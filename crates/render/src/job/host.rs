@@ -171,6 +171,7 @@ mod light_union_lease_tests {
             strip.append_to(&mut options, 64)?;
         }
         Ok(ImageRequest {
+            studio_weights: None,
             environment: None,
             textures: None,
             integrator: Integrator::Raytrace,
@@ -1404,6 +1405,7 @@ impl ImageHost {
         )
         .map_err(|e| JobError::new(ErrorCode::InvalidRequest, e.to_string()))?;
         let request = ImageRequest {
+            studio_weights: None,
             width: frame.info.width,
             height: frame.info.height,
             camera: source.0.request.camera,
@@ -1627,6 +1629,7 @@ mod retained_request_tests {
         let mut lights = Vec::with_capacity(8);
         lights.push(super::super::DirectionalLightOptions { direction: [0.0, 0.0, 1.0], color: [1.0; 3], intensity: 1.0 });
         ImageRequest {
+            studio_weights: None,
             environment: None,
             textures: None,
             integrator: Integrator::Raytrace,
@@ -1696,6 +1699,7 @@ mod environment_metadata_lease_tests {
         let mut host = CpuHost::for_platform().unwrap();
         let budget = host.0.shared.budget.clone();
         let request = ImageRequest {
+            studio_weights: None,
             environment: None,
             textures: None,
             integrator: Integrator::Raytrace,
@@ -1808,6 +1812,7 @@ mod surface_request_metadata_tests {
 
     fn request() -> ImageRequest {
         ImageRequest {
+            studio_weights: None,
             environment: None,
             textures: None,
             integrator: Default::default(),

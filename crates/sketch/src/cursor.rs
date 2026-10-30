@@ -15,11 +15,12 @@ const MAX_VARIABLES: usize = 400;
 const MAX_STEPS: usize = 96;
 const CORRECTION_ITERS: usize = 16;
 const TOTAL_CORRECTION_ITERS: usize = 256;
-/// Pivot tolerance of the null space, on rows scaled to a largest entry of 1. Redundant
-/// constraints (a parallelogram held both parallel and equal on each pair of sides) are
-/// dependent only at an exact solution; a pose corrected to `TOL` leaves their rows independent
-/// by about that much, and a tighter tolerance counts that as rank and finds no freedom (#4585).
-/// The solver's rank analysis, which reports the sketch's degrees of freedom, uses 1e-7 too.
+/// Pivot tolerance of the null space, on the Jacobian equilibrated to unit rows and columns.
+/// Redundant constraints (a parallelogram held both parallel and equal on each pair of sides)
+/// are dependent only at an exact solution; a pose corrected to `TOL` leaves their rows
+/// independent by about that much, and a tighter tolerance counts that as rank and finds no
+/// freedom (#4585). The solver's rank analysis, which reports the sketch's degrees of freedom,
+/// uses 1e-7 too.
 const NULL_SPACE_TOL: f64 = 1e-7;
 
 /// Move a point toward `target` using freedom left by the design constraints. `max_step`
@@ -131,13 +132,21 @@ fn move_cursor_towards(
     // Held feasibility solves accept up to ACCEPT. A tiny, nearly feasible hard pin can
     // precede a failed step; refine it before constructing a tangent, rather than losing
     // the cursor objective just because the previous pose is between TOL and ACCEPT.
+    // An ill-conditioned sketch (a near-zero-length construction line makes its angle row
+    // unsolvable to TOL, #7635) stalls that refinement between TOL and ACCEPT. The solver
+    // itself calls such a pose solved, so the cursor keeps working from it and accepts its
+    // corrected trials at the same tolerance the final validation uses.
+    let mut trial_tol = TOL;
     if initial_residual >= TOL {
         let Some((its, residual)) = lm_capped_with_budget(&problem, &lay, &sub, &vars, &mut x, &col, CORRECTION_ITERS, budget.as_deref_mut()) else {
             return false;
         };
         spent += its.max(1);
-        if !(residual < TOL) {
+        if residual >= ACCEPT {
             return false;
+        }
+        if residual >= TOL {
+            trial_tol = ACCEPT;
         }
         apply(&mut best, &lay, &x);
         if !in_range(&best) || !valid(&problem, &best) {
@@ -214,7 +223,7 @@ fn move_cursor_towards(
                     break 'search;
                 };
                 spent += its.max(1);
-                if !(residual < TOL) {
+                if !(residual < trial_tol) {
                     if budget.as_ref().is_some_and(|b| b.exhausted()) {
                         break 'search;
                     }
@@ -222,7 +231,11 @@ fn move_cursor_towards(
                 }
                 let next = position(&trial);
                 let cost = (target - next).dot(target - next);
-                if !cost.is_finite() || cost >= old_cost - 1e-14 * old_cost.max(1.0) {
+                // The cursor itself must move. Retracting onto the constraints moves it by
+                // rounding even along freedom that can't reach it (the far end of a line held only
+                // by its direction): taking such a step for the rounding moved that end a whole
+                // step, and step after step it walked away or collapsed its line to a point (#8944).
+                if !cost.is_finite() || cost >= old_cost - 1e-14 * old_cost.max(1.0) || next.dist(at) < trial_tol {
                     continue;
                 }
                 if !within_budget(&mut budget, setup_work.saturating_mul(4)) {
@@ -263,26 +276,43 @@ fn in_range(sk: &Sketch) -> bool {
             .all(|c| !matches!(c.kind, CurveKind::Circle { r, .. } | CurveKind::Ellipse { r, .. } if !crate::model::radius_in_range(r)))
 }
 
-fn null_space(mut j: Mat) -> Vec<Vec<f64>> {
-    for row in 0..j.rows {
-        let scale = (0..j.cols).map(|c| j.get(row, c).abs()).fold(0.0_f64, f64::max);
+fn null_space(j: Mat) -> Vec<Vec<f64>> {
+    // Equilibrate before the rank analysis. A near-zero-length construction line makes its
+    // angle row's entries on that line ~1e7 while the same row's entries on the line it
+    // measures are ~1: per-row scaling alone hides those (physically meaningful) small
+    // entries below the pivot tolerance, and the null space then lets the measured line
+    // rotate freely (#7635). Scaling each column by its largest entry first brings the
+    // row's entries onto one scale; the null vectors are mapped back afterwards.
+    let mut col = vec![0.0_f64; j.cols];
+    for (c, m) in col.iter_mut().enumerate() {
+        for r in 0..j.rows {
+            *m = m.max(j.get(r, c).abs());
+        }
+    }
+    let inv: Vec<f64> = col.iter().map(|m| 1.0 / m.max(1.0)).collect();
+    let mut a = Mat::zeros(j.rows, j.cols);
+    for r in 0..j.rows {
+        let scale = (0..j.cols).map(|c| j.get(r, c).abs() * inv[c]).fold(0.0_f64, f64::max);
         if scale > 0.0 {
-            for c in 0..j.cols {
-                j.set(row, c, j.get(row, c) / scale);
+            for (c, &ic) in inv.iter().enumerate() {
+                a.set(r, c, j.get(r, c) * ic / scale);
             }
         }
     }
-    let pivots = rref(&mut j, NULL_SPACE_TOL);
+    let pivots = rref(&mut a, NULL_SPACE_TOL);
     let mut z: Vec<Vec<f64>> = Vec::new();
-    for free in (0..j.cols).filter(|c| !pivots.contains(c)) {
-        let mut v = vec![0.0; j.cols];
+    for free in (0..a.cols).filter(|c| !pivots.contains(c)) {
+        let mut v = vec![0.0; a.cols];
         if let Some(x) = v.get_mut(free) {
             *x = 1.0;
         }
         for (row, &pivot) in pivots.iter().enumerate() {
             if let Some(x) = v.get_mut(pivot) {
-                *x = -j.get(row, free);
+                *x = -a.get(row, free);
             }
+        }
+        for (x, &ic) in v.iter_mut().zip(&inv) {
+            *x *= ic;
         }
         for _ in 0..2 {
             for q in &z {

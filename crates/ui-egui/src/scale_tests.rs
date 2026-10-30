@@ -266,6 +266,8 @@ pub(crate) fn view_frame(
     let none = || std::sync::Arc::new(std::sync::Mutex::new(None));
     crate::gpu::Frame {
         product: false,
+        product_lights: None,
+        upload_error: None,
         key: model.0,
         slot: model.1.clone(),
         sketch_key: 0,
@@ -281,12 +283,14 @@ pub(crate) fn view_frame(
         clip: [0.0; 4],
         cap: [0.0; 4],
         images: Vec::new(),
+        clouds: Vec::new(),
         analysis: [0.0; 8],
         analysis_colors: crate::gpu::analysis_colors(&t.analysis),
         access: None,
         outline: false,
         eye: [e[0], e[1], e[2], if proj.cam.fov > 0.0 { 1.0 } else { 0.0 }],
         ao_radius: 0.0,
+        ao_samples: solidcraft_gpu::view::AO_SAMPLES,
         ssaa: 1.0,
         hover_tint: [f32::from(t.hover_face_lift) / 255.0; 3],
         selection_tint: [0.4, 0.6, 0.9],

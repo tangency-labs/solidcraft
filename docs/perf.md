@@ -494,8 +494,8 @@ straight-line projection and exact surface-refinement reuse changes:
 
 These are geometry rebuild times, not complete desktop opening times. The public fixture
 can be generated with `solidcraft-cli run examples/acceptance/sensor_enclosure.json
---save sensor.solidcraft --quiet`, then measured with `solidcraft-cli bench-open
-sensor.solidcraft`. Each benchmark starts a new process; this does not measure a warm
+--save sensor.sc --quiet`, then measured with `solidcraft-cli bench-open
+sensor.sc`. Each benchmark starts a new process; this does not measure a warm
 timeline-cache hit. The local assembly is private and is not part of the repository.
 
 Straight segments now use guarded algebraic closest-point projection instead of sampling
@@ -536,7 +536,7 @@ ready: 13.04 s geometry, 2.20 s placement, 0.53 s meshing and 0.07 s thumbnails.
 the optimized `ci` profile and actual Vulkan rendering, with isolated settings and caches.
 Linux and Windows timings are separate measurements and must not be compared as a speedup.
 
-`solidcraft-cli bench-open design.solidcraft` reports JSON lines for file reading,
+`solidcraft-cli bench-open design.sc` reports JSON lines for file reading,
 JSON decoding and migrations (including input-name repair), timeline evaluation, individual
 features, and world placement/display meshing. `--parse-only` stops before geometry evaluation.
 The parse timer includes document validation and repair, not just the JSON parser.

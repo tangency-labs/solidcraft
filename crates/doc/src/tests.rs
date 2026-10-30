@@ -159,6 +159,22 @@ fn results_kept_ahead_outlive_the_cache() {
     assert!(rel(measure(&m.state().bodies[0].body).unwrap().volume, 30000.0) < 1e-9);
 }
 
+/// A saved model whose feature warning is longer than 65,536 characters is still taken on open
+/// (#8541): Save writes it, so Open reads it.
+#[test]
+fn a_saved_model_with_a_long_warning_is_adopted() {
+    let (doc, _) = plate_doc();
+    let mut m = Model::new();
+    m.evaluate(&doc);
+    let mut saved = m.saved(&doc).unwrap();
+    let last = doc.features.last().unwrap().id;
+    let warning = "w".repeat(122_701);
+    let features = saved.records["features"].as_array_mut().unwrap();
+    features.last_mut().unwrap()["warning"] = warning.clone().into();
+    let reopened = Model::adopt(&doc, &saved).unwrap();
+    assert_eq!(reopened.result(last).and_then(|r| r.warning.as_deref()), Some(warning.as_str()));
+}
+
 /// Rolling the marker back must not discard unchanged results just because the bounded cache
 /// evicted them. Opening an earlier feature and returning to the end otherwise rebuilds it all.
 #[test]
@@ -436,6 +452,7 @@ fn primitives_and_combine() {
             radius: "2".into(),
             height: "20".into(),
             operation: Operation::NewBody,
+            references: Vec::new(),
         },
         None,
     )
@@ -469,6 +486,8 @@ fn hostile_expressions_never_panic() {
         "deg",
         "x",
         "sqrt",
+        "cosh",
+        "atanh",
         "pow",
         "min",
         "max",
@@ -549,7 +568,7 @@ fn feature_inserted_at_a_marker_inside_a_timeline_folder_joins_it() {
     let first = doc.add_feature(FeatureKind::Sketch { plane: PlaneRef::Origin { name: "XY".into() }, sketch: Sketch::new() }, Some("First")).unwrap();
     let second =
         doc.add_feature(FeatureKind::Sketch { plane: PlaneRef::Origin { name: "XY".into() }, sketch: Sketch::new() }, Some("Second")).unwrap();
-    doc.timeline_groups.push(TimelineGroup { id: 100, name: "Pair".into(), parent: None, features: vec![first, second] });
+    doc.timeline_groups.push(TimelineGroup { id: 100, name: "Pair".into(), parent: None, features: vec![first, second], joints: vec![] });
     doc.marker = Some(1);
 
     let inserted =
@@ -560,6 +579,21 @@ fn feature_inserted_at_a_marker_inside_a_timeline_folder_joins_it() {
     assert_eq!(doc.marker, Some(2));
     assert!(non_contiguous_timeline_group(&doc.features, &doc.timeline_groups).is_none());
     assert!(Document::from_json(&doc.to_json()).is_ok(), "the inserted feature must leave a reopenable design");
+}
+
+/// A marker after the last feature leaves every feature active, as no marker does, so a feature
+/// added then is active too, not added rolled back (#7741: editing the last feature from the
+/// History runs its command with the marker there).
+#[test]
+fn feature_added_with_the_marker_at_the_end_is_active() {
+    let mut doc = Document::new("marker at the end");
+    let first = doc.add_feature(FeatureKind::Sketch { plane: PlaneRef::Origin { name: "XY".into() }, sketch: Sketch::new() }, Some("First")).unwrap();
+    doc.marker = Some(1);
+
+    let added = doc.add_feature(FeatureKind::Sketch { plane: PlaneRef::Origin { name: "XY".into() }, sketch: Sketch::new() }, Some("Added")).unwrap();
+
+    assert_eq!(doc.features.iter().map(|feature| feature.id).collect::<Vec<_>>(), vec![first, added]);
+    assert_eq!(doc.marker, Some(2), "the marker stays after the last feature");
 }
 
 /// A construction plane that is its own side resolves through the model and back into the
@@ -667,4 +701,43 @@ fn empty_boolean_targets_without_overlap_keep_plain_message() {
         model.evaluate(&doc);
         assert_eq!(model.result(cut).unwrap().error.as_deref(), Some("there is no body to cut or intersect"));
     }
+}
+
+#[test]
+fn timeline_group_legacy_json_omits_empty_joint_membership() {
+    let old = serde_json::json!({"id":100, "name":"Folder", "parent":null, "features":[]});
+    let group: TimelineGroup = serde_json::from_value(old.clone()).unwrap();
+    assert!(group.joints.is_empty());
+    assert_eq!(serde_json::to_value(&group).unwrap(), old);
+    let mut doc = Document::new("legacy folders");
+    doc.timeline_groups.push(group);
+    doc.next_id = 101;
+    let saved = doc.to_json();
+    let value: serde_json::Value = serde_json::from_str(&saved).unwrap();
+    assert!(value["timeline_groups"][0].get("joints").is_none());
+    assert_eq!(Document::from_json(&saved).unwrap().to_json(), saved);
+}
+
+/// A sketch whose touching curves are cut into more pieces than the profile search looks at
+/// says that some profiles may be missing, instead of leaving them out silently (#6896); an
+/// ordinary sketch says nothing.
+#[test]
+fn a_sketch_too_large_to_search_whole_says_profiles_may_be_missing() {
+    let mut doc = Document::new("large");
+    let mut sk = Sketch::new();
+    // Concentric ellipses 100 m across, each sampled into thousands of pieces, all one island.
+    let c = sk.add_point(Vec2::ZERO, None).unwrap();
+    for k in 0..5 {
+        let m = sk.add_point(Vec2::new(1e5 - k as f64 * 1e3, 0.0), None).unwrap();
+        sk.add_curve(solidcraft_sketch::CurveKind::Ellipse { c, m, r: 6e4 - k as f64 * 1e3 }, None).unwrap();
+    }
+    let large = doc.add_feature(FeatureKind::Sketch { plane: PlaneRef::Origin { name: "XY".into() }, sketch: sk }, None).unwrap();
+    let (plate, plate_sketch) = plate_doc();
+    let mut m = Model::new();
+    m.evaluate(&doc);
+    let warning = m.result(large).and_then(|r| r.warning.clone()).unwrap_or_default();
+    assert!(warning.contains("some profiles may be missing"), "{warning}");
+    let mut m = Model::new();
+    m.evaluate(&plate);
+    assert!(m.result(plate_sketch).and_then(|r| r.warning.as_deref()).is_none());
 }

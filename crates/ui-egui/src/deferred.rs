@@ -123,6 +123,12 @@ impl SolveApp {
     /// a while (see the module notes). `Ok(Null)` when it is left computing or waiting its turn:
     /// its outcome then shows as any command's does (an error in the status line).
     pub fn run_heavy(&mut self, id: &str, params: Value) -> Result<Value, String> {
+        if id == "timeline.play" {
+            return self.run(id, params);
+        }
+        // A manual history action takes over from playback. Playback takes its state out
+        // while submitting its own next step, then puts it back to wait for that step.
+        crate::timeline::stop_playback(self);
         if self.deferred.is_some() {
             if replaced_by_a_later_one(id) && self.deferred_queue.last().is_some_and(|(q, _)| q == id) {
                 self.deferred_queue.pop();
@@ -234,7 +240,10 @@ impl SolveApp {
                     // The design changed meanwhile: computed again for the design as it is now.
                     let _ = self.run_heavy(&id, params);
                 } else if !superseded {
+                    // This is playback's own completed step, not a manual history edit.
+                    let playback = self.timeline_playback.take();
                     let _ = self.run_evaluated(&id, params, job.evaluated.flatten().as_ref(), job.kept);
+                    self.timeline_playback = playback;
                 }
             }
         }

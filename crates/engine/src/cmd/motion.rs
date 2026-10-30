@@ -461,6 +461,11 @@ pub fn drive_joint(s: &mut Session, id: u64, q: Vec<f64>, given: usize) -> Resul
     Ok(drive_with_contact(s, &[(id, q)], &given)?.0)
 }
 
+/// Drive exactly one coordinate, letting the other values follow loops and preserving expressions.
+pub fn drive_joint_index(s: &mut Session, id: u64, q: Vec<f64>, index: usize) -> Result<Value> {
+    Ok(drive_with_contact(s, &[(id, q)], &[(id, index)].into_iter().collect())?.0)
+}
+
 fn enable_sets(s: &mut Session, p: &Value) -> Result<Value> {
     let on = bool_(p, "enabled").unwrap_or(true);
     s.doc_mut().assembly.contact_enabled = on;

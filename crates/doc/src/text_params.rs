@@ -23,9 +23,9 @@ pub struct TextParam {
     pub comment: String,
 }
 
-/// Is `unit` the text unit?
+/// Is `unit` the text unit, ignoring ASCII case and surrounding whitespace?
 pub fn is_text_unit(unit: &str) -> bool {
-    unit.trim() == TEXT_UNIT
+    unit.trim().eq_ignore_ascii_case(TEXT_UNIT)
 }
 
 /// A text as typed for a text parameter: inside matching quotes, what they hold (a quote doubled

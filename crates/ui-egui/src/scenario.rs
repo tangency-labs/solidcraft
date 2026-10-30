@@ -286,9 +286,10 @@ impl Harness {
             }
             self.frame();
         }
-        // A file opening, recovering or saving in the background: wait for it (as a person would).
+        // A file opening, recovering or saving in the background, or a window checking what its
+        // material does: wait for it (as a person would).
         let began = std::time::Instant::now();
-        while (!self.app.file_load.idle() || self.app.saving.is_some() || crate::open_meshing::active(&self.app))
+        while (!self.app.file_load.idle() || self.app.saving.is_some() || crate::open_meshing::active(&self.app) || self.app.op_check.busy())
             && began.elapsed() < std::time::Duration::from_secs(120)
         {
             self.frame();
@@ -352,6 +353,34 @@ impl Harness {
             let d = |p: &[f64; 2]| (p[1] - ly).abs() * 4.0 + (p[0] - lx).abs();
             d(a).total_cmp(&d(b))
         })
+    }
+
+    /// Accessibility bounds include scrolled-out page content. Reveal that content with
+    /// wheel input before using its coordinates; window actions and navigation stay put.
+    fn reveal_widget(&mut self, text: &str, near: Option<&str>) -> Result<[f64; 2], String> {
+        let find = |h: &Self| match near {
+            Some(label) => h.widget_near(text, label),
+            None => h.widget(text),
+        };
+        for _ in 0..32 {
+            let point = find(self).ok_or_else(|| format!("no widget `{text}` on screen"))?;
+            let at = egui::pos2(point[0] as f32, point[1] as f32);
+            let page = self.app.prefs_window.open.then(|| rect_of("prefs:page_body")).flatten();
+            let chrome = ["prefs:ok", "prefs:apply", "prefs:cancel", "prefs:search"].iter().any(|key| handle_at(key) == Some(at));
+            let Some(page) = page.filter(|page| !chrome && page.x_range().contains(at.x)) else { return Ok(point) };
+            if page.contains(at) {
+                return Ok(point);
+            }
+            self.call("ui.scroll", json!({"x":page.center().x,"y":page.center().y,"delta":if at.y < page.top() {100} else {-100}}));
+            // Follow the wheel's actual smoothing, rather than clicking its moving content.
+            for _ in 0..120 {
+                if self.ctx.input(|input| !input.is_scrolling()) {
+                    break;
+                }
+                self.frame();
+            }
+        }
+        Err(format!("widget `{text}` could not be revealed in its page"))
     }
 
     /// Centres of the visible widgets whose label or value is `text`, last drawn first.
@@ -456,12 +485,10 @@ impl Harness {
                 self.call("ui.click", p)
             } else if let Some(text) = s.get("widget").and_then(Value::as_str) {
                 // A dialog field, choice or button, found by its text.
-                let found = match s.get("near").and_then(Value::as_str) {
-                    Some(near) => self.widget_near(text, near),
-                    None => self.widget(text),
-                };
-                let [x, y] = found.ok_or_else(|| format!("no widget `{text}` on screen"))?;
+                let near = s.get("near").and_then(Value::as_str);
+                let [x, y] = self.reveal_widget(text, near)?;
                 self.call("ui.move", json!({"x": x, "y": y}));
+                let [x, y] = self.reveal_widget(text, near)?;
                 self.call("ui.click", json!({"x": x, "y": y}))
             } else if let Some(at) = s.get("hold") {
                 // Press and hold still (Select Other): `frames` with the button down (default 40,
@@ -845,7 +872,12 @@ pub fn check(h: &mut Harness, e: &Value) -> Result<(), String> {
                         .filter_map(|l| m.area_rect(l.id).map(|r| (l.id, r)))
                         .collect()
                 });
+                // Workspace panels (docks and strips) are laid out against the viewport, not sized like dialogs.
+                let panels: Vec<egui::Rect> = h.app.shell.workspace_panels.values().map(|(rect, _)| *rect).collect();
                 for (id, r) in rects {
+                    if panels.iter().any(|p| (p.min - r.min).abs().max_elem() < 1.0 && (p.max - r.max).abs().max_elem() < 1.0) {
+                        continue;
+                    }
                     if r.width() > max_w || !screen.expand(1.0).contains_rect(r) {
                         return Err(format!("window {id:?} at {r:?} (width {:.0}) does not fit {screen:?} at ≤{max_w}", r.width()));
                     }

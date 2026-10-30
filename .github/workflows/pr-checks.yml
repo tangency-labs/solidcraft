@@ -52,6 +52,7 @@ jobs:
   # effort: a fork PR just doesn't get the `changes-default` label from here.
   label:
     name: Label changes-default
+    if: github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     continue-on-error: true

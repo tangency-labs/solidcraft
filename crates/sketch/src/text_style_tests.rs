@@ -84,6 +84,24 @@ fn italic_without_an_italic_face_slants_and_bold_without_a_bold_face_is_an_error
     assert!(e.to_string().contains("no bold face"), "{e}");
 }
 
+/// #8211: a variable font (one file for every weight, as most web fonts ship) has no bold face of
+/// its own; Bold sets its weight axis to 700, so the strokes widen at the same height.
+#[test]
+fn bold_in_a_variable_font_sets_its_weight_axis() {
+    let file = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../assets/fonts/ibm-plex-sans/IBMPlexSans-Variable.ttf");
+    let font = file.to_string_lossy().into_owned();
+    let set = |style: &TextStyle| extent(&text_geometry_styled(Some(&font), "l", Vec2::ZERO, 10.0, 0.0, style, None).unwrap());
+    let (plain, bold) = (set(&TextStyle::default()), set(&TextStyle { bold: true, ..TextStyle::default() }));
+    let width = |(lo, hi): (Vec2, Vec2)| hi.x - lo.x;
+    assert!(width(bold) > 1.25 * width(plain), "the stroke widens: {plain:?} {bold:?}");
+    assert!((bold.1.y - plain.1.y).abs() < 0.05 * 10.0, "the same height: {plain:?} {bold:?}");
+    let (data, slanted) = crate::font_data_styled(Some(&font), true, false).unwrap();
+    assert_eq!((data.weight, slanted), (Some(700.0), false));
+    // A font without a weight axis still has no bold to give.
+    let e = text_geometry_styled(None, "l", Vec2::ZERO, 10.0, 0.0, &TextStyle { bold: true, ..TextStyle::default() }, None).unwrap_err();
+    assert!(e.to_string().contains("no bold face"), "{e}");
+}
+
 #[test]
 fn text_on_a_straight_path_stands_on_it_reading_left_to_right_whichever_way_it_was_drawn() {
     let plain = styled("Hi", &TextStyle::default(), None);

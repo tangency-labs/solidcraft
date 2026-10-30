@@ -269,6 +269,7 @@ pub const OPENAI_PRESETS: &[ApiPreset] = &[
     ApiPreset { name: "LM Studio", base_url: "http://localhost:1234/v1" },
     ApiPreset { name: "OpenAI", base_url: "https://api.openai.com/v1" },
     ApiPreset { name: "Mammouth AI", base_url: "https://api.mammouth.ai/v1" },
+    ApiPreset { name: "OpenCode Go", base_url: "https://opencode.ai/zen/go/v1" },
 ];
 
 /// Anthropic-compatible endpoints people use. The base URL is the one their documentation calls

@@ -1,7 +1,8 @@
 //! 3D sketching in the viewport (the Sketch Palette's 3D Sketch option): the Line, Arc, Spline
 //! and Point tools take points off the sketch plane by snapping to model vertices, edges and
 //! faces and to points already drawn in 3D; segments that stay on the plane are ordinary sketch
-//! lines and arcs. The 3D Arc command has its own tool: every point it takes is a world point.
+//! lines and arcs. The 3D Line, Arc, Spline and Point commands have their own tools: every point
+//! they take is a world point, with no on-plane downgrade.
 //! A drawn 3D point (or curve end) clicked without a tool gets a move triad:
 //! drag an arrow to move along X, Y or Z, or the square to move parallel to the sketch plane.
 //! Everything runs `sketch.line3d`, `sketch.arc3d`, `sketch.spline3d`, `sketch.point3d`,
@@ -39,7 +40,17 @@ pub fn active(app: &SolveApp) -> bool {
 }
 
 fn takes(cmd: &str) -> bool {
-    matches!(cmd, "sketch.line" | "sketch.arc.three_point" | "sketch.arc3d" | "sketch.spline.fit_point" | "sketch.point")
+    matches!(
+        cmd,
+        "sketch.line"
+            | "sketch.arc.three_point"
+            | "sketch.arc3d"
+            | "sketch.spline.fit_point"
+            | "sketch.point"
+            | "sketch.line3d"
+            | "sketch.spline3d"
+            | "sketch.point3d"
+    )
 }
 
 /// Only 3D point-placing tools broaden sketch-point picking; ordinary selection stays local.
@@ -140,6 +151,11 @@ pub fn on_click(app: &mut SolveApp, tool: &mut Tool, proj: &Proj, pos: Pos2) -> 
             };
             report(app, r);
         }
+        "sketch.point3d" => {
+            // The dedicated 3D Point tool: every click is a world point, and the tool stays.
+            let r = app.run("sketch.point3d", json!({"point": [p.x, p.y, p.z]}));
+            report(app, r);
+        }
         "sketch.line" => {
             if let Some(a) = chain().last().copied() {
                 let r = match (on_plane(app, a), on_plane(app, p)) {
@@ -206,6 +222,12 @@ pub fn finish(app: &mut SolveApp) -> bool {
         };
         report(app, r);
     }
+    // The dedicated 3D tools keep every point as a world point: no on-plane downgrade.
+    if matches!(cmd, "sketch.line3d" | "sketch.spline3d") && pts.len() >= 2 {
+        let q: Vec<Value> = pts.iter().map(|p| json!([p.x, p.y, p.z])).collect();
+        let r = app.run(cmd, json!({ "points": q }));
+        report(app, r);
+    }
     set_chain(Some(cmd), Vec::new());
     true
 }
@@ -256,7 +278,7 @@ pub fn preview(app: &SolveApp, t: &Tool, painter: &egui::Painter, proj: &Proj) -
         };
         let screen: Vec<Pos2> = poly.into_iter().filter_map(|p| proj.to_screen(p)).collect();
         painter.add(Shape::line(screen, stroke));
-    } else if t.cmd == "sketch.spline.fit_point" && all.len() >= 2 {
+    } else if matches!(t.cmd, "sketch.spline.fit_point" | "sketch.spline3d") && all.len() >= 2 {
         let mut w: Vec<Vec3> = pts.clone();
         if let Some((h, _)) = hover {
             w.push(h);

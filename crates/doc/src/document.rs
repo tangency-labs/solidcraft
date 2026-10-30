@@ -693,6 +693,11 @@ pub enum FeatureKind {
         height: Expr,
         #[serde(default)]
         operation: Operation,
+        /// Up to two straight edges of the face it stands on (#6380), as a Single hole's
+        /// references: the base centre sits at each one's distance from its edge, in the face's
+        /// plane, and follows the edges when the part changes. `base` keeps where it was placed.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        references: Vec<HoleReference>,
     },
     Sphere {
         #[serde(with = "point_expr")]
@@ -2612,13 +2617,42 @@ pub struct StandardPart {
 /// A component whose contents come from another design file (Insert Design): where that file
 /// is, and the Import feature in the component that holds its bodies (Update Links replaces
 /// them; Break Link keeps them and forgets the file).
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct DesignLink {
     /// The design file: relative to this design's folder once this design is saved, else as
     /// given (`/` separates folders).
     pub path: String,
     /// The Import feature holding the linked design's bodies.
     pub feature: u64,
+    /// Last inherited values, by Import body slot. Differing assembly assignments are
+    /// local overrides and survive a source update. Older links start with no baseline.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub inherited: Vec<LinkedBodyProperties>,
+}
+
+/// The values last inherited by a linked body, not another editable material library.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct LinkedBodyProperties {
+    pub material: String,
+    /// SHA-256 of the inherited custom definition, for equality only. The complete
+    /// engineering card stays in user_materials, not duplicated once per linked body.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub material_fingerprint: Option<String>,
+    /// Explicit body/component look only: material fallback must remain a fallback.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub appearance: Option<crate::appearance::Look>,
+    /// Last inherited authored face overrides. None marks links saved before face
+    /// inheritance; Some(empty) records that the source has no authored face overrides.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub faces: Option<Vec<crate::appearance::FaceLook>>,
+}
+
+impl LinkedBodyProperties {
+    pub fn fingerprint(material: &UserMaterial) -> Result<String> {
+        use sha2::{Digest, Sha256};
+        let bytes = serde_json::to_vec(material).map_err(|e| DocError::Invalid(e.to_string()))?;
+        Ok(format!("{:x}", Sha256::digest(bytes)))
+    }
 }
 
 /// A name the design's counter hands out (`Body1`).
@@ -2693,12 +2727,18 @@ pub struct Document {
     /// Reference images on planes (Insert Canvas).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub canvases: Vec<crate::canvas::Canvas>,
+    /// Scanned points kept as a reference (Insert Point Cloud).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub point_clouds: Vec<crate::point_cloud::PointCloud>,
     /// Comments of feature-input parameters (by name).
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub param_comments: std::collections::BTreeMap<String, String>,
     /// Physical material per body (by body name); others use the default.
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub materials: std::collections::BTreeMap<String, String>,
+    /// The flat face per body (by body name) that a slicer export lays on the print bed.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub print_faces: std::collections::BTreeMap<String, crate::config::ConfigFaceTarget>,
     /// Physical materials defined in this design (`material.create`), next to the built-in ones.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub user_materials: Vec<UserMaterial>,
@@ -2814,7 +2854,7 @@ pub struct BrowserGroup {
     pub items: Vec<String>,
 }
 
-/// A saved feature-history folder. Folders may nest, and a feature can belong to at most one folder.
+/// A saved history folder. Folders may nest; each feature or joint belongs to at most one folder.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct TimelineGroup {
     pub id: u64,
@@ -2824,6 +2864,9 @@ pub struct TimelineGroup {
     pub parent: Option<u64>,
     #[serde(default)]
     pub features: Vec<u64>,
+    /// Joints stored in this timeline folder.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub joints: Vec<u64>,
 }
 
 /// The first feature-history folder whose own and nested features do not form one
@@ -2898,6 +2941,7 @@ impl Document {
             .map(|g| g.id)
             .chain(self.timeline_groups.iter().map(|g| g.id))
             .chain(self.canvases.iter().map(|c| c.id))
+            .chain(self.point_clouds.iter().map(|c| c.id))
             .chain(a.joints.iter().map(|j| j.id))
             .chain(a.contact_sets.iter().map(|c| c.id))
             .chain(a.studies.iter().map(|s| s.id))
@@ -2941,10 +2985,12 @@ impl Document {
             body_components: Default::default(),
             body_offsets: Default::default(),
             materials: Default::default(),
+            print_faces: Default::default(),
             user_materials: Vec::new(),
             appearances: Default::default(),
             favorites: Default::default(),
             canvases: Vec::new(),
+            point_clouds: Vec::new(),
             param_comments: Default::default(),
             browser_groups: Vec::new(),
             timeline_groups: Vec::new(),
@@ -2955,7 +3001,7 @@ impl Document {
     }
 
     /// Rename body `old` to `new` where the design keeps things by body name outside its
-    /// features: materials, appearances, plastic rules, configuration columns, offsets, components and the
+    /// features: materials, print faces, appearances, plastic rules, configuration columns, offsets, components and the
     /// browser's groups and order. (The features are the rename command's to change.)
     ///
     /// A name the design numbered (`Body1`) is not used again after the rename: the design's
@@ -2970,6 +3016,10 @@ impl Document {
         }
         if let Some(m) = self.materials.remove(old) {
             self.materials.insert(new.to_string(), m);
+        }
+        if let Some(mut face) = self.print_faces.remove(old) {
+            face.body = new.to_string();
+            self.print_faces.insert(new.to_string(), face);
         }
         if let Some(rule) = self.plastic.assigned.remove(old) {
             self.plastic.assigned.insert(new.to_string(), rule);
@@ -3126,14 +3176,22 @@ impl Document {
     /// The model with each body carrying the colour, opacity and face colours it is shown with
     /// (for export).
     pub fn painted(&self, state: &crate::ModelState) -> crate::ModelState {
+        self.painted_with_faces(state, true)
+    }
+
+    /// Linked designs carry authored face overrides as editable properties. Their STEP
+    /// geometry keeps imported paint, without baking a second copy of those overrides.
+    pub fn painted_for_link(&self, state: &crate::ModelState) -> crate::ModelState {
+        self.painted_with_faces(state, false)
+    }
+
+    fn painted_with_faces(&self, state: &crate::ModelState, authored_faces: bool) -> crate::ModelState {
         let mut st = state.clone();
         for b in &mut st.bodies {
             let c = self.body_color(b);
-            let faces: Vec<solidcraft_kernel::FacePaint> = self
-                .face_colors(b)
-                .into_iter()
-                .map(|(face, l)| solidcraft_kernel::FacePaint { face, color: l.rgb(), opacity: l.opacity as f32 })
-                .collect();
+            let face_colors = if authored_faces { self.face_colors(b) } else { self.imported_face_colors(b) };
+            let faces: Vec<solidcraft_kernel::FacePaint> =
+                face_colors.into_iter().map(|(face, l)| solidcraft_kernel::FacePaint { face, color: l.rgb(), opacity: l.opacity as f32 }).collect();
             let opacity = self.model_body_opacity(b) as f32;
             let paint = solidcraft_kernel::Paint { opacity, faces };
             if c != b.body.color() || b.body.paint() != Some(&paint) {
@@ -3304,12 +3362,13 @@ impl Document {
         Ok(id)
     }
 
-    /// A component by id or name (0 / "root" is the design itself).
+    /// A component by id or name (0 / "root" is the design itself). A component that carries the
+    /// design's own name is found by that name: the design is still named by 0 / "root".
     pub fn find_component(&self, key: &str) -> Option<u64> {
-        if key == "0" || key.eq_ignore_ascii_case("root") || key == self.name {
+        if key == "0" || key.eq_ignore_ascii_case("root") {
             return Some(0);
         }
-        self.components.iter().find(|c| c.id.to_string() == key || c.name == key).map(|c| c.id)
+        self.components.iter().find(|c| c.id.to_string() == key || c.name == key).map(|c| c.id).or_else(|| (key == self.name).then_some(0))
     }
 
     /// Read a design file's JSON (any format this build knows; older ones are upgraded).
@@ -3505,11 +3564,14 @@ impl Document {
         let id = f.id;
         let insertion_group = self.marker.and_then(|marker| self.timeline_group_at_insertion(marker));
         match self.marker {
-            Some(m) if m < self.features.len() => {
-                self.features.insert(m, f);
-                self.marker = Some(m + 1);
+            // A marker right after the last feature moves on past a feature added there, or the
+            // new feature would be added rolled back (#7741).
+            Some(marker) => {
+                let position = marker.min(self.features.len());
+                self.features.insert(position, f);
+                self.marker = Some(position + 1);
             }
-            _ => self.features.push(f),
+            None => self.features.push(f),
         }
         if let Some(group_id) = insertion_group {
             let positions: std::collections::BTreeMap<u64, usize> =
@@ -3651,7 +3713,7 @@ impl Document {
     }
 
     /// Add or change a parameter. Fails if the result would not evaluate. A new parameter
-    /// without a unit takes the unit of its value (mm, deg or none).
+    /// without a unit takes the unit of its value (a length in the design's units, deg or none).
     pub fn set_param(&mut self, name: &str, expr_s: &str, unit: Option<&str>, comment: Option<&str>) -> Result<()> {
         // A text parameter: one with the text unit, or an existing one when no unit is given.
         match (unit.map(crate::text_params::is_text_unit), self.text_param(name).is_some()) {
@@ -3835,10 +3897,11 @@ impl Document {
         }
     }
 
-    /// Apply parameter values to every dimension in a sketch, and to its points placed by
-    /// parameters (in place).
+    /// Apply parameter values to every dimension in a sketch, to its points placed by parameters
+    /// and to its equation curves (in place).
     pub fn apply_dimension_values(&self, vals: &std::collections::BTreeMap<String, expr::Value>, sk: &mut Sketch) -> Result<()> {
         self.apply_point_values(vals, sk)?;
+        self.apply_equation_values(vals, sk)?;
         self.apply_pattern_values(vals, sk)?;
         for c in &mut sk.constraints {
             if let Some(p) = &c.param {

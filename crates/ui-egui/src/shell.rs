@@ -91,9 +91,17 @@ impl Cards {
 /// Shell panels measured after drawing the full-bleed viewport. No design or preferences data.
 #[derive(Default)]
 pub(crate) struct State {
+    /// Per-window Render view state; neither preferences nor document data.
+    pub render_focus: bool,
+    pub render_browser_open: bool,
     pub cards: Vec<Rect>,
     pub panels: Vec<Rect>,
+    /// Actual floating workspace surfaces and their optional canvas reservation.
+    pub workspace_panels: std::collections::BTreeMap<&'static str, (Rect, Option<crate::ui_kit::Edge>)>,
     pub browser: Option<Rect>,
+    /// The browser set to reveal on hover is out of sight this frame (#8692); its place stays
+    /// in `browser`, which the pointer reveals.
+    pub browser_hidden: bool,
     pub history: Option<Rect>,
     /// In-memory seam drag width, never serialized as a preference.
     pub history_drag_width: Option<f32>,
@@ -107,12 +115,51 @@ pub(crate) struct State {
     pub left_space: Option<Rect>,
     /// The left column an open dialog holds this frame (`dialog_column`).
     pub dialog_column: Option<Rect>,
+    /// The status bar along the window's bottom edge, while it is shown (#7243).
+    pub status_bar: Option<Rect>,
 }
 
-/// One source of occlusion for navigation, picking, overlays and fit.
+/// Register the actual card, so fitting and pointer shielding use the same rectangle.
+pub(crate) fn register_panel(app: &mut SolveApp, id: &'static str, rect: Option<Rect>, edge: Option<crate::ui_kit::Edge>) {
+    let rect = rect.filter(|_| !crate::render_ui::focused(app) || !id.starts_with("render:") || id == "render:focus:exit");
+    if let Some(rect) = rect.filter(|r| r.is_finite() && r.is_positive()) {
+        app.shell.workspace_panels.insert(id, (rect, edge));
+    } else {
+        app.shell.workspace_panels.remove(id);
+    }
+}
+
+/// Shared workspace-card bounds below the ribbon and above a floating bottom strip.
+pub(crate) fn panel_bounds(app: &SolveApp, mut available: Rect) -> Rect {
+    for card in &app.shell.cards {
+        available.min.y = within(card.bottom(), available.top(), available.bottom());
+    }
+    if crate::render_workspace::active(app) {
+        let bottom = app.shell.cards.iter().map(|r| r.bottom()).fold(available.top() - Tokens::get().space_8, f32::max);
+        available.min.y = (bottom + Tokens::get().space_8).min(available.bottom());
+    }
+    for (rect, edge) in app.shell.workspace_panels.values() {
+        if matches!(edge, Some(crate::ui_kit::Edge::Bottom)) {
+            available.max.y = within(rect.top(), available.top(), available.bottom());
+        }
+    }
+    available
+}
+
+/// One source of occlusion for navigation, picking and overlays.
 pub(crate) fn covered_rects(app: &SolveApp) -> Vec<Rect> {
+    occluding_rects(app, false)
+}
+
+/// Selection controls follow the projected model, so they must not influence its fit.
+pub(crate) fn fit_rects(app: &SolveApp) -> Vec<Rect> {
+    occluding_rects(app, true)
+}
+
+fn occluding_rects(app: &SolveApp, fitting: bool) -> Vec<Rect> {
     let mut rects = Vec::new();
-    if Container::for_layout(app.ui.layout, Surface::Panel).floating() {
+    rects.extend(app.shell.workspace_panels.iter().filter(|(id, _)| !fitting || **id != "render:selection").map(|(_, (rect, _))| *rect));
+    if crate::render_workspace::active(app) || Container::for_layout(app.ui.layout, Surface::Panel).floating() {
         rects.extend(app.shell.cards.iter().copied());
         rects.extend(app.shell.panels.iter().copied());
         if crate::agent_chat::shown(app) && app.agent_chat.open && !app.preferences.agent_chat_popped {
@@ -127,6 +174,7 @@ pub(crate) fn covered_rects(app: &SolveApp) -> Vec<Rect> {
     rects.extend(app.viewport.palette_rect.filter(|_| app.session.active_sketch.is_some()));
     rects.extend(app.viewport.dialog_rect.filter(|_| app.dialog.is_some() || app.tree.redefine.is_some()));
     rects.extend(crate::view_confirm::rect(app));
+    rects.extend(app.shell.status_bar.filter(|_| crate::status_bar::shown(app)));
     rects.retain(|r| r.is_finite() && r.is_positive());
     rects
 }
@@ -157,25 +205,51 @@ pub(crate) fn bottom_overlay_rect(app: &SolveApp, mut viewport: Rect) -> Rect {
 
 /// The former central panel remains the anchor for controls and docked panels.
 pub(crate) fn content_rect(app: &SolveApp, viewport: Rect) -> Rect {
-    app.shell.content.unwrap_or(viewport).intersect(viewport)
+    // The content kept from the last frame can lie outside a viewport that has shrunk or moved
+    // since (a resize, a new scale): the intersection is then turned inside out, its min past
+    // its max. The viewport stands in for it.
+    let content = app.shell.content.unwrap_or(viewport).intersect(viewport);
+    if content.is_positive() { content } else { viewport }
+}
+
+/// `v` kept within `lo..=hi`, or `lo` when that range is empty: `f32::clamp` panics on
+/// `lo > hi`, which a rect squeezed to nothing between cards gives.
+fn within(v: f32, lo: f32, hi: f32) -> f32 {
+    if lo <= hi { v.clamp(lo, hi) } else { lo }
 }
 
 /// Free anchor space shared by both layouts. Compact edge hosts have already consumed
 /// their allocation; content-hugging Browser and floating overlays reserve their measured span.
 pub(crate) fn workspace_content(app: &SolveApp, mut content: Rect) -> Rect {
+    if crate::render_workspace::active(app) {
+        if crate::render_ui::focused(app) {
+            return content;
+        }
+        let gap = Container::floating_card(Surface::Panel).gap();
+        for (rect, edge) in app.shell.workspace_panels.values() {
+            match edge {
+                Some(crate::ui_kit::Edge::Left) => content.min.x = within(rect.right() + gap, content.left(), content.right()),
+                Some(crate::ui_kit::Edge::Right) => content.max.x = within(rect.left() - gap, content.left(), content.right()),
+                Some(crate::ui_kit::Edge::Bottom) => content.max.y = within(rect.top() - gap, content.top(), content.bottom()),
+                Some(crate::ui_kit::Edge::Top) => content.min.y = within(rect.bottom() + gap, content.top(), content.bottom()),
+                None => {}
+            }
+        }
+        return content;
+    }
     let gap = Container::for_layout(app.ui.layout, Surface::Panel).gap();
     if let Some(history) = app.shell.history {
         if app.preferences.timeline_left {
-            content.min.x = (history.right() + gap).clamp(content.left(), content.right());
+            content.min.x = within(history.right() + gap, content.left(), content.right());
         } else {
-            content.max.y = (history.top() - gap).clamp(content.top(), content.bottom());
+            content.max.y = within(history.top() - gap, content.top(), content.bottom());
         }
     }
     if let Some(browser) = app.shell.browser {
-        content.min.x = (browser.right() + gap).clamp(content.left(), content.right());
+        content.min.x = within(browser.right() + gap, content.left(), content.right());
     }
     if let Some(column) = app.shell.dialog_column {
-        content.min.x = (column.right() + gap).clamp(content.left(), content.right());
+        content.min.x = within(column.right() + gap, content.left(), content.right());
     }
     content
 }
@@ -186,7 +260,7 @@ pub(crate) fn tool_drag_rect(app: &SolveApp, placement: Rect) -> Rect {
     let gap = Container::for_layout(app.ui.layout, Surface::Feature).gap();
     let mut bounds = crate::agent_chat::tool_space(app, app.viewport.rect.unwrap_or(placement));
     for card in app.shell.cards.iter().filter(|r| r.is_finite() && r.is_positive()) {
-        bounds.min.y = (card.bottom() + gap).clamp(bounds.top(), bounds.bottom());
+        bounds.min.y = within(card.bottom() + gap, bounds.top(), bounds.bottom());
     }
     bounds
 }

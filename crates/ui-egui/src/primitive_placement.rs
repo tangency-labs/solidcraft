@@ -1,7 +1,8 @@
-//! Where a Box or Cylinder goes, typed in its dialog (#5638). The Box is placed by its corner
-//! or its centre, the Cylinder by the centre of its base, as X, Y and Z fields that take
-//! expressions and units like the size fields. A point picked in the view (a vertex, a point on
-//! an edge or face, the origin) fills the Box's fields.
+//! Where a primitive goes, typed in its dialog (#5638). The Box is placed by its corner or its
+//! centre, the Cylinder and Cone by the centre of their base, the Sphere and Torus by their
+//! centre, as X, Y and Z fields that take expressions and units like the size fields. A point
+//! picked in the view (a vertex, a point on an edge or face, the origin) fills the fields of the
+//! Box, Sphere and Torus.
 //!
 //! The placement lives in the dialog's extra parameters under the command's own key (`corner`,
 //! `center` or `base`). It is written there only once a field or the choice changes, so a new
@@ -22,7 +23,8 @@ use solidcraft_engine::Sel;
 fn keys(cmd: &str) -> &'static [&'static str] {
     match cmd {
         "solid.box" => &["corner", "center"],
-        "solid.cylinder" => &["base"],
+        "solid.cylinder" | "solid.cone" => &["base"],
+        "solid.sphere" | "solid.torus" => &["center"],
         _ => &[],
     }
 }
@@ -30,10 +32,11 @@ fn keys(cmd: &str) -> &'static [&'static str] {
 /// The Box's choice of the point its fields place.
 const BOX_PLACEMENTS: [&str; 2] = ["Corner", "Center"];
 
-/// The selection inputs of a primitive's dialog: the Box takes a point for its corner or centre.
+/// The selection inputs of a primitive's dialog: the Box takes a point for its corner or centre,
+/// the Sphere and Torus for their centre.
 pub(crate) fn inputs(cmd: &str) -> Vec<SelInput> {
     match cmd {
-        "solid.box" => vec![SelInput::new("Point", VERTICES | EDGES | FACES | ORIGIN, false)],
+        "solid.box" | "solid.sphere" | "solid.torus" => vec![SelInput::new("Point", VERTICES | EDGES | FACES | ORIGIN, false)],
         _ => Vec::new(),
     }
 }
@@ -77,8 +80,9 @@ pub(crate) fn rows(ui: &mut egui::Ui, s: &Session, cmd: &str, extra: &mut Map<St
     if keys(cmd).len() > 1 {
         choice_row(ui, "Placement", "pr_place", &mut choice, &BOX_PLACEMENTS);
     } else {
+        let point = if keys(cmd) == ["center"] { tr("ui.center") } else { tr("Base Center") };
         ui_kit::row(ui, "Placement", |ui| {
-            ui_kit::text(ui, tr("Base Center"), ui_kit::Text::Cell);
+            ui_kit::text(ui, point, ui_kit::Text::Cell);
         });
     }
     let before = coords.clone();

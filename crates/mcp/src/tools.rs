@@ -296,7 +296,7 @@ pub fn tool_definitions() -> Vec<Value> {
         tool(
             "open",
             "Open a design",
-            "Open a .solidcraft design file, a STEP file (.step/.stp: a new design whose bodies come from the file, as an \
+            "Open a .sc design file (or a .solidcraft one from an earlier release), a STEP file (.step/.stp: a new design whose bodies come from the file, as an \
              Import base feature in a component named after the file; an assembly's parts become nested components) or a \
              mesh (.3mf/.stl/.obj/.glb/.gltf: mesh bodies in such a component; a glTF file's nodes become nested components and its \
              materials appearances); the result reports the component (id, component_name). Replaces the current design; insert into it \
@@ -305,7 +305,7 @@ pub fn tool_definitions() -> Vec<Value> {
              so it is turned by default (`up: \"z\"` keeps its axes). `names` picks what the bodies are named after when the solids' own names say nothing useful.",
             obj(
                 json!({
-                    "path": string("Path to a .solidcraft, .step/.stp, .3mf, .stl, .obj, .glb or .gltf file"),
+                    "path": string("Path to a .sc (or .solidcraft), .step/.stp, .3mf, .stl, .obj, .glb or .gltf file"),
                     "up": {"type": "string", "enum": ["z", "y"], "description": "STEP and glTF only. z keeps the file's axes; y: the file has Y up, so its bodies are turned to stand Z up. Default: z for STEP, y for glTF"},
                     "names": {"type": "string", "enum": ["auto", "solid", "product", "instance"], "description": "STEP, IGES, FreeCAD and Rhino. auto (default): keep meaningful solid names, replace placeholders with the nearest named product, else instance; solid: the solid's own name; product: the part's name; instance: the occurrence's name, else the product's"},
                 }),
@@ -316,9 +316,12 @@ pub fn tool_definitions() -> Vec<Value> {
         tool(
             "save",
             "Save the design",
-            "Save the design to `path` or its current file. The default is a design container; a .json path selects plain JSON. Set format to container or json to override the path.",
+            "Save the design to `path` or its current file (a design opened as .solidcraft keeps that name). New designs are .sc files. The default is a design container; a .json path selects plain JSON. Set format to container or json to override the path. \
+             By default the path must lie in one of the agent's folders: the folder of a design opened or saved in this session (not its hidden files), \
+             SolidCraft's recovery folder, or a folder this server was started with `--allow-path DIR`. For a folder outside them, ask the user \
+             to add `--allow-path` and that folder to this server's arguments in their MCP client configuration.",
             obj(
-                json!({"path": string("Path to save to (default: the current file)"), "format": {"type": "string", "enum": ["container", "json"], "description": "Design encoding (default: JSON for .json, container otherwise)"}}),
+                json!({"path": string("Path to save to, e.g. part.sc (default: the current file)"), "format": {"type": "string", "enum": ["container", "json"], "description": "Design encoding (default: JSON for .json, container otherwise)"}}),
                 &[],
             ),
             Effect::Files,
@@ -762,7 +765,18 @@ fn batch(b: &mut dyn Backend, a: &Map<String, Value>) -> Value {
     let mut mapped: Vec<Value> = Vec::with_capacity(steps.len());
     let mut filters: Vec<(usize, String)> = Vec::new();
     for (i, step) in steps.iter().enumerate() {
-        match batch_step(step) {
+        // The window goes to another design's tab for these, however the step names them: the
+        // batch's later steps and its rollback would land in the wrong design.
+        let step_result = batch_step(step).and_then(|(command, params, filter)| {
+            let id = if command.is_empty() { step.get("command").or_else(|| step.get("id")).and_then(Value::as_str).unwrap_or("") } else { &command };
+            match solidcraft_engine::find_command(id).map(|spec| spec.id) {
+                Some(c @ ("component.edit_in_place" | "component.finish_edit")) => {
+                    Err(format!("`{c}` goes to another design's tab: send it on its own, not in a batch"))
+                }
+                _ => Ok((command, params, filter)),
+            }
+        });
+        match step_result {
             Ok((command, _, _)) if command.is_empty() => mapped.push(step.clone()),
             Ok((command, params, filter)) => {
                 if let Some(f) = filter {

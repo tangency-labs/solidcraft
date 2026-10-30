@@ -1,4 +1,6 @@
 {
+  "order": 151,
+  "provenance": "Original SolidCraft mapping of Solarized (MIT palette)",
   "base": "dark",
   "borders": {},
   "colors": {

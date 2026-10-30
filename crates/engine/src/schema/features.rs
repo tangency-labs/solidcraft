@@ -9,9 +9,9 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use super::types::{
-    AngleExpr, AxisDir, ConventionParam, DirectionParam, ExtentKeyword, ExtrudeOperation, FacesParam, FeatureCommon, FromPoint, IdOrName, LengthExpr,
-    NumberExpr, OperationParam, Point3, PointExpr3, ProfilesParam, ScaleFactors, SketchRef, StringList, ThinSideParam, ToPoint, feature_common,
-    present,
+    AngleExpr, AxisDir, AxisLine, ConventionParam, DirectionParam, ExtentKeyword, ExtrudeOperation, FacesParam, FeatureCommon, FromPoint,
+    GeoRefParam, IdOrName, LengthExpr, NumberExpr, OperationParam, PlaneCommon, PlaneOrFace, Point3, PointExpr3, ProfilesParam, ScaleFactors,
+    SketchRef, StringList, ThinSideParam, ToPoint, feature_common, present,
 };
 
 /// Add a box primitive.
@@ -189,6 +189,12 @@ pub struct CylinderParams {
     #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "AxisDir")]
     pub axis: Option<AxisDir>,
+    /// Up to two straight edges of the face it stands on, each `{edge: [x, y, z], distance: expr}`
+    /// (as `solid.hole`'s): the base centre goes that far from each edge's line, in the face's
+    /// plane, and follows the edges. With a numeric `base` only.
+    #[serde(default)]
+    #[schemars(with = "Option<Vec<serde_json::Value>>")]
+    pub references: Option<serde_json::Value>,
     /// How the cylinder combines with existing bodies. Default: new.
     #[serde(default)]
     pub operation: Option<OperationParam>,
@@ -359,6 +365,41 @@ pub struct ScaleParams {
     /// scale changes only `bodies`, whatever this lists.
     #[serde(default)]
     pub participants: Option<StringList>,
+}
+
+/// Add a construction plane parallel to `base`: `offset` away along its normal, or through a
+/// point.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct OffsetPlaneParams {
+    /// The plane it is parallel to.
+    pub base: PlaneOrFace,
+    /// How far from `base`, along its normal (negative: the other way). Required unless
+    /// `through` is given; not with `through` (`null` counts as not given).
+    #[serde(default)]
+    pub offset: Option<LengthExpr>,
+    /// A point the plane goes through instead: a vertex, a construction point, a sketch point, a
+    /// fixed point, or the centre of a circular edge, a sketch circle or arc, or a spherical or
+    /// toroidal face. `null` counts as not given.
+    #[serde(default)]
+    pub through: Option<GeoRefParam>,
+    #[serde(flatten, deserialize_with = "feature_common")]
+    pub common: PlaneCommon,
+}
+
+/// Add a construction plane: `base` turned by `angle` about an axis.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct PlaneAtAngleParams {
+    /// The plane to turn.
+    pub base: PlaneOrFace,
+    /// The axis it turns about. A picked edge's or face's axis points the way its largest
+    /// component is positive.
+    pub axis: AxisLine,
+    /// How far to turn, counterclockwise looking back along `axis`'s direction.
+    pub angle: AngleExpr,
+    #[serde(flatten, deserialize_with = "feature_common")]
+    pub common: PlaneCommon,
 }
 
 /// What a feature command returns.

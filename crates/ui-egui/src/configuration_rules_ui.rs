@@ -18,6 +18,10 @@ pub struct Editor {
     pub(super) drafts: std::collections::BTreeMap<(String, String), String>,
     /// The configuration table at a design revision: the command's answer and its shown cells.
     pub(super) table: Option<std::sync::Arc<(u64, Value, super::Table)>>,
+    /// The Add Column menu's filter text, and whether the menu was open last frame (the filter
+    /// takes focus when the menu opens and is cleared when it closes).
+    pub(super) column_filter: String,
+    pub(super) column_menu_open: bool,
 }
 impl Default for Editor {
     fn default() -> Self {
@@ -39,6 +43,8 @@ impl Default for Editor {
             focus_new_row: false,
             drafts: Default::default(),
             table: None,
+            column_filter: String::new(),
+            column_menu_open: false,
         }
     }
 }

@@ -12,7 +12,7 @@ description: "Use when running SolidCraft to see a change working, driving it th
   - `{"id":2,"method":"ui.start","params":{"command":"sketch.create"}}`, then `ui.click {x, y}`
   - `{"id":3,"method":"ui.screenshot","params":{"path":"/tmp/shot.png"}}`, then read the PNG
 - For UI work, look at the result. Without a window use `ui.render` or `solidcraft-cli snapshot`.
-- Headless: `solidcraft-cli run script.json --out part.step`, `solidcraft-cli eval design.solidcraft`, `solidcraft-cli snapshot script.json --out shot.png`, `solidcraft-cli commands`.
+- Headless: `solidcraft-cli run script.json --out part.step`, `solidcraft-cli eval design.sc`, `solidcraft-cli snapshot script.json --out shot.png`, `solidcraft-cli commands`.
 - Build with `CARGO_TARGET_DIR=<repo>/target`.
 
 ## MCP tools

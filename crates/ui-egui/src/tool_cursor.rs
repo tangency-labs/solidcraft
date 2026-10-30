@@ -86,23 +86,43 @@ mod tests {
     }
 
     #[test]
+    fn navigation_preference_restores_tool_badge_on_cancel_and_defaults() {
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        h.call("ui.prefs", json!({"open":"Navigation"}));
+        h.frames(4);
+        crate::prefs::reveal_preference(&mut h, "view:tool_cursor");
+        h.step(&json!({"click":{"handle":"view:tool_cursor"}})).unwrap();
+        assert!(h.app.ui.tool_cursor);
+        h.call("ui.prefs", json!({"button":"cancel"}));
+        assert!(!h.app.ui.tool_cursor);
+        h.app.ui.tool_cursor = true;
+        h.call("ui.prefs", json!({"open":"Navigation"}));
+        h.call("ui.prefs", json!({"button":"defaults"}));
+        assert!(!h.app.ui.tool_cursor);
+        h.call("ui.prefs", json!({"button":"cancel"}));
+        assert!(h.app.ui.tool_cursor, "Cancel also restores the value from before Defaults");
+    }
+
+    #[test]
     fn badge_shows_the_running_tool_beside_the_pointer() {
         let mut h = Harness::new();
         h.settle();
-        // Off by default: a running tool shows no badge until View settings turn it on.
+        // Off by default: a running tool shows no badge until Navigation preferences turn it on.
         assert!(!h.app.ui.tool_cursor, "the badge is on by default");
         h.step(&json!({"start": "sketch.create"})).unwrap();
         let (_, badge) = hover_middle(&mut h);
         assert!(badge.is_none(), "off by default, yet a badge is drawn at {badge:?}");
         h.step(&json!({"key": "Escape"})).unwrap();
         h.settle();
-        // Turned on with the checkbox in the navigation bar's View settings.
-        h.step(&json!({"click": {"handle": "nav:view"}})).unwrap();
-        h.frames(2);
+        // The board's Display menu omits this preference; Navigation keeps its checkbox.
+        h.call("ui.prefs", json!({"open":"Navigation"}));
+        h.frames(4);
+        crate::prefs::reveal_preference(&mut h, "view:tool_cursor");
         h.step(&json!({"click": {"handle": "view:tool_cursor"}})).unwrap();
-        h.step(&json!({"click": {"handle": "nav:view"}})).unwrap();
+        h.call("ui.prefs", json!({"button":"ok"}));
         h.frames(2);
-        assert!(h.app.ui.tool_cursor, "the View settings checkbox did not turn the badge on");
+        assert!(h.app.ui.tool_cursor, "the Navigation preferences checkbox did not turn the badge on");
         let (_, badge) = hover_middle(&mut h);
         assert!(badge.is_none(), "no tool runs, yet a badge is drawn at {badge:?}");
 
@@ -123,7 +143,7 @@ mod tests {
         // The coordinate readout starts READOUT below and right of the pointer: no overlap.
         assert!(badge.bottom() < at.y + READOUT, "the badge {badge:?} covers the readout under {at:?}");
 
-        // Turned off in View settings.
+        // Turned off in Navigation preferences.
         h.app.ui.tool_cursor = false;
         let (_, badge) = hover_middle(&mut h);
         assert!(badge.is_none(), "turned off, yet a badge is drawn at {badge:?}");

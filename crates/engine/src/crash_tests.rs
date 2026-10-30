@@ -232,6 +232,7 @@ fn a_command_panic_is_reported_once_with_the_design_and_the_command() {
     assert!(!bt.iter().any(|f| f.as_str().unwrap().contains("crash::hook")), "the hook's own frames are dropped: {bt:?}");
     assert_eq!(v["recent_commands"][0]["command"], "solid.box");
     // The design from before the command, and the command: together they reproduce the crash.
+    assert!(v["design_path"].as_str().unwrap().ends_with("design.sc"), "{v}");
     let design = solidcraft_io::read_design(&fs::read(v["design_path"].as_str().unwrap()).unwrap()).unwrap();
     assert_eq!(design.features.len(), 1);
     let replay: Value = serde_json::from_slice(&fs::read(v["replay_path"].as_str().unwrap()).unwrap()).unwrap();
@@ -502,6 +503,17 @@ fn fake_report(dir: &Path, secs: u64, sig: u64, kind: &str) -> String {
     let t = std::time::UNIX_EPOCH + std::time::Duration::from_secs(secs);
     File::options().write(true).open(&f).unwrap().set_modified(t).unwrap();
     id
+}
+
+/// A report folder an earlier release wrote holds `design.solidcraft`: still found.
+#[test]
+fn a_report_from_an_earlier_release_still_finds_its_design() {
+    let d = fresh_dir("legacy-design");
+    let id = fake_report(&d, 1_700_000_000, 7, "command_panic");
+    fs::write(d.join(&id).join("design.solidcraft"), solidcraft_io::write_design(&solidcraft_doc::Document::default())).unwrap();
+    let v = read(&d, &id).unwrap();
+    assert!(v["design_path"].as_str().unwrap().ends_with("design.solidcraft"), "{v}");
+    let _ = fs::remove_dir_all(&d);
 }
 
 #[test]

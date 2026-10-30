@@ -308,7 +308,7 @@ mod tests {
     fn material_inspection_preserves_legacy_entries_and_reports_unknowns_and_density_separately() {
         let mut s = fixture();
         let built_in = s.execute("material.list", &json!({})).unwrap();
-        for (name, density) in solidcraft_doc::MATERIALS {
+        for &(name, density) in solidcraft_doc::MATERIALS {
             let row = built_in["materials"].as_array().unwrap().iter().find(|m| m["name"] == name).unwrap();
             assert_eq!(*row, json!({"name":name,"density_g_cm3":density}));
             let inspected = s.execute("material.inspect", &json!({"material":name.to_lowercase()})).unwrap();

@@ -1,0 +1,58 @@
+{
+  "en": {
+    "prefs.viewport_section_status": "Show viewport section status",
+    "prefs.viewport_section_status_help": "Show the section setting in the viewport. Escape and the active ribbon button turn it off. Disable to keep the previous section controls.",
+    "ui.viewport_status_section_hatch": "{setting} · hatch",
+    "ui.viewport_status_section_plane": "Current plane",
+    "ui.viewport_status_section_tilted": "tilted · {offset}"
+  },
+  "ar": {
+    "prefs.viewport_section_status": "إظهار حالة المقطع في منفذ العرض",
+    "prefs.viewport_section_status_help": "عرض إعداد المقطع في منفذ العرض. يُوقف Escape وزر الشريط النشط المقطع. عطّل الخيار للاحتفاظ بأدوات المقطع السابقة.",
+    "ui.viewport_status_section_hatch": "{setting} · تهشير",
+    "ui.viewport_status_section_plane": "المستوى الحالي",
+    "ui.viewport_status_section_tilted": "مائل · {offset}"
+  },
+  "de": {
+    "prefs.viewport_section_status": "Schnittstatus im Ansichtsfenster anzeigen",
+    "prefs.viewport_section_status_help": "Die Schnitteinstellung im Ansichtsfenster anzeigen. Escape und die aktive Schaltfläche schalten den Schnitt aus. Deaktivieren, um die bisherigen Schnittbedienelemente zu behalten.",
+    "ui.viewport_status_section_hatch": "{setting} · Schraffur",
+    "ui.viewport_status_section_plane": "Aktuelle Ebene",
+    "ui.viewport_status_section_tilted": "geneigt · {offset}"
+  },
+  "he": {
+    "prefs.viewport_section_status": "הצגת מצב חתך בחלון התצוגה",
+    "prefs.viewport_section_status_help": "הצגת הגדרת החתך בחלון התצוגה. Escape ולחצן הסרט הפעיל מכבים את החתך. כיבוי האפשרות שומר על בקרי החתך הקודמים.",
+    "ui.viewport_status_section_hatch": "{setting} · קווקוו",
+    "ui.viewport_status_section_plane": "המישור הנוכחי",
+    "ui.viewport_status_section_tilted": "נטוי · {offset}"
+  },
+  "ja": {
+    "prefs.viewport_section_status": "ビューポートの断面状態を表示",
+    "prefs.viewport_section_status_help": "ビューポートに断面設定を表示します。Escape または有効なリボンボタンで断面を解除します。無効にすると従来の断面操作を維持します。",
+    "ui.viewport_status_section_hatch": "{setting} · ハッチング",
+    "ui.viewport_status_section_plane": "現在の平面",
+    "ui.viewport_status_section_tilted": "傾斜 · {offset}"
+  },
+  "ko": {
+    "prefs.viewport_section_status": "뷰포트 단면 상태 표시",
+    "prefs.viewport_section_status_help": "뷰포트에 단면 설정을 표시합니다. Escape 키와 활성 리본 버튼으로 단면을 끕니다. 비활성화하면 이전 단면 조작을 유지합니다.",
+    "ui.viewport_status_section_hatch": "{setting} · 해칭",
+    "ui.viewport_status_section_plane": "현재 평면",
+    "ui.viewport_status_section_tilted": "기울어짐 · {offset}"
+  },
+  "vi": {
+    "prefs.viewport_section_status": "Hiện trạng thái mặt cắt trong khung nhìn",
+    "prefs.viewport_section_status_help": "Hiện thiết lập mặt cắt trong khung nhìn. Escape và nút dải công cụ đang bật sẽ tắt mặt cắt. Tắt tùy chọn để giữ cách điều khiển mặt cắt trước đây.",
+    "ui.viewport_status_section_hatch": "{setting} · gạch mặt cắt",
+    "ui.viewport_status_section_plane": "Mặt phẳng hiện tại",
+    "ui.viewport_status_section_tilted": "nghiêng · {offset}"
+  },
+  "zh": {
+    "prefs.viewport_section_status": "显示视口剖面状态",
+    "prefs.viewport_section_status_help": "在视口中显示剖面设置。按 Escape 或单击活动的功能区按钮可关闭剖面。禁用以保留原有剖面控件。",
+    "ui.viewport_status_section_hatch": "{setting} · 填充线",
+    "ui.viewport_status_section_plane": "当前平面",
+    "ui.viewport_status_section_tilted": "倾斜 · {offset}"
+  }
+}

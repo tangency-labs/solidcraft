@@ -9,6 +9,7 @@ use solidcraft_sketch::{CurveKind, LinkKind, LinkSource, Sketch};
 
 use super::CommandSpec;
 use super::sketch::{edit, ids_of};
+use super::sketch_store;
 use crate::params::{bad, num, str_, vec2};
 use crate::{EngineError, Result, Session};
 
@@ -152,6 +153,12 @@ fn bounds_of(geom: &[Geom2]) -> Option<(Vec2, Vec2)> {
                 pts.extend([*c + Vec2::new(r, r), *c - Vec2::new(r, r)]);
             }
             Geom2::Spline { pts: sp, .. } => pts.extend(sp.iter().copied()),
+            // Points along the curve, not its apex, which can lie well outside it (an elliptical
+            // arc of a DXF comes in as conics, #8155).
+            Geom2::Conic { a, apex, b, rho } if *rho > 0.0 && *rho < 1.0 => {
+                let seg = solidcraft_geom::Seg2::Conic { a: *a, apex: *apex, b: *b, w: rho / (1.0 - rho) };
+                pts.extend((0..=64).map(|i| seg.point_at(f64::from(i) / 64.0)));
+            }
             Geom2::Conic { a, apex, b, .. } => pts.extend([*a, *apex, *b]),
             Geom2::Text { at, .. } => pts.push(*at),
         }
@@ -227,12 +234,13 @@ fn insert(s: &mut Session, p: &Value, cmd: &str, svg: bool) -> Result<Value> {
         Ok((ids_of(sk, &cs), texts))
     })?;
     // Text becomes sketch text.
-    let id = s.active_sketch.ok_or_else(|| bad(cmd, "no sketch"))?;
+    let id = sketch_store::active(s).ok_or_else(|| bad(cmd, "no sketch"))?;
     let mut n_text = 0;
     for t in texts {
         if let Geom2::Text { text, at, height, angle: own } = t {
+            // Not `sketch_store::update`: a text that can't be linked is skipped, not refused.
             let mut doc = (*s.doc).clone();
-            let mut sk = doc.sketch(id)?.clone();
+            let mut sk = sketch_store::read(&doc, id)?.clone();
             if super::sketch_project::add_link(
                 s,
                 &doc,
@@ -243,7 +251,7 @@ fn insert(s: &mut Session, p: &Value, cmd: &str, svg: bool) -> Result<Value> {
             )
             .is_ok()
             {
-                *doc.sketch_mut(id)? = sk;
+                sketch_store::write(&mut doc, id, sk)?;
                 *s.doc_mut() = doc;
                 n_text += 1;
             }
@@ -262,12 +270,7 @@ fn insert_svg(s: &mut Session, p: &Value) -> Result<Value> {
 
 fn export_dxf(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.export_dxf";
-    let id = match p.get("sketch") {
-        Some(Value::Number(n)) => n.as_u64(),
-        Some(Value::String(x)) => s.doc.find_feature(x).map(|f| f.id),
-        _ => s.active_sketch,
-    }
-    .ok_or_else(|| bad(cmd, "no such sketch (and none is active)"))?;
+    let id = sketch_store::target(s, p, cmd)?;
     let st = s.model.state();
     let ss = st.sketch(id).ok_or_else(|| EngineError::Other("that sketch is not evaluated".into()))?;
     let sk = &ss.sketch;
@@ -350,6 +353,32 @@ mod tests {
             assert_eq!(r["curves"], 1, "{n} points: {r}");
             s.execute("sketch.finish", &json!({})).unwrap();
         }
+    }
+
+    /// #8155: an elliptical arc of a DXF (as Fusion writes one) comes into the sketch as exact
+    /// conics, and the drawing's size is the arc's own, not the box round the conics' apexes.
+    #[test]
+    fn an_elliptical_arc_comes_in_as_conics_at_its_own_size() {
+        // Centre (0, 0), major radius 10 along X, minor 5, from -45° to 45°: one quarter turn,
+        // whose apex is at x = 10 / cos 45° = 14.1, past the arc's end at x = 10.
+        let dxf = format!(
+            "0\nSECTION\n2\nENTITIES\n0\nELLIPSE\n10\n0\n20\n0\n11\n10\n21\n0\n40\n0.5\n41\n{}\n42\n{}\n0\nENDSEC\n0\nEOF\n",
+            -std::f64::consts::FRAC_PI_4,
+            std::f64::consts::FRAC_PI_4
+        );
+        let mut s = Session::default();
+        let b = s.execute("sketch.drawing_bounds", &json!({"text": dxf, "format": "dxf"})).unwrap();
+        let (w, h) = (b["width"].as_f64().unwrap(), b["height"].as_f64().unwrap());
+        let half = std::f64::consts::FRAC_1_SQRT_2;
+        assert!((w - 10.0 * (1.0 - half)).abs() < 1e-3 && (h - 10.0 * half).abs() < 1e-3, "{b}");
+        let r = s.execute("sketch.insert_dxf", &json!({"text": dxf})).unwrap();
+        assert_eq!(r["curves"], 1, "{r}");
+        let st = s.model.state();
+        let sk = &st.sketch(r["sketch"].as_u64().unwrap()).unwrap().sketch;
+        assert!(matches!(sk.curves[0].kind, solidcraft_sketch::CurveKind::Conic { .. }), "{:?}", sk.curves[0].kind);
+        // Every point the sketch draws it with lies on the ellipse.
+        let worst = sk.polyline(0).iter().map(|p| ((p.x / 10.0).powi(2) + (p.y / 5.0).powi(2) - 1.0).abs()).fold(0.0, f64::max);
+        assert!(worst < 1e-9, "{worst}");
     }
 
     const PLATE: &str =

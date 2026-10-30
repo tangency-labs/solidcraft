@@ -1,4 +1,6 @@
 {
+  "order": 130,
+  "provenance": "Original SolidCraft mapping of Atom One Dark (MIT palette)",
   "base": "dark",
   "colors": {
     "accent": "#61afef",
@@ -50,8 +52,8 @@
     "dialog_footer": "#2f343e",
     "dialog_label": "#b4bbc8",
     "dialog_rule": "#353b47",
-    "dimension": "#abb2bf",
-    "dimension_driven": "#7f848e",
+    "dimension": "#56b6c2",
+    "dimension_driven": "#3f8590",
     "error": "#e06c75",
     "field": "#1e2227",
     "form_accent": "#d283e9",

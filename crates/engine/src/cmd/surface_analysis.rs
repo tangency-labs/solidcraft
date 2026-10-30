@@ -62,6 +62,7 @@ fn set(s: &mut Session, p: &Value, a: SurfaceAnalysis) -> Result<Value> {
     } else {
         s.analysis = Some(a);
     }
+    s.status_analysis_changed((!bool_(p, "clear").unwrap_or(false)).then_some(crate::status_items::StatusId::SurfaceAnalysis));
     s.revision += 1;
     Ok(json!({ "analysis": s.analysis }))
 }
@@ -117,6 +118,7 @@ fn continuity(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "inspect.continuity";
     if bool_(p, "clear").unwrap_or(false) {
         s.continuity.clear();
+        s.status_analysis_changed(None);
         s.revision += 1;
         return Ok(json!({ "analysis": "continuity", "cleared": true }));
     }
@@ -205,6 +207,7 @@ fn continuity(s: &mut Session, p: &Value) -> Result<Value> {
     } else {
         s.continuity = seams;
     }
+    s.status_analysis_changed(Some(crate::status_items::StatusId::Continuity));
     s.revision += 1;
     Ok(json!({
         "analysis": "continuity",
@@ -313,6 +316,372 @@ mod tests {
         s.execute("solid.box", &json!({"length": size, "width": size, "height": size})).unwrap();
     }
 
+    fn status(s: &mut Session) -> Vec<crate::status_items::StatusItem> {
+        serde_json::from_value::<crate::status_items::StatusItems>(s.execute("view.status_items", &json!({})).unwrap()).unwrap().items
+    }
+
+    #[test]
+    fn newest_status_uses_activation_not_row_order_and_filters_unpresented_effects() {
+        use crate::status_items::StatusId::{Continuity, Section, SurfaceAnalysis};
+        let mut s = Session::default();
+        s.execute("inspect.zebra", &json!({})).unwrap();
+        s.execute("inspect.section", &json!({"plane":"XY"})).unwrap();
+        s.execute("inspect.draft", &json!({"angle":7})).unwrap();
+        assert_eq!(status(&mut s).iter().map(|item| item.id).collect::<Vec<_>>(), [SurfaceAnalysis, Section]);
+        assert_eq!(s.newest_status_item(&[SurfaceAnalysis, Continuity, Section]).unwrap().command, "inspect.draft");
+        s.execute("inspect.section", &json!({"plane":"XZ"})).unwrap();
+        assert_eq!(s.newest_status_item(&[SurfaceAnalysis, Continuity, Section]).unwrap().id, Section);
+        let before = (s.revision, s.undo.len(), s.doc.to_json(), s.status_activation.clone());
+        assert_eq!(s.newest_status_item(&[SurfaceAnalysis, Continuity]).unwrap().command, "inspect.draft");
+        assert_eq!((s.revision, s.undo.len(), s.doc.to_json(), s.status_activation.clone()), before);
+        assert!(s.execute("inspect.zebra", &json!({"stripes":-1})).is_err());
+        assert_eq!(s.status_activation, before.3);
+        s.execute("inspect.draft", &json!({"clear":true})).unwrap();
+        assert!(s.newest_status_item(&[SurfaceAnalysis, Continuity]).is_none());
+        s.execute("inspect.zebra", &json!({})).unwrap();
+        assert_eq!(s.newest_status_item(&[SurfaceAnalysis, Continuity, Section]).unwrap().command, "inspect.zebra");
+    }
+
+    #[test]
+    fn newest_status_tracks_independent_continuity_and_policy_normalisation() {
+        use crate::status_items::StatusId::{Continuity, SurfaceAnalysis};
+        for continuity_first in [false, true] {
+            let mut s = Session::default();
+            boxed(&mut s, 10.0);
+            s.set_single_surface_analysis(false);
+            let shading = ("inspect.zebra", json!({}));
+            let seams = ("inspect.continuity", json!({"edges":[[5,0,0]],"samples":5}));
+            for (cmd, params) in if continuity_first { [seams, shading] } else { [shading, seams] } {
+                s.execute(cmd, &params).unwrap();
+            }
+            let latest = if continuity_first { "inspect.zebra" } else { "inspect.continuity" };
+            assert_eq!(s.newest_status_item(&[SurfaceAnalysis, Continuity]).unwrap().command, latest);
+            s.set_single_surface_analysis(true);
+            assert_eq!(s.newest_status_item(&[SurfaceAnalysis]).unwrap().command, latest);
+            s.set_single_surface_analysis(false);
+            let clear = s.newest_status_item(&[SurfaceAnalysis, Continuity]).unwrap().clear;
+            s.execute(&clear.command, &json!({"clear":true})).unwrap();
+            assert!(s.newest_status_item(&[SurfaceAnalysis, Continuity]).is_none());
+        }
+    }
+
+    #[test]
+    fn status_items_zero_seam_continuity_never_leaves_a_phantom_winner() {
+        use crate::status_items::StatusId;
+        for single in [false, true] {
+            let mut empty = Session::default();
+            empty.set_single_surface_analysis(single);
+            empty.execute("inspect.zebra", &json!({"stripes":14.5})).unwrap();
+            let before = (status(&mut empty), empty.latest_analysis, empty.revision);
+            assert!(empty.execute("inspect.continuity", &json!({})).is_err());
+            assert_eq!((status(&mut empty), empty.latest_analysis, empty.revision), before, "empty-model failure is atomic");
+            for had_continuity in [false, true] {
+                let mut s = Session::default();
+                s.set_single_surface_analysis(single);
+                boxed(&mut s, 10.0);
+                for (command, params) in [
+                    ("sketch.create", json!({"plane":"XY","name":"Boundary"})),
+                    ("sketch.rectangle.two_point", json!({"p0":[20,20],"p1":[30,30]})),
+                    ("sketch.finish", json!({})),
+                    ("surface.patch", json!({"sketch":"Boundary","body_name":"Sheet"})),
+                    ("inspect.zebra", json!({"stripes":14.5})),
+                    ("inspect.section", json!({"plane":"XY"})),
+                ] {
+                    s.execute(command, &params).unwrap();
+                }
+                if had_continuity {
+                    s.execute("inspect.continuity", &json!({"body":"Body1","edges":[[5,0,0]],"samples":5})).unwrap();
+                    assert_eq!(s.continuity.len(), 1);
+                    if single {
+                        s.execute("inspect.zebra", &json!({"stripes":14.5})).unwrap();
+                    }
+                }
+                s.mark_saved();
+                let doc = s.doc.clone();
+                let undo = s.undo.len();
+                let result = s.execute("inspect.continuity", &json!({"body":"Sheet","samples":5})).unwrap();
+                assert_eq!(result["summary"]["edges"], 0);
+                assert_eq!(result["summary"]["skipped"], 4, "an actual one-face sheet has four open boundaries");
+                assert!(s.continuity.is_empty());
+                assert_eq!(s.latest_analysis, if single { None } else { Some(StatusId::SurfaceAnalysis) });
+                if single {
+                    assert_eq!(s.analysis, None, "single-mode successful zero-result replacement retains its existing clear semantics");
+                } else {
+                    assert_eq!(s.analysis, Some(SurfaceAnalysis::Zebra { stripes: 14.5 }), "legacy zero result preserves shading");
+                }
+                let expected = if single { vec![StatusId::Section] } else { vec![StatusId::SurfaceAnalysis, StatusId::Section] };
+                for policy in [true, false, true] {
+                    s.set_single_surface_analysis(policy);
+                    assert_eq!(status(&mut s).iter().map(|item| item.id).collect::<Vec<_>>(), expected);
+                }
+                assert!(std::sync::Arc::ptr_eq(&doc, &s.doc));
+                assert!(!s.is_dirty());
+                assert_eq!(s.undo.len(), undo);
+            }
+        }
+    }
+
+    #[test]
+    fn status_items_legacy_policy_keeps_independent_effects_and_clears_in_both_orders() {
+        use crate::status_items::StatusId::{Continuity, Section, SurfaceAnalysis};
+        for continuity_first in [false, true] {
+            let mut s = Session::default();
+            boxed(&mut s, 10.0);
+            s.mark_saved();
+            let doc = s.doc.clone();
+            let undo = s.undo.len();
+            s.set_single_surface_analysis(false);
+            let shading = ("inspect.zebra", json!({"stripes": 14.5}));
+            let continuity = ("inspect.continuity", json!({"edges": [[5, 0, 0]], "samples": 5}));
+            for (command, params) in if continuity_first { [continuity, shading] } else { [shading, continuity] } {
+                s.execute(command, &params).unwrap();
+            }
+            s.execute("inspect.section", &json!({"plane": "XY"})).unwrap();
+            let items = status(&mut s);
+            let expected = if continuity_first { vec![Continuity, SurfaceAnalysis, Section] } else { vec![SurfaceAnalysis, Continuity, Section] };
+            assert_eq!(items.iter().map(|item| item.id).collect::<Vec<_>>(), expected);
+            assert_eq!(s.analysis, Some(crate::SurfaceAnalysis::Zebra { stripes: 14.5 }));
+            assert_eq!(s.continuity.len(), 1);
+            let before = (items.clone(), s.status_order.clone(), s.latest_analysis, s.revision, s.continuity.clone());
+            for (command, params) in [
+                ("inspect.continuity", json!({"body": "missing"})),
+                ("inspect.draft", json!({"pull": [0, 0, 0]})),
+                ("inspect.zebra", json!({"stripes": -2})),
+            ] {
+                assert!(s.execute(command, &params).is_err());
+                assert_eq!((status(&mut s), s.status_order.clone(), s.latest_analysis, s.revision, s.continuity.clone()), before);
+            }
+            // The legacy generic shading clear still ends Zebra, never Continuity or Section.
+            s.execute("inspect.curvature_map", &json!({"clear": true})).unwrap();
+            assert_eq!(status(&mut s).iter().map(|item| item.id).collect::<Vec<_>>(), vec![Continuity, Section]);
+            let clear = items.iter().find(|item| item.id == Continuity).unwrap().clear.clone();
+            for _ in 0..2 {
+                s.execute(&clear.command, &serde_json::to_value(&clear.params).unwrap()).unwrap();
+                assert_eq!(status(&mut s).iter().map(|item| item.id).collect::<Vec<_>>(), vec![Section]);
+            }
+            // Clear in the opposite direction leaves the shading active too.
+            s.execute("inspect.zebra", &json!({})).unwrap();
+            s.execute("inspect.continuity", &json!({"edges": [[5, 0, 0]]})).unwrap();
+            s.execute("inspect.continuity", &json!({"clear": true})).unwrap();
+            assert!(s.analysis.is_some());
+            assert!(s.section.is_some());
+            assert!(std::sync::Arc::ptr_eq(&doc, &s.doc));
+            assert!(!s.is_dirty());
+            assert_eq!(s.undo.len(), undo);
+        }
+    }
+
+    #[test]
+    fn status_items_policy_switch_keeps_latest_replacement_at_oldest_group_position() {
+        use crate::status_items::{StatusId, StatusSetting};
+        for continuity_first in [false, true] {
+            for latest_continuity in [false, true] {
+                let mut s = Session::default();
+                boxed(&mut s, 10.0);
+                s.mark_saved();
+                let doc = s.doc.clone();
+                let undo = s.undo.len();
+                s.set_single_surface_analysis(false);
+                let shading = ("inspect.zebra", json!({}));
+                let continuity = ("inspect.continuity", json!({"edges": [[5, 0, 0]], "samples": 5}));
+                let (first, last) = if continuity_first { (continuity, shading) } else { (shading, continuity) };
+                s.execute(first.0, &first.1).unwrap();
+                s.execute("inspect.section", &json!({"plane": "XY"})).unwrap();
+                s.execute(last.0, &last.1).unwrap();
+                // Replacement does not move the slot, but determines the policy-switch winner.
+                if latest_continuity {
+                    s.execute("inspect.continuity", &json!({"edges": [[0, 5, 0]], "add": true})).unwrap();
+                } else {
+                    s.execute("inspect.draft", &json!({"angle": 7.5})).unwrap();
+                }
+                let before = status(&mut s);
+                for _ in 0..3 {
+                    assert_eq!(status(&mut s), before);
+                }
+                s.set_single_surface_analysis(true);
+                let items = status(&mut s);
+                assert_eq!(items.iter().map(|item| item.id).collect::<Vec<_>>(), vec![StatusId::SurfaceAnalysis, StatusId::Section]);
+                assert_eq!(items[0].command, if latest_continuity { "inspect.continuity" } else { "inspect.draft" });
+                if latest_continuity {
+                    assert_eq!(s.analysis, None);
+                    assert_eq!(items[0].setting, StatusSetting::Continuity { edge_count: 2 });
+                } else {
+                    assert!(s.continuity.is_empty());
+                    assert!(matches!(s.analysis, Some(SurfaceAnalysis::Draft { angle, .. }) if angle == 7.5));
+                }
+                let revision = s.revision;
+                s.set_single_surface_analysis(true);
+                assert_eq!(s.revision, revision, "idempotent policy application");
+                s.set_single_surface_analysis(false);
+                assert_eq!(status(&mut s)[0].id, if latest_continuity { StatusId::Continuity } else { StatusId::SurfaceAnalysis });
+                assert!(std::sync::Arc::ptr_eq(&doc, &s.doc));
+                assert!(!s.is_dirty());
+                assert_eq!(s.undo.len(), undo);
+                assert!(!s.scratch().single_surface_analysis());
+                s.execute("file.new", &json!({})).unwrap();
+                assert!(!s.single_surface_analysis(), "new/open retain SDK session configuration");
+                assert!(status(&mut s).is_empty());
+            }
+        }
+    }
+
+    #[test]
+    fn status_items_describe_every_effect_and_execute_their_own_clear() {
+        use crate::status_items::{StatusId, StatusKind, StatusSetting};
+        let mut s = Session::default();
+        assert!(status(&mut s).is_empty());
+        for (command, params, setting, has_key) in [
+            ("inspect.zebra", json!({"stripes": 12.5}), StatusSetting::Zebra { stripes: 12.5 }, false),
+            ("inspect.draft", json!({"pull": [0, -2, 0], "angle": 3.25}), StatusSetting::Draft { pull: [0.0, -1.0, 0.0], angle_deg: 3.25 }, true),
+            ("inspect.environment_map", json!({}), StatusSetting::Environment, false),
+            ("inspect.accessibility", json!({"direction": [-3, 0, 0]}), StatusSetting::Accessibility { direction: [-1.0, 0.0, 0.0] }, true),
+            ("inspect.curvature_map", json!({"radius": 2.75}), StatusSetting::Curvature { radius_mm: 2.75 }, true),
+        ] {
+            s.execute(command, &params).unwrap();
+            let items = status(&mut s);
+            assert_eq!(items.len(), 1);
+            let item = &items[0];
+            assert_eq!(item.id, StatusId::SurfaceAnalysis);
+            assert_eq!(item.kind, StatusKind::Mode);
+            assert_eq!(item.command, command);
+            assert_eq!(item.setting, setting);
+            assert_eq!(item.has_key, has_key);
+            assert_eq!(item.clear.command, command);
+            let params = serde_json::to_value(&item.clear.params).unwrap();
+            for _ in 0..2 {
+                s.execute(&item.clear.command, &params).unwrap();
+                assert!(status(&mut s).is_empty());
+            }
+        }
+        for (params, origin, normal, hatch) in [
+            (json!({"plane": "XY", "at": 20, "hatch": false}), [0.0, 0.0, 20.0], [0.0, 0.0, 1.0], false),
+            (json!({"plane": {"origin": [1, 2, 3], "normal": [0, 3, 4]}}), [1.0, 2.0, 3.0], [0.0, 0.6, 0.8], true),
+        ] {
+            s.execute("inspect.section", &params).unwrap();
+            let item = status(&mut s).remove(0);
+            assert_eq!(item.id, StatusId::Section);
+            assert_eq!(item.kind, StatusKind::Mode);
+            assert_eq!(item.command, "inspect.section");
+            assert_eq!(item.setting, StatusSetting::Section { origin_mm: origin, normal, hatch });
+            assert!(!item.has_key);
+            s.execute(&item.clear.command, &serde_json::to_value(item.clear.params).unwrap()).unwrap();
+            assert!(status(&mut s).is_empty());
+        }
+    }
+
+    #[test]
+    fn status_items_order_slots_by_activation_and_retain_replacement_position() {
+        use crate::status_items::StatusId::{Section, SurfaceAnalysis};
+        for section_first in [false, true] {
+            let mut s = Session::default();
+            let section = ("inspect.section", json!({"plane": "XY"}));
+            let zebra = ("inspect.zebra", json!({}));
+            for (command, params) in if section_first { [section, zebra] } else { [zebra, section] } {
+                s.execute(command, &params).unwrap();
+            }
+            let expected = if section_first { vec![Section, SurfaceAnalysis] } else { vec![SurfaceAnalysis, Section] };
+            assert_eq!(status(&mut s).iter().map(|item| item.id).collect::<Vec<_>>(), expected);
+            s.execute("inspect.draft", &json!({"angle": 7})).unwrap();
+            s.execute("inspect.section", &json!({"plane": "YZ", "at": 9})).unwrap();
+            assert_eq!(
+                status(&mut s).iter().map(|item| item.id).collect::<Vec<_>>(),
+                expected,
+                "analysis and Section replacements retain their slots"
+            );
+            s.execute("inspect.draft", &json!({"clear": true})).unwrap();
+            assert_eq!(status(&mut s).iter().map(|item| item.id).collect::<Vec<_>>(), vec![Section]);
+            s.execute("inspect.zebra", &json!({})).unwrap();
+            assert_eq!(status(&mut s).iter().map(|item| item.id).collect::<Vec<_>>(), vec![Section, SurfaceAnalysis]);
+            s.execute("inspect.section", &json!({"clear": true})).unwrap();
+            assert_eq!(status(&mut s).len(), 1);
+            s.execute("inspect.section", &json!({"plane": "XZ"})).unwrap();
+            assert_eq!(status(&mut s).iter().map(|item| item.id).collect::<Vec<_>>(), vec![SurfaceAnalysis, Section]);
+        }
+    }
+
+    #[test]
+    fn status_items_continuity_shares_the_analysis_slot_and_failures_keep_effects() {
+        use crate::status_items::{StatusId, StatusSetting};
+        let mut s = Session::default();
+        boxed(&mut s, 10.0);
+        s.execute("inspect.zebra", &json!({})).unwrap();
+        s.execute("inspect.section", &json!({"plane": "XY"})).unwrap();
+        s.execute("inspect.continuity", &json!({"edges": [[5, 0, 0]]})).unwrap();
+        assert_eq!(s.analysis, None);
+        let continuity = status(&mut s)[0].clone();
+        assert_eq!(continuity.id, StatusId::SurfaceAnalysis);
+        assert_eq!(continuity.command, "inspect.continuity");
+        assert_eq!(continuity.setting, StatusSetting::Continuity { edge_count: 1 });
+        assert!(!continuity.has_key);
+        s.execute("inspect.continuity", &json!({"edges": [[0, 5, 0]], "add": true})).unwrap();
+        assert_eq!(status(&mut s)[0].setting, StatusSetting::Continuity { edge_count: 2 });
+        let before = status(&mut s);
+        let order = s.status_order.clone();
+        let effects = (s.analysis, s.continuity.clone(), s.section, s.section_hatch, s.revision);
+        for (command, params) in [
+            ("inspect.continuity", json!({"body": "missing"})),
+            ("inspect.continuity", json!({"samples": 2})),
+            ("inspect.draft", json!({"pull": [0, 0, 0]})),
+            ("inspect.zebra", json!({"stripes": -1})),
+            ("inspect.section", json!({"plane": {"normal": [0, 0, 0]}})),
+        ] {
+            assert!(s.execute(command, &params).is_err());
+            assert_eq!(status(&mut s), before);
+            assert_eq!(s.status_order, order);
+            assert_eq!((s.analysis, s.continuity.clone(), s.section, s.section_hatch, s.revision), effects);
+        }
+        s.execute("inspect.draft", &json!({})).unwrap();
+        assert!(s.continuity.is_empty());
+        let before = status(&mut s);
+        assert!(s.execute("inspect.continuity", &json!({"body": "missing"})).is_err());
+        assert_eq!(status(&mut s), before, "failed Continuity activation keeps surface shading and ordering");
+        s.execute(&continuity.clear.command, &serde_json::to_value(continuity.clear.params).unwrap()).unwrap();
+        assert_eq!(status(&mut s)[0].command, "inspect.draft", "stale continuity clear keeps replacement");
+        s.execute("inspect.continuity", &json!({"edges": [[5, 0, 0]]})).unwrap();
+        let item = status(&mut s).remove(0);
+        s.execute(&item.clear.command, &serde_json::to_value(item.clear.params).unwrap()).unwrap();
+        assert_eq!(status(&mut s).len(), 1);
+        assert_eq!(status(&mut s)[0].id, StatusId::Section);
+    }
+
+    #[test]
+    fn status_items_queries_are_read_only_even_during_a_stale_live_drag() {
+        use std::sync::Arc;
+        let mut s = Session::default();
+        for (command, params) in [
+            ("sketch.create", json!({"plane":"XY"})),
+            ("sketch.rectangle.two_point", json!({"p0":[5,5],"p1":[25,20]})),
+            ("sketch.dimension", json!({"entities":["l1"],"value":20})),
+            ("sketch.dimension", json!({"entities":["l2"],"value":15})),
+            ("sketch.finish", json!({})),
+            ("solid.extrude", json!({"distance":5})),
+            ("inspect.zebra", json!({"stripes": 10.5})),
+            ("inspect.section", json!({"plane":"XY", "at": 2})),
+            ("sketch.edit", json!({"sketch":"Sketch1"})),
+        ] {
+            s.execute(command, &params).unwrap();
+        }
+        let effects = status(&mut s);
+        s.execute("sketch.drag", &json!({"entity":"l1.start","from":[5,5],"to":[4,5],"live":true})).unwrap();
+        assert!(s.model.is_stale());
+        let doc = s.doc.clone();
+        let model = s.model.state();
+        let selection = s.selection.clone();
+        let before = (s.revision, s.undo.len(), s.redo.len(), s.is_dirty(), s.evaluations, s.status_order.clone());
+        for _ in 0..3 {
+            assert_eq!(status(&mut s), effects);
+        }
+        assert!(Arc::ptr_eq(&doc, &s.doc));
+        assert!(Arc::ptr_eq(&model, &s.model.state()));
+        assert!(s.model.is_stale());
+        assert_eq!(s.selection, selection);
+        assert_eq!((s.revision, s.undo.len(), s.redo.len(), s.is_dirty(), s.evaluations, s.status_order.clone()), before);
+        assert!(s.scratch().status_items().is_empty(), "scratch sessions have no persistent view effects");
+        s.execute("file.new", &json!({})).unwrap();
+        assert!(status(&mut s).is_empty());
+        assert!(s.status_order.is_empty(), "new design resets transient chronology");
+    }
+
     /// The edges of the first body of a continuity reply.
     fn edges(v: &Value) -> &Vec<Value> {
         v["bodies"][0]["edges"].as_array().unwrap_or_else(|| panic!("no edges in {v}"))
@@ -376,7 +745,7 @@ mod tests {
         assert_eq!(v["summary"]["worst"], json!("sharp"));
         assert_eq!(s.continuity.len(), 12, "the seams are kept for the viewport");
         assert_eq!(s.undo.len(), undo, "no undo step");
-        assert_eq!(s.analysis, None, "the other analyses are left alone");
+        assert_eq!(s.analysis, None, "only the Continuity analysis is active");
     }
 
     /// A rolling-ball fillet is tangent to the faces it joins but not curvature continuous: its

@@ -27,8 +27,45 @@ macro_rules! element {
     };
 }
 
+fn navigation_sample(ui: &mut Ui, size: crate::navigation_bar::Size) {
+    let metrics = NavigationMetrics::for_size(size);
+    let inset = NAV_PADDING + NAV_BORDER;
+    let menu_width = metrics.icon + NAV_MENU_LEFT + NAV_MENU_RIGHT + NAV_MENU_GAP + NAV_CHEVRON;
+    let (rect, _) =
+        ui.allocate_exact_size(vec2(2.0 * metrics.button + menu_width + 2.0 * NAV_GAP + 2.0 * inset, metrics.height()), egui::Sense::hover());
+    navigation_surface(ui, rect, size, true);
+    let mut x = rect.left() + inset;
+    for (id, icon, kind, selected, width) in [
+        ("pan", "pan", crate::navigation_bar::Kind::Tool, true, metrics.button),
+        ("fit", "fit", crate::navigation_bar::Kind::Action, false, metrics.button),
+        ("visual_style", "style_shaded_edges", crate::navigation_bar::Kind::Menu, false, menu_width),
+    ] {
+        let bounds = egui::Rect::from_min_size(egui::pos2(x, rect.top() + inset), vec2(width, metrics.button));
+        navigation_button(
+            ui,
+            bounds,
+            NavigationButton { id, icon, label: id, kind, selected, labels: false, menu: kind == crate::navigation_bar::Kind::Menu },
+        );
+        if id == "fit" {
+            navigation_edit_outline(ui, bounds, true, false);
+        }
+        x += width + NAV_GAP;
+    }
+}
+
 // One entry per element/variant: names, rendering and geometry expectations stay together.
 const ELEMENTS: &[Element] = &[
+    element!("viewport_status_item", "viewport_status:sample:item", Some("viewport_status:sample:close"), |ui, _| {
+        let item = StatusItem {
+            id: "sample".into(),
+            kind: StatusKind::Mode,
+            name: "Draft".into(),
+            setting: "Z · 1°".into(),
+            has_key: true,
+            editable: false,
+        };
+        viewport_status_item(ui, &item, &mut StatusPresentation::default());
+    }),
     element!("sphere_thumbnail", |ui, _| {
         ui.horizontal(|ui| {
             for kind in [FinishKind::Matte, FinishKind::Satin, FinishKind::Gloss, FinishKind::Metal, FinishKind::Glass] {
@@ -58,6 +95,365 @@ const ELEMENTS: &[Element] = &[
     }),
     element!("look_chain_empty", |ui, _| {
         look_chain(ui, "gallery:empty-chain", ["Face", "Body", "Component", "Material"], [None; 4], LookStep::Face);
+    }),
+    element!("navigation_regular", |ui, _| navigation_sample(ui, crate::navigation_bar::Size::Regular)),
+    element!("navigation_compact", |ui, _| navigation_sample(ui, crate::navigation_bar::Size::Compact)),
+    element!("navigation_popup", |ui, _| {
+        navigation_menu(ui, NAV_POPUP_WIDTH, |ui| {
+            navigation_menu_heading(ui, "Visual style");
+            let mut row = NavigationMenuRow::new("shaded", "Shaded", "style_shaded");
+            row.selected = true;
+            row.show(ui);
+            navigation_menu_separator(ui);
+            NavigationMenuRow::new("fit", "Fit", "fit").show(ui);
+            let mut later = NavigationMenuRow::new("translucent", "Translucent", "style_translucent");
+            later.enabled = false;
+            later.detail = Some("Later");
+            later.show(ui);
+        });
+    }),
+    element!("navigation_settings", |ui, state| {
+        settings_section(ui, "gallery_navigation", "Navigation bar", |ui| {
+            text(ui, "Choose the controls on the bar at the bottom of the 3D view.", Text::Hint("gallery_navigation"));
+            let width = ui.available_width();
+            navigation_stage(ui, width);
+            settings_card(ui, |ui| {
+                text(ui, "Fit", Text::NameCell(true));
+                text(ui, "Action · Runs once and never stays lit.", Text::Hint("gallery_navigation_action"));
+            });
+            navigation_tile(ui, "grid", "Grid", "style", false);
+            row(ui, "Position", |ui| {
+                segmented(ui, &mut state.selected, &["Left", "Center", "Right"], Default::default());
+            });
+            checkbox(ui, "Show navigation bar", &mut state.checked);
+            button(ui, "Reset to default", Button::Normal);
+        });
+    }),
+    element!("linear_color_field", |ui, _| {
+        row(ui, "Zenith", |ui| linear_color_field(ui, &mut [0.5, 0.64, 0.81], 1e6));
+    }),
+    element!("section_method", |ui, _| {
+        section_method(ui, "gallery_method", "Atmosphere", true, "GPU", |ui| {
+            text(ui, "Participating medium", Text::Inline);
+        });
+    }),
+    element!("segments_availability", |ui, state| {
+        segmented(
+            ui,
+            &mut state.selected,
+            &["World", "Colour", "Gradient", "Clear"],
+            Segments { enabled: &[false, true, false, true], compact: true, ..Default::default() },
+        );
+    }),
+    element!("read_only_text", |ui, _| {
+        read_only_text(ui, "{\n  \"samples\": 256\n}");
+    }),
+    element!("method_section_sampling", |ui, state| {
+        method_section(ui, "gallery_method", "Path tracing", "GPU", Some("Needs GPU path tracing"), |ui| {
+            checkbox(ui, "Reduce noise", &mut state.checked);
+        });
+    }),
+    element!("icon_action", |ui, _| {
+        icon_action(ui, "Duplicate", "copy", true, false);
+        icon_action(ui, "Remove", "delete", true, true);
+    }),
+    element!("aspect_grid", |ui, _| {
+        aspect_grid(
+            ui,
+            &[
+                AspectTile { id: "gallery:aspect:wide", label: "16:9", aspect: 16.0 / 9.0, selected: true },
+                AspectTile { id: "gallery:aspect:square", label: "1:1", aspect: 1.0, selected: false },
+                AspectTile { id: "gallery:aspect:tall", label: "9:16", aspect: 9.0 / 16.0, selected: false },
+            ],
+        );
+    }),
+    element!("frame_guides", |ui, _| {
+        let (viewport, _) = ui.allocate_exact_size(vec2(200.0, 150.0), egui::Sense::hover());
+        frame_guides(ui, viewport, viewport.shrink(20.0), FrameGuides { thirds: true, safe_area: true, centre_mark: true });
+    }),
+    element!("tree_row_rect", |ui, _| {
+        for (index, row) in [
+            Row { label: "Objects", ..Default::default() },
+            Row { label: "Output", subtitle: "1920 × 1080 · PNG", ..Default::default() },
+            Row { compact: true, label: "Environment", subtitle: "Studio Soft 2K", ..Default::default() },
+        ]
+        .iter()
+        .enumerate()
+        {
+            let rect = tree_row_rect(ui, row);
+            assert_eq!(tree_row(ui, ui.id().with(("tree_geometry", index)), row).rect, Some(rect));
+        }
+    }),
+    element!("editor_section", |ui, _| {
+        editor_section(ui, "edit", "Edit", true, |ui| {
+            text(ui, "Colour", Text::Inline);
+        });
+    }),
+    element!("method_section", |ui, _| {
+        method_section(ui, "gpu_section", "Glass and absorption", "GPU", Some("Needs GPU path tracing"), |ui| {
+            checkbox(ui, "Use physical glass", &mut false);
+        });
+    }),
+    element!("vector3_field", |ui, _| {
+        row(ui, "Origin", |ui| vector3_field(ui, &mut [0.0; 3], -1e6..=1e6, " mm"));
+    }),
+    element!("pending_section", |ui, _| {
+        pending_section(ui, "upcoming", "Textures", "Soon");
+    }),
+    element!("inspector_header", |ui, _| {
+        inspector_header(ui, "body", "Boss", "Body");
+    }),
+    element!("workspace_chip", |ui, _| {
+        workspace_chip(ui, "Body");
+    }),
+    element!("section_heading", |ui, _| {
+        section_heading(ui, "Edit");
+    }),
+    element!("text_button", |ui, _| {
+        text_button(ui, "Reset", true);
+    }),
+    element!("mixed_slider", |ui, _| {
+        mixed_slider(ui, &mut 0.5, 0.0..=1.0, None);
+    }),
+    element!("searchable_icon_dropdown", |ui, _| {
+        searchable_icon_dropdown(ui, "spin", "Replace…", &mut String::new(), &[]);
+    }),
+    element!("number_pair", |ui, _| {
+        let (mut w, mut h) = (1920, 1080);
+        number_pair(ui, "Size", [&mut w, &mut h], 1..=16384, 1.0, "");
+    }),
+    element!("progress_action", |ui, _| {
+        progress_action(ui, "Rendering · 62%", 0.62, "Cancel");
+    }),
+    element!("settings_choice_row", |ui, _| {
+        settings_choice_row(ui, &SettingsChoice { key: "gallery:radio_row", title: "Preview", summary: "1280 × 720", detail: "Preview size" }, true);
+    }),
+    element!("icon_label_action", |ui, _| {
+        icon_label_action(ui, "Render Image", Some("play"), true, true);
+    }),
+    element!("completion_text", |ui, _| {
+        completion_text(ui, "Render 1 · 1920 × 1080", true);
+        completion_text(ui, "No completed image", false);
+    }),
+    element!("tree_row", |ui, _| {
+        let actions = [TreeAction { icon: "plus", hover_only: false, label: "Add", reason: None, target: "gallery:tree:add" }];
+        tree_row(ui, ui.id().with("tree_plain"), &Row { label: "Objects", fold: Some(true), actions: &actions, ..Default::default() });
+        tree_row(ui, ui.id().with("tree_subtitle"), &Row { label: "Output", subtitle: "1920 × 1080 · PNG", selected: true, ..Default::default() });
+    }),
+    element!("tree_header", |ui, state| {
+        tree_header(ui, "Scene", &mut state.selected, &["By object", "By look"], "Search objects");
+        tree_row(
+            ui,
+            ui.id().with("compact_environment"),
+            &Row { compact: true, label: "Environment", icon: "environment_map", subtitle: "Studio Soft 2K", ..Default::default() },
+        );
+        tree_row(
+            ui,
+            ui.id().with("compact_object"),
+            &Row {
+                compact: true,
+                depth: 1,
+                label: "Boss",
+                swatch: Some(Tokens::get().accent),
+                eye: Some(true),
+                secondary: "Anodized Blue",
+                selected: true,
+                ..Default::default()
+            },
+        );
+    }),
+    element!("tree_row_disabled_actions", |ui, _| {
+        let actions =
+            [TreeAction { icon: "lookat", hover_only: true, label: "Solo", reason: Some("Not available yet"), target: "gallery:tree:solo" }];
+        tree_row(ui, ui.id().with("tree_actions"), &Row { label: "Light", actions: &actions, ..Default::default() });
+    }),
+    element!("selection_actions", |ui, _| {
+        let actions = [
+            StageAction { icon: Some("chain"), label: "Appearance Chain", enabled: true, primary: false, reason: None },
+            StageAction { icon: Some("reorder"), label: "Replace All", enabled: true, primary: false, reason: None },
+            StageAction { icon: Some("star"), label: "Favorite Look", enabled: true, primary: true, reason: None },
+            StageAction { icon: Some("suppress"), label: "Hide", enabled: true, primary: false, reason: None },
+        ];
+        selection_actions(ui, "Boss", &actions);
+    }),
+    element!("catalog_scope", |ui, state| {
+        catalog_scope(ui, |ui| {
+            search_field(ui, ui.id().with("catalog_search"), &mut state.value, "Search appearances");
+            segmented(
+                ui,
+                &mut state.selected,
+                &["In Design", "Library", "Recent", "★"],
+                Segments { compact: true, proportional: true, workspace_accent: true, ..Default::default() },
+            );
+            ui.horizontal(|ui| {
+                choice_chip(ui, "catalog_all", "All", true);
+                choice_chip(ui, "catalog_metal", "Metal", false);
+            });
+            catalog_footer(ui, "Click to apply · drag onto the model");
+        });
+    }),
+    element!("catalog_footer", |ui, _| {
+        catalog_footer(ui, "Click to apply · drag onto the model");
+    }),
+    element!("sphere_preview", |ui, _| {
+        sphere_preview(
+            ui,
+            "gallery:preview",
+            Sphere { color: Tokens::get().render_accent, kind: FinishKind::Satin, opacity: None },
+            "Satin",
+            ["Library", "Used by 2"],
+            |ui| searchable_icon_dropdown(ui, "spin", "Replace…", &mut String::new(), &[]),
+        );
+    }),
+    element!("sphere_preview_with_source", |ui, _| {
+        sphere_preview_with_source(
+            ui,
+            "gallery:preview-source",
+            Sphere { color: Tokens::get().render_accent, kind: FinishKind::Satin, opacity: None },
+            "Satin",
+            "Used by 2",
+            |ui| {
+                compact_dropdown_menu(ui, "gallery:source", "In Design", |ui| {
+                    text(ui, "Body look", Text::Inline);
+                })
+            },
+            |ui| text_button(ui, "Replace…", true),
+        );
+    }),
+    element!("mixed_scalar_field", |ui, _| {
+        let mut value = 0.5;
+        mixed_scalar_field(ui, &mut value, 0.0..=1.0, Some("Mixed"));
+    }),
+    element!("check_line", |ui, _s| {
+        check_line(ui, "gallery:check_ok", "Ready", false);
+    }),
+    element!("check_line_warning", |ui, _s| {
+        check_line(ui, "gallery:check_warning", "Transparency approximation", true);
+    }),
+    element!("check_line_error", |ui, _s| {
+        check_status_line(ui, "gallery:check_error", "Image size exceeds the renderer limit", CheckStatus::Error);
+    }),
+    element!("check_status_line", |ui, _| {
+        check_status_line(ui, "gallery:status_ok", "Ready", CheckStatus::Ok);
+        check_status_line(ui, "gallery:status_warning", "Transparency approximation", CheckStatus::Warning);
+        check_status_line(ui, "gallery:status_error", "Image size exceeds the renderer limit", CheckStatus::Error);
+    }),
+    element!("segmented_unavailable", |ui, s| {
+        segmented(
+            ui,
+            &mut s.selected,
+            &["Draft", "Custom"],
+            Segments { disabled_reasons: &[Some("waiting for the quality contract"), None], ..Default::default() },
+        );
+    }),
+    element!("review_and_apply", |ui, state| {
+        ReviewAndApply {
+            title: "Review native studio",
+            name: "Soft enveloping studio",
+            subtitle: "Native studio · whole scene",
+            replaces: "Lighting, environment, exposure and stage",
+            kept: "Camera, sampling, dimensions, optical bindings and geometry",
+            acknowledgement: "Confirm replacing saved state",
+            apply: "Apply studio",
+            copy: false,
+            notice: None,
+        }
+        .content(ui, &mut state.checked, |_| {});
+    }),
+    element!("catalog_footer_height", |ui, _| {
+        let expected = catalog_footer_height(ui);
+        catalog_footer(ui, "Click to apply to the selection.");
+        assert_eq!(crate::scenario::rect_of("catalog:footer").unwrap().height(), expected);
+    }),
+    element!("catalog_footer_with_tip", |ui, _| {
+        catalog_footer_with_tip(ui, "Click to apply to the selection.", "Paint and drag assignment are not supported yet.");
+    }),
+    element!("catalog_layout", |ui, _| {
+        ui.allocate_ui(egui::vec2(ui.available_width(), 300.0), |ui| {
+            let layout = CatalogLayout::new(ui, "gallery:catalog", 3);
+            layout.body(ui, |ui| {
+                for index in 0..12 {
+                    MenuItem::new("catalog_item", &format!("Surface {index}"), "grid").search_row(ui, "", "Authored map", None);
+                }
+            });
+            layout.footer(ui, |ui| {
+                catalog_footer(ui, "Select a surface to review.");
+            });
+        });
+    }),
+    element!("sphere_grid", |ui, _| {
+        let sphere = Sphere { color: Tokens::get().render_accent, kind: FinishKind::Satin, opacity: None };
+        let tiles = ["gallery:grid:a", "gallery:grid:b", "gallery:grid:c"].map(|id| SphereTile {
+            id,
+            name: "Satin",
+            sphere,
+            selected: id.ends_with('b'),
+            users: 1,
+            tip: "Satin",
+            badge: None,
+        });
+        sphere_grid(ui, &tiles);
+    }),
+    element!("sphere_grid_drag", |ui, _| {
+        let tiles = [SphereTile {
+            id: "gallery:drag-grid",
+            name: "Copper",
+            sphere: Sphere { color: Tokens::get().render_accent, kind: FinishKind::Metal, opacity: None },
+            selected: true,
+            users: 1,
+            tip: "Drag to apply",
+            badge: None,
+        }];
+        sphere_grid_drag(ui, &tiles);
+    }),
+    element!("sphere_cursor", |ui, _| {
+        let sphere = Sphere { color: Tokens::get().render_accent, kind: FinishKind::Satin, opacity: None };
+        sphere_thumbnail(ui, "gallery:cursor-sample", sphere, Tokens::get().control_height);
+        sphere_cursor(ui, sphere);
+    }),
+    element!("note_height", |ui, _| {
+        let label = "A wrapped note reserves its measured height in a bounded card.";
+        let _height = note_height(ui, label);
+        text(ui, label, Text::Note("gallery:measured-note"));
+    }),
+    element!("sphere_tile", "gallery:tile", Some("gallery:tile"), |ui, _| {
+        SphereTile {
+            id: "gallery:tile",
+            name: "Satin metal",
+            sphere: Sphere { color: Tokens::get().render_accent, kind: FinishKind::Metal, opacity: None },
+            selected: true,
+            users: 3,
+            tip: "Satin metal",
+            badge: Some("Library"),
+        }
+        .show(ui);
+    }),
+    element!("strip_toggle", |ui, _| {
+        ui.horizontal(|ui| {
+            strip_toggle(ui, true, "Hide Shots strip");
+            strip_toggle(ui, false, "Shots");
+        });
+    }),
+    element!("strip_heading", |ui, _| {
+        StripHeading::new(ui.painter(), "History").show(ui);
+    }),
+    element!("choice_chip_selected", |ui, _| {
+        choice_chip(ui, "saved", "Hero", true);
+    }),
+    element!("add_choice", |ui, _| {
+        add_choice(ui, "Save Shot");
+    }),
+    element!("compact_dropdown_menu", |ui, _| {
+        compact_dropdown_menu(ui, "gallery_strip_size", "1920 × 1080", |ui| {
+            list_picker(ui, "full_hd", "Full HD", true);
+        });
+    }),
+    element!("thumbnail_choice", |ui, _| {
+        ui.horizontal(|ui| {
+            thumbnail_choice(ui, "hero", "Hero", ThumbnailChoice { selected: true, modified: true, ..Default::default() });
+            thumbnail_choice(ui, "front", "Front", ThumbnailChoice { progress: Some(0.6), ..Default::default() });
+            add_choice(ui, "Save Shot");
+        });
     }),
     element!("settings_form", |ui, state| {
         settings_form(ui, Tokens::get().form_label_width, |ui| {
@@ -268,7 +664,7 @@ const ELEMENTS: &[Element] = &[
             let side = Tokens::get().space_24;
             for control in HistoryTransport::ALL {
                 let (rect, _) = ui.allocate_exact_size(vec2(side, side), egui::Sense::hover());
-                control.show(ui, rect);
+                control.show(ui, rect, false);
             }
         });
     }),
@@ -299,7 +695,7 @@ const ELEMENTS: &[Element] = &[
         });
     }),
     element!("file_action", |ui, _| {
-        FileView::action_tile(ui, "gallery:file:new", ui.available_width(), "new", "New design", "Millimetres · opens in Design", true);
+        FileView::action_tile(ui, "gallery:file:new", ui.available_width(), "new", "New design", "Millimeters · opens in Design", true);
     }),
     element!("file_recovery_banner", |ui, _| {
         FileView::recovery_banner(
@@ -308,7 +704,7 @@ const ELEMENTS: &[Element] = &[
             super::file_view::RecoveryMessage {
                 title: "1 design was recovered",
                 before_filename: " after SolidCraft closed unexpectedly: ",
-                filename: "enclosure-lid.solidcraft",
+                filename: "enclosure-lid.sc",
                 after_filename: ", 2 minutes ago.",
             },
             "Recover",
@@ -326,7 +722,7 @@ const ELEMENTS: &[Element] = &[
                     id,
                     RecentRow {
                         title: "Sample Plate",
-                        path: "Designs/sample-plate.solidcraft",
+                        path: "Designs/sample-plate.sc",
                         when: "Open now",
                         workspace: "Design",
                         thumbnail: None,
@@ -342,7 +738,7 @@ const ELEMENTS: &[Element] = &[
             "gallery:file:recent",
             RecentRow {
                 title: "Sample Plate",
-                path: "Designs/sample-plate.solidcraft",
+                path: "Designs/sample-plate.sc",
                 when: "Open now",
                 workspace: "Design",
                 thumbnail: None,
@@ -555,6 +951,12 @@ const ELEMENTS: &[Element] = &[
     element!("icon_label_button", |ui, _| {
         icon_label_button(ui, "Copy path", "copy", true, false);
     }),
+    element!("compact_icon_label_button", |ui, _| {
+        ui.horizontal(|ui| {
+            compact_icon_label_button(ui, "Paint", "appearance", true);
+            compact_icon_label_button(ui, "Pick Up", "select", true);
+        });
+    }),
     element!("section_count", |ui, _| {
         section_count(ui, "count", "Parameters", false, Some(5), |_| {});
     }),
@@ -674,6 +1076,11 @@ const ELEMENTS: &[Element] = &[
     element!("number_field", |ui, _| {
         number_field(ui, &mut 3_u32, 1..=200, 1.0, "");
     }),
+    element!("number_fields", |ui, _| {
+        row(ui, "Target", |ui| {
+            number_fields(ui, &mut [-18.0, 125.5, -18.0], -1e9..=1e9, 0.1, "");
+        });
+    }),
     element!("slider_percent", |ui, _| {
         slider(ui, &mut 1.0, 0.5..=2.5, Slider { step: Some(0.05), format: |v| format!("{:.0} %", v * 100.0), ..Default::default() });
     }),
@@ -714,8 +1121,20 @@ const ELEMENTS: &[Element] = &[
             });
         });
     }),
+    element!("name_list", "dialog:table:gallery_names:Bracket.solidcraft", None, |ui, _| {
+        name_list(ui, "gallery_names", &["Name", "Size", "Actions"], "No files", |list| {
+            list.row("Bracket.solidcraft", |row| {
+                row.name("Bracket.solidcraft");
+                row.cell(|ui| text(ui, "12.3 KB", Text::Inline));
+                row.cell(|ui| button(ui, "Open", Button::Small));
+            });
+        });
+    }),
     element!("list_picker", "dialog:list:gallery", Some("dialog:list:gallery"), |ui, _| {
         list_picker(ui, "gallery", "Preset", true);
+    }),
+    element!("choice_chip", "dialog:list:gallery", Some("dialog:list:gallery"), |ui, _| {
+        choice_chip(ui, "gallery", "Shot 1", true);
     }),
     element!("inline_text", "dialog:inline:Active", Some("dialog:inline:Active"), |ui, _| {
         text(ui, "Active", Text::Inline);
@@ -734,11 +1153,20 @@ const ELEMENTS: &[Element] = &[
     element!("search_field", |ui, s| {
         search_field(ui, ui.id().with("search"), &mut s.value, "Search");
     }),
+    element!("menu_filter", |ui, s| {
+        menu_filter(ui, ui.id().with("menu_filter"), &mut s.value, "Filter");
+    }),
     element!("cell_editor", |ui, s| {
         cell_editor(ui, ui.id().with("cell"), &mut s.value, "Expression", true);
     }),
     element!("color_field", |ui, _| {
         color_field(ui, &mut [120, 150, 180]);
+    }),
+    element!("color_field_with_opacity", |ui, _| {
+        color_field_with_opacity(ui, &mut [120, 150, 180], &mut 0.5);
+    }),
+    element!("mixed_color_field", |ui, _| {
+        mixed_color_field(ui, &mut [120, 150, 180], Some(&mut 0.5), Some("Mixed"));
     }),
     element!("slider", |ui, _| {
         slider(ui, &mut 0.5, 0.0..=1.0, Default::default());
@@ -748,6 +1176,9 @@ const ELEMENTS: &[Element] = &[
     }),
     element!("scalar_field", |ui, _| {
         scalar_field(ui, &mut 0.5, 0.0..=1.0);
+    }),
+    element!("track_number", |ui, _| {
+        track_number(ui, &mut 1350.0, 0.5, 1);
     }),
     element!("length_field", |ui, _| {
         length_field(ui, &mut 12.7, "in", 2);
@@ -897,6 +1328,11 @@ const ELEMENTS: &[Element] = &[
             dropdown(ui, "gallery", &mut s.selected, &["One", "Two"]);
         });
     }),
+    element!("dropdown_picked", "dialog:row:Gallery", Some("dialog:Gallery"), |ui, s| {
+        row(ui, "Gallery", |ui| {
+            dropdown_picked(ui, "gallery_picked", &mut s.selected, &["One", "Two"]);
+        });
+    }),
     element!("selection_field", "dialog:row:Gallery", Some("dialog:Gallery"), |ui, _| {
         row(ui, "Gallery", |ui| {
             selection_field(ui, "Point 1", Selection { active: true, filled: true });
@@ -982,6 +1418,21 @@ const ELEMENTS: &[Element] = &[
     element!("wide_primary_button", |ui, _| {
         wide_primary_button(ui, "Finish Sketch");
     }),
+    element!("persistent_button_shape", "gallery:persistent_button", Some("gallery:persistent_button"), |ui, _| {
+        let t = Tokens::get();
+        let (rect, response) = ui.allocate_exact_size(vec2(t.form_button_height * 3.0, t.form_button_height * 2.0), egui::Sense::click());
+        ui.painter().add(persistent_button_shape(ui, &response, rect));
+        ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, "Selected", crate::fonts::semibold(t.font_label), t.selected_ink);
+        scenario::publish_target("gallery:persistent_button", rect);
+    }),
+    element!("native_button_focus", "gallery:native_button_focus", Some("gallery:native_button_focus"), |ui, _| {
+        let t = Tokens::get();
+        let (rect, response) = ui.allocate_exact_size(vec2(t.form_button_height * 3.0, t.form_button_height), egui::Sense::click());
+        response.request_focus();
+        ui.painter().rect_filled(rect, t.radius_sm, t.control_fill);
+        ui.painter().add(native_button_focus(ui, &response, rect));
+        scenario::publish_target("gallery:native_button_focus", rect);
+    }),
     element!("button", "dialog:row:Gallery", Some("dialog:button:Gallery:Add"), |ui, _| {
         row(ui, "Gallery", |ui| {
             button(ui, "Add", Button::Normal);
@@ -1027,6 +1478,10 @@ const ELEMENTS: &[Element] = &[
         let (rect, _) = ui.allocate_exact_size(vec2(row_height(), row_height()), egui::Sense::hover());
         icon_button_at(ui, rect, "close", "Close");
     }),
+    element!("mirrored_icon_button_at", |ui, _| {
+        let (rect, _) = ui.allocate_exact_size(vec2(row_height(), row_height()), egui::Sense::hover());
+        mirrored_icon_button_at(ui, rect, "chevron_right", "Move left");
+    }),
     element!("quiet_icon_button_at", |ui, _| {
         let (rect, _) = ui.allocate_exact_size(vec2(row_height(), row_height()), egui::Sense::hover());
         quiet_icon_button_at(ui, rect, "plus", "Add shortcut");
@@ -1068,6 +1523,15 @@ const ELEMENTS: &[Element] = &[
     element!("caption", "dialog:caption:Gallery", None, |ui, _| {
         caption(ui, "Gallery", "Construction");
     }),
+    element!("status_line", "dialog:status:needs a joint that turns and one that slides", None, |ui, _| {
+        status_line(ui, "needs a joint that turns and one that slides", StatusTone::Dim);
+    }),
+    element!("status_line_warning", |ui, _| {
+        status_line(ui, "Pick two different components before creating a joint.", StatusTone::Warning);
+    }),
+    element!("status_line_error", |ui, _| {
+        status_line(ui, "The interference check could not finish. Check the selected bodies.", StatusTone::Error);
+    }),
     element!("figure_rows", "dialog:figure:gallery", Some("dialog:Gallery"), |ui, s| {
         let Sample { value, second, .. } = s;
         figure_rows(ui, "gallery", &mut [("Gallery", value), ("Second", second)], |painter, rect, slots| {
@@ -1082,6 +1546,9 @@ const ELEMENTS: &[Element] = &[
     }),
     element!("section", "dialog:section:Advanced", Some("dialog:section:Advanced"), |ui, _| {
         section(ui, "gallery", "Advanced", false, |_| {});
+    }),
+    element!("search_fold", "prefs:search:shortcuts", Some("prefs:search:shortcuts"), |ui, _| {
+        search_fold(ui, "Shortcuts", 3, |_| {});
     }),
     element!("divider", "dialog:divider:gallery", None, |ui, _| {
         divider(ui, "gallery");
@@ -1104,7 +1571,10 @@ const ELEMENTS: &[Element] = &[
 fn example(ui: &mut Ui, element: &Element) -> (&'static str, Option<&'static str>) {
     let mut sample = Sample { value: "12 mm".into(), second: "25 mm".into(), selected: 0, checked: true };
     let rect = ui.scope(|ui| (element.draw)(ui, &mut sample)).response.rect;
-    if matches!(element.name, "menu" | "menu_submenu" | "rename_menu" | "workspace_menu" | "command_search" | "history_icons" | "history_names") {
+    if matches!(
+        element.name,
+        "menu" | "menu_submenu" | "rename_menu" | "workspace_menu" | "command_search" | "history_icons" | "history_names" | "navigation_popup"
+    ) {
         // A popup's elevation is painted outside its layout rectangle. Reserve those
         // actual shadow bounds as part of the gallery sample, keeping the paint guard strict.
         ui.expand_to_include_rect(rect + Menu::frame().shadow.margin());
@@ -1437,6 +1907,7 @@ fn gallery_covers_every_inline_element() {
         "color.rs",
         "disclosure.rs",
         "fields.rs",
+        "framing.rs",
         "layout.rs",
         "look_chain.rs",
         "menu.rs",
@@ -1446,6 +1917,7 @@ fn gallery_covers_every_inline_element() {
         "sphere.rs",
         "status.rs",
         "table.rs",
+        "tree.rs",
     ] {
         let source = std::fs::read_to_string(root.join(file)).unwrap();
         let ast = syn::parse_file(&source).unwrap();
@@ -1767,6 +2239,7 @@ fn confirm_radial_and_history_rows_keep_multitone_artwork() {
                             warning: false,
                             reference: false,
                             accent: crate::theme::TabAccent::for_tab(&Tokens::get(), "MODEL"),
+                            ink: None,
                         }
                         .paint(
                             ui.painter(),
@@ -1943,7 +2416,7 @@ fn file_view_application_evidence_in_both_themes_and_widths() {
     std::fs::create_dir_all(&output_dir).unwrap();
     let fixture_dir = std::env::temp_dir().join(format!("solidcraft-file-evidence-{}", std::process::id()));
     std::fs::create_dir_all(&fixture_dir).unwrap();
-    let path = fixture_dir.join("sample-plate.solidcraft");
+    let path = fixture_dir.join("sample-plate.sc");
     let fixture = path.to_string_lossy().to_string();
     let mut sample = crate::test_support::sample_app();
     sample.session.execute("file.save_as", &serde_json::json!({"path":fixture})).unwrap();
@@ -1962,7 +2435,7 @@ fn file_view_application_evidence_in_both_themes_and_widths() {
             app.ui.dark = dark;
             app.recoverable.push(solidcraft_engine::recovery::Entry {
                 id: "public-evidence".into(),
-                path: Some("enclosure-lid.solidcraft".into()),
+                path: Some("enclosure-lid.sc".into()),
                 name: "Enclosure lid".into(),
                 saved_at: web_time::SystemTime::now().duration_since(web_time::UNIX_EPOCH).unwrap().as_secs().saturating_sub(120),
                 features: 14,
@@ -2032,4 +2505,21 @@ fn material_widgets_board_in_both_themes() {
         }
     }
     crate::theme::set_dark(previous);
+}
+
+#[test]
+fn tree_icon_actions_keep_repeated_light_rows_independent() {
+    let ctx = crate::fonts::test_context();
+    let mut ids = std::collections::HashSet::new();
+    super::test_support::frame(&ctx, vec![], |ui| {
+        for index in 0..3 {
+            let target = format!("light:{index}:visibility");
+            let actions = [TreeAction { icon: "eye", hover_only: false, label: "Hide", reason: Some("Not available yet"), target: &target }];
+            let row = tree_row(ui, ui.id().with(index), &Row { compact: true, label: "Directional", actions: &actions, ..Default::default() });
+            for action in row.actions {
+                assert!(ids.insert(action.id), "each light action must have its own widget identity");
+            }
+        }
+    });
+    assert_eq!(ids.len(), 3);
 }

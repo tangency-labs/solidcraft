@@ -3,6 +3,7 @@
 //! or a session: each agent found is asked for `--version` (with a time limit), and whether it
 //! looks logged in comes only from whether its own credentials file exists.
 
+use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
@@ -200,13 +201,20 @@ fn home() -> Option<PathBuf> {
     std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" }).map(PathBuf::from).filter(|p| p.is_absolute())
 }
 
-/// PATH, then the usual places npm, Homebrew, nvm, Volta, bun, pipx and Grok put commands.
+/// PATH, then the usual places npm, Homebrew, nvm, Volta, bun, pipx and Grok put commands, and on
+/// Windows Node's own install folders: a launcher can start SolidCraft with a PATH that lacks
+/// them, and an npm agent's `.cmd` shim then can't find `node` (#9297).
 pub fn search_dirs() -> Vec<PathBuf> {
-    let mut dirs: Vec<PathBuf> = std::env::var_os("PATH").map(|p| std::env::split_paths(&p).collect()).unwrap_or_default();
-    if let Some(prefix) = std::env::var_os("NPM_CONFIG_PREFIX").map(PathBuf::from) {
-        dirs.push(if cfg!(windows) { prefix.clone() } else { prefix.join("bin") });
+    search_dirs_in(&|name| std::env::var_os(name), cfg!(windows))
+}
+
+/// [`search_dirs`] in the environment `var` reads, on Windows or not.
+fn search_dirs_in(var: &dyn Fn(&str) -> Option<OsString>, windows: bool) -> Vec<PathBuf> {
+    let mut dirs: Vec<PathBuf> = var("PATH").map(|p| std::env::split_paths(&p).collect()).unwrap_or_default();
+    if let Some(prefix) = var("NPM_CONFIG_PREFIX").map(PathBuf::from) {
+        dirs.push(if windows { prefix.clone() } else { prefix.join("bin") });
     }
-    if let Some(h) = home() {
+    if let Some(h) = var(if windows { "USERPROFILE" } else { "HOME" }).map(PathBuf::from).filter(|p| p.is_absolute()) {
         for d in [".local/bin", ".npm-global/bin", ".npm-packages/bin", ".volta/bin", ".bun/bin", ".cargo/bin", ".grok/bin", "bin"] {
             dirs.push(h.join(d));
         }
@@ -217,10 +225,15 @@ pub fn search_dirs() -> Vec<PathBuf> {
             dirs.extend(v.into_iter().rev());
         }
     }
-    if cfg!(windows) {
-        if let Some(a) = std::env::var_os("APPDATA") {
+    if windows {
+        if let Some(a) = var("APPDATA") {
             dirs.push(PathBuf::from(a).join("npm"));
         }
+        // Node's installers (64-bit and 32-bit), and nvm-windows' link to the version in use.
+        for program_files in ["ProgramFiles", "ProgramFiles(x86)"] {
+            dirs.extend(var(program_files).map(|d| PathBuf::from(d).join("nodejs")));
+        }
+        dirs.extend(var("NVM_SYMLINK").map(PathBuf::from));
     } else {
         for d in ["/opt/homebrew/bin", "/usr/local/bin", "/home/linuxbrew/.linuxbrew/bin", "/usr/bin"] {
             dirs.push(PathBuf::from(d));
@@ -558,6 +571,42 @@ mod tests {
             assert!(!k.programs.is_empty() && !k.install.is_empty(), "{}", k.id);
         }
         assert_eq!(KNOWN.first().map(|k| k.id), Some("claude"), "the Claude Code adapter is the default");
+    }
+
+    /// A launcher can start SolidCraft with a PATH that lacks Node (#9297). On Windows, Node's
+    /// install folders are searched after it, so `node` is found, and an agent started with these
+    /// folders as its PATH (`command_for`) finds it too.
+    #[test]
+    fn on_windows_nodes_install_folders_are_searched() {
+        let root = std::env::temp_dir().join(format!("sc-agent-node-{}", std::process::id()));
+        let system = root.join("Windows");
+        let program_files = root.join("Program Files");
+        let x86 = root.join("Program Files (x86)");
+        let nvm = root.join("nvm4w").join("nodejs");
+        let env = |name: &str| -> Option<OsString> {
+            match name {
+                "PATH" => Some(system.clone().into()),
+                "ProgramFiles" => Some(program_files.clone().into()),
+                "ProgramFiles(x86)" => Some(x86.clone().into()),
+                "NVM_SYMLINK" => Some(nvm.clone().into()),
+                _ => None,
+            }
+        };
+        let dirs = search_dirs_in(&env, true);
+        assert_eq!(dirs.first(), Some(&system), "the PATH SolidCraft was given comes first");
+        for node in [program_files.join("nodejs"), x86.join("nodejs"), nvm.clone()] {
+            assert!(dirs.contains(&node), "{} in {dirs:?}", node.display());
+        }
+        std::fs::create_dir_all(program_files.join("nodejs")).unwrap();
+        for name in ["node.exe", "node"] {
+            std::fs::write(program_files.join("nodejs").join(name), "").unwrap();
+        }
+        assert_eq!(find_in("node", std::slice::from_ref(&system)), None, "not on the PATH the launcher gave");
+        assert!(find_in("node", &dirs).is_some_and(|p| p.starts_with(program_files.join("nodejs"))), "{dirs:?}");
+        // Nothing is made up where the variables are missing, and elsewhere they mean nothing.
+        assert_eq!(search_dirs_in(&|name| (name == "PATH").then(|| system.clone().into()), true), std::slice::from_ref(&system));
+        assert!(!search_dirs_in(&env, false).iter().any(|d| d.ends_with("nodejs")));
+        let _ = std::fs::remove_dir_all(root);
     }
 
     /// Finder's PATH lacks user-installed runtimes. Discovery, the version probe and a live

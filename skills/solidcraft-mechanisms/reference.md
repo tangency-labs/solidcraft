@@ -138,7 +138,7 @@ The same pattern moved the solar wings of the SELENE rover (`Rover-v7.solidcraft
 | `a joint needs two different occurrences` | Both origins found the same part. Give `occurrence` on both. If the parts are bodies of one component (an imported STEP file often brings them so), run `component.from_bodies {"bodies": [...]}` first. |
 | "unknown command" for `file.open` | Open a design with the `open` tool or `doc.open {path}`. |
 | Rigid hoses, cables or springs drift as the mechanism moves | Bodies don't bend. Hide them with `browser.visibility`, or model them per link. |
-| `solidcraft-cli snapshot SCRIPT --in design` runs on an empty design | `snapshot` ignores `--in`. Run `solidcraft-cli run SCRIPT --in design --save out.solidcraft` first. |
+| `solidcraft-cli snapshot SCRIPT --in design` runs on an empty design | `snapshot` ignores `--in`. Run `solidcraft-cli run SCRIPT --in design --save out.sc` first. |
 | A URDF export lacks a joint | `export` to `.urdf` leaves out each joint that closes a loop, with a warning, because URDF is a tree. |
 
 ## Reply cost

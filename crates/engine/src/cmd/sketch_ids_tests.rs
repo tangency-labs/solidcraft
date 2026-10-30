@@ -328,3 +328,28 @@ fn commands_that_add_nothing_report_empty_lists() {
     let r = run(&mut s, "sketch.move_point", json!({"point": strs(&c["points"])[1], "to": [12, 6]}));
     assert_eq!(r["created"], json!({"points": [], "curves": [], "constraints": [], "dimensions": []}), "{r}");
 }
+
+/// Conic curves take the curve prefix `n`, not the constraints' `k` (#6173): however a conic
+/// is created — drawn, a Move/Copy copy, a pattern copy — its id still says it is a curve.
+#[test]
+fn conic_curves_take_the_n_prefix_not_the_constraints_k() {
+    let mut s = new_sketch();
+    let drawn = run(&mut s, "sketch.conic", json!({"start": [80, 490], "end": [100, 490], "apex": [90, 505], "rho": 0.5}));
+    let conic = strs(&drawn["curves"])[0].clone();
+    assert_eq!(conic, "n1", "a drawn conic starts its own counter");
+
+    // A constraint keeps its prefix, and it no longer shares a counter with conics.
+    run(&mut s, "sketch.constraint.fix", json!({"entity": format!("{conic}.start")}));
+    let sk = sketch(&s);
+    assert!(sk.constraints.iter().any(|k| k.id == "k1"), "constraint ids: {:?}", sk.constraints.iter().map(|k| &k.id).collect::<Vec<_>>());
+
+    let copy = run(&mut s, "sketch.move", json!({"entities": [conic], "translate": [40, 0], "copy": true}));
+    assert_eq!(strs(&copy["curves"]), vec!["n2".to_string()], "a Move/Copy copy continues the conic counter");
+
+    let pattern = run(&mut s, "sketch.pattern.rectangular", json!({"entities": [conic], "count": 2, "spacing": 40}));
+    let made: Vec<String> = strs(&pattern["curves"]);
+    assert!(!made.is_empty(), "{pattern}");
+    for id in made {
+        assert!(id.starts_with('n'), "a pattern copy keeps the conic prefix: {id}");
+    }
+}

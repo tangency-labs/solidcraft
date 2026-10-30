@@ -105,6 +105,7 @@ fn ok(h: &mut Harness) {
 #[test]
 fn edit_starts_from_the_section_as_it_was_left() {
     let mut h = harness();
+    h.app.preferences.viewport_section_status = false;
     h.app.run("solid.box", json!({"length":40,"width":30,"height":20})).unwrap();
     h.app.session.selection = vec![solidcraft_engine::Sel::Plane { name: "XY".into() }];
     h.app.start("inspect.section");
@@ -179,6 +180,7 @@ fn the_hatch_option_carries_through_the_section() {
 #[test]
 fn ok_with_no_plane_picked_turns_the_section_off() {
     let mut h = harness();
+    h.app.preferences.viewport_section_status = false;
     h.app.run("solid.box", json!({"length":40,"width":30,"height":20})).unwrap();
     h.app.run("inspect.section", json!({"plane": "XZ", "offset": 10})).unwrap();
     h.app.session.selection.clear();
@@ -201,4 +203,63 @@ fn ok_with_no_plane_picked_turns_the_section_off() {
     h.step(&json!({"widget":"OK"})).unwrap();
     h.frames(3);
     assert_eq!(h.app.dialog.as_ref().and_then(|d| d.error.as_deref()), Some("select a plane or planar face first"));
+}
+
+#[test]
+fn editing_programmatic_sections_keeps_actual_plane_flip_hatch_and_cancel_then_moves_it() {
+    for params in [
+        json!({"plane":"XY","at":-25.4,"flip":true,"hatch":false}),
+        json!({"plane":{"origin":[7,-12,4],"normal":[-3,-4,0]},"offset":5,"hatch":false}),
+        json!({"plane":{"origin":[7,-12,4],"normal":[0,0,-1]},"offset":-5,"flip":true}),
+    ] {
+        let mut h = harness();
+        h.app.run("inspect.section", params).unwrap();
+        assert!(h.app.dialog.is_none(), "programmatic commands never open a form");
+        let cut = h.app.session.section.unwrap();
+        let hatch = h.app.session.section_hatch;
+        crate::dialogs::edit_section(&mut h.app);
+        let d = h.app.dialog.as_ref().unwrap();
+        let cmds = crate::dialogs::apply_commands(&h.app, d).unwrap();
+        let mut scratch = h.app.session.scratch();
+        scratch.execute(&cmds[0].0, &cmds[0].1).unwrap();
+        let preview = scratch.section.unwrap();
+        assert!((preview.0 - cut.0).len() < 1e-9 && (preview.1 - cut.1).len() < 1e-9);
+        assert_eq!(scratch.section_hatch, hatch);
+        assert_eq!(h.app.session.section, Some(cut), "edit intent cannot toggle the active cut off");
+        crate::dialogs::cancel(&mut h.app);
+        assert_eq!(h.app.session.section, Some(cut));
+        crate::dialogs::edit_section(&mut h.app);
+        if let Some(crate::dialogs::Kind::Section { offset, .. }) = h.app.dialog.as_mut().map(|d| &mut d.kind) {
+            *offset = "30 mm".into();
+        }
+        let cmds = crate::dialogs::apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
+        h.app.run(&cmds[0].0, cmds[0].1.clone()).unwrap();
+        assert_ne!(h.app.session.section.unwrap().0, cut.0);
+        assert!(
+            (h.app.session.section.unwrap().1 - cut.1).len() < 1e-12,
+            "moving the plane retains its clipping direction within normalisation precision"
+        );
+    }
+}
+
+#[test]
+fn section_ribbon_toggle_and_setting_edit_have_separate_intent_and_compatibility() {
+    let mut h = harness();
+    h.app.run("inspect.zebra", json!({})).unwrap();
+    h.app.run("inspect.section", json!({"plane":"YZ","offset":3})).unwrap();
+    h.frames(3);
+    let effect = h.app.session.status_items().into_iter().find(|e| e.command == "inspect.section").unwrap();
+    let item = crate::viewport_status::presentation(&h.app, &effect).unwrap();
+    h.step(&json!({"click":{"handle":format!("viewport_status:{}:setting",item.id)}})).unwrap();
+    assert!(h.app.dialog.is_some() && h.app.session.section.is_some());
+    crate::dialogs::cancel(&mut h.app);
+    h.app.start("inspect.section");
+    assert!(h.app.dialog.is_none() && h.app.session.section.is_none());
+    assert!(h.app.session.analysis.is_some());
+    h.app.run("inspect.section", json!({"plane":"XY"})).unwrap();
+    h.app.preferences.viewport_section_status = false;
+    let cut = h.app.session.section;
+    h.app.start("inspect.section");
+    assert!(h.app.dialog.is_some());
+    assert_eq!(h.app.session.section, cut);
 }

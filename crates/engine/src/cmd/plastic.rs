@@ -120,7 +120,7 @@ fn manage_rules(s: &mut Session, p: &Value) -> Result<Value> {
 
 fn assign_rule(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "plastic.assign_rule";
-    let bodies = string_list(p, "bodies");
+    let bodies = string_list(cmd, p, "bodies")?;
     if bodies.is_empty() || bodies.len() > 10_000 {
         return Err(bad(cmd, "`bodies` must list bodies"));
     }

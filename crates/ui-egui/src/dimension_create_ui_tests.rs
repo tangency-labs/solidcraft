@@ -224,7 +224,7 @@ fn edge_and_endpoint_creation_commit_once_and_undo_restores_exact_design() {
         ([20., 0.], vec![[10., 0.]], [10., 5.]),
         ([20., 0.], vec![[0., 0.], [20., 0.]], [10., 5.]),
         ([0., 20.], vec![[0., 0.], [0., 20.]], [-5., 10.]),
-        ([12., 16.], vec![[0., 0.], [12., 16.]], [-5., 12.]),
+        ([12., 16.], vec![[0., 0.], [12., 16.]], [10., 4.]),
     ] {
         let mut h = line(end);
         let original = h.app.session.doc.to_json();
@@ -515,13 +515,15 @@ fn inch_dimension_entry_survives_unit_changes_undo_and_reopen() {
     crate::dim_view::cancel();
 }
 
-/// Placing the dimension of two unaligned points above them gives the horizontal distance,
-/// beside them the vertical one, and across from them the distance between them (#257).
+/// Placing the dimension of two unaligned points above or below the box they span gives the
+/// horizontal distance, beside it the vertical one, and inside it or in its outer corners the
+/// distance between them (#257). Just above the middle of the box, and just beside it, are
+/// horizontal and vertical too, not only past the ends (#7295).
 #[test]
 fn placing_a_two_point_dimension_picks_horizontal_vertical_or_aligned() {
     // What each placement fixes at 10 mm: the X span, the Y span, or the length.
     let spans = |a: solidcraft_engine::geom::Vec2, b: solidcraft_engine::geom::Vec2| [(b.x - a.x).abs(), (b.y - a.y).abs(), a.dist(b)];
-    for (at, measured) in [([6., 25.], 0), ([-10., 1.], 1), ([-5., 12.], 2)] {
+    for (at, measured) in [([6., 25.], 0), ([2., 20.], 0), ([-10., 1.], 1), ([15., 4.], 1), ([10., 4.], 2), ([-6., 22.], 2)] {
         let mut h = line([12., 16.]);
         place(&mut h, &[[0., 0.], [12., 16.]], at);
         type_value(&mut h, "10 mm");
@@ -786,8 +788,8 @@ fn type_first_keeps_the_place_first_flow() {
     crate::dim_view::cancel();
 }
 
-/// Type-first, the text follows the pointer: moving it from across the picks (the distance
-/// between them) to above or beside them switches to the horizontal or vertical distance and
+/// Type-first, the text follows the pointer: moving it from inside the box the picks span (the
+/// distance between them) to above or beside it switches to the horizontal or vertical distance and
 /// back. Until something is typed the value follows the dimension, so the preview measures the
 /// picked points where they are (it neither moves nor scales them) and Enter keeps them there.
 #[test]
@@ -795,8 +797,8 @@ fn type_first_switching_between_aligned_horizontal_and_vertical_keeps_the_picked
     use solidcraft_engine::sketch::ConstraintKind as K;
     let end = [12., 16.];
     let mid = [6., 8.];
-    // Across from the picks, above them, beside them.
-    let (across, above, beside) = ([-5., 12.], [6., 25.], [-10., 1.]);
+    // Inside the picks' box, above it (over its middle), beside it.
+    let (across, above, beside) = ([10., 4.], [3., 20.], [-10., 1.]);
     type Kind = fn(&K) -> bool;
     let aligned: Kind = |k| matches!(k, K::Distance { .. } | K::Length { .. });
     let horizontal: Kind = |k| matches!(k, K::DistanceX { .. });
@@ -1270,4 +1272,80 @@ fn a_shown_dimension_that_breaks_a_later_feature_reports_it_and_undoes() {
     h.settle();
     assert_eq!(h.app.session.doc.to_json(), before);
     assert!(!failed(&h), "undo brings the fillet back");
+}
+
+/// Editing an existing dimension to `name = value` names its own parameter (#4071): `d1`
+/// becomes `width`, set to the value, in one undo step, and opening it again shows `width`'s
+/// value as its expression. No other parameter is made.
+#[test]
+fn editing_a_dimension_to_a_definition_names_its_parameter() {
+    let mut h = line([25., 0.]);
+    place(&mut h, &[[12.5, 0.]], [12.5, 8.]);
+    type_value(&mut h, "25");
+    h.step(&json!({"key":"Enter"})).unwrap();
+    h.settle();
+    let params = h.app.session.doc.params.len();
+    let undo = h.app.session.undo.len();
+    crate::dim_view::edit_param(&h.app, "d1");
+    h.settle();
+    type_value(&mut h, "width = 30");
+    h.step(&json!({"key":"Enter"})).unwrap();
+    let doc = &h.app.session.doc;
+    assert!(doc.param("d1").is_none(), "{:?}", h.app.status);
+    assert_eq!(doc.param("width").map(|p| p.expr.as_str()), Some("30"));
+    assert_eq!(doc.params.len(), params, "renamed, not added");
+    assert_eq!(h.app.session.undo.len(), undo + 1, "one undo step");
+    assert!(h.app.status.as_ref().is_some_and(|s| !s.2 && s.0.contains("`width`")), "{:?}", h.app.status);
+    let sk = doc.sketch(h.app.session.active_sketch.unwrap()).unwrap();
+    assert!(sk.constraints.iter().any(|c| c.param.as_deref() == Some("width") && c.kind.value().is_some_and(|v| (v - 30.0).abs() < 1e-6)));
+}
+
+/// The status line after a dimension is applied reads in the interface language (#8863): a
+/// new parameter (`w = 40/2`), a plain value, a renamed parameter and a driven dimension, with
+/// the parameter name kept as typed.
+#[test]
+fn the_status_after_a_dimension_is_in_the_interface_language() {
+    let pl = crate::i18n::Locale::for_language("pl");
+    let en = crate::i18n::Locale::for_language("en");
+    let status = |h: &Harness| h.app.status.as_ref().map(|s| (s.0.clone(), s.2));
+    let polish = |mut h: Harness| {
+        h.app.preferences.language = "pl".into();
+        h.frames(2);
+        h
+    };
+    // A new parameter.
+    let mut h = polish(line([25., 0.]));
+    place(&mut h, &[[12.5, 0.]], [12.5, 8.]);
+    type_value(&mut h, "w = 40/2");
+    h.step(&json!({"key":"Enter"})).unwrap();
+    assert!(h.app.session.doc.param("w").is_some(), "{:?}", h.app.status);
+    assert_eq!(status(&h), Some(("Wymiar zastosowany; zdefiniowano parametr `w`".to_string(), false)));
+    // A plain value, then the same dimension renamed to `width = 30`.
+    let mut h = polish(line([25., 0.]));
+    place(&mut h, &[[12.5, 0.]], [12.5, 8.]);
+    type_value(&mut h, "25");
+    h.step(&json!({"key":"Enter"})).unwrap();
+    assert_eq!(status(&h), Some((pl.text("sketch.dimension_applied").to_string(), false)));
+    h.settle();
+    crate::dim_view::edit_param(&h.app, "d1");
+    h.settle();
+    type_value(&mut h, "width = 30");
+    h.step(&json!({"key":"Enter"})).unwrap();
+    assert!(h.app.session.doc.param("width").is_some(), "{:?}", h.app.status);
+    assert_eq!(status(&h), Some((pl.format("sketch.dimension_applied_renamed", &[("name", "width")]), false)));
+    // A dimension the sketch already determines is added as a driven one.
+    let mut h = polish(line([20., 0.]));
+    h.app.run("sketch.dimension", json!({"entities":["l1"],"value":"20 mm"})).unwrap();
+    h.settle();
+    h.step(&json!({"start":"sketch.dimension"})).unwrap();
+    h.step(&json!({"click":{"world":[10,0,0]}})).unwrap();
+    h.step(&json!({"move":{"world":[10,6,0]}})).unwrap();
+    h.settle();
+    h.step(&json!({"click":{"world":[10,6,0]}})).unwrap();
+    assert!(!crate::dim_view::editing(), "a driven dimension has no value to edit");
+    assert_eq!(status(&h), Some((pl.text("sketch.dimension_added_driven").to_string(), false)));
+    for id in ["sketch.dimension_applied", "sketch.dimension_applied_defined", "sketch.dimension_applied_renamed", "sketch.dimension_added_driven"] {
+        assert_ne!(pl.text(id), en.text(id), "{id}: the Polish catalog translates it");
+    }
+    crate::dim_view::cancel();
 }

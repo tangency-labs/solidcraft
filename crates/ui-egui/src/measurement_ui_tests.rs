@@ -77,7 +77,7 @@ fn measurement_axis_distances_follow_the_upstream_centre_min_and_max_choices() {
     assert!(measured["distance_mm"].as_f64().unwrap() < 50. && measured["max"].as_f64().unwrap() > 50.);
 
     for (label, distance, from, to) in [
-        ("Centre to centre", "center_distance", "center_from", "center_to"),
+        ("Center to center", "center_distance", "center_from", "center_to"),
         ("Min", "distance_mm", "from", "to"),
         ("Max", "max", "max_from", "max_to"),
     ] {
@@ -177,6 +177,37 @@ fn measurement_axis_distances_can_be_disabled_saved_and_restored_in_preferences(
     h.call("ui.prefs", json!({"measure_axis_distances":false}));
     h.call("ui.prefs", json!({"button":"cancel"}));
     assert!(h.app.preferences.measure_axis_distances, "Cancel restores the last Apply");
+}
+
+/// The view numbers the picks as the panel does (#6020): "1" beside the first pick's end of the
+/// line, "2" beside the second's, in every view and whichever way round they were picked, clear
+/// of the distance label.
+#[test]
+fn the_view_numbers_the_two_picks() {
+    for reverse in [false, true] {
+        let (a, b) = ([0., 0., 0.], [-3., 4., -12.]);
+        let (first, second) = if reverse { (b, a) } else { (a, b) };
+        let mut h = vertex_measurement(first, second);
+        for view in ["iso", "top", "front", "right"] {
+            h.call("ui.view", json!({"view": view}));
+            let texts = painted_text(&mut h);
+            assert!(texts.iter().any(|t| t == "1") && texts.iter().any(|t| t == "2"), "{view}: {texts:?}");
+            let mut at = |p: [f64; 3]| {
+                let r = h.call("ui.at", json!({ "world": p }))["result"].clone();
+                egui::pos2(r[0].as_f64().unwrap() as f32, r[1].as_f64().unwrap() as f32)
+            };
+            let (pa, pb) = (at(first), at(second));
+            let label = crate::scenario::rect_of("measure:label").unwrap();
+            for (n, own, other) in [("1", pa, pb), ("2", pb, pa)] {
+                let r = crate::scenario::rect_of(&format!("measure:item:{n}")).unwrap();
+                assert!(r.center().distance(own) < r.center().distance(other), "{view}, reverse={reverse}: {n} beside its own pick");
+                assert!(r.center().distance(own) < 40.0, "{view}: {n} is {} from its pick", r.center().distance(own));
+                assert!(!r.intersects(label), "{view}: {n} covers the distance");
+            }
+        }
+        h.call("ui.key", json!({"key": "Escape"}));
+        assert!(crate::scenario::handles("measure:item:1").is_empty(), "the numbers go with the measure");
+    }
 }
 
 #[test]

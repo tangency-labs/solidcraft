@@ -188,7 +188,7 @@ through nvm or `~/.local/bin` can therefore work in a terminal while SolidCraft 
 that no agent was found. For Claude Code and its ACP adapter, run:
 
 ```sh
-flatpak override --user ai.storyteller.solidcraft --filesystem=~/.nvm:ro --filesystem=~/.local/bin:ro --filesystem=~/.local/share/claude:ro --filesystem=~/.claude --filesystem=~/.claude.json --share=network
+flatpak override --user io.tangencylabs.solidcraft --filesystem=~/.nvm:ro --filesystem=~/.local/bin:ro --filesystem=~/.local/share/claude:ro --filesystem=~/.claude --filesystem=~/.claude.json --share=network
 ```
 
 These permissions apply to SolidCraft for your user account:
@@ -224,7 +224,13 @@ Grok Build also supports `XAI_API_KEY` for users who choose API authentication.
 - **Custom command:** any other program that speaks ACP on stdin and stdout, such as
   `my-agent --acp`. SolidCraft starts it directly, not through a shell.
 - **OpenAI-compatible API:** a preset (Ollama `http://localhost:11434/v1`, LM Studio
-  `http://localhost:1234/v1`, OpenAI, Mammouth AI `https://api.mammouth.ai/v1`) or a custom URL, the model name, and an optional key.
+  `http://localhost:1234/v1`, OpenAI, Mammouth AI `https://api.mammouth.ai/v1`, OpenCode Go `https://opencode.ai/zen/go/v1`) or a custom URL, the model name, and an optional key.
+  OpenCode Go models are routed to their endpoint by themselves (`/responses`,
+  `/messages` or Gemini for those families, `/chat/completions` for the rest),
+  each conversation request carrying the session header Go asks for, so one
+  preset covers every model.
+  A model the list does not know is retried on the next protocol when Go names
+  the mismatch.
 - **Anthropic-compatible API:** a preset (Anthropic) or a custom URL, for an endpoint that
   speaks the Anthropic Messages API (`{base}/v1/messages`). This covers Anthropic itself and
   providers that offer an Anthropic-compatible endpoint, such as DeepSeek and Qwen.

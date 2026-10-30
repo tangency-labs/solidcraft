@@ -22,10 +22,15 @@ struct Popup {
     /// A row is selected, so Enter and Tab complete it. A popup opened on a word that is
     /// itself a complete name (`width`) starts unarmed: it only shows the longer names, Enter
     /// and Tab reach the editor as if it were not there, and an arrow key arms it (#3663). A
-    /// unit means something only after a number, where no popup opens, so a unit typed anywhere
-    /// else (`rad` on the way to `radius`) is a prefix like any other and the popup is armed.
+    /// unit means something only after a value: after a number no popup opens, after a name or
+    /// constant (`pi mm`) it is a complete name as above (#8862). A unit typed anywhere else
+    /// (`rad` on the way to `radius`) is a prefix like any other and the popup is armed.
     /// A press on a row inserts it whether or not the list is armed.
     armed: bool,
+    /// A key armed the list (an arrow, or Ctrl+Space). Otherwise `armed` is worked out again
+    /// every frame: the names it depends on are gathered only once a box has the focus, and
+    /// the text before the word can change under it (`20 mm` replaced by `pi mm`).
+    keyed: bool,
 }
 
 fn popup_id() -> egui::Id {
@@ -45,7 +50,7 @@ pub(crate) fn begin_frame(ctx: &egui::Context) {
         });
         popup.explicit = true;
         popup.dismissed = false;
-        popup.armed = true;
+        (popup.armed, popup.keyed) = (true, true);
         ctx.data_mut(|d| d.insert_temp(popup_id(), popup.clone()));
     }
     let escape_blurred = ctx.input(|i| i.key_pressed(Key::Escape)) && ctx.memory(|m| m.focused().is_none() && m.had_focus_last_frame(popup.editor));
@@ -73,8 +78,8 @@ pub(crate) fn begin_frame(ctx: &egui::Context) {
                 && *modifiers == egui::Modifiers::NONE
             {
                 match key {
-                    Key::ArrowDown if !popup.armed => (popup.armed, popup.selected) = (true, 0),
-                    Key::ArrowUp if !popup.armed => (popup.armed, popup.selected) = (true, popup.count - 1),
+                    Key::ArrowDown if !popup.armed => (popup.armed, popup.keyed, popup.selected) = (true, true, 0),
+                    Key::ArrowUp if !popup.armed => (popup.armed, popup.keyed, popup.selected) = (true, true, popup.count - 1),
                     Key::ArrowDown => popup.selected = (popup.selected + 1) % popup.count,
                     Key::ArrowUp => popup.selected = (popup.selected + popup.count - 1) % popup.count,
                     // Unarmed, the typed word is complete: Enter submits it and Tab moves on.
@@ -116,6 +121,10 @@ pub(crate) fn showing(ctx: &egui::Context, editor: egui::Id) -> bool {
 
 pub(crate) fn complete(ui: &mut egui::Ui, resp: &egui::Response, text: &mut String) -> bool {
     let ctx = ui.ctx().clone();
+    // The field's right-click menu is open (#8875): the suggestions wait rather than cover it.
+    if ui_kit::text_menu_open(&ctx, resp.id) {
+        return false;
+    }
     // A press on a suggestion takes the focus from the editor before the list can see it
     // clicked, and the editor then gives up what was typed (#3257). The press picks the
     // suggestion under it, and the editor gets its focus back below.
@@ -140,9 +149,13 @@ pub(crate) fn complete(ui: &mut egui::Ui, resp: &egui::Response, text: &mut Stri
     // Dismissed suggestions stay closed until this box is typed in: another control rewriting
     // its text (a slider dragged while the box keeps the focus) or a moved caret is no reason.
     let dismissed = previous.as_ref().is_some_and(|p| p.dismissed) && !resp.changed();
-    // A word that is already a complete name opens unarmed: Enter submits it as typed. A unit
-    // without a number before it (`rad`, half-way to `radius`) is a prefix, so it stays armed.
-    let armed = !exact_token(&ctx, &word) || unit_token(&ctx, &word);
+    // What the word follows, blanks aside.
+    let before = text.chars().take(start).filter(|c| !c.is_whitespace()).last();
+    // A word that is already a complete name opens unarmed: Enter submits it as typed. A unit is
+    // a unit after a value it multiplies, a name or constant as much as a number (`pi mm`, #8862);
+    // anywhere else (`rad`, half-way to `radius`) it is a prefix, so it stays armed.
+    let after_value = before.is_some_and(|c| c.is_alphanumeric() || matches!(c, '_' | '.' | ')'));
+    let armed = !exact_token(&ctx, &word) || (unit_token(&ctx, &word) && !after_value);
     let mut popup = previous.filter(|p| p.word == word && p.cursor == cursor).unwrap_or(Popup {
         editor: resp.id,
         frame: 0,
@@ -155,14 +168,16 @@ pub(crate) fn complete(ui: &mut egui::Ui, resp: &egui::Response, text: &mut Stri
         explicit: false,
         rows: Vec::new(),
         armed,
+        keyed: false,
     });
+    popup.armed = popup.keyed || armed;
     // Never over a control being dragged: the drag dismisses them.
     if ctx.dragged_id().is_some_and(|id| id != resp.id) {
         popup.dismissed = true;
     }
     // A unit right after a number (`2 in`, `10 mm`, the form every dialog starts its sizes in)
     // is a unit, not the start of a name: no popup there, so nothing sits over the OK button.
-    let number_before = text.chars().take(start).filter(|c| !c.is_whitespace()).last().is_some_and(|c| c.is_ascii_digit() || c == '.' || c == ')');
+    let number_before = before.is_some_and(|c| c.is_ascii_digit() || c == '.' || c == ')');
     let list = if !popup.explicit && number_before && unit_token(&ctx, &popup.word) {
         Vec::new()
     } else {
@@ -327,6 +342,55 @@ mod tests {
         fn popup(&self) -> Option<(usize, bool)> {
             popup_state(&self.ctx)
         }
+    }
+
+    /// #8533: a long parameter name widens the completion popup past a narrow editor.
+    #[test]
+    fn long_parameter_names_widen_the_completion_popup() {
+        let short = Editor::new("wi");
+        assert!(showing(&short.ctx, short.id));
+        let short_w = crate::scenario::rect_of("dialog:suggestions").map(|r| r.width()).unwrap_or(0.0);
+
+        let ctx = crate::fonts::test_context();
+        let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+        let long = "Driver_MountHole_to_Cover_Shared_Base_Layout_Angle";
+        app.run("parameters.add", json!({"name": long, "expression": "8 deg"})).unwrap();
+        params_dialog::publish(&mut app, &ctx);
+        let id = egui::Id::new("long_name_completion");
+        ctx.memory_mut(|m| m.request_focus(id));
+        let mut text = "Driver".to_string();
+        let mut output = ctx.run_ui(
+            egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1200.0, 400.0))), ..Default::default() },
+            |ui| {
+                begin_frame(ui.ctx());
+                params_dialog::publish(&mut app, ui.ctx());
+                egui::CentralPanel::default().show(ui, |ui| {
+                    let response = ui.add(egui::TextEdit::singleline(&mut text).id(id).desired_width(120.0));
+                    let mut state = egui::TextEdit::load_state(ui.ctx(), id).unwrap_or_default();
+                    state.cursor.set_char_range(Some(egui::text::CCursorRange::one(egui::text::CCursor::new(text.chars().count()))));
+                    state.store(ui.ctx(), id);
+                    let _ = complete(ui, &response, &mut text);
+                });
+            },
+        );
+        output.textures_delta.clear();
+        // A second frame so the popup sees the caret after "Driver".
+        let mut output = ctx.run_ui(
+            egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1200.0, 400.0))), ..Default::default() },
+            |ui| {
+                begin_frame(ui.ctx());
+                params_dialog::publish(&mut app, ui.ctx());
+                egui::CentralPanel::default().show(ui, |ui| {
+                    let response = ui.add(egui::TextEdit::singleline(&mut text).id(id).desired_width(120.0));
+                    let _ = complete(ui, &response, &mut text);
+                });
+            },
+        );
+        output.textures_delta.clear();
+        assert!(suggestions(&ctx, "Driver").iter().any(|s| s.text == long));
+        let long_w = crate::scenario::rect_of("dialog:suggestions").map(|r| r.width()).unwrap_or(0.0);
+        assert!(long_w > short_w + 40.0, "long name popup {long_w} should outgrow short {short_w}");
+        assert!(long_w > 200.0, "popup should not stay locked to a narrow editor ({long_w})");
     }
 
     #[test]
@@ -495,6 +559,50 @@ mod tests {
         assert_eq!(e.popup(), Some((1, true)));
         e.key(Key::Enter);
         assert_eq!(e.text, "2 * mm_wall");
+    }
+
+    /// A unit after a name or constant multiplies it, as after a number: `pi mm` is π mm and
+    /// `pi rad` half a turn. The longer names are listed unarmed, so Enter submits what was
+    /// typed, and Down then Enter still completes `mm_wall` or `radius` (#8862).
+    #[test]
+    fn a_unit_after_a_name_submits_as_typed() {
+        for (text, longer) in [("pi mm", "pi mm_wall"), ("pi rad", "pi radius")] {
+            for arrow in [false, true] {
+                let mut e = Editor::new(text);
+                e.app.run("parameters.add", json!({"name":"mm_wall","expression":"3 mm"})).unwrap();
+                e.frame(Vec::new());
+                assert_eq!(e.popup(), Some((1, false)), "{text}");
+                if arrow {
+                    e.key(Key::ArrowDown);
+                }
+                e.key(Key::Enter);
+                if arrow {
+                    assert_eq!(e.text, longer);
+                    assert!(e.accepted && e.leaked.is_empty(), "{text}");
+                } else {
+                    assert_eq!(e.text, text);
+                    assert!(!e.accepted && e.leaked.contains(&Key::Enter), "{text}");
+                }
+            }
+        }
+    }
+
+    /// Whether Enter completes follows the text as it is now, also when the word and the caret
+    /// stay where they were: `pi*mm` replaced by `pi mm` in one go (a paste over the selected
+    /// text) leaves `mm` at the same place, and Enter must then submit `pi mm` (#8862).
+    #[test]
+    fn replacing_the_text_before_a_unit_rearms_the_list() {
+        let mut e = Editor::new("pi*mm");
+        e.app.run("parameters.add", json!({"name":"mm_wall","expression":"3 mm"})).unwrap();
+        e.frame(Vec::new());
+        assert_eq!(e.popup(), Some((1, true)), "after `*` a unit is a prefix");
+        e.frame(vec![egui::Event::Key { key: Key::A, physical_key: None, pressed: true, repeat: false, modifiers: egui::Modifiers::COMMAND }]);
+        e.frame(vec![egui::Event::Text("pi mm".into())]);
+        assert_eq!(e.cursor(), 5);
+        assert_eq!(e.popup(), Some((1, false)));
+        e.key(Key::Enter);
+        assert_eq!(e.text, "pi mm");
+        assert!(!e.accepted && e.leaked.contains(&Key::Enter));
     }
 
     /// Typing a name letter by letter passes through words that happen to be units: `ra` lists

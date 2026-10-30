@@ -10,6 +10,7 @@
 # (see the windows job). Nothing else is signed yet.
 #
 #   Linux x86_64, aarch64   AppImage (+ .zsync), .deb, .rpm, .flatpak, .snap, .tar.gz packaging/linux
+#   Arch Linux x86_64, aarch64  .pkg.tar.zst, repackaged from the .tar.gz         the arch job
 #   FreeBSD x86_64          .tar.gz (built in a FreeBSD VM)                        packaging/freebsd
 #   macOS universal         .dmg, and the CLI as a .zip (both archs built in parallel)  packaging/macos
 #   Windows x64, x86, arm64 .msi and a portable .zip; x64 also the plain .exe      packaging/windows
@@ -206,6 +207,45 @@ jobs:
           path: dist/release/*.flatpak
           if-no-files-found: error
 
+  arch:
+    name: Arch Linux ${{ matrix.arch }}
+    needs: [version, linux]
+    if: needs.version.outputs.build == 'true'
+    # makepkg only repackages the tarball's prebuilt binaries, so both architectures build here.
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [x86_64, aarch64]
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-linux-${{ matrix.arch }}
+          path: dist/linux
+      # The Craft apps' shared Arch packaging (storytold/craft-common-actions, MIT OR Apache-2.0):
+      # makepkg in an archlinux:base-devel container. The package is named after the tarball's
+      # .desktop file (io.tangencylabs.solidcraft) and written as
+      # dist/release/solidcraft-<version>-linux-<arch>.pkg.tar.zst.
+      - uses: storytold/craft-common-actions/actions/arch-package@fa5ef18780cf5e7d5d3b8de068de56cffc83cac5 # main
+        with:
+          tarball: dist/linux/solidcraft-${{ env.VERSION }}-linux-${{ matrix.arch }}.tar.gz
+          arch: ${{ matrix.arch }}
+      - name: Check the package
+        env:
+          PKG: dist/release/solidcraft-${{ env.VERSION }}-linux-${{ matrix.arch }}.pkg.tar.zst
+        run: |
+          tar --zstd -tf "$PKG" | grep -E '^usr/bin/solidcraft$|^usr/bin/solidcraft-cli$|^usr/share/applications/io\.tangencylabs\.solidcraft\.desktop$'
+          tar --zstd -xOf "$PKG" .PKGINFO | grep -E '^(pkgname|pkgver|arch) = '
+          tar --zstd -xOf "$PKG" .PKGINFO | grep -qx 'pkgname = io.tangencylabs.solidcraft'
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-arch-${{ matrix.arch }}
+          path: dist/release/*.pkg.tar.zst
+          if-no-files-found: error
+
 
 
   snap:
@@ -297,7 +337,7 @@ jobs:
             export CARGO_TARGET_DIR=/var/tmp/solidcraft-target CARGO_BUILD_JOBS=4
             bash packaging/freebsd/package.sh
             tar -tzf dist/release/solidcraft-*-freebsd-x86_64.tar.gz \
-              | grep -E '/bin/solidcraft$|/bin/solidcraft-cli$|/share/applications/ai\.storyteller\.solvecraft\.desktop$|/share/doc/solidcraft/THIRD-PARTY-LICENSES\.txt$'
+              | grep -E '/bin/solidcraft$|/bin/solidcraft-cli$|/share/applications/io\.tangencylabs\.solidcraft\.desktop$|/share/doc/solidcraft/THIRD-PARTY-LICENSES\.txt$'
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: release-freebsd-x86_64
@@ -571,7 +611,7 @@ jobs:
 
   release:
     name: GitHub Release or dry-run artifacts
-    needs: [version, linux, flatpak, snap, freebsd, macos, windows, web]
+    needs: [version, linux, flatpak, arch, snap, freebsd, macos, windows, web]
     if: needs.version.outputs.build == 'true'
     runs-on: ubuntu-latest
     permissions:
@@ -597,7 +637,7 @@ jobs:
           shopt -s nullglob
           for f in "solidcraft-$VERSION-"*; do
             case "$f" in
-              *.msi | *-portable.zip | *.dmg | *.AppImage | *.deb | *.rpm | *.flatpak | *.snap)
+              *.msi | *-portable.zip | *.dmg | *.AppImage | *.deb | *.rpm | *.flatpak | *.snap | *.pkg.tar.zst)
                 cp -- "$f" "solidcraft-${f#"solidcraft-$VERSION-"}" ;;
             esac
           done

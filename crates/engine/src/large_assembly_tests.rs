@@ -38,6 +38,7 @@ fn generated_assembly(parts: usize) -> Document {
                 radius: mm(1.5),
                 height: mm(4.0 + k as f64),
                 operation: Operation::NewBody,
+                references: Vec::new(),
             };
             made.push((i, doc.add_feature(pin, Some(&format!("Pin {i}.{k}"))).unwrap()));
         }

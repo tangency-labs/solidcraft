@@ -25,9 +25,15 @@ thread_local! {
     /// The palette of a theme file (`theme_files`) in place of the built-in one of its base
     /// (dark or light), per thread like the rest. `None`: the built-in palettes.
     static CUSTOM: Cell<Option<Custom>> = const { Cell::new(None) };
+    /// The application bar's logo in the theme's accent instead of its own logo colours
+    /// (Preferences › Interface › Logo), per thread like the rest.
+    static LOGO_ACCENT: Cell<bool> = const { Cell::new(false) };
     /// The 3D view's own dark or light when Preferences give it one ([`ViewportTheme`], #4146),
     /// per thread like the rest. `None`: the view is as dark as the window.
     static VIEWPORT_DARK: Cell<Option<bool>> = const { Cell::new(None) };
+    /// The 3D view's background colour when Preferences give it one (#7688), per thread like the
+    /// rest. `None`: the theme's gradient.
+    static VIEWPORT_BACKGROUND: Cell<Option<[u8; 3]>> = const { Cell::new(None) };
 }
 
 /// Three structural border levels plus independent content and control outlines.
@@ -230,6 +236,12 @@ pub fn set_custom(custom: Option<Custom>) -> bool {
     CUSTOM.with(|c| c.replace(custom) != custom)
 }
 
+/// Draw the logo in the theme's accent (`true`) or its own logo colours. Returns whether that
+/// changed anything (the visuals follow on the next [`apply`]).
+pub fn set_logo_accent(on: bool) -> bool {
+    LOGO_ACCENT.with(|c| c.replace(on) != on)
+}
+
 /// Isolated widget tests restore the thread's theme even when an assertion fails.
 #[cfg(test)]
 pub(crate) fn scoped_tokens(tokens: Tokens) -> impl Drop {
@@ -267,10 +279,7 @@ pub(crate) fn icon_accent_for_tab(tab: &str) -> Option<&'static str> {
 /// WCAG contrast of two opaque sRGB colours.
 pub(crate) fn contrast_ratio(a: Color32, b: Color32) -> f64 {
     let luminance = |c: Color32| {
-        let linear = |v: u8| {
-            let v = f64::from(v) / 255.0;
-            if v <= 0.04045 { v / 12.92 } else { ((v + 0.055) / 1.055).powf(2.4) }
-        };
+        let linear = solidcraft_engine::geom::srgb::decode8;
         0.2126 * linear(c.r()) + 0.7152 * linear(c.g()) + 0.0722 * linear(c.b())
     };
     let (a, b) = (luminance(a), luminance(b));
@@ -285,7 +294,7 @@ impl TabAccent {
             "MESH" => (t.mesh_fill, t.mesh_ink, t.mesh_soft),
             "FORM" => (t.form_fill, t.form_tab_ink, t.form_soft),
             "SHEET METAL" => (t.sheet_fill, t.sheet_ink, t.sheet_soft),
-            "RENDER" => (t.render_fill, t.render_ink, t.render_soft),
+            "RENDER" | "RENDER APPEARANCE" | "RENDER SCENE" | "RENDER CAMERA" => (t.render_fill, t.render_ink, t.render_soft),
             // Model and shared utility tabs retain their existing selection exactly.
             _ => (t.accent, t.selected_ink, t.accent_soft),
         };
@@ -354,6 +363,11 @@ pub fn is_dark() -> bool {
 /// Is the 3D view dark? As the window, unless Preferences give the view its own (#4146).
 pub fn viewport_dark() -> bool {
     VIEWPORT_DARK.get().unwrap_or_else(is_dark)
+}
+
+/// The 3D view's own background colour, or `None` for the theme's gradient (#7688).
+pub fn viewport_background() -> Option<[u8; 3]> {
+    VIEWPORT_BACKGROUND.get()
 }
 
 /// The common conversion boundary for compiled icon palette data.
@@ -487,6 +501,11 @@ pub fn set_vision(mode: ColorVision) {
     VISION.with(|v| v.set(mode));
 }
 
+/// An sRGB colour carried by model data, including file colours and point-cloud shading.
+pub(crate) const fn model_color(rgb: [u8; 3]) -> Color32 {
+    Color32::from_rgb(rgb[0], rgb[1], rgb[2])
+}
+
 /// An sRGB colour given as 0..1 (the analysis colours), for drawing in the UI.
 pub fn srgb(c: [f32; 3]) -> Color32 {
     let byte = |x: f32| (x.clamp(0.0, 1.0) * 255.0).round() as u8;
@@ -510,6 +529,16 @@ pub struct IconColors {
 /// other one's colours (#4146): a new colour drawn in the view goes in both.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Tokens {
+    /// Navigation chrome from the approved Navbar boards.
+    pub nav_hover: Color32,
+    pub nav_press: Color32,
+    pub nav_dim: Color32,
+    pub nav_viewport: Color32,
+    pub nav_tip: Color32,
+    pub nav_tip_ink: Color32,
+    pub nav_tip_key_border: Color32,
+    pub nav_field: Color32,
+
     /// Optional structural/control strokes. None retains each surface’s legacy styling.
     pub borders: Borders,
     /// File/start presentation, with explicit foreground/background pairs.
@@ -719,6 +748,10 @@ pub struct Tokens {
     pub body_edge: Color32,
     /// Command manipulators (direction arrows, handles).
     pub manipulator: Color32,
+    /// Allowed assembly motion, separate from the selected face's blue.
+    pub joint_manipulator: Color32,
+    /// Assembly Move axis and centre, distinct from its draggable amber arrows.
+    pub joint_axis: Color32,
     /// New surface in a feature preview.
     pub preview_add: Color32,
     /// The surface of a body a feature preview creates (New Body), apart from a join (#1805).
@@ -748,7 +781,12 @@ pub struct Tokens {
     pub sketch_halo: Color32,
     /// Fixed (locked) sketch geometry.
     pub sketch_locked: Color32,
-    /// Sketch dimensions: driving, driven (reference).
+    /// The open sketch's curves and points that a failing constraint holds, and that
+    /// constraint's glyph or dimension, while the constraints conflict (#7244). The error red by
+    /// default; a theme file that sets `error` but not this key takes its `error`.
+    pub sketch_conflict: Color32,
+    /// Sketch dimensions: driving, driven (reference). Each theme gives them a colour of their
+    /// own, apart from the sketch curves they measure (#7861).
     pub dimension: Color32,
     pub dimension_driven: Color32,
     /// Sketch points: fully constrained, free.
@@ -849,14 +887,24 @@ impl Tokens {
     /// mode being chosen before it is applied (#7152).
     pub fn get_in(mode: ColorVision) -> Tokens {
         let window = Tokens::themed(is_dark(), mode);
-        if viewport_dark() == is_dark() { window } else { window.with_viewport(Tokens::themed(viewport_dark(), mode)) }
+        let tokens = if viewport_dark() == is_dark() { window } else { window.with_viewport(Tokens::themed(viewport_dark(), mode)) };
+        tokens.with_background(viewport_background())
     }
 
     /// The tokens of the 3D view's side (#4146), for a window colour drawn straight onto the view
     /// with nothing behind it (a status line, a label or a warning beside the geometry), so it
     /// reads on the view's background. As [`Tokens::get`] unless the view has its own side.
     pub fn view() -> Tokens {
-        Tokens::themed(viewport_dark(), vision())
+        Tokens::themed(viewport_dark(), vision()).with_background(viewport_background())
+    }
+
+    /// These tokens with the 3D view's background one flat colour (#7688), or as they are for `None`.
+    pub fn with_background(mut self, colour: Option<[u8; 3]>) -> Tokens {
+        if let Some([r, g, b]) = colour {
+            self.viewport_top = Color32::from_rgb(r, g, b);
+            self.viewport_bottom = self.viewport_top;
+        }
+        self
     }
 
     /// These tokens with the colours drawn in the 3D view taken from `view`: the background and
@@ -889,6 +937,8 @@ impl Tokens {
             body: view.body,
             body_edge: view.body_edge,
             manipulator: view.manipulator,
+            joint_manipulator: view.joint_manipulator,
+            joint_axis: view.joint_axis,
             preview_add: view.preview_add,
             preview_new: view.preview_new,
             preview_sketch: view.preview_sketch,
@@ -905,6 +955,7 @@ impl Tokens {
             sketch: view.sketch,
             sketch_fixed: view.sketch_fixed,
             sketch_locked: view.sketch_locked,
+            sketch_conflict: view.sketch_conflict,
             dimension: view.dimension,
             dimension_driven: view.dimension_driven,
             sketch_point: view.sketch_point,
@@ -934,7 +985,17 @@ impl Tokens {
     /// that base ([`set_custom`]), else the built-in one; the colour vision mode on top.
     pub fn themed(dark: bool, mode: ColorVision) -> Tokens {
         let custom = CUSTOM.get().filter(|c| c.dark == dark).map(|c| c.tokens);
-        custom.unwrap_or(if dark { Tokens::dark() } else { Tokens::light() }).with_vision(dark, mode)
+        let t = custom.unwrap_or(if dark { Tokens::dark() } else { Tokens::light() });
+        let t = if LOGO_ACCENT.get() { t.with_accent_logo() } else { t };
+        t.with_vision(dark, mode)
+    }
+
+    /// These tokens with the logo's three faces in shades of the accent: lighter, the accent
+    /// itself, darker (as the built-in logo's blues are).
+    pub fn with_accent_logo(mut self) -> Tokens {
+        let accent = self.accent.to_opaque();
+        self.logo = [accent.lerp_to_gamma(Color32::WHITE, 0.22), accent, accent.lerp_to_gamma(Color32::BLACK, 0.2)];
+        self
     }
 
     /// These tokens with a colour vision mode's values on top (the tables in `palettes.rs`); Off
@@ -976,6 +1037,11 @@ pub fn set_dark(dark: bool) {
 /// Give the 3D view its own dark or light (#4146), or `None` to draw it as dark as the window.
 pub fn set_viewport_dark(dark: Option<bool>) {
     VIEWPORT_DARK.set(dark);
+}
+
+/// Give the 3D view a background colour of its own (#7688), or `None` for the theme's gradient.
+pub fn set_viewport_background(colour: Option<[u8; 3]>) {
+    VIEWPORT_BACKGROUND.set(colour);
 }
 
 fn visuals(dark: bool) -> egui::Visuals {
@@ -1293,6 +1359,7 @@ mod tests {
                     (t.box_window, t.section_cap, t.preview_add, t.sketch_construction, t.continuity),
                     (v.box_window, v.section_cap, v.preview_add, v.sketch_construction, v.continuity)
                 );
+                assert_eq!((t.joint_manipulator, t.joint_axis), (v.joint_manipulator, v.joint_axis));
                 assert_eq!(t.analysis, v.analysis);
                 // The window's: panels, text, accents, dialogs, and the chips over the view with
                 // their borders and icons.

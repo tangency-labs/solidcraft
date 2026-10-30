@@ -343,3 +343,26 @@ fn crossing_cylinders_union_moved_far() {
     let there = run(&mv(&a), &mv(&b), BoolOp::Union).unwrap();
     assert!(close(here, there, s), "union at origin {here:.4}, moved by 1000 gives {there:.4}");
 }
+
+/// The box takes half the cylinder's disc across 10 mm of its height. Its overlap is
+/// pi * 2.5^2 * 10 / 2, including after a scale that makes the radius 0.125 mm.
+#[test]
+fn half_cylinder_intersection_scales_with_the_solid() {
+    let overlap = std::f64::consts::PI * 2.5f64.powi(2) * 10.0 / 2.0;
+    let cylinder_volume = std::f64::consts::PI * 2.5f64.powi(2) * 17.5;
+    let box_volume = 12.5 * 5.0 * 10.0;
+    for k in [1.0, 0.05] {
+        let a = Prim::Cyl { at: [12.5, 5.0, 5.0].map(|x| x * k), axis: 2, r: 2.5 * k, h: 17.5 * k }.body();
+        let b = Prim::Box { at: [10.0, 5.0, 7.5].map(|x| x * k), size: [12.5, 5.0, 10.0].map(|x| x * k) }.body();
+        for (op, expected) in
+            [(BoolOp::Union, cylinder_volume + box_volume - overlap), (BoolOp::Intersect, overlap), (BoolOp::Cut, cylinder_volume - overlap)]
+        {
+            let result = boolean(&a, &b, op)
+                .unwrap_or_else(|e| panic!("{op:?} at scale {k}: {e}"))
+                .unwrap_or_else(|| panic!("{op:?} at scale {k} is not empty"));
+            assert!(result.validity().is_empty(), "{op:?} at scale {k}: {:?}", result.validity());
+            let actual = measure(&result).unwrap().volume / (k * k * k);
+            assert!(close(actual, expected, expected), "{op:?} at scale {k}: {actual} != {expected}");
+        }
+    }
+}

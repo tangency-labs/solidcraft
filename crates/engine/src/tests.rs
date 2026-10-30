@@ -345,6 +345,7 @@ mod primitive_points;
 mod rim_cut;
 mod robustness;
 mod robustness_goldens;
+mod rounded_loft_face;
 mod sphere_lens;
 mod spiral_join;
 mod step_import_options;
@@ -708,6 +709,10 @@ pub(crate) fn hostile_values() -> Vec<Value> {
         json!("mm = 5"),
         json!("w = w"),
         json!("w == 1/0"),
+        // Every value input reads `name = expression` (#4071).
+        json!("a = = 3"),
+        json!("é = 1e308 * 10"),
+        json!(format!("{} = 1", "n".repeat(5000))),
         json!([]),
         json!([1e308, -1e308]),
         json!([0, 0, 0]),
@@ -892,6 +897,33 @@ fn hostile_params_never_panic() {
         workers.into_iter().flat_map(|w| w.join().unwrap()).collect()
     });
     assert!(internal.is_empty(), "commands panicked:\n{}", internal.join("\n"));
+}
+
+/// #6651: a list parameter of the wrong type is refused, not read as an empty list. An empty
+/// list means "every body" to most commands, so a number, an object or a list with a number in
+/// it was read as no list at all: a cut meant for one body cut every body it touched, and the
+/// command reported success.
+///
+/// `null` is not in this list: the schema contract declares these parameters optional and
+/// reads `null` as absent, so it keeps the meaning it always had (no list given).
+#[test]
+fn a_list_parameter_of_the_wrong_type_is_refused() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"corner": [0, 0, 0], "length": 40, "width": 30, "height": 10, "body_name": "Plate"}));
+    run(&mut s, "solid.box", json!({"corner": [60, 0, 0], "length": 10, "width": 10, "height": 20, "body_name": "Block"}));
+    let before = volume(&mut s);
+    // A tool crossing both bodies, meant for the Block only.
+    for targets in [json!(7), json!(true), json!({"body": "Block"}), json!(["Block", 42])] {
+        let params =
+            json!({"corner": [35, 2, -1], "length": 30, "width": 3, "height": 30, "operation": "cut", "body_name": "Slot", "targets": targets});
+        let err = s.execute("solid.box", &params).expect_err("a list parameter of the wrong type is refused");
+        let EngineError::BadParams { cmd, msg } = &err else {
+            panic!("{params}: {err}");
+        };
+        assert_eq!(cmd, "solid.box", "{params}: {err}");
+        assert!(msg.contains("targets"), "{params}: {err}");
+        assert_eq!(volume(&mut s), before, "{params}: the design changed");
+    }
 }
 
 #[test]
@@ -2117,6 +2149,25 @@ fn material_and_appearance_colours_export_to_step() {
     run(&mut s2, "doc.open", json!({"path": p.to_string_lossy()}));
     let _ = std::fs::remove_file(&p);
     check(&step_round_trip(&mut s2, "colours2"));
+}
+
+/// The OBJ export carries the colours of the bodies: the mesh file names a material library
+/// beside it, and the library holds a material per body.
+#[test]
+fn obj_export_writes_the_colours_of_the_bodies() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "Red Box"}));
+    run(&mut s, "appearance.assign", json!({"bodies": ["Red Box"], "color": "#d03030"}));
+    let dir = std::env::temp_dir().join(format!("solidcraft-objcolours-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let obj = dir.join("part.obj");
+    run(&mut s, "file.export", json!({"path": obj.to_string_lossy(), "format": "obj"}));
+    let text = std::fs::read_to_string(&obj).unwrap();
+    assert!(text.contains("\nmtllib part.mtl\n"), "{text}");
+    let mtl = std::fs::read_to_string(dir.join("part.mtl")).unwrap();
+    assert!(mtl.contains("\nnewmtl Red_Box\n"), "{mtl}");
+    assert!(mtl.contains("Kd 0.816 0.188 0.188"), "{mtl}");
+    let _ = std::fs::remove_dir_all(&dir);
 }
 
 /// Face appearances and see-through bodies export: STEP styles on the faces with a

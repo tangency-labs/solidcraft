@@ -13,7 +13,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use serde_json::{Value, json};
-use solidcraft_doc::{DesignLink, Document, FeatureKind};
+use solidcraft_doc::{DesignLink, Document, FeatureKind, LinkedBodyProperties, UserMaterial};
 
 use super::CommandSpec;
 use super::design_link::{absolute, resolve, stored};
@@ -30,7 +30,7 @@ mod relink_tests;
 
 pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("component.insert_design", "Insert Design", insert_design).at("SOLID", "ASSEMBLE").icon("component").params(
-        "path: a .solidcraft design → a new component linked to it, holding its solid bodies as placed in that design and a copy of its design properties; \
+        "path: a .sc design → a new component linked to it, holding its solid bodies as placed in that design and a copy of its design properties; \
          name? (default: the design's name); parent?: component id or name (default: the active one); translate?: [x,y,z]; \
          reuse?: bool (default false): insert a free occurrence, reusing an existing link to the same file when available",
     ),
@@ -39,13 +39,13 @@ pub static COMMANDS: &[CommandSpec] = &[
          → updated, unchanged, warnings (also joints whose faces are gone or that no longer solve)",
     ),
     CommandSpec::new("component.relink", "Relink Source", relink).icon("update").params(
-        "component: id or name of a linked component; path: a saved .solidcraft design — replaces the source and linked bodies for all its occurrences, preserving identities and placements; returns path, previous_path, warnings, joint_errors and joint_conflicts",
+        "component: id or name of a linked component; path: a saved .sc design — replaces the source and linked bodies for all its occurrences, preserving identities and placements; returns path, previous_path, warnings, joint_errors and joint_conflicts",
     ),
     CommandSpec::new("component.break_link", "Break Link", break_link)
         .icon("break")
         .params("component: id or name of a linked component — keeps its bodies as they are and forgets the design file"),
     CommandSpec::new("component.extract", "Extract to File", extract::extract).icon("export").params(
-        "component: id or name of a component that is not linked; path: the .solidcraft design to write → its history, subcomponents and their joints \
+        "component: id or name of a component that is not linked; path: the .sc design to write → its history, subcomponents and their joints \
          move to that design, and the component becomes linked to it (as component.insert_design makes it); returns path, file, feature, bodies, \
          notices (what stays behind), warnings and copies (components that build the same bodies: see component.replace_with_link)",
     ),
@@ -53,7 +53,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         "component: id or name of a linked component → copies: [{component, name}], the components not linked whose own history builds the same bodies",
     ),
     CommandSpec::new("component.replace_with_link", "Replace with Link", extract::replace_with_link).icon("chain").params(
-        "component or components: [ids or names] of components that are not linked; with: a linked component, or path: a .solidcraft design \
+        "component or components: [ids or names] of components that are not linked; with: a linked component, or path: a .sc design \
          (its link here, else a new linked component) → each component's history goes and its placements become placements of the linked \
          component; refused when its bodies are not the same as the link's; returns component, name, replaced and warnings",
     ),
@@ -88,11 +88,20 @@ pub fn resolve_design_links(doc: &mut Document, from: Option<&str>) {
 
 /// The bodies of a linked design: its name, the Import feature that holds them and the names
 /// the design gives their faces (`Feature::link_faces`), with the source's design properties.
-type Linked = (String, solidcraft_io::StepFeature, Vec<Vec<String>>, solidcraft_doc::Metadata);
+type Linked = (String, solidcraft_io::StepFeature, Vec<Vec<String>>, solidcraft_doc::Metadata, Vec<SourceProperties>);
+
+#[derive(Clone)]
+struct SourceProperties {
+    material: String,
+    definition: Option<UserMaterial>,
+    appearance: Option<solidcraft_doc::appearance::Look>,
+    /// Resolved authored overrides, by the face index in this imported body.
+    faces: Vec<(usize, solidcraft_doc::appearance::Look)>,
+}
 
 /// What a linked file last gave, by the file: digests of its bytes, of the STEP text it gave and
-/// of its face names, and that read's warnings. Update Links evaluates a file again only when its
-/// bytes or the linked bodies changed since (#5606). Bounded, oldest first out.
+/// of its face names, and that read's warnings and source properties. Update Links evaluates
+/// a file again only when its bytes or the linked bodies changed since (#5606). Bounded, oldest first out.
 static READS: Mutex<Vec<LinkRead>> = Mutex::new(Vec::new());
 const READS_SIZE: usize = 256;
 
@@ -102,6 +111,7 @@ struct LinkRead {
     step: u64,
     faces: u64,
     warnings: Vec<String>,
+    properties: Vec<SourceProperties>,
 }
 
 #[cfg(test)]
@@ -116,15 +126,18 @@ fn digest<T: Hash + ?Sized>(value: &T) -> u64 {
     h.finish()
 }
 
-/// The warnings of the last read of `file`, when it had these bytes and gave the STEP text
+/// Warnings and source properties of the last read of `file`, when it had these bytes and gave the STEP text
 /// `step` and the face names `faces`: the bodies it gives are the ones the link holds.
-fn unchanged_read(file: &Path, bytes: u64, step: u64, faces: u64) -> Option<Vec<String>> {
+fn unchanged_read(file: &Path, bytes: u64, step: u64, faces: u64) -> Option<(Vec<String>, Vec<SourceProperties>)> {
     let file = absolute(file);
     let reads = READS.lock().ok()?;
-    reads.iter().find(|r| r.file == file && r.bytes == bytes && r.step == step && r.faces == faces).map(|r| r.warnings.clone())
+    reads
+        .iter()
+        .find(|r| r.file == file && r.bytes == bytes && r.step == step && r.faces == faces)
+        .map(|r| (r.warnings.clone(), r.properties.clone()))
 }
 
-fn remember_read(file: &Path, bytes: u64, feature: &solidcraft_io::StepFeature, faces: &[Vec<String>]) {
+fn remember_read(file: &Path, bytes: u64, feature: &solidcraft_io::StepFeature, faces: &[Vec<String>], properties: &[SourceProperties]) {
     let FeatureKind::Import { step, .. } = &feature.kind else { return };
     let file = absolute(file);
     let Ok(mut reads) = READS.lock() else { return };
@@ -132,7 +145,14 @@ fn remember_read(file: &Path, bytes: u64, feature: &solidcraft_io::StepFeature, 
     if reads.len() >= READS_SIZE {
         reads.remove(0);
     }
-    reads.push(LinkRead { file, bytes, step: digest(step.as_bytes()), faces: digest(faces), warnings: feature.warnings.clone() });
+    reads.push(LinkRead {
+        file,
+        bytes,
+        step: digest(step.as_bytes()),
+        faces: digest(faces),
+        warnings: feature.warnings.clone(),
+        properties: properties.to_vec(),
+    });
 }
 
 /// The bytes of the design at `file`, which must not be the design saved at `own`.
@@ -143,8 +163,9 @@ fn read_link(file: &Path, own: Option<&str>) -> Result<Vec<u8>> {
     }
     // A network location only when its server is allowed, a device never: judged from the text
     // before anything is read (on Windows, reading `\\host\share\x` connects to the host).
-    solidcraft_io::vfs::read_design_path(&shown, own, solidcraft_io::MAX_DESIGN_BYTES).map_err(|e| {
-        let e = e.to_string();
+    let design = solidcraft_io::limits::Kind::Design;
+    solidcraft_io::vfs::read_design_path(&shown, own, solidcraft_io::limits::max_design_bytes()).map_err(|e| {
+        let e = solidcraft_io::limits::explain(design, e).to_string();
         EngineError::Other(if e.starts_with(&shown) { e } else { format!("{shown}: {e}") })
     })
 }
@@ -168,9 +189,9 @@ fn design_bodies(file: &Path, bytes: &[u8]) -> Result<Linked> {
     } else {
         (solidcraft_io::read_design(bytes).map_err(fail)?, None)
     };
-    let (name, feature, faces, metadata) = session_bodies(&Session::opened_at(doc, saved.as_ref(), Some(&shown)), &shown)?;
-    remember_read(file, digest(bytes), &feature, &faces);
-    Ok((name, feature, faces, metadata))
+    let (name, feature, faces, metadata, properties) = session_bodies(&Session::opened_at(doc, saved.as_ref(), Some(&shown)), &shown)?;
+    remember_read(file, digest(bytes), &feature, &faces, &properties);
+    Ok((name, feature, faces, metadata, properties))
 }
 
 /// The solid bodies of `part`, the design saved as `shown`, as an Import feature.
@@ -184,7 +205,7 @@ fn session_bodies(part: &Session, shown: &str) -> Result<Linked> {
     if solids.is_empty() {
         return Err(EngineError::Other(format!("{shown}: the design has no solid bodies to link")));
     }
-    let step = solidcraft_io::export(&part.doc.painted(&world), &solids, solidcraft_io::Format::Step, &name)
+    let step = solidcraft_io::export(&part.doc.painted_for_link(&world), &solids, solidcraft_io::Format::Step, &name)
         .map_err(|e| EngineError::Other(format!("{shown}: {e}")))?;
     let mut feature = solidcraft_io::step_import_feature(&step, shown).map_err(|e| EngineError::Other(format!("{shown}: {e}")))?;
     if world.bodies.len() > solids.len() {
@@ -193,7 +214,239 @@ fn session_bodies(part: &Session, shown: &str) -> Result<Linked> {
     // The STEP text keeps no face names: carry the design's own, so references into the linked
     // bodies follow them as they do inside the design (#3330).
     let faces = solidcraft_doc::naming::carried_face_names(&world, &feature.import.bodies);
-    Ok((name, feature, faces, part.doc.metadata.clone()))
+    let properties = feature
+        .import
+        .bodies
+        .iter()
+        .zip(&faces)
+        .map(|(read, carried)| {
+            // STEP can split a source body into several lumps. Match its carried source
+            // face names rather than assuming source and imported body orders agree.
+            let source = world
+                .bodies
+                .iter()
+                .find(|b| b.name == read.name)
+                .or_else(|| {
+                    world
+                        .bodies
+                        .iter()
+                        .filter(|b| !b.body.is_mesh())
+                        .filter_map(|b| {
+                            let names = solidcraft_doc::naming::face_names(b);
+                            let count = carried.iter().filter(|n| !n.is_empty() && names.contains(n)).count();
+                            (count > 0).then_some((count, b))
+                        })
+                        .max_by_key(|(count, _)| *count)
+                        .map(|(_, b)| b)
+                })
+                .ok_or_else(|| EngineError::Other(format!("{shown}: cannot match linked body {} to its source properties", read.name)))?;
+            let key = source.definition_name();
+            let material = part.doc.body_material(key);
+            let definition = if solidcraft_doc::material_density(&material).is_none() { part.doc.user_material(&material).cloned() } else { None };
+            let appearance = part
+                .doc
+                .appearances
+                .bodies
+                .get(key)
+                .cloned()
+                .or_else(|| part.doc.appearances.components.get(&part.doc.model_body_component(source)).cloned());
+            let names = solidcraft_doc::naming::face_names(source);
+            let authored: std::collections::BTreeMap<_, _> = part
+                .doc
+                .authored_face_colors(source)
+                .into_iter()
+                .filter_map(|(index, look)| names.get(index).map(|name| (name.clone(), look)))
+                .collect();
+            let faces = carried.iter().enumerate().filter_map(|(index, name)| authored.get(name).map(|look| (index, look.clone()))).collect();
+            Ok(SourceProperties { material, definition, appearance, faces })
+        })
+        .collect::<Result<Vec<_>>>()?;
+    Ok((name, feature, faces, part.doc.metadata.clone(), properties))
+}
+
+fn material_fingerprint(doc: &Document, material: &str) -> Result<Option<String>> {
+    if solidcraft_doc::material_density(material).is_some() {
+        return Ok(None);
+    }
+    doc.user_material(material).map(LinkedBodyProperties::fingerprint).transpose().map_err(|e| EngineError::Other(e.to_string()))
+}
+
+/// Copy a design-owned definition without changing a same-named assembly material.
+fn inherit_material(doc: &mut Document, source: &SourceProperties, previous: Option<&str>) -> Result<String> {
+    let Some(definition) = &source.definition else { return Ok(source.material.clone()) };
+    for existing in &doc.user_materials {
+        // Equal density/optics do not make differently named materials interchangeable.
+        // A previous disambiguated copy can be reused on subsequent source updates.
+        if !existing.name.eq_ignore_ascii_case(&definition.name) && previous != Some(existing.name.as_str()) {
+            continue;
+        }
+        let mut candidate = definition.clone();
+        candidate.name.clone_from(&existing.name);
+        if &candidate == existing {
+            return Ok(existing.name.clone());
+        }
+    }
+    if doc.user_materials.len() >= solidcraft_doc::MAX_USER_MATERIALS {
+        return Err(EngineError::Other("cannot inherit linked material: this design already has 1000 custom materials".into()));
+    }
+    let mut copy = definition.clone();
+    if doc.material_name(&copy.name).is_some() {
+        let base: String = copy.name.chars().take(64).collect();
+        let name = (1..=solidcraft_doc::MAX_USER_MATERIALS + 1)
+            .map(|i| format!("{base} (linked {i})"))
+            .find(|name| doc.material_name(name).is_none())
+            .ok_or_else(|| EngineError::Other("cannot name the linked material".into()))?;
+        copy.name = name;
+    }
+    let name = copy.name.clone();
+    doc.user_materials.push(copy);
+    Ok(name)
+}
+
+/// Replace only unchanged inherited face assignments. A locally edited, added or removed
+/// override remains local, independently for each face. Resolve names on the evaluated Import,
+/// not source feature IDs or face order from the source's model.
+fn inherit_faces(
+    s: &mut Session,
+    name: &str,
+    source: &SourceProperties,
+    previous: Option<&LinkedBodyProperties>,
+) -> (Vec<solidcraft_doc::appearance::FaceLook>, bool) {
+    use solidcraft_doc::appearance::FaceLook;
+    let previous = previous.and_then(|p| p.faces.as_deref()).unwrap_or_default();
+    if source.faces.is_empty() && previous.is_empty() {
+        return (Vec::new(), false);
+    }
+    let state = s.model.state();
+    let Some(body) = state.body(name) else { return (Vec::new(), false) };
+    let names = solidcraft_doc::naming::face_names(body);
+    // A stable named assignment needs no new geometric point. Keep its position in
+    // the appearance list and avoid tessellating on unchanged cached reads.
+    if previous.len() == source.faces.len()
+        && previous.iter().all(|old| old.body == name && s.doc.appearances.faces.contains(old))
+        && source.faces.iter().all(|(index, look)| {
+            names.get(*index).is_some_and(|name| previous.iter().any(|old| old.name.as_ref() == Some(name) && old.look == *look))
+        })
+    {
+        return (previous.to_vec(), false);
+    }
+    let before = s.doc.appearances.faces.clone();
+    let mut local = before.clone();
+    let mut inherited = Vec::new();
+    let mut replaced = Vec::new();
+    let mut blocked = std::collections::BTreeSet::new();
+    for old in previous {
+        let mut old = old.clone();
+        old.body = name.into();
+        if let Some(index) = local.iter().position(|face| *face == old) {
+            local.remove(index);
+            replaced.push(old);
+        } else {
+            if let Some(name) = &old.name {
+                blocked.extend(solidcraft_doc::naming::faces_with_stem(body, name));
+            }
+            // Remember an explicit local removal too, including after save/reopen.
+            inherited.push(old);
+        }
+    }
+    s.doc_mut().appearances.faces = local;
+    blocked.extend(s.doc.authored_face_colors(body).into_iter().map(|(index, _)| index));
+    let spots = if source.faces.is_empty() { Vec::new() } else { solidcraft_doc::naming::face_spots(body) };
+    let mut assignments = Vec::new();
+    for (index, look) in &source.faces {
+        if blocked.contains(index) {
+            // An appended local override can coexist with the old inherited entry.
+            // Keep that baseline as a tombstone if the local override is later removed.
+            if let Some(old) = names.get(*index).and_then(|name| previous.iter().find(|old| old.name.as_ref() == Some(name))) {
+                let mut old = old.clone();
+                old.body = name.into();
+                if !inherited.contains(&old) {
+                    inherited.push(old);
+                }
+            }
+            continue;
+        }
+        let Some(face_name) = names.get(*index).filter(|name| !name.is_empty()) else { continue };
+        let Some(spot) = spots.get(*index).and_then(|spot| *spot) else { continue };
+        let face = FaceLook {
+            body: name.into(),
+            point: spot.point,
+            look: look.clone(),
+            name: Some(face_name.clone()),
+            strict_name: false,
+            certificate: None,
+        };
+        assignments.push(face.clone());
+        inherited.push(face);
+    }
+    // Replace inherited entries in place; leave all local and other bodies' entries
+    // in their original order, including multiple overrides on the same face.
+    let mut after = Vec::new();
+    for old in &before {
+        if replaced.contains(old) {
+            if let Some(index) = assignments.iter().position(|face| face.body == old.body && face.name == old.name) {
+                after.push(assignments.remove(index));
+            }
+        } else {
+            after.push(old.clone());
+        }
+    }
+    after.extend(assignments);
+    let changed = after != before;
+    s.doc_mut().appearances.faces = after;
+    (inherited, changed)
+}
+
+/// Apply properties after evaluation has resolved body-name collisions. Last inherited
+/// values are kept independently for material and appearance, so overriding one does not
+/// stop updates of the other. Session::execute makes this part of the command's undo step.
+fn inherit_properties(s: &mut Session, component: u64, sources: &[SourceProperties]) -> Result<bool> {
+    let Some(link) = s.doc.links.get(&component).cloned() else { return Ok(false) };
+    let state = s.model.state();
+    let names: Vec<String> = state.bodies.iter().filter(|b| b.feature == link.feature).map(|b| b.name.clone()).collect();
+    let slots = s.doc.feature(link.feature).map(|f| f.body_name_slots(names.len())).unwrap_or_default();
+    let mut inherited = link.inherited.clone();
+    inherited.resize(sources.len(), LinkedBodyProperties::default());
+    let mut changed = false;
+    for (name, slot) in names.iter().zip(slots) {
+        let Some(source) = sources.get(slot) else { continue };
+        let old = link.inherited.get(slot);
+        let current_definition = material_fingerprint(&s.doc, &s.doc.body_material(name))?;
+        let may_change_material = match old {
+            Some(old) => s.doc.materials.get(name) == Some(&old.material) && current_definition == old.material_fingerprint,
+            None => !s.doc.materials.contains_key(name),
+        };
+        let mut next = old.cloned().unwrap_or_default();
+        if may_change_material {
+            let material = inherit_material(s.doc_mut(), source, old.map(|old| old.material.as_str()))?;
+            changed |= s.doc.materials.get(name) != Some(&material);
+            s.doc_mut().materials.insert(name.clone(), material.clone());
+            next.material_fingerprint = material_fingerprint(&s.doc, &material)?;
+            next.material = material;
+        }
+        if s.doc.appearances.bodies.get(name) == old.and_then(|old| old.appearance.as_ref()) {
+            changed |= s.doc.appearances.bodies.get(name) != source.appearance.as_ref();
+            match &source.appearance {
+                Some(look) => {
+                    s.doc_mut().appearances.bodies.insert(name.clone(), look.clone());
+                }
+                None => {
+                    s.doc_mut().appearances.bodies.remove(name);
+                }
+            }
+            next.appearance.clone_from(&source.appearance);
+        }
+        let (faces, face_changed) = inherit_faces(s, name, source, old);
+        next.faces = Some(faces);
+        changed |= face_changed;
+        if let Some(snapshot) = inherited.get_mut(slot) {
+            *snapshot = next;
+        }
+    }
+    if let Some(link) = s.doc_mut().links.get_mut(&component) {
+        link.inherited = inherited;
+    }
+    Ok(changed)
 }
 
 fn component_key(s: &Session, p: &Value, key: &str, cmd: &str) -> Result<u64> {
@@ -225,7 +478,7 @@ fn insert_design(s: &mut Session, p: &Value) -> Result<Value> {
             return super::component::copy_occurrence(s, &json!({"component": component, "parent": parent, "translate": translate}));
         }
     }
-    let (design_name, sf, faces, metadata) = linked_bodies(&file, s.path.as_deref())?;
+    let (design_name, sf, faces, metadata, properties) = linked_bodies(&file, s.path.as_deref())?;
     let name = str_(p, "name").filter(|n| !n.trim().is_empty()).map(str::to_string).unwrap_or(design_name);
     let mut create = json!({"name": name, "activate": false});
     // Clipboard insertion uses reuse even for the first paste, which must stay movable.
@@ -252,11 +505,13 @@ fn insert_design(s: &mut Session, p: &Value) -> Result<Value> {
         o.transform[3] = [translate.x, translate.y, translate.z, 1.0];
     }
     let path = stored(s.path.as_deref(), &file);
-    s.doc_mut().links.insert(comp, DesignLink { path: file.to_string_lossy().into_owned(), feature: id });
+    s.doc_mut().links.insert(comp, DesignLink { path: file.to_string_lossy().into_owned(), feature: id, inherited: Vec::new() });
     s.refresh();
     if let Some(e) = s.model.result(id).and_then(|r| r.error.clone()) {
         return Err(EngineError::Other(e));
     }
+    inherit_properties(s, comp, &properties)?;
+    s.refresh();
     let st = s.model.state();
     let bodies: Vec<&str> = st.bodies.iter().filter(|b| b.feature == id).map(|b| b.name.as_str()).collect();
     Ok(
@@ -294,18 +549,34 @@ fn update_links(s: &mut Session, p: &Value) -> Result<Value> {
         link_refused(s.path.as_deref(), &link.path).map_err(|e| bad(cmd, format!("{cname}: {e}")))?;
         let file = resolve(s.path.as_deref(), &link.path);
         let bytes = read_link(&file, s.path.as_deref()).map_err(|e| bad(cmd, format!("{cname}: {e}")))?;
-        let kept_faces = s.doc.feature(link.feature).map(|f| digest(f.link_faces.as_slice()));
-        if let Some(known) = kept_faces.and_then(|faces| unchanged_read(&file, digest(bytes.as_slice()), digest(old.as_bytes()), faces)) {
+        // A link that has not recorded the properties it inherited (made before they were) is read again.
+        let kept_faces = s
+            .doc
+            .feature(link.feature)
+            .filter(|_| !link.inherited.is_empty() && link.inherited.iter().all(|p| p.faces.is_some()))
+            .map(|f| digest(f.link_faces.as_slice()));
+        if let Some((known, properties)) = kept_faces.and_then(|faces| unchanged_read(&file, digest(bytes.as_slice()), digest(old.as_bytes()), faces))
+        {
             warnings.extend(known);
-            unchanged.push(cname);
+            // Another component or session may have evaluated this source first. Its
+            // cached geometry says nothing about this link's inherited properties.
+            if inherit_properties(s, comp, &properties)? {
+                updated.push(cname)
+            } else {
+                unchanged.push(cname)
+            }
             continue;
         }
-        let (_, sf, faces, _) = design_bodies(&file, &bytes).map_err(|e| bad(cmd, format!("{cname}: {e}")))?;
+        let (_, sf, faces, _, properties) = design_bodies(&file, &bytes).map_err(|e| bad(cmd, format!("{cname}: {e}")))?;
         warnings.extend(sf.warnings.iter().cloned());
         let same = matches!(&sf.kind, FeatureKind::Import { step, .. } if *step == old);
         let kept = s.doc.feature(link.feature).map(|f| &f.link_faces);
         if same && kept == Some(&faces) {
-            unchanged.push(cname);
+            if inherit_properties(s, comp, &properties)? {
+                updated.push(cname)
+            } else {
+                unchanged.push(cname)
+            }
             continue;
         }
         // The same bodies, their faces named for the first time (a link made before names were
@@ -329,6 +600,8 @@ fn update_links(s: &mut Session, p: &Value) -> Result<Value> {
             // A link made before the design's face names were kept gets them here.
             f.link_faces = faces;
         }
+        s.refresh();
+        let changed = inherit_properties(s, comp, &properties)? || changed;
         if changed { updated.push(cname) } else { unchanged.push(cname) }
     }
     solidcraft_doc::progress::item(None);
@@ -367,8 +640,8 @@ fn relink(s: &mut Session, p: &Value) -> Result<Value> {
     }
     let given = str_(p, "path").filter(|x| !x.trim().is_empty() && x.len() < 4096).ok_or_else(|| bad(cmd, "`path` is required"))?;
     let file = absolute(Path::new(given));
-    if !file.extension().and_then(|e| e.to_str()).is_some_and(|e| e.eq_ignore_ascii_case("solidcraft")) {
-        return Err(bad(cmd, "choose a saved .solidcraft design"));
+    if !solidcraft_io::is_design_container_path(&file) {
+        return Err(bad(cmd, "choose a saved .sc design"));
     }
     // A network or device path is judged from its text before the disk is asked anything.
     link_refused(s.path.as_deref(), given).map_err(|e| bad(cmd, e.to_string()))?;
@@ -381,7 +654,7 @@ fn relink(s: &mut Session, p: &Value) -> Result<Value> {
     }
     // Read/evaluate the candidate before changing anything. Session::execute owns the single
     // undo step and restores both the document and evaluated state on any later failure.
-    let (_, sf, faces, _) = linked_bodies(&file, s.path.as_deref()).map_err(|e| bad(cmd, e.to_string()))?;
+    let (_, sf, faces, _, properties) = linked_bodies(&file, s.path.as_deref()).map_err(|e| bad(cmd, e.to_string()))?;
     let geometry_changed = match (s.doc.feature(link.feature).map(|f| &f.kind), &sf.kind) {
         (Some(FeatureKind::Import { step: old, .. }), FeatureKind::Import { step, .. }) => old != step,
         _ => true,
@@ -404,11 +677,13 @@ fn relink(s: &mut Session, p: &Value) -> Result<Value> {
         f.kind = sf.kind;
         f.link_faces = faces;
     }
-    s.doc_mut().links.insert(comp, DesignLink { path: file.to_string_lossy().into_owned(), feature: link.feature });
+    s.doc_mut().links.insert(comp, DesignLink { path: file.to_string_lossy().into_owned(), ..link.clone() });
     s.refresh();
     if let Some(error) = s.model.result(link.feature).and_then(|r| r.error.clone()) {
         return Err(bad(cmd, error));
     }
+    inherit_properties(s, comp, &properties)?;
+    s.refresh();
     // Report the solver's diagnostics. A resolved joint can still describe the wrong
     // connection after a source edit; the reminder above does not depend on solve errors.
     let sol = solidcraft_doc::joints::solve(&s.doc, &s.model.state());
@@ -840,7 +1115,7 @@ mod tests {
         std::fs::copy(&part, dir.join("parts").join("NUL.solidcraft")).unwrap();
         let before = volume(&mut a);
         for link in crafted.iter().chain(&devices) {
-            a.doc_mut().links.insert(comp, DesignLink { path: link.to_string(), feature });
+            a.doc_mut().links.insert(comp, DesignLink { path: link.to_string(), feature, ..Default::default() });
             let calls = solidcraft_io::vfs::file_calls();
             let listed = run(&mut a, "component.links", json!({}));
             let entry = &listed["links"][0];
@@ -858,7 +1133,7 @@ mod tests {
         // Allowed (Allow once, a preference, …), the same link is read as any other.
         #[cfg(unix)]
         {
-            a.doc_mut().links.insert(comp, DesignLink { path: crafted[0].to_string(), feature });
+            a.doc_mut().links.insert(comp, DesignLink { path: crafted[0].to_string(), feature, ..Default::default() });
             solidcraft_io::vfs::allowing_hosts(&["EVIL.example".to_string()], || {
                 let listed = run(&mut a, "component.links", json!({}));
                 assert_eq!(listed["links"][0]["found"], true, "{listed}");
@@ -868,7 +1143,7 @@ mod tests {
         }
         // A local link, relative or absolute, is found and read as before.
         for local in ["parts/plate.solidcraft".to_string(), part.to_string_lossy().to_string()] {
-            a.doc_mut().links.insert(comp, DesignLink { path: local.clone(), feature });
+            a.doc_mut().links.insert(comp, DesignLink { path: local.clone(), feature, ..Default::default() });
             assert_eq!(run(&mut a, "component.links", json!({}))["links"][0]["found"], true, "{local}");
             assert_eq!(run(&mut a, "component.update_links", json!({}))["unchanged"], json!(["plate"]), "{local}");
         }
@@ -888,7 +1163,9 @@ mod tests {
     fn every_link_path_goes_through_the_design_path_rule() {
         let root = Path::new(env!("CARGO_MANIFEST_DIR"));
         let code = |file: &str| {
-            let text = std::fs::read_to_string(root.join(file)).unwrap();
+            // Windows Git checkouts can use CRLF. Locate the test module in either
+            // representation, rather than mistaking its fixture file calls for product code.
+            let text = std::fs::read_to_string(root.join(file)).unwrap().replace("\r\n", "\n");
             // The code before its test module.
             text.split("\n#[cfg(test)]\n#[allow(clippy::unwrap_used").next().unwrap_or("").to_string()
         };

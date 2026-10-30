@@ -91,6 +91,12 @@ pub struct Tool {
     pub dim_history: Vec<crate::sketch_dims::DimBox>,
     pub dims_stage: usize,
     pub dims_focus: bool,
+    /// How far (radians, signed) the cursor has gone round a centre-point arc's centre since its
+    /// start was placed: its sign is the way the arc runs (#6645).
+    pub arc_turn: f64,
+    /// Where each point was placed and the sketch points the snap lined it up with (#7828):
+    /// constrained to them once the shape is made.
+    pub lined: Vec<(Vec2, Vec<crate::sketch_tools::Lined>)>,
 }
 
 impl Tool {
@@ -106,6 +112,9 @@ impl Tool {
             "sketch.circle.three_point" => ("sketch.circle.three_point", Kind::Draw(3)),
             "sketch.arc.three_point" => ("sketch.arc.three_point", Kind::Draw(3)),
             "sketch.arc3d" => ("sketch.arc3d", Kind::Draw(3)),
+            "sketch.line3d" => ("sketch.line3d", Kind::Draw(0)),
+            "sketch.spline3d" => ("sketch.spline3d", Kind::Draw(0)),
+            "sketch.point3d" => ("sketch.point3d", Kind::Draw(1)),
             "sketch.arc.center_point" => ("sketch.arc.center_point", Kind::Draw(3)),
             "sketch.polygon.inscribed" => ("sketch.polygon.inscribed", Kind::Draw(2)),
             "sketch.polygon.circumscribed" => ("sketch.polygon.circumscribed", Kind::Draw(2)),
@@ -138,6 +147,8 @@ impl Tool {
             dim_history: Vec::new(),
             dims_stage: usize::MAX,
             dims_focus: false,
+            arc_turn: 0.0,
+            lined: Vec::new(),
         })
     }
 }
@@ -152,7 +163,10 @@ pub fn hint(id: &str) -> String {
         "sketch.circle.center" => "Circle: click the centre, then a point on the circle".into(),
         "sketch.arc.three_point" => "Arc: click start, end, then a point on the arc".into(),
         "sketch.arc3d" => "3D Arc: click start, end, then a point on the arc (points may leave the sketch plane)".into(),
-        "sketch.arc.center_point" => "Arc: click centre and start, then click end or type a signed sweep".into(),
+        "sketch.line3d" => "3D Line: click world points; right-click or Esc to finish (points may leave the sketch plane)".into(),
+        "sketch.spline3d" => "3D Spline: click fit points in 3D; right-click or Esc to finish".into(),
+        "sketch.point3d" => "3D Point: click where a 3D point goes".into(),
+        "sketch.arc.center_point" => "Arc: click centre and start, go round either way and click the end, or type a signed sweep".into(),
         "sketch.dimension" => {
             "Dimension: pick one or two entities and type the value (or click to place it first); click a dimension to edit it; Enter applies".into()
         }
@@ -207,9 +221,45 @@ pub fn on_hover(app: &mut SolveApp, proj: &Proj, pos: Pos2, shift: bool) {
     } else {
         sketch_point_at(app, proj, pos)
     };
+    let follow = app.preferences.center_arc_follows_cursor;
     if let Some(t) = app.tool.as_mut() {
         t.hover = h;
+        if follow {
+            follow_arc_turn(t);
+        } else {
+            t.arc_turn = 0.0;
+        }
     }
+}
+
+/// Add the cursor's latest step round a centre-point arc's centre to the turn it has made since
+/// the start was placed, a step never more than half a turn. A full turn back to the start wraps.
+fn follow_arc_turn(t: &mut Tool) {
+    let (Some(c), Some(a), Some(h)) = (t.pts.first(), t.pts.get(1), t.hover.as_ref()) else {
+        t.arc_turn = 0.0;
+        return;
+    };
+    if t.cmd != "sketch.arc.center_point" || t.pts.len() != 2 {
+        t.arc_turn = 0.0;
+        return;
+    }
+    let (c, a, h) = (c.0, a.0, h.0);
+    if h.dist(c) <= 1e-9 || a.dist(c) <= 1e-9 {
+        return;
+    }
+    let at = (a - c).angle() + t.arc_turn;
+    let step = ((h - c).angle() - at + std::f64::consts::PI).rem_euclid(std::f64::consts::TAU) - std::f64::consts::PI;
+    if step.is_finite() {
+        t.arc_turn = (t.arc_turn + step) % std::f64::consts::TAU;
+    }
+}
+
+/// A centre-point arc's sweep from its start to `end` (radians): counter-clockwise, unless the
+/// cursor went round the centre clockwise from the start (#6645).
+pub(crate) fn center_arc_sweep(t: &Tool, end: Vec2) -> f64 {
+    let (Some(c), Some(a)) = (t.pts.first(), t.pts.get(1)) else { return 0.0 };
+    let ccw = ((end - c.0).angle() - (a.0 - c.0).angle()).rem_euclid(std::f64::consts::TAU);
+    if t.arc_turn < 0.0 && ccw > 0.0 { ccw - std::f64::consts::TAU } else { ccw }
 }
 
 pub fn on_click(app: &mut SolveApp, proj: &Proj, pos: Pos2, shift: bool) {
@@ -338,15 +388,29 @@ pub fn on_click(app: &mut SolveApp, proj: &Proj, pos: Pos2, shift: bool) {
                             })
                     })
             });
-            let hit = midpoint.as_deref().and_then(|id| id.strip_prefix("mid:")).map(|id| (id.to_string(), true, true)).or_else(|| {
-                hits.iter().find_map(|h| match h {
-                    Hit::SketchPoint { sketch, id, .. } if Some(*sketch) == app.session.active_sketch => Some((id.clone(), false, true)),
-                    Hit::SketchCurve { sketch, id, straight, .. } if Some(*sketch) == app.session.active_sketch => {
-                        Some((id.clone(), true, *straight))
-                    }
-                    _ => None,
+            let hit = midpoint
+                .as_deref()
+                .and_then(|id| id.strip_prefix("mid:"))
+                .map(|id| (id.to_string(), true, true))
+                .or_else(|| {
+                    hits.iter().find_map(|h| match h {
+                        Hit::SketchPoint { sketch, id, .. } if Some(*sketch) == app.session.active_sketch => Some((id.clone(), false, true)),
+                        Hit::SketchCurve { sketch, id, straight, .. } if Some(*sketch) == app.session.active_sketch => {
+                            Some((id.clone(), true, *straight))
+                        }
+                        _ => None,
+                    })
                 })
-            });
+                .or_else(|| {
+                    // With nothing of the sketch under the cursor, a body's edge or vertex may be
+                    // measured too (#7912): the command projects it into the sketch. An edge is a
+                    // length of its own; a vertex waits for the entity it is measured against.
+                    hits.iter().find_map(|h| match h {
+                        Hit::Edge { .. } => crate::sketch_tools::model_ref(app, h).map(|r| (r.to_string(), true, false)),
+                        Hit::Vertex { .. } => crate::sketch_tools::model_ref(app, h).map(|r| (r.to_string(), false, false)),
+                        _ => None,
+                    })
+                });
             let fresh = |tool: &Tool, id: &String| !tool.picks.contains(id) && tool.picks.len() < 2;
             // Before a new dimension is under way, a click on an existing one edits its value;
             // the tool stays on for the next dimension.
@@ -410,7 +474,7 @@ pub fn on_click(app: &mut SolveApp, proj: &Proj, pos: Pos2, shift: bool) {
             }
         }
     }
-    if !crate::sketch_text::editing(app) {
+    if !crate::sketch_text::editing(app) && !crate::sketch_tools::image_placement_finished(&tool) {
         app.tool = Some(tool);
     }
 }
@@ -450,7 +514,9 @@ pub fn place(app: &mut SolveApp, p: (Vec2, Option<String>)) {
         app.tool = Some(tool);
         return;
     }
+    tool.lined.push((p.0, crate::sketch_tools::lined_at(p.0)));
     tool.pts.push(p);
+    let before = crate::sketch_tools::point_ids(app);
     if tool.cmd == "sketch.line" {
         if tool.pts.len() >= 2 {
             let (a, b) = (tool.pts[tool.pts.len() - 2].clone(), tool.pts[tool.pts.len() - 1].clone());
@@ -462,11 +528,13 @@ pub fn place(app: &mut SolveApp, p: (Vec2, Option<String>)) {
                 if let Some(id) = curves.first() {
                     if angled {
                         crate::inference::clear();
+                        tool.lined.clear();
                     } else {
                         // Endpoint inference is part of this drawing. Preserve its original
                         // undo history even when the history is already at the engine's cap.
                         let history = dimensioned.then(|| std::mem::take(&mut app.session.undo));
                         crate::inference::commit(app, id, b.0);
+                        crate::sketch_tools::constrain_lined(app, &mut tool, &[a.0, b.0], &before);
                         if let Some(history) = history {
                             app.session.undo = history;
                         }
@@ -479,35 +547,54 @@ pub fn place(app: &mut SolveApp, p: (Vec2, Option<String>)) {
                 crate::sketch_dims::reset(&mut tool);
             } else {
                 tool.pts.pop();
+                tool.lined.pop();
             }
         }
     } else if n > 0 && tool.pts.len() >= n {
         match run_shape(app, &tool) {
             Ok(_) => {
+                let placed: Vec<Vec2> = tool.pts.iter().map(|p| p.0).collect();
+                crate::sketch_tools::constrain_lined(app, &mut tool, &placed, &before);
                 tool.pts.clear();
                 crate::sketch_dims::reset(&mut tool);
             }
             Err(error) => {
                 app.set_status(error, true);
                 tool.pts.pop();
+                tool.lined.pop();
             }
         }
     }
     app.tool = Some(tool);
 }
 
-/// Geometry and typed constraints are committed atomically, as one undo step.
+/// Geometry and typed constraints are committed atomically, as one undo step. With "Dimension
+/// new shapes" on (Preferences › Sketch), every other size of a shape the engine can dimension
+/// joins them at its size as drawn, and with "Also place them from the origin" the shape is then
+/// placed until fully constrained; the engine's `dimension_roles` decides which shapes those are.
+/// This is the one place drawing tools commit through: the 3D tools (`sketch3d`) take part by
+/// committing here once their creators are listed there.
 pub(crate) fn draw(app: &mut SolveApp, t: &Tool, params: Value) -> Result<Value, String> {
     let dimensions = crate::sketch_dims::dimensions(t);
-    if dimensions.as_object().is_none_or(|values| values.is_empty()) {
+    let as_drawn = app.preferences.sketch_auto_dimensions && solidcraft_engine::dimension_roles(t.cmd).is_some();
+    let locate = as_drawn && app.preferences.sketch_auto_locate;
+    if !as_drawn && dimensions.as_object().is_none_or(|values| values.is_empty()) {
         app.run(t.cmd, params)
     } else {
-        let result = app.run("sketch.draw.dimensioned", json!({"command": t.cmd, "params": params, "dimensions": dimensions}))?;
+        let request = json!({"command": t.cmd, "params": params, "dimensions": dimensions, "as_drawn": as_drawn, "locate": locate});
+        let result = app.run("sketch.draw.dimensioned", request)?;
         // The internal wrapper has no toolbar category; apply the original creator's line
         // type while retaining the draw's undo history, including at the history limit.
         let history = std::mem::take(&mut app.session.undo);
         crate::sketch_palette::apply_mode(app, t.cmd, &result);
         app.session.undo = history;
+        // A box typed `name = expression` defined the parameter `name` (#7567).
+        let defined: Vec<_> = result["defined"].as_array().into_iter().flatten().filter_map(Value::as_str).map(|name| format!("`{name}`")).collect();
+        match defined.as_slice() {
+            [] => {}
+            [name] => app.set_status(format!("Parameter {name} defined"), false),
+            names => app.set_status(format!("Parameters {} defined", names.join(", ")), false),
+        }
         Ok(result)
     }
 }
@@ -551,6 +638,9 @@ fn run_shape(app: &mut SolveApp, t: &Tool) -> Result<Vec<String>, String> {
             };
             match crate::sketch_dims::locked_value(app, t, "Sweep") {
                 Some(sweep) => json!({"center": center, "start": arg(&p[1]), "sweep": sweep.to_degrees()}),
+                None if center_arc_sweep(t, p[2].0) < 0.0 => {
+                    json!({"center": center, "start": arg(&p[1]), "end": xy(&p[2]), "clockwise": true})
+                }
                 None => json!({"center": center, "start": arg(&p[1]), "end": xy(&p[2])}),
             }
         }
@@ -691,7 +781,7 @@ pub(crate) fn projection_preselection(selection: &[solidcraft_engine::Sel]) -> O
 
 /// `x` or `y` when the origin axis `name` is the active sketch's own x or y axis: along it, and
 /// through the sketch's origin.
-fn sketch_axis_of(app: &SolveApp, name: &str) -> Option<&'static str> {
+pub(crate) fn sketch_axis_of(app: &SolveApp, name: &str) -> Option<&'static str> {
     use solidcraft_engine::geom::Vec3;
     let dir = match name {
         "X" => Vec3::X,
@@ -894,7 +984,7 @@ pub(crate) fn preview_curve(
         }
         ("sketch.arc.center_point", [c, a]) => {
             let start = (*a - *c).angle();
-            let sweep = sweep.unwrap_or_else(|| ((hover - *c).angle() - start).rem_euclid(std::f64::consts::TAU));
+            let sweep = sweep.unwrap_or_else(|| center_arc_sweep(t, hover));
             if !sweep.is_finite() || sweep.abs() <= 1e-9 || sweep.abs() >= std::f64::consts::TAU {
                 return None;
             }

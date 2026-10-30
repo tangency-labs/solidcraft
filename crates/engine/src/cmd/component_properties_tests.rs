@@ -98,6 +98,114 @@ fn properties_reject_hostile_identifiers_and_options() {
     for path in [json!([]), json!(["bad"]), json!([0]), json!(vec![occurrence; 65])] {
         assert!(s.execute("occurrence.properties", &json!({"occurrence": occurrence, "path": path})).is_err());
     }
+    for about in [json!("origin"), json!([1, 2]), json!([1, 2, "z"]), json!([f64::MAX, 0, 0]), json!({"x": 1})] {
+        assert!(s.execute("component.properties", &json!({"about": about})).is_err(), "{about}");
+    }
+}
+
+fn tensor(v: &Value) -> [[f64; 3]; 3] {
+    [0, 1, 2].map(|r| [0, 1, 2].map(|c| v[r][c].as_f64().unwrap_or_else(|| panic!("no [{r}][{c}] in {v}"))))
+}
+
+fn tensor_close(actual: &Value, want: [[f64; 3]; 3], rel: f64) {
+    let got = tensor(actual);
+    let scale = want.iter().flatten().fold(0.0f64, |m, x| m.max(x.abs()));
+    for (g, w) in got.iter().flatten().zip(want.iter().flatten()) {
+        assert!((g - w).abs() <= rel * scale, "{got:?} != {want:?}");
+    }
+}
+
+/// #8095: a 10 × 20 × 30 mm steel box's inertia tensor about its centre of mass is
+/// m (b² + c²) / 12 … on the diagonal, its principal axes are its edges, and turning its
+/// placement turns the tensor with it.
+#[test]
+fn box_inertia_matches_the_closed_form_and_turns_with_its_placement() {
+    let mut s = Session::default();
+    let c = run(&mut s, "component.create", json!({"name": "Block", "grounded": false}));
+    run(&mut s, "solid.box", json!({"length": 10, "width": 20, "height": 30, "body_name": "Block"}));
+    run(&mut s, "material.assign", json!({"bodies": ["Block"], "material": "Steel"}));
+    let r = run(&mut s, "component.properties", json!({"component": c["component"]}));
+    let total = &r["total"];
+    close(&total["bbox"]["max"][1], 20.0);
+    let m = total["mass_g"].as_f64().unwrap();
+    close(&total["mass_g"], 6000.0 * s.doc.density("Block") / 1000.0);
+    let (a, b, h) = (10.0, 20.0, 30.0);
+    let (ixx, iyy, izz) = (m * (b * b + h * h) / 12.0, m * (a * a + h * h) / 12.0, m * (a * a + b * b) / 12.0);
+    tensor_close(&total["inertia_g_mm2"], [[ixx, 0.0, 0.0], [0.0, iyy, 0.0], [0.0, 0.0, izz]], 1e-9);
+    tensor_close(&r["bodies"][0]["inertia_g_mm2"], [[ixx, 0.0, 0.0], [0.0, iyy, 0.0], [0.0, 0.0, izz]], 1e-9);
+    // Smallest first: about the longest edge (z), largest about the shortest (x).
+    for (k, want) in [izz, iyy, ixx].into_iter().enumerate() {
+        assert!((total["principal_moments_g_mm2"][k].as_f64().unwrap() - want).abs() < 1e-9 * ixx, "{total}");
+    }
+    // Right-handed: z × y is −x.
+    assert_eq!(total["principal_axes"], json!([[0.0, 0.0, 1.0], [0.0, 1.0, 0.0], [-1.0, 0.0, 0.0]]));
+    for (k, want) in [5.0, 10.0, 15.0].iter().enumerate() {
+        close(&total["first_moment_g_mm"][k], m * want);
+    }
+    // A quarter turn about z swaps the x and y moments; the principal moments stay.
+    run(&mut s, "occurrence.move", json!({"occurrence": c["occurrence"], "axis": [0, 0, 1], "angle": "90 deg", "capture": false}));
+    let turned = run(&mut s, "component.properties", json!({"component": c["component"]}));
+    tensor_close(&turned["total"]["inertia_g_mm2"], [[iyy, 0.0, 0.0], [0.0, ixx, 0.0], [0.0, 0.0, izz]], 1e-9);
+    assert_eq!(turned["total"]["principal_moments_g_mm2"], total["principal_moments_g_mm2"]);
+    let x_axis = &turned["total"]["principal_axes"][2];
+    assert!(x_axis[0].as_f64().unwrap().abs() < 1e-9 && (x_axis[1].as_f64().unwrap().abs() - 1.0).abs() < 1e-9, "{turned}");
+}
+
+/// #8095: an assembly's tensor adds each placement's own about the shared centre of mass by
+/// parallel axes, and `about` takes it about any point; a cylinder's comes from its
+/// tessellation, close to m r² / 2 about its axis.
+#[test]
+fn assembly_inertia_adds_placements_by_parallel_axes_and_about_any_point() {
+    let mut s = Session::default();
+    let (component, _, body) = box_in(&mut s, "Block");
+    run(&mut s, "occurrence.copy", json!({"component": component, "translate": [20, 0, 0]}));
+    let root = run(&mut s, "component.properties", json!({"component": "root", "about": [0, 0, 0]}));
+    let total = &root["total"];
+    let m = s.doc.density(&body);
+    close(&total["mass_g"], 2.0 * m);
+    // Each 10 mm cube: m (10² + 10²) / 12 on its diagonal; each sits 10 mm along x from (15, 5, 5).
+    let own = m * 200.0 / 12.0;
+    let at_centre = [[2.0 * own, 0.0, 0.0], [0.0, 2.0 * own + 2.0 * m * 100.0, 0.0], [0.0, 0.0, 2.0 * own + 2.0 * m * 100.0]];
+    tensor_close(&total["inertia_g_mm2"], at_centre, 1e-9);
+    // About the origin: the parallel-axis term of the whole mass at (15, 5, 5).
+    let (mm, cv) = (2.0 * m, [15.0, 5.0, 5.0]);
+    let c2: f64 = cv.iter().map(|x| x * x).sum();
+    let at_origin = [0, 1, 2].map(|r| [0, 1, 2].map(|k| at_centre[r][k] + mm * (if r == k { c2 } else { 0.0 } - cv[r] * cv[k])));
+    assert_eq!(total["inertia_about"]["point"], json!([0.0, 0.0, 0.0]));
+    tensor_close(&total["inertia_about"]["inertia_g_mm2"], at_origin, 1e-9);
+    assert!(total.get("inertia_about").is_some() && run(&mut s, "component.properties", json!({}))["total"].get("inertia_about").is_none());
+
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"radius": 8, "height": 10, "body_name": "Pin"}));
+    let r = run(&mut s, "component.properties", json!({}));
+    let (m, r2) = (r["total"]["mass_g"].as_f64().unwrap(), 64.0);
+    let i = tensor(&r["total"]["inertia_g_mm2"]);
+    assert!((i[2][2] - m * r2 / 2.0).abs() < 1e-3 * m * r2 / 2.0, "{i:?}");
+    assert!((i[0][0] - m * (3.0 * r2 + 100.0) / 12.0).abs() < 1e-3 * i[0][0], "{i:?}");
+}
+
+/// #8095: an open surface has no volume, so no tensor; the closed bodies beside it keep theirs.
+#[test]
+fn open_bodies_have_no_inertia_and_leave_the_closed_ones_alone() {
+    let mut s = Session::default();
+    for (command, params) in [
+        ("sketch.create", json!({"plane": "XY", "name": "Profile"})),
+        ("sketch.line", json!({"points": [[30, 0], [30, 40]], "ids": ["side"]})),
+        ("sketch.finish", json!({})),
+        ("surface.revolve", json!({"sketch": "Profile", "curves": ["side"], "axis": "y", "angle": "270 deg", "body_name": "Tube"})),
+    ] {
+        run(&mut s, command, params);
+    }
+    let open = run(&mut s, "component.properties", json!({"about": [1, 2, 3]}));
+    assert_eq!(open["bodies"][0]["inertia_g_mm2"], Value::Null);
+    for key in ["inertia_g_mm2", "principal_moments_g_mm2", "principal_axes"] {
+        assert_eq!(open["total"][key], Value::Null, "{key}");
+    }
+    assert_eq!(open["total"]["inertia_about"]["inertia_g_mm2"], Value::Null);
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [100, 0, 0], "body_name": "Box"}));
+    let both = run(&mut s, "component.properties", json!({}));
+    let m = both["total"]["mass_g"].as_f64().unwrap();
+    tensor_close(&both["total"]["inertia_g_mm2"], [[m * 200.0 / 12.0, 0.0, 0.0], [0.0, m * 200.0 / 12.0, 0.0], [0.0, 0.0, m * 200.0 / 12.0]], 1e-9);
 }
 
 #[test]

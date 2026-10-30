@@ -847,8 +847,8 @@ fn desktop_body(app: &mut SolveApp, ui: &mut egui::Ui) {
     let frame = Container::new(ui.ctx(), Surface::Viewport).edge_frame(egui::Color32::TRANSPARENT);
     let composer = Container::new(ui.ctx(), Surface::Viewport).edge(Id::new("sc_agent_chat_composer"), Edge::Bottom);
     composer.resizable(false).show_separator_line(false).frame(frame).show(ui, |ui| {
-        ui_kit::assistant_composer_footer(ui, |ui| {
-            ui_kit::assistant_composer(ui, focused, |ui| {
+        let footer = ui_kit::assistant_composer_footer(ui, |ui| {
+            let boxed = ui_kit::assistant_composer(ui, focused, |ui| {
                 // What Pick context chose for this message, each item with an ×.
                 if !app.agent_chat.picked_context.is_empty() {
                     let tray = app.agent_chat.picked_context.clone();
@@ -987,7 +987,9 @@ fn desktop_body(app: &mut SolveApp, ui: &mut egui::Ui) {
                     },
                 );
             });
+            crate::scenario::publish_rect("agent_chat:composer_box", boxed.response.rect);
         });
+        crate::scenario::publish_rect("agent_chat:composer_footer", footer.response.rect);
     });
     if let Some(at) = remove_picked_at {
         remove_picked(app, at);
@@ -1188,7 +1190,7 @@ fn switcher(app: &mut SolveApp, ui: &mut egui::Ui) {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-const FLATPAK_OVERRIDE: &str = "flatpak override --user ai.storyteller.solidcraft --filesystem=~/.nvm:ro --filesystem=~/.local/bin:ro --filesystem=~/.local/share/claude:ro --filesystem=~/.claude --filesystem=~/.claude.json --share=network";
+const FLATPAK_OVERRIDE: &str = "flatpak override --user io.tangencylabs.solidcraft --filesystem=~/.nvm:ro --filesystem=~/.local/bin:ro --filesystem=~/.local/share/claude:ro --filesystem=~/.claude --filesystem=~/.claude.json --share=network";
 
 #[cfg(not(target_arch = "wasm32"))]
 pub(super) fn no_agents_message() -> String {
@@ -1978,7 +1980,7 @@ mod tests {
             child.args(["--exact", "agent_chat::panel::tests::empty_discovery_explains_flatpak_permissions", "--nocapture"]);
             child.env(CHILD, case);
             if case == "flatpak" {
-                child.env("FLATPAK_ID", "ai.storyteller.solidcraft");
+                child.env("FLATPAK_ID", "io.tangencylabs.solidcraft");
             } else {
                 child.env_remove("FLATPAK_ID");
             }

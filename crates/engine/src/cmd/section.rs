@@ -19,6 +19,7 @@ fn section(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "inspect.section";
     if bool_(p, "clear").unwrap_or(false) {
         s.section = None;
+        s.status_slot(crate::status_items::StatusId::Section, false);
         s.revision += 1;
         return Ok(json!({"section": null}));
     }
@@ -75,6 +76,8 @@ fn section(s: &mut Session, p: &Value) -> Result<Value> {
     let origin = origin + normal * offset * if bool_(p, "flip").unwrap_or(false) { -1.0 } else { 1.0 };
     s.section = Some((origin, normal));
     s.section_hatch = bool_(p, "hatch").unwrap_or(true);
+    s.status_slot(crate::status_items::StatusId::Section, true);
+    s.status_activated(crate::status_items::StatusId::Section);
     s.revision += 1;
     let mut section = json!({"origin": origin, "normal": normal, "hatch": s.section_hatch});
     if let Some(i) = axis {

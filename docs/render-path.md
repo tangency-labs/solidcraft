@@ -17,8 +17,8 @@ the pending/ready/failed host, and failures are not retried on each viewport ins
 It opens its independent job device on the viewport's selected adapter,
 so software fallback and safe mode do not rediscover a failing hardware driver.
 An incompatible explicit GPU policy leaves progressive rendering unavailable there.
-The path tracer runs on Vulkan only (#3217). A viewport on D3D12 is reopened on the
-same GPU through Vulkan. Where there is no Vulkan driver (macOS for now, Windows over
+The path tracer runs on Vulkan, or on Metal on macOS (#3217). A viewport on D3D12 is reopened on the
+same GPU through Vulkan. Where there is no Vulkan or Metal driver (Windows over
 Remote Desktop or on the WARP software adapter, older drivers), the path executor reports
 itself unavailable and images render on the CPU. On an RTX 4090, D3D12 was never faster:
 equal per sample with DXC and about 55% slower with FXC, and it compiles the path shader

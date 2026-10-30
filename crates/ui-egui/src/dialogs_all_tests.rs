@@ -13,7 +13,10 @@ fn measure_input_fits_external_sketch_geometry() {
     assert!(fits(accept, &curve));
     assert!(fits(accept, &point));
     assert_eq!(d.items(), vec![curve.clone(), point.clone()]);
-    assert_eq!(d.candidate(&h.app.session, &Hit::SketchCurve { sketch: 17, id: "line1".into(), straight: true }), Some(curve.clone()));
+    assert_eq!(
+        d.candidate(&h.app.session, &Hit::SketchCurve { sketch: 17, id: "line1".into(), straight: true, point: solidcraft_engine::geom::Vec3::ZERO }),
+        Some(curve.clone())
+    );
     assert_eq!(
         d.candidate(&h.app.session, &Hit::SketchPoint { sketch: 17, id: "p1".into(), at: solidcraft_engine::geom::Vec2::new(0.0, 0.0) }),
         Some(point.clone())
@@ -68,6 +71,9 @@ fn representative(h: &Harness, command: &str) -> Dialog {
         }
         if command == "solid.coil" {
             continue; // an empty Profile input keeps the primitive section, which this form checks
+        }
+        if command == "solid.cylinder" {
+            continue; // its face and reference edges place it (cylinder reference tests); this form checks its fields
         }
         if matches!(input.label, "Rail" | "Second Rail" | "Pass through" | "Direction" | "Roller (optional)" | "Tip (optional)") {
             continue;
@@ -252,6 +258,42 @@ form_case!(shell, "solid.shell", ["Thickness", "Direction"]);
 form_case!(draft, "solid.draft", ["Angle"]);
 form_case!(mirror, "solid.mirror", ["Operation"]);
 
+/// The Motion Study's and Motion Trace's hints read in the user's language: the dialogs drew them
+/// as they got them, in English.
+#[test]
+fn motion_dialog_hints_are_translated() {
+    fn texts(shape: &egui::Shape, out: &mut Vec<String>) {
+        match shape {
+            egui::Shape::Text(text) => out.push(text.galley.job.text.clone()),
+            egui::Shape::Vec(shapes) => shapes.iter().for_each(|shape| texts(shape, out)),
+            _ => {}
+        }
+    }
+    let mut h = fixture();
+    h.app.preferences.language = "ja".into();
+    let _japanese = crate::i18n::scope("ja");
+    for (command, english) in [("motion.study", "add a key for a joint first"), ("motion.trace", "select a point on a component")] {
+        let mut d = Dialog::for_command(&h.app, command).unwrap();
+        let mut painted = Vec::new();
+        for _ in 0..2 {
+            let mut out = h.ctx.run_ui(
+                egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, vec2(320.0, 1600.0))), ..Default::default() },
+                |ui| {
+                    ui.set_width(264.0);
+                    ui_kit::scope(ui, |ui| {
+                        rows(&mut h.app, &h.ctx, &mut d, ui);
+                    });
+                },
+            );
+            out.textures_delta.clear();
+            painted.clear();
+            out.shapes.iter().for_each(|shape| texts(&shape.shape, &mut painted));
+        }
+        assert!(!painted.iter().any(|p| p == english), "{command} paints {english:?} in Japanese");
+        assert!(painted.iter().any(|p| p == crate::i18n::tr_label(english)), "{command} paints {painted:?}");
+    }
+}
+
 fn mirror_preselection() -> (Harness, Vec<Sel>) {
     let mut h = Harness::new();
     h.app.run("sketch.create", json!({"plane":"XY","name":"Sketch1"})).unwrap();
@@ -356,19 +398,65 @@ form_case!(web, "solid.web", ["Direction", "Thickness", "Depth"]);
 form_case!(emboss, "solid.emboss", ["Depth", "Type"]);
 form_case!(replace_face, "solid.replace_face", []);
 form_case!(boundary_fill, "solid.boundary_fill", ["Cells", "Operation"]);
-form_case!(align, "solid.align", ["From Snap", "To Snap"]);
+form_case!(align, "solid.align", ["Object Type", "From Snap", "To Snap"]);
+
+#[test]
+fn align_components_mode_switches_and_aligns_only_selected_instance() {
+    let mut h = Harness::new();
+    let comp = h.app.run("component.create", json!({"name": "Extrusion"})).unwrap()["component"].as_u64().unwrap();
+    h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 60, "body_name": "Beam"})).unwrap();
+    h.app.run("component.activate", json!({"component": "root"})).unwrap();
+    let second = h.app.run("occurrence.copy", json!({"component": comp, "translate": [40, 0, 0]})).unwrap()["occurrence"].as_u64().unwrap();
+
+    // Preselecting an occurrence opens Align in Components mode and advances to From.
+    let picked = vec![Sel::Occurrence { path: vec![second] }];
+    h.app.session.selection = picked.clone();
+    h.app.start("solid.align");
+    h.frames(4);
+    assert_eq!(h.app.dialog.as_ref().unwrap().inputs[0].label, "Components");
+    assert_eq!(h.app.dialog.as_ref().unwrap().inputs[0].items, picked);
+    assert_eq!(h.app.dialog.as_ref().unwrap().active, 1);
+
+    // Switching Object Type to Bodies and back restores the preselected occurrence.
+    mirror_object_type(&mut h, "Bodies");
+    assert_eq!(h.app.dialog.as_ref().unwrap().inputs[0].label, "Bodies");
+    assert!(h.app.dialog.as_ref().unwrap().inputs[0].items.is_empty());
+    mirror_object_type(&mut h, "Components");
+    assert_eq!(h.app.dialog.as_ref().unwrap().inputs[0].label, "Components");
+    assert_eq!(h.app.dialog.as_ref().unwrap().inputs[0].items, picked);
+
+    let from = face_sel(&h.app.session, Vec3::new(45.0, 5.0, 0.0)).unwrap();
+    let to = face_sel(&h.app.session, Vec3::new(10.0, 5.0, 30.0)).unwrap();
+    {
+        let d = h.app.dialog.as_mut().unwrap();
+        d.inputs[1].items = vec![from];
+        d.inputs[2].items = vec![to];
+    }
+    let commands = apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
+    assert_eq!(commands[0].0, "occurrence.align");
+    assert_eq!(commands[0].1["paths"], json!([[second]]));
+    for (command, params) in commands {
+        h.app.run(&command, params).unwrap();
+    }
+
+    let st = h.app.session.world_state();
+    let b1 = st.body("Beam").unwrap().mesh().bounds();
+    assert!((b1.min.x - 0.0).abs() < 1e-5 && (b1.max.x - 10.0).abs() < 1e-5, "{b1:?}");
+    let b2 = st.body("Beam (Extrusion:2)").unwrap().mesh().bounds();
+    assert!((b2.min.x - 10.0).abs() < 1e-5 && (b2.max.x - 70.0).abs() < 1e-5, "{b2:?}");
+}
 form_case!(remove, "solid.remove", []);
 form_case!(path_pattern, "solid.pattern.path", ["Type", "Object Type", "Quantity", "Spacing"]);
 form_case!(pipe, "solid.pipe", ["Diameter", "Wall", "Operation"]);
 form_case!(stock, "solid.bounding_solid", ["Margin"]);
 form_case!(frame_member, "frame.member", ["All Lines", "Anchor", "Angle", "Mirror", "Name"]);
 form_case!(thread, "solid.thread", ["Profile", "Size", "Pitch", "Designation"]);
-form_case!(primitive_box, "solid.box", ["length", "width", "height", "Operation"]);
-form_case!(cylinder, "solid.cylinder", ["diameter", "height", "Operation"]);
-form_case!(sphere, "solid.sphere", ["diameter", "Operation"]);
-form_case!(torus, "solid.torus", ["major", "minor", "Operation"]);
-form_case!(cone, "solid.cone", ["diameter", "top_diameter", "height", "Operation"]);
-form_case!(coil, "solid.coil", ["diameter", "revolutions", "pitch", "section_size", "Operation"]);
+form_case!(primitive_box, "solid.box", ["ui.length", "ui.width", "ui.height", "Operation"]);
+form_case!(cylinder, "solid.cylinder", ["ui.diameter", "ui.height", "Operation"]);
+form_case!(sphere, "solid.sphere", ["ui.diameter", "Operation"]);
+form_case!(torus, "solid.torus", ["ui.major_radius", "ui.minor_radius", "Operation"]);
+form_case!(cone, "solid.cone", ["ui.diameter", "ui.top_diameter", "ui.height", "Operation"]);
+form_case!(coil, "solid.coil", ["ui.diameter", "ui.revolutions", "ui.pitch", "ui.section_size", "Operation"]);
 form_case!(combine, "solid.combine", ["Operation"]);
 form_case!(surface_extrude, "surface.extrude", ["Distance", "Direction"]);
 form_case!(surface_revolve, "surface.revolve", ["Angle", "Direction"]);
@@ -415,6 +503,47 @@ fn registry_dialog_inventory_has_no_unclassified_feature_forms() {
     for spec in solidcraft_engine::command_specs() {
         let Some(d) = Dialog::for_command(&h.app, spec.id) else { continue };
         assert!(super::command(&d.kind).is_some(), "{}: {:?}", spec.id, d.kind);
+    }
+}
+
+/// Texts these dialogs draw themselves read in the user's language: the joints' Play button, the
+/// Motion Study's Loop, the Stitch tolerance hint, the Flange type and the Emboss note.
+#[test]
+fn hand_drawn_dialog_texts_are_translated() {
+    fn texts(shape: &egui::Shape, out: &mut Vec<String>) {
+        match shape {
+            egui::Shape::Text(text) => out.push(text.galley.job.text.clone()),
+            egui::Shape::Vec(shapes) => shapes.iter().for_each(|shape| texts(shape, out)),
+            _ => {}
+        }
+    }
+    let mut h = fixture();
+    h.app.preferences.language = "ja".into();
+    let _japanese = crate::i18n::scope("ja");
+    for (command, english) in [
+        ("joint.gear", "▶ Play"),
+        ("motion.study", "Loop"),
+        ("surface.stitch", "tight"),
+        ("sheet.flange", "Base"),
+        ("solid.emboss", "Orthogonal line profiles tangent to one supported cylinder wrap automatically. Pick a wall to choose a target."),
+    ] {
+        let mut d = Dialog::for_command(&h.app, command).unwrap();
+        let mut painted = Vec::new();
+        for _ in 0..2 {
+            let mut out = h.ctx.run_ui(
+                egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, vec2(320.0, 1600.0))), ..Default::default() },
+                |ui| {
+                    ui.set_width(264.0);
+                    ui_kit::scope(ui, |ui| {
+                        rows(&mut h.app, &h.ctx, &mut d, ui);
+                    });
+                },
+            );
+            out.textures_delta.clear();
+            painted.clear();
+            out.shapes.iter().for_each(|shape| texts(&shape.shape, &mut painted));
+        }
+        assert!(!painted.iter().any(|p| p == english), "{command} paints {english:?} in Japanese: {painted:?}");
     }
 }
 
@@ -863,6 +992,33 @@ fn viewport_profile_click_returns_extrude_value_focus() {
     assert!((bounds.max.z - bounds.min.z - 30.0).abs() < 1e-7);
 }
 
+/// Typing `depth = 30` in the extrude dialog's distance defines the user parameter `depth` and
+/// the extrude uses it, in the dialog's one undo step; the preview made nothing (#4071).
+#[test]
+fn a_dialog_field_typed_as_a_definition_defines_the_parameter() {
+    let mut h = extrude_focus_fixture();
+    let undo = h.app.session.undo.len();
+    // As above: the first click returns focus to the distance, the second picks the profile.
+    h.step(&json!({"click":{"world":[15,10,0]}})).unwrap();
+    h.step(&json!({"text":"30"})).unwrap();
+    h.step(&json!({"click":{"world":[15,10,0]}})).unwrap();
+    h.step(&json!({"text":"depth = 30"})).unwrap();
+    assert!(matches!(&h.app.dialog.as_ref().unwrap().kind, Kind::Extrude { distance, .. } if distance == "depth = 30"));
+    h.settle();
+    assert!(h.app.session.doc.param("depth").is_none(), "the preview defined nothing");
+    h.step(&json!({"key":"Enter"})).unwrap();
+    h.settle();
+    assert!(h.app.dialog.is_none(), "{:?} {:?}", h.app.status, h.app.dialog.as_ref().map(|d| (d.error.clone(), format!("{:?}", d.kind))));
+    let doc = &h.app.session.doc;
+    let depth = doc.param("depth").expect("the user parameter was added");
+    assert!(!depth.model && depth.expr == "30" && depth.unit == "mm", "{depth:?}");
+    let extrude = doc.features.iter().rev().find(|f| f.name.starts_with("Extrude")).unwrap();
+    assert!(extrude.kind.inputs().iter().any(|(label, e, _)| *label == "Distance" && e == "depth"), "{:?}", extrude.kind.inputs());
+    assert_eq!(h.app.session.undo.len(), undo + 1, "one undo step");
+    let bounds = h.app.session.world_state().bodies.first().unwrap().mesh().bounds();
+    assert!((bounds.max.z - bounds.min.z - 30.0).abs() < 1e-7);
+}
+
 #[test]
 fn viewport_empty_click_falls_back_to_first_numeric_dialog_field() {
     let mut h = extrude_focus_fixture();
@@ -930,4 +1086,90 @@ fn extrude_builds_the_one_region_clicked_where_the_face_outline_cuts_a_profile()
         let volume = h.app.run("inspect.measure", json!({})).unwrap()["total"]["volume_mm3"].as_f64().unwrap();
         assert!(((volume - before) - area * 5.0).abs() < 5e-3 * area * 5.0, "x = {x}: {volume} - {before} vs {}", area * 5.0);
     }
+}
+
+/// Every selection field of every command's dialog is labelled with a message the catalogs carry,
+/// so it reads in the user's language ("First edge", "Second point" read English everywhere when
+/// they were missing).
+#[test]
+fn every_selection_field_label_is_translated() {
+    let h = fixture();
+    let _japanese = crate::i18n::scope("ja");
+    let mut missing = std::collections::BTreeSet::new();
+    for spec in solidcraft_engine::command_specs() {
+        let Some(d) = Dialog::for_command(&h.app, spec.id) else { continue };
+        for input in &d.inputs {
+            let label = input.label.trim();
+            if label.chars().any(|c| c.is_ascii_alphabetic()) && crate::i18n::tr_label(label) == label {
+                missing.insert(format!("{}: {label}", spec.id));
+            }
+        }
+    }
+    assert!(missing.is_empty(), "selection fields without a message: {missing:#?}");
+}
+
+#[test]
+fn align_components_picks_the_placement_under_the_active_component_and_warns_when_shared() {
+    let mut h = Harness::new();
+    let made = h.app.run("component.create", json!({"name": "Frame", "grounded": false})).unwrap();
+    let (frame, a) = (made["component"].as_u64().unwrap(), made["occurrence"].as_u64().unwrap());
+    let bracket = h.app.run("component.create", json!({"name": "Bracket", "grounded": false})).unwrap()["occurrence"].as_u64().unwrap();
+    h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 4, "body_name": "Plate"})).unwrap();
+    h.app.run("component.activate", json!({"component": "root"})).unwrap();
+    let plate = h.app.session.world_state().bodies.first().map(|b| b.name.clone()).unwrap();
+
+    // With the design active, a click on the part inside Frame picks the Frame placement.
+    assert_eq!(occurrence_path_of_body(&h.app.session, &plate), Some(vec![a]));
+    // With that Frame placement active, the same click picks the part inside it.
+    h.app.run("component.activate", json!({"component": frame, "occurrence": a, "path": [a]})).unwrap();
+    assert_eq!(occurrence_path_of_body(&h.app.session, &plate), Some(vec![a, bracket]));
+    assert!(!align_moves_shared(&h.app.session, &[Sel::Occurrence { path: vec![a, bracket] }]), "Frame is placed once");
+
+    // Once Frame is placed twice, the part's placement inside it is shared: the dialog says so.
+    h.app.run("component.activate", json!({"component": "root"})).unwrap();
+    h.app.run("occurrence.copy", json!({"component": frame, "translate": [0, 50, 0]})).unwrap();
+    assert!(align_moves_shared(&h.app.session, &[Sel::Occurrence { path: vec![a, bracket] }]));
+    assert!(!align_moves_shared(&h.app.session, &[Sel::Occurrence { path: vec![a] }]), "a top-level placement is its own");
+
+    h.app.session.selection = vec![Sel::Occurrence { path: vec![a] }];
+    h.app.start("solid.align");
+    h.frames(4);
+    assert!(h.widget(ALIGN_SHARED_WARNING).is_none(), "no warning for a top-level pick");
+    h.app.dialog.as_mut().unwrap().inputs[0].items = vec![Sel::Occurrence { path: vec![a, bracket] }];
+    h.frames(4);
+    assert!(h.widget(ALIGN_SHARED_WARNING).is_some(), "the shared pick is called out");
+}
+
+/// OK on the editor of a pattern behind the history marker leaves it rolled back, so the view
+/// does not change: the status line says why, where the edit used to look as if it had silently
+/// failed (#8100).
+#[test]
+fn ok_on_a_rolled_back_pattern_editor_says_it_is_not_built() {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    for (id, params) in [
+        ("solid.box", json!({"length":40,"width":30,"height":10,"corner":[0,0,0],"body_name":"Plate"})),
+        ("solid.cylinder", json!({"radius":2,"height":20,"base":[10,15,-5],"operation":"cut","targets":["Plate"],"name":"Cut"})),
+        ("solid.pattern.circular", json!({"features":["Cut"],"axis":{"origin":[20,15,0],"dir":[0,0,1]},"count":2,"name":"Pattern"})),
+        ("timeline.roll_to", json!({"position":2})),
+    ] {
+        h.app.run(id, params).unwrap();
+    }
+    let pattern = h.app.session.doc.features.last().unwrap().id;
+    h.app.edit_feature(pattern);
+    h.settle();
+    assert!(h.app.dialog.is_some(), "the pattern's editor opens");
+    h.step(&json!({"click":{"handle":"dialog:OK"}})).unwrap();
+    for _ in 0..500 {
+        if h.app.dialog.is_none() {
+            break;
+        }
+        h.frames(1);
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    assert!(h.app.dialog.is_none(), "the edit is applied");
+    assert_eq!(h.app.session.doc.marker, Some(2), "the pattern stays behind the marker");
+    let (text, _, error) = h.app.status.clone().unwrap();
+    assert!(!error, "{text}");
+    assert!(text.starts_with("Pattern changed, but it is after the history marker"), "{text}");
 }

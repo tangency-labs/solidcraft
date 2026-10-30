@@ -1,7 +1,7 @@
 # UI localization
 
-SolidCraft embeds its translations and works offline. English, Arabic, Czech, Danish, German, English (UK), Spanish, French, Galician, Hebrew, Italian,
-Japanese, Korean, Malay, Norwegian Bokmål, Dutch, Polish, Brazilian Portuguese, Russian, Turkish, Ukrainian and Chinese are currently registered in `crates/ui-egui/src/i18n.rs`. Adding a language requires an
+SolidCraft embeds its translations and works offline. English, Arabic, Bosnian, Czech, Danish, German, English (UK), Spanish, French, Galician, Hebrew, Croatian, Italian,
+Japanese, Korean, Malay, Norwegian Bokmål, Dutch, Polish, Brazilian Portuguese, Russian, Serbian, Turkish, Ukrainian and Chinese are currently registered in `crates/ui-egui/src/i18n.rs`. Adding a language requires an
 embedded catalog and one registration there; the preferences selector and validation use the same
 registry.
 
@@ -44,7 +44,8 @@ that looks untranslated. Two guards catch that in the build:
 
 - `every_complete_catalog_carries_every_english_message` — adding a key to `en.json`
   without giving it to a complete catalog fails the tests. English is the source catalog,
-  Arabic, Hebrew, Japanese and Chinese are delivered complete; Danish, German, Spanish, Galician, Italian, Korean, Malay, Norwegian Bokmål, Polish, Brazilian Portuguese, Russian, French, Ukrainian and
+  Arabic, Hebrew, Japanese and Chinese are delivered complete; Bosnian, Croatian and Serbian carry
+  every English message today but are not held to it, so a new label may follow later in them; Danish, German, Spanish, Galician, Italian, Korean, Malay, Norwegian Bokmål, Polish, Brazilian Portuguese, Russian, French, Ukrainian and
   Turkish are partial — their gaps fall back to English and are reported by `cargo xtask i18n` without
   failing the build. A new label needs en, ar, he, ja, zh, de and ko; Russian, French, Ukrainian and Malay may
   follow later.
@@ -80,6 +81,19 @@ is Bozza; Counterbore is Lamatura and Countersink is Svasatura. Established tech
 terms such as Loft, Sweep, Spline and Offset remain unchanged. Command IDs, shortcuts,
 file formats, units and user-provided names are not translated.
 
+The Bosnian (`bs`, Bosanski), Croatian (`hr`, Hrvatski) and Serbian (`sr`, Српски) catalogs are
+original translations kept in step: Bosnian and Croatian are ijekavian in Latin script, Serbian is
+ekavian in Cyrillic. They share Skica (Sketch), Ograničenje (Constraint), Kota (Dimension),
+Ekstrudiraj (Extrude), Zaobljenje (Fillet), Skošenje (Chamfer), Niz (Pattern) and Spoj (Joint), and
+follow each standard where it differs: Tijelo/Tijelo/Telo (Body), Ravan/Ravnina/Ravan (Plane),
+Tačka/Točka/Tačka (Point), Ivica/Brid/Ivica (Edge), Ugao/Kut/Ugao (Angle), Rupa/Provrt/Rupa (Hole),
+Sačuvaj/Spremi/Sačuvaj (Save). A timeline feature is Operacija in Bosnian and Serbian and Značajka in
+Croatian; the Browser panel is Stablo modela, so it is never confused with a web browser
+(preglednik/pregledač); the undo history is Historija/Povijest/Istorija and the timeline Vremenska
+traka. In Serbian, brand and file names, acronyms, units, key names and placeholders stay in Latin
+script inside the Cyrillic text. Command IDs, shortcuts, file formats, units and user-provided names
+are not translated.
+
 The Norwegian Bokmål catalog (`nb`, shown as Norsk bokmål) uses Skisse (Sketch),
 Kropp (Body), Funksjon (timeline Feature), Binding (Constraint), Avrunding (Fillet)
 and Fas (Chamfer). Ground/Unground are Fest posisjon/Frigjør posisjon, Draft is
@@ -103,16 +117,21 @@ Chinese font-name list (`PingFang`, `Microsoft YaHei`, `Noto Sans CJK SC`, …) 
 glyph. No fonts are redistributed in native desktop distribution packages; native builds rely
 entirely on existing operating system fonts or craft-fonts.
 
-In the browser, `solidcraft-web` bundles a self-hosted Japanese font (`BIZUDPGothic-Regular.ttf`, licensed
-under SIL OFL 1.1) within the web distribution artifacts only. The font is loaded asynchronously from the same
-origin (`./fonts/BIZUDPGothic-Regular.ttf`) on-demand when the interface language is a CJK one, or, with
-any other interface language, the first time Japanese text (kana, kanji or full-width forms in a design name,
-file name, body name or typed text) is drawn, without contacting any external CDNs or third-party servers.
-A session that never shows such text downloads no font. If font loading fails with a CJK interface, the web
-interface shows English for that session only to prevent missing glyphs (tofu); the saved language
-preference is kept, so the next visit tries again. The bundled font specifically targets Japanese; it also
-renders the kanji Chinese shares with Japanese, while Korean (Hangul) and simplified-only Chinese characters
-are not covered, so a self-hosted SC/Korean font bundle remains follow-up work for full web coverage.
+In the browser, `solidcraft-web` ships self-hosted script fonts (SIL OFL 1.1) in the web distribution
+artifacts only, loaded asynchronously from the same origin without contacting any external CDNs or
+third-party servers:
+
+- Japanese (and Hangul-less Korean UI for now): `./fonts/BIZUDPGothic-Regular.ttf`
+- Simplified Chinese (`zh`): `./fonts/CraftUI-SC.otf` (a locale-glyph subset of Noto Sans SC, renamed
+  under the OFL so it does not use the reserved name Noto)
+- Traditional Chinese (`zh-TW`): `./fonts/CraftUI-TC.otf` (same for Noto Sans TC)
+
+A CJK interface language fetches the matching face on demand. With any other interface language, the
+first time Japanese text (kana, kanji or full-width forms in a design name, file name, body name or
+typed text) is drawn, the Japanese face is fetched (#720). A session that never shows such text
+downloads no script font. If the needed face fails to load, the web interface shows English for that
+session only to prevent missing glyphs (tofu); the saved language preference is kept, so the next
+visit tries again. Korean Hangul coverage on the web remains follow-up work.
 
 ## Right-to-left text
 

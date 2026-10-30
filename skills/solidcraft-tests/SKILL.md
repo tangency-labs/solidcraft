@@ -12,7 +12,7 @@ The long form is `docs/book/src/dev/testing.md`.
 - Engine tests sit next to the code or in `*_tests.rs` files; they measure the result (volume, area, face/edge/vertex counts) against a value you can derive.
 - UI scenarios are JSON in `crates/ui-egui/tests/scenarios/*.json`; a new file is picked up automatically. Put `{"pending": "why"}` in a scenario that records a bug before it is fixed, and remove it in the fixing PR.
 - Reference tests are `tests/oracle/<case>/recipe.json` with an `expected.json` beside it, run by `cargo xtask oracle`. Expected values are worked out in closed form (`tools/oracle-analytic/`) or computed by FreeCAD run as a separate program (`tools/freecad-oracle/`). A case that fails on a known bug names its issue (`"known_failure": "#123"`). Never change an expected value to match SolidCraft's output, and never take one from a commercial CAD product.
-- Crash fixes: a regression test, started from the crash report's `design.solidcraft` and `replay.json` (`skills/solidcraft-crash-safety/SKILL.md`).
+- Crash fixes: a regression test, started from the crash report's `design.sc` and `replay.json` (`skills/solidcraft-crash-safety/SKILL.md`).
 
 ## A failing test needs its fix
 A failing test without its fix cannot merge: it turns `main` red for everyone. Include the fix in the same PR, or mark the test `#[ignore = "fails until #123 is fixed"]` and remove that line in the PR that fixes it.

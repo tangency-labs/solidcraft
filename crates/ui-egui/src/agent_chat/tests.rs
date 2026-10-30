@@ -214,7 +214,7 @@ fn a_messages_changes_undo_as_one_step() {
 #[test]
 fn file_actions_wait_for_the_user() {
     let (mut app, tx) = app_in_a_turn();
-    let dir = std::env::temp_dir().join(format!("sc-agent-chat-approve-{}", std::process::id()));
+    let dir = solidcraft_engine::io::vfs::temp_dir().join(format!("sc-agent-chat-approve-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let path = dir.join("a.solidcraft");
     let save = json!({"command": "file.save", "params": {"path": path.to_string_lossy()}, "allow_paths": [dir.to_string_lossy()]});
@@ -466,7 +466,7 @@ fn permission_modes_decide_what_asks() {
     decline_all(&mut app, "test");
     // Allow everything, set for this agent only.
     app.preferences.agent_permissions.insert("codex".into(), agents::Mode::All);
-    let dir = std::env::temp_dir().join(format!("sc-agent-chat-all-{}", std::process::id()));
+    let dir = solidcraft_engine::io::vfs::temp_dir().join(format!("sc-agent-chat-all-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let path = dir.join("b.solidcraft");
     let save = ask(
@@ -2843,4 +2843,62 @@ fn a_screenshot_card_hides_the_path_until_details() {
     h.call("ui.click", json!({"x": card.x, "y": card.y}));
     h.frames(3);
     assert!(h.widget("Result").is_some() && h.widget(path).is_some(), "Details holds the full path");
+}
+
+/// The composer's input box fills its parent composer area on all four sides, in every layout:
+/// the only inset left is the text's own padding inside the box (no second margin around it).
+#[test]
+fn the_composer_box_fills_its_parent_in_every_layout() {
+    use crate::scenario::rect_of;
+    for (layout, popped) in [("floating", false), ("docked", false), ("floating", true), ("docked", true)] {
+        let mut h = narrow_chat();
+        h.call("ui.resize", json!({"width": 1600, "height": 1000}));
+        h.call("ui.set", json!({"layout": layout}));
+        h.app.preferences.agent_chat_popped = popped;
+        h.app.agent_chat.state = Some(State::Ready);
+        h.frames(4);
+        let footer = rect_of("agent_chat:composer_footer").unwrap_or_else(|| panic!("{layout} popped={popped}: the composer area"));
+        let boxed = rect_of("agent_chat:composer_box").expect("the input box");
+        let (l, r, t, b) =
+            (boxed.left() - footer.left(), footer.right() - boxed.right(), boxed.top() - footer.top(), footer.bottom() - boxed.bottom());
+        for (edge, gap) in [("left", l), ("right", r), ("top", t), ("bottom", b)] {
+            assert!(gap.abs() <= 1.0, "{layout} popped={popped}: box {edge} edge is {gap} from its parent ({boxed:?} in {footer:?})");
+        }
+        let input = rect_of("agent_chat:input").expect("the text");
+        assert!(input.left() > boxed.left() + 2.0, "{layout} popped={popped}: the text keeps its own padding");
+        let send = rect_of("agent_chat:send").expect("Send");
+        assert!(boxed.contains_rect(send), "{layout} popped={popped}: Send stays inside the box");
+    }
+}
+
+/// The composer hint (idle and busy, in every language) stays on one row, even at the narrowest
+/// panel, and is cut with an ellipsis instead of wrapping.
+#[test]
+fn the_composer_hint_stays_on_one_row_at_the_narrowest_width() {
+    let mut h = narrow_chat();
+    h.app.agent_chat.state = Some(State::Ready);
+    h.frames(4);
+    let width = crate::scenario::rect_of("agent_chat:input").expect("the text box").width();
+    let ctx = crate::fonts::test_context();
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/locales");
+    let mut checked = 0;
+    for entry in std::fs::read_dir(dir).unwrap().filter_map(Result::ok) {
+        let path = entry.path();
+        if path.extension().is_none_or(|x| x != "json") {
+            continue;
+        }
+        let language = path.file_stem().unwrap().to_string_lossy().into_owned();
+        let _scope = crate::i18n::scope(&language);
+        for key in ["ui.agent_chat_placeholder", "ui.agent_chat_placeholder_busy"] {
+            let hint = crate::i18n::tr(key).to_owned();
+            let mut rows = 0;
+            let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
+                rows = crate::ui_kit::assistant_hint_galley(ui, &hint, width - 2.0 * crate::theme::Tokens::get().form_inset).rows.len();
+            });
+            output.textures_delta.clear();
+            assert_eq!(rows, 1, "{language} {key} at {width} wide: {hint}");
+            checked += 1;
+        }
+    }
+    assert!(checked >= 20, "every language was checked");
 }

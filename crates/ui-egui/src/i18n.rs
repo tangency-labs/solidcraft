@@ -57,6 +57,7 @@ impl Catalog {
 
 static ENGLISH: Catalog = Catalog::new("en", "English", include_str!(concat!(env!("OUT_DIR"), "/locales/en.json")));
 static ARABIC: Catalog = Catalog::new("ar", "العربية", include_str!(concat!(env!("OUT_DIR"), "/locales/ar.json")));
+static BOSNIAN: Catalog = Catalog::new("bs", "Bosanski", include_str!(concat!(env!("OUT_DIR"), "/locales/bs.json")));
 static CZECH: Catalog = Catalog::new("cs", "Čeština", include_str!(concat!(env!("OUT_DIR"), "/locales/cs.json")));
 static DANISH: Catalog = Catalog::new("da", "Dansk", include_str!(concat!(env!("OUT_DIR"), "/locales/da.json")));
 static GERMAN: Catalog = Catalog::new("de", "Deutsch", include_str!(concat!(env!("OUT_DIR"), "/locales/de.json")));
@@ -66,6 +67,7 @@ static SPANISH: Catalog = Catalog::new("es", "Español (España)", include_str!(
 static FRENCH: Catalog = Catalog::new("fr", "Français", include_str!(concat!(env!("OUT_DIR"), "/locales/fr.json")));
 static GALICIAN: Catalog = Catalog::new("gl", "Galego", include_str!(concat!(env!("OUT_DIR"), "/locales/gl.json")));
 static HEBREW: Catalog = Catalog::new("he", "עברית", include_str!(concat!(env!("OUT_DIR"), "/locales/he.json")));
+static CROATIAN: Catalog = Catalog::new("hr", "Hrvatski", include_str!(concat!(env!("OUT_DIR"), "/locales/hr.json")));
 static HUNGARIAN: Catalog = Catalog::new("hu", "Magyar", include_str!(concat!(env!("OUT_DIR"), "/locales/hu.json")));
 static INDONESIAN: Catalog = Catalog::new("id", "Bahasa Indonesia", include_str!(concat!(env!("OUT_DIR"), "/locales/id.json")));
 static ITALIAN: Catalog = Catalog::new("it", "Italiano", include_str!(concat!(env!("OUT_DIR"), "/locales/it.json")));
@@ -78,6 +80,7 @@ static POLISH: Catalog = Catalog::new("pl", "Polski", include_str!(concat!(env!(
 static PORTUGUESE_BR: Catalog = Catalog::new("pt-BR", "Português (Brasil)", include_str!(concat!(env!("OUT_DIR"), "/locales/pt-BR.json")));
 static ROMANIAN: Catalog = Catalog::new("ro", "Română", include_str!(concat!(env!("OUT_DIR"), "/locales/ro.json")));
 static RUSSIAN: Catalog = Catalog::new("ru", "Русский", include_str!(concat!(env!("OUT_DIR"), "/locales/ru.json")));
+static SERBIAN: Catalog = Catalog::new("sr", "Српски", include_str!(concat!(env!("OUT_DIR"), "/locales/sr.json")));
 static SWEDISH: Catalog = Catalog::new("sv", "Svenska", include_str!(concat!(env!("OUT_DIR"), "/locales/sv.json")));
 static TURKISH: Catalog = Catalog::new("tr", "Türkçe", include_str!(concat!(env!("OUT_DIR"), "/locales/tr.json")));
 static UKRAINIAN: Catalog = Catalog::new("uk", "Українська", include_str!(concat!(env!("OUT_DIR"), "/locales/uk.json")));
@@ -90,6 +93,7 @@ static CHINESE_TRADITIONAL: Catalog = Catalog::new("zh-TW", "繁體中文", incl
 pub const LOCALES: &[&Catalog] = &[
     &ENGLISH,
     &ARABIC,
+    &BOSNIAN,
     &CZECH,
     &DANISH,
     &GERMAN,
@@ -98,6 +102,7 @@ pub const LOCALES: &[&Catalog] = &[
     &FRENCH,
     &GALICIAN,
     &HEBREW,
+    &CROATIAN,
     &HUNGARIAN,
     &INDONESIAN,
     &ITALIAN,
@@ -110,6 +115,7 @@ pub const LOCALES: &[&Catalog] = &[
     &PORTUGUESE_BR,
     &ROMANIAN,
     &RUSSIAN,
+    &SERBIAN,
     &SWEDISH,
     &TURKISH,
     &UKRAINIAN,
@@ -300,6 +306,14 @@ pub fn tr(id: &str) -> &str {
 pub fn tr_label(label: &str) -> &str {
     CURRENT.with(|current| current.get().label(label))
 }
+
+/// Every English catalog entry `(id, text)`, for Preferences search to match a translation
+/// back to the words it was written in.
+pub(crate) fn each_english_message(mut f: impl FnMut(&str, &str)) {
+    for (id, text) in ENGLISH.messages() {
+        f(id, text);
+    }
+}
 pub fn format(id: &str, args: &[(&str, &str)]) -> String {
     CURRENT.with(|current| current.get().format(id, args))
 }
@@ -330,6 +344,18 @@ mod tests {
                     // pending files hold it in reading order, as the catalogs do (#7527).
                     assert_eq!(Locale::for_language(&locale).text(&id), crate::bidi::visual_template(&text), "{locale}: {id}");
                 }
+            }
+        }
+    }
+
+    #[test]
+    fn construction_operation_names_exist_in_every_supported_catalog() {
+        let family = crate::sketch_families::family("sketch.construction_line").unwrap();
+        for catalog in LOCALES {
+            assert!(catalog.messages().get("ui.construction.ribbon_label").is_some_and(|v| !v.trim().is_empty()), "{}: ribbon label", catalog.id);
+            for id in family.commands {
+                let key = format!("cmd.{id}");
+                assert!(catalog.messages().get(&key).is_some_and(|v| !v.trim().is_empty()), "{}: {key}", catalog.id);
             }
         }
     }
@@ -657,13 +683,142 @@ mod tests {
         );
     }
 
+    #[test]
+    fn render_shell_labels_and_planned_reasons_translate_in_required_catalogs() {
+        for language in ["ja", "zh", "de", "ko"] {
+            let locale = Locale::for_language(language);
+            for label in [
+                "APPEARANCE",
+                "SCENE",
+                "LIGHTS",
+                "STAGE",
+                "CAMERA",
+                "SHOTS",
+                "LENS",
+                "FRAME",
+                "RESULT",
+                "IMAGE",
+                "BATCH",
+                "Shots",
+                "Shots Strip",
+                "Pick",
+                "Component",
+                "The live preview shows direct light only and no shadows.",
+            ] {
+                assert_ne!(locale.label(label), label, "{language}: {label}");
+            }
+            assert_ne!(locale.text("render.stage_preview_note"), Locale::for_language("en").text("render.stage_preview_note"));
+            // "Studio" is also the German word: require the translated catalog entry,
+            // rather than requiring its spelling to differ from English.
+            assert!(locale.0.messages().contains_key("toolbar.render_studio"));
+            assert_eq!(locale.label("STUDIO"), locale.text("toolbar.render_studio"));
+            let english: Messages = serde_json::from_str(ENGLISH.source).unwrap();
+            for id in english.keys().filter(|id| id.starts_with("render.inspector_")) {
+                assert!(locale.0.messages().contains_key(id), "{language}: {id}");
+            }
+            for id in [
+                "render.pick_label",
+                "render.pick_body",
+                "render.pick_face",
+                "render.pick_component",
+                "render.pick_help",
+                "render.tree_browser",
+                "render.tree_search",
+                "render.tree_more",
+                "render.shots_save",
+                "render.shots_name_help",
+                "render.shots_no_result",
+                "render.shots_result",
+                "render.studios_environments",
+                "render.frame_presets",
+                "render.size_presets",
+                "render.frame_presets_pending",
+                "render.size_presets_pending",
+                "render.search_appearances",
+                "render.library_applicable",
+                "render.library_other",
+                "render.library_apply_hint",
+                "render.studio_tiles_require_gpu",
+                "render.environment_tiles_require_raytrace",
+            ] {
+                assert_ne!(locale.text(id), Locale::for_language("en").text(id), "{language}: {id}");
+            }
+            let session = solidcraft_engine::Session::default();
+            for command in solidcraft_engine::command_specs().into_iter().filter(|c| c.planned.is_some() && crate::workspace::render_tab(c.tab)) {
+                assert_ne!(locale.label(command.label), command.label, "{language}: {}", command.id);
+                let reason = command.info(&session).disabled_reason.unwrap();
+                assert_ne!(locale.label(&reason), reason, "{language}: {} reason", command.id);
+            }
+        }
+    }
+
+    #[test]
+    fn output_viewer_labels_exist_in_all_required_catalogs() {
+        for language in ["en", "de", "ja", "ko", "zh"] {
+            let locale = Locale::for_language(language);
+            for key in [
+                "cmd.render_output_size",
+                "cmd.render_result_view",
+                "cmd.render_result_close",
+                "cmd.render_result_copy",
+                "cmd.render_lights_add",
+                "render.output_destination",
+                "render.output_destination_help",
+                "render.output_backend_ready",
+                "render.output_dimensions",
+                "render.output_effects",
+                "render.output_advanced",
+                "render.output_copy",
+                "render.output_fit",
+                "render.output_export",
+                "render.output_view_image",
+                "render.effects_gpu_only",
+                "render.output_image",
+                "render.output_check_summary",
+                "render.output_presets_help",
+                "render.size_preview",
+                "render.size_full_hd",
+                "render.size_4k",
+                "render.size_square",
+                "render.size_custom",
+                "render.output_format",
+                "render.output_exr_unavailable",
+                "render.output_largest",
+                "render.output_quality",
+                "render.output_quality_waiting",
+                "render.quality_draft",
+                "render.quality_balanced",
+                "render.quality_high",
+                "render.quality_custom",
+                "render.output_check",
+                "render.output_check_help",
+                "render.output_ready",
+                "render.output_size_ok",
+                "render.check_transmission",
+                "render.check_opaque",
+                "render.check_sorted_alpha",
+                "render.state_model",
+                "render.state_in_progress",
+                "render.state_completed",
+                "render.result_actual",
+                "render.radial_assign",
+                "render.radial_save",
+                "render.radial_fit",
+                "render.radial_compare",
+                "render.wait_add_light",
+            ] {
+                assert!(locale.0.messages().contains_key(key), "{language}: {key}");
+            }
+        }
+    }
+
     /// The mouse mapping picker shows its preset's help through `tr_label`, which the guard above
     /// can't see: the text sits in a struct field, not in a call. Each one must be the English text
     /// of its preset's catalog message, or it stays English in every locale.
     #[test]
     fn navigation_preset_help_reaches_the_catalog() {
         let english = Locale::for_language("en");
-        for preset in &crate::prefs::NAV_PRESETS {
+        for preset in crate::prefs::NAV_PRESETS {
             let id = format!("nav.{}.help", preset.id);
             assert_eq!(english.text(&id), preset.help, "{id}");
         }
@@ -1044,6 +1199,9 @@ mod tests {
     #[test]
     fn new_languages_translate_keys_labels_and_default_names() {
         for (id, name, preferences, extrude, sketch1, save) in [
+            ("bs", "Bosanski", "Postavke", "Ekstrudiraj", "Skica1", "Sačuvati promjene u My {design}?"),
+            ("hr", "Hrvatski", "Postavke", "Ekstrudiraj", "Skica1", "Spremiti promjene u My {design}?"),
+            ("sr", "Српски", "Подешавања", "Екструдирај", "Скица1", "Сачувати промене у My {design}?"),
             ("hu", "Magyar", "Beállítások", "Kihúzás", "Vázlat1", "Menti a(z) My {design} módosításait?"),
             ("id", "Bahasa Indonesia", "Preferensi", "Ekstrusi", "Sketsa1", "Simpan perubahan ke My {design}?"),
             ("nl", "Nederlands", "Voorkeuren", "Extruderen", "Schets1", "Wijzigingen in My {design} opslaan?"),
@@ -1116,6 +1274,7 @@ mod tests {
     const KIT_CALLS: &[KitCall] = &[
         // layout.rs: `sized_row` draws `tr_label(text)`, and every row builder reaches it.
         KitCall { name: "row", args: &[1], id: false, trim: &[1] },
+        KitCall { name: "status_line", args: &[1], id: false, trim: &[] },
         KitCall { name: "expr_row", args: &[1], id: false, trim: &[1] },
         KitCall { name: "hint_row", args: &[1], id: false, trim: &[1] },
         KitCall { name: "text_row", args: &[1], id: false, trim: &[1] },
@@ -1128,6 +1287,7 @@ mod tests {
         KitCall { name: "cell_editor", args: &[3], id: false, trim: &[] },
         KitCall { name: "bounded_cell_editor", args: &[3], id: false, trim: &[] },
         KitCall { name: "search_field", args: &[3], id: false, trim: &[] },
+        KitCall { name: "menu_filter", args: &[3], id: false, trim: &[] },
         KitCall { name: "placement_field", args: &[3], id: false, trim: &[] },
         KitCall { name: "library_cell", args: &[3], id: false, trim: &[] },
         // actions.rs
@@ -1800,8 +1960,8 @@ mod tests {
 
     /// The names the hand-written kit probes import, exactly as a UI file would.
     const KIT_IMPORTS: &str = concat!(
-        "use crate::ui_kit::{row, expr_row, hint_row, text_row, choice_row, section, section_count, ",
-        "multiline_text_field, dropdown, cell_editor, bounded_cell_editor, search_field, placement_field, ",
+        "use crate::ui_kit::{row, status_line, expr_row, hint_row, text_row, choice_row, section, section_count, ",
+        "multiline_text_field, dropdown, cell_editor, bounded_cell_editor, search_field, menu_filter, placement_field, ",
         "library_cell, icon_button_at, icon_button_colored, footer, button, primary_button, ",
         "wide_primary_button, action_menu, compact_button, icon_label_button, command_menu_button, ",
         "checkbox_grid, options, checkbox_row, toggle_icon, removable_header, bin_button, ",
@@ -1824,6 +1984,7 @@ mod tests {
     fn every_kit_call_is_read_at_its_real_signature() {
         let cases: &[(&str, &[&str])] = &[
             ("row(ui, \"row\", |ui| {})", &["row"]),
+            ("status_line(ui, \"status_line\", StatusTone::Dim)", &["status_line"]),
             ("expr_row(ui, \"expr_row\", value)", &["expr_row"]),
             ("hint_row(ui, \"hint_row\", value, hint)", &["hint_row"]),
             ("text_row(ui, \"text_row\", value, hint)", &["text_row"]),
@@ -1838,6 +1999,7 @@ mod tests {
             ("cell_editor(ui, id, value, \"cell_editor\", invalid)", &["cell_editor"]),
             ("bounded_cell_editor(ui, id, value, \"bounded_cell_editor\", invalid, limit)", &["bounded_cell_editor"]),
             ("search_field(ui, id, value, \"search_field\")", &["search_field"]),
+            ("menu_filter(ui, id, value, \"menu_filter\")", &["menu_filter"]),
             ("placement_field(ui, id, value, \"placement_field\")", &["placement_field"]),
             ("library_cell(ui, id, value, \"library_cell\", |ui| {})", &["library_cell"]),
             ("icon_button_at(ui, rect, icon, \"icon_button_at\")", &["icon_button_at"]),

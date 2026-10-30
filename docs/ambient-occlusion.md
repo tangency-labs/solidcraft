@@ -34,7 +34,11 @@ The GPU viewport uses 32 hemisphere samples per shaded pixel against an opaque d
 prepass (at most 2048 pixels on its longest side), the sample pattern turned by a
 different angle at each pixel. One pattern for every pixel drew faint shifted copies of
 nearby parts (#4167) and stepped bands along contacts (#3407); turned, they become an
-even fine grain, which 2× supersampling smooths further. The radius follows
+even fine grain, which 2× supersampling smooths further. While the view moves (orbit, pan,
+zoom, resize), frames take 8 samples on the same turned pattern, and the full 32 follow once
+the view has held still for 0.25 s, the settling time adaptive supersampling uses (#7165).
+The AO grain changes when the full count arrives, as the edges do when adaptive supersampling
+does. `ui.screenshot` waits for that full-quality frame (at most half a second). The radius follows
 model size, and depth-range rejection avoids shadows from distant foreground objects.
 It supports orthographic and perspective cameras and respects section clipping.
 Wireframe, transparent bodies, overlays and surface-analysis colours are unaffected.
@@ -102,3 +106,22 @@ Per-trial medians (ms), in chronological order:
 - sample-quality: 5.82, 4.48, 7.08.
 - 25-plates-performance: 3.13, 3.16, 3.14.
 - 25-plates-quality: 6.80, 7.02, 6.95.
+
+## AO while the view moves (2026-10-26, #7165)
+
+Apple M4 Max, macOS 27, release build, MSAA 4x, ground shadow on, normal display quality,
+supersampling off. The design is `solidcraft-cli bench-agent --save` (1,280 bodies, 767,476
+triangles), fitted to a 1600 x 960 point viewport. The camera was turned through `ui.camera`
+every 8 ms for 6 seconds while a Metal System Trace recorded the window. The figure is the
+median fragment time of the command buffers that drew the scene (over 1 ms of GPU work), one
+trace per configuration, three interleaved series.
+
+| | Series 1 | Series 2 | Series 3 |
+|---|---:|---:|---:|
+| AO off | 3.79 ms | 4.16 ms | 3.82 ms |
+| AO on, 32 samples while moving (before) | 4.48 ms | 5.41 ms | 4.70 ms |
+| AO on, 8 samples while moving | 3.96 ms | 3.80 ms | 4.17 ms |
+
+AO added about 0.9 ms of fragment time to each moving frame before, and adds about 0.06 ms
+now. The still frame and its cost are unchanged. This is one machine and one design; the
+ratio, not the milliseconds, is what carries over to slower GPUs.

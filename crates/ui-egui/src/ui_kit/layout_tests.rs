@@ -5,6 +5,62 @@ use crate::{scenario, theme::Tokens};
 use egui::Ui;
 
 #[test]
+fn status_lines_wrap_at_form_width_and_leave_room_for_the_next_row() {
+    let previous_dark = crate::theme::is_dark();
+    for dark in [false, true] {
+        crate::theme::set_dark(dark);
+        let base = Tokens::get();
+        for width in [160.0, 280.0] {
+            for font_label in [base.font_label, base.font_label * 1.8] {
+                let _theme = crate::theme::scoped_tokens(Tokens { font_label, ..base });
+                for (tone, ink) in [(StatusTone::Dim, base.text_dim), (StatusTone::Warning, base.warning), (StatusTone::Error, base.error)] {
+                    let ctx = crate::fonts::test_context();
+                    let message = "needs a joint that turns and one that slides";
+                    let mut message_rect = egui::Rect::NOTHING;
+                    let output = crate::test_support::frame(
+                        &ctx,
+                        egui::RawInput {
+                            screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(400.0, 600.0))),
+                            ..Default::default()
+                        },
+                        |ui| {
+                            ui.set_width(width);
+                            scope(ui, |ui| {
+                                message_rect = status_line(ui, message, tone).rect;
+                                assert_eq!(ui.style().wrap_mode, Some(egui::TextWrapMode::Truncate), "ordinary controls keep their style");
+                                row(ui, "Radius", |ui| {
+                                    ui.label("10 mm");
+                                });
+                            });
+                        },
+                    );
+                    let text = crate::test_support::text_shapes(&output).find(|text| text.galley.text() == message).unwrap();
+                    assert!(!text.galley.elided, "width={width}, font={font_label}");
+                    if width == 160.0 {
+                        assert!(text.galley.rows.len() > 1, "a narrow form must wrap");
+                    }
+                    assert!(text.galley.job.sections.iter().all(|section| section.format.color == ink));
+                    assert!(message_rect.width() <= width + 0.5);
+                    let next = scenario::rect_of("dialog:row:Radius").unwrap();
+                    assert!((message_rect.left() - next.left()).abs() < 0.5, "use both form columns");
+                    assert!(next.top() >= message_rect.bottom(), "the next row must follow all lines");
+                    let painted = text.galley.rect.translate(text.pos.to_vec2());
+                    assert!(message_rect.expand(0.5).contains_rect(painted), "reserve the painted height");
+                    let clip = output
+                        .shapes
+                        .iter()
+                        .find(|shape| matches!(&shape.shape, egui::Shape::Text(t) if t.galley.text() == message))
+                        .unwrap()
+                        .clip_rect;
+                    assert!(clip.contains_rect(painted), "every line is visible");
+                }
+            }
+        }
+    }
+    crate::theme::set_dark(previous_dark);
+}
+
+#[test]
 fn theme_rail_cues_follow_hidden_content() {
     use crate::ui_kit::preferences::theme_rail_cues;
     assert_eq!(theme_rail_cues(0.0, 0.0), (false, false));

@@ -1,7 +1,8 @@
 use serde_json::{Value, json};
 
 use super::{
-    BoundingSolidParams, BoxParams, ConeParams, CylinderParams, ExtrudeParams, FeatureResult, PipeParams, ScaleParams, SphereParams, TorusParams,
+    BoundingSolidParams, BoxParams, ConeParams, CylinderParams, ExtrudeParams, FeatureResult, OffsetPlaneParams, PipeParams, PlaneAtAngleParams,
+    ScaleParams, SphereParams, TorusParams,
 };
 use crate::Session;
 use crate::schema::tests::{assert_keys, assert_strict_keeps_todays_errors, conforms, sketch_rectangle};
@@ -49,7 +50,7 @@ fn schemas_and_the_key_check_agree() {
     );
     assert_keys(
         input_schema_for::<CylinderParams>(),
-        &["axis", "base", "body_name", "body_names", "diameter", "height", "name", "operation", "participants", "radius", "targets"],
+        &["axis", "base", "body_name", "body_names", "diameter", "height", "name", "operation", "participants", "radius", "references", "targets"],
     );
     assert_keys(
         input_schema_for::<SphereParams>(),
@@ -83,6 +84,8 @@ fn schemas_and_the_key_check_agree() {
     );
     assert_keys(input_schema_for::<BoundingSolidParams>(), &["bodies", "body_name", "body_names", "margin", "name", "participants"]);
     assert_keys(input_schema_for::<ScaleParams>(), &["bodies", "factor", "factors", "name", "origin", "participants"]);
+    assert_keys(input_schema_for::<OffsetPlaneParams>(), &["base", "name", "offset", "participants", "through"]);
+    assert_keys(input_schema_for::<PlaneAtAngleParams>(), &["angle", "axis", "base", "name", "participants"]);
 }
 
 #[test]
@@ -135,6 +138,24 @@ fn strict_keeps_todays_errors() {
         ("solid.scale", json!({"bodies": ["Body1"], "factors": [1, 2]})),
         ("solid.scale", json!({"bodies": ["Body1"], "factors": [1, 2, 3, 4]})),
         ("solid.scale", json!({"bodies": ["Body1"]})),
+        ("construct.plane.offset", json!({"base": true, "offset": 5})),
+        ("construct.plane.offset", json!({"base": {"face": [1, 2]}, "offset": 5})),
+        ("construct.plane.offset", json!({"base": {"face": [0, 0, 0], "fixed": "yes"}, "offset": 5})),
+        ("construct.plane.offset", json!({"base": {"face": [0, 0, 0], "body": ""}, "offset": 5})),
+        ("construct.plane.offset", json!({"base": {"face": [0, 0, 0], "body": "Body1"}, "offset": 5})),
+        ("construct.plane.offset", json!({"base": {"face": [0, 0, 0], "index": -1}, "offset": 5})),
+        ("construct.plane.offset", json!({"base": {"face": [0, 0, 0], "path": [0]}, "offset": 5})),
+        ("construct.plane.offset", json!({"base": {"face": [0, 0, 0], "path": vec![1; 65]}, "offset": 5})),
+        ("construct.plane.offset", json!({"base": {"normal": [0, 0, 1], "origin": "here"}, "offset": 5})),
+        ("construct.plane.offset", json!({"base": "XY", "through": {"edge": "x"}})),
+        ("construct.plane.offset", json!({"base": "XY", "offset": true})),
+        ("construct.plane.at_angle", json!({"base": "XY", "axis": {"dir": [0, 0, 0]}, "angle": 30})),
+        ("construct.plane.at_angle", json!({"base": "XY", "axis": {"origin": "o", "dir": [0, 0, 1]}, "angle": 30})),
+        ("construct.plane.at_angle", json!({"base": "XY", "axis": 5, "angle": 30})),
+        ("construct.plane.at_angle", json!({"base": "XY", "axis": null, "angle": 30})),
+        ("construct.plane.at_angle", json!({"base": "XY", "axis": {"face": "x", "point": [0, 0, 0]}, "angle": 30})),
+        ("construct.plane.at_angle", json!({"base": "XY", "axis": {"face": "x"}, "angle": 30})),
+        ("construct.plane.at_angle", json!({"base": "XY", "axis": "X", "angle": true})),
     ]);
 }
 

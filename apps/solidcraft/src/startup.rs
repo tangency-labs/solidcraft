@@ -255,7 +255,7 @@ pub const FLOAT_DEPTH_STENCIL: eframe::wgpu::Features = eframe::wgpu::Features::
 /// asks for a float one only when whichever it picks has it.
 pub fn float_depth_everywhere(options: &eframe::egui_wgpu::WgpuConfiguration) -> bool {
     let eframe::egui_wgpu::WgpuSetup::CreateNew(setup) = &options.wgpu_setup else { return false };
-    let mut desc = eframe::wgpu::InstanceDescriptor::new_without_display_handle_from_env();
+    let mut desc = solidcraft_gpu::instance_descriptor_from_env();
     desc.backends = setup.instance_descriptor.backends;
     let instance = eframe::wgpu::Instance::new(desc);
     let adapters = pollster::block_on(instance.enumerate_adapters(setup.instance_descriptor.backends));
@@ -272,6 +272,7 @@ pub fn has_hardware_adapter(backends: eframe::wgpu::Backends) -> bool {
     let mut desc = eframe::wgpu::InstanceDescriptor::new_without_display_handle();
     desc.backends = backends;
     desc.flags = eframe::wgpu::InstanceFlags::from_build_config().with_env();
+    desc.backend_options.dx12.shader_compiler = solidcraft_gpu::dx12_compiler();
     let instance = eframe::wgpu::Instance::new(desc);
     let adapters = pollster::block_on(instance.enumerate_adapters(backends));
     let found: Vec<String> = adapters.iter().map(|a| format!("{} ({:?})", a.get_info().name, a.get_info().device_type)).collect();
@@ -291,6 +292,71 @@ pub fn window_instance_flags(flags: eframe::wgpu::InstanceFlags, intel_mac: bool
     if intel_mac && env.map(str::trim).is_none_or(str::is_empty) { flags - eframe::wgpu::InstanceFlags::VALIDATION_INDIRECT_CALL } else { flags }
 }
 
+/// The environment variable that makes the macOS compatibility shim report an older OS
+/// version to wgpu's Metal backend. On OCLP-patched machines the Metal compiler accepts
+/// only up to the MSL standard of the original GPU, not the one the patched OS reports,
+/// so wgpu picks a standard that the compiler refuses (`invalid value 'metal3.2'`).
+/// Setting this variable before the process starts causes the OS to report the older
+/// version and wgpu selects a supported MSL standard (#3080, #4605).
+#[cfg(target_os = "macos")]
+pub const SYSTEM_VERSION_COMPAT_ENV: &str = "SYSTEM_VERSION_COMPAT";
+
+/// The NVRAM variable that OpenCore Legacy Patcher writes on every OCLP-booted system.
+/// Its presence is the primary signal that `SYSTEM_VERSION_COMPAT=1` is needed.
+#[cfg(target_os = "macos")]
+pub const OCLP_NVRAM_KEY: &str = "4D1FDA02-38C7-4A6A-9CC6-4BCCA8B30102:OCLP-Version";
+
+/// `true` if the OCLP NVRAM key is present on this system.
+///
+/// Runs `nvram <key>` and treats exit 0 as present. Any error (missing binary,
+/// permission denied, key absent) returns `false` — this is a best-effort probe.
+#[cfg(target_os = "macos")]
+pub fn oclp_nvram_present() -> bool {
+    std::process::Command::new("nvram").arg(OCLP_NVRAM_KEY).output().map(|o| o.status.success()).unwrap_or(false)
+}
+
+/// Whether to re-launch with `SYSTEM_VERSION_COMPAT=1`: it is not set yet and OCLP shows through
+/// the NVRAM key. The probe runs only when it is needed, so a re-launched process (variable
+/// set) never starts `nvram`.
+#[cfg(target_os = "macos")]
+fn compat_wanted(compat_set: bool, nvram: impl FnOnce() -> bool) -> bool {
+    !compat_set && nvram()
+}
+
+/// If this process is running under OCLP and `SYSTEM_VERSION_COMPAT` has not been set,
+/// re-launch the current binary with `SYSTEM_VERSION_COMPAT=1` added to the environment,
+/// then exit with the child's status code.
+///
+/// `SYSTEM_VERSION_COMPAT=1` must be present **before** the process starts: setting it
+/// with `std::env::set_var` inside `main` is too late because the macOS frameworks have
+/// already queried the OS version by then. Re-launching is the only safe approach that
+/// works without `unsafe` (a true `execve` replacement would require it).
+///
+/// Returns `Ok(false)` immediately when:
+/// - `SYSTEM_VERSION_COMPAT` is already set (re-launched process, no loop), or
+/// - the OCLP NVRAM key is absent.
+///
+/// Returns `Err` only when `std::env::current_exe()` fails or the child process cannot
+/// be spawned; the caller should log the error and continue normally.
+///
+/// Never returns `Ok(true)`: a successful re-launch exits the current process.
+#[cfg(target_os = "macos")]
+pub fn relaunch_with_version_compat() -> Result<bool, String> {
+    // A set variable means this is the re-launched process: no loop.
+    if !compat_wanted(std::env::var_os(SYSTEM_VERSION_COMPAT_ENV).is_some(), oclp_nvram_present) {
+        return Ok(false);
+    }
+    log::info!("startup: OCLP detected; re-launching with {}=1", SYSTEM_VERSION_COMPAT_ENV);
+    eprintln!("SolidCraft: OCLP detected; re-launching with {}=1", SYSTEM_VERSION_COMPAT_ENV);
+    let exe = std::env::current_exe().map_err(|e| format!("could not find own executable: {e}"))?;
+    let status = std::process::Command::new(&exe)
+        .args(std::env::args_os().skip(1))
+        .env(SYSTEM_VERSION_COMPAT_ENV, "1")
+        .status()
+        .map_err(|e| format!("could not re-launch with {}: {e}", SYSTEM_VERSION_COMPAT_ENV))?;
+    std::process::exit(status.code().unwrap_or(1));
+}
+
 /// Windows with OpenGL: the window keeps the system title bar (#2063). The window without OS
 /// decorations keeps its caption style while having no frame, and some OpenGL drivers (older
 /// Intel HD/UHD) then show the picture a caption's height lower than the window, so it no longer
@@ -300,6 +366,14 @@ pub fn window_instance_flags(flags: eframe::wgpu::InstanceFlags, intel_mac: bool
 pub fn system_title_bar(windows: bool, backends: eframe::wgpu::Backends) -> bool {
     use eframe::wgpu::Backends;
     windows && backends.contains(Backends::GL) && !backends.intersects(Backends::DX12 | Backends::VULKAN)
+}
+
+/// The `--max-file-size` value (#4086): a size such as `2GB` or `1500MB`, at most 16 GB. It raises
+/// the largest STEP/import and design file this run reads, over the saved preference, without
+/// saving anything. A missing or bad value stops the start with this error.
+pub fn max_file_size(value: Option<&str>) -> Result<u64, String> {
+    let value = value.ok_or("--max-file-size needs a size, for example --max-file-size 2GB")?;
+    solidcraft_engine::io::limits::parse_flag(value).map_err(|e| format!("--max-file-size: {e}"))
 }
 
 /// The message shown when no window could be opened at all.
@@ -322,6 +396,16 @@ mod tests {
 
     fn cards() -> Vec<AdapterChoice> {
         ["Integrated", "Discrete small", "Discrete large"].into_iter().map(|name| AdapterChoice { name: name.into(), compatible: true }).collect()
+    }
+
+    #[test]
+    fn max_file_size_parses_sizes_and_refuses_bad_ones() {
+        assert_eq!(max_file_size(Some("2GB")), Ok(2 << 30));
+        assert_eq!(max_file_size(Some("1500MB")), Ok(1500 << 20));
+        for bad in [None, Some(""), Some("2"), Some("17GB"), Some("lots"), Some("-1GB")] {
+            let error = max_file_size(bad).unwrap_err();
+            assert!(error.contains("--max-file-size"), "{bad:?}: {error}");
+        }
     }
 
     #[test]
@@ -393,6 +477,27 @@ mod tests {
         assert_eq!(window_instance_flags(F::VALIDATION, true, Some("0")), F::VALIDATION);
         // Every other machine keeps what it had.
         assert_eq!(window_instance_flags(on, false, None), on);
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn oclp_relaunch_needs_the_signal_and_no_compat_variable() {
+        use super::compat_wanted;
+        let probed = std::cell::Cell::new(false);
+        let probe = |found: bool| {
+            let probed = &probed;
+            move || {
+                probed.set(true);
+                found
+            }
+        };
+        // The re-launched process has the variable: no probe, no second re-launch.
+        assert!(!compat_wanted(true, probe(true)));
+        assert!(!probed.get());
+        // The OCLP NVRAM key is the signal.
+        assert!(compat_wanted(false, probe(true)));
+        // No signal: an ordinary Mac starts as it is.
+        assert!(!compat_wanted(false, probe(false)));
     }
 
     #[test]
@@ -573,7 +678,7 @@ mod tests {
         if cfg!(target_os = "windows") && std::env::var_os(WGPU_BACKEND_ENV).is_none() {
             assert_eq!(backends, eframe::wgpu::Backends::DX12);
         }
-        let mut desc = eframe::wgpu::InstanceDescriptor::new_without_display_handle_from_env();
+        let mut desc = solidcraft_gpu::instance_descriptor_from_env();
         desc.backends = backends;
         let instance = eframe::wgpu::Instance::new(desc);
         let adapters = pollster::block_on(instance.enumerate_adapters(backends));

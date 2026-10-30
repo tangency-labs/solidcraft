@@ -2208,3 +2208,34 @@ fn a_parameter_change_solves_the_joints_once() {
     assert!(super::solve_counts::take().0 > 0);
     assert!(near(place(&s, "Bracket", Vec3::new(110.0, 210.0, 0.0)), Vec3::new(180.0, 50.0, 1.0)));
 }
+
+#[test]
+fn driving_one_cylindrical_coordinate_preserves_the_other_expression_and_reports_continuous() {
+    let mut s = Session::default();
+    run(&mut s, "component.create", json!({"name":"Part","grounded":false}));
+    run(&mut s, "solid.box", json!({"length":10,"width":10,"height":10}));
+    run(&mut s, "component.activate", json!({"component":"root"}));
+    run(&mut s, "parameters.add", json!({"name":"turn","expression":"30 deg"}));
+    let joint = run(
+        &mut s,
+        "joint.create",
+        json!({"type":"cylindrical","a":{"occurrence":0,"point":[0,0,0]},"b":{"occurrence":"Part","point":[0,0,0]},"flip":true,"values":["turn",0]}),
+    )["joint"]
+        .as_u64()
+        .unwrap();
+    let before = s.doc.assembly.joints.iter().find(|j| j.id == joint).unwrap().exprs.value(0).map(str::to_string);
+    assert!(before.is_some());
+    let reply = run(&mut s, "joint.drive", json!({"joint":joint,"index":1,"value":12,"continuous":true,"quiet":true}));
+    assert_eq!(reply["continuous"], true);
+    let j = s.doc.assembly.joints.iter().find(|j| j.id == joint).unwrap();
+    assert_eq!(j.exprs.value(0).map(str::to_string), before);
+    assert!((j.values[0].to_degrees() - 30.).abs() < 1e-7);
+    assert!((j.values[1] - 12.).abs() < 1e-7);
+    run(&mut s, "parameters.change", json!({"name":"turn","expression":"40 deg"}));
+    let j = s.doc.assembly.joints.iter().find(|j| j.id == joint).unwrap();
+    assert!((j.values[0].to_degrees() - 40.).abs() < 1e-7, "the preserved expression still drives the angle");
+    assert!((j.values[1] - 12.).abs() < 1e-7);
+    for bad in [json!(-1), json!(2), json!(1000000), json!("0")] {
+        assert!(s.execute("joint.drive", &json!({"joint":joint,"index":bad,"value":0})).is_err());
+    }
+}

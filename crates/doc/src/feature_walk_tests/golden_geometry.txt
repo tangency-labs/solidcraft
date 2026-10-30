@@ -30,6 +30,9 @@ box
 cylinder
   moves: axis[0], axis[2], base[0], base[1], base[2]
   placement: cyl.x, cyl.y, cyl.z
+cylinder_references
+  moves: axis[0], axis[2], base[0], base[1], base[2], references[0].edge[0], references[0].edge[1], references[0].edge[2], references[1].edge[0], references[1].edge[1], references[1].edge[2]
+  placement: 0, 0, 0
 sphere
   moves: center[0], center[1], center[2]
   placement: sph.x, sph.y, sph.z

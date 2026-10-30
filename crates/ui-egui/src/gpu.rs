@@ -10,7 +10,7 @@ use egui_wgpu::wgpu;
 pub use solidcraft_gpu::view::{
     AccessMap, BlockBuilder, BlockBytes, BlockTris, DrawStats, DrawStatsHandle, Frame, GpuImage, GpuScene, GpuTarget, INSTANCE_SIZE, InstanceLook,
     InstancedMesh, LINE_SIZE, LOD_PX, MAX_PALETTE, PBR_SIZE, Palette, PaletteIndex, PlannedBody, Renderer, SHARED_SIZE, SceneBlock, SceneSlot,
-    SharedTris, TRI_SIZE, TriClass, extend_runs, level_for, lifted_width, placement_scale, runs_within, supersampled_size,
+    SharedTris, TRI_SIZE, TriClass, UploadError, extend_runs, level_for, lifted_width, placement_scale, runs_within, supersampled_size,
 };
 
 /// A frame of the viewport as an egui paint callback.
@@ -209,13 +209,14 @@ pub fn analysis_colors(c: &crate::theme::AnalysisColors) -> [f32; 36] {
 pub(crate) fn offscreen_backends() -> wgpu::Backends {
     static CHOSEN: std::sync::OnceLock<wgpu::Backends> = std::sync::OnceLock::new();
     *CHOSEN.get_or_init(|| {
-        let default = wgpu::InstanceDescriptor::new_without_display_handle_from_env().backends;
+        let default = solidcraft_gpu::instance_descriptor_from_env().backends;
         if !cfg!(target_os = "windows") || std::env::var("WGPU_BACKEND").is_ok_and(|v| !v.trim().is_empty()) {
             return default;
         }
         let hardware = |backends: wgpu::Backends| {
             let mut desc = wgpu::InstanceDescriptor::new_without_display_handle();
             desc.backends = backends;
+            desc.backend_options.dx12.shader_compiler = solidcraft_gpu::dx12_compiler();
             let adapters = pollster::block_on(wgpu::Instance::new(desc).enumerate_adapters(backends));
             adapters.iter().any(|a| a.get_info().device_type != wgpu::DeviceType::Cpu)
         };
@@ -223,18 +224,44 @@ pub(crate) fn offscreen_backends() -> wgpu::Backends {
     })
 }
 
-/// A device of its own for an offscreen render or check (`None` without a GPU adapter), on
-/// [`offscreen_backends`]. One test at a time starts its instance, adapter and device: starting an
-/// instance scans the Vulkan drivers, and tests doing that side by side crashed the test process
-/// inside the Vulkan loader (`loader_icd_scan`). Rendering on the devices still runs side by side.
+/// Held while a test starts an instance, adapter or device: starting an instance scans the Vulkan
+/// drivers, and tests doing that side by side crashed the test process inside the Vulkan loader
+/// (`loader_icd_scan`). Rendering on the devices still runs side by side.
 #[cfg(all(test, not(target_arch = "wasm32")))]
-pub(crate) fn offscreen_device() -> Option<(wgpu::Adapter, wgpu::Device, wgpu::Queue)> {
+fn offscreen_starting() -> std::sync::MutexGuard<'static, ()> {
     static STARTING: std::sync::Mutex<()> = std::sync::Mutex::new(());
-    let _one_at_a_time = STARTING.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-    let mut desc = wgpu::InstanceDescriptor::new_without_display_handle_from_env();
+    STARTING.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+/// The adapter an offscreen test opens under `policy` (`SOLIDCRAFT_GPU`, #9040), on
+/// [`offscreen_backends`]; call it holding [`offscreen_starting`]. Under `auto` (the variable
+/// unset) wgpu's default adapter, as before; under `hardware` or `software` the one
+/// `solidcraft_gpu::select` picks for headless pictures of that tier, so `software` keeps the
+/// tests off the hardware GPU; under `cpu`, as for pictures, none. `None` when none qualifies.
+#[cfg(all(test, not(target_arch = "wasm32")))]
+fn offscreen_adapter(policy: solidcraft_gpu::select::Policy) -> Option<wgpu::Adapter> {
+    use solidcraft_gpu::select::Policy;
+    let mut desc = solidcraft_gpu::instance_descriptor_from_env();
     desc.backends = offscreen_backends();
     let instance = wgpu::Instance::new(desc);
-    let adapter = pollster::block_on(instance.request_adapter(&Default::default())).ok()?;
+    match policy {
+        Policy::Auto => pollster::block_on(instance.request_adapter(&Default::default())).ok(),
+        Policy::Hardware | Policy::Software => {
+            let found = pollster::block_on(instance.enumerate_adapters(offscreen_backends()));
+            solidcraft_gpu::select::pick_among(found, policy).map(|(adapter, _)| adapter)
+        }
+        Policy::Cpu => None,
+    }
+}
+
+/// A device of its own for an offscreen render or check (`None` without a GPU adapter the
+/// `SOLIDCRAFT_GPU` policy admits, or when the variable names no policy), on [`offscreen_backends`]. One test at a time starts its
+/// instance, adapter and device ([`offscreen_starting`]).
+#[cfg(all(test, not(target_arch = "wasm32")))]
+pub(crate) fn offscreen_device() -> Option<(wgpu::Adapter, wgpu::Device, wgpu::Queue)> {
+    let policy = solidcraft_gpu::select::Policy::from_env().map_err(|e| eprintln!("no offscreen device: {e}")).ok()?;
+    let _one_at_a_time = offscreen_starting();
+    let adapter = offscreen_adapter(policy)?;
     let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
         required_features: solidcraft_gpu::depth_features(&adapter),
         required_limits: wgpu::Limits::downlevel_defaults().using_resolution(adapter.limits()),
@@ -279,13 +306,23 @@ pub(crate) fn render_offscreen(
         back,
         eye,
         size,
-        Offscreen { tess, product: false, srgb: false, analysis, analysis_colors: colors, ssaa: 1.0, ao_radius: 0.0 },
+        Offscreen {
+            tess,
+            product: false,
+            srgb: false,
+            analysis,
+            analysis_colors: colors,
+            ssaa: 1.0,
+            ao_radius: 0.0,
+            ao_samples: solidcraft_gpu::view::AO_SAMPLES,
+        },
     )
 }
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
 pub(crate) fn render_product_offscreen(
     scene: GpuScene,
+    highlight: Option<GpuScene>,
     view_proj: [[f32; 4]; 4],
     back: [f32; 3],
     eye: [f32; 4],
@@ -294,12 +331,21 @@ pub(crate) fn render_product_offscreen(
 ) -> Option<Vec<u8>> {
     offscreen(
         scene,
-        None,
+        highlight,
         view_proj,
         back,
         eye,
         size,
-        Offscreen { tess: None, product: true, srgb, analysis: [0.0; 8], analysis_colors: [0.0; 36], ssaa: 1.0, ao_radius: 0.0 },
+        Offscreen {
+            tess: None,
+            product: true,
+            srgb,
+            analysis: [0.0; 8],
+            analysis_colors: [0.0; 36],
+            ssaa: 1.0,
+            ao_radius: 0.0,
+            ao_samples: solidcraft_gpu::view::AO_SAMPLES,
+        },
     )
 }
 
@@ -312,6 +358,7 @@ struct Offscreen<'a> {
     analysis_colors: [f32; 36],
     ssaa: f32,
     ao_radius: f32,
+    ao_samples: u32,
 }
 
 /// [`render_offscreen`] of a scene supersampled `ssaa` times (1: off).
@@ -331,11 +378,21 @@ pub(crate) fn render_offscreen_ssaa(
         back,
         eye,
         size,
-        Offscreen { tess: None, product: false, srgb: false, analysis: [0.0; 8], analysis_colors: [0.0; 36], ssaa, ao_radius: 0.0 },
+        Offscreen {
+            tess: None,
+            product: false,
+            srgb: false,
+            analysis: [0.0; 8],
+            analysis_colors: [0.0; 36],
+            ssaa,
+            ao_radius: 0.0,
+            ao_samples: solidcraft_gpu::view::AO_SAMPLES,
+        },
     )
 }
 
-/// [`render_offscreen`] of a scene with ambient occlusion of `ao_radius` (world units; 0: off).
+/// [`render_offscreen`] of a scene with ambient occlusion of `ao_radius` (world units; 0: off),
+/// `ao_samples` samples per pixel.
 #[cfg(all(test, not(target_arch = "wasm32")))]
 pub(crate) fn render_offscreen_ao(
     scene: GpuScene,
@@ -344,6 +401,7 @@ pub(crate) fn render_offscreen_ao(
     eye: [f32; 4],
     size: u32,
     ao_radius: f32,
+    ao_samples: u32,
 ) -> Option<Vec<u8>> {
     offscreen(
         scene,
@@ -352,7 +410,7 @@ pub(crate) fn render_offscreen_ao(
         back,
         eye,
         size,
-        Offscreen { tess: None, product: false, srgb: false, analysis: [0.0; 8], analysis_colors: [0.0; 36], ssaa: 1.0, ao_radius },
+        Offscreen { tess: None, product: false, srgb: false, analysis: [0.0; 8], analysis_colors: [0.0; 36], ssaa: 1.0, ao_radius, ao_samples },
     )
 }
 
@@ -366,7 +424,7 @@ fn offscreen(
     size: u32,
     options: Offscreen<'_>,
 ) -> Option<Vec<u8>> {
-    let Offscreen { tess, product, srgb, analysis, analysis_colors, ssaa, ao_radius } = options;
+    let Offscreen { tess, product, srgb, analysis, analysis_colors, ssaa, ao_radius, ao_samples } = options;
     let (adapter, device, queue) = offscreen_device()?;
     eprintln!("offscreen adapter: {:?}", adapter.get_info().backend);
     let format = if srgb { wgpu::TextureFormat::Rgba8UnormSrgb } else { wgpu::TextureFormat::Rgba8Unorm };
@@ -377,7 +435,9 @@ fn offscreen(
     resources.insert(Renderer::new(&device, target, compute));
     let none = || Arc::new(Mutex::new(None));
     let cb = ViewportCallback(Frame {
+        product_lights: None,
         product,
+        upload_error: None,
         key: 1,
         slot: Arc::new(Mutex::new(Some(scene))),
         sketch_key: 0,
@@ -393,12 +453,14 @@ fn offscreen(
         clip: [0.0; 4],
         cap: [0.0; 4],
         images: Vec::new(),
+        clouds: Vec::new(),
         analysis,
         analysis_colors,
         access: None,
         outline: false,
         eye,
         ao_radius,
+        ao_samples,
         ssaa,
         hover_tint: [0.0; 3],
         selection_tint: [0.0; 3],
@@ -611,6 +673,33 @@ mod tests {
             assert!(chosen.contains(used), "the offscreen device runs on {used:?}, not on {chosen:?}");
         }
     }
+    /// `SOLIDCRAFT_GPU` picks the offscreen tests' adapter as it picks headless pictures' (#9040):
+    /// `software` never a hardware GPU (it did, and the tests crashed one), `hardware` never a
+    /// software rasterizer, `cpu` none. A tier without an adapter here is skipped. Only adapters
+    /// are picked: no device is opened.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn offscreen_tests_pick_their_adapter_by_the_gpu_policy() {
+        use solidcraft_gpu::select::Policy;
+        let _one_at_a_time = super::offscreen_starting();
+        assert!(super::offscreen_adapter(Policy::Cpu).is_none(), "cpu opens no adapter");
+        for (policy, software) in [(Policy::Software, true), (Policy::Hardware, false)] {
+            match super::offscreen_adapter(policy) {
+                Some(adapter) => {
+                    let info = adapter.get_info();
+                    assert_eq!(
+                        info.device_type == egui_wgpu::wgpu::DeviceType::Cpu,
+                        software,
+                        "{policy:?} picked {} ({:?})",
+                        info.name,
+                        info.device_type
+                    );
+                }
+                None => eprintln!("skipping {policy:?}: no adapter of that tier"),
+            }
+        }
+    }
+
     /// A device the driver loses (#4172): its lost callback marks it, the painter's probe sees it
     /// before the next frame's uploads, those uploads no longer reach the device (they panicked
     /// inside wgpu when they were the first to meet the loss), and pictures (thumbnails of saves)

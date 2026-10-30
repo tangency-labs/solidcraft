@@ -145,7 +145,7 @@ fn eval_and_inspect_reject_invalid_options_before_script_execution_or_reporting(
 #[test]
 fn cli_loads_both_design_encodings_by_contents() {
     let dir = Scratch::new();
-    for extension in ["solidcraft", "solvecraft", "json"] {
+    for extension in ["sc", "solidcraft", "solvecraft", "json"] {
         let saved = dir.0.join(format!("box.{extension}"));
         json_output(cli().arg("run").arg(dir.script()).arg("--save").arg(&saved).output().unwrap());
         let bytes = std::fs::read(&saved).unwrap();
@@ -412,6 +412,11 @@ fn legacy_extension_and_format_tag_still_open() {
     assert_eq!(body_count(&resaved), 2);
     let reopened = solidcraft_engine::io::read_design(&std::fs::read(&resaved).unwrap()).unwrap();
     assert!(reopened.to_json().contains("\"solidcraft/"));
+    // `.solidcraft` (before `.sc`) opens as `--in` and as the design to evaluate; `.sc` too.
+    let current = dir.0.join("current.sc");
+    json_output(cli().args(["run", "--in"]).arg(&resaved).arg(dir.script()).arg("--save").arg(&current).output().unwrap());
+    assert_eq!(body_count(&current), 3);
+    assert!(solidcraft_engine::io::is_design_container(&std::fs::read(&current).unwrap()), "a .sc file is a design container");
 }
 
 /// `snapshot` starts from `--in` as `run` does (its script runs on that design), and refuses an
@@ -489,6 +494,78 @@ fn timings_and_profile_report_each_command() {
     let output = cli().arg("run").arg("--in").arg(&saved).arg("--timings").output().unwrap();
     assert!(!output.status.success());
     assert!(String::from_utf8_lossy(&output.stderr).contains("--timings needs a script"));
+}
+
+/// #6921: `--param-check` checks a script's steps against their contracts on every path `run`
+/// takes (a script alone, on an `--in` design or script, with `--results`, `--timings` or
+/// `--profile`), and a warning reaches stderr even when a later step fails.
+#[test]
+fn param_check_reaches_every_script_run_takes() {
+    let dir = Scratch::new();
+    let typo = dir.0.join("typo.json");
+    let step = json!({"command": "solid.box", "params": {"length": 2, "width": 3, "height": 4, "operaton": "new"}});
+    std::fs::write(&typo, json!({"commands": [step.clone()]}).to_string()).unwrap();
+    let base = dir.0.join("base.solidcraft");
+    json_output(cli().arg("run").arg(dir.script()).arg("--save").arg(&base).output().unwrap());
+    let saved = dir.0.join("saved.solidcraft");
+    let start = dir.script();
+    let (typo, base, saved_arg, start) = (typo.to_str().unwrap(), base.to_str().unwrap(), saved.to_str().unwrap(), start.to_str().unwrap());
+    let paths = [&[][..], &["--in", base], &["--in", start], &["--results"], &["--timings"], &["--timings", "--profile"]];
+    let run = |level: Option<&str>, extra: &[&str]| {
+        std::fs::remove_file(&saved).ok();
+        let check = level.map(|l| ["--param-check", l]).into_iter().flatten();
+        cli().args(["run", typo, "--save", saved_arg]).args(check).args(extra).output().unwrap()
+    };
+
+    // Off, the default: the step runs as it always has, without a word.
+    let off = run(None, &[]);
+    assert!(off.status.success() && !String::from_utf8_lossy(&off.stderr).contains("operaton"), "{off:?}");
+    assert_eq!(body_count(&saved), 1);
+
+    // Warn: each path runs the step, saves, and reports it on stderr; `--results` keeps it too.
+    for extra in paths {
+        let output = run(Some("warn"), extra);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(output.status.success(), "{extra:?}: {stderr}");
+        assert!(stderr.contains("step 1: unknown key `operaton`; did you mean `operation`?"), "{extra:?}: {stderr}");
+        assert!(saved.exists(), "{extra:?}");
+        if extra == ["--results"] {
+            let results: Value = serde_json::from_slice(&output.stdout).unwrap();
+            assert!(results[0]["param_warnings"][0].as_str().is_some_and(|w| w.contains("operaton")), "{results}");
+        }
+    }
+
+    // Strict: on each path the run stops at the step, and nothing is written.
+    for extra in paths {
+        let output = run(Some("strict"), extra);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert_eq!(output.status.code(), Some(1), "{extra:?}: {stderr}");
+        assert!(stderr.contains("unknown key `operaton`"), "{extra:?}: {stderr}");
+        assert!(!saved.exists(), "{extra:?}");
+    }
+
+    // Warn, with a later step that fails: the run fails, and the first step's warning is still
+    // reported, timed or not.
+    let failing = dir.0.join("failing.json");
+    let fail = json!({"command": "solid.extrude", "params": {"sketch": "Nope"}});
+    std::fs::write(&failing, json!({"commands": [step, fail]}).to_string()).unwrap();
+    for extra in [&[][..], &["--timings"]] {
+        let output = cli().arg("run").arg(&failing).args(["--param-check", "warn"]).args(extra).output().unwrap();
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert_eq!(output.status.code(), Some(1), "{extra:?}: {stderr}");
+        assert!(stderr.contains("step 1: unknown key `operaton`") && stderr.contains("no sketch `Nope`"), "{extra:?}: {stderr}");
+    }
+
+    // A level it doesn't know and a missing value fail.
+    for (bad, says) in [
+        (&["--param-check", "loud"][..], "--param-check wants off, warn or strict, not `loud`"),
+        (&["--param-check"], "run: --param-check wants off, warn or strict"),
+    ] {
+        let output = cli().args(["run", typo]).args(bad).output().unwrap();
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert_eq!(output.status.code(), Some(1), "{bad:?}: {stderr}");
+        assert!(stderr.contains(says), "{bad:?}: {stderr}");
+    }
 }
 
 fn render_setup_script(dir: &Scratch, job: Value) -> PathBuf {

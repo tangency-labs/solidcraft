@@ -343,7 +343,9 @@ pub(crate) fn bin_button(ui: &mut Ui, tooltip: &str) -> Response {
     response
 }
 
-/// Last header cell opens the unchanged column menu. Hover brackets indicate insertion.
+/// Last header cell opens the unchanged column menu. Hover brackets indicate insertion. The
+/// menu holds a filter field, so a click inside it (into the field) keeps it open: entries
+/// close it themselves when picked.
 pub(crate) fn plus_header<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> Option<R> {
     let t = Tokens::get();
     let rect = egui::Rect::from_center_size(ui.max_rect().center(), vec2(t.form_close_size - t.space_4, t.form_close_size - t.space_4));
@@ -357,7 +359,7 @@ pub(crate) fn plus_header<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> Opt
     }
     scenario::publish_handle("dialog:menu:Add Column", rect.center());
     scenario::publish_rect("dialog:menu:Add Column", rect);
-    let popup = Container::new(ui.ctx(), Surface::Popup).menu(&response);
+    let popup = Container::new(ui.ctx(), Surface::Popup).menu(&response).close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside);
     let open = popup.is_open();
     let result = popup.show(|ui| super::scope(ui, add)).map(|r| r.inner);
     if open {

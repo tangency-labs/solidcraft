@@ -1,5 +1,6 @@
 //! New points on an existing fit spline (#6533): a fit point inserted where the curve already
-//! runs, or a new first or last point the spline runs on to.
+//! runs, or a new first or last point the spline runs on to. Also a spline's direction reversed
+//! (#8224).
 //!
 //! The spline keeps its curve index and every point it had (the new point is appended to
 //! `Sketch::points`), so constraints on its points and on the curve stay as they were.
@@ -84,6 +85,32 @@ impl Sketch {
             }
         }
         Ok(p)
+    }
+
+    /// Reverse spline `ci`'s direction: its last point becomes its first and the curve runs the
+    /// other way along the same path. Its points are reversed in place, so every point, and every
+    /// constraint on them and on the curve, stays. The shape doesn't change: a fit spline's chord
+    /// lengths and natural ends, a control point spline's uniform clamped knots and a closed
+    /// spline's cyclic fit (whose closing point repeats its first) read the same both ways.
+    pub fn reverse_spline(&mut self, ci: usize) -> Result<()> {
+        let curve = self.curves.get(ci).ok_or_else(|| SketchError::Unknown(format!("curve {ci}")))?;
+        if !matches!(curve.kind, CurveKind::Spline { .. }) {
+            return Err(SketchError::WrongKind(curve.id.clone(), "only a spline can be reversed".into()));
+        }
+        if curve.link.is_some() {
+            return Err(SketchError::Invalid("a projected spline follows its source; it can't be reversed on its own".into()));
+        }
+        let id = curve.id.as_str();
+        // An offset's side is taken along its sources' directions.
+        let offset = self.freeform_offsets.iter().any(|o| o.source == id || o.output == id)
+            || self.offsets.iter().any(|o| o.sources.iter().any(|(source, _)| source == id) || o.owns_output(id));
+        if offset {
+            return Err(SketchError::Invalid("the spline is part of an offset; break the offset association first".into()));
+        }
+        if let Some(CurveKind::Spline { pts, .. }) = self.curves.get_mut(ci).map(|c| &mut c.kind) {
+            pts.reverse();
+        }
+        Ok(())
     }
 
     /// The points of spline `ci`, when it may take another one.

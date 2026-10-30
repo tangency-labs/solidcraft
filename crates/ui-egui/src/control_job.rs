@@ -38,7 +38,7 @@ use crate::control::ControlRequest;
 
 /// Areas whose commands only compute the design (no files written, nothing started outside the
 /// app), so evaluating them ahead on a copy has no effect but a warm cache.
-const AHEAD_AREAS: [&str; 22] = [
+const AHEAD_AREAS: &[&str] = &[
     "appearance",
     "assembly",
     "body",
@@ -64,16 +64,16 @@ const AHEAD_AREAS: [&str; 22] = [
 ];
 
 /// Parameters that name a file or folder: a command given one runs here, as before.
-const NAMES_A_FILE: [&str; 8] = ["path", "paths", "file", "files", "dir", "folder", "url", "out"];
+const NAMES_A_FILE: &[&str] = &["path", "paths", "file", "files", "dir", "folder", "url", "out"];
 
 /// Commands that change nothing in the design and write a file: they run on a copy.
-const ANSWERED_ON_A_COPY: [&str; 2] = ["file.export", "file.save_mesh"];
+const ANSWERED_ON_A_COPY: &[&str] = &["file.export", "file.save_mesh"];
 
 /// Commands that only read the design, which can take long on a large one (a measure of every
 /// body, an inspection that measures them, #4604; a clearance or interference check of every pair
 /// of bodies, minutes on an assembly of 150): they run on a copy too, whatever the preference,
 /// since an answer from the design as it was when asked has no order to keep.
-const READ_ON_A_COPY: [&str; 4] = ["inspect.measure", "document.inspect", "inspect.clearance", "inspect.interference"];
+const READ_ON_A_COPY: &[&str] = &["inspect.measure", "document.inspect", "inspect.clearance", "inspect.interference"];
 
 /// Exports and readings computing at once; more run here.
 const MAX_ANSWERING: usize = 4;
@@ -406,12 +406,22 @@ impl SolveApp {
     /// is taken care of; `Some`: it runs here (no threads).
     fn answer_on_a_copy(&mut self, req: ControlRequest, id: &'static str, params: Value) -> Option<ControlRequest> {
         let Ok(scope) = crate::control::request_scope(self, &req.params) else { return Some(req) };
+        // The request's own level (#9184) checks it on the copy, and the reply says so, as
+        // `control::handle` does; a word that is no level is refused there.
+        let Ok(level) = crate::control::request_param_check(&req.method, &req.params) else { return Some(req) };
         let mut copy = self.session.scratch();
+        if let Some(level) = level {
+            copy.param_check = level;
+        }
         let rx = spawn(scope, move || {
-            Some(match copy.execute(id, &params) {
+            let mut reply = match copy.execute(id, &params) {
                 Ok(v) => json!({"ok": true, "result": v}),
                 Err(e) => json!({"ok": false, "error": e.to_string()}),
-            })
+            };
+            if let Some(level) = level {
+                reply["param_check"] = json!(level.name());
+            }
+            Some(reply)
         });
         let Some(rx) = rx else { return Some(req) };
         let job = ControlJob { label: label(self, id), req, work: Work::Answer, done: rx, started: crate::now_ms(), steps: None };

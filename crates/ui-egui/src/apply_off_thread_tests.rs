@@ -24,6 +24,12 @@ fn square_on_a_block() -> Harness {
     h.app.finish_sketch();
     h.app.start("solid.extrude");
     h.frames(2);
+    // The window's own operation check would hand OK its Join already evaluated (#6901): these
+    // tests are about OK computing it.
+    if let Some(d) = h.app.dialog.as_mut() {
+        d.op_auto.manual = true;
+    }
+    h.app.op_check = Default::default();
     h
 }
 
@@ -363,6 +369,50 @@ fn cancelling_a_stale_editor_preserves_the_newer_document() {
     assert!(std::sync::Arc::ptr_eq(&document, &h.app.session.doc));
     assert!(h.app.dialog.is_none());
     assert!(h.app.status.as_ref().is_some_and(|(_, _, error)| *error));
+}
+
+#[test]
+fn hiding_an_origin_plane_during_feature_edit_allows_ok_and_cancel() {
+    for apply in [false, true] {
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        for (command, params) in [
+            ("sketch.create", json!({"plane":"XY"})),
+            ("sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[30,20]})),
+            ("sketch.finish", json!({})),
+            ("solid.extrude", json!({"distance":10,"operation":"new"})),
+        ] {
+            h.app.run(command, params).unwrap();
+        }
+        h.call("ui.editFeature", json!({"feature":"Extrude1"}));
+        h.frames(2);
+        h.step(&json!({"click":{"handle":"dialog:Distance"}})).unwrap();
+        h.step(&json!({"key":"A","cmd":true})).unwrap();
+        h.step(&json!({"text":"20 mm"})).unwrap();
+        h.step(&json!({"click":{"handle":"fold:Origin"}})).unwrap();
+        h.step(&json!({"click":{"handle":"eye:XY"}})).unwrap();
+        assert!(h.app.session.visibility.hidden_origin.iter().any(|name| name == "XY"));
+        if apply {
+            h.step(&json!({"click":{"handle":"dialog:OK"}})).unwrap();
+            until_applied(&mut h);
+        } else {
+            h.step(&json!({"key":"Escape"})).unwrap();
+        }
+        assert!(h.app.dialog.is_none(), "{:?}", h.app.dialog.as_ref().and_then(|dialog| dialog.error.as_ref()));
+        assert!(h.app.status.as_ref().is_none_or(|(_, _, error)| !error), "{:?}", h.app.status);
+        assert_eq!(h.app.session.doc.marker, None);
+        assert!(h.app.session.visibility.hidden_origin.iter().any(|name| name == "XY"));
+        h.step(&json!({"expect":{"bodies":1,"volume":if apply {12000} else {6000}}})).unwrap();
+        if apply {
+            h.app.run("edit.undo", json!({})).unwrap();
+            assert_eq!(h.app.session.doc.marker, None);
+            assert!(h.app.session.visibility.hidden_origin.iter().any(|name| name == "XY"));
+        }
+        h.app.run("edit.undo", json!({})).unwrap();
+        assert_eq!(h.app.session.doc.marker, None, "undoing the eye click keeps the complete timeline");
+        assert!(!h.app.session.visibility.hidden_origin.iter().any(|name| name == "XY"));
+        h.step(&json!({"expect":{"bodies":1,"volume":6000}})).unwrap();
+    }
 }
 
 #[test]

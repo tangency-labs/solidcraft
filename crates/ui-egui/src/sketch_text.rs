@@ -385,6 +385,17 @@ pub(crate) fn preview(app: &mut SolveApp, k: &mut Tx) -> Option<Result<(), Strin
     }
     let mut live = params;
     live["live"] = json!(true);
+    // The live edit runs on the design itself: a typed definition is made once, by OK, and the
+    // preview shows its value (#4071).
+    let at = live.get_mut("at").and_then(Value::as_array_mut).map(|a| a.iter_mut().collect::<Vec<_>>()).unwrap_or_default();
+    for v in at {
+        value_of_definition(v);
+    }
+    for key in ["height", "angle"] {
+        if let Some(v) = live.get_mut(key) {
+            value_of_definition(v);
+        }
+    }
     Some(
         folded(app, k, |app| app.session.execute("sketch.edit_text", &live))
             .map(|_| {
@@ -392,6 +403,13 @@ pub(crate) fn preview(app: &mut SolveApp, k: &mut Tx) -> Option<Result<(), Strin
             })
             .map_err(|error| error.to_string()),
     )
+}
+
+/// A field typed as `name = value`, as just its value.
+fn value_of_definition(v: &mut Value) {
+    if let Some((_, rhs)) = v.as_str().and_then(solidcraft_engine::doc::expr::definition) {
+        *v = json!(rhs);
+    }
 }
 
 /// OK: the fields' final edit (which also brings the features after the sketch up to date), in
@@ -643,7 +661,9 @@ fn edit_params(app: &SolveApp, k: &Tx) -> Result<Value, String> {
             }
             v
         };
-        let names_parameters = i < ANGLE_END && !solidcraft_engine::doc::expr::references(value).is_empty();
+        // A field that names parameters, or names its value (`h = 10`, #4071), goes as typed.
+        let names_parameters = i < ANGLE_END
+            && (!solidcraft_engine::doc::expr::references(value).is_empty() || solidcraft_engine::doc::expr::definition(value).is_some());
         sent[i] = match given {
             Some(e) => json!(e),
             None if value != initial && names_parameters => json!(value.trim()),

@@ -493,6 +493,56 @@ fn configuration_inventory_keeps_library_rules_preview_and_inline_row_lifecycle(
 }
 
 #[test]
+fn configuration_add_column_menu_filters_as_typed_and_resets_on_close() {
+    // A design has many parameters, features and bodies: the Add Column menu's filter narrows
+    // its list as the user types, Enter picks a lone match, and the next opening starts blank.
+    let mut h = fixture();
+    h.app.run("config.configure", json!({"params":["width"]})).unwrap();
+    h.app.start("config.table");
+    h.frames(4);
+    h.step(&json!({"click":{"handle":"dialog:menu:Add Column"}})).unwrap();
+    h.frames(2);
+    assert!(scenario::handle_at("dialog:menu:Add Column:filter").is_some(), "the menu opens with a filter field");
+    h.step(&json!({"click":{"handle":"dialog:menu:Add Column:filter"}})).unwrap();
+    h.frames(2);
+    assert!(scenario::handle_at("dialog:menu:Add Column:filter").is_some(), "a click into the filter keeps the menu open");
+    let feature = h.app.session.doc.features[0].name.clone();
+    assert!(h.widget(&format!("Suppress {feature}")).is_some());
+    assert!(h.widget("Body1 (material)").is_some());
+    assert!(h.widget("Face Appearance").is_some());
+    h.step(&json!({"text":"mater"})).unwrap();
+    h.frames(2);
+    assert!(h.widget("Body1 (material)").is_some(), "the match stays");
+    assert!(h.widget(&format!("Suppress {feature}")).is_none(), "a feature does not match `mater`");
+    assert!(h.widget("Body1 (appearance)").is_none());
+    assert!(h.widget("Face Appearance").is_none(), "the submenu hides when it does not match");
+    h.step(&json!({"key":"A","cmd":true})).unwrap();
+    h.step(&json!({"text":"zzz"})).unwrap();
+    h.frames(2);
+    assert!(h.widget("No matching columns").is_some());
+    h.step(&json!({"key":"A","cmd":true})).unwrap();
+    h.step(&json!({"text":"face app"})).unwrap();
+    h.frames(2);
+    assert!(h.widget("Face Appearance").is_some(), "the submenu matches by its own label");
+    h.step(&json!({"key":"A","cmd":true})).unwrap();
+    h.step(&json!({"text":"Suppress"})).unwrap();
+    h.step(&json!({"key":"Enter"})).unwrap();
+    h.frames(3);
+    assert!(
+        h.app.session.doc.configs.columns.iter().any(|c| matches!(c, solidcraft_engine::doc::config::Column::Suppress(_))),
+        "Enter picks the one match"
+    );
+    assert!(h.app.dialog.is_some(), "Enter in the filter does not submit the card");
+    assert!(scenario::handle_at("dialog:menu:Add Column:filter").is_none(), "picking closes the menu");
+    h.step(&json!({"click":{"handle":"dialog:menu:Add Column"}})).unwrap();
+    h.frames(2);
+    assert!(h.widget("Body1 (material)").is_some(), "a reopened menu starts unfiltered");
+    assert!(h.widget(&format!("Suppress {feature}")).is_none(), "an added column leaves the menu");
+    h.step(&json!({"key":"Escape"})).unwrap();
+    assert!(h.app.dialog.is_some(), "menu Escape leaves the card open");
+}
+
+#[test]
 fn draft_bins_do_not_delete_saved_rows_named_new() {
     for command in ["parameters.change", "config.table"] {
         let mut h = fixture();

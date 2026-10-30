@@ -361,6 +361,23 @@ fn the_level_survives_a_new_design() {
     assert_eq!(s.scratch().param_check, ParamCheck::Strict);
 }
 
+#[test]
+fn issues_are_read_from_the_commands_own_contract() {
+    let issues = super::issues("solid.box", &json!({"length": 1, "width": 1, "height": 1, "operaton": "cut"}));
+    assert_eq!(messages(&issues), ["unknown key `operaton`; did you mean `operation`?"]);
+    assert_eq!(issues, box_contract().check(&json!({"length": 1, "width": 1, "height": 1, "operaton": "cut"})));
+    // No contract, or no such command: nothing to say.
+    assert!(super::issues("solid.fillet", &json!({"nonsense": 1})).is_empty());
+    assert!(super::issues("no.such", &json!({"nonsense": 1})).is_empty());
+}
+
+#[test]
+fn a_level_is_read_back_from_its_name() {
+    for level in ParamCheck::ALL {
+        assert_eq!(ParamCheck::parse(level.name()), Some(level));
+    }
+}
+
 /// Whether `v` conforms to `node` of the schema `root`, for the keywords these schemas use
 /// apart from `pattern`: `type`, `properties`, `required`, `additionalProperties: false`,
 /// `items`, `minItems`, `maxItems`, `uniqueItems`, `enum`, `minLength`, `maxLength`, `minimum`,
@@ -851,4 +868,178 @@ fn picks_are_still_looked_up_one_at_a_time() {
     assert_eq!(error(&mut s, "solid.extrude", json!({"distance": 5, "sketch": "Nope"})), "invalid parameters for `solid.extrude`: no sketch `Nope`");
     let r = s.execute("solid.fillet", &fillet(json!([{"body": "Body1", "index": 0}]))).unwrap_or_else(|e| panic!("{e}"));
     assert_eq!(r["changed_bodies"], json!(["Body1"]), "{r}");
+}
+
+/// A reference is accepted as `construct::geo` reads it before it looks anything up, and its
+/// schema says the same, the first form that fits deciding, apart from what a schema can't say
+/// (below).
+#[test]
+fn references_match_the_reference_reader() {
+    let schema = input_schema_for::<GeoRefParam>();
+    let schema = schema.as_value();
+    for (v, accepted) in [
+        (json!({"face": [1, 2, 3]}), true),
+        (json!({"edge": {"x": 1, "y": 2, "z": 3}}), true),
+        (json!({"vertex": [1, 2, 3], "body": "Body1"}), true),
+        (json!({"face": "F1", "edge": [1, 2, 3]}), true),
+        (json!({"face": [1e9, 0, 0]}), false),
+        (json!({"type": "point", "p": [1, 2, 3]}), true),
+        (json!({"type": "origin"}), true),
+        (json!({"type": "bogus"}), false),
+        (json!({"type": null, "face": [1, 2, 3]}), false),
+        (json!({"sketch": 3, "point": "p1"}), true),
+        (json!({"sketch": "Guide", "curve": "l1"}), true),
+        (json!({"sketch": 2.5, "point": [1, 2], "curve": "l1"}), true),
+        (json!({"sketch": true, "point": "p1"}), false),
+        (json!({"sketch": 3}), false),
+        (json!({"sketch": null, "point": [1, 2, 3]}), false),
+        (json!({"point": [1, 2, 3]}), true),
+        (json!({"point": "p1"}), false),
+        (json!({"plane": "XY"}), true),
+        (json!({"plane": 4}), true),
+        (json!({"plane": -4}), false),
+        (json!({"plane": {"normal": [0, 0, 1]}}), true),
+        (json!({"plane": {"origin": ["w", 0, 0], "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]}}), true),
+        (json!({"plane": {"x_dir": [1, 0, 0]}}), false),
+        (json!({"plane": {"origin": [0, 0], "normal": [0, 0, 1]}}), false),
+        (json!({"plane": 2.5, "axis": "X"}), false),
+        (json!({"point": [1, 2, 3], "plane": 2.5}), true),
+        (json!({"axis": "X"}), true),
+        (json!({"axis": 1, "construct_point": "P"}), true),
+        (json!({"construct_point": "P"}), true),
+        (json!({"construct_point": 1}), false),
+        (json!("Shelf"), true),
+        (json!(""), true),
+        (json!(5), false),
+        (json!(null), false),
+        (json!([1, 2, 3]), false),
+        (json!({}), false),
+    ] {
+        let form = match crate::cmd::geo_form(&v) {
+            Ok(crate::cmd::GeoForm::Sketch { sketch, part }) => crate::cmd::sketch_key(Some(sketch)).is_some() && part.is_some(),
+            Ok(crate::cmd::GeoForm::Plane(plane)) => parse::<PlaneParam>(plane.clone()).is_some(),
+            form => form.is_ok(),
+        };
+        assert_eq!(form, accepted, "reader {v}");
+        assert_eq!(parse::<GeoRefParam>(v.clone()).is_some(), accepted, "{v}");
+        assert_eq!(conforms(schema, schema, &v), accepted, "schema {v}");
+    }
+    // Where the schema can't follow the reader: a saved reference is read whole by serde, and an
+    // explicit plane's directions must make a plane.
+    for v in [json!({"type": "face", "at": "x"}), json!({"plane": {"normal": [0, 0, 0]}})] {
+        assert!(parse::<GeoRefParam>(v.clone()).is_none() && conforms(schema, schema, &v), "{v}");
+    }
+}
+
+/// A plane is accepted as `features::plane_param` reads it before it looks anything up, and
+/// so is a plane or face `base` (a face as `sketch::face::capture` reads it); their schemas say
+/// the same, apart from directions that don't make a plane.
+#[test]
+fn planes_match_the_plane_readers() {
+    let plane = input_schema_for::<PlaneParam>();
+    let plane = plane.as_value();
+    let base = input_schema_for::<PlaneOrFace>();
+    let base = base.as_value();
+    let face = |extra: Value| {
+        let mut v = json!({"face": [1, 2, 3]});
+        if let (Some(v), Some(extra)) = (v.as_object_mut(), extra.as_object()) {
+            v.extend(extra.clone());
+        }
+        v
+    };
+    for (v, as_plane, as_base) in [
+        (json!("XY"), true, true),
+        (json!("anything"), true, true),
+        (json!(7), true, true),
+        (json!(u64::MAX), true, true),
+        (json!(-7), false, false),
+        (json!(7.5), false, false),
+        (json!(true), false, false),
+        (json!(null), false, false),
+        (json!([0, 0, 1]), false, false),
+        (json!({}), false, false),
+        (json!({"origin": [0, 0, "h"], "normal": [0, 0, 1]}), true, true),
+        (json!({"origin": {"x": 0, "y": 0, "z": 1}, "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]}), true, true),
+        (json!({"x_dir": [1, 0, 0], "y_dir": "y", "normal": [0, 0, 1]}), true, true),
+        (json!({"x_dir": [1, 0, 0]}), false, false),
+        (json!({"origin": {"x": 0, "y": 0}, "normal": [0, 0, 1]}), false, false),
+        (json!({"origin": null, "normal": [0, 0, 1]}), false, false),
+        (face(json!({})), false, true),
+        (face(json!({"normal": [0, 0, 1]})), true, true),
+        (face(json!({"body": "Body1", "index": 0, "path": [1, 2], "fixed": true})), false, true),
+        (face(json!({"body": "Body1"})), false, false),
+        (face(json!({"index": 0})), false, false),
+        (face(json!({"body": "", "index": 0})), false, false),
+        (face(json!({"body": "Body1", "index": -1})), false, false),
+        (face(json!({"body": "Body1", "index": 1.0})), false, false),
+        (face(json!({"path": [0]})), false, false),
+        (face(json!({"path": vec![1; 64]})), false, true),
+        (face(json!({"path": vec![1; 65]})), false, false),
+        (face(json!({"fixed": "yes"})), false, false),
+        (json!({"face": "x", "normal": [0, 0, 1]}), true, false),
+        (json!({"face": null}), false, false),
+    ] {
+        assert_eq!(parse::<PlaneParam>(v.clone()).is_some(), as_plane, "{v}");
+        assert_eq!(conforms(plane, plane, &v), as_plane, "plane schema {v}");
+        let reader = match v.get("face") {
+            Some(_) => crate::cmd::face_pick_form(&v).is_ok(),
+            None => as_plane,
+        };
+        assert_eq!(reader, as_base, "reader {v}");
+        assert_eq!(parse::<PlaneOrFace>(v.clone()).is_some(), as_base, "{v}");
+        assert_eq!(conforms(base, base, &v), as_base, "base schema {v}");
+    }
+    for v in [json!({"normal": [0, 0, 0]}), json!({"x_dir": [1, 0, 0], "y_dir": [2, 0, 0], "normal": [0, 0, 1]})] {
+        assert!(parse::<PlaneParam>(v.clone()).is_none() && conforms(plane, plane, &v), "{v}");
+    }
+    // An id, an index or a path id written with a fraction (`7.0`) is refused by the readers but
+    // is an integer to JSON Schema (`conforms` reads integers as serde does, so it agrees with
+    // the readers above; a standard validator would not).
+    assert!(parse::<PlaneParam>(json!(7.0)).is_none() && parse::<PlaneOrFace>(face(json!({"path": [1.0]}))).is_none());
+}
+
+/// A plane at an angle's `axis` is accepted as `features::axis_line` reads it before it looks
+/// anything up, and its schema says the same, apart from what a schema can't say (below).
+#[test]
+fn axis_lines_match_the_axis_reader() {
+    let schema = input_schema_for::<AxisLine>();
+    let schema = schema.as_value();
+    for (v, accepted) in [
+        (json!("X"), true),
+        (json!("Bore"), true),
+        (json!({"dir": [0, 0, 1]}), true),
+        (json!({"origin": [1, 2, 3], "dir": {"x": 0, "y": 1, "z": 0}}), true),
+        (json!({"origin": ["1 mm", 0, 0], "dir": [0, 0, 1]}), false),
+        (json!({"dir": [0, 0, 1], "type": "world", "axis": "X"}), true),
+        (json!({"edge": [1, 2, 3]}), true),
+        (json!({"face": [1, 2, 3], "dir": [0, 0, 1]}), true),
+        (json!({"face": "x", "dir": [0, 0, 1]}), false),
+        (json!({"type": "edge", "at": [1, 2, 3]}), true),
+        (json!({"type": "vertex", "at": [1, 2, 3]}), false),
+        (json!({"face": "x", "vertex": [1, 2, 3]}), false),
+        (json!({"edge": "x", "sketch": 1, "curve": "l1"}), false),
+        (json!({}), false),
+        (json!(5), false),
+        (json!(null), false),
+        (json!([0, 0, 1]), false),
+    ] {
+        assert_eq!(parse::<AxisLine>(v.clone()).is_some(), accepted, "{v}");
+        assert_eq!(conforms(schema, schema, &v), accepted, "schema {v}");
+    }
+    // Where the schema can't follow the reader: a saved edge is read whole by serde, and `dir`
+    // must not be zero.
+    for v in [json!({"type": "edge", "at": "x"}), json!({"dir": [0, 0, 0]})] {
+        assert!(parse::<AxisLine>(v.clone()).is_none() && conforms(schema, schema, &v), "{v}");
+    }
+}
+
+/// A construction plane's name is refused when `features::check_plane_name` refuses it. (The
+/// schema can't say which names: see `PlaneName`.)
+#[test]
+fn plane_names_match_check_plane_name() {
+    for name in ["Shelf", "XY", " top ", "Front\u{a0}", "RIGHT", "XYZ", "", "前"] {
+        let refused = crate::cmd::plane_name_problem(name);
+        assert_eq!(parse::<PlaneName>(json!(name)).is_none(), refused.is_some(), "{name:?}");
+    }
+    assert!(parse::<PlaneName>(json!(5)).is_none());
 }

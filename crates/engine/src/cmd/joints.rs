@@ -43,7 +43,7 @@ pub static COMMANDS: &[CommandSpec] = &[
          closed loop follow, and the motion stops where the loop can no longer close → stopped_by_loop); quiet?: bool (leave out dof \
          and fixed) → values: [{name, value, unit: deg|mm, limits}] as joint.list gives them; moved: whether any occurrence moved; \
          reason: why the joint can move nothing (suppressed, its origins lost, or its chain joined to nothing grounded → unconnected: \
-         the occurrence named)",
+         the occurrence named); index?: zero-based coordinate to drive with value (the other coordinates follow); continuous?: bool (drag frame, suppress UI echo)",
     ),
     CommandSpec::new("joint.reach", "Reach Point", reach).icon("reach").params(
         "occurrence: id|name; point: [x,y,z] (where its point goes, world); at?: [x,y,z] (its point, in the world where it is now; default: the centre of          its bodies' box); z?: [x,y,z] (the way its axis then points); axis?: [x,y,z] (that axis, in the world now; default: its own z); joints?: [ids          or names] (only these move toward the point; the other joints of a closed loop they are in follow); quiet?: bool; continuous?: bool (a frame          of a drag: the answer says continuous, and the app's command line doesn't echo it). Moves the values of the joints          on its chain from where they are to the nearest pose, within their limits, through motion links, keeping closed loops closed as joint.drive does          (contact sets are not checked) → reached; error_mm (and error_deg with z): how close it got; point: where its point is; values: [{joint, name,          values}] of the joints that moved, as joint.list gives them; moved; stopped_by_limit: [{joint, value, limit: min|max}]: the limits it rests on          short of the point; stopped_by_loop: {joint}: the closed loop that stopped it (its chain alone gets closer); reason: why nothing can move",
@@ -858,7 +858,27 @@ fn drive(s: &mut Session, p: &Value) -> Result<Value> {
     if kind == JointKind::Rigid {
         return Err(bad(cmd, "a rigid joint does not move: joint.edit can make it revolute (turns), slider (slides) or cylindrical (both)"));
     }
-    let mut q = values_param(s, p, kind, cmd)?;
+    let index = match p.get("index") {
+        None => None,
+        Some(v) => Some(
+            v.as_u64()
+                .and_then(|i| usize::try_from(i).ok())
+                .filter(|i| *i < kind.dofs().len())
+                .ok_or_else(|| bad(cmd, "index is outside this joint's coordinates"))?,
+        ),
+    };
+    let mut q = if let Some(index) = index {
+        if p.get("values").is_some() {
+            return Err(bad(cmd, "index goes with value, not values"));
+        }
+        let mut q = joints::joint_values(&s.doc.assembly).remove(&id).unwrap_or_else(|| vec![0.0; kind.dofs().len()]);
+        if let Some(slot) = q.get_mut(index) {
+            *slot = value(s, p.get("value").ok_or_else(|| bad(cmd, "give value"))?, kind.is_angle(index), cmd)?;
+        }
+        q
+    } else {
+        values_param(s, p, kind, cmd)?
+    };
     if p.get("values").is_none() && p.get("value").is_none() {
         return Err(bad(cmd, "give `value` or `values`"));
     }
@@ -869,23 +889,32 @@ fn drive(s: &mut Session, p: &Value) -> Result<Value> {
         Some(Value::Array(a)) => a.len(),
         _ => 1,
     };
-    for (i, v) in q.iter_mut().enumerate().skip(given) {
-        *v = j.values.get(i).copied().unwrap_or(*v);
+    if index.is_none() {
+        for (i, v) in q.iter_mut().enumerate().skip(given) {
+            *v = j.values.get(i).copied().unwrap_or(*v);
+        }
     }
     joints::clamp(j, &mut q);
     // Moved as far toward `q` as contact sets and closed loops allow. Values left out of
     // `values` are not driven: in a closed loop they follow.
     // Driving moves the joint by hand: the values driven drop their expressions (an expression
     // given here is worked out once, as contact or a loop may stop the motion short of it).
-    for i in 0..given.min(kind.dofs().len()) {
-        j.exprs.set_value(i, None);
+    if let Some(index) = index {
+        j.exprs.set_value(index, None);
+    } else {
+        for i in 0..given.min(kind.dofs().len()) {
+            j.exprs.set_value(i, None);
+        }
     }
     let before = super::motion::positions(s);
-    let r = super::motion::drive_joint(s, id, q, given)?;
+    let r = if let Some(index) = index { super::motion::drive_joint_index(s, id, q, index)? } else { super::motion::drive_joint(s, id, q, given)? };
     let sol = solution(s, &BTreeMap::new(), response_analysis(p));
     let mut out = sol_json(&sol, p);
     out["joint"] = json!(id);
     out["values"] = json!(effective_values(s, id));
+    if bool_(p, "continuous") == Some(true) {
+        out["continuous"] = json!(true);
+    }
     out["stopped_by_contact"] = r["stopped_by_contact"].clone();
     out["stopped_by_loop"] = r["stopped_by_loop"].clone();
     out["moved"] = json!(super::motion::moved(&before, &super::motion::positions(s)).next().is_some());
@@ -1364,11 +1393,11 @@ fn edit(s: &mut Session, p: &Value) -> Result<Value> {
     if let Some(f) = bool_(p, "flip") {
         j.flip = f;
     }
-    if let Some(x) = bool_(p, "suppressed") {
-        j.suppressed = x;
-    }
     if let Some(n) = str_(p, "name").map(str::trim).filter(|n| !n.is_empty() && n.len() <= 128) {
         j.name = n.to_string();
+    }
+    if let Some(x) = bool_(p, "suppressed") {
+        suppress_joints(s.doc_mut(), &[id], x);
     }
     // A relation whose type, offset, tilt or flip changes starts again from where its parts are.
     let reseat = kind.is_some() || offset.is_some() || angle.is_some() || p.get("flip").is_some();
@@ -1382,6 +1411,25 @@ fn edit(s: &mut Session, p: &Value) -> Result<Value> {
     }
     let sol = resolve(s);
     Ok(sol_json(&sol, p))
+}
+
+/// Shared mutation for individual joints and timeline folders; the caller resolves once.
+pub(super) fn suppress_joints(doc: &mut solidcraft_doc::Document, ids: &[u64], suppressed: bool) {
+    let ids: std::collections::BTreeSet<_> = ids.iter().copied().collect();
+    for joint in &mut doc.assembly.joints {
+        if ids.contains(&joint.id) {
+            joint.suppressed = suppressed;
+        }
+    }
+}
+
+pub(super) fn delete_joints(doc: &mut solidcraft_doc::Document, ids: &[u64]) {
+    let ids: std::collections::BTreeSet<_> = ids.iter().copied().collect();
+    doc.assembly.joints.retain(|joint| !ids.contains(&joint.id));
+    doc.assembly.links.retain(|link| !ids.contains(&link.a) && !ids.contains(&link.b));
+    for group in &mut doc.timeline_groups {
+        group.joints.retain(|id| !ids.contains(id));
+    }
 }
 
 fn delete(s: &mut Session, p: &Value) -> Result<Value> {
@@ -1406,9 +1454,7 @@ fn delete(s: &mut Session, p: &Value) -> Result<Value> {
         return Ok(json!({"deleted_link": i}));
     }
     let id = joint_id(s, p.get("joint"), cmd)?;
-    let doc = s.doc_mut();
-    doc.assembly.joints.retain(|j| j.id != id);
-    doc.assembly.links.retain(|l| l.a != id && l.b != id);
+    delete_joints(s.doc_mut(), &[id]);
     let sol = resolve(s);
     let mut out = sol_json(&sol, p);
     out["deleted"] = json!(id);

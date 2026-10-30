@@ -516,6 +516,10 @@ impl AgentChat {
     pub fn state(&self) -> State {
         self.state.unwrap_or(State::Off)
     }
+    #[cfg(test)]
+    pub(crate) fn set_state(&mut self, state: State) {
+        self.state = Some(state);
+    }
     fn push(&mut self, item: Item) {
         if self.items.len() >= MAX_ITEMS {
             self.items.drain(..MAX_ITEMS / 10);
@@ -976,6 +980,7 @@ fn connect_at_start(app: &mut SolveApp, ctx: &egui::Context) {
 
 /// Stop the agent (and everything it started); the conversation stays.
 pub fn disconnect(app: &mut SolveApp) {
+    crate::edit_in_place::forget_after_turn(app);
     app.agent_chat.disconnect_document(&mut app.session, false);
 }
 
@@ -1413,6 +1418,7 @@ pub(crate) fn attach_dropped(app: &mut SolveApp, paths: impl Iterator<Item = std
 pub fn cancel(app: &mut SolveApp) {
     app.agent_chat.steering = false;
     app.agent_chat.stopped = true;
+    crate::edit_in_place::forget_after_turn(app);
     interrupt(app);
 }
 

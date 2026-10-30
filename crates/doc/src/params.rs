@@ -225,6 +225,12 @@ impl Document {
     /// A typed length that is a bare number means the design's units: it gets that unit written
     /// in (feature inputs are stored in mm otherwise). Anything else is returned unchanged.
     pub fn with_design_unit(&self, e: &str, kind: Kind) -> String {
+        // A definition's value reads as the value would (#4071): `w = 2` is `w = 2 in`.
+        if let Some((name, rhs)) = expr::definition(e)
+            && expr::is_bare_number(rhs)
+        {
+            return format!("{name} = {}", self.with_design_unit(rhs, kind));
+        }
         let u = self.units.trim();
         let bare = expr::is_bare_number(e);
         if kind == Kind::Length && bare && !u.is_empty() && u != "mm" && expr::unit_info(u).is_some_and(|(k, _)| k == Kind::Length) {
@@ -262,7 +268,7 @@ impl Document {
             .filter(|(_, _, k)| *k == Kind::Length)
             .map(|(_, e, _)| {
                 let d = if expr::is_literal(&e) { expr::Defaults::default() } else { expr::Defaults { len: scale, ..expr::Defaults::default() } };
-                expr::eval_with(&e, &look).and_then(|v| v.to_kind_in(Kind::Length, d)).ok()
+                expr::eval_with_defaults(&e, &look, d).and_then(|v| v.to_kind_in(Kind::Length, d)).ok()
             })
             .collect()
     }
@@ -579,7 +585,7 @@ impl Document {
                 }
                 let unit = match unit {
                     Some(u) => u.trim().to_string(),
-                    None => Self::infer_unit_in(vals, expr_s),
+                    None => Self::infer_unit_in(vals, expr_s, &self.units),
                 };
                 self.params.push(crate::Param {
                     name: name.into(),
@@ -690,18 +696,19 @@ impl Document {
     }
 
     /// The unit for a new parameter with this expression: that of its value; a bare number is
-    /// a length (mm).
+    /// a length in the design's units, as a typed length reads it (#8865).
     pub(crate) fn infer_unit(&self, e: &str) -> String {
-        Self::infer_unit_in(&self.param_values().0, e)
+        Self::infer_unit_in(&self.param_values().0, e, &self.units)
     }
 
-    /// [`Document::infer_unit`] against parameter values already worked out.
-    fn infer_unit_in(vals: &BTreeMap<String, Value>, e: &str) -> String {
+    /// [`Document::infer_unit`] against parameter values already worked out, a length taking
+    /// `units` (the design's, or `mm` where a bare number reads as millimetres).
+    pub(crate) fn infer_unit_in(vals: &BTreeMap<String, Value>, e: &str, units: &str) -> String {
         let v = expr::eval_with(e, &|n| vals.get(n).copied().ok_or_else(|| DocError::Expr(format!("unknown parameter `{n}`"))));
         match v.ok().and_then(|v| v.kind()) {
             Some(Kind::Unitless) if !expr::references(e).is_empty() => String::new(),
             Some(Kind::Angle) => "deg".into(),
-            _ => "mm".into(),
+            _ => expr::length_unit_or_mm(units).to_string(),
         }
     }
 
@@ -884,6 +891,18 @@ impl Document {
                     }
                 }
                 for e in sketch.text_exprs_mut() {
+                    let r = expr::rename_reference(e, old, new);
+                    if r != *e {
+                        *e = r;
+                        n += 1;
+                    }
+                }
+                // An equation curve's variable hides a parameter of its name: such a parameter is
+                // not what its formulas refer to.
+                for (variable, e) in sketch.equation_exprs_mut() {
+                    if variable == old {
+                        continue;
+                    }
                     let r = expr::rename_reference(e, old, new);
                     if r != *e {
                         *e = r;
@@ -1129,6 +1148,19 @@ mod design_length_tests {
         assert_eq!(written("parsec", 5.0), w("mm", "5 mm"));
         assert_eq!(written("deg", 5.0), w("mm", "5 mm"));
         assert_eq!(written("", 5.0), w("mm", "5 mm"));
+    }
+
+    /// A bare number typed as a formula (`=5`) means the design's units like `5` does.
+    #[test]
+    fn a_formula_that_is_a_bare_number_gets_the_design_unit() {
+        let mut doc = Document::new("Units");
+        doc.units = "in".into();
+        let length = crate::expr::Kind::Length;
+        assert_eq!(doc.with_design_unit("5", length), "5 in");
+        assert_eq!(doc.with_design_unit("=5", length), "=5 in");
+        assert_eq!(doc.with_design_unit("=5 mm", length), "=5 mm");
+        let inches = doc.eval(&doc.with_design_unit("=5", length), length).unwrap();
+        assert!((inches - 127.0).abs() < 1e-9, "{inches}");
     }
 
     #[test]

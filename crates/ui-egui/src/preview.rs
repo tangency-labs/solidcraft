@@ -11,11 +11,13 @@
 //! runs once, on OK, and an error it finds shows then, the dialog staying open.
 
 use std::hash::{Hash, Hasher};
+use std::sync::Arc;
 use std::sync::mpsc::{Receiver, TryRecvError};
 
 use serde_json::Value;
 use solidcraft_engine::Session;
 use solidcraft_engine::doc::ModelState;
+use solidcraft_engine::doc::progress::Progress;
 use solidcraft_engine::geom::{Aabb3, Mesh, Ring, Vec3};
 
 use crate::SolveApp;
@@ -80,11 +82,22 @@ pub struct Built {
 
 type Job = Result<Built, String>;
 
+/// How many obsolete preview jobs may still run, left behind for newer inputs (#7167). Beyond
+/// them, a new job waits for the running one as before, so a quick series of picks keeps at
+/// most this many kernel computations going beside the current one.
+const DETACHED: usize = 2;
+
 #[derive(Default)]
 pub struct PreviewState {
     /// Key of the commands whose result (or error) is shown.
     shown_key: Option<u64>,
     running: Option<(u64, Receiver<Job>)>,
+    /// Asks the running job to stop between features once it is obsolete.
+    running_progress: Option<Arc<Progress>>,
+    /// Jobs left behind for inputs that changed to another setup (#7167): asked to stop, their
+    /// results are dropped when they come. With [`DETACHED`] of them running, the next obsolete
+    /// job is waited for.
+    detached: Vec<Receiver<Job>>,
     /// The running job builds a tool alone (for a join, cut or intersect).
     running_tool: bool,
     /// Inputs of a joint or distance preview, excluding only its driven values.
@@ -137,7 +150,7 @@ impl PreviewState {
     fn clear(&mut self) {
         self.straight.clear();
         self.moving.clear();
-        self.running = None;
+        self.detach();
         self.running_tool = false;
         self.running_stream_key = None;
         self.shown_key = None;
@@ -155,8 +168,9 @@ impl PreviewState {
     /// keeps drawing the last scene it took until the slot it reads hands it another, so a fresh
     /// state (another slot, empty) would leave the old preview drawn over the next design.
     pub fn reset(&mut self) {
-        let (slot, key) = (std::mem::take(&mut self.slot), self.key);
-        *self = PreviewState { slot, key, ..PreviewState::default() };
+        self.detach();
+        let (slot, key, detached) = (std::mem::take(&mut self.slot), self.key, std::mem::take(&mut self.detached));
+        *self = PreviewState { slot, key, detached, ..PreviewState::default() };
         self.set_scene(GpuScene::default());
     }
 
@@ -224,6 +238,32 @@ impl PreviewState {
                 }
             }
         }
+        // A detached job's result is never shown: drop it once it is done.
+        self.detached.retain(|rx| matches!(rx.try_recv(), Err(TryRecvError::Empty)));
+        // The inputs moved to another setup (another selection, for the features whose distance,
+        // radius or pose streams) while a job runs: its result could only be dropped, so stop
+        // waiting for it and let the current inputs start now (#7167). A tool, or a value
+        // streaming within one setup, still shows each finished result; inputs that don't stream
+        // wait as before. At most `DETACHED` jobs are left behind; while they run, the next
+        // obsolete one is waited for as before.
+        let other_setup = !self.running_tool && stream_key.is_some() && self.running_stream_key.is_some() && self.running_stream_key != stream_key;
+        if self.running.as_ref().is_some_and(|(k, _)| *k != key) && other_setup && self.detached.len() < DETACHED {
+            self.detach();
+        }
+    }
+
+    /// Stop waiting for the running job: ask it to stop between features, and count it among the
+    /// detached jobs until its thread ends (also when a closed dialog or another design leaves it
+    /// behind, so `DETACHED` bounds what runs).
+    fn detach(&mut self) {
+        if let Some(progress) = self.running_progress.take() {
+            progress.cancel();
+        }
+        if let Some((_, rx)) = self.running.take() {
+            self.detached.push(rx);
+        }
+        self.running_tool = false;
+        self.running_stream_key = None;
     }
 }
 
@@ -348,7 +388,7 @@ pub fn update(app: &mut SolveApp, ctx: &egui::Context) {
             return;
         }
         let scratch = app.session.scratch();
-        spawn(&mut app.preview, key, scratch, cmds, colors, tool);
+        spawn(&mut app.preview, key, scratch, cmds, colors, tool, Arc::new(Progress::default()));
     }
     app.preview.busy = app.preview.running.is_some();
     if app.preview.busy {
@@ -368,14 +408,20 @@ fn job_key(cmds: &[(String, Value)], revision: u64, colors: Colors) -> u64 {
 
 /// Start computing the preview of `cmds`: for a tool feature (`tool`), only its tool.
 #[cfg(not(target_arch = "wasm32"))]
-fn spawn(pv: &mut PreviewState, key: u64, scratch: Session, cmds: Vec<(String, Value)>, colors: Colors, tool: bool) {
+fn spawn(pv: &mut PreviewState, key: u64, scratch: Session, cmds: Vec<(String, Value)>, colors: Colors, tool: bool, progress: Arc<Progress>) {
     let (tx, rx) = std::sync::mpsc::channel();
+    // Watched by `progress`, so a job left behind for other inputs skips its remaining features.
+    let watched = progress.clone();
     let spawned = std::thread::Builder::new().name("preview".into()).spawn(move || {
-        let _ = tx.send(if tool { compute_tool(&scratch, &cmds, colors) } else { compute(&scratch, &cmds, colors) });
+        let job = solidcraft_engine::doc::progress::watch(watched, || {
+            if tool { compute_tool(&scratch, &cmds, colors) } else { compute(&scratch, &cmds, colors) }
+        });
+        let _ = tx.send(job);
     });
     match spawned {
         Ok(_) => {
             pv.running = Some((key, rx));
+            pv.running_progress = Some(progress);
             pv.running_tool = tool;
         }
         Err(e) => pv.apply(key, Err(e.to_string())),
@@ -384,7 +430,7 @@ fn spawn(pv: &mut PreviewState, key: u64, scratch: Session, cmds: Vec<(String, V
 
 /// No threads on the web: compute right away.
 #[cfg(target_arch = "wasm32")]
-fn spawn(pv: &mut PreviewState, key: u64, scratch: Session, cmds: Vec<(String, Value)>, colors: Colors, tool: bool) {
+fn spawn(pv: &mut PreviewState, key: u64, scratch: Session, cmds: Vec<(String, Value)>, colors: Colors, tool: bool, _progress: Arc<Progress>) {
     pv.apply(key, if tool { compute_tool(&scratch, &cmds, colors) } else { compute(&scratch, &cmds, colors) });
 }
 
