@@ -39,8 +39,12 @@ mod threemf;
 pub mod urdf;
 pub mod vfs;
 
-pub use dxf::{read_dxf, write_dxf};
-pub use dxf_out::{DxfEntity, DxfLayer, DxfLinetype, DxfShape, loop_shapes, seg_shape, write_dxf_drawing};
+pub use dxf::{read_dxf, read_dxf_file, write_dxf};
+pub use dxf_out::{
+    DxfEntity, DxfEntityWeight, DxfFile, DxfFileEntity, DxfFileLayer, DxfGeometryBounds, DxfLayer, DxfLayerId, DxfLinetype, DxfShape,
+    DxfStandardWeight, DxfTextHorizontalAlignment, DxfTextVerticalAlignment, DxfVertex, loop_shapes, seg_shape, write_dxf_drawing, write_dxf_file,
+    write_dxf_file_with_text_bounds,
+};
 pub use legacy_dir::{APP_ID, LEGACY_APP_ID, PREVIOUS_APP_IDS, adopt_legacy_dir, legacy_flatpak_paths};
 pub use safe_write::{backup_path, write_atomic};
 pub use sketch2d::{Geom2, MAX_DRAWING_BYTES};
