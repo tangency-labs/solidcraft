@@ -184,6 +184,11 @@ pub(super) fn layout(app: &mut SolveApp, ui: &mut egui::Ui) {
                         let check = setting::ribbon_reveal(app, ui).on_hover_text(app.tr("prefs.ribbon_reveal_note"));
                         crate::scenario::publish_target("prefs:ribbon_reveal", check.rect);
                     });
+                    // A double-click on a design tab renames it; off, it maximizes the window.
+                    ui_kit::row(ui, "", |ui| {
+                        let check = setting::tab_double_click_renames(app, ui).on_hover_text(app.tr("prefs.tab_double_click_renames_note"));
+                        crate::scenario::publish_target("prefs:tab_double_click_renames", check.rect);
+                    });
                     // Where every feature dialog puts its OK and Cancel (#6708).
                     ui_kit::row(ui, app.tr("prefs.dialog_buttons"), |ui| {
                         let placements = [crate::ui_kit::DialogButtons::Bottom, crate::ui_kit::DialogButtons::Top];
