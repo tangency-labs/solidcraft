@@ -1419,3 +1419,36 @@ fn a_ball_chains_in_between_links_get_no_plausibility_warning() {
     let p = package(&s);
     assert!(!p.warnings.iter().any(|w| w.contains("no mass")), "{:?}", p.warnings);
 }
+
+#[test]
+fn a_pasted_component_keeps_its_mass_override() {
+    let mut s = two_cubes();
+    run(&mut s, "component.physical_override", json!({"component": "B", "mass": 5.0}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    run(&mut s, "component.paste_new", json!({"component": "B"}));
+    let with: Vec<_> = s.doc.components.iter().filter(|c| c.physical_override.is_some()).collect();
+    assert_eq!(with.len(), 2, "{:?}", s.doc.components.iter().map(|c| &c.name).collect::<Vec<_>>());
+}
+
+#[test]
+fn body_collision_refuses_a_component_with_no_bodies_of_its_own() {
+    let mut s = Session::default();
+    run(&mut s, "component.create", json!({"name": "Group"}));
+    let group = s.doc.find_component("Group").unwrap_or(0);
+    run(&mut s, "component.create", json!({"name": "Child", "parent": group}));
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10}));
+    assert!(s.execute("body.collision", &json!({"component": "Group", "shape": "box"})).is_err());
+    assert!(s.doc.collision_shapes.is_empty());
+}
+
+#[test]
+fn a_mass_only_override_with_nothing_to_scale_warns() {
+    let mut s = sheet();
+    let id = s.doc.find_component("Sheet").unwrap_or(0);
+    let o = solidcraft_doc::PhysicalOverride { mass: 2.0, com: None, inertia: None };
+    if let Some(c) = s.doc_mut().components.iter_mut().find(|c| c.id == id) {
+        c.physical_override = Some(o);
+    }
+    let p = package(&s);
+    assert!(p.warnings.iter().any(|w| w.contains("override") && w.contains("Sheet")), "{:?}", p.warnings);
+}

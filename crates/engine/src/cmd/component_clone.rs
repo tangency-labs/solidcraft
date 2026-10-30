@@ -301,6 +301,7 @@ pub(super) fn build(
             added.metadata = c.metadata.clone();
             added.properties = c.properties.clone();
             added.identification_color = c.identification_color;
+            added.physical_override = c.physical_override;
         }
         components.insert(*old, new);
         if *old != component {

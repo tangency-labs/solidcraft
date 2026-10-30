@@ -337,6 +337,9 @@ pub fn show_object(app: &mut SolveApp, ctx: &egui::Context) {
         rows.push(("", crate::i18n::tr_label("Open surface — no volume").to_string()));
     } else {
         rows.push(("Mass", format!("{:.3} g", number(total, "mass_g"))));
+        if let Some(mass) = v["physical_override"]["mass"].as_f64() {
+            rows.push(("Mass override", format!("{mass:.3} kg")));
+        }
         rows.push(("Volume", crate::prefs::show_mm(app, number(total, "volume_mm3"), 3)));
     }
     if skipped > 0 && skipped < bodies.len() as u64 {
@@ -424,6 +427,19 @@ mod tests {
     use serde_json::json;
 
     use crate::scenario::Harness;
+
+    #[test]
+    fn properties_note_a_mass_override_next_to_the_computed_mass() {
+        let mut h = Harness::new();
+        h.app.run("component.create", json!({"name": "Motor"})).unwrap();
+        h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10})).unwrap();
+        h.app.run("component.physical_override", json!({"component": "Motor", "mass": 2.5})).unwrap();
+        let measured = h.app.run("component.properties", json!({"component": "Motor"})).unwrap();
+        h.app.menu.props = Some(("Motor".into(), measured));
+        h.frames(2);
+        assert!(h.widget("Mass").is_some());
+        assert!(h.widget("Mass override").is_some());
+    }
 
     #[test]
     fn open_surface_properties_show_area_without_volume_rows() {

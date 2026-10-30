@@ -1122,3 +1122,19 @@ fn fits_refuse_an_empty_or_non_finite_mesh() {
         assert!(crate::hull3::fit_box(m).is_none() && crate::hull3::fit_cylinder(m).is_none() && crate::hull3::fit_sphere(m).is_none());
     }
 }
+
+#[test]
+fn convex_hull_is_the_same_on_every_run() {
+    let mut points = Vec::new();
+    for i in 0..30 {
+        for j in 0..60 {
+            let (t, f) = (std::f64::consts::PI * (f64::from(i) + 0.5) / 30.0, std::f64::consts::TAU * f64::from(j) / 60.0);
+            points.push(Vec3::new(7.0 * t.sin() * f.cos(), 7.0 * t.sin() * f.sin(), 7.0 * t.cos()));
+        }
+    }
+    let first = crate::hull3::convex_hull(&points).unwrap_or_else(|| panic!("no hull"));
+    for _ in 0..5 {
+        let again = crate::hull3::convex_hull(&points).unwrap_or_else(|| panic!("no hull"));
+        assert_eq!(first.triangles, again.triangles);
+    }
+}

@@ -131,6 +131,9 @@ pub(super) fn body_collision(s: &mut Session, p: &Value) -> Result<Value> {
             state.bodies.iter().filter(|b| s.doc.model_body_component(b) == id).map(|b| b.name.clone()).collect()
         }
     };
+    if bodies.is_empty() {
+        return Err(bad(cmd, "this component has no bodies of its own: set the shape on the components that hold them"));
+    }
     let text = text.to_string();
     let doc = s.doc_mut();
     for b in &bodies {

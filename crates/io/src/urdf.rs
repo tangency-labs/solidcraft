@@ -366,6 +366,9 @@ fn parts(
         if saved.is_some() && physical_override.is_none() {
             out.warnings.push(format!("the physical override of `{label}` is not usable numbers: ignored"));
         }
+        if physical_override.is_some_and(|o| o.inertia.is_none()) && masses.is_empty() {
+            out.warnings.push(format!("the physical override of `{label}` has no inertia and no closed body to work one out from: ignored"));
+        }
         let mut part = Part { visual: None, collision: Vec::new(), color, masses, physical_override };
         if !visual.triangles.is_empty() {
             let file = names.file(&format!("{stem}-{label}"));
@@ -873,7 +876,11 @@ fn plausibility(model: &UrdfModel, warnings: &mut Vec<String>) {
         // A chain's in-between links and frames have an empty `path`: their values are ours.
         let (false, Some(i)) = (l.path.is_empty(), l.inertial) else { continue };
         if i.mass == TOKEN_MASS {
-            if model.joints.iter().any(|j| j.child == at && j.step != Step::Fixed) {
+            // A part with none of its own may only group others, which carry the mass.
+            let groups = model.joints.iter().any(|j| {
+                j.parent == at && j.step == Step::Fixed && model.links.get(j.child).is_some_and(|c| c.inertial.is_some_and(|i| i.mass > TOKEN_MASS))
+            });
+            if !groups && model.joints.iter().any(|j| j.child == at && j.step != Step::Fixed) {
                 warnings.push(format!("`{}` moves but has no mass: give it a closed body or a mass override", l.name));
             }
             continue;
@@ -1284,6 +1291,22 @@ mod tests {
         let mut warnings = Vec::new();
         plausibility(&token_part(Step::Fixed, vec![1]), &mut warnings);
         plausibility(&token_part(Step::Revolute, Vec::new()), &mut warnings);
+        assert!(warnings.is_empty(), "{warnings:?}");
+    }
+
+    #[test]
+    fn a_moving_group_with_a_massive_fixed_child_does_not_warn() {
+        let mut model = token_part(Step::Revolute, vec![1]);
+        let child = Link {
+            name: "Motor".into(),
+            path: vec![1, 2],
+            inertial: Some(Inertial { mass: 1.0, com: Vec3::ZERO, inertia: [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]] }),
+            ..model.links[1].clone()
+        };
+        model.links.push(child);
+        model.joints.push(UrdfJoint { name: "f".into(), parent: 1, child: 2, step: Step::Fixed, ..model.joints[0].clone() });
+        let mut warnings = Vec::new();
+        plausibility(&model, &mut warnings);
         assert!(warnings.is_empty(), "{warnings:?}");
     }
 
