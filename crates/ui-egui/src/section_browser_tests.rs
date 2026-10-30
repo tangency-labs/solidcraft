@@ -729,3 +729,15 @@ fn turn_off_section_view_removes_the_clicked_plane() {
     assert!(h.app.session.section.is_empty() && h.app.session.section_hidden.is_empty());
     assert!(context_menu::items(&h.app, &Target::Analysis).iter().all(|i| !i.enabled || i.label.is_empty()));
 }
+
+/// Each plane keeps its hatch, by its number, whichever other planes are on show.
+#[test]
+fn hiding_a_plane_leaves_the_others_hatch() {
+    let mut h = box_in_view();
+    corner(&mut h);
+    assert_eq!(crate::viewport::section_clip(&h.app).1[..2], [0, 1]);
+    click(&mut h, "eye:Section 1");
+    assert_eq!(crate::viewport::section_clip(&h.app).1[0], 1, "Section 2 keeps its hatch");
+    let scene = solidcraft_engine::view::scene_with_section(&h.app.session, &h.app.cam, &h.app.session.section);
+    assert_eq!(scene.clip_hatch, [1]);
+}

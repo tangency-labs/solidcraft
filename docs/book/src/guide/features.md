@@ -206,9 +206,10 @@ and the cut faces are hatched (Hatch off draws them in each body's own colour). 
 geometry and is not saved with the design, but each change to it is a step in the undo history:
 Undo brings back the section as it was. A section has up to six planes, and it hides what lies
 beyond all of them at once: one plane hides its side, two square to each other cut a quarter
-away. As on a drawing, each plane's cut faces are hatched their own way, at 45° on the first
-plane on show, 135° on the second, then 30°, 60°, 120° and 150°, measured on the plane as seen
-from the side it cuts away (upright on a wall, along X on a floor).
+away. As on a drawing, each plane's cut faces are hatched their own way, by the plane's number:
+45° on Section 1, 135° on Section 2, then 30°, 60°, 120° and 150° (Section 7 starts again at
+45°), measured on the plane as seen from the side it cuts away (upright on a wall, along X on a
+floor). Hiding one plane leaves the others' hatch as it is.
 
 - The toolbar's **Section Analysis** starts a new section on a plane or planar face; its arrow
   and **Distance** move the cut. A positive distance cuts more away: into the part from a face,

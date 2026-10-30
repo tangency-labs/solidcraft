@@ -963,6 +963,8 @@ pub struct Frame {
     /// Section cut: up to [`MAX_SECTION_PLANES`] planes (normal, d), the first ones; fragments
     /// with normal·p > d for every one are hidden. A zero normal: no plane (the first: no section).
     pub clip: [[f32; 4]; MAX_SECTION_PLANES],
+    /// Each clip plane's hatch, an index into `solidcraft_render::SECTION_HATCH_ANGLES`.
+    pub clip_hatch: [usize; MAX_SECTION_PLANES],
     /// Colour of the inside of cut bodies (straight sRGB, 0..1); alpha 1 hatches it, 0 leaves it plain in the body's colour.
     pub cap: [f32; 4],
     /// Canvases and decals.
@@ -4156,6 +4158,15 @@ pub fn clip_planes(planes: &[(Vec3, f64)]) -> [[f32; 4]; MAX_SECTION_PLANES] {
     clip
 }
 
+/// A section's planes' hatches as [`Frame::clip_hatch`], beside [`clip_planes`].
+pub fn clip_hatches(hatch: &[usize]) -> [usize; MAX_SECTION_PLANES] {
+    let mut out = [0; MAX_SECTION_PLANES];
+    for (slot, h) in out.iter_mut().zip(hatch) {
+        *slot = *h;
+    }
+    out
+}
+
 /// Uniform bytes for a frame.
 pub fn uniform_bytes(cb: &Frame, w: f32, h: f32, linear: bool, reversed: bool) -> Vec<u8> {
     let mut v: Vec<f32> = gpu_view_proj(cb.view_proj, reversed).iter().flatten().copied().collect();
@@ -4188,9 +4199,9 @@ pub fn uniform_bytes(cb: &Frame, w: f32, h: f32, linear: bool, reversed: bool) -
         v.extend(light.map(|value| if value.is_finite() { value } else { 0.0 }));
     }
     let vp = solidcraft_render::Mat4(cb.view_proj.map(|c| c.map(f64::from)));
-    for (k, c) in cb.clip.iter().enumerate() {
+    for (c, hatch) in cb.clip.iter().zip(cb.clip_hatch) {
         let n = Vec3::new(f64::from(c[0]), f64::from(c[1]), f64::from(c[2]));
-        let [x, y] = solidcraft_render::section_hatch(&vp, n, k, f64::from(w.max(1.0)), f64::from(h.max(1.0)));
+        let [x, y] = solidcraft_render::section_hatch(&vp, n, hatch, f64::from(w.max(1.0)), f64::from(h.max(1.0)));
         v.extend([x as f32, y as f32, 0.0, 0.0]);
     }
     v.extend(cb.sky.map(|value| if value.is_finite() { value } else { 0.0 }));
@@ -4435,6 +4446,7 @@ mod tests {
         let mut f = cached_frame();
         f.clip = super::clip_planes(&[(super::Vec3::X, 1.0); super::MAX_SECTION_PLANES]);
         f.clip[super::MAX_SECTION_PLANES - 1] = [0.0, 0.0, 1.0, 7.25];
+        f.clip_hatch = super::clip_hatches(&[0, 1, 2, 3, 4, 5]);
         f.view_proj = solidcraft_render::Camera::default().view_proj(1.0, 40.0).to_f32();
         let bytes = super::uniform_bytes(&f, 64.0, 64.0, false, false);
         assert_eq!(bytes.len() as u64, super::UNIFORM_SIZE);
@@ -4451,7 +4463,13 @@ mod tests {
             let [x, y] = solidcraft_render::section_hatch(&vp, n, k, 64.0, 64.0);
             assert_eq!(h, &[x as f32, y as f32, 0.0, 0.0], "plane {k}'s hatch");
         }
-        assert_ne!(hatch[..2], hatch[4..6], "the first two planes, alike but for their place, hatch differently");
+        assert_ne!(hatch[..2], hatch[4..6], "the first two planes, alike but for their hatch, hatch differently");
+        // The hatch goes with the plane, not its slot: the second plane alone keeps its own.
+        f.clip_hatch = super::clip_hatches(&[1]);
+        let bytes = super::uniform_bytes(&f, 64.0, 64.0, false, false);
+        let v: Vec<f32> = bytes.as_chunks::<4>().0.iter().map(|c| f32::from_le_bytes(*c)).collect();
+        let [x, y] = solidcraft_render::section_hatch(&vp, super::Vec3::X, 1, 64.0, 64.0);
+        assert_eq!(hatches(&v)[..2], [x as f32, y as f32]);
     }
 
     /// A frame with a fixed picture, and a key that names everything it shows.
@@ -4475,6 +4493,7 @@ mod tests {
             back: [0.0; 3],
             size_px: [800.0, 600.0],
             clip: [[0.0; 4]; super::MAX_SECTION_PLANES],
+            clip_hatch: [0; super::MAX_SECTION_PLANES],
             cap: [0.0; 4],
             images: Vec::new(),
             clouds: Vec::new(),
@@ -4864,6 +4883,7 @@ mod glass_tests {
             back: [0.0, 0.0, 1.0],
             size_px: [SIZE as f32; 2],
             clip: [[0.0; 4]; super::MAX_SECTION_PLANES],
+            clip_hatch: [0; super::MAX_SECTION_PLANES],
             cap: [0.0; 4],
             images: Vec::new(),
             clouds: Vec::new(),
@@ -5040,6 +5060,7 @@ mod glass_tests {
             back: [0.0, 0.0, 1.0],
             size_px: [SIZE as f32; 2],
             clip: [[0.0; 4]; super::MAX_SECTION_PLANES],
+            clip_hatch: [0; super::MAX_SECTION_PLANES],
             cap: [0.0; 4],
             images: Vec::new(),
             clouds: Vec::new(),

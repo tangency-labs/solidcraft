@@ -43,5 +43,5 @@ pub use product::{FaceAppearance, ProductMesh, ProductScene};
 pub use raster::{Canvas, render, render_png, render_transparent};
 pub use scene::{
     MAX_SECTION_PLANES, MIN_ALPHA, Rgb, SECTION_CAP, SECTION_HATCH_ANGLES, SEE_THROUGH, Scene, SceneLine, SceneMesh, png, section_hatch,
-    section_hatch_line, section_plane_frame,
+    section_hatch_line, section_hatch_of, section_plane_frame,
 };

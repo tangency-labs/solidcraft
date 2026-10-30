@@ -111,6 +111,7 @@ impl Renderer {
             back: [0.0, 0.0, 1.0],
             size_px: [SIZE as f32; 2],
             clip: [[0.0; 4]; super::MAX_SECTION_PLANES],
+            clip_hatch: [0; super::MAX_SECTION_PLANES],
             cap: [0.0; 4],
             images: Vec::new(),
             clouds: Vec::new(),

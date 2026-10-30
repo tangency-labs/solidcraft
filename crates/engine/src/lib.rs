@@ -654,6 +654,11 @@ impl SectionPlane {
         (self.normal, self.normal.dot(self.origin))
     }
 
+    /// Its cut faces' hatch (an index into `render::SECTION_HATCH_ANGLES`), kept by its id.
+    pub fn hatch(&self) -> usize {
+        solidcraft_render::section_hatch_of(self.id)
+    }
+
     /// Whether the plane keeps `p` (within `eps`).
     pub fn keeps(&self, p: Vec3, eps: f64) -> bool {
         self.normal.dot(p - self.origin) <= eps

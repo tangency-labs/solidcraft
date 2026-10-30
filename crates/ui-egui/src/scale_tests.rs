@@ -281,6 +281,7 @@ pub(crate) fn view_frame(
         back: proj.cam.back().to_f32(),
         size_px: [size as f32; 2],
         clip: [[0.0; 4]; solidcraft_gpu::view::MAX_SECTION_PLANES],
+        clip_hatch: [0; solidcraft_gpu::view::MAX_SECTION_PLANES],
         cap: [0.0; 4],
         images: Vec::new(),
         clouds: Vec::new(),

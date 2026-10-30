@@ -116,7 +116,12 @@ pub fn render(scene: &Scene, cam: &Camera, w: usize, h: usize) -> Canvas {
         let (t, k) = hidden_until(at, dir, &scene.clip, 1e-3 * (1.0 + radius))?;
         Some((project(at + dir * t).map(|q| q[2] as f32), k))
     };
-    let hatch: Vec<[f64; 2]> = scene.clip.iter().enumerate().map(|(k, (n, _))| crate::section_hatch(&vp, *n, k, w as f64, h as f64)).collect();
+    let hatch: Vec<[f64; 2]> = scene
+        .clip
+        .iter()
+        .enumerate()
+        .map(|(k, (n, _))| crate::section_hatch(&vp, *n, scene.clip_hatch.get(k).copied().unwrap_or(k), w as f64, h as f64))
+        .collect();
     let cap_slope =
         scene.clip.iter().filter_map(|(n, d)| cap_plane(cam, *n, *d, radius, &project)).map(|[a, b, _]| a.hypot(b) as f32).fold(0.0, f32::max);
     let mut cap_depth = if scene.clip.is_empty() { Vec::new() } else { vec![f32::INFINITY; sw * sh] };
@@ -698,7 +703,7 @@ mod tests {
     /// in the plane's own frame: a horizontal cut seen from above, as the first plane and then
     /// after other planes (which cut nothing away themselves) up to the last, shows its stripes
     /// at 45, 135, 30, 60, 120 and 150 degrees on screen, in an orthographic view and a
-    /// perspective one.
+    /// perspective one. Given its hatch (`clip_hatch`), the plane alone keeps that angle.
     #[test]
     fn each_plane_of_a_section_hatches_at_its_own_angle() {
         for fov in [0.0f64, 0.5] {
@@ -712,6 +717,10 @@ mod tests {
                 let c = render(&scene, &cam, 160, 160);
                 let got = hatch_angle(&c.rgba, c.w, (80, 80), 24);
                 assert!(same_way(got, *want, 2.0), "fov {fov}, plane {k}: hatched at {got} degrees, not {want}");
+                let alone = Scene { meshes: scene.meshes, radius: 40.0, clip: vec![(Vec3::Z, 10.0)], clip_hatch: vec![k], ..Default::default() };
+                let c = render(&alone, &cam, 160, 160);
+                let got = hatch_angle(&c.rgba, c.w, (80, 80), 24);
+                assert!(same_way(got, *want, 2.0), "fov {fov}, hatch {k} alone: hatched at {got} degrees, not {want}");
             }
         }
     }

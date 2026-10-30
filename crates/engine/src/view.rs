@@ -774,6 +774,7 @@ fn build_scene(
     let mut sc = Scene {
         background: Some(p.background),
         clip: section.iter().map(|c| c.clip()).collect(),
+        clip_hatch: section.iter().map(SectionPlane::hatch).collect(),
         cap: Some(p.cap),
         plain_cap: !s.section_hatch,
         analysis: s.analysis.map(|a| SceneAnalysis { mode: a.mode(), colors: p.analysis }),

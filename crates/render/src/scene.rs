@@ -80,6 +80,9 @@ pub struct Scene {
     /// A section cut by up to [`MAX_SECTION_PLANES`] planes, each (normal, d): what lies where
     /// normal·p > d for every one of them is cut away, and the inside shows as a hatched cap.
     pub clip: Vec<(Vec3, f64)>,
+    /// Each clip plane's hatch, an index into [`SECTION_HATCH_ANGLES`] ([`section_hatch_of`]);
+    /// one missing: its place in `clip`.
+    pub clip_hatch: Vec<usize>,
     /// The colour the section cap is tinted toward (default: [`SECTION_CAP`]).
     pub cap: Option<Rgb>,
     /// The section cap without its hatch: plain, in the body's own colour.
@@ -94,9 +97,15 @@ pub const MAX_SECTION_PLANES: usize = 6;
 /// The section cap's default tint, as in the viewport.
 pub const SECTION_CAP: Rgb = Rgb(214, 128, 72);
 
-/// The angle (degrees) each plane's cut faces are hatched at, by the plane's place in the
-/// section, in the plane's own frame ([`section_hatch_line`]).
+/// The angle (degrees) each plane's cut faces are hatched at, by the plane's id
+/// ([`section_hatch_of`]), in the plane's own frame ([`section_hatch_line`]).
 pub const SECTION_HATCH_ANGLES: [f64; MAX_SECTION_PLANES] = [45.0, 135.0, 30.0, 60.0, 120.0, 150.0];
+
+/// The hatch of the section plane with id `id` (from 1): an index into [`SECTION_HATCH_ANGLES`],
+/// the same whichever other planes are on show.
+pub fn section_hatch_of(id: u64) -> usize {
+    (id.saturating_sub(1) % MAX_SECTION_PLANES as u64) as usize
+}
 
 /// The section plane's own frame (right, up) as seen from the side its normal `n` points to,
 /// world Z up: fixed by the plane alone, so its hatch keeps its direction as the camera moves.

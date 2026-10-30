@@ -2230,6 +2230,7 @@ fn paint_product(app: &mut SolveApp, ui: &mut egui::Ui, rect: egui::Rect, camera
             back: camera.back().to_f32(),
             size_px: [rect.width() * ppp, rect.height() * ppp],
             clip: [[0.0; 4]; solidcraft_gpu::view::MAX_SECTION_PLANES],
+            clip_hatch: [0; solidcraft_gpu::view::MAX_SECTION_PLANES],
             cap: [0.0; 4],
             images: Vec::new(),
             clouds: Vec::new(),
