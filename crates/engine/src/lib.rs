@@ -603,7 +603,7 @@ pub struct LiveEdit {
     pub report: solidcraft_sketch::SolveReport,
 }
 
-/// The design, active sketch, pending positions and undo history at an `edit.checkpoint`.
+/// The design, active sketch, pending positions, undo history and section at an `edit.checkpoint`.
 #[derive(Clone, Debug)]
 pub(crate) struct Checkpoint {
     pub id: u64,
@@ -613,6 +613,7 @@ pub(crate) struct Checkpoint {
     pub visibility: Visibility,
     pub undo: Vec<Snapshot>,
     pub redo: Vec<Snapshot>,
+    pub section: SectionState,
 }
 
 /// A way of shading the model's faces to judge their shape (view state, not part of the design).
@@ -1692,7 +1693,7 @@ impl Session {
         v
     }
 
-    /// Remember the design, active sketch, pending positions and undo history; returns the checkpoint's id.
+    /// Remember the design, active sketch, pending positions, undo history and section; returns the checkpoint's id.
     pub fn checkpoint(&mut self) -> u64 {
         let id = self.next_checkpoint;
         self.next_checkpoint += 1;
@@ -1704,6 +1705,7 @@ impl Session {
             pending_moves: self.pending_moves.clone(),
             visibility: self.visibility.clone(),
             redo: self.redo.clone(),
+            section: self.section_state(),
         });
         if self.checkpoints.len() > MAX_CHECKPOINTS {
             self.checkpoints.remove(0);
@@ -1735,6 +1737,9 @@ impl Session {
         self.visibility = c.visibility;
         self.undo = c.undo;
         self.redo = c.redo;
+        if self.section_state() != c.section {
+            self.set_section_state(c.section);
+        }
         self.selection.clear();
         if self.render_only_change(&before) {
             self.refresh_render(&before.doc);

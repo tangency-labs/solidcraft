@@ -1844,6 +1844,17 @@ fn section_changes_undo_and_redo() {
     assert_eq!(s.section_state(), cut);
     run(&mut s, "edit.undo", json!({}));
     assert!(Arc::ptr_eq(&doc, &s.doc) && s.section_state() == cut, "the box undone, the section kept");
+    // A checkpoint brings back the section with the history that matches it.
+    let steps = s.undo.len();
+    let id = run(&mut s, "edit.checkpoint", json!({}))["checkpoint"].as_u64().unwrap();
+    run(&mut s, "inspect.section", json!({"plane": "XY", "at": 5, "add": true}));
+    run(&mut s, "inspect.section", json!({"hide": 1}));
+    run(&mut s, "edit.restore_checkpoint", json!({"checkpoint": id}));
+    assert_eq!((s.section_state(), s.undo.len()), (cut.clone(), steps));
+    let id = run(&mut s, "edit.checkpoint", json!({}))["checkpoint"].as_u64().unwrap();
+    run(&mut s, "inspect.section", json!({"clear": true}));
+    run(&mut s, "edit.restore_checkpoint", json!({"checkpoint": id}));
+    assert_eq!(s.section_state(), cut);
 }
 
 /// A section of several planes: `add` puts a plane beside the others (or starts the section),
