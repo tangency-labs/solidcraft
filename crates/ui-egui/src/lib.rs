@@ -1854,7 +1854,7 @@ impl SolveApp {
                 let _ = self.session.execute("select.clear", &json!({}));
             }
             self.tool = Some(t);
-            self.set_status(tools::hint(id), false);
+            self.set_status(self.tr_label(&tools::hint(id)), false);
             return;
         }
         if let Some(mut d) = dialogs::Dialog::for_command(self, id) {

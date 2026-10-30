@@ -1,0 +1,1 @@
+| assets/locales/pending/flat-pattern-empty-state.json | SolidCraft contributors | Original English, German, Japanese, Korean and Simplified Chinese flat-pattern empty-state message | MIT OR Apache-2.0 |

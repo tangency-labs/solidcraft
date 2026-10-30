@@ -87,7 +87,7 @@ pub fn set_mode(app: &mut SolveApp, m: u8) {
         3 => "Infinite mode: new lines are infinite construction lines",
         _ => "Normal mode",
     };
-    app.set_status(hint, false);
+    app.set_status(app.tr_label(hint), false);
 }
 
 /// X / the toolbar's Construction: convert the selected curves, or with nothing selected
@@ -95,7 +95,7 @@ pub fn set_mode(app: &mut SolveApp, m: u8) {
 pub fn toggle_construction(app: &mut SolveApp) {
     let curves = selected_curves(app);
     if curves.is_empty() && app.session.active_sketch.is_none() {
-        app.set_status("Construction mode is for drawing in a sketch: edit a sketch first", false);
+        app.set_status(app.tr_label("Construction mode is for drawing in a sketch: edit a sketch first"), false);
     } else if curves.is_empty() {
         let m = if mode(app) == 1 { 0 } else { 1 };
         set_mode(app, m);
@@ -1056,5 +1056,17 @@ mod tests {
         assert!(h.app.session.active_sketch.is_none());
         assert_eq!(h.app.session.doc.features.len(), 1, "a sketch with a line is kept");
         assert!(crate::scenario::handles("timeline:").iter().any(|(n, _)| n.contains("Sketch")));
+    }
+    #[test]
+    fn drawing_mode_messages_use_app_language_outside_the_frame_scope() {
+        let _language = crate::i18n::scope("en");
+        let mut h = crate::scenario::Harness::new();
+        h.app.preferences.language = "de".into();
+        h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+        for (mode, expected) in [(1, "Konstruktionsmodus:"), (2, "Mittellinienmodus:"), (3, "Unendlichmodus:"), (0, "Normalmodus")] {
+            set_mode(&mut h.app, mode);
+            assert!(h.app.status.as_ref().is_some_and(|(text, _, error)| !error && text.starts_with(expected)));
+            assert_eq!(crate::i18n::language(), "en", "setting a mode must not change the caller's language scope");
+        }
     }
 }

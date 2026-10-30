@@ -1738,7 +1738,13 @@ fn snap_hint(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
     crate::scenario::publish_count("sketch_align_guides", guides.len() as f64);
     let r = egui::Rect::from_min_size(sp + egui::vec2(12.0, -24.0), egui::vec2(24.0, 14.0));
     painter.rect_filled(r, tk.radius_sm.saturating_sub(1), tk.accent_soft);
-    painter.text(r.center(), egui::Align2::CENTER_CENTER, label, egui::FontId::proportional(crate::theme::Tokens::get().font_micro), tk.text);
+    painter.text(
+        r.center(),
+        egui::Align2::CENTER_CENTER,
+        app.tr_label(label),
+        egui::FontId::proportional(crate::theme::Tokens::get().font_micro),
+        tk.text,
+    );
 }
 
 /// Per frame, after the viewport is drawn: constraint glyphs, snap hints and analysis marks.
