@@ -273,6 +273,9 @@ struct SessionObjects<'target> {
     generators: Vec<FilletSurfaceGenerator>,
     laws: Vec<FilletLaw>,
     attributes: AttributeStore,
+    /// (not upstream) The target's and the second base's own attribute stores as the
+    /// session took them, put back by `Drop` if handing the session's back fails.
+    attributes_before: (AttributeStore, AttributeStore),
     merge_attributes: Option<Vec<AttributeHandle>>,
     /// WR-459: the target's edges and faces before filleting, kept by the clean-up.
     cleanup_kept: Option<(BTreeSet<EdgeId>, BTreeSet<FaceId>)>,
@@ -1102,15 +1105,12 @@ pub struct FilletSession<'target> {
     objects: SessionObjects<'target>,
 }
 
-/// (not upstream) Moves `body`'s own attributes ([`Brep::add_attribute`]) into the
-/// session store under the body's issued identities (`serial`).
-fn seed_body_attributes(
-    attributes: &mut AttributeStore,
-    body: &mut Brep,
-    serial: u64,
-) -> Result<()> {
-    let store = body.take_attributes();
-    attributes.absorb(store, &|key| {
+/// (not upstream) Copies `body`'s own attributes ([`Brep::add_attribute`]) into the
+/// session store under the body's issued identities (`serial`). The body keeps its
+/// store: the caller empties it only once every body is seeded, so a failed seed leaves
+/// each body's attributes where they were.
+fn seed_body_attributes(attributes: &mut AttributeStore, body: &Brep, serial: u64) -> Result<()> {
+    attributes.absorb(body.attribute_store().clone(), &|key| {
         crate::topology::loopuse::entity_of_notify_key(key)
             .map(|e| crate::topology::brep::p3::topology_ref(serial, e).key)
             .ok_or_else(|| invalid("attribute list names no object"))
@@ -1131,6 +1131,9 @@ fn body_attributes(
             .filter(|&e| body.is_live_entity(e))
             .map(|e| crate::topology::loopuse::notify_ref(e).key)
     })?;
+    // Only this body's attributes: those no object of it lists (the other body's, the
+    // session's own) are not carried into its store.
+    store.retain_listed();
     Ok(store)
 }
 
@@ -1143,15 +1146,16 @@ impl Drop for FilletSession<'_> {
             let _ = self.objects.attributes.destroy(handle);
         }
         let objects = &mut self.objects;
-        if let Ok(store) =
-            body_attributes(&objects.attributes, objects.target, objects.target_serial)
-        {
-            objects.target.set_attributes(store);
-        }
+        let (target_before, second_before) = core::mem::take(&mut objects.attributes_before);
+        // (a hand-back that fails puts the body's store from before the session back,
+        // rather than leaving it empty)
+        let store = body_attributes(&objects.attributes, objects.target, objects.target_serial)
+            .unwrap_or(target_before);
+        objects.target.set_attributes(store);
         if let Some(second) = &mut objects.second_base {
-            if let Ok(store) = body_attributes(&objects.attributes, second.body, second.serial) {
-                second.body.set_attributes(store);
-            }
+            let store = body_attributes(&objects.attributes, second.body, second.serial)
+                .unwrap_or(second_before);
+            second.body.set_attributes(store);
         }
     }
 }
@@ -1203,9 +1207,17 @@ impl<'target> FilletSession<'target> {
         // session's store holds the bodies' own attributes under its identities while it
         // runs, after the executive's own; `Drop` hands them back.
         seed_body_attributes(&mut attributes, target, target_serial)?;
-        if let Some(second) = &mut second_base {
-            seed_body_attributes(&mut attributes, second.body, second.serial)?;
+        if let Some(second) = &second_base {
+            seed_body_attributes(&mut attributes, &*second.body, second.serial)?;
         }
+        // Every seed succeeded: only now do the bodies' own stores move to the session.
+        let attributes_before = (
+            target.take_attributes(),
+            second_base
+                .as_mut()
+                .map(|second| second.body.take_attributes())
+                .unwrap_or_default(),
+        );
         let executive = FilletExecutive::new(
             Some(FilletObject::Body(FilletBody::Target)),
             ExecutiveObjects {
@@ -1228,6 +1240,7 @@ impl<'target> FilletSession<'target> {
                 generators: Vec::new(),
                 laws: Vec::new(),
                 attributes,
+                attributes_before,
                 merge_attributes: None,
                 cleanup_kept: None,
                 extended_surfaces: BTreeMap::new(),
@@ -4774,5 +4787,48 @@ mod tests {
                 assert_eq!((error.vertex, error.location), (None, None));
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod attribute_seed_tests {
+    use super::*;
+    use crate::geom::attribute::ObjectKey;
+    use crate::math::Point3;
+    use crate::primitive::api_primitives::create_box;
+
+    /// A second base whose seed fails (an attribute list naming no object) fails the
+    /// session's construction and leaves both bodies' attributes where they were: the
+    /// target's were not taken before every seed succeeded.
+    #[test]
+    fn failed_seed_leaves_both_bodies_attributes() {
+        let mut k = Kernel::default();
+        let mut target = create_box(&mut k, Point3::ZERO, 1.0, 1.0, 1.0).unwrap();
+        let face = crate::topology::brep::p1::faces(&target, None)
+            .unwrap()
+            .first()
+            .copied()
+            .unwrap();
+        target
+            .add_attribute(
+                EntityRef::Face(face),
+                Attribute::long(10_007, 7, Behavior::Copy),
+            )
+            .unwrap();
+        let mut second = create_box(&mut k, Point3::new(5.0, 0.0, 0.0), 1.0, 1.0, 1.0).unwrap();
+        let mut store = AttributeStore::new();
+        let handle = store
+            .insert(Attribute::long(10_008, 8, Behavior::Copy))
+            .unwrap();
+        // key 0 names no object (`loopuse::entity_of_notify_key`)
+        store.add_attribute(ObjectKey(0), handle).unwrap();
+        second.set_attributes(store);
+        let target_before = target.attribute_store().clone();
+        let second_before = second.attribute_store().clone();
+
+        assert!(FilletSession::with_second_base(&mut k, &mut target, Some(&mut second)).is_err());
+        assert_eq!(target.attribute_store(), &target_before);
+        assert_eq!(second.attribute_store(), &second_before);
+        assert_eq!(target.entity_attributes(EntityRef::Face(face)).len(), 1);
     }
 }

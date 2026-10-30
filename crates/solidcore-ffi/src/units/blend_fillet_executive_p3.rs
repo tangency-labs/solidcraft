@@ -853,7 +853,9 @@ pub fn validate_attributed(input: &[f64]) -> Result<(), FfiError> {
 /// `boolean_api_brep`'s attributed op; [`super::boolean_api_brep::sort_rows`] order).
 pub fn attributed(input: &[f64]) -> Result<Vec<f64>, FfiError> {
     validate_attributed(input)?;
-    call_with_buffer(65536, |out, len| unsafe {
+    // Large enough that the case never runs twice in one child (the retry would see the
+    // first run's latched point step).
+    call_with_buffer(1 << 18, |out, len| unsafe {
         sc_blend_fillet_executive_p3_attributed(
             input.as_ptr(),
             input.len() as i64,

@@ -64,7 +64,9 @@ struct Inputs {
 impl Inputs {
     /// Whether any form but `attributed` is present.
     fn has_other_form(&self) -> bool {
-        self.fillet_preview.is_some() || self.has_record_form()
+        self.fillet_preview.is_some()
+            || self.two_offset_chamfer.is_some()
+            || self.has_record_form()
     }
     /// Whether any form but `attributed` and `fillet_preview` is present.
     fn has_record_form(&self) -> bool {
@@ -77,6 +79,11 @@ impl Inputs {
     /// Whether any other fixture form accompanies a `fillet_preview` case.
     fn mixed_with_preview(&self) -> bool {
         self.attributed.is_some() || self.has_record_form()
+    }
+
+    /// Whether any other fixture form accompanies a `two_offset_chamfer` case.
+    fn mixed_with_chamfer(&self) -> bool {
+        self.fillet_preview.is_some() || self.mixed_with_preview()
     }
 }
 
@@ -982,6 +989,12 @@ impl UnitDiff for Runner {
             }
             return attributed::cpp(attributed);
         }
+        if let Some(chamfer) = &input.two_offset_chamfer {
+            if input.mixed_with_chamfer() {
+                return Err(HarnessError::new("mixed fixture forms"));
+            }
+            return two_offset_chamfer::cpp(chamfer);
+        }
         if let Some(preview) = &input.fillet_preview {
             if input.mixed_with_preview() {
                 return Err(HarnessError::new("mixed fixture forms"));
@@ -1034,6 +1047,12 @@ impl UnitDiff for Runner {
                 return Err(HarnessError::new("mixed fixture forms"));
             }
             return attributed::rust(attributed);
+        }
+        if let Some(chamfer) = &input.two_offset_chamfer {
+            if input.mixed_with_chamfer() {
+                return Err(HarnessError::new("mixed fixture forms"));
+            }
+            return two_offset_chamfer::rust(chamfer);
         }
         if let Some(preview) = &input.fillet_preview {
             if input.mixed_with_preview() {
