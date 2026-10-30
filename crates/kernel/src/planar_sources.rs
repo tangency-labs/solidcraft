@@ -4,6 +4,7 @@ use super::{Body, FaceSource};
 use crate::{KernelError, Result, guard};
 use solidcraft_geom::brep::{self, Surface};
 use solidcraft_geom::{Plane, Vec3};
+use std::collections::HashMap;
 use std::sync::Arc;
 
 /// The oriented plane each face of `body` lies on (in face order), from its record: the
@@ -64,14 +65,100 @@ impl Resolution {
     }
 }
 
-/// The entries of `sorted` (ordered by their plane's normal x) whose normal x is within the
-/// resolution's angle of `nx` (and rounding): the only ones `same_support` can accept for a plane
-/// with that normal.
-fn normal_window<T>(sorted: &[T], plane: impl Fn(&T) -> &Plane, nx: f64, at: Resolution) -> &[T] {
-    let window = 2. * at.angular + 1e-12;
-    let first = sorted.partition_point(|t| plane(t).normal().x < nx - window);
-    let last = sorted.partition_point(|t| plane(t).normal().x <= nx + window);
-    sorted.get(first..last.max(first)).unwrap_or_default()
+/// The planes of a list indexed by their unit normal and their offset, so the planes that can be
+/// one support with a given plane at a resolution (`same_support`) are found without looking at
+/// the rest: a superset of them, which the caller decides on exactly with `same_support`.
+///
+/// Two unit normals within the resolution's angle (`|na × nb| <= angular`, `na · nb > 0`) differ
+/// by at most their angle, `asin(angular) <= π/2 · angular < 2 · angular`: the normal cells are
+/// twice that wide and a plane looks in its own cell and the neighbour on each side it is near.
+/// Their offsets from a common centre `c`, `d = (o - c) · n`, satisfy
+/// `d_b - d_a = (b.o - a.o) · n_b + (a.o - c) · (n_b - n_a)`, so a match is within
+/// `linear + |a.o - c| · |n_b - n_a|` of the plane's own offset; each cell is sorted by offset and
+/// searched in that window, widened by far more than the rounding of the offsets. A plane whose
+/// normal is not of unit length (a hostile record) is kept aside and offered to every query.
+struct PlaneIndex {
+    cells: HashMap<[i64; 3], Vec<(f64, usize)>>,
+    /// Entries whose normal is not unit to `UNIT`: offered to every query.
+    loose: Vec<usize>,
+    len: usize,
+    centre: Vec3,
+    /// The farthest origin of an indexed plane from `centre`.
+    reach: f64,
+    /// The bound on two matching normals' difference; the cells are `2 * normal_reach` wide.
+    normal_reach: f64,
+    linear: f64,
+}
+
+/// How far from unit length a normal may be for the index's bounds to hold.
+const UNIT: f64 = 1e-9;
+
+impl PlaneIndex {
+    fn new<'a>(planes: impl Iterator<Item = &'a Plane> + Clone, at: Resolution) -> Self {
+        let mut lo = Vec3::new(f64::INFINITY, f64::INFINITY, f64::INFINITY);
+        let mut hi = -lo;
+        for p in planes.clone().filter(|p| p.origin.is_finite()) {
+            lo = Vec3::new(lo.x.min(p.origin.x), lo.y.min(p.origin.y), lo.z.min(p.origin.z));
+            hi = Vec3::new(hi.x.max(p.origin.x), hi.y.max(p.origin.y), hi.z.max(p.origin.z));
+        }
+        let centre = if lo.is_finite() && hi.is_finite() { (lo + hi) * 0.5 } else { Vec3::ZERO };
+        let normal_reach = 2. * at.angular + 4. * UNIT;
+        let mut index = PlaneIndex { cells: HashMap::new(), loose: Vec::new(), len: 0, centre, reach: 0., normal_reach, linear: at.linear };
+        for (position, plane) in planes.enumerate() {
+            index.len += 1;
+            let n = plane.normal();
+            let d = (plane.origin - centre).dot(n);
+            match index.cell(n) {
+                Some(key) if (n.len() - 1.).abs() <= UNIT && d.is_finite() => {
+                    index.reach = index.reach.max((plane.origin - centre).len());
+                    index.cells.entry(key).or_default().push((d, position));
+                }
+                _ => index.loose.push(position),
+            }
+        }
+        for cell in index.cells.values_mut() {
+            cell.sort_by(|a, b| a.0.total_cmp(&b.0));
+        }
+        index
+    }
+
+    fn cell(&self, n: Vec3) -> Option<[i64; 3]> {
+        let width = 2. * self.normal_reach;
+        let key = |v: f64| {
+            let k = (v / width).floor();
+            (k.is_finite() && k.abs() < 1e15).then_some(k as i64)
+        };
+        Some([key(n.x)?, key(n.y)?, key(n.z)?])
+    }
+
+    /// The positions of the indexed planes that can be one support with `plane`, in no order:
+    /// every one `same_support` accepts, and others it refuses.
+    fn near(&self, plane: &Plane) -> Vec<usize> {
+        let n = plane.normal();
+        let offset = (plane.origin - self.centre).dot(n);
+        let from_centre = (plane.origin - self.centre).len();
+        let (Some(low), Some(high)) =
+            (self.cell(n - Vec3::new(1., 1., 1.) * self.normal_reach), self.cell(n + Vec3::new(1., 1., 1.) * self.normal_reach))
+        else {
+            return (0..self.len).collect();
+        };
+        if (n.len() - 1.).abs() > UNIT || !offset.is_finite() || !from_centre.is_finite() {
+            return (0..self.len).collect();
+        }
+        let window = self.linear + from_centre * self.normal_reach + 1e-12 * (1. + from_centre + self.reach);
+        let mut out = self.loose.clone();
+        for x in low[0]..=high[0] {
+            for y in low[1]..=high[1] {
+                for z in low[2]..=high[2] {
+                    let Some(cell) = self.cells.get(&[x, y, z]) else { continue };
+                    let first = cell.partition_point(|e| e.0 < offset - window);
+                    let last = cell.partition_point(|e| e.0 <= offset + window);
+                    out.extend(cell.get(first..last.max(first)).unwrap_or_default().iter().map(|e| e.1));
+                }
+            }
+        }
+        out
+    }
 }
 
 /// Whether `a` and `b` are one oriented plane at resolution `at`: normals the same way within its
@@ -203,14 +290,6 @@ impl Body {
         if inputs.iter().all(|input| input.face_sources().is_none()) {
             return Ok(self);
         }
-        // Each body at most 16 384 faces, and the inputs together at most two such bodies' worth.
-        if inputs.iter().fold(0usize, |n, input| n.saturating_add(input.face_count())) > 2 * 16_384
-            || inputs.iter().any(|input| input.face_count() > 16_384)
-            || self.face_count() > 16_384
-            || blocker.is_some_and(|b| b.face_count() > 16_384)
-        {
-            return Err(KernelError::Invalid("planar source face budget exceeded".into()));
-        }
         if inputs.iter().any(|input| input.face_sources().is_some_and(|sources| sources.len() != input.face_count())) {
             return Err(KernelError::Invalid("planar source alignment mismatch".into()));
         }
@@ -233,7 +312,6 @@ impl Body {
                 let opposing = Plane::new(plane.origin, plane.x, -plane.y).ok_or_else(|| KernelError::Invalid("invalid opposing plane".into()))?;
                 competing.push(opposing);
             }
-            competing.sort_by(|a, b| a.normal().x.total_cmp(&b.normal().x));
             let mut candidates = Vec::new();
             let mut unknown_supports = Vec::new();
             let mut faces = Vec::new();
@@ -271,33 +349,22 @@ impl Body {
                     candidates.push((inner, source, true, cost));
                 }
             }
-            // Planes that match must have (nearly) the same unit normal (`same_support`), so the
-            // lists are sorted by the normal's x and each face looks only at its window of them.
-            unknown_supports.sort_by(|a, b| a.normal().x.total_cmp(&b.normal().x));
+            // The candidates are taken in the order of their normal's x: where several match one
+            // face, the first decides which the rest are compared with.
             candidates.sort_by(|a, b| a.0.normal().x.total_cmp(&b.0.normal().x));
-            let mut work = 2_000_000usize;
+            let unknown_index = PlaneIndex::new(unknown_supports.iter(), at);
+            let competing_index = PlaneIndex::new(competing.iter(), at);
+            let candidate_index = PlaneIndex::new(candidates.iter().map(|c| &c.0), at);
             let mut metadata = 2_000_000usize;
             let mut identity_bytes = 16_000_000usize;
             let mut result = Vec::new();
             for (index, actual) in actual_planes(&self)?.into_iter().enumerate() {
                 let mut found = None;
                 if let Some(actual) = actual {
-                    let mut blocked = false;
-                    let nx = actual.normal().x;
-                    for plane in normal_window(&unknown_supports, |p| p, nx, at) {
-                        work = work.checked_sub(1).ok_or_else(|| KernelError::Invalid("unknown planar source comparison budget exceeded".into()))?;
-                        if same_support(plane, &actual, at) {
-                            blocked = true;
-                            break;
-                        }
-                    }
-                    for plane in normal_window(&competing, |p| p, nx, at) {
-                        work = work.checked_sub(1).ok_or_else(|| KernelError::Invalid("planar tool comparison budget exceeded".into()))?;
-                        if same_support(plane, &actual, at) {
-                            blocked = true;
-                            break;
-                        }
-                    }
+                    let on = |planes: &[Plane], index: &PlaneIndex| {
+                        index.near(&actual).into_iter().any(|i| planes.get(i).is_some_and(|plane| same_support(plane, &actual, at)))
+                    };
+                    let blocked = on(&unknown_supports, &unknown_index) || on(&competing, &competing_index);
                     if blocked {
                         let existing = self
                             .face_sources()
@@ -316,8 +383,9 @@ impl Body {
                         continue;
                     }
                     let mut chosen: Option<(Plane, &FaceSource, bool, usize)> = None;
-                    for (plane, source, inner, cost) in normal_window(&candidates, |c| &c.0, nx, at) {
-                        work = work.checked_sub(1).ok_or_else(|| KernelError::Invalid("planar source comparison budget exceeded".into()))?;
+                    let mut near = candidate_index.near(&actual);
+                    near.sort_unstable();
+                    for (plane, source, inner, cost) in near.into_iter().filter_map(|i| candidates.get(i)) {
                         if same_support(plane, &actual, at) {
                             if let Some((previous_plane, previous_source, previous_inner, _)) = chosen {
                                 let Some(remaining) = identity_bytes.checked_sub(*cost) else {
@@ -490,6 +558,47 @@ mod tests {
             .collect();
         combined.face_sources = Some(Arc::new(sources));
         combined
+    }
+
+    /// The plane index offers every plane `same_support` accepts: planes turned and moved by
+    /// about the resolution (either side of it, so across cell edges), far from the centre, and
+    /// with normals not of unit length, each checked against a scan of them all.
+    #[test]
+    fn plane_index_finds_every_support_a_scan_finds() {
+        let body = box_solid(Vec3::ZERO, Vec3::new(1000., 1000., 1000.)).unwrap();
+        let at = Resolution::of(&body);
+        let (eps, tol) = (at.angular, at.linear);
+        let mut planes = Vec::new();
+        let mut seed = 0x9e37_79b9_7f4a_7c15u64;
+        let mut next = || {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            (seed >> 11) as f64 / (1u64 << 53) as f64 * 2. - 1.
+        };
+        for base in [Vec3::X, Vec3::Y, Vec3::Z, -Vec3::Z, Vec3::new(1., 2., 3.)] {
+            for k in 0..200 {
+                let base = base.normalized().unwrap();
+                let n = (base + Vec3::new(next(), next(), next()) * (eps * 1.2)).normalized().unwrap();
+                // A point of the base plane (through the world origin), near or far, moved off it
+                // by up to one and a half times the resolution's distance.
+                let r = Vec3::new(next(), next(), next()) * if k % 3 == 0 { 1e4 } else { 300. };
+                let origin = r - base * r.dot(base) + n * (next() * tol * 1.5);
+                let p = Plane::from_normal(origin, n).unwrap();
+                planes.push(if k % 50 == 0 { Plane { x: p.x * 1.5, ..p } } else { p });
+            }
+        }
+        let index = PlaneIndex::new(planes.iter(), at);
+        let mut matches = 0;
+        for query in &planes {
+            let mut near = index.near(query);
+            near.sort_unstable();
+            let found: Vec<usize> = near.into_iter().filter(|&i| same_support(&planes[i], query, at)).collect();
+            let scan: Vec<usize> = (0..planes.len()).filter(|&i| same_support(&planes[i], query, at)).collect();
+            assert_eq!(found, scan);
+            matches += scan.len();
+        }
+        assert!(matches > 2 * planes.len(), "the planes meet each other, not only themselves: {matches}");
     }
 
     #[test]
