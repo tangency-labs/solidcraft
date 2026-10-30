@@ -221,7 +221,7 @@ pub(crate) fn paint_layout(ui: &mut egui::Ui, state: super::preferences::LayoutP
                 egui::Align2::CENTER_CENTER,
                 crate::i18n::tr_label(label),
                 egui::FontId::proportional(t.font_small),
-                t.form_dim,
+                t.readable_ink(t.form_dim, fill),
             );
         }
         rect
@@ -266,7 +266,7 @@ pub(crate) fn paint_layout(ui: &mut egui::Ui, state: super::preferences::LayoutP
         // A single vertical mark reads as the narrow icon-only history rail.
         p.line_segment(
             [history.center_top() + vec2(0.0, t.space_8), history.center_bottom() - vec2(0.0, t.space_8)],
-            Stroke::new(2.0, t.form_primary),
+            Stroke::new(2.0, t.selection_ink()),
         );
     }
     // An open command dialog demonstrates its placement without another UI host.

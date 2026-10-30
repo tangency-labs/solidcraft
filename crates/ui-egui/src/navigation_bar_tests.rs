@@ -4,6 +4,43 @@ use egui::{Rect, pos2, vec2};
 use serde_json::json;
 
 #[test]
+fn selected_display_rows_keep_readable_labels_checks_and_separate_fills() {
+    use crate::ui_kit::*;
+    let t = crate::theme_files::resolve(crate::theme_files::find("solidcraft-95", &[]).unwrap());
+    let _theme = crate::theme::scoped_tokens(t);
+    let ctx = crate::fonts::test_context();
+    let output = crate::test_support::frame(&ctx, egui::RawInput::default(), |ui| {
+        navigation_menu(ui, NAV_POPUP_WIDTH, |ui| {
+            for label in ["Grid", "Ground shadow"] {
+                let mut row = NavigationMenuRow::new(label, label, "grid");
+                row.selected = true;
+                row.show(ui);
+            }
+        });
+    });
+    let mut fills = Vec::new();
+    let mut checks = 0;
+    for clipped in &output.shapes {
+        crate::test_support::each_shape(&clipped.shape, &mut |shape| match shape {
+            egui::Shape::Text(text) if ["Grid", "Ground shadow"].contains(&text.galley.job.text.as_str()) => {
+                assert!(crate::theme::contrast_ratio(text.fallback_color, t.selected_bg) >= 4.5);
+            }
+            egui::Shape::Rect(rect) if rect.fill == t.selected_bg => fills.push(rect.rect),
+            egui::Shape::Path(path) if path.points.len() == 3 => {
+                if let egui::epaint::ColorMode::Solid(ink) = path.stroke.color {
+                    assert!(crate::theme::contrast_ratio(ink, t.selected_bg) >= 4.5);
+                    checks += 1;
+                }
+            }
+            _ => {}
+        });
+    }
+    assert_eq!(checks, 2);
+    assert_eq!(fills.len(), 2);
+    assert!(fills[0].bottom() < fills[1].top(), "adjacent selected rows need a visible gap");
+}
+
+#[test]
 fn selection_mode_icons_resolve_to_real_masters() {
     assert_eq!(SELECTION_MODE_ICONS.len(), 6);
     for (mode, icon) in SELECTION_MODE_ICONS {

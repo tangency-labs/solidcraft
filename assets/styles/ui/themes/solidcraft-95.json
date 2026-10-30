@@ -54,7 +54,7 @@
     "dialog_rule": "#808080",
     "dimension": "#ffffff",
     "dimension_driven": "#ffff00",
-    "error": "#ff0000",
+    "error": "#800000",
     "field": "#ffffff",
     "form_accent": "#800080",
     "form_dim": "#404040",
@@ -162,16 +162,16 @@
     "sheet_soft": "#b1bbbb",
     "sketch": "#000080",
     "sketch_accent": "#008000",
-    "sketch_centerline": "#808000",
-    "sketch_construction": "#808000",
+    "sketch_centerline": "#ffdf80",
+    "sketch_construction": "#ffdf80",
     "sketch_fixed": "#000000",
     "sketch_halo": "#ffffff",
     "sketch_ink": "#005400",
-    "sketch_locked": "#008000",
+    "sketch_locked": "#00ff00",
     "sketch_lost": "#800080",
     "sketch_point": "#000000",
     "sketch_point_free": "#000080",
-    "sketch_projected": "#800080",
+    "sketch_projected": "#ffbfff",
     "sketch_soft": "#b1bbb1",
     "subheading_bg": "#c0c0c0",
     "surface_accent": "#804000",
@@ -180,7 +180,7 @@
     "surface_soft": "#bbb6b1",
     "tab_on_fill_dark": "#000000",
     "text": "#000000",
-    "text_dim": "#808080",
+    "text_dim": "#4c4c4c",
     "timeline": "#c0c0c0",
     "timeline_item": "#c0c0c0",
     "timeline_item_error": "#ffffc0",
@@ -240,7 +240,7 @@
     "construction": [
       "#ffffc0",
       "#c0c000",
-      "#808000"
+      "#606000"
     ]
   },
   "borders": {

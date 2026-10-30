@@ -42,7 +42,7 @@ impl<'a> NavigationMenuRow<'a> {
         let t = Tokens::get();
         let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width().max(0.0), NAV_MENU_ROW), Sense::hover());
         let response = ui.interact(rect, ui.id().with(self.id), if self.enabled { Sense::click() } else { Sense::hover() });
-        let ink = if self.selected { t.form_primary } else { t.form_ink };
+        let ink = if self.selected { t.selection_ink() } else { t.form_ink };
         let bg = if self.selected {
             Some(t.selected_bg)
         } else if response.hovered() && self.enabled {
@@ -51,7 +51,7 @@ impl<'a> NavigationMenuRow<'a> {
             None
         };
         if let Some(bg) = bg {
-            ui.painter().rect_filled(rect, NAV_MENU_RADIUS, bg);
+            ui.painter().rect_filled(rect.shrink2(vec2(0.0, t.space_2 / 2.0)), NAV_MENU_RADIUS, bg);
         }
         if !self.icon.is_empty() {
             let icon =
@@ -69,7 +69,13 @@ impl<'a> NavigationMenuRow<'a> {
                 Align2::RIGHT_CENTER,
                 detail,
                 FontId::proportional(if self.enabled { t.font_body } else { t.font_small }),
-                if self.enabled { t.form_dim } else { t.nav_dim },
+                if self.selected {
+                    ink
+                } else if self.enabled {
+                    t.form_dim
+                } else {
+                    t.nav_dim
+                },
             );
             end = end.min(detail.left() - t.space_8);
         }
@@ -81,7 +87,7 @@ impl<'a> NavigationMenuRow<'a> {
         ui.painter().galley(pos2(left, rect.center().y - galley.size().y / 2.0), galley, ink);
         let tail = Rect::from_center_size(pos2(rect.right() - NAV_MENU_INSET - t.space_14 / 2.0, rect.center().y), vec2(t.space_14, t.space_14));
         if self.selected {
-            super::checks::paint_check_glyph(ui.painter(), tail, false, t.form_primary);
+            super::checks::paint_check_glyph(ui.painter(), tail, false, ink);
         } else if self.submenu {
             let arrow =
                 Rect::from_center_size(pos2(rect.right() - NAV_MENU_INSET - NAV_CHEVRON / 2.0, rect.center().y), vec2(NAV_CHEVRON, NAV_CHEVRON));
