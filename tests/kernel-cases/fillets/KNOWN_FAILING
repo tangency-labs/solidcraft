@@ -32,7 +32,6 @@
 851-chamfer-knife-edge-tip-2-box-less-cylinder SMLib SM_ERR_INVALID_INPUT on the knife edge (opposite normals on its two faces)
 851-chamfer-knife-edge-tip-2-sketched SMLib SM_ERR_INVALID_INPUT on the knife edge (opposite normals on its two faces)
 851-chamfer-knife-edge-tip-5 SMLib SM_ERR_INVALID_INPUT on the knife edge (opposite normals on its two faces)
-851-fillet-knife-edge-tip-r2 SMLib SM_ERR_INVALID_INPUT on the knife edge (opposite normals on its two faces)
 9-fillet-corner-curvature-with-reduce-fit not supported yet: solid.fillet builds corner g2 with the exact fit only
 9-fillet-corner-curvature-with-taper-fit not supported yet: solid.fillet builds corner g2 with the exact fit only
 926-chamfer-top-edge-ending-on-boss-wall-above-it not supported yet: the chamfer is refused as larger than its faces where it ends on the boss's wall
