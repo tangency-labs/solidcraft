@@ -1471,8 +1471,17 @@ fn brute_force(
                 points.push(pnt);
                 params.push(param);
 
-                // (the solution's own first object, as `sm_CalcDistAndDev` reads it)
-                let (dist, dev) = calc_dist_and_dev(k, p0, sol, |_| Some(surface), want_deviation)?;
+                // (the solution's own first object, as `sm_CalcDistAndDev` reads it:
+                // upstream every solution of `pTmpSurface->GlobalPointSolve` names that
+                // surface, the fast drops `this` and `GlobalPointSolve_1` its branch owner,
+                // while the port's solve returns them without objects; name the solved
+                // surface again so the distance and deviation are measured, not -1)
+                let mut named = *sol;
+                if let Some(first) = named.objects.first_mut() {
+                    *first = Some(NoObject);
+                }
+                let (dist, dev) =
+                    calc_dist_and_dev(k, p0, &named, |_| Some(surface), want_deviation)?;
                 max_dist = max_dist.max(dist);
                 // (Note, dMaxDev is 0 if ptr is Null.)
                 max_dev = max_dev.max(dev.unwrap_or(0.0));
