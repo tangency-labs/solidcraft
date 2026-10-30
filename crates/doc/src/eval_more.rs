@@ -561,7 +561,7 @@ pub(super) fn sheet_eval(
             st.sheets.push(sh);
             Ok(())
         }
-        FeatureKind::SheetFlange { edges, height, angle, radius, position, flip, body, corner_relief_shape, corner_relief, height_from } => {
+        FeatureKind::SheetFlange { edges, height, angle, radius, position, flip, body, corner_relief_shape, corner_relief, height_from, corners } => {
             let i = sheet_for(st, body, edges.first().map(|e| e.point.0))?;
             let (h, a) = (val(vals, height, Kind::Length)?, val(vals, angle, Kind::Angle)?);
             // Each edge's own height and angle, else the feature's.
@@ -614,7 +614,43 @@ pub(super) fn sheet_eval(
                 .map(|(pick, (height, angle))| sheet::EdgeFlange { pick, height, angle, from })
                 .collect();
             let n0 = sh.flanges.len();
-            let (_, notes) = sh.add_flanges_each(&each, rr, position, *flip, relief)?;
+            if corners.len() > 1000 {
+                return Err(DocError::Invalid("at most 1000 corner joins are supported".into()));
+            }
+            let mut joins = Vec::with_capacity(corners.len());
+            let mut pairs = std::collections::BTreeSet::new();
+            for corner in corners {
+                let edge_index = |point: Vec3| {
+                    edges
+                        .iter()
+                        .position(|edge| edge.point.0.dist(point) < 1e-6)
+                        .ok_or_else(|| DocError::Invalid("a corner must name two of this feature's selected edges".into()))
+                };
+                let covering = edge_index(corner.covering.0)?;
+                let covered = edge_index(corner.covered.0)?;
+                if covering == covered || !pairs.insert((covering.min(covered), covering.max(covered))) {
+                    return Err(DocError::Invalid("a corner must name two distinct edges and can only be specified once".into()));
+                }
+                let gap = corner.gap.as_ref().map(|expression| val(vals, expression, Kind::Length)).transpose()?;
+                let overlap = match corner.corner_type.as_str() {
+                    "butt" if corner.overlap.is_none() && gap.is_none() => continue,
+                    "butt" if corner.overlap.is_none() => 0.0,
+                    "full" if corner.overlap.is_none() => sh.t,
+                    "partial" => {
+                        let expression =
+                            corner.overlap.as_ref().ok_or_else(|| DocError::Invalid("partial overlap needs an overlap length".into()))?;
+                        let amount = val(vals, expression, Kind::Length)?;
+                        if !amount.is_finite() || amount <= 0.0 || amount >= sh.t {
+                            return Err(DocError::Invalid("partial overlap must be greater than zero and less than the sheet thickness".into()));
+                        }
+                        amount
+                    }
+                    "butt" | "full" => return Err(DocError::Invalid("only partial overlap takes an overlap length".into())),
+                    _ => return Err(DocError::Invalid("corner type must be butt, partial or full".into())),
+                };
+                joins.push(sheet::CornerJoin { covering, covered, overlap, gap });
+            }
+            let (_, notes) = sh.add_flanges_joined(&each, rr, position, *flip, relief, &joins)?;
             if !notes.is_empty() {
                 let notes = notes.join("; ");
                 *warning = Some(match warning.take() {
@@ -661,6 +697,35 @@ pub(super) fn sheet_eval(
             }
             tag_flanges(sh, n0, f.id);
             rebuild_sheet(st, i)
+        }
+        FeatureKind::SheetCornerJoin { covering, covered, corner_type, overlap, body, gap } => {
+            let index = sheet_for(st, &Some(body.clone()), None)?;
+            let sheet = st.sheets.get_mut(index).ok_or_else(|| DocError::Invalid("sheet".into()))?;
+            let resolve = |tag: &str| {
+                sheet
+                    .flanges
+                    .iter()
+                    .position(|flange| flange.tag == tag)
+                    .ok_or_else(|| DocError::Invalid(format!("corner join lost flange `{tag}`; select its replacement or suppress the join")))
+            };
+            let (covering, covered) = (resolve(covering)?, resolve(covered)?);
+            let amount = match corner_type.as_str() {
+                "butt" if overlap.is_none() => None,
+                "full" if overlap.is_none() => Some(sheet.t),
+                "partial" => {
+                    let expression = overlap.as_ref().ok_or_else(|| DocError::Invalid("partial overlap needs an overlap length".into()))?;
+                    let amount = val(vals, expression, Kind::Length)?;
+                    if !amount.is_finite() || amount <= 0.0 || amount >= sheet.t {
+                        return Err(DocError::Invalid("partial overlap must be greater than zero and less than the sheet thickness".into()));
+                    }
+                    Some(amount)
+                }
+                "butt" | "full" => return Err(DocError::Invalid("only partial overlap takes an overlap length".into())),
+                _ => return Err(DocError::Invalid("corner type must be butt, partial or full".into())),
+            };
+            let gap = gap.as_ref().map(|expression| val(vals, expression, Kind::Length)).transpose()?.unwrap_or(sheet.gap);
+            sheet.join_corner_with_gap(covering, covered, amount, gap)?;
+            rebuild_sheet(st, index)
         }
         FeatureKind::SheetPerforate { diameter, pitch, margin, pattern, body } => {
             // Without a body name the field goes on the newest sheet, as the command's own body lookup does.

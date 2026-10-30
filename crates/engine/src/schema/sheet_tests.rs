@@ -48,6 +48,7 @@ fn schemas_and_the_key_check_agree() {
             "body",
             "corner_relief",
             "corner_relief_shape",
+            "corners",
             "curves",
             "distance",
             "edges",

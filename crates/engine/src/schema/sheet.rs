@@ -335,6 +335,25 @@ impl JsonSchema for PerforationPattern {
     }
 }
 
+/// An edge flange corner's covering and covered edges, join type and optional length expressions.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct FlangeCornerParams {
+    /// A point in mm on the selected edge whose wall covers the other wall.
+    pub covering: Point3,
+    /// A point in mm on the other selected edge meeting the covering edge on the base.
+    pub covered: Point3,
+    /// butt, partial or full. Default: butt.
+    #[serde(default)]
+    pub corner_type: Option<String>,
+    /// Partial overlap's length across the covered wall's thickness.
+    #[serde(default)]
+    pub overlap: Option<LengthExpr>,
+    /// Clearance between the walls, accepting global length parameters. Default: the sheet rule.
+    #[serde(default)]
+    pub gap: Option<LengthExpr>,
+}
+
 /// Add a sheet metal flange: a base flange from sketch profiles, a contour flange along an open
 /// chain of sketch lines, or edge flanges on a sheet's edges. Thickness, K-factor, bend radius
 /// and reliefs come from the sheet metal rule (`sheet.manage_rules`), so those keys are refused;
@@ -413,6 +432,10 @@ pub struct FlangeParams {
     /// on a base or contour flange.
     #[serde(default)]
     pub then: Option<ThenSteps>,
+    /// Edge: joins between selected base edges, with optional per-corner overlap and gap.
+    /// Omitted settings keep the existing Butt joins and sheet rule gap.
+    #[serde(default)]
+    pub corners: Option<Vec<FlangeCornerParams>>,
     #[serde(flatten, deserialize_with = "feature_common")]
     pub common: FeatureCommon,
 }

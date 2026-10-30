@@ -72,6 +72,7 @@ pub(super) fn command(kind: &Kind) -> Option<&'static str> {
         }),
         Kind::Sheet(k) => match k {
             crate::dialogs_sheet::Sm::Flange { .. } => Some("sheet.flange"),
+            crate::dialogs_sheet::Sm::CornerJoin { .. } => Some("sheet.corner_join"),
             crate::dialogs_sheet::Sm::Unfold { refold } => Some(if *refold { "sheet.refold" } else { "sheet.unfold" }),
             crate::dialogs_sheet::Sm::Convert { .. } => Some("sheet.convert"),
             crate::dialogs_sheet::Sm::Rules { .. } => Some("sheet.manage_rules"),

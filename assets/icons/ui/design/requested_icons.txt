@@ -87,6 +87,7 @@ contact_sets	false
 continuity	false
 convert_sheet	false
 copy	false
+corner_join	false
 curvature_comb	false
 curvature_map	false
 cut	false

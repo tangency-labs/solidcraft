@@ -8,6 +8,8 @@ and selected when the active body is a sheet), and builds parts from a sheet of 
   sketch, or an edge flange from a part edge.
 - [**Hem**](../reference/commands.md#command-sheet.hem) returns a sheet edge back toward the sheet; no new sketch is required.
 - **Fold** (`sheet.fold`) bends the sheet along a sketch line.
+- **Corner Join** (`sheet.corner_join`) joins neighbouring base flanges, including flanges
+  made by separate features.
 - **Unfold / Refold** (`sheet.unfold`, `sheet.refold`) for working on the flat part.
 - **Convert** (`sheet.convert`) turns a plate of constant thickness into sheet metal, or, with
   bend edges, a solid or a shelled body.
@@ -114,12 +116,12 @@ left out, each with a warning saying which the other is.
 The rule's shape and size are the default. An edge flange feature can choose its own for the
 corners its flanges make: `corner_relief_shape` (`notch`, `round`, `rectangular` or `tear`) and
 `corner_relief` (the size across, a length or an expression) in `sheet.flange`, or Corner Relief
-Shape and Corner Relief in the Flange dialog. In the dialog, Rule as the shape and an empty size
+Shape and Corner Relief under **Bend settings** in the Flange dialog. In the dialog, Rule as the shape and an empty size
 take the rule's; either one left out follows the rule while the other is the feature's. Corners are
 relieved only between the flanges of one feature, so a feature's choice never meets another's at a
 corner, and two edge flange features of one part can have different reliefs under one rule. A
 base or contour flange takes its corners from the rule only and refuses both parameters. The
-flange gap and the rule's other values stay with the rule for every flange. The feature's choice is
+rule's other values stay with the rule for every flange. The feature's choice is
 saved with the design (file format 23).
 
 ```json
@@ -137,6 +139,79 @@ opposite ways, ends that would overlap in the flat pattern) stays open, and the 
 reports a warning saying where. A flange added by a later feature leaves the corner as it was:
 the earlier flange keeps its length and the new one ends at its bend.
 
+For neighbouring base edges selected in the same feature, the Flange dialog offers pictured
+**Corner Type** choices for all selected corners. **Butt** keeps the existing mitred join. **Partial Overlap** extends
+the **Covering** flange across part of the other wall's thickness; **Overlap** is a length
+expression greater than zero and less than the sheet thickness. **Full Overlap** covers the
+whole thickness and follows changes to the rule's thickness. For a rectangular base aligned
+with its sheet frame, **Covering** chooses **Front and rear walls** or **Left and right walls**
+for all corners. Front is the low-Y edge, rear the high-Y edge, left low-X and right high-X
+in the sheet's local frame; rotating the camera does not rename the walls. The first common
+overlap choice covers with the front and rear walls.
+
+**Corner Gap** sets the clearance for all selected corners. Leave it empty to use the sheet
+rule's **Flange Gap**, or enter a length such as `0.5 mm`, a global parameter such as
+`corner_clearance`, or an expression such as `corner_clearance + 0.1 mm`. The same field under
+**Customize each corner** sets an individual corner's gap. Mixed values are preserved until
+you edit the common field. Parameter changes recalculate the folded part and flat pattern.
+Gap is separate from Overlap and Corner Relief; it must be at least 0.01 mm and must not cut
+a panel away.
+
+Expand **Customize each corner** for independent corner types and covering walls. Mixed
+settings remain unchanged until a common choice is explicitly selected. Nonrectangular bases
+retain individual wall choices without a front/rear preset. Hovering or focusing a corner or
+covering control outlines its walls in the computed preview without changing the selection.
+For these overlapping joins **Corner Gap** (or the rule's **Flange Gap**) is the clearance between the covered
+wall's end and the covering wall's face, not a distance along the corner's bisector.
+
+The same choices are available as `corners` in `sheet.flange`. Each entry identifies two of
+the selected edges by their picked points, names the `covering` and `covered` edge, and sets
+`corner_type` to `butt`, `partial` or `full`. Only `partial` takes `overlap`. Any corner can
+set an optional `gap` length expression; omitting it uses the rule. Omitted corners
+stay Butt, so existing designs keep their joins. The example makes the front and rear walls
+cover both side walls of a 120 x 90 mm base under the 2 mm rule above:
+
+```json
+{"command":"sheet.flange","params":{"edges":[[60,0,2],[120,45,2],[60,90,2],[0,45,2]],
+ "height":38.6,"corner_relief_shape":"notch","corners":[
+  {"covering":[60,0,2],"covered":[120,45,2],"corner_type":"full"},
+  {"covering":[60,0,2],"covered":[0,45,2],"corner_type":"full"},
+  {"covering":[60,90,2],"covered":[120,45,2],"corner_type":"full"},
+  {"covering":[60,90,2],"covered":[0,45,2],"corner_type":"partial","overlap":"1 mm"}
+ ]}}
+```
+
+Corner choices are saved with the feature and restored by Edit Feature. Choosing Butt there
+removes an overlap. The folded solid, mass and flat pattern use the same panel ends, including
+DXF output; an overlap changes panel lengths without extending bend lines. Currently overlap
+requires two convex, neighbouring base flanges with panels beyond their bends and bending
+the same way. The `corners` parameter applies to flanges made in the same feature.
+Returns, side-edge flanges, concave corners and tear
+relief are not supported for overlap. An unsupported overlap, or one that would intersect in
+the flat pattern, is refused rather than silently replaced with Butt.
+
+For flanges made in separate operations, add **Corner Join** from **SHEET METAL > MODIFY**
+after both Flange features. Select a flat face on **Flange 1** and **Flange 2**, choose Butt,
+Partial Overlap or Full Overlap, and choose the Covering flange for an overlap. The result is
+a separate timeline feature with live preview and Edit Feature support. **Corner Gap** accepts
+the same lengths and parameter expressions as the Flange dialog, with an empty value following
+the rule. It follows earlier flange and parameter changes; a removed flange reports a lost reference instead of silently
+selecting a replacement. Suppress or edit the join to repair it.
+
+The JSON command takes the sheet's persistent flange tags (`F<feature>.<edge>`, as used in its
+panel face names), not current array indices. For example, where features 3 and 4 each made
+one wall:
+
+```json
+{"command":"sheet.corner_join","params":{"covering":"F3.0","covered":"F4.0",
+ "corner_type":"partial","overlap":"1 mm","gap":"0.5 mm"}}
+```
+
+The two flanges must belong to the same folded sheet and still meet at a corner of its base.
+Joins on torn flanges, flanges with returns, or corners already removed by a relief are refused.
+Butt and Full Overlap take no overlap expression. The operation changes panel ends, not bend
+lines, and the same geometry drives the folded part, mass properties, flat pattern and DXF.
+
 The flanges of one edge flange feature can each have an angle and a height of their own. An
 entry of `edges` is a point `[x, y, z]`, which takes the feature's `height` and `angle`, or an
 object `{"point": [x, y, z], "angle": "105 deg", "height": "30 mm"}` whose `angle` and `height`
@@ -145,9 +220,9 @@ so parameters work, and each is a feature input of its own (`Edge angle`, `Edge 
 `Height` and `Angle`. The corners between such flanges close like those between equal ones:
 the ends run toward each other the rule's gap apart, either side of the plane halfway between
 the two flanges, and a taller flange's end keeps that line up to its own tip. This is how to
-close a corner between flanges at different angles, because flanges of separate features
-don't close toward each other. In the Flange dialog, picking more than one edge shows a row
-per edge with an angle and a height box; an empty box takes the value above.
+close a corner between flanges at different angles in one feature; separate features need
+a later Corner Join. In the Flange dialog, expand **Per Edge** for a row per selected wall
+with an angle and a height box; an empty box takes the value above.
 
 ```json
 {"command":"sheet.flange","params":{"edges":[[60,0,2],{"point":[120,45,2],"angle":"90 deg"},
@@ -222,7 +297,7 @@ The slot's width is `corner_relief`, and it survives unfolding, refolding and DX
 yet and leaves the notch with a warning. A mitre that would overlap the flat pattern stays
 open with a warning. Side-edge setbacks on curved panels or on only part of an edge left by
 a cut-out are not supported yet. The edge connecting a panel to its existing bend is not a
-free edge. See `examples/regressions/sheet-side-flange-corner.json` for a small reproduction.
+free edge. See `examples/regressions/sheet_side_flange_corner.json` for a small reproduction.
 
 **Convert** also takes a solid or a shelled body: pick the face that stays fixed and the sharp
 edges that become bends (`bends`; Bend Edges in the dialog). The flat faces reached from the

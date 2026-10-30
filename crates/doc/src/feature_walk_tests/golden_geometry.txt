@@ -130,6 +130,7 @@ sheet_base
 sheet_contour
 sheet_flange
   moves: edges[0].point[0], edges[0].point[1], edges[0].point[2], edges[1].point[0], edges[1].point[1], edges[1].point[2]
+sheet_corner_join
 sheet_hem
   moves: edges[0][0], edges[0][1], edges[0][2]
 sheet_perforate

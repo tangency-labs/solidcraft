@@ -308,6 +308,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj
         app.dialog = Some(d);
         return;
     }
+    crate::dialogs_sheet::corner_overlay(app, painter, proj, &d);
     if let Kind::Measure { result: Some(r), show, .. } = &d.kind {
         measure_line(app, painter, proj, r, *show);
         app.dialog = Some(d);

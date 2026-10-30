@@ -146,6 +146,7 @@ impl StraightPreview {
         Some(Ok(Built {
             scene,
             sketches: Vec::new(),
+            sheet_walls: Vec::new(),
             applied: None,
             stopped: None,
             tapered: Vec::new(),

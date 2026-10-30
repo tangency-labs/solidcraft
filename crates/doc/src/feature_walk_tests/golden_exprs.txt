@@ -283,6 +283,10 @@ sheet_flange
     Edge height = flange.e2_height (Length)
     Corner relief = flange.relief (Length)
   expressions: flange.height, flange.angle, flange.radius, flange.e1_angle, flange.e1_height, flange.e2_height, flange.relief
+sheet_corner_join
+  inputs:
+    Overlap = join.overlap (Length)
+  expressions: join.overlap
 sheet_hem
   inputs:
     Length = hem.length (Length)

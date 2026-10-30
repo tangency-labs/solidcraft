@@ -61,10 +61,17 @@ pub struct SketchPreview {
     pub points: Vec<usize>,
 }
 
+pub struct SheetWallPreview {
+    pub edge: [Vec3; 2],
+    pub outline: Vec<Vec3>,
+    pub tolerance: f64,
+}
+
 /// A computed preview: the scene to draw and the bodies it stands in for.
 pub struct Built {
     pub scene: GpuScene,
     pub sketches: Vec<SketchPreview>,
+    pub sheet_walls: Vec<SheetWallPreview>,
     pub replaced: Vec<String>,
     /// Why the feature failed, when the scene only shows its tool body.
     pub error: Option<String>,
@@ -110,6 +117,7 @@ pub struct PreviewState {
     /// Is a preview scene up?
     pub active: bool,
     pub sketches: Vec<SketchPreview>,
+    pub sheet_walls: Vec<SheetWallPreview>,
     /// Why the current inputs don't make a feature (nothing is previewed then).
     pub error: Option<String>,
     /// A preview is being computed.
@@ -159,6 +167,7 @@ impl PreviewState {
         self.stopped = None;
         self.tapered.clear();
         self.sketches.clear();
+        self.sheet_walls.clear();
         self.busy = false;
         self.rolled_back = false;
         self.hide_scene();
@@ -187,6 +196,7 @@ impl PreviewState {
         match job {
             Ok(b) => {
                 self.sketches = b.sketches;
+                self.sheet_walls = b.sheet_walls;
                 self.replaced = b.replaced;
                 self.bounds = b.bounds;
                 self.active = true;
@@ -201,6 +211,7 @@ impl PreviewState {
             Err(e) => {
                 self.hide_scene();
                 self.sketches.clear();
+                self.sheet_walls.clear();
                 self.error = Some(e);
                 self.applied = None;
                 self.stopped = None;
@@ -595,6 +606,7 @@ fn build_tool(before: &ModelState, after: &ModelState, c: Colors, op: &str) -> B
     Built {
         scene: sc,
         sketches: Vec::new(),
+        sheet_walls: Vec::new(),
         replaced: Vec::new(),
         error: None,
         bounds: Aabb3::EMPTY,
@@ -752,7 +764,21 @@ pub fn build(before: &ModelState, after: &ModelState, c: Colors) -> Built {
             if indices.is_empty() && points.is_empty() { None } else { Some(SketchPreview { sketch: sketch.clone(), curves: indices, points }) }
         })
         .collect();
-    Built { scene: sc, sketches, replaced, error: None, bounds: Aabb3::EMPTY, applied: None, tapered: Vec::new(), stopped: None }
+    let sheet_walls = after
+        .sheets
+        .iter()
+        .flat_map(|sheet| {
+            sheet.flanges.iter().filter(|flange| flange.parent.is_none()).filter_map(|flange| {
+                let plane = sheet.panel_face(&format!("{}:top", flange.tag))?;
+                Some(SheetWallPreview {
+                    edge: [sheet.frame.to_world(flange.p), sheet.frame.to_world(flange.p + flange.d * flange.len)],
+                    outline: sheet.panel(flange).outer.polyline(1e-3).into_iter().map(|point| plane.to_world(point)).collect(),
+                    tolerance: sheet.t * 2.0 + flange.radius * 2.0 + 1e-3,
+                })
+            })
+        })
+        .collect();
+    Built { scene: sc, sketches, sheet_walls, replaced, error: None, bounds: Aabb3::EMPTY, applied: None, tapered: Vec::new(), stopped: None }
 }
 
 /// Which of the `nf` faces of `m` are new surface, i.e. not on the old mesh? Each is decided by
@@ -977,6 +1003,7 @@ mod tests {
         Built {
             scene: GpuScene::default(),
             sketches: Vec::new(),
+            sheet_walls: Vec::new(),
             replaced: vec!["Lid".into()],
             error: None,
             bounds: Aabb3::EMPTY,
@@ -984,6 +1011,25 @@ mod tests {
             tapered: Vec::new(),
             stopped: None,
         }
+    }
+
+    #[test]
+    fn sheet_wall_feedback_is_cleared_when_preview_fails_or_closes() {
+        let built = || Built {
+            sheet_walls: vec![SheetWallPreview { edge: [Vec3::ZERO, Vec3::X], outline: vec![Vec3::ZERO, Vec3::X, Vec3::Z], tolerance: 1.0 }],
+            ..pose()
+        };
+        let mut preview = PreviewState::default();
+        preview.apply(1, Ok(built()));
+        assert_eq!(preview.sheet_walls.len(), 1);
+        preview.apply(2, Err("invalid corner".into()));
+        assert!(preview.sheet_walls.is_empty());
+        preview.apply(3, Ok(built()));
+        preview.clear();
+        assert!(preview.sheet_walls.is_empty());
+        preview.apply(4, Ok(built()));
+        preview.reset();
+        assert!(preview.sheet_walls.is_empty());
     }
 
     /// The worker completes while the slider is still held or Play keeps advancing.

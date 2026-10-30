@@ -1030,7 +1030,7 @@ pub fn convert_body(
     let mut closed = Vec::with_capacity(corners.len());
     for k in &corners {
         match sh.close_corner(k) {
-            Ok(()) => closed.push(*k),
+            Ok(()) => closed.push((*k, sh.gap)),
             Err(why) => notes.push(format!("the corner at {} stays cut open: {why}", sh.shown(k.c))),
         }
     }
