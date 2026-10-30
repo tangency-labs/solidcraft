@@ -1,6 +1,7 @@
 use super::*;
 use crate::cmd::{Part, command_specs, find_command};
 use crate::tests::Folder;
+use solidcraft_doc::drawing::template;
 
 fn run(s: &mut Session, id: &str, p: Value) -> Value {
     s.execute(id, &p).unwrap_or_else(|e| panic!("{id}: {e}"))
@@ -15,6 +16,46 @@ fn design() -> Session {
     let mut s = Session::default();
     run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 10, "body_name": "Plate"}));
     s
+}
+
+/// A sheet's general tolerances, as `drawing.inspect` lists its cells.
+fn tolerances(made: &Value) -> Value {
+    let cells = made["sheets"][0]["title_block_cells"].as_array().unwrap();
+    cells.iter().find(|cell| cell["name"] == "general_tolerances").unwrap()["text"].clone()
+}
+
+/// A drawing starts from the template named, else ISO A3 for a part or, for a design with
+/// components, for an assembly, which `drawing.template.list` marks; it keeps the template's
+/// projection unless given one. An unknown template is refused with nothing changed, and undo
+/// takes the drawing away whole.
+#[test]
+fn a_drawing_starts_from_a_template() {
+    let mut s = design();
+    let listed = run(&mut s, "drawing.template.list", json!({}))["templates"].clone();
+    let names: Vec<&str> = listed.as_array().unwrap().iter().map(|t| t["name"].as_str().unwrap()).collect();
+    assert_eq!(names, template::BUILT_INS);
+    let marked: Vec<&Value> = listed.as_array().unwrap().iter().filter(|t| t["default"] == json!(true)).collect();
+    assert_eq!(marked, [&json!({"name": "iso-a3-part", "title": "ISO A3 part", "default": true})]);
+    let made = run(&mut s, "drawing.create", json!({"template": "iso-a4-part", "projection": "first", "language": "de"}));
+    let sheet = &made["sheets"][0];
+    assert_eq!((&sheet["size_mm"], &sheet["orientation"]), (&json!([210.0, 297.0]), &json!("portrait")));
+    assert_eq!((&made["projection"], &made["language"]), (&json!("first"), &json!("de")));
+    assert_eq!(tolerances(&made), json!(template::PART_TOLERANCES));
+    let (undo, before) = (s.undo.len(), s.doc.drawings.clone());
+    assert!(refused(&mut s, "drawing.create", json!({"template": "iso-b2-part"})).contains("no template `iso-b2-part`"));
+    assert_eq!((s.undo.len(), &s.doc.drawings), (undo, &before), "nothing changed");
+    run(&mut s, "drawing.close", json!({}));
+    run(&mut s, "edit.undo", json!({}));
+    assert!(s.doc.drawings.is_empty(), "undo takes the drawing away whole");
+    // A design with components: the assembly template, in its own projection.
+    run(&mut s, "component.create", json!({"name": "Bracket"}));
+    run(&mut s, "component.activate", json!({"component": 0}));
+    let marked =
+        run(&mut s, "drawing.template.list", json!({}))["templates"].as_array().unwrap().iter().find(|t| t["default"] == json!(true)).cloned();
+    assert_eq!(marked.map(|t| t["name"].clone()), Some(json!("iso-a3-assembly")));
+    let made = run(&mut s, "drawing.create", json!({}));
+    assert_eq!((&made["sheets"][0]["size_mm"], &made["projection"]), (&json!([420.0, 297.0]), &json!("third")));
+    assert_eq!(tolerances(&made), json!(template::ASSEMBLY_TOLERANCES));
 }
 
 /// The drawing open, as the design holds it.
@@ -49,7 +90,8 @@ fn a_drawing_of_the_design_is_kept_in_it_and_opened() {
     let d = open_one(&s);
     assert_eq!(made["id"], json!(ids::encode(d.id)));
     assert!(d.sheets[0].border.is_some(), "the ISO border");
-    assert_eq!(d.sheets[0].title_block, Some(solidcraft_geom::title_block::default_block()));
+    let built_in = template::built_in("iso-a3-part").unwrap().unwrap();
+    assert_eq!(d.sheets[0].title_block, built_in.sheets[0].title_block, "the part template's block");
     assert_eq!(sheet["title_block"]["size_mm"], json!([180.0, 54.0]));
     assert_eq!((s.doc.drawings.len(), s.open_drawing), (1, Some(d.id)));
     assert_eq!((s.undo.len(), s.undo.last().map(|u| u.part)), (undo + 1, Some(None)), "a step of the model");
