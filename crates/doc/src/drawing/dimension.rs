@@ -738,37 +738,44 @@ impl<'a> Lookup<'a> {
         Ok(self.named.entry(i).or_insert_with(|| BodyEdges::new(b)))
     }
 
-    /// The edges `edge` names: the one edge, or the pieces of it.
+    /// The edges `edge` names: the one edge, or the pieces of it. One piece is that edge, though not
+    /// found exactly: a name saved from a split face finds it on a body with the one face.
     pub(super) fn edges(&mut self, edge: &ModelEdge) -> std::result::Result<Edges, Status> {
         let (i, frame) = self.body(&edge.body, edge.origin_feature, &edge.path)?;
         let names = self.names(i)?;
-        let (indices, whole) = match names.matching(&edge.name) {
+        let (indices, named) = match names.matching(&edge.name) {
             Some(EdgeMatch::Edge(e)) => (vec![e], true),
             Some(EdgeMatch::Pieces(pieces)) => (pieces, false),
             None => return Err(Status::Lost(format!("edge `{}` no longer exists", edge.name))),
         };
-        let exact = whole && indices.iter().all(|e| names.verified(*e));
+        let whole = named || indices.len() == 1;
+        let exact = named && indices.iter().all(|e| names.verified(*e));
         let placed = |e: &usize| names.mesh.edges.get(*e).map(|line| (*e, line.iter().map(|p| apply_point(&frame, *p)).collect()));
         Ok(Edges { pieces: indices.iter().filter_map(placed).collect(), whole, exact, body: i, frame })
     }
 
     /// The circle or arc `edge` names, as [`Lookup::arc`] reads it, and whether it was found exactly.
-    /// A split edge is several arcs, each drawn in its own place.
+    /// The pieces of a split edge on one circle are still that circle, as [`Lookup::line`] keeps a
+    /// line: read from the longest, so its points lie on what is left of it. Pieces on several
+    /// circles are listed, and none is chosen.
     fn whole_arc(&mut self, edge: &ModelEdge, basis: &Plane) -> std::result::Result<(f64, [Vec3; 4], bool), Status> {
         let found = self.edges(edge)?;
-        if !found.whole {
+        if !found.whole && one_circle(&found.pieces).is_none() {
             return Err(Status::Ambiguous(edge_candidates(&edge.body, &found)));
         }
-        let (radius, points) = self.arc(edge, &found, basis)?;
+        let length = |line: &[Vec3]| line.windows(2).map(|w| w.first().zip(w.last()).map_or(0.0, |(a, b)| a.dist(*b))).sum::<f64>();
+        let longest = found.pieces.iter().max_by(|a, b| length(&a.1).total_cmp(&length(&b.1)));
+        let not_found = || Status::Lost(format!("edge `{}` no longer exists", edge.name));
+        let (radius, points) = self.arc(edge, &found, longest.ok_or_else(not_found)?, basis)?;
         Ok((radius, points, found.exact))
     }
 
-    /// The circle or arc that `found` (one whole edge) is, as the view through `basis` sees it face
-    /// on: its radius, and its centre and its start, middle and end in the design's frame. Read
-    /// exactly from the body, in the view's plane through the edge, so the points are the edge's.
-    fn arc(&self, edge: &ModelEdge, found: &Edges, basis: &Plane) -> std::result::Result<(f64, [Vec3; 4]), Status> {
+    /// The circle or arc that `piece` of `found` is, as the view through `basis` sees it face on:
+    /// its radius, and its centre and its start, middle and end in the design's frame. Read exactly
+    /// from the body, in the view's plane through the edge, so the points are the edge's.
+    fn arc(&self, edge: &ModelEdge, found: &Edges, piece: &(usize, Vec<Vec3>), basis: &Plane) -> std::result::Result<(f64, [Vec3; 4]), Status> {
         let face_on = || Status::Unmeasurable(format!("edge `{}` isn't a circle in this view (it isn't parallel to it)", edge.name));
-        let (index, line) = found.pieces.first().ok_or_else(face_on)?;
+        let (index, line) = piece;
         let through = Plane { origin: *line.first().ok_or_else(face_on)?, ..*basis };
         let local = mat_inverse(&found.frame).and_then(|back| map_plane(&back, &through)).ok_or_else(face_on)?;
         let body = self.state.bodies.get(found.body).ok_or_else(|| Status::Lost("its body no longer exists".into()))?;
@@ -820,19 +827,17 @@ impl<'a> Lookup<'a> {
         }
     }
 
-    /// The centre `point` names: of the circle or arc its one named edge is, whole, as construction
-    /// geometry finds a round edge's ([`as_circle`]).
+    /// The centre `point` names: of the circle or arc its one named edge is, or the one circle its
+    /// pieces lie on, as construction geometry finds a round edge's ([`as_circle`]).
     fn centre(&mut self, point: &ModelPoint) -> std::result::Result<(Vec3, bool), Status> {
         let name = point.edges.first().ok_or_else(|| Status::Lost("its centre names no edge".into()))?;
         let edge = ModelEdge { body: point.body.clone(), origin_feature: point.origin_feature, name: name.clone(), path: point.path.clone() };
         let found = self.edges(&edge)?;
-        // A split edge is several arcs.
-        if !found.whole {
-            return Err(Status::Ambiguous(edge_candidates(&edge.body, &found)));
+        match one_circle(&found.pieces) {
+            Some(centre) => Ok((centre, found.exact)),
+            None if found.whole => Err(Status::Unmeasurable(format!("edge `{name}` isn't a circle or an arc"))),
+            None => Err(Status::Ambiguous(edge_candidates(&edge.body, &found))),
         }
-        let round = found.pieces.first().and_then(|(_, line)| as_circle(line));
-        let (centre, ..) = round.ok_or_else(|| Status::Unmeasurable(format!("edge `{name}` isn't a circle or an arc")))?;
-        Ok((centre, found.exact))
     }
 
     /// The cylinder `face` lies on (or the pieces it was cut into, all on one cylinder), with every
@@ -1122,6 +1127,21 @@ fn one_arc(segs: &[Seg2]) -> Option<(f64, [Vec2; 4])> {
     }
     let arc = Seg2::Arc { center, radius, start, sweep };
     Some((radius, [center, arc.start(), arc.mid(), arc.end()]))
+}
+
+/// The centre of the one circle every one of `pieces` lies on: `None` if they aren't on one circle.
+/// The circle is read from all their points together ([`as_circle`], four at least), since a short
+/// arc's three points are too few to read one from alone, and every point lies on it, in its plane.
+/// Two points could be a chord, so a piece needs three.
+fn one_circle(pieces: &[(usize, Vec<Vec3>)]) -> Option<Vec3> {
+    if pieces.iter().any(|(_, line)| line.len() < 3) {
+        return None;
+    }
+    let points: Vec<Vec3> = pieces.iter().flat_map(|(_, line)| line.iter().copied()).collect();
+    let (centre, normal, radius) = as_circle(&points)?;
+    let tol = radius * 1e-6;
+    let on = |p: &Vec3| ((*p - centre).len() - radius).abs() <= tol && (*p - centre).dot(normal).abs() <= tol;
+    points.iter().all(on).then_some(centre)
 }
 
 /// A straight polyline's ends.

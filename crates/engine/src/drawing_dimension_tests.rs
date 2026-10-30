@@ -318,11 +318,44 @@ fn a_circle_and_an_arc_read_their_radius_and_diameter() {
     assert!(matches!(&r.status, Status::Lost(why) if why.contains("no longer exists")), "{r:?}");
     run(&mut f.s, "edit.undo", json!({}));
     assert_reads(&f.resolve(across), 12.0, false);
-    // A slot across the rim splits it: which piece to measure isn't one answer, and none is chosen.
+    // A slot across the rim leaves two arcs of one circle: it is still that circle, not exactly, with
+    // its arrow on what is left of it.
     run(&mut f.s, "solid.box", json!({"length": 2, "width": 5, "height": 20, "corner": [39, -1, 5], "operation": "cut", "targets": ["Box"]}));
     let r = f.resolve(across);
-    assert!(matches!(&r.status, Status::Ambiguous(pieces) if pieces.len() >= 2), "{r:?}");
-    assert_eq!(r.measured, None);
+    assert_reads(&r, 12.0, false);
+    assert!(!r.exact, "{r:?}");
+    let centre = Vec3::new(40.0, 0.0, 15.0);
+    assert!(r.points[0].dist(centre) < 1e-6, "{r:?}");
+    assert!(r.points[1..].iter().all(|p| (p.dist(centre) - 6.0).abs() < 1e-6 && (p.x - 40.0).abs() >= 1.0 - 1e-6), "{r:?}");
+    // A slot through the whole hole, along a line through its centre, leaves arcs too short to read a
+    // circle from on their own: each still lies on the circle the longer ones give.
+    run(&mut f.s, "edit.undo", json!({}));
+    run(&mut f.s, "solid.box", json!({"length": 40, "width": 42, "height": 3, "corner": [20, -1, 13.5], "operation": "cut", "targets": ["Box"]}));
+    let r = f.resolve(across);
+    assert_reads(&r, 12.0, false);
+    assert!(!r.exact, "{r:?}");
+}
+
+/// A name saved from a face that was split finds the one edge on a body with the one face: it is
+/// that edge, not exactly, for a length, a radius and a centre alike.
+#[test]
+fn one_piece_of_a_name_is_that_edge() {
+    let mut f = boxed();
+    run(&mut f.s, "solid.cylinder", json!({"radius": 6, "height": 42, "base": [40, -1, 15], "axis": "Y", "operation": "cut", "targets": ["Box"]}));
+    // As a name reads once its second face was split by a face that has since gone.
+    let piece = |e: ModelEdge| ModelEdge { name: format!("{}#[F9:side]#1", e.name), ..e };
+    let top = piece(f.edge([0.0, 0.0, 30.0], [80.0, 0.0, 30.0]));
+    let rim = piece(f.round([40.0, 0.0, 15.0], 6.0));
+    let length = f.add(f.front, DimensionKind::Length { edge: top, direction: LinearDirection::Aligned, reading: Reading::True }, None);
+    let across = f.add(f.front, radial(&rim, true), None);
+    let centre = ModelPoint { body: rim.body, origin_feature: rim.origin_feature, edges: vec![rim.name], centre: true, path: Vec::new() };
+    let up = DimensionKind::Linear { a: f.corner([0.0, 0.0, 0.0]), b: centre, direction: LinearDirection::Vertical, reading: Reading::Projected };
+    let up = f.add(f.front, up, None);
+    for (id, value) in [(length, 80.0), (across, 12.0), (up, 15.0)] {
+        let r = f.resolve(id);
+        assert_reads(&r, value, false);
+        assert!(!r.exact, "{r:?}");
+    }
 }
 
 /// What a dimension measures is gone when its edge is filleted away, and found again on undo; a
@@ -384,8 +417,8 @@ fn a_split_edge_is_ambiguous_for_its_length_and_its_ends_still_meet() {
 }
 
 /// A hole's centre is found through its rim, exactly: 40 along and 15 up from the box's bottom
-/// front left corner. A slot across the rim leaves it several arcs, so the centre is ambiguous and
-/// none is chosen; with the hole suppressed its centre is lost.
+/// front left corner. A slot across the rim leaves it several arcs of one circle, so the centre is
+/// still that circle's, not exactly; with the hole suppressed its centre is lost.
 #[test]
 fn a_holes_centre_is_found_through_its_rim() {
     let mut f = boxed();
@@ -404,10 +437,15 @@ fn a_holes_centre_is_found_through_its_rim() {
     assert_reads(&f.resolve(up), 15.0, false);
     run(&mut f.s, "solid.box", json!({"length": 2, "width": 5, "height": 30, "corner": [39, -1, 0], "operation": "cut", "targets": ["Box"]}));
     let r = f.resolve(across);
-    assert!(matches!(&r.status, Status::Ambiguous(c) if c.len() >= 2) && r.measured.is_none(), "{r:?}");
+    assert_reads(&r, 40.0, false);
+    assert!(!r.exact, "{r:?}");
     run(&mut f.s, "timeline.suppress", json!({"feature": hole, "suppressed": true}));
     let r = f.resolve(across);
     assert!(matches!(&r.status, Status::Lost(why) if why.contains("no longer exists")), "{r:?}");
+}
+
+fn radial(edge: &ModelEdge, diameter: bool) -> DimensionKind {
+    DimensionKind::Radial { edge: edge.clone(), diameter }
 }
 
 /// A boss of radius 5 along X on the box's right face reads Ø10 between its silhouettes in the front
