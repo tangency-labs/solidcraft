@@ -1474,25 +1474,44 @@ fn shell_non_convex() {
     assert!(rel(v, outer - cavity) < 1e-6, "{v} vs {}", outer - cavity);
 }
 
-/// A basin: a slab with a tapered pocket and a 4 mm front rim, shelled from below. A wall
-/// thicker than the rim (with the pocket's slope) would turn the top face inside out: refused,
-/// not a body with wrong mass properties.
+/// A basin: a 100 × 60 × 30 slab with a tapered pocket (60 × 46 at the top, 4 mm from the front,
+/// 40 × 20 at its floor 20 down) shelled from below, each wall moved in by t with sharp edges.
+/// The cavity is the slab shrunk by t (open at z = 0) less the pocket grown by t, each sloped side
+/// moved out along its normal; the volume, slab − pocket − cavity, is a cubic in z integrated by
+/// hand. From t ≈ 2.70 the front side's offset passes the front wall's below the 4 mm rim, and
+/// the rim stays solid: the cavity's front stops at y = t (from z = (28 − (1 + √1.64) t)/0.8 up).
 #[test]
-fn shell_thicker_than_a_rim_is_refused() {
+fn shell_of_a_basin_past_its_rim_keeps_the_rim_solid() {
     let slab = box_solid(Vec3::ZERO, Vec3::new(100.0, 60.0, 30.0)).unwrap();
     let rect = |x0: f64, y0: f64, x1: f64, y1: f64| Loop2::polygon(&[Vec2::new(x0, y0), Vec2::new(x1, y0), Vec2::new(x1, y1), Vec2::new(x0, y1)]);
     let at = |z: f64| Plane::new(Vec3::new(0.0, 0.0, z), Vec3::X, Vec3::Y).unwrap();
     let pocket = loft(&[(at(30.0), rect(20.0, 4.0, 80.0, 50.0)), (at(10.0), rect(30.0, 20.0, 70.0, 40.0))]).unwrap();
     let basin = boolean(&slab, &pocket, BoolOp::Cut).unwrap().unwrap();
     let open = [Vec3::new(50.0, 30.0, 0.0)];
-    let e = shell(&basin, &open, 6.0).unwrap_err().to_string();
-    assert!(e.contains("rim or ledge"), "{e}");
-    let (whole, thin) = (measure(&basin).unwrap(), measure(&shell(&basin, &open, 1.0).unwrap()).unwrap());
-    assert!(thin.volume > 0.0 && thin.volume < whole.volume, "{} vs {}", thin.volume, whole.volume);
-    let (lo, hi) = (thin.bbox.min, thin.bbox.max);
-    let c = thin.centroid;
-    assert!(c.x > lo.x && c.x < hi.x && c.y > lo.y && c.y < hi.y && c.z > lo.z && c.z < hi.z, "{c:?}");
-    assert!((c.x - 50.0).abs() < 1e-3, "{c:?}");
+    // The pocket grown by t at height z: x from 35 − z/2 − t√5/2 to 65 + z/2 + t√5/2, y from
+    // 28 − 0.8 z − t√1.64 (or y = t, where that is less) to 35 + z/2 + t√5/2, for
+    // z = 10 − t … 30 − t; its sides stay inside the shrunk slab in x and at the back for t ≤ 6.
+    let (r5, r164) = (5f64.sqrt(), 1.64f64.sqrt());
+    let integral = |c: [f64; 3], lo: f64, hi: f64| c[0] * (hi - lo) + c[1] * (hi * hi - lo * lo) / 2.0 + c[2] * (hi.powi(3) - lo.powi(3)) / 3.0;
+    // (w0 + z)(h0 + h1 z) as coefficients in z.
+    let product = |w0: f64, h0: f64, h1: f64| [w0 * h0, w0 * h1 + h0, h1];
+    let grown = |t: f64| {
+        let (lo, hi, w0) = (10.0 - t, 30.0 - t, 30.0 + r5 * t);
+        let full = product(w0, 7.0 + t * (r5 / 2.0 + r164), 1.3);
+        let z0 = ((28.0 - r164 * t - t) / 0.8).clamp(lo, hi);
+        integral(full, lo, z0) + integral(product(w0, 35.0 + (r5 / 2.0 - 1.0) * t, 0.5), z0, hi)
+    };
+    let volume = |t: f64| 100.0 * 60.0 * 30.0 - grown(0.0) - (100.0 - 2.0 * t) * (60.0 - 2.0 * t) * (30.0 - t) + grown(t);
+    let whole = measure(&basin).unwrap();
+    assert!(rel(whole.volume, 180_000.0 - grown(0.0)) < 1e-9, "{}", whole.volume);
+    for (t, want) in [(1.0, 17_105.624_041_5), (4.0, 63_560.249_228_4), (6.0, 90_113.920_210_1)] {
+        assert!(rel(volume(t), want) < 1e-12, "the closed form at {t}: {}", volume(t));
+        let m = measure(&shell(&basin, &open, t).unwrap()).unwrap();
+        assert!(rel(m.volume, want) < 1e-6, "t {t}: {} vs {want}", m.volume);
+        let (lo, hi, c) = (m.bbox.min, m.bbox.max, m.centroid);
+        assert!(c.x > lo.x && c.x < hi.x && c.y > lo.y && c.y < hi.y && c.z > lo.z && c.z < hi.z, "{c:?}");
+        assert!((c.x - 50.0).abs() < 1e-3, "{c:?}");
+    }
 }
 
 #[test]
