@@ -148,6 +148,55 @@ impl Tokens {
         if let Some(bevel) = self.borders.bevel {
             bevel.paint(ui.painter(), response.rect.shrink(1.0), self.control_radius, true, response.enabled());
         }
+        // egui draws a field's focus ring in the selected-text colour ([`Tokens::selected_fg`]),
+        // which may be made for the selected fill and vanish on the field.
+        if response.has_focus() && self.selected_fg() != self.form_primary {
+            ui.painter().rect_stroke(response.rect, self.control_radius, Stroke::new(1.0, self.form_primary), egui::StrokeKind::Inside);
+        }
+    }
+
+    /// `ink`, unless it is as good as gone on one of `fills`. Fills are opaque.
+    pub(crate) fn readable(&self, ink: Color32, fills: &[Color32]) -> Color32 {
+        self.ink_above(VISIBLE_CONTRAST, ink, fills)
+    }
+
+    /// `ink` at `floor` or better, else the first of the theme's inks that reads, else the one
+    /// that comes closest.
+    fn ink_above(&self, floor: f64, ink: Color32, fills: &[Color32]) -> Color32 {
+        let worst = |c: Color32| fills.iter().map(|fill| contrast_ratio(c, *fill)).fold(f64::INFINITY, f64::min);
+        if worst(ink) >= floor {
+            return ink;
+        }
+        let inks = [self.selected_ink, self.form_ink, self.on_accent];
+        inks.into_iter()
+            .find(|c| worst(*c) >= TEXT_CONTRAST)
+            .unwrap_or_else(|| inks.into_iter().fold(ink, |a, b| if worst(b) > worst(a) { b } else { a }))
+    }
+
+    /// Text and icons on `selected_bg`: the primary colour, unless the fill is as dark as the
+    /// primary (SolidCraft 95's navy), where it takes the theme's selected ink so that a selected
+    /// item is never a blank block.
+    pub(crate) fn selected_fg(&self) -> Color32 {
+        self.readable(self.form_primary, &[self.selected_bg])
+    }
+
+    /// The one ink for an icon on `selected_bg` when the fill would swallow its artwork, whose
+    /// strokes are as dark as the primary colour. `None` keeps the artwork's colours.
+    pub(crate) fn selected_icon_ink(&self) -> Option<Color32> {
+        (contrast_ratio(self.form_primary, self.selected_bg) < VISIBLE_CONTRAST).then(|| self.selected_fg())
+    }
+
+    /// Text drawn straight on the 3D view: a mid-tone background can leave the ink meant for it
+    /// unreadable.
+    pub(crate) fn on_view(&self, ink: Color32) -> Color32 {
+        self.ink_above(VIEW_CONTRAST, ink, &[self.viewport_top, self.viewport_bottom])
+    }
+
+    /// Sketch geometry being drawn. `sketch_accent` is chosen for the ribbon and panels; where it
+    /// does not show on the 3D view, the view's own colour for proposed sketch geometry does.
+    pub(crate) fn sketch_stroke(&self) -> Color32 {
+        let shows = |c: Color32| contrast_ratio(c, self.viewport_top).min(contrast_ratio(c, self.viewport_bottom)) >= VIEW_CONTRAST;
+        if shows(self.sketch_accent) { self.sketch_accent } else { self.preview_sketch }
     }
 
     pub fn button_bevel(&self, ui: &egui::Ui, response: &egui::Response, selected: bool) {
@@ -275,6 +324,15 @@ pub(crate) fn icon_accent_for_tab(tab: &str) -> Option<&'static str> {
         _ => None,
     }
 }
+
+/// WCAG minimum for small text.
+pub(crate) const TEXT_CONTRAST: f64 = 4.5;
+/// What the 3D view asks of text and sketch strokes drawn straight on it, with nothing behind
+/// them. Set under the themes whose gradient dips near 3:1, which are fine as they are.
+pub(crate) const VIEW_CONTRAST: f64 = 2.5;
+/// Below this an ink is as good as gone, and only then does a theme's own pairing give way: one
+/// above it, even under [`TEXT_CONTRAST`], is how that theme looks.
+pub(crate) const VISIBLE_CONTRAST: f64 = 2.0;
 
 /// WCAG contrast of two opaque sRGB colours.
 pub(crate) fn contrast_ratio(a: Color32, b: Color32) -> f64 {

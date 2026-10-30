@@ -241,6 +241,9 @@ impl Table<'_> {
         let ppp = ui.ctx().pixels_per_point().max(0.5);
         let left = (rect.left() * ppp).round() / ppp + t.space_8;
         ui.push_id((&self.id, key), |ui| {
+            if selected {
+                ui.visuals_mut().override_text_color = Some(t.readable(t.text, &[t.selected_bg]));
+            }
             add(&mut TableRow {
                 ui,
                 widths: &self.widths,
@@ -352,7 +355,7 @@ pub(crate) fn plus_header<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> Opt
     let response = super::actions::icon_button_colored(ui, rect, "plus", "Add Column", Some(t.form_dim));
     if response.hovered() {
         ui.painter().rect_filled(rect, t.control_radius, t.selected_bg);
-        crate::icons::paint_ink(ui.painter(), rect.shrink(t.form_icon_inset), "plus", t.form_primary);
+        crate::icons::paint_ink(ui.painter(), rect.shrink(t.form_icon_inset), "plus", t.selected_fg());
         for x in [rect.left() - t.form_gap_y, rect.right() + t.form_gap_y] {
             ui.painter().vline(x, rect.y_range(), egui::Stroke::new(t.space_2, t.form_primary));
         }

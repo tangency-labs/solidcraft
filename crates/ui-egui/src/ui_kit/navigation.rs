@@ -27,6 +27,9 @@ pub(crate) const NAV_POPUP_GAP: f32 = 6.0;
 pub(crate) const NAV_POPUP_PADDING: i8 = 5;
 pub(crate) const NAV_MENU_ROW: f32 = 30.0;
 pub(crate) const NAV_MENU_RADIUS: u8 = 6;
+/// Clear space above and below a menu row's fill, inside the row, in a bevelled theme, whose
+/// solid selected fills would otherwise merge into one block.
+pub(crate) const NAV_MENU_ROW_GAP: f32 = 1.0;
 pub(crate) const NAV_MENU_HEADING: f32 = 22.0;
 pub(crate) const NAV_HEADING_TEXT: f32 = 11.0;
 pub(crate) const NAV_HEADING_TRACKING: f32 = 0.07;

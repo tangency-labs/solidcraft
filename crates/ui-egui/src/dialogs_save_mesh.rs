@@ -276,6 +276,12 @@ fn decode(bytes: &[u8]) -> Option<egui::ColorImage> {
 }
 
 /// `text` on one line, ending in … when it is wider than `width`.
+/// A slicer row's text, on the selected fill or on the menu.
+fn row_ink(on_selected: bool) -> Color32 {
+    let t = Tokens::get();
+    if on_selected { t.readable(t.text, &[t.selected_bg]) } else { t.text }
+}
+
 fn fitted(ui: &egui::Ui, text: &str, width: f32, color: Color32) -> std::sync::Arc<egui::Galley> {
     let mut job = egui::text::LayoutJob::simple_singleline(text.to_string(), egui::FontId::proportional(Tokens::get().font_button), color);
     job.wrap = egui::text::TextWrapping::truncate_at_width(width.max(0.0));
@@ -389,9 +395,10 @@ fn slicer_combo(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut SaveMesh) {
                 ui.painter().rect_filled(rect, Tokens::get().radius_sm / 2, fill);
             }
             paint_icon(ui, egui::Rect::from_min_size(rect.left_center() + vec2(3.0, -ICON / 2.0), vec2(ICON, ICON)), tex, &e.slicer.name);
-            let text = fitted(ui, &e.slicer.name, rect.width() - (ICON + 9.0) - 6.0, Tokens::get().text);
+            let ink = row_ink(selected && !resp.hovered());
+            let text = fitted(ui, &e.slicer.name, rect.width() - (ICON + 9.0) - 6.0, ink);
             let (elided, at) = (text.elided, rect.left_center() + vec2(ICON + 9.0, -text.size().y / 2.0));
-            ui.painter().galley(at, text, Tokens::get().text);
+            ui.painter().galley(at, text, ink);
             crate::scenario::publish_handle(&format!("dialog:Slicer:{}", e.slicer.name), rect.center());
             if e.user {
                 let hint = crate::i18n::format("ui.slicer_delete_tip", &[("program", e.slicer.command.first().map_or("", String::as_str))]);
@@ -413,8 +420,9 @@ fn slicer_combo(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut SaveMesh) {
                 let fill = if resp.hovered() { Tokens::get().hover } else { Tokens::get().selected_bg };
                 ui.painter().rect_filled(rect, 2.0, fill);
             }
-            let text = fitted(ui, easyprint_label, rect.width() - (ICON + 9.0) - 6.0, Tokens::get().text);
-            ui.painter().galley(rect.left_center() + vec2(ICON + 9.0, -text.size().y / 2.0), text, Tokens::get().text);
+            let ink = row_ink(k.slicer == EASYPRINT && !resp.hovered());
+            let text = fitted(ui, easyprint_label, rect.width() - (ICON + 9.0) - 6.0, ink);
+            ui.painter().galley(rect.left_center() + vec2(ICON + 9.0, -text.size().y / 2.0), text, ink);
             crate::scenario::publish_handle("dialog:Slicer:EasyPrint", rect.center());
             if resp.clicked() {
                 chosen = Some(EASYPRINT.to_string());

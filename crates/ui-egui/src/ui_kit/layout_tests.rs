@@ -5,6 +5,34 @@ use crate::{scenario, theme::Tokens};
 use egui::Ui;
 
 #[test]
+fn text_selected_in_a_form_reads_and_its_field_keeps_a_focus_ring() {
+    for theme in crate::theme_files::builtin() {
+        let t = crate::theme_files::resolve(theme);
+        let _theme = crate::theme::scoped_tokens(t);
+        let ctx = crate::fonts::test_context();
+        let mut text = String::from("12.5");
+        let id = egui::Id::new("focused");
+        ctx.memory_mut(|m| m.request_focus(id));
+        for _ in 0..2 {
+            let output = crate::test_support::frame(&ctx, egui::RawInput::default(), |ui| {
+                scope(ui, |ui| {
+                    let selection = ui.visuals().selection;
+                    let ratio = crate::theme::contrast_ratio(selection.stroke.color, selection.bg_fill);
+                    assert!(ratio >= crate::theme::VISIBLE_CONTRAST, "{}: {ratio:.2}:1", theme.id);
+                    let response = ui.add(egui::TextEdit::singleline(&mut text).id(id));
+                    t.input_bevel(ui, &response);
+                });
+            });
+            let mut ring = false;
+            for shape in &output.shapes {
+                crate::test_support::each_shape(&shape.shape, &mut |s| ring |= matches!(s, egui::Shape::Rect(r) if r.stroke.color == t.form_primary));
+            }
+            assert!(ring, "{}: no focus ring in the primary colour", theme.id);
+        }
+    }
+}
+
+#[test]
 fn status_lines_wrap_at_form_width_and_leave_room_for_the_next_row() {
     let previous_dark = crate::theme::is_dark();
     for dark in [false, true] {

@@ -214,7 +214,8 @@ pub(crate) fn paint_layout(ui: &mut egui::Ui, state: super::preferences::LayoutP
         p.rect(rect, if state.compact { 0 } else { t.radius_sm }, fill, t.control_border_stroke(t.control_border), egui::StrokeKind::Inside);
         if !label.is_empty() {
             let centre = if h > 20.0 { c.at(x + w * 0.5, y + 7.0) } else { rect.center() };
-            p.text(centre, egui::Align2::CENTER_CENTER, crate::i18n::tr_label(label), egui::FontId::proportional(t.font_small), t.form_dim);
+            let ink = if fill == t.selected_bg { t.readable(t.form_dim, &[fill]) } else { t.form_dim };
+            p.text(centre, egui::Align2::CENTER_CENTER, crate::i18n::tr_label(label), egui::FontId::proportional(t.font_small), ink);
         }
         rect
     };
@@ -253,7 +254,7 @@ pub(crate) fn paint_layout(ui: &mut egui::Ui, state: super::preferences::LayoutP
         // A single vertical mark reads as the narrow icon-only history rail.
         p.line_segment(
             [history.center_top() + vec2(0.0, t.space_8), history.center_bottom() - vec2(0.0, t.space_8)],
-            Stroke::new(2.0, t.form_primary),
+            Stroke::new(2.0, t.selected_fg()),
         );
     }
     crate::scenario::publish_rect("prefs:layout_preview", outer);

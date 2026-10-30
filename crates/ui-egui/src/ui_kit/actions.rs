@@ -182,8 +182,14 @@ pub(super) fn footer_with_left(
     ui.scope_builder(egui::UiBuilder::new().max_rect(left_rect).layout(egui::Layout::left_to_right(egui::Align::Center)), |ui| {
         if let Some(label) = apply_label.filter(|_| confirm) {
             let marked = selected == Some(Action::Apply);
-            let mut button =
-                egui::Button::new(crate::i18n::tr_label(label)).frame(secondary_left).selected(marked).min_size(vec2(0.0, t.form_button_height));
+            let mut button = egui::Button::new(if secondary_left && marked {
+                RichText::new(crate::i18n::tr_label(label)).color(t.readable(t.form_ink, &[t.selected_bg]))
+            } else {
+                RichText::new(crate::i18n::tr_label(label))
+            })
+            .frame(secondary_left)
+            .selected(marked)
+            .min_size(vec2(0.0, t.form_button_height));
             if secondary_left {
                 ui.spacing_mut().button_padding = vec2(t.space_12, 0.0);
                 button = button
@@ -265,12 +271,13 @@ fn action_button(ui: &mut Ui, label: &str, kind: Action, look: &ActionLook, padd
     let primary = look.primary(kind);
     let live = look.live(kind);
     ui.spacing_mut().button_padding = vec2(padding, 0.0);
+    let ink = if primary || !live { t.form_dim } else { t.form_ink };
     let text = RichText::new(crate::i18n::tr_label(label)).size(t.font_label).color(if primary && ok_enabled {
         look.primary_ink
-    } else if primary || !live {
-        t.form_dim
+    } else if marked {
+        t.readable(ink, &[t.selected_bg])
     } else {
-        t.form_ink
+        ink
     });
     let response = ui.add_enabled(
         live,
@@ -403,12 +410,14 @@ pub(crate) fn button_pair(ui: &mut egui::Ui, key: &str, states: [bool; 2], butto
                     egui::StrokeKind::Inside,
                 );
                 let label = crate::i18n::tr_label(button.label);
-                let galley = ui.painter().layout_no_wrap(label.to_string(), egui::FontId::proportional(t.font_label), t.form_ink);
+                let ink = if on { t.readable(t.form_ink, &[t.selected_bg]) } else { t.form_ink };
+                let galley = ui.painter().layout_no_wrap(label.to_string(), egui::FontId::proportional(t.font_label), ink);
                 let icon_width = if button.icon.is_some() { t.sketch_footer_icon_size + t.space_4 } else { 0.0 };
                 let left = rect.center().x - (galley.size().x + icon_width) / 2.0;
                 let painter = ui.painter().with_clip_rect(ui.clip_rect().intersect(rect));
                 if let Some(icon) = button.icon {
-                    crate::icons::paint_icon(
+                    let paint = if on { crate::icons::paint_on_selected } else { crate::icons::paint_icon };
+                    paint(
                         &painter,
                         egui::Rect::from_center_size(
                             egui::pos2(left + t.sketch_footer_icon_size / 2.0, rect.center().y),
@@ -418,7 +427,7 @@ pub(crate) fn button_pair(ui: &mut egui::Ui, key: &str, states: [bool; 2], butto
                         f32::from(t.icon.a()) / 255.0,
                     );
                 }
-                painter.galley(egui::pos2(left + icon_width, rect.center().y - galley.size().y / 2.0), galley, t.form_ink);
+                painter.galley(egui::pos2(left + icon_width, rect.center().y - galley.size().y / 2.0), galley, ink);
                 response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, ui.is_enabled(), on, label));
                 t.button_bevel(ui, &response, on);
                 pointer_on_hover(ui, &response);
@@ -602,7 +611,7 @@ pub(crate) fn compact_button(ui: &mut Ui, glyph: &str, tooltip: &str, enabled: b
             let ink = if !enabled {
                 t.form_dim.gamma_multiply(0.35)
             } else if selected {
-                t.form_primary
+                t.selected_fg()
             } else {
                 t.form_dim
             };

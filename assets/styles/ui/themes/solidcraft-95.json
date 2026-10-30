@@ -29,10 +29,10 @@
     "body_edge": "#000000",
     "body_selected": "#8080ff",
     "border": "#808080",
-    "box_crossing": "#008000",
+    "box_crossing": "#00ff00",
     "box_window": "#000080",
     "chip": "#000080",
-    "construction_geom": "#808000",
+    "construction_geom": "#ffff00",
     "construction_plane": "#ffff0046",
     "continuity": [
       "#008000",
@@ -54,7 +54,7 @@
     "dialog_rule": "#808080",
     "dimension": "#ffffff",
     "dimension_driven": "#ffff00",
-    "error": "#ff0000",
+    "error": "#800000",
     "field": "#ffffff",
     "form_accent": "#800080",
     "form_dim": "#404040",
@@ -141,7 +141,7 @@
     "preview_add": "#000080",
     "preview_cut": "#ff00006e",
     "preview_new": "#ffff00",
-    "preview_sketch": "#008000",
+    "preview_sketch": "#00ff00",
     "profile_fill": "#ffff0033",
     "render_accent": "#590905",
     "render_fill": "#800000",
@@ -162,16 +162,16 @@
     "sheet_soft": "#b1bbbb",
     "sketch": "#000080",
     "sketch_accent": "#008000",
-    "sketch_centerline": "#808000",
-    "sketch_construction": "#808000",
+    "sketch_centerline": "#00ffff",
+    "sketch_construction": "#00ffff",
     "sketch_fixed": "#000000",
-    "sketch_halo": "#ffffff",
+    "sketch_halo": "#000000",
     "sketch_ink": "#005400",
-    "sketch_locked": "#008000",
-    "sketch_lost": "#800080",
+    "sketch_locked": "#00ff00",
+    "sketch_lost": "#ffc0ff",
     "sketch_point": "#000000",
     "sketch_point_free": "#000080",
-    "sketch_projected": "#800080",
+    "sketch_projected": "#ffc0ff",
     "sketch_soft": "#b1bbb1",
     "subheading_bg": "#c0c0c0",
     "surface_accent": "#804000",
@@ -180,7 +180,7 @@
     "surface_soft": "#bbb6b1",
     "tab_on_fill_dark": "#000000",
     "text": "#000000",
-    "text_dim": "#808080",
+    "text_dim": "#4d4d4d",
     "timeline": "#c0c0c0",
     "timeline_item": "#c0c0c0",
     "timeline_item_error": "#ffffc0",
@@ -215,12 +215,12 @@
     "surface": [
       "#e0c0a0",
       "#b07040",
-      "#804000"
+      "#713800"
     ],
     "mesh": [
       "#ffffc0",
       "#c0c000",
-      "#808000"
+      "#4c4c00"
     ],
     "form": [
       "#ffc0ff",
@@ -230,7 +230,7 @@
     "sketch": [
       "#c0ffc0",
       "#00c000",
-      "#008000"
+      "#005400"
     ],
     "constraint": [
       "#ffc0c0",
@@ -240,7 +240,7 @@
     "construction": [
       "#ffffc0",
       "#c0c000",
-      "#808000"
+      "#4c4c00"
     ]
   },
   "borders": {

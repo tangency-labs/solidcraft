@@ -1452,7 +1452,7 @@ pub fn preview(app: &SolveApp, t: &Tool, painter: &egui::Painter, proj: &Proj) {
         // Draw the preview extension line using preview_new color (same as fillet/chamfer preview)
         crate::tools::paint_sketch_path(&world, 0, painter, proj, Stroke::new(2.0, tk.preview_new.gamma_multiply(0.9)));
     }
-    let stroke = Stroke::new(1.5, tk.sketch_accent);
+    let stroke = Stroke::new(1.5, tk.sketch_stroke());
     // A Trim drag: the pieces it will remove, then the path drawn so far.
     if t.cmd == "sketch.trim" && !t.pts.is_empty() {
         TRIM_REMOVED.with(|r| {
@@ -1470,7 +1470,7 @@ pub fn preview(app: &SolveApp, t: &Tool, painter: &egui::Painter, proj: &Proj) {
     {
         painter.circle_stroke(sp, if snap.is_some() { 6.0 } else { 3.0 }, stroke);
     }
-    let faint = Stroke::new(1.0, tk.sketch_accent.gamma_multiply(0.6));
+    let faint = Stroke::new(1.0, tk.sketch_stroke().gamma_multiply(0.6));
     let mode = crate::sketch_palette::mode(app);
     for w in t.pts.windows(2) {
         crate::tools::paint_sketch_path(&[ss.plane.to_world(w[0].0), ss.plane.to_world(w[1].0)], mode, painter, proj, faint);

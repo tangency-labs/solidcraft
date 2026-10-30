@@ -39,6 +39,29 @@ Shared utility tabs (Assemble, Insert, Inspect, Manage, View) retain the Model
 family. The seven workspace groups are Model, Surface, Mesh, Form, Sheet Metal,
 Render and Sketch. Their labels remain the primary identifier; colour supplements them.
 
+## Readable pairs on the shared fills
+
+`form_primary` is meant for text on a pale `selected_bg`, and a theme may make the two
+the same (SolidCraft 95's navy and CGA do). `Tokens::selected_fg` keeps the primary unless it is
+as good as gone, under 2:1, and then takes `selected_ink`, for selected tabs, menu rows and text
+selected in a form. `Tokens::readable` does the same for any ink on a known fill, and
+`Tokens::on_view` for text straight on the 3D view, at 2.5:1. A pair above those floors is how a
+theme looks and stays as it is, even under 4.5:1, so Dark, Light and most themes are unchanged.
+
+Icons have their own palette, so nothing above reaches them. Under the same 2:1, a selected icon,
+including a pressed ribbon button's, takes one ink, the one its label uses, through
+`Tokens::selected_icon_ink` and `icons::paint_on_selected`; other themes keep the artwork's
+colours. In SolidCraft 95 the strong stroke of every ramp reaches 4.5:1 on a button: Surface, Mesh,
+Sketch and construction take the theme's darker workspace inks.
+
+SolidCraft 95's view is a mid-tone teal, so the classic mid-tone green, olive and purple vanish
+on it. What is drawn on the view takes the light half of the 16-colour palette instead, or the
+pale `#ffc0ff` of its Form ramp for projected and lost links, and reaches 3:1. `Tokens::sketch_stroke`
+gives geometry being drawn `preview_sketch` where `sketch_accent`, kept for the ribbon and panels,
+does not show on the view. The bright colours stand on silver bodies by hue rather than brightness;
+the Graphics preference Halo under sketch curves draws a black rim beneath them. Axis colours stay
+red, green and blue by convention: red and blue on teal are 1.2:1 and 1.8:1, separated by hue.
+
 ## Theme file contract
 
 `solidcraft-theme/1` accepts an optional `icon_palette` object. Single opaque hex

@@ -574,6 +574,47 @@ fn a_long_menu_row_label_ends_in_an_ellipsis_inside_its_row() {
     }
 }
 
+/// In a bevelled theme two selected rows one under the other (the Display menu's Grid and Ground
+/// shadow) stay two rows at their full height, each with a check that shows on the navy. Other
+/// themes keep their fills edge to edge, and their primary-coloured check.
+#[test]
+fn neighbouring_selected_menu_rows_stay_apart_in_a_bevelled_theme_and_show_their_check() {
+    use crate::ui_kit::*;
+    let ctx = crate::fonts::test_context();
+    let bevelled = crate::theme_files::resolve(crate::theme_files::builtin().iter().find(|t| t.id == "solidcraft-95").unwrap());
+    for (t, gap, check) in
+        [(bevelled, NAV_MENU_ROW_GAP, bevelled.selected_ink), (crate::theme::Tokens::dark(), 0.0, crate::theme::Tokens::dark().form_primary)]
+    {
+        let _theme = crate::theme::scoped_tokens(t);
+        let mut rows = [Rect::NOTHING; 2];
+        let output = crate::test_support::frame(&ctx, egui::RawInput::default(), |ui| {
+            navigation_menu(ui, NAV_POPUP_WIDTH, |ui| {
+                for (row, id) in rows.iter_mut().zip(["grid", "ground_shadow"]) {
+                    let mut item = NavigationMenuRow::new(id, id, "select");
+                    item.selected = true;
+                    *row = item.show(ui).rect;
+                }
+            });
+        });
+        let (mut fills, mut strokes) = (Vec::new(), Vec::new());
+        for shape in &output.shapes {
+            crate::test_support::each_shape(&shape.shape, &mut |s| match s {
+                egui::Shape::Rect(r) if r.fill == t.selected_bg && r.rect.height() == NAV_MENU_ROW - 2.0 * gap => fills.push(r.rect),
+                egui::Shape::Path(p) => {
+                    if let egui::epaint::ColorMode::Solid(colour) = p.stroke.color {
+                        strokes.push(colour);
+                    }
+                }
+                _ => {}
+            });
+        }
+        assert_eq!(rows.map(|row| row.height()), [NAV_MENU_ROW; 2]);
+        let [first, second] = fills[..] else { panic!("two selected fills, got {fills:?}") };
+        assert_eq!(second.top() - first.bottom(), 2.0 * gap);
+        assert_eq!(strokes.iter().filter(|c| **c == check).count(), 2, "{strokes:?}");
+    }
+}
+
 #[test]
 fn navigation_board_position_aliases_migrate_and_editor_alignment_follows_position() {
     use crate::navigation_bar_view::editor_layout;

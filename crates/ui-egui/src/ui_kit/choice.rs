@@ -134,20 +134,15 @@ pub(crate) fn segmented(ui: &mut Ui, selected: &mut usize, options: &[&str], con
             ne: if index + 1 == options.len() { t.control_radius } else { 0 },
             se: if index + 1 == options.len() { t.control_radius } else { 0 },
         };
+        let on_fill = if primary {
+            t.form_primary
+        } else if workspace_accent {
+            accent.soft
+        } else {
+            t.selected_bg
+        };
         if on || response.hovered() {
-            ui.painter().rect_filled(
-                segment,
-                rounding,
-                if on && primary {
-                    t.form_primary
-                } else if on && workspace_accent {
-                    accent.soft
-                } else if on {
-                    t.selected_bg
-                } else {
-                    t.hover
-                },
-            );
+            ui.painter().rect_filled(segment, rounding, if on { on_fill } else { t.hover });
         }
         if index > 0 {
             ui.painter().vline(segment.left(), segment.y_range(), t.control_border_stroke(t.control_border));
@@ -173,7 +168,7 @@ pub(crate) fn segmented(ui: &mut Ui, selected: &mut usize, options: &[&str], con
             text,
             font,
             if !segment_enabled {
-                t.form_dim
+                if on { t.readable(t.form_dim, &[on_fill]) } else { t.form_dim }
             } else if on && primary {
                 t.on_accent
             } else if on && workspace_accent {
@@ -263,7 +258,8 @@ pub(crate) fn segmented_icons(ui: &mut Ui, selected: &mut usize, options: &[Icon
             let icon_rect = egui::Rect::from_center_size(segment.center(), vec2(t.space_14, t.space_14));
             crate::icons::paint_ink(ui.painter(), icon_rect, option.icon, if on { accent.ink } else { t.form_dim });
         } else {
-            crate::icons::paint_icon(ui.painter(), icon_rect, option.icon, f32::from(t.icon.a()) / 255.0);
+            let paint = if on { crate::icons::paint_on_selected } else { crate::icons::paint_icon };
+            paint(ui.painter(), icon_rect, option.icon, f32::from(t.icon.a()) / 255.0);
         }
         t.button_bevel_with_radius(ui, &response, on, rounding);
         response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, ui.is_enabled(), on, option.key));
@@ -396,7 +392,9 @@ pub(crate) fn toggle_icon(ui: &mut Ui, row: &str, label: &str, selected: &mut bo
     let t = Tokens::get();
     let response =
         ui.add(egui::Button::new("").selected(*selected).min_size(vec2(t.space_24 + t.space_4, t.control_height)).sense(egui::Sense::CLICK));
-    crate::icons::paint_icon(ui.painter(), response.rect.shrink(t.space_3), icon, f32::from(t.icon.a()) / 255.0);
+    // Outside a form the button takes the soft selection, which suits the artwork.
+    let paint = if *selected && ui.visuals().selection.bg_fill == t.selected_bg { crate::icons::paint_on_selected } else { crate::icons::paint_icon };
+    paint(ui.painter(), response.rect.shrink(t.space_3), icon, f32::from(t.icon.a()) / 255.0);
     response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, true, *selected, crate::i18n::tr_label(label)));
     t.button_bevel(ui, &response, *selected);
     crate::scenario::publish_handle(&format!("dialog:{row}:{label}"), response.rect.center());
@@ -662,7 +660,7 @@ pub(crate) fn popup_list(
                             inner.min,
                             egui::pos2((inner.right() - kind_width - t.space_8).max(inner.left()), inner.bottom()),
                         );
-                        super::text::paint_text(ui, text_rect, option.text, mono.clone(), if picked { t.form_primary } else { option.color }, false);
+                        super::text::paint_text(ui, text_rect, option.text, mono.clone(), if picked { t.selected_fg() } else { option.color }, false);
                         ui.painter().text(inner.right_center(), egui::Align2::RIGHT_CENTER, kind, kind_font.clone(), t.form_dim);
                         response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::SelectableLabel, ui.is_enabled(), picked, option.text));
                         // Tip the full name first: long identifiers still clip inside a capped popup.

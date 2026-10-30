@@ -145,13 +145,13 @@ pub fn preview(app: &SolveApp, t: &Tool, painter: &egui::Painter, proj: &Proj) {
         let points = [ss.plane.to_world(origin - line.direction * extent), ss.plane.to_world(origin + line.direction * extent)];
         let selected = chosen == Some(i);
         let stroke =
-            Stroke::new(if selected { 2.0 } else { 1.0 }, if selected { tokens.preview_new } else { tokens.sketch_accent.gamma_multiply(0.35) });
+            Stroke::new(if selected { 2.0 } else { 1.0 }, if selected { tokens.preview_new } else { tokens.sketch_stroke().gamma_multiply(0.35) });
         crate::tools::paint_sketch_path(&points, 3, painter, proj, stroke);
     }
     if let Some(first) = t.pts.first()
         && let Some(p) = proj.to_screen(ss.plane.to_world(first.0))
     {
-        painter.circle_stroke(p, 4.0, Stroke::new(1.5, tokens.sketch_accent));
+        painter.circle_stroke(p, 4.0, Stroke::new(1.5, tokens.sketch_stroke()));
     }
 }
 

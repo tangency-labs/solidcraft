@@ -1019,6 +1019,8 @@ struct PersistentRibbonPaint {
     rect: Rect,
     background: egui::layers::ShapeIdx,
     label_slot: egui::layers::ShapeIdx,
+    icon: &'static str,
+    icon_rect: Rect,
     neutral: egui::Shape,
     label: Option<String>,
     enabled: bool,
@@ -1062,6 +1064,10 @@ fn paint_persistent_ribbon(app: &SolveApp, ui: &egui::Ui, paints: Vec<Persistent
             neutral
         };
         ui.painter().set(paint.background, background);
+        // The artwork went down before this pass knew the button is pressed; this covers it.
+        if selected && let Some(ink) = t.selected_icon_ink() {
+            icons::paint_ink(&ui.painter_at(paint.rect), paint.icon_rect, paint.icon, ink);
+        }
         if paint.response.has_focus() {
             crate::scenario::publish_target(&format!("ribbon:focus:{}", paint.command.id), paint.rect);
         }
@@ -1707,6 +1713,8 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
                         rect: whole,
                         background: background_slot,
                         label_slot: painter.add(egui::Shape::Noop),
+                        icon,
+                        icon_rect,
                         neutral,
                         label: labels.then_some(label),
                         enabled: ui.is_enabled() && info.enabled,

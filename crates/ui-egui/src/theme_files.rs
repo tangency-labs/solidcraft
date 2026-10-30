@@ -981,6 +981,121 @@ mod tests {
         }
     }
 
+    /// An ink gives way only where it is as good as gone. The themes people already use, the
+    /// default first, keep every colour they had: a pair that is merely low stays as it is.
+    #[test]
+    fn only_inks_that_are_gone_change_outside_solidcraft_95() {
+        for (id, t) in [("dark", Tokens::dark()), ("light", Tokens::light())] {
+            assert_eq!(t.selected_fg(), t.form_primary, "{id}");
+            assert_eq!(t.selected_icon_ink(), None, "{id} keeps its icon colours");
+            assert_eq!(t.readable(t.form_dim, &[t.selected_bg]), t.form_dim, "{id}");
+            assert_eq!(t.readable(t.text, &[t.selected_bg]), t.text, "{id}");
+            assert_eq!(t.readable(t.selected_ink, &[t.accent_soft]), t.selected_ink, "{id}");
+        }
+        for mode in crate::theme::ColorVision::ALL {
+            for t in [Tokens::dark().with_vision(true, mode), Tokens::light().with_vision(false, mode)] {
+                assert_eq!(t.sketch_stroke(), t.sketch_accent, "{mode:?}");
+                for ink in [t.sketch_accent, t.error, t.text_dim] {
+                    assert_eq!(t.on_view(ink), ink, "{mode:?}");
+                }
+            }
+        }
+        let mut selected_changes = Vec::new();
+        let themes = [("dark".to_string(), Tokens::dark()), ("light".to_string(), Tokens::light())];
+        for (id, t) in themes.into_iter().chain(builtin().iter().map(|theme| (theme.id.clone(), resolve(theme)))) {
+            if t.selected_fg() != t.form_primary {
+                selected_changes.push(id.clone());
+            }
+            if id == "solidcraft-95" {
+                continue;
+            }
+            assert_eq!(t.sketch_stroke(), t.sketch_accent, "{id}");
+            for ink in [t.sketch_accent, t.error, t.text_dim] {
+                assert_eq!(t.on_view(ink), ink, "{id}");
+            }
+        }
+        selected_changes.sort();
+        assert_eq!(selected_changes, ["cga", "solidcraft-95"]);
+    }
+
+    /// What is left after that rule shows in every theme, and in SolidCraft 95, where navy on navy
+    /// was a blank tab, it reads as text.
+    #[test]
+    fn selected_and_view_text_show_in_every_theme() {
+        use crate::theme::{TEXT_CONTRAST, VISIBLE_CONTRAST, contrast_ratio};
+        for theme in builtin() {
+            let t = resolve(theme);
+            let floor = if theme.id == "solidcraft-95" { TEXT_CONTRAST } else { VISIBLE_CONTRAST };
+            for (what, ink, fill) in [
+                ("selected text", t.selected_fg(), t.selected_bg),
+                ("disabled selected text", t.readable(t.form_dim, &[t.selected_bg]), t.selected_bg),
+                ("text in a selected row", t.readable(t.text, &[t.selected_bg]), t.selected_bg),
+                ("ink on the soft accent", t.readable(t.selected_ink, &[t.accent_soft]), t.accent_soft),
+                ("sketch status on the view", t.on_view(t.sketch_accent), t.viewport_top),
+                ("error on the view", t.on_view(t.error), t.viewport_top),
+                ("dim text on the view", t.on_view(t.text_dim), t.viewport_top),
+            ] {
+                let ratio = contrast_ratio(ink, fill);
+                assert!(ratio >= floor, "{}: {what} is {ratio:.2}:1", theme.id);
+            }
+        }
+    }
+
+    /// A selected icon keeps its colours unless the selected fill would swallow them.
+    #[test]
+    fn selected_icons_show_on_the_selected_fill_in_every_theme() {
+        use crate::theme::{TEXT_CONTRAST, VISIBLE_CONTRAST, contrast_ratio};
+        for theme in builtin() {
+            let t = resolve(theme);
+            match t.selected_icon_ink() {
+                Some(ink) => assert!(contrast_ratio(ink, t.selected_bg) >= TEXT_CONTRAST, "{}", theme.id),
+                None => assert!(contrast_ratio(t.form_primary, t.selected_bg) >= VISIBLE_CONTRAST, "{}", theme.id),
+            }
+        }
+        let t = resolve(builtin().iter().find(|t| t.id == "solidcraft-95").unwrap());
+        assert_eq!(t.selected_icon_ink(), Some(t.selected_ink));
+    }
+
+    /// SolidCraft 95 pairs a mid-tone teal view with mid-tone colours from the 16-colour palette:
+    /// what is drawn on the view is chosen from the light half of it, or the darkest colours.
+    #[test]
+    fn solidcraft_95_reads_on_its_silver_panels_and_teal_view() {
+        use crate::theme::{TEXT_CONTRAST, contrast_ratio};
+        const GRAPHIC_CONTRAST: f64 = 3.0;
+        let file = builtin().iter().find(|t| t.id == "solidcraft-95").unwrap();
+        let t = resolve(file);
+        // Icon strokes are thin, and dashed ones thinner: they read as text does on a button.
+        for ramp in ["solid", "surface", "mesh", "form", "sketch", "constraint", "construction"] {
+            let colours = colors_of(&file.icon_palette[ramp], 3).unwrap();
+            assert!(contrast_ratio(colours[2], t.control_fill) >= TEXT_CONTRAST, "{ramp} stroke on a button");
+        }
+        for (name, ink) in [("text_dim", t.text_dim), ("form_dim", t.form_dim), ("error", t.error), ("form_error", t.form_error)] {
+            assert!(contrast_ratio(ink, t.panel) >= TEXT_CONTRAST, "{name} on a panel");
+        }
+        for (name, ink) in [
+            ("sketch", t.sketch),
+            ("sketch_fixed", t.sketch_fixed),
+            ("sketch_locked", t.sketch_locked),
+            ("sketch_construction", t.sketch_construction),
+            ("sketch_centerline", t.sketch_centerline),
+            ("sketch_projected", t.sketch_projected),
+            ("sketch_lost", t.sketch_lost),
+            ("sketch_point", t.sketch_point),
+            ("sketch_point_free", t.sketch_point_free),
+            ("sketch_stroke", t.sketch_stroke()),
+            ("preview_sketch", t.preview_sketch),
+            ("rubber_band", t.rubber_band),
+            ("construction_geom", t.construction_geom),
+            ("box_window", t.box_window),
+            ("box_crossing", t.box_crossing),
+            ("manipulator", t.manipulator),
+            ("dimension", t.dimension),
+            ("dimension_driven", t.dimension_driven),
+        ] {
+            assert!(contrast_ratio(ink, t.viewport_top) >= GRAPHIC_CONTRAST, "{name} on the view");
+        }
+    }
+
     #[test]
     fn one_bit_themes_are_complete_opaque_black_and_white() {
         for (id, name, base) in [("1-bit", "1-bit", Base::Light), ("1-bit-dark", "1-bit Dark", Base::Dark)] {

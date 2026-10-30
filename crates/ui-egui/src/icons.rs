@@ -43,6 +43,15 @@ pub fn paint_icon(p: &Painter, r: Rect, name: &str, opacity: f32) {
     paint_on(p, r, name, None, opacity);
 }
 
+/// Draw the icon `name` on the selected fill: as [`paint_icon`], or in one ink where the theme's
+/// fill is too dark for the artwork.
+pub(crate) fn paint_on_selected(p: &Painter, r: Rect, name: &str, opacity: f32) {
+    match crate::theme::Tokens::get().selected_icon_ink() {
+        Some(ink) => paint_ink(p, r, name, ink.gamma_multiply(opacity)),
+        None => paint_icon(p, r, name, opacity),
+    }
+}
+
 /// Draw the icon `name` for a surface that is always dark (the application bar), whatever the
 /// theme: `dark: Some(true)`. `None` follows the theme.
 pub fn paint_on(p: &Painter, r: Rect, name: &str, dark: Option<bool>, opacity: f32) {

@@ -27,7 +27,7 @@ pub(crate) fn scope<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> R {
         ui.style_mut().text_styles.insert(egui::TextStyle::Monospace, egui::FontId::monospace(t.font_body));
         let visuals = ui.visuals_mut();
         visuals.weak_text_color = Some(t.form_dim);
-        visuals.selection.stroke = egui::Stroke::new(1.0, t.form_primary);
+        visuals.selection.stroke = egui::Stroke::new(1.0, t.selected_fg());
         visuals.selection.bg_fill = t.selected_bg;
         visuals.widgets.noninteractive.bg_stroke = t.tertiary_border(t.dialog_rule);
         for state in [&mut visuals.widgets.inactive, &mut visuals.widgets.hovered, &mut visuals.widgets.active, &mut visuals.widgets.open] {

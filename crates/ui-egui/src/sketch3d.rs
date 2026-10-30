@@ -239,7 +239,7 @@ pub fn preview(app: &SolveApp, t: &Tool, painter: &egui::Painter, proj: &Proj) -
     }
     // Drawn straight onto the view: its side's colours (#4146).
     let tk = Tokens::view();
-    let stroke = Stroke::new(1.5, tk.sketch_accent);
+    let stroke = Stroke::new(1.5, tk.sketch_stroke());
     let pts = if CHAIN.with(|c| c.borrow().0) == Some(t.cmd) { chain() } else { Vec::new() };
     let hover = HOVER.with(|h| *h.borrow());
     let mut all: Vec<Pos2> = pts.iter().filter_map(|p| proj.to_screen(*p)).collect();
@@ -264,7 +264,7 @@ pub fn preview(app: &SolveApp, t: &Tool, painter: &egui::Painter, proj: &Proj) -
             egui::Align2::LEFT_TOP,
             format!("{}, {}, {}", crate::prefs::show_mm(app, h.x, 1), crate::prefs::show_mm(app, h.y, 1), crate::prefs::show_mm(app, h.z, 1)),
             egui::FontId::proportional(crate::theme::Tokens::get().font_small),
-            tk.text_dim,
+            tk.on_view(tk.text_dim),
         );
     }
     if matches!(t.cmd, "sketch.arc.three_point" | "sketch.arc3d") && pts.len() == 2 {

@@ -358,8 +358,9 @@ pub(crate) fn option_card(ui: &mut Ui, label: &str, note: Option<&str>, selected
         if enabled { Sense::click() } else { Sense::hover() },
     );
     let hover = enabled && response.hovered();
+    let dim = if selected { t.readable(t.form_dim, &[t.selected_bg]) } else { t.form_dim };
     let ink = if !enabled {
-        t.form_dim
+        dim
     } else if selected {
         t.selected_ink
     } else {
@@ -399,7 +400,7 @@ pub(crate) fn option_card(ui: &mut Ui, label: &str, note: Option<&str>, selected
             Rect::from_min_size(pos2(label_rect.left(), label_rect.bottom()), vec2(label_rect.width(), t.space_16)),
             note,
             FontId::proportional(t.font_small),
-            t.form_dim,
+            dim,
         );
     }
     if selected {
@@ -644,7 +645,7 @@ pub(crate) fn scale_specimen(ui: &mut Ui, scale: f32) {
     let feature = Rect::from_min_size(origin + vec2(0.0, line_h + t.space_8 * scale), vec2(r.width() - t.space_10 * 2.0, line_h));
     p.rect_filled(feature, t.control_radius, t.selected_bg);
     let icon = Rect::from_center_size(pos2(feature.left() + t.space_16 * scale, feature.center().y), vec2(t.space_16, t.space_16) * scale);
-    crate::icons::paint_icon(&p, icon, "extrude", 1.0);
+    crate::icons::paint_on_selected(&p, icon, "extrude", 1.0);
     p.text(
         pos2(icon.right() + t.space_6 * scale, feature.center().y),
         egui::Align2::LEFT_CENTER,

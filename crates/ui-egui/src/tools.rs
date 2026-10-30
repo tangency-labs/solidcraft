@@ -1147,7 +1147,7 @@ pub fn preview(app: &SolveApp, t: &Tool, painter: &egui::Painter, proj: &Proj) {
     let to = |p: Vec2| proj.to_screen(ss.plane.to_world(p));
     // Drawn straight onto the view: its side's colours (#4146).
     let tk = crate::theme::Tokens::view();
-    let stroke = Stroke::new(1.5, tk.sketch_accent);
+    let stroke = Stroke::new(1.5, tk.sketch_stroke());
     if let Some((hp, snap)) = &t.hover
         && let Some(sp) = to(*hp)
     {
@@ -1217,7 +1217,7 @@ pub fn preview(app: &SolveApp, t: &Tool, painter: &egui::Painter, proj: &Proj) {
                     egui::Align2::CENTER_CENTER,
                     if horizontal { "H" } else { "V" },
                     egui::FontId::proportional(crate::theme::Tokens::get().font_micro),
-                    tk.sketch_accent,
+                    tk.on_view(tk.sketch_accent),
                 );
             }
         }

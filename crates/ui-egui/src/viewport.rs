@@ -4924,7 +4924,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
 fn paint_box_selection(painter: &egui::Painter, bx: BoxSel, sketch: bool) {
     let t = Tokens::get();
     let col = if sketch {
-        t.sketch_accent
+        t.sketch_stroke()
     } else if bx.crossing {
         t.box_crossing
     } else {
@@ -5949,7 +5949,7 @@ fn overlays(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
             crate::i18n::format("sketch.degrees_of_freedom", &[("count", &ss.report.dof.to_string())])
         };
         let msg = format!("{} — {status}", crate::i18n::tr_name(&ss.name));
-        let c = if ss.report.ok() { v.sketch_accent } else { v.error };
+        let c = v.on_view(if ss.report.ok() { v.sketch_accent } else { v.error });
         painter.text(pos2(r.left() + 12.0, r.top() + 12.0), Align2::LEFT_TOP, msg, FontId::proportional(t.font_button), c);
     }
 }
