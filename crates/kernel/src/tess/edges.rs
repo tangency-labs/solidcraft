@@ -15,7 +15,7 @@ const MAX_DEPTH: u32 = 24;
 /// The most of its curve's turn one segment may span (a quarter turn, with rounding room): the
 /// boundary of every face stays a polygon with the face's area, as a closed curve's first four
 /// segments keep it.
-const QUARTER_TURN: f64 = std::f64::consts::FRAC_PI_2 * (1.0 + 1e-9);
+pub(crate) const QUARTER_TURN: f64 = std::f64::consts::FRAC_PI_2 * (1.0 + 1e-9);
 
 /// An edge's nodes, from its start vertex (interval min) to its end vertex (interval max).
 pub(crate) struct Nodes {
@@ -163,7 +163,7 @@ pub(crate) fn split_segments(b: &brep::Brep, ei: usize, nodes: &mut Nodes, segs:
 }
 
 /// Angle (radians) between two directions; zero when either is empty.
-fn turn(a: Vec3, b: Vec3) -> f64 {
+pub(crate) fn turn(a: Vec3, b: Vec3) -> f64 {
     let (la, lb) = (a.len(), b.len());
     if !(la > 0.0 && lb > 0.0) {
         return 0.0;

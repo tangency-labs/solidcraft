@@ -5,6 +5,7 @@
 use solidcraft_geom::tess::EvalSurface;
 pub(crate) use solidcraft_geom::tess::uv::{Domain, degenerate_within, domain, unwrap};
 
+use super::edges::{QUARTER_TURN, turn};
 use super::size::Rules;
 
 /// Division of `range` along direction `d` so that between neighbouring lines the surface sags
@@ -16,19 +17,10 @@ pub(crate) fn divide(s: &EvalSurface, d: usize, range: (f64, f64), across: (f64,
     if !(a1 > a0) {
         return vec![a0, a1];
     }
-    let flat = limits(s, d, across, rules, h);
-    // Start from quarter turns at most, so a closed iso-line is not taken for a flat one (a
-    // plane's parameters are lengths and its lines are never closed).
-    let initial = if matches!(s, EvalSurface::Plane { .. }) { 1 } else { ((a1 - a0) / std::f64::consts::FRAC_PI_2).ceil().clamp(1.0, 64.0) as u32 };
-    // Both ends exactly (a0 + (a1 − a0) · 1 may round away from a1): the end lines are the
-    // face's own parameter box, which the boundary nodes sit on.
-    let starts: Vec<f64> = (0..=initial)
-        .map(|i| {
-            let t = f64::from(i) / f64::from(initial);
-            a0 * (1.0 - t) + a1 * t
-        })
-        .collect();
-    split(&starts, &flat, max_lines)
+    // The whole range first: the limits split it, and no interval spans more than a quarter
+    // turn of its iso-lines, so a closed iso-line is never taken for a flat one. Both ends
+    // exactly: the end lines are the face's own parameter box, which the boundary nodes sit on.
+    split(&[a0, a1], &limits(s, d, across, rules, h), max_lines)
 }
 
 /// `lines` (increasing, ends included) with every interval that fails the same limits as
@@ -80,8 +72,14 @@ pub(crate) fn fine_between(s: &EvalSurface, rules: &Rules, h: f64, a: [f64; 2], 
     }
 }
 
+/// An iso-line's extent below which it is a point, as a fraction of the chord tolerance (which
+/// is never finer than a millionth of the body, so this is far above rounding).
+const POINT: f64 = 1e-6;
+
 /// Whether the surface between the iso-lines at `a` and `b` (direction `d`, sampled along
-/// iso-lines across `across`) is within the tolerance, the side length `h` and the facet angle.
+/// iso-lines across `across`) is within the tolerance, the side length `h` and the facet angle,
+/// and spans at most a quarter turn of each iso-line (as an edge segment does, see
+/// [`QUARTER_TURN`]): a turn read from the points, since a spline's parameter is no angle.
 fn limits<'a>(s: &'a EvalSurface, d: usize, across: (f64, f64), rules: &'a Rules, h: f64) -> impl Fn(f64, f64) -> bool + 'a {
     let tol = rules.tol;
     let uv = move |x: f64, y: f64| if d == 0 { (x, y) } else { (y, x) };
@@ -103,6 +101,15 @@ fn limits<'a>(s: &'a EvalSurface, d: usize, across: (f64, f64), rules: &'a Rules
             }
             let sag = [0.25, 0.5, 0.75].iter().filter_map(|f| at(a + (b - a) * f, y)).map(|q| q.dist_to_segment(pa, pb)).fold(0.0, f64::max);
             if sag > tol {
+                return false;
+            }
+            // The two half chords of an arc turning θ differ by θ/2; a closed iso-line's by π.
+            // An iso-line within a millionth of the tolerance of one point (a pole) turns no
+            // amount: its directions are rounding.
+            if let Some(pm) = at(0.5 * (a + b), y)
+                && pa.dist(pm).max(pm.dist(pb)) > POINT * tol
+                && 2.0 * turn(pm - pa, pb - pm) > QUARTER_TURN
+            {
                 return false;
             }
             // At a pole the normal is undefined: take it from just inside the segment.
@@ -145,6 +152,26 @@ mod tests {
         // With a longest side the straight direction is divided too: 4 mm in sides ≤ 0.5.
         let along = divide(&s, 0, (0.0, 1.0), (0.0, std::f64::consts::TAU), &Rules { tol: 0.01, max_len: f64::INFINITY, turn: None }, 0.5, 10_000);
         assert_eq!(along.len(), 9);
+    }
+
+    /// A quarter of a cylinder as a rational quadratic spline (as SMLib holds a bend), its range a
+    /// rounding over π/2 as a boundary's pcurves give it: the quarter turn is read from the
+    /// surface, not the parameter, so at a tolerance above its sag it is one interval; and a whole
+    /// turn is still divided into quarters however coarse the tolerance.
+    #[test]
+    fn a_quarter_turn_is_read_from_the_surface_not_the_parameter() {
+        let w = std::f64::consts::FRAC_1_SQRT_2;
+        let q = std::f64::consts::FRAC_PI_2;
+        let s = EvalSurface::nurbs(
+            [1, 2],
+            [vec![0.0, 0.0, 40.0, 40.0], vec![0.0, 0.0, 0.0, q, q, q]],
+            [2, 3],
+            vec![[1.0, 0.0, 0.0, 1.0], [1.0, 0.0, 40.0, 1.0], [w, w, 0.0, w], [w, w, 40.0 * w, w], [0.0, 1.0, 0.0, 1.0], [0.0, 1.0, 40.0, 1.0]],
+        );
+        let coarse = Rules { tol: 3.0, max_len: f64::INFINITY, turn: None };
+        assert_eq!(divide(&s, 1, (-6.7e-13, q), (0.0, 40.0), &coarse, f64::INFINITY, 10_000), vec![-6.7e-13, q]);
+        let whole = divide(&cylinder(), 1, (0.0, std::f64::consts::TAU), (0.0, 1.0), &Rules { tol: 100.0, ..coarse }, f64::INFINITY, 10_000);
+        assert_eq!(whole.len(), 5, "{whole:?}");
     }
 
     /// The first and last lines are the range's ends to the last bit: the boundary nodes sit on
