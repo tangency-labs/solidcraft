@@ -473,7 +473,9 @@ fn shell_planar(b: &Body, open: &[Vec3], thickness: f64) -> Result<Body> {
             .filter_map(|(t, f)| mesh.tri(t).map(|[x, y, z]| (point_tri(*p, x, y, z), *f as usize)))
             .min_by(|a, c| a.0.total_cmp(&c.0));
         if let Some((d, f)) = near
-            && d < size * 1e-3 + 1e-6
+            // Match the UI's face-pick reach (body size · 0.05): a healed freeform wall's
+            // tessellation can sit farther from the authored pick than size · 1e−3 (#6306, #6382).
+            && d < size * 0.05 + 1e-6
             && !opened.contains(&f)
         {
             opened.push(f);
@@ -633,7 +635,6 @@ fn rim_without_thickness(b: &Body, opened: &[usize], thickness: f64, whole_rim: 
 }
 
 fn shell_opened(b: &Body, healed: &Body, open: &[Vec3], opened: &[usize], thickness: f64, margin: f64) -> Result<Body> {
-    let size = healed.size();
     // Open faces pushed out past the body: the simple way, unless a face tangent to an open
     // one (a fillet along its edge) can't follow; then every face moves in (tangencies keep)
     // and the opening is the open face's copy swept out through the body.
@@ -661,33 +662,63 @@ fn shell_opened(b: &Body, healed: &Body, open: &[Vec3], opened: &[usize], thickn
             Ok(record::after(hollowed(r, healed, offsets(&cavity)), healed, &record::counts(&[b])))
         }
         Ok(None) => Err(KernelError::Failed("the shell removed everything".into())),
-        // Healing can leave faces the boolean dislikes (revolved patches): the body as it was,
-        // its faces to open found again.
-        Err(e) => {
-            let raw = b.tessellate((size * 1e-3).max(1e-3)).map_err(|_| e.clone())?;
-            let mut opened_raw: Vec<usize> = Vec::new();
-            for p in open {
-                let near = raw
-                    .triangles
-                    .iter()
-                    .zip(&raw.tri_face)
-                    .filter_map(|(t, f)| raw.tri(t).map(|[x, y, z]| (point_tri(*p, x, y, z), *f as usize)))
-                    .min_by(|a, c| a.0.total_cmp(&c.0));
-                if let Some((d, f)) = near
-                    && d < size * 1e-3 + 1e-6
-                    && !opened_raw.contains(&f)
-                {
-                    opened_raw.push(f);
-                }
+        // Healing can leave faces the boolean dislikes (revolved patches). A fitted freeform
+        // cavity often fails B-rep Cut even when it lies inside (#6306): build a closed hollow
+        // via void, then pierce each open face with a prism.
+        Err(e) => shell_fitted_void_open(b, healed, open, opened, thickness, margin).map_err(|_| e),
+    }
+}
+
+/// Closed hollow from a fitted inward offset. Open faces (and the inner faces that line them)
+/// are removed so the void opens; the result is a surface cup when the B-rep Cut of a freefrom
+/// cavity cannot open it (#6306).
+fn shell_fitted_void_open(b: &Body, healed: &Body, open: &[Vec3], opened: &[usize], thickness: f64, margin: f64) -> Result<Body> {
+    let _ = margin;
+    let size = healed.size();
+    let closed = offset_planar(healed, |_, _| -thickness)?;
+    // Trim gap walls that may poke past the body (Intersect of body∩cavity is reliable here).
+    let closed = match crate::ops::boolean(healed, &closed, crate::BoolOp::Intersect)? {
+        Some(c) => c,
+        None => return Err(KernelError::Failed("the shell cavity misses the body".into())),
+    };
+    let hollow = crate::ops::hollow_void(healed, &closed)?;
+    let mut opened = opened.to_vec();
+    if opened.is_empty() && !open.is_empty() {
+        let mesh = healed.tessellate((size * 1e-3).max(1e-3))?;
+        for p in open {
+            let near = mesh
+                .triangles
+                .iter()
+                .zip(&mesh.tri_face)
+                .filter_map(|(t, f)| mesh.tri(t).map(|[x, y, z]| (point_tri(*p, x, y, z), *f as usize)))
+                .min_by(|a, c| a.0.total_cmp(&c.0));
+            if let Some((d, f)) = near
+                && d < size * 0.05 + 1e-6
+                && !opened.contains(&f)
+            {
+                opened.push(f);
             }
-            let opened = opened_raw;
-            let cavity = offset_planar(b, |fi, _| if opened.contains(&fi) { margin } else { -thickness }).map_err(|_| e.clone())?;
-            let r = crate::ops::boolean(b, &cavity, crate::BoolOp::Cut)
-                .map_err(|_| e)?
-                .ok_or_else(|| KernelError::Failed("the shell removed everything".into()))?;
-            Ok(hollowed(r, b, offsets(&cavity)))
         }
     }
+    if opened.is_empty() {
+        return Err(KernelError::Invalid("select at least one face to remove".into()));
+    }
+    let n_outer = healed.face_count();
+    let mut remove = opened.clone();
+    for &fi in &opened {
+        // hollow_void appends the inverted cavity after the outer shell; when face counts match,
+        // the lining face is at n_outer + fi.
+        if closed.face_count() == n_outer {
+            let inner = n_outer + fi;
+            if inner < hollow.face_count() {
+                remove.push(inner);
+            }
+        }
+    }
+    remove.sort_unstable();
+    remove.dedup();
+    let out = crate::surfaces::remove_faces(&hollow, &remove)?;
+    Ok(record::after(out.without_history(), healed, &record::counts(&[b])))
 }
 
 /// The cavity with each open face pushed out (`cavity`), trimmed so that beyond an open face's
@@ -807,8 +838,38 @@ pub(crate) fn point_tri(p: Vec3, a: Vec3, b: Vec3, c: Vec3) -> f64 {
 
 /// The body with every planar face moved along its outward normal by `shift(face index,
 /// normal)`, keeping the topology: each vertex goes to where its faces' moved planes meet.
+/// Bodies with freeform faces fall back to a fitted offset (Thicken's FaceMover path) so a
+/// thickened spline wall can still be shelled (#6306).
 pub(crate) fn offset_planar(b: &Body, shift: impl Fn(usize, Vec3) -> f64) -> Result<Body> {
-    crate::offset::offset_body(b, shift)
+    match crate::offset::offset_body(b, &shift) {
+        Ok(r) => Ok(r),
+        Err(e) => {
+            let msg = e.to_string();
+            if !msg.contains("planes, cylinders, cones, spheres and tori") {
+                return Err(e);
+            }
+            crate::surface_offset::offset_solid_fitted(b, |i| {
+                let n = b
+                    .solid
+                    .face_iter()
+                    .nth(i)
+                    .and_then(|f| {
+                        let s = f.oriented_surface();
+                        use mt::{BoundedCurve, ParametricCurve, ParametricSurface3D, SearchNearestParameter};
+                        let e = f.edge_iter().next()?;
+                        let c = e.oriented_curve();
+                        let (t0, t1) = c.range_tuple();
+                        let q = c.subs(0.5 * (t0 + t1));
+                        let (u, v) = s.search_nearest_parameter(q, None, 50)?;
+                        let n = s.normal(u, v);
+                        Vec3::new(n.x, n.y, n.z).normalized()
+                    })
+                    .unwrap_or(Vec3::Z);
+                shift(i, n)
+            })
+            .map_err(|_| e)
+        }
+    }
 }
 
 pub(crate) fn solve3_pub(m: [[f64; 3]; 3], r: [f64; 3]) -> Option<[f64; 3]> {
