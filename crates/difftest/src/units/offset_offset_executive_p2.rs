@@ -1498,12 +1498,13 @@ fn unchanged(before: Option<&ffi::BrepSnapshot>, after: Option<&ffi::BrepSnapsho
     match (before, after) {
         (None, None) => true,
         (Some(a), Some(b)) => {
-            a.integers == b.integers
-                && a.values.len() == b.values.len()
-                && a.values
-                    .iter()
-                    .zip(&b.values)
-                    .all(|(a, b)| a.to_bits() == b.to_bits())
+            // The gap caches count too: the Rust side's purity state is the whole
+            // B-rep, caches included, and both kernels refresh some of them on the
+            // source (`CalcVertexFaceGap` resets every same-face use's cache).
+            let same = |x: &[f64], y: &[f64]| {
+                x.len() == y.len() && x.iter().zip(y).all(|(a, b)| a.to_bits() == b.to_bits())
+            };
+            a.integers == b.integers && same(&a.values, &b.values) && same(&a.caches, &b.caches)
         }
         _ => false,
     }
@@ -2308,6 +2309,7 @@ mod tests {
         ffi::BrepSnapshot {
             integers: vec![1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
             values: vec![tolerance],
+            caches: Vec::new(),
         }
     }
     fn empty_snapshot(status: i32) -> ffi::Snapshot {
@@ -2750,6 +2752,7 @@ mod tests {
         let mut block = ffi::BrepSnapshot {
             integers: ints,
             values,
+            caches: Vec::new(),
         };
         let decoded = decode_block(&block).unwrap();
         let fixture = sheet([0.0; 3], 1.0, 0);
@@ -2779,6 +2782,13 @@ mod tests {
         assert_eq!(changed.ints["input.pure"], [0, 1]);
         snapshot.source_after = snapshot.source_before.clone();
         snapshot.source_after.as_mut().unwrap().values[0] = 2e-6;
+        assert_eq!(
+            native_output(&input, &snapshot).unwrap().ints["input.pure"],
+            [0, 1]
+        );
+        // A reset gap cache alone also breaks purity, as on the Rust side.
+        snapshot.source_after = snapshot.source_before.clone();
+        snapshot.source_after.as_mut().unwrap().caches = vec![0.0; 5];
         assert_eq!(
             native_output(&input, &snapshot).unwrap().ints["input.pure"],
             [0, 1]

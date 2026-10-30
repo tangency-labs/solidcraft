@@ -110,7 +110,7 @@
 //! its PRE-operation index; absent/null indices are `-1`. No address is emitted.
 //!
 //! Each optional B-rep is `0`, or `1, integer_count, integers..., value_count,
-//! values...`. Integers and floats are separated by the safe decoder into
+//! values..., cache_count, caches...`. Integers and floats are separated by the safe decoder into
 //! [`BrepSnapshot`]; counted lists below are `count, traversal IDs...`. IDs are
 //! zero-based in native traversal order, `-1` null, `-2` not in that traversal.
 //! B-rep integer layout:
@@ -140,6 +140,10 @@
 //! Samples are observations, not
 //! an exact serialization of arbitrary returned geometry. In particular they
 //! must not be advertised as complete offset/shell equivalence.
+//! Cache layout (only compared before/after on the native side, for `input.pure`):
+//! per vertex use in `GetVertexuses` order `edge_gap_init, edge_t, face_gap_init,
+//! face_u, face_v` (zeros when not initialised), then per edgeuse
+//! `max_edge_face_gap_init`. They are read only through already-initialised caches.
 
 use crate::{call_with_buffer, FfiError};
 
@@ -357,6 +361,9 @@ pub struct BrepSnapshot {
     /// Actual tolerances, domains, intervals, points and sampled normals.
     /// The exact layout is documented in the module header.
     pub values: Vec<f64>,
+    /// The lazily filled vertex-use and edge-use gap caches (layout in the module
+    /// header), observed without filling any cache.
+    pub caches: Vec<f64>,
 }
 
 /// Final inherited executive state, observed before its destructor runs.
@@ -771,7 +778,20 @@ impl Reader<'_> {
             .remaining
             .get(count..)
             .ok_or_else(|| invalid("truncated native geometry"))?;
-        Ok(Some(BrepSnapshot { integers, values }))
+        let count = self.count()?;
+        let Some(caches) = self.remaining.get(..count) else {
+            return Err(invalid("truncated native caches"));
+        };
+        let caches = caches.to_vec();
+        self.remaining = self
+            .remaining
+            .get(count..)
+            .ok_or_else(|| invalid("truncated native caches"))?;
+        Ok(Some(BrepSnapshot {
+            integers,
+            values,
+            caches,
+        }))
     }
 }
 

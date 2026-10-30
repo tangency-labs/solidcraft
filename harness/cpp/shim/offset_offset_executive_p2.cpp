@@ -31,6 +31,7 @@
 #include <SmCylinder.h>
 #include <SmEdge.h>
 #include <SmEdgeuse.h>
+#include <SmGap.h>
 #include <SmFace.h>
 #include <SmFaceuse.h>
 #include <SmLine.h>
@@ -43,6 +44,7 @@
 #include <SmRegion.h>
 #include <SmShell.h>
 #include <SmVertex.h>
+#include <SmVertexuse.h>
 #include <nurbs.h>
 #include <algorithm>
 #include <array>
@@ -410,8 +412,29 @@ int curve_kind(SmCurve* curve) {
 }
 struct Block {
     bool present = false;
-    std::vector<double> integers, values;
+    std::vector<double> integers, values, caches;
 };
+// The lazily filled topology caches the Rust purity check also sees (its whole B-rep
+// state): per vertex use (GetVertexuses order) the vertex/edge gap's init flag and edge
+// parameter and the vertex/face gap's init flag and face UV, per edge use (GetEdgeuses
+// order) the max edge/face gap's init flag. Read through the const getters only when
+// already initialised, so observing never fills a cache.
+void put_caches(std::vector<double>& out, SmBrep* brep,
+                const SmTArray<SmEdgeuse*>& edgeuses) {
+    SmTArray<SmVertexuse*> uses;
+    brep->GetVertexuses(uses);
+    if ((size_t)uses.GetSize() + edgeuses.GetSize() > max_output/64)
+        throw std::length_error("native snapshot cache budget");
+    for (ULONG i=0; i<uses.GetSize(); ++i) {
+        SmVertexuse* vu = uses[i];
+        SmVertexEdgeGap* edge = vu->IsVertexEdgeGapInit() ? vu->GetVertexEdgeGap() : nullptr;
+        SmVertexFaceGap* face = vu->IsVertexFaceGapInit() ? vu->GetVertexFaceGap() : nullptr;
+        out.insert(out.end(), {edge ? 1.0 : 0.0, edge ? edge->GetEdgeT() : 0.0,
+            face ? 1.0 : 0.0, face ? face->GetFaceUV().x : 0.0, face ? face->GetFaceUV().y : 0.0});
+    }
+    for (ULONG i=0; i<edgeuses.GetSize(); ++i)
+        out.push_back(edgeuses[i]->IsMaxEdgeFaceGapInit() ? 1.0 : 0.0);
+}
 template<class T> void put_ids(std::vector<double>& out, const SmTArray<T*>& list,
                               const SmTArray<T*>& traversal) {
     out.push_back((double)list.GetSize());
@@ -519,6 +542,7 @@ Block snapshot(SmBrep* brep) {
         put_point(vals,vertices[i]->GetPoint());
         vals.push_back((double)vertices[i]->GetTolerance());
     }
+    put_caches(block.caches,brep,edgeuses);
     return block;
 }
 void put_block(std::vector<double>& out, const Block& block) {
@@ -530,6 +554,10 @@ void put_block(std::vector<double>& out, const Block& block) {
     out.insert(out.end(),block.integers.begin(),block.integers.end());
     out.push_back((double)block.values.size());
     out.insert(out.end(),block.values.begin(),block.values.end());
+    if (block.caches.size() + out.size() + 1 > max_output)
+        throw std::length_error("native snapshot output budget");
+    out.push_back((double)block.caches.size());
+    out.insert(out.end(),block.caches.begin(),block.caches.end());
 }
 
 // Attributed cases (#1462): every source face (GetFaces order) and edge (GetEdges order)
