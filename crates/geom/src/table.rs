@@ -7,7 +7,8 @@
 //! worked out and formatted: nothing here works one out, so a filter hides rows and never changes
 //! a count or a quantity. [`Table::validate`] checks a definition on its own, as when one is read,
 //! and [`Table::layout`] places it with a text measurer: each shown row's rectangle and each cell's
-//! lines of text by the cell text rule. Nothing here is saved or drawn yet.
+//! lines of text by the cell text rule. Nothing here is saved yet; [`TableLayout::paper`] gives a
+//! placed table's lines to the paper scene (its text follows once the scene has text, #4813).
 //!
 //! - The table grows away from its heading. With the heading at the top the rows run down below
 //!   it; at the bottom (ISO 7573) the first row sits just above it and the rows run up.
@@ -25,8 +26,8 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use serde::{Deserialize, Serialize};
 
 use crate::cell::{self, Content, HAlign, PADDING_MM, Part, Source, Warning, check_text, is_snake_case};
-use crate::paper::{MAX_COORDINATE_MM, MAX_LINE_MM, MAX_SIDE_MM};
-use crate::{Aabb2, Vec2};
+use crate::paper::{Group, Item, MAX_COORDINATE_MM, MAX_LINE_MM, MAX_SIDE_MM, ObjectKind};
+use crate::{Aabb2, Loop2, Seg2, Vec2};
 
 /// The most rows a table may list, and the most overrides it may keep.
 pub const MAX_ROWS: usize = 10_000;
@@ -430,6 +431,31 @@ impl Table {
     fn insets(&self, columns: usize) -> Vec<(f64, f64)> {
         let half = |outline: bool| if outline { self.outline_line_mm } else { self.cell_line_mm } / 2.0;
         (0..columns).map(|i| (half(i == 0), half(i + 1 == columns))).collect()
+    }
+}
+
+impl TableLayout {
+    /// The table's lines as one paper group, the `kind` of object `object` is: the outline as a
+    /// closed stroke `outline_line_mm` wide, and a stroke `cell_line_mm` wide across the whole table
+    /// at each row boundary inside it and down the whole table at each column boundary. Each line is
+    /// drawn once, centred on its edge, on the layout's own corners. The cells' text isn't here yet.
+    pub fn paper(&self, object: u64, kind: ObjectKind) -> Group {
+        let Aabb2 { min, max } = self.outline;
+        let stroke = |path, closed, width_mm| Item::Stroke { path, closed, width_mm };
+        let line = |a, b| stroke(vec![Seg2::Line { a, b }], false, self.cell_line_mm);
+        let corners = [min, Vec2::new(max.x, min.y), max, Vec2::new(min.x, max.y)];
+        let mut items = vec![stroke(Loop2::polygon(&corners).segs, true, self.outline_line_mm)];
+        // Rows from the top: each one's lower edge is a boundary but the lowest's, the outline's.
+        let mut rows: Vec<&RowLayout> = std::iter::once(&self.heading).chain(&self.rows).collect();
+        rows.sort_by(|a, b| b.rect.max.y.total_cmp(&a.rect.max.y));
+        for row in rows.iter().take(rows.len().saturating_sub(1)) {
+            items.push(line(Vec2::new(min.x, row.rect.min.y), Vec2::new(max.x, row.rect.min.y)));
+        }
+        // Each column's right edge but the last's, the same in every row.
+        for cell in self.heading.cells.iter().take(self.heading.cells.len().saturating_sub(1)) {
+            items.push(line(Vec2::new(cell.rect.max.x, min.y), Vec2::new(cell.rect.max.x, max.y)));
+        }
+        Group { object, kind, items }
     }
 }
 
