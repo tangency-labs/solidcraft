@@ -27,18 +27,28 @@
 //!   the edge pair counts as coincident. A failing [`Curve::global_coincidence_checker`]
 //!   is read the same way; [`SolidError::Unported`] propagates.
 //! - Edge ends are `Option`s: upstream compares `NULL` vertex pointers like any other.
+//! - **Candidates (#431, fork `ef9041d`).** Both pair searches read their vertices or
+//!   edges once, in the order the first outer pass reads them, and visit only the
+//!   partners that can pass their test: vertices a box search finds within twice
+//!   `SM_EFF_ZERO`, edges starting at a vertex coincident with either end. They run
+//!   the test unchanged on those, in the all-pairs order, so the pairs and the first
+//!   error are upstream's; the searches are linear in the face, not quadratic.
 //! - `sm_AssertTestFace38` dereferences the face surface; a face without one is
 //!   [`SolidError::InvalidInput`] (`SmFace::AssertValid` only calls it with a surface).
 //!   The surface is copied before the UV trim curves are built (building them mutates
 //!   the B-rep, not the surface).
 
+use std::collections::BTreeMap;
+
 use crate::curve::curve::Curve;
 use crate::error::{Result, SolidError};
 use crate::geom::extent1d::Extent1d;
+use crate::geom::extent3d::Extent3d;
 use crate::geom::solution_array::{ObjectKind, SolutionObject, SolutionType};
 use crate::geom::tol::xsect_tol_3d_from_zones;
 use crate::kernel::Kernel;
-use crate::math::EFF_ZERO_SQ;
+use crate::math::{EFF_ZERO, EFF_ZERO_SQ};
+use crate::topology::brep::validation::spatial::SpatialIndex;
 use crate::topology::edgeuse::p1 as eu1;
 use crate::topology::edgeuse::p3 as eu3;
 use crate::topology::{edge, loopuse, vertex};
@@ -92,8 +102,17 @@ pub fn has_coincident_vertices(
     let mut out = CoincidentVertices::default();
     let mut done = false;
 
+    // (#431) the first outer vertex reads every point in order, so they are read once
+    // up front; only the vertices a box search finds within twice SM_EFF_ZERO of a
+    // vertex can pass the distance test, and they are tested in the all-pairs order
+    let points = vertices
+        .iter()
+        .map(|&v| vertex::point(b, v))
+        .collect::<Result<Vec<_>>>()?;
+    let search = SpatialIndex::new(points.iter().map(|&p| Some(Extent3d::from_point(p))));
+
     // for every Vertex
-    for (ii, &to_survive) in vertices.iter().enumerate() {
+    for (ii, (&to_survive, &survive_point)) in vertices.iter().zip(&points).enumerate() {
         if done {
             break;
         }
@@ -102,11 +121,16 @@ pub fn has_coincident_vertices(
         if out.to_delete.contains(&to_survive) {
             continue;
         }
-        let survive_point = vertex::point(b, to_survive)?;
 
         // for every other vertex - look for coincident partners
-        for &to_delete in vertices.iter().skip(ii + 1) {
-            let dist_sq = survive_point.distance_squared(vertex::point(b, to_delete)?);
+        for jj in search.near_point(survive_point, 2.0 * EFF_ZERO) {
+            if jj <= ii {
+                continue;
+            }
+            let (Some(&to_delete), Some(&delete_point)) = (vertices.get(jj), points.get(jj)) else {
+                continue;
+            };
+            let dist_sq = survive_point.distance_squared(delete_point);
             if dist_sq < EFF_ZERO_SQ {
                 out.found = true;
                 done = quit_early;
@@ -194,14 +218,36 @@ pub fn has_coincident_edges(
 
     let mut done = false;
 
+    // (#431) the first outer edge reads every edge in order, so the edges are read
+    // once up front, and an edge is compared only with the later edges whose start
+    // vertex is one of the vertices coincident with its start or end (as the test
+    // below requires), in the all-pairs order
+    let mut data = Vec::new();
+    for (ii, &e) in edges.iter().enumerate() {
+        let curve = edge_curve(b, e)?;
+        let ivl = b.edge(e)?.interval;
+        // the outer loop reads the tolerance before the ends, the inner one after
+        let (zone_tol, start, end) = if ii == 0 {
+            let zone_tol = edge::tolerance(b, e)?;
+            (zone_tol, edge::start_vertex(b, e)?, edge::end_vertex(b, e)?)
+        } else {
+            let (start, end) = (edge::start_vertex(b, e)?, edge::end_vertex(b, e)?);
+            (edge::tolerance(b, e)?, start, end)
+        };
+        data.push((curve, ivl, zone_tol, start, end));
+    }
+    let mut edges_starting_at: BTreeMap<Option<VertexId>, Vec<usize>> = BTreeMap::new();
+    for (jj, &(_, _, _, start, _)) in data.iter().enumerate() {
+        edges_starting_at.entry(start).or_default().push(jj);
+    }
+
     // for every Edge
-    for (ii, &to_survive) in edges.iter().enumerate() {
+    for (ii, (&to_survive, &(survive_curve, survive_ivl, survive_zone_tol, start, end))) in
+        edges.iter().zip(&data).enumerate()
+    {
         if done {
             break;
         }
-        let survive_curve = edge_curve(b, to_survive)?;
-        let survive_ivl = b.edge(to_survive)?.interval;
-        let survive_zone_tol = edge::tolerance(b, to_survive)?;
 
         // skip edges already on the pToDeleteEdges list
         if out.to_delete.contains(&to_survive) {
@@ -209,16 +255,28 @@ pub fn has_coincident_edges(
         }
 
         // Get list of all vertices coincident with pToSurviveEdge Start and End Vertices
-        let start_verts = find_coincident_verts(edge::start_vertex(b, to_survive)?, &verts);
-        let end_verts = find_coincident_verts(edge::end_vertex(b, to_survive)?, &verts);
+        let start_verts = find_coincident_verts(start, &verts);
+        let end_verts = find_coincident_verts(end, &verts);
 
         // for every other Edge - look for coincident partners
-        for &to_delete in edges.iter().skip(ii + 1) {
-            let delete_curve = edge_curve(b, to_delete)?;
-            let delete_ivl = b.edge(to_delete)?.interval;
-            let start_vertex = edge::start_vertex(b, to_delete)?;
-            let end_vertex = edge::end_vertex(b, to_delete)?;
-            let delete_zone_tol = edge::tolerance(b, to_delete)?;
+        let mut candidates: Vec<usize> = start_verts
+            .iter()
+            .chain(&end_verts)
+            .filter_map(|v| edges_starting_at.get(v))
+            .flatten()
+            .copied()
+            .filter(|&jj| jj > ii)
+            .collect();
+        candidates.sort_unstable();
+        candidates.dedup();
+        for jj in candidates {
+            let (
+                Some(&to_delete),
+                Some(&(delete_curve, delete_ivl, delete_zone_tol, start_vertex, end_vertex)),
+            ) = (edges.get(jj), data.get(jj))
+            else {
+                continue;
+            };
 
             // only check edges which share common endPoint vertices
             if (start_verts.contains(&start_vertex) && end_verts.contains(&end_vertex))
@@ -468,6 +526,182 @@ mod tests {
         assert_eq!(pairs.to_survive.len(), 1);
         let pair = [pairs.to_survive[0], pairs.to_delete[0]];
         assert!(pair == [e01, e12] || pair == [e12, e01], "{pair:?}");
+    }
+
+    /// A plate with `teeth` teeth along one side (one profile of lines swept 2 along
+    /// z): its two caps are bounded by `4 * teeth + 4` edges (#431).
+    fn toothed_plate(k: &mut Kernel, teeth: u32) -> Brep {
+        use crate::curve::curve::Curve;
+        use crate::primitive::api_curves::create_line_segment;
+        use crate::sweep::api_brep::create_linear_sweep;
+
+        let length = 2.0 * f64::from(teeth) + 1.0;
+        let mut points = vec![
+            Point3::new(0.0, 0.0, 0.0),
+            Point3::new(length, 0.0, 0.0),
+            Point3::new(length, 5.0, 0.0),
+        ];
+        for i in (0..teeth).rev() {
+            let x = 2.0 * f64::from(i) + 1.0;
+            points.push(Point3::new(x + 1.0, 5.0, 0.0));
+            points.push(Point3::new(x + 1.0, 6.0, 0.0));
+            points.push(Point3::new(x, 6.0, 0.0));
+            points.push(Point3::new(x, 5.0, 0.0));
+        }
+        points.push(Point3::new(0.0, 5.0, 0.0));
+        let curves: Vec<Curve> = (0..points.len())
+            .map(|i| {
+                let next = points[(i + 1) % points.len()];
+                Curve::from(create_line_segment(points[i], next).unwrap())
+            })
+            .collect();
+        let curves: Vec<Option<&Curve>> = curves.iter().map(Some).collect();
+        create_linear_sweep(k, &curves, Vec3::new(0.0, 0.0, 1.0), 2.0, true).unwrap()
+    }
+
+    /// `HasCoincidentVertices` as upstream writes it: every later vertex for each.
+    fn all_pairs_vertices(b: &Brep, f: FaceId) -> CoincidentVertices {
+        let vertices = p4::vertices(b, f, None, false, None).unwrap();
+        let mut out = CoincidentVertices::default();
+        for (ii, &to_survive) in vertices.iter().enumerate() {
+            if out.to_delete.contains(&to_survive) {
+                continue;
+            }
+            let p = vertex::point(b, to_survive).unwrap();
+            for &to_delete in vertices.iter().skip(ii + 1) {
+                if p.distance_squared(vertex::point(b, to_delete).unwrap()) < EFF_ZERO_SQ {
+                    out.found = true;
+                    out.to_survive.push(to_survive);
+                    out.to_delete.push(to_delete);
+                }
+            }
+        }
+        out
+    }
+
+    /// `HasCoincidentEdges` as upstream writes it: every later edge for each.
+    fn all_pairs_edges(k: &Kernel, b: &Brep, f: FaceId) -> CoincidentEdges {
+        let edges = p4::edges(b, f, None, false, None).unwrap();
+        let verts = has_coincident_vertices(b, f, false).unwrap();
+        let mut out = CoincidentEdges::default();
+        for (ii, &to_survive) in edges.iter().enumerate() {
+            if out.to_delete.contains(&to_survive) {
+                continue;
+            }
+            let survive = b.edge(to_survive).unwrap();
+            let start_verts =
+                find_coincident_verts(edge::start_vertex(b, to_survive).unwrap(), &verts);
+            let end_verts = find_coincident_verts(edge::end_vertex(b, to_survive).unwrap(), &verts);
+            for &to_delete in edges.iter().skip(ii + 1) {
+                let delete = b.edge(to_delete).unwrap();
+                let start_vertex = edge::start_vertex(b, to_delete).unwrap();
+                let end_vertex = edge::end_vertex(b, to_delete).unwrap();
+                if !((start_verts.contains(&start_vertex) && end_verts.contains(&end_vertex))
+                    || (end_verts.contains(&start_vertex) && start_verts.contains(&end_vertex)))
+                {
+                    continue;
+                }
+                let tol = xsect_tol_3d_from_zones(
+                    k,
+                    edge::tolerance(b, to_survive).unwrap(),
+                    edge::tolerance(b, to_delete).unwrap(),
+                );
+                let (c1, c2) = (
+                    survive.curve.as_ref().unwrap(),
+                    delete.curve.as_ref().unwrap(),
+                );
+                let found = c1.global_coincidence_checker(
+                    k,
+                    &survive.interval,
+                    c2,
+                    &delete.interval,
+                    tol,
+                    true,
+                    [
+                        Some(CurveHandle(c1.natural_interval())),
+                        Some(CurveHandle(c2.natural_interval())),
+                    ],
+                );
+                let (more, types) = match found {
+                    Ok(c) => (
+                        c.additional_work_needed,
+                        c.solutions
+                            .iter()
+                            .map(|s| s.solution_type)
+                            .collect::<Vec<_>>(),
+                    ),
+                    Err(_) => (false, Vec::new()),
+                };
+                let range = |i: usize| types.get(i) == Some(&SolutionType::RangeOfValues);
+                if !more
+                    || (types.len() == 1 && range(0))
+                    || (types.len() == 2 && range(0) && range(1))
+                {
+                    out.found = true;
+                    out.to_survive.push(to_survive);
+                    out.to_delete.push(to_delete);
+                }
+            }
+        }
+        out
+    }
+
+    /// #431 (fork `ef9041d`): on the caps of a 40-tooth plate, with vertices moved onto
+    /// earlier ones, half `SM_EFF_ZERO` beside them and one and a half `SM_EFF_ZERO`
+    /// beside them, the candidate searches give exactly the all-pairs pairs, and the
+    /// level-2 face tests agree.
+    #[test]
+    fn candidate_searches_match_all_pairs() {
+        let mut k = Kernel::default();
+        let mut b = toothed_plate(&mut k, 40);
+        let faces = crate::topology::brep::p1::faces(&b, None).unwrap();
+        let caps: Vec<FaceId> = faces
+            .iter()
+            .copied()
+            .filter(|&f| p4::edges(&b, f, None, false, None).unwrap().len() == 4 * 40 + 4)
+            .collect();
+        assert_eq!(caps.len(), 2);
+        all_pass(&k, &mut b);
+
+        for &f in &caps {
+            let vs = p4::vertices(&b, f, None, false, None).unwrap();
+            for (i, &v) in vs.iter().enumerate().skip(1) {
+                let before = b.vertex(vs[i - 1]).unwrap().point;
+                let moved = match i % 7 {
+                    0 => before,
+                    3 => before + Vec3::new(3.0e-13, 4.0e-13, 0.0),
+                    5 => before + Vec3::new(1.5e-12, 0.0, 0.0),
+                    _ => continue,
+                };
+                b.vertex_mut(v).unwrap().point = moved;
+            }
+        }
+        for &f in &faces {
+            let expected = all_pairs_vertices(&b, f);
+            assert_eq!(
+                has_coincident_vertices(&b, f, false).unwrap(),
+                expected,
+                "{f:?}"
+            );
+            assert_eq!(assert_test_face32(&b, f).unwrap(), !expected.found, "{f:?}");
+            let expected = all_pairs_edges(&k, &b, f);
+            assert_eq!(
+                has_coincident_edges(&k, &b, f, false).unwrap(),
+                expected,
+                "{f:?}"
+            );
+            assert_eq!(
+                assert_test_face33(&k, &b, f).unwrap(),
+                !expected.found,
+                "{f:?}"
+            );
+        }
+        for &f in &caps {
+            assert!(
+                has_coincident_vertices(&b, f, false).unwrap().found,
+                "{f:?}"
+            );
+        }
     }
 
     /// The top face of a box with a through hole has two disjoint loops (test 38

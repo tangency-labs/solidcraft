@@ -14,7 +14,7 @@ struct Node {
     entries: Vec<usize>,
 }
 
-pub(super) struct SpatialIndex {
+pub(crate) struct SpatialIndex {
     entries: Vec<Entry>,
     nodes: Vec<Node>,
     unbounded: Vec<usize>,
@@ -27,7 +27,7 @@ fn finite(b: &Extent3d) -> bool {
     })
 }
 impl SpatialIndex {
-    pub(super) fn new(boxes: impl IntoIterator<Item = Option<Extent3d>>) -> Self {
+    pub(crate) fn new(boxes: impl IntoIterator<Item = Option<Extent3d>>) -> Self {
         let mut entries = Vec::new();
         let mut unbounded = Vec::new();
         let mut len = 0;
@@ -129,19 +129,19 @@ impl SpatialIndex {
         result.sort_unstable();
         result
     }
-    pub(super) fn points_in_box(&self, bbox: &Extent3d, tol: f64) -> Vec<usize> {
+    pub(crate) fn points_in_box(&self, bbox: &Extent3d, tol: f64) -> Vec<usize> {
         if !finite(bbox) || !tol.is_finite() || tol < 0.0 {
             return (0..self.len).collect();
         }
         self.select(|node| !node.are_disjoint(bbox, tol))
     }
-    pub(super) fn boxes_in_box(&self, bbox: &Extent3d, tol: f64) -> Vec<usize> {
+    pub(crate) fn boxes_in_box(&self, bbox: &Extent3d, tol: f64) -> Vec<usize> {
         if !finite(bbox) || !tol.is_finite() || tol < 0.0 {
             return (0..self.len).collect();
         }
         self.select(|node| !bbox.are_disjoint(node, tol))
     }
-    pub(super) fn near_point(&self, p: Point3, tol: f64) -> Vec<usize> {
+    pub(crate) fn near_point(&self, p: Point3, tol: f64) -> Vec<usize> {
         if ![p.x, p.y, p.z, tol].iter().all(|x| x.is_finite()) || tol < 0.0 {
             return (0..self.len).collect();
         }

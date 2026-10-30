@@ -136,11 +136,17 @@
 //!   ([`CurveClassification::classify_face_interval_mut`]): its face queries edit the
 //!   snapshot, so their UV trims and tolerance changes stay for the rest of the
 //!   classification (not for the caller's B-rep).
+//! - **Vertex index (#431, fork `ef9041d`).** `SmBrep::AssertValid` classifies every
+//!   vertex of a face on it, and each `PointClassify` listed the face's vertices
+//!   again. `point_classify_indexed` takes a `FaceVertexIndex` built once per face
+//!   and tests first the vertices a box search finds near the point (all of them
+//!   when none of those is at it).
 //! - No recursion.
 
 use crate::curve::curve::{Curve, CurveKind};
 use crate::error::{ignored, EntityRef, Result, SolidError, SM_ERR};
 use crate::geom::extent2d::Extent2d;
+use crate::geom::extent3d::Extent3d;
 use crate::geom::point_set::PointContainment;
 use crate::geom::tree::{NodeClass, NodeData};
 use crate::intersect::curve_class::p1::{src_zone_tol_3d_of, CurveClassification};
@@ -164,6 +170,7 @@ use crate::surface::surface::p1::{
 use crate::surface::surface::{CacheTreeState, Surface, SurfaceKind, TrimCacheSlot};
 use crate::surface::surface_cache::p1::{FaceContainment, SurfaceCache};
 use crate::surface::trim_srf_cache::{CacheFace, TrimSrfCache};
+use crate::topology::brep::validation::spatial::SpatialIndex;
 use crate::topology::edgeuse::p1 as eu1;
 use crate::topology::face::p2 as fp2;
 use crate::topology::loopuse;
@@ -784,7 +791,16 @@ pub fn point_classify(
     pc: &mut PointClassification<EntityRef>,
     opts: PointClassifyOptions<'_>,
 ) -> Result<()> {
-    point_classify_with_topology(k, &mut QueryTopology::Mutable(b), f, uv, pc, opts, None)
+    point_classify_with_topology(
+        k,
+        &mut QueryTopology::Mutable(b),
+        f,
+        uv,
+        pc,
+        opts,
+        None,
+        None,
+    )
 }
 
 /// Classify `uv` against face `f` without mutating its prepared topology.
@@ -806,7 +822,16 @@ pub fn point_classify_prepared(
     pc: &mut PointClassification<EntityRef>,
     opts: PointClassifyOptions<'_>,
 ) -> Result<()> {
-    point_classify_with_topology(k, &mut QueryTopology::Prepared(b), f, uv, pc, opts, None)
+    point_classify_with_topology(
+        k,
+        &mut QueryTopology::Prepared(b),
+        f,
+        uv,
+        pc,
+        opts,
+        None,
+        None,
+    )
 }
 
 pub(crate) fn point_classify_requested(
@@ -826,6 +851,7 @@ pub(crate) fn point_classify_requested(
         pc,
         opts,
         None,
+        None,
     )
 }
 
@@ -838,7 +864,88 @@ pub(crate) fn point_classify_live(
     opts: PointClassifyOptions<'_>,
     cache: Option<&SurfaceCache<crate::topology::brep_cache::CacheObject>>,
 ) -> Result<()> {
-    point_classify_with_topology(k, &mut QueryTopology::Mutable(b), f, uv, pc, opts, cache)
+    point_classify_with_topology(
+        k,
+        &mut QueryTopology::Mutable(b),
+        f,
+        uv,
+        pc,
+        opts,
+        cache,
+        None,
+    )
+}
+
+/// The vertices of a face in [`face_vertices`] order (all loops) with a box search
+/// over their points, for a run of [`point_classify_indexed`] calls on a face whose
+/// topology does not change between them (the fork's `SmFaceVertexIndex`, #431).
+pub(crate) struct FaceVertexIndex {
+    face: FaceId,
+    vertices: Vec<VertexId>,
+    search: SpatialIndex,
+    max_vertex_tol: f64,
+}
+
+impl FaceVertexIndex {
+    /// The index of face `f`'s vertices; `None` when they cannot be listed (the
+    /// classification then lists them itself, and fails as it would).
+    pub(crate) fn new(b: &Brep, f: FaceId) -> Option<Self> {
+        let vertices = face_vertices(b, f, false, None).ok()?;
+        let mut points = Vec::new();
+        let mut max_vertex_tol = f64::NEG_INFINITY;
+        for &v in &vertices {
+            let vertex = b.vertex(v).ok()?;
+            points.push(Some(Extent3d::from_point(vertex.point)));
+            max_vertex_tol = max2(max_vertex_tol, vertex.tolerance);
+        }
+        Some(Self {
+            face: f,
+            vertices,
+            search: SpatialIndex::new(points),
+            max_vertex_tol,
+        })
+    }
+
+    /// The vertices a box search finds within `pad` of `p`, in [`face_vertices`]
+    /// order (all of them when `p` or `pad` is not finite).
+    fn near(&self, p: Point3, pad: f64) -> Vec<VertexId> {
+        self.search
+            .near_point(p, pad)
+            .into_iter()
+            .filter_map(|i| self.vertices.get(i).copied())
+            .collect()
+    }
+}
+
+/// [`point_classify`] with the index of the face's vertices `vertex_index` (built by
+/// [`FaceVertexIndex::new`] on the same face and topology), for `SmFace::AssertValid`
+/// test 12, which reads only the class: the same class without listing the face's
+/// vertices on every call. The vertex reported is upstream's (the first in
+/// [`face_vertices`] order at the point) unless a vertex tolerance grew after the
+/// index was built (a UV trim curve made since), when it can be a later one.
+///
+/// # Errors
+///
+/// Those of [`point_classify`].
+pub(crate) fn point_classify_indexed(
+    k: &Kernel,
+    b: &mut Brep,
+    f: FaceId,
+    uv: Point2,
+    pc: &mut PointClassification<EntityRef>,
+    opts: PointClassifyOptions<'_>,
+    vertex_index: Option<&FaceVertexIndex>,
+) -> Result<()> {
+    point_classify_with_topology(
+        k,
+        &mut QueryTopology::Mutable(b),
+        f,
+        uv,
+        pc,
+        opts,
+        None,
+        vertex_index,
+    )
 }
 
 fn cache_is_current<O: Copy + PartialEq>(cache: &SurfaceCache<O>) -> bool {
@@ -926,6 +1033,7 @@ fn point_classify_with_topology(
     pc: &mut PointClassification<EntityRef>,
     opts: PointClassifyOptions<'_>,
     prepared_cache: Option<&SurfaceCache<crate::topology::brep_cache::CacheObject>>,
+    vertex_index: Option<&FaceVertexIndex>,
 ) -> Result<()> {
     let PointClassifyOptions {
         tgt_loops_only,
@@ -1029,24 +1137,42 @@ fn point_classify_with_topology(
 
     {
         // begin Scope for TargetPoint/Vertex intersection
-        let verts = face_vertices(b, f, tgt_loops_only, tgt_loops)?;
-
-        // see if the target point is on a vertex location
-        for v in verts {
-            let vert = b.vertex(v)?;
-            let mut vert_tol = max2(face_tolerance, vert.tolerance);
-            vert_tol = max2(vert_tol, pc.tolerance());
-
-            if vert.point.closer_than(vert_tol, surf_pt) {
-                pc.set_class_object(PointClassType::Vertex, Some(EntityRef::Vertex(v)));
-
-                // Need to calculate the deviation.
-                pc.set_deviation(vert.point.distance(surf_pt));
-                pc.set_src_zone_tol_3d(vert_tol);
-                pc.set_pre_snap_param(BIG_DOUBLE);
-                return Ok(());
+        // (#431) with the caller's index of this face's vertices, those a box search
+        // finds within the largest vertex tolerance of the point are tested first, in
+        // GetVertices order, and all of them only when none of those is at the point
+        let index = vertex_index.filter(|index| !tgt_loops_only && index.face == f);
+        let mut verts = match index {
+            Some(index) => {
+                let pad = max2(max2(face_tolerance, index.max_vertex_tol), pc.tolerance());
+                index.near(surf_pt, pad)
             }
-        } // end iter every face vertex
+            None => face_vertices(b, f, tgt_loops_only, tgt_loops)?,
+        };
+        let mut searched = index.is_some();
+
+        loop {
+            // see if the target point is on a vertex location
+            for v in verts {
+                let vert = b.vertex(v)?;
+                let mut vert_tol = max2(face_tolerance, vert.tolerance);
+                vert_tol = max2(vert_tol, pc.tolerance());
+
+                if vert.point.closer_than(vert_tol, surf_pt) {
+                    pc.set_class_object(PointClassType::Vertex, Some(EntityRef::Vertex(v)));
+
+                    // Need to calculate the deviation.
+                    pc.set_deviation(vert.point.distance(surf_pt));
+                    pc.set_src_zone_tol_3d(vert_tol);
+                    pc.set_pre_snap_param(BIG_DOUBLE);
+                    return Ok(());
+                }
+            } // end iter every face vertex
+            if !searched {
+                break;
+            }
+            searched = false;
+            verts = face_vertices(b, f, tgt_loops_only, tgt_loops)?;
+        }
     }
 
     // arrive here when TargetPoint is not on a vertex,

@@ -21,7 +21,7 @@
 mod assert_valid;
 mod coincidence;
 mod pointers;
-mod spatial;
+pub(crate) mod spatial;
 
 pub use assert_valid::{assert_valid, check_brep, check_brep_with_keys, BrepCheck, CheckLevel};
 pub use coincidence::{contains_coincident_topology, CoincidenceResult};
