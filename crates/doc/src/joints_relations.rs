@@ -96,6 +96,7 @@ mod tests {
             offset_xy: [0.0; 2],
             captured: None,
             constraint: None,
+            dynamics: Vec::new(),
         }
     }
 

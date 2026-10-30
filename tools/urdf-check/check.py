@@ -53,6 +53,14 @@ def poses(urdf, expected):
         robot.update_cfg({name: q.get(name, 0.0) for name in robot.actuated_joint_names})
         return np.array(robot.get_transform(link, "base_link"))
     checked = 0
+    for joint, want in expected.get("joints", {}).items():
+        j = robot.joint_map[joint]
+        got = {"effort": j.limit.effort, "velocity": j.limit.velocity, "damping": j.dynamics.damping if j.dynamics else None, "friction": j.dynamics.friction if j.dynamics else None}
+        for key, value in want.items():
+            # yourdfpy can hand back the attribute's text.
+            if got[key] is None or abs(float(got[key]) - value) > TOLERANCE:
+                raise AssertionError(f"{joint} {key}: {got[key]}, expected {value}")
+        checked += 1
     for pose in expected.get("poses", []):
         for link, want in pose["links"].items():
             rest = transform(link, {})

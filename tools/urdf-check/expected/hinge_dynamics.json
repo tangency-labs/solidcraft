@@ -1,0 +1,32 @@
+{
+ "joints": {
+  "Hinge": {
+   "effort": 12.5,
+   "velocity": 2.0,
+   "damping": 0.1,
+   "friction": 0.05
+  }
+ },
+ "poses": [
+  {
+   "q": {
+    "Hinge": 0.5
+   },
+   "links": {
+    "B": {
+     "xyz": [
+      0.005,
+      0.005,
+      0.01
+     ],
+     "turn": 0.5,
+     "about": [
+      0,
+      0,
+      1
+     ]
+    }
+   }
+  }
+ ]
+}

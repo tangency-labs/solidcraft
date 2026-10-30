@@ -1143,6 +1143,10 @@ fn hostile_params_never_panic() {
     let _reset = mesh_convert::MadeUp;
     *crate::slicers::TEST_DETECTED.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(Vec::new());
     let keys = [
+        "effort",
+        "velocity",
+        "damping",
+        "friction",
         "plane",
         "offset",
         "name",

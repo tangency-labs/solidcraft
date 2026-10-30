@@ -86,6 +86,7 @@ impl Document {
                     b: JointOrigin::new(o.id, Snap::Frame { origin: Vec3::ZERO, z: Vec3::Z, x: Some(Vec3::X) }),
                     values: Vec::new(),
                     limits: Vec::new(),
+                    dynamics: Vec::new(),
                     flip: true,
                     offset: 0.0,
                     angle: 0.0,
