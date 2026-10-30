@@ -204,12 +204,13 @@ reference-object placement and multi-curve chains are not yet available in this 
 Section Analysis cuts the view, not the design: what lies beyond the section's planes is hidden
 and the cut faces are hatched (Hatch off draws them in each body's own colour). It changes no
 geometry and is not saved with the design, but each change to it is a step in the undo history:
-Undo brings back the section as it was. A section has up to six planes, and it hides what lies
-beyond all of them at once: one plane hides its side, two square to each other cut a quarter
-away. As on a drawing, each plane's cut faces are hatched their own way, by the plane's number:
+Undo brings back the section as it was. A section has up to six planes, and each hides what lies
+beyond it: the view keeps only what every plane keeps, so two planes square to each other cut an
+L-shaped piece away and keep a quarter, and three keep an eighth. As on a drawing, each plane's cut faces are hatched their own way, by the plane's number:
 45° on Section 1, 135° on Section 2, then 30°, 60°, 120° and 150° (Section 7 starts again at
 45°), measured on the plane as seen from the side it cuts away (upright on a wall, along X on a
-floor). Hiding one plane leaves the others' hatch as it is.
+floor), so where two planes' cut faces meet each keeps its own. Hiding one plane leaves the
+others' hatch as it is.
 
 - The toolbar's **Section Analysis** starts a new section on a plane or planar face; its arrow
   and **Distance** move the cut. A positive distance cuts more away: into the part from a face,
@@ -217,8 +218,8 @@ floor). Hiding one plane leaves the others' hatch as it is.
   way. **Flip** hides the other side of the plane being edited and leaves it where it is.
 - Right-click a planar face and choose **Section View**: the dialog starts on the face's plane,
   so dragging the arrow inward cuts into the part. With a section on, the face's plane joins it
-  as another plane, cutting the same way: at distance 0 it hides nothing more, and dragged in it
-  cuts away what lies beyond it and every other plane, such as a corner.
+  as another plane, cutting the same way: at distance 0 it hides nothing more, so the cut on show
+  stays as it is, and dragged in it cuts its own side away as well.
 - Right-click a cut face and choose **Edit Section View** to move or flip its plane (the others
   stay as they are), or **Turn Off Section View** to take that plane out; the last one turns the
   section off.

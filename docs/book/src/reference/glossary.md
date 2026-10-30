@@ -382,10 +382,10 @@ are kept, not deleted.
 
 ### section plane
 
-A plane of a Section Analysis; the view hides what lies beyond every section plane at once.
+A plane of a Section Analysis; the view hides what lies beyond any section plane.
 
-One section plane hides its normal's side. Two square to each other cut a quarter away, three an
-eighth. A section has at most six.
+One section plane hides its normal's side, and the view keeps what every plane keeps: two square
+to each other keep a quarter, three an eighth. A section has at most six.
 
 - **In SolidCraft:** `inspect.section` (`plane`, `add`, `replace`, `remove`, `hide`, `show`, `folder`, `clear`); the
   `section_plane` of a `view.pick` hit on a cut face; the viewport menu's Section View, Edit Section View
