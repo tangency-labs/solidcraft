@@ -2773,7 +2773,9 @@ fn hovering_a_large_body_does_not_wait_for_its_pick_index() {
     h.step(&json!({"move": at})).unwrap();
     let hover_ms = t.elapsed().as_secs_f64() * 1000.0;
     assert!(matches!(h.app.viewport.hover, Some(crate::viewport::Hit::Face { .. })), "{:?}", h.app.viewport.hover);
-    assert!(hover_ms < index_ms / 3.0, "the first hover took {hover_ms:.1} ms; making the index takes {index_ms:.1} ms");
+    // Half, not a third: on a loaded runner the hover alone has taken 70 ms against a 190 ms index.
+    // Waiting for the index would cost the whole of it, so half still tells the two apart.
+    assert!(hover_ms < index_ms / 2.0, "the first hover took {hover_ms:.1} ms; making the index takes {index_ms:.1} ms");
 }
 
 /// #4452: with Combine open, bodies clicked in the Browser fill its inputs, as clicks on them
