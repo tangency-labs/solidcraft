@@ -24,6 +24,9 @@ mod topology;
 pub use curve2::Curve2;
 
 pub const VERSION: u32 = 4;
+/// The most items (records, points, knots, uses) [`Brep::validate`] takes in a record that comes
+/// from outside the kernel: a file, the control channel, pasted data. A record the kernel built
+/// ([`Brep::validate_built`]) has no such cap.
 pub const MAX_ITEMS: usize = 4_000_000;
 pub const MAX_SHELLS: usize = 1024;
 const MAX_DEPTH: usize = 16;
@@ -266,11 +269,19 @@ fn require(condition: bool, message: &'static str) -> Result<()> {
     if condition { Ok(()) } else { Err(Invalid(message)) }
 }
 
-struct Budget(usize);
+/// The items counted so far and the most allowed.
+struct Budget {
+    used: usize,
+    limit: usize,
+}
 impl Budget {
+    /// The budget of a record from outside the kernel.
+    fn input() -> Budget {
+        Budget { used: 0, limit: MAX_ITEMS }
+    }
     fn add(&mut self, n: usize) -> Result<()> {
-        self.0 = self.0.checked_add(n).ok_or(Invalid("item budget"))?;
-        require(self.0 <= MAX_ITEMS, "item budget")
+        self.used = self.used.checked_add(n).ok_or(Invalid("item budget"))?;
+        require(self.used <= self.limit, "item budget")
     }
 }
 fn numbers(values: impl IntoIterator<Item = f64>) -> Result<()> {
@@ -584,12 +595,26 @@ impl Brep {
     /// list of uses and the canonical order. Does not certify watertightness, that edges lie on
     /// their surfaces or that pcurves lift onto their edges ([`Brep::check_geometry`] spot-checks
     /// those).
+    ///
+    /// For a record from outside the kernel (a file, the control channel, pasted data): it is
+    /// refused past [`MAX_ITEMS`] items, so hostile input is bounded before anything walks it.
     pub fn validate(&self) -> Result<()> {
+        self.validate_within(Budget::input())
+    }
+
+    /// [`Brep::validate`] for a record the kernel built in memory (an operation's result, a
+    /// body's own record, a part of a validated record): every check but the item budget. The
+    /// record already sits in memory, its size set by inputs that were bounded where they came
+    /// in, and the checks are linear in it; a cap here would only refuse a real result.
+    pub fn validate_built(&self) -> Result<()> {
+        self.validate_within(Budget { used: 0, limit: usize::MAX })
+    }
+
+    fn validate_within(&self, mut budget: Budget) -> Result<()> {
         require(self.version == VERSION, "unsupported version")?;
         tolerance(self.tolerance)?;
         require(!self.shells.is_empty() && self.shells.len() <= MAX_SHELLS, "shell count")?;
         require(!self.regions.is_empty() && self.regions.len() <= 2 * MAX_SHELLS + 1, "region count")?;
-        let mut budget = Budget(0);
         budget.add(self.regions.len() + self.faces.len() + self.edges.len())?;
         for v in &self.vertices {
             points(&[v.point], &mut budget)?;

@@ -214,6 +214,12 @@ closed chains through shared vertices; every edge's `uses` lists exactly its use
 once each, primary first, with `upper` as stated; pcurve intervals; parameter
 ranges; and the canonical order.
 
+The item cap is for records from outside the kernel: a native file, a STEP file,
+the control channel. `Brep::validate_built` runs every other check on a record the
+kernel built in memory (an operation's result, a body's own record, a part of one):
+that record already sits in memory, its size set by inputs bounded where they came
+in, and the checks are linear in it, so a cap there would only refuse a real result.
+
 These are structural and resource guards, not a geometric validity certificate.
 The validator does not check that edges lie on their surfaces, that pcurves lift
 onto their edges, that a closed shell is watertight or that shells nest as the
@@ -231,8 +237,8 @@ edge loop's pcurves enclose (u, v) area (more than 10⁻⁹ of the square of the
 loop's extent), and exactly one loop of each face, the outer, runs
 counter-clockwise about the natural normal, the rest clockwise (told apart by
 their areas, not their order); every vertex loop's vertex lies on its face's
-surface (within the vertex's). It makes a fixed number of evaluations per record, so its work is linear in the item
-budget, and a point it cannot evaluate is an error naming the record. It is not
+surface (within the vertex's). It makes a fixed number of evaluations per record, so its work is linear in the
+record, and a point it cannot evaluate is an error naming the record. It is not
 a certificate either: between the points it checks, an edge may still leave its
 surface. The truck adapter runs it before building topology, which truck does
 without checks of its own.

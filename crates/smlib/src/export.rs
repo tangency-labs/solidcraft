@@ -265,8 +265,10 @@ fn at<T: Copy>(a: &[T], k: usize, what: &str) -> Res<T> {
 fn idx(x: i64, n: usize, what: &str) -> Res<usize> {
     usize::try_from(x).ok().filter(|i| *i < n).ok_or_else(|| invalid(format!("{what}: {x} out of range")))
 }
+/// A count in the arrays: at most SMLib's longest array ([`flat::MAX_LEN`], checked on entry), as
+/// no block is longer than the array it lies in, so offsets worked out from counts cannot overflow.
 fn count(x: i64, what: &str) -> Res<usize> {
-    usize::try_from(x).ok().filter(|n| *n <= b::MAX_ITEMS).ok_or_else(|| invalid(format!("{what}: count {x}")))
+    usize::try_from(x).ok().filter(|n| *n <= flat::MAX_LEN).ok_or_else(|| invalid(format!("{what}: count {x}")))
 }
 fn index(i: usize) -> Res<u32> {
     u32::try_from(i).map_err(|_| invalid("index"))
@@ -320,7 +322,7 @@ fn surfaces(flat: View, n_faces: usize) -> Res<Vec<(b::Surface, Option<b::Surfac
         let nv = count(at(flat.i(FACE_NURBS_V_VERTEX_COUNT), j, "NURBS face")?, "NURBS face")?;
         let ou = count(at(flat.i(FACE_NURBS_U_ORDER), j, "NURBS face")?, "NURBS face")?;
         let ov = count(at(flat.i(FACE_NURBS_V_ORDER), j, "NURBS face")?, "NURBS face")?;
-        let n = nu.checked_mul(nv).filter(|n| *n <= b::MAX_ITEMS).ok_or_else(|| invalid("NURBS face size"))?;
+        let n = nu.checked_mul(nv).filter(|n| *n <= flat::MAX_LEN).ok_or_else(|| invalid("NURBS face size"))?;
         let slice = |v: &[f64], from: usize, len: usize| v.get(from..from + len).map(<[f64]>::to_vec).ok_or_else(|| invalid("NURBS face arrays"));
         let pts = slice(flat.f(FACE_NURBS_CVS), 3 * at_.cv, 3 * n)?;
         let u_knots = slice(flat.f(FACE_NURBS_U_KNOTS), at_.uk, nu + ou)?;
@@ -739,7 +741,6 @@ fn native_ordered(arrays: &Arrays) -> Res<(b::Brep, Report, Order)> {
         || flat.i(EDGEUSE_ORIENTATION).len() != n_edgeuses
         || flat.i(LOOP_VERTEX).len() != n_loops
         || flat.i(EDGE_VERTICES).len() != 2 * n_edges
-        || [n_faceuses, n_faces, n_loops, n_edgeuses, n_edges, n_vertices].iter().any(|n| *n > b::MAX_ITEMS)
     {
         return Err(invalid("array lengths"));
     }
@@ -1309,7 +1310,7 @@ fn canonical(parts: Parts, n_vertices: usize, flat: View, tolerances: &Tolerance
         })
         .collect::<Res<Vec<_>>>()?;
     let brep = b::Brep { version: b::VERSION, tolerance, regions, shells, faces: face_records, edges: edge_records, vertices };
-    brep.validate().map_err(|e| invalid(format!("the mapped B-rep does not validate: {e}")))?;
+    brep.validate_built().map_err(|e| invalid(format!("the mapped B-rep does not validate: {e}")))?;
     let placed = |new: &[Option<u32>]| {
         new.iter().map(|i| i.map(|i| i as usize).ok_or_else(|| invalid("an entity outside the canonical walk"))).collect::<Res<Vec<_>>>()
     };

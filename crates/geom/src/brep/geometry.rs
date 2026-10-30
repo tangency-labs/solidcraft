@@ -8,7 +8,7 @@
 //!
 //! A spot check, not a certificate: a fixed number of evaluations per record (three points of
 //! each edge, [`AREA_SAMPLES`] of each use, one projection per vertex loop), so the work is
-//! linear in the item budget [`Brep::validate`] caps. Every distance is held to the record's own tolerance:
+//! linear in the record. Every distance is held to the record's own tolerance:
 //! an edge's for its pcurves, an edge's and its vertex's together where they meet, a vertex's on
 //! its surface. A point that cannot be evaluated is an error, never a panic.
 use super::eval::{CurveEval, SurfaceEval};
