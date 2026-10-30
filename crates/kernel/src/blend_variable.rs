@@ -642,11 +642,26 @@ mod tests {
         assert!(fillet_variable(&b, at, start, 4.0, 1e-9).is_err());
     }
 
-    /// A prism of the polygon `pts` (in xy) from z = 0 to `h`.
-    fn prism(pts: &[(f64, f64)], h: f64) -> Body {
+    /// A prism of the polygon `pts` (in xy) from z = `z0` to `z1`.
+    fn prism_between(pts: &[(f64, f64)], z0: f64, z1: f64) -> Body {
         use solidcraft_geom::{Loop2, Plane, Region2, Vec2};
         let outer = Loop2::polygon(&pts.iter().map(|(x, y)| Vec2::new(*x, *y)).collect::<Vec<_>>());
-        crate::extrude(&Plane::XY, &[Region2 { outer, holes: vec![] }], 0.0, h).unwrap().pop().unwrap()
+        crate::extrude(&Plane::XY, &[Region2 { outer, holes: vec![] }], z0, z1).unwrap().pop().unwrap()
+    }
+
+    /// A prism of the polygon `pts` (in xy) from z = 0 to `h`.
+    fn prism(pts: &[(f64, f64)], h: f64) -> Body {
+        prism_between(pts, 0.0, h)
+    }
+
+    /// A plate 15 high whose top narrows from 20 to 2 mm along 40 mm (the trapezoid (0, 0),
+    /// (40, 0), (40, 2), (0, 20)), against a wall standing behind its slanted side from z = -15
+    /// to 30: the plate's top and bottom end on the wall in concave edges, so a blend of its
+    /// front edges can't run past them (no cliff to cut over). 6600 + 20 · 38 · 45.
+    fn ledge() -> Body {
+        let plate = prism(&[(0.0, 0.0), (40.0, 0.0), (40.0, 2.0), (0.0, 20.0)], 15.0);
+        let wall = prism_between(&[(40.0, 2.0), (0.0, 20.0), (0.0, 30.0), (40.0, 30.0)], -15.0, 30.0);
+        crate::boolean(&plate, &wall, crate::BoolOp::Union).unwrap().unwrap()
     }
 
     /// The material a right-angled blend with the radius `law` removes along an edge of length L:
@@ -663,17 +678,48 @@ mod tests {
     }
 
     /// A taper on the top front edge of a wedge, whose top face narrows to a point, and of a
-    /// trapezoid, whose top face narrows to 2 mm: the radius asked for where it fits, below
-    /// 0.9 of the room everywhere, down to zero at the wedge's tip and to 1.8 mm at the
-    /// trapezoid's narrow end; the volume integrates the spline.
+    /// plate against a wall, whose top face narrows to 2 mm: the radius asked for where it fits,
+    /// below 0.9 of the room everywhere, down to zero at the wedge's tip and to 1.8 mm at the
+    /// plate's narrow end; the volume integrates the spline. On the free-standing wedge R16 runs
+    /// over the top's far edge and the front's bottom edge (cliffs), so it is built as if those
+    /// faces went on and cut from the wedge (the blend-overflow decision, 237f0ae74), and a
+    /// tapered fillet keeps it; against the wall the plate's R3 has no room at the narrow end
+    /// and tapers.
     #[test]
     fn taper_follows_the_room_along_the_edge() {
         let (at, start) = (Vec3::new(20.0, 0.0, 15.0), Vec3::new(0.0, 0.0, 15.0));
+        let plate = ledge();
+        let full = 6600.0 + 20.0 * 38.0 * 45.0;
+        assert!(matches!(crate::fillet(&plate, &[at], 3.0), Err(KernelError::TooLarge(_))));
+        let (f, tapers) = fillet_tapered(&plate, &[at], 3.0).unwrap();
+        let t = tapers.into_iter().flatten().next().unwrap();
+        let law = if t.start.dist(start) < 1e-9 { t.spline } else { t.spline.reversed() };
+        assert!((law.eval(0.0) - 3.0).abs() < 1e-9 && (law.eval(1.0) - 1.8).abs() < 1e-9);
+        let v = fine_volume(&f);
+        assert!(rel(v, full - removed(&law, 40.0)) < 1e-4, "{v} vs {}", full - removed(&law, 40.0));
+        // A radius that fits stays constant.
+        let (g, tapers) = fillet_tapered(&plate, &[at], 1.0).unwrap();
+        assert_eq!(tapers, vec![None]);
+        assert!(rel(measure(&g).unwrap().volume, measure(&crate::fillet(&plate, &[at], 1.0).unwrap()).unwrap().volume) < 1e-12);
+
         let wedge = prism(&[(0.0, 0.0), (40.0, 0.0), (0.0, 20.0)], 15.0);
-        assert!(matches!(crate::fillet(&wedge, &[at], 16.0), Err(KernelError::TooLarge(_))));
+        // At x the section is the rectangle [0, w] × [0, 15], w = 20 (1 − x/40), less the part
+        // of the 16 × 16 square at the edge outside the circle about (16, 16): integrated along x.
+        let cut = |w: f64| {
+            let (r, s, t) = (16.0f64, 16.0f64.min(w), 15.0);
+            let f = |v: f64| 0.5 * (v * (r * r - v * v).max(0.0).sqrt() + r * r * (v / r).clamp(-1.0, 1.0).asin());
+            let s1 = (r - (r * r - (r - t) * (r - t)).sqrt()).min(s);
+            t * s1 + r * (s - s1) - (f(r - s1) - f(r - s))
+        };
+        let n = 20000;
+        let removed16: f64 = (0..n).map(|i| cut(20.0 * (1.0 - (i as f64 + 0.5) / n as f64))).sum::<f64>() * 40.0 / n as f64;
+        let (f, tapers) = fillet_tapered(&wedge, &[at], 16.0).unwrap();
+        assert_eq!(tapers, vec![None]);
+        let v = measure(&f).unwrap().volume;
+        assert!(rel(v, 6000.0 - removed16) < 1e-6, "{v} vs {}", 6000.0 - removed16);
+        // The taper the room gives: the top face is 20 (1 − u) wide, the front 15 high.
         let t = taper(&wedge, at, 16.0).unwrap();
         let law = if t.start.dist(start) < 1e-9 { t.spline.clone() } else { t.spline.reversed() };
-        // The room: the top face is 20 (1 − u) wide, the front 15 high.
         for i in 0..=100 {
             let u = i as f64 / 100.0;
             let r = law.eval(u);
@@ -681,25 +727,11 @@ mod tests {
         }
         assert_eq!(law.eval(1.0), 0.0);
         assert!((law.eval(0.0) - 13.5).abs() < 1e-9);
-        let (f, tapers) = fillet_tapered(&wedge, &[at], 16.0).unwrap();
-        assert_eq!(tapers, vec![Some(t)]);
+        let f = fillet_variable_spline(&wedge, at, t.start, &t.spline).unwrap();
         let v = fine_volume(&f);
         assert!(rel(v, 6000.0 - removed(&law, 40.0)) < 1e-4, "{v} vs {}", 6000.0 - removed(&law, 40.0));
         assert_eq!(f.unmeshed_faces(), 0);
         assert!(faces_and_vertices(&f).0.contains(&3));
-
-        let trap = prism(&[(0.0, 0.0), (40.0, 0.0), (40.0, 2.0), (0.0, 20.0)], 15.0);
-        assert!(matches!(crate::fillet(&trap, &[at], 3.0), Err(KernelError::TooLarge(_))));
-        let (f, tapers) = fillet_tapered(&trap, &[at], 3.0).unwrap();
-        let t = tapers.into_iter().flatten().next().unwrap();
-        let law = if t.start.dist(start) < 1e-9 { t.spline } else { t.spline.reversed() };
-        assert!((law.eval(0.0) - 3.0).abs() < 1e-9 && (law.eval(1.0) - 1.8).abs() < 1e-9);
-        let v = fine_volume(&f);
-        assert!(rel(v, 6600.0 - removed(&law, 40.0)) < 1e-4, "{v} vs {}", 6600.0 - removed(&law, 40.0));
-        // A radius that fits stays constant.
-        let (g, tapers) = fillet_tapered(&trap, &[at], 1.0).unwrap();
-        assert_eq!(tapers, vec![None]);
-        assert!(rel(measure(&g).unwrap().volume, measure(&crate::fillet(&trap, &[at], 1.0).unwrap()).unwrap().volume) < 1e-12);
     }
 
     /// A radius spline given directly: a cubic with its control radii pulling the radius up in

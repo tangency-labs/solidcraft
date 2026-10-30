@@ -1154,8 +1154,11 @@ mod tests {
     fn the_feature_menu_copies_a_warning_message() {
         for left in [false, true] {
             let mut h = two_boxes(left);
-            // Too large for the box: reduced to what fits, which the feature's warning says.
-            h.app.run("solid.fillet", json!({"edges": [[5, 0, 10]], "radius": 20, "fit": "reduce", "body": "One"})).unwrap();
+            // Too large for the box: R6 on its four vertical edges would cross on the 10 mm faces,
+            // so it is reduced to what fits (a full round, 5), which the feature's warning says.
+            h.app
+                .run("solid.fillet", json!({"edges": [[0, 0, 5], [10, 0, 5], [10, 10, 5], [0, 10, 5]], "radius": 6, "fit": "reduce", "body": "One"}))
+                .unwrap();
             h.frames(4);
             let id = h.app.session.doc.features.last().map(|f| f.id).unwrap();
             let name = h.app.session.doc.features.last().map(|f| f.name.clone()).unwrap();

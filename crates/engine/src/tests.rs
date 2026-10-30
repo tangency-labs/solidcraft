@@ -4007,42 +4007,85 @@ fn fillet_fit_reduce_uses_the_largest_radius_that_fits() {
     assert!(s.execute("solid.fillet", &json!({"edges": mids, "radius": 1, "fit": "taper", "type": "chord"})).is_err());
 }
 
+/// A plate 15 high whose top narrows from 20 to `tip` mm along 40 mm (a wedge at 0), and, with
+/// `wall`, a wall standing behind its slanted side from z = -15 to 30, which the plate's top and
+/// bottom end on in concave edges: a blend of its front edges can't run past them.
+fn tapering_plate(tip: f64, wall: bool) -> Session {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY"}));
+    let pts = if tip > 0.0 { json!([[0, 0], [40, 0], [40, tip], [0, 20]]) } else { json!([[0, 0], [40, 0], [0, 20]]) };
+    run(&mut s, "sketch.line", json!({"points": pts, "closed": true}));
+    run(&mut s, "solid.extrude", json!({"distance": 15}));
+    if wall {
+        run(&mut s, "sketch.create", json!({"plane": {"origin": [0, 0, -15], "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]}}));
+        run(&mut s, "sketch.line", json!({"points": [[40, tip], [0, 20], [0, 30], [40, 30]], "closed": true}));
+        run(&mut s, "solid.extrude", json!({"distance": 45, "operation": "join"}));
+        assert_eq!(s.model.state().bodies.len(), 1);
+    }
+    s
+}
+
+/// [`tapering_plate`]'s volume: the plate, and the wall's 20 (40 − tip) section along 45.
+fn tapering_plate_volume(tip: f64, wall: bool) -> f64 {
+    (40.0 * (20.0 + tip) / 2.0) * 15.0 + if wall { 20.0 * (40.0 - tip) * 45.0 } else { 0.0 }
+}
+
 #[test]
 fn fillet_fit_taper_follows_the_room_along_the_edge() {
-    // #293: the top front edge of a plate whose top narrows from 20 to `tip` mm along 40 mm.
-    // At a 2 mm tip it can't take 3 mm; taper keeps 3 where it fits and comes down to 0.9 of the
-    // 2 mm there. With an 8 mm tip 3 fits and stays constant; a plate closing to a point
-    // tapers to 0. The warning says what was done.
+    // #293: the top front edge of a plate whose top narrows from 20 to `tip` mm along 40 mm,
+    // against a wall. At a 2 mm tip it can't take 3 mm; taper keeps 3 where it fits and comes
+    // down to 0.9 of the 2 mm there. With an 8 mm tip 3 fits and stays constant. The warning
+    // says what was done.
     let (k, edge) = (1.0 - PI / 4.0, json!([[20, 0, 15]]));
-    let plate = |tip: f64| {
-        let mut s = Session::default();
-        run(&mut s, "sketch.create", json!({"plane": "XY"}));
-        let pts = if tip > 0.0 { json!([[0, 0], [40, 0], [40, tip], [0, 20]]) } else { json!([[0, 0], [40, 0], [0, 20]]) };
-        run(&mut s, "sketch.line", json!({"points": pts, "closed": true}));
-        run(&mut s, "solid.extrude", json!({"distance": 15}));
-        s
-    };
     let warning = |s: &Session, out: &Value| out["feature"].as_u64().and_then(|id| s.model.result(id)).and_then(|r| r.warning.clone());
 
-    let mut s = plate(2.0);
+    let mut s = tapering_plate(2.0, true);
     assert!(s.execute("solid.fillet", &json!({"edges": edge, "radius": 3})).is_err());
     let out = run(&mut s, "solid.fillet", json!({"edges": edge, "radius": 3, "fit": "taper"}));
     let w = warning(&s, &out).unwrap_or_default();
     assert!(w.contains("tapers to the room on 1 of 1 edges, down to 1.8 mm"), "{w}");
     // Between the material a constant 1.8 and a constant 3 would remove.
-    let (v, full) = (volume(&mut s), 40.0 * 22.0 / 2.0 * 15.0);
+    let (v, full) = (volume(&mut s), tapering_plate_volume(2.0, true));
     assert!(v < full - k * 1.8 * 1.8 * 40.0 && v > full - k * 9.0 * 40.0, "{v}");
     let json = serde_json::to_string(&s.doc.features).unwrap();
     assert_eq!(json.matches("\"fit\":\"taper\"").count(), 1, "{json}");
 
-    let mut s = plate(8.0);
+    let mut s = tapering_plate(8.0, true);
     let out = run(&mut s, "solid.fillet", json!({"edges": edge, "radius": 3, "fit": "taper"}));
     assert_eq!(warning(&s, &out), None);
-    assert!(rel(volume(&mut s), 40.0 * 28.0 / 2.0 * 15.0 - k * 9.0 * 40.0) < 2e-4);
+    assert!(rel(volume(&mut s), tapering_plate_volume(8.0, true) - k * 9.0 * 40.0) < 2e-4);
 
-    let mut s = plate(0.0);
-    let out = run(&mut s, "solid.fillet", json!({"edges": edge, "radius": 16, "fit": "taper"}));
-    let w = warning(&s, &out).unwrap_or_default();
+    // Without the wall the 2 mm top's far edge is a cliff: R3 runs over it and is cut from the
+    // plate as if the top went on (the blend-overflow decision, 237f0ae74), so it fits and the
+    // taper leaves it constant. At x the plate's section is [0, w] × [0, 15], w = 20 − 0.45 x:
+    // the round takes its whole (1 − π/4)·9 where w >= 3, and where w < 3 the part of the
+    // 3 × 3 corner outside the circle about (3, 3) with s <= w, 3 w − (F(3) − F(3 − w)),
+    // F(v) = (v √(9 − v²) + 9 asin(v/3)) / 2.
+    let mut s = tapering_plate(2.0, false);
+    let out = run(&mut s, "solid.fillet", json!({"edges": edge, "radius": 3, "fit": "taper"}));
+    assert_eq!(warning(&s, &out), None);
+    let f = |v: f64| 0.5 * (v * (9.0 - v * v).max(0.0).sqrt() + 9.0 * (v / 3.0).asin());
+    let n = 20000;
+    let taken: f64 = (0..n)
+        .map(|i| {
+            let w = 20.0 - 0.45 * 40.0 * (i as f64 + 0.5) / n as f64;
+            if w >= 3.0 { 9.0 * k } else { 3.0 * w - (f(3.0) - f(3.0 - w)) }
+        })
+        .sum::<f64>()
+        * 40.0
+        / n as f64;
+    let want = tapering_plate_volume(2.0, false) - taken;
+    assert!(rel(volume(&mut s), want) < 1e-6, "{} vs {want}", volume(&mut s));
+}
+
+#[test]
+fn fillet_fit_taper_closes_to_a_point() {
+    // #293: a wedge against a wall, its top closing to a point at x = 40: no constant radius
+    // fits there, and taper comes down to 0 at the point.
+    let mut s = tapering_plate(0.0, true);
+    assert!(s.execute("solid.fillet", &json!({"edges": [[20, 0, 15]], "radius": 16})).is_err());
+    let out = run(&mut s, "solid.fillet", json!({"edges": [[20, 0, 15]], "radius": 16, "fit": "taper"}));
+    let w = out["feature"].as_u64().and_then(|id| s.model.result(id)).and_then(|r| r.warning.clone()).unwrap_or_default();
     assert!(w.contains("on 1 of 1 edges, down to 0 mm"), "{w}");
 }
 
@@ -4050,10 +4093,7 @@ fn fillet_fit_taper_follows_the_room_along_the_edge() {
 fn spline_fillet_takes_over_a_taper() {
     // A tapered fillet keeps each edge's radius spline; given back as a `spline` fillet it makes
     // the same part, and its control radii are then the user's to change.
-    let mut s = Session::default();
-    run(&mut s, "sketch.create", json!({"plane": "XY"}));
-    run(&mut s, "sketch.line", json!({"points": [[0, 0], [40, 0], [40, 2], [0, 20]], "closed": true}));
-    run(&mut s, "solid.extrude", json!({"distance": 15}));
+    let mut s = tapering_plate(2.0, true);
     let edge = json!([[20, 0, 15]]);
     let out = run(&mut s, "solid.fillet", json!({"edges": edge, "radius": 3, "fit": "taper"}));
     let id = out["feature"].as_u64().unwrap();
@@ -4079,29 +4119,54 @@ fn spline_fillet_takes_over_a_taper() {
 
 #[test]
 fn fillet_fit_reduce_keeps_the_radius_where_it_fits() {
-    // A 2 mm fin on a block: its top edge can't take 4, a corner of the block far from it can.
-    // Only the fin's edge is reduced; the reply gives each edge's radius.
+    // A 14 x 6 x 10 post on a block: its four vertical edges can't take 3.5 (two rounds on its
+    // 6 mm ends would cross), a corner of the block far from it can. Only the post's edges are
+    // reduced, to 3 (a full round); the reply gives each edge's radius.
     let mut s = Session::default();
     run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 20}));
-    run(&mut s, "solid.box", json!({"length": 2, "width": 30, "height": 10, "corner": [19, 0, 20], "operation": "join"}));
+    run(&mut s, "solid.box", json!({"length": 14, "width": 6, "height": 10, "corner": [2, 2, 20], "operation": "join"}));
     assert_eq!(s.model.state().bodies.len(), 1);
-    let edges = json!([[21, 15, 30], [40, 0, 10]]);
-    let out = run(&mut s, "solid.fillet", json!({"edges": edges, "radius": 4, "fit": "reduce"}));
-    let fin = out["radius_applied"].as_f64().unwrap();
-    assert!(fin < 4.0, "{out}");
+    let post = [[2.0, 2.0, 25.0], [16.0, 2.0, 25.0], [2.0, 8.0, 25.0], [16.0, 8.0, 25.0]];
+    let edges = json!([post[0], post[1], post[2], post[3], [40, 0, 10]]);
+    let out = run(&mut s, "solid.fillet", json!({"edges": edges, "radius": 3.5, "fit": "reduce"}));
+    assert_eq!(out["radius_applied"].as_f64(), Some(3.0), "{out}");
     let each: Vec<(Vec<f64>, f64)> = out["radii_applied"]
         .as_array()
         .unwrap()
         .iter()
         .map(|x| (x["edge"].as_array().unwrap().iter().filter_map(Value::as_f64).collect(), x["radius"].as_f64().unwrap()))
         .collect();
-    assert_eq!(each, [(vec![21.0, 15.0, 30.0], fin), (vec![40.0, 0.0, 10.0], 4.0)], "{out}");
-    let removed = (1.0 - PI / 4.0) * (fin * fin * 30.0 + 16.0 * 20.0);
-    let want = 40.0 * 30.0 * 20.0 + 2.0 * 30.0 * 10.0 - removed;
+    let mut want_each: Vec<(Vec<f64>, f64)> = post.iter().map(|p| (p.to_vec(), 3.0)).collect();
+    want_each.push((vec![40.0, 0.0, 10.0], 3.5));
+    assert_eq!(each, want_each, "{out}");
+    // The post's full round takes (4 − π)·9 of its section along its 10 mm height, the block's
+    // corner (1 − π/4)·3.5² along 20.
+    let removed = (4.0 - PI) * 9.0 * 10.0 + (1.0 - PI / 4.0) * 3.5 * 3.5 * 20.0;
+    let want = 40.0 * 30.0 * 20.0 + 14.0 * 6.0 * 10.0 - removed;
     assert!(rel(volume(&mut s), want) < 2e-4, "{} vs {want}", volume(&mut s));
     let id = out["feature"].as_u64().unwrap();
     let warning = s.model.result(id).and_then(|r| r.warning.clone()).unwrap_or_default();
-    assert!(warning.contains("on 1 of 2 edges"), "{warning}");
+    assert!(warning.contains("on 4 of 5 edges"), "{warning}");
+}
+
+/// A 2 mm fin's top edge at R4 runs over the fin's top, past its far edge (a cliff): it is cut
+/// as if the top went on (the blend-overflow decision), so with `fit: reduce` nothing is reduced.
+/// The fin's section loses the 4 x 4 square at its edge less the quarter disc about (17, 26)
+/// inside the fin (x >= 19), as `fillet_max_each_reduces_only_where_the_radius_does_not_fit`
+/// in the kernel finds it.
+#[test]
+fn fillet_fit_reduce_keeps_a_round_over_a_cliff() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 20}));
+    run(&mut s, "solid.box", json!({"length": 2, "width": 30, "height": 10, "corner": [19, 0, 20], "operation": "join"}));
+    let out = run(&mut s, "solid.fillet", json!({"edges": [[21, 15, 30], [40, 0, 10]], "radius": 4, "fit": "reduce"}));
+    assert_eq!(out["radius_applied"].as_f64(), None, "{out}");
+    let id = out["feature"].as_u64().unwrap();
+    assert_eq!(s.model.result(id).and_then(|r| r.warning.clone()), None);
+    let disc = |a: f64| 0.5 * (a * (16.0 - a * a).max(0.0).sqrt() + 16.0 * (a / 4.0).asin());
+    let removed = (2.0 * 4.0 - (disc(4.0) - disc(2.0))) * 30.0 + (1.0 - PI / 4.0) * 16.0 * 20.0;
+    let want = 40.0 * 30.0 * 20.0 + 2.0 * 30.0 * 10.0 - removed;
+    assert!(rel(volume(&mut s), want) < 1e-6, "{} vs {want}", volume(&mut s));
 }
 
 #[test]
