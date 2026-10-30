@@ -22,9 +22,8 @@
 //! ignored failure leaves `UNSURE`, which counts as inner. Upstream's face-use
 //! distribution loop reuses its index in the inner re-mark loop, so after each move the
 //! scan resumes past the count of distributed face uses; the port keeps that. A deleted
-//! region (`delete pRegion`, after `SM_NO_DESTRUCTION`) is reset in its arena like a
-//! deleted shell, with the void flag `UNSURE`; the infinite region moves to the head
-//! of the region list.
+//! region (`delete pRegion`, after `SM_NO_DESTRUCTION`) leaves its arena like a deleted
+//! shell; the infinite region moves to the head of the region list.
 //! Opt-in (WR-584, fork tangency-labs/smlib@69c5198):
 //! [`UpstreamFixes::boolean_new_face_closure_both_sides`](crate::kernel::UpstreamFixes::boolean_new_face_closure_both_sides)
 //! makes the closure test search from the face use and its mate at once
@@ -448,8 +447,7 @@ fn set_surface_owner(
 }
 
 // `delete pShell` of an emptied shell: `~SmShell` notifies `SM_NO_DESTRUCTION`
-// and resets the type. An arena record cannot be freed, so it is reset to
-// `SmShell()` (already off its region's list, so unreachable).
+// (already off its region's list), then its record leaves the arena.
 fn delete_shell(
     k: &mut Kernel,
     brep: &mut Brep,
@@ -469,7 +467,7 @@ fn delete_shell(
             None,
         ))
     })?;
-    *brep.shell_mut(shell)? = Shell::default();
+    brep.remove_shell_record(shell)?;
     Ok(())
 }
 
@@ -2256,8 +2254,7 @@ fn brep_remove_region(brep: &mut Brep, region: RegionId) -> Result<()> {
 }
 
 // `delete pRegion` of an emptied region: `~SmRegion` notifies `SM_NO_DESTRUCTION`
-// and sets the void flag to `UNSURE`. An arena record cannot be freed, so it is
-// reset (already off the B-rep's list, so unreachable).
+// (already off the B-rep's list), then its record leaves the arena.
 fn delete_region(
     k: &mut Kernel,
     brep: &mut Brep,
@@ -2277,11 +2274,7 @@ fn delete_region(
             None,
         ))
     })?;
-    *brep.region_mut(region)? = Region {
-        in_brep: false,
-        shells: Vec::new(),
-        is_void: crate::topology::brep_data::UNSURE,
-    };
+    brep.remove_region_record(region)?;
     Ok(())
 }
 
@@ -2525,7 +2518,8 @@ mod tests {
         .unwrap();
         let shell = made.shell.unwrap();
         assert_eq!(b.region(region).unwrap().shells, vec![shell]);
-        assert_eq!(b.shell(old_shell).unwrap(), &Shell::default());
+        // `delete pShell`: the emptied vertex shell's record left its arena
+        assert!(b.shell(old_shell).is_err());
         let uses = &b.vertex(v).unwrap().vertexuses;
         assert_eq!(uses.len(), 2);
         let face = b.face(made.face).unwrap();

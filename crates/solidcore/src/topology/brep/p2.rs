@@ -56,8 +56,8 @@
 //!   records to the arenas as they link them, not all up front; `MakeEdgeTopology`'s
 //!   `TransferChildrenTo` (the one shell call that can fail) runs before any new record
 //!   exists, so upstream's `SmObjDelete` guards have nothing to undo. The merged end
-//!   shell is deleted ([`shell::destroy`]); a deleted vertex shell's vertex use stays in
-//!   the arena, unlinked.
+//!   shell is deleted ([`shell::destroy`]), and a vertex shell's vertex use is deleted
+//!   with its record (`delete pVU`).
 //! - Opt-in (WR-585, fork tangency-labs/smlib@be8ac73):
 //!   [`UpstreamFixes::boolean_wire_edge_keeps_faceuse_shell`](crate::kernel::UpstreamFixes::boolean_wire_edge_keeps_faceuse_shell)
 //!   makes `MakeEdgeTopology`, joining a wire start shell to a faceuse end shell, move
@@ -1880,7 +1880,7 @@ fn attach_wire_edge(b: &mut Brep, s: ShellId, e: EdgeId, eu: EdgeuseId) -> Resul
     // If start shell was shell vertex make it a wire edge with pointer to newE.
     if shell_is_vertex_shell(b, s)? {
         let vu = shell_vertexuse(b, s)?;
-        remove_vertexuse_from_vertex(b, vu)?;
+        delete_vertexuse(b, vu)?;
         shell_set_wire_edgeuse(b, s, eu)?;
     }
 
@@ -1891,14 +1891,15 @@ fn attach_wire_edge(b: &mut Brep, s: ShellId, e: EdgeId, eu: EdgeuseId) -> Resul
     Ok(())
 }
 
-/// Removes vertex use `vu` from its vertex's list (`pVU->GetVertex()->Remove(pVU)`;
-/// the record stays in the arena, unreachable, as upstream deletes it).
-fn remove_vertexuse_from_vertex(b: &mut Brep, vu: VertexuseId) -> Result<()> {
+/// Removes vertex use `vu` from its vertex's list and deletes it
+/// (`pVU->GetVertex()->Remove(pVU)`, `delete pVU`: its record leaves the arena).
+fn delete_vertexuse(b: &mut Brep, vu: VertexuseId) -> Result<()> {
     let v = b
         .vertexuse(vu)?
         .vertex
         .ok_or(null_deref("vertex use without vertex"))?;
     b.vertex_mut(v)?.vertexuses.retain(|&x| x != vu);
+    b.remove_vertexuse_record(vu)?;
     Ok(())
 }
 
@@ -1975,7 +1976,7 @@ pub fn make_edge_topology(
         let mut remove_end = true;
         if shell_is_vertex_shell(b, end_shell)? {
             let vu = shell_vertexuse(b, end_shell)?;
-            remove_vertexuse_from_vertex(b, vu)?;
+            delete_vertexuse(b, vu)?;
             shell_clear_members(b, end_shell)?;
         } else if k.fixes.boolean_wire_edge_keeps_faceuse_shell
             && b.shell(start_shell)?.is_wire_shell()
@@ -3022,7 +3023,8 @@ mod tests {
     }
 
     /// `MakeEdgeTopology` between two shell vertices deletes the end vertex shell
-    /// (`delete pEndShell`): the region keeps one wire shell and the arena no orphan.
+    /// (`delete pEndShell`) and both shell vertex uses (`delete pVU`): the region keeps
+    /// one wire shell and the arenas no orphan (the edge's two vertex uses remain).
     #[test]
     fn edge_between_shell_vertices_deletes_the_merged_shell() {
         let mut k = Kernel::default();
@@ -3037,6 +3039,7 @@ mod tests {
         assert!(b.shell(end_shell).is_err());
         let region = b.infinite_region().unwrap();
         assert_eq!(b.region(region).unwrap().shells.len(), 1);
+        assert_eq!(b.vertexuses().len(), 2);
     }
 
     fn solution(objects: &[CacheObject], params: &[f64]) -> Solution<CacheObject> {

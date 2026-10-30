@@ -24,8 +24,8 @@
 //! Part 1's `add_*_record` appends a face, edge or vertex to its owning list at
 //! allocation; native `PostInsert`s later, with no same-kind allocation in between,
 //! so the list order matches, but a record allocated before a dependency error stays
-//! listed (native leaks it unlisted). Deleted loops and loop uses are reset in place
-//! (arena records cannot be freed), as part 1 deletes vertex uses. Topology record
+//! listed (native leaks it unlisted). Deleted loops and loop uses leave their arenas
+//! (`Brep::remove_*_record`), as part 1's deleted vertex uses do. Topology record
 //! construction uses the shared arena model (no allocator/debug notifications).
 //! Owned geometry arguments are dropped on Rust errors. The shell-to-no-shell
 //! retry is a two-pass loop (at most one retry), so there is no recursion. Inner
@@ -2150,14 +2150,17 @@ fn delete_loop_records(b: &mut Brep, loop_: LoopId, env: &mut edge::NotifyEnv<'_
             None,
         ))?;
     }
-    // `delete` of the loop and both loop uses. An arena record cannot be freed, so
-    // (as part 1's sm_RmAndDel_OldLoopVertices) the records are reset: RemoveLoop
-    // already unlinked both loop uses from their face uses.
-    *b.loopuse_mut(a)? = Loopuse::default();
-    *b.loopuse_mut(z)? = Loopuse::default();
-    let record = b.loop_mut(loop_)?;
-    record.edges.clear();
-    record.loopuse = None;
+    // `delete` of the loop and both loop uses (RemoveLoop already unlinked both loop
+    // uses from their face uses): their records leave the arenas, and the loop leaves
+    // its face's cached loop list (`Face::loops`), so no later read of that cache
+    // reaches the removed record.
+    let face = b.loop_(loop_)?.face;
+    b.remove_loopuse_record(a)?;
+    b.remove_loopuse_record(z)?;
+    b.remove_loop_record(loop_)?;
+    if let Ok(record) = b.face_mut(face) {
+        record.loops.retain(|&x| x != loop_);
+    }
     Ok(())
 }
 

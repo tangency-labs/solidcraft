@@ -77,7 +77,8 @@
 //!   (upstream overflows its stack or hangs on a cyclic radial walk; real loop
 //!   nestings are a handful).
 //! - `sm_RmAndDel_OldLoopVertices` deletes two vertex uses: the port unlinks them from
-//!   their vertex and resets their records (an arena record cannot be freed).
+//!   their vertex and removes their records (finding
+//!   `plan/findings/topology.brep--deleted-records-leave-their-arenas-follow-up.md`).
 //! - `sm_SetObjectMap` / `sm_GetObjectMap` keep an [`EntityRef`] `BTreeMap`
 //!   ([`ObjectMap`]) instead of the pointer hash map (plan hazard `ptr-hash`: upstream
 //!   `SmMapPtrToPtr` iteration order is pointer order; only lookups are used here) and
@@ -155,7 +156,7 @@ use crate::topology::topology_traverser::{Entity, Marks};
 use crate::topology::vertex;
 use crate::topology::vertexuse;
 use crate::topology::{
-    Brep, EdgeId, EdgeuseId, FaceId, LoopId, RegionId, ShellId, VertexId, Vertexuse, VertexuseId,
+    Brep, EdgeId, EdgeuseId, FaceId, LoopId, RegionId, ShellId, VertexId, VertexuseId,
 };
 
 /// `SmBoolean` `TRUE` / `FALSE`.
@@ -1224,7 +1225,7 @@ fn vertexuse_loop(b: &Brep, vu: VertexuseId) -> Result<Option<LoopId>> {
 
 /// `sm_RmAndDel_OldLoopVertices`: when `vu` is a loop vertex use, finds its partner
 /// (the next, else the previous, loop vertex use on the same loop in the vertex's
-/// list), removes both from the vertex and deletes them (their records are reset).
+/// list), removes both from the vertex and deletes them (their records are removed).
 ///
 /// # Errors
 ///
@@ -1266,8 +1267,8 @@ pub fn rm_and_del_old_loop_vertices(b: &mut Brep, vu: VertexuseId) -> Result<()>
     b.vertex_mut(v)?.vertexuses.retain(|&x| x != vu && x != del);
 
     // delete the LoopVertexuses
-    *b.vertexuse_mut(vu)? = Vertexuse::default();
-    *b.vertexuse_mut(del)? = Vertexuse::default();
+    b.remove_vertexuse_record(vu)?;
+    b.remove_vertexuse_record(del)?;
     Ok(())
 }
 

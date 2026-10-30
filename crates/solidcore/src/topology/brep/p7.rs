@@ -695,9 +695,10 @@ fn merge_shells(
 /// The tail of the shell merge once `reg` lost its last shell: `this->Remove(pReg)`
 /// (status ignored), then `m_pInfiniteRegion = m_pList`.
 fn remove_emptied_region(b: &mut Brep, reg: RegionId) -> Result<()> {
-    // Upstream deletes pReg even when Remove fails; a failed removal here leaves the
-    // region (and its in_brep) as it was. Unreachable: a merged shell's region is listed.
+    // Upstream deletes pReg even when Remove fails (unreachable: a merged shell's
+    // region is listed); `delete pReg` removes its record.
     ignore_status(brep_remove_region(b, reg))?;
+    b.remove_region_record(reg)?;
     // make sure infinite region points where it should: the first region of the list
     // (a stored head of None starts at the first region on the list; it is not an
     // empty list)
