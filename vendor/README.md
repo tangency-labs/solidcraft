@@ -365,3 +365,18 @@ SolidCraft changes:
   (the `wp::pointer_gestures` module); drop the example and test targets.
 - `src/event.rs`, `src/changelog/unreleased.md`: the platform notes of both events and the
   changelog entry.
+
+## gpu-allocator 0.28.0 (MIT OR Apache-2.0, Traverse Research and contributors)
+
+Original package sources from https://crates.io/crates/gpu-allocator/0.28.0 (repository
+https://github.com/Traverse-Research/gpu-allocator), with both original licence texts retained.
+The examples, README and lock file are not copied; the manifest's example targets are removed
+with them.
+
+SolidCraft changes:
+- `src/vulkan/mod.rs`: `MemoryLocation::CpuToGpu` prefers `HOST_VISIBLE | HOST_COHERENT` memory
+  instead of `HOST_VISIBLE | HOST_COHERENT | DEVICE_LOCAL`, so wgpu's staging and
+  mapped-for-writing buffers are in system RAM rather than VRAM mapped through Resizable BAR.
+  On an NVIDIA RTX 2000 Ada laptop GPU (driver 595, Linux) CPU writes into the BAR-mapped type
+  ran at about 35 MB/s; with this change the UI upload of 0.37 MB per frame takes 0.06 ms
+  instead of 10.6 ms and orbiting a large assembly goes from 25 to 164 frames per second (#3595).

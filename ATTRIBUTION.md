@@ -675,6 +675,7 @@ copied into SolidCraft.
 | vendor/truck-shapeops | truck-shapeops 0.4.0, https://github.com/ricosjp/truck (RICOS Co. Ltd.) | Apache-2.0 | robust meshing and nearest-parameter fallback in booleans; degenerate intersection-curve rejection; face and edge history of booleans; trace macro; corner choice at vertices several intersection curves end on; reuse of an operand's meshes (vendor/README.md) |
 | vendor/truck-geometry | truck-geometry 0.5.0, https://github.com/ricosjp/truck (RICOS Co. Ltd.) | Apache-2.0 | intersection curves divided from their neighbours' surface parameters; surface second derivatives (vendor/README.md) |
 | vendor/matext4cgmath | matext4cgmath 0.1.0, https://github.com/ricosjp/matext4cgmath (RICOS Co. Ltd.) | Apache-2.0 | root refinement stops after 100 Newton steps (vendor/README.md) |
+| vendor/gpu-allocator | gpu-allocator 0.28.0, https://github.com/Traverse-Research/gpu-allocator (Traverse Research and contributors) | MIT OR Apache-2.0 | Vulkan upload memory (`CpuToGpu`) prefers system RAM over BAR-mapped VRAM (vendor/README.md) |
 
 ## Vendored renderer compatibility fix
 
