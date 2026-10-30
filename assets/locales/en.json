@@ -1484,7 +1484,7 @@
   "help.solid.pipe": "Creates a round tube along a path of sketch curves, solid or hollow with a wall thickness. Use it for tubes, wires, cables and rails.",
   "help.solid.press_pull": "Adds or removes material as you drag a face, or rounds edges as you drag them. Use it for quick changes straight on the model.",
   "help.solid.remove": "Takes the selected bodies out of the design from this point in the timeline on; earlier steps keep them. Use it to drop a helper body, such as a cutting tool you no longer need.",
-  "help.solid.replace_face": "Moves the selected flat faces onto a plane or onto a parallel face, and the body grows or shrinks to meet it. Use it to bring a face flush with another part or a construction plane.",
+  "help.solid.replace_face": "Replaces selected faces with a plane or face surface, extending or trimming their neighbours to keep the body closed. Unsupported intersections are refused.",
   "help.solid.revolve": "Spins a sketch profile around an axis to make a round solid. Use it for shafts, knobs, bowls and any part that is round about a center line.",
   "help.solid.rib": "Adds a thin wall along an open sketch curve, filled out to the next faces of the body. Use it to stiffen walls and corners, for example in moulded or printed parts.",
   "help.solid.scale": "Makes the selected bodies larger or smaller by a factor, the same in every direction or one per axis. Use it to resize an imported shape or to allow for shrinkage.",

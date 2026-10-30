@@ -1,0 +1,19 @@
+{
+  "en": {
+    "ui.delete_face_heal": "Heal (close the gap)",
+    "ui.delete_face_heal_hint": "Turn off to leave an open surface body for further surface editing."
+  },
+  "zh": {
+    "ui.delete_face_heal": "修复（封闭缺口）",
+    "ui.delete_face_heal_hint": "关闭后保留开口片体，可继续进行曲面编辑。"
+  },
+  "ja": {
+    "ui.delete_face_heal": "修復（隙間を閉じる）"
+  },
+  "de": {
+    "ui.delete_face_heal": "Heilen (Lücke schließen)"
+  },
+  "ko": {
+    "ui.delete_face_heal": "복구 (틈 닫기)"
+  }
+}
