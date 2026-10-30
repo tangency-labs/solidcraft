@@ -491,6 +491,11 @@ pub struct Dialog {
     pub(crate) chain_applied: bool,
     /// A pattern's objects of the Object Type not shown now, restored when it is chosen again.
     pub(crate) other_objects: Vec<Sel>,
+    /// The multi-pick input whose picked items are listed under it, each removable (#3683).
+    pub(crate) listed: Option<usize>,
+    /// The listed item (and its input) whose row is under the pointer: the view lights it as a
+    /// hover (`viewport::list_hover`).
+    pub(crate) list_hover: Option<(usize, Sel)>,
     /// Shell feedback is derived from the picks, never saved as additional face references.
     shell_chain: std::cell::RefCell<Option<ShellChain>>,
     /// An extrude Press Pull opened with nothing selected: its first pick may be a curved face or
@@ -750,6 +755,8 @@ impl Dialog {
             picked_edges: Vec::new(),
             chain_applied,
             other_objects: Vec::new(),
+            listed: None,
+            list_hover: None,
             shell_chain: Default::default(),
             press_pull: false,
             op_auto: Default::default(),
@@ -1742,6 +1749,61 @@ impl Dialog {
         inp.items = items;
         self.error = None;
     }
+
+    /// What input `i`'s list of picked items shows, one row each (#3683): what its chip counts.
+    /// A rim or a surface split into pieces is one row, as it is one pick; a Shell with Tangent
+    /// Chain lists every face it opens.
+    pub(crate) fn listed_items(&self, s: &Session, i: usize) -> Vec<Sel> {
+        if i == 0
+            && let Some(faces) = self.shell_faces(s)
+        {
+            return faces;
+        }
+        let mut rows: Vec<Sel> = Vec::new();
+        let mut shown: Vec<Sel> = Vec::new();
+        for item in self.inputs.get(i).map(|inp| inp.items.as_slice()).unwrap_or_default() {
+            if shown.iter().any(|x| selection::same_item(x, item)) {
+                continue;
+            }
+            shown.extend(crate::viewport::grouped_selection(s, item));
+            rows.push(item.clone());
+        }
+        rows
+    }
+
+    /// Remove a listed row's item from input `i`, as picking it again toggles it off: the
+    /// pieces of its rim or surface go with it, and the hand-picked edges and the explicit
+    /// profile choice follow. A face a Shell's tangent chain opens goes with the picks whose
+    /// chain holds it.
+    pub(crate) fn remove_listed(&mut self, s: &Session, i: usize, item: &Sel) {
+        let shell_chain = i == 0 && self.shell_faces(s).is_some();
+        let state = s.world_state();
+        let Some(inp) = self.inputs.get_mut(i) else { return };
+        if shell_chain {
+            let Sel::Face { body, index, .. } = item else { return };
+            inp.items.retain(|pick| {
+                let Sel::Face { body: b, point, .. } = pick else { return true };
+                b != body || !state.body(b).is_some_and(|m| solidcraft_engine::doc::tangent_face_chain(m, &[*point]).iter().any(|(f, _)| f == index))
+            });
+        } else {
+            let mut gone = crate::viewport::grouped_selection(s, item);
+            gone.push(item.clone());
+            inp.items.retain(|x| !gone.iter().any(|g| selection::same_item(x, g)));
+            if i == 0 {
+                self.picked_edges.retain(|x| !gone.iter().any(|g| selection::same_item(x, g)));
+            }
+        }
+        let empty = inp.items.is_empty();
+        if empty && self.listed == Some(i) {
+            self.listed = None;
+        }
+        if i == 0 && matches!(self.kind, Kind::Extrude { .. } | Kind::Revolve { .. } | Kind::Emboss { .. }) {
+            self.profile_selection_changed = true;
+        }
+        self.list_hover = None;
+        self.error = None;
+        self.sync_thread(s);
+    }
 }
 
 /// The edges a Fillet or Chamfer pick stands for: its tangent chain when `chain` is on, else
@@ -2593,6 +2655,8 @@ pub(crate) fn input_rows_range(d: &mut Dialog, ui: &mut egui::Ui, s: &Session, n
     let mut clear: Option<usize> = None;
     let mut activate: Option<usize> = None;
     let mut remove = None;
+    let mut toggle_list: Option<usize> = None;
+    let mut hovered: Option<(usize, Sel)> = None;
     let shell_count = d.shell_faces(s).map(|faces| faces.len());
     for (i, inp) in d.inputs.iter().enumerate().skip(range.start).take(range.end.saturating_sub(range.start)) {
         let stored_reference = feature_pattern_reference_key(d, i).and_then(|key| d.extra.get(key)).filter(|_| inp.items.is_empty());
@@ -2658,22 +2722,51 @@ pub(crate) fn input_rows_range(d: &mut Dialog, ui: &mut egui::Ui, s: &Session, n
                     if button.clicked() {
                         clear = Some(i);
                     }
+                    // Several picks: an arrow beside the clear button lists them, each with its
+                    // own remove button (#3683). Drawn straight into the row, which is this field's
+                    // own: a scope around it would take room and widen the dialog.
+                    if inp.multi {
+                        let open = d.listed == Some(i);
+                        let at = rect.translate(vec2(-t.space_24, 0.0));
+                        let label = crate::i18n::tr_label(if open { "Hide the picked items" } else { "Show the picked items" });
+                        let arrow = crate::ui_kit::disclosure_button_at(ui, at, open, label);
+                        crate::scenario::publish_handle(&format!("dialog:list_toggle:{}", inp.label), arrow.rect.center());
+                        if arrow.clicked() {
+                            toggle_list = Some(i);
+                        }
+                    }
                 }
             });
         });
-        if matches!(d.kind, Kind::SketchModify(_)) && inp.multi {
-            for (index, item) in inp.items.iter().enumerate() {
-                if crate::ui_kit::list_row(ui, &format!("{}:{index}", inp.label), &selection_label(s, names, d, inp, item)).clicked() {
-                    remove = Some((i, index));
+        if inp.multi && d.listed == Some(i) && !inp.items.is_empty() {
+            let rows = d.listed_items(s, i);
+            egui::ScrollArea::vertical().id_salt(("picked_items", i)).max_height(t.control_height * 6.5).show(ui, |ui| {
+                for (index, item) in rows.into_iter().enumerate() {
+                    let row = crate::ui_kit::list_row(ui, &format!("{}:{index}", inp.label), &selection_label(s, names, d, inp, &item));
+                    if row.hovered() {
+                        hovered = Some((i, item.clone()));
+                    }
+                    if row.clicked() {
+                        remove = Some((i, item));
+                    }
                 }
-            }
+            });
         }
     }
-    if let Some((input, index)) = remove
-        && let Some(input) = d.inputs.get_mut(input)
-        && index < input.items.len()
-    {
-        input.items.remove(index);
+    // The row under the pointer lights its item in the view; rows of inputs drawn elsewhere
+    // keep theirs.
+    let ours = |h: &Option<(usize, Sel)>| h.as_ref().is_some_and(|(i, _)| range.contains(i));
+    if hovered.is_some() || ours(&d.list_hover) {
+        if d.list_hover != hovered {
+            ui.ctx().request_repaint();
+        }
+        d.list_hover = hovered;
+    }
+    if let Some(i) = toggle_list {
+        d.listed = if d.listed == Some(i) { None } else { Some(i) };
+    }
+    if let Some((input, item)) = remove {
+        d.remove_listed(s, input, &item);
     }
     if let Some(i) = activate {
         d.active = i;
@@ -2681,6 +2774,10 @@ pub(crate) fn input_rows_range(d: &mut Dialog, ui: &mut egui::Ui, s: &Session, n
     if let Some(i) = clear {
         if let Some(key) = feature_pattern_reference_key(d, i) {
             d.extra.remove(key);
+        }
+        if d.listed == Some(i) {
+            d.listed = None;
+            d.list_hover = None;
         }
         let Some(inp) = d.inputs.get_mut(i) else { return };
         inp.items.clear();
