@@ -139,6 +139,7 @@ mod surfaces;
 mod sweep_path;
 #[cfg(test)]
 mod sweep_rails_tests;
+mod tangent_edge;
 mod tess;
 #[cfg(test)]
 mod thin_face_tests;
