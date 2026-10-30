@@ -1,0 +1,24 @@
+{
+ "sources": [],
+ "what": "the four rim edges of a rectangular pocket rounded r2 (convex edges meeting at the pocket's concave corners)",
+ "source": "analytic",
+ "method": "plate 60x40x10 with the pocket 30x20x5 (x 15..45, y 10..30, floor z = 5, sharp vertical corners): V0 = 24000 - 3000 = 21000. Each convex rim edge loses the spandrel A = 0.858407 along its length (100 in all); at each corner of the pocket the two rounds run on past the corner into the material beyond it and meet in a mitre, so the quadrant there loses what both remove: the overlap of their spandrel prisms, r^3 (5/3 - pi/2) = 0.766963. Removed = 100 A + 4 overlap = 88.9086. V = 20911.0914. Faces 15.",
+ "body_count": 1,
+ "volume_mm3": 20911.091414483082,
+ "faces": 15,
+ "bbox": {
+  "min": [
+   0,
+   0,
+   0
+  ],
+  "max": [
+   60,
+   40,
+   10
+  ]
+ },
+ "continuity": {
+  "order": "g1"
+ }
+}
