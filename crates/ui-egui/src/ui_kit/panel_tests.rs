@@ -1211,3 +1211,21 @@ fn bevel_lighting_reverses_for_fields_and_pressed_buttons_without_changing_geome
     let output = crate::test_support::frame(&ctx, egui::RawInput::default(), |ui| bevel.paint(ui.painter(), tiny, 0, false, true));
     assert!(!output.shapes.iter().any(|s| matches!(&s.shape, egui::Shape::LineSegment { .. })));
 }
+
+/// A left-anchored panel in a view that came out inside out keeps an anchor instead of
+/// panicking in `f32::clamp`, as the layout beside it did in #9492.
+#[test]
+fn a_left_panel_in_an_inside_out_view_keeps_an_anchor() {
+    let ctx = crate::fonts::test_context();
+    let inside_out = egui::Rect::from_min_max(egui::pos2(264.1875, 40.0), egui::pos2(159.0, 600.0));
+    let panel = super::Panel::new(
+        "Panel",
+        egui::Id::new("inside_out_panel"),
+        egui::pos2(200.0, 80.0),
+        inside_out,
+        crate::frame::Side::Left,
+        egui::Frame::NONE,
+    );
+    let anchor = panel.bounded_anchor(&ctx);
+    assert!(anchor.x.is_finite() && anchor.y.is_finite(), "{anchor:?}");
+}

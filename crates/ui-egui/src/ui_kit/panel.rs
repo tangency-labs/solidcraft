@@ -652,7 +652,7 @@ impl<'a> Panel<'a> {
                 viewport.left() + width,
                 (viewport.right() - if gap > 0.0 { Tokens::get().space_8 } else { 0.0 }).max(viewport.left() + width),
             ),
-            crate::frame::Side::Left => self.anchor.x.clamp(viewport.left(), viewport.right() - width),
+            crate::frame::Side::Left => crate::shell::within(self.anchor.x, viewport.left(), viewport.right() - width),
         };
         let t = Tokens::get();
         let chrome = t.form_header_height + t.form_footer_height + t.form_gap_y * 2.0 + self.frame.total_margin().sum().y + gap;

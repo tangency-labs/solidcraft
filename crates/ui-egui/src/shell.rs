@@ -214,7 +214,7 @@ pub(crate) fn content_rect(app: &SolveApp, viewport: Rect) -> Rect {
 
 /// `v` kept within `lo..=hi`, or `lo` when that range is empty: `f32::clamp` panics on
 /// `lo > hi`, which a rect squeezed to nothing between cards gives.
-fn within(v: f32, lo: f32, hi: f32) -> f32 {
+pub(crate) fn within(v: f32, lo: f32, hi: f32) -> f32 {
     if lo <= hi { v.clamp(lo, hi) } else { lo }
 }
 

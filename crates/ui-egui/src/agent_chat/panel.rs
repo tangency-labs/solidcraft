@@ -161,9 +161,9 @@ pub(crate) fn tool_space(app: &SolveApp, mut available: Rect) -> Rect {
         && let Some(chat) = app.agent_chat.panel_rect.filter(|r| r.is_finite() && r.is_positive())
     {
         if app.preferences.agent_chat_side == "left" {
-            available.min.x = (chat.right() + crate::shell::SHELL_GAP).clamp(available.left(), available.right());
+            available.min.x = crate::shell::within(chat.right() + crate::shell::SHELL_GAP, available.left(), available.right());
         } else {
-            available.max.x = (chat.left() - crate::shell::SHELL_GAP).clamp(available.left(), available.right());
+            available.max.x = crate::shell::within(chat.left() - crate::shell::SHELL_GAP, available.left(), available.right());
         }
     }
     available

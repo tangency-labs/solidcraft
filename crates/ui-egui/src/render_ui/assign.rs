@@ -531,8 +531,8 @@ pub(crate) fn selection_bar(app: &mut SolveApp, ui: &mut egui::Ui, free: egui::R
         })
         .collect::<Vec<_>>();
     let anchor = egui::pos2(
-        screen.center().x.clamp(free.left(), free.right()),
-        (screen.top() - crate::theme::Tokens::get().space_12).clamp(free.top(), free.bottom()),
+        crate::shell::within(screen.center().x, free.left(), free.right()),
+        crate::shell::within(screen.top() - crate::theme::Tokens::get().space_12, free.top(), free.bottom()),
     );
     let ctx = ui.ctx().clone();
     let pill = ui_kit::Container::selection_card(&ctx, egui::Id::new("render_selection"), anchor, free, |ui| {

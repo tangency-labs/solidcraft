@@ -2902,3 +2902,21 @@ fn the_composer_hint_stays_on_one_row_at_the_narrowest_width() {
     }
     assert!(checked >= 20, "every language was checked");
 }
+
+/// The room tool windows get beside the docked Assistant, in a view that came out inside out
+/// (the window of #9492): the Assistant's side gives way instead of panicking in `f32::clamp`.
+#[test]
+fn tool_room_beside_the_docked_assistant_survives_an_inside_out_view() {
+    let mut app = SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
+    app.ui.layout = crate::shell::LayoutMode::Floating;
+    app.preferences.ai_features = true;
+    app.agent_chat.open = true;
+    app.preferences.agent_chat_popped = false;
+    app.agent_chat.panel_rect = Some(egui::Rect::from_min_max(egui::pos2(100.0, 40.0), egui::pos2(150.0, 600.0)));
+    let inside_out = egui::Rect::from_min_max(egui::pos2(264.1875, 40.0), egui::pos2(159.0, 600.0));
+    for side in ["right", "left"] {
+        app.preferences.agent_chat_side = side.into();
+        let free = tool_space(&app, inside_out);
+        assert!(free.min.x.is_finite() && free.max.x.is_finite(), "{side}: {free:?}");
+    }
+}
