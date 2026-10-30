@@ -213,19 +213,31 @@ fn a_record_per_sheet_numbers_each_sheet_apart() {
 fn a_record_round_trips_through_json_and_damaged_ones_are_refused() {
     let mut record = RevisionRecord { numbering: Numbering::Letters, ..RevisionRecord::default() };
     let a = add(&mut record, None).unwrap();
+    let b = add(&mut record, None).unwrap();
+    let version = |change: &str| ModelVersion { path: "parts/bracket.solidcraft".into(), change: change.into() };
     record.issue(a, None).unwrap();
-    record.issue(a, Some("3f2a9c1e")).unwrap();
+    record.issue(b, Some(version("3f2a9c1e"))).unwrap();
     add_tag(&mut record, a).unwrap();
     // The issued copies keep the model version they were issued against; the row has none.
-    let versions: Vec<_> = record.issued().iter().map(|r| r.model_version.as_deref()).collect();
-    assert_eq!((versions, record.rows()[0].model_version.as_deref()), (vec![None, Some("3f2a9c1e")], None));
-    assert_eq!(record.issue(a, Some("x\ny")), Err(Invalid("a label is one line of at most 4096 bytes")));
+    let versions: Vec<_> = record.issued().iter().map(|r| r.model_version.clone()).collect();
+    assert_eq!((versions, record.rows()[1].model_version.clone()), (vec![None, Some(version("3f2a9c1e"))], None));
+    let c = add(&mut record, None).unwrap();
+    for bad in [version("x\ny"), ModelVersion { path: "x\ny".into(), change: "c".into() }] {
+        assert_eq!(record.issue(c, Some(bad)), Err(Invalid("a label is one line of at most 4096 bytes")));
+    }
     assert_eq!(record.issued().len(), 2, "a refused version issues nothing");
+    // Once for each row, and its copy is counted with it.
+    assert_eq!(record.issue(a, None), Err(Invalid("a row is issued once: make a new revision")));
+    assert_eq!(record.ids().filter(|id| *id == a).count(), 1);
+    record.delete(a).unwrap();
+    assert_eq!(record.ids().filter(|id| *id == a).count(), 1, "the copy keeps its id with its row gone");
+    // A tag still bound, beside the one that has lost its row and answers for it itself.
+    add_tag(&mut record, b).unwrap();
     let json = serde_json::to_value(&record).unwrap();
     assert_eq!(json["numbering"], json!("letters"));
     let id = json!(crate::ids::encode(a));
     assert_eq!(
-        (&json["rows"][0]["id"], &json["tags"][0]["row"], &json["rows"][0]["sheet"]),
+        (&json["issued"][0]["id"], &json["tags"][0]["row"], &json["issued"][0]["sheet"]),
         (&id, &id, &json!(null)),
         "ids as every drawing writes them"
     );
@@ -254,12 +266,14 @@ fn a_record_round_trips_through_json_and_damaged_ones_are_refused() {
         (&|v| v["rows"][0]["sheet"] = json!(crate::ids::encode(3)), "a row has a sheet when the record is kept per sheet, and only then"),
         (&|v| v["tags"][0]["size_mm"] = json!(0.5), "a tag's side is 1 to 50 mm"),
         (&|v| v["tags"][0]["size_mm"] = json!(50.001), "a tag's side is 1 to 50 mm"),
-        (&|v| v["tags"][0]["row"] = json!(crate::ids::encode(99)), "a tag is bound to a row"),
+        (&|v| v["tags"][1]["row"] = json!(crate::ids::encode(99)), "a tag is bound to a row"),
         (&|v| v["rows"] = json!([]), "a tag is bound to a row"),
         (&|v| v["rows"][0]["revision"] = json!("A\nB"), "a label is one line of at most 4096 bytes"),
         (&|v| v["issued"][0]["date"] = json!("\u{1}"), "a cell's text has no control character but a line break"),
         (&|v| v["tags"][0]["text"] = json!("x\ny"), "a label is one line of at most 4096 bytes"),
-        (&|v| v["issued"][1]["model_version"] = json!("x\ny"), "a label is one line of at most 4096 bytes"),
+        (&|v| v["issued"][1]["model_version"]["change"] = json!("x\ny"), "a label is one line of at most 4096 bytes"),
+        (&|v| v["issued"][1]["id"] = v["issued"][0]["id"].clone(), "a row is issued once"),
+        (&|v| v["tags"][0]["id"] = v["issued"][1]["id"].clone(), "each row and tag has its own id"),
         (&|v| v["rows"] = json!(vec![json!({"id": crate::ids::encode(1), "revision": "A"}); 1001]), "a record has at most 1000 rows"),
     ] {
         assert_eq!(damaged(change), Err(Invalid(message)), "{message}");
@@ -276,9 +290,13 @@ fn the_caps_hold() {
     assert_eq!(record.rows().last().unwrap().revision, "1000");
     let first = record.rows()[0].id;
     for _ in 0..MAX_ISSUED {
-        record.issue(first, None).unwrap();
         add_tag(&mut record, first).unwrap();
     }
+    // The copies of rows long deleted, as a record that has lived a while holds them.
+    let mut json = serde_json::to_value(&record).unwrap();
+    let copy = |i: usize| json!({"id": crate::ids::encode(u64::MAX / 2 + i as u64), "revision": "1"});
+    json["issued"] = (0..MAX_ISSUED).map(copy).collect();
+    let mut record: RevisionRecord = serde_json::from_value(json).unwrap();
     assert_eq!(record.issue(first, None), Err(Invalid("a record's issued history holds at most 10,000 entries")));
     assert_eq!(add_tag(&mut record, first), Err(Invalid("a record has at most 10,000 tags")));
     record.validate().unwrap();

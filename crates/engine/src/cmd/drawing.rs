@@ -398,7 +398,11 @@ fn inspect(s: &mut Session, _p: &Value) -> Result<Value> {
         "properties": d.properties,
         "sources": d.sources.iter().map(|source| json!({"id": ids::encode(source.id)})).collect::<Vec<_>>(),
         "sheets": sheets,
-        "revisions": {"rows": super::drawing_revision::rows(&d.revisions), "next": d.revisions.next_revision(None)},
+        "revisions": {
+            "rows": super::drawing_revision::rows(&d.revisions),
+            "next": d.revisions.next_revision(None),
+            "issued": super::drawing_revision::issued(&d.revisions),
+        },
     }))
 }
 

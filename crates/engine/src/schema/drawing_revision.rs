@@ -68,6 +68,21 @@ pub struct RevisionAddParams {
     pub set: RowSet,
 }
 
+/// What `drawing.revise` takes.
+#[derive(Debug, Default, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+#[schemars(deny_unknown_fields)]
+pub struct ReviseParams {
+    /// The row to issue, as it reads. Left out, a new revision is added and issued.
+    #[serde(default, deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "RowIdParam")]
+    pub row: Option<RowIdParam>,
+    /// A new revision's texts: not given with `row`, which changes nothing in it.
+    #[serde(default, deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "RowSet")]
+    pub set: Option<RowSet>,
+}
+
 /// What `drawing.revision.edit` takes.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -85,6 +100,13 @@ pub struct RevisionDeleteParams {
     pub row: RowIdParam,
 }
 
+/// The design a revision was issued from: both parts opaque text from the version history.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct VersionResult {
+    pub path: String,
+    pub change: String,
+}
+
 /// One row, as the revision table shows it.
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct RowResult {
@@ -95,6 +117,9 @@ pub struct RowResult {
     pub checker: String,
     pub date: String,
     pub hidden: bool,
+    /// An issued copy's: the design it was issued from, when there is a version to name.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub version: Option<VersionResult>,
 }
 
 /// What the revision commands return.
@@ -107,6 +132,12 @@ pub struct RevisionsResult {
     pub rows: Vec<RowResult>,
     /// The revision the next row gets, or none when nothing follows the highest.
     pub next: Option<String>,
+    /// The issued history, the oldest first: each copy as it read when issued.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub issued: Vec<RowResult>,
+    /// What `drawing.revise` issued against, when there is a version to name.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub version: Option<VersionResult>,
     /// What an edit changed.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub changed: Vec<String>,
