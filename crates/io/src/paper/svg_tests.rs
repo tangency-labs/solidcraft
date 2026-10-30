@@ -168,7 +168,7 @@ fn the_svg_reader_reads_it_back() {
 /// Text isn't written yet (B2): a scene with a run is refused by name, never written without it.
 #[test]
 fn text_is_refused_by_name_until_the_writer_learns_it() {
-    use solidcraft_geom::paper::text::{Cluster, Font, FontFlags, FontGlyph, FontMetrics, PlacedGlyph, TextRun};
+    use solidcraft_geom::paper::text::{Cluster, Embed, Font, FontFlags, FontGlyph, FontMetrics, PlacedGlyph, TextRun};
     let metrics = FontMetrics {
         ascent: 900,
         descent: -200,
@@ -184,6 +184,7 @@ fn text_is_refused_by_name_until_the_writer_learns_it() {
         bytes: std::sync::Arc::from(vec![1u8]),
         face: 0,
         postscript_name: "MadeUp".into(),
+        embed: Embed::Subset,
         num_glyphs: 2,
         units_per_em: 1000,
         metrics,

@@ -8,9 +8,17 @@
 //!   [`paper_font_note`] says so. A run names its font by the font's id ([`Font::id`]).
 //! - Bold takes the family's bold face, and is refused without one; an italic takes its italic
 //!   face, or leans as sketch text's made-up italic does.
-//! - A face is admitted once a process, the first time it is asked for: a static face (a PDF
-//!   embeds a face's default outlines) with a PostScript name, a cap height and a `post` table, its
-//!   stem width measured from its `l` (no table gives it). One that lacks any of them is refused.
+//! - A face is admitted once a process, the first time it is asked for (#4890 F2). Any face with
+//!   outlines is: a variable one at its default instance (what a PDF draws), with the cap height sketch
+//!   text scales it by, and what its tables lack made up for:
+//!   - a PostScript name of what a PDF name can hold of its own, else of its family and style, else
+//!     `Font-` and the start of its id;
+//!   - without a `post` table, no italic angle, and a fixed pitch when every glyph advances alike;
+//!   - its stem width measured across its `l` (no table gives it), else from its weight (a PDF reader
+//!     uses it only to choose a stand-in, never for an embedded font).
+//!
+//!   How a PDF may carry it ([`Embed`]) comes from its embedding permissions. A bitmap or colour-only
+//!   face, with no outlines to fill, is refused.
 //! - A character the font has no glyph for is refused by name: sketch's `?` stand-in is never set
 //!   on paper.
 //! - Lines break at `\n`, a line pitch apart, and are aligned as sketch text's are. A line with
@@ -22,7 +30,9 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
 
 use sha2::{Digest, Sha256};
-use solidcraft_geom::paper::text::{Cluster, Font, FontFlags, FontGlyph, FontMetrics, PlacedGlyph, TextRun};
+use solidcraft_geom::paper::text::{
+    Cluster, Embed, Font, FontFlags, FontGlyph, FontMetrics, MAX_POSTSCRIPT_NAME, PlacedGlyph, TextRun, is_postscript_char,
+};
 use solidcraft_geom::{Loop2, Vec2};
 
 use crate::fonts::{DEFAULT_FONT_FAMILY, FontData, check_family, find_style_in, font_data, font_dirs, normalize};
@@ -191,23 +201,22 @@ fn admitted(data: &FontData) -> std::result::Result<Font, String> {
 
 fn admit(data: &FontData) -> std::result::Result<Font, String> {
     let face = ttf_parser::Face::parse(data.bytes(), data.index).map_err(|e| e.to_string())?;
-    if face.is_variable() {
-        return Err("it is a variable face".into());
+    let tables = face.tables();
+    if tables.glyf.is_none() && tables.cff.is_none() && tables.cff2.is_none() {
+        return Err("it has no outlines: a bitmap or colour font".into());
     }
-    let name = face.names().into_iter().filter(|n| n.name_id == ttf_parser::name_id::POST_SCRIPT_NAME).find_map(|n| n.to_string());
-    let postscript_name = name.ok_or("it has no PostScript name")?;
-    let cap_height = face.capital_height().filter(|c| *c > 0).ok_or("it has no cap height")?;
-    if face.tables().post.is_none() {
-        return Err("it has no post table".into());
-    }
-    let stem_v =
-        stem(&face, &TextMetrics::new(data, &TextStyle::default()).map_err(|e| e.to_string())?).ok_or("it has no upright stem to measure")?;
+    let id: [u8; 32] = Sha256::new().chain_update(data.bytes()).chain_update(data.index.to_le_bytes()).finalize().into();
+    let metrics = TextMetrics::new(data, &TextStyle::default()).map_err(|e| e.to_string())?;
+    // At most 70 % of 16384 units per em, or a table's own i16.
+    let cap_height = metrics.cap().round() as i16;
+    let fixed_pitch = if tables.post.is_some() { face.is_monospaced() } else { same_advances(&face) };
     let b = face.global_bounding_box();
     Ok(Font {
-        id: Sha256::new().chain_update(data.bytes()).chain_update(data.index.to_le_bytes()).finalize().into(),
+        id,
         bytes: Arc::from(data.bytes()),
         face: data.index,
-        postscript_name,
+        postscript_name: postscript_name(&face, &id),
+        embed: embed(&face),
         num_glyphs: face.number_of_glyphs(),
         units_per_em: face.units_per_em(),
         metrics: FontMetrics {
@@ -216,11 +225,54 @@ fn admit(data: &FontData) -> std::result::Result<Font, String> {
             cap_height,
             bbox: [b.x_min, b.y_min, b.x_max, b.y_max],
             italic_angle: f64::from(face.italic_angle()),
-            flags: FontFlags { fixed_pitch: face.is_monospaced(), serif: serif(&face), italic: face.is_italic(), symbolic: false },
-            stem_v,
+            flags: FontFlags { fixed_pitch, serif: serif(&face), italic: face.is_italic(), symbolic: false },
+            stem_v: stem(&face, &metrics).unwrap_or_else(|| weight_stem(&face)),
         },
         glyphs: BTreeMap::new(),
     })
+}
+
+/// The face's PostScript name as a PDF takes it: what a PDF name can hold of its own, else of its
+/// family and style, else `Font-` and the first 4 bytes of its id in hex.
+fn postscript_name(face: &ttf_parser::Face, id: &[u8; 32]) -> String {
+    use ttf_parser::name_id::{FAMILY, POST_SCRIPT_NAME, SUBFAMILY, TYPOGRAPHIC_FAMILY, TYPOGRAPHIC_SUBFAMILY};
+    let name = |ids: &[u16]| ids.iter().find_map(|&want| face.names().into_iter().filter(|n| n.name_id == want).find_map(|n| n.to_string()));
+    let held = |s: String| -> Option<String> {
+        let kept: String = s.chars().filter(|c| is_postscript_char(*c)).take(MAX_POSTSCRIPT_NAME).collect();
+        Some(kept.trim_matches('-').to_string()).filter(|n| !n.is_empty())
+    };
+    let made = || held(format!("{}-{}", name(&[TYPOGRAPHIC_FAMILY, FAMILY])?, name(&[TYPOGRAPHIC_SUBFAMILY, SUBFAMILY]).unwrap_or_default()));
+    let hex: String = id.iter().take(4).map(|b| format!("{b:02X}")).collect();
+    name(&[POST_SCRIPT_NAME]).and_then(held).or_else(made).unwrap_or_else(|| format!("Font-{hex}"))
+}
+
+/// How a PDF may carry the face: not at all when its licence restricts it (fsType 0x0002) or allows
+/// only its bitmaps (0x0200), or its outlines are CFF2, which a PDF can't hold; whole when it may
+/// not be subset (0x0100); else a subset.
+fn embed(face: &ttf_parser::Face) -> Embed {
+    let os2 = face.tables().os2;
+    let restricted = os2.is_some_and(|t| matches!(t.permissions(), Some(ttf_parser::Permissions::Restricted)) || !t.is_outline_embedding_allowed());
+    if restricted || face.tables().cff2.is_some() {
+        Embed::Outlines
+    } else if os2.is_some_and(|t| !t.is_subsetting_allowed()) {
+        Embed::Whole
+    } else {
+        Embed::Subset
+    }
+}
+
+/// Whether every glyph that advances advances alike: a fixed pitch, for a face with no `post`
+/// table to say so.
+fn same_advances(face: &ttf_parser::Face) -> bool {
+    let mut advances = (0..face.number_of_glyphs()).filter_map(|g| face.glyph_hor_advance(ttf_parser::GlyphId(g))).filter(|a| *a > 0);
+    advances.next().is_some_and(|first| advances.all(|a| a == first))
+}
+
+/// A stem width from the face's weight, for a face with no `l` or `I` to measure: a fifth of its
+/// weight class per thousand units of em (80 for a regular weight).
+fn weight_stem(face: &ttf_parser::Face) -> u16 {
+    let per_em = f64::from(face.weight().to_number()) / 5.0 / 1000.0;
+    (per_em * f64::from(face.units_per_em())).round().clamp(1.0, f64::from(u16::MAX)) as u16
 }
 
 /// Whether a face has serifs, by its OS/2 family class (the high byte of `sFamilyClass`, at byte

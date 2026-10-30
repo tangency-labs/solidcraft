@@ -12,6 +12,8 @@
 //!   only the faces it has read).
 //! - Glyph outlines are filled nonzero: a font's contours may overlap, where the scene's own fills
 //!   are even-odd.
+//! - Each font says how a PDF may carry it ([`Embed`]): a subset, the whole face, or not at all,
+//!   when the PDF draws its glyphs' outlines with the run's text beside them instead.
 //!
 //! [`Scene::validate`] holds the text to these rules too:
 //! - fonts listed by id, each once and each used by a run; its bytes there, at most
@@ -45,7 +47,7 @@ pub const MAX_FONT_BYTES: usize = 64 << 20;
 /// The most pieces one glyph's outline may have.
 pub const MAX_GLYPH_PIECES: usize = 4096;
 /// The longest name a PDF takes.
-const MAX_POSTSCRIPT_NAME: usize = 127;
+pub const MAX_POSTSCRIPT_NAME: usize = 127;
 /// The cap heights sketch text may be set at, in millimetres: above a micrometre, below a
 /// kilometre.
 const CAP_HEIGHT_MM: (f64, f64) = (1e-6, 1e6);
@@ -61,14 +63,36 @@ pub struct Font {
     pub bytes: Arc<[u8]>,
     /// The face in the file.
     pub face: u32,
-    /// What a PDF names it by.
+    /// What a PDF names it by ([`is_postscript_char`]).
     pub postscript_name: String,
+    /// How a PDF may carry it.
+    pub embed: Embed,
     /// How many glyphs the face has: every glyph id is below it.
     pub num_glyphs: u16,
     pub units_per_em: u16,
     pub metrics: FontMetrics,
     /// The glyphs the scene's runs place, by id, and no others.
     pub glyphs: BTreeMap<u16, FontGlyph>,
+}
+
+/// How a PDF may carry a font, from its embedding permissions (OS/2 `fsType`) and the kind of its
+/// outlines.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Embed {
+    /// The glyphs its runs place, as a subset of the face.
+    #[default]
+    Subset,
+    /// The whole face: it may not be subset.
+    Whole,
+    /// Not at all (its licence restricts it, or a PDF can't hold its outlines): the PDF draws the
+    /// runs' outlines ([`TextRun::outlines`]) with their text beside them.
+    Outlines,
+}
+
+/// A character a PDF's font name may hold: printable ASCII, none of `()<>[]{}/%`.
+pub fn is_postscript_char(c: char) -> bool {
+    c.is_ascii_graphic() && !"()<>[]{}/%".contains(c)
 }
 
 /// What a PDF's font descriptor needs, read from the face's own tables (head, hhea, OS/2, post),
@@ -191,7 +215,7 @@ impl Font {
         let bytes = !self.bytes.is_empty() && self.bytes.len() <= MAX_FONT_BYTES;
         require(bytes, "a font has its bytes, at most 64 MiB: a scene read from JSON takes them from the font of its id")?;
         let name = &self.postscript_name;
-        require((1..=MAX_POSTSCRIPT_NAME).contains(&name.len()) && name.bytes().all(|b| b.is_ascii_graphic() && !b"()<>[]{}/%".contains(&b)), NAMES)?;
+        require((1..=MAX_POSTSCRIPT_NAME).contains(&name.len()) && name.chars().all(is_postscript_char), NAMES)?;
         require(self.num_glyphs > 0 && (16..=16384).contains(&self.units_per_em), "a font has glyphs, and 16 to 16384 units per em")?;
         require(self.metrics.cap_height > 0 && self.metrics.italic_angle.is_finite(), "a font's cap height is above 0 and its italic angle finite")?;
         for (id, glyph) in &self.glyphs {
