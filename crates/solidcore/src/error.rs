@@ -285,6 +285,11 @@ pub const SM_ERR_WARNING: i32 = 1023;
 /// ignore (its usual mapping is [`SolidError::InvalidInput`]).
 pub const SM_ERR_INVALID_INPUT: i32 = 1007;
 
+/// Upstream `SmStatus` value `SM_ERR_OUT_OF_MEMORY` (`SmMessages.h`), as carried by
+/// [`SolidError::Upstream`] where an `SM_API` wrapper returns it for an output array
+/// that cannot grow.
+pub const SM_ERR_OUT_OF_MEMORY: i32 = 1002;
+
 /// SMLib fork status `SM_ERR_OFFSET_WALLS_TOUCH` (tangency-labs/smlib a759622,
 /// `SmMessages.h`; not in the pinned upstream), as carried by [`SolidError::Upstream`]:
 /// an offset (a shell, a solid offset) whose walls would meet, because loops of an offset
