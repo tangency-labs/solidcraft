@@ -223,12 +223,17 @@ mod tests {
     #[test]
     fn three_rounds_at_a_corner() {
         let (bx, a, b, c) = setup();
-        // Two rounds meeting in a mitre, then the third edge: a sphere octant.
+        // Two rounds meeting in a mitre, then the third edge with its tangent chain, as the Fillet
+        // feature asks for it (84bd2daad): the mitre's seam leaves c's end along c, so the chain
+        // is c and the seam, and the corner is a sphere octant. The cube less its three rounds
+        // (each (1 − π/4) r² over its 18 mm straight part) and the corner's 2 mm cube less the
+        // octant (r³ (1 − π/6)).
         let ab = fillet(&bx, &[a, b], 2.0).unwrap();
-        let r = fillet(&ab, &[c], 2.0).unwrap();
+        let r = fillet(&ab, &crate::tangent_chain(&ab, &[c]).unwrap(), 2.0).unwrap();
         let sphere = 8000.0 - 3.0 * (1.0 - std::f64::consts::FRAC_PI_4) * 4.0 * 18.0 - 8.0 * (1.0 - std::f64::consts::PI / 6.0);
         assert_eq!(r.face_count(), 10);
-        assert!((vol(&r) - sphere).abs() < 0.05, "{} vs {sphere}", vol(&r));
+        assert!(r.validity().is_empty(), "{:?}", r.validity());
+        assert!((vol(&r) - sphere).abs() < 1e-11 * sphere, "{} vs {sphere}", vol(&r));
         assert!(kink(&r) < 0.01);
         // Different radii: a smooth patch over the corner, slightly more than the strips take.
         for (rs, sel) in [((2.0, 2.0, 3.0), fillet(&ab, &[c], 3.0)), ((2.0, 3.0, 4.0), fillet_radii(&bx, &[(a, 2.0), (b, 3.0), (c, 4.0)]))] {
