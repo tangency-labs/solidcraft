@@ -239,16 +239,11 @@ fn a_round_ending_in_an_earlier_round_matches_both_together() {
         (arc_top(), TIP),
         (BACK, TIP),
         (arc_top(), BACK),
+        // The other order (the arc's round once left 0.05 mm³ more at the knife-edge tip).
+        (BACK, arc_top()),
     ] {
         one_then_the_other(first, then);
     }
-}
-
-/// The back edge rounded first, then the arc's top edge: the same solid as both together, or the
-/// other order (the arc's round once left 0.05 mm³ more at the knife-edge tip).
-#[test]
-fn the_arc_rounded_after_the_back_edge_matches_both_together() {
-    one_then_the_other(BACK, arc_top());
 }
 
 /// The edge at `first` rounded (2), then the one at `then` as a fillet of its own, each with its
