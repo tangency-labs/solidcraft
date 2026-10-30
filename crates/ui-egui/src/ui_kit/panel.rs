@@ -1036,10 +1036,13 @@ impl<'a> Window<'a> {
                 if self.body_padding {
                     let height =
                         (dimension(ui.ctx().content_rect().height()) - t.form_header_height - t.form_footer_height - t.space_24 * 2.0).max(0.0);
+                    // Offer the body all the room the screen leaves, not just the height the card
+                    // had last frame: a card first laid out on a tiny page (a browser canvas not
+                    // sized yet) would otherwise keep a body of no height, its buttons hidden (#9472).
                     egui::ScrollArea::vertical()
                         .id_salt("window_body")
                         .max_height(height)
-                        .min_scrolled_height(0.0)
+                        .min_scrolled_height(height)
                         .auto_shrink([false, true])
                         .show(ui, body);
                 } else {
