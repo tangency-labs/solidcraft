@@ -47,7 +47,7 @@ pub static COMMANDS: &[CommandSpec] = &[
          or joints?: [joint id or name] (their glyphs; they still constrain and move parts); \
          or features?: [feature id or name] (the bodies they made; path?: [occurrence ids] for only that placement's); \
          or folder?: bodies|sketches|construction|origin|joints|all (all of it; showing also shows its browser folders and groups, and `all` takes in the occurrence hides too); \
-         or tree_folders?: [browser folder or group key: c0/bodies, o:4/sketches, c0/g7, c0/joints, c0/canvases, c0/point_clouds] (the folder or group itself: its items keep their own state); \
+         or tree_folders?: [browser folder or group key: c0/bodies, o:4/sketches, o:4/origin, c0/g7, c0/joints, c0/canvases, c0/point_clouds] (the folder or group itself: its items keep their own state; component origin items use o:4/origin/XY etc. in items); \
          or paths?: [[occurrence ids]] (exact placements and descendants), isolate?: bool (requires paths and visible:true). Saved with the design and undone like any other change (the camera is not)",
     ),
     CommandSpec::new("browser.expand_all", "Expand All", expand_all).icon("folder").noundo().params(
@@ -87,7 +87,7 @@ fn keys(p: &Value, k: &str, cmd: &str) -> Result<Vec<String>> {
         _ => None,
     };
     let v = v.ok_or_else(|| bad(cmd, format!("`{k}` must be a list of item keys")))?;
-    if v.len() > 10_000 || v.iter().any(|x| x.is_empty() || x.len() > 256) {
+    if v.len() > 10_000 || v.iter().any(|x| x.is_empty() || (x.len() > 256 && crate::origins::item(x).is_none())) {
         return Err(bad(cmd, format!("`{k}` has bad keys")));
     }
     Ok(v)
@@ -204,6 +204,9 @@ fn is_construction(k: &FeatureKind) -> bool {
 /// or by name), then a body, then a joint. With no exact match the name is compared without
 /// regard to case, as it always was: a feature first, then an origin item.
 fn shown_item(s: &Session, key: &str) -> Option<Shown> {
+    if s.origin_geometry(key).is_some() {
+        return Some(Shown::Origin(key.to_string()));
+    }
     shown_item_exact(s, key).or_else(|| shown_item_ignore_case(s, key))
 }
 
@@ -255,6 +258,9 @@ fn shown_feature(s: &Session, f: &solidcraft_doc::Feature, key: &str) -> Option<
 /// A browser folder or group key (`Visibility::hidden_folders`): `c0` or `o:<ids>`, then
 /// `/bodies`, `/sketches`, `/construction`, `/joints`, `/canvases` or `/g<group id>`.
 fn tree_folder_key(k: &str) -> bool {
+    if crate::origins::folder_path(k).is_some() {
+        return true;
+    }
     let Some((scope, last)) = k.rsplit_once('/') else { return false };
     let scope_ok =
         scope == "c0" || scope.strip_prefix("o:").is_some_and(|ids| ids.split('/').count() <= 64 && ids.split('/').all(|i| i.parse::<u64>().is_ok()));
@@ -284,7 +290,27 @@ fn visibility(s: &mut Session, p: &Value) -> Result<Value> {
                 })
             })
             .collect::<Result<_>>()?;
+        for path in keys.iter().filter_map(|key| crate::origins::folder_path(key)) {
+            s.occurrence_placement(&path).map_err(|e| bad(cmd, e.to_string()))?;
+        }
+        if visible {
+            let mut shown: BTreeSet<_> = s.visibility.shown_component_origins.iter().cloned().collect();
+            shown.extend(keys.iter().filter_map(|key| crate::origins::folder_path(key)));
+            if shown.len() > crate::origins::MAX_SHOWN {
+                return Err(bad(cmd, "at most 10000 component origins can be shown at once"));
+            }
+        }
         for k in &keys {
+            if let Some(path) = crate::origins::folder_path(k) {
+                if visible {
+                    if !s.visibility.shown_component_origins.contains(&path) {
+                        s.visibility.shown_component_origins.push(path);
+                    }
+                } else {
+                    s.visibility.shown_component_origins.retain(|p| p != &path);
+                }
+                continue;
+            }
             s.visibility.hidden_folders.retain(|h| h != k);
             if !visible {
                 s.visibility.hidden_folders.push(k.clone());
@@ -542,6 +568,9 @@ fn collect_component_keys(s: &Session, prefix: &str, component: u64, root_extras
         keys.closed.insert(format!("{prefix}/features"));
     }
     let occurrence = prefix.starts_with("o:");
+    if occurrence {
+        keys.closed.insert(format!("{prefix}/origin"));
+    }
     for f in s.doc.features.iter().filter(|f| f.component == component) {
         if let FeatureKind::Sketch { sketch, .. } = &f.kind
             && !sketch.patterns.is_empty()

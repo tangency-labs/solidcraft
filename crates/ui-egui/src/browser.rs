@@ -362,6 +362,9 @@ pub fn group_items(app: &SolveApp, id: u64, scope: &str) -> Vec<Item> {
 
 /// The menu of a folder row (Bodies, Sketches, Construction).
 pub fn folder_items(app: &SolveApp, component: u64, folder: &str, scope: &str) -> Vec<Item> {
+    if folder == "origin" {
+        return vec![Item::action("ui.folderVisible", "Show/Hide", "eye").key("V").with(json!({"key":format!("{scope}/origin")}))];
+    }
     let sel: Vec<String> = selected_keys(app, component, folder);
     let all = entries(app, component, folder);
     let mut v = Vec::new();
@@ -1657,6 +1660,9 @@ fn occurrence_rows_inner(
         return;
     }
     let render = crate::render_workspace::active(app);
+    if !render {
+        origin_rows_at(app, ui, depth + 1, acts, path);
+    }
     for (slot, folder) in placement.folders.iter_mut().zip(["bodies", "sketches", "construction"]) {
         if render && folder != "bodies" {
             continue;
@@ -1742,49 +1748,90 @@ fn origin_things() -> [(&'static str, &'static str, Option<Thing>); 7] {
 }
 
 fn origin_rows(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize, acts: &mut Actions) {
-    let key = "origin";
+    origin_rows_at(app, ui, depth, acts, &[]);
+}
+
+fn origin_rows_at(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize, acts: &mut Actions, path: &[u64]) {
+    let component = !path.is_empty();
+    let folder = solidcraft_engine::origins::folder(path);
+    let key = if component { folder.as_str() } else { "origin" };
+    let shown = if component { !app.session.folder_hidden(key) } else { app.origin_shown() };
+    let faded = !shown || (component && !app.session.occurrence_visible(path));
     let open = is_open(app, key, false);
     let lit = |thing: &Option<Thing>| thing.as_ref().map_or((false, false), |t| acts.lit.thing(t));
-    let items = origin_things();
+    let items: Vec<_> = origin_things()
+        .into_iter()
+        .map(|(k, icon, thing)| {
+            let name = if component { solidcraft_engine::origins::key(path, k) } else { k.into() };
+            let thing = if component {
+                Some(match icon {
+                    "plane" => Thing::Plane(name.clone()),
+                    "axis" => Thing::Axis(name.clone()),
+                    _ => Thing::Point(name.clone()),
+                })
+            } else {
+                thing
+            };
+            (k, name, icon, thing)
+        })
+        .collect();
     let r = draw_row(
         ui,
         ui.id().with(key),
         &Row {
             depth,
             fold: Some(open),
-            eye: Some(app.origin_shown()),
+            eye: Some(shown),
             icon: "origin",
             label: "Origin",
-            dim: !app.origin_shown(),
-            mark: if items.iter().any(|(_, _, thing)| lit(thing) != (false, false)) { Mark::Branch } else { Mark::None },
+            handle: component.then_some(key),
+            dim: faded,
+            mark: if items.iter().any(|(_, _, _, thing)| lit(thing) != (false, false)) { Mark::Branch } else { Mark::None },
             ..Default::default()
         },
     );
     if r.fold || r.clicked {
         toggle(app, key, false);
+        if component && r.clicked {
+            pick_folder(app, key);
+        }
     }
     if r.eye {
-        app.set_origin_shown(!app.origin_shown());
+        if component {
+            toggle_folder(app, key);
+        } else {
+            app.set_origin_shown(!shown);
+        }
     }
     if let Some(p) = r.secondary {
-        crate::context_menu::open_for(app, p, Target::Origin);
+        let target = if component {
+            Target::Folder {
+                component: app.session.occurrence_placement(path).map_or(0, |p| p.component),
+                folder: "origin".into(),
+                scope: solidcraft_engine::Session::folder_scope(path),
+            }
+        } else {
+            Target::Origin
+        };
+        crate::context_menu::open_for(app, p, target);
     }
     if !open {
         return;
     }
-    for (k, icon, thing) in items {
+    for (k, name, icon, thing) in items {
         // An origin plane by the name the preferences give it; its key stays the id.
         let label = app.preferences.origin_plane_names.label(k);
-        let visible = !app.session.visibility.hidden_origin.iter().any(|h| h == k);
+        let visible = !app.session.visibility.hidden_origin.contains(&name);
         let sel = match icon {
-            "plane" => Some(Sel::Plane { name: k.into() }),
-            "axis" => Some(Sel::Axis { name: k.into() }),
+            "plane" => Some(Sel::Plane { name: name.clone() }),
+            "axis" => Some(Sel::Axis { name: name.clone() }),
+            _ if component => Some(Sel::ConstructionPoint { name: name.clone() }),
             _ => Some(Sel::Vertex { body: String::new(), point: solidcraft_engine::geom::Vec3::ZERO }),
         };
         let (selected, mark) = lit_row(lit(&thing));
         let r = draw_row(
             ui,
-            ui.id().with(("o", k)),
+            ui.id().with(("o", &name)),
             // Faded when hidden itself or with the whole Origin. A renamed plane's label is already
             // in the interface's language (`name`).
             &Row {
@@ -1792,21 +1839,22 @@ fn origin_rows(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize, acts: &mut A
                 eye: Some(visible),
                 icon,
                 label,
+                handle: component.then_some(name.as_str()),
                 name: label != k,
                 selected,
-                dim: !visible || !app.origin_shown(),
+                dim: !visible || faded,
                 mark,
                 ..Default::default()
             },
         );
         if r.eye {
             // Through the command, so the Origin row's eye is an undo step (#2219).
-            let _ = app.run("browser.visibility", json!({ "items": [k], "visible": !visible }));
+            let _ = app.run("browser.visibility", json!({ "items": [&name], "visible": !visible }));
         }
         if let Some(p) = r.secondary {
             let target = match icon {
-                "plane" => Some(Target::OriginPlane { name: k.into() }),
-                "axis" => Some(Target::OriginAxis { name: k.into() }),
+                "plane" => Some(Target::OriginPlane { name: name.clone() }),
+                "axis" => Some(Target::OriginAxis { name: name.clone() }),
                 _ => None,
             };
             if let Some(target) = target {
@@ -1814,7 +1862,7 @@ fn origin_rows(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize, acts: &mut A
             }
         }
         if r.hovered && icon == "plane" {
-            acts.hover_plane = Some(k.into());
+            acts.hover_plane = Some(name);
         }
         if r.clicked
             && let Some(x) = sel

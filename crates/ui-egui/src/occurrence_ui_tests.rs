@@ -4,6 +4,44 @@ use serde_json::json;
 use solidcraft_engine::Sel;
 
 #[test]
+fn new_component_has_its_own_origin_folder() {
+    let mut h = Harness::new();
+    let created = h.app.run("component.create", json!({"name":"Part"})).unwrap();
+    let occurrence = created["occurrence"].as_u64().unwrap();
+    h.frames(3);
+    assert_eq!(super::drawn_rows().iter().filter(|row| row.0 == "Origin").count(), 2, "the design and the component each have an Origin");
+    h.step(&json!({"click":{"handle":format!("fold:o:{occurrence}/origin")}})).unwrap();
+    for item in ["O", "X", "Y", "Z", "XY", "XZ", "YZ"] {
+        assert!(crate::scenario::handle_at(&format!("row:o:{occurrence}/origin/{item}")).is_some(), "missing component origin item {item}");
+    }
+    assert!(!h.app.tree.expanded.contains("origin"), "opening the component origin must not open the design origin");
+}
+
+#[test]
+fn component_origin_plane_can_start_a_sketch_after_the_component_moves() {
+    use solidcraft_engine::geom::Vec3;
+    let mut h = Harness::new();
+    let created = h.app.run("component.create", json!({"name":"Part","grounded":false})).unwrap();
+    let occurrence = created["occurrence"].as_u64().unwrap();
+    h.app.run("occurrence.move", json!({"occurrence":occurrence,"translate":[20,30,40],"axis":[1,0,0],"angle":"90 deg"})).unwrap();
+    h.frames(3);
+    h.step(&json!({"click":{"handle":format!("fold:o:{occurrence}/origin")}})).unwrap();
+    h.step(&json!({"click":{"handle":format!("eye:o:{occurrence}/origin")}})).unwrap();
+    assert!(h.app.origin_shown(), "the component eye must not toggle the design origin");
+    assert_eq!(crate::viewport::construction_points(&h.app).len(), 1);
+    assert_eq!(crate::viewport::construction_axis_segments(&h.app).len(), 3);
+    assert_eq!(crate::viewport::construction_quads(&h.app).len(), 3);
+    h.app.start("sketch.create");
+    h.frames(2);
+    h.step(&json!({"click":{"handle":format!("row:o:{occurrence}/origin/XY")}})).unwrap();
+    let sketch = h.app.session.active_sketch.expect("the component plane starts the sketch");
+    let state = h.app.session.world_state();
+    let plane = state.sketch(sketch).unwrap().plane;
+    assert!(plane.origin.dist(Vec3::new(20., 30., 40.)) < 1e-8);
+    assert!(plane.normal().dot(Vec3::Y).abs() > 1. - 1e-8);
+}
+
+#[test]
 fn replaced_body_name_uses_evaluated_owner_in_browser_and_component_actions() {
     let mut h = Harness::new();
     h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"body_name":"Block"})).unwrap();

@@ -26,6 +26,8 @@ pub(crate) struct Row<'a> {
     pub(crate) eye: Option<bool>,
     pub(crate) icon: &'a str,
     pub(crate) label: &'a str,
+    /// A stable automation identity when several rows have the same visible label.
+    pub(crate) handle: Option<&'a str>,
     /// The label is a name someone gave (a body, sketch, component, …): it is shown as typed,
     /// not translated when it happens to match a UI label.
     pub(crate) name: bool,
@@ -119,6 +121,7 @@ pub(crate) fn tree_row_rect(ui: &egui::Ui, row: &Row<'_>) -> Rect {
 }
 
 pub(crate) fn tree_row(ui: &mut egui::Ui, id: egui::Id, row: &Row) -> RowResp {
+    let handle = row.handle.unwrap_or(row.label);
     let t = Tokens::get();
     // Rows scrolled out of view only take their space: no widgets, no painting.
     let r = tree_row_rect(ui, row);
@@ -213,7 +216,7 @@ pub(crate) fn tree_row(ui: &mut egui::Ui, id: egui::Id, row: &Row) -> RowResp {
     if let Some(open) = row.fold {
         crate::ui_kit::disclosure(ui.painter(), pos2(x + 6.0, cy), open, if hover_on == 1 { t.text } else { t.text_dim });
         out.fold = resp.clicked() && click_on == 1;
-        crate::scenario::publish_handle(&format!("fold:{}", row.label), fold_r.center());
+        crate::scenario::publish_handle(&format!("fold:{handle}"), fold_r.center());
     }
     x += if row.compact { t.space_16 } else { 14.0 };
     // Eye.
@@ -224,7 +227,7 @@ pub(crate) fn tree_row(ui: &mut egui::Ui, id: egui::Id, row: &Row) -> RowResp {
         icons::paint_icon(ui.painter(), er, if vis { "eye" } else { "suppress" }, if vis && !row.dim { 0.85 } else { DIM_ICON_OPACITY });
         out.eye = resp.clicked() && click_on == 2;
         out.eye_rect = Some(eye_r.intersect(ui.clip_rect()));
-        crate::scenario::publish_handle(&format!("eye:{}", row.label), er.center());
+        crate::scenario::publish_handle(&format!("eye:{handle}"), er.center());
     }
     if !row.compact {
         x += 18.0;
@@ -273,7 +276,7 @@ pub(crate) fn tree_row(ui: &mut egui::Ui, id: egui::Id, row: &Row) -> RowResp {
         right -= t.space_16;
         let sr = Rect::from_center_size(pos2(right + t.space_8, cy), vec2(t.space_14, t.space_14));
         icons::paint_icon(ui.painter(), sr, status.icon(), 1.0);
-        crate::scenario::publish_handle(&format!("status:{}:{}", status.icon(), row.label), sr.center());
+        crate::scenario::publish_handle(&format!("status:{}:{handle}", status.icon()), sr.center());
         right -= t.space_4;
     }
     for text in [row.count, row.secondary, if row.compact { row.subtitle } else { "" }] {
@@ -333,9 +336,9 @@ pub(crate) fn tree_row(ui: &mut egui::Ui, id: egui::Id, row: &Row) -> RowResp {
         let ir = Rect::from_center_size(action_r.center(), vec2(t.space_14, t.space_14));
         icons::paint_icon(ui.painter(), ir, icon, if action_hover { 1.0 } else { 0.6 });
         out.action = resp.clicked() && action_click;
-        crate::scenario::publish_handle(&format!("action:{}", row.label), action_r.center());
+        crate::scenario::publish_handle(&format!("action:{handle}"), action_r.center());
     }
-    crate::scenario::publish_handle(&format!("row:{}", row.label), r.center());
+    crate::scenario::publish_handle(&format!("row:{handle}"), r.center());
     let tip = match hover_on {
         0 if action_hover => row.action.map(|(_, tip)| crate::i18n::tr_label(tip)),
         1 => Some(if row.fold == Some(true) { crate::i18n::tr("ui.collapse") } else { crate::i18n::tr("ui.expand") }),
