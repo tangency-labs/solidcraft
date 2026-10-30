@@ -68,6 +68,7 @@ pub mod drawing_balloon;
 pub mod drawing_dimension;
 pub mod drawing_export;
 pub mod drawing_image;
+pub mod drawing_note;
 pub mod drawing_revision;
 pub mod drawing_scene;
 pub mod drawing_sheet;

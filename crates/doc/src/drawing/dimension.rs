@@ -343,7 +343,7 @@ fn check_face(face: &ModelFace) -> Result<()> {
     check_reference_name(&face.name)
 }
 
-fn check_point(point: &ModelPoint) -> Result<()> {
+pub(super) fn check_point(point: &ModelPoint) -> Result<()> {
     check_body(&point.body, point.origin_feature, &point.path)?;
     if point.centre {
         require(point.edges.len() == 1, || "a centre is of one named circle or arc".into())?;
@@ -786,6 +786,21 @@ impl<'a> Lookup<'a> {
         Ok(self.named.entry(i).or_insert_with(|| BodyEdges::new(b)))
     }
 
+    /// The middle of the edge `edge` names, in the design's frame, where a balloon's arrow or a note's
+    /// leader ends: how it stands, the point, and whether it was found by exact history. A split edge
+    /// has no one middle: the pieces are listed, and none is chosen.
+    pub(super) fn middle(&mut self, edge: &ModelEdge) -> (Status, Option<Vec3>, bool) {
+        match self.edges(edge) {
+            Ok(found) if !found.whole => (Status::Ambiguous(edge_candidates(&edge.body, &found)), None, false),
+            Ok(found) => {
+                let point = found.pieces.first().and_then(|(_, line)| crate::joints::edge::middle(line)).map(|(p, _)| p);
+                let status = if point.is_some() { Status::Ok } else { Status::Lost(format!("edge `{}` has no length", edge.name)) };
+                (status, point, found.exact)
+            }
+            Err(status) => (status, None, false),
+        }
+    }
+
     /// The edges `edge` names: the one edge, or the pieces of it. One piece is that edge, though not
     /// found exactly: a name saved from a split face finds it on a body with the one face.
     pub(super) fn edges(&mut self, edge: &ModelEdge) -> std::result::Result<Edges, Status> {
@@ -858,7 +873,7 @@ impl<'a> Lookup<'a> {
 
     /// The point `point` names, in the design's frame: a corner, the one end all its named edges
     /// (or their pieces) share, or a centre.
-    fn corner(&mut self, point: &ModelPoint) -> std::result::Result<(Vec3, bool), Status> {
+    pub(super) fn corner(&mut self, point: &ModelPoint) -> std::result::Result<(Vec3, bool), Status> {
         if point.centre {
             return self.centre(point);
         }
