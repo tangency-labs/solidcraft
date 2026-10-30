@@ -459,7 +459,7 @@ fn end_cap_outlines_inset_and_chamfer_exactly() {
 }
 
 #[test]
-fn end_caps_close_open_sections_with_the_rectangle_round_them() {
+fn end_caps_close_open_sections_with_the_outside_of_the_profile() {
     use crate::end_cap::cap_outline;
     // Closed sections keep their own outline: the rounded tube, the round tube.
     let tube = Profile::RectTube { width: 40.0, height: 30.0, wall: 3.0, outer_radius: Some(6.0) }.region().unwrap();
@@ -475,4 +475,42 @@ fn end_caps_close_open_sections_with_the_rectangle_round_them() {
     for (p, area) in open {
         close(cap_outline(&p.region().unwrap().outer).signed_area(), area, "open section");
     }
+    // The outside of the profile, rounds and chamfers included: a 40 x 40 extrusion with r 3
+    // corners but a 2 x 2 chamfer at the bottom left, and a 6 wide, 5 deep slot in each side,
+    // gets the rounded, chamfered square with the slots closed: 1600 - 3 r² (1 - π/4) - 2.
+    use solidcraft_geom::{Loop2, Seg2, Vec2};
+    use std::f64::consts::{FRAC_PI_2, PI};
+    let (h, r, w, dp) = (20.0, 3.0, 3.0, 5.0);
+    let v = Vec2::new;
+    let line = |a: Vec2, b: Vec2| Seg2::Line { a, b };
+    let round = |center: Vec2, start: f64| Seg2::Arc { center, radius: r, start, sweep: FRAC_PI_2 };
+    let segs = vec![
+        line(v(-h + 2.0, -h), v(-w, -h)),
+        line(v(-w, -h), v(-w, -h + dp)),
+        line(v(-w, -h + dp), v(w, -h + dp)),
+        line(v(w, -h + dp), v(w, -h)),
+        line(v(w, -h), v(h - r, -h)),
+        round(v(h - r, -h + r), -FRAC_PI_2),
+        line(v(h, -h + r), v(h, -w)),
+        line(v(h, -w), v(h - dp, -w)),
+        line(v(h - dp, -w), v(h - dp, w)),
+        line(v(h - dp, w), v(h, w)),
+        line(v(h, w), v(h, h - r)),
+        round(v(h - r, h - r), 0.0),
+        line(v(h - r, h), v(w, h)),
+        line(v(w, h), v(w, h - dp)),
+        line(v(w, h - dp), v(-w, h - dp)),
+        line(v(-w, h - dp), v(-w, h)),
+        line(v(-w, h), v(-h + r, h)),
+        round(v(-h + r, h - r), FRAC_PI_2),
+        line(v(-h, h - r), v(-h, w)),
+        line(v(-h, w), v(-h + dp, w)),
+        line(v(-h + dp, w), v(-h + dp, -w)),
+        line(v(-h + dp, -w), v(-h, -w)),
+        line(v(-h, -w), v(-h, -h + 2.0)),
+        line(v(-h, -h + 2.0), v(-h + 2.0, -h)),
+    ];
+    let cap = cap_outline(&Loop2 { segs });
+    close(cap.signed_area(), 1600.0 - 3.0 * r * r * (1.0 - PI / 4.0) - 2.0, "slotted extrusion");
+    assert_eq!(cap.segs.iter().filter(|s| matches!(s, Seg2::Arc { .. })).count(), 3, "its three rounds are kept");
 }

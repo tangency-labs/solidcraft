@@ -478,9 +478,11 @@ pub(crate) fn evaluate(doc: &Document, vals: &BTreeMap<String, Value>, f: &Featu
     Ok(())
 }
 
-/// The outline an end cap is cut from: a closed section's own outline (a tube, a pipe, a bar),
-/// or, for an open section that turns inward somewhere (an angle, a channel, a beam), the
-/// rectangle round it, so the plate closes the whole end.
+/// The outline an end cap is cut from: the outside of the profile. A closed section (a tube, a
+/// pipe, a bar) keeps its own outline. An open section that turns inward somewhere (an angle, a
+/// channel, a beam, an extrusion with slots) keeps the edges on its bounding rectangle and the
+/// rounds and chamfers turning between them, and bridges each inward stretch along the
+/// rectangle, so the plate closes the whole end with the profile's own outside corners.
 pub(crate) fn cap_outline(outer: &Loop2) -> Loop2 {
     let ring = outer.polyline(1e-3);
     let convex = ring.corners().all(|(p, c, n)| (*c - *p).cross(*n - *c) >= -1e-9);
@@ -488,7 +490,64 @@ pub(crate) fn cap_outline(outer: &Loop2) -> Loop2 {
         return outer.clone();
     }
     let bb = ring.bounds();
-    Loop2::polygon(&[bb.min, Vec2::new(bb.max.x, bb.min.y), bb.max, Vec2::new(bb.min.x, bb.max.y)])
+    let rect = Loop2::polygon(&[bb.min, Vec2::new(bb.max.x, bb.min.y), bb.max, Vec2::new(bb.min.x, bb.max.y)]);
+    let tol = 1e-6 * (1.0 + bb.max.dist(bb.min));
+    // How far a point is off each side of the rectangle (0 bottom, 1 right, 2 top, 3 left,
+    // counter-clockwise); a line lies on a side when both its ends do.
+    let off = |q: Vec2| [(q.y - bb.min.y).abs(), (q.x - bb.max.x).abs(), (q.y - bb.max.y).abs(), (q.x - bb.min.x).abs()];
+    let on_side = |s: &Seg2| match *s {
+        Seg2::Line { a, b } => (0..4).find(|i| off(a).get(*i).is_some_and(|e| *e < tol) && off(b).get(*i).is_some_and(|e| *e < tol)),
+        _ => None,
+    };
+    let segs = &outer.segs;
+    let n = segs.len();
+    let sides: Vec<Option<usize>> = segs.iter().map(on_side).collect();
+    let Some(first) = sides.iter().position(Option::is_some) else { return rect };
+    let corner = |i: usize| [Vec2::new(bb.max.x, bb.min.y), bb.max, Vec2::new(bb.min.x, bb.max.y), bb.min].get(i % 4).copied();
+    let mut out: Vec<Seg2> = Vec::with_capacity(n + 4);
+    let mut i = first;
+    for _ in 0..n {
+        let (Some(&seg), Some(&Some(si))) = (segs.get(i), sides.get(i)) else { return rect };
+        out.push(seg);
+        // The stretch up to the next edge on the rectangle.
+        let mut j = (i + 1) % n;
+        let mut run = Vec::new();
+        while sides.get(j).is_some_and(Option::is_none) {
+            run.push(j);
+            j = (j + 1) % n;
+        }
+        let (Some(&next), Some(&Some(sj))) = (segs.get(j), sides.get(j)) else { return rect };
+        // Kept when it only turns outward from one side to the next: a round or a chamfer.
+        let mut chain = vec![seg];
+        chain.extend(run.iter().filter_map(|k| segs.get(*k).copied()));
+        chain.push(next);
+        let turns_out = chain.windows(2).all(|w| matches!(w, [a, b] if a.end_tangent().cross(b.start_tangent()) >= -1e-9))
+            && chain.iter().all(|s| !matches!(*s, Seg2::Arc { sweep, .. } if sweep < 0.0));
+        if !run.is_empty() && turns_out && sj == (si + 1) % 4 {
+            out.extend(run.iter().filter_map(|k| segs.get(*k).copied()));
+        } else if !run.is_empty() || seg.end().dist(next.start()) > tol {
+            // Along the rectangle from this side round to the next one's.
+            let mut p = seg.end();
+            let steps = (sj + 4 - si) % 4;
+            let steps = if steps == 0 && (next.start() - p).dot(corner(si).unwrap_or(p) - p) < 0.0 { 4 } else { steps };
+            for k in 0..steps {
+                let Some(c) = corner(si + k) else { return rect };
+                if p.dist(c) > tol {
+                    out.push(Seg2::Line { a: p, b: c });
+                }
+                p = c;
+            }
+            if p.dist(next.start()) > tol {
+                out.push(Seg2::Line { a: p, b: next.start() });
+            }
+        }
+        if j == first {
+            break;
+        }
+        i = j;
+    }
+    let lp = Loop2 { segs: out };
+    if lp.signed_area() > 0.0 && lp.is_closed(tol) && !crosses_itself(&lp) { lp } else { rect }
 }
 
 fn one(mut bodies: Vec<solidcraft_kernel::Body>) -> Result<solidcraft_kernel::Body> {

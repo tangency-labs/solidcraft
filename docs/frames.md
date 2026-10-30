@@ -82,7 +82,9 @@ each must be a flat end of a frame member, square to its line.
 
 - The plate covers the outside of the profile: on a closed section (a square or rectangular
   tube, a pipe, a bar) it is the profile's outer outline; on an open section (an angle, a
-  channel, a beam) it is the rectangle round the profile, so the whole end is closed.
+  channel, a beam, an extrusion with slots) it is the profile's outside edges with their rounds
+  and chamfers, and each inward stretch (a slot, between flanges) is closed straight across
+  along the rectangle round the profile, so the whole end is closed.
 - **Offset** sets the plate in from that outside edge: tick it, then give the inset as a
   **Ratio of thickness** (0.5 puts a 6 mm cap 3 mm in from the edge) or a **Length**. Unticked,
   the plate is flush with the outside of the profile. A rounded corner keeps its rounding less
@@ -96,8 +98,8 @@ each must be a flat end of a frame member, square to its line.
 - Caps follow the member: change its profile, its line or the frame sketch and they move and
   resize with it. Renaming the member keeps them. A cap whose member or face is gone reports an
   error instead of picking another end.
-- Caps follow any outline of lines and arcs. The rectangle on an open section is chamfered at
-  its four corners. An inset that leaves no plate is refused, as is a chamfer longer than its
+- Caps follow any outline of lines and arcs. On an open section the chamfer cuts the
+  plate's outside corners. An inset that leaves no plate is refused, as is a chamfer longer than its
   edges allow.
 
 ```json
