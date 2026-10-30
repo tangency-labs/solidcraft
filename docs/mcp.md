@@ -151,6 +151,8 @@ change the design undoably. `new_design` replaces it (destructive). `execute`, `
 `screenshot` (whose `path` writes a file) can read, write, overwrite or delete files: they are
 not read-only, `destructiveHint` and `openWorldHint` are true.
 
+`cancel` changes the design only by keeping a change from landing; it touches no files.
+
 ### Client configuration
 
 `solidcraft-cli` is on `PATH` after every package install: the Windows installer adds its folder, the deb, rpm and FreeBSD packages install it in `/usr/bin`, the Homebrew cask links it, the AppImage writes a small `solidcraft-cli` launcher into `~/.local/bin` on its first run, and the macOS app links it into `/opt/homebrew/bin` or `/usr/local/bin` when it starts (Help > Install solidcraft-cli command does it with an administrator prompt when those are not writable). Two packages keep it out of `PATH` by design: Snap exposes it as `solidcraft.cli`, and Flatpak runs it as `flatpak run --command=solidcraft-cli io.tangencylabs.solidcraft`; use those as the client's `command` (with `mcp` as the arguments).
@@ -294,6 +296,7 @@ The `skill_reference` tool returns these documents from the copies built into So
 | `skill_reference` | `skill`, `file?` (default `reference.md`) | Read a bundled skill document. Skills: `solidcraft-modeling`, `solidcraft-mechanisms`, `solidcraft-editing`, `solidcraft-checking`. |
 | `running` | - | What the app is running or has queued, for every client (`control.running`, see [control-protocol.md](control-protocol.md#limits)): each request's connection and id, method, command id or a batch's step count, `running_s` and `queued`, never its parameters. Answers at once while the app is busy: ask it when a call timed out before sending a change again. Headless: always `{"running": []}`. |
 | `new_design` | `name?` | Start an empty design. |
+| `cancel` | — | Bridged: cancel this server's request that was still running in the app when its call returned (`control.cancel`, see [Cancelling a request](#cancelling-a-request)). Headless: an error, as nothing is ever left running. Not a `batch` step. |
 | `open` | `path` | Open a `.sc` design (or a `.solidcraft` one from an earlier release), a STEP file (`.step`/`.stp`) as a new design holding its bodies (an Import base feature), or a 3MF/STL file as mesh bodies. |
 | `save` | `path?` | Save the design (to its current file without `path`). |
 
@@ -343,8 +346,8 @@ how long it waits; when the request finishes, the tool call returns its real res
 runs after that, the tool call fails with an error starting `still running:` that names the
 request and says what it still does: it will still apply when it finishes, or will still write
 the file (an export or a save: the design does not change), or only reads (nothing changes). Don't
-send it again: call the `pending` tool, which waits up to 60 seconds for its result each time.
-Any other tool call first waits up to 60 seconds for it too, and is not sent while it still runs
+send it again: call the `pending` tool, which waits up to 60 seconds for its result each time, or
+`cancel` it ([Cancelling a request](#cancelling-a-request)). Any other tool call first waits up to 60 seconds for it too, and is not sent while it still runs
 (so nothing is queued to apply unseen behind it); a request that finishes in that wait keeps its
 result for `pending`. If the connection to the app is lost meanwhile, the result is lost with it,
 and `pending` says so: inspect the design before sending a change again.
@@ -365,6 +368,25 @@ step: the design, the active sketch and the undo history are restored exactly as
 however long the history is. Batches that call `file.new` or `doc.open` get the design back,
 not its file path. (An older app without checkpoints falls back to undoing as many steps as
 the batch added to the undo history.)
+
+### Cancelling a request
+
+A request the app is still running when its call returns (an error starting `still running:`) has
+not failed and was not cancelled. `cancel` cancels it at once, without first waiting for it as
+other calls do, on the connection it was sent on (`control.cancel`,
+[control-protocol.md](control-protocol.md#cancelling-a-request)):
+
+- still waiting its turn in the app: removed, it never runs (`outcome: "removed"`);
+- a design change or an export computing off the app's window thread (Preferences > AI > Keep the
+  window responsive while agents run commands): stopped, nothing of it applied (`outcome:
+  "stopped"`; an export's file may still be written). The work stops early in the background;
+- already applying on the window thread, or a file being opened: a tool error starting
+  `cannot be cancelled:`. It will still finish; inspect the design before sending it again;
+- already finished: `cancelled: null` with its reply.
+
+Once it is removed, stopped or finished, later calls no longer wait for it and `pending` says
+`pending: null`. With nothing running, `cancel` says `nothing to cancel`. Only this server's own request can be
+cancelled; another client's requests are out of its reach.
 
 ## Camera and close-up recipe
 

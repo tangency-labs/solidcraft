@@ -40,6 +40,9 @@
 //!   (#35); while it is shown, `engine.execute` first glides to the command's button and picks
 //!   and replies once the command has run (`"animate": false` skips that one call)
 //! - `ui.resize {width, height}`, `app.quit`
+//!
+//! `control.pending` and `control.cancel` belong to the connection: its host answers them
+//! (apps/solidcraft/src/control_server.rs) through each request's [`ControlRequest::ticket`].
 
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc::Sender;
@@ -64,12 +67,15 @@ pub struct ControlRequest {
     /// Chat requests already admitted by the gate may outlive a tab switch. This turn's
     /// validity follows them through queues, computation and cursor animation.
     pub(crate) chat_turn: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
+    /// Where the request is, shared with the connection that sent it so it can cancel it
+    /// (`control.cancel`, [`crate::control_job::Ticket`]).
+    pub ticket: std::sync::Arc<crate::control_job::Ticket>,
 }
 
 impl ControlRequest {
     pub fn new(method: impl Into<String>, params: Value) -> (Self, std::sync::mpsc::Receiver<ControlResponse>) {
         let (tx, rx) = std::sync::mpsc::channel();
-        (Self { method: method.into(), params, reply: tx, started: Default::default(), chat_turn: None }, rx)
+        (Self { method: method.into(), params, reply: tx, started: Default::default(), chat_turn: None, ticket: Default::default() }, rx)
     }
 
     pub(crate) fn refuse_cancelled_chat(&self) -> bool {
