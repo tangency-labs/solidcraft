@@ -597,10 +597,11 @@ fn end_at_wall(base: &mut Face, wall: &mut Face, ids: (usize, usize), by: f64, b
     if let Some(x) = wall.pts.get_mut((k + 1) % m) {
         *x = q1;
     }
-    let kept = |j: usize, out: &[usize]| !out.contains(&((j + m - k) % m));
-    wall.pts = wall.pts.iter().enumerate().filter(|(j, _)| kept(*j, &corners_out)).map(|(_, x)| *x).collect();
-    wall.across = wall.across.iter().enumerate().filter(|(j, _)| kept(*j, &edges_out)).map(|(_, x)| *x).collect();
-    wall.round = wall.round.iter().enumerate().filter(|(j, _)| kept(*j, &edges_out)).map(|(_, x)| *x).collect();
+    // Counted from the bend's edge, so each kept corner is still followed by its own edge
+    // wherever the face's loop starts.
+    wall.pts = kept_from(&wall.pts, k, &corners_out);
+    wall.across = kept_from(&wall.across, k, &edges_out);
+    wall.round = kept_from(&wall.round, k, &edges_out);
     // The fixed face's edge: the bend from `p1` to `q1` (it runs the other way along it), no bend
     // beside it.
     let (Some(&a), Some(&b)) = (base.pts.get(i), base.pts.get((i + 1) % n)) else { return };
@@ -618,6 +619,15 @@ fn end_at_wall(base: &mut Face, wall: &mut Face, ids: (usize, usize), by: f64, b
     base.pts.splice(i..=i, pieces.iter().map(|(x, _)| *x));
     base.across.splice(i..=i, pieces.iter().map(|(_, g)| *g));
     base.round.splice(i..=i, std::iter::repeat_n(None, count));
+}
+
+/// The items of a loop's per-corner or per-edge list `of`, counted from item `k` on, less those
+/// at the places `out` (counted from `k`). Corners and edges taken out at the same places counted
+/// from one start stay paired (edge `j` from corner `j`); taken out at their places in the list
+/// they would not where the places run across the list's start.
+fn kept_from<T: Copy>(of: &[T], k: usize, out: &[usize]) -> Vec<T> {
+    let m = of.len();
+    (0..m).filter(|j| !out.contains(j)).filter_map(|j| of.get((k + j) % m).copied()).collect()
 }
 
 /// Give flange `i` its panel: `outline` in flat coordinates, counter-clockwise, its edge at the

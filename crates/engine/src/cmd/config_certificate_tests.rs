@@ -15,6 +15,8 @@ fn paint(session: &mut Session, body: &str, point: Value) {
     run(session, "config.row", json!({"name":"Painted","values":{key:"ABS - Red"}}));
     run(session, "config.activate", json!({"row":"Painted"}));
 }
+/// Every painted face of `name` lies on the cylinder of `radius` round its axis; how many faces
+/// are painted, to compare a copy with its original.
 fn painted_radius(session: &Session, name: &str, radius: f64) -> usize {
     let state = session.model.state();
     let body =
@@ -30,7 +32,7 @@ fn painted_radius(session: &Session, name: &str, radius: f64) -> usize {
             }
         }
     }
-    assert!(!painted.is_empty());
+    assert!(!painted.is_empty(), "{name}: nothing painted");
     painted.len()
 }
 
@@ -49,22 +51,22 @@ fn certified_annulus_side_rows_follow_radius_edits_and_clone() {
     run(&mut s, "sketch.finish", json!({}));
     run(&mut s, "solid.extrude", json!({"distance":10,"profiles":[{"point":[9.5,0]}],"body_name":"Ring"}));
     paint(&mut s, "Ring", json!([10, 0, 5]));
-    assert_eq!(painted_radius(&s, "Ring", 10.), 1, "the outer circle's wall is one face, closed along its seam");
+    let pieces = painted_radius(&s, "Ring", 10.);
     let Column::FaceAppearance(target) = &s.doc.configs.columns[0] else { panic!() };
     assert_eq!(target.certificate, Some(FaceCertificate::ExtrudeSide { sketch, curve: "outer".into() }));
     run(&mut s, "parameters.change", json!({"name":dimensions[0],"expression":"12 mm"}));
     run(&mut s, "parameters.change", json!({"name":dimensions[1],"expression":"9.25 mm"}));
     run(&mut s, "config.activate", json!({"row":"Painted"}));
-    assert_eq!(painted_radius(&s, "Ring", 12.), 1);
+    assert_eq!(painted_radius(&s, "Ring", 12.), pieces);
     run(&mut s, "component.paste_new", json!({"component":part,"translate":[30,0,0]}));
     assert_eq!(s.doc.configs.columns.len(), 2);
     run(&mut s, "config.activate", json!({"row":"Painted"}));
-    assert_eq!(painted_radius(&s, "Ring (2)", 12.), 1);
+    assert_eq!(painted_radius(&s, "Ring (2)", 12.), pieces);
     let reopened = solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap();
     let mut reopened = Session::new(reopened);
     run(&mut reopened, "config.activate", json!({"row":"Painted"}));
-    assert_eq!(painted_radius(&reopened, "Ring", 12.), 1);
-    assert_eq!(painted_radius(&reopened, "Ring (2)", 12.), 1);
+    assert_eq!(painted_radius(&reopened, "Ring", 12.), pieces);
+    assert_eq!(painted_radius(&reopened, "Ring (2)", 12.), pieces);
     run(&mut reopened, "config.activate", json!({"row":"Default"}));
     assert!(reopened.doc.appearances.faces.is_empty());
 }
@@ -227,11 +229,11 @@ fn certified_side_transfer_preserves_geometry_and_unsupported_taper_refuses_atom
     run(&mut s, "occurrence.move", json!({"occurrence":occurrence,"translate":[30,20,0],"angle":90,"axis":[0,0,1],"capture":false}));
     run(&mut s, "component.move_bodies", json!({"component":destination,"bodies":["Round"]}));
     run(&mut s, "config.activate", json!({"row":"Painted"}));
-    assert_eq!(painted_radius(&s, "Round", 10.), 1);
+    let pieces = painted_radius(&s, "Round", 10.);
     let before = s.world_state().unwrap().body("Round").unwrap().mesh().bounds();
     let mut s = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
     run(&mut s, "config.activate", json!({"row":"Painted"}));
-    assert_eq!(painted_radius(&s, "Round", 10.), 1);
+    assert_eq!(painted_radius(&s, "Round", 10.), pieces);
     assert!(
         s.world_state().unwrap().body("Round").unwrap().mesh().bounds().min.dist(before.min) < 1e-8,
         "before {before:?}, reopened {:?}",
