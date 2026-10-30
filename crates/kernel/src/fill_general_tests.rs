@@ -43,7 +43,7 @@ impl Faces {
                         b::Loop::Vertex { .. } => None,
                     })
                     .collect();
-                (SurfaceEval::new(&f.surface).unwrap(), f.domain, polys)
+                (SurfaceEval::new(f.parameters()).unwrap(), f.domain, polys)
             })
             .collect();
         Faces { faces }

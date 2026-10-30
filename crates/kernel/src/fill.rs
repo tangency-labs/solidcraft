@@ -1370,7 +1370,7 @@ mod tests {
         shuffled.swap(0, 1);
         let (b, _) = fill_rim(&open, &shuffled);
         let (ra, rb) = (record(&a), record(&b));
-        let (sa, sb) = (SurfaceEval::new(&ra.faces[0].surface).unwrap(), SurfaceEval::new(&rb.faces[0].surface).unwrap());
+        let (sa, sb) = (SurfaceEval::new(ra.faces[0].parameters()).unwrap(), SurfaceEval::new(rb.faces[0].parameters()).unwrap());
         let [[u0, u1], [v0, v1]] = ra.faces[0].domain;
         let mut gap = 0.0f64;
         for (x, y) in [(0.2, 0.3), (0.5, 0.5), (0.7, 0.9)] {
@@ -1586,7 +1586,7 @@ mod tests {
             mesh_is_clean(&full);
             // The middle of the loop's box moved by crown × its diagonal (the bump is 1 there).
             let (ra, rb) = (record(&plain), record(&full));
-            let (a, b) = (SurfaceEval::new(&ra.faces[0].surface).unwrap(), SurfaceEval::new(&rb.faces[0].surface).unwrap());
+            let (a, b) = (SurfaceEval::new(ra.faces[0].parameters()).unwrap(), SurfaceEval::new(rb.faces[0].parameters()).unwrap());
             let [[bu0, bu1], [bv0, bv1]] = ra.faces[0].domain;
             let (uc, vc) = ((bu0 + bu1) / 2.0, (bv0 + bv1) / 2.0);
             let size = (bu1 - bu0).hypot(bv1 - bv0);
