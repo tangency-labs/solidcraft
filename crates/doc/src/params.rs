@@ -9,6 +9,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use serde::{Deserialize, Serialize};
 
 use crate::expr::{self, Expr, Kind, ParamDef, Value};
+use crate::sheet::rule_references;
 use crate::walk::Walk;
 use crate::{DocError, Document, FeatureKind, MAX_PARAMS, Result};
 
@@ -781,13 +782,14 @@ impl Document {
             }
         }
         let uses = |e: &str| expr::references(e).iter().any(|r| r == name);
+        let rule_uses = |field: &str, e: &str| rule_references(field, e).iter().any(|r| r == name);
         for r in &self.sheet.rules {
-            for (field, _, _) in r.fields().into_iter().filter(|(_, e, _)| uses(e)) {
+            for (field, _, _) in r.fields().into_iter().filter(|(f, e, _)| rule_uses(f, e)) {
                 out.push(ParamUser::Rule { kind: "sheet metal".into(), name: r.name.clone(), field: field.into() });
             }
         }
         for r in &self.plastic.rules {
-            for (field, _, _) in r.fields().into_iter().filter(|(_, e, _)| uses(e)) {
+            for (field, _, _) in r.fields().into_iter().filter(|(f, e, _)| rule_uses(f, e)) {
                 out.push(ParamUser::Rule { kind: "plastic".into(), name: r.name.clone(), field: field.into() });
             }
         }
@@ -948,7 +950,8 @@ impl Document {
         }
         // Sheet metal and plastic rules and canvas planes hold expressions too (#4420).
         let rules = self.sheet.rules.iter_mut().flat_map(|r| r.fields_mut()).chain(self.plastic.rules.iter_mut().flat_map(|r| r.fields_mut()));
-        for (_, e) in rules {
+        // `Thickness` outside a rule's own thickness is the rule's, not the parameter (#9623).
+        for (_, e) in rules.filter(|(field, _)| old != "Thickness" || *field == "thickness") {
             let r = expr::rename_reference(e, old, new);
             if r != *e {
                 *e = r;
@@ -1009,10 +1012,10 @@ impl Document {
             }
             // Sheet metal and plastic features rebuild when their rules' parameters change (#4420).
             if f.kind.is_sheet() {
-                names.extend(self.sheet.rules.iter().flat_map(|r| r.fields()).flat_map(|(_, e, _)| expr::references(e)));
+                names.extend(self.sheet.rules.iter().flat_map(|r| r.fields()).flat_map(|(f, e, _)| rule_references(f, e)));
             }
             if f.kind.is_plastic() {
-                names.extend(self.plastic.rules.iter().flat_map(|r| r.fields()).flat_map(|(_, e, _)| expr::references(e)));
+                names.extend(self.plastic.rules.iter().flat_map(|r| r.fields()).flat_map(|(f, e, _)| rule_references(f, e)));
             }
             out.extend(names.into_iter().map(|n| (format!("Feature:{}", f.name), n)));
         }
@@ -1036,9 +1039,9 @@ impl Document {
         }
         // A rule that uses it changes every sheet metal (or plastic) feature: the evaluation
         // hashes the rules into their fingerprint.
-        let uses = |e: &String| expr::references(e).iter().any(|r| affected.contains(r));
-        let sheet = self.sheet.rules.iter().any(|r| r.fields().iter().any(|(_, e, _)| uses(e)));
-        let plastic = self.plastic.rules.iter().any(|r| r.fields().iter().any(|(_, e, _)| uses(e)));
+        let uses = |field: &str, e: &str| rule_references(field, e).iter().any(|r| affected.contains(r));
+        let sheet = self.sheet.rules.iter().any(|r| r.fields().iter().any(|(f, e, _)| uses(f, e)));
+        let plastic = self.plastic.rules.iter().any(|r| r.fields().iter().any(|(f, e, _)| uses(f, e)));
         let mut out = Vec::new();
         for f in &self.features {
             let mut hit = f.param_names.iter().any(|n| affected.contains(n));

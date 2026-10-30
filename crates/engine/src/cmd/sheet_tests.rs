@@ -509,6 +509,47 @@ fn rules_are_parameters() {
     assert!(s.execute("sheet.manage_rules", &json!({"name": "Bad", "k_factor": 3})).is_err());
 }
 
+/// #9623: `Thickness` in a rule's expressions is the rule's thickness, also when the design has a
+/// parameter of that name; the rule's own `thickness` may still use that parameter.
+#[test]
+fn thickness_in_a_rule_is_the_rules_even_beside_a_parameter_of_that_name() {
+    fn build(param: Option<&str>, rule: Value) -> (Value, f64) {
+        let mut s = Session::default();
+        if let Some(e) = param {
+            run(&mut s, "parameters.add", json!({"name": "Thickness", "expression": e}));
+        }
+        run(&mut s, "sheet.manage_rules", rule);
+        base(&mut s, 100.0, 50.0);
+        let t = s.model.state().sheets[0].t;
+        run(&mut s, "sheet.flange", json!({"edges": [[50, 0, t], [100, 25, t]], "height": 20}));
+        let failing: Vec<String> = s.model.results.iter().filter_map(|r| r.error.clone()).collect();
+        assert!(failing.is_empty(), "{failing:?}");
+        let l = run(&mut s, "sheet.rules", json!({}));
+        let values = l["rules"].as_array().and_then(|r| r.iter().find(|r| r["rule"]["name"] == "R")).map(|r| r["values"].clone()).unwrap_or_default();
+        (values, volume(&mut s))
+    }
+    let rule = json!({"name": "R", "thickness": 2, "k_factor": 0.5, "bend_radius": 2, "corner_relief_shape": "round", "active": true});
+    let (want, v) = build(None, rule.clone());
+    for (k, x) in [("thickness", 2.0), ("gap", 2.0), ("relief_width", 2.0), ("relief_depth", 1.0), ("corner_relief", 8.0), ("bend_radius", 2.0)] {
+        assert_eq!(want[k].as_f64(), Some(x), "{k}: {want}");
+    }
+    assert!(rel(v, 14651.157) < 1e-4, "{v}");
+    let (got, w) = build(Some("10 mm"), rule);
+    assert_eq!(got, want);
+    assert!(rel(w, v) < 1e-9, "{w} against {v}");
+    // A bend radius of `Thickness` is the rule's 2 mm, not the parameter's 10.
+    let rule = json!({"name": "R", "thickness": 2, "k_factor": 0.5, "bend_radius": "Thickness", "corner_relief_shape": "round", "active": true});
+    let (got, w) = build(Some("10 mm"), rule);
+    assert_eq!(got, want);
+    assert!(rel(w, v) < 1e-9, "{w} against {v}");
+    // The rule's thickness itself reads the design's `Thickness`, and the rest follow it.
+    let rule =
+        json!({"name": "R", "thickness": "Thickness", "k_factor": 0.5, "bend_radius": "Thickness", "corner_relief_shape": "round", "active": true});
+    let (got, w) = build(Some("2 mm"), rule);
+    assert_eq!(got, want);
+    assert!(rel(w, v) < 1e-9, "{w} against {v}");
+}
+
 #[test]
 fn contour_flange_hem_and_tray() {
     // Oracle 72.
