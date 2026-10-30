@@ -18,8 +18,9 @@
 //! Ordinary split failures retain the nearby vertex alongside their status. All six
 //! owned bodies are present; individual dependency calls defer to their owners.
 //! `FindInfiniteRegion` retries a failed `SmShell::RayFire` as upstream, but propagates
-//! errors that have no upstream status (unported, stale id, pending preparation, B-rep
-//! cache owner/handle resolution) instead of treating them as a missed ray.
+//! errors that have no upstream status (unported, stale id, pending preparation, any
+//! port invariant such as B-rep cache owner/handle resolution) instead of treating them
+//! as a missed ray; so does its `SmBrep::RayFire` fallback.
 //! Part 1's `add_*_record` appends a face, edge or vertex to its owning list at
 //! allocation; native `PostInsert`s later, with no same-kind allocation in between,
 //! so the list order matches, but a record allocated before a dependency error stays
@@ -404,7 +405,8 @@ fn brep_edges(b: &Brep) -> Result<Vec<EdgeId>> {
 
 /// `this->RayFire(start, direction, tolerance, pRegion, sPC)` (unit `topology.brep_p2`)
 /// on `query`'s cache: `Ok(true)` with the region in `state` on success, `Ok(false)` on
-/// an ordinary failure (the caller tries its next ray). The intersection is not read
+/// an ordinary failure (the caller tries its next ray). Errors with no upstream status
+/// propagate, as for the shell ray fires. The intersection is not read
 /// after the ray fires, so `state.classification` stays as it was.
 fn brep_ray_fire<O>(
     k: &Kernel,
@@ -416,7 +418,7 @@ fn brep_ray_fire<O>(
     state: &mut crate::topology::shell::ShellRayState<O>,
 ) -> Result<bool> {
     let fired = query.ray_fire_live(k, b, start, direction, tolerance);
-    match crate::error::ignored(fired)? {
+    match crate::error::native_failure(fired)? {
         Some(hit) => {
             state.region = hit.region;
             Ok(true)
@@ -435,20 +437,11 @@ fn ray_direction(direction: Vec3) -> Result<Vec3> {
 
 /// Whether a `SmShell::RayFire` call succeeded. Upstream retries on any failed status;
 /// an error with no upstream status (an unported callee, a stale id, a pending
-/// geometry preparation, or the B-rep cache failing to resolve an owner under the
-/// query's identities) is propagated instead, so a naming mismatch cannot pass for a
-/// missed ray and silently select another region.
+/// geometry preparation, or any port invariant such as the B-rep cache failing to
+/// resolve an owner under the query's identities) is propagated instead, so a naming
+/// mismatch cannot pass for a missed ray and silently select another region.
 fn ray_success(status: &Result<()>) -> Result<bool> {
-    match status {
-        Ok(()) => Ok(true),
-        Err(
-            e @ (SolidError::Unported { .. }
-            | SolidError::NotFound { .. }
-            | SolidError::PreparationRequired { .. }),
-        ) => Err(e.clone()),
-        Err(e) if crate::topology::brep_cache::is_identity_error(e) => Err(e.clone()),
-        Err(_) => Ok(false),
-    }
+    Ok(crate::error::native_failure(status.clone())?.is_some())
 }
 
 fn is_intersector_approx(curve: &Curve) -> Result<bool> {
@@ -3244,6 +3237,10 @@ mod tests {
             },
             SolidError::PreparationRequired { operation: OP },
             SolidError::port_invariant("topology::brep_cache", "edge owner is not in source B-rep"),
+            // A port invariant from any operation, not only the B-rep cache's own
+            // identity errors (these used to pass for a missed ray).
+            SolidError::port_invariant("topology::shell", "faceuse without face"),
+            SolidError::port_invariant("query::brep", "solver owner is not a cache owner"),
         ];
         for e in internal {
             assert_eq!(ray_success(&Err(e.clone())), Err(e));

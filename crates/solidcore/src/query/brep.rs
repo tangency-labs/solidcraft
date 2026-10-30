@@ -95,7 +95,7 @@ pub use ray::{
 
 use core::cell::OnceCell;
 
-use crate::error::{ignore_status, ignored, EntityRef, Result, SolidError};
+use crate::error::{ignore_status, ignored, native_failure, EntityRef, Result, SolidError};
 use crate::geom::attribute::{Attribute, AttributeValue, Behavior};
 use crate::geom::extent3d::Extent3d;
 use crate::geom::global_solver::{SolutionRequested, SolverOperation};
@@ -665,7 +665,9 @@ impl<'a> BrepQuery<'a> {
     /// # Errors
     ///
     /// `SM_ERR` when no ray finds a region; those of the boundary solve, the region list
-    /// and the classification load; [`SolidError::Unported`] from the ray fires.
+    /// and the classification load; errors of the ray fires that have no upstream
+    /// status ([`SolidError::Unported`], a port invariant, a stale id), which are not
+    /// treated as a missed ray.
     pub fn point_3d_classify(
         &self,
         k: &Kernel,
@@ -790,7 +792,7 @@ impl<'a> BrepQuery<'a> {
                     None,
                 )
             });
-            Ok(ignored(fired)?.map(|r| r.region))
+            Ok(native_failure(fired)?.map(|r| r.region))
         };
         let mut region = None;
         for (forward, backward) in CLASSIFY_RAYS {
