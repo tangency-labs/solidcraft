@@ -1456,8 +1456,14 @@ impl JointRun<'_> {
     }
 }
 
+/// Whether `count` joints group as one button: from the second joint, unless the preference shows
+/// each joint as before (Preferences > Interface, "Group joints in the History").
+fn grouped(app: &SolveApp, count: usize) -> bool {
+    count > JOINT_GROUP_MIN && app.preferences.history_group_joints
+}
+
 fn joints_open(app: &SolveApp, count: usize, run: JointRun) -> bool {
-    count <= JOINT_GROUP_MIN || crate::browser::is_open(app, &run.key(), false)
+    !grouped(app, count) || crate::browser::is_open(app, &run.key(), false)
 }
 
 fn toggle_joints(app: &mut SolveApp, run: JointRun) {
@@ -1521,7 +1527,7 @@ pub(crate) fn joint_chips(app: &mut SolveApp, ui: &mut egui::Ui, p: &egui::Paint
     if joints.is_empty() {
         return x;
     }
-    if joints.len() > JOINT_GROUP_MIN {
+    if grouped(app, joints.len()) {
         let open = joints_open(app, joints.len(), set);
         let accent = crate::theme::TabAccent::for_tab(&t, &app.ui.tab);
         let (width, clicked) = joint_group_button(ui, p, egui::pos2(x, r.top() + 6.0), joints.len(), open, accent, set);
@@ -1590,7 +1596,7 @@ pub(crate) fn timeline_joint_rows(app: &mut SolveApp, ui: &mut egui::Ui, ids: Op
     }
     if ids.is_none() {
         ui.add_space(4.0);
-        if joints.len() > JOINT_GROUP_MIN {
+        if grouped(app, joints.len()) {
             let shown = joints_open(app, joints.len(), JointRun::Loose);
             let header = format!("JOINTS ({})", joints.len());
             let clicked = ui
