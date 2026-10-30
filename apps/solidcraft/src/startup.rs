@@ -447,6 +447,47 @@ mod tests {
         let _ = std::fs::remove_dir_all(&d);
     }
 
+    /// #4164: two windows saving at once leave `app.ron` holding one whole save, never a short
+    /// save with a longer one's tail behind it, and no temporary files. A window starting
+    /// meanwhile reads one whole save too.
+    #[test]
+    fn settings_saved_at_once_from_two_windows_stay_whole() {
+        let keys = ["solidcraft.prefs"];
+        let d = scratch("concurrent");
+        let path = d.join("app.ron");
+        let save = |size: usize| {
+            std::collections::HashMap::from([
+                ("solidcraft.prefs".to_string(), format!("{{\"grid\":{size}}}")),
+                ("window".to_string(), "x".repeat(size)),
+            ])
+        };
+        let (long, short) = (save(200_000), save(10));
+        let whole = |text: &str| ron::from_str::<std::collections::HashMap<String, String>>(text).is_ok_and(|kv| kv == long || kv == short);
+        eframe::save_to_disk(&path, &short);
+        let saving = std::sync::atomic::AtomicBool::new(true);
+        let damaged = std::thread::scope(|s| {
+            let reader = s.spawn(|| {
+                let mut damaged = 0;
+                while saving.load(std::sync::atomic::Ordering::Relaxed) {
+                    damaged += usize::from(!std::fs::read_to_string(&path).is_ok_and(|t| whole(&t)));
+                }
+                damaged
+            });
+            let writers: Vec<_> =
+                [&long, &short, &long, &short].into_iter().map(|kv| s.spawn(|| (0..40).for_each(|_| eframe::save_to_disk(&path, kv)))).collect();
+            writers.into_iter().for_each(|w| w.join().unwrap());
+            saving.store(false, std::sync::atomic::Ordering::Relaxed);
+            reader.join().unwrap()
+        });
+        assert_eq!(damaged, 0, "every read while saving found one whole save");
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(whole(&text), "one whole save: {} bytes", text.len());
+        assert!(check_settings(&d, &keys).is_empty(), "the file reads");
+        let names: Vec<_> = std::fs::read_dir(&d).unwrap().flatten().map(|e| e.file_name()).collect();
+        assert_eq!(names, ["app.ron"], "no temporary files are left");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
     #[test]
     fn launches_that_never_got_a_window_are_counted_until_one_does() {
         let d = scratch("marker");
