@@ -190,13 +190,14 @@ pub(crate) fn railed(sections: &[Section], closed: bool, rails: &[Vec<Vec3>], fi
     };
     let curves_of = |pts: &[Vec<Vec3>]| -> Vec<CurveN<4>> { lead.iter().zip(pts).map(|(c, p)| with(c, p)).collect() };
     // The plain loft's middle and its direction there.
+    let middle_at = |v: f64| -> Result<Vec3> { centroid(&curves_of(&plain(v)?)).ok_or_else(|| fail("the plain loft")) };
     let middle = |v: f64| -> Result<(Vec3, Vec3)> {
         let h = 1e-4;
-        let d = centroid(&plain((v + h).min(1.0))?) - centroid(&plain((v - h).max(0.0))?);
+        let d = middle_at((v + h).min(1.0))? - middle_at((v - h).max(0.0))?;
         let d = d.normalized().ok_or_else(|| KernelError::Invalid("two loft sections sit on top of each other".into()))?;
-        Ok((centroid(&plain(v)?), d))
+        Ok((middle_at(v)?, d))
     };
-    let start = centroid(ctrl.first().ok_or_else(|| fail("sections"))?);
+    let start = centroid(lead).ok_or_else(|| fail("sections"))?;
     let rails: Vec<Rail> = rails.iter().map(|r| rail(r, start, sections, tol)).collect::<Result<_>>()?;
     if let [a, b] = &rails[..]
         && a.anchors.iter().zip(&b.anchors).any(|(p, q)| p.on.dist(q.on) <= tol)
@@ -347,10 +348,36 @@ fn wire_point(section: &[CurveN<4>], g: f64) -> Result<Vec3> {
     section.get(k).and_then(|c| point_at(c, g - k as f64)).ok_or_else(|| KernelError::Failed("loft rails: section".into()))
 }
 
-/// The middle of a section's control points.
-fn centroid(ctrl: &[Vec<Vec3>]) -> Vec3 {
-    let (sum, n) = ctrl.iter().flatten().fold((Vec3::ZERO, 0usize), |(s, n), p| (s + *p, n + 1));
-    sum * (1.0 / n.max(1) as f64)
+/// The middle of a section: the centroid of its curves by length, ∫ x ds / ∫ ds, each knot
+/// span by 8-point Gauss–Legendre. It is the section's shape alone, whatever control points
+/// describe it: a circle's is its centre, however many pieces it is drawn in (a whole circle as
+/// one closed rational curve repeats its first control point as its last, and the mean of the
+/// control points sat a ninth of the radius towards it). `None` for a section with no length.
+fn centroid(section: &[CurveN<4>]) -> Option<Vec3> {
+    let (mut sum, mut length) = (Vec3::ZERO, 0.0);
+    for c in section {
+        let (lo, hi) = (*c.knots.get(c.degree)?, *c.knots.get(c.ctrl.len())?);
+        for w in c.knots.windows(2) {
+            let (a, b) = (w[0].max(lo), w[1].min(hi));
+            if !(b > a) {
+                continue;
+            }
+            let (mid, half) = (0.5 * (a + b), 0.5 * (b - a));
+            for (x, wt) in solidcraft_geom::bspline::GAUSS_8 {
+                let ([hx, hy, hz, hw], [dx, dy, dz, dw]) = c.eval(mid + half * x)?;
+                if !(hw.abs() > 1e-300) {
+                    return None;
+                }
+                let p = Vec3::new(hx / hw, hy / hw, hz / hw);
+                // The rational point's derivative: (h' − p w') / w.
+                let speed = ((Vec3::new(dx, dy, dz) - p * dw) * (1.0 / hw)).len();
+                let ds = wt * half * speed;
+                sum += p * ds;
+                length += ds;
+            }
+        }
+    }
+    (length > 0.0 && sum.is_finite()).then(|| sum * (1.0 / length))
 }
 
 /// The move that puts a station's guided points onto the rails (`pairs`: each point with its
