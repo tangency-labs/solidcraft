@@ -439,6 +439,9 @@ pub struct Session {
     /// The faces Isocurve Analysis shows the isoparametric curves of, for the viewport to draw
     /// ([`Session::isocurve_lines`]). View state: not part of the design and not an undo step.
     pub isocurves: Vec<IsoPick>,
+    /// The curvature combs `inspect.curvature_comb` shows, for the viewport to draw; `None` when
+    /// the analysis is off. View state: not part of the design and not an undo step.
+    pub comb: Option<CombView>,
     /// What is hidden or shown in the view (`browser.visibility`): saved with the design and an
     /// undo step of its own ([`Snapshot::visibility`]). A design brings its saved visibility when
     /// it opens (`Session::new`).
@@ -538,6 +541,35 @@ pub struct IsoPick {
     pub count: usize,
 }
 
+/// What Curvature Comb Analysis shows: the picks, the options every comb is drawn with, and
+/// the teeth drawn, all at one scale so their lengths compare. View state only.
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+pub struct CombView {
+    pub picks: Vec<CombPick>,
+    /// Teeth per curve.
+    pub density: usize,
+    /// The multiplier on the automatic scale.
+    pub length: f64,
+    /// A fixed comb length per unit curvature, in place of the automatic one.
+    pub fixed_scale: Option<f64>,
+    /// The comb length per unit curvature the teeth are drawn at, shared by every comb.
+    pub scale: f64,
+    /// Each comb's teeth as (foot, tip), in world coordinates.
+    pub teeth: Vec<Vec<[Vec3; 2]>>,
+}
+
+/// A curve Curvature Comb Analysis shows, as it was picked (found again whenever it is drawn).
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum CombPick {
+    /// A sketch curve.
+    Curve { sketch: u64, curve: String },
+    /// The body edge whose exact curve passes nearest `at`.
+    Edge { at: Vec3 },
+    /// The face at `at`, combed along `count` iso curves each way.
+    Face { at: Vec3, count: usize },
+}
+
 impl SurfaceAnalysis {
     /// How a picture shades the faces for this analysis.
     pub fn mode(self) -> render::AnalysisMode {
@@ -633,6 +665,7 @@ impl Session {
             analysis: None,
             continuity: Vec::new(),
             isocurves: Vec::new(),
+            comb: None,
             checkpoints: Vec::new(),
             next_checkpoint: 1,
             replacements: 0,
@@ -1443,6 +1476,7 @@ impl Session {
             analysis: None,
             continuity: Vec::new(),
             isocurves: Vec::new(),
+            comb: None,
             checkpoints: Vec::new(),
             next_checkpoint: 1,
             replacements: 0,

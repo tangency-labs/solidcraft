@@ -77,9 +77,6 @@ thread_local! {
     /// The inference the cursor snapped to last (label, sketch point), for the hint.
     static SNAP: RefCell<Option<(&'static str, Vec2)>> = const { RefCell::new(None) };
     static PREV: Cell<Option<Vec2>> = const { Cell::new(None) };
-    /// The curvature combs shown while the comb tool is active: each pick (the command's
-    /// parameters for the curve or edge clicked) and its combs' teeth (foot, tip).
-    static COMBS: RefCell<Vec<(Value, Vec<Vec<[Vec3; 2]>>)>> = const { RefCell::new(Vec::new()) };
     /// The comb tool's options: comb length (a multiplier on the automatic length) and teeth.
     static COMB_OPTIONS: Cell<CombOptions> = const { Cell::new(CombOptions::DEFAULT) };
     /// The image file a Canvas or Decal tool places.
@@ -388,37 +385,23 @@ pub(crate) fn comb_options() -> CombOptions {
 
 /// The combs shown, each as its teeth (foot, tip).
 #[cfg(test)]
-pub(crate) fn shown_combs() -> Vec<Vec<[Vec3; 2]>> {
-    COMBS.with(|c| c.borrow().iter().flat_map(|(_, combs)| combs.clone()).collect())
+pub(crate) fn shown_combs(app: &SolveApp) -> Vec<Vec<[Vec3; 2]>> {
+    app.session.comb.as_ref().map(|v| v.teeth.clone()).unwrap_or_default()
 }
 
-/// Run the comb command for `pick` with the tool's options: its combs' teeth (foot, tip), or
-/// nothing when it fails (the status line says why).
-fn comb_teeth(app: &mut SolveApp, pick: &Value) -> Option<Vec<Vec<[Vec3; 2]>>> {
+/// Comb `picks` (the comb command's parameters for curves or edges; none: draw those shown
+/// again) beside the combs already shown, every comb at one scale with the tool's options. A
+/// failure leaves those shown as they were (the status line says why).
+fn comb(app: &mut SolveApp, picks: Value) {
     let options = comb_options();
-    let mut params = pick.clone();
+    let mut params = picks;
+    params["add"] = json!(true);
     params["density"] = json!(options.teeth);
     params["length"] = json!(options.length);
-    let v = app.run("inspect.curvature_comb", params).ok()?;
-    Some(
-        v["combs"]
-            .as_array()
-            .into_iter()
-            .flatten()
-            .map(|comb| comb["teeth"].as_array().into_iter().flatten().filter_map(|t| Some([v3(t.get(0)?)?, v3(t.get(1)?)?])).collect())
-            .collect(),
-    )
+    let _ = app.run("inspect.curvature_comb", params);
 }
 
-/// Show the comb of `pick` (the comb command's parameters for a curve or an edge) beside those
-/// already shown.
-fn add_comb(app: &mut SolveApp, pick: Value) {
-    if let Some(teeth) = comb_teeth(app, &pick) {
-        COMBS.with(|c| c.borrow_mut().push((pick, teeth)));
-    }
-}
-
-/// Change the comb tool's options and run the comb again on every curve already shown.
+/// Change the comb tool's options and draw the combs shown again with them.
 pub(crate) fn set_comb_options(app: &mut SolveApp, options: CombOptions) {
     let options = CombOptions {
         length: options.length.clamp(*CombOptions::LENGTH.start(), *CombOptions::LENGTH.end()),
@@ -427,9 +410,9 @@ pub(crate) fn set_comb_options(app: &mut SolveApp, options: CombOptions) {
     if COMB_OPTIONS.with(|o| o.replace(options)) == options {
         return;
     }
-    let picks: Vec<Value> = COMBS.with(|c| c.borrow().iter().map(|(pick, _)| pick.clone()).collect());
-    let shown: Vec<(Value, Vec<Vec<[Vec3; 2]>>)> = picks.into_iter().filter_map(|pick| comb_teeth(app, &pick).map(|teeth| (pick, teeth))).collect();
-    COMBS.with(|c| *c.borrow_mut() = shown);
+    if app.session.comb.is_some() {
+        comb(app, json!({}));
+    }
 }
 
 /// The comb tool's options at the top left of the free viewport while it runs (the analysis and
@@ -478,24 +461,19 @@ fn comb_options_card(app: &mut SolveApp, ctx: &egui::Context, proj: &Proj) {
     set_comb_options(app, options);
 }
 
-/// Curvature combs: teeth and the envelope through their tips.
+/// Curvature combs (`Session::comb`): teeth and the envelope through their tips.
 fn combs(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
-    if app.tool.as_ref().map(|t| t.cmd) != Some("inspect.curvature_comb") {
-        COMBS.with(|c| c.borrow_mut().clear());
-        return;
-    }
+    let Some(shown) = &app.session.comb else { return };
     let tk = crate::theme::Tokens::get();
-    COMBS.with(|c| {
-        for comb in c.borrow().iter().flat_map(|(_, combs)| combs) {
-            let mut tips: Vec<Pos2> = Vec::new();
-            for [a, b] in comb {
-                let (Some(p), Some(q)) = (proj.to_screen(*a), proj.to_screen(*b)) else { continue };
-                painter.line_segment([p, q], Stroke::new(1.0, tk.comb_teeth));
-                tips.push(q);
-            }
-            painter.add(egui::Shape::line(tips, Stroke::new(1.4, tk.comb_envelope)));
+    for comb in &shown.teeth {
+        let mut tips: Vec<Pos2> = Vec::new();
+        for [a, b] in comb {
+            let (Some(p), Some(q)) = (proj.to_screen(*a), proj.to_screen(*b)) else { continue };
+            painter.line_segment([p, q], Stroke::new(1.0, tk.comb_teeth));
+            tips.push(q);
         }
-    });
+        painter.add(egui::Shape::line(tips, Stroke::new(1.4, tk.comb_envelope)));
+    }
 }
 
 /// Snap a cursor point on the sketch plane to what is inferred while drawing: a crossing of
@@ -952,7 +930,7 @@ pub fn on_click(app: &mut SolveApp, tool: &mut Tool, proj: &Proj, pos: Pos2) {
                 _ => None,
             });
             if let Some(p) = params {
-                add_comb(app, p);
+                comb(app, p);
             }
         }
         Mode::ModelRef if cmd == "inspect.isocurve" => {
@@ -1635,6 +1613,10 @@ pub fn show(app: &mut SolveApp, ui: &egui::Ui, painter: &egui::Painter, proj: &P
     SHIFT.with(|c| c.set(iso.contains(ModAction::IsoCurveAlternate)));
     glyphs(app, painter, proj, ui.input(|i| i.pointer.hover_pos()).filter(|_| ui.rect_contains_pointer(proj.rect)));
     snap_hint(app, painter, proj);
+    // The combs go with the comb tool.
+    if app.session.comb.is_some() && app.tool.as_ref().map(|t| t.cmd) != Some("inspect.curvature_comb") {
+        let _ = app.run("inspect.curvature_comb", json!({"clear": true}));
+    }
     combs(app, painter, proj);
     comb_options_card(app, ui.ctx(), proj);
     if DEFERRED.with(|d| d.replace(false)) {

@@ -6,7 +6,7 @@ use solidcraft_geom::{Aabb3, Seg2, Vec2, Vec3};
 
 use super::CommandSpec;
 use crate::params::{bad, bool_, num, string_list, vec3};
-use crate::{EngineError, Result, Session};
+use crate::{CombPick, CombView, EngineError, Result, Session};
 
 pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("inspect.curvature_comb", "Curvature Comb Analysis", curvature_comb)
@@ -19,10 +19,13 @@ pub static COMMANDS: &[CommandSpec] = &[
              combs along the face's iso grid); density?: teeth per curve, 2…2000 (default 40; on an edge or an iso curve exactly \
              that many, evenly spaced along its parameter); scale?: comb length per unit curvature (default auto: the longest \
              tooth a fifth of the combs' size); length?: a multiplier on the automatic scale, 0.01…100 (default 1; ignored with \
-             `scale`). The curvature is exact: from each sketch curve, edge curve (line, circle, ellipse, B-spline, NURBS, \
+             `scale`); add?: true keeps the combs shown and adds these, every comb again at one scale (with nothing picked it \
+             draws those shown again with this call's options, or turns the analysis on with none); clear?: true turns the \
+             analysis off. Every comb of a call shares one scale, so tooth lengths compare across curves; the viewport draws \
+             them. The curvature is exact: from each sketch curve, edge curve (line, circle, ellipse, B-spline, NURBS, \
              intersection curve) or face surface's own derivatives, never from the display mesh; a face's teeth are the \
              surface's normal curvature along each iso curve, along the surface normal. → combs: [{curve, teeth: [[foot, tip]], \
-             envelope: [tip], max_curvature, min_radius}], scale",
+             envelope: [tip], max_curvature, min_radius}] (those shown, with `add`), scale",
         ),
     CommandSpec::new("inspect.minimum_radius", "Minimum Radius Analysis", minimum_radius)
         .at("SKETCH", "INSPECT")
@@ -100,18 +103,62 @@ fn edge_teeth(st: &solidcraft_doc::ModelState, at: Vec3, density: usize) -> Resu
     }
 }
 
+/// Most curves Curvature Comb Analysis shows at once.
+const MAX_COMB_PICKS: usize = 1000;
+
+/// The combs of one pick, each as (id, teeth (foot, curvature, unit normal)): one for a curve or
+/// an edge, one per iso curve for a face.
+fn pick_teeth(s: &Session, pick: &CombPick, density: usize) -> Result<Vec<(String, Vec<(Vec3, f64, Vec3)>)>> {
+    let cmd = "inspect.curvature_comb";
+    match pick {
+        CombPick::Curve { sketch, curve } => {
+            let st = s.model.state();
+            let ss = st.sketch(*sketch).ok_or_else(|| EngineError::Other("that sketch is not evaluated".into()))?;
+            let ci = ss.sketch.curve_index(curve).ok_or_else(|| bad(cmd, format!("unknown curve `{curve}`")))?;
+            let segs = ss.sketch.exact_segs(ci).unwrap_or_else(|| ss.sketch.segs(ci));
+            let teeth = teeth_2d(&segs, density).into_iter().map(|(q, k, n)| (ss.plane.to_world(q), k, ss.plane.dir_to_world(n))).collect();
+            Ok(vec![(curve.clone(), teeth)])
+        }
+        CombPick::Edge { at } => {
+            let teeth = edge_teeth(&s.model.state(), *at, density)?.ok_or_else(|| bad(cmd, "no edge there"))?;
+            Ok(vec![(format!("edge@{},{},{}", at.x, at.y, at.z), teeth)])
+        }
+        CombPick::Face { at, count } => {
+            let world = s.world_state()?;
+            let (body, face) = iso_face_at(s, &world, *at).ok_or_else(|| bad(cmd, "no face there"))?;
+            let mut out = Vec::new();
+            for (k, line) in body.iso_lines(face, *count)?.iter().enumerate() {
+                out.push((format!("face@{},{},{}#{k}", at.x, at.y, at.z), teeth_exact(&crate::kernel::iso_comb(&body.body, face, line, density)?)));
+            }
+            Ok(out)
+        }
+    }
+}
+
+/// `inspect.curvature_comb`: the combs of the picked curves, edges and faces (with `add`, those
+/// already shown too), all at one scale, kept so the viewport draws them. View state only.
 fn curvature_comb(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "inspect.curvature_comb";
+    if bool_(p, "clear").unwrap_or(false) {
+        s.comb = None;
+        s.revision += 1;
+        return Ok(json!({"analysis": "curvature_comb", "cleared": true}));
+    }
+    let add = bool_(p, "add").unwrap_or(false);
+    let shown = if add { s.comb.clone() } else { None };
     let density = num(p, "density")
         .filter(|d| d.is_finite())
         .map(|d| d.clamp(crate::kernel::MIN_COMB_TEETH as f64, crate::kernel::MAX_COMB_TEETH as f64) as usize)
-        .unwrap_or(40);
+        .unwrap_or(shown.as_ref().map_or(40, |v| v.density));
     let length = match p.get("length") {
-        None | Some(Value::Null) => 1.0,
+        None | Some(Value::Null) => shown.as_ref().map_or(1.0, |v| v.length),
         Some(v) => v.as_f64().filter(|x| (0.01..=100.0).contains(x)).ok_or_else(|| bad(cmd, "`length` must be a multiplier 0.01…100"))?,
     };
-    let st = s.model.state();
-    let mut combs: Vec<(String, Vec<(Vec3, f64, Vec3)>)> = Vec::new();
+    let fixed_scale = match p.get("scale") {
+        None | Some(Value::Null) => shown.as_ref().and_then(|v| v.fixed_scale),
+        Some(_) => num(p, "scale").filter(|x| x.is_finite() && *x > 0.0),
+    };
+    let mut picks: Vec<CombPick> = Vec::new();
     let curves = string_list(p, "curves");
     if !curves.is_empty() {
         let id = match p.get("sketch") {
@@ -120,19 +167,11 @@ fn curvature_comb(s: &mut Session, p: &Value) -> Result<Value> {
             _ => s.active_sketch,
         }
         .ok_or_else(|| bad(cmd, "no such sketch (and none is active)"))?;
-        let ss = st.sketch(id).ok_or_else(|| EngineError::Other("that sketch is not evaluated".into()))?;
-        for c in curves.iter().take(1000) {
-            let ci = ss.sketch.curve_index(c).ok_or_else(|| bad(cmd, format!("unknown curve `{c}`")))?;
-            let segs = ss.sketch.exact_segs(ci).unwrap_or_else(|| ss.sketch.segs(ci));
-            let teeth = teeth_2d(&segs, density).into_iter().map(|(q, k, n)| (ss.plane.to_world(q), k, ss.plane.dir_to_world(n))).collect();
-            combs.push((c.clone(), teeth));
-        }
+        picks.extend(curves.iter().take(MAX_COMB_PICKS).map(|c| CombPick::Curve { sketch: id, curve: c.clone() }));
     }
     if let Some(edges) = p.get("edges").and_then(Value::as_array) {
-        for e in edges.iter().take(1000) {
-            let at = vec3(e).ok_or_else(|| bad(cmd, "`edges` must be points [x,y,z]"))?;
-            let teeth = edge_teeth(&st, at, density)?.ok_or_else(|| bad(cmd, "no edge there"))?;
-            combs.push((format!("edge@{},{},{}", at.x, at.y, at.z), teeth));
+        for e in edges.iter().take(MAX_COMB_PICKS) {
+            picks.push(CombPick::Edge { at: vec3(e).ok_or_else(|| bad(cmd, "`edges` must be points [x,y,z]"))? });
         }
     }
     if let Some(faces) = p.get("faces") {
@@ -143,39 +182,57 @@ fn curvature_comb(s: &mut Session, p: &Value) -> Result<Value> {
                 num(p, "count").filter(|c| c.is_finite()).map(|c| c.clamp(1.0, 50.0) as usize).ok_or_else(|| bad(cmd, "`count` must be a number"))?
             }
         };
-        let world = s.world_state()?;
         for v in faces.iter().take(100) {
-            let at = vec3(v).ok_or_else(|| bad(cmd, "`faces` must list points [x,y,z]"))?;
-            let (body, face) = iso_face_at(s, &world, at).ok_or_else(|| bad(cmd, "no face there"))?;
-            for (k, line) in body.iso_lines(face, count)?.iter().enumerate() {
-                let teeth = teeth_exact(&crate::kernel::iso_comb(&body.body, face, line, density)?);
-                combs.push((format!("face@{},{},{}#{k}", at.x, at.y, at.z), teeth));
-            }
+            picks.push(CombPick::Face { at: vec3(v).ok_or_else(|| bad(cmd, "`faces` must list points [x,y,z]"))?, count });
         }
     }
-    if combs.is_empty() {
+    if picks.is_empty() && !add {
         return Err(bad(cmd, "give `curves`, `edges` or `faces`"));
+    }
+    let shown_picks = shown.map(|v| v.picks).unwrap_or_default();
+    if shown_picks.len() + picks.len() > MAX_COMB_PICKS {
+        return Err(bad(cmd, format!("at most {MAX_COMB_PICKS} curves can be combed at once")));
+    }
+    // The curves shown are combed again with these options; one gone with a model change since
+    // (its sketch, edge or face no longer there) is dropped. A new pick must be there.
+    let mut kept: Vec<CombPick> = Vec::new();
+    let mut combs: Vec<(String, Vec<(Vec3, f64, Vec3)>)> = Vec::new();
+    for pick in shown_picks {
+        if let Ok(teeth) = pick_teeth(s, &pick, density) {
+            combs.extend(teeth);
+            kept.push(pick);
+        }
+    }
+    for pick in picks {
+        combs.extend(pick_teeth(s, &pick, density)?);
+        kept.push(pick);
     }
     // One scale for all combs: the longest tooth is a fifth of the largest curve's size.
     let kmax = combs.iter().flat_map(|c| c.1.iter().map(|t| t.1.abs())).fold(0.0_f64, f64::max);
     let bounds: Aabb3 = combs.iter().flat_map(|c| c.1.iter().map(|t| t.0)).collect();
     let diag = bounds.diagonal();
     let auto = if kmax > 1e-12 && !bounds.is_empty() && diag.is_finite() { 0.2 * diag / kmax } else { 1.0 };
-    let scale = num(p, "scale").filter(|x| x.is_finite() && *x > 0.0).unwrap_or(auto * length);
+    let scale = fixed_scale.unwrap_or(auto * length);
+    let mut drawn = Vec::with_capacity(combs.len());
     let out: Vec<Value> = combs
         .iter()
         .map(|(id, teeth)| {
-            let lines: Vec<[[f64; 3]; 2]> = teeth.iter().map(|(q, k, n)| [(*q).into(), (*q - *n * (k * scale)).into()]).collect();
+            let lines: Vec<[Vec3; 2]> = teeth.iter().map(|(q, k, n)| [*q, *q - *n * (k * scale)]).collect();
             let kmax_c = teeth.iter().map(|t| t.1.abs()).fold(0.0_f64, f64::max);
-            json!({
+            let reply: Vec<[[f64; 3]; 2]> = lines.iter().map(|[a, b]| [(*a).into(), (*b).into()]).collect();
+            let value = json!({
                 "curve": id,
-                "teeth": lines,
-                "envelope": lines.iter().map(|l| l[1]).collect::<Vec<_>>(),
+                "envelope": reply.iter().map(|l| l[1]).collect::<Vec<_>>(),
+                "teeth": reply,
                 "max_curvature": kmax_c,
                 "min_radius": if kmax_c > 1e-12 { Value::from(1.0 / kmax_c) } else { Value::Null },
-            })
+            });
+            drawn.push(lines);
+            value
         })
         .collect();
+    s.comb = Some(CombView { picks: kept, density, length, fixed_scale, scale, teeth: drawn });
+    s.revision += 1;
     Ok(json!({"combs": out, "scale": scale}))
 }
 
@@ -473,6 +530,40 @@ mod tests {
         assert!(rings >= 3 && straight >= 3, "{rings} rings, {straight} straight: {r}");
         assert!(s.execute("inspect.curvature_comb", &json!({"faces": []})).is_err());
         assert!(s.execute("inspect.curvature_comb", &json!({"faces": [[58, 0, 5]], "count": "x"})).is_err());
+    }
+
+    /// The combs shown are kept in the session: `add` adds to them and draws them all again at
+    /// one scale (an R5 circle's teeth twice an R10 circle's), with nothing picked it takes new
+    /// options, a sketch curve keeps its own sketch, and `clear` turns the analysis off.
+    #[test]
+    fn added_combs_share_one_scale_and_clear_turns_them_off() {
+        use solidcraft_geom::Vec3;
+        let mut s = Session::default();
+        s.execute("solid.cylinder", &json!({"radius": 5, "height": 10})).unwrap();
+        s.execute("solid.cylinder", &json!({"base": [40, 0, 0], "radius": 10, "height": 10})).unwrap();
+        let one = s.execute("inspect.curvature_comb", &json!({"edges": [[0, 5, 10]], "density": 8})).unwrap();
+        let both = s.execute("inspect.curvature_comb", &json!({"edges": [[40, 10, 10]], "add": true})).unwrap();
+        let shown = s.comb.as_ref().unwrap();
+        assert_eq!((shown.picks.len(), shown.teeth.len(), shown.density), (2, 2, 8), "the first call's density is kept");
+        assert_eq!(both["combs"].as_array().unwrap().len(), 2);
+        let tooth = |c: &[[Vec3; 2]]| c[0][0].dist(c[0][1]);
+        assert!((tooth(&shown.teeth[0]) / tooth(&shown.teeth[1]) - 2.0).abs() < 1e-9);
+        assert_ne!(one["scale"], both["scale"], "the scale is the pair's, not the first comb's");
+        let longer = s.execute("inspect.curvature_comb", &json!({"add": true, "length": 2})).unwrap();
+        assert!((longer["scale"].as_f64().unwrap() - 2.0 * both["scale"].as_f64().unwrap()).abs() < 1e-9);
+        assert_eq!(s.comb.as_ref().unwrap().picks.len(), 2);
+        // A sketch curve keeps its sketch after another becomes active.
+        s.execute("sketch.create", &json!({"plane": "XY"})).unwrap();
+        let c = s.execute("sketch.circle.center", &json!({"center": [0, 30], "radius": 5})).unwrap()["curves"][0].clone();
+        s.execute("inspect.curvature_comb", &json!({"curves": [c], "add": true})).unwrap();
+        s.execute("sketch.finish", &json!({})).unwrap();
+        s.execute("sketch.create", &json!({"plane": "XZ"})).unwrap();
+        let r = s.execute("inspect.curvature_comb", &json!({"add": true})).unwrap();
+        assert_eq!(r["combs"].as_array().unwrap().len(), 3, "{r}");
+        s.execute("inspect.curvature_comb", &json!({"clear": true})).unwrap();
+        assert!(s.comb.is_none());
+        let on = s.execute("inspect.curvature_comb", &json!({"add": true})).unwrap();
+        assert!(on["combs"].as_array().unwrap().is_empty() && s.comb.as_ref().is_some_and(|v| v.picks.is_empty()));
     }
 
     /// Each tooth of a comb reply as (foot, curvature): the tooth's length over the scale.
