@@ -1968,6 +1968,10 @@ pub struct MakeJointOriginParams {
     /// Blank text gives the default. A name already taken is refused.
     #[serde(default)]
     pub name: Option<String>,
+    /// Robot exports write the origin as a frame of its own: an empty link on a fixed joint.
+    /// Default false.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub export_frame: Option<bool>,
     /// The occurrence the origin is on, by id or name. Default: found from the point, or the
     /// named face's component.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -2823,6 +2827,29 @@ pub struct JointDynamicsResult {
     pub damping: Option<f64>,
     /// The friction now saved.
     pub friction: Option<f64>,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
+/// Mark a named joint origin as a frame of its own in robot exports (a tool tip, a sensor mount),
+/// or stop marking it.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct OriginFrameParams {
+    /// The named joint origin.
+    pub origin: String,
+    /// Whether robot exports write it.
+    pub frame: bool,
+}
+
+/// What `joint.origin_frame` returns.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct OriginFrameResult {
+    /// The joint origin.
+    pub origin: String,
+    /// Whether robot exports now write it.
+    pub frame: bool,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,

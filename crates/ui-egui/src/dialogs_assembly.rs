@@ -111,6 +111,8 @@ pub enum Asm {
     },
     Joint(Box<JointForm>),
     JointOrigin {
+        /// Robot exports write it as a frame of its own.
+        frame: bool,
         name: String,
         hover: Hover,
     },
@@ -311,7 +313,7 @@ pub fn start(app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
             Asm::Joint(Box::new(JointForm::new(true, &app.session.doc))),
             vec![SelInput::new("Components", BODIES, true), SelInput::new("Position", SNAPS, false)],
         ),
-        "joint.origin" => (Asm::JointOrigin { name: String::new(), hover: None }, vec![SelInput::new("Snap", SNAPS, false)]),
+        "joint.origin" => (Asm::JointOrigin { name: String::new(), frame: false, hover: None }, vec![SelInput::new("Snap", SNAPS, false)]),
         "joint.rigid_group" => (Asm::RigidGroup, vec![SelInput::new("Components", BODIES, true)]),
         "joint.drive" => {
             let joint = picked_joint(app, true);
@@ -1353,8 +1355,9 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Asm, inputs: &mut [Se
                 ui.ctx().request_repaint_after(std::time::Duration::from_millis(30));
             }
         }
-        Asm::JointOrigin { name, .. } => {
+        Asm::JointOrigin { name, frame, .. } => {
             enter |= text_row(ui, "Name", name, solidcraft_ui_text::tr_label("Joint Origin1")).0;
+            crate::ui_kit::checkbox(ui, solidcraft_ui_text::tr_label("Export as a robot frame"), frame);
         }
         Asm::RigidGroup => {}
         Asm::Drive { joint, values, focus } => {
@@ -2052,10 +2055,13 @@ pub fn commands(app: &SolveApp, k: &Asm, inputs: &[SelInput]) -> Result<Vec<(Str
             }
             cmd("joint.create", p)
         }
-        Asm::JointOrigin { name, .. } => {
+        Asm::JointOrigin { name, frame, .. } => {
             let mut p = snap(0, "a snap")?.param;
             if !name.trim().is_empty() {
                 p["name"] = json!(name.trim());
+            }
+            if *frame {
+                p["frame"] = json!(true);
             }
             cmd("joint.origin", p)
         }

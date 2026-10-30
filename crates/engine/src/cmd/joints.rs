@@ -57,8 +57,13 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&ORIGIN_CONTRACT)
         .output(output_schema_for::<MakeJointOriginResult>)
         .params(
-        "name?, occurrence?: id|name (default: from the pick, or the named face's component), path?: [occurrence ids from the root] (the placement picked on, ending at the occurrence: a part in a sub-assembly placed more than once is then on that copy; default: the occurrence's first placement, or with no occurrence the placement nearest the pick), face: [x,y,z] | \"<name>\" (centre of a planar face) | circle: [x,y,z] | \"<name>\" (centre of a round end: a point on its wall or rim, the end's centre, or the round face's name as model.faces lists it) | edge: [x,y,z] (a point on an edge of a planar face: the edge's middle, z out of the face, y into it; on?: [x,y,z] a point on the face (default: the larger planar face beside the edge); corner?: [x,y,z] near one end: the corner there, x and y along its two edges into the face; found again by name, so it follows the face as it changes size; z?: [x,y,z] the frame's z instead of the face's normal, along the edge when it runs that way, x chosen from z: an edge or corner picked as it is, kept as a point where it can't be found by name) | point: [x,y,z], z?: [x,y,z] | plane: \"XY\"|\"XZ\"|\"YZ\"|\"o:<ids>/origin/<item>\"|\"<name>\" | axis: \"X\"|\"Y\"|\"Z\"|\"o:<ids>/origin/<item>\"|\"<name>\"; a circle's z?: [x,y,z] (a round edge's centre with the way out of it: its end by name when that is the frame it shows, else a point there); body?: the named face's body; end?: \"<name>\" (a circle's end: the face across its rim there; default the end nearer the pick); x?: [x,y,z] (a direction, world) | \"<face name>\" | {face: [x,y,z]} (the frame's x: a direction, a plane's normal, or the way to another hole's axis; keeps a round origin's turn; a point's x is a direction, laid square to its z, default: chosen from z alone). Faces are kept by name: the origin follows its face, and a circle its end, when the design changes",
+        "name?, export_frame?: bool (robot exports write it as a frame of its own), occurrence?: id|name (default: from the pick, or the named face's component), path?: [occurrence ids from the root] (the placement picked on, ending at the occurrence: a part in a sub-assembly placed more than once is then on that copy; default: the occurrence's first placement, or with no occurrence the placement nearest the pick), face: [x,y,z] | \"<name>\" (centre of a planar face) | circle: [x,y,z] | \"<name>\" (centre of a round end: a point on its wall or rim, the end's centre, or the round face's name as model.faces lists it) | edge: [x,y,z] (a point on an edge of a planar face: the edge's middle, z out of the face, y into it; on?: [x,y,z] a point on the face (default: the larger planar face beside the edge); corner?: [x,y,z] near one end: the corner there, x and y along its two edges into the face; found again by name, so it follows the face as it changes size; z?: [x,y,z] the frame's z instead of the face's normal, along the edge when it runs that way, x chosen from z: an edge or corner picked as it is, kept as a point where it can't be found by name) | point: [x,y,z], z?: [x,y,z] | plane: \"XY\"|\"XZ\"|\"YZ\"|\"o:<ids>/origin/<item>\"|\"<name>\" | axis: \"X\"|\"Y\"|\"Z\"|\"o:<ids>/origin/<item>\"|\"<name>\"; a circle's z?: [x,y,z] (a round edge's centre with the way out of it: its end by name when that is the frame it shows, else a point there); body?: the named face's body; end?: \"<name>\" (a circle's end: the face across its rim there; default the end nearer the pick); x?: [x,y,z] (a direction, world) | \"<face name>\" | {face: [x,y,z]} (the frame's x: a direction, a plane's normal, or the way to another hole's axis; keeps a round origin's turn; a point's x is a direction, laid square to its z, default: chosen from z alone). Faces are kept by name: the origin follows its face, and a circle its end, when the design changes",
     ),
+    CommandSpec::new("joint.origin_frame", "Export Origin as Frame", crate::checked!("joint.origin_frame", origin_frame))
+        .icon("joint_origin")
+        .contract(&ORIGIN_FRAME_CONTRACT)
+        .output(crate::schema::output_schema_for::<crate::schema::joints::OriginFrameResult>)
+        .params("origin: a named joint origin; frame: bool: robot exports write it as a frame of its own (a tool tip, a sensor mount)"),
     CommandSpec::new("joint.create", "Joint", crate::checked!("joint.create", joint))
         .at("SOLID", "ASSEMBLE")
         .icon("joint")
@@ -1328,7 +1333,7 @@ fn joint_origin(s: &mut Session, p: &Value) -> Result<Value> {
     if s.doc.assembly.origins.iter().any(|o| o.name == name) {
         return Err(bad(cmd, format!("there is already a joint origin `{name}`")));
     }
-    s.doc_mut().assembly.origins.push(NamedOrigin { name: name.clone(), origin });
+    s.doc_mut().assembly.origins.push(NamedOrigin { name: name.clone(), origin, export_frame: bool_(p, "export_frame").unwrap_or(false) });
     reply(cmd, MakeJointOriginResult { origin: name, param_warnings: Vec::new() })
 }
 
@@ -2169,6 +2174,23 @@ fn limits(s: &mut Session, p: &Value) -> Result<Value> {
     j.values = q;
     let sol = resolve(s);
     reply(cmd, SolveResult { solved: solve_report(&sol, p), param_warnings: Vec::new() })
+}
+
+const ORIGIN_FRAME_CONTRACT: crate::schema::TypedContract<crate::schema::joints::OriginFrameParams> = crate::schema::TypedContract::new();
+
+/// Mark a named joint origin as a frame for robot exports, or stop marking it.
+fn origin_frame(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "joint.origin_frame";
+    let name = str_(p, "origin").ok_or_else(|| bad(cmd, "give `origin`"))?;
+    let frame = bool_(p, "frame").ok_or_else(|| bad(cmd, "give `frame`"))?;
+    if !s.doc.assembly.origins.iter().any(|o| o.name == name) {
+        return Err(bad(cmd, format!("no joint origin `{name}`")));
+    }
+    let name = name.to_string();
+    if let Some(o) = s.doc_mut().assembly.origins.iter_mut().find(|o| o.name == name) {
+        o.export_frame = frame;
+    }
+    Ok(json!({"origin": name, "frame": frame}))
 }
 
 const DYNAMICS_CONTRACT: crate::schema::TypedContract<crate::schema::joints::JointDynamicsParams> = crate::schema::TypedContract::new();

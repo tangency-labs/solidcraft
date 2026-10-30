@@ -14,7 +14,9 @@ use std::collections::{BTreeMap, BTreeSet, HashSet, VecDeque};
 
 use solidcore_record::Vec3;
 use solidcraft_doc::joints::{self, Joint, JointDynamics, JointKind};
-use solidcraft_doc::{Document, IDENTITY, MAX_PLACEMENT_DEPTH, MAX_PLACEMENTS, Mat, ModelState, Occurrence, apply_point, mat_inverse, mat_mul};
+use solidcraft_doc::{
+    Document, IDENTITY, MAX_PLACEMENT_DEPTH, MAX_PLACEMENTS, Mat, ModelState, Occurrence, PhysicalOverride, apply_point, mat_inverse, mat_mul,
+};
 use solidcraft_geom::Mesh;
 
 use crate::{IoError, Result, export_mesh, stl_binary, weld, weld_eps};
@@ -228,6 +230,7 @@ struct Part {
     collision: Option<String>,
     color: Option<[f32; 4]>,
     masses: Vec<BodyMass>,
+    physical_override: Option<PhysicalOverride>,
 }
 
 /// Mesh files and masses per component (0: the root's bodies, named `base`).
@@ -264,7 +267,12 @@ fn parts(doc: &Document, st: &ModelState, stem: &str, names: &mut Names, out: &m
                 }
             }
         }
-        let mut part = Part { visual: None, collision: None, color, masses };
+        let saved = doc.components.iter().find(|x| x.id == c).and_then(|x| x.physical_override);
+        let physical_override = saved.filter(PhysicalOverride::is_sane);
+        if saved.is_some() && physical_override.is_none() {
+            out.warnings.push(format!("the physical override of `{label}` is not usable numbers: ignored"));
+        }
+        let mut part = Part { visual: None, collision: None, color, masses, physical_override };
         if !visual.triangles.is_empty() {
             let file = names.file(&format!("{stem}-{label}"));
             out.meshes.push((file.clone(), stl_binary(&[metres(&visual)], &label)));
@@ -302,6 +310,7 @@ fn canonical(doc: &Document, occ: u64) -> Vec<u64> {
 /// The tree as it grows.
 struct Tree<'a> {
     doc: &'a Document,
+    st: &'a ModelState,
     parts: BTreeMap<u64, Part>,
     names: Names,
     model: UrdfModel,
@@ -340,7 +349,7 @@ impl<'a> Tree<'a> {
             visual: part.and_then(|p| p.visual.clone()),
             collision: part.and_then(|p| p.collision.clone()),
             color: part.and_then(|p| p.color),
-            inertial: part.and_then(|p| inertial(&p.masses, &mesh_origin)).or(Some(token())),
+            inertial: part.and_then(|p| link_inertial(p, &mesh_origin)).or(Some(token())),
         };
         self.model.links.push(link);
         Some(self.model.links.len() - 1)
@@ -362,6 +371,28 @@ impl<'a> Tree<'a> {
             dynamics: JointDynamics::default(),
             mimic: None,
         });
+    }
+
+    /// Each origin flagged as a frame becomes an empty link fixed on its part's link: `fixed`
+    /// keeps it from needing mass of its own.
+    fn frames(&mut self) {
+        let doc = self.doc;
+        let st = self.st;
+        for o in doc.assembly.origins.iter().filter(|o| o.export_frame) {
+            let occ = o.origin.occurrence;
+            let frame = self.placed.get(&occ).copied().and_then(|(parent, at)| {
+                let local = joints::resolve_origin(doc, st, &o.origin).ok()?;
+                Some((parent, mat_mul(&mat_inverse(&at)?, &mat_mul(&self.world(occ), &local))))
+            });
+            let Some((parent, origin)) = frame else {
+                self.warnings.push(format!("frame `{}` is skipped: its origin doesn't resolve", o.name));
+                continue;
+            };
+            let name = self.names.take(&o.name);
+            let child = self.model.links.len();
+            self.model.links.push(Link { name, path: Vec::new(), mesh_origin: IDENTITY, visual: None, collision: None, color: None, inertial: None });
+            self.fixed(parent, child, origin);
+        }
     }
 
     /// The link an occurrence fixed in place hangs on, and its frame: `base_link` for the top
@@ -562,6 +593,7 @@ pub fn urdf(doc: &Document, st: &ModelState, stem: &str, options: &UrdfOptions) 
     let parts = parts(doc, st, stem, &mut names, &mut out)?;
     let mut tree = Tree {
         doc,
+        st,
         parts,
         names,
         model: UrdfModel::default(),
@@ -638,6 +670,7 @@ pub fn urdf(doc: &Document, st: &ModelState, stem: &str, options: &UrdfOptions) 
         }
     }
     tree.copies(&jointed);
+    tree.frames();
     if options.mimic {
         resolve_mimics(&mut tree.model, doc, &mut tree.warnings);
     }
@@ -756,6 +789,51 @@ fn inertial(masses: &[BodyMass], to_link: &Mat) -> Option<Inertial> {
     let inertia = total.map(|row| row.map(|x| x * 1e-6));
     let finite = mass.is_finite() && [com.x, com.y, com.z].iter().all(|x| x.is_finite()) && inertia.iter().flatten().all(|x| x.is_finite());
     finite.then_some(Inertial { mass, com, inertia })
+}
+
+/// What a part's link weighs: its bodies' values, or the override in their place.
+fn link_inertial(part: &Part, to_link: &Mat) -> Option<Inertial> {
+    let computed = inertial(&part.masses, to_link);
+    let Some(o) = part.physical_override else { return computed };
+    let com = match (o.com, computed) {
+        (Some([x, y, z]), _) => apply_point(to_link, Vec3::new(x, y, z)),
+        (None, Some(c)) => c.com,
+        (None, None) => apply_point(to_link, Vec3::ZERO),
+    };
+    let inertia = match (o.inertia, computed) {
+        (Some([xx, yy, zz, xy, xz, yz]), _) => turned([[xx, xy, xz], [xy, yy, yz], [xz, yz, zz]], to_link),
+        (None, Some(c)) => c.inertia.map(|row| row.map(|x| x * o.mass / c.mass)),
+        (None, None) => return None,
+    };
+    Some(Inertial { mass: o.mass, com, inertia })
+}
+
+/// `R I Rᵀ` for the turn of `m`.
+fn turned(inertia: [[f64; 3]; 3], m: &Mat) -> [[f64; 3]; 3] {
+    let r = |i: usize, j: usize| m.get(j).and_then(|c| c.get(i)).copied().unwrap_or(0.0);
+    let mut out = [[0.0; 3]; 3];
+    for (i, row_out) in out.iter_mut().enumerate() {
+        for (j, cell) in row_out.iter_mut().enumerate() {
+            for (a, row) in inertia.iter().enumerate() {
+                for (b, x) in row.iter().enumerate() {
+                    *cell += r(i, a) * x * r(j, b);
+                }
+            }
+        }
+    }
+    out
+}
+
+/// Whether a component has a closed body to work a mass out from.
+pub fn has_mass(doc: &Document, st: &ModelState, component: u64) -> Result<bool> {
+    for b in st.bodies.iter().filter(|b| doc.model_body_component(b) == component) {
+        let m = export_mesh(&b.body)?;
+        let (positions, triangles) = weld(&m.positions, &m.triangles, weld_eps(&b.body));
+        if (Mesh { positions, triangles, ..Mesh::default() }).mass_properties().is_some() {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 fn append(into: &mut Mesh, m: &Mesh) {
