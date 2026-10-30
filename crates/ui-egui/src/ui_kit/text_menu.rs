@@ -198,16 +198,19 @@ fn keep_selection(ui: &Ui, response: &Response, len: usize) -> Option<CCursorRan
     if !down {
         kept = None;
     }
+    // Read before `data_mut`: both lock the context's memory.
+    let focused = response.has_focus();
     let range = match kept {
         Some(keep) => {
             state.cursor.set_char_range(Some(keep));
             state.store(ctx, id);
             Some(keep)
         }
+        // The click on a menu row took the focus before the field drew, and egui 0.37 drops an
+        // unfocused field's selection: the row acts on the selection of the last focused frame.
+        None if !focused => last.or(now),
         None => now,
     };
-    // Read before `data_mut`: both lock the context's memory.
-    let focused = response.has_focus();
     ctx.data_mut(|d| {
         match kept {
             Some(keep) => {
