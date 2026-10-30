@@ -223,6 +223,32 @@ pub fn grid_step(half_height: f64) -> (f64, f64) {
     (minor, minor * 5.0)
 }
 
+/// The grid a sketch's points snap to: the crossings of the lines the viewport draws, and the
+/// finer lattice between them.
+///
+/// The grid's lines are `minor` apart, so its crossings are what the user can see and what a
+/// point lands on when it is near one (#7114). Between two crossings the finer lattice holds
+/// the point, so a value that is not on a crossing (an exact inch, say) can still be placed.
+pub fn sketch_grid_step(half_height: f64) -> (f64, f64) {
+    let (minor, _) = grid_step(half_height);
+    (minor, minor / 10.0)
+}
+
+/// The crossing of the drawn grid's lines nearest `p`, when `p` is within a quarter of a cell of
+/// it: the point the user can see and means (#7114).
+///
+/// A quarter of a cell is close enough that the crossing is what the pointer meant, and far
+/// enough that the finer lattice still holds the points between the crossings.
+pub fn sketch_grid_crossing(p: Vec2, minor: f64) -> Option<Vec2> {
+    let crossing = Vec2::new((p.x / minor).round() * minor, (p.y / minor).round() * minor);
+    (crossing.dist(p) <= minor / 4.0).then_some(crossing)
+}
+
+/// The point of the finer lattice between the crossings nearest `p`.
+pub fn sketch_grid_lattice(p: Vec2, fine: f64) -> Vec2 {
+    Vec2::new((p.x / fine).round() * fine, (p.y / fine).round() * fine)
+}
+
 /// How the grid fades out with the distance from the middle of the view (#4214).
 ///
 /// The grid used to stop at a fixed distance, so its edge showed as a cut across the picture. It

@@ -513,3 +513,24 @@ fn a_horizontal_line_ends_plumb_with_a_point_above_and_keeps_both() {
         "the line stays horizontal"
     );
 }
+
+/// #7114: a point placed near a visible grid intersection lands on that intersection. The
+/// sketch snapped to a tenth of the drawn grid's spacing, a hidden lattice between the lines
+/// the user can see, so a point placed on an intersection landed beside it.
+#[test]
+fn a_point_near_a_visible_grid_intersection_snaps_to_it_7114() {
+    use solidcraft_engine::geom::Vec2;
+    let mut h = Harness::new();
+    h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+    h.settle();
+    h.step(&json!({"start":"sketch.point"})).unwrap();
+    // The drawn grid's own spacing, and a crossing of its lines.
+    let minor = solidcraft_engine::view::grid_step(h.app.cam.half_height()).0;
+    let at = Vec2::new(minor * 4.0, minor * 4.0);
+    // A little off that crossing: on the hidden finer lattice the point would land beside it,
+    // on the grid the user can see it lands on it.
+    let off = Vec2::new(at.x + minor / 16.0, at.y);
+    h.step(&json!({"move":{"sketch":[off.x, off.y]}})).unwrap();
+    let hover = h.app.tool.as_ref().unwrap().hover.as_ref().unwrap().0;
+    assert_eq!(hover, at, "the point lands on the visible grid intersection");
+}
