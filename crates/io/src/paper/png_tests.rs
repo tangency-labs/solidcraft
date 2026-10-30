@@ -259,8 +259,8 @@ fn what_cannot_be_drawn_is_refused() {
         p(20.0, 10.0),
         vec![Item::Stroke { path: vec![Seg2::Conic { a: p(0.0, 0.0), apex: p(5.0, 5.0), b: p(10.0, 0.0), w: 0.5 }], closed: false, width_mm: 0.35 }],
     );
-    let e = paper_png(&ellipse.prepare().unwrap(), PngOptions::default(), &NoPictures, Vec::new()).unwrap_err();
-    assert!(e.to_string().contains("not supported yet"), "{e}");
+    // An ellipse draws, as cubics (A3b).
+    assert!(paper_png(&ellipse.prepare().unwrap(), PngOptions::default(), &NoPictures, Vec::new()).is_ok());
     // 1,000 circles of 100 m at 2400 dpi, each about 19,000 points: over 2^24 in all. A small sheet,
     // so a cap that failed would cost seconds, not hours.
     let big = Loop2::circle(p(0.0, 0.0), 1e5);

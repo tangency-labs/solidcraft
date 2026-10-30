@@ -347,7 +347,7 @@ fn a_scene_on_the_grid_keeps_y_up_and_leaves_the_closing_line_to_the_writer() {
 
 /// Slivers are measured in the grid's own steps: a 5 mm piece goes straight on to the next on a
 /// 1 mm grid, and stays on the nanometre grid. An arc's quarters keep its radius and turn, in
-/// steps; a width under half a step is one step. A curve the walk can't take yet is refused.
+/// steps; a width under half a step is one step. An ellipse comes as counted cubics.
 #[test]
 fn slivers_and_radii_are_in_the_grids_own_steps() {
     let millimetre = Grid::new(1.0).unwrap();
@@ -360,7 +360,7 @@ fn slivers_and_radii_are_in_the_grids_own_steps() {
     let coarse = walk(&three, millimetre);
     let to = |x: i64| Piece::Line { to: GridPoint { x, y: 0 } };
     assert_eq!(path(&coarse).1.pieces, [to(100), to(200)]);
-    assert_eq!(coarse.report, GridReport { widths_snapped: 1, pieces_merged: 1 }, "0.35 mm is under half a 1 mm step");
+    assert_eq!(coarse.report, GridReport { widths_snapped: 1, pieces_merged: 1, curve_cubics: 0 }, "0.35 mm is under half a 1 mm step");
     assert_eq!(path(&coarse).0, 1);
     // The boundary both ways: 10 steps along x merge, 11 don't; a (6, 8) step merges, (7, 8) doesn't.
     for (dx, dy, merged) in [(10.0, 0.0, 1), (11.0, 0.0, 0), (6.0, 8.0, 1), (7.0, 8.0, 0)] {
@@ -377,9 +377,13 @@ fn slivers_and_radii_are_in_the_grids_own_steps() {
         path(&walk(&half, millimetre)).1,
         GridPath { start: GridPoint { x: 50, y: 60 }, pieces: vec![arc(60, 50), arc(50, 40)], closed: false }
     );
+    // An ellipse comes as cubics, counted, ending where it ends.
     let ellipse = open(vec![Seg2::Conic { a: p(0.0, 0.0), apex: p(10.0, 10.0), b: p(20.0, 0.0), w: 0.5 }]);
-    let refused = ellipse.prepare().unwrap().on_grid(Grid::NANOMETRE).unwrap_err();
-    assert!(refused.0.contains("not supported yet"), "{refused}");
+    let on = walk(&ellipse, Grid::NANOMETRE);
+    let walked = path(&on).1;
+    assert!(on.report.curve_cubics > 1 && walked.pieces.len() == on.report.curve_cubics, "{:?}", on.report);
+    assert!(walked.pieces.iter().all(|piece| matches!(piece, Piece::Cubic { .. })));
+    assert_eq!(walked.pieces.last().map(Piece::to), Some(GridPoint { x: 20_000_000, y: 0 }));
 }
 
 fn picture(x0: f64, y0: f64, x1: f64, y1: f64, opacity: f64) -> Item {
