@@ -1,0 +1,33 @@
+{
+  "nl": {
+    "browser.calibrate_click_a": "Klik op de afbeelding voor Punt A of typ de coördinaten ervan.",
+    "browser.calibrate_click_b": "Klik op de afbeelding voor Punt B of typ de coördinaten ervan.",
+    "help.sketch.construction_line": "Maak een oneindige constructielijn door twee punten. Gebruik deze om een schets op te zetten zonder profielen te splitsen.",
+    "help.sketch.construction_line.angle": "Maak een oneindige constructielijn onder een hoek ten opzichte van de X-as van de schets. Kies het punt en typ de hoek, of kies de richting ervan.",
+    "help.sketch.construction_line.bisector": "Kies twee elkaar snijdende rechte schetslijnen en kies dan een van beide bissectrices. Het resultaat volgt zijn bronlijnen.",
+    "help.sketch.construction_line.horizontal": "Maak een oneindige horizontale constructielijn door een punt. De horizontale beperking blijft gelden bij latere bewerkingen.",
+    "help.sketch.construction_line.parallel": "Kies een rechte schetslijn en plaats dan een parallelle, oneindige constructielijn. Klik met rechts om een andere referentie te kiezen.",
+    "help.sketch.construction_line.perpendicular": "Kies een rechte schetslijn en plaats dan een loodrechte, oneindige constructielijn. Klik met rechts om een andere referentie te kiezen.",
+    "help.sketch.construction_line.tangent_at": "Maak een raaklijn in een punt van een cirkel of cirkelboog, of in een eindpunt van een open spline of kegelsnede. Kies de kromme en dan het raakpunt.",
+    "help.sketch.construction_line.tangent_external": "Kies een cirkel of cirkelboog en dan een extern punt en een oplossing voor de raaklijn. De voorbeelden tonen alleen raakpunten op de getekende boog.",
+    "help.sketch.construction_line.tangent_two": "Kies twee cirkels of cirkelbogen en kies dan een gemeenschappelijke raaklijn in het voorbeeld. De raakpunten moeten op de getekende krommen liggen.",
+    "help.sketch.construction_line.vertical": "Maak een oneindige verticale constructielijn door een punt. De verticale beperking blijft gelden bij latere bewerkingen.",
+    "prefs.persistent_ribbon_pressed": "Actieve lintopdrachten markeren",
+    "prefs.persistent_ribbon_pressed_help": "Lintopdrachten markeren zolang hun effect actief is. Zet dit uit om het vorige neutrale uiterlijk en de vorige opdrachthulp te behouden.",
+    "prefs.sketch_construction_lines": "Uitgebreide tools voor constructielijnen",
+    "prefs.sketch_open_look_at": "Naar een schets toe draaien wanneer die wordt geopend",
+    "prefs.sketch_open_look_at_note": "Uit: een schets maken of bewerken laat de weergave zoals die is. Kijken naar richt de weergave op de schets wanneer je dat wilt.",
+    "recovery.discard_all": "Alles verwerpen",
+    "recovery.discard_all_detail": "Dit kan niet ongedaan worden gemaakt.",
+    "recovery.discard_all_title": "{count} automatische opslagen verwerpen?",
+    "recovery.discard_all_title_one": "1 automatische opslag verwerpen?",
+    "ui.construction.angle_hint": "Constructielijn: klik op een punt en typ dan een hoek of kies een richting",
+    "ui.construction.bisector_hint": "Bissectrice: kies twee elkaar snijdende rechte lijnen en dan de gewenste oplossing",
+    "ui.construction.common_hint": "Gemeenschappelijke raaklijn: kies twee cirkels/bogen en dan de gewenste oplossing",
+    "ui.construction.contact_hint": "Raaklijn: kies een cirkel/boog of open spline/kegelsnede en dan het raakpunt (vrije krommen: eindpunten)",
+    "ui.construction.external_hint": "Raaklijn: kies een cirkel of boog, een extern punt en dan de gewenste oplossing",
+    "ui.construction.free_hint": "Constructielijn: klik op twee punten; klik met rechts om opnieuw te beginnen",
+    "ui.construction.point_hint": "Constructielijn: klik op het punt waar de lijn doorheen moet",
+    "ui.construction.reference_hint": "Constructielijn: kies een rechte lijn en dan een punt; klik met rechts om de referentie te wijzigen"
+  }
+}
