@@ -404,3 +404,27 @@ fn a_crown_fills_out_to_the_side_the_neighbours_face() {
     eprintln!("the window's middle {plain:.4} from the centre, crowned {out:.4}, crowned to inward neighbours {sunk:.4}");
     assert!(out > plain + 0.1 && sunk < plain - 0.1, "{plain} {out} {sunk}");
 }
+
+/// The same loop fills to the same bits every time, about a centre and in a ring (a design is
+/// rebuilt on reading it back, and must come back the same surface).
+#[test]
+fn a_fill_is_the_same_to_the_last_bit_every_time() {
+    let tube = circle_quarters(30.0, 10.0);
+    let radial = |p: Vec3| (Vec3::new(p.x, p.y, 0.0).normalized().unwrap(), Vec3::Z);
+    let s = IsoSpec { tol: 2e-5, ..spec() };
+    let ring = |_: usize| iso_fill(&tube, &mut beside_by(&tube, radial), &s).unwrap();
+    let corners: Vec<Vec3> =
+        (0..6).map(|k| Vec3::new((k as f64 * 1.047).cos(), (k as f64 * 1.047).sin(), 0.0) * 20.0 + Vec3::Z * (k % 2) as f64).collect();
+    let hexagon: Vec<IsoEdge> = (0..6)
+        .map(|k| {
+            let (a, b) = (corners[k], corners[(k + 1) % 6]);
+            IsoEdge { degree: 2, knots: vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0], points: vec![a, (a + b) * 0.5 + Vec3::Z * 2.0, b], weights: None }
+        })
+        .collect();
+    let mut g0 = |_k: usize, ts: &[f64]| -> Result<Vec<Option<Across>>, String> { Ok(vec![None; ts.len()]) };
+    let centre = |g0: &mut dyn FnMut(usize, &[f64]) -> Result<Vec<Option<Across>>, String>| iso_fill(&hexagon, g0, &s).unwrap();
+    let (a, b) = (ring(0), ring(1));
+    assert_eq!(a.patches, b.patches, "the ring");
+    let (a, b) = (centre(&mut g0), centre(&mut g0));
+    assert_eq!(a.patches, b.patches, "about a centre");
+}

@@ -2054,11 +2054,13 @@ impl Normal {
 /// form a banded block, eliminated exactly onto the shared unknowns (the spokes', the centre's,
 /// and any a row couples across patches) by their Schur complement, which is solved dense; the
 /// interiors then follow by back substitution. Entries are kept sparse until the blocks are
-/// known (callers add both halves of the symmetric matrix).
+/// known (callers add both halves of the symmetric matrix), in ordered maps: the eliminations
+/// sum them in their order, so a hashed map's order (another each run) would make the fill
+/// differ in its last bits from one run to the next, and a design read back another surface.
 struct BlockNormal {
     /// Each coordinate's patch when only one patch holds its point, else `None`.
     owner: Vec<Option<usize>>,
-    entries: std::collections::HashMap<(usize, usize), f64>,
+    entries: std::collections::BTreeMap<(usize, usize), f64>,
 }
 
 impl BlockNormal {
@@ -2077,7 +2079,7 @@ impl BlockNormal {
             let o = if let [p] = h.as_slice() { Some(*p) } else { None };
             [o; 3]
         });
-        BlockNormal { owner: owner.collect(), entries: std::collections::HashMap::new() }
+        BlockNormal { owner: owner.collect(), entries: std::collections::BTreeMap::new() }
     }
 
     fn add(&mut self, r: usize, s: usize, v: f64) {
@@ -2128,8 +2130,8 @@ impl BlockNormal {
         let m = shared.len();
         // The shared block, and per patch its block, its coupling to the shared unknowns.
         let mut s_mat = vec![0.0; m * m];
-        let mut blocks: Vec<std::collections::HashMap<(usize, usize), f64>> = vec![std::collections::HashMap::new(); patches];
-        let mut couple: Vec<std::collections::HashMap<(usize, usize), f64>> = vec![std::collections::HashMap::new(); patches];
+        let mut blocks: Vec<std::collections::BTreeMap<(usize, usize), f64>> = vec![std::collections::BTreeMap::new(); patches];
+        let mut couple: Vec<std::collections::BTreeMap<(usize, usize), f64>> = vec![std::collections::BTreeMap::new(); patches];
         for ((r, c), v) in std::mem::take(&mut self.entries) {
             let (or, oc) = (self.owner.get(r).copied().flatten(), self.owner.get(c).copied().flatten());
             let (pr, pc) = (place.get(r).copied().unwrap_or(0), place.get(c).copied().unwrap_or(0));
