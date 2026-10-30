@@ -230,9 +230,9 @@ fn angle_between(a: f64, b: f64) -> f64 {
     d.min(180.0 - d)
 }
 
-/// Two planes cut a quarter of the box away (what both hide): the cut faces in the cap colour
-/// hide what lies inside the rest, and the picture is the CPU rasterizer's, near enough. Each
-/// plane's cut is hatched its own way, the same on the GPU as on the CPU.
+/// Two planes each cut their own side of the box away (y < 15, x > 20), keeping a quarter: the
+/// cut faces in the cap colour hide what lies inside it, and the picture is the CPU rasterizer's,
+/// near enough. Each plane's cut is hatched its own way, the same on the GPU as on the CPU.
 #[test]
 fn pictures_cut_with_two_planes() {
     let Some(c) = capturer() else { return };
@@ -249,9 +249,9 @@ fn pictures_cut_with_two_planes() {
         let mut cam = view::home_camera(&s);
         cam.fov = fov;
         let mut sc = view::scene(&s, &cam);
-        // A marker inside the material, behind the first plane's cut face.
+        // A marker inside the quarter kept, behind both cut faces.
         sc.lines.push(SceneLine {
-            points: vec![Vec3::new(25.0, 25.0, 10.0), Vec3::new(35.0, 25.0, 10.0)],
+            points: vec![Vec3::new(5.0, 25.0, 10.0), Vec3::new(15.0, 25.0, 10.0)],
             color: Rgb(255, 0, 0),
             alpha: 1.0,
             width: 3.0,
@@ -265,7 +265,7 @@ fn pictures_cut_with_two_planes() {
         assert!(gpu_cap > 500, "fov {fov}: cap pixels {gpu_cap}");
         assert!(gpu_cap.abs_diff(cpu_cap) * 10 < cpu_cap, "fov {fov}: GPU cap {gpu_cap} px, CPU {cpu_cap} px");
         // The middle of each plane's cut face: the first plane's (y = 15), the second's (x = 20).
-        let angles = [Vec3::new(30.0, 15.0, 10.0), Vec3::new(20.0, 7.5, 10.0)].map(|p| {
+        let angles = [Vec3::new(10.0, 15.0, 10.0), Vec3::new(20.0, 22.5, 10.0)].map(|p| {
             let (x, y, _) = cam.to_screen(p, 300.0, 220.0, sc.radius).unwrap();
             let at = (x as usize, y as usize);
             (hatch_angle(&img, 300, at, 10), hatch_angle(&cpu, 300, at, 10))
@@ -275,6 +275,76 @@ fn pictures_cut_with_two_planes() {
         }
         let ((first, _), (second, _)) = (angles[0], angles[1]);
         assert!(angle_between(first, second) >= 30.0, "fov {fov}: both cuts hatched alike, at {first} and {second} degrees");
+    }
+}
+
+/// Whether a picture's pixel is the cap's warm tint (red over blue), in its light and dark
+/// stripes alike, unlike the grey-blue body and background.
+fn warm(p: [u8; 4]) -> bool {
+    f64::from(p[0]) > f64::from(p[2]) * 1.1
+}
+
+/// The pixel of a `w` × `h` picture by `cam` showing the world point `p`.
+fn pixel_at(img: &[u8], cam: &Camera, (w, h): (usize, usize), radius: f64, p: Vec3) -> [u8; 4] {
+    let Some((x, y, _)) = cam.to_screen(p, w as f64, h as f64, radius) else { return [0; 4] };
+    let i = (y as usize * w + x as usize) * 4;
+    img.get(i..i + 4).and_then(|p| p.try_into().ok()).unwrap_or([0; 4])
+}
+
+/// A cut face is whole where the material behind it reaches past another plane before its far
+/// wall: the view ray comes in through the first plane (x = 0) and leaves through the second
+/// (y = 0) inside the block, so no kept back face lies behind the cap. Every point of the first
+/// plane's cut shows it, with two planes and with a third (z = 14) keeping an eighth, whose cut
+/// meets the first's along their line, each hatched its own way, as the CPU rasterizer draws it.
+#[test]
+fn pictures_cap_a_cut_that_reaches_past_another_plane() {
+    let Some(c) = capturer() else { return };
+    let mut s = session(&[("solid.box", json!({"length": 40, "width": 40, "height": 20, "corner": [-20, -20, 0]}))]);
+    s.execute("inspect.section", &json!({"plane": {"origin": [0, 0, 0], "normal": [1, 0, 0]}})).unwrap();
+    s.execute("inspect.section", &json!({"plane": {"origin": [0, 0, 0], "normal": [0, -1, 0]}, "add": true})).unwrap();
+    let size = (300, 240);
+    for top in [20.0, 14.0] {
+        if top < 20.0 {
+            s.execute("inspect.section", &json!({"plane": {"origin": [0, 0, top], "normal": [0, 0, 1]}, "add": true})).unwrap();
+        }
+        for fov in [0.0, 0.5] {
+            let mut cam = view::home_camera(&s).looking_from(Vec3::new(1.0, 0.5, 0.7));
+            cam.fov = fov;
+            let sc = view::scene_with_guides(&s, &cam, &s.section, Guides { grid: false, axes: false });
+            let img = c.rgba(&sc, &cam, size.0 as u32, size.1 as u32).unwrap();
+            let cpu = solidcraft_engine::render::render(&sc, &cam, size.0, size.1).rgba;
+            for y in (2..19).step_by(2) {
+                for z in (2..top as i32 - 1).step_by(2) {
+                    let p = Vec3::new(0.0, f64::from(y), f64::from(z));
+                    let (gpu, on_cpu) = (pixel_at(&img, &cam, size, sc.radius, p), pixel_at(&cpu, &cam, size, sc.radius, p));
+                    assert!(warm(gpu) && warm(on_cpu), "top {top}, fov {fov}: no cap at {p:?}: GPU {gpu:?}, CPU {on_cpu:?}");
+                }
+            }
+            let count = |img: &[u8]| pixels(img).filter(|p| warm(*p)).count();
+            let (gpu_cap, cpu_cap) = (count(&img), count(&cpu));
+            assert!(gpu_cap.abs_diff(cpu_cap) * 10 < cpu_cap, "top {top}, fov {fov}: GPU cap {gpu_cap} px, CPU {cpu_cap} px");
+            if top < 20.0 {
+                // Either side of the line where the two cuts meet: the side cut's, the top cut's.
+                let side = Vec3::new(0.0, 10.0, 11.0);
+                let roof = Vec3::new(-6.0, 10.0, 14.0);
+                for p in [side, roof] {
+                    assert!(warm(pixel_at(&img, &cam, size, sc.radius, p)), "top {top}, fov {fov}: no cap at {p:?}");
+                }
+                let at = |p: Vec3| {
+                    let (x, y, _) = cam.to_screen(p, size.0 as f64, size.1 as f64, sc.radius).unwrap();
+                    (x as usize, y as usize)
+                };
+                let side_at = at(Vec3::new(0.0, 10.0, 6.0));
+                let roof_at = at(Vec3::new(-10.0, 10.0, 14.0));
+                let (side_gpu, side_cpu) = (hatch_angle(&img, size.0, side_at, 8), hatch_angle(&cpu, size.0, side_at, 8));
+                let (roof_gpu, roof_cpu) = (hatch_angle(&img, size.0, roof_at, 8), hatch_angle(&cpu, size.0, roof_at, 8));
+                assert!(
+                    angle_between(side_gpu, side_cpu) <= 3.0 && angle_between(roof_gpu, roof_cpu) <= 3.0,
+                    "fov {fov}: GPU {side_gpu} {roof_gpu}, CPU {side_cpu} {roof_cpu}"
+                );
+                assert!(angle_between(side_gpu, roof_gpu) >= 20.0, "fov {fov}: the two cuts hatched alike, {side_gpu} and {roof_gpu} degrees");
+            }
+        }
     }
 }
 

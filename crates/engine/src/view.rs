@@ -888,7 +888,7 @@ fn build_scene(
             }
             sc.lines.push(SceneLine { points: e.clone(), color: p.edge, alpha: 1.0, width: 1.2, on_top: false });
         }
-        // The outline of the body where each section plane cuts what the section hides.
+        // The outline of the body where each section plane cuts what the section keeps.
         for (i, c) in section.iter().enumerate() {
             for (a, b) in section_segments(&mesh, c.origin, c.normal).into_iter().filter_map(|(a, b)| outline_part(a, b, &section, i)) {
                 sc.lines.push(SceneLine { points: vec![a, b], color: p.edge, alpha: 1.0, width: 1.6, on_top: false });
@@ -921,9 +921,9 @@ pub fn section_segments(m: &solidcraft_geom::Mesh, o: Vec3, n: Vec3) -> Vec<(Vec
 }
 
 /// The part of a cut outline segment `a`–`b` of plane `own` (from [`section_segments`]) that
-/// bounds what the section hides: where every other plane hides too (the section hides what lies
-/// on the positive side of all of its planes). On another plane, the side of the cut face the
-/// body is on decides.
+/// bounds what the section keeps: where every other plane keeps it too (the section hides what
+/// lies on the positive side of any of its planes). On another plane, the side of the cut face
+/// the body is on decides.
 pub fn outline_part(a: Vec3, b: Vec3, planes: &[SectionPlane], own: usize) -> Option<(Vec3, Vec3)> {
     let c = planes.get(own)?;
     let onto = |p: Vec3| p - c.normal * c.normal.dot(p - c.origin);
@@ -933,10 +933,10 @@ pub fn outline_part(a: Vec3, b: Vec3, planes: &[SectionPlane], own: usize) -> Op
     for (_, c) in planes.iter().enumerate().filter(|(i, _)| *i != own) {
         let (da, db) = (c.normal.dot(pa - c.origin), c.normal.dot(pb - c.origin));
         match (da > 0.0, db > 0.0) {
-            (true, true) => {}
-            (false, false) => return None,
-            (true, false) => hi = hi.min(da / (da - db)),
-            (false, true) => lo = lo.max(da / (da - db)),
+            (false, false) => {}
+            (true, true) => return None,
+            (true, false) => lo = lo.max(da / (da - db)),
+            (false, true) => hi = hi.min(da / (da - db)),
         }
     }
     (lo < hi).then(|| (a + (b - a) * lo, a + (b - a) * hi))
@@ -1277,9 +1277,9 @@ mod tests {
         assert!((n - Vec3::new(0.0, -1.0, 0.0)).len() < 1e-12 && (d + 15.0).abs() < 1e-12, "{n:?} {d}");
         assert_eq!(sc.cap, Some(colors::SECTION_CAP));
         assert!(!section_segments(&s.world_state().bodies[0].mesh(), Vec3::new(0.0, 15.0, 0.0), -Vec3::Y).is_empty());
-        // A second plane clips too. The section hides what both hide (x > 20, y < 15), and each
-        // plane's outline runs only along that: the first's at y 15 where x > 20, the second's
-        // at x 20 where y < 15.
+        // A second plane clips too. Each plane hides its own side (x > 20, y < 15), and each
+        // plane's outline runs only along what is kept: the first's at y 15 where x < 20, the
+        // second's at x 20 where y > 15.
         s.execute("inspect.section", &json!({"plane": {"origin": [20, 0, 0], "normal": [1, 0, 0]}, "add": true})).unwrap();
         let sc = scene(&s, &cam);
         assert_eq!(sc.clip.len(), 2);
@@ -1288,27 +1288,30 @@ mod tests {
         let on = |l: &SceneLine, f: fn(&Vec3) -> bool| l.points.iter().all(f);
         assert!(outline.iter().any(|l| on(l, |p| (p.y - 15.0).abs() < 1e-2)) && outline.iter().any(|l| on(l, |p| (p.x - 20.0).abs() < 1e-2)));
         for l in &outline {
-            assert!(on(l, |p| p.x > 20.0 - 1e-2 && p.y < 15.0 + 1e-2), "outside what is cut away: {:?}", l.points);
+            assert!(on(l, |p| p.x < 20.0 + 1e-2 && p.y > 15.0 - 1e-2), "outside what is kept: {:?}", l.points);
         }
-        // A plane lying on the front face with the box behind it hides nothing of the box, so the
-        // section hides nothing: no outline, neither the plane's own nor the other's along it.
+        // A plane lying on the front face with the box behind it hides nothing of the box, so
+        // the first plane's cut stays as it was: its outline all round, the front edge included.
         let outline =
             |s: &Session| -> Vec<SceneLine> { scene(s, &cam).lines.into_iter().filter(|l| l.width == 1.6 && l.color == colors::EDGE).collect() };
-        s.execute("inspect.section", &json!({"plane": {"origin": [0, 0, 10], "normal": [0, 0, 1]}})).unwrap();
-        let top = outline(&s);
-        assert!(top.iter().any(|l| on(l, |p| p.y.abs() < 1e-2)), "one plane outlines the front of its cut: {}", top.len());
-        s.execute("inspect.section", &json!({"plane": {"origin": [0, 0, 0], "normal": [0, -1, 0]}, "add": true})).unwrap();
-        let none = outline(&s);
-        assert!(none.is_empty(), "a plane on a face the box is behind: {:?}", none.iter().map(|l| &l.points).collect::<Vec<_>>());
-        // Facing into the box, the same plane keeps the cut as it was: the first plane's outline
-        // all round, the front edge included.
-        s.execute("inspect.section", &json!({"plane": {"origin": [0, 0, 10], "normal": [0, 0, 1]}})).unwrap();
-        s.execute("inspect.section", &json!({"plane": {"origin": [0, 0, 0], "normal": [0, 1, 0]}, "add": true})).unwrap();
-        let kept = outline(&s);
         let sides: [fn(&Vec3) -> bool; 4] =
             [|p| p.x.abs() < 1e-2, |p| (p.x - 40.0).abs() < 1e-2, |p| p.y.abs() < 1e-2, |p| (p.y - 30.0).abs() < 1e-2];
+        s.execute("inspect.section", &json!({"plane": {"origin": [0, 0, 10], "normal": [0, 0, 1]}})).unwrap();
+        let top = outline(&s);
+        s.execute("inspect.section", &json!({"plane": {"origin": [0, 0, 0], "normal": [0, -1, 0]}, "add": true})).unwrap();
+        let kept = outline(&s);
         for (i, side) in sides.into_iter().enumerate() {
             assert!(kept.iter().any(|l| on(l, side) && on(l, |p| (p.z - 10.0).abs() < 1e-2)), "side {i} of the cut lost its outline");
+        }
+        assert_eq!(kept.len(), top.len(), "a plane that hides nothing changes the outline");
+        // Facing into the box and moved 10 mm in, it cuts its own side away as well: both
+        // outlines run only round what is left (y < 10, z < 10).
+        s.execute("inspect.section", &json!({"plane": {"origin": [0, 0, 10], "normal": [0, 0, 1]}})).unwrap();
+        s.execute("inspect.section", &json!({"plane": {"origin": [0, 10, 0], "normal": [0, 1, 0]}, "add": true})).unwrap();
+        let both = outline(&s);
+        assert!(both.iter().any(|l| on(l, |p| (p.z - 10.0).abs() < 1e-2)) && both.iter().any(|l| on(l, |p| (p.y - 10.0).abs() < 1e-2)));
+        for l in &both {
+            assert!(on(l, |p| p.y < 10.0 + 1e-2 && p.z < 10.0 + 1e-2), "outside what is kept: {:?}", l.points);
         }
     }
 
@@ -1351,8 +1354,8 @@ mod tests {
         assert!(changed > 500, "{changed} pixels changed");
     }
 
-    /// The CPU rasterizer: two planes cut a quarter of the box away (what both hide), and both
-    /// cut faces show in the cap colour.
+    /// The CPU rasterizer: two planes each cut their own side away, and both cut faces show in
+    /// the cap colour.
     #[test]
     fn cpu_pictures_cut_with_two_planes() {
         let mut s = Session::default();
@@ -1366,7 +1369,8 @@ mod tests {
         let one = warm(&s);
         s.execute("inspect.section", &json!({"plane": {"origin": [20, 0, 0], "normal": [1, 0, 0]}, "add": true})).unwrap();
         let two = warm(&s);
-        // One plane shows its whole cut face; two show what is left of it and the second's.
+        // One plane shows its whole cut face; two show what the second keeps of it and the
+        // second's.
         assert!(one > 500 && two > 300 && two != one, "cap pixels: one plane {one}, two {two}");
     }
 

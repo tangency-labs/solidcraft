@@ -78,7 +78,7 @@ pub struct Scene {
     /// Scene radius for clipping planes.
     pub radius: f64,
     /// A section cut by up to [`MAX_SECTION_PLANES`] planes, each (normal, d): what lies where
-    /// normal·p > d for every one of them is cut away, and the inside shows as a hatched cap.
+    /// normal·p > d for any one of them is cut away, and the inside shows as a hatched cap.
     pub clip: Vec<(Vec3, f64)>,
     /// Each clip plane's hatch, an index into [`SECTION_HATCH_ANGLES`] ([`section_hatch_of`]);
     /// one missing: its place in `clip`.

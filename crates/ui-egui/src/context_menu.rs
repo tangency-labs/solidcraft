@@ -1914,8 +1914,8 @@ fn sketches_to_parts(app: &mut SolveApp, p: Value) {
 
 /// Section View on a face: the Section Analysis dialog on the face's plane (its outward normal,
 /// unflipped, so a positive distance cuts into the part). With a section on (its planes shown or
-/// hidden) the plane joins it, keeping the section's hatch: at 0 it hides nothing more, and moved in it cuts away what
-/// lies beyond it and every other plane.
+/// hidden) the plane joins it, keeping the section's hatch: at 0 it hides nothing more, and moved in it cuts away its
+/// own side as well, the other planes' cuts staying.
 fn section_view(app: &mut SolveApp, face: Sel) {
     let adding = !app.session.section.is_empty() || !app.session.section_hidden.is_empty();
     let section_hatch = app.session.section_hatch;

@@ -383,8 +383,8 @@ fn section_view_on_a_face_starts_a_section_on_its_plane() {
 
 /// With a section on, Section View on another face adds that face's plane to it: the dialog
 /// says so, opens unflipped as the first plane did, the preview keeps the planes on show, and OK
-/// leaves both. At 0 the new plane hides nothing more; moved in, the section hides what lies
-/// beyond both planes.
+/// leaves both. At 0 the new plane hides nothing more, so the first cut stays on show, the
+/// picture as it was; moved in, it cuts its own side away as well.
 #[test]
 fn section_view_adds_a_face_plane_to_the_section_on_show() {
     let mut h = box_in_view();
@@ -399,24 +399,33 @@ fn section_view_adds_a_face_plane_to_the_section_on_show() {
     assert!(crate::scenario::handle_at("dialog:hint:section_add").is_some(), "the dialog says the plane joins the section");
     let preview = crate::viewport::section_planes(&h.app);
     assert_eq!(preview.len(), 2, "the preview keeps the section's plane");
-    assert!(!hidden(&preview, [39.0, 5.0, 10.0]), "at the end face, the new plane hides nothing more: {preview:?}");
+    assert!(
+        hidden(&preview, [39.0, 5.0, 10.0]) && !hidden(&preview, [39.0, 20.0, 10.0]),
+        "at the end face, the first cut stays as it was: {preview:?}"
+    );
+    let cam = h.app.cam;
+    let picture = |planes: &[solidcraft_engine::SectionPlane]| {
+        solidcraft_engine::render::render(&solidcraft_engine::view::scene_with_section(&h.app.session, &cam, planes), &cam, 200, 140).rgba
+    };
+    assert!(picture(&preview) == picture(&h.app.session.section), "a plane added at 0 changes the picture");
     assert!(!crate::viewport::section_hatch(&h.app), "the preview keeps the section plain");
     set_offset(&mut h, "20 mm");
     h.frames(2);
     let preview = crate::viewport::section_planes(&h.app);
-    assert!(hidden(&preview, [30.0, 5.0, 10.0]) && !hidden(&preview, [10.0, 5.0, 10.0]) && !hidden(&preview, [30.0, 20.0, 10.0]), "{preview:?}");
+    assert!(hidden(&preview, [30.0, 5.0, 10.0]) && hidden(&preview, [10.0, 5.0, 10.0]) && hidden(&preview, [30.0, 20.0, 10.0]), "{preview:?}");
+    assert!(!hidden(&preview, [10.0, 20.0, 10.0]), "the quarter both planes keep: {preview:?}");
     ok(&mut h);
     let planes: Vec<_> = h.app.session.section.iter().map(|c| (c.id, c.normal)).collect();
     assert_eq!(planes.len(), 2, "{planes:?}");
     assert!((planes[1].1 - solidcraft_engine::geom::Vec3::X).len() < 1e-9 && (h.app.session.section[1].origin.x - 20.0).abs() < 1e-9, "{planes:?}");
     assert!(!h.app.session.section_hatch, "a plain section stays plain");
-    assert!(hidden(&h.app.session.section, [30.0, 5.0, 10.0]) && !hidden(&h.app.session.section, [10.0, 5.0, 10.0]));
+    assert!(hidden(&h.app.session.section, [30.0, 20.0, 10.0]) && !hidden(&h.app.session.section, [10.0, 20.0, 10.0]));
 }
 
-/// Whether a section of `planes` hides the world point `p`.
+/// Whether a section of `planes` hides the world point `p`: some plane does.
 fn hidden(planes: &[solidcraft_engine::SectionPlane], p: [f64; 3]) -> bool {
     let p = solidcraft_engine::geom::Vec3::new(p[0], p[1], p[2]);
-    !planes.is_empty() && !planes.iter().any(|c| c.keeps(p, 0.0))
+    !planes.iter().all(|c| c.keeps(p, 0.0))
 }
 
 /// Two planes by Section View (#8717): from the long front face 10 mm in, then from the end
@@ -432,16 +441,18 @@ fn corner(h: &mut Harness) {
     ok(h);
 }
 
-/// The two planes cut away the corner they both hide, and each flips on its own: the second's
-/// Flip leaves the first as it was.
+/// Each of the two planes cuts its own side away, an L round the corner they keep, and each flips
+/// on its own: the second's Flip leaves the first as it was.
 #[test]
 fn each_plane_flips_on_its_own() {
     let mut h = box_in_view();
     corner(&mut h);
     let planes = h.app.session.section.clone();
     assert_eq!(planes.len(), 2);
-    assert!(hidden(&planes, [30.0, 5.0, 10.0]), "the corner is cut: {planes:?}");
-    assert!(!hidden(&planes, [10.0, 5.0, 10.0]) && !hidden(&planes, [30.0, 20.0, 10.0]), "only the corner: {planes:?}");
+    assert!(!hidden(&planes, [10.0, 20.0, 10.0]), "the corner both keep: {planes:?}");
+    for p in [[30.0, 5.0, 10.0], [10.0, 5.0, 10.0], [30.0, 20.0, 10.0]] {
+        assert!(hidden(&planes, p), "{p:?} is cut away: {planes:?}");
+    }
     assert!((planes[0].origin.y - 10.0).abs() < 1e-9 && (planes[1].origin.x - 22.0).abs() < 1e-9, "{planes:?}");
 
     // Edit the second plane and flip it: the preview turns it alone round, and so does OK.
@@ -458,7 +469,7 @@ fn each_plane_flips_on_its_own() {
     ok(&mut h);
     let after = h.app.session.section.clone();
     assert!(after[0] == planes[0] && (after[1].normal + solidcraft_engine::geom::Vec3::X).len() < 1e-9, "{after:?}");
-    assert!(hidden(&after, [10.0, 5.0, 10.0]) && !hidden(&after, [30.0, 5.0, 10.0]));
+    assert!(!hidden(&after, [30.0, 20.0, 10.0]) && hidden(&after, [10.0, 20.0, 10.0]) && hidden(&after, [30.0, 5.0, 10.0]));
     // Editing the first plane opens it unflipped, as it was left.
     menu(&mut h, 1, "Edit Section Analysis");
     assert!(matches!(h.app.dialog.as_ref().map(|d| &d.kind), Some(crate::dialogs::Kind::Section { flip: false, edit: Some(1), .. })));
@@ -508,7 +519,7 @@ fn each_plane_has_its_own_row() {
 fn edit_section_view_edits_the_plane_clicked() {
     let mut h = box_in_view();
     corner(&mut h);
-    for (at, id, offset) in [([22.0, 5.0, 10.0], 2, "18 mm"), ([30.0, 10.0, 10.0], 1, "10 mm")] {
+    for (at, id, offset) in [([22.0, 20.0, 10.0], 2, "18 mm"), ([10.0, 10.0, 10.0], 1, "10 mm")] {
         let labels = menu_at(&mut h, at);
         let edit = labels.iter().position(|l| l == "Edit Section View").unwrap_or_else(|| panic!("{labels:?}"));
         assert_eq!(labels.get(edit + 1).map(String::as_str), Some("Turn Off Section View"), "{labels:?}");
@@ -695,20 +706,21 @@ fn turn_off_section_view_removes_the_clicked_plane() {
     pick(&mut h, "Turn Off Section View");
     assert!(h.app.session.section.is_empty(), "one plane: the section is off");
 
-    // Two planes cut a quarter away (x > 20, y < 15): each cut face is its own plane's.
+    // Two planes each cut their side away (x > 20, y < 15), keeping a quarter: each cut face
+    // is its own plane's.
     let two = |h: &mut Harness| {
         h.app.run("inspect.section", json!({"plane": {"origin": [0, 15, 0], "normal": [0, -1, 0]}})).unwrap();
         h.app.run("inspect.section", json!({"plane": {"origin": [20, 0, 0], "normal": [1, 0, 0]}, "add": true})).unwrap();
         h.frames(3);
     };
     two(&mut h);
-    let labels = menu_at(&mut h, [20.0, 7.0, 10.0]);
+    let labels = menu_at(&mut h, [20.0, 22.0, 10.0]);
     assert!(labels.iter().any(|l| l == "Turn Off Section View"), "the second plane's cut face: {labels:?}");
     pick(&mut h, "Turn Off Section View");
     let left: Vec<u64> = h.app.session.section.iter().map(|c| c.id).collect();
     assert_eq!(left, [1], "the clicked plane goes, the other stays");
     two(&mut h);
-    menu_at(&mut h, [30.0, 15.0, 10.0]);
+    menu_at(&mut h, [10.0, 15.0, 10.0]);
     pick(&mut h, "Turn Off Section View");
     let left: Vec<(u64, f64)> = h.app.session.section.iter().map(|c| (c.id, c.normal.x)).collect();
     assert_eq!(left, [(2, 1.0)], "the first plane's cut face takes out the first plane");
@@ -720,7 +732,7 @@ fn turn_off_section_view_removes_the_clicked_plane() {
     // The cut face offers one way off; the Analysis folder's menu turns every plane off, hidden
     // ones too.
     two(&mut h);
-    let labels = menu_at(&mut h, [20.0, 7.0, 10.0]);
+    let labels = menu_at(&mut h, [20.0, 22.0, 10.0]);
     assert!(!labels.iter().any(|l| l == "Remove Section"), "{labels:?}");
     h.app.run("inspect.section", json!({"hide": 1})).unwrap();
     let off = context_menu::items(&h.app, &Target::Analysis).into_iter().find(|i| i.label == "Turn Off Section View").expect("on the folder's menu");

@@ -141,8 +141,8 @@ pub fn pick_command(app: &mut SolveApp, p: &Value) -> Result<Value, String> {
     for input in &inputs {
         let mut cands = face_candidates(app, &st, &bounds, input, &active_bodies, replaced, include_ghosted);
         cands.sort_by(|a, b| a.t.total_cmp(&b.t));
-        // A section hides the material on the side every plane's normal points at: faces there
-        // do not stop a pick, and the cut cap answers where the cut crosses material.
+        // A section hides the material on the side any plane's normal points at: faces there do
+        // not stop a pick, and the cut cap answers where the cut crosses material.
         let kept: Vec<&Cand> = cands.iter().filter(|c| section_keeps(&section, c.point)).collect();
         let cap = section_cap(app, &st, &bounds, input, &section, kept.first().map(|c| c.t), include_ghosted, replaced, &active_bodies);
         let face_t = kept.first().map(|c| c.t).or(cap.as_ref().map(|c| c.t));
@@ -280,31 +280,31 @@ fn barycentric(p: Vec3, a: Vec3, b: Vec3, c: Vec3) -> (f64, f64, f64) {
     (1.0 - v - w, v, w)
 }
 
-/// Whether the section keeps `p`: some plane keeps it (the section hides what lies on the
-/// positive side of all of them), within [`SECTION_EPS`].
+/// Whether the section keeps `p`: every plane keeps it (the section hides what lies on the
+/// positive side of any of them), within [`SECTION_EPS`].
 pub(crate) fn section_keeps(planes: &[SectionPlane], p: Vec3) -> bool {
-    planes.is_empty() || planes.iter().any(|c| c.keeps(p, SECTION_EPS))
+    planes.iter().all(|c| c.keeps(p, SECTION_EPS))
 }
 
-/// Where the ray `o + d·t` leaves the stretch the section hides (the positive side of every
-/// plane) ahead of `o`: `t` and the index of the plane it leaves through, where its cut face is.
-pub(crate) fn section_exit(planes: &[SectionPlane], o: Vec3, d: Vec3) -> Option<(f64, usize)> {
+/// Where the ray `o + d·t` comes into what the section keeps (inside every plane) ahead of `o`:
+/// `t` and the index of the plane it comes in through, where its cut face is.
+pub(crate) fn section_entry(planes: &[SectionPlane], o: Vec3, d: Vec3) -> Option<(f64, usize)> {
     let (mut lo, mut hi, mut through) = (f64::NEG_INFINITY, f64::INFINITY, None);
     for (i, c) in planes.iter().enumerate() {
-        // n·(o + d·t) > n·origin: t·dn > s.
+        // n·(o + d·t) <= n·origin: t·dn <= s.
         let (dn, s) = (c.normal.dot(d), c.normal.dot(c.origin - o));
         if dn.abs() < 1e-12 {
-            if s >= 0.0 {
+            if s < 0.0 {
                 return None;
             }
         } else if dn > 0.0 {
-            lo = lo.max(s / dn);
-        } else if s / dn < hi {
-            (hi, through) = (s / dn, Some(i));
+            hi = hi.min(s / dn);
+        } else if s / dn > lo {
+            (lo, through) = (s / dn, Some(i));
         }
     }
     let i = through?;
-    (hi > 0.0 && lo < hi).then_some((hi, i))
+    (lo > 0.0 && lo < hi).then_some((lo, i))
 }
 
 /// A cut cap under a pick: where, in which body, and the plane it is a cut face of.
@@ -315,7 +315,7 @@ pub(crate) struct CapHit {
 }
 
 /// Whether the section's cut crosses material at the ray (where a cut cap answers): where the
-/// ray leaves the hidden stretch lies inside a body, told by an odd number of mesh crossings
+/// ray comes into what the section keeps lies inside a body, told by an odd number of mesh crossings
 /// before it. The walk re-raycasts each body past every crossing it finds, bounded per body.
 #[allow(clippy::too_many_arguments)]
 fn section_cap(
@@ -329,7 +329,7 @@ fn section_cap(
     replaced: &[String],
     active_bodies: &Option<Vec<String>>,
 ) -> Option<CapHit> {
-    let (t, i) = section_exit(planes, input.o, input.d)?;
+    let (t, i) = section_entry(planes, input.o, input.d)?;
     if t >= first_kept.unwrap_or(f64::INFINITY) {
         return None;
     }

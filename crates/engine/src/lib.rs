@@ -543,7 +543,7 @@ pub struct Session {
     /// host puts it here; each design's own copies stay in its own clipboard.
     pub foreign_copy: Option<Arc<ForeignCopy>>,
     /// Section Analysis: a view cut by planes, at most [`view::MAX_SECTION_PLANES`]: what lies
-    /// on the normal side of every one is hidden (none: no section).
+    /// on the normal side of any one is hidden (none: no section).
     pub section: Vec<SectionPlane>,
     /// The section's planes hidden with their eye: kept, cutting nothing (`inspect.section`'s
     /// `hide` and `show`).
@@ -637,8 +637,8 @@ pub enum SurfaceAnalysis {
     Access { dir: Vec3 },
 }
 
-/// One plane of a Section Analysis: what lies on its normal's side, and on every other plane's,
-/// is hidden. View state only.
+/// One plane of a Section Analysis: what lies on its normal's side is hidden, whatever the other
+/// planes keep. View state only.
 #[derive(Clone, Copy, Debug, PartialEq, serde::Serialize)]
 pub struct SectionPlane {
     /// Its number in the section, from 1 (`inspect.section`'s `remove` takes it).

@@ -1875,11 +1875,11 @@ fn section_analysis_with_several_planes() {
     assert_eq!(r["planes"][0]["normal"], json!([0.0, -1.0, 0.0]), "{r}");
     assert_eq!(r["planes"][1]["normal"], json!([-1.0, 0.0, 0.0]), "{r}");
     assert!(!s.section_hatch, "`hatch` applies to the whole section");
-    // The section hides what both planes hide: a quarter of the box is cut away.
-    let kept = |s: &Session, p: Vec3| s.section.iter().any(|c| c.keeps(p, 0.0));
-    assert!(!kept(&s, Vec3::new(10.0, 5.0, 10.0)));
-    for p in [Vec3::new(10.0, 20.0, 10.0), Vec3::new(30.0, 5.0, 10.0), Vec3::new(30.0, 20.0, 10.0)] {
-        assert!(kept(&s, p), "{p:?}");
+    // Each plane hides its own side (y < 15, x < 20): a quarter of the box is kept.
+    let kept = |s: &Session, p: Vec3| s.section.iter().all(|c| c.keeps(p, 0.0));
+    assert!(kept(&s, Vec3::new(30.0, 20.0, 10.0)));
+    for p in [Vec3::new(10.0, 5.0, 10.0), Vec3::new(10.0, 20.0, 10.0), Vec3::new(30.0, 5.0, 10.0)] {
+        assert!(!kept(&s, p), "{p:?}");
     }
     // Adding keeps the hatch unless it is given.
     run(&mut s, "inspect.section", json!({"plane": "XY", "at": 18, "add": true}));

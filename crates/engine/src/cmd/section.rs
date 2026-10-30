@@ -1,6 +1,6 @@
-//! Section Analysis: a view-only cut through the model by up to six planes. What lies on the
-//! positive side of every plane is hidden: one plane hides its side, two cut a wedge (a quarter,
-//! square to each other) away. It changes no geometry; each change is an undo step of its own.
+//! Section Analysis: a view-only cut through the model by up to six planes. Each plane hides
+//! what lies on its positive side, so the part kept is what every plane keeps: two square to
+//! each other keep a quarter. It changes no geometry; each change is an undo step of its own.
 
 use serde_json::{Value, json};
 use solidcraft_geom::{Plane, Vec3};
@@ -21,8 +21,8 @@ pub static COMMANDS: &[CommandSpec] =
          (XY: -Z, XZ: -Y, YZ: -X; negative moves it the other way); \
          at?: expr, the cut's world coordinate on the named plane's axis (XY: Z, XZ: Y, YZ: X), instead of offset; \
          flip?: bool (hide the other side; the plane stays where it is); hatch?: bool (hatch the cut faces, in each body's colour; default true, or as it was with add or replace); \
-         add?: bool (add the plane to the section, starting one if there is none, instead of replacing it: the section hides what \
-         lies on the positive side of every plane, so two square planes cut a quarter away; at most 6 planes, hidden ones included); \
+         add?: bool (add the plane to the section, starting one if there is none, instead of replacing it: each plane hides what \
+         lies on its positive side, so the section keeps only what every plane keeps, a quarter for two square planes; at most 6 planes, hidden ones included); \
          replace?: a plane's id (move that plane to `plane`, keeping its id and the others; a hidden one is shown); or remove: a plane's id \
          (take that plane out; the last turns the section off); or hide / show: a plane's id or [ids] (a hidden plane stays in the \
          section and cuts nothing until shown); or folder: false (hide the Analysis folder: the planes on show stop cutting and \

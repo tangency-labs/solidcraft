@@ -107,14 +107,18 @@ pub fn render(scene: &Scene, cam: &Camera, w: usize, h: usize) -> Canvas {
     // pixel's view ray. Written into the depth buffer once the solids are drawn, so the cut face
     // hides edges inside the body (holes, far corners) instead of showing them like a pane of
     // glass, while holes through the cut stay open (as the viewport does with its stencil).
-    // The section hides what lies on the positive side of every plane, so the cut is where the
-    // ray leaves that stretch.
+    // The section hides what lies on the positive side of any plane, so the cut is where the
+    // ray comes into what every plane keeps.
     let radius = scene.radius.max(1.0);
-    // The cut on the view ray through `at`: its screen depth and the plane it lies on.
+    let slack = CLIP_SLACK * (1.0 + radius);
+    let perspective = cam.fov > 0.0;
+    let ray = |at: Vec3| if perspective { at - cam.eye() } else { -view_dir };
+    // The cut on the view ray through `at` when `at` lies past it: its screen depth and the
+    // plane it lies on.
     let cut_at = |at: Vec3| -> Option<(Option<f32>, usize)> {
-        let dir = if cam.fov > 0.0 { at - cam.eye() } else { -view_dir };
-        let (t, k) = hidden_until(at, dir, &scene.clip, 1e-3 * (1.0 + radius))?;
-        Some((project(at + dir * t).map(|q| q[2] as f32), k))
+        let dir = ray(at);
+        let s = kept_span(at, dir, &scene.clip, 1e-3 * (1.0 + radius)).filter(|s| s.past_entry(perspective))?;
+        Some((project(at + dir * s.lo).map(|q| q[2] as f32), s.by?))
     };
     let hatch: Vec<[f64; 2]> = scene
         .clip
@@ -125,10 +129,30 @@ pub fn render(scene: &Scene, cam: &Camera, w: usize, h: usize) -> Canvas {
     let cap_slope =
         scene.clip.iter().filter_map(|(n, d)| cap_plane(cam, *n, *d, radius, &project)).map(|[a, b, _]| a.hypot(b) as f32).fold(0.0, f32::max);
     let mut cap_depth = if scene.clip.is_empty() { Vec::new() } else { vec![f32::INFINITY; sw * sh] };
+    // As the viewport's stencil does: per pixel, how many bodies the point where its view ray
+    // comes into what the section keeps is inside (back faces past it count up, front faces
+    // down), and the nearest hidden back face past it, which shows the cap where no kept one
+    // does (its body reaches past another plane first): its depth, colour, plane and the cap's
+    // depth.
+    let mut count = if scene.clip.is_empty() { Vec::new() } else { vec![0i32; sw * sh] };
+    let mut hole: Vec<Option<(f32, [f64; 3], usize, f32)>> = if scene.clip.is_empty() { Vec::new() } else { vec![None; sw * sh] };
     // The screen depth slope (per canvas pixel) of the surface each pixel shows, for the lines'
     // depth test.
     let mut slope = vec![0f32; sw * sh];
     let cap_tint = scene.cap.unwrap_or(SECTION_CAP).f();
+    // The cut's colour at canvas pixel (`x`, `y`) of a body `base`, on plane `k`: the body's
+    // colour tinted toward the cap colour, hatched at its plane's angle (as the viewport draws
+    // it); a plain cap is the body's own colour.
+    let cap_color = |x: usize, y: usize, base: [f64; 3], k: usize| -> [f64; 3] {
+        if scene.plain_cap {
+            return base;
+        }
+        let tinted: [f64; 3] = std::array::from_fn(|c| base[c] + (cap_tint[c] - base[c]) * 0.35);
+        let s = hatch.get(k).copied().unwrap_or([1.0 / 9.0; 2]);
+        let phase = (x as f64 * s[0] + y as f64 * s[1]) / SS as f64;
+        let shade = if phase.rem_euclid(1.0) < 2.0 / 9.0 { 0.6 } else { 1.0 };
+        tinted.map(|v| v * shade)
+    };
     for pass in [Pass::Solid, Pass::GlassFar, Pass::GlassNear] {
         for sm in scene.meshes.iter().filter(|m| m.glass() == pass.glass()) {
             let alpha = sm.alpha();
@@ -182,11 +206,23 @@ pub fn render(scene: &Scene, cam: &Camera, w: usize, h: usize) -> Canvas {
                         let qs = q0 + q1 + q2;
                         let (p0, p1, p2) = if qs > 1e-12 { (q0 / qs, q1 / qs, q2 / qs) } else { (w0, w1, w2) };
                         let at = wp[0] * p0 + wp[1] * p1 + wp[2] * p2;
-                        if hidden(at, &scene.clip) {
-                            continue;
-                        }
                         let z = (w0 * a[2] + w1 * b[2] + w2 * cc[2]) as f32;
                         let i = y * sw + x;
+                        let hid = hidden(at, &scene.clip, slack);
+                        if !pass.glass()
+                            && let Some(span) = kept_span(at, ray(at), &scene.clip, slack).filter(|s| s.past_entry(perspective))
+                        {
+                            if let Some(n) = count.get_mut(i) {
+                                *n += if inside { 1 } else { -1 };
+                            }
+                            if let Some(h) = hole.get_mut(i).filter(|h| hid && inside && h.is_none_or(|(d, ..)| z < d)) {
+                                let cz = cut_at(at).and_then(|(cz, _)| cz).map_or(z, |cz| cz.min(z));
+                                *h = Some((z, base, span.by.unwrap_or(0), cz));
+                            }
+                        }
+                        if hid {
+                            continue;
+                        }
                         if c.depth.get(i).is_some_and(|d| z < *d) {
                             // A see-through body is blended over what is already drawn and
                             // leaves the depth buffer alone, so bodies inside it stay visible
@@ -207,18 +243,7 @@ pub fn render(scene: &Scene, cam: &Camera, w: usize, h: usize) -> Canvas {
                                 *d = exit.and_then(|(cz, _)| cz).map_or(f32::INFINITY, |c| c.min(z));
                             }
                             if cut {
-                                // The cut: the body's colour tinted toward the cap colour, hatched
-                                // at its plane's angle (as the viewport draws it); a plain cap is
-                                // the body's own colour.
-                                if scene.plain_cap {
-                                    c.put(x, y, base, 1.0);
-                                    continue;
-                                }
-                                let tinted: [f64; 3] = std::array::from_fn(|k| base[k] + (cap_tint[k] - base[k]) * 0.35);
-                                let s = hatch.get(exit.map_or(0, |(_, k)| k)).copied().unwrap_or([1.0 / 9.0; 2]);
-                                let phase = (x as f64 * s[0] + y as f64 * s[1]) / SS as f64;
-                                let k = if phase.rem_euclid(1.0) < 2.0 / 9.0 { 0.6 } else { 1.0 };
-                                c.put(x, y, tinted.map(|v| v * k), 1.0);
+                                c.put(x, y, cap_color(x, y, base, exit.map_or(0, |(_, k)| k)), 1.0);
                                 continue;
                             }
                             let mut col = shade(n, view_dir, base);
@@ -235,6 +260,24 @@ pub fn render(scene: &Scene, cam: &Camera, w: usize, h: usize) -> Canvas {
                 }
             }
         }
+        if pass == Pass::Solid {
+            // The caps no kept back face shows, where the cut lies inside a body and nothing
+            // kept is nearer.
+            for (i, h) in hole.iter().enumerate() {
+                let (Some((z, base, k, cz)), Some(n)) = (h, count.get(i)) else { continue };
+                if *n == 0 || c.depth.get(i).is_none_or(|d| *d <= *z) {
+                    continue;
+                }
+                let (x, y) = (i % sw, i / sw);
+                c.put(x, y, cap_color(x, y, *base, *k), 1.0);
+                if let Some(d) = c.depth.get_mut(i) {
+                    *d = *z;
+                }
+                if let Some(d) = cap_depth.get_mut(i) {
+                    *d = *cz;
+                }
+            }
+        }
     }
     for ((d, s), cz) in c.depth.iter_mut().zip(slope.iter_mut()).zip(&cap_depth) {
         if cz.is_finite() {
@@ -242,7 +285,9 @@ pub fn render(scene: &Scene, cam: &Camera, w: usize, h: usize) -> Canvas {
             *s = s.max(cap_slope);
         }
     }
-    for l in scene.grid.iter().chain(&scene.lines) {
+    // The section cuts the model's lines, not the grid (as in the viewport).
+    let grid = scene.grid.iter().map(|l| (l, &[][..]));
+    for (l, clip) in grid.chain(scene.lines.iter().map(|l| (l, &scene.clip[..]))) {
         let col = l.color.f();
         // A line that is not opaque is blended with what is under it (the grid fading out).
         let alpha = f64::from(l.alpha).clamp(0.0, 1.0);
@@ -251,7 +296,7 @@ pub fn render(scene: &Scene, cam: &Camera, w: usize, h: usize) -> Canvas {
             let (Some(&p), Some(&q)) = (seg.first(), seg.get(1)) else { continue };
             // The section cuts the segment in 3D (screen space is not linear in depth in
             // perspective views).
-            for (p, q) in clip_segment(p, q, &scene.clip).into_iter().flatten() {
+            if let Some((p, q)) = clip_segment(p, q, clip, slack) {
                 let (Some(a), Some(b)) = (project(p), project(q)) else { continue };
                 let len = ((b[0] - a[0]).powi(2) + (b[1] - a[1]).powi(2)).sqrt();
                 let steps = (len.ceil() as usize).clamp(1, 20_000);
@@ -315,54 +360,71 @@ pub fn render(scene: &Scene, cam: &Camera, w: usize, h: usize) -> Canvas {
     out
 }
 
-/// Whether the section hides `p`: it lies on the positive side (normal·p > d) of every plane.
-fn hidden(p: Vec3, clip: &[(Vec3, f64)]) -> bool {
-    !clip.is_empty() && clip.iter().all(|(n, d)| n.dot(p) > *d)
+/// How far past a plane (relative to the scene's radius) a point may lie and still be kept, so
+/// a face lying on a plane stays whole (the viewport's `clip_slack`).
+const CLIP_SLACK: f64 = 1e-6;
+
+/// Whether the section hides `p`: it lies on the positive side (normal·p > d) of any plane, by
+/// more than `slack`.
+fn hidden(p: Vec3, clip: &[(Vec3, f64)], slack: f64) -> bool {
+    clip.iter().any(|(n, d)| n.dot(p) > d + slack)
 }
 
-/// Where the ray `at + dir·t` leaves the stretch the section hides (each plane moved `margin`
-/// to its hidden side), as `t` and the plane it leaves by; None when it never is hidden or
-/// never leaves.
-fn hidden_until(at: Vec3, dir: Vec3, clip: &[(Vec3, f64)], margin: f64) -> Option<(f64, usize)> {
-    let (mut lo, mut hi, mut by) = (f64::NEG_INFINITY, f64::INFINITY, 0);
+/// The stretch `lo < t < hi` of the ray `at + dir·t` the section keeps (inside every plane,
+/// each moved `margin` to its hidden side), and the plane it comes in through (`by`).
+#[derive(Clone, Copy, Debug)]
+struct Span {
+    lo: f64,
+    hi: f64,
+    by: Option<usize>,
+}
+
+impl Span {
+    /// `at` lies past where the ray comes into the kept stretch, that point ahead of the eye
+    /// (`at - dir` in a perspective view).
+    fn past_entry(&self, perspective: bool) -> bool {
+        self.by.is_some() && self.lo < 0.0 && self.lo < self.hi && (!perspective || self.lo > -1.0)
+    }
+}
+
+/// [`Span`] of the ray `at + dir·t`; None when the section has no planes or the ray runs
+/// alongside a plane on its hidden side.
+fn kept_span(at: Vec3, dir: Vec3, clip: &[(Vec3, f64)], margin: f64) -> Option<Span> {
+    if clip.is_empty() {
+        return None;
+    }
+    let mut s = Span { lo: f64::NEG_INFINITY, hi: f64::INFINITY, by: None };
     for (k, (n, d)) in clip.iter().enumerate() {
-        // n·(at + dir·t) > d + margin: t·dn > s.
-        let (dn, s) = (n.dot(dir), d + margin - n.dot(at));
+        // n·(at + dir·t) <= d + margin: t·dn <= r.
+        let (dn, r) = (n.dot(dir), d + margin - n.dot(at));
         if dn.abs() < 1e-12 {
-            if s >= 0.0 {
+            if r < 0.0 {
                 return None;
             }
         } else if dn > 0.0 {
-            lo = lo.max(s / dn);
-        } else if s / dn < hi {
-            (hi, by) = (s / dn, k);
+            s.hi = s.hi.min(r / dn);
+        } else if r / dn > s.lo {
+            (s.lo, s.by) = (r / dn, Some(k));
         }
     }
-    (hi.is_finite() && lo < hi).then_some((hi, by))
+    Some(s)
 }
 
-/// The parts of segment `p`–`q` the section keeps: all but the stretch on the positive side of
-/// every plane, so at most two.
-fn clip_segment(p: Vec3, q: Vec3, clip: &[(Vec3, f64)]) -> [Option<(Vec3, Vec3)>; 2] {
-    if clip.is_empty() {
-        return [Some((p, q)), None];
-    }
-    // The hidden stretch `p + (q - p)·s`, lo < s < hi.
+/// The part of segment `p`–`q` the section keeps: what lies inside every plane (within
+/// `slack`), one piece at most.
+fn clip_segment(p: Vec3, q: Vec3, clip: &[(Vec3, f64)], slack: f64) -> Option<(Vec3, Vec3)> {
     let (mut lo, mut hi) = (0.0f64, 1.0f64);
     for (n, d) in clip {
-        let (dp, dq) = (n.dot(p) - d - 1e-6, n.dot(q) - d - 1e-6);
+        let (dp, dq) = (n.dot(p) - d - slack, n.dot(q) - d - slack);
         match (dp > 0.0, dq > 0.0) {
-            (true, true) => {}
-            (false, false) => return [Some((p, q)), None],
-            (true, false) => hi = hi.min(dp / (dp - dq)),
-            (false, true) => lo = lo.max(dp / (dp - dq)),
+            (false, false) => {}
+            (true, true) => return None,
+            (true, false) => lo = lo.max(dp / (dp - dq)),
+            (false, true) => hi = hi.min(dp / (dp - dq)),
         }
     }
-    if lo >= hi {
-        return [Some((p, q)), None];
-    }
     let at = |s: f64| p + (q - p) * s;
-    [(lo > 0.0).then(|| (p, at(lo))), (hi < 1.0).then(|| (at(hi), q))]
+    (lo < hi).then(|| (at(lo), at(hi)))
 }
 
 /// Screen depth of the section plane `n·p = d` as `z = a·x + b·y + k` in canvas pixels (a plane
@@ -425,17 +487,20 @@ mod tests {
     #[test]
     fn section_clips_lines_at_the_plane() {
         let clip = [(Vec3::X, 2.0)];
-        let [Some((p, q)), None] = clip_segment(Vec3::ZERO, Vec3::new(10.0, 4.0, 0.0), &clip) else { panic!("one piece") };
+        let Some((p, q)) = clip_segment(Vec3::ZERO, Vec3::new(10.0, 4.0, 0.0), &clip, 0.0) else { panic!("one piece") };
         assert_eq!(p, Vec3::ZERO);
         assert!((q.x - 2.0).abs() < 1e-5 && (q.y - 0.8).abs() < 1e-5, "{q:?}");
-        assert_eq!(clip_segment(Vec3::new(3.0, 0.0, 0.0), Vec3::new(5.0, 0.0, 0.0), &clip), [None, None]);
-        assert!(clip_segment(Vec3::new(3.0, 0.0, 0.0), Vec3::new(5.0, 0.0, 0.0), &[])[0].is_some());
-        // Two planes hide only what both hide (2 < x < 6): the segment keeps both ends.
-        let both = [(Vec3::X, 2.0), (-Vec3::X, -6.0)];
-        let [Some((a, b)), Some((c, d))] = clip_segment(Vec3::ZERO, Vec3::new(10.0, 4.0, 0.0), &both) else { panic!("two pieces") };
-        assert!(a == Vec3::ZERO && (b.x - 2.0).abs() < 1e-5 && (c.x - 6.0).abs() < 1e-5 && d == Vec3::new(10.0, 4.0, 0.0), "{b:?} {c:?}");
-        // Where one of them keeps it, the other hides nothing.
-        assert_eq!(clip_segment(Vec3::ZERO, Vec3::new(1.0, 0.0, 0.0), &both), [Some((Vec3::ZERO, Vec3::new(1.0, 0.0, 0.0))), None]);
+        assert_eq!(clip_segment(Vec3::new(3.0, 0.0, 0.0), Vec3::new(5.0, 0.0, 0.0), &clip, 0.0), None);
+        assert!(clip_segment(Vec3::new(3.0, 0.0, 0.0), Vec3::new(5.0, 0.0, 0.0), &[], 0.0).is_some());
+        // Each plane hides its own side (x > 2 and x < -6 here): what is left is between them.
+        let both = [(Vec3::X, 2.0), (-Vec3::X, 6.0)];
+        let Some((a, b)) = clip_segment(Vec3::new(-10.0, 0.0, 0.0), Vec3::new(10.0, 4.0, 0.0), &both, 0.0) else { panic!("one piece") };
+        assert!((a.x + 6.0).abs() < 1e-9 && (b.x - 2.0).abs() < 1e-9, "{a:?} {b:?}");
+        // A segment one plane hides whole is gone, whatever the other keeps.
+        assert_eq!(clip_segment(Vec3::new(3.0, 0.0, 0.0), Vec3::new(4.0, 0.0, 0.0), &both, 0.0), None);
+        // A segment lying on a plane stays, within the slack.
+        let on = clip_segment(Vec3::new(2.0, 0.0, 0.0), Vec3::new(2.0, 5.0, 0.0), &both, 1e-9);
+        assert_eq!(on, Some((Vec3::new(2.0, 0.0, 0.0), Vec3::new(2.0, 5.0, 0.0))));
     }
 
     #[test]
@@ -502,6 +567,26 @@ mod tests {
         let mut cam = Camera { distance: 60.0, ..Default::default() };
         cam.set_view(StandardView::Front);
         (scene, cam)
+    }
+
+    /// The section cuts the model's lines but not the grid, as the viewport draws them.
+    #[test]
+    fn a_section_leaves_the_grid_whole() {
+        let line = |y: f64| SceneLine {
+            points: vec![Vec3::new(-8.0, y, 4.0), Vec3::new(8.0, y, 4.0)],
+            color: Rgb(0, 0, 255),
+            alpha: 1.0,
+            width: 1.4,
+            on_top: false,
+        };
+        let mut cam = Camera { distance: 50.0, ..Default::default() };
+        cam.set_view(StandardView::Front);
+        let blue = |sc: &Scene| render(sc, &cam, 64, 64).rgba.chunks(4).filter(|p| p[2] > 200 && p[0] < 100).count();
+        let clip = vec![(Vec3::Z, 0.0)];
+        let grid = Scene { grid: vec![line(0.0)], radius: 30.0, clip: clip.clone(), ..Default::default() };
+        let lines = Scene { lines: vec![line(0.0)], radius: 30.0, clip, ..Default::default() };
+        assert!(blue(&grid) > 20, "the grid is cut");
+        assert_eq!(blue(&lines), 0, "a model line past the plane is drawn");
     }
 
     /// A body the design draws see-through lets what is behind it show: the colour of the body
@@ -708,7 +793,7 @@ mod tests {
     fn each_plane_of_a_section_hatches_at_its_own_angle() {
         for fov in [0.0f64, 0.5] {
             for (k, want) in SECTION_HATCH_ANGLES.iter().enumerate() {
-                let mut clip = vec![(Vec3::X, -1e4); k];
+                let mut clip = vec![(Vec3::X, 1e4); k];
                 clip.push((Vec3::Z, 10.0));
                 let body = SceneMesh::solid(Arc::new(block(Vec3::new(-20.0, -20.0, 0.0), Vec3::new(20.0, 20.0, 20.0))), Rgb(150, 160, 175));
                 let scene = Scene { meshes: vec![body], radius: 40.0, clip, ..Default::default() };
@@ -721,6 +806,75 @@ mod tests {
                 let c = render(&alone, &cam, 160, 160);
                 let got = hatch_angle(&c.rgba, c.w, (80, 80), 24);
                 assert!(same_way(got, *want, 2.0), "fov {fov}, hatch {k} alone: hatched at {got} degrees, not {want}");
+            }
+        }
+    }
+
+    /// The block of [`block`] 40 × 40 × 20 about the origin's column, standing on z = 0.
+    fn cut_block(clip: Vec<(Vec3, f64)>) -> Scene {
+        let body = SceneMesh::solid(Arc::new(block(Vec3::new(-20.0, -20.0, 0.0), Vec3::new(20.0, 20.0, 20.0))), Rgb(150, 160, 175));
+        Scene { meshes: vec![body], radius: 40.0, clip, ..Default::default() }
+    }
+
+    /// The pixel of `c` (`w` wide, rendered by `cam` for a scene of radius 40) showing `p`.
+    fn pixel_at(c: &Canvas, cam: &Camera, p: Vec3) -> [u8; 3] {
+        let Some((x, y, _)) = cam.to_screen(p, c.w as f64, c.h as f64, 40.0) else { return [0; 3] };
+        let i = (y as usize * c.w + x as usize) * 4;
+        c.rgba.get(i..i + 3).map_or([0; 3], |p| [p[0], p[1], p[2]])
+    }
+
+    /// The cap's warm tint (red over blue), unlike the grey-blue body and background, in its
+    /// light and dark stripes alike.
+    fn warm(p: [u8; 3]) -> bool {
+        f64::from(p[0]) > f64::from(p[2]) * 1.1
+    }
+
+    /// Each plane cuts its own side away: two square planes leave one quarter of the block, three
+    /// an eighth (its top cut by the third). Seen from above, only that quarter shows, under
+    /// three planes in the cap colour.
+    #[test]
+    fn each_plane_of_a_section_cuts_its_own_side_away() {
+        let mut cam = Camera { distance: 120.0, ..Default::default() };
+        cam.set_view(StandardView::Top);
+        let empty = render(&Scene { radius: 40.0, ..Default::default() }, &cam, 160, 160);
+        let two = vec![(Vec3::X, 0.0), (-Vec3::Y, 0.0)];
+        let mut three = two.clone();
+        three.push((Vec3::Z, 10.0));
+        for (clip, kept_top) in [(two, false), (three, true)] {
+            let c = render(&cut_block(clip.clone()), &cam, 160, 160);
+            for (x, y) in [(10.0, 10.0), (10.0, -10.0), (-10.0, -10.0)] {
+                let p = Vec3::new(x, y, 20.0);
+                assert_eq!(pixel_at(&c, &cam, p), pixel_at(&empty, &cam, p), "{clip:?}: ({x}, {y}) is cut away");
+            }
+            let kept = pixel_at(&c, &cam, Vec3::new(-10.0, 10.0, 20.0));
+            assert_ne!(kept, pixel_at(&empty, &cam, Vec3::new(-10.0, 10.0, 20.0)), "{clip:?}: the kept quarter shows");
+            assert_eq!(warm(kept), kept_top, "{clip:?}: the kept quarter's top {kept:?}");
+        }
+    }
+
+    /// A cut face is whole where the material behind it reaches past another plane before its
+    /// far wall (the view ray comes in through one plane and leaves through the other inside the
+    /// body): every point of the first plane's cut shows the cap, with two planes and with three,
+    /// orthographic and in perspective.
+    #[test]
+    fn a_cut_reaching_past_another_plane_is_capped_whole() {
+        for fov in [0.0f64, 0.5] {
+            let mut cam = Camera { distance: if fov > 0.0 { 60.0 / (fov * 0.5).tan() } else { 120.0 }, fov, ..Default::default() };
+            cam = cam.looking_from(Vec3::new(1.0, 0.5, 0.7));
+            let two = vec![(Vec3::X, 0.0), (-Vec3::Y, 0.0)];
+            let mut three = two.clone();
+            three.push((Vec3::Z, 14.0));
+            for clip in [two, three] {
+                let top = clip.get(2).map_or(20.0, |(_, d)| *d);
+                let c = render(&cut_block(clip.clone()), &cam, 240, 240);
+                for y in (2..19).step_by(2) {
+                    for z in (2..top as i32 - 1).step_by(2) {
+                        let p = Vec3::new(0.0, f64::from(y), f64::from(z));
+                        assert!(warm(pixel_at(&c, &cam, p)), "fov {fov}, {} planes: no cap at {p:?}: {:?}", clip.len(), pixel_at(&c, &cam, p));
+                    }
+                }
+                let above = Vec3::new(0.0, 10.0, top + 26.0);
+                assert!(!warm(pixel_at(&c, &cam, above)), "fov {fov}, {} planes: a cap above the block", clip.len());
             }
         }
     }

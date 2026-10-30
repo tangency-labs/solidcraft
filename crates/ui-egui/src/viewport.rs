@@ -2552,7 +2552,7 @@ fn pick_hits(app: &SolveApp, proj: &Proj, pos: Pos2, other_sketch_points: bool, 
     {
         hits.push(far);
     }
-    // A section hides the material on the side every plane's normal points at: nothing there is
+    // A section hides the material on the side any plane's normal points at: nothing there is
     // picked, and where the cut crosses a body its cap hides what lies behind it (#6328), as
     // `view.pick` answers.
     let section = section_planes(app);
@@ -2609,7 +2609,7 @@ fn pick_hits(app: &SolveApp, proj: &Proj, pos: Pos2, other_sketch_points: bool, 
     }
     // The cut cap, where the plane crosses a body nearer than any kept face: it hides that face
     // and everything behind it, and is no face itself.
-    let cap = crate::view_pick::section_exit(&section, o, d).and_then(|(t_cap, _)| {
+    let cap = crate::view_pick::section_entry(&section, o, d).and_then(|(t_cap, _)| {
         let nearer = bestf.as_ref().is_none_or(|(t, _)| t_cap < *t);
         let replaced = app.preview.effective_replaced();
         let shown_bodies = &None;

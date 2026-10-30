@@ -961,7 +961,7 @@ pub struct Frame {
     /// Viewport size in physical pixels.
     pub size_px: [f32; 2],
     /// Section cut: up to [`MAX_SECTION_PLANES`] planes (normal, d), the first ones; fragments
-    /// with normal·p > d for every one are hidden. A zero normal: no plane (the first: no section).
+    /// with normal·p > d for any one are hidden. A zero normal: no plane (the first: no section).
     pub clip: [[f32; 4]; MAX_SECTION_PLANES],
     /// Each clip plane's hatch, an index into `solidcraft_render::SECTION_HATCH_ANGLES`.
     pub clip_hatch: [usize; MAX_SECTION_PLANES],
@@ -1948,16 +1948,21 @@ impl Batches {
     }
 }
 
-/// The section's pipelines (see `Renderer::tri_cut`). The stencil's low bits ([`WINDING`]) count
-/// the faces behind the cut on each pixel, its high bit ([`NOT_CAP`]) marks where no cap shows.
+/// The section's pipelines (see `Renderer::tri_cut`), in the order they draw. The stencil's
+/// low bits ([`WINDING`]) count bodies, its high bit ([`NOT_CAP`]) marks where no cap shows.
 struct Cut {
-    /// No colour or depth: counts the faces behind the cut, +1 per back face and -1 per front
-    /// face, so the count is not 0 where the cut runs through a body, whatever the faces' order.
-    wind: wgpu::RenderPipeline,
+    /// Every face past where its view ray comes into what the section keeps: back faces count
+    /// up and front faces down, leaving how many bodies that point (the cap) is inside, whatever
+    /// the faces' order. No colour or depth.
+    count: wgpu::RenderPipeline,
     /// Draws the faces and marks the stencil by their true depth: [`NOT_CAP`] where a front face
     /// is the visible surface. Unpushed: `FACE_BIAS`'s slope part would let a front face win a
     /// band along its edge with a back face seen through the cut, and the cap would skip it (#6328).
     mark: wgpu::RenderPipeline,
+    /// The cap where its body reaches past another plane before the far wall, so no kept back
+    /// face shows it: the nearest hidden back face behind it, where the count says the cap is
+    /// inside a body, in the cap colour, marked as the cap.
+    hole: wgpu::RenderPipeline,
     /// Where the cut runs through a body but a front face won the marking: the back faces again,
     /// pulled toward the eye (`fs_solid_touch`), and marked as the cap where one wins. That front
     /// face is another body's lying on the far wall (a shaft in its bore), faceted another way,
@@ -1967,11 +1972,11 @@ struct Cut {
     /// `Renderer::section_reset`), so their edges draw over them (#1434). No colour, no stencil.
     push: wgpu::RenderPipeline,
     /// The cap again, only where marked, at the section plane's depth: depth only, as the mark
-    /// drew the cap's colour (#6728).
+    /// and the hole drew the cap's colour (#6728).
     cap: wgpu::RenderPipeline,
 }
 
-/// The stencil bits of [`Cut::wind`]'s count (kept modulo 128).
+/// The stencil bits of [`Cut::count`]'s body count (kept modulo 128).
 const WINDING: u32 = 0x7f;
 /// The stencil bit [`Cut::mark`] sets where a front face is the visible surface (no cap there).
 const NOT_CAP: u32 = 0x80;
@@ -2008,7 +2013,8 @@ pub struct Renderer {
     #[cfg(not(target_arch = "wasm32"))]
     tess_later: Option<TessLater>,
     /// While a section is shown (when the depth buffer has a stencil), in place of `tri`: the
-    /// faces marking where the cap shows, their depth pushed back, then the cap again at the
+    /// faces counting which pixels' cut lies inside a body, marking where the cap shows (and
+    /// where only a hidden far wall does), their depth pushed back, then the cap again at the
     /// section plane's depth, so it hides the inside ([`Cut`]).
     tri_cut: Option<Cut>,
     /// Highlight triangles over the model (depth test ≤, no depth write).
@@ -2109,7 +2115,7 @@ pub struct Renderer {
     /// The scene target's depth back to the far plane between the section's marking and push
     /// passes ([`Cut`]); stencil and colour untouched.
     section_reset: Option<wgpu::RenderPipeline>,
-    /// The scene target's stencil to 0 before the section's passes count faces in it ([`Cut::wind`]);
+    /// The scene target's stencil to 0 before the section's passes count bodies in it ([`Cut::count`]);
     /// depth and colour untouched.
     section_clear: Option<wgpu::RenderPipeline>,
     /// The new resolve textures [`clear_resolve_targets`] has cleared (tests count them).
@@ -2687,77 +2693,65 @@ impl Renderer {
         let solid = |label: &str, fs: &str, cull: Option<wgpu::Face>, ds: Option<wgpu::DepthStencilState>, source: TriSource| {
             solid_writes(label, fs, cull, ds, source, true)
         };
-        // While a section is shown, the depth states of the stencil marking and of the cap (see
-        // `Renderer::tri_cut`), where the depth buffer has a stencil.
+        // While a section is shown, the depth states of its passes (see `Renderer::tri_cut`),
+        // where the depth buffer has a stencil: count, mark, hole, touch and cap.
         let cut_states = t.depth.filter(|f| f.has_stencil_aspect()).map(|format| {
+            use wgpu::CompareFunction::{Always, Equal, Less, LessEqual, NotEqual};
             use wgpu::StencilOperation::{DecrementWrap, IncrementWrap, Keep, Replace, Zero};
-            let face = |pass_op| wgpu::StencilFaceState { compare: wgpu::CompareFunction::Always, fail_op: Keep, depth_fail_op: Keep, pass_op };
-            // First the faces behind the cut are counted, back +1 and front -1, whatever their depth.
-            let wind = wgpu::DepthStencilState {
+            let face = |compare, pass_op| wgpu::StencilFaceState { compare, fail_op: Keep, depth_fail_op: Keep, pass_op };
+            let state = |write: bool, compare, front, back, read_mask, write_mask| wgpu::DepthStencilState {
                 format,
-                depth_write_enabled: Some(false),
-                depth_compare: Some(wgpu::CompareFunction::Always),
-                stencil: wgpu::StencilState { front: face(DecrementWrap), back: face(IncrementWrap), read_mask: 0xff, write_mask: WINDING },
+                depth_write_enabled: Some(write),
+                depth_compare: Some(compare),
+                stencil: wgpu::StencilState { front, back, read_mask, write_mask },
                 bias: Default::default(),
             };
+            // First the bodies behind the cut are counted, back +1 and front -1, whatever their depth.
+            let count = state(false, Always, face(Always, DecrementWrap), face(Always, IncrementWrap), 0, WINDING);
             // The visible surface, by its true depth, marks the stencil: `NOT_CAP` where it is a
             // front face (the reference), cleared where it is a back face (the cap).
-            let mark = wgpu::DepthStencilState {
-                format,
-                depth_write_enabled: Some(true),
-                depth_compare: Some(depth_compare(reversed, wgpu::CompareFunction::Less)),
-                stencil: wgpu::StencilState { front: face(Replace), back: face(Zero), read_mask: 0xff, write_mask: NOT_CAP },
-                bias: Default::default(),
-            };
+            let less = depth_compare(reversed, Less);
+            let mark = state(true, less, face(Always, Replace), face(Always, Zero), 0, NOT_CAP);
+            // Where the count says the cap is inside a body: a hidden far wall is the cap.
+            let inside = face(NotEqual, Zero);
+            let hole = state(true, less, inside, inside, WINDING, NOT_CAP);
             // Where a front face won but the count says the cut runs through a body (`NOT_CAP` set
             // and a count: above the reference `NOT_CAP`), a back face pulled in front of it is the
             // cap after all.
-            let through = wgpu::StencilFaceState { compare: wgpu::CompareFunction::Less, ..face(Zero) };
-            let touch = wgpu::DepthStencilState {
-                format,
-                depth_write_enabled: Some(true),
-                depth_compare: Some(depth_compare(reversed, wgpu::CompareFunction::LessEqual)),
-                stencil: wgpu::StencilState { front: through, back: through, read_mask: 0xff, write_mask: NOT_CAP },
-                bias: Default::default(),
-            };
+            let through = face(Less, Zero);
+            let touch = state(true, depth_compare(reversed, LessEqual), through, through, 0xff, NOT_CAP);
             // Then the cap's back faces again, only there (`NOT_CAP` clear, the reference 0), at the
             // section plane's depth.
-            let only = wgpu::StencilFaceState { compare: wgpu::CompareFunction::Equal, ..face(Keep) };
-            let cap = wgpu::DepthStencilState {
-                format,
-                depth_write_enabled: Some(true),
-                depth_compare: Some(wgpu::CompareFunction::Always),
-                stencil: wgpu::StencilState { front: only, back: only, read_mask: NOT_CAP, write_mask: 0 },
-                bias: Default::default(),
-            };
-            (wind, mark, touch, cap)
+            let only = face(Equal, Keep);
+            let cap = state(true, Always, only, only, NOT_CAP, 0);
+            [count, mark, hole, touch, cap]
         });
-        // `Cut::wind`, `Cut::mark` and `Cut::push` use `tri`'s fragment shader; `Cut::touch` and
-        // `Cut::cap` have their own.
+        // `Cut::mark` and `Cut::push` use `tri`'s fragment shader.
         let marks = |source: TriSource| {
-            cut_states.as_ref().map(|(wind, mark, _, _)| {
+            cut_states.as_ref().map(|[_, mark, ..]| {
                 (
-                    solid_writes("sc_tris_wind", "fs_solid", None, Some(wind.clone()), source, false),
                     solid("sc_tris_mark", "fs_solid", None, Some(mark.clone()), source),
                     solid_writes("sc_tris_push", "fs_solid", None, pushed(wgpu::CompareFunction::Less, true, FACE_BIAS), source, false),
                 )
             })
         };
-        // Depth only: every back face behind a marked pixel draws here, so writing colour let the
-        // last one drawn paint the cut, other bodies behind it included (their colours and
-        // outlines showed through it, #6328). The marking pass already drew the nearest back
-        // face's colour.
+        // The cap: depth only, as every back face behind a marked pixel draws here, so writing
+        // colour let the last one drawn paint the cut, other bodies behind it included (their
+        // colours and outlines showed through it, #6328). The marking and hole passes already
+        // drew the nearest back face's colour.
         let cap = |source: TriSource| {
-            cut_states.as_ref().map(|(_, _, touch, cap)| {
+            cut_states.as_ref().map(|[count, _, hole, touch, cap]| {
                 (
+                    solid_writes("sc_tris_count", "fs_section_count", None, Some(count.clone()), source, false),
+                    solid("sc_tris_hole", "fs_section_hole", Some(wgpu::Face::Front), Some(hole.clone()), source),
                     solid("sc_tris_touch", "fs_solid_touch", Some(wgpu::Face::Front), Some(touch.clone()), source),
                     solid_writes("sc_tris_cap", "fs_solid_cut", Some(wgpu::Face::Front), Some(cap.clone()), source, false),
                 )
             })
         };
-        type Marks = (wgpu::RenderPipeline, wgpu::RenderPipeline, wgpu::RenderPipeline);
-        let cut = |marks: Option<Marks>, cap: Option<(wgpu::RenderPipeline, wgpu::RenderPipeline)>| {
-            marks.zip(cap).map(|((wind, mark, push), (touch, cap))| Cut { wind, mark, touch, push, cap })
+        type Caps = (wgpu::RenderPipeline, wgpu::RenderPipeline, wgpu::RenderPipeline, wgpu::RenderPipeline);
+        let cut = |marks: Option<(wgpu::RenderPipeline, wgpu::RenderPipeline)>, cap: Option<Caps>| {
+            marks.zip(cap).map(|((mark, push), (count, hole, touch, cap))| Cut { count, mark, hole, touch, push, cap })
         };
         let access_bind = access_texture(device, None, &access_bgl, 1, &[]);
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
@@ -3690,13 +3684,14 @@ impl Renderer {
                     tris(pass, pick(cut), &pv.tris);
                 };
                 // The stencil starts at 0 (the window's pass keeps it from frame to frame), counts
-                // the faces behind the cut, then marks where no cap shows (`Cut`).
+                // the bodies behind the cut, then marks where no cap shows (`Cut`).
                 pass.set_pipeline(clear);
                 pass.draw(0..3, 0..1);
                 tally.call();
-                all(pass, |c| &c.wind);
+                all(pass, |c| &c.count);
                 pass.set_stencil_reference(NOT_CAP);
                 all(pass, |c| &c.mark);
+                all(pass, |c| &c.hole);
                 all(pass, |c| &c.touch);
                 pass.set_pipeline(reset);
                 pass.draw(0..3, 0..1);
