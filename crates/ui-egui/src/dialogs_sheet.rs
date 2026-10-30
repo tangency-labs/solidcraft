@@ -30,8 +30,9 @@ const POSITION_LABELS: [&str; 5] = ["Inside", "Outside", "Middle", "Material Out
 /// Where an edge flange's height is measured from (`height_from`; the first is the default).
 const HEIGHT_FROM: [&str; 3] = ["outer", "inner", "tangent"];
 const HEIGHT_FROM_LABELS: [&str; 3] = ["Outer Sharp", "Inner Sharp", "Tangent"];
-/// Rule fields the manager edits (parameter name, label).
-pub(crate) const RULE_FIELDS: [(&str, &str); 8] = [
+/// Rule fields the manager edits (parameter name, label). `unfold_value` is drawn with the
+/// K-factor, under the label of the rule's unfold method (`UNFOLD_VALUE_LABELS`).
+pub(crate) const RULE_FIELDS: [(&str, &str); 9] = [
     ("thickness", "Thickness"),
     ("k_factor", "K Factor"),
     ("bend_radius", "Bend Radius"),
@@ -40,7 +41,14 @@ pub(crate) const RULE_FIELDS: [(&str, &str); 8] = [
     ("corner_relief", "Corner Relief"),
     ("hem_gap", "Hem Gap"),
     ("gap", "Flange Gap"),
+    ("unfold_value", "sheet.unfold_method.deduction_90"),
 ];
+/// What sets a rule's K-factor (the rule's `unfold_method`), and the labels the manager offers:
+/// Bend Deduction before Bend Allowance, as press brake charts mostly give it.
+pub(crate) const UNFOLD_METHODS: [&str; 3] = ["k_factor", "deduction", "allowance"];
+const UNFOLD_METHOD_LABELS: [&str; 3] = ["K Factor", "sheet.unfold_method.deduction", "sheet.unfold_method.allowance"];
+/// The label of the 90° value each unfold method reads (none for the K-factor).
+const UNFOLD_VALUE_LABELS: [Option<&str>; 3] = [None, Some("sheet.unfold_method.deduction_90"), Some("sheet.unfold_method.allowance_90")];
 /// The corner relief shapes the manager offers (the rule's `corner_relief_shape`) and their labels.
 pub(crate) const RELIEF_SHAPES: [&str; 4] = ["notch", "round", "rectangular", "tear"];
 const RELIEF_SHAPE_LABELS: [&str; 4] = ["Notch", "Round", "Rectangular", "Tear"];
@@ -121,6 +129,8 @@ crate::dialog_descriptor::dialog_descriptors! {
                 relief: usize,
                 /// How bend angles read (index into `ANGLE_DISPLAYS`).
                 angles: usize,
+                /// What sets the K-factor (index into `UNFOLD_METHODS`).
+                method: usize,
                 active: bool,
                 loaded: Option<usize>,
             },
@@ -198,7 +208,7 @@ pub fn start(app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
             let active = app.session.doc.sheet.active.clone();
             let rules = rule_list(app);
             let pick = active.and_then(|a| rules.iter().position(|r| r.name == a)).unwrap_or(0);
-            (Sm::Rules { pick, name: String::new(), values: Vec::new(), relief: 0, angles: 0, active: true, loaded: None }, vec![])
+            (Sm::Rules { pick, name: String::new(), values: Vec::new(), relief: 0, angles: 0, method: 0, active: true, loaded: None }, vec![])
         }
         "sheet.flat_pattern" => (Sm::FlatPattern { data: None, key: None, status: None }, vec![SelInput::new("Body (last if none)", BODIES, false)]),
         _ => Sm::simple_start(id)?,
@@ -209,6 +219,33 @@ pub fn start(app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
 /// The design's rules (the default steel rule when it has none).
 fn rule_list(app: &SolveApp) -> Vec<SheetRule> {
     design_rules(&app.session.doc)
+}
+
+/// A row whose value is worked out, not typed: a disabled field, so it lines up and reads like
+/// the rows around it.
+fn read_only_row(ui: &mut egui::Ui, label: &str, text: &str) {
+    let mut shown = text.to_string();
+    crate::ui_kit::row(ui, label, |ui| ui.add_enabled_ui(false, |ui| crate::ui_kit::field(ui, &mut shown)));
+}
+
+/// The rule values the manager's fields give, as its OK would save them (a bare length in the
+/// design's unit), with the K-factor `method` (index into `UNFOLD_METHODS`) sets; or why they
+/// don't evaluate.
+pub(crate) fn manager_rule_values(
+    doc: &solidcraft_engine::doc::Document,
+    values: &[String],
+    method: usize,
+) -> Result<solidcraft_engine::doc::sheet::RuleValues, String> {
+    let mut rule = SheetRule::steel();
+    for (key, slot) in rule.fields_mut() {
+        let Some(text) = RULE_FIELDS.iter().position(|(k, _)| *k == key).and_then(|i| values.get(i)) else {
+            return Err(format!("no `{key}` value"));
+        };
+        *slot = if key == "k_factor" { text.trim().to_string() } else { crate::length_input::expression(doc, text, ValueKind::Length) };
+    }
+    rule.unfold_method = UNFOLD_METHODS.get(method).copied().unwrap_or("k_factor").into();
+    let (vals, _) = doc.param_values();
+    doc.rule_values(&vals, &rule).map_err(|e| e.to_string())
 }
 
 /// The rules the manager lists for this design: its own, or the default steel rule when it has
@@ -374,7 +411,7 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Sm, inputs: &mut [Sel
         }
         Sm::Unfold { .. } => {}
         Sm::Convert { rule } => rule_combo(app, ui, "sm_conv_rule", rule),
-        Sm::Rules { pick, name, values, relief, angles, active, loaded } => {
+        Sm::Rules { pick, name, values, relief, angles, method, active, loaded } => {
             let rules = rule_list(app);
             crate::rule_editor::rule_editor! {
                 ui, "sm_rules", rules, pick, name, active, loaded;
@@ -391,20 +428,69 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Sm, inputs: &mut [Sel
                         crate::length_input::stored(&app.session.doc, &base.corner_relief),
                         crate::length_input::stored(&app.session.doc, &base.hem_gap),
                         crate::length_input::stored(&app.session.doc, &base.gap),
+                        crate::length_input::stored(&app.session.doc, &base.unfold_value),
                     ];
                     *relief = RELIEF_SHAPES.iter().position(|s| s.eq_ignore_ascii_case(base.corner_relief_shape.trim())).unwrap_or(0);
                     *angles = ANGLE_DISPLAYS.iter().position(|d| d.eq_ignore_ascii_case(base.angle_display.trim())).unwrap_or(0);
+                    *method = UNFOLD_METHODS.iter().position(|m| m.eq_ignore_ascii_case(base.unfold_method.trim())).unwrap_or(0);
                     *active = app.session.doc.sheet_rule(None).name == base.name || *pick >= rules.len();
                 },
                 fields: {
-                    for ((key, label), v) in RULE_FIELDS.iter().zip(values.iter_mut()) {
-                        if *key == "corner_relief" {
+                    // What the fields give, as OK would save them: the K-factor and its 90° bend.
+                    let unfolds = manager_rule_values(&app.session.doc, values, *method);
+                    // What the 90° value implies, said below the rows when there is something to say.
+                    let mut note = None;
+                    for (i, (key, label)) in RULE_FIELDS.iter().enumerate() {
+                        match *key {
+                            // Drawn with the K-factor, under its method's label.
+                            "unfold_value" => continue,
                             // The shape goes with its size, the row below.
-                            choice_row(ui, "Corner Relief Shape", "sm_relief_shape", relief, &RELIEF_SHAPE_LABELS);
+                            "corner_relief" => {
+                                choice_row(ui, "Corner Relief Shape", "sm_relief_shape", relief, &RELIEF_SHAPE_LABELS);
+                            }
+                            "k_factor" => {
+                                choice_row(ui, "sheet.unfold_method.label", "sm_unfold_method", method, &UNFOLD_METHOD_LABELS);
+                                if let Some(value_label) = UNFOLD_VALUE_LABELS.get(*method).copied().flatten() {
+                                    // A 90° value: the K-factor it works out to is shown, not typed.
+                                    let at = RULE_FIELDS.iter().position(|(k, _)| *k == "unfold_value");
+                                    if let Some(v) = at.and_then(|at| values.get_mut(at)) {
+                                        enter |= expr_row(ui, value_label, v);
+                                    }
+                                    let typed = at.and_then(|at| values.get(at)).is_some_and(|v| !v.trim().is_empty());
+                                    let k = unfolds.as_ref().map_or_else(|_| "—".to_string(), |v| format!("{:.10}", v.k_factor));
+                                    read_only_row(ui, label, &k);
+                                    note = match &unfolds {
+                                        Ok(v) if v.k_factor > 1.0 => {
+                                            Some((crate::i18n::tr("sheet.unfold_method.above_1").to_string(), crate::ui_kit::StatusTone::Warning))
+                                        }
+                                        Err(e) if typed => Some((e.clone(), crate::ui_kit::StatusTone::Error)),
+                                        _ => None,
+                                    };
+                                    continue;
+                                }
+                            }
+                            _ => {}
                         }
-                        enter |= expr_row(ui, label, v);
+                        if let Some(v) = values.get_mut(i) {
+                            enter |= expr_row(ui, label, v);
+                        }
+                        if *key == "k_factor" {
+                            // What the K-factor gives a 90° bend, to check it against a chart.
+                            let text = unfolds.as_ref().map_or_else(
+                                |_| "—".to_string(),
+                                |v| {
+                                    let allowance = crate::prefs::show_mm(app, v.allowance_90(), 1);
+                                    let deduction = crate::prefs::show_mm(app, v.deduction_90(), 1);
+                                    crate::i18n::format("sheet.unfold_method.at_90_values", &[("allowance", &allowance), ("deduction", &deduction)])
+                                },
+                            );
+                            read_only_row(ui, "sheet.unfold_method.at_90", &text);
+                        }
                     }
                     choice_row(ui, "Angle Display", "sm_angle_display", angles, &ANGLE_DISPLAY_LABELS);
+                    if let Some((text, tone)) = note {
+                        crate::ui_kit::status_line(ui, &text, tone);
+                    }
                 }
             }
             if *pick < rules.len()
@@ -765,12 +851,15 @@ pub fn commands(app: &SolveApp, k: &Sm, inputs: &[SelInput], extra: &Map<String,
             }
             ("sheet.convert", p)
         }
-        Sm::Rules { pick, name, values, relief, angles, active, .. } => {
+        Sm::Rules { pick, name, values, relief, angles, method, active, .. } => {
             let rules = rule_list(app);
-            let fields = RULE_FIELDS.iter().map(|(key, _)| *key).zip(values);
+            let unfold = UNFOLD_METHODS.get(*method).copied().unwrap_or("k_factor");
+            // The K-factor method doesn't read the 90° value, so a hidden one is left as it was.
+            let fields = RULE_FIELDS.iter().map(|(key, _)| *key).zip(values).filter(|(key, _)| *key != "unfold_value" || unfold != "k_factor");
             let mut p = crate::rule_editor::params(rules.get(*pick).map(|r| r.name.as_str()), name, *active, fields)?;
             p["corner_relief_shape"] = json!(RELIEF_SHAPES.get(*relief).copied().unwrap_or("notch"));
             p["angle_display"] = json!(ANGLE_DISPLAYS.get(*angles).copied().unwrap_or("bend"));
+            p["unfold_method"] = json!(unfold);
             ("sheet.manage_rules", p)
         }
         Sm::FlatPattern { .. } => return Ok(Vec::new()),

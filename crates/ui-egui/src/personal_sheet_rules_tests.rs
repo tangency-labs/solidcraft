@@ -100,7 +100,7 @@ fn a_personal_rule_saved_in_one_design_is_added_to_another_by_ok() {
             "sheet.manage_rules".to_string(),
             json!({"name":"CRS 1.6","active":true,"thickness":"1.6 mm","k_factor":"0.42","bend_radius":"1.6 mm","relief_width":"Thickness",
                 "relief_depth":"Thickness * 0.5","corner_relief":"Thickness * 4.0","hem_gap":"0.01 mm","gap":"Thickness",
-                "corner_relief_shape":"notch","angle_display":"bend"})
+                "corner_relief_shape":"notch","angle_display":"bend","unfold_method":"k_factor"})
         )]
     );
     other.step(&json!({"click":{"handle":"dialog:ok"}})).unwrap();
@@ -238,4 +238,54 @@ fn malformed_rows_are_dropped_and_a_newer_versions_values_are_kept_but_never_rec
     assert_eq!(newer.recall(sm(&mut h), &doc), Err("sheet.personal_rules.unsupported"));
     assert_eq!(format!("{:?}", sm(&mut h)), before, "a refused recall leaves the manager as it was");
     assert_eq!(library.overwrite("Newer rule", sm(&mut h), &doc), Err("sheet.personal_rules.unsupported"));
+}
+
+/// A rule that unfolds by a press brake chart's 90° bend deduction (#6794) is saved with its
+/// method and its value, with the value's unit, and recalled with both in a design of another
+/// unit. A rule shown with the K-factor keeps no 90° value, not even one left in its hidden field.
+#[test]
+fn a_personal_rule_keeps_its_unfold_method_and_90_degree_value() {
+    use std::f64::consts::FRAC_PI_2;
+    let mut h = manager("in");
+    {
+        let Sm::Rules { values, method, .. } = sm(&mut h) else { panic!() };
+        *values = ["0.0625", "0.44", "Thickness", "Thickness", "Thickness * 0.5", "Thickness * 4.0", "0.0004", "Thickness", "0.1114"]
+            .map(String::from)
+            .to_vec();
+        *method = 1;
+    }
+    h.frames(2);
+    save_personal(&mut h, "CRS 16ga");
+    let saved = library_json(&h);
+    assert_eq!((&saved[0]["unfold_method"], &saved[0]["unfold_value"]), (&json!("deduction"), &json!("0.1114 in")), "{saved}");
+
+    // Recalled in a millimetre design: the same rule, so the same K-factor once OK adds it.
+    let mut other = manager_with("mm", &h.app.preferences.personal_sheet_rules);
+    choose_personal(&mut other, "CRS 16ga");
+    {
+        let Sm::Rules { method, values, .. } = sm(&mut other) else { panic!() };
+        assert_eq!((*method, values[8].as_str()), (1, "0.1114 in"));
+    }
+    let commands = ok_commands(&other);
+    assert_eq!((&commands[0].1["unfold_method"], &commands[0].1["unfold_value"]), (&json!("deduction"), &json!("0.1114 in")));
+    other.step(&json!({"click":{"handle":"dialog:ok"}})).unwrap();
+    other.frames(2);
+    let doc = &other.app.session.doc;
+    let rule = doc.sheet_rule(None);
+    assert_eq!((rule.name.as_str(), rule.unfold_method.as_str()), ("CRS 16ga", "deduction"));
+    let (vals, _) = doc.param_values();
+    let k = doc.rule_values(&vals, &rule).unwrap().k_factor;
+    let (t, r, deduction) = (1.5875, 1.5875, 0.1114 * 25.4);
+    assert!((k - ((2.0 * (r + t) - deduction) / FRAC_PI_2 - r) / t).abs() < 1e-9, "{k}");
+
+    // Shown with the K-factor, the rule is saved without the value left in the hidden field.
+    {
+        let Sm::Rules { method, .. } = sm(&mut h) else { panic!() };
+        *method = 0;
+    }
+    h.frames(2);
+    save_personal(&mut h, "K only");
+    let saved = library_json(&h);
+    let k_only = saved.as_array().and_then(|rows| rows.iter().find(|row| row["name"] == "K only")).cloned().unwrap_or_default();
+    assert!(k_only.is_object() && k_only.get("unfold_method").is_none() && k_only.get("unfold_value").is_none(), "{saved}");
 }

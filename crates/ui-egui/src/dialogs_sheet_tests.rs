@@ -488,6 +488,79 @@ fn rules_dialog_sets_how_bend_angles_read() {
     }
 }
 
+/// The rule manager's unfold method (#6794): Bend Deduction picked in the dialog, with a press
+/// brake chart's 90° value, reaches the rule and the flat pattern. The dialog shows the K-factor
+/// the value works out to, says when it is above 1, and for a K-factor shows what a 90° bend gets.
+#[test]
+fn rules_dialog_unfolds_by_a_90_degree_bend_deduction() {
+    use std::f64::consts::FRAC_PI_2;
+    let mut h = crate::scenario::Harness::new();
+    h.app
+        .run("sheet.manage_rules", json!({"name": "CRS 1.6", "thickness": "1.6 mm", "k_factor": 0.44, "bend_radius": "Thickness", "active": true}))
+        .unwrap();
+    h.app.run("sketch.create", json!({"plane": "XY", "name": "Base"})).unwrap();
+    h.app.run("sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [80, 50]})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    h.app.run("sheet.flange", json!({"sketch": "Base"})).unwrap();
+    h.app.run("sheet.flange", json!({"edges": [[40, 50, 1.6], [40, 0, 1.6]], "height": 20})).unwrap();
+    // 20 + 50 + 20 over the outside, less a deduction for each of the two bends.
+    let width = |app: &mut SolveApp| app.session.execute("sheet.flat_pattern", &json!({})).unwrap()["flat_size_mm"][1].as_f64().unwrap_or(0.0);
+    let shown = |app: &SolveApp| match app.dialog.as_ref().map(|d| &d.kind) {
+        Some(Kind::Sheet(Sm::Rules { method, values, .. })) => Some((*method, values.clone())),
+        _ => None,
+    };
+    let set_value = |app: &mut SolveApp, text: &str| {
+        if let Some(Kind::Sheet(Sm::Rules { values, .. })) = app.dialog.as_mut().map(|d| &mut d.kind) {
+            values[8] = text.into();
+        }
+    };
+    let k_deduction = 6.4 - FRAC_PI_2 * (1.6 + 0.44 * 1.6);
+    assert!((width(&mut h.app) - (90.0 - 2.0 * k_deduction)).abs() < 1e-6);
+
+    h.step(&json!({"start": "sheet.manage_rules"})).unwrap();
+    h.frames(3);
+    let (method, values) = shown(&h.app).unwrap();
+    assert_eq!(method, 0, "a rule starts with its K-factor");
+    // With a K-factor, a row says what a 90° bend gets, to check the rule against a chart.
+    assert!(crate::scenario::rect_of("dialog:row:sheet.unfold_method.at_90").is_some());
+    let v = manager_rule_values(&h.app.session.doc, &values, 0).unwrap();
+    assert!((v.deduction_90() - k_deduction).abs() < 1e-12, "{}", v.deduction_90());
+
+    h.step(&json!({"click": {"handle": "dialog:sheet.unfold_method.label"}})).unwrap();
+    h.step(&json!({"click": {"handle": "dialog:sheet.unfold_method.label:sheet.unfold_method.deduction"}})).unwrap();
+    h.frames(2);
+    assert_eq!(shown(&h.app).map(|s| s.0), Some(1));
+    assert!(crate::scenario::rect_of("dialog:row:sheet.unfold_method.deduction_90").is_some());
+    // A deduction this small means a K-factor above 1: allowed, and said.
+    set_value(&mut h.app, "0.5");
+    h.frames(2);
+    let above = format!("dialog:status:{}", crate::i18n::tr("sheet.unfold_method.above_1"));
+    assert!(crate::scenario::rect_of(&above).is_some(), "{above}");
+    // The chart's 2.83 mm: the K-factor it works out to.
+    set_value(&mut h.app, "2.83");
+    h.frames(2);
+    let (method, values) = shown(&h.app).unwrap();
+    let v = manager_rule_values(&h.app.session.doc, &values, method).unwrap();
+    assert!((v.k_factor - 0.4204578671).abs() < 1e-10, "{}", v.k_factor);
+    h.step(&json!({"widget": "OK"})).unwrap();
+    assert!(h.app.dialog.is_none(), "{:?}", h.app.dialog);
+    let rule = h.app.session.doc.sheet_rule(None);
+    assert_eq!((rule.unfold_method.as_str(), rule.unfold_value.as_str(), rule.k_factor.as_str()), ("deduction", "2.83", "0.44"));
+    assert!((width(&mut h.app) - 84.34).abs() < 1e-6, "{}", width(&mut h.app));
+
+    // The dialog shows the rule's method and value the next time. Back to the K-factor, the part
+    // follows the K-factor again.
+    h.step(&json!({"start": "sheet.manage_rules"})).unwrap();
+    h.frames(3);
+    let (method, values) = shown(&h.app).unwrap();
+    assert_eq!((method, values[8].as_str()), (1, "2.83 mm"));
+    h.step(&json!({"click": {"handle": "dialog:sheet.unfold_method.label"}})).unwrap();
+    h.step(&json!({"click": {"handle": "dialog:sheet.unfold_method.label:K Factor"}})).unwrap();
+    h.step(&json!({"widget": "OK"})).unwrap();
+    assert_eq!(h.app.session.doc.sheet_rule(None).unfold_method, "k_factor");
+    assert!((width(&mut h.app) - (90.0 - 2.0 * k_deduction)).abs() < 1e-6, "{}", width(&mut h.app));
+}
+
 /// The rule manager's rectangular relief, on a base whose corners are not square: the shape and
 /// the size the dialog shows reach the part, the bends and the flat pattern.
 #[test]
