@@ -324,7 +324,10 @@ pub(crate) fn history(app: &SolveApp, strip: &Strip) -> History {
     let within = crate::timeline_scope::shown(app);
     let view = View::of(doc, within.map(|c| crate::timeline_scope::components_within(app, c)).as_ref());
     let n = view.len();
-    if n <= FOLD_FROM && doc.timeline_groups.is_empty() {
+    // Off, the bar shows each feature and starts folders open, as it did before (Preferences >
+    // Interface, "Fold the History bar into groups").
+    let folds = n > FOLD_FROM && app.preferences.history_bar_groups;
+    if !folds && doc.timeline_groups.is_empty() {
         return History { entries: (0..n).map(Entry::Feature).collect(), marks: Vec::new(), folders: Default::default(), view, within };
     }
     let folders = crate::timeline_folders::Folders::of(doc);
@@ -333,7 +336,7 @@ pub(crate) fn history(app: &SolveApp, strip: &Strip) -> History {
     let of = |c: u64| chains.get(&c).map_or(&[][..], Vec::as_slice);
     // Inside a component, runs fold by the components inside it.
     let level = within.map_or(0, |c| of(c).len());
-    let per_feature: Vec<&[u64]> = if n > FOLD_FROM {
+    let per_feature: Vec<&[u64]> = if folds {
         let chain = |i: usize| doc.features.get(i).and_then(|f| of(f.component).get(level..)).unwrap_or_default();
         view.indices(0, n).into_iter().map(chain).collect()
     } else {
@@ -387,7 +390,8 @@ impl Opens for Shown<'_> {
     }
 
     fn folder(&mut self, id: u64) -> bool {
-        crate::timeline_folders::is_open(self.app, id, self.folders.contains(&id))
+        let unless_clicked = self.folders.contains(&id) || !self.app.preferences.history_bar_groups;
+        crate::timeline_folders::is_open(self.app, id, unless_clicked)
     }
 }
 

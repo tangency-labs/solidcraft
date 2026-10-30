@@ -8,14 +8,18 @@
     "Fold Features": "Fold Features",
     "Group Features": "Group Features",
     "Select Features": "Select Features",
-    "Show Each Feature": "Show Each Feature"
+    "Show Each Feature": "Show Each Feature",
+    "prefs.history_bar_groups": "Fold the History bar into groups",
+    "prefs.history_bar_groups_note": "In a long history, a run of one component's features folds into one chip, and feature folders start folded. An inserted STEP assembly goes into a Group folder. Off shows each feature, starts folders open and makes no folder."
   },
   "de": {
     "ui.history_scope_all": "Features des ganzen Designs zeigen",
     "ui.history_scope_all_shown": "Die Features des ganzen Designs",
     "ui.history_scope_pick": "Eine Komponente bearbeiten oder im Browser wählen, um nur ihre Features zu zeigen",
     "ui.history_scope_show": "Nur die Features von {name} und der Komponenten darin zeigen",
-    "ui.history_scope_shown": "Die Features von {name} und der Komponenten darin"
+    "ui.history_scope_shown": "Die Features von {name} und der Komponenten darin",
+    "prefs.history_bar_groups": "Verlaufsleiste in Gruppen falten",
+    "prefs.history_bar_groups_note": "In einem langen Verlauf wird eine Folge von Features einer Komponente zu einem Chip gefaltet, und Merkmalsordner beginnen gefaltet. Eine eingefügte STEP-Baugruppe kommt in einen Group-Ordner. Aus zeigt jedes Feature, öffnet Ordner und legt keinen Ordner an."
   },
   "ja": {
     "ui.history_scope_all": "設計全体のフィーチャーを表示",
@@ -26,7 +30,9 @@
     "Fold Features": "フィーチャーを折りたたむ",
     "Group Features": "フィーチャーをグループ化",
     "Select Features": "フィーチャーを選択",
-    "Show Each Feature": "各フィーチャーを表示"
+    "Show Each Feature": "各フィーチャーを表示",
+    "prefs.history_bar_groups": "履歴バーをグループにまとめる",
+    "prefs.history_bar_groups_note": "長い履歴では、1つのコンポーネントの連続したフィーチャーを1つのチップにまとめ、フィーチャーフォルダは閉じた状態で始まります。挿入したSTEPアセンブリはGroupフォルダに入ります。オフにすると、各フィーチャーを表示し、フォルダは開いた状態で始まり、フォルダは作成されません。"
   },
   "zh": {
     "ui.history_scope_all": "显示整个设计的特征",
@@ -37,7 +43,9 @@
     "Fold Features": "折叠特征",
     "Group Features": "将特征编组",
     "Select Features": "选择特征",
-    "Show Each Feature": "显示每个特征"
+    "Show Each Feature": "显示每个特征",
+    "prefs.history_bar_groups": "将历史栏折叠为分组",
+    "prefs.history_bar_groups_note": "在较长的历史中，同一组件的连续特征折叠为一个标签，特征文件夹开始时为折叠状态。插入的 STEP 装配体放入 Group 文件夹。关闭后显示每个特征，文件夹开始时为展开状态，且不创建文件夹。"
   },
   "ar": {
     "ui.history_scope_all": "إظهار ميزات التصميم كله",
@@ -48,7 +56,9 @@
     "Fold Features": "طي الميزات",
     "Group Features": "تجميع الميزات",
     "Select Features": "تحديد الميزات",
-    "Show Each Feature": "إظهار كل ميزة"
+    "Show Each Feature": "إظهار كل ميزة",
+    "prefs.history_bar_groups": "طي شريط السجل في مجموعات",
+    "prefs.history_bar_groups_note": "في سجل طويل، تُطوى سلسلة ميزات المكوّن الواحد في شريحة واحدة، وتبدأ مجلدات الميزات مطوية. تدخل مجموعة STEP المُدرجة في مجلد Group. عند الإيقاف تظهر كل ميزة، وتبدأ المجلدات مفتوحة، ولا يُنشأ أي مجلد."
   },
   "he": {
     "ui.history_scope_all": "הצגת הפיצ'רים של כל התכן",
@@ -59,7 +69,9 @@
     "Fold Features": "קיפול פיצ'רים",
     "Group Features": "קיבוץ פיצ'רים",
     "Select Features": "בחירת פיצ'רים",
-    "Show Each Feature": "הצגת כל פיצ'ר"
+    "Show Each Feature": "הצגת כל פיצ'ר",
+    "prefs.history_bar_groups": "קיפול סרגל ציר הזמן לקבוצות",
+    "prefs.history_bar_groups_note": "בציר זמן ארוך, רצף פיצ'רים של רכיב אחד מתקפל לשבב אחד, ותיקיות פיצ'רים מתחילות מקופלות. מכלול STEP שהוכנס נכנס לתיקיית Group. כשהאפשרות כבויה, כל פיצ'ר מוצג, התיקיות מתחילות פתוחות ולא נוצרת תיקייה."
   },
   "vi": {
     "ui.history_scope_all": "Hiện các tính năng của toàn bộ thiết kế",
@@ -70,6 +82,12 @@
     "Fold Features": "Thu gọn tính năng",
     "Group Features": "Nhóm tính năng",
     "Select Features": "Chọn tính năng",
-    "Show Each Feature": "Hiện từng tính năng"
+    "Show Each Feature": "Hiện từng tính năng",
+    "prefs.history_bar_groups": "Thu gọn thanh Lịch sử thành nhóm",
+    "prefs.history_bar_groups_note": "Trong lịch sử dài, một chuỗi tính năng của cùng một thành phần được thu gọn thành một thẻ, và thư mục tính năng bắt đầu ở dạng thu gọn. Cụm lắp ráp STEP được chèn vào sẽ nằm trong thư mục Group. Khi tắt, mỗi tính năng đều hiện, thư mục bắt đầu ở dạng mở và không tạo thư mục nào."
+  },
+  "ko": {
+    "prefs.history_bar_groups": "이력 막대를 그룹으로 접기",
+    "prefs.history_bar_groups_note": "긴 이력에서는 한 컴포넌트의 연속된 특성을 하나의 칩으로 접고, 특성 폴더는 접힌 상태로 시작합니다. 삽입한 STEP 어셈블리는 Group 폴더에 들어갑니다. 끄면 각 특성을 표시하고, 폴더를 펼친 상태로 시작하며, 폴더를 만들지 않습니다."
   }
 }
