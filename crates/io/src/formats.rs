@@ -145,6 +145,7 @@ const URDF_OPTIONS: &[OptionSpec] = &[
     OptionSpec { param: "mesh_prefix", label: "Mesh file prefix", kind: OptionKind::Text { default: "", hint: "package://robot/meshes/" } },
     OptionSpec { param: "effort", label: "Joint effort", kind: OptionKind::Number { default: 1000.0, min: 0.0, max: 1e9, unit: "" } },
     OptionSpec { param: "velocity", label: "Joint velocity", kind: OptionKind::Number { default: 10.0, min: 0.0, max: 1e9, unit: "" } },
+    OptionSpec { param: "mimic", label: "Couple motion links", kind: OptionKind::Bool { default: true } },
 ];
 
 const VIEW_DXF_OPTIONS: &[OptionSpec] = &[
