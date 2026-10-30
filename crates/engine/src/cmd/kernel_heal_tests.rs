@@ -40,6 +40,37 @@ fn shell_a_box_with_a_drilled_hole() {
     assert!((v_shell - want).abs() < 2e-4 * want, "{v_shell} vs {want}");
 }
 
+/// #6382: after a sphere is split, a near-miss pick on the cut (within UI reach, outside the
+/// old kernel size·1e−3 band) must still open that face and hollow the half.
+#[test]
+fn shell_half_sphere_with_a_near_miss_on_the_cut() {
+    let mut s = Session::default();
+    run(&mut s, "solid.sphere", json!({"center": [0, 0, 0], "radius": 25, "body_name": "Ball"}));
+    run(&mut s, "construct.plane.offset", json!({"base": "XY", "offset": 0, "name": "Cut"}));
+    run(&mut s, "solid.split_body", json!({"body": "Ball", "plane": "Cut"}));
+    let before = run(&mut s, "inspect.measure", json!({}))["bodies"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|b| b["name"] == "Ball")
+        .and_then(|b| b["volume_mm3"].as_f64())
+        .unwrap();
+    // 0.1 mm off the cut: UI would accept; the old kernel pick refused the face.
+    run(
+        &mut s,
+        "solid.shell",
+        json!({"body": "Ball", "faces": [[5.0, 5.0, 0.1]], "thickness": 2, "tangent_chain": false}),
+    );
+    let after = run(&mut s, "inspect.measure", json!({}))["bodies"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|b| b["name"] == "Ball")
+        .and_then(|b| b["volume_mm3"].as_f64())
+        .unwrap();
+    assert!(after > 0.0 && after < before * 0.95, "half should be hollow: {after} of {before}");
+}
+
 /// Offset Face on a cone and a sphere move them exactly.
 #[test]
 fn offset_cone_and_sphere_faces() {
