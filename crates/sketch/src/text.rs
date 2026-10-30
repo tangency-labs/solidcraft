@@ -280,6 +280,11 @@ impl<'a> TextMetrics<'a> {
         })
     }
 
+    /// The capital height text is scaled by, in font units ([`cap_height`]).
+    pub(crate) fn cap(&self) -> f64 {
+        self.cap
+    }
+
     /// Millimetres per font unit at a capital height of `height` mm.
     pub fn scale(&self, height: f64) -> Result<f64> {
         check_height(height)?;
