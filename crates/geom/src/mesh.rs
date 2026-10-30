@@ -818,13 +818,20 @@ impl Mesh {
                 let cell = span / side as f64 * (1.0 + 1e-9);
                 let n = (side + 1, side + 1);
                 let mut cells = vec![Vec::new(); n.0 * n.1];
+                // Each row takes the cells a triangle covers in it, not its box's: a long thin
+                // triangle running across the rays' plane (a perforated sheet's face) has a box of
+                // most of the grid. The row is grown a little so rounding never leaves out a cell
+                // the triangle touches (far from the origin, rounding grows with the coordinates).
+                let margin = cell * 1e-6 + 1e-12 * lo.0.abs().max(lo.1.abs()).max(hi.0.abs()).max(hi.1.abs());
                 if lo.0.is_finite() {
                     for (i, t) in tris.iter().enumerate() {
                         let (x0, x1) = (t.iter().map(|p| p.0).fold(f64::INFINITY, f64::min), t.iter().map(|p| p.0).fold(f64::NEG_INFINITY, f64::max));
                         let (y0, y1) = (t.iter().map(|p| p.1).fold(f64::INFINITY, f64::min), t.iter().map(|p| p.1).fold(f64::NEG_INFINITY, f64::max));
                         let c = |x: f64, o: f64, m: usize| (((x - o) / cell).floor().max(0.0) as usize).min(m - 1);
-                        for gx in c(x0, lo.0, n.0)..=c(x1, lo.0, n.0) {
-                            for gy in c(y0, lo.1, n.1)..=c(y1, lo.1, n.1) {
+                        for gy in c(y0, lo.1, n.1)..=c(y1, lo.1, n.1) {
+                            let (ya, yb) = (lo.1 + gy as f64 * cell - margin, lo.1 + (gy + 1) as f64 * cell + margin);
+                            let (xa, xb) = row_span(t, ya, yb).map_or((x0, x1), |(a, b)| ((a - margin).max(x0), (b + margin).min(x1)));
+                            for gx in c(xa, lo.0, n.0)..=c(xb, lo.0, n.0) {
                                 if let Some(slot) = cells.get_mut(gx * n.1 + gy) {
                                     slot.push(i as u32);
                                 }
@@ -837,6 +844,28 @@ impl Mesh {
             .collect();
         InsideIndex { mesh: self, rays }
     }
+}
+
+/// The span along the first coordinate of the triangle's part with the second between `ya` and
+/// `yb`: its corners in the strip and where its sides cross the strip's edges. `None` when it
+/// misses the strip (or a coordinate is not finite).
+fn row_span(t: &[(f64, f64); 3], ya: f64, yb: f64) -> Option<(f64, f64)> {
+    let (mut lo, mut hi) = (f64::INFINITY, f64::NEG_INFINITY);
+    for k in 0..3 {
+        let (p, q) = (t[k], t[(k + 1) % 3]);
+        if (ya..=yb).contains(&p.1) {
+            lo = lo.min(p.0);
+            hi = hi.max(p.0);
+        }
+        for y in [ya, yb] {
+            if (p.1 - y) * (q.1 - y) < 0.0 {
+                let x = p.0 + (y - p.1) / (q.1 - p.1) * (q.0 - p.0);
+                lo = lo.min(x);
+                hi = hi.max(x);
+            }
+        }
+    }
+    (lo <= hi).then_some((lo, hi))
 }
 
 impl InsideIndex<'_> {

@@ -926,6 +926,101 @@ mod blend {
     }
 }
 
+/// The index answers as `Mesh::contains` does on a thin plate 400 × 470 × 2, whose faces are long
+/// triangles running across the rays' planes (binned by the cells they cover, not their boxes),
+/// at points inside, outside and just off its faces.
+#[test]
+fn inside_index_agrees_with_contains_on_a_thin_plate() {
+    let mut plate = cube_mesh(1.0);
+    for p in &mut plate.positions {
+        *p = Vec3::new(p.x * 400.0, p.y * 470.0, p.z * 2.0);
+    }
+    let index = plate.inside_index();
+    let mut seed = 0x2545_f491_4f6c_dd1d_u64;
+    let mut next = || {
+        seed ^= seed << 13;
+        seed ^= seed >> 7;
+        seed ^= seed << 17;
+        (seed >> 11) as f64 / (1u64 << 53) as f64
+    };
+    let (mut inside, mut outside) = (0, 0);
+    for _ in 0..20_000 {
+        let p = Vec3::new(next() * 420.0 - 10.0, next() * 490.0 - 10.0, next() * 3.0 - 0.5);
+        let want = plate.contains(p);
+        assert_eq!(index.contains(p), want, "{p:?}");
+        if want { inside += 1 } else { outside += 1 }
+    }
+    assert!(inside > 1000 && outside > 1000, "{inside} inside, {outside} outside");
+}
+
+/// A closed plate `size` with its top and bottom split into `n` × `n` squares (two triangles
+/// each), its corner at `at`.
+fn grid_plate(n: u32, size: Vec3, at: Vec3) -> Mesh {
+    let mut positions = Vec::new();
+    for z in [0.0, 1.0] {
+        for j in 0..=n {
+            for i in 0..=n {
+                positions.push(at + Vec3::new(size.x * f64::from(i) / f64::from(n), size.y * f64::from(j) / f64::from(n), size.z * z));
+            }
+        }
+    }
+    let k = |i: u32, j: u32, top: u32| top * (n + 1) * (n + 1) + j * (n + 1) + i;
+    let mut triangles = Vec::new();
+    for top in [0, 1] {
+        for j in 0..n {
+            for i in 0..n {
+                triangles.push([k(i, j, top), k(i + 1, j, top), k(i + 1, j + 1, top)]);
+                triangles.push([k(i, j, top), k(i + 1, j + 1, top), k(i, j + 1, top)]);
+            }
+        }
+    }
+    // The walls, between the two grids' edges.
+    let rim: Vec<(u32, u32)> =
+        (0..n).map(|i| (i, 0)).chain((0..n).map(|j| (n, j))).chain((0..n).map(|i| (n - i, n))).chain((0..n).map(|j| (0, n - j))).collect();
+    for (a, b) in rim.iter().zip(rim.iter().cycle().skip(1)) {
+        let (a0, b0, a1, b1) = (k(a.0, a.1, 0), k(b.0, b.1, 0), k(a.0, a.1, 1), k(b.0, b.1, 1));
+        triangles.push([a0, b0, b1]);
+        triangles.push([a0, b1, a1]);
+    }
+    let tri_face = vec![0; triangles.len()];
+    Mesh {
+        normals: vec![Vec3::Z; positions.len()],
+        positions,
+        triangles,
+        tri_face,
+        edges: vec![],
+        seams: vec![],
+        smooth_edges: vec![],
+        sharp_edges: vec![],
+        edge_faces: vec![],
+    }
+}
+
+/// The same far from the origin, where rounding in the projected coordinates is many times the
+/// margin a fine grid's cells would allow: a plate 1 × 1 × 0.01 of 40,800 triangles, 1e8 mm out
+/// on each axis.
+#[test]
+fn inside_index_agrees_with_contains_far_from_the_origin() {
+    let far = 1e8;
+    let plate = grid_plate(100, Vec3::new(1.0, 1.0, 0.01), Vec3::new(far, far, far));
+    let index = plate.inside_index();
+    let mut seed = 0x9e37_79b9_7f4a_7c15_u64;
+    let mut next = || {
+        seed ^= seed << 13;
+        seed ^= seed >> 7;
+        seed ^= seed << 17;
+        (seed >> 11) as f64 / (1u64 << 53) as f64
+    };
+    let (mut inside, mut outside) = (0, 0);
+    for _ in 0..2_000 {
+        let p = Vec3::new(far + next() * 1.2 - 0.1, far + next() * 1.2 - 0.1, far + next() * 0.014 - 0.002);
+        let want = plate.contains(p);
+        assert_eq!(index.contains(p), want, "{p:?}");
+        if want { inside += 1 } else { outside += 1 }
+    }
+    assert!(inside > 100 && outside > 100, "{inside} inside, {outside} outside");
+}
+
 #[test]
 fn a_box_from_points_holds_them_and_grows() {
     let b: Aabb3 = [Vec3::new(1.0, 2.0, 3.0), Vec3::new(-1.0, 0.0, 5.0), Vec3::new(f64::INFINITY, 0.0, 0.0)].into_iter().collect();

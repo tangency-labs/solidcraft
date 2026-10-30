@@ -488,6 +488,10 @@ mod tests {
         for _ in 0..30 {
             let (q, a, b) = (s.subs(u, v), s.uder(u, v), s.vder(u, v));
             let (rx, ry) = (q.x - x, q.y - y);
+            // Started from the neighbouring point, it has usually settled after a step or two.
+            if rx.hypot(ry) < 1e-12 {
+                break;
+            }
             let det = a.x * b.y - a.y * b.x;
             if det.abs() < 1e-300 {
                 return None;
