@@ -725,3 +725,50 @@ fn dialog_keyboard_enter_on_closed_extrude_dropdowns_applies_without_changing_va
         assert_eq!(extent(&h), before, "Enter must preserve the selected {label}");
     }
 }
+
+#[test]
+fn dropdown_extrude_menu_confirm_wrap_and_tab_exit_preserve_form_focus() {
+    use crate::test_support::dialog_tab_to;
+    let mut h = make(json!({}));
+    let document = h.app.session.doc.to_json();
+    let undo = h.app.session.undo.len();
+    open(&mut h);
+    dialog_tab_to(&mut h, "dialog:Direction");
+    h.step(&json!({"key":"Space"})).unwrap();
+    h.step(&json!({"key":"ArrowDown"})).unwrap();
+    h.step(&json!({"key":"Space"})).unwrap();
+    assert!(!egui::Popup::is_any_open(&h.ctx), "Space must close Direction after selecting Two Sides");
+    dialog_tab_to(&mut h, "dialog:Extent Type");
+    h.step(&json!({"key":"Space"})).unwrap();
+    h.step(&json!({"key":"ArrowDown"})).unwrap();
+    h.step(&json!({"key":"Space"})).unwrap();
+    assert!(!egui::Popup::is_any_open(&h.ctx), "Space closes after choosing To Object");
+    assert!(crate::scenario::handle_at("dialog:To Object").is_some(), "the conditional selection field appears");
+    dialog_tab_to(&mut h, "dialog:Extent Type");
+    h.step(&json!({"key":"Space"})).unwrap();
+    h.step(&json!({"key":"ArrowDown"})).unwrap();
+    h.step(&json!({"key":"Space"})).unwrap();
+    let crate::dialogs::Kind::Extrude { all, .. } = &h.app.dialog.as_ref().unwrap().kind else { panic!("Extrude") };
+    assert!(*all, "reopening starts at To Object, so Down chooses All");
+    h.step(&json!({"key":"Space"})).unwrap();
+    h.step(&json!({"key":"ArrowDown"})).unwrap();
+    h.step(&json!({"key":"Space"})).unwrap();
+    let crate::dialogs::Kind::Extrude { all, .. } = &h.app.dialog.as_ref().unwrap().kind else { panic!("Extrude") };
+    assert!(!*all, "Down from All wraps to Distance");
+    h.step(&json!({"key":"Space"})).unwrap();
+    h.step(&json!({"key":"ArrowDown"})).unwrap();
+    h.step(&json!({"key":"Tab"})).unwrap();
+    assert!(!egui::Popup::is_any_open(&h.ctx));
+    assert!(
+        h.ctx.read_response(h.ctx.memory(|m| m.focused()).unwrap()).unwrap().rect.contains(crate::scenario::handle_at("dialog:Distance").unwrap()),
+        "Tab exits to Distance without committing To Object"
+    );
+    h.step(&json!({"key":"Tab","shift":true})).unwrap();
+    assert!(
+        h.ctx.read_response(h.ctx.memory(|m| m.focused()).unwrap()).unwrap().rect.contains(crate::scenario::handle_at("dialog:Extent Type").unwrap())
+    );
+    h.step(&json!({"key":"Escape"})).unwrap();
+    assert!(h.app.dialog.is_none());
+    assert_eq!(h.app.session.doc.to_json(), document);
+    assert_eq!(h.app.session.undo.len(), undo);
+}
