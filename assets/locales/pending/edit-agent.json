@@ -1,0 +1,66 @@
+{
+  "en": {
+    "ui.ai_edit_agent_title": "Edit agent",
+    "ui.ai_edit_clear_key": "Remove stored API key",
+    "ui.ai_edit_key_endpoint": "Enter a new API key or remove the stored key before changing the endpoint or protocol.",
+    "ui.ai_edit_key_note": "Leave the API key blank to keep the stored key. Enter a new key to replace it.",
+    "ui.ai_edit_missing": "This agent was removed. Close the editor and add it again.",
+    "ui.ai_edit_save_note": "Save applies these agent settings immediately, even if you later cancel Preferences."
+  },
+  "de": {
+    "ui.ai_edit_agent_title": "Agent bearbeiten",
+    "ui.ai_edit_clear_key": "Gespeicherten API-Schlüssel entfernen",
+    "ui.ai_edit_key_endpoint": "Geben Sie einen neuen API-Schlüssel ein oder entfernen Sie den gespeicherten Schlüssel, bevor Sie den Endpunkt oder das Protokoll ändern.",
+    "ui.ai_edit_key_note": "Lassen Sie den API-Schlüssel leer, um den gespeicherten Schlüssel beizubehalten. Geben Sie einen neuen Schlüssel ein, um ihn zu ersetzen.",
+    "ui.ai_edit_missing": "Dieser Agent wurde entfernt. Schließen Sie den Editor und fügen Sie ihn erneut hinzu.",
+    "ui.ai_edit_save_note": "Speichern übernimmt diese Agenteneinstellungen sofort, auch wenn Sie die Einstellungen später abbrechen."
+  },
+  "ja": {
+    "ui.ai_edit_agent_title": "エージェントを編集",
+    "ui.ai_edit_clear_key": "保存済みのAPIキーを削除",
+    "ui.ai_edit_key_endpoint": "エンドポイントまたはプロトコルを変更する前に、新しいAPIキーを入力するか、保存済みのキーを削除してください。",
+    "ui.ai_edit_key_note": "APIキーを空欄にすると保存済みのキーを保持します。新しいキーを入力すると置き換えます。",
+    "ui.ai_edit_missing": "このエージェントは削除されました。編集画面を閉じて、再度追加してください。",
+    "ui.ai_edit_save_note": "保存すると、このエージェントの設定がすぐに適用されます。その後に環境設定をキャンセルしても元に戻りません。"
+  },
+  "zh": {
+    "ui.ai_edit_agent_title": "编辑代理",
+    "ui.ai_edit_clear_key": "删除已保存的 API 密钥",
+    "ui.ai_edit_key_endpoint": "更改端点或协议之前，请输入新的 API 密钥或删除已保存的密钥。",
+    "ui.ai_edit_key_note": "将 API 密钥留空可保留已保存的密钥。输入新密钥可将其替换。",
+    "ui.ai_edit_missing": "此代理已被删除。请关闭编辑器并重新添加。",
+    "ui.ai_edit_save_note": "保存会立即应用此代理的设置，即使您之后取消偏好设置也不会撤销。"
+  },
+  "ko": {
+    "ui.ai_edit_agent_title": "에이전트 편집",
+    "ui.ai_edit_clear_key": "저장된 API 키 삭제",
+    "ui.ai_edit_key_endpoint": "엔드포인트 또는 프로토콜을 변경하기 전에 새 API 키를 입력하거나 저장된 키를 삭제하세요.",
+    "ui.ai_edit_key_note": "API 키를 비워 두면 저장된 키가 유지됩니다. 새 키를 입력하면 기존 키가 교체됩니다.",
+    "ui.ai_edit_missing": "이 에이전트는 삭제되었습니다. 편집기를 닫고 다시 추가하세요.",
+    "ui.ai_edit_save_note": "저장하면 이 에이전트 설정이 즉시 적용되며, 나중에 환경설정을 취소해도 유지됩니다."
+  },
+  "ar": {
+    "ui.ai_edit_agent_title": "تعديل الوكيل",
+    "ui.ai_edit_clear_key": "إزالة مفتاح API المحفوظ",
+    "ui.ai_edit_key_endpoint": "أدخل مفتاح API جديدًا أو أزل المفتاح المحفوظ قبل تغيير نقطة النهاية أو البروتوكول.",
+    "ui.ai_edit_key_note": "اترك حقل مفتاح API فارغًا للاحتفاظ بالمفتاح المحفوظ. أدخل مفتاحًا جديدًا لاستبداله.",
+    "ui.ai_edit_missing": "تمت إزالة هذا الوكيل. أغلق المحرر وأضفه مجددًا.",
+    "ui.ai_edit_save_note": "يطبق الحفظ إعدادات هذا الوكيل فورًا، حتى إذا ألغيت نافذة التفضيلات لاحقًا."
+  },
+  "he": {
+    "ui.ai_edit_agent_title": "עריכת סוכן",
+    "ui.ai_edit_clear_key": "הסרת מפתח ה-API השמור",
+    "ui.ai_edit_key_endpoint": "יש להזין מפתח API חדש או להסיר את המפתח השמור לפני שינוי נקודת הקצה או הפרוטוקול.",
+    "ui.ai_edit_key_note": "יש להשאיר את שדה מפתח ה-API ריק כדי לשמור על המפתח הקיים. הזנת מפתח חדש תחליף אותו.",
+    "ui.ai_edit_missing": "הסוכן הזה הוסר. יש לסגור את העורך ולהוסיף אותו שוב.",
+    "ui.ai_edit_save_note": "השמירה מחילה את הגדרות הסוכן האלה מיד, גם אם חלון ההעדפות יבוטל לאחר מכן."
+  },
+  "vi": {
+    "ui.ai_edit_agent_title": "Chỉnh sửa tác nhân",
+    "ui.ai_edit_clear_key": "Xóa khóa API đã lưu",
+    "ui.ai_edit_key_endpoint": "Nhập khóa API mới hoặc xóa khóa đã lưu trước khi thay đổi điểm cuối hoặc giao thức.",
+    "ui.ai_edit_key_note": "Để trống khóa API để giữ khóa đã lưu. Nhập khóa mới để thay thế.",
+    "ui.ai_edit_missing": "Tác nhân này đã bị xóa. Đóng trình chỉnh sửa rồi thêm lại.",
+    "ui.ai_edit_save_note": "Lưu sẽ áp dụng ngay các cài đặt tác nhân này, ngay cả khi bạn hủy cửa sổ Tùy chọn sau đó."
+  }
+}

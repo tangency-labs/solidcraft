@@ -148,7 +148,7 @@ messages go as one prompt, in order, when the turn ends normally.
 
 Preferences → AI → **Agents** lists every agent the chat can use, each with its kind (a program or
 an endpoint), version or model, whether it looks signed in, **Test**, **Default** (the one a new
-conversation starts with), its own permission setting, and **Remove** for the ones you added.
+conversation starts with), its own permission setting, and **Edit** and **Remove** for the ones you added.
 
 ### Found by themselves
 
@@ -251,6 +251,21 @@ only chat and suggests choosing one with tool support. Results are cached in mem
 model, with a limit of 128 entries. SolidCraft recognises Ollama through `/api/version` at the
 endpoint's origin or the Ollama preset. Failed checks and older servers without a capabilities
 field show no warning. The check never blocks sending a message.
+
+### Edit a saved agent
+
+Choose **Edit** beside **Test**, before **Remove**, to reopen the creation form with the
+saved name, command or endpoint, protocol, model and request timeout. **Save** updates the
+same agent, keeping its default selection and permissions; **Cancel** in the editor changes nothing.
+The editor’s **Save** applies that agent immediately, even if you later cancel the surrounding
+Preferences window. Unrelated Preferences changes remain cancellable.
+Editing a running agent disconnects it so its next connection uses the saved settings.
+
+The API key field is always empty: the stored key is never loaded into the form. Leave it
+empty to keep the key, enter a new key to replace it, or select **Remove stored API key**.
+Changing the endpoint URL or protocol requires a replacement key or explicit removal, so a
+stored credential is not silently sent to a different endpoint. Installed agents found
+automatically are not edited here; add your own entry for different arguments.
 
 ### Local models
 

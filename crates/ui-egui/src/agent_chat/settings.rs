@@ -1,5 +1,5 @@
 //! Settings → AI: the master switch, the agents (found and added, each with Test, Default and,
-//! for added ones, Remove), permissions (global and per agent, and the "always allow" answers),
+//! for added ones, Edit and Remove), permissions (global and per agent, and the "always allow" answers),
 //! and the panel. Plus the Add agent dialog: an installed ACP agent, a custom command, or an
 //! endpoint (OpenAI-compatible or Anthropic-compatible, whose key goes to the system keychain).
 
@@ -16,10 +16,13 @@ pub enum AddKind {
     Api,
 }
 
-/// The Add agent dialog's fields.
+/// The shared Add/Edit agent dialog's fields.
 #[derive(Default)]
 pub struct AddState {
     pub kind: AddKind,
+    /// Stable identity when editing; never contains a credential.
+    pub editing: Option<String>,
+    pub clear_key: bool,
     pub name: String,
     pub command: String,
     pub installed: usize,
@@ -165,6 +168,26 @@ pub fn open_add(app: &mut SolveApp) {
         base_url: preset.map(|p| p.base_url.to_string()).unwrap_or_default(),
         name: preset.map(|p| p.name.to_string()).unwrap_or_default(),
         request_timeout_s: agents::DEFAULT_REQUEST_TIMEOUT_S,
+        ..Default::default()
+    });
+}
+
+/// Reuse the creation form without ever reading the stored credential into it.
+pub fn open_edit(app: &mut SolveApp, id: &str) {
+    let Some(c) = app.preferences.agents.iter().find(|c| c.id == id) else { return };
+    let protocol = if c.kind == Kind::Anthropic { Protocol::Anthropic } else { Protocol::OpenAi };
+    let presets = agents::presets(protocol);
+    let preset = presets.iter().position(|p| p.base_url == c.base_url).unwrap_or(presets.len());
+    app.agent_chat.settings.add = Some(AddState {
+        editing: Some(c.id.clone()),
+        kind: if c.kind == Kind::Acp { AddKind::Custom } else { AddKind::Api },
+        name: c.name.clone(),
+        command: c.command.clone(),
+        preset,
+        protocol,
+        base_url: c.base_url.clone(),
+        model: c.model.clone(),
+        request_timeout_s: c.request_timeout_s,
         ..Default::default()
     });
 }
@@ -403,6 +426,7 @@ fn agents_section(app: &mut SolveApp, ui: &mut egui::Ui) {
     let d = &app.preferences.agent_default;
     let default = if all.iter().any(|e| &e.id == d) { Some(d.clone()) } else { all.first().map(|e| e.id.clone()) };
     let mut remove: Option<String> = None;
+    let mut edit: Option<String> = None;
     let mut test: Option<agents::Entry> = None;
     let mut retimed: Option<(String, u64)> = None;
     let t = crate::theme::Tokens::get();
@@ -442,6 +466,13 @@ fn agents_section(app: &mut SolveApp, ui: &mut egui::Ui) {
                         };
                         if test_button.on_hover_text(tr(tip)).clicked() {
                             test = Some(entry.clone());
+                        }
+                        if !entry.found {
+                            let button = ui_kit::button(ui, tr("ui.edit"), ui_kit::Button::Small);
+                            crate::scenario::publish_target(&format!("prefs:ai_edit:{}", entry.id), button.rect);
+                            if button.clicked() {
+                                edit = Some(entry.id.clone());
+                            }
                         }
                         if !entry.found && ui_kit::button(ui, tr("ui.ai_remove"), ui_kit::Button::Ghost).clicked() {
                             remove = Some(entry.id.clone());
@@ -518,6 +549,9 @@ fn agents_section(app: &mut SolveApp, ui: &mut egui::Ui) {
             }
         });
     });
+    if let Some(id) = edit {
+        open_edit(app, &id);
+    }
     if let Some(e) = test {
         let key = if e.key { app.services.secrets.as_ref().and_then(|s| s.get(&e.id).ok().flatten()) } else { None };
         let started = start_test(app, &e, key);
@@ -561,14 +595,24 @@ pub fn dialog(app: &mut SolveApp, ctx: &egui::Context) {
     let found: Vec<agents::Entry> = agents::entries(app).into_iter().filter(|e| e.found).collect();
     #[cfg(target_arch = "wasm32")]
     let found: Vec<agents::Entry> = Vec::new();
+    let editing = app.agent_chat.settings.add.as_ref().and_then(|s| s.editing.as_ref()).is_some();
+    let stored_key = app
+        .agent_chat
+        .settings
+        .add
+        .as_ref()
+        .and_then(|s| s.editing.as_ref())
+        .and_then(|id| app.preferences.agents.iter().find(|c| &c.id == id))
+        .is_some_and(|c| c.key);
     let has_keychain = app.services.secrets.is_some();
     let mut open = true;
     let mut add = false;
     let mut test = false;
-    let (closed, action) = ui_kit::Window::new(egui::Id::new("sc_ai_add"), "settings", tr("ui.ai_add_agent_title"))
+    let title = tr(if editing { "ui.ai_edit_agent_title" } else { "ui.ai_add_agent_title" });
+    let (closed, action) = ui_kit::Window::new(egui::Id::new("sc_ai_add"), "settings", title)
         .cards(2.0)
         .fields()
-        .actions(tr("ui.ai_add"), "Cancel", None)
+        .actions(tr(if editing { "ui.save" } else { "ui.ai_add" }), "Cancel", None)
         .show(ctx, true, |ui| {
             let Some(s) = app.agent_chat.settings.add.as_mut() else { return };
             if let Some(test) = s.test.as_mut() {
@@ -679,12 +723,19 @@ pub fn dialog(app: &mut SolveApp, ctx: &egui::Context) {
                             crate::scenario::publish_target("ai_add:key", r.rect);
                         });
                     });
+                    if stored_key {
+                        ui_kit::text(ui, tr("ui.ai_edit_key_note"), ui_kit::Text::Note("stored_key"));
+                        ui_kit::checkbox(ui, tr("ui.ai_edit_clear_key"), &mut s.clear_key);
+                    }
                     ui_kit::text(ui, tr(if has_keychain { "ui.ai_key_note" } else { "ui.ai_no_keychain" }), ui_kit::Text::Note("keychain"));
                     if ui_kit::button(ui, tr("ui.ai_test"), ui_kit::Button::Normal).clicked() {
                         test = true;
                     }
                     test_line(ui, &s.test.as_ref());
                 }
+            }
+            if s.editing.is_some() {
+                ui_kit::text(ui, tr("ui.ai_edit_save_note"), ui_kit::Text::Note("edit_save"));
             }
             if let Some(e) = &s.error {
                 ui_kit::text(ui, e, ui_kit::Text::Report("add_error", true));
@@ -712,8 +763,18 @@ pub fn dialog(app: &mut SolveApp, ctx: &egui::Context) {
                 key: false,
                 request_timeout_s: s.request_timeout_s,
             };
-            let key = Some(s.key.trim().to_string()).filter(|k| !k.is_empty());
+            let key = Some(s.key.trim().to_string()).filter(|k| !k.is_empty()).or_else(|| {
+                if s.clear_key {
+                    return None;
+                }
+                let c = app.preferences.agents.iter().find(|c| Some(&c.id) == s.editing.as_ref())?;
+                if !c.key || c.kind != e.kind || url.as_ref().ok() != Some(&c.base_url) {
+                    return None;
+                }
+                app.services.secrets.as_ref()?.get(&c.id).ok().flatten()
+            });
             let result = match url {
+                Ok(ref url) if key.is_some() && !agents::key_safe_for(url) => Test::Done(Err(TestError::Other(tr("ui.ai_key_needs_https").into()))),
                 Ok(_) => start_test(app, &e, key),
                 Err(err) => Test::Done(Err(TestError::Other(err))),
             };
@@ -740,9 +801,13 @@ pub fn dialog(app: &mut SolveApp, ctx: &egui::Context) {
     }
 }
 
-/// Add what the dialog holds; its key goes to the keychain.
+/// Save the shared Add/Edit form; credentials stay in the keychain.
 fn add_agent(app: &mut SolveApp) -> Result<(), String> {
     let Some(s) = app.agent_chat.settings.add.as_ref() else { return Ok(()) };
+    let previous = s.editing.as_ref().and_then(|id| app.preferences.agents.iter().find(|c| &c.id == id)).cloned();
+    if s.editing.is_some() && previous.is_none() {
+        return Err(tr("ui.ai_edit_missing").to_string());
+    }
     let name = s.name.trim().chars().take(80).collect::<String>();
     let mut c = AgentConfig { name, ..Default::default() };
     let mut key: Option<String> = None;
@@ -772,6 +837,18 @@ fn add_agent(app: &mut SolveApp) -> Result<(), String> {
             c.id = agents::new_id(&app.preferences, c.kind.id());
         }
     }
+    if let Some(old) = &previous {
+        c.id = old.id.clone();
+        if c.kind == old.kind && c.base_url == old.base_url {
+            c.ollama = old.ollama;
+        }
+        if c.kind != Kind::Acp && old.key && !s.clear_key && key.is_none() {
+            if old.kind != c.kind || old.base_url != c.base_url {
+                return Err(tr("ui.ai_edit_key_endpoint").to_string());
+            }
+            c.key = true;
+        }
+    }
     if c.name.is_empty() {
         c.name = c.id.clone();
     }
@@ -780,15 +857,289 @@ fn add_agent(app: &mut SolveApp) -> Result<(), String> {
         store.set(&c.id, &k).map_err(|e| trf("ui.ai_keychain_error", &[("error", &e)]))?;
         c.key = true;
     }
-    app.preferences.agents.push(c);
+    if let Some(old) = previous {
+        if old.key && !c.key {
+            let Some(store) = &app.services.secrets else { return Err(tr("ui.ai_no_keychain").to_string()) };
+            store.delete(&c.id).map_err(|e| trf("ui.ai_keychain_error", &[("error", &e)]))?;
+        }
+        if let Some(saved) = app.preferences.agents.iter_mut().find(|saved| saved.id == c.id) {
+            *saved = c.clone();
+        }
+        app.agent_chat.settings.tests.remove(&c.id);
+        app.agent_chat.login_results.remove(&c.id);
+        if old.model != c.model || old.kind != c.kind || old.base_url != c.base_url {
+            app.preferences.agent_models.remove(&c.id);
+        }
+        crate::prefs::retain_saved_agent(app, &c.id);
+        if app.agent_chat.running_id == c.id {
+            disconnect(app);
+        }
+    } else {
+        app.preferences.agents.push(c);
+    }
     Ok(())
 }
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod card_tests {
+    // Test-only fixtures deliberately fail if the editor retrieves a stored credential.
+    #![allow(clippy::panic, clippy::unwrap_used)]
+
     use super::*;
     use crate::scenario::{self, Harness};
     use serde_json::json;
+
+    #[derive(Default)]
+    struct TestSecrets {
+        values: std::sync::Mutex<std::collections::HashMap<String, String>>,
+        fail: std::sync::atomic::AtomicBool,
+    }
+
+    impl backend::Secrets for TestSecrets {
+        fn get(&self, _: &str) -> Result<Option<String>, String> {
+            panic!("opening or saving the editor must not retrieve credentials")
+        }
+        fn set(&self, id: &str, key: &str) -> Result<(), String> {
+            if self.fail.load(std::sync::atomic::Ordering::SeqCst) {
+                return Err("fixture failure".into());
+            }
+            self.values.lock().unwrap().insert(id.into(), key.into());
+            Ok(())
+        }
+        fn delete(&self, id: &str) -> Result<(), String> {
+            if self.fail.load(std::sync::atomic::Ordering::SeqCst) {
+                return Err("fixture failure".into());
+            }
+            self.values.lock().unwrap().remove(id);
+            Ok(())
+        }
+    }
+
+    fn edit_fixture(kind: Kind) -> (Harness, std::sync::Arc<TestSecrets>) {
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        h.app.preferences.ai_features = true;
+        h.app.agent_chat.detection = Some(Default::default());
+        h.app.preferences.agents.push(AgentConfig {
+            id: "fixture".into(),
+            name: "Fixture agent".into(),
+            kind,
+            command: "fixture-agent --acp".into(),
+            base_url: "https://example.test/v1".into(),
+            model: "fixture-model".into(),
+            key: kind.is_api(),
+            request_timeout_s: 600,
+            ..Default::default()
+        });
+        h.app.preferences.agent_default = "fixture".into();
+        h.app.preferences.agent_last = "fixture".into();
+        h.app.preferences.agent_permissions.insert("fixture".into(), Mode::Edits);
+        let store = std::sync::Arc::new(TestSecrets::default());
+        if kind.is_api() {
+            store.values.lock().unwrap().insert("fixture".into(), "synthetic-test-key".into());
+        }
+        h.app.services.secrets = Some(store.clone());
+        (h, store)
+    }
+
+    #[test]
+    fn edit_agent_prefills_each_kind_without_retrieving_keys_and_saves_in_place() {
+        for kind in [Kind::Acp, Kind::Api, Kind::Anthropic] {
+            let (mut h, store) = edit_fixture(kind);
+            let old = h.app.preferences.agents[0].clone();
+            open_edit(&mut h.app, "fixture");
+            let s = h.app.agent_chat.settings.add.as_mut().unwrap();
+            assert_eq!(s.name, old.name);
+            assert_eq!(s.command, old.command);
+            assert_eq!(s.base_url, old.base_url);
+            assert_eq!(s.model, old.model);
+            assert_eq!(s.request_timeout_s, 600);
+            assert!(s.key.is_empty());
+            s.name = "Renamed fixture".into();
+            s.model = "new-model".into();
+            s.command = "new-fixture --acp".into();
+            add_agent(&mut h.app).unwrap();
+            assert_eq!(h.app.preferences.agents.len(), 1);
+            let saved = &h.app.preferences.agents[0];
+            assert_eq!(saved.id, old.id);
+            assert_eq!(saved.name, "Renamed fixture");
+            assert_eq!(saved.kind, kind);
+            assert_eq!(saved.key, old.key);
+            if kind.is_api() {
+                assert_eq!(saved.model, "new-model");
+                assert_eq!(store.values.lock().unwrap()["fixture"], "synthetic-test-key");
+            } else {
+                assert_eq!(saved.command, "new-fixture --acp");
+            }
+            assert_eq!(h.app.preferences.agent_default, "fixture");
+            assert_eq!(h.app.preferences.agent_last, "fixture");
+            assert_eq!(h.app.preferences.agent_permissions["fixture"], Mode::Edits);
+        }
+    }
+
+    #[test]
+    fn edit_agent_replace_remove_and_keychain_failure_are_atomic() {
+        let (mut h, store) = edit_fixture(Kind::Api);
+        open_edit(&mut h.app, "fixture");
+        h.app.agent_chat.settings.add.as_mut().unwrap().key = "replacement-fixture-key".into();
+        store.fail.store(true, std::sync::atomic::Ordering::SeqCst);
+        let old = h.app.preferences.agents.clone();
+        assert!(add_agent(&mut h.app).is_err());
+        assert_eq!(h.app.preferences.agents, old);
+        assert_eq!(store.values.lock().unwrap()["fixture"], "synthetic-test-key");
+        store.fail.store(false, std::sync::atomic::Ordering::SeqCst);
+        add_agent(&mut h.app).unwrap();
+        assert_eq!(store.values.lock().unwrap()["fixture"], "replacement-fixture-key");
+        open_edit(&mut h.app, "fixture");
+        h.app.agent_chat.settings.add.as_mut().unwrap().clear_key = true;
+        store.fail.store(true, std::sync::atomic::Ordering::SeqCst);
+        assert!(add_agent(&mut h.app).is_err());
+        assert!(h.app.preferences.agents[0].key);
+        store.fail.store(false, std::sync::atomic::Ordering::SeqCst);
+        add_agent(&mut h.app).unwrap();
+        assert!(!h.app.preferences.agents[0].key);
+        assert!(store.values.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn edit_agent_never_reuses_a_stored_key_for_a_changed_endpoint_or_protocol() {
+        for change_protocol in [false, true] {
+            let (mut h, store) = edit_fixture(Kind::Api);
+            let old = h.app.preferences.agents.clone();
+            open_edit(&mut h.app, "fixture");
+            let s = h.app.agent_chat.settings.add.as_mut().unwrap();
+            if change_protocol {
+                s.protocol = Protocol::Anthropic;
+            } else {
+                s.base_url = "https://other.example.test/v1".into();
+            }
+            assert!(add_agent(&mut h.app).is_err());
+            assert_eq!(h.app.preferences.agents, old);
+            assert_eq!(store.values.lock().unwrap()["fixture"], "synthetic-test-key");
+            h.app.agent_chat.settings.add.as_mut().unwrap().clear_key = true;
+            add_agent(&mut h.app).unwrap();
+            assert!(!h.app.preferences.agents[0].key);
+        }
+    }
+
+    #[test]
+    fn edit_agent_validation_and_cancel_preserve_the_original() {
+        let (mut h, store) = edit_fixture(Kind::Api);
+        let old = h.app.preferences.agents.clone();
+        open_edit(&mut h.app, "fixture");
+        h.app.agent_chat.settings.add.as_mut().unwrap().model.clear();
+        assert!(add_agent(&mut h.app).is_err());
+        assert_eq!(h.app.preferences.agents, old);
+        h.frames(4);
+        h.step(&json!({"click":{"handle":"dialog:cancel"}})).unwrap();
+        assert!(h.app.agent_chat.settings.add.is_none());
+        assert_eq!(h.app.preferences.agents, old);
+        assert_eq!(store.values.lock().unwrap()["fixture"], "synthetic-test-key");
+    }
+
+    #[test]
+    fn edit_agent_save_keeps_config_and_key_consistent_when_outer_preferences_are_cancelled() {
+        for remove_key in [false, true] {
+            let (mut h, store) = edit_fixture(Kind::Api);
+            h.call("ui.prefs", json!({"open":"AI"}));
+            let scale = h.app.preferences.ui_scale;
+            h.app.preferences.ui_scale = scale + 0.25;
+            h.app.preferences.agent_models.insert("fixture".into(), "previous-model".into());
+            open_edit(&mut h.app, "fixture");
+            let s = h.app.agent_chat.settings.add.as_mut().unwrap();
+            s.name = "Saved independently".into();
+            s.base_url = "https://new.example.test/v1".into();
+            s.model = "new-model".into();
+            if remove_key {
+                s.clear_key = true;
+            } else {
+                s.key = "replacement-fixture-key".into();
+            }
+            add_agent(&mut h.app).unwrap();
+            h.app.agent_chat.settings.add = None;
+            h.call("ui.prefs", json!({"button":"cancel"}));
+            let saved = &h.app.preferences.agents[0];
+            assert_eq!(saved.name, "Saved independently");
+            assert_eq!(saved.base_url, "https://new.example.test/v1");
+            assert_eq!(saved.model, "new-model");
+            assert_eq!(saved.key, !remove_key);
+            assert!(!h.app.preferences.agent_models.contains_key("fixture"));
+            assert_eq!(h.app.preferences.ui_scale, scale, "unrelated edits still cancel");
+            let values = store.values.lock().unwrap();
+            if remove_key {
+                assert!(values.is_empty());
+            } else {
+                assert_eq!(values["fixture"], "replacement-fixture-key");
+            }
+        }
+    }
+
+    #[test]
+    fn edit_agent_without_keychain_preserves_key_and_removed_agents_are_not_recreated() {
+        let (mut h, store) = edit_fixture(Kind::Api);
+        h.app.services.secrets = None;
+        open_edit(&mut h.app, "fixture");
+        h.app.agent_chat.settings.add.as_mut().unwrap().name = "Still stored".into();
+        add_agent(&mut h.app).unwrap();
+        assert!(h.app.preferences.agents[0].key);
+        assert_eq!(store.values.lock().unwrap()["fixture"], "synthetic-test-key");
+        open_edit(&mut h.app, "fixture");
+        h.app.preferences.agents.clear();
+        assert!(add_agent(&mut h.app).is_err());
+        assert!(h.app.preferences.agents.is_empty());
+    }
+
+    fn edit_evidence(app: &mut SolveApp, stage: &str) {
+        let Ok(dir) = std::env::var("SOLIDCRAFT_AGENT_EDIT_EVIDENCE") else { return };
+        let ctx = egui::Context::default();
+        crate::fonts::setup_bundled_fonts(&ctx);
+        let bounds = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1600.0, 1100.0));
+        let mut textures = Default::default();
+        // Establish Preferences first, just as the real Edit click does, so the editor
+        // is the newly opened window and appears above it in the fresh render context.
+        let mut editor = app.agent_chat.settings.add.take();
+        for frame in 0..12 {
+            if frame == 3 {
+                app.agent_chat.settings.add = editor.take();
+            }
+            let output = ctx.run_ui(
+                egui::RawInput { screen_rect: Some(bounds), time: Some(frame as f64 / 60.0), focused: true, ..Default::default() },
+                |ui| {
+                    app.logic(ui.ctx());
+                    app.ui(ui);
+                },
+            );
+            crate::ui_kit::test_textures_update(&mut textures, &output.textures_delta);
+            if frame == 11 {
+                let shot = crate::ui_kit::test_raster(&ctx, output.shapes, output.pixels_per_point, bounds, &textures);
+                std::fs::create_dir_all(&dir).unwrap();
+                shot.save(std::path::Path::new(&dir).join(format!("agent-{stage}.png"))).unwrap();
+            }
+        }
+    }
+
+    #[test]
+    fn edit_agent_button_opens_the_existing_form_and_save_updates_not_duplicates() {
+        let (mut h, _) = edit_fixture(Kind::Anthropic);
+        h.call("ui.resize", json!({"width":1600,"height":1100}));
+        h.call("ui.prefs", json!({"open":"AI"}));
+        h.frames(4);
+        edit_evidence(&mut h.app, "settings");
+        h.frames(4);
+        h.step(&json!({"click":{"handle":"prefs:ai_edit:fixture"}})).unwrap();
+        let s = h.app.agent_chat.settings.add.as_mut().unwrap();
+        assert_eq!(s.editing.as_deref(), Some("fixture"));
+        assert_eq!(s.protocol, Protocol::Anthropic);
+        assert!(s.key.is_empty());
+        edit_evidence(&mut h.app, "editor");
+        h.app.agent_chat.settings.add.as_mut().unwrap().name = "Edited via preferences".into();
+        h.frames(4);
+        h.step(&json!({"click":{"handle":"ai_add:add"}})).unwrap();
+        assert!(h.app.agent_chat.settings.add.is_none());
+        assert_eq!(h.app.preferences.agents.len(), 1);
+        assert_eq!(h.app.preferences.agents[0].name, "Edited via preferences");
+        edit_evidence(&mut h.app, "saved");
+    }
 
     #[test]
     fn cached_model_warning_follows_endpoint_model_and_agent_selection() {

@@ -2397,6 +2397,24 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     }
 }
 
+/// The nested agent editor has its own explicit Save. Keep its configuration together
+/// with its already-committed keychain update if the outer Preferences window is cancelled.
+/// Do not apply any unrelated pending preferences.
+pub(crate) fn retain_saved_agent(app: &mut SolveApp, id: &str) {
+    let Some(saved) = app.preferences.agents.iter().find(|agent| agent.id == id).cloned() else { return };
+    let Some(snapshot) = app.prefs_window.snapshot.as_mut() else { return };
+    if let Some(original) = snapshot.prefs.agents.iter_mut().find(|agent| agent.id == id) {
+        *original = saved;
+    } else {
+        snapshot.prefs.agents.push(saved);
+    }
+    if let Some(model) = app.preferences.agent_models.get(id) {
+        snapshot.prefs.agent_models.insert(id.to_string(), model.clone());
+    } else {
+        snapshot.prefs.agent_models.remove(id);
+    }
+}
+
 /// Close the dialog; `revert`: put back what was there when it opened (Cancel, Esc, ×).
 pub(crate) fn close(app: &mut SolveApp, revert: bool) {
     if let Some(s) = app.prefs_window.snapshot.take()
