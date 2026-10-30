@@ -103,7 +103,8 @@ tiny-skia = { version = "0.12", default-features = false, features = ["std", "si
 toml = "1"
 
 # ui
-egui = "0.37"
+# default_fonts: the built-in Hack is the UI's symbol fallback (#2955); 0.37 no longer turns it on.
+egui = { version = "0.37", features = ["default_fonts"] }
 eframe = { version = "0.37", default-features = false, features = ["persistence"] }
 # Instant/SystemTime that also work in the browser (std panics on wasm32-unknown-unknown).
 web-time = "1"
