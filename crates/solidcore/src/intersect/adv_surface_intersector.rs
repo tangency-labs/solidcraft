@@ -214,6 +214,11 @@ pub struct AdvSurfaceIntersector<'s, 't, O> {
     /// Nesting depth of [`GlobalSolve::solve_branch`] (bounds the recursion on cyclic
     /// tree links).
     solve_depth: usize,
+    /// Not upstream (the fork's `m_vTangentSeeds`, opt-in
+    /// `Kernel::fixes.ssi_tangent_curve_tracer`, WR-75): the UV pairs where
+    /// [`AdvSurfaceIntersector::find_interior_curves`] found the normals (nearly)
+    /// parallel, seeds of the tangential curve pass.
+    pub(crate) tangent_curve_seeds: Vec<[Point2; 2]>,
 }
 
 /// `sm_AddSingDir`: appends `sing_vec` to `dirs[..count]` unless a stored direction
@@ -330,6 +335,7 @@ impl<'s, 't, O: SolutionObject + 't> AdvSurfaceIntersector<'s, 't, O> {
             nodes: [None, None],
             separate_gauss_maps: true,
             solve_depth: 0,
+            tangent_curve_seeds: Vec::new(),
         })
     }
 
@@ -546,6 +552,10 @@ impl<'s, 't, O: SolutionObject + 't> AdvSurfaceIntersector<'s, 't, O> {
                 }
                 if angle_rad * (180.0 / PI) < 5.0 {
                     self.push_tangent_seed(k, &mut tangent_seeds, node1, node2)?;
+                    // (WR-75, opt-in) a seed of the tangential curve pass
+                    if k.fixes.ssi_tangent_curve_tracer {
+                        self.tangent_curve_seeds.push([uv_guess1, uv_guess2]);
+                    }
                     continue;
                 }
             }
@@ -586,6 +596,10 @@ impl<'s, 't, O: SolutionObject + 't> AdvSurfaceIntersector<'s, 't, O> {
                 }
                 if angle_rad * (180.0 / PI) < 2.0 {
                     self.push_tangent_seed(k, &mut tangent_seeds, node1, node2)?;
+                    // (WR-75, opt-in) a seed of the tangential curve pass
+                    if k.fixes.ssi_tangent_curve_tracer {
+                        self.tangent_curve_seeds.push([uv, uv2]);
+                    }
                     continue;
                 }
             }
