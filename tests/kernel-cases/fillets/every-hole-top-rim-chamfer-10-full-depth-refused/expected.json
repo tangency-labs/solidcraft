@@ -1,0 +1,8 @@
+{
+ "sources": [],
+ "what": "the top rim of a hole through a 10 mm plate chamfered 10: its leg would use the hole's whole wall: refused, naming the largest distance that fits",
+ "source": "invariants",
+ "method": "owner rule: a chamfer whose leg runs off the face beside its edge is refused, and a full-width chamfer stays refused (it would replace the wall and turn the bottom rim into the chamfer's edge, changing the user's geometry). The wall is 10 tall, so every distance below 10 fits; the search names the largest at the request's three significant digits (step 0.01): 9.99.",
+ "outcome": "refused",
+ "refusal": "the largest distance that fits is 9.99 mm"
+}
