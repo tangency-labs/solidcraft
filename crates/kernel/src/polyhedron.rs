@@ -925,4 +925,19 @@ mod rim_preflight_tests {
         let faces: Vec<_> = (0..combined.solid.face_iter().count()).collect();
         assert!(rim_without_thickness(&combined, &faces, 2.0, true).is_none());
     }
+
+    /// Robustness seed 6 (#1494): a cylinder joined on a box's side leaves a saddle on the
+    /// cylinder seam; the shell used to refuse that corner.
+    #[test]
+    fn shell_of_a_box_with_a_side_cylinder_opens_at_the_bottom() {
+        let b = crate::box_solid(Vec3::ZERO, Vec3::new(47.5, 45.0, 30.0)).unwrap();
+        let c = crate::cylinder(Vec3::new(47.5, 0.0, 10.0), Vec3::X, 7.5, 30.0).unwrap();
+        let u = crate::boolean(&b, &c, crate::BoolOp::Union).unwrap().unwrap();
+        let before = crate::measure(&u).unwrap().volume;
+        let s = shell(&u, &[Vec3::new(23.75, 22.5, 0.0)], 1.0).expect("shell");
+        assert!(s.validity().is_empty(), "{:?}", s.validity());
+        assert_eq!(s.shell_count(), 1);
+        let vol = crate::measure(&s).unwrap().volume;
+        assert!(vol.is_finite() && vol > 0.0 && vol < before, "before {before}, shell {vol}");
+    }
 }
