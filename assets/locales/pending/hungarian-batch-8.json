@@ -1,0 +1,33 @@
+{
+  "hu": {
+    "browser.calibrate_click_a": "Kattintson a képen az A pontra, vagy adja meg a koordinátáit.",
+    "browser.calibrate_click_b": "Kattintson a képen a B pontra, vagy adja meg a koordinátáit.",
+    "help.sketch.construction_line": "Végtelen szerkesztőegyenest hoz létre két ponton át. Használja a vázlat megtervezéséhez a profilok szétvágása nélkül.",
+    "help.sketch.construction_line.angle": "Végtelen szerkesztőegyenest hoz létre a vázlat X tengelyéhez képest adott szögben. Válassza ki a pontot, és adja meg a szöget, vagy válassza ki az irányát.",
+    "help.sketch.construction_line.bisector": "Válasszon ki két egymást metsző egyenes vázlatvonalat, majd bármelyik szögfelezőt. Az eredmény követi a forrásvonalait.",
+    "help.sketch.construction_line.horizontal": "Végtelen vízszintes szerkesztőegyenest hoz létre egy ponton át. Vízszintes kényszere a későbbi módosítások után is megmarad.",
+    "help.sketch.construction_line.parallel": "Válasszon ki egy egyenes vázlatvonalat, majd helyezzen el egy vele párhuzamos, végtelen szerkesztőegyenest. Másik referencia kiválasztásához kattintson jobb gombbal.",
+    "help.sketch.construction_line.perpendicular": "Válasszon ki egy egyenes vázlatvonalat, majd helyezzen el egy rá merőleges, végtelen szerkesztőegyenest. Másik referencia kiválasztásához kattintson jobb gombbal.",
+    "help.sketch.construction_line.tangent_at": "Érintőt hoz létre egy kör vagy körív pontjában, illetve egy nyitott spline vagy kúpgörbe végpontjában. Válassza ki a görbét, majd az érintési pontját.",
+    "help.sketch.construction_line.tangent_external": "Válasszon ki egy kört vagy körívet, majd egy külső pontot és egy érintőmegoldást. Az előnézetek csak a megrajzolt íven lévő érintési pontokat mutatják.",
+    "help.sketch.construction_line.tangent_two": "Válasszon ki két kört vagy körívet, majd az előnézetben válasszon közös érintőt. Az érintési pontoknak a megrajzolt görbéken kell lenniük.",
+    "help.sketch.construction_line.vertical": "Végtelen függőleges szerkesztőegyenest hoz létre egy ponton át. Függőleges kényszere a későbbi módosítások után is megmarad.",
+    "prefs.persistent_ribbon_pressed": "Az aktív menüszalag-parancsok kiemelése",
+    "prefs.persistent_ribbon_pressed_help": "Kiemeli a menüszalag parancsait, amíg a hatásuk be van kapcsolva. Kapcsolja ki a korábbi semleges megjelenés és parancssúgó megtartásához.",
+    "prefs.sketch_construction_lines": "Bővített szerkesztőegyenes-eszközök",
+    "prefs.sketch_open_look_at": "Vázlat megnyitásakor a nézet a vázlatra fordul",
+    "prefs.sketch_open_look_at_note": "Ki: vázlat létrehozása vagy szerkesztése nem változtatja a nézetet. A Ránézés a vázlatra fordítja a nézetet, amikor szeretné.",
+    "recovery.discard_all": "Összes elvetése",
+    "recovery.discard_all_detail": "Ez a művelet nem vonható vissza.",
+    "recovery.discard_all_title": "{count} automatikus mentés elvetése?",
+    "recovery.discard_all_title_one": "1 automatikus mentés elvetése?",
+    "ui.construction.angle_hint": "Szerkesztőegyenes: kattintson egy pontra, majd adjon meg szöget, vagy válasszon irányt",
+    "ui.construction.bisector_hint": "Szögfelező: válasszon két egymást metsző egyenest, majd a kívánt megoldást",
+    "ui.construction.common_hint": "Közös érintő: válasszon két kört/ívet, majd a kívánt megoldást",
+    "ui.construction.contact_hint": "Érintő: válasszon egy kört/ívet vagy nyitott spline-t/kúpgörbét, majd az érintési pontot (szabadformájú görbék: végpontok)",
+    "ui.construction.external_hint": "Érintő: válasszon egy kört vagy ívet, egy külső pontot, majd a kívánt megoldást",
+    "ui.construction.free_hint": "Szerkesztőegyenes: kattintson két pontra; jobb kattintással újrakezdheti",
+    "ui.construction.point_hint": "Szerkesztőegyenes: kattintson arra a pontra, amelyen át kell haladnia",
+    "ui.construction.reference_hint": "Szerkesztőegyenes: válasszon egy egyenest, majd egy pontot; jobb kattintással módosíthatja a referenciát"
+  }
+}
