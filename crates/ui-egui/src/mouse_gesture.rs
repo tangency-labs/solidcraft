@@ -1321,12 +1321,12 @@ mod tests {
     }
 
     #[test]
-    fn the_right_button_stops_orbiting_only_while_gestures_are_active() {
+    fn mouse_gestures_leave_solidworks_camera_bindings_unchanged() {
         use crate::prefs::{NavButton, nav_mode};
         let none = egui::Modifiers::NONE;
         let mut app = app();
         app.preferences.nav = MOUSE_MODE.into();
-        assert!(nav_mode(&app, NavButton::Right, none).is_some(), "gestures off: the right button orbits as before");
+        assert_eq!(nav_mode(&app, NavButton::Right, none), None, "SolidWorks right drag belongs to menus");
         app.preferences.mouse_gestures.enabled = true;
         assert_eq!(nav_mode(&app, NavButton::Right, none), None, "gestures on: it opens the ring");
         assert_eq!(nav_mode(&app, NavButton::Middle, none), nav_mode(&gesture_app_off(), NavButton::Middle, none), "the other buttons are untouched");

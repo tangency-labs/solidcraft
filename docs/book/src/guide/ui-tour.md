@@ -38,21 +38,20 @@
   selects it (Shift or Ctrl adds), and in a command's dialog it goes to the active selection box.
   Esc or a click elsewhere closes the list. Clicking again on the same spot, with nothing changed
   in between, selects the next thing in that list. The
-  wheel zooms at the cursor, the middle button pans and right-drag orbits freely (the mouse
-  preset in Preferences switches to SolidWorks, Inventor, Alias, Maya, Blender, Tinkercad, OpenSCAD, HFSS or Touchpad style). On a
-  trackpad, pinch zooms and two-finger scroll pans (Navigation › Two-finger scroll pans;
-  off: scroll zooms like the wheel); mouse wheels zoom and the thumb wheel pans sideways.
-  On Linux, pinch needs the native Wayland window system
-  (see [Troubleshooting](troubleshooting.md)).
-  To zoom with vertical two-finger scroll while holding a key, choose the key in Navigation › Zoom with two-finger scroll while holding (Cmd on macOS or Ctrl on Windows/Linux, Alt, or Control). It is off until you choose one.
-  With the **Fusion** preset and two-finger pan enabled, hold **Shift** while scrolling with
-  two fingers to orbit freely instead of panning. No click is needed. Releasing Shift returns
-  to panning, even during the same gesture. Shift does not snap this gesture to standard views;
-  orbit gestures do nothing on flat 2D pages. Other presets keep their existing scroll behaviour.
+  wheel zooms at the cursor, the middle button pans and Shift+middle orbits freely in the default
+  Fusion preset. **Preferences › Navigation** lists each preset's mouse and trackpad gestures.
+  On a trackpad, pinch zooms; Fusion uses two-finger movement to pan and Shift+two-finger
+  movement to orbit, without clicking. Ctrl/Cmd+vertical movement zooms. Turn off
+  **Use preset trackpad gestures** to make vertical movement zoom like the wheel.
+  Mouse thumb wheels pan sideways.
+  On Linux, pinch needs the native Wayland window system (see [Troubleshooting](troubleshooting.md)).
+  Navigation › Zoom with two-finger scroll while holding lets you choose a modifier instead;
+  it is off until you choose one.
   Shift+middle orbits freely
   in the default and Inventor presets. In every preset, Ctrl+left drag (Cmd on macOS) that starts
-  on empty space orbits; a Ctrl+click still adds to the selection. Shift+right-drag snaps to the nearest standard or
-  diagonal view; Shift does not request snapping when the preset already requires it to orbit.
+  on empty space orbits; a Ctrl+click still adds to the selection. Adding Shift to
+  an orbit snaps to the nearest standard or diagonal view when the preset does
+  not already require Shift for that orbit or use it to pan.
 
   Enable **Preferences → Navigation → Free orbit** to rotate the mouse and 3D mouse continuously
   through both poles, preserving roll. During an orbit drag, Shift snaps the view direction and
@@ -67,7 +66,6 @@
   preset orbits on a right drag. Off, a right drag leaves the camera alone and the right button
   only opens the context menu. Picking the SolidWorks preset turns it off and sets Middle
   double-click to Fit; both can be changed back afterwards.
-
   **Mouse gestures** (Preferences › Navigation, off by default) work with the SolidWorks mouse preset
   only (the wheel orbits, Ctrl + wheel pans) and take over the right button, which then no longer
   orbits: hold it and move the pointer 4 pt to open a ring of tools (280 pt inside, 350 pt outside), even

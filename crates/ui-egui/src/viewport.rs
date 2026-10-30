@@ -176,6 +176,8 @@ pub struct ViewportState {
     pub orbit_pivot: Option<Vec3>,
     /// The orbit drag under way, summed from where it began (see [`crate::navigation::orbit`]).
     pub orbit_from: Option<crate::navigation::OrbitFrom>,
+    /// The button holding a free orbit, so adding Shift can snap the ongoing drag.
+    pub(crate) orbit_button: Option<crate::prefs::NavButton>,
     /// Continuous orbit: the view turns about the vertical until the next click or key.
     pub spin: bool,
     /// The 3D mouse's motion this frame, for the page showing the camera to apply with what its
@@ -4127,8 +4129,22 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     }
     let input =
         if flat { crate::dialogs_sheet::navigate(app, ui, rect, &resp) } else { crate::navigation::handle(app, ui, rect, &resp, NavCaps::MODEL) };
-    let CameraInput { hover, scroll, mods, middle, secondary_down, primary_down, primary_pressed, inside, axes, pinch, pan, primary_nav, mode } =
-        input;
+    let CameraInput {
+        hover,
+        scroll,
+        mods,
+        middle,
+        secondary_down,
+        primary_down,
+        primary_pressed,
+        inside,
+        axes,
+        pinch,
+        pan,
+        trackpad_orbit,
+        primary_nav,
+        mode,
+    } = input;
     app.viewport.physical_scale = ui.ctx().pixels_per_point();
     // Suppress-snap chord and manipulator-free prefs; Shift midpoint targeting while sketching.
     // Preview reselect uses Primary but is skipped while a manipulator drag is under way.
@@ -4167,6 +4183,8 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     let navigating = scroll != 0.0
         || pinch != 1.0
         || pan != egui::Vec2::ZERO
+        || trackpad_orbit
+        || app.viewport.trackpad_gesture
         || middle
         || secondary_down
         || (app.viewport.primary_nav.is_some() && primary_down)
@@ -8290,7 +8308,7 @@ mod tests {
             vec![Event::PointerMoved(p + vec2(30.0, 20.0))],
             vec![button(p + vec2(30.0, 20.0), false)],
         ];
-        for nav in [crate::prefs::NAV_PRESETS[0].id, crate::prefs::TOUCHPAD_NAV] {
+        for (nav, orbits) in [("fusion", false), (crate::prefs::TOUCHPAD_NAV, true)] {
             for (frames, is_click) in clicks.iter().map(|f| (f, true)).chain([(&drag, false)]) {
                 let ctx = crate::fonts::test_context();
                 let mut app = hover_app(false);
@@ -8311,7 +8329,11 @@ mod tests {
                     assert_eq!(app.cam, before, "{nav}: a right-click does not orbit");
                 } else {
                     assert!(app.viewport.context_menu.is_none(), "{nav}: a right drag opens no menu");
-                    assert_ne!(app.cam.yaw, before.yaw, "{nav}: a right drag still orbits");
+                    if orbits {
+                        assert_ne!(app.cam.yaw, before.yaw, "{nav}: a right drag still orbits");
+                    } else {
+                        assert_eq!(app.cam, before, "{nav}: a right drag leaves the camera alone");
+                    }
                 }
             }
         }
@@ -9453,6 +9475,149 @@ mod tests {
         assert_eq!(h.app.cam, after);
     }
 
+    fn two_finger_gesture(h: &mut crate::scenario::Harness, delta: egui::Vec2, modifiers: egui::Modifiers) {
+        // A separate swipe, rather than the momentum bracket sent as the last one ends.
+        h.frames(8);
+        for phase in [egui::TouchPhase::Start, egui::TouchPhase::Move, egui::TouchPhase::End] {
+            h.app.synthetic.push(egui::Event::ModifiersChanged(modifiers));
+            h.app.synthetic.push(egui::Event::MouseWheel { unit: egui::MouseWheelUnit::Point, delta, modifiers, phase });
+            h.frame();
+        }
+    }
+
+    #[test]
+    fn trackpad_presets_separate_pan_orbit_and_zoom_without_editing_the_design() {
+        for (preset, shift_orbits) in [("fusion", true), ("blender", false), ("rhino", false), ("sketchup", false)] {
+            let mut h = crate::scenario::Harness::new();
+            h.call("ui.prefs", json!({"nav":preset,"zoom_to_cursor":false}));
+            h.call("ui.move", json!({"x":800,"y":500}));
+            let undo = h.app.session.undo.len();
+            for shift in [false, true] {
+                let before = h.app.cam;
+                two_finger_gesture(&mut h, vec2(30.0, 20.0), egui::Modifiers { shift, ..Default::default() });
+                if shift == shift_orbits {
+                    assert!((h.app.cam.yaw - before.yaw - 0.24).abs() < 1e-6, "{preset}: two-finger orbit");
+                    assert_eq!(h.app.cam.target, before.target, "{preset}: orbit must not pan");
+                } else {
+                    assert_ne!(h.app.cam.target, before.target, "{preset}: two-finger pan");
+                    assert_eq!(h.app.cam.back(), before.back(), "{preset}: pan must not orbit");
+                }
+                assert_eq!(h.app.cam.distance, before.distance, "{preset}: movement must not also zoom");
+            }
+            let before = h.app.cam;
+            h.app.synthetic.push(egui::Event::Zoom(1.25));
+            h.frame();
+            assert!((h.app.cam.distance - before.distance / 1.25).abs() < 1e-6, "{preset}: pinch zoom");
+            let before = h.app.cam;
+            two_finger_gesture(&mut h, vec2(60.0, -40.0), egui::Modifiers { command: true, mac_cmd: true, ..Default::default() });
+            assert!((h.app.cam.distance - before.distance * 0.06_f64.exp()).abs() < 1e-6, "{preset}: Cmd+vertical movement zooms");
+            assert_eq!(h.app.cam.target, before.target);
+            assert_eq!(h.app.cam.back(), before.back());
+            let stopped = h.app.cam;
+            h.frames(60);
+            assert_eq!(h.app.cam, stopped, "{preset}: no smoothing tail after gestures");
+            assert_eq!(h.app.session.undo.len(), undo, "{preset}: navigation must not edit the design");
+        }
+    }
+
+    #[test]
+    fn trackpad_cursor_orbit_keeps_its_pivot_between_events() {
+        let mut h = crate::scenario::Harness::new();
+        h.call("solid.box", json!({"length":40,"width":30,"height":20}));
+        h.call("ui.prefs", json!({"nav":"fusion","orbit_around":"cursor"}));
+        let rect = h.app.viewport.rect.unwrap();
+        let at = projection(&h.app, rect).to_screen(h.app.cam.target).unwrap();
+        h.call("ui.move", json!({"x":at.x,"y":at.y}));
+        let scroll =
+            |phase| egui::Event::MouseWheel { unit: egui::MouseWheelUnit::Point, delta: vec2(12.0, 8.0), modifiers: egui::Modifiers::SHIFT, phase };
+        for phase in [egui::TouchPhase::Start, egui::TouchPhase::Move] {
+            h.app.synthetic.push(scroll(phase));
+            h.frame();
+        }
+        let pivot = h.app.viewport.orbit_pivot;
+        assert!(pivot.is_some());
+        h.frames(2);
+        assert_eq!(h.app.viewport.orbit_pivot, pivot, "repaints between events keep the cursor anchor");
+        h.app.synthetic.push(scroll(egui::TouchPhase::Move));
+        h.frame();
+        assert_eq!(h.app.viewport.orbit_pivot, pivot, "the next event uses the same anchor");
+        h.app.synthetic.push(scroll(egui::TouchPhase::End));
+        h.frame();
+        assert!(h.app.viewport.orbit_pivot.is_none(), "ending the gesture releases the anchor");
+    }
+
+    #[test]
+    fn mouse_presets_route_modified_drags_without_editing_the_design() {
+        for (preset, button, shift, ctrl, mode) in [
+            ("solidworks", "middle", true, false, NavMode::Zoom),
+            ("solidworks", "middle", false, true, NavMode::Pan),
+            ("blender", "middle", true, false, NavMode::Pan),
+            ("onshape", "right", false, true, NavMode::Pan),
+            ("rhino", "right", true, false, NavMode::Pan),
+            ("sketchup", "middle", true, false, NavMode::Pan),
+            ("nx", "middle", false, true, NavMode::Zoom),
+        ] {
+            let mut h = crate::scenario::Harness::new();
+            h.call("ui.prefs", json!({"nav":preset,"zoom_to_cursor":false}));
+            let before = h.app.cam;
+            let undo = h.app.session.undo.len();
+            h.call("ui.drag", json!({"x0":800,"y0":500,"x1":880,"y1":520,"button":button,"shift":shift,"ctrl":ctrl}));
+            match mode {
+                NavMode::Orbit => {
+                    assert_ne!(h.app.cam.back(), before.back(), "{preset}: modified drag must orbit");
+                    assert_eq!(h.app.cam.target, before.target);
+                    assert_eq!(h.app.cam.distance, before.distance);
+                }
+                NavMode::Pan => {
+                    assert_ne!(h.app.cam.target, before.target, "{preset}: modified drag must pan");
+                    assert_eq!(h.app.cam.back(), before.back());
+                    assert_eq!(h.app.cam.distance, before.distance);
+                }
+                NavMode::Zoom => {
+                    assert!((h.app.cam.distance - before.distance * 0.2_f64.exp()).abs() < 1e-6, "{preset}: modified drag must zoom");
+                    assert_eq!(h.app.cam.target, before.target);
+                    assert_eq!(h.app.cam.back(), before.back());
+                }
+            }
+            assert_eq!(h.app.session.undo.len(), undo);
+            assert!(h.app.session.selection.is_empty() && h.app.viewport.boxsel.is_none());
+        }
+    }
+
+    #[test]
+    fn catia_and_nx_button_chords_navigate_without_selecting() {
+        for (preset, second, orbit) in [
+            ("catia", egui::PointerButton::Primary, true),
+            ("catia", egui::PointerButton::Secondary, true),
+            ("nx", egui::PointerButton::Secondary, false),
+        ] {
+            let ctx = crate::fonts::test_context();
+            let mut app = hover_app(false);
+            app.preferences.nav = preset.into();
+            let start = pos2(300.0, 300.0);
+            hover_frame(&mut app, &ctx, vec![egui::Event::PointerMoved(start)]);
+            let before = app.cam;
+            hover_frame(
+                &mut app,
+                &ctx,
+                vec![
+                    egui::Event::PointerButton { pos: start, button: egui::PointerButton::Middle, pressed: true, modifiers: egui::Modifiers::NONE },
+                    egui::Event::PointerButton { pos: start, button: second, pressed: true, modifiers: egui::Modifiers::NONE },
+                ],
+            );
+            hover_frame(&mut app, &ctx, vec![egui::Event::PointerMoved(start + vec2(30.0, 20.0))]);
+            if orbit {
+                assert!((app.cam.yaw - before.yaw - 0.24).abs() < 1e-6, "{preset}: chord orbits");
+                assert_eq!(app.cam.target, before.target);
+            } else {
+                assert_ne!(app.cam.target, before.target, "{preset}: chord pans");
+                assert_eq!(app.cam.back(), before.back());
+            }
+            assert_eq!(app.cam.distance, before.distance);
+            assert!(app.session.selection.is_empty() && app.viewport.boxsel.is_none());
+        }
+    }
+
     #[test]
     fn trackpad_zoom_modifier_zooms_without_pan_or_tail() {
         use crate::prefs::TrackpadZoomModifier as Z;
@@ -9779,10 +9944,10 @@ mod tests {
     }
 
     /// #7327: macOS sends the inertia after the fingers lift as its own scroll bracket, right after
-    /// the fingers' one, with the modifiers held at the time. Releasing Shift while an orbit coasts
-    /// (or pressing it while a pan coasts) ends the coast instead of carrying it into the other mode.
+    /// the fingers' one, with the modifiers held at the time. Switching between pan, orbit and zoom
+    /// ends the coast instead of carrying it into the other mode.
     #[test]
-    fn fusion_trackpad_inertia_stops_when_shift_changes() {
+    fn fusion_trackpad_inertia_stops_when_navigation_mode_changes() {
         use egui::{Modifiers, TouchPhase::*};
         let mut h = crate::scenario::Harness::new();
         h.app.preferences.nav = "fusion".into();
@@ -9793,7 +9958,12 @@ mod tests {
             h.app.synthetic.push(gesture(phase, modifiers));
             h.frame();
         };
-        for (held, other) in [(Modifiers::SHIFT, Modifiers::NONE), (Modifiers::NONE, Modifiers::SHIFT)] {
+        for (held, other) in [
+            (Modifiers::SHIFT, Modifiers::NONE),
+            (Modifiers::NONE, Modifiers::SHIFT),
+            (Modifiers::CTRL, Modifiers::NONE),
+            (Modifiers::NONE, Modifiers::CTRL),
+        ] {
             // The fingers swipe and lift; the coast starts in the next frame and keeps their mode.
             for phase in [Start, Move, Move, End, Start, Move] {
                 play(&mut h, phase, held);
@@ -9841,7 +10011,7 @@ mod tests {
     }
 
     #[test]
-    fn shift_trackpad_orbit_preserves_other_presets_and_legacy_scroll() {
+    fn shift_trackpad_follows_presets_and_can_be_disabled() {
         for preset in crate::prefs::NAV_PRESETS.iter().map(|preset| preset.id) {
             for trackpad_pan in [true, false] {
                 let mut h = crate::scenario::Harness::new();
@@ -9863,9 +10033,11 @@ mod tests {
                     assert_ne!(h.app.cam.back(), before.back());
                 } else {
                     assert_eq!(h.app.cam.back(), before.back(), "{preset}, pan={trackpad_pan}: must not orbit");
-                    if h.app.preferences.trackpad_pans() {
+                    if trackpad_pan && matches!(preset, "blender" | "rhino" | "sketchup") {
                         assert_ne!(h.app.cam.target, before.target, "{preset}: Shift still pans");
                         assert_eq!(h.app.cam.half_height(), before.half_height());
+                    } else {
+                        assert_ne!(h.app.cam.half_height(), before.half_height(), "{preset}: vertical movement zooms");
                     }
                 }
             }
@@ -10626,6 +10798,7 @@ mod tests {
             assert!((h.app.cam.pitch - expected.pitch).abs() < 1e-6, "{preset}: {:?}", h.app.cam);
             assert_eq!(h.app.cam.target, before.target);
             assert_eq!(h.app.cam.distance, before.distance);
+            h.app.preferences.nav = "onshape".into();
             h.call("ui.view", json!({"view":"front"}));
             h.call("ui.drag", json!({"x0":800,"y0":500,"x1":1020,"y1":500,"button":"right","shift":true,"steps":40}));
             assert!((h.app.cam.yaw - std::f64::consts::FRAC_PI_2).abs() < 1e-6, "{preset}: {:?}", h.app.cam);

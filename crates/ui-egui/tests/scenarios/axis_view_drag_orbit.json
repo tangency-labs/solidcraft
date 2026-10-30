@@ -1,6 +1,12 @@
 [
   {
-    "note": "Viewport right-drag orbits freely; holding Shift snaps after accumulated motion."
+    "note": "Onshape right-drag orbits freely; holding Shift snaps after accumulated motion."
+  },
+  {
+    "call": "ui.prefs",
+    "params": {
+      "nav": "onshape"
+    }
   },
   {
     "call": "ui.view",
