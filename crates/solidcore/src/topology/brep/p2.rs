@@ -58,6 +58,11 @@
 //!   exists, so upstream's `SmObjDelete` guards have nothing to undo. The merged end
 //!   shell is deleted ([`shell::destroy`]); a deleted vertex shell's vertex use stays in
 //!   the arena, unlinked.
+//! - Opt-in (WR-585, fork tangency-labs/smlib@be8ac73):
+//!   [`UpstreamFixes::boolean_wire_edge_keeps_faceuse_shell`](crate::kernel::UpstreamFixes::boolean_wire_edge_keeps_faceuse_shell)
+//!   makes `MakeEdgeTopology`, joining a wire start shell to a faceuse end shell, move
+//!   the wires into the faceuse shell, put it in the wire shell's place in the region
+//!   and delete the wire shell, instead of moving every face use into the wire shell.
 //! - `MateLaminaEdgeToSurface` checks for the face's surface before the neighbour
 //!   (lamina / seam) checks; upstream binds the surface only for `IsSeam`, so a face
 //!   without surface there ends in the distance loop instead of
@@ -1967,16 +1972,34 @@ pub fn make_edge_topology(
     }
 
     if start_shell != end_shell {
+        let mut remove_end = true;
         if shell_is_vertex_shell(b, end_shell)? {
             let vu = shell_vertexuse(b, end_shell)?;
             remove_vertexuse_from_vertex(b, vu)?;
             shell_clear_members(b, end_shell)?;
+        } else if k.fixes.boolean_wire_edge_keeps_faceuse_shell
+            && b.shell(start_shell)?.is_wire_shell()
+            && b.shell(end_shell)?.is_faceuse_shell()
+        {
+            // WR-585 (opt-in, fork tangency-labs/smlib@be8ac73): the faceuse shell takes
+            // the wire shell's wires and its place in the region, and the wire shell
+            // goes, instead of moving every face use into the wire shell.
+            let reg = shell_region(b, start_shell)?.ok_or(null_deref("shell without region"))?;
+            shell_transfer_children(k, b, start_shell, end_shell)?;
+            shell::region_remove_shell(b, reg, end_shell)?;
+            region_insert_shell_after(b, reg, end_shell, start_shell)?;
+            shell::region_remove_shell(b, reg, start_shell)?;
+            shell::destroy(k, b, start_shell, env)?;
+            start_shell = end_shell;
+            remove_end = false;
         } else {
             shell_transfer_children(k, b, end_shell, start_shell)?;
         }
-        region_remove_shell(b, end_shell)?;
-        // delete pEndShell (SmBrep.cpp:13724): ~SmShell, ported as shell::destroy
-        shell::destroy(k, b, end_shell, env)?;
+        if remove_end {
+            region_remove_shell(b, end_shell)?;
+            // delete pEndShell (SmBrep.cpp:13724): ~SmShell, ported as shell::destroy
+            shell::destroy(k, b, end_shell, env)?;
+        }
     }
 
     let (e, eu) = link_new_wire_edge(b, start, end)?;
@@ -2025,6 +2048,27 @@ fn face_create_uv_trim_curves(
 /// The shell's owner (`m_pListOwner`) is already the region.
 fn region_post_insert_shell(b: &mut Brep, r: RegionId, s: ShellId) -> Result<()> {
     b.region_mut(r)?.shells.push(s);
+    b.shell_mut(s)?.region = Some(r);
+    Ok(())
+}
+
+/// `pRegion->InsertAfter(pShell, pAfter)` (`SmOwningTopology::InsertAfter`): puts
+/// `s` into the region's shell list just after `after` and makes the region its owner
+/// (WR-585's opt-in only; not in the pinned upstream's `MakeEdgeTopology`).
+///
+/// # Errors
+/// `InvalidInput` when `after` is not in the region's list, and dangling ids.
+fn region_insert_shell_after(b: &mut Brep, r: RegionId, s: ShellId, after: ShellId) -> Result<()> {
+    b.shell(s)?;
+    let list = &mut b.region_mut(r)?.shells;
+    let at = list
+        .iter()
+        .position(|&x| x == after)
+        .ok_or(SolidError::invalid_input(
+            OP,
+            "shell to insert after is not in the region",
+        ))?;
+    list.insert(at + 1, s);
     b.shell_mut(s)?.region = Some(r);
     Ok(())
 }

@@ -1430,6 +1430,9 @@ fn enable_fix(k: &mut Kernel, name: &str) -> Result<(), String> {
         "cone_parallel_line_midpoint" => &mut k.fixes.cone_parallel_line_midpoint,
         "analytic_copy_keeps_parameterization" => &mut k.fixes.analytic_copy_keeps_parameterization,
         "precise_properties_body_length_scale" => &mut k.fixes.precise_properties_body_length_scale,
+        "boolean_wire_edge_keeps_faceuse_shell" => {
+            &mut k.fixes.boolean_wire_edge_keeps_faceuse_shell
+        }
         "boolean_new_face_closure_both_sides" => &mut k.fixes.boolean_new_face_closure_both_sides,
         "precise_properties_split_at_surface_knots" => {
             &mut k.fixes.precise_properties_split_at_surface_knots
