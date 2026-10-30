@@ -1,0 +1,8 @@
+{
+ "sources": [],
+ "what": "a 5 mm deep pocket's rim edges chamfered 5.5: the legs would run off the walls over the floor: refused, naming the largest distance that fits",
+ "source": "invariants",
+ "method": "owner rule: a chamfer whose leg runs off the face beside its edge over another face is refused, naming the largest size that fits, and a full-width chamfer stays refused. The walls are 5 deep, so every distance below 5 fits (every-chamfer-pocket-rim-4-9-fits) and 5 does not; the search names the largest at the request's three significant digits (step 0.001): 4.999.",
+ "outcome": "refused",
+ "refusal": "the largest distance that fits is 4.999 mm"
+}
