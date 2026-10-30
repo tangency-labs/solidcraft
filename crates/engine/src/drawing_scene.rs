@@ -26,6 +26,7 @@ use solidcraft_doc::drawing::view::ResolvedView;
 use solidcraft_doc::drawing::{Drawing, Sheet};
 use solidcraft_doc::drawing_view::TangentEdges;
 use solidcraft_doc::{DocError, ModelState, ids};
+use solidcraft_geom::paper::text::TextRun;
 use solidcraft_geom::paper::{Group, Item, MAX_RECORDS, Scene};
 use solidcraft_geom::{Loop2, Region2, Seg2, Vec2};
 
@@ -169,10 +170,10 @@ fn assemble<D: Borrow<Drawn>>(record: &Sheet, views: impl Iterator<Item = (u64, 
         None => Vec::new(),
     };
     let mut records = border.iter().map(Group::records).fold(0usize, usize::saturating_add);
-    let mut scene = Scene { size_mm, groups: border };
+    let mut scene = Scene::new(size_mm, border);
     // Each view's group is counted onto the scene and checked alone on the sheet first, so one past
     // the limits leaves out only itself, and checking costs one pass over each group.
-    let mut alone = Scene { size_mm, groups: Vec::with_capacity(1) };
+    let mut alone = Scene::new(size_mm, Vec::with_capacity(1));
     let mut states = Vec::new();
     for (view, centre, drawn) in views {
         let drawn: &Drawn = drawn.borrow();
@@ -218,6 +219,7 @@ fn moved(group: &Group, by: Vec2) -> Group {
     let items = group.items.iter().map(|item| match item {
         Item::Stroke { path, closed, width_mm } => Item::Stroke { path: segs(path), closed: *closed, width_mm: *width_mm },
         Item::Fill { region } => Item::Fill { region: Region2 { outer: ring(&region.outer), holes: region.holes.iter().map(ring).collect() } },
+        Item::Text(run) => Item::Text(TextRun { origin: run.origin + by, ..run.clone() }),
     });
     Group { object: group.object, kind: group.kind, items: items.collect() }
 }

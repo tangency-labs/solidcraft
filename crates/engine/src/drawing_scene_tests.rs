@@ -256,7 +256,7 @@ fn the_provider_draws_a_view_a_step_until_it_is_the_built_scene() {
     let first = extract(&mut s, sheet).unwrap();
     assert_eq!(
         (bytes(&first.scene), first.stale.as_slice(), first.views.len()),
-        (bytes(&Scene { size_mm: whole.size_mm, groups: whole.groups[..3].to_vec() }), &order[..], 0)
+        (bytes(&Scene::new(whole.size_mm, whole.groups[..3].to_vec())), &order[..], 0)
     );
     let again = extract(&mut s, sheet).unwrap();
     assert!(Arc::ptr_eq(&again.scene, &first.scene) && again.generation == first.generation);
@@ -470,4 +470,23 @@ fn a_change_of_reference_parts_redraws_the_views() {
     // A saved view takes the setting: the reference part now covers what is under it.
     run(&mut s, "drawing.view.edit", json!({"view": ids::encode(top), "set": {"reference_hides_model": true}}));
     assert_ne!(bytes(&settled(&mut s, sheet).scene), bytes(&after.scene));
+}
+
+/// A run of text moves with its group: its start moves, and nothing else changes.
+#[test]
+fn text_moves_with_its_group() {
+    let run = TextRun {
+        font: [0; 32],
+        scale: 0.005,
+        origin: Vec2::new(1.0, 2.0),
+        angle: 0.5,
+        slant: 0.2,
+        glyphs: vec![],
+        text: String::new(),
+        clusters: vec![],
+        rtl: false,
+    };
+    let group = Group { object: 1, kind: ObjectKind::View, items: vec![Item::Text(run.clone())] };
+    let Item::Text(placed) = &moved(&group, Vec2::new(10.0, 20.0)).items[0] else { panic!("a run") };
+    assert_eq!(placed, &TextRun { origin: Vec2::new(11.0, 22.0), ..run });
 }

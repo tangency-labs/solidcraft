@@ -564,7 +564,7 @@ outer
             Item::Stroke { path: vec![Seg2::Arc { center: p(50.0, 50.0), radius: 10.0, start: 0.0, sweep: 4.0 }], closed: false, width_mm: 0.35 },
             Item::Fill { region: Region2 { outer: border, holes: vec![] } },
         ];
-        let scene = Scene { size_mm: p(420.0, 297.0), groups: vec![Group { object: 7, kind: ObjectKind::DrawingBorder, items }] };
+        let scene = Scene::new(p(420.0, 297.0), vec![Group { object: 7, kind: ObjectKind::DrawingBorder, items }]);
         let json = serde_json::to_vec(&scene).unwrap();
         let write = |b: &[u8]| -> Option<usize> {
             let scene: Scene = serde_json::from_slice(b).ok()?;
