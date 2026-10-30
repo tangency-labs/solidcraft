@@ -946,6 +946,10 @@ fn a_copy_with_history_undoes_like_the_session_it_copies() {
 #[test]
 fn hostile_params_never_panic() {
     let keys = [
+        "effort",
+        "velocity",
+        "damping",
+        "friction",
         "plane",
         "offset",
         "name",

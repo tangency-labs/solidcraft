@@ -10,7 +10,7 @@ use serde_json::{Value, json};
 use solidcore_record::Vec3;
 use solidcraft_doc::expr::{self, Kind};
 use solidcraft_doc::joints::cam::{self, Cam, CamProfile, Follower};
-use solidcraft_doc::joints::{self, Coupling, Joint, JointExprs, JointKind, JointOrigin, MotionLink, NamedOrigin, Size, Snap, XRef};
+use solidcraft_doc::joints::{self, Coupling, Joint, JointDynamics, JointExprs, JointKind, JointOrigin, MotionLink, NamedOrigin, Size, Snap, XRef};
 use solidcraft_geom::Aabb3;
 
 use super::CommandSpec;
@@ -84,6 +84,13 @@ pub static COMMANDS: &[CommandSpec] = &[
         "a: the cam's joint (revolute); b: the follower's joint, a slider (a translating follower) or a revolute (an oscillating one),          b driven by a; profile: {sketch: id|name, index?: the profile (default: the largest)} | {edges: [[x,y,z]…] (points on edges of          the cam's bodies forming one closed loop, world), occurrence?}: the cam's outline, in a plane square to its axis, read again          whenever the design changes; follower?: knife|roller|flat (default knife; flat: a face square to a slider's line); radius?: the          roller's radius (mm, an expression or {circle: [x,y,z], occurrence?}: the roller's round face, which is its tip too); tip?: a          joint origin where the follower touches: its knife's point or its roller's centre, such as {circle: [x,y,z]} on the roller          (needed for an oscillating follower; a translating one's line runs through it, by default along its slider's axis); flip?: bool (ride the cam from the other side          than the one the follower is on now); link?: index (replace that motion link) → link, lift: {min, max, rise, unit} (b's travel          over a turn of the cam), reverse (the side it rides from), follower_offset (mm: how far a translating follower's line passes          from the cam's axis); b keeps where it is, also when the link replaces another (at the current pose)",
     ),
     CommandSpec::new("joint.limits", "Joint Limits", limits).icon("joint").params("joint; index?: value index (default 0); min?, max? (omit both to clear)"),
+    CommandSpec::new("joint.dynamics", "Joint Dynamics", crate::checked!("joint.dynamics", dynamics))
+        .icon("joint")
+        .contract(&DYNAMICS_CONTRACT)
+        .output(crate::schema::output_schema_for::<crate::schema::joints::JointDynamicsResult>)
+        .params(
+            "joint; index?: value index (default 0); effort?: N or N m; velocity?: m/s or rad/s; damping?: N s/m or N m s/rad; friction?: N or N m (omit all to clear): what a simulator reads, written by URDF export; the joint solver does not use them",
+        ),
     CommandSpec::new("joint.edit", "Edit Joint", crate::checked!("joint.edit", edit))
         .icon("edit")
         .contract(&EDIT_CONTRACT)
@@ -245,6 +252,7 @@ pub(crate) fn named_values(j: &Joint, q: &[f64]) -> Vec<Value> {
         .map(|(i, n)| {
             let (v, angle) = (q.get(i).copied().unwrap_or(0.0), j.kind.is_angle(i));
             json!({"name": n, "value": expr::round_reported(if angle { v.to_degrees() } else { v }), "unit": if angle { "deg" } else { "mm" },
+                "dynamics": j.dynamics.get(i).copied().flatten(),
                 "limits": j.limits.get(i).copied().flatten().map(|(a, b)| if angle { [expr::round_reported(a.to_degrees()), expr::round_reported(b.to_degrees())] } else { [expr::round_reported(a), expr::round_reported(b)] })})
         })
         .collect()
@@ -947,6 +955,7 @@ fn joint(s: &mut Session, p: &Value) -> Result<Value> {
         angle: angle.unwrap_or(0.0),
         suppressed: false,
         exprs: JointExprs { offset: typed(p.get("offset")), angle: typed(p.get("angle")), values: value_exprs(p) },
+        dynamics: Vec::new(),
     };
     // No angle given: B keeps its turn about the joint's axis where a half turn would otherwise
     // come only from how its origin's x was chosen. (An angle relation's angle is its tilt.)
@@ -992,6 +1001,7 @@ fn as_built(s: &mut Session, p: &Value) -> Result<Value> {
         angle: 0.0,
         suppressed: false,
         exprs: Default::default(),
+        dynamics: Vec::new(),
     };
     add_joint(s, j, p)
 }
@@ -1582,6 +1592,41 @@ fn limits(s: &mut Session, p: &Value) -> Result<Value> {
     Ok(sol_json(&sol, p))
 }
 
+const DYNAMICS_CONTRACT: crate::schema::TypedContract<crate::schema::joints::JointDynamicsParams> = crate::schema::TypedContract::new();
+
+/// Set or clear what a simulator reads for one joint value.
+fn dynamics(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "joint.dynamics";
+    let id = joint_id(s, p.get("joint"), cmd)?;
+    let i = num(p, "index").unwrap_or(0.0).max(0.0) as usize;
+    let kind = s.doc.assembly.joints.iter().find(|j| j.id == id).map(|j| j.kind).ok_or_else(|| bad(cmd, "joint"))?;
+    if i >= kind.dofs().len() {
+        return Err(bad(cmd, "no such value"));
+    }
+    let given = |k: &str| match p.get(k) {
+        None | Some(Value::Null) => Ok(None),
+        Some(_) => num(p, k).map(Some).ok_or_else(|| bad(cmd, format!("`{k}` must be a number"))),
+    };
+    let asked = JointDynamics { effort: given("effort")?, velocity: given("velocity")?, damping: given("damping")?, friction: given("friction")? };
+    if asked.sane() != asked {
+        return Err(bad(
+            cmd,
+            format!("effort and velocity must be above 0, damping and friction 0 or more, and none above {}", joints::MAX_DYNAMICS),
+        ));
+    }
+    let slot = (asked != JointDynamics::default()).then_some(asked);
+    let doc = s.doc_mut();
+    let Some(j) = doc.assembly.joints.iter_mut().find(|j| j.id == id) else { return Err(bad(cmd, "joint")) };
+    j.dynamics.resize(kind.dofs().len(), None);
+    if let Some(d) = j.dynamics.get_mut(i) {
+        *d = slot;
+    }
+    if j.dynamics.iter().all(Option::is_none) {
+        j.dynamics.clear();
+    }
+    Ok(json!({"joint": id, "index": i, "effort": asked.effort, "velocity": asked.velocity, "damping": asked.damping, "friction": asked.friction}))
+}
+
 fn edit(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "joint.edit";
     let id = joint_id(s, p.get("joint"), cmd)?;
@@ -1618,6 +1663,7 @@ fn edit(s: &mut Session, p: &Value) -> Result<Value> {
         j.kind = k;
         j.values.resize(k.dofs().len(), 0.0);
         j.limits.resize(k.dofs().len(), None);
+        j.dynamics.truncate(k.dofs().len());
         j.exprs.values.truncate(k.dofs().len());
         // A value that changes unit with the type (a slide becoming a turn) drops its expression,
         // which would no longer work out and leave the joint out of the solve.

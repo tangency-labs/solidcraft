@@ -23,6 +23,7 @@ fn joint(id: u64, a: u64, b: u64) -> Joint {
         angle: 0.1,
         suppressed: false,
         exprs: Default::default(),
+        dynamics: Vec::new(),
     }
 }
 

@@ -30,11 +30,20 @@ way, the error names the files already written and the one that failed.
 | Parameter | Default | Meaning |
 |---|---|---|
 | `mesh_prefix` | none | Put before each mesh file name. Leave it empty for loaders that resolve against the URDF's folder (Isaac Sim, PyBullet, MuJoCo, yourdfpy). RViz and other ROS tools need `package://<pkg>/meshes/` or an absolute folder. |
-| `effort` | 1000 | Joint effort limit, in N (sliding) or N m (turning). |
-| `velocity` | 10 | Joint velocity limit, in m/s or rad/s. |
+| `effort` | 1000 | Effort limit for joint values with none saved, in N (sliding) or N m (turning). |
+| `velocity` | 10 | Velocity limit for joint values with none saved, in m/s or rad/s. |
 
-URDF requires `effort` and `velocity` on every moving joint. When they are not given, the
-defaults are written and a warning says so. A value that is not a positive number is refused.
+URDF requires `effort` and `velocity` on every moving joint. A joint's own values come first, then
+these parameters, then the defaults, with a warning naming the joints that used them. A value that
+is not a positive number is refused.
+
+## Joint dynamics
+
+`joint.dynamics {joint, index?, effort?, velocity?, damping?, friction?}` saves what a simulator
+reads for one joint value, in the design, in SI units: effort in N or N m, velocity in m/s or rad/s,
+damping in N s/m or N m s/rad, friction in N or N m. Editing a joint shows them under **Dynamics**.
+The joint solver does not use them. `damping` and `friction` are written as `<dynamics>` only where
+set. In a chain, each step uses the values of the joint value it follows.
 
 ## Links
 
@@ -114,4 +123,3 @@ the copies move together, which a URDF could only express with `<mimic>`.) The e
 - Simplified collision shapes: the collision mesh is the visual mesh.
 - SDF and MJCF export, and URDF import.
 - Joint motion inside the copies of a component placed several times.
-- Drive dynamics: `effort` and `velocity` are limits you choose.
