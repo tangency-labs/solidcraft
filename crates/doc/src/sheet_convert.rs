@@ -1024,7 +1024,7 @@ pub fn convert_body(
     let made: Vec<usize> = (0..sh.flanges.len()).collect();
     let mut notes = Vec::new();
     for &i in &made {
-        notes.extend(sh.relieve_bend_ends(i, (false, false)));
+        notes.extend(sh.relieve_bend_ends(i, (false, false), false));
     }
     let corners = sh.corners(&made);
     let mut closed = Vec::with_capacity(corners.len());
