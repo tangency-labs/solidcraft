@@ -852,7 +852,8 @@ pub fn tabs(app: &mut SolveApp, ui: &mut egui::Ui, r: Rect, x0: f32, x1: f32) {
         if resp.secondary_clicked() {
             menu = Some((i, ui.ctx().pointer_interact_pos().unwrap_or(tr.left_bottom())));
         }
-        if xresp.on_hover_text("Close").clicked() {
+        // A middle click closes the tab, as in a web browser.
+        if resp.middle_clicked() || xresp.on_hover_text("Close").clicked() {
             shut = Some(i);
         } else if (if held.is_some() { resp } else { resp.on_hover_text(tip) }).clicked() {
             pick = Some(i);
@@ -1379,6 +1380,33 @@ mod tests {
         h.step(&json!({"click": {"handle": "tab:design:1"}, "button": "right"})).unwrap();
         h.frames(2);
         h.step(&json!({"click": {"handle": "tab_menu:ui.closeOtherTabs"}})).unwrap();
+        h.frames(2);
+        assert_eq!(h.app.docs.count(), 1);
+    }
+
+    /// A middle click on a tab closes it as its × does: at once when it has nothing to save,
+    /// after asking when it has.
+    #[test]
+    fn a_tab_middle_clicked_closes() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.custom_titlebar = true;
+        h.call("ui.resize", json!({"width": 1400, "height": 720}));
+        open_tab(&mut h.app, Session::default()).unwrap();
+        h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10})).unwrap();
+        open_tab(&mut h.app, Session::default()).unwrap();
+        assert_eq!(h.app.docs.count(), 3);
+        h.frames(3);
+        // The second tab holds unsaved changes: closing it asks first
+        h.step(&json!({"click": {"handle": "tab:design:1"}, "button": "middle"})).unwrap();
+        h.frames(2);
+        assert_eq!(h.app.docs.count(), 3);
+        assert!(h.app.docs.closing.is_some(), "a design with changes asks before it closes");
+        h.call("ui.documents", json!({"answer": "dont_save"}));
+        h.frames(2);
+        assert_eq!(h.app.docs.count(), 2);
+        // The first has nothing to save: it closes at once
+        h.step(&json!({"click": {"handle": "tab:design:0"}, "button": "middle"})).unwrap();
         h.frames(2);
         assert_eq!(h.app.docs.count(), 1);
     }
