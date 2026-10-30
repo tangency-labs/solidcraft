@@ -1,0 +1,13 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#324"
+ ],
+ "what": "324-fillet-over-hole-overlap with the hole cut by a cylinder longer than the block (z -1 to 11), so the hole's wall is trimmed by both the top and the bottom face",
+ "source": "analytic",
+ "method": "the same body as 324-fillet-over-hole-overlap: block 40x20x10 minus a through hole of r=3 centred (20,14.5), then R4 on the top long edge at y=20. The round covers y=16..20 and removes 40*(16-4pi) = 137.35; the hole removes 9*pi*10 = 282.74; where both remove the same material (y in 16..17.5) add it back: overlap = integral over y from 16 to 17.5 of [4 - sqrt(16-(y-16)^2)] x 2 sqrt(9-(y-14.5)^2) dy = 0.3758. V = 8000 - 9*pi*10 - 40*(16-4*pi) + overlap = 7580.287.",
+ "body_count": 1,
+ "volume_mm3": 7580.287315360674,
+ "continuity": {
+  "order": "g1"
+ }
+}
