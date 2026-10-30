@@ -17,12 +17,28 @@ and selected when the active body is a sheet), and builds parts from a sheet of 
 Bends follow the rule's K-factor, so flat lengths match what a press brake will make. Tests
 check flat lengths against hand-computed bend allowances.
 
+A rule's **Unfold Method** says where that K-factor comes from:
+
+- **K Factor**, the default: the value typed in. Below it the manager shows what a 90° bend then
+  gets, its bend allowance and bend deduction, to check the rule against a press brake chart.
+- **Bend Deduction** or **Bend Allowance**: the chart's value for a 90° bend at the rule's
+  thickness and bend radius, a length like the other fields. The rule then uses the K-factor
+  that makes a 90° bend come out at exactly that value, and the manager shows it to 10 decimal
+  places. Bends at other angles, and flanges with a radius of their own, follow from the same
+  K-factor, so a 45° bend gets half the 90° bend allowance.
+
+For example, 1.6 mm sheet with a 1.6 mm bend radius and a bend deduction of 2.83 mm unfolds with
+a K-factor of 0.4204578671, and a channel 20 + 50 + 20 mm over its outside flattens to
+90 − 2 × 2.83 = 84.34 mm. A K-factor above 1 is allowed, since a chart measured at a larger
+air-bent radius than the rule's gives one; the manager says so. A value that would put the
+neutral axis inside the bend (a K-factor below 0) is refused.
+
 A rule is saved in its design, and a new design starts with only the default steel rule. To use
 the same rules in every design, keep them as **personal rules**, saved in your profile: open
 **Personal rules** at the top of Sheet Metal Rules.
 
-- **Save new** keeps the rule the manager shows under a name: its thickness, K factor, bend
-  radius, reliefs, gaps, corner relief shape and angle display. A bare number is saved with the
+- **Save new** keeps the rule the manager shows under a name: its thickness, unfold method and
+  K factor or 90° value, bend radius, reliefs, gaps, corner relief shape and angle display. A bare number is saved with the
   design's unit, so the rule makes the same sheet in a millimetre or an inch design. `Thickness`
   and other expressions are kept as typed, and are worked out in the design the rule is used in.
 - Picking a personal rule fills the manager with it: the design's own rule of that name, or else
