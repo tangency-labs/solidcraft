@@ -25,6 +25,7 @@
 //! | [`Extent2d::expand_absolute`]          | `ExpandAbsolute(double)`                       |
 //! | [`Extent2d::expand_absolute_vec`]      | `ExpandAbsolute(const SmVector2d)`             |
 //! | [`Extent2d::expand_relative`]          | `ExpandRelative`                               |
+//! | [`Extent2d::scale`]                    | `Scale` (public for export, #1765)             |
 //! | [`Extent2d::min`], [`Extent2d::mid`], [`Extent2d::max`] | `GetMin`, `GetMid`, `GetMax`  |
 //! | [`Extent2d::u_min`] .. [`Extent2d::v_max`] | `GetUMin`, `GetUMax`, `GetVMin`, `GetVMax` |
 //! | [`Extent2d::u_interval`], [`Extent2d::v_interval`] | `GetUInterval`, `GetVInterval`     |
@@ -56,10 +57,11 @@
 //! | [`SS_NONE`], [`SS_UMIN`], [`SS_VMIN`], [`SS_UMAX`], [`SS_VMAX`] | `SM_SS_*` (`SmTypes.h`) |
 //!
 //! Methods of `SmExtent2d` that no in-scope upstream code reaches
-//! (`harness/callgraph/unused_functions.txt`: `Set`, `SetUMin`..`SetVMax`, `Scale`,
-//! the distance methods, `IsPoint`, `IsLine`, `AnyBounds`, `ClassifyPointDir2d`,
-//! the periodic disjoint/intersect methods, `ApproximateUnbounded`, ...) are not
-//! ported.
+//! (`harness/callgraph/unused_functions.txt`: `Set`, `SetUMin`..`SetVMax`, the
+//! distance methods, `IsPoint`, `IsLine`, `AnyBounds`, `ClassifyPointDir2d`, the
+//! periodic disjoint/intersect methods, `ApproximateUnbounded`, ...) are not ported.
+//! `Scale` is listed there too but is ported for callers outside the closure: an
+//! exporter scaling a plane's parameter domain (#1765).
 //!
 //! Deviations:
 //! - Out-params become return values (tuples, `Option`, `Result`). Optional
@@ -360,6 +362,36 @@ impl Extent2d {
     pub fn expand_relative(&mut self, factor: f64) -> &mut Self {
         let d = (self.max - self.min) * factor;
         self.expand_absolute_vec(d)
+    }
+
+    /// Scales every bounded end by `scale` in x and by `scale_v` in y (`scale` when
+    /// `None`); unbounded ends stay (`Scale`, its `pOptScaleV`).
+    pub fn scale(&mut self, scale: f64, scale_v: Option<f64>) -> &mut Self {
+        let scale_v = scale_v.unwrap_or(scale);
+
+        self.min.x *= if is_infinite_param(self.min.x) {
+            1.0
+        } else {
+            scale
+        };
+        self.max.x *= if is_infinite_param(self.max.x) {
+            1.0
+        } else {
+            scale
+        };
+
+        self.min.y *= if is_infinite_param(self.min.y) {
+            1.0
+        } else {
+            scale_v
+        };
+        self.max.y *= if is_infinite_param(self.max.y) {
+            1.0
+        } else {
+            scale_v
+        };
+
+        self
     }
 
     /// Minimum corner (`GetMin`).
@@ -861,6 +893,23 @@ mod tests {
 
     fn p(x: f64, y: f64) -> Point2 {
         Vec2::new(x, y)
+    }
+
+    /// `Scale` (#1765): bounded ends scale, by the V factor in y when given; an unbounded
+    /// end stays, and the call chains.
+    #[test]
+    fn scale_scales_the_bounded_ends() {
+        let mut e = Extent2d::from_points(p(-1.0, 2.0), p(3.0, 4.0));
+        e.scale(2.0, None);
+        assert_eq!((e.min(), e.max()), (p(-2.0, 4.0), p(6.0, 8.0)));
+        e.scale(0.5, Some(-1.0)).scale(1.0, None);
+        assert_eq!((e.min(), e.max()), (p(-1.0, -4.0), p(3.0, -8.0)));
+        let mut u = Extent2d::from_bounds(-2.0, 1.0, INFINITE_PARAMETER, INFINITE_PARAMETER);
+        u.scale(3.0, Some(2.0));
+        assert_eq!(
+            (u.min(), u.max()),
+            (p(-6.0, 2.0), p(INFINITE_PARAMETER, INFINITE_PARAMETER))
+        );
     }
 
     /// `my_test_extent2d` (`tests/prog_test/src/smCurveTest.cpp:2688`), owned parts.
