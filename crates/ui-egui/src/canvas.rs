@@ -1665,7 +1665,9 @@ fn revolve_display_extent(app: &SolveApp, d: &Dialog, axis: (Vec3, Vec3)) -> Opt
             .ok()?;
         (angle, other)
     };
-    solidcraft_engine::doc::revolve_extent_with_convention(
+    // The solid refuses 0° and a sweep past a full turn, and the dialog says so. The handle
+    // still uses that boundary, so the grab point stays and the angle can be dragged back.
+    solidcraft_engine::doc::revolve_extent_for_handle(
         &state,
         &plane,
         &regions,
