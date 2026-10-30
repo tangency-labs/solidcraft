@@ -1,7 +1,7 @@
 //! The paper scene: what a sheet shows, as strokes and fills in sheet millimetres, for the writers
 //! that put it in a file (DXF, SVG, PNG, PDF). Plain data with one check, [`Scene::validate`]:
-//! nothing here is saved, drawn on screen or made by a command yet. Text, clips and styles are
-//! later additions.
+//! nothing here is saved, drawn on screen or made by a command yet. Text and styles are later
+//! additions.
 //!
 //! - Coordinates are millimetres from the sheet's lower-left corner, x to the right and y up;
 //!   angles are radians, anticlockwise. A line's width is its width on paper, centred on its path.
@@ -37,16 +37,24 @@
 //!
 //! Writers read a [`Prepared`] scene, which only [`Scene::prepare`] makes, so none reads one that
 //! wasn't checked, and format it on their number grid ([`Prepared::on_grid`], [`grid`]'s rules),
-//! so every format draws the same joints, closures and merges. Clipping will happen in
-//! `prepare` too, once, before any writer (A8).
+//! so every format draws the same joints, closures and merges.
+//!
+//! Clips: [`Scene::prepare_clipped`] also cuts each group of an object to that object's [`Clip`], a
+//! rectangle or a circle (a detail view's), once, before any writer ([`clip`]'s rules), and checks
+//! what that made again, so every writer draws the same clip-free groups. A clip is checked there:
+//! one an object, from its lower-left to its upper-right corner or with a radius above 0, every
+//! number finite and at most 1e5 mm in size, and its object's items strokes of lines and arcs
+//! (fills and other curves aren't clipped yet).
 
 use serde::{Deserialize, Serialize};
 
+use std::borrow::Cow;
 use std::f64::consts::FRAC_PI_2;
 
 use crate::{EPS, Region2, Seg2, Vec2};
 
 pub mod annotate;
+pub mod clip;
 pub mod flatten;
 pub mod grid;
 
@@ -149,6 +157,28 @@ pub enum Item {
     Fill { region: Region2 },
 }
 
+/// What one object's groups are cut to: only what lies inside is drawn.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub enum Clip {
+    /// The rectangle from its lower-left corner `min` to its upper-right corner `max`.
+    Rect { min: Vec2, max: Vec2 },
+    /// The disc of `radius` round `center`.
+    Circle { center: Vec2, radius: f64 },
+}
+
+impl Clip {
+    /// Checks the clip against the module's notes.
+    fn check(&self) -> Result<()> {
+        let within = |v: f64| v.is_finite() && v.abs() <= MAX_COORDINATE_MM;
+        let fine = match *self {
+            Clip::Rect { min, max } => [min.x, min.y, max.x, max.y].into_iter().all(within) && min.x < max.x && min.y < max.y,
+            Clip::Circle { center, radius } => within(center.x) && within(center.y) && radius > 0.0 && radius <= MAX_COORDINATE_MM,
+        };
+        require(fine, "a clip is a rectangle from its lower-left to its upper-right corner, or a circle with a radius above 0, within 1e5 mm")
+    }
+}
+
 /// A dashed line's pattern: dash and gap lengths in turn, starting with a dash, and how far into
 /// the pattern the stroke starts.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -200,19 +230,20 @@ fn meet(a: &Seg2, b: &Seg2) -> bool {
     a.end().dist(b.start()) <= EPS
 }
 
-/// A scene that passed [`Scene::validate`]: what every writer reads.
-#[derive(Clone, Copy, Debug)]
+/// A scene that passed [`Scene::validate`], with no clips left: what every writer reads. Without
+/// clips the scene is borrowed as it is; with them it is the scene cut to them.
+#[derive(Clone, Debug)]
 pub struct Prepared<'a> {
-    scene: &'a Scene,
+    scene: Cow<'a, Scene>,
 }
 
-impl<'a> Prepared<'a> {
+impl Prepared<'_> {
     pub fn size_mm(&self) -> Vec2 {
         self.scene.size_mm
     }
 
     /// The groups, in paint order.
-    pub fn groups(&self) -> &'a [Group] {
+    pub fn groups(&self) -> &[Group] {
         &self.scene.groups
     }
 }
@@ -234,8 +265,33 @@ pub fn arc_pieces(center: Vec2, radius: f64, start: f64, sweep: f64) -> impl Ite
 impl Scene {
     /// The scene, checked ([`Scene::validate`]), for the writers.
     pub fn prepare(&self) -> Result<Prepared<'_>> {
+        self.prepare_clipped(&[])
+    }
+
+    /// The scene, checked, with each group of an object in `clips` cut to that object's clip, for
+    /// the writers. The clips are checked by the module's notes, and what the cuts made is checked
+    /// again: a cut adds pieces, and the scene may then hold too many.
+    pub fn prepare_clipped(&self, clips: &[(u64, Clip)]) -> Result<Prepared<'_>> {
         self.validate()?;
-        Ok(Prepared { scene: self })
+        if clips.is_empty() {
+            return Ok(Prepared { scene: Cow::Borrowed(self) });
+        }
+        require(clips.len() <= MAX_RECORDS, "more than 100,000 clips")?;
+        let mut sorted = clips.to_vec();
+        sorted.sort_unstable_by_key(|(object, _)| *object);
+        require(sorted.windows(2).all(|w| w[0].0 != w[1].0), "an object has one clip")?;
+        sorted.iter().try_for_each(|(_, clip)| clip.check())?;
+        let mut groups = Vec::with_capacity(self.groups.len());
+        for group in &self.groups {
+            let at = sorted.binary_search_by_key(&group.object, |(object, _)| *object).ok();
+            match at.and_then(|at| sorted.get(at)) {
+                Some((_, clip)) => groups.push(clip::clipped(group, clip)?),
+                None => groups.push(group.clone()),
+            }
+        }
+        let cut = Scene { size_mm: self.size_mm, groups };
+        cut.validate()?;
+        Ok(Prepared { scene: Cow::Owned(cut) })
     }
 
     /// Checks the scene against the limits in the module's notes, counting its records first.
