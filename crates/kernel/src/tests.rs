@@ -738,10 +738,11 @@ fn tapered_extrude_between_with_a_foot() {
     );
 }
 
-/// A taper steeper than a profile's details is refused, and says why: a slot narrower than the
-/// taper closes; a ring's hole smaller than it closes.
+/// A taper steeper than a profile's details: a slot narrower than the taper closes partway up
+/// and the solid builds, the slot's walls meeting above where its end wall closes to a point; a
+/// ring's hole smaller than the taper closes the whole hole and is refused, saying why.
 #[test]
-fn tapered_extrude_refuses_a_taper_steeper_than_the_details() {
+fn tapered_extrude_closes_a_narrow_slot_and_refuses_a_closing_hole() {
     let slot = Loop2::polygon(&[
         Vec2::new(0.0, 0.0),
         Vec2::new(10.0, 0.0),
@@ -752,9 +753,18 @@ fn tapered_extrude_refuses_a_taper_steeper_than_the_details() {
         Vec2::new(4.9, 10.0),
         Vec2::new(0.0, 10.0),
     ]);
-    let e = extrude_tapered(&Plane::XY, &Region2 { outer: slot, holes: vec![] }, 2.0, 1.0, 10f64.to_radians(), crate::DraftCorner::default())
-        .unwrap_err();
-    assert!(e.to_string().contains("the taper closes the profile"), "{e}");
+    let a = 10f64.to_radians();
+    let b = extrude_tapered(&Plane::XY, &Region2 { outer: slot, holes: vec![] }, 2.0, 1.0, a, crate::DraftCorner::default()).unwrap();
+    assert!(b.validity().is_empty(), "{:?}", b.validity());
+    // Every wall moves out of the material by z·t at height z (t = tan 10°): the 10 mm square
+    // grows to 10 + 2zt, so the solid without the slot is ∫₀² (10 + 2zt)² dz
+    // = ((10 + 4t)³ − 1000) / (6t). The slot narrows to 0.2 − 2zt, its length staying 8 (its end
+    // wall and the square's side both move up by zt), and it closes at z = 0.1/t (0.567, below
+    // the top): it takes ∫ 8 (0.2 − 2zt) dz over 0..0.1/t = 0.08/t.
+    let t = a.tan();
+    let v = ((10.0 + 4.0 * t).powi(3) - 1000.0) / (6.0 * t) - 0.08 / t;
+    let m = measure(&b).unwrap();
+    assert!(rel(m.volume, v) < 1e-6, "{} vs {v}", m.volume);
     let ring = Region2 { outer: Loop2::circle(Vec2::ZERO, 5.0), holes: vec![Loop2::circle(Vec2::ZERO, 0.3).reversed()] };
     let e = extrude_tapered(&Plane::XY, &ring, 2.0, 1.0, 10f64.to_radians(), crate::DraftCorner::default()).unwrap_err();
     assert!(e.to_string().contains("the taper closes the profile"), "{e}");
