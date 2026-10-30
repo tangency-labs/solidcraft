@@ -1045,11 +1045,10 @@ fn rust_fixture(i: &Inputs) -> Result<Brep, HarnessError> {
 fn make_faces_rust(i: &Inputs) -> Result<Output, HarnessError> {
     let mut b = rust_fixture(i)?;
     b.set_key(ObjectKey(0xB000_0000));
-    // The fixture's edges own their curves, as its faces own their surfaces (the import
-    // gives those the face names of `key_of`). The ray fires of the infinite-region
-    // search find an edge from its curve's owner, under the runner's names.
-    let brep = solidcore::topology::brep::p2::brep_ref(&b);
-    crate::util::own_edge_curves(&mut b, &|e| key_of(EntityRef::Edge(e)), Some(brep));
+    // The fixture's edges own their curves and its faces their surfaces under the
+    // runner's `key_of` names, as the build gives them ([`CONVENTIONS`]); the ray fires of
+    // the infinite-region search find an edge from its curve's owner. No owner is added
+    // to geometry the build left without one.
     let resolved = resolve(i, &b)?;
     let mut records = seeded_records(&b);
     let mut attributes = AttributeStore::default();
