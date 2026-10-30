@@ -5725,6 +5725,7 @@ name = "xtask"
 version = "0.24.0"
 dependencies = [
  "proc-macro2",
+ "quick-xml",
  "serde",
  "serde_json",
  "sha2 0.10.9",

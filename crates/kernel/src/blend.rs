@@ -837,6 +837,253 @@ pub(crate) fn rounds_too_small(body: &Body, picks: &[Vec3], edges: &[usize], rad
     Ok(())
 }
 
+/// Refuses a round whose section would cut through the material into a hollow behind its edge,
+/// opening the part (a slit into the hollow, or a cut through the part): the owner's rule of
+/// 2026-10-30, as [`KernelError::TooLarge`], so a fillet feature names the largest radius that
+/// fits. A round running past a rim of its faces into open air is left to the blend (tangent
+/// where it has room, cut where it runs out).
+///
+/// Decided exactly in the section square to a picked straight edge between two planar faces
+/// (A and B, convex): the round's circle of radius r has its centre at E + r k, the point at
+/// depth r below both planes (k = −(n_A + n_B)/(1 + n_A·n_B)), and removes the region between the
+/// edge E and its arc. That region grows with r. Material behind the faces first opens into a
+/// hollow where the arc, moving away from E, uncovers a point q of the body's boundary strictly
+/// inside the wedge with no material just beyond it (toward the centre): q lies on the circle,
+/// |q − E − r k| = r, whose larger root in r is where it opens ([`opening_radius`]). Where the
+/// strips of faces A and B themselves leave their faces, the round runs out past a rim into the
+/// air, which is not a point of this kind (it lies on a face's plane, not inside the wedge).
+///
+/// The boundary points looked at run along the edge, so their section is the same all along the
+/// stretch they share with it: straight edges parallel to it (a hollow's corner), cylindrical
+/// faces about axes parallel to it (a hollow's rounded corner), and a picked concave edge parallel
+/// to it, rounded in the same fillet (the arc of its round, which fills the hollow's corner).
+/// Whether the point uncovered is material is the body's exact point classification.
+pub(crate) fn rounds_into_hollow(body: &Body, picks: &[Vec3], edges: &[usize], radii: &[f64]) -> Result<()> {
+    let rec = Faces::of(body)?;
+    for (i, (&e, &r)) in edges.iter().zip(radii).enumerate() {
+        let Some(section) = Section::of(&rec, e) else { continue };
+        let Some((opens, at)) = section.opening(body, &rec, edges, radii)? else { continue };
+        if r <= opens + section.tolerance {
+            continue;
+        }
+        let pick = picks.get(i).map(|p| format!(" at ({:.3}, {:.3}, {:.3})", p.x, p.y, p.z)).unwrap_or_default();
+        return Err(KernelError::TooLarge(format!(
+            "the round of radius {r} mm on the edge{pick} would cut through the material behind it into the hollow at ({:.3}, {:.3}, \
+             {:.3}) and open the part",
+            at.x, at.y, at.z
+        )));
+    }
+    Ok(())
+}
+
+/// The section of a round of a straight, convex edge between two planar faces, as
+/// [`rounds_into_hollow`] reads it.
+struct Section {
+    /// The edge's start, its unit direction and its length.
+    start: Vec3,
+    dir: Vec3,
+    length: f64,
+    /// The faces' outward unit normals.
+    na: Vec3,
+    nb: Vec3,
+    /// The centre of the round of radius r is at `start + r k` in the section through `start`.
+    k: Vec3,
+    tolerance: f64,
+}
+
+impl Section {
+    fn of(rec: &Faces, e: usize) -> Option<Section> {
+        if !rec.straight(e) {
+            return None;
+        }
+        let [fa, fb] = <[u32; 2]>::try_from(rec.faces_of(e).into_iter().collect::<Vec<_>>()).ok()?;
+        let (na, nb) = (rec.plane_normal(fa as usize)?, rec.plane_normal(fb as usize)?);
+        let (start, end) = rec.ends(e)?;
+        let length = start.dist(end);
+        let dir = (end - start).normalized()?;
+        let g = na.dot(nb);
+        if !(g.is_finite() && g.abs() < 1.0 - 1e-9) {
+            return None;
+        }
+        // Convex: going into face A from the edge goes below face B's plane.
+        let use_a = rec.uses(fa as usize).find(|u| u.edge as usize == e)?;
+        let into_a = rec.direction_into_face(fa as usize, use_a)?;
+        if into_a.dot(nb) >= 0.0 {
+            return None;
+        }
+        let tolerance = rec.rec.edges.get(e)?.tolerance.max(rec.rec.tolerance).max(1e-9);
+        let k = (na + nb) * (-1.0 / (1.0 + g));
+        Some(Section { start, dir, length, na, nb, k, tolerance })
+    }
+
+    /// `p − start` without its part along the edge: its place in the section.
+    fn flat(&self, p: Vec3) -> Vec3 {
+        let w = p - self.start;
+        w - self.dir * w.dot(self.dir)
+    }
+
+    /// Whether `p` (in the section) runs along the edge: a direction parallel to it.
+    fn parallel(&self, d: Vec3) -> bool {
+        d.normalized().is_some_and(|d| d.cross(self.dir).len() <= 1e-9)
+    }
+
+    /// The stretch `[lo, hi]` along the edge (from its start) that `[a, b]` (points' places along
+    /// it) shares with it, its middle; `None` where they share none.
+    fn shared(&self, a: f64, b: f64) -> Option<f64> {
+        let (lo, hi) = (a.min(b).max(0.0), a.max(b).min(self.length));
+        (hi - lo > self.tolerance).then_some(0.5 * (lo + hi))
+    }
+
+    /// The smallest radius at which the round opens into a hollow behind it and the point where it
+    /// does (at the middle of the stretch the opening runs along); `None` where it never does
+    /// through the boundary looked at ([`rounds_into_hollow`]). `edges` and `radii`: the fillet's.
+    fn opening(&self, body: &Body, rec: &Faces, edges: &[usize], radii: &[f64]) -> Result<Option<(f64, Vec3)>> {
+        let mut best: Option<(f64, Vec3)> = None;
+        let mut keep = |found: Option<(f64, Vec3)>| {
+            if let Some((r, p)) = found
+                && best.is_none_or(|(b, _)| r < b)
+            {
+                best = Some((r, p));
+            }
+        };
+        // Straight edges parallel to the round's: a hollow's corner, or a picked concave edge whose
+        // round of its own fills it.
+        for (j, edge) in rec.rec.edges.iter().enumerate() {
+            if !matches!(edge.curve, Curve::Line { .. }) {
+                continue;
+            }
+            let Some((a, b)) = rec.ends(j) else { continue };
+            if !self.parallel(b - a) {
+                continue;
+            }
+            let Some(middle) = self.shared((a - self.start).dot(self.dir), (b - self.start).dot(self.dir)) else { continue };
+            // The round's own edge, and edges on its line, lie at the section's origin.
+            let q = self.flat(a);
+            if q.len() <= self.tolerance {
+                continue;
+            }
+            let found = match edges.iter().position(|&p| p == j) {
+                Some(at) => match (concave_round_centre(rec, j, radii.get(at).copied()), radii.get(at)) {
+                    (Some((o, arc)), Some(&rho)) => self.through_circle(body, self.flat(o), rho, middle, Some(arc))?,
+                    _ => None,
+                },
+                None => self.through_point(body, q, middle)?,
+            };
+            keep(found);
+        }
+        // Cylindrical faces about axes parallel to the edge: a hollow's rounded corner.
+        for (f, face) in rec.rec.faces.iter().enumerate() {
+            let Surface::Cylinder { frame, radius } = &face.surface else { continue };
+            if !self.parallel(v3(frame.x_axis).cross(v3(frame.y_axis))) {
+                continue;
+            }
+            let along: Vec<f64> =
+                rec.uses(f).filter_map(|u| rec.ends(u.edge as usize)).flat_map(|(a, b)| [a, b]).map(|p| (p - self.start).dot(self.dir)).collect();
+            let (lo, hi) = along.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), t| (lo.min(*t), hi.max(*t)));
+            let Some(middle) = self.shared(lo, hi) else { continue };
+            keep(self.through_circle(body, self.flat(v3(frame.origin)), *radius, middle, None)?);
+        }
+        Ok(best)
+    }
+
+    /// Where the round opens through the section point `q` (a boundary point running along the
+    /// edge): its larger radius on the circle through `q`, when `q` then lies on the round's arc
+    /// strictly inside the wedge and no material lies just beyond it, toward the centre.
+    fn through_point(&self, body: &Body, q: Vec3, middle: f64) -> Result<Option<(f64, Vec3)>> {
+        // |q − r k|² = r²: (|k|² − 1) r² − 2 (q·k) r + |q|² = 0.
+        let Some(r) = larger_root(self.k.len2() - 1.0, q.dot(self.k), q.len2()) else { return Ok(None) };
+        self.opens_at(body, r, q, middle)
+    }
+
+    /// Where the round opens through a circle of the section, centre `o`, radius `rho`, with the
+    /// hollow inside it: where the circle's far point from the round's centre reaches the round's
+    /// arc (|o − r k| + rho = r). `arc`: the directions from `o` the circle is the boundary
+    /// along, when it is a picked concave edge's round, not yet built.
+    fn through_circle(&self, body: &Body, o: Vec3, rho: f64, middle: f64, arc: Option<(Vec3, Vec3)>) -> Result<Option<(f64, Vec3)>> {
+        // |o − r k|² = (r − rho)²: (|k|² − 1) r² − 2 (o·k − rho) r + |o|² − rho² = 0.
+        let Some(r) = larger_root(self.k.len2() - 1.0, o.dot(self.k) - rho, o.len2() - rho * rho) else { return Ok(None) };
+        let Some(out) = (o - self.k * r).normalized() else { return Ok(None) };
+        let q = o + out * rho;
+        match arc {
+            Some((m1, m2)) => {
+                // On the concave round's own arc: between its two contacts, seen from its centre.
+                if !within(out, m1, m2, self.tolerance / rho.max(1.0)) {
+                    return Ok(None);
+                }
+                self.opens_at(body, r, q, middle)
+            }
+            None => {
+                // On the face itself.
+                if body.classify_point(self.place(q, middle))? != crate::body::PointClass::OnBoundary {
+                    return Ok(None);
+                }
+                self.opens_at(body, r, q, middle)
+            }
+        }
+    }
+
+    /// The section point `q` at `middle` along the edge.
+    fn place(&self, q: Vec3, middle: f64) -> Vec3 {
+        self.start + self.dir * middle + q
+    }
+
+    /// `Some((r, q placed))` when, at radius `r`, `q` lies on the round's arc strictly inside the
+    /// wedge and the body has no material just beyond it toward the centre.
+    fn opens_at(&self, body: &Body, r: f64, q: Vec3, middle: f64) -> Result<Option<(f64, Vec3)>> {
+        if !(r.is_finite() && r > self.tolerance) {
+            return Ok(None);
+        }
+        let centre = self.k * r;
+        // q − centre = α n_A + β n_B with α, β > 0: on the arc between the contacts.
+        if !within(q - centre, self.na, self.nb, self.tolerance) {
+            return Ok(None);
+        }
+        let Some(inward) = (centre - q).normalized() else { return Ok(None) };
+        let step = (r * 1e-3).max(self.tolerance * 10.0);
+        let at = self.place(q, middle);
+        Ok((body.classify_point(at + inward * step)? == crate::body::PointClass::Outside).then_some((r, at)))
+    }
+}
+
+/// Whether `w` = α a + β b with α, β > `margin` (a, b unit, not parallel).
+fn within(w: Vec3, a: Vec3, b: Vec3, margin: f64) -> bool {
+    let g = a.dot(b);
+    let det = 1.0 - g * g;
+    if !(det > 1e-12) {
+        return false;
+    }
+    let (wa, wb) = (w.dot(a), w.dot(b));
+    let alpha = (wa - g * wb) / det;
+    let beta = (wb - g * wa) / det;
+    alpha > margin && beta > margin
+}
+
+/// The larger root of a x² − 2 b x + c = 0 (a > 0).
+fn larger_root(a: f64, b: f64, c: f64) -> Option<f64> {
+    let disc = b * b - a * c;
+    (a > 1e-12 && disc >= 0.0).then(|| (b + disc.sqrt()) / a).filter(|r| r.is_finite())
+}
+
+/// The centre of the round of radius `r` of concave straight edge `e` between planar faces, and
+/// the directions from it to the round's two contacts: the circle tangent to both faces' planes
+/// on the side away from the material.
+fn concave_round_centre(rec: &Faces, e: usize, r: Option<f64>) -> Option<(Vec3, (Vec3, Vec3))> {
+    let r = r?;
+    let [f1, f2] = <[u32; 2]>::try_from(rec.faces_of(e).into_iter().collect::<Vec<_>>()).ok()?;
+    let (n1, n2) = (rec.plane_normal(f1 as usize)?, rec.plane_normal(f2 as usize)?);
+    let use1 = rec.uses(f1 as usize).find(|u| u.edge as usize == e)?;
+    // Concave: going into face 1 from the edge goes above face 2's plane.
+    if rec.direction_into_face(f1 as usize, use1)?.dot(n2) <= 0.0 {
+        return None;
+    }
+    let g = n1.dot(n2);
+    if !(g.is_finite() && g.abs() < 1.0 - 1e-9) {
+        return None;
+    }
+    let (a, _) = rec.ends(e)?;
+    Some((a + (n1 + n2) * (r / (1.0 + g)), (-n1, -n2)))
+}
+
 /// A blend's failure where a picked edge continues tangentially into `next`, an edge left out
 /// ([`unfinished_chain`]): SMLib rounds a tangent chain as one sequence and could not end the
 /// blend there, so the reason and the way out are named.
@@ -1301,6 +1548,42 @@ mod tests {
 
     /// At 1° the crease rounds from 0.526 mm: R2 lies 0.076 µm in and R20 0.76 µm, and each
     /// builds, removing 20 · r²(tan(δ/2) − δ/2).
+    /// A box 104 x 64 x 42 hollowed 2 mm from the inside, open at the bottom: 1668's thin wall.
+    fn thin_walled_case() -> Body {
+        let outer = crate::build::box_solid(Vec3::new(-52.0, -32.0, 0.0), Vec3::new(52.0, 32.0, 42.0)).unwrap();
+        let hollow = crate::build::box_solid(Vec3::new(-50.0, -30.0, -1.0), Vec3::new(50.0, 30.0, 40.0)).unwrap();
+        crate::ops::boolean(&outer, &hollow, crate::BoolOp::Cut).unwrap().unwrap()
+    }
+
+    #[test]
+    fn a_round_cutting_through_a_thin_wall_into_the_hollow_is_refused_naming_the_largest_that_fits() {
+        let case = thin_walled_case();
+        let top = Vec3::new(0.0, 32.0, 42.0);
+        // The round's centre is at (32 - r, 42 - r); the hollow's corner (30, 40) leaves its circle
+        // where sqrt2 (r - 2) = r: r = 4 + 2 sqrt2 = 6.8284.
+        let e = fillet(&case, &[top], 7.0).unwrap_err();
+        assert!(matches!(e, KernelError::TooLarge(_)), "{e}");
+        let e = e.to_string();
+        assert!(e.contains("into the hollow at (0.000, 30.000, 40.000) and open the part"), "{e}");
+        let (largest, _) = fillet_max(&case, &[top], 7.0).unwrap().unwrap();
+        assert!((largest - 6.828).abs() < 1e-9, "{largest}");
+
+        // Just short of the corner it rounds, its whole section along the 104.
+        let r = 6.8;
+        let rounded = fillet(&case, &[top], r).unwrap();
+        let want = 104.0 * 64.0 * 42.0 - 100.0 * 60.0 * 40.0 - (1.0 - std::f64::consts::FRAC_PI_4) * r * r * 104.0;
+        let got = crate::measure(&rounded).unwrap().volume;
+        assert!((got - want).abs() < 1e-6 * want, "{got} vs {want}");
+
+        // The inside edge rounded with it fills the hollow's corner: the outer round reaches the
+        // inner R7's arc (centre (23, 33)) only at sqrt2 (r - 9) + 7 = r, r = 13.83.
+        let inside = Vec3::new(0.0, 30.0, 40.0);
+        assert!(fillet(&case, &[top, inside], 7.0).is_ok());
+        assert!(fillet_each(&case, &[top, inside], &[13.8, 7.0]).is_ok());
+        let e = fillet_each(&case, &[top, inside], &[13.9, 7.0]).unwrap_err().to_string();
+        assert!(e.contains("into the hollow at"), "{e}");
+    }
+
     #[test]
     fn a_one_degree_crease_rounds_from_the_smallest_radius_named() {
         let (gentle, crease) = roof(0.5);

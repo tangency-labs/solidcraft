@@ -1,0 +1,10 @@
+# The cargo tests that fail today, one a line: `<test> <why it fails today>`, with the issue that
+# tracks it when there is one. Sorted. `<test>` is nextest's `<binary id>::<test name>`, as the
+# junit report names it. CI's test jobs (`cargo xtask known-failing`) fail on a test that fails
+# and is not listed here, and on a listed test that passes: a fix removes its line in the same
+# pull request. The tests stay un-ignored, so every run shows whether they still fail.
+# Refresh (after an SMLib pin bump): download the junit artifacts of develop's latest CI run, one
+# directory each (`gh run download <run> -R tangency-labs/solidcraft -n <artifact> -D <dir>/<artifact>`
+# for junit and junit-gpu-1..4), run `cargo xtask known-failing --junit <dir>`, then drop each
+# FIXED line and add each REGRESSION line with its cause, from the test's failure message.
+# Baseline: none yet.

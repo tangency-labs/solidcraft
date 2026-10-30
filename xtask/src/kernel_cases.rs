@@ -372,7 +372,7 @@ pub fn run(rest: &[&str]) -> Result<(), String> {
 /// The cases a known-failing baseline lists, with their causes: one per line, `<case> <cause>`,
 /// the case's directory relative to the baseline's own; `#` starts a comment line. The list is
 /// sorted with no case twice, and every case has a cause.
-fn known_failing(text: &str) -> Result<Vec<(&str, &str)>, String> {
+pub(crate) fn known_failing(text: &str) -> Result<Vec<(&str, &str)>, String> {
     let mut out: Vec<(&str, &str)> = Vec::new();
     for (n, line) in text.lines().enumerate() {
         let line = line.trim();

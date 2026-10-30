@@ -3,15 +3,9 @@
   "tangency-labs/solidcraft#1668",
   "tangency-labs/solidcraft#1080"
  ],
- "what": "an R7 round of the outer top edge of a 2 mm wall alone: past the sharp inside corner it is cut from the wall as if the hollow were not there, opening a slit along the hollow",
+ "what": "an R7 round of the outer top edge of a 2 mm wall alone: past the sharp inside corner it would cut through the wall into the hollow, opening a slit along it, so it is refused, naming the largest radius that fits",
  "source": "analytic",
- "method": "box 100x60x40 shelled outward 2 mm open at the bottom: 104x64x42 less 100x60x40 = 39552. The round's circle about (y, z) = (25, 35), r 7, takes (1-pi/4) 49 along the edge's 104, less its part over the hollow (y < 30, z < 40), the square [25,30]x[35,40] outside the circle: Int_sqrt24^5 (5 - sqrt(49-u^2)) du = 5(5-sqrt24) - (F(5) - F(sqrt24)), F(t) = (t sqrt(49-t^2) + 49 asin(t/7))/2, = 0.005068, along the hollow's 100 (the end walls x = +-50..52 are solid). V = 38458.895826, exact: the tolerance holds it to 0.04 mm^3",
- "body_count": 1,
- "volume_mm3": 38458.89582646349,
- "tolerance": {
-  "rel": 1e-06
- },
- "continuity": {
-  "order": "g1"
- }
+ "method": "box 100x60x40 shelled outward 2 mm open at the bottom: the wall runs y 30..32, z 40..42 at the top edge (y, z) = (32, 42). The round's centre is at (32 - r, 42 - r); it removes what lies between the edge and its arc. The hollow's corner (30, 40) lies at sqrt2 (r - 2) from the centre: the arc uncovers it, and the section breaks into the hollow along its 100, where sqrt2 (r - 2) = r, r = 4 + 2 sqrt2 = 6.8284. Past that the wall would open (the owner's ruling of 2026-10-30: refused as too large, naming the largest that fits, 6.828).",
+ "outcome": "refused",
+ "refusal": "the largest radius that fits is 6.828 mm"
 }

@@ -5,6 +5,8 @@
 //!
 //! - The message catalogs (`assets/locales/*.json`): one message per line, sorted by id, no
 //!   duplicate ids, as `serde_json` pretty-prints them.
+//! - `tests/KNOWN_FAILING_TESTS`: one test a line with its cause, sorted, each test once
+//!   (checked only; `cargo xtask known-failing` reads it).
 
 use std::path::Path;
 
@@ -39,7 +41,8 @@ pub fn run(root: &Path, fix: bool) -> Result<(), String> {
     }
     crate::pending::check_locales(root)?;
     crate::pending::check_attribution(root)?;
-    println!("lists: message catalogs are sorted; pending locale and attribution files fold cleanly");
+    crate::known_failing::check_list(root)?;
+    println!("lists: message catalogs and the known-failing tests are sorted; pending locale and attribution files fold cleanly");
     Ok(())
 }
 

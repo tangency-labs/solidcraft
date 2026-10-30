@@ -218,6 +218,7 @@ mod imp {
         let next = crate::blend::unfinished_chain(body, edges, &picked.edges, &picked.hidden)?;
         if matches!(kind, Kind::Round) {
             crate::blend::rounds_too_small(body, edges, &picked.edges, sizes)?;
+            crate::blend::rounds_into_hollow(body, edges, &picked.edges, sizes)?;
         }
         let tol = pick_tolerance(body);
         let Kind::Round = kind else {
@@ -285,6 +286,7 @@ mod imp {
         let picked = resolve(body, edges)?;
         let next = crate::blend::unfinished_chain(body, edges, &picked.edges, &picked.hidden)?;
         crate::blend::rounds_too_small(body, edges, &picked.edges, sizes)?;
+        crate::blend::rounds_into_hollow(body, edges, &picked.edges, sizes)?;
         let corners = corner_vertices(body, setbacks.iter().map(|(p, _)| *p))?;
         let distances: Vec<f64> = setbacks.iter().map(|(_, d)| *d).collect();
         let tol = pick_tolerance(body);

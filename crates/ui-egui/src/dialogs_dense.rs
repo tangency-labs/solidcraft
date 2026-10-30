@@ -134,7 +134,7 @@ const FILLET_FITS: [(&str, &str); 3] = [("ui.fillet_fit_exact", "exact"), ("ui.f
 /// Which fillet options apply together, exactly as `solid.fillet` takes them (`fillet` in
 /// crates/engine/src/cmd/features.rs):
 ///
-/// | Type          | If too large (`fit`)    | Corners (`corner`)                  | Setback (`setbacks`) |
+/// | Type          | Face limits (`fit`)     | Corners (`corner`)                  | Setback (`setbacks`) |
 /// |---------------|-------------------------|-------------------------------------|----------------------|
 /// | Constant      | exact, reduce or taper  | tangent; curvature with exact only  | with curvature only  |
 /// | any other     | exact (not sent)        | tangent (not sent)                  | none                 |
@@ -229,7 +229,7 @@ fn fillet_corner_rows(
     enter
 }
 
-/// A Constant radius fillet's "If too large" row (`fit`), with the radius a reduced fillet used.
+/// A Constant radius fillet's "Face limits" row (`fit`), with the radius a reduced fillet used.
 fn fillet_fit_rows(app: &SolveApp, ui: &mut egui::Ui, extra: &mut serde_json::Map<String, Value>, setback: &mut Option<String>) {
     let t = Tokens::get();
     let before = extra.get("fit").cloned();
@@ -1227,7 +1227,7 @@ mod tests {
             let exact = p.get("fit").is_none_or(|f| f == "exact");
             assert!(constant || p.get("fit").is_none(), "{what}: fit without Constant radius: {p}");
             assert!(constant && exact || (p.get("corner").is_none() && p.get("setbacks").is_none()), "{what}: a curvature corner with {p}");
-            assert_eq!(scenario::handle_at("dialog:ui.fillet_fit").is_some(), constant, "{what}: If too large shows exactly with Constant radius");
+            assert_eq!(scenario::handle_at("dialog:ui.fillet_fit").is_some(), constant, "{what}: Face limits shows exactly with Constant radius");
             assert_eq!(scenario::handle_at("dialog:ui.corners").is_some(), constant, "{what}: Corners shows exactly with Constant radius");
             if !ran.borrow_mut().insert(p.to_string()) {
                 return;
@@ -1254,7 +1254,7 @@ mod tests {
                         choose(&mut h, "ui.fillet_fit", fit);
                         check(&h, &what);
                         choose(&mut h, "ui.corners", Continuity::G2.label_id());
-                        assert!(parameters(&h).get("fit").is_none(), "{what}: a curvature corner puts If too large back to Stop");
+                        assert!(parameters(&h).get("fit").is_none(), "{what}: a curvature corner puts Face limits back to Exact radius");
                     }
                     check(&h, &what);
                     choose(&mut h, "Type", label);

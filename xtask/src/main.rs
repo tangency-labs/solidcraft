@@ -12,6 +12,7 @@ mod i18n;
 mod icons;
 mod kernel_cases;
 mod kernel_ladder;
+mod known_failing;
 mod layers;
 mod licences;
 mod lists;
@@ -68,6 +69,12 @@ commands:
                   --coverage: instead of running cases, fail on a registry command (the CLI's
                   `commands`, planned ones aside) that no recipe.json under tests/kernel-cases/
                   uses and tests/kernel-cases/EXEMPT does not list, and on a stale EXEMPT line
+  known-failing --junit PATH... [--list FILE]
+                  grade a nextest run's junit report (a file, or every .xml under a directory)
+                  against the tests known to fail today, tests/KNOWN_FAILING_TESTS (FILE): fails
+                  on a test that failed and is not listed, and on a listed test that passed
+                  (fixed: take its line off); a listed test that did not run is neither. CI's
+                  test jobs run it after nextest
   action-matrix [--bless] [--results FILE] [--from DIR]
                   try every ordinary action on every face, edge, vertex and body of the design
                   corpus and compare with tests/action_matrix/baseline.json (--bless rewrites it;
@@ -91,7 +98,8 @@ commands:
                   into ATTRIBUTION.md, and delete them (the Generated files workflow runs this on
                   main; pull requests add the pending files instead of editing the shared ones)
   lists [--fix]   check that files many changes add to are sorted one item per line (the
-                  message catalogs in assets/locales); --fix sorts them
+                  message catalogs in assets/locales, tests/KNOWN_FAILING_TESTS); --fix sorts
+                  the catalogs
   skills          check that AGENTS.md and skills/*/SKILL.md cite files, `cargo xtask` commands and skills
                   that exist, that the router table lists exactly the skills there are, and that
                   AGENTS.md and new skills stay short
@@ -126,6 +134,7 @@ fn main() -> ExitCode {
         Some("features") => features::run(&root()),
         Some("i18n") => i18n::run(&root(), &rest),
         Some("kernel-cases") => kernel_cases::run(&rest),
+        Some("known-failing") => known_failing::run(&root(), &rest),
         Some("oracle") => cmd_oracle(rest.iter().position(|a| *a == "--cli").and_then(|i| rest.get(i + 1)).copied()),
         Some("action-matrix") => {
             let arg = |name: &str| rest.iter().position(|a| *a == name).and_then(|i| rest.get(i + 1)).copied();
