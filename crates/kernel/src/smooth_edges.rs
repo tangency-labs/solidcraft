@@ -241,6 +241,8 @@ fn classify(body: &Body, mesh: &Mesh, mut work: usize) -> (Vec<bool>, Vec<bool>)
     let faces = face_evals(&rec);
     let mut smooth = vec![false; mesh.edges.len()];
     let mut sharp = vec![false; mesh.edges.len()];
+    // Edges of one join: the measured edges between the same faces that continue each other.
+    let mut joins: Vec<usize> = Vec::new();
     // The mesh's edges are the record's, in its order.
     for (current, line) in mesh.edges.iter().enumerate().take(rec.edges.len()) {
         let Some(split_work) = line.len().checked_add(1).and_then(|n| n.checked_mul(split_points)) else { break };
@@ -251,6 +253,7 @@ fn classify(body: &Body, mesh: &Mesh, mut work: usize) -> (Vec<bool>, Vec<bool>)
         } else if !same_faces(&rec, mesh, current) {
             None
         } else {
+            joins.push(current);
             let length: f64 = line.windows(2).map(|w| if let [a, b] = w { a.dist(*b) } else { 0. }).sum();
             let Join { smooth: tangent, crease } =
                 if length > 0. && length.is_finite() { join(&rec, &faces, current, length, &mut work) } else { Join::default() };
@@ -266,7 +269,74 @@ fn classify(body: &Body, mesh: &Mesh, mut work: usize) -> (Vec<bool>, Vec<bool>)
             break;
         }
     }
+    whole_joins(&rec, &joins, &mut smooth, work);
     (smooth, sharp)
+}
+
+/// One verdict for each join, however the B-rep splits it: the edges in `measured` between the
+/// same faces that continue each other at a shared vertex (their curves' tangents there within
+/// [`ANGLE`] of one line) are one join, smooth only where every one of its edges is. A seam
+/// SMLib holds as two edges, G2 along one and only near G2 along the other (a G2 corner patch's
+/// side next to the face it ends on), is drawn whole, never to a vertex in the middle of the
+/// line. `work` bounds the pairs compared; past it the edges keep their own verdicts.
+fn whole_joins(record: &Brep, measured: &[usize], smooth: &mut [bool], mut work: usize) {
+    // Per vertex, each measured edge ending there: its faces and its tangent leaving the vertex.
+    let mut ends: std::collections::HashMap<u32, Vec<(usize, Vec<u32>, Vec3)>> = std::collections::HashMap::new();
+    for &e in measured {
+        let Some(edge) = record.edges.get(e) else { continue };
+        let Some(curve) = CurveEval::new(edge.parameters()).ok() else { continue };
+        let mut faces: Vec<u32> = edge.uses.iter().map(|u| u.face).collect();
+        faces.sort_unstable();
+        faces.dedup();
+        let [t0, t1] = edge.interval;
+        for (vertex, t, sign) in [(edge.vertices[0], t0, 1.), (edge.vertices[1], t1, -1.)] {
+            if let Some(d) = curve.derivs(t).and_then(|d| (d.1 * sign).normalized()) {
+                ends.entry(vertex).or_default().push((e, faces.clone(), d));
+            }
+        }
+    }
+    let mut parent: Vec<usize> = (0..smooth.len()).collect();
+    fn root(parent: &mut [usize], mut i: usize) -> usize {
+        while let Some(&p) = parent.get(i) {
+            if p == i {
+                break;
+            }
+            let up = parent.get(p).copied().unwrap_or(p);
+            if let Some(slot) = parent.get_mut(i) {
+                *slot = up;
+            }
+            i = up;
+        }
+        i
+    }
+    let cos = ANGLE.cos();
+    'vertices: for at in ends.values() {
+        for (i, (a, fa, da)) in at.iter().enumerate() {
+            for (b, fb, db) in at.iter().skip(i + 1) {
+                let Some(left) = work.checked_sub(1) else { break 'vertices };
+                work = left;
+                // Leaving the vertex in opposite directions: one continues the other.
+                if a != b && fa == fb && da.dot(*db) <= -cos {
+                    let (ra, rb) = (root(&mut parent, *a), root(&mut parent, *b));
+                    if let Some(slot) = parent.get_mut(ra) {
+                        *slot = rb;
+                    }
+                }
+            }
+        }
+    }
+    let mut whole: std::collections::HashMap<usize, bool> = std::collections::HashMap::new();
+    for &e in measured {
+        let r = root(&mut parent, e);
+        let own = smooth.get(e).copied().unwrap_or(false);
+        whole.entry(r).and_modify(|s| *s &= own).or_insert(own);
+    }
+    for &e in measured {
+        let r = root(&mut parent, e);
+        if let (Some(slot), Some(&all)) = (smooth.get_mut(e), whole.get(&r)) {
+            *slot = all;
+        }
+    }
 }
 
 #[cfg(test)]
@@ -357,6 +427,31 @@ mod tests {
         unknown.edge_faces[index].push(999);
         assert!(!flags(&body, &unknown).0[index]);
         assert!(classify(&body, &mesh, 0).0.iter().all(|f| !*f));
+    }
+
+    /// A G2 corner patch's sides are G2 to their rounds except near the faces they end on, and
+    /// SMLib holds each side as two edges: the side is one join, drawn whole, not up to the
+    /// vertex in its middle where the G2 half begins (the 20 mm box's r3 corner).
+    #[test]
+    fn a_seam_split_in_two_edges_is_drawn_whole() {
+        let body = crate::box_solid(Vec3::ZERO, Vec3::new(20., 20., 20.)).unwrap();
+        let picks = [Vec3::new(20., 20., 10.), Vec3::new(20., 10., 20.), Vec3::new(10., 20., 20.)];
+        let g2 = crate::fillet_g2_corners(&body, &picks, 3., &[]).unwrap();
+        let mesh = g2.mesh(&crate::MeshTolerance::chord(0.02)).unwrap();
+        let rec = crate::native::brep_record(&g2).unwrap();
+        let patch = rec
+            .faces
+            .iter()
+            .position(|f| !matches!(f.surface, Surface::Plane { .. } | Surface::PlaneThrough { .. } | Surface::Cylinder { .. }))
+            .unwrap() as u32;
+        let rounds: Vec<u32> = (0..rec.faces.len() as u32).filter(|f| matches!(rec.faces[*f as usize].surface, Surface::Cylinder { .. })).collect();
+        assert_eq!(rounds.len(), 3);
+        for round in rounds {
+            let side: Vec<usize> =
+                (0..mesh.edges.len()).filter(|e| mesh.edge_faces[*e].contains(&patch) && mesh.edge_faces[*e].contains(&round)).collect();
+            assert_eq!(side.len(), 2, "SMLib splits the side in two: {side:?}");
+            assert!(side.iter().all(|e| mesh.shaded_edge_visible(*e)), "the side to round {round} is drawn whole: {side:?}");
+        }
     }
 
     /// An extruded circle of eight cubics whose first cubic leaves its start turned by `degrees`:

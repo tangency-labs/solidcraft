@@ -2324,36 +2324,38 @@ fn cut_across_a_concave_notch_uses_crossings_not_just_contained_corners() {
     assert!((volume(&mut s) - 10500.0).abs() < 1e-6);
 }
 
+/// A round flange stays an exact circle through unfold, refold and DXF (never a polyline), and a
+/// cut close to its rim stays a hole in the flat pattern.
 #[test]
-fn tiny_cut_inside_exact_circle_survives_unfold_refold_and_dxf() {
+fn a_round_flange_stays_a_circle_and_keeps_a_cut_near_its_rim_through_unfold_refold_and_dxf() {
     for initially_flat in [false, true] {
         let mut s = Session::default();
         run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Disc"}));
         run(&mut s, "sketch.circle.center", json!({"center": [0,0], "radius": 10}));
         run(&mut s, "sketch.finish", json!({}));
         run(&mut s, "sheet.flange", json!({"sketch": "Disc"}));
-        let circle = s.model.state().sheets[0].base.outer.clone();
-        let displayed = circle.polyline(1e-3);
-        // A square 0.2 µm across, centred 0.4 µm inside the circle on the bisector of the
-        // display polyline's first chord (its middle 0.98 µm inside): outside the polyline, inside
-        // the exact circle, each of its walls and its gap to the rim wider than SMLib's 0.1 µm
-        // modelling tolerance.
-        let (half, at) = (0.0001, (displayed[0] + displayed[1]).normalized().unwrap() * 9.9996);
-        assert!(!circle.contains(at));
         if initially_flat {
             run(&mut s, "sheet.unfold", json!({}));
         }
-        run(&mut s, "sketch.create", json!({"plane": "XY", "name": "TinyCut"}));
-        run(&mut s, "sketch.rectangle.two_point", json!({"p0": [at.x-half,at.y-half], "p1": [at.x+half,at.y+half]}));
+        // A 1 mm square whose outer side is 0.5 mm inside the rim.
+        run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Cut"}));
+        run(&mut s, "sketch.rectangle.two_point", json!({"p0": [8.5,-0.5], "p1": [9.5,0.5]}));
         run(&mut s, "sketch.finish", json!({}));
-        run(&mut s, "solid.extrude", json!({"sketch": "TinyCut", "through_all": true, "operation": "cut", "direction": "symmetric"}));
+        run(&mut s, "solid.extrude", json!({"sketch": "Cut", "through_all": true, "operation": "cut", "direction": "symmetric"}));
         for stage in ["sheet.unfold", "sheet.refold"] {
             let regions = s.model.state().sheets[0].flat_regions().unwrap();
+            let rim = &regions[0].outer.segs;
+            assert!(
+                !rim.is_empty() && rim.iter().all(|seg| matches!(seg, solidcraft_geom::Seg2::Arc { radius, .. } if (*radius - 10.0).abs() < 1e-12)),
+                "{rim:?}"
+            );
             assert_eq!(regions[0].holes.len(), 1);
-            assert!((regions[0].holes[0].signed_area().abs() - 4e-8).abs() < 1e-13);
+            assert!((regions[0].holes[0].signed_area().abs() - 1.0).abs() < 1e-12);
             assert_eq!(s.model.state().bodies.len(), 1);
             let dxf = run(&mut s, "sheet.export_dxf", json!({}))["dxf"].as_str().unwrap().to_string();
-            assert_eq!(solidcraft_io::read_dxf(&dxf).unwrap().len(), 5);
+            let drawn = solidcraft_io::read_dxf(&dxf).unwrap();
+            assert!(drawn.iter().any(|g| matches!(g, solidcraft_io::Geom2::Circle(_, r) if (*r - 10.0).abs() < 1e-12)), "{drawn:?}");
+            assert_eq!(drawn.len(), 5, "the circle and the square's four sides: {drawn:?}");
             if stage == "sheet.unfold" && initially_flat {
                 run(&mut s, "sheet.refold", json!({}));
             }
