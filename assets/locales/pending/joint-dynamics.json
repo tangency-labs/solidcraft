@@ -1,0 +1,26 @@
+{
+  "en": {
+    "cmd.joint_dynamics": "Joint Dynamics",
+    "Dynamics": "Dynamics",
+    "Effort": "Effort",
+    "Damping": "Damping",
+    "Friction": "Friction",
+    "Not a number": "Not a number"
+  },
+  "ar": {
+    "cmd.joint_dynamics": "ديناميكيات المفصل",
+    "Dynamics": "الديناميكيات",
+    "Effort": "القوة القصوى",
+    "Damping": "التخميد",
+    "Friction": "الاحتكاك",
+    "Not a number": "ليس رقمًا"
+  },
+  "he": {
+    "cmd.joint_dynamics": "דינמיקה של מפרק",
+    "Dynamics": "דינמיקה",
+    "Effort": "כוח מרבי",
+    "Damping": "ריסון",
+    "Friction": "חיכוך",
+    "Not a number": "לא מספר"
+  }
+}

@@ -96,6 +96,7 @@ mod tests {
             angle: 0.6,
             suppressed: false,
             exprs: Default::default(),
+            dynamics: Vec::new(),
         }
     }
 

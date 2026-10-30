@@ -335,6 +335,40 @@ pub struct Joint {
     /// again whenever the design changes, so a joint follows the parameters it is defined by.
     #[serde(default, skip_serializing_if = "JointExprs::is_empty")]
     pub exprs: JointExprs,
+    /// Per value: what a simulator reads (`JointDynamics`). The joint solver does not use them.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub dynamics: Vec<Option<JointDynamics>>,
+}
+
+/// The largest effort, velocity, damping or friction a joint can hold.
+pub const MAX_DYNAMICS: f64 = 1e9;
+
+/// What a simulator needs to know about one joint value, in SI: effort in N or N m, velocity in
+/// m/s or rad/s, damping in N s/m or N m s/rad, friction in N or N m.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct JointDynamics {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effort: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub velocity: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub damping: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub friction: Option<f64>,
+}
+
+impl JointDynamics {
+    /// Without the values a hand-edited file could hold that no command accepts.
+    pub fn sane(&self) -> JointDynamics {
+        let positive = |x: &f64| x.is_finite() && *x > 0.0 && *x <= MAX_DYNAMICS;
+        let not_negative = |x: &f64| x.is_finite() && *x >= 0.0 && *x <= MAX_DYNAMICS;
+        JointDynamics {
+            effort: self.effort.filter(positive),
+            velocity: self.velocity.filter(positive),
+            damping: self.damping.filter(not_negative),
+            friction: self.friction.filter(not_negative),
+        }
+    }
 }
 
 /// Expressions a joint's numbers follow (over the design's parameters): the offset (a length),
@@ -2331,6 +2365,7 @@ mod tests {
                 angle: 0.0,
                 suppressed: false,
                 exprs: Default::default(),
+                dynamics: Vec::new(),
             })
             .collect();
         let links =

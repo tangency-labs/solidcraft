@@ -650,3 +650,68 @@ fn urdf_files_stay_inside_allow_paths() {
     let _ = std::fs::remove_dir_all(&inside);
     let _ = std::fs::remove_dir_all(&outside);
 }
+
+#[test]
+fn joint_dynamics_are_written_per_joint_and_the_export_value_is_only_a_fallback() {
+    let mut s = hinge();
+    run(&mut s, "joint.dynamics", json!({"joint": "Hinge", "effort": 12.5, "velocity": 2.0, "damping": 0.1}));
+    let options = solidcraft_io::UrdfOptions { effort: Some(77.0), velocity: Some(7.0), ..Default::default() };
+    let xml = solidcraft_io::urdf(&s.doc, &s.doc.painted(&s.model.state()), "robot", &options).map(|p| p.xml).unwrap_or_else(|e| panic!("{e}"));
+    assert!(xml.contains(r#"effort="12.5" velocity="2""#), "{xml}");
+    assert!(xml.contains(r#"<dynamics damping="0.1"/>"#), "{xml}");
+    assert!(!xml.contains(r#"effort="77""#), "{xml}");
+}
+
+#[test]
+fn a_joint_with_only_some_dynamics_takes_the_rest_from_the_fallback() {
+    let mut s = hinge();
+    run(&mut s, "joint.dynamics", json!({"joint": "Hinge", "effort": 12.5}));
+    let p = package(&s);
+    assert!(p.xml.contains(r#"effort="12.5" velocity="10""#), "{}", p.xml);
+    assert!(!p.xml.contains("<dynamics"), "{}", p.xml);
+    assert!(has_warning(&p, "Hinge"), "{:?}", p.warnings);
+}
+
+#[test]
+fn a_joint_with_saved_limits_is_not_warned_about() {
+    let mut s = hinge();
+    run(&mut s, "joint.dynamics", json!({"joint": "Hinge", "effort": 12.5, "velocity": 2.0}));
+    let p = package(&s);
+    assert!(!has_warning(&p, "not given"), "{:?}", p.warnings);
+}
+
+#[test]
+fn urdf_without_dynamics_is_unchanged() {
+    let p = package(&hinge());
+    assert!(!p.xml.contains("<dynamics"), "{}", p.xml);
+    assert!(p.xml.contains(r#"effort="1000" velocity="10""#), "{}", p.xml);
+    assert!(has_warning(&p, "not given"), "{:?}", p.warnings);
+}
+
+#[test]
+fn a_chain_reached_from_its_b_side_keeps_each_values_dynamics() {
+    let mut s = two_cubes();
+    ground(&mut s, "A", false);
+    ground(&mut s, "B", true);
+    joint(&mut s, "cylindrical", "Sleeve", json!([]));
+    run(&mut s, "joint.dynamics", json!({"joint": "Sleeve", "index": 0, "damping": 0.1}));
+    run(&mut s, "joint.dynamics", json!({"joint": "Sleeve", "index": 1, "damping": 0.2}));
+    let p = package(&s);
+    let damping = |step| p.model.joints.iter().find(|j| j.step == step).and_then(|j| j.dynamics.damping);
+    assert_eq!(damping(Step::Revolute), Some(0.1), "{}", p.xml);
+    assert_eq!(damping(Step::Prismatic), Some(0.2), "{}", p.xml);
+}
+
+#[test]
+fn hand_edited_dynamics_are_ignored_with_a_warning() {
+    let mut s = hinge();
+    let bad =
+        solidcraft_doc::joints::JointDynamics { effort: Some(f64::NAN), velocity: Some(-1.0), damping: Some(f64::INFINITY), friction: Some(-2.0) };
+    if let Some(j) = s.doc_mut().assembly.joints.first_mut() {
+        j.dynamics = vec![Some(bad); 5];
+    }
+    let p = package(&s);
+    assert!(!p.xml.contains("<dynamics"), "{}", p.xml);
+    assert!(p.xml.contains(r#"effort="1000" velocity="10""#), "{}", p.xml);
+    assert!(has_warning(&p, "dynamics"), "{:?}", p.warnings);
+}

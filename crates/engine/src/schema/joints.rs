@@ -111,3 +111,47 @@ pub struct EditJointResult {
 #[cfg(test)]
 #[path = "joints_tests.rs"]
 mod tests;
+
+/// Set or clear what a simulator reads for one value of a joint. URDF export writes these; the
+/// joint solver does not use them. Give none of the four to clear the value's dynamics.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct JointDynamicsParams {
+    /// The joint, by id or name.
+    pub joint: IdOrName,
+    /// Which of the joint's values. Default: 0.
+    #[serde(default)]
+    pub index: Option<usize>,
+    /// The most force or torque, in N or N m. Above 0.
+    #[serde(default)]
+    pub effort: Option<f64>,
+    /// The highest speed, in m/s or rad/s. Above 0.
+    #[serde(default)]
+    pub velocity: Option<f64>,
+    /// Damping, in N s/m or N m s/rad. 0 or more.
+    #[serde(default)]
+    pub damping: Option<f64>,
+    /// Friction, in N or N m. 0 or more.
+    #[serde(default)]
+    pub friction: Option<f64>,
+}
+
+/// What `joint.dynamics` returns.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct JointDynamicsResult {
+    /// The joint, by id.
+    pub joint: u64,
+    /// The value set.
+    pub index: usize,
+    /// The effort now saved.
+    pub effort: Option<f64>,
+    /// The velocity now saved.
+    pub velocity: Option<f64>,
+    /// The damping now saved.
+    pub damping: Option<f64>,
+    /// The friction now saved.
+    pub friction: Option<f64>,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}

@@ -730,6 +730,10 @@ pub(crate) fn hostile_values() -> Vec<Value> {
 #[test]
 fn hostile_params_never_panic() {
     let keys = [
+        "effort",
+        "velocity",
+        "damping",
+        "friction",
         "plane",
         "offset",
         "name",

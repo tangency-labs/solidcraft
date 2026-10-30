@@ -280,6 +280,7 @@ fn motion_key(cmds: &[(String, Value)], revision: u64, colors: Colors) -> Option
                     | "joint.as_built"
                     | "joint.edit"
                     | "joint.limits"
+                    | "joint.dynamics"
                     | "joint.gear"
                     | "joint.rack_pinion"
                     | "joint.screw"

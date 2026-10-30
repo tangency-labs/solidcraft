@@ -2428,3 +2428,57 @@ fn driving_one_cylindrical_coordinate_preserves_the_other_expression_and_reports
         assert!(s.execute("joint.drive", &json!({"joint":joint,"index":bad,"value":0})).is_err());
     }
 }
+
+/// Two cubes on a cylindrical joint.
+fn sleeve() -> Session {
+    let mut s = Session::default();
+    for (name, x) in [("A", 0), ("B", 20)] {
+        s.execute("component.activate", &json!({"component": "root"})).ok();
+        s.execute("component.create", &json!({"name": name})).ok();
+        s.execute("solid.box", &json!({"length": 10, "width": 10, "height": 10, "corner": [x, 0, 0]})).ok();
+    }
+    s.execute("joint.create", &json!({"type": "cylindrical", "a": {"face": [5, 5, 10]}, "b": {"face": [25, 5, 0]}, "name": "Sleeve"})).ok();
+    s
+}
+
+#[test]
+fn joint_dynamics_clears_when_nothing_is_given() {
+    let mut s = sleeve();
+    assert!(s.execute("joint.dynamics", &json!({"joint": "Sleeve", "damping": 0.5})).is_ok());
+    assert_eq!(s.doc.assembly.joints[0].dynamics[0].and_then(|d| d.damping), Some(0.5));
+    assert!(s.execute("joint.dynamics", &json!({"joint": "Sleeve"})).is_ok());
+    assert!(s.doc.assembly.joints[0].dynamics.is_empty());
+}
+
+#[test]
+fn a_changed_joint_type_keeps_only_its_own_slots() {
+    let mut s = sleeve();
+    assert!(s.execute("joint.dynamics", &json!({"joint": "Sleeve", "index": 1, "damping": 0.5})).is_ok());
+    assert_eq!(s.doc.assembly.joints[0].dynamics.len(), 2);
+    assert!(s.execute("joint.edit", &json!({"joint": "Sleeve", "type": "revolute"})).is_ok());
+    assert_eq!(s.doc.assembly.joints[0].dynamics.len(), 1);
+}
+
+#[test]
+fn joint_dynamics_are_reported_by_the_joint_list() {
+    let mut s = sleeve();
+    assert!(s.execute("joint.dynamics", &json!({"joint": "Sleeve", "effort": 3.0})).is_ok());
+    let list = s.execute("joint.list", &json!({})).unwrap_or_default();
+    assert_eq!(list["joints"][0]["values"][0]["dynamics"]["effort"], json!(3.0), "{list}");
+}
+
+#[test]
+fn joint_dynamics_refuses_hostile_values() {
+    let mut s = sleeve();
+    for p in [
+        json!({"joint": "Sleeve", "effort": 0.0}),
+        json!({"joint": "Sleeve", "velocity": -1.0}),
+        json!({"joint": "Sleeve", "damping": -1.0}),
+        json!({"joint": "Sleeve", "friction": 1e300}),
+        json!({"joint": "Sleeve", "index": 99, "damping": 1.0}),
+        json!({"joint": "Nobody", "damping": 1.0}),
+    ] {
+        assert!(s.execute("joint.dynamics", &p).is_err(), "{p}");
+    }
+    assert!(s.doc.assembly.joints[0].dynamics.iter().all(Option::is_none));
+}
