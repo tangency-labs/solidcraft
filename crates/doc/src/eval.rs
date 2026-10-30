@@ -3642,6 +3642,15 @@ fn blend_body(
     let (mut used, mut tapered) = (None, Vec::new());
     // The blended body, and the lineage of what the last blend started from.
     let (nb, from) = match &f.kind {
+        // A curvature-continuous fillet's corners are G2 patches, whatever `corner` says: SMLib's
+        // own corner patch is only tangent to its rounds.
+        FeatureKind::Fillet { style: crate::FilletStyle::Curvature, setbacks, .. } => {
+            let mut corners = Vec::with_capacity(setbacks.len());
+            for c in setbacks {
+                corners.push((c.vertex.0, val(vals, &c.distance, Kind::Length)?));
+            }
+            (kernel::fillet_g2_with_g2_corners(&mb.body, edges, r, &corners)?, input)
+        }
         FeatureKind::Fillet { corner, setbacks, .. } if matches!(corner, crate::FilletCorner::G2) || !setbacks.is_empty() => {
             // Each setback: its corner's vertex and its distance.
             let mut corners = Vec::with_capacity(setbacks.len());
@@ -3653,7 +3662,6 @@ fn blend_body(
                 crate::FilletCorner::Rolling => (kernel::fillet_setback(&mb.body, edges, r, &corners)?, input),
             }
         }
-        FeatureKind::Fillet { style: crate::FilletStyle::Curvature, .. } => (kernel::fillet_g2(&mb.body, edges, r)?, input),
         FeatureKind::Fillet { style: crate::FilletStyle::Chord, .. } => (kernel::fillet_chord(&mb.body, edges, r)?, input),
         FeatureKind::Fillet { style: crate::FilletStyle::Variable { radius2, start, mid, smooth }, .. } => {
             let r2 = val(vals, radius2, Kind::Length)?;

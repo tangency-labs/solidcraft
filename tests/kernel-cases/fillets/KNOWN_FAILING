@@ -51,4 +51,5 @@ every-pocket-rim-edges-r2 a corner patch where two rim rounds meet at each conca
 every-pocket-rim-edges-r5-as-deep-as-pocket a corner patch where two rim rounds meet at each concave pocket corner (15 faces, not 11) instead of the mitre the rounds make running into each other
 report-fillet-concave-arc-bar-top-into-cylinder-solver-residues SMLib status 1001: SmFilletNx1Corner cannot make the topology at the arc's end (fillet error 3, corner type 8)
 report-fillet-corner-after-round-running-into-cylinder-solver-residues SMLib's check refuses the round: its corner's surface of revolution is close to singular at its boundary (SmSurface test 5)
+report-fillet-curvature-three-edges-at-bar-corner SMLib's check refuses the open setback sheet of curvature rounds: a 2D B-spline curve cusp (SmBSplineCurve test 13)
 report-fillet-edge-tangent-at-one-end-into-cylinder SMLib's check refuses the round that fades out at the edge's tangent end: internal poles, coincident control points, cusps
