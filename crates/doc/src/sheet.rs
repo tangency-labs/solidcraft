@@ -830,6 +830,21 @@ fn rect(a: Vec2, b: Vec2, c: Vec2, d: Vec2) -> Region2 {
     Region2 { outer: lp, holes: Vec::new() }
 }
 
+/// Where two edges of a loop meet at an angle. A curve's own points are not corners, nor is the
+/// joint between two curves that go on smoothly (an ellipse's quarters).
+fn outline_corners(outline: &Loop2) -> Vec<Vec2> {
+    let segs = &outline.segs;
+    let mut corners = Vec::new();
+    for (i, next) in segs.iter().enumerate() {
+        let Some(prev) = segs.get((i + segs.len() - 1) % segs.len()) else { continue };
+        let (t0, t1) = (prev.end_tangent(), next.start_tangent());
+        if t0.cross(t1).abs() > 1e-6 || t0.dot(t1) < 0.0 {
+            corners.push(next.start());
+        }
+    }
+    corners
+}
+
 /// Round to a 1e-9 mm grid (keeps trimmed edges exactly where the kernel expects them).
 fn snap(v: Vec2) -> Vec2 {
     let r = |x: f64| (x * 1e9).round() / 1e9;
@@ -3684,11 +3699,12 @@ impl SheetBody {
             let pts = dedup(&r.outer.ccw().polyline(1e-3));
             let (a2, b2) = (Vec2::new(fa.x, fa.y), Vec2::new(fb.x, fb.y));
             if pts.contains((a2 + b2) * 0.5) || polys_cross(&pts, &[a2, b2, (a2 + b2) * 0.5]) {
-                found = Some((pi, inv, a2, b2, pts));
+                found = Some((pi, inv, a2, b2, pts, r.outer));
                 break;
             }
         }
-        let (panel, inv, a2, b2, pts) = found.ok_or_else(|| DocError::Invalid("the fold line must lie on a flat face of the sheet".into()))?;
+        let (panel, inv, a2, b2, pts, outline) =
+            found.ok_or_else(|| DocError::Invalid("the fold line must lie on a flat face of the sheet".into()))?;
         let d = (b2 - a2).normalized().ok_or_else(|| DocError::Invalid("the fold line has no length".into()))?;
         let mut n = Vec2::new(-d.y, d.x);
         let l0 = a2.dot(n);
@@ -3777,8 +3793,10 @@ impl SheetBody {
         let (u0, u1) = (us.iter().cloned().fold(f64::MAX, f64::min), us.iter().cloned().fold(f64::MIN, f64::max));
         if ((u1 - u0) * ba - signed_area(&strip).abs()).abs() > 1e-6 * (u1 - u0).max(1.0) * ba.max(1.0) {
             // A corner of the outline inside the zone (e.g. a fold right at a tab's root): name
-            // it and how far the line has to move to clear it.
-            let corners: Vec<(Vec2, f64)> = pts.iter().map(|q| (*q, q.dot(n) - s0)).filter(|(_, s)| *s > 1e-6 && *s < ba - 1e-6).collect();
+            // it and how far the line has to move to clear it. Only where two of the outline's
+            // edges meet at an angle: the points along a curved edge are not corners (#6957).
+            let corners: Vec<(Vec2, f64)> =
+                outline_corners(&outline).into_iter().map(|q| (q, q.dot(n) - s0)).filter(|(_, s)| *s > 1e-6 && *s < ba - 1e-6).collect();
             if let Some(&(c, _)) = corners.first() {
                 let on = corners.iter().fold(0.0_f64, |m, (_, s)| m.max(*s));
                 let back = corners.iter().fold(0.0_f64, |m, (_, s)| m.max(ba - *s));
@@ -3788,6 +3806,16 @@ impl SheetBody {
                      move the fold line at least {on:.3} mm toward the side that folds or {back:.3} mm toward the side that stays",
                     w.x, w.y, w.z
                 )));
+            }
+            // A slanted or curved edge across the zone: fold the rectangle that holds the panel,
+            // and cut what lies outside its outline, as fold, unfold, cut and refold would (#6957).
+            let saved = self.clone();
+            if self.hold_base_in_rectangle(panel, &outline, &pts, n, d) {
+                let folded = self.fold_side(a, b, angle, radius, position, flip, fixed, warning, other_side);
+                if folded.is_err() {
+                    *self = saved;
+                }
+                return folded;
             }
             return Err(DocError::Invalid("not supported yet: folds whose bend zone crosses a slanted or curved edge of the sheet".into()));
         }
@@ -3844,6 +3872,33 @@ impl SheetBody {
         // Cut-outs may cross the bend where their edges run along or across it (the faces
         // check the rest when the sheet is built).
         Ok(i)
+    }
+
+    /// Make the base the rectangle that holds it, square to the fold line (`d` along it, `n`
+    /// across), and cut what lies outside its `outline` back off, as a cut-out made in the flat
+    /// would. The material is the same, and a fold then has a bend zone square across the sheet,
+    /// which the cut-out's edges cross as any cut-out's do (#6957). Only for the base with no
+    /// flange on it yet, which the rectangle could run into; false when nothing changed.
+    fn hold_base_in_rectangle(&mut self, panel: Option<usize>, outline: &Loop2, pts: &[Vec2], n: Vec2, d: Vec2) -> bool {
+        if panel.is_some() || !self.flanges.is_empty() || pts.is_empty() {
+            return false;
+        }
+        let (mut u0, mut u1, mut v0, mut v1) = (f64::MAX, f64::MIN, f64::MAX, f64::MIN);
+        for q in pts {
+            (u0, u1) = (u0.min(q.dot(d)), u1.max(q.dot(d)));
+            (v0, v1) = (v0.min(q.dot(n)), v1.max(q.dot(n)));
+        }
+        let corner = |u: f64, v: f64| snap(d * u + n * v);
+        let held = rect(corner(u0, v0), corner(u1, v0), corner(u1, v1), corner(u0, v1));
+        if (held.area() - signed_area(pts).abs()).abs() < 1e-9 * held.area().max(1.0) {
+            return false;
+        }
+        // The cut reaches past the rectangle, so none of its edges lies on the sheet's own edge.
+        let m = 1.0 + 0.1 * (u1 - u0).max(v1 - v0);
+        let cut = rect(corner(u0 - m, v0 - m), corner(u1 + m, v0 - m), corner(u1 + m, v1 + m), corner(u0 - m, v1 + m));
+        self.holes.push(Region2 { outer: cut.outer, holes: vec![outline.ccw().reversed()] });
+        self.base = Region2 { outer: held.outer, holes: self.base.holes.clone() };
+        true
     }
 
     /// A fold whose bend zone falls apart into several pieces (`strips`: tabs on one line). The
