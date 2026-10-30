@@ -617,6 +617,54 @@ mod tests {
         }
     }
 
+    /// A square with a square hole (20 x 20 at r 10 to 30, the hole 8 x 8 centred in it)
+    /// turned a whole turn about z is a ring with a ring-shaped void: with the opt-ins
+    /// (WR-529, the fork's tangency-labs/smlib@38b4212) the void is not counted as
+    /// material, and the volume is Pappus's, area 336 about the centroid at r 20.
+    #[test]
+    fn holed_profile_full_turn_leaves_the_hole_a_void() {
+        use crate::geom::attribute::{AttributeStore, ObjectKey};
+        use crate::mass::integrator::properties::{brep_volume, PropertyAttributes};
+
+        let square = |x0: f64, z0: f64, side: f64| {
+            let (x1, z1) = (x0 + side, z0 + side);
+            [
+                segment([x0, 0.0, z0], [x1, 0.0, z0]),
+                segment([x1, 0.0, z0], [x1, 0.0, z1]),
+                segment([x1, 0.0, z1], [x0, 0.0, z1]),
+                segment([x0, 0.0, z1], [x0, 0.0, z0]),
+            ]
+        };
+        let mut profile = square(10.0, 0.0, 20.0).to_vec();
+        profile.extend(square(16.0, 6.0, 8.0));
+        let curves: Vec<Option<&Curve>> = profile.iter().map(Some).collect();
+        let (o, z) = (Point3::new(0.0, 0.0, 0.0), Vec3::new(0.0, 0.0, 1.0));
+
+        let mut k = Kernel::default();
+        k.fixes.revolve_nested_shells_as_cavities = true;
+        k.fixes.revolve_holed_profile_void = true;
+        let mut ring = create_rotational_sweep(&mut k, &curves, o, z, 360.0, true).unwrap();
+        let store = AttributeStore::default();
+        let key_of = |_| ObjectKey(0);
+        let attributes = PropertyAttributes {
+            store: &store,
+            key_of: &key_of,
+        };
+        let volume = brep_volume(&k, &mut ring, 1e-6, &attributes).unwrap();
+        let want = (400.0 - 64.0) * 2.0 * std::f64::consts::PI * 20.0;
+        assert!(
+            (volume - want).abs() < 1e-3 * want,
+            "volume {volume}, want {want}"
+        );
+        let check = crate::topology::brep::validation::check_brep(
+            &mut k,
+            &mut ring,
+            crate::topology::brep::validation::CheckLevel::Level2,
+        )
+        .unwrap();
+        assert_eq!(check.failure_count(), 0, "{:?}", check.lines());
+    }
+
     /// An open chain of two lines (out from r 6 to 8, then up 2) revolved half a turn into
     /// a sheet joins at its meeting vertex with the opt-in (WR-409): two faces, the flat
     /// ring sector and the cylinder, of area (8^2 - 6^2) pi / 2 + 8 pi 2.

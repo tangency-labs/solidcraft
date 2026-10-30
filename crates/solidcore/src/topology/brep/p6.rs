@@ -1993,7 +1993,10 @@ fn nest_shells(
 /// `nest_shells` fires), tells whether it lies inside. A candidate inside exactly one
 /// other, itself inside none, has its outside shell moved into that solid's region,
 /// its own region marked void and its faces swapped to point into the cavity.
-/// Deeper nesting is left as built.
+/// Deeper nesting is left as built. With `Kernel::fixes.revolve_holed_profile_void`
+/// (WR-529), a B-rep whose infinite region holds one shell, more than two regions and
+/// only closed face-use shells gets its void flags from the nesting instead
+/// ([`super::p1::set_region_is_void_flags_for_nested_solids`]).
 pub(crate) fn nest_closed_shells_as_cavities(
     k: &mut Kernel,
     brep: &mut Brep,
@@ -2002,6 +2005,26 @@ pub(crate) fn nest_closed_shells_as_cavities(
     let Some(infinite) = brep.infinite_region() else {
         return Ok(());
     };
+    // Not upstream (WR-529, opt-in `revolve_holed_profile_void`; the fork's
+    // tangency-labs/smlib@38b4212): the stitch may have nested the shells itself (a hole in
+    // the profile: the ring it turns into lies inside the ring around it, in that ring's
+    // region) and left the region inside the inner shell material. Where every shell is
+    // closed the regions alternate material and void from the infinite region in.
+    if k.fixes.revolve_holed_profile_void && brep.region(infinite)?.shells.len() < 2 {
+        let regions = super::p1::regions(brep, None)?;
+        if regions.len() <= 2 {
+            return Ok(());
+        }
+        for &region in &regions {
+            for &s in &brep.region(region)?.shells {
+                let shell = brep.shell(s)?;
+                if !shell.is_faceuse_shell() || !shell.is_closed(brep, s)? {
+                    return Ok(());
+                }
+            }
+        }
+        return super::p1::set_region_is_void_flags_for_nested_solids(k, brep);
+    }
     // (solid region, its shell, the mated shell in the infinite region)
     let mut solids: Vec<(RegionId, ShellId, ShellId)> = Vec::new();
     for region in super::p1::regions(brep, None)? {
