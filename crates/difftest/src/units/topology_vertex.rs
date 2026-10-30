@@ -7,18 +7,18 @@
 //! B-spline surface or a plane (`CreateFaceFromSurface`), or the wire network of
 //! `prog_test` `my_test_topology`, or a chain of wire edges. The Rust side builds every
 //! non-file source itself ([`crate::own_builder`] under this shim's [`CONVENTIONS`], a
-//! chain by [`build_chain`]). For an `.smb` file it imports the graph the shim exports
-//! in traversal order (raw members, including each vertex's vertex use list in upstream list order,
-//! each vertex use's cached gaps, each edge's curve identity and each face's upward face
-//! use) into a [`Brep`] and runs the ported functions on it; their results are compared
-//! as traversal indices, flags, statuses and values. `init_gaps` has the C++ side compute the cached
-//! gaps before the op, so that cached gaps and their resets are observable. A B-rep
-//! whose edges share a curve object, or whose edge curves are not B-splines or lines,
-//! is a harness error (the Rust side could not represent it). An analytic face surface
-//! (cone, sphere, ...) travels exactly as its upstream database record when that record
-//! is lossless (`sc_analytic_export.h`, read by [`crate::util::read_exact_surface`]);
-//! any other `SmBSplineSurface` subclass is held only as its B-spline part, and the
-//! solving ops on such a B-rep are deferred.
+//! chain by [`build_chain`]) and reads an `.smb` file with the Rust reader
+//! ([`crate::own_reader::file_in_order`]), both renumbered into the shim's traversal
+//! order: no C++ export reaches the Rust side. It runs the ported functions on that
+//! B-rep; their results are compared as traversal indices, flags, statuses and values.
+//! `init_gaps` has the C++ side compute the cached gaps before the op, so that cached
+//! gaps and their resets are observable. The C++ side resolves its selectors on the
+//! import of the shim's export ([`import`]): a B-rep whose edges share a curve object, or
+//! whose edge curves are not B-splines or lines, is a harness error there. An analytic
+//! face surface (cone, sphere, ...) travels in that export exactly as its upstream
+//! database record when that record is lossless (`sc_analytic_export.h`, read by
+//! [`crate::util::read_exact_surface`]); any other `SmBSplineSurface` subclass only as
+//! its B-spline part, which the Rust side, reading the file itself, never sees.
 //!
 //! The vertex selector is taken modulo the vertex count (so generated cases need no
 //! counts); other selectors likewise, `-1` selecting null.
@@ -1704,11 +1704,13 @@ fn build_chain(
     Ok(())
 }
 
-/// The Rust B-rep of a case, the face surface subclass held only inexactly (none for a
-/// built source) and its entity counts, or the output of a failed build. Shim-built
-/// sources are built by the Rust kernel ([`crate::own_builder`] under this shim's
-/// [`CONVENTIONS`]; a chain by [`build_chain`]); only `.smb` file sources are still
-/// imported from the C++ export ([`import`]).
+/// The Rust B-rep of a case, the face surface subclass held only inexactly (always
+/// none: the Rust side builds or reads every source itself) and its entity counts, or
+/// the output of a failed build or read. Shim-built sources are built by the Rust kernel
+/// ([`crate::own_builder`] under this shim's [`CONVENTIONS`]; a chain by
+/// [`build_chain`]), `.smb` file sources read by the Rust reader
+/// ([`crate::own_reader::file_in_order`]), both renumbered into the shim's traversal
+/// order.
 fn own_brep(i: &Inputs) -> Result<crate::own_builder::RustBrep<OwnBrep>, HarnessError> {
     use crate::own_builder::{build_as, counts, failed_output, finish, in_new_brep, Built};
     let mut k = Kernel::default();
@@ -1733,12 +1735,26 @@ fn own_brep(i: &Inputs) -> Result<crate::own_builder::RustBrep<OwnBrep>, Harness
         }
         Some(Built::Failed(e)) => Ok(Err(failed_output(&e))),
         None => {
-            let ex = export(i)?;
-            let Some(c) = ffi::counts(&ex) else {
-                return Ok(Err(build_failure(&ex)));
+            // an `.smb` file: the Rust reader, renumbered into the shim's traversal order
+            let BrepIn::File { rebuild, .. } = &i.brep else {
+                return Err(harness("own builder: a non-file source was not built"));
             };
-            let (b, inexact) = import(&ex)?;
-            Ok(Ok((b, inexact, c)))
+            let path = path_of(&i.brep)?;
+            let read = crate::own_reader::file_in_order(
+                &mut k,
+                &path,
+                *rebuild,
+                i.validate_only,
+                i.init_gaps,
+                &CONVENTIONS,
+            )?;
+            match read {
+                Built::Brep(b) => {
+                    let c = counts(&b);
+                    Ok(Ok((*b, None, c)))
+                }
+                Built::Failed(e) => Ok(Err(failed_output(&e))),
+            }
         }
     }
 }
