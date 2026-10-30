@@ -286,6 +286,28 @@ pub(crate) fn contrast_ratio(a: Color32, b: Color32) -> f64 {
     (a.max(b) + 0.05) / (a.min(b) + 0.05)
 }
 
+/// WCAG floors: body text, and icons, bold labels and other large marks.
+pub(crate) const TEXT_CONTRAST: f64 = 4.5;
+pub(crate) const MARK_CONTRAST: f64 = 3.0;
+
+/// The first of `inks` that reads at `min` on every one of `fills`, else whichever of them reads
+/// best on its worst fill. Themes older than a surface can pair a fill with an ink that vanishes
+/// on it (SolidCraft 95's navy accent on its navy selection); this keeps such a pair readable
+/// without changing any theme where the preferred ink already reads.
+pub(crate) fn readable(fills: &[Color32], min: f64, inks: &[Color32]) -> Color32 {
+    let worst = |ink: Color32| fills.iter().map(|fill| contrast_ratio(ink, *fill)).fold(f64::INFINITY, f64::min);
+    inks.iter()
+        .copied()
+        .find(|ink| worst(*ink) >= min)
+        .or_else(|| inks.iter().copied().max_by(|a, b| worst(*a).total_cmp(&worst(*b))))
+        .unwrap_or(Color32::BLACK)
+}
+
+/// Is `fill` dark enough that light artwork reads better on it?
+pub(crate) fn is_dark_fill(fill: Color32) -> bool {
+    contrast_ratio(Color32::WHITE, fill) > contrast_ratio(Color32::BLACK, fill)
+}
+
 impl TabAccent {
     pub fn for_tab(t: &Tokens, tab: &str) -> Self {
         let (color, ink, soft) = match tab {
@@ -870,6 +892,17 @@ impl Tokens {
     /// Subtle shell elevation, derived from the semantic application-bar colour.
     pub(crate) fn shell_shadow(self) -> egui::Shadow {
         egui::Shadow { offset: [0, self.space_2 as i8], blur: self.space_8 as u8, spread: 0, color: self.app_bar.gamma_multiply(0.18) }
+    }
+
+    /// The accent ink (`form_primary`) on `fill`, or the theme's selected or body ink where the
+    /// accent does not read there: a theme whose selection or highlight is its accent colour.
+    pub(crate) fn accent_on(&self, fill: Color32) -> Color32 {
+        readable(&[fill], MARK_CONTRAST, &[self.form_primary, self.selected_ink, self.form_ink])
+    }
+
+    /// `ink` on the selected fill, or `selected_ink` where `ink` does not read at `min` there.
+    pub(crate) fn on_selected(&self, ink: Color32, min: f64) -> Color32 {
+        readable(&[self.selected_bg], min, &[ink, self.selected_ink])
     }
 
     /// The X, Y and Z axis colours, in that order.

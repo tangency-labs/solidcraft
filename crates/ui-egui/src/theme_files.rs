@@ -509,8 +509,36 @@ pub fn resolve(theme: &ThemeFile) -> Tokens {
     // A file that sets no colours is its base palette, exactly.
     if !theme.colors.is_empty() {
         file_view_from_theme(&mut t, theme.base.is_dark(), |k| theme.colors.contains_key(k));
+        navigation_from_theme(&mut t, |k| theme.colors.contains_key(k));
     }
     t
+}
+
+/// The navigation bar and its menus are newer than most theme files: the navigation colours a
+/// theme leaves unset follow its own hover, dim text, control and dialog colours instead of its
+/// base's blue-greys, and its tooltip is the theme's ink and dialog colours turned around.
+fn navigation_from_theme(t: &mut Tokens, set: impl Fn(&str) -> bool) {
+    if !set("nav_hover") {
+        t.nav_hover = t.hover;
+    }
+    if !set("nav_press") {
+        t.nav_press = t.nav_hover.lerp_to_gamma(t.form_ink, 0.12);
+    }
+    if !set("nav_dim") {
+        t.nav_dim = t.text_dim;
+    }
+    if !set("nav_field") {
+        t.nav_field = t.control_fill;
+    }
+    if !set("nav_viewport") {
+        t.nav_viewport = t.dialog_body;
+    }
+    if !set("nav_tip") {
+        t.nav_tip = t.form_ink;
+    }
+    if !set("nav_tip_ink") {
+        t.nav_tip_ink = t.dialog_body;
+    }
 }
 
 /// The File view's colours a theme leaves unset follow the theme's own panel, border, accent and

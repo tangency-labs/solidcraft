@@ -56,7 +56,13 @@ pub(crate) fn count_field(ui: &mut Ui, value: &mut String, limits: &Count<'_>) -
         if enabled && arrow.hovered() {
             painter.rect_filled(half.shrink(1.0), t.control_radius, t.selected_bg);
         }
-        let ink = if enabled { t.form_ink } else { t.form_dim };
+        let ink = if !enabled {
+            t.form_dim
+        } else if arrow.hovered() {
+            t.on_selected(t.form_ink, crate::theme::MARK_CONTRAST)
+        } else {
+            t.form_ink
+        };
         let (c, w, h) = (half.center(), (reserve * 0.18).max(2.0), (half.height() * 0.2).max(2.0));
         let tip = if delta > 0 { -h } else { h };
         painter.add(egui::Shape::convex_polygon(

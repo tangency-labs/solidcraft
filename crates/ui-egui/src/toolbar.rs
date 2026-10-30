@@ -290,7 +290,13 @@ pub(crate) fn offer_pill(
     let glyph = Rect::from_center_size(pos2(glyph_x, rect.center().y), vec2(16.0, 16.0));
     icons::paint_on(ui.painter(), glyph, icon, Some(true), 1.0);
     if let Some((text, _)) = label {
-        ui.painter().text(pos2(rect.left() + text_x, rect.center().y), Align2::LEFT_CENTER, text, font, t.app_bar_text);
+        // The pill is the theme's accent: a light accent (the phosphor themes) needs dark ink.
+        let ink = if hot {
+            t.app_bar_text
+        } else {
+            crate::theme::readable(&[fill], crate::theme::MARK_CONTRAST, &[t.app_bar_text, t.on_accent, t.tab_on_fill_dark])
+        };
+        ui.painter().text(pos2(rect.left() + text_x, rect.center().y), Align2::LEFT_CENTER, text, font, ink);
     }
     Some((rect, response))
 }

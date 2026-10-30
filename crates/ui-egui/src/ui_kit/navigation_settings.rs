@@ -63,7 +63,7 @@ pub(crate) fn navigation_tile(ui: &mut Ui, id: &str, label: &str, icon: &str, dr
     if add.hovered() {
         painter.rect_filled(add_rect, t.control_radius.saturating_sub(NAV_BORDER as u8), t.nav_hover);
     }
-    icons::paint_ink(&painter, Rect::from_center_size(add_rect.center(), vec2(t.space_14, t.space_14)), "plus", t.form_primary);
+    icons::paint_ink(&painter, Rect::from_center_size(add_rect.center(), vec2(t.space_14, t.space_14)), "plus", t.accent_on(t.nav_hover));
     response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), label));
     add.widget_info(|| {
         egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), crate::i18n::format("navbar.custom.add_slot", &[("slot", label)]))

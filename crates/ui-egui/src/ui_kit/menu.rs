@@ -277,14 +277,14 @@ impl<'a> MenuItem<'a> {
         let ink = if self.danger {
             t.form_error
         } else if hot {
-            t.form_primary
+            t.accent_on(t.accent_soft)
         } else {
             t.form_ink
         };
         let dim = if self.danger {
             t.form_error
         } else if hot {
-            t.form_primary
+            t.accent_on(t.accent_soft)
         } else {
             t.form_dim
         };
@@ -299,7 +299,7 @@ impl<'a> MenuItem<'a> {
         let icon = Rect::from_center_size(pos2(r.left() + t.control_height / 2.0, r.center().y), vec2(t.space_16, t.space_16));
         if let Some(on) = self.checked {
             if on {
-                super::checks::paint_check_glyph(&painter, icon, false, t.form_primary);
+                super::checks::paint_check_glyph(&painter, icon, false, if hot { ink } else { t.form_primary });
             }
         } else if let Some(color) = self.swatch {
             painter.rect(icon, t.radius_sm, color, t.control_border_stroke(t.control_border), egui::StrokeKind::Inside);
@@ -419,7 +419,7 @@ pub(crate) fn workspace_menu(ui: &mut egui::Ui, items: &[Item], key_row: Option<
                 let badge = ui.painter().layout_no_wrap(
                     badge.to_string(),
                     FontId::proportional(crate::theme::Tokens::get().font_small),
-                    if current { t.on_accent } else { accent },
+                    if current { crate::theme::readable(&[accent], crate::theme::MARK_CONTRAST, &[t.on_accent, t.tab_on_fill_dark]) } else { accent },
                 );
                 let badge_rect = Rect::from_min_size(pos2(badge_x, y - 8.0), badge.size() + vec2(t.space_12, t.space_3));
                 ui.painter().rect_filled(badge_rect, t.radius_lg, if current { accent } else { soft });

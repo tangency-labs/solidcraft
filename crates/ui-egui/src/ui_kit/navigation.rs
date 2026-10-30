@@ -104,11 +104,16 @@ pub(crate) fn navigation_fill(t: &Tokens, fill: NavigationFill) -> Option<egui::
 /// The label and icon colour of a slot. An active slot keeps the accent ink on its selected fill
 /// where that reads; a theme whose selected fill is as dark as its accent (SolidCraft 95's navy)
 /// gets the theme's selected-text ink instead, so an active toggle never turns into a blank block.
+/// A hovered or pressed slot keeps the body ink unless the theme's press colour is as dark as
+/// it (1-bit's black press), where the selected-text ink takes over too.
 pub(crate) fn navigation_ink(t: &Tokens, fill: NavigationFill) -> egui::Color32 {
-    if fill != NavigationFill::Active {
-        return t.form_ink;
+    let readable = |fill, ink| crate::theme::readable(&[fill], NAV_ACTIVE_MIN_CONTRAST, &[ink, t.selected_ink]);
+    match fill {
+        NavigationFill::None => t.form_ink,
+        NavigationFill::Hover => readable(t.nav_hover, t.form_ink),
+        NavigationFill::Press => readable(t.nav_press, t.form_ink),
+        NavigationFill::Active => readable(t.selected_bg, t.form_primary),
     }
-    if crate::theme::contrast_ratio(t.form_primary, t.selected_bg) >= NAV_ACTIVE_MIN_CONTRAST { t.form_primary } else { t.selected_ink }
 }
 
 /// WCAG small-text contrast for an active slot's label on its selected fill.
@@ -245,5 +250,89 @@ mod active_ink_tests {
             }
         }
         assert!(failures.is_empty(), "active navigation slot unreadable:\n{}", failures.join("\n"));
+    }
+
+    /// Every fill the newer UI paints text or an icon on, with the ink it paints there, reads in
+    /// every built-in theme: the navigation bar and its menus, viewport status items, the
+    /// ribbon's drop-downs and workspace menu, the Render stages, toggles and segmented options,
+    /// badges and the sketch status drawn on the view. A theme older than one of these surfaces
+    /// left it with its base palette's colour, or with its accent on an accent-coloured fill
+    /// (SolidCraft 95's navy on navy).
+    #[test]
+    fn newer_ui_text_and_icons_stay_readable_in_every_built_in_theme() {
+        use crate::theme::{MARK_CONTRAST, TEXT_CONTRAST, TabAccent, Tokens, contrast_ratio, readable};
+        use egui::Color32;
+        type Pick = fn(&Tokens) -> Color32;
+        let status: Pick = |t| readable(&[t.viewport_top, t.viewport_bottom], MARK_CONTRAST, &[t.sketch_accent, t.sketch_ink, t.text]);
+        let conflict: Pick = |t| readable(&[t.viewport_top, t.viewport_bottom], MARK_CONTRAST, &[t.error, t.form_error, t.text]);
+        // (where, fill, ink, floor)
+        let pairs: &[(&str, Pick, Pick, f64)] = &[
+            ("selected label: navigation menu, Preferences pages, picked rows", |t| t.selected_bg, |t| t.accent_on(t.selected_bg), MARK_CONTRAST),
+            ("navigation menu: selected row detail", |t| t.selected_bg, |t| t.on_selected(t.form_dim, MARK_CONTRAST), MARK_CONTRAST),
+            ("navigation bar: hovered slot", |t| t.nav_hover, |t| navigation_ink(t, NavigationFill::Hover), TEXT_CONTRAST),
+            ("navigation bar: pressed slot", |t| t.nav_press, |t| navigation_ink(t, NavigationFill::Press), TEXT_CONTRAST),
+            ("navigation menu: hovered row icon", |t| t.nav_hover, |t| t.form_dim, MARK_CONTRAST),
+            ("navigation settings: add slot", |t| t.nav_hover, |t| t.accent_on(t.nav_hover), MARK_CONTRAST),
+            ("navigation tooltip", |t| t.nav_tip, |t| t.nav_tip_ink, TEXT_CONTRAST),
+            ("viewport status item: name", |t| t.overlay, |t| t.text, TEXT_CONTRAST),
+            ("viewport status item: setting", |t| t.overlay, |t| t.text_dim, MARK_CONTRAST),
+            ("ribbon: section label", |t| t.toolbar, |t| t.text_dim, MARK_CONTRAST),
+            ("ribbon: hovered section label", |t| t.hover, |t| t.text_dim, MARK_CONTRAST),
+            ("panels: secondary text", |t| t.panel, |t| t.text_dim, MARK_CONTRAST),
+            ("ribbon drop-down: highlighted row", |t| t.accent_soft, |t| t.accent_on(t.accent_soft), MARK_CONTRAST),
+            (
+                "workspace menu: current badge",
+                |t| t.accent,
+                |t| readable(&[t.accent], MARK_CONTRAST, &[t.on_accent, t.tab_on_fill_dark]),
+                MARK_CONTRAST,
+            ),
+            (
+                "Render stage bar: current stage number",
+                |t| TabAccent::for_tab(t, "RENDER").color,
+                |t| TabAccent::for_tab(t, "RENDER").on_fill(t),
+                MARK_CONTRAST,
+            ),
+            ("toggle buttons, keyboard-marked action: on", |t| t.selected_bg, |t| t.on_selected(t.form_ink, TEXT_CONTRAST), TEXT_CONTRAST),
+            ("toggle and segmented icons: on", |t| t.selected_bg, |t| t.on_selected(t.form_ink, MARK_CONTRAST), MARK_CONTRAST),
+            ("segmented choice: selected label", |t| t.selected_bg, |t| t.selected_ink, TEXT_CONTRAST),
+            ("settings and search badges: valid", |t| t.form_success_fill, |t| t.form_success, MARK_CONTRAST),
+            ("search badges: invalid", |t| t.form_error_fill, |t| t.form_error, MARK_CONTRAST),
+            ("dialogs: success text", |t| t.dialog_body, |t| t.form_success, MARK_CONTRAST),
+            (
+                "title bar: offer pill",
+                |t| t.accent,
+                |t| readable(&[t.accent], MARK_CONTRAST, &[t.app_bar_text, t.on_accent, t.tab_on_fill_dark]),
+                MARK_CONTRAST,
+            ),
+            ("save mesh: lettered tile", |t| t.chip, |t| readable(&[t.chip], TEXT_CONTRAST, &[t.text, t.on_accent]), MARK_CONTRAST),
+            ("sketch status on the view, top", |t| t.viewport_top, status, MARK_CONTRAST),
+            ("sketch status on the view, bottom", |t| t.viewport_bottom, status, MARK_CONTRAST),
+            ("sketch conflict status on the view, top", |t| t.viewport_top, conflict, MARK_CONTRAST),
+            ("sketch conflict status on the view, bottom", |t| t.viewport_bottom, conflict, MARK_CONTRAST),
+        ];
+        // A translucent fill is seen over the panel it floats on, translucent ink over its fill.
+        let solid = |c: Color32, under: Color32| {
+            if c.a() == 255 {
+                return c;
+            }
+            let k = f32::from(c.a()) / 255.0;
+            let [r, g, b, _] = c.to_srgba_unmultiplied();
+            let mix = |x: u8, y: u8| (f32::from(x) * k + f32::from(y) * (1.0 - k)).round() as u8;
+            Color32::from_rgb(mix(r, under.r()), mix(g, under.g()), mix(b, under.b()))
+        };
+        let mut themes = vec![("Dark".to_owned(), Tokens::dark()), ("Light".to_owned(), Tokens::light())];
+        themes.extend(crate::theme_files::builtin().iter().map(|theme| (theme.name.clone(), crate::theme_files::resolve(theme))));
+        let mut failures = Vec::new();
+        for (name, t) in &themes {
+            for (place, fill, ink, floor) in pairs {
+                let fill = solid(fill(t), t.panel);
+                let ink = solid(ink(t), fill);
+                let ratio = contrast_ratio(ink, fill);
+                if ratio < *floor {
+                    failures.push(format!("{name}: {place}: {ratio:.2}:1 ({ink:?} on {fill:?})"));
+                }
+            }
+        }
+        assert!(failures.is_empty(), "unreadable in a built-in theme:\n{}", failures.join("\n"));
     }
 }

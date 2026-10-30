@@ -269,6 +269,8 @@ fn action_button(ui: &mut Ui, label: &str, kind: Action, look: &ActionLook, padd
         look.primary_ink
     } else if primary || !live {
         t.form_dim
+    } else if marked {
+        t.on_selected(t.form_ink, crate::theme::TEXT_CONTRAST)
     } else {
         t.form_ink
     });
@@ -403,22 +405,26 @@ pub(crate) fn button_pair(ui: &mut egui::Ui, key: &str, states: [bool; 2], butto
                     egui::StrokeKind::Inside,
                 );
                 let label = crate::i18n::tr_label(button.label);
-                let galley = ui.painter().layout_no_wrap(label.to_string(), egui::FontId::proportional(t.font_label), t.form_ink);
+                let ink = if on { t.on_selected(t.form_ink, crate::theme::TEXT_CONTRAST) } else { t.form_ink };
+                let galley = ui.painter().layout_no_wrap(label.to_string(), egui::FontId::proportional(t.font_label), ink);
                 let icon_width = if button.icon.is_some() { t.sketch_footer_icon_size + t.space_4 } else { 0.0 };
                 let left = rect.center().x - (galley.size().x + icon_width) / 2.0;
                 let painter = ui.painter().with_clip_rect(ui.clip_rect().intersect(rect));
                 if let Some(icon) = button.icon {
-                    crate::icons::paint_icon(
+                    // A selection darker or lighter than the theme takes that side's artwork.
+                    let side = (on && crate::theme::is_dark_fill(t.selected_bg) != crate::theme::is_dark()).then_some(!crate::theme::is_dark());
+                    crate::icons::paint_on(
                         &painter,
                         egui::Rect::from_center_size(
                             egui::pos2(left + t.sketch_footer_icon_size / 2.0, rect.center().y),
                             vec2(t.sketch_footer_icon_size, t.sketch_footer_icon_size),
                         ),
                         icon,
+                        side,
                         f32::from(t.icon.a()) / 255.0,
                     );
                 }
-                painter.galley(egui::pos2(left + icon_width, rect.center().y - galley.size().y / 2.0), galley, t.form_ink);
+                painter.galley(egui::pos2(left + icon_width, rect.center().y - galley.size().y / 2.0), galley, ink);
                 response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, ui.is_enabled(), on, label));
                 t.button_bevel(ui, &response, on);
                 pointer_on_hover(ui, &response);
@@ -602,7 +608,7 @@ pub(crate) fn compact_button(ui: &mut Ui, glyph: &str, tooltip: &str, enabled: b
             let ink = if !enabled {
                 t.form_dim.gamma_multiply(0.35)
             } else if selected {
-                t.form_primary
+                t.accent_on(t.selected_bg)
             } else {
                 t.form_dim
             };

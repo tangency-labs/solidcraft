@@ -5949,7 +5949,10 @@ fn overlays(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
             crate::i18n::format("sketch.degrees_of_freedom", &[("count", &ss.report.dof.to_string())])
         };
         let msg = format!("{} — {status}", crate::i18n::tr_name(&ss.name));
-        let c = if ss.report.ok() { v.sketch_accent } else { v.error };
+        // Straight on the view's gradient: a theme whose sketch or error colour is close to its
+        // background (SolidCraft 95's green and red on teal) gets the view's text colour.
+        let inks = if ss.report.ok() { [v.sketch_accent, v.sketch_ink, v.text] } else { [v.error, v.form_error, v.text] };
+        let c = crate::theme::readable(&[v.viewport_top, v.viewport_bottom], crate::theme::MARK_CONTRAST, &inks);
         painter.text(pos2(r.left() + 12.0, r.top() + 12.0), Align2::LEFT_TOP, msg, FontId::proportional(t.font_button), c);
     }
 }

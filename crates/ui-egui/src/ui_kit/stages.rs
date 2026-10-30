@@ -186,7 +186,7 @@ impl StageBar {
                 },
                 &(index + 1).to_string(),
                 crate::fonts::semibold(t.font_small),
-                if on { t.on_accent } else { t.text_dim },
+                if on { accent.on_fill(&t) } else { t.text_dim },
                 false,
             );
             let text = Rect::from_min_max(pos2(badge.right() + t.space_6 + 1.0, chip.top()), chip.right_bottom() - vec2(t.space_14, 0.0));

@@ -164,7 +164,18 @@ pub(crate) fn segmented(ui: &mut Ui, selected: &mut usize, options: &[&str], con
                 egui::pos2(text_rect.left() - t.space_6 - t.space_14 / 2.0, segment.center().y),
                 vec2(t.space_14, t.space_14),
             );
-            crate::icons::paint_ink(ui.painter(), icon_rect, icon, if on && workspace_accent { accent.ink } else { t.form_ink });
+            crate::icons::paint_ink(
+                ui.painter(),
+                icon_rect,
+                icon,
+                if on && workspace_accent {
+                    accent.ink
+                } else if on && !primary {
+                    t.on_selected(t.form_ink, crate::theme::MARK_CONTRAST)
+                } else {
+                    t.form_ink
+                },
+            );
         }
         let text_rect = if compact { text_rect.intersect(segment.shrink2(vec2(t.space_4, 0.0))) } else { text_rect };
         paint_text(
@@ -262,6 +273,10 @@ pub(crate) fn segmented_icons(ui: &mut Ui, selected: &mut usize, options: &[Icon
         if catalog {
             let icon_rect = egui::Rect::from_center_size(segment.center(), vec2(t.space_14, t.space_14));
             crate::icons::paint_ink(ui.painter(), icon_rect, option.icon, if on { accent.ink } else { t.form_dim });
+        } else if on && crate::theme::is_dark_fill(t.selected_bg) != crate::theme::is_dark() {
+            // A selection darker or lighter than the theme (SolidCraft 95's navy) takes the
+            // artwork drawn for that side, so the option's line or dash still shows.
+            crate::icons::paint_on(ui.painter(), icon_rect, option.icon, Some(!crate::theme::is_dark()), f32::from(t.icon.a()) / 255.0);
         } else {
             crate::icons::paint_icon(ui.painter(), icon_rect, option.icon, f32::from(t.icon.a()) / 255.0);
         }
@@ -662,8 +677,16 @@ pub(crate) fn popup_list(
                             inner.min,
                             egui::pos2((inner.right() - kind_width - t.space_8).max(inner.left()), inner.bottom()),
                         );
-                        super::text::paint_text(ui, text_rect, option.text, mono.clone(), if picked { t.form_primary } else { option.color }, false);
-                        ui.painter().text(inner.right_center(), egui::Align2::RIGHT_CENTER, kind, kind_font.clone(), t.form_dim);
+                        super::text::paint_text(
+                            ui,
+                            text_rect,
+                            option.text,
+                            mono.clone(),
+                            if picked { t.accent_on(t.selected_bg) } else { option.color },
+                            false,
+                        );
+                        let kind_ink = if picked { t.on_selected(t.form_dim, crate::theme::MARK_CONTRAST) } else { t.form_dim };
+                        ui.painter().text(inner.right_center(), egui::Align2::RIGHT_CENTER, kind, kind_font.clone(), kind_ink);
                         response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::SelectableLabel, ui.is_enabled(), picked, option.text));
                         // Tip the full name first: long identifiers still clip inside a capped popup.
                         let tip = if option.detail.is_empty() { option.text.to_owned() } else { format!("{}\n{}", option.text, option.detail) };

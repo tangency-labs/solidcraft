@@ -297,7 +297,7 @@ fn paint_icon(ui: &egui::Ui, rect: egui::Rect, tex: Option<egui::TextureId>, nam
                 egui::Align2::CENTER_CENTER,
                 letter,
                 egui::FontId::proportional(crate::theme::Tokens::get().font_small),
-                t.text,
+                crate::theme::readable(&[t.chip], crate::theme::TEXT_CONTRAST, &[t.text, t.on_accent]),
             );
         }
     }
