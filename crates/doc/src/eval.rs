@@ -4659,7 +4659,15 @@ fn hole_tools_and_prisms(
         }
         HoleKind::Countersink { cs_diameter, cs_angle, tip_angle } => {
             let (rc, half) = (val(vals, cs_diameter, Kind::Length)? / 2.0, val(vals, cs_angle, Kind::Angle)? / 2.0);
-            if !(rc > r && half > 1e-3 && half < std::f64::consts::FRAC_PI_2) {
+            // The angle and the width are told apart: an angle out of range is not a countersink
+            // too narrow (#9625).
+            if !(half > 1e-3 && half < std::f64::consts::FRAC_PI_2) {
+                return Err(DocError::Invalid(format!(
+                    "the countersink angle must be more than 0° and less than 180°, not {}°",
+                    ((2.0 * half).to_degrees() * 1e6).round() / 1e6
+                )));
+            }
+            if !(rc > r) {
                 return Err(DocError::Invalid("the countersink must be wider than the hole".into()));
             }
             // One revolved tool: the cone from its rim on the face to just inside the hole
