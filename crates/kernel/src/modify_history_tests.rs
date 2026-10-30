@@ -263,15 +263,23 @@ fn shell_of_a_stepped_body_joins_its_walls() {
     assert_eq!(offsets, b.face_count() - 1, "{h:?}");
 }
 
-/// A shell of a painted block: its faces are used as they are (unhealed), keeping the paint's
-/// face order, with the history of that copy. Paint is an authored boundary, so the cavity Cut
-/// keeps the side faces it sews across the rim's level in pieces (Split).
+/// A shell of a painted block: the painted face (face 0) comes through as one face on its own
+/// support, so the paint has one face to follow, and each of the five inner walls is an offset of
+/// the face it lines, as on the plain block (`shell_lines_the_walls_with_offsets`).
 #[test]
 fn shell_of_a_painted_body() {
     let b = painted_cube();
-    let r = crate::shell(&b, &[Vec3::new(20.0, 15.0, 20.0)], 2.0).unwrap();
+    let top = Vec3::new(20.0, 15.0, 20.0);
+    let r = crate::shell(&b, &[top], 2.0).unwrap();
     let h = verified(&r, &b, reach(2.0));
-    assert_eq!(changes(h), [0, 2, 8, 0, 5], "{h:?}");
+    assert_eq!(with(h, &[face(0)]).len(), 1, "the painted face is one face: {h:?}");
+    let top = face_at(&b, top);
+    for f in (0..6).filter(|f| *f != top) {
+        let walls = with(h, &[FaceOrigin::Offset { operand: 0, face: f }]);
+        assert_eq!(walls.len(), 1, "{h:?}");
+        assert_eq!(h.faces[walls[0]].change, Change::Generated);
+    }
+    assert!(with(h, &[FaceOrigin::Offset { operand: 0, face: top }]).is_empty());
 }
 
 #[test]
@@ -370,10 +378,22 @@ fn surfaces_keep_their_faces() {
     let h = checked(&lid, &[&open], reach(0.0), &|_| true);
     assert_eq!(h.faces[0].change, Change::Generated);
     assert!(h.edges.iter().all(|e| matches!(e.origins.as_slice(), [EdgeOrigin::Edge { operand: 0, .. }])));
-    // Stitched: each face the one it was sewn from, the seam the edges sewn together.
+    // Stitched: each face the one it was sewn from (its geometry checked against it), the five
+    // walls each one of the open box's and the lid the patch, and the seam the edges sewn
+    // together.
     let closed = crate::stitch(&[&open, &lid], 0.0).unwrap();
     let h = checked(&closed, &[&open, &lid], reach(0.0), &|_| false);
-    assert!(h.faces.iter().all(|f| f.change == Change::Kept && f.origins.len() == 1));
+    let mut sewn: Vec<FaceOrigin> = h
+        .faces
+        .iter()
+        .map(|f| match f.origins[..] {
+            [o] => o,
+            _ => panic!("a stitched face from one face: {f:?}"),
+        })
+        .collect();
+    sewn.sort();
+    let want = [(0, 0), (0, 1), (0, 2), (0, 3), (0, 4), (1, 0)].map(|(operand, face)| FaceOrigin::Face { operand, face });
+    assert_eq!(sewn, want, "{h:?}");
     assert_eq!(h.edges.iter().filter(|e| e.origins.len() == 2).count(), 4);
     let patch = crate::patch_region(&Plane::XY, &Region2 { outer: square(0.0, 0.0, 10.0, 10.0), holes: vec![] }).unwrap();
     assert_eq!(patch.history().unwrap().operands, 0);
@@ -432,29 +452,16 @@ fn box_cuts_of(b: &Body) -> Vec<(&'static str, Body, Body)> {
     .collect()
 }
 
-/// Meetings with a side of several origins (a face the modifier's heal merged).
-fn merged_meetings(h: &History) -> usize {
-    h.edges.iter().flat_map(|e| &e.origins).filter(|o| matches!(o, EdgeOrigin::Meet { a, b } if a.single().is_none() || b.single().is_none())).count()
-}
-
-/// A fillet right after a box cut. The cut joins the walls it sews in pieces across its slabs
-/// on their common supports, so the fillet finds whole faces. Where the block is painted the cut
-/// keeps those pieces (it has more faces), the fillet's heal merges them, and the edges where
-/// the round runs into such a face meet all of it. Composed with the cut, over the block and
-/// the tool.
+/// A fillet right after a box cut, on the plain and the painted block: the round stands in place
+/// of the picked edge, and composed with the cut its history holds over the block and the tool.
 #[test]
 fn fillet_after_box_cuts() {
     let at = Vec3::new(5.0, 0.0, 20.0);
-    let plain = box_cuts_of(&cube());
     for (b, painted) in [(cube(), false), (painted_cube(), true)] {
-        let cuts = if painted { box_cuts_of(&b) } else { plain.clone() };
-        for ((name, cut, tool), (_, whole, _)) in cuts.into_iter().zip(&plain) {
+        for (name, cut, tool) in box_cuts_of(&b) {
             let r = crate::fillet(&cut, &[at], 2.0).unwrap();
             let h = verified(&r, &cut, reach(2.0 * 1.5));
-            assert_eq!(blends(h), [vec![edge(edge_at(&cut, at))]], "{name}");
-            let pieces = cut.face_count() > whole.face_count();
-            assert_eq!(pieces, painted && name != "notch" && name != "hole", "{name} (painted: {painted})");
-            assert_eq!(merged_meetings(h) > 0, pieces, "{name} (painted: {painted}): {h:?}");
+            assert_eq!(blends(h), [vec![edge(edge_at(&cut, at))]], "{name} (painted: {painted})");
             let mut through = h.clone();
             through.substitute(0, cut.history().unwrap()).unwrap();
             through.check(&r, &[&b, &tool]).unwrap();
