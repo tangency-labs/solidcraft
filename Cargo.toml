@@ -79,6 +79,12 @@ cadmpeg-core = "=0.6.3"
 cadmpeg-ir = "=0.6.3"
 cadmpeg-registry = { version = "=0.6.3", default-features = false, features = ["fcstd", "rhino", "step"] }
 
+# OpenXR runtime bindings (MIT OR Apache-2.0, Rust bindings for the Khronos loader). `loaded`
+# finds the loader the OpenXR runtime installs at run time, so no C++ toolchain and no CMake are
+# needed to build. The `static` feature would compile the Khronos loader from source instead,
+# which the macOS release build would pay for on every release; see apps/solidcraft-cli/src/xr_info.rs.
+openxr = { version = "0.22", default-features = false, features = ["loaded"] }
+
 # fonts (sketch text outlines; MIT OR Apache-2.0, pure Rust)
 ttf-parser = { version = "0.25", default-features = false, features = ["std", "variable-fonts"] }
 
