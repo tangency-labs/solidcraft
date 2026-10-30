@@ -267,7 +267,9 @@ pub(super) fn geo(s: &Session, v: Option<&Value>, cmd: &str, what: &str) -> Resu
         Ok(GeoForm::Point(p)) => GeoRef::Point { p },
         Ok(GeoForm::Plane(plane)) => GeoRef::Plane { plane: plane_param(s, Some(plane), cmd)? },
         Ok(GeoForm::Axis(a)) => {
-            if ["x", "y", "z"].contains(&a.to_ascii_lowercase().as_str()) {
+            if let Some((origin, dir)) = s.origin_axis(a) {
+                GeoRef::Line { a: origin, b: origin + dir }
+            } else if ["x", "y", "z"].contains(&a.to_ascii_lowercase().as_str()) {
                 GeoRef::World { axis: a.to_ascii_uppercase() }
             } else {
                 match s.doc.find_feature(a).map(|f| &f.kind) {
@@ -276,10 +278,16 @@ pub(super) fn geo(s: &Session, v: Option<&Value>, cmd: &str, what: &str) -> Resu
                 }
             }
         }
-        Ok(GeoForm::ConstructPoint(n)) => match s.doc.find_feature(n).map(|f| &f.kind) {
-            Some(FeatureKind::ConstructionPoint { .. }) => GeoRef::ConstructPoint { name: n.into() },
-            _ => return Err(bad(cmd, format!("no construction point `{n}`"))),
-        },
+        Ok(GeoForm::ConstructPoint(n)) => {
+            if let Some(solidcraft_doc::construct::ConstructGeom::Point(p)) = s.origin_geometry(n) {
+                GeoRef::Point { p }
+            } else {
+                match s.doc.find_feature(n).map(|f| &f.kind) {
+                    Some(FeatureKind::ConstructionPoint { .. }) => GeoRef::ConstructPoint { name: n.into() },
+                    _ => return Err(bad(cmd, format!("no construction point `{n}`"))),
+                }
+            }
+        }
         Err(GeoFormError::Saved(e)) => return Err(bad(cmd, format!("`{what}`: {e}"))),
         Err(GeoFormError::Unknown) => return Err(bad(cmd, format!("`{what}` must be {REF}"))),
     };

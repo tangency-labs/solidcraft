@@ -214,7 +214,7 @@ fn normal_target(s: &Session) -> Option<(solidcore_record::Vec3, solidcore_recor
             let plane = state.body(body)?.body.planar_face(*index)?;
             Some((*point, plane.normal()))
         }
-        Sel::Plane { name } => solidcore_record::Plane::named(name).map(|plane| (plane.origin, plane.normal())),
+        Sel::Plane { name } => s.origin_plane(name).or_else(|| solidcore_record::Plane::named(name)).map(|plane| (plane.origin, plane.normal())),
         _ => None,
     })
 }
