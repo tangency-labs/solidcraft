@@ -257,7 +257,8 @@ impl Cone {
     /// scaled about its axis stays exact, and the rows run straight up the axis), so the
     /// cone keeps the cylinder's frame, trimmed domain and parameterization: the UV trim
     /// curves of its face stay valid on it. The analytic data is then rebuilt from the NURB
-    /// ([`Self::rebuild_step_from_nurb_parameters`]).
+    /// ([`Self::rebuild_step_from_nurb_parameters`]). The result is a cone
+    /// ([`Self::is_cylinder_class`] false), whatever the slope.
     ///
     /// # Errors
     ///
@@ -275,6 +276,11 @@ impl Cone {
         let axis = canonical.origin.x_axis().cross(canonical.origin.y_axis());
         let axis = axis / axis.length();
         let mut cone = self.clone();
+        // The result is an `SmCone`, not an `SmCylinder` (the capi's draft gets an `SmCone`
+        // from `CopyAndAddAnalytics` on the edited NURB): a kept cylinder flag would make the
+        // rebuild refuse the unequal radii under `cylinder_rebuild_mean_radius`, and otherwise
+        // leave a cone that reports itself a cylinder (tangency-labs/solidcore#1606).
+        cone.cylinder = false;
         let (nu, nv) = (
             cone.rev.base.number_control_points(SurfParamType::U),
             cone.rev.base.number_control_points(SurfParamType::V),
@@ -1996,7 +2002,8 @@ mod tests {
     /// the straight law of the height, the cone's own data (base radius, semi-angle) rebuilt.
     #[test]
     fn lean_cylinder_keeps_the_parameters_and_changes_the_radius() {
-        let k = kernel();
+        let mut k = kernel();
+        k.fixes.cylinder_rebuild_mean_radius = true;
         let frame = Axis2Placement::new(Point3::new(1.0, 2.0, 3.0), Vec3::X, Vec3::Y);
         let mut cylinder = Cone::create_canonical_cylinder(&k, &frame, 5.0).unwrap();
         let mut domain = Extent2d::default();
@@ -2004,6 +2011,7 @@ mod tests {
         cylinder.adjust_step_uv_domain(&k, &domain).unwrap();
         let slope = 0.1;
         let cone = cylinder.lean_cylinder(&k, slope, 4.0).unwrap();
+        assert!(!cone.is_cylinder() && !cone.is_cylinder_class());
         assert_eq!(
             cone.rev().base().natural_uv_domain(),
             cylinder.rev().base().natural_uv_domain()
