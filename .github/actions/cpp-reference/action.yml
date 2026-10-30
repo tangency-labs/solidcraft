@@ -30,13 +30,13 @@ runs:
     # sccache caches the ~200 shim objects solidcore-ffi compiles (the cc crate wraps the
     # C++ compiler in RUSTC_WRAPPER when it is sccache) and the workspace crates, which
     # rust-cache does not keep; both survive across runs in the GitHub Actions cache.
+    # A pinned version is downloaded straight from the release URL; without one the
+    # action asks the REST API for the latest release on every job, which spends the
+    # repository's GITHUB_TOKEN quota and fails the job once it runs out.
     - name: Set up sccache
       uses: mozilla-actions/sccache-action@v0.0.11
-      # Pinned: without a version the action asks the GitHub API for sccache's latest
-      # release in every job, and a burst of runs exhausts the repository's API quota
-      # ("API rate limit exceeded for installation"), failing every job's setup.
       with:
-        version: v0.10.0
+        version: v0.19.0
 
     - name: Enable sccache
       shell: bash
