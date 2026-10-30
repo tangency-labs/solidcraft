@@ -192,6 +192,37 @@ fn a_drawings_projection_is_first_or_third_angle() {
     }
 }
 
+/// A drawing's font is a family named by `drawing.create` or `drawing.set` (one undo step), saved
+/// with the design; the built-in font when none is named. A family this computer lacks is named in
+/// `font_note`, and a font file or anything but text is refused.
+#[test]
+fn a_drawings_font_is_a_family_by_name() {
+    let folder = Folder::new("drawing-font");
+    let mut s = design();
+    let made = run(&mut s, "drawing.create", json!({"font": " No Such Family Q7 "}));
+    assert_eq!(
+        (&made["font"], &made["font_note"]),
+        (&json!("No Such Family Q7"), &json!("No Such Family Q7 isn't on this computer: set in Liberation Sans"))
+    );
+    let steps = s.undo.len();
+    let set = run(&mut s, "drawing.set", json!({"font": "Liberation Sans"}));
+    assert_eq!((&set["font"], &set["font_note"], s.undo.len()), (&json!("Liberation Sans"), &Value::Null, steps + 1));
+    run(&mut s, "file.save", json!({"path": folder.path("plate.solidcraft")}));
+    let mut opened = Session::default();
+    run(&mut opened, "doc.open", json!({"path": folder.path("plate.solidcraft")}));
+    assert_eq!(opened.doc.drawings[0].font, "Liberation Sans");
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(run(&mut s, "drawing.inspect", json!({}))["font"], "No Such Family Q7");
+    assert_eq!(run(&mut s, "drawing.set", json!({"font": ""}))["font_note"], Value::Null);
+    for path in ["C:/Fonts/arial.ttf", "/usr/share/fonts/a", "Futura.otf"] {
+        let e = refused(&mut s, "drawing.set", json!({"font": path}));
+        assert!(e.contains("drawings name fonts by family, so they travel"), "{path}: {e}");
+        assert!(refused(&mut s, "drawing.create", json!({"font": path})).contains("by family"), "{path}");
+    }
+    assert!(refused(&mut s, "drawing.set", json!({"font": 3})).contains("`font` must be text"));
+    assert_eq!(open_one(&s).font, "");
+}
+
 /// Undo and redo go through the open part's steps only. With a drawing open, its own steps; the
 /// model's stay where they are. With none open, the model's steps, which put the design back as
 /// it was but keep each drawing it had as it is now.

@@ -1,50 +1,61 @@
 //! Text on paper (#4890 B1b): a text laid out by [`TextMetrics`], the rule sketch text draws and
-//! measures with, as the paper scene's runs of placed glyphs ([`TextRun`]), with the drawing fonts
-//! they are set in ([`Font`]), each holding the glyphs its runs place.
+//! measures with, as the paper scene's runs of placed glyphs ([`TextRun`]), with the fonts they
+//! are set in ([`Font`]), each holding the glyphs its runs place.
 //!
-//! - Drawings are set in bundled fonts only, never an installed one, so every machine sets a sheet
-//!   alike and a PDF can embed the font. A run names its font by the font's id ([`Font::id`]),
-//!   hashed once when the font is admitted. Each is one upright regular face: bold is refused,
-//!   and an italic leans as sketch text's made-up italic does.
-//! - A font is admitted once, the first time it is asked for: a static face (a PDF embeds a face's
-//!   default outlines) with a PostScript name, a cap height and a `post` table, its stem width
-//!   measured from its `l` (no table gives it). One that lacks any of them is refused.
+//! - A text is set in the font family its drawing names (#4890 F1): an installed family, found as
+//!   sketch text finds one ([`find_style_in`]), or the built-in Liberation Sans for none. A family
+//!   that isn't installed, or whose face can't be set on paper, is set in the built-in font, and
+//!   [`paper_font_note`] says so. A run names its font by the font's id ([`Font::id`]).
+//! - Bold takes the family's bold face, and is refused without one; an italic takes its italic
+//!   face, or leans as sketch text's made-up italic does.
+//! - A face is admitted once a process, the first time it is asked for: a static face (a PDF
+//!   embeds a face's default outlines) with a PostScript name, a cap height and a `post` table, its
+//!   stem width measured from its `l` (no table gives it). One that lacks any of them is refused.
 //! - A character the font has no glyph for is refused by name: sketch's `?` stand-in is never set
 //!   on paper.
 //! - Lines break at `\n`, a line pitch apart, and are aligned as sketch text's are. A line with
 //!   right-to-left characters is a run per direction, shaped. Every run of a line starts where the
 //!   line does, its glyphs placed along the whole line.
 
-use std::collections::BTreeMap;
-use std::sync::{Arc, OnceLock};
+use std::collections::{BTreeMap, HashMap};
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use sha2::{Digest, Sha256};
 use solidcraft_geom::paper::text::{Cluster, Font, FontFlags, FontGlyph, FontMetrics, PlacedGlyph, TextRun};
 use solidcraft_geom::{Loop2, Vec2};
 
-use crate::fonts::{DEFAULT_FONT_FAMILY, font_data, normalize};
+use crate::fonts::{DEFAULT_FONT_FAMILY, FontData, check_family, find_style_in, font_data, font_dirs, normalize};
 use crate::model::{Result, SketchError};
 use crate::text::{LaidLine, MAX_TEXT_CHARS, Run, SLANT_DEG, TextMetrics, TextStyle, check_height, check_spacing};
 
-/// A bundled font drawings may be set in: its family, and whether it is a serif face (a PDF
-/// reader's font flags; no table says so).
-pub struct DrawingFont {
-    pub family: &'static str,
-    pub serif: bool,
-}
+/// Most faces kept admitted at once (each holds its file's bytes); past it the table starts again.
+const MAX_ADMITTED: usize = 16;
 
-/// The fonts drawings are set in, by number.
-pub const DRAWING_FONTS: &[DrawingFont] = &[DrawingFont { family: DEFAULT_FONT_FAMILY, serif: false }];
+/// Faces admitted for paper, by file (None: the built-in font) and face index: each one's record
+/// with no glyphs yet, or why it can't be set on paper.
+type Admitted = HashMap<(Option<PathBuf>, u32), std::result::Result<Font, String>>;
+static ADMITTED: OnceLock<Mutex<Admitted>> = OnceLock::new();
 
-/// Each drawing font, admitted the first time it is asked for: its font record with no glyphs yet.
-static ADMITTED: [OnceLock<std::result::Result<Font, String>>; DRAWING_FONTS.len()] = [const { OnceLock::new() }; DRAWING_FONTS.len()];
-
-/// `text` on paper in `family` (None: the default drawing font), its first line's baseline
-/// starting at `at` (sheet mm) and turned `angle` radians about it, at a capital height of
+/// `text` on paper in the font `family` (None or empty: the built-in font), its first line's
+/// baseline starting at `at` (sheet mm) and turned `angle` radians about it, at a capital height of
 /// `height` mm, set in `style` (which follows no path on paper). Its runs, and the fonts they use
 /// (each once, in order of id, holding the glyphs its runs place); None when it sets no glyph
 /// (empty lines only).
 pub fn paper_text(
+    text: &str,
+    family: Option<&str>,
+    at: Vec2,
+    height: f64,
+    angle: f64,
+    style: &TextStyle,
+) -> Result<Option<(Vec<TextRun>, Vec<Font>)>> {
+    paper_text_in(&font_dirs(), text, family, at, height, angle, style)
+}
+
+/// [`paper_text`] with the fonts installed in `dirs`.
+pub fn paper_text_in(
+    dirs: &[PathBuf],
     text: &str,
     family: Option<&str>,
     at: Vec2,
@@ -63,9 +74,7 @@ pub fn paper_text(
     if style.path.is_some() {
         return Err(SketchError::Invalid("text on paper follows no path".into()));
     }
-    let (number, family) = drawing_font(family, style.bold)?;
-    let mut font = admitted(number)?;
-    let data = font_data(Some(family))?;
+    let (data, mut font, family) = paper_face(dirs, family, style.bold, style.italic)?;
     let metrics = TextMetrics::new(&data, style)?;
     let (k, pitch) = (metrics.scale(height)?, metrics.line_pitch(height)?);
     let slant = if style.italic && !font.metrics.flags.italic { SLANT_DEG.to_radians().tan() } else { 0.0 };
@@ -75,7 +84,7 @@ pub fn paper_text(
         let missing = metrics.missing(line);
         if !missing.is_empty() {
             let chars: String = missing.iter().map(|c| format!(" {c:?}")).collect();
-            return Err(SketchError::Invalid(format!("the drawing font {family} has no glyph for{chars}")));
+            return Err(SketchError::Invalid(format!("the font {family} has no glyph for{chars}")));
         }
         let laid = metrics.laid_out(line, k);
         // The line's start: along the baseline by its alignment, then down a pitch a row.
@@ -122,31 +131,65 @@ fn run_records(laid: &LaidLine, run: &Run, line: &str) -> Result<(Vec<PlacedGlyp
     Ok((placed, text.to_string(), clusters))
 }
 
-/// The drawing font a text in `family` (None or empty: the default) is set in, by number, and its
-/// family as the list names it.
-fn drawing_font(family: Option<&str>, bold: bool) -> Result<(u16, &'static str)> {
-    let name = family.map(str::trim).filter(|n| !n.is_empty()).unwrap_or(DEFAULT_FONT_FAMILY);
-    let Some((number, font)) = DRAWING_FONTS.iter().enumerate().find(|(_, f)| normalize(f.family) == normalize(name)) else {
-        let fonts: Vec<&str> = DRAWING_FONTS.iter().map(|f| f.family).collect();
-        return Err(SketchError::Invalid(format!("`{name}` is not a drawing font: drawings are set in {}", fonts.join(", "))));
+/// The face a text in `family` is set in on paper, from the fonts of `dirs`, its record, and the
+/// family it is: the built-in font for none, or for a family that isn't installed or can't be set on
+/// paper ([`paper_font_note`] says which). Bold takes a bold face, and is refused without one.
+fn paper_face(dirs: &[PathBuf], family: Option<&str>, bold: bool, italic: bool) -> Result<(FontData, Font, String)> {
+    let name = family.map(str::trim).unwrap_or("");
+    check_family(name)?;
+    let (data, font, face_bold, name) = match installed_face(dirs, name, bold, italic) {
+        Some(Ok((data, font, face_bold))) => (data, font, face_bold, name),
+        _ => {
+            let data = font_data(None)?;
+            let font = admitted(&data).map_err(|e| SketchError::Invalid(format!("the built-in font can't be set on paper: {e}")))?;
+            (data, font, false, DEFAULT_FONT_FAMILY)
+        }
     };
-    if bold {
-        return Err(SketchError::Invalid(format!("the drawing font {} has no bold face", font.family)));
+    if bold && !face_bold {
+        return Err(SketchError::Invalid(format!("the font {name} has no bold face")));
     }
-    Ok((u16::try_from(number).map_err(|_| SketchError::TooLarge)?, font.family))
+    Ok((data, font, name.to_string()))
 }
 
-/// Drawing font `number`'s record, admitted once (the module's notes), with no glyphs yet.
-fn admitted(number: u16) -> Result<Font> {
-    let (Some(font), Some(cell)) = (DRAWING_FONTS.get(usize::from(number)), ADMITTED.get(usize::from(number))) else {
-        return Err(SketchError::Invalid(format!("no drawing font {number}")));
-    };
-    let admitted = cell.get_or_init(|| admit(font).map_err(|e| format!("the drawing font {} can't be used: {e}", font.family)));
-    admitted.clone().map_err(SketchError::Invalid)
+/// An installed family's face for paper, from `dirs`, with its record and whether it is bold, or
+/// why it can't be used; None for the built-in font (no name, or its own).
+fn installed_face(dirs: &[PathBuf], name: &str, bold: bool, italic: bool) -> Option<std::result::Result<(FontData, Font, bool), String>> {
+    if name.is_empty() || normalize(name) == normalize(DEFAULT_FONT_FAMILY) {
+        return None;
+    }
+    Some(match find_style_in(dirs, name, bold, italic) {
+        Ok(Some((data, face_bold, _))) => {
+            admitted(&data).map(|font| (data, font, face_bold)).map_err(|e| format!("{name} can't be set on paper ({e})"))
+        }
+        Ok(None) => Err(format!("{name} isn't on this computer")),
+        Err(e) => Err(format!("{name} can't be read ({e})")),
+    })
 }
 
-fn admit(font: &DrawingFont) -> std::result::Result<Font, String> {
-    let data = font_data(Some(font.family)).map_err(|e| e.to_string())?;
+/// Why text in `family` is set in the built-in font instead, from the fonts of `dirs`, for a
+/// drawing's status ("Futura isn't on this computer: set in Liberation Sans"); None when the family
+/// is set itself.
+pub fn paper_font_note(dirs: &[PathBuf], family: &str) -> Option<String> {
+    let reason = installed_face(dirs, family.trim(), false, false)?.err()?;
+    Some(format!("{reason}: set in {DEFAULT_FONT_FAMILY}"))
+}
+
+/// A face's record for paper, admitted once (the module's notes), with no glyphs yet.
+fn admitted(data: &FontData) -> std::result::Result<Font, String> {
+    let key = (data.path().map(Path::to_path_buf), data.index);
+    let mut table = ADMITTED.get_or_init(Default::default).lock().map_err(|_| "the table of fonts is unusable".to_string())?;
+    if let Some(admitted) = table.get(&key) {
+        return admitted.clone();
+    }
+    if table.len() >= MAX_ADMITTED {
+        table.clear();
+    }
+    let admitted = admit(data);
+    table.insert(key, admitted.clone());
+    admitted
+}
+
+fn admit(data: &FontData) -> std::result::Result<Font, String> {
     let face = ttf_parser::Face::parse(data.bytes(), data.index).map_err(|e| e.to_string())?;
     if face.is_variable() {
         return Err("it is a variable face".into());
@@ -158,7 +201,7 @@ fn admit(font: &DrawingFont) -> std::result::Result<Font, String> {
         return Err("it has no post table".into());
     }
     let stem_v =
-        stem(&face, &TextMetrics::new(&data, &TextStyle::default()).map_err(|e| e.to_string())?).ok_or("it has no upright stem to measure")?;
+        stem(&face, &TextMetrics::new(data, &TextStyle::default()).map_err(|e| e.to_string())?).ok_or("it has no upright stem to measure")?;
     let b = face.global_bounding_box();
     Ok(Font {
         id: Sha256::new().chain_update(data.bytes()).chain_update(data.index.to_le_bytes()).finalize().into(),
@@ -173,11 +216,18 @@ fn admit(font: &DrawingFont) -> std::result::Result<Font, String> {
             cap_height,
             bbox: [b.x_min, b.y_min, b.x_max, b.y_max],
             italic_angle: f64::from(face.italic_angle()),
-            flags: FontFlags { fixed_pitch: face.is_monospaced(), serif: font.serif, italic: face.is_italic(), symbolic: false },
+            flags: FontFlags { fixed_pitch: face.is_monospaced(), serif: serif(&face), italic: face.is_italic(), symbolic: false },
             stem_v,
         },
         glyphs: BTreeMap::new(),
     })
+}
+
+/// Whether a face has serifs, by its OS/2 family class (the high byte of `sFamilyClass`, at byte
+/// 30): classes 1 to 5 and 7 are serif ones.
+fn serif(face: &ttf_parser::Face) -> bool {
+    let os2 = face.raw_face().table(ttf_parser::Tag::from_bytes(b"OS/2"));
+    os2.and_then(|table| table.get(30)).is_some_and(|class| matches!(class, 1..=5 | 7))
 }
 
 /// A glyph's outline as the scene holds it: closed loops, in font units.

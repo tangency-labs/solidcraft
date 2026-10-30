@@ -1982,12 +1982,15 @@ pub fn apply_new_design(app: &mut SolveApp) {
     apply_new_design_units(app, &app.preferences.default_units.clone());
 }
 
-/// A new drawing takes the preferred projection, as a new design takes the preferred units: not
-/// an undo step. Caller: `drawing.create` run from the app.
+/// A new drawing takes the preferred projection, as a new design takes the preferred units, and
+/// the interface font when it is a family (drawings name fonts by family, never a file): not an
+/// undo step. Caller: `drawing.create` run from the app.
 pub fn apply_new_drawing(app: &mut SolveApp) {
     let projection = app.preferences.default_projection;
-    let differs = app.session.drawing("drawing.create").is_ok_and(|d| d.projection != projection);
-    if differs && app.session.execute("drawing.set", &json!({ "projection": projection })).is_ok() {
+    let font = app.preferences.ui_font.trim();
+    let font = if solidcraft_engine::sketch::check_family(font).is_ok() { font.to_string() } else { String::new() };
+    let differs = app.session.drawing("drawing.create").is_ok_and(|d| d.projection != projection || d.font != font);
+    if differs && app.session.execute("drawing.set", &json!({ "projection": projection, "font": font })).is_ok() {
         app.session.undo.pop();
     }
 }
@@ -6795,6 +6798,22 @@ mod tests {
         let (first, third) = (drawn("first"), drawn("third"));
         assert_eq!((first.0, third.0), (Some(Projection::First), Some(Projection::Third)));
         assert_eq!(first.1, third.1, "the projection is no undo step of its own");
+    }
+
+    /// A new drawing is set in the interface font when that is a family, and in the built-in font
+    /// when it is a font file or none; it is no undo step of its own.
+    #[test]
+    fn new_drawings_take_the_interface_font_by_family() {
+        let drawn = |ui_font: &str| {
+            let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+            app.preferences.ui_font = ui_font.into();
+            app.run("solid.box", json!({"length": 40, "width": 30, "height": 10})).unwrap();
+            app.run("drawing.create", json!({})).unwrap();
+            (app.session.drawing("test").map(|d| d.font.clone()).unwrap(), app.session.undo.len())
+        };
+        let (family, file, none) = (drawn(" IBM Plex Mono "), drawn("C:/Fonts/arial.ttf"), drawn(""));
+        assert_eq!((family.0.as_str(), file.0.as_str(), none.0.as_str()), ("IBM Plex Mono", "", ""));
+        assert_eq!((family.1, file.1), (none.1, none.1), "the font is no undo step of its own");
     }
 
     /// #6474, #2742: Maya moves the camera with Alt and any button, HFSS with Alt or Shift+Alt and
