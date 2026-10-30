@@ -67,10 +67,13 @@ void put_geometry(std::vector<double>& o, SmBrep* b) {
 
 // Args: editing, placement O/X/Y (9). Op 0 exports the fixture graph (`0 graph`), op 2 its
 // native face and vertex lists (`nf face* nv vertex*`); op 1
-// runs Mirror: `record_len status geometry... 0 graph` of the mirrored B-rep.
+// runs Mirror: `record_len status geometry... 0 graph` of the mirrored B-rep. Op 3 takes
+// 18 args (editing, bScaleTol, the 4x4 matrix row-major) and runs
+// SmBrep::Transform(const double[4][4], SmBoolean) with the same output as op 1.
 SC_EXPORT int32_t sc_topology_brep_mirror_eval(int32_t op, const char* path, const double* input,
         int64_t n, const double* a, int64_t na, double* out, int64_t cap, int64_t* out_len) {
-    if (op < 0 || op > 2 || !input || n < 1 || !a || na != 10 || !path || !out_len) return SC_ERR_ARG;
+    if (op < 0 || op > 3 || !input || n < 1 || !a || na != (op == 3 ? 18 : 10) || !path || !out_len)
+        return SC_ERR_ARG;
     SC_TRY
     Rd rd{input, 0};
     SmStatus status = SM_SUCCESS;
@@ -103,9 +106,16 @@ SC_EXPORT int32_t sc_topology_brep_mirror_eval(int32_t op, const char* path, con
         for (ULONG i = 0; i < vertices.GetSize(); ++i) o.push_back((double)g.find(9, vertices[i]));
         return sc_copy_out(o.data(), (int64_t)o.size(), out, cap, out_len);
     }
-    SmAxis2Placement plane(SmPoint3d(a[1], a[2], a[3]), SmVector3d(a[4], a[5], a[6]),
-                           SmVector3d(a[7], a[8], a[9]));
-    status = b->Mirror(plane);
+    if (op == 3) {
+        double m[4][4];
+        for (int r = 0; r < 4; ++r)
+            for (int c = 0; c < 4; ++c) m[r][c] = a[2 + 4 * r + c];
+        status = b->Transform(m, a[1] != 0 ? TRUE : FALSE);
+    } else {
+        SmAxis2Placement plane(SmPoint3d(a[1], a[2], a[3]), SmVector3d(a[4], a[5], a[6]),
+                               SmVector3d(a[7], a[8], a[9]));
+        status = b->Mirror(plane);
+    }
     std::vector<double> record = {st(status)};
     put_geometry(record, b);
     std::vector<double> result = {(double)record.size()};

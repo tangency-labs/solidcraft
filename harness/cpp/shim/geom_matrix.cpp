@@ -20,6 +20,7 @@ enum ScMatrixOp : int32_t
     OP_SOLVE = 8,        // SolveLinearSystem(v): out = x
     OP_EIGEN = 9,        // EigenSystemJacobiSolver: out = values, vectors, matrix; ints = [iter]
     OP_EIGEN3 = 10,      // Compute3x3EigenVectors: out = values, vectors (rows = vectors), matrix
+    OP_SVD = 11,         // SVDecompose(W, V): out = W, V, matrix after (= U)
 };
 
 static void put_matrix(const SmMatrix& m, double* out, int64_t& k)
@@ -205,6 +206,20 @@ SC_EXPORT int32_t sc_geom_matrix_op(int32_t op, int64_t rows, int64_t cols, cons
                 out[k++] = aVecs[r].y;
                 out[k++] = aVecs[r].z;
             }
+            put_matrix(sM, out, k);
+        }
+        break;
+    }
+    case OP_SVD:
+    {
+        SmTArray<double> sW;
+        SmMatrix sVm(1, 1);
+        *status = sM.SVDecompose(sW, sVm);
+        if (*status == SM_SUCCESS)
+        {
+            for (ULONG r = 0; r < sW.GetSize(); r++)
+                out[k++] = sW[r];
+            put_matrix(sVm, out, k);
             put_matrix(sM, out, k);
         }
         break;

@@ -8,13 +8,20 @@
 //! edge curve, every edge use's UV trim curve and every face surface (type code,
 //! natural domain, evaluated points). Inputs the native reader cannot build are
 //! `rejected`, not failed.
+//!
+//! A case with a `matrix` runs `SmBrep::Transform(const double[4][4], bScaleTol)`
+//! (`topology::brep::mirror::transform_matrix`) instead of the mirror, compared the same
+//! way: the fixture file `transform_matrix.json` (identity, rotation, uniform and
+//! non-uniform scale, shear, mirror, near-singular, singular, huge and tiny scale) and
+//! [`MATRIX_GENERATED`] generated `mat####` cases, seeded apart from the `gen####`
+//! mirror stream.
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use solidcore::geom::axis2_placement::Axis2Placement;
 use solidcore::kernel::Kernel;
 use solidcore::math::Vec3;
-use solidcore::topology::brep::mirror::mirror;
+use solidcore::topology::brep::mirror::{mirror, transform_matrix};
 use solidcore::topology::brep::p3::notify_serial;
 use solidcore::topology::Brep;
 use solidcore::{Result as SolidResult, SolidError};
@@ -57,7 +64,15 @@ struct Inputs {
     origin: [f64; 3],
     x: [f64; 3],
     y: [f64; 3],
+    /// When set, `SmBrep::Transform` by this 4x4 matrix (rows; the translation is row
+    /// 3) instead of the mirror.
+    matrix: Option<[[f64; 4]; 4]>,
+    /// `bScaleTol` of the matrix transform (upstream's default `TRUE`).
+    scale_tol: bool,
 }
+
+/// Generated matrix-transform cases per run.
+pub const MATRIX_GENERATED: usize = 96;
 
 impl Default for Inputs {
     fn default() -> Self {
@@ -68,6 +83,8 @@ impl Default for Inputs {
             origin: [0.; 3],
             x: [1., 0., 0.],
             y: [0., 1., 0.],
+            matrix: None,
+            scale_tol: true,
         }
     }
 }
@@ -109,7 +126,19 @@ fn path(i: &Inputs) -> Result<String, HarnessError> {
 
 /// The native output, or `Err(output)` when the FFI guard refuses the input.
 fn native(i: &Inputs, op: u8) -> Result<Result<Vec<f64>, Output>, HarnessError> {
-    match ffi::eval(op, &path(i)?, &block(i), &args(i)) {
+    let r = match (op, i.matrix) {
+        (1, Some(m)) => {
+            let mut a = [0.0; 18];
+            a[0] = f64::from(i.editing);
+            a[1] = f64::from(i.scale_tol);
+            for (slot, x) in a.iter_mut().skip(2).zip(m.iter().flatten()) {
+                *slot = *x;
+            }
+            ffi::transform(&path(i)?, &block(i), &a)
+        }
+        _ => ffi::eval(op, &path(i)?, &block(i), &args(i)),
+    };
+    match r {
         Ok(raw) if raw.first() == Some(&-999.) => Ok(Err(Output::rejected(format!(
             "fixture constructor status {}",
             raw.get(1).copied().unwrap_or(-1.)
@@ -251,7 +280,11 @@ impl UnitDiff for Runner {
         b.set_editing_enabled(i.editing);
         let plane = Axis2Placement::new(v(i.origin), v(i.x), v(i.y));
         let mut run = || -> SolidResult<Vec<f64>> {
-            let st = status(mirror(&mut k, &mut b, &plane))?;
+            let r = match &i.matrix {
+                Some(m) => transform_matrix(&mut k, &mut b, m, i.scale_tol),
+                None => mirror(&mut k, &mut b, &plane),
+            };
+            let st = status(r)?;
             let mut record = vec![st];
             record.extend(geometry(&k, &b, true)?);
             Ok(record)
@@ -319,8 +352,84 @@ impl UnitDiff for Runner {
     fn cases(&self, ctx: &CaseContext) -> Result<Vec<Case>, HarnessError> {
         let mut ctx = ctx.clone();
         ctx.seeds = ctx.seeds.max(128);
-        crate::runner::default_cases(self, &ctx)
+        let mut cases = crate::runner::default_cases(self, &ctx)?;
+        for n in 0..MATRIX_GENERATED {
+            let seed = CaseContext::seed_for("topology.brep_mirror.transform_matrix", n);
+            let mut rng = Rng::new(seed);
+            let Some(inputs) = generate_matrix(&mut rng) else {
+                break;
+            };
+            cases.push(Case {
+                unit: self.id().to_string(),
+                name: format!("mat{n:04}"),
+                source: crate::case::CaseSource::Generated { seed },
+                inputs,
+            });
+        }
+        Ok(cases)
     }
+}
+
+/// A matrix-transform case: a generated 3x3 block (rotation times a scale of one of
+/// the kinds below, sometimes sheared) and translation, on one of [`FILES`].
+fn generate_matrix(rng: &mut Rng) -> Option<Value> {
+    let file = FILES.get(rng.below(FILES.len() as u64) as usize)?;
+    let (a, c) = (rng.uniform(-3.2, 3.2), rng.uniform(-3.2, 3.2));
+    let (ca, sa, cc, sc) = (a.cos(), a.sin(), c.cos(), c.sin());
+    // a rotation about Z then X
+    let rot = [[ca, sa, 0.], [-sa * cc, ca * cc, sc], [sa * sc, -ca * sc, cc]];
+    let d = match rng.below(9) {
+        0 => [1., 1., 1.],
+        1 => {
+            let s = rng.uniform(0.2, 5.0);
+            [s, s, s]
+        }
+        2 | 3 => [
+            rng.uniform(0.2, 5.0),
+            rng.uniform(0.2, 5.0),
+            rng.uniform(0.2, 5.0),
+        ],
+        4 => [-1., 1., 1.],
+        5 => [-rng.uniform(0.2, 5.0), rng.uniform(0.2, 5.0), 1.],
+        6 => [1., 1., 10f64.powi(-(rng.range_i64(3, 10) as i32))],
+        7 => {
+            let s = 10f64.powi(rng.range_i64(-6, 6) as i32);
+            [s, s, s]
+        }
+        _ => [1., 1., 0.],
+    };
+    let mut m = [[0.; 4]; 4];
+    for ((out, row), dr) in m.iter_mut().zip(rot).zip(d) {
+        for (o, x) in out.iter_mut().zip(row) {
+            *o = x * dr;
+        }
+    }
+    if rng.chance(0.4) {
+        // a shear term
+        let (r, k) = (rng.below(3) as usize, rng.below(3) as usize);
+        let shear = rng.uniform(-1.0, 1.0);
+        if let Some(x) = m.get_mut(r).and_then(|row| row.get_mut(k)) {
+            *x += shear;
+        }
+    }
+    let scale = 10f64.powi(rng.range_i64(-1, 2) as i32);
+    let t = [
+        rng.uniform(-10., 10.) * scale,
+        rng.uniform(-10., 10.) * scale,
+        rng.uniform(-10., 10.) * scale,
+        1.,
+    ];
+    if let Some(row) = m.get_mut(3) {
+        *row = t;
+    }
+    let i = Inputs {
+        file: (*file).into(),
+        matrix: Some(m),
+        scale_tol: rng.chance(0.8),
+        editing: rng.chance(0.9),
+        ..Inputs::default()
+    };
+    serde_json::to_value(i).ok()
 }
 
 /// `Face::shell` and `Shell::faces` have no upstream counterpart: the import derives them
