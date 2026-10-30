@@ -1,6 +1,7 @@
 //! Native B-rep p6 operations. The Rust side builds a wire edge, face, network or
-//! kind-5 net fixture itself ([`crate::own_builder`]); only an `.smb` file's raw
-//! topology is imported from the shim's export.
+//! kind-5 net fixture itself ([`crate::own_builder`]) and reads an `.smb` file with the
+//! Rust reader ([`crate::own_reader::file_in_order`]), both renumbered into the shim's
+//! walk order: no C++ export reaches the Rust side.
 //! Closure passes compare actual statuses, output reset, shell ownership, context
 //! mark advancement/locks, and every face-use mark. Copy compares only empty inputs.
 //! Op 3 runs `MakeFaceTopology` one or more times (each on the B-rep the previous
@@ -987,8 +988,10 @@ fn build_net(
 }
 
 /// The Rust B-rep of a case's fixture, built by the Rust kernel
-/// ([`crate::own_builder`] under [`CONVENTIONS`]; a kind-5 net by [`build_net`]), or
-/// the build's error; `None` for an `.smb` file (imported from the shim's export).
+/// ([`crate::own_builder`] under [`CONVENTIONS`]; a kind-5 net by [`build_net`]) or,
+/// for an `.smb` file (upstream's or a local fixture), read by the Rust reader and
+/// renumbered under [`CONVENTIONS`] ([`crate::own_reader::file_in_order`]), or the
+/// build's or read's error.
 fn own_fixture(i: &Inputs) -> Result<Option<Result<Brep, SolidError>>, HarnessError> {
     use crate::own_builder::{build_as, finish, in_new_brep, Built};
     let mut k = Kernel::default();
@@ -1006,8 +1009,23 @@ fn own_fixture(i: &Inputs) -> Result<Option<Result<Brep, SolidError>>, HarnessEr
             .collect::<Result<Vec<_>, HarnessError>>()?;
         let raw = in_new_brep(&mut k, |k, b| build_net(k, b, &net.points, &edges))?;
         Some(finish(&mut k, raw, false, false, &CONVENTIONS)?)
+    } else if let Some(built) = build_as(&mut k, brep_of(i)?, false, false, &CONVENTIONS)? {
+        Some(built)
     } else {
-        build_as(&mut k, brep_of(i)?, false, false, &CONVENTIONS)?
+        // an `.smb` file: the Rust reader's B-rep in the shim's walk order, its geometry
+        // owned under this runner's identities (no C++ export reaches the Rust side)
+        let BrepIn::File { rebuild, .. } = brep_of(i)? else {
+            return Err(harness("own builder: a non-file source was not built"));
+        };
+        let path = path_of(i)?;
+        Some(crate::own_reader::file_in_order(
+            &mut k,
+            &path,
+            *rebuild,
+            false,
+            false,
+            &CONVENTIONS,
+        )?)
     };
     Ok(built.map(|b| match b {
         Built::Brep(b) => Ok(*b),
@@ -1015,17 +1033,12 @@ fn own_fixture(i: &Inputs) -> Result<Option<Result<Brep, SolidError>>, HarnessEr
     }))
 }
 
-/// The Rust fixture B-rep: built by [`own_fixture`], or for an `.smb` file imported
-/// from the shim's graph export.
+/// The Rust fixture B-rep, built or read by [`own_fixture`].
 fn rust_fixture(i: &Inputs) -> Result<Brep, HarnessError> {
     match own_fixture(i)? {
         Some(Ok(b)) => Ok(b),
         Some(Err(e)) => Err(harness(format!("fixture construction failed: {e}"))),
-        None => {
-            let fixture = ffi::export(&path_of(i)?, &block(i)?).map_err(harness)?;
-            counts(&fixture.graph).ok_or_else(|| harness("fixture construction failed"))?;
-            Ok(shared::import(&fixture.graph)?.0)
-        }
+        None => Err(harness("fixture construction failed: no fixture")),
     }
 }
 
