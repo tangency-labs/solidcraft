@@ -23,6 +23,7 @@
 //! | `topology::edge::replace_3d_curve` (shared)  | `SmEdge::Replace3DCurve`                         |
 //! | [`glue_edges`]                               | `SmBrep::GlueEdges`                              |
 //! | [`update_analytical_domain`]                 | `SmSurface::UpdateAnalyticalDomain` (virtual)    |
+//! | [`FilletRemoval::set_exact_only`], [`FilletRemoval::not_exact`], [`FilletRemoval::sharp_edge`] | the fork's `SetExactOnly`, `NotExact`, `GetSharpEdge` (WR-606, not upstream) |
 //!
 //! Deviations:
 //! - **Object model.** `SmFaceRemoval` (an abstract base with one derived class) is not
@@ -47,6 +48,15 @@
 //! - **Curve owners.** A curve the removal installs is owned under its edge's
 //!   [`Brep::owner_identity`], the identity the B-rep check compares (`SetOwner(pEdge)`),
 //!   and `ValidateGeometry` checks it under the same identities.
+//! - **Exact only (not upstream).** WR-606, the SolidCraft fork's tangency-labs/smlib
+//!   5b0534b: [`FilletRemoval::set_exact_only`] (off by default; [`delete_fillet_face`]
+//!   never sets it) makes the removal refuse what SMLib would only approximate. A side
+//!   edge that stops short of a new corner runs on along its own line (its end span
+//!   continued) instead of a fitted intersection of its faces. A curved side edge, a
+//!   corner of more than three edges, or a face other than a plane whose new corner lies
+//!   outside its surface's natural domain fails the removal before the B-rep changes.
+//!   The fork installs the run-on curve with `SetCurve` and then sets its owner; the
+//!   port sets the owner first, as for the new edge.
 //! - No recursion.
 
 use crate::curve::curve::{Curve, CurveKind};
@@ -59,11 +69,12 @@ use crate::geom::object::NotifyOperation;
 use crate::geom::tol;
 use crate::geom::vector2d::{Point2, Vec2};
 use crate::kernel::Kernel;
-use crate::math::{Point3, Vec3, EFF_ZERO};
+use crate::math::{Point3, Vec3, EFF_ZERO, EFF_ZERO_SQRT};
 use crate::nurbs::b_spline_curve_n_lib::TrimMode;
 use crate::nurbs::b_spline_surface::p1::SurfParamType;
 use crate::nurbs::b_spline_surface::BSplineSurface;
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
+use crate::surface::plane::Plane;
 use crate::surface::surface::p3::set_out_of_bounds_enabled;
 use crate::surface::surface::{Surface, SurfaceKind};
 use crate::topology::brep::p2::{self as brep_p2, NotifyArg};
@@ -71,6 +82,7 @@ use crate::topology::brep::p3::{self as brep_p3, with_kernel_callbacks, DeleteFa
 use crate::topology::brep::p4::{self as brep_p4, DeleteEnv};
 use crate::topology::edge::{self, SetCurveOptions};
 use crate::topology::edgeuse::p1::{self as eu1, UvTrimCurveArg};
+use crate::topology::edgeuse::p3::get_or_create_uv_trim_curve;
 use crate::topology::topology_traverser::Marks;
 use crate::topology::{vertex, vertexuse, Brep, EdgeId, EdgeuseId, FaceId, LoopuseStart, VertexId};
 
@@ -120,6 +132,16 @@ pub struct FilletCornerInfo {
     pub new_side_edge_ext_end_face_uv: Option<Curve>,
     /// `m_pNewSideEdgeExtTanFaceUV`.
     pub new_side_edge_ext_tan_face_uv: Option<Curve>,
+    /// Not upstream (WR-606, exact only; SolidCraft change, tangency-labs/smlib 5b0534b):
+    /// the side edge's line run on to the new corner (`m_pNewSideCurve`), until
+    /// `DoRemoval` installs it.
+    pub new_side_curve: Option<Curve>,
+    /// WR-606 (`m_bSideCurveReplaced`): `DoRemoval` put [`Self::new_side_curve`] on the
+    /// side edge.
+    pub side_curve_replaced: bool,
+    /// WR-606 (`m_bRebuildSideUVs`, exact only): `DoRemoval` makes the side edge's UV
+    /// trim curves anew.
+    pub rebuild_side_uvs: bool,
     /// `m_pSideEdge`.
     pub side_edge: Option<EdgeId>,
     /// `m_bHighEndOfSideEdge`.
@@ -143,6 +165,7 @@ impl FilletCornerInfo {
 /// made before the B-rep changes, except that a side edge's UV trim curve that does not
 /// reach its new corner is extended (or cleared) on the way, as upstream does.
 #[derive(Debug, Clone)]
+#[allow(clippy::struct_excessive_bools)] // upstream's independent SmBoolean members
 pub struct FilletRemoval {
     /// `m_pFaceToDelete`.
     face_to_delete: FaceId,
@@ -176,6 +199,10 @@ pub struct FilletRemoval {
     new_edge_curve_uvs: [Option<Curve>; 2],
     /// `m_aCornerInfo[which end][which side]`.
     corners: [[FilletCornerInfo; 2]; 2],
+    /// Not upstream (WR-606, `m_bExactOnly`): see [`FilletRemoval::set_exact_only`].
+    exact_only: bool,
+    /// Not upstream (WR-606, `m_bNotExact`): see [`FilletRemoval::not_exact`].
+    not_exact: bool,
 }
 
 impl FilletRemoval {
@@ -199,7 +226,34 @@ impl FilletRemoval {
             new_edge_curve_3d: None,
             new_edge_curve_uvs: [None, None],
             corners: Default::default(),
+            exact_only: false,
+            not_exact: false,
         }
+    }
+
+    /// Not upstream (WR-606; SolidCraft change, tangency-labs/smlib 5b0534b,
+    /// `SetExactOnly`): remove only what SMLib makes exactly. A side edge runs on to
+    /// the new corner only along its line (not on a fitted intersection), a face grows
+    /// only within its surface's domain or on a plane, and every corner has a side
+    /// edge. Otherwise [`FilletRemoval::remove_face`] fails before changing the B-rep,
+    /// [`FilletRemoval::not_exact`] true where a continuation was the reason. Off by
+    /// default (upstream's removal); [`delete_fillet_face`] never sets it.
+    pub fn set_exact_only(&mut self, exact_only: bool) {
+        self.exact_only = exact_only;
+    }
+
+    /// Not upstream (WR-606, `NotExact`): an exact-only removal failed because a
+    /// continuation would not be exact.
+    #[must_use]
+    pub const fn not_exact(&self) -> bool {
+        self.not_exact
+    }
+
+    /// Not upstream (WR-606, `GetSharpEdge`): the edge the fillet became (after a
+    /// successful [`FilletRemoval::remove_face`]).
+    #[must_use]
+    pub const fn sharp_edge(&self) -> Option<EdgeId> {
+        self.tan_edges[0]
     }
 
     /// `RemoveFace`: collects the fillet's topology, intersects the new corners, the side
@@ -226,6 +280,46 @@ impl FilletRemoval {
 
         // Intersect the surfaces of the tangent Faces (which have been extended).
         self.intersect_tangent_surfaces(k, b)?;
+
+        // Not upstream (WR-606, exact only): a face grows over the fillet's place within
+        // its surface's domain, or on a plane (a plane continued is the same plane); any
+        // other surface would be continued past its domain, which SMLib does not do
+        // exactly.
+        if self.exact_only {
+            for ii in 0..2 {
+                let uv_end_new = *self
+                    .uv_end_surf_new
+                    .get(ii)
+                    .ok_or_else(|| null("end index"))?;
+                let faces = [self.end_face(ii)?, self.tan_face(ii)?];
+                let uvs = [
+                    [uv_end_new, uv_end_new],
+                    [
+                        self.corner(0, ii)?.uv_tan_surf_new,
+                        self.corner(1, ii)?.uv_tan_surf_new,
+                    ],
+                ];
+                for (face, face_uvs) in faces.into_iter().zip(uvs) {
+                    let srf = ner(crate::topology::face::p2::surface(b, face)?)?;
+                    let domain = srf.natural_uv_domain_with_nurb(k)?;
+                    let slack = EFF_ZERO_SQRT * (1.0 + domain.max_dimension());
+                    let mut inside = true;
+                    for uv in face_uvs {
+                        if uv.x < domain.min().x - slack
+                            || uv.x > domain.max().x + slack
+                            || uv.y < domain.min().y - slack
+                            || uv.y > domain.max().y + slack
+                        {
+                            inside = false;
+                        }
+                    }
+                    if !inside && !srf.is_kind_of(Plane::TYPE)? {
+                        self.not_exact = true;
+                        return Err(sm_err());
+                    }
+                }
+            }
+        }
 
         // Ok, we've collected all of the info without incident.
         // Start digging into the Brep.
@@ -589,6 +683,67 @@ impl FilletRemoval {
             }
         }
 
+        // Not upstream (WR-606, exact only): a side edge too short to reach the new
+        // corner runs on along its own line (its end span continued: the same line); a
+        // curved one would need a fitted intersection.
+        if self.exact_only && !(stat_ok && success && crv_dist <= tol) {
+            // a corner of more than three edges keeps its end edge, on a fitted intersection
+            let Some(side) = side_edge else {
+                return Err(sm_err());
+            };
+            let side_curve = ner(edge::curve(b, side)?)?.clone();
+            if bspline_part(&side_curve).is_none() || !side_curve.is_linear(k, tol, false)?.linear {
+                self.not_exact = true;
+                return Err(sm_err());
+            }
+            let curve_ivl = side_curve.natural_interval();
+            let end = if high_end {
+                curve_ivl.max()
+            } else {
+                curve_ivl.min()
+            };
+            let pv = side_curve.evaluate(k, end, 1, true, false)?;
+            let [p0, d1, ..] = pv.as_slice() else {
+                return Err(null("short evaluation"));
+            };
+            let (p0, d1) = (*p0, *d1);
+            let speed = d1.length();
+            // (`!(dSpeed > SM_EFF_ZERO)`: a NaN speed fails too)
+            if speed.is_nan() || speed <= EFF_ZERO {
+                return Err(sm_err());
+            }
+            let reach = (p0.distance(new_vtx_pt) + 10.0 * tol) / speed;
+            let far = if high_end { end + reach } else { end - reach };
+            let side_part = ner(bspline_part(&side_curve))?;
+            let longer = Curve::from(ner(side_part.create_extended_curve(
+                far,
+                ContinuityType::CInfinity,
+                true,
+            )?)?);
+            let guess = far;
+            let drop = longer.drop_point(
+                k,
+                &longer.natural_interval(),
+                new_vtx_pt,
+                None,
+                tol * 10.0,
+                Some(guess),
+                SolverOperation::Minimize,
+            );
+            self.corner_mut(which_end, which_side)?.new_side_curve = Some(longer);
+            match drop {
+                Ok(d) if d.success && d.distance <= tol => {
+                    stat_ok = true;
+                    success = d.success;
+                    crv_param = d.parameter;
+                    crv_dist = d.distance;
+                }
+                Err(e) if e.is_unported() => return Err(e),
+                // the corner is off the side edge's line
+                _ => return Err(sm_err()),
+            }
+        }
+
         if stat_ok && success && crv_dist <= tol {
             // Good, the curve is long enough, just update the Edge domain.
             let side = ner(side_edge)?;
@@ -597,6 +752,14 @@ impl FilletRemoval {
                 corner.new_side_edge_param = crv_param;
                 // Just to make sure:
                 corner.new_side_edge_extension_3d = None;
+            }
+
+            // Not upstream (WR-606, exact only): nothing changes before DoRemoval(), which
+            // makes this side edge's UV trims anew from its curve once its interval
+            // reaches the corner.
+            if self.exact_only {
+                self.corner_mut(which_end, which_side)?.rebuild_side_uvs = true;
+                return Ok(());
             }
             let mut side_edge_extent = edge::interval(b, side)?;
             side_edge_extent.add_value(crv_param);
@@ -969,8 +1132,30 @@ impl FilletRemoval {
         let mut new_side_edge_domain = edge::interval(b, side_edge)?;
 
         if corner.new_side_edge_extension_3d.is_none() {
+            let new_side_edge_param = corner.new_side_edge_param;
+            // Not upstream (WR-606, exact only): its line run on to the corner (the old
+            // part keeps its parameters); the UV trims go with the old curve and are made
+            // anew at the end of DoRemoval.
+            if let Some(mut new_curve) = self
+                .corner_mut(which_end, which_side)?
+                .new_side_curve
+                .take()
+            {
+                with_kernel_callbacks(k, b, |_k, b, env| {
+                    let owner = (env.key_of)(EntityRef::Edge(side_edge));
+                    let _ = new_curve.set_owner(Some(owner), Some(brep_p2::brep_ref(b)));
+                    let options = SetCurveOptions {
+                        delete_old_curve: true,
+                        ..SetCurveOptions::default()
+                    };
+                    edge::set_curve(b, side_edge, Some(new_curve), options, env, [None, None])
+                        .map(drop)
+                })?;
+                self.corner_mut(which_end, which_side)?.side_curve_replaced = true;
+            }
+
             // Curve was long enough: just update the Edge's domain.
-            new_side_edge_domain.add_value(corner.new_side_edge_param);
+            new_side_edge_domain.add_value(new_side_edge_param);
             edge::set_interval(b, side_edge, &new_side_edge_domain)?;
 
             // And the two uv curves: in End face, and Tangent face. (Upstream reads the
@@ -1200,6 +1385,31 @@ impl FilletRemoval {
         let deviation = self.new_edge_deviation;
         set_trim_curve(k, b, survive_edge, self.tan_face(0)?, uv0, deviation, false)?;
         set_trim_curve(k, b, survive_edge, self.tan_face(1)?, uv1, deviation, true)?;
+
+        // Not upstream (WR-606, exact only): UV trims of the side edges that run on to the
+        // corners, made anew.
+        for which_end in 0..2 {
+            for which_side in 0..2 {
+                let corner = self.corner(which_end, which_side)?;
+                let Some(side) = corner.side_edge else {
+                    continue;
+                };
+                if !(corner.side_curve_replaced || corner.rebuild_side_uvs) {
+                    continue;
+                }
+                let uses = b.edge(side)?.edgeuses.clone();
+                for &eu in &uses {
+                    // (status ignored)
+                    ignore_status(eu1::delete_uv_trim_curve(b, eu))?;
+                }
+                for &eu in &uses {
+                    get_or_create_uv_trim_curve(k, b, eu, false, false, true)?.status?;
+                    if eu1::uv_trim_curve(b, eu)?.0.is_none() {
+                        return Err(SolidError::null_pointer(OP));
+                    }
+                }
+            }
+        }
 
         // And that should do it.
         Ok(())

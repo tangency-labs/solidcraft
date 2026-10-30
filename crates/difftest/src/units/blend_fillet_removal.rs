@@ -180,3 +180,111 @@ impl UnitDiff for Runner {
         }
     }
 }
+
+/// WR-606 (the fork's tangency-labs/smlib 5b0534b): the exact-only removal on the
+/// fixture solids, Rust only (the pinned C++ has no exact mode). Every face of every
+/// fixture is tried; a removal refused as not exact leaves the solid as it was, one that
+/// is not refused gives what the default removal gives, and some face of a fillet
+/// between B-spline faces (whose new corner lies outside a surface's natural domain, or
+/// whose side edge is a curve that stops short of it) is refused as not exact.
+#[cfg(test)]
+mod exact_only_tests {
+    use super::{path, Inputs};
+    use solidcore::blend::fillet_removal::FilletRemoval;
+    use solidcore::kernel::Kernel;
+    use solidcore::topology::brep::p1 as bp1;
+    use solidcore::topology::face::p2 as face2;
+    use solidcore::topology::{vertex, Brep};
+
+    const FILES: [&str; 18] = [
+        "Defeature/defillet.smb",
+        "Defeature/inset_cube_1x1fillet.smb",
+        "Defeature/inset_cube_1x2fillet.smb",
+        "Defeature/inset_cube_1x3fillet.smb",
+        "Defeature/inset_cube_3x1fillet.smb",
+        "Fillet/cyl_on_box_w_fillet.smb",
+        "Fillet/cyl_on_box_w_fillet1.smb",
+        "Fillet/fillet0114.smb",
+        "Fillet/fillet0227.smb",
+        "Fillet/fillet1010.smb",
+        "Fillet/fillet1017.smb",
+        "Fillet/fillet1018.smb",
+        "Fillet/fillet1019.smb",
+        "Fillet/filleted_box.smb",
+        "Fillet/shell_fillet.smb",
+        "Fillet/torii_fillet.smb",
+        "Solids/nurb_fillet.smb",
+        "box_with_large_fillet.smb",
+    ];
+
+    /// Face, edge and vertex counts and the vertex points, sorted.
+    fn snapshot(b: &Brep) -> (usize, usize, Vec<[f64; 3]>) {
+        let mut points: Vec<[f64; 3]> = b
+            .vertex_list()
+            .iter()
+            .map(|&v| vertex::point(b, v).unwrap().to_array())
+            .collect();
+        points.sort_by(|p, q| p.partial_cmp(q).unwrap());
+        (b.face_list().len(), b.edges().ids().count(), points)
+    }
+
+    /// The fixture `file` read by the Rust reader.
+    fn read(k: &mut Kernel, file: &str) -> Brep {
+        let i = Inputs {
+            file: file.into(),
+            ..Inputs::default()
+        };
+        crate::own_reader::read_file_rebuild(k, &path(&i).unwrap(), false)
+            .unwrap()
+            .unwrap()
+    }
+
+    /// `SmFilletRemoval(face, face tolerance)` on face `index` of `file`, exact only or
+    /// not, with editing enabled: whether it succeeded, `NotExact`, and the solid's
+    /// snapshot before and after.
+    #[allow(clippy::type_complexity)]
+    fn remove(
+        file: &str,
+        index: usize,
+        exact_only: bool,
+    ) -> (bool, bool, (usize, usize, Vec<[f64; 3]>), (usize, usize, Vec<[f64; 3]>)) {
+        let mut k = Kernel::default();
+        let mut b = read(&mut k, file);
+        let f = bp1::faces(&b, None).unwrap()[index];
+        let before = snapshot(&b);
+        b.set_editing_enabled(true);
+        let tol = face2::tolerance(&b, f).unwrap();
+        let mut removal = FilletRemoval::new(f, tol);
+        removal.set_exact_only(exact_only);
+        let r = removal.remove_face(&mut k, &mut b);
+        b.refresh_cached_topology();
+        (r.is_ok(), removal.not_exact(), before, snapshot(&b))
+    }
+
+    #[test]
+    fn exact_only_refuses_inexact_removals_and_agrees_with_the_rest() {
+        let mut refused = Vec::new();
+        let mut exact = 0;
+        for file in FILES {
+            let mut k = Kernel::default();
+            let count = bp1::faces(&read(&mut k, file), None).unwrap().len();
+            for index in 0..count {
+                let (ok, not_exact, before, after) = remove(file, index, true);
+                if not_exact {
+                    assert!(!ok, "{file} face {index}: not exact but removed");
+                    assert_eq!(after, before, "{file} face {index}: refused but changed");
+                    refused.push(format!("{file} face {index}"));
+                } else if ok {
+                    let (default_ok, _, _, default_after) = remove(file, index, false);
+                    assert!(default_ok, "{file} face {index}: exact only removed, default not");
+                    assert_eq!(after.0, default_after.0, "{file} face {index}: faces");
+                    assert_eq!(after.1, default_after.1, "{file} face {index}: edges");
+                    exact += 1;
+                }
+            }
+        }
+        eprintln!("exact-only: {exact} removed, refused as not exact: {refused:?}");
+        assert!(!refused.is_empty(), "no fixture face was refused as not exact");
+        assert!(exact > 0, "no fixture face was removed exactly");
+    }
+}
