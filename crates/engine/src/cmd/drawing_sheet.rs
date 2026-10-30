@@ -71,7 +71,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .output(output_schema_for::<SheetsResult>)
         .params(
             "sheet: id or name (a drawing keeps at least one); contents?: delete, to delete the views on it, their dimensions and \
-             balloons with it (without it a sheet with anything on it is refused, naming what) → the drawing's sheets. One undo step.",
+             balloons, and the images on it, with it (without it a sheet with anything on it is refused, naming what) → the drawing's sheets. One undo step.",
         ),
 ];
 
@@ -102,7 +102,10 @@ fn listed(on: &OnSheet) -> String {
         (!list.is_empty()).then(|| format!("{} {what}{s} ({})", list.len(), named(list)))
     };
     let mut kinds: Vec<String> =
-        [kind("view", &on.views), kind("dimension", &on.dimensions), kind("balloon", &on.balloons)].into_iter().flatten().collect();
+        [kind("view", &on.views), kind("dimension", &on.dimensions), kind("balloon", &on.balloons), kind("image", &on.images)]
+            .into_iter()
+            .flatten()
+            .collect();
     let last = kinds.pop().unwrap_or_default();
     if kinds.is_empty() { last } else { format!("{} and {last}", kinds.join(", ")) }
 }

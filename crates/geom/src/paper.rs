@@ -44,6 +44,8 @@ pub mod annotate;
 pub const MAX_LINE_MM: f64 = 10.0;
 /// The longest side a sheet may have, in millimetres.
 pub const MAX_SIDE_MM: f64 = 5000.0;
+/// The most pixels an image on paper may have: 8,000 by 8,000, 256 MB once decoded.
+pub const MAX_IMAGE_PIXELS: u64 = 64_000_000;
 /// Groups, items, loops and curve pieces a scene may hold in all.
 pub const MAX_RECORDS: usize = 100_000;
 /// The largest coordinate and radius either way, in millimetres: twenty times the longest side.
