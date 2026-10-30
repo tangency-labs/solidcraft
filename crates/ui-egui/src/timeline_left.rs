@@ -1190,7 +1190,7 @@ struct Rows<'a> {
     sketch_states: crate::sketch_state::SketchStates,
 }
 
-fn vertical_features(app: &mut SolveApp, ui: &mut egui::Ui, names: bool) {
+pub(crate) fn vertical_features(app: &mut SolveApp, ui: &mut egui::Ui, names: bool) {
     let t = Tokens::get();
     // Show origin and bodies at the top (#6490): the browser's Bodies folder and Origin rows lead
     // the history when it is wide enough for names. They are not places in the history: nothing

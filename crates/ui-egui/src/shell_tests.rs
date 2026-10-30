@@ -966,6 +966,133 @@ fn dialog_place_is_saved_and_survives_cancel_defaults_and_bad_input() {
     assert_eq!(restored.preferences.default_units, "in");
 }
 
+/// A design with Extrude1 (Body1) built from Sketch1, for the design tree over the view.
+fn extruded(h: &mut Harness) {
+    sketched(h);
+    h.app.run("solid.extrude", json!({"distance":10})).unwrap();
+}
+
+/// Dialogs in the left column, the design tree over the view (#6710): the view's top-left corner
+/// shows the design's name, folded; a click opens the browser's Origin and Bodies rows and the
+/// History's features over the view, covered for navigation and picking only inside its card; a
+/// plane picked there starts the sketch; another click folds it, and it goes with the dialog.
+#[test]
+fn the_design_tree_over_the_view_folds_picks_and_goes_with_the_dialog() {
+    for mode in [LayoutMode::Floating, LayoutMode::Docked] {
+        let what = format!("{mode:?}");
+        let mut h = Harness::new();
+        h.call("ui.resize", json!({"width":1400,"height":900}));
+        h.call("ui.set", json!({"layout":mode}));
+        h.app.run("view.history_layout", json!({"dock":"under_browser"})).unwrap();
+        extruded(&mut h);
+        h.settle();
+        h.step(&json!({"start":"sketch.create"})).unwrap();
+        h.settle();
+        assert!(rect_of("dialog_tree:outer").is_none(), "{what}: at the view's edge the browser is there");
+        h.step(&json!({"widget":"Cancel"})).unwrap();
+        h.call("ui.prefs", json!({"dialog_place":"left_column"}));
+        h.step(&json!({"start":"sketch.create"})).unwrap();
+        h.settle();
+        let folded = rect_of("dialog_tree:outer").expect("the folded tree");
+        let viewport = h.app.viewport.rect.unwrap();
+        let content = content_rect(&h.app, viewport);
+        let dialog = h.app.viewport.dialog_rect.unwrap();
+        assert!(folded.left() >= dialog.right() && (folded.left() - content.left()).abs() <= SHELL_GAP + 1.0, "{what}: {folded:?} {content:?}");
+        assert!((folded.top() - content.top()).abs() <= SHELL_GAP + 1.0, "{what}: {folded:?} {content:?}");
+        assert!(folded.height() < 2.0 * crate::ui_kit::TREE_ROW_HEIGHT + 12.0, "{what}: folded is one row: {folded:?}");
+        assert!(crate::scenario::handle_at("timeline:Extrude1").is_none(), "{what}: folded");
+        assert!(covered(&h.app, folded.center()), "{what}");
+        assert!(!covered(&h.app, folded.right_bottom() + vec2(6.0, 6.0)), "{what}: the view goes on right beside it");
+        h.step(&json!({"click":{"handle":"dialog_tree:header"}})).unwrap();
+        h.settle();
+        let open = rect_of("dialog_tree:outer").expect("the open tree");
+        assert!(open.height() > folded.height() * 3.0 && open.left() == folded.left(), "{what}: {open:?}");
+        let rows: Vec<String> = crate::browser::drawn_rows().into_iter().map(|(label, ..)| label).collect();
+        for row in ["Origin", "Bodies", "Body1"] {
+            assert!(rows.iter().any(|r| r == row), "{what}: {row} in {rows:?}");
+        }
+        assert!(crate::scenario::handle_at("timeline:Extrude1").is_some_and(|p| open.contains(p)), "{what}: the History's rows");
+        assert!(covered(&h.app, open.center()) && !covered(&h.app, open.right_center() + vec2(6.0, 0.0)), "{what}");
+        h.step(&json!({"click":{"chevron":"Origin"}})).unwrap();
+        h.settle();
+        h.step(&json!({"click":{"browser":"XY"}})).unwrap();
+        h.settle();
+        assert!(h.app.session.active_sketch.is_some(), "{what}: the plane picked in the tree starts the sketch");
+        assert!(
+            h.app.dialog.is_none() && rect_of("dialog_tree:outer").is_none() && h.app.shell.dialog_tree.is_none(),
+            "{what}: it goes with the dialog"
+        );
+        h.app.run("sketch.finish", json!({})).unwrap();
+        h.step(&json!({"start":"solid.shell"})).unwrap();
+        h.settle();
+        let again = rect_of("dialog_tree:outer").expect("a new dialog's tree");
+        assert!(again.height() < 2.0 * crate::ui_kit::TREE_ROW_HEIGHT + 12.0, "{what}: each dialog starts with the tree folded");
+        h.step(&json!({"click":{"handle":"dialog_tree:header"}})).unwrap();
+        h.step(&json!({"click":{"handle":"dialog_tree:header"}})).unwrap();
+        h.settle();
+        assert!(
+            rect_of("dialog_tree:outer").is_some_and(|r| r.height() < 2.0 * crate::ui_kit::TREE_ROW_HEIGHT + 12.0),
+            "{what}: a second click folds it"
+        );
+    }
+}
+
+/// With OK and Cancel in the view's corner (#6709), the open tree keeps clear of the pair, also on
+/// a view too narrow for both side by side at the tree's full width.
+#[test]
+fn the_design_tree_over_the_view_keeps_clear_of_the_corner_pair() {
+    for width in [1400.0, 600.0] {
+        let mut h = Harness::new();
+        h.call("ui.resize", json!({"width":width,"height":900}));
+        h.call("ui.prefs", json!({"dialog_place":"left_column","view_confirm_corner":true}));
+        extruded(&mut h);
+        h.settle();
+        h.step(&json!({"start":"solid.shell"})).unwrap();
+        h.settle();
+        h.step(&json!({"click":{"handle":"dialog_tree:header"}})).unwrap();
+        h.settle();
+        let tree = rect_of("dialog_tree:outer").expect("the open tree");
+        let pair = rect_of("view:confirm").expect("the pair");
+        assert!(!tree.intersects(pair), "width {width}: {tree:?} {pair:?}");
+        assert!(!tree.intersects(h.app.viewport.dialog_rect.unwrap()), "width {width}: the tree is beside the dialog");
+    }
+}
+
+/// A click on a feature in the design tree over the view gives it to a dialog input that takes
+/// features, through the History's own click (`timeline::pick_feature_into_dialog`, #6532); a body
+/// goes to an input that takes bodies, as in the browser.
+#[test]
+fn the_design_tree_over_the_view_gives_features_and_bodies_to_the_dialog() {
+    let mut h = Harness::new();
+    h.call("ui.resize", json!({"width":1400,"height":900}));
+    h.call("ui.prefs", json!({"dialog_place":"left_column"}));
+    h.app.run("view.history_layout", json!({"dock":"left"})).unwrap();
+    extruded(&mut h);
+    h.settle();
+    let extrude = h.app.session.doc.features.iter().find(|f| f.name == "Extrude1").unwrap().id;
+    h.step(&json!({"start":"solid.mirror"})).unwrap();
+    h.settle();
+    h.step(&json!({"click":{"handle":"dialog:Object Type"}})).unwrap();
+    h.step(&json!({"click":{"handle":"dialog:Object Type:Features"}})).unwrap();
+    h.step(&json!({"click":{"handle":"dialog:Features"}})).unwrap();
+    h.step(&json!({"click":{"handle":"dialog_tree:header"}})).unwrap();
+    h.settle();
+    let tree = rect_of("dialog_tree:outer").expect("the open tree");
+    assert!(crate::scenario::handle_at("timeline:Extrude1").is_some_and(|p| tree.contains(p)), "the History's row is in the tree");
+    h.step(&json!({"click":{"handle":"timeline:Extrude1"}})).unwrap();
+    let d = h.app.dialog.as_ref().expect("Mirror stays open");
+    assert_eq!(d.inputs[0].items, vec![solidcraft_engine::Sel::Feature { id: extrude }], "the feature fills Features");
+    h.step(&json!({"widget":"Cancel"})).unwrap();
+    h.settle();
+    h.step(&json!({"start":"solid.combine"})).unwrap();
+    h.settle();
+    h.step(&json!({"click":{"handle":"dialog_tree:header"}})).unwrap();
+    h.settle();
+    h.step(&json!({"click":{"browser":"Body1"}})).unwrap();
+    let d = h.app.dialog.as_ref().expect("Combine stays open");
+    assert!(d.inputs.iter().any(|i| i.items.contains(&solidcraft_engine::Sel::Body { name: "Body1".into() })), "a body picked in the tree");
+}
+
 /// Every text the last frame painted.
 fn painted_texts(h: &Harness) -> Vec<String> {
     fn walk(shape: &egui::Shape, out: &mut Vec<String>) {
