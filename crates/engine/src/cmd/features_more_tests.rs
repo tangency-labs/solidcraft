@@ -1870,8 +1870,14 @@ fn fillets_on_tapered_bosses_saved_before_still_find_their_edges() {
         let r = s.model.result(id).unwrap();
         assert!(r.error.is_none() && r.warning.is_none(), "{name}: {:?} {:?}", r.error, r.warning);
     }
-    // The build that saved it measured 69454.885209 mm³.
-    assert!((volume - 69454.8852092132).abs() < 1e-3, "{volume}");
+    // In closed form: the 80 × 40 × 20 block, the 20 × 20 boss 10 high tapered 5° in (a frustum,
+    // top 20 − 20 tan 5° square: 3660.251034), the Ø16 boss tapered alike (a cone frustum, top
+    // radius 8 − 10 tan 5°: 1798.751833); less the R1 round along a sloping corner (the corner's
+    // section, r²(cot φ/2 − (π − φ)/2) at its dihedral angle φ = 90.435°, times its length
+    // between z = 20 and 30: 2.124401) and the R0.5 round all round the cone's top (the section
+    // at the rim's 95°, turned about the axis by Pappus: 1.928463). The build that saved it,
+    // with truck, measured 69454.885209.
+    assert!((volume - 69454.950004).abs() < 1e-3, "{volume}");
     assert_eq!(s.world_state().unwrap().bodies.len(), 1);
 }
 
