@@ -29,6 +29,7 @@ pub mod fill_iso;
 pub mod fill_matched;
 mod grid;
 pub mod hlr;
+pub mod hull3;
 pub mod inertia;
 pub mod linkage;
 mod mesh;
