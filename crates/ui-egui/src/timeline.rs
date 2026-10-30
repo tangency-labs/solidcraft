@@ -807,9 +807,14 @@ pub(crate) fn floating_rect(available: Rect) -> Rect {
     Container::floating_card(Surface::Panel).bottom_strip_rect(available, 40.0)
 }
 
-/// The features that affect the active component (#5854), `None` with the root active: worked
-/// out once for each revision, active component and model state, and kept for the frames after.
+/// The features that affect the active component (#5854), `None` with the root active or with
+/// Preferences' "Dim unrelated features" off (the default), so
+/// nothing is dimmed then: worked out once for each revision, active component and model state,
+/// and kept for the frames after.
 pub(crate) fn affecting(app: &mut SolveApp) -> Option<std::sync::Arc<std::collections::BTreeSet<u64>>> {
+    if !app.preferences.history_dim_unrelated {
+        return None;
+    }
     let key = (app.session.revision, app.session.active_component, app.session.model.state());
     if let Some(((revision, component, state), set)) = &app.tree.affecting
         && (*revision, *component) == (key.0, key.1)
@@ -2535,6 +2540,32 @@ mod tests {
         }
     }
 
+    /// #5854: dimming is behind a preference, off by default. With a component active and the
+    /// preference off, nothing is left to dim, so both timelines look as they did; turned on in
+    /// Preferences, the features that don't affect the component are the ones dimmed.
+    #[test]
+    fn nothing_is_dimmed_with_the_preference_off() {
+        let mut h = Harness::new();
+        for (cmd, p) in [
+            ("component.create", json!({"name": "Part"})),
+            ("solid.box", json!({"length": 10, "width": 10, "height": 10, "name": "Own"})),
+            ("component.activate", json!({"component": "root"})),
+            ("solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [30, 0, 0], "name": "Other"})),
+            ("component.activate", json!({"component": "Part"})),
+        ] {
+            h.app.run(cmd, p).unwrap();
+        }
+        assert!(!h.app.preferences.history_dim_unrelated, "off by default");
+        assert!(super::affecting(&mut h.app).is_none(), "nothing is dimmed with the preference off");
+        h.frames(3);
+        h.call("ui.prefs", json!({"history_dim_unrelated": true}));
+        let id = |h: &Harness, n: &str| h.app.session.doc.find_feature(n).map(|f| f.id).unwrap();
+        let on = super::affecting(&mut h.app).expect("turned on, with a component active");
+        assert!(on.contains(&id(&h, "Own")) && !on.contains(&id(&h, "Other")), "Other is dimmed, Own is not");
+        h.call("ui.prefs", json!({"history_dim_unrelated": false}));
+        assert!(super::affecting(&mut h.app).is_none(), "turned off again");
+    }
+
     /// #5854: the features affecting the active component are worked out once for a model
     /// state, not every frame, and again once the model changes.
     #[test]
@@ -2549,6 +2580,7 @@ mod tests {
         ] {
             h.app.run(cmd, p).unwrap();
         }
+        h.app.preferences.history_dim_unrelated = true;
         let first = super::affecting(&mut h.app).expect("a component is active");
         assert!(std::sync::Arc::ptr_eq(&first, &super::affecting(&mut h.app).unwrap()), "kept for the same model");
         let id = |h: &Harness, n: &str| h.app.session.doc.find_feature(n).map(|f| f.id).unwrap();
