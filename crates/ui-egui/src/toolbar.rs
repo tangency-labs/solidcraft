@@ -5822,24 +5822,6 @@ mod ribbon_label_tests {
             let lines = ribbon_button_lines(&painter, "長い日本語のラベル 続き", 50.0);
             assert_eq!(lines.len(), 2);
             assert!(lines[0].ends_with('…'));
-            let ja = crate::i18n::Locale::for_language("ja");
-            for (id, expected) in [
-                ("sketch.create", vec!["新規", "スケッチ"]),
-                ("config.table", vec!["構成", "テーブル"]),
-                ("construct.plane.offset", vec!["オフセット", "平面"]),
-                ("surface.loft", vec!["サーフェス", "ロフト"]),
-                ("mesh.convert", vec!["メッシュを", "変換"]),
-                ("component.create", vec!["新規", "コンポ"]),
-                ("joint.origin", vec!["ジョイント", "原点"]),
-                ("joint.drive", vec!["ジョイント", "を駆動"]),
-            ] {
-                let command = solidcraft_engine::find_command(id).unwrap();
-                let label = ja.label(crate::workspace::ribbon_button_label(command));
-                let width = ribbon_button_width(&painter, label) - BUTTON_LABEL_PADDING;
-                assert_eq!(ribbon_button_lines(&painter, label, width), expected, "{id}");
-            }
-            let comp = solidcraft_engine::find_command("component.create").unwrap();
-            assert_eq!(ja.label(comp.label), "新規コンポーネント");
             // Hebrew comes in display order (`bidi::visual`): the reader starts at the right end,
             // so "סקיצה חדשה" (New Sketch, stored as "חדשה סקיצה") puts סקיצה on the first line.
             let label = crate::bidi::visual("סקיצה חדשה").into_owned();
@@ -5849,6 +5831,34 @@ mod ribbon_label_tests {
             let lines = ribbon_button_lines(&painter, &crate::bidi::visual("אחת שתיים שלוש ארבע חמש"), 50.0);
             assert_eq!(lines.len(), 2);
             assert!(lines[1].starts_with('…'), "{lines:?}");
+        });
+        output.textures_delta.clear();
+        // Japanese is measured with the bundled Japanese face, as a Japanese UI draws it: without it
+        // the glyphs are missing and their width says nothing.
+        let ctx = crate::fonts::test_context();
+        let cjk = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets/fonts/biz-udp-gothic/BIZUDPGothic-Regular.ttf"));
+        assert!(crate::fonts::install_cjk_font_for(&ctx, cjk.to_vec(), "ja"));
+        ctx.run_ui(egui::RawInput::default(), |_| {}).textures_delta.clear();
+        let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
+            let painter = ui.painter().clone();
+            let ja = crate::i18n::Locale::for_language("ja");
+            for (id, expected) in [
+                ("sketch.create", vec!["新規", "スケッチ"]),
+                ("config.table", vec!["構成", "テーブル"]),
+                ("construct.plane.offset", vec!["オフセット", "平面"]),
+                ("surface.loft", vec!["サーフェス", "ロフト"]),
+                ("mesh.convert", vec!["メッシュを", "変換"]),
+                ("component.create", vec!["新規", "コンポ"]),
+                ("joint.origin", vec!["ジョイント", "原点"]),
+                ("joint.drive", vec!["ジョイントを", "駆動"]),
+            ] {
+                let command = solidcraft_engine::find_command(id).unwrap();
+                let label = ja.label(crate::workspace::ribbon_button_label(command));
+                let width = ribbon_button_width(&painter, label) - BUTTON_LABEL_PADDING;
+                assert_eq!(ribbon_button_lines(&painter, label, width), expected, "{id}");
+            }
+            let comp = solidcraft_engine::find_command("component.create").unwrap();
+            assert_eq!(ja.label(comp.label), "新規コンポーネント");
         });
         output.textures_delta.clear();
     }

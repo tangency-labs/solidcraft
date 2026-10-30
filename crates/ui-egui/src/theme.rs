@@ -1899,14 +1899,15 @@ mod tests {
             let actual = visuals(dark);
             let original = if dark { egui::Visuals::dark() } else { egui::Visuals::light() };
             assert_eq!(actual.menu_corner_radius, original.menu_corner_radius);
+            // egui 0.37 rounds its widgets 4 points; ours keep the 2 and 3 points egui used before.
             for (a, b) in [
-                (actual.widgets.noninteractive, original.widgets.noninteractive),
-                (actual.widgets.inactive, original.widgets.inactive),
-                (actual.widgets.hovered, original.widgets.hovered),
-                (actual.widgets.active, original.widgets.active),
-                (actual.widgets.open, original.widgets.open),
+                (actual.widgets.noninteractive, 2),
+                (actual.widgets.inactive, 2),
+                (actual.widgets.hovered, 3),
+                (actual.widgets.active, 2),
+                (actual.widgets.open, 2),
             ] {
-                assert_eq!(a.corner_radius, b.corner_radius);
+                assert_eq!(a.corner_radius, egui::CornerRadius::same(b));
             }
             let tokens = Tokens { radius_sm: 0, radius_md: 0, ..Tokens::dark() };
             set_custom(Some(Custom { dark, tokens }));
