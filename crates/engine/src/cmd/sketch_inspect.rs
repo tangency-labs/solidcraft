@@ -13,7 +13,17 @@ pub static COMMANDS: &[CommandSpec] = &[
         .at("SKETCH", "INSPECT")
         .icon("curvature_comb")
         .noundo()
-        .params("curves?: [sketch curve ids] (sketch?: id|name, default active) | edges?: [[x,y,z] points on body edges] | faces?: [[x,y,z] points on faces] with count?: isoparametric curves each way (default 4; combs along the face's iso grid); density?: teeth per curve (default 40), scale?: comb length per unit curvature (default auto)"),
+        .params(
+            "curves?: [sketch curve ids] (sketch?: id|name, default active) | edges?: [[x,y,z] points on body edges: the edge whose \
+             exact curve passes nearest] | faces?: [[x,y,z] points on faces] with count?: isoparametric curves each way (default 4; \
+             combs along the face's iso grid); density?: teeth per curve, 2…2000 (default 40; on an edge or an iso curve exactly \
+             that many, evenly spaced along its parameter); scale?: comb length per unit curvature (default auto: the longest \
+             tooth a fifth of the combs' size); length?: a multiplier on the automatic scale, 0.01…100 (default 1; ignored with \
+             `scale`). The curvature is exact: from each sketch curve, edge curve (line, circle, ellipse, B-spline, NURBS, \
+             intersection curve) or face surface's own derivatives, never from the display mesh; a face's teeth are the \
+             surface's normal curvature along each iso curve, along the surface normal. → combs: [{curve, teeth: [[foot, tip]], \
+             envelope: [tip], max_curvature, min_radius}], scale",
+        ),
     CommandSpec::new("inspect.minimum_radius", "Minimum Radius Analysis", minimum_radius)
         .at("SKETCH", "INSPECT")
         .icon("min_radius")
@@ -61,25 +71,45 @@ fn teeth_2d(segs: &[Seg2], density: usize) -> Vec<(Vec2, f64, Vec2)> {
     out
 }
 
-/// Teeth along a 3D polyline (discrete curvature from three consecutive points).
-fn teeth_3d(pts: &[Vec3]) -> Vec<(Vec3, f64, Vec3)> {
-    let mut out = Vec::new();
-    for w in pts.windows(3) {
-        let (a, b, c) = (w[0], w[1], w[2]);
-        let (ab, bc, ca) = (b - a, c - b, a - c);
-        let area2 = ab.cross(bc).len();
-        let den = ab.len() * bc.len() * ca.len();
-        let k = if den > 1e-300 { 2.0 * area2 / den } else { 0.0 };
-        // Towards the centre of curvature.
-        let n = (a + c - b * 2.0).normalized().unwrap_or(Vec3::ZERO);
-        out.push((b, k, n));
+/// Teeth from the kernel's exact comb: (foot, curvature, unit normal towards the centre of
+/// curvature; zero where straight).
+fn teeth_exact(teeth: &[crate::kernel::CombTooth]) -> Vec<(Vec3, f64, Vec3)> {
+    teeth
+        .iter()
+        .map(|t| {
+            let k = t.curvature.len();
+            (t.at, k, if k > 0.0 { t.curvature * (1.0 / k) } else { Vec3::ZERO })
+        })
+        .collect()
+}
+
+/// The comb of the body edge whose exact curve passes nearest `at`, over the model's B-rep bodies
+/// (mesh bodies have no curves): `density` exact teeth along it.
+fn edge_teeth(st: &solidcraft_doc::ModelState, at: Vec3, density: usize) -> Result<Option<Vec<(Vec3, f64, Vec3)>>> {
+    let mut best: Option<(f64, &solidcraft_doc::ModelBody, usize)> = None;
+    for b in st.bodies.iter().filter(|b| !b.body.is_mesh()) {
+        if let Some((d, edge)) = crate::kernel::comb_edge_near(&b.body, at)?
+            && best.is_none_or(|x| d < x.0)
+        {
+            best = Some((d, b, edge));
+        }
     }
-    out
+    match best {
+        Some((_, b, edge)) => Ok(Some(teeth_exact(&crate::kernel::edge_comb(&b.body, edge, density)?))),
+        None => Ok(None),
+    }
 }
 
 fn curvature_comb(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "inspect.curvature_comb";
-    let density = num(p, "density").map(|d| d.clamp(2.0, 2000.0) as usize).unwrap_or(40);
+    let density = num(p, "density")
+        .filter(|d| d.is_finite())
+        .map(|d| d.clamp(crate::kernel::MIN_COMB_TEETH as f64, crate::kernel::MAX_COMB_TEETH as f64) as usize)
+        .unwrap_or(40);
+    let length = match p.get("length") {
+        None | Some(Value::Null) => 1.0,
+        Some(v) => v.as_f64().filter(|x| (0.01..=100.0).contains(x)).ok_or_else(|| bad(cmd, "`length` must be a multiplier 0.01…100"))?,
+    };
     let st = s.model.state();
     let mut combs: Vec<(String, Vec<(Vec3, f64, Vec3)>)> = Vec::new();
     let curves = string_list(p, "curves");
@@ -101,21 +131,8 @@ fn curvature_comb(s: &mut Session, p: &Value) -> Result<Value> {
     if let Some(edges) = p.get("edges").and_then(Value::as_array) {
         for e in edges.iter().take(1000) {
             let at = vec3(e).ok_or_else(|| bad(cmd, "`edges` must be points [x,y,z]"))?;
-            let mut best: Option<(f64, Vec<Vec3>)> = None;
-            for b in &st.bodies {
-                let m = b.mesh();
-                for (i, pts) in m.edges.iter().enumerate() {
-                    if m.seams.get(i).copied().unwrap_or(false) {
-                        continue;
-                    }
-                    let d = pts.windows(2).map(|w| at.dist_to_segment(w[0], w[1])).fold(f64::INFINITY, f64::min);
-                    if best.as_ref().is_none_or(|x| d < x.0) {
-                        best = Some((d, pts.clone()));
-                    }
-                }
-            }
-            let (_, pts) = best.ok_or_else(|| bad(cmd, "no edge there"))?;
-            combs.push((format!("edge@{},{},{}", at.x, at.y, at.z), teeth_3d(&pts)));
+            let teeth = edge_teeth(&st, at, density)?.ok_or_else(|| bad(cmd, "no edge there"))?;
+            combs.push((format!("edge@{},{},{}", at.x, at.y, at.z), teeth));
         }
     }
     if let Some(faces) = p.get("faces") {
@@ -131,7 +148,8 @@ fn curvature_comb(s: &mut Session, p: &Value) -> Result<Value> {
             let at = vec3(v).ok_or_else(|| bad(cmd, "`faces` must list points [x,y,z]"))?;
             let (body, face) = iso_face_at(s, &world, at).ok_or_else(|| bad(cmd, "no face there"))?;
             for (k, line) in body.iso_lines(face, count)?.iter().enumerate() {
-                combs.push((format!("face@{},{},{}#{k}", at.x, at.y, at.z), teeth_3d(&line.points)));
+                let teeth = teeth_exact(&crate::kernel::iso_comb(&body.body, face, line, density)?);
+                combs.push((format!("face@{},{},{}#{k}", at.x, at.y, at.z), teeth));
             }
         }
     }
@@ -142,8 +160,8 @@ fn curvature_comb(s: &mut Session, p: &Value) -> Result<Value> {
     let kmax = combs.iter().flat_map(|c| c.1.iter().map(|t| t.1.abs())).fold(0.0_f64, f64::max);
     let bounds: Aabb3 = combs.iter().flat_map(|c| c.1.iter().map(|t| t.0)).collect();
     let diag = bounds.diagonal();
-    let scale =
-        num(p, "scale").filter(|x| *x > 0.0).unwrap_or(if kmax > 1e-12 && !bounds.is_empty() && diag.is_finite() { 0.2 * diag / kmax } else { 1.0 });
+    let auto = if kmax > 1e-12 && !bounds.is_empty() && diag.is_finite() { 0.2 * diag / kmax } else { 1.0 };
+    let scale = num(p, "scale").filter(|x| x.is_finite() && *x > 0.0).unwrap_or(auto * length);
     let out: Vec<Value> = combs
         .iter()
         .map(|(id, teeth)| {
@@ -253,21 +271,8 @@ fn minimum_radius(s: &mut Session, p: &Value) -> Result<Value> {
     if let Some(edges) = p.get("edges").and_then(Value::as_array) {
         for e in edges.iter().take(1000) {
             let at = vec3(e).ok_or_else(|| bad(cmd, "`edges` must be points [x,y,z]"))?;
-            let mut best: Option<(f64, Vec<Vec3>)> = None;
-            for b in &st.bodies {
-                let m = b.mesh();
-                for (i, pts) in m.edges.iter().enumerate() {
-                    if m.seams.get(i).copied().unwrap_or(false) {
-                        continue;
-                    }
-                    let d = pts.windows(2).map(|w| at.dist_to_segment(w[0], w[1])).fold(f64::INFINITY, f64::min);
-                    if best.as_ref().is_none_or(|x| d < x.0) {
-                        best = Some((d, pts.clone()));
-                    }
-                }
-            }
-            let (_, pts) = best.ok_or_else(|| bad(cmd, "no edge there"))?;
-            items.push((format!("edge@{},{},{}", at.x, at.y, at.z), min_of(&teeth_3d(&pts))));
+            let teeth = edge_teeth(&st, at, 400)?.ok_or_else(|| bad(cmd, "no edge there"))?;
+            items.push((format!("edge@{},{},{}", at.x, at.y, at.z), min_of(&teeth)));
         }
     }
     let faces: Vec<Vec3> = match p.get("faces").and_then(Value::as_array) {
@@ -457,7 +462,7 @@ mod tests {
         s.execute("sketch.finish", &json!({})).unwrap();
         s.execute("solid.cylinder", &json!({"base": [50, 0, 0], "radius": 8, "height": 10})).unwrap();
         let r = s.execute("inspect.curvature_comb", &json!({"edges": [[58, 0, 10]]})).unwrap();
-        assert!((r["combs"][0]["min_radius"].as_f64().unwrap() - 8.0).abs() < 0.5, "{r}");
+        assert!((r["combs"][0]["min_radius"].as_f64().unwrap() - 8.0).abs() < 1e-9, "{r}");
         assert!(s.execute("inspect.curvature_comb", &json!({})).is_err());
         // Combs along the side face's isocurves: rings of radius 8 and straight lines along it.
         let r = s.execute("inspect.curvature_comb", &json!({"faces": [[58, 0, 5]], "count": 3})).unwrap();
@@ -468,6 +473,124 @@ mod tests {
         assert!(rings >= 3 && straight >= 3, "{rings} rings, {straight} straight: {r}");
         assert!(s.execute("inspect.curvature_comb", &json!({"faces": []})).is_err());
         assert!(s.execute("inspect.curvature_comb", &json!({"faces": [[58, 0, 5]], "count": "x"})).is_err());
+    }
+
+    /// Each tooth of a comb reply as (foot, curvature): the tooth's length over the scale.
+    fn tooth_curvatures(r: &Value, comb: usize) -> Vec<([f64; 3], f64)> {
+        let scale = r["scale"].as_f64().unwrap();
+        r["combs"][comb]["teeth"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|t| {
+                let [a, b] = [0, 1].map(|i| [0, 1, 2].map(|k| t[i][k].as_f64().unwrap()));
+                (a, (0..3).map(|k| (b[k] - a[k]).powi(2)).sum::<f64>().sqrt() / scale)
+            })
+            .collect()
+    }
+
+    /// An edge's comb is its exact curve's: on a cylinder's circular edge of radius R every tooth
+    /// reads 1/R to 1e-9, at any display quality (the comb never reads the mesh), the teeth stand
+    /// out of the circle (away from its centre), and `density` is the number of teeth.
+    #[test]
+    fn an_edge_comb_is_exact_and_has_density_teeth() {
+        use solidcraft_doc::display_quality::{DisplayQuality, set_current};
+        let mut s = Session::default();
+        s.execute("solid.cylinder", &json!({"base": [50, 0, 0], "radius": 0.75, "height": 40})).unwrap();
+        let mut feet = Vec::new();
+        for quality in [DisplayQuality::Coarse, DisplayQuality::Ultra] {
+            set_current(quality);
+            let r = s.execute("inspect.curvature_comb", &json!({"edges": [[50.75, 0, 40]], "density": 7})).unwrap();
+            let teeth = tooth_curvatures(&r, 0);
+            assert_eq!(teeth.len(), 7, "{r}");
+            for (foot, k) in &teeth {
+                assert!((k - 1.0 / 0.75).abs() < 1e-9, "{k} at {foot:?}");
+                assert!(((foot[0] - 50.0).hypot(foot[1]) - 0.75).abs() < 1e-9 && (foot[2] - 40.0).abs() < 1e-9, "{foot:?}");
+            }
+            let tip = &r["combs"][0]["envelope"][2];
+            assert!((tip[0].as_f64().unwrap() - 50.0).hypot(tip[1].as_f64().unwrap()) > 0.75, "outside the circle");
+            assert!((r["combs"][0]["max_curvature"].as_f64().unwrap() - 1.0 / 0.75).abs() < 1e-9);
+            feet.push(r["combs"][0]["teeth"].clone());
+        }
+        set_current(DisplayQuality::Normal);
+        assert_eq!(feet[0], feet[1], "the same comb at any display quality");
+        let r = s.execute("inspect.curvature_comb", &json!({"edges": [[50.75, 0, 0]], "density": 123})).unwrap();
+        assert_eq!(r["combs"][0]["teeth"].as_array().unwrap().len(), 123);
+        for density in [json!("x"), json!(-5), json!(1e300)] {
+            assert!(s.execute("inspect.curvature_comb", &json!({"edges": [[50.75, 0, 0]], "density": density})).is_ok(), "{density}: clamped");
+        }
+    }
+
+    /// An ellipse's curvature, a b / (b² cos² t + a² sin² t)^{3/2} at angle t, is a/b² at the ends of
+    /// its major axis and b/a² at those of its minor one: the comb of an extruded ellipse's edge
+    /// reads it at every tooth, the ends included.
+    #[test]
+    fn an_ellipse_edge_comb_matches_the_closed_form() {
+        let (a, b) = (10.0_f64, 4.0_f64);
+        let mut s = Session::default();
+        s.execute("sketch.create", &json!({"plane": "XY"})).unwrap();
+        s.execute("sketch.ellipse", &json!({"center": [0, 0], "major": [a, 0], "minor_radius": b})).unwrap();
+        s.execute("sketch.finish", &json!({})).unwrap();
+        s.execute("solid.extrude", &json!({"distance": 5})).unwrap();
+        let r = s.execute("inspect.curvature_comb", &json!({"edges": [[0, b, 5]], "density": 40})).unwrap();
+        let exact = |p: [f64; 3]| {
+            let (c, sn) = (p[0] / a, p[1] / b);
+            a * b / (b * b * c * c + a * a * sn * sn).powf(1.5)
+        };
+        let teeth = tooth_curvatures(&r, 0);
+        assert!(teeth.len() >= 20, "{r}");
+        for (foot, k) in &teeth {
+            assert!(((foot[0] / a).hypot(foot[1] / b) - 1.0).abs() < 1e-9, "on the ellipse: {foot:?}");
+            assert!((k - exact(*foot)).abs() < 1e-9 * exact(*foot), "{k} vs {} at {foot:?}", exact(*foot));
+        }
+        // The vertices: the teeth at the ends of the axes, wherever the edge's parameter puts them.
+        let at = |q: [f64; 2]| teeth.iter().find(|(f, _)| (f[0] - q[0]).hypot(f[1] - q[1]) < 1e-9).map(|t| t.1);
+        let major = [[a, 0.0], [-a, 0.0]].into_iter().filter_map(at).collect::<Vec<_>>();
+        let minor = [[0.0, b], [0.0, -b]].into_iter().filter_map(at).collect::<Vec<_>>();
+        assert!(!major.is_empty() && !minor.is_empty(), "teeth at the vertices: {teeth:?}");
+        assert!(major.iter().all(|k| (k - a / (b * b)).abs() < 1e-9), "{major:?}");
+        assert!(minor.iter().all(|k| (k - b / (a * a)).abs() < 1e-12), "{minor:?}");
+        assert!((r["combs"][0]["max_curvature"].as_f64().unwrap() - a / (b * b)).abs() < 1e-9, "{r}");
+    }
+
+    /// A face comb follows the surface: on a cylinder's side the iso curves round it read 1/R at
+    /// every tooth and those along it 0, the teeth along the surface normal; `scale` sets the teeth's
+    /// length per unit curvature and `length` multiplies the automatic one.
+    #[test]
+    fn a_face_comb_is_the_normal_curvature_and_scale_sets_its_length() {
+        let mut s = Session::default();
+        s.execute("solid.cylinder", &json!({"radius": 6, "height": 30})).unwrap();
+        let r = s.execute("inspect.curvature_comb", &json!({"faces": [[6, 0, 15]], "count": 3, "density": 9})).unwrap();
+        let combs = r["combs"].as_array().unwrap();
+        let (mut rings, mut lines) = (0, 0);
+        for (i, comb) in combs.iter().enumerate() {
+            let teeth = tooth_curvatures(&r, i);
+            assert_eq!(teeth.len(), 9, "{comb}");
+            if teeth.iter().all(|(_, k)| *k == 0.0) {
+                lines += 1;
+                assert!(comb["min_radius"].is_null());
+            } else {
+                rings += 1;
+                assert!(teeth.iter().all(|(_, k)| (k - 1.0 / 6.0).abs() < 1e-9), "{teeth:?}");
+                // Out of the surface, along its normal (radially, at the tooth's height).
+                for t in comb["teeth"].as_array().unwrap() {
+                    let q = |i: usize, k: usize| t[i][k].as_f64().unwrap();
+                    assert!((q(1, 2) - q(0, 2)).abs() < 1e-9 && q(1, 0).hypot(q(1, 1)) > 6.0 + 1e-6, "{t}");
+                }
+            }
+        }
+        assert_eq!((rings, lines), (3, 3), "{r}");
+        // Tooth length is curvature × scale.
+        let tooth = |r: &Value| tooth_curvatures(r, 0)[0].1 * r["scale"].as_f64().unwrap();
+        let auto = s.execute("inspect.curvature_comb", &json!({"faces": [[6, 0, 15]], "count": 3})).unwrap();
+        let fixed = s.execute("inspect.curvature_comb", &json!({"faces": [[6, 0, 15]], "count": 3, "scale": 12})).unwrap();
+        assert!((tooth(&fixed) - 2.0).abs() < 1e-9, "12 × 1/6: {}", tooth(&fixed));
+        let longer = s.execute("inspect.curvature_comb", &json!({"faces": [[6, 0, 15]], "count": 3, "length": 3})).unwrap();
+        assert!((longer["scale"].as_f64().unwrap() - 3.0 * auto["scale"].as_f64().unwrap()).abs() < 1e-9);
+        assert!((tooth(&longer) - 3.0 * tooth(&auto)).abs() < 1e-9);
+        for bad in [json!(0), json!(-1), json!(1000), json!("2")] {
+            assert!(s.execute("inspect.curvature_comb", &json!({"faces": [[6, 0, 15]], "length": bad})).is_err(), "{bad}");
+        }
     }
 
     #[test]

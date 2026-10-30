@@ -35,6 +35,9 @@ pub struct IsoLine {
     /// The exact record curve on `interval` of its own parameter.
     pub curve: brep::Curve,
     pub interval: [f64; 2],
+    /// The surface parameter that runs along the curve (u when `along_u`, else v), from the
+    /// start of `interval` to its end.
+    pub span: [f64; 2],
     /// Its points from the start of `interval` to its end, at the chord tolerance asked for.
     pub points: Vec<Vec3>,
 }
@@ -104,9 +107,10 @@ impl<'a> FaceTrims<'a> {
     }
 
     /// The iso line of the surface at `fixed` (v when `along_u`, else u) across the face's box,
-    /// cut to the face: the pieces inside it, each as its exact record curve on its interval, in
-    /// the order the line runs (none when the line misses the face).
-    fn clip(&self, along_u: bool, fixed: f64) -> Result<Vec<(brep::Curve, [f64; 2])>> {
+    /// cut to the face: the pieces inside it, each as its exact record curve on its interval and
+    /// the running parameter's span, in the order the line runs (none when the line misses the
+    /// face).
+    fn clip(&self, along_u: bool, fixed: f64) -> Result<Vec<(brep::Curve, [f64; 2], [f64; 2])>> {
         let [[u0, u1], [v0, v1]] = self.domain;
         let (lo, hi) = if along_u { (u0, u1) } else { (v0, v1) };
         let at_t = |t: f64| if along_u { [t, fixed] } else { [fixed, t] };
@@ -149,11 +153,13 @@ impl<'a> FaceTrims<'a> {
             if self.inside(at_t(0.5 * (a + b))) {
                 run = Some(run.map_or((a, b), |(s, _)| (s, b)));
             } else if let Some(r) = run.take() {
-                out.push(iso_record(self.surface, along_u, fixed, r)?);
+                let (curve, interval) = iso_record(self.surface, along_u, fixed, r)?;
+                out.push((curve, interval, [r.0, r.1]));
             }
         }
         if let Some(r) = run {
-            out.push(iso_record(self.surface, along_u, fixed, r)?);
+            let (curve, interval) = iso_record(self.surface, along_u, fixed, r)?;
+            out.push((curve, interval, [r.0, r.1]));
         }
         Ok(out)
     }
@@ -184,7 +190,7 @@ pub fn iso_curves(body: &Body, face: usize, at: Vec3, along_u: bool) -> Result<V
             }
         }
     }
-    let out = trims.clip(along_u, if along_u { pv } else { pu })?;
+    let out: Vec<(brep::Curve, [f64; 2])> = trims.clip(along_u, if along_u { pv } else { pu })?.into_iter().map(|(c, i, _)| (c, i)).collect();
     if out.is_empty() {
         return Err(KernelError::Invalid("the iso curve runs outside the face".into()));
     }
@@ -216,13 +222,13 @@ pub fn iso_grid(body: &Body, face: usize, count: usize, chord: f64) -> Result<Ve
         }
         for k in 1..=count {
             let fixed = lo + (hi - lo) * k as f64 / (count + 1) as f64;
-            for (curve, interval) in trims.clip(along_u, fixed)? {
+            for (curve, interval, span) in trims.clip(along_u, fixed)? {
                 let segs = curve_path(&curve, interval)?;
                 let mut points: Vec<Vec3> = segs.first().map(crate::PathSeg::start).into_iter().collect();
                 for s in &segs {
                     points.extend(s.points_after_start(chord));
                 }
-                out.push(IsoLine { along_u, fixed, curve, interval, points });
+                out.push(IsoLine { along_u, fixed, curve, interval, span, points });
             }
         }
     }
