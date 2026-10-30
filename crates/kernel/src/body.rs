@@ -376,11 +376,11 @@ fn same_shared<T: PartialEq>(a: &Option<std::sync::Arc<T>>, b: &Option<std::sync
     }
 }
 
-/// `record`, checked to be a body's: valid structure (budgets, references, loops, regions,
+/// `record`, checked to be a body's: valid structure (references, loops, regions,
 /// canonical order) and at least one face. A solid's faces bound material; a surface body's lie
 /// in open shells.
 fn solid_record(record: Brep) -> Result<Brep> {
-    record.validate().map_err(|e| KernelError::Invalid(e.to_string()))?;
+    record.validate_built().map_err(|e| KernelError::Invalid(e.to_string()))?;
     if record.faces.is_empty() {
         return Err(KernelError::Failed("empty result".into()));
     }
@@ -477,7 +477,8 @@ impl Body {
     }
 
     /// The body of a schema 4 record (a solid, or a surface body of open shells): checked for
-    /// structure (budgets, references, loops, regions, canonical order). Its faces face as the
+    /// structure (references, loops, regions, canonical order; a record from a file is checked
+    /// against the file budgets where it is read). Its faces face as the
     /// record says.
     pub(crate) fn from_record(record: Brep) -> Result<Body> {
         Ok(Body::bare(solid_record(record)?, None))

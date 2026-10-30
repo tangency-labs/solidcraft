@@ -417,6 +417,23 @@ mod tests {
     }
 
     #[test]
+    fn a_kernel_body_past_the_file_item_budget_is_taken_and_a_file_of_it_refused() {
+        // The box with its first edge a polyline of the file item budget's worth of points: a
+        // record the kernel's own operations may make (#3992), and more than a file may carry.
+        let body = crate::box_solid(Vec3::ZERO, Vec3::new(10., 20., 30.)).unwrap();
+        let mut record = body.record().clone();
+        let [t0, t1] = record.edges[0].interval;
+        let n = solidcraft_geom::brep::MAX_ITEMS;
+        let points = (0..n).map(|i| [i as f64 * 1e-6, 0., 0.]).collect();
+        record.edges[0].curve = solidcraft_geom::brep::Curve::Polyline { points };
+        assert!(t0 >= 0.0 && t1 <= (n - 1) as f64);
+        Body::from_record(record.clone()).unwrap();
+        let saved = SavedBody { solid: record, metadata: metadata::encode(&body).unwrap(), runtime: Runtime { size: 0.0, coarse_missing: None } };
+        let refused = validate_topology(&saved).err().map(|e| e.to_string()).unwrap_or_default();
+        assert!(refused.contains("item budget"), "{refused}");
+    }
+
+    #[test]
     fn native_preserves_face_appearance_and_authored_boundaries() {
         let mut body = crate::box_solid(Vec3::new(1., 2., 3.), Vec3::new(10., 20., 30.))
             .unwrap()

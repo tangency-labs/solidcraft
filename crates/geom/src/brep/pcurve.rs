@@ -131,7 +131,7 @@ fn check_size(loops: &[Vec<EdgeUse<'_>>], tolerance: f64) -> Result<()> {
 /// Each use's pcurve: the given one, or its closed form; a use with neither is its `Failed`
 /// error, any other error fails the face.
 fn each_pcurve(surface_record: &Surface, on: &On, loops: &[Vec<EdgeUse<'_>>], tolerance: f64) -> Result<Vec<Vec<Result<Curve2>>>> {
-    let mut budget = Budget(0);
+    let mut budget = Budget::input();
     surface(surface_record, 0, &mut budget).map_err(|e| Error::Invalid(e.to_string()))?;
     // A seam edge used twice is worked out once.
     let mut done: Vec<(u32, Result<Curve2>)> = Vec::new();

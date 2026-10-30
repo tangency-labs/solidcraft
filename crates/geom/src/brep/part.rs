@@ -370,7 +370,7 @@ impl Brep {
             edges: new_edges,
             vertices: new_vertices,
         };
-        brep.validate()?;
+        brep.validate_built()?;
         Ok(Part { brep, faces: faces.old, edges: edges.old, vertices: vertices.old })
     }
 }

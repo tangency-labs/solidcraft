@@ -2,7 +2,7 @@
  "sources": [],
  "what": "a point a third along a quarter-circle arc",
  "source": "analytic",
- "method": "the arc r 10 about the origin from (10,0) to (0,10) counter-clockwise: a third of its length is 30 deg round: (10 cos 30, 10 sin 30, 0) = (8.6603, 5, 0)",
+ "method": "the arc r 10 about the origin from (10,0) to (0,10) counter-clockwise: a third of its length is 30 deg round: (10 cos 30, 10 sin 30, 0) = (8.6603, 5, 0); the point is on the arc itself, so it is graded to 1e-9 mm (a chord polyline is 0.87 um off)",
  "construction": {
   "P": {
    "point": [
@@ -11,5 +11,8 @@
     0
    ]
   }
+ },
+ "tolerance": {
+  "abs_mm": 1e-09
  }
 }

@@ -1234,6 +1234,62 @@ impl PathSeg {
         }
     }
 
+    /// The segment as the rational Bézier span in space that is the same curve on the same
+    /// parameter: a sketch cubic, Bézier or conic carried onto its plane (an affine image keeps
+    /// the weights). `None` for a line or an arc, which have closed forms of their own, and for a
+    /// span that does not evaluate.
+    fn space_bezier(&self) -> Option<crate::point_path::SpaceBezier> {
+        use solidcraft_geom::bspline::HPoint;
+        let PathSeg::Curve { plane, seg } = *self else {
+            return match *self {
+                PathSeg::Bezier(b) => Some(b),
+                _ => None,
+            };
+        };
+        let w = |p: Vec2, weight: f64| HPoint::weighted(plane.to_world(p), weight);
+        match seg {
+            Seg2::Cubic { p0, p1, p2, p3 } => crate::point_path::SpaceBezier::new(&[w(p0, 1.0), w(p1, 1.0), w(p2, 1.0), w(p3, 1.0)]),
+            Seg2::Bezier { n, p } => {
+                let ctrl: Vec<HPoint> = p.get(..=usize::from(n))?.iter().map(|q| w(*q, 1.0)).collect();
+                crate::point_path::SpaceBezier::new(&ctrl)
+            }
+            Seg2::Conic { a, apex, b, w: weight } => crate::point_path::SpaceBezier::new(&[w(a, 1.0), w(apex, weight), w(b, 1.0)]),
+            Seg2::Line { .. } | Seg2::Arc { .. } => None,
+        }
+    }
+
+    /// The segment's length: a line's and an arc's in closed form, a free-form span's by its
+    /// arc-length integral ([`crate::SpaceBezier::length`]). `None` for a segment that does not
+    /// evaluate.
+    pub fn length(&self) -> Option<f64> {
+        let l = match *self {
+            PathSeg::Line { a, b } => a.dist(b),
+            PathSeg::Arc { a, center, angle, .. } => a.dist(center) * angle.abs(),
+            PathSeg::Curve { plane, seg: seg @ (Seg2::Line { .. } | Seg2::Arc { .. }) } => return PathSeg::of_sketch(&plane, &seg).length(),
+            PathSeg::Curve { .. } | PathSeg::Bezier(_) => self.space_bezier()?.length()?,
+        };
+        l.is_finite().then_some(l)
+    }
+
+    /// The point a fraction `f` (0…1) of the way along the segment by arc length, and the unit
+    /// direction of travel there: a line's and an arc's in closed form (an arc's length grows
+    /// with its angle), a free-form span's at the parameter where its arc-length integral reaches
+    /// that fraction ([`crate::SpaceBezier::along`]). `None` for a segment that does not
+    /// evaluate or has no direction.
+    pub fn along(&self, f: f64) -> Option<(Vec3, Vec3)> {
+        let f = f.clamp(0.0, 1.0);
+        match *self {
+            PathSeg::Line { a, b } => Some((a.lerp(b, f), (b - a).normalized()?)),
+            PathSeg::Arc { a, center, axis, angle } => {
+                let k = axis.normalized()?;
+                let p = rotate_about(a, center, k, angle * f);
+                Some((p, (k.cross(p - center) * angle.signum()).normalized()?))
+            }
+            PathSeg::Curve { plane, seg: seg @ (Seg2::Line { .. } | Seg2::Arc { .. }) } => PathSeg::of_sketch(&plane, &seg).along(f),
+            PathSeg::Curve { .. } | PathSeg::Bezier(_) => self.space_bezier()?.along(f),
+        }
+    }
+
     /// The segment the other way round.
     pub fn reversed(&self) -> PathSeg {
         match *self {

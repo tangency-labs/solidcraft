@@ -100,12 +100,12 @@ mod tests {
     #[test]
     fn pcurves_validate_and_round_trip() {
         let line = Curve2::Spline { knots: vec![0., 0., 1., 1.], points: vec![[0., 0.], [1., 2.]] };
-        curve2(&line, &mut Budget(0)).unwrap();
+        curve2(&line, &mut Budget::input()).unwrap();
         assert_eq!(line.interval(), Some([0., 1.]));
         assert_eq!(serde_json::from_str::<Curve2>(&serde_json::to_string(&line).unwrap()).unwrap(), line);
         let bad = Curve2::RationalSpline { knots: vec![0., 0., 1., 1.], homogeneous: vec![[0., 0., 1.], [1., 2., 0.]] };
-        assert!(curve2(&bad, &mut Budget(0)).is_err());
+        assert!(curve2(&bad, &mut Budget::input()).is_err());
         let nan = Curve2::Spline { knots: vec![0., 0., 1., 1.], points: vec![[0., f64::NAN], [1., 2.]] };
-        assert!(curve2(&nan, &mut Budget(0)).is_err());
+        assert!(curve2(&nan, &mut Budget::input()).is_err());
     }
 }
