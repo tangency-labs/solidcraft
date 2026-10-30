@@ -68,6 +68,14 @@ set. In a chain, each step uses the values of the joint value it follows.
   the chain there.
 - **Colour:** the first body's colour, as the visual's material.
 
+## Frames
+
+A named joint origin marked as a frame (`joint.origin {..., frame: true}`, `joint.origin_frame`, or
+**Export as a robot frame** in the Joint Origin dialog) becomes an empty link named after it, on a
+`fixed` joint to its part's link: a tool tip, a camera or a mount point. It has no mass, because a
+`fixed` joint needs none. An origin that no longer resolves is skipped with a warning. On a component
+placed several times, the frame appears on the first placement.
+
 ## Joints
 
 | SolidCraft joint | URDF |
