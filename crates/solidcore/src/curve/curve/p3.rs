@@ -21,6 +21,10 @@
 //! | `EvalNFunctions for` [`CcTangentIntEnfo`]         | `SmCCTangentIntENFO::Evaluate` (co-ported, unit `curve.curve_p5`) |
 //!
 //! Deviations:
+//! - **Loop normal.** Opt-in `Kernel::fixes.curve_loop_normal_from_area` (WR-587,
+//!   #1776) sums the sampled polygon's area vector instead of weighted turns, so
+//!   reflex corners cannot reverse a planar loop's normal. An open chain closes
+//!   by its chord. Default sampling and weighted turns retain upstream parity.
 //! - **Curve kinds.** `ComputeCrvsNormal` and `CrvsFixGaps` cast every curve to
 //!   `SmBSplineCurve`. `ComputeCrvsNormal` only calls virtual members and the
 //!   non-virtual `SmCurve::IsLinear`, so it takes any [`Curve`]. `CrvsFixGaps` calls
@@ -247,11 +251,18 @@ impl<C1: CurveEvaluate + ?Sized, C2: CurveEvaluate + ?Sized> EvalNFunctions
 /// a two-point curve), plus the closing corner when the last sample returns to the
 /// start point; `(0, 0, 1)` when the sum vanishes.
 ///
+/// With [`Kernel::fixes`]'s `curve_loop_normal_from_area` enabled, the normal is
+/// the sampled polygon's area vector: it follows a concave planar loop's winding,
+/// and an open chain is closed by its chord (WR-587, #1776).
+///
 /// # Errors
 ///
 /// `SM_ERR` for a single linear curve; those of the control point counts;
 /// [`SolidError::Unported`] from the evaluations.
 pub fn compute_crvs_normal(k: &Kernel, curves: &[Curve]) -> Result<Vec3> {
+    if k.fixes.curve_loop_normal_from_area {
+        return compute_crvs_area_normal(k, curves);
+    }
     // Initialize resulting normal
     let mut normal = Vec3::new(0.0, 0.0, 0.0);
 
@@ -316,6 +327,41 @@ pub fn compute_crvs_normal(k: &Kernel, curves: &[Curve]) -> Result<Vec3> {
     }
 
     // (status ignored: a zero normal becomes (0, 0, 1))
+    Ok(normal.unitize_or_z())
+}
+
+/// Twice the sampled polygon's oriented area, summed as a fan from its first
+/// point (the closing chord contributes zero to that fan), then unitized.
+fn compute_crvs_area_normal(k: &Kernel, curves: &[Curve]) -> Result<Vec3> {
+    let mut normal = Vec3::ZERO;
+    let mut first: Option<Point3> = None;
+    let mut previous = Vec3::ZERO;
+    let mut point = Vec3::ZERO;
+    for curve in curves {
+        let domain = curve.natural_interval();
+        if curve.is_linear(k, EFF_ZERO, false)?.linear && curves.len() == 1 {
+            return Err(SolidError::sm_err(OP_NORMAL));
+        }
+        let count = if curve.number_control_points()? == 2 {
+            1_u32
+        } else {
+            5_u32
+        };
+        for j in 0..=count {
+            point = point_keep(
+                k,
+                curve,
+                domain.evaluate(f64::from(j) / f64::from(count)),
+                point,
+            )?;
+            if let Some(origin) = first {
+                normal += (previous - origin).cross(point - origin);
+            } else {
+                first = Some(point);
+            }
+            previous = point;
+        }
+    }
     Ok(normal.unitize_or_z())
 }
 
@@ -2140,8 +2186,56 @@ mod tests {
     }
 
     #[test]
+    fn issue_1776_concave_loop_normal_follows_orientation() {
+        let points = [
+            [-0.5, -3.5, 0.0],
+            [0.5, -3.5, 0.0],
+            [0.5, -0.5, 0.0],
+            [3.5, -0.5, 0.0],
+            [3.5, 0.5, 0.0],
+            [0.5, 0.5, 0.0],
+            [0.5, 3.5, 0.0],
+            [-0.5, 3.5, 0.0],
+            [-0.5, 0.5, 0.0],
+            [-3.5, 0.5, 0.0],
+            [-3.5, -0.5, 0.0],
+            [-0.5, -0.5, 0.0],
+        ];
+        let curves: Vec<_> = points
+            .iter()
+            .zip(points.iter().cycle().skip(1))
+            .map(|(&a, &b)| {
+                Curve::from(
+                    Line::create_line_segment(3, Vec3::from_array(a), Vec3::from_array(b), None)
+                        .unwrap(),
+                )
+            })
+            .collect();
+        let mut k = Kernel::default();
+        assert!(!k.fixes.curve_loop_normal_from_area);
+        assert_eq!(compute_crvs_normal(&k, &curves).unwrap(), -Vec3::Z);
+        k.fixes.curve_loop_normal_from_area = true;
+        assert_eq!(compute_crvs_normal(&k, &curves).unwrap(), Vec3::Z);
+
+        let reversed: Vec<_> = points
+            .iter()
+            .rev()
+            .zip(points.iter().rev().cycle().skip(1))
+            .map(|(&a, &b)| {
+                Curve::from(
+                    Line::create_line_segment(3, Vec3::from_array(a), Vec3::from_array(b), None)
+                        .unwrap(),
+                )
+            })
+            .collect();
+        assert_eq!(compute_crvs_normal(&k, &reversed).unwrap(), -Vec3::Z);
+        k.fixes.curve_loop_normal_from_area = false;
+        assert_eq!(compute_crvs_normal(&k, &reversed).unwrap(), Vec3::Z);
+    }
+
+    #[test]
     fn normal_of_a_planar_loop() {
-        let k = &Kernel::default();
+        let mut k = Kernel::default();
         // a counter-clockwise loop in the XY plane made of curved Hermite pieces
         let curves = vec![
             hermite(
@@ -2169,8 +2263,74 @@ mod tests {
                 [0.5, -1.0, 0.0],
             ),
         ];
-        let n = compute_crvs_normal(k, &curves).unwrap();
-        assert!((n.z - 1.0).abs() < 1e-12, "{n:?}");
+        for area_normal in [false, true] {
+            k.fixes.curve_loop_normal_from_area = area_normal;
+            let n = compute_crvs_normal(&k, &curves).unwrap();
+            assert!((n.z - 1.0).abs() < 1e-12, "{n:?}");
+        }
+    }
+
+    #[test]
+    fn area_normal_closes_an_open_chain_and_uses_its_plane() {
+        let mut k = Kernel::default();
+        k.fixes.curve_loop_normal_from_area = true;
+        // Two chords enclose a triangle in the YZ plane; the closing chord
+        // goes back to the first sample without contributing another fan triangle.
+        let curves = [
+            line([7.0, 10.0, 20.0], [0.0, 1.0, 0.0], 0.0, 2.0),
+            line([7.0, 12.0, 21.0], [0.0, 0.0, 1.0], -1.0, 3.0),
+        ];
+        assert_eq!(compute_crvs_normal(&k, &curves).unwrap(), Vec3::X);
+    }
+
+    #[test]
+    fn area_normal_is_invariant_under_start_point_and_chord_subdivision() {
+        let mut k = Kernel::default();
+        k.fixes.curve_loop_normal_from_area = true;
+        let points = [
+            Vec3::new(1e9, -5.0, -35.0),
+            Vec3::new(1e9, 5.0, -35.0),
+            Vec3::new(1e9, 5.0, -5.0),
+            Vec3::new(1e9, 35.0, -5.0),
+            Vec3::new(1e9, 35.0, 5.0),
+            Vec3::new(1e9, 5.0, 5.0),
+            Vec3::new(1e9, 5.0, 35.0),
+            Vec3::new(1e9, -5.0, 35.0),
+            Vec3::new(1e9, -5.0, 5.0),
+            Vec3::new(1e9, -35.0, 5.0),
+            Vec3::new(1e9, -35.0, -5.0),
+            Vec3::new(1e9, -5.0, -5.0),
+        ];
+        for start in 0..points.len() {
+            let ordered: Vec<_> = points
+                .iter()
+                .cycle()
+                .skip(start)
+                .take(points.len())
+                .collect();
+            let curves: Vec<_> = ordered
+                .iter()
+                .zip(ordered.iter().cycle().skip(1))
+                .flat_map(|(&&a, &&b)| {
+                    let mid = (a + b) * 0.5;
+                    [(a, mid), (mid, b)].map(|(p, q)| {
+                        Curve::from(Line::create_line_segment(3, p, q, None).unwrap())
+                    })
+                })
+                .collect();
+            assert_eq!(compute_crvs_normal(&k, &curves).unwrap(), Vec3::X);
+        }
+    }
+
+    #[test]
+    fn area_normal_retains_degenerate_defaults_and_single_line_error() {
+        let mut k = Kernel::default();
+        k.fixes.curve_loop_normal_from_area = true;
+        assert_eq!(compute_crvs_normal(&k, &[]).unwrap(), Vec3::Z);
+        let a = line([0.0, 0.0, 0.0], [1.0, 0.0, 0.0], 0.0, 1.0);
+        let b = line([1.0, 0.0, 0.0], [1.0, 0.0, 0.0], 0.0, 1.0);
+        assert_eq!(compute_crvs_normal(&k, &[a.clone(), b]).unwrap(), Vec3::Z);
+        assert!(compute_crvs_normal(&k, &[a]).is_err());
     }
 
     #[test]
