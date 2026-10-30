@@ -26,6 +26,7 @@ pub const DOCUMENTED: &[&str] = &[
     "sketch.construction_line.tangent_two",
     "sketch.construction_line.vertical",
     "sketch.equation_curve",
+    "sketch.inspect",
     "solid.align",
     "solid.chamfer",
     "solid.combine",

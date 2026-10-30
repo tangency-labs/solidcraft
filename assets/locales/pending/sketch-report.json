@@ -1,0 +1,58 @@
+{
+  "en": {
+    "help.sketch.inspect": "Opens a report on the open sketch: how many degrees of freedom are left and whether it is fully constrained. Use it to find out what still moves before you finish the sketch.",
+    "ui.sketch_report.all_constrained": "Everything is fully constrained.",
+    "ui.sketch_report.dof": "Degrees of freedom",
+    "ui.sketch_report.loose": "Not fully constrained",
+    "ui.sketch_report.status": "Status",
+    "ui.sketch_report.title": "Sketch Report"
+  },
+  "de": {
+    "help.sketch.inspect": "Öffnet einen Bericht zur offenen Skizze: wie viele Freiheitsgrade übrig sind und ob sie vollständig bestimmt ist. Damit sehen Sie, was sich noch bewegt, bevor Sie die Skizze abschließen.",
+    "ui.sketch_report.all_constrained": "Alles ist vollständig bestimmt.",
+    "ui.sketch_report.dof": "Freiheitsgrade",
+    "ui.sketch_report.loose": "Nicht vollständig bestimmt",
+    "ui.sketch_report.status": "Status",
+    "ui.sketch_report.title": "Skizzenbericht"
+  },
+  "ja": {
+    "help.sketch.inspect": "開いているスケッチのレポートを開きます。残りの自由度と、完全に拘束されているかどうかを表示します。スケッチを終える前に、まだ動く部分を確認するときに使います。",
+    "ui.sketch_report.all_constrained": "すべて完全に拘束されています。",
+    "ui.sketch_report.dof": "自由度",
+    "ui.sketch_report.loose": "完全には拘束されていません",
+    "ui.sketch_report.status": "状態",
+    "ui.sketch_report.title": "スケッチ レポート"
+  },
+  "zh": {
+    "help.sketch.inspect": "打开当前草图的报告：显示剩余的自由度以及是否已完全约束。在完成草图之前，用它找出仍然可以移动的部分。",
+    "ui.sketch_report.all_constrained": "全部已完全约束。",
+    "ui.sketch_report.dof": "自由度",
+    "ui.sketch_report.loose": "未完全约束",
+    "ui.sketch_report.status": "状态",
+    "ui.sketch_report.title": "草图报告"
+  },
+  "ar": {
+    "help.sketch.inspect": "يفتح تقريرًا عن الرسم المفتوح: عدد درجات الحرية المتبقية وهل هو مقيد بالكامل. استخدمه لمعرفة ما لا يزال يتحرك قبل إنهاء الرسم.",
+    "ui.sketch_report.all_constrained": "كل شيء مقيد بالكامل.",
+    "ui.sketch_report.dof": "درجات الحرية",
+    "ui.sketch_report.loose": "غير مقيد بالكامل",
+    "ui.sketch_report.status": "الحالة",
+    "ui.sketch_report.title": "تقرير الرسم"
+  },
+  "he": {
+    "help.sketch.inspect": "פותח דוח על הסקיצה הפתוחה: כמה דרגות חופש נותרו והאם היא מאולצת במלואה. השתמשו בו כדי לגלות מה עדיין זז לפני שמסיימים את הסקיצה.",
+    "ui.sketch_report.all_constrained": "הכול מאולץ במלואו.",
+    "ui.sketch_report.dof": "דרגות חופש",
+    "ui.sketch_report.loose": "לא מאולץ במלואו",
+    "ui.sketch_report.status": "מצב",
+    "ui.sketch_report.title": "דוח סקיצה"
+  },
+  "vi": {
+    "help.sketch.inspect": "Mở báo cáo về bản phác thảo đang mở: còn bao nhiêu bậc tự do và đã ràng buộc hoàn toàn chưa. Dùng nó để biết phần nào vẫn còn di chuyển được trước khi hoàn tất bản phác thảo.",
+    "ui.sketch_report.all_constrained": "Mọi thứ đã được ràng buộc hoàn toàn.",
+    "ui.sketch_report.dof": "Bậc tự do",
+    "ui.sketch_report.loose": "Chưa ràng buộc hoàn toàn",
+    "ui.sketch_report.status": "Trạng thái",
+    "ui.sketch_report.title": "Báo cáo phác thảo"
+  }
+}
