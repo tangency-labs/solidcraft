@@ -1397,3 +1397,25 @@ fn file_export_refuses_an_unknown_collision_default() {
     let urdf = temp("collision-word").join("r.urdf");
     assert!(s.execute("file.export", &json!({"path": urdf.to_string_lossy(), "collision": "blob"})).is_err());
 }
+
+#[test]
+fn an_inertia_breaking_the_triangle_inequality_warns() {
+    let mut s = two_cubes();
+    run(&mut s, "component.physical_override", json!({"component": "B", "mass": 1.0, "inertia": [10.0, 1.0, 1.0, 0.0, 0.0, 0.0]}));
+    let p = package(&s);
+    assert!(p.warnings.iter().any(|w| w.contains("inertia") && w.contains('B')), "{:?}", p.warnings);
+}
+
+#[test]
+fn a_plain_hinge_gets_no_plausibility_warning() {
+    let p = package(&hinge());
+    assert!(!p.warnings.iter().any(|w| w.contains("inertia") || w.contains("no mass") || w.contains("triangles")), "{:?}", p.warnings);
+}
+
+#[test]
+fn a_ball_chains_in_between_links_get_no_plausibility_warning() {
+    let mut s = two_cubes();
+    joint(&mut s, "ball", "Ball", json!([]));
+    let p = package(&s);
+    assert!(!p.warnings.iter().any(|w| w.contains("no mass")), "{:?}", p.warnings);
+}

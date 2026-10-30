@@ -17,6 +17,7 @@ use solidcraft_doc::{
     mat_mul,
 };
 use solidcraft_geom::hull3::{convex_hull, fit_box, fit_cylinder, fit_sphere};
+use solidcraft_geom::inertia::principal;
 use solidcraft_geom::{Mesh, Vec3};
 
 use crate::{IoError, Result, export_mesh, stl_binary, weld, weld_eps};
@@ -30,6 +31,8 @@ const DEFAULT_EFFORT: f64 = 1000.0;
 const DEFAULT_VELOCITY: f64 = 10.0;
 /// Thinnest collision primitive (mm): URDF has no use for one of no size, as a flat body's would be.
 const MIN_SHAPE: f64 = 1e-3;
+/// More triangles than this in a collision mesh gets a warning: simulators slow down a lot.
+const COLLISION_TRIANGLE_WARNING: usize = 50_000;
 
 /// Choices for [`urdf`] (`file.export` parameters).
 #[derive(Clone, Debug, Default)]
@@ -369,10 +372,12 @@ fn parts(
             out.meshes.push((file.clone(), stl_binary(&[metres(&visual)], &label)));
             part.visual = Some(file.clone());
             if shared {
+                out.warnings.extend(large_collision(visual.triangles.len(), &label));
                 part.collision.push(CollisionGeom::Mesh { file, origin: IDENTITY });
             }
         }
         if !shared && !collision.triangles.is_empty() {
+            out.warnings.extend(large_collision(collision.triangles.len(), &label));
             let file = names.file(&format!("{stem}-{label}-collision"));
             out.meshes.push((file.clone(), stl_binary(&[metres(&collision)], &label)));
             part.collision.push(CollisionGeom::Mesh { file, origin: IDENTITY });
@@ -777,6 +782,7 @@ pub fn urdf(doc: &Document, st: &ModelState, stem: &str, options: &UrdfOptions) 
     }
     tree.copies(&jointed);
     tree.frames();
+    plausibility(&tree.model, &mut tree.warnings);
     if options.mimic {
         resolve_mimics(&mut tree.model, doc, &mut tree.warnings);
     }
@@ -859,6 +865,29 @@ fn resolve_mimics(model: &mut UrdfModel, doc: &Document, warnings: &mut Vec<Stri
             f.mimic = Some(mimic);
         }
     }
+}
+
+/// Warnings about values a simulator would take but that are unlikely to be meant.
+fn plausibility(model: &UrdfModel, warnings: &mut Vec<String>) {
+    for (at, l) in model.links.iter().enumerate() {
+        // A chain's in-between links and frames have an empty `path`: their values are ours.
+        let (false, Some(i)) = (l.path.is_empty(), l.inertial) else { continue };
+        if i.mass == TOKEN_MASS {
+            if model.joints.iter().any(|j| j.child == at && j.step != Step::Fixed) {
+                warnings.push(format!("`{}` moves but has no mass: give it a closed body or a mass override", l.name));
+            }
+            continue;
+        }
+        let plausible = principal(&i.inertia, 0.0).is_some_and(|([a, b, c], _)| a > 0.0 && c <= (a + b) * (1.0 + 1e-6));
+        if !plausible {
+            warnings.push(format!("the inertia of `{}` is not physically possible: check its mass override", l.name));
+        }
+    }
+}
+
+fn large_collision(triangles: usize, name: &str) -> Option<String> {
+    (triangles > COLLISION_TRIANGLE_WARNING)
+        .then(|| format!("the collision mesh of `{name}` has {triangles} triangles, which slows a simulator: give it a simpler collision shape"))
 }
 
 fn token() -> Inertial {
@@ -1147,7 +1176,7 @@ mod tests {
             path: Vec::new(),
             mesh_origin,
             visual: Some("m.stl".into()),
-            collision: Some("m.stl".into()),
+            collision: vec![CollisionGeom::Mesh { file: "m.stl".into(), origin: mesh_origin }],
             color: None,
             inertial: None,
         };
@@ -1215,6 +1244,53 @@ mod tests {
             assert!(e.contains("mesh_prefix") && e.contains(why), "{e}");
         }
         assert!(urdf(&doc, &st, "t", &UrdfOptions { mesh_prefix: "package://r/m/".into(), ..UrdfOptions::default() }).is_ok());
+    }
+
+    /// `base_link` and a part with token mass on a joint of the given step.
+    fn token_part(step: Step, path: Vec<u64>) -> UrdfModel {
+        let link = |name: &str, path: Vec<u64>| Link {
+            name: name.into(),
+            path,
+            mesh_origin: IDENTITY,
+            visual: None,
+            collision: Vec::new(),
+            color: None,
+            inertial: Some(token()),
+        };
+        let joint = UrdfJoint {
+            name: "j".into(),
+            parent: 0,
+            child: 1,
+            origin: IDENTITY,
+            step,
+            axis: Vec3::Z,
+            limit: None,
+            source: None,
+            dynamics: JointDynamics::default(),
+            mimic: None,
+        };
+        UrdfModel { links: vec![link("base_link", Vec::new()), link("Sheet", path)], joints: vec![joint] }
+    }
+
+    #[test]
+    fn a_moving_link_with_token_mass_warns() {
+        let mut warnings = Vec::new();
+        plausibility(&token_part(Step::Revolute, vec![1]), &mut warnings);
+        assert!(warnings.iter().any(|w| w.contains("Sheet") && w.contains("no mass")), "{warnings:?}");
+    }
+
+    #[test]
+    fn a_fixed_or_in_between_link_with_token_mass_does_not_warn() {
+        let mut warnings = Vec::new();
+        plausibility(&token_part(Step::Fixed, vec![1]), &mut warnings);
+        plausibility(&token_part(Step::Revolute, Vec::new()), &mut warnings);
+        assert!(warnings.is_empty(), "{warnings:?}");
+    }
+
+    #[test]
+    fn a_large_collision_mesh_warns_naming_the_link() {
+        assert!(large_collision(COLLISION_TRIANGLE_WARNING, "Arm").is_none());
+        assert!(large_collision(COLLISION_TRIANGLE_WARNING + 1, "Arm").is_some_and(|w| w.contains("Arm") && w.contains("triangles")));
     }
 
     #[test]
