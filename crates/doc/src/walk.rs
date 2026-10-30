@@ -115,32 +115,32 @@ macro_rules! walk_each {
     ($([$($g:tt)*] $t:ty),*) => {$(
         impl<$($g)*> Walk for $t {
             fn walk_exprs<'a>(&'a self, f: &mut dyn FnMut(ExprItem<'a>)) {
-                for t in self {
+                for t in self.iter() {
                     t.walk_exprs(f)
                 }
             }
             fn walk_exprs_mut<'a>(&'a mut self, f: &mut dyn FnMut(ExprItemMut<'a>)) {
-                for t in self {
+                for t in self.iter_mut() {
                     t.walk_exprs_mut(f)
                 }
             }
             fn walk_refs<'a>(&'a self, f: &mut dyn FnMut(RefItem<'a>)) {
-                for t in self {
+                for t in self.iter() {
                     t.walk_refs(f)
                 }
             }
             fn walk_refs_mut<'a>(&'a mut self, f: &mut dyn FnMut(RefItemMut<'a>)) {
-                for t in self {
+                for t in self.iter_mut() {
                     t.walk_refs_mut(f)
                 }
             }
             fn walk_geometry<'a>(&'a self, f: &mut dyn FnMut(GeoItem<'a>)) {
-                for t in self {
+                for t in self.iter() {
                     t.walk_geometry(f)
                 }
             }
             fn walk_geometry_mut<'a>(&'a mut self, f: &mut dyn FnMut(GeoItemMut<'a>)) {
-                for t in self {
+                for t in self.iter_mut() {
                     t.walk_geometry_mut(f)
                 }
             }

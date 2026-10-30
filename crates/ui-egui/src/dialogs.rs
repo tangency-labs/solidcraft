@@ -2566,7 +2566,7 @@ fn input_rows(d: &mut Dialog, ui: &mut egui::Ui, s: &Session, names: crate::pref
 
 /// Saved vectors/axes are real inputs even when they have no origin-axis selection chip.
 fn feature_pattern_reference_key(d: &Dialog, index: usize) -> Option<&'static str> {
-    if !d.inputs.first().is_some_and(|i| i.accept == selection::FEATURES) {
+    if d.inputs.first().is_none_or(|i| i.accept != selection::FEATURES) {
         return None;
     }
     match (&d.kind, index) {

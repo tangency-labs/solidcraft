@@ -806,7 +806,7 @@ struct ArcEnd {
 fn arc_end(sk: &Sketch, ci: usize, toward: Vec2, cmd: &str) -> Result<Option<ArcEnd>> {
     let Some(CurveKind::Arc { a, b, .. }) = sk.curves.get(ci).map(|c| c.kind.clone()) else { return Ok(None) };
     let Some(Shape::Round { c: centre, r, start, sweep }) = sk.shape(ci) else { return Ok(None) };
-    if !(r.is_finite() && r > 0.0) || !start.is_finite() || !sweep.is_finite() {
+    if !(r.is_finite() && r > 0.0 && start.is_finite() && sweep.is_finite()) {
         return Err(bad(cmd, "the arc's circle is not usable"));
     }
     // A whole circle has no end to grow from.
@@ -1307,10 +1307,8 @@ fn extend_pair(sk: &mut Sketch, ids: &[String], ats: Option<[Vec2; 2]>, cmd: &st
     let mut first_err = None;
     for q in cands.iter().copied().filter(|q| q.x.is_finite() && q.y.is_finite()) {
         match (reach_to(sk, cs[0], toward(0, q), q, cmd), reach_to(sk, cs[1], toward(1, q), q, cmd)) {
-            (Ok(Some((_, l0))), Ok(Some((_, l1)))) => {
-                if valid.iter().all(|(x, _)| x.dist(q) > TOL * 10.0) {
-                    valid.push((q, l0 + l1));
-                }
+            (Ok(Some((_, l0))), Ok(Some((_, l1)))) if valid.iter().all(|(x, _)| x.dist(q) > TOL * 10.0) => {
+                valid.push((q, l0 + l1));
             }
             (Err(e), _) | (_, Err(e)) => {
                 first_err.get_or_insert(e);

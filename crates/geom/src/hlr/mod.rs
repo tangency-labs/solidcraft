@@ -742,7 +742,7 @@ pub fn hidden_lines(defs: &[Prepared], scene: &[Placement], view: &View, opts: &
             });
         }
         let dl = p.local_dir(view.d);
-        let supported = |f: &FaceData| !(f.freeform && !opts.freeform) && f.trim.unsupported.is_none();
+        let supported = |f: &FaceData| (!f.freeform || opts.freeform) && f.trim.unsupported.is_none();
         // Faces on one surface (a sphere in two halves, say) share their silhouettes, keyed by
         // the set's first face: one curve along their seams, not one per face.
         let mut sets: std::collections::BTreeMap<usize, Vec<usize>> = std::collections::BTreeMap::new();

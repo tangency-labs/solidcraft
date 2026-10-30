@@ -299,7 +299,7 @@ fn offer_bodies(app: &mut SolveApp, names: &[String], take: Take) -> bool {
     }
     let Some(mut d) = app.dialog.take() else { return false };
     for body in picked {
-        if !d.active_input().is_some_and(|i| i.accept & crate::selection::BODIES != 0) {
+        if d.active_input().is_none_or(|i| i.accept & crate::selection::BODIES == 0) {
             break;
         }
         if matches!(take, Take::Add) && d.active_input().is_some_and(|i| i.items.contains(&body)) {

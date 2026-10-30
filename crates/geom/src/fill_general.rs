@@ -163,7 +163,7 @@ pub fn fill_general(
     if sides == 0 || sides.saturating_mul(16) > MAX_LOOP_POINTS / 2 {
         return Err(SplineError::TooLarge(format!("a loop of {sides} sides (at most {})", MAX_LOOP_POINTS / 32)));
     }
-    if !(spec.tol.is_finite() && spec.tol > 0.0) || !(spec.angle_tol.is_finite() && spec.angle_tol > 0.0) {
+    if !(spec.tol.is_finite() && spec.tol > 0.0 && spec.angle_tol.is_finite() && spec.angle_tol > 0.0) {
         return invalid("the fill tolerances must be positive");
     }
     // A range test also throws out NaN.

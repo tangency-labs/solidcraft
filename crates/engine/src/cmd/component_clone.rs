@@ -615,20 +615,16 @@ pub(super) fn build(
                     | L::Body { body }
                     | L::Vertex { body, .. }
                     | L::Iso { body, .. }
-                    | L::Spun { body, .. } => {
-                        if !bodies.contains_key(body) {
-                            notices.push(format!("{} retains external linked body {body}", feature.name));
-                        }
+                    | L::Spun { body, .. }
+                        if !bodies.contains_key(body) =>
+                    {
+                        notices.push(format!("{} retains external linked body {body}", feature.name));
                     }
-                    L::SketchCurve { sketch, .. } | L::SketchPoint { sketch, .. } => {
-                        if !features.contains_key(sketch) {
-                            notices.push(format!("{} retains external linked sketch {sketch}", feature.name));
-                        }
+                    L::SketchCurve { sketch, .. } | L::SketchPoint { sketch, .. } if !features.contains_key(sketch) => {
+                        notices.push(format!("{} retains external linked sketch {sketch}", feature.name));
                     }
-                    L::OnSurface { sketch, body, .. } => {
-                        if !features.contains_key(sketch) || !bodies.contains_key(body) {
-                            notices.push(format!("{} retains external surface link", feature.name));
-                        }
+                    L::OnSurface { sketch, body, .. } if !features.contains_key(sketch) || !bodies.contains_key(body) => {
+                        notices.push(format!("{} retains external surface link", feature.name));
                     }
                     L::Intersection { a, b } => {
                         pending.push(a);

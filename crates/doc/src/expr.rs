@@ -478,7 +478,7 @@ fn mixed_fraction(cs: &[(usize, char)], mut i: usize, depth: usize) -> Option<(f
         i += 1;
     }
     let numerator = digits(i);
-    if i == space || numerator == 0 || !cs.get(i + numerator).is_some_and(|(_, c)| *c == '/') {
+    if i == space || numerator == 0 || cs.get(i + numerator).is_none_or(|(_, c)| *c != '/') {
         return None;
     }
     let denominator = digits(i + numerator + 1);

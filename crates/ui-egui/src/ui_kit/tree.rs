@@ -239,7 +239,7 @@ pub(crate) fn tree_row(ui: &mut egui::Ui, id: egui::Id, row: &Row) -> RowResp {
         out.radio = resp.clicked() && click_on == 3;
         x += 15.0;
     }
-    if !row.icon.is_empty() && !(row.compact && row.swatch.is_some()) {
+    if !(row.icon.is_empty() || row.compact && row.swatch.is_some()) {
         let ir = Rect::from_min_size(pos2(x, cy - 8.0), vec2(t.space_16, t.space_16));
         // Icons are full-colour images (a tint colour only sets their opacity): a hidden or
         // faded row draws its icon faint, like its label.

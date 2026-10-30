@@ -384,7 +384,7 @@ impl SharedCylinders {
         let (fa, fb) = (fa as usize, fb as usize);
         self.cylinders.iter().any(|c| {
             let (on_a, on_b) = (fa == c.faces.0, fb == c.faces.1);
-            ((on_a && on_b) || (on_a && c.caps.1.contains(&fb)) || (c.caps.0.contains(&fa) && on_b)) && c.holds(p, tol)
+            ((on_a && (on_b || c.caps.1.contains(&fb))) || (c.caps.0.contains(&fa) && on_b)) && c.holds(p, tol)
         })
     }
 

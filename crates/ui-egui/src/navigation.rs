@@ -270,10 +270,8 @@ pub(crate) fn pinch_factor(input: &egui::InputState, options: egui::InputOptions
     let mut factor = 1.0;
     for event in &input.events {
         match event {
-            egui::Event::Zoom(f) => {
-                if f.is_finite() && *f > 0.0 {
-                    factor *= f;
-                }
+            egui::Event::Zoom(f) if f.is_finite() && *f > 0.0 => {
+                factor *= f;
             }
             // A wheel the chosen zoom modifier already turns into zoom is not also a pinch.
             egui::Event::MouseWheel { unit, delta, modifiers, phase: egui::TouchPhase::Move }

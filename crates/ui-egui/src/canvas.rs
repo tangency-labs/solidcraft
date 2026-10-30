@@ -506,13 +506,8 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
         None
     };
     let sign = match (to_span, &d.kind) {
-        (Some(span), _) => {
-            if span < 0.0 {
-                -1.0
-            } else {
-                1.0
-            }
-        }
+        (Some(span), _) if span < 0.0 => -1.0,
+        (Some(_), _) => 1.0,
         (_, Kind::Extrude { direction: 1 | crate::dialogs::TWO_SIDES_REVERSED, .. }) => -1.0,
         _ => 1.0,
     };

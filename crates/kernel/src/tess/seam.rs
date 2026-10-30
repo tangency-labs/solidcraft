@@ -225,7 +225,7 @@ pub(crate) fn cut(s: &EvalSurface, loops: &[Loop], d: usize, per: f64, rules: &R
     for pair in left.chunks(2).zip(right.chunks(2)) {
         let (lp, rp) = pair;
         let (Some(la), Some(lb), Some(ra), Some(rb)) = (lp.first(), lp.get(1), rp.first(), rp.get(1)) else { return None };
-        if !(la.0.above && !lb.0.above) {
+        if !la.0.above || lb.0.above {
             return None;
         }
         // Nodes strictly between, made once for both lines.
