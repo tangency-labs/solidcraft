@@ -122,6 +122,7 @@ fn color_popover_with_opacity(ui: &mut Ui, rgb: &mut [u8; 3], mut opacity: Optio
     let mut hexadecimal = ui.ctx().data(|d| d.get_temp::<bool>(format_id)).unwrap_or(false);
     let mut linear = ui.global_style().visuals.numeric_color_space == egui::style::NumericColorSpace::Linear;
     let mut accepted_mixed = false;
+    let mut picked_recent = false;
     ui.vertical(|ui| {
         ui.spacing_mut().item_spacing.y = t.space_10;
         ui.horizontal(|ui| {
@@ -197,27 +198,14 @@ fn color_popover_with_opacity(ui: &mut Ui, rgb: &mut [u8; 3], mut opacity: Optio
                 }
             });
         } else {
+            let spin = if linear {
+                Spin { max: 1.0, step: 0.01, speed: 0.003, decimals: 3 }
+            } else {
+                Spin { max: 255.0, step: 1.0, speed: 0.5, decimals: 0 }
+            };
             ui.columns(3, |columns| {
                 for ((ui, channel), name) in columns.iter_mut().zip(channels.iter_mut()).zip(["R", "G", "B"]) {
-                    ui.vertical(|ui| {
-                        ui.spacing_mut().item_spacing.y = t.space_3;
-                        ui.add(egui::Label::new(egui::RichText::new(name).size(t.font_small).color(t.form_dim)));
-                        let response = ui.add_sized(
-                            vec2(dimension(ui.available_width()), t.control_height),
-                            egui::DragValue::new(channel)
-                                .range(0.0..=if linear { 1.0 } else { 255.0 })
-                                .speed(if linear { 0.003 } else { 0.5 })
-                                .custom_parser(crate::prefs::parse_number)
-                                .custom_formatter(move |v, _| if linear { format!("{v:.03}") } else { format!("{v:.0}") }),
-                        );
-                        response.widget_info(|| {
-                            let mut info = egui::WidgetInfo::drag_value(ui.is_enabled(), *channel);
-                            info.label = Some(name.into());
-                            info
-                        });
-                        publish(&format!("color:channel:{name}"), &response);
-                        edited |= response.changed();
-                    });
+                    edited |= spin_channel(ui, name, None, channel, spin);
                 }
             });
         }
@@ -233,6 +221,23 @@ fn color_popover_with_opacity(ui: &mut Ui, rgb: &mut [u8; 3], mut opacity: Optio
         }
         // Only graphical edits convert HSV back to RGB. Typed byte values stay exact.
         let mut graphical_edit = false;
+        // Hue in degrees, saturation and value in percent, of the same gamma HSV the square shows.
+        const HSV: [(&str, &str, f64); 3] = [("H", "color.hue", 360.0), ("S", "color.saturation", 100.0), ("V", "color.value", 100.0)];
+        let mut hsv_fields = [hsv.h, hsv.s, hsv.v].iter().zip(HSV).map(|(v, (_, _, max))| f64::from(*v) * max).collect::<Vec<_>>();
+        let mut hsv_edited = false;
+        ui.columns(3, |columns| {
+            for ((ui, value), (name, tip, max)) in columns.iter_mut().zip(hsv_fields.iter_mut()).zip(HSV) {
+                hsv_edited |= spin_channel(ui, name, Some(i18n::tr(tip)), value, Spin { max, step: 1.0, speed: 0.5, decimals: 0 });
+            }
+        });
+        if hsv_edited {
+            let unit = |at: usize| {
+                let (value, max) = (hsv_fields.get(at).copied().unwrap_or(0.0), HSV.get(at).map_or(1.0, |h| h.2));
+                if value.is_finite() { (value / max).clamp(0.0, 1.0) as f32 } else { 0.0 }
+            };
+            (hsv.h, hsv.s, hsv.v) = (unit(0), unit(1), unit(2));
+            graphical_edit = true;
+        }
         let width = dimension(ui.available_width());
         let (square, response) = ui.allocate_exact_size(vec2(width, t.control_height * 7.0 + t.space_4), Sense::click_and_drag());
         if (response.clicked() || response.dragged())
@@ -274,7 +279,33 @@ fn color_popover_with_opacity(ui: &mut Ui, rgb: &mut [u8; 3], mut opacity: Optio
         );
         publish("color:current", &response);
         response.on_hover_text(i18n::tr("color.selected"));
+        if let Some(picked) = recent_row(ui, width) {
+            *rgb = picked;
+            picked_recent = true;
+            accepted_mixed = mixed;
+            hsv = crate::theme::srgb(rgb.map(|c| f32::from(c) / 255.0)).into();
+            hex.set(*rgb, opacity.as_deref().copied());
+        }
     });
+    // A colour joins the recent list once an edit is finished: a drag or a held step button is
+    // released, a typed value is entered. Every picker shares the list (`share_recent_colors`).
+    // While the popover stays open, fine-tuning replaces the colour it added rather than filling
+    // the list with each step; a colour taken from the list starts a new entry.
+    let session_id = id.with("recent_session");
+    let pass = ui.ctx().cumulative_pass_nr();
+    let mut session = ui.ctx().data(|d| d.get_temp::<RecentSession>(session_id)).unwrap_or_default();
+    if session.pass.saturating_add(1) < pass {
+        session = RecentSession::default();
+    }
+    session.pass = pass;
+    session.pending |= *rgb != before_rgb;
+    if session.pending && !ui.input(|i| i.pointer.any_down()) {
+        let replacing = if picked_recent { None } else { session.entry };
+        remember_color(ui.ctx(), *rgb, replacing);
+        session.entry = if picked_recent { None } else { Some(*rgb) };
+        session.pending = false;
+    }
+    ui.ctx().data_mut(|d| d.insert_temp(session_id, session));
     hex.sync(*rgb, opacity.as_deref().copied());
     ui.ctx().data_mut(|d| d.insert_temp(id, (*rgb, hsv)));
     ui.ctx().data_mut(|d| {
@@ -333,6 +364,213 @@ fn parse_hex(text: &str) -> Option<([u8; 3], Option<u8>)> {
     }
     let byte = |at: usize| digits.get(at..at + 2).and_then(|value| u8::from_str_radix(value, 16).ok());
     Some(([byte(0)?, byte(2)?, byte(4)?], if digits.len() == 8 { Some(byte(6)?) } else { None }))
+}
+
+/// How a channel number edits: its range `0..=max`, the step of its step buttons, the drag
+/// speed and the decimals shown.
+#[derive(Clone, Copy)]
+struct Spin {
+    max: f64,
+    step: f64,
+    speed: f64,
+    decimals: usize,
+}
+
+/// One channel of the popover: its name above a drag field (drag, or click and type) and a pair
+/// of step buttons for fine adjustment. Returns whether the value changed.
+/// Tokens: space_2/3/14, control_height, font_small, form_dim.
+fn spin_channel(ui: &mut Ui, name: &str, tip: Option<&str>, value: &mut f64, spin: Spin) -> bool {
+    let t = Tokens::get();
+    let Spin { max, step, speed, decimals } = spin;
+    let mut changed = false;
+    ui.vertical(|ui| {
+        ui.spacing_mut().item_spacing.y = t.space_3;
+        let label = ui.add(egui::Label::new(egui::RichText::new(name).size(t.font_small).color(t.form_dim)));
+        if let Some(tip) = tip {
+            label.on_hover_text(tip);
+        }
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = t.space_2;
+            let width = dimension(ui.available_width() - t.space_14 - t.space_2);
+            let response = ui.add_sized(
+                vec2(width, t.control_height),
+                egui::DragValue::new(value)
+                    .range(0.0..=max)
+                    .speed(speed)
+                    .custom_parser(crate::prefs::parse_number)
+                    .custom_formatter(move |v, _| format!("{v:.decimals$}")),
+            );
+            response.widget_info(|| {
+                let mut info = egui::WidgetInfo::drag_value(ui.is_enabled(), *value);
+                info.label = Some(tip.unwrap_or(name).into());
+                info
+            });
+            publish(&format!("color:channel:{name}"), &response);
+            let response = match tip {
+                Some(tip) => response.on_hover_text(tip),
+                None => response,
+            };
+            changed |= response.changed();
+            let steps = spin_buttons(ui, name, t.control_height);
+            if steps != 0 {
+                let current = if value.is_finite() { *value } else { 0.0 };
+                *value = (current + f64::from(steps) * step).clamp(0.0, max);
+                changed = true;
+            }
+        });
+    });
+    changed
+}
+
+/// Seconds a step button is held before it repeats, then between repeats.
+const REPEAT_DELAY: f64 = 0.4;
+const REPEAT_EVERY: f64 = 0.05;
+
+/// Step buttons stacked beside a number: a press steps once, holding repeats. Returns this
+/// frame's steps (+ up, − down). Tokens: space_14, control_radius, hover, form_ink, form_dim.
+fn spin_buttons(ui: &mut Ui, key: &str, height: f32) -> i32 {
+    let t = Tokens::get();
+    let (rect, _) = ui.allocate_exact_size(vec2(t.space_14, height), Sense::hover());
+    let (top, bottom) = rect.split_top_bottom_at_fraction(0.5);
+    let mut steps = 0;
+    for (direction, half, label, end) in [(1, top, "color.step_up", "up"), (-1, bottom, "color.step_down", "down")] {
+        let id = ui.id().with(("color_spin", key, end));
+        let response = ui.interact(half, id, Sense::click());
+        response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), i18n::tr(label)));
+        publish(&format!("color:spin:{key}:{end}"), &response);
+        let held = response.is_pointer_button_down_on();
+        if response.hovered() || held {
+            ui.painter().rect_filled(half, t.control_radius, t.hover);
+        }
+        let ink = if response.hovered() || held { t.form_ink } else { t.form_dim };
+        let side = half.height().min(half.width());
+        let icon = egui::Rect::from_center_size(half.center(), vec2(side, side));
+        if direction > 0 {
+            crate::icons::paint_ink_flipped(ui.painter(), icon, "chevron", ink);
+        } else {
+            crate::icons::paint_ink(ui.painter(), icon, "chevron", ink);
+        }
+        let repeat = id.with("repeat");
+        if held {
+            let now = ui.input(|i| i.time);
+            let next = ui.ctx().data(|d| d.get_temp::<f64>(repeat));
+            let due = match next {
+                None => Some(now + REPEAT_DELAY),
+                Some(next) if now >= next => Some(now + REPEAT_EVERY),
+                Some(_) => None,
+            };
+            if let Some(due) = due {
+                steps += direction;
+                ui.ctx().data_mut(|d| d.insert_temp(repeat, due));
+            }
+            ui.ctx().request_repaint_after(std::time::Duration::from_secs_f64(REPEAT_EVERY));
+        } else {
+            ui.ctx().data_mut(|d| d.remove::<f64>(repeat));
+        }
+        response.on_hover_text(i18n::tr(label));
+    }
+    steps
+}
+
+/// How many colours the recent list keeps.
+pub(crate) const MAX_RECENT_COLORS: usize = 12;
+
+/// The colours picked last, newest first, shared by every colour picker of the window.
+#[derive(Clone, Default)]
+struct RecentColors {
+    colors: Vec<[u8; 3]>,
+    /// Picked since the app last took the list for its preferences.
+    changed: bool,
+}
+
+/// One popover's part in the recent list while it stays open (drawn on consecutive passes).
+#[derive(Clone, Copy, Default)]
+struct RecentSession {
+    /// The pass the popover was last drawn on; a gap means it was closed and opened again.
+    pass: u64,
+    /// The colour changed and the edit is not finished yet (a button is still down).
+    pending: bool,
+    /// The colour this opening added, replaced by the next finished edit.
+    entry: Option<[u8; 3]>,
+}
+
+fn recent_id() -> egui::Id {
+    egui::Id::new("color_recent_colors")
+}
+
+/// The recently picked colours, newest first.
+fn recent_colors(ctx: &egui::Context) -> Vec<[u8; 3]> {
+    ctx.data(|d| d.get_temp::<RecentColors>(recent_id())).map(|r| r.colors).unwrap_or_default()
+}
+
+/// Put a finished pick at the front of the recent list (once, capped).
+/// `replacing` is the colour this popover added earlier while it stayed open: it goes if it is
+/// still the newest entry.
+fn remember_color(ctx: &egui::Context, rgb: [u8; 3], replacing: Option<[u8; 3]>) {
+    ctx.data_mut(|d| {
+        let recent = d.get_temp_mut_or_default::<RecentColors>(recent_id());
+        if replacing.is_some() && recent.colors.first().copied() == replacing {
+            recent.colors.remove(0);
+        }
+        recent.colors.retain(|c| *c != rgb);
+        recent.colors.insert(0, rgb);
+        recent.colors.truncate(MAX_RECENT_COLORS);
+        recent.changed = true;
+    });
+}
+
+/// Keep the saved list and the pickers' list the same; the app calls this every frame. Picks made
+/// since the last call are written to `saved`; otherwise `saved` (loaded, reset) is what the
+/// pickers show.
+pub fn share_recent_colors(ctx: &egui::Context, saved: &mut Vec<[u8; 3]>) {
+    saved.truncate(MAX_RECENT_COLORS);
+    ctx.data_mut(|d| {
+        let recent = d.get_temp_mut_or_default::<RecentColors>(recent_id());
+        if recent.changed {
+            saved.clone_from(&recent.colors);
+            recent.changed = false;
+        } else if recent.colors != *saved {
+            recent.colors.clone_from(saved);
+        }
+    });
+}
+
+/// The recent colours as a row of samples (empty slots outlined); returns the one clicked.
+/// Tokens: space_3/4/8, font_small, form_dim, control_radius/border, border, form_ink.
+fn recent_row(ui: &mut Ui, width: f32) -> Option<[u8; 3]> {
+    let t = Tokens::get();
+    let colors = recent_colors(ui.ctx());
+    let mut picked = None;
+    ui.vertical(|ui| {
+        ui.spacing_mut().item_spacing.y = t.space_3;
+        ui.add(egui::Label::new(egui::RichText::new(i18n::tr("color.recent")).size(t.font_small).color(t.form_dim)));
+        let gap = t.space_4;
+        let slots = MAX_RECENT_COLORS as f32;
+        let side = ((width - gap * (slots - 1.0)) / slots).max(t.space_8);
+        let (row, response) = ui.allocate_exact_size(vec2(width, side), Sense::hover());
+        publish("color:recent", &response);
+        if colors.is_empty() {
+            response.on_hover_text(i18n::tr("color.recent_help"));
+        }
+        for slot in 0..MAX_RECENT_COLORS {
+            let rect = egui::Rect::from_min_size(row.min + vec2(slot as f32 * (side + gap), 0.0), vec2(side, side));
+            let Some(&[r, g, b]) = colors.get(slot) else {
+                ui.painter().rect_stroke(rect, t.control_radius, t.control_border_stroke(t.border), egui::StrokeKind::Inside);
+                continue;
+            };
+            let response = ui.interact(rect, ui.id().with(("color_recent", slot)), Sense::click());
+            let stroke = if response.hovered() { t.control_border_stroke(t.form_ink) } else { t.control_border_stroke(t.control_border) };
+            ui.painter().rect(rect, t.control_radius, crate::theme::srgb([r, g, b].map(|c| f32::from(c) / 255.0)), stroke, egui::StrokeKind::Inside);
+            let hex = format!("#{r:02x}{g:02x}{b:02x}");
+            response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &hex));
+            publish(&format!("color:recent:{slot}"), &response);
+            let response = response.on_hover_cursor(egui::CursorIcon::PointingHand).on_hover_text(&hex);
+            if response.clicked() {
+                picked = Some([r, g, b]);
+            }
+        }
+    });
+    picked
 }
 
 fn marker(ui: &Ui, at: egui::Pos2, radius: f32) {
