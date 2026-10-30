@@ -391,3 +391,23 @@ SolidCraft changes:
   (the `wp::pointer_gestures` module); drop the example and test targets.
 - `src/event.rs`, `src/changelog/unreleased.md`: the platform notes of both events and the
   changelog entry.
+
+## eframe 0.36.2 (MIT OR Apache-2.0, Emil Ernerfeldt and contributors)
+
+Original package source from https://github.com/emilk/egui (eframe is a crate of the egui
+repository, tag 0.36.2), with both original licence texts retained in `vendor/eframe/`. The
+package's own `data/icon.png` (the default window icon, read when no other icon is available) is
+kept, so the window icon's fallback is unchanged.
+
+SolidCraft changes:
+- `src/native/winit_integration.rs`: a new `UserEvent::RunLogicNow { viewport_id }` variant.
+  Sending it runs the requested viewport's logic and paint pass at once, so the desktop app's
+  control channel (#743) can serve a request without waiting for the compositor's next frame. On
+  Wayland a window the compositor has stopped giving frames to (off-screen, on another workspace,
+  or scrolled out of view in niri's scrolling layout) otherwise only gets frame callbacks from a
+  once-per-second fallback timer, so each control request stalled for one second. The usual
+  repaint path is unchanged: the compositor's frames present the result as usual.
+- `src/native/run.rs`: handle `UserEvent::RunLogicNow` by running the pass now. The app's
+  `NativeOptions.event_loop_ready` hook hands the app the event loop's proxy before the loop
+  starts, so the control server can send the event from its own thread; a wake with no proxy yet
+  (the loop not started) is a no-op.

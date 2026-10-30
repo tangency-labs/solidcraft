@@ -15,6 +15,36 @@ use solidcraft_engine::control_pending;
 use solidcraft_ui_egui::ControlRequest;
 use solidcraft_ui_egui::control::{DESIGN_WATCH, DesignWatch, Subscriber};
 
+/// Wakes the app's event loop for a control request: eframe runs the app's logic pass for it at
+/// once, without waiting for the compositor's next frame (#743). The proxy arrives when the
+/// event loop starts (eframe's `event_loop_ready` hook); until then the requests ride the usual
+/// `request_repaint` repaint.
+#[derive(Clone, Default)]
+pub struct Wake {
+    proxy: std::sync::Arc<std::sync::Mutex<Option<eframe::EventLoopProxy<eframe::UserEvent>>>>,
+}
+
+impl Wake {
+    /// Keep this launch's proxy; the event loop's `event_loop_ready` hook fills it once.
+    pub fn new(proxy: std::sync::Arc<std::sync::Mutex<Option<eframe::EventLoopProxy<eframe::UserEvent>>>>) -> Self {
+        Self { proxy }
+    }
+
+    /// The event loop started; remember its proxy.
+    pub fn set(&self, proxy: eframe::EventLoopProxy<eframe::UserEvent>) {
+        *self.proxy.lock().unwrap_or_else(PoisonError::into_inner) = Some(proxy);
+    }
+
+    /// Run the app's logic pass now, so a request just sent is served without waiting for a GUI
+    /// frame: a window the compositor has stopped giving frames to (off-screen, another
+    /// workspace) would otherwise answer each request once per second (#743).
+    fn run_logic_now(&self) {
+        if let Some(proxy) = self.proxy.lock().unwrap_or_else(PoisonError::into_inner).clone() {
+            let _ = proxy.send_event(eframe::UserEvent::RunLogicNow { viewport_id: eframe::egui::ViewportId::ROOT });
+        }
+    }
+}
+
 /// Connections served at once, so a flood must not be able to spawn threads without end.
 const MAX_CONNECTIONS: usize = 16;
 /// Lines that are not JSON before the connection is closed, so garbage cannot loop forever.
@@ -51,7 +81,7 @@ pub fn remove_token_file() {
 /// The port the app's own channel listens on and its token, for removing the discovery file at exit.
 static APP_PORT: std::sync::Mutex<Option<(u16, String)>> = std::sync::Mutex::new(None);
 
-pub fn start(listen_on: control_auth::Listen, ctx: egui::Context) -> Receiver<ControlRequest> {
+pub fn start(listen_on: control_auth::Listen, ctx: egui::Context, wake: Wake) -> Receiver<ControlRequest> {
     let (tx, rx) = channel::<ControlRequest>();
     // Every connection must show the token before anything runs (docs/control-protocol.md).
     match control_auth::env_token().or_else(new_token) {
@@ -62,7 +92,7 @@ pub fn start(listen_on: control_auth::Listen, ctx: egui::Context) -> Receiver<Co
             };
             match listener {
                 Ok(l) => {
-                    if let Some(port) = listen_on_listener(l, token.clone(), tx, ctx, false) {
+                    if let Some(port) = listen_on_listener(l, token.clone(), tx, ctx, false, &wake) {
                         if matches!(listen_on, control_auth::Listen::Default) {
                             eprintln!("solidcraft: control channel on the default port 127.0.0.1:{port} (Preferences > Assistant turns it off)");
                         }
@@ -89,7 +119,7 @@ pub fn start(listen_on: control_auth::Listen, ctx: egui::Context) -> Receiver<Co
 /// port with a fresh token of its own (never `SOLIDCRAFT_CONTROL_TOKEN`), written to the usual
 /// token file, where the MCP server finds it, so the token never passes through the agent. Its
 /// requests go to `tx`, where the chat's gate reads them; one may wait long for the user's Allow.
-pub fn listen_agent(tx: Sender<ControlRequest>, ctx: egui::Context) -> Option<u16> {
+pub fn listen_agent(tx: Sender<ControlRequest>, ctx: egui::Context, wake: &Wake) -> Option<u16> {
     let Some(token) = new_token() else {
         eprintln!("solidcraft: agent chat endpoint not started: no random token available");
         return None;
@@ -101,12 +131,19 @@ pub fn listen_agent(tx: Sender<ControlRequest>, ctx: egui::Context) -> Option<u1
             return None;
         }
     };
-    listen_on_listener(listener, token, tx, ctx, true)
+    listen_on_listener(listener, token, tx, ctx, true, wake)
 }
 
 /// Serve `listener` (loopback) with `token`; the port it listens on.
 /// `patient`: every request may wait as long as a batch (a person decides on it).
-fn listen_on_listener(listener: TcpListener, token: String, tx: Sender<ControlRequest>, ctx: egui::Context, patient: bool) -> Option<u16> {
+fn listen_on_listener(
+    listener: TcpListener,
+    token: String,
+    tx: Sender<ControlRequest>,
+    ctx: egui::Context,
+    patient: bool,
+    wake: &Wake,
+) -> Option<u16> {
     let port = listener.local_addr().ok()?.port();
     match control_auth::token_path(port) {
         Some(path) => match control_auth::write_token_file(&path, &token) {
@@ -127,6 +164,7 @@ fn listen_on_listener(listener: TcpListener, token: String, tx: Sender<ControlRe
         }
     }
     let token = std::sync::Arc::new(token);
+    let wake = wake.clone(); // The serving thread owns its handle; the caller's borrow may end.
     std::thread::spawn(move || {
         for stream in listener.incoming().flatten() {
             if OPEN.fetch_add(1, Ordering::Relaxed) >= MAX_CONNECTIONS {
@@ -138,8 +176,9 @@ fn listen_on_listener(listener: TcpListener, token: String, tx: Sender<ControlRe
             let tx = tx.clone();
             let ctx = ctx.clone();
             let token = token.clone();
+            let wake = wake.clone();
             std::thread::spawn(move || {
-                serve(stream, &token, tx, ctx, patient);
+                serve(stream, &token, tx, ctx, patient, &wake);
                 OPEN.fetch_sub(1, Ordering::Relaxed);
             });
         }
@@ -525,8 +564,8 @@ fn answer(out: &mut TcpStream, events: Option<&Subscription>, reply: &Value) -> 
     }
 }
 
-fn serve(stream: TcpStream, token: &str, tx: Sender<ControlRequest>, ctx: egui::Context, patient: bool) {
-    serve_with(stream, token, tx, ctx, patient, WAITS, &RUNNING, &DESIGN_WATCH);
+fn serve(stream: TcpStream, token: &str, tx: Sender<ControlRequest>, ctx: egui::Context, patient: bool, wake: &Wake) {
+    serve_with(stream, token, tx, ctx, patient, WAITS, &RUNNING, &DESIGN_WATCH, wake);
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -539,6 +578,7 @@ fn serve_with(
     waits: Waits,
     running: &'static Running,
     design: &'static DesignWatch,
+    wake: &Wake,
 ) {
     let connection = running.connections.fetch_add(1, Ordering::Relaxed) + 1;
     let Ok(read) = stream.try_clone() else { return };
@@ -630,6 +670,9 @@ fn serve_with(
                         break;
                     }
                     ctx.request_repaint();
+                    // The repaint schedules the pass; this runs it at once, so the request does
+                    // not wait for the compositor's next frame (#743).
+                    wake.run_logic_now();
                     match rrx.recv_timeout(wait) {
                         Ok(r) => r,
                         Err(_) => {
@@ -702,7 +745,7 @@ mod tests {
         static RUNNING: Running = Running::new();
         std::thread::spawn(move || {
             if let Some(stream) = listener.incoming().flatten().next() {
-                serve_with(stream, token, tx, egui::Context::default(), false, waits, &RUNNING, &DESIGN_WATCH);
+                serve_with(stream, token, tx, egui::Context::default(), false, waits, &RUNNING, &DESIGN_WATCH, &Wake::default());
             }
         });
         let s = TcpStream::connect(addr).unwrap();
@@ -768,7 +811,9 @@ mod tests {
         std::thread::spawn(move || {
             for stream in listener.incoming().flatten() {
                 let tx = tx.clone();
-                std::thread::spawn(move || serve_with(stream, token, tx, egui::Context::default(), false, waits, &RUNNING, &DESIGN_WATCH));
+                std::thread::spawn(move || {
+                    serve_with(stream, token, tx, egui::Context::default(), false, waits, &RUNNING, &DESIGN_WATCH, &Wake::default())
+                });
             }
         });
         let open = || {
@@ -873,7 +918,7 @@ mod tests {
         std::thread::spawn(move || {
             for stream in listener.incoming().flatten() {
                 let tx = tx.clone();
-                std::thread::spawn(move || serve_with(stream, token, tx, egui::Context::default(), false, WAITS, &RUNNING, &WATCH));
+                std::thread::spawn(move || serve_with(stream, token, tx, egui::Context::default(), false, WAITS, &RUNNING, &WATCH, &Wake::default()));
             }
         });
         let open = || {
@@ -1035,6 +1080,7 @@ mod tests {
         let (tx, rx) = channel::<ControlRequest>();
         let ran = std::sync::Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
         let seen = ran.clone();
+        let wake = Wake::new(Arc::new(Mutex::new(None)));
         std::thread::spawn(move || {
             for req in rx {
                 seen.lock().unwrap().push(req.method.clone());
@@ -1044,7 +1090,8 @@ mod tests {
         std::thread::spawn(move || {
             for stream in listener.incoming().flatten() {
                 let tx = tx.clone();
-                std::thread::spawn(move || serve(stream, token, tx, egui::Context::default(), false));
+                let wake = wake.clone();
+                std::thread::spawn(move || serve(stream, token, tx, egui::Context::default(), false, &wake));
             }
         });
         let session = |lines: &[String]| {
@@ -1114,6 +1161,17 @@ mod tests {
         // The same line against a smaller cap is refused.
         let mut r = BufReader::with_capacity(64, text.as_slice());
         assert!(read_line(&mut r, 1000).is_err());
+    }
+
+    /// #743: the wake's proxy arrives when the event loop starts. Clones share the launch's
+    /// holder, and a wake without a proxy yet (the loop not started) is a no-op, not an error.
+    #[test]
+    fn the_wake_shares_its_proxy_holder() {
+        let wake = Wake::default();
+        wake.run_logic_now();
+        let other = wake.clone();
+        assert!(std::sync::Arc::ptr_eq(&wake.proxy, &other.proxy));
+        assert!(wake.proxy.lock().unwrap().is_none());
     }
 
     /// A large reply reaches the socket in one write, not one per JSON piece (a component tree of
