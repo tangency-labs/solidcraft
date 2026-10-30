@@ -28,7 +28,7 @@ fn own_border() -> DrawingBorderProfile {
 /// tangent edges shown, with a 5 mm reference margin. On the front view, a dimension of each kind:
 /// between two corners, a placed copy's edge length along a direction, and an angle with its text
 /// given; and a balloon on the placed copy's top edge.
-fn plate() -> Drawing {
+pub(crate) fn plate() -> Drawing {
     let mut id_source = IdSource::seeded(SEED);
     let a3 = drawing_sheet::Sheet::standard(PaperSize::A3, Orientation::Landscape);
     let mut d = Drawing::new("Plate assembly", "en-GB", "Assembly", a3, Some(DrawingBorderProfile::iso()), &BTreeSet::new(), &mut id_source).unwrap();
