@@ -4,7 +4,6 @@
 //! answers the pairs of parts that pass through each other along the way.
 
 use std::collections::BTreeMap;
-use std::sync::Arc;
 
 use serde_json::{Value, json};
 use solidcraft_doc::joints;
@@ -31,8 +30,10 @@ pub const INTERFERENCE_DOC: &str = "study: id|name; occurrences?: [ids or names]
      default every occurrence), with against?: [ids or names] (then each of `occurrences` is checked only against these, such \
      as an arm against the parts it must miss), or contact_sets?: true (the pairs of the design's contact sets); samples? \
      (2…1000, default the study's steps + 1) → collisions: [{a, b, first_step, last_step, steps: [[from, to]…] (the step ranges where they overlap), \
-     depth_mm (how far into each other, the most at deepest_step), volume_mm3 (their overlap there; null when it was not \
-     cheap to work out)}], clear, \
+     volume_mm3 (the most volume they share at a sample, worked out exactly from the bodies; null when it was not cheap to \
+     work out at every sample they overlap), deepest_step (the first sample sharing that volume; with volume_mm3 null, the \
+     one of the greatest depth_mm), depth_mm (how far into each other at most: an estimate from points of the bodies' \
+     contact meshes, not exact)}], clear, \
      pairs (checked), samples (taken), truncated (the work budget ran out; checked_to: the last step checked), stopped_at, \
      stopped_by_loop. The study plays as motion.play plays it but contact sets do not stop it, on a copy (the design is not \
      changed). Parts are tested at the samples only: one that passes wholly through another between two samples is missed";
@@ -43,9 +44,10 @@ const MAX_SAMPLES: usize = 1000;
 const MAX_SERIES: usize = 256;
 /// Most collision work over a whole study (see `ContactGeometry::hits`).
 const MAX_WORK: usize = 500_000_000;
-/// Most colliding pairs whose overlap volume is worked out, and most body booleans that takes.
+/// Most colliding pairs whose overlap volume is worked out, and most body booleans that takes
+/// over the whole study (one per pair of overlapping bodies at each sample a pair collides).
 const MAX_VOLUMES: usize = 16;
-const MAX_BOOLEANS: usize = 64;
+const MAX_BOOLEANS: usize = 256;
 
 /// How many samples `p` asks for (`min`…`MAX_SAMPLES`, default the study's steps + 1).
 fn samples(p: &Value, m: &MotionStudy, min: usize, cmd: &str) -> Result<usize> {
@@ -250,10 +252,29 @@ struct Collision {
     names: (String, String),
     /// The samples where they overlap, in order.
     samples: Vec<usize>,
+    /// The most sampled mesh depth, and the first sample reaching it.
     depth: f64,
     deepest: usize,
-    /// The design at the deepest sample (its placements).
-    at_deepest: Arc<Document>,
+    /// The most exact shared volume and the first sample sharing it; `None` once a sample's
+    /// volume was not worked out (the pair got no volume slot, or the booleans ran out).
+    most_volume: Option<(f64, usize)>,
+}
+
+impl Collision {
+    /// Takes the exact shared volume at sample `k` (`None`: not worked out). A volume larger by
+    /// no more than the booleans' rounding is a tie, which keeps the earlier sample.
+    fn take_volume(&mut self, k: usize, volume: Option<f64>) {
+        self.most_volume = match (self.most_volume, volume) {
+            (Some((best, at)), Some(v)) => Some(if v > best + 1e-9 * best.max(1.0) { (v, k) } else { (best, at) }),
+            _ => None,
+        };
+    }
+
+    /// The sample the collision is deepest at: where they share the most volume, else (no
+    /// volume) where the sampled depth is greatest.
+    fn deepest_sample(&self) -> usize {
+        self.most_volume.map_or(self.deepest, |(_, at)| at)
+    }
 }
 
 /// The volume the parts under occurrences `a` and `b` share, placed as in `doc` (`None`: not
@@ -358,12 +379,14 @@ pub(super) fn checked_pairs(s: &Session, p: &Value, cmd: &str) -> Result<Contact
 }
 
 pub(super) fn interference(s: &mut Session, p: &Value) -> Result<Value> {
+    let s: &Session = s;
     let cmd = "motion.interference";
     let m = s.doc.assembly.studies.get(study_index(s, p, cmd)?).cloned().ok_or_else(|| bad(cmd, "study"))?;
     let n = samples(p, &m, 2, cmd)?;
     let geometry = checked_pairs(s, p, cmd)?;
     let mut found: BTreeMap<(u64, u64), Collision> = BTreeMap::new();
     let (mut work, mut checked, mut truncated) = (0usize, 0usize, false);
+    let mut booleans = MAX_BOOLEANS;
     let stop = play(s, &m, n, false, |t, k| {
         // Placing the meshes is work too, also where nothing comes near.
         work = work.saturating_add(geometry.vertex_count());
@@ -383,18 +406,24 @@ pub(super) fn interference(s: &mut Session, p: &Value) -> Result<Value> {
         for ((a, an), (b, bn), depth) in hits {
             // Each pair once, the older occurrence (the lower id) first.
             let ((a, an), (b, bn)) = if a <= b { ((a, an), (b, bn)) } else { ((b, bn), (a, an)) };
+            // The first MAX_VOLUMES pairs found have their shared volume worked out.
+            let slots = found.len() < MAX_VOLUMES;
             let c = found.entry((a, b)).or_insert_with(|| Collision {
                 names: (an, bn),
                 samples: Vec::new(),
                 depth: 0.0,
                 deepest: k,
-                at_deepest: t.doc.clone(),
+                most_volume: slots.then_some((0.0, k)),
             });
-            if c.samples.last() != Some(&k) {
-                c.samples.push(k);
+            if c.samples.last() == Some(&k) {
+                continue;
             }
+            c.samples.push(k);
             if depth > c.depth {
-                (c.depth, c.deepest, c.at_deepest) = (depth, k, t.doc.clone());
+                (c.depth, c.deepest) = (depth, k);
+            }
+            if c.most_volume.is_some() {
+                c.take_volume(k, shared_volume(s, &t.doc, a, b, &mut booleans));
             }
         }
         Ok(true)
@@ -405,16 +434,14 @@ pub(super) fn interference(s: &mut Session, p: &Value) -> Result<Value> {
     }
     let mut list: Vec<(&(u64, u64), &Collision)> = found.iter().collect();
     list.sort_by_key(|(_, c)| c.samples.first().copied().unwrap_or(usize::MAX));
-    let mut booleans = MAX_BOOLEANS;
     let collisions: Vec<Value> = list
         .iter()
-        .enumerate()
-        .map(|(i, ((a, b), c))| {
-            let volume = if i < MAX_VOLUMES { shared_volume(s, &c.at_deepest, *a, *b, &mut booleans) } else { None };
+        .map(|(_, c)| {
+            let volume = c.most_volume.map(|(v, _)| v);
             let first = c.samples.first().map(|k| step_of(&m, *k, n));
             let last = c.samples.last().map(|k| step_of(&m, *k, n));
             json!({"a": c.names.0, "b": c.names.1, "first_step": first, "last_step": last, "steps": ranges(&m, &c.samples, n),
-                "depth_mm": c.depth, "deepest_step": step_of(&m, c.deepest, n), "volume_mm3": volume})
+                "depth_mm": c.depth, "deepest_step": step_of(&m, c.deepest_sample(), n), "volume_mm3": volume})
         })
         .collect();
     let mut out = json!({"study": m.name, "steps": m.steps, "clear": collisions.is_empty(), "collisions": collisions,
