@@ -43,9 +43,13 @@
 //!   them exactly (no copy-constructor knot fix-up). Each edge owns its curve, so the
 //!   3D curve list has one curve per edge (upstream shares a curve between edges
 //!   only when they share the object). `GetSurfaces` keeps the surfaces owned by
-//!   their faces, as upstream. Dereferences of null objects (a loop without loop
-//!   uses, an edge use without mate, next edge use, loop use or loop; an edge without
-//!   primary edge use or curve) are `SM_ERR_NULL_POINTER`.
+//!   their faces, as upstream: a face is named by the caller's identity when its
+//!   surface's owner is that, else by the B-rep's own owner identity
+//!   ([`Brep::owner_identity`]), so a caller whose names differ from the B-rep's
+//!   naming scheme still gets every owned surface written. Dereferences of null
+//!   objects (a loop without loop uses, an edge use without mate, next edge use, loop
+//!   use or loop; an edge without primary edge use or curve) are
+//!   `SM_ERR_NULL_POINTER`.
 //! - **Statuses.** Upstream ignores the status of every record write and of the curve
 //!   and surface writes; the port's record writes cannot fail, and a curve or surface
 //!   that cannot be written (no ported writer, no NURB) is an error instead of a
@@ -62,7 +66,7 @@ use crate::nurbs::b_spline_surface::BSplineSurface;
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use crate::nurbs::math::NOZ;
 use crate::surface::surface::{Surface, SurfaceKind};
-use crate::topology::brep::p1::{self as bl, surface_owners};
+use crate::topology::brep::p1::{self as bl, default_face_owner, surface_owners};
 use crate::topology::brep::p10::HEALER_VERSION;
 use crate::topology::brep::p2::is_manifold_solid;
 use crate::topology::brep_data::{
@@ -1332,8 +1336,18 @@ impl BrepData {
             bd.faceuses.push(fd);
         }
 
-        // Surfaces owned by their faces
-        let face_ref = |f: FaceId| (env.key_of)(EntityRef::Face(f));
+        // Surfaces owned by their faces (`pSurface->GetOwner() == pFace`): the face's
+        // identity is the caller's name for it when the surface carries that, else the
+        // B-rep's own owner identity (`GetSurfaces`)
+        let face_ref = |f: FaceId| {
+            let caller = (env.key_of)(EntityRef::Face(f));
+            let owner = b.face(f).ok().and_then(|x| x.surface.as_ref()?.owner());
+            if owner == Some(caller) {
+                caller
+            } else {
+                default_face_owner(b, f)
+            }
+        };
         let mut surface_index: BTreeMap<FaceId, u64> = BTreeMap::new();
         for f in surface_owners(b, None, &face_ref)? {
             let surface = b.face(f)?.surface.as_ref().ok_or_else(null)?;
