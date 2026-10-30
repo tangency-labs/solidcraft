@@ -17,6 +17,7 @@
 //! | `root_surface` (private)                | `GetRootSurface` (virtual)                   |
 //! | [`BSplineSurface::degree_elevate`]      | `SmBSplineSurface::DegreeElevate`            |
 //! | [`BSplineSurface::insert_knots`]        | `SmBSplineSurface::InsertKnots` (NLib form)  |
+//! | [`BSplineSurface::insert_one_knot`]     | `SmBSplineSurface::InsertOneKnot`            |
 //! | [`BSplineSurface::remove_knots`]        | `SmBSplineSurface::RemoveKnots`              |
 //!
 //! None of these is in `harness/callgraph/units.json`: they are listed in
@@ -73,7 +74,7 @@ use crate::nurbs::b_spline_surface::{
 use crate::nurbs::b_spline_surface_n_lib::p2::EvaluateFlags;
 use crate::nurbs::knots::Side;
 use crate::nurbs::srf_basic::Direction;
-use crate::nurbs::srf_tool::p1::insert_knots;
+use crate::nurbs::srf_tool::p1::{insert_knot, insert_knots};
 use crate::nurbs::srf_tool::p2::elevate_degree;
 use crate::nurbs::srf_tool::p3::remove_all_knots;
 use crate::nurbs::srf_tool::p4::remove_knots_constrained;
@@ -85,6 +86,7 @@ const OP_BEZIER: &str = "surface::surface::approximate::compute_cubic_bezier_app
 const OP_ROOT: &str = "surface::surface::approximate::root_surface";
 const OP_ELEVATE: &str = "surface::surface::approximate::degree_elevate";
 const OP_INSERT: &str = "surface::surface::approximate::insert_knots";
+const OP_INSERT_ONE: &str = "surface::surface::approximate::insert_one_knot";
 const OP_REMOVE: &str = "surface::surface::approximate::remove_knots";
 
 /// A bicubic Bezier patch (`SmCubicBezierSurface`): its 4x4 control points,
@@ -734,6 +736,37 @@ impl BSplineSurface {
 
         // Make sur with the union of surP target knot vector and the new knots
         let sur = insert_knots(sur_p, new_knots, dir).map_err(SolidError::nl_ser(OP))?;
+
+        // build a surface from it and swap the NURBs
+        self.nurb = Self::from_gw_nurb(&sur).nurb;
+        Ok(())
+    }
+
+    /// Inserts the interior knot `new_knot` `count` times in `param`'s direction (v for
+    /// [`SurfParamType::V`], else u), its old and new multiplicities summing to at most
+    /// the degree (`InsertOneKnot`).
+    ///
+    /// # Errors
+    ///
+    /// `NULL` pointer without NURB; those of the NLib insertion (the surface is then
+    /// unchanged).
+    pub fn insert_one_knot(
+        &mut self,
+        new_knot: f64,
+        count: usize,
+        param: SurfParamType,
+    ) -> Result<()> {
+        const OP: &str = OP_INSERT_ONE;
+        let dir = if param == SurfParamType::V {
+            Direction::V
+        } else {
+            Direction::U
+        };
+        let sur_p = self
+            .nurb
+            .as_ref()
+            .ok_or_else(|| SolidError::null_pointer(OP))?;
+        let sur = insert_knot(sur_p, new_knot, count, dir).map_err(SolidError::nl_ser(OP))?;
 
         // build a surface from it and swap the NURBs
         self.nurb = Self::from_gw_nurb(&sur).nurb;
