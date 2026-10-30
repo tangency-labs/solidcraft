@@ -20,6 +20,7 @@
 //! | [`fix_loop_orientation`], [`fix_face_loop_orientations`] | `SmTrimmingTools::FixTrimLoopOrientation` (loop, face) |
 //! | [`fix_trim_loop_order`]                      | `SmTrimmingTools::FixTrimLoopOrder`                       |
 //! | [`order_curves_into_loops`], [`OrderedLoops`] | `SmTrimmingTools::OrderCurvesIntoLoops`                  |
+//! | `next_round_the_vertex` (private)           | fork-only `sm_NextRoundTheVertex` (WR-591)                |
 //! | [`find_outer_loops`]                         | `SmTrimmingTools::FindOuterLoops`                         |
 //! | [`check_face`], [`check_faces`]              | `SmTrimmingTools::CheckFace`, `CheckFaces`                |
 //! | [`is_loop_uv_gap_within_tolerance`]          | `sm_IsLoopUVGapWithinTolerance` (static)                  |
@@ -33,6 +34,11 @@
 //! | [`min`]                                      | `SmTrimmingTools::Min`                                    |
 //!
 //! Deviations:
+//! - **Not upstream (WR-591, opt-in `Kernel::fixes.loops_go_on_round_the_vertex`;
+//!   SolidCraft change, tangency-labs/smlib 9209e76).** Where several curve ends meet
+//!   at a vertex, [`order_curves_into_loops`] goes on along the end next round the
+//!   vertex from the arriving curve (`next_round_the_vertex`, the fork's
+//!   `sm_NextRoundTheVertex`) instead of the first by index.
 //! - **Object model.** Faces, loops and edge uses are ids into a [`Brep`]; the static
 //!   methods are free functions taking the B-rep (and the [`Kernel`] where tolerances or
 //!   solves are read). Out-params are return values. A UV trim curve is the
@@ -111,7 +117,7 @@ use crate::geom::tol::{self, SmallTopoType, ZONE_TOL_3D};
 use crate::geom::tools::find_first_point_within_tol_to_pnt;
 use crate::geom::vector2d::Point2;
 use crate::kernel::Kernel;
-use crate::math::{Point3, Vec3, UNDEF_DOUBLE};
+use crate::math::{Point3, Vec3, EFF_ZERO_SQRT, PI, UNDEF_DOUBLE};
 use crate::nurbs::b_spline_curve::p2::BoundingBoxRequest;
 use crate::nurbs::b_spline_curve::{BSplineCurve, CanonicalData};
 use crate::nurbs::b_spline_curve_n_lib::TrimMode;
@@ -1474,6 +1480,136 @@ fn eval_point(k: &Kernel, c: &Curve, t: f64) -> Result<Point3> {
     c.evaluate_point(k, t)
 }
 
+/// Not upstream (WR-591, the fork's `sm_NextRoundTheVertex`, tangency-labs/smlib
+/// 9209e76): the curve end a loop goes on from at a vertex where several curve ends
+/// meet. `arrive` is the end the loop arrives by (`2i` the start of curve `i`, `2i + 1`
+/// its end), `close` the start of the loop's first curve, `found` the nearest end to
+/// `arrive`. The ends at that vertex (within `tol_3d` of `found`) that the loop can go
+/// on from are those of curves it has not used, and `close`. Of them it takes the one
+/// whose leaving tangent comes next round the vertex from the arriving curve's (about
+/// the plane those tangents span; ends leaving tangent to each other in the order they
+/// bend), so the loop never crosses itself there. Returns the end to go on from.
+///
+/// # Errors
+///
+/// `SM_ERR` for a zero tangent at an end there; those of the curve evaluations.
+fn next_round_the_vertex(
+    k: &Kernel,
+    curves: &[Curve],
+    ends: &[Point3],
+    seen: &[bool],
+    arrive: usize,
+    close: usize,
+    tol_3d: f64,
+    found: usize,
+) -> Result<usize> {
+    // the ends there the loop can go on from
+    let found_pt = at(ends, found)?;
+    let mut candidates = Vec::new();
+    for (ii, end) in ends.iter().enumerate() {
+        if ii == arrive || end.distance(found_pt) > tol_3d {
+            continue;
+        }
+        if at(seen, ii / 2)? && ii != close {
+            continue;
+        }
+        candidates.push(ii);
+    }
+    if candidates.len() < 2 {
+        return Ok(candidates.first().copied().unwrap_or(found));
+    }
+
+    // a curve end's tangent and second derivative as the loop runs it away from the
+    // vertex (the arriving curve's too, run backwards from the vertex)
+    let leaving = |end: usize| -> Result<(Vec3, Vec3)> {
+        let c = curves.get(end / 2).ok_or_else(|| null("curve index"))?;
+        let ivl = c.natural_interval();
+        let at_start = end % 2 == 0;
+        let d = c.evaluate(
+            k,
+            if at_start { ivl.min() } else { ivl.max() },
+            2,
+            at_start,
+            true,
+        )?;
+        let d1 = at(&d, 1)?;
+        let tangent = if at_start { d1 } else { -1.0 * d1 };
+        Ok((tangent, at(&d, 2)?))
+    };
+    let (mut back, back_acc) = leaving(arrive)?;
+    if back.length() <= 0.0 {
+        return Err(SolidError::sm_err(OP));
+    }
+    back /= back.length();
+
+    let mut rays = Vec::new();
+    let mut accs = Vec::new();
+    for &end in &candidates {
+        let (ray, acc) = leaving(end)?;
+        if ray.length() <= 0.0 {
+            return Err(SolidError::sm_err(OP));
+        }
+        rays.push(ray);
+        accs.push(acc);
+    }
+
+    // the curves' plane: its normal from two rays there that are not parallel, else
+    // from the arriving curve's bending
+    let small = |v: Vec3| v.length() <= EFF_ZERO_SQRT;
+    let mut normal = Vec3::new(0.0, 0.0, 0.0);
+    for ray in &rays {
+        if !small(normal) {
+            break;
+        }
+        normal = back.cross(*ray / ray.length());
+    }
+    for (ii, ri) in rays.iter().enumerate() {
+        if !small(normal) {
+            break;
+        }
+        for rj in rays.iter().skip(ii + 1) {
+            if !small(normal) {
+                break;
+            }
+            normal = (*ri / ri.length()).cross(*rj / rj.length());
+        }
+    }
+    if small(normal) {
+        normal = back.cross(back_acc);
+    }
+    if small(normal) {
+        // every curve there on one line: they cannot touch from two sides
+        return Ok(found);
+    }
+    normal /= normal.length();
+
+    // each ray's angle round the vertex from the arriving one, (0, 2 pi], and for rays
+    // leaving along one line, its bending towards larger angles (curvature about the
+    // normal)
+    let two_pi = 2.0 * PI;
+    let mut best = 0;
+    let mut best_angle = 0.0;
+    let mut best_bend = 0.0;
+    for (ii, (ray, acc)) in rays.iter().zip(&accs).enumerate() {
+        let r = *ray / ray.length();
+        let mut angle = normal.dot(back.cross(r)).atan2(back.dot(r));
+        if angle <= 0.0 {
+            angle += two_pi;
+        }
+        let speed = ray.length();
+        let bend = normal.dot(ray.cross(*acc)) / (speed * speed * speed);
+        if ii == 0
+            || angle < best_angle - EFF_ZERO_SQRT
+            || (angle < best_angle + EFF_ZERO_SQRT && bend < best_bend)
+        {
+            best = ii;
+            best_angle = angle;
+            best_bend = bend;
+        }
+    }
+    at(&candidates, best)
+}
+
 /// `OrderCurvesIntoLoops`: orders `curves` into closed loops by matching their end
 /// points (within `max(tol_3d, radius/1000)` of the curves' bounding sphere), computes the
 /// plane through all loops (average loop point, unit normal from the loops' polygons)
@@ -1624,11 +1760,29 @@ pub fn order_curves_into_loops(k: &Kernel, curves: &[Curve], tol_3d: f64) -> Res
                 break;
             }
 
-            // Matching Curve index and seen status
-            let next_index = if m.index % 2 == 0 {
-                m.index / 2
+            // Not upstream (WR-591, opt-in): where more curve ends meet at this vertex
+            // (loops touching there), the loop goes on along the curve next round the
+            // vertex from the one it arrives by, so it never crosses itself
+            let found_index = if k.fixes.loops_go_on_round_the_vertex {
+                next_round_the_vertex(
+                    k,
+                    curves,
+                    &vertex_points,
+                    &seen,
+                    target,
+                    2 * first_curve_index,
+                    tol_3d,
+                    m.index,
+                )?
             } else {
-                (m.index - 1) / 2
+                m.index
+            };
+
+            // Matching Curve index and seen status
+            let next_index = if found_index % 2 == 0 {
+                found_index / 2
+            } else {
+                (found_index - 1) / 2
             };
 
             // expected exit: closed loop
@@ -1652,7 +1806,7 @@ pub fn order_curves_into_loops(k: &Kernel, curves: &[Curve], tol_3d: f64) -> Res
             }
 
             // Preparing for next iter
-            orient = if m.index % 2 == 0 {
+            orient = if found_index % 2 == 0 {
                 OrientType::Same
             } else {
                 OrientType::Opposite

@@ -1438,6 +1438,7 @@ fn enable_fix(k: &mut Kernel, name: &str) -> Result<(), String> {
             &mut k.fixes.precise_properties_split_at_surface_knots
         }
         "precise_properties_trim_base_v" => &mut k.fixes.precise_properties_trim_base_v,
+        "loops_go_on_round_the_vertex" => &mut k.fixes.loops_go_on_round_the_vertex,
         "revolve_nested_shells_as_cavities" => &mut k.fixes.revolve_nested_shells_as_cavities,
         "stitch_solid_nests_cavities" => &mut k.fixes.stitch_solid_nests_cavities,
         "sphere_small_circle_not_touching" => &mut k.fixes.sphere_small_circle_not_touching,
