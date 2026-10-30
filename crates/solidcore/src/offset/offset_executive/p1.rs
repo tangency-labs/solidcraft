@@ -2422,14 +2422,21 @@ impl OffsetExecutive {
             // on sNewFaces. The intersector over the one offset B-rep is merge p4's
             // arena adapter; its notifications are keyed under
             // `DELETE_FACES_NAMESPACE`, not `offset_key_of`.
-            ignore_status(KernelManifoldIntersector::delete_faces_in(
-                kernel,
-                brep,
-                &delete_faces,
-                &mut *notifications.records,
-                &mut *notifications.attributes,
-                DELETE_FACES_NAMESPACE,
-            ))?;
+            // The deletion edits the offset B-rep through the kernel context, whose
+            // callbacks a kernel-context caller has lent to `notifications.context`
+            // (upstream: the one context); without returning them the deletion
+            // failed as a nested edit and, its status ignored, kept the face.
+            let lent = notifications.context.as_deref_mut();
+            ignore_status(Context::with_lease_returned(kernel, lent, |kernel| {
+                KernelManifoldIntersector::delete_faces_in(
+                    kernel,
+                    brep,
+                    &delete_faces,
+                    &mut *notifications.records,
+                    &mut *notifications.attributes,
+                    DELETE_FACES_NAMESPACE,
+                )
+            }))?;
             new_faces.retain(|face| !delete_faces.contains(face));
         }
         Ok(new_faces)
