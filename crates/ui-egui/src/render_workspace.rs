@@ -712,7 +712,7 @@ pub(crate) fn select_stage(app: &mut SolveApp, key: &str) {
     if stage == Stage::Look {
         app.tree.collapsed.remove("c0");
         app.tree.collapsed.remove("c0/bodies");
-        // The Bodies folder starts closed in the Browser.
+        // The Bodies folder starts closed while the Browser's rows do (Preferences › Interface).
         app.tree.expanded.insert("c0/bodies".into());
     }
 }

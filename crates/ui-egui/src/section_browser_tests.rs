@@ -12,8 +12,6 @@ fn harness() -> Harness {
     let mut h = Harness::new();
     h.app.home.open = false;
     h.app.ui.show_browser = true;
-    // The Analysis folder starts closed.
-    h.app.tree.expanded.insert("analysis".into());
     h.frames(3);
     h
 }

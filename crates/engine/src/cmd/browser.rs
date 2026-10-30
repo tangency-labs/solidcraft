@@ -52,7 +52,7 @@ pub static COMMANDS: &[CommandSpec] = &[
     ),
     CommandSpec::new("browser.expand_all", "Expand All", expand_all).icon("folder").noundo().params(
         "path?: [occurrence ids] (that placement and its descendants); component?: id (that component's own folders); \
-         omit both for the whole tree, including rows that start closed (placements, folders, Origin, Named Views, Features). \
+         omit both for the whole tree, including folders that start closed (Origin, Named Views, Features). \
          Display only: open/closed rows are not saved in the design and are not an undo step → open, open_by_default, closed_by_default",
     ),
     CommandSpec::new("browser.collapse_all", "Collapse All", collapse_all).icon("folder").noundo().params(
@@ -621,9 +621,7 @@ fn visibility(s: &mut Session, p: &Value) -> Result<Value> {
     Ok(json!({ "visible": visible, "changed": items.len(), "visibility": s.visibility }))
 }
 
-/// Browser rows that start open (the design's row, `c0`) vs closed (placements, folders, groups,
-/// patterns, Origin, Features). Preferences › Interface can start placements and folders open:
-/// the browser opens or closes every listed row, whichever way it starts.
+/// Browser rows that start open (`c0`, Bodies, placements) vs closed (Origin, Features).
 struct FoldKeys {
     open: BTreeSet<String>,
     closed: BTreeSet<String>,
@@ -686,19 +684,14 @@ fn has_native_features(s: &Session, component: u64) -> bool {
 }
 
 fn collect_component_keys(s: &Session, prefix: &str, component: u64, root_extras: bool, keys: &mut FoldKeys) {
-    // Placements and folders start closed in the browser; component rows start open.
-    if prefix.starts_with("o:") {
-        keys.closed.insert(prefix.to_string());
-    } else {
-        keys.open.insert(prefix.to_string());
-    }
+    keys.open.insert(prefix.to_string());
     for folder in FOLDERS {
         if folder_has_items(s, component, folder) {
-            keys.closed.insert(format!("{prefix}/{folder}"));
+            keys.open.insert(format!("{prefix}/{folder}"));
         }
     }
     for g in s.doc.browser_groups.iter().filter(|g| g.component == component) {
-        keys.closed.insert(format!("{prefix}/g{}", g.id));
+        keys.open.insert(format!("{prefix}/g{}", g.id));
     }
     if has_native_features(s, component) {
         keys.closed.insert(format!("{prefix}/features"));
@@ -709,7 +702,7 @@ fn collect_component_keys(s: &Session, prefix: &str, component: u64, root_extras
             && !sketch.patterns.is_empty()
         {
             let key = if occurrence { format!("{prefix}/s:{}/patterns", f.id) } else { format!("s:{}/patterns", f.id) };
-            keys.closed.insert(key);
+            keys.open.insert(key);
         }
     }
     if root_extras {
@@ -717,16 +710,16 @@ fn collect_component_keys(s: &Session, prefix: &str, component: u64, root_extras
         keys.closed.insert("namedviews".into());
         keys.closed.insert("origin".into());
         if !s.doc.canvases.is_empty() {
-            keys.closed.insert("canvases".into());
+            keys.open.insert("canvases".into());
         }
         if !s.doc.point_clouds.is_empty() {
-            keys.closed.insert("point_clouds".into());
+            keys.open.insert("point_clouds".into());
         }
         if !s.doc.assembly.joints.is_empty() {
-            keys.closed.insert("c0/joints".into());
+            keys.open.insert("c0/joints".into());
         }
         if s.section.is_some() {
-            keys.closed.insert("analysis".into());
+            keys.open.insert("analysis".into());
         }
     }
 }
@@ -768,7 +761,6 @@ fn fold_tree(s: &mut Session, p: &Value, open: bool, cmd: &str) -> Result<Value>
             FoldScope::Occurrence(path) => occurrence_fold_key(path),
         };
         keys.open.remove(&own);
-        keys.closed.remove(&own);
     }
     if keys.open.len().saturating_add(keys.closed.len()) > MAX_FOLD_KEYS {
         return Err(bad(cmd, "expand/collapse exceeds 10000 browser rows"));
@@ -2296,11 +2288,10 @@ mod tests {
         let open = strs(&expanded, "open_by_default");
         let closed = strs(&expanded, "closed_by_default");
         assert!(open.contains(&"c0".into()), "{open:?}");
-        assert_eq!(open, vec!["c0".to_string()], "only the design's row starts open: {open:?}");
-        assert!(closed.contains(&"c0/bodies".into()), "folders start closed: {closed:?}");
-        assert!(closed.contains(&format!("c0/g{g}")), "{closed:?}");
-        assert!(closed.contains(&"c0/sketches".into()), "{closed:?}");
-        assert!(closed.contains(&format!("o:{occ}")), "placements start closed: {closed:?}");
+        assert!(open.contains(&"c0/bodies".into()), "{open:?}");
+        assert!(open.contains(&format!("c0/g{g}")), "{open:?}");
+        assert!(open.contains(&"c0/sketches".into()), "{open:?}");
+        assert!(open.contains(&format!("o:{occ}")), "{open:?}");
         assert!(closed.contains(&"origin".into()) && closed.contains(&"namedviews".into()) && closed.contains(&"docsettings".into()), "{closed:?}");
         assert!(closed.contains(&"c0/features".into()), "{closed:?}");
         assert_eq!(s.undo.len(), n, "display-only: no undo step");
@@ -2309,21 +2300,18 @@ mod tests {
         assert_eq!(collapsed["open"], false);
         let open = strs(&collapsed, "open_by_default");
         assert!(!open.contains(&"c0".into()), "the design row stays visible: {open:?}");
-        assert!(strs(&collapsed, "closed_by_default").contains(&"c0/bodies".into()), "{collapsed}");
-        assert!(strs(&collapsed, "closed_by_default").contains(&format!("o:{occ}")), "{collapsed}");
+        assert!(open.contains(&"c0/bodies".into()) && open.contains(&format!("o:{occ}")), "{open:?}");
 
         let below = run(&mut s, "browser.collapse_all", json!({"path": [occ]}));
-        let own = format!("o:{occ}");
-        assert!(
-            !strs(&below, "open_by_default").contains(&own) && !strs(&below, "closed_by_default").contains(&own),
-            "the clicked row stays open: {below}"
-        );
+        let open = strs(&below, "open_by_default");
+        assert!(!open.contains(&format!("o:{occ}")), "the clicked row stays open: {open:?}");
+        assert!(!open.contains(&"c0/bodies".into()), "{open:?}");
         assert!(strs(&below, "closed_by_default").iter().all(|k| !k.starts_with("c0") && k != "origin"), "{below}");
 
         let only = run(&mut s, "browser.expand_all", json!({"component": created["component"]}));
         let open = strs(&only, "open_by_default");
         assert!(open.iter().any(|k| k.starts_with('c') && k != "c0" && !k.starts_with("c0/")), "{open:?}");
-        assert!(!open.contains(&format!("o:{occ}")) && !strs(&only, "closed_by_default").contains(&format!("o:{occ}")), "{only}");
+        assert!(!open.contains(&format!("o:{occ}")), "{open:?}");
     }
 
     #[test]

@@ -1377,8 +1377,6 @@ mod tests {
             crate::scenario::check(h, e).unwrap_or_else(|err| panic!("{what}: {err}"));
         };
         let mut h = crate::scenario::Harness::new();
-        // The Sketches folder starts closed.
-        h.app.tree.expanded.insert("c0/sketches".into());
         h.call("ui.view", json!({"view": "iso"}));
         h.frames(3);
         h.step(&json!({"click": {"handle": "button:sketch.create"}})).unwrap();

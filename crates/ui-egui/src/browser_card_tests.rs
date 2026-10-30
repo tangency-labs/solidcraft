@@ -7,8 +7,6 @@ fn clicked_browser_folders_toggle_visibility_with_v() {
     for mode in [LayoutMode::Floating, LayoutMode::Docked] {
         let mut h = Harness::new();
         h.app.ui.layout = mode;
-        // The Bodies folder starts closed: open, its Group row can be clicked.
-        h.app.tree.expanded.insert("c0/bodies".into());
         for (name, x) in [("One", 0), ("Two", 20)] {
             h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"corner":[x,0,0],"operation":"new_body","body_name":name})).unwrap();
         }
@@ -49,8 +47,6 @@ fn clicked_browser_folders_toggle_visibility_with_v() {
 fn folder_visibility_target_clears_when_the_user_moves_on() {
     for action in ["body click", "selection command", "empty click", "escape", "design tab", "model edit", "tool"] {
         let mut h = Harness::new();
-        // The Bodies folder starts closed: open, its body row can be clicked.
-        h.app.tree.expanded.insert("c0/bodies".into());
         h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"body_name":"One"})).unwrap();
         h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
         h.app.run("sketch.finish", json!({})).unwrap();
@@ -131,8 +127,6 @@ fn browser_body_clicks_fill_and_toggle_save_mesh_inputs() {
     for mode in [LayoutMode::Floating, LayoutMode::Docked] {
         let mut h = Harness::new();
         h.app.ui.layout = mode;
-        // The Bodies folder starts closed.
-        h.app.tree.expanded.insert("c0/bodies".into());
         for (name, x) in [("One", 0), ("Two", 20)] {
             h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"corner":[x,0,0],"operation":"new_body","body_name":name})).unwrap();
         }
@@ -158,7 +152,6 @@ fn browser_body_clicks_fill_and_toggle_save_mesh_inputs() {
 #[test]
 fn browser_body_clicks_respect_the_active_dialog_input() {
     let mut h = Harness::new();
-    h.app.tree.expanded.insert("c0/bodies".into());
     for (name, x) in [("One", 0), ("Two", 20)] {
         h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"corner":[x,0,0],"operation":"new_body","body_name":name})).unwrap();
     }
@@ -195,8 +188,6 @@ fn browser_card_shrinks_and_scrolls_without_covering_history() {
     assert!(short.bottom() < history.top() - SHELL_GAP);
     assert!(drawn_rows().iter().all(|(_, rect, _, _)| rect.height() == 26.0));
 
-    // The Sketches folder starts closed: open, it lists them all.
-    h.app.tree.expanded.insert("c0/sketches".into());
     for i in 0..35 {
         h.app.run("sketch.create", json!({"plane":"XY", "name":format!("Sketch{i}")})).unwrap();
         h.app.run("sketch.finish", json!({})).unwrap();
@@ -261,13 +252,11 @@ fn card_and_column_keep_body_eyes_menus_and_group_drops() {
     for mode in [LayoutMode::Floating, LayoutMode::Docked] {
         let mut h = Harness::new();
         h.app.ui.layout = mode;
-        h.app.tree.expanded.insert("c0/bodies".into());
         for (name, x) in [("One", 0), ("Two", 20)] {
             h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"corner":[x,0,0],"operation":"new_body","body_name":name})).unwrap();
         }
         let group =
             h.app.run("browser.group", json!({"component":0,"folder":"bodies","items":["One"],"name":"Group"})).unwrap()["group"].as_u64().unwrap();
-        h.app.tree.expanded.insert(format!("c0/g{group}"));
         h.settle();
         h.step(&json!({"click":{"handle":"eye:Two"}})).unwrap();
         assert!(h.app.session.visibility.hidden_bodies.iter().any(|name| name == "Two"));
@@ -408,8 +397,6 @@ fn a_browser_that_reveals_on_hover_shows_and_hides_with_the_pointer() {
     for mode in [LayoutMode::Floating, LayoutMode::Docked] {
         let mut h = Harness::new();
         h.app.ui.layout = mode;
-        // The Bodies folder starts closed: open, its row has a menu to keep the card shown.
-        h.app.tree.expanded.insert("c0/bodies".into());
         h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"operation":"new_body","body_name":"One"})).unwrap();
         h.call("ui.resize", json!({"width":1400,"height":900}));
         h.settle();
@@ -577,7 +564,6 @@ fn browser_width_rejects_hostile_preferences_and_tiny_windows_still_fit() {
 #[test]
 fn a_long_body_name_stays_inside_the_card_and_ends_in_an_ellipsis() {
     let mut h = Harness::new();
-    h.app.tree.expanded.insert("c0/bodies".into());
     h.call("ui.resize", json!({"width":1400,"height":900}));
     let name = "W".repeat(200);
     h.app.run("solid.box", json!({"body_name":name, "operation":"new", "length":10, "width":10, "height":10})).unwrap();
@@ -720,8 +706,6 @@ fn row_eyes_line_up_at_the_right_end_unless_the_preference_keeps_them_left() {
     let part = h.app.run("component.create", json!({"name":"Part"})).unwrap()["occurrence"].as_u64().unwrap();
     h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"corner":[20,0,0],"body_name":"Inner"})).unwrap();
     h.app.run("component.activate", json!({"component":0})).unwrap();
-    // The Bodies folder and the placement start closed: open both, so Top and Inner have rows.
-    h.app.tree.expanded.extend(["c0/bodies".to_string(), super::occurrence_key(&[part])]);
     h.settle();
     let placement = format!("occurrence:{part}");
     let eye = |name: &str| handle_at(&format!("eye:{name}")).unwrap_or_else(|| panic!("eye:{name}"));
@@ -794,8 +778,6 @@ fn an_eye_at_the_row_end_takes_its_click_from_the_scroll_bar() {
         h.app.run("sketch.create", json!({"plane":"XY", "name":format!("Sketch{i}")})).unwrap();
         h.app.run("sketch.finish", json!({})).unwrap();
     }
-    // The Sketches folder starts closed: open, its rows overflow the card.
-    h.app.tree.expanded.insert("c0/sketches".into());
     h.settle();
     assert!(handle_at("row:Sketch34").is_none(), "the rows overflow the card");
     let card = rect_of("browser:card").unwrap();

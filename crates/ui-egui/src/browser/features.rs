@@ -34,7 +34,7 @@ pub(crate) fn reveal(app: &mut SolveApp, id: u64, body: &str) {
 pub(crate) fn reveal_in_history(app: &mut SolveApp, id: u64) {
     let Some(component) = app.session.doc.feature(id).map(|feature| feature.component) else { return };
     app.ui.show_browser = true;
-    // Opened whichever way each row starts: a component's row may start closed (#3005).
+    // Opened whichever way each row starts (Preferences › Interface can start rows closed).
     for key in ["c0".to_string(), format!("c{component}"), format!("c{component}/history")] {
         set_open(app, &key, true, true);
     }
@@ -339,7 +339,7 @@ mod tests {
         let mut h = Harness::new();
         h.app.run("sketch.create", json!({"plane":"XY","name":"Sketch1"})).unwrap();
         h.app.run("sketch.finish", json!({})).unwrap();
-        h.app.tree.expanded.extend(["c0/features".into(), "c0/sketches".into()]);
+        h.app.tree.expanded.insert("c0/features".into());
         let saved = h.app.session.doc.to_json();
         let undo = h.app.session.undo.len();
         h.frames(2);
@@ -366,7 +366,6 @@ mod tests {
         for cache in ["current", "missing", "stale"] {
             assert_eq!(feature_rows(&mut h, cache), ["Features".to_owned(), name.clone()], "{cache}");
         }
-        h.app.tree.expanded.insert("c0/sketches".into());
         h.frames(2);
         let labels: Vec<_> = drawn_rows().into_iter().map(|(label, ..)| label).collect();
         assert_eq!(labels.iter().filter(|label| *label == "Profile").count(), 1, "{labels:?}");
@@ -465,13 +464,14 @@ mod tests {
         let saved = h.app.session.doc.to_json();
         h.app.session = solidcraft_engine::Session::new(solidcraft_engine::doc::Document::from_json(&saved).unwrap());
         h.app.tree.collapsed.insert("c0".into());
+        h.app.tree.collapsed.insert(occurrence_key(&path));
         h.app.preferences.timeline_left_browser_collapsed = true;
         let undo = h.app.session.undo.len();
         for id in [base, hole, fillet] {
             find_in_timeline(&mut h.app, id, &world_body);
             assert_eq!(h.app.tree.reveal_feature.as_ref().unwrap().path, path);
             assert!(!h.app.tree.collapsed.contains("c0"));
-            assert!((1..=path.len()).all(|depth| h.app.tree.expanded.contains(&occurrence_key(&path[..depth]))));
+            assert!(!h.app.tree.collapsed.contains(&occurrence_key(&path)));
             assert!(!h.app.preferences.timeline_left_browser_collapsed);
             h.frames(2);
             assert!(h.app.tree.reveal_feature.is_none(), "the actual feature row was drawn and scrolled to");
@@ -561,12 +561,12 @@ mod tests {
             assert_eq!(world_body == "Plate", named_plate);
             h.app.tree.collapsed.insert("c0".into());
             for depth in 1..=path.len() {
-                h.app.tree.expanded.remove(&occurrence_key(&path[..depth]));
+                h.app.tree.collapsed.insert(occurrence_key(&path[..depth]));
             }
             h.app.tree.collapsed.insert(format!("{}/bodies", occurrence_key(&path)));
             find_in_browser(&mut h.app, face(&world_body));
             for depth in 1..=path.len() {
-                assert!(h.app.tree.expanded.contains(&occurrence_key(&path[..depth])), "{world_body}: {:?}", &path[..depth]);
+                assert!(!h.app.tree.collapsed.contains(&occurrence_key(&path[..depth])), "{world_body}: {:?}", &path[..depth]);
             }
             assert!(!h.app.tree.collapsed.contains(&format!("{}/bodies", occurrence_key(&path))), "{world_body}");
             h.frames(2);
@@ -581,12 +581,14 @@ mod tests {
         is_open(app, key, key == "c0" || rows_start_open(app))
     }
 
-    /// Find in Browser opens the rows down to the body it finds and no others, and lights them
-    /// from the path it found, without walking the placements again. The next find closes the
-    /// rows the last one opened, but not rows opened or closed by hand since.
+    /// While the Browser's rows start closed (Preferences › Interface, #8768), Find in Browser
+    /// opens the rows down to the body it finds and no others, and lights them from the path it
+    /// found, without walking the placements again. The next find closes the rows the last one
+    /// opened, but not rows opened or closed by hand since.
     #[test]
     fn browser_find_opens_only_the_found_bodys_rows_and_the_next_find_closes_them() {
         let mut h = Harness::new();
+        assert_eq!(h.call("ui.prefs", json!({"browser_rows_start_closed": true}))["ok"], true);
         // Part placed twice, through two placements of Assembly, and Leaf inside Other.
         let assembly = h.app.run("component.create", json!({"name":"Assembly"})).unwrap()["occurrence"].as_u64().unwrap();
         let part = h.app.run("component.create", json!({"name":"Part"})).unwrap()["occurrence"].as_u64().unwrap();
@@ -645,11 +647,13 @@ mod tests {
         assert!(h.app.tree.found_rows.is_empty() && h.app.tree.found.is_none(), "the rows found belong to the other design");
     }
 
-    /// The History's Find in Browser finds the feature's body as the body's own Find in Browser
-    /// does: the Browser shows, and only the rows down to the body open.
+    /// While the Browser's rows start closed, the History's Find in Browser finds the feature's
+    /// body as the body's own Find in Browser does: the Browser shows, and only the rows down to
+    /// the body open.
     #[test]
     fn history_find_in_browser_opens_the_rows_down_to_the_features_body() {
         let mut h = Harness::new();
+        assert_eq!(h.call("ui.prefs", json!({"browser_rows_start_closed": true}))["ok"], true);
         let assembly = h.app.run("component.create", json!({"name":"Assembly"})).unwrap()["occurrence"].as_u64().unwrap();
         let part = h.app.run("component.create", json!({"name":"Part"})).unwrap()["occurrence"].as_u64().unwrap();
         let feature = h.app.run("solid.box", json!({"length":40,"width":30,"height":20,"body_name":"Plate"})).unwrap()["feature"].as_u64().unwrap();

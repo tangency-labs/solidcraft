@@ -626,15 +626,12 @@ fn expand_and_collapse_all_open_the_browser_tree_from_the_design_menu() {
     let occ = created["occurrence"].as_u64().unwrap();
     let child = app.run("component.create", json!({"name": "Inner", "parent_path": [occ]})).unwrap()["occurrence"].as_u64().unwrap();
     let path = vec![occ];
-    // Placements start closed: open this one and its child, then fold from it.
-    act(&mut app, &Target::Occurrence { path: path.clone() }, "Expand All");
-    assert!(app.tree.expanded.contains(&format!("o:{occ}/{child}")), "{:?}", app.tree.expanded);
     act(&mut app, &Target::Occurrence { path: path.clone() }, "Collapse All");
-    assert!(!app.tree.expanded.contains(&format!("o:{occ}/{child}")), "its children fold: {:?}", app.tree.expanded);
-    assert!(app.tree.expanded.contains(&format!("o:{occ}")), "the clicked row stays open: {:?}", app.tree.expanded);
+    assert!(app.tree.collapsed.contains(&format!("o:{occ}/{child}")), "its children fold: {:?}", app.tree.collapsed);
+    assert!(!app.tree.collapsed.contains(&format!("o:{occ}")), "the clicked row stays open: {:?}", app.tree.collapsed);
     assert!(!app.tree.collapsed.contains("c0/bodies"), "a placement's collapse leaves the rest of the tree: {:?}", app.tree.collapsed);
     act(&mut app, &Target::Occurrence { path }, "Expand All");
-    assert!(app.tree.expanded.contains(&format!("o:{occ}/{child}")), "{:?}", app.tree.expanded);
+    assert!(!app.tree.collapsed.contains(&format!("o:{occ}/{child}")), "{:?}", app.tree.collapsed);
 }
 
 #[test]
@@ -1047,7 +1044,6 @@ fn double_click_on_a_body_row_renames_it_in_the_row() {
     let mut h = crate::scenario::Harness::new();
     h.app.run("solid.box", json!({"length": 40, "width": 40, "height": 10, "body_name": "Block"})).unwrap();
     h.app.run("select.clear", json!({})).unwrap();
-    h.app.tree.expanded.insert("c0/bodies".into());
     h.frames(3);
     let at = crate::scenario::handle_at("row:Block").expect("the body has a browser row");
     h.call("ui.click", json!({"x": at.x, "y": at.y, "double": true}));
@@ -1155,7 +1151,6 @@ fn construction_plane_row_opens_its_menu() {
     h.app.run("construct.plane.offset", json!({"base": "XY", "offset": 25, "name": "Cut"})).unwrap();
     let id = h.app.session.doc.find_feature("Cut").map(|f| f.id).unwrap();
     h.app.run("select.clear", json!({})).unwrap();
-    h.app.tree.expanded.insert("c0/construction".into());
     h.frames(3);
     let at = crate::scenario::handle_at("row:Cut").expect("the plane has a browser row");
     h.call("ui.click", json!({"x": at.x, "y": at.y, "button": "right"}));
@@ -1744,8 +1739,6 @@ mod browser_rows {
         h.app.home.open = false;
         h.app.ui.show_browser = true;
         h.app.session.run_script(&solidcraft_engine::sample::script()).expect("sample");
-        // The Bodies folder starts closed.
-        h.app.tree.expanded.insert("c0/bodies".into());
         h.frames(3);
         h
     }
