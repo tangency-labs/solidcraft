@@ -179,6 +179,28 @@ impl Item {
 }
 
 /// A command entry: label, icon, shortcut and enablement come from the registry.
+/// Collision Shape ▸ a choice for `target` (a body, or a component's bodies).
+fn collision_menu(app: &SolveApp, target: serde_json::Value) -> Item {
+    let mut menu = cmd(app, "body.collision", "Collision Shape");
+    menu.children = [
+        ("auto", "Automatic"),
+        ("mesh", "Full mesh"),
+        ("convex_hull", "Convex hull"),
+        ("box", "Box"),
+        ("cylinder", "Cylinder"),
+        ("sphere", "Sphere"),
+        ("none", "No collision"),
+    ]
+    .into_iter()
+    .map(|(shape, label)| {
+        let mut p = target.clone();
+        p["shape"] = json!(shape);
+        cmd(app, "body.collision", label).with(p)
+    })
+    .collect();
+    menu
+}
+
 pub(crate) fn cmd(app: &SolveApp, id: &str, label: &str) -> Item {
     let info = solidcraft_engine::find_command(id).map(|c| c.info(&app.session));
     let shortcut = match id {
@@ -783,6 +805,7 @@ fn body_items(app: &SolveApp, bodies: &[String], browser: bool) -> Vec<Item> {
     ];
     if one {
         let b = bodies.first().cloned().unwrap_or_default();
+        v.push(collision_menu(app, json!({ "body": b })));
         if let Some(component) = crate::dialogs_part_size::component_for_bodies(app, bodies) {
             v.push(cmd(app, "parts.resize", "Change Part Size").with(json!({"component":component})));
         }
@@ -1052,6 +1075,7 @@ fn component_items(app: &SolveApp, id: u64) -> Vec<Item> {
         v.push(act("ui.delete", "Delete", "delete").key("Del").with(json!({ "occurrences": [occ.map(|o| o.id)] })).on(occ.is_some()));
     }
     v.push(act("ui.rename", "Rename", "rename").with(json!({ "component": id })));
+    v.push(collision_menu(app, json!({ "component": id })));
     v.push(Item::sep());
     v.push(act(if hidden { "ui.show" } else { "ui.hide" }, "Show/Hide", "eye").key("V").with(json!({ "bodies": names })).on(!bodies.is_empty()));
     v.push(act("ui.showAll", "Show All Bodies", "eye"));

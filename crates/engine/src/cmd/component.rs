@@ -92,6 +92,11 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("component.properties", "Component Physical Properties", properties::component)
         .icon("measure").noundo()
         .params("component?: id or name (default active); descendants?: bool (default true); about?: [x, y, z] (mm). Measures the first placement, or all placements for root, including pending moves; material-aware mass and center of mass in world coordinates; volume, density, mass, center of mass and inertia_g_mm2 (the inertia tensor about the body's center of mass, world axes, from its tessellation) only for closed, consistently oriented bodies; total.open_bodies_skipped counts open bodies excluded from volume/mass totals; total.first_moment_g_mm (mass × center of mass), inertia_g_mm2 about the total center of mass, principal_moments_g_mm2 (smallest first) and principal_axes (unit, right-handed); with about, total.inertia_about {point, inertia_g_mm2}"),
+    CommandSpec::new("body.collision", "Collision Shape", crate::checked!("body.collision", properties::body_collision))
+        .icon("body")
+        .contract(&properties::BODY_COLLISION_CONTRACT)
+        .output(crate::schema::output_schema_for::<crate::schema::component::BodyCollisionResult>)
+        .params("body: its name, or component: id or name for all its bodies; shape: auto|mesh|convex_hull|box|cylinder|sphere|none: what it looks like to a simulator (URDF export)"),
     CommandSpec::new("component.physical_override", "Mass Override", crate::checked!("component.physical_override", properties::physical_override))
         .icon("measure")
         .contract(&properties::PHYSICAL_OVERRIDE_CONTRACT)

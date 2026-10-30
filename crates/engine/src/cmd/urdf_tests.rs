@@ -1180,3 +1180,65 @@ fn properties_keep_the_computed_mass_and_note_the_override() {
     assert_eq!(after["mass"], before["mass"]);
     assert_eq!(after["physical_override"]["mass"], json!(5.0), "{after}");
 }
+
+#[test]
+fn a_body_keeps_its_collision_shape_when_renamed() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "Block"}));
+    run(&mut s, "body.collision", json!({"body": "Block", "shape": "box"}));
+    assert_eq!(s.doc.collision_shape("Block"), solidcraft_doc::CollisionShape::Box);
+    run(&mut s, "body.rename", json!({"body": "Block", "name": "Brick"}));
+    assert_eq!(s.doc.collision_shape("Brick"), solidcraft_doc::CollisionShape::Box);
+    assert_eq!(s.doc.collision_shape("Block"), solidcraft_doc::CollisionShape::Auto);
+}
+
+#[test]
+fn setting_a_component_sets_all_its_bodies() {
+    let mut s = Session::default();
+    run(&mut s, "component.create", json!({"name": "C"}));
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "One"}));
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [20, 0, 0], "body_name": "Two", "operation": "new"}));
+    run(&mut s, "body.collision", json!({"component": "C", "shape": "none"}));
+    for b in ["One", "Two"] {
+        assert_eq!(s.doc.collision_shape(b), solidcraft_doc::CollisionShape::None, "{b}");
+    }
+}
+
+#[test]
+fn auto_removes_the_entry() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "Block"}));
+    run(&mut s, "body.collision", json!({"body": "Block", "shape": "sphere"}));
+    run(&mut s, "body.collision", json!({"body": "Block", "shape": "auto"}));
+    assert!(s.doc.collision_shapes.is_empty());
+}
+
+#[test]
+fn body_collision_refuses_bad_requests() {
+    let mut s = Session::default();
+    run(&mut s, "component.create", json!({"name": "C"}));
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "Block"}));
+    for p in [
+        json!({"body": "Block", "component": "C", "shape": "box"}),
+        json!({"shape": "box"}),
+        json!({"body": "Block", "shape": "blob"}),
+        json!({"body": "Nobody", "shape": "box"}),
+        json!({"component": "Nobody", "shape": "box"}),
+        json!({"body": "Block"}),
+    ] {
+        assert!(s.execute("body.collision", &p).is_err(), "{p}");
+    }
+    assert!(s.doc.collision_shapes.is_empty());
+}
+
+#[test]
+fn a_pasted_component_gets_its_bodies_shapes() {
+    let mut s = Session::default();
+    run(&mut s, "component.create", json!({"name": "C"}));
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "Block"}));
+    run(&mut s, "body.collision", json!({"body": "Block", "shape": "sphere"}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    run(&mut s, "component.paste_new", json!({"component": "C"}));
+    assert_eq!(s.doc.collision_shapes.len(), 2, "{:?}", s.doc.collision_shapes);
+    assert!(s.doc.collision_shapes.values().all(|x| *x == solidcraft_doc::CollisionShape::Sphere));
+}

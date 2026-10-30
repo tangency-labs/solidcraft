@@ -461,3 +461,29 @@ pub struct PhysicalOverrideResult {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,
 }
+
+/// Set what a body, or every body of a component, looks like to a simulator.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct BodyCollisionParams {
+    /// The body, by name. Give this or `component`.
+    #[serde(default)]
+    pub body: Option<String>,
+    /// The component whose bodies to set, by id or name. Give this or `body`.
+    #[serde(default)]
+    pub component: Option<IdOrName>,
+    /// `auto` (the export decides), `mesh`, `convex_hull`, `box`, `cylinder`, `sphere` or `none`.
+    pub shape: String,
+}
+
+/// What `body.collision` returns.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct BodyCollisionResult {
+    /// The bodies set.
+    pub bodies: Vec<String>,
+    /// The shape they now have.
+    pub shape: String,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}

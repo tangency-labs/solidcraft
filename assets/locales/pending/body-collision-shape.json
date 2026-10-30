@@ -1,0 +1,26 @@
+{
+  "en": {
+    "cmd.body_collision": "Collision Shape",
+    "Collision Shape": "Collision Shape",
+    "Automatic": "Automatic",
+    "Convex hull": "Convex hull",
+    "Full mesh": "Full mesh",
+    "No collision": "No collision"
+  },
+  "ar": {
+    "cmd.body_collision": "شكل التصادم",
+    "Collision Shape": "شكل التصادم",
+    "Automatic": "تلقائي",
+    "Convex hull": "غلاف محدب",
+    "Full mesh": "شبكة كاملة",
+    "No collision": "بدون تصادم"
+  },
+  "he": {
+    "cmd.body_collision": "צורת התנגשות",
+    "Collision Shape": "צורת התנגשות",
+    "Automatic": "אוטומטי",
+    "Convex hull": "מעטפת קמורה",
+    "Full mesh": "רשת מלאה",
+    "No collision": "ללא התנגשות"
+  }
+}

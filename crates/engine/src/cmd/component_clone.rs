@@ -516,6 +516,9 @@ pub(super) fn build(
         if let Some(mat) = source.materials.get(old) {
             scratch.doc_mut().materials.insert(new.clone(), mat.clone());
         }
+        if let Some(shape) = source.collision_shapes.get(old) {
+            scratch.doc_mut().collision_shapes.insert(new.clone(), *shape);
+        }
         if let Some(look) = source.appearances.bodies.get(old) {
             scratch.doc_mut().appearances.bodies.insert(new.clone(), look.clone());
         }
