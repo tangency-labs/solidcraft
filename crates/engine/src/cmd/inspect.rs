@@ -491,7 +491,7 @@ fn find_holes(s: &mut Session, p: &Value) -> Result<Value> {
     {
         return Err(bad(cmd, format!("no feature `{want}`")));
     }
-    let want_bodies = string_list(p, "bodies");
+    let want_bodies = string_list(cmd, p, "bodies")?;
     let holes_only = bool_(p, "holes_only").unwrap_or(true);
     let feats = hole_features(s);
     let st = s.world_state();
