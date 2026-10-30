@@ -535,8 +535,11 @@ impl DialogComputation {
             session,
             cmds,
             marker: d.editing.map(|(_, marker)| marker),
+            // The editor's pinned original is for a dialog that previews (as `open_feature_edit`
+            // keeps it); one that no longer does (Modeled unticked) edits the design as it is.
             editing: d
                 .editing
+                .filter(|_| d.previews())
                 .and(app.editing_state.as_ref())
                 .map(|state| EditingState { source: state.source.scratch(), original: state.original.scratch() }),
         })
@@ -606,12 +609,13 @@ fn display_quality(app: &SolveApp) -> solidcraft_engine::doc::display_quality::D
     solidcraft_engine::doc::display_quality::DisplayQuality::parse(&app.preferences.display_quality).unwrap_or_default()
 }
 
-/// Desktop feature dialogs evaluate the entire command and its dependent suffix once.
-/// Results wait until a later frame before adoption, keeping the computing state visible.
+/// Desktop feature dialogs evaluate the entire command and its dependent suffix once; so does
+/// any feature edit, with a live preview or without. Results wait until a later frame before
+/// adoption, keeping the computing state visible.
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn begin_applying(app: &SolveApp, d: &Dialog) -> Option<Applying> {
     let wait = app.apply_off_thread?;
-    if !d.previews() {
+    if !d.previews() && d.editing.is_none() {
         return None;
     }
     let computation = DialogComputation::new(app, d).ok()?;

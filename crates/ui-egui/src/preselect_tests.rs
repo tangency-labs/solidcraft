@@ -1600,6 +1600,39 @@ fn modeled_thread_survives_timeline_double_click_and_ok() {
     }
 }
 
+/// A modeled thread's editor previews; unticking Modeled makes it a plain edit, so its OK
+/// computes off the window thread from the design as it is: a body hidden meanwhile doesn't
+/// refuse it as a changed design.
+#[test]
+fn a_thread_edit_switched_to_cosmetic_applies_after_a_body_is_hidden() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.home.open = false;
+    h.app.apply_off_thread = Some(std::time::Duration::ZERO);
+    h.app.run("solid.cylinder", json!({"radius":4,"height":4})).unwrap();
+    h.app.run("solid.box", json!({"corner":[20,0,0],"length":4,"width":4,"height":4})).unwrap();
+    let Sel::Face { point, .. } = thread_face(&h.app, "Body1") else { panic!("face") };
+    let id = h.app.run("solid.thread", json!({"face":point,"designation":"M8x1","modeled":true})).unwrap()["feature"].as_u64().unwrap();
+    h.frames(4);
+    h.step(&json!({"click":{"handle":"timeline:Thread1"},"double":true})).unwrap();
+    h.frames(4);
+    assert!(h.app.dialog.as_ref().unwrap().previews(), "a modeled thread previews");
+    h.app.dialog.as_mut().unwrap().extra["modeled"] = json!(false);
+    assert!(!h.app.dialog.as_ref().unwrap().previews());
+    h.app.run("browser.visibility", json!({"items":["Body2"],"visible":false})).unwrap();
+    h.step(&json!({"widget":"OK"})).unwrap();
+    for _ in 0..500 {
+        if h.app.applying.is_none() {
+            break;
+        }
+        h.frames(1);
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    h.frames(4);
+    assert!(h.app.dialog.is_none(), "{:?}", h.app.dialog.as_ref().and_then(|d| d.error.clone()));
+    assert_eq!(h.app.session.doc.marker, None);
+    assert!(matches!(h.app.session.doc.feature(id).unwrap().kind, solidcraft_engine::doc::FeatureKind::Thread { modeled: false, .. }));
+}
+
 #[test]
 fn planar_face_reopen_keeps_the_tight_pick_tolerance() {
     for (command, mut params, point) in [
