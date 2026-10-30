@@ -1051,14 +1051,13 @@ fn edit_feature(s: &mut Session, p: &Value) -> Result<Value> {
     nf.id = f.id;
     // A one-sided extrude made symmetric takes the convention a new one would: its old marker
     // never read a symmetric distance.
-    let maker = if matches!(f.kind, FeatureKind::SurfaceExtrude { .. }) { "surface.extrude" } else { "solid.extrude" };
     if let (FeatureKind::Extrude { extent: old, .. }, FeatureKind::Extrude { extent: new, .. })
     | (FeatureKind::SurfaceExtrude { extent: old, .. }, FeatureKind::SurfaceExtrude { extent: new, .. }) = (&f.kind, &mut nf.kind)
         && old.direction != solidcraft_doc::Direction::Symmetric
         && new.direction == solidcraft_doc::Direction::Symmetric
         && set.get("extent").and_then(|e| e.get("convention")).is_none()
     {
-        new.convention = super::features::default_extrude_convention(s, maker);
+        new.convention = solidcraft_doc::ExtrudeConvention::TotalDistance;
     }
     if std::mem::discriminant(&nf.kind) != std::mem::discriminant(&f.kind) {
         return Err(bad(cmd, "the feature type cannot change"));
@@ -1419,7 +1418,7 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
         let convention = if extent.direction == solidcraft_doc::Direction::Symmetric {
             extent.convention
         } else {
-            super::features::default_extrude_convention(s, cid)
+            solidcraft_doc::ExtrudeConvention::TotalDistance
         };
         parameters.entry("convention").or_insert_with(|| json!(convention));
     }

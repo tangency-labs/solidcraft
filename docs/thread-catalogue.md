@@ -27,10 +27,6 @@ cutting taps, printed p.704 (M, coarse) and pp.704 to 706 (MF, fine); M8 drills
 the pitch, to 0.001 mm (M8.5x1: 7.5 mm). This replaces the major-minus-pitch
 estimate every metric size took before (M8 6.75 mm). A saved design keeps the
 diameter it stored, so it builds as before; editing such a hole keeps its drill.
-The Design preference "Metric tapped holes drill the major diameter less the
-pitch" (`metric_tap_drill_major_less_pitch`, off by default) gives new metric
-holes that older drill again, in the Hole dialog and for the `solid.hole` command
-given no `diameter`.
 Custom metric dimensions remain editable, and Custom stays selected even when its
 current dimensions match a catalogue entry.
 

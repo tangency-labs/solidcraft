@@ -1268,3 +1268,21 @@ fn a_modelled_tapped_hole_stops_clear_of_its_bottom_or_fades_out_before_it() {
     assert!(drill(6.5).contains("the tap cannot cut"));
     assert!(drill(7.1).is_empty() && drill(6.7).is_empty(), "inside the range");
 }
+
+/// A tapped hole given no `diameter` drills the tap maker's drill for its size (M8: 6.8 mm, 1/4-20
+/// UNC: 5.1054 mm); a given diameter is kept.
+#[test]
+fn a_tapped_hole_given_no_diameter_drills_the_tap_makers_drill() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length":40,"width":20,"height":10,"body_name":"Plate"}));
+    let mut drilled = |p: Value| {
+        let id = run(&mut s, "solid.hole", p)["feature"].as_u64().unwrap();
+        match &s.doc.feature(id).unwrap().kind {
+            solidcraft_doc::FeatureKind::Hole { diameter, .. } => diameter.to_string(),
+            k => panic!("{k:?}"),
+        }
+    };
+    assert_eq!(drilled(json!({"position":[10,10,10],"thread":"M8"})), "6.8 mm");
+    assert_eq!(drilled(json!({"position":[25,10,10],"thread":"1/4-20 UNC"})), "5.1054 mm");
+    assert_eq!(drilled(json!({"position":[33,10,10],"thread":"M8","diameter":"6.9 mm"})), "6.9 mm");
+}

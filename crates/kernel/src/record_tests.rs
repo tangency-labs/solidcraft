@@ -49,7 +49,9 @@ fn mesh_points(b: &Body) -> (Vec<Vec<Vec3>>, Vec<Vec<Vec3>>) {
 }
 
 /// The segments a face lies over: its vertices on them within `tol`, its triangles' centres
-/// near them (`to_2d` takes a point into the profile's plane).
+/// near them (`to_2d` takes a point into the profile's plane). A face over one segment has all
+/// of them on it; a face over several (the one wall a circle drawn in arcs sweeps) has each
+/// centre near one of them and each vertex on one of them.
 fn swept_from(b: &Body, loops: &[&Loop2], to_2d: impl Fn(Vec3) -> Vec2, tol: f64) -> Vec<Vec<usize>> {
     let (corners, centres) = mesh_points(b);
     let flat = |pts: &Vec<Vec3>| pts.iter().map(|p| to_2d(*p)).collect::<Vec<_>>();
@@ -57,8 +59,19 @@ fn swept_from(b: &Body, loops: &[&Loop2], to_2d: impl Fn(Vec3) -> Vec2, tol: f64
         .iter()
         .zip(&centres)
         .map(|(v, c)| {
-            let near = under(loops, &flat(c), b.size() * 3e-3);
-            under(loops, &flat(v), tol).into_iter().filter(|k| near.contains(k)).collect()
+            let (v, c) = (flat(v), flat(c));
+            let near = under(loops, &c, b.size() * 3e-3);
+            let one: Vec<usize> = under(loops, &v, tol).into_iter().filter(|k| near.contains(k)).collect();
+            if !one.is_empty() {
+                return one;
+            }
+            let each = |pts: &[Vec2], tol: f64| pts.iter().map(|q| under(loops, std::slice::from_ref(q), tol)).collect::<Vec<_>>();
+            let centre_segs = each(&c, b.size() * 3e-3);
+            let mut over: Vec<usize> = centre_segs.iter().flatten().copied().collect();
+            over.sort_unstable();
+            over.dedup();
+            let covered = |segs: &[Vec<usize>]| segs.iter().all(|s| s.iter().any(|k| over.contains(k)));
+            if over.len() > 1 && covered(&centre_segs) && covered(&each(&v, tol)) { over } else { Vec::new() }
         })
         .collect()
 }
@@ -234,7 +247,8 @@ fn revolve_partial_and_full() {
 }
 
 /// Loops given clockwise, a hole that is a full circle of three arcs: extrude and revolve
-/// number every face by the segment as given, one face each.
+/// number every face by the segments as given. Extruded, the circle's arcs sweep one wall,
+/// made from all three; the rectangle's sides one face each.
 #[test]
 fn clockwise_loops_and_a_circle_of_arcs_keep_their_numbers() {
     let (c, rad) = (Vec2::new(20.0, 10.0), 4.0);
@@ -245,9 +259,11 @@ fn clockwise_loops_and_a_circle_of_arcs_keep_their_numbers() {
     let b = crate::extrude(&Plane::XY, std::slice::from_ref(&r), 0.0, 10.0).unwrap().pop().unwrap();
     let got = origins(&b);
     assert_eq!(got, expected_extrusion(&b, &Plane::XY, &r, 10.0));
-    for k in 0..7 {
+    for k in 0..4 {
         assert_eq!(got.iter().filter(|o| **o == [P(k)]).count(), 1, "segment {k}");
     }
+    assert_eq!(got.iter().filter(|o| **o == [P(4), P(5), P(6)]).count(), 1, "the circle's one wall");
+    assert_eq!(got.len(), 7, "four sides, the wall, two caps");
     // Revolved, each arc turns into a face of its own, as the rectangle's sides do.
     for angle in [FRAC_PI_2, TAU] {
         let b = crate::revolve(&SIDE, std::slice::from_ref(&r), Vec2::ZERO, Vec2::Y, angle).unwrap().pop().unwrap();

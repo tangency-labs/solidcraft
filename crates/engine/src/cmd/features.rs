@@ -1120,18 +1120,6 @@ fn thin_regions(s: &Session, ss: &solidcraft_doc::SolvedSketch, thin: &ThinWall)
     solidcraft_sketch::thin_wall_regions(&curves, inside, outside).map_err(|e| format!("thin wall: {e}"))
 }
 
-/// How a new extent of `cmd` (`solid.extrude` or `surface.extrude`) reads a symmetric distance
-/// when the call doesn't say: the total, split evenly around the start plane, for both. A surface
-/// extrude reads it on each side, as surface extrudes did before, while the user's preference
-/// says so ([`Session::surface_extrude_symmetric_per_side`]).
-pub(crate) fn default_extrude_convention(s: &Session, cmd: &str) -> solidcraft_doc::ExtrudeConvention {
-    if cmd == "surface.extrude" && s.surface_extrude_symmetric_per_side {
-        solidcraft_doc::ExtrudeConvention::LegacyPerSide
-    } else {
-        solidcraft_doc::ExtrudeConvention::TotalDistance
-    }
-}
-
 /// An extrude's extent from its parameters: distance (or through all, or to an object), the
 /// side(s), a second distance, a start offset, a taper, and from an object.
 pub(super) fn extent_param(s: &Session, p: &Value, cmd: &str) -> Result<Extent> {
@@ -1167,8 +1155,10 @@ pub(super) fn extent_param(s: &Session, p: &Value, cmd: &str) -> Result<Extent> 
     if let Some(d) = &start_offset {
         check_expr(s, d, Kind::Length, cmd, "start_offset")?;
     }
+    // A symmetric distance the call doesn't qualify is the total, split evenly around the start
+    // plane, for solid and surface extrudes alike.
     let convention = match p.get("convention") {
-        None => default_extrude_convention(s, cmd),
+        None => solidcraft_doc::ExtrudeConvention::TotalDistance,
         Some(value) => serde_json::from_value(value.clone()).map_err(|_| bad(cmd, "`convention` must be total_distance or legacy_per_side"))?,
     };
     Ok(Extent {
@@ -2551,7 +2541,7 @@ fn hole(s: &mut Session, p: &Value) -> Result<Value> {
         }
         (None, Some(t), None) => {
             let size = solidcraft_doc::parse_tapped_thread(t).ok_or_else(|| bad(cmd, "thread"))?;
-            Expr::new(format!("{} mm", size.default_drill(s.metric_tap_drill_major_less_pitch)))
+            Expr::new(format!("{} mm", size.tap_drill))
         }
         (None, None, None) => return Err(bad(cmd, "needs `diameter`, `thread` (a tapped hole) or `clearance` (a bolt size)")),
     };

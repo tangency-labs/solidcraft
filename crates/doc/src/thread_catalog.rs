@@ -485,16 +485,6 @@ impl TappedThread {
         (self.minor_diameter().min(self.tap_drill), self.tap_drill * (1.0 + DRILL_ALLOWANCE))
     }
 
-    /// The drill a new hole of this size takes without a `diameter`: the tap maker's, or for an
-    /// ISO metric size with `major_less_pitch` (the preference that keeps the drill every metric
-    /// size took before) the major diameter less the pitch, to the micrometre.
-    pub fn default_drill(&self, major_less_pitch: bool) -> f64 {
-        match (self.family, major_less_pitch) {
-            (TappedThreadFamily::Metric, true) => ((self.major_diameter - self.pitch) * 1000.0).round() / 1000.0,
-            _ => self.tap_drill,
-        }
-    }
-
     /// Whether a hole of `diameter` mm can be tapped to this size; the error names the range.
     pub fn check_drill(&self, diameter: f64) -> Result<(), String> {
         let (lo, hi) = self.drill_range();

@@ -633,14 +633,6 @@ preference_settings! {
     /// Up/Down and the wheel over a focused value field step its plain number (`value_step`,
     /// #2320). Off by default: the keys move the text cursor and the wheel scrolls, as before.
     step_values: bool = false, PAGE_DESIGN => check_id("ui.step_values");
-    /// New metric tapped holes drill the major diameter less the pitch (M8: 6.75 mm), as before
-    /// the tap maker's drills; off by default: the tap maker's drill (M8: 6.8 mm). Saved designs
-    /// keep the drill they stored either way.
-    metric_tap_drill_major_less_pitch: bool = false, PAGE_DESIGN => check_id("prefs.metric_tap_drill_major_less_pitch");
-    /// New symmetric surface extrudes go their distance each way, as before they matched solid
-    /// extrudes; off by default: the distance is the total, split evenly around the start plane.
-    /// Saved designs keep the reading they stored either way.
-    surface_extrude_symmetric_per_side: bool = false, PAGE_DESIGN => check_id("prefs.surface_extrude_symmetric_per_side");
     /// When SMLib's full check runs while features are computed (`diagnostics.validation`):
     /// `each_feature` (the default) checks the bodies each feature keeps once; `each_step`, as
     /// before, checks after every sweep, boolean and blend; `off` (experimental) never does.
@@ -1130,10 +1122,6 @@ fn defaults(app: &mut SolveApp, page: usize) {
 /// the interface scale.
 pub fn apply(app: &mut SolveApp, ctx: &egui::Context) {
     apply_network(&app.preferences);
-    // The hole command reads the metric tapped drill rule from the session, Surface Extrude its
-    // symmetric reading.
-    app.session.metric_tap_drill_major_less_pitch = app.preferences.metric_tap_drill_major_less_pitch;
-    app.session.surface_extrude_symmetric_per_side = app.preferences.surface_extrude_symmetric_per_side;
     // The features computed from now on are checked as the preference says.
     app.session.set_validation(app.preferences.validation);
     // The profiler records while the preference is on (switched when it changes; at start-up only
@@ -2461,72 +2449,18 @@ mod tests {
         assert!(!solidcraft_engine::profile::enabled());
     }
 
-    /// New metric tapped holes drill the tap maker's drill (M8: 6.8 mm); the preference keeps
-    /// the major diameter less the pitch they took before (6.75 mm). It reaches the hole command
-    /// whether set through the control channel or the Preferences page, and a hole given its
-    /// diameter keeps it either way.
+    /// Preferences saved with a setting this version no longer has still load, every other
+    /// setting kept: the removed key is ignored like any unknown one.
     #[test]
-    fn the_metric_tap_drill_preference_keeps_major_less_pitch() {
+    fn saved_preferences_with_a_removed_setting_still_load() {
         use serde_json::json;
-        let plate = || {
-            let mut h = crate::scenario::Harness::new();
-            h.app.run("solid.box", json!({"length":40,"width":20,"height":10,"body_name":"Plate"})).unwrap();
-            h
-        };
-        let drilled = |h: &mut crate::scenario::Harness, params: serde_json::Value| {
-            let id = h.app.run("solid.hole", params).unwrap()["feature"].as_u64().unwrap();
-            match &h.app.session.doc.feature(id).unwrap().kind {
-                solidcraft_engine::doc::FeatureKind::Hole { diameter, .. } => diameter.to_string(),
-                k => panic!("{k:?}"),
-            }
-        };
-        let m8 = json!({"position":[10,10,10],"thread":"M8"});
-        let mut h = plate();
-        h.frames(1);
-        assert!(!h.app.preferences.metric_tap_drill_major_less_pitch, "off by default");
-        assert_eq!(drilled(&mut h, m8.clone()), "6.8 mm");
-        let mut h = plate();
-        h.call("ui.prefs", json!({"metric_tap_drill_major_less_pitch": true}));
-        h.frames(2);
-        assert!(h.app.session.metric_tap_drill_major_less_pitch);
-        assert_eq!(drilled(&mut h, m8.clone()), "6.75 mm");
-        // Only metric changes: a Unified size keeps its tabulated drill.
-        assert_eq!(drilled(&mut h, json!({"position":[25,10,10],"thread":"1/4-20 UNC"})), "5.1054 mm");
-        let mut given = m8;
-        given["position"] = json!([33, 10, 10]);
-        given["diameter"] = json!("6.9 mm");
-        assert_eq!(drilled(&mut h, given), "6.9 mm");
-        // A design opened or started keeps the user's choice.
-        h.app.run("file.new", json!({})).unwrap();
-        assert!(h.app.session.metric_tap_drill_major_less_pitch);
-    }
-
-    /// New symmetric surface extrudes read their distance as the total, as solid extrudes do; the
-    /// preference brings back the distance on each side they took before. It reaches the command
-    /// whether set through the control channel or the Preferences page, and survives a new design.
-    #[test]
-    fn the_surface_extrude_preference_keeps_the_distance_on_each_side() {
-        use serde_json::json;
-        let height = |h: &mut crate::scenario::Harness, name: &str| {
-            h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
-            h.app.run("sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[10,10]})).unwrap();
-            h.app.run("sketch.finish", json!({})).unwrap();
-            h.app.run("surface.extrude", json!({"distance":"10 mm","direction":"symmetric","body_name":name})).unwrap();
-            let st = h.app.session.world_state().unwrap();
-            let b = st.body(name).unwrap().mesh().bounds();
-            b.max.z - b.min.z
-        };
-        let mut h = crate::scenario::Harness::new();
-        h.frames(1);
-        assert!(!h.app.preferences.surface_extrude_symmetric_per_side, "off by default");
-        assert!((height(&mut h, "Total") - 10.0).abs() < 1e-7);
-        let mut h = crate::scenario::Harness::new();
-        h.call("ui.prefs", json!({"surface_extrude_symmetric_per_side": true}));
-        h.frames(2);
-        assert!(h.app.session.surface_extrude_symmetric_per_side);
-        assert!((height(&mut h, "Each") - 20.0).abs() < 1e-7);
-        h.app.run("file.new", json!({})).unwrap();
-        assert!(h.app.session.surface_extrude_symmetric_per_side);
+        for removed in ["metric_tap_drill_major_less_pitch", "surface_extrude_symmetric_per_side"] {
+            let saved = json!({"length_decimals": 4, removed: true});
+            let p = serde_json::from_value::<super::Prefs>(saved.clone()).unwrap();
+            assert_eq!(p.length_decimals, 4, "{removed}");
+            assert_eq!(super::lenient(&saved).length_decimals, 4, "{removed}");
+            assert!(serde_json::to_value(&p).unwrap().get(removed).is_none(), "{removed} is not written back");
+        }
     }
 
     #[test]

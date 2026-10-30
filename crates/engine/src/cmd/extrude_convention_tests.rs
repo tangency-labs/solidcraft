@@ -193,34 +193,6 @@ fn older_symmetric_surface_extrudes_keep_the_distance_on_each_side() {
     }
 }
 
-/// The preference brings back the per-side reading for new surface extrudes only: solid
-/// extrudes and an explicit `convention` are unchanged by it.
-#[test]
-fn the_per_side_preference_keeps_the_older_surface_extrude_reading() {
-    let mut s = fixture(json!({}));
-    s.surface_extrude_symmetric_per_side = true;
-    run(&mut s, "surface.extrude", json!({"sketch":"Square","distance":"10 mm","direction":"symmetric","name":"Sheet","body_name":"Sheet"}));
-    assert_z(&s, "Sheet", -10.0, 10.0);
-    let FeatureKind::SurfaceExtrude { extent, .. } = &s.doc.find_feature("Sheet").unwrap().kind else { panic!("surface extrude") };
-    assert_eq!(extent.convention, ExtrudeConvention::LegacyPerSide);
-    run(
-        &mut s,
-        "surface.extrude",
-        json!({"sketch":"Square","distance":"10 mm","direction":"symmetric","convention":"total_distance","name":"Total","body_name":"Total"}),
-    );
-    assert_z(&s, "Total", -5.0, 5.0);
-    run(&mut s, "solid.extrude", json!({"sketch":"Square","distance":"10 mm","direction":"symmetric","operation":"new","body_name":"Solid"}));
-    assert_z(&s, "Solid", -5.0, 5.0);
-    // The saved marker, not the preference, decides on reopening.
-    s.surface_extrude_symmetric_per_side = false;
-    let reopened = Session::new(Document::from_json(&s.doc.to_json()).unwrap());
-    assert_z(&reopened, "Sheet", -10.0, 10.0);
-    // A design opened or started keeps the user's choice.
-    s.surface_extrude_symmetric_per_side = true;
-    s.replace_design(Session::default());
-    assert!(s.surface_extrude_symmetric_per_side);
-}
-
 /// A second distance goes the other way from the first side (#2700): along the normal when the
 /// first side goes against it, whether by `direction: negative` or by a negative distance.
 #[test]

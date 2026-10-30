@@ -631,14 +631,7 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
                 opts.tapped = tap == 1;
             });
             if opts.tapped {
-                enter |= crate::dialogs_thread::hole_rows(
-                    ui,
-                    &app.session.doc,
-                    &mut opts.thread,
-                    &mut opts.custom_thread,
-                    &mut opts.drill,
-                    app.preferences.metric_tap_drill_major_less_pitch,
-                );
+                enter |= crate::dialogs_thread::hole_rows(ui, &app.session.doc, &mut opts.thread, &mut opts.custom_thread, &mut opts.drill);
                 crate::dialogs_thread::hole_hand_row(ui, &mut opts.hand);
                 ui_kit::checkbox_grid(ui, &mut [("Full thread depth", &mut opts.thread_full_depth), ("Modeled", &mut opts.modeled)], 1);
                 // A modelled thread's inner end, towards the bottom, as the thread dialog's.

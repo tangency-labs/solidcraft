@@ -377,13 +377,6 @@ pub struct Session {
     pub(crate) followed: Option<cmd::inspect::Followed>,
     /// Project a face's edges into a sketch created on it (the default; `sketch.auto_project`).
     pub auto_project: bool,
-    /// A new metric tapped hole given no `diameter` drills the major diameter less the pitch,
-    /// as before the tap maker's drills (a user preference); false: the tap maker's drill.
-    pub metric_tap_drill_major_less_pitch: bool,
-    /// A new symmetric surface extrude given no `convention` reads its distance on each side, as
-    /// surface extrudes did before they matched solid ones (a user preference); false: the total,
-    /// split evenly around the start plane, as a solid extrude reads it.
-    pub surface_extrude_symmetric_per_side: bool,
     /// How calls that break a command's parameter contract are treated (off by default). It
     /// belongs to the session, not the design, so it survives opening and starting designs.
     pub param_check: schema::ParamCheck,
@@ -651,8 +644,6 @@ impl Session {
             document_id: cmd::inspect::new_document_id(),
             followed: None,
             auto_project: true,
-            metric_tap_drill_major_less_pitch: false,
-            surface_extrude_symmetric_per_side: false,
             param_check: schema::ParamCheck::Off,
             easyprint_upload: None,
             live_links: None,
@@ -702,8 +693,6 @@ impl Session {
     pub fn replace_design(&mut self, fresh: Session) {
         let auto_project = self.auto_project;
         let validation = self.validation();
-        let metric_tap_drill_major_less_pitch = self.metric_tap_drill_major_less_pitch;
-        let surface_extrude_symmetric_per_side = self.surface_extrude_symmetric_per_side;
         let param_check = self.param_check;
         let easyprint_upload = self.easyprint_upload.take();
         let render_viewport = self.render_viewport.clone();
@@ -722,8 +711,6 @@ impl Session {
         // The user's, like `auto_project`: the commands that open a design evaluate it under it
         // already (`Session::opened_validating`).
         self.set_validation(validation);
-        self.metric_tap_drill_major_less_pitch = metric_tap_drill_major_less_pitch;
-        self.surface_extrude_symmetric_per_side = surface_extrude_symmetric_per_side;
         self.param_check = param_check;
         self.easyprint_upload = easyprint_upload;
         self.render_viewport = render_viewport;
@@ -1480,8 +1467,6 @@ impl Session {
             document_id: self.document_id.clone(),
             followed: None,
             auto_project: self.auto_project,
-            metric_tap_drill_major_less_pitch: self.metric_tap_drill_major_less_pitch,
-            surface_extrude_symmetric_per_side: self.surface_extrude_symmetric_per_side,
             param_check: self.param_check,
             easyprint_upload: self.easyprint_upload.clone(),
             live_links: None,

@@ -74,7 +74,6 @@ pub(crate) fn hole_rows(
     designation: &mut String,
     custom: &mut Option<HoleThreadDraft>,
     drill: &mut Option<String>,
-    major_less_pitch: bool,
 ) -> bool {
     let before = designation.clone();
     let designation_id = ui.make_persistent_id("hole_thread_designation");
@@ -170,13 +169,12 @@ pub(crate) fn hole_rows(
     form_row(ui, "Tap drill diameter", |ui| {
         match parse_tapped_thread(designation).filter(|_| custom.as_ref().is_none_or(|draft| draft.error.is_none())) {
             Some(size) => {
-                let default = format!("{} mm", size.default_drill(major_less_pitch));
+                let default = format!("{} mm", size.tap_drill);
                 let (lo, hi) = size.drill_range();
                 let mm = |v: f64| format!("{:.3}", v);
-                let args =
-                    [("drill", mm(size.default_drill(major_less_pitch))), ("minor", mm(size.minor_diameter())), ("low", mm(lo)), ("high", mm(hi))];
+                let args = [("drill", mm(size.tap_drill)), ("minor", mm(size.minor_diameter())), ("low", mm(lo)), ("high", mm(hi))];
                 let args: Vec<(&str, &str)> = args.iter().map(|(k, v)| (*k, v.as_str())).collect();
-                let id = match (size.taper_drill().is_some(), size.drill_is_tabulated() && size.default_drill(major_less_pitch) == size.tap_drill) {
+                let id = match (size.taper_drill().is_some(), size.drill_is_tabulated()) {
                     (true, _) => "thread.drill_range_taper",
                     (false, true) => "thread.drill_range",
                     (false, false) => "thread.drill_range_custom",
@@ -984,7 +982,7 @@ mod contribution_tests {
             let doc = Document::default();
             let _ = ctx.run_ui(Default::default(), |ui| {
                 egui::Grid::new("hole_catalogue").show(ui, |ui| {
-                    hole_rows(ui, &doc, &mut designation, &mut custom, &mut None, false);
+                    hole_rows(ui, &doc, &mut designation, &mut custom, &mut None);
                 });
             });
             assert_eq!(designation, original);
@@ -1135,7 +1133,7 @@ mod contribution_tests {
             let doc = Document::default();
             let _ = context.run_ui(Default::default(), |ui| {
                 egui::Grid::new("authored_hole").show(ui, |ui| {
-                    hole_rows(ui, &doc, &mut hole, &mut custom, &mut None, false);
+                    hole_rows(ui, &doc, &mut hole, &mut custom, &mut None);
                 });
             });
             assert_eq!(hole, original);
