@@ -1,0 +1,141 @@
+{
+ "commands": [
+  {
+   "command": "component.activate",
+   "params": {
+    "component": "root"
+   }
+  },
+  {
+   "command": "component.create",
+   "params": {
+    "name": "H"
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 10,
+    "width": 10,
+    "height": 10,
+    "corner": [
+     0,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "command": "component.activate",
+   "params": {
+    "component": "root"
+   }
+  },
+  {
+   "command": "component.create",
+   "params": {
+    "name": "A"
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 10,
+    "width": 10,
+    "height": 10,
+    "corner": [
+     20,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "command": "component.activate",
+   "params": {
+    "component": "root"
+   }
+  },
+  {
+   "command": "component.create",
+   "params": {
+    "name": "B"
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 10,
+    "width": 10,
+    "height": 10,
+    "corner": [
+     40,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "command": "occurrence.ground",
+   "params": {
+    "occurrence": "H:1",
+    "grounded": true
+   }
+  },
+  {
+   "command": "joint.create",
+   "params": {
+    "type": "revolute",
+    "a": {
+     "occurrence": "H:1",
+     "face": [
+      5,
+      5,
+      10
+     ]
+    },
+    "b": {
+     "occurrence": "A:1",
+     "face": [
+      25,
+      5,
+      0
+     ]
+    },
+    "name": "JA"
+   }
+  },
+  {
+   "command": "joint.create",
+   "params": {
+    "type": "revolute",
+    "a": {
+     "occurrence": "H:1",
+     "face": [
+      5,
+      5,
+      10
+     ]
+    },
+    "b": {
+     "occurrence": "B:1",
+     "face": [
+      45,
+      5,
+      0
+     ]
+    },
+    "name": "JB"
+   }
+  },
+  {
+   "command": "joint.gear",
+   "params": {
+    "a": "JA",
+    "b": "JB",
+    "ra": 10,
+    "rb": 20
+   }
+  }
+ ]
+}
