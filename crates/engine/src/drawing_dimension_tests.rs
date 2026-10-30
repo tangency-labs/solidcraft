@@ -448,6 +448,65 @@ fn radial(edge: &ModelEdge, diameter: bool) -> DimensionKind {
     DimensionKind::Radial { edge: edge.clone(), diameter }
 }
 
+/// The box's two ends read 80 between them, exactly, across the view or along it, and 80 over cos 45°
+/// along a diagonal; its points are each end's two ends on paper, z 0 to 30. The right view sees them
+/// face on, so it can't. A fillet takes the corners a dimension between corners needs and leaves the
+/// faces measured. A slot through an end leaves two pieces on one plane: still that face, not exactly.
+#[test]
+fn flat_faces_are_measured_when_their_corners_are_gone() {
+    let mut f = boxed();
+    let (near, far) = (f.face([0.0, 20.0, 15.0]), f.face([80.0, 20.0, 15.0]));
+    let kind = |direction| DimensionKind::Faces { a: near.clone(), b: far.clone(), direction };
+    let aligned = f.add(f.front, kind(LinearDirection::Aligned), None);
+    let r = f.resolve(aligned);
+    assert_reads(&r, 80.0, false);
+    assert!(r.exact && r.points.len() == 4, "{r:?}");
+    let spans = |p: &[Vec3], x: f64| p.iter().all(|q| (q.x - x).abs() < 1e-9) && (p[0].z - p[1].z).abs() > 30.0 - 1e-9;
+    assert!(spans(&r.points[..2], 0.0) && spans(&r.points[2..], 80.0), "{r:?}");
+    let along = f.add(f.front, kind(LinearDirection::Horizontal), None);
+    assert_reads(&f.resolve(along), 80.0, false);
+    let diagonal = f.add(f.front, kind(LinearDirection::Along(solidcraft_geom::Vec2::new(1.0, 1.0))), None);
+    assert!((f.resolve(diagonal).measured.unwrap().value - 80.0 * 2f64.sqrt()).abs() < 1e-9);
+    let seen = f.add(f.right, kind(LinearDirection::Aligned), None);
+    assert!(matches!(&f.resolve(seen).status, Status::Unmeasurable(why) if why.contains("edge-on")), "{:?}", f.resolve(seen));
+    let corners = f.linear(f.front, [0.0, 0.0, 30.0], [80.0, 0.0, 30.0], LinearDirection::Horizontal, Reading::Projected);
+    assert_reads(&f.resolve(corners), 80.0, false);
+
+    run(&mut f.s, "solid.fillet", json!({"edges": [[0, 20, 30], [80, 20, 30]], "radius": 5, "body": "Box"}));
+    assert!(!matches!(f.resolve(corners).status, Status::Ok), "{:?}", f.resolve(corners));
+    assert_reads(&f.resolve(aligned), 80.0, false);
+    run(&mut f.s, "edit.undo", json!({}));
+
+    run(&mut f.s, "solid.box", json!({"length": 5, "width": 4, "height": 32, "corner": [-1, 18, -1], "operation": "cut", "targets": ["Box"]}));
+    let r = f.resolve(aligned);
+    assert_reads(&r, 80.0, false);
+    assert!(!r.exact, "{r:?}");
+}
+
+/// A face split on purpose is separate faces: its pieces are listed and none is chosen, though they
+/// lie on one plane. A chamfer's face isn't parallel to the end it is measured from, and a hole's
+/// isn't flat, so neither can be read; a suppressed feature says so.
+#[test]
+fn a_flat_face_that_isnt_one_face_or_isnt_parallel_says_so() {
+    let mut f = boxed();
+    let (near, far) = (f.face([0.0, 20.0, 15.0]), f.face([80.0, 20.0, 15.0]));
+    let id = f.add(f.front, DimensionKind::Faces { a: near.clone(), b: far, direction: LinearDirection::Aligned }, None);
+    let feature = f.s.doc.features.last().unwrap().name.clone();
+    run(&mut f.s, "solid.chamfer", json!({"edges": [[80, 20, 30]], "distance": 5, "body": "Box"}));
+    let slope = f.face([77.5, 20.0, 27.5]);
+    let tilted = f.add(f.front, DimensionKind::Faces { a: near.clone(), b: slope, direction: LinearDirection::Aligned }, None);
+    assert!(matches!(&f.resolve(tilted).status, Status::Unmeasurable(why) if why.contains("parallel")), "{:?}", f.resolve(tilted));
+    run(&mut f.s, "solid.cylinder", json!({"radius": 3, "height": 42, "base": [20, -1, 15], "axis": "Y", "operation": "cut", "targets": ["Box"]}));
+    let round = f.face([17.0, 20.0, 15.0]);
+    let not_flat = f.add(f.front, DimensionKind::Faces { a: near, b: round, direction: LinearDirection::Aligned }, None);
+    assert!(matches!(&f.resolve(not_flat).status, Status::Unmeasurable(why) if why.contains("isn't flat")), "{:?}", f.resolve(not_flat));
+    run(&mut f.s, "solid.split_face", json!({"body": "Box", "faces": [[0, 20, 15]], "plane": {"origin": [0, 20, 0], "normal": [0, 1, 0]}}));
+    let r = f.resolve(id);
+    assert!(matches!(&r.status, Status::Ambiguous(c) if c.len() >= 2) && r.measured.is_none(), "{r:?}");
+    run(&mut f.s, "timeline.suppress", json!({"feature": feature, "suppressed": true}));
+    assert_eq!(f.resolve(id).status, Status::Suppressed);
+}
+
 /// A boss of radius 5 along X on the box's right face reads Ø10 between its silhouettes in the front
 /// view, exactly, with its silhouettes 10 apart from one end of it to the other. A notch across its
 /// top cuts its face into pieces, all on the one cylinder, so it still reads Ø10 (found through

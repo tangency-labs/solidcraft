@@ -176,21 +176,8 @@ pub fn between_silhouettes(
     let (a_way, b_way) = (way(a_side, toward), way(b_side, -toward));
     let (pa, pb) = (a.origin + a_way * a.radius, b.origin + b_way * b.radius);
     let across = (pb - pa).dot(toward);
-    let along = match direction {
-        LinearDirection::Aligned => None,
-        LinearDirection::Horizontal => Some(Vec2::X),
-        LinearDirection::Vertical => Some(Vec2::Y),
-        LinearDirection::Along(v) => Some(v.normalized().ok_or(Invalid("the direction to measure along is zero or not finite"))?),
-    };
-    let value = match along {
-        None => across.abs(),
-        // Along a direction, as far as a line that way runs from one silhouette to the other.
-        Some(v) => {
-            let slant = Vec2::new(toward.dot(basis.x), toward.dot(basis.y)).dot(v);
-            require(slant.abs() > PARALLEL, "the silhouettes run along the direction to measure: it never crosses from one to the other")?;
-            (across / slant).abs()
-        }
-    };
+    let runs_along = "the silhouettes run along the direction to measure: it never crosses from one to the other";
+    let value = crossing(basis, toward, across, direction, runs_along)?;
     require(value > EPS, "the dimension would read 0: the silhouettes are one line in this view")?;
     // Parallel in the model, the silhouettes are as far apart as the view shows when the line square
     // to both lies in the view's plane.
@@ -198,6 +185,39 @@ pub fn between_silhouettes(
     let square = (pb - pa) - ua * (pb - pa).dot(ua);
     let foreshortened = ua.cross(ub).len() > PARALLEL || out_of_plane(basis, square);
     Ok((Measured { value, foreshortened }, [a_way, b_way]))
+}
+
+/// The distance between flat faces `a` and `b` (each a point on it and its normal), which the view
+/// through `basis` sees edge-on, along `direction` as [`linear`] takes it (aligned: square to them).
+/// The faces must be parallel. The line square to both lies in the view's plane, so it reads as the
+/// model has it.
+pub fn between_faces(basis: &Plane, a: (Vec3, Vec3), b: (Vec3, Vec3), direction: LinearDirection) -> Result<Measured> {
+    validate_plane(basis).map_err(|_| Invalid("a view's basis is finite and orthonormal"))?;
+    require(model_point(a.0) && model_point(b.0), "a face has a point within 1e12 mm of the origin")?;
+    let unit = |n: Vec3| n.normalized().ok_or(Invalid("a face's normal is zero or not finite"));
+    let (na, nb) = (unit(a.1)?, unit(b.1)?);
+    let edge_on = |n: Vec3| n.dot(basis.normal()).abs() <= PARALLEL;
+    require(edge_on(na) && edge_on(nb), "a face isn't edge-on in this view")?;
+    require(na.cross(nb).len() <= PARALLEL, "the faces aren't parallel")?;
+    let gap = (b.0 - a.0).dot(na);
+    let runs_along = "the faces run along the direction to measure: it never crosses from one to the other";
+    let value = crossing(basis, na * gap.signum(), gap.abs(), direction, runs_along)?;
+    require(value > EPS, "the dimension would read 0: the faces are one plane")?;
+    Ok(Measured { value, foreshortened: false })
+}
+
+/// How far a line along `direction` (aligned: `toward`) runs between two parallel lines on the view,
+/// `across` apart along `toward`, a unit vector square to them in the view's plane.
+fn crossing(basis: &Plane, toward: Vec3, across: f64, direction: LinearDirection, runs_along: &'static str) -> Result<f64> {
+    let along = match direction {
+        LinearDirection::Aligned => return Ok(across.abs()),
+        LinearDirection::Horizontal => Vec2::X,
+        LinearDirection::Vertical => Vec2::Y,
+        LinearDirection::Along(v) => v.normalized().ok_or(Invalid("the direction to measure along is zero or not finite"))?,
+    };
+    let slant = Vec2::new(toward.dot(basis.x), toward.dot(basis.y)).dot(along);
+    require(slant.abs() > PARALLEL, runs_along)?;
+    Ok((across / slant).abs())
 }
 
 /// The angle from the line `from` to `edge` (model points, from its first to its second) on the

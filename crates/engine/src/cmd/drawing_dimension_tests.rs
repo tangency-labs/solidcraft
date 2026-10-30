@@ -476,6 +476,48 @@ fn a_dimension_that_cant_be_measured_gives_its_last_good_value() {
     assert!(run(&mut fresh, INSPECT, json!({"dimension": added["dimension"]})).get("last_good").is_none());
 }
 
+/// Two flat faces the view sees edge-on: the box's ends read 80 across it and 80 along the view, each
+/// saved by its name; an edit takes a direction only. Refused, with the drawing unchanged: a face the
+/// view sees face on, one plane, a round face, and a direction along the faces.
+#[test]
+fn two_flat_faces_read_the_distance_between_them() {
+    let (mut s, view) = front_view();
+    let drawing = s.drawing("test").unwrap().id;
+    run(&mut s, "drawing.close", json!({}));
+    run(&mut s, "solid.cylinder", json!({"radius": 3, "height": 42, "base": [20, -1, 15], "axis": "Y", "operation": "cut", "targets": ["Box"]}));
+    run(&mut s, "drawing.open", json!({"drawing": ids::encode(drawing)}));
+    let added = add(&mut s, view, json!({"faces": {"a": [0, 20, 15], "b": [80, 20, 15]}}));
+    reads(&added, 80.0, "80.00");
+    assert_eq!((added["exact"].clone(), added["foreshortened"].clone()), (json!(true), json!(false)), "{added}");
+    let saved = &added["record"]["kind"]["faces"];
+    assert!(saved["a"]["body"] == "Box" && saved["b"]["name"].is_string() && saved["direction"] == "aligned", "{saved}");
+    let by_index = {
+        let state = s.model.state();
+        solidcraft_doc::appearance::face_index_at(state.body("Box").unwrap(), Vec3::new(0.0, 20.0, 15.0)).unwrap()
+    };
+    let same = add(&mut s, view, json!({"faces": {"a": {"body": "Box", "index": by_index}, "b": [80, 20, 15]}}));
+    assert_eq!(same["record"]["kind"], added["record"]["kind"]);
+    let id = added["dimension"].clone();
+    assert_eq!(edit(&mut s, &id, json!({"direction": "horizontal"}))["changed"], json!(["direction"]));
+    reads(&run(&mut s, INSPECT, json!({"dimension": id})), 80.0, "80.00");
+    let e = s.execute(EDIT, &json!({"dimension": id, "set": {"reading": "true"}})).err().map(|e| e.to_string()).unwrap_or_default();
+    assert!(e.contains("only `direction`"), "{e}");
+    let before = s.drawing("test").unwrap().to_json().unwrap();
+    let v = ids::encode(view);
+    let faces = |a: Value, b: Value, direction: Value| json!({"view": v, "kind": {"faces": {"a": a, "b": b, "direction": direction}}});
+    let cases = [
+        (faces(json!([40, 0, 10]), json!([80, 20, 15]), json!("aligned")), "isn't edge-on"),
+        (faces(json!([0, 10, 10]), json!([0, 30, 10]), json!("aligned")), "one plane"),
+        (faces(json!([23, 20, 15]), json!([80, 20, 15]), json!("aligned")), "isn't flat"),
+        (faces(json!([0, 20, 15]), json!([80, 20, 15]), json!("vertical")), "run along the direction"),
+        (faces(json!([0, 20, 15]), json!([200, 200, 200]), json!("aligned")), "no face at [200, 200, 200]"),
+    ];
+    for (p, why) in cases {
+        let e = refused(&mut s, p.clone());
+        assert!(e.contains(why), "{p}: {e}");
+    }
+    assert_eq!(s.drawing("test").unwrap().to_json().unwrap(), before);
+}
 /// A setting its kind hasn't got, and a value the record would refuse, are refused with the
 /// drawing unchanged; an angle takes its other side.
 #[test]
@@ -570,6 +612,10 @@ fn hostile_dimension_params_never_panic() {
         ),
         (ADD, json!({"view": v, "kind": {"angle": {"a": {"point": [40, 0, 30], "path": [1]}, "b": [0, 0, 15], "other_side": true}}})),
         (ADD, json!({"view": v, "kind": {"radial": {"edge": {"body": "Box", "index": 0, "path": [1]}, "diameter": true}}})),
+        (
+            ADD,
+            json!({"view": v, "kind": {"faces": {"a": {"body": "Box", "index": 0, "path": [1]}, "b": [80, 20, 15], "direction": {"along": [1, 0]}}}}),
+        ),
         (
             ADD,
             json!({"view": v, "kind": {"chain": {"points": [[0, 0, 0], {"centre": {"body": "Box", "index": 0}, "path": [1]}, corner, [80, 0, 0]],

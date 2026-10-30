@@ -49,7 +49,8 @@ pub static COMMANDS: &[CommandSpec] = &[
              other_side?}}, {radial: {edge: a circle or an arc the view sees face on, diameter?: by default for a whole circle or \
              half a turn or more}}, {cylinder: {face: a face of a whole cylinder the view doesn't see end-on, read as Ø between its \
              silhouettes}}, {silhouettes: {a, b: {face, side: near or far, the silhouette nearer the other cylinder or farther}, \
-             direction?: as a linear one's, aligned being square to them}: two of one cylinder make its cylinder dimension} or \
+             direction?: as a linear one's, aligned being square to them}: two of one cylinder make its cylinder dimension}, \
+             {faces: {a, b: flat, parallel faces the view sees edge-on, direction?: as a linear one's, aligned being square to them}} or \
              {chain: {points: [3 to 64 corners, in order along one line], direction?: as a linear one's, aligned being first to \
              last}}; an edge is a point on it [x, y, z] in the design's frame, {point} or {body, index}, and a \
              corner a point, {point}, {edges: [2 to 16 edges]} or {centre: an edge that is a circle or an arc}, and a face a point on \
@@ -118,6 +119,9 @@ fn add(s: &mut Session, p: &Value) -> Result<Value> {
         KindParam::Silhouettes { a, b, direction } => {
             let silhouette = |s: &SilhouetteParam| face(&s.face).map(|face| Silhouette { face, side: s.side });
             doc.silhouettes_kind(model, silhouette(&a)?, silhouette(&b)?, direction).map_err(|why| bad(ADD, why.to_string()))?
+        }
+        KindParam::Faces { a, b, direction } => {
+            DimensionKind::Faces { a: face(&a)?, b: face(&b)?, direction: direction.unwrap_or(LinearDirection::Aligned) }
         }
         KindParam::Chain { points, direction } => {
             // Counted before any point is looked up.
@@ -225,6 +229,12 @@ fn change(d: &mut Drawing, id: u64, set: &DimensionSet) -> Result<Vec<String>> {
             }
             *direction = set.direction.unwrap_or(*direction);
         }
+        DimensionKind::Faces { direction, .. } => {
+            if set.reading.is_some() || set.other_side.is_some() {
+                return Err(bad(EDIT, "a dimension between faces has only `direction`: it reads as the view shows them"));
+            }
+            *direction = set.direction.unwrap_or(*direction);
+        }
         DimensionKind::Cylinder { .. } => {
             if set.direction.is_some() || set.reading.is_some() || set.other_side.is_some() {
                 return Err(bad(EDIT, "a cylinder's diameter has no direction, reading or side: it reads between its silhouettes"));
@@ -242,7 +252,9 @@ fn kind_settings(kind: &DimensionKind) -> (Option<LinearDirection>, Option<Readi
         }
         DimensionKind::Angle { reading, other_side, .. } => (None, Some(*reading), *other_side, false),
         DimensionKind::Radial { diameter, .. } => (None, None, false, *diameter),
-        DimensionKind::Chain { direction, .. } | DimensionKind::Silhouettes { direction, .. } => (Some(*direction), None, false, false),
+        DimensionKind::Chain { direction, .. } | DimensionKind::Silhouettes { direction, .. } | DimensionKind::Faces { direction, .. } => {
+            (Some(*direction), None, false, false)
+        }
         DimensionKind::Cylinder { .. } => (None, None, false, false),
     }
 }
