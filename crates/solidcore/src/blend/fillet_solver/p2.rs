@@ -1250,24 +1250,37 @@ impl FilletSolver {
             return Err(sm_err());
         }
 
-        // the ball's centre: every TsectPnt's, where the axes meet
-        let center = eval_offset(k, ops.solver_mut(), 0, t_first.uv_pos(SrfIndex::First))?;
-        for t in tsects {
-            let c0 = eval_offset(k, ops.solver_mut(), 0, t.uv_pos(SrfIndex::First))?;
-            let c1 = eval_offset(k, ops.solver_mut(), 1, t.uv_pos(SrfIndex::Second))?;
-            if c0.distance(center) > tol || c1.distance(center) > tol {
-                return Err(sm_err());
+        let (center, axes) = if k.fixes.fillet_corner_ball_center_from_axes {
+            // Not upstream (WR-541, the fork's tangency-labs/smlib@bc6ddf9): the ball's
+            // centre is where the axes meet. Not the trace's points: at the edge's end where
+            // the contact circles meet both offset cylinders collapse onto their axes, so a
+            // point of their intersection fixes neither base parameter round its axis, and
+            // its solve stops a step short of the axes' crossing.
+            let axes = [cylinders[0].1.unitize()?, cylinders[1].1.unitize()?];
+            let center = axes_meet(cylinders[0].0, axes[0], cylinders[1].0, axes[1], tol)
+                .ok_or_else(sm_err)?;
+            (center, axes)
+        } else {
+            // the ball's centre: every TsectPnt's, where the axes meet
+            let center = eval_offset(k, ops.solver_mut(), 0, t_first.uv_pos(SrfIndex::First))?;
+            for t in tsects {
+                let c0 = eval_offset(k, ops.solver_mut(), 0, t.uv_pos(SrfIndex::First))?;
+                let c1 = eval_offset(k, ops.solver_mut(), 1, t.uv_pos(SrfIndex::Second))?;
+                if c0.distance(center) > tol || c1.distance(center) > tol {
+                    return Err(sm_err());
+                }
             }
-        }
-        let axes = [cylinders[0].1.unitize()?, cylinders[1].1.unitize()?];
-        for (c, axis) in cylinders.iter().zip(axes) {
-            let off = center - c.0;
-            if (off - axis * off.dot(axis)).length() > tol {
-                return Err(sm_err());
+            let axes = [cylinders[0].1.unitize()?, cylinders[1].1.unitize()?];
+            for (c, axis) in cylinders.iter().zip(axes) {
+                let off = center - c.0;
+                if (off - axis * off.dot(axis)).length() > tol {
+                    return Err(sm_err());
+                }
             }
-        }
+            (center, axes)
+        };
         let mut turn_axis = axes[0].cross(axes[1]);
-        if turn_axis.length() < EFF_ZERO_SQRT {
+        if !k.fixes.fillet_corner_ball_center_from_axes && turn_axis.length() < EFF_ZERO_SQRT {
             return Err(sm_err()); // parallel cylinders: the centres fill a line, not this case
         }
         turn_axis = turn_axis.unitize()?;
@@ -2566,6 +2579,28 @@ pub fn find_rollover_side_edge<O: ClassObject>(
     }
 }
 
+/// Not upstream (WR-541, tangency-labs/smlib@bc6ddf9): where the axes through `o0` along
+/// `a0` and through `o1` along `a1` (unit vectors) meet: the middle of their nearest
+/// points; `None` for (nearly) parallel axes (`1 - (a0 . a1)^2 < SM_EFF_ZERO_SQRT`: the
+/// centres fill a line) or nearest points farther apart than `tol` (the axes miss each
+/// other).
+fn axes_meet(o0: Point3, a0: Vec3, o1: Point3, a1: Vec3, tol: f64) -> Option<Point3> {
+    let w = o0 - o1;
+    let bdot = a0.dot(a1);
+    let den = 1.0 - bdot * bdot;
+    if den < EFF_ZERO_SQRT {
+        return None;
+    }
+    let d = a0.dot(w);
+    let e = a1.dot(w);
+    let p0 = o0 + a0 * ((bdot * e - d) / den);
+    let p1 = o1 + a1 * ((e - bdot * d) / den);
+    if p0.distance(p1) > tol {
+        return None;
+    }
+    Some(p0 + (p1 - p0) * 0.5)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -3232,5 +3267,43 @@ mod tests {
         assert_eq!(info.edges, vec![Some(SolverErrorObject::FilletEdge(r0))]);
         assert_eq!(info.location, Some(Point3::new(1.25, -2.5, 0.5)));
         assert_eq!(info.comment, "bad int");
+    }
+
+    /// WR-541 (tangency-labs/smlib@bc6ddf9): the corner ball's centre is where the
+    /// cylinders' axes meet, also when they are a rounding apart; parallel axes or axes
+    /// that miss each other give none.
+    #[test]
+    fn corner_ball_centre_is_where_the_axes_meet() {
+        let x = Vec3::new(1.0, 0.0, 0.0);
+        let y = Vec3::new(0.0, 1.0, 0.0);
+        // axes along x through (0, 2, 2) and along y through (2, 0, 2 + 1e-9)
+        let c = axes_meet(
+            Point3::new(0.0, 2.0, 2.0),
+            x,
+            Point3::new(2.0, 0.0, 2.0 + 1e-9),
+            y,
+            1e-6,
+        )
+        .unwrap();
+        assert!(
+            c.distance(Point3::new(2.0, 2.0, 2.0 + 0.5e-9)) < 1e-15,
+            "{c:?}"
+        );
+        assert!(axes_meet(
+            Point3::new(0.0, 0.0, 0.0),
+            x,
+            Point3::new(0.0, 1.0, 0.0),
+            x,
+            1e-6
+        )
+        .is_none());
+        assert!(axes_meet(
+            Point3::new(0.0, 2.0, 2.0),
+            x,
+            Point3::new(2.0, 0.0, 3.0),
+            y,
+            1e-6
+        )
+        .is_none());
     }
 }
