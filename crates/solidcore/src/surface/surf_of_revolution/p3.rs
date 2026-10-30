@@ -914,6 +914,51 @@ impl SurfOfRevolution {
         intersect_revolved(self, k, uv_domain, other, other_uv_domain, approx_tol_3d)
     }
 
+    /// [`Self::intersect_with_cone`] into `out` (reset first). On an error `out` keeps
+    /// what was appended before it, as upstream leaves its output arrays.
+    pub(crate) fn intersect_with_cone_into<R: Revolved + ?Sized>(
+        &self,
+        k: &Kernel,
+        uv_domain: &Extent2d,
+        cone: &R,
+        cone_uv_domain: &Extent2d,
+        approx_tol_3d: Option<f64>,
+        out: &mut SurfaceIntersection,
+    ) -> Result<bool> {
+        if !self.planar_generator {
+            *out = SurfaceIntersection::default();
+            return Ok(true);
+        }
+        intersect_revolved_into(self, k, uv_domain, cone, cone_uv_domain, approx_tol_3d, out)
+    }
+
+    /// [`Self::intersect_with_sphere`] into `out` (reset first). On an error `out` keeps
+    /// what was appended before it, as upstream leaves its output arrays.
+    pub(crate) fn intersect_with_sphere_into<R: Revolved + ?Sized>(
+        &self,
+        k: &Kernel,
+        uv_domain: &Extent2d,
+        sphere: &R,
+        sphere_uv_domain: &Extent2d,
+        approx_tol_3d: Option<f64>,
+        out: &mut SurfaceIntersection,
+    ) -> Result<bool> {
+        // Can not intersect things with non planar generator curves here
+        if !self.planar_generator {
+            *out = SurfaceIntersection::default();
+            return Ok(true);
+        }
+        intersect_revolved_into(
+            self,
+            k,
+            uv_domain,
+            sphere,
+            sphere_uv_domain,
+            approx_tol_3d,
+            out,
+        )
+    }
+
     // ---- analytic data from the NURB ------------------------------------------------
 
     /// Rebuilds the generator, placement, swap flag, STEP domain and polar converter
@@ -1243,19 +1288,43 @@ pub(crate) fn intersect_revolved<T: Revolved + ?Sized, R: Revolved + ?Sized>(
     other_uv_domain: &Extent2d,
     approx_tol_3d: Option<f64>,
 ) -> Result<(bool, SurfaceIntersection)> {
+    let mut out = SurfaceIntersection::default();
+    let more = intersect_revolved_into(
+        this,
+        k,
+        uv_domain,
+        other,
+        other_uv_domain,
+        approx_tol_3d,
+        &mut out,
+    )?;
+    Ok((more, out))
+}
+
+/// [`intersect_revolved`] into `out` (reset first). On an error `out` keeps what was appended
+/// before it, as upstream leaves its output arrays.
+pub(crate) fn intersect_revolved_into<T: Revolved + ?Sized, R: Revolved + ?Sized>(
+    this: &T,
+    k: &Kernel,
+    uv_domain: &Extent2d,
+    other: &R,
+    other_uv_domain: &Extent2d,
+    approx_tol_3d: Option<f64>,
+    out: &mut SurfaceIntersection,
+) -> Result<bool> {
     // init output
     let me = this.as_surf_of_revolution();
-    let mut out = SurfaceIntersection::default();
+    *out = SurfaceIntersection::default();
     let other_rev = other.as_surf_of_revolution();
 
     // no work - non planar generator curves
     if !me.planar_generator || !other_rev.planar_generator {
-        return Ok((true, out));
+        return Ok(true);
     }
 
     // no work - Self Intersection is best done by NURBS to get UV curves.
     if core::ptr::eq(me, other_rev) {
-        return Ok((true, out));
+        return Ok(true);
     }
 
     // locals
@@ -1271,7 +1340,7 @@ pub(crate) fn intersect_revolved<T: Revolved + ?Sized, R: Revolved + ?Sized>(
 
     // no work - coordinate systems are not parallel
     if !z_axis.is_parallel_to(other_z_axis, angular_tolerance) {
-        return Ok((true, out));
+        return Ok(true);
     }
 
     // arrive here when both rotation axes are parallel to one another
@@ -1295,7 +1364,7 @@ pub(crate) fn intersect_revolved<T: Revolved + ?Sized, R: Revolved + ?Sized>(
     // no work = rotation axes are not coincident
     let (distance, _) = line_point_distance(origin, z_axis, other_origin);
     if distance > tol / 100.0 {
-        return Ok((true, out));
+        return Ok(true);
     }
 
     // map input NurbDomains to StepDomains
@@ -1331,7 +1400,7 @@ pub(crate) fn intersect_revolved<T: Revolved + ?Sized, R: Revolved + ?Sized>(
 
     // no work - no sweep intersections
     if ivls.is_empty() {
-        return Ok((false, out));
+        return Ok(false);
     }
 
     // get temp genCurves in the same plane
@@ -1476,7 +1545,7 @@ pub(crate) fn intersect_revolved<T: Revolved + ?Sized, R: Revolved + ?Sized>(
     }
 
     // all done
-    Ok((false, out))
+    Ok(false)
 }
 
 #[cfg(test)]

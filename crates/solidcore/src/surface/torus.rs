@@ -459,6 +459,29 @@ impl Torus {
         )
     }
 
+    /// [`Torus::intersect_with_plane_owned`] into `out` (reset first). On an error `out`
+    /// keeps what was appended before it, as upstream leaves its output arrays.
+    pub(crate) fn intersect_with_plane_owned_into(
+        &self,
+        k: &Kernel,
+        plane: &Plane,
+        plane_owner: PlaneOwner,
+        other_uv_domain: &Extent2d,
+        approx_tol_3d: Option<f64>,
+        out: &mut SurfaceIntersection,
+    ) -> Result<bool> {
+        let shape = self.shape();
+        self.base.intersect_with_plane_owned_using_into(
+            k,
+            plane,
+            plane_owner,
+            other_uv_domain,
+            approx_tol_3d,
+            &|s, k, p, t| Ok(iso_curve(s, shape, k, p, t, None, false)?.curve),
+            out,
+        )
+    }
+
     /// Trims to the NURB domain `new_nurb_uv_domain` (`SmSurfOfRevolution::TrimWithDomain`
     /// on a torus): the inherited body with the torus's `ConvertUVFromNURBSToSTEP` and iso
     /// circles as its virtual calls.

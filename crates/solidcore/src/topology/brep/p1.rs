@@ -2619,8 +2619,37 @@ pub fn brep_intersect_mut(
     crv_angle_tolerance_deg: f64,
     want_points: bool,
 ) -> Result<(Vec<Curve>, Option<Vec<Point3>>)> {
-    let this_faces = faces(b, None)?;
-    let other_faces = faces(other, None)?;
+    let (curves, points, status) = brep_intersect_mut_with_partial(
+        k,
+        b,
+        other,
+        approx_tol_3d,
+        crv_angle_tolerance_deg,
+        want_points,
+    );
+    status?;
+    Ok((curves, points))
+}
+
+/// [`brep_intersect_mut`] for a caller that reads the outputs whatever the call returned
+/// (`SmApiIntersectBreps`): the curves and points with the status. On a failed face pair
+/// they are those the earlier pairs accumulated (duplicates not removed yet), as
+/// upstream's `SER` leaves them in the caller's arrays.
+pub fn brep_intersect_mut_with_partial(
+    k: &Kernel,
+    b: &mut Brep,
+    other: &mut Brep,
+    approx_tol_3d: f64,
+    crv_angle_tolerance_deg: f64,
+    want_points: bool,
+) -> (Vec<Curve>, Option<Vec<Point3>>, Result<()>) {
+    let faces_of = |b: &Brep, other: &Brep| -> Result<(Vec<FaceId>, Vec<FaceId>)> {
+        Ok((faces(b, None)?, faces(other, None)?))
+    };
+    let (this_faces, other_faces) = match faces_of(&*b, &*other) {
+        Ok(f) => f,
+        Err(e) => return (Vec::new(), want_points.then(Vec::new), Err(e)),
+    };
     brep_intersect_faces(
         k,
         &this_faces,
@@ -2663,7 +2692,25 @@ pub fn brep_intersect_self(
     crv_angle_tolerance_deg: f64,
     want_points: bool,
 ) -> Result<(Vec<Curve>, Option<Vec<Point3>>)> {
-    let this_faces = faces(b, None)?;
+    let (curves, points, status) =
+        brep_intersect_self_with_partial(k, b, approx_tol_3d, crv_angle_tolerance_deg, want_points);
+    status?;
+    Ok((curves, points))
+}
+
+/// [`brep_intersect_self`] with the partial outputs of a failed call, as
+/// [`brep_intersect_mut_with_partial`].
+pub fn brep_intersect_self_with_partial(
+    k: &Kernel,
+    b: &mut Brep,
+    approx_tol_3d: f64,
+    crv_angle_tolerance_deg: f64,
+    want_points: bool,
+) -> (Vec<Curve>, Option<Vec<Point3>>, Result<()>) {
+    let this_faces = match faces(b, None) {
+        Ok(f) => f,
+        Err(e) => return (Vec::new(), want_points.then(Vec::new), Err(e)),
+    };
     brep_intersect_faces(
         k,
         &this_faces,
@@ -2692,14 +2739,15 @@ pub fn brep_intersect_self(
 }
 
 /// The face-pair loop of `SmBrep::BrepIntersect`, with `face_pair` the
-/// `SmFace::FaceIntersect` of one pair.
+/// `SmFace::FaceIntersect` of one pair: the curves, the points (when `want_points`) and
+/// the status. A failed pair (`SER`) leaves the outputs of the pairs before it.
 fn brep_intersect_faces(
     k: &Kernel,
     this_faces: &[FaceId],
     other_faces: &[FaceId],
     want_points: bool,
     mut face_pair: impl FnMut(FaceId, FaceId) -> Result<(Vec<Option<Curve>>, Vec<Point3>)>,
-) -> Result<(Vec<Curve>, Option<Vec<Point3>>)> {
+) -> (Vec<Curve>, Option<Vec<Point3>>, Result<()>) {
     // init output
     let mut curves_3d: Vec<Option<Curve>> = Vec::new();
     let mut points: Option<Vec<Point3>> = want_points.then(Vec::new);
@@ -2710,7 +2758,10 @@ fn brep_intersect_faces(
         // for every otherBrep Face
         for &other_face in other_faces {
             // intersect the faces
-            let (mut curves, mut pts) = face_pair(this_face, other_face)?;
+            let (mut curves, mut pts) = match face_pair(this_face, other_face) {
+                Ok(out) => out,
+                Err(e) => return (curves_3d.into_iter().flatten().collect(), points, Err(e)),
+            };
 
             // accumulate the outputs
             curves_3d.append(&mut curves);
@@ -2720,8 +2771,8 @@ fn brep_intersect_faces(
         }
     }
 
-    crate::curve::curve::p5::remove_duplicate_curves(k, &mut curves_3d)?;
-    Ok((curves_3d.into_iter().flatten().collect(), points))
+    let status = crate::curve::curve::p5::remove_duplicate_curves(k, &mut curves_3d).map(|_| ());
+    (curves_3d.into_iter().flatten().collect(), points, status)
 }
 
 // ---- corner blends (SmBrep::CreateCornerBlend) ------------------------------------------

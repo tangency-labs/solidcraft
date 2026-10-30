@@ -55,9 +55,10 @@ use crate::nurbs::b_spline_curve::BoundingBoxRequest;
 use crate::nurbs::b_spline_curve_n_lib::TrimMode;
 use crate::nurbs::b_spline_surface::p1::LocationType;
 use crate::nurbs::b_spline_surface::{BSplineSurface, IsoCurveOptions, SurfParamType};
+use crate::surface::plane::p2::PlaneOwner;
 use crate::surface::surface::p1::SurfaceIntersectContext;
 use crate::surface::surface::p2::{
-    base_global_surface_intersect_in, Surface, SurfaceIntersection, SurfaceKind,
+    base_global_surface_intersect_into, Surface, SurfaceIntersection, SurfaceKind,
     B_SPLINE_SURFACE_TYPE,
 };
 
@@ -65,6 +66,7 @@ use super::p1::{
     gen_adjust_step_interval, gen_base, gen_base_mut, gen_max_analytic_domain, gen_step_interval,
     not_b_spline, SurfOfRevolution, SweepIsoFn,
 };
+use super::p3::intersect_revolved_into;
 
 const OP_ADJUST: &str = "surface::surf_of_revolution::p2::SurfOfRevolution::adjust_step_uv_domain";
 const OP_STEP_INV: &str = "surface::surf_of_revolution::p2::SurfOfRevolution::step_inversion";
@@ -686,8 +688,8 @@ impl SurfOfRevolution {
     /// `other_uv_domain` (`GlobalSurfaceIntersect`): the special cases of a plane or
     /// another surface of revolution ([`Self::intersect_with_plane`],
     /// [`Self::intersect_with_surf_of_revolution`]) and, where they need more, the
-    /// general surface intersection ([`base_global_surface_intersect`](crate::surface::surface::p2::base_global_surface_intersect)) whose
-    /// curves follow the special cases' (upstream appends to the same arrays).
+    /// general surface intersection ([`base_global_surface_intersect`](crate::surface::surface::p2::base_global_surface_intersect)), which
+    /// resets the output arrays first (`SmSurfaceIntersector::DoIntersection`).
     ///
     /// # Errors
     ///
@@ -730,47 +732,83 @@ impl SurfOfRevolution {
         ang_tol_rad: Option<f64>,
         context: Option<SurfaceIntersectContext<'_, O>>,
     ) -> Result<SurfaceIntersection> {
-        let mut need_nurb_intersection = true;
         let mut out = SurfaceIntersection::default();
+        self.global_surface_intersect_into(
+            this,
+            k,
+            uv_domain,
+            other,
+            other_uv_domain,
+            use_surface_edges,
+            approx_tol_3d,
+            ang_tol_rad,
+            context,
+            &mut out,
+        )?;
+        Ok(out)
+    }
+
+    /// [`Self::global_surface_intersect_in`] into `out` (upstream's output arrays). On an
+    /// error `out` keeps what the failing intersection appended before it, as upstream
+    /// leaves its output arrays. The general intersection, when a special case needs
+    /// more, resets them first (`SmSurfaceIntersector::DoIntersection`).
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn global_surface_intersect_into<O: SolutionObject + Copy + PartialEq>(
+        &self,
+        this: &Surface,
+        k: &Kernel,
+        uv_domain: &Extent2d,
+        other: &Surface,
+        other_uv_domain: &Extent2d,
+        use_surface_edges: [bool; 2],
+        approx_tol_3d: Option<f64>,
+        ang_tol_rad: Option<f64>,
+        context: Option<SurfaceIntersectContext<'_, O>>,
+        out: &mut SurfaceIntersection,
+    ) -> Result<()> {
+        let mut need_nurb_intersection = true;
         match other.kind_with_nurb(k)? {
             SurfaceKind::Plane(p) => {
-                let (more, found) =
-                    self.intersect_with_plane(k, p, other_uv_domain, approx_tol_3d)?;
-                need_nurb_intersection = more;
-                out = found;
+                need_nurb_intersection = self.intersect_with_plane_owned_using_into(
+                    k,
+                    p,
+                    PlaneOwner::NoFace,
+                    other_uv_domain,
+                    approx_tol_3d,
+                    &Self::own_sweep_iso,
+                    out,
+                )?;
             }
             SurfaceKind::Cone(c) if c.type_code() == crate::surface::surface::p2::CONE_TYPE => {
-                let (more, found) = self.intersect_with_cone(
+                need_nurb_intersection = self.intersect_with_cone_into(
                     k,
                     uv_domain,
                     c.as_ref(),
                     other_uv_domain,
                     approx_tol_3d,
+                    out,
                 )?;
-                need_nurb_intersection = more;
-                out = found;
             }
             SurfaceKind::SurfOfRevolution(o) => {
-                let (more, found) = self.intersect_with_surf_of_revolution(
+                need_nurb_intersection = intersect_revolved_into(
+                    self,
                     k,
                     uv_domain,
                     o.as_ref(),
                     other_uv_domain,
                     approx_tol_3d,
+                    out,
                 )?;
-                need_nurb_intersection = more;
-                out = found;
             }
             SurfaceKind::Sphere(o) => {
-                let (more, found) = self.intersect_with_sphere(
+                need_nurb_intersection = self.intersect_with_sphere_into(
                     k,
                     uv_domain,
                     o.as_ref(),
                     other_uv_domain,
                     approx_tol_3d,
+                    out,
                 )?;
-                need_nurb_intersection = more;
-                out = found;
             }
             // (an SmCylinder is not SmCone_TYPE, an SmTorus not SmSurfOfRevolution_TYPE:
             // the default branch)
@@ -786,7 +824,7 @@ impl SurfOfRevolution {
 
         // If we're here, then analytic intersections were not found
         if need_nurb_intersection {
-            let more = base_global_surface_intersect_in(
+            base_global_surface_intersect_into(
                 k,
                 this,
                 uv_domain,
@@ -796,14 +834,10 @@ impl SurfOfRevolution {
                 approx_tol_3d,
                 ang_tol_rad,
                 context,
+                out,
             )?;
-            out.curves_3d.extend(more.curves_3d);
-            out.surface1_uv_curves.extend(more.surface1_uv_curves);
-            out.surface2_uv_curves.extend(more.surface2_uv_curves);
-            out.curve_types.extend(more.curve_types);
-            out.deviations.extend(more.deviations);
         }
-        Ok(out)
+        Ok(())
     }
 
     // ---- recognition ----------------------------------------------------------------

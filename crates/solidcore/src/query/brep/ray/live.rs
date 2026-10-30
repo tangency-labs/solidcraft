@@ -8,6 +8,7 @@
 //! | `solve_mutable_brep_point` | `SmBrep::RayFire`'s `BrepPointSolve` |
 //! | [`LiveBrepObjects`] | Geometry pointers and live topology reads during the solve |
 //! | [`BrepFaceServices`], [`FaceCaches`], [`SidedFaceServices`], [`SideObject`] | `smsurf_GetSurfaceCache` / `SmFace::PointClassify` of face surfaces on mutable B-reps |
+//! | [`CurveFaceServices`], [`CurveFaceObject`] | the same for a free curve's solve against a face's surface |
 //!
 //! Deviations: exact evaluation copies satisfy the solver's borrowed-geometry API.
 //! A checked, operation-local `RefCell` lends the original B-rep to lazy face queries;
@@ -715,6 +716,120 @@ impl FaceQueries<SideObject> for SidedFaceServices<'_> {
         match self.side(curve) {
             Ok(side) => side.curve_edge_tolerance(curve.1),
             Err(e) => Some(Err(e)),
+        }
+    }
+}
+
+/// A solution object of a free curve's solve against a B-rep face's surface (upstream's
+/// solutions name the curve, which belongs to no B-rep, and the face's surface): the
+/// curve with its natural interval, or a [`CacheObject`] of the B-rep.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum CurveFaceObject {
+    /// The free curve (`SmCurve::GetNaturalInterval` is its interval).
+    Curve(Extent1d),
+    /// An object of the B-rep.
+    Brep(CacheObject),
+}
+
+impl crate::geom::solution_array::SolutionObject for CurveFaceObject {
+    fn kind(&self) -> crate::geom::solution_array::ObjectKind {
+        match self {
+            Self::Curve(_) => crate::geom::solution_array::ObjectKind::Curve,
+            Self::Brep(c) => c.kind(),
+        }
+    }
+
+    fn natural_interval(&self) -> Option<Extent1d> {
+        match self {
+            Self::Curve(ivl) => Some(*ivl),
+            Self::Brep(_) => None,
+        }
+    }
+}
+
+/// A [`BrepFaceServices`] on [`CurveFaceObject`] handles: the face caches and
+/// classifications of its B-rep for a free curve's solve against a face's surface.
+#[derive(Debug)]
+pub struct CurveFaceServices<'s, 'a>(pub &'s BrepFaceServices<'a>);
+
+fn brep_object(o: CurveFaceObject) -> Result<CacheObject> {
+    match o {
+        CurveFaceObject::Brep(c) => Ok(c),
+        CurveFaceObject::Curve(_) => Err(SolidError::invalid_input(OP, "expected B-rep handle")),
+    }
+}
+
+impl SurfaceSolveContext<CurveFaceObject> for CurveFaceServices<'_, '_> {
+    fn build_surface_cache(
+        &mut self,
+        k: &Kernel,
+        surface: &Surface,
+        handle: Option<CurveFaceObject>,
+    ) -> Result<SurfaceCache<CurveFaceObject>> {
+        // (as `BrepFaceServices::build_surface_cache`, mapped in the one copy the fetch
+        // makes)
+        match handle {
+            Some(CurveFaceObject::Brep(CacheObject::Surface(face))) => {
+                self.0
+                    .cache_mapped(k, face, |c| Ok(CurveFaceObject::Brep(c)))
+            }
+            None => crate::surface::surface::p2::surface_cache(k, surface, None),
+            Some(_) => Err(SolidError::invalid_input(OP, "expected surface handle")),
+        }
+    }
+    fn surface_cache_state(
+        &mut self,
+        k: &Kernel,
+        surface: &Surface,
+        handle: Option<CurveFaceObject>,
+    ) -> Result<SurfaceCache<CurveFaceObject>> {
+        match handle {
+            Some(CurveFaceObject::Brep(CacheObject::Surface(face))) => {
+                self.0
+                    .cache_state_mapped(k, face, |c| Ok(CurveFaceObject::Brep(c)))
+            }
+            None => crate::surface::surface::p2::surface_cache(k, surface, None),
+            Some(_) => Err(SolidError::invalid_input(OP, "expected surface handle")),
+        }
+    }
+    fn face_queries(&self) -> Option<&dyn FaceQueries<CurveFaceObject>> {
+        Some(self)
+    }
+}
+
+impl FaceQueries<CurveFaceObject> for CurveFaceServices<'_, '_> {
+    fn face_zone_tol_3d(&self, face: CurveFaceObject) -> Result<f64> {
+        self.0.face_zone_tol_3d(brep_object(face)?)
+    }
+    fn face_point_classify(
+        &self,
+        k: &Kernel,
+        face: CurveFaceObject,
+        uv: Point2,
+        tolerance: f64,
+    ) -> Result<(i32, Option<CurveFaceObject>)> {
+        let (class, object) = self
+            .0
+            .face_point_classify(k, brep_object(face)?, uv, tolerance)?;
+        Ok((class, object.map(CurveFaceObject::Brep)))
+    }
+    fn face_point_classify_fast_drop(
+        &self,
+        k: &Kernel,
+        face: CurveFaceObject,
+        uv: Point2,
+        tolerance: f64,
+    ) -> Result<(i32, Option<CurveFaceObject>)> {
+        let (class, object) =
+            self.0
+                .face_point_classify_fast_drop(k, brep_object(face)?, uv, tolerance)?;
+        Ok((class, object.map(CurveFaceObject::Brep)))
+    }
+    fn curve_edge_tolerance(&self, curve: CurveFaceObject) -> Option<Result<f64>> {
+        // (the free curve has no owning edge: upstream's `GetOwner()` is NULL)
+        match curve {
+            CurveFaceObject::Curve(_) => None,
+            CurveFaceObject::Brep(c) => self.0.curve_edge_tolerance(c),
         }
     }
 }

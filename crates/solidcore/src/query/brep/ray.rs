@@ -16,7 +16,10 @@
 
 mod live;
 pub(crate) use live::{solve_mutable_brep_point, solve_mutable_ray};
-pub use live::{BrepFaceServices, FaceCaches, LiveBrepObjects, SideObject, SidedFaceServices};
+pub use live::{
+    BrepFaceServices, CurveFaceObject, CurveFaceServices, FaceCaches, LiveBrepObjects, SideObject,
+    SidedFaceServices,
+};
 
 use std::cell::Cell;
 use std::collections::{BTreeMap, BTreeSet};

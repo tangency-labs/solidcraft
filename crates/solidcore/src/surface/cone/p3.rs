@@ -581,8 +581,33 @@ impl Cone {
         surfaces: [Option<&Surface>; 2],
     ) -> Result<(bool, SurfaceIntersection)> {
         let mut out = SurfaceIntersection::default();
+        let more = self.intersect_with_cone_on_into(
+            k,
+            domain,
+            other,
+            other_domain,
+            approx_tol,
+            surfaces,
+            &mut out,
+        )?;
+        Ok((more, out))
+    }
+
+    /// [`Self::intersect_with_cone_on`] into `out` (reset first). On an error `out` keeps what was
+    /// appended before it, as upstream leaves its output arrays.
+    fn intersect_with_cone_on_into(
+        &self,
+        k: &Kernel,
+        domain: &Extent2d,
+        other: &Self,
+        other_domain: &Extent2d,
+        approx_tol: Option<f64>,
+        surfaces: [Option<&Surface>; 2],
+        out: &mut SurfaceIntersection,
+    ) -> Result<bool> {
+        *out = SurfaceIntersection::default();
         if core::ptr::eq(self, other) {
-            return Ok((false, out));
+            return Ok(false);
         }
         let box1 = bbox(k, self, domain)?;
         let mut box2 = bbox(k, other, other_domain)?;
@@ -592,7 +617,7 @@ impl Cone {
         });
         box2.expand_absolute(tol);
         if box1.are_disjoint(&box2, 0.0) {
-            return Ok((false, out));
+            return Ok(false);
         }
         let height = self.height(k)?;
         let axis = self.rev().position().z_axis();
@@ -621,16 +646,16 @@ impl Cone {
                 || max_radius + tol < other_min_radius - distance
                 || other_max_radius + tol < min_radius - distance
             {
-                return Ok((false, out));
+                return Ok(false);
             }
             let param2 = line_closest_point(bottom, axis, other_top);
             if (param > height + tol && param2 > height + tol)
                 || (param < 0.0 - tol && param2 < 0.0 - tol)
             {
-                return Ok((false, out));
+                return Ok(false);
             }
             if !self.is_cylinder() || !other.is_cylinder() {
-                return Ok((true, out));
+                return Ok(true);
             }
             let (mut min, mut max, other_min, other_max) = if k.fixes.cone_parallel_line_domains {
                 // Face domains can be shorter than either underlying cylinder.
@@ -648,7 +673,7 @@ impl Cone {
                 let other_min = min2(other_param, other_param2);
                 let other_max = max2(other_param, other_param2);
                 if other_min > max + tol || other_max < min - tol {
-                    return Ok((false, out));
+                    return Ok(false);
                 }
                 (min, max, other_min, other_max)
             } else {
@@ -690,7 +715,7 @@ impl Cone {
                     other_domain,
                     boundary_tol,
                 ))? {
-                    append(&mut out, first);
+                    append(out, first);
                 }
                 let second = boundary_intersections(
                     k,
@@ -702,8 +727,8 @@ impl Cone {
                 );
                 // Upstream overwrites the first status/needs-more with the second.
                 let second = second?;
-                append_boundary_intersections(k, &mut out, second, tol)?;
-                return Ok((false, out));
+                append_boundary_intersections(k, out, second, tol)?;
+                return Ok(false);
             }
             let start = bottom + param * axis;
             let intersection = circle_coplanar_circle_intersect(
@@ -719,7 +744,7 @@ impl Cone {
                 CircleCircle::None => Vec::new(),
                 CircleCircle::Tangent(p) => vec![p],
                 CircleCircle::Crossing(p, q) => vec![p, q],
-                CircleCircle::Coincident => return Ok((true, out)),
+                CircleCircle::Coincident => return Ok(true),
             };
             for point in points {
                 let line_point = point + (min - param) * axis;
@@ -755,7 +780,7 @@ impl Cone {
                 }
                 if max - min < tol {
                     add(
-                        &mut out,
+                        out,
                         Curve::from(BSplineCurve::create_degenerate_curve(3, line_point)?),
                         TsectCurveType::Touching,
                     );
@@ -770,7 +795,7 @@ impl Cone {
                         },
                     );
                     add(
-                        &mut out,
+                        out,
                         Curve::from(curve),
                         if count == 1 {
                             TsectCurveType::Tangent
@@ -785,11 +810,11 @@ impl Cone {
                 || !other.is_cylinder()
                 || (self.top_radius() - other.top_radius()).abs() > tol
             {
-                return Ok((true, out));
+                return Ok(true);
             }
             let points = segment_segment_intersect(bottom, top, other_bottom, other_top, tol)?;
             let [point] = points.as_slice() else {
-                return Ok((true, out));
+                return Ok(true);
             };
             let (vec1, vec2) = parallelogram_cross_vectors(
                 axis,
@@ -848,7 +873,7 @@ impl Cone {
                 out.deviations.push(0.0);
             }
         }
-        Ok((false, out))
+        Ok(false)
     }
 }
 
@@ -1030,6 +1055,48 @@ impl Cone {
         ang_tol_rad: Option<f64>,
         general: impl FnOnce(GeneralIntersectionRequest<'a>) -> Result<SurfaceIntersection>,
     ) -> Result<SurfaceIntersection> {
+        let mut out = SurfaceIntersection::default();
+        self.global_surface_intersect_on_into(
+            this,
+            k,
+            domain,
+            other,
+            other_domain,
+            use_surface_edges,
+            approx_tol_3d,
+            ang_tol_rad,
+            |req, out| {
+                *out = general(req)?;
+                Ok(())
+            },
+            &mut out,
+        )?;
+        Ok(out)
+    }
+
+    /// [`Cone::global_surface_intersect_on`] into `out` (upstream's output arrays). On an
+    /// error `out` keeps what the failing special case (or `general`, which fills it)
+    /// appended before it, as upstream leaves its output arrays; the general
+    /// intersection resets them first.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn global_surface_intersect_on_into<'a, G>(
+        &'a self,
+        this: Option<&'a Surface>,
+        k: &'a Kernel,
+        domain: &'a Extent2d,
+        other: IntersectTarget<'a>,
+        other_domain: &'a Extent2d,
+        use_surface_edges: [bool; 2],
+        approx_tol_3d: Option<f64>,
+        ang_tol_rad: Option<f64>,
+        general: G,
+        out: &mut SurfaceIntersection,
+    ) -> Result<()>
+    where
+        G: FnOnce(GeneralIntersectionRequest<'a>, &mut SurfaceIntersection) -> Result<()>,
+    {
+        // (each special case resets the outputs on entry)
+        *out = SurfaceIntersection::default();
         let other_surface = match other {
             IntersectTarget::Surface(s) => Some(s),
             _ => None,
@@ -1045,60 +1112,68 @@ impl Cone {
             },
             _ => other,
         };
-        let (needs_more, out) = match target {
+        let needs_more = match target {
             IntersectTarget::Plane(p) => {
-                self.intersect_with_plane(k, domain, p, other_domain, approx_tol_3d)?
+                let (more, found) =
+                    self.intersect_with_plane(k, domain, p, other_domain, approx_tol_3d)?;
+                *out = found;
+                more
             }
             IntersectTarget::Cone(c) if matches!(c.type_code(), CONE_TYPE | CYLINDER_TYPE) => self
-                .intersect_with_cone_on(
+                .intersect_with_cone_on_into(
                     k,
                     domain,
                     c,
                     other_domain,
                     approx_tol_3d,
                     [this, other_surface],
+                    out,
                 )?,
+            // the other surface's first surface is this one: its UV curves are swapped,
+            // also in a partial output
             IntersectTarget::Revolution(r) => {
-                let (more, mut out) =
-                    r.intersect_with_cone(k, other_domain, self, domain, approx_tol_3d)?;
+                let more =
+                    r.intersect_with_cone_into(k, other_domain, self, domain, approx_tol_3d, out);
                 core::mem::swap(&mut out.surface1_uv_curves, &mut out.surface2_uv_curves);
-                (more, out)
+                more?
             }
             IntersectTarget::Sphere(s) => {
-                let (more, mut out) =
-                    s.intersect_with_cone(k, other_domain, self, domain, approx_tol_3d)?;
+                let more =
+                    s.intersect_with_cone_into(k, other_domain, self, domain, approx_tol_3d, out);
                 core::mem::swap(&mut out.surface1_uv_curves, &mut out.surface2_uv_curves);
-                (more, out)
+                more?
             }
             IntersectTarget::Extrusion(e) if self.is_cylinder() => {
                 let r = e.intersect_with_cylinder(k, self, approx_tol_3d)?;
-                (
-                    r.needs_more_intersections,
-                    SurfaceIntersection {
-                        curves_3d: r.curves_3d,
-                        surface1_uv_curves: r.surface2_uv_curves,
-                        surface2_uv_curves: r.surface1_uv_curves,
-                        curve_types: r.curve_types,
-                        deviations: r.deviations,
-                    },
-                )
+                *out = SurfaceIntersection {
+                    curves_3d: r.curves_3d,
+                    surface1_uv_curves: r.surface2_uv_curves,
+                    surface2_uv_curves: r.surface1_uv_curves,
+                    curve_types: r.curve_types,
+                    deviations: r.deviations,
+                };
+                r.needs_more_intersections
             }
-            _ => (true, SurfaceIntersection::default()),
+            _ => true,
         };
         if needs_more {
             // DoIntersection resets every native output before its general solve.
-            return general(GeneralIntersectionRequest {
-                kernel: k,
-                cone: self,
-                domain,
-                other,
-                other_domain,
-                use_surface_edges,
-                approx_tol_3d,
-                ang_tol_rad,
-            });
+            *out = SurfaceIntersection::default();
+            general(
+                GeneralIntersectionRequest {
+                    kernel: k,
+                    cone: self,
+                    domain,
+                    other,
+                    other_domain,
+                    use_surface_edges,
+                    approx_tol_3d,
+                    ang_tol_rad,
+                },
+                out,
+            )?;
         }
-        Ok(out)
+        Ok(())
     }
 }
 
