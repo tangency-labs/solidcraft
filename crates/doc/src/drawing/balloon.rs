@@ -9,11 +9,14 @@
 //! - **The balloon** sits at a place on paper, in millimetres from its view's centre, so it moves
 //!   with the view and not with the model.
 //!
-//! The number a balloon shows comes from a parts list, once parts lists are placed on sheets.
+//! The number a balloon shows comes from a parts list, worked out and never saved: the one it names,
+//! else its sheet's only one, else the drawing's only one ([`Drawing::parts_list_for`]). It keeps the
+//! balloon whatever becomes of the row.
 //!
 //! The rules, beside the record's: a balloon is on one of the drawing's views; its edge reference
 //! keeps a dimension's rules, with an occurrence path of 1 to [`crate::MAX_PLACEMENT_DEPTH`] ids; its place
-//! is on paper ([`is_paper_coordinate`]); at most [`MAX_BALLOONS`] balloons, listed by id.
+//! is on paper ([`is_paper_coordinate`]); the list it names is one of the drawing's parts lists; at
+//! most [`MAX_BALLOONS`] balloons, listed by id.
 //!
 //! [`Document::resolve_balloons`] finds each balloon's edge again as a dimension's is found
 //! ([`super::dimension::Status`]): by name, strictly, and what it can't decide it says.
@@ -25,6 +28,7 @@ use solidcraft_geom::paper::MAX_SIDE_MM;
 
 use super::by_id::Record;
 use super::dimension::{Lookup, ModelEdge, Status, check_edge, edge_candidates};
+use super::table::{Kind, PartsList, SheetTable};
 use super::{Drawing, require};
 use crate::{DocError, Document, Model, Result, ids};
 
@@ -44,6 +48,9 @@ pub struct Balloon {
     pub edge: ModelEdge,
     /// The balloon's centre, in millimetres of paper from its view's centre.
     pub at: [f64; 2],
+    /// The parts list it names, when it names one.
+    #[serde(default, with = "crate::ids::option", skip_serializing_if = "Option::is_none")]
+    pub parts_list: Option<u64>,
 }
 
 impl Balloon {
@@ -60,14 +67,40 @@ impl Record for Balloon {
 }
 
 impl Drawing {
-    /// The balloons' rules (the module's notes). The views are checked first, so they are in id
-    /// order here.
+    /// The parts list balloon `b` reads, by its id: the one it names, else its sheet's only one, else
+    /// the drawing's only one. With none to go by, the lists it could name, by id.
+    pub fn parts_list_for(&self, b: &Balloon) -> std::result::Result<(u64, PartsList), Vec<u64>> {
+        let list = |t: &SheetTable| match t.kind {
+            Kind::PartsList(list) => Some((t.id, list)),
+            Kind::Revision => None,
+        };
+        let lists: Vec<(u64, u64, PartsList)> = self.tables.iter().filter_map(|t| list(t).map(|(id, l)| (id, t.sheet, l))).collect();
+        if let Some(named) = lists.iter().find(|(id, ..)| Some(*id) == b.parts_list) {
+            return Ok((named.0, named.2));
+        }
+        let sheet = self.view(b.view).map(|v| v.sheet);
+        let mut on_sheet = lists.iter().filter(|(_, on, _)| Some(*on) == sheet);
+        if let (Some(only), None) = (on_sheet.next(), on_sheet.next()) {
+            return Ok((only.0, only.2));
+        }
+        match lists.as_slice() {
+            [only] => Ok((only.0, only.2)),
+            _ => Err(lists.iter().map(|(id, ..)| *id).collect()),
+        }
+    }
+
+    /// The balloons' rules (the module's notes). The views and the tables are checked first, so they
+    /// are in id order here.
     pub(super) fn check_balloons(&self) -> Result<()> {
         self.balloons.check(MAX_BALLOONS, "balloon", |b| self.check_balloon(b))
     }
 
     fn check_balloon(&self, b: &Balloon) -> Result<()> {
         require(self.view(b.view).is_some(), || format!("it is on view {}, which the drawing doesn't have", ids::encode(b.view)))?;
+        if let Some(list) = b.parts_list {
+            let named = || format!("it names table {}, which isn't one of the drawing's parts lists", ids::encode(list));
+            require(self.tables.by_id(list).is_some_and(|t| matches!(t.kind, Kind::PartsList(_))), named)?;
+        }
         check_edge(&b.edge)?;
         require(!b.edge.path.is_empty(), || "it points at a placed part: its edge's body is placed through an occurrence".into())?;
         let [x, y] = b.at;

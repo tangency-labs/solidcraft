@@ -12,8 +12,8 @@
 //! A row is named by its `RowKey`: the rows it is listed under and its lowest member (a
 //! component and the type it counts as there), however its part number or contents read. Its
 //! mass is what one of its parts weighs as the row stands for it (`Holds`), so the rows of any
-//! list add up to the assembly once. The keys, what rows stand for, their members and `row_of`
-//! stay inside this crate until balloons read them; item numbers are saved by key ([`numbers`]). Placements are rigid, so
+//! list add up to the assembly once. The keys, what rows stand for and their members stay inside
+//! this crate: a balloon reads its row's item ([`Bom::item_of`]), and item numbers are saved by key ([`numbers`]). Placements are rigid, so
 //! each definition is weighed once however often it is placed, and kept in the [`Tree`] for every list made from it. The
 //! assembly's own mass is weighed the same way, never added up from rows: a row whose definitions
 //! weigh differently has none.
@@ -266,8 +266,7 @@ pub struct Bom {
 
 /// Why a placement is counted in no row of a list.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[cfg_attr(not(test), expect(dead_code, reason = "item numbers and balloons follow rows by them (#3874)"))]
-pub(crate) enum Unlisted {
+pub enum Unlisted {
     /// No placement below the assembly listed has that path.
     NotFound,
     /// It counts as a reference, or is inside one: no bill of materials counts it.
@@ -298,8 +297,7 @@ impl Bom {
     /// that lists it, else the row of the part it is inside (a nut inside a purchased bolt is
     /// counted in the bolt's). `tree` is the one the list was made from, with its members
     /// (`list_with`).
-    #[cfg_attr(not(test), expect(dead_code, reason = "item numbers and balloons follow rows by them (#3874)"))]
-    pub(crate) fn row_of(&self, tree: &Tree, path: &[u64]) -> std::result::Result<&Row, Unlisted> {
+    pub(crate) fn row_of(&self, tree: &Tree, path: &[u64]) -> std::result::Result<(Vec<u32>, &Row), Unlisted> {
         if path.len() > MAX_PLACEMENT_DEPTH {
             return Err(Unlisted::NotFound);
         }
@@ -316,14 +314,26 @@ impl Bom {
         at.and_then(|at| self.row_at(at)).ok_or(Unlisted::NoRow)
     }
 
-    /// The row at `at`: its position among the rows, then among each one's children.
-    fn row_at(&self, at: &[usize]) -> Option<&Row> {
+    /// The row at `at` (its position among the rows, then among each one's children), with its item
+    /// numbers from the top.
+    fn row_at(&self, at: &[usize]) -> Option<(Vec<u32>, &Row)> {
         let (first, rest) = at.split_first()?;
         let mut row = self.rows.get(*first)?;
+        let mut item = vec![row.item];
         for &i in rest {
             row = row.children.get(i)?;
+            item.push(row.item);
         }
-        Some(row)
+        Some((item, row))
+    }
+
+    /// The item ("1.2") of the row a placement is counted in, by its occurrence path from the top of
+    /// the design: a balloon's, which is cut to start below the assembly listed. A path that doesn't
+    /// run through that assembly is [`Unlisted::NotFound`]; through one of its placements, whichever,
+    /// it reads the same row. `tree` is as for `row_of`.
+    pub fn item_of(&self, tree: &Tree, path: &[u64]) -> std::result::Result<String, Unlisted> {
+        let below = tree.below(self.source, path).ok_or(Unlisted::NotFound)?;
+        self.row_of(tree, below).map(|(item, _)| item_text(&item))
     }
 
     /// Where each member's row is, for `row_of`.
@@ -402,6 +412,21 @@ impl<'a> Tree<'a> {
     /// What a component places.
     fn contents(&self, id: u64) -> &[Placed] {
         self.children.get(&id).map_or(&[], Vec::as_slice)
+    }
+
+    /// What of `path`, from the top of the design, runs below `source`'s first placement on it.
+    fn below<'p>(&self, source: u64, path: &'p [u64]) -> Option<&'p [u64]> {
+        if source == 0 {
+            return Some(path);
+        }
+        let mut component = 0;
+        for (i, id) in path.iter().enumerate() {
+            component = self.contents(component).iter().find(|p| p.occurrence == *id)?.member.component;
+            if component == source {
+                return path.get(i + 1..);
+            }
+        }
+        None
     }
 
     /// The components placed in `id` whose parts are part of what `id` stands for as `holds` says
@@ -852,7 +877,7 @@ pub fn list(tree: &mut Tree, request: &Request) -> Result<Bom> {
 
 /// [`list`], with each row's members when asked (what item numbers and balloons will follow rows
 /// by, and what `row_of` reads), so a list made for its rows alone copies no paths.
-pub(crate) fn list_with(tree: &mut Tree, request: &Request, members: bool) -> Result<Bom> {
+pub fn list_with(tree: &mut Tree, request: &Request, members: bool) -> Result<Bom> {
     if request.source != 0 && !tree.components.contains_key(&request.source) {
         return Err(DocError::Unknown(format!("component {}", request.source)));
     }

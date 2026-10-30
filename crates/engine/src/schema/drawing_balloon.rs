@@ -11,6 +11,7 @@ use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Value;
 
 use super::drawing_dimension::{CandidateResult, EdgeParam};
+use super::drawing_table::TableIdParam;
 use super::drawing_view::ViewIdParam;
 
 /// A balloon, by its id.
@@ -46,6 +47,10 @@ pub struct AddParams {
     pub edge: EdgeParam,
     /// The balloon's centre on paper, in millimetres from the view's centre.
     pub at: [f64; 2],
+    /// The parts list it reads. Left out, its sheet's only one, else the drawing's only one.
+    #[serde(default, deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "TableIdParam")]
+    pub parts_list: Option<TableIdParam>,
 }
 
 /// What `drawing.balloon.inspect` takes.
@@ -74,6 +79,10 @@ pub struct BalloonSet {
     #[serde(deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "[f64; 2]")]
     pub at: Option<[f64; 2]>,
+    /// The parts list it reads, or `null` to read its sheet's only one, else the drawing's.
+    #[serde(deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "Option<TableIdParam>")]
+    pub parts_list: Option<Option<TableIdParam>>,
 }
 
 /// What `drawing.balloon.edit` returns.
@@ -107,6 +116,19 @@ pub struct BalloonResult {
     pub exact: bool,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub candidates: Vec<CandidateResult>,
+    /// The parts list it reads.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub parts_list: Option<String>,
+    /// With no parts list to go by, the ones it could name.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub choices: Vec<String>,
+    /// Its row's item in that list ("1.2").
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub item: Option<String>,
+    /// `ok`, `no_list`, `reference`, `no_row` or `not_found`.
+    pub row_status: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub warnings: Vec<String>,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,

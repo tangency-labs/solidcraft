@@ -149,6 +149,9 @@ pub struct TableResult {
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct DeleteResult {
     pub table: String,
+    /// The balloons that named it, which name no list now.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub balloons: Vec<String>,
 }
 
 #[cfg(test)]

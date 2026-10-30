@@ -22,6 +22,21 @@ pub use solidcraft_geom::ids::{ID_CHARS, decode, deserialize, encode, serialize}
 
 use crate::{DocError, Result};
 
+/// `#[serde(with = "crate::ids::option")]`: a field holding an id, or nothing.
+pub mod option {
+    use serde::de::Error;
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+    pub fn serialize<S: Serializer>(id: &Option<u64>, s: S) -> std::result::Result<S::Ok, S::Error> {
+        id.map(super::encode).serialize(s)
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> std::result::Result<Option<u64>, D::Error> {
+        let read = |text: String| super::decode(&text).ok_or_else(|| D::Error::custom(format!("`{text}` is not an id")));
+        Option::<String>::deserialize(d)?.map(read).transpose()
+    }
+}
+
 /// splitmix64's step: odd, so the state passes every `u64` before it comes round again.
 const GAMMA: u64 = 0x9e37_79b9_7f4a_7c15;
 

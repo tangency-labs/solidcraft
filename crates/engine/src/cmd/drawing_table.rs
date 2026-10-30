@@ -11,7 +11,7 @@ use std::sync::Arc;
 
 use serde_json::Value;
 use solidcraft_doc::drawing::table::{Kind, MassFormat, PartsList, SheetTable};
-use solidcraft_doc::drawing::{Drawing, SheetComponent};
+use solidcraft_doc::drawing::{Drawing, OnSheet, SheetComponent};
 use solidcraft_doc::ids;
 
 use super::CommandSpec;
@@ -60,7 +60,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .doc_only()
         .contract(&DELETE_CONTRACT)
         .output(output_schema_for::<DeleteResult>)
-        .params("table: its id → {table}. A sheet's delete counts the tables on it and takes them with `contents: delete`. One undo step."),
+        .params("table: its id → {table, balloons?: those that named it, which name no list now}. A sheet's delete counts the tables on it and takes them with `contents: delete`. One undo step."),
 ];
 
 fn add(s: &mut Session, p: &Value) -> Result<Value> {
@@ -103,12 +103,13 @@ fn edit(s: &mut Session, p: &Value) -> Result<Value> {
 fn delete(s: &mut Session, p: &Value) -> Result<Value> {
     let request: DeleteParams = crate::schema::read(DELETE, p)?;
     let id = request.table.0;
-    s.edit_drawing(DELETE, |d| {
-        let at = d.tables.index_of(id).ok_or_else(|| bad(DELETE, format!("the drawing has no table {}", ids::encode(id))))?;
-        d.tables.remove(at);
-        Ok(())
+    let balloons = s.edit_drawing(DELETE, |d| {
+        d.tables.by_id(id).ok_or_else(|| bad(DELETE, format!("the drawing has no table {}", ids::encode(id))))?;
+        let named = d.balloons.iter().filter(|b| b.parts_list == Some(id)).map(|b| ids::encode(b.id)).collect();
+        d.remove_objects(&OnSheet { tables: vec![id], ..Default::default() });
+        Ok(named)
     })?;
-    serde_json::to_value(DeleteResult { table: ids::encode(id) }).map_err(|e| EngineError::Other(e.to_string()))
+    serde_json::to_value(DeleteResult { table: ids::encode(id), balloons }).map_err(|e| EngineError::Other(e.to_string()))
 }
 
 /// The list a parts list on `sheet` starts with: what its sheet documents, else the design.

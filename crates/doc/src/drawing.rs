@@ -438,6 +438,12 @@ impl Drawing {
         self.sheet_images.retain(|i| objects.images.binary_search(&i.id).is_err());
         self.drop_unused_images();
         self.tables.retain(|t| objects.tables.binary_search(&t.id).is_err());
+        // A balloon outlives the list it named, and goes back to the lists it could read.
+        for balloon in self.balloons.iter_mut() {
+            if balloon.parts_list.is_some_and(|list| objects.tables.binary_search(&list).is_ok()) {
+                Arc::make_mut(balloon).parts_list = None;
+            }
+        }
         if !objects.tags.is_empty() {
             Arc::make_mut(&mut self.revisions).delete_tags(&objects.tags);
         }
@@ -489,9 +495,9 @@ impl Drawing {
         })?;
         self.check_views()?;
         self.check_dimensions()?;
+        self.check_tables()?;
         self.check_balloons()?;
-        self.check_images()?;
-        self.check_tables()
+        self.check_images()
     }
 
     /// A sheet's own rules, and that the source it documents is one of the drawing's.
