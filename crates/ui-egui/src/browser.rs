@@ -158,15 +158,12 @@ pub struct TreeState {
     pub cloud_panel: Option<CloudPanel>,
     /// The plane a row at the top of the history lights this frame, kept the same way (#6975).
     history_plane: Option<String>,
-    /// A Section Analysis hidden with its eye in the Analysis folder: its planes, so the eye can
-    /// bring it back (#822). Empty: none hidden.
-    pub hidden_section: Vec<solidcraft_engine::SectionPlane>,
     /// What the Section Analysis dialog's OK made, per plane of the section, for Edit to start from.
     pub section_dialog: Vec<crate::dialogs::SectionDraft>,
-    /// The Analysis folder hidden with its own eye, and the Section Analysis hidden with its
-    /// own: the section shows only while neither is, and each eye keeps its state.
+    /// The Analysis folder hidden with its own eye, and the section planes it hid then: each
+    /// plane's eye keeps its own state meanwhile, and a plane shows only while both are shown.
     pub analysis_hidden: bool,
-    pub section_hidden: bool,
+    pub folder_hid: Vec<u64>,
     /// What waits for the Capture Position question: a command id, or [`SAVE`].
     pub capture_prompt: Option<String>,
     /// The design, undo depth and visibility when the button last went down: a drag over the eyes
@@ -2002,22 +1999,22 @@ pub fn view_items(app: &SolveApp, name: &str) -> Vec<Item> {
     ]
 }
 
-/// The Analysis folder: the Section Analysis, while there is one (shown or hidden), with an eye
-/// to hide and show it, a double-click to edit it and a menu to delete it (#822).
+/// The Analysis folder: a row per plane of the Section Analysis while it has any (shown or
+/// hidden), each with an eye to hide and show it, a double-click to edit it and a menu to delete
+/// it (#822).
 fn analysis_rows(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize, acts: &mut Actions) {
-    if !app.session.section.is_empty() {
-        // A section made (or remade) while an older one was hidden replaces it, shown.
-        app.tree.hidden_section.clear();
+    let mut planes: Vec<(u64, bool)> =
+        app.session.section.iter().map(|c| (c.id, true)).chain(app.session.section_hidden.iter().map(|c| (c.id, false))).collect();
+    planes.sort_unstable();
+    // A plane on show (made, shown, or brought back by Undo) shows the folder.
+    if planes.is_empty() || !app.session.section.is_empty() {
         app.tree.analysis_hidden = false;
-        app.tree.section_hidden = false;
+        app.tree.folder_hid.clear();
     }
-    if app.session.section.is_empty() && app.tree.hidden_section.is_empty() {
-        app.tree.analysis_hidden = false;
-        app.tree.section_hidden = false;
+    if planes.is_empty() {
         return;
     }
-    // Each eye is its own: the folder's never follows the section's, nor the other way round.
-    let (folder_shown, section_shown) = (!app.tree.analysis_hidden, !app.tree.section_hidden);
+    let folder_shown = !app.tree.analysis_hidden;
     let key = "analysis";
     let open = is_open(app, key, true);
     let r = draw_row(
@@ -2029,77 +2026,83 @@ fn analysis_rows(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize, acts: &mut
         toggle(app, key, true);
     }
     if r.eye {
-        app.tree.analysis_hidden = folder_shown;
-        sync_section(app);
+        set_analysis_shown(app, !folder_shown);
     }
     if !open {
         return;
     }
-    let r = draw_row(
-        ui,
-        ui.id().with("section_analysis"),
-        &Row {
-            depth: depth + 1,
-            eye: Some(section_shown),
-            icon: "section",
-            label: "Section Analysis",
-            dim: !section_shown || !folder_shown,
-            ..Default::default()
-        },
-    );
-    if r.eye {
-        set_section_shown(app, !section_shown);
-    }
-    if r.double {
-        crate::dialogs::edit_section(app);
-    }
-    if let Some(p) = r.secondary {
-        acts.menu = Some((p, Target::Section));
-    }
-}
-
-/// Show or hide the Section Analysis itself (its eye): a hidden Analysis folder still keeps it
-/// off.
-pub fn set_section_shown(app: &mut SolveApp, shown: bool) {
-    app.tree.section_hidden = !shown;
-    sync_section(app);
-}
-
-/// The section is on while both the Analysis folder and the section itself are shown.
-fn sync_section(app: &mut SolveApp) {
-    let on = !app.tree.analysis_hidden && !app.tree.section_hidden;
-    set_section_visible(app, on);
-}
-
-/// Hide the Section Analysis (keeping its planes to show it again) or show the hidden one.
-pub fn set_section_visible(app: &mut SolveApp, visible: bool) {
-    if visible {
-        let hidden = std::mem::take(&mut app.tree.hidden_section);
-        let hatch = app.session.section_hatch;
-        let shown = hidden.iter().enumerate().all(|(i, c)| {
-            let plane = json!({"origin": [c.origin.x, c.origin.y, c.origin.z], "normal": [c.normal.x, c.normal.y, c.normal.z]});
-            app.run("inspect.section", json!({"plane": plane, "hatch": hatch, "add": i > 0})).is_ok()
-        });
-        if !shown {
-            app.tree.hidden_section = hidden;
+    for (id, cutting) in planes {
+        let shown = section_plane_shown(app, id, cutting);
+        let label = section_row_label(id);
+        let r = draw_row(
+            ui,
+            ui.id().with(("section_plane", id)),
+            &Row { depth: depth + 1, eye: Some(shown), icon: "section", label: &label, dim: !shown || !folder_shown, ..Default::default() },
+        );
+        if r.eye {
+            set_section_shown(app, id, !shown);
         }
-    } else if !app.session.section.is_empty() {
-        let section = app.session.section.clone();
-        if app.run("inspect.section", json!({"clear": true})).is_ok() {
-            app.tree.hidden_section = section;
+        if r.double {
+            crate::dialogs::edit_section_plane(app, Some(id));
+        }
+        if let Some(p) = r.secondary {
+            acts.menu = Some((p, Target::Section { plane: id }));
         }
     }
 }
 
-/// The menu of the Section Analysis row.
-pub fn section_items(app: &SolveApp) -> Vec<Item> {
-    let visible = !app.tree.section_hidden;
+/// A section plane's row in the Analysis folder (`row:Section 2`; shown translated).
+pub fn section_row_label(id: u64) -> String {
+    format!("Section {id}")
+}
+
+/// Whether a section plane's own eye is open: it cuts, or the hidden Analysis folder hid it.
+fn section_plane_shown(app: &SolveApp, id: u64, cutting: bool) -> bool {
+    cutting || (app.tree.analysis_hidden && app.tree.folder_hid.contains(&id))
+}
+
+/// Show or hide one section plane (its eye): while the Analysis folder is hidden, only its own
+/// eye changes, and it shows with the folder.
+pub fn set_section_shown(app: &mut SolveApp, id: u64, shown: bool) {
+    if app.tree.analysis_hidden {
+        app.tree.folder_hid.retain(|x| *x != id);
+        if shown && app.session.section_hidden.iter().any(|c| c.id == id) {
+            app.tree.folder_hid.push(id);
+        }
+        return;
+    }
+    drop(app.run("inspect.section", if shown { json!({ "show": id }) } else { json!({ "hide": id }) }));
+}
+
+/// Hide the Analysis folder (the planes on show, in one step) or show it again (the planes it
+/// hid that are still hidden).
+pub fn set_analysis_shown(app: &mut SolveApp, shown: bool) {
+    if shown {
+        let back: Vec<u64> = app.tree.folder_hid.iter().copied().filter(|id| app.session.section_hidden.iter().any(|c| c.id == *id)).collect();
+        if !back.is_empty() {
+            drop(app.run("inspect.section", json!({ "show": back })));
+        }
+        app.tree.analysis_hidden = false;
+        app.tree.folder_hid.clear();
+    } else {
+        let on: Vec<u64> = app.session.section.iter().map(|c| c.id).collect();
+        if on.is_empty() || app.run("inspect.section", json!({ "hide": on })).is_ok() {
+            app.tree.analysis_hidden = true;
+            app.tree.folder_hid = on;
+        }
+    }
+}
+
+/// The menu of a section plane's row.
+pub fn section_items(app: &SolveApp, plane: u64) -> Vec<Item> {
+    let cutting = app.session.section.iter().any(|c| c.id == plane);
+    let visible = section_plane_shown(app, plane, cutting);
     vec![
-        Item::action("ui.editSection", "Edit Section Analysis", "section"),
+        Item::action("ui.editSection", "Edit Section Analysis", "section").with(json!({ "plane": plane })),
         Item::sep(),
-        Item::action("ui.unsection", "Delete", "delete"),
+        Item::action("ui.removeSectionPlane", "Delete", "delete").with(json!({ "plane": plane })),
         Item::sep(),
-        Item::action("ui.sectionVisible", "Show/Hide", "eye").key("V").with(json!({ "visible": !visible })),
+        Item::action("ui.sectionVisible", "Show/Hide", "eye").key("V").with(json!({ "plane": plane, "visible": !visible })),
     ]
 }
 

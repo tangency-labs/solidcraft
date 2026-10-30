@@ -4177,35 +4177,54 @@ pub(crate) fn run_dialog(app: &mut SolveApp, d: &Dialog) -> Result<(), String> {
             Some(id) => app.session.section.iter().find(|c| c.id == *id),
             None => app.session.section.last(),
         }
-        .map(|c| (c.origin, c.normal));
-        let section = &app.session.section;
-        app.tree
-            .section_dialog
-            .retain(|last| section.iter().any(|c| same_cut((c.origin, c.normal), last.cut)) && !made.is_some_and(|m| same_cut(m, last.cut)));
+        .copied();
         // Programmatic geometry is reconstructed from the actual session, never cached.
-        if let Some(cut) = made.filter(|_| !(d.extra.contains_key("plane") && sels(d, 0).is_empty())) {
-            app.tree.section_dialog.push(SectionDraft { offset: offset.clone(), flip: *flip, hatch: *hatch, plane: sels(d, 0).to_vec(), cut });
+        if let Some(c) = made.filter(|_| !(d.extra.contains_key("plane") && sels(d, 0).is_empty())) {
+            let drafts = &mut app.tree.section_dialog;
+            drafts.retain(|last| !(last.id == c.id && same_cut((c.origin, c.normal), last.cut)));
+            drafts.push(SectionDraft {
+                id: c.id,
+                offset: offset.clone(),
+                flip: *flip,
+                hatch: *hatch,
+                plane: sels(d, 0).to_vec(),
+                cut: (c.origin, c.normal),
+            });
+            if drafts.len() > SECTION_DRAFTS {
+                drafts.remove(0);
+            }
         }
     }
     Ok(())
 }
 
-/// Edit Section Analysis: its dialog, where the dialog that made the section shown (or hidden)
-/// now left it, so the cut moves on from there. A section of one plane made some other way opens
-/// it afresh, as the toolbar always does (a new section, in place of the old), or with the
-/// viewport's Section status, in the same form from its actual geometry. A section of several
-/// planes edits its last plane in place, keeping the others; a hidden one is shown.
+/// Section drafts kept: enough for Undo and Redo to find the dialog each plane was left at.
+const SECTION_DRAFTS: usize = 64;
+
+/// Edit Section Analysis: its dialog, where the dialog that made the section left it, so the cut
+/// moves on from there.
 pub fn edit_section(app: &mut SolveApp) {
-    if app.session.section.is_empty() && app.tree.hidden_section.len() > 1 {
-        app.tree.analysis_hidden = false;
-        app.tree.section_hidden = false;
-        crate::browser::set_section_visible(app, true);
-    }
+    edit_section_plane(app, None);
+}
+
+/// Edit one plane of the section (`plane`, else its last): the dialog where the dialog that made
+/// that plane left it. A section of one plane made some other way opens it afresh, as the toolbar
+/// always does (a new section, in place of the old), or with the viewport's Section status, in
+/// the same form from its actual geometry. A plane of several moves in place, keeping the others;
+/// a hidden one is shown by OK.
+pub fn edit_section_plane(app: &mut SolveApp, plane: Option<u64>) {
+    let mut planes: Vec<solidcraft_engine::SectionPlane> = app.session.section.iter().chain(&app.session.section_hidden).copied().collect();
+    planes.sort_by_key(|c| c.id);
     app.start_section_edit();
-    let planes = if app.session.section.is_empty() { &app.tree.hidden_section } else { &app.session.section };
-    let Some(plane) = planes.last().copied() else { return };
+    let Some(plane) = (match plane {
+        Some(id) => planes.iter().find(|c| c.id == id),
+        None => planes.last(),
+    })
+    .copied() else {
+        return;
+    };
     let edit = (planes.len() > 1).then_some(plane.id);
-    let last = app.tree.section_dialog.iter().find(|last| same_cut((plane.origin, plane.normal), last.cut)).cloned();
+    let last = app.tree.section_dialog.iter().rev().find(|last| last.id == plane.id && same_cut((plane.origin, plane.normal), last.cut)).cloned();
     let section_hatch = app.session.section_hatch;
     let geometry = app.preferences.viewport_section_status;
     let Some(d) = app.dialog.as_mut().filter(|d| matches!(d.kind, Kind::Section { .. })) else { return };
@@ -4241,11 +4260,12 @@ fn section_from_geometry(d: &mut Dialog, plane: solidcraft_engine::SectionPlane,
     d.extra.insert("plane".into(), json!({"origin": base, "normal": canonical}));
 }
 
-/// What the Section Analysis dialog's OK made: its distance, flip and plane pick, and the cut
-/// (origin, normal) they made, so Edit reopens the dialog where it was while that cut stands
-/// (one per plane of the section).
+/// What the Section Analysis dialog's OK made for one plane (its id): its distance, flip and
+/// plane pick, and the cut (origin, normal) they made, so Edit reopens the dialog where it was
+/// while that plane stands there.
 #[derive(Clone, Debug)]
 pub struct SectionDraft {
+    pub id: u64,
     pub offset: String,
     pub flip: bool,
     pub hatch: bool,
@@ -4253,7 +4273,7 @@ pub struct SectionDraft {
     pub cut: (Vec3, Vec3),
 }
 
-/// The same cut, up to rounding (hiding and showing a section runs it again from its plane).
+/// The same cut, up to rounding.
 fn same_cut(a: (Vec3, Vec3), b: (Vec3, Vec3)) -> bool {
     let tol = 1e-9 * (1.0 + a.0.len().max(b.0.len()));
     (a.0 - b.0).len() <= tol && (a.1 - b.1).len() <= 1e-9

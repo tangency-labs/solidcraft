@@ -2781,7 +2781,8 @@ pub fn section_planes(app: &SolveApp) -> Vec<SectionPlane> {
             return if adding { app.session.section.clone() } else { Vec::new() };
         };
         let mut scratch = app.session.scratch();
-        scratch.section = app.session.section.clone();
+        (scratch.section, scratch.section_hidden, scratch.section_hatch) =
+            (app.session.section.clone(), app.session.section_hidden.clone(), app.session.section_hatch);
         return match scratch.execute("inspect.section", &p) {
             Ok(_) => scratch.section,
             Err(_) if adding => app.session.section.clone(),

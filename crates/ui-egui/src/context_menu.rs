@@ -100,8 +100,10 @@ pub enum Target {
     PointCloud {
         id: u64,
     },
-    /// The Section Analysis in the browser's Analysis folder.
-    Section,
+    /// A plane of the Section Analysis in the browser's Analysis folder (its id).
+    Section {
+        plane: u64,
+    },
     /// A component's Bodies, Sketches or Construction folder, under the design (`scope` `c0`)
     /// or a placement (`o:<path>`).
     Folder {
@@ -407,7 +409,7 @@ pub fn items(app: &SolveApp, target: &Target) -> Vec<Item> {
         Target::PointCloud { id } => crate::browser::point_cloud_items(app, *id),
         Target::Origin => crate::browser::origin_items(app),
         Target::NamedViews => vec![act("ui.newView", "New Named View", "perspective")],
-        Target::Section => crate::browser::section_items(app),
+        Target::Section { plane } => crate::browser::section_items(app, *plane),
         Target::Joint { id } => joint_items(app, *id),
         Target::ToolbarCommand { id } => crate::toolbar_custom::command_items(app, id),
         Target::Toolbar => crate::toolbar_custom::toolbar_items(app),
@@ -643,8 +645,10 @@ fn viewport_items(app: &SolveApp) -> Vec<Item> {
         v.push(act("ui.selectOther", "Select Other…", "select").key("Hold click"));
         v.push(Item::sep());
     }
-    // A section's cut face: turn its plane off (the whole section when it has only that one).
+    // A section's cut face: edit its plane, or turn it off (the whole section when it has only
+    // that one).
     if let Some(plane) = app.menu.section_plane.filter(|id| app.session.section.iter().any(|c| c.id == *id)) {
+        v.push(act("ui.editSectionView", "Edit Section View", "section").with(json!({ "plane": plane })));
         v.push(act("ui.sectionViewOff", "Turn Off Section View", "section").with(json!({ "plane": plane })));
         v.push(Item::sep());
     }
@@ -1610,26 +1614,25 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
         "ui.tangentChain" => tangent_chain(app),
         "ui.origin" => app.set_origin_shown(!app.origin_shown()),
         "ui.clear" => drop(app.run("select.clear", json!({}))),
-        "ui.unsection" => {
-            app.tree.hidden_section.clear();
-            drop(app.run("inspect.section", json!({"clear": true})));
-        }
+        "ui.unsection" => drop(app.run("inspect.section", json!({"clear": true}))),
         "ui.sectionView" => {
             if let Some(face) = p.get("face").and_then(|f| serde_json::from_value::<Sel>(f.clone()).ok()) {
                 section_view(app, face);
             }
         }
-        "ui.sectionViewOff" => {
-            let id = p.get("plane").and_then(Value::as_u64);
-            if app.session.section.len() > 1 && id.is_some_and(|id| app.session.section.iter().any(|c| c.id == id)) {
+        // Removing a section's last plane turns it off.
+        "ui.sectionViewOff" | "ui.removeSectionPlane" => {
+            if let Some(id) = p.get("plane").and_then(Value::as_u64) {
+                app.tree.folder_hid.retain(|x| *x != id);
                 drop(app.run("inspect.section", json!({ "remove": id })));
-            } else {
-                app.tree.hidden_section.clear();
-                drop(app.run("inspect.section", json!({"clear": true})));
             }
         }
-        "ui.editSection" => crate::dialogs::edit_section(app),
-        "ui.sectionVisible" => crate::browser::set_section_shown(app, p.get("visible").and_then(Value::as_bool).unwrap_or(true)),
+        "ui.editSection" | "ui.editSectionView" => crate::dialogs::edit_section_plane(app, p.get("plane").and_then(Value::as_u64)),
+        "ui.sectionVisible" => {
+            if let Some(id) = p.get("plane").and_then(Value::as_u64) {
+                crate::browser::set_section_shown(app, id, p.get("visible").and_then(Value::as_bool).unwrap_or(true));
+            }
+        }
         "ui.fit" => app.animate_view("fit"),
         "ui.home" => app.animate_view("home"),
         // One command for the whole selection: all fixed unless all already are.
@@ -1910,19 +1913,19 @@ fn sketches_to_parts(app: &mut SolveApp, p: Value) {
 }
 
 /// Section View on a face: the Section Analysis dialog on the face's plane (its outward normal,
-/// so the arrow dragged inward cuts into the part). With a section on show the plane joins it,
-/// flipped to hide the part's side, so the cut stays as it was until the plane moves, and
-/// keeping the section's hatch.
+/// unflipped, so a positive distance cuts into the part). With a section on (its planes shown or
+/// hidden) the plane joins it, keeping the section's hatch: at 0 it hides nothing more, and moved in it cuts away what
+/// lies beyond it and every other plane.
 fn section_view(app: &mut SolveApp, face: Sel) {
-    let adding = !app.session.section.is_empty();
+    let adding = !app.session.section.is_empty() || !app.session.section_hidden.is_empty();
     let section_hatch = app.session.section_hatch;
     app.start_section_edit();
     if let Some(d) = app.dialog.as_mut()
         && let crate::dialogs::Kind::Section { add, flip, hatch, .. } = &mut d.kind
     {
-        *add = adding;
+        (*add, *flip) = (adding, false);
         if adding {
-            (*flip, *hatch) = (true, section_hatch);
+            *hatch = section_hatch;
         }
         if let Some(plane) = d.inputs.first_mut() {
             plane.items = vec![face];
