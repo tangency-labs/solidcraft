@@ -9,10 +9,15 @@ on:
         description: "Published GitHub release tag to publish (for example, v1.2.3)"
         required: true
         type: string
+  # A release's own Pages request is cancelled when a later one queues behind it, and that later one
+  # can fail (#5287): until a Pages run succeeds, the feed keeps the previous release. Check hourly.
+  schedule:
+    - cron: '41 * * * *'
 
 permissions:
   contents: read
   actions: write
+  pages: read
 
 concurrency:
   group: flatpak-pages-${{ github.repository }}
@@ -27,6 +32,7 @@ jobs:
       RELEASE_TAG: ${{ github.event.release.tag_name || inputs.release_tag }}
     steps:
       - name: Deploy through the shared Pages workflow
+        if: github.event_name != 'schedule'
         run: |
           set -euo pipefail
           published="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE_TAG" \
@@ -35,3 +41,32 @@ jobs:
           gh workflow run pages.yml --repo "$GITHUB_REPOSITORY" --ref main \
             -f release_tag="$RELEASE_TAG"
           echo "Requested the combined Pages deployment for $RELEASE_TAG" >>"$GITHUB_STEP_SUMMARY"
+      - name: Request the deployment again if the feed is behind the latest release
+        if: github.event_name == 'schedule'
+        run: |
+          set -euo pipefail
+          # The same choice as packaging/flatpak-site.sh makes for a Pages run without a tag.
+          latest="$(gh api "repos/$GITHUB_REPOSITORY/releases?per_page=100" \
+            --jq '[.[] | select(.draft == false and .prerelease == false)][0].tag_name // empty')"
+          if [ -z "$latest" ]; then exit 0; fi
+          base_url="$(gh api "repos/$GITHUB_REPOSITORY/pages" --jq .html_url)"
+          base_url="https://${base_url#*://}"
+          served="$(curl --fail --silent --location "${base_url%/}/flatpak/index.html" \
+            | sed -n 's/.*Latest published release: <strong>\([^<]*\)<.*/\1/p')" || served=""
+          if [ "$served" = "$latest" ]; then exit 0; fi
+          pending="$(gh run list --repo "$GITHUB_REPOSITORY" --workflow pages.yml --limit 20 \
+            --json status --jq '[.[] | select(.status != "completed")] | length')"
+          if [ "$pending" != 0 ]; then
+            echo "The feed serves ${served:-nothing}, not $latest; a Pages run is already on its way" >>"$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          # One retry per commit on main: a build that fails again needs a person, not a loop.
+          head="$(gh api "repos/$GITHUB_REPOSITORY/commits/main" --jq .sha)"
+          retried="$(gh run list --repo "$GITHUB_REPOSITORY" --workflow pages.yml --event workflow_dispatch \
+            --commit "$head" --json conclusion --jq '[.[] | select(.conclusion != "cancelled")] | length')"
+          if [ "$retried" != 0 ]; then
+            echo "::error::The Flatpak feed serves ${served:-nothing}, not $latest, and the Pages run requested for $head did not fix it"
+            exit 1
+          fi
+          gh workflow run pages.yml --repo "$GITHUB_REPOSITORY" --ref main -f release_tag="$latest"
+          echo "The feed served ${served:-nothing}; requested the combined Pages deployment for $latest" >>"$GITHUB_STEP_SUMMARY"

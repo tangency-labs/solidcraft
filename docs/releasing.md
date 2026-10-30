@@ -190,6 +190,12 @@ docs updates include the latest stable Flatpak release too. Verify the resulting
 not only the dispatch job, so a release cannot erase the docs or app and docs updates cannot
 erase the package repository.
 
+Only one Pages run waits at a time, so a later push to `main` cancels the release's own Pages
+request; that later run includes the release, but if it fails nothing deploys. The Flatpak workflow
+therefore also runs hourly: when `flatpak/index.html` names an older release than the latest stable
+one and no Pages run is queued, it requests one for the latest tag, once per commit on `main`. If
+that run fails too, the hourly check fails until a Pages run succeeds.
+
 ## Snap package and Snap Store
 
 Every release and nightly attaches `solidcraft-<version>-linux-<arch>.snap` for x86_64 and
