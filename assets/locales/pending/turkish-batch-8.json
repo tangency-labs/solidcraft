@@ -1,0 +1,33 @@
+{
+  "tr": {
+    "browser.calibrate_click_a": "A Noktası için görüntüye tıklayın veya koordinatlarını yazın.",
+    "browser.calibrate_click_b": "B Noktası için görüntüye tıklayın veya koordinatlarını yazın.",
+    "help.sketch.construction_line": "İki noktadan geçen sonsuz bir yardımcı doğru oluşturun. Profilleri bölmeden bir eskizi kurgulamak için kullanın.",
+    "help.sketch.construction_line.angle": "Eskizin X ekseninden belirli bir açıyla sonsuz bir yardımcı doğru oluşturun. Noktayı seçip açıyı yazın veya yönünü seçin.",
+    "help.sketch.construction_line.bisector": "Kesişen iki düz eskiz çizgisini seçin, ardından iki açıortaydan birini seçin. Sonuç, kaynak çizgilerini izler.",
+    "help.sketch.construction_line.horizontal": "Bir noktadan geçen sonsuz yatay bir yardımcı doğru oluşturun. Yatay kısıtlaması sonraki düzenlemelerde de korunur.",
+    "help.sketch.construction_line.parallel": "Düz bir eskiz çizgisi seçin, ardından paralel bir sonsuz yardımcı doğru yerleştirin. Başka bir referans seçmek için sağ tıklayın.",
+    "help.sketch.construction_line.perpendicular": "Düz bir eskiz çizgisi seçin, ardından dik bir sonsuz yardımcı doğru yerleştirin. Başka bir referans seçmek için sağ tıklayın.",
+    "help.sketch.construction_line.tangent_at": "Bir daire veya dairesel yay üzerindeki bir noktada ya da açık bir spline veya konik eğrinin uç noktasında teğet oluşturun. Önce eğriyi, sonra değme noktasını seçin.",
+    "help.sketch.construction_line.tangent_external": "Bir daire veya dairesel yay seçin, ardından bir dış nokta ve bir teğet çözümü seçin. Önizlemeler yalnızca çizilen yay üzerindeki değme noktalarını gösterir.",
+    "help.sketch.construction_line.tangent_two": "İki daire veya dairesel yay seçin, ardından önizlemede ortak bir teğet seçin. Değme noktaları çizilen eğriler üzerinde olmalıdır.",
+    "help.sketch.construction_line.vertical": "Bir noktadan geçen sonsuz dikey bir yardımcı doğru oluşturun. Dikey kısıtlaması sonraki düzenlemelerde de korunur.",
+    "prefs.persistent_ribbon_pressed": "Etkin şerit komutlarını vurgula",
+    "prefs.persistent_ribbon_pressed_help": "Şerit komutlarını, etkileri açık olduğu sürece vurgula. Önceki nötr görünümü ve komut yardımını korumak için kapatın.",
+    "prefs.sketch_construction_lines": "Genişletilmiş yardımcı doğru araçları",
+    "prefs.sketch_open_look_at": "Eskiz açıldığında görünümü ona doğru döndür",
+    "prefs.sketch_open_look_at_note": "Kapalı: eskiz oluşturmak veya düzenlemek görünümü olduğu gibi bırakır. Bak komutu, istediğinizde görünümü eskize çevirir.",
+    "recovery.discard_all": "Tümünü at",
+    "recovery.discard_all_detail": "Bu işlem geri alınamaz.",
+    "recovery.discard_all_title": "{count} otomatik kayıt atılsın mı?",
+    "recovery.discard_all_title_one": "1 otomatik kayıt atılsın mı?",
+    "ui.construction.angle_hint": "Yardımcı doğru: bir noktaya tıklayın, ardından bir açı yazın veya bir yön seçin",
+    "ui.construction.bisector_hint": "Açıortay: kesişen iki düz çizgiyi, ardından istenen çözümü seçin",
+    "ui.construction.common_hint": "Ortak teğet: iki daire/yay, ardından istenen çözümü seçin",
+    "ui.construction.contact_hint": "Teğet: bir daire/yay veya açık spline/konik eğri, ardından değme noktasını seçin (serbest biçimli eğriler: uç noktalar)",
+    "ui.construction.external_hint": "Teğet: bir daire veya yay, bir dış nokta, ardından istenen çözümü seçin",
+    "ui.construction.free_hint": "Yardımcı doğru: iki noktaya tıklayın; yeniden başlamak için sağ tıklayın",
+    "ui.construction.point_hint": "Yardımcı doğru: geçeceği noktaya tıklayın",
+    "ui.construction.reference_hint": "Yardımcı doğru: düz bir çizgi, ardından bir nokta seçin; referansı değiştirmek için sağ tıklayın"
+  }
+}
