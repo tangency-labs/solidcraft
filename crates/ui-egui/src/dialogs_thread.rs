@@ -1087,7 +1087,9 @@ mod contribution_tests {
         *designation = Some("1/4-20 UNC".into());
         *modeled = true;
         let reopened = Session::new(Document::from_json(&app.session.doc.to_json()).unwrap());
-        assert!(reopened.model.results.last().unwrap().error.as_ref().unwrap().contains("ISO metric"));
+        // The thread is metric (the M8 it was made as): a unified designation is not one of its.
+        let error = reopened.model.results.last().unwrap().error.clone().unwrap();
+        assert!(error.contains("unknown metric thread `1/4-20 UNC`"), "{error}");
     }
 
     #[test]

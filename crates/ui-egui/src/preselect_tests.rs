@@ -799,8 +799,8 @@ fn press_pull_then_curved_face_offsets_it() {
     crate::viewport::dialog_pick(&mut app, &hit, Sel::Face { body: "Body1".into(), index: wall, point: p });
     let d = app.dialog.clone().unwrap();
     assert!(matches!(d.kind, Kind::OffsetFaces { .. }));
-    // Both halves of the hole's wall.
-    assert_eq!(d.inputs[0].items.len(), 2);
+    // The hole's whole wall: one face, closed on its seam.
+    assert_eq!(d.inputs[0].items.len(), 1);
 
     let mut app = app_with(script);
     app.start("solid.press_pull");
