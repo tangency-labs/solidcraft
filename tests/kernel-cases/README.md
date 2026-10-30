@@ -48,7 +48,9 @@ One directory per area, one per case: `tests/kernel-cases/<area>/<id>/`.
 
 Each area also has its gate files: `KNOWN_FAILING` and `PATHS` (see [the gate](#the-kernel-rig-gate)).
 
-`<id>` is `<source number>-<short-name>`, such as `1894-prism-cut-touching-walls`.
+`<id>` is `<source number>-<short-name>`, such as `1894-prism-cut-touching-walls`. A case from a report with no issue or pull request (a failure the maintainers met in the app) is
+`report-<short-name>` and lists no `sources`; its `what` says where it was reported. A case that
+covers a command with no source at all is `cov-<short-name>`.
 
 Each case has:
 

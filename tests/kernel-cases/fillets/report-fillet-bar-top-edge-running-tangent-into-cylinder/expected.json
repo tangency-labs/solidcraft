@@ -1,11 +1,7 @@
 {
- "sources": [
-  "tangency-labs/solidcraft#1207"
- ],
- "what": "an r2 round of a bar's top edge whose side runs tangent into a cylinder: the round seemed to build but its body could not be measured or changed (SMLib refused the cylinder's wall coming back as a cylinder over more than a turn)",
+ "what": "an r2 round of a bar's top edge whose side runs tangent into a cylinder: the round seemed to build but its body could not be measured or changed (SMLib refused the cylinder's wall coming back as a cylinder over more than a turn); reported from the app (2026-10-30, test-peg part)",
  "source": "analytic",
  "method": "a bar 40 x 16 x 10 whose far end is a half disc R8 about (40, 8), a disc R8 about the same centre sketched on its top (the top's outline projected) and extruded 10 up, joined: the bar's sides run tangent into the cylinder, V0 = 6400 + 960 pi; the r2 round of the front top edge (y = 0, z = 10) runs into the cylinder's wall: removed = integral over y in [0, 2] of (2 - sqrt(4 - (2 - y)^2)) (40 - sqrt(64 - (8 - y)^2)) dy = 32.3064821881 (Simpson)",
  "body_count": 1,
- "faces": 9,
  "volume_mm3": 9383.622465258068
 }
