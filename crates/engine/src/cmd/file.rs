@@ -3545,6 +3545,11 @@ fn export_urdf(s: &Session, cmd: &str, path: &str, p: &Value) -> Result<Value> {
         effort: positive("effort")?,
         velocity: positive("velocity")?,
         mimic: bool_(p, "mimic").unwrap_or(true),
+        collision: match str_(p, "collision") {
+            None | Some("mesh") => solidcraft_io::urdf::CollisionDefault::Mesh,
+            Some("convex_hull") => solidcraft_io::urdf::CollisionDefault::ConvexHull,
+            Some(_) => return Err(bad(cmd, "`collision` must be mesh or convex_hull")),
+        },
         decals: Vec::new(),
     };
     // The pictures shown on the model are written only when asked for, so an export made the

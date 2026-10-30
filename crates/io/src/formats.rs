@@ -209,6 +209,11 @@ const URDF_OPTIONS: &[OptionSpec] = &[
     },
     OptionSpec { param: "images", label: "Pictures as textured visuals", kind: OptionKind::Bool { default: false } },
     OptionSpec { param: "mimic", label: "Couple motion links", kind: OptionKind::Bool { default: true } },
+    OptionSpec {
+        param: "collision",
+        label: "Collision",
+        kind: OptionKind::Choice { choices: &[("mesh", "Full mesh"), ("convex_hull", "Convex hull")], default: 0 },
+    },
 ];
 
 const SDF_OPTIONS: &[OptionSpec] = &[
