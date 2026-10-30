@@ -1,5 +1,7 @@
 //! Surface analyses: zebra stripes, draft angle and curvature map shading of the model's faces.
-//! View state only: no geometry changes and no undo step.
+//! View state only: no geometry changes and no undo step. The view analyses (these shadings,
+//! continuity seams, isocurves and curvature combs) are one group: one at a time is on, and
+//! `inspect.analysis` says which or turns it off.
 
 use serde_json::{Value, json};
 use solidcraft_geom::Vec3;
@@ -38,6 +40,18 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("curvature_map")
         .noundo()
         .params("radius?: mm shown red (default: a tenth of the model's size); clear?: true turns the analysis off"),
+    CommandSpec::new("inspect.analysis", "View Analysis", crate::checked!("inspect.analysis", analysis))
+        .icon("zebra")
+        .noundo()
+        .doc_only()
+        .contract(&ANALYSIS_CONTRACT)
+        .output(crate::schema::output_schema_for::<crate::schema::surface_analysis::AnalysisState>)
+        .params(
+            "off?: true turns the view analysis on now off. → active: the command id of the view analysis on (inspect.zebra, \
+             inspect.draft, inspect.curvature_map, inspect.environment_map, inspect.accessibility, inspect.continuity, \
+             inspect.isocurve or inspect.curvature_comb), or null. One is on at a time: turning one on turns the one on before \
+             off. Read-only without `off`",
+        ),
     CommandSpec::new("inspect.continuity", "Continuity Analysis", continuity).at("SURFACE", "INSPECT").icon("continuity").noundo().params(
         "body?: name (default: the visible bodies); edges?: [x,y,z] points or {\"index\": i} (default: every edge of the body; \
              a pick must match one body); samples?: 3…257 stations along each edge, ends included (default 33); \
@@ -52,10 +66,75 @@ pub static COMMANDS: &[CommandSpec] = &[
     ),
 ];
 
+const ANALYSIS_CONTRACT: crate::schema::TypedContract<crate::schema::surface_analysis::AnalysisParams> = crate::schema::TypedContract::new();
+
+/// The view analyses, by the command that turns each on: the shadings, the continuity seams, the
+/// isocurves and the curvature combs. One at a time is on.
+impl Session {
+    /// The view analysis on now, by its command id, or `None`.
+    pub fn active_analysis(&self) -> Option<&'static str> {
+        if let Some(a) = self.analysis {
+            Some(a.command())
+        } else if self.comb.is_some() {
+            Some("inspect.curvature_comb")
+        } else if !self.isocurves.is_empty() {
+            Some("inspect.isocurve")
+        } else if !self.continuity.is_empty() {
+            Some("inspect.continuity")
+        } else {
+            None
+        }
+    }
+
+    /// Turn every view analysis off but the one command `keep` turns on (`None`: all of them).
+    pub fn analyses_off(&mut self, keep: Option<&str>) {
+        if self.analysis.is_some_and(|a| Some(a.command()) != keep) {
+            self.analysis = None;
+        }
+        if keep != Some("inspect.curvature_comb") {
+            self.comb = None;
+        }
+        if keep != Some("inspect.isocurve") {
+            self.isocurves.clear();
+        }
+        if keep != Some("inspect.continuity") {
+            self.continuity.clear();
+        }
+        self.revision += 1;
+    }
+}
+
+impl SurfaceAnalysis {
+    /// The command that turns this analysis on.
+    pub fn command(self) -> &'static str {
+        match self {
+            SurfaceAnalysis::Zebra { .. } => "inspect.zebra",
+            SurfaceAnalysis::Draft { .. } => "inspect.draft",
+            SurfaceAnalysis::Curvature { .. } => "inspect.curvature_map",
+            SurfaceAnalysis::Environment => "inspect.environment_map",
+            SurfaceAnalysis::Access { .. } => "inspect.accessibility",
+        }
+    }
+}
+
+/// `inspect.analysis`: which view analysis is on, and `off` turns it off.
+fn analysis(s: &mut Session, p: &Value) -> Result<Value> {
+    let off = match p.get("off") {
+        None | Some(Value::Null) => false,
+        Some(Value::Bool(b)) => *b,
+        Some(_) => return Err(bad("inspect.analysis", "`off` must be true or false")),
+    };
+    if off {
+        s.analyses_off(None);
+    }
+    Ok(json!({"active": s.active_analysis()}))
+}
+
 fn set(s: &mut Session, p: &Value, a: SurfaceAnalysis) -> Result<Value> {
     if bool_(p, "clear").unwrap_or(false) {
         s.analysis = None;
     } else {
+        s.analyses_off(Some(a.command()));
         s.analysis = Some(a);
     }
     s.revision += 1;
@@ -212,6 +291,9 @@ fn continuity(s: &mut Session, p: &Value) -> Result<Value> {
         s.continuity.extend(seams);
     } else {
         s.continuity = seams;
+    }
+    if !s.continuity.is_empty() {
+        s.analyses_off(Some("inspect.continuity"));
     }
     s.revision += 1;
     Ok(json!({

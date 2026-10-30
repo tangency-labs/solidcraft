@@ -649,6 +649,7 @@ fn comb_options_draw_the_combs_shown_again() {
     h.step(&json!({"key": "Escape"})).unwrap();
     h.frames(2);
     assert!(shown_combs(&h.app).is_empty() && crate::scenario::rect_of("comb_options").is_none());
+    assert!(!crate::toolbar::shows_pressed(&h.app, "inspect.curvature_comb"), "Esc turned the analysis off");
 }
 
 /// Every comb shown shares one scale: the tool combs each new pick together with those already
@@ -676,4 +677,55 @@ fn combs_shown_together_share_one_scale() {
     set_comb_options(&mut h.app, CombOptions { length: 3.0, teeth: 12 });
     assert!((ratio(&h) - 2.0).abs() < 1e-9, "{}", ratio(&h));
     assert_eq!(shown_combs(&h.app)[1].len(), 12);
+}
+
+/// The view analysis buttons are one toggle group, reflecting the session's one analysis on:
+/// Curvature Comb on shows it pressed (through another dialog too); its button again turns it off
+/// and clears the combs; Zebra on turns the comb off, and Zebra again leaves none on.
+#[test]
+fn view_analysis_buttons_are_one_toggle_group() {
+    use crate::sketch_tools::shown_combs;
+    use crate::toolbar::shows_pressed;
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    h.app.run("solid.cylinder", json!({"radius": 10, "height": 20})).unwrap();
+    h.settle();
+    let (comb, zebra) = ("inspect.curvature_comb", "inspect.zebra");
+    let active = |h: &mut Harness| h.app.run("inspect.analysis", json!({})).unwrap()["active"].clone();
+    // Comb on, then off with its button again.
+    h.step(&json!({"start": comb})).unwrap();
+    h.frame();
+    assert!(shows_pressed(&h.app, comb) && !shows_pressed(&h.app, zebra));
+    assert_eq!(active(&mut h), json!(comb));
+    h.step(&json!({"click": {"world": [0, 10, 20]}})).unwrap();
+    assert_eq!(shown_combs(&h.app).len(), 1, "{:?}", h.app.status);
+    h.step(&json!({"start": comb})).unwrap();
+    h.frame();
+    assert!(shown_combs(&h.app).is_empty() && h.app.tool.is_none() && !shows_pressed(&h.app, comb));
+    assert_eq!(active(&mut h), json!(null));
+    // Comb on again; it stays on, pressed, while another dialog is open.
+    h.step(&json!({"start": comb})).unwrap();
+    h.step(&json!({"click": {"world": [0, 10, 20]}})).unwrap();
+    h.step(&json!({"start": "solid.fillet"})).unwrap();
+    h.frame();
+    assert!(h.app.dialog.is_some() && h.app.tool.is_none());
+    assert!(shows_pressed(&h.app, comb) && shown_combs(&h.app).len() == 1);
+    h.step(&json!({"key": "Escape"})).unwrap();
+    h.frame();
+    // Zebra on: the comb goes off and its combs go.
+    h.step(&json!({"start": zebra})).unwrap();
+    h.frame();
+    assert!(shows_pressed(&h.app, zebra) && !shows_pressed(&h.app, comb));
+    assert!(shown_combs(&h.app).is_empty());
+    assert_eq!(active(&mut h), json!(zebra));
+    // Comb on: Zebra goes off.
+    h.step(&json!({"start": comb})).unwrap();
+    h.frame();
+    assert!(shows_pressed(&h.app, comb) && !shows_pressed(&h.app, zebra) && h.app.session.analysis.is_none());
+    // Zebra on, then off: none is on.
+    h.step(&json!({"start": zebra})).unwrap();
+    h.step(&json!({"start": zebra})).unwrap();
+    h.frame();
+    assert!(!shows_pressed(&h.app, zebra) && !shows_pressed(&h.app, comb));
+    assert_eq!(active(&mut h), json!(null));
 }

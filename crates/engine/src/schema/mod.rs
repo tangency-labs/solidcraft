@@ -58,6 +58,7 @@ pub mod browser;
 pub mod diagnostics;
 pub mod features;
 pub mod inspect;
+pub mod surface_analysis;
 
 pub use check::{Contract, Issue, ParamCheck, TypedContract, input_schema_for, output_schema_for, run_checked, run_checked_as};
 pub use types::*;

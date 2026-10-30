@@ -325,6 +325,18 @@ pub fn start_hook(app: &mut SolveApp, id: &str) -> bool {
         app.set_status(format!("Continuity: {} (click the button again to turn it off)", counts.join(", ")), false);
         return true;
     }
+    if id == "inspect.curvature_comb" {
+        // With combs shown the button turns the analysis off; otherwise it turns it on (any other
+        // view analysis off) and the tool combs the curves clicked.
+        if app.session.comb.is_some() {
+            if app.run(id, json!({"clear": true})).is_ok() {
+                app.set_status("Analysis off", false);
+            }
+            return false;
+        }
+        comb(app, json!({}));
+        return app.session.comb.is_some();
+    }
     if id == "inspect.isocurve" && !app.session.isocurves.is_empty() {
         // With curves shown, the button turns the analysis off; otherwise the tool picks faces.
         if app.run(id, json!({"clear": true})).is_ok() {
@@ -1203,6 +1215,11 @@ fn run_entities(app: &mut SolveApp, t: &Tool) {
 /// Right-click with an extra tool: finish a chain or move to the next stage. Returns false
 /// when the tool should be dropped.
 pub fn finish(app: &mut SolveApp, tool: &mut Tool) -> bool {
+    // Esc or a right click ends the comb tool and turns its analysis off.
+    if tool.cmd == "inspect.curvature_comb" {
+        let _ = app.run(tool.cmd, json!({"clear": true}));
+        return false;
+    }
     let Some(m) = mode(tool.cmd) else { return false };
     match m {
         Mode::Points(0) if tool.pts.len() >= 2 => {
@@ -1613,10 +1630,6 @@ pub fn show(app: &mut SolveApp, ui: &egui::Ui, painter: &egui::Painter, proj: &P
     SHIFT.with(|c| c.set(iso.contains(ModAction::IsoCurveAlternate)));
     glyphs(app, painter, proj, ui.input(|i| i.pointer.hover_pos()).filter(|_| ui.rect_contains_pointer(proj.rect)));
     snap_hint(app, painter, proj);
-    // The combs go with the comb tool.
-    if app.session.comb.is_some() && app.tool.as_ref().map(|t| t.cmd) != Some("inspect.curvature_comb") {
-        let _ = app.run("inspect.curvature_comb", json!({"clear": true}));
-    }
     combs(app, painter, proj);
     comb_options_card(app, ui.ctx(), proj);
     if DEFERRED.with(|d| d.replace(false)) {

@@ -231,8 +231,8 @@ fn curvature_comb(s: &mut Session, p: &Value) -> Result<Value> {
             value
         })
         .collect();
+    s.analyses_off(Some("inspect.curvature_comb"));
     s.comb = Some(CombView { picks: kept, density, length, fixed_scale, scale, teeth: drawn });
-    s.revision += 1;
     Ok(json!({"combs": out, "scale": scale}))
 }
 
@@ -426,7 +426,7 @@ fn isocurves(s: &mut Session, p: &Value) -> Result<Value> {
         s.isocurves.clear();
     }
     s.isocurves.extend(picks.into_iter().map(|(_, k)| k));
-    s.revision += 1;
+    s.analyses_off(Some("inspect.isocurve"));
     Ok(json!({"curves": curves, "faces": shown}))
 }
 
