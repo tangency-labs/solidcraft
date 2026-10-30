@@ -275,17 +275,75 @@ fn merging_finds_the_turns_start_when_the_history_was_trimmed() {
         active_sketch: None,
         pending_moves: Default::default(),
         visibility: Default::default(),
+        section: None,
     };
     let docs: Vec<_> = (0..6).map(doc).collect();
     // The turn began at depth 3 with docs[3]; the history then lost its oldest step.
+    let start = UndoMark { depth: 3, top: Some(Box::new(snap(&docs[2]))) };
     let mut undo: Vec<_> = docs[1..6].iter().map(snap).collect();
-    assert_eq!(merge_undo(&mut undo, &docs[3], 3, "Agent"), 3);
+    assert_eq!(merge_undo(&mut undo, &docs[3], &start, "Agent"), 3);
     assert_eq!(undo.len(), 3);
     assert!(Arc::ptr_eq(&undo[2].doc, &docs[3]) && undo[2].label == "Agent");
+    // The step on top at the start is gone too: the first step is found by its design.
+    let mut undo: Vec<_> = docs[3..6].iter().map(snap).collect();
+    assert_eq!(merge_undo(&mut undo, &docs[3], &start, "Agent"), 3);
+    // A section step in the turn: the merged step brings back the section before it.
+    let mut undo: Vec<_> = docs[1..6].iter().map(snap).collect();
+    let before = solidcraft_engine::SectionState { hatch: true, ..Default::default() };
+    undo[3].section = Some(before.clone());
+    merge_undo(&mut undo, &docs[3], &start, "Agent");
+    assert_eq!(undo[2].section, Some(before.clone()));
     // A start that is no longer in the history: nothing is merged.
     let mut undo: Vec<_> = docs[1..6].iter().map(snap).collect();
-    assert_eq!(merge_undo(&mut undo, &doc(9), 3, "Agent"), 0);
+    let gone = UndoMark { depth: 3, top: Some(Box::new(snap(&doc(8)))) };
+    assert_eq!(merge_undo(&mut undo, &doc(9), &gone, "Agent"), 0);
     assert_eq!(undo.len(), 5);
+    // A turn that made no step leaves the user's own last step alone, though a section step
+    // keeps the design it began with.
+    let mut undo: Vec<_> = docs[1..4].iter().map(snap).collect();
+    undo[2].section = Some(before.clone());
+    undo[2].doc = docs[3].clone();
+    let start = UndoMark::of(&undo);
+    assert_eq!(merge_undo(&mut undo, &docs[3], &start, "Agent"), 0);
+    assert_eq!((undo.len(), undo[2].label.as_str()), (3, ""));
+    // A full history of steps that all kept one design (section steps): the turn's steps follow
+    // the step on top at its start.
+    let step = |i: usize| solidcraft_engine::Snapshot { label: i.to_string(), ..snap(&docs[3]) };
+    let start = UndoMark::of(&[step(1), step(2), step(3)]);
+    let mut undo = vec![step(3), step(4), step(5)];
+    assert_eq!(merge_undo(&mut undo, &docs[3], &start, "Agent"), 2);
+}
+
+/// The user's own section step is theirs: a message that changed nothing does not take it over,
+/// and the chat's Undo of an agent's changes stops once the user has sectioned since.
+#[test]
+fn section_steps_stay_the_users() {
+    let mut app = SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
+    app.run("solid.box", json!({"length": 10, "width": 10, "height": 10})).unwrap();
+    app.run("inspect.section", json!({"plane": "XY", "at": 5})).unwrap();
+    let (_tx, rx) = channel::<ControlRequest>();
+    app.agent_chat.tools_rx = Some(rx);
+    app.agent_chat.state = Some(State::Busy);
+    start_turn(&mut app, "look".into(), false, None, Vec::new());
+    end_turn(&mut app);
+    assert_eq!(app.session.undo.len(), 2);
+    assert_eq!(app.session.undo.last().map(|s| s.label.as_str()), Some("Section Analysis"));
+    assert!(!app.agent_chat.items.iter().any(|i| matches!(i, Item::Changes { .. })));
+
+    let (mut app, tx) = app_in_a_turn();
+    let reply = ask(&tx, "engine.execute", boxed(0.0));
+    frame(&mut app);
+    assert_eq!(reply.recv_timeout(std::time::Duration::from_secs(30)).unwrap()["ok"], true);
+    end_turn(&mut app);
+    let n = app.agent_chat.items.iter().rposition(|i| matches!(i, Item::Changes { .. })).expect("the changes are listed");
+    app.run("inspect.section", json!({"plane": "XY", "at": 5})).unwrap();
+    undo_changes(&mut app, n);
+    assert_eq!(app.session.section.len(), 1, "the user's section stays");
+    assert_eq!(app.session.doc.features.len(), 1, "and so does the agent's box");
+    assert!(matches!(app.agent_chat.items[n], Item::Changes { undone: false, .. }));
+    app.run("edit.undo", json!({})).unwrap();
+    undo_changes(&mut app, n);
+    assert!(app.session.doc.features.is_empty() && matches!(app.agent_chat.items[n], Item::Changes { undone: true, .. }));
 }
 
 /// People who don't want AI never see it: with "Show AI features" off there is no button, the

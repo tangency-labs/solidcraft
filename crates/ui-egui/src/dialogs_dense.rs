@@ -900,10 +900,14 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
         Kind::Frame(k) => enter |= crate::dialogs_frame::rows(app, ui, k, &d.inputs),
         Kind::Assembly(k) => enter |= crate::dialogs_assembly::rows(app, ui, k, &mut d.inputs, &mut d.active),
         Kind::Measure { result, show, .. } => measure_rows(app, ui, result.as_ref(), show),
-        Kind::Section { offset, flip, hatch } => {
+        Kind::Section { offset, flip, hatch, add, edit } => {
             enter |= expr_row(ui, "Distance", offset);
             ui_kit::options(ui, "feature_options", &mut [("Flip", flip), ("Hatch", hatch)]);
-            if section_turns_off(&app.session, &d.inputs) && !d.extra.contains_key("plane") {
+            if edit.is_some() {
+                ui_kit::text(ui, tr("section.edit_hint"), ui_kit::Text::Hint("section_edit"));
+            } else if *add {
+                ui_kit::text(ui, tr("section.add_hint"), ui_kit::Text::Hint("section_add"));
+            } else if section_turns_off(&app.session, d.extra.contains_key("plane"), &d.inputs) {
                 ui_kit::text(ui, tr("section.off_hint"), ui_kit::Text::Hint("section_off"));
             }
         }

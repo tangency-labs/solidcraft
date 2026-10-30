@@ -422,7 +422,7 @@ pub(crate) fn view_scene(app: &SolveApp, guides: solidcraft_engine::view::Guides
     let mut scene = solidcraft_engine::view::scene_with_thread_markings(
         &app.session,
         &app.cam,
-        crate::viewport::section_plane(app),
+        &crate::viewport::section_planes(app),
         solidcraft_engine::view::world_curve_parts,
         &palette,
         guides,
@@ -1684,7 +1684,7 @@ mod tests {
         app.start("inspect.section");
         let Some(crate::dialogs::Kind::Section { offset, .. }) = app.dialog.as_mut().map(|d| &mut d.kind) else { panic!("no section dialog") };
         *offset = "15 mm".into();
-        assert!(app.session.section.is_none() && crate::viewport::section_plane(&app).is_some());
+        assert!(app.session.section.is_empty() && !crate::viewport::section_planes(&app).is_empty());
         let preview = render(&mut app, &dir.join("preview.png"));
         assert!(whole != preview, "the model render ignores the section the window shows");
         // Committed, it renders the same.

@@ -61,9 +61,10 @@ const FILE_EXTENSIONS: &[&str] = &[
     "toml",
 ];
 
-/// Commands that only read (not counted as changes).
+/// Commands that only read (not counted as changes). Section Analysis changes only the view, but
+/// each change is an undo step.
 fn reads_only(id: &str) -> bool {
-    id.starts_with("inspect.")
+    (id.starts_with("inspect.") && id != "inspect.section")
         || id.starts_with("model.")
         || id.ends_with(".inspect")
         || id.ends_with(".list")
@@ -350,6 +351,9 @@ mod tests {
         assert!(matches!(request("engine.execute", &json!({"command": "edit.undo"}), 0), Verdict::Ask(_)));
         let batch = json!({"commands": [{"command": "solid.box"}, {"command": "edit.undo"}, {"command": "edit.undo"}]});
         assert!(matches!(request("engine.batch", &batch, 0), Verdict::Ask(_)));
+        assert_eq!(exec("inspect.section", json!({"plane": "XY"})), Verdict::Run { change: true });
+        let sectioned = json!({"commands": [{"command": "inspect.section", "params": {"plane": "XY"}}, {"command": "edit.undo"}]});
+        assert_eq!(request("engine.batch", &sectioned, 0), Verdict::Run { change: true });
     }
 
     #[test]

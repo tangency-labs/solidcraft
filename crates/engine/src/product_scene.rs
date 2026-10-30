@@ -83,7 +83,7 @@ mod tests {
             assert!(Arc::ptr_eq(&m.mesh, &s.world_state().body(&m.name).unwrap().mesh()));
         }
         s.selection = vec![Sel::Body { name: first.meshes[0].name.clone() }];
-        s.section = Some((Vec3::ZERO, Vec3::X));
+        s.section = vec![crate::SectionPlane { id: 1, origin: Vec3::ZERO, normal: Vec3::X }];
         s.analysis = Some(crate::SurfaceAnalysis::Zebra { stripes: 10.0 });
         let after = extract(&s).unwrap();
         for (a, b) in first.meshes.iter().zip(&after.meshes) {

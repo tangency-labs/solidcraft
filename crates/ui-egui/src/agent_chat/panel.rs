@@ -1688,13 +1688,13 @@ fn conversation(app: &mut SolveApp, ui: &mut egui::Ui) {
                     }
                 });
             }
-            Item::Changes { steps, doc, undone } => {
+            Item::Changes { steps, doc, mark, undone } => {
                 ui.horizontal(|ui| {
                     let text = trf("ui.agent_chat_changes", &[("n", &steps.to_string())]);
                     ui.label(RichText::new(text).color(t.text_dim).size(crate::theme::Tokens::get().font_caption));
                     if *undone {
                         ui.label(RichText::new(tr("ui.agent_chat_undone")).color(t.text_dim).size(crate::theme::Tokens::get().font_caption));
-                    } else if Arc::ptr_eq(doc, &current_doc) {
+                    } else if Arc::ptr_eq(doc, &current_doc) && mark.is_at(&app.session.undo) {
                         let b = ui_kit::button(ui, tr("ui.agent_chat_undo_changes"), ui_kit::Button::Normal).on_hover_text(tr("ui.ai_undo_tip"));
                         crate::scenario::publish_handle("agent_chat:undo", b.rect.center());
                         if b.clicked() {

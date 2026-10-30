@@ -198,7 +198,9 @@ pub(crate) fn dispatch(app: &mut SolveApp, actions: Vec<StatusAction>) {
             }
             StatusAction::Edit(id) => {
                 if effects.iter().any(|effect| effect.id == StatusId::Section && identity(effect) == id) {
-                    crate::dialogs::edit_section(app);
+                    // The plane the setting shows: the first on show.
+                    let shown = app.session.section.first().map(|c| c.id);
+                    crate::dialogs::edit_section_plane(app, shown);
                 }
             }
         }

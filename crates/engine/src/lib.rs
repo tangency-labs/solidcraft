@@ -260,6 +260,17 @@ pub struct Snapshot {
     /// What was hidden or shown then (`browser.visibility`). It is saved with the design, so
     /// hiding a body is undone and redone like any other change.
     pub visibility: Visibility,
+    /// The Section Analysis before a step that changed it (none: the step left it alone).
+    pub section: Option<SectionState>,
+}
+
+/// A Section Analysis as an undo step keeps it. View state, never saved with the design.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct SectionState {
+    pub planes: Vec<SectionPlane>,
+    pub hidden: Vec<SectionPlane>,
+    pub hatch: bool,
+    pub folder: Option<Vec<u64>>,
 }
 
 /// Where the open sketch was entered (`sketch.create`, `sketch.edit`): the design before it and
@@ -482,8 +493,15 @@ pub struct Session {
     /// What was copied in another design, to paste here (`component.paste_from_design`). The
     /// host puts it here; each design's own copies stay in its own clipboard.
     pub foreign_copy: Option<Arc<ForeignCopy>>,
-    /// Section Analysis: a view cut by a plane (origin, unit normal; the normal side is hidden).
-    pub section: Option<(Vec3, Vec3)>,
+    /// Section Analysis: a view cut by planes, at most [`view::MAX_SECTION_PLANES`]: what lies
+    /// on the normal side of any one is hidden (none: no section).
+    pub section: Vec<SectionPlane>,
+    /// The section's planes hidden with their eye: kept, cutting nothing (`inspect.section`'s
+    /// `hide` and `show`).
+    pub section_hidden: Vec<SectionPlane>,
+    /// The Analysis folder hidden with its eye (`inspect.section`'s `folder: false`): the hidden
+    /// planes that come back when it is shown (none: the folder is shown).
+    pub section_folder: Option<Vec<u64>>,
     /// Whether the section's cut faces are hatched (`inspect.section`'s `hatch`; on by default).
     pub section_hatch: bool,
     /// Component identification colours are enabled when present; view state only.
@@ -540,7 +558,7 @@ pub struct LiveEdit {
     pub report: solidcraft_sketch::SolveReport,
 }
 
-/// The design, active sketch, pending positions and undo history at an `edit.checkpoint`.
+/// The design, active sketch, pending positions, undo history and section at an `edit.checkpoint`.
 #[derive(Clone, Debug)]
 pub(crate) struct Checkpoint {
     pub id: u64,
@@ -550,6 +568,7 @@ pub(crate) struct Checkpoint {
     pub visibility: Visibility,
     pub undo: Vec<Snapshot>,
     pub redo: Vec<Snapshot>,
+    pub section: SectionState,
 }
 
 /// A way of shading the model's faces to judge their shape (view state, not part of the design).
@@ -567,6 +586,56 @@ pub enum SurfaceAnalysis {
     /// Green where a tool coming along `dir` reaches the face (facing it, nothing above), red
     /// elsewhere.
     Access { dir: Vec3 },
+}
+
+/// One plane of a Section Analysis: what lies on its normal's side is hidden, whatever the other
+/// planes keep. View state only.
+#[derive(Clone, Copy, Debug, PartialEq, serde::Serialize)]
+pub struct SectionPlane {
+    /// Its number in the section, from 1 (`inspect.section`'s `remove` takes it).
+    pub id: u64,
+    pub origin: Vec3,
+    /// Unit length.
+    pub normal: Vec3,
+}
+
+impl SectionPlane {
+    /// The plane as (normal, d): what lies where normal·p > d is hidden.
+    pub fn clip(&self) -> (Vec3, f64) {
+        (self.normal, self.normal.dot(self.origin))
+    }
+
+    /// Its cut faces' hatch (an index into `render::SECTION_HATCH_ANGLES`), kept by its id.
+    pub fn hatch(&self) -> usize {
+        solidcraft_render::section_hatch_of(self.id)
+    }
+
+    /// Whether the plane keeps `p` (within `eps`).
+    pub fn keeps(&self, p: Vec3, eps: f64) -> bool {
+        self.normal.dot(p - self.origin) <= eps
+    }
+}
+
+impl Session {
+    /// The Section Analysis as an undo step keeps it.
+    pub fn section_state(&self) -> SectionState {
+        SectionState {
+            planes: self.section.clone(),
+            hidden: self.section_hidden.clone(),
+            hatch: self.section_hatch,
+            folder: self.section_folder.clone(),
+        }
+    }
+
+    pub fn set_section_state(&mut self, state: SectionState) {
+        let was_on = !self.section.is_empty();
+        (self.section, self.section_hidden, self.section_hatch, self.section_folder) = (state.planes, state.hidden, state.hatch, state.folder);
+        self.status_slot(crate::status_items::StatusId::Section, !self.section.is_empty());
+        if !was_on && !self.section.is_empty() {
+            self.status_activated(crate::status_items::StatusId::Section);
+        }
+        self.revision += 1;
+    }
 }
 
 /// One seam measured by `inspect.continuity`, where the viewport shades it: the stations it was
@@ -674,7 +743,9 @@ impl Session {
             sketch_clipboard: None,
             appearance_clipboard: None,
             foreign_copy: None,
-            section: None,
+            section: Vec::new(),
+            section_hidden: Vec::new(),
+            section_folder: None,
             section_hatch: true,
             colored_components: None,
             analysis: None,
@@ -1269,13 +1340,15 @@ impl Session {
             }
         }
         (spec.enabled)(self).map_err(|why| EngineError::Disabled(spec.id.to_string(), why))?;
-        let before = Snapshot {
+        let mut before = Snapshot {
             label: spec.label.to_string(),
             doc: self.doc.clone(),
             active_sketch: self.active_sketch,
             pending_moves: self.pending_moves.clone(),
             visibility: self.visibility.clone(),
+            section: None,
         };
+        let section_before = self.section_state();
         // Where new geometry goes: not in the design, but a replay needs it (component.activate).
         let active_before = (self.active_component, self.active_occurrence_path.clone());
         let replacements = self.replacements;
@@ -1347,6 +1420,11 @@ impl Session {
         // Hiding or showing (`browser.visibility`) leaves the document alone, so it needs its own
         // test: it is saved with the design and has an undo step of its own.
         let hidden = self.visibility != before.visibility;
+        // A Section Analysis is view state outside the design, with undo steps of its own.
+        let sectioned = self.section_state() != section_before;
+        if sectioned {
+            before.section = Some(section_before);
+        }
         let result = match r {
             Ok((v, live_edit)) => {
                 let v = if changed { self.with_created(spec.id, params, &before, v) } else { v };
@@ -1378,10 +1456,19 @@ impl Session {
                     if pin {
                         self.pin_body_names();
                     }
+                } else if sectioned && spec.undoable {
+                    self.undo.push(before);
+                    if self.undo.len() > MAX_UNDO {
+                        self.undo.remove(0);
+                    }
+                    self.redo.clear();
                 }
                 Ok(v)
             }
             Err(e) => {
+                if let Some(section) = before.section.take() {
+                    self.set_section_state(section);
+                }
                 if changed || hidden || self.pending_moves != before.pending_moves {
                     self.doc = before.doc;
                     self.active_sketch = before.active_sketch;
@@ -1437,7 +1524,7 @@ impl Session {
         v
     }
 
-    /// Remember the design, active sketch, pending positions and undo history; returns the checkpoint's id.
+    /// Remember the design, active sketch, pending positions, undo history and section; returns the checkpoint's id.
     pub fn checkpoint(&mut self) -> u64 {
         let id = self.next_checkpoint;
         self.next_checkpoint += 1;
@@ -1449,6 +1536,7 @@ impl Session {
             pending_moves: self.pending_moves.clone(),
             visibility: self.visibility.clone(),
             redo: self.redo.clone(),
+            section: self.section_state(),
         });
         if self.checkpoints.len() > MAX_CHECKPOINTS {
             self.checkpoints.remove(0);
@@ -1467,6 +1555,7 @@ impl Session {
             active_sketch: self.active_sketch,
             pending_moves: self.pending_moves.clone(),
             visibility: self.visibility.clone(),
+            section: None,
         };
         self.doc = c.doc;
         self.active_sketch = c.active_sketch;
@@ -1474,6 +1563,9 @@ impl Session {
         self.visibility = c.visibility;
         self.undo = c.undo;
         self.redo = c.redo;
+        if self.section_state() != c.section {
+            self.set_section_state(c.section);
+        }
         self.selection.clear();
         if self.render_only_change(&before) {
             self.refresh_render(&before.doc);
@@ -1536,7 +1628,9 @@ impl Session {
             sketch_clipboard: self.sketch_clipboard.clone(),
             appearance_clipboard: self.appearance_clipboard.clone(),
             foreign_copy: self.foreign_copy.clone(),
-            section: None,
+            section: Vec::new(),
+            section_hidden: Vec::new(),
+            section_folder: None,
             section_hatch: true,
             colored_components: None,
             analysis: None,

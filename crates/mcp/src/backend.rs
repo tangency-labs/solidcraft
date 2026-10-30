@@ -710,7 +710,7 @@ impl Backend for Headless {
                 let path = str_p("path").ok_or("missing `path`")?;
                 // A path outside the agent's folders is refused before anything is drawn.
                 solidcraft_engine::io::vfs::check(path).map_err(|e| format!("{path}: {e}"))?;
-                let scene = solidcraft_engine::view::scene_with_guides(s, &cam, s.section, guides);
+                let scene = solidcraft_engine::view::scene_with_guides(s, &cam, &s.section, guides);
                 // Drawn on the GPU by the renderer the host installed (`solidcraft-cli mcp`).
                 let png = solidcraft_engine::capture::png(&scene, &cam, w, h)?;
                 solidcraft_engine::io::vfs::write(path, &png.bytes).map_err(|e| format!("{path}: {e}"))?;

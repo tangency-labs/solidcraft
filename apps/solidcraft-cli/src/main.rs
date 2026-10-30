@@ -617,7 +617,7 @@ fn cmd_snapshot(args: &[String]) -> Result<(), String> {
     }
     let cam = s.camera.unwrap_or_else(|| solidcraft_engine::view::home_camera(&s));
     let guides = Guides { grid: !args.iter().any(|a| a == "--no-grid"), axes: !args.iter().any(|a| a == "--no-axes") };
-    let scene = solidcraft_engine::view::scene_with_guides(&s, &cam, s.section, guides);
+    let scene = solidcraft_engine::view::scene_with_guides(&s, &cam, &s.section, guides);
     let png = solidcraft_engine::capture::png(&scene, &cam, w, h)?;
     std::fs::write(out, &png.bytes).map_err(|e| format!("{out}: {e}"))?;
     let mut reply = json!({"path": out, "width": w, "height": h, "bytes": png.bytes.len(), "renderer": png.renderer});

@@ -115,7 +115,7 @@ impl Session {
         self.single_surface_analysis = single;
         let shading = self.analysis.is_some();
         let continuity = !self.continuity.is_empty();
-        let section = self.section.is_some();
+        let section = !self.section.is_empty();
         self.status_activation.retain(|source| match source {
             StatusId::SurfaceAnalysis => shading,
             StatusId::Continuity => continuity,
@@ -131,7 +131,7 @@ impl Session {
             let active = match id {
                 StatusId::SurfaceAnalysis => self.analysis.is_some() || (single && !self.continuity.is_empty()),
                 StatusId::Continuity => !self.continuity.is_empty(),
-                StatusId::Section => self.section.is_some(),
+                StatusId::Section => !self.section.is_empty(),
             };
             self.status_slot(id, active);
         }
@@ -198,11 +198,11 @@ impl Session {
         let analysis = analysis.map(|(command, setting, has_key)| item(StatusId::SurfaceAnalysis, command, setting, has_key));
         let continuity = (!self.single_surface_analysis && !self.continuity.is_empty())
             .then(|| item(StatusId::Continuity, "inspect.continuity", StatusSetting::Continuity { edge_count: self.continuity.len() }, false));
-        let section = self.section.map(|(origin, normal)| {
+        let section = self.section.first().map(|plane| {
             item(
                 StatusId::Section,
                 "inspect.section",
-                StatusSetting::Section { origin_mm: origin.into(), normal: normal.into(), hatch: self.section_hatch },
+                StatusSetting::Section { origin_mm: plane.origin.into(), normal: plane.normal.into(), hatch: self.section_hatch },
                 false,
             )
         });

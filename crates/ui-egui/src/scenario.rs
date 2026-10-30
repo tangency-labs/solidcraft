@@ -983,7 +983,7 @@ pub fn check(h: &mut Harness, e: &Value) -> Result<(), String> {
                 approx(w, v, "canvas width")?;
             }
             "section" => {
-                if h.app.session.section.is_some() != v.as_bool().unwrap_or(false) {
+                if h.app.session.section.is_empty() == v.as_bool().unwrap_or(false) {
                     return Err(format!("section view: want {v}"));
                 }
             }

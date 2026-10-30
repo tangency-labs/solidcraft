@@ -462,7 +462,7 @@ fn ambiguous_plane_aliases_refuse_without_document_or_history_changes() {
             assert!(error.to_string().contains(&format!("use `{other}` for the origin plane")), "{error}");
             assert_eq!(s.doc.to_json(), before);
             assert_eq!(s.undo.len(), history);
-            assert!(s.section.is_none());
+            assert!(s.section.is_empty());
         }
         run(&mut s, "sketch.create", json!({"plane":id}));
         let inspected = run(&mut s, "sketch.inspect", json!({}));

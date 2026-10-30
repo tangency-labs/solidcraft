@@ -572,6 +572,7 @@ fn build_tool(before: &ModelState, after: &ModelState, c: Colors, op: &str) -> B
     let edge = if op == "cut" { sc.color([c.removed[0], c.removed[1], c.removed[2], 255]) } else { sc.color(c.edge) };
     for a in after.bodies.iter().filter(|a| before.body(&a.name).is_none()) {
         let m = a.mesh();
+        let added_here = added.sheet(a.is_surface());
         for t in &m.triangles {
             for k in t {
                 let i = *k as usize;
@@ -579,7 +580,7 @@ fn build_tool(before: &ModelState, after: &ModelState, c: Colors, op: &str) -> B
                     match op {
                         "cut" => sc.xray_tri(p.to_f32(), n.to_f32(), removed),
                         "intersect" => sc.xray_tri(p.to_f32(), n.to_f32(), intersect),
-                        _ => sc.tri(p.to_f32(), n.to_f32(), added),
+                        _ => sc.tri(p.to_f32(), n.to_f32(), added_here),
                     }
                 }
             }
@@ -673,6 +674,7 @@ pub fn build(before: &ModelState, after: &ModelState, c: Colors) -> Built {
         // Material removed from a body (a hole, a pocket): its new faces also show through the
         // body in the cut colour, so the cut is seen from any side.
         let cut = old.as_ref().is_some_and(|bm| am.measure().volume < bm.measure().volume - 1e-6);
+        let sheet = a.is_surface();
         for (t, f) in am.triangles.iter().zip(&am.tri_face) {
             let new = added.get(*f as usize).copied().unwrap_or(true);
             let col = match (new, old.is_some()) {
@@ -683,7 +685,7 @@ pub fn build(before: &ModelState, after: &ModelState, c: Colors) -> Built {
             for k in t {
                 let i = *k as usize;
                 if let (Some(p), Some(n)) = (am.positions.get(i), am.normals.get(i)) {
-                    sc.tri(p.to_f32(), n.to_f32(), col);
+                    sc.tri(p.to_f32(), n.to_f32(), col.sheet(sheet));
                     if new && cut {
                         sc.xray_tri(p.to_f32(), n.to_f32(), removed);
                     }

@@ -241,10 +241,12 @@ pub enum Item {
         tool: String,
         answer: Option<bool>,
     },
-    /// A message's changes, merged into one undo step; `doc`: the design right after it.
+    /// A message's changes, merged into one undo step; `doc`: the design right after it, `mark`:
+    /// the undo history right after it.
     Changes {
         steps: usize,
         doc: Arc<solidcraft_engine::doc::Document>,
+        mark: UndoMark,
         undone: bool,
     },
     Notice {
@@ -253,13 +255,44 @@ pub enum Item {
     },
 }
 
+/// Which undo step is the last one done: the history's depth and its top step.
+#[derive(Clone, Debug)]
+pub struct UndoMark {
+    depth: usize,
+    top: Option<Box<solidcraft_engine::Snapshot>>,
+}
+
+impl UndoMark {
+    pub fn of(undo: &[solidcraft_engine::Snapshot]) -> Self {
+        UndoMark { depth: undo.len(), top: undo.last().cloned().map(Box::new) }
+    }
+
+    /// Whether `undo` is still as it was when marked.
+    pub fn is_at(&self, undo: &[solidcraft_engine::Snapshot]) -> bool {
+        self.depth == undo.len()
+            && match (&self.top, undo.last()) {
+                (Some(a), Some(b)) => same_step(a, b),
+                (a, b) => a.is_none() && b.is_none(),
+            }
+    }
+}
+
+fn same_step(a: &solidcraft_engine::Snapshot, b: &solidcraft_engine::Snapshot) -> bool {
+    Arc::ptr_eq(&a.doc, &b.doc)
+        && a.label == b.label
+        && a.section == b.section
+        && a.visibility == b.visibility
+        && a.active_sketch == b.active_sketch
+        && a.pending_moves == b.pending_moves
+}
+
 /// The message being answered: what undo and the limits need.
 struct Turn {
     /// Deferred requests stop being valid when this turn ends or its tab is left.
     active: Arc<std::sync::atomic::AtomicBool>,
-    /// The design and the undo depth before it.
+    /// The design and the undo history before it.
     start_doc: Arc<solidcraft_engine::doc::Document>,
-    start_undo: usize,
+    start_undo: UndoMark,
     /// Requests that ran commands, and requests of any kind.
     changes: u32,
     requests: u32,
@@ -1353,7 +1386,7 @@ fn start_turn_with(app: &mut SolveApp, text: String, image: bool, at: Option<usi
     app.agent_chat.turn = Some(Turn {
         active: Arc::new(std::sync::atomic::AtomicBool::new(true)),
         start_doc: app.session.doc.clone(),
-        start_undo: app.session.undo.len(),
+        start_undo: UndoMark::of(&app.session.undo),
         changes: 0,
         requests: 0,
         limit_told: false,
@@ -1602,7 +1635,7 @@ fn end_turn(app: &mut SolveApp) {
 fn finish_turn(chat: &mut AgentChat, session: &mut solidcraft_engine::Session) {
     let Some(turn) = chat.turn.take() else { return };
     turn.active.store(false, std::sync::atomic::Ordering::Relaxed);
-    let steps = merge_undo(&mut session.undo, &turn.start_doc, turn.start_undo, &trf("ui.agent_chat_undo_label", &[("message", &turn.label)]));
+    let steps = merge_undo(&mut session.undo, &turn.start_doc, &turn.start_undo, &trf("ui.agent_chat_undo_label", &[("message", &turn.label)]));
     if chat.ended.as_deref() == Some("")
         && !chat.stopped
         && turn.tools_available
@@ -1619,35 +1652,48 @@ fn finish_turn(chat: &mut AgentChat, session: &mut solidcraft_engine::Session) {
     }
     if steps > 0 {
         let doc = session.doc.clone();
-        chat.push(Item::Changes { steps, doc, undone: false });
+        chat.push(Item::Changes { steps, doc, mark: UndoMark::of(&session.undo), undone: false });
     }
 }
 
-/// Merge the undo steps made since `start_doc` (at depth `start_undo`) into one, labelled `label`;
-/// how many steps it took in (0: none were made, or the history no longer reaches that far).
+/// Merge the undo steps made since `start_doc` (with the history at `start`) into one, labelled
+/// `label`; how many steps it took in (0: none were made, or the history no longer reaches that far).
 fn merge_undo(
     undo: &mut Vec<solidcraft_engine::Snapshot>,
     start_doc: &Arc<solidcraft_engine::doc::Document>,
-    start_undo: usize,
+    start: &UndoMark,
     label: &str,
 ) -> usize {
-    // The first change of the turn saved the design as it was when the turn began. When the
-    // history is full its oldest steps go, so look for it at or below where it was put.
-    let Some(first) = (0..undo.len().min(start_undo + 1)).rev().find(|&i| undo.get(i).is_some_and(|s| Arc::ptr_eq(&s.doc, start_doc))) else {
+    if start.is_at(undo) {
+        return 0;
+    }
+    // The turn's first step follows the top step at its start; a full history drops its oldest
+    // steps, so look at or below where that was, and past it for the design the first step saved.
+    let below = 0..undo.len().min(start.depth);
+    let trimmed = undo.len() >= start.depth;
+    let first = match &start.top {
+        None => Some(0),
+        Some(top) => below.clone().rev().find(|&i| undo.get(i).is_some_and(|s| same_step(s, top))).map(|i| i + 1),
+    }
+    .or_else(|| below.rev().find(|&i| trimmed && undo.get(i).is_some_and(|s| Arc::ptr_eq(&s.doc, start_doc))));
+    let Some(first) = first.filter(|&f| f < undo.len()) else {
         return 0;
     };
     let steps = undo.len() - first;
+    // The merged step brings back the section as it was before the first step that changed it.
+    let section = undo.get(first..).and_then(|merged| merged.iter().find_map(|s| s.section.clone()));
     undo.truncate(first + 1);
     if let Some(s) = undo.get_mut(first) {
         s.label = label.to_string();
+        s.section = s.section.take().or(section);
     }
     steps
 }
 
 /// Undo a message's changes from the conversation (only while they are the last thing done).
 pub fn undo_changes(app: &mut SolveApp, index: usize) {
-    let Some(Item::Changes { doc, undone, .. }) = app.agent_chat.items.get(index) else { return };
-    if *undone || !Arc::ptr_eq(doc, &app.session.doc) {
+    let Some(Item::Changes { doc, mark, undone, .. }) = app.agent_chat.items.get(index) else { return };
+    if *undone || !Arc::ptr_eq(doc, &app.session.doc) || !mark.is_at(&app.session.undo) {
         return;
     }
     if app.run("edit.undo", json!({})).is_ok()
@@ -1679,7 +1725,7 @@ fn pump_tools(app: &mut SolveApp) {
         {
             o.insert("allow_paths".into(), json!([working_dir().to_string_lossy()]));
         }
-        let undo_left = undo_len.saturating_sub(turn.start_undo);
+        let undo_left = undo_len.saturating_sub(turn.start_undo.depth);
         // The permission mode (the agent's own, else the global one) and "always allow" answers.
         let mode = agents::mode_for(&app.preferences, &app.agent_chat.running_id);
         let tool = gate::tool_key(&req.method, &req.params);

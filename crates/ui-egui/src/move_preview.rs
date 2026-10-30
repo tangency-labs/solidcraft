@@ -23,12 +23,13 @@ pub(crate) struct MovePreview {
     cached: Option<Cached>,
 }
 
-/// The listed bodies' world meshes, for the design and revision they were taken from.
+/// The listed bodies' world meshes, each with whether it is an open sheet, for the design and
+/// revision they were taken from.
 struct Cached {
     document: Arc<Document>,
     revision: u64,
     bodies: Vec<String>,
-    meshes: Vec<Arc<Mesh>>,
+    meshes: Vec<(Arc<Mesh>, bool)>,
 }
 
 impl MovePreview {
@@ -80,8 +81,8 @@ impl MovePreview {
             .is_none_or(|c| c.revision != app.session.revision || !Arc::ptr_eq(&c.document, &app.session.doc) || c.bodies != bodies)
         {
             let state = app.session.world_state();
-            let meshes: Vec<Arc<Mesh>> = bodies.iter().map(|n| state.body(n).map(|b| b.mesh())).collect::<Option<_>>()?;
-            if meshes.iter().map(|m| m.triangles.len()).sum::<usize>() > MAX_TRIANGLES {
+            let meshes: Vec<(Arc<Mesh>, bool)> = bodies.iter().map(|n| state.body(n).map(|b| (b.mesh(), b.is_surface()))).collect::<Option<_>>()?;
+            if meshes.iter().map(|(m, _)| m.triangles.len()).sum::<usize>() > MAX_TRIANGLES {
                 return None;
             }
             self.cached = Some(Cached { document: app.session.doc.clone(), revision: app.session.revision, bodies: bodies.clone(), meshes });
@@ -93,8 +94,8 @@ impl MovePreview {
         let mut scene = GpuScene::default();
         let removed = scene.color(colors.removed);
         let mut bounds = Aabb3::EMPTY;
-        for mesh in &cache.meshes {
-            draw(&mut scene, mesh, &m, colors, &mut bounds);
+        for (mesh, sheet) in &cache.meshes {
+            draw(&mut scene, mesh, *sheet, &m, colors, &mut bounds);
             if !copy {
                 // Where the body was, as the scratch-design preview shows a body moved away.
                 for t in &mesh.triangles {
@@ -119,9 +120,10 @@ impl MovePreview {
     }
 }
 
-/// `mesh` moved by `m`, in the colour of geometry the feature adds, with its shaded edges.
-fn draw(scene: &mut GpuScene, mesh: &Mesh, m: &Mat, colors: Colors, bounds: &mut Aabb3) {
-    let added = scene.color(colors.added);
+/// `mesh` (an open sheet's when `sheet`) moved by `m`, in the colour of geometry the feature
+/// adds, with its shaded edges.
+fn draw(scene: &mut GpuScene, mesh: &Mesh, sheet: bool, m: &Mat, colors: Colors, bounds: &mut Aabb3) {
+    let added = scene.color(colors.added).sheet(sheet);
     for t in &mesh.triangles {
         for k in t {
             let i = *k as usize;

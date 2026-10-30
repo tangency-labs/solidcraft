@@ -12,6 +12,7 @@
 use std::sync::{Arc, Mutex};
 
 use solidcraft_geom::Vec3;
+pub use solidcraft_render::MAX_SECTION_PLANES;
 
 use crate::pbr;
 use wgpu::util::DeviceExt;
@@ -39,6 +40,23 @@ pub const INSTANCE_SIZE: usize = 52;
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 #[repr(transparent)]
 pub struct PaletteIndex(pub u32);
+
+/// The palette word's top bit, past every index ([`MAX_PALETTE`]): the triangle is an open
+/// sheet's (a surface body's), which has no inside, so a section's body count leaves it out
+/// ([`Cut::count`]).
+pub const OPEN_SHEET: u32 = 1 << 31;
+
+impl PaletteIndex {
+    /// This colour on triangles of an open sheet when `open` ([`OPEN_SHEET`]).
+    pub fn sheet(self, open: bool) -> PaletteIndex {
+        if open { PaletteIndex(self.0 | OPEN_SHEET) } else { self }
+    }
+
+    /// The entry, without the [`OPEN_SHEET`] bit.
+    fn entry(self) -> usize {
+        (self.0 & !OPEN_SHEET) as usize
+    }
+}
 
 /// How many palette entries fit on one texel row: the shader reads `x = i & 2047`,
 /// `y = i >> 11`. A power of two keeps the lookup a shift and a mask.
@@ -84,13 +102,13 @@ impl Palette {
 
     /// The colour at `i`, if the palette has it.
     pub fn get(&self, i: PaletteIndex) -> Option<[u8; 4]> {
-        self.entries.get(i.0 as usize).copied()
+        self.entries.get(i.entry()).copied()
     }
 
     /// Set an entry's colour; `false` when the index is out of range. Stable entries are updated
     /// in place (what appearance and theme edits do); interned entries keep their lookup current.
     pub fn set(&mut self, i: PaletteIndex, rgba: [u8; 4]) -> bool {
-        let at = i.0 as usize;
+        let at = i.entry();
         let ephemeral = at >= self.stable_len;
         let Some(slot) = self.entries.get_mut(at) else { return false };
         if ephemeral {
@@ -98,7 +116,7 @@ impl Palette {
         }
         *slot = rgba;
         if ephemeral {
-            self.lookup.insert(rgba, i.0);
+            self.lookup.insert(rgba, i.0 & !OPEN_SHEET);
         }
         true
     }
@@ -151,10 +169,12 @@ fn octahedral6(n: [f32; 3]) -> u32 {
     let q = |v: f32| ((v.clamp(-1.0, 1.0) + 1.0) * 31.0).round() as u32 + 1;
     (q(y).min(63) << 6) | q(x).min(63)
 }
-/// The shader's `U`: the view-projection matrix, 10 `vec4`s (the tenth carries the ambient
-/// occlusion radius), the 8 analysis colours, their flags, the depth direction and the two
-/// whole-body highlight colours (`uniform_bytes`).
-const UNIFORM_SIZE: u64 = 416 + 16 + 21 * 64;
+/// The shader's `U`: the view-projection matrix, 3 `vec4`s, the section's
+/// [`MAX_SECTION_PLANES`] planes, 6 more `vec4`s (the last carries the ambient occlusion
+/// radius), the 8 analysis colours, their flags, the depth direction, the two whole-body
+/// highlight colours, the product lights (a flag and count, then 21 lights of 4 `vec4`s) and
+/// each section plane's hatch (`uniform_bytes`).
+const UNIFORM_SIZE: u64 = 416 + 16 * (2 * MAX_SECTION_PLANES as u64 - 1) + 16 + 21 * 64;
 
 /// A body drawn from its display plan, evaluated on the GPU: the plan, and a palette index per
 /// face (the plan's face numbering; faces past the end take the last index).
@@ -168,8 +188,8 @@ pub struct PlannedBody {
 }
 
 /// What the viewport's last frame drew, counted as it was drawn (the performance overlay, #2548).
-/// Triangles and line segments count every pass that draws them, so a section's stencil passes
-/// count twice; that is the work the GPU did.
+/// Triangles and line segments count every pass that draws them, so a section's passes count
+/// each face three times (five with two planes or more); that is the work the GPU did.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct DrawStats {
     pub draw_calls: u32,
@@ -957,8 +977,11 @@ pub struct Frame {
     pub back: [f32; 3],
     /// Viewport size in physical pixels.
     pub size_px: [f32; 2],
-    /// Section cut: (normal, d); fragments with normal·p > d are hidden. A zero normal: none.
-    pub clip: [f32; 4],
+    /// Section cut: up to [`MAX_SECTION_PLANES`] planes (normal, d), the first ones; fragments
+    /// with normal·p > d for any one are hidden. A zero normal: no plane (the first: no section).
+    pub clip: [[f32; 4]; MAX_SECTION_PLANES],
+    /// Each clip plane's hatch, an index into `solidcraft_render::SECTION_HATCH_ANGLES`.
+    pub clip_hatch: [usize; MAX_SECTION_PLANES],
     /// Colour of the inside of cut bodies (straight sRGB, 0..1); alpha 1 hatches it, 0 leaves it plain in the body's colour.
     pub cap: [f32; 4],
     /// Canvases and decals.
@@ -1939,19 +1962,35 @@ impl Batches {
     }
 }
 
-/// The section's pipelines (see `Renderer::tri_cut`).
+/// The section's pipelines (see `Renderer::tri_cut`), in the order they draw. The stencil's
+/// low bits ([`CUT_COUNT`]) count bodies, its top bit ([`CUT_CAP`]) marks the cap.
 struct Cut {
-    /// Draws the faces and marks the stencil by their true depth: 1 where a back face (the cap)
-    /// is the visible surface. Unpushed: `FACE_BIAS`'s slope part would let a front face win a
-    /// band along its edge with a back face seen through the cut, and the cap would skip it (#6328).
+    /// Every closed body's face past where its view ray comes into what the section keeps: back
+    /// faces count up and front faces down, leaving how many bodies that point (the cap) is
+    /// inside. An open sheet's ([`OPEN_SHEET`]) would leave a count where no material is. No
+    /// colour or depth. Drawn, with `hole`, only for two planes or more.
+    count: wgpu::RenderPipeline,
+    /// Draws the faces and marks the stencil by their true depth: the cap bit where a back face
+    /// (the cap) is the visible surface. Unpushed: `FACE_BIAS`'s slope part would let a front
+    /// face win a band along its edge with a back face seen through the cut, and the cap would
+    /// skip it (#6328).
     mark: wgpu::RenderPipeline,
+    /// The cap where its body reaches past another plane before the far wall, so no kept back
+    /// face shows it: the nearest hidden back face of a closed body behind it, where the count
+    /// says the cap is inside a body, in the cap colour, marking the cap bit.
+    hole: wgpu::RenderPipeline,
     /// The faces' depth again, pushed back by `FACE_BIAS` as unsectioned faces are (after
     /// `Renderer::section_reset`), so their edges draw over them (#1434). No colour, no stencil.
     push: wgpu::RenderPipeline,
     /// The cap again, only where marked, at the section plane's depth: depth only, as the mark
-    /// drew the cap's colour (#6728).
+    /// and the hole drew the cap's colour (#6728).
     cap: wgpu::RenderPipeline,
 }
+
+/// The stencil bits of a section's body count ([`Cut::count`]).
+const CUT_COUNT: u32 = 0x7f;
+/// The stencil bit marking a section's cap ([`Cut::mark`], [`Cut::hole`]); the stencil reference.
+const CUT_CAP: u32 = 0x80;
 
 /// The viewport's pipelines and the scenes uploaded to one device, for one kind of target.
 pub struct Renderer {
@@ -1985,7 +2024,8 @@ pub struct Renderer {
     #[cfg(not(target_arch = "wasm32"))]
     tess_later: Option<TessLater>,
     /// While a section is shown (when the depth buffer has a stencil), in place of `tri`: the
-    /// faces marking where the cap shows, their depth pushed back, then the cap again at the
+    /// faces counting which pixels' cut lies inside a body, marking where the cap shows (and
+    /// where only a hidden far wall does), their depth pushed back, then the cap again at the
     /// section plane's depth, so it hides the inside ([`Cut`]).
     tri_cut: Option<Cut>,
     /// Highlight triangles over the model (depth test ≤, no depth write).
@@ -2086,6 +2126,9 @@ pub struct Renderer {
     /// The scene target's depth back to the far plane between the section's marking and push
     /// passes ([`Cut`]); stencil and colour untouched.
     section_reset: Option<wgpu::RenderPipeline>,
+    /// The scene target's stencil cleared before a section's passes ([`Cut`]); depth and colour
+    /// untouched.
+    section_clear: Option<wgpu::RenderPipeline>,
     /// The new resolve textures [`clear_resolve_targets`] has cleared (tests count them).
     #[cfg(test)]
     resolve_clears: u32,
@@ -2309,6 +2352,15 @@ impl TriSource {
             TriSource::Instanced => "vs_tri_inst",
             TriSource::InstancedFlat => "vs_tri_inst_flat",
             TriSource::Built | TriSource::Planned => "vs_tri",
+        }
+    }
+
+    /// [`TriSource::entry`] leaving out open sheets' triangles ([`OPEN_SHEET`]).
+    fn closed_entry(self) -> &'static str {
+        match self {
+            TriSource::Instanced => "vs_tri_inst_closed",
+            TriSource::InstancedFlat => "vs_tri_inst_flat_closed",
+            TriSource::Built | TriSource::Planned => "vs_tri_closed",
         }
     }
 
@@ -2626,83 +2678,94 @@ impl Renderer {
         let evaluated = [Some(planned_layout()), Some(color_layout())];
         let placed = [Some(shared_layout()), Some(instance_layout())];
         // `colour`: whether the pipeline writes colour (the cap's depth pass writes none).
-        let solid_writes = |label: &str, fs: &str, cull: Option<wgpu::Face>, ds: Option<wgpu::DepthStencilState>, source: TriSource, colour: bool| {
-            let fs = source.fragment(fs);
-            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-                label: Some(label),
-                layout: Some(&solid_layout),
-                vertex: wgpu::VertexState {
-                    module: &module,
-                    entry_point: Some(source.entry()),
-                    buffers: match source {
-                        TriSource::Built => &built[..],
-                        TriSource::Planned => &evaluated[..],
-                        TriSource::Instanced | TriSource::InstancedFlat => &placed[..],
+        let tri_pipeline =
+            |label: &str, vs: &str, fs: &str, cull: Option<wgpu::Face>, ds: Option<wgpu::DepthStencilState>, source: TriSource, colour: bool| {
+                let fs = source.fragment(fs);
+                device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                    label: Some(label),
+                    layout: Some(&solid_layout),
+                    vertex: wgpu::VertexState {
+                        module: &module,
+                        entry_point: Some(vs),
+                        buffers: match source {
+                            TriSource::Built => &built[..],
+                            TriSource::Planned => &evaluated[..],
+                            TriSource::Instanced | TriSource::InstancedFlat => &placed[..],
+                        },
+                        compilation_options: Default::default(),
                     },
-                    compilation_options: Default::default(),
-                },
-                primitive: wgpu::PrimitiveState { topology: wgpu::PrimitiveTopology::TriangleList, cull_mode: cull, ..Default::default() },
-                depth_stencil: ds,
-                multisample: wgpu::MultisampleState { count: t.samples.max(1), mask: !0, alpha_to_coverage_enabled: false },
-                fragment: Some(wgpu::FragmentState {
-                    module: &module,
-                    entry_point: Some(&fs),
-                    targets: &[Some(wgpu::ColorTargetState {
-                        format: t.format,
-                        blend: None,
-                        write_mask: if colour { wgpu::ColorWrites::ALL } else { wgpu::ColorWrites::empty() },
-                    })],
-                    compilation_options: Default::default(),
-                }),
-                multiview_mask: None,
-                cache: None,
-            })
+                    primitive: wgpu::PrimitiveState { topology: wgpu::PrimitiveTopology::TriangleList, cull_mode: cull, ..Default::default() },
+                    depth_stencil: ds,
+                    multisample: wgpu::MultisampleState { count: t.samples.max(1), mask: !0, alpha_to_coverage_enabled: false },
+                    fragment: Some(wgpu::FragmentState {
+                        module: &module,
+                        entry_point: Some(&fs),
+                        targets: &[Some(wgpu::ColorTargetState {
+                            format: t.format,
+                            blend: None,
+                            write_mask: if colour { wgpu::ColorWrites::ALL } else { wgpu::ColorWrites::empty() },
+                        })],
+                        compilation_options: Default::default(),
+                    }),
+                    multiview_mask: None,
+                    cache: None,
+                })
+            };
+        let solid_writes = |label: &str, fs: &str, cull: Option<wgpu::Face>, ds: Option<wgpu::DepthStencilState>, source: TriSource, colour: bool| {
+            tri_pipeline(label, source.entry(), fs, cull, ds, source, colour)
         };
         let solid = |label: &str, fs: &str, cull: Option<wgpu::Face>, ds: Option<wgpu::DepthStencilState>, source: TriSource| {
             solid_writes(label, fs, cull, ds, source, true)
         };
-        // While a section is shown, the depth states of the stencil marking and of the cap (see
-        // `Renderer::tri_cut`), where the depth buffer has a stencil.
+        // While a section is shown, the depth states of its passes (see `Renderer::tri_cut`),
+        // where the depth buffer has a stencil: count, mark, hole and cap.
         let cut_states = t.depth.filter(|f| f.has_stencil_aspect()).map(|format| {
-            // The visible surface, by its true depth, marks the stencil: 1 where it is a back face (the cap).
-            use wgpu::StencilOperation::{Keep, Replace, Zero};
-            let face = |pass_op| wgpu::StencilFaceState { compare: wgpu::CompareFunction::Always, fail_op: Keep, depth_fail_op: Keep, pass_op };
-            let mark = wgpu::DepthStencilState {
+            use wgpu::CompareFunction::{Always, Equal, Less, NotEqual};
+            use wgpu::StencilOperation::{DecrementWrap, IncrementWrap, Keep, Replace, Zero};
+            let face = |compare, pass_op| wgpu::StencilFaceState { compare, fail_op: Keep, depth_fail_op: Keep, pass_op };
+            let state = |write: bool, compare, front, back, read_mask, write_mask| wgpu::DepthStencilState {
                 format,
-                depth_write_enabled: Some(true),
-                depth_compare: Some(depth_compare(reversed, wgpu::CompareFunction::Less)),
-                stencil: wgpu::StencilState { front: face(Zero), back: face(Replace), read_mask: 0xff, write_mask: 0xff },
+                depth_write_enabled: Some(write),
+                depth_compare: Some(compare),
+                stencil: wgpu::StencilState { front, back, read_mask, write_mask },
                 bias: Default::default(),
             };
+            let count = state(false, Always, face(Always, DecrementWrap), face(Always, IncrementWrap), 0, CUT_COUNT);
+            // The visible surface, by its true depth, marks the cap: where it is a back face.
+            let less = depth_compare(reversed, Less);
+            let mark = state(true, less, face(Always, Zero), face(Always, Replace), 0, CUT_CAP);
+            let inside = face(NotEqual, Replace);
+            let hole = state(true, less, inside, inside, CUT_COUNT, CUT_CAP);
             // Then the cap's back faces again, only there, at the section plane's depth.
-            let only = wgpu::StencilFaceState { compare: wgpu::CompareFunction::Equal, ..face(Keep) };
-            let cap = wgpu::DepthStencilState {
-                format,
-                depth_write_enabled: Some(true),
-                depth_compare: Some(wgpu::CompareFunction::Always),
-                stencil: wgpu::StencilState { front: only, back: only, read_mask: 0xff, write_mask: 0 },
-                bias: Default::default(),
-            };
-            (mark, cap)
+            let only = face(Equal, Keep);
+            let cap = state(true, Always, only, only, CUT_CAP, 0);
+            [count, mark, hole, cap]
         });
-        // `Cut::mark` and `Cut::push` use `tri`'s fragment shader; `Cut::cap` has its own.
+        // `Cut::mark` and `Cut::push` use `tri`'s fragment shader.
         let marks = |source: TriSource| {
-            cut_states.as_ref().map(|(mark, _)| {
+            cut_states.as_ref().map(|[_, mark, ..]| {
                 (
                     solid("sc_tris_mark", "fs_solid", None, Some(mark.clone()), source),
                     solid_writes("sc_tris_push", "fs_solid", None, pushed(wgpu::CompareFunction::Less, true, FACE_BIAS), source, false),
                 )
             })
         };
-        // Depth only: every back face behind a marked pixel draws here, so writing colour let the
-        // last one drawn paint the cut, other bodies behind it included (their colours and
-        // outlines showed through it, #6328). The marking pass already drew the nearest back
-        // face's colour.
+        // The cap: depth only, as every back face behind a marked pixel draws here, so writing
+        // colour let the last one drawn paint the cut, other bodies behind it included (their
+        // colours and outlines showed through it, #6328). The marking and hole passes already
+        // drew the nearest back face's colour.
         let cap = |source: TriSource| {
-            cut_states.as_ref().map(|(_, cap)| solid_writes("sc_tris_cap", "fs_solid_cut", Some(wgpu::Face::Front), Some(cap.clone()), source, false))
+            cut_states.as_ref().map(|[count, _, hole, cap]| {
+                (
+                    tri_pipeline("sc_tris_count", source.closed_entry(), "fs_section_count", None, Some(count.clone()), source, false),
+                    tri_pipeline("sc_tris_hole", source.closed_entry(), "fs_section_hole", Some(wgpu::Face::Front), Some(hole.clone()), source, true),
+                    solid_writes("sc_tris_cap", "fs_solid_cut", Some(wgpu::Face::Front), Some(cap.clone()), source, false),
+                )
+            })
         };
-        let cut = |marks: Option<(wgpu::RenderPipeline, wgpu::RenderPipeline)>, cap: Option<wgpu::RenderPipeline>| {
-            marks.zip(cap).map(|((mark, push), cap)| Cut { mark, push, cap })
+        type Caps = (wgpu::RenderPipeline, wgpu::RenderPipeline, wgpu::RenderPipeline);
+        let cut = |marks: Option<(wgpu::RenderPipeline, wgpu::RenderPipeline)>, cap: Option<Caps>| {
+            marks.zip(cap).map(|((mark, push), (count, hole, cap))| Cut { count, mark, hole, push, cap })
         };
         let access_bind = access_texture(device, None, &access_bgl, 1, &[]);
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
@@ -2775,8 +2838,9 @@ impl Renderer {
         let oit = || oit::Pipelines::new(device, &module, &layout, t.format, t.depth, t.samples);
         let resets = || {
             (
-                window.reversed_depth().then(|| depth_reset_pipeline(device, window)).flatten(),
-                t.depth.filter(|f| f.has_stencil_aspect()).and_then(|_| depth_reset_pipeline(device, t)),
+                window.reversed_depth().then(|| depth_reset_pipeline(device, window, false)).flatten(),
+                t.depth.filter(|f| f.has_stencil_aspect()).and_then(|_| depth_reset_pipeline(device, t, false)),
+                t.depth.filter(|f| f.has_stencil_aspect()).and_then(|_| depth_reset_pipeline(device, t, true)),
             )
         };
         let opaque = || pushed(wgpu::CompareFunction::Less, true, FACE_BIAS);
@@ -2881,12 +2945,13 @@ impl Renderer {
             let (line, line_hidden) = lines.join();
             let (overlay, guide_line) = lines_all.join();
             let (ss_blit, copy_blit, ss_filter) = blits.join();
-            let (depth_reset, section_reset) = resets.join();
+            let (depth_reset, section_reset, section_clear) = resets.join();
             let oit = oit.join();
             Renderer {
                 ao: ao.join(),
                 depth_reset,
                 section_reset,
+                section_clear,
                 #[cfg(test)]
                 resolve_clears: 0,
                 target: GpuTarget { oit: oit.is_some(), ..t },
@@ -3006,8 +3071,9 @@ pub const FACE_SLOPE: f32 = 1.0;
 const GHOST_BIAS: wgpu::DepthBiasState = wgpu::DepthBiasState { constant: 2 * FACE_STEPS, slope_scale: 2.0 * FACE_SLOPE, clamp: 0.0 };
 
 /// A pipeline that sets the depth of the viewport in a pass of `t`'s kind back to the far plane,
-/// leaving colour and stencil as they are. None without a depth buffer.
-fn depth_reset_pipeline(device: &wgpu::Device, t: GpuTarget) -> Option<wgpu::RenderPipeline> {
+/// leaving colour and stencil as they are; with `stencil`, clears the stencil instead, leaving
+/// colour and depth. None without a depth buffer.
+fn depth_reset_pipeline(device: &wgpu::Device, t: GpuTarget, stencil: bool) -> Option<wgpu::RenderPipeline> {
     let format = t.depth?;
     let far = if t.reversed_depth() { "0.0" } else { "1.0" };
     let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
@@ -3023,9 +3089,14 @@ fn depth_reset_pipeline(device: &wgpu::Device, t: GpuTarget) -> Option<wgpu::Ren
         primitive: wgpu::PrimitiveState { topology: wgpu::PrimitiveTopology::TriangleList, ..Default::default() },
         depth_stencil: Some(wgpu::DepthStencilState {
             format,
-            depth_write_enabled: Some(true),
+            depth_write_enabled: Some(!stencil),
             depth_compare: Some(wgpu::CompareFunction::Always),
-            stencil: Default::default(),
+            stencil: if stencil {
+                let zero = wgpu::StencilFaceState { pass_op: wgpu::StencilOperation::Zero, ..wgpu::StencilFaceState::IGNORE };
+                wgpu::StencilState { front: zero, back: zero, read_mask: 0, write_mask: 0xff }
+            } else {
+                Default::default()
+            },
             bias: Default::default(),
         }),
         multisample: wgpu::MultisampleState { count: t.samples.max(1), mask: !0, alpha_to_coverage_enabled: false },
@@ -3230,7 +3301,7 @@ fn frame_key(cb: &Frame) -> u64 {
     cb.back.map(f32::to_bits).hash(&mut h);
     cb.eye.map(f32::to_bits).hash(&mut h);
     cb.size_px.map(f32::to_bits).hash(&mut h);
-    cb.clip.map(f32::to_bits).hash(&mut h);
+    cb.clip.iter().flatten().for_each(|v| v.to_bits().hash(&mut h));
     cb.cap.map(f32::to_bits).hash(&mut h);
     cb.analysis.map(f32::to_bits).hash(&mut h);
     cb.analysis_colors.map(f32::to_bits).hash(&mut h);
@@ -3588,15 +3659,19 @@ impl Renderer {
                     d.draw(pass, smooth, flat, tally);
                 }
             };
-        let sectioned = cb.clip[..3].iter().map(|c| c * c).sum::<f32>() > 0.25;
+        let shown = |c: &[f32; 4]| c[..3].iter().map(|v| v * v).sum::<f32>() > 0.25;
+        let sectioned = shown(&cb.clip[0]);
+        // One plane keeps the whole of a ray past where it comes in, so no hidden face lies past
+        // it: the count and the hole draw nothing.
+        let holes = cb.clip.iter().filter(|c| shown(c)).count() > 1;
         match (
             res.tri_cut.as_ref().filter(|_| sectioned),
             res.tri_cut_planned.as_ref(),
             res.tri_cut_instanced.as_ref(),
             res.tri_cut_instanced_flat.as_ref(),
-            res.section_reset.as_ref(),
+            res.section_reset.as_ref().zip(res.section_clear.as_ref()),
         ) {
-            (Some(cut), Some(cut_planned), Some(cut_instanced), Some(cut_flat), Some(reset)) => {
+            (Some(cut), Some(cut_planned), Some(cut_instanced), Some(cut_flat), Some((reset, clear))) => {
                 // The model's own triangles, blocks, plans and instances with its palette, then the
                 // preview's with its own.
                 let all = |pass: &mut wgpu::RenderPass<'static>, pick: fn(&Cut) -> &wgpu::RenderPipeline| {
@@ -3608,8 +3683,17 @@ impl Renderer {
                     pass.set_bind_group(0, scene_bind(pv, &res.bind), &[]);
                     tris(pass, pick(cut), &pv.tris);
                 };
-                pass.set_stencil_reference(1);
+                pass.set_stencil_reference(CUT_CAP);
+                pass.set_pipeline(clear);
+                pass.draw(0..3, 0..1);
+                tally.call();
+                if holes {
+                    all(pass, |c| &c.count);
+                }
                 all(pass, |c| &c.mark);
+                if holes {
+                    all(pass, |c| &c.hole);
+                }
                 pass.set_pipeline(reset);
                 pass.draw(0..3, 0..1);
                 tally.call();
@@ -4059,12 +4143,31 @@ fn load_depth<T>(first: bool, clear: T) -> wgpu::LoadOp<T> {
     if first { wgpu::LoadOp::Clear(clear) } else { wgpu::LoadOp::Load }
 }
 
+/// A section's planes (normal, d) as [`Frame::clip`]: the first [`MAX_SECTION_PLANES`], the
+/// rest of the slots unused.
+pub fn clip_planes(planes: &[(Vec3, f64)]) -> [[f32; 4]; MAX_SECTION_PLANES] {
+    let mut clip = [[0.0; 4]; MAX_SECTION_PLANES];
+    for (slot, (n, d)) in clip.iter_mut().zip(planes) {
+        *slot = [n.x as f32, n.y as f32, n.z as f32, *d as f32];
+    }
+    clip
+}
+
+/// A section's planes' hatches as [`Frame::clip_hatch`], beside [`clip_planes`].
+pub fn clip_hatches(hatch: &[usize]) -> [usize; MAX_SECTION_PLANES] {
+    let mut out = [0; MAX_SECTION_PLANES];
+    for (slot, h) in out.iter_mut().zip(hatch) {
+        *slot = *h;
+    }
+    out
+}
+
 /// Uniform bytes for a frame.
 pub fn uniform_bytes(cb: &Frame, w: f32, h: f32, linear: bool, reversed: bool) -> Vec<u8> {
     let mut v: Vec<f32> = gpu_view_proj(cb.view_proj, reversed).iter().flatten().copied().collect();
     v.extend([cb.back[0], cb.back[1], cb.back[2], if linear { 1.0 } else { 0.0 }]);
     v.extend([w.max(1.0), h.max(1.0), 0.0, if cb.outline { 1.0 } else { 0.0 }]);
-    v.extend(cb.clip);
+    v.extend(cb.clip.iter().flatten());
     v.extend(cb.cap);
     v.extend(cb.analysis);
     match &cb.access {
@@ -4089,6 +4192,12 @@ pub fn uniform_bytes(cb: &Frame, w: f32, h: f32, linear: bool, reversed: bool) -
     for index in 0..21 {
         let light = cb.product_lights.as_ref().and_then(|lights| lights.get(index)).copied().unwrap_or([0.0; 16]);
         v.extend(light.map(|value| if value.is_finite() { value } else { 0.0 }));
+    }
+    let vp = solidcraft_render::Mat4(cb.view_proj.map(|c| c.map(f64::from)));
+    for (c, hatch) in cb.clip.iter().zip(cb.clip_hatch) {
+        let n = Vec3::new(f64::from(c[0]), f64::from(c[1]), f64::from(c[2]));
+        let [x, y] = solidcraft_render::section_hatch(&vp, n, hatch, f64::from(w.max(1.0)), f64::from(h.max(1.0)));
+        v.extend([x as f32, y as f32, 0.0, 0.0]);
     }
     v.iter().flat_map(|x| x.to_le_bytes()).collect()
 }
@@ -4303,6 +4412,37 @@ mod tests {
         assert_ne!(super::frame_key(&frame), previous);
     }
 
+    /// The uniform fills the shader's `U` exactly, the section's planes and their hatch included.
+    #[test]
+    fn the_uniform_matches_the_shader_layout() {
+        let mut f = cached_frame();
+        f.clip = super::clip_planes(&[(super::Vec3::X, 1.0); super::MAX_SECTION_PLANES]);
+        f.clip[super::MAX_SECTION_PLANES - 1] = [0.0, 0.0, 1.0, 7.25];
+        f.clip_hatch = super::clip_hatches(&[0, 1, 2, 3, 4, 5]);
+        f.view_proj = solidcraft_render::Camera::default().view_proj(1.0, 40.0).to_f32();
+        let bytes = super::uniform_bytes(&f, 64.0, 64.0, false, false);
+        assert_eq!(bytes.len() as u64, super::UNIFORM_SIZE);
+        let v: Vec<f32> = bytes.as_chunks::<4>().0.iter().map(|c| f32::from_le_bytes(*c)).collect();
+        assert_eq!(v[24..28], [1.0, 0.0, 0.0, 1.0], "the first plane follows the screen");
+        let last = 16 + 8 + 4 * super::MAX_SECTION_PLANES;
+        assert_eq!(v[last - 2..last], [1.0, 7.25], "the last plane sits before the cap colour");
+        // Each plane's hatch closes the uniform, as the shared `section_hatch` has it.
+        let vp = solidcraft_render::Mat4(f.view_proj.map(|c| c.map(f64::from)));
+        let hatch = &v[v.len() - 4 * super::MAX_SECTION_PLANES..];
+        for (k, (h, c)) in hatch.as_chunks::<4>().0.iter().zip(&f.clip).enumerate() {
+            let n = super::Vec3::new(f64::from(c[0]), f64::from(c[1]), f64::from(c[2]));
+            let [x, y] = solidcraft_render::section_hatch(&vp, n, k, 64.0, 64.0);
+            assert_eq!(h, &[x as f32, y as f32, 0.0, 0.0], "plane {k}'s hatch");
+        }
+        assert_ne!(hatch[..2], hatch[4..6], "the first two planes, alike but for their hatch, hatch differently");
+        // The hatch goes with the plane, not its slot: the second plane alone keeps its own.
+        f.clip_hatch = super::clip_hatches(&[1]);
+        let bytes = super::uniform_bytes(&f, 64.0, 64.0, false, false);
+        let v: Vec<f32> = bytes.as_chunks::<4>().0.iter().map(|c| f32::from_le_bytes(*c)).collect();
+        let [x, y] = solidcraft_render::section_hatch(&vp, super::Vec3::X, 1, 64.0, 64.0);
+        assert_eq!(v[v.len() - 4 * super::MAX_SECTION_PLANES..][..2], [x as f32, y as f32]);
+    }
+
     /// A frame with a fixed picture, and a key that names everything it shows.
     fn cached_frame() -> super::Frame {
         use std::sync::{Arc, Mutex};
@@ -4323,7 +4463,8 @@ mod tests {
             view_proj: [[0.0; 4]; 4],
             back: [0.0; 3],
             size_px: [800.0, 600.0],
-            clip: [0.0; 4],
+            clip: [[0.0; 4]; super::MAX_SECTION_PLANES],
+            clip_hatch: [0; super::MAX_SECTION_PLANES],
             cap: [0.0; 4],
             images: Vec::new(),
             clouds: Vec::new(),
@@ -4369,7 +4510,8 @@ mod tests {
             ("lighting", key(|f| f.back[0] += 1.0)),
             ("eye", key(|f| f.eye[0] += 1.0)),
             ("size", key(|f| f.size_px[0] += 1.0)),
-            ("section", key(|f| f.clip[0] = 1.0)),
+            ("section", key(|f| f.clip[0][0] = 1.0)),
+            ("second section plane", key(|f| f.clip[1][0] = 1.0)),
             ("section cap", key(|f| f.cap[0] = 0.5)),
             ("analysis", key(|f| f.analysis[0] = 1.0)),
             ("analysis colours", key(|f| f.analysis_colors[0] = 1.0)),
@@ -4710,7 +4852,8 @@ mod glass_tests {
             view_proj: [[0.1, 0.0, 0.0, 0.0], [0.0, 0.1, 0.0, 0.0], [0.0, 0.0, -0.01, 0.0], [0.0, 0.0, 0.5, 1.0]],
             back: [0.0, 0.0, 1.0],
             size_px: [SIZE as f32; 2],
-            clip: [0.0; 4],
+            clip: [[0.0; 4]; super::MAX_SECTION_PLANES],
+            clip_hatch: [0; super::MAX_SECTION_PLANES],
             cap: [0.0; 4],
             images: Vec::new(),
             clouds: Vec::new(),
@@ -4885,7 +5028,8 @@ mod glass_tests {
             view_proj: [[0.1, 0.0, 0.0, 0.0], [0.0, 0.1, 0.0, 0.0], [0.0, 0.0, -0.01, 0.0], [0.0, 0.0, 0.5, 1.0]],
             back: [0.0, 0.0, 1.0],
             size_px: [SIZE as f32; 2],
-            clip: [0.0; 4],
+            clip: [[0.0; 4]; super::MAX_SECTION_PLANES],
+            clip_hatch: [0; super::MAX_SECTION_PLANES],
             cap: [0.0; 4],
             images: Vec::new(),
             clouds: Vec::new(),

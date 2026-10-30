@@ -6744,7 +6744,7 @@ mod tests {
             assert_eq!(s.continuity.len(), 1);
             assert_eq!(s.status_items().len(), 2);
             assert_eq!(s.status_items()[0].command, "inspect.continuity");
-            assert!(s.section.is_some());
+            assert!(!s.section.is_empty());
             assert!(!s.is_dirty());
         }
         assert!(std::sync::Arc::ptr_eq(&doc, &app.session.doc));
