@@ -17,7 +17,11 @@
 //! evaluation propagates its error. Loop membership of an edge use (test 14) and wire
 //! membership (test 13) read sets built once per loop use / shell. `SmHyperbola` and
 //! `SmParabola` use the inherited `SmBSplineCurve` check with their own `MakeNurb`,
-//! `IsAnalytic` and `IsBounded`.
+//! `IsAnalytic` and `IsBounded`. Opt-in (WR-540,
+//! `Kernel::fixes.edge_check_orders_tangent_faces`, #383): where two faces round an edge
+//! leave it within `SM_ANG_TOL_DEG` of each other, test 9 orders every face by the
+//! direction to its point 20 edge tolerances into the face, square to the edge (the
+//! fork's tangency-labs/smlib@5533bbb).
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -27,9 +31,9 @@ use crate::error::{EntityRef, Result};
 use crate::geom::assert_array::{AssertArray, ObjectKey};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
-use crate::geom::tol::{is_zero, ScaledZero, ZONE_TOL_3D};
+use crate::geom::tol::{is_zero, ScaledZero, ANG_TOL_DEG, ZONE_TOL_3D};
 use crate::kernel::Kernel;
-use crate::math::{rad_to_deg, Point3, EFF_ZERO, UNDEF_DOUBLE};
+use crate::math::{rad_to_deg, Point3, EFF_ZERO, PI, UNDEF_DOUBLE};
 use crate::nurbs::b_spline_curve::p3::DerivedOverrides;
 use crate::nurbs::b_spline_surface::SurfParamType;
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
@@ -260,6 +264,46 @@ fn edge_point(k: &Kernel, b: &Brep, e: EdgeId, t: f64) -> Result<Point3> {
     c.evaluate_point(k, t)
 }
 
+/// The direction edge use `eu`'s face leaves the edge in at `t` (with its point,
+/// tangent and face normal): its binormal, or with `step_off` (WR-540) the direction to
+/// its point `step_off_dist` into the face, square to the edge (kept as the binormal when
+/// the step or a unitisation fails).
+fn sector_direction(
+    k: &Kernel,
+    b: &mut Brep,
+    eu: EdgeuseId,
+    t: f64,
+    options: BinormalOptions,
+    step_off: bool,
+    step_off_dist: f64,
+) -> Result<crate::topology::edgeuse::p2::BinormalEval> {
+    use crate::topology::edgeuse::p2::{evaluate_binormal_step_off, StepOffOptions};
+    let mut eval = evaluate_binormal(k, b, eu, t, true, &options)?;
+    if !step_off {
+        return Ok(eval);
+    }
+    let Some(stepped) = crate::error::ignored(evaluate_binormal_step_off(
+        k,
+        b,
+        eu,
+        t,
+        step_off_dist,
+        &StepOffOptions::default(),
+    ))?
+    else {
+        return Ok(eval);
+    };
+    let Ok(unit_tan) = eval.tangent.unitize() else {
+        return Ok(eval);
+    };
+    let mut away = stepped.point - eval.point;
+    away = away - away.dot(unit_tan) * unit_tan;
+    if let Ok(away) = away.unitize() {
+        eval.binormal = away;
+    }
+    Ok(eval)
+}
+
 /// The radial edge-use walk of `SmEdge::AssertValid` (tests 8-11).
 fn radial_order(
     k: &mut Kernel,
@@ -287,6 +331,45 @@ fn radial_order(
 
     // Must watch out for zero sectors: coincident faces.
     let mut have_nonzero_angle = false;
+
+    // Not upstream (WR-540), opt-in `Kernel::fixes.edge_check_orders_tangent_faces` (the
+    // fork's tangency-labs/smlib@5533bbb, #383): a sector between faces tangent along the
+    // edge (a cylinder touching a plane it rests on, left by a boolean as a non-manifold
+    // edge) has binormals that agree to first order, so the binormal angles tie (or differ
+    // by rounding, either way round) and cannot show the order. Where any sector is that
+    // narrow, every face is measured by the direction from the edge to its point a short
+    // step into the face (20 edge tolerances, as IsConvexRadialSector steps).
+    let seq_param = extent.evaluate(0.456);
+    let mut step_off = false;
+    let mut step_off_dist = 0.0;
+    if k.fixes.edge_check_orders_tangent_faces {
+        step_off_dist = 20.0 * tedge::tolerance(b, e)?;
+        let tie_dot = (ANG_TOL_DEG * PI / 180.0).cos();
+        let num_eus = b.edge(e)?.edgeuses.len();
+        let mut eu = target;
+        let mut sectors = 0usize;
+        while let Some(rad) = eu1::radial(b, eu)? {
+            if !eu1::is_loop_edgeuse(b, eu)? || !eu1::is_loop_edgeuse(b, rad)? {
+                break;
+            }
+            let b0 = crate::error::ignored(evaluate_binormal(k, b, eu, seq_param, true, &options))?;
+            let b1 =
+                crate::error::ignored(evaluate_binormal(k, b, rad, seq_param, true, &options))?;
+            if let (Some(b0), Some(b1)) = (b0, b1) {
+                if let (Ok(u0), Ok(u1)) = (b0.binormal.unitize(), b1.binormal.unitize()) {
+                    if u0.dot(u1) > tie_dot {
+                        step_off = true;
+                    }
+                }
+            }
+            sectors += 1;
+            match eu1::mate(b, rad)? {
+                Some(next) if !step_off && next != target && sectors < num_eus => eu = next,
+                _ => break,
+            }
+        }
+    }
+
     let mut steps = 0;
     while Some(target) != primary {
         steps += 1;
@@ -305,8 +388,8 @@ fn radial_order(
             ));
         }
         let t = extent.evaluate(0.456);
-        let target_eval = evaluate_binormal(k, b, target, t, true, &options)?;
-        let radial_eval = evaluate_binormal(k, b, radial, t, true, &options)?;
+        let target_eval = sector_direction(k, b, target, t, options, step_off, step_off_dist)?;
+        let radial_eval = sector_direction(k, b, radial, t, options, step_off, step_off_dist)?;
 
         // 1st iteration save variables
         if primary.is_none() {
