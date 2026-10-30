@@ -155,3 +155,26 @@ pub struct JointDynamicsResult {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,
 }
+
+/// Mark a named joint origin as a frame of its own in robot exports (a tool tip, a sensor mount),
+/// or stop marking it.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct OriginFrameParams {
+    /// The named joint origin.
+    pub origin: String,
+    /// Whether robot exports write it.
+    pub frame: bool,
+}
+
+/// What `joint.origin_frame` returns.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct OriginFrameResult {
+    /// The joint origin.
+    pub origin: String,
+    /// Whether robot exports now write it.
+    pub frame: bool,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}

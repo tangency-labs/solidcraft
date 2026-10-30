@@ -300,6 +300,7 @@ fn canonical(doc: &Document, occ: u64) -> Vec<u64> {
 /// The tree as it grows.
 struct Tree<'a> {
     doc: &'a Document,
+    st: &'a ModelState,
     parts: BTreeMap<u64, Part>,
     names: Names,
     model: UrdfModel,
@@ -360,6 +361,28 @@ impl<'a> Tree<'a> {
             dynamics: JointDynamics::default(),
             mimic: None,
         });
+    }
+
+    /// Each origin flagged as a frame becomes an empty link fixed on its part's link: `fixed`
+    /// keeps it from needing mass of its own.
+    fn frames(&mut self) {
+        let doc = self.doc;
+        let st = self.st;
+        for o in doc.assembly.origins.iter().filter(|o| o.export_frame) {
+            let occ = o.origin.occurrence;
+            let frame = self.placed.get(&occ).copied().and_then(|(parent, at)| {
+                let local = joints::resolve_origin(doc, st, &o.origin).ok()?;
+                Some((parent, mat_mul(&mat_inverse(&at)?, &mat_mul(&self.world(occ), &local))))
+            });
+            let Some((parent, origin)) = frame else {
+                self.warnings.push(format!("frame `{}` is skipped: its origin doesn't resolve", o.name));
+                continue;
+            };
+            let name = self.names.take(&o.name);
+            let child = self.model.links.len();
+            self.model.links.push(Link { name, path: Vec::new(), mesh_origin: IDENTITY, visual: None, collision: None, color: None, inertial: None });
+            self.fixed(parent, child, origin);
+        }
     }
 
     /// The link an occurrence fixed in place hangs on, and its frame: `base_link` for the top
@@ -560,6 +583,7 @@ pub fn urdf(doc: &Document, st: &ModelState, stem: &str, options: &UrdfOptions) 
     let parts = parts(doc, st, stem, &mut names, &mut out)?;
     let mut tree = Tree {
         doc,
+        st,
         parts,
         names,
         model: UrdfModel::default(),
@@ -636,6 +660,7 @@ pub fn urdf(doc: &Document, st: &ModelState, stem: &str, options: &UrdfOptions) 
         }
     }
     tree.copies(&jointed);
+    tree.frames();
     if options.mimic {
         resolve_mimics(&mut tree.model, doc, &mut tree.warnings);
     }

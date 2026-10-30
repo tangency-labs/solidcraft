@@ -924,3 +924,92 @@ fn a_follower_limit_the_driver_can_exceed_warns() {
     run(&mut s, "joint.limits", json!({"joint": "J1", "min": -90, "max": 90}));
     assert!(!has_warning(&mimic_package(&s), "exceed"));
 }
+
+/// `two_cubes` on a revolute joint, with a flagged origin "tool0" on the top of B.
+fn tool_frame() -> Session {
+    let mut s = two_cubes();
+    joint(&mut s, "revolute", "Turn", json!([]));
+    let b = occ(&s, "B");
+    // The joint has moved B onto A: its top face is at z = 20 now.
+    run(&mut s, "joint.origin", json!({"name": "tool0", "occurrence": b, "face": [5, 5, 20], "frame": true}));
+    s
+}
+
+/// A link's frame at the design's current joint values.
+fn frame_of(p: &UrdfPackage, s: &Session, link: &str) -> Mat {
+    let vals = joints::joint_values(&s.doc.assembly);
+    let frames = p.model.link_frames(|j| j.source.and_then(|(id, k)| vals.get(&id)?.get(k).copied()).unwrap_or(0.0));
+    let at = p.model.links.iter().position(|l| l.name == link).unwrap_or_else(|| panic!("no link {link}: {}", p.xml));
+    frames[at]
+}
+
+fn world_of_origin(s: &Session, name: &str) -> Mat {
+    let o = s.doc.assembly.origins.iter().find(|o| o.name == name).map(|o| o.origin.clone());
+    let o = o.unwrap_or_else(|| panic!("no origin {name}"));
+    s.doc.origin_world(&s.model.state(), &o).unwrap_or_else(|e| panic!("{e}"))
+}
+
+#[test]
+fn a_flagged_origin_becomes_a_fixed_massless_link() {
+    let s = tool_frame();
+    let p = package(&s);
+    assert!(p.xml.contains(r#"<link name="tool0">"#) || p.xml.contains(r#"<link name="tool0"/>"#), "{}", p.xml);
+    let l = p.model.links.iter().find(|l| l.name == "tool0").unwrap_or_else(|| panic!("{}", p.xml));
+    assert!(l.inertial.is_none() && l.visual.is_none() && l.collision.is_none());
+    let at = p.model.links.iter().position(|l| l.name == "tool0");
+    let j = p.model.joints.iter().find(|j| Some(j.child) == at).unwrap_or_else(|| panic!("{}", p.xml));
+    assert_eq!(j.step, Step::Fixed);
+    assert_eq!(p.model.links[j.parent].name, "B");
+    let frame = frame_of(&p, &s, "tool0");
+    assert!(close(&frame, &world_of_origin(&s, "tool0")));
+    assert!((frame[3][0] - 5.0).abs() < 1e-9 && (frame[3][1] - 5.0).abs() < 1e-9 && (frame[3][2] - 20.0).abs() < 1e-9, "{frame:?}");
+}
+
+#[test]
+fn an_unflagged_origin_adds_nothing() {
+    let mut s = tool_frame();
+    let before = package(&s).model.links.len();
+    run(&mut s, "joint.origin_frame", json!({"origin": "tool0", "frame": false}));
+    assert_eq!(package(&s).model.links.len(), before - 1);
+    run(&mut s, "joint.origin_frame", json!({"origin": "tool0", "frame": true}));
+    assert_eq!(package(&s).model.links.len(), before);
+    assert!(s.execute("joint.origin_frame", &json!({"origin": "nobody", "frame": true})).is_err());
+}
+
+#[test]
+fn a_frame_moves_with_its_part_when_the_joint_drives() {
+    let mut s = tool_frame();
+    run(&mut s, "joint.drive", json!({"joint": "Turn", "values": [40]}));
+    let p = package(&s);
+    assert!(close(&frame_of(&p, &s, "tool0"), &world_of_origin(&s, "tool0")));
+}
+
+#[test]
+fn a_frame_name_taken_by_a_joint_gets_a_suffix() {
+    let mut s = two_cubes();
+    joint(&mut s, "revolute", "Turn", json!([]));
+    let b = occ(&s, "B");
+    run(&mut s, "joint.origin", json!({"name": "Turn", "occurrence": b, "face": [5, 5, 20], "frame": true}));
+    let p = package(&s);
+    assert!(p.model.links.iter().any(|l| l.name == "Turn_2"), "{}", p.xml);
+    assert!(p.model.joints.iter().any(|j| j.name == "Turn"), "{}", p.xml);
+}
+
+#[test]
+fn a_frame_whose_face_is_gone_is_skipped_with_a_warning() {
+    let mut s = tool_frame();
+    let mut lost = s.doc.assembly.origins[0].origin.clone();
+    lost.occurrence = 987_654;
+    s.doc_mut().assembly.origins[0].origin = lost;
+    let p = package(&s);
+    assert!(!p.model.links.iter().any(|l| l.name == "tool0"), "{}", p.xml);
+    assert!(p.warnings.iter().any(|w| w.contains("tool0")), "{:?}", p.warnings);
+}
+
+#[test]
+fn a_frame_on_a_component_placed_twice_appears_once() {
+    let mut s = tool_frame();
+    run(&mut s, "occurrence.copy", json!({"component": "B", "translate": [50, 0, 0]}));
+    let p = package(&s);
+    assert_eq!(p.model.links.iter().filter(|l| l.name.starts_with("tool0")).count(), 1, "{}", p.xml);
+}
