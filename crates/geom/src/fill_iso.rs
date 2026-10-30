@@ -61,8 +61,15 @@
 //!   - across a patch's own C0 knot lines (a side's break where it is only C0 in its
 //!     parameter), the derivatives either side in the ratio of the crossing sides' speeds
 //!     ([`knot_line_rows`]): the fill is tangent continuous there too;
-//!   - across each spoke, the two patches' derivatives away from it opposed (`∂S_k/∂u + ∂S_{k+1}/∂v
-//!     = 0` on the shared parameter): the patches join tangent there;
+//!   - across each spoke, the two patches' derivatives away from it opposed up to the linear
+//!     gluing function of G1 joins at an N-valent point (C. Loop, J. Peters, J. Hahn):
+//!     `∂S_k/∂u + ∂S_{k+1}/∂v = α(t)·∂S/∂t` on the shared parameter t (0 at the edge's
+//!     midpoint, 1 at the centre), `α(t) = 2·cos(2π/N)·t`: the patches join tangent there. At
+//!     the midpoint `α = 0` (the edge's two halves leave it at the same speed, opposed); at the
+//!     centre it is the value the spokes' tangents `d_k` meet when they are any affine image of
+//!     the regular N-star, `d_{k−1} + d_{k+1} = 2·cos(2π/N)·d_k`. Parametric C1 (`α = 0`) asks
+//!     `d_{k−1} + d_{k+1} = 0` there, which for N other than a multiple of four only `d = 0`
+//!     meets: every patch would have a flat corner at the centre;
 //!   - points the fill passes through, located on the last solution (nearest point of any patch)
 //!     and fitted again (Hoschek's parameter correction).
 //!
@@ -1243,12 +1250,15 @@ fn solve(mut quilt: Quilt, stations: &[Station], spec: &IsoSpec) -> SplineResult
             // The span across the side: of v for sides 0 and 2, of u for 1 and 3.
             linkage_rows(&mut rows, patch, s, span(patch).get(1 - s.side % 2).copied().unwrap_or(1.0))?;
         }
-        // Across each spoke the two patches' derivatives away from it are opposed.
+        // Across each spoke the two patches' derivatives away from it are opposed, up to the
+        // gluing function's share of the derivative along it (module docs).
+        let gluing = 2.0 * (std::f64::consts::TAU / quilt.patches.len() as f64).cos();
         for &(left, right) in &quilt.spokes {
             let (Some(a), Some(b)) = (quilt.patches.get(left), quilt.patches.get(right)) else { continue };
             for i in 0..spoke_count {
                 let t = (i as f64 + 0.5) / spoke_count as f64;
-                on_each_axis(&mut rows, &[(left, a.row(1.0, t, 1, 0)?), (right, b.row(t, 1.0, 0, 1)?)], Vec3::ZERO, 1.0);
+                let along: Vec<(usize, usize, f64)> = a.row(1.0, t, 0, 1)?.into_iter().map(|(i, j, c)| (i, j, -gluing * t * c)).collect();
+                on_each_axis(&mut rows, &[(left, a.row(1.0, t, 1, 0)?), (right, b.row(t, 1.0, 0, 1)?), (left, along)], Vec3::ZERO, 1.0);
             }
         }
         for (p, (patch, uv)) in spec.points.iter().zip(&located) {

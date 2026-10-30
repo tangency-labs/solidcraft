@@ -279,3 +279,51 @@ fn a_tube_end_capped_g1_holds_the_wall_and_does_not_fold() {
     assert!(fill.achieved.normal_excess <= s.angle_tol);
     assert!(!any_fold(&fill), "the cap folds");
 }
+
+/// The angle (degrees) between a patch's two derivatives at a corner of its square, and their
+/// lengths.
+fn corner_angle(p: &IsoPatch, uv: [f64; 2]) -> (f64, f64, f64) {
+    let s = SurfaceEval::new(&Surface::RationalSpline {
+        u_knots: p.surface.knots()[0].clone(),
+        v_knots: p.surface.knots()[1].clone(),
+        homogeneous: (0..p.surface.count()[0])
+            .map(|i| (0..p.surface.count()[1]).map(|j| p.surface.point(i, j)).map(|h| [h.x, h.y, h.z, h.w]).collect())
+            .collect(),
+    })
+    .unwrap();
+    let (_, su, sv) = s.derivs(uv[0], uv[1]).unwrap();
+    let cos = su.dot(sv) / (su.len() * sv.len());
+    (cos.clamp(-1.0, 1.0).acos().to_degrees(), su.len(), sv.len())
+}
+
+/// Loops of five to eight sides about a centre on a wavy rim: at the centre every
+/// patch has a proper corner (its two derivatives neither vanishing nor parallel). Parametric C1
+/// across the spokes cannot give that for N other than a multiple of four: it asks the spokes'
+/// tangents at the centre `d_{k−1} + d_{k+1} = 0`, which only `d = 0` meets.
+#[test]
+fn patches_about_a_centre_have_proper_corners_there() {
+    for n in 5..=8usize {
+        let corners: Vec<Vec3> = (0..n)
+            .map(|k| {
+                let a = 0.3 + k as f64 * std::f64::consts::TAU / n as f64;
+                Vec3::new(20.0 * a.cos(), 20.0 * a.sin(), 3.0 * (2.0 * a).sin())
+            })
+            .collect();
+        // Quadratic edges bowed up out of the rim's surface.
+        let edges: Vec<IsoEdge> = (0..n)
+            .map(|k| {
+                let (a, b) = (corners[k], corners[(k + 1) % n]);
+                IsoEdge { degree: 2, knots: vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0], points: vec![a, (a + b) * 0.5 + Vec3::Z * 2.0, b], weights: None }
+            })
+            .collect();
+        let mut g0 = |_k: usize, ts: &[f64]| -> Result<Vec<Option<Across>>, String> { Ok(vec![None; ts.len()]) };
+        let fill = iso_fill(&edges, &mut g0, &IsoSpec { tol: 2e-5, ..spec() }).unwrap();
+        let worst = fill
+            .patches
+            .iter()
+            .map(|p| corner_angle(p, [1.0, 1.0]))
+            .fold((180.0f64, f64::MAX), |(a, l), (b, x, y)| (a.min(b).min(180.0 - b), l.min(x).min(y)));
+        eprintln!("{n} sides: at the centre the patches' corners are at least {:.2}° from flat, derivatives at least {:.3e} long", worst.0, worst.1);
+        assert!(worst.0 > 0.5 && worst.1 > 1e-3, "{n} sides: a flat corner at the centre {worst:?}");
+    }
+}
