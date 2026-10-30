@@ -497,8 +497,19 @@ impl BSplineSurface {
             } else {
                 uv_domain.u_interval()
             };
-            // may snap the interval by tol to existing knots (status ignored)
-            ignored(new_iso_curve.trim(k, &mut trim_ivl, TrimMode::Notify))?;
+            if k.fixes.iso_curve_sliver_domain_is_degenerate
+                && trim_ivl.max() - trim_ivl.min() < EFF_ZERO
+            {
+                // not upstream (WR-562, opt-in; fork tangency-labs/smlib 8088f5e): a domain
+                // of no length along the curve leaves of the iso curve only a point, a
+                // degenerate curve there (Trim refuses the interval, and upstream returns
+                // the whole curve)
+                let point = new_iso_curve.evaluate_point(trim_ivl.min())?;
+                new_iso_curve = BSplineCurve::create_degenerate_curve(3, point)?;
+            } else {
+                // may snap the interval by tol to existing knots (status ignored)
+                ignored(new_iso_curve.trim(k, &mut trim_ivl, TrimMode::Notify))?;
+            }
         }
 
         Ok(IsoParametricCurve {
@@ -1653,6 +1664,50 @@ mod tests {
         let cur = crate::nurbs::crv_basic::Curve::new(pw, 2, vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0])
             .expect("curve");
         SmCurve::from(BSplineCurve::from_nurb(cur, 3, false))
+    }
+
+    /// WR-562 (fork tangency-labs/smlib 8088f5e): an iso curve over a domain of no
+    /// length along it (v in `[0.5, 0.5]`) is the whole untrimmed curve upstream (`Trim`
+    /// refuses the interval) and a degenerate curve at the surface point with
+    /// `iso_curve_sliver_domain_is_degenerate`.
+    #[test]
+    fn wr562_iso_curve_over_a_sliver_domain_is_degenerate_with_the_opt_in() {
+        let surface = BSplineSurface::create_bilinear_surface(
+            Vec3::new(0.0, 0.0, 0.0),
+            Vec3::new(4.0, 0.0, 0.0),
+            Vec3::new(0.0, 2.0, 0.0),
+            Vec3::new(4.0, 2.0, 1.0),
+        )
+        .unwrap();
+        let options = IsoCurveOptions {
+            domain: Some(Extent2d::from_bounds(0.0, 0.5, 1.0, 0.5)),
+            uv_iso_curve: false,
+        };
+        let ends = |c: &BSplineCurve| {
+            let ivl = c.natural_interval();
+            (
+                c.evaluate_point(ivl.min()).unwrap(),
+                c.evaluate_point(ivl.max()).unwrap(),
+            )
+        };
+
+        let mut k = Kernel::default();
+        let upstream = surface
+            .create_iso_parametric_curve(&k, SurfParamType::U, 0.25, options)
+            .unwrap();
+        let (a, b) = ends(&upstream.curve);
+        assert!(a.distance(b) > 1.0, "{a:?} {b:?}");
+
+        k.fixes.iso_curve_sliver_domain_is_degenerate = true;
+        let fixed = surface
+            .create_iso_parametric_curve(&k, SurfParamType::U, 0.25, options)
+            .unwrap();
+        let at = surface.evaluate_point(Point2::new(0.25, 0.5)).unwrap();
+        let (a, b) = ends(&fixed.curve);
+        assert!(
+            a.distance(at) < 1e-12 && b.distance(at) < 1e-12,
+            "{a:?} {b:?} {at:?}"
+        );
     }
 
     /// WR-103: arcs about two centres (the first two sharing their start point) build a
