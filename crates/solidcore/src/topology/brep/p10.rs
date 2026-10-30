@@ -2472,19 +2472,27 @@ fn find_and_set_infinite_region(
 /// Completes the native `SetUVTrimCurve` owner binding (`pUVTrimCurve->SetOwner(eu)`)
 /// under the caller's names `key_of` for the UV trim curves the B-rep's own routines
 /// left without owner (a B-rep under [`crate::topology::NamingScheme::Caller`]: lazy
-/// face queries, edge splits). Existing owners are kept so a foreign or incorrect
-/// owner remains detectable. An edge use the B-rep's routines added (edge splits) gets
+/// face queries, edge splits), or named by the default identity of an edge use without
+/// a recorded key (`Brep::owner_identity`, the same owner). Other existing owners are
+/// kept so a foreign or incorrect owner remains detectable. An edge use the B-rep's routines added (edge splits) gets
 /// its caller key recorded (`Brep::geometry_owner_key`) so trims made later are named
 /// alike.
 fn bind_uv_trim_owners(b: &mut Brep, key_of: &dyn Fn(EntityRef) -> ObjectRef) -> Result<()> {
     for edge in p1::edges(b, None)? {
         for id in b.edge(edge)?.edgeuses.clone() {
             let entity = EntityRef::Edgeuse(id);
-            if b.geometry_owner_key(entity).is_none() {
+            // a trim bound before the key was recorded is named by the edge use's
+            // default identity (`Brep::owner_identity`); it is the same owner
+            let unrecorded = b
+                .geometry_owner_key(entity)
+                .is_none()
+                .then(|| b.owner_identity(entity));
+            if unrecorded.is_some() {
                 b.set_geometry_owner_key(entity, Some(key_of(entity)));
             }
             if let Some(curve) = b.edgeuse_mut(id)?.uv_trim_curve.as_mut() {
-                if curve.owner().is_none() {
+                if curve.owner().is_none() || (unrecorded.is_some() && curve.owner() == unrecorded)
+                {
                     curve.set_owner(Some(key_of(EntityRef::Edgeuse(id))), None);
                 }
             }

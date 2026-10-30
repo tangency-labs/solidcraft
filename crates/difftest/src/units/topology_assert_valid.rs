@@ -61,6 +61,12 @@ struct Inputs {
     /// ([`copy_summary`]): the copy's report identities are its caller keys.
     #[serde(default)]
     copy: bool,
+    /// With `copy`: check the result of an operation on the copy instead (shim op 4,
+    /// `copy_operation`; #1631): 1 union with a 10 mm box at `value` on each axis, 2
+    /// the same with that box's copy, 3 `fillet_edges` of edge `index` with radius
+    /// `value`, 4 a shell of distance `value` with face `index` open.
+    #[serde(default)]
+    copy_op: u8,
     #[serde(default)]
     mutation: u8,
     #[serde(default)]
@@ -174,7 +180,11 @@ fn args(i: &Inputs) -> [f64; 5] {
     [
         f64::from(i.level),
         f64::from(i.walk),
-        f64::from(i.mutation),
+        f64::from(if i.copy && i.copy_op != 0 {
+            i.copy_op
+        } else {
+            i.mutation
+        }),
         i.index as f64,
         i.value,
     ]
@@ -600,7 +610,7 @@ fn copy_check(k: &mut Kernel, src: &Brep, i: &Inputs) -> Result<Output, HarnessE
     let mut state = solidcore::topology::brep::p2::ArenaNotifyState::new(&Brep::new());
     let mut env = state.env(None);
     env.key_of = &copy_key;
-    let mut copy =
+    let copy =
         match solidcore::topology::brep::p3::api_brep_copy(k, &mut env, Some(src), &key) {
             Ok(c) => c,
             Err(e) => {
@@ -609,7 +619,108 @@ fn copy_check(k: &mut Kernel, src: &Brep, i: &Inputs) -> Result<Output, HarnessE
                 ))
             }
         };
-    capi_output(validation::check_brep(k, &mut copy, level)).map(copy_summary)
+    let mut result = match copy_operation(k, copy, i) {
+        Ok(Ok(b)) => b,
+        Ok(Err(e)) => {
+            return Ok(copy_summary(
+                Output::unported(&e).unwrap_or_else(|| Output::err(e.to_string())),
+            ))
+        }
+        Err(e) => return Err(e),
+    };
+    capi_output(validation::check_brep(k, &mut result, level)).map(copy_summary)
+}
+/// The operation of a copy case on the copy (`copy_operation` of the shim, through the
+/// Rust API): the copy itself without one; the operation's error inside.
+fn copy_operation(
+    k: &mut Kernel,
+    mut copy: Brep,
+    i: &Inputs,
+) -> Result<solidcore::Result<Brep>, HarnessError> {
+    use solidcore::boolean::api_brep::boolean_union;
+    use solidcore::primitive::api_primitives::create_box;
+    let v = i.value;
+    Ok(match i.copy_op {
+        0 => Ok(copy),
+        1 | 2 => (|| {
+            let mut other = create_box(k, Vec3::new(v, v, v), 10.0, 10.0, 10.0)?;
+            if i.copy_op == 2 {
+                let other_key = |e: EntityRef| {
+                    let r = key(e);
+                    ObjectRef {
+                        type_code: r.type_code,
+                        key: ObjectKey(r.key.0 | (2 << 40)),
+                    }
+                };
+                let mut state =
+                    solidcore::topology::brep::p2::ArenaNotifyState::new(&Brep::new());
+                let mut env = state.env(None);
+                env.key_of = &other_key;
+                other = solidcore::topology::brep::p3::api_brep_copy(k, &mut env, Some(&other), &key)?;
+            }
+            boolean_union(k, copy, other)
+        })(),
+        3 => (|| {
+            let edges = copy.edge_list().to_vec();
+            let edge = *edges
+                .get(i.index % edges.len().max(1))
+                .ok_or_else(|| solidcore::SolidError::invalid_input("difftest", "no edge"))?;
+            solidcore::blend::fillet_executive::api::fillet_edges(k, &mut copy, &[edge], v, 1, 1, 1.0)?;
+            Ok(copy)
+        })(),
+        4 => shell_copy(k, copy, i),
+        _ => return Err(herr("copy_op takes 0 to 4")),
+    })
+}
+/// `SmApiShellBrepFull` of a copy case: the copy shelled by `value` (extended convex
+/// edges, merged results, no offset solid) with face `index` of its face list open.
+fn shell_copy(k: &mut Kernel, mut copy: Brep, i: &Inputs) -> solidcore::Result<Brep> {
+    use super::offset_offset_executive_p2 as off;
+    use solidcore::geom::attribute::AttributeStore;
+    use solidcore::offset::offset_executive::p1::OffsetExecutive;
+    use solidcore::offset::offset_executive::p2::{OffsetNotifications, OffsetOptions, ShellOptions};
+    let faces = copy.face_list().to_vec();
+    let open = *faces
+        .get(i.index % faces.len().max(1))
+        .ok_or_else(|| solidcore::SolidError::invalid_input("difftest", "no face"))?;
+    let mut records = solidcore::topology::topology::NotifyRecords::new();
+    let mut attributes = AttributeStore::default();
+    off::register_notification_brep(&mut records, &mut copy, off::NAMESPACE_SOURCE);
+    let result_brep =
+        off::result_notification_key(EntityRef::Brep(solidcore::topology::BrepId::from_index(0)));
+    records.insert(result_brep.key, solidcore::topology::topology::Topology::new());
+    let mut notifications = OffsetNotifications {
+        records: &mut records,
+        attributes: &mut attributes,
+        original_key_of: &off::original_notification_key,
+        result_key_of: &off::result_notification_key,
+        original_curve_ref: &off::original_curve_key,
+        result_curve_ref: &off::result_curve_key,
+        boolean_source_lists: &off::boolean_source_lists,
+        result_brep,
+        merge_identities: Some(&off::MergeBodies),
+    };
+    OffsetExecutive::shell_brep(
+        k,
+        copy,
+        ShellOptions {
+            offset: OffsetOptions {
+                distance: i.value,
+                extend_convex_edges: true,
+                merge_results: true,
+            },
+            create_offset_solid: false,
+            merge_sheet_side_walls: false,
+        },
+        &[open],
+        &mut notifications,
+    )
+    .result
+    .map(|mut b| {
+        // as `api_shell_brep_full` does for its caller: the port's cached topology fields
+        b.refresh_cached_topology();
+        b
+    })
 }
 const NULL_LINK_TESTS: &str = "the level-2 tests dereference the nulled link (crash in C++)";
 
@@ -625,6 +736,8 @@ impl UnitDiff for Runner {
         let (path, block) = block(&i.brep)?;
         let op = if i.tests {
             2
+        } else if i.copy && i.copy_op != 0 {
+            4
         } else if i.copy {
             3
         } else {
@@ -743,6 +856,7 @@ impl UnitDiff for Runner {
             capi,
             tests: false,
             copy: false,
+            copy_op: 0,
             mutation,
             index: rng.below(100) as usize,
             value,

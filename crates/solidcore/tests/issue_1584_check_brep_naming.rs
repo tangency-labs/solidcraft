@@ -19,7 +19,7 @@ use solidcore::topology::brep_data_write::FromBrepEnv;
 use solidcore::topology::edgeuse::p3::get_or_create_uv_trim_curve;
 use solidcore::topology::topology::NotifyRecords;
 use solidcore::topology::{EdgeId, EdgeuseId, FaceId, NamingScheme};
-use solidcore::{Brep, EntityRef, SolidError};
+use solidcore::{Brep, EntityRef};
 
 /// A caller naming: the notification layout shifted by `base`.
 fn named(e: EntityRef, base: u64) -> ObjectRef {
@@ -204,11 +204,14 @@ fn foreign_trim_owner_still_fails_test_6() {
 }
 
 #[test]
-fn caller_body_without_keys_is_refused() {
+fn caller_body_without_keys_is_checked_under_the_default_identities() {
     let mut k = Kernel::default();
-    // a body built through the Euler operators records no caller keys
+    // a body that records no caller keys is not refused (#1631): the check names each
+    // entity by the scheme's default identity, as the binders name an entity without
+    // a recorded key, and the box's geometry is owned by those
     let mut b = create_box(&mut k, Vec3::new(0.0, 0.0, 0.0), 10.0, 20.0, 30.0).unwrap();
     b.set_naming(NamingScheme::Caller);
-    let err = check_brep(&mut k, &mut b, CheckLevel::Level2).unwrap_err();
-    assert!(matches!(err, SolidError::InvalidInput { .. }), "{err:?}");
+    let r = check_brep(&mut k, &mut b, CheckLevel::Level2).unwrap();
+    assert!(r.is_valid(), "{:?}", r.lines());
+    assert!(r.lines().is_empty(), "{:?}", r.lines());
 }

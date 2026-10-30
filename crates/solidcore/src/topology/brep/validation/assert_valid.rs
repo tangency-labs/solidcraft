@@ -48,7 +48,6 @@ mod shell;
 mod vertex;
 
 use std::borrow::Cow;
-use std::collections::BTreeMap;
 
 use super::{object_info, validate_pointers, Object, SUCCESS};
 use crate::error::{EntityRef, Result};
@@ -58,7 +57,7 @@ use crate::geom::assert_array::{
 use crate::geom::object::ObjectRef;
 use crate::kernel::Kernel;
 use crate::math::UNDEF_DOUBLE;
-use crate::topology::{Brep, BrepId, NamingScheme};
+use crate::topology::{Brep, BrepId};
 
 /// `SM_LEVEL_GIVEN`: every test, no base classes.
 const LEVEL_GIVEN: u8 = 4;
@@ -174,63 +173,24 @@ fn report_line(r: &AssertReport) -> String {
     )
 }
 
-/// The arena identities of the crate's imported B-reps
-/// ([`crate::topology::brep_cache::arena_identity`]).
-fn arena(e: EntityRef) -> ObjectRef {
-    use crate::topology::brep_cache::{arena_identity, CacheObject};
-    match e {
-        EntityRef::Edge(x) => arena_identity(CacheObject::Edge(x)),
-        EntityRef::Face(x) => arena_identity(CacheObject::Face(x)),
-        EntityRef::Vertex(x) => arena_identity(CacheObject::Vertex(x)),
-        EntityRef::Brep(_) => arena_identity(CacheObject::Brep),
-        other => crate::topology::loopuse::notify_ref(other),
-    }
-}
-
-/// The caller keys a [`NamingScheme::Caller`] B-rep recorded for every edge, face and
-/// edge use (`Brep::geometry_owner_keys`, the only entities the check names as
-/// geometry owners); `None` when one of them has none.
-fn recorded_caller_keys(b: &Brep) -> Option<BTreeMap<EntityRef, ObjectRef>> {
-    let entities = b
-        .edges()
-        .ids()
-        .map(EntityRef::Edge)
-        .chain(b.faces().ids().map(EntityRef::Face))
-        .chain(b.edgeuses().ids().map(EntityRef::Edgeuse));
-    let mut keys = BTreeMap::new();
-    for e in entities {
-        keys.insert(e, b.geometry_owner_key(e)?);
-    }
-    Some(keys)
-}
-
-/// [`check_brep_with_keys`] with the geometry-owner identities of `b`'s naming scheme:
-/// the Euler operators' notification identities for a [`NamingScheme::Notify`]
-/// B-rep, the caller keys recorded where a [`NamingScheme::Caller`] B-rep was built
-/// (an imported body, [`crate::topology::brep::p3::api_brep_copy`]), else the arena
-/// identities ([`crate::topology::brep_cache::arena_identity`]).
+/// [`check_brep_with_keys`] with the geometry-owner identities of `b`'s naming scheme
+/// ([`Brep::owner_identity`]): the Euler operators' notification identities for a
+/// [`NamingScheme::Notify`](crate::topology::NamingScheme::Notify) B-rep; for a
+/// [`NamingScheme::Caller`](crate::topology::NamingScheme::Caller) B-rep the caller
+/// key recorded where the entity was built or its geometry bound (an imported body,
+/// [`crate::topology::brep::p3::api_brep_copy`], an operation on either), else the
+/// arena identities ([`crate::topology::brep_cache::arena_identity`]), which the
+/// binders name an entity with no recorded key by too.
 ///
 /// # Errors
 ///
-/// [`crate::SolidError::InvalidInput`] for a [`NamingScheme::Caller`] B-rep without a
-/// recorded key for each edge, face and edge use (pass the maker's keys to
-/// [`check_brep_with_keys`]); those of [`check_brep_with_keys`].
+/// Those of [`check_brep_with_keys`].
 pub fn check_brep(k: &mut Kernel, b: &mut Brep, level: CheckLevel) -> Result<BrepCheck> {
-    match b.naming() {
-        NamingScheme::Notify => {
-            check_brep_with_keys(k, b, level, &crate::topology::loopuse::notify_ref)
-        }
-        NamingScheme::Caller => {
-            let recorded = recorded_caller_keys(b).ok_or(crate::SolidError::invalid_input(
-                "topology::brep::validation::check_brep",
-                "body names geometry owners by its maker's keys and does not record them \
-                 all; use check_brep_with_keys",
-            ))?;
-            let keys = |e: EntityRef| recorded.get(&e).copied().unwrap_or_else(|| arena(e));
-            check_brep_with_keys(k, b, level, &keys)
-        }
-        _ => check_brep_with_keys(k, b, level, &arena),
-    }
+    let naming = b.naming();
+    let recorded = b.geometry_owner_keys().clone();
+    let keys =
+        |e: EntityRef| crate::topology::owner_identity_of(naming, recorded.get(&e).copied(), e);
+    check_brep_with_keys(k, b, level, &keys)
 }
 
 /// The capi `smlib_brep_check(brep, level)`: [`validate_pointers`] at `level` (its

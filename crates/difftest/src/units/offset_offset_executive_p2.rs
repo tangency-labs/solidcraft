@@ -1687,15 +1687,15 @@ fn notification_key(entity: EntityRef, namespace: u64) -> ObjectRef {
     }
 }
 
-fn original_notification_key(entity: EntityRef) -> ObjectRef {
+pub(super) fn original_notification_key(entity: EntityRef) -> ObjectRef {
     notification_key(entity, 1)
 }
 
-fn result_notification_key(entity: EntityRef) -> ObjectRef {
+pub(super) fn result_notification_key(entity: EntityRef) -> ObjectRef {
     notification_key(entity, 3)
 }
 
-fn original_curve_key(edge: EdgeId, type_code: i64) -> ObjectRef {
+pub(super) fn original_curve_key(edge: EdgeId, type_code: i64) -> ObjectRef {
     ObjectRef {
         key: ObjectKey((5_u64 << 60) | ((type_code as u64) << 32) | u64::from(edge.index())),
         type_code,
@@ -1703,7 +1703,7 @@ fn original_curve_key(edge: EdgeId, type_code: i64) -> ObjectRef {
 }
 
 // Source lists are opaque notification handles, disjoint from topology and curves.
-fn boolean_source_lists(result: bool, region: RegionId) -> [ObjectRef; 2] {
+pub(super) fn boolean_source_lists(result: bool, region: RegionId) -> [ObjectRef; 2] {
     let namespace = if result { 7_u64 } else { 6_u64 };
     [0_u64, 1].map(|list| ObjectRef {
         key: ObjectKey((namespace << 60) | (list << 32) | u64::from(region.index())),
@@ -1711,7 +1711,7 @@ fn boolean_source_lists(result: bool, region: RegionId) -> [ObjectRef; 2] {
     })
 }
 
-fn result_curve_key(edge: EdgeId, type_code: i64) -> ObjectRef {
+pub(super) fn result_curve_key(edge: EdgeId, type_code: i64) -> ObjectRef {
     ObjectRef {
         key: ObjectKey((4_u64 << 60) | ((type_code as u64) << 32) | u64::from(edge.index())),
         type_code,
@@ -1754,7 +1754,7 @@ fn copy_source_lists(region: RegionId) -> [ObjectRef; 2] {
 /// and below the kernel's reserved bit 63: bits 58-59 tell topology (1), curves (2)
 /// and source lists (3) apart, bits 46-57 hold the merge-store handle, bits 32-45 the
 /// type code.
-struct MergeBodies;
+pub(super) struct MergeBodies;
 impl MergeBodies {
     fn key(class: u64, brep: BrepId, kind: u64, index: u32) -> ObjectKey {
         ObjectKey(
@@ -1811,10 +1811,10 @@ impl SweepIdentities for MergeBodies {
 }
 
 /// The notification namespace of the source fixture's identities.
-const NAMESPACE_SOURCE: u64 = 1;
+pub(super) const NAMESPACE_SOURCE: u64 = 1;
 /// The notification namespace of the foreign fixture's identities.
 const NAMESPACE_FOREIGN: u64 = 2;
-fn register_notification_brep(
+pub(super) fn register_notification_brep(
     records: &mut solidcore::topology::topology::NotifyRecords,
     brep: &mut Brep,
     namespace: u64,

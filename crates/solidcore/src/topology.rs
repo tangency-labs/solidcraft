@@ -700,6 +700,43 @@ pub enum NamingScheme {
     Arena,
 }
 
+/// The identity `entity` owns geometry under in a B-rep of naming `naming` that
+/// records `recorded` for it: [`Brep::owner_identity`] without the B-rep.
+#[must_use]
+pub(crate) fn owner_identity_of(
+    naming: NamingScheme,
+    recorded: Option<crate::geom::object::ObjectRef>,
+    entity: EntityRef,
+) -> crate::geom::object::ObjectRef {
+    match (naming, recorded) {
+        (NamingScheme::Caller, Some(key)) => key,
+        _ => scheme_owner_identity(naming, entity),
+    }
+}
+
+/// The identity a B-rep of naming `naming` names `entity` by when it records none:
+/// the Euler operators' notification identity ([`loopuse::notify_ref`]) under
+/// [`NamingScheme::Notify`], else the arena identity of the crate's imported B-reps
+/// ([`brep_cache::arena_identity`]) for edges, faces, vertices and the B-rep, and the
+/// notification identity for the other entities (edge uses among them).
+#[must_use]
+pub(crate) fn scheme_owner_identity(
+    naming: NamingScheme,
+    entity: EntityRef,
+) -> crate::geom::object::ObjectRef {
+    use brep_cache::{arena_identity, CacheObject};
+    if naming == NamingScheme::Notify {
+        return loopuse::notify_ref(entity);
+    }
+    match entity {
+        EntityRef::Edge(x) => arena_identity(CacheObject::Edge(x)),
+        EntityRef::Face(x) => arena_identity(CacheObject::Face(x)),
+        EntityRef::Vertex(x) => arena_identity(CacheObject::Vertex(x)),
+        EntityRef::Brep(_) => arena_identity(CacheObject::Brep),
+        other => loopuse::notify_ref(other),
+    }
+}
+
 /// A boundary representation (`SmBrep`): arenas of shells, faces, loops, edges and
 /// vertices linked by typed ids.
 #[derive(Debug)]
@@ -1013,6 +1050,20 @@ impl Brep {
         }
         self.naming = NamingScheme::Arena;
         Ok(())
+    }
+
+    /// The identity `entity` owns geometry under (upstream: the entity itself,
+    /// `pGeom->GetOwner() == this`): under [`NamingScheme::Caller`] the key recorded
+    /// for it where it was built or its geometry bound, else, and under every other
+    /// scheme, the scheme's own identity (the notification identity under
+    /// [`NamingScheme::Notify`], otherwise the arena identity of an edge, face or
+    /// vertex and the notification identity of any other entity). Geometry binders name new
+    /// geometry by it and [`check_brep`](crate::topology::brep::validation::check_brep)
+    /// checks owners against it, so the two always agree (upstream's identity exists
+    /// from the moment the entity does).
+    #[must_use]
+    pub fn owner_identity(&self, entity: EntityRef) -> crate::geom::object::ObjectRef {
+        owner_identity_of(self.naming, self.geometry_owner_key(entity), entity)
     }
 
     /// Producer-supplied owner identity recorded when geometry was bound to `entity`.

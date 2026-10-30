@@ -131,12 +131,12 @@ pub(crate) fn entity_of_notification_key(
 /// own naming: a face's surface (an edge's curve) owned under that face's (edge's)
 /// [`notification_key`] in `namespace` is the record's own geometry (upstream's owner
 /// is the record), so it takes the record's name in `b`'s recorded scheme
-/// ([`Brep::naming`](crate::topology::Brep::naming): notification or arena identity)
-/// and the face's tolerance is re-recorded on it. An edge use's UV trim curve owned
-/// under the edge use's key takes the edge use's notification identity (upstream's owner
-/// is the edge use; `SmEdgeuse::AssertValid` test #6). Called when the namespace ends with
-/// the merge (its records and attributes go with it); a B-rep of another or unknown
-/// scheme is left as it is.
+/// ([`Brep::owner_identity`]: notification or arena identity, or a caller's recorded
+/// key) and the face's tolerance is re-recorded on it. An edge use's UV trim curve
+/// owned under the edge use's key likewise takes the edge use's name (upstream's owner
+/// is the edge use; `SmEdgeuse::AssertValid` test #6). Called when the namespace ends
+/// with the merge (its records and attributes go with it); a B-rep of unknown scheme
+/// is left as it is.
 ///
 /// # Errors
 ///
@@ -145,13 +145,8 @@ pub(crate) fn adopt_namespace_owners(b: &mut Brep, namespace: u32, other: bool) 
     use crate::topology::NamingScheme;
     let name = |e: EntityRef| -> Option<ObjectRef> {
         match b.naming() {
-            NamingScheme::Notify => Some(crate::topology::loopuse::notify_ref(e)),
-            NamingScheme::Arena => Some(match e {
-                EntityRef::Face(f) => arena_identity(CacheObject::Face(f)),
-                EntityRef::Edge(x) => arena_identity(CacheObject::Edge(x)),
-                _ => return None,
-            }),
-            _ => None,
+            NamingScheme::Unknown => None,
+            _ => Some(b.owner_identity(e)),
         }
     };
     let faces: Vec<(FaceId, ObjectRef)> = bp::faces(b, None)?
@@ -191,16 +186,16 @@ pub(crate) fn adopt_namespace_owners(b: &mut Brep, namespace: u32, other: bool) 
         }
     }
     // An edge use's UV trim curve is owned by the edge use (`SmEdgeuse` test #6); one
-    // the merge set under the namespace takes the edge use's own name. Both schemes
-    // name edge uses by their notification identity (the check's keys for an arena
-    // B-rep fall back to it too).
-    if matches!(b.naming(), NamingScheme::Notify | NamingScheme::Arena) {
+    // the merge set under the namespace takes the edge use's own name
+    // ([`Brep::owner_identity`]: its notification identity under the notification and
+    // arena schemes, its recorded key or else that identity under a caller's).
+    if b.naming() != NamingScheme::Unknown {
         let uses: Vec<_> = b.edgeuses().iter().map(|(id, _)| id).collect();
         for eu in uses {
             let merged = notification_key(namespace, other, EntityRef::Edgeuse(eu));
+            let own = b.owner_identity(EntityRef::Edgeuse(eu));
             if let Some(trim) = b.edgeuse_mut(eu)?.uv_trim_curve.as_mut() {
                 if trim.owner() == Some(merged) {
-                    let own = crate::topology::loopuse::notify_ref(EntityRef::Edgeuse(eu));
                     trim.set_owner(Some(own), None);
                 }
             }
@@ -221,7 +216,6 @@ struct GeometryOwnerScope<'a, 'keys> {
 }
 impl<'a, 'keys> GeometryOwnerScope<'a, 'keys> {
     fn new(body: &'a mut Brep, keys: NotificationKeys<'keys>, other: bool) -> Result<Self> {
-        use crate::topology::NamingScheme;
         let naming = body.naming();
         let mut scope = Self {
             body,
@@ -232,11 +226,8 @@ impl<'a, 'keys> GeometryOwnerScope<'a, 'keys> {
         };
         if matches!(keys, NotificationKeys::Namespace(_)) {
             for edge in crate::topology::brep::p1::edges(scope.body, None)? {
-                let expected = if naming == NamingScheme::Notify {
-                    crate::topology::loopuse::notify_ref(EntityRef::Edge(edge))
-                } else {
-                    arena_identity(CacheObject::Edge(edge))
-                };
+                let expected =
+                    crate::topology::scheme_owner_identity(naming, EntityRef::Edge(edge));
                 if let Some(curve) = scope.body.edge_mut(edge)?.curve.as_mut() {
                     if curve.owner() == Some(expected) {
                         scope.edges.push((edge, expected));
@@ -245,11 +236,8 @@ impl<'a, 'keys> GeometryOwnerScope<'a, 'keys> {
                 }
             }
             for face in crate::topology::brep::p1::faces(scope.body, None)? {
-                let expected = if naming == NamingScheme::Notify {
-                    crate::topology::loopuse::notify_ref(EntityRef::Face(face))
-                } else {
-                    arena_identity(CacheObject::Face(face))
-                };
+                let expected =
+                    crate::topology::scheme_owner_identity(naming, EntityRef::Face(face));
                 let rebound = scope
                     .body
                     .face_mut(face)?

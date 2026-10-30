@@ -566,6 +566,9 @@ impl FilletSession<'_> {
             // DoPiecewiseMerge deletes m_pFilletBrep inside its mark scope
             return self.do_piecewise_merge(k);
         }
+        // the keys a caller-named target recorded before the merge name its entities
+        // afterwards (`Brep::owner_identity`)
+        let recorded = self.objects.target.geometry_owner_keys().clone();
         let result = self.merge_fillet_in_place(k);
         // (not upstream: owners are pointers there) the insertion names the geometry
         // it binds to the target's edges and faces by the session's kernel identity
@@ -578,7 +581,8 @@ impl FilletSession<'_> {
         let session_owner = |e| p3::topology_ref(serial, e);
         let restored =
             super::piecewise::normalize_session_owners(self.objects.target, session_owner, |e| {
-                super::piecewise::naming_owner(naming, e).unwrap_or_else(|| session_owner(e))
+                super::piecewise::naming_owner(naming, recorded.get(&e).copied(), e)
+                    .unwrap_or_else(|| session_owner(e))
             });
         result.and(restored)
     }

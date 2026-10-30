@@ -1632,7 +1632,11 @@ pub fn make_edge_in_face_with_vu_with_curve_identity(
         } else {
             eu2
         };
-        trim.set_owner(Some((env.key_of)(EntityRef::Edgeuse(top))), None);
+        // SetOwner(pEu): named by the caller's key, recorded as for the edge's curve
+        // (`set_curve_owner`) so the B-rep's checks name the edge use alike
+        let top_owner = (env.key_of)(EntityRef::Edgeuse(top));
+        trim.set_owner(Some(top_owner), None);
+        b.set_geometry_owner_key(EntityRef::Edgeuse(top), Some(top_owner));
         b.edgeuse_mut(top)?.uv_trim_curve = Some(trim);
         b.edgeuse_mut(top)?.drop_curve_fail = drop_fail;
         let mut copy =
@@ -1661,7 +1665,9 @@ pub fn make_edge_in_face_with_vu_with_curve_identity(
         } else {
             eu3
         };
-        copy.set_owner(Some((env.key_of)(EntityRef::Edgeuse(bottom))), None);
+        let bottom_owner = (env.key_of)(EntityRef::Edgeuse(bottom));
+        copy.set_owner(Some(bottom_owner), None);
+        b.set_geometry_owner_key(EntityRef::Edgeuse(bottom), Some(bottom_owner));
         b.edgeuse_mut(bottom)?.uv_trim_curve = Some(copy);
         b.edgeuse_mut(bottom)?.drop_curve_fail = fail_copy;
         original_trim_owner = Some(top);

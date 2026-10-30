@@ -63,7 +63,7 @@
 //!   reported by [`regions`].
 //! - [`surfaces`] / [`curves`]: upstream's `GetOwner() == pFace` / `pEdge` test compares
 //!   the geometry's owner with the face's / edge's
-//!   [`arena_identity`] (the kernel's
+//!   [`arena_identity`](crate::topology::brep_cache::arena_identity) (the kernel's
 //!   identity of arena entities; a B-rep whose geometry carries no owner reports no
 //!   surfaces or curves, as upstream for unowned geometry); the attribute filter
 //!   ([`GeometryAttributeFilter`]) looks the geometry up under its own keys.
@@ -141,7 +141,7 @@ use crate::query::brep::{self as qbrep, BoundingBoxOptions};
 use crate::surface::surface::p2::{BlendEndType, CurvatureType, DerivSurfDefinition};
 use crate::surface::surface::p4::NoObject;
 use crate::surface::surface::Surface;
-use crate::topology::brep_cache::{arena_identity, CacheObject};
+use crate::topology::brep_cache::CacheObject;
 use crate::topology::edge::{self, AttributeFilter};
 use crate::topology::edgeuse::p1 as eu1;
 use crate::topology::edgeuse::p2::BinormalEval;
@@ -155,8 +155,7 @@ use crate::topology::topology_traverser::{Entity, Marks};
 use crate::topology::vertex;
 use crate::topology::vertexuse;
 use crate::topology::{
-    Brep, EdgeId, EdgeuseId, FaceId, LoopId, NamingScheme, RegionId, ShellId, VertexId, Vertexuse,
-    VertexuseId,
+    Brep, EdgeId, EdgeuseId, FaceId, LoopId, RegionId, ShellId, VertexId, Vertexuse, VertexuseId,
 };
 
 /// `SmBoolean` `TRUE` / `FALSE`.
@@ -671,42 +670,36 @@ impl core::fmt::Debug for GeometryAttributeFilter<'_> {
     }
 }
 
-/// The default expected owner of `f`'s surface under `b`'s recorded naming scheme,
-/// falling back to a proven caller owner recorded on `b`.
+/// The default expected owner of `f`'s surface: its identity in `b`'s recorded naming
+/// scheme ([`Brep::owner_identity`]), falling back to a proven owner recorded on `b`.
 pub(crate) fn default_face_owner(b: &Brep, f: FaceId) -> ObjectRef {
-    let fallback = if b.naming() == NamingScheme::Notify {
-        loopuse::notify_ref(EntityRef::Face(f))
-    } else {
-        arena_identity(CacheObject::Face(f))
-    };
+    let entity = EntityRef::Face(f);
+    let expected = b.owner_identity(entity);
     let actual = b.face(f).ok().and_then(|x| x.surface.as_ref()?.owner());
-    if actual != Some(fallback) {
-        if let Some(proven) = b.geometry_owner_key(EntityRef::Face(f)) {
+    if actual != Some(expected) {
+        if let Some(proven) = b.geometry_owner_key(entity) {
             if actual == Some(proven) {
                 return proven;
             }
         }
     }
-    fallback
+    expected
 }
 
-/// The default expected owner of `e`'s curve under `b`'s recorded naming scheme,
-/// falling back to a proven caller owner recorded on `b`.
+/// The default expected owner of `e`'s curve: its identity in `b`'s recorded naming
+/// scheme ([`Brep::owner_identity`]), falling back to a proven owner recorded on `b`.
 pub(crate) fn default_edge_owner(b: &Brep, e: EdgeId) -> ObjectRef {
-    let fallback = if b.naming() == NamingScheme::Notify {
-        loopuse::notify_ref(EntityRef::Edge(e))
-    } else {
-        arena_identity(CacheObject::Edge(e))
-    };
+    let entity = EntityRef::Edge(e);
+    let expected = b.owner_identity(entity);
     let actual = b.edge(e).ok().and_then(|x| x.curve.as_ref()?.owner());
-    if actual != Some(fallback) {
-        if let Some(proven) = b.geometry_owner_key(EntityRef::Edge(e)) {
+    if actual != Some(expected) {
+        if let Some(proven) = b.geometry_owner_key(entity) {
             if actual == Some(proven) {
                 return proven;
             }
         }
     }
-    fallback
+    expected
 }
 
 /// `GetSurfaces`: the surfaces owned by their faces (`pSurface->GetOwner() == pFace`,
