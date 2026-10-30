@@ -1,6 +1,6 @@
-Updates: WR-583
+Updates: WR-604
 
-#### WR-583 addendum (2026-10-30): opt-in error propagation
+#### WR-604 addendum (2026-10-30): opt-in error propagation
 
 `Kernel::fixes.fillet_trim_status` enables first-error propagation for the primary
 rails, both other-rail lists, center line, intersections and surface trim. It is

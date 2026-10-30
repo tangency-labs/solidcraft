@@ -4,7 +4,7 @@ Updates: plan/findings/blend.fillet_geom_p1--fillet-trim-status-483.md
 
 PR #674 follows the default-off `UpstreamFixes` policy. The same failing inputs
 now preserve the pinned C++ result by default. `Kernel::fixes.fillet_trim_status`
-enables the first-error behavior described in the original finding (WR-583).
+enables the first-error behavior described in the original finding (WR-604).
 Both modes preserve visitation order and successful prefix edits; neither rolls
 back. The broader boolean, sweep and offset paths in #483 remain separate work.
 

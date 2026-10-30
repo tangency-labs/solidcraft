@@ -1,4 +1,4 @@
-#### WR-583. `SmFilletGeom::Trim` drops trim and intersection errors (#483)
+#### WR-604. `SmFilletGeom::Trim` drops trim and intersection errors (#483)
 - **Severity:** Wrong result
 - **Area:** Fillets and blends
 - **Location:** `source/SMLib/src/SmFilletGeom.cpp:10333`, `SmFilletGeom::Trim` at pinned v1.0.1 (`3fd5b95`).
