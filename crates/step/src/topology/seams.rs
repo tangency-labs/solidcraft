@@ -151,7 +151,131 @@ fn meridian(profile: &BCurve, o: Vec3, k: Vec3, angle: f64) -> R<BCurve> {
     })
 }
 
+/// A B-spline surface closed around u (its first and last control columns the same, `period`
+/// its knot width) started at `s` instead, exactly: `s` inserted to full multiplicity, then the
+/// piece from `s` to the end followed by the piece from the start to `s`, moved on by a period.
+/// The same points at parameters a period apart before `s`; `None` for another surface or an `s`
+/// outside the open domain.
+fn restarted(surface: &BSurface, s: f64, period: f64) -> Option<BSurface> {
+    use solidcraft_geom::bspline::{HPoint, segment};
+    let (u_knots, v_knots, rows): (&Vec<f64>, &Vec<f64>, Vec<Vec<HPoint>>) = match surface {
+        BSurface::Spline { u_knots, v_knots, points } => {
+            (u_knots, v_knots, points.iter().map(|r| r.iter().map(|p| HPoint { x: p[0], y: p[1], z: p[2], w: 1.0 }).collect()).collect())
+        }
+        BSurface::RationalSpline { u_knots, v_knots, homogeneous } => {
+            (u_knots, v_knots, homogeneous.iter().map(|r| r.iter().map(|h| HPoint { x: h[0], y: h[1], z: h[2], w: h[3] }).collect()).collect())
+        }
+        _ => return None,
+    };
+    let n = rows.len();
+    let p = u_knots.len().checked_sub(n + 1)?;
+    let (u0, u1) = (*u_knots.get(p)?, *u_knots.get(n)?);
+    if !(u0 < s && s < u1) || !((u1 - u0 - period).abs() <= 1e-9 * period.max(1.0)) {
+        return None;
+    }
+    // Each v column of control points across u is a curve along u.
+    let columns = rows.first()?.len();
+    let column = |j: usize| rows.iter().map(|r| r.get(j).copied()).collect::<Option<Vec<HPoint>>>();
+    let mut knots: Option<Vec<f64>> = None;
+    let mut out: Vec<Vec<HPoint>> = Vec::with_capacity(columns);
+    for j in 0..columns {
+        let c = column(j)?;
+        let (ka, a) = segment(p, u_knots, &c, s, u1).ok()?;
+        let (kb, b) = segment(p, u_knots, &c, u0, s).ok()?;
+        // The piece after the seam starts where the one before it ends (the closed surface's
+        // last column is its first): joined there with multiplicity p.
+        let mut k = ka.get(..ka.len() - 1)?.to_vec();
+        k.extend(kb.get(p + 1..)?.iter().map(|x| x + period));
+        let mut pts = a;
+        pts.extend(b.get(1..)?.iter().copied());
+        if k.len() != pts.len() + p + 1 || knots.as_ref().is_some_and(|x| *x != k) {
+            return None;
+        }
+        knots = Some(k);
+        out.push(pts);
+    }
+    let u_knots = knots?;
+    // Back to rows along u.
+    let rows: Vec<Vec<HPoint>> =
+        (0..out.first()?.len()).map(|i| out.iter().map(|c| c.get(i).copied()).collect::<Option<Vec<_>>>()).collect::<Option<_>>()?;
+    Some(match surface {
+        BSurface::Spline { .. } => BSurface::Spline {
+            u_knots,
+            v_knots: v_knots.clone(),
+            points: rows.iter().map(|r| r.iter().map(|h| [h.x / h.w, h.y / h.w, h.z / h.w]).collect()).collect(),
+        },
+        _ => BSurface::RationalSpline {
+            u_knots,
+            v_knots: v_knots.clone(),
+            homogeneous: rows.iter().map(|r| r.iter().map(|h| [h.x, h.y, h.z, h.w]).collect()).collect(),
+        },
+    })
+}
+
 impl Builder<'_, '_> {
+    /// Start every B-spline surface closed around u that a face lies across the start of, without
+    /// winding round it, in the middle of the widest stretch of u the face leaves free: the face's
+    /// pcurves then run inside the surface's knots, as a kernel's trims have to (one crossing the
+    /// start had its pcurve clamped there, mm off its edge). Exact ([`restarted`]). Returns how
+    /// many surfaces were started anew.
+    pub(super) fn start_splines_clear_of_faces(&mut self) -> R<usize> {
+        let mut turned = 0;
+        for fi in 0..self.faces.len() {
+            let Some(face) = self.faces.get(fi) else { continue };
+            if !matches!(face.surface, BSurface::Spline { .. } | BSurface::RationalSpline { .. }) {
+                continue;
+            }
+            let eval = SurfaceEval::new(&face.surface).map_err(|e| e.to_string())?;
+            let dom = eval.domain();
+            let (Some(period), None, Some((u0, _))) = (dom.period[0], dom.period[1], dom.range[0]) else { continue };
+            // How far along u each loop of the face reaches, followed round from its first point
+            // (unwrapped across the start); a face winding round is the seams' to handle. The
+            // widest loop bounds the face.
+            let mut widest: Option<(f64, f64)> = None;
+            let mut winds = false;
+            for l in &face.loops {
+                let LoopB::Edges(es) = l else { continue };
+                winds |= self.winding(&eval, es, [Some(period), None])?[0] != 0;
+                let mut last: Option<f64> = None;
+                let (mut lo, mut hi) = (f64::INFINITY, f64::NEG_INFINITY);
+                for &(e, _) in es {
+                    let edge = self.edges.get(e as usize).ok_or("edge reference")?;
+                    let c = CurveEval::new(&edge.curve).map_err(|m| m.to_string())?;
+                    let [a, b] = edge.interval;
+                    for k in 0..=SAMPLES {
+                        let t = a + (b - a) * k as f64 / SAMPLES as f64;
+                        let Some(q) = c.point(t).and_then(|p| eval.project(p, None, f64::INFINITY)) else { continue };
+                        let u = last.map_or(q[0], |x| x + wrap_by(q[0] - x, period));
+                        (lo, hi) = (lo.min(u), hi.max(u));
+                        last = Some(u);
+                    }
+                }
+                if hi - lo > widest.map_or(f64::NEG_INFINITY, |(a, b)| b - a) {
+                    widest = Some((lo, hi));
+                }
+            }
+            let Some((lo, hi)) = widest else { continue };
+            // Across the start: a whole number of periods from it lies inside the reach, clear of
+            // its ends (a face that only meets the start there runs inside the knots already).
+            let start = u0 + ((hi - u0) / period).floor() * period;
+            let clear = 1e-9 * period;
+            let crossing = hi - start > clear && start - lo > clear;
+            if winds || !crossing || !(hi - lo < period) {
+                continue;
+            }
+            // The middle of the stretch the face leaves free.
+            let free = hi + 0.5 * (period - (hi - lo));
+            let at = u0 + (free - u0).rem_euclid(period);
+            let Some(surface) = restarted(&face.surface, at, period) else { continue };
+            if let Some(f) = self.faces.get_mut(fi) {
+                f.surface = surface;
+                f.extent = None;
+            }
+            turned += 1;
+        }
+        Ok(turned)
+    }
+
     /// Give every face that winds around its surface without a seam one. Returns how many
     /// seams were added.
     pub(super) fn add_seams(&mut self) -> R<usize> {

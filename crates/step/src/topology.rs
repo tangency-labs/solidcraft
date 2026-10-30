@@ -950,6 +950,7 @@ impl<'b, 'a> Builder<'b, 'a> {
         if at_poles > 0 {
             notes.push(format!("{at_poles} edges split where they pass through a face's pole"));
         }
+        self.start_splines_clear_of_faces()?;
         let seams = self.add_seams()?;
         if seams > 0 {
             notes.push(format!("{seams} seam edges added to faces that wind around their surface"));
