@@ -2102,6 +2102,45 @@ mod tests {
     }
 
     #[test]
+    fn rejected_shifted_generator_interval_preserves_the_revolution() {
+        let mut k = k();
+        k.fixes.ellipse_step_interval_checks = true;
+        for swap in [false, true] {
+            let g = Ellipse::new_circle(
+                &k,
+                Vec3::new(3.0, 0.0, 0.0),
+                Vec3::X,
+                Vec3::Z,
+                Extent1d::from_min_max(0.0, 360.0),
+                1.0,
+                &EllipseOptions::default(),
+            )
+            .unwrap();
+            let mut s =
+                SurfOfRevolution::create_canonical(&k, Curve::from(g), Vec3::ZERO, Vec3::Z, swap)
+                    .unwrap();
+            let old_domain = s.step_uv_domain();
+            let old_nurb = s.base().gw_nurb().unwrap().clone();
+            let target = Extent2d::from_bounds(0.0, 360.0, 180.0, 540.0);
+            assert!(matches!(
+                s.adjust_step_uv_domain(&k, &target),
+                Err(SolidError::InvalidInput { .. })
+            ));
+            assert_eq!(s.step_uv_domain(), old_domain);
+            assert_eq!(s.base().gw_nurb().unwrap(), &old_nurb);
+            let CurveKind::Ellipse(gen) = s.gen_curve().unwrap().kind() else {
+                panic!("circle generator changed type");
+            };
+            assert_eq!(gen.step_interval(), old_domain.v_interval());
+            // A supported trim still succeeds after the rejected edit.
+            s.adjust_step_uv_domain(&k, &Extent2d::from_bounds(0.0, 0.0, 180.0, 90.0))
+                .unwrap();
+            let n = s.base().gw_nurb().unwrap();
+            assert!(n.u_knots().iter().chain(n.v_knots()).all(|v| v.is_finite()));
+        }
+    }
+
+    #[test]
     fn canonical_line_is_a_cone() {
         let s = cone();
         assert!(s.planar_generator());

@@ -1792,6 +1792,932 @@
      }
     ]
    }
+  },
+  {
+   "name": "collapsed_step_circle_180_reverse_0",
+   "upstream_ref": "issue #428 / WR-211: polar clamping must not create a zero-length NURBS interval",
+   "inputs": {
+    "build": {
+     "circle": {
+      "c": [
+       1,
+       2,
+       3
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "domain": [
+       0,
+       180
+      ],
+      "inside_out": false,
+      "dim": 3,
+      "r": 2
+     }
+    },
+    "ops": [
+     {
+      "op": "adjust",
+      "domain": [
+       360,
+       540
+      ]
+     },
+     {
+      "op": "state",
+      "types": []
+     }
+    ]
+   }
+  },
+  {
+   "name": "healthy_step_circle_180_reverse_0",
+   "upstream_ref": "issue #428 / WR-211: polar clamping must not create a zero-length NURBS interval",
+   "inputs": {
+    "build": {
+     "circle": {
+      "c": [
+       1,
+       2,
+       3
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "domain": [
+       0,
+       180
+      ],
+      "inside_out": false,
+      "dim": 3,
+      "r": 2
+     }
+    },
+    "ops": [
+     {
+      "op": "adjust",
+      "domain": [
+       0,
+       90
+      ]
+     },
+     {
+      "op": "state",
+      "types": []
+     }
+    ]
+   }
+  },
+  {
+   "name": "collapsed_step_circle_180_reverse_1",
+   "upstream_ref": "issue #428 / WR-211: polar clamping must not create a zero-length NURBS interval",
+   "inputs": {
+    "build": {
+     "circle": {
+      "c": [
+       1,
+       2,
+       3
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "domain": [
+       0,
+       180
+      ],
+      "inside_out": true,
+      "dim": 3,
+      "r": 2
+     }
+    },
+    "ops": [
+     {
+      "op": "adjust",
+      "domain": [
+       360,
+       540
+      ]
+     },
+     {
+      "op": "state",
+      "types": []
+     }
+    ]
+   }
+  },
+  {
+   "name": "healthy_step_circle_180_reverse_1",
+   "upstream_ref": "issue #428 / WR-211: polar clamping must not create a zero-length NURBS interval",
+   "inputs": {
+    "build": {
+     "circle": {
+      "c": [
+       1,
+       2,
+       3
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "domain": [
+       0,
+       180
+      ],
+      "inside_out": true,
+      "dim": 3,
+      "r": 2
+     }
+    },
+    "ops": [
+     {
+      "op": "adjust",
+      "domain": [
+       0,
+       90
+      ]
+     },
+     {
+      "op": "state",
+      "types": []
+     }
+    ]
+   }
+  },
+  {
+   "name": "collapsed_step_circle_360_reverse_0",
+   "upstream_ref": "issue #428 / WR-211: polar clamping must not create a zero-length NURBS interval",
+   "inputs": {
+    "build": {
+     "circle": {
+      "c": [
+       1,
+       2,
+       3
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "domain": [
+       0,
+       360
+      ],
+      "inside_out": false,
+      "dim": 3,
+      "r": 2
+     }
+    },
+    "ops": [
+     {
+      "op": "adjust",
+      "domain": [
+       360,
+       540
+      ]
+     },
+     {
+      "op": "state",
+      "types": []
+     }
+    ]
+   }
+  },
+  {
+   "name": "healthy_step_circle_360_reverse_0",
+   "upstream_ref": "issue #428 / WR-211: polar clamping must not create a zero-length NURBS interval",
+   "inputs": {
+    "build": {
+     "circle": {
+      "c": [
+       1,
+       2,
+       3
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "domain": [
+       0,
+       360
+      ],
+      "inside_out": false,
+      "dim": 3,
+      "r": 2
+     }
+    },
+    "ops": [
+     {
+      "op": "adjust",
+      "domain": [
+       0,
+       90
+      ]
+     },
+     {
+      "op": "state",
+      "types": []
+     }
+    ]
+   }
+  },
+  {
+   "name": "collapsed_step_circle_360_reverse_1",
+   "upstream_ref": "issue #428 / WR-211: polar clamping must not create a zero-length NURBS interval",
+   "inputs": {
+    "build": {
+     "circle": {
+      "c": [
+       1,
+       2,
+       3
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "domain": [
+       0,
+       360
+      ],
+      "inside_out": true,
+      "dim": 3,
+      "r": 2
+     }
+    },
+    "ops": [
+     {
+      "op": "adjust",
+      "domain": [
+       360,
+       540
+      ]
+     },
+     {
+      "op": "state",
+      "types": []
+     }
+    ]
+   }
+  },
+  {
+   "name": "healthy_step_circle_360_reverse_1",
+   "upstream_ref": "issue #428 / WR-211: polar clamping must not create a zero-length NURBS interval",
+   "inputs": {
+    "build": {
+     "circle": {
+      "c": [
+       1,
+       2,
+       3
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "domain": [
+       0,
+       360
+      ],
+      "inside_out": true,
+      "dim": 3,
+      "r": 2
+     }
+    },
+    "ops": [
+     {
+      "op": "adjust",
+      "domain": [
+       0,
+       90
+      ]
+     },
+     {
+      "op": "state",
+      "types": []
+     }
+    ]
+   }
+  },
+  {
+   "name": "collapsed_step_ellipse_180_reverse_0",
+   "upstream_ref": "issue #428 / WR-211: polar clamping must not create a zero-length NURBS interval",
+   "inputs": {
+    "build": {
+     "ellipse": {
+      "c": [
+       1,
+       2,
+       3
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "domain": [
+       0,
+       180
+      ],
+      "inside_out": false,
+      "dim": 3,
+      "radii": [
+       2,
+       1
+      ]
+     }
+    },
+    "ops": [
+     {
+      "op": "adjust",
+      "domain": [
+       360,
+       540
+      ]
+     },
+     {
+      "op": "state",
+      "types": []
+     }
+    ]
+   }
+  },
+  {
+   "name": "healthy_step_ellipse_180_reverse_0",
+   "upstream_ref": "issue #428 / WR-211: polar clamping must not create a zero-length NURBS interval",
+   "inputs": {
+    "build": {
+     "ellipse": {
+      "c": [
+       1,
+       2,
+       3
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "domain": [
+       0,
+       180
+      ],
+      "inside_out": false,
+      "dim": 3,
+      "radii": [
+       2,
+       1
+      ]
+     }
+    },
+    "ops": [
+     {
+      "op": "adjust",
+      "domain": [
+       0,
+       90
+      ]
+     },
+     {
+      "op": "state",
+      "types": []
+     }
+    ]
+   }
+  },
+  {
+   "name": "collapsed_step_ellipse_180_reverse_1",
+   "upstream_ref": "issue #428 / WR-211: polar clamping must not create a zero-length NURBS interval",
+   "inputs": {
+    "build": {
+     "ellipse": {
+      "c": [
+       1,
+       2,
+       3
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "domain": [
+       0,
+       180
+      ],
+      "inside_out": true,
+      "dim": 3,
+      "radii": [
+       2,
+       1
+      ]
+     }
+    },
+    "ops": [
+     {
+      "op": "adjust",
+      "domain": [
+       360,
+       540
+      ]
+     },
+     {
+      "op": "state",
+      "types": []
+     }
+    ]
+   }
+  },
+  {
+   "name": "healthy_step_ellipse_180_reverse_1",
+   "upstream_ref": "issue #428 / WR-211: polar clamping must not create a zero-length NURBS interval",
+   "inputs": {
+    "build": {
+     "ellipse": {
+      "c": [
+       1,
+       2,
+       3
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "domain": [
+       0,
+       180
+      ],
+      "inside_out": true,
+      "dim": 3,
+      "radii": [
+       2,
+       1
+      ]
+     }
+    },
+    "ops": [
+     {
+      "op": "adjust",
+      "domain": [
+       0,
+       90
+      ]
+     },
+     {
+      "op": "state",
+      "types": []
+     }
+    ]
+   }
+  },
+  {
+   "name": "collapsed_step_ellipse_360_reverse_0",
+   "upstream_ref": "issue #428 / WR-211: polar clamping must not create a zero-length NURBS interval",
+   "inputs": {
+    "build": {
+     "ellipse": {
+      "c": [
+       1,
+       2,
+       3
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "domain": [
+       0,
+       360
+      ],
+      "inside_out": false,
+      "dim": 3,
+      "radii": [
+       2,
+       1
+      ]
+     }
+    },
+    "ops": [
+     {
+      "op": "adjust",
+      "domain": [
+       360,
+       540
+      ]
+     },
+     {
+      "op": "state",
+      "types": []
+     }
+    ]
+   }
+  },
+  {
+   "name": "healthy_step_ellipse_360_reverse_0",
+   "upstream_ref": "issue #428 / WR-211: polar clamping must not create a zero-length NURBS interval",
+   "inputs": {
+    "build": {
+     "ellipse": {
+      "c": [
+       1,
+       2,
+       3
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "domain": [
+       0,
+       360
+      ],
+      "inside_out": false,
+      "dim": 3,
+      "radii": [
+       2,
+       1
+      ]
+     }
+    },
+    "ops": [
+     {
+      "op": "adjust",
+      "domain": [
+       0,
+       90
+      ]
+     },
+     {
+      "op": "state",
+      "types": []
+     }
+    ]
+   }
+  },
+  {
+   "name": "collapsed_step_ellipse_360_reverse_1",
+   "upstream_ref": "issue #428 / WR-211: polar clamping must not create a zero-length NURBS interval",
+   "inputs": {
+    "build": {
+     "ellipse": {
+      "c": [
+       1,
+       2,
+       3
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "domain": [
+       0,
+       360
+      ],
+      "inside_out": true,
+      "dim": 3,
+      "radii": [
+       2,
+       1
+      ]
+     }
+    },
+    "ops": [
+     {
+      "op": "adjust",
+      "domain": [
+       360,
+       540
+      ]
+     },
+     {
+      "op": "state",
+      "types": []
+     }
+    ]
+   }
+  },
+  {
+   "name": "healthy_step_ellipse_360_reverse_1",
+   "upstream_ref": "issue #428 / WR-211: polar clamping must not create a zero-length NURBS interval",
+   "inputs": {
+    "build": {
+     "ellipse": {
+      "c": [
+       1,
+       2,
+       3
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "domain": [
+       0,
+       360
+      ],
+      "inside_out": true,
+      "dim": 3,
+      "radii": [
+       2,
+       1
+      ]
+     }
+    },
+    "ops": [
+     {
+      "op": "adjust",
+      "domain": [
+       0,
+       90
+      ]
+     },
+     {
+      "op": "state",
+      "types": []
+     }
+    ]
+   }
+  },
+  {
+   "name": "healthy_shifted_circle_reverse_0",
+   "inputs": {
+    "build": {
+     "circle": {
+      "c": [
+       1,
+       2,
+       3
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "domain": [
+       360,
+       540
+      ],
+      "inside_out": false,
+      "dim": 3,
+      "r": 2
+     }
+    },
+    "ops": [
+     {
+      "op": "adjust",
+      "domain": [
+       360,
+       540
+      ]
+     },
+     {
+      "op": "state",
+      "types": []
+     }
+    ]
+   }
+  },
+  {
+   "name": "healthy_shifted_circle_reverse_1",
+   "inputs": {
+    "build": {
+     "circle": {
+      "c": [
+       1,
+       2,
+       3
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "domain": [
+       360,
+       540
+      ],
+      "inside_out": true,
+      "dim": 3,
+      "r": 2
+     }
+    },
+    "ops": [
+     {
+      "op": "adjust",
+      "domain": [
+       360,
+       540
+      ]
+     },
+     {
+      "op": "state",
+      "types": []
+     }
+    ]
+   }
+  },
+  {
+   "name": "healthy_shifted_ellipse_reverse_0",
+   "inputs": {
+    "build": {
+     "ellipse": {
+      "c": [
+       1,
+       2,
+       3
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "domain": [
+       360,
+       540
+      ],
+      "inside_out": false,
+      "dim": 3,
+      "radii": [
+       2,
+       1
+      ]
+     }
+    },
+    "ops": [
+     {
+      "op": "adjust",
+      "domain": [
+       360,
+       540
+      ]
+     },
+     {
+      "op": "state",
+      "types": []
+     }
+    ]
+   }
+  },
+  {
+   "name": "healthy_shifted_ellipse_reverse_1",
+   "inputs": {
+    "build": {
+     "ellipse": {
+      "c": [
+       1,
+       2,
+       3
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "domain": [
+       360,
+       540
+      ],
+      "inside_out": true,
+      "dim": 3,
+      "radii": [
+       2,
+       1
+      ]
+     }
+    },
+    "ops": [
+     {
+      "op": "adjust",
+      "domain": [
+       360,
+       540
+      ]
+     },
+     {
+      "op": "state",
+      "types": []
+     }
+    ]
+   }
   }
  ]
 }

@@ -17,6 +17,9 @@
 //! | [`SurfOfRevolution::trim_with_domain`]                      | `TrimWithDomain`                          |
 //!
 //! Deviations:
+//! - **Rejected generator intervals (#428).** With
+//!   `Kernel::fixes.ellipse_step_interval_checks`, the surface analytic domain is
+//!   stored only after its generator accepts the STEP interval. Default order is C++.
 //! - **Arguments.** Out-params become return values; `SmContext` arguments, the
 //!   `Notify` calls and `TrimWithDomain`'s in/out domain (upstream never writes it) are
 //!   dropped. `STEPInversion` and `GlobalSurfaceIntersect` take the kernel for the
@@ -157,16 +160,20 @@ impl SurfOfRevolution {
             return Ok(());
         }
 
-        // set surface analytic domain
-        self.anal_uv_domain = *new_step_uv_domain;
-
-        // set GenCurve analytic domain from V part of new surface domain
-        let v_ivl = self.anal_uv_domain.v_interval();
+        // Preserve upstream's update order by default. The opt-in keeps a
+        // rejected generator edit from changing the surface's advertised domain.
+        if !k.fixes.ellipse_step_interval_checks {
+            self.anal_uv_domain = *new_step_uv_domain;
+        }
+        let v_ivl = new_step_uv_domain.v_interval();
         let gen = self
             .gen_curve
             .as_mut()
             .ok_or(SolidError::null_pointer(OP_ADJUST))?;
         gen_adjust_step_interval(k, gen, &v_ivl)?;
+        if k.fixes.ellipse_step_interval_checks {
+            self.anal_uv_domain = *new_step_uv_domain;
+        }
 
         // build Nurb domain from Analytic domain
         let mut nurb_domain = *new_step_uv_domain;
