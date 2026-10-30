@@ -1,0 +1,26 @@
+{
+  "en": {
+    "cmd.drawing_image_add": "Add Image"
+  },
+  "ar": {
+    "cmd.drawing_image_add": "إضافة صورة"
+  },
+  "de": {
+    "cmd.drawing_image_add": "Bild hinzufügen"
+  },
+  "he": {
+    "cmd.drawing_image_add": "הוספת תמונה"
+  },
+  "ja": {
+    "cmd.drawing_image_add": "画像を追加"
+  },
+  "ko": {
+    "cmd.drawing_image_add": "이미지 추가"
+  },
+  "vi": {
+    "cmd.drawing_image_add": "Thêm hình ảnh"
+  },
+  "zh": {
+    "cmd.drawing_image_add": "添加图像"
+  }
+}
