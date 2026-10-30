@@ -137,20 +137,23 @@ fn generated_profiles_and_press_pull_convert_rotated_occurrence_picks_once() {
 }
 
 /// A 40 x 30 x 20 box whose top is split at x = 20 and its left half raised 5 by Offset Face:
-/// the raised top has no construction certificate and no exact history name yet (#494).
+/// the raised top has no construction certificate, and an exact history name from SMLib's
+/// offset history.
 fn raised_half(s: &mut Session, body: &str) {
     run(s, "solid.box", json!({"length":40,"width":30,"height":20,"body_name":body}));
     run(s, "solid.split_face", json!({"faces":[[10,15,20]],"plane":{"origin":[20,0,0],"normal":[1,0,0]}}));
     run(s, "solid.offset_face", json!({"faces":[[10,15,20]],"distance":5}));
 }
 
+/// Internal capture of a face in another component whose occurrence has an uncaptured move:
+/// the raised top has no construction certificate, but its exact history name keeps it, so the
+/// capture is an exact (lineage) anchor on that occurrence's path, whose pending position is
+/// captured when the attachment is made (`capture_positions`). Capturing changes nothing.
 #[test]
-fn legacy_internal_capture_refuses_an_uncaptured_source_in_another_component() {
+fn internal_capture_in_another_component_anchors_an_offset_face_by_its_history_name() {
     let mut s = Session::default();
     let component = run(&mut s, "component.create", json!({"name":"Source","grounded":false}));
     let occurrence = component["occurrence"].as_u64().unwrap();
-    // A face Offset Face raised has no construction certificate or exact history name yet:
-    // the legacy path.
     raised_half(&mut s, "Stock");
     run(&mut s, "component.activate", json!({"component":0}));
     run(&mut s, "occurrence.move", json!({"occurrence":occurrence,"translate":[30,0,0],"capture":false}));
@@ -165,15 +168,20 @@ fn legacy_internal_capture_refuses_an_uncaptured_source_in_another_component() {
         .into_iter()
         .find(|face| face.plane_normal.is_some_and(|normal| normal.z > 0.999) && (face.centroid.z - 25.0).abs() < 1e-6)
         .unwrap();
+    assert!(state.body("Stock").unwrap().body.face_plane(end.index).is_none(), "the raised top has no construction certificate");
     let before = s.doc.to_json();
-    let error = super::super::sketch::face::capture_internal(
+    let pending = s.pending_moves.clone();
+    let plane = super::super::sketch::face::capture_internal(
         &s,
         &json!({"face":[40,15,25],"body":"Stock","index":end.index,"path":[occurrence]}),
         "internal",
     )
-    .unwrap_err();
-    assert!(error.to_string().contains("capture the source occurrence position"), "{error}");
+    .unwrap();
+    let anchor = super::super::sketch::face::anchor(&plane).expect("an exact attachment");
+    assert_eq!(anchor.target.certificate, Some(solidcraft_doc::config::FaceCertificate::Lineage));
+    assert_eq!(anchor.path, vec![occurrence]);
     assert_eq!(s.doc.to_json(), before);
+    assert_eq!(s.pending_moves, pending);
 }
 
 #[test]
