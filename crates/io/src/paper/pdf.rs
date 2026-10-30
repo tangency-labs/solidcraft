@@ -1,5 +1,6 @@
 //! A paper scene as a vector PDF (#4890, P1): one page the sheet's size, its lines and fills,
-//! geometry and optional-content layers (text follows with P2).
+//! geometry and optional-content layers (text follows with P2); several scenes as the pages of
+//! one document ([`paper_pdf_pages`]), each its sheet's size, sharing one set of layers.
 //!
 //! - **The file** comes from `pdf-writer`: a catalog, one page whose MediaBox is the sheet in
 //!   points, its content deflated, and an Info dictionary with the Producer, the Title when there
@@ -44,6 +45,8 @@ pub const ARC_TOLERANCE_MM: f64 = 1e-4;
 const PT_PER_MM: f64 = 72.0 / 25.4;
 /// The smallest page side, in points (Annex C).
 const MIN_PAGE_PT: f64 = 3.0;
+/// The most pages a sheet PDF may have: a drawing's sheets.
+const MAX_PAGES: usize = solidcraft_doc::drawing::MAX_SHEETS;
 /// The most characters a title may have.
 const MAX_TITLE_CHARS: usize = 1000;
 /// The last second a PDF date can hold: 9999-12-31 23:59:59 UTC.
@@ -73,27 +76,46 @@ impl Default for PdfOptions {
 /// What writing a scene did that the scene didn't say: the grid's report.
 pub type PdfReport = GridReport;
 
-/// A scene's PDF document, and what writing it did.
+/// A scene's PDF document, and what writing it did: [`paper_pdf_pages`] with one page.
 pub fn paper_pdf(scene: &Prepared, options: &PdfOptions) -> Result<(Vec<u8>, PdfReport)> {
+    let (bytes, mut reports) = paper_pdf_pages(std::slice::from_ref(scene), options)?;
+    let report = reports.pop().ok_or_else(|| IoError::Invalid("the sheet PDF has no page".into()))?;
+    Ok((bytes, report))
+}
+
+/// Scenes as the pages of one PDF document, in order, each page its scene's size, and what
+/// writing each page did. The pages share one allowance of content, [`MAX_DRAWING_BYTES`].
+pub fn paper_pdf_pages(scenes: &[Prepared], options: &PdfOptions) -> Result<(Vec<u8>, Vec<PdfReport>)> {
     let title = options.title.as_deref().filter(|t| !t.is_empty());
     if title.is_some_and(|t| t.chars().count() > MAX_TITLE_CHARS) {
         return Err(IoError::Invalid(format!("a sheet PDF's title is at most {MAX_TITLE_CHARS} characters")));
     }
+    if !(1..=MAX_PAGES).contains(&scenes.len()) {
+        return Err(IoError::Invalid(format!("a sheet PDF has 1 to {MAX_PAGES} pages")));
+    }
     let date = options.output_time.map(date).transpose()?;
-    let on = scene.on_grid(Grid::TEN_NANOMETRES).map_err(|e| IoError::Invalid(e.to_string()))?;
-    let page = [on.size.x, on.size.y].map(|n| n as f64 / Grid::TEN_NANOMETRES.per_mm() * PT_PER_MM);
-    if page.iter().any(|side| *side < MIN_PAGE_PT) {
-        return Err(IoError::Invalid(format!("a sheet PDF's page is at least {MIN_PAGE_PT} pt (about 1.06 mm) a side")));
+    let mut sheets = Vec::with_capacity(scenes.len());
+    for scene in scenes {
+        let on = scene.on_grid(Grid::TEN_NANOMETRES).map_err(|e| IoError::Invalid(e.to_string()))?;
+        let page = [on.size.x, on.size.y].map(|n| n as f64 / Grid::TEN_NANOMETRES.per_mm() * PT_PER_MM);
+        if page.iter().any(|side| *side < MIN_PAGE_PT) {
+            return Err(IoError::Invalid(format!("a sheet PDF's page is at least {MIN_PAGE_PT} pt (about 1.06 mm) a side")));
+        }
+        sheets.push((on, page));
     }
 
-    let layers = if options.layers { collect_layers(&on.groups)? } else { Vec::new() };
-    let content = content_with_limit_and_layers(&on.groups, options.layers.then_some(layers.as_slice()), MAX_DRAWING_BYTES)?;
-    let mut deflate = ZlibEncoder::new(Vec::new(), Compression::default());
-    let compressed = deflate.write_all(content.as_bytes()).and_then(|()| deflate.finish());
-    let compressed = compressed.map_err(|e| IoError::Invalid(format!("the sheet PDF: {e}")))?;
+    // Object numbers in the order the objects are written: the catalog, the page tree, each page
+    // and its content, the Info dictionary, then the layers. One page keeps 1 to 5 and layers
+    // from 6.
+    let mut refs = Refs(1);
+    let (catalog, tree) = (refs.next()?, refs.next()?);
+    let mut pages = Vec::with_capacity(sheets.len());
+    for _ in &sheets {
+        pages.push((refs.next()?, refs.next()?));
+    }
+    let info = refs.next()?;
+    let layers = if options.layers { collect_layers(sheets.iter().flat_map(|(on, _)| &on.groups), &mut refs)? } else { Vec::new() };
 
-    // Each object's number, used once (pdf-writer panics on a number written twice).
-    let (catalog, tree, page_id, contents, info) = (Ref::new(1), Ref::new(2), Ref::new(3), Ref::new(4), Ref::new(5));
     let mut pdf = Pdf::new();
     {
         let mut root = pdf.catalog(catalog);
@@ -109,20 +131,33 @@ pub fn paper_pdf(scene: &Prepared, options: &PdfOptions) -> Result<(Vec<u8>, Pdf
             default.pair(Name(b"BaseState"), Name(b"ON"));
         }
     }
-    pdf.pages(tree).kids([page_id]).count(1);
-    let mut writer = pdf.page(page_id);
-    writer.parent(tree).media_box(Rect::new(0.0, 0.0, page[0] as f32, page[1] as f32)).contents(contents);
-    {
-        let mut resources = writer.resources();
-        if !layers.is_empty() {
-            let mut properties = resources.insert(Name(b"Properties")).dict();
-            for layer in &layers {
-                properties.pair(Name(layer.tag.as_bytes()), layer.reference);
+    let count = i32::try_from(pages.len()).map_err(|_| IoError::Invalid("too many PDF pages".into()))?;
+    pdf.pages(tree).kids(pages.iter().map(|(page, _)| *page)).count(count);
+    let (mut used, mut reports) = (0usize, Vec::with_capacity(sheets.len()));
+    for ((on, page), (page_id, contents)) in sheets.into_iter().zip(pages) {
+        let content = content_with_limit_and_layers(&on.groups, options.layers.then_some(layers.as_slice()), MAX_DRAWING_BYTES - used)?;
+        used += content.len();
+        let mut deflate = ZlibEncoder::new(Vec::new(), Compression::default());
+        let compressed = deflate.write_all(content.as_bytes()).and_then(|()| deflate.finish());
+        let compressed = compressed.map_err(|e| IoError::Invalid(format!("the sheet PDF: {e}")))?;
+        let mut writer = pdf.page(page_id);
+        writer.parent(tree).media_box(Rect::new(0.0, 0.0, page[0] as f32, page[1] as f32)).contents(contents);
+        {
+            // This page's layers: the kinds it paints.
+            let mut resources = writer.resources();
+            let painted = |layer: &&Layer| on.groups.iter().any(|g| !g.items.is_empty() && g.kind == layer.kind);
+            let mut on_page = layers.iter().filter(painted).peekable();
+            if on_page.peek().is_some() {
+                let mut properties = resources.insert(Name(b"Properties")).dict();
+                for layer in on_page {
+                    properties.pair(Name(layer.tag.as_bytes()), layer.reference);
+                }
             }
         }
+        drop(writer);
+        pdf.stream(contents, &compressed).filter(Filter::FlateDecode);
+        reports.push(on.report);
     }
-    drop(writer);
-    pdf.stream(contents, &compressed).filter(Filter::FlateDecode);
     let mut doc = pdf.document_info(info);
     doc.producer(TextStr(concat!("SolidCraft ", env!("CARGO_PKG_VERSION"))));
     if let Some(title) = title {
@@ -137,7 +172,18 @@ pub fn paper_pdf(scene: &Prepared, options: &PdfOptions) -> Result<(Vec<u8>, Pdf
         group.pair(Name(b"Type"), Name(b"OCG"));
         group.pair(Name(b"Name"), TextStr(layer.kind.layer()));
     }
-    Ok((pdf.finish(), on.report))
+    Ok((pdf.finish(), reports))
+}
+
+/// The next object numbers of one document, each handed out once (pdf-writer panics on a number
+/// written twice).
+struct Refs(i32);
+
+impl Refs {
+    fn next(&mut self) -> Result<Ref> {
+        let next = self.0.checked_add(1).ok_or_else(|| IoError::Invalid("too many PDF objects".into()))?;
+        Ok(Ref::new(std::mem::replace(&mut self.0, next)))
+    }
 }
 
 /// `secs` since 1970 as a PDF date in UTC, refused past the year 9999.
@@ -158,15 +204,16 @@ struct Layer {
     tag: String,
 }
 
-fn collect_layers(groups: &[GridGroup]) -> Result<Vec<Layer>> {
+/// The layers of `groups` (every page's, in page order): one a kind, numbered from `refs` and
+/// tagged `L0`, `L1`… as the kinds are first painted, so a kind is the same layer on every page.
+fn collect_layers<'a>(groups: impl IntoIterator<Item = &'a GridGroup>, refs: &mut Refs) -> Result<Vec<Layer>> {
     let mut layers: Vec<Layer> = Vec::new();
-    for group in groups.iter().filter(|group| !group.items.is_empty()) {
+    for group in groups.into_iter().filter(|group| !group.items.is_empty()) {
         if layers.iter().any(|layer| layer.kind == group.kind) {
             continue;
         }
         layers.try_reserve(1).map_err(|_| IoError::Invalid("the sheet PDF: cannot allocate its layer list".into()))?;
-        let index = i32::try_from(layers.len()).ok().and_then(|n| n.checked_add(6)).ok_or_else(|| IoError::Invalid("too many PDF layers".into()))?;
-        layers.push(Layer { kind: group.kind, reference: Ref::new(index), tag: format!("L{}", layers.len()) });
+        layers.push(Layer { kind: group.kind, reference: refs.next()?, tag: format!("L{}", layers.len()) });
     }
     Ok(layers)
 }
@@ -180,7 +227,8 @@ fn content(groups: &[GridGroup]) -> Result<String> {
 // The private seam permits smaller test limits, never a higher production cap.
 #[cfg(test)]
 fn content_with_limit(groups: &[GridGroup], max_bytes: usize) -> Result<String> {
-    let layers = collect_layers(groups)?;
+    // Numbered as a one-page document's, from 6.
+    let layers = collect_layers(groups, &mut Refs(6))?;
     content_with_limit_and_layers(groups, Some(&layers), max_bytes)
 }
 

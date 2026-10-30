@@ -786,3 +786,126 @@ fn merged_pdf_run_limits_charge_transitions_and_the_final_close() {
         assert!(super::content_with_limit(&grid.groups, prefix + tail.len() - 1).is_err());
     }
 }
+
+// Many pages (#7626's follow-up): `paper_pdf_pages`, with `paper_pdf` its one-page call.
+
+/// A sheet of `size` with a short stroke for each of `kinds`, one group each, in order.
+fn sheet_of(size: Vec2, kinds: &[ObjectKind]) -> Scene {
+    let line = |y: f64| stroke(vec![Seg2::Line { a: p(10.0, y), b: p(20.0, y) }], false, 0.35, None);
+    let groups = kinds.iter().zip(1u64..).map(|(kind, object)| Group { object, kind: *kind, items: vec![line(10.0 * object as f64)] }).collect();
+    Scene { size_mm: size, groups }
+}
+
+/// Each object of a file: its number and its text, from `N 0 obj` to `endobj`.
+fn objects(bytes: &[u8]) -> Vec<(i32, String)> {
+    text(bytes)
+        .split("endobj")
+        .filter_map(|chunk| {
+            let at = chunk.find(" 0 obj")?;
+            let number = chunk[..at].rsplit(|c: char| !c.is_ascii_digit()).next()?.parse().ok()?;
+            Some((number, chunk[at..].to_string()))
+        })
+        .collect()
+}
+
+/// Every content stream of a file, inflated, in file order (each starts after its dictionary,
+/// where `endstream` never stands).
+fn contents(bytes: &[u8]) -> Vec<String> {
+    let start = b">>\nstream\n";
+    let mut out = Vec::new();
+    let mut from = 0;
+    while let Some(at) = bytes[from..].windows(start.len()).position(|w| w == start).map(|at| from + at) {
+        out.push(content(&bytes[at..]));
+        from = at + start.len();
+    }
+    out
+}
+
+/// A page's MediaBox width and height, in points.
+fn media_box(object: &str) -> [f64; 2] {
+    let at = object.find("/MediaBox [").unwrap() + "/MediaBox [".len();
+    let n: Vec<f64> = object[at..].split(']').next().unwrap().split_whitespace().map(|n| n.parse().unwrap()).collect();
+    [n[2], n[3]]
+}
+
+/// One page through the page builder is today's one-page call, byte for byte, with or without
+/// layers, a title and a date; its objects keep their numbers: catalog 1, page tree 2, page 3,
+/// content 4, Info 5, layers from 6.
+#[test]
+fn one_page_is_the_one_page_call_byte_for_byte() {
+    let sheet = sheet_of(p(420.0, 297.0), &[ObjectKind::DrawingBorder, ObjectKind::TitleBlock, ObjectKind::DrawingBorder]);
+    let prepared = sheet.prepare().unwrap();
+    for layers in [true, false] {
+        for (title, output_time) in [(None, None), (Some("Bracket — sheet 1".to_string()), Some(1_761_800_000))] {
+            let options = PdfOptions { title, output_time, layers };
+            let one = paper_pdf(&prepared, &options).unwrap();
+            let (bytes, reports) = paper_pdf_pages(std::slice::from_ref(&prepared), &options).unwrap();
+            assert_eq!((&bytes, &reports[..]), (&one.0, std::slice::from_ref(&one.1)), "{options:?}");
+        }
+    }
+    let bytes = pdf(&sheet, &PdfOptions::default());
+    let numbers: Vec<i32> = objects(&bytes).iter().map(|(n, _)| *n).collect();
+    assert_eq!(numbers, [1, 2, 3, 4, 5, 6, 7]);
+    let objects = objects(&bytes);
+    assert!(
+        objects[2].1.contains("/Type /Page")
+            && !objects[2].1.contains("/Type /Pages")
+            && objects[3].1.contains("stream")
+            && objects[4].1.contains("/Producer")
+    );
+    assert!(objects[5].1.contains("/Type /OCG") && objects[6].1.contains("/Type /OCG"));
+}
+
+/// Pages follow in order, each its sheet's size, numbered page then content; the Info dictionary
+/// follows them, then one layer for each kind across all pages, tagged as first painted, so a kind
+/// is the same layer on every page. Each page lists only the layers it paints; a page painting
+/// nothing lists none. Without layers each page's content is that sheet's one-page content.
+#[test]
+fn pages_follow_in_order_each_its_sheets_size_sharing_one_layer_a_kind() {
+    use ObjectKind::{DrawingBorder, TitleBlock};
+    let sheets = [sheet_of(p(420.0, 297.0), &[DrawingBorder, TitleBlock]), sheet_of(p(210.0, 297.0), &[TitleBlock]), sheet_of(p(297.0, 210.0), &[])];
+    let prepared: Vec<_> = sheets.iter().map(|s| s.prepare().unwrap()).collect();
+    let (bytes, reports) = paper_pdf_pages(&prepared, &PdfOptions::default()).unwrap();
+    assert_eq!(reports.len(), 3);
+    let objects = objects(&bytes);
+    assert_eq!(objects.iter().map(|(n, _)| *n).collect::<Vec<_>>(), (1..=11).collect::<Vec<_>>());
+    assert!(objects[1].1.contains("/Kids [3 0 R 5 0 R 7 0 R]") && objects[1].1.contains("/Count 3"), "{}", objects[1].1);
+    for (page, size) in [(2, [420.0, 297.0]), (4, [210.0, 297.0]), (6, [297.0, 210.0])] {
+        let [w, h] = media_box(&objects[page].1);
+        assert!((w - size[0] * PT_PER_MM).abs() < 1e-3 && (h - size[1] * PT_PER_MM).abs() < 1e-3, "{}", objects[page].1);
+    }
+    assert!(objects[8].1.contains("/Producer"), "Info follows the pages");
+    assert!(objects[9].1.contains(DrawingBorder.layer()), "{}", objects[9].1);
+    assert!(objects[10].1.contains(TitleBlock.layer()), "{}", objects[10].1);
+    assert!(objects[0].1.contains("/OCGs [10 0 R 11 0 R]"), "{}", objects[0].1);
+    assert!(objects[2].1.contains("/L0 10 0 R") && objects[2].1.contains("/L1 11 0 R"));
+    assert!(objects[4].1.contains("/L1 11 0 R") && !objects[4].1.contains("/L0"), "the second page paints only the title block");
+    assert!(!objects[6].1.contains("/Properties"), "a page painting nothing lists no layers");
+    let streams = contents(&bytes);
+    assert_eq!(streams.len(), 3);
+    assert!(streams[1].contains("/OC /L1 BDC") && !streams[1].contains("/L0"), "{}", streams[1]);
+    // Without layers each page is its sheet's own content, and the pages hold no layer at all.
+    let flat = PdfOptions { layers: false, ..PdfOptions::default() };
+    let (bytes, _) = paper_pdf_pages(&prepared, &flat).unwrap();
+    let alone: Vec<String> = sheets.iter().map(|s| content(&pdf(s, &flat))).collect();
+    assert_eq!(contents(&bytes), alone);
+    assert!(!text(&bytes).contains("/OCProperties") && !text(&bytes).contains("/Properties"));
+    // The same sheets give the same bytes.
+    assert_eq!(paper_pdf_pages(&prepared, &flat).unwrap().0, bytes);
+}
+
+/// No pages, more than a drawing has sheets, and any page that couldn't be written alone are
+/// refused.
+#[test]
+fn pages_are_refused_past_their_limits() {
+    let e = paper_pdf_pages(&[], &PdfOptions::default()).unwrap_err();
+    assert!(e.to_string().contains("1 to 1000 pages"), "{e}");
+    let sheet = scene(p(10.0, 10.0), vec![]);
+    let many: Vec<_> = (0..=MAX_PAGES).map(|_| sheet.prepare().unwrap()).collect();
+    let e = paper_pdf_pages(&many, &PdfOptions::default()).unwrap_err();
+    assert!(e.to_string().contains("1 to 1000 pages"), "{e}");
+    assert!(paper_pdf_pages(&many[..MAX_PAGES], &PdfOptions::default()).is_ok());
+    let tiny = scene(p(1.0, 297.0), vec![]);
+    let e = paper_pdf_pages(&[sheet.prepare().unwrap(), tiny.prepare().unwrap()], &PdfOptions::default()).unwrap_err();
+    assert!(e.to_string().contains("at least 3 pt"), "{e}");
+}
