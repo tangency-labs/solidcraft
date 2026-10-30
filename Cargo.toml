@@ -156,6 +156,7 @@ truck-geometry = { path = "vendor/truck-geometry" }
 truck-shapeops = { path = "vendor/truck-shapeops" }
 truck-stepio = { path = "vendor/truck-stepio" }
 truck-meshalgo = { path = "vendor/truck-meshalgo" }
+truck-modeling = { path = "vendor/truck-modeling" }
 matext4cgmath = { path = "vendor/matext4cgmath" }
 
 # Keep OpenGL pipelines, resolve textures and CAD callbacks at the same safe sample count.

@@ -1492,3 +1492,27 @@ fn join_that_meets_no_body_keeps_the_piece_and_says_so() {
     let combine = s.execute("solid.combine", &json!({"target": "A", "tools": ["B"], "operation": "join"})).unwrap();
     assert!(combine["warning"].is_null(), "{combine}");
 }
+
+/// #4431: tapered text cut into a block. Projecting the points of the intersection curves on the
+/// letters' tapered walls started each search from a grid of the wall surface evaluated afresh,
+/// and the cut took half a minute. It takes out exactly the tapered letters (the same extrude
+/// as new bodies) that stand on the block's top face.
+#[test]
+fn tapered_text_cut_takes_out_the_letters() {
+    let mut script: Value = serde_json::from_str(include_str!("../../../examples/regressions/tapered_text_cut.json")).unwrap();
+    let s = replay_value(&script);
+    let state = s.model.state();
+    assert_eq!(state.bodies.len(), 1);
+    assert!(state.bodies[0].body.validity().is_empty(), "{:?}", state.bodies[0].body.validity());
+    let cut = solidcraft_kernel::measure(&state.bodies[0].body).unwrap().volume;
+    let last = script["commands"].as_array_mut().unwrap().last_mut().unwrap();
+    last["params"]["operation"] = json!("new");
+    let apart = replay_value(&script);
+    // The last letter lies past the block's end (x 105.6 to 110.9): nothing to cut there.
+    let measures: Vec<_> = apart.model.state().bodies.iter().skip(1).map(|b| solidcraft_kernel::measure(&b.body).unwrap()).collect();
+    assert_eq!(measures.len(), 21);
+    let letters: f64 = measures.iter().filter(|m| m.bbox.max.x < 105.0).map(|m| m.volume).sum();
+    assert!(letters > 200.0, "letters {letters}");
+    let block = 105.0 * 26.0 * 40.0;
+    assert!((block - letters - cut).abs() < 0.05, "block {block} - letters {letters} = {}, cut {cut}", block - letters);
+}
