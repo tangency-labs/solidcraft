@@ -1794,6 +1794,8 @@ pub(crate) fn placement_field(ui: &mut Ui, id: egui::Id, value: &mut String, hin
     let t = Tokens::get();
     let font = egui::FontId::proportional(t.font_body);
     let size = placement_field_content_size(ui, value);
+    // egui 0.37 floors a text edit's height at the theme's interact height: lower it for this one.
+    let interact = std::mem::replace(&mut ui.spacing_mut().interact_size.y, size.y);
     let mut response = ui.add(
         text_input(egui::TextEdit::singleline(value))
             .id(id)
@@ -1806,6 +1808,7 @@ pub(crate) fn placement_field(ui: &mut Ui, id: egui::Id, value: &mut String, hin
             .text_color(t.form_ink)
             .clip_text(true),
     );
+    ui.spacing_mut().interact_size.y = interact;
     super::text_menu::menu(ui, &mut response, value, super::text_menu::Field::LINE);
     publish(ui, &response, egui::Role::TextInput);
     response.widget_info(|| {
