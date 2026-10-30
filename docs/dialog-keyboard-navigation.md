@@ -28,9 +28,11 @@ including `s30_pattern_a_hole`, remain complementary end-to-end coverage.
 | Closed dropdown | Enter | Apply without opening the popup or changing its value. |
 | Closed dropdown | Space | Open the popup. |
 | Closed indexed dropdown | Up/Down | Choose the previous/next option, keeping focus on the field. Stop at the ends. |
-| Open dropdown popup | Arrows / Enter | Navigate options and accept the focused option using the existing menu behavior. This Enter belongs to the popup. |
-| Open dropdown popup | Tab / Shift+Tab | Stay in the popup's own loop. |
-| Open dropdown popup | Escape | Close the popup first; subsequent navigation returns to the parent dialog. |
+| Open indexed dropdown | Open | Highlight the currently selected option. |
+| Open indexed dropdown | Up/Down | Move the pending highlight only; wrap between the first and last options. Keep focus with the dropdown. Left/Right do not move the highlight. |
+| Open indexed dropdown | Space / Enter | Accept the highlighted option and close the popup. This Enter belongs to the popup, not OK. |
+| Open dropdown popup | Tab / Shift+Tab | Close without accepting a pending choice; advance to the next/previous parent form control. Never Tab through the options. |
+| Open indexed dropdown | Escape | Close without changing the value; keep the parent dialog open. |
 | Completion suggestions or text context menu | Owned keys | Let that popup handle its own keys before the dialog. |
 | Action button | Enter or Space | Perform that button's action. Cancel still cancels; it is not a value field. |
 | Invalid or incomplete configuration | Enter | Keep the dialog open; do not create geometry or an undo step. |
@@ -74,6 +76,7 @@ selection, and stored input picks before and after navigation.
 | EX-T | Extrude: Tab from the floating distance reaches Profiles. Expanded Advanced fields participate, Close/title do not, and first/last controls wrap in one key press. | [extrude_edit_tests.rs](../crates/ui-egui/src/extrude_edit_tests.rs): `dialog_tab_extrude_enters_from_canvas_distance_and_never_leaves_the_dialog` |
 | EX-B | Extrude: Enter on Reverse Direction applies without flipping it, both unchecked and after Space checks it. Verify positive/negative extrusion bounds. | Same file: `checkbox_enter_applies_extrude_without_toggling_reverse` |
 | EX-D | Extrude: Enter on highlighted Direction, Extent Type, Operation, and Start closes the dialog without opening a popup or changing the feature's extent. | Same file: `dialog_keyboard_enter_on_closed_extrude_dropdowns_applies_without_changing_values` |
+| EX-P | Extrude: use Space/Down/Space to select Two Sides, then cycle Extent Type through To Object, All and back to Distance. Confirming closes each popup. Tab dismisses a pending To Object choice and reaches Distance; Shift+Tab returns to Extent Type. Cancelling preserves the document and undo history. | Same file: `dropdown_extrude_menu_confirm_wrap_and_tab_exit_preserve_form_focus` |
 | MV-T | Move: Tab leaves the floating axis editor for the dialog instead of cycling floating axes; reverse traversal and applying a typed Y distance still work. | [dialogs_move_tests.rs](../crates/ui-egui/src/dialogs_move_tests.rs): `dialog_tab_move_enters_the_dialog_instead_of_cycling_canvas_axes` |
 | PM-T | Parameters manager: repeated forward/reverse Tab remains inside the manager. | [params_dialog.rs](../crates/ui-egui/src/params_dialog.rs): `dialog_tab_parameters_stays_inside_its_manager` |
 
@@ -82,7 +85,7 @@ selection, and stored input picks before and after navigation.
 | ID | Coverage | Test location |
 | --- | --- | --- |
 | UI-F | Dialog-only wrap, exact enabled-control set, disabled fields skipped, visible accent focus on dropdowns and normal/primary/text buttons. | [panel_tests.rs](../crates/ui-egui/src/ui_kit/panel_tests.rs): `dialog_tab_window_wraps_in_both_directions_and_excludes_background_fields`, `dialog_tab_dropdown_and_actions_paint_a_focus_outline` |
-| UI-D | Enter-to-OK and Space-to-open for indexed dropdowns, picked-value dropdowns, custom menus, and searchable dropdowns. Closed arrows still work; open-menu arrows/Enter and popup Tab/Escape still work. | Same file: `dialog_keyboard_closed_dropdown_enter_applies_and_space_opens_all_variants`, `dialog_tab_dropdown_arrows_change_the_focused_choice`, `dialog_tab_dropdown_wraps_then_returns_to_its_parent_dialog` |
+| UI-D | Enter-to-OK and Space-to-open for indexed dropdowns, picked-value dropdowns, custom menus, and searchable dropdowns. Closed arrows still work; indexed menus start at the current choice, wrap with Up/Down, ignore Left/Right, confirm/close with Space or Enter, and cancel with Escape. Tab/Shift+Tab dismiss all four menu variants and reach the next/previous form control. | Same file: `dialog_keyboard_closed_dropdown_enter_applies_and_space_opens_all_variants`, `dialog_tab_dropdown_arrows_change_the_focused_choice`, `dialog_tab_dropdown_closes_and_leaves_in_both_directions`, `dropdown_open_menu_starts_at_current_wraps_and_space_confirms` |
 | UI-B | Plain/mixed, grid and full-row checkboxes: Space toggles, Enter preserves the value and applies; disabled and mouse behavior remain correct. | [checks_tests.rs](../crates/ui-egui/src/ui_kit/checks_tests.rs): `checkbox_keyboard_pointer_disabled_and_mixed`, `checkbox_variants_use_space_to_toggle_and_enter_to_apply_the_dialog` |
 | UI-S | Text and icon segments: Enter preserves selection/applies, Space selects, all four arrows select. Disabled choices are skipped; boundary arrows retain focus in the group. | [choice_tests.rs](../crates/ui-egui/src/ui_kit/choice_tests.rs): `segmented_space_and_arrows_choose_while_enter_applies_the_dialog`, `segmented_arrows_skip_disabled_options_and_stay_in_the_group` |
 | UI-N | Numeric selection preserves mm/cm/degree/inch units, negative/decimal/comma-decimal values and leading Unicode whitespace; expressions select as a whole. Quantity arrows are skipped by Tab but still work with the mouse. | [fields_tests.rs](../crates/ui-egui/src/ui_kit/fields_tests.rs): `tab_selects_the_number_and_typing_preserves_units`, `tab_skips_count_arrows_in_both_directions_and_pointer_still_steps` |
@@ -116,8 +119,11 @@ Chamfer, and Extrude. Use the remaining combinations when their controls exist.
   the previous selection. Separately test Space and arrows, including disabled
   options and both ends of the group.
 - [ ] On a closed dropdown, Enter applies without opening it. Reopen the dialog,
-  use Space to open the menu, use arrows/Enter to select, then Tab back into the
-  parent form. Escape closes a popup before cancelling the form.
+  use Space to open the menu and verify the current value is highlighted. Up/Down
+  wraps, Left/Right leaves the highlight alone, and Space/Enter confirms and
+  closes. Reopen and check Tab/Shift+Tab dismisses without committing a pending
+  choice and reaches the next/previous form control. Escape cancels the popup
+  before cancelling the form.
 - [ ] Open/close Options, Advanced, Variable Radius and Direction 2 sections.
   Check collapsed and disabled fields are skipped and newly shown fields join
   the order. Change a dropdown that adds/removes fields, such as Extrude's extent
@@ -142,6 +148,7 @@ Chamfer, and Extrude. Use the remaining combinations when their controls exist.
 From the repository root:
 
 ```sh
+cargo test --profile ci -p solidcraft-ui-egui --lib dropdown
 cargo test --profile ci -p solidcraft-ui-egui --lib dialog_keyboard
 cargo test --profile ci -p solidcraft-ui-egui --lib dialog_tab_
 cargo test --profile ci -p solidcraft-ui-egui --lib ui_kit
