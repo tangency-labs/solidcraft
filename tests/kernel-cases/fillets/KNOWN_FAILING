@@ -8,5 +8,3 @@
 5158-fillet-round-just-past-a-10mm-face SMLib status 1001: a convex round 0.01 past its face is not yet built by subtraction (10.0001-10.04 open)
 9-fillet-corner-curvature-with-reduce-fit not supported yet: solid.fillet builds corner g2 with the exact fit only
 9-fillet-corner-curvature-with-taper-fit not supported yet: solid.fillet builds corner g2 with the exact fit only
-9-fillet-corner-r1-curvature-default-setback continuity g1: the g2 corner patch seams G1 at the corner point, not G2
-9-fillet-corner-r5-curvature-default-setback continuity g1: the g2 corner patch seams G1 at the corner point, not G2

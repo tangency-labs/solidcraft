@@ -58,19 +58,21 @@ fn a_pocket_is_material_only_the_plain_box_has() {
     let g = &rs[0];
     assert_eq!(g["side"], "only_in_a");
     assert_eq!(g["material_of"], "A");
-    assert!(close(f(&g["volume_mm3"]), 40.0, 0.01), "{g}");
+    // Measured exactly, on the cut a − b: the pocket's own volume, box and centre.
+    assert_eq!(g["measured_by"], "boolean", "{g}");
+    assert!(close(f(&g["volume_mm3"]), 40.0, 1e-9), "{g}");
     assert!((f(&g["max_deviation_mm"]) - 0.5).abs() < 1e-6, "{g}");
     let (lo, hi) = (&g["bbox"]["min"], &g["bbox"]["max"]);
     for (k, (want_lo, want_hi)) in [(10.0, 20.0), (10.0, 18.0), (9.5, 10.0)].into_iter().enumerate() {
-        assert!((f(&lo[k]) - want_lo).abs() < 0.05 && (f(&hi[k]) - want_hi).abs() < 0.05, "{g}");
+        assert!((f(&lo[k]) - want_lo).abs() < 1e-6 && (f(&hi[k]) - want_hi).abs() < 1e-6, "{g}");
     }
     let c = &g["center"];
-    assert!((f(&c[0]) - 15.0).abs() < 0.02 && (f(&c[1]) - 14.0).abs() < 0.02 && (f(&c[2]) - 9.75).abs() < 1e-6, "{g}");
+    assert!((f(&c[0]) - 15.0).abs() < 1e-9 && (f(&c[1]) - 14.0).abs() < 1e-9 && (f(&c[2]) - 9.75).abs() < 1e-9, "{g}");
     // The pocket's floor and walls, and a's top.
     assert_eq!(g["faces_b"].as_array().map(Vec::len), Some(5), "{g}");
     assert_eq!(g["faces_a"].as_array().map(Vec::len), Some(1), "{g}");
     assert!(close(f(&r["difference"]["volume_mm3"]), -40.0, 1e-6), "{}", r["difference"]);
-    assert!(close(f(&r["only_in_a"]["volume_mm3"]), 40.0, 0.01));
+    assert!(close(f(&r["only_in_a"]["volume_mm3"]), 40.0, 1e-9));
     assert_eq!(r["only_in_b"]["regions"], 0);
     // The other way round, the same material is only in b.
     let r = run(&mut s, "inspect.compare", json!({"a": "A (2)", "b": "A"}));
@@ -88,7 +90,7 @@ fn a_boss_is_material_only_the_box_with_it_has() {
     let rs = regions(&r);
     assert_eq!(rs.len(), 1, "{r}");
     assert_eq!(rs[0]["side"], "only_in_b");
-    assert!(close(f(&rs[0]["volume_mm3"]), 60.0, 0.01), "{}", rs[0]);
+    assert!(close(f(&rs[0]["volume_mm3"]), 60.0, 1e-9), "{}", rs[0]);
     assert!((f(&rs[0]["max_deviation_mm"]) - 2.0).abs() < 1e-6);
     assert!(close(f(&r["difference"]["volume_mm3"]), 60.0, 1e-6));
     // Coloured green: the boss's top and four sides, all of them beyond the tolerance; not a's top,
@@ -102,6 +104,27 @@ fn a_boss_is_material_only_the_box_with_it_has() {
     let r = run(&mut s, "inspect.compare", json!({"color": {"only_in_b": "#0000ff"}}));
     assert_eq!(r["colored_faces"], 5);
     assert_eq!(s.doc.appearances.faces.iter().filter(|x| x.look.color == [0, 0, 255]).count(), 5);
+}
+
+#[test]
+fn a_taller_box_has_a_slab_only_it_has() {
+    // b is 5 mm taller on the same footprint: b − a is the slab z 20..25, 40 x 30 x 5 = 6000 mm³
+    // at (20, 15, 22.5), sharing four side faces and the bottom with a. Exact, from the cut.
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 20, "body_name": "A"}));
+    run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 25, "body_name": "B"}));
+    let r = run(&mut s, "inspect.compare", json!({"a": "A", "b": "B"}));
+    let rs = regions(&r);
+    assert_eq!(rs.len(), 1, "{r}");
+    let g = &rs[0];
+    assert_eq!((g["side"].as_str(), g["measured_by"].as_str()), (Some("only_in_b"), Some("boolean")), "{g}");
+    assert!(close(f(&g["volume_mm3"]), 6000.0, 1e-9), "{g}");
+    let c = &g["center"];
+    assert!((f(&c[0]) - 20.0).abs() < 1e-9 && (f(&c[1]) - 15.0).abs() < 1e-9 && (f(&c[2]) - 22.5).abs() < 1e-9, "{g}");
+    assert!((f(&g["bbox"]["min"][2]) - 20.0).abs() < 1e-6 && (f(&g["bbox"]["max"][2]) - 25.0).abs() < 1e-6, "{g}");
+    assert!(close(f(&r["only_in_b"]["volume_mm3"]), 6000.0, 1e-9), "{r}");
+    assert_eq!(f(&r["only_in_a"]["volume_mm3"]), 0.0);
+    assert_eq!(r["warnings"], json!([]), "{r}");
 }
 
 /// A 100 x 60 sheet-metal plate with a 20 mm flange along y = 0 and a 5 mm hole at (x, 40).
@@ -131,9 +154,10 @@ fn a_hole_moved_2_mm_leaves_two_crescents() {
     let crescent = (std::f64::consts::PI * rr * rr - 2.0 * rr * rr * (d / (2.0 * rr)).acos() + d / 2.0 * (4.0 * rr * rr - d * d).sqrt()) * t;
     assert!((crescent - 24.316_34).abs() < 1e-4);
     for g in &rs {
-        assert!(close(f(&g["volume_mm3"]), crescent, 0.02), "{g}");
+        assert_eq!(g["measured_by"], "boolean", "{g}");
+        assert!(close(f(&g["volume_mm3"]), crescent, 1e-6), "{g}");
         let c = &g["center"];
-        assert!((f(&c[1]) - 40.0).abs() < 0.05 && (f(&c[2]) - 1.25).abs() < 0.01, "{g}");
+        assert!((f(&c[1]) - 40.0).abs() < 1e-6 && (f(&c[2]) - 1.25).abs() < 1e-6, "{g}");
         // Material only Before has is where After's hole is (beyond x = 51), and the reverse.
         match g["side"].as_str() {
             Some("only_in_a") => assert!(f(&c[0]) > 51.5, "{g}"),
@@ -179,6 +203,30 @@ fn a_part_and_its_step_round_trips_are_identical() {
     }
 }
 
+/// With a body that encloses no volume (an open tube of four walls) the exact cut can't be made:
+/// every region says so and gives no volume or centre, never an estimate, while the deviation,
+/// which needs no cut, is still measured.
+#[test]
+fn a_region_the_cut_cannot_measure_has_no_volume_and_says_why() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "Block"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Square"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [10, 10]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "surface.extrude", json!({"sketch": "Square", "distance": "10 mm", "name": "Tube", "body_name": "Tube"}));
+    let r = run(&mut s, "inspect.compare", json!({"a": "Block", "b": "Tube"}));
+    assert!(f(&r["deviation"]["max_mm"]).is_finite(), "{r}");
+    let rs = regions(&r);
+    assert!(!rs.is_empty(), "the tube lacks the block's top and bottom: {r}");
+    for g in &rs {
+        assert_eq!(g["measured_by"], "not measured", "{g}");
+        assert!(g["volume_mm3"].is_null() && g["center"].is_null(), "{g}");
+        assert!(g["not_measured"].as_str().is_some_and(|w| w.contains("encloses no volume")), "{g}");
+    }
+    assert!(r["only_in_a"]["volume_mm3"].is_null(), "{r}");
+    assert!(r["verdict"].as_str().is_some_and(|v| v.contains("volume not measured")), "{r}");
+}
+
 #[test]
 fn bad_parameters_are_refused() {
     let mut s = two_boxes();
@@ -207,6 +255,6 @@ fn bad_parameters_are_refused() {
     assert_eq!(r["a"]["name"], "A");
     assert_eq!(r["b"]["name"], "C");
     assert_eq!(r["only_in_a"]["regions"], 1, "{r}");
-    assert!(close(f(&r["only_in_a"]["volume_mm3"]), 12_000.0 - 125.0, 0.01), "{r}");
+    assert!(close(f(&r["only_in_a"]["volume_mm3"]), 12_000.0 - 125.0, 1e-9), "{r}");
     assert!(r["verdict"].as_str().unwrap_or_default().starts_with("1 region differs by more than 0.01 mm"), "{}", r["verdict"]);
 }
