@@ -1503,10 +1503,14 @@ impl CurveOnClassifyCache {
     pub(crate) fn apply_uv_trim_updates(self, b: &mut Brep) -> Result<()> {
         if let Some(snapshot) = &self.snapshot {
             for (id, eu) in snapshot.edgeuses().iter() {
-                if b.edgeuse(id)?.uv_trim_curve.is_none() && eu.uv_trim_curve.is_some() {
-                    b.edgeuse_mut(id)?
-                        .uv_trim_curve
-                        .clone_from(&eu.uv_trim_curve);
+                if b.edgeuse(id)?.uv_trim_curve.is_none() {
+                    if let Some(trim) = eu.uv_trim_curve.as_ref() {
+                        // The trim `SetUVTrimCurve` made on the snapshot, owned by its
+                        // edge use there; an exact copy keeps that owner (a plain
+                        // clone is another object, without owner;
+                        // tangency-labs/solidcore#1678).
+                        b.edgeuse_mut(id)?.uv_trim_curve = Some(trim.clone_for_evaluation()?);
+                    }
                 }
             }
             for (id, e) in snapshot.edges().iter() {

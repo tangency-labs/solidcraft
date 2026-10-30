@@ -7,6 +7,10 @@
 //! rebound them to the target's own naming (the piecewise merge does), so the curve
 //! owner test of `SmEdge::ValidateGeometry` failed. Upstream's owners are pointers, so
 //! the C++ never fails it: a port divergence, fixed unconditionally.
+//!
+//! tangency-labs/solidcore#1678: the same cap then still failed `SmEdgeuse` test #6 on
+//! one edge use: a face classification made its missing UV trim curve on a snapshot
+//! of the B-rep and copied it back with a plain clone, which has no owner.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -75,12 +79,11 @@ fn issue_423_rim_round_edges_pass_the_edge_geometry_check() {
         let expected = 7.0 * PI + PI * PI / 2.0;
         let v = volume(&k, &mut b);
         assert!((v - expected).abs() < 1e-3 * expected, "volume {v}");
+        // The whole check is clean, as the C++ kernel's: no SmBrep (16011) test #61
+        // (an edge fails SmEdge::ValidateGeometry, #423) and no SmEdgeuse (16005)
+        // test #6 (a UV trim curve a face classification made lost its owner, #1678).
         let failed = failures(&mut k, &mut b);
-        // SmBrep (16011) test #61: an edge fails SmEdge::ValidateGeometry.
-        assert!(
-            !failed.contains(&(16011, 61)),
-            "keep {keep}: edge geometry check fails: {failed:?}"
-        );
+        assert_eq!(failed, vec![], "keep {keep}");
     }
 }
 
