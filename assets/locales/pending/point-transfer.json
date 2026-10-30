@@ -1,0 +1,74 @@
+{
+  "en": {
+    "cmd.edit.paste.point_to_point": "Point to Point Paste",
+    "cmd.objects.copy": "Copy Bodies or Component",
+    "cmd.objects.move.point_to_point": "Point to Point Move/Copy",
+    "dialog.anchor.from": "From",
+    "dialog.anchor.to": "To",
+    "dialog.move.free": "Free Move",
+    "dialog.move.point_to_point": "Point to Point"
+  },
+  "de": {
+    "cmd.edit.paste.point_to_point": "Punkt-zu-Punkt einfügen",
+    "cmd.objects.copy": "Körper oder Komponente kopieren",
+    "cmd.objects.move.point_to_point": "Punkt-zu-Punkt verschieben/kopieren",
+    "dialog.anchor.from": "Von",
+    "dialog.anchor.to": "Nach",
+    "dialog.move.free": "Frei verschieben",
+    "dialog.move.point_to_point": "Punkt zu Punkt"
+  },
+  "ja": {
+    "cmd.edit.paste.point_to_point": "点から点へ貼り付け",
+    "cmd.objects.copy": "ボディまたはコンポーネントをコピー",
+    "cmd.objects.move.point_to_point": "点から点へ移動/コピー",
+    "dialog.anchor.from": "移動元",
+    "dialog.anchor.to": "移動先",
+    "dialog.move.free": "自由移動",
+    "dialog.move.point_to_point": "点から点へ"
+  },
+  "ko": {
+    "cmd.edit.paste.point_to_point": "점 대 점 붙여넣기",
+    "cmd.objects.copy": "바디 또는 구성요소 복사",
+    "cmd.objects.move.point_to_point": "점 대 점 이동/복사",
+    "dialog.anchor.from": "시작점",
+    "dialog.anchor.to": "끝점",
+    "dialog.move.free": "자유 이동",
+    "dialog.move.point_to_point": "점 대 점"
+  },
+  "zh": {
+    "cmd.edit.paste.point_to_point": "点到点粘贴",
+    "cmd.objects.copy": "复制实体或组件",
+    "cmd.objects.move.point_to_point": "点到点移动/复制",
+    "dialog.anchor.from": "起点",
+    "dialog.anchor.to": "终点",
+    "dialog.move.free": "自由移动",
+    "dialog.move.point_to_point": "点到点"
+  },
+  "ar": {
+    "cmd.edit.paste.point_to_point": "لصق من نقطة إلى نقطة",
+    "cmd.objects.copy": "نسخ أجسام أو مكوّن",
+    "cmd.objects.move.point_to_point": "نقل/نسخ من نقطة إلى نقطة",
+    "dialog.anchor.from": "من",
+    "dialog.anchor.to": "إلى",
+    "dialog.move.free": "نقل حر",
+    "dialog.move.point_to_point": "من نقطة إلى نقطة"
+  },
+  "he": {
+    "cmd.edit.paste.point_to_point": "הדבקה מנקודה לנקודה",
+    "cmd.objects.copy": "העתקת גופים או רכיב",
+    "cmd.objects.move.point_to_point": "הזזה/העתקה מנקודה לנקודה",
+    "dialog.anchor.from": "מ־",
+    "dialog.anchor.to": "אל",
+    "dialog.move.free": "הזזה חופשית",
+    "dialog.move.point_to_point": "מנקודה לנקודה"
+  },
+  "vi": {
+    "cmd.edit.paste.point_to_point": "Dán từ điểm đến điểm",
+    "cmd.objects.copy": "Sao chép khối hoặc thành phần",
+    "cmd.objects.move.point_to_point": "Di chuyển/sao chép từ điểm đến điểm",
+    "dialog.anchor.from": "Từ",
+    "dialog.anchor.to": "Đến",
+    "dialog.move.free": "Di chuyển tự do",
+    "dialog.move.point_to_point": "Từ điểm đến điểm"
+  }
+}

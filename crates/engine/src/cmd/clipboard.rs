@@ -37,6 +37,7 @@ fn copy(s: &mut Session, p: &Value) -> Result<Value> {
     let names: Vec<String> = copied.iter().map(|f| f.name.clone()).collect();
     s.clipboard = copied;
     s.foreign_copy = Some(std::sync::Arc::new(crate::ForeignCopy::of_features(s)));
+    s.object_clipboard.clear();
     Ok(json!({"copied": names}))
 }
 
@@ -55,7 +56,7 @@ pub(in crate::cmd) fn explicit_planes(p: &mut PlaneRef) {
     }
 }
 
-fn paste(s: &mut Session, p: &Value) -> Result<Value> {
+pub(super) fn paste(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "timeline.paste";
     match p.get("from_design") {
         Some(Value::Bool(true)) => return super::clipboard_foreign::paste(s, p),

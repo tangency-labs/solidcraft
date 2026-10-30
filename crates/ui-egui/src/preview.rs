@@ -454,6 +454,9 @@ pub fn compute(s: &Session, cmds: &[(String, Value)], colors: Colors) -> Job {
                 | "sketch.chamfer.distance_angle"
                 | "sketch.insert_svg"
                 | "sketch.insert_dxf"
+                | "sketch.move"
+                | "edit.paste.point_to_point"
+                | "objects.move.point_to_point"
         ) || command == "construct.plane.along_path"
             || params.get("command").and_then(Value::as_str) == Some("construct.plane.along_path")
     }) {
@@ -738,7 +741,7 @@ pub fn build(before: &ModelState, after: &ModelState, c: Colors) -> Built {
                     let unchanged = old_curves.get(curve.id.as_str()).is_some_and(|previous| {
                         previous.kind == curve.kind
                             && curve.kind.point_ids().iter().all(|i| old.and_then(|s| s.sketch.point(*i)) == sketch.sketch.point(*i))
-                    });
+                    }) && old.is_some_and(|s| s.plane == sketch.plane);
                     if unchanged { None } else { Some(index) }
                 })
                 .collect::<Vec<_>>();
@@ -876,11 +879,10 @@ pub fn paint_sketches(app: &SolveApp, painter: &egui::Painter, proj: &crate::vie
     if app.preview.rolled_back {
         return;
     }
-    if !app
-        .dialog
-        .as_ref()
-        .is_some_and(|d| matches!(d.kind, crate::dialogs::Kind::SketchModify(_) | crate::dialogs::Kind::InsertDrawing(_)) && d.previews())
-    {
+    if !app.dialog.as_ref().is_some_and(|d| {
+        matches!(d.kind, crate::dialogs::Kind::SketchModify(_) | crate::dialogs::Kind::InsertDrawing(_) | crate::dialogs::Kind::PointTransfer(_))
+            && d.previews()
+    }) {
         return;
     }
     let stroke = egui::Stroke::new(2.5, Tokens::get().preview_sketch);
