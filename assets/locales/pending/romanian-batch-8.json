@@ -1,0 +1,33 @@
+{
+  "ro": {
+    "browser.calibrate_click_a": "Faceți clic pe imagine pentru Punctul A sau tastați coordonatele acestuia.",
+    "browser.calibrate_click_b": "Faceți clic pe imagine pentru Punctul B sau tastați coordonatele acestuia.",
+    "help.sketch.construction_line": "Creați o dreaptă de construcție infinită prin două puncte. Folosiți-o pentru a structura o schiță fără a diviza profilurile.",
+    "help.sketch.construction_line.angle": "Creați o dreaptă de construcție infinită sub un unghi față de axa X a schiței. Alegeți punctul și tastați unghiul sau alegeți direcția acestuia.",
+    "help.sketch.construction_line.bisector": "Alegeți două linii drepte ale schiței care se intersectează, apoi una dintre cele două bisectoare. Rezultatul urmărește liniile sursă.",
+    "help.sketch.construction_line.horizontal": "Creați o dreaptă de construcție orizontală infinită printr-un punct. Constrângerea orizontală rămâne valabilă la editările ulterioare.",
+    "help.sketch.construction_line.parallel": "Alegeți o linie dreaptă a schiței, apoi plasați o dreaptă de construcție paralelă infinită. Clic dreapta pentru a alege o altă referință.",
+    "help.sketch.construction_line.perpendicular": "Alegeți o linie dreaptă a schiței, apoi plasați o dreaptă de construcție perpendiculară infinită. Clic dreapta pentru a alege o altă referință.",
+    "help.sketch.construction_line.tangent_at": "Creați o tangentă într-un punct al unui cerc sau arc de cerc ori în capătul unui spline sau al unei curbe conice deschise. Alegeți curba, apoi punctul de tangență.",
+    "help.sketch.construction_line.tangent_external": "Alegeți un cerc sau un arc de cerc, apoi un punct exterior și o soluție de tangentă. Previzualizările arată doar punctele de tangență de pe arcul desenat.",
+    "help.sketch.construction_line.tangent_two": "Alegeți două cercuri sau arce de cerc, apoi o tangentă comună în previzualizare. Punctele de tangență trebuie să se afle pe curbele desenate.",
+    "help.sketch.construction_line.vertical": "Creați o dreaptă de construcție verticală infinită printr-un punct. Constrângerea verticală rămâne valabilă la editările ulterioare.",
+    "prefs.persistent_ribbon_pressed": "Evidențiază comenzile active din panglică",
+    "prefs.persistent_ribbon_pressed_help": "Evidențiază comenzile din panglică cât timp efectele lor sunt active. Dezactivați pentru a păstra aspectul neutru anterior și ajutorul pentru comenzi.",
+    "prefs.sketch_construction_lines": "Scule extinse pentru dreptele de construcție",
+    "prefs.sketch_open_look_at": "Rotește vizualizarea spre schiță la deschiderea ei",
+    "prefs.sketch_open_look_at_note": "Dezactivat: crearea sau editarea unei schițe lasă vizualizarea neschimbată. Comanda Privește spre orientează vizualizarea spre schiță atunci când doriți.",
+    "recovery.discard_all": "Renunță la toate",
+    "recovery.discard_all_detail": "Această acțiune nu poate fi anulată.",
+    "recovery.discard_all_title": "Renunțați la salvările automate ({count})?",
+    "recovery.discard_all_title_one": "Renunțați la 1 salvare automată?",
+    "ui.construction.angle_hint": "Dreaptă de construcție: clic pe un punct, apoi tastați un unghi sau alegeți o direcție",
+    "ui.construction.bisector_hint": "Bisectoare: alegeți două linii drepte care se intersectează, apoi soluția dorită",
+    "ui.construction.common_hint": "Tangentă comună: alegeți două cercuri/arce, apoi soluția dorită",
+    "ui.construction.contact_hint": "Tangentă: alegeți un cerc/arc sau un spline/o curbă conică deschisă, apoi punctul de tangență (curbe de formă liberă: capetele)",
+    "ui.construction.external_hint": "Tangentă: alegeți un cerc sau un arc, un punct exterior, apoi soluția dorită",
+    "ui.construction.free_hint": "Dreaptă de construcție: clic pe două puncte; clic dreapta pentru a relua",
+    "ui.construction.point_hint": "Dreaptă de construcție: clic pe punctul prin care trece",
+    "ui.construction.reference_hint": "Dreaptă de construcție: alegeți o linie dreaptă, apoi un punct; clic dreapta pentru a schimba referința"
+  }
+}
