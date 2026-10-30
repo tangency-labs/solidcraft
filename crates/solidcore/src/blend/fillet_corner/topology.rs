@@ -452,7 +452,15 @@ impl FilletCorner {
                 }
                 if skipped > 0 {
                     let next_edge = edge_of(target, next)?;
-                    if same_convexity_edges_round_vertex(k, target, filleted, next_edge)? {
+                    // An edge reached past the tangent side edge whose own faces meet
+                    // tangentially at the vertex (a bar's flat side running onto its round
+                    // end, below a wall the bar's top meets) has no convexity: it is never
+                    // of the opposite one, so it is the corner's edge
+                    // (tangency-labs/smlib@1ff7353, WR-593).
+                    if (k.fixes.fillet_nx1_tangent_corner_edge
+                        && check_tangential_edgeuse_at_vertex(k, target, next, vertex, tol_deg)?)
+                        || same_convexity_edges_round_vertex(k, target, filleted, next_edge)?
+                    {
                         *need(corner_sides.get_mut(kk), "side index")? = next;
                         *need(same.get_mut(kk), "convexity index")? = true;
                         corner_total -= skipped;

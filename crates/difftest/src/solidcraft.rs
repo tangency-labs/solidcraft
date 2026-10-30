@@ -1442,6 +1442,8 @@ fn enable_fix(k: &mut Kernel, name: &str) -> Result<(), String> {
         "stitch_solid_nests_cavities" => &mut k.fixes.stitch_solid_nests_cavities,
         "sphere_small_circle_not_touching" => &mut k.fixes.sphere_small_circle_not_touching,
         "curve_tight_box_interval_knots" => &mut k.fixes.curve_tight_box_interval_knots,
+        "fillet_nx1_tangent_side_edge" => &mut k.fixes.fillet_nx1_tangent_side_edge,
+        "fillet_nx1_tangent_corner_edge" => &mut k.fixes.fillet_nx1_tangent_corner_edge,
         _ => return Err(format!("unknown `fixes` entry `{name}`")),
     };
     *field = true;
