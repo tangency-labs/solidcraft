@@ -1634,7 +1634,7 @@ fn every_context_target_has_identified_icon_rows_including_submenus() {
         Target::ViewGizmo,
         Target::NamedView { name: "Top".into() },
         Target::Canvas { id: 1 },
-        Target::Section,
+        Target::Section { plane: 1 },
         Target::Folder { component: 0, folder: "bodies".into(), scope: "c0".into() },
         Target::Timeline { feature },
     ] {
@@ -2221,7 +2221,7 @@ fn ui_menu_refuses_a_target_the_design_does_not_have() {
         (json!({"type": "component", "id": 999}), "no component `999`"),
         (json!({"type": "joint", "id": 7}), "no joint `7`"),
         (json!({"type": "timeline", "feature": 999}), "no feature `999`"),
-        (json!({"type": "section"}), "no section"),
+        (json!({"type": "section", "plane": 1}), "no section `1`"),
         (json!({"type": "folder", "component": 0, "folder": "drawings", "scope": "c0"}), "no `drawings` folder of component 0 under `c0`"),
         (json!({"type": "folder", "component": 0, "folder": "bodies", "scope": "o:999"}), "no `bodies` folder of component 0 under `o:999`"),
         (json!({"type": "group", "id": group, "scope": "c7"}), bad_group.as_str()),

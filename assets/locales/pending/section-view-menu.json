@@ -1,50 +1,66 @@
 {
   "en": {
+    "browser.section_plane": "Section {number}",
     "section.add_hint": "The plane joins the section: what lies beyond all of its planes is hidden.",
-    "section.edit_hint": "Edits the section's last plane: its other planes stay as they are.",
+    "section.edit_hint": "Edits one plane of the section: its other planes stay as they are.",
     "ui.section_view": "Section View",
+    "ui.section_view_edit": "Edit Section View",
     "ui.section_view_off": "Turn Off Section View"
   },
   "ar": {
+    "browser.section_plane": "المقطع {number}",
     "section.add_hint": "يُضاف المستوى إلى المقطع: يُخفى ما يقع خلف جميع مستوياته.",
-    "section.edit_hint": "يُعدَّل آخر مستوى في المقطع: تبقى مستوياته الأخرى كما هي.",
+    "section.edit_hint": "يُعدَّل مستوى واحد من المقطع: تبقى مستوياته الأخرى كما هي.",
     "ui.section_view": "عرض المقطع",
+    "ui.section_view_edit": "تعديل عرض المقطع",
     "ui.section_view_off": "إيقاف عرض المقطع"
   },
   "de": {
+    "browser.section_plane": "Schnitt {number}",
     "section.add_hint": "Die Ebene kommt zum Schnitt hinzu: Was jenseits all seiner Ebenen liegt, wird ausgeblendet.",
-    "section.edit_hint": "Bearbeitet die letzte Ebene des Schnitts: Seine übrigen Ebenen bleiben, wie sie sind.",
+    "section.edit_hint": "Bearbeitet eine Ebene des Schnitts: Seine übrigen Ebenen bleiben, wie sie sind.",
     "ui.section_view": "Schnittansicht",
+    "ui.section_view_edit": "Schnittansicht bearbeiten",
     "ui.section_view_off": "Schnittansicht ausschalten"
   },
   "he": {
+    "browser.section_plane": "חתך {number}",
     "section.add_hint": "המישור מצטרף לחתך: מה שנמצא מעבר לכל המישורים שלו מוסתר.",
-    "section.edit_hint": "עורך את המישור האחרון של החתך: שאר המישורים שלו נשארים כפי שהם.",
+    "section.edit_hint": "עורך מישור אחד של החתך: שאר המישורים שלו נשארים כפי שהם.",
     "ui.section_view": "תצוגת חתך",
+    "ui.section_view_edit": "עריכת תצוגת החתך",
     "ui.section_view_off": "כיבוי תצוגת החתך"
   },
   "ja": {
+    "browser.section_plane": "断面 {number}",
     "section.add_hint": "平面をセクションに追加します。すべての平面の外側にある部分が非表示になります。",
-    "section.edit_hint": "セクションの最後の平面を編集します。ほかの平面はそのまま残ります。",
+    "section.edit_hint": "セクションの平面を 1 つ編集します。ほかの平面はそのまま残ります。",
     "ui.section_view": "断面表示",
+    "ui.section_view_edit": "断面表示を編集",
     "ui.section_view_off": "断面表示を解除"
   },
   "ko": {
+    "browser.section_plane": "단면 {number}",
     "section.add_hint": "평면이 단면에 추가됩니다. 모든 평면 너머에 있는 부분이 숨겨집니다.",
-    "section.edit_hint": "단면의 마지막 평면을 편집합니다. 다른 평면은 그대로 유지됩니다.",
+    "section.edit_hint": "단면의 평면 하나를 편집합니다. 다른 평면은 그대로 유지됩니다.",
     "ui.section_view": "단면 보기",
+    "ui.section_view_edit": "단면 보기 편집",
     "ui.section_view_off": "단면 보기 끄기"
   },
   "vi": {
+    "browser.section_plane": "Mặt cắt {number}",
     "section.add_hint": "Mặt phẳng được thêm vào mặt cắt: phần nằm ngoài tất cả các mặt phẳng của nó sẽ bị ẩn.",
-    "section.edit_hint": "Sửa mặt phẳng cuối cùng của mặt cắt: các mặt phẳng khác của nó giữ nguyên.",
+    "section.edit_hint": "Sửa một mặt phẳng của mặt cắt: các mặt phẳng khác của nó giữ nguyên.",
     "ui.section_view": "Hiển thị mặt cắt",
+    "ui.section_view_edit": "Sửa hiển thị mặt cắt",
     "ui.section_view_off": "Tắt hiển thị mặt cắt"
   },
   "zh": {
+    "browser.section_plane": "剖面 {number}",
     "section.add_hint": "该平面将加入剖面：位于其所有平面外侧的部分将被隐藏。",
-    "section.edit_hint": "编辑剖面的最后一个平面：其他平面保持不变。",
+    "section.edit_hint": "编辑剖面的一个平面：其他平面保持不变。",
     "ui.section_view": "剖面视图",
+    "ui.section_view_edit": "编辑剖面视图",
     "ui.section_view_off": "关闭剖面视图"
   }
 }
