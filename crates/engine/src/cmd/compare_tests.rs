@@ -203,6 +203,30 @@ fn a_part_and_its_step_round_trips_are_identical() {
     }
 }
 
+/// With a body that encloses no volume (an open tube of four walls) the exact cut can't be made:
+/// every region says so and gives no volume or centre, never an estimate, while the deviation,
+/// which needs no cut, is still measured.
+#[test]
+fn a_region_the_cut_cannot_measure_has_no_volume_and_says_why() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "Block"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Square"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [10, 10]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "surface.extrude", json!({"sketch": "Square", "distance": "10 mm", "name": "Tube", "body_name": "Tube"}));
+    let r = run(&mut s, "inspect.compare", json!({"a": "Block", "b": "Tube"}));
+    assert!(f(&r["deviation"]["max_mm"]).is_finite(), "{r}");
+    let rs = regions(&r);
+    assert!(!rs.is_empty(), "the tube lacks the block's top and bottom: {r}");
+    for g in &rs {
+        assert_eq!(g["measured_by"], "not measured", "{g}");
+        assert!(g["volume_mm3"].is_null() && g["center"].is_null(), "{g}");
+        assert!(g["not_measured"].as_str().is_some_and(|w| w.contains("encloses no volume")), "{g}");
+    }
+    assert!(r["only_in_a"]["volume_mm3"].is_null(), "{r}");
+    assert!(r["verdict"].as_str().is_some_and(|v| v.contains("volume not measured")), "{r}");
+}
+
 #[test]
 fn bad_parameters_are_refused() {
     let mut s = two_boxes();

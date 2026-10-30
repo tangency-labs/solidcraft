@@ -20,8 +20,8 @@ pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new("inspect.compare", "Com
      (colours the faces that hold a region, red where only a has material and green where only b has: the faces mostly beyond the tolerance, else the \
      one with the largest share; an undo step) → a, b: volume_mm3, area_mm2, center_of_mass, bbox; difference: b − a; \
      deviation: a_to_b, b_to_a (max_mm, mean_mm, at, area_beyond_mm2); regions, largest first: side (only_in_a | only_in_b), volume_mm3, center and bbox (measured_by: \"boolean\": exact, the pieces of a − b or \
-     b − a there, measured as inspect.measure does; \"lines\": integrated along lines through the region, see resolution, when the cut could not be \
-     made, with a warning), area_mm2, max_deviation_mm, at, faces_a, faces_b (face indices, as model.faces lists them); identical; verdict; warnings \
+     b − a there, measured as inspect.measure does; \"not measured\": the cut could not be made, so volume_mm3 and center are null and \
+     not_measured says why, never an estimate), area_mm2, max_deviation_mm, at, faces_a, faces_b (face indices, as model.faces lists them); identical; verdict; warnings \
      (a body whose surface does not enclose what it measures, lines left out, a cut that could not be made). The regions are found from the two \
      surfaces, so near-identical bodies compare too",
 )];
@@ -127,9 +127,8 @@ fn enclosed_volume(m: &solidcraft_geom::Mesh) -> f64 {
 }
 
 /// What makes the comparison less certain: a body whose surface does not enclose what it
-/// measures (open, or faces that failed), `skipped` lines left out of region volumes integrated
-/// along lines.
-fn warnings(bodies: [(&str, &Value, &solidcraft_geom::Mesh); 2], chord: f64, skipped: usize) -> Vec<String> {
+/// measures (open, or faces that failed).
+fn warnings(bodies: [(&str, &Value, &solidcraft_geom::Mesh); 2], chord: f64) -> Vec<String> {
     let mut out = Vec::new();
     for (name, measure, mesh) in bodies {
         let (Some(v), area) = (measure["volume_mm3"].as_f64(), measure["area_mm2"].as_f64().unwrap_or(0.0)) else { continue };
@@ -140,9 +139,6 @@ fn warnings(bodies: [(&str, &Value, &solidcraft_geom::Mesh); 2], chord: f64, ski
                 "`{name}`: its surface encloses {enclosed:.3} mm³ but the body measures {v:.3} mm³: it is open or has faces that failed, so its measures and the regions near the gap are unreliable"
             ));
         }
-    }
-    if skipped > 0 {
-        out.push(format!("{skipped} line(s) through the regions crossed a gap in a surface and were left out of their volumes"));
     }
     out
 }
@@ -237,12 +233,12 @@ fn exact_regions(
         .iter()
         .map(|(side, e)| {
             let (from, tool) = if *side == Side::OnlyInA { ("a", "b") } else { ("b", "a") };
-            format!("the cut {from} − {tool} could not be made ({e}): its regions' volumes are integrated along lines, not exact")
+            format!("the cut {from} − {tool} could not be made ({e}): its regions' volumes are not measured")
         })
         .collect();
     let unmatched = c.regions.iter().zip(&measured).filter(|(r, m)| m.is_none() && !failed.iter().any(|(side, _)| *side == r.side)).count();
     if unmatched > 0 {
-        notes.push(format!("{unmatched} region(s) held no piece of the cut: their volumes are integrated along lines, not exact"));
+        notes.push(format!("{unmatched} region(s) held no piece of the cut: their volumes are not measured"));
     }
     (measured, notes)
 }
@@ -291,63 +287,73 @@ fn compare_bodies(s: &mut Session, p: &Value) -> Result<Value> {
     } else if super::inspect::encloses_volume(&ba.body) && super::inspect::encloses_volume(&bb.body) {
         exact_regions(&ba.body, &bb.body, &c, c.spacing.max(tolerance))
     } else {
-        (vec![None; c.regions.len()], vec!["a body encloses no volume, so the regions' volumes are integrated along lines, not exact".to_string()])
+        (vec![None; c.regions.len()], vec!["a body encloses no volume, so the regions' volumes are not measured".to_string()])
     };
-    let measured = |i: usize| -> (f64, Vec3, Aabb3, &'static str) {
-        match (exact.get(i).copied().flatten(), c.regions.get(i)) {
-            (Some(m), _) => (m.volume, m.center, m.bbox, "boolean"),
-            (None, Some(r)) => (r.volume, r.center, r.bbox, "lines"),
-            (None, None) => (f64::NAN, Vec3::ZERO, Aabb3::EMPTY, "lines"),
-        }
-    };
-    // Largest first, by the volumes as measured.
+    // A region's exact volume, centre and box, or none: never the lines' estimate in its place.
+    let measured = |i: usize| exact.get(i).copied().flatten();
+    // Largest first: by the exact volume, then (unmeasured) by area.
     let mut order: Vec<usize> = (0..c.regions.len()).collect();
-    order.sort_by(|&x, &y| measured(y).0.total_cmp(&measured(x).0));
+    let key = |i: usize| (measured(i).map(|m| m.volume), c.regions.get(i).map_or(0.0, |r| r.area_a + r.area_b));
+    order.sort_by(|&x, &y| match (key(x).0, key(y).0) {
+        (Some(vx), Some(vy)) => vy.total_cmp(&vx),
+        (Some(_), None) => std::cmp::Ordering::Less,
+        (None, Some(_)) => std::cmp::Ordering::Greater,
+        (None, None) => key(y).1.total_cmp(&key(x).1),
+    });
+    let reason = |i: usize| -> String {
+        let side = c.regions.get(i).map(|r| r.side);
+        let mine = |n: &&String| side.is_some_and(|s| n.starts_with(if s == Side::OnlyInA { "the cut a" } else { "the cut b" }));
+        exact_notes.iter().find(mine).or_else(|| exact_notes.last()).cloned().unwrap_or_else(|| "the exact cut gave no piece here".to_string())
+    };
     let axis = |k: usize| ["X", "Y", "Z"].get(k).copied().unwrap_or("?");
     let regions: Vec<Value> = order
         .iter()
         .enumerate()
         .filter_map(|(i, &k)| c.regions.get(k).map(|r| (i, k, r)))
         .map(|(i, k, r)| {
-            let (volume, center, bbox, measured_by) = measured(k);
+            let m = measured(k);
             json!({
                 "index": i + 1,
                 "side": side_name(r.side),
                 "material_of": if r.side == Side::OnlyInA { &na } else { &nb },
-                "volume_mm3": volume,
-                "measured_by": measured_by,
+                "volume_mm3": m.map(|m| m.volume),
+                "measured_by": if m.is_some() { "boolean" } else { "not measured" },
+                "not_measured": if m.is_some() { Value::Null } else { json!(reason(k)) },
                 "area_mm2": r.area_a + r.area_b,
                 "area_a_mm2": r.area_a,
                 "area_b_mm2": r.area_b,
                 "max_deviation_mm": r.max_deviation,
                 "at": r.at,
-                "center": center,
-                "bbox": {"min": bbox.min, "max": bbox.max},
+                "center": m.map(|m| m.center),
+                "bbox": m.map(|m| json!({"min": m.bbox.min, "max": m.bbox.max})).unwrap_or_else(|| json!({"min": r.bbox.min, "max": r.bbox.max})),
                 "faces_a": r.faces_a.iter().map(|x| x.0).collect::<Vec<u32>>(),
                 "faces_b": r.faces_b.iter().map(|x| x.0).collect::<Vec<u32>>(),
                 "resolution": {"along": axis(r.lines.axis), "line_spacing_mm": r.lines.spacing, "lines": r.lines.count, "skipped_lines": r.lines.skipped},
             })
         })
         .collect();
+    // A side's total, or none when one of its regions is not measured.
     let total = |side: Side| {
-        let rs: Vec<f64> = (0..c.regions.len()).filter(|&i| c.regions.get(i).is_some_and(|r| r.side == side)).map(|i| measured(i).0).collect();
+        let rs: Vec<Option<f64>> =
+            (0..c.regions.len()).filter(|&i| c.regions.get(i).is_some_and(|r| r.side == side)).map(|i| measured(i).map(|m| m.volume)).collect();
         // `+ 0.0`: an empty sum is -0.0.
-        (rs.len(), rs.iter().filter(|v| v.is_finite()).sum::<f64>() + 0.0)
+        (rs.len(), rs.iter().copied().sum::<Option<f64>>().map(|v| v + 0.0))
     };
     let ((ca, va), (cb, vb)) = (total(Side::OnlyInA), total(Side::OnlyInB));
     let worst = c.a_to_b.max.max(c.b_to_a.max);
     let identical = c.regions.is_empty() && c.unlisted == 0;
-    let skipped = (0..c.regions.len()).filter(|&i| measured(i).3 == "lines").filter_map(|i| c.regions.get(i)).map(|r| r.lines.skipped).sum();
-    let mut warnings = warnings([(na.as_str(), &measure_a, &mesh_a), (nb.as_str(), &measure_b, &mesh_b)], chord, skipped);
+    let mut warnings = warnings([(na.as_str(), &measure_a, &mesh_a), (nb.as_str(), &measure_b, &mesh_b)], chord);
     warnings.extend(exact_notes);
     let mut verdict = if identical {
         format!("identical within {tolerance} mm (largest deviation {worst:.4} mm)")
     } else {
         let more = if c.unlisted > 0 { format!(" (and {} more, not measured)", c.unlisted) } else { String::new() };
         format!(
-            "{} {} by more than {tolerance} mm: {ca} with material only in `{na}` ({va:.3} mm³), {cb} only in `{nb}` ({vb:.3} mm³){more}",
+            "{} {} by more than {tolerance} mm: {ca} with material only in `{na}` ({}), {cb} only in `{nb}` ({}){more}",
             c.regions.len(),
-            if c.regions.len() == 1 { "region differs" } else { "regions differ" }
+            if c.regions.len() == 1 { "region differs" } else { "regions differ" },
+            va.map_or("volume not measured".to_string(), |v| format!("{v:.3} mm³")),
+            vb.map_or("volume not measured".to_string(), |v| format!("{v:.3} mm³")),
         )
     };
     if !warnings.is_empty() {
