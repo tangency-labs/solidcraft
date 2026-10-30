@@ -132,7 +132,9 @@ pub(crate) fn entity_of_notification_key(
 /// [`notification_key`] in `namespace` is the record's own geometry (upstream's owner
 /// is the record), so it takes the record's name in `b`'s recorded scheme
 /// ([`Brep::naming`](crate::topology::Brep::naming): notification or arena identity)
-/// and the face's tolerance is re-recorded on it. Called when the namespace ends with
+/// and the face's tolerance is re-recorded on it. An edge use's UV trim curve owned
+/// under the edge use's key takes the edge use's notification identity (upstream's owner
+/// is the edge use; `SmEdgeuse::AssertValid` test #6). Called when the namespace ends with
 /// the merge (its records and attributes go with it); a B-rep of another or unknown
 /// scheme is left as it is.
 ///
@@ -186,6 +188,22 @@ pub(crate) fn adopt_namespace_owners(b: &mut Brep, namespace: u32, other: bool) 
         });
         if adopted {
             b.set_geometry_owner_key(EntityRef::Edge(e), Some(own));
+        }
+    }
+    // An edge use's UV trim curve is owned by the edge use (`SmEdgeuse` test #6); one
+    // the merge set under the namespace takes the edge use's own name. Both schemes
+    // name edge uses by their notification identity (the check's keys for an arena
+    // B-rep fall back to it too).
+    if matches!(b.naming(), NamingScheme::Notify | NamingScheme::Arena) {
+        let uses: Vec<_> = b.edgeuses().iter().map(|(id, _)| id).collect();
+        for eu in uses {
+            let merged = notification_key(namespace, other, EntityRef::Edgeuse(eu));
+            if let Some(trim) = b.edgeuse_mut(eu)?.uv_trim_curve.as_mut() {
+                if trim.owner() == Some(merged) {
+                    let own = crate::topology::loopuse::notify_ref(EntityRef::Edgeuse(eu));
+                    trim.set_owner(Some(own), None);
+                }
+            }
         }
     }
     Ok(())
