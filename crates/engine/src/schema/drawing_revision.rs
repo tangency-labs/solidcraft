@@ -7,7 +7,7 @@ use schemars::{JsonSchema, Schema, SchemaGenerator, json_schema};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-/// A revision row, by its id as `drawing.revision.list` gives it.
+/// A revision row, by its id as `drawing.inspect` lists it.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct RowIdParam(pub u64);
 
@@ -97,7 +97,7 @@ pub struct RowResult {
     pub hidden: bool,
 }
 
-/// What `drawing.revision.list` returns, and the other revision commands with it.
+/// What the revision commands return.
 #[derive(Debug, Default, Serialize, JsonSchema)]
 pub struct RevisionsResult {
     /// The row added, changed or deleted.

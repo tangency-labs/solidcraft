@@ -387,14 +387,15 @@ impl RevisionRecord {
         self.rows.iter().rev().find(|r| r.sheet == sheet)
     }
 
-    /// `sheet`'s shown rows as a revision table reads them, in order, each keyed by its id.
+    /// `sheet`'s shown rows as a revision table reads them, in order, each keyed by its id as a file
+    /// writes it.
     pub fn table_rows(&self, sheet: Option<u64>) -> Vec<table::Row> {
         let fields =
             |row: &RevisionRow| Field::ALL.into_iter().filter_map(|f| Some((f.key().to_string(), row.field(f.key())?.to_string()))).collect();
         self.rows
             .iter()
             .filter(|r| r.sheet == sheet && !r.hidden)
-            .map(|r| table::Row { key: r.id.to_string(), kind: RowKind::Part, purchased: false, fields: fields(r) })
+            .map(|r| table::Row { key: crate::ids::encode(r.id), kind: RowKind::Part, purchased: false, fields: fields(r) })
             .collect()
     }
 }

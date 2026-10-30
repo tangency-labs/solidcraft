@@ -581,7 +581,6 @@
   "cmd.drawing_revision_add": "リビジョンを追加",
   "cmd.drawing_revision_delete": "リビジョンを削除",
   "cmd.drawing_revision_edit": "リビジョンを編集",
-  "cmd.drawing_revision_list": "リビジョンを一覧表示",
   "cmd.drawing_set": "図面設定",
   "cmd.drawing_sheet_add": "シートを追加",
   "cmd.drawing_sheet_delete": "シートを削除",

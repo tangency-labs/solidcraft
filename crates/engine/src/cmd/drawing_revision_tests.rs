@@ -33,6 +33,11 @@ fn add(s: &mut Session, set: Value) -> String {
     run(s, ADD, json!({"set": set}))["row"].as_str().unwrap().to_string()
 }
 
+/// The rows `drawing.inspect` lists, and the next revision.
+fn listed(s: &mut Session) -> Value {
+    s.execute("drawing.inspect", &json!({})).unwrap()["revisions"].clone()
+}
+
 fn revisions(reply: &Value) -> Vec<&str> {
     reply["rows"].as_array().unwrap().iter().map(|r| r["revision"].as_str().unwrap()).collect()
 }
@@ -43,16 +48,16 @@ fn revisions(reply: &Value) -> Vec<&str> {
 #[test]
 fn rows_take_the_next_revision_and_keep_what_is_typed() {
     let mut s = drawing_session();
-    assert_eq!(run(&mut s, LIST, json!({})), json!({"rows": [], "next": "1"}));
+    assert_eq!(listed(&mut s), json!({"rows": [], "next": "1"}));
     let steps = s.undo.len();
     let first = add(&mut s, json!({"description": "First issue", "designer": "CW", "date": "2026-10-29"}));
     assert_eq!(s.undo.len(), steps + 1, "one undo step, texts and all");
     let second = add(&mut s, json!({}));
     let third = add(&mut s, json!({}));
-    let listed = run(&mut s, LIST, json!({}));
-    assert_eq!((revisions(&listed), listed["next"].as_str()), (vec!["1", "2", "3"], Some("4")));
+    let shown = listed(&mut s);
+    assert_eq!((revisions(&shown), shown["next"].as_str()), (vec!["1", "2", "3"], Some("4")));
     assert_eq!(
-        listed["rows"][0],
+        shown["rows"][0],
         json!({"row": first, "revision": "1", "description": "First issue", "designer": "CW", "checker": "", "date": "2026-10-29", "hidden": false})
     );
     let edited = run(&mut s, EDIT, json!({"row": third, "set": {"revision": "5", "checker": "JB", "hidden": true}}));
@@ -64,10 +69,10 @@ fn rows_take_the_next_revision_and_keep_what_is_typed() {
     let deleted = run(&mut s, DELETE, json!({"row": second}));
     assert_eq!((revisions(&deleted), deleted["next"].as_str()), (vec!["1", "5"], Some("6")));
     run(&mut s, DELETE, json!({"row": third}));
-    assert_eq!(run(&mut s, LIST, json!({}))["next"], "2", "the highest left is 1");
+    assert_eq!(listed(&mut s)["next"], "2", "the highest left is 1");
     s.execute("edit.undo", &json!({})).unwrap();
     s.execute("edit.undo", &json!({})).unwrap();
-    assert_eq!(revisions(&run(&mut s, LIST, json!({}))), ["1", "2", "5"], "undo puts both back where they were");
+    assert_eq!(revisions(&listed(&mut s)), ["1", "2", "5"], "undo puts both back where they were");
     let record = &s.drawing("test").unwrap().revisions;
     assert_eq!(record.newest(None).map(|r| r.revision.as_str()), Some("5"), "a hidden row is still the newest");
     assert_eq!(record.table_rows(None).len(), 2, "but the table leaves it out");
@@ -93,6 +98,12 @@ fn rows_are_saved_with_the_drawing() {
         *damaged.pointer_mut(path).unwrap_or_else(|| panic!("{path}")) = bad;
         assert!(Drawing::from_json(&damaged.to_string()).is_err(), "{path}");
     }
+    // A record kept per sheet, each row on a sheet of the drawing, keeps its own rules: the drawing refuses it.
+    let mut per_sheet = v.clone();
+    per_sheet["revisions"]["per_sheet"] = json!(true);
+    per_sheet["revisions"]["rows"][0]["sheet"] = v["sheets"][0]["id"].clone();
+    let why = Drawing::from_json(&per_sheet.to_string()).unwrap_err().to_string();
+    assert!(why.contains("one revision record for all its sheets"), "{why}");
     s.execute("file.save", &json!({"path": folder.path("box.solidcraft")})).unwrap();
     let mut opened = Session::default();
     opened.execute("doc.open", &json!({"path": folder.path("box.solidcraft")})).unwrap();

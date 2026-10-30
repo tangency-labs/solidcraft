@@ -1,5 +1,5 @@
 //! A drawing's revision rows (#3874, W31): add, edit and delete them, each one undo step of the
-//! drawing (none when nothing changes), and list them. One revision record covers the whole drawing
+//! drawing (none when nothing changes); `drawing.inspect` lists them. One revision record covers the whole drawing
 //! ([`solidcraft_geom::revision`]): a new row gets the next revision, after the highest the record
 //! has given, and people type the rest. The newest row is the drawing's revision, hidden or not.
 
@@ -21,7 +21,6 @@ const EDIT: &str = "drawing.revision.edit";
 const EDIT_CONTRACT: TypedContract<RevisionEditParams> = TypedContract::new();
 const DELETE: &str = "drawing.revision.delete";
 const DELETE_CONTRACT: TypedContract<RevisionDeleteParams> = TypedContract::new();
-const LIST: &str = "drawing.revision.list";
 
 pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new(ADD, "Add Revision", crate::checked!("drawing.revision.add", ADD_CONTRACT, add))
@@ -45,9 +44,6 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&DELETE_CONTRACT)
         .output(output_schema_for::<RevisionsResult>)
         .params("row: a row's id → {row, rows, next, tags_lost?: the revision tags bound to it, which keep the revision they showed}. Its revision is not given out again. One undo step."),
-    CommandSpec::new(LIST, "List Revisions", list).icon("inspect").in_drawing().noundo().doc_only().output(output_schema_for::<RevisionsResult>).params(
-        "→ {rows: [{row, revision, description, designer, checker, date, hidden}], the oldest first, next: the revision a new row gets}. Read-only.",
-    ),
 ];
 
 fn add(s: &mut Session, p: &Value) -> Result<Value> {
@@ -82,10 +78,6 @@ fn delete(s: &mut Session, p: &Value) -> Result<Value> {
     answer(s, DELETE, RevisionsResult { row: Some(ids::encode(id)), tags_lost: lost.into_iter().map(ids::encode).collect(), ..Default::default() })
 }
 
-fn list(s: &mut Session, _p: &Value) -> Result<Value> {
-    answer(s, LIST, RevisionsResult::default())
-}
-
 /// Sets what `set` gives on row `id`: the warnings for a revision in letters with a letter the
 /// lettering skips.
 fn apply(record: &mut RevisionRecord, id: u64, set: &RowSet, cmd: &str) -> Result<Vec<String>> {
@@ -116,21 +108,22 @@ fn row<'a>(record: &'a RevisionRecord, id: u64, cmd: &str) -> Result<&'a Revisio
 /// `reply` with the drawing's rows and its next revision, as every revision command answers.
 fn answer(s: &Session, cmd: &str, reply: RevisionsResult) -> Result<Value> {
     let record = &s.drawing(cmd)?.revisions;
-    let rows = record
-        .rows()
-        .iter()
-        .map(|r| RowResult {
-            row: ids::encode(r.id),
-            revision: r.revision.clone(),
-            description: r.description.clone(),
-            designer: r.designer.clone(),
-            checker: r.checker.clone(),
-            date: r.date.clone(),
-            hidden: r.hidden,
-        })
-        .collect();
-    let reply = RevisionsResult { rows, next: record.next_revision(None), ..reply };
+    let reply = RevisionsResult { rows: rows(record), next: record.next_revision(None), ..reply };
     serde_json::to_value(reply).map_err(|e| EngineError::Other(e.to_string()))
+}
+
+/// Every row of `record`, the oldest first: what the revision commands and `drawing.inspect` list.
+pub(super) fn rows(record: &RevisionRecord) -> Vec<RowResult> {
+    let row = |r: &RevisionRow| RowResult {
+        row: ids::encode(r.id),
+        revision: r.revision.clone(),
+        description: r.description.clone(),
+        designer: r.designer.clone(),
+        checker: r.checker.clone(),
+        date: r.date.clone(),
+        hidden: r.hidden,
+    };
+    record.rows().iter().map(row).collect()
 }
 
 #[cfg(test)]

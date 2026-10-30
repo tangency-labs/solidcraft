@@ -182,7 +182,7 @@ fn the_title_block_and_the_table_read_the_same_fields() {
     // The table shows the rows not hidden, each field by the same function.
     let rows = record.table_rows(None);
     assert_eq!(rows.len(), 1);
-    assert_eq!(rows[0].key, one.to_string());
+    assert_eq!(rows[0].key, crate::ids::encode(one));
     for f in Field::ALL {
         assert_eq!(rows[0].fields.get(f.key()).map(String::as_str), record.rows()[0].field(f.key()));
     }

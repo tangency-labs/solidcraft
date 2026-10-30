@@ -44,7 +44,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         "drawing: id → deleted: its id; closed when it was open (one undo step of the model)",
     ),
     CommandSpec::new("drawing.inspect", "Inspect Drawing", inspect).in_drawing().icon("inspect").noundo().doc_only().params(
-        "→ {id, name, units, projection, language, properties, sources: [{id}], sheets: [{id, name, size_mm, orientation, dpi, documents, excluded}]}. Read-only.",
+        "→ {id, name, units, projection, language, properties, sources: [{id}], sheets: [{id, name, size_mm, orientation, dpi, documents, excluded}], revisions: {rows: [{row, revision, description, designer, checker, date, hidden}], the oldest first (the newest is the drawing's revision), next: the revision a new row gets}}. Read-only.",
     ),
     CommandSpec::new("drawing.set", "Drawing Settings", set)
         .in_drawing()
@@ -175,6 +175,7 @@ fn inspect(s: &mut Session, _p: &Value) -> Result<Value> {
         "properties": d.properties,
         "sources": d.sources.iter().map(|source| json!({"id": ids::encode(source.id)})).collect::<Vec<_>>(),
         "sheets": sheets,
+        "revisions": {"rows": super::drawing_revision::rows(&d.revisions), "next": d.revisions.next_revision(None)},
     }))
 }
 

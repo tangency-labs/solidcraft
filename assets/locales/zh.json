@@ -581,7 +581,6 @@
   "cmd.drawing_revision_add": "添加版本",
   "cmd.drawing_revision_delete": "删除版本",
   "cmd.drawing_revision_edit": "编辑版本",
-  "cmd.drawing_revision_list": "列出版本",
   "cmd.drawing_set": "绘图设置",
   "cmd.drawing_sheet_add": "添加图纸",
   "cmd.drawing_sheet_delete": "删除图纸",
