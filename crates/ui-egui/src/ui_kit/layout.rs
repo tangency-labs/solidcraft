@@ -212,8 +212,14 @@ pub(crate) fn status_line(ui: &mut Ui, text: &str, tone: StatusTone) -> Response
 }
 
 /// Declarative expression row; retains the field's completion and accepted Enter. Tokens: `row, field`.
+/// Dragging the label sideways changes a literal value (`super::scrub`).
 pub(crate) fn expr_row(ui: &mut Ui, label: &str, value: &mut String) -> bool {
-    row(ui, label, |ui| super::field(ui, value))
+    scrub_row(ui, label, |ui, scrub| {
+        if let Some(scrub) = scrub {
+            super::scrub(ui, scrub, value);
+        }
+        super::field(ui, value)
+    })
 }
 
 /// Whole-number count row with step arrows; retains completion and accepted Enter. Tokens: `row, count_field`.
@@ -222,8 +228,14 @@ pub(crate) fn count_row(ui: &mut Ui, label: &str, value: &mut String, limits: &s
 }
 
 /// Expression row with an empty-value hint. Tokens: `row, hint_field`.
+/// Its label scrubs a literal value as `expr_row`'s does.
 pub(crate) fn hint_row(ui: &mut Ui, label: &str, value: &mut String, hint: &str) -> bool {
-    row(ui, label, |ui| super::hint_field(ui, value, hint))
+    scrub_row(ui, label, |ui, scrub| {
+        if let Some(scrub) = scrub {
+            super::scrub(ui, scrub, value);
+        }
+        super::hint_field(ui, value, hint)
+    })
 }
 
 /// Expression row with an empty-value hint whose value the form checks: with `warning`, the
@@ -275,6 +287,16 @@ pub(crate) fn continuity_tip(allowed: &[Continuity]) -> String {
 
 /// Internal form geometry for controls which need several lines (e.g. text areas).
 pub(super) fn sized_row<R>(ui: &mut Ui, text: &str, height: f32, control: impl FnOnce(&mut Ui) -> R) -> R {
+    row_with(ui, text, height, false, |ui, _| control(ui))
+}
+
+/// A row whose label also senses a drag; the control gets that drag first (None while a
+/// Preferences search hides the row). Tokens: `row`.
+fn scrub_row<R>(ui: &mut Ui, text: &str, control: impl FnOnce(&mut Ui, Option<&Response>) -> R) -> R {
+    row_with(ui, text, row_height(), true, control)
+}
+
+fn row_with<R>(ui: &mut Ui, text: &str, height: f32, scrub: bool, control: impl FnOnce(&mut Ui, Option<&Response>) -> R) -> R {
     let mut passthrough = false;
     if crate::prefs_search::querying(ui) {
         // A row with no label has no words to match; its controls supply them (#9265).
@@ -288,7 +310,7 @@ pub(super) fn sized_row<R>(ui: &mut Ui, text: &str, height: f32, control: impl F
             if unlabelled {
                 crate::prefs_search::push_unlabelled(ui);
             }
-            let result = crate::prefs_search::run_hidden(ui, text, control);
+            let result = crate::prefs_search::run_hidden(ui, text, |ui| control(ui, None));
             if unlabelled {
                 crate::prefs_search::pop_unlabelled(ui);
             }
@@ -298,14 +320,14 @@ pub(super) fn sized_row<R>(ui: &mut Ui, text: &str, height: f32, control: impl F
         crate::prefs_search::push_passthrough(ui);
         passthrough = true;
     }
-    let result = sized_row_body(ui, text, height, control);
+    let result = sized_row_body(ui, text, height, scrub, control);
     if passthrough {
         crate::prefs_search::pop_passthrough(ui);
     }
     result
 }
 
-fn sized_row_body<R>(ui: &mut Ui, text: &str, height: f32, control: impl FnOnce(&mut Ui) -> R) -> R {
+fn sized_row_body<R>(ui: &mut Ui, text: &str, height: f32, scrub: bool, control: impl FnOnce(&mut Ui, Option<&Response>) -> R) -> R {
     let t = Tokens::get();
     let width = dimension(ui.available_width());
     let (rect, _) = ui.allocate_exact_size(vec2(width, height), egui::Sense::hover());
@@ -317,7 +339,7 @@ fn sized_row_body<R>(ui: &mut Ui, text: &str, height: f32, control: impl FnOnce(
     // Measuring takes the original text and prepares it the same way, so column and row agree.
     let label_width = label_column(ui, text, width);
     let label_rect = egui::Rect::from_min_size(rect.min, vec2(label_width, rect.height()));
-    let help = ui.stack().iter().find_map(|node| node.tags().get_downcast::<String>(super::preferences_small::ROW_HELP)).cloned();
+    let help =ui.stack().iter().find_map(|node| node.tags().get_downcast::<String>(super::preferences_small::ROW_HELP)).cloned();
     if label_width > 0.0 {
         ui.scope_builder(egui::UiBuilder::new().max_rect(label_rect).layout(egui::Layout::left_to_right(egui::Align::Center)), |ui| {
             // Left aligned in the label column, as in the design.
@@ -343,6 +365,11 @@ fn sized_row_body<R>(ui: &mut Ui, text: &str, height: f32, control: impl FnOnce(
             }
         });
     }
+    // Sensed after the label, so a drag on it reaches this rather than the label; a help icon
+    // beside the label keeps its own hover and click.
+    let scrub_width = if help.is_some() { (label_width - t.space_16 - t.space_4).max(0.0) } else { label_width };
+    let scrub_rect = egui::Rect::from_min_size(label_rect.min, vec2(scrub_width, rect.height()));
+    let drag = (scrub && scrub_width > 0.0).then(|| ui.interact(scrub_rect, ui.id().with(("sc_row_scrub", text)), egui::Sense::drag()));
     let gutter = if label_width > 0.0 { label_gap(ui, width) } else { 0.0 };
     let control_rect = egui::Rect::from_min_max(egui::pos2((label_rect.right() + gutter).min(rect.right()), rect.top()), rect.max);
     let result = ui
@@ -355,7 +382,7 @@ fn sized_row_body<R>(ui: &mut Ui, text: &str, height: f32, control: impl FnOnce(
             |ui| {
                 ui.set_clip_rect(ui.clip_rect().intersect(control_rect));
                 ui.spacing_mut().text_edit_width = control_rect.width();
-                control(ui)
+                control(ui, drag.as_ref())
             },
         )
         .inner;
