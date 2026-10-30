@@ -1528,8 +1528,11 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
         let finish_plan =
             sizes.last().and_then(|size| if tab == "SKETCH" || (tab == "MODEL" && editing_in_place) { Some(Plan::full(size)) } else { None });
         let finish_width = finish_plan.as_ref().map_or(0.0, |p| p.width().max(80.0));
+        // The Finish group keeps its own gap before it, so the panels on its left give up room
+        // (collapse) before they would touch it.
+        let finish_gap = if finish_plan.is_some() { 4.0 } else { 0.0 };
         let normal_count = sizes.len().saturating_sub(usize::from(finish_plan.is_some()));
-        let mut plans = fit(sizes.get(..normal_count).unwrap_or_default(), right - 4.0 - px - finish_width);
+        let mut plans = fit(sizes.get(..normal_count).unwrap_or_default(), right - 4.0 - px - finish_width - finish_gap);
         let finish_right = plans.iter().any(|p| p.fit == Fit::More);
         plans.extend(finish_plan);
         crate::scenario::publish_count("toolbar_collapsed", plans.iter().filter(|p| p.fit == Fit::Collapsed).count() as f64);
