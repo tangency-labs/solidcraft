@@ -334,17 +334,6 @@ fn make_topology_from_data(
     r
 }
 
-/// `SmFace::Notify(op, data1, data2, data3)` on face `f` (`None` for a null datum or for
-/// the B-rep, which has no identity here).
-fn face_notify(
-    b: &mut Brep,
-    f: FaceId,
-    op: NotifyOperation,
-    data: [Option<EntityRef>; 3],
-) -> Result<()> {
-    crate::topology::loopuse::face_notify_data(b, f, op, data)
-}
-
 /// `SmFace::SetTolerance(tol, bUpdateOnlyIfLarger, bCascadeToBndries)` (`SM_USE_OLDTOL`).
 fn face_set_tolerance(
     b: &mut Brep,
@@ -2167,12 +2156,25 @@ pub fn copy_faces(
                 if let Some(nf) = made.face {
                     new_faces.push(nf);
                 }
-                // SmFace::Notify(SM_NO_COPY, pNewFace, pDestinationBrep, this)
-                face_notify(
+                // SmFace::Notify(SM_NO_COPY, pNewFace, pDestinationBrep, this), through
+                // the caller's records and attributes (the B-reps have no identity
+                // here). Both faces are SmTopology objects upstream, the new one with
+                // the default record its constructor gives it, so a face the caller
+                // has no record for gets one (#1628: a fresh empty map failed as soon
+                // as the new face's identity differed from the source face's).
+                let this = (env.key_of)(EntityRef::Face(f));
+                let new_face = made.face.map(this_face);
+                env.records.or_default(this.key);
+                if let Some(nf) = new_face {
+                    env.records.or_default(nf.key);
+                }
+                crate::topology::face::p3::notify(
                     src,
                     f,
+                    env,
+                    None,
                     NotifyOperation::Copy,
-                    [made.face.map(EntityRef::Face), None, None],
+                    [new_face, None, None],
                 )?;
             }
             Err(e) if e.is_unported() => return Err(e),

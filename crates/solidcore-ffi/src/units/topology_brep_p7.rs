@@ -15,7 +15,7 @@
 //! | `MakeFaceWithCurves`| `surface u0 v0 u1 v1 orient region_null crv_on_surf nloops count* has3d has_uv ncurves (curve3d? curveuv? orient)* npts pt[3]*` | `-2 \| status [face shell region counts]` (`-2`: `crv_on_surf` TRUE with 3D but no UV curves, where upstream dereferences the null UV array) |
 //! | `MakeFace`          | `kind side orient region_null` (`kind` 0: null surface, 1: a square wire loop on `z = 0`) | `-3 \| status [face shell region counts]` (`-3`: the square's lines cannot be made) |
 //! | `Glue`              | `e1 e2 orient gap nesting`, B-rep block | `0 (-2 \| status counts edge_tols vertex_tols)` (tolerances sorted) (`-2`: `SM_OT_SAME`, equal intervals and one edge without curve) (`-1 status` when the B-rep build fails) |
-//! | `Copy`              | `n use_merge`, B-rep block | `0 status nfaces counts` |
+//! | `Copy`              | `n use_merge repeat`, B-rep block | `0 status*repeat nfaces counts` (the faces copied `repeat` times, 1 to [`MAX_COPIES`], into one B-rep; `nfaces` over all copies) |
 //! | `MergeSelf`         | `face tol ncurves (raw curve3d raw curveuv1 raw curveuv2)*`, B-rep block | `0 (-2 \| status nedges counts edges*)` (UV curves 2D) |
 //!
 //! `counts` are the region, shell, face, loop, edge and vertex counts of the B-rep made.
@@ -48,6 +48,8 @@ pub const MAX_DEGREE: usize = 5;
 pub const MAX_COORD: f64 = 1.0e12;
 /// Largest number of curves (and loops, loop points).
 pub const MAX_CURVES: usize = 64;
+/// Largest number of copies of `Copy`.
+pub const MAX_COPIES: usize = 8;
 /// Largest file size of `Read`.
 pub const MAX_BYTES: usize = 1 << 22;
 
@@ -353,6 +355,9 @@ pub fn eval(op: Op, path: &str, input: &[f64]) -> Result<Vec<f64>, FfiError> {
                 Op::Copy => {
                     ar.index(1 << 20)?;
                     ar.flag()?;
+                    if ar.index(MAX_COPIES)? == 0 {
+                        return Err(bad("no copy"));
+                    }
                 }
                 _ => {
                     if ar.index(1 << 20)? >= n_f {
@@ -422,7 +427,7 @@ fn merge_self_curves(input: &[f64]) -> Result<usize, FfiError> {
 fn n_args(op: Op, input: &[f64]) -> Result<usize, FfiError> {
     Ok(match op {
         Op::Glue => 5,
-        Op::Copy => 2,
+        Op::Copy => 3,
         Op::MergeSelf => merge_self_curves(input)?,
         _ => 0,
     })

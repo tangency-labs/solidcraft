@@ -284,21 +284,27 @@ void p7_glue(SmBrep* b, Graph& g, Rd& rd, std::vector<double>& o)
     p7_put_tolerances(o, b);
 }
 
-// `n use_merge`, B-rep block: the first `n` faces (in traversal order) copied into a new
-// B-rep. Output `status nfaces counts_of_destination`.
+// `n use_merge repeat`, B-rep block: the first `n` faces (in traversal order) copied
+// `repeat` times into one new B-rep. Output `status... nfaces counts_of_destination`
+// (one status per copy, the new faces of all copies).
 void p7_copy(SmBrep* b, Graph& g, Rd& rd, std::vector<double>& o)
 {
     int64_t n = rd.idx();
     SmBoolean merge = rd.bflag();
+    int64_t repeat = rd.idx();
     SmTArray<SmFace*> faces;
     for (int64_t i = 0; i < n && i < (int64_t)g.faces.size(); i++)
         faces.Add(g.faces[(size_t)i]);
     Built dest;
     dest.brep = new (the_context()) SmBrep();
     SmTArray<SmFace*> nfs;
-    SmStatus s = b->CopyFaces(faces, dest.brep, &nfs, merge);
-    o.push_back(st(s));
-    o.push_back((double)nfs.GetSize());
+    double made = 0;
+    for (int64_t r = 0; r < repeat; r++) {
+        // (CopyFaces resets the new-face list first)
+        o.push_back(st(b->CopyFaces(faces, dest.brep, &nfs, merge)));
+        made += (double)nfs.GetSize();
+    }
+    o.push_back(made);
     p7_put_counts(o, dest.brep);
 }
 
@@ -424,7 +430,7 @@ void p7_merge_self(SmBrep* b, Graph& g, Rd& rd, const SelfCurves& cs, std::vecto
 void p7_brep_op(int32_t op, Rd& rd, const char* path, std::vector<double>& o)
 {
     // the op's arguments come first, then the B-rep block
-    int64_t n_args = op == OP_GLUE ? 5 : 2;
+    int64_t n_args = op == OP_GLUE ? 5 : op == OP_COPY ? 3 : 2;
     std::vector<double> args;
     for (int64_t i = 0; i < n_args; i++)
         args.push_back(rd.num());

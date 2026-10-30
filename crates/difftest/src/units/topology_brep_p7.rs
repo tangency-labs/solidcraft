@@ -203,6 +203,10 @@ enum Inputs {
         brep: BrepIn,
         n: u64,
         merge: bool,
+        /// How many times the faces are copied into the same destination (#1628: the
+        /// copies after the first go into a B-rep that already has faces).
+        #[serde(default = "one_copy")]
+        repeat: u64,
     },
     MergeSelf {
         brep: BrepIn,
@@ -211,6 +215,11 @@ enum Inputs {
         #[serde(default)]
         curves: Vec<SelfCurveIn>,
     },
+}
+
+/// One copy (cases written before `repeat` existed).
+fn one_copy() -> u64 {
+    1
 }
 
 /// One self-intersection curve of `merge_self`: its 3D curve and its (2D) UV curves on
@@ -556,8 +565,13 @@ fn encode(i: &Inputs) -> Result<(Op, String, Vec<f64>), HarnessError> {
             path = shared::path_of(brep)?;
             Op::Glue
         }
-        Inputs::Copy { brep, n, merge } => {
-            v.extend([*n as f64, flag(*merge)]);
+        Inputs::Copy {
+            brep,
+            n,
+            merge,
+            repeat,
+        } => {
+            v.extend([*n as f64, flag(*merge), *repeat as f64]);
             v.extend(brep_block(brep)?);
             path = shared::path_of(brep)?;
             Op::Copy
@@ -1227,27 +1241,37 @@ fn rust_record(k: &mut Kernel, i: &Inputs, ex: Option<&[f64]>) -> Record {
             o.extend(brep_tolerances(&b));
             Ok(o)
         }
-        Inputs::Copy { n, merge, .. } => {
+        Inputs::Copy {
+            n, merge, repeat, ..
+        } => {
             let ex = ex.ok_or_else(|| hfail("no export"))?;
             let (mut b, _) = shared::import(ex)?;
             let faces: Vec<FaceId> = b.faces().ids().take(*n as usize).collect();
             let (mut dest, _) = native_brep()?;
-            let mut records = solidcore::topology::topology::NotifyRecords::new();
-            let mut attrs = AttributeStore::default();
-            let mut env = ed::NotifyEnv {
-                records: &mut records,
-                attributes: &mut attrs,
-                context: None,
-                key_of: &key_of,
-            };
-            let r = p7::copy_faces(k, &mut b, &faces, &mut dest, *merge, &this_face, &mut env);
-            // (a face that could not be copied makes upstream's status SM_ERR; the copies
-            // made are kept)
-            let s = match &r {
-                Ok((_, false)) => f64::from(solidcore::error::SM_ERR),
-                _ => status(&r)?,
-            };
-            let mut o = vec![0.0, s, r.as_ref().map_or(0, |(f, _)| f.len()) as f64];
+            let mut o = vec![0.0];
+            let mut made = 0;
+            // (each copy notifies through records of its own, as a caller building a
+            // fresh environment per call does)
+            for _ in 0..*repeat {
+                let mut records = solidcore::topology::topology::NotifyRecords::new();
+                let mut attrs = AttributeStore::default();
+                let mut env = ed::NotifyEnv {
+                    records: &mut records,
+                    attributes: &mut attrs,
+                    context: None,
+                    key_of: &key_of,
+                };
+                let r = p7::copy_faces(k, &mut b, &faces, &mut dest, *merge, &this_face, &mut env);
+                // (a face that could not be copied makes upstream's status SM_ERR; the
+                // copies made are kept)
+                let s = match &r {
+                    Ok((_, false)) => f64::from(solidcore::error::SM_ERR),
+                    _ => status(&r)?,
+                };
+                o.push(s);
+                made += r.as_ref().map_or(0, |(f, _)| f.len());
+            }
+            o.push(made as f64);
             o.extend(brep_counts(&dest));
             Ok(o)
         }
@@ -1843,6 +1867,7 @@ fn gen_inputs(rng: &mut Rng) -> Inputs {
             brep: shared::gen_brep(rng),
             n: rng.below(8),
             merge: rng.chance(0.5),
+            repeat: 1,
         },
         _ => Inputs::MakeFace {
             kind: rng.below(2) as u8,
@@ -1961,6 +1986,25 @@ impl UnitDiff for Runner {
                         },
                         n: 2,
                         merge,
+                        repeat: 1,
+                    },
+                )?;
+            }
+        }
+        // #1628: copies into a destination that already has faces
+        for file in ["plane_square.smb", "disk.smb", "plane_circ.smb"] {
+            for repeat in [2, 3] {
+                push(
+                    &mut v,
+                    format!("copy_repeat{repeat}_{file}"),
+                    &Inputs::Copy {
+                        brep: BrepIn::File {
+                            file: file.to_string(),
+                            rebuild: false,
+                        },
+                        n: 2,
+                        merge: false,
+                        repeat,
                     },
                 )?;
             }
