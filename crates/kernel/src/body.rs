@@ -1351,6 +1351,10 @@ impl Body {
     pub fn parts(&self, groups: &[Vec<usize>]) -> Result<Vec<Body>> {
         let regions = self.record.material_regions();
         let counts = [(self.face_count(), self.edge_count())];
+        // Sources are by face position: a table of another length belongs to another body.
+        if self.face_sources.as_ref().is_some_and(|all| all.len() != self.face_count()) {
+            return Err(KernelError::Invalid("lumps: face source table does not match the body".into()));
+        }
         groups
             .iter()
             .map(|group| {
