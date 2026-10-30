@@ -191,20 +191,25 @@ fn within(a: Vec2, b: Vec2, area: &Aabb2) -> Option<(Vec2, Vec2)> {
 /// A visible line's width on paper until D2 sets widths by kind of line: the thick line of ISO
 /// 128's 0.5 mm line group.
 pub const VISIBLE_MM: f64 = 0.5;
+/// A reference part's line on paper until D2 does: the thin line of the same group.
+pub const REFERENCE_MM: f64 = 0.25;
 
-/// `lines` as the paper scene group of the view `object`: each visible piece one stroke,
-/// [`VISIBLE_MM`] wide, closed when it ends where it starts. Hidden pieces are left out until the
-/// paper scene has dashed lines (V7b).
+/// `lines` as the paper scene group of the view `object`: each visible piece one stroke, closed when
+/// it ends where it starts, reference parts' [`REFERENCE_MM`] wide and under the model's,
+/// [`VISIBLE_MM`] wide. Hidden pieces are left out until the paper scene has dashed lines (V7b).
 pub fn paper_group(lines: &Lines, object: u64) -> Group {
-    let stroke = |piece: &Piece| {
+    let stroke = |piece: &Piece, width_mm: f64| {
         let path: Vec<Seg2> = piece.path.iter().copied().filter_map(drawable).collect();
         let ends_meet = path.first().zip(path.last()).is_some_and(|(first, last)| last.end().dist(first.start()) <= EPS);
         // One straight line never closes on itself, however short.
         let closed = ends_meet && !matches!(path.as_slice(), [Seg2::Line { .. }]);
-        (!path.is_empty()).then_some(Item::Stroke { path, closed, width_mm: VISIBLE_MM })
+        (!path.is_empty()).then_some(Item::Stroke { path, closed, width_mm })
     };
-    let visible = lines.lines.iter().flat_map(|l| &l.pieces).filter(|p| p.visibility == Visibility::Visible);
-    Group { object, kind: ObjectKind::View, items: visible.filter_map(stroke).collect() }
+    let strokes = |reference: bool, width_mm: f64| {
+        let pieces = lines.lines.iter().filter(move |l| l.reference == reference).flat_map(|l| &l.pieces);
+        pieces.filter(|p| p.visibility == Visibility::Visible).filter_map(move |p| stroke(p, width_mm))
+    };
+    Group { object, kind: ObjectKind::View, items: strokes(true, REFERENCE_MM).chain(strokes(false, VISIBLE_MM)).collect() }
 }
 
 /// `seg`, or nothing where it has no length to draw: a line whose ends are one point. An arc too
@@ -411,6 +416,29 @@ mod tests {
         assert!(matches!(chord, Some(Seg2::Line { .. })), "{chord:?}");
         let scene = solidcraft_geom::paper::Scene { size_mm: Vec2::new(420.0, 297.0), groups: vec![group] };
         assert!(scene.validate().is_ok());
+    }
+
+    /// Reference lines come first, whatever order the lines are in, so the model's paint over them,
+    /// and each role has its width.
+    #[test]
+    fn reference_strokes_are_thin_and_under_the_models() {
+        let (a, b) = (Vec2::new(0.0, 0.0), Vec2::new(10.0, 0.0));
+        let line = |reference: bool| ViewLine {
+            shown: 0,
+            reference,
+            source: Source::Edge { edge: 0, tangent: false },
+            pieces: vec![piece(Visibility::Visible, vec![Seg2::Line { a, b }])],
+        };
+        let lines = Lines { lines: vec![line(false), line(true), line(false)], covered: 0, model_chord_mm: 0.01, stats: Stats::default() };
+        let widths: Vec<f64> = paper_group(&lines, 7)
+            .items
+            .iter()
+            .filter_map(|i| match i {
+                Item::Stroke { width_mm, .. } => Some(*width_mm),
+                Item::Fill { .. } => None,
+            })
+            .collect();
+        assert_eq!(widths, [REFERENCE_MM, VISIBLE_MM, VISIBLE_MM]);
     }
 
     /// A view's group past the paper scene's 100,000 records is caught by the scene's own check.

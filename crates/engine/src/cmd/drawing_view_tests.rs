@@ -1048,6 +1048,16 @@ fn no_reference_parts_means_the_setting_changes_nothing() {
     assert!(plain["lines"].as_array().unwrap().iter().all(|l| l["reference"] == false), "{plain}");
 }
 
+/// The snapshot's scene draws reference parts as saved views do: thin, and first.
+#[test]
+fn a_scene_draws_reference_parts_thin_under_the_model() {
+    let (mut s, _) = plate_and_block(5.0);
+    let v = snap(&mut s, json!({"view": "top", "scale": "1:1", "scene": true, "reference_margin_mm": 20}));
+    let widths: Vec<f64> = strokes(&v).iter().map(|(_, _, width)| *width).collect();
+    let thin = widths.iter().take_while(|w| **w == crate::drawing_view::REFERENCE_MM).count();
+    assert!(thin > 0 && widths[thin..].iter().all(|w| *w == crate::drawing_view::VISIBLE_MM), "{widths:?}");
+}
+
 /// Hidden reference lines wait for dashed lines on paper as the model's do.
 #[test]
 fn a_scene_with_hidden_reference_lines_is_refused() {

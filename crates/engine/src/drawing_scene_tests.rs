@@ -443,4 +443,12 @@ fn a_change_of_reference_parts_redraws_the_views() {
     assert!(stale.len() == 2 && stale.contains(&front) && stale.contains(&top), "{stale:?}");
     let after = settled(&mut s, sheet);
     assert_ne!(bytes(&before.scene), bytes(&after.scene));
+    let thin = |scene: &Scene| {
+        let items = scene.groups.iter().filter(|g| g.kind == ObjectKind::View).flat_map(|g| &g.items);
+        items.filter(|i| matches!(i, Item::Stroke { width_mm, .. } if *width_mm == crate::drawing_view::REFERENCE_MM)).count()
+    };
+    assert_eq!(thin(&before.scene), 0);
+    assert!(thin(&after.scene) > 0);
+    let scene = built(&s, sheet);
+    assert_eq!(bytes(&scene.scene), bytes(&after.scene), "the provider and a build draw one thing");
 }
