@@ -6,10 +6,10 @@
 //! curves), a wire edge from a B-spline curve (`CreateWireEdgeFromCurve`), a face from a
 //! B-spline surface or a plane (`CreateFaceFromSurface`), or the wire network of
 //! `prog_test` `my_test_topology`. The Rust side builds a wire edge, face or network
-//! source itself ([`crate::own_builder`], renumbered into the shim's traversal order).
-//! For an `.smb` file it imports the graph the shim exports in traversal order (raw
-//! members, including each vertex use's cached gap states and UV point) into a [`Brep`].
-//! It runs the ported functions on that B-rep; their results are compared as traversal
+//! source itself ([`crate::own_builder`]) and reads an `.smb` file with the Rust reader
+//! ([`crate::own_reader::file_in_order`]), both renumbered into the shim's traversal
+//! order: no C++ export reaches the Rust side. It runs the ported functions on that
+//! B-rep; their results are compared as traversal
 //! indices, flags, statuses and values. `init_gaps` has the C++ side compute the cached
 //! gaps before the op, so that resets are observable.
 //!
@@ -1258,36 +1258,6 @@ fn output(op: &OpIn, body: &[f64]) -> Output {
     }
 }
 
-/// Whether the op's vertex use is on a face whose surface was not imported exactly (an
-/// `SmBSplineSurface` subclass other than `SmPlane`, imported as its B-spline part):
-/// the ops reaching the face's surface would evaluate a different surface, so such
-/// cases are not compared (both sides report `inexact_surface`).
-fn inexact(op: &OpIn, b: &Brep, exact: &[bool]) -> bool {
-    let vu = match op {
-        OpIn::VuQuery { vu }
-        | OpIn::Connected { vu, .. }
-        | OpIn::Gaps { vu, .. }
-        | OpIn::Notify { vu, .. }
-        | OpIn::UvPoint { vu, .. }
-        | OpIn::UvSector { vu, .. }
-        | OpIn::MissingSeam { vu, .. }
-        | OpIn::OnPole { vu } => *vu,
-    };
-    if matches!(
-        op,
-        OpIn::VuQuery { .. } | OpIn::Connected { .. } | OpIn::Notify { .. }
-    ) {
-        return false;
-    }
-    let Ok(Some(fu)) = vu1::faceuse(b, VertexuseId::from_index(vu as u32)) else {
-        return false;
-    };
-    let Ok(Some(f)) = b.faceuse(fu).map(|r| r.face) else {
-        return false;
-    };
-    !exact.get(f.index() as usize).copied().unwrap_or(true)
-}
-
 // ---- C++ side ---------------------------------------------------------------------------
 
 fn run_cpp(i: &Inputs) -> Result<Output, HarnessError> {
@@ -1298,10 +1268,6 @@ fn run_cpp(i: &Inputs) -> Result<Output, HarnessError> {
     let Some(op) = resolve(&i.op, c) else {
         return Ok(Output::err("no_vertexuse"));
     };
-    let (b, exact) = import_raw(&ex)?;
-    if inexact(&op, &b, &exact) {
-        return Ok(Output::err("inexact_surface"));
-    }
     let (code, args) = op_args(&op);
     let mut input = brep_block(i)?;
     input.extend(args);
@@ -1380,47 +1346,55 @@ fn notify_operation(code: u8) -> Result<NotifyOperation, HarnessError> {
     })
 }
 
-/// A Rust B-rep, whether each face's surface is held exactly, and its entity counts.
-type OwnBrep = (Brep, Vec<bool>, [usize; 10]);
+/// A Rust B-rep and its entity counts.
+type OwnBrep = (Brep, [usize; 10]);
 
-/// The Rust B-rep of a case, whether each face's surface is held exactly, and its
-/// entity counts, or the output of a failed build. Shim-built sources are built by the
-/// Rust kernel ([`crate::own_builder`] under `sc_topology_fixture.h`'s conventions);
-/// only `.smb` file sources are still imported from the C++ export ([`import_raw`]).
+/// The Rust B-rep of a case and its entity counts, or the output of a failed build or
+/// read, under `sc_topology_fixture.h`'s conventions: shim-built sources built by the
+/// Rust kernel ([`crate::own_builder`]), `.smb` file sources read by the Rust reader
+/// ([`crate::own_reader::file_in_order`]), both renumbered into the shim's traversal
+/// order. Every face surface is the Rust B-rep's own, exact, so no case is withheld as
+/// an inexact import (the export's analytic surfaces no longer reach the Rust side).
 fn rust_brep(
     i: &Inputs,
 ) -> Result<crate::own_builder::RustBrep<OwnBrep>, HarnessError> {
     use crate::own_builder::{build_as, counts, failed_output, Built, Conventions};
     let mut k = Kernel::default();
     let conv = &Conventions::TOPOLOGY_FIXTURE;
-    match build_as(&mut k, &i.brep, i.validate_only, i.init_gaps, conv)? {
-        Some(Built::Brep(b)) => {
+    let built = if let Some(built) = build_as(&mut k, &i.brep, i.validate_only, i.init_gaps, conv)?
+    {
+        built
+    } else {
+        let BrepIn::File { rebuild, .. } = &i.brep else {
+            return Err(harness("own builder: a non-file source was not built"));
+        };
+        let path = path_of(&i.brep)?;
+        crate::own_reader::file_in_order(
+            &mut k,
+            &path,
+            *rebuild,
+            i.validate_only,
+            i.init_gaps,
+            conv,
+        )?
+    };
+    match built {
+        Built::Brep(b) => {
             let c = counts(&b);
-            Ok(Ok((*b, vec![true; c[3]], c)))
+            Ok(Ok((*b, c)))
         }
-        Some(Built::Failed(e)) => Ok(Err(failed_output(&e))),
-        None => {
-            let ex = export(i)?;
-            let Some(c) = ffi::counts(&ex) else {
-                return Ok(Err(build_failure(&ex)));
-            };
-            let (b, exact) = import_raw(&ex)?;
-            Ok(Ok((b, exact, c)))
-        }
+        Built::Failed(e) => Ok(Err(failed_output(&e))),
     }
 }
 
 fn run_rust(i: &Inputs) -> Result<Output, HarnessError> {
-    let (mut b, exact, c) = match rust_brep(i)? {
+    let (mut b, c) = match rust_brep(i)? {
         Ok(x) => x,
         Err(o) => return Ok(o),
     };
     let Some(op) = resolve(&i.op, c) else {
         return Ok(Output::err("no_vertexuse"));
     };
-    if inexact(&op, &b, &exact) {
-        return Ok(Output::err("inexact_surface"));
-    }
     // The ops read the cached gaps (`IsOnPole`: the vertex/face gap's face UV), so a
     // gap that cannot be refilled is reported, not left at its placeholder.
     if let Err(e) = recalc_gaps(&mut b) {
