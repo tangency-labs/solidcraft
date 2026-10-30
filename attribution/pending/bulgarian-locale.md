@@ -1,0 +1,1 @@
+| assets/locales/bg.json | Yasen-55 | Original translation | MIT OR Apache-2.0 |
