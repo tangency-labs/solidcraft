@@ -1420,11 +1420,22 @@ impl SheetBody {
             let mut v = Vec::new();
             for e in segs {
                 let Seg2::Line { a, b } = *e else {
-                    split_edges += 1;
-                    if split_edges > MAX_FLAT_POINTS {
-                        return Err(flat_budget_error());
+                    // A closed curve (a whole circle is one arc, `Loop2::circle`) in its two
+                    // exact halves: a sewn edge runs between two vertices, and an arc's wall is
+                    // the cylinder through its ends and middle.
+                    let halves = if e.start().dist(e.end()) < LINEAR_TOL {
+                        let (h0, h1) = e.split_half();
+                        vec![h0, h1]
+                    } else {
+                        vec![*e]
+                    };
+                    for h in halves {
+                        split_edges += 1;
+                        if split_edges > MAX_FLAT_POINTS {
+                            return Err(flat_budget_error());
+                        }
+                        v.push(h);
                     }
-                    v.push(*e);
                     continue;
                 };
                 let d = b - a;

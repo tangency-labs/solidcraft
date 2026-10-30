@@ -5,7 +5,7 @@
 //! neighbouring flange), the rim along the bend there, `<flange>:rim.ext0` and `rim.ext1`. A panel is `base` or a flange's tag (`F<feature>.<k>`), so the names
 //! say what each face is and stay with it when sizes change or other flanges come and go.
 
-use solidcraft_geom::{Vec2, Vec3};
+use solidcraft_geom::{Plane, Vec2, Vec3};
 
 use super::SheetBody;
 use crate::{ModelBody, ModelState, apply_point, mat_inverse};
@@ -13,12 +13,33 @@ use crate::{ModelBody, ModelState, apply_point, mat_inverse};
 /// The share of a face's sample points that must agree on a name for the face to take it.
 const AGREE: f64 = 0.8;
 
+/// The sine of the angle within which a flat face's plane faces along a triangle's normal.
+const FACING: f64 = 1e-3;
+
 impl SheetBody {
     /// The readable name of the face of this sheet a point lies on (sheet coordinates, within
     /// `tol`, kept below a quarter of the thickness): a flat face's (see
     /// [`panel_face_at`](Self::panel_face_at)), else a bend's inner or outer face.
     pub fn face_name_at(&self, p: Vec3, tol: f64) -> Option<String> {
         self.panel_face_at(p, tol).map(|(name, _)| name).or_else(|| self.bend_face_at(p, tol)).or_else(|| self.ext_rim_at(p, tol))
+    }
+
+    /// [`face_name_at`](Self::face_name_at) for a point on a face whose normal is `normal` (a
+    /// mesh triangle's, either way round): a flat face's name is taken only where its plane faces
+    /// along `normal`. A rim is as narrow as the sheet is thick, so the centres of its triangles
+    /// can lie within `tol` of the panel's top or bottom face beside it.
+    fn face_name_facing(&self, p: Vec3, normal: Vec3, tol: f64) -> Option<String> {
+        let facing = |plane: &Plane| plane.normal().cross(normal).len() < FACING;
+        match self.panel_face_at(p, tol) {
+            Some((name, plane)) if facing(&plane) => Some(name),
+            Some(_) => self
+                .rim_face_at(p, tol)
+                .filter(|(_, plane)| facing(plane))
+                .map(|(name, _)| name)
+                .or_else(|| self.bend_face_at(p, tol))
+                .or_else(|| self.ext_rim_at(p, tol)),
+            None => self.bend_face_at(p, tol).or_else(|| self.ext_rim_at(p, tol)),
+        }
     }
 
     /// The rim of a flange's panel along its bend line, where the panel runs on past the
@@ -106,12 +127,13 @@ pub fn body_sheet_face_names(st: &ModelState, b: &ModelBody) -> Vec<Option<Strin
     let mut total = vec![0usize; nf];
     for (t, f) in m.triangles.iter().zip(&m.tri_face) {
         let (Some(v), Some(n), Some([a, b2, c])) = (votes.get_mut(*f as usize), total.get_mut(*f as usize), m.tri(t)) else { continue };
+        let Some(normal) = (b2 - a).cross(c - a).normalized() else { continue };
         // At most a few dozen points a face: enough to tell its name, cheap on a fine mesh.
         if *n >= 48 {
             continue;
         }
         *n += 1;
-        if let Some(name) = sheet.face_name_at((a + b2 + c) * (1.0 / 3.0), tol) {
+        if let Some(name) = sheet.face_name_facing((a + b2 + c) * (1.0 / 3.0), normal, tol) {
             match v.iter_mut().find(|(x, _)| *x == name) {
                 Some(x) => x.1 += 1,
                 None => v.push((name, 1)),
