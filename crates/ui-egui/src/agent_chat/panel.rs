@@ -211,7 +211,7 @@ fn floating(app: &mut SolveApp, ui: &mut egui::Ui) {
     let frame = ui_kit::Panel::feature_frame(&ctx, app.ui.layout, side);
     let inner = (vec2(width, height) - frame.total_margin().sum()).max(egui::Vec2::ZERO);
     let panel = ui_kit::Panel::new(tr("ui.assistant"), Id::new("sc_agent_chat_floating"), anchor, available, side, frame).width(width);
-    if let Some(card) = panel.window(&ctx).fixed_size(inner).show(&ctx, |ui| {
+    if let Some(card) = panel.fixed_window(&ctx, inner).show(&ctx, |ui| {
         ui.set_min_size(inner);
         ui.set_max_size(inner);
         ui.set_clip_rect(ui.clip_rect().intersect(Rect::from_min_size(ui.max_rect().min, inner)));
