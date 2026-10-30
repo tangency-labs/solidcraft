@@ -897,6 +897,62 @@ fn hostile_params_never_panic() {
         workers.into_iter().flat_map(|w| w.join().unwrap()).collect()
     });
     assert!(internal.is_empty(), "commands panicked:\n{}", internal.join("\n"));
+    // The merge corner: the plate's top edge rounded where it meets the round at the wall's foot
+    // at both wall ends, at every hostile radius, with the foot round's ends picked too, and with
+    // fits that search or taper.
+    let mut s = merge_corner_session();
+    let edges = json!([[6, 6, 2], [20, 10, 2], [28, 3, 2], [24, -12, 2]]);
+    let with_ends = json!([[6, 6, 2], [20, 10, 2], [28, 3, 2], [24, -12, 2], [0.4393, 2.2929, 2.2929], [20.2929, -19.4142, 2.2929]]);
+    let mut tries: Vec<Value> = hostile_values().into_iter().map(|v| json!({"edges": edges, "radius": v})).collect();
+    tries.extend(hostile_values().into_iter().map(|v| json!({"edges": v, "radius": 0.5})));
+    tries.extend([0.5, 2.1].map(|r| json!({"edges": with_ends, "radius": r})));
+    tries.extend(["reduce", "taper"].map(|fit| json!({"edges": edges, "radius": 2.1, "fit": fit})));
+    let mut internal = Vec::new();
+    for p in tries {
+        match s.execute("solid.fillet", &p) {
+            Err(EngineError::Internal(id, msg)) => internal.push(format!("{id} {p}: {msg}")),
+            Ok(_) => {
+                let _ = s.execute("edit.undo", &json!({}));
+            }
+            Err(_) => {}
+        }
+    }
+    assert!(internal.is_empty(), "the merge corner panicked:\n{}", internal.join("\n"));
+}
+
+/// A plate 2 thick with an L-shaped wall 4 high standing on it, the wall's ends flush with the
+/// plate's sides beneath, the wall's corner rounded 1, the plate's outer corners 3 and the wall's
+/// foot 1: the plate's top edge from one wall end to the other meets the foot's round at both.
+fn merge_corner_session() -> Session {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY"}));
+    let plate = json!([[0, 0], [18, 0], [18, -20], [20, -20], [28, -4], [28, 10], [12, 10], [0, 2]]);
+    run(&mut s, "sketch.line", json!({"points": plate, "closed": true, "infer": false}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"distance": 2}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "offset": 2}));
+    let wall = json!([[0, 0], [18, 0], [18, -20], [20, -20], [20, 2], [0, 2]]);
+    run(&mut s, "sketch.line", json!({"points": wall, "closed": true, "infer": false}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"distance": 4, "operation": "join"}));
+    run(&mut s, "solid.fillet", json!({"edges": [[20, 2, 4]], "radius": 1}));
+    run(&mut s, "solid.fillet", json!({"edges": [[12, 10, 1], [28, 10, 1], [28, -4, 1]], "radius": 3}));
+    run(&mut s, "solid.fillet", json!({"edges": [[10, 2, 2], [19.7071, 1.7071, 2], [20, -10, 2]], "radius": 1}));
+    s
+}
+
+/// The merge corner builds through the commands: the plate's top edge rounded after the wall's
+/// foot, its volume what the two rounds alone take and add less a little at each wall end.
+#[test]
+fn the_merge_corner_builds_through_the_fillet_command() {
+    let mut s = merge_corner_session();
+    let footed = volume(&mut s);
+    run(&mut s, "solid.fillet", json!({"edges": [[6, 6, 2], [20, 10, 2], [28, 3, 2], [24, -12, 2]], "radius": 0.5}));
+    let merged = volume(&mut s);
+    assert!(merged < footed - 1.0 && merged > footed - 5.0, "{footed} {merged}");
+    let state = s.model.state();
+    let body = &state.bodies.first().unwrap().body;
+    assert!(body.validity().is_empty(), "{:?}", body.validity());
 }
 
 /// #6651: a list parameter of the wrong type is refused, not read as an empty list. An empty

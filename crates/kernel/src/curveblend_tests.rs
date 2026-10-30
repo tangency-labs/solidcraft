@@ -6,7 +6,7 @@ use mt::{BoundedCurve, ParametricCurve, ParametricSurface, ParametricSurface3D, 
 use super::*;
 use crate::blend::plane_normal;
 use crate::issue_851_tests::planned_volume;
-use crate::{Body, BoolOp, boolean, cylinder, fillet};
+use crate::{Body, BoolOp, boolean, box_solid, cylinder, fillet};
 
 #[test]
 fn issue_1303_chamfer_open_rim_after_end_chamfer() {
@@ -728,4 +728,1588 @@ fn round_along_long_lines_and_small_turns_measures_its_volume() {
     assert!((m.volume - want).abs() < 1e-5 * want, "{} vs {want}", m.volume);
     // Centred across the bar, as the part is.
     assert!(m.centroid.x.abs() < 1e-3, "centre of mass x {}", m.centroid.x);
+}
+
+/// The area and the first moments (about the corner's two faces) of a round's cross-section on a
+/// square corner, the unit square less the quarter disc of radius 1 about (1, 1), sampled on a
+/// fine grid: `f(s, h)` integrated over it, `s` the distance from one face and `h` from the other.
+fn round_section_integral(f: impl Fn(f64, f64) -> f64) -> f64 {
+    let n = 2000;
+    let step = 1.0 / n as f64;
+    let mut sum = 0.0;
+    for i in 0..n {
+        for j in 0..n {
+            let (s, h) = ((i as f64 + 0.5) * step, (j as f64 + 0.5) * step);
+            if (1.0 - s).powi(2) + (1.0 - h).powi(2) >= 1.0 {
+                sum += f(s, h);
+            }
+        }
+    }
+    sum * step * step
+}
+
+#[test]
+fn round_an_open_rim_after_end_chamfers() {
+    use solidcraft_geom::{Loop2, Plane, Region2, Seg2, Vec2};
+    // The rim of #1303, its inner top edge rounded where the chamfer was: each end of the chain
+    // meets two bevels at a four-face vertex, and the round crosses the seam between them.
+    let rim = Region2 {
+        outer: Loop2 {
+            segs: vec![
+                Seg2::Line { a: Vec2::new(31.0, -15.0), b: Vec2::new(31.0, -11.75) },
+                Seg2::Line { a: Vec2::new(31.0, -11.75), b: Vec2::new(0.0, -11.75) },
+                Seg2::Arc { center: Vec2::ZERO, radius: 11.75, start: -std::f64::consts::FRAC_PI_2, sweep: -std::f64::consts::PI },
+                Seg2::Line { a: Vec2::new(0.0, 11.75), b: Vec2::new(31.0, 11.75) },
+                Seg2::Line { a: Vec2::new(31.0, 11.75), b: Vec2::new(31.0, 15.0) },
+                Seg2::Line { a: Vec2::new(31.0, 15.0), b: Vec2::new(0.0, 15.0) },
+                Seg2::Arc { center: Vec2::ZERO, radius: 15.0, start: std::f64::consts::FRAC_PI_2, sweep: std::f64::consts::PI },
+                Seg2::Line { a: Vec2::new(0.0, -15.0), b: Vec2::new(31.0, -15.0) },
+            ],
+        },
+        holes: vec![],
+    };
+    let plain = crate::extrude(&Plane::XY, &[rim], 0.0, 13.0).unwrap().pop().unwrap();
+    let bevelled = |size: f64| {
+        let ends = [Vec3::new(31.0, 13.375, 13.0), Vec3::new(31.0, -13.375, 13.0), Vec3::new(31.0, 11.75, 8.0), Vec3::new(31.0, -11.75, 8.0)];
+        crate::blend_corner::chamfer(&plain, &ends, size).unwrap()
+    };
+    let body = bevelled(1.0);
+    let picks = [Vec3::new(-11.75, 0.0, 13.0), Vec3::new(15.0, 11.75, 13.0), Vec3::new(15.0, -11.75, 13.0)];
+    let result = fillet(&body, &picks, 1.0).unwrap();
+    assert!(result.validity().is_empty(), "{:?}", result.validity());
+    assert_eq!(result.crossed_face_loops().unwrap(), 0);
+    // A point `s` from the inner wall and `h` below the top is taken away along the two lines
+    // up to the nearer bevel (x + z = 43 above, x - y = 18.25 beside: x = 30 + min(s, h)) and
+    // round the half ring at radius 11.75 + s.
+    // The mesh inside the round takes slightly more than the round does: measured on the same rim
+    // rounded without bevels, its square ends exact, and taken off.
+    let along = round_section_integral(|s, h| 2.0 * (30.0 + s.min(h)) + std::f64::consts::PI * (11.75 + s));
+    let square = round_section_integral(|s, _| 2.0 * 31.0 + std::f64::consts::PI * (11.75 + s));
+    let bias = planned_volume(&plain) - planned_volume(&fillet(&plain, &picks, 1.0).unwrap()) - square;
+    let removed = planned_volume(&body) - planned_volume(&result) - bias;
+    assert!((removed - along).abs() < 0.003, "removed {removed}, expected {along} (mesh bias {bias})");
+    // Each end meets the seam between the bevels where the round crosses it.
+    for side in [1.0, -1.0] {
+        let crossing = result.solid.vertex_iter().map(|v| from_p3(v.point())).find(|p| {
+            let (s, h) = (p.y * side - 11.75, 13.0 - p.z);
+            (p.x - (30.0 + s)).abs() < 1e-6 && (h - s).abs() < 1e-6 && s > 0.0 && s < 1.0
+        });
+        let crossing = crossing.unwrap_or_else(|| panic!("no vertex where the round crosses the bevels' seam on the {side} side"));
+        // On the round: 1 from the axis through (y 12.75, z 12).
+        let (s, h) = (crossing.y * side - 11.75, 13.0 - crossing.z);
+        assert!(((1.0 - s).hypot(1.0 - h) - 1.0).abs() < 1e-5, "{crossing:?}");
+    }
+    assert!(fillet(&body, &picks, 4.0).is_err());
+    // Bevels narrower than where the round meets their seam (0.3 against 1 - 1/sqrt 2 of 1.5):
+    // the round would cross into the end face beyond them. Refused, not built across it.
+    let refused = fillet(&bevelled(0.3), &picks, 1.5).unwrap_err().to_string();
+    assert!(refused.contains("split round end"), "{refused}");
+}
+
+/// A plate (z 0 to 2) with an L-shaped wall standing on it (z 2 to 6), the wall's outer corner
+/// rounded to radius 1: the wall's ends are flush with the plate's sides beneath them, and the
+/// plate's sides run on slanted from there.
+fn wall_on_a_plate() -> Body {
+    use solidcraft_geom::{Loop2, Plane, Region2, Seg2, Vec2};
+    let polygon = |pts: &[(f64, f64)]| Region2 {
+        outer: Loop2 {
+            segs: pts.iter().zip(pts.iter().cycle().skip(1)).map(|(a, b)| Seg2::Line { a: Vec2::new(a.0, a.1), b: Vec2::new(b.0, b.1) }).collect(),
+        },
+        holes: vec![],
+    };
+    let plate = polygon(&[(0.0, 0.0), (18.0, 0.0), (18.0, -20.0), (20.0, -20.0), (28.0, -4.0), (28.0, 10.0), (12.0, 10.0), (0.0, 2.0)]);
+    let wall = polygon(&[(0.0, 0.0), (18.0, 0.0), (18.0, -20.0), (20.0, -20.0), (20.0, 2.0), (0.0, 2.0)]);
+    let plate = crate::extrude(&Plane::XY, &[plate], 0.0, 2.0).unwrap().pop().unwrap();
+    let wall = crate::extrude(&Plane::XY, &[wall], 2.0, 6.0).unwrap().pop().unwrap();
+    let body = boolean(&plate, &wall, BoolOp::Union).unwrap().unwrap();
+    fillet(&body, &[Vec3::new(20.0, 2.0, 4.0)], 1.0).unwrap()
+}
+
+#[test]
+fn round_the_foot_of_a_wall_flush_with_the_plate_sides() {
+    // The foot of the wall (a line, the round at its corner and a line) rounded where it meets
+    // the plate: each end of the chain is a vertex of four faces, the wall's end above the
+    // plate's side flush with it and the plate's slanted side beyond, and the round ends in the
+    // slanted side (the wall's end is where the round touches the wall).
+    let body = wall_on_a_plate();
+    let corner = Vec3::new(19.0 + std::f64::consts::FRAC_1_SQRT_2, 1.0 + std::f64::consts::FRAC_1_SQRT_2, 2.0);
+    let picks = [Vec3::new(10.0, 2.0, 2.0), corner, Vec3::new(20.0, -10.0, 2.0)];
+    let r = 0.5;
+    let result = fillet(&body, &picks, r).unwrap();
+    assert!(result.validity().is_empty(), "{:?}", result.validity());
+    assert_eq!(result.crossed_face_loops().unwrap(), 0);
+    let added = foot_round_added(r);
+    let grown = planned_volume(&result) - planned_volume(&body);
+    assert!((grown - added).abs() < 0.002, "added {grown}, expected {added}");
+    // The round touches the wall's end at its edge with the plate's side beneath: one vertex
+    // there, at the contact (y 2, z 2 + r at x 0; x 20, z 2 + r at y -20).
+    for p in [Vec3::new(0.0, 2.0, 2.0 + r), Vec3::new(20.0, -20.0, 2.0 + r)] {
+        let ids: std::collections::HashSet<_> = result.solid.vertex_iter().filter(|v| from_p3(v.point()).dist(p) < 1e-6).map(|v| v.id()).collect();
+        assert_eq!(ids.len(), 1, "{p:?}");
+    }
+    // The old corner vertices are gone.
+    for p in [Vec3::new(0.0, 2.0, 2.0), Vec3::new(20.0, -20.0, 2.0)] {
+        assert!(!result.solid.vertex_iter().any(|v| from_p3(v.point()).dist(p) < 1e-6), "{p:?}");
+    }
+    // As wide as the wall is high less one: still a valid body. Higher than the wall: refused.
+    let wide = fillet(&body, &picks, 3.0).unwrap();
+    assert!(wide.validity().is_empty(), "{:?}", wide.validity());
+    assert_eq!(wide.crossed_face_loops().unwrap(), 0);
+    assert!(fillet(&body, &picks, 4.5).is_err());
+}
+
+#[test]
+fn round_the_plate_top_edge_up_to_the_wall_ends() {
+    // The plate's outer top edge, from one end of the wall to the other, rounded once its
+    // corners are round: a convex chain whose ends meet the wall standing on the plate. The
+    // seam between the wall's face and its end runs up from the chain's end, in the plane of the
+    // plate's side: the round meets it at the side's contact, and the wall's face runs on down to
+    // the round (the plate beneath the wall is kept).
+    let rounded = 3.0;
+    let mut body = wall_on_a_plate();
+    let outline =
+        [Vec3::new(0.0, 2.0, 0.0), Vec3::new(12.0, 10.0, 0.0), Vec3::new(28.0, 10.0, 0.0), Vec3::new(28.0, -4.0, 0.0), Vec3::new(20.0, -20.0, 0.0)];
+    body = fillet(&body, &outline[1..4].iter().map(|p| *p + Vec3::new(0.0, 0.0, 1.0)).collect::<Vec<_>>(), rounded).unwrap();
+    // Each corner: its turn, the setback of its round along both lines and the arc's middle.
+    let dir = |a: Vec3, b: Vec3| (b - a).normalized().unwrap();
+    let corners: Vec<(f64, f64, Vec3)> = (1..4)
+        .map(|i| {
+            let (a, b) = (dir(outline[i - 1], outline[i]), dir(outline[i], outline[i + 1]));
+            let turn = a.dot(b).clamp(-1.0, 1.0).acos();
+            let inward = (b - a).normalized().unwrap();
+            let centre = outline[i] + inward * (rounded / (std::f64::consts::FRAC_PI_2 - turn / 2.0).sin());
+            (turn, rounded * (turn / 2.0).tan(), centre - inward * rounded)
+        })
+        .collect();
+    let top = Vec3::new(0.0, 0.0, 2.0);
+    let mut picks: Vec<Vec3> = outline.windows(2).map(|w| (w[0] + w[1]) * 0.5 + top).collect();
+    picks.extend(corners.iter().map(|c| c.2 + top));
+    let r = 0.5;
+    let result = fillet(&body, &picks, r).unwrap();
+    assert!(result.validity().is_empty(), "{:?}", result.validity());
+    assert_eq!(result.crossed_face_loops().unwrap(), 0);
+    let removed = edge_round_removed(r);
+    // The mesh inside the round's curve takes a few thousandths more; ends not cut back by the
+    // wall at all would be 0.02 off.
+    let lost = planned_volume(&body) - planned_volume(&result);
+    assert!((lost - removed).abs() < 0.006, "removed {lost}, expected {removed}");
+    // The round meets the seam up the wall's corner at the plate side's contact, 0.5 below the
+    // plate's top: one vertex there at each end, and the old corners are gone.
+    for p in [Vec3::new(0.0, 2.0, 2.0 - r), Vec3::new(20.0, -20.0, 2.0 - r)] {
+        let ids: std::collections::HashSet<_> = result.solid.vertex_iter().filter(|v| from_p3(v.point()).dist(p) < 1e-6).map(|v| v.id()).collect();
+        assert_eq!(ids.len(), 1, "{p:?}");
+    }
+    for p in [Vec3::new(0.0, 2.0, 2.0), Vec3::new(20.0, -20.0, 2.0)] {
+        assert!(!result.solid.vertex_iter().any(|v| from_p3(v.point()).dist(p) < 1e-6), "{p:?}");
+    }
+    // Deeper than the plate is thick (its corners' rounds would take 3): refused at the ends.
+    let refused = fillet(&body, &picks, 2.1).unwrap_err().to_string();
+    assert!(refused.contains("larger than the neighbouring faces"), "{refused}");
+}
+
+/// The ends of the wall in [`wall_on_a_plate`]: the vertex where the wall's corner stands on the
+/// plate, flush with its side; the directions along the wall's end and along its face from there
+/// (both level, away from the corner); the plate's slanted side, the same way; and a point on
+/// the corner above the plate and on the plate's corner beneath it.
+fn flush_corners() -> [(Vec3, Vec3, Vec3, Vec3, Vec3, Vec3); 2] {
+    let n = |x: f64, y: f64| Vec3::new(x, y, 0.0).normalized().unwrap();
+    [
+        (Vec3::new(0.0, 2.0, 2.0), n(0.0, -1.0), n(1.0, 0.0), n(12.0, 8.0), Vec3::new(0.0, 2.0, 4.0), Vec3::new(0.0, 2.0, 1.0)),
+        (Vec3::new(20.0, -20.0, 2.0), n(-1.0, 0.0), n(0.0, 1.0), n(8.0, 16.0), Vec3::new(20.0, -20.0, 4.0), Vec3::new(20.0, -20.0, 1.0)),
+    ]
+}
+
+/// What a round of radius `r` takes off a straight corner of `length` whose faces meet at the
+/// inside angle `alpha`: the section between the faces and the arc touching both.
+fn corner_round_removed(r: f64, alpha: f64, length: f64) -> f64 {
+    r * r * (1.0 / (alpha / 2.0).tan() - (std::f64::consts::PI - alpha) / 2.0) * length
+}
+
+#[test]
+fn round_a_wall_corner_down_to_the_plate_it_stands_flush_on() {
+    // The wall's outer corner at each end stands on the plate, its end flush with the plate's
+    // side beneath, which runs on slanted: the vertical line there is two edges, the wall's corner
+    // and the plate's, with the plate's top between the wall's face and the plate's side. A round
+    // of the wall's corner ends in the plate's top (its end section a quarter disc of the top,
+    // the new edge along the wall's end down to the plate kept); a round of the plate's corner
+    // alone would leave the wall's corner overhanging it, and is refused; both together, or the
+    // plate's after the wall's, leave a ledge of the plate's top between their two ends.
+    let body = wall_on_a_plate();
+    for (v, along_end, along_face, along_side, up, down) in flush_corners() {
+        // The chain stops there: each piece is rounded on its own.
+        for p in [up, down] {
+            let (idx, _) = body.nearest_edge(p, 1e-3).unwrap().unwrap();
+            assert_eq!(crate::fillet_chain(&body, idx).unwrap().len(), 1, "{p:?}");
+        }
+        // The plate's corner's inside angle.
+        let alpha = along_end.dot(along_side).acos();
+        for r in [0.5, 1.0] {
+            let how = format!("{v:?} r {r}");
+            let wall = fillet(&body, &[up], r).unwrap();
+            assert!(wall.validity().is_empty(), "{how}: {:?}", wall.validity());
+            assert_eq!(wall.crossed_face_loops().unwrap(), 0, "{how}");
+            let removed = planned_volume(&body) - planned_volume(&wall);
+            let expected = corner_round_removed(r, std::f64::consts::FRAC_PI_2, 4.0);
+            assert!((removed - expected).abs() < 0.002, "{how}: removed {removed}, expected {expected}");
+            // The corner on the plate stays; the round's contacts reach the plate's top.
+            for p in [v, v + along_end * r, v + along_face * r] {
+                assert_eq!(vertices_at(&wall, p, 1e-6), 1, "{how}: {p:?}");
+            }
+            let refused = fillet(&body, &[down], r).unwrap_err().to_string();
+            assert!(refused.contains("blend that corner first"), "{how}: {refused}");
+            // Together in either order, or one after the other: the same body.
+            let below = corner_round_removed(r, alpha, 2.0);
+            let then = fillet(&wall, &[down], r).unwrap();
+            for (name, both) in
+                [("together", fillet(&body, &[up, down], r).unwrap()), ("reversed", fillet(&body, &[down, up], r).unwrap()), ("after", then.clone())]
+            {
+                assert!(both.validity().is_empty(), "{how} {name}: {:?}", both.validity());
+                assert_eq!(both.crossed_face_loops().unwrap(), 0, "{how} {name}");
+                let removed = planned_volume(&body) - planned_volume(&both);
+                assert!((removed - expected - below).abs() < 0.002, "{how} {name}: removed {removed}, expected {}", expected + below);
+                assert!(same_vertices(&both, &then, 1e-6), "{how} {name}");
+                // The corner is gone; the plate's top keeps a ledge along the wall's end between
+                // the two rounds' contacts.
+                assert_eq!(vertices_at(&both, v, 1e-6), 0, "{how} {name}");
+                let ledge = r / (alpha / 2.0).tan();
+                for p in [v + along_end * r, v + along_end * ledge] {
+                    assert_eq!(vertices_at(&both, p, 1e-6), 1, "{how} {name}: {p:?}");
+                }
+            }
+        }
+        // Chamfered: the same end, a flat one.
+        let flat = crate::chamfer(&body, &[up], 0.5).unwrap();
+        assert!(flat.validity().is_empty(), "{:?}", flat.validity());
+        let removed = planned_volume(&body) - planned_volume(&flat);
+        assert!((removed - 0.5 * 0.5 * 0.5 * 4.0).abs() < 0.002, "chamfer removed {removed}");
+        // As wide as the wall's end: refused or sound; wider: refused.
+        if let Ok(b) = fillet(&body, &[up], 2.0) {
+            assert!(b.validity().is_empty(), "{:?}", b.validity());
+            assert_eq!(b.crossed_face_loops().unwrap(), 0);
+        }
+        assert!(fillet(&body, &[up], 2.5).is_err());
+    }
+}
+
+/// [`wall_on_a_plate`] with the wall's outer top edge (its face's, round the corner) rounded `r`
+/// first, and with `both` its end's top edge at the first end too: rounds the rolling ball fitted.
+fn wall_with_round_top(r: f64, both: bool) -> Body {
+    let body = wall_on_a_plate();
+    let top = fillet(&body, &[Vec3::new(10.0, 2.0, 6.0)], r).unwrap();
+    if both { fillet(&top, &[Vec3::new(0.0, 1.0, 6.0)], r).unwrap() } else { top }
+}
+
+#[test]
+fn round_a_wall_corner_into_earlier_rounds_of_its_top_edges() {
+    // The wall's top edges rounded first, as the rolling ball fits them (the face's runs round
+    // the corner's round): the corner's round of the same radius ends in them at the top as if
+    // all were rounded together, and in the plate's top at the bottom. Where only the face's top
+    // edge is rounded, the two cylinders cut each other along a crease; where the end's top edge
+    // is too, a piece of the ball touching the three faces takes the corner in place of the
+    // mitre between the earlier rounds.
+    let r = 0.5;
+    let quarter = corner_round_removed(r, std::f64::consts::FRAC_PI_2, 1.0) / (r * r);
+    // The crease: the corner's round less where it overlaps the face's round (the two cylinders'
+    // common corner, r³ (5/3 - π/2)).
+    let crease = wall_with_round_top(r, false);
+    let upper = Vec3::new(0.0, 2.0, 4.0);
+    let result = fillet(&crease, &[upper], r).unwrap();
+    assert!(result.validity().is_empty(), "{:?}", result.validity());
+    assert_eq!(result.crossed_face_loops().unwrap(), 0);
+    let removed = planned_volume(&crease) - planned_volume(&result);
+    let expected = quarter * r * r * 4.0 - (5.0 / 3.0 - std::f64::consts::FRAC_PI_2) * r.powi(3);
+    assert!((removed - expected).abs() < 0.002, "crease: removed {removed}, expected {expected}");
+    // The crease ends where the corner's round meets the end's top edge, at the end of the face's
+    // round on the wall's end.
+    assert_eq!(vertices_at(&result, Vec3::new(0.0, 2.0 - r, 6.0), 1e-6), 1);
+    assert_eq!(vertices_at(&result, Vec3::new(0.0, 2.0, 6.0 - r), 1e-6), 0);
+    // The other end too, and with the plate's corner beneath.
+    let other = fillet(&crease, &[Vec3::new(20.0, -20.0, 4.0), Vec3::new(20.0, -20.0, 1.0)], r).unwrap();
+    assert!(other.validity().is_empty(), "{:?}", other.validity());
+    assert_eq!(other.crossed_face_loops().unwrap(), 0);
+    // The ball: the corner's round up to the ball's centre, and the corner of the cube about it
+    // less the ball's eighth beyond what the two earlier rounds left (r³ (2/3 - π/6)).
+    let ball = wall_with_round_top(r, true);
+    for picks in [vec![upper], vec![upper, Vec3::new(0.0, 2.0, 1.0)]] {
+        let result = fillet(&ball, &picks, r).unwrap();
+        assert!(result.validity().is_empty(), "{:?}", result.validity());
+        assert_eq!(result.crossed_face_loops().unwrap(), 0);
+        if picks.len() == 1 {
+            let removed = planned_volume(&ball) - planned_volume(&result);
+            let expected = quarter * r * r * (4.0 - r) + (2.0 / 3.0 - std::f64::consts::FRAC_PI_6) * r.powi(3);
+            assert!((removed - expected).abs() < 0.002, "ball: removed {removed}, expected {expected}");
+        }
+        // The mitre's far end is where the ball touches the wall's top; the corner below it is gone.
+        assert_eq!(vertices_at(&result, Vec3::new(r, 2.0 - r, 6.0), 1e-6), 1);
+        assert_eq!(vertices_at(&result, Vec3::new(0.0, 2.0, 6.0 - r), 1e-6), 0);
+    }
+}
+
+/// The foot of the wall in [`wall_on_a_plate`] rounded `r` (line, the corner's round, line).
+fn round_the_foot(body: &Body, r: f64) -> crate::Result<Body> {
+    let corner = Vec3::new(19.0 + std::f64::consts::FRAC_1_SQRT_2, 1.0 + std::f64::consts::FRAC_1_SQRT_2, 2.0);
+    fillet(body, &[Vec3::new(10.0, 2.0, 2.0), corner, Vec3::new(20.0, -10.0, 2.0)], r)
+}
+
+/// What the round of radius `r` at the foot of the wall in [`wall_on_a_plate`] adds. A point `s`
+/// from the wall and `h` above the plate (in radii) is added along the lines from where the
+/// slanted side passes it (x = 1.5 s r at the first end, y = -20 + 2 s r at the other) to the
+/// corner's round, and round its quarter turn at radius 1 + s r.
+fn foot_round_added(r: f64) -> f64 {
+    round_section_integral(|s, _| {
+        let (x0, y0) = (1.5 * s * r, -20.0 + 2.0 * s * r);
+        (19.0 - x0) + (1.0 - y0) + std::f64::consts::FRAC_PI_2 * (1.0 + s * r)
+    }) * r
+        * r
+}
+
+/// What the round of radius `r` along the plate's top edge of [`plate_with_round_corners`] takes
+/// away. A point `s` in from the plate's side (and `h` below its top) is taken away along the
+/// lines between the corners' rounds and round each corner's turn at the radius `3 - s`, less
+/// where the wall stands: the plane of its face cuts the run back by 1.5 s at the first end (the
+/// line along (12, 8) meeting y = 2) and 2 s at the other (along (8, 16) meeting x = 20).
+fn edge_round_removed(r: f64) -> f64 {
+    let rounded = 3.0;
+    let outline =
+        [Vec3::new(0.0, 2.0, 0.0), Vec3::new(12.0, 10.0, 0.0), Vec3::new(28.0, 10.0, 0.0), Vec3::new(28.0, -4.0, 0.0), Vec3::new(20.0, -20.0, 0.0)];
+    let dir = |a: Vec3, b: Vec3| (b - a).normalized().unwrap();
+    // Each corner's turn and the setback of its round along both lines.
+    let corners: Vec<(f64, f64)> = (1..4)
+        .map(|i| {
+            let turn = dir(outline[i - 1], outline[i]).dot(dir(outline[i], outline[i + 1])).clamp(-1.0, 1.0).acos();
+            (turn, rounded * (turn / 2.0).tan())
+        })
+        .collect();
+    let lines: f64 = outline
+        .windows(2)
+        .enumerate()
+        .map(|(i, w)| {
+            let back = |k: usize| if (1..4).contains(&k) { corners[k - 1].1 } else { 0.0 };
+            w[0].dist(w[1]) - back(i) - back(i + 1)
+        })
+        .sum();
+    let turns: f64 = corners.iter().map(|c| c.0).sum();
+    round_section_integral(|s, _| {
+        let s = s * r;
+        lines + turns * (rounded - s) - 3.5 * s
+    }) * r
+        * r
+}
+
+#[test]
+fn round_the_foot_of_a_wall_as_high_as_its_end_edge() {
+    // The wall's end chamfered at the top: the edge between its face and its end runs from the
+    // plate up to 5. A round of 3 reaches its far end exactly there (the wall's end flush with the
+    // plate's side: the round meets that edge at its contact), using the edge up.
+    let body = crate::blend_corner::chamfer(&wall_on_a_plate(), &[Vec3::new(0.0, 1.0, 6.0)], 1.0).unwrap();
+    for r in [2.999, 3.0] {
+        let result = round_the_foot(&body, r).unwrap_or_else(|e| panic!("r {r}: {e}"));
+        assert!(result.validity().is_empty(), "r {r}: {:?}", result.validity());
+        assert_eq!(result.crossed_face_loops().unwrap(), 0, "r {r}");
+    }
+    assert!(round_the_foot(&body, 3.001).is_err());
+}
+
+/// [`wall_on_a_plate`] with the plate's sides drafted by `angle` (about the plate's top, leaning
+/// outward for a positive angle), the wall's corner rounded 1.
+fn wall_on_a_drafted_plate(angle: f64) -> Body {
+    use solidcraft_geom::{Loop2, Plane, Region2, Seg2, Vec2};
+    let polygon = |pts: &[(f64, f64)]| Region2 {
+        outer: Loop2 {
+            segs: pts.iter().zip(pts.iter().cycle().skip(1)).map(|(a, b)| Seg2::Line { a: Vec2::new(a.0, a.1), b: Vec2::new(b.0, b.1) }).collect(),
+        },
+        holes: vec![],
+    };
+    let plate = polygon(&[(0.0, 0.0), (18.0, 0.0), (18.0, -20.0), (20.0, -20.0), (28.0, -4.0), (28.0, 10.0), (12.0, 10.0), (0.0, 2.0)]);
+    let wall = polygon(&[(0.0, 0.0), (18.0, 0.0), (18.0, -20.0), (20.0, -20.0), (20.0, 2.0), (0.0, 2.0)]);
+    let mut plate = crate::extrude(&Plane::XY, &[plate], 0.0, 2.0).unwrap().pop().unwrap();
+    let neutral = Plane { origin: Vec3::new(0.0, 0.0, 2.0), x: Vec3::X, y: Vec3::Y };
+    plate = crate::draft(&plate, &[Vec3::new(6.0, 6.0, 1.0), Vec3::new(24.0, -12.0, 1.0)], &neutral, -Vec3::Z, angle).unwrap();
+    let wall = crate::extrude(&Plane::XY, &[wall], 2.0, 6.0).unwrap().pop().unwrap();
+    let body = boolean(&plate, &wall, BoolOp::Union).unwrap().unwrap();
+    fillet(&body, &[Vec3::new(20.0, 2.0, 4.0)], 1.0).unwrap()
+}
+
+#[test]
+fn round_the_foot_of_a_wall_over_drafted_plate_sides() {
+    // Drafted 10 degrees, the plate's sides no longer hold the line of the seam up the wall's end:
+    // the round crosses it inside, past the vertex, and the seam runs on to it. Next to nothing
+    // (4e-5 degrees, a modelling error) and the seam is all but in the side's plane: still a
+    // round, at small radii and large.
+    for (degrees, radii) in [(10.0, [0.5, 2.0, 3.5]), (4e-5, [0.05, 0.5, 2.0])] {
+        let body = wall_on_a_drafted_plate(f64::to_radians(degrees));
+        for r in radii {
+            let result = round_the_foot(&body, r).unwrap_or_else(|e| panic!("draft {degrees} r {r}: {e}"));
+            assert!(result.validity().is_empty(), "draft {degrees} r {r}: {:?}", result.validity());
+            assert_eq!(result.crossed_face_loops().unwrap(), 0, "draft {degrees} r {r}");
+            assert!(planned_volume(&result) > planned_volume(&body), "draft {degrees} r {r}");
+        }
+    }
+}
+
+/// [`wall_on_a_plate`] with the plate's three outer corners rounded 3, and points on the lines of
+/// the plate's outer top edge from one end of the wall to the other.
+fn plate_with_round_corners() -> (Body, Vec<Vec3>) {
+    let outline =
+        [Vec3::new(0.0, 2.0, 0.0), Vec3::new(12.0, 10.0, 0.0), Vec3::new(28.0, 10.0, 0.0), Vec3::new(28.0, -4.0, 0.0), Vec3::new(20.0, -20.0, 0.0)];
+    let body = fillet(&wall_on_a_plate(), &outline[1..4].iter().map(|p| *p + Vec3::new(0.0, 0.0, 1.0)).collect::<Vec<_>>(), 3.0).unwrap();
+    (body, outline.windows(2).map(|w| (w[0] + w[1]) * 0.5 + Vec3::new(0.0, 0.0, 2.0)).collect())
+}
+
+/// The number of edges in the smooth chain through the edge of `body` nearest `p`.
+fn chain_at(body: &Body, p: Vec3) -> usize {
+    let all = Body::unique_edges(&body.solid);
+    let (i, _) = body.nearest_edge(p, 1e-3).unwrap().unwrap();
+    crate::blend::smooth_chain(&body.solid, &all[i]).unwrap().len()
+}
+
+#[test]
+fn a_chain_ends_at_the_end_of_an_earlier_round_of_the_other_kind() {
+    // Each round's end runs on smoothly from the other round's edge: the plate's top edge into the
+    // end of the round at the wall's foot (up the plate's side and on up the wall's end), the foot
+    // into the end of the round along the plate's edge (down the wall's face and on down the
+    // plate's side). The rolling ball does not run on there: the chains end where they meet the
+    // earlier round, as they did before it.
+    let (body, outline) = plate_with_round_corners();
+    let foot = Vec3::new(10.0, 2.0, 2.0);
+    // The foot: its two lines and the wall corner's round. The plate's edge: four lines and the
+    // three corners' rounds.
+    assert_eq!(chain_at(&body, foot), 3);
+    assert_eq!(chain_at(&body, outline[0]), 7);
+    for r in [0.5, 1.0] {
+        let footed = round_the_foot(&body, r).unwrap();
+        assert_eq!(chain_at(&footed, outline[0]), 7, "r {r}");
+        let edged = fillet(&body, &outline, r).unwrap();
+        assert_eq!(chain_at(&edged, foot), 3, "r {r}");
+    }
+}
+
+#[test]
+fn a_chain_runs_on_into_an_earlier_round_of_its_own_kind() {
+    // Untouched bodies keep their chains: the wall's foot, and a box's top loop round its rounded
+    // corners. A top edge of a box runs on over the end of an earlier round along the next top edge
+    // (both take material away) and down the box's corner.
+    let foot = Vec3::new(10.0, 2.0, 2.0);
+    assert_eq!(chain_at(&wall_on_a_plate(), foot), 3);
+    let block = box_solid(Vec3::ZERO, Vec3::new(10.0, 8.0, 6.0)).unwrap();
+    let corners = [Vec3::new(0.0, 0.0, 3.0), Vec3::new(10.0, 0.0, 3.0), Vec3::new(10.0, 8.0, 3.0), Vec3::new(0.0, 8.0, 3.0)];
+    assert_eq!(chain_at(&fillet(&block, &corners, 1.0).unwrap(), Vec3::new(5.0, 0.0, 6.0)), 8);
+    let edged = fillet(&block, &[Vec3::new(5.0, 0.0, 6.0)], 1.0).unwrap();
+    assert_eq!(chain_at(&edged, Vec3::new(0.0, 4.0, 6.0)), 3);
+}
+
+/// A wall end of [`wall_on_a_plate`] (and of the bracket at the user's size): `V`, the wall's trace
+/// on the plate leaving it, square to that into the plate's top, and tan of the top's angle there
+/// (between the wall's trace and the plate's side: negative past 90°, infinite at it).
+type WallEnd = (Vec3, Vec3, Vec3, f64);
+
+fn wall_ends() -> [WallEnd; 2] {
+    [(Vec3::new(0.0, 2.0, 2.0), Vec3::X, Vec3::Y, 2.0 / 3.0), (Vec3::new(20.0, -20.0, 2.0), Vec3::Y, Vec3::X, 0.5)]
+}
+
+/// The vertices of the merge corner of the foot's round `ra` and the plate edge's round `rb` at a
+/// wall end (`P*`, where the two contacts on the plate's top cross; `q_W` and `q_S` on the line of
+/// the wall's end, `ra` above and `rb` below the top), and the points where each round alone ended
+/// and the merge has no vertex (`V`; `P'`, where the foot's contact meets the plate's side;
+/// `P''`, where the edge's contact meets the wall's trace).
+fn merge_points((v, w, m, tan): WallEnd, ra: f64, rb: f64) -> ([Vec3; 3], [Vec3; 3]) {
+    let theta = if tan < 0.0 { std::f64::consts::PI + tan.atan() } else { tan.atan() };
+    let (sin, cot) = (theta.sin(), theta.cos() / theta.sin());
+    let p_star = v + w * (rb / sin + ra * cot) + m * ra;
+    ([p_star, v + Vec3::Z * ra, v - Vec3::Z * rb], [v, v + w * (ra * cot) + m * ra, v + w * (rb / sin)])
+}
+
+/// The distinct vertices of `body` within `tol` of `p`.
+fn vertices_at(body: &Body, p: Vec3, tol: f64) -> usize {
+    body.solid.vertex_iter().filter(|v| from_p3(v.point()).dist(p) < tol).map(|v| v.id()).collect::<std::collections::HashSet<_>>().len()
+}
+
+/// A merged body: sound, with one vertex at each of `P*`, `q_W` and `q_S` at both ends, and none
+/// where either round alone ended.
+fn assert_merged(body: &Body, ends: &[WallEnd], (ra, rb): (f64, f64), tol: f64, how: &str) {
+    assert!(body.validity().is_empty(), "{how}: {:?}", body.validity());
+    assert_eq!(body.crossed_face_loops().unwrap(), 0, "{how}");
+    for end in ends {
+        let (corners, gone) = merge_points(*end, ra, rb);
+        for p in corners {
+            assert_eq!(vertices_at(body, p, tol), 1, "{how}: {p:?}");
+        }
+        for p in gone {
+            assert_eq!(vertices_at(body, p, tol), 0, "{how}: {p:?}");
+        }
+    }
+}
+
+/// The edge of `body` from `a` to `b` (either way), and the two faces it joins.
+fn edge_between(body: &Body, a: Vec3, b: Vec3, tol: f64) -> (mt::Edge, Vec<&mt::Face>) {
+    let at = |v: &mt::Vertex, p: Vec3| from_p3(v.point()).dist(p) < tol;
+    let edges: Vec<mt::Edge> = Body::unique_edges(&body.solid)
+        .into_iter()
+        .filter(|e| (at(e.front(), a) && at(e.back(), b)) || (at(e.front(), b) && at(e.back(), a)))
+        .collect();
+    assert_eq!(edges.len(), 1, "edges from {a:?} to {b:?}");
+    let faces: Vec<&mt::Face> = body.solid.face_iter().filter(|f| f.edge_iter().any(|e| e.id() == edges[0].id())).collect();
+    assert_eq!(faces.len(), 2);
+    (edges[0].clone(), faces)
+}
+
+/// Points along the edge, its ends left out.
+fn along_edge(e: &mt::Edge) -> Vec<Vec3> {
+    let c = e.curve();
+    let (lo, hi) = c.range_tuple();
+    (1..16).map(|i| from_p3(c.subs(lo + (hi - lo) * f64::from(i) / 16.0))).collect()
+}
+
+/// The largest angle between the outward normals of the two faces along the edge from `a` to `b`.
+fn crease(body: &Body, a: Vec3, b: Vec3, tol: f64) -> f64 {
+    let (edge, faces) = edge_between(body, a, b, tol);
+    along_edge(&edge)
+        .into_iter()
+        .map(|p| {
+            let (n1, n2) = (project(faces[0], p, None).unwrap().1, project(faces[1], p, None).unwrap().1);
+            n1.dot(n2).clamp(-1.0, 1.0).acos()
+        })
+        .fold(0.0, f64::max)
+}
+
+/// The area of the planar face of `body` with outward normal `n` through `at`, from its boundary
+/// (finely sampled: its curved edges are straight or nearly so).
+fn plane_face_area(body: &Body, n: Vec3, at: Vec3) -> f64 {
+    let found: Vec<&mt::Face> = body
+        .solid
+        .face_iter()
+        .filter(|f| plane_normal(f).is_some_and(|m| m.dot(n) > 1.0 - 1e-9) && project(f, at, None).is_some_and(|(q, _, _)| q.dist(at) < 1e-9))
+        .collect();
+    assert_eq!(found.len(), 1, "faces along {n:?} through {at:?}");
+    let mut twice = 0.0;
+    for w in found[0].boundaries() {
+        let pts: Vec<Vec3> = w
+            .edge_iter()
+            .flat_map(|e| {
+                let c = e.oriented_curve();
+                let (lo, hi) = c.range_tuple();
+                (0..256).map(move |i| from_p3(c.subs(lo + (hi - lo) * f64::from(i) / 256.0)))
+            })
+            .collect();
+        twice += pts.iter().zip(pts.iter().cycle().skip(1)).map(|(p, q)| (*p - at).cross(*q - at).dot(n)).sum::<f64>();
+    }
+    0.5 * twice.abs()
+}
+
+/// `∫ f` over `[a, b]` by Simpson's rule on `n` (even) spans.
+fn simpson(a: f64, b: f64, n: usize, f: impl Fn(f64) -> f64) -> f64 {
+    let h = (b - a) / n as f64;
+    (0..=n)
+        .map(|i| {
+            f(a + h * i as f64)
+                * if i == 0 || i == n {
+                    1.0
+                } else if i % 2 == 1 {
+                    4.0
+                } else {
+                    2.0
+                }
+        })
+        .sum::<f64>()
+        * h
+        / 3.0
+}
+
+/// The volume the merge corner of the rounds `ra` (adding material, on the wall) and `rb` (taking
+/// it away, along the plate's side) adds beyond the two rounds alone at a wall end where the
+/// plate's top has the angle `theta` (negative: it takes away). Each section square to the
+/// bisector of the top's corner, scaled across by cos(θ/2), holds the two rounds' sections as
+/// circles: `A` about (ra, ra) on the wall's trace x = 0, `B` about (w − rb, −rb) on the side's
+/// trace x = w. The merged profile runs along `A`, then along the two circles' other internal
+/// tangent (the top is one), then along `B`; each round alone ends at the other's plane. Their
+/// difference across the section, integrated over `w` from 0 to R = ra + rb, is the correction
+/// with `dρ = dw/(2 sin(θ/2))` along the bisector and the areas unscaled by 1/cos(θ/2).
+fn merge_correction(theta: f64, ra: f64, rb: f64) -> f64 {
+    let r = ra + rb;
+    // ∫ √(ρ² − x²) dx.
+    let disc = |x: f64, rho: f64| {
+        let x = x.clamp(-rho, rho);
+        0.5 * (x * (rho * rho - x * x).sqrt() + rho * rho * (x / rho).asin())
+    };
+    // Under `A`'s lower arc and `B`'s upper arc, from x0 to x1 (B's for the section `w` wide).
+    let under_a = |x0: f64, x1: f64| ra * (x1 - x0) - (disc(x1 - ra, ra) - disc(x0 - ra, ra));
+    let under_b = |w: f64, x0: f64, x1: f64| -rb * (x1 - x0) + (disc(x1 - (w - rb), rb) - disc(x0 - (w - rb), rb));
+    let added = |w: f64| {
+        // The tangent's unit normal `n`, with n·(cA − cB) = R: the top's (0, 1), or the other.
+        let (dx, dy) = (r - w, r);
+        let (len, phi) = (dx.hypot(dy), dy.atan2(dx));
+        let alpha = (r / len).clamp(-1.0, 1.0).acos();
+        let n = [phi + alpha, phi - alpha]
+            .map(|a| (a.cos(), a.sin()))
+            .into_iter()
+            .max_by(|x, y| x.0.hypot(x.1 - 1.0).total_cmp(&y.0.hypot(y.1 - 1.0)))
+            .unwrap();
+        let (a, b) = ((ra - ra * n.0, ra - ra * n.1), (w - rb + rb * n.0, -rb + rb * n.1));
+        let merged = under_a(0.0, a.0) + 0.5 * (a.1 + b.1) * (b.0 - a.0) + under_b(w, b.0, w);
+        let alone = under_a(0.0, ra.min(w)) + under_b(w, (w - rb).max(0.0), w);
+        merged - alone
+    };
+    let mut cuts = [0.0, ra, rb, r];
+    cuts.sort_by(f64::total_cmp);
+    cuts.windows(2).map(|s| simpson(s[0], s[1], 2000, added)).sum::<f64>() / theta.sin()
+}
+
+#[test]
+fn the_merge_correction_is_what_the_design_tabulates() {
+    // Its own check of the reference: antisymmetric in the radii, nothing for equal ones, and the
+    // design's table (computed by other means) to its last digit.
+    let (first, second) = ((2.0f64 / 3.0).atan(), 0.5f64.atan());
+    for (ra, rb, c1, c2) in [(0.5, 0.25, -0.00606, -0.00751), (1.0, 0.5, -0.04846, -0.06010), (2.0, 0.5, -0.3534, -0.4383)] {
+        let digit = |x: f64| if x.abs() > 0.1 { 1e-4 } else { 1e-5 };
+        assert!((merge_correction(first, ra, rb) - c1).abs() <= digit(c1), "{ra} {rb}: {}", merge_correction(first, ra, rb));
+        assert!((merge_correction(second, ra, rb) - c2).abs() <= digit(c2), "{ra} {rb}: {}", merge_correction(second, ra, rb));
+        assert!((merge_correction(first, ra, rb) + merge_correction(first, rb, ra)).abs() < 1e-9);
+    }
+    assert!(merge_correction(first, 0.5, 0.5).abs() < 1e-12);
+}
+
+#[test]
+fn rounds_meeting_at_the_wall_ends_merge_alike_in_any_order() {
+    // The round at the wall's foot (adding material) and the round along the plate's top edge
+    // (taking it away) meet at both ends of the wall. One after the other either way round, in one
+    // fillet or each at its own radius, they merge into the same band at each end: the foot's
+    // round flows into the edge's through it, the wall's end keeps its face, and each round is as
+    // it is alone outside the band.
+    let (body, outline) = plate_with_round_corners();
+    let corner = Vec3::new(19.0 + std::f64::consts::FRAC_1_SQRT_2, 1.0 + std::f64::consts::FRAC_1_SQRT_2, 2.0);
+    let foot = [Vec3::new(10.0, 2.0, 2.0), corner, Vec3::new(20.0, -10.0, 2.0)];
+    let both: Vec<Vec3> = foot.iter().chain(&outline).copied().collect();
+    let (first, second) = ((2.0f64 / 3.0).atan(), 0.5f64.atan());
+    // The faces at each end: the wall's end, its face and the plate's side (outward normal and a
+    // point inside each).
+    let ends = [
+        [
+            (-Vec3::X, Vec3::new(0.0, 1.0, 1.0)),
+            (Vec3::Y, Vec3::new(10.0, 2.0, 5.0)),
+            (Vec3::new(-2.0, 3.0, 0.0) / 13f64.sqrt(), Vec3::new(6.0, 6.0, 1.0)),
+        ],
+        [
+            (-Vec3::Y, Vec3::new(19.0, -20.0, 1.0)),
+            (Vec3::X, Vec3::new(20.0, -10.0, 5.0)),
+            (Vec3::new(2.0, -1.0, 0.0) / 5f64.sqrt(), Vec3::new(24.0, -12.0, 1.0)),
+        ],
+    ];
+    let area = |b: &Body, (n, at): (Vec3, Vec3)| plane_face_area(b, n, at);
+    for (ra, rb) in [(1.0, 0.5), (0.5, 1.0), (0.5, 0.5), (1.0, 1.0)] {
+        let footed = round_the_foot(&body, ra).unwrap();
+        let edged = fillet(&body, &outline, rb).unwrap();
+        let radii: Vec<f64> = foot.iter().map(|_| ra).chain(outline.iter().map(|_| rb)).collect();
+        let mut routes = vec![
+            ("foot then edge", fillet(&footed, &outline, rb).unwrap()),
+            ("edge then foot", round_the_foot(&edged, ra).unwrap()),
+            ("each at its radius", crate::fillet_each(&body, &both, &radii).unwrap()),
+        ];
+        if ra == rb {
+            routes.push(("together", fillet(&body, &both, ra).unwrap()));
+        }
+        // The earlier round's ends picked too (each from where its contact with the top meets the
+        // side to the line of the wall's end), before the chain or after it: the merge takes them
+        // up, and the corner is the same.
+        let ends_of = |b: &Body, which: usize| -> Vec<Vec3> {
+            wall_ends()
+                .into_iter()
+                .map(|end| {
+                    let ([_, q_w, q_s], gone) = merge_points(end, ra, rb);
+                    let q = if which == 1 { q_w } else { q_s };
+                    crate::blend::edge_mid(&edge_between(b, gone[which], q, 1e-6).0).unwrap()
+                })
+                .collect()
+        };
+        let (caps_a, caps_b) = (ends_of(&footed, 1), ends_of(&edged, 2));
+        let picks: Vec<Vec3> = caps_a.iter().chain(&outline).copied().collect();
+        routes.push(("foot then edge, the foot's ends picked first", fillet(&footed, &picks, rb).unwrap()));
+        let picks: Vec<Vec3> = foot.iter().chain(&caps_b).copied().collect();
+        routes.push(("edge then foot, the edge's ends picked last", fillet(&edged, &picks, ra).unwrap()));
+        // Tapering where the round doesn't fit has nothing to taper.
+        let (tapered, tapers) = crate::fillet_tapered(&footed, &outline, rb).unwrap();
+        assert!(tapers.iter().all(Option::is_none), "{ra} {rb}");
+        routes.push(("tapered", tapered));
+        // What the merge adds: each round alone, and the correction at each end.
+        let correction = merge_correction(first, ra, rb) + merge_correction(second, ra, rb);
+        let analytic = foot_round_added(ra) - edge_round_removed(rb) + correction;
+        let (v_body, v_footed, v_edged) = (planned_volume(&body), planned_volume(&footed), planned_volume(&edged));
+        let mut volumes = Vec::new();
+        for (how, result) in &routes {
+            let how = format!("{how}, foot {ra} edge {rb}");
+            assert_merged(result, &wall_ends(), (ra, rb), 1e-6, &how);
+            for (end, [e, w, s]) in wall_ends().into_iter().zip(ends) {
+                // The wall's end keeps its area; its face is as the foot's round leaves it, the
+                // plate's side as the edge's round leaves it.
+                assert!((area(result, e) - area(&body, e)).abs() < 1e-9, "{how}: the wall's end");
+                assert!((area(result, w) - area(&footed, w)).abs() < 1e-6, "{how}: the wall's face {} {}", area(result, w), area(&footed, w));
+                assert!((area(result, s) - area(&edged, s)).abs() < 1e-6, "{how}: the plate's side {} {}", area(result, s), area(&edged, s));
+                // The band joins both rounds smoothly, and stands upright along the wall's end.
+                let ([p_star, q_w, q_s], _) = merge_points(end, ra, rb);
+                for q in [q_w, q_s] {
+                    let bend = crease(result, p_star, q, 1e-6);
+                    assert!(bend < 1e-3, "{how}: {bend} rad between the band and the round to {q:?}");
+                }
+                let (on_l, faces) = edge_between(result, q_w, q_s, 1e-6);
+                let band = faces.iter().find(|f| plane_normal(f).is_none()).unwrap();
+                for p in along_edge(&on_l) {
+                    let n = project(band, p, None).unwrap().1;
+                    assert!(n.z.abs() < 1e-3, "{how}: the band's normal {n:?} at {p:?}");
+                }
+            }
+            let v = planned_volume(result);
+            // The mesh inside the rounds takes a few thousandths more (as for each alone).
+            assert!((v - v_body - analytic).abs() < 0.008, "{how}: grown {}, expected {analytic}", v - v_body);
+            // Against each round alone as meshed, the merge is the correction.
+            let merged = v - (v_footed + v_edged - v_body);
+            assert!((merged - correction).abs() < 0.002, "{how}: merged {merged}, expected {correction}");
+            volumes.push(v);
+            // Every route has its vertices where the first has them.
+            assert!(same_vertices(result, &routes[0].1, 1e-6), "{how}: the vertices differ from {}'s", routes[0].0);
+        }
+        let v0 = volumes[0];
+        assert!(volumes.iter().all(|v| (v - v0).abs() < 1e-6 * v0), "foot {ra} edge {rb}: {volumes:?}");
+    }
+}
+
+/// The points of the distinct vertices of `body`.
+fn vertex_points(body: &Body) -> Vec<Vec3> {
+    let mut seen = std::collections::HashSet::new();
+    body.solid.vertex_iter().filter(|v| seen.insert(v.id())).map(|v| from_p3(v.point())).collect()
+}
+
+/// Whether `a` and `b` have as many vertices, each of either within `tol` of one of the other's.
+fn same_vertices(a: &Body, b: &Body, tol: f64) -> bool {
+    let (pa, pb) = (vertex_points(a), vertex_points(b));
+    let near = |p: &Vec3, ps: &[Vec3]| ps.iter().any(|q| q.dist(*p) < tol);
+    pa.len() == pb.len() && pa.iter().all(|p| near(p, &pb)) && pb.iter().all(|p| near(p, &pa))
+}
+
+/// A prism over the polygon `pts` (in the plane z = 0 through `origin`), from `z0` to `z1` above.
+fn prism_at(origin: Vec3, pts: &[(f64, f64)], z0: f64, z1: f64) -> Body {
+    use solidcraft_geom::{Loop2, Plane, Region2, Seg2, Vec2};
+    let region = Region2 {
+        outer: Loop2 {
+            segs: pts.iter().zip(pts.iter().cycle().skip(1)).map(|(a, b)| Seg2::Line { a: Vec2::new(a.0, a.1), b: Vec2::new(b.0, b.1) }).collect(),
+        },
+        holes: vec![],
+    };
+    crate::extrude(&Plane { origin, x: Vec3::X, y: Vec3::Y }, &[region], z0, z1).unwrap().pop().unwrap()
+}
+
+/// The volume through the display planner at chord tolerance `tol`, its mesh closed.
+fn volume_at(b: &Body, tol: f64) -> f64 {
+    let mesh = b.display_plan(tol).unwrap().evaluate();
+    let key = |p: Vec3| [p.x.to_bits(), p.y.to_bits(), p.z.to_bits()];
+    let mut uses: std::collections::HashMap<([u64; 3], [u64; 3]), i32> = std::collections::HashMap::new();
+    for t in &mesh.triangles {
+        let [a, b, c] = mesh.tri(t).unwrap();
+        for (p, q) in [(a, b), (b, c), (c, a)] {
+            *uses.entry((key(p), key(q))).or_default() += 1;
+            *uses.entry((key(q), key(p))).or_default() -= 1;
+        }
+    }
+    assert!(uses.values().all(|n| *n == 0), "the mesh has cracks");
+    mesh.measure().volume
+}
+
+#[test]
+fn the_merge_corner_at_a_hundredth_and_a_hundred_times_off_the_origin() {
+    // [`plate_with_round_corners`] scaled and moved far from the origin: the same corner by every
+    // route (either order, each at its radius, the earlier round's ends picked too) at every
+    // scale, and with the plate's corners left sharp.
+    let corner = Vec3::new(19.0 + std::f64::consts::FRAC_1_SQRT_2, 1.0 + std::f64::consts::FRAC_1_SQRT_2, 2.0);
+    let (first, second) = ((2.0f64 / 3.0).atan(), 0.5f64.atan());
+    let (ra, rb) = (1.0, 0.5);
+    let analytic = foot_round_added(ra) - edge_round_removed(rb) + merge_correction(first, ra, rb) + merge_correction(second, ra, rb);
+    for k in [0.01, 100.0] {
+        let origin = Vec3::new(37.0, -52.0, 13.0) * k;
+        let at = |p: Vec3| origin + p * k;
+        let plate = prism_at(
+            origin,
+            &[(0.0, 0.0), (18.0, 0.0), (18.0, -20.0), (20.0, -20.0), (28.0, -4.0), (28.0, 10.0), (12.0, 10.0), (0.0, 2.0)]
+                .map(|(x, y)| (x * k, y * k)),
+            0.0,
+            2.0 * k,
+        );
+        let wall = prism_at(
+            origin,
+            &[(0.0, 0.0), (18.0, 0.0), (18.0, -20.0), (20.0, -20.0), (20.0, 2.0), (0.0, 2.0)].map(|(x, y)| (x * k, y * k)),
+            2.0 * k,
+            6.0 * k,
+        );
+        let mut body = boolean(&plate, &wall, BoolOp::Union).unwrap().unwrap();
+        body = fillet(&body, &[at(Vec3::new(20.0, 2.0, 4.0))], k).unwrap();
+        let sharp = body.clone();
+        body = fillet(&body, &[Vec3::new(12.0, 10.0, 1.0), Vec3::new(28.0, 10.0, 1.0), Vec3::new(28.0, -4.0, 1.0)].map(at), 3.0 * k).unwrap();
+        let outline = [
+            Vec3::new(0.0, 2.0, 2.0),
+            Vec3::new(12.0, 10.0, 2.0),
+            Vec3::new(28.0, 10.0, 2.0),
+            Vec3::new(28.0, -4.0, 2.0),
+            Vec3::new(20.0, -20.0, 2.0),
+        ];
+        let picks: Vec<Vec3> = outline.windows(2).map(|w| at((w[0] + w[1]) * 0.5)).collect();
+        let foot = [Vec3::new(10.0, 2.0, 2.0), corner, Vec3::new(20.0, -10.0, 2.0)].map(at);
+        let footed = fillet(&body, &foot, ra * k).unwrap();
+        let edged = fillet(&body, &picks, rb * k).unwrap();
+        let ends = wall_ends().map(|(v, w, m, tan)| (at(v), w, m, tan));
+        let tol = 1e-6 * k;
+        // The foot's ends, picked with the plate's edge.
+        let caps = ends.map(|end| {
+            let ([_, q_w, _], gone) = merge_points(end, ra * k, rb * k);
+            crate::blend::edge_mid(&edge_between(&footed, gone[1], q_w, tol).0).unwrap()
+        });
+        let both: Vec<Vec3> = foot.iter().chain(&picks).copied().collect();
+        let radii: Vec<f64> = foot.iter().map(|_| ra * k).chain(picks.iter().map(|_| rb * k)).collect();
+        let routes = [
+            ("foot then edge", fillet(&footed, &picks, rb * k).unwrap()),
+            ("edge then foot", fillet(&edged, &foot, ra * k).unwrap()),
+            ("each at its radius", crate::fillet_each(&body, &both, &radii).unwrap()),
+            ("foot then edge, the foot's ends picked", fillet(&footed, &caps.iter().chain(&picks).copied().collect::<Vec<_>>(), rb * k).unwrap()),
+        ];
+        let mut volumes = Vec::new();
+        for (how, result) in &routes {
+            let how = format!("{how} at {k}x");
+            assert_merged(result, &ends, (ra * k, rb * k), tol, &how);
+            for end in ends {
+                let ([p_star, q_w, q_s], _) = merge_points(end, ra * k, rb * k);
+                for q in [q_w, q_s] {
+                    let bend = crease(result, p_star, q, tol);
+                    assert!(bend < 1e-3, "{how}: {bend} rad between the band and the round to {q:?}");
+                }
+            }
+            let grown = (volume_at(result, 2e-4 * k) - volume_at(&body, 2e-4 * k)) / k.powi(3);
+            assert!((grown - analytic).abs() < 0.008, "{how}: grown {grown}, expected {analytic}");
+            volumes.push(grown);
+            assert!(same_vertices(result, &routes[0].1, tol), "{how}: the vertices differ from {}'s", routes[0].0);
+        }
+        assert!(volumes.iter().all(|v| (v - volumes[0]).abs() < 1e-4), "{k}x: {volumes:?}");
+        // The plate's corners left sharp: its straight top edges from the wall's ends round on
+        // their own, and merge with the foot's round either way round.
+        let tops = [Vec3::new(6.0, 6.0, 2.0), Vec3::new(24.0, -12.0, 2.0)].map(at);
+        let edged = fillet(&sharp, &tops, rb * k).unwrap();
+        assert!(edged.validity().is_empty(), "sharp at {k}x: {:?}", edged.validity());
+        let a = fillet(&fillet(&sharp, &foot, ra * k).unwrap(), &tops, rb * k).unwrap();
+        let b = fillet(&edged, &foot, ra * k).unwrap();
+        for (how, result) in [("sharp, foot then edge", &a), ("sharp, edge then foot", &b)] {
+            assert_merged(result, &ends, (ra * k, rb * k), tol, &format!("{how} at {k}x"));
+        }
+        let (va, vb) = (volume_at(&a, 2e-4 * k), volume_at(&b, 2e-4 * k));
+        assert!((va - vb).abs() < 1e-6 * va, "sharp at {k}x: {va} {vb}");
+        assert!(same_vertices(&a, &b, tol), "sharp at {k}x: the orders' vertices differ");
+    }
+}
+
+/// The bracket at the user's size: a plate 10 thick, a wall 20 high on it with its outer corner
+/// rounded 5 and its ends flush with the plate's sides, the plate's three outer corners rounded 10;
+/// with points on the wall's foot and on the plate's top edge from one end of the wall to the other.
+fn bracket() -> (Body, [Vec3; 2], Vec<Vec3>) {
+    let plate = prism_at(
+        Vec3::ZERO,
+        &[(0.0, 0.0), (90.0, 0.0), (90.0, -100.0), (100.0, -100.0), (140.0, -20.0), (140.0, 50.0), (60.0, 50.0), (0.0, 10.0)],
+        0.0,
+        10.0,
+    );
+    let wall = prism_at(Vec3::ZERO, &[(0.0, 0.0), (90.0, 0.0), (90.0, -100.0), (100.0, -100.0), (100.0, 10.0), (0.0, 10.0)], 10.0, 30.0);
+    let mut body = boolean(&plate, &wall, BoolOp::Union).unwrap().unwrap();
+    body = fillet(&body, &[Vec3::new(100.0, 10.0, 20.0)], 5.0).unwrap();
+    body = fillet(&body, &[Vec3::new(60.0, 50.0, 5.0), Vec3::new(140.0, 50.0, 5.0), Vec3::new(140.0, -20.0, 5.0)], 10.0).unwrap();
+    let outline = [
+        Vec3::new(0.0, 10.0, 10.0),
+        Vec3::new(60.0, 50.0, 10.0),
+        Vec3::new(140.0, 50.0, 10.0),
+        Vec3::new(140.0, -20.0, 10.0),
+        Vec3::new(100.0, -100.0, 10.0),
+    ];
+    (body, [Vec3::new(50.0, 10.0, 10.0), Vec3::new(100.0, -50.0, 10.0)], outline.windows(2).map(|w| (w[0] + w[1]) * 0.5).collect())
+}
+
+#[test]
+fn the_bracket_at_the_users_size_merges_its_rounds_at_the_wall_ends() {
+    // The foot rounded 2, the plate's edge 2 or 1.5, either first: the band needs about 5.7 to 7.5
+    // of straight edge back from each wall end along both rounds, and has it.
+    let (body, foot, outline) = bracket();
+    let ends: [WallEnd; 2] = [(Vec3::new(0.0, 10.0, 10.0), Vec3::X, Vec3::Y, 2.0 / 3.0), (Vec3::new(100.0, -100.0, 10.0), Vec3::Y, Vec3::X, 0.5)];
+    let footed = fillet(&body, &foot, 2.0).unwrap();
+    for rb in [2.0, 1.5] {
+        let edged = fillet(&body, &outline, rb).unwrap();
+        let a = fillet(&footed, &outline, rb).unwrap();
+        let b = fillet(&edged, &foot, 2.0).unwrap();
+        for (how, result) in [("foot then edge", &a), ("edge then foot", &b)] {
+            let how = format!("{how} {rb}");
+            assert_merged(result, &ends, (2.0, rb), 1e-6, &how);
+            for end in ends {
+                let ([p_star, q_w, q_s], _) = merge_points(end, 2.0, rb);
+                for q in [q_w, q_s] {
+                    assert!(crease(result, p_star, q, 1e-6) < 1e-3, "{how}");
+                }
+            }
+        }
+        let (va, vb) = (planned_volume(&a), planned_volume(&b));
+        assert!((va - vb).abs() < 1e-6 * va, "{rb}: {va} {vb}");
+    }
+}
+
+#[test]
+fn rounds_meeting_at_a_wall_end_are_refused_where_the_band_does_not_fit() {
+    // The plate's side runs straight from the first wall end only to (3, 4), a corner rounded 1.
+    // The band of a foot round 1 and an edge round 0.5 needs 2.55 of it (and 2.40 along the
+    // wall): built. With a foot round of 1.5 it needs 3.46, and the side has 3.34 before its
+    // corner's round: refused, saying so, either way round.
+    let plate = prism_at(
+        Vec3::ZERO,
+        &[(0.0, 0.0), (18.0, 0.0), (18.0, -20.0), (20.0, -20.0), (28.0, -4.0), (28.0, 10.0), (6.0, 10.0), (3.0, 4.0), (0.0, 2.0)],
+        0.0,
+        2.0,
+    );
+    let wall = prism_at(Vec3::ZERO, &[(0.0, 0.0), (18.0, 0.0), (18.0, -20.0), (20.0, -20.0), (20.0, 2.0), (0.0, 2.0)], 2.0, 6.0);
+    let mut body = boolean(&plate, &wall, BoolOp::Union).unwrap().unwrap();
+    body = fillet(&body, &[Vec3::new(20.0, 2.0, 4.0)], 1.0).unwrap();
+    body = fillet(&body, &[Vec3::new(3.0, 4.0, 1.0)], 1.0).unwrap();
+    body = fillet(&body, &[Vec3::new(6.0, 10.0, 1.0), Vec3::new(28.0, 10.0, 1.0), Vec3::new(28.0, -4.0, 1.0)], 3.0).unwrap();
+    let outline =
+        [Vec3::new(2.55, 3.7, 2.0), Vec3::new(4.5, 7.0, 2.0), Vec3::new(17.0, 10.0, 2.0), Vec3::new(28.0, 3.0, 2.0), Vec3::new(24.0, -12.0, 2.0)];
+    let fits = fillet(&round_the_foot(&body, 1.0).unwrap(), &outline, 0.5).unwrap();
+    assert_merged(&fits, &wall_ends(), (1.0, 0.5), 1e-6, "foot 1 then edge 0.5");
+    let footed = round_the_foot(&body, 1.5).unwrap();
+    let edged = fillet(&body, &outline, 0.5).unwrap();
+    let corner = Vec3::new(19.0 + std::f64::consts::FRAC_1_SQRT_2, 1.0 + std::f64::consts::FRAC_1_SQRT_2, 2.0);
+    let both: Vec<Vec3> = [Vec3::new(10.0, 2.0, 2.0), corner, Vec3::new(20.0, -10.0, 2.0)].into_iter().chain(outline).collect();
+    let radii: Vec<f64> = (0..both.len()).map(|i| if i < 3 { 1.5 } else { 0.5 }).collect();
+    let each = crate::fillet_each(&body, &both, &radii).map(|_| ()).unwrap_err();
+    for refused in [fillet(&footed, &outline, 0.5).unwrap_err(), round_the_foot(&edged, 1.5).unwrap_err(), each] {
+        // Too large: smaller rounds may merge, so it is no decisive refusal.
+        assert!(!crate::blend::decisive(&refused), "{refused}");
+        assert!(matches!(&refused, KernelError::TooLarge(m) if m.starts_with(crate::blend::MIXED_END_SIZE)), "{refused}");
+        let text = refused.to_string();
+        assert!(text.contains("need 3.454 mm of straight edge before it, 3.34"), "{text}");
+    }
+    // The largest edge round that merges with the foot's 1.5 there: about 0.43 (0.4 builds, 0.45
+    // needs 3.379 of the 3.340), found by the search as by hand.
+    for r in [0.4, 0.35] {
+        assert_merged(&fillet(&footed, &outline, r).unwrap(), &wall_ends()[..1], (1.5, r), 1e-6, &format!("edge {r}"));
+    }
+    let (largest, built) = crate::fillet_max(&footed, &outline, 0.5).unwrap();
+    assert!((0.4..0.45).contains(&largest), "{largest}");
+    assert_merged(&built, &wall_ends()[..1], (1.5, largest), 1e-6, "the largest");
+    // A ball rolled along the plate's edge at a chord's width has no one radius for the band:
+    // refused as such.
+    let (rounded, outline) = plate_with_round_corners();
+    let footed = round_the_foot(&rounded, 1.0).unwrap();
+    let all = Body::unique_edges(&footed.solid);
+    let (i, _) = footed.nearest_edge(outline[0], 1e-3).unwrap().unwrap();
+    let ids = crate::blend::smooth_chain(&footed.solid, &all[i]).unwrap();
+    let chord = crate::guard("test", || curve_blend_chord(&footed.solid, &ids, footed.size(), 0.5, true));
+    assert!(chord.as_ref().is_err_and(crate::blend::decisive), "{:?}", chord.map(|_| ()));
+}
+
+/// [`wall_on_a_plate`] with the plate's corners left sharp and its side at the first wall end
+/// turned to `deg` from the wall's trace. The wall's end there runs from (0, 2) to `foot`, above
+/// the plate's edge flush with it, so the line of the wall's end stays where the wall's face meets
+/// the plate's side. With a point on that side's top edge.
+fn wall_on_a_turned_plate(deg: f64, foot: (f64, f64)) -> (Body, Vec3) {
+    let theta = deg.to_radians();
+    let x = 8.0 * theta.cos() / theta.sin();
+    let plate = prism_at(Vec3::ZERO, &[foot, (18.0, 0.0), (18.0, -20.0), (20.0, -20.0), (28.0, -4.0), (28.0, 10.0), (x, 10.0), (0.0, 2.0)], 0.0, 2.0);
+    let wall = prism_at(Vec3::ZERO, &[foot, (18.0, 0.0), (18.0, -20.0), (20.0, -20.0), (20.0, 2.0), (0.0, 2.0)], 2.0, 6.0);
+    let body = boolean(&plate, &wall, BoolOp::Union).unwrap().unwrap();
+    (fillet(&body, &[Vec3::new(20.0, 2.0, 4.0)], 1.0).unwrap(), Vec3::new(x / 2.0, 6.0, 2.0))
+}
+
+#[test]
+fn rounds_meeting_where_the_plate_side_is_square_to_the_wall_merge_in_any_order() {
+    // At the first wall end the plate's side leaves the wall's trace square to it (and 2° either
+    // side), the wall's end oblique above the plate's edge beneath it: the earlier round's contact
+    // with the top runs square to the later chain there, or nearly. Each chain still ends at the
+    // earlier round's end (the foot's three edges, the side's one), and the two rounds merge into
+    // the same band in either order and each at its radius.
+    let corner = Vec3::new(19.0 + std::f64::consts::FRAC_1_SQRT_2, 1.0 + std::f64::consts::FRAC_1_SQRT_2, 2.0);
+    let foot = [Vec3::new(10.0, 2.0, 2.0), corner, Vec3::new(20.0, -10.0, 2.0)];
+    for deg in [90.0, 88.0, 92.0] {
+        let (body, top) = wall_on_a_turned_plate(deg, (2.0, 0.0));
+        let theta = f64::to_radians(deg);
+        let end: WallEnd = (Vec3::new(0.0, 2.0, 2.0), Vec3::X, Vec3::Y, if deg == 90.0 { f64::INFINITY } else { theta.tan() });
+        let pairs: &[(f64, f64)] = if deg == 90.0 { &[(1.0, 0.5), (0.5, 1.0), (0.5, 0.5)] } else { &[(1.0, 0.5)] };
+        for &(ra, rb) in pairs {
+            let footed = round_the_foot(&body, ra).unwrap();
+            let edged = fillet(&body, &[top], rb).unwrap();
+            assert_eq!(chain_at(&footed, top), 1, "{deg}° foot {ra}");
+            assert_eq!(chain_at(&edged, foot[0]), 3, "{deg}° edge {rb}");
+            let picks: Vec<Vec3> = foot.iter().copied().chain([top]).collect();
+            let routes = [
+                ("foot then edge", fillet(&footed, &[top], rb)),
+                ("edge then foot", round_the_foot(&edged, ra)),
+                ("each at its radius", crate::fillet_each(&body, &picks, &[ra, ra, ra, rb])),
+            ];
+            let correction = merge_correction(theta, ra, rb);
+            let (v_body, v_footed, v_edged) = (planned_volume(&body), planned_volume(&footed), planned_volume(&edged));
+            let first = routes[0].1.as_ref().unwrap();
+            for (how, result) in &routes {
+                let how = format!("{how} at {deg}°, foot {ra} edge {rb}");
+                let result = result.as_ref().unwrap_or_else(|e| panic!("{how}: {e}"));
+                assert_merged(result, &[end], (ra, rb), 1e-6, &how);
+                let ([p_star, q_w, q_s], _) = merge_points(end, ra, rb);
+                for q in [q_w, q_s] {
+                    assert!(crease(result, p_star, q, 1e-6) < 1e-3, "{how}");
+                }
+                let merged = planned_volume(result) - (v_footed + v_edged - v_body);
+                assert!((merged - correction).abs() < 0.002, "{how}: merged {merged}, expected {correction}");
+                assert!(same_vertices(result, first, 1e-6), "{how}: the vertices differ from the first route's");
+                assert!((planned_volume(result) - planned_volume(first)).abs() < 1e-6 * v_body, "{how}");
+            }
+        }
+    }
+    // The wall's end leaning out over the plate's edge (to (-1, 0)): a band reaching past it is
+    // refused as such, not as some other size.
+    let (body, top) = wall_on_a_turned_plate(90.0, (-1.0, 0.0));
+    let refused = fillet(&round_the_foot(&body, 1.0).unwrap(), &[top], 0.25).unwrap_err();
+    assert!(matches!(&refused, KernelError::TooLarge(m) if m.starts_with(crate::blend::MIXED_END_SIZE)), "{refused}");
+    assert!(refused.to_string().contains("reach past the wall's end"), "{refused}");
+}
+
+/// A straight wall (x 0 to 40, y 0 to 2, z 3 to 8) on a plate 3 thick, its ends flush with the
+/// plate's sides beneath them. The plate's sides leave the wall's ends at `deg` to its trace, run
+/// straight for `side` to a sharp corner and on parallel to the wall. With a point on the wall's
+/// foot and on each slanted side's top edge (0.9 of the way along), and the wall's ends.
+fn wall_on_a_trapezoid(deg: f64, side: f64) -> (Body, Vec3, [Vec3; 2], [WallEnd; 2]) {
+    wall_on_a_trapezoid_at(deg, side, Vec3::ZERO, 1.0)
+}
+
+/// [`wall_on_a_trapezoid`] scaled by `k` about the origin and moved by `origin`.
+fn wall_on_a_trapezoid_at(deg: f64, side: f64, origin: Vec3, k: f64) -> (Body, Vec3, [Vec3; 2], [WallEnd; 2]) {
+    let (c, s) = (deg.to_radians().cos(), deg.to_radians().sin());
+    let plate = [(0.0, 0.0), (40.0, 0.0), (40.0, 2.0), (40.0 - side * c, 2.0 + side * s), (side * c, 2.0 + side * s), (0.0, 2.0)];
+    let plate = prism_at(origin, &plate.map(|(x, y)| (x * k, y * k)), 0.0, 3.0 * k);
+    let wall = prism_at(origin, &[(0.0, 0.0), (40.0, 0.0), (40.0, 2.0), (0.0, 2.0)].map(|(x, y)| (x * k, y * k)), 3.0 * k, 8.0 * k);
+    let body = boolean(&plate, &wall, BoolOp::Union).unwrap().unwrap();
+    let tan = deg.to_radians().tan();
+    let p = |x: f64, y: f64| origin + Vec3::new(x, y, 3.0) * k;
+    let ends = [(p(0.0, 2.0), Vec3::X, Vec3::Y, tan), (p(40.0, 2.0), -Vec3::X, Vec3::Y, tan)];
+    let at = 0.9 * side;
+    (body, p(20.0, 2.0), [p(at * c, 2.0 + at * s), p(40.0 - at * c, 2.0 + at * s)], ends)
+}
+
+#[test]
+fn rounds_meeting_at_a_wall_end_fit_alike_in_either_order_before_a_sharp_corner() {
+    // The plate's side runs only 4 from each wall end to a sharp corner of 150°. The edge's round
+    // runs on along the top past that corner (its contact with the top meets the next side
+    // rb·cot 30° further on), so the band fits even where its corner on the top lies past the
+    // side's 4. It fits by the same measure whichever round came first: every route builds it,
+    // the larger round first or the smaller.
+    let (body, foot, tops, ends) = wall_on_a_trapezoid(30.0, 4.0);
+    let theta = 30f64.to_radians();
+    for (ra, rb) in [(1.0, 1.3), (1.0, 2.0), (1.6, 0.5)] {
+        let footed = fillet(&body, &[foot], ra).unwrap();
+        let edged = fillet(&body, &tops, rb).unwrap();
+        let picks = [foot, tops[0], tops[1]];
+        let routes = [
+            ("foot then edge", fillet(&footed, &tops, rb)),
+            ("edge then foot", fillet(&edged, &[foot], ra)),
+            ("each at its radius", crate::fillet_each(&body, &picks, &[ra, rb, rb])),
+        ];
+        let correction = 2.0 * merge_correction(theta, ra, rb);
+        let mass = |b: &Body| crate::measure_mass(b).unwrap().volume;
+        let (v_body, v_footed, v_edged) = (mass(&body), mass(&footed), mass(&edged));
+        let first = routes[0].1.as_ref().unwrap_or_else(|e| panic!("foot {ra} edge {rb}: {e}"));
+        for (how, result) in &routes {
+            let how = format!("{how}, foot {ra} edge {rb}");
+            let result = result.as_ref().unwrap_or_else(|e| panic!("{how}: {e}"));
+            assert_merged(result, &ends, (ra, rb), 1e-6, &how);
+            for end in ends {
+                let ([p_star, q_w, q_s], _) = merge_points(end, ra, rb);
+                for q in [q_w, q_s] {
+                    assert!(crease(result, p_star, q, 1e-6) < 1e-3, "{how}");
+                }
+            }
+            // The merge is the correction at both ends, to the measure's own noise on a body of
+            // 860 mm³ (a hundredth of the correction where the rounds are as large as the top is
+            // wide), and the same by every route.
+            let merged = mass(result) - (v_footed + v_edged - v_body);
+            assert!((merged - correction).abs() < 0.001 + 0.012 * correction.abs(), "{how}: merged {merged}, expected {correction}");
+            assert!((mass(result) - mass(first)).abs() < 1e-6 * v_body, "{how}");
+            assert!(same_vertices(result, first, 1e-6), "{how}: the vertices differ from the first route's");
+        }
+    }
+}
+
+#[test]
+fn a_plate_edge_nearly_square_to_the_wall_merges_each_at_its_radius_either_size_first() {
+    // The plate's sides leave the wall's ends at 85°, so the wall's end runs 5° off the plate's
+    // side beneath it. The edge's round alone is refused there (it would end on a face almost
+    // along its edge), but after the foot's round it ends on that round's end and merges with it.
+    // Each at its radius builds that merge whichever radius is the larger.
+    let (body, foot, tops, ends) = wall_on_a_trapezoid(85.0, 15.0);
+    for (ra, rb) in [(1.0, 0.5), (0.5, 1.0)] {
+        let alone = fillet(&body, &tops, rb).map(|_| ()).unwrap_err().to_string();
+        assert!(alone.contains("an end face almost along the edge"), "{alone}");
+        let merged = fillet(&fillet(&body, &[foot], ra).unwrap(), &tops, rb).unwrap();
+        let how = format!("foot {ra} edge {rb}");
+        assert_merged(&merged, &ends, (ra, rb), 1e-6, &how);
+        let each = crate::fillet_each(&body, &[foot, tops[0], tops[1]], &[ra, rb, rb]).unwrap_or_else(|e| panic!("{how}: {e}"));
+        assert_merged(&each, &ends, (ra, rb), 1e-6, &format!("each at its radius, {how}"));
+        assert!(same_vertices(&each, &merged, 1e-6), "{how}");
+    }
+}
+
+#[test]
+fn the_rounds_trimmed_by_the_band_mesh_on_their_cylinders_at_narrow_corners() {
+    // At a plate's corner of 10° or 15° each round's edge with the band leaves its contact with
+    // the top at a narrow angle: the display mesh of both rounds stays on their cylinders there,
+    // to the chord tolerance, as each round alone does (a grid fanned across that corner left them
+    // by a hundred times as much).
+    let tol = 5e-5;
+    for (deg, ra, rb) in [(10.0f64, 0.5, 0.5), (15.0, 0.5, 1.0)] {
+        let (body, foot, tops, ends) = wall_on_a_trapezoid(deg, 15.0);
+        let merged = fillet(&fillet(&body, &[foot], ra).unwrap(), &tops, rb).unwrap();
+        assert_merged(&merged, &ends, (ra, rb), 1e-6, &format!("{deg}°"));
+        // Each round's cylinder at each end (a point on its axis, the axis, the radius) and `P*`.
+        let theta = deg.to_radians();
+        let rounds: Vec<(Vec3, Vec3, Vec3, f64, Vec3)> = ends
+            .iter()
+            .flat_map(|end| {
+                let (v, w, _, _) = *end;
+                let s = Vec3::new(w.x * theta.cos(), theta.sin(), 0.0);
+                let (m_w, m_s) = ((s - w * w.dot(s)).normalized().unwrap(), (w - s * w.dot(s)).normalized().unwrap());
+                let ([p_star, _, _], _) = merge_points(*end, ra, rb);
+                [(v + m_w * ra + Vec3::Z * ra, w, Vec3::Z, ra, p_star), (v + m_s * rb - Vec3::Z * rb, s, Vec3::Z, rb, p_star)]
+            })
+            .collect();
+        let off = |(a, d, _, r, _): &(Vec3, Vec3, Vec3, f64, Vec3), p: Vec3| {
+            let q = p - *a;
+            ((q - *d * q.dot(*d)).len() - r).abs()
+        };
+        let mesh = merged.display_plan(tol).unwrap().evaluate();
+        let mut checked = 0;
+        for (t, f) in mesh.triangles.iter().zip(&mesh.tri_face) {
+            let corners = mesh.tri(t).unwrap();
+            let centre = (corners[0] + corners[1] + corners[2]) * (1.0 / 3.0);
+            // A triangle of a round near `P*`: its corners on that round's cylinder.
+            let Some(round) = rounds.iter().find(|x| x.4.dist(centre) < 1.5 && corners.iter().all(|c| off(x, *c) < 1e-7)) else { continue };
+            let gap = off(round, centre);
+            assert!(gap < 4.0 * tol, "{deg}° face {f}: {gap} off its round at {centre:?}");
+            checked += 1;
+        }
+        assert!(checked > 100, "{deg}°: {checked}");
+    }
+}
+
+/// The chain along `pick` on `body` is `len` edges, and a round of it at each radius is built
+/// sound.
+fn chain_and_round_kept(body: &Body, pick: Vec3, len: usize, radii: &[f64]) {
+    assert_eq!(chain_at(body, pick), len);
+    for r in radii {
+        let result = fillet(body, &[pick], *r).unwrap_or_else(|e| panic!("r {r}: {e}"));
+        assert!(result.validity().is_empty(), "r {r}: {:?}", result.validity());
+        assert_eq!(result.crossed_face_loops().unwrap(), 0, "r {r}");
+        assert!(result.solid.face_iter().count() > body.solid.face_iter().count(), "r {r}");
+    }
+}
+
+#[test]
+fn a_chain_runs_on_over_a_designed_cove_on_an_oblique_side() {
+    // A ramp's top runs down a cove (a cylinder bending up, no earlier round) into a step, cut by a
+    // slanted side: the top edge of the side runs on smoothly over the cove's oblique seam with the
+    // top and on up the step. No earlier round of the other kind ends there: the chain runs on.
+    use solidcraft_geom::{Loop2, Plane, Region2, Seg2, Vec2};
+    let line = |a: (f64, f64), b: (f64, f64)| Seg2::Line { a: Vec2::new(a.0, a.1), b: Vec2::new(b.0, b.1) };
+    let profile = Region2 {
+        outer: Loop2 {
+            segs: vec![
+                line((0.0, 0.0), (20.0, 0.0)),
+                line((20.0, 0.0), (20.0, 2.0)),
+                line((20.0, 2.0), (10.0, 2.0)),
+                Seg2::Arc { center: Vec2::new(10.0, 5.0), radius: 3.0, start: -std::f64::consts::FRAC_PI_2, sweep: -std::f64::consts::FRAC_PI_2 },
+                line((7.0, 5.0), (7.0, 8.0)),
+                line((7.0, 8.0), (0.0, 8.0)),
+                line((0.0, 8.0), (0.0, 0.0)),
+            ],
+        },
+        holes: vec![],
+    };
+    let ramp = crate::extrude(&Plane::YZ, &[profile], 0.0, 10.0).unwrap().pop().unwrap();
+    // Away the side of x = 2 + 0.3 y.
+    let cut = Region2 {
+        outer: Loop2 {
+            segs: vec![
+                line((-5.0, -5.0), (0.5, -5.0)),
+                line((0.5, -5.0), (9.5, 25.0)),
+                line((9.5, 25.0), (-5.0, 25.0)),
+                line((-5.0, 25.0), (-5.0, -5.0)),
+            ],
+        },
+        holes: vec![],
+    };
+    let cut = crate::extrude(&Plane::XY, &[cut], -1.0, 10.0).unwrap().pop().unwrap();
+    let body = boolean(&ramp, &cut, BoolOp::Cut).unwrap().unwrap();
+    chain_and_round_kept(&body, Vec3::new(6.5, 15.0, 2.0), 3, &[0.5, 1.0]);
+}
+
+#[test]
+fn a_chain_runs_on_over_a_wall_foot_round_whose_end_is_flush_with_the_side() {
+    // A wall on a plate, its end in one plane with the plate's slanted side, its foot rounded: the
+    // round's end runs across that one face from the plate's top edge up the wall's end. That is
+    // no end against a separate end face ([`crate::merge_corner`]): the plate's top edge runs on
+    // over it and up the wall's end.
+    use solidcraft_geom::{Loop2, Plane, Region2, Seg2, Vec2};
+    let polygon = |pts: &[(f64, f64)]| Region2 {
+        outer: Loop2 {
+            segs: pts.iter().zip(pts.iter().cycle().skip(1)).map(|(a, b)| Seg2::Line { a: Vec2::new(a.0, a.1), b: Vec2::new(b.0, b.1) }).collect(),
+        },
+        holes: vec![],
+    };
+    let plate = crate::extrude(&Plane::XY, &[polygon(&[(0.0, 0.0), (20.0, 0.0), (20.0, 10.0), (5.0, 10.0)])], 0.0, 2.0).unwrap().pop().unwrap();
+    let wall = crate::extrude(&Plane::XY, &[polygon(&[(0.0, 0.0), (20.0, 0.0), (20.0, 2.0), (1.0, 2.0)])], 2.0, 6.0).unwrap().pop().unwrap();
+    let body = boolean(&plate, &wall, BoolOp::Union).unwrap().unwrap();
+    for r in [0.5, 1.0] {
+        let footed = fillet(&body, &[Vec3::new(10.0, 2.0, 2.0)], r).unwrap();
+        chain_and_round_kept(&footed, Vec3::new(3.0, 6.0, 2.0), 3, &[0.5, 1.0]);
+    }
+}
+
+/// Both rounds on `body`, the foot's picks `foot` at `ra` and the plate edge's `tops` at `rb`: one
+/// after the other either way round and each at its radius, every route builds the same merge at
+/// each of `ends`, the merge adding `correction` beyond the two rounds alone.
+fn merges_alike(body: &Body, foot: &[Vec3], tops: &[Vec3], ends: &[WallEnd], (ra, rb): (f64, f64), correction: f64, how: &str) {
+    let footed = fillet(body, foot, ra).unwrap_or_else(|e| panic!("{how}: the foot alone: {e}"));
+    let edged = fillet(body, tops, rb).unwrap_or_else(|e| panic!("{how}: the edge alone: {e}"));
+    let picks: Vec<Vec3> = foot.iter().chain(tops).copied().collect();
+    let radii: Vec<f64> = foot.iter().map(|_| ra).chain(tops.iter().map(|_| rb)).collect();
+    let routes = [
+        ("foot then edge", fillet(&footed, tops, rb)),
+        ("edge then foot", fillet(&edged, foot, ra)),
+        ("each at its radius", crate::fillet_each(body, &picks, &radii)),
+    ];
+    merged_alike(body, (&footed, &edged), &routes, ends, (ra, rb), correction, how);
+}
+
+/// Every one of `routes` (from `body`, whose rounds alone are `footed` and `edged`) builds the same
+/// merge at each of `ends`, the merge adding `correction` beyond the two rounds alone.
+fn merged_alike(
+    body: &Body,
+    (footed, edged): (&Body, &Body),
+    routes: &[(&str, crate::Result<Body>)],
+    ends: &[WallEnd],
+    (ra, rb): (f64, f64),
+    correction: f64,
+    how: &str,
+) {
+    let mass = planned_volume;
+    let (v_body, v_footed, v_edged) = (mass(body), mass(footed), mass(edged));
+    let first = routes[0].1.as_ref().unwrap_or_else(|e| panic!("{how}, {}, foot {ra} edge {rb}: {e}", routes[0].0));
+    for (route, result) in routes {
+        let how = format!("{how}, {route}, foot {ra} edge {rb}");
+        let result = result.as_ref().unwrap_or_else(|e| panic!("{how}: {e}"));
+        assert_merged(result, ends, (ra, rb), 1e-6, &how);
+        for end in ends {
+            let ([p_star, q_w, q_s], _) = merge_points(*end, ra, rb);
+            for q in [q_w, q_s] {
+                assert!(crease(result, p_star, q, 1e-6) < 1e-3, "{how}");
+            }
+        }
+        // Against each round alone as meshed, the merge is the correction (to the mesh's two
+        // thousandths at each end, as where the plate's side is square to the wall).
+        let merged = mass(result) - (v_footed + v_edged - v_body);
+        assert!((merged - correction).abs() < 0.002 * ends.len() as f64, "{how}: merged {merged}, expected {correction}");
+        // The same body by every route: the same vertices, and the same volume as measured (the
+        // display's mesh differs by its chord where the faces' parameters do).
+        assert!(same_vertices(result, first, 1e-6), "{how}: the vertices differ from the first route's");
+        let measured = |b: &Body| crate::measure_mass(b).unwrap().volume;
+        assert!((measured(result) - measured(first)).abs() < 1e-6 * v_body, "{how}");
+    }
+}
+
+/// [`a_chain_runs_on_over_a_wall_foot_round_whose_end_is_flush_with_the_side`]'s wall on a plate,
+/// its end in one plane with the plate's slanted side; with a point on the wall's foot and on the
+/// side's top edge, and the wall's end there.
+fn wall_flush_with_a_slanted_side() -> (Body, Vec3, Vec3, WallEnd) {
+    use solidcraft_geom::{Loop2, Plane, Region2, Seg2, Vec2};
+    let polygon = |pts: &[(f64, f64)]| Region2 {
+        outer: Loop2 {
+            segs: pts.iter().zip(pts.iter().cycle().skip(1)).map(|(a, b)| Seg2::Line { a: Vec2::new(a.0, a.1), b: Vec2::new(b.0, b.1) }).collect(),
+        },
+        holes: vec![],
+    };
+    let plate = crate::extrude(&Plane::XY, &[polygon(&[(0.0, 0.0), (20.0, 0.0), (20.0, 10.0), (5.0, 10.0)])], 0.0, 2.0).unwrap().pop().unwrap();
+    let wall = crate::extrude(&Plane::XY, &[polygon(&[(0.0, 0.0), (20.0, 0.0), (20.0, 2.0), (1.0, 2.0)])], 2.0, 6.0).unwrap().pop().unwrap();
+    let body = boolean(&plate, &wall, BoolOp::Union).unwrap().unwrap();
+    (body, Vec3::new(10.0, 2.0, 2.0), Vec3::new(3.0, 6.0, 2.0), (Vec3::new(1.0, 2.0, 2.0), Vec3::X, Vec3::Y, 2.0))
+}
+
+#[test]
+fn rounds_meeting_where_the_wall_end_is_flush_with_the_plate_side_merge_after_the_edge() {
+    // A wall on a plate, its end in one plane with the plate's side beneath it: the wall's end and
+    // the plate's side are one face. The foot's round after the plate edge's ends at that round's
+    // end (which runs down the wall's face, square below the top) and merges with it, the band's
+    // edge on the line of the wall's end; so do both in one fillet, and each at its radius where
+    // the edge's round, the larger, comes first. The other way round the faces at the foot's end
+    // are those of a pocket's rim meeting a rounded inner corner (the plate's top the pocket's
+    // wall, the side its top): the edge's chain runs on over the foot's end and up the wall's end,
+    // as round a pocket ([`a_chain_runs_on_over_a_wall_foot_round_whose_end_is_flush_with_the_side`]).
+    // Square ends (a rectangular plate, its side 4 or 15 long to the next corner) and a side
+    // slanted at tan⁻¹ 2.
+    let square = |side: f64| {
+        let (body, foot, tops, ends) = wall_on_a_trapezoid(90.0, side);
+        (body, vec![foot], tops.to_vec(), ends.to_vec(), std::f64::consts::FRAC_PI_2)
+    };
+    let (slanted, foot, top, end) = wall_flush_with_a_slanted_side();
+    let cases = [square(4.0), square(15.0), (slanted, vec![foot], vec![top], vec![end], 2f64.atan())];
+    for (body, foot, tops, ends, theta) in &cases {
+        let how = format!("{:.0}°, {} ends", theta.to_degrees(), ends.len());
+        for (ra, rb) in [(0.5, 1.0), (0.5, 0.5), (1.0, 0.5)] {
+            let footed = fillet(body, foot, ra).unwrap();
+            let edged = fillet(body, tops, rb).unwrap();
+            assert_eq!(chain_at(&edged, foot[0]), 1, "{how}, edge {rb}");
+            assert_eq!(chain_at(&footed, tops[0]), 3, "{how}, foot {ra}");
+            let picks: Vec<Vec3> = foot.iter().chain(tops).copied().collect();
+            let radii: Vec<f64> = foot.iter().map(|_| ra).chain(tops.iter().map(|_| rb)).collect();
+            let mut routes = vec![("edge then foot", fillet(&edged, foot, ra))];
+            if ra < rb {
+                routes.push(("each at its radius", crate::fillet_each(body, &picks, &radii)));
+            }
+            // In one fillet the foot's round may come first, the edge's then as after it: the
+            // merge, or refused as too large (never the chain run on, which the fillet's chains
+            // as picked keep it from).
+            if ra == rb {
+                match fillet(body, &picks, ra) {
+                    Ok(b) => routes.push(("together", Ok(b))),
+                    Err(e) => assert!(matches!(e, KernelError::TooLarge(_)), "{how}: {e}"),
+                }
+            }
+            let correction = ends.len() as f64 * merge_correction(*theta, ra, rb);
+            merged_alike(body, (&footed, &edged), &routes, ends, (ra, rb), correction, &how);
+            // Foot then edge: refused, or the chain run on, sound.
+            if let Ok(b) = fillet(&footed, tops, rb) {
+                assert!(b.validity().is_empty(), "{how}: {:?}", b.validity());
+                assert_eq!(b.crossed_face_loops().unwrap(), 0, "{how}");
+            }
+        }
+    }
+}
+
+#[test]
+fn a_round_merging_with_one_earlier_round_at_both_its_ends_does_so_in_either_order() {
+    // The plate's corners rounded 2, its top edge is one chain of five edges from one wall end to
+    // the other, and the foot's round one face along the whole wall: the edge's round merges with
+    // that one round at both its ends, shortening its contact with the top at both. Every route
+    // builds the same two bands.
+    let (body, foot, tops, ends) = wall_on_a_trapezoid(30.0, 8.0);
+    let (c, s) = (30f64.to_radians().cos(), 30f64.to_radians().sin());
+    let corners = [Vec3::new(8.0 * c, 2.0 + 8.0 * s, 1.5), Vec3::new(40.0 - 8.0 * c, 2.0 + 8.0 * s, 1.5)];
+    let body = fillet(&body, &corners, 2.0).unwrap();
+    assert_eq!(chain_at(&body, tops[0]), 5);
+    let correction = 2.0 * merge_correction(30f64.to_radians(), 1.0, 0.5);
+    merges_alike(&body, &[foot], &[tops[0]], &ends, (1.0, 0.5), correction, "rounded corners");
+    merges_alike(&body, &[foot], &[tops[0]], &ends, (0.5, 1.0), -correction, "rounded corners");
+}
+
+#[test]
+fn rounds_meeting_where_the_wall_end_is_flush_with_a_short_or_thin_plate_side_merge_or_are_refused() {
+    // The square plate's side only a little longer than the band needs, or the plate's edge rounded
+    // as deep as the plate is thick and deeper: the foot's round after the edge's builds the merge
+    // sound, or is refused.
+    for (side, ra, rb) in [(1.03, 1.0, 1.0), (1.03, 0.5, 1.0), (15.0, 1.0, 2.999), (15.0, 1.0, 3.0), (15.0, 1.0, 3.5)] {
+        let how = format!("side {side}, foot {ra} edge {rb}");
+        let (body, foot, tops, ends) = wall_on_a_trapezoid(90.0, side);
+        if let Ok(b) = fillet(&body, &tops, rb).and_then(|edged| fillet(&edged, &[foot], ra)) {
+            assert_merged(&b, &ends, (ra, rb), 1e-6, &how);
+        }
+    }
+}
+
+#[test]
+fn rounds_meeting_at_wall_ends_off_square_by_a_modelling_error_merge_in_either_order() {
+    // The plate's sides drafted by next to nothing (a modelling error, or a file's rounding): the
+    // line of the wall's end bends by that much at the top. The band is built as on square faces,
+    // within the fit's tolerance of them, by every route; and the largest round that fits is found.
+    let foot = [
+        Vec3::new(10.0, 2.0, 2.0),
+        Vec3::new(19.0 + std::f64::consts::FRAC_1_SQRT_2, 1.0 + std::f64::consts::FRAC_1_SQRT_2, 2.0),
+        Vec3::new(20.0, -10.0, 2.0),
+    ];
+    let tops = [Vec3::new(6.0, 6.0, 2.0), Vec3::new(24.0, -12.0, 2.0)];
+    let picks: Vec<Vec3> = foot.iter().chain(&tops).copied().collect();
+    let (ra, rb) = (1.0, 0.5);
+    for degrees in [1e-6, 4e-5, 1e-4] {
+        let body = wall_on_a_drafted_plate(f64::to_radians(degrees));
+        let footed = round_the_foot(&body, ra).unwrap();
+        let edged = fillet(&body, &tops, rb).unwrap();
+        let routes = [
+            ("foot then edge", fillet(&footed, &tops, rb)),
+            ("edge then foot", round_the_foot(&edged, ra)),
+            ("each at its radius", crate::fillet_each(&body, &picks, &[ra, ra, ra, rb, rb])),
+        ];
+        let first = routes[0].1.as_ref().unwrap_or_else(|e| panic!("draft {degrees}: {e}"));
+        for (how, result) in &routes {
+            let how = format!("draft {degrees}, {how}");
+            let result = result.as_ref().unwrap_or_else(|e| panic!("{how}: {e}"));
+            assert_merged(result, &wall_ends(), (ra, rb), 1e-5, &how);
+            assert!(same_vertices(result, first, 1e-5), "{how}");
+            assert!((planned_volume(result) - planned_volume(first)).abs() < 1e-6 * planned_volume(&body), "{how}");
+        }
+        // (It searches below the radius asked for, taken to be refused.)
+        let (r, _) = crate::fillet_max(&footed, &tops, rb).unwrap_or_else(|| panic!("draft {degrees}: none fits"));
+        assert!(r > 0.99 * rb, "draft {degrees}: {r}");
+    }
+    // Off by a twentieth of a degree the band would leave the faces: refused as too large for
+    // them (smaller rounds may fit), never decisively, or built sound.
+    let body = wall_on_a_drafted_plate(f64::to_radians(0.05));
+    let footed = round_the_foot(&body, ra).unwrap();
+    match fillet(&footed, &tops, rb) {
+        Ok(b) => {
+            assert!(b.validity().is_empty(), "{:?}", b.validity());
+            assert_eq!(b.crossed_face_loops().unwrap(), 0);
+        }
+        Err(e) => assert!(!e.to_string().starts_with(crate::blend::MIXED_END), "{e}"),
+    }
+}
+
+#[test]
+fn a_small_part_far_from_the_origin_rounds_and_merges_as_at_it() {
+    // [`wall_on_a_trapezoid`] at a hundredth, at the origin and 100 and 1000 mm from it: the foot's
+    // round alone builds wherever the part is (the fillet's check of what it adds measures the
+    // part moved to the origin), and so does the merge, either order alike.
+    let (ra, rb) = (0.005, 0.01);
+    let mut grown = Vec::new();
+    for far in [0.0, 100.0, 1000.0] {
+        let origin = Vec3::new(far, -0.6 * far, 0.3 * far);
+        let (body, foot, tops, ends) = wall_on_a_trapezoid_at(110.0, 15.0, origin, 0.01);
+        let footed = fillet(&body, &[foot], ra).unwrap_or_else(|e| panic!("{far}: the foot alone: {e}"));
+        assert!(footed.validity().is_empty(), "{far}: {:?}", footed.validity());
+        let a = fillet(&footed, &tops, rb).unwrap_or_else(|e| panic!("{far}: foot then edge: {e}"));
+        let b = fillet(&fillet(&body, &tops, rb).unwrap(), &[foot], ra).unwrap_or_else(|e| panic!("{far}: edge then foot: {e}"));
+        for (how, result) in [("foot then edge", &a), ("edge then foot", &b)] {
+            assert_merged(result, &ends, (ra, rb), 1e-8, &format!("{far}: {how}"));
+        }
+        assert!(same_vertices(&a, &b, 1e-8), "{far}");
+        // Measured moved back to the origin: the measure's mesh cracks count for their distance
+        // from it.
+        let v = |x: &Body| crate::measure_mass(&crate::transform(x, -origin, Vec3::ZERO, Vec3::Z, 0.0).unwrap()).unwrap().volume;
+        grown.push((v(&footed) - v(&body), v(&a) - v(&body), v(&b) - v(&body)));
+    }
+    // What each adds, the same either order and wherever the part is, to a part in 10⁴ of the
+    // foot's round.
+    let (g0, a0, b0) = grown[0];
+    assert!(g0 > 0.0 && (a0 - b0).abs() < 1e-3 * g0, "{grown:?}");
+    for (g, a, b) in &grown {
+        assert!((g - g0).abs() < 1e-4 * g0 && (a - a0).abs() < 1e-4 * g0 && (b - b0).abs() < 1e-4 * g0, "{grown:?}");
+    }
+}
+
+/// A 12 by 4 bar standing on the origin, 10 high, its four upright edges rounded 1.5.
+fn rounded_bar() -> Body {
+    let bar = box_solid(Vec3::new(-6.0, -2.0, -5.0), Vec3::new(6.0, 2.0, 5.0)).unwrap();
+    fillet(&bar, &[Vec3::new(-6.0, -2.0, 0.0), Vec3::new(6.0, -2.0, 0.0), Vec3::new(6.0, 2.0, 0.0), Vec3::new(-6.0, 2.0, 0.0)], 1.5).unwrap()
+}
+
+#[test]
+fn a_chain_runs_on_round_a_tilted_slot_and_a_boss_on_a_tilted_plate() {
+    // A rounded slot sunk at a slant into a block's top, and a rounded bar standing on a tilted
+    // plate: the rim and the foot run round the slot's and the bar's rounded corners, whose seams
+    // cross them obliquely and which bend away from the ball. They are the design's corners, not
+    // an earlier round's ends: the chains go all the way round and a round of one edge takes them.
+    let tilt = 20f64.to_radians();
+    let slot = crate::transform(&rounded_bar(), Vec3::new(0.0, 0.0, 10.0), Vec3::ZERO, Vec3::Y, tilt).unwrap();
+    let block = box_solid(Vec3::new(-15.0, -10.0, 0.0), Vec3::new(15.0, 10.0, 10.0)).unwrap();
+    let slotted = boolean(&block, &slot, BoolOp::Cut).unwrap().unwrap();
+    chain_and_round_kept(&slotted, Vec3::new(0.0, 2.0, 10.0), 8, &[0.5]);
+    let plate = box_solid(Vec3::new(-15.0, -10.0, -2.0), Vec3::new(15.0, 10.0, 0.0)).unwrap();
+    let plate = crate::transform(&plate, Vec3::ZERO, Vec3::ZERO, Vec3::Y, tilt).unwrap();
+    let boss = boolean(&plate, &rounded_bar(), BoolOp::Union).unwrap().unwrap();
+    chain_and_round_kept(&boss, Vec3::new(0.0, 2.0, 0.0), 8, &[0.5]);
+}
+
+#[test]
+fn a_sharp_plate_edge_rounds_into_the_wall_end_and_merges_with_the_foot() {
+    // [`wall_on_a_plate`] with the plate's corners left sharp: the top edge from each wall end to
+    // the plate's next corner is a chain of one straight edge. At the wall's end its end faces are
+    // the wall's face and its end (flush with the plate's side beneath): the round runs on past
+    // the vertex to the line between them, as it does along the rounded outline. With the foot
+    // rounded too, in either order or each at its radius, the two merge at both wall ends.
+    let body = wall_on_a_plate();
+    let corner = Vec3::new(19.0 + std::f64::consts::FRAC_1_SQRT_2, 1.0 + std::f64::consts::FRAC_1_SQRT_2, 2.0);
+    let foot = [Vec3::new(10.0, 2.0, 2.0), corner, Vec3::new(20.0, -10.0, 2.0)];
+    let tops = [Vec3::new(6.0, 6.0, 2.0), Vec3::new(24.0, -12.0, 2.0)];
+    let (first, second) = ((2.0f64 / 3.0).atan(), 0.5f64.atan());
+    // Each edge's round is cut off at both ends by planes square to the top along parallel
+    // traces (y = 2 and y = 10 along the first edge, x = 20 and x = 28 along the second): every
+    // line along it is as long as the edge.
+    let lines = 208f64.sqrt() + 320f64.sqrt();
+    let v_body = planned_volume(&body);
+    for (ra, rb) in [(1.0, 0.5), (0.5, 1.0)] {
+        let edged = fillet(&body, &tops, rb).unwrap();
+        assert!(edged.validity().is_empty(), "{rb}: {:?}", edged.validity());
+        assert_eq!(edged.crossed_face_loops().unwrap(), 0);
+        let removed = (1.0 - std::f64::consts::FRAC_PI_4) * rb * rb * lines;
+        let lost = v_body - planned_volume(&edged);
+        assert!((lost - removed).abs() < 0.006, "edge {rb}: removed {lost}, expected {removed}");
+        // Alone, the round meets the line of the wall's end at its side contact and the wall's
+        // trace at its top contact; the old corner is gone.
+        for end in wall_ends() {
+            let ([_, _, q_s], [v, _, p2]) = merge_points(end, ra, rb);
+            assert_eq!((vertices_at(&edged, q_s, 1e-6), vertices_at(&edged, v, 1e-6), vertices_at(&edged, p2, 1e-6)), (1, 0, 1), "edge {rb}");
+        }
+        let footed = round_the_foot(&body, ra).unwrap();
+        let radii: Vec<f64> = foot.iter().map(|_| ra).chain(tops.iter().map(|_| rb)).collect();
+        let both: Vec<Vec3> = foot.iter().chain(&tops).copied().collect();
+        let routes = [
+            ("foot then edge", fillet(&footed, &tops, rb).unwrap()),
+            ("edge then foot", round_the_foot(&edged, ra).unwrap()),
+            ("each at its radius", crate::fillet_each(&body, &both, &radii).unwrap()),
+        ];
+        let analytic = foot_round_added(ra) - removed + merge_correction(first, ra, rb) + merge_correction(second, ra, rb);
+        for (how, result) in &routes {
+            let how = format!("{how}, foot {ra} edge {rb}");
+            assert_merged(result, &wall_ends(), (ra, rb), 1e-6, &how);
+            for end in wall_ends() {
+                let ([p_star, q_w, q_s], _) = merge_points(end, ra, rb);
+                for q in [q_w, q_s] {
+                    assert!(crease(result, p_star, q, 1e-6) < 1e-3, "{how}");
+                }
+            }
+            let grown = planned_volume(result) - v_body;
+            assert!((grown - analytic).abs() < 0.008, "{how}: grown {grown}, expected {analytic}");
+            let v0 = planned_volume(&routes[0].1);
+            assert!((planned_volume(result) - v0).abs() < 1e-6 * v0, "{how}");
+            assert!(same_vertices(result, &routes[0].1, 1e-6), "{how}: the vertices differ from {}'s", routes[0].0);
+        }
+    }
+}
+
+#[test]
+fn hostile_sizes_and_picks_at_the_merge_corner_are_refused_or_built_sound() {
+    // The plate's edge rounded where it meets the foot's round at the wall's ends (and the foot's
+    // ends picked with it), at sizes and picks nobody means: refused, or a sound body.
+    let (body, outline) = plate_with_round_corners();
+    let footed = round_the_foot(&body, 1.0).unwrap();
+    let sound = |how: String, r: crate::Result<Body>| {
+        if let Ok(b) = r {
+            assert!(b.validity().is_empty(), "{how}: {:?}", b.validity());
+            assert_eq!(b.crossed_face_loops().unwrap(), 0, "{how}");
+        }
+    };
+    let caps: Vec<Vec3> = wall_ends()
+        .into_iter()
+        .map(|end| {
+            let ([_, q_w, _], gone) = merge_points(end, 1.0, 0.5);
+            crate::blend::edge_mid(&edge_between(&footed, gone[1], q_w, 1e-6).0).unwrap()
+        })
+        .collect();
+    let with_caps: Vec<Vec3> = outline.iter().chain(&caps).copied().collect();
+    for r in [f64::NAN, f64::INFINITY, -1.0, 0.0, 1e-300, 1e-7, 1.999, 2.0, 2.001, 1e6, 1e300] {
+        sound(format!("edge {r}"), fillet(&footed, &outline, r));
+        sound(format!("edge and caps {r}"), fillet(&footed, &with_caps, r));
+        let radii: Vec<f64> = outline.iter().enumerate().map(|(i, _)| if i == 0 { r } else { 0.5 }).collect();
+        sound(format!("each {r}"), crate::fillet_each(&footed, &outline, &radii));
+    }
+    // A radius the band has no room for: the largest that builds, or none.
+    if let Some((r, b)) = crate::fillet_max(&footed, &outline, 2.5) {
+        sound(format!("largest {r}"), Ok(b));
+    }
+    // Picks off every edge, or not numbers at all; radii that don't match the picks.
+    for p in [Vec3::new(f64::NAN, 0.0, 2.0), Vec3::new(1e300, 0.0, 0.0), Vec3::new(0.0, 2.0, 1e-300)] {
+        let picks: Vec<Vec3> = outline.iter().copied().chain([p]).collect();
+        sound(format!("pick {p:?}"), fillet(&footed, &picks, 0.5));
+    }
+    assert!(crate::fillet_each(&footed, &outline, &[0.5]).is_err());
+    sound("no picks".into(), fillet(&footed, &[], 0.5));
 }

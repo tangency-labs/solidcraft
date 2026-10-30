@@ -163,6 +163,24 @@ impl ModelBody {
     pub fn definition_name(&self) -> &str {
         self.source_name.as_deref().unwrap_or(&self.name)
     }
+    /// The edges a fillet of edge `index` takes with it, as the kernel walks its tangent chain
+    /// ([`kernel::fillet_chain`]); `None` for a mesh body.
+    pub fn fillet_chain(&self, index: usize) -> Option<Vec<usize>> {
+        kernel::fillet_chain(&self.body, index)
+    }
+
+    /// The tangent chain the app picks for edge `index`: the mesh's chain (edges carrying on
+    /// within 2°), cut back to the edges the kernel's chain also takes, so it stops where the
+    /// fillet does (at the end of an earlier round of the other kind) and never takes more than
+    /// the mesh's chain did. A mesh body keeps the mesh's chain.
+    pub fn fillet_tangent_chain(&self, index: usize) -> Vec<usize> {
+        let mesh = self.mesh().tangent_chain(index, 2f64.to_radians());
+        match self.fillet_chain(index) {
+            Some(kernel) => mesh.into_iter().filter(|i| *i == index || kernel.contains(i)).collect(),
+            None => mesh,
+        }
+    }
+
     /// Display mesh, computed once: chord tolerance 1/1000 of the body size, and no facet of a
     /// curved face or edge turning more than [`kernel::DISPLAY_ANGLE`], so that a bend or a
     /// hole that is small beside the body is still drawn round.

@@ -249,6 +249,17 @@ impl Rebuild {
         self.made(new, edges.into_iter().map(Was::Edge).collect());
     }
 
+    /// The operand edges the faces it made were made in place of (a blend's edges, the edges
+    /// meeting at a corner patch's corner).
+    pub(crate) fn blended(&self) -> impl Iterator<Item = mt::EdgeID> + '_ {
+        self.faces.values().flat_map(|(_, was, _)| {
+            was.iter().filter_map(|w| match w {
+                Was::Edge(id) => Some(*id),
+                Was::Face(_) => None,
+            })
+        })
+    }
+
     /// `new` is made from what `was` says (nothing: new to the operation).
     pub(crate) fn made(&mut self, new: &mt::Face, was: Vec<Was>) {
         self.faces.insert(new.id(), (new.clone(), was, false));

@@ -555,7 +555,9 @@ pub fn taper(body: &Body, edge_at: Vec3, radius: f64) -> Result<Taper> {
 /// on alone gets a [`taper`], and the rest the constant radius. The result and the taper of each
 /// edge (in `edges`' order; None where the radius is constant).
 pub fn fillet_tapered(body: &Body, edges: &[Vec3], radius: f64) -> Result<(Body, Vec<Option<Taper>>)> {
+    // A decisive refusal is not about the radius: no taper gets round it, so it stands as it is.
     let why = match crate::fillet(body, edges, radius) {
+        Err(e) if crate::blend::decisive(&e) => return Err(e),
         Err(KernelError::TooLarge(why)) => why,
         other => return other.map(|b| (b, vec![None; edges.len()])),
     };
@@ -564,6 +566,7 @@ pub fn fillet_tapered(body: &Body, edges: &[Vec3], radius: f64) -> Result<(Body,
     for (p, slot) in edges.iter().zip(tapers.iter_mut()) {
         match crate::fillet(body, &[*p], radius) {
             Ok(_) => constant.push(*p),
+            Err(e) if crate::blend::decisive(&e) => return Err(e),
             Err(KernelError::TooLarge(_)) => *slot = Some(taper(body, *p, radius)?),
             Err(e) => return Err(e),
         }
