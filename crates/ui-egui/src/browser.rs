@@ -3354,7 +3354,10 @@ pub fn dims_overlay(app: &SolveApp, ctx: &egui::Context) {
             let r = Rect::from_center_size(tc, size);
             // A command window takes a driving dimension's name on a click (#9477): the one
             // under the pointer lights up as a sketch's own do.
-            let pick = app.dialog.is_some() && c.param.is_some() && pointer.is_some_and(|p| r.expand(2.0).contains(p));
+            let pick = app.dialog.is_some()
+                && app.session.active_sketch.is_none()
+                && c.param.is_some()
+                && pointer.is_some_and(|p| r.expand(2.0).contains(p));
             let (col, galley) = if pick {
                 ctx.set_cursor_icon(egui::CursorIcon::PointingHand);
                 (tk.accent, painter.layout_no_wrap(galley.text().to_owned(), FontId::proportional(tk.font_caption), tk.accent))

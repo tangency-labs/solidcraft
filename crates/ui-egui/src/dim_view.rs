@@ -902,16 +902,14 @@ pub(crate) fn with_reference(expr: &str, name: &str, range: Option<egui::text::C
 }
 
 /// The driving dimension whose value text is under a screen position, for a command window
-/// that takes its name (#9477): its parameter. A finished sketch's shown dimension (Show
-/// Dimensions) outside sketch editing, the sketch's own while editing it. Driven dimensions
-/// have none.
+/// that takes its name (#9477): its parameter. Only a finished sketch's shown dimension (Show
+/// Dimensions) outside sketch editing, as for a double-click: in a sketch, its own dimensions
+/// lie over the curves a sketch window picks. Driven dimensions have none.
 pub fn reference_at(app: &SolveApp, pos: Pos2) -> Option<String> {
     if app.session.active_sketch.is_some() {
-        let id = hit_text(pos)?;
-        DRAWN.with(|d| d.borrow().iter().find(|d| d.id == id).and_then(|d| d.param.clone()))
-    } else {
-        model_hit(pos)?.param
+        return None;
     }
+    model_hit(pos)?.param
 }
 
 /// Insert a reference into the expression, using character offsets (not bytes). The rule:
