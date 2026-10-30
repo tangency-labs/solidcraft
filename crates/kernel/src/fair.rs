@@ -53,10 +53,17 @@ use crate::{KernelError, Result};
 
 /// Most steps one fairing run takes (see [`FairOptions::iterations`]).
 pub const MAX_FAIR_ITERATIONS: usize = 1000;
-/// Most control points one fairing run accepts (a 64 × 64 net): plenty for any face's control
-/// net, and small enough that a step stays cheap whatever a design file contains.
-pub const MAX_FAIR_POINTS: usize = 4096;
-/// Most entries of the banded system (2²¹ doubles, 16 MB).
+/// Most control points one fairing run accepts (a 128 × 128 net). `MAX_FAIR_BAND` is what
+/// bounds the solver's memory and its factorisation; this bounds the rest of a step, the energy
+/// sweep over every control point (`(2p_u + 1)(2p_v + 1)` neighbours each, three terms) and the
+/// copies of the net: for a bicubic net a few million multiply-adds and under a megabyte. It is
+/// set above the band's own limit for square bicubic nets (about 90 × 90), so a face's net is
+/// refused for the system it needs rather than for its size: SMLib's thickenings make faces of
+/// 72 × 78 control points, which the band takes at about 1.1 M entries.
+pub const MAX_FAIR_POINTS: usize = 1 << 14;
+/// Most entries of the banded system (2²¹ doubles, 16 MB). The factorisation's work is at most
+/// `n · min(n, bw)²` for `n` unknowns `bw` apart with `n · (bw + 1)` within this, a few 10⁹
+/// multiply-adds at the very worst (`n ≈ bw ≈ 1450`), and each solve's at most twice the band.
 const MAX_FAIR_BAND: usize = 1 << 21;
 /// The fairness energy of a curve, as a one-direction net: the `(order in u, order in v, weight)`
 /// term list of `∫∫ (∂S)²`.
@@ -1307,7 +1314,8 @@ mod tests {
         );
         // A net too large to fair, refused before anything is allocated for it.
         let line = [0.0, 0.0, 1.0, 1.0];
-        assert!(fair_net([1, 1], [&line, &line], &Grid::from_fn([65, 65], |_, _| [0.0; 3]).unwrap(), &ok).is_err(), "4225 control points");
+        let huge = fair_net([1, 1], [&line, &line], &Grid::from_fn([129, 129], |_, _| [0.0; 3]).unwrap(), &ok).unwrap_err();
+        assert!(matches!(huge, KernelError::TooLarge(_)), "16641 control points: {huge}");
         // A singular system: a cubic whose last control points lie past the end of its domain
         // (0.5), where they do not move the curve at all, so the interior equations have no
         // unique solution and the run must refuse rather than move anything.
