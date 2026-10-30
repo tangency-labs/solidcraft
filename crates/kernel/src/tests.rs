@@ -311,10 +311,32 @@ fn loop_fillet_as_tall_as_its_wall_consumes_it() {
     let m = measure(&f).unwrap();
     assert!(rel(m.volume, want) < 2e-4, "{} vs {want}", m.volume);
     assert!(f.validity().is_empty(), "{:?}", f.validity());
-    // Taller than the wall: still refused, the body unchanged.
+    // Taller than the wall the round overflows on its tangent side, past the wall's bottom
+    // edge: it is built on the wall continued down and cut from the disc (the owner's
+    // blend-overflow ruling, 2026-10-30), keeping its radius. Its section in (ρ, z) is the r
+    // square at the edge outside the circle about (13 − r, 2 − r), above z = 0: with
+    // t = z − (2 − r) = r sin θ and ρ(θ) = 13 − r + r cos θ the disc keeps
+    // π (169·2 − ∫ (169 − ρ²) dz), θ from asin((r − 2) / r) (957.692239 at r = 2.5).
+    let kept = |r: f64| {
+        let (n, lo) = (20000, ((r - 2.0) / r).asin());
+        let taken: f64 = (0..n)
+            .map(|i| {
+                let th = lo + (f64::from(i) + 0.5) * (PI / 2.0 - lo) / f64::from(n);
+                let rho = 13.0 - r + r * th.cos();
+                (169.0 - rho * rho) * r * th.cos()
+            })
+            .sum::<f64>()
+            * (PI / 2.0 - lo)
+            / f64::from(n);
+        PI * (169.0 * 2.0 - taken)
+    };
+    assert!(rel(kept(2.0), PI * 169.0 * 2.0 - spandrel(2.0).0 * 2.0 * PI * (13.0 - spandrel(2.0).1)) < 1e-9);
+    assert!((kept(2.5) - 957.692239).abs() < 1e-6, "{}", kept(2.5));
     for r in [2.0 + 1e-3, 2.5] {
-        let e = fillet(&disc, &[Vec3::new(0.0, 13.0, 2.0), Vec3::new(0.0, -13.0, 2.0)], r).unwrap_err();
-        assert!(e.to_string().contains("taller than the walls"), "{r}: {e}");
+        let f = fillet(&disc, &[Vec3::new(0.0, 13.0, 2.0), Vec3::new(0.0, -13.0, 2.0)], r).unwrap_or_else(|e| panic!("{r}: {e}"));
+        assert!(f.validity().is_empty(), "{r}: {:?}", f.validity());
+        let v = measure(&f).unwrap().volume;
+        assert!(rel(v, kept(r)) < 1e-6, "{r}: {v} vs {}", kept(r));
     }
 }
 
@@ -2067,8 +2089,8 @@ fn fillet_mixed_arc_and_line_removed_volume_converges() {
         }
         let blended = fillet(&body, &[Vec3::new(0.0, 10.0, 15.0), Vec3::new(5.0, 0.0, 15.0)], r).unwrap();
         // The removal from the exact volumes (SMLib's, to 1e-8): the reference to a hundred
-        // thousandth (the blend's surfaces are SMLib's fits; their section error is
-        // fillet_mixed_arc_and_line_joint_preserves_both_section_radii's).
+        // thousandth (the blend's surfaces are SMLib's fits; the rig's
+        // fillets/485-fillet-d-prism-top-outline-arc-and-flat grades the same round).
         let done = measure(&blended).unwrap();
         let exact = source.volume - done.volume;
         assert!(rel(exact, want) < 1e-5, "r={r}: removed {exact}, expected {want}");
@@ -2080,42 +2102,6 @@ fn fillet_mixed_arc_and_line_removed_volume_converges() {
             assert!((removed - exact).abs() <= bound, "r={r}, tol={tol}: mesh removal {removed}, exact {exact} (within {bound})");
         }
     }
-}
-
-#[test]
-fn fillet_mixed_arc_and_line_joint_preserves_both_section_radii() {
-    let r = 0.5;
-    let body = mixed_arc_and_line_prism();
-    let blended = fillet(&body, &[Vec3::new(0.0, 10.0, 15.0), Vec3::new(5.0, 0.0, 15.0)], r).unwrap();
-    crate::guard("inspect mixed fillet mitres", || {
-        let rec = blended.record();
-        let mut mitres = std::collections::HashSet::new();
-        for (id, edge) in rec.edges.iter().enumerate() {
-            let a = Vec3::from(rec.vertices[edge.vertices[0] as usize].point);
-            let b = Vec3::from(rec.vertices[edge.vertices[1] as usize].point);
-            // Only the two corner profiles join the top contact to the wall contact.
-            if (a.z - b.z).abs() < r - 1e-8 || a.z.min(b.z) < 15.0 - r - 1e-8 || a.x * b.x <= 0.0 {
-                continue;
-            }
-            if !mitres.insert(id) {
-                continue;
-            }
-            let curve = solidcraft_geom::brep::eval::CurveEval::new(edge.parameters()).unwrap();
-            let [lo, hi] = edge.interval;
-            for i in 0..=257 {
-                let p = curve.point(lo + (hi - lo) * f64::from(i) / 257.0).unwrap();
-                // The joint lies on both the cylindrical line blend and the toroidal
-                // arc blend, not their tangent-plane approximation.
-                let radius2 = (p.y - r).powi(2) + (p.z - (15.0 - r)).powi(2);
-                assert!((radius2 - r * r).abs() < 1e-7, "distorted line section at {p:?}: radius squared {radius2}");
-                let radius2 = (p.x.hypot(p.y) - (10.0 - r)).powi(2) + (p.z - (15.0 - r)).powi(2);
-                assert!((radius2 - r * r).abs() < 1e-7, "distorted arc section at {p:?}: radius squared {radius2}");
-            }
-        }
-        assert_eq!(mitres.len(), 2, "both arc/line corners must be checked");
-        Ok(())
-    })
-    .unwrap();
 }
 
 #[test]

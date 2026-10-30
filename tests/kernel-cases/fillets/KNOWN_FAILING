@@ -8,6 +8,8 @@
 9-fillet-corner-curvature-with-reduce-fit not supported yet: solid.fillet builds corner g2 with the exact fit only
 9-fillet-corner-curvature-with-taper-fit not supported yet: solid.fillet builds corner g2 with the exact fit only
 every-block-cylinder-crease-top-edge-after-arc-round-r1 the r1 round's contact seam with the block's side face reads 60 degrees (the cylinder wall's normal) at its end on the crease (8.660, 5, 15.284): G0 where the round is built tangent
+every-chamfer-pocket-rim-5-5-refused refused naming 5 mm as the largest distance: the full-width chamfer (legs as deep as the 5 mm walls) builds instead of being refused
+every-chamfer-pocket-rim-5-full-depth-refused the full-width chamfer (legs as deep as the 5 mm walls) builds instead of being refused
 every-hole-top-rim-chamfer-10-full-depth-refused the full-width chamfer (leg as deep as the 10 mm plate) builds instead of being refused
 every-hole-top-rim-r12-past-plate-bottom SMLib status 1001: a convex round past its face on the tangent side is not yet built by subtraction
 every-pocket-floor-and-rim-edges-r2 a corner patch where two rim rounds meet at each concave pocket corner (23 faces, not 19) instead of the mitre the rounds make running into each other

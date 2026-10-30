@@ -1,0 +1,24 @@
+{
+ "sources": [],
+ "what": "a rectangular pocket's rim edges chamfered by two distances: 2 along the top (facing up) and 1 down the walls",
+ "source": "analytic",
+ "method": "plate 60x40x10 with the pocket 30x20x5 (x 15..45, y 10..30, floor z = 5, sharp vertical corners): V0 = 24000 - 3000 = 21000. Each rim edge loses the triangle of legs 2 (on the top) and 1 (down the wall), area 1, along 100; at each corner the mitred quadrant loses the points past both walls with s/2 + u < 1 and t/2 + u < 1: int_0^1 (2 (1-u))^2 du = 4/3. Removed = 100 + 16/3 = 105.3333. V = 20894.6667. Faces 15.",
+ "body_count": 1,
+ "volume_mm3": 20894.666666666668,
+ "faces": 15,
+ "bbox": {
+  "min": [
+   0,
+   0,
+   0
+  ],
+  "max": [
+   60,
+   40,
+   10
+  ]
+ },
+ "continuity": {
+  "order": "g0"
+ }
+}
