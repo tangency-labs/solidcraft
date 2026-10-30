@@ -322,9 +322,11 @@ accelerations are finite differences between samples, central inside and one-sid
 so they are as smooth as the samples are dense (up to 1000, one per step by default). Angles are
 unwrapped, so a joint that turns on past half a turn keeps counting.
 `motion.interference {study, occurrences?, against?, contact_sets?, samples?}` answers each
-colliding pair with its `first_step`, `last_step`, the `steps` ranges where they overlap, how
-far into each other (`depth_mm`, the most at `deepest_step`) and their shared `volume_mm3`
-there (null when it is not cheap to work out). It plays the study as `motion.play` does, but
+colliding pair with its `first_step`, `last_step`, the `steps` ranges where they overlap, the
+most volume they share at a sample (`volume_mm3`, worked out exactly from the bodies; null when
+it is not cheap to work out at every sample they overlap), the first sample sharing that much
+(`deepest_step`) and how far into each other they reach (`depth_mm`, an estimate from points of
+the bodies' contact meshes). It plays the study as `motion.play` does, but
 contact sets don't stop it, and parts are tested at the samples only: a part that passes right
 through another between two samples is missed. Parts are told apart by occurrence, as contact
 sets tell them apart: an occurrence inside a sub-assembly placed twice is one part, so its two

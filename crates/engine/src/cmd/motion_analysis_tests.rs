@@ -147,10 +147,9 @@ fn interference_names_the_step_two_parts_start_to_collide() {
         assert_eq!((c["a"].as_str(), c["b"].as_str()), (Some("A:1"), Some("B:1")), "{r}");
         assert_eq!((c["first_step"].as_f64(), c["last_step"].as_f64()), (Some(11.0), Some(15.0)), "{r}");
         assert_eq!(c["steps"], json!([[11.0, 15.0]]), "{r}");
-        let deepest = c["deepest_step"].as_f64().unwrap_or(f64::NAN);
-        assert!(c["depth_mm"].as_f64().unwrap_or(0.0) > 1.0 && (11.0..=15.0).contains(&deepest), "{r}");
-        let volume = c["volume_mm3"].as_f64().unwrap_or(f64::NAN);
-        assert!((volume - 100.0 * (deepest - 10.0)).abs() < 1e-6, "{r}");
+        // Deepest where they share the most: 5 mm of the 10 x 10 face at the end.
+        assert!(c["depth_mm"].as_f64().unwrap_or(0.0) > 1.0 && c["deepest_step"] == 15.0, "{r}");
+        assert!((c["volume_mm3"].as_f64().unwrap_or(f64::NAN) - 500.0).abs() < 1e-6, "{r}");
     }
     // B against a far block C only: B's pass through A is not asked about.
     run(&mut s, "component.create", json!({"name": "C"}));
@@ -165,6 +164,39 @@ fn interference_names_the_step_two_parts_start_to_collide() {
     run(&mut s, "motion.study", json!({"study": "Push", "keys": [{"joint": "Rail", "points": [[0, 10], [15, 0]]}]}));
     let r = run(&mut s, "motion.interference", json!({"study": "Push"}));
     assert!(r["clear"] == true && r["collisions"] == json!([]), "{r}");
+}
+
+/// An arm (40 x 10 x 10 from (0, -5, 0)) turns on a hinge at the origin from 0 to 90 degrees in
+/// 9 steps into a grounded block (50 x 10 x 10 from (-10, 30, 0)). Its corner (40, 5) reaches
+/// y = 40 sin θ + 5 cos θ, past 30 from 40.97 degrees, so it overlaps from step 5. Every point of
+/// the slab is within 5 mm of z = 0 or z = 10, so from 60 degrees on (where the arm's side
+/// crosses y = 35) the depth is 5 mm at every step: only the shared volume, which grows to the
+/// arm's 10 x 10 x 10 end inside the block at 90 degrees, tells the deepest step. Sampled twice
+/// as densely (5 degrees a sample), the overlap is seen from step 4.5 (45 degrees) and is still
+/// deepest at the end.
+#[test]
+fn interference_is_deepest_where_the_parts_share_the_most_volume() {
+    let mut s = Session::default();
+    for (name, size, corner) in [("Base", [20, 20, 10], [-10, -10, -10]), ("Arm", [40, 10, 10], [0, -5, 0]), ("Stop", [50, 10, 10], [-10, 30, 0])] {
+        run(&mut s, "component.activate", json!({"component": "root"}));
+        run(&mut s, "component.create", json!({"name": name}));
+        run(&mut s, "solid.box", json!({"length": size[0], "width": size[1], "height": size[2], "corner": corner}));
+    }
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    for name in ["Base", "Stop"] {
+        let o = occ(&s, name);
+        run(&mut s, "occurrence.ground", json!({"occurrence": o, "grounded": true}));
+    }
+    let end = |o: &str| json!({"occurrence": o, "point": [0, 0, 0], "z": [0, 0, 1]});
+    run(&mut s, "joint.create", json!({"type": "revolute", "name": "Hinge", "flip": true, "a": end("Base"), "b": end("Arm"), "quiet": true}));
+    run(&mut s, "motion.study", json!({"name": "Open", "steps": 9, "keys": [{"joint": "Hinge", "points": [[0, 0], [9, 90]]}]}));
+    for (samples, first) in [(10, 5.0), (19, 4.5)] {
+        let r = run(&mut s, "motion.interference", json!({"study": "Open", "samples": samples, "occurrences": ["Arm"], "against": ["Stop"]}));
+        let c = &r["collisions"][0];
+        assert!(r["clear"] == false && c["first_step"] == first && c["last_step"] == 9.0 && c["deepest_step"] == 9.0, "{samples}: {r}");
+        assert!((c["volume_mm3"].as_f64().unwrap_or(f64::NAN) - 1000.0).abs() < 1e-6, "{samples}: {r}");
+        assert!(c["depth_mm"].as_f64().is_some_and(|d| d > 0.0 && d <= 5.0 + 1e-9), "{samples}: {r}");
+    }
 }
 
 /// A number names a study by its id first, text by its name first: a study may be named like
