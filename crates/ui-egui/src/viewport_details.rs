@@ -182,7 +182,10 @@ pub(crate) fn edit_params(app: &SolveApp, effect: &StatusItem, id: &str, value: 
                 base = base.into_iter().zip(new_n).map(|(o, n)| o - n * projection).collect();
             }
             let flip = normal.iter().zip(n).map(|(a, b)| a * b).sum::<f64>() < 0.0;
-            Some(json!({"plane":{"origin":base,"normal":new_n},"offset":format!("{} mm",if id=="offset"{scalar(value)?}else{old_offset}),
+            // The plane at its offset along the normal shown.
+            let offset = if id == "offset" { scalar(value)? } else { old_offset };
+            let origin: Vec<f64> = base.iter().zip(new_n).map(|(o, n)| o + n * offset).collect();
+            Some(json!({"plane":{"origin":origin,"normal":new_n},
                 "flip":if id=="flip"{check(value)?}else{flip},"hatch":if id=="hatch"{check(value)?}else{hatch}}))
         }
         StatusSetting::Continuity { .. } => {

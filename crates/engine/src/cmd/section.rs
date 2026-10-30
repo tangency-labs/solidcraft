@@ -1,6 +1,6 @@
 //! Section Analysis: a view-only cut through the model by up to six planes. What lies on the
 //! positive side of every plane is hidden: one plane hides its side, two cut a wedge (a quarter,
-//! square to each other) away. It changes no geometry and is not an undo step.
+//! square to each other) away. It changes no geometry; each change is an undo step of its own.
 
 use serde_json::{Value, json};
 use solidcraft_geom::{Plane, Vec3};
@@ -15,29 +15,49 @@ const SECTION: TypedContract<contract::SectionParams> = TypedContract::new();
 pub static COMMANDS: &[CommandSpec] =
     &[CommandSpec::new("inspect.section", "Section Analysis", crate::checked!("inspect.section", section))
     .contract(&SECTION).output(output_schema_for::<contract::SectionResult>)
-    .at("SOLID", "INSPECT").icon("section").noundo().params(
-        "plane: XY|XZ|YZ | construction plane name or id | {origin, normal}; offset?: expr along the plane's normal (XY: +Z, XZ: +Y, YZ: +X); \
+    .at("SOLID", "INSPECT").icon("section").params(
+        "plane: XY|XZ|YZ | construction plane name or id | {origin, normal}; offset?: expr, how far the cut moves against the plane's \
+         normal as given (before any flip), so a positive distance cuts more away: into the part from a face's outward plane \
+         (XY: -Z, XZ: -Y, YZ: -X; negative moves it the other way); \
          at?: expr, the cut's world coordinate on the named plane's axis (XY: Z, XZ: Y, YZ: X), instead of offset; \
-         flip?: bool; hatch?: bool (hatch the cut faces, in each body's colour; default true, or as it was with add or replace); \
+         flip?: bool (hide the other side; the plane stays where it is); hatch?: bool (hatch the cut faces, in each body's colour; default true, or as it was with add or replace); \
          add?: bool (add the plane to the section, starting one if there is none, instead of replacing it: the section hides what \
-         lies on the positive side of every plane, so two square planes cut a quarter away; at most 6 planes); \
-         replace?: a plane's id (move that plane to `plane`, keeping its id and the others); or remove: a plane's id (take that plane out; the last turns the section off); \
-         or clear: true (all planes). Returns section: the plane made {id, origin, normal, hatch, and for a named plane axis and at} \
-         (null when the section is off), and planes: [{id, origin, normal}], every plane of the section",
+         lies on the positive side of every plane, so two square planes cut a quarter away; at most 6 planes, hidden ones included); \
+         replace?: a plane's id (move that plane to `plane`, keeping its id and the others; a hidden one is shown); or remove: a plane's id \
+         (take that plane out; the last turns the section off); or hide / show: a plane's id or [ids] (a hidden plane stays in the \
+         section and cuts nothing until shown); or clear: true (all planes). Each change is one undo step; the design is untouched. \
+         Returns section: the plane made {id, origin, normal, hatch, and for a named plane axis and at} \
+         (null when the section is off, or for remove, hide and show), and planes: [{id, origin, normal, hidden}], every plane of the section by id",
     )];
 
 fn section(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "inspect.section";
     if bool_(p, "clear").unwrap_or(false) {
         s.section.clear();
+        s.section_hidden.clear();
         s.status_slot(crate::status_items::StatusId::Section, false);
         s.revision += 1;
         return Ok(reply(s, Value::Null));
     }
+    let given = |key: &str| p.get(key).is_some_and(|v| !v.is_null());
     let add = match p.get("add") {
         None | Some(Value::Null) => false,
         Some(v) => v.as_bool().ok_or_else(|| bad(cmd, "`add` must be true or false"))?,
     };
+    if given("hide") || given("show") {
+        if (given("hide") && given("show")) || ["plane", "replace", "remove"].iter().any(|k| given(k)) || add {
+            return Err(bad(cmd, "`hide` and `show` take plane ids alone: give one of them without `plane`, `add`, `replace` or `remove`"));
+        }
+        let (key, hide) = if given("hide") { ("hide", true) } else { ("show", false) };
+        let ids = plane_ids(s, p.get(key), key, cmd)?;
+        let (from, to) = if hide { (&mut s.section, &mut s.section_hidden) } else { (&mut s.section_hidden, &mut s.section) };
+        to.extend(from.iter().filter(|c| ids.contains(&c.id)).copied());
+        from.retain(|c| !ids.contains(&c.id));
+        to.sort_by_key(|c| c.id);
+        s.status_slot(crate::status_items::StatusId::Section, !s.section.is_empty());
+        s.revision += 1;
+        return Ok(reply(s, Value::Null));
+    }
     let id_of = |key: &str| -> Result<Option<u64>> {
         match p.get(key).filter(|v| !v.is_null()) {
             None => Ok(None),
@@ -45,11 +65,12 @@ fn section(s: &mut Session, p: &Value) -> Result<Value> {
         }
     };
     let replace = id_of("replace")?;
-    if replace.is_some() && (add || p.get("remove").is_some_and(|v| !v.is_null())) {
+    if replace.is_some() && (add || given("remove")) {
         return Err(bad(cmd, "`replace` moves one plane: give it without `add` or `remove`"));
     }
+    let known = |s: &Session, id: u64| s.section.iter().chain(&s.section_hidden).any(|c| c.id == id);
     if let Some(id) = replace
-        && !s.section.iter().any(|c| c.id == id)
+        && !known(s, id)
     {
         return Err(bad(cmd, format!("the section has no plane {id}")));
     }
@@ -58,8 +79,11 @@ fn section(s: &mut Session, p: &Value) -> Result<Value> {
             return Err(bad(cmd, "give either a `plane` to cut with or the `remove` id of one, not both"));
         }
         let id = v.as_u64().ok_or_else(|| bad(cmd, "`remove` must be the id of one of the section's planes"))?;
-        let at = s.section.iter().position(|c| c.id == id).ok_or_else(|| bad(cmd, format!("the section has no plane {id}")))?;
-        s.section.remove(at);
+        if !known(s, id) {
+            return Err(bad(cmd, format!("the section has no plane {id}")));
+        }
+        s.section.retain(|c| c.id != id);
+        s.section_hidden.retain(|c| c.id != id);
         s.status_slot(crate::status_items::StatusId::Section, !s.section.is_empty());
         s.revision += 1;
         return Ok(reply(s, Value::Null));
@@ -75,12 +99,12 @@ fn section(s: &mut Session, p: &Value) -> Result<Value> {
     let offset = match (offset, at, axis) {
         (Some(_), Some(_), _) => return Err(bad(cmd, "give either `offset` (along the normal) or `at` (a world coordinate), not both")),
         (_, Some(_), None) => return Err(bad(cmd, "`at` needs a named plane (XY, XZ, YZ); move an {origin, normal} plane by its origin")),
-        // The named planes pass through the world origin, so the offset is `at` signed by the normal.
-        (_, Some(at), Some(i)) => at * axis_component(normal, i).signum(),
+        // The named planes pass through the world origin, and the offset runs against the normal.
+        (_, Some(at), Some(i)) => -at * axis_component(normal, i).signum(),
         (offset, None, _) => offset.unwrap_or(0.0),
     };
+    let origin = origin - normal * offset;
     let normal = if bool_(p, "flip").unwrap_or(false) { -normal } else { normal };
-    let origin = origin + normal * offset * if bool_(p, "flip").unwrap_or(false) { -1.0 } else { 1.0 };
     if !origin.is_finite() || !normal.is_finite() || (normal.len() - 1.0).abs() > 1e-6 {
         return Err(bad(cmd, "the plane must be finite"));
     }
@@ -91,25 +115,34 @@ fn section(s: &mut Session, p: &Value) -> Result<Value> {
     };
     let tol = 1e-9 * (1.0 + origin.len());
     let twice = |s: &Session| {
-        s.section.iter().any(|c| Some(c.id) != replace && (c.normal - normal).len() <= 1e-9 && c.normal.dot(origin - c.origin).abs() <= tol)
+        s.section
+            .iter()
+            .chain(&s.section_hidden)
+            .any(|c| Some(c.id) != replace && (c.normal - normal).len() <= 1e-9 && c.normal.dot(origin - c.origin).abs() <= tol)
     };
     if (add || replace.is_some()) && twice(s) {
         return Err(bad(cmd, "the section already cuts with this plane"));
     }
     let id = if let Some(id) = replace {
-        for c in s.section.iter_mut().filter(|c| c.id == id) {
-            (c.origin, c.normal) = (origin, normal);
+        s.section_hidden.retain(|c| c.id != id);
+        match s.section.iter_mut().find(|c| c.id == id) {
+            Some(c) => (c.origin, c.normal) = (origin, normal),
+            None => {
+                s.section.push(SectionPlane { id, origin, normal });
+                s.section.sort_by_key(|c| c.id);
+            }
         }
         id
     } else if add {
-        if s.section.len() >= MAX_SECTION_PLANES {
+        if s.section.len() + s.section_hidden.len() >= MAX_SECTION_PLANES {
             return Err(bad(cmd, format!("a section cuts with at most {MAX_SECTION_PLANES} planes; remove one first")));
         }
-        let id = s.section.iter().map(|c| c.id).max().unwrap_or(0) + 1;
+        let id = s.section.iter().chain(&s.section_hidden).map(|c| c.id).max().unwrap_or(0) + 1;
         s.section.push(SectionPlane { id, origin, normal });
         id
     } else {
         s.section.clear();
+        s.section_hidden.clear();
         s.section.push(SectionPlane { id: 1, origin, normal });
         1
     };
@@ -125,10 +158,26 @@ fn section(s: &mut Session, p: &Value) -> Result<Value> {
     Ok(reply(s, made))
 }
 
-/// The reply: the plane made (or null) and every plane of the section.
+/// The ids `hide` or `show` names: one id or a list, each one of the section's planes.
+fn plane_ids(s: &Session, v: Option<&Value>, key: &str, cmd: &str) -> Result<Vec<u64>> {
+    let one = |v: &Value| v.as_u64().ok_or_else(|| bad(cmd, format!("`{key}` must be a plane's id or a list of them")));
+    let ids = match v {
+        Some(Value::Array(a)) => a.iter().map(one).collect::<Result<Vec<u64>>>()?,
+        Some(v) => vec![one(v)?],
+        None => Vec::new(),
+    };
+    match ids.iter().find(|id| !s.section.iter().chain(&s.section_hidden).any(|c| c.id == **id)) {
+        Some(id) => Err(bad(cmd, format!("the section has no plane {id}"))),
+        None => Ok(ids),
+    }
+}
+
+/// The reply: the plane made (or null) and every plane of the section, by id.
 fn reply(s: &Session, made: Value) -> Value {
-    let planes: Vec<Value> = s.section.iter().map(|c| json!({"id": c.id, "origin": c.origin, "normal": c.normal})).collect();
-    let made = if s.section.is_empty() { Value::Null } else { made };
+    let mut all: Vec<(&SectionPlane, bool)> = s.section.iter().map(|c| (c, false)).chain(s.section_hidden.iter().map(|c| (c, true))).collect();
+    all.sort_by_key(|(c, _)| c.id);
+    let planes: Vec<Value> = all.iter().map(|(c, hidden)| json!({"id": c.id, "origin": c.origin, "normal": c.normal, "hidden": hidden})).collect();
+    let made = if s.section.is_empty() && s.section_hidden.is_empty() { Value::Null } else { made };
     json!({"section": made, "planes": planes})
 }
 

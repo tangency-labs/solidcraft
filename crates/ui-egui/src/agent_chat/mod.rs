@@ -1764,9 +1764,12 @@ fn merge_undo(
         return 0;
     };
     let steps = undo.len() - first;
+    // The merged step brings back the section as it was before the first step that changed it.
+    let section = undo.get(first..).and_then(|merged| merged.iter().find_map(|s| s.section.clone()));
     undo.truncate(first + 1);
     if let Some(s) = undo.get_mut(first) {
         s.label = label.to_string();
+        s.section = s.section.take().or(section);
     }
     steps
 }

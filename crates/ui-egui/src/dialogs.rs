@@ -4232,7 +4232,8 @@ fn section_from_geometry(d: &mut Dialog, plane: solidcraft_engine::SectionPlane,
     let n = [plane.normal.x, plane.normal.y, plane.normal.z];
     let Some((_, distance, canonical)) = crate::viewport_status::section_coordinates(o, n) else { return };
     let flip = n.iter().zip(canonical).map(|(a, b)| a * b).sum::<f64>() < 0.0;
-    d.kind = Kind::Section { offset: format!("{distance} mm"), flip, hatch, add: false, edit };
+    // A positive distance moves the cut against the normal.
+    d.kind = Kind::Section { offset: format!("{} mm", 0.0 - distance), flip, hatch, add: false, edit };
     if let Some(input) = d.inputs.first_mut() {
         input.items.clear();
     }

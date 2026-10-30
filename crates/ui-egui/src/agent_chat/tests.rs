@@ -309,6 +309,7 @@ fn merging_finds_the_turns_start_when_the_history_was_trimmed() {
         active_sketch: None,
         pending_moves: Default::default(),
         visibility: Default::default(),
+        section: None,
     };
     let docs: Vec<_> = (0..6).map(doc).collect();
     // The turn began at depth 3 with docs[3]; the history then lost its oldest step.
@@ -316,6 +317,12 @@ fn merging_finds_the_turns_start_when_the_history_was_trimmed() {
     assert_eq!(merge_undo(&mut undo, &docs[3], 3, "Agent"), 3);
     assert_eq!(undo.len(), 3);
     assert!(Arc::ptr_eq(&undo[2].doc, &docs[3]) && undo[2].label == "Agent");
+    // A section step in the turn: the merged step brings back the section before it.
+    let mut undo: Vec<_> = docs[1..6].iter().map(snap).collect();
+    let before = solidcraft_engine::SectionState { hatch: true, ..Default::default() };
+    undo[3].section = Some(before.clone());
+    merge_undo(&mut undo, &docs[3], 3, "Agent");
+    assert_eq!(undo[2].section, Some(before));
     // A start that is no longer in the history: nothing is merged.
     let mut undo: Vec<_> = docs[1..6].iter().map(snap).collect();
     assert_eq!(merge_undo(&mut undo, &doc(9), 3, "Agent"), 0);

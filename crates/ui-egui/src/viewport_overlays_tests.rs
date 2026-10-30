@@ -69,7 +69,12 @@ fn section_details_live_fields_reconstruct_arbitrary_plane_without_losing_compan
     h.app.session.doc_mut().units = "in".into();
     let effect = h.app.session.status_items().remove(0);
     let params = crate::viewport_details::edit_params(&h.app, &effect, "offset", &V::Length { value: -25.4, units: "in".into() }).unwrap();
-    assert_eq!(params["offset"], "-25.4 mm");
+    let offset = |v: &serde_json::Value| {
+        let o: Vec<f64> = v["plane"]["origin"].as_array().unwrap().iter().filter_map(serde_json::Value::as_f64).collect();
+        let n: Vec<f64> = v["plane"]["normal"].as_array().unwrap().iter().filter_map(serde_json::Value::as_f64).collect();
+        o.iter().zip(&n).map(|(o, n)| o * n).sum::<f64>()
+    };
+    assert!((offset(&params) + 25.4).abs() < 1e-9, "{params}");
     assert_eq!(params["hatch"], true);
     assert_eq!(params["flip"], !current_flip);
     h.app.run("inspect.section", params).unwrap();
@@ -198,7 +203,9 @@ fn details_native_value_edits_run_real_commands_without_design_history() {
             _ => panic!("real edited setting expected"),
         };
         assert!((value - expected).abs() < 1e-9, "native {field}: {value} instead of {expected}");
-        assert_eq!((h.app.session.doc.to_json(), h.app.session.undo.len()), before);
+        // A section change is an undo step of its own (#8717); the design is untouched.
+        let steps = usize::from(command == "inspect.section");
+        assert_eq!((h.app.session.doc.to_json(), h.app.session.undo.len()), (before.0, before.1 + steps));
         assert!(h.app.dialog.is_none());
     }
 }

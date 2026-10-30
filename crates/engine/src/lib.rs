@@ -287,6 +287,16 @@ pub struct Snapshot {
     /// What was hidden or shown then (`browser.visibility`). It is saved with the design, so
     /// hiding a body is undone and redone like any other change.
     pub visibility: Visibility,
+    /// The Section Analysis before a step that changed it (none: the step left it alone).
+    pub section: Option<SectionState>,
+}
+
+/// A Section Analysis as an undo step keeps it. View state, never saved with the design.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct SectionState {
+    pub planes: Vec<SectionPlane>,
+    pub hidden: Vec<SectionPlane>,
+    pub hatch: bool,
 }
 
 /// Where the open sketch was entered (`sketch.create`, `sketch.edit`): the design before it and
@@ -534,6 +544,9 @@ pub struct Session {
     /// Section Analysis: a view cut by planes, at most [`view::MAX_SECTION_PLANES`]: what lies
     /// on the normal side of every one is hidden (none: no section).
     pub section: Vec<SectionPlane>,
+    /// The section's planes hidden with their eye: kept, cutting nothing (`inspect.section`'s
+    /// `hide` and `show`).
+    pub section_hidden: Vec<SectionPlane>,
     /// Whether the section's cut faces are hatched (`inspect.section`'s `hatch`; on by default).
     pub section_hatch: bool,
     /// Component identification colours are enabled when present; view state only.
@@ -639,6 +652,18 @@ impl SectionPlane {
     /// Whether the plane keeps `p` (within `eps`).
     pub fn keeps(&self, p: Vec3, eps: f64) -> bool {
         self.normal.dot(p - self.origin) <= eps
+    }
+}
+
+impl Session {
+    /// The Section Analysis as an undo step keeps it.
+    pub fn section_state(&self) -> SectionState {
+        SectionState { planes: self.section.clone(), hidden: self.section_hidden.clone(), hatch: self.section_hatch }
+    }
+
+    pub(crate) fn set_section_state(&mut self, state: SectionState) {
+        (self.section, self.section_hidden, self.section_hatch) = (state.planes, state.hidden, state.hatch);
+        self.revision += 1;
     }
 }
 
@@ -764,6 +789,7 @@ impl Session {
             appearance_clipboard: None,
             foreign_copy: None,
             section: Vec::new(),
+            section_hidden: Vec::new(),
             section_hatch: true,
             colored_components: None,
             analysis: None,
@@ -1482,13 +1508,15 @@ impl Session {
             }
         }
         (spec.enabled)(self).map_err(|why| EngineError::Disabled(spec.id.to_string(), why))?;
-        let before = Snapshot {
+        let mut before = Snapshot {
             label: spec.label.to_string(),
             doc: self.doc.clone(),
             active_sketch: self.active_sketch,
             pending_moves: self.pending_moves.clone(),
             visibility: self.visibility.clone(),
+            section: None,
         };
+        let section_before = self.section_state();
         // Where new geometry goes: not in the design, but a replay needs it (component.activate).
         let active_before = (self.active_component, self.active_occurrence_path.clone());
         let replacements = self.replacements;
@@ -1560,6 +1588,11 @@ impl Session {
         // Hiding or showing (`browser.visibility`) leaves the document alone, so it needs its own
         // test: it is saved with the design and has an undo step of its own.
         let hidden = self.visibility != before.visibility;
+        // A Section Analysis is view state outside the design, with undo steps of its own.
+        let sectioned = self.section_state() != section_before;
+        if sectioned {
+            before.section = Some(section_before);
+        }
         let result = match r {
             Ok((v, live_edit)) => {
                 let v = if changed { self.with_created(spec.id, params, &before, v) } else { v };
@@ -1591,10 +1624,19 @@ impl Session {
                     if pin {
                         self.pin_body_names();
                     }
+                } else if sectioned && spec.undoable {
+                    self.undo.push(before);
+                    if self.undo.len() > MAX_UNDO {
+                        self.undo.remove(0);
+                    }
+                    self.redo.clear();
                 }
                 Ok(v)
             }
             Err(e) => {
+                if let Some(section) = before.section.take() {
+                    self.set_section_state(section);
+                }
                 if changed || hidden || self.pending_moves != before.pending_moves {
                     self.doc = before.doc;
                     self.active_sketch = before.active_sketch;
@@ -1685,6 +1727,7 @@ impl Session {
             active_sketch: self.active_sketch,
             pending_moves: self.pending_moves.clone(),
             visibility: self.visibility.clone(),
+            section: None,
         };
         self.doc = c.doc;
         self.active_sketch = c.active_sketch;
@@ -1762,6 +1805,7 @@ impl Session {
             appearance_clipboard: self.appearance_clipboard.clone(),
             foreign_copy: self.foreign_copy.clone(),
             section: Vec::new(),
+            section_hidden: Vec::new(),
             section_hatch: true,
             colored_components: None,
             analysis: None,

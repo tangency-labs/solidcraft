@@ -17,7 +17,7 @@ pub struct SectionParams {
     #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "Plane")]
     pub plane: Option<Plane>,
-    /// Signed distance along the original plane normal, in design units or an expression.
+    /// Signed distance against the original plane normal (positive cuts more away), in design units or an expression.
     pub offset: Option<LengthExpr>,
     /// World coordinate on a named plane's normal axis; mutually exclusive with offset.
     pub at: Option<LengthExpr>,
@@ -30,6 +30,17 @@ pub struct SectionParams {
     pub replace: Option<u64>,
     /// Take this plane (by id) out of the section.
     pub remove: Option<u64>,
+    /// Hide planes (by id): they stay in the section and cut nothing.
+    pub hide: Option<PlaneIds>,
+    /// Show hidden planes (by id) again.
+    pub show: Option<PlaneIds>,
+}
+/// One plane's id or a list of them.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(untagged)]
+pub enum PlaneIds {
+    One(u64),
+    Many(Vec<u64>),
 }
 #[derive(Serialize, JsonSchema)]
 pub struct Section {
@@ -55,4 +66,5 @@ pub struct SectionPlaneState {
     pub id: u64,
     pub origin: [f64; 3],
     pub normal: [f64; 3],
+    pub hidden: bool,
 }
