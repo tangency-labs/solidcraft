@@ -2810,7 +2810,8 @@ fn set_curve_with_identity(
 /// `GetBlendEdgeuse`: the edge use bounding the sector to fillet (an
 /// [`OrientType::Same`] edge use of an interior region for a solid, of the concave
 /// side for a shell); `None` for a lamina edge, an edge between tangent faces (within
-/// 2 degrees) or an inconsistent edge use.
+/// 2 degrees; half a degree with `fixes.fillet_half_degree_crease`, WR-621) or an
+/// inconsistent edge use.
 ///
 /// # Errors
 ///
@@ -2889,8 +2890,15 @@ pub fn blend_edgeuse(k: &Kernel, b: &mut Brep, e: EdgeId) -> Result<Option<Edgeu
     let (fu_normal, fu_normal2) = (ev0.face_normal, ev1.face_normal);
     let (bin_vec, bin_vec2) = (ev0.binormal, ev1.binormal);
 
-    // set max nonTangent angle to 88 degrees
-    let max_dot = (88.0 * PI / 180.0).cos();
+    // set max nonTangent angle to 88 degrees. With `fillet_half_degree_crease` (WR-621,
+    // fork 2e8758b) 89.5 degrees: faces within half a degree of each other are tangent, a
+    // crease of 0.5 to 2 degrees is an edge the model means and is filleted
+    let max_angle = if k.fixes.fillet_half_degree_crease {
+        89.5
+    } else {
+        88.0
+    };
+    let max_dot = (max_angle * PI / 180.0).cos();
 
     // the faces are tangent and can't be filleted. With `fillet_knife_edge_rounds`
     // (WR-570, fork b7ec55b) only when their binormals point away from each other (the

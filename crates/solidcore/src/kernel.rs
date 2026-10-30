@@ -198,6 +198,8 @@ pub struct UpstreamFixes {
     /// corner's degeneracy test takes anti-parallel side normals for an ordinary corner.
     /// Upstream refuses the edge as tangent (WR-570; the fork's tangency-labs/smlib@b7ec55b).
     pub fillet_knife_edge_rounds: bool,
+    /// `SmEdge::GetBlendEdgeuse` takes two faces for tangent (an edge with nothing to round) only within half a degree of each other, not 2 degrees: a crease of 0.5 to 2 degrees (a draft meeting a flat, a roof crease) is an edge the model means and is rounded like any other. Upstream refuses it (`SM_ERR_INVALID_INPUT` from the fillet) (WR-621, #1808; the fork's tangency-labs/smlib@2e8758b).
+    pub fillet_half_degree_crease: bool,
     /// `DoExtendedOffset` finds the excess offset faces after the merge only, not also on the untrimmed faces before it (WR-341, #977).
     pub offset_excess_faces_after_merge: bool,
     /// `SmFilletEdge::FindFilletBrepEdge`, looking for both edges of a fillet edge split in two (a corner's face curve split at the side's middle), keeps the second half when the first half's midpoint matched the curve to scaled zero and the other's only to the edges' tolerance, provided its ends lie on the curve too. Upstream kept such a near edge only for when nothing matched at all, so the second half was never merged into its face and the corner's sheet came out with two free edges (`SMLIB_ERR_NOT_SOLID` for some set-back, eased G2 corners) (WR-612, #1819; the fork's tangency-labs/smlib@ceb3272).
