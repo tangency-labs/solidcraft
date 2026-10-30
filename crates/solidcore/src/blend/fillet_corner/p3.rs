@@ -644,6 +644,12 @@ pub struct FilletCorner {
     pub extended_surface_patch: bool,
     /// `m_dSetBackDist`.
     pub set_back_dist: f64,
+    /// `m_dEaseDist` (the fork's, tangency-labs/smlib `e74bbd3`, #1376): the length along
+    /// each edge before the setback over which each round's cross-section eases, by a C2
+    /// law, from its own to the curvature-continuous section (the `G2` blend curve at
+    /// thirds), and the corner's rail-rail curves meet the rails curvature-continuously.
+    /// `0.0` (the default) is none: the pinned behaviour.
+    pub ease_dist: f64,
     /// `m_dThisApproxTol3d`.
     pub approx_tol_3d: f64,
     /// `m_dTangencyTolRadians`.
@@ -960,6 +966,7 @@ impl FilletCorner {
             topology_adjusted: false,
             extended_surface_patch: true,
             set_back_dist: 0.0,
+            ease_dist: 0.0,
             approx_tol_3d,
             tangency_tol_radians,
             status: FilStatus::Unprocessed,

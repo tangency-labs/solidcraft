@@ -85,6 +85,13 @@
 //!   implied by the edge holding it.
 //! - **Arguments.** Out-params become return values; `iDebugLevel` and debug drawing
 //!   are dropped. No input-driven recursion.
+//! - **Eased corners (the fork's, tangency-labs/smlib `e74bbd3`, #1376).** At a corner
+//!   with an ease (`FilletCorner::ease_dist > 0`, never by default)
+//!   `calc_rail_rail_interpolation` takes at least two derivatives and the G2/G3 fairing
+//!   branch (`g2_rail_rail_curve`, private) that upstream's `TRUE` condition leaves
+//!   unreachable, with the fork's changes to it. A rail running backwards negates only
+//!   its odd derivatives (upstream negates all); only the first is read without an ease,
+//!   so the pinned results are unchanged.
 
 use std::borrow::Cow;
 
@@ -96,6 +103,7 @@ use crate::curve::curve::{Curve, CurveKind};
 use crate::error::{EntityRef, Result, SolidError};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
+use crate::geom::geom_utility::p1::line_line_closest_point;
 use crate::geom::global_solver::{SolutionRequested, SolverOperation};
 use crate::geom::tol::{approx_tol3d, zone_tol3d};
 use crate::geom::vector2d::Point2;
@@ -106,6 +114,7 @@ use crate::math::{Point3, Vec3, BIG_DOUBLE, EFF_ZERO, PI};
 use crate::nurbs::b_spline_curve::BSplineCurve;
 use crate::nurbs::b_spline_curve_n_lib::TrimMode;
 use crate::nurbs::b_spline_surface_n_lib::p2::{EvaluateFlags, OrientType};
+use crate::nurbs::crv_fit::p1::ParamMethod;
 use crate::nurbs::knots::Side;
 use crate::surface::plane::Plane;
 use crate::surface::surface::p1::SurfaceSolveContext;
@@ -496,6 +505,104 @@ fn arc_length_param(
             entity: None,
         })
     }
+}
+
+/// The G2/G3 branch of `SmFilletEdge::CalcRailRailInterpolation` as the fork runs it at an
+/// eased corner (tangency-labs/smlib `e74bbd3`, #1376): each end's odd derivatives turned
+/// to run the way the curve does (the start tangent towards where the two tangent lines
+/// meet, the end tangent from there), whatever the rails' orientation flags say; the
+/// points are the vertices themselves (`start_pnt`, `end_pnt`, not the rail points
+/// dropped there); the tangents and higher derivatives faired
+/// (`FairBlendCurveDerivatives`, preventing inflection), then the uniform interpolant of
+/// degree 3, 5 or 7 for 1, 2 or 3 derivatives.
+///
+/// # Errors
+///
+/// `SM_ERR` for fewer than two entries in a derivative list; those of
+/// `FairBlendCurveDerivatives` and `CreateInterpolatingCurve`.
+fn g2_rail_rail_curve(
+    start_pnt: Point3,
+    end_pnt: Point3,
+    pnt_vec1: &mut [Vec3],
+    pnt_vec2: &mut [Vec3],
+    num_derivatives: usize,
+) -> Result<BSplineCurve> {
+    const OP: &str = OP_INTERP;
+    let tangent1 = pnt_vec1
+        .get(1)
+        .copied()
+        .ok_or_else(|| SolidError::sm_err(OP))?;
+    let tangent2 = pnt_vec2
+        .get(1)
+        .copied()
+        .ok_or_else(|| SolidError::sm_err(OP))?;
+    // smgu_LineLineClosestPoint == SM_SUCCESS (any failure skips the turn)
+    if let Ok((t1, t2)) = line_line_closest_point(start_pnt, tangent1, end_pnt, tangent2) {
+        if t1.abs() > EFF_ZERO && t2.abs() > EFF_ZERO {
+            for ii in (1..=num_derivatives).step_by(2) {
+                if t1 < 0.0 {
+                    if let Some(d) = pnt_vec1.get_mut(ii) {
+                        *d = -*d;
+                    }
+                }
+                if t2 > 0.0 {
+                    if let Some(d) = pnt_vec2.get_mut(ii) {
+                        *d = -*d;
+                    }
+                }
+            }
+        }
+    }
+    // Fair the 3d points & tangents (from the vertices themselves)
+    let points = [start_pnt, end_pnt];
+    let mut tangents = [
+        pnt_vec1
+            .get(1)
+            .copied()
+            .ok_or_else(|| SolidError::sm_err(OP))?,
+        pnt_vec2
+            .get(1)
+            .copied()
+            .ok_or_else(|| SolidError::sm_err(OP))?,
+    ];
+    let mut high_derivs = Vec::new();
+    for kk in 2..=num_derivatives {
+        high_derivs.push(
+            pnt_vec1
+                .get(kk)
+                .copied()
+                .ok_or_else(|| SolidError::sm_err(OP))?,
+        );
+        high_derivs.push(
+            pnt_vec2
+                .get(kk)
+                .copied()
+                .ok_or_else(|| SolidError::sm_err(OP))?,
+        );
+    }
+    let prevent_inflection = true;
+    BSplineCurve::fair_blend_curve_derivatives(
+        &points,
+        &mut tangents,
+        Some(&mut high_derivs),
+        prevent_inflection,
+    )?;
+    // Create 3d curve
+    let mut degree = 3;
+    if num_derivatives == 2 {
+        degree = 5;
+    } else if num_derivatives == 3 {
+        degree = 7;
+    }
+    BSplineCurve::create_interpolating_curve(
+        ParamMethod::Uniform,
+        3,
+        degree,
+        &points,
+        &tangents,
+        Some(&high_derivs),
+        true,
+    )
 }
 
 /// The point and the tangent `set_back_dist` along edge `e` from the filleted vertex
@@ -2354,7 +2461,9 @@ impl FilletBrep {
     /// dropped again), else in the face's UV space (lifted to 3D). The edge gets the 3D
     /// curve, its mate edge use the UV curve. With a corner, the corner's cross-section
     /// solver picks the continuity, and a concave `NxN` corner may replace the curve by a
-    /// cubic rail/rail interpolant.
+    /// cubic rail/rail interpolant. At a corner with an ease (the fork's, `e74bbd3`) the
+    /// curve is the faired G2 (or G3) interpolant of the rails' ends instead, meeting the
+    /// rails curvature-continuously.
     ///
     /// # Errors
     ///
@@ -2459,6 +2568,18 @@ impl FilletBrep {
                     _ => 1,
                 };
             }
+        }
+        // The fork's (tangency-labs/smlib `e74bbd3`, #1376): at a corner whose rounds ease
+        // into their curvature-continuous sections before the setback
+        // (`SmFilletCorner::m_dEaseDist`), the curve meets each rail curvature-continuously:
+        // the G2 interpolation of the rails' ends below, which meets a straight rail with
+        // zero curvature. Without an ease (the default) nothing changes.
+        let meet_rails_g2 = match opt_corner {
+            Some(corner) => corners.corner(corner)?.ease_dist() > 0.0,
+            None => false,
+        };
+        if meet_rails_g2 && num_derivatives < 2 {
+            num_derivatives = 2;
         }
         // sPntVec[4]: at most three derivatives are read
         let num_derivatives = num_derivatives.min(3);
@@ -2586,16 +2707,19 @@ impl FilletBrep {
             || (rail2_vertex == Some(end_fv) && orient2 == OrientType::Opposite);
 
         // Calc tangent (and higher derivatives) from the rail at start vertex
+        // (the fork's, `e74bbd3`: run backwards, the odd derivatives change sign, the even
+        // ones do not; upstream negates every derivative. Only the first derivative is read
+        // unless the curve meets the rails G2, so without an ease this is the pinned result.)
         let mut pnt_vec1 = curve1.evaluate(k, param1, num_derivatives, true, true)?;
         if !same_orient1 {
-            for d in pnt_vec1.iter_mut().skip(1).take(num_derivatives) {
+            for d in pnt_vec1.iter_mut().skip(1).take(num_derivatives).step_by(2) {
                 *d = -*d;
             }
         }
         // Calc tangent from the other rail
         let mut pnt_vec2 = curve2.evaluate(k, param2, num_derivatives, true, true)?;
         if !same_orient2 {
-            for d in pnt_vec2.iter_mut().skip(1).take(num_derivatives) {
+            for d in pnt_vec2.iter_mut().skip(1).take(num_derivatives).step_by(2) {
                 *d = -*d;
             }
         }
@@ -2603,12 +2727,22 @@ impl FilletBrep {
         let new_curve = if fsg_type == FilletSurfaceGeneratorType::Linear {
             // Linear cases
             BSplineCurve::create_line_segment(3, start_pnt, end_pnt)?
-        } else {
+        } else if !meet_rails_g2 {
             // In G1 cases, we create the 3d curve and then drop it onto the surface
-            // (the `TRUE` branch: upstream's G2/G3 fairing branch is unreachable)
+            // (upstream's `TRUE` branch; the fork's `!bMeetRailsG2`: without an ease the
+            // G2/G3 fairing branch below is unreachable, as upstream)
             let mut start_vec = pnt_vec1.get(1).copied().unwrap_or(Vec3::UNDEF);
             let mut end_vec = pnt_vec2.get(1).copied().unwrap_or(Vec3::UNDEF);
             interpolate_endpts_and_tangents(start_pnt, end_pnt, &mut start_vec, &mut end_vec, 3)?
+        } else {
+            // G1, G2 & G3 cases (reached only at an eased corner, the fork's `e74bbd3`)
+            g2_rail_rail_curve(
+                start_pnt,
+                end_pnt,
+                &mut pnt_vec1,
+                &mut pnt_vec2,
+                num_derivatives,
+            )?
         };
 
         // p3DCurve, an SmBSplineCurve: a B-spline, or the line / conic iso curve

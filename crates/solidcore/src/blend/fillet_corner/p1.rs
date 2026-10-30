@@ -25,6 +25,7 @@
 //! | [`FilletCorner::this_approx_tol_3d`]         | `GetThisApproxTol3d` (and the `SmFilletCorner` branch of `SmTol::GetApproxTol3d(const SmObject*)`) |
 //! | [`FilletCorner::fillet_edges`], [`FilletCorner::fillet_vertices`] | `GetFilletEdges`, `GetFilletVertices` |
 //! | [`FilletCorner::filleted_vertex`], [`FilletCorner::set_back_dist`], [`FilletCorner::status`] | `GetFilletedVertex`, `GetSetBackDist`, `GetStatus` |
+//! | [`FilletCorner::ease_dist`] | `GetEaseDist` (the fork's, tangency-labs/smlib `e74bbd3`) |
 //! | [`FilletCorner::type_code`], [`FilletCorner::type_string`], [`FilletCorner::is_kind_of`] | `GetType`, `GetTypeString`, `IsKindOf` (`SM_COMMON`) |
 //! | [`FilletCorner::add_fillet_vertex`]          | `AddFilletVertex`                           |
 //! | [`FilletCorner::set_bevel`], [`FilletCorner::set_calc_as_const_rad`], [`FilletCorner::set_chamfer`] | `SetBevel`, `SetCalcAsConstRad`, `SmFilletConvexNxNCorner::SetChamfer` |
@@ -701,6 +702,13 @@ impl FilletCorner {
     #[must_use]
     pub const fn set_back_dist(&self) -> f64 {
         self.set_back_dist
+    }
+
+    /// `GetEaseDist` (the fork's, tangency-labs/smlib `e74bbd3`, #1376): see
+    /// [`FilletCorner::ease_dist`].
+    #[must_use]
+    pub const fn ease_dist(&self) -> f64 {
+        self.ease_dist
     }
 
     /// `GetStatus`.

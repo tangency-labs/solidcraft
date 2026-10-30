@@ -98,6 +98,7 @@ mod classification;
 mod concave_nxn;
 mod corner_marks;
 mod crossing_rails;
+mod ease;
 pub(crate) mod finish;
 mod original_merge;
 mod original_trim;
@@ -2063,6 +2064,24 @@ impl<'target> FilletSession<'target> {
         Ok(())
     }
 
+    /// `SmFilletCorner::SetEaseDist` on one live corner (the fork's, tangency-labs/smlib
+    /// `e74bbd3`, #1376): over `distance` along each edge before the corner's setback, each
+    /// round's cross-section eases from its own into the curvature-continuous one, and the
+    /// corner's rail-rail curves meet the rails curvature-continuously. `0.0` (the default)
+    /// is none, the pinned behaviour; it acts only with a setback
+    /// ([`Self::set_corner_setback`]).
+    ///
+    /// # Errors
+    /// An unresolved corner identity.
+    pub fn set_corner_ease(&mut self, id: FilletCornerId, distance: f64) -> Result<()> {
+        self.objects
+            .corners
+            .get_mut(id.0 as usize)
+            .ok_or_else(|| invalid("corner is not live in this session"))?
+            .ease_dist = distance;
+        Ok(())
+    }
+
     /// `SmFilletCorner::SetBevel` on one live corner.
     ///
     /// # Errors
@@ -3446,6 +3465,13 @@ impl SolverGeometryAccess<FilletObject> for SessionObjects<'_> {
             }
         }
         Ok(true)
+    }
+    fn geometry_ease_set_back_sections(
+        &mut self,
+        k: &mut Kernel,
+        corners: &[FilletObject],
+    ) -> Result<()> {
+        self.ease_set_back_sections(k, corners)
     }
     fn geometry_bands_clear_other_rails(
         &mut self,
