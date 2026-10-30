@@ -1605,14 +1605,57 @@ fn a_scripted_drag_solves_the_steps_past_a_failure_at_once_and_ends_where_one_by
     let mut one = hung_arm();
     let r1 = super::drag::last_drag::one_by_one(|| drag(&mut one));
     let solves1 = super::drag::last_drag::get();
-    super::drag::last_drag::skipped();
+    super::drag::last_drag::ahead();
     let mut ahead = hung_arm();
-    let r2 = drag(&mut ahead);
+    let r2 = super::drag::last_drag::with_threads(8, || drag(&mut ahead));
     let solves2 = super::drag::last_drag::get();
-    assert!(super::drag::last_drag::skipped() > 0, "steps were solved ahead");
+    assert!(super::drag::last_drag::ahead().taken > 0, "steps were solved ahead");
     assert_eq!(r2, r1);
     assert_eq!(points(&ahead), points(&one));
     assert_eq!((solves2.count, solves2.work), (solves1.count, solves1.work));
+}
+
+/// Past a failed step, a scripted drag solves each step once. A batch starts past the steps the
+/// last one solved, and the walk takes the first of them that doesn't fail from the batch (the
+/// copy it solved, when it solved) instead of solving it again. The only extra solves are a
+/// batch's steps past that one, which ran beside it on other cores. On one thread (the browser
+/// build) nothing is solved ahead. Before, one failed step followed by one that solves took 17
+/// solves where one by one takes 2, one after another in the browser.
+#[test]
+fn a_scripted_drag_solves_each_step_past_a_failure_once() {
+    use super::drag::last_drag;
+    use super::solve_counts;
+    let start = hung_arm();
+    let h = pt(&start, "eh.end");
+    let points = |s: &Session| sketch(s).points.iter().map(|p| p.pos).collect::<Vec<_>>();
+    let mut moved = 0;
+    // Out past the arm's reach, and swung round through the shoulder's hole and out of it again.
+    for (angle, scale) in [(2.0, 1.5), (3.1, 1.0)] {
+        let far = hung_hand_target(&start, angle, scale);
+        let drag = |s: &mut Session| run(s, "sketch.drag", json!({"entity": "eh.end", "from": [h.x, h.y], "to": [far.x, far.y]}));
+        let mut one = hung_arm();
+        solve_counts::take();
+        last_drag::ahead();
+        let r1 = last_drag::one_by_one(|| drag(&mut one));
+        let (n1, _) = solve_counts::take();
+        assert_eq!(last_drag::ahead(), last_drag::Ahead::default(), "one thread solves nothing ahead");
+        for threads in [2, 8] {
+            let mut s = hung_arm();
+            solve_counts::take();
+            let r = last_drag::with_threads(threads, || drag(&mut s));
+            let (n, _) = solve_counts::take();
+            let ahead = last_drag::ahead();
+            assert_eq!(r, r1, "{threads} threads");
+            assert_eq!(points(&s), points(&one), "{threads} threads");
+            assert!(ahead.taken > 0, "{threads} threads: {ahead:?}");
+            // The walk's solves and those of the steps it took from a batch are one by one's.
+            assert_eq!(n, n1 + ahead.solved - ahead.taken, "{threads} threads: {ahead:?}");
+            // The walk takes every batch's first step.
+            assert!(ahead.solved - ahead.taken <= (threads - 1) * ahead.batches, "{threads} threads: {ahead:?}");
+            moved += ahead.moved;
+        }
+    }
+    assert!(moved > 0, "the walk went on from a copy solved ahead");
 }
 
 /// All the held solves of one live frame, halvings included, share one decomposition budget:

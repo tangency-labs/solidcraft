@@ -12,6 +12,7 @@
 //! geometry cannot reach stop short at the edge of that stretch and go on past it. It steps only
 //! when the move is long next to the dragged geometry, so a normal mouse frame is a single solve.
 
+use std::collections::VecDeque;
 use std::f64::consts::{PI, TAU};
 
 use solidcraft_geom::Vec2;
@@ -36,7 +37,8 @@ const MAX_STEPS: usize = 64;
 /// After a step fails, the way to it from the last solved state is halved until what is left is
 /// shorter than a step over this; at most `MAX_STEPS` such solves per drag.
 const HALVINGS: usize = 16;
-/// Steps of a drag that isn't live solved at once past a failed step (see [`drag_entity`]).
+/// Most steps of a drag that isn't live solved at once past a failed step, one per core (see
+/// [`drag_entity`] and [`threads`]).
 const AHEAD: usize = 8;
 /// An arc whose sweep gets this close (radians) to 0 or a full turn has run into its start.
 const SWEEP_EPS: f64 = 1e-6;
@@ -188,16 +190,8 @@ pub(super) fn drag_entity(
         });
         kept || counted_solve(sk, &hold, Some(&last.pos), Analysis::StatusOnly, Some(&mut *budget)).ok()
     };
-    let mut step = |sk: &mut Sketch, last: &Geometry, t: f64, solves: &mut Solves| {
-        let mut own = Budget::full();
-        let budget = frame.as_mut().unwrap_or(&mut own);
-        let spent = budget.spent();
-        let ok = held(sk, last, t, budget);
-        solves.count += 1;
-        solves.work += budget.spent() - spent;
-        solves.cut |= budget.exhausted();
-        solves.numeric |= budget.numeric_exhausted();
-        let outcome = if !ok {
+    let try_step = |sk: &mut Sketch, last: &Geometry, t: f64, budget: &mut Budget| {
+        let outcome = if !held(sk, last, t, budget) {
             Step::Failed
         } else if last.sweep_wrapped(sk) {
             Step::Wrapped
@@ -205,6 +199,14 @@ pub(super) fn drag_entity(
             return Step::Solved;
         };
         last.restore(sk);
+        outcome
+    };
+    let mut step = |sk: &mut Sketch, last: &Geometry, t: f64, solves: &mut Solves| {
+        let mut own = Budget::full();
+        let budget = frame.as_mut().unwrap_or(&mut own);
+        let spent = budget.spent();
+        let outcome = try_step(sk, last, t, budget);
+        solves.add(budget, budget.spent() - spent);
         outcome
     };
     let mut last = Geometry::default();
@@ -223,6 +225,8 @@ pub(super) fn drag_entity(
     let mut shortened = false;
     let mut wrapped = false;
     let mut out_of_frame = false;
+    // Steps solved at once past a failed one that the walk has not reached yet.
+    let mut ahead: VecDeque<(f64, Tried)> = VecDeque::new();
     'walk: while t < 1.0 {
         // A live frame whose numerical solves have done their share takes no more steps: the
         // rest of the way waits for the next frame (`retry`), instead of seconds of held solves
@@ -239,39 +243,60 @@ pub(super) fn drag_entity(
         }
         // Past a failed step, every next one starts from the last solved state again and a failed
         // one leaves nothing for the one after. Unless the drag is live (its steps share the
-        // frame's budget), the next few are solved at once, on all cores, and those that fail
-        // in a row are taken as tried: the walk goes on where it would have, one by one, at the
-        // first of them that doesn't fail, without the seconds of failing solves before it.
-        #[cfg(test)]
-        let ahead = last_drag::ahead();
-        #[cfg(not(test))]
-        let ahead = true;
-        if ahead && !live && failed.is_some() && line_grab.is_none() {
-            let ahead: Vec<f64> =
-                (1..=AHEAD).map(|j| at(base, dt, k + j)).scan(false, |done, t| (!std::mem::replace(done, t >= 1.0)).then_some(t)).collect();
-            let tried = solidcraft_kernel::map_on_threads(&ahead, AHEAD, |&t| {
-                let mut sk = sk.clone();
-                let mut budget = Budget::full();
-                let ok = held(&mut sk, &last, t, &mut budget);
-                (ok, budget.spent(), budget.exhausted())
-            });
-            let failing = tried.iter().take_while(|r| matches!(r, Some((false, _, false)))).flatten().collect::<Vec<_>>();
-            if !failing.is_empty() {
-                for (_, work, _) in &failing {
-                    solves.count += 1;
-                    solves.work += work;
-                }
-                k += failing.len();
-                t = at(base, dt, k);
+        // frame's budget) or there is one thread (the browser), the next steps not yet tried are
+        // solved at once, one per core, each on a copy of the sketch. The walk takes them in
+        // order as it would have solved them one by one, without the seconds of failing solves in
+        // a row: a failed one is taken as tried, the first that solves is taken as solved and the
+        // rest are dropped (the sketch has moved on).
+        let at_once = if ahead.is_empty() && !live && failed.is_some() && line_grab.is_none() { threads() } else { 1 };
+        if at_once > 1 {
+            let next: Vec<f64> =
+                (1..=at_once).map(|j| at(base, dt, k + j)).scan(false, |done, t| (!std::mem::replace(done, t >= 1.0)).then_some(t)).collect();
+            let tried = solidcraft_kernel::map_on_threads(&next, at_once, |&t| {
+                // Counted on the drag's thread, whichever thread solves it.
                 #[cfg(test)]
-                last_drag::add_skipped(failing.len());
-                continue 'walk;
+                let before = super::solve_counts::take();
+                let mut copy = sk.clone();
+                let mut budget = Budget::full();
+                let step = try_step(&mut copy, &last, t, &mut budget);
+                let tried = Tried {
+                    solved: matches!(step, Step::Solved).then_some(copy),
+                    step,
+                    budget,
+                    #[cfg(test)]
+                    counted: super::solve_counts::take(),
+                };
+                #[cfg(test)]
+                super::solve_counts::add(before);
+                tried
+            });
+            #[cfg(test)]
+            {
+                last_drag::batch(tried.len());
+                for tried in tried.iter().flatten() {
+                    super::solve_counts::add(tried.counted);
+                }
             }
+            // A step whose solve panicked is left to the walk, and the steps after it with it.
+            ahead.extend(next.into_iter().zip(tried).map_while(|(t, tried)| Some((t, tried?))));
         }
         k += 1;
         t = at(base, dt, k);
-        match step(sk, &last, t, &mut solves) {
+        let outcome = match ahead.pop_front() {
+            // Solved from the state the sketch is still in (only a step that solves moves it).
+            Some((when, tried)) if when == t => {
+                #[cfg(test)]
+                last_drag::took(tried.solved.is_some());
+                tried.take(sk, &mut solves)
+            }
+            _ => {
+                ahead.clear();
+                step(sk, &last, t, &mut solves)
+            }
+        };
+        match outcome {
             Step::Solved => {
+                ahead.clear();
                 (good, failed) = (t, None);
                 if t < 1.0 {
                     last.take(sk);
@@ -383,6 +408,48 @@ pub(super) struct Solves {
     pub numeric: bool,
 }
 
+impl Solves {
+    /// One more held solve, which did `work` on `budget`.
+    fn add(&mut self, budget: &Budget, work: usize) {
+        self.count += 1;
+        self.work += work;
+        self.cut |= budget.exhausted();
+        self.numeric |= budget.numeric_exhausted();
+    }
+}
+
+/// A step of a drag solved ahead on a copy of the sketch, with its own budget.
+struct Tried {
+    step: Step,
+    budget: Budget,
+    /// The copy, when the step solved.
+    solved: Option<Sketch>,
+    /// Its solves, for `solve_counts`.
+    #[cfg(test)]
+    counted: (usize, usize),
+}
+
+impl Tried {
+    /// Take the step as if it had been solved on `sk` now.
+    fn take(self, sk: &mut Sketch, solves: &mut Solves) -> Step {
+        solves.add(&self.budget, self.budget.spent());
+        if let Some(solved) = self.solved {
+            *sk = solved;
+        }
+        self.step
+    }
+}
+
+/// The steps past a failed one solved at once: one per core, at most `AHEAD`. One (none ahead)
+/// in the browser build, which would solve them one after another.
+fn threads() -> usize {
+    #[cfg(test)]
+    if let Some(n) = last_drag::threads() {
+        return n.min(AHEAD);
+    }
+    if cfg!(target_arch = "wasm32") { 1 } else { std::thread::available_parallelism().map_or(1, usize::from).min(AHEAD) }
+}
+
 /// One live frame's decomposition budget (smaller in tests that set one).
 fn frame_budget() -> Budget {
     #[cfg(test)]
@@ -407,8 +474,8 @@ pub(super) mod last_drag {
         static LAST: Cell<Solves> = const { Cell::new(Solves { count: 0, work: 0, cut: false, numeric: false }) };
         static FRAME: Cell<Option<usize>> = const { Cell::new(None) };
         static NUMERIC: Cell<Option<usize>> = const { Cell::new(None) };
-        static AHEAD: Cell<bool> = const { Cell::new(true) };
-        static SKIPPED: Cell<usize> = const { Cell::new(0) };
+        static THREADS: Cell<Option<usize>> = const { Cell::new(None) };
+        static AHEAD: Cell<Ahead> = const { Cell::new(Ahead { batches: 0, solved: 0, taken: 0, moved: 0 }) };
     }
 
     pub fn set(s: Solves) {
@@ -458,32 +525,55 @@ pub(super) mod last_drag {
         f()
     }
 
-    pub fn ahead() -> bool {
-        AHEAD.with(Cell::get)
+    pub fn threads() -> Option<usize> {
+        THREADS.with(Cell::get)
     }
 
-    /// Failed steps taken as tried from the steps solved at once, since the last call.
-    pub fn skipped() -> usize {
-        SKIPPED.with(|c| c.replace(0))
-    }
+    /// Restores the thread count when dropped, also when the test panics.
+    struct RestoreThreads(Option<usize>);
 
-    pub fn add_skipped(n: usize) {
-        SKIPPED.with(|c| c.set(c.get() + n));
-    }
-
-    /// Restores solving steps ahead when dropped, also when the test panics.
-    struct RestoreAhead(bool);
-
-    impl Drop for RestoreAhead {
+    impl Drop for RestoreThreads {
         fn drop(&mut self) {
-            AHEAD.with(|c| c.set(self.0));
+            THREADS.with(|c| c.set(self.0));
         }
+    }
+
+    /// Run `f` with the steps past a failed one solved `n` at once (one: one by one, as in the
+    /// browser build).
+    pub fn with_threads<R>(n: usize, f: impl FnOnce() -> R) -> R {
+        let _restore = RestoreThreads(THREADS.with(|c| c.replace(Some(n))));
+        f()
     }
 
     /// Run `f` with every step of a drag solved one by one, as before steps were solved ahead.
     pub fn one_by_one<R>(f: impl FnOnce() -> R) -> R {
-        let _restore = RestoreAhead(AHEAD.with(|c| c.replace(false)));
-        f()
+        with_threads(1, f)
+    }
+
+    /// The steps solved ahead of the walk.
+    #[derive(Clone, Copy, Debug, Default, PartialEq)]
+    pub struct Ahead {
+        /// Times steps were solved at once.
+        pub batches: usize,
+        /// Steps solved so.
+        pub solved: usize,
+        /// Those the walk took instead of solving them.
+        pub taken: usize,
+        /// Those of them that solved: the walk went on from the copy.
+        pub moved: usize,
+    }
+
+    /// The steps solved ahead since the last call.
+    pub fn ahead() -> Ahead {
+        AHEAD.with(|c| c.replace(Ahead::default()))
+    }
+
+    pub fn batch(solved: usize) {
+        AHEAD.with(|c| c.set(Ahead { batches: c.get().batches + 1, solved: c.get().solved + solved, ..c.get() }));
+    }
+
+    pub fn took(moved: bool) {
+        AHEAD.with(|c| c.set(Ahead { taken: c.get().taken + 1, moved: c.get().moved + usize::from(moved), ..c.get() }));
     }
 }
 

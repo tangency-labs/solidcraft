@@ -435,6 +435,14 @@ pub(super) mod solve_counts {
     pub fn take() -> (usize, usize) {
         COUNTS.with(|c| c.replace((0, 0)))
     }
+
+    /// Count solves run on another thread (as `take` returned them there) as this thread's.
+    pub fn add((n, full): (usize, usize)) {
+        COUNTS.with(|c| {
+            let (a, b) = c.get();
+            c.set((a + n, b + full));
+        });
+    }
 }
 
 /// How close (mm) a new point must land to an existing one to be connected to it.
