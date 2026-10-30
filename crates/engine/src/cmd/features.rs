@@ -1806,7 +1806,42 @@ fn move_bodies(s: &mut Session, p: &Value) -> Result<Value> {
     if let Some(plan) = crate::frames::placements_moved(s, p) {
         return move_placements(s, p, plan);
     }
+    // Bodies in differently placed frames: one Move feature per frame, each moving its bodies
+    // by the world vector and turn mapped into that frame (#9660).
+    if let Some(moves) = crate::frames::split_move(s, p) {
+        return move_split(s, &moves);
+    }
     move_body_feature(s, p)
+}
+
+/// The moves of `frames::split_move`, in one step, with one reply: the features made, and the
+/// bodies made, changed and removed by any of them.
+fn move_split(s: &mut Session, moves: &[Value]) -> Result<Value> {
+    let mut features = Vec::new();
+    let mut lists: [(&str, Vec<Value>); 3] = [("created_bodies", Vec::new()), ("changed_bodies", Vec::new()), ("removed_bodies", Vec::new())];
+    let mut last = Value::Null;
+    for p in moves {
+        let reply = move_body_feature(s, p)?;
+        features.push(reply.get("feature").cloned().unwrap_or(Value::Null));
+        for (key, list) in &mut lists {
+            for name in reply.get(*key).and_then(Value::as_array).into_iter().flatten() {
+                if !list.contains(name) {
+                    list.push(name.clone());
+                }
+            }
+        }
+        last = reply;
+    }
+    if let Some(out) = last.as_object_mut() {
+        if let Some(first) = features.first() {
+            out.insert("feature".into(), first.clone());
+        }
+        out.insert("features".into(), Value::Array(features));
+        for (key, list) in lists {
+            out.insert(key.into(), Value::Array(list));
+        }
+    }
+    Ok(last)
 }
 
 /// A move of several placements of one part (`frames::placements_moved`, #4768): each placement

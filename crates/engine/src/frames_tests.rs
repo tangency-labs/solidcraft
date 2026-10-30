@@ -263,6 +263,65 @@ fn move_expression_distances_keep_parameters_through_rebuild_and_reopen() {
     }
 }
 
+/// One `solid.move` of bodies placed in differently turned frames (a block in the root and a
+/// screw inserted lying down) moves and turns each of them in the world, whichever is listed
+/// first (#9660).
+#[test]
+fn one_move_of_bodies_in_differently_turned_frames_moves_each_in_the_world() {
+    let corners = |(lo, hi): (Vec3, Vec3)| {
+        let mut out = Vec::new();
+        for x in [lo.x, hi.x] {
+            for y in [lo.y, hi.y] {
+                for z in [lo.z, hi.z] {
+                    out.push(Vec3::new(x, y, z));
+                }
+            }
+        }
+        out
+    };
+    let bounds = |points: Vec<Vec3>| {
+        let mut lo = Vec3::new(f64::INFINITY, f64::INFINITY, f64::INFINITY);
+        let mut hi = Vec3::new(f64::NEG_INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY);
+        for p in points {
+            lo = Vec3::new(lo.x.min(p.x), lo.y.min(p.y), lo.z.min(p.z));
+            hi = Vec3::new(hi.x.max(p.x), hi.y.max(p.y), hi.z.max(p.z));
+        }
+        (lo, hi)
+    };
+    let close = |a: (Vec3, Vec3), b: (Vec3, Vec3)| a.0.dist(b.0) < 1e-4 && a.1.dist(b.1) < 1e-4;
+    // The quarter turn is about the world z axis, which passes through the screw's own origin
+    // (where it was inserted): a Move feature turns about that origin.
+    let moves: [(Value, &dyn Fn(Vec3) -> Vec3); 3] = [
+        (json!({"translate": [0, 0, 3]}), &|p| p + Vec3::new(0.0, 0.0, 3.0)),
+        (json!({"translate": [0, "2 mm", 0]}), &|p| p + Vec3::new(0.0, 2.0, 0.0)),
+        (json!({"axis": [0, 0, 1], "angle": "90 deg"}), &|p| Vec3::new(-p.y, p.x, p.z)),
+    ];
+    for direction in [[1, 0, 0], [0, 0, -1], [0, 1, 0]] {
+        for order in [["Block", "Body1"], ["Body1", "Block"]] {
+            for (params, expected) in &moves {
+                let mut s = Session::default();
+                run(&mut s, "solid.box", json!({"length": 30, "width": 30, "height": 10, "center": [0, 0, 5], "body_name": "Block"}));
+                let screw = json!({"family": "socket_head_cap_screw", "size": "M3", "length": 12, "point": [0, 0, 10], "direction": direction, "name": "screw"});
+                run(&mut s, "parts.insert", screw);
+                let before: Vec<_> = order.iter().map(|b| world_bbox(&s, b)).collect();
+                let mut p = params.clone();
+                p["bodies"] = json!(order);
+                run(&mut s, "solid.move", p.clone());
+                for (body, was) in order.iter().zip(&before) {
+                    let want = bounds(corners(*was).into_iter().map(expected).collect());
+                    let got = world_bbox(&s, body);
+                    assert!(close(got, want), "{body} after {p} (screw along {direction:?}): {got:?}, want {want:?}");
+                }
+                // One step: a single undo puts both back.
+                run(&mut s, "edit.undo", json!({}));
+                for (body, was) in order.iter().zip(&before) {
+                    assert!(close(world_bbox(&s, body), *was), "{body} after undoing {p}");
+                }
+            }
+        }
+    }
+}
+
 /// Edit Feature passes a primitive's placement through as saved, so changing the radius of
 /// Leaf B's rod in the Hinge Assembly leaves the leaf where it was (#2926).
 #[test]
