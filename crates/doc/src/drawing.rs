@@ -67,6 +67,7 @@ pub mod by_id;
 pub mod dimension;
 pub mod fields;
 pub mod image;
+pub mod template;
 pub mod view;
 
 use balloon::Balloon;
