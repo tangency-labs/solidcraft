@@ -1,7 +1,9 @@
 //! Differential topology traversal on real SMLib graphs. Fixture construction reuses
 //! topology.vertexuse: the Rust side builds a wire edge, face or network source itself
-//! ([`crate::own_builder`]) and imports only an `.smb` file's graph export; no
-//! traversal result is imported.
+//! ([`crate::own_builder`]) and reads an `.smb` file with the Rust reader
+//! ([`crate::own_reader::file_in_order`]), both renumbered into the shim's traversal order;
+//! no C++ export (graph or vertex use lists) and no traversal result reaches the Rust
+//! side.
 use super::topology_vertexuse::{self as shared, BrepIn};
 use crate::{Case, HarnessError, Output, Rng, UnitDiff};
 use serde::{Deserialize, Serialize};
@@ -124,44 +126,39 @@ fn select_generated_op(i: &mut Inputs, counts: [usize; 10], rng: &mut Rng) {
 }
 
 /// The Rust B-rep of a case and its entity counts, or the output of a failed build.
-/// Shim-built sources are built by the Rust kernel ([`crate::own_builder`] under
-/// `sc_topology_fixture.h`'s conventions, each vertex's native vertex use list
-/// included); `.smb` file sources are imported from the shim's export, with each
-/// vertex's vertex use list in its native order.
+/// Shim-built sources are built by the Rust kernel ([`crate::own_builder`]) and `.smb`
+/// file sources read by the Rust reader ([`crate::own_reader::file_in_order`]), both
+/// renumbered under `sc_topology_fixture.h`'s conventions, each vertex's vertex use list
+/// the Rust build's own (nothing of the shim's export reaches the Rust side).
 fn own_brep(
     k: &mut Kernel,
     i: &Inputs,
 ) -> Result<Result<(solidcore::topology::Brep, [usize; 10]), Output>, HarnessError> {
     use crate::own_builder::{build_as, counts, Built, Conventions};
-    match build_as(k, &i.brep, false, false, &Conventions::TOPOLOGY_FIXTURE)? {
-        Some(Built::Brep(b)) => {
+    let conv = &Conventions::TOPOLOGY_FIXTURE;
+    let built = if let Some(b) = build_as(k, &i.brep, false, false, conv)? {
+        b
+    } else {
+        let BrepIn::File { rebuild, .. } = &i.brep else {
+            return Err(HarnessError::new(
+                "own builder: a non-file source was not built",
+            ));
+        };
+        let path = shared::path_of(&i.brep)?;
+        crate::own_reader::file_in_order(k, &path, *rebuild, false, false, conv)?
+    };
+    match built {
+        Built::Brep(b) => {
             let c = counts(&b);
             Ok(Ok((*b, c)))
         }
-        Some(Built::Failed(e)) => Ok(Err(match Output::unported(&e) {
+        Built::Failed(e) => Ok(Err(match Output::unported(&e) {
             Some(o) => o,
             None => Output::new().values(
                 "build",
                 vec![-1.0, crate::own_builder::build_status(&e)],
             ),
         })),
-        None => {
-            let ex = export(i)?;
-            let Some(c) = fixture::counts(&ex.graph) else {
-                return Ok(Err(Output::new().values("build", ex.graph)));
-            };
-            let (mut b, _) = shared::import(&ex.graph)?;
-            for (index, list) in ex.vertexuses.iter().enumerate() {
-                b.vertex_mut(VertexId::from_index(index as u32))
-                    .map_err(|e| HarnessError::new(e.to_string()))?
-                    .vertexuses = list
-                    .iter()
-                    .copied()
-                    .map(solidcore::topology::VertexuseId::from_index)
-                    .collect();
-            }
-            Ok(Ok((b, c)))
-        }
     }
 }
 
