@@ -4,4 +4,3 @@
 # line in the same pull request.
 # Baseline: rig-cases-surfaces 45f69c0e5 with SMLib 60b1c6a, aarch64 Linux.
 cov-fair-single-span-face-has-nothing-free-to-move surface.fair refuses a face of degree 1 one way ("a fairness term does not fit the net's degrees"): kernel/src/fair.rs checks its second-derivative terms against the net's degrees instead of fairing only the direction that has them
-cov-thicken-cylinder-sheet-symmetric-tube the tube's two flat end rings come back as B-spline faces, not planes (surface_types bspline, cylinder): volume, faces and box are right; the exact plane is lost in SMLib's thicken or in its record conversion
