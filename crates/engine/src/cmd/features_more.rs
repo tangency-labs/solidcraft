@@ -242,34 +242,72 @@ fn emboss(s: &mut Session, p: &Value) -> Result<Value> {
         match solidcraft_kernel::face_surface(body, index) {
             Some(solidcraft_kernel::FaceSurface::Plane { .. }) => {
                 targets = vec![name.to_owned()];
-                None
+                let at = solidcraft_kernel::emboss_anchor(body, index, at).map_err(|e| bad(cmd, e.to_string()))?;
+                let face = emboss_selection(s, selected, at)?;
+                check_emboss_positions(s, sketch, selected, &face)?;
+                Some(face)
             }
-            Some(solidcraft_kernel::FaceSurface::Cylinder { .. }) => {
+            _ => {
                 if targets.len() > 1 {
                     return Err(bad(cmd, "cylinder emboss needs one selected target body"));
                 }
                 // Viewport picks lie on tessellated chords. Keep their axial and
                 // angular position, and certify their distance before storing an
                 // exact surface anchor for later replay.
-                let at = solidcraft_kernel::cylinder_emboss_anchor(body, index, at).map_err(|e| bad(cmd, e.to_string()))?;
+                let at = solidcraft_kernel::emboss_anchor(body, index, at)
+                    .or_else(|_| solidcraft_kernel::cylinder_emboss_anchor(body, index, at))
+                    .map_err(|e| bad(cmd, e.to_string()))?;
                 let face = emboss_selection(s, selected, at)?;
                 check_emboss_positions(s, sketch, selected, &face)?;
                 targets = vec![name.to_owned()];
                 Some(face)
             }
-            _ => return Err(bad(cmd, "only planar faces and complete exterior cylindrical walls support emboss")),
         }
     } else {
         let inferred = infer_emboss_selection(s, sketch, &profiles, &depth, deboss, &targets)?;
         if let Some(face) = &inferred {
             targets = vec![face.body.0.clone()];
+        } else {
+            let on_body_face = {
+                let state = s.model.state();
+                if let Some(ss) = state.sketch(sketch) {
+                    let n = ss.plane.normal();
+                    let d = ss.plane.origin.dot(n);
+                    state.bodies.iter().any(|b| {
+                        if !targets.is_empty() && !targets.iter().any(|t| t == &b.name || t == b.definition_name()) {
+                            return false;
+                        }
+                        (0..b.body.face_count()).any(|idx| {
+                            if let Some(solidcraft_kernel::FaceSurface::Plane { normal, point }) = solidcraft_kernel::face_surface(&b.body, idx) {
+                                (normal.dot(n).abs() - 1.0).abs() < 1e-4 && (point.dot(n) - d).abs() < 1e-4
+                            } else {
+                                false
+                            }
+                        })
+                    })
+                } else {
+                    false
+                }
+            };
+            if !on_body_face {
+                return Err(bad(cmd, "sketch plane does not lie on a body face; select a target face"));
+            }
         }
         inferred
     };
+    let mapping = str_(p, "mapping").map(|s| s.to_ascii_lowercase()).or_else(|| Some("wrap".into()));
     add_feature(
         s,
         p,
-        FeatureKind::Emboss { sketch: SketchId(sketch), profiles, depth, deboss, targets: targets.into_iter().map(BodyName).collect(), face },
+        FeatureKind::Emboss {
+            sketch: SketchId(sketch),
+            profiles,
+            depth,
+            deboss,
+            targets: targets.into_iter().map(BodyName).collect(),
+            face,
+            mapping,
+        },
     )
 }
 

@@ -144,7 +144,7 @@ crate::dialog_descriptor::dialog_descriptors! {
             FeatureKind::Emboss { depth, deboss, .. }) {
             depth: String = "1 mm".into() => depth.to_string(),
             deboss: bool = false => *deboss,
-        } => json!({"depth": depth, "mode": if *deboss { "deboss" } else { "emboss" }});
+        } => json!({"depth": depth, "mode": if *deboss { "deboss" } else { "emboss" }, "mapping": "wrap"});
         ; custom {
             /// Pick a plane or planar face; the sketch starts on it at once.
             Sketch,
