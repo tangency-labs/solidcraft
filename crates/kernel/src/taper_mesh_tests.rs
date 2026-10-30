@@ -5,9 +5,11 @@ fn wedge() -> (Body, RadiusSpline) {
     let outer = Loop2::polygon(&[Vec2::new(0., 0.), Vec2::new(40., 0.), Vec2::new(0., 20.)]);
     let body = crate::extrude(&Plane::XY, &[Region2 { outer, holes: vec![] }], 0., 15.).unwrap().pop().unwrap();
     let at = Vec3::new(20., 0., 15.);
-    let (filleted, tapers) = fillet_tapered(&body, &[at], 16.).unwrap();
-    let taper = tapers.into_iter().flatten().next().unwrap();
-    (filleted, taper.spline)
+    // The room's taper, closing to zero at the wedge's tip, given as a spline fillet: R16 itself
+    // is built over the wedge's cliffs (the blend-overflow decision), so a tapered fillet no
+    // longer tapers it.
+    let t = taper(&body, at, 16.).unwrap();
+    (fillet_variable_spline(&body, at, t.start, &t.spline).unwrap(), t.spline)
 }
 
 fn expected(law: &RadiusSpline) -> f64 {
