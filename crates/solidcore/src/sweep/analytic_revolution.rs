@@ -101,9 +101,17 @@ pub fn analytic_revolution(
     } else {
         0.0
     };
+    // WR-552: the caller's own tolerance, within which a circle reaching the axis is
+    // the horn torus's
+    let horn_tol = if k.fixes.revolve_arc_touching_axis_is_horn_torus {
+        tol
+    } else {
+        0.0
+    };
     let tol = tol.min(FIT_REL * (1.0 + size));
-    let Some(Some((candidate, reversed))) =
-        ignored(candidate(k, curve, base_pt, axis, angle_deg, tol, axis_tol))?
+    let Some(Some((candidate, reversed))) = ignored(candidate(
+        k, curve, base_pt, axis, angle_deg, tol, axis_tol, horn_tol,
+    ))?
     else {
         return Ok(None);
     };
@@ -266,6 +274,7 @@ fn candidate(
     angle_deg: f64,
     tol: f64,
     axis_tol: f64,
+    horn_tol: f64,
 ) -> Result<Option<(Surface, bool)>> {
     let ends = curve.ends(k)?;
     let (start_dist, _) = line_point_distance(base_pt, axis, ends.start);
@@ -439,13 +448,25 @@ fn candidate(
     };
     let inside_out = false;
     let (low, high) = tube_range(start, sweep);
+    // WR-552 (tangency-labs/smlib@c4e378d): a circle that reaches the axis to within the
+    // caller's tolerance, as the sweep takes a vertex there to be on it, sweeps a horn
+    // torus, its tube through the axis there. Swept as it lay (a hair inside, a spindle
+    // torus; outside, a ring one), the minor circles crossed or missed the axis where the
+    // topology collapses, and the face's loop there came out turned over. The snap moves
+    // the surface by at most that difference, so the layout test below keeps it only when
+    // the difference is within the fit tolerance (else the B-spline stays).
+    let major = if (centre_dist - radius).abs() <= horn_tol {
+        radius
+    } else {
+        centre_dist
+    };
     let mut torus = Torus::new(
         k,
         origin,
         x,
         y,
         Extent2d::from_bounds(0.0, low, angle_deg, high),
-        centre_dist,
+        major,
         radius,
         TorusOptions {
             swap_uv: false,
