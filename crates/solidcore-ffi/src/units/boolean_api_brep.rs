@@ -41,9 +41,12 @@
 //! | `Piecewise`     | 14 | brep brep `create_new`                 | `has [is_first brep brep]`                      |
 //! | `Sweep`         | 15 | brep `D[3] dist stitch merge region` sel | brep (also on `SM_ERR_INVALID_INPUT`)         |
 //! | `RotationalSweep` | 16 | brep `P[3] A[3] angle stitch merge region` sel | brep (also on `SM_ERR_INVALID_INPUT`)  |
-//! | `Attributed`    | 17 | brep brep `operation` `behavior`       | two-B-rep record, then the attribute rows       |
-//! | `Sweep` (attributed) | 18 | `behavior`, then op 15's args     | op 15's record, then the attribute rows         |
-//! | `RotationalSweep` (attributed) | 19 | `behavior`, then op 16's args | op 16's record, then the attribute rows |
+//! | `Attributed`    | 17 | brep brep `operation` `behavior` [`copy_first` flags] | two-B-rep record, then the attribute rows |
+//! | `TessellateBoundaries` | 18 | brep `angle_tol_deg` `nd`, `nd` edge indices | (also after `SM_ERR`) `ne` edge indices, `nc` counts, `np` points `x y z` |
+//! | `AttributedList` | 19 | `behavior`, a `MergeBreps` / `Lists` / `Trees` call | its record, then the attribute rows |
+//! | `Checked`       | 20 | brep brep `operation` `level`          | two-B-rep record, then the result's check       |
+//! | `Sweep` (attributed) | 21 | `behavior`, then op 15's args     | op 15's record, then the attribute rows         |
+//! | `RotationalSweep` (attributed) | 22 | `behavior`, then op 16's args | op 16's record, then the attribute rows |
 //!
 //! The two-B-rep record is `has [is_first kept brep [brep]]` (the second B-rep when
 //! upstream keeps it); a B-rep is `faces edges vertices regions manifold_solid`, then per
@@ -92,10 +95,24 @@
 //! measure is the face's `SmApiFaceComputeArea` at [`AREA_ACCURACY`] or the edge's
 //! `SmApiEdgeComputeLength` at [`LENGTH_ACCURACY`] (minus the status on failure); rows are
 //! sorted by their attribute part, then by measure ([`sort_rows`]).
-//! An attributed sweep (op `18` / `19`: [`Call::Sweep`] / [`Call::RotationalSweep`] with
+//! `AttributedList` tags every B-rep `i` of a `MergeBreps`, `Lists` or `Trees` call's
+//! lists (in input order, `breps1` then `breps2`) as operand `i`, runs the call, and ends a
+//! successful record with the `faces rows... edges rows...` of each output B-rep (the
+//! result; each list output; each non-null tree slot), then the number of those values.
+//! An attributed sweep (op `21` / `22`: [`Call::Sweep`] / [`Call::RotationalSweep`] with
 //! `attributed`) tags the swept B-rep's faces and edges the same way (operand 0) before
 //! the sweep; a successful record ends, after the areas tail, with that B-rep's
 //! `faces rows... edges rows...` and the number of those values.
+//!
+//! `Checked` runs `SmApiBoolean`, then on success the capi check sequence on the result at
+//! `level` (`SmAssertTestLevel`, 0 to 2): `SmBrep::ValidatePointers` (its default
+//! `SM_NO_WALK`), then `SmBrep::AssertValid` with `SM_WALK` unless the pointer check
+//! reported a failure. After the two-B-rep record come `pointers_status failed...
+//! assert_valid failed...` and the number of those values ([`split_measures`]):
+//! `assert_valid` is `-1` when skipped, else `0`/`1`; each `failed` is `groups` then per
+//! failed test, in ascending order, `reporting_type list_index test_index count` (which
+//! tests fail and how often; the sides number a result's entities differently, so the
+//! entities a report names are not compared).
 //!
 //! [`run`] accepts only what upstream handles without undefined behaviour: finite
 //! operand data with positive box and plane dimensions and a nonzero sphere radius (torus
@@ -508,7 +525,7 @@ pub enum Call {
         /// The optional selections.
         selection: Selection,
         /// `Some(behavior)`: every face and edge of the B-rep is tagged first, as
-        /// [`Call::Attributed`] tags operand 0 (op `18`/`19`), and the record ends with
+        /// [`Call::Attributed`] tags operand 0 (op `21`/`22`), and the record ends with
         /// the swept B-rep's attribute rows.
         attributed: Option<u8>,
     },
@@ -531,7 +548,7 @@ pub enum Call {
         /// The optional selections.
         selection: Selection,
         /// `Some(behavior)`: every face and edge of the B-rep is tagged first, as
-        /// [`Call::Attributed`] tags operand 0 (op `18`/`19`), and the record ends with
+        /// [`Call::Attributed`] tags operand 0 (op `21`/`22`), and the record ends with
         /// the swept B-rep's attribute rows.
         attributed: Option<u8>,
     },
@@ -856,7 +873,7 @@ fn push_list(o: &mut Vec<f64>, l: &[BrepSpec], max: usize) -> Result<(), FfiErro
 fn push_attributed(o: &mut Vec<f64>, op: f64, attributed: Option<u8>) -> Result<(), FfiError> {
     match attributed {
         None => o.push(op),
-        Some(behavior) if behavior <= 4 => o.extend([op + 3.0, f64::from(behavior)]),
+        Some(behavior) if behavior <= 4 => o.extend([op + 6.0, f64::from(behavior)]),
         Some(_) => return Err(bad("behavior is not an SmAttributeBehaviorType value")),
     }
     Ok(())

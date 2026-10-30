@@ -368,7 +368,7 @@ enum Inputs {
         selection: SelectionIn,
         /// Tag every face and edge first (operand 0 of [`Inputs::Attributed`], this
         /// behaviour) and compare the swept B-rep's attribute rows too.
-        #[serde(default)]
+        #[serde(default, skip_serializing_if = "Option::is_none")]
         attributed: Option<u8>,
     },
     /// `SmApiNonManifoldRotationalSweep(brep, region, ...)`.
@@ -387,7 +387,7 @@ enum Inputs {
         selection: SelectionIn,
         /// Tag every face and edge first (operand 0 of [`Inputs::Attributed`], this
         /// behaviour) and compare the swept B-rep's attribute rows too.
-        #[serde(default)]
+        #[serde(default, skip_serializing_if = "Option::is_none")]
         attributed: Option<u8>,
     },
     /// Both operands' faces and edges tagged with their own long attribute (behaviour

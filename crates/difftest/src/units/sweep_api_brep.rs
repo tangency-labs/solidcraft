@@ -150,13 +150,13 @@ enum Inputs {
         sweep: SweepIn,
         /// Tag every disc face and edge first (this behaviour) and compare the
         /// attribute sets of the result and of the discs.
-        #[serde(default)]
+        #[serde(default, skip_serializing_if = "Option::is_none")]
         attributed: Option<u8>,
     },
     FromEdges {
         circles: Vec<(P3, f64)>,
         sweep: SweepIn,
-        #[serde(default)]
+        #[serde(default, skip_serializing_if = "Option::is_none")]
         attributed: Option<u8>,
     },
     Taper {
