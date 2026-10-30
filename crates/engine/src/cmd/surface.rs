@@ -1954,17 +1954,25 @@ mod tests {
         (numbers[0], numbers[1])
     }
 
-    /// Surface Fair on the fitted B-spline face of an offset sphere: the face is smoothed in
-    /// place, its edges do not move at all, the reply carries the energy before and after, undo,
-    /// redo and a cold reopen keep it, and hostile inputs are refused.
+    /// Surface Fair on the fitted B-spline face of a patch on a rim that is not planar (a box's
+    /// top cut away by a sideways cylinder): the face is smoothed in place, its edges do not move
+    /// at all, the reply carries the energy before and after, undo, redo and a cold reopen keep
+    /// it, and hostile inputs are refused.
     #[test]
     fn fairing_a_b_spline_face_keeps_its_edges_and_reports_its_energy() {
         let mut s = Session::default();
-        run(&mut s, "solid.sphere", json!({"radius": 20, "body_name": "Ball"}));
-        // A sphere is neither a plane nor a cylinder, so its offset is a fitted B-spline face.
-        run(&mut s, "surface.offset", json!({"faces": [[0, 0, 20]], "body": "Ball", "distance": 2, "body_name": "Shell"}));
+        run(&mut s, "solid.box", json!({"length": 28, "width": 28, "height": 20, "corner": [-14, -14, 0], "body_name": "Saddle"}));
+        run(
+            &mut s,
+            "solid.cylinder",
+            json!({"radius": 40, "height": 120, "base": [0, -60, 50], "axis": "Y", "operation": "cut", "targets": ["Saddle"]}),
+        );
+        let z = |x: f64| 50.0 - (1600.0 - x * x).sqrt();
+        let rim = json!([[14, 0, z(14.0)], [0, 14, z(0.0)], [-14, 0, z(-14.0)], [0, -14, z(0.0)]]);
+        // The rim is not planar, so its patch is a fitted B-spline face.
+        run(&mut s, "surface.patch", json!({"edges": rim, "body": "Saddle", "body_name": "Shell"}));
         let st = s.world_state().unwrap();
-        assert!(st.body("Shell").unwrap().body.is_surface(), "an offset sphere face is a sheet");
+        assert!(st.body("Shell").unwrap().body.is_surface(), "a patch on a rim is a sheet");
         let before: Vec<solidcraft_geom::Vec3> = st.body("Shell").unwrap().body.edges(0.1).unwrap().iter().flat_map(|e| e.points.clone()).collect();
         assert!(!before.is_empty());
         let area_before = area(&s, "Shell");
