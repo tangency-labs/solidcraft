@@ -172,13 +172,14 @@ conversation shows the merged step with an Undo button while it's still the late
 ### Document ownership
 
 Each open design tab owns an `AgentChat`, including its transcript, backend session, agent
-selection, sign-in retry, draft, attachments, pending messages and approval state. `DocSlot`
-parks that state alongside its `Session`; switching restores both together. Panel visibility,
+selection, sign-in retry, draft, attachments, pending messages and approval state. The conversation
+is also kept in `<design>_context/` beside the design, or in the data folder until first save.
+`DocSlot` parks that state alongside its `Session`; switching restores both together. Panel visibility,
 placement, agent discovery, endpoint model cache, settings dialogs and the desktop endpoint
-starter remain window state. A new tab gets a fresh conversation. Closing a tab drops its
-backend; closing the last tab or replacing its design (including programmatic New, Open and
+starter and context data folder remain window state. A new tab gets a fresh conversation. Closing
+a tab drops its backend; closing the last tab or replacing its design (including programmatic New, Open and
 Recover commands or scripts) clears its conversation.
-Conversation state is in memory only and does not change the design file format.
+The conversation does not change the design file format.
 
 Leaving a tab cancels its running turn, declines outstanding approvals, and merges completed
 changes into that design's undo history before swapping sessions. Its backend conversation
@@ -243,7 +244,7 @@ returns the whole state, for tests and screenshots.
 
 | Area | Work |
 |---|---|
-| Conversation | Diffs, persisted conversation history, resume (`session/load`) |
+| Conversation | Diffs, showing saved history on reopen, resume (`session/load`) |
 | Session controls | Model and mode pickers from `configOptions` / `modes`, slash commands |
 | Auth | An embedded terminal or "open a terminal here" for terminal logins on each OS; logout |
 | Discovery | Read the ACP registry; keychain-aware login check on macOS |
