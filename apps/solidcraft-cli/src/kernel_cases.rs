@@ -633,7 +633,7 @@ fn flat_pattern_checks(c: &mut Checks, want: &Value, results: &[Value], rel: f64
     }
 }
 
-fn check_case(dir: &str, dumps: Option<&std::path::Path>) -> Value {
+fn check_case(dir: &str, dumps: Option<&std::path::Path>, validation: solidcraft_engine::kernel::Validation) -> Value {
     let (area, name) = case_name(dir);
     let mut out = json!({"case": name, "area": area, "kernel": kernel()});
     let want = match read_json(&format!("{dir}/expected.json")) {
@@ -692,6 +692,7 @@ fn check_case(dir: &str, dumps: Option<&std::path::Path>) -> Value {
         }
     }
     let mut s = solidcraft_engine::Session::default();
+    s.set_validation(validation);
     let clock = std::time::Instant::now();
     let ran = s.run_script(&commands);
     // The commands' own time, without process start or grading: the ladder's timing golden.
@@ -945,7 +946,14 @@ pub fn run(args: &[String]) -> Result<(), String> {
     if dumps.as_ref().is_some_and(|d| d.as_os_str().is_empty()) {
         return Err("kernel-cases: --dumps= needs a folder".into());
     }
-    let results: Vec<Value> = dirs.iter().map(|d| check_case(d, dumps.as_deref())).collect();
+    // `--validation=MODE`: the cases' features are checked under MODE (each_step, each_feature,
+    // off; default each_feature, the app's default).
+    let validation = match args.iter().find_map(|a| a.strip_prefix("--validation=")) {
+        Some(m) => solidcraft_engine::kernel::Validation::parse(m)
+            .ok_or_else(|| format!("kernel-cases: --validation= must be each_step, each_feature or off, not `{m}`"))?,
+        None => solidcraft_engine::kernel::Validation::default(),
+    };
+    let results: Vec<Value> = dirs.iter().map(|d| check_case(d, dumps.as_deref(), validation)).collect();
     if dumps.is_some() {
         solidcraft_engine::kernel::smlib_dump_dir(None).map_err(|e| format!("kernel-cases: --dumps: {e}"))?;
     }

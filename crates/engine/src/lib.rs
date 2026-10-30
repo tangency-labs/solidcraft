@@ -606,7 +606,12 @@ impl Session {
     /// `doc`'s evaluation ([`Model::adopt`]); otherwise the timeline is evaluated.
     /// Use [`Self::opened_at`] when the document's file location is known.
     /// `SOLIDCRAFT_NO_MODEL_CACHE` set always evaluates.
-    pub fn opened(mut doc: Document, saved: Option<&solidcraft_doc::SavedModel>) -> Self {
+    pub fn opened(doc: Document, saved: Option<&solidcraft_doc::SavedModel>) -> Self {
+        Self::opened_validating(doc, saved, solidcraft_kernel::Validation::default())
+    }
+
+    /// [`Self::opened`], its features evaluated under `validation` ([`Session::set_validation`]).
+    pub fn opened_validating(mut doc: Document, saved: Option<&solidcraft_doc::SavedModel>, validation: solidcraft_kernel::Validation) -> Self {
         // A design's font files are checked like its other paths before it is evaluated.
         solidcraft_io::vfs::install_checks();
         // The session keeps what is hidden (an undo step of its own); the design file carries it.
@@ -615,11 +620,18 @@ impl Session {
         let adopted = saved
             .filter(|_| solidcraft_geom::env::var_os("NO_MODEL_CACHE").is_none())
             .and_then(|saved| Model::adopt(&doc, saved).map_err(|e| log::info!("the saved model is not used: {e}")).ok());
-        let model = adopted.unwrap_or_else(|| {
-            let mut model = Model::new();
-            model.evaluate(&doc);
-            model
-        });
+        let model = match adopted {
+            Some(mut model) => {
+                model.set_validation(validation);
+                model
+            }
+            None => {
+                let mut model = Model::new();
+                model.set_validation(validation);
+                model.evaluate(&doc);
+                model
+            }
+        };
         Session {
             saved: doc.clone(),
             doc,
@@ -690,6 +702,7 @@ impl Session {
     /// checkpoint keeps, not the replaced session's file path (docs/mcp.md).
     pub fn replace_design(&mut self, fresh: Session) {
         let auto_project = self.auto_project;
+        let validation = self.validation();
         let metric_tap_drill_major_less_pitch = self.metric_tap_drill_major_less_pitch;
         let surface_extrude_symmetric_per_side = self.surface_extrude_symmetric_per_side;
         let param_check = self.param_check;
@@ -707,6 +720,9 @@ impl Session {
         self.crash_journal = crash_journal;
         self.command_check = command_check;
         self.auto_project = auto_project;
+        // The user's, like `auto_project`: the commands that open a design evaluate it under it
+        // already (`Session::opened_validating`).
+        self.set_validation(validation);
         self.metric_tap_drill_major_less_pitch = metric_tap_drill_major_less_pitch;
         self.surface_extrude_symmetric_per_side = surface_extrude_symmetric_per_side;
         self.param_check = param_check;
@@ -940,6 +956,20 @@ impl Session {
             Some(cell) => cell.get_or_init(compute).clone(),
             None => compute(),
         }
+    }
+
+    /// When SMLib's check runs on the features evaluated: after every sweep, boolean and blend,
+    /// once on the bodies each feature keeps (the default), or not at all. A user's setting,
+    /// kept when another design is opened (`diagnostics.validation`, the app's preference).
+    pub fn validation(&self) -> solidcraft_kernel::Validation {
+        self.model.validation()
+    }
+
+    /// Evaluate the features computed from now on under `validation` ([`Session::validation`]);
+    /// the results already there stand until their features are computed again
+    /// (`timeline.compute_all` computes every one).
+    pub fn set_validation(&mut self, validation: solidcraft_kernel::Validation) {
+        self.model.set_validation(validation);
     }
 
     pub fn refresh(&mut self) {

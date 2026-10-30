@@ -1,6 +1,6 @@
 use serde_json::json;
 
-use super::ProfileParams;
+use super::{ProfileParams, ValidationParams};
 use crate::Session;
 use crate::schema::input_schema_for;
 use crate::schema::tests::{assert_keys, assert_strict_keeps_todays_errors};
@@ -8,6 +8,7 @@ use crate::schema::tests::{assert_keys, assert_strict_keeps_todays_errors};
 #[test]
 fn schemas_and_the_key_check_agree() {
     assert_keys(input_schema_for::<ProfileParams>(), &["enabled", "reset", "top", "trace"]);
+    assert_keys(input_schema_for::<ValidationParams>(), &["mode"]);
 }
 
 #[test]
@@ -18,6 +19,8 @@ fn strict_keeps_todays_errors() {
         ("diagnostics.profile", json!({"top": -1})),
         ("diagnostics.profile", json!({"top": 2.5})),
         ("diagnostics.profile", json!({"trace": 5})),
+        ("diagnostics.validation", json!({"mode": "each step"})),
+        ("diagnostics.validation", json!({"mode": true})),
     ]);
 }
 
@@ -59,4 +62,60 @@ fn diagnostics_profile_reports_commands_features_and_the_kernel() {
     assert!(rows.iter().any(|x| x["category"] == "command" && x["name"] == "diagnostics.profile"), "{after}");
     assert_eq!(after["enabled"], json!(false), "{after}");
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Features are checked once each by default; the command reads and sets the mode, and the mode
+/// is the user's: it stays when another design is started and when everything is computed again.
+#[test]
+fn validation_defaults_to_each_feature_and_round_trips_through_the_command() {
+    use solidcraft_kernel::Validation;
+    let mut s = Session::default();
+    assert_eq!(s.validation(), Validation::EachFeature);
+    assert_eq!(s.execute("diagnostics.validation", &json!({})).unwrap(), json!({"mode": "each_feature", "previous": "each_feature"}));
+    let r = s.execute("diagnostics.validation", &json!({"mode": "each_step"})).unwrap();
+    assert_eq!(r, json!({"mode": "each_step", "previous": "each_feature"}));
+    assert_eq!(s.validation(), Validation::EachStep);
+    s.execute("file.new", &json!({})).unwrap();
+    s.execute("solid.box", &json!({"length": 10, "width": 10, "height": 10})).unwrap();
+    s.execute("timeline.compute_all", &json!({})).unwrap();
+    assert_eq!(s.execute("diagnostics.validation", &json!({"mode": "off"})).unwrap()["previous"], json!("each_step"));
+    assert_eq!(s.validation(), Validation::Off);
+    // A refused mode changes nothing.
+    assert!(s.execute("diagnostics.validation", &json!({"mode": "never"})).is_err());
+    assert_eq!(s.validation(), Validation::Off);
+}
+
+/// A feature whose body SMLib's check refuses fails under each_feature as under each_step (once
+/// at its end instead of at the step), with the check's reason; off keeps the body. The bar's
+/// top edge rounded into the boss's round (kernel case
+/// fillets/1207-fillet-bar-top-edge-after-boss-arc-round-r0-5, refused by the check on this
+/// SMLib); the same features without the last round build under every mode, to the same volume.
+#[test]
+fn a_body_the_check_refuses_still_fails_its_feature_once_per_feature() {
+    use solidcraft_kernel::Validation;
+    let build = |mode: Validation, last: bool| {
+        let mut s = Session::default();
+        s.set_validation(mode);
+        s.execute("solid.box", &json!({"length": 100, "width": 30, "height": 10, "corner": [0, -15, 0], "body_name": "Arm"})).unwrap();
+        s.execute("solid.cylinder", &json!({"diameter": 40, "height": 20, "base": [0, 0, 0], "operation": "join", "targets": ["Arm"]})).unwrap();
+        s.execute("solid.fillet", &json!({"edges": [[16, 12, 10]], "radius": 2})).unwrap();
+        let r = if last { s.execute("solid.fillet", &json!({"edges": [[60, -15, 10]], "radius": 0.5})).map(|_| ()) } else { Ok(()) };
+        let volume = s.execute("inspect.measure", &json!({})).ok().and_then(|m| m["total"]["volume_mm3"].as_f64());
+        (r.map_err(|e| e.to_string()), volume)
+    };
+    let each_step = build(Validation::EachStep, false);
+    for mode in [Validation::EachFeature, Validation::Off] {
+        let (r, volume) = build(mode, false);
+        assert!(r.is_ok() && each_step.0.is_ok(), "{mode:?}: {r:?}");
+        assert!(volume.zip(each_step.1).is_some_and(|(v, w)| (v - w).abs() <= 1e-9 * w), "{mode:?}: {volume:?} vs {:?}", each_step.1);
+    }
+    let (step, _) = build(Validation::EachStep, true);
+    let (feature, _) = build(Validation::EachFeature, true);
+    assert_eq!(step.is_err(), feature.is_err(), "each_step {step:?}, each_feature {feature:?}");
+    if let Err(e) = &feature {
+        assert!(e.contains("SMLib's check refuses the result"), "{e}");
+        assert!(step.as_ref().err().is_some_and(|e| e.contains("SMLib's check refuses the result")), "{step:?}");
+        let (off, _) = build(Validation::Off, true);
+        assert!(off.is_ok(), "off keeps the body the check refuses: {off:?}");
+    }
 }

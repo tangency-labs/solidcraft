@@ -982,6 +982,7 @@ impl SolveApp {
         // next frame applies them.
         self.session.metric_tap_drill_major_less_pitch = self.preferences.metric_tap_drill_major_less_pitch;
         self.session.surface_extrude_symmetric_per_side = self.preferences.surface_extrude_symmetric_per_side;
+        self.session.set_validation(self.preferences.validation);
         let t0 = now_ms();
         let r = self.session.execute(id, &params).map_err(|e| e.to_string());
         self.big_operation |= now_ms() - t0 >= recovery_ui::BIG_OPERATION_MS;
@@ -1010,6 +1011,8 @@ impl SolveApp {
                         self.ui.visual_style = index;
                     }
                 }
+                // The command and the preference are one setting.
+                "diagnostics.validation" => self.preferences.validation = self.session.validation(),
                 "view.grid" => self.ui.show_grid = v.get("on").and_then(Value::as_bool).unwrap_or(!self.ui.show_grid),
                 "view.ground_shadow" => self.ui.ground_shadow = v.get("on").and_then(Value::as_bool).unwrap_or(!self.ui.ground_shadow),
                 "view.navigation_bar" => {

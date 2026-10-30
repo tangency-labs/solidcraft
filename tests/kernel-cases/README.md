@@ -14,6 +14,10 @@ The CLI links SMLib by default (`scripts/fetch-smlib.sh` fetches the prebuilt li
 built with `--no-default-features`, every operation answers that SMLib is not built. The run's output folder (`--out`, default `target/kernel-cases`)
 gets `results.json`, every case's full result, and `dumps/<area>-<case>/`: the inputs of each
 SMLib call a case failed in, for replay (the CLI's `--dumps=DIR`, which the rig always passes).
+`--validation MODE` runs the cases' features under that mode of SMLib's check
+(`diagnostics.validation`): `each_feature` (the default: the bodies each feature keeps are checked
+once), `each_step` (after every sweep, boolean and blend, as before) or `off`; the
+`KNOWN_FAILING` lists are each_feature's.
 
 ## Rules
 

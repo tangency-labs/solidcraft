@@ -294,6 +294,7 @@ fn open(s: &mut Session, p: &Value) -> Result<Value> {
     if let Some(command) = super::drawing_import_command(path) {
         let stem = std::path::Path::new(path).file_stem().map(|x| x.to_string_lossy().to_string()).unwrap_or_else(|| "Untitled".into());
         let mut fresh = Session::new(Document::new(&stem));
+        fresh.set_validation(s.validation());
         let mut out = fresh.execute(command, &json!({"path": path}))?;
         fresh.undo.clear();
         s.replace_design(fresh);
@@ -307,6 +308,7 @@ fn open(s: &mut Session, p: &Value) -> Result<Value> {
         // A new, unsaved design holding the file's bodies.
         let stem = std::path::Path::new(path).file_stem().map(|x| x.to_string_lossy().to_string()).unwrap_or_else(|| "Untitled".into());
         let mut fresh = Session::new(Document::new(&stem));
+        fresh.set_validation(s.validation());
         let r = if solidcraft_io::is_step_path(path) {
             add_step(&mut fresh, path, None, &step_options(p, "doc.open")?)?
         } else {
@@ -335,7 +337,7 @@ fn open(s: &mut Session, p: &Value) -> Result<Value> {
     if let Some(stem) = default_name_for(&doc.name, path) {
         doc.name = stem;
     }
-    s.replace_design(Session::opened_at(doc, saved.as_ref(), Some(path)));
+    s.replace_design(Session::opened_at_validating(doc, saved.as_ref(), Some(path), s.validation()));
     s.disk = disk;
     s.read_only = read_only;
     let errors = s.model.results.iter().filter(|r| r.error.is_some()).count();
@@ -460,9 +462,19 @@ fn write_bytes(
 impl Session {
     /// Open a design with its file location, resolving component links before history keeps
     /// them. Absolute in-memory targets survive Save As, undo, redo and recovery unchanged.
-    pub fn opened_at(mut doc: Document, saved: Option<&solidcraft_doc::SavedModel>, path: Option<&str>) -> Self {
+    pub fn opened_at(doc: Document, saved: Option<&solidcraft_doc::SavedModel>, path: Option<&str>) -> Self {
+        Self::opened_at_validating(doc, saved, path, solidcraft_kernel::Validation::default())
+    }
+
+    /// [`Self::opened_at`], its features evaluated under `validation` ([`Session::set_validation`]).
+    pub fn opened_at_validating(
+        mut doc: Document,
+        saved: Option<&solidcraft_doc::SavedModel>,
+        path: Option<&str>,
+        validation: solidcraft_kernel::Validation,
+    ) -> Self {
         super::component_link::resolve_design_links(&mut doc, path);
-        let mut session = Self::opened(doc, saved);
+        let mut session = Self::opened_validating(doc, saved, validation);
         session.path = path.map(str::to_owned);
         session
     }
@@ -815,7 +827,7 @@ fn recover(s: &mut Session, p: &Value) -> Result<Value> {
     if let Some(stem) = entry.path.as_deref().and_then(|path| default_name_for(&doc.name, path)) {
         doc.name = stem;
     }
-    s.replace_design(Session::opened_at(doc, None, entry.path.as_deref()));
+    s.replace_design(Session::opened_at_validating(doc, None, entry.path.as_deref(), s.validation()));
     s.mark_unsaved();
     if bool_(p, "discard").unwrap_or(false) {
         crate::recovery::remove(&dir, id)?;

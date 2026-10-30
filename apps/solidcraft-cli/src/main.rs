@@ -1,7 +1,7 @@
 //! SolidCraft headless command line.
 //!
 //! ```text
-//! solidcraft-cli run <script.json|design.solidcraft|part.step|mesh.3mf> [--in design|part.step|mesh.3mf] [--out FILE]... [--save FILE] [--quiet] [--results] [--timings] [--profile] [--json-out FILE] [--allow-errors]
+//! solidcraft-cli run <script.json|design.solidcraft|part.step|mesh.3mf> [--in design|part.step|mesh.3mf] [--out FILE]... [--save FILE] [--quiet] [--results] [--timings] [--profile] [--json-out FILE] [--allow-errors] [--validation MODE]
 //! solidcraft-cli eval <script.json|design.solidcraft|part.step> [--in design.solidcraft|part.step] [--json-out FILE] (alias: inspect) measurements as JSON
 //! solidcraft-cli script <design.solidcraft> [--out script.json]     the design's history as a command script
 //! solidcraft-cli bench-open <design.solidcraft | part.step> [--parse-only] [--save OUT.solidcraft] [--display LEVEL [--edit NAME EXPR]] [--ops script.json] loading timings as JSON lines
@@ -15,7 +15,7 @@
 //! solidcraft-cli commands                                     the command registry as JSON
 //! solidcraft-cli recipe <recipe.json>                         translate an oracle recipe to a script
 //! solidcraft-cli oracle <case-dir>...                         replay recipes and compare with expected.json
-//! solidcraft-cli kernel-cases [--json] [--dumps=DIR] <case-dir>... the kernel regression rig (tests/kernel-cases)
+//! solidcraft-cli kernel-cases [--json] [--dumps=DIR] [--validation=MODE] <case-dir>... the kernel regression rig (tests/kernel-cases)
 //! solidcraft-cli mcp [--headless] [--in design|script] [--connect HOST:PORT [--token T]] [--allow-path DIR]... [--allow-any-path]
 //!                    [--param-check off|warn|strict]
 //!                                                             MCP server on stdio (docs/mcp.md)
@@ -59,7 +59,7 @@ struct Command {
 }
 
 /// `run`'s lines in the usage.
-const USAGE_RUN: &str = "  solidcraft-cli run <script.json|design.solidcraft|part.step> [--in design.solidcraft|part.step] [--out FILE]... [--save FILE] [--quiet] [--results] [--timings] [--profile] [--profile-out trace.json] [--json-out FILE] [--allow-errors]\n  solidcraft-cli run --in <design.solidcraft|part.step> [--out FILE]...\n      (a timeline feature that fails fails the run and nothing is written; --allow-errors writes anyway)\n      (--timings prints {timings: [{index, command, ms}], total_ms} for a script, with --results its results too;\n       --profile adds each command's profile: {boolean_ms, tessellate_ms, other_ms}, the kernel's share)\n      (--profile also records where the time goes, SMLib's calls, kernel operations, features, commands and import stages,\n       and prints the table to stderr: count, total, self time and longest per span; --profile-out FILE writes the spans\n       as a Chrome trace for chrome://tracing or ui.perfetto.dev; SOLIDCRAFT_PROFILE=1 does the same for any command)\n";
+const USAGE_RUN: &str = "  solidcraft-cli run <script.json|design.solidcraft|part.step> [--in design.solidcraft|part.step] [--out FILE]... [--save FILE] [--quiet] [--results] [--timings] [--profile] [--profile-out trace.json] [--json-out FILE] [--allow-errors] [--validation each_step|each_feature|off]\n  solidcraft-cli run --in <design.solidcraft|part.step> [--out FILE]...\n      (a timeline feature that fails fails the run and nothing is written; --allow-errors writes anyway)\n      (--validation: when SMLib's full check runs on the features computed (diagnostics.validation), default each_feature)\n      (--timings prints {timings: [{index, command, ms}], total_ms} for a script, with --results its results too;\n       --profile adds each command's profile: {boolean_ms, tessellate_ms, other_ms}, the kernel's share)\n      (--profile also records where the time goes, SMLib's calls, kernel operations, features, commands and import stages,\n       and prints the table to stderr: count, total, self time and longest per span; --profile-out FILE writes the spans\n       as a Chrome trace for chrome://tracing or ui.perfetto.dev; SOLIDCRAFT_PROFILE=1 does the same for any command)\n";
 /// `eval`'s lines in the usage.
 const USAGE_EVAL: &str = "  solidcraft-cli eval <script.json|design.solidcraft|part.step> [--in design.solidcraft|part.step] [--json-out FILE] [--profile] [--profile-out trace.json]     (alias: inspect)\n  solidcraft-cli eval --in <script.json|design.solidcraft|part.step> [--json-out FILE]\n      (with both inputs, runs the positional script on --in before measuring; does not automatically save the modified design)\n      (--json-out FILE writes the JSON that run (with --results, else the measurement) and eval print to FILE instead of stdout,\n       as plain UTF-8: a shell's > can re-encode it, e.g. Windows PowerShell adds a byte-order mark)\n      (--profile and --profile-out as for run)\n";
 /// `script`'s lines in the usage.
@@ -83,7 +83,7 @@ const USAGE_RECIPE: &str = "  solidcraft-cli recipe <recipe.json>\n";
 /// `oracle`'s lines in the usage.
 const USAGE_ORACLE: &str = "  solidcraft-cli oracle <case-dir>... [--json]\n";
 /// `kernel-cases`'s lines in the usage.
-const USAGE_KERNEL_CASES: &str = "  solidcraft-cli kernel-cases <case-dir>... [--json] [--dumps=DIR]\n      (the kernel regression rig, tests/kernel-cases, on SMLib; --dumps: each case's\n       failing SMLib calls leave their inputs for replay in DIR/<area>-<case>)\n";
+const USAGE_KERNEL_CASES: &str = "  solidcraft-cli kernel-cases <case-dir>... [--json] [--dumps=DIR] [--validation=each_step|each_feature|off]\n      (the kernel regression rig, tests/kernel-cases, on SMLib; --dumps: each case's\n       failing SMLib calls leave their inputs for replay in DIR/<area>-<case>; --validation: when SMLib's\n       full check runs (diagnostics.validation), default each_feature)\n";
 /// `fuzz`'s lines in the usage.
 const USAGE_FUZZ: &str =
     "  solidcraft-cli fuzz [--from N] [--count N] [--jobs J] [--timeout S] [--steps N] [--minimise] [--out DIR] [--report FILE]\n";
@@ -278,8 +278,15 @@ pub fn load(path: &str) -> Result<Session, String> {
 /// `load`, with scripts and recipes run at the parameter-check level `check`, which the
 /// session keeps.
 fn load_checked(path: &str, check: solidcraft_engine::schema::ParamCheck) -> Result<Session, String> {
+    load_with(path, check, solidcraft_engine::kernel::Validation::default())
+}
+
+/// `load_checked`, the features computed under `validation` (`diagnostics.validation`), which
+/// the session keeps.
+fn load_with(path: &str, check: solidcraft_engine::schema::ParamCheck, validation: solidcraft_engine::kernel::Validation) -> Result<Session, String> {
     let mut s = Session::default();
     s.param_check = check;
+    s.set_validation(validation);
     if solidcraft_engine::io::is_step_path(path) || solidcraft_engine::io::is_mesh_path(path) {
         s.execute("doc.open", &json!({"path": path})).map_err(|e| e.to_string())?;
         return Ok(s);
@@ -287,7 +294,7 @@ fn load_checked(path: &str, check: solidcraft_engine::schema::ParamCheck) -> Res
     let bytes = solidcraft_engine::io::vfs::read(path, solidcraft_engine::io::MAX_DESIGN_BYTES).map_err(|e| format!("{path}: {e}"))?;
     if solidcraft_engine::io::is_design_container(&bytes) {
         let doc = solidcraft_engine::io::read_design(&bytes).map_err(|e| format!("{path}: {e}"))?;
-        let mut session = Session::opened_at(doc, None, Some(path));
+        let mut session = Session::opened_at_validating(doc, None, Some(path), validation);
         session.param_check = check;
         return Ok(session);
     }
@@ -377,10 +384,11 @@ fn cmd_run(args: &[String]) -> Result<(), String> {
     known_args(
         "run",
         args,
-        &["--in", "--out", "--save", "--json-out", "--profile-out"],
+        &["--in", "--out", "--save", "--json-out", "--profile-out", "--validation"],
         &["--quiet", "--results", "--timings", "--profile", "--allow-errors"],
         true,
     )?;
+    let validation = validation_flag("run", args)?;
     let base = flag(args, "--in");
     let path = positional(args);
     if path.is_none() && base.is_none() {
@@ -395,8 +403,12 @@ fn cmd_run(args: &[String]) -> Result<(), String> {
     let (mut s, results) = if want_results || timings {
         // Collect every command's result or time (scripts only), then process requested files too.
         let mut s = match base {
-            Some(b) => load(b)?,
-            None => Session::default(),
+            Some(b) => load_with(b, solidcraft_engine::schema::ParamCheck::Off, validation)?,
+            None => {
+                let mut s = Session::default();
+                s.set_validation(validation);
+                s
+            }
         };
         let needs = if want_results { "--results needs a script" } else { "--timings needs a script" };
         let v = read_json(path.ok_or(needs)?)?;
@@ -411,7 +423,7 @@ fn cmd_run(args: &[String]) -> Result<(), String> {
         };
         (s, Some(out))
     } else {
-        (open(base, path)?, None)
+        (open_validating(base, path, validation)?, None)
     };
     // A feature that fails leaves the bodies as they were before it (a parameter change can
     // break a feature without failing the command that made it): writing them would hand out
@@ -438,6 +450,12 @@ fn cmd_run(args: &[String]) -> Result<(), String> {
 /// The session `run`, `eval` and `snapshot` start from: `--in` (a design or STEP file) with the
 /// positional script run on top of it, or either one alone.
 fn open(base: Option<&str>, path: Option<&String>) -> Result<Session, String> {
+    open_validating(base, path, solidcraft_engine::kernel::Validation::default())
+}
+
+/// [`open`], the features computed under `validation`.
+fn open_validating(base: Option<&str>, path: Option<&String>, validation: solidcraft_engine::kernel::Validation) -> Result<Session, String> {
+    let load = |p: &str| load_with(p, solidcraft_engine::schema::ParamCheck::Off, validation);
     match (base, path) {
         (Some(b), Some(p)) => {
             let mut s = load(b)?;
@@ -447,6 +465,15 @@ fn open(base: Option<&str>, path: Option<&String>) -> Result<Session, String> {
         (Some(b), None) => load(b),
         (None, Some(p)) => load(p),
         (None, None) => Err(usage()),
+    }
+}
+
+/// `--validation MODE` (`diagnostics.validation`): the default, each_feature, when not given.
+fn validation_flag(cmd: &str, args: &[String]) -> Result<solidcraft_engine::kernel::Validation, String> {
+    match flag(args, "--validation") {
+        Some(m) => solidcraft_engine::kernel::Validation::parse(m)
+            .ok_or_else(|| format!("{cmd}: --validation must be each_step, each_feature or off, not `{m}`")),
+        None => Ok(solidcraft_engine::kernel::Validation::default()),
     }
 }
 

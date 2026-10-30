@@ -32,6 +32,9 @@ pub(crate) struct Options {
     out: PathBuf,
     /// `--known-failing FILE`: run as a regression gate against that baseline (see [`gate`]).
     known_failing: Option<PathBuf>,
+    /// `--validation MODE`: when SMLib's full check runs on the cases' features (each_step,
+    /// each_feature, off; the CLI's default, each_feature, when not given).
+    validation: Option<String>,
 }
 
 /// The run's options; `out` is its output folder unless `--out` gives one.
@@ -44,7 +47,11 @@ pub(crate) fn options(rest: &[&str], out: &str) -> Result<Options, String> {
         let p = PathBuf::from(p);
         if p.is_absolute() { p } else { root().join(p) }
     });
-    Ok(Options { cli: arg("--cli"), area: arg("--area"), timeout: Duration::from_secs(secs), jobs, out, known_failing })
+    let validation = arg("--validation");
+    if let Some(v) = validation.as_deref().filter(|v| !["each_step", "each_feature", "off"].contains(v)) {
+        return Err(format!("--validation must be each_step, each_feature or off, not `{v}`"));
+    }
+    Ok(Options { cli: arg("--cli"), area: arg("--area"), timeout: Duration::from_secs(secs), jobs, out, known_failing, validation })
 }
 
 /// Every case's full result as JSON, into the run's output folder.
@@ -99,7 +106,11 @@ fn run_case(o: &Options, case: &Path) -> Value {
     };
     let mut dumps = std::ffi::OsString::from("--dumps=");
     dumps.push(o.out.join("dumps"));
-    cmd.current_dir(root()).args(["kernel-cases", "--json"]).arg(dumps).arg(&rel).stdout(Stdio::piped()).stderr(Stdio::piped());
+    cmd.current_dir(root()).args(["kernel-cases", "--json"]).arg(dumps);
+    if let Some(v) = &o.validation {
+        cmd.arg(format!("--validation={v}"));
+    }
+    cmd.arg(&rel).stdout(Stdio::piped()).stderr(Stdio::piped());
     let base = |status: &str, error: String| {
         let area = case.parent().and_then(|p| p.file_name()).map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
         let id = case.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();

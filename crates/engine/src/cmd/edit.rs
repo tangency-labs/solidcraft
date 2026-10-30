@@ -134,7 +134,9 @@ fn restore_checkpoint(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 fn compute_all(s: &mut Session, _p: &Value) -> Result<Value> {
+    let validation = s.validation();
     s.model = solidcraft_doc::Model::new();
+    s.set_validation(validation);
     s.refresh();
     let errors = s.model.results.iter().filter(|r| r.error.is_some()).count();
     Ok(json!({"features": s.model.results.len(), "errors": errors}))

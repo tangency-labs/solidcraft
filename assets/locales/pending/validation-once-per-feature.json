@@ -1,0 +1,65 @@
+{
+  "ar": {
+    "cmd.diagnostics_validation": "التحقق",
+    "prefs.validation": "التحقق من الأجسام",
+    "prefs.validation.each_feature": "مرة لكل ميزة",
+    "prefs.validation.each_step": "بعد كل خطوة",
+    "prefs.validation.label": "فحص النواة الكامل",
+    "prefs.validation.off": "متوقف (تجريبي)",
+    "prefs.validation_note": "مرة لكل ميزة: تُفحص الأجسام التي تنتجها الميزة مرة واحدة قبل الاحتفاظ بها، وتفشل الميزة إذا رُفض أحدها. بعد كل خطوة: يُفحص ناتج كل عملية سحب ودمج وتقويس، كما في السابق. متوقف: لا فحص، فقد يُحتفظ بجسم معيب."
+  },
+  "de": {
+    "cmd.diagnostics_validation": "Prüfung",
+    "prefs.validation": "Körperprüfung",
+    "prefs.validation.each_feature": "Einmal je Feature",
+    "prefs.validation.each_step": "Nach jedem Schritt",
+    "prefs.validation.label": "Vollständige Kernel-Prüfung",
+    "prefs.validation.off": "Aus (experimentell)",
+    "prefs.validation_note": "Einmal je Feature: Die Körper, die ein Feature erzeugt, werden einmal geprüft, bevor sie übernommen werden; wird einer abgelehnt, schlägt das Feature fehl. Nach jedem Schritt: Das Ergebnis jedes Sweeps, jeder Boolesche Operation und jeder Rundung wird geprüft, wie bisher. Aus: keine Prüfung, ein fehlerhafter Körper kann bleiben."
+  },
+  "en": {
+    "cmd.diagnostics_validation": "Validation",
+    "prefs.validation": "Body check",
+    "prefs.validation.each_feature": "Once per feature",
+    "prefs.validation.each_step": "After every step",
+    "prefs.validation.label": "Full kernel check",
+    "prefs.validation.off": "Off (experimental)",
+    "prefs.validation_note": "Once per feature: the bodies a feature makes are checked once before they are kept, and the feature fails if one is refused. After every step: the result of every sweep, boolean and blend is checked, as before. Off: no check, so a faulty body can be kept."
+  },
+  "he": {
+    "cmd.diagnostics_validation": "אימות",
+    "prefs.validation": "בדיקת גופים",
+    "prefs.validation.each_feature": "פעם אחת לכל תכונה",
+    "prefs.validation.each_step": "אחרי כל שלב",
+    "prefs.validation.label": "הבדיקה המלאה של הקרנל",
+    "prefs.validation.off": "כבוי (ניסיוני)",
+    "prefs.validation_note": "פעם אחת לכל תכונה: הגופים שתכונה יוצרת נבדקים פעם אחת לפני שהם נשמרים, והתכונה נכשלת אם אחד מהם נדחה. אחרי כל שלב: התוצאה של כל סחיפה, פעולה בוליאנית ועיגול נבדקת, כמו קודם. כבוי: אין בדיקה, ולכן גוף פגום עלול להישמר."
+  },
+  "ja": {
+    "cmd.diagnostics_validation": "検証",
+    "prefs.validation": "ボディのチェック",
+    "prefs.validation.each_feature": "フィーチャーごとに 1 回",
+    "prefs.validation.each_step": "各ステップの後",
+    "prefs.validation.label": "カーネルの完全チェック",
+    "prefs.validation.off": "オフ (試験的)",
+    "prefs.validation_note": "フィーチャーごとに 1 回: フィーチャーが作るボディを保持する前に 1 回チェックし、拒否されたものがあればフィーチャーは失敗します。各ステップの後: これまでどおり、スイープ、ブーリアン、ブレンドのたびに結果をチェックします。オフ: チェックしないため、不正なボディが残ることがあります。"
+  },
+  "ko": {
+    "cmd.diagnostics_validation": "검증",
+    "prefs.validation": "바디 검사",
+    "prefs.validation.each_feature": "피처마다 한 번",
+    "prefs.validation.each_step": "모든 단계 후",
+    "prefs.validation.label": "커널 전체 검사",
+    "prefs.validation.off": "끄기 (실험적)",
+    "prefs.validation_note": "피처마다 한 번: 피처가 만든 바디를 유지하기 전에 한 번 검사하며, 하나라도 거부되면 피처가 실패합니다. 모든 단계 후: 이전처럼 스윕, 불리언, 블렌드마다 결과를 검사합니다. 끄기: 검사하지 않으므로 결함 있는 바디가 남을 수 있습니다."
+  },
+  "zh": {
+    "cmd.diagnostics_validation": "验证",
+    "prefs.validation": "实体检查",
+    "prefs.validation.each_feature": "每个特征一次",
+    "prefs.validation.each_step": "每一步之后",
+    "prefs.validation.label": "内核完整检查",
+    "prefs.validation.off": "关闭（实验性）",
+    "prefs.validation_note": "每个特征一次：特征生成的实体在保留前检查一次，若有实体被拒绝，该特征失败。每一步之后：与以前一样，每次扫掠、布尔运算和倒圆后都检查结果。关闭：不检查，因此可能保留有缺陷的实体。"
+  }
+}

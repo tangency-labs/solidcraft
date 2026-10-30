@@ -408,8 +408,10 @@ fn start(app: &mut SolveApp) {
     let before = if insert { crate::open_meshing::session_world(&app.session).bodies.iter().map(|b| b.name.clone()).collect() } else { Vec::new() };
     let update = request.kind == Kind::UpdateLinks;
     let mut scratch = if insert || update || request.kind == Kind::ExportDxf { app.session.scratch() } else { Session::default() };
-    // A design opened or recovered here is run through the host's pre-command check too.
+    // A design opened or recovered here is run through the host's pre-command check too, and
+    // evaluated under the user's validation mode.
     scratch.set_command_check(app.session.command_check());
+    scratch.set_validation(app.preferences.validation);
     if insert {
         scratch.selection = app.session.selection.clone();
     }
@@ -537,6 +539,7 @@ fn start_staged(app: &mut SolveApp) {
     let before = if insert { crate::open_meshing::session_world(&app.session).bodies.iter().map(|b| b.name.clone()).collect() } else { Vec::new() };
     let mut session = if insert { app.session.scratch() } else { Session::default() };
     session.set_command_check(app.session.command_check());
+    session.set_validation(app.preferences.validation);
     if insert {
         session.selection = app.session.selection.clone();
     }

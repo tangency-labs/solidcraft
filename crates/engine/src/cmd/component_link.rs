@@ -88,8 +88,8 @@ pub fn resolve_design_links(doc: &mut Document, from: Option<&str>) {
 /// the design gives their faces (`Feature::link_faces`), with the source's design properties.
 type Linked = (String, solidcraft_io::StepFeature, Vec<Vec<String>>, solidcraft_doc::Metadata);
 
-/// The solid bodies of the design at `file`, evaluated, as an Import feature.
-fn linked_bodies(file: &Path, own: Option<&str>) -> Result<Linked> {
+/// The solid bodies of the design at `file`, evaluated under `validation`, as an Import feature.
+fn linked_bodies(file: &Path, own: Option<&str>, validation: solidcraft_kernel::Validation) -> Result<Linked> {
     let shown = file.display().to_string();
     if own.is_some_and(|o| absolute(Path::new(o)) == absolute(file)) {
         return Err(EngineError::Other(format!("{shown}: a design can't be linked into itself")));
@@ -101,7 +101,7 @@ fn linked_bodies(file: &Path, own: Option<&str>) -> Result<Linked> {
         EngineError::Other(if e.starts_with(&shown) { e } else { format!("{shown}: {e}") })
     })?;
     let doc = solidcraft_io::read_design(&bytes).map_err(|e| EngineError::Other(format!("{shown}: {e}")))?;
-    session_bodies(&Session::opened_at(doc, None, Some(&shown)), &shown)
+    session_bodies(&Session::opened_at_validating(doc, None, Some(&shown), validation), &shown)
 }
 
 /// The solid bodies of `part`, the design saved as `shown`, as an Import feature.
@@ -156,7 +156,7 @@ fn insert_design(s: &mut Session, p: &Value) -> Result<Value> {
             return super::component::copy_occurrence(s, &json!({"component": component, "parent": parent, "translate": translate}));
         }
     }
-    let (design_name, sf, faces, metadata) = linked_bodies(&file, s.path.as_deref())?;
+    let (design_name, sf, faces, metadata) = linked_bodies(&file, s.path.as_deref(), s.validation())?;
     let name = str_(p, "name").filter(|n| !n.trim().is_empty()).map(str::to_string).unwrap_or(design_name);
     let mut create = json!({"name": name, "activate": false});
     // Clipboard insertion uses reuse even for the first paste, which must stay movable.
@@ -224,7 +224,7 @@ fn update_links(s: &mut Session, p: &Value) -> Result<Value> {
         let old = old.clone();
         link_refused(s.path.as_deref(), &link.path).map_err(|e| bad(cmd, format!("{cname}: {e}")))?;
         let file = resolve(s.path.as_deref(), &link.path);
-        let (_, sf, faces, _) = linked_bodies(&file, s.path.as_deref()).map_err(|e| bad(cmd, format!("{cname}: {e}")))?;
+        let (_, sf, faces, _) = linked_bodies(&file, s.path.as_deref(), s.validation()).map_err(|e| bad(cmd, format!("{cname}: {e}")))?;
         warnings.extend(sf.warnings.iter().cloned());
         let same = matches!(&sf.kind, FeatureKind::Import { step, .. } if *step == old);
         let kept = s.doc.feature(link.feature).map(|f| &f.link_faces);
@@ -305,7 +305,7 @@ fn relink(s: &mut Session, p: &Value) -> Result<Value> {
     }
     // Read/evaluate the candidate before changing anything. Session::execute owns the single
     // undo step and restores both the document and evaluated state on any later failure.
-    let (_, sf, faces, _) = linked_bodies(&file, s.path.as_deref()).map_err(|e| bad(cmd, e.to_string()))?;
+    let (_, sf, faces, _) = linked_bodies(&file, s.path.as_deref(), s.validation()).map_err(|e| bad(cmd, e.to_string()))?;
     let geometry_changed = match (s.doc.feature(link.feature).map(|f| &f.kind), &sf.kind) {
         (Some(FeatureKind::Import { step: old, .. }), FeatureKind::Import { step, .. }) => old != step,
         _ => true,

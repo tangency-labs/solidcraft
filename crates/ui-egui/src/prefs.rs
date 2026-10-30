@@ -641,6 +641,10 @@ preference_settings! {
     /// extrudes; off by default: the distance is the total, split evenly around the start plane.
     /// Saved designs keep the reading they stored either way.
     surface_extrude_symmetric_per_side: bool = false, PAGE_DESIGN => check_id("prefs.surface_extrude_symmetric_per_side");
+    /// When SMLib's full check runs while features are computed (`diagnostics.validation`):
+    /// `each_feature` (the default) checks the bodies each feature keeps once; `each_step`, as
+    /// before, checks after every sweep, boolean and blend; `off` (experimental) never does.
+    validation: solidcraft_engine::kernel::Validation = solidcraft_engine::kernel::Validation::EachFeature, PAGE_DESIGN;
     /// Reopen the saved designs that were open when the app was last closed (#5542).
     reopen_designs: bool = true, PAGE_GENERAL;
     /// Those designs' files, in tab order, as the last quit left them.
@@ -1130,6 +1134,8 @@ pub fn apply(app: &mut SolveApp, ctx: &egui::Context) {
     // symmetric reading.
     app.session.metric_tap_drill_major_less_pitch = app.preferences.metric_tap_drill_major_less_pitch;
     app.session.surface_extrude_symmetric_per_side = app.preferences.surface_extrude_symmetric_per_side;
+    // The features computed from now on are checked as the preference says.
+    app.session.set_validation(app.preferences.validation);
     // The profiler records while the preference is on (switched when it changes; at start-up only
     // when on, so SOLIDCRAFT_PROFILE=1 is not undone by the default).
     let profile = app.preferences.profile_operations;
@@ -2340,6 +2346,11 @@ pub fn set(app: &mut SolveApp, p: &serde_json::Value) -> Result<serde_json::Valu
         && v.as_str().and_then(crate::theme::ViewportTheme::from_id).is_none()
     {
         return Err("`viewport_theme` must be theme, light or dark".into());
+    }
+    if let Some(v) = p.get("validation")
+        && v.as_str().and_then(solidcraft_engine::kernel::Validation::parse).is_none()
+    {
+        return Err("`validation` must be each_step, each_feature or off".into());
     }
     let new: Prefs = migrate(serde_json::from_value(cur).map_err(|e| e.to_string())?);
     if !UNITS.contains(&new.default_units.as_str()) {
@@ -3841,6 +3852,30 @@ mod tests {
         assert_eq!(super::lenient(&json!({"display_quality": "ultra"})).display_quality, "ultra");
         super::defaults(&mut app, super::PAGE_GRAPHICS);
         assert_eq!(app.preferences.display_quality, "normal");
+    }
+
+    /// The validation mode is once per feature by default; set by name or by the command, the
+    /// two stay one setting, the session computes under it, and Restore Defaults on Design brings
+    /// each_feature back. A saved unknown mode reads as the default.
+    #[test]
+    fn validation_defaults_to_each_feature_and_follows_the_command() {
+        use serde_json::json;
+        use solidcraft_engine::kernel::Validation;
+        let mut app = crate::SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
+        assert_eq!(app.preferences.validation, Validation::EachFeature);
+        assert_eq!(super::lenient(&json!({"validation": "sometimes"})).validation, Validation::EachFeature);
+        assert!(super::set(&mut app, &json!({"validation": "never"})).unwrap_err().contains("each_step, each_feature or off"));
+        let out = super::set(&mut app, &json!({"validation": "each_step"})).unwrap();
+        assert_eq!(out["validation"], "each_step");
+        assert_eq!(super::lenient(&out).validation, Validation::EachStep);
+        // A command runs under the preference.
+        app.run("diagnostics.validation", json!({})).unwrap();
+        assert_eq!(app.session.validation(), Validation::EachStep);
+        // The command sets the preference too.
+        app.run("diagnostics.validation", json!({"mode": "off"})).unwrap();
+        assert_eq!((app.preferences.validation, app.session.validation()), (Validation::Off, Validation::Off));
+        super::defaults(&mut app, super::PAGE_DESIGN);
+        assert_eq!(app.preferences.validation, Validation::EachFeature);
     }
 
     #[test]

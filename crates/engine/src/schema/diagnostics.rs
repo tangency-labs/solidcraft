@@ -142,6 +142,67 @@ impl ProfileReport {
     }
 }
 
+/// A validation mode by name, with the handler's message for anything else.
+fn validation_mode<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<ValidationMode>, D::Error> {
+    match Value::deserialize(d)? {
+        Value::Null => Ok(None),
+        Value::String(s) => ValidationMode::parse(&s).map(Some).ok_or_else(|| serde::de::Error::custom(VALIDATION_MODES)),
+        _ => Err(serde::de::Error::custom(VALIDATION_MODES)),
+    }
+}
+
+/// What a `mode` that names no validation mode is told.
+pub(crate) const VALIDATION_MODES: &str = "must be each_step, each_feature or off";
+
+/// When SMLib's full check runs while features are computed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ValidationMode {
+    /// After every sweep, boolean and blend inside a feature: a step whose result fails the
+    /// check fails the feature there.
+    EachStep,
+    /// Once per feature (the default): each body the feature makes or changes is checked before
+    /// it is kept, and a body the check refuses fails the feature with the check's reason.
+    EachFeature,
+    /// Never (experimental): a body the check would refuse is kept.
+    Off,
+}
+
+impl ValidationMode {
+    fn parse(id: &str) -> Option<ValidationMode> {
+        solidcraft_kernel::Validation::parse(id).map(ValidationMode::from)
+    }
+}
+
+impl From<solidcraft_kernel::Validation> for ValidationMode {
+    fn from(v: solidcraft_kernel::Validation) -> Self {
+        match v {
+            solidcraft_kernel::Validation::EachStep => ValidationMode::EachStep,
+            solidcraft_kernel::Validation::EachFeature => ValidationMode::EachFeature,
+            solidcraft_kernel::Validation::Off => ValidationMode::Off,
+        }
+    }
+}
+
+/// Read, or set, when SMLib's full check runs on the features computed from now on.
+#[derive(Debug, Default, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct ValidationParams {
+    /// The mode to compute features under from now on. Default: leave it as it is. The results
+    /// already there stand until their features are computed again (`timeline.compute_all`).
+    #[serde(default, deserialize_with = "validation_mode")]
+    pub mode: Option<ValidationMode>,
+}
+
+/// The reply of `diagnostics.validation`.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct ValidationReply {
+    /// The mode features are computed under now.
+    pub mode: ValidationMode,
+    /// The mode before this call.
+    pub previous: ValidationMode,
+}
+
 /// Tests that switch the process-wide profiler on, off or reset it run one at a time.
 #[cfg(test)]
 pub(crate) static PROFILE_TESTS: std::sync::Mutex<()> = std::sync::Mutex::new(());

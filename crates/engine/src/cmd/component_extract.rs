@@ -376,7 +376,7 @@ fn part_design(s: &Session, sc: &Scope, stem: &str, cmd: &str) -> Result<(Sessio
     if !source.configs.is_empty() {
         notices.push(format!("the configurations stay in this design; {stem} has none"));
     }
-    let part = Session::new(part);
+    let part = Session::opened_validating(part, None, s.validation());
     let failing: Vec<String> = part.model.results.iter().filter_map(|r| r.error.as_ref().map(|e| format!("{} ({e})", r.name))).take(5).collect();
     if !failing.is_empty() {
         return Err(bad(cmd, format!("{name} does not build on its own: {}", failing.join("; "))));
