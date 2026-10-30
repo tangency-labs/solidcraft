@@ -682,7 +682,7 @@ fn ring_notch() -> f64 {
 }
 
 /// The wedge of #1617: a side profile in (y, z) extruded 138 mm along x, its back face leaning
-/// by `lean` (the tangent of its angle), with the issue's rounds. The last one runs along the
+/// by `lean` (the tangent of its angle), with the issue's rounds, each on the edges it picked. The last one runs along the
 /// outline of both ends. The issue asked for R1 with `fit: reduce`, which reduces it to 0.854 mm;
 /// that radius is asked for here directly, which builds the same body without the fit's search
 /// (about a minute).
@@ -700,7 +700,14 @@ fn raked_wedge(lean: f64) -> Session {
         ("solid.fillet", json!({"body": "Wedge", "radius": 1.2, "edges": [[0, -60, 22]]})),
         ("solid.fillet", json!({"body": "Wedge", "radius": 1.5, "edges": [[0, -22, 22]]})),
         ("solid.fillet", json!({"body": "Wedge", "radius": 1.5, "edges": [[0, 38, 60]]})),
-        ("solid.fillet", json!({"body": "Wedge", "radius": 4, "edges": [[-69, -60, 12], [69, -60, 12], [-69, back, 30], [69, back, 30]]})),
+        // The issue's R4 rounds these four end edges alone: carried on round the end outline
+        // (tangent propagation, the feature's default since 84bd2daad, after this test), it would
+        // run onto the R1.2 round's end arc, where its rail on the end face would be an arc of
+        // radius 1.2 - 4 < 0.
+        (
+            "solid.fillet",
+            json!({"body": "Wedge", "radius": 4, "tangent_chain": false, "edges": [[-69, -60, 12], [69, -60, 12], [-69, back, 30], [69, back, 30]]}),
+        ),
         ("solid.fillet", json!({"body": "Wedge", "radius": 0.854, "edges": ends})),
     ];
     for (command, params) in steps {
