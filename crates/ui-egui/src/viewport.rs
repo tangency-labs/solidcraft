@@ -5486,8 +5486,13 @@ pub(crate) fn measurement_selection(s: &solidcraft_engine::Session, sel: &Sel) -
     representative
 }
 
-/// What a box selects: sketch entities while sketching, otherwise what the open dialog's
-/// active input takes (edges, faces or bodies), otherwise bodies.
+/// What a box selects: sketch entities while sketching, otherwise what the open
+/// dialog's active input takes (edges, faces, bodies or regions), otherwise the
+/// bodies of the design. A design with no body (an imported SVG leaves a sketch
+/// and no body) has only its regions (profiles) to select, so the marquee takes
+/// those too. An input that asks for edges or faces never takes a region: the
+/// regions are neither. A click takes a region of a shown sketch as well (see
+/// hit_sel), but the marquee of a design that has a body takes the bodies alone.
 fn box_select(app: &mut SolveApp, proj: &Proj, bx: BoxSel, add: bool) {
     use crate::selection::{BODIES, EDGES, FACES, PROFILES};
     // While OK computes, the dialog's inputs hold.
@@ -5555,10 +5560,16 @@ fn box_select(app: &mut SolveApp, proj: &Proj, bx: BoxSel, add: bool) {
             }
         }
     } else {
-        let accept = app.dialog.as_ref().and_then(|d| d.active_input()).map(|i| i.accept).unwrap_or(BODIES);
+        // With no dialog the marquee takes what a click takes: the bodies. A design whose only
+        // feature is an imported SVG has no body to pick at all, so its regions are what there is
+        // to select (#7058). A design that has a body keeps the old behaviour: the bodies alone.
+        let dialog_accept = app.dialog.as_ref().and_then(|d| d.active_input()).map(|i| i.accept);
+        let has_body = st.bodies.iter().any(|b| app.session.body_visible(&b.name));
+        let accept = dialog_accept.unwrap_or(if has_body { BODIES } else { BODIES | PROFILES });
         // Bulk body selection follows the active component, just like its unfaded bodies.
         // Keep other dialogs and Move's reference inputs free to pick across components.
-        let scoped_bodies = accept == BODIES && app.dialog.as_ref().is_none_or(|d| matches!(d.kind, crate::dialogs::Kind::Move { .. }));
+        let scoped_bodies =
+            dialog_accept.unwrap_or(BODIES) == BODIES && app.dialog.as_ref().is_none_or(|d| matches!(d.kind, crate::dialogs::Kind::Move { .. }));
         let active_bodies =
             app.session.active_occurrence_path.as_ref().filter(|_| scoped_bodies).and_then(|p| app.session.occurrence_bodies(p, true).ok());
         for b in &st.bodies {
@@ -5606,25 +5617,28 @@ fn box_select(app: &mut SolveApp, proj: &Proj, bx: BoxSel, add: bool) {
                 if (bx.crossing && crossing_hit) || (!bx.crossing && all_in && !m.edges.is_empty()) {
                     out.push(Sel::Body { name: b.name.clone() });
                 }
-            } else if accept & PROFILES != 0 {
-                for sid in visible_sketches(app) {
-                    let Some(ss) = st.sketch(sid) else { continue };
-                    for (pi, p) in ss.profiles.iter().enumerate() {
-                        let parts = crate::sketch_display::boundary_parts(&p.region.outer, &ss.plane, proj, app.viewport.pixels_per_point());
-                        let takes = if bx.crossing {
-                            parts.iter().any(|part| bx.takes(&to2(part)))
-                        } else {
-                            crate::sketch_display::profile_region(app, sid, pi, &ss.plane, proj).as_ref().as_ref().is_some_and(|display| {
-                                let points: Vec<_> = display.outer.segs.iter().map(|segment| ss.plane.to_world(segment.start())).collect();
-                                bx.takes(&to2(&points))
-                            })
-                        };
-                        if takes {
-                            out.push(Sel::Profile { sketch: sid, index: pi });
-                        }
+            }
+        }
+        // The regions of the shown sketches. They are not bodies, and a design whose only
+        // feature is an imported SVG has none: the regions are what there is to select (#7058).
+        // They are not edges or faces either: a mask that asks for those never takes them.
+        if accept & PROFILES != 0 && accept & (EDGES | FACES) == 0 {
+            for sid in visible_sketches(app) {
+                let Some(ss) = st.sketch(sid) else { continue };
+                for (pi, p) in ss.profiles.iter().enumerate() {
+                    let parts = crate::sketch_display::boundary_parts(&p.region.outer, &ss.plane, proj, app.viewport.pixels_per_point());
+                    let takes = if bx.crossing {
+                        parts.iter().any(|part| bx.takes(&to2(part)))
+                    } else {
+                        crate::sketch_display::profile_region(app, sid, pi, &ss.plane, proj).as_ref().as_ref().is_some_and(|display| {
+                            let points: Vec<_> = display.outer.segs.iter().map(|segment| ss.plane.to_world(segment.start())).collect();
+                            bx.takes(&to2(&points))
+                        })
+                    };
+                    if takes {
+                        out.push(Sel::Profile { sketch: sid, index: pi });
                     }
                 }
-                break;
             }
         }
     }
@@ -10834,6 +10848,162 @@ mod tests {
         h.frame();
         let _ = std::fs::remove_file(&path);
         assert!(a == 0 && b > 20, "Deutan: {a} fixed-line pixels in Off's colour, {b} in Deutan's");
+    }
+
+    /// #7058: an imported SVG leaves a sketch with regions and no body. A marquee over it must
+    /// take those regions, as a click on one does: the box selection only looked for bodies, and
+    /// the regions of a body-less design were out of reach.
+    #[test]
+    fn a_marquee_over_an_imported_svg_sketch_selects_its_regions() {
+        let mut h = crate::scenario::Harness::new();
+        let svg = r#"<svg width="40mm" height="40mm" viewBox="0 0 40 40"><path d="M0 0 H40 V40 H0 Z"/></svg>"#;
+        let imported = h.app.run("sketch.insert_svg", json!({"text": svg})).unwrap();
+        let sketch = imported["sketch"].as_u64().unwrap();
+        h.app.run("sketch.finish", json!({})).unwrap();
+        assert!(h.app.session.world_state().bodies.is_empty(), "the import leaves a sketch, not a body");
+        h.call("ui.view", json!({"view": "top"}));
+        let st = h.app.session.world_state();
+        let ss = st.sketch(sketch).unwrap();
+        assert_eq!(ss.profiles.len(), 1, "the imported square is one region");
+        let (low, high) = ss.sketch.bounds().unwrap();
+        let a = ss.plane.to_world(Vec2::new(low.x - 5.0, low.y - 5.0));
+        let b = ss.plane.to_world(Vec2::new(high.x + 5.0, high.y + 5.0));
+        h.step(&json!({"drag": [{"world": [a.x, a.y, a.z]}, {"world": [b.x, b.y, b.z]}]})).unwrap();
+        assert_eq!(h.app.session.selection, vec![Sel::Profile { sketch, index: 0 }], "the marquee takes the imported region");
+    }
+
+    /// #7058: the reporter drags with Shift held to add the second region of the import to the
+    /// selection, so that both are extruded at once.
+    #[test]
+    fn a_shift_marquee_adds_the_other_region_of_an_imported_svg_sketch() {
+        let mut h = crate::scenario::Harness::new();
+        let svg = r#"<svg width="80mm" height="40mm" viewBox="0 0 80 40"><path d="M0 0 H30 V30 H0 Z"/><path d="M50 0 H80 V30 H50 Z"/></svg>"#;
+        let imported = h.app.run("sketch.insert_svg", json!({"text": svg})).unwrap();
+        let sketch = imported["sketch"].as_u64().unwrap();
+        h.app.run("sketch.finish", json!({})).unwrap();
+        h.call("ui.view", json!({"view": "top"}));
+        h.call("ui.view", json!({"view": "fit"}));
+        let st = h.app.session.world_state();
+        let ss = st.sketch(sketch).unwrap();
+        assert_eq!(ss.profiles.len(), 2, "the imported squares are two regions");
+        // The world box of each region, a little outside its edges.
+        let mut boxes = Vec::new();
+        for p in ss.profiles.iter() {
+            let mut low = Vec2::new(f64::INFINITY, f64::INFINITY);
+            let mut high = Vec2::new(f64::NEG_INFINITY, f64::NEG_INFINITY);
+            for seg in p.region.outer.segs.iter() {
+                for q in [seg.start(), seg.end()] {
+                    low.x = low.x.min(q.x);
+                    low.y = low.y.min(q.y);
+                    high.x = high.x.max(q.x);
+                    high.y = high.y.max(q.y);
+                }
+            }
+            boxes.push((ss.plane.to_world(Vec2::new(low.x - 2.0, low.y - 2.0)), ss.plane.to_world(Vec2::new(high.x + 2.0, high.y + 2.0))));
+        }
+        let (a, b) = boxes[0];
+        h.step(&json!({"drag": [{"world": [a.x, a.y, a.z]}, {"world": [b.x, b.y, b.z]}]})).unwrap();
+        assert_eq!(h.app.session.selection, vec![Sel::Profile { sketch, index: 0 }], "the marquee takes the first region");
+        let (c, d) = boxes[1];
+        // The drag runs from the box's top-left corner to its bottom-right one: a release on the
+        // navigator compass in the view's top-right corner drops the rubber band before it
+        // selects, so the second region is taken by a drag that ends over the model.
+        h.step(&json!({"drag": [{"world": [c.x, d.y, c.z]}, {"world": [d.x, c.y, d.z]}], "shift": true})).unwrap();
+        assert_eq!(
+            h.app.session.selection,
+            vec![Sel::Profile { sketch, index: 0 }, Sel::Profile { sketch, index: 1 }],
+            "the shift marquee adds the second region"
+        );
+    }
+
+    /// #7058: the regions are what a body-less design has to select, but a design that has a body
+    /// keeps the old behaviour: the marquee takes the bodies, not the regions.
+    #[test]
+    fn a_marquee_in_a_design_with_a_body_takes_only_the_bodies() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.run("solid.box", json!({"length":20,"width":20,"height":20})).unwrap();
+        let svg = r#"<svg width="40mm" height="40mm" viewBox="0 0 40 40"><path d="M0 0 H40 V40 H0 Z"/></svg>"#;
+        let imported = h.app.run("sketch.insert_svg", json!({"text": svg})).unwrap();
+        let sketch = imported["sketch"].as_u64().unwrap();
+        h.app.run("sketch.finish", json!({})).unwrap();
+        h.settle();
+        assert_eq!(h.app.session.world_state().bodies.len(), 1, "the design has a body and a sketch");
+        assert!(!h.app.session.world_state().bodies[0].mesh().edges.is_empty(), "the body is meshed");
+        h.call("ui.view", json!({"view": "top"}));
+        h.settle();
+        h.call("ui.view", json!({"view": "fit"}));
+        h.settle();
+        let st = h.app.session.world_state();
+        let ss = st.sketch(sketch).unwrap();
+        let (low, high) = ss.sketch.bounds().unwrap();
+        // The screen box of the body and of the region: the marquee covers both.
+        let mut lo = [f64::INFINITY; 3];
+        let mut hi = [f64::NEG_INFINITY; 3];
+        for b in &st.bodies {
+            let m = b.mesh();
+            for t in m.triangles.iter() {
+                if let Some(tr) = m.tri(t) {
+                    for p in tr {
+                        lo[0] = lo[0].min(p.x);
+                        lo[1] = lo[1].min(p.y);
+                        lo[2] = lo[2].min(p.z);
+                        hi[0] = hi[0].max(p.x);
+                        hi[1] = hi[1].max(p.y);
+                        hi[2] = hi[2].max(p.z);
+                    }
+                }
+            }
+        }
+        let mut points = Vec::new();
+        for x in [lo[0], hi[0]] {
+            for y in [lo[1], hi[1]] {
+                for z in [lo[2], hi[2]] {
+                    points.push(Vec3::new(x, y, z));
+                }
+            }
+        }
+        for x in [low.x, high.x] {
+            for y in [low.y, high.y] {
+                points.push(ss.plane.to_world(Vec2::new(x, y)));
+            }
+        }
+        let mut screen_lo = [f64::INFINITY; 2];
+        let mut screen_hi = [f64::NEG_INFINITY; 2];
+        for p in &points {
+            let s = h.at(&json!({"world": [p.x, p.y, p.z]})).unwrap();
+            screen_lo[0] = screen_lo[0].min(s[0]);
+            screen_lo[1] = screen_lo[1].min(s[1]);
+            screen_hi[0] = screen_hi[0].max(s[0]);
+            screen_hi[1] = screen_hi[1].max(s[1]);
+        }
+        h.step(&json!({"drag": [[screen_lo[0] - 5.0, screen_lo[1] - 5.0], [screen_hi[0] + 5.0, screen_hi[1] + 5.0]]})).unwrap();
+        let taken = h.app.session.selection.clone();
+        assert!(!taken.is_empty(), "the marquee takes the body it covers");
+        assert!(taken.iter().all(|s| matches!(s, Sel::Body { .. })), "a design with a body takes the bodies alone, not the regions: {taken:?}");
+    }
+
+    /// #7058: a mask that asks for edges or faces never takes the regions: the regions are
+    /// neither. The Patch dialog's boundary input takes profiles or edges, so the marquee must
+    /// leave it the edges alone.
+    #[test]
+    fn a_marquee_in_a_dialog_that_asks_for_edges_takes_no_region() {
+        let mut h = crate::scenario::Harness::new();
+        let svg = r#"<svg width="40mm" height="40mm" viewBox="0 0 40 40"><path d="M0 0 H40 V40 H0 Z"/></svg>"#;
+        let imported = h.app.run("sketch.insert_svg", json!({"text": svg})).unwrap();
+        let sketch = imported["sketch"].as_u64().unwrap();
+        h.app.run("sketch.finish", json!({})).unwrap();
+        h.call("ui.view", json!({"view": "top"}));
+        // The Patch dialog takes its boundary from profiles or edges.
+        h.step(&json!({"start": "surface.patch"})).unwrap();
+        assert!(h.app.dialog.is_some(), "the patch dialog is open");
+        let st = h.app.session.world_state();
+        let ss = st.sketch(sketch).unwrap();
+        let (low, high) = ss.sketch.bounds().unwrap();
+        let a = ss.plane.to_world(Vec2::new(low.x - 5.0, low.y - 5.0));
+        let b = ss.plane.to_world(Vec2::new(high.x + 5.0, high.y + 5.0));
+        h.step(&json!({"drag": [{"world": [a.x, a.y, a.z]}, {"world": [b.x, b.y, b.z]}]})).unwrap();
+        let items = h.app.dialog.as_ref().unwrap().inputs[0].items.clone();
+        assert!(!items.iter().any(|s| matches!(s, Sel::Profile { .. })), "a mask that asks for edges takes no region: {items:?}");
     }
 }
 
