@@ -168,17 +168,18 @@ fn control([a, b, c]: [u8; 3]) -> Vec<f64> {
     v
 }
 /// An operand's Rust B-rep, built by the Rust kernel ([`crate::own_builder::build_any`]:
-/// the Rust `.smb` reader or constructors, in the fixture's traversal order), with its
-/// geometry owned under arena identities (the B-rep cache solves of op 5's point
-/// classification, `BrepQuery::default`, find faces and edges by them, as upstream's by
-/// pointer); the output of a failed build otherwise.
+/// the Rust `.smb` reader or constructors, in the fixture's traversal order), its
+/// geometry owned by the build under arena identities (`Conventions::EDGEUSE_GRAPH`: the
+/// fixture's traversal, faces and edges named as the B-rep cache solves of op 5's point
+/// classification, `BrepQuery::default`, find them, as upstream's by pointer; no owner is
+/// added to geometry the build left without one); the output of a failed build otherwise.
 fn own_operand(k: &mut Kernel, src: &BrepIn) -> Result<Result<Brep, Output>, HarnessError> {
     use crate::own_builder::{build_any, failed_output, Built, Conventions};
-    match build_any(k, src, false, false, &Conventions::TOPOLOGY_FIXTURE)? {
+    match build_any(k, src, false, false, &Conventions::EDGEUSE_GRAPH)? {
         Built::Brep(b) => {
             let mut b = *b;
-            crate::util::own_arena_geometry(&mut b);
-            // the new owners drop the face tolerances cached on the surfaces
+            // each face's tolerance on its surface, as the face upstream answers
+            // GetTolerance with
             let faces: Vec<_> = b.faces().ids().collect();
             for f in faces {
                 b.sync_face_surface_tolerance(f)
