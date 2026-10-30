@@ -58,6 +58,7 @@ mod frame;
 pub(crate) mod inspect;
 mod interference;
 pub(crate) mod joints;
+mod laser;
 mod libraries;
 mod material_properties;
 mod materials;
@@ -332,6 +333,7 @@ pub fn command_specs() -> Vec<&'static CommandSpec> {
     v.extend(parameters::COMMANDS.iter());
     v.extend(parameter_sweep::COMMANDS.iter());
     v.extend(file::COMMANDS.iter());
+    v.extend(laser::COMMANDS.iter());
     v.extend(metadata::COMMANDS.iter());
     v.extend(inspect::COMMANDS.iter());
     v.extend(compare::COMMANDS.iter());
