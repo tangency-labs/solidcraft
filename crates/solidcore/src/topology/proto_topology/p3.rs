@@ -1599,8 +1599,8 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
                         )?;
 
                         // Make sure that a parameter is set in each PointClass object.
-                        ignore_soft(cc1.set_point_class_parameters(k, &*geometry, false))?;
-                        ignore_soft(cc2.set_point_class_parameters(k, &*geometry, false))?;
+                        ignore_soft(geometry.set_point_class_parameters_mut(k, &mut cc1, false))?;
+                        ignore_soft(geometry.set_point_class_parameters_mut(k, &mut cc2, false))?;
 
                         cc1s.push(cc1);
                         cc2s.push(cc2);
@@ -1643,8 +1643,8 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
                 ))?;
 
                 let _ = cc1.extract_geometry(k, &*geometry, &mut cc2, ExtractOptions::default())?;
-                ignore_soft(cc1.set_point_class_parameters(k, &*geometry, false))?;
-                ignore_soft(cc2.set_point_class_parameters(k, &*geometry, false))?;
+                ignore_soft(geometry.set_point_class_parameters_mut(k, &mut cc1, false))?;
+                ignore_soft(geometry.set_point_class_parameters_mut(k, &mut cc2, false))?;
                 cc1s.push(cc1);
                 cc2s.push(cc2);
             }

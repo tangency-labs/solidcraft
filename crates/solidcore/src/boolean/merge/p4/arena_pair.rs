@@ -1016,6 +1016,18 @@ impl ProtoBrep<H> for ArenaPair<'_> {
         )
     }
 
+    /// `SetPointClassParameters` with the faces' B-reps lent mutably
+    /// ([`ClassGeometryMut::topology_entity_for_query`]): a face's point solve makes its
+    /// trimmed surface cache there, as upstream's `smsurf_GetSurfaceCache` does.
+    fn set_point_class_parameters_mut(
+        &mut self,
+        k: &Kernel,
+        cc: &mut CurveClassification<H>,
+        set_mids: bool,
+    ) -> crate::Result<()> {
+        cc.set_point_class_parameters_mut(k, self, set_mids)
+    }
+
     /// `SmEdgeuse::EvaluateBinormal(t, FALSE, ..)` on the operand's B-rep
     /// ([`crate::topology::edgeuse::p3::evaluate_binormal`]).
     fn edgeuse_evaluate_binormal(

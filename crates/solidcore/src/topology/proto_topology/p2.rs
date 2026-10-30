@@ -284,6 +284,29 @@ pub trait ProtoBrep<O>: ProtoGeometry<O> + ProtoTopology<O> {
         self.face_curve_on_classify(k, face, do_point_classify, cc)
     }
 
+    /// `pCurveClassification->SetPointClassParameters(bSetMids)` of
+    /// `ResolveOverlappingProtoEdges`. Upstream's point solve of a face's surface makes
+    /// the face's trimmed surface cache (`smsurf_GetSurfaceCache`), so an owner that can
+    /// lend its faces' B-reps overrides this with
+    /// [`CurveClassification::set_point_class_parameters_mut`]; the default is the
+    /// read-only [`CurveClassification::set_point_class_parameters`].
+    ///
+    /// # Errors
+    ///
+    /// Those of [`CurveClassification::set_point_class_parameters`].
+    fn set_point_class_parameters_mut(
+        &mut self,
+        k: &Kernel,
+        cc: &mut CurveClassification<O>,
+        set_mids: bool,
+    ) -> Result<()>
+    where
+        Self: Sized,
+        O: ClassObject,
+    {
+        cc.set_point_class_parameters(k, &*self, set_mids)
+    }
+
     /// `SmBrep::Point3DClassify(point, tolerance, bDoBoundaryIntersections, sPC)` of the
     /// B-rep `brep` names, read by `topology.proto_topology_p3`: the B-rep owner
     /// implements it with `query::brep::BrepQuery::point_3d_classify` on its B-rep and
