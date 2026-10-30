@@ -31,8 +31,8 @@ fn names(s: &Session) -> Vec<&str> {
     s.doc.drawings.iter().map(|d| d.name.as_str()).collect()
 }
 
-/// A drawing of the design: one A3 sheet with the ISO border, the design its one source, kept in
-/// the design and opened. Making it is one step of the model, and evaluates nothing.
+/// A drawing of the design: one A3 sheet with the ISO border and the built-in title block, the
+/// design its one source, kept in the design and opened. Making it is one step of the model, and evaluates nothing.
 #[test]
 fn a_drawing_of_the_design_is_kept_in_it_and_opened() {
     let mut s = design();
@@ -49,6 +49,8 @@ fn a_drawing_of_the_design_is_kept_in_it_and_opened() {
     let d = open_one(&s);
     assert_eq!(made["id"], json!(ids::encode(d.id)));
     assert!(d.sheets[0].border.is_some(), "the ISO border");
+    assert_eq!(d.sheets[0].title_block, Some(solidcraft_geom::title_block::default_block()));
+    assert_eq!(sheet["title_block"]["size_mm"], json!([180.0, 54.0]));
     assert_eq!((s.doc.drawings.len(), s.open_drawing), (1, Some(d.id)));
     assert_eq!((s.undo.len(), s.undo.last().map(|u| u.part)), (undo + 1, Some(None)), "a step of the model");
     assert_eq!((s.evaluations, &s.doc.features), (evaluations, &features), "nothing evaluated, the model as it was");

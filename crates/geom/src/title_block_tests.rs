@@ -17,40 +17,6 @@ fn text(cap_mm: f64, align: HAlign, fit: Fit, parts: Vec<Part>) -> CellKind {
     CellKind::Text(TextCell { content: Content(parts), cap_mm, align, fit })
 }
 
-/// The S2 plan's 180 x 54 mm default, as test data: twelve cells under 2.5 mm labels.
-fn block() -> TitleBlock {
-    use HAlign::{Centre, Left};
-    use Source::{Component, Drawing, Revision};
-    let count = |n| Fit { max_chars: Some(n), ..Fit::default() };
-    let (whole, wrap) = (Fit::default(), Fit { wrap: true, ..Fit::default() });
-    let title = Fit { max_chars: Some(25), wide_max_chars: Some(30), wrap: false };
-    let sheet = vec![field(Source::Sheet, "number"), Part::Text("/".into()), field(Source::Sheet, "count")];
-    let cells = [
-        ("title", [-180.0, 0.0, -68.0, 14.0], "Title", text(5.0, Left, title, vec![field(Component, "name")])),
-        ("identification_number", [-68.0, 0.0, 0.0, 14.0], "Identification number", text(5.0, Left, count(16), vec![field(Drawing, "number")])),
-        ("created_by", [-180.0, 14.0, -121.0, 24.0], "Created by", text(3.5, Left, count(20), vec![field(Revision, "designer")])),
-        ("approved_by", [-121.0, 14.0, -62.0, 24.0], "Approved by", text(3.5, Left, count(20), vec![field(Revision, "checker")])),
-        ("date_of_issue", [-62.0, 14.0, -31.0, 24.0], "Date of issue", text(3.5, Left, count(10), vec![field(Revision, "date")])),
-        ("sheet", [-31.0, 14.0, 0.0, 24.0], "Sheet", text(3.5, Centre, count(9), sheet)),
-        ("material", [-180.0, 24.0, -100.0, 34.0], "Material", text(3.5, Left, whole, vec![field(Component, "material")])),
-        ("finish", [-100.0, 24.0, -30.0, 34.0], "Finish", text(3.5, Left, whole, vec![field(Component, "properties.finish")])),
-        ("mass", [-30.0, 24.0, 0.0, 34.0], "Mass", text(3.5, Centre, whole, vec![field(Component, "mass")])),
-        ("legal_owner", [-180.0, 34.0, -100.0, 54.0], "Legal owner", text(3.5, Left, wrap, vec![field(Drawing, "properties.legal_owner")])),
-        (
-            "general_tolerances",
-            [-100.0, 34.0, -30.0, 54.0],
-            "General tolerances",
-            text(2.5, Left, wrap, vec![field(Drawing, "properties.general_tolerances")]),
-        ),
-        ("projection", [-30.0, 34.0, 0.0, 54.0], "Projection", CellKind::ProjectionSymbol),
-    ];
-    let cells = cells
-        .into_iter()
-        .map(|(name, rect_mm, label, kind)| Cell { name: name.into(), rect_mm, label: Some(Label { text: label.into(), cap_mm: 2.5 }), kind })
-        .collect();
-    TitleBlock { size_mm: Vec2::new(180.0, 54.0), outline_line_mm: 0.7, cell_line_mm: 0.35, cells }
-}
-
 fn sheet_layout(profile: &DrawingBorderProfile, size: PaperSize, orientation: Orientation) -> SheetLayout {
     profile.layout(&Sheet::standard(size, orientation)).unwrap()
 }
@@ -93,7 +59,7 @@ fn text_of(cell: &Cell) -> &TextCell {
 
 #[test]
 fn the_default_geometry_validates_and_its_cells_tile_the_block() {
-    let block = block();
+    let block = default_block();
     block.validate().unwrap();
     assert_eq!(block.cells.len(), 12);
     let area: f64 = block.cells.iter().map(|c| c.rect(Vec2::ZERO).size()).map(|s| s.x * s.y).sum();
@@ -111,7 +77,7 @@ fn the_default_geometry_validates_and_its_cells_tile_the_block() {
 
 #[test]
 fn on_a3_landscape_the_block_sits_on_the_drawing_borders_lower_right_corner() {
-    let (block, sheet) = (block(), iso(PaperSize::A3, Orientation::Landscape));
+    let (block, sheet) = (default_block(), iso(PaperSize::A3, Orientation::Landscape));
     let layout = block.layout(&sheet).unwrap();
     assert_eq!(layout.outline, rect(230.0, 10.0, 410.0, 64.0));
     assert_eq!(layout.outline.size().x, 180.0);
@@ -144,8 +110,8 @@ fn on_a3_landscape_the_block_sits_on_the_drawing_borders_lower_right_corner() {
 #[test]
 fn the_padding_starts_at_the_lines_inner_edge() {
     let sheet = SheetLayout { drawing_border_line_mm: 1e-9, ..iso(PaperSize::A3, Orientation::Landscape) };
-    let hairline = TitleBlock { outline_line_mm: 1e-9, cell_line_mm: 1e-9, ..block() }.layout(&sheet).unwrap();
-    let wide = TitleBlock { outline_line_mm: 3.0, ..block() }.layout(&sheet).unwrap();
+    let hairline = TitleBlock { outline_line_mm: 1e-9, cell_line_mm: 1e-9, ..default_block() }.layout(&sheet).unwrap();
+    let wide = TitleBlock { outline_line_mm: 3.0, ..default_block() }.layout(&sheet).unwrap();
     let (thin, thick) = (hairline.cells[0].value_box, wide.cells[0].value_box);
     assert!((thick.min.x - thin.min.x - 1.5).abs() < 1e-6 && (thick.min.y - thin.min.y - 1.5).abs() < 1e-6, "{thin:?} {thick:?}");
     // The outline's inner edge is 1.5 mm inside the cell's left side; the text starts 1 mm past it.
@@ -157,7 +123,7 @@ fn the_padding_starts_at_the_lines_inner_edge() {
 #[test]
 fn a_drawing_border_line_wider_than_the_outline_pads_the_right_and_bottom_cells() {
     let a3 = |line_mm: f64| SheetLayout { drawing_border_line_mm: line_mm, ..iso(PaperSize::A3, Orientation::Landscape) };
-    let block = block();
+    let block = default_block();
     let boxes = |block: &TitleBlock, line_mm: f64| {
         let layout = block.layout(&a3(line_mm)).unwrap();
         ["title", "identification_number", "projection"].map(|name| cell_named(block, &layout, name).value_box)
@@ -200,8 +166,8 @@ fn a_drawing_border_line_wider_than_the_outline_pads_the_right_and_bottom_cells(
 /// placed where rounding leaves the room (A2's corner, x = 584).
 #[test]
 fn a_cells_room_is_checked_again_where_the_block_sits() {
-    let sliver = Cell { rect_mm: [-70.34999999999971, 0.0, -67.9999999999997, 14.0], ..block().cells[0].clone() };
-    let block = TitleBlock { cells: vec![sliver], ..block() };
+    let sliver = Cell { rect_mm: [-70.34999999999971, 0.0, -67.9999999999997, 14.0], ..default_block().cells[0].clone() };
+    let block = TitleBlock { cells: vec![sliver], ..default_block() };
     block.validate().unwrap();
     const NO_ROOM: Invalid = Invalid("a cell has room for its value below its label");
     assert_eq!(block.layout(&iso(PaperSize::A3, Orientation::Landscape)), Err(NO_ROOM));
@@ -211,7 +177,7 @@ fn a_cells_room_is_checked_again_where_the_block_sits() {
 
 #[test]
 fn the_block_follows_the_drawing_border_on_a2_and_a4() {
-    let block = block();
+    let block = default_block();
     assert_eq!(block.layout(&iso(PaperSize::A2, Orientation::Landscape)).unwrap().outline, rect(404.0, 10.0, 584.0, 64.0));
     // A4 upright: 10 mm to spare on the left of the 190 mm drawing border, none with the filing margin.
     let a4 = iso(PaperSize::A4, Orientation::Portrait);
@@ -225,7 +191,7 @@ fn the_block_follows_the_drawing_border_on_a2_and_a4() {
 #[test]
 fn a5_landscape_holds_the_block_and_a5_portrait_is_too_narrow() {
     const TOO_BIG: Invalid = Invalid("a title block fits inside the drawing border");
-    let block = block();
+    let block = default_block();
     assert_eq!(block.layout(&iso(PaperSize::A5, Orientation::Landscape)).unwrap().outline, rect(20.0, 10.0, 200.0, 64.0));
     // With the filing margin, the drawing border is exactly the block's width.
     let a5 = filing(PaperSize::A5, Orientation::Landscape);
@@ -252,7 +218,7 @@ fn a5_landscape_holds_the_block_and_a5_portrait_is_too_narrow() {
 /// too narrow.
 #[test]
 fn on_every_sheet_each_cell_keeps_its_place_from_the_corner() {
-    let block = block();
+    let block = default_block();
     let mut refused = Vec::new();
     for size in PaperSize::ALL {
         for orientation in [Orientation::Landscape, Orientation::Portrait] {
@@ -285,7 +251,7 @@ fn on_every_sheet_each_cell_keeps_its_place_from_the_corner() {
 /// height): two lines of 3.5 mm for the legal owner, three of 2.5 mm for the general tolerances.
 #[test]
 fn the_wrapped_cells_hold_the_lines_the_plan_gives_them() {
-    let block = block();
+    let block = default_block();
     let layout = block.layout(&iso(PaperSize::A3, Orientation::Landscape)).unwrap();
     for (name, lines) in [("legal_owner", 2), ("general_tolerances", 3)] {
         let i = block.cells.iter().position(|c| c.name == name).unwrap();
@@ -303,7 +269,7 @@ fn the_wrapped_cells_hold_the_lines_the_plan_gives_them() {
 fn hostile_definitions_are_refused() {
     let a3 = iso(PaperSize::A3, Orientation::Landscape);
     let with = |change: &dyn Fn(&mut TitleBlock)| {
-        let mut block = block();
+        let mut block = default_block();
         change(&mut block);
         block
     };
@@ -401,10 +367,10 @@ fn hostile_definitions_are_refused() {
     // And their limits are accepted.
     let accepted = [
         many(MAX_CELLS),
-        TitleBlock { size_mm: Vec2::new(1.0, 1.0), cells: vec![], ..block() },
-        TitleBlock { size_mm: Vec2::new(1000.0, 1000.0), cells: vec![], ..block() },
+        TitleBlock { size_mm: Vec2::new(1.0, 1.0), cells: vec![], ..default_block() },
+        TitleBlock { size_mm: Vec2::new(1000.0, 1000.0), cells: vec![], ..default_block() },
         // The widest outline on its own: the default's text doesn't fit inside a 10 mm line.
-        TitleBlock { outline_line_mm: 10.0, cells: vec![], ..block() },
+        TitleBlock { outline_line_mm: 10.0, cells: vec![], ..default_block() },
         with(&|b| b.cell_line_mm = 1e-9),
         with(&named("a")),
         with(&named("title_2")),
@@ -421,7 +387,7 @@ fn hostile_definitions_are_refused() {
 
 #[test]
 fn a_block_round_trips_through_json_and_unknown_fields_are_refused() {
-    let block = block();
+    let block = default_block();
     let value = serde_json::to_value(&block).unwrap();
     assert_eq!(value["size_mm"], json!([180.0, 54.0]));
     assert_eq!((value["outline_line_mm"].clone(), value["cell_line_mm"].clone()), (json!(0.7), json!(0.35)));
@@ -477,7 +443,7 @@ fn a_block_round_trips_through_json_and_unknown_fields_are_refused() {
 
 #[test]
 fn a_drawing_border_that_isnt_finite_holds_no_block() {
-    let block = block();
+    let block = default_block();
     let a3 = iso(PaperSize::A3, Orientation::Landscape);
     for drawing_border in [Aabb2::EMPTY, rect(410.0, 10.0, 10.0, 287.0), rect(f64::NAN, 10.0, 410.0, 287.0), rect(10.0, 10.0, f64::INFINITY, 287.0)] {
         let sheet = SheetLayout { drawing_border, ..a3.clone() };
@@ -496,7 +462,7 @@ fn fuzzed_definitions_never_panic_and_an_accepted_one_lays_out_inside_its_outlin
     let mut rng = Lcg(0x7b1c);
     let (mut accepted, mut laid_out) = (0, 0);
     for _ in 0..4000 {
-        let mut block = block();
+        let mut block = default_block();
         for _ in 0..1 + (rng.unit() * 3.0) as usize {
             let i = (rng.unit() * 12.0) as usize % 12;
             let n = if rng.unit() < 0.3 { NUMBERS[(rng.unit() * 9.0) as usize % 9] } else { (rng.unit() - 0.5) * 20.0 };
@@ -545,4 +511,30 @@ fn fuzzed_definitions_never_panic_and_an_accepted_one_lays_out_inside_its_outlin
     }
     // Fewer lay out than accepted: about two in five meet a 5 or 10 mm border line, which leaves most blocks no room.
     assert!(accepted > 400 && laid_out > 200, "{accepted} accepted, {laid_out} laid out");
+}
+
+/// The built-in block's twelve cells, by name: no type, status or scale cell. The legal owner is the
+/// drawing's `organization`, and the general tolerances are text to change.
+#[test]
+fn the_built_in_blocks_cells() {
+    let block = default_block();
+    let names: Vec<&str> = block.cells.iter().map(|c| c.name.as_str()).collect();
+    let expected = [
+        "title",
+        "identification_number",
+        "created_by",
+        "approved_by",
+        "date_of_issue",
+        "sheet",
+        "material",
+        "finish",
+        "mass",
+        "legal_owner",
+        "general_tolerances",
+        "projection",
+    ];
+    assert_eq!(names, expected);
+    let content = |name: &str| text_of(block.cells.iter().find(|c| c.name == name).unwrap()).content.clone();
+    assert_eq!(content("legal_owner"), Content(vec![field(Source::Drawing, "organization")]));
+    assert_eq!(content("general_tolerances"), Content(vec![Part::Text("ISO 2768-m".into())]));
 }
