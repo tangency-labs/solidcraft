@@ -76,6 +76,16 @@
 //!   failing paths are not reachable from the callers ported so far).
 //! - The `SM_DEBUG_CODE` blocks are not ported.
 //! - **Recursion.** None.
+//! - **HANG-51.** `ResolveOverlappingProtoEdges` does not advance its index after it
+//!   replaces an overlapping proto edge group, and a replacement can form a new group
+//!   at the same index forever (`Solids/extrusion_old.smb`, rounded solid outset 2.5:
+//!   a two-edge group re-formed thousands of times; the C++ hangs too). The port fails
+//!   with `InvalidInput` once it has replaced more than [`MAX_OVERLAP_GROUPS_BASE`] +
+//!   [`OVERLAP_GROUPS_PER_PROTO_EDGE`] x (proto edges at entry) groups in one call.
+//!   The topology intersector's caller propagates it (it ignores only soft statuses).
+//!   Across the difftest cases of the boolean, merge, topology intersector, proto
+//!   topology, offset and fillet intersector units, four calls replace a group, one
+//!   each.
 
 use crate::curve::curve::p2::Curve;
 use crate::curve::curve::p8::CurveIntersectOptions;
@@ -99,6 +109,20 @@ use super::p1::{
 use super::p2::ProtoBrep;
 
 const OP: &str = "topology::proto_topology::p3";
+const OP_RESOLVE_OVERLAPPING: &str =
+    "topology::proto_topology::p3::resolve_overlapping_proto_edges";
+/// Overlapping proto edge groups one
+/// [`ProtoTopologyManager::resolve_overlapping_proto_edges`] may replace beyond
+/// [`OVERLAP_GROUPS_PER_PROTO_EDGE`] per proto edge it starts with (not upstream; see
+/// the module deviations, HANG-51).
+pub const MAX_OVERLAP_GROUPS_BASE: usize = 64;
+
+/// Overlapping proto edge groups one
+/// [`ProtoTopologyManager::resolve_overlapping_proto_edges`] may replace per proto edge
+/// it starts with, on top of [`MAX_OVERLAP_GROUPS_BASE`] (each group holds at least two
+/// proto edges, so a call that does not cycle replaces groups in proportion to its
+/// proto edges).
+pub const OVERLAP_GROUPS_PER_PROTO_EDGE: usize = 4;
 const OP_ED_SPLIT: &str = "topology::proto_topology::p3::edge_definition_split";
 const OP_SPLIT_INT: &str = "topology::proto_topology::p3::split_intersecting_proto_edges";
 
@@ -1389,6 +1413,12 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
 
         // For each PE (at least one of the SrcTopos should be an edge.)
         let mut ii = 0usize;
+        // groups replaced so far and the most allowed (not upstream: HANG-51, see the
+        // module deviations)
+        let mut groups_resolved = 0usize;
+        let max_groups = OVERLAP_GROUPS_PER_PROTO_EDGE
+            .saturating_mul(self.proto_edges().len())
+            .saturating_add(MAX_OVERLAP_GROUPS_BASE);
         // repeat the index when the list was changed by removing a group
         while let Some(&pe) = self.proto_edges().get(ii) {
             let group = self.overlapping_pe_group(pe)?;
@@ -1398,6 +1428,13 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
             if !found_group {
                 ii += 1;
                 continue;
+            }
+            groups_resolved += 1;
+            if groups_resolved > max_groups {
+                return Err(SolidError::invalid_input(
+                    OP_RESOLVE_OVERLAPPING,
+                    "overlapping proto edge groups keep re-forming (HANG-51)",
+                ));
             }
 
             // lowest topology search locals
