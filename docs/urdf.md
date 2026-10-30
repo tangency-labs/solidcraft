@@ -5,7 +5,8 @@ Description Format), the format ROS, Gazebo, Isaac Sim, PyBullet and MuJoCo read
 becomes a link with its mesh, mass and inertia. Each joint becomes a URDF joint, or a short
 chain of them, that moves the parts the way SolidCraft does.
 
-- **Desktop:** **File → Export URDF…**
+- **Desktop:** **File → Export URDF…** asks for the options below. It remembers **Couple motion
+  links**, which is the preference `urdf_mimic`.
 - **Commands:** `file.export {"path": "robot.urdf"}` (or `"format": "urdf"`)
 - **MCP:** the `export` tool with a `.urdf` path or `format: "urdf"`
 - **CLI:** `solidcraft-cli run script.json --out robot.urdf`

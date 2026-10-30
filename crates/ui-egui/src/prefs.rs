@@ -1249,6 +1249,8 @@ preference_settings! {
     /// choice here (`save_mesh_send`, `save_mesh_slicer`); a settings file that still has them loads,
     /// and they are ignored.
     save_mesh_format: String = "stl".into();
+    /// URDF export writes motion links as `<mimic>` (false: each joint is free, as before).
+    urdf_mimic: bool = true;
     /// Hidden edges in the current-view DXF export (false: omit, true: dashed).
     view_dxf_dashed: bool = false;
     /// Model-space chord tolerance for current-view DXF curves, in millimetres.
