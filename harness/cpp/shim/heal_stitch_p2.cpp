@@ -21,6 +21,7 @@
 #include <SmShell.h>
 #include <SmStitch.h>
 
+#include <algorithm>
 #include <cmath>
 
 namespace
@@ -212,6 +213,20 @@ void put_digest(SmBrep* brep, std::vector<double>& o)
     put_topology(brep, o);
 }
 
+// The regions after StitchIntoSolid, order-free: the count (GetRegions) and the IsVoid
+// flags, sorted.
+void put_regions(SmBrep* brep, std::vector<double>& o)
+{
+    SmTArray<SmRegion*> rs;
+    brep->GetRegions(rs);
+    std::vector<double> flags;
+    for (ULONG i = 0; i < rs.GetSize(); i++)
+        flags.push_back((double)rs[i]->IsVoid());
+    std::sort(flags.begin(), flags.end());
+    o.push_back((double)flags.size());
+    o.insert(o.end(), flags.begin(), flags.end());
+}
+
 // The stitch outputs StitchIntoSolid / StitchIntoShell share.
 void put_counts(std::vector<double>& o, ULONG n, double mv, double me) { o.insert(o.end(), {(double)n, mv, me}); }
 
@@ -303,6 +318,7 @@ void run_op(int32_t op, Rd& rd, const char* path, std::vector<double>& o)
             o.push_back(flg(solid));
             put_counts(o, n, mv, me);
             put_digest(brep, o);
+            put_regions(brep, o);
         }
         break;
     }

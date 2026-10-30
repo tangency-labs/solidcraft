@@ -1325,12 +1325,16 @@ pub fn solid_stitch_start(k: &Kernel, b: &Brep) -> Result<(f64, f64)> {
 /// compare, no edge splitting and manifold gluing, from a tenth of the B-rep tolerance,
 /// doubling it while lamina edges remain and it is below 1/200 of the bounding box
 /// diagonal. The result is a solid when no lamina edge is left and the B-rep has more
-/// than one region.
+/// than one region. With
+/// [`UpstreamFixes::stitch_solid_nests_cavities`](crate::kernel::UpstreamFixes::stitch_solid_nests_cavities)
+/// (WR-569) such a solid is then made a nested solid model, so a closed shell inside
+/// another bounds a void.
 ///
 /// # Errors
 ///
 /// Those of `CalculateBoundingBox` and [`Stitch::do_stitching`];
-/// [`SolidError::InvalidInput`] past [`MAX_TOL_DOUBLINGS`].
+/// [`SolidError::InvalidInput`] past [`MAX_TOL_DOUBLINGS`]; with the opt-in, those of
+/// `FindAndSetInfiniteRegion`.
 pub fn stitch_into_solid(k: &mut Kernel, b: &mut Brep) -> Result<AdvancedStitch> {
     stitch_into_solid_with(k, b, None)
 }
@@ -1392,6 +1396,18 @@ pub(crate) fn stitch_into_solid_with(
     }
 
     if num_lamina == 0 && bp1::regions(b, None)?.len() > 1 {
+        // Not upstream (WR-569, opt-in; the fork's tangency-labs/smlib@351c57c): the
+        // stitching found the infinite region but left the regions inside nested closed
+        // shells solid, each shell where the glue put it. A solid is a nested solid model:
+        // inside the outer shell is material, inside a shell within it a void, and so on,
+        // each region's outer shell first.
+        if k.fixes.stitch_solid_nests_cavities {
+            let old = b.editing_enabled();
+            b.set_editing_enabled(false);
+            let r = find_and_set_infinite_region(k, b, None, SetRegionVoidType::NestedSolid, None);
+            b.set_editing_enabled(old);
+            r?;
+        }
         out.produces_a_solid = true;
     }
     Ok(out)
@@ -1617,6 +1633,91 @@ mod tests {
             .split_edges_with_vertices(&mut k, &mut b, &mut [], &mut Vec::new())
             .unwrap();
         assert!(r.processed.is_empty() && r.max_vertex_gap == 0.0);
+    }
+
+    /// The faces of the cube `[lo, hi]^3` as loose planar faces of `b`, each loop
+    /// counterclockwise about the outward normal (`inward`: about the inward one, the
+    /// faces of a cavity).
+    fn add_cube_faces(k: &mut Kernel, b: &mut Brep, lo: f64, hi: f64, inward: bool) {
+        use crate::curve::curve::Curve;
+        use crate::math::Point3;
+        use crate::primitive::api_curves::create_line_segment;
+        use crate::topology::brep::p2::ArenaNotifyState;
+        use crate::topology::brep::p8::{create_planar_faces_with_3d_curves, FaceBuildEnv};
+        use crate::topology::loopuse::notify_ref;
+        use crate::topology::topology_traverser::Marks;
+
+        let p = |x: f64, y: f64, z: f64| Point3::new(x, y, z);
+        let (a, c) = (lo, hi);
+        // each face counterclockwise seen from outside the cube
+        let faces = [
+            [p(a, a, a), p(a, c, a), p(c, c, a), p(c, a, a)], // z = lo
+            [p(a, a, c), p(c, a, c), p(c, c, c), p(a, c, c)], // z = hi
+            [p(a, a, a), p(c, a, a), p(c, a, c), p(a, a, c)], // y = lo
+            [p(a, c, a), p(a, c, c), p(c, c, c), p(c, c, a)], // y = hi
+            [p(a, a, a), p(a, a, c), p(a, c, c), p(a, c, a)], // x = lo
+            [p(c, a, a), p(c, c, a), p(c, c, c), p(c, a, c)], // x = hi
+        ];
+        for mut corners in faces {
+            if inward {
+                corners.reverse();
+            }
+            let curves: Vec<Curve> = (0..4)
+                .map(|i| {
+                    let line = create_line_segment(corners[i], corners[(i + 1) % 4]).unwrap();
+                    Curve::from(line)
+                })
+                .collect();
+            let mut state = ArenaNotifyState::new(b);
+            let mut env = state.env(None);
+            let mut marks = Marks::default();
+            let this_face = |f: FaceId| notify_ref(EntityRef::Face(f));
+            let mut fenv = FaceBuildEnv {
+                env: &mut env,
+                marks: &mut marks,
+                this_face: &this_face,
+            };
+            let region = b.infinite_region();
+            create_planar_faces_with_3d_curves(k, b, region, &curves, 0.01, &mut fenv).unwrap();
+        }
+    }
+
+    /// The number of `b`'s regions that are voids (`is_void == 1`).
+    fn void_count(b: &Brep) -> usize {
+        bp1::regions(b, None)
+            .unwrap()
+            .into_iter()
+            .filter(|&r| b.region(r).unwrap().is_void == 1)
+            .count()
+    }
+
+    /// A cube of side 10 with a cube cavity of side 4, as twelve loose faces: the stitch
+    /// closes both shells. With the opt-in (WR-569, the fork's
+    /// tangency-labs/smlib@351c57c) the region inside the inner shell is a void, as is the
+    /// infinite region; upstream leaves it solid.
+    #[test]
+    fn stitched_solid_cavity_is_a_void() {
+        let build = |fix: bool| {
+            let mut k = Kernel::default();
+            k.fixes.stitch_solid_nests_cavities = fix;
+            let mut b = crate::topology::brep::p3::new_brep(
+                &mut k,
+                crate::geom::tol::USE_DEFAULT,
+                crate::geom::tol::USE_DEFAULT,
+            )
+            .unwrap();
+            add_cube_faces(&mut k, &mut b, 0.0, 10.0, false);
+            add_cube_faces(&mut k, &mut b, 3.0, 7.0, true);
+            let r = stitch_into_solid(&mut k, &mut b).unwrap();
+            assert!(r.produces_a_solid, "{r:?}");
+            assert_eq!(r.lamina_edges, 0);
+            assert_eq!(bp1::regions(&b, None).unwrap().len(), 3);
+            b
+        };
+        // the infinite region and the cavity are voids, between them the material
+        assert_eq!(void_count(&build(true)), 2);
+        // upstream: only the infinite region
+        assert_eq!(void_count(&build(false)), 1);
     }
 
     #[test]

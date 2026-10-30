@@ -428,6 +428,8 @@ pub struct UpstreamFixes {
     pub curve_tight_box_interval_knots: bool,
     /// `SmTopologyIntersector::IntersectTopology` skips a face pair whose face boxes lie farther apart than the intersection tolerance (a box that cannot be computed, or holds nothing, rules nothing out), and `SmBrep::MakeEdgeInFaceWithVU`, on a plane, leaves in place without classifying an inner loop whose test point lies outside the box of the new face's outer loop (grown by the edges' tolerances, at the retry tolerance). Upstream pairs every face of one sheet with every face of the other through whole-surface checks and classifies every inner loop against each imprinted face, so a 2D boolean of a sheet with n holes takes time in n^2 (WR-527, #1526/#1527; the fork's tangency-labs/smlib@60b1c6a).
     pub boolean_skips_faces_apart: bool,
+    /// `SmStitch::StitchIntoSolid`, when its stitch leaves no lamina edge and more than one region, makes the B-rep a nested solid model (`FindAndSetInfiniteRegion(NULL, SM_VS_NESTEDSOLID)`, with editing disabled): material inside the outer shell, a void inside a shell within it, and so on, each region's outer shell first. Upstream's stitch only finds the infinite region (`SM_VS_INFINITEREGION_SWAP`), so the region inside a closed shell nested in another stays solid and the shells stay where the gluing put them: a holed profile swept round a closed path measures as if it had no hole, and twisted a half turn fails the check (Test #12, an inner shell not inside its region's outer shell) (WR-569; the fork's tangency-labs/smlib@351c57c).
+    pub stitch_solid_nests_cavities: bool,
 }
 
 /// Options for [`Kernel::new`].
