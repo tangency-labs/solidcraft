@@ -1017,6 +1017,52 @@ mod targets {
         assert!(h.widget("All bodies of the component").is_none());
     }
 
+    /// A Cut or Intersect saved without targets, edited with a body hidden and OK'd unchanged,
+    /// still changes both bodies, as a replay does, and leaves visibility as it was (#2464).
+    #[test]
+    fn an_unchanged_edit_keeps_a_cut_without_targets_on_hidden_bodies() {
+        for (op, left) in [("cut", 8000.0 - RIM), ("intersect", RIM)] {
+            let mut h = plate_and_copy(false);
+            h.app.run("solid.extrude", json!({"sketch":"Rim","profiles":[0],"distance":-3,"operation":op,"name":"Groove"})).unwrap();
+            let feature = h.app.session.doc.find_feature("Groove").unwrap().id;
+            let before = serde_json::to_value(&h.app.session.doc.feature(feature).unwrap().kind).unwrap();
+            assert!(matches!(&h.app.session.doc.feature(feature).unwrap().kind, FeatureKind::Extrude { targets, .. } if targets.is_empty()));
+            hide(&mut h, "Plate (2)");
+            let shown = h.app.session.visibility.clone();
+            h.app.edit_feature(feature);
+            h.frames(2);
+            h.step(&json!({"key":"Enter"})).unwrap();
+            assert!(h.app.dialog.is_none(), "{op}: {:?}", h.app.dialog);
+            assert_eq!(serde_json::to_value(&h.app.session.doc.feature(feature).unwrap().kind).unwrap(), before, "{op}");
+            for body in ["Plate", "Plate (2)"] {
+                assert!((volume(&h, body) - left).abs() < 1e-6, "{op}: {body} {}", volume(&h, body));
+            }
+            assert_eq!(h.app.session.visibility, shown, "{op}");
+        }
+    }
+
+    /// A Join with a target hidden since: the editor shows it without unhiding it, lists it, and
+    /// an unchanged OK keeps the feature and the visibility as they were.
+    #[test]
+    fn an_unchanged_edit_keeps_a_hidden_target() {
+        let mut h = plate_and_copy(true);
+        h.app.run("solid.extrude", json!({"sketch":"Rim","profiles":[0],"distance":3,"operation":"join","targets":["Plate"],"name":"Lip"})).unwrap();
+        let feature = h.app.session.doc.find_feature("Lip").unwrap().id;
+        let before = serde_json::to_value(&h.app.session.doc.feature(feature).unwrap().kind).unwrap();
+        hide(&mut h, "Plate");
+        let shown = h.app.session.visibility.clone();
+        h.app.edit_feature(feature);
+        h.frames(2);
+        assert!(h.app.body_visible("Plate"), "the editor shows the sketch's face body");
+        assert!(!h.app.session.body_visible("Plate"));
+        let d = h.app.dialog.as_ref().unwrap();
+        assert_eq!(d.inputs.iter().find(|i| i.label == TARGETS).unwrap().items, vec![Sel::Body { name: "Plate".into() }]);
+        h.step(&json!({"key":"Enter"})).unwrap();
+        assert!(h.app.dialog.is_none(), "{:?}", h.app.dialog);
+        assert_eq!(serde_json::to_value(&h.app.session.doc.feature(feature).unwrap().kind).unwrap(), before);
+        assert_eq!(h.app.session.visibility, shown);
+    }
+
     /// An edit that empties a stored target list is refused, as a new Join is.
     #[test]
     fn an_edit_that_empties_its_targets_is_refused() {
