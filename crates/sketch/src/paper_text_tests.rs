@@ -14,7 +14,20 @@ use crate::*;
 const AT: Vec2 = Vec2 { x: 100.0, y: 50.0 };
 
 fn set(text: &str, style: &TextStyle) -> (Vec<TextRun>, Font) {
-    paper_text(text, None, AT, 5.0, 0.0, style).unwrap().unwrap()
+    one(paper_text(text, None, AT, 5.0, 0.0, style).unwrap().unwrap())
+}
+
+/// The runs and their one font: the fonts come back once each, in order of id, each run's among them
+/// and each holding exactly the glyphs its runs place.
+fn one((runs, mut fonts): (Vec<TextRun>, Vec<Font>)) -> (Vec<TextRun>, Font) {
+    assert!(fonts.windows(2).all(|w| w[0].id < w[1].id), "once each, in order of id");
+    for font in &fonts {
+        let placed: std::collections::BTreeSet<u16> = runs.iter().filter(|r| r.font == font.id).flat_map(|r| r.glyphs.iter().map(|g| g.id)).collect();
+        assert!(font.glyphs.keys().copied().eq(placed), "{} holds exactly its runs' glyphs", font.postscript_name);
+    }
+    assert!(runs.iter().all(|r| fonts.iter().any(|f| f.id == r.font)), "each run's font is listed");
+    assert_eq!(fonts.len(), 1, "one drawing font so far");
+    (runs, fonts.remove(0))
 }
 
 /// The runs on an A3 sheet as one group, with their font: what `Scene::validate` holds them to.
@@ -89,7 +102,7 @@ fn a_space_has_its_advance_and_no_outline() {
 fn lines_break_a_pitch_apart_and_align_as_sketch_text_does() {
     let style = TextStyle { align: TextAlign::Center, ..TextStyle::default() };
     let angle = std::f64::consts::FRAC_PI_2;
-    let (runs, font) = paper_text("AB\nC", None, AT, 5.0, angle, &style).unwrap().unwrap();
+    let (runs, font) = one(paper_text("AB\nC", None, AT, 5.0, angle, &style).unwrap().unwrap());
     let pitch = TextMetrics::new(&font_data(None).unwrap(), &style).unwrap().line_pitch(5.0).unwrap();
     // Turned a quarter: along the baseline is up the sheet, down a line is to the right.
     for (run, along, down) in [(&runs[0], -width("AB") / 2.0, 0.0), (&runs[1], -width("C") / 2.0, pitch)] {
@@ -175,7 +188,10 @@ fn fuzz_whatever_is_set_is_a_scene() {
         };
         let angle = next(8) as f64 * 0.7;
         match paper_text(&text, None, AT, 2.5 + next(4) as f64, angle, &style) {
-            Ok(Some((runs, font))) => scene(&runs, &font).validate().unwrap_or_else(|e| panic!("{text:?} {style:?}: {e:?}")),
+            Ok(Some(set)) => {
+                let (runs, font) = one(set);
+                scene(&runs, &font).validate().unwrap_or_else(|e| panic!("{text:?} {style:?}: {e:?}"));
+            }
             Ok(None) => assert!(text.chars().all(|c| c == '\n'), "{text:?}"),
             Err(e) => panic!("{text:?}: {e}"),
         }

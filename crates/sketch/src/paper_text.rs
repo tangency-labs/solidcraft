@@ -1,6 +1,6 @@
 //! Text on paper (#4890 B1b): a text laid out by [`TextMetrics`], the rule sketch text draws and
-//! measures with, as the paper scene's runs of placed glyphs ([`TextRun`]), with the drawing font
-//! they are set in ([`Font`]) holding the glyphs they place.
+//! measures with, as the paper scene's runs of placed glyphs ([`TextRun`]), with the drawing fonts
+//! they are set in ([`Font`]), each holding the glyphs its runs place.
 //!
 //! - Drawings are set in bundled fonts only, never an installed one, so every machine sets a sheet
 //!   alike and a PDF can embed the font. A run names its font by the font's id ([`Font::id`]),
@@ -41,9 +41,17 @@ static ADMITTED: [OnceLock<std::result::Result<Font, String>>; DRAWING_FONTS.len
 
 /// `text` on paper in `family` (None: the default drawing font), its first line's baseline
 /// starting at `at` (sheet mm) and turned `angle` radians about it, at a capital height of
-/// `height` mm, set in `style` (which follows no path on paper). Its runs, and its font with the
-/// glyphs they place; None when it sets no glyph (empty lines only).
-pub fn paper_text(text: &str, family: Option<&str>, at: Vec2, height: f64, angle: f64, style: &TextStyle) -> Result<Option<(Vec<TextRun>, Font)>> {
+/// `height` mm, set in `style` (which follows no path on paper). Its runs, and the fonts they use
+/// (each once, in order of id, holding the glyphs its runs place); None when it sets no glyph
+/// (empty lines only).
+pub fn paper_text(
+    text: &str,
+    family: Option<&str>,
+    at: Vec2,
+    height: f64,
+    angle: f64,
+    style: &TextStyle,
+) -> Result<Option<(Vec<TextRun>, Vec<Font>)>> {
     if text.chars().count() > MAX_TEXT_CHARS {
         return Err(SketchError::TooLarge);
     }
@@ -85,7 +93,7 @@ pub fn paper_text(text: &str, family: Option<&str>, at: Vec2, height: f64, angle
         let id = ttf_parser::GlyphId(g.id);
         font.glyphs.entry(g.id).or_insert_with(|| FontGlyph { advance: metrics.advance(id), outline: outline(&metrics, id) });
     }
-    Ok(Some((runs, font)))
+    Ok(Some((runs, vec![font])))
 }
 
 /// One run of a laid-out line as the scene records it: its glyphs, its text, and its clusters, each
