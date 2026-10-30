@@ -3365,6 +3365,153 @@ impl SolverGeometryAccess<FilletObject> for SessionObjects<'_> {
         }
         Ok(true)
     }
+    fn geometry_bands_clear_other_rails(
+        &mut self,
+        k: &mut Kernel,
+        solvers: &[FilletObject],
+    ) -> Result<bool> {
+        use crate::blend::fillet_geom::p1::FilletGeomType;
+        use crate::geom::global_solver::SolverOperation;
+        use crate::intersect::point_class::{PointClassType, PointClassification};
+        use crate::topology::edgeuse::p1 as eu;
+        // each solver's rails (the face each rolls on and its curve), its filleted edge
+        // (with its ends and curve), and the largest solver tolerance
+        let mut rails: Vec<Vec<(FaceId, crate::curve::curve::Curve)>> = Vec::new();
+        let mut edges = Vec::new();
+        let mut tol = 0.0;
+        for &solver in solvers {
+            let FilletObject::Solver(id) = solver else {
+                return Err(invalid("object is not a solver"));
+            };
+            let base = self.solver(id)?.base();
+            if base.approx_tol_3d > tol {
+                tol = base.approx_tol_3d;
+            }
+            let mut own = Vec::new();
+            for geom in base.fillet_geoms() {
+                let geom = self.pseudo.geom(geom)?;
+                if geom.fillet_geom_type() != FilletGeomType::Default {
+                    continue;
+                }
+                for ii in 0..2 {
+                    let rail = geom
+                        .rail(ii)
+                        .ok_or_else(|| invalid("geometry without rail"))?;
+                    let curve = crate::topology::edge::curve(self.pseudo.brep(), rail)?
+                        .ok_or_else(|| invalid("rail without curve"))?
+                        .clone();
+                    if let Some(face) = self.pseudo.fillet_edge(rail)?.original_face() {
+                        own.push((face, curve));
+                    }
+                }
+            }
+            rails.push(own);
+            let fil_eu = base
+                .edgeuse(0)?
+                .ok_or_else(|| invalid("solver without first edgeuse"))?;
+            let edge = eu::edge(self.target, fil_eu)?
+                .ok_or_else(|| invalid("solver edgeuse without edge"))?;
+            let ends = [
+                crate::topology::edge::start_vertex(self.target, edge)?,
+                crate::topology::edge::end_vertex(self.target, edge)?,
+            ];
+            edges.push((edge, ends));
+        }
+        let apart = 10.0 * tol;
+        for (a, &(edge_a, ends_a)) in edges.iter().enumerate() {
+            for (b, &(edge_b, ends_b)) in edges.iter().enumerate() {
+                if a == b || edge_a == edge_b {
+                    continue;
+                }
+                if ends_a.iter().any(|v| ends_b.contains(v)) {
+                    continue; // a corner trims them where they meet
+                }
+                let edge_curve_b = self
+                    .target
+                    .edge(edge_b)?
+                    .curve
+                    .clone()
+                    .ok_or_else(|| invalid("filleted edge without curve"))?;
+                let edge_ivl_b = self.target.edge(edge_b)?.interval;
+                let (Some(rails_a), Some(rails_b)) = (rails.get(a), rails.get(b)) else {
+                    continue;
+                };
+                for (face_a, curve_a) in rails_a {
+                    for (face_b, curve_b) in rails_b {
+                        if face_a != face_b {
+                            continue;
+                        }
+                        let ivl_a = curve_a.natural_interval();
+                        let ivl_b = curve_b.natural_interval();
+                        for s in 1..16_u32 {
+                            let p =
+                                curve_a.evaluate_point(k, ivl_a.evaluate(f64::from(s) / 16.0))?;
+                            let face_tol = crate::geom::tol::zone_tol3d(
+                                k,
+                                crate::topology::face::p2::tolerance(self.target, *face_a)?,
+                            );
+                            let mut on = PointClassification::<EntityRef>::new(face_tol);
+                            crate::query::face::p1::point_3d_classify(
+                                k,
+                                self.target,
+                                *face_a,
+                                p,
+                                face_tol,
+                                true,
+                                &mut on,
+                                crate::query::face::p1::Point3dClassifyOptions::default(),
+                            )?;
+                            if on.point_class() == PointClassType::Unknown {
+                                continue; // off the face
+                            }
+                            let on_edge = edge_curve_b.drop_point(
+                                k,
+                                &edge_ivl_b,
+                                p,
+                                None,
+                                crate::math::BIG_DOUBLE,
+                                None,
+                                SolverOperation::Minimize,
+                            )?;
+                            let on_rail = curve_b.drop_point(
+                                k,
+                                &ivl_b,
+                                p,
+                                None,
+                                crate::math::BIG_DOUBLE,
+                                None,
+                                SolverOperation::Minimize,
+                            )?;
+                            let t = on_edge.parameter;
+                            if !on_edge.success
+                                || !on_rail.success
+                                || t <= edge_ivl_b.min()
+                                || t >= edge_ivl_b.max()
+                            {
+                                continue; // beside the band, not across it
+                            }
+                            let e = edge_curve_b.evaluate_point(k, t)?;
+                            let r = curve_b.evaluate_point(k, on_rail.parameter)?;
+                            let mut chord = e - r;
+                            let width = chord.length();
+                            if !matches!(
+                                width.partial_cmp(&(2.0 * apart)),
+                                Some(core::cmp::Ordering::Greater)
+                            ) {
+                                continue;
+                            }
+                            chord *= 1.0 / width;
+                            let from_rail = (p - r).dot(chord);
+                            if from_rail > apart && from_rail < width - apart {
+                                return Ok(false);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        Ok(true)
+    }
 }
 
 impl SolverLoadingAccess<FilletObject> for SessionObjects<'_> {

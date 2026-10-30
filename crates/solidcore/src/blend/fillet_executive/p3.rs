@@ -2007,6 +2007,20 @@ pub trait SolverGeometryAccess<O: ClassObject + SolutionObject + Ord> {
             "blend.fillet_executive_p3",
         ))
     }
+    /// The fork's `SmFilletExecutive::BandsClearOtherRails` over `solvers` (not upstream;
+    /// opt-in `fixes.fillet_refuse_overlapping_bands`, WR-542): `false` when a blend's
+    /// rail runs inside the band another blend takes off a face they share, away from a
+    /// corner that trims them.
+    ///
+    /// # Errors
+    /// [`SolidError::Unported`] without live context; missing geometry.
+    fn geometry_bands_clear_other_rails(&mut self, k: &mut Kernel, solvers: &[O]) -> Result<bool> {
+        let _ = (k, solvers);
+        Err(SolidError::unported(
+            "SmFilletExecutive::BandsClearOtherRails (fork)",
+            "blend.fillet_executive_p3",
+        ))
+    }
 }
 
 impl<O, A> SolverGeometryAccess<O> for A
@@ -2302,6 +2316,28 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
         {
             return self.record_no_room(
                 "Fillet Error: the blends take the whole of a face they roll on, some at an angle to it (the blend is larger than the faces allow)",
+            );
+        }
+        Ok(())
+    }
+
+    /// Refuse blends whose bands on a face they share overlap, away from any corner that
+    /// trims them (not upstream; opt-in `fixes.fillet_refuse_overlapping_bands`, WR-542:
+    /// the fork's tangency-labs/smlib@c0d74ee, `SmFilletExecutive::BandsClearOtherRails`,
+    /// called right after `FacesOutlastTheirBlends`). Fails with `FilletErrorType::NoRoom`.
+    ///
+    /// # Errors
+    /// The refusal as `SM_ERR`, noted in the error info; those of the check.
+    pub fn refuse_overlapping_bands(
+        &mut self,
+        k: &mut Kernel,
+        access: &mut impl SolverGeometryAccess<O>,
+    ) -> Result<()> {
+        if k.fixes.fillet_refuse_overlapping_bands
+            && !access.geometry_bands_clear_other_rails(k, &self.solvers)?
+        {
+            return self.record_no_room(
+                "Fillet Error: a blend's rail runs inside the band another blend takes off a face they share (the blends are larger than the face allows)",
             );
         }
         Ok(())
@@ -2606,6 +2642,7 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
         self.calculate_solver_geometry(k, access)?;
         self.refuse_blends_larger_than_faces(k, access)?;
         self.refuse_face_consuming_blends(k, access)?;
+        self.refuse_overlapping_bands(k, access)?;
         self.calculate_corner_edges(k, access)?;
         self.trim_solver_rails(k, access)?;
         self.classify_solver_rails(k, access)?;
