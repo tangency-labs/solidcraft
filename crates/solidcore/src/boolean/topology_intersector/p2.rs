@@ -53,6 +53,9 @@
 //!   not returned, except by `check_for_squeeze_vertices_into`, which appends to the
 //!   caller's lists as upstream does (a failure after the first conflict keeps its
 //!   appends). The `NotUsed` `bMakingManifoldSolid` of `EdgeEdgeIntersect` is kept.
+//! - **Opt-in (WR-527, #1526).** With `Kernel::fixes.boolean_skips_faces_apart`,
+//!   `IntersectTopology` skips a face pair whose face boxes are disjoint by the
+//!   intersection tolerance (the fork's tangency-labs/smlib@60b1c6a).
 //! - **Deleted curves.** `IntersectTopology` and `IntersectInsertRelate` return the
 //!   curve handles deleted (by `SplitIntersectingProtoEdges`, the resolution, the
 //!   imprint and the manager's destructor), as [`p1`](super::p1) does.
@@ -1332,9 +1335,32 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
             ))?;
         }
 
+        // Opt-in (WR-527, #1526/#1527): each face's bounding box, for skipping the pairs
+        // below that lie apart. A box that cannot be computed, or holds nothing, rules
+        // nothing out.
+        let face_boxes = |faces: &[O]| -> Vec<Extent3d> {
+            faces
+                .iter()
+                .map(|&f| match brep.face_calculate_bounding_box(k, f, false) {
+                    Ok(b) if !b.has_negative_volume() => b,
+                    _ => {
+                        let mut b = Extent3d::new();
+                        b.set_unbounded();
+                        b
+                    }
+                })
+                .collect()
+        };
+        let skip_apart = k.fixes.boolean_skips_faces_apart;
+        let (boxes1, boxes2) = if skip_apart {
+            (face_boxes(&faces1), face_boxes(&faces2))
+        } else {
+            (Vec::new(), Vec::new())
+        };
+
         // Finally, the Face-Face intersections.
-        for &f1 in &faces1 {
-            for &f2 in &faces2 {
+        for (ii, &f1) in faces1.iter().enumerate() {
+            for (jj, &f2) in faces2.iter().enumerate() {
                 let s1 = brep
                     .face_surface(f1)
                     .ok_or(invalid(OP_INTERSECT_TOPOLOGY, "face handle is unknown"))?;
@@ -1351,6 +1377,14 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
 
                 // No existing SSI, check coincidence or intersection.
                 let tol = self.this_approx_tol_3d();
+
+                // Opt-in (WR-527): no work - faces farther apart than the intersection
+                // tolerance cannot meet
+                if let (Some(box1), Some(box2)) = (boxes1.get(ii), boxes2.get(jj)) {
+                    if box1.are_disjoint(box2, tol) {
+                        continue;
+                    }
+                }
 
                 // Check for coincident surfaces -- partial coincidence is ok.
                 let surf1 = s1.ok_or(invalid(OP_INTERSECT_TOPOLOGY, "face without surface"))?;
