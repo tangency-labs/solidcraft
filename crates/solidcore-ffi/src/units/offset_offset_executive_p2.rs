@@ -1764,8 +1764,11 @@ mod tests {
         r.config.extend_convex = true;
         r.faces = vec![FaceSelection::Foreign(0), FaceSelection::Source(0)];
         let mut input = pack(&r).unwrap();
-        // Malformed later selectors remain rejected despite the first foreign face.
-        *input.last_mut().unwrap() = 1.0;
+        // Malformed later selectors remain rejected despite the first foreign face: the
+        // last selector's index (before the trailing `attributed`) names a face the
+        // one-face source does not have.
+        let at = input.len() - 2;
+        input[at] = 1.0;
         invalid_inputs.push(input);
         for input in invalid_inputs {
             let mut out = [42.0; 2];
