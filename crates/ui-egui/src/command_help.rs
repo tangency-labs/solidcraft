@@ -1,10 +1,15 @@
 //! Written help for the ribbon tooltips (#2758): two short sentences per command, shown under the
 //! tool name when the pointer rests on its button. The names stay as they are; the help is a
 //! separate message `help.<command id>` in the catalogs, so a tool without help keeps its plain
-//! tooltip. Text only for now; pictures and animations are a later step. A new toolbar command
-//! ships with its help: `every_toolbar_command_has_help_or_is_on_the_backlog` fails otherwise.
+//! tooltip. A tool can also show an example picture under the text (see `ILLUSTRATIONS`); animations
+//! are a later step. A new toolbar command ships with its help:
+//! `every_toolbar_command_has_help_or_is_on_the_backlog` fails otherwise.
+
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
 
 use crate::i18n;
+use crate::icon_svg::{self, Look};
 
 /// The commands that have help text. Each one needs a `help.<id>` message in the catalogs.
 pub const DOCUMENTED: &[&str] = &[
@@ -53,6 +58,25 @@ pub const DOCUMENTED: &[&str] = &[
     "timeline.play",
 ];
 
+/// The example pictures, by command id (sorted): original SVGs on the icon grid in
+/// `assets/icons/ui/design/svg/help`, drawn by [`icon_svg`] in the palette of the current theme. A
+/// documented command without an entry shows its text only. Nothing is saved in a design.
+const ILLUSTRATIONS: &[(&str, &str)] = &[
+    ("solid.combine", include_str!("../../../assets/icons/ui/design/svg/help/help_combine.svg")),
+    ("solid.loft", include_str!("../../../assets/icons/ui/design/svg/help/help_loft.svg")),
+    ("solid.mirror", include_str!("../../../assets/icons/ui/design/svg/help/help_mirror.svg")),
+    ("solid.pattern.circular", include_str!("../../../assets/icons/ui/design/svg/help/help_pattern_circular.svg")),
+    ("solid.pattern.rectangular", include_str!("../../../assets/icons/ui/design/svg/help/help_pattern_rectangular.svg")),
+    ("solid.sweep", include_str!("../../../assets/icons/ui/design/svg/help/help_sweep.svg")),
+];
+
+/// The picture is shown 240 x 180 points: the band y 8 to 56 (4:3) of the 64 x 64 grid.
+const PICTURE_WIDTH: f32 = 240.0;
+
+/// Textures already rasterised: one per (command, look, pixel width).
+#[derive(Clone, Default)]
+struct Pictures(Arc<Mutex<HashMap<(&'static str, Look, u32), egui::TextureHandle>>>);
+
 /// The help for `command` in the current language, when it has any.
 pub fn help(command: &str) -> Option<String> {
     if !DOCUMENTED.contains(&command) {
@@ -61,6 +85,41 @@ pub fn help(command: &str) -> Option<String> {
     let key = format!("help.{command}");
     let text = i18n::tr(&key);
     (text != key).then(|| text.to_owned())
+}
+
+/// The example picture of `command` for the current theme and workspace accent, rasterised once per size.
+fn picture(ctx: &egui::Context, command: &str) -> Option<egui::TextureHandle> {
+    let (id, source) = ILLUSTRATIONS.iter().find(|(id, _)| *id == command)?;
+    let ppp = ctx.pixels_per_point().max(0.5);
+    // A multiple of 8 pixels, so that the band (one eighth to seven eighths of the height) is whole rows.
+    let px = ((PICTURE_WIDTH * ppp).round().clamp(16.0, 1024.0) as u32).div_ceil(8) * 8;
+    // The `active-*` roles follow the accent of the workspace tab, like the ribbon icons; the look is part of the cache key.
+    let accent = crate::theme::TabAccent::current_icon_accent(ctx).and_then(icon_svg::accent_index);
+    let look = Look::themed(ctx.global_style().visuals.dark_mode, accent, crate::theme::vision());
+    let cache = ctx.data_mut(|d| d.get_temp_mut_or_insert_with(egui::Id::new("sc_help_pictures"), Pictures::default).clone());
+    let mut map = cache.0.lock().ok()?;
+    if let std::collections::hash_map::Entry::Vacant(slot) = map.entry((id, look, px)) {
+        slot.insert(ctx.load_texture(format!("help:{id}:{px}"), band(source, look, px)?, egui::TextureOptions::LINEAR));
+    }
+    map.get(&(*id, look, px)).cloned()
+}
+
+/// The 4:3 band of the master `source` drawn `px` pixels wide.
+fn band(source: &str, look: Look, px: u32) -> Option<egui::ColorImage> {
+    let doc = icon_svg::Doc::parse(source).inspect_err(|e| log::warn!("help picture: {e}")).ok()?;
+    let pm = icon_svg::render(&doc, look, px)?;
+    let (width, rows) = (px as usize, px as usize * 3 / 4);
+    let data = pm.data().get(px as usize / 8 * width * 4..)?.get(..rows * width * 4)?;
+    Some(egui::ColorImage::from_rgba_premultiplied([width, rows], data))
+}
+
+/// Show the example picture of `command` when it has one.
+pub fn illustration(ui: &mut egui::Ui, command: &str) {
+    if let Some(texture) = picture(ui.ctx(), command) {
+        let ppp = ui.ctx().pixels_per_point().max(0.5);
+        ui.add_space(4.0);
+        ui.image(egui::load::SizedTexture::new(texture.id(), texture.size_vec2() / ppp));
+    }
 }
 
 /// Show `tip` (name, shortcut or the reason the tool is disabled) as the tooltip of `response`,
@@ -73,6 +132,7 @@ pub fn tooltip(response: egui::Response, command: &str, tip: String) -> egui::Re
         if let Some(help) = help {
             ui.add_space(2.0);
             ui.label(egui::RichText::new(help).weak());
+            illustration(ui, command);
         }
     })
 }
@@ -412,6 +472,62 @@ mod tests {
                 assert_eq!(text.matches('{').count(), translated.matches('{').count(), "{key}");
             }
         }
+    }
+
+    #[test]
+    fn every_picture_is_for_a_documented_command_and_stays_in_its_band() {
+        assert!(ILLUSTRATIONS.is_sorted_by_key(|(id, _)| *id));
+        for (id, source) in ILLUSTRATIONS {
+            assert!(DOCUMENTED.contains(id), "{id} has a picture but no help");
+            let doc = icon_svg::Doc::parse(source).unwrap_or_else(|e| panic!("{id}: {e}"));
+            for dark in [false, true] {
+                let look = Look { dark, accent: None, vision: crate::theme::ColorVision::Off, palette: None };
+                let full = icon_svg::render(&doc, look, 128).unwrap_or_else(|| panic!("{id}: no image"));
+                let rows = |range: std::ops::Range<usize>| {
+                    full.data().get(range.start * 512..range.end * 512).unwrap_or_default().iter().skip(3).step_by(4).any(|a| *a > 0)
+                };
+                assert!(rows(16..112), "{id}: empty picture");
+                assert!(!rows(0..16) && !rows(112..128), "{id}: the artwork leaves the 4:3 band");
+                let image = band(source, look, 240).unwrap_or_else(|| panic!("{id}: no band"));
+                assert_eq!(image.size, [240, 180]);
+            }
+        }
+    }
+
+    #[test]
+    fn a_picture_follows_the_workspace_accent_and_keeps_its_shape() {
+        let alpha = |image: &egui::ColorImage| image.pixels.iter().map(|c| c.a()).collect::<Vec<_>>();
+        for (id, source) in ILLUSTRATIONS {
+            for dark in [false, true] {
+                let look = |accent| Look { dark, accent, vision: crate::theme::ColorVision::Off, palette: None };
+                let blue = band(source, look(None), 240).unwrap_or_else(|| panic!("{id}: no band"));
+                for name in ["surface", "form", "mesh", "sketch"] {
+                    let accent = icon_svg::accent_index(name).unwrap_or_else(|| panic!("accent {name}"));
+                    let image = band(source, look(Some(accent)), 240).unwrap_or_else(|| panic!("{id}: no band"));
+                    assert_ne!(image.pixels, blue.pixels, "{id}: the {name} accent changes the colours");
+                    assert_eq!(alpha(&image), alpha(&blue), "{id}: the {name} accent keeps the shape");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn the_picture_takes_the_accent_of_the_active_tab() {
+        let ctx = crate::fonts::test_context();
+        let id = |ctx: &egui::Context| picture(ctx, "solid.loft").map(|t| t.id());
+        let blue = id(&ctx);
+        ctx.data_mut(|d| d.insert_temp(egui::Id::new("sc_tab_icon_accent"), Some("surface")));
+        let orange = id(&ctx);
+        assert!(blue.is_some() && orange.is_some() && blue != orange, "a tab accent gets its own texture");
+        ctx.data_mut(|d| d.insert_temp(egui::Id::new("sc_tab_icon_accent"), None::<&'static str>));
+        assert_eq!(id(&ctx), blue, "the base blue texture is reused");
+    }
+
+    #[test]
+    fn a_picture_is_drawn_for_an_illustrated_command_only() {
+        let ctx = crate::fonts::test_context();
+        assert!(picture(&ctx, "solid.sweep").is_some_and(|t| t.size() == [240, 180]));
+        assert!(picture(&ctx, "solid.extrude").is_none());
     }
 
     #[test]

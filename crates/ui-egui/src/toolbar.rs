@@ -2158,6 +2158,7 @@ fn ribbon_tooltip(app: &SolveApp, response: egui::Response, command: &solidcraft
         // The tool's own help, when it has one (#2758).
         if let Some(help) = crate::command_help::help(command.id) {
             ui.add(egui::Label::new(egui::RichText::new(help).color(t.text_dim)).wrap());
+            crate::command_help::illustration(ui, command.id);
         }
         if let Some(reason) = disabled {
             ui.add(egui::Label::new(egui::RichText::new(app.tr_label(reason)).color(t.text_dim)).wrap());
