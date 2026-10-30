@@ -49,12 +49,28 @@ fn overlapping_rounds_are_refused() {
     }
 }
 
-/// Below half the wall the rounds fit: a closed solid with a round on every edge.
+/// Below half the wall the rounds fit: a closed solid with a round on every edge. Each end face's
+/// round section at depth u into the round is the end face's outline moved in by
+/// d = r − √(r² − (r − u)²), each edge parallel to itself: the area less L d (L the outline's
+/// and the window's length together, 2 · 41.5 + 2 · 12.3 = 107.6), plus d² at each of the six
+/// convex corners (two rounds mitred) and less π d² / 4 at each of the six concave ones, the two
+/// shoulders and the window's four corners (two rounds meeting at a concave corner beside an
+/// unpicked sharp edge are swept round it, the owner's ruling of 2026-10-30). Over the round,
+/// ∫ d = r² (1 − π/4) and ∫ d² = r³ (5/3 − π/2), at both ends.
 #[test]
 fn rounds_that_fit_are_closed() {
+    use std::f64::consts::{FRAC_PI_2, FRAC_PI_4};
     let p = part();
-    let b = crate::fillet(&p, &edges(), 0.5).unwrap();
+    let r = 0.5;
+    let b = crate::fillet(&p, &edges(), r).unwrap();
     assert!(b.validity().is_empty(), "{:?}", b.validity());
     assert_eq!(b.crossed_face_loops().unwrap(), 0);
-    assert_eq!(b.face_count(), p.face_count() + edges().len());
+    let (a, top) = (12.74437365538526, 22.69275963366936);
+    let part_volume = 14.0 * (21.5 * 10.0 + (top - a) * 10.0 - 5.2 * 7.1);
+    assert!((crate::measure(&p).unwrap().volume - part_volume).abs() < 1e-9 * part_volume);
+    let length = 2.0 * (21.5 + 20.0) + 2.0 * (5.2 + 7.1);
+    let corners = 6.0 - 6.0 * FRAC_PI_4;
+    let removed = 2.0 * (length * r * r * (1.0 - FRAC_PI_4) - corners * r * r * r * (5.0 / 3.0 - FRAC_PI_2));
+    let v = crate::measure(&b).unwrap().volume;
+    assert!((v - (part_volume - removed)).abs() < 1e-7 * part_volume, "{v} vs {}", part_volume - removed);
 }

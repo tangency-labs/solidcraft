@@ -168,28 +168,40 @@ mod tests {
         assert!(fillet_radii(&rounded, &[(seam, 2.0)]).is_err());
     }
 
+    /// A 40 x 80 x 27 box (and the same shelled 1 mm, open at the top) with its bottom edges
+    /// rounded R2 as four separate fillets (mitred at the bottom corners), then one vertical
+    /// edge R2: the same solid whichever of its picks comes first. Horizontal sections: below
+    /// z = r above the bottom, s up, the rectangle moved in by d = r − ρ, ρ = √(r² − (r − s)²),
+    /// with the rounded corner a quarter disc of radius ρ less than its square (the sphere octant
+    /// where the three rounds meet); above, the rectangle less that corner at r. With
+    /// ∫ ρ = π r² / 4, ∫ ρ² = 2 r³ / 3, ∫ d = r² (1 − π/4) and ∫ d² = r³ (5/3 − π/2) over the
+    /// bottom r. The shell's cavity, 38 x 78 x 26, lies clear of both rounds (the bottom round's
+    /// arc passes 2 − √2 from the outer corner along the diagonal, the cavity's corner 1).
     #[test]
     fn issue2422_vertical_after_separate_bottom_rounds() {
+        use std::f64::consts::{FRAC_PI_2, FRAC_PI_4};
         let origin = Vec3::new(-5.0, 7.2, -2.0);
-        let b = box_solid(origin, origin + Vec3::new(40.0, 80.0, 27.0)).unwrap();
+        let (l, w, h, r) = (40.0, 80.0, 27.0, 2.0);
+        let b = box_solid(origin, origin + Vec3::new(l, w, h)).unwrap();
         let bottom = [Vec3::new(15.0, 7.2, -2.0), Vec3::new(35.0, 47.2, -2.0), Vec3::new(15.0, 87.2, -2.0), Vec3::new(-5.0, 47.2, -2.0)];
+        let spandrel = 1.0 - FRAC_PI_4;
+        let solid = l * w * r - 2.0 * (l + w) * r * r * spandrel + 4.0 * r * r * r * (5.0 / 3.0 - FRAC_PI_2) - spandrel * 2.0 * r * r * r / 3.0
+            + (h - r) * (l * w - spandrel * r * r);
+        let cavity = (l - 2.0) * (w - 2.0) * (h - 1.0);
         // The issue has no design attached. Reconstruct its outside corner and bottom mitre,
         // using the reported picks, with and without the open cavity visible in the screenshot.
         let picks = [Vec3::new(-5.0, 87.2, 12.5), Vec3::new(-4.283446394180081, 86.48344639418008, -1.5001085324947512)];
-        for base in [b.clone(), crate::shell(&b, &[Vec3::new(15.0, 47.2, 25.0)], 1.0).unwrap()] {
+        for (base, want) in [(b.clone(), solid), (crate::shell(&b, &[Vec3::new(15.0, 47.2, 25.0)], 1.0).unwrap(), solid - cavity)] {
             // Each fillet with its tangent chain, as the Fillet feature asks for it by default
             // (tangent propagation).
             let mut rounded = base;
             for edge in bottom {
                 rounded = fillet(&rounded, &crate::tangent_chain(&rounded, &[edge]).unwrap(), 2.0).unwrap();
             }
-            let reference = fillet(&rounded, &crate::tangent_chain(&rounded, &picks[..1]).unwrap(), 2.0).unwrap();
-            for selection in [picks, [picks[1], picks[0]]] {
-                let result = fillet(&rounded, &crate::tangent_chain(&rounded, &selection).unwrap(), 2.0).unwrap();
-                assert_eq!(result.face_count(), reference.face_count());
-                assert_eq!(result.unmeshed_faces(), 0);
+            for selection in [&picks[..1], &picks[..], &[picks[1], picks[0]][..]] {
+                let result = fillet(&rounded, &crate::tangent_chain(&rounded, selection).unwrap(), 2.0).unwrap();
                 assert!(result.validity().is_empty(), "{:?}", result.validity());
-                assert!((vol(&result) - vol(&reference)).abs() < 0.05);
+                assert!((vol(&result) - want).abs() < 1e-6 * want, "{selection:?}: {} vs {want}", vol(&result));
                 assert!(!result.contains(Vec3::new(-4.9, 87.1, 10.0)));
                 assert!(result.contains(Vec3::new(-4.1, 86.3, 10.0)));
             }
@@ -369,9 +381,20 @@ mod tests {
                 .unwrap();
         let basin = crate::boolean(&slab, &pocket, crate::BoolOp::Cut).unwrap().unwrap();
         let picks = [Vec3::new(50.0, 1.0, 30.0), Vec3::new(80.0, 27.0, 30.0), Vec3::new(50.0, 50.0, 30.0), Vec3::new(20.0, 27.0, 30.0)];
-        // Past the 1 mm rim the blends run over the slab's front edge (a cliff) and are cut from
-        // the slab (the blend-overflow decision, 237f0ae74): nothing escapes it.
-        for (round, size) in [(false, 2.0), (true, 4.0), (false, 0.5), (true, 0.5)] {
+        // The 2 mm chamfer's leg would run off the 1 mm rim's top over the slab's front edge and
+        // lower the front face: refused as too large, naming the largest that fits, below the
+        // rim's width (a full-width chamfer is refused too), the owner's blend-overflow ruling of
+        // 2026-10-30.
+        let message = match crate::chamfer(&basin, &picks, 2.0) {
+            Err(KernelError::TooLarge(m)) => m,
+            Err(e) => panic!("refused, but not as too large: {e}"),
+            Ok(_) => panic!("a chamfer whose leg runs off the rim was built"),
+        };
+        let largest: f64 = message.rsplit("that fits is ").next().and_then(|t| t.trim_end_matches(" mm").parse().ok()).unwrap_or(0.0);
+        assert!((1.0 - 1e-3 - 1e-12..1.0).contains(&largest), "{message}");
+        // Past the 1 mm rim the R4 round runs over the slab's front edge on its tangent side (a
+        // cliff) and is cut from the slab (the same ruling): nothing escapes it.
+        for (round, size) in [(true, 4.0), (false, 0.5), (true, 0.5)] {
             let result = if round { fillet(&basin, &picks, size) } else { crate::chamfer(&basin, &picks, size) };
             let result = result.unwrap_or_else(|e| panic!("round={round}, {size}: {e}"));
             assert!(result.validity().is_empty(), "round={round}, {size}: {:?}", result.validity());

@@ -1224,34 +1224,15 @@ fn chamfer_sloped_basin_rim() {
     assert!(mesh.contains(Vec3::new(50.0, 3.5, 28.0)));
 }
 
-/// The removal of an equal-distance chamfer `d` of the rim edge at y = `margin` of
-/// `chamfer_sloped_basin_rim`'s basin, cut from the slab as if its top went on past y = 0 (the
-/// blend-overflow decision, 237f0ae74): the triangle between the edge (margin, 30), the top's
-/// contact (margin − d, 30) and the wall's contact d down the wall towards (20, 10), clipped to
-/// y >= 0, times the chamfer's length at its depth h, 60 − h between the sloped end walls:
-/// area · (30 + z̄) over the clipped polygon (shoelace).
-fn basin_rim_chamfer_removed(margin: f64, d: f64) -> f64 {
-    let len = ((20.0 - margin).powi(2) + 400.0).sqrt();
-    let (e, t) = ((margin, 30.0), (margin - d, 30.0));
-    let w = (margin + d * (20.0 - margin) / len, 30.0 - d * 20.0 / len);
-    let poly = if t.0 >= 0.0 {
-        vec![e, t, w]
-    } else {
-        let s = -t.0 / (w.0 - t.0);
-        vec![e, (0.0, 30.0), (0.0, t.1 + s * (w.1 - t.1)), w]
-    };
-    let (mut area, mut moment) = (0.0, 0.0);
-    for i in 0..poly.len() {
-        let ((y0, z0), (y1, z1)) = (poly[i], poly[(i + 1) % poly.len()]);
-        let c = y0 * z1 - y1 * z0;
-        area += c / 2.0;
-        moment += (z0 + z1) * c / 6.0;
-    }
-    area.abs() * 30.0 + moment.abs()
-}
-
+/// A chamfer wider than a basin's thin rim (`chamfer_sloped_basin_rim`'s basin with the rim
+/// `margin` wide at the top) would run its leg off the rim's top, over the slab's front edge,
+/// and lower the front face (a 2 mm chamfer on the 1 mm rim takes its top from 30 to 29.382):
+/// refused as too large, naming the largest size that fits, the body unchanged (the owner's
+/// blend-overflow ruling, 2026-10-30). As wide as the rim it would use the rim's top up: refused
+/// too, so the largest that fits is the size just below the rim's width (the fit search's step,
+/// three significant digits of the size asked for). A smaller chamfer builds.
 #[test]
-fn chamfer_wider_than_sloped_basin_rim_is_cut_and_a_full_width_one_refused() {
+fn chamfer_wider_than_sloped_basin_rim_is_refused_naming_the_largest() {
     let rectangle = |x0, y0, x1, y1| Loop2::polygon(&[Vec2::new(x0, y0), Vec2::new(x1, y0), Vec2::new(x1, y1), Vec2::new(x0, y1)]);
     let basin = |margin: f64| {
         let slab = box_solid(Vec3::ZERO, Vec3::new(100.0, 60.0, 30.0)).unwrap();
@@ -1260,29 +1241,31 @@ fn chamfer_wider_than_sloped_basin_rim_is_cut_and_a_full_width_one_refused() {
                 .unwrap();
         boolean(&slab, &pocket, BoolOp::Cut).unwrap().unwrap()
     };
-    // The formula reads the fitting chamfer of `chamfer_sloped_basin_rim` as it does.
-    let drop = 2.0 / (1.0 + 0.8f64.powi(2)).sqrt();
-    assert!(rel(basin_rim_chamfer_removed(4.0, 2.0), drop * (60.0 - drop / 3.0)) < 1e-12);
-    // Wider than the rim: the chamfer runs over the slab's front edge (a cliff) and is cut.
-    for (margin, distance) in [(1.0, 2.0), (1.0, 3.0), (0.5, 4.0)] {
+    for (margin, distance) in [(1.0, 2.0), (1.0, 3.0), (0.5, 4.0), (0.5, 0.5), (1.0, 1.0)] {
         let b = basin(margin);
         let before = measure(&b).unwrap().volume;
-        let made = chamfer(&b, &[Vec3::new(50.0, margin, 30.0)], distance).unwrap_or_else(|e| panic!("{margin}, {distance}: {e}"));
-        assert!(made.validity().is_empty(), "{margin}, {distance}: {:?}", made.validity());
-        let want = before - basin_rim_chamfer_removed(margin, distance);
-        assert!(rel(measure(&made).unwrap().volume, want) < 1e-8, "{margin}, {distance}: {} vs {want}", measure(&made).unwrap().volume);
+        let message = match chamfer(&b, &[Vec3::new(50.0, margin, 30.0)], distance) {
+            Err(KernelError::TooLarge(m)) => m,
+            Err(e) => panic!("{margin}, {distance}: refused, but not as too large: {e}"),
+            Ok(_) => panic!("{margin}, {distance}: a chamfer whose leg runs off the rim was built"),
+        };
+        let largest: f64 = message.rsplit("that fits is ").next().and_then(|t| t.trim_end_matches(" mm").parse().ok()).unwrap_or(0.0);
+        let step = 10f64.powf(distance.log10().floor() - 3.0);
+        assert!((margin - step - 1e-12..margin).contains(&largest), "{margin}, {distance}: {message}");
+        assert_eq!(measure(&b).unwrap().volume, before);
     }
-    // As wide as the rim it would use the rim's top up: a full-width chamfer is refused, the
-    // body unchanged. A smaller chamfer on the same thin rim is still supported.
+    // Half the rim's width fits: as `chamfer_sloped_basin_rim`, the triangle of legs d on the
+    // top and d down the wall (towards (20, 10), its run 20 − margin over the drop 20) takes
+    // d · drop / 2 with drop = 20 d / √((20 − margin)² + 400), its length 60 − h between the
+    // sloped end walls at depth h, so its volume is that area times 60 − drop / 3.
     for margin in [0.5, 1.0] {
         let b = basin(margin);
-        let before = measure(&b).unwrap();
-        let error = chamfer(&b, &[Vec3::new(50.0, margin, 30.0)], margin).unwrap_err();
-        assert!(matches!(error, KernelError::TooLarge(_)), "{margin}: {error}");
-        assert_eq!(measure(&b).unwrap().volume, before.volume);
-        let smaller = chamfer(&b, &[Vec3::new(50.0, margin, 30.0)], margin * 0.5).unwrap();
-        assert!(smaller.validity().is_empty());
-        assert!(measure(&smaller).unwrap().volume < before.volume);
+        let d = margin * 0.5;
+        let smaller = chamfer(&b, &[Vec3::new(50.0, margin, 30.0)], d).unwrap();
+        assert!(smaller.validity().is_empty(), "{margin}: {:?}", smaller.validity());
+        let drop = 20.0 * d / ((20.0 - margin).powi(2) + 400.0).sqrt();
+        let want = measure(&b).unwrap().volume - d * drop / 2.0 * (60.0 - drop / 3.0);
+        assert!(rel(measure(&smaller).unwrap().volume, want) < 1e-8, "{margin}: {} vs {want}", measure(&smaller).unwrap().volume);
     }
 }
 
@@ -1966,6 +1949,29 @@ fn fillet_sharp_arc_and_arc_loop() {
     assert!(rel(removed, want) < 1e-3, "{removed} vs {want}");
 }
 
+/// The area of the tabbed plate's outline (`fillet_tabbed_plate_outer_loop_and_partial_selection_after_hole`)
+/// with the R25 arc moved in by `da` and the tab's run (its sides, R2 corners and top) by `dt`,
+/// each element parallel to itself, by Green's theorem: an arc about c of radius ρ from a to b
+/// gives ½ (ρ² (b − a) + ρ (cx (sin b − sin a) − cy (cos b − cos a))), a segment p→q ½ (p × q).
+/// Where only one side of a concave corner at (±4, y) moves the elements meet where they cross
+/// (the round runs into the other wall); where both do, the corner is swept, an arc of radius d
+/// about the corner (the owner's ruling for rounds meeting at a concave corner, 2026-10-30).
+fn tabbed_plate_area(da: f64, dt: f64) -> f64 {
+    let (y, cy) = ((625.0_f64 - 16.0).sqrt(), 280.0 / 9.0);
+    let theta = (4.0_f64 / 25.0).acos();
+    let (big, rho) = (25.0 - da, 2.0 - dt);
+    let tab = rho * rho * PI + 2.0 * rho * (2.0 + cy) + 4.0 * (cy + rho);
+    if da > 0.0 && dt > 0.0 {
+        assert!((da - dt).abs() < 1e-15, "a swept corner of one size");
+        let corner = -da * da * theta + da * (4.0 * theta.sin() + y * (1.0 - theta.cos()));
+        0.5 * (big * big * (PI + 2.0 * theta) + 2.0 * corner + tab) + (4.0 - dt) * (cy - y)
+    } else {
+        let yc = (big * big - (4.0 - dt).powi(2)).sqrt();
+        let at = yc.atan2(4.0 - dt);
+        0.5 * (big * big * (PI + 2.0 * at) + tab) + (4.0 - dt) * (cy - yc)
+    }
+}
+
 #[test]
 fn fillet_tabbed_plate_outer_loop_and_partial_selection_after_hole() {
     use solidcraft_geom::Seg2;
@@ -1988,7 +1994,20 @@ fn fillet_tabbed_plate_outer_loop_and_partial_selection_after_hole() {
     };
     let body =
         extrude(&Plane::XY, &[Region2 { outer: outline, holes: vec![Loop2::circle(Vec2::new(0.0, hole_y), 1.5)] }], 0.0, 2.0).unwrap().pop().unwrap();
-    let inner = fillet(&body, &[Vec3::new(1.5, hole_y, 2.0)], 0.5).unwrap();
+    let r = 0.5;
+    // The section a round takes off, (1 − π/4) r², and its centroid's distance from both faces.
+    let (spandrel, centroid) = ((1.0 - PI / 4.0) * r * r, r * (10.0 - 3.0 * PI) / (3.0 * (4.0 - PI)));
+    // The outline's area (Green's theorem, checked against the disc, the tab's rectangle and its
+    // two R2 corners), the plate its prism 2 high less the hole.
+    let outline_area = tabbed_plate_area(0.0, 0.0);
+    let parts = 312.5 * (PI + 2.0 * theta) + 4.0 * y + 8.0 * (corner_y - y) + 8.0 + 2.0 * PI;
+    assert!(rel(outline_area, parts) < 1e-14, "{outline_area} vs {parts}");
+    assert!(rel(measure(&body).unwrap().volume, 2.0 * (outline_area - PI * 2.25)) < 1e-9);
+    // The hole's rim round (Pappus: the spandrel about the hole's axis at 1.5 + its centroid).
+    let inner = fillet(&body, &[Vec3::new(1.5, hole_y, 2.0)], r).unwrap();
+    let rim = spandrel * 2.0 * PI * (1.5 + centroid);
+    let holed = measure(&inner).unwrap().volume;
+    assert!(rel(measure(&body).unwrap().volume - holed, rim) < 1e-5, "{} vs {rim}", measure(&body).unwrap().volume - holed);
     let edges = [
         Vec3::new(-24.91935125502191, -2.0064727829797544, 2.0),
         Vec3::new(24.919351255429795, -2.006472777913911, 2.0),
@@ -1998,6 +2017,30 @@ fn fillet_tabbed_plate_outer_loop_and_partial_selection_after_hole() {
         Vec3::new(-3.4142135648720653, 32.52532467287703, 2.0),
         Vec3::new(-4.0000000025087745, 27.89451823429679, 2.0),
     ];
+    // The selections that end only at the sharp concave corners at (±4, y): the R25 arc (its two
+    // edges, tangent at the bottom), the tab's run (tangent through its R2 corners), and both.
+    // Each takes off the outline's section less the section moved in by d = r (1 − cos φ) at the
+    // height r sin φ into the round, integrated over that height (midpoint rule in φ).
+    let removed = |arc: bool, tab: bool, steps: u32| {
+        let dphi = (PI / 2.0) / f64::from(steps);
+        (0..steps)
+            .map(|i| {
+                let phi = (f64::from(i) + 0.5) * dphi;
+                let d = r * (1.0 - phi.cos());
+                (outline_area - tabbed_plate_area(if arc { d } else { 0.0 }, if tab { d } else { 0.0 })) * r * phi.cos() * dphi
+            })
+            .sum::<f64>()
+    };
+    for (mask, arc, tab) in [(0b0000011_u32, true, false), (0b1111100, false, true), (0b1111111, true, true)] {
+        let want = removed(arc, tab, 8192);
+        assert!((want - removed(arc, tab, 4096)).abs() < 1e-7 * want, "the reference quadrature must converge");
+        let picks: Vec<_> = edges.iter().enumerate().filter(|(i, _)| mask & (1 << i) != 0).map(|(_, p)| *p).collect();
+        let blended = fillet(&inner, &picks, r).unwrap_or_else(|e| panic!("{picks:?}: {e}"));
+        assert!(blended.validity().is_empty(), "{picks:?}: {:?}", blended.validity());
+        // Exact volumes (SMLib's, to 1e-8); the blend's surfaces are SMLib's fits.
+        let got = holed - measure(&blended).unwrap().volume;
+        assert!(rel(got, want) < 1e-5, "arc {arc}, tab {tab}: removed {got}, expected {want}");
+    }
     // All 127 nonempty subsets: the whole rim, each individual edge, and every
     // contiguous or disjoint partial selection of the issue's seven picks.
     for mask in 1_u32..(1 << edges.len()) {
