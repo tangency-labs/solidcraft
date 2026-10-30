@@ -28,7 +28,7 @@ fn chamfer_through_the_openings_is_refused() {
     let mut s = open_fixture();
     let err = chamfer_error(&s).expect("the 9 mm chamfer cuts through two openings: it must be refused");
     assert!(err.contains("runs past the faces beside the edge"), "{err}");
-    assert!(err.contains("the largest size that fits is 5 mm"), "{err}");
+    assert!(err.contains("a size that fits is 5 mm"), "{err}");
     assert!((volume(&mut s) - 4000.0).abs() < 1e-6, "the part stays as it was without the chamfer");
 }
 

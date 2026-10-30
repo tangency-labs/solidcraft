@@ -737,7 +737,10 @@ fn fillet_fitted(
     r: f64,
     fit: crate::FilletFit,
 ) -> std::result::Result<(kernel::Body, Option<Vec<f64>>), kernel::KernelError> {
-    match kernel::fillet(body, edges, r) {
+    // Reduce searches for a real radius itself; verifying a suggestion here would be wasted
+    // work on every refused live preview.
+    let built = if fit == crate::FilletFit::Reduce { kernel::fillet_quiet(body, edges, r) } else { kernel::fillet(body, edges, r) };
+    match built {
         Err(kernel::KernelError::TooLarge(why)) if fit == crate::FilletFit::Reduce => match kernel::fillet_max_each(body, edges, r) {
             // Built at the radius asked for after all (the groups apart): nothing reduced.
             Some((used, b)) => Ok((b, used.iter().any(|u| *u < r).then_some(used))),
