@@ -30,10 +30,18 @@ pub(crate) fn reveal_feature(app: &mut SolveApp, id: u64, body: &str) {
     features::reveal(app, id, body);
 }
 
-/// Whether placements and folders start open (Preferences › Interface; off: they start closed and
-/// open with their arrow, Find in Browser or Expand All). The design's own row always starts open.
+/// Whether placements and folders start open: unless Preferences › Layout › Browser rows start
+/// closed is on, when they open with their arrow, Find in Browser or Expand All (#8768). The
+/// design's own row always starts open.
 pub(crate) fn rows_start_open(app: &SolveApp) -> bool {
-    app.preferences.browser_rows_start_open
+    !app.preferences.browser_rows_start_closed
+}
+
+/// Whether the Browser follows the 3D view: a body picked there opens the Browser down to its row
+/// (#3005), and the rows above what is selected or under the pointer are marked (#3009). It does
+/// while the rows start open; while they start closed, only Find in Browser opens them.
+fn follows_view(app: &SolveApp) -> bool {
+    rows_start_open(app)
 }
 
 /// Find in Browser for a body: show the Browser and find the body there ([`find_in_tree`]).
@@ -54,10 +62,11 @@ struct Found {
 }
 
 /// Open the rows that hold a body and no others: the document, the placements down to it, its
-/// Bodies folder and any group around it. The rows the last find opened close again, unless they
-/// were opened or closed by hand since or are on this path. The body's row is scrolled into view,
-/// and the path lights the rows leading to it. The path is looked up once, here: the rows are
-/// opened before drawing, because a closed row never draws what is inside it.
+/// Bodies folder and any group around it. While the rows start closed, the rows the last find
+/// opened close again, unless they were opened or closed by hand since or are on this path. The
+/// body's row is scrolled into view, and the path lights the rows leading to it. The path is
+/// looked up once, here: the rows are opened before drawing, because a closed row never draws
+/// what is inside it.
 fn find_in_tree(app: &mut SolveApp, body: &str) {
     app.tree.reveal_feature = None;
     app.tree.reveal = Some(body.to_string());
@@ -69,6 +78,11 @@ fn find_in_tree(app: &mut SolveApp, body: &str) {
     rows.extend((1..=path.len()).map(|depth| (occurrence_key(&path[..depth]), start_open)));
     rows.push((format!("{scope}/bodies"), start_open));
     rows.extend(group_chain(app, component, "bodies", &source).into_iter().map(|id| (format!("{scope}/g{id}"), start_open)));
+    // Rows that start open stay open after a find, as they always have: only rows that start
+    // closed close again at the next one.
+    if start_open {
+        app.tree.found_rows.clear();
+    }
     let mut opened = Vec::new();
     for (key, default) in std::mem::take(&mut app.tree.found_rows) {
         if rows.iter().any(|(row, _)| *row == key) {
@@ -78,7 +92,7 @@ fn find_in_tree(app: &mut SolveApp, body: &str) {
         }
     }
     for (key, default) in rows {
-        if set_open(app, &key, default, true) {
+        if set_open(app, &key, default, true) && !start_open {
             opened.push((key, default));
         }
     }
@@ -731,11 +745,10 @@ pub(crate) fn picked_body(sel: &Sel) -> Option<&str> {
     }
 }
 
-/// A pick in the viewport, while the Browser is shown and follows the 3D view (Preferences ›
-/// Interface, off by default): the Browser finds the body of the last item picked, as Find in
-/// Browser does (#3005).
+/// A pick in the viewport, while the Browser is shown and follows the 3D view ([`follows_view`]):
+/// the Browser finds the body of the last item picked, as Find in Browser does (#3005).
 pub(crate) fn reveal_pick(app: &mut SolveApp) {
-    if app.preferences.browser_follows_view
+    if follows_view(app)
         && app.ui.show_browser
         && let Some(body) = app.session.selection.last().and_then(picked_body).map(str::to_string)
     {
@@ -870,7 +883,7 @@ impl Lit {
         // Unless the Browser follows the 3D view, a body's placement is not looked up for the rows
         // above it (that names every placement again after each edit): only the one Find in
         // Browser found is known, until the selection changes.
-        let follows = app.preferences.browser_follows_view;
+        let follows = follows_view(app);
         if app.tree.found.as_ref().is_some_and(|found| found.selection != app.session.selection) {
             app.tree.found = None;
         }
@@ -1677,8 +1690,8 @@ fn occurrence_rows_inner(
     placement: &mut cache::Node,
 ) {
     let key = &placement.key;
-    // Placements start closed: a design with many components shows one row per top-level
-    // placement until opened. Find in Browser opens the ones holding its body.
+    // While the rows start closed (Preferences › Interface), a design with many components shows
+    // one row per top-level placement until opened. Find in Browser opens the ones holding its body.
     let start_open = rows_start_open(app);
     let open = is_open(app, key, start_open);
     let on_screen = ui.is_rect_visible(row_rect(ui));

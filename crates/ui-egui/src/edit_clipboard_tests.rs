@@ -546,7 +546,7 @@ fn a_cut_component_moves_into_the_component_it_is_pasted_in() {
     assert!(super::paste_into(&mut app, None, false, Some((holder, vec![holder_at]))));
     assert_eq!(app.session.doc.occurrences.iter().find(|o| o.id == part_at).unwrap().parent, holder);
     assert_eq!(app.session.selection, vec![solidcraft_engine::Sel::Occurrence { path: vec![holder_at, part_at] }]);
-    assert!(!crate::browser::is_open(&app, &format!("o:{holder_at}/{part_at}"), false), "it arrives folded");
+    assert!(!crate::browser::is_open(&app, &format!("o:{holder_at}/{part_at}"), true), "it arrives folded");
     assert!(app.cut.is_empty() && !super::can_paste(&app));
     app.run("occurrence.copy", json!({"component": holder})).unwrap();
     app.run("select.set", json!({"items": [{"type": "occurrence", "path": [holder_at]}]})).unwrap();

@@ -269,6 +269,9 @@ mod tests {
         let mut h = crate::scenario::Harness::new();
         h.app = app;
         h.app.home.open = false;
+        for id in [first, second] {
+            h.app.tree.collapsed.insert(format!("o:{id}"));
+        }
         h.frames(3);
         assert_eq!(crate::browser::drawn_rows().iter().filter(|(label, _, _, _)| label.ends_with("[M6×20]")).count(), 2);
         let at = h.call("ui.at", json!({"handle":format!("row:occurrence:{second}")}));

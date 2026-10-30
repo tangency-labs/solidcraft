@@ -2274,15 +2274,10 @@ mod tests {
         let origin = in_history("row:Origin").expect("the Origin");
         let first = handle_at("timeline:First").unwrap();
         assert!(bodies.y < origin.y && origin.y < first.y, "Bodies, Origin, then the features");
-        assert!(in_history("row:Block").is_none(), "the Bodies folder starts closed, as in the browser");
+        assert!(in_history("row:Block").is_some() && in_history("row:Other").is_some(), "the Bodies folder starts open, as in the browser");
         assert!(in_history("row:XY").is_none(), "the Origin starts closed, as in the browser");
 
-        // The folds are the browser's: opening one here opens it there.
-        h.call("ui.click", json!({"x": bodies.x, "y": bodies.y}));
-        h.frames(2);
-        assert!(crate::browser::is_open(&h.app, "c0/bodies", false));
-        assert!(in_history("row:Block").is_some() && in_history("row:Other").is_some(), "the opened Bodies folder lists them");
-        let origin = in_history("row:Origin").expect("the Origin, below the bodies");
+        // The fold is the browser's: opening it here opens it there.
         h.call("ui.click", json!({"x": origin.x, "y": origin.y}));
         h.frames(2);
         assert!(crate::browser::is_open(&h.app, "origin", false));
@@ -2338,10 +2333,8 @@ mod tests {
         h.app.preferences.timeline_left_width = 240.0;
         h.app.preferences.timeline_origin_bodies = true;
         h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "RootBlock"})).unwrap();
-        let part = h.app.run("component.create", json!({"name": "Part"})).unwrap()["occurrence"].as_u64().unwrap();
+        h.app.run("component.create", json!({"name": "Part"})).unwrap();
         h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [20, 0, 0], "body_name": "Inside"})).unwrap();
-        // Bodies folders start closed.
-        h.app.tree.expanded.extend(["c0/bodies".to_string(), format!("o:{part}/bodies")]);
         h.frames(4);
         assert!(in_history("row:Inside").is_some() && in_history("row:RootBlock").is_none(), "the active component's bodies");
         assert!(in_history("row:Origin").is_some());

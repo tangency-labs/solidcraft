@@ -87,8 +87,6 @@ mod tests {
             .unwrap();
         let circular = h.app.run("sketch.pattern.circular", json!({"entities":["source"],"center":"origin","count":3})).unwrap();
         h.app.finish_sketch();
-        // The Sketches folder and the sketch's patterns start closed.
-        h.app.tree.expanded.extend(["c0/sketches".to_string(), format!("s:{sketch}/patterns")]);
         h.frames(6);
         (h, sketch, rectangular["pattern"].as_str().unwrap().into(), circular["pattern"].as_str().unwrap().into())
     }
