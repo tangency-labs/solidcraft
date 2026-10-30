@@ -8,24 +8,36 @@ fn selection_mode_icons_resolve_to_real_masters() {
     assert_eq!(SELECTION_MODE_ICONS.len(), 6);
     for (mode, icon) in SELECTION_MODE_ICONS {
         let resolved = crate::icon_svg::resolve(icon);
-        assert!(!resolved.placeholder, "{mode}: {icon}");
+        assert!(!resolved.placeholder, "{mode:?}: {icon}");
         assert_eq!(resolved.master, *icon);
     }
 }
 
 #[test]
+fn the_selection_mode_slot_shows_each_modes_icon_and_name() {
+    let slot = find("selection_mode").unwrap();
+    assert_eq!(SELECTION_MODE_ICONS.iter().map(|(mode, _)| *mode).collect::<Vec<_>>(), PickMode::ALL);
+    for (mode, icon) in SELECTION_MODE_ICONS {
+        assert_eq!(slot.current_icon(&UiState { pick_mode: *mode, ..Default::default() }), *icon);
+    }
+    assert!(slot.shows_value() && find("visual_style").unwrap().shows_value() && !find("display").unwrap().shows_value());
+    assert_eq!(NavigationBar::default().menu_display("selection_mode"), MenuDisplay::IconAndValue);
+}
+
+#[test]
 fn slot_icons_follow_current_style_and_display_toggle_meanings() {
     let slot = find("visual_style").unwrap();
+    let ui = |visual_style| UiState { visual_style, ..Default::default() };
     for (style, icon) in [(0, "style_shaded_edges"), (1, "style_shaded"), (2, "style_wireframe"), (3, "style_hidden_edges")] {
-        assert_eq!(slot.current_icon(style), icon);
+        assert_eq!(slot.current_icon(&ui(style)), icon);
         let resolved = crate::icon_svg::resolve(icon);
         assert!(!resolved.placeholder, "{style}: {icon}");
         assert_eq!(resolved.master, if style == 0 { "style" } else { icon });
     }
-    assert_eq!(slot.current_icon(u8::MAX), "style_shaded_edges");
+    assert_eq!(slot.current_icon(&ui(u8::MAX)), "style_shaded_edges");
     assert!(!crate::icon_svg::resolve("style_translucent").placeholder);
     for id in ["display", "grid", "ground_shadow", "ambient_occlusion"] {
-        assert_eq!(find(id).unwrap().current_icon(2), id);
+        assert_eq!(find(id).unwrap().current_icon(&ui(2)), id);
     }
 }
 
@@ -73,7 +85,7 @@ fn catalogue_slot_descriptions_explain_slots_without_settings_jargon() {
 #[test]
 fn default_slots_and_canvas_availability_preserve_navigation() {
     let bar = NavigationBar::default();
-    assert_eq!(bar.slots, ["orbit", "pan", "zoom", "separator", "fit", "look_at", "home", "separator", "visual_style", "display"]);
+    assert_eq!(bar.slots, ["orbit", "pan", "zoom", "separator", "fit", "look_at", "home", "separator", "selection_mode", "visual_style", "display"]);
     let flat = NavCaps { orbit: false, pick: false };
     for caps in [NavCaps::MODEL, NavCaps::RENDER, flat] {
         let shown: Vec<_> = CATALOGUE.iter().filter(|slot| slot.available(caps)).map(|slot| slot.id).collect();
@@ -83,10 +95,14 @@ fn default_slots_and_canvas_availability_preserve_navigation() {
         for id in ["pan", "zoom", "fit", "home", "display", "grid", "ground_shadow", "ambient_occlusion"] {
             assert!(shown.contains(&id), "{caps:?}: {id}");
         }
+        // The selection mode only where a click picks from the model, by no rule of the page's own.
+        assert_eq!(shown.contains(&"selection_mode"), caps.pick, "{caps:?}");
+        assert!(!find("selection_mode").unwrap().available(Canvas { caps, own_pick: true }), "{caps:?}: an open sketch or Render");
     }
     let mut app = crate::SolveApp::new(Default::default(), Default::default());
     app.run("sketch.create", json!({"plane":"XY"})).unwrap();
-    assert!(find("visual_style").unwrap().available(canvas_caps(&app)), "the previous bar kept style available in a sketch");
+    assert!(find("visual_style").unwrap().available(canvas(&app)), "the previous bar kept style available in a sketch");
+    assert!(!find("selection_mode").unwrap().available(canvas(&app)), "a sketch picks its own geometry");
 }
 
 #[test]
@@ -128,7 +144,8 @@ fn measured_bar_drops_labels_then_overflows_in_order_without_compass_overlap() {
     }
     let wide = Rect::from_min_size(pos2(0.0, 0.0), vec2(1400.0, 720.0));
     assert!(measure(wide, &prefs, NavCaps::MODEL, |_| 50.0).labels);
-    let middle = Rect::from_min_size(pos2(0.0, 0.0), vec2(380.0, 720.0));
+    // The default row without labels or menu values is 382 wide, with 12 at each edge: 406.
+    let middle = Rect::from_min_size(pos2(0.0, 0.0), vec2(430.0, 720.0));
     let bar = measure(middle, &prefs, NavCaps::MODEL, |_| 50.0);
     assert!(!bar.labels && bar.overflow.is_empty(), "text disappears before slots fold");
 }
@@ -395,19 +412,16 @@ fn navigation_preview_and_viewport_share_the_row_painter() {
             let mut opaque = live.clone();
             opaque.fill = preview.fill;
             assert_eq!(&opaque, preview, "only the board's opaque editing surface differs");
-        } else if let (egui::Shape::Mesh(live), egui::Shape::Mesh(preview)) = (&live.shape, &preview.shape)
-            && live != preview
-        {
-            let first = live.vertices.first().unwrap().pos;
-            assert!(bar.slots.iter().any(|(slot, rect)| slot.kind == Kind::Menu && rect.contains(first)));
-            let delta = preview.vertices.first().unwrap().pos - first;
+        } else if live.shape != preview.shape {
+            // A menu's artwork and value text, in either caller.
+            let (from, to) = (live.shape.visual_bounding_rect(), preview.shape.visual_bounding_rect());
+            assert!(bar.slots.iter().any(|(slot, rect)| slot.kind == Kind::Menu && rect.contains(from.center())));
+            let delta = to.min - from.min;
             assert_eq!(delta.y, 0.0);
             assert_eq!(delta.x.abs(), crate::ui_kit::NAV_BORDER, "editing menus include their CSS transparent border");
-            let mut shifted = live.as_ref().clone();
-            for vertex in &mut shifted.vertices {
-                vertex.pos += delta;
-            }
-            assert_eq!(&shifted, preview.as_ref(), "menu padding changes no artwork, colour, UVs or other geometry");
+            let mut shifted = live.shape.clone();
+            shifted.translate(delta);
+            assert_eq!(shifted, preview.shape, "menu padding changes no artwork, text, colour, UVs or other geometry");
         } else {
             assert_eq!(live, preview, "slot painting is identical in both callers");
         }

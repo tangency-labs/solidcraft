@@ -99,6 +99,35 @@ impl From<solidcraft_io::IoError> for EngineError {
 
 pub type Result<T> = std::result::Result<T, EngineError>;
 
+/// What a click on the model picks while no dialog or tool takes the pick: the window's selection
+/// mode (#4255, `select.mode`). The selection filter narrows it.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PickMode {
+    /// Faces, edges and vertices.
+    #[default]
+    Faces,
+    /// The body of the face clicked.
+    Bodies,
+    /// The feature that made the face clicked.
+    Features,
+    /// The innermost placement holding the body clicked.
+    Parts,
+    /// The top-level placement holding the body clicked.
+    Components,
+    /// Sketch curves, points and profiles only.
+    Sketch,
+}
+
+impl PickMode {
+    pub const ALL: [PickMode; 6] = [PickMode::Faces, PickMode::Bodies, PickMode::Features, PickMode::Parts, PickMode::Components, PickMode::Sketch];
+
+    /// A click on a face picks a whole object (its body, feature or placement).
+    pub fn whole(self) -> bool {
+        matches!(self, PickMode::Bodies | PickMode::Features | PickMode::Parts | PickMode::Components)
+    }
+}
+
 /// Something selected in the model.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]

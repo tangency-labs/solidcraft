@@ -313,7 +313,7 @@ slot/tile/add/appearance targets retain their identities.
 | Bar 7 | More button follows the selected size; popup width 200; value text drops before labels and overflow | `NavigationMetrics`, `NAV_MORE_WIDTH`, `navigation_bar_view::measure` |
 | Bar 8 | Idle fade 45%, hidden 0%, restored 100%; hide-mode fade in 120ms | `navigation_opacity`, `NAV_IDLE_OPACITY/FADE_SECONDS` |
 | Bar 9 | Tooltip delay 800ms, gap 6, padding (8,5), radius 6; 12 medium text, 11 mono key, 15 key line height | `NAV_TOOLTIP_DELAY/POPUP_GAP`, `navigation_tooltip`; `nav_tip/tip_ink/tip_key_border` |
-| Bar 10 | Render hides Look at and Visual style; flat canvases hide Orbit, Spin, Look at, Projection and Visual style, retaining Home and Display | `Slot::available`, `canvas_caps` |
+| Bar 10 | Render's product view hides Selection mode, which its pick filter sets; Render's result and flat canvases hide Orbit, Spin, Look at, Projection, Visual style and Selection mode, retaining Home and Display; an open sketch hides Selection mode | `Slot::available`, `canvas_caps`, `canvas` |
 | Bar 11 | Context width 232; bar has Customise / Hide / Reset, slot has Remove | `NAV_CONTEXT_WIDTH`, `navigation_bar_view::context_menu` |
 | Settings 1, 8 | Stage height 58, radius 8, padding 12 inside its 1 border; position follows preference live | `NAV_STAGE_HEIGHT/RADIUS/INSET`, `editor_layout` |
 | Settings 1–3 | Standard settings section and full-width detail card; actions stay on one line, with name truncation before icon-only actions | `settings_section`, `settings_card`, `inspector_header_layout` |
@@ -345,7 +345,9 @@ and app-bar colour at 18% replace the board's (0,4), 16 blur and 10%/30% shadow.
 The default is Regular/Centre; saved Compact values stay Compact. `slots` remains
 a plain list of IDs; optional `slot_options: {"visual_style":{"shows":"icon_and_value"}}`
 stores menu presentation independently of global button labels. Missing Visual style
-options mean Icon only; Display has no current value and remains Icon only.
+options mean Icon only, and missing Selection mode options Icon and value; Display has no current value and remains Icon only.
+The menus that hold a setting (`Slot::shows_value`) show its icon on the button: Visual style the
+style's, Selection mode the mode's (`SELECTION_MODE_ICONS`).
 
 Board regression checks live in the existing test modules:
 

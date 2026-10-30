@@ -226,13 +226,7 @@ pub(crate) fn dock_chip(app: &mut SolveApp, ui: &mut egui::Ui, id: &'static str,
 }
 
 fn current_pick_mode(app: &SolveApp) -> &'static str {
-    if app.ui.pick_components {
-        "component"
-    } else if app.ui.pick_bodies {
-        "body"
-    } else {
-        "face"
-    }
+    crate::selection_mode::render_filter(app.ui.pick_mode)
 }
 
 fn shots_pill(app: &mut SolveApp, ui: &mut egui::Ui, free: Rect) {

@@ -1512,7 +1512,7 @@ struct Snapshot {
     shadow: bool,
     perspective: bool,
     style: u8,
-    pick_bodies: bool,
+    pick_mode: solidcraft_engine::PickMode,
     agent: crate::agent_cursor::Settings,
     autosave: f64,
     auto_project: bool,
@@ -1535,7 +1535,7 @@ impl Snapshot {
             shadow: app.ui.ground_shadow,
             perspective: app.ui.perspective,
             style: app.ui.visual_style,
-            pick_bodies: app.ui.pick_bodies,
+            pick_mode: app.ui.pick_mode,
             agent: app.ui.agent_cursor,
             autosave: app.autosave_minutes,
             auto_project: app.session.auto_project,
@@ -1564,7 +1564,7 @@ impl Snapshot {
         app.ui.ground_shadow = self.shadow;
         app.ui.perspective = self.perspective;
         app.ui.visual_style = self.style;
-        app.ui.pick_bodies = self.pick_bodies;
+        app.ui.pick_mode = self.pick_mode;
         app.ui.agent_cursor = self.agent;
         app.autosave_minutes = self.autosave;
         set_autosave(app);
@@ -1591,7 +1591,7 @@ impl Snapshot {
             shadow,
             perspective,
             style,
-            pick_bodies,
+            pick_mode,
             agent,
             autosave,
             auto_project,
@@ -1609,7 +1609,7 @@ impl Snapshot {
             && *shadow == app.ui.ground_shadow
             && *perspective == app.ui.perspective
             && *style == app.ui.visual_style
-            && *pick_bodies == app.ui.pick_bodies
+            && *pick_mode == app.ui.pick_mode
             && *agent == app.ui.agent_cursor
             && *autosave == app.autosave_minutes
             && *auto_project == app.session.auto_project
@@ -1882,7 +1882,7 @@ fn defaults(app: &mut SolveApp, page: usize) {
         }
         PAGE_SKETCH => {
             app.session.auto_project = true;
-            app.ui.pick_bodies = false;
+            app.ui.pick_mode = Default::default();
         }
         _ => {}
     }
@@ -3673,6 +3673,14 @@ mod tests {
         navbar_click(&mut h, "prefs:navbar:slot:visual_style");
         navbar_click(&mut h, "prefs:navbar:shows:0");
         assert_eq!(h.app.preferences.navigation_bar.menu_display("visual_style"), MenuDisplay::IconAndValue);
+        // Every menu that holds a setting offers the choice, the selection mode's too (#4255).
+        h.call(
+            "ui.prefs",
+            json!({"open":"Interface/Navigation bar", "navigation_bar":{"slots":["fit","visual_style","selection_mode","display","spin"]}}),
+        );
+        navbar_click(&mut h, "prefs:navbar:slot:selection_mode");
+        navbar_click(&mut h, "prefs:navbar:shows:1");
+        assert_eq!(h.app.preferences.navigation_bar.menu_display("selection_mode"), MenuDisplay::IconOnly);
         navbar_click(&mut h, "prefs:navbar:position:0");
         assert_eq!(h.app.preferences.navigation_bar.position, Position::Left);
         navbar_click(&mut h, "prefs:navbar:position:2");
@@ -5073,17 +5081,17 @@ mod tests {
         assert_eq!(page_index("Shortcuts"), Some(PAGE_SHORTCUTS));
         let mut app = SolveApp::new(Default::default(), Default::default());
         app.ui.agent_cursor.show = false;
-        app.ui.pick_bodies = true;
+        app.ui.pick_mode = solidcraft_engine::PickMode::Features;
         app.session.auto_project = false;
         defaults(&mut app, PAGE_GENERAL);
         assert!(!app.ui.agent_cursor.show);
-        assert!(app.ui.pick_bodies);
+        assert_eq!(app.ui.pick_mode, solidcraft_engine::PickMode::Features);
         assert!(!app.session.auto_project);
         defaults(&mut app, PAGE_AI);
         let expected = SolveApp::new(Default::default(), Default::default()).ui.agent_cursor.show;
         assert_eq!(app.ui.agent_cursor.show, expected);
         defaults(&mut app, PAGE_SKETCH);
-        assert!(!app.ui.pick_bodies);
+        assert_eq!(app.ui.pick_mode, solidcraft_engine::PickMode::Faces);
         assert!(app.session.auto_project);
     }
 

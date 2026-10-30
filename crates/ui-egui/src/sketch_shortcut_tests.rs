@@ -107,7 +107,7 @@ fn project_can_keep_its_previous_direct_pick_workflow() {
 fn a_sketch_key_sketches_on_the_selected_planar_face() {
     let mut h = Harness::new();
     h.app.set_origin_shown(false);
-    h.app.ui.pick_bodies = false;
+    h.app.ui.pick_mode = solidcraft_engine::PickMode::Faces;
     h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"body_name":"BaseBox"})).unwrap();
     h.call("ui.view", json!({"view":"top"}));
     h.call("ui.view", json!({"view":"fit"}));

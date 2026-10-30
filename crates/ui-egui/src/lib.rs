@@ -226,6 +226,7 @@ pub mod scenario;
 pub(crate) mod scene_palette;
 pub mod select_other;
 pub mod selection;
+pub(crate) mod selection_mode;
 pub mod settings_profiles;
 #[cfg(test)]
 mod settings_profiles_tests;
@@ -346,10 +347,8 @@ pub struct UiState {
     pub dark: bool,
     /// Selection filter: kinds a click doesn't pick (`vertices`, `edges`, `faces`, `sketch`).
     pub pick_off: Vec<String>,
-    /// A click on a face picks its whole body.
-    pub pick_bodies: bool,
-    /// A face picks its exact component occurrence in Design and Render.
-    pub pick_components: bool,
+    /// What a click on the model picks (#4255, `select.mode`).
+    pub pick_mode: solidcraft_engine::PickMode,
     /// 0: shaded with edges, 1: shaded, 2: wireframe, 3: shaded with hidden edges.
     pub visual_style: u8,
     /// A soft shadow on the ground under the model (seen from above).
@@ -379,8 +378,7 @@ impl Default for UiState {
             palette_open: false,
             dark: true,
             pick_off: Vec::new(),
-            pick_bodies: false,
-            pick_components: false,
+            pick_mode: Default::default(),
             visual_style: 0,
             ground_shadow: true,
             up_axis: Default::default(),
@@ -957,7 +955,7 @@ impl SolveApp {
             "navigation_bar": self.ui.show_navigation_bar,
             "perspective": self.ui.perspective,
             "auto_ortho_faces": self.ui.auto_ortho_faces,
-            "pick_bodies": self.ui.pick_bodies,
+            "pick_mode": self.ui.pick_mode,
             "auto_project": self.session.auto_project,
             "visual_style": self.ui.visual_style,
             "browser_collapsed": self.tree.collapsed,
@@ -1001,8 +999,8 @@ impl SolveApp {
         if let Some(a) = flag("auto_ortho_faces") {
             self.ui.auto_ortho_faces = a;
         }
-        if let Some(b) = flag("pick_bodies") {
-            self.ui.pick_bodies = b;
+        if let Some(mode) = selection_mode::from_prefs(&v) {
+            self.ui.pick_mode = mode;
         }
         if let Some(a) = flag("auto_project") {
             self.session.auto_project = a;
@@ -1249,9 +1247,7 @@ impl SolveApp {
                 render_workspace::select_stage(self, stage);
             }
             if id == "select.filter" {
-                let mode = v.get("mode").and_then(Value::as_str);
-                self.ui.pick_bodies = mode == Some("body");
-                self.ui.pick_components = mode == Some("component");
+                self.ui.pick_mode = selection_mode::from_render_filter(v.get("mode").and_then(Value::as_str));
                 self.ui.pick_off.retain(|kind| kind != "faces");
             }
             if id == "view.render_dock"
@@ -1294,6 +1290,11 @@ impl SolveApp {
             if id == "view.angle_readout" {
                 self.preferences.show_view_angles = v.get("enabled").and_then(Value::as_bool).unwrap_or(false);
             }
+            if id == "select.mode"
+                && let Some(mode) = v.get("mode").and_then(|m| serde_json::from_value(m.clone()).ok())
+            {
+                self.ui.pick_mode = mode;
+            }
             if matches!(id, "view.ambient_occlusion" | "view.graphics_preset") {
                 self.preferences.ambient_occlusion = v.get("enabled").and_then(Value::as_bool).unwrap_or(false);
                 if id == "view.graphics_preset" {
@@ -1324,6 +1325,10 @@ impl SolveApp {
             r => r,
         };
         self.finish_command(id, &r);
+        if matches!(id, "select.mode" | "select.filter") {
+            // Parts and Components pick through the placements' walk: have it before the next frame draws.
+            selection_mode::prepare(self);
+        }
         if render_workspace::active(self)
             && matches!(id, "appearance.assign" | "appearance.paste")
             && let Ok(value) = &r

@@ -200,6 +200,31 @@ fn clicking_again_on_the_same_spot_selects_the_next_thing_under_it() {
     assert_eq!(curves(&h), ["l1"]);
 }
 
+/// A repeat click after the selection mode changed is a plain click in the new mode, not a step
+/// through the old mode's list (#4255): two blocks one behind the other, Bodies then Faces & edges.
+#[test]
+fn a_changed_selection_mode_starts_the_cycle_over() {
+    let mut h = Harness::new();
+    h.app.run("solid.box", json!({"length": 20, "width": 10, "height": 20, "corner": [0, 0, 0], "body_name": "Front"})).unwrap();
+    h.app.run("solid.box", json!({"length": 20, "width": 10, "height": 20, "corner": [0, 30, 0], "body_name": "Back"})).unwrap();
+    h.call("ui.view", json!({"view": "front"}));
+    h.call("ui.view", json!({"view": "fit"}));
+    h.frames(2);
+    let p = h.app.viewport.rect.unwrap().center();
+    let at = json!([p.x, p.y]);
+    h.call("ui.set", json!({"pickMode": "bodies"}));
+    h.step(&json!({"click": at})).unwrap();
+    assert_eq!(h.app.session.selection, [Sel::Body { name: "Front".into() }]);
+    h.frames(30);
+    h.call("ui.set", json!({"pickMode": "faces"}));
+    h.step(&json!({"click": at})).unwrap();
+    assert!(
+        matches!(h.app.session.selection.as_slice(), [Sel::Face { body, .. }] if body == "Front"),
+        "the front block's face, not the next row: {:?}",
+        h.app.session.selection
+    );
+}
+
 #[test]
 fn a_double_click_does_not_cycle() {
     let (mut h, at) = two_lines();

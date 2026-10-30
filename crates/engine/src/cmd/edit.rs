@@ -2,12 +2,17 @@
 
 use std::collections::BTreeMap;
 
+use serde::Deserialize;
 use serde_json::{Value, json};
 use solidcraft_doc::{Feature, FeatureKind};
 
 use super::CommandSpec;
 use crate::params::{bad, bool_, name_or_id_list, num, str_};
-use crate::{EngineError, Result, Sel, Session, Snapshot};
+use crate::schema::edit::{SelectModeParams, SelectModeResult};
+use crate::schema::{TypedContract, output_schema_for};
+use crate::{EngineError, PickMode, Result, Sel, Session, Snapshot};
+
+const SELECT_MODE_CONTRACT: TypedContract<SelectModeParams> = TypedContract::new();
 
 pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("edit.undo", "Undo", undo).icon("undo").key("Ctrl+Z").noundo().doc_only(),
@@ -94,6 +99,15 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("select.clear", "Clear Selection", select_clear).icon("select").noundo(),
     CommandSpec::new("select.same_look", "Select Same Look", select_same_look).icon("select").noundo().doc_only()
         .params("body?: world body name, face?: face index; defaults to the current body/face selection → selects objects using the resolved appearance"),
+    CommandSpec::new("select.mode", "Selection Mode", crate::checked!("select.mode", select_mode))
+        .icon("select")
+        .noundo()
+        .doc_only()
+        .contract(&SELECT_MODE_CONTRACT)
+        .output(output_schema_for::<SelectModeResult>)
+        .params(
+        "mode: faces|bodies|features|parts|components|sketch → mode; what a click on the model picks: faces, edges and vertices,          the face's whole body, the feature that made it, the innermost placement or the top-level component holding it, or          sketch geometry only. A window setting: the design is untouched",
+    ),
 ];
 
 const PLAY_CONTRACT: crate::schema::TypedContract<crate::schema::edit::TimelinePlayParams> = crate::schema::TypedContract::new();
@@ -1309,6 +1323,16 @@ fn select_same_look(s: &mut Session, p: &Value) -> Result<Value> {
         return Err(bad("select.same_look", "too many objects"));
     }
     select_set(s, &json!({"items":items}))
+}
+
+fn select_mode(_s: &mut Session, p: &Value) -> Result<Value> {
+    let mode = pick_mode(p.get("mode").unwrap_or(&Value::Null)).map_err(|e| bad("select.mode", e))?;
+    serde_json::to_value(SelectModeResult { mode, param_warnings: Vec::new() }).map_err(|e| EngineError::Other(e.to_string()))
+}
+
+/// `select.mode`'s `mode`, with the handler's message for anything else.
+pub(crate) fn pick_mode(v: &Value) -> std::result::Result<PickMode, String> {
+    PickMode::deserialize(v).map_err(|_| "mode must be faces, bodies, features, parts, components or sketch".to_string())
 }
 
 fn select_clear(s: &mut Session, _p: &Value) -> Result<Value> {

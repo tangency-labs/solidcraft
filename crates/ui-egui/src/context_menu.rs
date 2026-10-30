@@ -552,7 +552,6 @@ pub fn items(app: &SolveApp, target: &Target) -> Vec<Item> {
 }
 
 /// Resolve the picked face's creator, rather than the feature that first made its body.
-/// Persistent face names retain their creator through later trims and placements.
 fn picked_face_feature(app: &SolveApp) -> Option<u64> {
     let (body, index) = app.session.selection.iter().find_map(|s| match s {
         Sel::Face { body, index, .. } => Some((body, *index)),
@@ -561,7 +560,8 @@ fn picked_face_feature(app: &SolveApp) -> Option<u64> {
     face_feature(app, body, index)
 }
 
-/// The feature that made face `index` of `body` (by its world name).
+/// The feature that made face `index` of `body` (persistent face names retain their creator
+/// through later trims and placements); None for an import's faces and in another component.
 pub(crate) fn face_feature(app: &SolveApp, body: &str, index: usize) -> Option<u64> {
     let state = app.session.world_state();
     let body = state.body(body)?;

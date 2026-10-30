@@ -167,7 +167,7 @@ mod tests {
             h.call("ui.resize", json!({"width": 2400, "height": 900}));
             h.app.run("solid.box", json!({"length": 40, "width": 30, "height": 20})).unwrap();
             h.call("ui.view", json!({"view": "fit"}));
-            h.app.ui.pick_bodies = true;
+            h.app.ui.pick_mode = solidcraft_engine::PickMode::Bodies;
             let p = h.app.viewport.rect.unwrap().center();
             h.call("ui.move", json!({"x": p.x, "y": p.y}));
             assert!(h.app.viewport.hover.is_some(), "the uncovered model must highlight");

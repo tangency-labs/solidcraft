@@ -81,7 +81,7 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         crate::scenario::publish_target("prefs:hide_constraint_glyphs_zoomed_out", check.rect);
     });
     ui_kit::settings_section(ui, "selection", app.tr("prefs.selecting"), |ui| {
-        ui_kit::checkbox(ui, crate::i18n::tr_label("Click selects whole bodies"), &mut app.ui.pick_bodies);
+        crate::selection_mode::bodies_checkbox(app, ui, crate::i18n::tr_label("Click selects whole bodies"));
         ui_kit::checkbox(ui, app.tr("prefs.prefer_free_sketch_points"), &mut app.preferences.prefer_free_sketch_points);
         let hidden = setting::select_other_hidden(app, ui).on_hover_text(app.tr("prefs.select_other_hidden_help"));
         crate::scenario::publish_target("prefs:select_other_hidden", hidden.rect);
