@@ -688,8 +688,8 @@ fn export_to(
     } else {
         // Bodies carry the colour they are shown in (appearance, material or imported), and the
         // file the design's properties where the format has a place for them.
-        // The design's own picture, drawn only for a format that has a place for it.
-        let thumbnail = matches!(format, Format::ThreeMf | Format::ThreeMfTagged).then(|| thumbnail::saved(s)).flatten();
+        // A picture of the part, drawn only for a format that has a place for it.
+        let thumbnail = matches!(format, Format::ThreeMf | Format::ThreeMfTagged).then(|| thumbnail::exported(s)).flatten();
         solidcraft_io::export_with_parts(
             &s.doc.painted(&s.world_state()),
             bodies,
@@ -951,7 +951,7 @@ mod urdf_tests;
 mod tests {
     use super::*;
 
-    /// #9449: a 3MF export carries the picture a save draws as its package thumbnail.
+    /// #9449: a 3MF export carries a picture of the part as its package thumbnail.
     #[test]
     fn a_3mf_export_carries_the_design_thumbnail() {
         crate::capture::install_test_renderer();
@@ -960,7 +960,7 @@ mod tests {
         for body in &s.world_state().bodies {
             body.mesh();
         }
-        assert!(thumbnail::saved(&s).is_some());
+        assert!(thumbnail::exported(&s).is_some());
         let dir = std::env::temp_dir();
         let has_thumbnail = |s: &mut Session, name: &str| {
             let path = dir.join(format!("solidcraft-3mf-thumbnail-{}-{name}", std::process::id()));
