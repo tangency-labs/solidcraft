@@ -57,8 +57,12 @@ fn shell_with_a_hole_through_a_curved_side() {
 /// A cut whose end only touches the plate's arc side (#897, robustness seed 14): the end lies
 /// tangent to the arc at its apex, the direct boolean fails, and the last-resort nudge used to
 /// push the end into the arc, leaving a sliver of it a tenth of a millimetre wide that a shell
-/// then couldn't offset. The nudge the other way parts them: the same faces as a cut clear of
-/// the apex, and seed 14 shells and fillets again.
+/// then couldn't offset. The touching cut must make the same part as a cut 0.1 clear of the
+/// apex (x = −10.1 .. 7.4 instead of −10 .. 7.5), less the hole's last 0.1 mm: the arc (centre
+/// (0, 10), r 10) reaches x = −10 only at y = 10, so both cuts open the same patch of it, and
+/// the slice x = 7.4 .. 7.5 of the r 5 hole lies wholly inside the plate. The touching cut has
+/// π 5² 0.1 less volume and 2π 5 0.1 more area (the longer hole wall; the floor disc is the
+/// same); a sliver left on the arc adds about a square millimetre of faces.
 #[test]
 fn cut_whose_end_touches_an_arc_side_leaves_no_sliver() {
     let plate = |x: f64| {
@@ -72,11 +76,27 @@ fn cut_whose_end_touches_an_arc_side_leaves_no_sliver() {
         ]))
     };
     let (touching, clear) = (plate(-10.0), plate(-10.1));
-    let faces = |s: &Session| s.model.state().bodies.iter().map(|b| b.body.face_count()).sum::<usize>();
-    assert_eq!(faces(&touching), faces(&clear), "a sliver face was left where the cut's end touches the arc");
-    let r = fuzz::run(14, 8);
-    let kinds: Vec<&str> = r.steps.iter().map(|s| s.kind).collect();
-    assert!(r.outcome.kind == "ok" && kinds.contains(&"shell"), "seed 14: {:?} {kinds:?}\n{}", r.outcome, r.script());
+    let area = |s: &Session| s.model.state().bodies.iter().map(|b| solidcraft_kernel::measure(&b.body).map(|m| m.area).unwrap_or(0.0)).sum::<f64>();
+    let dv = total_volume(&clear) - total_volume(&touching);
+    assert!((dv - PI * 25.0 * 0.1).abs() < 1e-4, "volume: clear − touching = {dv}, not π 5² 0.1");
+    let da = area(&touching) - area(&clear);
+    assert!((da - 2.0 * PI * 5.0 * 0.1).abs() < 1e-4, "area: touching − clear = {da}, not 2π 5 0.1: a sliver where the cut's end touches the arc");
+    assert_eq!(touching.model.state().bodies.len(), 1);
+}
+
+/// Robustness seed 14 (#897) as the generator made it: the touching cut above, then a shell
+/// opening the plate's top face (y = 20). Every step builds and the body is a sound solid.
+#[test]
+fn shell_after_a_cut_whose_end_touches_an_arc_side() {
+    script(json!([
+        {"command": "sketch.create", "params": {"plane": "XY"}},
+        {"command": "sketch.line", "params": {"points": [[0, 0], [42.5, 0], [42.5, 20.0], [0, 20.0]]}},
+        {"command": "sketch.arc.three_point", "params": {"end": [0, 0], "start": [0, 20.0], "through": [-10.0, 10.0]}},
+        {"command": "sketch.finish", "params": {}},
+        {"command": "solid.extrude", "params": {"distance": 27.5}},
+        {"command": "solid.cylinder", "params": {"axis": [1.0, 0.0, 0.0], "base": [-10.000000000000002, 12.5, 12.5], "height": 17.5, "operation": "cut", "radius": 5.0}},
+        {"command": "solid.shell", "params": {"faces": [[21.25, 19.999999999999993, 13.749999999999998]], "thickness": 2.0}}
+    ]));
 }
 
 /// #827: a hinge barrel joined to a laptop lid through its mounting leaf. The barrel's top lies
@@ -480,18 +500,20 @@ fn planned_volume(s: &Session) -> f64 {
 /// #851: the knife edge where the wall runs out has opposite normals on its two faces. It rounds
 /// to the ball that fits there and chamfers with the plane through that ball's contacts (the cusp
 /// area less the wall's sector and the ball's, or the chord triangle less the wall's segment,
-/// times the 10 mm height).
+/// times the 10 mm height). The ball 2 from both faces sits at (62⅙ − √168, −2); the round takes
+/// 10 (11.5 √168 − 220.5 θ − 2 (π − θ)), θ = acos(19/23), within 5e-4 of it.
 #[test]
 fn blend_a_knife_edge_where_a_curved_wall_runs_out() {
     let knife = json!([[62.1667, 0, 5]]);
-    for (command, params, removed) in
-        [("solid.fillet", json!({"edges": knife, "radius": 2}), 119.648_812), ("solid.chamfer", json!({"edges": knife, "distance": 2}), 159.236_451)]
-    {
+    for (command, params, removed, within) in [
+        ("solid.fillet", json!({"edges": knife, "radius": 2}), 119.648_812, 119.648_812 * 5e-4),
+        ("solid.chamfer", json!({"edges": knife, "distance": 2}), 159.236_451, 0.5),
+    ] {
         let mut s = knife_edge_part();
         let before = planned_volume(&s);
         s.execute(command, &params).unwrap_or_else(|e| panic!("{command}: {e}"));
         let after = planned_volume(&s);
-        assert!((before - after - removed).abs() < 0.5, "{command}: removed {}, expected {removed}", before - after);
+        assert!((before - after - removed).abs() < within, "{command}: removed {}, expected {removed}", before - after);
         for b in &s.model.state().bodies {
             assert!(b.body.validity().is_empty(), "{command}: {:?}", b.body.validity());
         }

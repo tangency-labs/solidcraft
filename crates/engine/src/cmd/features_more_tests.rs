@@ -1725,38 +1725,6 @@ fn fillet_straight_edges_that_end_at_the_arc_wall() {
     }
 }
 
-/// The vertical knife edge at the tip (the arc and the back face meeting at no angle) rounds to
-/// the ball 2 from both, about 13 back from the tip: the cusp beyond the ball, on the tip's side
-/// of its contacts, all the way up.
-#[test]
-fn fillet_the_knife_edge_at_the_tip() {
-    let cx = 62.166666666666664;
-    let (kx, ky) = (cx - (23.0f64 * 23.0 - 19.0 * 19.0).sqrt(), -2.0);
-    let (hx, hy) = (0.002, 0.0005);
-    let mut area = 0.0;
-    let mut x = kx + hx / 2.0;
-    while x < cx {
-        let lo = -21.0 + (441.0 - (x - cx) * (x - cx)).max(0.0).sqrt();
-        for j in 0..((0.0 - lo) / hy).ceil() as usize {
-            let (y0, y1) = (lo + j as f64 * hy, (lo + (j + 1) as f64 * hy).min(0.0));
-            let y = (y0 + y1) * 0.5;
-            let a = (y - ky).atan2(x - kx);
-            if (x - kx).hypot(y - ky) > 2.0 && a >= (-21.0 - ky).atan2(cx - kx) {
-                area += (y1 - y0) * hx;
-            }
-        }
-        x += hx;
-    }
-    let mut s = knife_edge_part();
-    let before = planned(&s);
-    run(&mut s, "solid.fillet", json!({"edges": [[cx, 0.0, 5.0]], "radius": 2}));
-    let after = planned(&s);
-    assert!(rel(before - after, area * 10.0) < 5e-4, "removed {} vs {}", before - after, area * 10.0);
-    let mut s = knife_edge_part();
-    run(&mut s, "solid.chamfer", json!({"edges": [[cx, 0.0, 5.0]], "distance": 2}));
-    assert!(before - planned(&s) > before - after, "the chamfer takes the ball's bulge off too");
-}
-
 /// Rounds of the edges at the arc's top front corner, two or all three together (r 2): they meet
 /// in creases (with all three, a piece of sphere fills the corner). Each set takes off its rounds
 /// alone, less what each alone takes in a box about the corner, plus what they take there

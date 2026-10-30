@@ -1518,7 +1518,10 @@ mod tests {
 
     /// Off a doubly curved face (a saddle patch over a cup's rim) its normal turns along a
     /// straight edge: the strip is ruled to a far curve of its own, from corner to corner, which
-    /// its handles move.
+    /// its handles move. Lifting every handle (the far curve's interior control points) 1 mm in z
+    /// gives the far curve those control points and the same corners, so it rises by
+    /// 1 − R₀ − Rₙ (its end basis functions) inside and not at all at the corners; the strip built
+    /// with them has that curve for its far edge, away from where the default strip's runs.
     #[test]
     fn a_strip_off_a_curved_face_is_ruled_to_its_far_curve() {
         let b = box_solid(Vec3::new(-14.0, -14.0, 0.0), Vec3::new(14.0, 14.0, 20.0)).unwrap();
@@ -1533,9 +1536,29 @@ mod tests {
         assert!(s.is_surface() && s.face_count() == 1);
         let handles = ruled_far_handles(&cover, &edge, &r).unwrap();
         let [Some(h)] = handles.as_slice() else { panic!("one free strip: {handles:?}") };
+        assert!(!h.is_empty(), "the far curve has interior control points to move");
         let lifted: Vec<Vec3> = h.iter().map(|p| *p + Vec3::new(0.0, 0.0, 1.0)).collect();
-        let moved = ruled_surface_with(&cover, &edge, &r, &[Some(lifted)]).unwrap();
-        assert!(measure(&moved).unwrap().bbox.max.z > measure(&s).unwrap().bbox.max.z, "the handles move the far curve");
+        let moved = ruled_surface_with(&cover, &edge, &r, &[Some(lifted.clone())]).unwrap();
+        // The plan takes the handles as they are, and keeps the corners.
+        let (plain, given) = (planned(&cover, &edge, &r, &[]).unwrap(), planned(&cover, &edge, &r, &[Some(lifted.clone())]).unwrap());
+        let (far, far_moved) = (&plain.strips[0].top, &given.strips[0].top);
+        let ctrl = |c: &CurveN<4>| c.ctrl.iter().map(|h| Vec3::new(h[0] / h[3], h[1] / h[3], h[2] / h[3])).collect::<Vec<_>>();
+        let (before, after) = (ctrl(far), ctrl(far_moved));
+        assert_eq!(after.len(), lifted.len() + 2);
+        assert!(after[1..after.len() - 1].iter().zip(&lifted).all(|(a, b)| a.dist(*b) < 1e-12), "{after:?} vs {lifted:?}");
+        assert!(before[0].dist(after[0]) < 1e-12 && before[before.len() - 1].dist(after[after.len() - 1]) < 1e-12);
+        // The built strip's far edge is that curve (its edges' polylines within 1e-4 of their
+        // curves), and its middle is well off the default strip's edges.
+        let tol = 1e-4;
+        for i in 0..=32 {
+            let p = point(far_moved, f64::from(i) / 32.0).unwrap();
+            let (_, d) = moved.nearest_edge(p, tol).unwrap().unwrap();
+            assert!(d < 10.0 * tol, "the far curve at {i}/32, {p:?}, is {d} from the strip's edges");
+        }
+        let (mid, rose) = (point(far_moved, 0.5).unwrap(), point(far_moved, 0.5).unwrap().dist(point(far, 0.5).unwrap()));
+        assert!(rose > 0.1, "the middle rose {rose}");
+        let (_, d) = s.nearest_edge(mid, tol).unwrap().unwrap();
+        assert!(d > 0.5 * rose, "the default strip has an edge {d} from the moved middle (it rose {rose})");
     }
 
     /// Each strip is made in place of the edge it stands on; a corner face in place of the two
