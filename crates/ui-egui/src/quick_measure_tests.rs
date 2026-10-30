@@ -198,13 +198,13 @@ fn the_readout_sits_above_history_and_a_click_copies_it() {
     assert_eq!(copied, Some(format!("Length {}", crate::prefs::show_mm(&h.app, 10.0, 1))));
 }
 
-/// The measurement is computed off the window thread: right after the selection changes it is
-/// still coming, and it lands a frame or so later.
+/// The measurement is computed off the window thread and lands a frame or so after the selection
+/// changes. The thread may already be done when the first poll looks, so only the arrival is
+/// asserted, never that it is still coming.
 #[test]
 fn the_measurement_computes_off_the_window_thread() {
     let mut h = block();
     h.app.session.selection = vec![edge(&h, Vec3::new(5.0, 0.0, 0.0))];
     crate::quick_measure::poll(&mut h.app, &h.ctx);
-    assert!(h.app.quick_measure.lines(&h.app).is_empty(), "computing");
     assert!(!readout(&mut h).is_empty(), "then in");
 }
