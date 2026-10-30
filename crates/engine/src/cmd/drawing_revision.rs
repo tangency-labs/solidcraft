@@ -10,7 +10,6 @@
 use std::sync::Arc;
 
 use serde_json::Value;
-use solidcraft_doc::drawing::Drawing;
 use solidcraft_doc::ids;
 use solidcraft_geom::revision::{Field, ModelVersion, RevisionRecord, RevisionRow, Tag, TagText};
 
@@ -160,16 +159,11 @@ fn delete(s: &mut Session, p: &Value) -> Result<Value> {
     answer(s, DELETE, RevisionsResult { row: Some(ids::encode(id)), tags_lost: lost.into_iter().map(ids::encode).collect(), ..Default::default() })
 }
 
-/// The id of the sheet `named` names in `d`, for `cmd`.
-fn sheet_named(d: &Drawing, named: &str, cmd: &str) -> Result<u64> {
-    crate::drawing_scene::sheet_id(d, named, cmd)
-}
-
 fn tag_add(s: &mut Session, p: &Value) -> Result<Value> {
     let request: TagAddParams = crate::schema::read(TAG_ADD, p)?;
     let id = s.drawing(TAG_ADD)?.clone().allocate_id(&mut s.ids).map_err(|e| bad(TAG_ADD, e.to_string()))?;
     s.edit_drawing(TAG_ADD, |d| {
-        let sheet = sheet_named(d, &request.sheet, TAG_ADD)?;
+        let sheet = crate::drawing_scene::sheet_id(d, &request.sheet, TAG_ADD)?;
         let record = Arc::make_mut(&mut d.revisions);
         record.add_tag(request.row.0, id, sheet, request.at).map_err(|e| bad(TAG_ADD, e.to_string()))?;
         record
@@ -187,7 +181,7 @@ fn tag_edit(s: &mut Session, p: &Value) -> Result<Value> {
     let id = request.tag.0;
     s.edit_drawing(TAG_EDIT, |d| {
         let set = request.set;
-        let sheet = set.sheet.as_deref().map(|named| sheet_named(d, named, TAG_EDIT)).transpose()?;
+        let sheet = set.sheet.as_deref().map(|named| crate::drawing_scene::sheet_id(d, named, TAG_EDIT)).transpose()?;
         let change = |tag: &mut Tag| {
             tag.sheet = sheet.unwrap_or(tag.sheet);
             tag.at = set.at.unwrap_or(tag.at);

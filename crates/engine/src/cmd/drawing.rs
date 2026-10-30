@@ -394,6 +394,7 @@ fn inspect(s: &mut Session, _p: &Value) -> Result<Value> {
             "documents": sheet.documents.map(|c| json!({"source": ids::encode(c.source), "component": c.component})),
             "excluded": sheet.excluded,
             "views": sheet_views(d, sheet.id, &dimensions, &balloons),
+            "tables": d.tables.iter().filter(|t| t.sheet == sheet.id).map(|t| ids::encode(t.id)).collect::<Vec<_>>(),
         }));
     }
     Ok(json!({

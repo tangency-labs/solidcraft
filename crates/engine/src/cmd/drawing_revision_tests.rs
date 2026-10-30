@@ -230,7 +230,7 @@ fn an_issued_copy_keeps_what_it_read() {
     d.validate().unwrap();
     assert_eq!(Drawing::from_json(&d.to_json().unwrap()).unwrap(), *d);
 
-    let (count, _) = (s.drawing("test").unwrap().revisions.issued().len(), ());
+    let count = s.drawing("test").unwrap().revisions.issued().len();
     while s.undo.len() > steps {
         s.execute("edit.undo", &json!({})).unwrap();
     }

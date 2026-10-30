@@ -1,0 +1,58 @@
+{
+  "en": {
+    "cmd.drawing_table_add": "Add Table",
+    "cmd.drawing_table_delete": "Delete Table",
+    "cmd.drawing_table_edit": "Edit Table",
+    "cmd.drawing_table_inspect": "Inspect Table",
+    "help.drawing.table.edit": "Changes a saved table on a sheet: what it lists, where it sits, its columns and its words. Use it to adjust a parts list or revision table after adding it."
+  },
+  "ar": {
+    "cmd.drawing_table_add": "إضافة جدول",
+    "cmd.drawing_table_delete": "حذف الجدول",
+    "cmd.drawing_table_edit": "تحرير الجدول",
+    "cmd.drawing_table_inspect": "فحص الجدول",
+    "help.drawing.table.edit": "يغيّر جدولاً محفوظاً على ورقة: ما يعرضه ومكانه وأعمدته ونصوصه. استخدمه لضبط قائمة أجزاء أو جدول مراجعات بعد إضافته."
+  },
+  "de": {
+    "cmd.drawing_table_add": "Tabelle hinzufügen",
+    "cmd.drawing_table_delete": "Tabelle löschen",
+    "cmd.drawing_table_edit": "Tabelle bearbeiten",
+    "cmd.drawing_table_inspect": "Tabelle prüfen",
+    "help.drawing.table.edit": "Ändert eine gespeicherte Tabelle auf einem Blatt: was sie auflistet, wo sie steht, ihre Spalten und Texte. Damit passen Sie eine Stückliste oder Revisionstabelle nach dem Hinzufügen an."
+  },
+  "he": {
+    "cmd.drawing_table_add": "הוספת טבלה",
+    "cmd.drawing_table_delete": "מחיקת טבלה",
+    "cmd.drawing_table_edit": "עריכת טבלה",
+    "cmd.drawing_table_inspect": "בדיקת טבלה",
+    "help.drawing.table.edit": "משנה טבלה שמורה בגיליון: מה היא מציגה, היכן היא ממוקמת, העמודות והטקסטים שלה. השתמשו בכך כדי להתאים רשימת חלקים או טבלת גרסאות לאחר הוספתה."
+  },
+  "ja": {
+    "cmd.drawing_table_add": "表を追加",
+    "cmd.drawing_table_delete": "表を削除",
+    "cmd.drawing_table_edit": "表を編集",
+    "cmd.drawing_table_inspect": "表を確認",
+    "help.drawing.table.edit": "シート上の保存済みの表の内容、位置、列、文字を変更します。部品表や改訂表を追加した後の調整に使います。"
+  },
+  "ko": {
+    "cmd.drawing_table_add": "표 추가",
+    "cmd.drawing_table_delete": "표 삭제",
+    "cmd.drawing_table_edit": "표 편집",
+    "cmd.drawing_table_inspect": "표 확인",
+    "help.drawing.table.edit": "시트에 저장된 표의 내용, 위치, 열, 글자를 변경합니다. 부품표나 개정표를 추가한 뒤 조정할 때 사용합니다."
+  },
+  "vi": {
+    "cmd.drawing_table_add": "Thêm bảng",
+    "cmd.drawing_table_delete": "Xóa bảng",
+    "cmd.drawing_table_edit": "Sửa bảng",
+    "cmd.drawing_table_inspect": "Kiểm tra bảng",
+    "help.drawing.table.edit": "Thay đổi một bảng đã lưu trên trang: nội dung, vị trí, các cột và chữ của bảng. Dùng để chỉnh danh sách chi tiết hoặc bảng sửa đổi sau khi thêm."
+  },
+  "zh": {
+    "cmd.drawing_table_add": "添加表格",
+    "cmd.drawing_table_delete": "删除表格",
+    "cmd.drawing_table_edit": "编辑表格",
+    "cmd.drawing_table_inspect": "检查表格",
+    "help.drawing.table.edit": "更改图纸页上已保存的表格的内容、位置、列和文字。添加零件表或修订表后，可用它进行调整。"
+  }
+}
