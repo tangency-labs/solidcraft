@@ -1126,6 +1126,7 @@ fn trim_other_uv_curves(
     });
     tk.rng = k.rng.clone();
     tk.fixes.bspline_trim_preserves_uv_spans = k.fixes.bspline_trim_preserves_uv_spans;
+    tk.fixes.bspline_trim_keeps_rational_end_spans = k.fixes.bspline_trim_keeps_rational_end_spans;
     for x in crate::topology::edge::edgeuses(b, e, None, None)? {
         if x == this {
             continue;

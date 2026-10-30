@@ -1,0 +1,236 @@
+{
+  "cases": [
+    {
+      "name": "issue1529_r16_head_notify",
+      "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:4624 (N_CrvRemoveDegenSegs on a new end span); tangency-labs/solidcore#1529 (pinned default behavior: the short end span of a radius 16 half circle is removed)",
+      "inputs": {
+        "this": {
+          "dim": 3,
+          "crv": {
+            "p": 2,
+            "u": [
+              0,
+              0,
+              0,
+              0.5,
+              0.5,
+              1,
+              1,
+              1
+            ],
+            "cpts": [
+              [
+                16.0,
+                0,
+                0,
+                1
+              ],
+              [
+                11.313708498984761,
+                11.313708498984761,
+                0,
+                0.7071067811865476
+              ],
+              [
+                0,
+                16.0,
+                0,
+                1
+              ],
+              [
+                -11.313708498984761,
+                11.313708498984761,
+                0,
+                0.7071067811865476
+              ],
+              [
+                -16.0,
+                0,
+                0,
+                1
+              ]
+            ]
+          }
+        },
+        "op": "trim",
+        "a": 0.4999999,
+        "b": 0.9,
+        "mode": 0
+      }
+    },
+    {
+      "name": "issue1529_r16_head_silent",
+      "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:4624 (N_CrvRemoveDegenSegs on a new end span); tangency-labs/solidcore#1529 (pinned default behavior: the short end span of a radius 16 half circle is removed)",
+      "inputs": {
+        "this": {
+          "dim": 3,
+          "crv": {
+            "p": 2,
+            "u": [
+              0,
+              0,
+              0,
+              0.5,
+              0.5,
+              1,
+              1,
+              1
+            ],
+            "cpts": [
+              [
+                16.0,
+                0,
+                0,
+                1
+              ],
+              [
+                11.313708498984761,
+                11.313708498984761,
+                0,
+                0.7071067811865476
+              ],
+              [
+                0,
+                16.0,
+                0,
+                1
+              ],
+              [
+                -11.313708498984761,
+                11.313708498984761,
+                0,
+                0.7071067811865476
+              ],
+              [
+                -16.0,
+                0,
+                0,
+                1
+              ]
+            ]
+          }
+        },
+        "op": "trim",
+        "a": 0.4999999,
+        "b": 0.9,
+        "mode": 1
+      }
+    },
+    {
+      "name": "issue1529_r16_tail_notify",
+      "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:4624 (N_CrvRemoveDegenSegs on a new end span); tangency-labs/solidcore#1529 (pinned default behavior: the short end span of a radius 16 half circle is removed)",
+      "inputs": {
+        "this": {
+          "dim": 3,
+          "crv": {
+            "p": 2,
+            "u": [
+              0,
+              0,
+              0,
+              0.5,
+              0.5,
+              1,
+              1,
+              1
+            ],
+            "cpts": [
+              [
+                16.0,
+                0,
+                0,
+                1
+              ],
+              [
+                11.313708498984761,
+                11.313708498984761,
+                0,
+                0.7071067811865476
+              ],
+              [
+                0,
+                16.0,
+                0,
+                1
+              ],
+              [
+                -11.313708498984761,
+                11.313708498984761,
+                0,
+                0.7071067811865476
+              ],
+              [
+                -16.0,
+                0,
+                0,
+                1
+              ]
+            ]
+          }
+        },
+        "op": "trim",
+        "a": 0.1,
+        "b": 0.5000001,
+        "mode": 0
+      }
+    },
+    {
+      "name": "issue1529_r16_tail_silent",
+      "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:4624 (N_CrvRemoveDegenSegs on a new end span); tangency-labs/solidcore#1529 (pinned default behavior: the short end span of a radius 16 half circle is removed)",
+      "inputs": {
+        "this": {
+          "dim": 3,
+          "crv": {
+            "p": 2,
+            "u": [
+              0,
+              0,
+              0,
+              0.5,
+              0.5,
+              1,
+              1,
+              1
+            ],
+            "cpts": [
+              [
+                16.0,
+                0,
+                0,
+                1
+              ],
+              [
+                11.313708498984761,
+                11.313708498984761,
+                0,
+                0.7071067811865476
+              ],
+              [
+                0,
+                16.0,
+                0,
+                1
+              ],
+              [
+                -11.313708498984761,
+                11.313708498984761,
+                0,
+                0.7071067811865476
+              ],
+              [
+                -16.0,
+                0,
+                0,
+                1
+              ]
+            ]
+          }
+        },
+        "op": "trim",
+        "a": 0.1,
+        "b": 0.5000001,
+        "mode": 1
+      }
+    }
+  ]
+}

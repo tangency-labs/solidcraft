@@ -2324,6 +2324,7 @@ fn edge_zone_kernel(k: &Kernel, tol: f64) -> Kernel {
     });
     tk.rng = k.rng.clone();
     tk.fixes.bspline_trim_preserves_uv_spans = k.fixes.bspline_trim_preserves_uv_spans;
+    tk.fixes.bspline_trim_keeps_rational_end_spans = k.fixes.bspline_trim_keeps_rational_end_spans;
     tk
 }
 

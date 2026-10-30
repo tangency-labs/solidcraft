@@ -90,6 +90,11 @@
 //!   end-span removal applies only to dimension-3 model curves. UV spans are in
 //!   surface parameter units and must not be removed using a 3D zone tolerance.
 //!   The default retains pinned SMLib behavior.
+//! - **Opt-in rational end spans (WR-575, #1529).** With
+//!   [`crate::kernel::UpstreamFixes::bspline_trim_keeps_rational_end_spans`], a
+//!   rational trimmed curve (a conic's NURB) keeps its short end spans: their removal
+//!   stretches the rest of the curve and moves it off its conic. The default retains
+//!   pinned SMLib behavior.
 //! - **Back-edges.** `SetIntersectionCurveThroughPoint` starts with
 //!   `IsIntersectorApprox` ([`BSplineCurve::is_intersector_approx`]) and uses
 //!   `SmCurve::ApproximateLength` ([`crate::curve::curve::p2`]), `SmSurface::LocalPointSolve`
@@ -2284,7 +2289,12 @@ impl BSplineCurve {
                         .ok_or_else(|| invalid(OP, "short knots"))?,
                     OP,
                 )?;
+            // `fixes.bspline_trim_keeps_rational_end_spans` (WR-575): a rational curve's
+            // short end span stays, as removing it moves the conic off its shape
+            let keeps_rational =
+                k.fixes.bspline_trim_keeps_rational_end_spans && cur1.is_rational();
             if (!k.fixes.bspline_trim_preserves_uv_spans || self.dim == 3)
+                && !keeps_rational
                 && ((head < zone_tol_1d_min && knots.len() > 2)
                     || (tail < zone_tol_1d_max && knots.len() > 2))
             {
@@ -2510,6 +2520,94 @@ mod tests {
         assert_ne!(owned.nurb, standalone.nurb);
         assert!(lifted_trim_gap(&original, &owned, interval) < 1e-12);
         assert!(lifted_trim_gap(&original, &standalone, interval) > k.tolerances.zone_tol_3d);
+    }
+
+    // The rational half circle of radius `r` about the origin in z = 0 (two quarters,
+    // the middle knot at 0.5), a model curve: every control point carries its weight, as
+    // a rational NURB's do (`N_IsCrvRat` reads the first; `NOW` marks no weight).
+    fn half_circle(r: f64) -> BSplineCurve {
+        let w = core::f64::consts::FRAC_1_SQRT_2;
+        let points = [
+            CPoint::new(r, 0.0, 0.0, 1.0),
+            CPoint::new(r * w, r * w, 0.0, w),
+            CPoint::new(0.0, r, 0.0, 1.0),
+            CPoint::new(-r * w, r * w, 0.0, w),
+            CPoint::new(-r, 0.0, 0.0, 1.0),
+        ];
+        let mut nurb = allocate_nurb_curve(4, 2, 7).unwrap();
+        nurb.cpts_mut().copy_from_slice(&points);
+        nurb.knots_mut()
+            .copy_from_slice(&[0.0, 0.0, 0.0, 0.5, 0.5, 1.0, 1.0, 1.0]);
+        BSplineCurve::from_nurb(nurb, 3, false)
+    }
+
+    // The largest distance of the curve from the circle of radius `r` about the origin.
+    fn off_circle(c: &BSplineCurve, r: f64) -> f64 {
+        let ivl = c.natural_interval();
+        (0..=256)
+            .map(|i| {
+                let p = c
+                    .evaluate_point(ivl.evaluate(f64::from(i) / 256.0))
+                    .unwrap();
+                (p.length() - r).abs()
+            })
+            .fold(0.0, f64::max)
+    }
+
+    #[test]
+    fn wr_575_trim_keeps_a_rational_short_end_span_on_the_circle() {
+        // #1529: a trim 1e-7 from the middle knot of a radius 16 half circle leaves an end
+        // span of about 3.5e-6, shorter than the 3D zone tolerance
+        let r = 16.0;
+        let mut fixed = Kernel::default();
+        fixed.fixes.bspline_trim_keeps_rational_end_spans = true;
+        let default = Kernel::default();
+        assert!(!default.fixes.bspline_trim_keeps_rational_end_spans);
+        for (min, max) in [(0.5 - 1e-7, 0.9), (0.1, 0.5 + 1e-7)] {
+            let ivl = Extent1d::from_min_max(min, max);
+            let mut kept = half_circle(r);
+            let mut kept_ivl = ivl;
+            kept.trim(&fixed, &mut kept_ivl, TrimMode::Notify).unwrap();
+            assert_eq!(kept.knots(None).unwrap().0, vec![min, 0.5, max]);
+            let off = off_circle(&kept, r);
+            assert!(off < 1e-12 * r, "{ivl:?}: kept span {off} off the circle");
+
+            // upstream: the span is removed and the rest stretched off the circle
+            let mut old = half_circle(r);
+            let mut old_ivl = ivl;
+            old.trim(&default, &mut old_ivl, TrimMode::Notify).unwrap();
+            assert_ne!(old.knots(None).unwrap().0, vec![min, 0.5, max]);
+            let off = off_circle(&old, r);
+            assert!(off > 1e-9, "{ivl:?}: removed span {off} off the circle");
+        }
+    }
+
+    #[test]
+    fn wr_575_non_rational_short_end_span_is_still_removed() {
+        let mut fixed = Kernel::default();
+        fixed.fixes.bspline_trim_keeps_rational_end_spans = true;
+        let default = Kernel::default();
+        // a polynomial (weights 1) curve with an interior knot at 0.5
+        let points = [
+            CPoint::new(0.0, 0.0, 0.0, NOW),
+            CPoint::new(10.0, 20.0, 0.0, NOW),
+            CPoint::new(30.0, 30.0, 10.0, NOW),
+            CPoint::new(40.0, 10.0, 0.0, NOW),
+            CPoint::new(60.0, 0.0, 0.0, NOW),
+        ];
+        let mut nurb = allocate_nurb_curve(4, 2, 7).unwrap();
+        nurb.cpts_mut().copy_from_slice(&points);
+        nurb.knots_mut()
+            .copy_from_slice(&[0.0, 0.0, 0.0, 0.5, 0.5, 1.0, 1.0, 1.0]);
+        let original = BSplineCurve::from_nurb(nurb, 3, false);
+        let ivl = Extent1d::from_min_max(0.5 - 1e-8, 0.9);
+        let mut a = original.clone();
+        let mut a_ivl = ivl;
+        a.trim(&fixed, &mut a_ivl, TrimMode::Notify).unwrap();
+        let mut b = original;
+        let mut b_ivl = ivl;
+        b.trim(&default, &mut b_ivl, TrimMode::Notify).unwrap();
+        assert_eq!(a.nurb, b.nurb);
     }
 
     #[test]

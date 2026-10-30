@@ -286,6 +286,8 @@ pub struct UpstreamFixes {
     /// (dimension 3), preserving exact UV trims in surface parameter units
     /// (WR-441, #1114). Off by default for pinned SMLib compatibility.
     pub bspline_trim_preserves_uv_spans: bool,
+    /// `BSplineCurve::trim` keeps a short end span of a rational curve (its control points carry weights, `N_IsCrvRat`: a conic's NURB) instead of removing it with `N_CrvRemoveDegenSegs`, which stretches the remaining spans over its length and so moves a conic off its circle or ellipse (a trimmed half circle of radius 16 by about 1e-6, enough for its edge and vertex gaps to pass the tolerance); non-rational curves are cleaned as upstream (WR-575, #1529). Off by default for pinned SMLib compatibility.
+    pub bspline_trim_keeps_rational_end_spans: bool,
     /// `SmCone::IntersectWithCone` tests the line of two parallel cylinders against both face domains at its middle, not its bottom end (WR-259, #711).
     pub cone_parallel_line_midpoint: bool,
     /// `SmCone::IntersectWithCone` clips parallel-cylinder lines to both requested face domains, including overlaps away from the full line's middle (WR-259, #711). Independent of `cone_parallel_line_midpoint`; off by default for pinned SMLib compatibility.
