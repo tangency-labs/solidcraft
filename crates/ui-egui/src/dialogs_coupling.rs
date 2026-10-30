@@ -37,6 +37,8 @@ pub struct CouplingForm {
     pub animate: bool,
     /// Animation phase, 0…1.
     pub phase: f64,
+    /// Editing motion link this instead of adding a new one (#6825).
+    pub editing: Option<usize>,
 }
 
 /// Joints with a value that turns (`turn`) or slides: (id, label).
@@ -87,7 +89,7 @@ pub fn start(app: &SolveApp, id: &str) -> Option<(Asm, Vec<SelInput>)> {
         }
         _ => return None,
     };
-    let f = CouplingForm { command, a, b, sizes, internal: false, reverse: false, picked: [None, None], animate: false, phase: 0.0 };
+    let f = CouplingForm { command, a, b, sizes, internal: false, reverse: false, picked: [None, None], animate: false, phase: 0.0, editing: None };
     Some((Asm::Coupling(Box::new(f)), inputs))
 }
 
@@ -253,6 +255,20 @@ pub fn commands(app: &SolveApp, f: &CouplingForm, inputs: &[SelInput]) -> Result
         _ => json!({"a": a, "b": b, "pitch": f.sizes[0].trim()}),
     };
     p["reverse"] = json!(f.reverse);
+    // When editing, a size left out of the box means "keep the old one" (a picked round face
+    // included), so send no key at all rather than an empty one (#6825).
+    if f.editing.is_some()
+        && let Some(obj) = p.as_object_mut()
+    {
+        for k in ["ra", "rb", "radius", "pitch"] {
+            if obj.get(k).and_then(Value::as_str).is_some_and(|t| t.trim().is_empty()) {
+                obj.remove(k);
+            }
+        }
+    }
+    if let Some(index) = f.editing {
+        p["link"] = json!(index);
+    }
     Ok(vec![(f.command.to_string(), p)])
 }
 
