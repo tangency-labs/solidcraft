@@ -1,0 +1,26 @@
+{
+  "en": {
+    "cmd.drawing_revise": "Issue Revision"
+  },
+  "ar": {
+    "cmd.drawing_revise": "إصدار مراجعة"
+  },
+  "de": {
+    "cmd.drawing_revise": "Revision herausgeben"
+  },
+  "he": {
+    "cmd.drawing_revise": "הוצאת גרסה"
+  },
+  "ja": {
+    "cmd.drawing_revise": "リビジョンを発行"
+  },
+  "ko": {
+    "cmd.drawing_revise": "리비전 발행"
+  },
+  "vi": {
+    "cmd.drawing_revise": "Phát hành bản sửa đổi"
+  },
+  "zh": {
+    "cmd.drawing_revise": "发布版本"
+  }
+}

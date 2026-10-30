@@ -48,7 +48,8 @@ fn revisions(reply: &Value) -> Vec<&str> {
 #[test]
 fn rows_take_the_next_revision_and_keep_what_is_typed() {
     let mut s = drawing_session();
-    assert_eq!(listed(&mut s), json!({"rows": [], "next": "1"}));
+    let empty = listed(&mut s);
+    assert_eq!((&empty["rows"], &empty["next"]), (&json!([]), &json!("1")), "{empty}");
     let steps = s.undo.len();
     let first = add(&mut s, json!({"description": "First issue", "designer": "CW", "date": "2026-10-29"}));
     assert_eq!(s.undo.len(), steps + 1, "one undo step, texts and all");
@@ -173,4 +174,88 @@ fn a_rows_id_comes_from_the_sessions_seed() {
     };
     assert_eq!(made(7), made(7));
     assert_ne!(made(7), made(8));
+}
+
+/// A saved drawing with rows typed by hand, some labels no numbering can read, opens and is revised:
+/// every old row stays as it was, field by field, and the new one follows the highest number.
+#[test]
+fn revising_keeps_every_row_as_typed() {
+    let mut s = drawing_session();
+    for typed in ["5", "B-2", "rev C"] {
+        add(&mut s, json!({"revision": typed, "description": format!("was {typed}"), "date": "not a date"}));
+    }
+    let before = listed(&mut s)["rows"].clone();
+    let reply = run(&mut s, REVISE, json!({"set": {"description": "Tender"}}));
+    let after = listed(&mut s);
+    assert_eq!(after["rows"].as_array().unwrap()[..3], before.as_array().unwrap()[..], "the old rows are untouched");
+    assert_eq!(after["rows"][3]["revision"], json!("6"), "after the highest number");
+    assert_eq!(reply["issued"][0]["revision"], json!("6"), "{reply}");
+    assert_eq!(after["issued"][0]["description"], json!("Tender"));
+    assert_eq!(after["issued"][0]["date"], json!(""), "nothing is filled in");
+    assert_eq!(after["issued"][0]["designer"], json!(""));
+    assert_eq!(after["issued"][0].get("version"), None, "there is no version yet");
+    assert_eq!(reply.get("version"), None);
+    assert_eq!(reply["next"], json!("7"), "an issued revision isn't given out again");
+}
+
+/// Issuing a row changes nothing in it; twice is refused; the copy keeps what it read through an
+/// edit, a hide and a delete, and its revision isn't given out again. One undo step, undone and
+/// redone. It saves and opens again: the regression for a copy sharing its row's id.
+#[test]
+fn an_issued_copy_keeps_what_it_read() {
+    let mut s = drawing_session();
+    let row = add(&mut s, json!({"description": "First"}));
+    let before = listed(&mut s)["rows"].clone();
+    let steps = s.undo.len();
+    let reply = run(&mut s, REVISE, json!({"row": row}));
+    assert_eq!(s.undo.len(), steps + 1, "one step");
+    assert_eq!(reply["rows"], before, "the row is as it was");
+    assert_eq!(reply["issued"][0]["row"], json!(row));
+    assert!(refused(&mut s, REVISE, json!({"row": row})).contains("issued once"));
+    assert!(refused(&mut s, REVISE, json!({"row": row, "set": {"date": "x"}})).contains("as it reads"));
+    assert!(refused(&mut s, REVISE, json!({"row": ids::encode(1 << 41)})).contains("no row"));
+
+    let edited = run(&mut s, EDIT, json!({"row": row, "set": {"description": "Changed"}}));
+    assert_eq!(edited["warnings"], json!(["its issued copy keeps what it read"]), "{edited}");
+    let unchanged = run(&mut s, EDIT, json!({"row": row, "set": {"description": "Changed"}}));
+    assert_eq!(unchanged.get("warnings"), None, "nothing changed, nothing to say");
+    run(&mut s, EDIT, json!({"row": row, "set": {"hidden": true}}));
+    let gone = run(&mut s, DELETE, json!({"row": row}));
+    assert_eq!(gone["issued"][0]["description"], json!("First"), "{gone}");
+    assert_eq!(gone["next"], json!("2"), "its revision isn't given out again");
+
+    // The record with the copy passes its rules, and reads back after a save.
+    let d = s.drawing("test").unwrap().clone();
+    d.validate().unwrap();
+    assert_eq!(Drawing::from_json(&d.to_json().unwrap()).unwrap(), *d);
+
+    let (count, _) = (s.drawing("test").unwrap().revisions.issued().len(), ());
+    while s.undo.len() > steps {
+        s.execute("edit.undo", &json!({})).unwrap();
+    }
+    assert_eq!(s.drawing("test").unwrap().revisions.issued().len(), 0, "undone");
+    while s.execute("edit.redo", &json!({})).is_ok() {}
+    assert_eq!(s.drawing("test").unwrap().revisions.issued().len(), count, "redone");
+}
+
+/// Two rows issued in one session, each with the version the session gave, and a version that isn't
+/// one line refused with nothing changed.
+#[test]
+fn a_revision_names_the_version_it_was_issued_against() {
+    let mut s = drawing_session();
+    let version = |change: &str| ModelVersion { path: "parts/bracket.solidcraft".into(), change: change.into() };
+    let first = revise_against(&mut s, &json!({"set": {"description": "One"}}), Some(version("kpqmzrts"))).unwrap();
+    assert_eq!(first["version"], json!({"path": "parts/bracket.solidcraft", "change": "kpqmzrts"}), "{first}");
+    assert_eq!(first["issued"][0]["version"]["change"], json!("kpqmzrts"));
+    assert_eq!(first["rows"][0].get("version"), None, "a row has none, only its copy");
+    let second = revise_against(&mut s, &json!({}), None).unwrap();
+    assert_eq!(second["issued"].as_array().map(Vec::len), Some(2), "{second}");
+    assert_eq!(second["issued"][1].get("version"), None);
+
+    let (record, steps) = (s.drawing("test").unwrap().clone(), s.undo.len());
+    for bad in [version("x\ny"), ModelVersion { path: "a\nb".into(), change: "c".into() }] {
+        assert!(revise_against(&mut s, &json!({}), Some(bad)).is_err());
+    }
+    assert_eq!((s.drawing("test").unwrap(), s.undo.len()), (&record, steps), "nothing changed");
+    s.drawing("test").unwrap().validate().unwrap();
 }
