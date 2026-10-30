@@ -1,0 +1,4 @@
+yourdfpy==0.0.60
+pybullet==3.2.7
+mujoco==3.17.0
+numpy==2.5.4
