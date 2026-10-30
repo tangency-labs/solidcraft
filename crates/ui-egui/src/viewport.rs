@@ -8304,10 +8304,10 @@ mod tests {
         app
     }
 
-    /// A Ø20 × 20 cylinder whose wall and rims are each in two halves: a circle drawn as two
-    /// half arcs, extruded (one wall face per arc). SMLib's own cylinder has one wall and one
-    /// edge per rim; a rim or wall in pieces comes from a profile like this one or an import.
-    fn split_cylinder_app() -> SolveApp {
+    /// A Ø20 × 20 cylinder from a circle drawn as two half arcs, extruded: the arcs on one
+    /// circle sweep one full-turn wall with its seam edge, and each rim is one closed edge, as
+    /// SMLib's own cylinder has (a rim or wall in pieces now comes only from an import).
+    fn arcs_cylinder_app() -> SolveApp {
         let mut s = solidcraft_engine::Session::default();
         s.execute("sketch.create", &json!({"plane": "XY"})).unwrap();
         s.execute("sketch.arc.three_point", &json!({"start": [10, 0], "end": [-10, 0], "through": [0, 10]})).unwrap();
@@ -8679,7 +8679,7 @@ mod tests {
 
     #[test]
     fn circular_items_measure_as_whole_rims_and_surfaces() {
-        let mut app = split_cylinder_app();
+        let mut app = arcs_cylinder_app();
         let st = app.session.world_state().unwrap();
         let b = &st.bodies[0];
         let m = b.mesh();
@@ -8698,16 +8698,18 @@ mod tests {
         assert_eq!(d.items().len(), 1);
 
         let faces = m.edge_faces.iter().zip(&m.seams).find(|(_, seam)| **seam).unwrap().0;
+        assert_eq!(faces.len(), 1, "the seam is inside the one wall");
         let wall = Sel::Face { body: b.name.clone(), index: faces[0] as usize, point: Vec3::new(10.0, 0.0, 10.0) };
         let wall_pieces = grouped_selection(&app.session, &wall);
+        assert_eq!(wall_pieces, std::slice::from_ref(&wall));
         let result = app.session.measure_items(&wall_pieces);
         assert_eq!(result["items"].as_array().unwrap().len(), 1);
         assert!((result["items"][0]["area_mm2"].as_f64().unwrap() - 400.0 * std::f64::consts::PI).abs() < 10.0, "{result}");
         let mut d = crate::dialogs::Dialog::for_command(&app, "inspect.measure").unwrap();
         d.pick(&app.session, wall.clone());
         assert_eq!(d.items().len(), 2, "a rim and a wall are two measurement targets");
-        d.pick(&app.session, Sel::Face { body: b.name.clone(), index: faces[1] as usize, point: Vec3::new(-10.0, 0.0, 10.0) });
-        assert_eq!(d.items().len(), 1, "the other half toggles the same wall");
+        d.pick(&app.session, Sel::Face { body: b.name.clone(), index: faces[0] as usize, point: Vec3::new(-10.0, 0.0, 10.0) });
+        assert_eq!(d.items().len(), 1, "a pick across the seam toggles the same wall");
     }
 
     #[test]
@@ -8759,87 +8761,100 @@ mod tests {
     }
 
     #[test]
-    fn circular_rim_hover_click_and_dialog_pick_include_both_halves() {
-        let mut app = split_cylinder_app();
+    fn circular_rim_hover_click_and_dialog_pick_take_the_whole_rim() {
+        let mut app = arcs_cylinder_app();
         let st = app.session.world_state().unwrap();
         let b = &st.bodies[0];
         let m = b.mesh();
         let top = m.edges.iter().position(|e| e.len() > 3 && e.iter().all(|p| (p.z - 20.0).abs() < 1e-6)).unwrap();
-        let rim = m.circular_rim(top);
-        assert_eq!(rim.len(), 2);
-        let line_count: usize = rim.iter().map(|&i| m.edges[i].len() - 1).sum();
-        for &i in &rim {
-            let mid = polyline_mid(&m.edges[i]);
-            app.viewport.hover = Some(Hit::Edge { body: b.name.clone(), index: i, mid });
-            assert_eq!(build_highlight(&app).merged().lines.len(), 2 * line_count * crate::gpu::LINE_SIZE);
-            let item = hit_sel(app.viewport.hover.as_ref().unwrap()).unwrap();
-            select(&mut app, Some(item.clone()), false, false);
-            assert_eq!(app.session.selection.len(), 2);
-            // Selecting both pieces must not draw each highlight twice.
-            assert_eq!(build_highlight(&app).merged().lines.len(), 2 * line_count * crate::gpu::LINE_SIZE);
-            // Ctrl/Shift clicking either half deselects the entire rim.
-            select(&mut app, Some(item.clone()), true, true);
-            assert!(app.session.selection.is_empty());
-            let mut d = crate::dialogs::Dialog::for_command(&app, "solid.chamfer").unwrap();
-            if let crate::dialogs::Kind::Fillet { chain, .. } = &mut d.kind {
-                *chain = false;
-            }
-            d.pick(&app.session, item.clone());
-            assert_eq!(d.items().len(), 2);
-            d.pick(&app.session, item);
-            assert!(d.items().is_empty());
+        // The rim is one closed edge round the whole circle.
+        assert_eq!(m.circular_rim(top), vec![top]);
+        let rim = &m.edges[top];
+        assert!(rim.first().zip(rim.last()).is_some_and(|(a, b)| a.dist(*b) < 1e-9));
+        assert!(rim.iter().all(|p| (p.x.hypot(p.y) - 10.0).abs() < 1e-6));
+        let line_count = rim.len() - 1;
+        let mid = polyline_mid(rim);
+        app.viewport.hover = Some(Hit::Edge { body: b.name.clone(), index: top, mid });
+        assert_eq!(build_highlight(&app).merged().lines.len(), 2 * line_count * crate::gpu::LINE_SIZE);
+        let item = hit_sel(app.viewport.hover.as_ref().unwrap()).unwrap();
+        select(&mut app, Some(item.clone()), false, false);
+        assert_eq!(app.session.selection, std::slice::from_ref(&item));
+        assert_eq!(build_highlight(&app).merged().lines.len(), 2 * line_count * crate::gpu::LINE_SIZE);
+        // Ctrl/Shift clicking the rim deselects it.
+        select(&mut app, Some(item.clone()), true, true);
+        assert!(app.session.selection.is_empty());
+        let mut d = crate::dialogs::Dialog::for_command(&app, "solid.chamfer").unwrap();
+        if let crate::dialogs::Kind::Fillet { chain, .. } = &mut d.kind {
+            *chain = false;
         }
+        d.pick(&app.session, item.clone());
+        assert_eq!(d.items().len(), 1);
+        d.pick(&app.session, item);
+        assert!(d.items().is_empty());
         // Screen-space picking works from either side of the rim as the model turns.
-        for &i in &rim {
-            let mid = polyline_mid(&m.edges[i]);
-            app.cam = app.cam.looking_from(Vec3::new(mid.x, mid.y, 20.0));
+        for at in [rim[rim.len() / 4], rim[3 * rim.len() / 4]] {
+            app.cam = app.cam.looking_from(Vec3::new(at.x, at.y, 20.0));
             app.cam.target = Vec3::new(0.0, 0.0, 10.0);
             for perspective in [false, true] {
                 app.ui.perspective = perspective;
                 let proj = projection(&app, Rect::from_min_size(pos2(0.0, 0.0), vec2(800.0, 600.0)));
-                let hits = pick(&app, &proj, proj.to_screen(mid).unwrap());
+                let hits = pick(&app, &proj, proj.to_screen(at).unwrap());
                 let (_, sel) = candidate(&app, &hits).unwrap();
-                assert!(matches!(sel, Sel::Edge { .. }), "{hits:?}");
-                assert_eq!(grouped_selection(&app.session, &sel).len(), 2);
+                assert!(matches!(sel, Sel::Edge { index, .. } if index == top), "{hits:?}");
+                assert_eq!(grouped_selection(&app.session, &sel).len(), 1);
             }
         }
     }
 
     #[test]
     fn curved_face_hover_selection_and_dialogs_cross_the_seam() {
-        let mut app = split_cylinder_app();
+        let mut app = arcs_cylinder_app();
         let st = app.session.world_state().unwrap();
         let b = &st.bodies[0];
         let m = b.mesh();
-        let faces = m.edge_faces.iter().zip(&m.seams).find(|(_, seam)| **seam).unwrap().0;
-        assert_eq!(faces.len(), 2);
-        let triangle_count = m.tri_face.iter().filter(|f| faces.contains(f)).count();
-        for &f in faces {
-            let index = f as usize;
-            let t = m.triangles.iter().zip(&m.tri_face).find(|(_, tf)| **tf == f).unwrap().0;
-            let [a, c, d] = m.tri(t).unwrap();
-            let point = (a + c + d) / 3.0;
+        let seam = m.seams.iter().position(|seam| *seam).unwrap();
+        let faces = &m.edge_faces[seam];
+        assert_eq!(faces.len(), 1, "the seam is inside the one wall");
+        let wall = faces[0];
+        let index = wall as usize;
+        assert_eq!(m.surface_patch(index), vec![index]);
+        let triangle_count = m.tri_face.iter().filter(|f| **f == wall).count();
+        // The wall's triangles nearest the seam on either side of it, by their centres' turn
+        // from the seam round the axis.
+        let at = m.edges[seam][0];
+        let turn = |p: Vec3| (at.x * p.y - at.y * p.x).atan2(at.x * p.x + at.y * p.y);
+        let centres: Vec<Vec3> = m
+            .triangles
+            .iter()
+            .zip(&m.tri_face)
+            .filter(|(_, f)| **f == wall)
+            .filter_map(|(t, _)| m.tri(t).map(|[a, c, d]| (a + c + d) / 3.0))
+            .collect();
+        let side =
+            |sign: f64| centres.iter().copied().filter(|p| turn(*p) * sign > 0.0).min_by(|p, q| turn(*p).abs().total_cmp(&turn(*q).abs())).unwrap();
+        let sides = [side(1.0), side(-1.0)];
+        assert!(sides.iter().all(|p| turn(*p).abs() < 0.5), "{sides:?}");
+        for (k, &point) in sides.iter().enumerate() {
             app.viewport.hover = Some(Hit::Face { body: b.name.clone(), index, point });
             assert_eq!(build_highlight(&app).merged().tris.len(), triangle_count * 3 * crate::gpu::TRI_SIZE);
             let item = hit_sel(app.viewport.hover.as_ref().unwrap()).unwrap();
             select(&mut app, Some(item.clone()), false, false);
-            assert_eq!(app.session.selection.len(), 2);
+            assert_eq!(app.session.selection, std::slice::from_ref(&item), "keep the original tool placement point");
             assert_eq!(build_highlight(&app).merged().tris.len(), triangle_count * 3 * crate::gpu::TRI_SIZE);
-            assert_eq!(app.session.selection.first(), Some(&item), "keep the original tool placement point first");
             let mut dialog = crate::dialogs::Dialog::for_command(&app, "solid.chamfer").unwrap();
-            assert_eq!(dialog.items().len(), 2);
+            assert_eq!(dialog.items().len(), 1);
             dialog.pick(&app.session, item.clone());
             assert!(dialog.items().is_empty());
             dialog.pick(&app.session, item);
-            assert_eq!(dialog.items().len(), 2);
-            // A point elsewhere on the opposite half still toggles the whole surface off.
-            let other = faces.iter().find(|&&x| x != f).unwrap();
-            select(&mut app, Some(Sel::Face { body: b.name.clone(), index: *other as usize, point: m.positions[0] }), true, true);
+            assert_eq!(dialog.items().len(), 1);
+            // A point on the other side of the seam still toggles the whole surface off.
+            select(&mut app, Some(Sel::Face { body: b.name.clone(), index, point: sides[1 - k] }), true, true);
             assert!(app.session.selection.is_empty());
         }
-        // Planar caps and box corners stay separate.
-        let cap = (0..b.body.face_count()).find(|&i| m.surface_patch(i).len() == 1).unwrap();
-        assert_eq!(m.surface_patch(cap), vec![cap]);
+        // Every face is its own patch: the planar caps, the wall, a box's faces.
+        for i in 0..b.body.face_count() {
+            assert_eq!(m.surface_patch(i), vec![i]);
+        }
         app.session.execute("solid.box", &json!({"length": 10, "width": 10, "height": 10})).unwrap();
         let st = app.session.world_state().unwrap();
         let box_body = st.bodies.last().unwrap();

@@ -89,6 +89,45 @@ fn fillet_as_wide_as_a_face_rounds_it_off() {
     assert!(s.execute("solid.fillet", &json!({"edges": [[21, 0, 10]], "radius": 3.5})).is_err());
 }
 
+/// The owner's ruling of 2026-10-30: two edges of a 20 mm box rounded r2 in one fillet (they
+/// meet in a mitre at the corner (20, 0, 20), the upright edge there sharp), then the upright edge
+/// r3 in a second fillet, whose tangent chain takes the mitre's seam with it. The corner is one
+/// smooth patch, the body rounding all three at once makes (kernel `fillet_radii` of the box with
+/// each edge's radius: 10 faces, 7928.743041 mm³); the r2 rounds keep their names, and the r3
+/// round and the corner patch are the second fillet's.
+#[test]
+fn a_later_round_at_a_mitred_corner_is_blended_with_the_rounds_there() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 20, "width": 20, "height": 20, "body_name": "Box"}));
+    let first = run(&mut s, "solid.fillet", json!({"edges": [[20, 10, 20], [10, 0, 20]], "radius": 2}))["feature"].as_u64().unwrap();
+    // A point halfway along each r2 round, at 45° between its faces.
+    let k = 2.0 - 2.0_f64.sqrt();
+    let rounds = [solidcraft_geom::Vec3::new(20.0 - k, 10.0, 20.0 - k), solidcraft_geom::Vec3::new(10.0, k, 20.0 - k)];
+    let named = |s: &mut Session, at: solidcraft_geom::Vec3| {
+        let st = s.model.state();
+        let (d, index) = solidcraft_doc::appearance::nearest_face(st.body("Box").unwrap(), at).unwrap();
+        // Found on the display mesh, whose facets lie within its chord of the faces.
+        assert!(d < 0.05, "{at:?} is {d} off the nearest face");
+        let faces = run(s, "model.faces", json!({"body": "Box"}))["faces"].as_array().cloned().unwrap_or_default();
+        faces.iter().find(|f| f["index"].as_u64() == Some(index as u64)).and_then(|f| f["name"].as_str()).unwrap_or_default().to_string()
+    };
+    let before: Vec<String> = rounds.iter().map(|p| named(&mut s, *p)).collect();
+    assert!(before.iter().all(|n| n.starts_with(&format!("F{first}:blend:"))), "{before:?}");
+    let second = run(&mut s, "solid.fillet", json!({"edges": [[20, 0, 10]], "radius": 3}))["feature"].as_u64().unwrap();
+    assert!(s.model.results.iter().all(|r| r.error.is_none()), "{:?}", s.model.results);
+    let v = volume(&mut s);
+    assert!((v - 7928.743041).abs() < 1e-5, "{v}");
+    let faces = run(&mut s, "model.faces", json!({"body": "Box"}))["faces"].as_array().cloned().unwrap_or_default();
+    assert_eq!(faces.len(), 10);
+    let after: Vec<String> = rounds.iter().map(|p| named(&mut s, *p)).collect();
+    assert_eq!(after, before);
+    // The r3 round (halfway up, at 45°) and the corner patch: the two faces the second fillet made.
+    let k3 = 3.0 - 4.5_f64.sqrt();
+    assert!(named(&mut s, solidcraft_geom::Vec3::new(20.0 - k3, k3, 10.0)).starts_with(&format!("F{second}:blend:")));
+    let made = faces.iter().filter(|f| f["name"].as_str().is_some_and(|n| n.starts_with(&format!("F{second}:")))).count();
+    assert_eq!(made, 2, "{faces:?}");
+}
+
 #[test]
 fn join_extrude_from_a_chamfered_top_face() {
     let mut s = Session::default();

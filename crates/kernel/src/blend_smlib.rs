@@ -204,9 +204,43 @@ mod imp {
         sizes_ok(what, sizes)?;
         let picked = resolve(body, edges)?;
         let next = crate::blend::unfinished_chain(body, edges, &picked.edges, &picked.hidden)?;
-        let kind = blend_kind(kind);
         let tol = pick_tolerance(body);
-        run(body, what, &picked.edges, |b| b.blend(kind, &picked.points, sizes, tol)).map_err(|e| crate::blend::with_continuation(e, next))
+        let Kind::Round = kind else {
+            let kind = blend_kind(kind);
+            return run(body, what, &picked.edges, |b| b.blend(kind, &picked.points, sizes, tol))
+                .map_err(|e| crate::blend::with_continuation(e, next));
+        };
+        // Constant-radius rounds: the body keeps what they were made on, and a later round at a
+        // corner where they meet blends them again with it (crate::blend_corner).
+        let out = match crate::blend_corner::later_corners(body, &picked.edges, sizes)? {
+            Some((later, new)) => reblend(body, what, &later).map(|b| b.with_rounds(body, new)),
+            None => run(body, what, &picked.edges, |b| b.blend(Blend::Round, &picked.points, sizes, tol))
+                .map(|b| b.with_rounds(body, picked.edges.iter().copied().zip(sizes.iter().copied()).collect())),
+        };
+        out.map_err(|e| crate::blend::with_continuation(e, next))
+    }
+
+    /// The blend `later` makes of its base, every round from the earliest meeting the new edges'
+    /// corners on and the new edges in one, with its history over `body`, the body the later
+    /// round was given ([`crate::blend_corner::rebase`]).
+    fn reblend(body: &Body, what: &str, later: &crate::blend_corner::Later) -> Result<Body> {
+        let base = &later.base;
+        let mesh = base.mesh(&crate::MeshTolerance::chord((base.size() * 2e-3).max(1e-3)))?;
+        let mut indices = Vec::with_capacity(later.edges.len());
+        let mut points = Vec::with_capacity(later.edges.len());
+        let mut radii = Vec::with_capacity(later.edges.len());
+        for (e, r) in &later.edges {
+            let line = mesh.edges.get(*e).ok_or_else(|| failed(what, "corner", "an earlier round's edge is not in the body it was made on"))?;
+            let (mid, _) = crate::body::polyline_mid(line);
+            indices.push(*e);
+            points.push([mid.x, mid.y, mid.z]);
+            radii.push(*r);
+        }
+        sizes_ok(what, &radii)?;
+        let tol = pick_tolerance(base);
+        let out = run(base, what, &indices, |b| b.blend(Blend::Round, &points, &radii, tol))?;
+        let history = out.history().and_then(|h| crate::blend_corner::rebase(h, later, body));
+        Ok(out.with_checked_history(history, &record::counts(&[body])).inherit_regularization_protection(body))
     }
 
     /// Rounds with corner setbacks: each corner point picks the body's nearest vertex (within

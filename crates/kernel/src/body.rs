@@ -59,6 +59,10 @@ pub struct Body {
     /// check to the end of its feature ([`crate::validation`]): checked there as the step's own
     /// check would have, then let go. Answers only for this record.
     pub(crate) unchecked: Option<std::sync::Arc<crate::validation::Unchecked>>,
+    /// The constant-radius rounds that made this body from another, when they did
+    /// ([`crate::blend_corner::Rounds`]): a later round at a corner where they meet blends them
+    /// again with it. Anything else that makes a body leaves it out.
+    pub(crate) rounds: Option<std::sync::Arc<crate::blend_corner::Rounds>>,
 }
 
 /// The meshes made of one record (see [`Body::keeping_meshes`]), by tolerance and angle. They
@@ -478,6 +482,7 @@ impl Body {
             display_of: None,
             meshes: None,
             unchecked: None,
+            rounds: None,
         }
     }
 
@@ -635,6 +640,13 @@ impl Body {
                 None
             }
         });
+        self
+    }
+
+    /// This body as the rounds of `edges` (each an edge of `before`, in its edge order, with its
+    /// radius) made it from `before` ([`crate::blend_corner::Rounds`]).
+    pub(crate) fn with_rounds(mut self, before: &Body, edges: Vec<(usize, f64)>) -> Self {
+        self.rounds = Some(std::sync::Arc::new(crate::blend_corner::Rounds { before: before.clone(), edges }));
         self
     }
 

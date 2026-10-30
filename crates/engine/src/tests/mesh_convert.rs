@@ -141,7 +141,8 @@ fn exported_binary_stl_with_a_bore_reconstructs_analytic_faces() {
     assert!(!body.is_mesh());
     assert!(body.validity().is_empty());
     assert_eq!(solidcraft_kernel::measure(body).unwrap().merged.face_types.get("cylinder"), Some(&1));
-    assert_eq!(body.faces(0.01).unwrap().len(), 10);
+    // The L's six sides, the two caps and the bore, one full-turn wall.
+    assert_eq!(body.faces(0.01).unwrap().len(), 9);
     std::fs::remove_file(path).unwrap();
 }
 

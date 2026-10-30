@@ -1,11 +1,248 @@
 //! Fillets with a radius per edge. SMLib rounds every picked edge at its own radius in one
 //! blend, with the corners where the rounds meet: an end in the face beyond, two rounds trimming
 //! each other, or a corner patch where three meet.
+//!
+//! A later round at a corner where earlier rounds already meet in a mitre (the owner's ruling of
+//! 2026-10-30) makes the corner all of them would have made rounded at once: one smooth patch,
+//! the mitre gone. A body made by constant-radius rounds keeps what they were made on and which
+//! edges they rounded at which radius ([`Rounds`]); a later round reaching such a corner
+//! ([`later_corners`]) blends the earlier rounds' edges, from the earliest of the rounds that
+//! meet there on, with the new edges in one SMLib blend of the body before them, and the result's
+//! history is put over the body the later round was given ([`rebase`]): an earlier round's face
+//! is that face, trimmed anew; the corner patch, and every face the new edges make, is the later
+//! round's. The mitre's seam is no edge to round on its own: picked (a tangent chain reaches it
+//! from the new edge), it only says the corner is blended again.
+
+use std::collections::BTreeSet;
 
 use solidcraft_geom::Vec3;
 
 use crate::body::Body;
+use crate::history::{Change, EdgeOrigin, EdgeProv, FaceOrigin, FaceProv, History};
 use crate::{KernelError, Result};
+
+/// The constant-radius rounds that made a body ([`crate::fillet`], [`fillet_radii`]): the body
+/// they were made on, and each edge they rounded (its index in that body's edge order) with its
+/// radius. The body's history is over `before`.
+#[derive(Clone, Debug)]
+pub(crate) struct Rounds {
+    pub(crate) before: Body,
+    pub(crate) edges: Vec<(usize, f64)>,
+}
+
+/// A later round at corners where earlier rounds meet ([`later_corners`]): what is blended in
+/// one go, and what puts its history over the body the later round was given.
+pub(crate) struct Later {
+    /// The body before the earliest of the rounds that meet at the new edges' corners.
+    pub(crate) base: Body,
+    /// The edges blended on `base` (its edge order) with their radii: the edges of every round
+    /// from that earliest on, and the new edges.
+    pub(crate) edges: Vec<(usize, f64)>,
+    /// The body over `base`: the histories of those rounds composed.
+    chain: History,
+    /// The new edges: each one's index in the body, and in `base`.
+    new: Vec<(usize, usize)>,
+    /// The body's mitre seams at the new edges' corners, which the corner patches replace.
+    seams: Vec<usize>,
+}
+
+/// The history of `body` over the body `levels` rounds back ([`Rounds::before`] taken that many
+/// times), composed; `None` when a step has no record or history, or for no levels.
+fn down(body: &Body, levels: usize) -> Option<History> {
+    let mut at = body.clone();
+    let mut composed: Option<History> = None;
+    for _ in 0..levels {
+        let rounds = at.rounds.clone()?;
+        let step = at.history().filter(|h| h.operands == 1)?.clone();
+        composed = Some(match composed {
+            None => step,
+            Some(h) => h.substituted(0, &step).ok()?,
+        });
+        at = rounds.before.clone();
+    }
+    composed
+}
+
+/// The operand edge `edge` of a result comes from, through `h`, when it is (a piece of) one.
+fn edge_origin(h: &History, edge: usize) -> Option<usize> {
+    match h.edges.get(edge).map(|e| e.origins.as_slice()) {
+        Some([EdgeOrigin::Edge { operand: 0, edge }]) => Some(*edge),
+        _ => None,
+    }
+}
+
+/// Faces a blend made in place of edges (rounds, their corner patches), through `h`.
+fn rounds_of(h: &History) -> Vec<bool> {
+    h.faces
+        .iter()
+        .map(|f| f.change == Change::Generated && !f.origins.is_empty() && f.origins.iter().all(|o| matches!(o, FaceOrigin::Edge { .. })))
+        .collect()
+}
+
+/// Is `edge` (its faces through `h`) where the rounds of different edges meet: between two of
+/// `rounds` made in place of edges none of which both are (a mitre, or rounds running on into
+/// each other), not between a round and its own end cap or a corner patch it is part of?
+fn between_rounds(h: &History, rounds: &[bool], edge: usize) -> bool {
+    let round = |f: usize| rounds.get(f).copied().unwrap_or(false).then(|| h.faces.get(f)).flatten();
+    match h.edges.get(edge).map(|e| e.faces.as_slice()) {
+        Some([f, g]) if f != g => match (round(*f), round(*g)) {
+            (Some(a), Some(b)) => a.origins.iter().all(|o| !b.origins.contains(o)),
+            _ => false,
+        },
+        _ => false,
+    }
+}
+
+/// The later rounds of `picked` (the body's edges, `sizes` their radii, as the blend resolved
+/// them) when one of them reaches a corner where rounds that made the body meet: the blend to
+/// make in their place, and the new edges (in the body's edge order, with their radii) the
+/// body's record of rounds takes. `Ok(None)` when none does, or when the rounds are not on record
+/// down to that corner. A picked seam between earlier rounds is refused unless a new edge of
+/// the same radius meets it: it has no round of its own.
+pub(crate) fn later_corners(body: &Body, picked: &[usize], sizes: &[f64]) -> Result<Option<(Later, Vec<(usize, f64)>)>> {
+    // The rounds on record, latest first: each one's body before it and the body over that.
+    let mut levels: Vec<(Rounds, History)> = Vec::new();
+    while let Some(h) = down(body, levels.len() + 1) {
+        let Some(r) = (match levels.last() {
+            None => body.rounds.as_deref().cloned(),
+            Some((r, _)) => r.before.rounds.as_deref().cloned(),
+        }) else {
+            break;
+        };
+        levels.push((r, h));
+    }
+    let Some((_, deepest)) = levels.last() else { return Ok(None) };
+    let rounds = rounds_of(deepest);
+    let record = body.record();
+    let ends = |e: usize| record.edges.get(e).map(|e| e.vertices).unwrap_or([u32::MAX; 2]);
+    let (seam_picks, new): (Vec<(usize, f64)>, Vec<(usize, f64)>) =
+        picked.iter().copied().zip(sizes.iter().copied()).partition(|(e, _)| between_rounds(deepest, &rounds, *e));
+    let corners: BTreeSet<u32> = new.iter().flat_map(|(e, _)| ends(*e)).collect();
+    let seams: Vec<usize> =
+        (0..record.edges.len()).filter(|e| between_rounds(deepest, &rounds, *e) && ends(*e).iter().any(|v| corners.contains(v))).collect();
+    for (seam, size) in &seam_picks {
+        let meets = new.iter().any(|(e, r)| r.to_bits() == size.to_bits() && ends(*e).iter().any(|v| ends(*seam).contains(v)));
+        if !meets {
+            return Err(KernelError::Invalid(
+                "fillet: a picked edge is where earlier rounds meet (a mitre), which has no round of its own: pick the edge that runs \
+                 into that corner, at its radius, and the corner is rounded again with it"
+                    .into(),
+            ));
+        }
+    }
+    if seams.is_empty() {
+        return Ok(None);
+    }
+    // The latest round from which on every seam is between rounds on record.
+    let Some(level) = levels.iter().position(|(_, h)| {
+        let rounds = rounds_of(h);
+        seams.iter().all(|s| between_rounds(h, &rounds, *s))
+    }) else {
+        return Ok(None);
+    };
+    let Some((base, chain)) = levels.get(level).map(|(r, h)| (r.before.clone(), h.clone())) else { return Ok(None) };
+    // Every round's edges from that level on, in `base`'s edge order.
+    let mut edges: Vec<(usize, f64)> = Vec::new();
+    for (step, (r, _)) in levels.iter().enumerate().take(level + 1) {
+        let inner = down(&r.before, level - step);
+        for (e, radius) in &r.edges {
+            let at = match &inner {
+                None => Some(*e),
+                Some(h) => edge_origin(h, *e),
+            };
+            let Some(at) = at else { return Ok(None) };
+            edges.push((at, *radius));
+        }
+    }
+    let mut mapped = Vec::with_capacity(new.len());
+    for (e, radius) in &new {
+        let Some(at) = edge_origin(&chain, *e) else { return Ok(None) };
+        mapped.push((*e, at));
+        edges.push((at, *radius));
+    }
+    Ok(Some((Later { base, edges, chain, new: mapped, seams }, new)))
+}
+
+/// The history of `result`, the blend `later` made of its base (`h`, over the base), over the
+/// body the later round was given (`body`, `later.chain` over the base): a face of the base's
+/// faces is the body's face of them, kept where both kept it, else trimmed anew (split or joined
+/// where they are several); an earlier round's face is that round's face in the body; a face
+/// made in place of a new edge (its round, and a corner patch where it meets earlier rounds) is
+/// new, made in place of the new edges and of the body's seams between the rounds it joins.
+/// Each edge is the body's edge between the faces it lies between there, else where its faces
+/// meet. `None` where a face has no counterpart.
+pub(crate) fn rebase(h: &History, later: &Later, body: &Body) -> Option<History> {
+    let chain = &later.chain;
+    let set = |p: &FaceProv| p.origins.iter().copied().collect::<BTreeSet<FaceOrigin>>();
+    let mut faces = Vec::with_capacity(h.faces.len());
+    for p in &h.faces {
+        let origins = set(p);
+        let new_edges: Vec<FaceOrigin> = later
+            .new
+            .iter()
+            .filter(|(_, at)| origins.contains(&FaceOrigin::Edge { operand: 0, edge: *at }))
+            .map(|(e, _)| FaceOrigin::Edge { operand: 0, edge: *e })
+            .collect();
+        if !new_edges.is_empty() {
+            // The seams between rounds all of whose origins this face takes up.
+            let replaced = later.seams.iter().filter(|s| {
+                chain.edges.get(**s).is_some_and(|e| e.faces.iter().all(|f| chain.faces.get(*f).is_some_and(|f| set(f).is_subset(&origins))))
+            });
+            let mut all = new_edges;
+            all.extend(replaced.map(|s| FaceOrigin::Edge { operand: 0, edge: *s }));
+            faces.push(crate::record::generated(all));
+            continue;
+        }
+        let candidates: Vec<usize> = if p.change == Change::Generated {
+            (0..chain.faces.len()).filter(|f| chain.faces.get(*f).is_some_and(|c| c.change == Change::Generated && set(c) == origins)).collect()
+        } else {
+            (0..chain.faces.len())
+                .filter(|f| chain.faces.get(*f).is_some_and(|c| c.change != Change::Generated && c.origins.iter().any(|o| origins.contains(o))))
+                .collect()
+        };
+        let change = match candidates[..] {
+            [] => return None,
+            [f] if p.change == Change::Kept && chain.faces.get(f).is_some_and(|c| c.change == Change::Kept) => Change::Kept,
+            [_] => Change::Modified,
+            _ => Change::Merged,
+        };
+        faces.push(FaceProv { origins: candidates.into_iter().map(|face| FaceOrigin::Face { operand: 0, face }).collect(), change });
+    }
+    crate::record::mark_shared_split(&mut faces);
+    // The body's faces under each result face, and the body's edges by the faces they separate.
+    let under = |f: usize| -> BTreeSet<usize> {
+        faces
+            .get(f)
+            .filter(|p| p.change != Change::Generated)
+            .map(|p| p.origins.iter().filter_map(|o| if let FaceOrigin::Face { face, .. } = o { Some(*face) } else { None }).collect())
+            .unwrap_or_default()
+    };
+    let body_edges = crate::history::edge_faces(body.record());
+    let edges = h
+        .edges
+        .iter()
+        .map(|e| {
+            let sides: Vec<BTreeSet<usize>> = e.faces.iter().map(|f| under(*f)).collect();
+            let same: Vec<EdgeOrigin> = if sides.iter().all(|s| !s.is_empty()) {
+                body_edges
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, between)| {
+                        between.len() == sides.len()
+                            && (between.iter().zip(&sides).all(|(f, s)| s.contains(f))
+                                || between.iter().rev().zip(&sides).all(|(f, s)| s.contains(f)))
+                    })
+                    .map(|(edge, _)| EdgeOrigin::Edge { operand: 0, edge })
+                    .collect()
+            } else {
+                Vec::new()
+            };
+            let origins = if same.is_empty() { crate::record::meeting(&e.faces, &faces) } else { same };
+            EdgeProv { faces: e.faces.clone(), origins }
+        })
+        .collect();
+    Some(History { operands: 1, faces, edges })
+}
 
 /// Fillet each edge nearest a point with its own radius.
 pub fn fillet_radii(body: &Body, edges: &[(Vec3, f64)]) -> Result<Body> {
