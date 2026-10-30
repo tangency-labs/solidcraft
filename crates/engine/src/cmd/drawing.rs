@@ -20,7 +20,7 @@ use crate::{Result, Session};
 
 pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("drawing.create", "Create Drawing", create).any_part().icon("new").doc_only().params(
-        "name?: the drawing's name (default: the design's); language?: the drawing's content language, a BCP 47 tag (default en); units?: \"follow_model\" (default) or one length unit such as \"mm\". Adds a drawing of this design, one ISO A3 landscape sheet with the ISO border, and opens it (one undo step of the model) → as drawing.inspect",
+        "name?: the drawing's name (default: the design's); language?: the drawing's content language, a BCP 47 tag (default en); units?: \"follow_model\" (default) or one length unit such as \"mm\"; font?: the font family its text is set in, by name (default: the built-in font). Adds a drawing of this design, one ISO A3 landscape sheet with the ISO border, and opens it (one undo step of the model) → as drawing.inspect",
     ),
     CommandSpec::new("drawing.list", "List Drawings", list)
         .any_part()
@@ -44,13 +44,13 @@ pub static COMMANDS: &[CommandSpec] = &[
         "drawing: id → deleted: its id; closed when it was open (one undo step of the model)",
     ),
     CommandSpec::new("drawing.inspect", "Inspect Drawing", inspect).in_drawing().icon("inspect").noundo().doc_only().params(
-        "→ {id, name, units, projection, language, properties, sources: [{id}], sheets: [{id, name, size_mm, orientation, dpi, documents, excluded}], revisions: {rows: [{row, revision, description, designer, checker, date, hidden}], the oldest first (the newest is the drawing's revision), next: the revision a new row gets}}. Read-only.",
+        "→ {id, name, units, projection, language, font, font_note: why its text is set in the built-in font instead (the font isn't on this computer, or can't be set on paper), or null, properties, sources: [{id}], sheets: [{id, name, size_mm, orientation, dpi, documents, excluded}], revisions: {rows: [{row, revision, description, designer, checker, date, hidden}], the oldest first (the newest is the drawing's revision), next: the revision a new row gets}}. Read-only.",
     ),
     CommandSpec::new("drawing.set", "Drawing Settings", set)
         .in_drawing()
         .icon("settings")
         .doc_only()
-        .params("name?, language?: a BCP 47 tag, units?: \"follow_model\" or one length unit such as \"mm\", projection?: first or third (angle), which every projected view follows. One undo step."),
+        .params("name?, language?: a BCP 47 tag, units?: \"follow_model\" or one length unit such as \"mm\", projection?: first or third (angle), which every projected view follows, font?: the font family its text is set in, by name, never a file (\"\": the built-in font). One undo step."),
     CommandSpec::new("drawing.properties", "Drawing Properties", properties).in_drawing().icon("settings").noundo().doc_only().params(
         "→ metadata: the drawing's properties as saved (other tools' keys too); properties: project, part_number, revision, author, organization, description and license, each its text or null. The design properties' rules (document.metadata).",
     ),
@@ -80,6 +80,16 @@ fn projection(cmd: &str, p: &Value) -> Result<Option<Projection>> {
         None => Ok(None),
         Some(v) => serde_json::from_value(v.clone()).map(Some).map_err(|_| bad(cmd, "`projection` is first or third (angle)")),
     }
+}
+
+/// `font` as given: a font family's name, never a file (drawings name fonts by family, so they
+/// travel).
+fn font<'a>(cmd: &str, p: &'a Value) -> Result<Option<&'a str>> {
+    let font = text(cmd, p, "font")?;
+    if let Some(family) = font {
+        solidcraft_sketch::check_family(family).map_err(|e| bad(cmd, e.to_string()))?;
+    }
+    Ok(font.map(str::trim))
 }
 
 /// An optional text parameter: absent, or a string.
@@ -114,6 +124,9 @@ fn create(s: &mut Session, p: &Value) -> Result<Value> {
     d.sources.push(Source { id: source });
     if let Some(units) = units(cmd, p)? {
         d.units = units;
+    }
+    if let Some(font) = font(cmd, p)? {
+        d.font = font.to_string();
     }
     d.validate().map_err(fail)?;
     s.open_drawing = Some(d.id);
@@ -172,6 +185,8 @@ fn inspect(s: &mut Session, _p: &Value) -> Result<Value> {
         "units": d.units,
         "projection": d.projection,
         "language": d.language,
+        "font": d.font,
+        "font_note": solidcraft_sketch::paper_font_note(&solidcraft_sketch::font_dirs(), &d.font),
         "properties": d.properties,
         "sources": d.sources.iter().map(|source| json!({"id": ids::encode(source.id)})).collect::<Vec<_>>(),
         "sheets": sheets,
@@ -193,6 +208,9 @@ fn set(s: &mut Session, p: &Value) -> Result<Value> {
         }
         if let Some(projection) = projection(cmd, p)? {
             d.projection = projection;
+        }
+        if let Some(font) = font(cmd, p)? {
+            d.font = font.to_string();
         }
         Ok(())
     })?;

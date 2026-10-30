@@ -1,6 +1,9 @@
-//! Text on paper (#4890 B1b): laid out by the rule sketch text measures with, in the bundled
-//! drawing font, as runs the paper scene takes. Expected numbers come from the font's own tables
-//! (Liberation Sans: 2048 units per em, a cap height of 1409) or from `TextMetrics`.
+//! Text on paper (#4890 B1b): laid out by the rule sketch text measures with, in the drawing's
+//! font, as runs the paper scene takes. Expected numbers come from the font's own tables
+//! (Liberation Sans: 2048 units per em, a cap height of 1409) or from `TextMetrics`. Named families
+//! are looked up in the repository's own fonts, never the computer's.
+
+use std::path::PathBuf;
 
 use sha2::{Digest, Sha256};
 use solidcraft_geom::Vec2;
@@ -26,7 +29,7 @@ fn one((runs, mut fonts): (Vec<TextRun>, Vec<Font>)) -> (Vec<TextRun>, Font) {
         assert!(font.glyphs.keys().copied().eq(placed), "{} holds exactly its runs' glyphs", font.postscript_name);
     }
     assert!(runs.iter().all(|r| fonts.iter().any(|f| f.id == r.font)), "each run's font is listed");
-    assert_eq!(fonts.len(), 1, "one drawing font so far");
+    assert_eq!(fonts.len(), 1, "one font a text so far");
     (runs, fonts.remove(0))
 }
 
@@ -43,7 +46,17 @@ fn width(line: &str) -> f64 {
 }
 
 fn err(text: &str, family: Option<&str>, style: &TextStyle) -> String {
-    paper_text(text, family, AT, 5.0, 0.0, style).unwrap_err().to_string()
+    paper_text_in(&repo_fonts(), text, family, AT, 5.0, 0.0, style).unwrap_err().to_string()
+}
+
+/// The repository's fonts as the only installed ones: Liberation Sans, IBM Plex Mono, BIZ
+/// UDPGothic and IBM Plex Sans (a variable face, which paper refuses).
+fn repo_fonts() -> Vec<PathBuf> {
+    vec![PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../assets/fonts")]
+}
+
+fn set_in(text: &str, family: &str) -> (Vec<TextRun>, Font) {
+    one(paper_text_in(&repo_fonts(), text, Some(family), AT, 5.0, 0.0, &TextStyle::default()).unwrap().unwrap())
 }
 
 #[test]
@@ -135,12 +148,55 @@ fn a_character_the_font_lacks_is_refused_by_name() {
 }
 
 #[test]
-fn only_the_drawing_fonts_faces_are_set() {
-    let plain = TextStyle::default();
-    let e = err("A", Some("Arial"), &plain);
-    assert!(e.contains("`Arial` is not a drawing font: drawings are set in Liberation Sans"), "{e}");
-    let e = err("A", None, &TextStyle { bold: true, ..TextStyle::default() });
-    assert!(e.contains("has no bold face"), "{e}");
+fn a_family_is_found_by_name_among_the_installed_fonts() {
+    let (runs, font) = set_in("Title 12", "ibm plex mono");
+    let file = std::fs::read(repo_fonts()[0].join("ibm-plex-mono/IBMPlexMono-Regular.ttf")).unwrap();
+    let id: [u8; 32] = Sha256::new().chain_update(&file).chain_update(0u32.to_le_bytes()).finalize().into();
+    assert_eq!((font.postscript_name.as_str(), font.id), ("IBMPlexMono-Regular", id));
+    assert!(*font.bytes == *file, "the file's own bytes");
+    assert!(font.metrics.flags.fixed_pitch && !font.metrics.flags.serif);
+    scene(&runs, &font).validate().unwrap();
+    assert_eq!(paper_font_note(&repo_fonts(), "IBM Plex Mono"), None);
+    // Japanese in a Japanese family; the built-in font has no glyph for it.
+    let (runs, font) = set_in("図面 A3", "BIZ UDPGothic");
+    assert_eq!(font.postscript_name, "BIZUDPGothic-Regular");
+    scene(&runs, &font).validate().unwrap();
+    // The same text in the same font is the same runs and font, every time.
+    assert_eq!(set_in("図面 A3", "BIZ UDPGothic"), (runs, font));
+}
+
+#[test]
+fn a_family_paper_cant_use_is_set_in_the_built_in_font_and_named() {
+    let builtin = set("Title", &TextStyle::default());
+    for (family, note) in [
+        ("Futura", "Futura isn't on this computer: set in Liberation Sans"),
+        ("IBM Plex Sans", "IBM Plex Sans can't be set on paper (it is a variable face): set in Liberation Sans"),
+    ] {
+        assert_eq!(set_in("Title", family), builtin, "{family}");
+        assert_eq!(paper_font_note(&repo_fonts(), family).as_deref(), Some(note));
+    }
+    for family in ["", " ", "Liberation Sans", "liberation-sans"] {
+        assert_eq!(paper_font_note(&repo_fonts(), family), None, "{family:?}");
+    }
+}
+
+#[test]
+fn a_font_file_or_a_name_on_several_lines_is_refused() {
+    for family in ["C:/Fonts/arial.ttf", "fonts\\a", "Futura.otf", "~/f.ttc"] {
+        let e = err("A", Some(family), &TextStyle::default());
+        assert!(e.contains("drawings name fonts by family, so they travel"), "{family}: {e}");
+    }
+    assert!(check_family("Futura\nBold").is_err() && check_family(&"F".repeat(1025)).is_err());
+    assert!(check_family("").is_ok() && check_family("Noto Sans CJK JP").is_ok());
+}
+
+#[test]
+fn bold_takes_a_bold_face_and_italic_leans_without_one() {
+    let bold = TextStyle { bold: true, ..TextStyle::default() };
+    let e = err("A", None, &bold);
+    assert!(e.contains("the font Liberation Sans has no bold face"), "{e}");
+    let e = err("A", Some("IBM Plex Mono"), &bold);
+    assert!(e.contains("the font IBM Plex Mono has no bold face"), "{e}");
     let (runs, _) = paper_text("A", Some(" liberation sans "), AT, 5.0, 0.0, &TextStyle { italic: true, ..TextStyle::default() }).unwrap().unwrap();
     assert_eq!(runs[0].slant, 12f64.to_radians().tan(), "a made-up italic leans as sketch text's");
     let e = err("A", None, &TextStyle { path: Some("c1".into()), ..TextStyle::default() });

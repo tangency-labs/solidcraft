@@ -16,6 +16,8 @@
 //! - **Units** follow each view's design or are one length unit for the whole drawing. The
 //!   **language** is the content's, a BCP 47 tag chosen when the drawing is made, whatever the
 //!   interface's is. **Properties** follow [`Metadata`]'s rules.
+//! - The **font** its text is set in: a font family's name, never a file, so the drawing travels
+//!   (none: the built-in font; [`solidcraft_sketch::check_family`]).
 //! - **Views** of its designs on its sheets, base and projected ([`view`]), and the **projection**
 //!   (first or third angle) every projected view follows.
 //! - **Dimensions** on its views, each measuring named corners or edges of the view's model
@@ -111,6 +113,9 @@ pub struct Drawing {
     pub projection: Projection,
     /// The language of the drawing's content, a BCP 47 tag (`en-GB`).
     pub language: String,
+    /// The font family its text is set in, by name; empty: the built-in font.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub font: String,
     /// In order, each behind its own `Arc`, so an undo step shares every sheet it didn't change.
     pub sheets: Vec<Arc<Sheet>>,
     /// By id ([`Drawing::add_views`]), each behind its own `Arc`, as the sheets are.
@@ -248,6 +253,7 @@ impl Drawing {
             units: Units::default(),
             projection: Projection::default(),
             language: language.into(),
+            font: String::new(),
             sheets: vec![Arc::new(first)],
             views: Vec::new(),
             dimensions: Vec::new(),
@@ -355,6 +361,7 @@ impl Drawing {
         require(is_language_tag(&self.language), || {
             format!("the language is not a BCP 47 tag of 2 to {MAX_LANGUAGE_CHARS} characters (such as `en` or `en-GB`)")
         })?;
+        solidcraft_sketch::check_family(&self.font).map_err(|e| DocError::Invalid(format!("the drawing's font: {e}")))?;
         if let Units::Fixed { unit } = &self.units {
             // A length unit of the expression unit table, written as the table writes it.
             let length = unit.trim() == unit.as_str() && expr::unit_info(unit).is_some_and(|(kind, _)| kind == expr::Kind::Length);
