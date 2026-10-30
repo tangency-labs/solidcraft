@@ -538,6 +538,54 @@ mod tests {
         let _ = fs::remove_dir_all(&d);
     }
 
+    /// What is shown and hidden is not part of the design's undo history but is restored with it:
+    /// the autosave keeps a hidden body hidden (K9' check, gap G3).
+    #[test]
+    fn an_autosave_keeps_what_is_hidden() {
+        let d = dir("hidden");
+        let mut s = Session::default();
+        let mut a = Autosaver::new(&d, Duration::from_secs(3600)).unwrap();
+        s.execute("solid.box", &json!({"length": 10, "width": 10, "height": 10, "body_name": "Box"})).unwrap();
+        s.execute("browser.visibility", &json!({"items": ["Box"], "visible": false})).unwrap();
+        assert!(!s.visibility.is_empty());
+        assert!(a.save(&s).unwrap());
+        drop(a);
+        let found = orphans(&d);
+        let (doc, entry) = load(&d, &found[0].id).unwrap();
+        assert_eq!(doc.visibility, s.visibility);
+        remove(&d, &entry.id).unwrap();
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    /// A drawing too large to save would fail the whole autosave: it is left out like one that
+    /// breaks a rule, the rest is written, and the error names it (K9' check, gap G2).
+    #[test]
+    fn an_autosave_leaves_out_a_drawing_too_large_to_save() {
+        let d = dir("huge-drawing");
+        let mut s = Session::default();
+        let mut a = Autosaver::new(&d, Duration::from_secs(3600)).unwrap();
+        s.execute("solid.box", &json!({"length": 10, "width": 10, "height": 10})).unwrap();
+        s.execute("drawing.create", &json!({"name": "Kept"})).unwrap();
+        let items = vec!["0"; 2_000_000].join(",");
+        let format = solidcraft_doc::format::DRAWING.format_string(1);
+        let huge = solidcraft_doc::drawing::Drawing::from_json(&format!(
+            r#"{{"format":"{format}","id":"0000000000002","name":"Huge","sources":[],"language":"en","sheets":[{{"id":"0000000000003","name":"S","sheet":{{"size":{{"standard":"a4"}}}}}}],"properties":{{"com.example":{{"items":[{items}]}}}}}}"#
+        ))
+        .unwrap();
+        let mut doc = (*s.doc).clone();
+        doc.drawings.push(Arc::new(huge));
+        s.doc = Arc::new(doc);
+        let error = a.save(&s).unwrap_err().to_string();
+        assert!(error.starts_with(r#"drawing "Huge" ("#) && error.contains("left out: drawing too large to save"), "{error}");
+        drop(a);
+        let found = orphans(&d);
+        assert_eq!(found.len(), 1);
+        let (doc, entry) = load(&d, &found[0].id).unwrap();
+        assert_eq!(doc.drawings.iter().map(|d| d.name.as_str()).collect::<Vec<_>>(), ["Kept"]);
+        remove(&d, &entry.id).unwrap();
+        let _ = fs::remove_dir_all(&d);
+    }
+
     /// A tick doesn't wait for the autosave (#3044): it starts the write on a worker and
     /// returns; the outcome is taken up by a later tick, and nothing new starts meanwhile. The
     /// entry is the design as it was when the write started, even when it changed since.

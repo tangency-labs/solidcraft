@@ -457,15 +457,16 @@ fn no_revisions(revisions: &Arc<RevisionRecord>) -> bool {
 /// `doc` without the drawings that break a rule, and a line naming each one left out and the
 /// rule. Reading refuses a design whole for one such drawing, so a copy that must open again (an
 /// autosave, a crash report's design) keeps the rest: the first [`MAX_DRAWINGS`], the first of
-/// two with one id, and only those keeping their own rules.
+/// two with one id, and only those keeping their own rules and small enough to save.
 pub fn openable(doc: &crate::Document) -> (Cow<'_, crate::Document>, Vec<String>) {
     let (mut seen, mut left_out) = (BTreeSet::new(), Vec::new());
     let kept: Vec<_> = doc
         .drawings
         .iter()
         .filter(|d| {
-            // Its own rules before its id: a drawing left out takes no id from a later one.
-            let checked = check_count(seen.len() + 1).and_then(|()| d.validate()).and_then(|()| take_id(&mut seen, d.id));
+            // Its own rules and its size before its id: a drawing left out takes no id from a later one.
+            let checked =
+                check_count(seen.len() + 1).and_then(|()| d.validate()).and_then(|()| d.to_json().map(drop)).and_then(|()| take_id(&mut seen, d.id));
             checked.map_err(|e| left_out.push(format!("{} left out: {e}", d.label()))).is_ok()
         })
         .cloned()

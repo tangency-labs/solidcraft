@@ -712,6 +712,13 @@ fn a_copy_that_must_open_leaves_out_only_the_drawings_a_read_refuses() {
     assert!(left_out[0].starts_with(&format!(r#"drawing "Plate 3" ({three}) left out: the language is not"#)), "{left_out:?}");
     assert_eq!(left_out[1], format!(r#"drawing "Plate 1 again" ({one}) left out: two drawings have the id {one}"#));
 
+    // A drawing left out takes no id from a later one.
+    let broken_first = Arc::new(Drawing { language: "?".into(), ..(*numbered(1)).clone() });
+    doc.drawings = vec![broken_first, numbered(1)];
+    let (kept, left_out) = openable(&doc);
+    assert_eq!(kept.drawings, [numbered(1)]);
+    assert_eq!(left_out.len(), 1, "{left_out:?}");
+
     doc.drawings = (1..=MAX_DRAWINGS as u64 + 2).map(numbered).collect();
     let (kept, left_out) = openable(&doc);
     assert_eq!(kept.drawings, doc.drawings[..MAX_DRAWINGS]);
