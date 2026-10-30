@@ -183,7 +183,16 @@ impl SolveApp {
                 self.deferred = Some(job);
                 Ok(Value::Null)
             }
-            Start::Now(evaluated, kept) => self.run_evaluated(id, params, evaluated.as_ref(), kept),
+            Start::Now(evaluated, kept) => {
+                let r = self.run_evaluated(id, params, evaluated.as_ref(), kept);
+                // One that waited its turn (a row) and then ran at once ends here.
+                let outcome = match &r {
+                    Ok(_) => crate::operations::Outcome::Done,
+                    Err(e) => crate::operations::Outcome::Failed(crate::friendly_error(id, e)),
+                };
+                crate::operations::ended(self, &format!("history:{serial}"), outcome);
+                r
+            }
         }
     }
 
@@ -264,10 +273,17 @@ impl SolveApp {
             Ok(replies) => Some(replies),
         };
         let Some(check) = self.delete_check.take() else { return };
+        use crate::operations::{Outcome, ended};
         match replies {
-            None => self.set_status("the delete could not be checked", true),
+            None => {
+                ended(self, "delete_check", Outcome::Failed("the delete could not be checked".into()));
+                self.set_status("the delete could not be checked", true);
+            }
             Some(_) if check.revision != self.session.revision => check.then.restart(self),
-            Some(replies) => check.then.finish(self, replies, Some(check.kept)),
+            Some(replies) => {
+                ended(self, "delete_check", Outcome::Done);
+                check.then.finish(self, replies, Some(check.kept));
+            }
         }
     }
 
@@ -281,14 +297,23 @@ impl SolveApp {
             if let Some(mut job) = self.deferred.take() {
                 let (id, params) = std::mem::take(&mut job.command);
                 let superseded = replaced_by_a_later_one(&id) && self.deferred_queue.first().is_some_and(|(q, _, _)| *q == id);
+                let key = format!("history:{}", job.serial);
                 if job.revision != self.session.revision {
                     // The design changed meanwhile: computed again for the design as it is now.
                     let _ = self.run_heavy_as(&id, params, job.serial);
                 } else if !superseded {
                     // This is playback's own completed step, not a manual history edit.
                     let playback = self.timeline_playback.take();
-                    let _ = self.run_evaluated(&id, params, job.evaluated.take().flatten().as_ref(), job.kept.take());
+                    let r = self.run_evaluated(&id, params, job.evaluated.take().flatten().as_ref(), job.kept.take());
                     self.timeline_playback = playback;
+                    let outcome = match r {
+                        Ok(_) => crate::operations::Outcome::Done,
+                        Err(e) => crate::operations::Outcome::Failed(crate::friendly_error(&id, &e)),
+                    };
+                    crate::operations::ended(self, &key, outcome);
+                } else {
+                    // A later one of the same kind does it (where the marker ends is all that counts).
+                    crate::operations::ended(self, &key, crate::operations::Outcome::Done);
                 }
             }
         }

@@ -11,7 +11,9 @@
 //! learns it was cancelled, through [`solidcraft_engine::doc::progress::Progress`]: the timeline's
 //! evaluation reports each feature it reaches, and long work inside one reports its steps through
 //! the kernel's watch ([`solidcraft_engine::kernel::watch::Watch`]); each stops at its next check
-//! once cancelled. Cancel from the control channel with `ui.operations` ([`control`]).
+//! once cancelled. Each says how it ended ([`ended`]): its row fades out done (a full bar), failed
+//! (red, saying why) or cancelled, and `ui.operations` ([`control`]) lists it for a minute; it
+//! also cancels operations from the control channel.
 
 use egui::{Align2, Color32, FontId, Rect, Sense, Stroke, pos2, vec2};
 use serde_json::{Value, json};
@@ -49,8 +51,8 @@ pub struct Row {
     pub waiting: bool,
     /// Asked to stop, and finishing its current step.
     pub cancelling: bool,
-    /// Gone because it was cancelled (fading out).
-    pub cancelled: bool,
+    /// How it ended, once it is gone (fading out); `None` while it runs, or when it didn't say.
+    pub ended: Option<Outcome>,
     /// How to cancel it; `None`: it can't be (a save being written).
     cancel: Option<Cancel>,
     /// An agent's command: drawn in the agent cursor's colour.
@@ -79,7 +81,7 @@ enum Cancel {
 
 impl Row {
     fn new(key: String, label: String) -> Self {
-        Row { key, label, steps: None, queued: false, waiting: false, cancelling: false, cancelled: false, cancel: None, agent: false }
+        Row { key, label, steps: None, queued: false, waiting: false, cancelling: false, ended: None, cancel: None, agent: false }
     }
 
     /// Whether its X does anything.
@@ -95,8 +97,10 @@ impl Row {
 
     /// The text over the bar: the step it is on of how many (`3 / 12`), queued or cancelling.
     pub fn status(&self) -> Option<String> {
-        if self.cancelled {
-            return Some(crate::i18n::tr("operations.stopped").to_string());
+        match self.ended {
+            Some(Outcome::Cancelled) => return Some(crate::i18n::tr("operations.stopped").to_string()),
+            Some(Outcome::Failed(_)) => return Some(crate::i18n::tr("operations.failed").to_string()),
+            Some(Outcome::Done) | None => {}
         }
         if self.cancelling {
             return Some(crate::i18n::tr("operations.cancelling").to_string());
@@ -187,7 +191,9 @@ pub fn current(app: &SolveApp) -> Vec<Row> {
     if app.agent_computing().is_some() {
         let steps = app.agent_steps();
         let label = steps.as_ref().map(|s| s.current()).or_else(|| app.agent_computing().map(|(_, label)| label)).unwrap_or_default();
-        rows.push(Row { steps: steps.map(|s| s.counts()), cancel: Some(Cancel::Agent), agent: true, ..Row::new("agent".into(), label) });
+        // A batch counts its steps; one command, the features it evaluates.
+        let steps = steps.and_then(|s| if s.counts().1 > 1 { Some(s.counts()) } else { evaluation_steps(&s.progress) });
+        rows.push(Row { steps, cancel: Some(Cancel::Agent), agent: true, ..Row::new("agent".into(), label) });
     }
     rows
 }
@@ -236,9 +242,73 @@ pub fn cancel(app: &mut SolveApp, key: &str) -> Result<(), String> {
         }
         Cancel::Agent => app.stop_agent_command(),
     }
-    app.operations.cancelled.push(row.key.clone());
+    record(&mut app.operations, &row.key, row.label.clone(), Outcome::Cancelled);
     app.set_status(crate::i18n::format("operations.cancelled", &[("name", &row.label)]), false);
     Ok(())
+}
+
+/// How an operation ended.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Outcome {
+    /// It did what it was asked.
+    Done,
+    /// It failed, saying why (as the status line does).
+    Failed(String),
+    /// It was cancelled: nothing of it was applied.
+    Cancelled,
+}
+
+impl Outcome {
+    fn id(&self) -> &'static str {
+        match self {
+            Outcome::Done => "done",
+            Outcome::Failed(_) => "failed",
+            Outcome::Cancelled => "cancelled",
+        }
+    }
+
+    /// How long its row stays after it ended, fully shown and then fading (ms): a failure stays
+    /// long enough to be seen.
+    fn shown_for(outcome: Option<&Outcome>) -> (f64, f64) {
+        match outcome {
+            Some(Outcome::Failed(_)) => (FAILED_MS, FADE_MS),
+            _ => (0.0, FADE_MS),
+        }
+    }
+}
+
+/// How long a failed operation's row stays before it fades (ms).
+pub const FAILED_MS: f64 = 2500.0;
+
+/// How long `ui.operations` lists an operation that ended (ms), and how many it keeps.
+const FINISHED_MS: f64 = 60_000.0;
+const FINISHED_KEPT: usize = 16;
+
+/// An operation that ended, as `ui.operations` lists it for a while.
+#[derive(Clone, Debug)]
+struct Finished {
+    key: String,
+    label: String,
+    outcome: Outcome,
+    at: f64,
+}
+
+/// The operation `key` ended with `outcome`: its row fades out saying so, and `ui.operations`
+/// lists it for a minute. The work itself calls this where it ends; an operation that ends
+/// without it fades out without saying how. One never seen under way (done within the app's
+/// wait, between two frames) had no row, and is not listed either.
+pub(crate) fn ended(app: &mut SolveApp, key: &str, outcome: Outcome) {
+    let Some(label) = app.operations.labels.iter().rev().find(|(k, _)| k == key).map(|(_, label)| label.clone()) else { return };
+    record(&mut app.operations, key, label, outcome);
+}
+
+fn record(panel: &mut Panel, key: &str, label: String, outcome: Outcome) {
+    let now = crate::now_ms();
+    panel.finished.retain(|f| now - f.at < FINISHED_MS && f.key != key);
+    if panel.finished.len() >= FINISHED_KEPT {
+        panel.finished.remove(0);
+    }
+    panel.finished.push(Finished { key: key.to_string(), label, outcome, at: now });
 }
 
 /// A row on screen: what it showed last, and since when it is gone (fading out).
@@ -255,8 +325,10 @@ pub struct Panel {
     shown: Vec<Shown>,
     /// Where the panel was drawn this frame, for the toasts to keep clear of.
     pub(crate) rect: Option<Rect>,
-    /// Operations cancelled, which fade out as cancelled rather than as done.
-    cancelled: Vec<String>,
+    /// The operations that ended lately and how ([`ended`]), oldest first.
+    finished: Vec<Finished>,
+    /// The names of the operations seen under way, for those that end ([`ended`]).
+    labels: Vec<(String, String)>,
 }
 
 impl Panel {
@@ -269,23 +341,36 @@ impl Panel {
                 Some(row) => (shown.row, shown.gone_at) = (row.clone(), None),
                 None if shown.gone_at.is_none() => {
                     shown.gone_at = Some(now);
-                    // Nothing left to cancel. It finished: a full bar while it fades; it was
-                    // cancelled: the bar where it stopped, saying so.
-                    if self.cancelled.contains(&shown.row.key) || shown.row.cancelling {
-                        shown.row.cancelled = true;
-                    } else {
+                    // Nothing left to cancel. Done: a full bar while it fades. Failed or
+                    // cancelled: the bar where it stopped, saying so. Not said: as it was.
+                    let outcome = self.finished.iter().rev().find(|f| f.key == shown.row.key).map(|f| f.outcome.clone());
+                    let outcome = outcome.or_else(|| shown.row.cancelling.then_some(Outcome::Cancelled));
+                    if outcome == Some(Outcome::Done) {
                         shown.row.steps = shown.row.steps.map(|(_, total)| (total, total));
                     }
+                    shown.row.ended = outcome;
                     shown.row.cancel = None;
                     shown.row.cancelling = false;
                     shown.row.queued = false;
+                    shown.row.waiting = false;
                 }
                 None => {}
             }
         }
-        self.shown.retain(|s| s.gone_at.is_none_or(|gone| now - gone < FADE_MS));
+        self.shown.retain(|s| {
+            let (hold, fade) = Outcome::shown_for(s.row.ended.as_ref());
+            s.gone_at.is_none_or(|gone| now - gone < hold + fade)
+        });
+        for row in &rows {
+            self.labels.retain(|(key, _)| *key != row.key);
+            self.labels.push((row.key.clone(), row.label.clone()));
+        }
+        // Names are kept for the operations still on screen or under way.
         let shown = &self.shown;
-        self.cancelled.retain(|key| shown.iter().any(|s| s.row.key == *key));
+        self.labels.retain(|(key, _)| shown.iter().any(|s| s.row.key == *key) || rows.iter().any(|r| r.key == *key));
+        if self.labels.len() > 64 {
+            self.labels.drain(..self.labels.len() - 64);
+        }
         for row in rows {
             if !self.shown.iter().any(|s| s.row.key == row.key) {
                 self.shown.push(Shown { row, gone_at: None });
@@ -295,7 +380,10 @@ impl Panel {
 
     /// The rows on screen, bottom first, with how opaque each is (fading out: less).
     pub fn rows(&self, now: f64) -> impl Iterator<Item = (&Row, f32)> {
-        self.shown.iter().map(move |s| (&s.row, s.gone_at.map_or(1.0, |gone| (1.0 - (now - gone) / FADE_MS).clamp(0.0, 1.0) as f32)))
+        self.shown.iter().map(move |s| {
+            let (hold, fade) = Outcome::shown_for(s.row.ended.as_ref());
+            (&s.row, s.gone_at.map_or(1.0, |gone| (1.0 - (now - gone - hold) / fade).clamp(0.0, 1.0) as f32))
+        })
     }
 
     /// Whether anything is on screen.
@@ -308,12 +396,15 @@ impl Panel {
 /// readout and its details, left of a pane over that corner. Off in Preferences: nothing.
 pub(crate) fn show(app: &mut SolveApp, ui: &egui::Ui, view: Rect) {
     app.operations.rect = None;
-    if !app.preferences.operations_panel {
-        app.operations = Panel::default();
-        return;
-    }
     let now = crate::now_ms();
     let mut rows = current(app);
+    if !app.preferences.operations_panel {
+        // Not shown, but the names are kept for `ui.operations`' list of those that ended.
+        app.operations.shown.clear();
+        app.operations.update(rows, now);
+        app.operations.shown.clear();
+        return;
+    }
     // A file the design waits for has its card, with its own Cancel (Wait for files to open).
     if app.preferences.file_operations_wait {
         rows.retain(|r| !r.key.starts_with("file:"));
@@ -373,7 +464,15 @@ pub(crate) fn show(app: &mut SolveApp, ui: &egui::Ui, view: Rect) {
 /// One row in `r`: name, bar with its step, and the X. True when the X was clicked.
 fn paint_row(ui: &egui::Ui, painter: &egui::Painter, t: &Tokens, row: &Row, alpha: f32, r: Rect) -> bool {
     let fade = |c: Color32| c.gamma_multiply(alpha);
-    let accent = if row.agent { crate::icons::pointer::agent() } else { t.form_primary };
+    let accent = match row.ended {
+        Some(Outcome::Failed(_)) => t.error,
+        _ if row.agent => crate::icons::pointer::agent(),
+        _ => t.form_primary,
+    };
+    // A failed row says why when the pointer is over it.
+    if let Some(Outcome::Failed(why)) = &row.ended {
+        let _ = ui.interact(r, egui::Id::new(("sc_operation_failed", &row.key)), Sense::hover()).on_hover_text(why);
+    }
     crate::scenario::publish_rect(&format!("operations:row:{}", row.key), r);
     // The X on the right.
     let x = Rect::from_center_size(pos2(r.right() - ROW * 0.5, r.center().y), vec2(ROW - 6.0, ROW - 6.0));
@@ -410,7 +509,7 @@ fn paint_row(ui: &egui::Ui, painter: &egui::Painter, t: &Tokens, row: &Row, alph
         }
         Some(_) => {}
         // Not told how far it is: a stripe going to and fro.
-        None if !row.queued && !row.waiting && !row.cancelling && !row.cancelled => {
+        None if !row.queued && !row.waiting && !row.cancelling && row.ended.is_none() => {
             let phase = (ui.ctx().input(|i| i.time) * 0.8).fract() as f32;
             let w = bar.width() * 0.3;
             let left = bar.left() + (bar.width() - w) * (1.0 - (phase * 2.0 - 1.0).abs());
@@ -429,7 +528,12 @@ pub fn control(app: &mut SolveApp, p: &Value) -> Result<Value, String> {
     if let Some(key) = p.get("cancel").and_then(Value::as_str) {
         return cancel(app, key).map(|()| json!({"cancelled": key}));
     }
-    let rows: Vec<Value> = current(app)
+    let under_way = current(app);
+    for row in &under_way {
+        app.operations.labels.retain(|(key, _)| *key != row.key);
+        app.operations.labels.push((row.key.clone(), row.label.clone()));
+    }
+    let rows: Vec<Value> = under_way
         .iter()
         .rev()
         .map(|r| {
@@ -443,7 +547,23 @@ pub fn control(app: &mut SolveApp, p: &Value) -> Result<Value, String> {
             })
         })
         .collect();
-    Ok(json!({"operations": rows, "shown": app.operations.rect.is_some()}))
+    // Those that ended in the last minute, newest first, and how.
+    let now = crate::now_ms();
+    let finished: Vec<Value> = app
+        .operations
+        .finished
+        .iter()
+        .rev()
+        .filter(|f| now - f.at < FINISHED_MS)
+        .map(|f| {
+            let mut v = json!({"key": f.key, "label": f.label, "outcome": f.outcome.id(), "ms_ago": (now - f.at).max(0.0).round()});
+            if let Outcome::Failed(why) = &f.outcome {
+                v["error"] = json!(why);
+            }
+            v
+        })
+        .collect();
+    Ok(json!({"operations": rows, "finished": finished, "shown": app.operations.rect.is_some()}))
 }
 
 #[cfg(test)]
@@ -464,7 +584,8 @@ mod tests {
         let keys: Vec<&str> = panel.rows(100.0).map(|(r, _)| r.key.as_str()).collect();
         assert_eq!(keys, ["a", "b"], "bottom first: the newer is above");
         assert_eq!(panel.rows(100.0).next().unwrap().0.steps, Some((2, 4)), "brought up to date in place");
-        // `a` ends.
+        // `a` ends, saying it is done.
+        panel.finished.push(Finished { key: "a".into(), label: "a".into(), outcome: Outcome::Done, at: 200.0 });
         panel.update(vec![row("b", None)], 200.0);
         let (a, alpha) = panel.rows(200.0 + FADE_MS / 2.0).next().unwrap();
         assert_eq!((a.key.as_str(), a.steps, a.cancellable()), ("a", Some((4, 4)), false));
@@ -472,14 +593,32 @@ mod tests {
         panel.update(vec![row("b", None)], 200.0 + FADE_MS);
         let keys: Vec<&str> = panel.rows(200.0 + FADE_MS).map(|(r, _)| r.key.as_str()).collect();
         assert_eq!(keys, ["b"]);
+        // One failed stays a while where it stopped, red and saying so, then fades.
+        panel.update(vec![row("f", Some((2, 5)))], 290.0 + FADE_MS);
+        panel.finished.push(Finished { key: "f".into(), label: "f".into(), outcome: Outcome::Failed("no room".into()), at: 295.0 });
+        panel.update(Vec::new(), 295.0 + FADE_MS);
+        let failed = |panel: &Panel, at: f64| panel.rows(at).find(|(r, _)| r.key == "f").map(|(r, alpha)| (r.steps, r.status(), alpha));
+        let says = Some(crate::i18n::tr("operations.failed").to_string());
+        assert_eq!(failed(&panel, 295.0 + FADE_MS + FAILED_MS - 1.0), Some((Some((2, 5)), says, 1.0)), "shown in full while it holds");
+        panel.update(Vec::new(), 300.0 + 2.0 * FADE_MS + FAILED_MS);
+        assert!(failed(&panel, 300.0 + 2.0 * FADE_MS + FAILED_MS).is_none(), "then gone");
+        // One that ends without saying how fades as it was.
+        panel.update(vec![row("u", Some((1, 3)))], 300.0 + FADE_MS);
+        panel.update(Vec::new(), 301.0 + FADE_MS);
+        let (u, _) = panel.rows(301.0 + FADE_MS).find(|(r, _)| r.key == "u").unwrap();
+        assert_eq!((u.steps, &u.ended, u.status().as_deref()), (Some((1, 3)), &None, Some("2 / 3")), "as it last was");
+        panel.update(Vec::new(), 302.0 + 2.0 * FADE_MS);
         // One cancelled fades out where it stopped, saying so.
         panel.update(vec![row("b", Some((3, 9)))], 300.0 + FADE_MS);
-        panel.cancelled.push("b".into());
+        panel.finished.push(Finished { key: "b".into(), label: "b".into(), outcome: Outcome::Cancelled, at: 300.0 });
         panel.update(Vec::new(), 310.0 + FADE_MS);
         let (b, _) = panel.rows(310.0 + FADE_MS).next().unwrap();
-        assert_eq!((b.steps, b.cancelled, b.status()), (Some((3, 9)), true, Some(crate::i18n::tr("operations.stopped").to_string())));
+        assert_eq!(
+            (b.steps, &b.ended, b.status()),
+            (Some((3, 9)), &Some(Outcome::Cancelled), Some(crate::i18n::tr("operations.stopped").to_string()))
+        );
         panel.update(Vec::new(), 400.0 + 2.0 * FADE_MS);
-        assert!(panel.is_empty() && panel.cancelled.is_empty());
+        assert!(panel.is_empty());
         // One that comes back while fading is running again.
         panel.update(vec![row("b", None), row("c", None)], 1000.0);
         panel.update(vec![row("c", None)], 1010.0);
@@ -526,6 +665,53 @@ mod tests {
         h.frames(3);
         assert_eq!(h.app.session.doc.features.len(), features, "nothing was undone");
         assert!(control(&mut h.app, &json!({"cancel": key(1)})).is_err(), "gone");
+        // Both are listed as ended, cancelled, newest first.
+        let finished = control(&mut h.app, &json!({})).unwrap()["finished"].clone();
+        let ended: Vec<(String, String)> =
+            finished.as_array().unwrap().iter().map(|f| (f["key"].as_str().unwrap().into(), f["outcome"].as_str().unwrap().into())).collect();
+        assert_eq!(ended, [(key(1), "cancelled".to_string()), (key(0), "cancelled".to_string())], "{finished}");
+    }
+
+    /// An operation seen under way says how it ended: `ui.operations` lists it for a while as done,
+    /// or as failed with the error the status line gives, and its row fades out saying so.
+    #[test]
+    fn ended_operations_are_listed_with_their_outcome() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10})).unwrap();
+        h.frames(2);
+        let outcome = |h: &mut crate::scenario::Harness, key: &str| {
+            let listed = control(&mut h.app, &json!({})).unwrap();
+            listed["finished"].as_array().unwrap().iter().find(|f| f["key"] == key).cloned()
+        };
+        // An undo computing (held), seen under way, then done.
+        let (job, release) = crate::deferred::Deferred::held("edit.undo");
+        let key = format!("history:{}", job.serial);
+        h.app.deferred = Some(job);
+        h.frames(2);
+        assert!(crate::scenario::rect_of(&format!("operations:row:{key}")).is_some(), "seen under way");
+        drop(release);
+        h.frames(2);
+        assert_eq!(h.app.session.doc.features.len(), 0, "the undo ran");
+        let done = outcome(&mut h, &key).expect("listed once it ended");
+        assert_eq!((done["outcome"].as_str(), done["label"].as_str()), (Some("done"), Some(command_name("edit.undo").as_str())), "{done}");
+        // A redo with nothing to redo fails, saying why.
+        h.app.run("edit.redo", json!({})).unwrap();
+        let (job, release) = crate::deferred::Deferred::held("edit.redo");
+        let key = format!("history:{}", job.serial);
+        h.app.deferred = Some(job);
+        h.frames(2);
+        drop(release);
+        h.frames(2);
+        let failed = outcome(&mut h, &key).expect("listed once it ended");
+        assert_eq!(failed["outcome"], "failed", "{failed}");
+        assert!(failed["error"].as_str().is_some_and(|e| !e.is_empty()), "{failed}");
+        let row = h.app.operations.rows(crate::now_ms()).find(|(r, _)| r.key == key).map(|(r, _)| r.clone()).expect("its row stays a while");
+        assert_eq!(row.status(), Some(crate::i18n::tr("operations.failed").to_string()));
+        // Done within the app's wait (never a row): not listed.
+        h.app.apply_off_thread = Some(std::time::Duration::from_secs(60));
+        h.app.run_heavy("edit.undo", json!({})).unwrap();
+        let listed = control(&mut h.app, &json!({})).unwrap();
+        assert_eq!(listed["finished"].as_array().unwrap().len(), 2, "{listed}");
     }
 
     /// The panel shows the rows in the view's corner, above the frame-rate readout, the newer

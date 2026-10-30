@@ -218,6 +218,7 @@ pub(crate) fn tick(app: &mut SolveApp, ctx: &egui::Context) {
         if let Some(m) = app.open_meshing.as_mut() {
             m.complete = true;
         }
+        crate::operations::ended(app, "meshing", crate::operations::Outcome::Done);
         if profiling() {
             let ms = began.map_or(0.0, |t| (ctx.input(|i| i.time) - t) * 1000.0);
             eprintln!("SolidCraft open meshing: all {} bodies shown after {ms:.0} ms", world.bodies.len());

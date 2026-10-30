@@ -35,6 +35,7 @@ use solidcraft_engine::{Session, doc::Document, doc::progress::Progress};
 
 use crate::SolveApp;
 use crate::control::ControlResponse;
+use crate::operations::Outcome;
 use crate::ui_kit;
 
 /// What a file operation does with its file.
@@ -572,6 +573,7 @@ fn start(app: &mut SolveApp) {
         return;
     }
     if request.design.as_deref().is_some_and(|d| !app.session.path.as_deref().is_some_and(|p| crate::documents::same_path(p, d))) {
+        crate::operations::ended(app, &format!("file:{}", request.serial), Outcome::Failed("the design it was for is no longer shown".into()));
         request.answer(Err("the design it was for is no longer shown".into()));
         return;
     }
@@ -580,6 +582,7 @@ fn start(app: &mut SolveApp) {
         && !crate::documents::active_is_blank(app)
     {
         let e = "too many open designs; close a tab before opening another";
+        crate::operations::ended(app, &format!("file:{}", request.serial), Outcome::Failed(e.into()));
         app.set_status(e, true);
         request.answer(Err(e.into()));
         return;
@@ -700,6 +703,7 @@ fn start(app: &mut SolveApp) {
         }
         Err(e) => {
             let e = format!("could not start file operation: {e}");
+            crate::operations::ended(app, &format!("file:{}", request.serial), Outcome::Failed(e.clone()));
             request.answer(Err(e.clone()));
             app.set_status(e, true);
         }
@@ -1239,8 +1243,10 @@ fn behind(app: &mut SolveApp) {
     let Some(mut running) = app.file_load.running.take() else { return };
     let Some(Ok(made)) = running.ready.take() else { return };
     let request = &running.request;
+    let key = format!("file:{}", request.serial);
     match crate::documents::open_tab_behind(app, made.session) {
         Ok(()) => {
+            crate::operations::ended(app, &key, Outcome::Done);
             if request.kind == Kind::Open {
                 app.home.add_recent(&request.path);
             }
@@ -1249,6 +1255,7 @@ fn behind(app: &mut SolveApp) {
             request.answer(Ok(made.result));
         }
         Err(e) => {
+            crate::operations::ended(app, &key, Outcome::Failed(e.clone()));
             app.set_status(e.clone(), true);
             request.answer(Err(e));
         }
@@ -1264,6 +1271,8 @@ fn land_now(app: &mut SolveApp) {
     }
     // Opened while the person kept working: it lands, whatever they changed in the design shown.
     let opens = !app.preferences.file_operations_wait && matches!(running.request.kind, Kind::Open | Kind::Recover { .. });
+    let key = format!("file:{}", running.request.serial);
+    let mut outcome = Outcome::Done;
     {
         let request = &running.request;
         match job {
@@ -1273,7 +1282,10 @@ fn land_now(app: &mut SolveApp) {
                 }
                 request.answer(Ok(made.result));
             }
-            _ if running.cancelled() => request.answer(Err("file operation cancelled".into())),
+            _ if running.cancelled() => {
+                outcome = Outcome::Cancelled;
+                request.answer(Err("file operation cancelled".into()));
+            }
             Ok(made) if request.kind == Kind::UpdateLinks && running.matches(&app.session) => {
                 let (id, _) = request.command();
                 app.session.accept_computed(made.session);
@@ -1334,10 +1346,12 @@ fn land_now(app: &mut SolveApp) {
             }
             Ok(_) => {
                 let e = "the active design changed while loading; the file operation was discarded";
+                outcome = Outcome::Failed(e.into());
                 request.answer(Err(e.into()));
                 app.set_status(e, true);
             }
             Err(e) => {
+                outcome = if e.contains("cancelled") { Outcome::Cancelled } else { Outcome::Failed(e.clone()) };
                 request.answer(Err(e.clone()));
                 if request.kind == Kind::UpdateLinks {
                     // Said as when the command ran here (the status line, the run's messages).
@@ -1351,6 +1365,7 @@ fn land_now(app: &mut SolveApp) {
             }
         }
     }
+    crate::operations::ended(app, &key, outcome);
 }
 
 /// The light overlay over everything under the title bar while a file loads. The title bar,
@@ -1503,6 +1518,9 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     if cancel && !cancelled {
         // The worker stops at its next cancellation checkpoint; its scratch design and
         // result channels are isolated from any file operation started afterwards.
+        for op in app.file_load.operations() {
+            crate::operations::ended(app, &format!("file:{}", op.serial), Outcome::Cancelled);
+        }
         app.file_load.cancel();
         app.set_status(if export { crate::i18n::tr_label("dxf.cancelled") } else { "file operation cancelled" }, false);
     }

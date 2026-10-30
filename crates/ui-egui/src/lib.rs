@@ -713,6 +713,9 @@ pub struct SolveApp {
     control_held: std::collections::VecDeque<ControlRequest>,
     /// An agent's design change computing off the window thread ([`control_job`]).
     control_job: Option<control_job::ControlJob>,
+    /// Replies of agents' commands run after computing off the window thread, on their way to
+    /// the agent ([`control_job`]): each is passed on as it comes, its outcome noted.
+    agent_replies: Vec<(std::sync::mpsc::Receiver<serde_json::Value>, std::sync::mpsc::Sender<serde_json::Value>)>,
     /// Agent exports computing on copies of the design.
     control_answering: Vec<control_job::ControlJob>,
     /// The agent cursor acting out control requests.
@@ -886,6 +889,7 @@ impl SolveApp {
             ai_connect: Default::default(),
             control_held: Default::default(),
             control_job: None,
+            agent_replies: Vec::new(),
             control_answering: Vec::new(),
             agent: Default::default(),
             pending_shots: Vec::new(),
