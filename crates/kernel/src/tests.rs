@@ -1105,14 +1105,13 @@ fn chamfer_sloped_basin_rim() {
 }
 
 /// A chamfer wider than a basin's thin rim (`chamfer_sloped_basin_rim`'s basin with the rim
-/// `margin` wide at the top) would run its leg off the rim's top, over the slab's front edge:
-/// refused as too large, naming the largest size that fits, the body unchanged (the owner's
-/// blend-overflow ruling, 2026-10-30). As wide as the rim it would use the rim's top up: refused
-/// too, so the largest that fits is the size just below the rim's width (the fit search's step,
-/// three significant digits of the size asked for). (The chamfers that fit, with their exact
-/// volumes, are the rig's fillets/1080-chamfer-sloped-basin-* cases.)
+/// `margin` wide at the top) would run its leg off the rim's top, over the slab's front edge; as
+/// wide as the rim it would use the rim's top up. Both are refused as too large, the kind a fit
+/// can reduce, the body unchanged (the owner's blend-overflow ruling, 2026-10-30). The largest
+/// size that fits is named by the doc layer (`with_largest_fit`) and graded, with the chamfers
+/// that fit, by the rig's fillets/1080-chamfer-sloped-basin-* cases.
 #[test]
-fn chamfer_wider_than_sloped_basin_rim_is_refused_naming_the_largest() {
+fn chamfer_wider_than_sloped_basin_rim_is_refused() {
     let rectangle = |x0, y0, x1, y1| Loop2::polygon(&[Vec2::new(x0, y0), Vec2::new(x1, y0), Vec2::new(x1, y1), Vec2::new(x0, y1)]);
     let basin = |margin: f64| {
         let slab = box_solid(Vec3::ZERO, Vec3::new(100.0, 60.0, 30.0)).unwrap();
@@ -1124,14 +1123,11 @@ fn chamfer_wider_than_sloped_basin_rim_is_refused_naming_the_largest() {
     for (margin, distance) in [(1.0, 2.0), (1.0, 3.0), (0.5, 4.0), (0.5, 0.5), (1.0, 1.0)] {
         let b = basin(margin);
         let before = measure(&b).unwrap().volume;
-        let message = match chamfer(&b, &[Vec3::new(50.0, margin, 30.0)], distance) {
-            Err(KernelError::TooLarge(m)) => m,
+        match chamfer(&b, &[Vec3::new(50.0, margin, 30.0)], distance) {
+            Err(KernelError::TooLarge(_)) => {}
             Err(e) => panic!("{margin}, {distance}: refused, but not as too large: {e}"),
             Ok(_) => panic!("{margin}, {distance}: a chamfer whose leg runs off the rim was built"),
-        };
-        let largest: f64 = message.rsplit("that fits is ").next().and_then(|t| t.trim_end_matches(" mm").parse().ok()).unwrap_or(0.0);
-        let step = 10f64.powf(distance.log10().floor() - 3.0);
-        assert!((margin - step - 1e-12..margin).contains(&largest), "{margin}, {distance}: {message}");
+        }
         assert_eq!(measure(&b).unwrap().volume, before);
     }
 }
