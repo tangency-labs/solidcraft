@@ -17,6 +17,9 @@
 //!   the members adding up to the overall from the first point to the last.
 //! - **Cylinder** (W20b): a whole cylinder's diameter between its two silhouettes, on a view that
 //!   doesn't look along its axis (a face, [`ModelFace`]).
+//! - **Silhouettes** (W20b): between a silhouette of one cylinder and a silhouette of another, each
+//!   named by its face and by whether it is the one nearer the other cylinder or the one farther,
+//!   as the view shows them ([`Silhouette`]). Two silhouettes of one cylinder are its diameter.
 //!
 //! A reference names its body, the feature that made the body (so a suppressed feature can be told
 //! from a deleted one) and its occurrence path (so a part placed twice has a dimension on each copy).
@@ -39,7 +42,7 @@
 //! its name, or the one edge between the faces it names, never the piece nearest an old pick; a
 //! corner where all its named edges meet, never the nearer of two; a centre the centre of its one
 //! named edge, which must be a circle or an arc; a cylinder the faces its named face is now, all
-//! on one cylinder, with both silhouettes on them. What it can't decide it says
+//! on one cylinder, with the silhouettes it measures on them. What it can't decide it says
 //! ([`Status`]), and it never chooses. [`Document::edge_reference`],
 //! [`Document::corner_reference`] and [`Document::face_reference`] turn what a command picks (a
 //! point, or an edge's or a face's index) into those names, and refuse a pick that doesn't name
@@ -50,7 +53,7 @@ use std::f64::consts::PI;
 use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
-use solidcraft_geom::drawing_measure::{self, AngleFrom, LinearDirection, Measured, Reading};
+use solidcraft_geom::drawing_measure::{self, AngleFrom, Cylinder, LinearDirection, Measured, Reading, SilhouetteSide};
 use solidcraft_geom::drawing_view::{Invalid, is_paper_coordinate};
 use solidcraft_geom::paper::MAX_SIDE_MM;
 use solidcraft_geom::{Plane, Seg2, Vec2, Vec3};
@@ -135,6 +138,18 @@ pub enum DimensionKind {
     /// A whole cylinder's diameter between its two silhouettes, on a view that doesn't look along
     /// its axis: the cylinder a face of it lies on.
     Cylinder { face: ModelFace },
+    /// The distance between a silhouette of one cylinder and a silhouette of another, as the view
+    /// shows them.
+    Silhouettes { a: Silhouette, b: Silhouette, direction: LinearDirection },
+}
+
+/// One of a cylinder's two silhouettes on a view: the cylinder by a face of it, and the side by
+/// where the other cylinder of its dimension is.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Silhouette {
+    pub face: ModelFace,
+    pub side: SilhouetteSide,
 }
 
 /// An edge of a body, by its persistent name.
@@ -254,9 +269,11 @@ impl Drawing {
                 let instead = || "a chain shows its members' numbers, never a text instead".into();
                 require(d.override_text.is_none(), instead)?;
             }
-            DimensionKind::Cylinder { face } => {
-                check_body(&face.body, face.origin_feature, &face.path)?;
-                check_reference_name(&face.name)?;
+            DimensionKind::Cylinder { face } => check_face(face)?,
+            DimensionKind::Silhouettes { a, b, direction } => {
+                check_face(&a.face)?;
+                check_face(&b.face)?;
+                check_direction(*direction, Reading::Projected)?;
             }
         }
         let off_paper = || format!("its offset and its text's place are at most {MAX_SIDE_MM} mm on paper");
@@ -288,6 +305,11 @@ pub(super) fn check_edge(edge: &ModelEdge) -> Result<()> {
 }
 
 /// A point reference's rules.
+fn check_face(face: &ModelFace) -> Result<()> {
+    check_body(&face.body, face.origin_feature, &face.path)?;
+    check_reference_name(&face.name)
+}
+
 fn check_point(point: &ModelPoint) -> Result<()> {
     check_body(&point.body, point.origin_feature, &point.path)?;
     if point.centre {
@@ -344,7 +366,9 @@ pub struct Resolved {
     pub exact: bool,
     /// What it measures, in the design's frame: a linear dimension's two points, an angle's two
     /// lines (four points, each line from its first to its second), a radial dimension's
-    /// centre and its arc's start, middle and end, or a chain's points. Empty unless measured.
+    /// centre and its arc's start, middle and end, a chain's points, or the ends of each silhouette
+    /// measured (a cylinder's two, from its faces' one end along its axis to the other). Empty
+    /// unless measured.
     pub points: Vec<Vec3>,
 }
 
@@ -430,6 +454,22 @@ impl Document {
         Ok(ModelFace { body: b.name.clone(), origin_feature: b.feature, name, path: path.to_vec() })
     }
 
+    /// What a dimension between silhouettes `a` and `b` is on `model` (this design's): when both
+    /// faces lie on one cylinder of one body placed once, that cylinder's diameter, which takes no
+    /// direction; else the distance between them along `direction`, aligned if none.
+    pub fn silhouettes_kind(&self, model: &Model, a: Silhouette, b: Silhouette, direction: Option<LinearDirection>) -> Result<DimensionKind> {
+        let mut lookup = Lookup::new(self, model);
+        let one = match (lookup.on_cylinder(&a.face), lookup.on_cylinder(&b.face)) {
+            (Ok(x), Ok(y)) => x.body == y.body && a.face.path == b.face.path && same_cylinder(&x.cylinder, &y.cylinder, x.tol),
+            _ => false,
+        };
+        match (one, direction) {
+            (true, Some(_)) => Err(DocError::Invalid("both silhouettes are on one cylinder: its diameter takes no direction".into())),
+            (true, None) => Ok(DimensionKind::Cylinder { face: a.face }),
+            (false, direction) => Ok(DimensionKind::Silhouettes { a, b, direction: direction.unwrap_or(LinearDirection::Aligned) }),
+        }
+    }
+
     /// The point `pick` names, as [`Document::edge_reference`] names an edge: a corner by the edges
     /// that meet there, a centre by its circle or arc. A point must be the end of 2 to
     /// [`MAX_VERTEX_EDGES`] edges of one body, edges given must meet at one point, and a centre's
@@ -505,16 +545,40 @@ pub(super) struct Lookup<'a> {
     state: Arc<ModelState>,
     /// Each named body's edge names, by its index in `state`.
     named: BTreeMap<usize, BodyEdges>,
-    /// Each body a cylinder dimension names: the cylinder each face lies on, by face.
+    /// Each body a cylinder dimension names: the cylinder each face lies on (its axis a unit
+    /// vector, in the body's own frame), by face.
     cylinders: BTreeMap<usize, Vec<Option<Cylinder>>>,
 }
 
-/// A cylinder: a point on its axis, its unit axis and its radius, in its body's own frame.
-#[derive(Clone, Copy, Debug)]
-struct Cylinder {
-    origin: Vec3,
-    axis: Vec3,
-    radius: f64,
+/// The cylinder a face lies on as the model has it now ([`Lookup::on_cylinder`]).
+struct OnCylinder {
+    /// In the design's frame, its axis a unit vector.
+    cylinder: Cylinder,
+    /// The body's index, and the corners of its faces' triangles on the cylinder, in the design's
+    /// frame.
+    body: usize,
+    corners: Vec<[Vec3; 3]>,
+    /// The kernel's tolerance for faces on one cylinder of the body.
+    tol: f64,
+    exact: bool,
+}
+
+impl OnCylinder {
+    /// Whether the silhouette `way` from the axis (a unit vector square to it) lies on the faces:
+    /// a triangle of them lies across it.
+    fn covers(&self, way: Vec3) -> bool {
+        let Cylinder { origin, axis, radius } = self.cylinder;
+        let round = |p: Vec3| (p - origin).dot(axis.cross(way)).atan2((p - origin).dot(way));
+        self.corners.iter().any(|t| straddles(t.map(round), self.tol / radius.max(self.tol)))
+    }
+
+    /// That silhouette's ends, from the faces' one end along the axis to the other.
+    fn ends(&self, way: Vec3) -> [Vec3; 2] {
+        let Cylinder { origin, axis, radius } = self.cylinder;
+        let along = |p: &Vec3| (*p - origin).dot(axis);
+        let (low, high) = self.corners.iter().flatten().fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), p| (lo.min(along(p)), hi.max(along(p))));
+        [origin + axis * low + way * radius, origin + axis * high + way * radius]
+    }
 }
 
 /// What a dimension measures, found and measured: a chain's overall, and its members.
@@ -617,6 +681,7 @@ impl<'a> Lookup<'a> {
                 Ok(Found { measured: chain.overall, members: chain.members, points, exact })
             }
             DimensionKind::Cylinder { face } => self.cylinder(face, basis),
+            DimensionKind::Silhouettes { a, b, direction } => self.silhouettes(a, b, *direction, basis),
         }
     }
 
@@ -731,11 +796,9 @@ impl<'a> Lookup<'a> {
         Ok((centre, found.exact))
     }
 
-    /// The whole cylinder `face` lies on (or the pieces it was cut into, all on one cylinder) and
-    /// its diameter between its two silhouettes on the view through `basis`: both must lie on the
-    /// body's faces on that cylinder, so a fillet's quarter round is refused. Its points are the
-    /// silhouettes' ends, each from the faces' one end along the axis to the other.
-    fn cylinder(&mut self, face: &ModelFace, basis: &Plane) -> std::result::Result<Found, Status> {
+    /// The cylinder `face` lies on (or the pieces it was cut into, all on one cylinder), with every
+    /// face of the body on that cylinder.
+    fn on_cylinder(&mut self, face: &ModelFace) -> std::result::Result<OnCylinder, Status> {
         let (i, frame) = self.body(&face.body, face.origin_feature, &face.path)?;
         let state = Arc::clone(&self.state);
         let b = state.bodies.get(i).ok_or_else(|| Status::Lost("its body no longer exists".into()))?;
@@ -757,25 +820,41 @@ impl<'a> Lookup<'a> {
             return Err(Status::Ambiguous(candidates()));
         }
         let faces: Vec<usize> = (0..cylinders.len()).filter(|f| on(f).is_some_and(|c| same_cylinder(&first, &c, tol))).collect();
-        // In the design's frame.
-        let origin = apply_point(&frame, first.origin);
         let axis = apply_vector(&frame, first.axis).normalized().ok_or_else(|| Status::Lost("its occurrence flattens it".into()))?;
-        let side = drawing_measure::silhouette_side(basis, axis).map_err(|e| Status::Unmeasurable(e.0.to_string()))?;
-        let corners = face_corners(b, &frame, &faces);
-        let slack = tol / first.radius.max(tol);
-        let covered =
-            |side: Vec3| corners.iter().any(|t| straddles(t.map(|p| (p - origin).dot(axis.cross(side)).atan2((p - origin).dot(side))), slack));
-        if !(covered(side) && covered(-side)) {
+        let cylinder = Cylinder { origin: apply_point(&frame, first.origin), axis, radius: first.radius };
+        Ok(OnCylinder { cylinder, body: i, corners: face_corners(b, &frame, &faces), tol, exact })
+    }
+
+    /// The diameter of the whole cylinder `face` lies on, between its two silhouettes on the view
+    /// through `basis`: both must lie on the body's faces on that cylinder, so a fillet's quarter
+    /// round is refused. Its points are the silhouettes' ends.
+    fn cylinder(&mut self, face: &ModelFace, basis: &Plane) -> std::result::Result<Found, Status> {
+        let on = self.on_cylinder(face)?;
+        let side = drawing_measure::silhouette_side(basis, on.cylinder.axis).map_err(|e| Status::Unmeasurable(e.0.to_string()))?;
+        if !(on.covers(side) && on.covers(-side)) {
             return Err(Status::Unmeasurable(format!(
                 "face `{}` isn't a whole cylinder in this view: one of its silhouettes isn't on it (give an arc's radius)",
                 face.name
             )));
         }
-        let along = |p: Vec3| (p - origin).dot(axis);
-        let (low, high) = corners.iter().flatten().fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), p| (lo.min(along(*p)), hi.max(along(*p))));
-        let r = side * first.radius;
-        let points = vec![origin + axis * low + r, origin + axis * high + r, origin + axis * low - r, origin + axis * high - r];
-        Ok(Found { measured: Measured { value: 2.0 * first.radius, foreshortened: false }, members: Vec::new(), points, exact })
+        let measured = Measured { value: 2.0 * on.cylinder.radius, foreshortened: false };
+        Ok(Found { measured, members: Vec::new(), points: [on.ends(side), on.ends(-side)].concat(), exact: on.exact })
+    }
+
+    /// The distance between silhouettes `a` and `b` on the view through `basis`, each on its
+    /// cylinder's faces. Its points are the two silhouettes' ends, `a`'s first.
+    fn silhouettes(&mut self, a: &Silhouette, b: &Silhouette, direction: LinearDirection, basis: &Plane) -> std::result::Result<Found, Status> {
+        let (on_a, on_b) = (self.on_cylinder(&a.face)?, self.on_cylinder(&b.face)?);
+        let between = drawing_measure::between_silhouettes(basis, &on_a.cylinder, a.side, &on_b.cylinder, b.side, direction);
+        let (measured, [way_a, way_b]) = between.map_err(|e| Status::Unmeasurable(e.0.to_string()))?;
+        for (on, way, s) in [(&on_a, way_a, a), (&on_b, way_b, b)] {
+            if !on.covers(way) {
+                let side = if s.side == SilhouetteSide::Near { "near" } else { "far" };
+                return Err(Status::Unmeasurable(format!("face `{}`'s {side} silhouette in this view isn't on it", s.face.name)));
+            }
+        }
+        let points = [on_a.ends(way_a), on_b.ends(way_b)].concat();
+        Ok(Found { measured, members: Vec::new(), points, exact: on_a.exact && on_b.exact })
     }
 }
 

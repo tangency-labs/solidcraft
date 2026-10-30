@@ -366,6 +366,45 @@ fn a_cylinder_dimension_saves_its_face() {
     assert!(changed("edges", json!(["F4:boss"])).starts_with("damaged drawing: "), "a face has no edges");
 }
 
+/// A dimension between two cylinders' silhouettes saves each one's face and side, and its
+/// direction; each face keeps a reference's rules, a side is near or far, and it reads as the view
+/// shows it (no `reading`).
+#[test]
+fn a_silhouettes_dimension_saves_each_face_and_side() {
+    let (mut d, _) = measured();
+    let (view, id) = (d.views[0].id, d.allocate_id(&mut IdSource::seeded(SEED + 1)).unwrap());
+    let face = |name: &str| ModelFace { body: BODY.into(), origin_feature: FEATURE, name: name.into(), path: Vec::new() };
+    let (a, b) = (Silhouette { face: face("F4:boss"), side: SilhouetteSide::Near }, Silhouette { face: face("F5:pin"), side: SilhouetteSide::Far });
+    let kind = DimensionKind::Silhouettes { a, b, direction: LinearDirection::Vertical };
+    d.add_dimensions([Arc::new(Dimension {
+        id,
+        view,
+        kind,
+        offset_mm: 6.0,
+        text: TextPlace::Centred,
+        decimals: 1,
+        override_text: None,
+        last_good: None,
+    })]);
+    d.validate().unwrap();
+    let silhouettes = ids::encode(id);
+    let mut v = file(&d);
+    let face = |name: &str| json!({"body": "Box", "origin_feature": 7, "name": name});
+    let saved = json!({"silhouettes": {"a": {"face": face("F4:boss"), "side": "near"}, "b": {"face": face("F5:pin"), "side": "far"}, "direction": "vertical"}});
+    assert_eq!(dim(&mut v, &silhouettes)["kind"], saved);
+    assert_eq!(Drawing::from_json(&v.to_string()).unwrap(), d);
+    let rule = |rule: &str| format!("damaged drawing: dimension {silhouettes}: {rule}");
+    let changed = |edit: &dyn Fn(&mut Value)| refused(&d, |v| edit(&mut dim(v, &silhouettes)["kind"]["silhouettes"]));
+    assert_eq!(changed(&|k| k["b"]["face"]["name"] = json!("")), rule("a name in a reference is 1 to 512 bytes, without control characters"));
+    assert_eq!(changed(&|k| k["a"]["face"]["origin_feature"] = json!(0)), rule("a reference names the feature that made its body"));
+    assert_eq!(changed(&|k| k["direction"] = json!({"along": [0.0, 0.0]})), rule("the direction to measure along is zero or not finite"));
+    let malformed: [fn(&mut Value); 3] = [|k| k["a"]["side"] = json!("left"), |k| k["reading"] = json!("true"), |k| k["b"]["edges"] = json!([])];
+    for edit in malformed {
+        let why = changed(&edit);
+        assert!(why.starts_with("damaged drawing: "), "{why}");
+    }
+}
+
 /// A direction along a picked line saves as its plane coordinates and reads back as the same
 /// direction: what W19a measures along.
 #[test]

@@ -7,14 +7,16 @@ use std::sync::Arc;
 use serde_json::{Value, json};
 use solidcraft_doc::ModelBody;
 use solidcraft_doc::appearance::face_index_at;
-use solidcraft_doc::drawing::dimension::{Candidate, Dimension, DimensionKind, ModelEdge, ModelFace, ModelPoint, Resolved, Status, TextPlace};
+use solidcraft_doc::drawing::dimension::{
+    Candidate, Dimension, DimensionKind, ModelEdge, ModelFace, ModelPoint, Resolved, Silhouette, Status, TextPlace,
+};
 use solidcraft_doc::drawing::view::{View, ViewKind, ViewPlace};
 use solidcraft_doc::drawing::{Drawing, Source, Units};
 use solidcraft_doc::drawing_view::{ViewDirection, ViewOverrides};
 use solidcraft_doc::ids::IdSource;
 use solidcraft_doc::naming::{edge_names, face_names};
 use solidcraft_geom::Vec3;
-use solidcraft_geom::drawing_measure::{LinearDirection, Reading};
+use solidcraft_geom::drawing_measure::{LinearDirection, Reading, SilhouetteSide};
 use solidcraft_geom::drawing_sheet::{Orientation, PaperSize, Sheet};
 use solidcraft_geom::drawing_view::{NamedView, ProjectedSide};
 
@@ -437,6 +439,45 @@ fn a_cylinders_diameter_is_found_through_all_its_faces() {
     run(&mut f.s, "timeline.suppress", json!({"feature": boss, "suppressed": true}));
     let r = f.resolve(front);
     assert!(matches!(&r.status, Status::Lost(why) if why.contains("no longer exists")), "{r:?}");
+}
+
+/// Two bosses along X on the box's right face, radius 5 at z = 15 and radius 3 at z = 25: in the
+/// front view the big one's near silhouette (z = 20) is 8 from the small one's far one (z = 28),
+/// exactly, each silhouette from x = 80 to 100. The right view looks along their axes. A flat cut
+/// along the small boss's top takes its far silhouette away; with the small boss suppressed it is
+/// lost.
+#[test]
+fn two_cylinders_silhouettes_are_found_on_their_faces() {
+    let mut f = boxed();
+    for (radius, z) in [(5, 15), (3, 25)] {
+        run(
+            &mut f.s,
+            "solid.cylinder",
+            json!({"radius": radius, "height": 20, "base": [80, 20, z], "axis": "X", "operation": "join", "targets": ["Box"]}),
+        );
+    }
+    let small = f.s.doc.features.last().unwrap().name.clone();
+    let below = |r: f64, z: f64| [90.0, 20.0 - r * 0.5, z - r * 30f64.to_radians().cos()];
+    let a = Silhouette { face: f.face(below(5.0, 15.0)), side: SilhouetteSide::Near };
+    let b = Silhouette { face: f.face(below(3.0, 25.0)), side: SilhouetteSide::Far };
+    let kind = DimensionKind::Silhouettes { a, b, direction: LinearDirection::Aligned };
+    let (front, right) = (f.add(f.front, kind.clone(), None), f.add(f.right, kind, None));
+    let r = f.resolve(front);
+    assert_reads(&r, 8.0, false);
+    assert!(r.exact, "{r:?}");
+    let [a, b, c, d] = r.points.as_slice() else { panic!("{r:?}") };
+    // Each from one end of the faces along the axis to the other, whichever way the axis runs.
+    let at = |p: &Vec3, x: f64, z: f64| (p.x - x).abs() < 1e-6 && (p.y - 20.0).abs() < 1e-9 && (p.z - z).abs() < 1e-9;
+    let runs = |p, q, z| (at(p, 80.0, z) && at(q, 100.0, z)) || (at(p, 100.0, z) && at(q, 80.0, z));
+    assert!(runs(a, b, 20.0) && runs(c, d, 28.0), "{:?}", r.points);
+    let r = f.resolve(right);
+    assert!(matches!(&r.status, Status::Unmeasurable(why) if why.contains("end-on")), "{r:?}");
+    run(&mut f.s, "solid.box", json!({"length": 31, "width": 50, "height": 10, "corner": [79, -1, 27], "operation": "cut", "targets": ["Box"]}));
+    let r = f.resolve(front);
+    assert!(matches!(&r.status, Status::Unmeasurable(why) if why.contains("far silhouette in this view isn't on it")), "{r:?}");
+    run(&mut f.s, "timeline.suppress", json!({"feature": small, "suppressed": true}));
+    let r = f.resolve(front);
+    assert!(matches!(&r.status, Status::Lost(_) | Status::Suppressed), "{r:?}");
 }
 
 /// A slot through the front face splits it, and the top front edge with it; an angle is put on the

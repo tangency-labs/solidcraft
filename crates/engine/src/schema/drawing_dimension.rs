@@ -13,7 +13,7 @@ use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::{Map, Value};
 use solidcraft_doc::MAX_PLACEMENT_DEPTH;
 use solidcraft_doc::drawing::dimension::{CornerPick, EdgePick, TextPlace};
-use solidcraft_geom::drawing_measure::{LinearDirection, Reading};
+use solidcraft_geom::drawing_measure::{LinearDirection, Reading, SilhouetteSide};
 
 use super::drawing_view::ViewIdParam;
 use crate::params;
@@ -44,6 +44,17 @@ pub struct CornerParam {
 pub struct FaceParam {
     pub pick: EdgePick,
     pub path: Vec<u64>,
+}
+
+/// One of a cylinder's silhouettes to measure from: a face on the cylinder, and which silhouette.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+#[schemars(deny_unknown_fields)]
+pub struct SilhouetteParam {
+    pub face: FaceParam,
+    /// `near` (the one nearer the other cylinder on the view) or `far`.
+    #[schemars(with = "String")]
+    pub side: SilhouetteSide,
 }
 
 /// An object's keys, each one of `allowed`.
@@ -241,6 +252,16 @@ pub enum KindParam {
     Cylinder {
         /// A face on the cylinder.
         face: FaceParam,
+    },
+    /// The distance between a silhouette of one cylinder and a silhouette of another, as the view
+    /// shows them; two of one cylinder make its `cylinder` dimension.
+    Silhouettes {
+        a: SilhouetteParam,
+        b: SilhouetteParam,
+        /// As a linear dimension's; `aligned` (the default) is square to the silhouettes.
+        #[serde(default, deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]
+        #[schemars(with = "Value")]
+        direction: Option<LinearDirection>,
     },
     /// The distances from each point to the next, in order along one line as the view shows them.
     Chain {

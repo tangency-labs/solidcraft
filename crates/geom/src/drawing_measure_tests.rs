@@ -210,6 +210,51 @@ fn a_cylinders_silhouettes_are_square_to_its_axis_and_the_view() {
     refused(silhouette_side(&Plane { x: Vec3::new(2.0, 0.0, 0.0), ..front() }, Vec3::X), "basis");
 }
 
+fn cylinder(origin: Vec3, axis: Vec3, radius: f64) -> Cylinder {
+    Cylinder { origin, axis, radius }
+}
+
+/// Two shafts along X in the front view, radius 5 at the origin and radius 3 at z = 30: near to
+/// near 22, near to far 28, far to near 32, far to far 38, whichever is given first; the same up
+/// the view and 22√2 along (1, 1). Behind the first, or leaning back, the second still reads 22,
+/// foreshortened. In the isometric view, two posts along Z read 10√2 between their axes.
+#[test]
+fn two_cylinders_read_between_the_silhouettes_given() {
+    use SilhouetteSide::{Far, Near};
+    let (a, b) = (cylinder(Vec3::ZERO, Vec3::X, 5.0), cylinder(Vec3::new(0.0, 0.0, 30.0), Vec3::X * 2.0, 3.0));
+    let read = |a: &Cylinder, a_side, b: &Cylinder, b_side, direction| between_silhouettes(&front(), a, a_side, b, b_side, direction);
+    let is = |read: Result<(Measured, [Vec3; 2])>, value, foreshortened| {
+        let (v, f) = reads(read.map(|(m, _)| m));
+        assert!(close(v, value) && f == foreshortened, "{v} {f}, not {value} {foreshortened}");
+    };
+    for (a_side, b_side, value) in [(Near, Near, 22.0), (Near, Far, 28.0), (Far, Near, 32.0), (Far, Far, 38.0)] {
+        is(read(&a, a_side, &b, b_side, Aligned), value, false);
+        is(read(&b, b_side, &a, a_side, Vertical), value, false);
+    }
+    let (m, ways) = read(&a, Near, &b, Near, Along(Vec2::new(1.0, 1.0))).unwrap();
+    assert!(close(m.value, 22.0 * 2f64.sqrt()) && ways[0].dist(Vec3::Z) < 1e-12 && ways[1].dist(-Vec3::Z) < 1e-12, "{m:?} {ways:?}");
+    let behind = cylinder(Vec3::new(0.0, 40.0, 30.0), -Vec3::X, 3.0);
+    is(read(&a, Near, &behind, Near, Aligned), 22.0, true);
+    let leaning = cylinder(Vec3::new(0.0, 0.0, 30.0), Vec3::new(1.0, 1.0, 0.0), 3.0);
+    is(read(&a, Near, &leaning, Near, Aligned), 22.0, true);
+    let posts = (cylinder(Vec3::ZERO, Vec3::Z, 2.0), cylinder(Vec3::new(10.0, 10.0, -7.0), Vec3::Z, 1.0));
+    is(between_silhouettes(&iso(), &posts.0, Near, &posts.1, Near, Aligned), 200f64.sqrt() - 3.0, false);
+
+    refused(read(&a, Near, &cylinder(Vec3::new(30.0, 0.0, 0.0), Vec3::Z, 3.0), Near, Aligned), "aren't parallel");
+    refused(read(&a, Near, &cylinder(Vec3::new(20.0, 10.0, 0.0), Vec3::X, 3.0), Near, Aligned), "one line in this view");
+    refused(read(&a, Near, &cylinder(Vec3::new(0.0, 0.0, 10.0), Vec3::X, 5.0), Near, Aligned), "would read 0");
+    refused(read(&a, Near, &b, Near, Horizontal), "run along the direction");
+    refused(read(&a, Near, &b, Near, Along(Vec2::ZERO)), "zero or not finite");
+    refused(read(&cylinder(Vec3::ZERO, Vec3::Y, 5.0), Near, &b, Near, Aligned), "end-on");
+    refused(read(&a, Near, &cylinder(b.origin, Vec3::ZERO, 3.0), Near, Aligned), "axis");
+    for radius in [0.0, -1.0, f64::NAN, f64::INFINITY, 2e12] {
+        refused(read(&a, Near, &cylinder(b.origin, Vec3::X, radius), Near, Aligned), "a radius over 0");
+    }
+    refused(read(&cylinder(Vec3::new(f64::NAN, 0.0, 0.0), Vec3::X, 5.0), Near, &b, Near, Aligned), "a radius over 0");
+    refused(read(&cylinder(Vec3::new(2e12, 0.0, 0.0), Vec3::X, 5.0), Near, &b, Near, Aligned), "a radius over 0");
+    refused(between_silhouettes(&Plane { x: Vec3::new(2.0, 0.0, 0.0), ..front() }, &a, Near, &b, Near, Aligned), "basis");
+}
+
 fn random(state: &mut u64) -> u64 {
     *state ^= *state << 13;
     *state ^= *state >> 7;
@@ -222,12 +267,13 @@ fn random(state: &mut u64) -> u64 {
 /// along the view's normal), 20,000 seeded cases: nothing panics; across² + up² = aligned²; a
 /// projected aligned length is never more than the true one; every angle is from 0 to π, and a
 /// true angle and its projection agree in a view square to both lines; a chain's members are each
-/// more than 0 and add up to its overall.
+/// more than 0 and add up to its overall; between two cylinders parallel on the view, far to far
+/// is the most of the four, and aligned the least of the directions.
 #[test]
 fn measurements_seeded_never_panic_and_keep_their_rules() {
     let mut seed = 0x4896_19a0_d1e5_7c3b;
     let hostile = [0.0, -0.0, 1e-10, 1e12, 1.1e12, f64::NAN, f64::INFINITY, f64::NEG_INFINITY, 1e300, -5.0];
-    let (mut lengths, mut angles, mut chains) = (0, 0, 0);
+    let (mut lengths, mut angles, mut chains, mut silhouettes) = (0, 0, 0, 0);
     for case in 0..20_000 {
         let tidy = !random(&mut seed).is_multiple_of(4);
         let number = |seed: &mut u64| {
@@ -269,11 +315,29 @@ fn measurements_seeded_never_panic_and_keep_their_rules() {
                 }
             }
         }
+        // The second axis is the first, leaning toward or from the view, so the two are parallel there.
+        let first = Cylinder { origin: a, axis: c - d, radius: number(&mut seed).abs() };
+        let second = Cylinder { origin: b, axis: (c - d) + basis.normal() * number(&mut seed), radius: number(&mut seed).abs() };
+        let read = |a_side, b_side, direction| between_silhouettes(&basis, &first, a_side, &second, b_side, direction).map(|(m, _)| m.value).ok();
+        let far = read(SilhouetteSide::Far, SilhouetteSide::Far, Aligned);
+        let sides = [SilhouetteSide::Near, SilhouetteSide::Far];
+        for (a_side, b_side) in sides.iter().flat_map(|a| sides.map(|b| (*a, b))) {
+            let aligned = read(a_side, b_side, Aligned);
+            if let (Some(v), Some(far)) = (aligned, far) {
+                silhouettes += 1;
+                assert!(v.is_finite() && v > EPS && v <= far * (1.0 + 1e-9), "case {case}: {v} {far}");
+            }
+            for direction in [Horizontal, Vertical, Along(along)] {
+                if let (Some(v), Some(slanted)) = (aligned, read(a_side, b_side, direction)) {
+                    assert!(v <= slanted * (1.0 + 1e-9), "case {case}: {v} {slanted}");
+                }
+            }
+        }
         if let (Ok(drawn), Ok(model)) = (angle(&basis, (a, b), Edge(c, d), Projected), angle(&basis, (a, b), Edge(c, d), True))
             && !drawn.foreshortened
         {
             assert!((drawn.value - model.value).abs() <= 1e-6, "case {case}: {drawn:?} {model:?}");
         }
     }
-    assert!(lengths > 5_000 && angles > 20_000 && chains > 2_000, "lengths {lengths}, angles {angles}, chains {chains}");
+    assert!(lengths > 5_000 && angles > 20_000 && chains > 2_000 && silhouettes > 20_000, "{lengths} {angles} {chains} {silhouettes}");
 }

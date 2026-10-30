@@ -389,6 +389,67 @@ fn a_cylinders_diameter_is_read_between_its_silhouettes() {
     assert_eq!(s.drawing("test").unwrap().to_json().unwrap(), before);
 }
 
+/// Two bosses along X on the box's right face, radius 5 at z = 15 and radius 3 at z = 25, in the
+/// front view: near to near 2, near to far 8, far to near 12 and far to far 18, saved by each
+/// face's name and side; up the view the same. Two faces of one boss make its Ø10, which takes no
+/// direction. Its edit takes a direction only. Refused, with the drawing unchanged: a flat face, a
+/// fillet's quarter round on the side its silhouette isn't on, a hole seen end-on, and a side that
+/// is neither near nor far.
+#[test]
+fn two_cylinders_read_between_the_silhouettes_given() {
+    let (mut s, view) = front_view();
+    let drawing = s.drawing("test").unwrap().id;
+    run(&mut s, "drawing.close", json!({}));
+    for (radius, z) in [(5, 15), (3, 25)] {
+        let boss = json!({"radius": radius, "height": 20, "base": [80, 20, z], "axis": "X", "operation": "join", "targets": ["Box"]});
+        run(&mut s, "solid.cylinder", boss);
+    }
+    run(&mut s, "solid.fillet", json!({"edges": [[40, 0, 30]], "radius": 4, "body": "Box"}));
+    run(&mut s, "solid.cylinder", json!({"radius": 3, "height": 42, "base": [20, -1, 15], "axis": "Y", "operation": "cut", "targets": ["Box"]}));
+    run(&mut s, "drawing.open", json!({"drawing": ids::encode(drawing)}));
+    // Each 30° round from its boss's top, away from where its two half faces meet.
+    let on = |r: f64, z: f64| json!([90.0, 20.0 + r * 30f64.to_radians().sin(), z + r * 30f64.to_radians().cos()]);
+    let (big, small) = (on(5.0, 15.0), on(3.0, 25.0));
+    let between = |a: &str, b: &str| json!({"silhouettes": {"a": {"face": big, "side": a}, "b": {"face": small, "side": b}}});
+    for (a, b, value) in [("near", "near", 2.0), ("near", "far", 8.0), ("far", "near", 12.0), ("far", "far", 18.0)] {
+        let added = add(&mut s, view, between(a, b));
+        reads(&added, value, &format!("{value:.2}"));
+        assert_eq!((added["exact"].clone(), added["foreshortened"].clone()), (json!(true), json!(false)), "{added}");
+        let saved = &added["record"]["kind"]["silhouettes"];
+        assert!(saved["a"]["side"] == a && saved["b"]["side"] == b && saved["direction"] == "aligned", "{saved}");
+        assert_eq!(saved["a"]["face"]["body"], "Box", "{saved}");
+        let up = edit(&mut s, &added["dimension"], json!({"direction": "vertical"}));
+        assert_eq!(up["changed"], json!(["direction"]), "{up}");
+        reads(&run(&mut s, INSPECT, json!({"dimension": added["dimension"]})), value, &format!("{value:.2}"));
+    }
+    let other_half = on(-5.0, 15.0);
+    let one = add(&mut s, view, json!({"silhouettes": {"a": {"face": big, "side": "near"}, "b": {"face": other_half, "side": "far"}}}));
+    reads(&one, 10.0, "Ø10.00");
+    assert!(one["record"]["kind"]["cylinder"]["face"]["name"].is_string(), "{one}");
+    let id = add(&mut s, view, between("near", "near"))["dimension"].clone();
+    let before = s.drawing("test").unwrap().to_json().unwrap();
+    let e = s.execute(EDIT, &json!({"dimension": id, "set": {"reading": "true"}})).err().map(|e| e.to_string()).unwrap_or_default();
+    assert!(e.contains("only `direction`"), "{e}");
+    let v = ids::encode(view);
+    let with =
+        |b: Value, side: &str| json!({"view": v, "kind": {"silhouettes": {"a": {"face": big, "side": "near"}, "b": {"face": b, "side": side}}}});
+    let on_fillet = [40.0, 4.0 - 4.0 * 45f64.to_radians().cos(), 26.0 + 4.0 * 45f64.to_radians().sin()];
+    let halves = json!({"view": v, "kind": {"silhouettes": {"a": {"face": big, "side": "near"}, "b": {"face": other_half, "side": "far"},
+        "direction": "vertical"}}});
+    let cases = [
+        (halves, "takes no direction"),
+        (with(json!([40, 0, 10]), "near"), "isn't a cylinder"),
+        (with(json!(on_fillet), "near"), "near silhouette in this view isn't on it"),
+        (with(json!([23, 20, 15]), "near"), "the cylinder is seen end-on in this view"),
+        (with(small.clone(), "left"), "unknown variant `left`"),
+    ];
+    for (p, why) in cases {
+        let e = refused(&mut s, p.clone());
+        assert!(e.contains(why), "{p}: {e}");
+    }
+    assert_eq!(s.drawing("test").unwrap().to_json().unwrap(), before);
+}
+
 /// A dimension whose edge is filleted away has no value, and gives the one it last read this
 /// session as its last good value.
 #[test]
@@ -511,6 +572,11 @@ fn hostile_dimension_params_never_panic() {
         ),
         (EDIT, json!({"dimension": chain, "set": {"direction": {"along": [1, 1]}, "decimals": 3}})),
         (ADD, json!({"view": v, "kind": {"cylinder": {"face": {"body": "Box", "index": 0, "path": [1]}}}})),
+        (
+            ADD,
+            json!({"view": v, "kind": {"silhouettes": {"a": {"face": {"body": "Box", "index": 0, "path": [1]}, "side": "near"},
+            "b": {"face": [0, 0, 15], "side": "far"}, "direction": {"along": [1, 1]}}}}),
+        ),
         (
             EDIT,
             json!({"dimension": id, "set": {"offset_mm": 5, "text": "centred", "decimals": 1, "override_text": null, "direction": "vertical",

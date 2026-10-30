@@ -127,9 +127,77 @@ pub fn chain(basis: &Plane, points: &[Vec3], direction: LinearDirection) -> Resu
 /// its silhouettes reads true.
 pub fn silhouette_side(basis: &Plane, axis: Vec3) -> Result<Vec3> {
     validate_plane(basis).map_err(|_| Invalid("a view's basis is finite and orthonormal"))?;
-    let axis = axis.normalized().ok_or(Invalid("the cylinder's axis is zero or not finite"))?;
+    let axis = unit_axis(axis)?;
     // A view along the axis makes this zero, which `normalized` refuses.
     basis.normal().cross(axis).normalized().ok_or(Invalid("the cylinder is seen end-on in this view: its rim is a circle"))
+}
+
+/// A cylinder as a measurement takes it (model): a point on its axis, its axis, and its radius.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Cylinder {
+    pub origin: Vec3,
+    pub axis: Vec3,
+    pub radius: f64,
+}
+
+/// Which of a cylinder's two silhouettes on a view, by where another cylinder is there: the one
+/// nearer to the other's axis, or the one farther from it. Named so, a dimension between two
+/// cylinders keeps to the silhouettes it was given whichever way round the view shows them.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SilhouetteSide {
+    Near,
+    Far,
+}
+
+/// The distance between silhouette `a_side` of cylinder `a` and silhouette `b_side` of cylinder
+/// `b` as the view through `basis` shows them, along `direction` as [`linear`] takes it (aligned:
+/// square to the silhouettes). The silhouettes must be parallel on the view, and the axes apart
+/// there, or near and far would mean nothing. Also the ways from each axis to its silhouette, for
+/// where the dimension is drawn. Foreshortened when the axes aren't parallel in the model or the
+/// silhouettes lie at different depths.
+pub fn between_silhouettes(
+    basis: &Plane,
+    a: &Cylinder,
+    a_side: SilhouetteSide,
+    b: &Cylinder,
+    b_side: SilhouetteSide,
+    direction: LinearDirection,
+) -> Result<(Measured, [Vec3; 2])> {
+    let round = |c: &Cylinder| model_point(c.origin) && c.radius > EPS && c.radius <= MAX_NUMBER;
+    require(round(a) && round(b), "a cylinder has a point on its axis within 1e12 mm of the origin, and a radius over 0")?;
+    let (wa, wb) = (silhouette_side(basis, a.axis)?, silhouette_side(basis, b.axis)?);
+    require(wa.cross(wb).len() <= PARALLEL, "the cylinders' silhouettes aren't parallel in this view")?;
+    // How far b's axis is from a's on the view, square to them.
+    let gap = (b.origin - a.origin).dot(wa);
+    require(gap.abs() > EPS, "the cylinders' axes are one line in this view: give each one's diameter instead")?;
+    let toward = wa * gap.signum();
+    let way = |side, toward: Vec3| if side == SilhouetteSide::Near { toward } else { -toward };
+    let (a_way, b_way) = (way(a_side, toward), way(b_side, -toward));
+    let (pa, pb) = (a.origin + a_way * a.radius, b.origin + b_way * b.radius);
+    let across = (pb - pa).dot(toward);
+    let along = match direction {
+        LinearDirection::Aligned => None,
+        LinearDirection::Horizontal => Some(Vec2::X),
+        LinearDirection::Vertical => Some(Vec2::Y),
+        LinearDirection::Along(v) => Some(v.normalized().ok_or(Invalid("the direction to measure along is zero or not finite"))?),
+    };
+    let value = match along {
+        None => across.abs(),
+        // Along a direction, as far as a line that way runs from one silhouette to the other.
+        Some(v) => {
+            let slant = Vec2::new(toward.dot(basis.x), toward.dot(basis.y)).dot(v);
+            require(slant.abs() > PARALLEL, "the silhouettes run along the direction to measure: it never crosses from one to the other")?;
+            (across / slant).abs()
+        }
+    };
+    require(value > EPS, "the dimension would read 0: the silhouettes are one line in this view")?;
+    // Parallel in the model, the silhouettes are as far apart as the view shows when the line square
+    // to both lies in the view's plane.
+    let (ua, ub) = (unit_axis(a.axis)?, unit_axis(b.axis)?);
+    let square = (pb - pa) - ua * (pb - pa).dot(ua);
+    let foreshortened = ua.cross(ub).len() > PARALLEL || out_of_plane(basis, square);
+    Ok((Measured { value, foreshortened }, [a_way, b_way]))
 }
 
 /// The angle from the line `from` to `edge` (model points, from its first to its second) on the
@@ -156,11 +224,20 @@ pub fn angle(basis: &Plane, edge: (Vec3, Vec3), from: AngleFrom, reading: Readin
 /// on a valid basis.
 fn segment(basis: &Plane, a: Vec3, b: Vec3) -> Result<Vec3> {
     validate_plane(basis).map_err(|_| Invalid("a view's basis is finite and orthonormal"))?;
-    let point = |p: Vec3| p.is_finite() && [p.x, p.y, p.z].iter().all(|v| v.abs() <= MAX_NUMBER);
-    require(point(a) && point(b), "a model point is finite and within 1e12 mm of the origin")?;
+    require(model_point(a) && model_point(b), "a model point is finite and within 1e12 mm of the origin")?;
     let d = b - a;
     require(d.len() > EPS, "a segment or edge has no length")?;
     Ok(d)
+}
+
+/// A cylinder's axis as a unit vector: refused when it is zero or not finite.
+fn unit_axis(axis: Vec3) -> Result<Vec3> {
+    axis.normalized().ok_or(Invalid("the cylinder's axis is zero or not finite"))
+}
+
+/// A model point a measurement takes: finite, and within 1e12 mm of the origin.
+fn model_point(p: Vec3) -> bool {
+    p.is_finite() && [p.x, p.y, p.z].iter().all(|v| v.abs() <= MAX_NUMBER)
 }
 
 /// `d` as the view shows it, in its plane's coordinates: refused when the view sees it end-on.
