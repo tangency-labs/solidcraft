@@ -5,7 +5,32 @@
  ],
  "what": "on #851's knife-edge part (tessellation/1263): the top front edge and the front-left upright, R2 together",
  "source": "invariants",
- "method": "the rolling ball of R2 fits on every one of these edges and where they meet; the corner between rounds that end in each other has no closed form here: one closed valid solid whose display mesh closes is the right answer (where a round ends on a face or in another round the seam is not a blend's tangent seam, so no order is graded)",
+ "method": "the rolling ball of R2 fits on every one of these edges and where they meet; the corner between rounds that end in each other has no closed form here: one closed valid solid whose display mesh closes. Each round meets the faces it rolls on G1: graded at its seams' middles (the top front round's at z = 8 on the front and y = -19 on the top; the arc's at rho 23 on the top and rho 21, z = 8 on the wall; the uprights' at their contacts, z = 5). Where a round ends on a face or on another round the seam is a crease by construction and is not graded.",
  "body_count": 1,
- "watertight": true
+ "watertight": true,
+ "continuity": {
+  "order": "g1",
+  "edges": [
+   [
+    20,
+    -21,
+    8
+   ],
+   [
+    20,
+    -19,
+    10
+   ],
+   [
+    0,
+    -19,
+    5
+   ],
+   [
+    2,
+    -21,
+    5
+   ]
+  ]
+ }
 }
