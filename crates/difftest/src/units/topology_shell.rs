@@ -3,11 +3,12 @@
 //! `RayFire` (through the B-rep's own `query::brep::BrepQuery` world), degeneracy,
 //! region ordering and filtering.
 //! Native fixtures reuse the edge-use fixture protocol: the Rust side builds a
-//! shim-built source itself ([`crate::own_builder`]) and imports only an `.smb` file's
-//! graph export.
+//! shim-built source itself ([`crate::own_builder`]) and reads an `.smb` file with the
+//! Rust reader, both in the shim's traversal order ([`crate::own_reader::brep_in_order`]);
+//! no C++ export reaches the Rust side.
 //! Setup failures fail the harness; topology and native integer flags compare exactly.
 
-use super::topology_edgeuse_p1::{fixture_input, import};
+use super::topology_edgeuse_p1::{fixture_input, BrepIn};
 
 #[path = "topology_shell/inner.rs"]
 mod inner;
@@ -209,7 +210,7 @@ fn ray_output(values: &[f64]) -> Result<Output, HarnessError> {
 }
 
 /// Upstream's file B-reps own their geometry (`SmSurface::GetFace`, `SmCurve::GetEdge`
-/// name the face and edge); the graph import leaves the owners unset. The ray's shape
+/// name the face and edge). The ray's shape
 /// solve maps a hit surface or curve back to its face or edge through that owner, so
 /// the copy gets the arena identities the ray world ([`BrepQuery::default`]) resolves.
 fn own_geometry(b: &mut solidcore::topology::Brep) -> Result<(), HarnessError> {
@@ -763,26 +764,20 @@ fn rust_transfer_records(
 }
 
 /// The Rust B-rep of the case's fixture: a shim-built source built by the Rust kernel
-/// ([`crate::own_builder`], as `topology.edgeuse_p1` builds it), an `.smb` file
-/// imported from `topology.edgeuse_p1`'s graph export; or the deferral of an unported
-/// callee of the build.
+/// ([`crate::own_builder`], as `topology.edgeuse_p1` builds it) or an `.smb` file read
+/// by the Rust reader, both in the shim's traversal order
+/// ([`crate::own_reader::brep_in_order`]); or the deferral of an unported callee of the
+/// build.
 fn own_brep(value: &Value) -> Result<Result<solidcore::topology::Brep, Output>, HarnessError> {
-    use crate::own_builder::{build_as, Built, Conventions};
+    use crate::own_builder::{Built, Conventions};
+    let src: BrepIn = serde_json::from_value(value.clone()).map_err(failure)?;
     let mut kernel = solidcore::kernel::Kernel::default();
-    match build_as(&mut kernel, value, false, false, &Conventions::EDGEUSE_GRAPH)? {
-        Some(Built::Brep(b)) => Ok(Ok(*b)),
-        Some(Built::Failed(e)) => Output::unported(&e)
+    let conv = &Conventions::EDGEUSE_GRAPH;
+    match crate::own_reader::brep_in_order(&mut kernel, &src, false, false, conv)? {
+        Built::Brep(b) => Ok(Ok(*b)),
+        Built::Failed(e) => Output::unported(&e)
             .map(Err)
             .ok_or_else(|| failure(format!("native fixture build failed: {e}"))),
-        None => {
-            let (path, block) = fixture_input(value.clone())?;
-            let export =
-                crate::export_memo::export("topology_edgeuse_p1", &[&path], &block, || {
-                    graph::eval(graph::Op::Export, &path, &block)
-                })
-                .map_err(failure)?;
-            Ok(Ok(import(&export)?))
-        }
     }
 }
 
