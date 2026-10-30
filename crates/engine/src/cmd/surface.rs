@@ -1921,7 +1921,7 @@ mod tests {
         assert!(s.doc.to_json().contains("\"continuity\""), "the continuity is saved");
         // Hostile and misplaced values.
         for (key, v) in [
-            ("continuity", json!("g3")),
+            ("continuity", json!("g5")),
             ("continuity", json!("smooth")),
             ("continuity", json!(5)),
             ("continuity", json!([{"edge": "here", "g": "g1"}])),
