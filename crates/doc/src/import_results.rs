@@ -51,7 +51,9 @@ pub struct ImportResults {
 
 impl ImportResults {
     /// The import of `step`, whose digest is `digest`: one this model has, else the one the
-    /// design file kept, else the text read now.
+    /// design file kept, else the text read now. The model keeps it for its next save, so a
+    /// feature evaluated again on the same text (after an edit before it) does not read the text
+    /// again either.
     pub fn import(&self, digest: &str, step: &str) -> kernel::Result<Arc<StepImport>> {
         if let Some(imp) = self.read.lock().unwrap_or_else(|e| e.into_inner()).get(digest) {
             return Ok(imp.clone());
