@@ -596,6 +596,8 @@ pub struct SolveApp {
     pub stand_up: Option<Vec<String>>,
     /// The placement of the component that file came in as: the offer turns it.
     pub stand_up_occurrence: Option<u64>,
+    /// Original file digest for the pending stand-up answer.
+    pub stand_up_digest: Option<String>,
     /// The file's header names an exporter that saves Y up (SolidWorks): the offer says so.
     pub stand_up_reason: bool,
     /// The file brought more than one body or a component tree: the offer says "assembly".
@@ -780,6 +782,7 @@ impl SolveApp {
             recoverable: Vec::new(),
             stand_up: None,
             stand_up_occurrence: None,
+            stand_up_digest: None,
             stand_up_reason: false,
             stand_up_assembly: false,
             stand_up_note: false,
@@ -1045,9 +1048,14 @@ impl SolveApp {
     }
 
     /// Run a command programmatically (JSON parameters, no dialogs).
-    pub fn run(&mut self, id: &str, params: Value) -> Result<Value, String> {
+    pub fn run(&mut self, id: &str, mut params: Value) -> Result<Value, String> {
         if self.file_load.busy() || self.file_picker.is_some() || self.saving.is_some() {
             return Err("a file operation is in progress".into());
+        }
+        if id == "doc.open"
+            && let Some(params) = params.as_object_mut()
+        {
+            params.entry("reuse_import").or_insert(Value::Bool(self.preferences.reuse_imports));
         }
         // Commands may start only detected slicers and the programs the user added under Custom….
         if matches!(id, "file.save_mesh" | "file.send_to_slicer") {

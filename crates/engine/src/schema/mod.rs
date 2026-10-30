@@ -58,6 +58,7 @@ pub mod component;
 pub mod construct;
 pub mod edit;
 pub mod features;
+pub mod file;
 pub mod inspect;
 pub mod render;
 pub mod render_lights;

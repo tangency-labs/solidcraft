@@ -3,7 +3,7 @@
 //! offers to stand it up: a quarter turn about X (Y → Z) of the component the file came in as
 //! (#1386), so an assembly's parts and instances turn together, in one step that can be undone.
 //! Preferences › Design › "Offer to stand up Y-up files" turns the offer off; with Y up as the
-//! default orientation it isn't needed. The file is never turned without asking.
+//! default orientation it isn't needed. A remembered answer can turn the same file silently.
 //!
 //! How it asks depends on the program the header names and on how the bodies rest (#7717):
 //! `estimate` weighs their flat area facing down Z against their flat area across Y. A file from
@@ -21,6 +21,76 @@ use serde_json::json;
 use crate::SolveApp;
 use crate::prefs::StandUpUnknown;
 use crate::ui_kit;
+
+/// Maximum remembered files; the oldest answer is evicted first.
+pub const MAX_ANSWERS: usize = 500;
+
+/// The offered rotation is +90 degrees about X, taking Y up to Z up.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Answer {
+    Leave,
+    YToZ,
+}
+
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+struct Remembered {
+    digest: String,
+    answer: Answer,
+}
+
+/// A bounded map in insertion order, kept in user preferences, never in the design.
+#[derive(Clone, Debug, Default, PartialEq, serde::Serialize)]
+#[serde(transparent)]
+pub struct Answers(std::collections::VecDeque<Remembered>);
+
+pub fn valid_digest(digest: &str) -> bool {
+    digest.len() == 64 && digest.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+}
+
+impl Answers {
+    pub fn get(&self, digest: &str) -> Option<Answer> {
+        self.0.iter().find(|entry| entry.digest == digest).map(|entry| entry.answer)
+    }
+
+    pub fn remember(&mut self, digest: String, answer: Answer) {
+        if !valid_digest(&digest) {
+            return;
+        }
+        self.0.retain(|entry| entry.digest != digest);
+        while self.0.len() >= MAX_ANSWERS {
+            self.0.pop_front();
+        }
+        self.0.push_back(Remembered { digest, answer });
+    }
+
+    pub fn clear(&mut self) {
+        self.0.clear();
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for Answers {
+    fn deserialize<D: serde::Deserializer<'de>>(saved: D) -> Result<Self, D::Error> {
+        let saved = <serde_json::Value as serde::Deserialize>::deserialize(saved)?;
+        let mut answers = Self::default();
+        if let Some(entries) = saved.as_array() {
+            for entry in entries {
+                if let Ok(entry) = serde_json::from_value::<Remembered>(entry.clone()) {
+                    answers.remember(entry.digest, entry.answer);
+                }
+            }
+        }
+        Ok(answers)
+    }
+}
+
+fn remember(app: &mut SolveApp, answer: Answer) {
+    if let Some(digest) = app.stand_up_digest.take()
+        && app.preferences.remember_stand_up
+    {
+        app.preferences.stand_up_answers.remember(digest, answer);
+    }
+}
 
 /// How long the note stays up when nobody is pointing at it, in seconds.
 pub const NOTE_SECONDS: f64 = 10.0;
@@ -150,6 +220,7 @@ pub fn estimate(app: &SolveApp, bodies: &[String]) -> Upright {
 /// new design), and the import's component placement from the command's `result`: offer to
 /// stand them up.
 pub fn offer(app: &mut SolveApp, path: &str, before: &[String], result: Option<&serde_json::Value>) {
+    clear_offer(app);
     let io = &solidcraft_engine::io::is_step_path;
     if !(io(path) || solidcraft_engine::io::is_iges_path(path)) || app.preferences.up_axis != "z" {
         return;
@@ -167,9 +238,25 @@ pub fn offer(app: &mut SolveApp, path: &str, before: &[String], result: Option<&
     if !app.preferences.offer_stand_up {
         return;
     }
+    let digest = text("content_sha256").filter(|d| valid_digest(d)).map(str::to_owned);
+    if app.preferences.remember_stand_up
+        && let Some(answer) = digest.as_deref().and_then(|d| app.preferences.stand_up_answers.get(d))
+    {
+        match answer {
+            Answer::Leave => return,
+            Answer::YToZ => {
+                app.stand_up = Some(bodies.clone());
+                app.stand_up_occurrence = occurrence;
+                match stand_up(app) {
+                    Ok(()) => return,
+                    Err(error) => app.set_status(error, true),
+                }
+            }
+        }
+    }
     // A header naming a Y-up exporter asks in the dialog, with the reason, unless the bodies
     // clearly stand on Z already (it may have been saved Z up): then only the note. The file is
-    // never turned without asking. Any other program gets what Preferences › Design says: the
+    // never turned without asking the first time. Any other program gets what Preferences › Design says: the
     // note unless the bodies clearly stand on Z (an unclear shape still gets it, so a Y-up file
     // is never left without an offer), the dialog always, or nothing. Ask is the behaviour from
     // before #7717 for every file: the dialog, without looking.
@@ -181,6 +268,7 @@ pub fn offer(app: &mut SolveApp, path: &str, before: &[String], result: Option<&
         StandUpUnknown::Note | StandUpUnknown::Off => return,
     };
     let subcomponents = result.and_then(|r| r.get("subcomponents")).and_then(serde_json::Value::as_u64).unwrap_or(0);
+    app.stand_up_digest = digest;
     app.stand_up_reason = known_y_up;
     app.stand_up_assembly = bodies.len() > 1 || subcomponents > 0;
     app.stand_up_note = note;
@@ -196,6 +284,7 @@ pub fn stand_up(app: &mut SolveApp) -> Result<(), String> {
     app.stand_up_note = false;
     app.stand_up_note_since = None;
     let Some(bodies) = app.stand_up.take() else { return Err("no file is waiting to be stood up".into()) };
+    let digest = app.stand_up_digest.take();
     match app.stand_up_occurrence.take() {
         // The import's component turns about its parent's origin, contents and all, even when it
         // came in as the design's grounded first part (#2804): it is still being placed.
@@ -205,6 +294,8 @@ pub fn stand_up(app: &mut SolveApp) -> Result<(), String> {
         None => app.run("solid.move", json!({ "bodies": bodies, "axis": [1, 0, 0], "angle": "90 deg" })),
     }
     .map_err(|e| e.to_string())?;
+    app.stand_up_digest = digest;
+    remember(app, Answer::YToZ);
     app.animate_view("home");
     Ok(())
 }
@@ -212,6 +303,12 @@ pub fn stand_up(app: &mut SolveApp) -> Result<(), String> {
 /// Dismiss the offer and keep the file as it opened ("Leave it", or the note's Close); the
 /// preference stays on.
 pub fn leave(app: &mut SolveApp) {
+    remember(app, Answer::Leave);
+    clear_offer(app);
+}
+
+fn clear_offer(app: &mut SolveApp) {
+    app.stand_up_digest = None;
     app.stand_up = None;
     app.stand_up_reason = false;
     app.stand_up_occurrence = None;

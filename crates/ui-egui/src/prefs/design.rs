@@ -76,6 +76,22 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 });
             },
         );
+        ui.horizontal_wrapped(|ui| {
+            let remember = setting::remember_stand_up(app, ui).on_hover_text(app.tr("prefs.remember_stand_up_note"));
+            crate::scenario::publish_handle("prefs:remember_stand_up", remember.rect.center());
+            if ui_kit::button(ui, app.tr("prefs.forget_stand_up"), ui_kit::Button::Normal).clicked() {
+                forget_stand_up(app);
+            }
+        });
+        ui.horizontal_wrapped(|ui| {
+            let reuse = setting::reuse_imports(app, ui).on_hover_text(app.tr("prefs.reuse_imports_note"));
+            crate::scenario::publish_handle("prefs:reuse_imports", reuse.rect.center());
+            let clear = ui_kit::button(ui, app.tr("prefs.clear_imports"), ui_kit::Button::Normal);
+            crate::scenario::publish_handle("prefs:clear_imports", clear.rect.center());
+            if clear.clicked() {
+                let _ = app.run("file.import_cache_clear", serde_json::json!({}));
+            }
+        });
         setting::extrude_auto_to_object(app, ui);
         let auto = setting::auto_operation(app, ui);
         crate::scenario::publish_handle("prefs:auto_operation", auto.rect.center());
