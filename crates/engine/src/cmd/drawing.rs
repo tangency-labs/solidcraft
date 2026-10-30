@@ -9,11 +9,13 @@ use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use serde_json::{Value, json};
+use solidcraft_doc::bom::{Mass, Tree};
+use solidcraft_doc::drawing::fields::{Component, Values};
 use solidcraft_doc::drawing::{self, Drawing, Source, Units};
-use solidcraft_doc::ids;
-use solidcraft_geom::cell::Projection;
+use solidcraft_doc::{Document, ids};
+use solidcraft_geom::cell::{Content, Projection};
 use solidcraft_geom::drawing_sheet::{DrawingBorderProfile, Orientation, PaperSize, Sheet};
-use solidcraft_geom::title_block;
+use solidcraft_geom::title_block::{self, CellKind};
 
 use super::CommandSpec;
 use crate::params::{bad, str_};
@@ -45,7 +47,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         "drawing: id → deleted: its id; closed when it was open (one undo step of the model)",
     ),
     CommandSpec::new("drawing.inspect", "Inspect Drawing", inspect).in_drawing().icon("inspect").noundo().doc_only().params(
-        "→ {id, name, units, projection, language, properties, sources: [{id}], sheets: [{id, name, size_mm, orientation, title_block (its definition, or null), dpi, documents, excluded}], revisions: {rows: [{row, revision, description, designer, checker, date, hidden}], the oldest first (the newest is the drawing's revision), next: the revision a new row gets}}. Read-only.",
+        "→ {id, name, units, projection, language, properties, sources: [{id}], sheets: [{id, name, size_mm, orientation, title_block (its definition, or null), title_block_cells: [{name, text, value?}] (each text cell as the sheet shows it: its fields' values, \"-\" for one with none, or the text typed over it with the value it hides as `value`), title_block_overrides, dpi, documents, excluded}], revisions: {rows: [{row, revision, description, designer, checker, date, hidden}], the oldest first (the newest is the drawing's revision), next: the revision a new row gets}}. Read-only.",
     ),
     CommandSpec::new("drawing.set", "Drawing Settings", set)
         .in_drawing()
@@ -157,8 +159,11 @@ fn delete(s: &mut Session, p: &Value) -> Result<Value> {
 fn inspect(s: &mut Session, _p: &Value) -> Result<Value> {
     let cmd = "drawing.inspect";
     let d = s.drawing(cmd)?;
+    let state = s.model.state();
+    // One tree for the drawing: each component it documents is weighed once.
+    let mut tree = Tree::new(&s.doc, &state);
     let mut sheets = Vec::with_capacity(d.sheets.len());
-    for sheet in &d.sheets {
+    for (at, sheet) in d.sheets.iter().enumerate() {
         let size = sheet.sheet.size_mm().map_err(|e| bad(cmd, e.to_string()))?;
         sheets.push(json!({
             "id": ids::encode(sheet.id),
@@ -166,6 +171,8 @@ fn inspect(s: &mut Session, _p: &Value) -> Result<Value> {
             "size_mm": [size.x, size.y],
             "orientation": sheet.sheet.orientation,
             "title_block": sheet.title_block,
+            "title_block_cells": title_block_cells(&s.doc, &mut tree, d, at),
+            "title_block_overrides": sheet.title_block_overrides,
             "dpi": sheet.dpi,
             "documents": sheet.documents.map(|c| json!({"source": ids::encode(c.source), "component": c.component})),
             "excluded": sheet.excluded,
@@ -182,6 +189,42 @@ fn inspect(s: &mut Session, _p: &Value) -> Result<Value> {
         "sheets": sheets,
         "revisions": {"rows": super::drawing_revision::rows(&d.revisions), "next": d.revisions.next_revision(None)},
     }))
+}
+
+/// The text cells of sheet `at`'s title block as the sheet shows them (`drawing.inspect`).
+fn title_block_cells(doc: &Document, tree: &mut Tree<'_>, d: &Drawing, at: usize) -> Vec<Value> {
+    let Some(sheet) = d.sheets.get(at) else { return Vec::new() };
+    let Some(block) = &sheet.title_block else { return Vec::new() };
+    // What the model says of the component it documents: a component since deleted has nothing.
+    let id = sheet.documents.map(|documents| documents.component);
+    let (mass, materials) = id.and_then(|id| tree.component(id).ok()).unzip();
+    let mass = mass.and_then(|mass| if let Mass::Grams(grams) = mass { Some(format_mass(grams)) } else { None });
+    let material = materials.filter(|m| !m.is_empty()).map(|m| m.join("; "));
+    let component = id.and_then(|id| documented(doc, id, material.as_deref(), mass.as_deref()));
+    let values = Values { drawing: d, sheet: at, component };
+    let cell = |name: &str, content: &Content| {
+        let value = values.text(content);
+        match sheet.title_block_overrides.get(name) {
+            Some(typed) => json!({"name": name, "text": typed, "value": value}),
+            None => json!({"name": name, "text": value}),
+        }
+    };
+    block.cells.iter().filter_map(|c| if let CellKind::Text(text) = &c.kind { Some(cell(&c.name, &text.content)) } else { None }).collect()
+}
+
+/// Component `id` of the design (0: the design itself) as a title block's fields read it, with
+/// what the model says of it; none when the design has no such component.
+fn documented<'a>(doc: &'a Document, id: u64, material: Option<&'a str>, mass: Option<&'a str>) -> Option<Component<'a>> {
+    if id == 0 {
+        return Some(Component { name: &doc.name, metadata: &doc.metadata, properties: None, material, mass });
+    }
+    let c = doc.components.iter().find(|c| c.id == id)?;
+    Some(Component { name: &c.name, metadata: &c.metadata, properties: Some(&c.properties), material, mass })
+}
+
+/// A mass as a sheet shows it: kilograms to two places, until #4867 gives drawings their units.
+fn format_mass(grams: f64) -> String {
+    format!("{:.2} kg", grams / 1000.0)
 }
 
 fn set(s: &mut Session, p: &Value) -> Result<Value> {

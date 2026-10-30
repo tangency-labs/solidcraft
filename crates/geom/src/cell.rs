@@ -38,6 +38,9 @@ pub const MAX_PARTS: usize = 64;
 pub const MAX_TEXT_BYTES: usize = 4096;
 /// The longest name a cell or a column may have.
 const MAX_NAME_BYTES: usize = 64;
+/// What a cell shows for a field without a value: a row field its row doesn't have, a property
+/// nobody gave.
+pub const MISSING: &str = "-";
 /// The space between the inner edge of a cell's lines and its text, in millimetres.
 pub const PADDING_MM: f64 = 1.0;
 /// How far a line's descenders reach below its baseline, as a share of its cap height: ISO 3098's
@@ -159,7 +162,7 @@ pub(crate) fn is_snake_case(name: &str) -> bool {
 
 /// Checks text by the module's rule: at most [`MAX_TEXT_BYTES`] in all, and no control character
 /// but a line break.
-pub(crate) fn check_text<'a>(texts: impl IntoIterator<Item = &'a str>) -> Result<()> {
+pub fn check_text<'a>(texts: impl IntoIterator<Item = &'a str>) -> Result<()> {
     let mut bytes = 0usize;
     for text in texts {
         bytes = bytes.saturating_add(text.len());

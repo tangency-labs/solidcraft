@@ -42,6 +42,7 @@ fn plate() -> Drawing {
         sheet: drawing_sheet::Sheet::standard(PaperSize::A4, Orientation::Portrait),
         border: Some(own_border()),
         title_block: None,
+        title_block_overrides: BTreeMap::new(),
         dpi: 600.0,
         documents: Some(SheetComponent { source: plate_id, component: 0 }),
         excluded: Excluded { count: false, print: true },

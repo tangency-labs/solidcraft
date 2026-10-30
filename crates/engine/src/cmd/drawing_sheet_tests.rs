@@ -258,3 +258,85 @@ fn a_sheets_title_block_by_command() {
     run(&mut s, "drawing.sheet.set", json!({"sheet": "Sheet 2", "title_block": null}));
     assert_eq!((sheets(&s)[0].title_block.is_some(), sheets(&s)[1].title_block.is_some()), (true, false));
 }
+
+/// The cells `drawing.inspect` lists for the first sheet, by name: their text, and the value an
+/// override hides.
+fn cells(s: &mut Session) -> BTreeMap<String, (String, Option<String>)> {
+    let inspected = run(s, "drawing.inspect", json!({}));
+    let text = |v: &Value| v.as_str().map(str::to_string);
+    let cells = inspected["sheets"][0]["title_block_cells"].as_array().unwrap().clone();
+    cells.iter().map(|c| (text(&c["name"]).unwrap(), (text(&c["text"]).unwrap(), text(&c["value"])))).collect()
+}
+
+/// Runs model command `id` with the drawing closed (an open drawing locks the model), then opens
+/// it again.
+fn on_model(s: &mut Session, id: &str, p: Value) {
+    let drawing = json!({"drawing": ids::encode(s.drawing("test").unwrap().id)});
+    run(s, "drawing.close", json!({}));
+    run(s, id, p);
+    run(s, "drawing.open", drawing);
+}
+
+/// The built-in block's cells read the model: the sheet's component, a steel block 100 x 50 x 10
+/// (50,000 mm³ at 7.85 g/cm³: 392.5 g), holding a steel gauge of 10 mm (7.85 g) that counts until
+/// it is a reference. A property taken away shows "-". An override shows its text and the value
+/// it hides, which follows the model; a new block keeps only the overrides of its text cells, and
+/// one naming a cell that shows no text, or a field its source doesn't have, is refused.
+#[test]
+fn a_title_blocks_cells_read_the_model() {
+    let mut s = Session::default();
+    let component = run(&mut s, "component.create", json!({"name": "Block"}))["component"].clone();
+    run(&mut s, "solid.box", json!({"length": 100, "width": 50, "height": 10, "body_name": "Block"}));
+    run(&mut s, "component.create", json!({"name": "Gauge", "parent": "Block"}));
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [0, 80, 0], "body_name": "Gauge"}));
+    run(&mut s, "component.activate", json!({"component": 0}));
+    for body in ["Block", "Gauge"] {
+        run(&mut s, "material.assign", json!({"bodies": [body], "material": "Steel"}));
+    }
+    let properties = json!({"component": "Block", "part_number": "BLK-1", "properties": {"finish": "Zinc plated"}});
+    run(&mut s, "component.metadata.set", properties);
+    run(&mut s, "drawing.create", json!({}));
+    let source = ids::encode(s.drawing("test").unwrap().sources[0].id);
+    run(&mut s, "drawing.sheet.set", json!({"sheet": "Sheet 1", "documents": {"source": source, "component": component}}));
+    let shown = |s: &mut Session, names: &[&str]| {
+        let cells = cells(s);
+        names.iter().map(|name| cells[*name].0.clone()).collect::<Vec<_>>()
+    };
+    let read = ["title", "identification_number", "material", "finish", "mass", "sheet", "general_tolerances", "legal_owner"];
+    let expected = ["Block", "-", "Steel", "Zinc plated", "0.40 kg", "1/1", "ISO 2768-m", "-"];
+    assert_eq!(shown(&mut s, &read), expected);
+    on_model(&mut s, "component.metadata.set", json!({"component": "Gauge", "bom_type": "reference"}));
+    on_model(&mut s, "component.metadata.set", json!({"component": "Block", "properties": {"finish": null}}));
+    assert_eq!(shown(&mut s, &["mass", "finish"]), ["0.39 kg", "-"]);
+    // An override, and the value under it moving on.
+    run(&mut s, "drawing.sheet.set", json!({"sheet": "Sheet 1", "title_block_overrides": {"material": "See note 3"}}));
+    assert_eq!(cells(&mut s)["material"], ("See note 3".to_string(), Some("Steel".to_string())));
+    on_model(&mut s, "material.assign", json!({"bodies": ["Block"], "material": "Aluminum"}));
+    assert_eq!(cells(&mut s)["material"], ("See note 3".to_string(), Some("Aluminum".to_string())));
+    let steps = s.undo.len();
+    for (overrides, why) in [
+        (json!({"projection": "x"}), "no text cell `projection` to override"),
+        (json!({"material": 3}), "`title_block_overrides.material` is text or null"),
+        (json!("See note 3"), "`title_block_overrides` is {cell: text or null} or null"),
+    ] {
+        let refusal = refused(&mut s, "drawing.sheet.set", json!({"sheet": "Sheet 1", "title_block_overrides": overrides}));
+        assert!(refusal.contains(why), "{refusal}");
+    }
+    let mut weight = serde_json::to_value(solidcraft_geom::title_block::default_block()).unwrap();
+    weight["cells"][8]["kind"]["text"]["content"] = json!([{"field": {"source": "component", "key": "weight"}}]);
+    let refusal = refused(&mut s, "drawing.sheet.set", json!({"sheet": "Sheet 1", "title_block": weight}));
+    assert!(refusal.contains("cell `mass`: the component has no field `weight`"), "{refusal}");
+    assert_eq!(s.undo.len(), steps, "nothing refused changed the drawing");
+    // A new block keeps the overrides of the text cells it still has; a cell set to null drops its
+    // own, and null drops them all.
+    let overrides = |s: &Session| sheets(s)[0].title_block_overrides.clone();
+    let title = json!({"sheet": "Sheet 1", "title_block_overrides": {"title": "Bracket, left"}});
+    run(&mut s, "drawing.sheet.set", title.clone());
+    run(&mut s, "drawing.sheet.set", json!({"sheet": "Sheet 1", "title_block": block()}));
+    assert_eq!(overrides(&s), BTreeMap::from([("title".to_string(), "Bracket, left".to_string())]));
+    run(&mut s, "drawing.sheet.set", json!({"sheet": "Sheet 1", "title_block_overrides": {"title": null}}));
+    assert!(overrides(&s).is_empty());
+    run(&mut s, "drawing.sheet.set", title);
+    run(&mut s, "drawing.sheet.set", json!({"sheet": "Sheet 1", "title_block_overrides": null}));
+    assert!(overrides(&s).is_empty());
+}
