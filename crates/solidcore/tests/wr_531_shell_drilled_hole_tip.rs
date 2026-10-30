@@ -9,11 +9,7 @@
 //! refuses that open offset. With `offset_point_vertex_caps` the apex's offset is a
 //! sphere zone of radius 2 and the shell is a closed solid.
 //!
-//! SMLib's level-2 check (`check_brep`) of the result reports exactly the lines of
-//! #1670 (open, fixed by #1674): a merged shell result is labelled
-//! `NamingScheme::Notify` while its edges' curves are owned under the caller's merge
-//! and result identities, so `SmBrep` test 61's owner comparison fails on those edges
-//! and `AssertValid` is skipped. Any other report line fails the test.
+//! The result must pass SMLib's level-2 check (`check_brep`) clean.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -90,18 +86,6 @@ fn check(k: &mut Kernel, b: &mut Brep) -> (usize, Vec<String>) {
     (c.failure_count(), c.lines())
 }
 
-/// #1670's report of an edge whose curve is owned under the caller's identities.
-const TEST_61_OWNER: &str =
-    "SmBrep::Test #61 Valid: Bad Edge fails pE->ValidateGeometry(FALSE) check [owner SmEdge]";
-
-/// #1670's report lines for `edges` such edges: one test 61 line each, then the
-/// skipped walk.
-fn issue_1670_lines(edges: usize) -> Vec<String> {
-    let mut lines = vec![TEST_61_OWNER.to_string(); edges];
-    lines.push("AssertValid skipped: ValidatePointers failed".to_string());
-    lines
-}
-
 fn spheres(b: &Brep) -> usize {
     b.face_list()
         .iter()
@@ -117,13 +101,8 @@ fn spheres(b: &Brep) -> usize {
 
 #[test]
 fn wr_531_drilled_hole_shells_with_a_sphere_cap() {
-    // TODO(#1670): return to a clean check_brep once tangency-labs/solidcore#1674 merges.
-    // Each case's count of #1670 edges, side open then top open, without and with
-    // WR-454's check (which leaves a closed result alone).
-    let issue_1670_edges = [[18, 18], [18, 18]];
-    let mut checked = Vec::new();
-    for (open_top, edges) in [false, true].into_iter().zip(issue_1670_edges) {
-        for (refuse_open, edges) in [false, true].into_iter().zip(edges) {
+    for open_top in [false, true] {
+        for refuse_open in [false, true] {
             let case = format!("open_top {open_top} refuse_open {refuse_open}");
             let (mut k, mut b) = shelled(true, refuse_open, open_top).unwrap();
             assert!(
@@ -132,15 +111,8 @@ fn wr_531_drilled_hole_shells_with_a_sphere_cap() {
             );
             assert_eq!(spheres(&b), 1, "{case}: one cap on a sphere");
             let (failed, lines) = check(&mut k, &mut b);
-            eprintln!("wr_531 {case}: {failed} failures {lines:?}");
-            checked.push((case, failed, lines, edges));
+            assert_eq!(failed, 0, "{case}: {lines:?}");
         }
-    }
-    // (every case is printed before the first comparison)
-    for (case, failed, lines, edges) in checked {
-        let want = issue_1670_lines(edges);
-        assert_eq!(failed, want.len(), "{case}: {lines:?}");
-        assert_eq!(lines, want, "{case}");
     }
 }
 
