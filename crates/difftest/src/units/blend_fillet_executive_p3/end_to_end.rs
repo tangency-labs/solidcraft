@@ -413,13 +413,15 @@ impl RealSolid {
         }
         if (self.radius_end.is_some() || self.radius_law.is_some())
             && (self.checkpoint != Checkpoint::Full
-                || self.source.is_some()
                 || self.piecewise_merge
                 || self.curve_blend_sih.is_some())
         {
             return Err(HarnessError::new(
-                "radius_end and radius_law require the full checkpoint on a box without merge options",
+                "radius_end and radius_law require the full checkpoint without merge options",
             ));
+        }
+        if self.radius_law.is_some() && self.source.is_some() {
+            return Err(HarnessError::new("radius_law requires the box"));
         }
         if self.piecewise_merge && self.checkpoint != Checkpoint::Full {
             return Err(HarnessError::new(
@@ -456,7 +458,12 @@ impl RealSolid {
                 .map_err(|e| HarnessError::new(e.to_string()));
         }
         match (&self.source, self.radius_end) {
-            (Some(source), _) => {
+            (Some(source), Some(end)) => ffi::validate_real_variable_source(
+                &self.source_wire(source),
+                source.path().is_some(),
+                end,
+            ),
+            (Some(source), None) => {
                 ffi::validate_real_source(&self.source_wire(source), source.path().is_some())
             }
             (None, Some(end)) => ffi::validate_real_variable_solid(&self.wire(), end),
@@ -605,6 +612,11 @@ pub(super) fn cpp(input: &RealSolid) -> Result<Output, HarnessError> {
     if let Some(step_back) = input.curve_blend_sih {
         return solid_output(super::fresh_cpp(|| {
             ffi::curve_sih_solid(step_back, &input.wire())
+        }));
+    }
+    if let (Some(source), Some(end)) = (&input.source, input.radius_end) {
+        return source_output(super::fresh_cpp(|| {
+            ffi::real_variable_source(&input.source_wire(source), source.path(), end)
         }));
     }
     if let Some(source) = &input.source {
@@ -1721,6 +1733,22 @@ mod tests {
         input.radius_end = Some(f64::NAN);
         assert!(super::cpp(&input).is_err());
         assert!(super::rust(&input).is_err());
+    }
+
+    #[test]
+    fn variable_radius_on_a_source_validates_its_endpoint_and_thumbweight() {
+        let mut input: super::RealSolid = serde_json::from_value(serde_json::json!({
+            "source": { "kind": "cylinder", "origin": [0,0,0], "radius": 10, "height": 20 },
+            "radius": 10, "radius_end": 10,
+            "xsect": 1, "continuity": 1, "thumbweight": 1, "edges": [1]
+        }))
+        .expect("valid variable source fixture schema");
+        assert!(input.validate().is_ok());
+        input.thumbweight = 1.5;
+        assert!(input.validate().is_err());
+        input.thumbweight = 1.0;
+        input.radius_end = Some(f64::NAN);
+        assert!(input.validate().is_err());
     }
 
     fn law_input() -> super::RealSolid {

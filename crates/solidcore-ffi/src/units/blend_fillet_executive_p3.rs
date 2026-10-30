@@ -412,6 +412,15 @@ extern "C" {
         cap: i64,
         len: *mut i64,
     ) -> i32;
+    fn sc_blend_fillet_executive_p3_real_variable_source(
+        path: *const std::ffi::c_char,
+        input: *const f64,
+        n: i64,
+        end_radius: f64,
+        out: *mut f64,
+        cap: i64,
+        len: *mut i64,
+    ) -> i32;
     fn sc_blend_fillet_executive_p3_surface_surface(
         input: *const f64,
         n: i64,
@@ -498,6 +507,50 @@ pub fn real_source(input: &[f64], path: Option<&str>) -> Result<Vec<f64>, FfiErr
             ptr,
             input.as_ptr(),
             input.len() as i64,
+            out.as_mut_ptr(),
+            out.len() as i64,
+            len,
+        )
+    })
+}
+
+/// Validate the non-box real-solid wire ([`validate_real_source`]) with a finite
+/// linear-law endpoint and the default thumbweight (the variable-radius public API
+/// has no thumbweight argument).
+pub fn validate_real_variable_source(
+    input: &[f64],
+    has_path: bool,
+    end_radius: f64,
+) -> Result<(), FfiError> {
+    validate_real_source(input, has_path)?;
+    if !end_radius.is_finite() || input.get(1 + SOURCE_PARAMS + 3) != Some(&1.0) {
+        return Err(FfiError::InvalidArgument(
+            "variable radius requires a finite endpoint and default thumbweight".into(),
+        ));
+    }
+    Ok(())
+}
+
+/// Execute the actual public variable-radius API with a linear radius law on a
+/// non-box source body (see [`validate_real_variable_source`]). The record is that of
+/// [`real_solid`].
+pub fn real_variable_source(
+    input: &[f64],
+    path: Option<&str>,
+    end_radius: f64,
+) -> Result<Vec<f64>, FfiError> {
+    validate_real_variable_source(input, path.is_some(), end_radius)?;
+    let cpath = path
+        .map(std::ffi::CString::new)
+        .transpose()
+        .map_err(|_| FfiError::InvalidArgument("path has a NUL byte".into()))?;
+    let ptr = cpath.as_ref().map_or(std::ptr::null(), |c| c.as_ptr());
+    call_with_buffer(65536, |out, len| unsafe {
+        sc_blend_fillet_executive_p3_real_variable_source(
+            ptr,
+            input.as_ptr(),
+            input.len() as i64,
+            end_radius,
             out.as_mut_ptr(),
             out.len() as i64,
             len,

@@ -354,7 +354,7 @@ SmBrep* build_source(int kind,const char* path,const double* p) {
 // the .smb file of kind 1 (null otherwise).
 namespace fillet_real_solid {
 int32_t real_source(const char* path, const double* input, int64_t n, double* out, int64_t cap,
-    int64_t* out_len, bool piecewise, double curve_sih=0.0) {
+    int64_t* out_len, bool piecewise, double curve_sih=0.0, const double* end_radius=nullptr) {
     const int64_t head=1+fillet_real_solid::SOURCE_PARAMS;
     if (!input || n < head+5) return SC_ERR_ARG;
     for (int64_t i=0; i<n; ++i) if (!std::isfinite(input[i])) return SC_ERR_ARG;
@@ -372,7 +372,7 @@ int32_t real_source(const char* path, const double* input, int64_t n, double* ou
     std::unique_ptr<SmBrep> body(fillet_real_solid::build_source(int(kind),path,p));
     if (!body) return SC_ERR_ARG;
     std::vector<double> values;
-    const auto rc=fillet_real_solid::fillet_and_record(body.get(),input+head,n-head,values,piecewise,curve_sih);
+    const auto rc=fillet_real_solid::fillet_and_record(body.get(),input+head,n-head,values,piecewise,curve_sih,end_radius);
     if (rc != SC_OK) return rc;
     return sc_copy_out(values.data(),int64_t(values.size()),out,cap,out_len);
     SC_CATCH
@@ -382,6 +382,15 @@ int32_t real_source(const char* path, const double* input, int64_t n, double* ou
 SC_EXPORT int32_t sc_blend_fillet_executive_p3_real_source(
     const char* path, const double* input, int64_t n, double* out, int64_t cap, int64_t* out_len) {
     return fillet_real_solid::real_source(path,input,n,out,cap,out_len,false);
+}
+
+// The source wire of sc_blend_fillet_executive_p3_real_source, filleted by
+// SmApiVariableRadiusFillet with the linear law from its radius to `end_radius` (the
+// wire's thumbweight must be 1: the variable-radius API has none).
+SC_EXPORT int32_t sc_blend_fillet_executive_p3_real_variable_source(
+    const char* path, const double* input, int64_t n, double end_radius,
+    double* out, int64_t cap, int64_t* out_len) {
+    return fillet_real_solid::real_source(path,input,n,out,cap,out_len,false,0.0,&end_radius);
 }
 
 // The source wire of sc_blend_fillet_executive_p3_real_source, filleted with the
