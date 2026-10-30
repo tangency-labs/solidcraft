@@ -1,0 +1,14 @@
+#### WR-611. A fillet meeting its face at more than 78 degrees trims nothing: the "inside" piece needs a binormal dot above a fixed 0.2
+- **Severity:** Wrong result
+- **Area:** Blends
+- **Location:** `source/SMLib/src/SmFilletGeom.cpp:12499`, `SmFilletGeom::TrimOriginalSurfaces` (def. `:12226`).
+- **What happens:** `TrimOriginalSurfaces` must delete the piece of an original face that lies 'inside' a fillet's rail. It takes as that piece the one whose binormal along the rail makes a dot of more than 0.2 with the fillet's binormal ("just to avoid noise around 0.0"). The pieces' binormals are opposite, so the inside piece is the one with the positive dot, the larger of the two. The fixed 0.2 refuses any fillet that meets its face at more than 78 degrees. Then nothing is deleted, the fillet face is left apart from the body, and the result is not a closed solid.
+- **Trigger:** chamfering a knife edge (WR-570's part: a plate's corner cut by a circle of radius 21 tangent to its back face). At d 0.5 the chamfer's chord meets the flat face at 81 degrees (dot 0.15), and at d 0.8 the dot is 0.19.
+- **How found:** the SolidCraft fork (tangency-labs/smlib@de4dae6 on branch replay/1.0.1, not yet merged in the fork's main, capi test `knife_edge_chamfers` at d 0.5 and 0.8), SolidCraft issue #1809 (solidcraft#851's knife edge).
+- **Confirmed:** by the port's test below. By default (pinned behaviour) the d 0.5 and 0.8 chamfers fail.
+- **Fix:** tangency-labs/smlib@de4dae6. Of the original face's pieces along the rail (every other edge use on the original or split faces), the inside one is the piece whose binormal gives the largest dot with the fillet's binormal above `SM_EFF_ZERO_SQRT`. Only a fillet square to the face is ambiguous, and then nothing is chosen, as before.
+- **Rust port:** behaves as upstream by default. `Kernel::fixes.fillet_trim_inside_by_best_dot` ports the change in `blend::fillet_geom::p6`'s `TrimOriginalSurfaces` loop.
+- **Tests:** `crates/solidcore/tests/wr_611_steep_fillet_trims_its_face.rs` uses the knife-edge part and its mirror, with `fillet_knife_edge_rounds` on.
+  - With the opt-in, chamfers of d 0.5, 0.8, 1, 2 and 5 (linear section on the ball of radius d) are manifold solids of the fork's closed-form volume, to 1e-9 relative.
+  - Without it, d 0.5 and 0.8 fail and d 2 builds.
+- **Difftest:** no change on the default path.

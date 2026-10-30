@@ -2322,7 +2322,43 @@ impl FilletBrep {
                 // for every Orig m_pTargetBrep->pBrepEdge->Edgeuse - find the Face
                 // connected to the edgeuse no longer needed
                 let edgeuses = edge::edgeuses(target, brep_edge, None, None)?;
-                for &eu in edgeuses.iter().step_by(2) {
+                // With `fillet_trim_inside_by_best_dot` (WR-611, fork de4dae6): of the original
+                // face's pieces along the rail, the one 'inside' is the one whose binormal
+                // points most the way the fillet's does. The pieces' binormals are opposite,
+                // so its dot is the positive one, however steeply the fillet meets the face;
+                // only a fillet square to the face (no side) is ambiguous.
+                let inside = if k.fixes.fillet_trim_inside_by_best_dot {
+                    let mut inside = None;
+                    let mut best_dot = EFF_ZERO_SQRT;
+                    for (index, &eu) in edgeuses.iter().enumerate().step_by(2) {
+                        let eu_face = eu1::face(target, eu)?;
+                        if !(eu_face == orig_face
+                            || eu_face.is_some_and(|f| splt_faces.contains(&f)))
+                        {
+                            continue;
+                        }
+                        let mut bin2 = evaluate_binormal(
+                            k,
+                            target,
+                            eu,
+                            dropped_parameter,
+                            false,
+                            &BinormalOptions::default(),
+                        )?
+                        .binormal;
+                        if fs.reverse_trim {
+                            bin2 = -bin2;
+                        }
+                        if fillet_bin.dot(bin2) > best_dot {
+                            best_dot = fillet_bin.dot(bin2);
+                            inside = Some(index);
+                        }
+                    }
+                    Some(inside)
+                } else {
+                    None
+                };
+                for (index, &eu) in edgeuses.iter().enumerate().step_by(2) {
                     // skip Orig m_pTargetBrep->pBrepEdge->Edgeuses not attached to the
                     // original Face(s).
                     let eu_face = eu1::face(target, eu)?;
@@ -2351,8 +2387,12 @@ impl FilletBrep {
                     // m_pTargetBrep->Edgeuse->Face is 'inside' the closed loop of common
                     // edges and it (and all Faces connected to it) get marked for
                     // deletion.
-                    if fillet_bin.dot(bin2) > 0.2 {
+                    let is_inside = match inside {
+                        Some(chosen) => chosen == Some(index),
                         // 0.2: just to avoid noise around 0.0.
+                        None => fillet_bin.dot(bin2) > 0.2,
+                    };
+                    if is_inside {
                         let matched_orig_face = eu1::face(target, eu)?;
                         let radial = eu1::radial(target, eu)?
                             .ok_or_else(|| invalid(OP_TRIM, "edge use without radial"))?;
