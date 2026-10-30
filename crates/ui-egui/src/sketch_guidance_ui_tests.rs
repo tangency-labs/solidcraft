@@ -652,3 +652,89 @@ fn a_horizontal_line_ends_plumb_with_a_point_above_and_keeps_both() {
         "the line stays horizontal"
     );
 }
+
+#[test]
+fn dialog_keyboard_sketch_mirror_and_patterns_cycle_without_committing_and_cancel() {
+    use crate::test_support::{dialog_tab_cycle, dialog_tab_to};
+    for command in ["sketch.mirror", "sketch.pattern.rectangular", "sketch.pattern.circular"] {
+        for placement in [crate::ui_kit::DialogButtons::Bottom, crate::ui_kit::DialogButtons::Top] {
+            let mut h = fixture();
+            h.app.preferences.dialog_buttons = placement;
+            h.call("ui.camera", json!({"target":[-60,0,0],"distance":120}));
+            let document = h.app.session.doc.to_json();
+            let undo = h.app.session.undo.len();
+            step(&mut h, json!({"start":command}));
+            pick(&mut h, [-22.5, 10.0], false);
+            let reference = h.app.dialog.as_ref().unwrap().inputs[1].label.to_string();
+            dialog_tab_to(&mut h, &format!("dialog:{reference}"));
+            if command.ends_with("circular") {
+                pick(&mut h, [-40.0, -20.0], false);
+            } else {
+                pick(&mut h, [0.0, 20.0], false);
+            }
+            dialog_tab_to(&mut h, &format!("dialog:{reference}"));
+            dialog_tab_cycle(&mut h);
+            step(&mut h, json!({"key":"Escape"}));
+            assert!(h.app.dialog.is_none());
+            assert_eq!(h.app.session.doc.to_json(), document);
+            assert_eq!(h.app.session.undo.len(), undo);
+        }
+    }
+}
+
+#[test]
+fn dialog_keyboard_sketch_patterns_enter_applies_the_typed_quantities() {
+    use crate::test_support::dialog_tab_to;
+    for command in ["sketch.pattern.rectangular", "sketch.pattern.circular"] {
+        let mut h = fixture();
+        h.call("ui.camera", json!({"target":[-60,0,0],"distance":120}));
+        step(&mut h, json!({"start":command}));
+        pick(&mut h, [-22.5, 10.0], false);
+        let reference = h.app.dialog.as_ref().unwrap().inputs[1].label.to_string();
+        if command.ends_with("circular") {
+            dialog_tab_to(&mut h, &format!("dialog:{reference}"));
+            pick(&mut h, [-40.0, -20.0], false);
+        } else {
+            step(&mut h, json!({"click":{"handle":"dialog:Quantity 2"}}));
+            step(&mut h, json!({"key":"A","cmd":true}));
+            step(&mut h, json!({"text":"2"}));
+        }
+        step(&mut h, json!({"click":{"handle":"dialog:Quantity"}}));
+        step(&mut h, json!({"key":"A","cmd":true}));
+        step(&mut h, json!({"text":"3"}));
+        dialog_tab_to(&mut h, &format!("dialog:{reference}"));
+        step(&mut h, json!({"key":"Enter"}));
+        assert!(h.app.dialog.is_none(), "{command}: Enter on the reference applies");
+        assert_eq!(h.app.session.world_state().sketch(1).unwrap().sketch.curves.len(), if command.ends_with("rectangular") { 8 } else { 5 });
+    }
+}
+
+#[test]
+fn dialog_keyboard_sketch_empty_selection_and_invalid_inputs_do_not_apply() {
+    use crate::test_support::dialog_tab_to;
+    for command in ["sketch.mirror", "sketch.pattern.rectangular", "sketch.pattern.circular"] {
+        let mut h = fixture();
+        h.call("ui.camera", json!({"target":[-60,0,0],"distance":120}));
+        let document = h.app.session.doc.to_json();
+        let undo = h.app.session.undo.len();
+        step(&mut h, json!({"start":command}));
+        dialog_tab_to(&mut h, "dialog:Entities");
+        step(&mut h, json!({"key":"Enter"}));
+        assert!(h.app.dialog.is_some(), "{command}: an empty selection cannot apply");
+        dialog_tab_to(&mut h, "dialog:Entities");
+        pick(&mut h, [-22.5, 10.0], false);
+        if command == "sketch.mirror" {
+            dialog_tab_to(&mut h, "dialog:Mirror line");
+        } else {
+            step(&mut h, json!({"click":{"handle":"dialog:Quantity"}}));
+            step(&mut h, json!({"key":"A","cmd":true}));
+            step(&mut h, json!({"text":"0"}));
+        }
+        step(&mut h, json!({"key":"Enter"}));
+        assert!(h.app.dialog.is_some(), "{command}: missing mirror line or zero quantity cannot apply");
+        step(&mut h, json!({"key":"Escape"}));
+        assert!(h.app.dialog.is_none());
+        assert_eq!(h.app.session.doc.to_json(), document);
+        assert_eq!(h.app.session.undo.len(), undo);
+    }
+}

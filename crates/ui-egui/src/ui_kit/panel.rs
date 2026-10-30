@@ -1,5 +1,5 @@
 //! Panel elements for dense cards; see `docs/ui-kit.md` for tokens and usage.
-use super::{actions::icon_button_at, metrics::*, text::paint_text};
+use super::{metrics::*, text::paint_text};
 use crate::{scenario, theme::Tokens};
 use egui::{Ui, vec2};
 
@@ -62,7 +62,7 @@ fn header_actions(
         vec2(t.form_close_size, t.form_close_size),
     );
     if closeable {
-        let close = icon_button_at(ui, close_rect, "close", "Close");
+        let close = super::icon_button_at_with_sense(ui, close_rect, "close", "Close", egui::Sense::CLICK);
         scenario::publish_handle("dialog:close", close.rect.center());
         if close.clicked() {
             on_close();
@@ -160,7 +160,7 @@ impl<'a> TopHeader<'a> {
             scenario::publish_handle("dialog:close", cancel_rect.center());
         } else {
             let close_rect = target(right);
-            let response = icon_button_at(ui, close_rect, "close", "Close");
+            let response = super::icon_button_at_with_sense(ui, close_rect, "close", "Close", egui::Sense::CLICK);
             scenario::publish_handle("dialog:close", response.rect.center());
             if response.clicked() {
                 *close = true;

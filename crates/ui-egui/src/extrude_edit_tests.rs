@@ -650,13 +650,17 @@ fn dialog_tab_extrude_enters_from_canvas_distance_and_never_leaves_the_dialog() 
     let focused = h.ctx.memory(|m| m.focused()).unwrap();
     let response = h.ctx.read_response(focused).unwrap();
     let layer = response.layer_id;
+    assert!(
+        response.rect.contains(crate::scenario::handle_at("dialog:Profiles").unwrap()),
+        "Tab from the floating distance must reach Profiles first"
+    );
     assert_ne!(layer, h.ctx.read_response(canvas).unwrap().layer_id);
     assert!(h.app.viewport.dialog_rect.unwrap().contains(response.rect.center()));
     for backwards in [false, true] {
         let mut previous = h.ctx.memory(|m| m.focused()).unwrap();
         let mut wrapped = false;
         for _ in 0..40 {
-            let from = crate::scenario::handle_at(if backwards { "dialog:close" } else { "dialog:cancel" }).unwrap();
+            let from = crate::scenario::handle_at(if backwards { "dialog:Profiles" } else { "dialog:cancel" }).unwrap();
             let wraps = h.ctx.read_response(previous).unwrap().rect.contains(from);
             h.step(&json!({"key":"Tab", "shift":backwards})).unwrap();
             let focused = h.ctx.memory(|m| m.focused()).unwrap();
@@ -664,7 +668,7 @@ fn dialog_tab_extrude_enters_from_canvas_distance_and_never_leaves_the_dialog() 
             assert_ne!(focused, previous, "each Tab must advance to a different control: {:?}", response.rect);
             assert_ne!(Some(response.rect), crate::scenario::rect_of("dialog:header"), "the pointer-only drag header must not be a Tab stop");
             if wraps {
-                let to = crate::scenario::handle_at(if backwards { "dialog:cancel" } else { "dialog:close" }).unwrap();
+                let to = crate::scenario::handle_at(if backwards { "dialog:cancel" } else { "dialog:Profiles" }).unwrap();
                 assert!(response.rect.contains(to), "the last action and first control must wrap in one Tab");
                 wrapped = true;
             }
@@ -673,5 +677,51 @@ fn dialog_tab_extrude_enters_from_canvas_distance_and_never_leaves_the_dialog() 
             assert!(response.rect.is_positive());
         }
         assert!(wrapped, "both traversal directions must exercise the wrap");
+    }
+}
+
+#[test]
+fn checkbox_enter_applies_extrude_without_toggling_reverse() {
+    for reversed in [false, true] {
+        let mut h = make(json!({}));
+        open(&mut h);
+        let mut reached = false;
+        for _ in 0..20 {
+            h.step(&json!({"key":"Tab"})).unwrap();
+            let at = crate::scenario::handle_at("dialog:Reverse Direction").unwrap();
+            if h.ctx.memory(|m| m.focused()).and_then(|id| h.ctx.read_response(id)).is_some_and(|r| r.rect.contains(at)) {
+                reached = true;
+                break;
+            }
+        }
+        assert!(reached, "Reverse Direction must be reachable with Tab");
+        if reversed {
+            h.step(&json!({"key":"Space"})).unwrap();
+            assert!(h.app.dialog.is_some(), "Space toggles without applying");
+        }
+        h.step(&json!({"key":"Enter"})).unwrap();
+        assert!(h.app.dialog.is_none(), "Enter on a checkbox must apply Extrude");
+        let state = h.app.session.world_state();
+        let bounds = state.body("Main").unwrap().mesh().bounds();
+        assert!((bounds.min.z - if reversed { -10.0 } else { 0.0 }).abs() < 1e-7);
+        assert!((bounds.max.z - if reversed { 0.0 } else { 10.0 }).abs() < 1e-7, "Enter must preserve the checkbox value");
+    }
+}
+
+#[test]
+fn dialog_keyboard_enter_on_closed_extrude_dropdowns_applies_without_changing_values() {
+    use crate::test_support::dialog_tab_to;
+    for label in ["Direction", "Extent Type", "Operation", "Start"] {
+        let mut h = make(json!({}));
+        open(&mut h);
+        if label == "Start" {
+            h.step(&json!({"click":{"handle":"dialog:section:Advanced"}})).unwrap();
+        }
+        let before = extent(&h);
+        dialog_tab_to(&mut h, &format!("dialog:{label}"));
+        h.step(&json!({"key":"Enter"})).unwrap();
+        assert!(!egui::Popup::is_any_open(&h.ctx), "Enter must not open {label}");
+        assert!(h.app.dialog.is_none(), "Enter on {label} must apply Extrude");
+        assert_eq!(extent(&h), before, "Enter must preserve the selected {label}");
     }
 }

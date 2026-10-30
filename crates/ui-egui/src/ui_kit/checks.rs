@@ -50,7 +50,17 @@ pub(super) fn paint_box(ui: &Ui, square: Rect, response: &Response, on: bool, mi
     }
 }
 
-/// Checkboxes only via ui_kit::checkbox. Labels, accessibility, keyboard and response stay native.
+/// Space activates a value choice; leave Enter unconsumed for the dialog's OK handler.
+pub(super) fn activated(response: &Response) -> bool {
+    if response.has_focus() && response.ctx.input(|i| i.key_pressed(egui::Key::Enter)) {
+        response.surrender_focus();
+        false
+    } else {
+        response.clicked()
+    }
+}
+
+/// Checkboxes only via ui_kit::checkbox; label and box share one hit target.
 pub(crate) fn checkbox(ui: &mut Ui, label: &str, value: &mut bool) -> Response {
     checkbox_indeterminate(ui, label, value, false)
 }
@@ -71,7 +81,7 @@ pub(crate) fn checkbox_indeterminate(ui: &mut Ui, label: &str, value: &mut bool,
     let (rect, mut response) = ui.allocate_exact_size(vec2(width, height), egui::Sense::click());
     crate::prefs_search::remember(ui, label, rect);
     crate::prefs_search::follow(ui, label, rect);
-    if response.clicked() {
+    if activated(&response) {
         *value = mixed || !*value;
         response.mark_changed();
     }
