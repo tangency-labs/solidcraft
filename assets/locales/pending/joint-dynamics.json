@@ -22,5 +22,29 @@
     "Damping": "ריסון",
     "Friction": "חיכוך",
     "Not a number": "לא מספר"
+  },
+  "ja": {
+    "cmd.joint_dynamics": "ジョイントの動力学",
+    "Dynamics": "動力学",
+    "Effort": "最大力",
+    "Damping": "減衰",
+    "Friction": "摩擦",
+    "Not a number": "数値ではありません"
+  },
+  "vi": {
+    "cmd.joint_dynamics": "Động lực học khớp",
+    "Dynamics": "Động lực học",
+    "Effort": "Lực tối đa",
+    "Damping": "Giảm chấn",
+    "Friction": "Ma sát",
+    "Not a number": "Không phải là số"
+  },
+  "zh": {
+    "cmd.joint_dynamics": "关节动力学",
+    "Dynamics": "动力学",
+    "Effort": "最大力",
+    "Damping": "阻尼",
+    "Friction": "摩擦",
+    "Not a number": "不是数字"
   }
 }
