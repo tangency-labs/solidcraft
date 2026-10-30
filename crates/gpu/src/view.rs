@@ -171,8 +171,8 @@ pub struct PlannedBody {
 }
 
 /// What the viewport's last frame drew, counted as it was drawn (the performance overlay, #2548).
-/// Triangles and line segments count every pass that draws them, so a section's stencil passes
-/// count once each; that is the work the GPU did.
+/// Triangles and line segments count every pass that draws them, so a section's passes count
+/// each face five times (six with two planes or more); that is the work the GPU did.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct DrawStats {
     pub draw_calls: u32,
@@ -1961,7 +1961,7 @@ struct Cut {
     mark: wgpu::RenderPipeline,
     /// The cap where its body reaches past another plane before the far wall, so no kept back
     /// face shows it: the nearest hidden back face behind it, where the count says the cap is
-    /// inside a body, in the cap colour, marked as the cap.
+    /// inside a body, in the cap colour, marked as the cap. Drawn only for two planes or more.
     hole: wgpu::RenderPipeline,
     /// Where the cut runs through a body but a front face won the marking: the back faces again,
     /// pulled toward the eye (`fs_solid_touch`), and marked as the cap where one wins. That front
@@ -3663,7 +3663,11 @@ impl Renderer {
                     d.draw(pass, smooth, flat, tally);
                 }
             };
-        let sectioned = cb.clip[0][..3].iter().map(|c| c * c).sum::<f32>() > 0.25;
+        let shown = |c: &[f32; 4]| c[..3].iter().map(|v| v * v).sum::<f32>() > 0.25;
+        let sectioned = shown(&cb.clip[0]);
+        // One plane keeps the whole of a ray past where it comes in, so no hidden face lies past
+        // it: the hole draws nothing.
+        let holes = cb.clip.iter().filter(|c| shown(c)).count() > 1;
         match (
             res.tri_cut.as_ref().filter(|_| sectioned),
             res.tri_cut_planned.as_ref(),
@@ -3691,7 +3695,9 @@ impl Renderer {
                 all(pass, |c| &c.count);
                 pass.set_stencil_reference(NOT_CAP);
                 all(pass, |c| &c.mark);
-                all(pass, |c| &c.hole);
+                if holes {
+                    all(pass, |c| &c.hole);
+                }
                 all(pass, |c| &c.touch);
                 pass.set_pipeline(reset);
                 pass.draw(0..3, 0..1);
