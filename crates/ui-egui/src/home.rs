@@ -875,6 +875,8 @@ fn start_content(app: &mut SolveApp, ui: &mut egui::Ui, action: &mut Option<File
         }
     });
     ui.add_space(t.file_section_gap);
+    crate::cloud::open_page(app, ui);
+    ui.add_space(t.file_section_gap);
     FileView::section(ui, app.tr("home.samples"), t.space_10, |ui| {
         let samples: Vec<_> = solidcraft_engine::sample::samples()
             .iter()
@@ -1375,8 +1377,9 @@ mod tests {
         h.app.home.show(rev);
         h.frames(2);
         assert!(h.app.home.open);
-        let gear = crate::scenario::handle_at("titlebar:preferences").unwrap();
-        h.call("ui.click", serde_json::json!({"x": gear.x, "y": gear.y}));
+        // Preferences is no longer a title-bar gear; it opens from the File
+        // menu, Ctrl+, and the Home page's own link, all through this command.
+        h.call("ui.prefs", serde_json::json!({"open": "General"}));
         assert!(h.app.prefs_window.open && h.app.home.open);
         let shown = |h: &crate::scenario::Harness| {
             h.ctx.memory(|m| m.areas().visible_last_frame(&egui::LayerId::new(egui::Order::Middle, egui::Id::new("sc_prefs"))))

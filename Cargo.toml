@@ -173,3 +173,4 @@ accesskit_macos = { path = "vendor/accesskit_macos" }
 [profile.mutants]
 inherits = "ci"
 incremental = true
+

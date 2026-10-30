@@ -31,6 +31,14 @@ solidcraft-engine = { workspace = true }
 # The D3D12 shader compiler the window starts with (#6756).
 solidcraft-gpu = { workspace = true }
 solidcraft-ui-egui = { workspace = true }
+# How this app reaches CloudCraft. No provider credential, no provider URL
+# and no provider protocol live in here. The UI crate states the work and
+# opens no socket; this client is the half that answers it.
+craft-cloud-client = { git = "https://github.com/wdunn001/collab-craft", rev = "dbfc5e3" }
+# The Share dialog's backend (the dialog itself is drawn by the UI crate,
+# which opens no socket). This is the half that reaches CloudCraft.
+collabcraft-share = { git = "https://github.com/wdunn001/collab-craft", rev = "dbfc5e3" }
+craft-ui = { git = "https://github.com/wdunn001/craft-libs", rev = "1a3cbfd724bf28ccbe51a1f45f19022f131f15bb", features = ["cloud"] }
 solidcraft-space-mouse = { workspace = true }
 eframe = { workspace = true, features = ["default_fonts", "wgpu", "accesskit", "wayland", "x11", "links"] }
 egui = { workspace = true }

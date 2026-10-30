@@ -211,7 +211,7 @@ dependencies = [
  "objc2-foundation 0.3.2",
  "parking_lot",
  "percent-encoding",
- "windows-sys 0.60.2",
+ "windows-sys 0.59.0",
  "x11rb",
 ]
 
@@ -866,6 +866,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "collabcraft-share"
+version = "0.1.0"
+source = "git+https://github.com/wdunn001/collab-craft?rev=dbfc5e3#dbfc5e3544fa50166b728cd183859200db05e6f7"
+dependencies = [
+ "craft-cloud",
+ "craft-cloud-client",
+ "craft-ui",
+ "wasm-bindgen-futures",
+]
+
+[[package]]
 name = "color"
 version = "0.3.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -983,6 +994,67 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5ca28b0ae3115b884660db4118d803791fd6756b6e88f39c0f3f7859060d7566"
 dependencies = [
  "libc",
+]
+
+[[package]]
+name = "craft-cloud"
+version = "0.1.0"
+source = "git+https://github.com/wdunn001/craft-libs?rev=1a3cbfd724bf28ccbe51a1f45f19022f131f15bb#1a3cbfd724bf28ccbe51a1f45f19022f131f15bb"
+dependencies = [
+ "serde",
+ "thiserror 2.0.21",
+]
+
+[[package]]
+name = "craft-cloud-client"
+version = "0.1.0"
+source = "git+https://github.com/wdunn001/collab-craft?rev=dbfc5e3#dbfc5e3544fa50166b728cd183859200db05e6f7"
+dependencies = [
+ "craft-cloud",
+ "craft-collab",
+ "craft-esign",
+ "js-sys",
+ "log",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+ "ureq",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "web-sys",
+]
+
+[[package]]
+name = "craft-collab"
+version = "0.1.0"
+source = "git+https://github.com/wdunn001/collab-craft?rev=dbfc5e3#dbfc5e3544fa50166b728cd183859200db05e6f7"
+dependencies = [
+ "js-sys",
+ "log",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+ "wasm-bindgen",
+]
+
+[[package]]
+name = "craft-esign"
+version = "0.1.0"
+source = "git+https://github.com/wdunn001/craft-libs?rev=1a3cbfd724bf28ccbe51a1f45f19022f131f15bb#1a3cbfd724bf28ccbe51a1f45f19022f131f15bb"
+dependencies = [
+ "craft-cloud",
+ "serde",
+ "thiserror 2.0.21",
+]
+
+[[package]]
+name = "craft-ui"
+version = "0.1.0"
+source = "git+https://github.com/wdunn001/craft-libs?rev=1a3cbfd724bf28ccbe51a1f45f19022f131f15bb#1a3cbfd724bf28ccbe51a1f45f19022f131f15bb"
+dependencies = [
+ "craft-cloud",
+ "egui",
+ "serde_json",
 ]
 
 [[package]]
@@ -1440,7 +1512,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -3703,7 +3775,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.12.1",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -3760,7 +3832,7 @@ dependencies = [
  "security-framework 3.7.0",
  "security-framework-sys",
  "webpki-root-certs",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -4211,6 +4283,9 @@ name = "solidcraft"
 version = "0.27.1"
 dependencies = [
  "block2 0.6.2",
+ "collabcraft-share",
+ "craft-cloud-client",
+ "craft-ui",
  "eframe",
  "egui",
  "embed-resource",
@@ -4427,6 +4502,8 @@ name = "solidcraft-ui-egui"
 version = "0.27.1"
 dependencies = [
  "arboard",
+ "craft-cloud",
+ "craft-ui",
  "egui",
  "egui-wgpu",
  "image",
@@ -4447,6 +4524,7 @@ dependencies = [
  "toml",
  "ttf-parser",
  "unicode-bidi",
+ "web-sys",
  "web-time",
  "winreg",
  "zip",
@@ -4456,6 +4534,8 @@ dependencies = [
 name = "solidcraft-web"
 version = "0.27.1"
 dependencies = [
+ "collabcraft-share",
+ "craft-cloud-client",
  "eframe",
  "egui",
  "js-sys",
@@ -4568,7 +4648,7 @@ dependencies = [
  "getrandom 0.3.4",
  "once_cell",
  "rustix 1.1.5",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -4999,6 +5079,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9a7ac20be9b7726e0bbdbf974c059676d9acb1cd414961f570a4e8231cacd7fc"
 dependencies = [
  "base64",
+ "flate2",
  "log",
  "percent-encoding",
  "rustls",
@@ -5006,6 +5087,7 @@ dependencies = [
  "rustls-platform-verifier",
  "ureq-proto",
  "utf8-zero",
+ "webpki-roots",
 ]
 
 [[package]]
@@ -5370,6 +5452,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "webpki-roots"
+version = "1.0.10"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1c1c8e20c8a38fc7d65abfe74eb7280e4aa667e8eec8bc84996d2874810748d9"
+dependencies = [
+ "rustls-pki-types",
+]
+
+[[package]]
 name = "weezl"
 version = "0.1.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5564,7 +5655,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -5907,7 +5998,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7d6f32a0ff4a9f6f01231eb2059cc85479330739333e0e58cadf03b6af2cca10"
 dependencies = [
  "cfg-if",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
