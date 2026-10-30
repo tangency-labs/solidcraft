@@ -313,6 +313,11 @@ SolidCraft changes:
   and the frame is skipped with a repaint asked for when it is due. The streak and the deadline
   survive a recreate; a configure the device takes ends the streak, a recreate it asked for
   included. A recreate for a lost surface goes ahead as before.
+- `src/lib.rs`, `src/winit.rs`: a window other than the main one (an immediate viewport, drawn
+  and presented inside the main window's frame) is configured with Mailbox, else Immediate,
+  when the configured mode waits for vsync and the surface offers one (`viewport_present_mode`).
+  Waiting on both surfaces in one frame halved the frame rate, and on Wayland a window the
+  compositor wasn't showing stalled the main window behind its present.
 - `src/lib.rs`, `src/winit.rs`: the device's lost callback marks `RenderState::device_lost`
   (`DeviceLost`), and the painter draws nothing on a lost device. Before a frame's uploads it
   submits nothing (`DeviceLost::probe`), so a device the driver lost is found by that
