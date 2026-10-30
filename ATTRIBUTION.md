@@ -628,6 +628,7 @@ Original SolidCraft drawings, Open for owner review; no runtime assignments.
 | assets/styles/ui/themes/1-bit-dark.json | SolidCraft contributors | original SolidCraft theme file | MIT OR Apache-2.0 |
 | `assets/locales/pending/navbar-customisation.json` | SolidCraft contributors | Original navigation bar editor translations | MIT OR Apache-2.0 |
 | `assets/locales/pending/navbar-slots.json` | SolidCraft contributors | Original navigation slot translations | MIT OR Apache-2.0 |
+| `assets/locales/pending/sheet-corner-join-translations.json` | SolidCraft contributors | Original Arabic, German, Hebrew, Korean and Vietnamese translations of this change's English UI strings; no commercial CAD text used | MIT OR Apache-2.0 |
 | assets/locales/bs.json | Tarik Sijercic (tsijercic1) | Original Bosnian translation of SolidCraft's English catalog; no commercial CAD text used | MIT OR Apache-2.0 |
 | assets/locales/hr.json | Tarik Sijercic (tsijercic1) | Original Croatian translation of SolidCraft's English catalog; no commercial CAD text used | MIT OR Apache-2.0 |
 | assets/locales/sr.json | Tarik Sijercic (tsijercic1) | Original Serbian (ekavian, Cyrillic) translation of SolidCraft's English catalog; no commercial CAD text used | MIT OR Apache-2.0 |

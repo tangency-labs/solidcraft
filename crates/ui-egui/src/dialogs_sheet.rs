@@ -844,7 +844,7 @@ fn flange_corner_rows(app: &SolveApp, ui: &mut egui::Ui, points: &[Vec3], corner
         for (kind, label) in CORNER_LABELS.iter().enumerate() {
             let button_rect = Rect::from_min_size(picture_rect.min + vec2(kind as f32 * 76.0, 0.0), vec2(70.0, 76.0));
             let response = ui
-                .scope_builder(egui::UiBuilder::new().max_rect(button_rect), |ui| {
+                .scope_builder(egui::UiBuilder::new().max_rect(button_rect).layout(egui::Layout::top_down_justified(egui::Align::Center)), |ui| {
                     ui.spacing_mut().interact_size = button_rect.size();
                     if common == Some(kind) {
                         ui.visuals_mut().widgets.inactive.weak_bg_fill = Tokens::get().selected_bg;
