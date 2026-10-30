@@ -1168,12 +1168,17 @@ fn prism_edge_in_a_round_cornered_slab_end_face_joins() {
 /// of the bodies as they lie left the hole closed by a skin of no thickness (the plate's top face
 /// whole over the hole, the tool's end face under it), which no volume shows and which was kept.
 /// The hole is open, and the cut takes the whole tool: the circle of radius 3.04 the two
-/// profiles make, from the barrel cut's floor at z 1.6 up to the plate's top at z 2.8.
+/// profiles make, from the barrel cut's floor at z 1.6 up to the plate's top at z 2.8. The design
+/// was saved by an older build: Extrude13 starts from a piece of a face that is no longer that
+/// piece, so it fails, asking for its face again; the rest builds.
 #[test]
 fn cut_up_to_the_plate_top_face_opens_the_hole() {
     let mut script: Value = serde_json::from_str(include_str!("../../../examples/regressions/cut_up_to_face_leaves_skin.json")).unwrap();
     let s = replay_value(&script);
-    assert!(s.model.results.iter().all(|r| r.error.is_none()), "{:?}", s.model.results);
+    let failed =
+        |r: &solidcraft_doc::FeatureResult| r.error.as_deref().and_then(solidcraft_doc::reselect_parts).map(|(feature, _)| feature.to_string());
+    assert!(s.model.results.iter().all(|r| r.error.is_none() || failed(r).as_deref() == Some("Extrude13")), "{:?}", s.model.results);
+    assert!(s.model.results.iter().any(|r| failed(r).as_deref() == Some("Extrude13")));
     let state = s.model.state();
     let body = &state.body("Body7").unwrap().body;
     assert!(body.validity().is_empty(), "{:?}", body.validity());

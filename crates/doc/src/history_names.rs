@@ -12,9 +12,10 @@
 //! piece of `F2:top` bounded by the block's left wall and the slot's left wall. Pieces nothing
 //! around them tells apart are numbered (`#1`, `#2`): in the order of what they came from when
 //! that differs (exact), else in the kernel's order (unverified). A face made of several (a
-//! coplanar join) takes one name and keeps the others as aliases, the faces merged into it. A
-//! face a feature built from several of its own roles (a side drawn in collinear pieces) has each
-//! of them as a name (synonyms): each names that very face.
+//! coplanar join) takes one name and keeps the others as aliases: a reference to one of them is
+//! to a face that is no longer as it was picked, and finds nothing. A face a feature built from
+//! several of its own roles (a side drawn in collinear pieces) has each of them as a name
+//! (synonyms): each names that very face.
 //!
 //! A piece that is split again keeps the face's stem and the bounds that told the piece it
 //! came from apart: its name lists the faces around it, not the qualifiers of the pieces
@@ -40,8 +41,8 @@ pub struct Names {
 /// What a face answers to besides its name, and how sure its name is.
 #[derive(Clone, Debug, Default)]
 pub(crate) struct FaceInfo {
-    /// Names of the other faces merged into it (a reference to one of them finds this face, as
-    /// the face it was merged into).
+    /// Names of the other faces merged into it. A reference to one of them is to a face that is
+    /// not this one as it was picked: a feature's reference by one finds nothing (`name_lookup`).
     pub aliases: Vec<String>,
     /// Other names of this very face: the roles besides its first of a face the feature that
     /// built it made from several (a side drawn in collinear pieces is one face, made by each).

@@ -304,21 +304,20 @@ fn deleting_one_edge_of_a_projected_face_keeps_the_others_as_they_were() {
     assert!(s.doc.sketch(id).unwrap().links.is_empty());
 }
 
+/// The edge a projection was made from goes with its body: the sketch fails, asking for the edge
+/// again, instead of keeping a lost link.
 #[test]
-fn lost_reference_keeps_geometry_with_a_warning() {
+fn a_reference_whose_body_is_gone_fails_its_sketch_asking_for_it_again() {
     let mut s = Session::default();
     run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10}));
     let boxf = s.doc.features.last().unwrap().id;
     run(&mut s, "sketch.create", json!({"plane": "XY"}));
     run(&mut s, "sketch.project", json!({"refs": [{"edge": [5, 0, 10]}]}));
     run(&mut s, "sketch.finish", json!({}));
+    let name = s.doc.sketch(s.doc.features.last().unwrap().id).unwrap().links[0].edge_name.clone().unwrap();
     run(&mut s, "timeline.suppress", json!({"feature": boxf, "suppressed": true}));
-    let st = s.model.state();
-    let ss = st.sketches.last().unwrap();
-    assert_eq!(ss.sketch.curves.len(), 1, "geometry kept");
-    assert!(ss.sketch.links[0].lost);
-    let w = s.model.results.last().unwrap().warning.clone().unwrap_or_default();
-    assert!(w.contains("lost"), "{w}");
+    let r = s.model.results.last().unwrap();
+    assert_eq!(r.error.as_deref().and_then(solidcraft_doc::reselect_parts), Some((r.name.as_str(), name.as_str())), "{r:?}");
 }
 
 #[test]
@@ -558,8 +557,8 @@ fn sweeps_and_pipes_follow_3d_sketch_curves() {
 }
 
 /// #47: references to other bodies: an edge, a face's loops and a silhouette of a second body
-/// project into a sketch on the first; they follow an edit of that body (a parameter) and
-/// are reported lost, not crashed on, when it goes away.
+/// project into a sketch on the first; they follow an edit of that body (a parameter), and when
+/// it goes away the sketch fails, asking for the named edge again, not crashed on.
 #[test]
 fn project_and_include_from_other_bodies() {
     let mut s = Session::default();
@@ -589,13 +588,17 @@ fn project_and_include_from_other_bodies() {
     let id = s.doc.features.iter().find(|f| matches!(f.kind, solidcraft_doc::FeatureKind::Sketch { .. })).unwrap().id;
     let si = run(&mut s, "sketch.inspect", json!({"sketch": id}));
     assert!(xs(&si).iter().any(|x| (x - 70.0).abs() < 1e-6), "{:?}", xs(&si));
-    // Remove the cylinder: its silhouette and edge are lost, with a warning and no error.
+    // Remove the cylinder: the edge included from it is gone, and the sketch asks for it again.
     let cyl = s.doc.features.iter().find(|f| matches!(f.kind, solidcraft_doc::FeatureKind::Cylinder { .. })).unwrap().id;
     run(&mut s, "timeline.delete", json!({"feature": cyl}));
     let t = run(&mut s, "document.inspect", json!({}));
     let row = t["timeline"].as_array().unwrap().iter().find(|r| r["id"] == json!(id)).cloned().unwrap();
-    assert!(row["error"].is_null(), "{row}");
-    assert!(row["warning"].as_str().is_some_and(|w| w.contains("lost")), "{row}");
+    let error = row["error"].as_str().unwrap_or_default();
+    assert!(
+        solidcraft_doc::reselect_parts(error)
+            .is_some_and(|(feature, reference)| feature == row["name"] && reference.starts_with(&format!("F{cyl}:"))),
+        "{row}"
+    );
 }
 
 /// A cylinder's wall and the torus of a rounded rim are drawn as one face but stored in halves

@@ -479,7 +479,7 @@ fn transferred_frozen_face_paint_ignores_consumed_legacy_offset() {
     let part = component(&mut s, "Part");
     run(&mut s, "component.move_bodies", json!({"component":part,"bodies":["Foreign"]}));
     let original = s.doc.appearances.faces.iter().find(|face| face.body == "Foreign").unwrap();
-    let expected = solidcraft_doc::naming::point_on_face(&s.model.state(), original.name.as_ref().unwrap(), original.point).unwrap().0;
+    let expected = solidcraft_doc::naming::point_on_face(&s.model.state(), original.name.as_ref().unwrap(), original.point).unwrap();
     copy(&mut s, part);
     let paint = s.doc.appearances.faces.iter().find(|face| face.body == "Foreign (2)").unwrap();
     assert!(paint.point.dist(expected) < 1e-6, "{:?} versus {expected:?}", paint.point);

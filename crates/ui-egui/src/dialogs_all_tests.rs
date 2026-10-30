@@ -742,7 +742,7 @@ fn draft_uses_the_picked_solid_beside_a_hidden_overlapping_mesh() {
     let target = body.name.clone();
     let point = Vec3::new(20.0, 10.0, 5.0);
     let name = naming::face_name_at_body(body, point).unwrap();
-    let (index, _, _) = naming::face_on_body(body, &name, point).unwrap();
+    let (index, _) = naming::face_on_body(body, &name, point).unwrap();
     h.app.session.selection = vec![Sel::Face { body: target.clone(), index, point }];
     let mut d = Dialog::for_command(&h.app, "solid.draft").unwrap();
     d.inputs[1].items = vec![Sel::Plane { name: "XY".into() }];

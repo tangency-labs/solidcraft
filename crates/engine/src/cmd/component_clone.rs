@@ -498,7 +498,6 @@ pub(super) fn paste(
                 }
                 if let Some(name) = &face.name {
                     face.point = solidcraft_doc::naming::point_on_face(&state, name, face.point)
-                        .map(|(point, _)| point)
                         .ok_or_else(|| bad(CMD, "source frozen face appearance lost its identity"))?;
                 }
                 let source_body = state.body(&face.body).ok_or_else(|| bad(CMD, "source frozen face appearance lost its body"))?;

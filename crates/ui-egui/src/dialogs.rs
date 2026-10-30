@@ -5117,8 +5117,7 @@ fn named_refill(s: &Session, body: Option<&str>, name: &str, point: Vec3, edge: 
             .filter_map(|b| naming::locate_edge(b, name, point).ok().map(|hit| (b, hit)))
             .min_by(|(_, a), (_, b)| a.point.dist(point).total_cmp(&b.point.dist(point)))?;
         (b, hit.edge, hit.point)
-    } else if let Some((b, (index, point, _))) = body.and_then(|n| st.body(n)).and_then(|b| naming::face_on_body(b, name, point).map(|hit| (b, hit)))
-    {
+    } else if let Some((b, (index, point))) = body.and_then(|n| st.body(n)).and_then(|b| naming::face_on_body(b, name, point).map(|hit| (b, hit))) {
         (b, index, point)
     } else {
         let hit = naming::locate_face(&st, name, point)?;

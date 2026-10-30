@@ -44,17 +44,8 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
                 {
                     let mut scoped = ModelState::default();
                     scoped.bodies.push(mb.clone());
-                    let (picked, split) = crate::naming::point_on_face(&scoped, name, at)
-                        .ok_or_else(|| DocError::Invalid("selected cylinder face no longer exists".into()))?;
-                    if split {
-                        return Err(DocError::Invalid("selected cylinder face was split".into()));
-                    }
-                    let (index, _, _) = crate::project::nearest_face(&mb.mesh(), picked)
-                        .ok_or_else(|| DocError::Invalid("selected cylinder face cannot be resolved".into()))?;
-                    if !crate::naming::face_has_name(&mb, index as usize, name) {
-                        return Err(DocError::Invalid("selected cylinder face is ambiguous".into()));
-                    }
-                    at = kernel::cylinder_emboss_anchor(&mb.body, index as usize, picked)?;
+                    let hit = crate::name_lookup::locate_face(&scoped, name, at).ok_or_else(|| DocError::reselect(name.as_str()))?;
+                    at = kernel::cylinder_emboss_anchor(&mb.body, hit.face, hit.point)?;
                 }
                 let result = kernel::emboss_cylinder_at(&mb.body, at, &plane, &regions, if *deboss { -d } else { d })?;
                 if let Some(slot) = st.bodies.get_mut(i) {
@@ -759,20 +750,18 @@ pub(super) fn sheet_eval(
             let mb = st.body(body).cloned().ok_or_else(|| DocError::Unknown(format!("body `{body}`")))?;
             let r = doc.sheet_rule(rule.as_deref());
             let values = |t: Option<f64>| doc.rule_values_at(vals, &r, t);
-            // The bend edges by name first; a name that is gone keeps its point, with a warning.
+            // The bend edges by name where they have one: a name that no longer finds its edge
+            // fails the conversion, asking for the edge to be picked again.
             let mut picks = Vec::with_capacity(bends.len());
             for (i, p) in bends.iter().enumerate() {
                 let name = f.edge_names.get(i).filter(|n| !n.is_empty());
-                picks.push(match name.map(|n| (n, crate::naming::locate_edge(&mb, n, p.0))) {
-                    Some((n, Ok(hit))) => {
+                picks.push(match name {
+                    Some(n) => {
+                        let hit = crate::naming::locate_edge(&mb, n, p.0).map_err(|_| DocError::reselect(n.as_str()))?;
                         if let Some(note) = hit.note(n) {
                             append_warning(warning, note);
                         }
                         hit.point
-                    }
-                    Some((n, Err(_))) => {
-                        append_warning(warning, format!("edge `{n}` no longer exists; using the edge at the picked point"));
-                        p.0
                     }
                     None => p.0,
                 });

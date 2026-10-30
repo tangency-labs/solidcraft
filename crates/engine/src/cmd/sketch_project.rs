@@ -194,9 +194,15 @@ pub(super) fn refresh(s: &Session, doc: &Document, id: u64, sk: &mut Sketch) -> 
         return vec!["lost face attachment; reattach explicitly".into()];
     };
     let Ok(plane) = sketch_plane(&doc, id, &st) else { return Vec::new() };
-    let warnings = match attachment {
+    let refreshed = match attachment {
         Some(anchor) => solidcraft_doc::project::refresh_face_anchor_links(&doc, &vals, &st, &plane, sk, anchor),
         None => solidcraft_doc::project::refresh_links(&doc, &vals, &st, &plane, sk),
+    };
+    // A link whose named face or edge is gone fails the sketch when it is evaluated; while it is
+    // edited, that is what the refresh says.
+    let warnings = match refreshed {
+        Ok(warnings) => warnings,
+        Err(e) => return vec![e.in_feature(&doc.feature(id).map(|f| f.name.clone()).unwrap_or_default()).to_string()],
     };
     if let Ok(stored) = doc.sketch(id)
         && sk.positions_in(stored).is_some()

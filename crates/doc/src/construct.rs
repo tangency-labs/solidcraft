@@ -141,16 +141,16 @@ fn construct<'a>(st: &'a ModelState, name: &str) -> Result<&'a ConstructGeom> {
     st.construct.iter().find(|c| c.name == name).map(|c| &c.geom).ok_or_else(|| DocError::Unknown(format!("construction `{name}`")))
 }
 
-/// The face picked: (body, face index, point on it).
+/// The face picked: (body, face index, point on it). A face picked with a name is the face the
+/// name finds, or the reference fails, asking for it to be picked again.
 fn face_of<'a>(st: &'a ModelState, at: Vec3, name: &Option<String>) -> Result<(&'a ModelBody, usize, Vec3)> {
     // The named face itself: its nearest point to the old pick can lie on an edge it shares
     // (a corner round that a parameter moved away from the pick), where picking again by the
     // point finds the flat face beside it (#1255).
-    if let Some(hit) = name.as_deref().and_then(|n| crate::name_lookup::locate_face(st, n, at))
-        && let Some(b) = st.bodies.get(hit.body).filter(|b| !b.body.is_mesh())
-        && hit.face < b.body.face_count()
-    {
-        return Ok((b, hit.face, hit.point));
+    if let Some(n) = name.as_deref() {
+        return crate::name_lookup::locate_face(st, n, at)
+            .and_then(|hit| st.bodies.get(hit.body).filter(|b| !b.body.is_mesh() && hit.face < b.body.face_count()).map(|b| (b, hit.face, hit.point)))
+            .ok_or_else(|| DocError::reselect(n));
     }
     for b in bodies(st) {
         if let Some(fi) = crate::appearance::face_index_at(b, at) {
@@ -165,16 +165,13 @@ fn edge_points(st: &ModelState, at: Vec3, name: &Option<String>) -> Result<Vec<V
     edge_pick(st, at, name).map(|(_, _, pts)| pts)
 }
 
-/// The edge picked: its body, its index there (as `Body::edges` lists it) and its polyline.
+/// The edge picked: its body, its index there (as `Body::edges` lists it) and its polyline. An
+/// edge picked with a name is the edge the name finds, or the reference fails, asking for it to
+/// be picked again.
 fn edge_pick<'a>(st: &'a ModelState, at: Vec3, name: &Option<String>) -> Result<(&'a ModelBody, usize, Vec<Vec3>)> {
     let mut at = at;
     if let Some(n) = name {
-        for b in bodies(st) {
-            if let Ok((q, _)) = crate::naming::find_edge(b, n, at) {
-                at = q;
-                break;
-            }
-        }
+        at = bodies(st).find_map(|b| crate::naming::find_edge(b, n, at).ok()).ok_or_else(|| DocError::reselect(n.as_str()))?;
     }
     let mut best: Option<(f64, &ModelBody, usize, Vec<Vec3>)> = None;
     for b in bodies(st) {
@@ -216,7 +213,7 @@ fn named_vertex(st: &ModelState, at: Vec3, names: &[String]) -> Option<Vec3> {
         .iter()
         .map(|n| {
             // The edge with that name itself, never the one nearest the old pick.
-            let on = bodies(st).find_map(|b| crate::naming::find_edge(b, n, at).ok())?.0;
+            let on = bodies(st).find_map(|b| crate::naming::find_edge(b, n, at).ok())?;
             let pts = edge_points(st, on, &None).ok()?;
             Some([*pts.first()?, *pts.last()?])
         })
@@ -683,12 +680,15 @@ pub(crate) fn resolve_geo_plane(ctx: &Ctx, p: &PlaneRef) -> Result<Plane> {
 
 impl GeoRef {
     /// Where a picked edge or face is now, found the way evaluation finds it (by its persistent
-    /// name, else at the picked point): a point on it. `None` for other references and for an
+    /// name when it has one, else at the picked point): a point on it. `None` for other references and for an
     /// edge or face that is gone.
     pub fn picked_point(&self, st: &ModelState) -> Option<Vec3> {
         match self {
             GeoRef::Edge { at, name } => {
-                let on = name.as_deref().and_then(|n| bodies(st).find_map(|b| crate::naming::find_edge(b, n, *at).ok())).map_or(*at, |(q, _)| q);
+                let on = match name.as_deref() {
+                    Some(n) => bodies(st).find_map(|b| crate::naming::find_edge(b, n, *at).ok())?,
+                    None => *at,
+                };
                 edge_pick(st, on, &None).ok().map(|_| on)
             }
             GeoRef::Face { at, name } => face_of(st, *at, name).ok().map(|(_, _, p)| p),

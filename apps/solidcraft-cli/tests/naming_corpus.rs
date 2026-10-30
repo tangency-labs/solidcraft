@@ -175,14 +175,9 @@ fn record_refs(out: &mut Vec<(String, bool)>, s: &Session, f: &Feature) {
                 ("not checked (a cylindrical emboss finds its face on its own body)".to_string(), true)
             } else {
                 match naming::locate_face_on_body(&fst, f.kind.face_body(), n, p) {
-                    Some(hit) => (
-                        format!(
-                            "{}{}",
-                            face_label(&fst, hit.body, hit.face),
-                            flags(&[(hit.split, "split"), (hit.merged, "merged"), (!hit.verified, "geometric"), (hit.legacy, "legacy")])
-                        ),
-                        true,
-                    ),
+                    Some(hit) => {
+                        (format!("{}{}", face_label(&fst, hit.body, hit.face), flags(&[(!hit.verified, "geometric"), (hit.legacy, "legacy")])), true)
+                    }
                     None => ("gone".into(), false),
                 }
             };
@@ -198,7 +193,7 @@ fn record_refs(out: &mut Vec<(String, bool)>, s: &Session, f: &Feature) {
                         "{} edge {}{}",
                         b.name,
                         naming::edge_names(b).get(hit.edge).map(String::as_str).unwrap_or("?"),
-                        flags(&[(hit.split, "split"), (!hit.verified, "geometric"), (hit.legacy, "legacy")])
+                        flags(&[(!hit.verified, "geometric"), (hit.legacy, "legacy")])
                     ),
                     true,
                 ),

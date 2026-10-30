@@ -939,10 +939,10 @@ fn edge_names_from(b: &ModelBody, faces: &[String]) -> Vec<String> {
     names
 }
 
-/// The edge of a body with this name: exact, else the pieces of the same edge nearest `near`
-/// (`Err` explains when there is none).
-pub fn find_edge(b: &ModelBody, name: &str, near: Vec3) -> Result<(Vec3, bool), String> {
-    locate_edge(b, name, near).map(|hit| (hit.point, hit.split))
+/// A point on the edge of a body this name finds (see [`locate_edge`]; `Err` explains when there
+/// is none).
+pub fn find_edge(b: &ModelBody, name: &str, near: Vec3) -> Result<Vec3, String> {
+    locate_edge(b, name, near).map(|hit| hit.point)
 }
 
 /// Names of the edges nearest each point on a body (for storing references).
@@ -1100,21 +1100,20 @@ pub fn named_face_point(st: &ModelState, body: Option<&str>, name: &str) -> Resu
     face_spot(b, hit.face).map(|spot| spot.point).ok_or_else(|| format!("face `{name}` has no surface to pick"))
 }
 
-/// The point on the face with this name nearest `p` (a split face: its nearest piece, with
-/// `true` for "not exactly that face": split, or merged into another); `None` when no face has
-/// the name.
-pub fn point_on_face(st: &ModelState, name: &str, p: Vec3) -> Option<(Vec3, bool)> {
-    locate_face(st, name, p).map(|hit| (hit.point, hit.split || hit.merged))
+/// The point on the face this name finds nearest `p`; `None` when the name finds no face (see
+/// [`locate_face`]).
+pub fn point_on_face(st: &ModelState, name: &str, p: Vec3) -> Option<Vec3> {
+    locate_face(st, name, p).map(|hit| hit.point)
 }
 
 /// Resolve a legacy named face only on its recorded source body. Return the
 /// selected face index as well as the closest point, which may lie on a shared
 /// edge and therefore must not be used to pick the face a second time.
-pub fn face_on_body(body: &ModelBody, name: &str, p: Vec3) -> Option<(usize, Vec3, bool)> {
+pub fn face_on_body(body: &ModelBody, name: &str, p: Vec3) -> Option<(usize, Vec3)> {
     if body.body.is_mesh() {
         return None;
     }
-    crate::name_lookup::locate_on(body, name, p).map(|hit| (hit.face, hit.point, hit.split || hit.merged))
+    crate::name_lookup::locate_on(body, name, p).map(|hit| (hit.face, hit.point))
 }
 
 #[cfg(test)]
@@ -1140,7 +1139,7 @@ mod tests {
 
     fn same_hit(a: &FaceHit, b: &FaceHit) {
         assert_eq!((a.body, a.face, a.point), (b.body, b.face, b.point));
-        assert_eq!((a.split, a.merged, a.verified, a.on_point, a.legacy), (b.split, b.merged, b.verified, b.on_point, b.legacy));
+        assert_eq!((a.verified, a.on_point, a.legacy), (b.verified, b.on_point, b.legacy));
     }
 
     #[test]

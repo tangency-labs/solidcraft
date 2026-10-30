@@ -2635,6 +2635,13 @@ mod naming {
         s.model.result(id).and_then(|r| r.warning.clone())
     }
 
+    /// The reference feature `name` failed on, asking for it to be picked again.
+    fn reselect(s: &Session, name: &str) -> Option<String> {
+        let id = s.doc.find_feature(name).map(|f| f.id)?;
+        let error = s.model.result(id).and_then(|r| r.error.clone())?;
+        solidcraft_doc::reselect_parts(&error).filter(|(feature, _)| *feature == name).map(|(_, reference)| reference.to_string())
+    }
+
     /// A 40 x 30 x 10 block (sketch S: l1…l4 counter-clockwise from the origin), a hole H, a
     /// fillet on the right top edge.
     fn block() -> Session {
@@ -2692,8 +2699,10 @@ mod naming {
         assert_eq!(warning(&s, "Round"), None);
     }
 
+    /// The notch leaves the filleted edge in two pieces: neither is the edge, so the fillet fails,
+    /// asking for its edge again, and never rounds the piece nearest the pick.
     #[test]
-    fn a_split_edge_warns_and_takes_the_nearest_piece() {
+    fn a_split_edge_fails_the_fillet_asking_for_the_edge_again() {
         let mut s = block();
         // Upstream of the fillet, a notch through the middle of the filleted edge.
         run(&mut s, "timeline.roll_to", json!({"feature": "Hole"}));
@@ -2702,12 +2711,13 @@ mod naming {
         run(&mut s, "sketch.finish", json!({}));
         run(&mut s, "solid.extrude", json!({"sketch": "N", "distance": 10, "operation": "cut", "name": "Notch"}));
         run(&mut s, "timeline.roll_to", json!({}));
-        let w = warning(&s, "Round").unwrap_or_default();
-        assert!(w.contains("split"), "{w}");
+        assert_eq!(reselect(&s, "Round").as_deref(), Some("F2:side:l2|F2:top"));
     }
 
+    /// The face the filleted edge bounded is gone with its sketch line: the fillet fails, asking
+    /// for its edge again.
     #[test]
-    fn a_removed_segment_warns() {
+    fn a_removed_segment_fails_the_fillet_asking_for_the_edge_again() {
         let mut s = block();
         // Replace the right side (l2) of the rectangle with a new line: the face it made is gone.
         let sk = s.doc.find_feature("S").map(|f| f.id).unwrap();
@@ -2716,8 +2726,7 @@ mod naming {
         run(&mut s, "sketch.line", json!({"points": [[40, 0], [40, 30]], "ids": ["right"]}));
         let r: Result<Value, _> = s.execute("sketch.finish", &json!({}));
         assert!(r.is_ok() || r.is_err());
-        let w = warning(&s, "Round").unwrap_or_default();
-        assert!(w.contains("no longer exists"), "{w}");
+        assert_eq!(reselect(&s, "Round").as_deref(), Some("F2:side:l2|F2:top"));
     }
 
     fn face_names(s: &mut Session, body: &str) -> Vec<String> {
@@ -4454,7 +4463,7 @@ fn a_side_drawn_in_two_collinear_pieces_extrudes_into_one_face() {
     let st = s.model.state();
     let body = st.body("Body1").unwrap();
     let edge = format!("F2:side:{}|F2:top", pieces[1]);
-    let (at, _) = solidcraft_doc::naming::find_edge(body, &edge, geom::Vec3::new(15.0, 0.0, 5.0)).unwrap();
+    let at = solidcraft_doc::naming::find_edge(body, &edge, geom::Vec3::new(15.0, 0.0, 5.0)).unwrap();
     assert!(at.y.abs() < 1e-9 && (at.z - 5.0).abs() < 1e-9, "{edge} at {at:?}");
     // A sketch attaches to the joined side as to any side.
     assert_eq!(run(&mut s, "sketch.create", json!({"plane": {"face": [15, 0, 2.5]}}))["attachment"], "exact_face");

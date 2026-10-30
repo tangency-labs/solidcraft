@@ -131,10 +131,10 @@ fn keep_component_looks(doc: &mut Document, owners: &BTreeMap<String, u64>, comp
 /// What the bodies `new` call the face or edge that `old` calls `name`, found where it is.
 fn renamed(old: &ModelState, new: &[&ModelBody], name: &str, near: Vec3) -> Option<String> {
     use solidcraft_doc::{appearance::face_index_at, naming};
-    if let Some((p, _)) = naming::point_on_face(old, name, near) {
+    if let Some(p) = naming::point_on_face(old, name, near) {
         return new.iter().find_map(|b| face_index_at(b, p).and_then(|i| naming::face_names(b).get(i).cloned()));
     }
-    let p = old.bodies.iter().find_map(|b| naming::find_edge(b, name, near).ok())?.0;
+    let p = old.bodies.iter().find_map(|b| naming::find_edge(b, name, near).ok())?;
     new.iter().find(|b| face_index_at(b, p).is_some()).and_then(|b| naming::edge_names_at(b, &[p]).pop())
 }
 

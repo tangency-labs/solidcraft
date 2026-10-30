@@ -341,7 +341,7 @@ fn profile_points(doc: &Document, st: &ModelState, p: &CamProfile, cam: &super::
                     let (body, p) = bodies
                         .iter()
                         .enumerate()
-                        .find_map(|(i, b)| crate::naming::find_edge(b, name, *pick).ok().map(|(p, _)| (i, p)))
+                        .find_map(|(i, b)| crate::naming::find_edge(b, name, *pick).ok().map(|p| (i, p)))
                         .ok_or_else(|| bad(&format!("the edge `{name}` no longer exists (edit the cam to pick again)")))?;
                     (on, at) = (Some(body), p);
                 }

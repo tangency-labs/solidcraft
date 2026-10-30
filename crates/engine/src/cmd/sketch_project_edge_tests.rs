@@ -1,6 +1,6 @@
 //! A projected edge stays the edge that was picked: its link keeps the edge's persistent name,
 //! so the edge is found by that name wherever a change of the body takes it, and no other edge
-//! is taken for it when it is split or gone.
+//! is taken for it when it is split or gone: the sketch fails, asking for the edge again.
 
 use serde_json::{Value, json};
 use solidcraft_geom::{Vec2, Vec3};
@@ -119,11 +119,17 @@ fn a_projected_edge_stays_that_edge_when_the_body_changes_size() {
     assert!(matches!(&stored(&s).source, LinkSource::Edge { body, at } if body == "Body1" && at.dist(Vec3::new(400.0, 25.0, 20.0)) < 1e-6));
 }
 
+/// What sketch `Top` asks to be picked again, when it fails for a reference it lost.
+fn reselect(s: &Session) -> Option<String> {
+    let r = s.model.result(s.doc.find_feature("Top").unwrap().id).unwrap();
+    r.error.as_deref().and_then(solidcraft_doc::reselect_parts).filter(|(feature, _)| *feature == "Top").map(|(_, reference)| reference.to_string())
+}
+
 /// A slot cut through the plate from x = 80 to 120, y = 20 to 30 leaves the picked edge in two
-/// pieces, y = 0..20 and y = 30..50. The link, picked at y = 10, gives the piece it was picked
-/// on and says the edge was split; without the slot it is the whole edge again.
+/// pieces, y = 0..20 and y = 30..50. Neither is the edge: the sketch fails, asking for it again
+/// (never the piece nearest the pick); without the slot it is the whole edge again.
 #[test]
-fn a_projected_edge_that_was_split_gives_its_nearest_piece_and_says_so() {
+fn a_projected_edge_that_was_split_fails_its_sketch_asking_for_the_edge_again() {
     let mut s = Session::default();
     plate(&mut s);
     run(&mut s, "sketch.create", json!({"plane": "XY", "name": "SlotSketch"}));
@@ -133,31 +139,28 @@ fn a_projected_edge_that_was_split_gives_its_nearest_piece_and_says_so() {
     run(&mut s, "timeline.suppress", json!({"feature": "Slot", "suppressed": true}));
     project_right_edge(&mut s, 10.0);
     assert_line(&s, 100.0, (0.0, 50.0), "drawn");
+    let name = stored(&s).edge_name.unwrap();
     run(&mut s, "timeline.suppress", json!({"feature": "Slot", "suppressed": false}));
-    assert_line(&s, 100.0, (0.0, 20.0), "split");
-    assert!(trouble(&s).contains("was split"), "{}", trouble(&s));
-    assert!(!link(&s).lost);
+    assert_eq!(reselect(&s), Some(name), "{}", trouble(&s));
     run(&mut s, "timeline.suppress", json!({"feature": "Slot", "suppressed": true}));
     assert_line(&s, 100.0, (0.0, 50.0), "whole again");
     assert_eq!(trouble(&s), "");
 }
 
 /// A fillet of radius 4 takes the picked edge away. Its two tangent edges are 4 from the picked
-/// point, the nearest edges there are now: the link is lost and keeps its line, it takes
-/// neither of them. Without the fillet the link has its edge again.
+/// point, the nearest edges there are now: the sketch takes neither of them, it fails, asking for
+/// its edge again. Without the fillet the link has its edge again.
 #[test]
-fn a_projected_edge_that_is_gone_is_lost_not_replaced() {
+fn a_projected_edge_that_is_gone_fails_its_sketch_not_replaced() {
     let mut s = Session::default();
     plate(&mut s);
     run(&mut s, "solid.fillet", json!({"edges": [[100, 25, 20]], "radius": "4 mm", "name": "Round"}));
     run(&mut s, "timeline.suppress", json!({"feature": "Round", "suppressed": true}));
     project_right_edge(&mut s, 25.0);
     assert_line(&s, 100.0, (0.0, 50.0), "drawn");
+    let name = stored(&s).edge_name.unwrap();
     run(&mut s, "timeline.suppress", json!({"feature": "Round", "suppressed": false}));
-    let said = trouble(&s);
-    assert!(said.contains("projected reference lost: edge") && said.contains("no longer exists"), "{said}");
-    assert!(link(&s).lost);
-    assert_line(&s, 100.0, (0.0, 50.0), "the last geometry is kept");
+    assert_eq!(reselect(&s), Some(name), "{}", trouble(&s));
     run(&mut s, "timeline.suppress", json!({"feature": "Round", "suppressed": true}));
     assert_eq!(trouble(&s), "");
     assert!(!link(&s).lost);

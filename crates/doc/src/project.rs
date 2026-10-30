@@ -600,20 +600,24 @@ pub fn resolved_edge_name(st: &ModelState, r: &Resolved) -> Option<String> {
     crate::naming::edge_names(body).get(index).filter(|name| !name.is_empty()).cloned()
 }
 
-/// Re-resolve every link of a sketch (in place). Returns warnings for lost, moved or rebuilt
-/// links; lost links keep their last geometry.
 fn lost(reference: &str) -> DocError {
     DocError::Unknown(format!("{reference} no longer exists"))
 }
 
 /// The edge a link's stored name finds, and the body it is on: the link's body, or, when no
-/// body has that name any more (it was joined into another), the body on which the name finds
-/// the edge nearest the link's point.
+/// body has that name any more (it was joined into another), the one body on which the name
+/// finds an edge.
 fn locate_named_edge(st: &ModelState, body: &str, name: &str, at: Vec3) -> Option<(String, crate::naming::EdgeHit)> {
     let hit = |b: &crate::ModelBody| crate::naming::locate_edge(b, name, at).ok().map(|hit| (b.name.clone(), hit));
     match st.body(body) {
         Some(b) => hit(b),
-        None => st.bodies.iter().filter(|b| !b.body.is_mesh()).filter_map(hit).min_by(|a, b| a.1.point.dist(at).total_cmp(&b.1.point.dist(at))),
+        None => {
+            let mut found = st.bodies.iter().filter(|b| !b.body.is_mesh()).filter_map(hit);
+            match (found.next(), found.next()) {
+                (Some(one), None) => Some(one),
+                _ => None,
+            }
+        }
     }
 }
 
@@ -752,6 +756,7 @@ pub fn resolve_face_indices(st: &ModelState, plane: &Plane, kind: LinkKind, body
     })
 }
 
+/// [`refresh_links`] for a sketch attached to a face by `anchor`.
 pub fn refresh_face_anchor_links(
     doc: &Document,
     vals: &BTreeMap<String, Value>,
@@ -759,7 +764,7 @@ pub fn refresh_face_anchor_links(
     plane: &Plane,
     sk: &mut Sketch,
     anchor: &crate::FaceAnchor,
-) -> Vec<String> {
+) -> Result<Vec<String>> {
     refresh_links_in(doc, vals, st, plane, sk, Some(anchor))
 }
 
@@ -832,7 +837,11 @@ fn merge_family_lines(geom: Vec<LinkGeom>) -> Result<Vec<LinkGeom>> {
     Ok(result)
 }
 
-pub fn refresh_links(doc: &Document, vals: &BTreeMap<String, Value>, st: &ModelState, plane: &Plane, sk: &mut Sketch) -> Vec<String> {
+/// Re-resolve every link of a sketch (in place). Returns warnings for lost, moved or rebuilt
+/// links; lost links keep their last geometry. A link kept by the name of a face or edge that no
+/// longer finds exactly that face or edge is not lost: the sketch fails, asking for the
+/// reference to be picked again ([`DocError::Reselect`]).
+pub fn refresh_links(doc: &Document, vals: &BTreeMap<String, Value>, st: &ModelState, plane: &Plane, sk: &mut Sketch) -> Result<Vec<String>> {
     refresh_links_in(doc, vals, st, plane, sk, None)
 }
 
@@ -869,7 +878,7 @@ fn refresh_links_in(
     plane: &Plane,
     sk: &mut Sketch,
     anchor: Option<&crate::FaceAnchor>,
-) -> Vec<String> {
+) -> Result<Vec<String>> {
     let mut warn = Vec::new();
     let links = sk.links.clone();
     for l in &links {
@@ -878,45 +887,18 @@ fn refresh_links_in(
         if !l.auto_face
             && let (Some(name), LinkSource::Face { body, at }) = (&l.face_name, &mut source)
         {
-            if let Some((index, p, split)) = st.body(body).and_then(|target| crate::naming::face_on_body(target, name, *at)) {
-                let stem = crate::naming::strip_piece(name);
-                let removed_piece = split
-                    && name != stem
-                    && st.body(body).is_some_and(|target| {
-                        (certified_planar_construction(target, index) || target.body.face_was_coalesced(index))
-                            && crate::naming::face_has_name(target, index, stem)
-                    });
-                if removed_piece {
-                    sk.set_link_lost(&l.id, true);
-                    warn.push(format!("projected face piece `{name}` no longer exists; last geometry retained"));
-                    continue;
-                }
-                *at = p;
-                named_face = Some((body.clone(), index, p));
-                if split {
-                    warn.push(format!("projected face `{name}` was split; using the nearest piece"));
-                }
-            } else {
-                sk.set_link_lost(&l.id, true);
-                warn.push(format!("projected face `{name}` no longer exists"));
-                continue;
-            }
+            let (index, p) =
+                st.body(body).and_then(|target| crate::naming::face_on_body(target, name, *at)).ok_or_else(|| DocError::reselect(name.as_str()))?;
+            *at = p;
+            named_face = Some((body.clone(), index, p));
         }
         // An edge the link keeps by name is that edge of its body, wherever it went. When no
-        // edge has the name any more the link is lost: no other edge is taken for it.
+        // edge has the name any more no other edge is taken for it: the sketch fails.
         let mut named_edge = None;
         if let (Some(name), LinkSource::Edge { body, at }) = (&l.edge_name, &source) {
-            match locate_named_edge(st, body, name, *at) {
-                Some((body, hit)) => {
-                    warn.extend(hit.note(name).map(|note| format!("projected {note}")));
-                    named_edge = Some((body, hit.edge, *at));
-                }
-                None => {
-                    sk.set_link_lost(&l.id, true);
-                    warn.push(format!("projected reference lost: edge `{name}` no longer exists; last geometry retained"));
-                    continue;
-                }
-            }
+            let (body, hit) = locate_named_edge(st, body, name, *at).ok_or_else(|| DocError::reselect(name.as_str()))?;
+            warn.extend(hit.note(name).map(|note| format!("projected {note}")));
+            named_edge = Some((body, hit.edge, *at));
         }
         let resolved = if matches!(source, LinkSource::Text { .. }) {
             // A text needs nothing outside its sketch; one on a path follows a curve of it.
@@ -974,7 +956,7 @@ fn refresh_links_in(
             }
         }
     }
-    warn
+    Ok(warn)
 }
 
 // ---------------------------------------------------------------------------------------------

@@ -1829,26 +1829,31 @@ fn a_line_of_text_cuts_into_a_block_at_any_depth() {
 
 /// A design saved before tapered sides were built through `taper_loop` (#1014), by the build
 /// before it: two tapered bosses apart from each other (now joined in one boolean), a fillet on
-/// a sloping side edge of one and on the top edge of the other, both saved by edge name. They
-/// still find their edges, and the part comes out the same.
+/// a sloping side edge of one and on the top edge of the other, both saved by edge name. The
+/// sloping edge is still the edge its name names. The top edge was saved as an edge of piece `#1`
+/// of the cone's side, which is one face now: no edge is that edge any more, so that fillet fails
+/// and asks for its edge to be picked again (never the nearest edge of the whole face), and the
+/// rest of the part comes out as before.
 #[test]
-fn fillets_on_tapered_bosses_saved_before_still_find_their_edges() {
+fn a_fillet_saved_on_a_piece_of_a_tapered_side_that_is_whole_now_asks_for_its_edge_again() {
     let text = include_str!("../../../../tests/taper/before-1014/two_tapered_bosses_filleted.json");
     let mut s = Session::new(solidcraft_doc::Document::from_json(text).unwrap());
     let volume = run(&mut s, "inspect.measure", json!({}))["total"]["volume_mm3"].as_f64().unwrap();
-    for name in ["Extrude2", "Fillet1", "Fillet2"] {
+    for name in ["Extrude2", "Fillet1"] {
         let id = s.doc.find_feature(name).unwrap().id;
         let r = s.model.result(id).unwrap();
         assert!(r.error.is_none() && r.warning.is_none(), "{name}: {:?} {:?}", r.error, r.warning);
     }
+    let fillet = s.doc.find_feature("Fillet2").unwrap().id;
+    let error = s.model.result(fillet).unwrap().error.clone().unwrap();
+    assert_eq!(solidcraft_doc::reselect_parts(&error), Some(("Fillet2", "F4:side:c1#1|F4:top#[F4:side:c1]")), "{error}");
     // In closed form: the 80 × 40 × 20 block, the 20 × 20 boss 10 high tapered 5° in (a frustum,
     // top 20 − 20 tan 5° square: 3660.251034), the Ø16 boss tapered alike (a cone frustum, top
     // radius 8 − 10 tan 5°: 1798.751833); less the R1 round along a sloping corner (the corner's
     // section, r²(cot φ/2 − (π − φ)/2) at its dihedral angle φ = 90.435°, times its length
-    // between z = 20 and 30: 2.124401) and the R0.5 round all round the cone's top (the section
-    // at the rim's 95°, turned about the axis by Pappus: 1.928463). The build that saved it,
-    // with truck, measured 69454.885209.
-    assert!((volume - 69454.950004).abs() < 1e-3, "{volume}");
+    // between z = 20 and 30: 2.124401). The R0.5 round all round the cone's top (1.928463) is
+    // the failed fillet's.
+    assert!((volume - 69456.878467).abs() < 1e-3, "{volume}");
     assert_eq!(s.world_state().unwrap().bodies.len(), 1);
 }
 
