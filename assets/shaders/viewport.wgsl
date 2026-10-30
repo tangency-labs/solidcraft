@@ -425,12 +425,12 @@ fn fs_ao_depth(i: TOut, @builtin(front_facing) front: bool) -> AoDepth {
     return opaque_depth(i, front);
 }
 
-/// The AO prepass's depth of an opaque surface's fragment.
+/// The AO prepass's depth of an opaque surface's fragment, at its own depth: a section's caps
+/// neither cast nor take occlusion (a cap's depth on a back face behind a kept face would be a
+/// wall in mid-air, darkening the faces beside the cut).
 fn opaque_depth(i: TOut, front: bool) -> AoDepth {
     if (clipped(i.wp) || length(i.n) < 0.5) { discard; }
-    var depth = i.pos.z;
-    if (!front && sectioned()) { depth = cap_depth(i.wp, i.pos.z); }
-    return AoDepth(depth, bitcast<u32>(depth));
+    return AoDepth(i.pos.z, bitcast<u32>(i.pos.z));
 }
 
 // Cosine-weighted hemisphere samples, the pattern turned by a different angle at each pixel.

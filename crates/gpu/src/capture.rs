@@ -180,17 +180,30 @@ impl Capturer {
     /// [`Capturer::rgba`] with `highlight` drawn as the viewport draws its highlight scene
     /// (selection and hover feedback), over the model scene.
     pub fn rgba_highlighted(&self, scene: &Scene, highlight: Option<GpuScene>, cam: &Camera, width: u32, height: u32) -> Result<Vec<u8>> {
-        self.draw(scene, highlight, cam, width, height).map(|(rgba, _)| rgba)
+        self.draw(scene, highlight, cam, [width, height], 0.0).map(|(rgba, _)| rgba)
+    }
+
+    /// [`Capturer::rgba`] with ambient occlusion of `radius` (world units), as the viewport
+    /// shades with it on.
+    pub fn rgba_occluded(&self, scene: &Scene, cam: &Camera, width: u32, height: u32, radius: f32) -> Result<Vec<u8>> {
+        self.draw(scene, None, cam, [width, height], radius).map(|(rgba, _)| rgba)
     }
 
     /// [`Capturer::rgba`] and what the picture drew ([`DrawStats`]). Both come from the same
     /// turn on the device, so another thread's picture can't put its counts in their place.
     pub fn rgba_with_stats(&self, scene: &Scene, cam: &Camera, width: u32, height: u32) -> Result<(Vec<u8>, DrawStats)> {
-        self.draw(scene, None, cam, width, height)
+        self.draw(scene, None, cam, [width, height], 0.0)
     }
 
     /// The picture and what it drew, both read while this call has the device to itself.
-    fn draw(&self, scene: &Scene, highlight: Option<GpuScene>, cam: &Camera, width: u32, height: u32) -> Result<(Vec<u8>, DrawStats)> {
+    fn draw(
+        &self,
+        scene: &Scene,
+        highlight: Option<GpuScene>,
+        cam: &Camera,
+        [width, height]: [u32; 2],
+        ao_radius: f32,
+    ) -> Result<(Vec<u8>, DrawStats)> {
         if !(1..=self.max_side).contains(&width) || !(1..=self.max_side).contains(&height) {
             return Err(GpuError::Render(format!("a picture is 1 to {} pixels a side, not {width} × {height}", self.max_side)));
         }
@@ -209,6 +222,7 @@ impl Capturer {
             _ => None,
         };
         let mut frame = frame(scene, cam, [width, height], state.key, access);
+        frame.ao_radius = ao_radius;
         // Always a highlight scene of the picture's own, empty without one: the renderer keeps
         // its last highlight scene while the slot is empty (as the viewport does until the next
         // is built), so the previous picture's highlight would show in this one.

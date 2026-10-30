@@ -348,6 +348,45 @@ fn pictures_cap_a_cut_that_reaches_past_another_plane() {
     }
 }
 
+/// The parts of a section hides cast no occlusion: with ambient occlusion on, the top of a plate
+/// cut short by a plane (and a block standing on its hidden end) is lit beside the cut as the
+/// top of a plate made that short is. The cap's depth on the far walls behind the kept top face
+/// used to stand in the occlusion's depth like a wall in mid-air, darkening the top along the cut.
+#[test]
+fn hidden_material_casts_no_occlusion() {
+    let Some(c) = capturer() else { return };
+    let mut cut = session(&[
+        ("solid.box", json!({"length": 60, "width": 40, "height": 10})),
+        ("solid.box", json!({"length": 8, "width": 20, "height": 20, "corner": [36, 10, 10], "operation": "new_body"})),
+    ]);
+    cut.execute("inspect.section", &json!({"plane": {"origin": [30, 0, 0], "normal": [1, 0, 0]}})).unwrap();
+    let short = session(&[("solid.box", json!({"length": 30, "width": 40, "height": 10}))]);
+    let size = (320, 240);
+    for fov in [0.0, 0.5] {
+        let mut cam = view::home_camera(&cut).looking_from(Vec3::new(1.0, -0.4, 0.9));
+        cam.fov = fov;
+        let guides = Guides { grid: false, axes: false };
+        let a = view::scene_with_guides(&cut, &cam, &cut.section, guides);
+        let b = view::scene_with_guides(&short, &cam, &[], guides);
+        // The viewport's radius for the cut design.
+        let radius = 0.04 * f64::hypot(60.0f64.hypot(40.0), 30.0) as f32;
+        let (img_a, img_b) = (
+            c.rgba_occluded(&a, &cam, size.0 as u32, size.1 as u32, radius).unwrap(),
+            c.rgba_occluded(&b, &cam, size.0 as u32, size.1 as u32, radius).unwrap(),
+        );
+        let lum = |img: &[u8], p: Vec3| pixel_at(img, &cam, size, a.radius, p)[..3].iter().map(|c| f64::from(*c)).sum::<f64>() / 3.0;
+        let (mut worst, mut n) = (0.0f64, 0);
+        for x in [20.0, 23.0, 25.0, 27.0, 28.5] {
+            for y in (4..37).step_by(4) {
+                let p = Vec3::new(x, f64::from(y), 10.0);
+                worst = worst.max(lum(&img_b, p) - lum(&img_a, p));
+                n += 1;
+            }
+        }
+        assert!(n > 0 && worst < 4.0, "fov {fov}: the top beside the cut is up to {worst:.1} levels darker than the short plate's");
+    }
+}
+
 /// With the section's hatch off, the cut shows plain in its body's own colour, as the CPU
 /// rasterizer draws it; hatched, it is tinted and striped.
 #[test]
