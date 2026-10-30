@@ -234,7 +234,10 @@ evaluating the model or changing the design, undo history or view revision. It r
 (`surface_analysis`, `section`, or the legacy independent `continuity`), `kind`, source `command`, structured `setting`, `has_key`
 and a `clear: {command, params}` request that can be executed unchanged. Settings retain numbers:
 lengths use millimetres, Draft's `angle_deg` uses degrees, directions are normalised, and
-Continuity's `edge_count` counts the seams currently kept for shading. Labels and units are
+Continuity's `edge_count` counts the seams currently kept for shading. Section's slot is there
+while a section plane is on show: its `setting` is the first plane on show (`origin_mm`,
+`normal`) and the section's `hatch`; with every plane hidden, the Analysis folder hidden, or the
+section undone away it gives up the slot, and its `clear` takes every plane out. Labels and units are
 formatted by clients. `engine.describe {command: "view.status_items"}` exposes both schemas.
 
 By default, surface analyses, including Continuity, share one slot; successful replacement keeps that
