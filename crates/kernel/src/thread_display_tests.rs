@@ -144,12 +144,14 @@ fn thread_display_mesh_stays_on_its_surfaces() {
             let [a, b2, c] = t.map(|i| mesh.positions[i as usize]);
             let (ra, rb, rcn) = (r(a), r(b2), r(c));
             let centre = r((a + b2 + c) * (1.0 / 3.0));
+            // An end disc is flat: its triangles are its boundary's, and one with its three
+            // corners on the rim (at r = rc) lies on the disc, not on a cylinder.
+            let end_disc = [a, b2, c].iter().all(|v| v.z.abs() < 1e-9) || [a, b2, c].iter().all(|v| (v.z - (turns + 2.0) * p).abs() < 1e-9);
             for want in [rc, rm] {
-                if [ra, rb, rcn].iter().all(|x| (x - want).abs() < 1e-4) {
+                if !end_disc && [ra, rb, rcn].iter().all(|x| (x - want).abs() < 1e-4) {
                     assert!(centre > want - 2.0 * tol, "{name}: triangle {ti} on the r = {want} cylinder cuts in to {centre}");
                 }
             }
-            let end_disc = [a, b2, c].iter().all(|v| v.z.abs() < 1e-9) || [a, b2, c].iter().all(|v| (v.z - (turns + 2.0) * p).abs() < 1e-9);
             assert!(end_disc || (centre > rc - 2.0 * tol && centre < rm + 1e-6), "{name}: triangle {ti} at radius {centre}, outside {rc}…{rm}");
         }
         // A mesh within the tolerance of the surfaces is within area × tolerance of the volume.

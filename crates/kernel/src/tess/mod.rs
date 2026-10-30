@@ -288,6 +288,12 @@ fn boundary(
     let mut out = Boundary { loops: Vec::with_capacity(face.loops.len()), segments: Vec::with_capacity(face.loops.len()), reach };
     // Each vertex's parameters, from the first edge use of the face to start there.
     let mut at_vertex: std::collections::HashMap<u32, [f64; 2]> = std::collections::HashMap::new();
+    // The vertex pairs an edge of the face joins.
+    let joined: std::collections::HashSet<(u32, u32)> = face_edges(face)
+        .filter_map(|oe| b.edges.get(oe.edge as usize))
+        .map(|e| (e.vertices[0].min(e.vertices[1]), e.vertices[0].max(e.vertices[1])))
+        .collect();
+    let vertex_point = |v: u32| b.vertices.get(v as usize).map(|x| (Vec3::new(x.point[0], x.point[1], x.point[2]), x.tolerance.max(0.0)));
     for l in &face.loops {
         let Loop::Edges { edges } = l else { continue };
         let (mut pts, mut uvs): (Vec<Vec3>, Vec<[f64; 2]>) = (Vec::new(), Vec::new());
@@ -341,6 +347,24 @@ fn boundary(
                         }
                     }
                     None => {
+                        // Another vertex of the face within the tolerance of both (and of the
+                        // chord tolerance), and not joined to this one by an edge (which makes
+                        // them two points however near: a step that small), is the same point:
+                        // the record's corners a hair apart (a planar boolean's, where a cut-out's
+                        // corner touches another loop's corner) are one point of the face, so its
+                        // loops touch there instead of crossing.
+                        let same = vertex_point(v).and_then(|(p, tv)| {
+                            at_vertex.iter().filter(|(w, _)| **w != v && !joined.contains(&(v.min(**w), v.max(**w)))).find_map(|(w, wq)| {
+                                let (pw, tw) = vertex_point(*w)?;
+                                (p.dist(pw) <= tv.max(tw).min(rules.tol)).then_some(*wq)
+                            })
+                        });
+                        if let Some(mut w) = same.filter(|w| !(0..2).any(|d| pole_along(*w, d) || pole_along(*q, d))) {
+                            for d in 0..2 {
+                                w[d] = uv::unwrap(w[d], q[d], dom.period[d]);
+                            }
+                            *q = w;
+                        }
                         at_vertex.insert(v, *q);
                     }
                 }
