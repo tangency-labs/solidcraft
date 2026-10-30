@@ -3540,7 +3540,13 @@ fn export_urdf(s: &Session, cmd: &str, path: &str, p: &Value) -> Result<Value> {
     };
     // `io::urdf` refuses a prefix XML cannot hold.
     let mesh_prefix = str_(p, "mesh_prefix").unwrap_or("").to_string();
-    let mut options = solidcraft_io::UrdfOptions { mesh_prefix, effort: positive("effort")?, velocity: positive("velocity")?, decals: Vec::new() };
+    let mut options = solidcraft_io::UrdfOptions {
+        mesh_prefix,
+        effort: positive("effort")?,
+        velocity: positive("velocity")?,
+        mimic: bool_(p, "mimic").unwrap_or(true),
+        decals: Vec::new(),
+    };
     // The pictures shown on the model are written only when asked for, so an export made the
     // usual way writes what it always has.
     let images = match p.get("images") {
