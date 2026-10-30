@@ -63,6 +63,8 @@ macro_rules! unpaged_preferences {
             /// choice here (`save_mesh_send`, `save_mesh_slicer`); a settings file that still has them loads,
             /// and they are ignored.
             save_mesh_format: String = "stl".into();
+            /// URDF export writes motion links as `<mimic>` (false: each joint is free, as before).
+            urdf_mimic: bool = true;
             /// Save as mesh: the last quality (`standard`, `fine` or `finest`, #4747).
             save_mesh_quality: String = "standard".into();
             /// Send to Slicer: the last slicer used (an installed slicer's id or a program path).
