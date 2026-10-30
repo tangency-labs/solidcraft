@@ -1091,9 +1091,9 @@ mod tests {
         }
     }
 
-    /// Offset Surface: a cylinder's side picked once with its chain (both halves) moved out to
-    /// radius 12; a box top moved up exactly; a zero distance copies; past the axis refused, the
-    /// design left as it was; undo, redo and reopening.
+    /// Offset Surface: a cylinder's side (one face, closed along its seam) picked with its chain
+    /// moved out to radius 12; a box top moved up exactly; a zero distance copies; past the axis
+    /// refused, the design left as it was; undo, redo and reopening.
     #[test]
     fn offset_surface_of_a_cylinder_and_a_box_top() {
         let mut s = Session::default();
@@ -1101,7 +1101,7 @@ mod tests {
         run(&mut s, "surface.offset", json!({"faces": [[10, 0, 10]], "chain": true, "distance": 2, "body": "Can", "body_name": "Sleeve"}));
         let st = s.world_state().unwrap();
         let sleeve = &st.body("Sleeve").unwrap().body;
-        assert!(sleeve.is_surface() && sleeve.face_count() == 2);
+        assert!(sleeve.is_surface() && sleeve.face_count() == 1);
         let want = 2.0 * std::f64::consts::PI * 12.0 * 20.0;
         assert!((area(&s, "Sleeve") - want).abs() < want * 1e-3, "{} vs {want}", area(&s, "Sleeve")); // (measured on meshes)
         assert!(st.body("Can").is_some(), "the source body stays");
