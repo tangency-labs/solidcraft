@@ -307,8 +307,11 @@ fn fit_once(fit: &[Vec3], all: &[Vec3], tol: f64, crown: f64) -> SplineResult<Fi
 /// is. A control point whose support rectangle keeps clear of the loop takes the bump's blossom
 /// coefficients, so the surface between the perturbed points is the bubble exactly and the
 /// surface over the loop is not moved at all (those points' basis functions are zero all along
-/// it). A fitted net is often too coarse to hold one; it is then refined by knot insertion, which
-/// leaves the surface itself as it is, until it does. Returns the crowned surface, how many
+/// it). A fitted net is often too coarse for that; it is then refined by knot insertion, which
+/// leaves the surface itself as it is, until every point whose basis function is not zero at the
+/// box's middle takes the bump (where the middle is inside the loop), so the middle rises by the
+/// bubble's full `crown · size` there, as documented, not by the share of it a coarse net's few
+/// clear points carry. Returns the crowned surface, how many
 /// control points took the bump, and the farthest the bump moved the surface at a sampled loop
 /// point (0).
 fn crown_fill(surface: NurbsSurface, uv: &[[f64; 2]], crown: f64, normal: Vec3) -> SplineResult<(NurbsSurface, usize, f64)> {
@@ -337,7 +340,7 @@ pub(crate) fn crown_fill_along(
     let gap = loop_gap(uv);
     let mut base = surface;
     loop {
-        if let Some((crowned, points)) = crown_net(&base, uv, gap, crown, along)? {
+        if let Some((crowned, points)) = crown_net(&base, uv, gap, crown, along)?.filter(|c| c.2).map(|(c, n, _)| (c, n)) {
             let mut drift = 0.0f64;
             for q in uv {
                 if let (Ok(a), Ok(b)) = (base.eval(q[0], q[1]), crowned.eval(q[0], q[1])) {
@@ -365,14 +368,15 @@ pub(crate) fn crown_fill_along(
 /// The crown's bump in the net `base`: a control point whose support rectangle keeps clear of the
 /// loop takes `crown · size · B(ξ, η)`, `B` the bubble's blossom at the point's knots (so the
 /// surface between the perturbed points is exactly the bubble, not a fit of it) and `size` the
-/// box's diagonal. `None` when the net has no such point.
+/// box's diagonal. `None` when the net has no such point; with it, whether every point
+/// supporting the box's middle took the bump (or the middle is outside the loop).
 fn crown_net(
     base: &NurbsSurface,
     uv: &[[f64; 2]],
     gap: [f64; 2],
     crown: f64,
     along: &dyn Fn([f64; 2]) -> Option<Vec3>,
-) -> SplineResult<Option<(NurbsSurface, usize)>> {
+) -> SplineResult<Option<(NurbsSurface, usize, bool)>> {
     let [cu, cv] = base.count();
     let degree = base.degree();
     let knots = base.knots();
@@ -391,10 +395,16 @@ fn crown_net(
     let (Some(knots_u), Some(knots_v)) = (knots.first(), knots.get(1)) else { return invalid("the surface has no knot vectors") };
     let mut ctrl = base.homogeneous().to_vec();
     let mut points = 0usize;
+    let middle = [0.5 * (domain[0][0] + domain[0][1]), 0.5 * (domain[1][0] + domain[1][1])];
+    // The points whose basis is not zero at the middle, and those of them that took the bump.
+    let (mut at_middle, mut raised_middle) = (0usize, 0usize);
+    let holds = |span: [f64; 2], x: f64| span[0] < x && x < span[1];
     for j in 0..cv {
         let Some((v_span, v_knots)) = support(knots_v, degree[1], j) else { continue };
         for i in 0..cu {
             let Some((u_span, u_knots)) = support(knots_u, degree[0], i) else { continue };
+            let supports = holds(u_span, middle[0]) && holds(v_span, middle[1]);
+            at_middle += usize::from(supports);
             if !clear_of_loop(u_span, v_span, uv, gap) {
                 continue;
             }
@@ -406,12 +416,14 @@ fn crown_net(
             let Some(p) = h.project() else { continue };
             *slot = HPoint::weighted(p + normal * bump, h.w);
             points += 1;
+            raised_middle += usize::from(supports);
         }
     }
     if points == 0 {
         return Ok(None);
     }
-    Ok(Some((NurbsSurface::from_homogeneous(degree, knots.clone(), ctrl)?, points)))
+    let middle_held = raised_middle == at_middle || !inside_loop(middle, uv);
+    Ok(Some((NurbsSurface::from_homogeneous(degree, knots.clone(), ctrl)?, points, middle_held)))
 }
 
 /// The same surface with a knot inserted in the middle of every span of direction `d` (0 = u):

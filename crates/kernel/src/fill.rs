@@ -166,7 +166,8 @@ fn general_fill(
             Some(Some(side)) => ts.iter().map(|t| side.across(record, *t).map_err(|e| e.to_string())).collect(),
         }
     };
-    let spec = IsoSpec { tol: face_tolerance(body), angle_tol: PATCH_ANGLE_TOL_DEG.to_radians(), crown, points };
+    let spec =
+        IsoSpec { tol: face_tolerance(body), angle_tol: PATCH_ANGLE_TOL_DEG.to_radians(), crown, corner_turn: CORNER_TURN_DEG.to_radians(), points };
     let fill = solidcraft_geom::fill_iso::iso_fill(&edges, &mut across, &spec).map_err(spline_error)?;
     let made = quilt_body(body, record, &pieces, &fill, face_tolerance(body))?;
     let a = fill.achieved;
@@ -281,6 +282,15 @@ fn loop_pieces(record: &b::Brep, chain: &[(usize, bool)]) -> Result<Vec<Piece>> 
         out.extend(pieces);
     }
     Ok(out)
+}
+
+/// The general fill's parameter `t` along a piece `[plo, phi]` of a record edge on `[a, z]`, run
+/// the loop's way (`forward`) or back, in the record edge's own parameter: the edge's, reflected
+/// where the loop runs against it, a piece's end or middle exactly.
+fn on_record(a: f64, z: f64, [plo, phi]: [f64; 2], forward: bool, t: f64) -> f64 {
+    let near = 1e-9 * (1.0 + (z - a).abs() + a.abs().max(z.abs()));
+    let t = if forward { t } else { reflected(a, z, t) };
+    [plo, phi, 0.5 * (plo + phi)].into_iter().find(|s| (s - t).abs() <= near).unwrap_or(t)
 }
 
 /// `t` on an edge's interval `[a, z]` reflected about its middle: the loop's parameter along an
@@ -843,30 +853,17 @@ fn quilt_body(body: &Body, record: &b::Brep, chain: &[Piece], fill: &IsoFill, to
                     let [a, z] = edge.interval;
                     // The patch's parameter runs the loop's way: the edge's own, reflected where the
                     // loop runs against it; a side's ends are its piece's ends or middle, exactly.
-                    let near = 1e-9 * (1.0 + (z - a).abs() + a.abs().max(z.abs()));
-                    let snap = |t: f64| [plo, phi, 0.5 * (plo + phi)].into_iter().find(|s| (s - t).abs() <= near).unwrap_or(t);
-                    let tau = |t: f64| snap(if forward { t } else { reflected(a, z, t) });
+                    let tau = |t: f64| on_record(a, z, [plo, phi], forward, t);
                     let (tf, tt) = (tau(from), tau(to));
                     let (lo, hi, along) = if tf < tt { (tf, tt, true) } else { (tt, tf, false) };
                     let key = (e, lo.to_bits(), hi.to_bits());
                     let id = match piece_of.get(&key) {
                         Some(id) => *id,
                         None => {
-                            let mut ends = [0u32; 2];
-                            for (end, t) in ends.iter_mut().zip([lo, hi]) {
-                                *end = if t == a || t == z {
-                                    let [start, finish] = edge.vertices;
-                                    let v = if t == a { start } else { finish };
-                                    let next = index(vertices.len())?;
-                                    let id = *vertex_of.entry(v).or_insert(next);
-                                    if id == next {
-                                        vertices.push(record.vertices.get(v as usize).ok_or_else(|| fail("vertex reference"))?.point);
-                                    }
-                                    id
-                                } else {
-                                    middle(&mut vertices, &mut middle_of, e, edge, t)?
-                                };
-                            }
+                            let ends = [
+                                vertex_on(record, &mut vertices, &mut vertex_of, &mut middle_of, e, lo)?,
+                                vertex_on(record, &mut vertices, &mut vertex_of, &mut middle_of, e, hi)?,
+                            ];
                             let id = index(edges.len())?;
                             // The edge itself: the interval and the pcurve's parameter are on its
                             // NURBS form (a conic's), which it keeps.
@@ -884,9 +881,13 @@ fn quilt_body(body: &Body, record: &b::Brep, chain: &[Piece], fill: &IsoFill, to
                         Some(id) => *id,
                         None => {
                             let curve = fill.spokes.get(spoke).ok_or_else(|| fail("spoke"))?;
-                            let &Piece { edge: e, interval: [plo, phi], .. } = chain.get(spoke).ok_or_else(|| fail("spoke"))?;
+                            // Its foot on the loop, in the record edge's parameter as the sides'
+                            // pieces are (the same bits where a side's piece ends there).
+                            let &(k, t) = fill.feet.get(spoke).ok_or_else(|| fail("spoke"))?;
+                            let &Piece { edge: e, forward, interval: [plo, phi] } = chain.get(k).ok_or_else(|| fail("spoke"))?;
                             let edge = record.edges.get(e).ok_or_else(|| fail("edge reference"))?;
-                            let start = middle(&mut vertices, &mut middle_of, e, edge, 0.5 * (plo + phi))?;
+                            let [a, z] = edge.interval;
+                            let start = vertex_on(record, &mut vertices, &mut vertex_of, &mut middle_of, e, on_record(a, z, [plo, phi], forward, t))?;
                             let end = centre.ok_or_else(|| fail("centre"))?;
                             let id = index(edges.len())?;
                             let spline = match &curve.weights {
@@ -947,6 +948,32 @@ fn hold_gap(brep: &mut b::Brep, gap: f64) {
     for v in &mut brep.vertices {
         v.tolerance = v.tolerance.max(4.0 * gap);
     }
+}
+
+/// The part vertex at parameter `t` of record edge `e`: the record's own vertex at an end of the
+/// edge's interval (made once), else [`middle`].
+fn vertex_on(
+    record: &b::Brep,
+    vertices: &mut Vec<[f64; 3]>,
+    vertex_of: &mut std::collections::HashMap<u32, u32>,
+    middle_of: &mut std::collections::HashMap<(usize, u64), u32>,
+    e: usize,
+    t: f64,
+) -> Result<u32> {
+    let fail = |m: &str| KernelError::Failed(format!("patch: {m}"));
+    let edge = record.edges.get(e).ok_or_else(|| fail("edge reference"))?;
+    let [a, z] = edge.interval;
+    if t != a && t != z {
+        return middle(vertices, middle_of, e, edge, t);
+    }
+    let [start, finish] = edge.vertices;
+    let v = if t == a { start } else { finish };
+    let next = u32::try_from(vertices.len()).map_err(|_| fail("vertex budget"))?;
+    let id = *vertex_of.entry(v).or_insert(next);
+    if id == next {
+        vertices.push(record.vertices.get(v as usize).ok_or_else(|| fail("vertex reference"))?.point);
+    }
+    Ok(id)
 }
 
 /// The vertex at parameter `t` inside record edge `e` (`edge`), made once.
@@ -1343,7 +1370,7 @@ mod tests {
         shuffled.swap(0, 1);
         let (b, _) = fill_rim(&open, &shuffled);
         let (ra, rb) = (record(&a), record(&b));
-        let (sa, sb) = (SurfaceEval::new(&ra.faces[0].surface).unwrap(), SurfaceEval::new(&rb.faces[0].surface).unwrap());
+        let (sa, sb) = (SurfaceEval::new(ra.faces[0].parameters()).unwrap(), SurfaceEval::new(rb.faces[0].parameters()).unwrap());
         let [[u0, u1], [v0, v1]] = ra.faces[0].domain;
         let mut gap = 0.0f64;
         for (x, y) in [(0.2, 0.3), (0.5, 0.5), (0.7, 0.9)] {
@@ -1557,10 +1584,17 @@ mod tests {
             let off = edges_off_surface(&full);
             assert!(off <= super::face_tolerance(&open), "an edge is {off} off the crowned face");
             mesh_is_clean(&full);
-            // The middle of the loop's box moved by crown × its diagonal (the bump is 1 there).
+            // The middle of the fill's box moved by crown × its diagonal (the bump is 1 there).
             let (ra, rb) = (record(&plain), record(&full));
-            let (a, b) = (SurfaceEval::new(&ra.faces[0].surface).unwrap(), SurfaceEval::new(&rb.faces[0].surface).unwrap());
-            let [[bu0, bu1], [bv0, bv1]] = ra.faces[0].domain;
+            let (a, b) = (SurfaceEval::new(ra.faces[0].parameters()).unwrap(), SurfaceEval::new(rb.faces[0].parameters()).unwrap());
+            // The height field's box is its surface's whole domain (the loop's box and 1% more
+            // each way, where the bubble is nought), not the face's: SMLib holds a face's domain
+            // as its loop's extent, 2% less across.
+            let (b::Surface::Spline { u_knots, v_knots, .. } | b::Surface::RationalSpline { u_knots, v_knots, .. }) = ra.faces[0].parameters() else {
+                panic!("a height field is a spline")
+            };
+            let ends = |k: &[f64]| [k[0], k[k.len() - 1]];
+            let ([bu0, bu1], [bv0, bv1]) = (ends(u_knots), ends(v_knots));
             let (uc, vc) = ((bu0 + bu1) / 2.0, (bv0 + bv1) / 2.0);
             let size = (bu1 - bu0).hypot(bv1 - bv0);
             let bump = a.point([uc, vc]).unwrap().dist(b.point([uc, vc]).unwrap());
