@@ -6,7 +6,7 @@ use std::collections::{BTreeMap, BTreeSet};
 type UniqueFrames = BTreeMap<u64, Option<(Vec<u64>, Mat)>>;
 
 fn unique_frames(s: &Session, cmd: &str) -> Result<UniqueFrames> {
-    let doc = s.placed_document();
+    let doc = s.design_document();
     let mut children = BTreeMap::<u64, Vec<&Occurrence>>::new();
     for occurrence in &doc.occurrences {
         children.entry(occurrence.parent).or_default().push(occurrence);
@@ -54,7 +54,7 @@ fn transfer(s: &mut Session, name: &str, to: u64, frames: &UniqueFrames, cmd: &s
     let state = s.model.state();
     let body = state.body(name).ok_or_else(|| bad(cmd, "body is missing"))?;
     let from = s.doc.model_body_component(body);
-    let doc = s.placed_document();
+    let doc = s.design_document();
     let unique = |component| {
         frames.get(&component).and_then(Option::as_ref).ok_or_else(|| {
             bad(cmd, "body transfer requires one source and destination placement; shared instances cannot preserve a unique world pose")
@@ -78,7 +78,9 @@ fn transfer(s: &mut Session, name: &str, to: u64, frames: &UniqueFrames, cmd: &s
     }
     let inherited = (!s.doc.appearances.bodies.contains_key(name)).then(|| s.doc.appearances.components.get(&from).cloned()).flatten();
     let paths: BTreeSet<u64> = source.0.iter().chain(&destination.0).copied().collect();
-    let captures: Vec<_> = paths.into_iter().filter_map(|id| s.pending_moves.get(&id).map(|transform| (id, *transform))).collect();
+    let uncaptured = s.uncaptured_moves();
+    let captures: Vec<_> = paths.into_iter().filter_map(|id| uncaptured.get(&id).map(|transform| (id, *transform))).collect();
+    drop(uncaptured);
     if captures.iter().any(|(_, transform)| !solidcraft_doc::valid_transfer_matrix(transform)) {
         return Err(bad(cmd, "pending transfer position is not a supported rigid transform"));
     }
@@ -164,13 +166,13 @@ fn move_at_boundary(s: &mut Session, p: &Value, allow_boundary: bool) -> Result<
     // component placed more than once gets the bodies in every instance, placed by that one.
     let given = path_param(p, "component_path", cmd)?;
     if given.is_some() || frames.get(&to).is_some_and(Option::is_none) {
-        let placed = super::placing::placement_of(&scratch, &scratch.placed_document(), to, given.as_deref(), "component_path", cmd)?;
+        let placed = super::placing::placement_of(&scratch, &scratch.design_document(), to, given.as_deref(), "component_path", cmd)?;
         frames.insert(to, Some(placed));
     }
     // The bodies move from the placement named (`from_path`: one of several where their component
     // is placed), as that placement shows them.
     if let Some(path) = path_param(p, "from_path", cmd)? {
-        let placed = scratch.placed_document();
+        let placed = scratch.design_document();
         let component = path
             .last()
             .and_then(|id| placed.occurrences.iter().find(|o| o.id == *id))

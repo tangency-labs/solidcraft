@@ -430,8 +430,8 @@ pub(super) fn copy_occurrence(s: &mut Session, p: &Value) -> Result<Value> {
     let m = if bool_(p, "in_place") == Some(true) {
         placing::in_place(s, &occurrence_path(s, p, src.id, cmd)?, parent, placing::parent_path(p, cmd)?.as_deref(), t, cmd)?
     } else {
-        let base = s.pending_moves.get(&src.id).unwrap_or(&src.transform);
-        solidcraft_doc::mat_mul(&translation(t), base)
+        let base = s.uncaptured_moves().get(&src.id).copied().unwrap_or(src.transform);
+        solidcraft_doc::mat_mul(&translation(t), &base)
     };
     if !valid_position(&m) {
         return Err(bad(cmd, "copy transform exceeds supported numeric range"));
@@ -469,7 +469,7 @@ fn paste_new(s: &mut Session, p: &Value) -> Result<Value> {
     let transform = match occ.as_ref().filter(|_| bool_(p, "in_place") == Some(true)) {
         Some(o) => placing::in_place(s, &occurrence_path(s, p, o.id, cmd)?, parent, placing::parent_path(p, cmd)?.as_deref(), t, cmd)?,
         None => {
-            let base = occ.as_ref().map(|o| s.pending_moves.get(&o.id).copied().unwrap_or(o.transform)).unwrap_or(solidcraft_doc::IDENTITY);
+            let base = occ.as_ref().map(|o| s.uncaptured_moves().get(&o.id).copied().unwrap_or(o.transform)).unwrap_or(solidcraft_doc::IDENTITY);
             solidcraft_doc::mat_mul(&translation(t), &base)
         }
     };
@@ -560,7 +560,7 @@ fn move_occurrence(s: &mut Session, p: &Value) -> Result<Value> {
     }
     let path = if p.get("path").is_some() || space == "world" { Some(occurrence_path(s, p, id, cmd)?) } else { None };
     let delta = if space == "world" {
-        let placement = s.occurrence_placement(path.as_deref().unwrap_or(&[]))?;
+        let placement = s.occurrence_placement_with(path.as_deref().unwrap_or(&[]), &s.uncaptured_moves())?;
         let inverse = solidcraft_doc::mat_inverse(&placement.parent_world).ok_or_else(|| bad(cmd, "parent frame is singular"))?;
         solidcraft_doc::mat_mul(&solidcraft_doc::mat_mul(&inverse, &delta), &placement.parent_world)
     } else {
@@ -579,7 +579,7 @@ fn move_occurrence(s: &mut Session, p: &Value) -> Result<Value> {
         }
         base
     } else {
-        s.pending_moves.get(&id).copied().unwrap_or(o.transform)
+        s.uncaptured_moves().get(&id).copied().unwrap_or(o.transform)
     };
     let next = solidcraft_doc::mat_mul(&delta, &cur);
     if !valid_position(&next) {
@@ -611,7 +611,9 @@ fn ground(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 fn capture(s: &mut Session, _p: &Value) -> Result<Value> {
-    let moves = std::mem::take(&mut s.pending_moves);
+    // The exploded view is shown, never captured: it stays shown, the design keeps its placements.
+    let moves = s.uncaptured_moves().into_owned();
+    s.pending_moves.retain(|id, _| !moves.contains_key(id));
     let n = moves.len();
     for (id, m) in moves {
         if let Some(o) = s.doc_mut().occurrences.iter_mut().find(|o| o.id == id) {

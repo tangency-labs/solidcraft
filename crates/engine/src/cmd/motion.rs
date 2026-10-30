@@ -1061,6 +1061,7 @@ fn explode_show(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "explode.show";
     if p.get("view").is_none_or(|v| v.is_null() || v.as_str().is_some_and(|x| x.eq_ignore_ascii_case("none"))) {
         s.pending_moves.clear();
+        s.exploded.clear();
         s.revision += 1;
         return Ok(json!({"view": null}));
     }
@@ -1070,6 +1071,8 @@ fn explode_show(s: &mut Session, p: &Value) -> Result<Value> {
     if !moves.values().all(solidcraft_doc::is_placement) {
         return Err(bad(cmd, format!("exploded view `{}` moves an occurrence out of range", v.name)));
     }
+    // Shown only: `exploded` marks these as the view's, so the design's placements leave them out.
+    s.exploded.clone_from(&moves);
     s.pending_moves = moves;
     s.revision += 1;
     Ok(json!({"view": v.id, "name": v.name}))

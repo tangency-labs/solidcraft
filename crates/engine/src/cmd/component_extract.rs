@@ -228,7 +228,7 @@ fn scope(s: &Session, comp: u64, cmd: &str) -> Result<Scope> {
     if source.marker.is_some_and(|m| m < source.features.len()) {
         return Err(bad(cmd, "move the timeline marker to the end first"));
     }
-    if !s.pending_moves.is_empty() {
+    if !s.uncaptured_moves().is_empty() {
         return Err(bad(cmd, "capture or revert the moved components first"));
     }
     let subtree: BTreeSet<u64> = source.components.iter().filter(|c| source.component_within(c.id, comp)).map(|c| c.id).collect();

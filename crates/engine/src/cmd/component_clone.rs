@@ -277,7 +277,7 @@ pub(super) fn paste(
     for old in source.occurrences.iter().filter(|o| selected.contains(&o.parent)) {
         let child = *components.get(&old.component).ok_or_else(|| bad(CMD, "missing child definition"))?;
         let owner = *components.get(&old.parent).ok_or_else(|| bad(CMD, "missing parent definition"))?;
-        let pose = s.pending_moves.get(&old.id).copied().unwrap_or(old.transform);
+        let pose = s.uncaptured_moves().get(&old.id).copied().unwrap_or(old.transform);
         if !super::component::valid_position(&pose) {
             return Err(bad(CMD, "invalid internal pending occurrence transform"));
         }

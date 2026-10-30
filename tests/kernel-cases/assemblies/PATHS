@@ -18,9 +18,12 @@ crates/engine/src/cmd/component_clone_assembly.rs
 crates/engine/src/cmd/component_drag.rs
 crates/engine/src/cmd/component_extract.rs
 crates/engine/src/cmd/component_link.rs
+crates/engine/src/cmd/component_placing.rs
 crates/engine/src/cmd/component_properties.rs
 crates/engine/src/cmd/component_reparent.rs
 crates/engine/src/cmd/component_transfer.rs
+# Where occurrences are placed, shown and reported (the exploded view is shown only).
+crates/engine/src/occurrences.rs
 # Interference and clearance between placed bodies.
 crates/engine/src/cmd/clearance.rs
 crates/engine/src/cmd/interference.rs
