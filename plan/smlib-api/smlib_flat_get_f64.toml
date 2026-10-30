@@ -1,0 +1,7 @@
+family = "F1b"
+status = "missing"
+solidcore_fn = ""
+pr = ""
+fork_file = "capi/src/smlib_flat_api.cpp"
+fork_commit = "ae90904"
+notes = "Kernel: none: the capi flat arrays (smlib_flat.cpp, about 4.3k lines of glue); SolidCraft passes every body through them."

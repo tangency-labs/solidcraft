@@ -164,6 +164,7 @@ jobs:
           workspaces: ". -> bin"
       - run: rustup target add wasm32-unknown-unknown
       - run: cargo check -p solidcore --target wasm32-unknown-unknown
+      - run: cargo check -p solidcore-smlib-api --target wasm32-unknown-unknown
 
   # Same packaging check the release workflow runs before publishing (no secrets).
   publish-dry-run:

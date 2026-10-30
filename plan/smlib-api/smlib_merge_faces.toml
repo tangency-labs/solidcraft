@@ -1,0 +1,7 @@
+family = "F4"
+status = "missing"
+solidcore_fn = ""
+pr = ""
+fork_file = "capi/src/smlib_ops.cpp"
+fork_commit = "d51a723"
+notes = "Kernel: RemoveTopologicalEdgesAndVertices (offset p2, piecewise)."

@@ -1,0 +1,7 @@
+family = "F1"
+status = "ported"
+solidcore_fn = "solidcore_smlib_api::Smlib::boolean2d"
+pr = 1823
+fork_file = "capi/src/smlib_ops.cpp"
+fork_commit = "d51a723"
+notes = "Kernel: boolean::api_brep::boolean_2d. Argument checks tested; no capi boolean2d case ported yet."

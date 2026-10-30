@@ -1,0 +1,7 @@
+family = "F3"
+status = "missing"
+solidcore_fn = ""
+pr = ""
+fork_file = "capi/src/smlib_sweeps.cpp"
+fork_commit = "a3485b9"
+notes = "Kernel: sweep::api_surfaces create_skin_primitive, heal stitch_into_solid."

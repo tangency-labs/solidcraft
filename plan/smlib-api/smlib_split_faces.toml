@@ -1,0 +1,7 @@
+family = "F5"
+status = "missing"
+solidcore_fn = ""
+pr = ""
+fork_file = "capi/src/smlib_split.cpp"
+fork_commit = "3e03bd2"
+notes = "Kernel: planar section + GlobalSurfaceIntersect + MergeCurvesOnSurface (brep p2)."

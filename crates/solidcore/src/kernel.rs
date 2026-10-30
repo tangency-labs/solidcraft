@@ -37,6 +37,8 @@ use core::cell::Cell;
 
 use crate::geom::context::Context;
 
+pub mod solidcraft;
+
 /// Geometric tolerances in model units (upstream defaults from `SmMath.h`).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Tolerances {
@@ -464,6 +466,8 @@ pub struct UpstreamFixes {
     pub boolean_new_face_closure_both_sides: bool,
     /// `SmStitch::StitchIntoSolid`, when its stitch leaves no lamina edge and more than one region, makes the B-rep a nested solid model (`FindAndSetInfiniteRegion(NULL, SM_VS_NESTEDSOLID)`, with editing disabled): material inside the outer shell, a void inside a shell within it, and so on, each region's outer shell first. Upstream's stitch only finds the infinite region (`SM_VS_INFINITEREGION_SWAP`), so the region inside a closed shell nested in another stays solid and the shells stay where the gluing put them: a holed profile swept round a closed path measures as if it had no hole, and twisted a half turn fails the check (Test #12, an inner shell not inside its region's outer shell) (WR-569; the fork's tangency-labs/smlib@351c57c).
     pub stitch_solid_nests_cavities: bool,
+    /// `SmPrimitiveCreation::CreateBox` returns the status of each face it makes (a plane that cannot be made, a face whose making fails even after the face was made, such as a box far smaller than the tolerance whose top face closes up on its bottom one) and of its `StitchAndOrient`, and makes no face on a side of zero extent. Upstream drops every one of those statuses and returns success with whatever faces were made (WR-596; the fork's tangency-labs/smlib@0df62c8, 35008b1 and 449c81c, `AddBoxFace`).
+    pub box_face_failures_propagate: bool,
     /// `SmEllipse::AdjustSTEPInterval` converts a new interval end outside the current arc
     /// itself: past a full-turn arc it is taken whole turns back into the arc and its NURBS
     /// parameter moved by the circle's NURBS length per turn (the other way for an

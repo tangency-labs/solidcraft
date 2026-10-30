@@ -1,0 +1,7 @@
+family = "later"
+status = "missing"
+solidcore_fn = ""
+pr = ""
+fork_file = "capi/src/smlib_history.cpp"
+fork_commit = "1c7accd"
+notes = "Kernel: attributes and notification records (ported)."

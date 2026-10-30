@@ -9,7 +9,7 @@ plan/units/*.toml, plan/PROGRESS.md (claims; generated, not committed), harness/
 line counts at the pin), scripts/upstream-pin.env (upstream version and commit),
 reports/difftest/*.json (not committed: CI's artifact, see scripts/fetch-reports.sh),
 reports/solids/solids.json (not committed: CI's artifact, see scripts/fetch-solids.sh),
-reports/ssi-corpus.json, plan/upstream-issues/*.md, the
+reports/ssi-corpus.json, plan/upstream-issues/*.md, plan/smlib-api/*.toml (SolidCraft API), the
 module file headers under crates/solidcore/src and git history (timeline). Output is
 deterministic: sorted, and the only date is the commit date of HEAD.
 
@@ -28,6 +28,7 @@ import shutil
 import subprocess
 import sys
 import time
+import tomllib
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.dont_write_bytecode = True  # keep harness/plan clean
@@ -196,6 +197,75 @@ def load_reports():
 
 
 SOLIDS_SCHEMA = 1
+
+
+SMLIB_STATUSES = ["tested", "ported", "partial", "missing"]
+SMLIB_BADGE = {"tested": "green", "ported": "partial", "partial": "claimed", "missing": "todo"}
+SMLIB_FAMILIES = {"F1": "Core: bodies, measures, check, primitives, booleans", "F1b": "Flat arrays",
+                  "F2": "Blends", "F3": "Sweeps", "F4": "Offsets", "F5": "Surface tools",
+                  "later": "History and functions waiting on fork SMLib ports"}
+
+
+def load_smlib_api():
+    """plan/smlib-api/<smlib_fn>.toml, one per C API function, in sorted order."""
+    fns = []
+    for p in sorted((ROOT / "plan/smlib-api").glob("*.toml")):
+        d = tomllib.loads(p.read_text())
+        d["name"] = p.stem
+        fns.append(d)
+    return fns
+
+
+def smlib_api_body(fns):
+    fams = list(SMLIB_FAMILIES) + sorted({f.get("family", "") for f in fns} - set(SMLIB_FAMILIES))
+    rows = []
+    for fam in fams:
+        fs = [f for f in fns if f.get("family") == fam]
+        if not fs:
+            continue
+        c = collections.Counter(f.get("status", "missing") for f in fs)
+        t = 100 * c["tested"] / len(fs)
+        d = 100 * (c["ported"] + c["partial"]) / len(fs)
+        rows.append(
+            f'<tr><td><strong>{esc(fam)}</strong> {esc(SMLIB_FAMILIES.get(fam, ""))}</td>'
+            + "".join(f"<td class=num>{c[st]}</td>" for st in SMLIB_STATUSES)
+            + f'<td class="barcell"><div class="bar" title="{t:.0f}% tested, {d:.0f}% ported or partial">'
+            f'<i class="green" style="width:{t:.2f}%"></i><i class="partial" style="width:{d:.2f}%"></i></div></td></tr>')
+    total = collections.Counter(f.get("status", "missing") for f in fns)
+    tiles = "".join(
+        f'<div class="tile"><div class="k"><span class="badge s-{SMLIB_BADGE[st]}">{st}</span></div>'
+        f'<div class="v">{total[st]}</div><div class="sub">functions</div></div>' for st in SMLIB_STATUSES)
+    frows = []
+    for f in fns:
+        st = f.get("status", "missing")
+        pr = f.get("pr", "")
+        prl = f'<a href="{REPO_URL}/pull/{esc(str(pr))}">#{esc(str(pr))}</a>' if pr != "" else ""
+        ff, fc = f.get("fork_file", ""), f.get("fork_commit", "")
+        src = (f'<a href="https://github.com/tangency-labs/smlib/blob/{esc(fc)}/{esc(ff)}">'
+               f'{esc(ff.split("/")[-1])}@<code>{esc(fc)}</code></a>') if ff and fc else esc(ff)
+        frows.append(
+            f'<tr><td><code>{esc(f["name"])}</code></td><td>{esc(f.get("family", ""))}</td>'
+            f'<td><span class="badge s-{SMLIB_BADGE.get(st, "todo")}">{esc(st)}</span></td>'
+            f'<td>{"<code>" + esc(f["solidcore_fn"]) + "</code>" if f.get("solidcore_fn") else ""}</td>'
+            f'<td>{prl}</td><td>{src}</td><td class="small">{inline(f.get("notes", ""))}</td></tr>')
+    return f"""<h1>SolidCraft API</h1>
+<p>The SolidCraft fork's C API to SMLib (<a href="https://github.com/tangency-labs/smlib">tangency-labs/smlib</a>
+<code>capi/include/smlib.h</code>), ported as the Rust crate <code>solidcore-smlib-api</code> over solidcore so that
+SolidCraft's SMLib backend can move to solidcore one call at a time. {len(fns)} functions, one file each under
+<code>plan/smlib-api/</code>; a family's PR updates its functions' files.</p>
+<section class="kpis">{tiles}</section>
+<section>
+<h2>By family</h2>
+<div class="scroll"><table><thead><tr><th>Family</th>{"".join(f"<th>{st}</th>" for st in SMLIB_STATUSES)}<th>Progress</th></tr></thead>
+<tbody>{"".join(rows)}</tbody></table></div>
+</section>
+<section>
+<h2>Functions</h2>
+<div class="scroll"><table class="sortable"><thead><tr><th data-sort="text">Function</th><th data-sort="text">Family</th>
+<th data-sort="text">Status</th><th data-sort="text">Rust</th><th data-sort="text">PR</th><th data-sort="text">Fork source</th>
+<th>Notes</th></tr></thead><tbody>{"".join(frows)}</tbody></table></div>
+</section>
+"""
 
 
 def load_solids():
@@ -514,7 +584,8 @@ def page(title, body, depth, nav, head_sha, head_date, description="", path="", 
     up = "../" * depth
     links = [("index.html", "Overview", "overview"), ("units/index.html", "Units", "units"),
              ("graph.html", "Graph", "graph"), ("solids.html", "Solids", "solids"),
-             ("issues.html", "Upstream issues", "issues"), ("ssi.html", "SSI corpus", "ssi")]
+             ("issues.html", "Upstream issues", "issues"), ("ssi.html", "SSI corpus", "ssi"),
+             ("smlib-api.html", "SolidCraft API", "smlib")]
     extra_js = "".join(f'\n<script src="{up}assets/{js}"></script>' for js in scripts)
     navhtml = "".join(
         f'<a href="{up}{href}"{" aria-current=\"page\"" if key == nav else ""}>{label}</a>'
@@ -943,6 +1014,7 @@ Rust and C++ are compared where the Rust path is ported: {par.get('compared', 0)
 <li><a href="graph.html">Dependency graph</a>: what is ready to claim and what blocks the most.</li>
 <li><a href="solids.html">Solids</a>: {f"{s_built}/{s_total} primitives build, {s_passed}/{s_total} pass" if solids else "no data yet"}, and what blocks each.</li>
 <li><a href="issues.html">{len(issues)} upstream issues</a> found while porting.</li>
+<li><a href="smlib-api.html">SolidCraft API</a>: the fork's <code>smlib_*</code> C API ported over solidcore, by family.</li>
 <li><a href="{VIEWER_URL}">Model viewer</a>: the upstream test models rendered by SMLib and by solidcore, side by side.</li>
 <li><a href="{REPO_URL}">Repository</a>: <a href="{REPO_URL}/blob/main/AGENTS.md">how to port a unit</a>,
 <a href="PROGRESS.md">checklist</a>.</li>
@@ -1257,7 +1329,14 @@ the C++ result's.</p>
 <tbody>{''.join(crow)}</tbody></table></div>
 """
     write("ssi.html", P("SSI corpus · solidcore", body, 0, "ssi", path="ssi.html"))
+
+    # ---- SolidCraft API (plan/smlib-api)
+    smlib_fns = load_smlib_api()
+    write("smlib-api.html", P("SolidCraft API · solidcore", smlib_api_body(smlib_fns), 0, "smlib",
+                              path="smlib-api.html",
+                              description="The SolidCraft fork's smlib_* C API ported over solidcore, by family"))
     return {"units": len(units), "areas": len(present), "issues": len(issues), "ssi": len(cases),
+            "smlib_api": len(smlib_fns),
             "solids": "{1}/{0} build, {2}/{0} pass".format(*solids_counts(solids)) if solids else "no data",
             "timeline": len(points),
             "seconds": time.time() - t_start}

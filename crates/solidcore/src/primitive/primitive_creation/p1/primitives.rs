@@ -36,6 +36,10 @@
 //! fd59111): [`PrimitiveCreation::create_linear_sweep`] tests a profile curve for an arc
 //! to the zero an `SmCylinder`'s own check holds its generating curve to (`arc_zero`),
 //! not to the B-rep's tolerance.
+//! Not upstream (WR-596, opt-in `Kernel::fixes.box_face_failures_propagate`; the fork's
+//! tangency-labs/smlib 0df62c8, 35008b1, 449c81c): [`PrimitiveCreation::create_box`]
+//! returns each face's and the stitch's status and skips sides of zero extent, as the
+//! fork's `AddBoxFace` does; upstream drops them.
 
 use super::PrimitiveCreation;
 use crate::curve::curve::Curve;
@@ -418,6 +422,61 @@ pub fn create_circle(
     Ok(brep)
 }
 
+/// The six faces of [`PrimitiveCreation::create_box`] (`length`, `width`, `height`) and
+/// their stitch; `propagate`: WR-596's statuses.
+fn box_faces(
+    k: &mut Kernel,
+    brep: &mut Brep,
+    [length, width, height]: [f64; 3],
+    frame: &Axis2Placement,
+    propagate: bool,
+) -> Result<()> {
+    let mut placement = Axis2Placement::new(frame.origin(), frame.x_axis(), frame.y_axis());
+    let planes = [
+        (frame.x_axis(), frame.y_axis(), length, width, height),
+        (frame.y_axis(), frame.z_axis(), width, height, length),
+        (frame.x_axis(), frame.z_axis(), length, height, -width),
+    ];
+    for (index, (x, y, u, v, offset)) in planes.into_iter().enumerate() {
+        if index != 0 {
+            let set = placement.set_canonical(frame.origin(), x, y);
+            if propagate {
+                set?;
+            } else {
+                ignore_status(set)?;
+            }
+        }
+        let domain = Extent2d::from_bounds(0.0, 0.0, u, v);
+        for side in 0..2 {
+            if side == 1 {
+                placement.translate(placement.z_axis().unitize_or_z() * offset);
+            }
+            if propagate {
+                // `AddBoxFace`: no face on a side of zero extent; a plane or face that
+                // cannot be made, or a face whose making fails after it was made,
+                // returns its status (the face keeps its plane)
+                if domain.x_length() == 0.0 || domain.y_length() == 0.0 {
+                    continue;
+                }
+                let mut plane = Plane::create_canonical(&placement)?;
+                plane.adjust_step_uv_domain(&domain)?;
+                let uv = plane.step_uv_domain();
+                create_face(k, brep, Surface::from(plane), uv)?;
+            } else {
+                let mut plane = Plane::create_canonical(&placement)?;
+                ignore_status(plane.adjust_step_uv_domain(&domain))?;
+                let uv = plane.step_uv_domain();
+                ignore_status(create_face(k, brep, Surface::from(plane), uv))?;
+            }
+        }
+    }
+    if propagate {
+        stitch(k, brep)
+    } else {
+        ignore_status(stitch(k, brep))
+    }
+}
+
 impl PrimitiveCreation {
     /// Build six planar faces, then stitch and orient them (`CreateBox`).
     pub fn create_box(
@@ -430,30 +489,14 @@ impl PrimitiveCreation {
         frame: &Axis2Placement,
     ) -> Result<()> {
         brep.set_editing_enabled(true);
-        let mut placement = Axis2Placement::new(frame.origin(), frame.x_axis(), frame.y_axis());
-        let planes = [
-            (frame.x_axis(), frame.y_axis(), length, width, height),
-            (frame.y_axis(), frame.z_axis(), width, height, length),
-            (frame.x_axis(), frame.z_axis(), length, height, -width),
-        ];
-        for (index, (x, y, u, v, offset)) in planes.into_iter().enumerate() {
-            if index != 0 {
-                ignore_status(placement.set_canonical(frame.origin(), x, y))?;
-            }
-            let domain = Extent2d::from_bounds(0.0, 0.0, u, v);
-            for side in 0..2 {
-                if side == 1 {
-                    placement.translate(placement.z_axis().unitize_or_z() * offset);
-                }
-                let mut plane = Plane::create_canonical(&placement)?;
-                ignore_status(plane.adjust_step_uv_domain(&domain))?;
-                let uv = plane.step_uv_domain();
-                ignore_status(create_face(k, brep, Surface::from(plane), uv))?;
-            }
+        // (WR-596, opt-in: the fork's `AddBoxFace`, every status returned; editing is
+        // turned off again on every way out)
+        let propagate = k.fixes.box_face_failures_propagate;
+        let result = box_faces(k, brep, [length, width, height], frame, propagate);
+        if propagate || result.is_ok() {
+            brep.set_editing_enabled(false);
         }
-        ignore_status(stitch(k, brep))?;
-        brep.set_editing_enabled(false);
-        Ok(())
+        result
     }
 
     /// Cylindrical box validation, followed by the first trimmed plane edit.

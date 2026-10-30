@@ -1,0 +1,7 @@
+family = "F1"
+status = "tested"
+solidcore_fn = "solidcore_smlib_api::Smlib::make_cone"
+pr = 1823
+fork_file = "capi/src/smlib_primitives.cpp"
+fork_commit = "4c23cbe"
+notes = "Kernel: primitive::api_primitives::create_*."

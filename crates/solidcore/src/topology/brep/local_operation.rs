@@ -7,6 +7,7 @@
 //! | Rust                | Upstream                  |
 //! |---------------------|---------------------------|
 //! | [`local_operation`] | `SmBrep::LocalOperation`  |
+//! | [`local_operation_simple`] | (not upstream) `SmBrep::LocalOperation` with its own notification identities |
 //!
 //! Deviations: the offset executive's local-operation geometry creator
 //! (`SmLocalOperationGeometryCreation`) is the face and surface lists the executive
@@ -43,6 +44,8 @@ use crate::topology::brep::p5;
 use crate::topology::brep_cache::{arena_identity, CacheObject};
 use crate::topology::face::p2 as face_ops;
 use crate::topology::{Brep, FaceId};
+
+pub use crate::offset::offset_executive::p2::local_operation_simple;
 
 const OP: &str = "topology::brep::local_operation::local_operation";
 

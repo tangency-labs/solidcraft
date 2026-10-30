@@ -1,0 +1,7 @@
+family = "F5"
+status = "missing"
+solidcore_fn = ""
+pr = ""
+fork_file = "capi/src/smlib_ssi.cpp"
+fork_commit = "ef62892"
+notes = "Kernel: intersect::api_intersectors::intersect_surfaces (result packaging in the glue)."

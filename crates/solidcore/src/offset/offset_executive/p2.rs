@@ -14,7 +14,7 @@
 //! | `order_edgeuses_by_brep` (private) | `sm_OrderEdgeusesByBrep` |
 //! | [`api_shell_brep_full`], [`ShellCopyIdentities`] | `SmApiShellBrepFull` (and its working copy's identities) |
 //! | [`api_offset_brep_full`] | `SmApiOffsetBrepFull` |
-//! | [`offset_brep_simple`], [`shell_brep_simple`] | (not upstream) the API calls with their own notification identities |
+//! | [`offset_brep_simple`], [`shell_brep_simple`], [`local_operation_simple`] | (not upstream) the API calls with their own notification identities |
 //! | [`faceuse_offset`] | `SmOffsetGeometryCreation::FaceuseOffset` over the owned B-rep |
 //!
 //! Deviations: original B-reps and the kernel are explicit arguments, not retained
@@ -1541,6 +1541,47 @@ pub fn offset_brep_simple(
     };
     let result = api_offset_brep_full(kernel, Some(original), options, &mut notifications);
     original.set_key(saved_key);
+    result
+}
+
+/// (not upstream) [`local_operation`](crate::topology::brep::local_operation::local_operation)
+/// with notification identities of its own, as [`offset_brep_simple`]: for a caller that
+/// keeps no notification stores (`SmBrep::LocalOperation` on a B-rep of the caller's).
+/// The B-rep's attributes stay on its faces as upstream's notifications carry them; its
+/// [`Brep::key`] is restored.
+///
+/// # Errors
+///
+/// Those of [`local_operation`](crate::topology::brep::local_operation::local_operation).
+pub fn local_operation_simple(
+    kernel: &mut Kernel,
+    b: &mut Brep,
+    faces: &[FaceId],
+    surfaces: Vec<crate::surface::surface::Surface>,
+) -> Result<()> {
+    let saved_key = b.key();
+    b.set_key(attributes::original_key(EntityRef::Brep(BrepId::from_index(0))).key);
+    let mut records = attributes::simple_records(b);
+    let mut store = AttributeStore::default();
+    let mut notifications = OffsetNotifications {
+        records: &mut records,
+        attributes: &mut store,
+        original_key_of: &attributes::original_key,
+        result_key_of: &attributes::result_key,
+        original_curve_ref: &attributes::original_curve,
+        result_curve_ref: &attributes::result_curve,
+        boolean_source_lists: &attributes::source_lists,
+        result_brep: attributes::result_key(EntityRef::Brep(BrepId::from_index(0))),
+        merge_identities: Some(&attributes::SimpleIdentities),
+    };
+    let result = crate::topology::brep::local_operation::local_operation(
+        kernel,
+        b,
+        faces,
+        surfaces,
+        &mut notifications,
+    );
+    b.set_key(saved_key);
     result
 }
 

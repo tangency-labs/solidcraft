@@ -1,0 +1,7 @@
+family = "F1"
+status = "tested"
+solidcore_fn = "solidcore_smlib_api::Smlib::brep_check"
+pr = 1823
+fork_file = "capi/src/smlib_check.cpp"
+fork_commit = "6c714c0"
+notes = "Kernel: topology::brep::validation::check_brep."

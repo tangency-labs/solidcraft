@@ -1,0 +1,7 @@
+family = "later"
+status = "missing"
+solidcore_fn = ""
+pr = ""
+fork_file = "capi/src/smlib_ops.cpp"
+fork_commit = "d51a723"
+notes = "Kernel: needs the fork's eased setback ported (tangency-labs/smlib e74bbd3, about 630 lines)."

@@ -1,0 +1,7 @@
+family = "F1"
+status = "missing"
+solidcore_fn = ""
+pr = ""
+fork_file = "capi/src/smlib_measure.cpp"
+fork_commit = "9767916"
+notes = "Kernel: heal gap GetMaxGapSample (GapFunction::crv_srf)."

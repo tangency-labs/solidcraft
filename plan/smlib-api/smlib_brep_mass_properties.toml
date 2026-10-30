@@ -1,0 +1,7 @@
+family = "F1"
+status = "tested"
+solidcore_fn = "solidcore_smlib_api::Smlib::brep_mass_properties"
+pr = 1823
+fork_file = "capi/src/smlib_measure.cpp"
+fork_commit = "9767916"
+notes = "Kernel: mass::integrator properties: brep_area, brep_volume, brep_properties, face_properties. The sphere and torus cases (tests/measure.rs, doubly_curved_against_closed_forms) run optimised, in CI's difftest-profile step."

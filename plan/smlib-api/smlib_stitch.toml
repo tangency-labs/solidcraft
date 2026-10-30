@@ -1,0 +1,7 @@
+family = "F5"
+status = "missing"
+solidcore_fn = ""
+pr = ""
+fork_file = "capi/src/smlib_sheets.cpp"
+fork_commit = "b018013"
+notes = "Kernel: topology::brep::p4::stitch_faces + OrientTrimmedSurfaces."

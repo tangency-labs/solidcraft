@@ -1,0 +1,7 @@
+family = "F2"
+status = "missing"
+solidcore_fn = ""
+pr = ""
+fork_file = "capi/src/smlib_ops.cpp"
+fork_commit = "d51a723"
+notes = "Kernel: blend::fillet_executive::api fillet_edges / chamfer_fillet / set_bevel_corners; capi glue (per-edge parameters, chamfer radius, failure mapping, StitchAndOrient)."

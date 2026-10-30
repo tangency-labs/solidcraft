@@ -1,0 +1,7 @@
+family = "F5"
+status = "missing"
+solidcore_fn = ""
+pr = ""
+fork_file = "capi/src/smlib_split.cpp"
+fork_commit = "3e03bd2"
+notes = "Kernel: boolean::api_brep boolean with options (+ face from surface, SwapUV)."

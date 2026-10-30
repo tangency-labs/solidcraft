@@ -1,0 +1,7 @@
+family = "F1"
+status = "tested"
+solidcore_fn = "solidcore_smlib_api::Smlib::brep_volume"
+pr = 1823
+fork_file = "capi/src/smlib_c.cpp"
+fork_commit = "2e9e6b2"
+notes = "Kernel: mass::integrator properties: brep_area, brep_volume, brep_properties, face_properties."

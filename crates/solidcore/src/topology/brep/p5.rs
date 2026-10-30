@@ -2381,7 +2381,15 @@ pub fn stitch_and_orient(
     stitch_and_orient_with_identity(k, b, options, None)
 }
 
-pub(crate) fn stitch_and_orient_with_identity(
+/// [`stitch_and_orient`] with the identity its B-rep cache gives the body's objects: a
+/// caller that built the faces under its own topology names (such as
+/// [`super::p2::caller_cache_key`] over a notification naming) passes them, so the cache
+/// resolves geometry owners under those names; `None` is [`stitch_and_orient`].
+///
+/// # Errors
+///
+/// Those of [`stitch_and_orient`].
+pub fn stitch_and_orient_with_identity(
     k: &mut Kernel,
     b: &mut Brep,
     options: &StitchAndOrientOptions,

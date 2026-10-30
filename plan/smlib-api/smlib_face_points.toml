@@ -1,0 +1,7 @@
+family = "F5"
+status = "missing"
+solidcore_fn = ""
+pr = ""
+fork_file = "capi/src/smlib_imprint.cpp"
+fork_commit = "4f8f998"
+notes = "Kernel: query::api_queries::face_internal_point."

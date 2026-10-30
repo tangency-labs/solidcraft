@@ -1,0 +1,7 @@
+family = "F5"
+status = "missing"
+solidcore_fn = ""
+pr = ""
+fork_file = "capi/src/smlib_extend.cpp"
+fork_commit = "b3dd0e5"
+notes = "Kernel: CreateExtendedSurface (offset p1), CreateFaceFromSurface."

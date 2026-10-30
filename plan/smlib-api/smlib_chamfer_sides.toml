@@ -1,0 +1,7 @@
+family = "F2"
+status = "missing"
+solidcore_fn = ""
+pr = ""
+fork_file = "capi/src/smlib_ops.cpp"
+fork_commit = "d51a723"
+notes = "Kernel: blend::fillet_executive session new_constant_radius_solver_with_second."

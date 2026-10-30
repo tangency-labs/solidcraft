@@ -1,0 +1,7 @@
+family = "F5"
+status = "missing"
+solidcore_fn = ""
+pr = ""
+fork_file = "capi/src/smlib_ssi.cpp"
+fork_commit = "ef62892"
+notes = "Kernel: surface types Plane / Cone / Sphere / Torus / BSplineSurface and evaluate."

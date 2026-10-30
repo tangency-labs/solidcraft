@@ -1,0 +1,7 @@
+family = "F1"
+status = "ported"
+solidcore_fn = "solidcore_smlib_api::Smlib::brep_is_manifold_solid"
+pr = 1823
+fork_file = "capi/src/smlib_flat_api.cpp"
+fork_commit = "ae90904"
+notes = "Kernel: query::api_queries::brep_is_manifold_solid."

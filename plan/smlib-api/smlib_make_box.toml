@@ -1,0 +1,7 @@
+family = "F1"
+status = "tested"
+solidcore_fn = "solidcore_smlib_api::Smlib::make_box"
+pr = 1823
+fork_file = "capi/src/smlib_c.cpp"
+fork_commit = "2e9e6b2"
+notes = "Kernel: primitive::api_primitives::create_*. Under the SolidCraft preset (WR-596, box_face_failures_propagate) a box far smaller than the tolerance is SM_ERR (1001), as the fork's."

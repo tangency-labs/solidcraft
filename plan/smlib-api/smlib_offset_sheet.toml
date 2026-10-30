@@ -1,0 +1,7 @@
+family = "F4"
+status = "missing"
+solidcore_fn = ""
+pr = ""
+fork_file = "capi/src/smlib_sheets.cpp"
+fork_commit = "b018013"
+notes = "Kernel: offset::offset_executive::p2 api_shell_brep_full / api_offset_brep_full / shell_brep_simple / offset_brep_simple."

@@ -1,0 +1,7 @@
+family = "F1"
+status = "tested"
+solidcore_fn = "solidcore_smlib_api::Smlib::brep_bounds"
+pr = 1823
+fork_file = "capi/src/smlib_measure.cpp"
+fork_commit = "9767916"
+notes = "Kernel: query::api_queries::brep_bounding_box (tight)."

@@ -1,0 +1,7 @@
+family = "F2"
+status = "missing"
+solidcore_fn = ""
+pr = ""
+fork_file = "capi/src/smlib_ops.cpp"
+fork_commit = "d51a723"
+notes = "Kernel: blend::fillet_executive::api::variable_radius_fillet (law checks in the glue)."

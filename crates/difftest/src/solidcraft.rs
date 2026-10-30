@@ -1419,8 +1419,15 @@ fn measure(k: &Kernel, b: &mut Brep) -> Result<Measured, SolidError> {
     })
 }
 
-/// Turns on the `UpstreamFixes` field `name` a case asks for.
+/// Turns on the `UpstreamFixes` field `name` a case asks for (`solidcraft`: the whole
+/// SolidCraft preset).
 fn enable_fix(k: &mut Kernel, name: &str) -> Result<(), String> {
+    // The whole SolidCraft preset (`UpstreamFixes::solidcraft`); it replaces the fixes
+    // set so far, so a case lists it first.
+    if name == "solidcraft" {
+        k.fixes = solidcore::kernel::UpstreamFixes::solidcraft();
+        return Ok(());
+    }
     let field = match name {
         "sweep_frame_on_planar_path_normal" => &mut k.fixes.sweep_frame_on_planar_path_normal,
         "delete_vertex_joins_seam_iso_curve" => &mut k.fixes.delete_vertex_joins_seam_iso_curve,

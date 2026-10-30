@@ -1,0 +1,7 @@
+family = "F1"
+status = "partial"
+solidcore_fn = "solidcore_smlib_api::Smlib::brep_transform"
+pr = 1823
+fork_file = "capi/src/smlib_c.cpp"
+fork_commit = "2e9e6b2"
+notes = "Kernel: topology::brep::p5::transform (the SVD branch for shear/reflection is unported). Only the orthogonal right-handed branch (placement and scale); a shear or reflection is SMLIB_ERR_UNSUPPORTED until solidcore ports SmBrep::Transform(double[4][4])'s SVD branch (#1595)."

@@ -1,0 +1,9 @@
+{
+ "cases": [
+  {
+   "name": "wr596_box_smaller_than_tolerance",
+   "issue": "WR-596 (smlib_fuzz leak-000bffce): a box far smaller than the tolerance; pinned CreateBox drops the face and stitch statuses (fork 449c81c returns 1001)",
+   "inputs": {"op": "box", "args": [7.041528834472482e-09, 7.041529113171147e-09, 7.041529113171147e-09, 7.0415291131711455e-09, 3.0401934352718015e-05, 7.04243860787292e-09]}
+  }
+ ]
+}

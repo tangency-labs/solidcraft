@@ -1,0 +1,7 @@
+family = "F5"
+status = "missing"
+solidcore_fn = ""
+pr = ""
+fork_file = "capi/src/smlib_sweeps.cpp"
+fork_commit = "a3485b9"
+notes = "Kernel: topology::brep planar section (CreatePlanarSectionCurves)."

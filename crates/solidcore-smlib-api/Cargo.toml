@@ -1,0 +1,13 @@
+[package]
+name = "solidcore-smlib-api"
+description = "The SMLib fork's C API (tangency-labs/smlib capi/include/smlib.h) as a Rust API over solidcore"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+publish = false
+
+[dependencies]
+solidcore = { path = "../solidcore" }
+
+[lints]
+workspace = true

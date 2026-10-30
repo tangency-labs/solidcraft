@@ -1,0 +1,7 @@
+family = "F3"
+status = "missing"
+solidcore_fn = ""
+pr = ""
+fork_file = "capi/src/smlib_sweeps.cpp"
+fork_commit = "a3485b9"
+notes = "Kernel: sweep::api_brep create_curve_sweep(_with_placements), StitchFaces / CreateByJoining."

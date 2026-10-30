@@ -1,0 +1,7 @@
+family = "F5"
+status = "missing"
+solidcore_fn = ""
+pr = ""
+fork_file = "capi/src/smlib_untrim.cpp"
+fork_commit = "f1a39ad"
+notes = "Kernel: MakeEdgeInFace, MakeVertexLoop, CopyFaces, DeleteInnerLoop (ported)."
