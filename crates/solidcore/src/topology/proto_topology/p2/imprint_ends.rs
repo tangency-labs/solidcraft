@@ -16,6 +16,8 @@
 //! | `trim_end_to_proto_vertex` | b43876f: `Imprint` moves an interval end to the curve's point nearest its proto vertex |
 //! | `extend_end_to_proto_vertex` | a8caccd: `SmEdgeDefinition::ExtendEndToProtoVertex` |
 //! | `extended_curve` | a8caccd: `sm_CreateExactlyExtendedCurve` |
+//! | `analytic_of_continued_nurb` | bec8a0b: `sm_AnalyticOfContinuedNurb` |
+//! | `ieee_remainder` (private) | `std::remainder` |
 //!
 //! Deviations: the fork's `GetOwner() != NULL` checks have no counterpart (curves live in
 //! the owner's store behind handles, none of them owned by an edge yet); replaced curves
@@ -24,6 +26,12 @@
 //! `Kernel::fixes.imprint_extends_edge_to_proto_vertex`); both flags carry the fork's
 //! correction ffaf4e8 (WR-498, #1480, #470): an end goes to its proto vertex's position
 //! only when the proto vertex is one vertex in each B-rep.
+//! The fork's `sm_CreateExactlyExtendedCurve` (a8caccd) continues any `SmBSplineCurve`
+//! kind and makes the analytic ones plain B-splines; `extended_curve` continues a plain
+//! B-spline only. Its correction bec8a0b (WR-601,
+//! `Kernel::fixes.imprint_extension_keeps_analytic_curve`) continues a line, circle or
+//! ellipse as that kind and no other analytic kind, so with both flags on the port is
+//! the fork at bec8a0b.
 
 #![allow(clippy::neg_cmp_op_on_partial_ord)] // the fork's NaN-safe tests
 
@@ -37,11 +45,15 @@ use crate::intersect::point_class::{ClassObject, ClassObjectKind, PointClassType
 use crate::kernel::Kernel;
 use crate::math::{Point2, Point3, Vec3, EFF_ZERO};
 use crate::nurbs::b_spline_curve::p1::{BSplineCurveForm, CanonicalData, KnotType};
+use crate::nurbs::b_spline_curve::BSplineCurve;
 use crate::nurbs::b_spline_curve_n_lib::TrimMode;
 
 /// How far ahead of a curve's end, as a fraction of the interval, a proto vertex may lie
 /// for the curve to be continued to it.
 const MAX_EXTENSION_FRACTION: f64 = 0.05;
+
+/// `ANALYTIC_TOL_SCALE` (`SmConfig.h`).
+const ANALYTIC_TOL_SCALE: f64 = 100.0;
 
 impl<O: ClassObject> ProtoTopologyManager<O> {
     /// The block at the top of the fork's `SmEdgeDefinition::Imprint`: for each end of the
@@ -405,9 +417,18 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
 /// homogeneous coordinates so a rational curve keeps its shape. No control points are
 /// added. `None` for another curve kind, an unclamped curve, or a `new_end` that is not
 /// outside the natural interval.
+///
+/// With `Kernel::fixes.imprint_extension_keeps_analytic_curve` (bec8a0b, WR-601) a line,
+/// circle or ellipse is continued too, over its NURB, and comes back as that kind
+/// ([`analytic_of_continued_nurb`]), or `None` when that fails (as for a parabola or a
+/// hyperbola). Without it those kinds are `None`.
 fn extended_curve(k: &Kernel, curve: &Curve, at_end: bool, new_end: f64) -> Option<Curve> {
-    let CurveKind::BSpline(src) = curve.kind() else {
-        return None;
+    let analytic = k.fixes.imprint_extension_keeps_analytic_curve;
+    let src: std::borrow::Cow<'_, BSplineCurve> = match curve.kind() {
+        CurveKind::BSpline(src) => std::borrow::Cow::Borrowed(src),
+        CurveKind::Line(line) if analytic => line.base_with_nurb().ok()?,
+        CurveKind::Ellipse(ellipse) if analytic => std::borrow::Cow::Borrowed(ellipse.base()),
+        _ => return None,
     };
     let natural = src.natural_interval();
     if if at_end {
@@ -417,10 +438,8 @@ fn extended_curve(k: &Kernel, curve: &Curve, at_end: bool, new_end: f64) -> Opti
     } {
         return None;
     }
-    let mut copy = curve.copy(k).ok()?;
-    let CurveKind::BSpline(bs) = copy.kind_mut() else {
-        return None;
-    };
+    let mut copy = src.copy();
+    let bs = &mut copy;
     let degree = bs.degree().ok()?;
     let (mut knots, mut mults) = bs.knots(None).ok()?;
     let mut num = knots.len();
@@ -503,20 +522,157 @@ fn extended_curve(k: &Kernel, curve: &Curve, at_end: bool, new_end: f64) -> Opti
         *knots.first_mut()? = new_end;
     }
 
-    let extended =
-        crate::nurbs::b_spline_curve::p1::BSplineCurve::create_canonical(&CanonicalData {
-            dim: bs.dim(),
-            degree,
-            control_points: &pts,
-            form: BSplineCurveForm::Unspecified,
-            knot_multiplicities: &mults,
-            knots: &knots,
-            knot_type: KnotType::Unspecified,
-            weights: rational.then_some(weights.as_slice()),
-            trim: None,
-        })
-        .ok()?;
+    let extended = BSplineCurve::create_canonical(&CanonicalData {
+        dim: bs.dim(),
+        degree,
+        control_points: &pts,
+        form: BSplineCurveForm::Unspecified,
+        knot_multiplicities: &mults,
+        knots: &knots,
+        knot_type: KnotType::Unspecified,
+        weights: rational.then_some(weights.as_slice()),
+        trim: None,
+    })
+    .ok()?;
+    // An analytic curve (a line, circle or ellipse) continued is that curve still: the
+    // same kind over the continued NURB, not a plain B-spline in its place (bec8a0b).
+    if !matches!(curve.kind(), CurveKind::BSpline(_)) {
+        return analytic_of_continued_nurb(k, curve, at_end, &extended);
+    }
     Some(Curve::from(extended))
+}
+
+/// `sm_AnalyticOfContinuedNurb` (bec8a0b, WR-601): the continued NURB `nurb` of the
+/// analytic `curve` made that kind again. A circle or ellipse keeps its frame, radii and
+/// inside-out sense, its angular domain carried on to the new end (`at_end`: its end was
+/// continued, else its start); a line runs between the continued ends over the same
+/// interval. The new curve takes `nurb` as its NURB, so its parameter is the continued
+/// one; it must evaluate as `nurb` does at nine points from end to end, or this is
+/// `None`, as for any other kind and an inside-out line.
+fn analytic_of_continued_nurb(
+    k: &Kernel,
+    curve: &Curve,
+    at_end: bool,
+    nurb: &BSplineCurve,
+) -> Option<Curve> {
+    use crate::curve::ellipse::EllipseOptions;
+    let nat = nurb.natural_interval();
+    let start = nurb.evaluate_point(nat.min()).ok()?;
+    let end = nurb.evaluate_point(nat.max()).ok()?;
+
+    let kind = match curve.kind() {
+        CurveKind::Ellipse(e) => {
+            let pos = e.position();
+            let inside_out = e.inside_out();
+            let dom = e.step_interval();
+            // The angular end the continued NURB end is: the max when the NURB runs the
+            // angle's way.
+            let at_max = at_end != inside_out;
+            let d = (if at_end { end } else { start }) - pos.origin();
+            let ang = crate::math::rad_to_deg(
+                (d.dot(pos.y_axis()) / e.y_radius()).atan2(d.dot(pos.x_axis()) / e.x_radius()),
+            );
+            let old = if at_max { dom.max() } else { dom.min() };
+            let delta = ieee_remainder(ang - old, 360.0);
+            if if at_max {
+                !(delta > 0.0)
+            } else {
+                !(delta < 0.0)
+            } {
+                return None;
+            }
+            let mut new_dom = dom;
+            if at_max {
+                new_dom.set_max(old + delta).ok()?;
+            } else {
+                new_dom.set_min(old + delta).ok()?;
+            }
+            let max_dom = e.max_analytic_domain();
+            if !(new_dom.length() <= 360.0)
+                || !(new_dom.min() >= max_dom.min())
+                || !(new_dom.max() <= max_dom.max())
+            {
+                return None;
+            }
+            let opts = EllipseOptions {
+                dim: curve.dim(),
+                nurb: Some(nurb),
+                inside_out,
+            };
+            let made = if e.is_circle_class() {
+                crate::curve::ellipse::Ellipse::new_circle(
+                    k,
+                    pos.origin(),
+                    pos.x_axis(),
+                    pos.y_axis(),
+                    new_dom,
+                    e.x_radius(),
+                    &opts,
+                )
+            } else {
+                crate::curve::ellipse::Ellipse::new(
+                    k,
+                    pos.origin(),
+                    pos.x_axis(),
+                    pos.y_axis(),
+                    new_dom,
+                    e.x_radius(),
+                    e.y_radius(),
+                    &opts,
+                )
+            };
+            Curve::from(made.ok()?)
+        }
+        CurveKind::Line(line) if !line.inside_out() => Curve::from(
+            crate::curve::line::Line::create_line_segment(curve.dim(), start, end, Some(&nat))
+                .ok()?,
+        ),
+        _ => return None,
+    };
+
+    // The same curve over the same parameter, to round-off.
+    let kind_nat = kind.natural_interval();
+    if !are_same(kind_nat.min(), nat.min()) || !are_same(kind_nat.max(), nat.max()) {
+        return None;
+    }
+    let zero = ANALYTIC_TOL_SCALE
+        * EFF_ZERO
+        * (1.0 + crate::math::max2(start.max_dimension(), end.max_dimension()));
+    for ii in 0..=8_u32 {
+        let t = nat.evaluate(f64::from(ii) / 8.0);
+        let on_nurb = nurb.evaluate_point(t).ok()?;
+        let on_kind = kind.evaluate_point(k, t).ok()?;
+        if !(on_nurb.distance(on_kind) <= zero) {
+            return None;
+        }
+    }
+    Some(kind)
+}
+
+/// C's `remainder(x, y)` (IEEE 754): `x - n y` for the integer `n` nearest `x / y`, ties
+/// to even. The result is exact; `n` is corrected when the rounded quotient misses it.
+fn ieee_remainder(x: f64, y: f64) -> f64 {
+    if !x.is_finite() || !(y.abs() > 0.0) || y.is_nan() {
+        return f64::NAN;
+    }
+    if y.is_infinite() {
+        return x;
+    }
+    let y = y.abs();
+    let mut n = (x / y).round_ties_even();
+    let mut r = x - n * y;
+    let half = 0.5 * y;
+    if r > half || (r == half && n % 2.0 != 0.0) {
+        n += 1.0;
+        r = x - n * y;
+    } else if r < -half || (r == -half && n % 2.0 != 0.0) {
+        n -= 1.0;
+        r = x - n * y;
+    }
+    if r == 0.0 {
+        return 0.0_f64.copysign(x);
+    }
+    r
 }
 
 #[cfg(test)]
@@ -534,7 +690,7 @@ mod tests {
             Point3::new(4.5, 0.5, -1.0),
             Point3::new(5.0, 2.0, 0.0),
         ];
-        let c = crate::nurbs::b_spline_curve::p1::BSplineCurve::create_canonical(&CanonicalData {
+        let c = BSplineCurve::create_canonical(&CanonicalData {
             dim: 3,
             degree: 3,
             control_points: &pts,
@@ -584,5 +740,163 @@ mod tests {
         // an end that is not outside the natural interval, and a curve of another kind
         assert!(extended_curve(&k, &old, true, 3.0).is_none());
         assert!(extended_curve(&k, &old, false, 0.5).is_none());
+    }
+
+    /// The quarter circle of radius 2 about (1, 1, 0) in the XY plane, from `from` to
+    /// `from + 90` degrees (`inside_out`: its NURB runs the other way).
+    fn quarter_circle(k: &Kernel, from: f64, inside_out: bool) -> Curve {
+        let e = crate::curve::ellipse::Ellipse::new_circle(
+            k,
+            Point3::new(1.0, 1.0, 0.0),
+            Vec3::X,
+            Vec3::Y,
+            Extent1d::from_min_max(from, from + 90.0),
+            2.0,
+            &crate::curve::ellipse::EllipseOptions {
+                inside_out,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        Curve::from(e)
+    }
+
+    /// WR-601 (bec8a0b): a circle continued past either end of its NURB stays a circle
+    /// of the same frame and radius, its angular domain carried on to the new end, over
+    /// the continued NURB's parameter; without `imprint_extension_keeps_analytic_curve`
+    /// it is not continued.
+    #[test]
+    fn wr601_continued_circle_stays_a_circle() {
+        for inside_out in [false, true] {
+            for at_end in [true, false] {
+                let mut k = Kernel::default();
+                let old = quarter_circle(&k, 10.0, inside_out);
+                let nat = old.natural_interval();
+                let h = 0.01 * nat.length();
+                let new_end = if at_end { nat.max() + h } else { nat.min() - h };
+                assert!(extended_curve(&k, &old, at_end, new_end).is_none());
+
+                k.fixes.imprint_extension_keeps_analytic_curve = true;
+                let new = extended_curve(&k, &old, at_end, new_end)
+                    .unwrap_or_else(|| panic!("inside_out {inside_out} at_end {at_end}"));
+                let CurveKind::Ellipse(e) = new.kind() else {
+                    panic!("not a circle: {}", new.class_string());
+                };
+                assert!(e.is_circle_class());
+                assert_eq!(e.x_radius(), 2.0);
+                assert_eq!(e.inside_out(), inside_out);
+                let dom = e.step_interval();
+                // The NURB end continued is the angular max unless the circle runs
+                // inside out.
+                if at_end == inside_out {
+                    assert!(dom.min() < 10.0, "{dom:?}");
+                    assert_eq!(dom.max(), 100.0);
+                } else {
+                    assert_eq!(dom.min(), 10.0);
+                    assert!(dom.max() > 100.0, "{dom:?}");
+                }
+                let new_nat = new.natural_interval();
+                assert!(are_same(
+                    if at_end { new_nat.max() } else { new_nat.min() },
+                    new_end
+                ));
+                // On the circle, and the old curve over the old interval.
+                for i in 0..=10 {
+                    let t = new_nat.evaluate(f64::from(i) / 10.0);
+                    let p = new.evaluate_point(&k, t).unwrap();
+                    let r = p.distance(Point3::new(1.0, 1.0, 0.0));
+                    assert!((r - 2.0).abs() < 1e-12, "t = {t}: r = {r}");
+                }
+                for i in 0..=10 {
+                    let t = nat.evaluate(f64::from(i) / 10.0);
+                    let (a, b) = (
+                        old.evaluate_point(&k, t).unwrap(),
+                        new.evaluate_point(&k, t).unwrap(),
+                    );
+                    assert!(a.distance(b) < 1e-12, "t = {t}: {a:?} vs {b:?}");
+                }
+            }
+        }
+    }
+
+    /// WR-601: a circle from 0 degrees continued back past 0 would leave its maximum
+    /// analytic domain `[0, 360]`, so it is not continued, as in the fork.
+    #[test]
+    fn wr601_circle_not_continued_out_of_its_analytic_domain() {
+        let mut k = Kernel::default();
+        k.fixes.imprint_extension_keeps_analytic_curve = true;
+        let old = quarter_circle(&k, 0.0, false);
+        let nat = old.natural_interval();
+        assert!(extended_curve(&k, &old, false, nat.min() - 0.01 * nat.length()).is_none());
+        assert!(extended_curve(&k, &old, true, nat.max() + 0.01 * nat.length()).is_some());
+    }
+
+    /// WR-601: a continued ellipse stays an ellipse of the same radii.
+    #[test]
+    fn wr601_continued_ellipse_stays_an_ellipse() {
+        let mut k = Kernel::default();
+        k.fixes.imprint_extension_keeps_analytic_curve = true;
+        let old = Curve::from(
+            crate::curve::ellipse::Ellipse::new(
+                &k,
+                Point3::new(0.0, 0.0, 1.0),
+                Vec3::X,
+                Vec3::Z,
+                Extent1d::from_min_max(-30.0, 60.0),
+                3.0,
+                1.5,
+                &crate::curve::ellipse::EllipseOptions::default(),
+            )
+            .unwrap(),
+        );
+        let nat = old.natural_interval();
+        let new_end = nat.max() + 0.02 * nat.length();
+        let new = extended_curve(&k, &old, true, new_end).unwrap();
+        let CurveKind::Ellipse(e) = new.kind() else {
+            panic!("not an ellipse: {}", new.class_string());
+        };
+        assert!(!e.is_circle_class());
+        assert_eq!((e.x_radius(), e.y_radius()), (3.0, 1.5));
+        assert_eq!(e.step_interval().min(), -30.0);
+        assert!(e.step_interval().max() > 60.0);
+        let p = new.evaluate_point(&k, new_end).unwrap();
+        let (x, z) = (p.x / 3.0, (p.z - 1.0) / 1.5);
+        assert!((x * x + z * z - 1.0).abs() < 1e-12, "{p:?}");
+    }
+
+    /// WR-601: a continued line stays a line over the continued interval, in 3D and as
+    /// a 2D UV curve.
+    #[test]
+    fn wr601_continued_line_stays_a_line() {
+        for dim in [3, 2] {
+            let mut k = Kernel::default();
+            let (a, b) = (Point3::new(1.0, 2.0, 0.0), Point3::new(4.0, -2.0, 0.0));
+            let old = Curve::from(crate::curve::line::Line::from_points(a, b, dim));
+            let nat = old.natural_interval();
+            let new_end = nat.min() - 0.03 * nat.length();
+            assert!(extended_curve(&k, &old, false, new_end).is_none());
+            k.fixes.imprint_extension_keeps_analytic_curve = true;
+            let new = extended_curve(&k, &old, false, new_end).unwrap();
+            let CurveKind::Line(line) = new.kind() else {
+                panic!("not a line: {}", new.class_string());
+            };
+            assert_eq!(line.dim(), dim);
+            let new_nat = new.natural_interval();
+            assert!(are_same(new_nat.min(), new_end) && are_same(new_nat.max(), nat.max()));
+            let start = new.evaluate_point(&k, new_end).unwrap();
+            let want = a + (b - a) * ((new_end - nat.min()) / nat.length());
+            assert!(start.distance(want) < 1e-12, "{start:?} vs {want:?}");
+        }
+    }
+
+    #[test]
+    fn ieee_remainder_matches_c() {
+        assert_eq!(ieee_remainder(190.0, 360.0), -170.0);
+        assert_eq!(ieee_remainder(-190.0, 360.0), 170.0);
+        assert_eq!(ieee_remainder(180.0, 360.0), 180.0);
+        assert_eq!(ieee_remainder(540.0, 360.0), -180.0);
+        assert_eq!(ieee_remainder(-180.0, 360.0), -180.0);
+        assert_eq!(ieee_remainder(5.0, 360.0), 5.0);
+        assert_eq!(ieee_remainder(-0.0, 360.0).to_bits(), (-0.0_f64).to_bits());
     }
 }
