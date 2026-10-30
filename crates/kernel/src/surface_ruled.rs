@@ -274,18 +274,27 @@ fn planned(body: &Body, at: &[Vec3], r: &Ruled, handles: &[Option<Vec<Vec3>>]) -
         }
     }
     let field = Field { mode, flip: r.flip, distance: d };
-    let mut rulings = Vec::with_capacity(n);
+    // Each edge's face beside it (its surface, whether it is used along its natural normal,
+    // whether it lies left of the edge: the strip's tangent direction points away from it).
+    let mut sides = Vec::with_capacity(n);
     for (j, k) in chosen.iter().enumerate() {
         let (face, along) =
             k.and_then(|k| around.get(j)?.get(k).copied()).ok_or_else(|| KernelError::Invalid("a picked edge has no face beside it".into()))?;
         let surface = surfaces.get(face).and_then(Option::as_ref).ok_or_else(|| KernelError::Failed("ruled surface: a face's surface".into()))?;
-        // The face lies left of its own boundary seen along its (oriented) normal; the strip's
-        // tangent direction points away from it.
         let forward = body.face_forward(face);
-        let base = bases.get(j).ok_or_else(|| KernelError::Failed("ruled surface: an edge".into()))?;
-        rulings.push(Rulings { base, face: surface, forward, face_left: along == forward, field: &field });
+        sides.push((surface, forward, along == forward));
     }
-    let sampled: Vec<Sampled> = rulings.iter().map(|r| Sampled::of(r, eps)).collect::<Result<_>>()?;
+    fn rulings_on<'a>(bases: &'a [CurveN<4>], sides: &[(&'a SurfaceEval, bool, bool)], field: &'a Field) -> Vec<Rulings<'a>> {
+        bases.iter().zip(sides).map(|(base, &(face, forward, face_left))| Rulings { base, face, forward, face_left, field }).collect()
+    }
+    let sampled: Vec<Sampled> = rulings_on(&bases, &sides, &field).iter().map(|r| Sampled::of(r, eps)).collect::<Result<_>>()?;
+    // A free strip's far curve lies in its edge's spline space: a straight edge's (one linear
+    // span) holds only the chord between the strip's corners, so its rulings' ends would not count.
+    // Such an edge is taken as the cubic it is too (exact degree elevation, the same points at the
+    // same parameters), the lowest degree whose interior control points set each end's tangent
+    // and let the curve pass near the rulings' ends.
+    let bases: Vec<CurveN<4>> = bases.into_iter().zip(&sampled).map(|(c, s)| if s.affine.is_none() { cubic_if_straight(c) } else { c }).collect();
+    let rulings = rulings_on(&bases, &sides, &field);
     // Exact strips' far edges are their edges' images; the rest are solved together.
     let exact: Vec<Option<CurveN<4>>> = sampled.iter().zip(&bases).map(|(s, base)| s.affine.as_ref().map(|m| mapped(base, |p| m.apply(p)))).collect();
     let corner = |r: &Reading| r.0 + r.3 * d;
@@ -379,6 +388,18 @@ fn base_curve(r: &Brep, e: usize, forward: bool) -> Result<CurveN<4>> {
         }
     };
     Ok(if forward { c } else { reversed(&c) })
+}
+
+/// A straight edge's NURBS (degree 1, one span: its two ends) as the cubic Bézier it also is,
+/// by exact degree elevation (control points at thirds of the way, weights kept equal); any other
+/// curve as it is.
+fn cubic_if_straight(c: CurveN<4>) -> CurveN<4> {
+    let ([p0, p1], [t0, t1]) = match (c.degree, c.ctrl.as_slice(), c.knots.as_slice()) {
+        (1, [p0, p1], [a, _, _, z]) => ([*p0, *p1], [*a, *z]),
+        _ => return c,
+    };
+    let mix = |s: f64| std::array::from_fn::<f64, 4, _>(|i| p0[i] * (1.0 - s) + p1[i] * s);
+    CurveN { degree: 3, knots: vec![t0, t0, t0, t0, t1, t1, t1, t1], ctrl: vec![p0, mix(1.0 / 3.0), mix(2.0 / 3.0), p1] }
 }
 
 fn degree(knots: &[f64], n: usize) -> Result<usize> {
@@ -519,7 +540,7 @@ impl Sampled {
 // Rulings that turn along a free-form edge end on an offset curve, which has no exact NURBS form.
 // Such a strip's far edge is a curve this module defines instead, and the strip is exactly the
 // ruled surface between the edge and it: a B-spline on the edge's own degree, knots and weights
-// (only its control points are free), from the strip's start corner to its end corner (where the
+// (a straight edge's taken as its cubic, `cubic_if_straight`; only its control points are free), from the strip's start corner to its end corner (where the
 // rulings at the edge's ends reach). Its interior control points are given (the doc's handles)
 // or, by default, the least-squares solution of these weighted terms, the construction's
 // parameters:
