@@ -87,7 +87,7 @@ mod classification;
 mod concave_nxn;
 mod corner_marks;
 mod crossing_rails;
-mod finish;
+pub(crate) mod finish;
 mod original_merge;
 mod original_trim;
 mod piecewise;

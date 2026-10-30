@@ -1104,6 +1104,35 @@ impl Brep {
         Ok(copy)
     }
 
+    /// A copy of this B-rep to put back with [`Brep::restore_from`] if an operation
+    /// on it is refused (not upstream: an operation's rollback). The edge and edge use
+    /// arenas are shared copy-on-write, so their curves keep their owners, and the face
+    /// surfaces keep theirs; the surfaces start with empty cache slots (a cache the
+    /// operation builds on the edited faces is not one of the copy's), and the copy's
+    /// objects, being copies, carry no notification identities.
+    #[must_use]
+    pub fn clone_for_rollback(&self) -> Self {
+        let mut copy = self.copy(true);
+        for (id, face) in self.faces.iter() {
+            if let (Some(original), Ok(face_copy)) = (face.surface.as_ref(), copy.face_mut(id)) {
+                if let Some(surface) = face_copy.surface.as_mut() {
+                    face::p2::RescueSurfaceOwner::new(original).restore(surface);
+                }
+            }
+        }
+        copy
+    }
+
+    /// Puts back the contents of `saved`, a [`Brep::clone_for_rollback`] of this
+    /// B-rep taken earlier, keeping this value's own identity (its notification
+    /// identity and progress tag, which a copy does not carry), so the B-rep is again
+    /// the one it was when `saved` was taken (not upstream: an operation's rollback).
+    pub fn restore_from(&mut self, mut saved: Self) {
+        std::mem::swap(&mut saved.notify_identity, &mut self.notify_identity);
+        std::mem::swap(&mut saved.progress_tag, &mut self.progress_tag);
+        *self = saved;
+    }
+
     /// Ends the innermost [`Brep::begin_surface_owner_cleared`] scope of face `f`.
     pub fn end_surface_owner_cleared(&mut self, f: FaceId) {
         if let Some(i) = self.surface_owner_cleared.iter().rposition(|&g| g == f) {

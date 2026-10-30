@@ -58,6 +58,7 @@
 //! ([`is_radius_supported`]). No recursion.
 
 use super::p1::is_radius_supported;
+use super::session::finish::{is_non_manifold_refusal, without_entity};
 use super::session::FilletSession;
 use crate::blend::fillet_executive::p2::SurfaceFilletOptions;
 use crate::blend::fillet_geom::p1::FilletSolverId;
@@ -74,6 +75,37 @@ use crate::topology::brep::p5::{stitch_and_orient, StitchAndOrientOptions};
 use crate::topology::{Brep, EdgeId, FaceId, VertexId};
 
 const OP: &str = "blend::fillet_executive::api";
+
+/// Run `fillet` (a session's set-up, `do_fillet` and the stitch) on `brep`; with
+/// `fixes.fillet_refuse_non_manifold_result` (WR-212, not upstream), a refusal of a
+/// result that is not a closed manifold solid puts back the body as it was before the
+/// call (a [`Brep::clone_for_rollback`] taken first) and names no entity, as the
+/// refused result's edge is gone with it. Every other result is `fillet`'s own.
+fn refusing_non_manifold_result(
+    k: &mut Kernel,
+    brep: &mut Brep,
+    fillet: impl FnOnce(&mut Kernel, &mut Brep) -> Result<()>,
+) -> Result<()> {
+    let saved = if k.fixes.fillet_refuse_non_manifold_result {
+        Some(brep.clone_for_rollback())
+    } else {
+        None
+    };
+    let result = fillet(k, brep);
+    match (saved, result) {
+        (Some(saved), Err(error)) if is_non_manifold_refusal(&error) => {
+            brep.restore_from(saved);
+            Err(without_entity(error))
+        }
+        (_, result) => {
+            // (not upstream: the port's cached topology fields, true again for the
+            // caller; the body keeps the edits the executive made before a failure,
+            // as upstream)
+            brep.refresh_cached_topology();
+            result
+        }
+    }
+}
 
 fn invalid_input() -> SolidError {
     SolidError::Upstream {
@@ -112,18 +144,22 @@ pub fn fillet_edges(
     if !is_radius_supported(radius, brep.tolerance()) {
         return Err(invalid_input());
     }
-    let fillet = {
-        let mut session = FilletSession::new(k, brep)?;
-        session
-            .prepare_constant_radius_edges(k, edges, radius, xsect_type, continuity, thumbweight)
-            .and_then(|()| session.do_fillet(k))
-    };
-    let result =
-        fillet.and_then(|()| stitch_and_orient(k, brep, &StitchAndOrientOptions::default()));
-    // (not upstream: the port's cached topology fields, true again for the caller;
-    // the body keeps the edits the executive made before a failure, as upstream)
-    brep.refresh_cached_topology();
-    result
+    refusing_non_manifold_result(k, brep, |k, brep| {
+        {
+            let mut session = FilletSession::new(k, brep)?;
+            session
+                .prepare_constant_radius_edges(
+                    k,
+                    edges,
+                    radius,
+                    xsect_type,
+                    continuity,
+                    thumbweight,
+                )
+                .and_then(|()| session.do_fillet(k))
+        }?;
+        stitch_and_orient(k, brep, &StitchAndOrientOptions::default())
+    })
 }
 
 /// `SmApiFilletEdgesPerEdge`: fillet `edges` of `brep` with a constant radius and
@@ -153,18 +189,22 @@ pub fn fillet_edges_per_edge(
             return Err(invalid_input());
         }
     }
-    let fillet = {
-        let mut session = FilletSession::new(k, brep)?;
-        session
-            .prepare_per_edge_constant_radius(k, edges, radii, xsect_types, continuity, thumbweight)
-            .and_then(|()| session.do_fillet(k))
-    };
-    let result =
-        fillet.and_then(|()| stitch_and_orient(k, brep, &StitchAndOrientOptions::default()));
-    // (not upstream: the port's cached topology fields, true again for the caller;
-    // the body keeps the edits the executive made before a failure, as upstream)
-    brep.refresh_cached_topology();
-    result
+    refusing_non_manifold_result(k, brep, |k, brep| {
+        {
+            let mut session = FilletSession::new(k, brep)?;
+            session
+                .prepare_per_edge_constant_radius(
+                    k,
+                    edges,
+                    radii,
+                    xsect_types,
+                    continuity,
+                    thumbweight,
+                )
+                .and_then(|()| session.do_fillet(k))
+        }?;
+        stitch_and_orient(k, brep, &StitchAndOrientOptions::default())
+    })
 }
 
 /// `SmApiVariableRadiusFillet`: fillet `edges` of `brep` with a radius running
@@ -196,18 +236,15 @@ pub fn variable_radius_fillet(
         return Err(invalid_input());
     }
     let law = FilletLaw::linear(start_radius, end_radius, None);
-    let fillet = {
-        let mut session = FilletSession::new(k, brep)?;
-        session
-            .prepare_variable_radius_edges(k, edges, start_radius, law, xsect_type, continuity)
-            .and_then(|()| session.do_fillet(k))
-    };
-    let result =
-        fillet.and_then(|()| stitch_and_orient(k, brep, &StitchAndOrientOptions::default()));
-    // (not upstream: the port's cached topology fields, true again for the caller;
-    // the body keeps the edits the executive made before a failure, as upstream)
-    brep.refresh_cached_topology();
-    result
+    refusing_non_manifold_result(k, brep, |k, brep| {
+        {
+            let mut session = FilletSession::new(k, brep)?;
+            session
+                .prepare_variable_radius_edges(k, edges, start_radius, law, xsect_type, continuity)
+                .and_then(|()| session.do_fillet(k))
+        }?;
+        stitch_and_orient(k, brep, &StitchAndOrientOptions::default())
+    })
 }
 
 /// Keep a value of an upstream call whose status is ignored; `Unported` propagates.
