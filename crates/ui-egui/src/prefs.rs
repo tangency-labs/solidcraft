@@ -3,8 +3,9 @@
 
 use egui::{Modifiers, Pos2};
 use serde::{Deserialize, Serialize};
-use serde_json::json;
+use serde_json::{Value, json};
 pub use solidcraft_engine::doc::display_units::{format_length, length_number, length_precision, unit_scale};
+use solidcraft_engine::doc::drawing::template;
 use solidcraft_engine::geom::Vec3;
 use solidcraft_engine::geom::cell::Projection;
 use solidcraft_engine::render::Camera;
@@ -886,6 +887,11 @@ preference_settings! {
     /// First or third angle for new drawings (third when not set, or set to one this version
     /// doesn't know).
     default_projection: Projection = Projection::Third, PAGE_DESIGN;
+    /// The template new drawings of parts start from: a built-in's name (ISO A3 when not set, or
+    /// set to one this version doesn't know).
+    part_drawing_template: String = "iso-a3-part".into(), PAGE_DESIGN;
+    /// The template new drawings of assemblies start from, as for parts.
+    assembly_drawing_template: String = "iso-a3-assembly".into(), PAGE_DESIGN;
     /// Mouse mapping: `fusion`, `solidworks` or `inventor`.
     nav: String = "fusion".into(), PAGE_NAVIGATION;
     /// Opt in to rotation through both poles with roll, without the Shift axis-snap spring.
@@ -1982,14 +1988,18 @@ pub fn apply_new_design(app: &mut SolveApp) {
     apply_new_design_units(app, &app.preferences.default_units.clone());
 }
 
-/// A new drawing takes the preferred projection, as a new design takes the preferred units: not
-/// an undo step. Caller: `drawing.create` run from the app.
-pub fn apply_new_drawing(app: &mut SolveApp) {
-    let projection = app.preferences.default_projection;
-    let differs = app.session.drawing("drawing.create").is_ok_and(|d| d.projection != projection);
-    if differs && app.session.execute("drawing.set", &json!({ "projection": projection })).is_ok() {
-        app.session.undo.pop();
+/// What `drawing.create` run from the app starts from when it names no template: the preferred
+/// template for a drawing of a part or of an assembly, in the preferred projection unless it names
+/// one. A template it names keeps its own projection.
+pub fn new_drawing_params(app: &SolveApp, mut params: Value) -> Value {
+    let Some(given) = params.as_object_mut() else { return params };
+    if !given.contains_key("template") {
+        let p = &app.preferences;
+        let preferred = if template::for_assembly(&app.session.doc) { &p.assembly_drawing_template } else { &p.part_drawing_template };
+        given.insert("template".into(), json!(preferred));
+        given.entry("projection").or_insert_with(|| json!(p.default_projection));
     }
+    params
 }
 
 /// The new-design preference also applies to the blank, unsaved design already open.
@@ -3267,6 +3277,16 @@ pub fn migrate(mut p: Prefs) -> Prefs {
         log::warn!("preferences: the 3D mouse axis assignment {:?} doesn't drive each axis once; using the default", p.space_mouse_axis_source);
         p.space_mouse_axis_source = crate::space_mouse::SAME_AXES;
     }
+    // A template this version doesn't have (a newer one's, or a saved template since removed).
+    let defaults = Prefs::default();
+    for (chosen, default) in
+        [(&mut p.part_drawing_template, defaults.part_drawing_template), (&mut p.assembly_drawing_template, defaults.assembly_drawing_template)]
+    {
+        if !template::BUILT_INS.contains(&chosen.as_str()) {
+            log::warn!("preferences: there is no drawing template `{chosen}`; using `{default}`");
+            *chosen = default;
+        }
+    }
     p.space_mouse_calibrations.retain(|device, calibration| {
         let usable = calibration.is_usable();
         if !usable {
@@ -3372,6 +3392,10 @@ pub fn set(app: &mut SolveApp, p: &serde_json::Value) -> Result<serde_json::Valu
     let new: Prefs = serde_json::from_value(cur).map_err(|e| e.to_string())?;
     if !accepted::wheel_zoom_speed(&new) {
         return Err("`wheel_zoom_speed` must be 0.25…4".into());
+    }
+    // Before `migrate`, which puts a template this version doesn't have back to the default.
+    if ![&new.part_drawing_template, &new.assembly_drawing_template].iter().all(|t| template::BUILT_INS.contains(&t.as_str())) {
+        return Err(format!("`part_drawing_template` and `assembly_drawing_template` must be one of {}", template::BUILT_INS.join(", ")));
     }
     let new = migrate(new);
     if !UNITS.contains(&new.default_units.as_str()) {
@@ -6823,6 +6847,29 @@ mod tests {
         let mut other = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
         other.load_prefs(&app.prefs());
         assert_eq!(other.preferences.nav, "hfss");
+    }
+
+    /// Templates of new drawings: ISO A3 unless chosen, refused when not a template, read as the
+    /// default when saved so. A new drawing starts from the one for its design's kind, in the
+    /// preferred projection; a template named keeps its own.
+    #[test]
+    fn new_drawings_start_from_the_preferred_template() {
+        use solidcraft_engine::geom::drawing_sheet::{PaperSize, SheetSize};
+        let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+        let chosen = |p: &Prefs| (p.part_drawing_template.clone(), p.assembly_drawing_template.clone());
+        assert_eq!(chosen(&app.preferences), ("iso-a3-part".into(), "iso-a3-assembly".into()));
+        assert!(set(&mut app, &json!({"part_drawing_template": "iso-b2-part"})).is_err());
+        let saved = json!({"part_drawing_template": "iso-b2-part", "assembly_drawing_template": "iso-a1-assembly"});
+        assert_eq!(chosen(&lenient(&saved)), ("iso-a3-part".into(), "iso-a1-assembly".into()));
+        set(&mut app, &json!({"part_drawing_template": "iso-a4-part", "default_projection": "first"})).unwrap();
+        app.run("solid.box", json!({"length": 40, "width": 30, "height": 10})).unwrap();
+        app.run("drawing.create", json!({})).unwrap();
+        let d = app.session.drawing("test").unwrap().clone();
+        assert_eq!((d.sheets[0].sheet.size, d.projection), (SheetSize::Standard(PaperSize::A4), Projection::First));
+        app.run("drawing.close", json!({})).unwrap();
+        app.run("drawing.create", json!({"template": "iso-a2-part"})).unwrap();
+        let d = app.session.drawing("test").unwrap().clone();
+        assert_eq!((d.sheets[0].sheet.size, d.projection), (SheetSize::Standard(PaperSize::A2), Projection::Third));
     }
 
     /// The dialog: changes apply at once, Cancel puts back what was there when it opened, Apply

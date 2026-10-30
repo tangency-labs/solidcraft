@@ -11,20 +11,33 @@ use std::sync::Arc;
 use serde_json::{Value, json};
 use solidcraft_doc::bom::{Mass, Tree};
 use solidcraft_doc::drawing::fields::{Component, Values};
-use solidcraft_doc::drawing::{self, Drawing, Source, Units};
+use solidcraft_doc::drawing::{self, Drawing, Source, Units, template};
 use solidcraft_doc::{Document, ids};
 use solidcraft_geom::cell::{Content, Projection};
-use solidcraft_geom::drawing_sheet::{DrawingBorderProfile, Orientation, PaperSize, Sheet};
-use solidcraft_geom::title_block::{self, CellKind};
+use solidcraft_geom::title_block::CellKind;
 
 use super::CommandSpec;
 use crate::params::{bad, str_};
-use crate::{Result, Session};
+use crate::schema::drawing::{TemplateEntry, TemplateListParams, TemplateListResult};
+use crate::schema::{TypedContract, output_schema_for};
+use crate::{EngineError, Result, Session};
+
+const TEMPLATE_LIST_CONTRACT: TypedContract<TemplateListParams> = TypedContract::new();
 
 pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("drawing.create", "Create Drawing", create).any_part().icon("new").doc_only().params(
-        "name?: the drawing's name (default: the design's); language?: the drawing's content language, a BCP 47 tag (default en); units?: \"follow_model\" (default) or one length unit such as \"mm\". Adds a drawing of this design, one ISO A3 landscape sheet with the ISO border and the built-in title block, and opens it (one undo step of the model) → as drawing.inspect",
+        "name?: the drawing's name (default: the design's); template?: a template's name (drawing.template.list; default iso-a3-part, or iso-a3-assembly for a design with components); language?: the drawing's content language, a BCP 47 tag (default: the template's, en for the built-ins); units?: \"follow_model\" or one length unit such as \"mm\" (default: the template's); projection?: first or third (angle) (default: the template's, third for the built-ins). Adds a drawing of this design made from the template, with ids of its own, and opens it (one undo step of the model) → as drawing.inspect",
     ),
+    CommandSpec::new("drawing.template.list", "List Drawing Templates", crate::checked!("drawing.template.list", template_list))
+        .any_part()
+        .icon("list")
+        .noundo()
+        .doc_only()
+        .contract(&TEMPLATE_LIST_CONTRACT)
+        .output(output_schema_for::<TemplateListResult>)
+        .params(
+            "→ templates: [{name, title, default: whether drawing.create starts from it for this design}], the built-ins: ISO A4 to A0 for a part and for an assembly",
+        ),
     CommandSpec::new("drawing.list", "List Drawings", list)
         .any_part()
         .icon("list")
@@ -106,15 +119,19 @@ fn create(s: &mut Session, p: &Value) -> Result<Value> {
     }
     drawing::check_count(s.doc.drawings.len() + 1).map_err(|e| bad(cmd, e.to_string()))?;
     let name = text(cmd, p, "name")?.map_or_else(|| s.doc.name.clone(), str::to_string);
-    let language = text(cmd, p, "language")?.unwrap_or("en");
+    let fail = |e: solidcraft_doc::DocError| bad(cmd, e.to_string());
+    let from = text(cmd, p, "template")?.unwrap_or_else(|| template::default_name(&s.doc));
+    let unknown = || bad(cmd, format!("no template `{from}` (drawing.template.list lists them)"));
+    let chosen = template::built_in(from).ok_or_else(unknown)?.map_err(fail)?;
     // Not the id of a drawing undo or redo could bring back either.
     let steps = s.undo.iter().chain(&s.redo).filter_map(|step| step.part);
     let taken: BTreeSet<u64> = s.doc.drawings.iter().map(|d| d.id).chain(steps).collect();
-    let a3 = Sheet::standard(PaperSize::A3, Orientation::Landscape);
-    let fail = |e: solidcraft_doc::DocError| bad(cmd, e.to_string());
-    let mut d = Drawing::new(&name, language, "Sheet 1", a3, Some(DrawingBorderProfile::iso()), &taken, &mut s.ids).map_err(fail)?;
-    if let Some(first) = d.sheets.first_mut() {
-        Arc::make_mut(first).title_block = Some(title_block::default_block());
+    let mut d = template::instantiate(&chosen, &name, &taken, &mut s.ids).map_err(fail)?;
+    if let Some(language) = text(cmd, p, "language")? {
+        d.language = language.to_string();
+    }
+    if let Some(projection) = projection(cmd, p)? {
+        d.projection = projection;
     }
     let source = d.allocate_id(&mut s.ids).map_err(fail)?;
     d.sources.push(Source { id: source });
@@ -125,6 +142,15 @@ fn create(s: &mut Session, p: &Value) -> Result<Value> {
     s.open_drawing = Some(d.id);
     s.doc_mut().put_drawing(Arc::new(d));
     inspect(s, &Value::Null)
+}
+
+fn template_list(s: &mut Session, _p: &Value) -> Result<Value> {
+    let default = template::default_name(&s.doc);
+    let templates = template::BUILT_INS
+        .iter()
+        .map(|&name| TemplateEntry { name: name.into(), title: template::title(name).unwrap_or_default(), default: name == default })
+        .collect();
+    serde_json::to_value(TemplateListResult { templates, param_warnings: Vec::new() }).map_err(|e| EngineError::Other(e.to_string()))
 }
 
 fn list(s: &mut Session, _p: &Value) -> Result<Value> {

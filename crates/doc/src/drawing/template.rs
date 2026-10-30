@@ -19,7 +19,7 @@ use solidcraft_geom::title_block::{self, CellKind};
 use super::Drawing;
 use crate::format::DRAWING;
 use crate::ids::IdSource;
-use crate::{DocError, Result};
+use crate::{DocError, Document, Result};
 
 /// The built-in templates, by name: each ISO size for a part and for an assembly.
 pub const BUILT_INS: &[&str] = &[
@@ -43,6 +43,17 @@ const BUILT_IN_SEED: u64 = 3875;
 /// The ISO sizes the built-ins come in, as their names and titles write them.
 const SIZES: [(PaperSize, &str); 5] =
     [(PaperSize::A4, "A4"), (PaperSize::A3, "A3"), (PaperSize::A2, "A2"), (PaperSize::A1, "A1"), (PaperSize::A0, "A0")];
+
+/// Whether a drawing of `design` is a drawing of an assembly: a design with components is one.
+pub fn for_assembly(design: &Document) -> bool {
+    !design.components.is_empty()
+}
+
+/// The built-in a new drawing of `design` starts from unless it is told: ISO A3, for a part or for
+/// an assembly.
+pub fn default_name(design: &Document) -> &'static str {
+    if for_assembly(design) { "iso-a3-assembly" } else { "iso-a3-part" }
+}
 
 /// The template rules: a drawing's ([`Drawing::validate`]), and nothing of a model. A template
 /// with anything of one is refused, naming all it has.
