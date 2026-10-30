@@ -17,7 +17,7 @@ on:
 permissions:
   contents: read # to check out scripts/claim
   issues: write
-  pull-requests: read
+  pull-requests: write # duplicate-claim warnings are comments on the PR, not the issue
 
 # One run at a time per issue, so two simultaneous /claim comments can't both win.
 concurrency:
