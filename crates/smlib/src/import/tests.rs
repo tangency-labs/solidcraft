@@ -267,3 +267,54 @@ fn only_a_tube_clear_of_its_axis_is_a_ring_torus() {
         assert!(matches!(ring(major), Surface::PlacedRevolution { .. }), "major {major}");
     }
 }
+
+/// A 6 mm wide patch of an extruded circle of radius 3000 whose trims straddle the knot where
+/// the profile's seam lies (u = 4 of a half circle in two quarter spans): the cylinder takes the
+/// patch's own range, 0.002 rad round and 7 high, on the circle exactly. Fitted on the patch's
+/// range (three points 2 mm apart) the centre came off the circle's plane by 2.5e-10 mm and the
+/// radius off by 8e-9 mm, a cylinder SMLib did not take back from its own NURBS of it.
+#[test]
+fn a_patch_across_an_extruded_circles_seam_is_its_exact_cylinder() {
+    let (r, h, half) = (3000.0, 7.0, 0.001);
+    let c = [10.0 - r, 0.0, 0.0];
+    let w = std::f64::consts::FRAC_1_SQRT_2;
+    let profile = [([c[0], -r], 1.0), ([c[0] + r, -r], w), ([c[0] + r, 0.0], 1.0), ([c[0] + r, r], w), ([c[0], r], 1.0)];
+    let homogeneous = profile.iter().map(|&([x, y], wt)| vec![[x * wt, y * wt, 0.0, wt], [x * wt, y * wt, h * wt, wt]]).collect();
+    let surface = Surface::RationalSpline { u_knots: vec![3.0, 3.0, 3.0, 4.0, 4.0, 5.0, 5.0, 5.0], v_knots: vec![0.0, 0.0, h, h], homogeneous };
+    // The quarter span after the seam reaches `half` at quarter_param(half); the one before it
+    // ends there, so the trims run symmetrically round the knot.
+    let (u0, u1) = (4.0 - quarter_param(half), 4.0 + quarter_param(half));
+    let corners = [[u0, 0.0], [u1, 0.0], [u1, h], [u0, h]];
+    let edges: Vec<OrientedEdge> = (0..4)
+        .map(|k| OrientedEdge {
+            edge: k as u32,
+            forward: true,
+            pcurve: Curve2::Spline { knots: vec![0.0, 0.0, 1.0, 1.0], points: vec![corners[k], corners[(k + 1) % 4]] },
+        })
+        .collect();
+    let line = Curve::Line { start: [0.0; 3], end: [1.0, 0.0, 0.0] };
+    let record = Record {
+        version: b::VERSION,
+        tolerance: 1e-6,
+        regions: Vec::new(),
+        shells: Vec::new(),
+        faces: vec![Face { surface, nurbs: None, domain: [[3.0, 5.0], [0.0, h]], loops: vec![Loop::Edges { edges }] }],
+        edges: (0..4)
+            .map(|_| Edge { nurbs: None, curve: line.clone(), interval: [0.0, 1.0], vertices: [0, 0], tolerance: 1e-6, uses: Vec::new() })
+            .collect(),
+        vertices: Vec::new(),
+    };
+    let made = analytic::analytic(&record).unwrap();
+    let f = &made.faces[0];
+    let Surface::Cylinder { frame, radius } = &f.surface else { panic!("{:?}", f.surface) };
+    assert!((radius - r).abs() <= 1e-10, "radius {radius}");
+    let z = cross(frame.x_axis, frame.y_axis);
+    assert!(z[0].abs() <= 1e-15 && z[1].abs() <= 1e-15 && frame.x_axis[2].abs() <= 1e-15, "axis {z:?}, x {:?}", frame.x_axis);
+    assert!(frame.origin[2].abs() <= 1e-12 && (frame.origin[0] - c[0]).abs() <= 1e-9 && frame.origin[1].abs() <= 1e-9, "centre {:?}", frame.origin);
+    // u from the patch's first edge, 2 * half round; v its height.
+    let [[a0, a1], [v0, v1]] = f.domain;
+    assert!(a0 == 0.0 && (a1 - 2.0 * half).abs() <= 1e-12, "{:?}", f.domain);
+    assert!(v0.abs() <= 1e-12 && (v1 - h).abs() <= 1e-12, "{:?}", f.domain);
+    let start = (-half).sin_cos();
+    assert!((frame.x_axis[0] - start.1).abs() <= 1e-12 && (frame.x_axis[1] - start.0).abs() <= 1e-12, "x {:?}", frame.x_axis);
+}

@@ -105,7 +105,10 @@ fn extruded_circle(u_knots: &[f64], v_knots: &[f64], net: &[Vec<[f64; 4]>], trim
         return None;
     }
     let arc = CurveEval::new(&b::Curve::RationalSpline { knots: arc_knots.to_vec(), homogeneous: first.clone() }).ok()?;
-    let (center, radius, normal) = circle(&arc, arc_range)?;
+    // The circle from the arc's widest span, not from the face's range: three points on a
+    // face a small part of a turn round (6 mm of a 3000 mm radius) put the centre off the
+    // circle's plane and the radius off by 1e-8 mm, which SMLib does not take back as a cylinder.
+    let (center, radius, normal) = circle(&arc, widest_span(arc_knots, first.len())?, arc_range)?;
     let z = d.normalized()?;
     if normal.cross(z).len() > 1e-9 {
         return None;
@@ -397,7 +400,7 @@ impl Revolution {
             return Ok((cone, [angle, v]));
         }
         // A circular profile.
-        let (center, radius, normal) = circle(&self.profile, t).ok_or(NOT_ANALYTIC)?;
+        let (center, radius, normal) = circle(&self.profile, t, t).ok_or(NOT_ANALYTIC)?;
         let slack = 1e-9 * radius.max(1.0);
         if normal.dot(self.z).abs() > 1e-9 || normal.dot(x).abs() > 1e-9 || (center - self.o).dot(y).abs() > slack {
             return Err(NOT_ANALYTIC);
@@ -506,11 +509,20 @@ fn agree((record, domain): (&b::Surface, [[f64; 2]; 2]), (analytic, range): (&b:
     Ok(d < 0.0)
 }
 
-/// The circle a curve runs along over `t`: centre, radius and unit normal (its turning sense),
-/// checked at 65 points within 10⁻⁹ of the radius (at least 1 mm).
-fn circle(c: &CurveEval, t: [f64; 2]) -> Option<(Vec3, f64, Vec3)> {
+/// The widest knot span of a B-spline with `points` control points on `knots`.
+fn widest_span(knots: &[f64], points: usize) -> Option<[f64; 2]> {
+    let degree = knots.len().checked_sub(points + 1)?;
+    knots.get(degree..=points)?.windows(2).map(|w| [w[0], w[1]]).max_by(|a, b| (a[1] - a[0]).total_cmp(&(b[1] - b[0])))
+}
+
+/// The circle a curve runs along over `t`, through its points at `fit` (a range of it on that
+/// circle a good part of a turn round, where three points fix the circle to rounding): centre,
+/// radius and unit normal (its turning sense over `fit`), checked at 65 points over `t` within
+/// 10⁻⁹ of the radius (at least 1 mm).
+fn circle(c: &CurveEval, fit: [f64; 2], t: [f64; 2]) -> Option<(Vec3, f64, Vec3)> {
+    let on = |s: f64| c.point(fit[0] + (fit[1] - fit[0]) * s);
     let at = |s: f64| c.point(t[0] + (t[1] - t[0]) * s);
-    let (p, q, r) = (at(0.0)?, at(1.0 / 3.0)?, at(2.0 / 3.0)?);
+    let (p, q, r) = (on(0.0)?, on(1.0 / 3.0)?, on(2.0 / 3.0)?);
     let (u, w) = (q - p, r - p);
     let normal = u.cross(w);
     let nn = normal.dot(normal);
