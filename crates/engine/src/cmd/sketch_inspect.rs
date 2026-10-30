@@ -33,7 +33,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .at("SKETCH", "INSPECT")
         .icon("center_of_mass")
         .noundo()
-        .params("bodies?: [names] (default all): the centre of mass (uniform density) of each and of all together"),
+        .params("bodies?: [names] (default all): the centre of mass (uniform density) of each and of all together, from the exact mass properties `inspect.measure` takes → center, volume, bodies: [{body, center, volume}], skipped: [{body, reason}] (bodies that enclose no volume or could not be measured)"),
 ];
 
 /// Curvature (signed, 1/mm) and unit normal of a segment at `t`.
@@ -395,20 +395,43 @@ fn center_of_mass(s: &mut Session, p: &Value) -> Result<Value> {
     let st = s.model.state();
     let mut out = Vec::new();
     let (mut vol, mut moment) = (0.0, Vec3::ZERO);
+    let mut skipped = Vec::new();
+    // Each body's exact mass properties, as `inspect.measure` takes them: a body that encloses no
+    // volume (a surface body, an open mesh) or that cannot be measured has no centre of mass.
     for b in st.bodies.iter().filter(|b| names.is_empty() || names.contains(&b.name)) {
-        let m = b.mesh().measure();
-        if !(m.volume.is_finite() && m.centroid.is_finite()) {
+        if !super::inspect::encloses_volume(&b.body) {
+            skipped.push(json!({"body": b.name, "reason": "it encloses no volume"}));
             continue;
         }
+        let m = match b.measure() {
+            Ok(m) if m.volume.is_finite() && m.centroid.is_finite() => m,
+            Ok(_) => {
+                skipped.push(json!({"body": b.name, "reason": "its measure is not finite"}));
+                continue;
+            }
+            Err(e) => {
+                skipped.push(json!({"body": b.name, "reason": e.to_string()}));
+                continue;
+            }
+        };
         vol += m.volume;
         moment += m.centroid * m.volume;
         out.push(json!({"body": b.name, "center": [m.centroid.x, m.centroid.y, m.centroid.z], "volume": m.volume}));
     }
     if out.is_empty() {
-        return Err(bad(cmd, if names.is_empty() { "there are no bodies" } else { "no such bodies" }));
+        return Err(bad(
+            cmd,
+            match skipped.first() {
+                Some(why) => {
+                    format!("no body to measure: `{}`: {}", why["body"].as_str().unwrap_or_default(), why["reason"].as_str().unwrap_or_default())
+                }
+                None if names.is_empty() => "there are no bodies".to_string(),
+                None => "no such bodies".to_string(),
+            },
+        ));
     }
     let c = if vol.abs() > 1e-300 { moment / vol } else { Vec3::ZERO };
-    Ok(json!({"center": [c.x, c.y, c.z], "volume": vol, "bodies": out}))
+    Ok(json!({"center": [c.x, c.y, c.z], "volume": vol, "bodies": out, "skipped": skipped}))
 }
 
 #[cfg(test)]
@@ -468,8 +491,11 @@ mod tests {
         let r = s.execute("inspect.center_of_mass", &json!({})).unwrap();
         let (vb, vc) = (1000.0, std::f64::consts::PI * 640.0);
         let want = (5.0 * vb + 50.0 * vc) / (vb + vc);
-        assert!((r["center"][0].as_f64().unwrap() - want).abs() < 0.1, "{r}");
-        assert!((r["center"][2].as_f64().unwrap() - 5.0).abs() < 0.05, "{r}");
+        // From the exact faces, not the display mesh, whose chords cut the cylinder short.
+        assert!((r["center"][0].as_f64().unwrap() - want).abs() < 1e-6 * want, "{r}");
+        assert!((r["center"][2].as_f64().unwrap() - 5.0).abs() < 1e-9, "{r}");
+        assert!((r["bodies"][0]["volume"].as_f64().unwrap() - vc).abs() < 1e-6 * vc, "{r}");
+        assert!((r["volume"].as_f64().unwrap() - (vb + vc)).abs() < 1e-6 * (vb + vc), "{r}");
         assert!(s.execute("inspect.center_of_mass", &json!({"bodies": ["nope"]})).is_err());
         // Isocurves on the cylinder's side: rings around it and lines along it.
         let r = s.execute("inspect.isocurve", &json!({"faces": [[58, 0, 5]], "count": 4})).unwrap();
