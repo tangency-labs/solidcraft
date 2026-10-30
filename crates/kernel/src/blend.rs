@@ -1845,6 +1845,10 @@ fn closed(input: &Body, b: Body) -> Result<Body> {
 /// faces around the edges is refused with [`KernelError::TooLarge`] ([`fillet_max`] finds the
 /// largest that works).
 pub fn fillet(body: &Body, edges: &[Vec3], radius: f64) -> Result<Body> {
+    crate::memo::scope(|| fillet_in_scope(body, edges, radius))
+}
+
+fn fillet_in_scope(body: &Body, edges: &[Vec3], radius: f64) -> Result<Body> {
     body.require_brep("fillet")?;
     // A round that would run past its faces into other geometry or another round (#1080).
     // Checked once built, so a refusal of the build itself stands as it is.
@@ -1934,6 +1938,10 @@ fn radius_step(radius: f64) -> f64 {
 /// of the edges, so the radius returned is one that was built; the search runs up to 16 of
 /// them, so it is for an explicit request, not every refusal.
 pub fn fillet_max(body: &Body, edges: &[Vec3], radius: f64) -> Option<(f64, Body)> {
+    crate::memo::scope(|| fillet_max_in_scope(body, edges, radius))
+}
+
+fn fillet_max_in_scope(body: &Body, edges: &[Vec3], radius: f64) -> Option<(f64, Body)> {
     if !(radius.is_finite() && radius > 1e-6) {
         return None;
     }
@@ -1966,6 +1974,10 @@ pub fn fillet_max(body: &Body, edges: &[Vec3], radius: f64) -> Option<(f64, Body
 /// size, the groups don't build together, or there are too many to search (each search is up
 /// to 16 fillets, and this runs in the live preview).
 pub fn fillet_max_each(body: &Body, edges: &[Vec3], radius: f64) -> Option<(Vec<f64>, Body)> {
+    crate::memo::scope(|| fillet_max_each_in_scope(body, edges, radius))
+}
+
+fn fillet_max_each_in_scope(body: &Body, edges: &[Vec3], radius: f64) -> Option<(Vec<f64>, Body)> {
     const MAX_GROUPS: usize = 8;
     const MAX_SEARCHES: usize = 2;
     let one = || fillet_max(body, edges, radius).map(|(r, b)| (vec![r; edges.len()], b));
@@ -2000,6 +2012,10 @@ pub fn fillet_max_each(body: &Body, edges: &[Vec3], radius: f64) -> Option<(Vec<
 /// The fillet of each edge at its own radius (`radii` in `edges`' order): built together where
 /// the corner build takes it, else the edges of each radius together, the largest first.
 pub fn fillet_each(body: &Body, edges: &[Vec3], radii: &[f64]) -> Result<Body> {
+    crate::memo::scope(|| fillet_each_in_scope(body, edges, radii))
+}
+
+fn fillet_each_in_scope(body: &Body, edges: &[Vec3], radii: &[f64]) -> Result<Body> {
     if radii.len() != edges.len() {
         return Err(KernelError::Invalid("one radius per edge".into()));
     }
@@ -2081,6 +2097,10 @@ fn interacting_groups(body: &Body, pts: &[Vec3]) -> Option<Vec<Vec<usize>>> {
 /// prism whose only face inside the body is the chamfer plane (so neighbouring chamfers meet in
 /// a mitre); the local operation is the fallback.
 pub fn chamfer(body: &Body, edges: &[Vec3], distance: f64) -> Result<Body> {
+    crate::memo::scope(|| chamfer_in_scope(body, edges, distance))
+}
+
+fn chamfer_in_scope(body: &Body, edges: &[Vec3], distance: f64) -> Result<Body> {
     body.require_brep("chamfer")?;
     if !(distance.is_finite() && distance > 1e-6 && distance < 1e6) {
         return Err(KernelError::Invalid("chamfer size must be positive".into()));
@@ -2313,6 +2333,10 @@ pub enum ChamferSide {
 /// a wall (a circular rim between a plane and a cylinder or cone, convex or concave, and loops of
 /// lines and arcs) are chamfered along that face's loop.
 pub fn chamfer_sides(body: &Body, edges: &[Vec3], d1: f64, side: ChamferSide, flip: bool) -> Result<Body> {
+    crate::memo::scope(|| chamfer_sides_in_scope(body, edges, d1, side, flip))
+}
+
+fn chamfer_sides_in_scope(body: &Body, edges: &[Vec3], d1: f64, side: ChamferSide, flip: bool) -> Result<Body> {
     body.require_brep("chamfer")?;
     let ok = |x: f64| x.is_finite() && x > 1e-6 && x < 1e6;
     let valid = ok(d1)

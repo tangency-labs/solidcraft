@@ -34,7 +34,7 @@ fn surface_of(shell: mt::Shell) -> Body {
         solid: std::sync::Arc::new(mt::Solid::new_unchecked(vec![shell])),
         size: 0.0,
         boundary_tol: None,
-        volume: Some(std::sync::Arc::new(std::sync::Mutex::new(None))),
+        cache: Some(std::sync::Arc::default()),
         coarse_missing: None,
         mesh: None,
         color: None,

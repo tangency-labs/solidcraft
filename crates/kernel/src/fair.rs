@@ -917,7 +917,7 @@ pub fn fair_faces(body: &Body, faces: &[usize], opts: &FairOptions) -> Result<(B
         let mut result = body.clone();
         result.solid = std::sync::Arc::new(mt::Solid::new_unchecked(shells));
         result.size = 0.0;
-        result.volume = Some(std::sync::Arc::new(std::sync::Mutex::new(None)));
+        result.cache = Some(std::sync::Arc::default());
         result.coarse_missing = None;
         result.history = None;
         result.phased = false;

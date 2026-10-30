@@ -61,6 +61,12 @@ fn min_edge_radius(m: &Mesh) -> Option<f64> {
     best
 }
 
+#[cfg(test)]
+thread_local! {
+    /// Bodies measured on this thread, not taken from a cache (tests count them).
+    pub(crate) static MEASURED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 /// Volume, area, centre and box of a body, as [`measure`] works them out, without the topology
 /// counts (and the tessellation they take).
 #[derive(Clone, Copy, Debug, Serialize)]
@@ -73,8 +79,29 @@ pub struct MassMeasure {
 
 /// Measure a body from a fine tessellation (chord tolerance 5e-5 of the body size, finer for
 /// small radii down to 5e-6). Faces whose fine tessellation disagrees with a coarse one (a
-/// meshing failure) use the coarse result.
+/// meshing failure) use the coarse result. Kept with the solid, so a clone isn't measured again.
 pub fn measure(b: &Body) -> Result<BodyMeasure> {
+    let same = |s: &Option<std::sync::Arc<Vec<Vec<Vec3>>>>| match (s, &b.splits) {
+        (Some(x), Some(y)) => std::sync::Arc::ptr_eq(x, y),
+        (None, None) => true,
+        _ => false,
+    };
+    let cached = b.cache.as_ref().and_then(|c| c.measure.lock().ok()?.as_ref().filter(|(s, _)| same(s)).map(|(_, m)| m.clone()));
+    if let Some(m) = cached {
+        return Ok(m);
+    }
+    let m = measure_uncached(b)?;
+    if let Some(c) = &b.cache
+        && let Ok(mut slot) = c.measure.lock()
+    {
+        *slot = Some((b.splits.clone(), m.clone()));
+    }
+    Ok(m)
+}
+
+fn measure_uncached(b: &Body) -> Result<BodyMeasure> {
+    #[cfg(test)]
+    MEASURED.with(|n| n.set(n.get() + 1));
     if let Some((pos, tris)) = b.triangle_mesh() {
         // Exact for a mesh body; topology counts are facets, sides and vertices.
         let m = b.tessellate(1.0)?;

@@ -114,7 +114,7 @@ pub fn decode_native_body(bytes: &[u8]) -> Result<Body> {
             solid: Arc::new(solid),
             size,
             boundary_tol,
-            volume: Some(std::sync::Arc::new(std::sync::Mutex::new(None))),
+            cache: Some(std::sync::Arc::default()),
             coarse_missing: coarse_missing.map(|(tol, n)| (tol, n as usize)),
             mesh: None,
             color: None,
