@@ -65,7 +65,7 @@ impl Brep {
     }
 }
 
-#[cfg(all(test, feature = "native"))]
+#[cfg(all(test, any(feature = "native", feature = "solidcore")))]
 mod tests {
     use super::*;
     use crate::Error;

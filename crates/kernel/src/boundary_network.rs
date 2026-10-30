@@ -433,6 +433,8 @@ fn face_of(s: &NurbsSurface, corners: &[Vec3]) -> Result<Body> {
     let mut parts = Parts { tolerance, ..Parts::default() };
     parts.vertices = c.iter().map(|p| solidcraft_geom::brep::Vertex { point: [p.x, p.y, p.z], tolerance }).collect();
     let mut uses = Vec::new();
+    // The same uses as plain (curve, interval, vertices, forward), for a flat patch.
+    let mut flat_uses = Vec::new();
     for (k, (ctrl, knots, [a, z], forward, fixed)) in sides.into_iter().enumerate() {
         if collapsed.get(k).copied().unwrap_or(false) {
             continue;
@@ -451,17 +453,40 @@ fn face_of(s: &NurbsSurface, corners: &[Vec3]) -> Result<Body> {
         ends.push(vertex_of[z]);
         let uv = |t: f64| [fixed[0].unwrap_or(t), fixed[1].unwrap_or(t)];
         let mut pieces = Vec::with_capacity(breaks.len());
+        let mut flat_side = Vec::with_capacity(breaks.len());
         for (w, e) in breaks.windows(2).zip(ends.windows(2)) {
             let interval = [w[0], w[1]];
             let edge = index(parts.edges.len())?;
             let vertices = [index(e[0])?, index(e[1])?];
             parts.edges.push(solidcraft_geom::brep::Edge { nurbs: None, curve: curve.clone(), interval, vertices, tolerance, uses: Vec::new() });
+            flat_side.push((curve.clone(), interval, vertices, forward, None));
             pieces.push(solidcraft_geom::brep::OrientedEdge { edge, forward, pcurve: uv_line(uv(w[0]), uv(w[1]), interval) });
         }
         if !forward {
             pieces.reverse();
         }
+        if !forward {
+            flat_side.reverse();
+        }
+        flat_uses.extend(flat_side);
         uses.extend(pieces);
+    }
+    // A flat patch is its plane, not a spline lying in it: a spline face of straight-through
+    // corners (an arc meeting a line at 180 degrees) is singular there, and an offset of it, a
+    // thickening, has no normal to go along.
+    let net: Vec<Vec3> = (0..nu).flat_map(|i| (0..nv).map(move |j| (i, j))).filter_map(|(i, j)| s.point(i, j).project()).collect();
+    let rim: Vec<Vec3> =
+        row(0).iter().chain(&column(nu - 1)).chain(row(nv - 1).iter().rev()).chain(column(0).iter().rev()).filter_map(|h| h.project()).collect();
+    if let Some((origin, n)) = flat_net(&net, &rim, size * 1e-9) {
+        let u = (c[1] - c[0]).cross(n).cross(n) * -1.0;
+        let u = u.normalized().or_else(|| n.cross(Vec3::X).normalized()).or_else(|| n.cross(Vec3::Y).normalized());
+        if let Some(u) = u {
+            let a = |x: Vec3| [x.x, x.y, x.z];
+            let surface = solidcraft_geom::brep::Surface::Plane { origin: a(origin), u_axis: a(u), v_axis: a(n.cross(u)) };
+            parts.edges.clear();
+            let brep = crate::surface_ruled::face_of(parts, surface, flat_uses)?;
+            return crate::surfaces::all_new(surface_body(&brep)?, &[]);
+        }
     }
     let face = solidcraft_geom::brep::Face {
         nurbs: None,
@@ -474,6 +499,18 @@ fn face_of(s: &NurbsSurface, corners: &[Vec3]) -> Result<Body> {
     crate::surfaces::all_new(body, &[])
 }
 
+/// The plane the control points `net` all lie within `tol` of, as a point on it and its unit
+/// normal turned the way the closed polygon `rim` runs round it, if there is one.
+fn flat_net(net: &[Vec3], rim: &[Vec3], tol: f64) -> Option<(Vec3, Vec3)> {
+    let origin = *rim.first()?;
+    // Newell's normal of the rim: its length is twice the enclosed area.
+    let mut n = Vec3::ZERO;
+    for (p, q) in rim.iter().zip(rim.iter().cycle().skip(1)) {
+        n += p.cross(*q);
+    }
+    let n = n.normalized()?;
+    net.iter().all(|p| (*p - origin).dot(n).abs() <= tol).then_some((origin, n))
+}
 /// The points of `corners` on a side's curve (within [`CROSS_TOLERANCE`]) strictly between its
 /// ends, with their parameters, in order: each found from its nearest of 256 samples by
 /// golden-section search.

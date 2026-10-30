@@ -632,6 +632,16 @@ impl<'b, 'a> Builder<'b, 'a> {
         Ok(())
     }
 
+    /// How far a round face's form may stop short of its boundary: a face that starts or ends
+    /// within this of a quarter line of its frame is given the form up to the line, and its edges
+    /// then lie that far off the form. The edge tolerance (`cover_edge` with [`EDGE_GAP_MARGIN`])
+    /// covers a gap only up to the file's uncertainty over that margin; snapping within the whole
+    /// uncertainty left gaps the uncertainty cannot cover (a cylinder 1.4e-5 rad off its face's
+    /// start, in a file stating 8e-5 mm, left 5.7e-5 mm and raised the edges past it).
+    fn snap(&self) -> f64 {
+        self.tol / EDGE_GAP_MARGIN
+    }
+
     /// Edge `e`'s tolerance covers `gap` with `margin`: refused if far off.
     fn cover_edge(&mut self, e: u32, gap: f64, margin: f64) -> R<()> {
         let Some(x) = self.edges.get_mut(e as usize) else { return Err("edge reference".into()) };
@@ -1306,6 +1316,53 @@ impl<'b, 'a> Builder<'b, 'a> {
         Ok(brep::form::extent(&face.surface, &boundary))
     }
 
+    /// `extent` with each periodic direction that it covers a whole turn of starting at the
+    /// face's seam in that direction (the seam edge used twice, constant there), a whole turn
+    /// from the box's own start where that differs. The box is unwrapped from the loop's first
+    /// point, which may lie a quarter or three away from the seam; its form would then close
+    /// on a seam that no loop's seam uses meet at (the loop's pcurves, from the seam to the
+    /// seam, lie outside the form's knots).
+    fn start_at_seam(&self, fi: usize, mut extent: [[f64; 2]; 2]) -> [[f64; 2]; 2] {
+        let Some(face) = self.faces.get(fi) else { return extent };
+        let Ok(on) = SurfaceEval::new(&face.surface) else { return extent };
+        let period = on.domain().period;
+        let mut uses: HashMap<u32, usize> = HashMap::new();
+        for l in &face.loops {
+            if let LoopB::Edges(es) = l {
+                for (e, _) in es {
+                    *uses.entry(*e).or_default() += 1;
+                }
+            }
+        }
+        let mut seams: Vec<u32> = uses.into_iter().filter(|(_, n)| *n >= 2).map(|(e, _)| e).collect();
+        seams.sort_unstable();
+        for e in seams {
+            let Some(edge) = self.edges.get(e as usize) else { continue };
+            let Ok(curve) = CurveEval::new(&edge.curve) else { continue };
+            let at: Vec<[f64; 2]> = [0.25, 0.5, 0.75]
+                .iter()
+                .filter_map(|f| {
+                    curve.point(edge.interval[0] + f * (edge.interval[1] - edge.interval[0])).and_then(|p| on.project(p, None, f64::INFINITY))
+                })
+                .collect();
+            let [first, ..] = at.as_slice() else { continue };
+            for d in 0..2 {
+                let Some(Some(per)) = period.get(d).copied() else { continue };
+                let Some(box_d) = extent.get_mut(d) else { continue };
+                // The seam is where this angle holds along the whole edge.
+                let constant =
+                    at.len() == 3 && at.iter().all(|q| ((q[d] - first[d]) / per).round().mul_add(-per, q[d] - first[d]).abs() < 1e-6 * per);
+                if constant && box_d[1] - box_d[0] >= per * (1.0 - 1e-9) {
+                    let start = ((box_d[0] - first[d]) / per).round().mul_add(per, first[d]);
+                    if (start - box_d[0]).abs() > 1e-9 * per {
+                        *box_d = [start, start + per];
+                    }
+                }
+            }
+        }
+        extent
+    }
+
     /// The pcurves of a face's edge loops (in its edge-loop order), its domain, whether it was
     /// turned over, and its NURBS form. Picks the outer loop when the file
     /// marks none (or marks one that another loop encloses), and turns the face over when its
@@ -1334,8 +1391,9 @@ impl<'b, 'a> Builder<'b, 'a> {
                     Some(e) => Some(e),
                     None => self.face_extent(fi)?,
                 };
+                let extent = extent.map(|e| self.start_at_seam(fi, e));
                 let extent = extent.ok_or_else(|| unsupported("a face whose boundary does not lie on its surface"))?;
-                Some(brep::form::surface_within(&label, extent, tol).ok_or_else(|| unsupported("a face of more than one turn"))?)
+                Some(brep::form::surface_within(&label, extent, self.snap()).ok_or_else(|| unsupported("a face of more than one turn"))?)
             }
             None => None,
         };

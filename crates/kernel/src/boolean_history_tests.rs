@@ -429,7 +429,7 @@ fn stacked_pieces_of_one_cylinder_keep_their_walls() {
 
 /// The same booleans through SMLib: its tags, renumbered into the operands' and the result's
 /// face and edge order, give a history that holds against the geometry.
-#[cfg(feature = "smlib")]
+#[cfg(any(feature = "smlib", feature = "solidcore"))]
 mod smlib {
     use super::*;
     use crate::smlib_boolean::smlib_boolean;

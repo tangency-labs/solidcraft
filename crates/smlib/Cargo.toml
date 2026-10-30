@@ -23,9 +23,12 @@ neg_cmp_op_on_partial_ord = "allow"
 # Compile and link SMLib. Off, the crate builds without a C++ toolchain or the SMLib sources, and
 # every call returns `Error::NotBuilt`, so workspace-wide builds and checks need neither.
 native = []
+# Run on the pure-Rust solidcore kernel instead of SMLib. Exclusive with `native`.
+solidcore = ["dep:solidcore"]
 
 [dependencies]
 log = { workspace = true }
+solidcore = { workspace = true, optional = true }
 solidcraft-geom = { workspace = true }
 solidcraft-profile = { workspace = true }
 

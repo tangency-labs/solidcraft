@@ -117,7 +117,7 @@ fn records_smlib_cannot_take_are_errors() {
     assert!(arrays(&r, true).is_err());
 }
 
-#[cfg(feature = "native")]
+#[cfg(any(feature = "native", feature = "solidcore"))]
 #[test]
 fn a_cube_record_imports_into_smlib() {
     let b = crate::Brep::from_record(&cube(10.0), true).unwrap();
@@ -126,7 +126,7 @@ fn a_cube_record_imports_into_smlib() {
     assert!(b.is_manifold_solid().unwrap());
 }
 
-#[cfg(feature = "native")]
+#[cfg(any(feature = "native", feature = "solidcore"))]
 #[test]
 fn a_plane_on_other_axes_goes_as_smlibs_plane() {
     // A tetrahedron: its faces' natural frames are unit and orthogonal, so make one plane's axes

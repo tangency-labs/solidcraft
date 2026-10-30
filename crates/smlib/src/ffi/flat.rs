@@ -2,11 +2,13 @@
 //! like its parent: called only through [`crate::flat`].
 #![allow(unsafe_code)]
 
+#[cfg(not(feature = "solidcore"))]
 use super::Handle;
 #[cfg(feature = "native")]
 use super::{OK, RawBrep, new_brep};
 
 /// `smlib_flat`, opaque.
+#[cfg_attr(feature = "solidcore", allow(dead_code))]
 #[repr(C)]
 pub struct RawFlat {
     _private: [u8; 0],
@@ -26,13 +28,17 @@ unsafe extern "C" {
 }
 
 /// An owned `smlib_flat`, freed once on drop.
+#[cfg(not(feature = "solidcore"))]
 #[cfg_attr(not(feature = "native"), allow(dead_code))]
 pub struct FlatHandle(std::ptr::NonNull<RawFlat>);
 
 // Only ever used through the C API, which serialises every call.
+#[cfg(not(feature = "solidcore"))]
 unsafe impl Send for FlatHandle {}
+#[cfg(not(feature = "solidcore"))]
 unsafe impl Sync for FlatHandle {}
 
+#[cfg(not(feature = "solidcore"))]
 impl Drop for FlatHandle {
     fn drop(&mut self) {
         #[cfg(feature = "native")]
@@ -100,7 +106,7 @@ mod calls {
 }
 
 /// The same calls when SMLib is not built: each one fails with `NOT_BUILT`.
-#[cfg(not(feature = "native"))]
+#[cfg(not(any(feature = "native", feature = "solidcore")))]
 mod calls {
     use super::*;
     use crate::ffi::NOT_BUILT;
@@ -131,4 +137,7 @@ mod calls {
     }
 }
 
+#[cfg(feature = "solidcore")]
+pub use super::rs_flat::*;
+#[cfg(not(feature = "solidcore"))]
 pub use calls::*;

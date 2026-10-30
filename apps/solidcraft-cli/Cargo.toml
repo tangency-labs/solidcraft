@@ -29,6 +29,7 @@ smlib = ["solidcraft-engine/smlib"]
 # The profiler, compiled in so any build can say where its time goes (`--profile`,
 # SOLIDCRAFT_PROFILE=1); it records nothing until asked.
 profile = ["solidcraft-engine/profile"]
+solidcore = ["solidcraft-engine/solidcore"]
 
 [dependencies]
 solidcraft-engine = { workspace = true }

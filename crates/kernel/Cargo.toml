@@ -13,6 +13,8 @@ workspace = true
 # scripts/fetch-smlib.sh (ADR 0002). Without it every geometric operation answers that SMLib
 # was not built.
 smlib = ["solidcraft-smlib/native"]
+# Run on the pure-Rust solidcore kernel instead (exclusive with `smlib`).
+solidcore = ["solidcraft-smlib/solidcore"]
 
 [dependencies]
 solidcraft-geom = { workspace = true }

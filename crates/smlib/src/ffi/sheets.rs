@@ -4,8 +4,9 @@
 
 #![allow(unsafe_code)]
 
+#[cfg(not(feature = "solidcore"))]
 use super::Handle;
-#[cfg(not(feature = "native"))]
+#[cfg(not(any(feature = "native", feature = "solidcore")))]
 use super::NOT_BUILT;
 #[cfg(feature = "native")]
 use super::{RawBrep, new_brep};
@@ -29,12 +30,15 @@ pub fn offset_sheet(b: &Handle, distance: f64) -> Result<Handle, i32> {
     new_brep(|out| unsafe { smlib_offset_sheet(b.raw(), distance, out) })
 }
 
-#[cfg(not(feature = "native"))]
+#[cfg(not(any(feature = "native", feature = "solidcore")))]
 pub fn stitch(_: &Handle, _: f64) -> Result<(Handle, bool), i32> {
     Err(NOT_BUILT)
 }
 
-#[cfg(not(feature = "native"))]
+#[cfg(not(any(feature = "native", feature = "solidcore")))]
 pub fn offset_sheet(_: &Handle, _: f64) -> Result<Handle, i32> {
     Err(NOT_BUILT)
 }
+
+#[cfg(feature = "solidcore")]
+pub use super::rs_shell::{offset_sheet, stitch};

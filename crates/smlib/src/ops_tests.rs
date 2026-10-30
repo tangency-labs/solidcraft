@@ -1,6 +1,6 @@
 //! The operations against analytic volumes and topology counts (built with SMLib only). `SMLIB_OPS_SHOTS=<dir>` also
 //! writes every result there as a native `.smb`, to render.
-#![cfg(feature = "native")]
+#![cfg(any(feature = "native", feature = "solidcore"))]
 
 use super::*;
 use crate::CheckLevel;
@@ -33,6 +33,7 @@ fn shot(b: &Brep, name: &str) {
 }
 
 /// The midpoints of the 12 edges of the cube [0, a]³.
+#[cfg(any(feature = "native", feature = "solidcore"))]
 fn cube_edge_midpoints(a: f64) -> Vec<[f64; 3]> {
     let h = a / 2.0;
     let mut v = Vec::new();
@@ -110,6 +111,7 @@ fn empty_and_split_boolean_results() {
     assert_close(volume(&halves), 8000.0 - 4.0 * 400.0, 1e-9, "split volume");
 }
 
+#[cfg(any(feature = "native", feature = "solidcore"))]
 #[test]
 fn fillet_every_edge_of_a_cube() {
     let (a, r) = (20.0, 2.0);
@@ -130,6 +132,7 @@ fn fillet_every_edge_of_a_cube() {
     assert_untouched(&c, 8000.0, [6, 12, 8]);
 }
 
+#[cfg(any(feature = "native", feature = "solidcore"))]
 #[test]
 fn chamfer_one_edge() {
     let c = cube(20.0);
@@ -142,6 +145,33 @@ fn chamfer_one_edge() {
     assert_untouched(&c, 8000.0, [6, 12, 8]);
 }
 
+/// A setback of `d` along both faces of an edge at interior angle `a` takes a prism of
+/// `d² sin(a) / 2` over the edge's length: the chamfer's chord follows the dihedral angle at the
+/// edge, not only the right angle.
+#[cfg(any(feature = "native", feature = "solidcore"))]
+#[test]
+fn chamfer_setback_is_exact_at_any_angle() {
+    use crate::sweeps::Curve;
+    let prism = |pts: &[[f64; 2]]| {
+        let loop_: Vec<Curve> = (0..pts.len())
+            .map(|i| Curve::Line { start: [pts[i][0], pts[i][1], 0.0], end: [pts[(i + 1) % pts.len()][0], pts[(i + 1) % pts.len()][1], 0.0] })
+            .collect();
+        Brep::extrude(&loop_, [0.0, 0.0, 1.0], 5.0, 0.0, crate::sweeps::DraftCorner::default(), true).unwrap()
+    };
+    let d = 2.0;
+    // A 45 degree wedge (area 50) at (10, 0); a 135 degree parallelogram (area 50) at (10, 0).
+    for (name, pts, area, angle) in [
+        ("wedge", vec![[0.0, 0.0], [10.0, 0.0], [0.0, 10.0]], 50.0, 45f64),
+        ("parallelogram", vec![[0.0, 0.0], [10.0, 0.0], [15.0, 5.0], [5.0, 5.0]], 50.0, 135f64),
+    ] {
+        let body = prism(&pts);
+        let ch = body.chamfer(&[[10.0, 0.0, 2.5]], 0.1, d).unwrap();
+        let removed = d * d * angle.to_radians().sin() / 2.0 * 5.0;
+        assert_close(volume(&ch), area * 5.0 - removed, 1e-7, name);
+    }
+}
+
+#[cfg(any(feature = "native", feature = "solidcore"))]
 #[test]
 fn shell_a_box_open_at_the_top() {
     let c = cube(20.0);
@@ -162,6 +192,7 @@ fn shell_a_box_open_at_the_top() {
     assert_untouched(&c, 8000.0, [6, 12, 8]);
 }
 
+#[cfg(feature = "native")]
 #[test]
 fn fillet_takes_exactly_the_picked_edges() {
     // Round the vertical edge x = y = 20 first (r = 5): the top rim is then line, arc, line,
@@ -183,6 +214,7 @@ fn fillet_takes_exactly_the_picked_edges() {
     assert!(volume(&all) < volume(&one), "the chain takes more than its one edge");
 }
 
+#[cfg(any(feature = "native", feature = "solidcore"))]
 #[test]
 fn hostile_inputs_are_errors() {
     let c = cube(20.0);
@@ -222,6 +254,7 @@ fn hostile_inputs_are_errors() {
     assert!((volume(&past) - 1000.0).abs() < 1e-6 * 1000.0, "{}", volume(&past));
     // A wall with no room inside it never reaches SMLib's offset.
     assert_eq!(c.shell(&[[10.0, 10.0, 20.0]], 0.1, -15.0).unwrap_err(), Error::NoRoom);
+    #[cfg(any(feature = "native", feature = "solidcore"))]
     assert_eq!(c.offset_faces(&[[10.0, 10.0, 20.0]], 0.1, -20.0).unwrap_err(), Error::NoRoom);
     assert_eq!(c.thicken(1.0, false).unwrap_err(), Error::Argument, "a solid is no sheet");
     assert_untouched(&c, 8000.0, [6, 12, 8]);
@@ -232,6 +265,7 @@ fn hostile_inputs_are_errors() {
 /// offset (r5) is tangent to the front's (y = 2), so the walls meet along a line and the offset
 /// bounds no solid there. Refused as such; 1.5 (the walls apart) and 2.5 (crossing, merged)
 /// build.
+#[cfg(feature = "native")]
 #[test]
 fn a_shell_whose_walls_would_meet_is_refused_as_such() {
     let block = Brep::make_box([0.0; 3], [60.0, 40.0, 10.0]).unwrap();
@@ -245,6 +279,7 @@ fn a_shell_whose_walls_would_meet_is_refused_as_such() {
     }
 }
 
+#[cfg(feature = "native")]
 #[test]
 fn boolean_history_through_tagged_operands() {
     // A slot across the top of the cube: the cube's 6 faces give 7 result faces (the top is cut
@@ -270,6 +305,7 @@ fn boolean_history_through_tagged_operands() {
 /// `blend` gives each picked edge its own size: two parallel top edges of a 20 mm cube rounded at
 /// 2 and 3 lose (1 - pi/4) r^2 L each, chamfered r^2 L / 2 each; a chord of 2 sqrt 2 on a right
 /// angle is the round of radius 2.
+#[cfg(any(feature = "native", feature = "solidcore"))]
 #[test]
 fn blends_take_a_size_per_edge() {
     let c = cube(20.0);
@@ -281,13 +317,17 @@ fn blends_take_a_size_per_edge() {
     let ch = c.blend(Blend::Chamfer, &tops, &[2.0, 3.0], 0.1).unwrap();
     shot(&ch, "blend-chamfer-2-3");
     assert_close(volume(&ch), 8000.0 - 0.5 * 13.0 * 20.0, 1e-6, "chamfers 2 and 3");
-    let chord = c.blend(Blend::Chord, &tops[..1], &[2.0 * 2f64.sqrt()], 0.1).unwrap();
-    assert_close(volume(&chord), 8000.0 - q * 4.0 * 20.0, 2e-6, "chord");
+    #[cfg(any(feature = "native", feature = "solidcore"))]
+    {
+        let chord = c.blend(Blend::Chord, &tops[..1], &[2.0 * 2f64.sqrt()], 0.1).unwrap();
+        assert_close(volume(&chord), 8000.0 - q * 4.0 * 20.0, 2e-6, "chord");
+    }
     assert!(c.blend(Blend::Round, &tops, &[2.0], 0.1).is_err());
 }
 
 /// A radius running linearly from 3 to 1 along a cube edge: (1 - pi/4) L (r0² + r0 r1 + r1²) / 3
 /// taken away, whichever end is the start.
+#[cfg(any(feature = "native", feature = "solidcore"))]
 #[test]
 fn a_variable_round_follows_its_law() {
     let c = cube(20.0);
@@ -300,6 +340,15 @@ fn a_variable_round_follows_its_law() {
     assert_close(volume(&back), volume(&r), 1e-7, "reversed");
     assert!(c.fillet_variable([10.0, 20.0, 20.0], 0.1, [0.0, 20.0, 20.0], 1, &[0.0, 0.5, 1.0, 1.0], &[3.0, 1.0]).is_err());
     assert!(matches!(c.fillet_variable([90.0, 90.0, 90.0], 0.1, [0.0; 3], 1, &knots, &[3.0, 1.0]), Err(Error::NoMatch { .. })));
+}
+
+/// The laws beyond a straight one (solidcore ports only that).
+#[cfg(feature = "native")]
+#[test]
+fn a_spline_variable_round_follows_its_law() {
+    let c = cube(20.0);
+    let q = 1.0 - std::f64::consts::FRAC_PI_4;
+    let knots = [0.0, 0.0, 1.0, 1.0];
     // A quadratic law with control radii 4, 1, 4: r(t) = 4(1 − t)² + 2t(1 − t) + 4t².
     let law = |t: f64| 4.0 * (1.0 - t).powi(2) + 2.0 * t * (1.0 - t) + 4.0 * t * t;
     let n = 4000;
@@ -328,6 +377,7 @@ fn a_variable_round_follows_its_law() {
 /// Unequal chamfers of a cube's top edge y = 20: 5 back along the face facing `first` most and 2
 /// along the other take away a triangle 5 × 2 / 2 along the 20 mm edge, either way round; 5 at
 /// 30° to the first face is 5 and 5 tan 30°.
+#[cfg(any(feature = "native", feature = "solidcore"))]
 #[test]
 fn chamfers_with_two_setbacks() {
     let c = cube(20.0);
@@ -353,6 +403,7 @@ fn chamfers_with_two_setbacks() {
     assert_eq!(c.chamfer_sides(&top, 0.1, 5.0, ChamferSecond::Distance(-2.0), [0.0, 0.0, 1.0]).unwrap_err(), Error::Argument);
 }
 
+#[cfg(feature = "native")]
 #[test]
 fn imprint_cuts_faces_where_a_tool_meets_them() {
     // A box half sunk into the cube cuts the four side faces it crosses and the top it lies in.
@@ -367,6 +418,7 @@ fn imprint_cuts_faces_where_a_tool_meets_them() {
     assert!(cube.imprint(&far).unwrap().is_none());
 }
 
+#[cfg(any(feature = "native", feature = "solidcore"))]
 #[test]
 fn draft_tilts_a_side_about_its_line_on_the_neutral_plane() {
     let c = cube(20.0);
@@ -389,6 +441,7 @@ fn draft_tilts_a_side_about_its_line_on_the_neutral_plane() {
 /// box's six faces and the three rounds (9 faces, 30 edges, 22 vertices), a sheet SMLib's check
 /// passes, and one hole of twelve edges (each section and face curve in two), chained end to
 /// start, each bounding a different face than the patch's neighbours across it.
+#[cfg(feature = "native")]
 #[test]
 fn a_setback_corner_left_open_returns_its_hole() {
     let b = Brep::make_box([0.0; 3], [60.0, 40.0, 20.0]).unwrap();
@@ -417,4 +470,107 @@ fn a_setback_corner_left_open_returns_its_hole() {
     assert!(matches!(refused, Err(Error::CornerRefused { corner: 0 })), "{refused:?}");
     let refused = b.blend_setback(Blend::Round, &edges[..2], &[5.0; 2], &[[60.0, 40.0, 20.0]], &[8.0], 0.1);
     assert!(matches!(refused, Err(Error::CornerRefused { corner: 0 })), "{refused:?}");
+}
+
+/// A 10 x 10 sheet thickened by 3 is a 300 mm³ slab, all on one side or half each way; offset
+/// moves it along its normal; stitching a closed body leaves it closed, a sheet open.
+#[cfg(any(feature = "native", feature = "solidcore"))]
+#[test]
+fn sheets_thicken_offset_and_stitch() {
+    use crate::sweeps::{Curve, DraftCorner};
+    let edge = Curve::Line { start: [0.0, 0.0, 0.0], end: [10.0, 0.0, 0.0] };
+    let sheet = Brep::extrude(&[edge], [0.0, 1.0, 0.0], 10.0, 0.0, DraftCorner::default(), false).unwrap();
+    let slab = sheet.thicken(3.0, false).unwrap();
+    shot(&slab, "thicken");
+    assert_close(volume(&slab), 300.0, 1e-9, "one-sided slab");
+    let mid = sheet.thicken(3.0, true).unwrap();
+    shot(&mid, "thicken_symmetric");
+    assert_close(volume(&mid), 300.0, 1e-9, "symmetric slab");
+    let (lo, hi) = mid.bounds().unwrap();
+    assert_close(hi[2] + lo[2], 0.0, 1.0, "symmetric about the sheet");
+    assert_close(hi[2] - lo[2], 3.0, 1e-9, "symmetric thickness");
+    let moved = sheet.offset_sheet(2.0).unwrap();
+    let (lo, hi) = moved.bounds().unwrap();
+    assert_close((hi[2] - lo[2]).abs() + (lo[2].abs() - 2.0).abs(), 0.0, 1.0, "offset sheet is flat at |z| = 2");
+    assert_eq!(cube(20.0).offset_sheet(1.0).unwrap_err(), Error::Argument, "a solid is no sheet");
+    let (closed, is_solid) = cube(20.0).stitch(1e-6).unwrap();
+    assert!(is_solid);
+    assert_close(volume(&closed), 8000.0, 1e-9, "stitched cube");
+    assert!(!sheet.stitch(1e-6).unwrap().1);
+}
+
+/// Two overlapping 10 x 10 squares (the second moved 5 along x) as sheets, combined as regions
+/// of their plane: 150, 50 and 50 mm² (thickened by 1, so mm³).
+#[test]
+fn sheets_combine_as_planar_regions() {
+    let square = |x: f64| {
+        let pts = [[x, 0.0, 0.0], [x + 10.0, 0.0, 0.0], [x + 10.0, 10.0, 0.0], [x, 10.0, 0.0]];
+        let loops: Vec<crate::sweeps::Curve> = (0..4).map(|i| crate::sweeps::Curve::Line { start: pts[i], end: pts[(i + 1) % 4] }).collect();
+        Brep::planar_faces(&loops).unwrap()
+    };
+    let (a, b) = (square(0.0), square(5.0));
+    for (op, want) in [(BooleanOp::Union, 150.0), (BooleanOp::Intersect, 50.0), (BooleanOp::Subtract, 50.0)] {
+        let r = a.boolean2d(&b, op).unwrap().unwrap();
+        assert_close(volume(&r.thicken(1.0, false).unwrap()), want, 1e-6, &format!("{op:?}"));
+    }
+    let far = square(30.0);
+    assert!(a.boolean2d(&far, BooleanOp::Intersect).unwrap().is_none(), "disjoint sheets share nothing");
+}
+
+/// A square with a half disc on its top side as a planar sheet, the arc analytic or a rational
+/// B-spline, thickened by 2 one-sided and half each way: a valid slab of twice the area.
+#[cfg(any(feature = "native", feature = "solidcore"))]
+#[test]
+fn sheet_with_a_tangent_arc_edge_thickens() {
+    use crate::sweeps::Curve;
+    let line = |a: [f64; 2], b: [f64; 2]| Curve::Line { start: [a[0], a[1], 0.0], end: [b[0], b[1], 0.0] };
+    let analytic = Curve::Arc {
+        center: [5.0, 10.0, 0.0],
+        axis: [0.0, 0.0, 1.0],
+        reference: [1.0, 0.0, 0.0],
+        radius: 5.0,
+        start: 0.0,
+        end: std::f64::consts::PI,
+    };
+    let w = std::f64::consts::FRAC_1_SQRT_2;
+    let rational = Curve::Nurbs {
+        degree: 2,
+        points: vec![[10.0, 10.0, 0.0, 1.0], [10.0, 15.0, 0.0, w], [5.0, 15.0, 0.0, 1.0], [0.0, 15.0, 0.0, w], [0.0, 10.0, 0.0, 1.0]],
+        knots: vec![0.0, 0.0, 0.0, 0.5, 0.5, 1.0, 1.0, 1.0],
+    };
+    let want = 2.0 * (100.0 + 12.5 * std::f64::consts::PI);
+    for (name, arc) in [("analytic", analytic), ("rational", rational)] {
+        let sheet =
+            Brep::planar_faces(&[line([0.0, 0.0], [10.0, 0.0]), line([10.0, 0.0], [10.0, 10.0]), arc, line([0.0, 10.0], [0.0, 0.0])]).unwrap();
+        for symmetric in [false, true] {
+            let slab = sheet.thicken(2.0, symmetric).unwrap_or_else(|e| panic!("{name} {symmetric}: {e}"));
+            let check = slab.check(crate::CheckLevel::All).unwrap();
+            assert!(check.is_valid(), "{name}, symmetric {symmetric}: {check}");
+            assert_close(volume(&slab), want, 1e-6, "slab");
+        }
+    }
+}
+
+/// A plate whose top narrows from 20 to 2 over its length, its front top edge rounded by a radius
+/// law that follows the room (the taper of a fillet that does not fit), the plate imported as the
+/// kernel gives it: the solver's trace of the blend goes wrong for some laws (the rail doubles
+/// back near x = 32.6), and what came out was the strip of material the round removes, passing
+/// SMLib's check. Rounded plate now: the trace refuses a step that lands far short of its aim
+/// (WR-500, `fillet_trace_rejects_short_step`).
+#[cfg(any(feature = "native", feature = "solidcore"))]
+#[test]
+fn tapered_round_keeps_the_plate() {
+    use crate::sweeps::{Curve, DraftCorner};
+    let corners = [[0.0, 0.0, 0.0], [40.0, 0.0, 0.0], [40.0, 2.0, 0.0], [0.0, 20.0, 0.0]];
+    let loops: Vec<Curve> = (0..4).map(|i| Curve::Line { start: corners[i], end: corners[(i + 1) % 4] }).collect();
+    let plate = Brep::extrude(&loops, [0.0, 0.0, 1.0], 15.0, 0.0, DraftCorner::default(), true).unwrap().export().unwrap().import().unwrap();
+    let knots = [0.0, 0.0, 0.0, 0.0, 0.125, 0.25, 0.375, 0.5, 0.625, 0.75, 0.875, 1.0, 1.0, 1.0, 1.0];
+    for penultimate in [3.0, 2.8, 2.475] {
+        let mut radii = [3.0; 11];
+        radii[9] = penultimate;
+        radii[10] = 1.8;
+        let round = plate.fillet_variable([20.0, 0.0, 15.0], 0.1, [0.0, 0.0, 15.0], 3, &knots, &radii).unwrap();
+        let v = volume(&round);
+        assert!(v > 6500.0 && v < 6540.0, "penultimate radius {penultimate}: volume {v}");
+    }
 }

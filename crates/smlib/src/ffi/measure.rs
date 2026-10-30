@@ -4,8 +4,9 @@
 
 #![allow(unsafe_code)]
 
+#[cfg(not(feature = "solidcore"))]
 use super::Handle;
-#[cfg(not(feature = "native"))]
+#[cfg(not(any(feature = "native", feature = "solidcore")))]
 use super::NOT_BUILT;
 #[cfg(feature = "native")]
 use super::{OK, RawBrep};
@@ -54,22 +55,25 @@ pub fn edge_face_distance(b: &Handle, edge: i64, face: i64) -> Result<f64, i32> 
     }
 }
 
-#[cfg(not(feature = "native"))]
+#[cfg(not(any(feature = "native", feature = "solidcore")))]
 pub fn edge_face_distance(_: &Handle, _: i64, _: i64) -> Result<f64, i32> {
     Err(NOT_BUILT)
 }
 
-#[cfg(not(feature = "native"))]
+#[cfg(not(any(feature = "native", feature = "solidcore")))]
 pub fn bounds(_: &Handle) -> Result<([f64; 3], [f64; 3]), i32> {
     Err(NOT_BUILT)
 }
 
-#[cfg(not(feature = "native"))]
+#[cfg(not(any(feature = "native", feature = "solidcore")))]
 pub fn mass_properties(_: &Handle, _: f64) -> Result<[f64; 11], i32> {
     Err(NOT_BUILT)
 }
 
-#[cfg(not(feature = "native"))]
+#[cfg(not(any(feature = "native", feature = "solidcore")))]
 pub fn area(_: &Handle, _: f64) -> Result<f64, i32> {
     Err(NOT_BUILT)
 }
+
+#[cfg(feature = "solidcore")]
+pub use super::rs_measure::{area, bounds, edge_face_distance, mass_properties};

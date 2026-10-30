@@ -68,7 +68,7 @@ impl Brep {
     }
 }
 
-#[cfg(all(test, feature = "native"))]
+#[cfg(all(test, any(feature = "native", feature = "solidcore")))]
 mod tests {
     use super::*;
 
@@ -100,6 +100,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "native")]
     #[test]
     fn a_copy_and_a_native_file_round_trip_stay_valid() {
         let b = Brep::make_box([0.0; 3], [2.0, 3.0, 4.0]).unwrap();

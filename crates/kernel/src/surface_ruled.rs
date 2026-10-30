@@ -1030,13 +1030,13 @@ impl Strip {
 }
 
 /// A pcurve given as a straight line between two (u, v) points over its edge's interval.
-type Curve2Pair = ([f64; 2], [f64; 2]);
+pub(crate) type Curve2Pair = ([f64; 2], [f64; 2]);
 
 /// One face of the record `parts` (whose vertices are in place) on `surface`, bounded by one loop
 /// of `uses`: each edge's curve, interval, vertices, whether the loop runs along it, and its
 /// straight pcurve where known (else the shared pcurve routine's, exact for lines and splines on
 /// a plane).
-fn face_of(mut parts: Parts, surface: b::Surface, uses: Vec<(b::Curve, [f64; 2], [u32; 2], bool, Option<Curve2Pair>)>) -> Result<Brep> {
+pub(crate) fn face_of(mut parts: Parts, surface: b::Surface, uses: Vec<(b::Curve, [f64; 2], [u32; 2], bool, Option<Curve2Pair>)>) -> Result<Brep> {
     let tolerance = parts.tolerance;
     let mut given = Vec::with_capacity(uses.len());
     for (curve, interval, vertices, forward, pc) in uses {

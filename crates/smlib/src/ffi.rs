@@ -16,6 +16,7 @@ pub const ERR_ARG: i32 = -1002;
 pub const ERR_EMPTY: i32 = -1003;
 
 /// `smlib_brep`, opaque.
+#[cfg_attr(feature = "solidcore", allow(dead_code))]
 #[repr(C)]
 pub struct RawBrep {
     _private: [u8; 0],
@@ -45,13 +46,17 @@ unsafe extern "C" {
 pub const NOT_BUILT: i32 = -2000;
 
 /// An owned `smlib_brep`. Only made here, from a pointer the C API returned; freed once on drop.
+#[cfg(not(feature = "solidcore"))]
 #[cfg_attr(not(feature = "native"), allow(dead_code))]
 pub struct Handle(std::ptr::NonNull<RawBrep>);
 
 // SMLib serialises every call behind its own lock, and a handle is only ever used through it.
+#[cfg(not(feature = "solidcore"))]
 unsafe impl Send for Handle {}
+#[cfg(not(feature = "solidcore"))]
 unsafe impl Sync for Handle {}
 
+#[cfg(not(feature = "solidcore"))]
 impl Drop for Handle {
     fn drop(&mut self) {
         #[cfg(feature = "native")]
@@ -61,6 +66,7 @@ impl Drop for Handle {
     }
 }
 
+#[cfg(not(feature = "solidcore"))]
 impl Handle {
     #[cfg_attr(not(feature = "native"), allow(dead_code))]
     fn raw(&self) -> *const RawBrep {
@@ -143,7 +149,7 @@ mod calls {
 }
 
 /// The same calls when SMLib is not built: each one fails with [`NOT_BUILT`].
-#[cfg(not(feature = "native"))]
+#[cfg(not(any(feature = "native", feature = "solidcore")))]
 mod calls {
     use super::*;
     use std::ffi::CStr;
@@ -184,7 +190,32 @@ mod calls {
     }
 }
 
+#[cfg(not(feature = "solidcore"))]
 pub use calls::*;
+#[cfg(feature = "solidcore")]
+mod rs;
+#[cfg(feature = "solidcore")]
+mod rs_blend;
+#[cfg(feature = "solidcore")]
+mod rs_export;
+#[cfg(feature = "solidcore")]
+mod rs_flat;
+#[cfg(feature = "solidcore")]
+mod rs_history;
+#[cfg(feature = "solidcore")]
+mod rs_import;
+#[cfg(feature = "solidcore")]
+mod rs_measure;
+#[cfg(feature = "solidcore")]
+mod rs_ops;
+#[cfg(feature = "solidcore")]
+mod rs_ops2;
+#[cfg(feature = "solidcore")]
+mod rs_shell;
+#[cfg(feature = "solidcore")]
+mod rs_sweeps;
+#[cfg(feature = "solidcore")]
+pub use rs::*;
 
 pub mod check;
 pub mod flat;
@@ -240,7 +271,7 @@ mod primitive_calls {
 }
 
 /// The same calls when SMLib is not built: each one fails with [`NOT_BUILT`].
-#[cfg(not(feature = "native"))]
+#[cfg(not(any(feature = "native", feature = "solidcore")))]
 mod primitive_calls {
     use super::*;
 
@@ -258,6 +289,7 @@ mod primitive_calls {
     }
 }
 
+#[cfg(not(feature = "solidcore"))]
 pub use primitive_calls::*;
 
 // ---- WASI calls (wasm32-unknown-unknown) -------------------------------------------------------

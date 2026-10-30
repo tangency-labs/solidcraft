@@ -406,3 +406,11 @@ fn outline_bounds_hold_the_display_mesh() {
         assert!(outline.diagonal() <= mesh.diagonal() * 1.5, "and is not much larger");
     }
 }
+
+#[test]
+fn a_whole_cylinder_walls_seam_is_flagged() {
+    let b = extrude(&Plane::XY, &[Region2 { outer: Loop2::circle(Vec2::ZERO, 10.0), holes: vec![] }], 0.0, 15.0).unwrap().pop().unwrap();
+    let m = b.mesh(&crate::MeshTolerance::chord(display_tol(&b))).unwrap();
+    // The wall uses its seam twice; the two rims are not seams.
+    assert_eq!(m.seams.iter().filter(|s| **s).count(), 1);
+}

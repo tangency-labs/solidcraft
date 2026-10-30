@@ -3,8 +3,9 @@
 
 #![allow(unsafe_code)]
 
+#[cfg(not(feature = "solidcore"))]
 use super::Handle;
-#[cfg(not(feature = "native"))]
+#[cfg(not(any(feature = "native", feature = "solidcore")))]
 use super::NOT_BUILT;
 #[cfg(feature = "native")]
 use super::{OK, RawBrep};
@@ -30,7 +31,10 @@ pub fn check(b: &Handle, level: i32, buf: &mut [u8]) -> Result<(usize, i64), (i3
     }
 }
 
-#[cfg(not(feature = "native"))]
+#[cfg(not(any(feature = "native", feature = "solidcore")))]
 pub fn check(_: &Handle, _: i32, _: &mut [u8]) -> Result<(usize, i64), (i32, usize)> {
     Err((NOT_BUILT, 0))
 }
+
+#[cfg(feature = "solidcore")]
+pub use super::rs_measure::check;

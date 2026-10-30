@@ -1,6 +1,6 @@
 use super::*;
 
-#[cfg(feature = "native")]
+#[cfg(any(feature = "native", feature = "solidcore"))]
 #[test]
 fn box_end_to_end() {
     let b = Brep::make_box([1.0, 2.0, 3.0], [10.0, 20.0, 30.0]).unwrap();
@@ -12,7 +12,7 @@ fn box_end_to_end() {
     assert_eq!(current_call(), None, "no call in flight between calls");
 }
 
-#[cfg(feature = "native")]
+#[cfg(any(feature = "native", feature = "solidcore"))]
 #[test]
 fn bad_arguments_are_errors() {
     assert_eq!(Brep::make_box([0.0; 3], [1.0, -1.0, 1.0]).unwrap_err(), Error::Argument);
@@ -46,7 +46,7 @@ fn native_files_round_trip_and_failures_dump_their_inputs() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-#[cfg(feature = "native")]
+#[cfg(any(feature = "native", feature = "solidcore"))]
 #[test]
 fn calls_from_many_threads_are_serialised() {
     let handles: Vec<_> = (0..8)
@@ -61,7 +61,7 @@ fn calls_from_many_threads_are_serialised() {
     assert!(handles.into_iter().all(|h| h.join().unwrap()));
 }
 
-#[cfg(not(feature = "native"))]
+#[cfg(not(any(feature = "native", feature = "solidcore")))]
 #[test]
 fn without_native_every_call_says_so() {
     assert_eq!(init(), Err(Error::NotBuilt));
@@ -159,4 +159,56 @@ fn an_edge_a_few_um_past_its_patch_keeps_its_interval() {
     assert_eq!(pc.interval(), Some([0.0, 1.0]));
     let [u, v] = pc.eval(1.0).unwrap();
     assert!((u - 1.0).abs() < 1e-9 && v.abs() < 1e-9, "{u} {v}");
+}
+
+#[cfg(any(feature = "native", feature = "solidcore"))]
+#[test]
+fn transform_moves_scales_and_leaves_the_source() {
+    let b = Brep::make_box([0.0; 3], [1.0, 2.0, 3.0]).unwrap();
+    // x' = 2x then a quarter turn about z (x -> y, y -> -x) and a move, rows as smlib.h has them.
+    let m = [[0.0, 2.0, 0.0, 0.0], [-2.0, 0.0, 0.0, 0.0], [0.0, 0.0, 2.0, 0.0], [5.0, 6.0, 7.0, 1.0]];
+    let t = b.transformed(&m).unwrap();
+    assert!((t.volume(1e-7).unwrap() - 48.0).abs() < 1e-6);
+    assert_eq!(t.counts().unwrap(), [6, 12, 8]);
+    // (x, y, z) -> (5 - 2y, 6 + 2x, 7 + 2z): the box [0,1] x [0,2] x [0,3] lands on [1,5] x [6,8] x [7,13].
+    let (lo, hi) = t.bounds().unwrap();
+    for (got, want) in lo.iter().chain(&hi).zip([1.0, 6.0, 7.0, 5.0, 8.0, 13.0]) {
+        assert!((got - want).abs() < 1e-6, "bounds {lo:?} {hi:?}");
+    }
+    assert!((b.volume(1e-7).unwrap() - 6.0).abs() < 1e-9, "the source is unchanged");
+}
+
+#[cfg(feature = "solidcore")]
+#[test]
+fn solidcore_refuses_a_shear_and_mirrors_a_reflection() {
+    let b = Brep::make_box([0.0; 3], [1.0, 2.0, 3.0]).unwrap();
+    let shear = [[1.0, 0.0, 0.0, 0.0], [0.5, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]];
+    assert_eq!(b.transformed(&shear).unwrap_err(), Error::Unsupported);
+    // x -> -x, and a reflection about z with a scale and a move: (x, y, z) -> (x + 4, y, 10 - 2z).
+    for (m, lo, hi, volume) in [
+        ([[-1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]], [-1.0, 0.0, 0.0], [0.0, 2.0, 3.0], 6.0),
+        ([[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, -2.0, 0.0], [4.0, 0.0, 10.0, 1.0]], [4.0, 0.0, 4.0], [5.0, 2.0, 10.0], 12.0),
+    ] {
+        let t = b.transformed(&m).unwrap();
+        assert!((t.volume(1e-7).unwrap() - volume).abs() < 1e-6, "volume of {m:?}");
+        assert_eq!(t.counts().unwrap(), [6, 12, 8]);
+        let (l, h) = t.bounds().unwrap();
+        for (got, want) in l.iter().chain(&h).zip(lo.iter().chain(&hi)) {
+            assert!((got - want).abs() < 1e-6, "bounds {l:?} {h:?}");
+        }
+    }
+}
+
+#[cfg(feature = "solidcore")]
+#[test]
+fn solidcore_export_writes_each_edges_and_vertexs_own_tolerance() {
+    for b in [Brep::make_box([0.0; 3], [1.0, 2.0, 3.0]).unwrap(), Brep::make_sphere([0.0; 3], 5.0).unwrap()] {
+        let a = b.arrays().unwrap();
+        let (e, v) = (&a.reals[&flat::EDGE_TOLERANCE], &a.reals[&flat::VERTEX_TOLERANCE]);
+        assert_eq!((e.len(), v.len()), (b.counts().unwrap()[1], b.counts().unwrap()[2]));
+        let body = a.reals[&flat::TOLERANCE][0];
+        assert!(e.iter().chain(v).all(|t| *t > 0.0 && *t <= body), "{e:?} {v:?} within the body's {body}");
+        // Back in, with the per-item tolerances.
+        assert!(b.to_native().is_ok());
+    }
 }

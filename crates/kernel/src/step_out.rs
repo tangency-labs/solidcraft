@@ -44,8 +44,19 @@ pub struct StepHeader {
     pub description: String,
 }
 
+/// The largest edge or vertex tolerance (mm) the reader takes (its `MAX_TOLERANCE`).
+const MAX_ORDINARY_TOLERANCE: f64 = 1.0;
 /// The least distance uncertainty written (mm).
 const MIN_UNCERTAINTY: f64 = 1e-6;
+
+/// The loosest tolerance of a record's edges and vertices that the reader accepts (at most 1 mm;
+/// one past it is refused on import whatever the file states), and its body's own. The body's
+/// tolerance is the smallest of its items', so it alone understates what the items need: the
+/// reader starts every edge and vertex at the stated uncertainty and flags each one it must raise.
+fn stated_uncertainty(record: &solidcraft_geom::brep::Brep) -> f64 {
+    let items = record.edges.iter().map(|e| e.tolerance).chain(record.vertices.iter().map(|v| v.tolerance));
+    items.chain([record.tolerance]).filter(|t| t.is_finite() && *t <= MAX_ORDINARY_TOLERANCE).fold(0.0, f64::max)
+}
 
 fn s(text: &str) -> Param {
     Param::Str(text.to_string())
@@ -115,9 +126,8 @@ pub fn step_export_products(products: &[ExportProduct], root: usize, header: &St
         }
     }
     let reached: Vec<(usize, &ExportProduct)> = products.iter().enumerate().filter(|(i, _)| reach.get(*i).copied().unwrap_or(false)).collect();
-    // The context states the models' accuracy: the loosest of their records' tolerances.
-    let uncertainty =
-        reached.iter().flat_map(|(_, p)| &p.bodies).map(|b| b.body.record().tolerance).filter(|t| t.is_finite()).fold(MIN_UNCERTAINTY, f64::max);
+    // The context states the models' accuracy: the loosest of their ordinary tolerances.
+    let uncertainty = reached.iter().flat_map(|(_, p)| &p.bodies).map(|b| stated_uncertainty(b.body.record())).fold(MIN_UNCERTAINTY, f64::max);
 
     let mut w = Writer::new();
     let app = w.add_distinct("APPLICATION_CONTEXT", &[s("managed model based 3d engineering")]);
@@ -338,6 +348,26 @@ mod tests {
         assert_eq!(hollow.shell_count(), 2);
         let text = crate::step_export(&[&hollow], "test").unwrap();
         assert_eq!(text.matches("BREP_WITH_VOIDS").count(), 1, "{text}");
+    }
+
+    #[test]
+    fn the_stated_uncertainty_is_the_loosest_ordinary_item_tolerance() {
+        let bx = crate::box_solid(Vec3::ZERO, Vec3::new(10.0, 20.0, 5.0)).unwrap();
+        let mut record = bx.record().clone();
+        record.tolerance = 2e-5;
+        for e in &mut record.edges {
+            e.tolerance = 2e-5;
+        }
+        for v in &mut record.vertices {
+            v.tolerance = 2e-5;
+        }
+        assert_eq!(stated_uncertainty(&record), 2e-5);
+        record.edges[0].tolerance = 6e-5;
+        record.vertices[1].tolerance = 9e-5;
+        assert_eq!(stated_uncertainty(&record), 9e-5);
+        // An edge past what the reader takes does not set the file's uncertainty.
+        record.edges[1].tolerance = 42.0;
+        assert_eq!(stated_uncertainty(&record), 9e-5);
     }
 
     #[test]

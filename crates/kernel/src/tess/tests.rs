@@ -373,7 +373,7 @@ fn closed_display_mesh(name: &str, b: &Body, tol: f64) -> Mesh {
 /// A sphere from SMLib cut through its centre: the half sphere is bounded by its rim and its
 /// seam from the pole up to the rim, used both ways. The seam's two uses share their nodes, so
 /// the mesh has no crack along it and nothing degenerate at the pole.
-#[cfg(feature = "smlib")]
+#[cfg(any(feature = "smlib", feature = "solidcore"))]
 #[test]
 fn a_half_sphere_from_smlib_is_closed_along_its_seam() {
     use solidcraft_smlib::{BooleanOp, Brep as S};
@@ -406,7 +406,7 @@ fn display_plans_stay_within_the_chord_tolerance() {
 }
 
 /// SMLib's torus is one face bounded by its two seams: a grid over the whole parameter box.
-#[cfg(feature = "smlib")]
+#[cfg(any(feature = "smlib", feature = "solidcore"))]
 #[test]
 fn an_smlib_torus_stays_within_the_chord_tolerance() {
     let Ok(ring) = solidcraft_smlib::Brep::make_torus([0.0; 3], 22.0, 4.0) else { panic!("torus") };
@@ -424,7 +424,7 @@ fn an_smlib_torus_stays_within_the_chord_tolerance() {
 
 /// A groove of trapezoid `section` (radius, axial offset) in the plane through the z axis along
 /// y, carried `turns` turns of `pitch` about z from `base`, as an SMLib solid.
-#[cfg(feature = "smlib")]
+#[cfg(any(feature = "smlib", feature = "solidcore"))]
 fn smlib_groove(section: [(f64, f64); 4], base: f64, pitch: f64, turns: f64) -> solidcraft_smlib::Brep {
     use solidcraft_geom::{Loop2, Vec2};
     smlib_screw(Loop2::polygon(&section.map(|(r, z)| Vec2::new(r, z))), base, pitch, turns)
@@ -432,7 +432,7 @@ fn smlib_groove(section: [(f64, f64); 4], base: f64, pitch: f64, turns: f64) -> 
 
 /// The `section` (radius, axial offset) in the plane through the z axis along y, carried
 /// `turns` turns of `pitch` about z from `base`, as an SMLib solid.
-#[cfg(feature = "smlib")]
+#[cfg(any(feature = "smlib", feature = "solidcore"))]
 fn smlib_screw(section: solidcraft_geom::Loop2, base: f64, pitch: f64, turns: f64) -> solidcraft_smlib::Brep {
     use solidcraft_geom::{Plane, Region2};
     let origin = Vec3::new(0.0, 0.0, base);
@@ -444,7 +444,7 @@ fn smlib_screw(section: solidcraft_geom::Loop2, base: f64, pitch: f64, turns: f6
     ok(crate::native::smlib_body(&groove))
 }
 
-#[cfg(feature = "smlib")]
+#[cfg(any(feature = "smlib", feature = "solidcore"))]
 fn smlib_cut(a: &solidcraft_smlib::Brep, b: &solidcraft_smlib::Brep) -> solidcraft_smlib::Brep {
     match a.boolean(b, solidcraft_smlib::BooleanOp::Subtract) {
         Ok(Some(r)) => r,
@@ -455,7 +455,7 @@ fn smlib_cut(a: &solidcraft_smlib::Brep, b: &solidcraft_smlib::Brep) -> solidcra
 /// The ISO basic profile's groove for pitch `p` and major diameter `d`: internal, from 0.1 p
 /// inside the hole wall of radius `wall` out to the major radius; external, from the root out
 /// past the shaft's surface (radius `wall`).
-#[cfg(feature = "smlib")]
+#[cfg(any(feature = "smlib", feature = "solidcore"))]
 fn iso_groove(p: f64, d: f64, wall: f64, internal: bool) -> [(f64, f64); 4] {
     let h = p * 3f64.sqrt() / 2.0;
     let slope = (PI / 6.0).tan();
@@ -478,7 +478,7 @@ fn iso_groove(p: f64, d: f64, wall: f64, internal: bool) -> [(f64, f64); 4] {
 /// parabolic segment) that flat triangles bridge rather than follow: a face no wider than its
 /// chords sag (the thread's crest band where it runs out through the block's end, 0.06 mm sag
 /// at 0.1) takes up to that much more or less area however it is triangulated inside.
-#[cfg(feature = "smlib")]
+#[cfg(any(feature = "smlib", feature = "solidcore"))]
 fn assert_faces_lie_flat(name: &str, plan: &solidcraft_geom::tess::TessPlan, tol: f64) {
     for fp in &plan.faces {
         let Some(s) = fp.surface.and_then(|i| plan.surfaces.get(i as usize)) else { continue };
@@ -530,7 +530,7 @@ fn assert_faces_lie_flat(name: &str, plan: &solidcraft_geom::tess::TessPlan, tol
 /// #1995: an M8x1 thread through a 7 mm hole in a 20 mm block, both ends open. Truck meshed the
 /// groove's winding walls with triangles reaching past both ends of the block; the body's mesh
 /// now comes from the display plan, inside the block and with the analytic volume.
-#[cfg(feature = "smlib")]
+#[cfg(any(feature = "smlib", feature = "solidcore"))]
 #[test]
 fn a_modelled_thread_in_a_bore_meshes_inside_its_block() {
     use solidcraft_smlib::Brep as S;
@@ -562,7 +562,7 @@ fn a_modelled_thread_in_a_bore_meshes_inside_its_block() {
 /// a triangle's side, with no four corners to blend. The butterfly of a round face made it a
 /// grid of ~200 000 points whose triangles zigzagged along the strip (six times the band's area,
 /// and off the surface by more than the tolerance); it is its boundary nodes alone now.
-#[cfg(feature = "smlib")]
+#[cfg(any(feature = "smlib", feature = "solidcore"))]
 #[test]
 fn a_thread_root_band_running_out_through_an_end_face_lies_on_its_surface() {
     let Ok(shaft) = solidcraft_smlib::Brep::make_cylinder([0.0; 3], 5.0, 30.0) else { panic!("shaft") };
@@ -587,7 +587,7 @@ fn a_thread_root_band_running_out_through_an_end_face_lies_on_its_surface() {
 /// halves go to the display plan for their mesh; at the measuring tolerance a half's wall wants
 /// more cells than a grid may have, and its cut grid gave up for an under-refined Delaunay (the
 /// halves measured 1.5% short of the whole). The cut grid now thins its lines to fit.
-#[cfg(feature = "smlib")]
+#[cfg(any(feature = "smlib", feature = "solidcore"))]
 #[test]
 fn the_halves_of_a_split_smlib_coil_measure_as_the_whole() {
     use solidcraft_geom::{Loop2, Vec2};

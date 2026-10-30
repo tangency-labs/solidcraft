@@ -78,11 +78,15 @@ impl W {
     }
     /// The file: millimetres, radians, an uncertainty of 1e-7 mm, every item in one
     /// representation.
-    fn file(mut self, items: &[u64]) -> p21::Exchange {
+    fn file(self, items: &[u64]) -> p21::Exchange {
+        self.file_within(items, 1e-7)
+    }
+    /// [`W::file`] stating `uncertainty` mm.
+    fn file_within(mut self, items: &[u64], uncertainty: f64) -> p21::Exchange {
         let l = self.add("(LENGTH_UNIT()NAMED_UNIT(*)SI_UNIT(.MILLI.,.METRE.))");
         let a = self.add("(NAMED_UNIT(*)PLANE_ANGLE_UNIT()SI_UNIT($,.RADIAN.))");
         let s = self.add("(NAMED_UNIT(*)SI_UNIT($,.STERADIAN.)SOLID_ANGLE_UNIT())");
-        let u = self.add(format!("UNCERTAINTY_MEASURE_WITH_UNIT(LENGTH_MEASURE(1.E-07),#{l},'distance_accuracy_value','')"));
+        let u = self.add(format!("UNCERTAINTY_MEASURE_WITH_UNIT(LENGTH_MEASURE({uncertainty:e}),#{l},'distance_accuracy_value','')"));
         let c = self.add(format!(
             "(GEOMETRIC_REPRESENTATION_CONTEXT(3)GLOBAL_UNCERTAINTY_ASSIGNED_CONTEXT((#{u}))GLOBAL_UNIT_ASSIGNED_CONTEXT((#{l},#{a},#{s}))REPRESENTATION_CONTEXT('',''))"
         ));
@@ -536,6 +540,32 @@ fn bands_and_caps_without_seams_get_one() {
     let pole = s.brep.vertices.iter().find(|v| (v.point[2] - 5.0).abs() < 1e-9);
     assert!(pole.is_some(), "{:?}", s.brep.vertices);
     faces_away(&s.brep, 0, |p| [0.0, 0.0, p[2].clamp(1.0, 2.0)]);
+}
+
+/// A dome whose loop already carries its seam: the meridian out to the pole, back, then the
+/// equator. The pole makes the rim wind once, yet nothing needs adding.
+#[test]
+fn a_dome_loop_that_already_has_its_seam_gets_no_other() {
+    let mut w = W::default();
+    let (ve, vn) = (w.vertex([5.0, 0.0, 0.0]), w.vertex([0.0, 0.0, 5.0]));
+    let meridian = w.circle([0.0; 3], [0.0, -1.0, 0.0], [1.0, 0.0, 0.0], 5.0);
+    let seam = w.add(format!("EDGE_CURVE('',#{ve},#{vn},#{meridian},.T.)"));
+    let k = w.circle([0.0; 3], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0], 5.0);
+    let rim = w.add(format!("EDGE_CURVE('',#{ve},#{ve},#{k},.T.)"));
+    let a = w.axis([0.0; 3], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]);
+    let sphere = w.add(format!("SPHERICAL_SURFACE('',#{a},5.)"));
+    let (o1, o2, o3) = (w.oe(seam, true), w.oe(seam, false), w.oe(rim, true));
+    let bx = w.bound(&[o1, o2, o3], true, true);
+    let dome = w.face(&[bx], sphere, true);
+    let plane = w.plane([0.0; 3], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]);
+    let x = w.oe(rim, false);
+    let bx = w.bound(&[x], true, true);
+    let disk = w.face(&[bx], plane, false);
+    let shell = closed_shell(&mut w, &[dome, disk]);
+    let solid = w.add(format!("MANIFOLD_SOLID_BREP('dome',#{shell})"));
+    let s = one_solid(&w.file(&[solid]));
+    assert_eq!(counts(&s.brep), [2, 1, 2, 2, 2]);
+    assert!(!s.notes.iter().any(|n| n.contains("seam edges added")), "{:?}", s.notes);
 }
 
 /// A 20 × 20 × 5 plate with a hole of radius 3 through it; with `marked`, its square bounds are
@@ -1233,4 +1263,74 @@ fn parabola_and_hyperbola_edges_bound_faces() {
             assert!(on.abs() < 1e-12, "{kind}: {p:?}");
         }
     }
+}
+
+/// A dome whose rim is two arcs (a quarter and three quarters), the loop starting at the arcs'
+/// shared vertex a quarter turn from the seam: the face's box, unwrapped from there, has the
+/// seam inside it, but its form (and so its pcurves, seam to seam) must start at the seam.
+#[test]
+fn a_dome_with_a_split_rim_keeps_its_whole_turn_on_a_form_that_starts_at_the_seam() {
+    let mut w = W::default();
+    let (ve, vb, vn) = (w.vertex([5.0, 0.0, 0.0]), w.vertex([0.0, 5.0, 0.0]), w.vertex([0.0, 0.0, 5.0]));
+    let meridian = w.circle([0.0; 3], [0.0, -1.0, 0.0], [1.0, 0.0, 0.0], 5.0);
+    let seam = w.add(format!("EDGE_CURVE('',#{ve},#{vn},#{meridian},.T.)"));
+    let k = w.circle([0.0; 3], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0], 5.0);
+    let quarter = w.add(format!("EDGE_CURVE('',#{ve},#{vb},#{k},.T.)"));
+    let rest = w.add(format!("EDGE_CURVE('',#{vb},#{ve},#{k},.T.)"));
+    let a = w.axis([0.0; 3], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]);
+    let sphere = w.add(format!("SPHERICAL_SURFACE('',#{a},5.)"));
+    let (o0, o1, o2, o3) = (w.oe(rest, true), w.oe(seam, true), w.oe(seam, false), w.oe(quarter, true));
+    let bx = w.bound(&[o0, o1, o2, o3], true, true);
+    let dome = w.face(&[bx], sphere, true);
+    let plane = w.plane([0.0; 3], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]);
+    let (x0, x1) = (w.oe(quarter, false), w.oe(rest, false));
+    let bx = w.bound(&[x1, x0], true, true);
+    let disk = w.face(&[bx], plane, false);
+    let shell = closed_shell(&mut w, &[dome, disk]);
+    let solid = w.add(format!("MANIFOLD_SOLID_BREP('dome',#{shell})"));
+    let s = one_solid(&w.file(&[solid]));
+    let face = s.brep.faces.iter().find(|f| f.nurbs.is_some()).expect("the dome's form");
+    let Some(BSurface::RationalSpline { u_knots, .. }) = &face.nurbs else { panic!("{:?}", face.nurbs) };
+    let (k0, k1) = (u_knots[0], u_knots[u_knots.len() - 1]);
+    assert!((k1 - k0 - 4.0).abs() < 1e-9, "{u_knots:?}");
+    assert!(face.domain[0][0] <= k0 + 1e-9 && face.domain[0][1] >= k1 - 1e-9, "{:?} on {u_knots:?}", face.domain);
+    // Every pcurve lies within the form's knots.
+    for l in &face.loops {
+        let Loop::Edges { edges } = l else { continue };
+        for e in edges {
+            let [a, z] = e.pcurve.interval().expect("a pcurve interval");
+            for q in [e.pcurve.eval(a), e.pcurve.eval(z)].into_iter().flatten() {
+                assert!(q[0] >= k0 - 1e-9 && q[0] <= k1 + 1e-9, "{q:?} outside {u_knots:?}");
+            }
+        }
+    }
+}
+
+/// A quarter of a cylinder's side whose frame is turned 1.4e-5 rad off the face's start, in a file
+/// stating 8e-5 mm: the face's far end lies 5.7e-5 mm past the frame's quarter line. The form must
+/// cover it, not snap to the line and leave the edges off it by more than the uncertainty allows.
+#[test]
+fn a_round_face_off_its_frames_quarter_line_is_covered_by_its_form() {
+    let (c, r, turn) = ([6.0, 6.0], 4.0, 1.414e-5_f64);
+    let mut w = W::default();
+    let at = |a: f64, h: f64| [c[0] + r * a.cos(), c[1] + r * a.sin(), h];
+    let x = [-turn.cos(), turn.sin(), 0.0];
+    let arc = |w: &mut W, h: f64| {
+        let (a, b) = (w.vertex(at(PI, h)), w.vertex(at(1.5 * PI, h)));
+        let k = w.circle([c[0], c[1], h], [0.0, 0.0, 1.0], x, r);
+        (w.add(format!("EDGE_CURVE('',#{a},#{b},#{k},.T.)")), a, b)
+    };
+    let (bottom, a0, b0) = arc(&mut w, 0.0);
+    let (top, a1, b1) = arc(&mut w, 5.0);
+    let up = w.line_edge((b0, at(1.5 * PI, 0.0)), (b1, at(1.5 * PI, 5.0)), true, 1.0);
+    let down = w.line_edge((a0, at(PI, 0.0)), (a1, at(PI, 5.0)), true, 1.0);
+    let ring = [w.oe(bottom, true), w.oe(up, true), w.oe(top, false), w.oe(down, false)];
+    let bound = w.bound(&ring, true, true);
+    let frame = w.axis([c[0], c[1], 0.0], [0.0, 0.0, 1.0], x);
+    let surface = w.add(format!("CYLINDRICAL_SURFACE('',#{frame},{})", real(r)));
+    let face = w.face(&[bound], surface, true);
+    let shell = w.add(format!("OPEN_SHELL('',(#{face}))"));
+    let model = w.add(format!("SHELL_BASED_SURFACE_MODEL('',(#{shell}))"));
+    let s = one_solid(&w.file_within(&[model], 8e-5));
+    assert!(s.notes.is_empty(), "{:?}", s.notes);
 }

@@ -10,6 +10,9 @@
 //! [`Error::NotBuilt`].
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
+#[cfg(all(feature = "native", feature = "solidcore"))]
+compile_error!("features `native` and `solidcore` are exclusive: pick one backend");
+
 use std::ffi::CString;
 use std::path::Path;
 use std::sync::Once;

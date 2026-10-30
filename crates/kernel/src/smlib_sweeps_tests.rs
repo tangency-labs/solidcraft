@@ -1,6 +1,6 @@
 //! The sweeps through SMLib ([`crate::smlib_sweeps`]): analytic volumes, and the history and
 //! construction sources the builders' vocabulary gives each face.
-#![cfg(feature = "smlib")]
+#![cfg(any(feature = "smlib", feature = "solidcore"))]
 
 use std::f64::consts::{PI, TAU};
 

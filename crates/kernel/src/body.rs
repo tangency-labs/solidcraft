@@ -1180,6 +1180,18 @@ impl Body {
         Ok(crossed)
     }
 
+    /// An error unless the mesher can follow every face of the body, at the fineness a view takes
+    /// (a five-hundredth of its size): a result it fails on is not a body to hand on (it would
+    /// show as nothing and measure as nothing), and the error names the face and why.
+    pub fn require_meshable(&self) -> Result<()> {
+        if self.is_mesh() {
+            return Ok(());
+        }
+        self.mesh(&MeshTolerance::chord((self.size() * 2e-3).max(1e-3)))
+            .map(|_| ())
+            .map_err(|e| KernelError::Failed(format!("the result cannot be meshed: {e}")))
+    }
+
     /// Faces with no triangles in a coarse mesh (the mesher failed or gave up), counted on the
     /// mesh's plan: the mesh itself is not made.
     pub fn unmeshed_faces(&self) -> usize {

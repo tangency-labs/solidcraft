@@ -14,6 +14,7 @@ repository = "https://github.com/bherbruck/solidcraft"
 
 [workspace.dependencies]
 robust = "1.2"
+solidcore = { git = "https://github.com/tangency-labs/solidcore", rev = "e16d2f77e5c69d57b691938c24b7bc10f3b0b022" }
 # internal
 solidcraft-geom = { path = "crates/geom" }
 solidcraft-profile = { path = "crates/profile" }

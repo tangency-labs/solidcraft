@@ -30,13 +30,13 @@
 //! Merged and Generated, and how many edges come from an operand edge, are new where two faces
 //! meet, or have no origin.
 
-#[cfg(not(feature = "smlib"))]
+#[cfg(not(any(feature = "smlib", feature = "solidcore")))]
 fn main() {
     eprintln!("smlib_booleans needs SMLib: run scripts/fetch-smlib.sh, then add --features smlib");
     std::process::exit(2);
 }
 
-#[cfg(feature = "smlib")]
+#[cfg(any(feature = "smlib", feature = "solidcore"))]
 fn main() {
     if let Err(e) = run::main() {
         eprintln!("smlib_booleans: {e}");
@@ -44,7 +44,7 @@ fn main() {
     }
 }
 
-#[cfg(feature = "smlib")]
+#[cfg(any(feature = "smlib", feature = "solidcore"))]
 mod run {
     use std::f64::consts::{FRAC_PI_2, FRAC_PI_6, PI};
     use std::fmt::Write as _;

@@ -56,18 +56,18 @@ fn smlib_validity(body: &Body) -> Option<SmlibCheck> {
 
 /// Whether this build links SMLib (the `smlib` feature).
 pub fn smlib_built() -> bool {
-    cfg!(feature = "smlib")
+    cfg!(any(feature = "smlib", feature = "solidcore"))
 }
 
 /// Where every SMLib call that fails from now on leaves its inputs for replay (the C API's
 /// `smlib_set_dump_dir`: the call's arguments and B-reps, which `smlib_brep_read` reads back);
 /// `None` stops it. A build without SMLib makes no calls to dump.
 pub fn smlib_dump_dir(dir: Option<&std::path::Path>) -> crate::Result<()> {
-    #[cfg(feature = "smlib")]
+    #[cfg(any(feature = "smlib", feature = "solidcore"))]
     {
         solidcraft_smlib::set_dump_dir(dir).map_err(|e| crate::KernelError::Failed(format!("SMLib dump folder: {e}")))
     }
-    #[cfg(not(feature = "smlib"))]
+    #[cfg(not(any(feature = "smlib", feature = "solidcore")))]
     {
         let _ = dir;
         Ok(())

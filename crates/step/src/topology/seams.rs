@@ -296,6 +296,10 @@ impl Builder<'_, '_> {
             let mut down = Vec::new();
             for (li, l) in face.loops.iter().enumerate() {
                 let LoopB::Edges(es) = l else { continue };
+                // An edge used both ways (out and back) is a seam already.
+                if es.iter().any(|&(e, f)| es.contains(&(e, !f))) {
+                    continue;
+                }
                 let w = self.winding(&eval, es, periods)?;
                 if w[1] != 0 || w[0].abs() > 1 {
                     return Err(format!("face #{}: {}", face.step, unsupported("a loop winding around a surface more than once or in v")));

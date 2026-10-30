@@ -40,25 +40,35 @@ pub const SWEEP_MAX_STATION_CURVES: usize = 400_000;
 
 /// A curve list as the C API reads it: kinds (with a NURBS curve's degree and point count) and
 /// each curve's numbers.
-#[cfg(feature = "native")]
+#[cfg(any(feature = "native", feature = "solidcore"))]
 pub struct List<'a> {
     kinds: &'a [i64],
     reals: &'a [f64],
 }
 
-/// Without SMLib nothing reads the list, so it carries nothing.
-#[cfg(not(feature = "native"))]
+/// Without a backend nothing reads the list, so it carries nothing.
+#[cfg(not(any(feature = "native", feature = "solidcore")))]
 pub struct List<'a>(std::marker::PhantomData<&'a ()>);
 
 impl<'a> List<'a> {
-    #[cfg(feature = "native")]
+    #[cfg(any(feature = "native", feature = "solidcore"))]
     pub fn new(kinds: &'a [i64], reals: &'a [f64]) -> Self {
         List { kinds, reals }
     }
 
-    #[cfg(not(feature = "native"))]
+    #[cfg(not(any(feature = "native", feature = "solidcore")))]
     pub fn new(_: &'a [i64], _: &'a [f64]) -> Self {
         List(std::marker::PhantomData)
+    }
+}
+
+#[cfg(feature = "solidcore")]
+impl List<'_> {
+    pub(super) fn kinds(&self) -> &[i64] {
+        self.kinds
+    }
+    pub(super) fn reals(&self) -> &[f64] {
+        self.reals
     }
 }
 
@@ -370,27 +380,27 @@ pub fn sweep_stations(profile: &List, maps: &[f64], ends: i32) -> Result<Handle,
     new_brep(|out| unsafe { smlib_sweep_stations(k, nk, r, nr, maps.as_ptr(), n, ends, out) })
 }
 
-#[cfg(not(feature = "native"))]
+#[cfg(not(any(feature = "native", feature = "solidcore")))]
 pub fn planar_faces(_: &List) -> Result<Handle, i32> {
     Err(NOT_BUILT)
 }
 
-#[cfg(not(feature = "native"))]
+#[cfg(not(any(feature = "native", feature = "solidcore")))]
 pub fn extrude(_: &List, _: &[f64; 3], _: f64, _: f64, _: i32, _: bool, _: &mut [f64; 3]) -> Result<Handle, i32> {
     Err(NOT_BUILT)
 }
 
-#[cfg(not(feature = "native"))]
+#[cfg(not(any(feature = "native", feature = "solidcore")))]
 pub fn revolve(_: &List, _: &[f64; 3], _: &[f64; 3], _: f64, _: bool) -> Result<Handle, i32> {
     Err(NOT_BUILT)
 }
 
-#[cfg(not(feature = "native"))]
+#[cfg(not(any(feature = "native", feature = "solidcore")))]
 pub fn sweep(_: &List, _: &List, _: i32, _: bool) -> Result<Handle, i32> {
     Err(NOT_BUILT)
 }
 
-#[cfg(not(feature = "native"))]
+#[cfg(not(any(feature = "native", feature = "solidcore")))]
 pub fn sweep_placed(_: &List, _: &List, _: i32, _: bool, _: &mut [f64; 36]) -> Result<Handle, i32> {
     Err(NOT_BUILT)
 }
@@ -405,22 +415,22 @@ pub fn face_section(_: &Handle, _: &[f64; 3], _: f64, _: &[f64; 3], _: &[f64; 3]
     Err(NOT_BUILT)
 }
 
-#[cfg(not(feature = "native"))]
+#[cfg(not(any(feature = "native", feature = "solidcore")))]
 pub fn loft(_: &List, _: &[i64], _: i32, _: bool) -> Result<Handle, i32> {
     Err(NOT_BUILT)
 }
 
-#[cfg(not(feature = "native"))]
+#[cfg(not(any(feature = "native", feature = "solidcore")))]
 pub fn loft_to_point(_: &List, _: &[f64; 3]) -> Result<Handle, i32> {
     Err(NOT_BUILT)
 }
 
-#[cfg(not(feature = "native"))]
+#[cfg(not(any(feature = "native", feature = "solidcore")))]
 pub fn screw_sweep(_: &List, _: &[f64; 3], _: &[f64; 3], _: f64, _: f64, _: f64) -> Result<Handle, i32> {
     Err(NOT_BUILT)
 }
 
-#[cfg(not(feature = "native"))]
+#[cfg(not(any(feature = "native", feature = "solidcore")))]
 pub fn screw_sweep_radial(_: &List, _: &[f64; 3], _: &[f64; 3], _: f64, _: f64, _: &[f64], _: f64) -> Result<Handle, i32> {
     Err(NOT_BUILT)
 }
@@ -429,3 +439,6 @@ pub fn screw_sweep_radial(_: &List, _: &[f64; 3], _: &[f64; 3], _: f64, _: f64, 
 pub fn sweep_stations(_: &List, _: &[f64], _: i32) -> Result<Handle, i32> {
     Err(NOT_BUILT)
 }
+
+#[cfg(feature = "solidcore")]
+pub use super::rs_sweeps::{extrude, loft, loft_to_point, planar_faces, revolve, screw_sweep, screw_sweep_radial, sweep, sweep_placed};

@@ -108,7 +108,7 @@ struct Regions {
     touching: bool,
 }
 
-#[cfg(feature = "smlib")]
+#[cfg(any(feature = "smlib", feature = "solidcore"))]
 mod sheets {
     use solidcraft_geom::Loop2;
     use solidcraft_geom::Vec3;
@@ -289,7 +289,7 @@ mod sheets {
     }
 }
 
-#[cfg(not(feature = "smlib"))]
+#[cfg(not(any(feature = "smlib", feature = "solidcore")))]
 mod sheets {
     use super::*;
 

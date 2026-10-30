@@ -245,7 +245,7 @@ pub fn thicken(b: &Handle, thickness: f64, symmetric: bool) -> Result<Handle, i3
     new_brep(|out| unsafe { smlib_thicken(b.raw(), thickness, i32::from(symmetric), out) })
 }
 
-#[cfg(not(feature = "native"))]
+#[cfg(not(any(feature = "native", feature = "solidcore")))]
 pub fn thicken(_: &Handle, _: f64, _: bool) -> Result<Handle, i32> {
     Err(NOT_BUILT)
 }
@@ -272,7 +272,7 @@ pub fn draft(
         })
 }
 
-#[cfg(not(feature = "native"))]
+#[cfg(not(any(feature = "native", feature = "solidcore")))]
 pub fn draft(_: &Handle, _: &[[f64; 3]], _: f64, _: &[f64; 3], _: &[f64; 3], _: &[f64; 3], _: f64) -> Result<Handle, PickError> {
     Err((NOT_BUILT, None))
 }
@@ -462,32 +462,32 @@ pub fn chamfer_sides(
         })
 }
 
-#[cfg(not(feature = "native"))]
+#[cfg(not(any(feature = "native", feature = "solidcore")))]
 pub fn chamfer_sides(_: &Handle, _: &[[f64; 3]], _: f64, _: f64, _: f64, _: bool, _: &[f64; 3]) -> Result<Handle, PickError> {
     Err((NOT_BUILT, None))
 }
 
-#[cfg(not(feature = "native"))]
+#[cfg(not(any(feature = "native", feature = "solidcore")))]
 pub fn blend(_: i32, _: &Handle, _: &[[f64; 3]], _: &[f64], _: f64) -> Result<Handle, PickError> {
     Err((NOT_BUILT, None))
 }
 
-#[cfg(not(feature = "native"))]
+#[cfg(not(any(feature = "native", feature = "solidcore")))]
 pub fn fillet_variable(_: &Handle, _: &[f64; 3], _: f64, _: &[f64; 3], _: i32, _: &[f64], _: &[f64]) -> Result<Handle, i32> {
     Err(NOT_BUILT)
 }
 
-#[cfg(not(feature = "native"))]
+#[cfg(not(any(feature = "native", feature = "solidcore")))]
 pub fn boolean(_: &Handle, _: &Handle, _: i32) -> Result<Handle, i32> {
     Err(NOT_BUILT)
 }
 
-#[cfg(not(feature = "native"))]
+#[cfg(not(any(feature = "native", feature = "solidcore")))]
 pub fn boolean_union_all(_: &[&Handle]) -> Result<Handle, i32> {
     Err(NOT_BUILT)
 }
 
-#[cfg(not(feature = "native"))]
+#[cfg(not(any(feature = "native", feature = "solidcore")))]
 pub fn boolean2d(_: &Handle, _: &Handle, _: i32) -> Result<Handle, i32> {
     Err(NOT_BUILT)
 }
@@ -497,12 +497,22 @@ pub fn imprint(_: &Handle, _: &Handle) -> Result<Handle, i32> {
     Err(NOT_BUILT)
 }
 
-#[cfg(not(feature = "native"))]
+#[cfg(not(any(feature = "native", feature = "solidcore")))]
 pub fn solid_count(_: &Handle) -> Result<i64, i32> {
     Err(NOT_BUILT)
 }
 
-#[cfg(not(feature = "native"))]
+#[cfg(not(any(feature = "native", feature = "solidcore")))]
 pub fn pick_op(_: Pick, _: &Handle, _: &[[f64; 3]], _: f64, _: f64) -> Result<Handle, PickError> {
     Err((NOT_BUILT, None))
 }
+
+#[cfg(feature = "solidcore")]
+pub use super::rs_ops::{boolean, boolean_union_all, boolean2d, solid_count};
+
+#[cfg(feature = "solidcore")]
+pub use super::rs_blend::{blend, fillet_variable, pick_op};
+#[cfg(feature = "solidcore")]
+pub use super::rs_ops2::{chamfer_sides, draft};
+#[cfg(feature = "solidcore")]
+pub use super::rs_shell::thicken;

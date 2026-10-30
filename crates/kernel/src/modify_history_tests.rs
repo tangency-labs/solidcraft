@@ -496,7 +496,7 @@ fn chamfer_after_box_cuts() {
 
 /// Shell, offset faces and thicken through SMLib (`crate::offset_backend`), their histories
 /// checked against the geometry as truck's are, and their numbers against the analytic ones.
-#[cfg(feature = "smlib")]
+#[cfg(any(feature = "smlib", feature = "solidcore"))]
 mod smlib {
     use super::*;
     use crate::offset_backend;

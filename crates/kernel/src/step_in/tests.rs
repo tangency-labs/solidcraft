@@ -2021,7 +2021,7 @@ pub(super) fn schema_4_volume(text: &str) -> f64 {
 /// schema 4 record, SMLib's body of it, back as a kernel body. Each has its exact volume and
 /// face count, and every face is traced to a face of the file (the NURBS cylinder, dome and
 /// torus ring among them: their faces wind around a spline closed on itself, and get a seam).
-#[cfg(feature = "smlib")]
+#[cfg(any(feature = "smlib", feature = "solidcore"))]
 #[test]
 fn step_conformance_parts_read_into_smlib() {
     let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/step-conformance");

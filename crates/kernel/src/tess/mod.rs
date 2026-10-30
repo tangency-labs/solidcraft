@@ -1013,7 +1013,19 @@ fn plan_face(
         ranges.push(start..uvs.len());
     }
     if uvs.len() < 3 {
-        return Err(fail("degenerate boundary"));
+        // Fewer than three distinct nodes enclose nothing: a face the tolerance flattens to a
+        // chord (a circular segment thinner than the chord tolerance, whose arc is one
+        // segment) has no triangles, and its neighbours meet along that chord as they do
+        // everywhere else. The mesh is as watertight as before.
+        return Ok(FacePlan {
+            face: u32::try_from(fi).unwrap_or(u32::MAX),
+            surface: None,
+            uv: Vec::new(),
+            fixed: Vec::new(),
+            normals: Vec::new(),
+            flip: false,
+            triangles: Vec::new(),
+        });
     }
     let mut bbox = [(f64::MAX, f64::MIN); 2];
     for p in &uvs {

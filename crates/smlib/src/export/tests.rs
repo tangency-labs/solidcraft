@@ -1,7 +1,7 @@
-#[cfg(feature = "native")]
+#[cfg(any(feature = "native", feature = "solidcore"))]
 use super::*;
 
-#[cfg(feature = "native")]
+#[cfg(any(feature = "native", feature = "solidcore"))]
 mod native_tests {
     use super::*;
     use crate::{CheckLevel, MEASURE_ACCURACY};
@@ -57,6 +57,7 @@ mod native_tests {
 
     /// A tagged body's own history, renumbered with its export's order on both sides, is the
     /// identity in canonical order: the order says where each SMLib face and edge went.
+    #[cfg(feature = "native")]
     #[test]
     fn the_export_order_renumbers_a_history_into_the_record() {
         for (name, s, _) in primitives() {
@@ -113,11 +114,23 @@ mod native_tests {
         assert!((half.unwrap() + 0.5f64.atan()).abs() < 1e-12);
     }
 
+    /// A cone whose half angle is within rounding of zero (a52's thread bosses: 1e-13) is exported as
+    /// a cylinder; as a cone the portable record's validation refuses it.
+    #[cfg(any(feature = "native", feature = "solidcore"))]
+    #[test]
+    fn a_cone_of_rounding_angle_is_exported_as_a_cylinder() {
+        let near = Brep::make_cone([0.0; 3], 4.0, 4.0 - 1e-12, 10.0).unwrap().to_native().unwrap();
+        assert!(near.faces.iter().any(|f| matches!(f.surface, b::Surface::Cylinder { .. })));
+        assert!(!near.faces.iter().any(|f| matches!(f.surface, b::Surface::Cone { .. })));
+        near.validate().unwrap();
+    }
+
     /// A hole tangent to the block's outline from inside: the material touches itself along the
     /// tangent line, where SMLib's one shell uses the edge four times. The record has two copies
     /// of that edge, each bounding one wedge of material (a face of the side and the half of the
     /// hole on the same side of the line), so every edge has two uses; the line's two vertices
     /// stay shared. The record goes back into SMLib as a valid solid of the same volume.
+    #[cfg(feature = "native")]
     #[test]
     fn a_hole_tangent_to_the_outline_comes_back_as_a_manifold_boundary() {
         let block = Brep::make_box([0.0; 3], [31.0, 29.0, 10.0]).unwrap();
@@ -169,6 +182,7 @@ mod native_tests {
     /// the line across the material would give it two coincident copies of the line, which
     /// SMLib refuses. The line is then copied across the empty sectors: the side uses one copy
     /// twice (a crack, as SMLib keeps a face meeting itself), the hole's two halves the other.
+    #[cfg(feature = "native")]
     #[test]
     fn a_blind_hole_tangent_to_a_side_leaves_the_side_a_crack() {
         let block = Brep::make_box([0.0; 3], [30.0, 20.0, 10.0]).unwrap();
@@ -236,6 +250,28 @@ mod native_tests {
         assert!(check.is_valid(), "{check}");
         let got = back.mass_properties(MEASURE_ACCURACY).unwrap().volume;
         assert!((got - want).abs() < 1e-6 * want, "volume {got} vs {want}");
+    }
+
+    /// A thin cylinder through a thick one at right angles: their intersection solid's seam
+    /// curves are B-splines (equal radii would give ellipses): they export as NURBS edges and the
+    /// record validates, with the volume SMLib measures.
+    #[test]
+    fn crossing_cylinders_export_their_spline_edges() {
+        let a = Brep::make_cylinder([0.0, 0.0, -10.0], 5.0, 20.0).unwrap();
+        let thin = Brep::make_cylinder([0.0, 0.0, -10.0], 3.0, 20.0).unwrap();
+        // The same cylinder turned onto the x axis: x -> -z, y -> y, z -> x.
+        let turn = [[0.0, 0.0, -1.0, 0.0], [0.0, 1.0, 0.0, 0.0], [1.0, 0.0, 0.0, 0.0], [0.0, 0.0, 0.0, 1.0]];
+        let b = thin.transformed(&turn).unwrap();
+        let r = a.boolean(&b, crate::BooleanOp::Intersect).unwrap().unwrap();
+        let check = r.check(CheckLevel::All).unwrap();
+        assert!(check.is_valid(), "{check}");
+        let got = r.mass_properties(MEASURE_ACCURACY).unwrap().volume;
+        assert!(got > 0.0 && got < PI * 9.0 * 20.0, "volume {got}");
+        let (native, report) = r.to_native_report().unwrap();
+        native.validate().unwrap();
+        native.check_geometry().unwrap();
+        assert!(report.nurbs_edges > 0, "the seam curves are splines");
+        assert_eq!(native.edges.len(), r.counts().unwrap()[1]);
     }
 
     /// The variable round r1 -> r5 along a box's top back edge run on into the R5 round of its

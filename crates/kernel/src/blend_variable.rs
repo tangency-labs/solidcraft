@@ -442,8 +442,10 @@ pub fn taper(body: &Body, edge_at: Vec3, radius: f64) -> Result<Taper> {
 /// edge (in `edges`' order; None where the radius is constant).
 pub fn fillet_tapered(body: &Body, edges: &[Vec3], radius: f64) -> Result<(Body, Vec<Option<Taper>>)> {
     let _span = solidcraft_profile::span("kernel", "fillet_tapered");
+    // A round SMLib cannot build at all (it fails where the rails leave the faces it rolls on) is
+    // taken as too large too: the taper is what was asked for, and it is checked as any round is.
     let why = match crate::fillet(body, edges, radius) {
-        Err(KernelError::TooLarge(why)) => why,
+        Err(e @ (KernelError::TooLarge(_) | KernelError::Failed(_))) => e,
         other => return other.map(|b| (b, vec![None; edges.len()])),
     };
     let mut tapers = vec![None; edges.len()];
@@ -451,13 +453,13 @@ pub fn fillet_tapered(body: &Body, edges: &[Vec3], radius: f64) -> Result<(Body,
     for (p, slot) in edges.iter().zip(tapers.iter_mut()) {
         match crate::fillet(body, &[*p], radius) {
             Ok(_) => constant.push(*p),
-            Err(KernelError::TooLarge(_)) => *slot = Some(taper(body, *p, radius)?),
+            Err(KernelError::TooLarge(_) | KernelError::Failed(_)) => *slot = Some(taper(body, *p, radius)?),
             Err(e) => return Err(e),
         }
     }
     // Each edge fits alone but not together: nothing to taper.
     if tapers.iter().all(Option::is_none) {
-        return Err(KernelError::TooLarge(why));
+        return Err(why);
     }
     // Each step's result carries its history over `[body]`.
     let counts = crate::record::counts(&[body]);

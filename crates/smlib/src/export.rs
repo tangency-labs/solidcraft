@@ -377,8 +377,9 @@ fn surfaces(flat: View, n_faces: usize) -> Res<Vec<(b::Surface, Option<b::Surfac
                     v3(flat.f(FACE_CONE_REF_DIRECTION), i, "cone")?,
                 );
                 let (radius, half) = (at(flat.f(FACE_CONE_RADIUS), i, "cone")?, at(flat.f(FACE_CONE_SEMI_ANGLE), i, "cone")?);
-                // SMLib's cone of semi-angle 0 is its cylinder.
-                if half == 0.0 {
+                // SMLib's cone of semi-angle 0 is its cylinder, and one within rounding of it (a thread's
+                // cone of 1e-13 comes out of the trims) is too: the portable record refuses it as a cone.
+                if half.abs() < 1e-12 {
                     b::Surface::Cylinder { frame: f, radius }
                 } else {
                     b::Surface::Cone { frame: f, radius_at_origin: radius, half_angle: half }

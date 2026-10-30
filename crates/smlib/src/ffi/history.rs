@@ -3,6 +3,7 @@
 //! [`crate::history`].
 #![allow(unsafe_code)]
 
+#[cfg(not(feature = "solidcore"))]
 use super::Handle;
 #[cfg(feature = "native")]
 use super::{ERR_BUFFER, OK, RawBrep, new_brep};
@@ -42,12 +43,15 @@ pub fn read(b: &Handle) -> Result<Vec<i64>, i32> {
     }
 }
 
-#[cfg(not(feature = "native"))]
+#[cfg(not(any(feature = "native", feature = "solidcore")))]
 pub fn tag(_: &Handle, _: i32) -> Result<Handle, i32> {
     Err(super::NOT_BUILT)
 }
 
-#[cfg(not(feature = "native"))]
+#[cfg(not(any(feature = "native", feature = "solidcore")))]
 pub fn read(_: &Handle) -> Result<Vec<i64>, i32> {
     Err(super::NOT_BUILT)
 }
+
+#[cfg(feature = "solidcore")]
+pub use super::rs_history::{read, tag};
