@@ -174,7 +174,7 @@ impl Cache {
                     let world = path.map_or_else(|| b.name.clone(), |p| doc.world_body_name(&state, &b.name, component, p));
                     Entry::body(app, b, world)
                 }),
-                "sketches" => doc.features.get(*i).map(|f| Entry::sketch(app, f)),
+                "sketches" => doc.features.get(*i).filter(|_| doc.marker.is_none_or(|marker| *i < marker)).map(|f| Entry::sketch(app, f)),
                 _ => doc.features.get(*i).map(|f| Entry::plane(app, f)),
             };
             if let Some(mut entry) = entry {
