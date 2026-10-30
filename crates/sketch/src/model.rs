@@ -1143,6 +1143,10 @@ impl Sketch {
         if let Some(v) = k.value()
             && (!v.is_finite() || v.abs() > MAX_COORD || (v < 0.0 && !k.is_angle()))
         {
+            // A length set below zero by a parameter says so in words (#9075).
+            if v < 0.0 && v.is_finite() {
+                return Err(SketchError::Invalid(format!("a dimension can't be negative ({v}); set it to a positive value")));
+            }
             return Err(SketchError::Invalid(format!("dimension value {v}")));
         }
         if let OffsetDistance { output, value, .. } = k

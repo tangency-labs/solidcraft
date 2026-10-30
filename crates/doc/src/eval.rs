@@ -1245,6 +1245,24 @@ impl ModelState {
     }
 }
 
+/// A feature whose sketch is earlier in the timeline but failed says so, with the sketch's own
+/// error, instead of "unknown sketch N (it must come earlier in the timeline)", which sends the
+/// user to the timeline order (#9075). Any other error is kept as it is.
+fn failed_sketch_named(error: String, earlier: &[FeatureResult]) -> String {
+    let Some(id) = error
+        .find("unknown sketch ")
+        .and_then(|at| error.get(at + "unknown sketch ".len()..))
+        .and_then(|rest| rest.split(|c: char| !c.is_ascii_digit()).next())
+        .and_then(|n| n.parse::<u64>().ok())
+    else {
+        return error;
+    };
+    match earlier.iter().find(|r| r.id == id) {
+        Some(FeatureResult { name, error: Some(why), .. }) => format!("its sketch `{name}` failed: {why}"),
+        _ => error,
+    }
+}
+
 /// Evaluation result of one feature.
 #[derive(Clone, Debug, Serialize)]
 pub struct FeatureResult {
@@ -2338,7 +2356,7 @@ impl Model {
                     watched.offer(i + 1, doc, &state);
                     None
                 }
-                Err(e) => Some(e.to_string().trim_start_matches("the operation failed: ").to_string()),
+                Err(e) => Some(failed_sketch_named(e.to_string().trim_start_matches("the operation failed: ").to_string(), &out)),
             };
             if !self.no_cache && !watched.cancelled() {
                 let e = CachedEval {

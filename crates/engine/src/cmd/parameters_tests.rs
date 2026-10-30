@@ -1060,3 +1060,29 @@ fn a_definition_of_the_parameter_a_value_names_changes_it() {
     let r = run(&mut s, "expr.evaluate", json!({"expression": "q = w * 2", "kind": "length"}));
     assert_eq!((r["ok"].as_bool(), r["value"].as_f64(), r["defines"].as_str()), (Some(true), Some(60.0), Some("q")), "{r}");
 }
+
+/// #9075: a sketch dimension set negative fails its sketch with a message that says so, and the
+/// extrude built on it names that sketch and why, instead of blaming the timeline order. The
+/// right value brings everything back.
+#[test]
+fn a_negative_sketch_dimension_is_named_by_the_features_built_on_it() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY"}));
+    run(
+        &mut s,
+        "sketch.draw.dimensioned",
+        json!({"command": "sketch.rectangle.center", "params": {"center": [0, 0], "corner": [20, 10]}, "dimensions": {"width": "40", "height": "20"}}),
+    );
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"distance": 5}));
+    let out = run(&mut s, "parameters.change", json!({"name": "d1", "expression": "-10"}));
+    let errors = out["errors"].to_string();
+    let failing: Vec<(String, String)> = s.model.results.iter().filter_map(|r| Some((r.name.clone(), r.error.clone()?))).collect();
+    let error_of = |name: &str| failing.iter().find(|(n, _)| n.starts_with(name)).map(|(_, e)| e.clone()).unwrap_or_default();
+    assert!(error_of("Sketch").contains("can't be negative"), "{failing:?} {errors}");
+    let extrude = error_of("Extrude");
+    assert!(extrude.starts_with("its sketch `Sketch") && extrude.contains("failed: ") && extrude.contains("can't be negative"), "{extrude}");
+    assert!(!extrude.contains("earlier in the timeline"), "{extrude}");
+    run(&mut s, "parameters.change", json!({"name": "d1", "expression": "20"}));
+    assert!(s.model.results.iter().all(|r| r.error.is_none()), "{:?}", s.model.results.iter().map(|r| &r.error).collect::<Vec<_>>());
+}
