@@ -10,11 +10,13 @@
 //! original edge uses to (the pairs are given; `MapEdgeuses` is unit
 //! `offset.offset_executive_p1`). The script first shapes the fixture (curves and
 //! surfaces of a store, an edge's curve replaced by a store curve, an edge use's UV
-//! trim curve, marked edge uses), then runs the unit's functions. The Rust side reads an
-//! `.smb` file source itself (`crate::own_builder::read_with`: the Rust reader,
-//! renumbered into the shim's walk order) and imports the shim's exports of the other
-//! sources (as the `topology.vertexuse` runner does); no C++ cache state is copied onto
-//! its B-reps. Its two B-reps go into two
+//! trim curve, marked edge uses), then runs the unit's functions. The Rust side makes
+//! every B-rep itself from the same source, renumbered into the shim's walk order: an
+//! `.smb` file read by the Rust reader (`crate::own_builder::read_with`), a wire, face
+//! or network built by the Rust kernel (`crate::own_builder::build_as`) and a cylinder
+//! or torus face from the concrete Rust surface (`native_face`); nothing of the shim's
+//! export reaches the Rust side. Only the C++ side's selector resolution imports the
+//! shim's exports. Its two B-reps go into two
 //! [`Brep`]s behind one adapter ([`Two`], which implements the port's [`OffsetBrep`]
 //! with the ported topology functions) and the ported executive
 //! (`offset.offset_executive_p1`, behind the port's [`OffsetExecutive`]) holding the same
@@ -61,9 +63,10 @@
 //! (`harness:analytic-geometry-export`). The generator's distances (0.001 to 100) never
 //! reach the HANG-27 bound. HANG-26 remains guarded independently of exact imports.
 //!
-//! **Analytic faces.** The shared importer brings an `SmBSplineSurface` subclass in as its
-//! B-spline part; revolution, extrusion, cone, cylinder, sphere and torus face surfaces
-//! are then restored from the shim's binary `WriteToDB` records (`read_face_surfaces`)
+//! **Analytic faces.** The Rust side's own B-reps keep their concrete surfaces. On the
+//! C++ side's resolution, the shared importer brings an `SmBSplineSurface` subclass in
+//! as its B-spline part; revolution, extrusion, cone, cylinder, sphere and torus face
+//! surfaces are then restored from the shim's binary `WriteToDB` records (`read_face_surfaces`)
 //! through the existing polymorphic reader. Native type codes, complete record
 //! consumption, face alignment and existing owner identities are checked. Restored
 //! surfaces synchronize their cached tolerance from the actual owning face. No native
@@ -2363,36 +2366,91 @@ struct Prepared {
 /// What ends [`prepare`] early: the output the side reports, or a harness error.
 type Early = Box<Result<Output, HarnessError>>;
 
-/// One B-rep of the case: the Rust reader's B-rep of an `.smb` file on the Rust side
-/// ([`crate::own_builder::read_with`], renumbered into the shim's walk order), or the
+/// One B-rep of the case: on the Rust side the B-rep the Rust kernel makes from the
+/// source itself ([`side`], renumbered into the shim's walk order), on the C++ side the
 /// import of the shim's export.
 enum Side {
-    /// Read by the Rust side itself: the B-rep, or the Rust read's failure.
+    /// Made by the Rust side itself: the B-rep, or the Rust build's failure.
     Own(Result<Box<Brep>, SolidError>),
     /// Imported from the shim's export.
     Import,
 }
 
-/// [`Side::Own`] for an `.smb` file source when `own` (the Rust side), else
-/// [`Side::Import`].
+/// [`Side::Own`] when `own` (the Rust side), else [`Side::Import`]. An `.smb` file is
+/// read by the Rust reader ([`crate::own_builder::read_with`]), a wire, face or network
+/// built by [`crate::own_builder::build_as`] (the shim's `build`, `m_bValidateOnly`
+/// and the gap walk off, as [`brep_block`] encodes them) and a cylinder or torus face
+/// by [`native_face`], all under [`Conventions::EDGEUSE_GRAPH`].
+///
+/// [`Conventions::EDGEUSE_GRAPH`]: crate::own_builder::Conventions::EDGEUSE_GRAPH
 fn side(k: &mut Kernel, b: &BrepIn, own: bool) -> Result<Side, HarnessError> {
-    use crate::own_builder::{read_with, Built, Conventions};
-    let BrepIn::File { rebuild, .. } = b else {
-        return Ok(Side::Import);
-    };
+    use crate::own_builder::{build_as, finish, read_with, Built, Conventions};
     if !own {
         return Ok(Side::Import);
     }
-    let path = path_of(Some(b))?;
-    Ok(Side::Own(
-        match read_with(k, &path, *rebuild, false, false, &Conventions::EDGEUSE_GRAPH)? {
-            Built::Brep(b) => Ok(b),
-            Built::Failed(e) => Err(e),
-        },
-    ))
+    let conv = &Conventions::EDGEUSE_GRAPH;
+    let built = match b {
+        BrepIn::File { rebuild, .. } => {
+            let path = path_of(Some(b))?;
+            read_with(k, &path, *rebuild, false, false, conv)?
+        }
+        BrepIn::Cylinder { .. } | BrepIn::Torus { .. } => {
+            let raw = native_face(k, b)?;
+            finish(k, raw, false, false, conv)?
+        }
+        BrepIn::Wire { .. } | BrepIn::Face { .. } | BrepIn::Network => {
+            build_as(k, b, false, false, conv)?
+                .ok_or_else(|| harness("own builder: a non-file source was not built"))?
+        }
+    };
+    Ok(Side::Own(match built {
+        Built::Brep(b) => Ok(b),
+        Built::Failed(e) => Err(e),
+    }))
 }
 
-/// A failed Rust read of B-rep `which` (`a` / `b`) as the shim reports a failed build.
+/// The shim's block 6 (`build_input`): a concrete `SmCylinder` (radius, height; 0 to
+/// 360 degrees) or `SmTorus` (major, minor radius; `SmExtent2d(0, 0, 360, 360)`) at the
+/// origin with axes x and y, no swap, not inside out, `MakeNurb`, then
+/// `CreateFaceFromSurface(surface, GetNaturalUVDomain())` on a new B-rep.
+fn native_face(k: &mut Kernel, b: &BrepIn) -> Result<Result<Brep, SolidError>, HarnessError> {
+    use crate::own_builder::{create_face, in_new_brep};
+    use solidcore::surface::cone::Cone;
+    use solidcore::surface::torus::{Torus, TorusOptions};
+    let origin = Point3::new(0.0, 0.0, 0.0);
+    let (x, y) = (Vec3::new(1.0, 0.0, 0.0), Vec3::new(0.0, 1.0, 0.0));
+    let made = match *b {
+        BrepIn::Cylinder { radius, height } => {
+            let mut c = Cone::new_cylinder_bounded(
+                origin, x, y, radius, 0.0, 360.0, height, false, false, false,
+            );
+            c.make_nurb(k).map(|()| Surface::from(c))
+        }
+        BrepIn::Torus { major, minor } => {
+            let opts = TorusOptions {
+                swap_uv: false,
+                inside_out: false,
+                circle_nurb: None,
+            };
+            let d = Extent2d::from_bounds(0.0, 0.0, 360.0, 360.0);
+            Torus::new(k, origin, x, y, d, major, minor, opts)
+                .and_then(|mut t| t.make_nurb(k).map(|()| Surface::from(t)))
+        }
+        _ => return Err(harness("native face of a source other than block 6")),
+    };
+    let surface = match made {
+        Ok(s) => s,
+        Err(e) => return Ok(Err(e)),
+    };
+    let d = match surface.natural_uv_domain_with_nurb(k) {
+        Ok(d) => d,
+        Err(e) => return Ok(Err(e)),
+    };
+    let dom = [d.u_min(), d.v_min(), d.u_max(), d.v_max()];
+    in_new_brep(k, |k, b| create_face(k, b, surface, dom).map(|_| ()))
+}
+
+/// A failed Rust build of B-rep `which` (`a` / `b`) as the shim reports a failed build.
 fn own_failure(which: &str, e: &SolidError) -> Output {
     Output::unported(e).unwrap_or_else(|| {
         Output::err(format!(
@@ -2404,9 +2462,8 @@ fn own_failure(which: &str, e: &SolidError) -> Output {
 
 /// Builds the B-reps and resolves the script; `Err(Ok(output))` is the output the side
 /// reports when the B-reps cannot be built or something cannot be resolved. With `own`
-/// (the Rust side) `.smb` file sources are read by the Rust reader ([`side`]), so no
-/// C++ export reaches the Rust side for them; every other source, and every source on
-/// the C++ side, is imported from the shim's export.
+/// (the Rust side) every source is made by the Rust kernel ([`side`]), so no C++ export
+/// reaches the Rust side; the C++ side imports the shim's export.
 fn prepare(i: &Inputs, own: bool) -> Result<Prepared, Box<Result<Output, HarnessError>>> {
     let mut k = Kernel::default();
     let side_a = side(&mut k, &i.brep_a, own).map_err(|e| Box::new(Err(e)))?;
@@ -2453,7 +2510,7 @@ fn prepare(i: &Inputs, own: bool) -> Result<Prepared, Box<Result<Output, Harness
         }
         Ok((brep, exact))
     };
-    // a B-rep the Rust side read itself has its own geometry: every face is exact
+    // a B-rep the Rust side made itself has its own geometry: every face is exact
     let own_exact = |b: &Brep| vec![true; b.faces().len()];
     let (brep_a, exact_a) = match side_a {
         Side::Own(Ok(b)) => {
