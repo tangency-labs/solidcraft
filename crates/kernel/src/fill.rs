@@ -1580,7 +1580,8 @@ mod tests {
         assert!(matches!(first_surface(&lid), b::Surface::Plane { .. }), "a planar loop is a plane");
         // Hostile crowns are refused before anything is built.
         for crown in [f64::NAN, f64::INFINITY, 3.01, -0.91, 1e300] {
-            assert!(patch_edges_crowned(&open, &rim, crown).is_err(), "crown {crown}");
+            let e = patch_edges_crowned(&open, &rim, crown).unwrap_err();
+            assert!(e.to_string().contains("crown must be between -0.9 and 3"), "crown {crown}: {e}");
         }
     }
 }

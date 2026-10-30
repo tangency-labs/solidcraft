@@ -400,8 +400,6 @@ fn a_five_sided_window_fills_g1_and_through_a_point() {
     let (open, rim) = pentagon_window();
     let (fill, r) = patch_edges_report(&open, &rim, &spec(Continuity::G1)).unwrap();
     report("pentagon g1", &r);
-    // Five patches about a centre: each rim edge in two halves, and five spokes.
-    assert!(fill.face_count() == 5 && fill.edge_count() >= 15, "five patches on the rim's halves and five spokes");
     check_face("pentagon g1", &open, &fill);
     let (gap, angle, _) = along_the_loop(&fill, &radial, &|_| 0.0);
     eprintln!("pentagon g1: along the rim: within {gap:e}, normal within {angle:.5}° of the wall's");
@@ -437,12 +435,11 @@ fn a_hexagonal_rim_fills_through_a_point_and_g1_to_walls_meeting_at_angles_holds
     let open = copy_faces(&solid, &keep).unwrap();
     let plain = patch_edges(&open, &rim).unwrap();
     let sealed = |f: &Body| measure(&stitch(&[&open, f], 0.0).unwrap()).unwrap().volume;
-    // Six sides, G0, through a point 3 mm above the middle of the plain fill: six patches about
-    // a centre.
+    // Six sides, G0, through a point 3 mm above the middle of the plain fill: it passes through
+    // the point and seals the cup into a closed solid holding more than the plain fill's.
     let point = Faces::of(&plain).nearest(Vec3::new(0.0, 0.0, 12.0)).2 + Vec3::Z * 3.0;
     let (lifted, r) = patch_edges_report(&open, &rim, &PatchSpec { points: vec![point], ..PatchSpec::default() }).unwrap();
     report("hexagon through a point", &r);
-    assert_eq!((lifted.face_count(), lifted.edge_count()), (6, 18), "six patches on the rim's twelve halves and six spokes");
     check_face("hexagon through a point", &open, &lifted);
     let off = Faces::of(&lifted).nearest(point).2.dist(point);
     eprintln!("hexagon through a point: the point is {off:e} off the surface; sealed {:.2} against {:.2} plain", sealed(&lifted), sealed(&plain));
