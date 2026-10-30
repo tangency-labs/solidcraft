@@ -1,0 +1,33 @@
+{
+  "id": {
+    "browser.calibrate_click_a": "Klik gambar untuk Titik A, atau ketik koordinatnya.",
+    "browser.calibrate_click_b": "Klik gambar untuk Titik B, atau ketik koordinatnya.",
+    "help.sketch.construction_line": "Buat garis bantu tak hingga melalui dua titik. Gunakan untuk menata sketsa tanpa memecah profil.",
+    "help.sketch.construction_line.angle": "Buat garis bantu tak hingga dengan sudut terhadap sumbu X sketsa. Pilih titiknya dan ketik sudutnya, atau pilih arahnya.",
+    "help.sketch.construction_line.bisector": "Pilih dua garis sketsa lurus yang berpotongan, lalu pilih salah satu garis bagi sudut. Hasilnya mengikuti garis sumbernya.",
+    "help.sketch.construction_line.horizontal": "Buat garis bantu horizontal tak hingga melalui sebuah titik. Batasan horizontalnya tetap berlaku pada pengeditan berikutnya.",
+    "help.sketch.construction_line.parallel": "Pilih sebuah garis sketsa lurus, lalu tempatkan garis bantu tak hingga yang sejajar. Klik kanan untuk memilih referensi lain.",
+    "help.sketch.construction_line.perpendicular": "Pilih sebuah garis sketsa lurus, lalu tempatkan garis bantu tak hingga yang tegak lurus. Klik kanan untuk memilih referensi lain.",
+    "help.sketch.construction_line.tangent_at": "Buat garis singgung pada sebuah titik di lingkaran atau busur lingkaran, atau pada titik ujung spline atau kurva konik yang terbuka. Pilih kurvanya, lalu titik singgungnya.",
+    "help.sketch.construction_line.tangent_external": "Pilih lingkaran atau busur lingkaran, lalu sebuah titik luar dan satu solusi garis singgung. Pratinjau hanya menampilkan titik singgung pada busur yang digambar.",
+    "help.sketch.construction_line.tangent_two": "Pilih dua lingkaran atau busur lingkaran, lalu pilih garis singgung persekutuan di pratinjau. Titik singgung harus berada pada kurva yang digambar.",
+    "help.sketch.construction_line.vertical": "Buat garis bantu vertikal tak hingga melalui sebuah titik. Batasan vertikalnya tetap berlaku pada pengeditan berikutnya.",
+    "prefs.persistent_ribbon_pressed": "Sorot perintah ribbon yang aktif",
+    "prefs.persistent_ribbon_pressed_help": "Sorot perintah ribbon selama efeknya aktif. Matikan untuk mempertahankan tampilan netral dan bantuan perintah sebelumnya.",
+    "prefs.sketch_construction_lines": "Alat garis bantu lanjutan",
+    "prefs.sketch_open_look_at": "Putar untuk menghadap sketsa saat dibuka",
+    "prefs.sketch_open_look_at_note": "Mati: membuat atau mengedit sketsa membiarkan tampilan apa adanya. Look At menghadapkan tampilan ke sketsa saat Anda menginginkannya.",
+    "recovery.discard_all": "Buang semua",
+    "recovery.discard_all_detail": "Aksi ini tidak dapat diurungkan.",
+    "recovery.discard_all_title": "Buang {count} simpan otomatis?",
+    "recovery.discard_all_title_one": "Buang 1 simpan otomatis?",
+    "ui.construction.angle_hint": "Garis bantu: klik sebuah titik, lalu ketik sudut atau pilih arah",
+    "ui.construction.bisector_hint": "Garis bagi sudut: pilih dua garis lurus yang berpotongan, lalu solusi yang diinginkan",
+    "ui.construction.common_hint": "Garis singgung persekutuan: pilih dua lingkaran/busur, lalu solusi yang diinginkan",
+    "ui.construction.contact_hint": "Garis singgung: pilih lingkaran/busur atau spline/kurva konik terbuka, lalu titik singgung (kurva bentuk bebas: titik ujung)",
+    "ui.construction.external_hint": "Garis singgung: pilih lingkaran atau busur, sebuah titik luar, lalu solusi yang diinginkan",
+    "ui.construction.free_hint": "Garis bantu: klik dua titik; klik kanan untuk mengulang",
+    "ui.construction.point_hint": "Garis bantu: klik titik yang akan dilalui",
+    "ui.construction.reference_hint": "Garis bantu: pilih garis lurus, lalu sebuah titik; klik kanan untuk mengganti referensi"
+  }
+}
