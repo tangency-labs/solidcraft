@@ -2823,6 +2823,7 @@ impl SolveApp {
         // Before the dialog: a click on the view's OK or Cancel is for this frame's dialog.
         view_confirm::show(self, ui.ctx());
         dialogs::show(self, ui.ctx());
+        dialogs::versions_ui::banner(self, ui.ctx());
         issue_report::CadInput::block(self, ui, report_input);
         sketch_palette::show(self, ui.ctx());
         self.resolve_fit(ui.ctx());

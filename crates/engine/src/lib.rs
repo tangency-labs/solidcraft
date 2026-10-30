@@ -356,6 +356,14 @@ impl WorldCache {
 /// Source of [`Session::uid`].
 static NEXT_UID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
 
+/// A version open for looking, with the workspace kept aside.
+#[derive(Clone)]
+pub struct VersionView {
+    pub version: String,
+    pub name: String,
+    pub(crate) parked: std::sync::Arc<Document>,
+}
+
 /// Commands evaluated in isolation, ready for an atomic handoff to their source session.
 pub struct ComputedCommands {
     source: Session,
@@ -420,6 +428,9 @@ pub struct Session {
     /// Opened read-only (`doc.open {read_only}`, the "open elsewhere" notice): saving to its own
     /// file is refused; Save As to another file is how its changes are kept.
     pub read_only: bool,
+    /// A version shown in the window without replacing the open workspace. The workspace is
+    /// `parked`; the document on display is the version. Not saved.
+    pub version_view: Option<VersionView>,
     /// One-shot display-only notification during doc.open, before authoritative evaluation.
     /// Interactive loaders may show it provisionally; it never becomes model state.
     pub open_preview: Option<Box<dyn Fn(solidcraft_io::DesignPreview) + Send + Sync>>,
@@ -645,6 +656,7 @@ impl Session {
             uid: NEXT_UID.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
             disk: None,
             read_only: false,
+            version_view: None,
             open_preview: None,
             log: Vec::new(),
             revision: 1,
@@ -729,7 +741,8 @@ impl Session {
 
     /// The design has changes not in its file: in the document, or in what is hidden.
     pub fn is_dirty(&self) -> bool {
-        (!Arc::ptr_eq(&self.doc, &self.saved) && *self.doc != *self.saved) || self.visibility != self.saved_visibility
+        let doc = self.persisted_doc();
+        (!Arc::ptr_eq(doc, &self.saved) && **doc != *self.saved) || self.visibility != self.saved_visibility
     }
     pub fn mark_saved(&mut self) {
         self.saved = self.doc.clone();
@@ -810,6 +823,12 @@ impl Session {
         }
         self.render_viewport = viewport.map(Arc::new);
         Ok(())
+    }
+
+    /// The design a file or an autosave should write. While a version is only being viewed,
+    /// that is the workspace, not the version on screen.
+    pub fn persisted_doc(&self) -> &std::sync::Arc<Document> {
+        self.version_view.as_ref().map(|view| &view.parked).unwrap_or(&self.doc)
     }
 
     /// The design as its current file holds it, including visibility and relative link paths.
@@ -1256,6 +1275,9 @@ impl Session {
             }
         }
         (spec.enabled)(self).map_err(|why| EngineError::Disabled(spec.id.to_string(), why))?;
+        if self.version_view.is_some() && spec.undoable {
+            return Err(EngineError::Disabled(spec.id.to_string(), "a version is open for viewing: go back to the workspace before editing".into()));
+        }
         let before = Snapshot {
             label: spec.label.to_string(),
             doc: self.doc.clone(),
@@ -1495,6 +1517,7 @@ impl Session {
             uid: self.uid,
             disk: self.disk,
             read_only: self.read_only,
+            version_view: self.version_view.clone(),
             open_preview: None,
             saved: self.saved.clone(),
             log: Vec::new(),
@@ -2006,6 +2029,7 @@ fn same_but_features(a: &Document, b: &Document) -> bool {
         named_views,
         visibility,
         next_component_color_index,
+        versions,
     } = a;
     *render == b.render
         && *format == b.format
@@ -2042,4 +2066,5 @@ fn same_but_features(a: &Document, b: &Document) -> bool {
         && *named_views == b.named_views
         && *visibility == b.visibility
         && *next_component_color_index == b.next_component_color_index
+        && *versions == b.versions
 }

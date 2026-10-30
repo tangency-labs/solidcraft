@@ -138,6 +138,7 @@ fn same_geometry_inputs(a: &Document, b: &Document) -> bool {
         named_views,
         visibility,
         point_clouds,
+        versions: _,
     } = a;
     (Arc::ptr_eq(render, &b.render) || *render == b.render)
         && *format == b.format

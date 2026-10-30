@@ -18,6 +18,7 @@ pub(super) fn command(kind: &Kind) -> Option<&'static str> {
         Kind::SaveMesh(k) => Some(crate::dialogs_save_mesh::command_id(k)),
         Kind::ViewDxf { .. } => Some("file.export_view_dxf"),
         Kind::InsertDrawing(p) => Some(if p.command.ends_with("dxf") { "sketch.insert_dxf" } else { "sketch.insert_svg" }),
+        Kind::Versions { .. } => Some("version.graph"),
         Kind::Sketch => Some("sketch.create"),
         Kind::SketchIntersect { .. } => Some("sketch.intersect"),
         Kind::SketchProject { .. } => Some("sketch.project"),
@@ -147,6 +148,9 @@ fn choose_fillet_type(extra: &mut serde_json::Map<String, Value>, index: usize, 
 }
 
 pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: &mut egui::Ui) -> bool {
+    if let Kind::Versions { name, selected, notice, error, take_theirs, compared } = &mut d.kind {
+        return super::versions_ui::rows(app, ui, name, selected, notice, error, take_theirs, compared);
+    }
     let t = Tokens::get();
     let mut enter = false;
     if matches!(d.kind, Kind::Appearance(_)) {
