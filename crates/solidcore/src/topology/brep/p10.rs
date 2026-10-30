@@ -1928,9 +1928,9 @@ pub fn merge_curves_on_surface(
 ) -> Result<(Vec<FaceId>, Vec<EdgeId>)> {
     // curve i is IntersectObject::Curve(i), its UV curve IntersectObject::UvCurve(i, false)
     let curves: Vec<IntersectObject> = (0..curves_3d.len()).map(IntersectObject::Curve).collect();
-    let uv: Option<Vec<IntersectObject>> = uv_curves.map(|uv| {
+    let uv: Option<Vec<Option<IntersectObject>>> = uv_curves.map(|uv| {
         (0..uv.len())
-            .map(|i| IntersectObject::UvCurve(i, false))
+            .map(|i| Some(IntersectObject::UvCurve(i, false)))
             .collect()
     });
     let mut world = MergeCurvesWorld {
@@ -1963,7 +1963,9 @@ pub fn merge_curves_on_surface(
 
 /// `MergeCurvesOnSurface(*pSurf, dTol, s3DCurves, pOptUVCurves, sNewFaces, sCurveEdges,
 /// FALSE, pOptIntersectionSurface)` (`bUVSpaceOkay = TRUE`): as
-/// [`merge_curves_on_surface`], with the optional intersection surface the curves came
+/// [`merge_curves_on_surface`], with one optional UV curve per curve (`None` for a null
+/// entry of upstream's array, which leaves that curve without one) and the optional
+/// intersection surface the curves came
 /// from (`SmPlaneCutter::MergeIntersection`'s cutting plane), which every curve
 /// classification gets as its second surface
 /// ([`IntersectObject::FreeSurface`]`(0)`) for `sm_RefineCCIToSurfaces`'s
@@ -1983,26 +1985,23 @@ pub fn merge_curves_on_surface_through_surface(
     face: FaceId,
     tol: f64,
     curves_3d: &mut [Curve],
-    uv_curves: Option<&[Curve]>,
+    uv_curves: Option<&[Option<Curve>]>,
     intersection_surface: Option<Surface>,
 ) -> Result<(Vec<FaceId>, Vec<EdgeId>)> {
     // curve i is IntersectObject::Curve(i), its UV curve IntersectObject::UvCurve(i, false)
+    // (none for a null entry of upstream's array)
     let curves: Vec<IntersectObject> = (0..curves_3d.len()).map(IntersectObject::Curve).collect();
-    let uv: Option<Vec<IntersectObject>> = uv_curves.map(|uv| {
-        (0..uv.len())
-            .map(|i| IntersectObject::UvCurve(i, false))
+    let uv: Option<Vec<Option<IntersectObject>>> = uv_curves.map(|uv| {
+        uv.iter()
+            .enumerate()
+            .map(|(i, c)| c.as_ref().map(|_| IntersectObject::UvCurve(i, false)))
             .collect()
     });
     let has_surface = intersection_surface.is_some();
     let mut world = MergeCurvesWorld {
         b,
         curves_3d: curves_3d.to_vec(),
-        uv: uv_curves
-            .unwrap_or_default()
-            .iter()
-            .cloned()
-            .map(Some)
-            .collect(),
+        uv: uv_curves.unwrap_or_default().to_vec(),
         env,
         curve_ref,
         free_surfaces: intersection_surface.into_iter().collect(),

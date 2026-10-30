@@ -3006,11 +3006,10 @@ fn surface_approximate_size(k: &Kernel, surface: &Surface) -> Result<Vec2> {
 /// `SmSurface::GlobalPointSolve(domain, SM_SO_MINIMIZE, point, 0.001 * |size|, &maxDrop,
 /// SM_SR_SINGLE, sols)` over the natural domain (`maxDrop` is `1.0`): the gap and UV
 /// point of the first solution, if any. The status is ignored (`SmCurveClass.cpp:1045`
-/// checks only the solution count), so a failed solve is an empty result. Upstream's
-/// temporary switch-off of the surface cache's point test (`m_bPointTestEnabled`,
-/// `:1040`) is moot here: the solver builds no cache for a surface that owns no face,
-/// and a face-owned one is `Unported` in the solver (`UNPORTED(query.face_p2)`; the
-/// switch must be added with it).
+/// checks only the solution count), so a failed solve is an empty result. Upstream
+/// switches the surface cache's point test off for the solve (`m_bPointTestEnabled`,
+/// `:1040`), so its solutions are not classified against a face's trim boundaries
+/// ([`Surface::global_point_solve_point_test_off`]).
 fn surface_global_point_solve(
     k: &Kernel,
     surface: &Surface,
@@ -3019,7 +3018,7 @@ fn surface_global_point_solve(
 ) -> Result<Option<(f64, Point2)>> {
     let tol = 0.001 * size.length();
     let solutions = ignored(
-        surface.global_point_solve::<crate::surface::surface::p4::NoObject>(
+        surface.global_point_solve_point_test_off::<crate::surface::surface::p4::NoObject>(
             k,
             Some(crate::surface::surface::p4::NoObject),
             &surface.natural_uv_domain_with_nurb(k)?,

@@ -1,0 +1,12 @@
+id = "topology.brep_cutting"
+upstream = ["source/SMLib/src/SmBrepCutting.cpp", "source/SMLib/src/SmCutter.cpp", "source/SM_API/src/SmApiBrep.cpp"]
+rust_module = "topology::brep::cutting"
+depends_on = ["topology.brep_planar_section", "topology.brep_p1", "topology.brep_p3", "topology.brep_p4", "topology.brep_p5", "topology.brep_p9", "topology.brep_p10", "topology.edge", "topology.vertex", "topology.edgeuse_p3", "curve.curve_p7", "query.brep"]
+soft_depends_on = []
+est_lines = 960
+layer = 49
+tests = ["tests/SM_API_test/src/TestSmBrep.cpp:TestSmCut", "tests/SM_API_test/src/TestSmBrep.cpp:TestNonManifoldSweepStaleEntry", "tests/prog_test/src/smTopoTest.cpp:my_test_tsurf_insert_edge"]
+status = "green"
+claimed_by = ""
+claimed_at = ""
+notes = "NOT IN callgraph/units.json: SmBrepCutting::SmBrepCutting / DoCut (SmBrepCutting.cpp:33/48), SmPlaneCutter::SmPlaneCutter / MergeIntersection / Classification (SmCutter.cpp:29/47/281) and SmApiCut (SmApiBrep.cpp:875) are listed in harness/callgraph/unused_functions.txt (no in-scope root reaches them). SM_API M1. Rust: topology::brep::cutting::{PlaneCutter, do_cut, cut, cut_notified}. Not ported: SmSurfaceBiLinearCutter (SmCutter.cpp:681..1130; no caller in SM_API, SMLib or the upstream tests), SmCutter's base MergeIntersection / Classification (SE(SM_ERR)) and the Draw methods. Builds on topology.brep_planar_section (CreatePlaneFromBBox, SmSurface::CreatePlanarSectionCurves through the face context) and topology.brep_p10's merge_curves_on_surface_through_surface. Status set when the difftest gate has run."

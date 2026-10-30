@@ -315,9 +315,23 @@ impl Canon {
                 g.vertices.add(Some(v));
             }
         }
-        for (id, r) in b.regions().iter() {
-            if r.in_brep {
-                g.regions.add(Some(id));
+        // the regions in the B-rep's list order (the shim walk's `GetRegions`), which a
+        // Rust-built B-rep can hold apart from its arena order (an imported export holds
+        // them alike); the arena order when the list cannot be read
+        match solidcore::topology::brep::p1::regions(b, None) {
+            Ok(list) => {
+                for id in list {
+                    if b.region(id).is_ok_and(|r| r.in_brep) {
+                        g.regions.add(Some(id));
+                    }
+                }
+            }
+            Err(_) => {
+                for (id, r) in b.regions().iter() {
+                    if r.in_brep {
+                        g.regions.add(Some(id));
+                    }
+                }
             }
         }
         for &e in b.edge_list() {

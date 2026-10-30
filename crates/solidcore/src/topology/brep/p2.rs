@@ -2024,7 +2024,8 @@ pub struct MergedCurves {
 }
 
 /// `MergeCurvesOnSurface`: merges the 3D `curves` (with optional UV curves
-/// `uv_curves`, used on the first face only) lying on the surface of `face` into the
+/// `uv_curves`, one entry per curve, `None` for upstream's null entry; used on the first
+/// face only) lying on the surface of `face` into the
 /// face, splitting it (and the faces split off it) into new faces. Curves shorter than
 /// `tolerance` are skipped. Each curve is classified against each face
 /// in place ([`curve_on_classify_mut`]), coincident-maybe intervals are squeezed, the
@@ -2048,7 +2049,7 @@ pub fn merge_curves_on_surface<O: ClassObject + Copy>(
     face: FaceId,
     tolerance: f64,
     curves: &[O],
-    uv_curves: Option<&[O]>,
+    uv_curves: Option<&[Option<O>]>,
     options: MergeCurvesOptions<O>,
 ) -> Result<MergedCurves> {
     // check state - m_bEditingEnabled must be on
@@ -2070,7 +2071,7 @@ fn merge_curves_body<O: ClassObject + Copy>(
     face: FaceId,
     tolerance: f64,
     curves: &[O],
-    uv_curves: Option<&[O]>,
+    uv_curves: Option<&[Option<O>]>,
     options: MergeCurvesOptions<O>,
 ) -> Result<MergedCurves> {
     let mut out = MergedCurves::default();
@@ -2098,7 +2099,7 @@ fn merge_curves_body<O: ClassObject + Copy>(
 
             // on first face iter - get UVCurve if given
             let uv_curve = match (uv_curves, jj) {
-                (Some(uv), 0) => Some(*uv.get(ii).ok_or(null_deref("missing UV curve"))?),
+                (Some(uv), 0) => *uv.get(ii).ok_or(null_deref("missing UV curve"))?,
                 _ => None,
             };
 

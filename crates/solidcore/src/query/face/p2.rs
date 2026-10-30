@@ -1556,12 +1556,14 @@ fn vertex_face_gap_length(k: &Kernel, b: &mut Brep, v: VertexId, f: FaceId) -> R
 
 /// The caller's [`ClassGeometry`] answering [`ClassGeometry::vertex_face_gap`] for the
 /// vertices `IntersectVertices` intersects (their gaps computed from the B-rep, as
-/// upstream's vertex pointers reach them); everything else is the caller's.
+/// upstream's vertex pointers reach them); everything else, and the edits of its
+/// surf/surf/surf block ([`ClassGeometryMut`]), is the caller's.
 ///
-/// Every [`ClassGeometry`] method must be forwarded to `inner` here, including any added
-/// later: a trait default would otherwise silently replace the inner adapter's override.
+/// Every [`ClassGeometry`] and [`ClassGeometryMut`] method must be forwarded to `inner`
+/// here, including any added later: a trait default would otherwise silently replace the
+/// inner adapter's override.
 struct WithVertexFaceGaps<'g, G, O> {
-    inner: &'g G,
+    inner: &'g mut G,
     gaps: Vec<(O, Option<f64>)>,
 }
 
@@ -1601,6 +1603,21 @@ impl<G: ClassGeometry<O>, O: ClassObject> ClassGeometry<O> for WithVertexFaceGap
         owner: crate::geom::object::ObjectRef,
     ) -> Option<crate::geom::object::ObjectRef> {
         self.inner.owner_of(owner)
+    }
+}
+
+impl<G: ClassGeometryMut<O>, O: ClassObject> ClassGeometryMut<O> for WithVertexFaceGaps<'_, G, O> {
+    fn curve_mut(&mut self, o: O) -> Option<&mut Curve> {
+        self.inner.curve_mut(o)
+    }
+    fn topology_entity_mut(&mut self, o: O) -> Option<(&mut Brep, EntityRef)> {
+        self.inner.topology_entity_mut(o)
+    }
+    fn set_filleting_edge_curve(&mut self, edge: O, curve: Curve) -> Result<()> {
+        self.inner.set_filleting_edge_curve(edge, curve)
+    }
+    fn topology_entity_for_query(&mut self, o: O) -> Option<(&mut Brep, EntityRef)> {
+        self.inner.topology_entity_for_query(o)
     }
 }
 
@@ -2169,14 +2186,19 @@ pub fn curve_on_classify_mut<O: ClassObject>(
                 .iter()
                 .map(|&v| objects.vertex(v))
                 .collect::<Vec<_>>();
+            // (an evaluation copy of the face's surface: the classification below edits
+            // through `objects`; the copy keeps the owner, so the face tolerance)
             let surface = objects
                 .classify_surface(f)?
-                .ok_or_else(|| null(OP_CURVE, "face without surface"))?;
-            let geometry = WithVertexFaceGaps {
-                inner: &*objects,
+                .ok_or_else(|| null(OP_CURVE, "face without surface"))?
+                .clone_for_evaluation()?;
+            // the surf/surf/surf block's edits (sm_SetXSectCurveThroughPoint on the
+            // classification curve, the vertices' edge uses' UV trim curves) are made
+            let mut geometry = WithVertexFaceGaps {
+                inner: &mut *objects,
                 gaps,
             };
-            cc.intersect_vertices(k, &geometry, &vertices, surface, has_big_gaps, true)?;
+            cc.intersect_vertices_mut(k, &mut geometry, &vertices, &surface, has_big_gaps, true)?;
 
             // 2nd intersect face edges with the curve
             let edges = face_edges(objects.brep(), f, cc.tgt_loops_only(), Some(&tgt_loops))?;

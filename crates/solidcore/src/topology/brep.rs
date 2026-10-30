@@ -5,6 +5,7 @@
 //!
 //! | Rust      | Upstream                                                        |
 //! |-----------|-----------------------------------------------------------------|
+//! | [`cutting`] | `SmBrepCutting`, `SmPlaneCutter`, `SmApiCut` (unit `topology.brep_cutting`) |
 //! | [`local_operation`] | `LocalOperation`                                     |
 //! | [`mirror`]| `Mirror` (unit `topology.brep_mirror`)                          |
 //! | [`p1`]    | see the module                                                  |
@@ -19,6 +20,7 @@
 //!
 //! Deviations: the B-rep records are the arenas of [`crate::topology::Brep`].
 
+pub mod cutting;
 pub mod local_operation;
 pub mod mirror;
 pub mod p1;

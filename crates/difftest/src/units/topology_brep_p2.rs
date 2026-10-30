@@ -1137,10 +1137,10 @@ fn merge_ssi_rust(
         .iter()
         .map(|c| rust_curve(c).map(SmCurve::from))
         .collect::<Result<_, _>>()?;
-    let uv: Option<Vec<SmCurve>> = uv_curves
+    let uv: Option<Vec<Option<SmCurve>>> = uv_curves
         .map(|uv| {
             uv.iter()
-                .map(|c| rust_curve(c).map(SmCurve::from))
+                .map(|c| rust_curve(c).map(|c| Some(SmCurve::from(c))))
                 .collect::<Result<_, _>>()
         })
         .transpose()?;
