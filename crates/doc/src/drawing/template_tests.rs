@@ -78,6 +78,39 @@ fn a_template_names_no_model() {
     assert!(check(&d).unwrap_err().to_string().contains("a drawing has 1 to 1000 sheets"));
 }
 
+/// Applying a template gives each sheet the template's paper, border and block (its one sheet's to
+/// both of a drawing's two), keeping the text typed over a cell the new block still has; nothing
+/// changes for the same template; a drawing with a model is no template.
+#[test]
+fn a_template_applied_gives_each_sheet_its_format() {
+    let mut d = instantiate(&made("iso-a3-part"), "Bracket drawing", &BTreeSet::new(), &mut IdSource::seeded(1)).unwrap();
+    let id = d.allocate_id(&mut IdSource::seeded(2)).unwrap();
+    d.sheets.push(Arc::new(Sheet { id, name: "Sheet 2".into(), ..(*d.sheets[0]).clone() }));
+    for (cell, text) in [("material", "See note 3"), ("finish", "Black oxide")] {
+        Arc::make_mut(&mut d.sheets[0]).title_block_overrides.insert(cell.into(), text.into());
+    }
+    assert_eq!(apply(&d, &made("iso-a3-part")).unwrap(), (d.clone(), Vec::new()), "the same template changes nothing");
+    let (applied, changed) = apply(&d, &made("iso-a2-assembly")).unwrap();
+    let ids: Vec<u64> = d.sheets.iter().map(|s| s.id).collect();
+    let restyled = |sheet| Restyled { sheet, paper: true, border: false, title_block: true, lost: Vec::new() };
+    assert_eq!(changed, ids.iter().map(|id| restyled(*id)).collect::<Vec<_>>());
+    let a2 = made("iso-a2-assembly");
+    for sheet in &applied.sheets {
+        assert_eq!((sheet.sheet, &sheet.title_block), (a2.sheets[0].sheet, &a2.sheets[0].title_block));
+    }
+    assert_eq!(applied.sheets[0].title_block_overrides, d.sheets[0].title_block_overrides, "every cell is still there");
+    assert_eq!((applied.id, applied.name.as_str(), &applied.sources), (d.id, "Bracket drawing", &d.sources));
+    // A block without a finish cell: its typed text is lost, and said so.
+    let mut renamed = made("iso-a3-part");
+    let block = Arc::make_mut(&mut renamed.sheets[0]).title_block.as_mut().unwrap();
+    block.cells.iter_mut().find(|cell| cell.name == "finish").unwrap().name = "surface".into();
+    let (applied, changed) = apply(&d, &renamed).unwrap();
+    assert_eq!(changed[0], Restyled { sheet: ids[0], paper: false, border: false, title_block: true, lost: vec!["finish".into()] });
+    let kept: Vec<&str> = applied.sheets[0].title_block_overrides.keys().map(String::as_str).collect();
+    assert_eq!(kept, ["material"]);
+    assert!(apply(&d, &plate()).unwrap_err().to_string().starts_with("a template draws no design"));
+}
+
 /// A drawing from a template has its own ids, none of the template's or of `taken`, the same ones
 /// again from the same seed; the name it is given; and everything else of the template, the text
 /// typed over its cells too.

@@ -18,16 +18,26 @@ use solidcraft_geom::title_block::CellKind;
 
 use super::CommandSpec;
 use crate::params::{bad, str_};
-use crate::schema::drawing::{TemplateEntry, TemplateListParams, TemplateListResult};
+use crate::schema::drawing::{SheetTemplateChange, TemplateApplyParams, TemplateApplyResult, TemplateEntry, TemplateListParams, TemplateListResult};
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Session};
 
+const TEMPLATE_APPLY_CONTRACT: TypedContract<TemplateApplyParams> = TypedContract::new();
 const TEMPLATE_LIST_CONTRACT: TypedContract<TemplateListParams> = TypedContract::new();
 
 pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("drawing.create", "Create Drawing", create).any_part().icon("new").doc_only().params(
         "name?: the drawing's name (default: the design's); template?: a template's name (drawing.template.list; default iso-a3-part, or iso-a3-assembly for a design with components); language?: the drawing's content language, a BCP 47 tag (default: the template's, en for the built-ins); units?: \"follow_model\" or one length unit such as \"mm\" (default: the template's); projection?: first or third (angle) (default: the template's, third for the built-ins). Adds a drawing of this design made from the template, with ids of its own, and opens it (one undo step of the model) → as drawing.inspect",
     ),
+    CommandSpec::new("drawing.template.apply", "Apply Drawing Template", crate::checked!("drawing.template.apply", template_apply))
+        .in_drawing()
+        .icon("settings")
+        .doc_only()
+        .contract(&TEMPLATE_APPLY_CONTRACT)
+        .output(output_schema_for::<TemplateApplyResult>)
+        .params(
+            "template: a template's name (drawing.template.list); dry_run?: true to answer without changing anything. Each sheet takes the paper, drawing border and title block of the template's sheet in its place (its last for sheets past its own); text typed over a cell stays while the new block has a text cell of that name. Nothing moves → changed: [{sheet, paper, border, title_block, lost: [cells whose typed text is dropped]}] for each sheet that changes, outside: the views on a sheet whose new paper leaves them outside its drawing space (as drawing.sheet.set lists them), dry_run. One undo step, none when nothing changes.",
+        ),
     CommandSpec::new("drawing.template.list", "List Drawing Templates", crate::checked!("drawing.template.list", template_list))
         .any_part()
         .icon("list")
@@ -142,6 +152,41 @@ fn create(s: &mut Session, p: &Value) -> Result<Value> {
     s.open_drawing = Some(d.id);
     s.doc_mut().put_drawing(Arc::new(d));
     inspect(s, &Value::Null)
+}
+
+fn template_apply(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "drawing.template.apply";
+    let fail = |e: solidcraft_doc::DocError| bad(cmd, e.to_string());
+    let from = text(cmd, p, "template")?.ok_or_else(|| bad(cmd, "`template` must be a template's name (drawing.template.list)"))?;
+    let unknown = || bad(cmd, format!("no template `{from}` (drawing.template.list lists them)"));
+    let chosen = template::built_in(from).ok_or_else(unknown)?.map_err(fail)?;
+    let dry_run = match p.get("dry_run") {
+        None => false,
+        Some(Value::Bool(dry_run)) => *dry_run,
+        Some(_) => return Err(bad(cmd, "`dry_run` is true or false")),
+    };
+    let (applied, changed) = template::apply(s.drawing(cmd)?, &chosen).map_err(fail)?;
+    // The views on a sheet whose paper changed: listed when they fall outside, never moved.
+    let views: Vec<u64> = changed.iter().filter(|c| c.paper).flat_map(|c| applied.on_sheet(c.sheet).views).collect();
+    let outside = super::drawing_view::outside_results(crate::drawing_view::outside(s, &applied, &views, cmd)?);
+    let listed = changed
+        .iter()
+        .map(|c| SheetTemplateChange {
+            sheet: ids::encode(c.sheet),
+            paper: c.paper,
+            border: c.border,
+            title_block: c.title_block,
+            lost: c.lost.clone(),
+        })
+        .collect();
+    if !dry_run && !changed.is_empty() {
+        s.edit_drawing(cmd, |d| {
+            *d = applied;
+            Ok(())
+        })?;
+    }
+    let reply = TemplateApplyResult { changed: listed, outside, dry_run, param_warnings: Vec::new() };
+    serde_json::to_value(reply).map_err(|e| EngineError::Other(e.to_string()))
 }
 
 fn template_list(s: &mut Session, _p: &Value) -> Result<Value> {

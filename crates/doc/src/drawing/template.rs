@@ -4,6 +4,9 @@
 //! documents a design ([`check`]). So it is saved and read as a drawing is, under the same caps
 //! and damage rules, and a new drawing is a copy of it with ids of its own ([`instantiate`]).
 //!
+//! A template applied to a drawing ([`apply`]) gives each sheet its paper, drawing border and title
+//! block, and moves nothing on it.
+//!
 //! The built-ins ([`BUILT_INS`]) are made in code when asked for, never stored: ISO A4 to A0, for
 //! parts and for assemblies, each one sheet with the ISO border and the built-in title block, which
 //! differ only in their general tolerances. A later built-in never changes a drawing made from an
@@ -16,7 +19,7 @@ use solidcraft_geom::cell::{Content, Part};
 use solidcraft_geom::drawing_sheet::{self, DrawingBorderProfile, Orientation, PaperSize};
 use solidcraft_geom::title_block::{self, CellKind};
 
-use super::Drawing;
+use super::{Drawing, fields};
 use crate::format::DRAWING;
 use crate::ids::IdSource;
 use crate::{DocError, Document, Result};
@@ -91,6 +94,45 @@ pub fn instantiate(template: &Drawing, name: &str, taken: &BTreeSet<u64>, id_sou
     let drawing = Drawing { format, format_pending: DRAWING.pending_names(), id, name: name.into(), sheets, ..template.clone() };
     drawing.validate()?;
     Ok(drawing)
+}
+
+/// What applying a template changed on one sheet ([`apply`]).
+#[derive(Clone, Debug, PartialEq)]
+pub struct Restyled {
+    pub sheet: u64,
+    pub paper: bool,
+    pub border: bool,
+    pub title_block: bool,
+    /// The cells whose typed text is dropped: the new block has no text cell of that name.
+    pub lost: Vec<String>,
+}
+
+/// `drawing` in `template`'s sheet formats: each sheet takes the paper, drawing border and title
+/// block of the template's sheet in its place (its last for the sheets past its own), and keeps the
+/// text typed over a cell while the new block has a text cell of that name. Nothing on a sheet
+/// moves. Answers the drawing, and what changed on each sheet that did.
+pub fn apply(drawing: &Drawing, template: &Drawing) -> Result<(Drawing, Vec<Restyled>)> {
+    check(template)?;
+    let mut d = drawing.clone();
+    let mut changed = Vec::new();
+    for (at, sheet) in d.sheets.iter_mut().enumerate() {
+        let Some(from) = template.sheets.get(at).or(template.sheets.last()) else { continue };
+        let kept = |name: &String| fields::overridable(from.title_block.as_ref(), name);
+        let lost: Vec<String> = sheet.title_block_overrides.keys().filter(|name| !kept(name)).cloned().collect();
+        let paper = sheet.sheet != from.sheet;
+        let (border, title_block) = (sheet.border != from.border, sheet.title_block != from.title_block);
+        if !(paper || border || title_block || !lost.is_empty()) {
+            continue;
+        }
+        let sheet = Arc::make_mut(sheet);
+        sheet.sheet = from.sheet;
+        sheet.border = from.border.clone();
+        sheet.title_block = from.title_block.clone();
+        sheet.title_block_overrides.retain(|name, _| kept(name));
+        changed.push(Restyled { sheet: sheet.id, paper, border, title_block, lost });
+    }
+    d.validate()?;
+    Ok((d, changed))
 }
 
 /// The built-in `name`'s paper size, its general tolerances and its title ("ISO A3 part"); none
