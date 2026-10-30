@@ -181,6 +181,15 @@ type Domain = Option<[f64; 4]>;
 /// basis) and whether it is a plain B-spline.
 fn surface_kind(rd: &mut Reader<'_>, nested: bool) -> Result<(Domain, bool), FfiError> {
     let kind = rd.index(2)?;
+    surface_body(rd, kind, nested)
+}
+
+/// The rest of a surface block of kind `kind` (`0..=2`), as [`surface_kind`].
+fn surface_body(
+    rd: &mut Reader<'_>,
+    kind: usize,
+    nested: bool,
+) -> Result<(Domain, bool), FfiError> {
     if kind == 2 {
         if nested {
             return Err(bad("nested curve-bounded surface"));
@@ -213,6 +222,32 @@ fn surface_kind(rd: &mut Reader<'_>, nested: bool) -> Result<(Domain, bool), Ffi
     let (u0, u1) = check_knots(&u, p, "surface u")?;
     let (v0, v1) = check_knots(&v, q, "surface v")?;
     Ok((Some([u0, v0, u1, v1]), true))
+}
+
+/// A surface of `Cover`: a B-spline or plane block, or an analytic block `4..=7`
+/// (`harness/cpp/shim/sc_analytic_surface.h`: cylinder `origin x y radius angle0 angle1
+/// height0 height1`, cone `apex x y half_angle_deg height0 height1`, sphere `center x y
+/// radius lon0 lon1 lat0 lat1`, torus `center x y R r major0 major1 minor0 minor1`;
+/// degrees) of finite values: the checks of the `ssi_corpus` FFI for the same
+/// constructors. A shape `SmCone::CreateCanonical` cannot build is a shim exception, and
+/// a C++ crash fails only its case (fresh process). Returns whether it is a plain
+/// B-spline.
+fn cover_surface(rd: &mut Reader<'_>) -> Result<bool, FfiError> {
+    let kind = rd.index(7)?;
+    match kind {
+        0 | 1 => Ok(surface_body(rd, kind, false)?.1),
+        4..=7 => {
+            // origin / apex / centre, x and y axes, then the kind's values
+            let rest = match kind {
+                4 | 6 => 5,
+                5 => 3,
+                _ => 6,
+            };
+            rd.finites(9 + rest)?;
+            Ok(false)
+        }
+        _ => Err(bad("Cover: a B-spline, plane or analytic surface")),
+    }
 }
 
 #[allow(dead_code)]
@@ -322,8 +357,20 @@ fn continuity(rd: &mut Reader<'_>) -> Result<(), FfiError> {
 ///
 /// [`FfiError::InvalidArgument`] for anything the shim must not see.
 pub fn validate(op: Op, input: &[f64]) -> Result<(), FfiError> {
+    validate_isolated(op, input).map(|_| ())
+}
+
+/// [`validate`]; returns whether the case runs in a fresh process (a `Cover` with a
+/// surface that is not a plain B-spline).
+fn validate_isolated(op: Op, input: &[f64]) -> Result<bool, FfiError> {
     let mut rd = Reader::new(input);
-    let (dom, is_bspline) = surface_kind(&mut rd, false)?;
+    let mut isolated = false;
+    let (dom, is_bspline) = if op == Op::Cover {
+        isolated |= !cover_surface(&mut rd)?;
+        (None, false)
+    } else {
+        surface_kind(&mut rd, false)?
+    };
     let bspline_only = |dom: Domain| {
         dom.filter(|_| is_bspline)
             .ok_or_else(|| bad("this op needs a B-spline surface"))
@@ -400,10 +447,7 @@ pub fn validate(op: Op, input: &[f64]) -> Result<(), FfiError> {
             rd.vec3()?;
         }
         Op::Cover => {
-            bspline_only(dom)?;
-            let (d2, b2) = surface_kind(&mut rd, false)?;
-            d2.filter(|_| b2)
-                .ok_or_else(|| bad("this op needs B-spline surfaces"))?;
+            isolated |= !cover_surface(&mut rd)?;
             rd.positive("tolerance")?;
             rd.flag()?;
         }
@@ -479,7 +523,8 @@ pub fn validate(op: Op, input: &[f64]) -> Result<(), FfiError> {
             }
         }
     }
-    rd.done()
+    rd.done()?;
+    Ok(isolated)
 }
 
 /// Runs `op` on `input` (see the module docs) and returns the output record.
@@ -489,7 +534,13 @@ pub fn validate(op: Op, input: &[f64]) -> Result<(), FfiError> {
 /// [`FfiError::InvalidArgument`] for a malformed input; [`FfiError::Status`] for a shim
 /// failure.
 pub fn eval(op: Op, input: &[f64]) -> Result<Vec<f64>, FfiError> {
-    validate(op, input)?;
+    if validate_isolated(op, input)? {
+        return crate::isolate::fresh_process(|| call(op, input));
+    }
+    call(op, input)
+}
+
+fn call(op: Op, input: &[f64]) -> Result<Vec<f64>, FfiError> {
     call_with_buffer(256, |buf, len| {
         // SAFETY: input is valid for input.len() reads and holds exactly what the shim
         // reads for `op` (validated above); buf is valid for buf.len() writes and the

@@ -15,9 +15,13 @@
 //
 // One entry point, sc_surface_surface_p5_eval(op, in, n_in, out, cap, out_len). Layouts are
 // documented in crates/solidcore-ffi/src/units/surface_surface_p5.rs, which validates every
-// input. A surface block is as in unit surface.surface_p7. `out` receives the op status
+// input. A surface block is as in unit surface.surface_p7, or (CoverOtherCoincidentSurface
+// only) an analytic SmCylinder / SmCone / SmSphere / SmTorus block `4..7` of
+// sc_analytic_surface.h. `out` receives the op status
 // (0 = SM_SUCCESS, else the SmStatus value) and the op's outputs.
 #include "sc_shim.h"
+
+#include "sc_analytic_surface.h"
 
 #include "StdAfx.h"
 #include <SmBSplineCurve.h>
@@ -41,6 +45,7 @@
 #include <SmVector3d.h>
 #include <nurbs.h>
 
+#include <stdexcept>
 #include <vector>
 
 #include "sc_sm.h"
@@ -831,6 +836,19 @@ const SmContext& the_context()
 SmSurface* read_surface(Rd& rd, const SmContext& ctx)
 {
     int64_t kind = rd.idx();
+    if (kind >= 4)
+    {
+        // an analytic surface (sc_analytic_surface.h; Cover only), its NURB made by
+        // GetNaturalUVDomain() as the ssi_corpus shim makes it
+        std::vector<double> v;
+        for (int64_t i = 0; i < sc_analytic::length(kind); i++)
+            v.push_back(rd.num());
+        SmSurface* a = v.empty() ? NULL : sc_analytic::build(ctx, kind, v.data());
+        if (a == NULL)
+            throw std::runtime_error("analytic surface");
+        (void)a->GetNaturalUVDomain();
+        return a;
+    }
     if (kind == 2)
     {
         // a curve-bounded surface without boundary curves over a basis surface block
