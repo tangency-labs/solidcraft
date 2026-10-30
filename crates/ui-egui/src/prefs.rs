@@ -1408,6 +1408,8 @@ pub struct PrefsWindow {
     reveal: Option<crate::prefs_search::Reveal>,
     /// Where the theme Import tile was drawn last frame: a file dropped there is a theme (#8226).
     import_tile: Option<egui::Rect>,
+    /// The kind of theme the Theme list shows (#8637); not saved.
+    theme_kind: crate::theme_files::ThemeKind,
 }
 
 /// Following a theme file needs the file system: the desktop app only (#7573).
@@ -1623,15 +1625,10 @@ fn apply_pending(app: &mut SolveApp) -> bool {
 /// ones, with Import…, Export… (the theme on now as a complete file, to start a new one from)
 /// and Remove (an imported theme). Like the other preferences, a choice applies at once.
 fn theme_row(app: &mut SolveApp, ui: &mut egui::Ui) {
-    let mut choices = theme_choices(app);
     // While a file is followed (#7573) it is the theme, so no tile shows as chosen.
     let following = !app.prefs_window.follow.path(&app.preferences.theme_follow).is_empty();
-    choices.sort_by_key(|(id, _)| match id.as_str() {
-        "light" => 0,
-        "dark" => 1,
-        "system" => 2,
-        _ => 3,
-    });
+    let kind = theme_kind_row(app, ui);
+    let (choices, mut palettes) = theme_list(app, kind);
     let mut tile_action: Option<(&str, String)> = None;
     let mut action_theme: Option<String> = None;
     let mut chosen: Option<String> = None;
@@ -1640,12 +1637,11 @@ fn theme_row(app: &mut SolveApp, ui: &mut egui::Ui) {
     ui_kit::theme_rail(
         ui,
         |ui| {
-            for (id, label) in &choices {
-                let palette = match id.as_str() {
-                    "light" | "system" => Tokens::light(),
-                    "dark" => Tokens::dark(),
-                    _ => crate::theme_files::find(id, &app.preferences.custom_themes).map(crate::theme_files::resolve).unwrap_or_else(Tokens::dark),
-                };
+            if choices.is_empty() {
+                ui_kit::text(ui, app.tr("prefs.theme_kind_none"), ui_kit::Text::Hint("theme_kind_none"));
+            }
+            for crate::theme_files::Listed { id, name: label, .. } in &choices {
+                let palette = palettes.remove(id).unwrap_or_else(Tokens::dark);
                 let custom = app.preferences.custom_themes.iter().any(|t| t.id == *id);
                 let note = app.tr(if id == "system" {
                     "prefs.follows_os"
@@ -3096,6 +3092,57 @@ fn theme_choices(app: &SolveApp) -> Vec<(String, String)> {
     let modes = THEMES.iter().map(|(id, label)| ((*id).to_string(), crate::i18n::tr_label(label).to_string()));
     let files = crate::theme_files::builtin().iter().chain(&app.preferences.custom_themes).map(|t| (t.id.clone(), t.name.clone()));
     modes.chain(files).collect()
+}
+
+/// The Theme list's filter (#8637): All, Light, Dark or High contrast. It only narrows what the
+/// list shows; the theme on stays on. Returns the kind now chosen.
+fn theme_kind_row(app: &mut SolveApp, ui: &mut egui::Ui) -> crate::theme_files::ThemeKind {
+    use crate::theme_files::ThemeKind;
+    let label = app.tr("prefs.theme_kind").to_string();
+    let labels: Vec<String> = ThemeKind::ALL.iter().map(|k| crate::i18n::tr(k.label_id()).to_string()).collect();
+    let options: Vec<&str> = labels.iter().map(String::as_str).collect();
+    let mut selected = ThemeKind::ALL.iter().position(|k| *k == app.prefs_window.theme_kind).unwrap_or(0);
+    if ui_kit::settings_segments(ui, &label, &mut selected, &options)
+        && let Some(kind) = ThemeKind::ALL.get(selected)
+    {
+        app.prefs_window.theme_kind = *kind;
+    }
+    // Handles that don't depend on the language.
+    for (kind, option) in ThemeKind::ALL.iter().zip(&labels) {
+        if let Some(at) = crate::scenario::handle_at(&format!("dialog:{label}:{option}")) {
+            crate::scenario::publish_handle(&format!("prefs:theme_kind:{}", kind.key()), at);
+        }
+    }
+    ui.add_space(Tokens::get().space_8);
+    app.prefs_window.theme_kind
+}
+
+/// The Theme list under `kind` (#8637), with each tile's palette: Light, Dark and System first,
+/// then the theme files by name.
+fn theme_list(app: &SolveApp, kind: crate::theme_files::ThemeKind) -> (Vec<crate::theme_files::Listed>, std::collections::HashMap<String, Tokens>) {
+    let mut palettes = std::collections::HashMap::new();
+    let mut entries: Vec<_> = theme_choices(app)
+        .into_iter()
+        .map(|(id, name)| {
+            let file = crate::theme_files::find(&id, &app.preferences.custom_themes);
+            let (palette, dark) = match id.as_str() {
+                "light" => (Tokens::light(), Some(false)),
+                "system" => (Tokens::light(), None),
+                "dark" => (Tokens::dark(), Some(true)),
+                _ => file.map_or((Tokens::dark(), Some(true)), |f| (crate::theme_files::resolve(f), Some(f.base.is_dark()))),
+            };
+            let high_contrast = crate::theme_files::is_high_contrast(&palette);
+            palettes.insert(id.clone(), palette);
+            crate::theme_files::Listed { mode: file.is_none(), id, name, dark, high_contrast }
+        })
+        .collect();
+    entries.sort_by_key(|e| match e.id.as_str() {
+        "light" => 0,
+        "dark" => 1,
+        "system" => 2,
+        _ => 3,
+    });
+    (crate::theme_files::listed(entries, kind), palettes)
 }
 
 /// Turn a theme on (a mode or a theme file's id); dark follows it.
@@ -5570,6 +5617,29 @@ mod tests {
                 assert!(!path.exists(), "nothing written outside");
             }
         }
+    }
+
+    /// #8637: the kind filter above the Theme list narrows the tiles; the theme on stays on.
+    #[test]
+    fn theme_kind_filter_narrows_the_theme_list() {
+        use serde_json::json;
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.call("ui.prefs", json!({"theme": "nord", "open": "Interface"}));
+        h.frames(2);
+        super::reveal_preference(&mut h, "prefs:theme_kind:high_contrast");
+        let shown = |id: &str| crate::scenario::rect_of(&format!("prefs:theme_tile:{id}")).is_some();
+        assert!(shown("light") && shown("akari") && shown("nord") && shown("high-contrast"));
+        for (kind, visible, hidden) in [
+            ("light", ["light", "system", "akari"], ["dark", "nord", "high-contrast"]),
+            ("dark", ["dark", "system", "nord"], ["light", "akari", "gruvbox-light"]),
+            ("high_contrast", ["high-contrast", "high-contrast", "high-contrast"], ["light", "system", "nord"]),
+        ] {
+            h.step(&json!({"click":{"handle":format!("prefs:theme_kind:{kind}")}})).unwrap();
+            h.frames(3);
+            assert!(visible.iter().all(|id| shown(id)) && !hidden.iter().any(|id| shown(id)), "{kind}");
+        }
+        assert_eq!(h.app.preferences.theme, "nord", "filtering never changes the theme");
     }
 
     /// Picking a font closes the font list, not the Preferences window's body: that folded the

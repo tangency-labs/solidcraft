@@ -1,0 +1,47 @@
+{
+  "en": {
+    "prefs.theme_high_contrast": "High contrast",
+    "prefs.theme_kind": "Show themes",
+    "prefs.theme_kind_none": "No theme of this kind"
+  },
+  "ar": {
+    "prefs.theme_high_contrast": "تباين عالٍ",
+    "prefs.theme_kind": "عرض السمات",
+    "prefs.theme_kind_none": "لا توجد سمة من هذا النوع"
+  },
+  "de": {
+    "prefs.theme_high_contrast": "Hoher Kontrast",
+    "prefs.theme_kind": "Designs anzeigen",
+    "prefs.theme_kind_none": "Kein Design dieser Art"
+  },
+  "es": {
+    "prefs.theme_high_contrast": "Alto contraste",
+    "prefs.theme_kind": "Mostrar temas",
+    "prefs.theme_kind_none": "Ningún tema de este tipo"
+  },
+  "fr": {
+    "prefs.theme_high_contrast": "Contraste élevé",
+    "prefs.theme_kind": "Afficher les thèmes",
+    "prefs.theme_kind_none": "Aucun thème de ce type"
+  },
+  "he": {
+    "prefs.theme_high_contrast": "ניגודיות גבוהה",
+    "prefs.theme_kind": "הצגת ערכות נושא",
+    "prefs.theme_kind_none": "אין ערכת נושא מסוג זה"
+  },
+  "ja": {
+    "prefs.theme_high_contrast": "ハイコントラスト",
+    "prefs.theme_kind": "テーマの表示",
+    "prefs.theme_kind_none": "この種類のテーマはありません"
+  },
+  "vi": {
+    "prefs.theme_high_contrast": "Độ tương phản cao",
+    "prefs.theme_kind": "Hiển thị chủ đề giao diện",
+    "prefs.theme_kind_none": "Không có chủ đề giao diện nào thuộc loại này"
+  },
+  "zh": {
+    "prefs.theme_high_contrast": "高对比度",
+    "prefs.theme_kind": "显示主题",
+    "prefs.theme_kind_none": "没有此类主题"
+  }
+}

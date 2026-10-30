@@ -696,6 +696,95 @@ pub fn add(custom: &mut Vec<ThemeFile>, mut theme: ThemeFile) -> Result<String, 
     Ok(id)
 }
 
+/// The kinds the Theme list can be narrowed to (#8637). Light and dark come from the theme's
+/// `base`; high contrast is measured on its colours ([`is_high_contrast`]), so no theme file
+/// needs a tag and imported files are sorted the same way.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ThemeKind {
+    #[default]
+    All,
+    Light,
+    Dark,
+    HighContrast,
+}
+
+impl ThemeKind {
+    pub const ALL: [ThemeKind; 4] = [ThemeKind::All, ThemeKind::Light, ThemeKind::Dark, ThemeKind::HighContrast];
+
+    /// The message id of the filter's label.
+    pub fn label_id(self) -> &'static str {
+        match self {
+            ThemeKind::All => "ui.all",
+            ThemeKind::Light => "ui.light",
+            ThemeKind::Dark => "ui.dark",
+            ThemeKind::HighContrast => "prefs.theme_high_contrast",
+        }
+    }
+
+    /// A stable key for scenario targets, independent of the language.
+    pub fn key(self) -> &'static str {
+        match self {
+            ThemeKind::All => "all",
+            ThemeKind::Light => "light",
+            ThemeKind::Dark => "dark",
+            ThemeKind::HighContrast => "high_contrast",
+        }
+    }
+}
+
+/// The WCAG contrast a high-contrast theme's body text keeps on its panels, toolbar and dialogs:
+/// close to black on white (21:1), well above what the usual themes choose (about 10:1 to 14:1).
+pub const HIGH_CONTRAST_TEXT: f64 = 15.0;
+/// ... and its dim (secondary) text: 7:1, the enhanced (AAA) level for normal text, where most
+/// themes keep it softer on purpose (about 4:1 to 6:1).
+pub const HIGH_CONTRAST_DIM: f64 = 7.0;
+
+/// Whether a theme is made for legibility: its text reaches [`HIGH_CONTRAST_TEXT`] and its dim
+/// text [`HIGH_CONTRAST_DIM`] on every surface they are read on.
+pub fn is_high_contrast(t: &Tokens) -> bool {
+    let reaches = |ink, min| [t.panel, t.toolbar, t.dialog_body].iter().all(|surface| crate::theme::contrast_ratio(ink, *surface) >= min);
+    reaches(t.text, HIGH_CONTRAST_TEXT) && reaches(t.text_dim, HIGH_CONTRAST_DIM)
+}
+
+/// One tile of the Theme list as the filter sees it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Listed {
+    pub id: String,
+    pub name: String,
+    /// `None` for a mode that is either (System follows the OS).
+    pub dark: Option<bool>,
+    pub high_contrast: bool,
+    /// Light, Dark and System: the main choices, kept first and in their own order.
+    pub mode: bool,
+}
+
+impl Listed {
+    /// Whether the tile shows under `kind`. System, which is light or dark depending on the OS,
+    /// shows under both.
+    pub fn shows(&self, kind: ThemeKind) -> bool {
+        match kind {
+            ThemeKind::All => true,
+            ThemeKind::Light => self.dark != Some(true),
+            ThemeKind::Dark => self.dark != Some(false),
+            ThemeKind::HighContrast => self.high_contrast,
+        }
+    }
+}
+
+/// The Theme list under `kind`: the modes first, in the order given, then the theme files
+/// (built in and imported together) by name, ignoring case, then by id.
+pub fn listed(entries: Vec<Listed>, kind: ThemeKind) -> Vec<Listed> {
+    let mut shown: Vec<Listed> = entries.into_iter().filter(|e| e.shows(kind)).collect();
+    // A stable sort keeps the modes' own order.
+    shown.sort_by(|a, b| match (a.mode, b.mode) {
+        (true, true) => std::cmp::Ordering::Equal,
+        (true, false) => std::cmp::Ordering::Less,
+        (false, true) => std::cmp::Ordering::Greater,
+        (false, false) => a.name.to_lowercase().cmp(&b.name.to_lowercase()).then_with(|| a.id.cmp(&b.id)),
+    });
+    shown
+}
+
 /// Seconds between two looks at a followed file's modified time and size.
 pub const FOLLOW_INTERVAL: f64 = 1.0;
 /// Longest followed path accepted, in bytes (hostile input from the control channel).
@@ -1468,5 +1557,60 @@ mod tests {
         assert!(follow_path(&"x".repeat(MAX_FOLLOW_PATH + 1)).is_err() && follow_path("a\nb").is_err());
         assert!(follow_path("a\u{7}b").is_err());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// #8637: light and dark come from each theme's base; high contrast from its colours.
+    #[test]
+    fn theme_kinds_follow_the_base_and_measured_contrast() {
+        let kinds: BTreeMap<&str, (bool, bool)> =
+            builtin().iter().map(|f| (f.id.as_str(), (f.base.is_dark(), is_high_contrast(&resolve(f))))).collect();
+        assert_eq!(kinds.get("high-contrast"), Some(&(true, true)));
+        assert_eq!(kinds.get("gruvbox-light").map(|k| k.0), Some(false));
+        assert_eq!(kinds.get("nord"), Some(&(true, false)), "soft dim text is not high contrast");
+        let high: Vec<_> = kinds.iter().filter(|(_, k)| k.1).map(|(id, _)| *id).collect();
+        assert_eq!(high, ["1-bit", "1-bit-dark", "cga", "high-contrast"], "Catppuccin's 7:1 dim text alone is not enough");
+        assert!(!is_high_contrast(&Tokens::light()) && !is_high_contrast(&Tokens::dark()));
+        // An imported file is measured the same way, without any tag.
+        let ink = json!({"text": "#ffffff", "text_dim": "#ffffff", "panel": "#000000", "toolbar": "#000000", "dialog_body": "#000000"});
+        let stark = from_value(&json!({"format": FORMAT, "name": "Stark", "base": "dark", "colors": ink})).unwrap();
+        assert!(is_high_contrast(&resolve(&stark)));
+        let mut soft = stark.clone();
+        soft.colors.insert("text_dim".into(), json!("#5a5a5a"));
+        assert!(!is_high_contrast(&resolve(&soft)), "every text role must reach 7:1");
+    }
+
+    /// #8637: the modes stay first in their own order; the files follow by name, ignoring case,
+    /// whether built in or imported; each filter keeps only its kind.
+    #[test]
+    fn theme_list_keeps_modes_first_and_sorts_files_by_name_under_each_filter() {
+        let entry = |id: &str, name: &str, dark: Option<bool>, high_contrast: bool, mode: bool| Listed {
+            id: id.into(),
+            name: name.into(),
+            dark,
+            high_contrast,
+            mode,
+        };
+        let entries = vec![
+            entry("light", "Light", Some(false), false, true),
+            entry("dark", "Dark", Some(true), false, true),
+            entry("system", "System", None, false, true),
+            entry("zeta", "Zeta", Some(true), false, false),
+            entry("high-contrast", "High Contrast", Some(true), true, false),
+            entry("akari", "Akari", Some(false), false, false),
+            entry("custom-mine", "beige", Some(false), true, false),
+            entry("blueprint", "Blueprint", Some(true), false, false),
+        ];
+        let ids = |kind| listed(entries.clone(), kind).into_iter().map(|e| e.id).collect::<Vec<_>>();
+        assert_eq!(ids(ThemeKind::All), ["light", "dark", "system", "akari", "custom-mine", "blueprint", "high-contrast", "zeta"]);
+        assert_eq!(ids(ThemeKind::Light), ["light", "system", "akari", "custom-mine"]);
+        assert_eq!(ids(ThemeKind::Dark), ["dark", "system", "blueprint", "high-contrast", "zeta"]);
+        assert_eq!(ids(ThemeKind::HighContrast), ["custom-mine", "high-contrast"]);
+        // The shipped files: sorted by name, so the list reads alphabetically whatever `order` says.
+        let shipped: Vec<_> = builtin()
+            .iter()
+            .map(|f| Listed { id: f.id.clone(), name: f.name.clone(), dark: Some(f.base.is_dark()), high_contrast: false, mode: false })
+            .collect();
+        let names: Vec<_> = listed(shipped, ThemeKind::All).into_iter().map(|e| e.name.to_lowercase()).collect();
+        assert!(names.windows(2).all(|w| w[0] <= w[1]), "{names:?}");
     }
 }
