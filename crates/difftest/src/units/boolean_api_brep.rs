@@ -8,7 +8,7 @@
 //! A case is one API call (`api` plus its arguments). Operands are boxes
 //! (`SmApiCreateBox`) or spheres (`SmApiCreateSphere`); fixture cases also use sheets
 //! (`SmApiCreatePlane`), disks (`SmApiCreatePlanarCircle`), tori (`SmApiCreateTorus`),
-//! operands moved by `SmApiRotate` /
+//! cylinders (`SmApiCreateCylinder`), cones (`SmApiCreateCone`), operands moved by `SmApiRotate` /
 //! `SmApiTranslate` steps, skin solids (`SmApiCreateSkinPrimitive` of exact NURB curves)
 //! and the result of an `SmApiBoolean` of two operands. Both sides
 //! build them with the same constructors (`primitive::api_primitives`,
@@ -47,6 +47,14 @@
 //! compares `attributes`: per result face (edge) its area (length) and the attributes it
 //! carries, sorted by attributes, so attribute propagation through the merge shows.
 //!
+//! A `checked` call (fixtures only) runs `SmApiBoolean`, then the capi check sequence
+//! (`SmBrep::ValidatePointers`, then `SmBrep::AssertValid`; Rust
+//! `topology::brep::validation::check_brep`) on the result at `level` (default 2), and
+//! also compares `check`: the pointer check's status, whether `AssertValid` ran and
+//! passed, and for each list the failed tests (reporting type, list and test index) with
+//! how many reports each failed. The entities a report names are not compared: the two
+//! sides number a boolean result's entities differently.
+//!
 //! Compared: the input validation (`SM_BO_EXTRACT_SEPARATE` for the two-B-rep entry
 //! points, short lists and operations other than union / intersection / difference /
 //! merge for `SmApiMergeBreps`, which must leave the list untouched) and the merges
@@ -70,6 +78,7 @@ use solidcore::boolean::api_brep as api;
 use solidcore::boolean::merge::MergeOptions;
 use solidcore::curve::curve::Curve as SmCurve;
 use solidcore::geom::a_object::BooleanOperation;
+use solidcore::geom::assert_array::AssertArray;
 use solidcore::geom::attribute::{Attribute, AttributeStore, Behavior, ObjectKey};
 use solidcore::geom::vector3d::{Point3, Vec3};
 use solidcore::kernel::Kernel;
@@ -86,6 +95,7 @@ use solidcore::sweep::api_brep::{
 use solidcore::sweep::api_surfaces::create_skin_primitive;
 use solidcore::error::SM_ERR;
 use solidcore::topology::brep::p1::BoundaryTessellation;
+use solidcore::topology::brep::validation::{check_brep, CheckLevel};
 use solidcore::topology::brep::{p1 as brep_p1, p2 as brep_p2};
 use solidcore::topology::edgeuse::p1 as edgeuse_p1;
 use solidcore::topology::proto_topology::p1::api_transform::{
@@ -160,6 +170,13 @@ enum BrepIn {
     },
     /// `SmApiCreatePlanarCircle` (a disk in the XY plane).
     Disk { origin: P3, radius: f64 },
+    /// `SmApiCreateCone` (`SmBrep*&` overload; axis +Z, `origin` the base center).
+    Cone {
+        origin: P3,
+        radius_base: f64,
+        radius_top: f64,
+        height: f64,
+    },
 }
 
 /// The `pRegionBrep` of a non-manifold sweep.
@@ -397,6 +414,19 @@ enum Inputs {
         #[serde(default)]
         behavior: u8,
     },
+    /// `SmApiBoolean`, then the capi check of its result at `level` (an
+    /// `SmAssertTestLevel`, 0 to 2); the record adds the failed tests.
+    Checked {
+        a: BrepIn,
+        b: BrepIn,
+        operation: i32,
+        #[serde(default = "level_2")]
+        level: u8,
+    },
+}
+
+fn level_2() -> u8 {
+    2
 }
 
 fn spec(b: &BrepIn) -> BrepSpec {
@@ -464,6 +494,17 @@ fn spec(b: &BrepIn) -> BrepSpec {
             b: Box::new(spec(b)),
         },
         &BrepIn::Disk { origin, radius } => BrepSpec::Disk { origin, radius },
+        &BrepIn::Cone {
+            origin,
+            radius_base,
+            radius_top,
+            height,
+        } => BrepSpec::Cone {
+            origin,
+            radius_base,
+            radius_top,
+            height,
+        },
     }
 }
 
@@ -641,6 +682,17 @@ fn to_call(i: &Inputs) -> Call {
             call: Box::new(to_call(call)),
             behavior: *behavior,
         },
+        Inputs::Checked {
+            a,
+            b,
+            operation,
+            level,
+        } => Call::Checked {
+            a: spec(a),
+            b: spec(b),
+            operation: *operation,
+            level: *level,
+        },
     }
 }
 
@@ -679,6 +731,7 @@ fn cpp(i: &Inputs) -> Result<Output, HarnessError> {
                     .ok_or_else(|| harness("cpp: attributed record too short"))?;
                 Ok(to_output(head)?.values("attributes", rows.to_vec()))
             }
+            Inputs::Checked { .. } => checked_output(&o),
             Inputs::Boolean2d { .. } => {
                 areas_output(&o, o.first() == Some(&0.0) && o.get(1) == Some(&1.0))
             }
@@ -703,6 +756,28 @@ fn measured_output(o: &[f64], key: &str) -> Result<Output, HarnessError> {
     let (head, measures) =
         ffi::split_measures(o).ok_or_else(|| harness("cpp: measured record too short"))?;
     Ok(to_output(head)?.values(key, measures.to_vec()))
+}
+
+/// A `checked` record: the integer record, then on success (`status` 0 and a result) the
+/// check the shim appends, split off as the integers `check` ([`ffi::split_measures`]).
+fn checked_output(o: &[f64]) -> Result<Output, HarnessError> {
+    let succeeded = o.first() == Some(&0.0) && o.get(1) == Some(&1.0);
+    if !succeeded {
+        return to_output(o);
+    }
+    let (head, check) =
+        ffi::split_measures(o).ok_or_else(|| harness("cpp: checked record too short"))?;
+    let check = check
+        .iter()
+        .map(|&x| {
+            if x.fract() == 0.0 && x.abs() < 1e15 {
+                Ok(x as i64)
+            } else {
+                Err(harness(format!("non-integer check entry {x}")))
+            }
+        })
+        .collect::<Result<Vec<i64>, _>>()?;
+    Ok(to_output(head)?.ints("check", check))
 }
 
 /// A record that ends, when `has_areas`, with the shim's `put_areas` tail (split off as
@@ -907,6 +982,12 @@ fn build_at(k: &mut Kernel, b: &BrepIn, depth: usize) -> Result<Brep, Stop> {
             create_skin_primitive(k, &counts, &refs, *degree as usize, *cap_ends).map(|s| s.brep)
         }
         &BrepIn::Disk { origin, radius } => primitives::create_planar_circle(k, p3(origin), radius),
+        &BrepIn::Cone {
+            origin,
+            radius_base,
+            radius_top,
+            height,
+        } => primitives::create_cone(k, p3(origin), radius_base, radius_top, height),
     };
     r.map_err(|e| stop("operand constructor", &e))
 }
@@ -1010,6 +1091,40 @@ fn measures(k: &Kernel, b: &mut Brep) -> Result<Vec<f64>, Stop> {
     }
     areas.sort_by(f64::total_cmp);
     o.extend(areas);
+    Ok(o)
+}
+
+/// The shim's `put_failed_tests`: `groups` then per failed report's (reporting type,
+/// list index, test index), in ascending order, `type list test count`.
+fn failed_tests(o: &mut Vec<i64>, reports: &AssertArray) -> Result<(), Stop> {
+    let mut groups: std::collections::BTreeMap<(i64, i64, i64), i64> =
+        std::collections::BTreeMap::new();
+    for r in reports.reports().iter().filter(|r| !r.ok) {
+        let list = i64::try_from(r.list_index).map_err(|_| harness("list index overflow"))?;
+        let test = i64::try_from(r.test_index).map_err(|_| harness("test index overflow"))?;
+        *groups.entry((r.reporting_type, list, test)).or_insert(0) += 1;
+    }
+    o.push(count(groups.len())?);
+    for ((t, l, i), n) in groups {
+        o.extend([t, l, i, n]);
+    }
+    Ok(())
+}
+
+/// The shim's `run_checked` tail: the capi check of `b` at `level` (`check_brep`), as
+/// `pointers_status failed... assert_valid failed...` (`assert_valid` `-1` when skipped).
+fn check(k: &mut Kernel, b: &mut Brep, level: u8) -> Result<Vec<i64>, Stop> {
+    let level = match level {
+        0 => CheckLevel::Level0,
+        1 => CheckLevel::Level1,
+        2 => CheckLevel::Level2,
+        _ => return Err(Stop::Harness(harness(format!("check level {level}")))),
+    };
+    let c = check_brep(k, b, level).map_err(|e| stop("check_brep", &e))?;
+    let mut o = vec![i64::from(c.pointers_status)];
+    failed_tests(&mut o, &c.pointer_reports)?;
+    o.push(c.assert_valid.map_or(-1, i64::from));
+    failed_tests(&mut o, &c.reports)?;
     Ok(o)
 }
 
@@ -1540,6 +1655,22 @@ fn rust_call_with(k: &mut Kernel, i: &Inputs, seen: &dyn Fn(&SolidError)) -> Res
                         }
                     }
                     Ok(rec.values("attributes", rows))
+                }
+                Err(e) => Ok(err_output(&e)),
+            }
+        }
+        Inputs::Checked {
+            a,
+            b,
+            operation,
+            level,
+        } => {
+            let (a, b) = (build(k, a)?, build(k, b)?);
+            match api::boolean(k, a, b, op(*operation)?) {
+                Ok(mut out) => {
+                    let rec = two_record(&out, keeps_other(*operation, false))?;
+                    let c = check(k, &mut out.result, *level)?;
+                    Ok(rec.ints("check", c))
                 }
                 Err(e) => Ok(err_output(&e)),
             }

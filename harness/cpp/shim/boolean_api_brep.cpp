@@ -6,6 +6,8 @@
 // SmApiNonManifoldBoolean, SmApiPiecewiseMerge) and its non-manifold sweeps of a B-rep
 // (SmApiNonManifoldSweep, SmApiNonManifoldRotationalSweep), and SmApiTessellateBoundaries of
 // an operand, called exactly as a caller of the API would.
+// OP_CHECKED also runs the capi check sequence (SmBrep::ValidatePointers, then
+// SmBrep::AssertValid) on an SmApiBoolean result.
 //
 // One entry point, sc_boolean_api_brep_run(in, n_in, out, cap, out_len). `in` is
 // `op args...`; layouts are documented in crates/solidcore-ffi/src/units/boolean_api_brep.rs,
@@ -13,7 +15,7 @@
 // checked here as well (a malformed program is SC_ERR_ARG). The whole program is parsed before
 // any upstream object is built. Operand B-reps are boxes (SmApiCreateBox), spheres
 // (SmApiCreateSphere), sheets (SmApiCreatePlane), planar disks (SmApiCreatePlanarCircle),
-// tori (SmApiCreateTorus), an operand moved
+// tori (SmApiCreateTorus), cones (SmApiCreateCone), an operand moved
 // by SmApiRotate / SmApiTranslate steps, a skin solid (SmApiCreateSkinPrimitive of NURB
 // curves), cylinders (SmApiCreateCylinder) or the SmApiBoolean result of two operands; a failing
 // constructor or operand Boolean is SC_ERR_ARG, except a failing SmApiCreateTorus, whose
@@ -35,6 +37,7 @@
 #include <SmApiGeneral.h>
 #include <SmApiPrimitives.h>
 #include <SmApiQueries.h>
+#include <SmAssertArray.h>
 #include <SmAttribute.h>
 #include <SmBSplineCurve.h>
 #include <SmBrep.h>
@@ -53,6 +56,7 @@
 
 #include <algorithm>
 #include <set>
+#include <map>
 #include <stdexcept>
 #include <vector>
 
@@ -85,6 +89,7 @@ enum : int32_t
     OP_ATTRIBUTED = 17,
     OP_TESSELLATE_BOUNDARIES = 18,
     OP_ATTRIBUTED_LIST = 19,
+    OP_CHECKED = 20,
 };
 
 // Most entries of one non-manifold sweep selection array (MAX_SELECTION in the Rust module).
@@ -102,6 +107,7 @@ enum : int32_t
     BK_SKIN = 7,     // SmApiCreateSkinPrimitive(counts, NURB curves, degree, cap)
     BK_DISK = 8,     // SmApiCreatePlanarCircle(origin, radius)
     BK_CYLINDER = 9, // SmApiCreateCylinder(origin, radius, height), the SmBrep*& overload
+    BK_CONE = 10,    // SmApiCreateCone(origin, radius_base, radius_top, height), the SmBrep*& overload
 };
 
 // Most curves (and profiles) of one BK_SKIN operand (MAX_SKIN_CURVES in the Rust module),
@@ -170,7 +176,7 @@ BrepSpec read_spec(Rd& rd, int depth = 0)
     if (depth >= MAX_DEPTH)
         throw Bad();
     BrepSpec s;
-    s.kind = (int32_t)rd.idx(1, 9);
+    s.kind = (int32_t)rd.idx(1, 10);
     int k = 0;
     switch (s.kind)
     {
@@ -183,6 +189,7 @@ BrepSpec read_spec(Rd& rd, int depth = 0)
     case BK_SKIN: k = 0; break;
     case BK_DISK: k = 4; break;
     case BK_CYLINDER: k = 5; break;
+    case BK_CONE: k = 6; break;
     default: throw Bad();
     }
     if (s.kind == BK_BOOLEAN)
@@ -300,6 +307,7 @@ SmBrep* build(const BrepSpec& s)
     case BK_SKIN: stat = build_skin(s, r); break;
     case BK_DISK: stat = SmApiCreatePlanarCircle(o, s.d[3], r); break;
     case BK_CYLINDER: stat = SmApiCreateCylinder(o, s.d[3], s.d[4], r); break;
+    case BK_CONE: stat = SmApiCreateCone(o, s.d[3], s.d[4], s.d[5], r); break;
     case BK_MOVED:
     {
         r = build(s.sub[0]);
@@ -753,6 +761,82 @@ void run_attributed(Rd& rd, std::vector<double>& o)
     delete res;
 }
 
+// The failed reports (!m_bOK) of one check list as `groups` then per
+// (m_lReportingType, m_lListIndex, m_lTestIndex), in ascending order, `type list test
+// count`: which tests fail and how often, not the entities they name (the two sides
+// number a boolean result's entities differently).
+void put_failed_tests(std::vector<double>& o, SmAssertArray& reports)
+{
+    std::map<std::vector<double>, long> groups;
+    for (ULONG i = 0; i < reports.GetSize(); i++)
+    {
+        SmAssertReport* r = reports[i];
+        if (r != NULL && !r->m_bOK)
+            groups[{(double)r->m_lReportingType, (double)r->m_lListIndex, (double)r->m_lTestIndex}]++;
+    }
+    o.push_back((double)groups.size());
+    for (std::map<std::vector<double>, long>::const_iterator g = groups.begin(); g != groups.end(); ++g)
+    {
+        o.insert(o.end(), g->first.begin(), g->first.end());
+        o.push_back((double)g->second);
+    }
+}
+
+// OP_CHECKED `brep brep operation level`: SmApiBoolean, then on success the two-B-rep
+// record of run_two followed by the capi check of the result at `level`
+// (SmAssertTestLevel 0 to 2): `pointers_status` (ValidatePointers' SmStatus, its default
+// SM_NO_WALK) and its failed tests (put_failed_tests), then `assert_valid` (-1 when
+// skipped because ValidatePointers reported a failure, else AssertValid's SmBoolean with
+// SM_WALK) and its failed tests, then the number of those values (as OP_MEASURED's tail).
+void run_checked(Rd& rd, std::vector<double>& o)
+{
+    BrepSpec a = read_spec(rd);
+    BrepSpec b = read_spec(rd);
+    int32_t op = (int32_t)rd.idx(0, 10);
+    SmAssertTestLevel level = (SmAssertTestLevel)rd.idx(0, 2);
+    if (rd.at != rd.n)
+        throw Bad();
+    std::vector<BrepSpec> specs;
+    specs.push_back(a);
+    specs.push_back(b);
+    std::vector<SmBrep*> bs = build_all(specs);
+    SmBrep* b1 = bs[0];
+    SmBrep* b2 = bs[1];
+    SmBrep* res = b1;
+    SmApiStatus stat = SmApiBoolean(b1, b2, (SmBooleanOperationType)op, res);
+    o.push_back(st(stat));
+    if (stat != SM_SUCCESS)
+    {
+        if (res != NULL && res != b1 && res != b2)
+            delete res;
+        delete b1;
+        delete b2;
+        return;
+    }
+    bool kept = keeps_other(op, false);
+    o.push_back(flg(res != NULL));
+    if (res == NULL)
+        return;
+    o.push_back(flg(res == b1));
+    o.push_back(flg(kept));
+    put_brep(o, res);
+    if (kept && b2 != res)
+        put_brep(o, b2);
+    size_t start = o.size();
+    SmAssertArray pointers, asserts;
+    o.push_back((double)res->ValidatePointers(&pointers, level));
+    put_failed_tests(o, pointers);
+    bool failed = false;
+    for (ULONG i = 0; i < pointers.GetSize(); i++)
+        failed |= pointers[i] != NULL && !pointers[i]->m_bOK;
+    o.push_back(failed ? -1.0 : flg(res->AssertValid(&asserts, level, SM_WALK) != FALSE));
+    put_failed_tests(o, asserts);
+    o.push_back((double)(o.size() - start));
+    if (kept && b2 != res)
+        delete b2;
+    delete res;
+}
+
 // OP_ATTRIBUTED_LIST's tagging: every B-rep `i` of `bs` tagged as operand `i`
 // (tag_operand) when `behavior` is one (>= 0).
 void tag_all(const std::vector<SmBrep*>& bs, int32_t behavior)
@@ -1173,7 +1257,7 @@ void run_tessellate_boundaries(Rd& rd, std::vector<double>& o)
 
 void run(Rd& rd, std::vector<double>& o)
 {
-    int32_t api = (int32_t)rd.idx(1, 19);
+    int32_t api = (int32_t)rd.idx(1, 20);
     switch (api)
     {
     case OP_BOOLEAN:
@@ -1195,6 +1279,7 @@ void run(Rd& rd, std::vector<double>& o)
     case OP_ATTRIBUTED: run_attributed(rd, o); break;
     case OP_TESSELLATE_BOUNDARIES: run_tessellate_boundaries(rd, o); break;
     case OP_ATTRIBUTED_LIST: run_attributed_list(rd, o); break;
+    case OP_CHECKED: run_checked(rd, o); break;
     default: throw Bad();
     }
 }

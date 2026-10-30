@@ -1,0 +1,2148 @@
+{
+ "cases": [
+  {
+   "name": "face_plane_setmember_owner_eu0",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:632",
+   "note": "SetMemberUVTrimCurve places the curve on the SAME member of the mated pair and makes it the curve's owner (SmEdgeuse.h:179-189, pUVTrimCurve->SetOwner(pOwner)); the state compares the owner as an edge use index on both sides, so placing through an OPPOSITE use shows the owner is the mate, not the use called.",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "plane": {
+       "o": [
+        1,
+        2,
+        3
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     "dom": [
+      -1,
+      -1,
+      1,
+      1
+     ]
+    },
+    "op": "set_uv",
+    "eu": 0,
+    "kind": 4,
+    "curve": {
+     "dim": 2,
+     "cpts": [
+      [
+       0.0,
+       0.0,
+       1.7976931348623157e+308,
+       -1.7976931348623157e+308
+      ],
+      [
+       0.2,
+       0.5,
+       1.7976931348623157e+308,
+       -1.7976931348623157e+308
+      ],
+      [
+       0.6,
+       0.4,
+       1.7976931348623157e+308,
+       -1.7976931348623157e+308
+      ],
+      [
+       1.0,
+       1.0,
+       1.7976931348623157e+308,
+       -1.7976931348623157e+308
+      ]
+     ],
+     "p": 3,
+     "u": [
+      0,
+      0,
+      0,
+      0,
+      1,
+      1,
+      1,
+      1
+     ]
+    },
+    "dmax": 0.0,
+    "delete": false,
+    "fail": null
+   }
+  },
+  {
+   "name": "face_plane_setmember_owner_eu1",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:632",
+   "note": "SetMemberUVTrimCurve places the curve on the SAME member of the mated pair and makes it the curve's owner (SmEdgeuse.h:179-189, pUVTrimCurve->SetOwner(pOwner)); the state compares the owner as an edge use index on both sides, so placing through an OPPOSITE use shows the owner is the mate, not the use called.",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "plane": {
+       "o": [
+        1,
+        2,
+        3
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     "dom": [
+      -1,
+      -1,
+      1,
+      1
+     ]
+    },
+    "op": "set_uv",
+    "eu": 1,
+    "kind": 4,
+    "curve": {
+     "dim": 2,
+     "cpts": [
+      [
+       0.0,
+       0.0,
+       1.7976931348623157e+308,
+       -1.7976931348623157e+308
+      ],
+      [
+       0.2,
+       0.5,
+       1.7976931348623157e+308,
+       -1.7976931348623157e+308
+      ],
+      [
+       0.6,
+       0.4,
+       1.7976931348623157e+308,
+       -1.7976931348623157e+308
+      ],
+      [
+       1.0,
+       1.0,
+       1.7976931348623157e+308,
+       -1.7976931348623157e+308
+      ]
+     ],
+     "p": 3,
+     "u": [
+      0,
+      0,
+      0,
+      0,
+      1,
+      1,
+      1,
+      1
+     ]
+    },
+    "dmax": 0.0,
+    "delete": false,
+    "fail": null
+   }
+  },
+  {
+   "name": "face_plane_setmember_owner_eu2",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:632",
+   "note": "SetMemberUVTrimCurve places the curve on the SAME member of the mated pair and makes it the curve's owner (SmEdgeuse.h:179-189, pUVTrimCurve->SetOwner(pOwner)); the state compares the owner as an edge use index on both sides, so placing through an OPPOSITE use shows the owner is the mate, not the use called.",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "plane": {
+       "o": [
+        1,
+        2,
+        3
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     "dom": [
+      -1,
+      -1,
+      1,
+      1
+     ]
+    },
+    "op": "set_uv",
+    "eu": 2,
+    "kind": 4,
+    "curve": {
+     "dim": 2,
+     "cpts": [
+      [
+       0.0,
+       0.0,
+       1.7976931348623157e+308,
+       -1.7976931348623157e+308
+      ],
+      [
+       0.2,
+       0.5,
+       1.7976931348623157e+308,
+       -1.7976931348623157e+308
+      ],
+      [
+       0.6,
+       0.4,
+       1.7976931348623157e+308,
+       -1.7976931348623157e+308
+      ],
+      [
+       1.0,
+       1.0,
+       1.7976931348623157e+308,
+       -1.7976931348623157e+308
+      ]
+     ],
+     "p": 3,
+     "u": [
+      0,
+      0,
+      0,
+      0,
+      1,
+      1,
+      1,
+      1
+     ]
+    },
+    "dmax": 0.0,
+    "delete": false,
+    "fail": null
+   }
+  },
+  {
+   "name": "face_plane_setmember_owner_eu3",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:632",
+   "note": "SetMemberUVTrimCurve places the curve on the SAME member of the mated pair and makes it the curve's owner (SmEdgeuse.h:179-189, pUVTrimCurve->SetOwner(pOwner)); the state compares the owner as an edge use index on both sides, so placing through an OPPOSITE use shows the owner is the mate, not the use called.",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "plane": {
+       "o": [
+        1,
+        2,
+        3
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     "dom": [
+      -1,
+      -1,
+      1,
+      1
+     ]
+    },
+    "op": "set_uv",
+    "eu": 3,
+    "kind": 4,
+    "curve": {
+     "dim": 2,
+     "cpts": [
+      [
+       0.0,
+       0.0,
+       1.7976931348623157e+308,
+       -1.7976931348623157e+308
+      ],
+      [
+       0.2,
+       0.5,
+       1.7976931348623157e+308,
+       -1.7976931348623157e+308
+      ],
+      [
+       0.6,
+       0.4,
+       1.7976931348623157e+308,
+       -1.7976931348623157e+308
+      ],
+      [
+       1.0,
+       1.0,
+       1.7976931348623157e+308,
+       -1.7976931348623157e+308
+      ]
+     ],
+     "p": 3,
+     "u": [
+      0,
+      0,
+      0,
+      0,
+      1,
+      1,
+      1,
+      1
+     ]
+    },
+    "dmax": 0.0,
+    "delete": false,
+    "fail": null
+   }
+  },
+  {
+   "name": "face_plane_setmember_owner_eu4",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:632",
+   "note": "SetMemberUVTrimCurve places the curve on the SAME member of the mated pair and makes it the curve's owner (SmEdgeuse.h:179-189, pUVTrimCurve->SetOwner(pOwner)); the state compares the owner as an edge use index on both sides, so placing through an OPPOSITE use shows the owner is the mate, not the use called.",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "plane": {
+       "o": [
+        1,
+        2,
+        3
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     "dom": [
+      -1,
+      -1,
+      1,
+      1
+     ]
+    },
+    "op": "set_uv",
+    "eu": 4,
+    "kind": 4,
+    "curve": {
+     "dim": 2,
+     "cpts": [
+      [
+       0.0,
+       0.0,
+       1.7976931348623157e+308,
+       -1.7976931348623157e+308
+      ],
+      [
+       0.2,
+       0.5,
+       1.7976931348623157e+308,
+       -1.7976931348623157e+308
+      ],
+      [
+       0.6,
+       0.4,
+       1.7976931348623157e+308,
+       -1.7976931348623157e+308
+      ],
+      [
+       1.0,
+       1.0,
+       1.7976931348623157e+308,
+       -1.7976931348623157e+308
+      ]
+     ],
+     "p": 3,
+     "u": [
+      0,
+      0,
+      0,
+      0,
+      1,
+      1,
+      1,
+      1
+     ]
+    },
+    "dmax": 0.0,
+    "delete": false,
+    "fail": null
+   }
+  },
+  {
+   "name": "face_plane_setmember_owner_eu5",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:632",
+   "note": "SetMemberUVTrimCurve places the curve on the SAME member of the mated pair and makes it the curve's owner (SmEdgeuse.h:179-189, pUVTrimCurve->SetOwner(pOwner)); the state compares the owner as an edge use index on both sides, so placing through an OPPOSITE use shows the owner is the mate, not the use called.",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "plane": {
+       "o": [
+        1,
+        2,
+        3
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     "dom": [
+      -1,
+      -1,
+      1,
+      1
+     ]
+    },
+    "op": "set_uv",
+    "eu": 5,
+    "kind": 4,
+    "curve": {
+     "dim": 2,
+     "cpts": [
+      [
+       0.0,
+       0.0,
+       1.7976931348623157e+308,
+       -1.7976931348623157e+308
+      ],
+      [
+       0.2,
+       0.5,
+       1.7976931348623157e+308,
+       -1.7976931348623157e+308
+      ],
+      [
+       0.6,
+       0.4,
+       1.7976931348623157e+308,
+       -1.7976931348623157e+308
+      ],
+      [
+       1.0,
+       1.0,
+       1.7976931348623157e+308,
+       -1.7976931348623157e+308
+      ]
+     ],
+     "p": 3,
+     "u": [
+      0,
+      0,
+      0,
+      0,
+      1,
+      1,
+      1,
+      1
+     ]
+    },
+    "dmax": 0.0,
+    "delete": false,
+    "fail": null
+   }
+  },
+  {
+   "name": "face_plane_setmember_owner_eu6",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:632",
+   "note": "SetMemberUVTrimCurve places the curve on the SAME member of the mated pair and makes it the curve's owner (SmEdgeuse.h:179-189, pUVTrimCurve->SetOwner(pOwner)); the state compares the owner as an edge use index on both sides, so placing through an OPPOSITE use shows the owner is the mate, not the use called.",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "plane": {
+       "o": [
+        1,
+        2,
+        3
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     "dom": [
+      -1,
+      -1,
+      1,
+      1
+     ]
+    },
+    "op": "set_uv",
+    "eu": 6,
+    "kind": 4,
+    "curve": {
+     "dim": 2,
+     "cpts": [
+      [
+       0.0,
+       0.0,
+       1.7976931348623157e+308,
+       -1.7976931348623157e+308
+      ],
+      [
+       0.2,
+       0.5,
+       1.7976931348623157e+308,
+       -1.7976931348623157e+308
+      ],
+      [
+       0.6,
+       0.4,
+       1.7976931348623157e+308,
+       -1.7976931348623157e+308
+      ],
+      [
+       1.0,
+       1.0,
+       1.7976931348623157e+308,
+       -1.7976931348623157e+308
+      ]
+     ],
+     "p": 3,
+     "u": [
+      0,
+      0,
+      0,
+      0,
+      1,
+      1,
+      1,
+      1
+     ]
+    },
+    "dmax": 0.0,
+    "delete": false,
+    "fail": null
+   }
+  },
+  {
+   "name": "face_plane_setmember_owner_eu7",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:632",
+   "note": "SetMemberUVTrimCurve places the curve on the SAME member of the mated pair and makes it the curve's owner (SmEdgeuse.h:179-189, pUVTrimCurve->SetOwner(pOwner)); the state compares the owner as an edge use index on both sides, so placing through an OPPOSITE use shows the owner is the mate, not the use called.",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "plane": {
+       "o": [
+        1,
+        2,
+        3
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     "dom": [
+      -1,
+      -1,
+      1,
+      1
+     ]
+    },
+    "op": "set_uv",
+    "eu": 7,
+    "kind": 4,
+    "curve": {
+     "dim": 2,
+     "cpts": [
+      [
+       0.0,
+       0.0,
+       1.7976931348623157e+308,
+       -1.7976931348623157e+308
+      ],
+      [
+       0.2,
+       0.5,
+       1.7976931348623157e+308,
+       -1.7976931348623157e+308
+      ],
+      [
+       0.6,
+       0.4,
+       1.7976931348623157e+308,
+       -1.7976931348623157e+308
+      ],
+      [
+       1.0,
+       1.0,
+       1.7976931348623157e+308,
+       -1.7976931348623157e+308
+      ]
+     ],
+     "p": 3,
+     "u": [
+      0,
+      0,
+      0,
+      0,
+      1,
+      1,
+      1,
+      1
+     ]
+    },
+    "dmax": 0.0,
+    "delete": false,
+    "fail": null
+   }
+  },
+  {
+   "name": "face_plane_setuv_new_owner_eu0",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:632",
+   "note": "SetUVTrimCurve(new curve) makes the SAME member of the pair the owner; compared as an edge use index on both sides.",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "plane": {
+       "o": [
+        1,
+        2,
+        3
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     "dom": [
+      -1,
+      -1,
+      1,
+      1
+     ]
+    },
+    "op": "set_uv",
+    "eu": 0,
+    "kind": 2,
+    "curve": {
+     "dim": 2,
+     "cpts": [
+      [
+       0.0,
+       0.0,
+       1.7976931348623157e+308,
+       -1.7976931348623157e+308
+      ],
+      [
+       0.2,
+       0.5,
+       1.7976931348623157e+308,
+       -1.7976931348623157e+308
+      ],
+      [
+       0.6,
+       0.4,
+       1.7976931348623157e+308,
+       -1.7976931348623157e+308
+      ],
+      [
+       1.0,
+       1.0,
+       1.7976931348623157e+308,
+       -1.7976931348623157e+308
+      ]
+     ],
+     "p": 3,
+     "u": [
+      0,
+      0,
+      0,
+      0,
+      1,
+      1,
+      1,
+      1
+     ]
+    },
+    "dmax": 0.0,
+    "delete": false,
+    "fail": null
+   }
+  },
+  {
+   "name": "face_plane_setuv_new_owner_eu1",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:632",
+   "note": "SetUVTrimCurve(new curve) makes the SAME member of the pair the owner; compared as an edge use index on both sides.",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "plane": {
+       "o": [
+        1,
+        2,
+        3
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     "dom": [
+      -1,
+      -1,
+      1,
+      1
+     ]
+    },
+    "op": "set_uv",
+    "eu": 1,
+    "kind": 2,
+    "curve": {
+     "dim": 2,
+     "cpts": [
+      [
+       0.0,
+       0.0,
+       1.7976931348623157e+308,
+       -1.7976931348623157e+308
+      ],
+      [
+       0.2,
+       0.5,
+       1.7976931348623157e+308,
+       -1.7976931348623157e+308
+      ],
+      [
+       0.6,
+       0.4,
+       1.7976931348623157e+308,
+       -1.7976931348623157e+308
+      ],
+      [
+       1.0,
+       1.0,
+       1.7976931348623157e+308,
+       -1.7976931348623157e+308
+      ]
+     ],
+     "p": 3,
+     "u": [
+      0,
+      0,
+      0,
+      0,
+      1,
+      1,
+      1,
+      1
+     ]
+    },
+    "dmax": 0.0,
+    "delete": false,
+    "fail": null
+   }
+  },
+  {
+   "name": "face_plane_setuv_new_owner_eu2",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:632",
+   "note": "SetUVTrimCurve(new curve) makes the SAME member of the pair the owner; compared as an edge use index on both sides.",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "plane": {
+       "o": [
+        1,
+        2,
+        3
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     "dom": [
+      -1,
+      -1,
+      1,
+      1
+     ]
+    },
+    "op": "set_uv",
+    "eu": 2,
+    "kind": 2,
+    "curve": {
+     "dim": 2,
+     "cpts": [
+      [
+       0.0,
+       0.0,
+       1.7976931348623157e+308,
+       -1.7976931348623157e+308
+      ],
+      [
+       0.2,
+       0.5,
+       1.7976931348623157e+308,
+       -1.7976931348623157e+308
+      ],
+      [
+       0.6,
+       0.4,
+       1.7976931348623157e+308,
+       -1.7976931348623157e+308
+      ],
+      [
+       1.0,
+       1.0,
+       1.7976931348623157e+308,
+       -1.7976931348623157e+308
+      ]
+     ],
+     "p": 3,
+     "u": [
+      0,
+      0,
+      0,
+      0,
+      1,
+      1,
+      1,
+      1
+     ]
+    },
+    "dmax": 0.0,
+    "delete": false,
+    "fail": null
+   }
+  },
+  {
+   "name": "face_plane_setuv_new_owner_eu3",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:632",
+   "note": "SetUVTrimCurve(new curve) makes the SAME member of the pair the owner; compared as an edge use index on both sides.",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "plane": {
+       "o": [
+        1,
+        2,
+        3
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     "dom": [
+      -1,
+      -1,
+      1,
+      1
+     ]
+    },
+    "op": "set_uv",
+    "eu": 3,
+    "kind": 2,
+    "curve": {
+     "dim": 2,
+     "cpts": [
+      [
+       0.0,
+       0.0,
+       1.7976931348623157e+308,
+       -1.7976931348623157e+308
+      ],
+      [
+       0.2,
+       0.5,
+       1.7976931348623157e+308,
+       -1.7976931348623157e+308
+      ],
+      [
+       0.6,
+       0.4,
+       1.7976931348623157e+308,
+       -1.7976931348623157e+308
+      ],
+      [
+       1.0,
+       1.0,
+       1.7976931348623157e+308,
+       -1.7976931348623157e+308
+      ]
+     ],
+     "p": 3,
+     "u": [
+      0,
+      0,
+      0,
+      0,
+      1,
+      1,
+      1,
+      1
+     ]
+    },
+    "dmax": 0.0,
+    "delete": false,
+    "fail": null
+   }
+  },
+  {
+   "name": "face_plane_setuv_new_owner_eu4",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:632",
+   "note": "SetUVTrimCurve(new curve) makes the SAME member of the pair the owner; compared as an edge use index on both sides.",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "plane": {
+       "o": [
+        1,
+        2,
+        3
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     "dom": [
+      -1,
+      -1,
+      1,
+      1
+     ]
+    },
+    "op": "set_uv",
+    "eu": 4,
+    "kind": 2,
+    "curve": {
+     "dim": 2,
+     "cpts": [
+      [
+       0.0,
+       0.0,
+       1.7976931348623157e+308,
+       -1.7976931348623157e+308
+      ],
+      [
+       0.2,
+       0.5,
+       1.7976931348623157e+308,
+       -1.7976931348623157e+308
+      ],
+      [
+       0.6,
+       0.4,
+       1.7976931348623157e+308,
+       -1.7976931348623157e+308
+      ],
+      [
+       1.0,
+       1.0,
+       1.7976931348623157e+308,
+       -1.7976931348623157e+308
+      ]
+     ],
+     "p": 3,
+     "u": [
+      0,
+      0,
+      0,
+      0,
+      1,
+      1,
+      1,
+      1
+     ]
+    },
+    "dmax": 0.0,
+    "delete": false,
+    "fail": null
+   }
+  },
+  {
+   "name": "face_plane_setuv_new_owner_eu5",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:632",
+   "note": "SetUVTrimCurve(new curve) makes the SAME member of the pair the owner; compared as an edge use index on both sides.",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "plane": {
+       "o": [
+        1,
+        2,
+        3
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     "dom": [
+      -1,
+      -1,
+      1,
+      1
+     ]
+    },
+    "op": "set_uv",
+    "eu": 5,
+    "kind": 2,
+    "curve": {
+     "dim": 2,
+     "cpts": [
+      [
+       0.0,
+       0.0,
+       1.7976931348623157e+308,
+       -1.7976931348623157e+308
+      ],
+      [
+       0.2,
+       0.5,
+       1.7976931348623157e+308,
+       -1.7976931348623157e+308
+      ],
+      [
+       0.6,
+       0.4,
+       1.7976931348623157e+308,
+       -1.7976931348623157e+308
+      ],
+      [
+       1.0,
+       1.0,
+       1.7976931348623157e+308,
+       -1.7976931348623157e+308
+      ]
+     ],
+     "p": 3,
+     "u": [
+      0,
+      0,
+      0,
+      0,
+      1,
+      1,
+      1,
+      1
+     ]
+    },
+    "dmax": 0.0,
+    "delete": false,
+    "fail": null
+   }
+  },
+  {
+   "name": "face_plane_setuv_new_owner_eu6",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:632",
+   "note": "SetUVTrimCurve(new curve) makes the SAME member of the pair the owner; compared as an edge use index on both sides.",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "plane": {
+       "o": [
+        1,
+        2,
+        3
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     "dom": [
+      -1,
+      -1,
+      1,
+      1
+     ]
+    },
+    "op": "set_uv",
+    "eu": 6,
+    "kind": 2,
+    "curve": {
+     "dim": 2,
+     "cpts": [
+      [
+       0.0,
+       0.0,
+       1.7976931348623157e+308,
+       -1.7976931348623157e+308
+      ],
+      [
+       0.2,
+       0.5,
+       1.7976931348623157e+308,
+       -1.7976931348623157e+308
+      ],
+      [
+       0.6,
+       0.4,
+       1.7976931348623157e+308,
+       -1.7976931348623157e+308
+      ],
+      [
+       1.0,
+       1.0,
+       1.7976931348623157e+308,
+       -1.7976931348623157e+308
+      ]
+     ],
+     "p": 3,
+     "u": [
+      0,
+      0,
+      0,
+      0,
+      1,
+      1,
+      1,
+      1
+     ]
+    },
+    "dmax": 0.0,
+    "delete": false,
+    "fail": null
+   }
+  },
+  {
+   "name": "face_plane_setuv_new_owner_eu7",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:632",
+   "note": "SetUVTrimCurve(new curve) makes the SAME member of the pair the owner; compared as an edge use index on both sides.",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "plane": {
+       "o": [
+        1,
+        2,
+        3
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     "dom": [
+      -1,
+      -1,
+      1,
+      1
+     ]
+    },
+    "op": "set_uv",
+    "eu": 7,
+    "kind": 2,
+    "curve": {
+     "dim": 2,
+     "cpts": [
+      [
+       0.0,
+       0.0,
+       1.7976931348623157e+308,
+       -1.7976931348623157e+308
+      ],
+      [
+       0.2,
+       0.5,
+       1.7976931348623157e+308,
+       -1.7976931348623157e+308
+      ],
+      [
+       0.6,
+       0.4,
+       1.7976931348623157e+308,
+       -1.7976931348623157e+308
+      ],
+      [
+       1.0,
+       1.0,
+       1.7976931348623157e+308,
+       -1.7976931348623157e+308
+      ]
+     ],
+     "p": 3,
+     "u": [
+      0,
+      0,
+      0,
+      0,
+      1,
+      1,
+      1,
+      1
+     ]
+    },
+    "dmax": 0.0,
+    "delete": false,
+    "fail": null
+   }
+  },
+  {
+   "name": "mouse_setmember_owner_eu0",
+   "upstream_ref": "tests/prog_test/src/smFeatureTest.cpp:63",
+   "note": "SetMemberUVTrimCurve places the curve on the SAME member of the mated pair and makes it the curve's owner (SmEdgeuse.h:179-189, pUVTrimCurve->SetOwner(pOwner)); the state compares the owner as an edge use index on both sides, so placing through an OPPOSITE use shows the owner is the mate, not the use called.",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Mouse.smb",
+     "rebuild": true
+    },
+    "op": "set_uv",
+    "eu": 0,
+    "kind": 4,
+    "curve": {
+     "dim": 2,
+     "cpts": [
+      [
+       0.0,
+       0.0,
+       1.7976931348623157e+308,
+       -1.7976931348623157e+308
+      ],
+      [
+       0.2,
+       0.5,
+       1.7976931348623157e+308,
+       -1.7976931348623157e+308
+      ],
+      [
+       0.6,
+       0.4,
+       1.7976931348623157e+308,
+       -1.7976931348623157e+308
+      ],
+      [
+       1.0,
+       1.0,
+       1.7976931348623157e+308,
+       -1.7976931348623157e+308
+      ]
+     ],
+     "p": 3,
+     "u": [
+      0,
+      0,
+      0,
+      0,
+      1,
+      1,
+      1,
+      1
+     ]
+    },
+    "dmax": 0.0,
+    "delete": false,
+    "fail": null
+   }
+  },
+  {
+   "name": "mouse_setmember_owner_eu1",
+   "upstream_ref": "tests/prog_test/src/smFeatureTest.cpp:63",
+   "note": "SetMemberUVTrimCurve places the curve on the SAME member of the mated pair and makes it the curve's owner (SmEdgeuse.h:179-189, pUVTrimCurve->SetOwner(pOwner)); the state compares the owner as an edge use index on both sides, so placing through an OPPOSITE use shows the owner is the mate, not the use called.",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Mouse.smb",
+     "rebuild": true
+    },
+    "op": "set_uv",
+    "eu": 1,
+    "kind": 4,
+    "curve": {
+     "dim": 2,
+     "cpts": [
+      [
+       0.0,
+       0.0,
+       1.7976931348623157e+308,
+       -1.7976931348623157e+308
+      ],
+      [
+       0.2,
+       0.5,
+       1.7976931348623157e+308,
+       -1.7976931348623157e+308
+      ],
+      [
+       0.6,
+       0.4,
+       1.7976931348623157e+308,
+       -1.7976931348623157e+308
+      ],
+      [
+       1.0,
+       1.0,
+       1.7976931348623157e+308,
+       -1.7976931348623157e+308
+      ]
+     ],
+     "p": 3,
+     "u": [
+      0,
+      0,
+      0,
+      0,
+      1,
+      1,
+      1,
+      1
+     ]
+    },
+    "dmax": 0.0,
+    "delete": false,
+    "fail": null
+   }
+  },
+  {
+   "name": "mouse_setmember_owner_eu2",
+   "upstream_ref": "tests/prog_test/src/smFeatureTest.cpp:63",
+   "note": "SetMemberUVTrimCurve places the curve on the SAME member of the mated pair and makes it the curve's owner (SmEdgeuse.h:179-189, pUVTrimCurve->SetOwner(pOwner)); the state compares the owner as an edge use index on both sides, so placing through an OPPOSITE use shows the owner is the mate, not the use called.",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Mouse.smb",
+     "rebuild": true
+    },
+    "op": "set_uv",
+    "eu": 2,
+    "kind": 4,
+    "curve": {
+     "dim": 2,
+     "cpts": [
+      [
+       0.0,
+       0.0,
+       1.7976931348623157e+308,
+       -1.7976931348623157e+308
+      ],
+      [
+       0.2,
+       0.5,
+       1.7976931348623157e+308,
+       -1.7976931348623157e+308
+      ],
+      [
+       0.6,
+       0.4,
+       1.7976931348623157e+308,
+       -1.7976931348623157e+308
+      ],
+      [
+       1.0,
+       1.0,
+       1.7976931348623157e+308,
+       -1.7976931348623157e+308
+      ]
+     ],
+     "p": 3,
+     "u": [
+      0,
+      0,
+      0,
+      0,
+      1,
+      1,
+      1,
+      1
+     ]
+    },
+    "dmax": 0.0,
+    "delete": false,
+    "fail": null
+   }
+  },
+  {
+   "name": "mouse_setmember_owner_eu3",
+   "upstream_ref": "tests/prog_test/src/smFeatureTest.cpp:63",
+   "note": "SetMemberUVTrimCurve places the curve on the SAME member of the mated pair and makes it the curve's owner (SmEdgeuse.h:179-189, pUVTrimCurve->SetOwner(pOwner)); the state compares the owner as an edge use index on both sides, so placing through an OPPOSITE use shows the owner is the mate, not the use called.",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Mouse.smb",
+     "rebuild": true
+    },
+    "op": "set_uv",
+    "eu": 3,
+    "kind": 4,
+    "curve": {
+     "dim": 2,
+     "cpts": [
+      [
+       0.0,
+       0.0,
+       1.7976931348623157e+308,
+       -1.7976931348623157e+308
+      ],
+      [
+       0.2,
+       0.5,
+       1.7976931348623157e+308,
+       -1.7976931348623157e+308
+      ],
+      [
+       0.6,
+       0.4,
+       1.7976931348623157e+308,
+       -1.7976931348623157e+308
+      ],
+      [
+       1.0,
+       1.0,
+       1.7976931348623157e+308,
+       -1.7976931348623157e+308
+      ]
+     ],
+     "p": 3,
+     "u": [
+      0,
+      0,
+      0,
+      0,
+      1,
+      1,
+      1,
+      1
+     ]
+    },
+    "dmax": 0.0,
+    "delete": false,
+    "fail": null
+   }
+  },
+  {
+   "name": "mouse_setmember_owner_eu4",
+   "upstream_ref": "tests/prog_test/src/smFeatureTest.cpp:63",
+   "note": "SetMemberUVTrimCurve places the curve on the SAME member of the mated pair and makes it the curve's owner (SmEdgeuse.h:179-189, pUVTrimCurve->SetOwner(pOwner)); the state compares the owner as an edge use index on both sides, so placing through an OPPOSITE use shows the owner is the mate, not the use called.",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Mouse.smb",
+     "rebuild": true
+    },
+    "op": "set_uv",
+    "eu": 4,
+    "kind": 4,
+    "curve": {
+     "dim": 2,
+     "cpts": [
+      [
+       0.0,
+       0.0,
+       1.7976931348623157e+308,
+       -1.7976931348623157e+308
+      ],
+      [
+       0.2,
+       0.5,
+       1.7976931348623157e+308,
+       -1.7976931348623157e+308
+      ],
+      [
+       0.6,
+       0.4,
+       1.7976931348623157e+308,
+       -1.7976931348623157e+308
+      ],
+      [
+       1.0,
+       1.0,
+       1.7976931348623157e+308,
+       -1.7976931348623157e+308
+      ]
+     ],
+     "p": 3,
+     "u": [
+      0,
+      0,
+      0,
+      0,
+      1,
+      1,
+      1,
+      1
+     ]
+    },
+    "dmax": 0.0,
+    "delete": false,
+    "fail": null
+   }
+  },
+  {
+   "name": "mouse_setmember_owner_eu5",
+   "upstream_ref": "tests/prog_test/src/smFeatureTest.cpp:63",
+   "note": "SetMemberUVTrimCurve places the curve on the SAME member of the mated pair and makes it the curve's owner (SmEdgeuse.h:179-189, pUVTrimCurve->SetOwner(pOwner)); the state compares the owner as an edge use index on both sides, so placing through an OPPOSITE use shows the owner is the mate, not the use called.",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Mouse.smb",
+     "rebuild": true
+    },
+    "op": "set_uv",
+    "eu": 5,
+    "kind": 4,
+    "curve": {
+     "dim": 2,
+     "cpts": [
+      [
+       0.0,
+       0.0,
+       1.7976931348623157e+308,
+       -1.7976931348623157e+308
+      ],
+      [
+       0.2,
+       0.5,
+       1.7976931348623157e+308,
+       -1.7976931348623157e+308
+      ],
+      [
+       0.6,
+       0.4,
+       1.7976931348623157e+308,
+       -1.7976931348623157e+308
+      ],
+      [
+       1.0,
+       1.0,
+       1.7976931348623157e+308,
+       -1.7976931348623157e+308
+      ]
+     ],
+     "p": 3,
+     "u": [
+      0,
+      0,
+      0,
+      0,
+      1,
+      1,
+      1,
+      1
+     ]
+    },
+    "dmax": 0.0,
+    "delete": false,
+    "fail": null
+   }
+  },
+  {
+   "name": "mouse_setmember_owner_eu6",
+   "upstream_ref": "tests/prog_test/src/smFeatureTest.cpp:63",
+   "note": "SetMemberUVTrimCurve places the curve on the SAME member of the mated pair and makes it the curve's owner (SmEdgeuse.h:179-189, pUVTrimCurve->SetOwner(pOwner)); the state compares the owner as an edge use index on both sides, so placing through an OPPOSITE use shows the owner is the mate, not the use called.",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Mouse.smb",
+     "rebuild": true
+    },
+    "op": "set_uv",
+    "eu": 6,
+    "kind": 4,
+    "curve": {
+     "dim": 2,
+     "cpts": [
+      [
+       0.0,
+       0.0,
+       1.7976931348623157e+308,
+       -1.7976931348623157e+308
+      ],
+      [
+       0.2,
+       0.5,
+       1.7976931348623157e+308,
+       -1.7976931348623157e+308
+      ],
+      [
+       0.6,
+       0.4,
+       1.7976931348623157e+308,
+       -1.7976931348623157e+308
+      ],
+      [
+       1.0,
+       1.0,
+       1.7976931348623157e+308,
+       -1.7976931348623157e+308
+      ]
+     ],
+     "p": 3,
+     "u": [
+      0,
+      0,
+      0,
+      0,
+      1,
+      1,
+      1,
+      1
+     ]
+    },
+    "dmax": 0.0,
+    "delete": false,
+    "fail": null
+   }
+  },
+  {
+   "name": "mouse_setmember_owner_eu7",
+   "upstream_ref": "tests/prog_test/src/smFeatureTest.cpp:63",
+   "note": "SetMemberUVTrimCurve places the curve on the SAME member of the mated pair and makes it the curve's owner (SmEdgeuse.h:179-189, pUVTrimCurve->SetOwner(pOwner)); the state compares the owner as an edge use index on both sides, so placing through an OPPOSITE use shows the owner is the mate, not the use called.",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Mouse.smb",
+     "rebuild": true
+    },
+    "op": "set_uv",
+    "eu": 7,
+    "kind": 4,
+    "curve": {
+     "dim": 2,
+     "cpts": [
+      [
+       0.0,
+       0.0,
+       1.7976931348623157e+308,
+       -1.7976931348623157e+308
+      ],
+      [
+       0.2,
+       0.5,
+       1.7976931348623157e+308,
+       -1.7976931348623157e+308
+      ],
+      [
+       0.6,
+       0.4,
+       1.7976931348623157e+308,
+       -1.7976931348623157e+308
+      ],
+      [
+       1.0,
+       1.0,
+       1.7976931348623157e+308,
+       -1.7976931348623157e+308
+      ]
+     ],
+     "p": 3,
+     "u": [
+      0,
+      0,
+      0,
+      0,
+      1,
+      1,
+      1,
+      1
+     ]
+    },
+    "dmax": 0.0,
+    "delete": false,
+    "fail": null
+   }
+  },
+  {
+   "name": "mouse_setuv_new_owner_eu0",
+   "upstream_ref": "tests/prog_test/src/smFeatureTest.cpp:63",
+   "note": "SetUVTrimCurve(new curve) makes the SAME member of the pair the owner; compared as an edge use index on both sides.",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Mouse.smb",
+     "rebuild": true
+    },
+    "op": "set_uv",
+    "eu": 0,
+    "kind": 2,
+    "curve": {
+     "dim": 2,
+     "cpts": [
+      [
+       0.0,
+       0.0,
+       1.7976931348623157e+308,
+       -1.7976931348623157e+308
+      ],
+      [
+       0.2,
+       0.5,
+       1.7976931348623157e+308,
+       -1.7976931348623157e+308
+      ],
+      [
+       0.6,
+       0.4,
+       1.7976931348623157e+308,
+       -1.7976931348623157e+308
+      ],
+      [
+       1.0,
+       1.0,
+       1.7976931348623157e+308,
+       -1.7976931348623157e+308
+      ]
+     ],
+     "p": 3,
+     "u": [
+      0,
+      0,
+      0,
+      0,
+      1,
+      1,
+      1,
+      1
+     ]
+    },
+    "dmax": 0.0,
+    "delete": false,
+    "fail": null
+   }
+  },
+  {
+   "name": "mouse_setuv_new_owner_eu1",
+   "upstream_ref": "tests/prog_test/src/smFeatureTest.cpp:63",
+   "note": "SetUVTrimCurve(new curve) makes the SAME member of the pair the owner; compared as an edge use index on both sides.",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Mouse.smb",
+     "rebuild": true
+    },
+    "op": "set_uv",
+    "eu": 1,
+    "kind": 2,
+    "curve": {
+     "dim": 2,
+     "cpts": [
+      [
+       0.0,
+       0.0,
+       1.7976931348623157e+308,
+       -1.7976931348623157e+308
+      ],
+      [
+       0.2,
+       0.5,
+       1.7976931348623157e+308,
+       -1.7976931348623157e+308
+      ],
+      [
+       0.6,
+       0.4,
+       1.7976931348623157e+308,
+       -1.7976931348623157e+308
+      ],
+      [
+       1.0,
+       1.0,
+       1.7976931348623157e+308,
+       -1.7976931348623157e+308
+      ]
+     ],
+     "p": 3,
+     "u": [
+      0,
+      0,
+      0,
+      0,
+      1,
+      1,
+      1,
+      1
+     ]
+    },
+    "dmax": 0.0,
+    "delete": false,
+    "fail": null
+   }
+  },
+  {
+   "name": "mouse_setuv_new_owner_eu2",
+   "upstream_ref": "tests/prog_test/src/smFeatureTest.cpp:63",
+   "note": "SetUVTrimCurve(new curve) makes the SAME member of the pair the owner; compared as an edge use index on both sides.",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Mouse.smb",
+     "rebuild": true
+    },
+    "op": "set_uv",
+    "eu": 2,
+    "kind": 2,
+    "curve": {
+     "dim": 2,
+     "cpts": [
+      [
+       0.0,
+       0.0,
+       1.7976931348623157e+308,
+       -1.7976931348623157e+308
+      ],
+      [
+       0.2,
+       0.5,
+       1.7976931348623157e+308,
+       -1.7976931348623157e+308
+      ],
+      [
+       0.6,
+       0.4,
+       1.7976931348623157e+308,
+       -1.7976931348623157e+308
+      ],
+      [
+       1.0,
+       1.0,
+       1.7976931348623157e+308,
+       -1.7976931348623157e+308
+      ]
+     ],
+     "p": 3,
+     "u": [
+      0,
+      0,
+      0,
+      0,
+      1,
+      1,
+      1,
+      1
+     ]
+    },
+    "dmax": 0.0,
+    "delete": false,
+    "fail": null
+   }
+  },
+  {
+   "name": "mouse_setuv_new_owner_eu3",
+   "upstream_ref": "tests/prog_test/src/smFeatureTest.cpp:63",
+   "note": "SetUVTrimCurve(new curve) makes the SAME member of the pair the owner; compared as an edge use index on both sides.",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Mouse.smb",
+     "rebuild": true
+    },
+    "op": "set_uv",
+    "eu": 3,
+    "kind": 2,
+    "curve": {
+     "dim": 2,
+     "cpts": [
+      [
+       0.0,
+       0.0,
+       1.7976931348623157e+308,
+       -1.7976931348623157e+308
+      ],
+      [
+       0.2,
+       0.5,
+       1.7976931348623157e+308,
+       -1.7976931348623157e+308
+      ],
+      [
+       0.6,
+       0.4,
+       1.7976931348623157e+308,
+       -1.7976931348623157e+308
+      ],
+      [
+       1.0,
+       1.0,
+       1.7976931348623157e+308,
+       -1.7976931348623157e+308
+      ]
+     ],
+     "p": 3,
+     "u": [
+      0,
+      0,
+      0,
+      0,
+      1,
+      1,
+      1,
+      1
+     ]
+    },
+    "dmax": 0.0,
+    "delete": false,
+    "fail": null
+   }
+  },
+  {
+   "name": "mouse_setuv_new_owner_eu4",
+   "upstream_ref": "tests/prog_test/src/smFeatureTest.cpp:63",
+   "note": "SetUVTrimCurve(new curve) makes the SAME member of the pair the owner; compared as an edge use index on both sides.",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Mouse.smb",
+     "rebuild": true
+    },
+    "op": "set_uv",
+    "eu": 4,
+    "kind": 2,
+    "curve": {
+     "dim": 2,
+     "cpts": [
+      [
+       0.0,
+       0.0,
+       1.7976931348623157e+308,
+       -1.7976931348623157e+308
+      ],
+      [
+       0.2,
+       0.5,
+       1.7976931348623157e+308,
+       -1.7976931348623157e+308
+      ],
+      [
+       0.6,
+       0.4,
+       1.7976931348623157e+308,
+       -1.7976931348623157e+308
+      ],
+      [
+       1.0,
+       1.0,
+       1.7976931348623157e+308,
+       -1.7976931348623157e+308
+      ]
+     ],
+     "p": 3,
+     "u": [
+      0,
+      0,
+      0,
+      0,
+      1,
+      1,
+      1,
+      1
+     ]
+    },
+    "dmax": 0.0,
+    "delete": false,
+    "fail": null
+   }
+  },
+  {
+   "name": "mouse_setuv_new_owner_eu5",
+   "upstream_ref": "tests/prog_test/src/smFeatureTest.cpp:63",
+   "note": "SetUVTrimCurve(new curve) makes the SAME member of the pair the owner; compared as an edge use index on both sides.",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Mouse.smb",
+     "rebuild": true
+    },
+    "op": "set_uv",
+    "eu": 5,
+    "kind": 2,
+    "curve": {
+     "dim": 2,
+     "cpts": [
+      [
+       0.0,
+       0.0,
+       1.7976931348623157e+308,
+       -1.7976931348623157e+308
+      ],
+      [
+       0.2,
+       0.5,
+       1.7976931348623157e+308,
+       -1.7976931348623157e+308
+      ],
+      [
+       0.6,
+       0.4,
+       1.7976931348623157e+308,
+       -1.7976931348623157e+308
+      ],
+      [
+       1.0,
+       1.0,
+       1.7976931348623157e+308,
+       -1.7976931348623157e+308
+      ]
+     ],
+     "p": 3,
+     "u": [
+      0,
+      0,
+      0,
+      0,
+      1,
+      1,
+      1,
+      1
+     ]
+    },
+    "dmax": 0.0,
+    "delete": false,
+    "fail": null
+   }
+  },
+  {
+   "name": "mouse_setuv_new_owner_eu6",
+   "upstream_ref": "tests/prog_test/src/smFeatureTest.cpp:63",
+   "note": "SetUVTrimCurve(new curve) makes the SAME member of the pair the owner; compared as an edge use index on both sides.",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Mouse.smb",
+     "rebuild": true
+    },
+    "op": "set_uv",
+    "eu": 6,
+    "kind": 2,
+    "curve": {
+     "dim": 2,
+     "cpts": [
+      [
+       0.0,
+       0.0,
+       1.7976931348623157e+308,
+       -1.7976931348623157e+308
+      ],
+      [
+       0.2,
+       0.5,
+       1.7976931348623157e+308,
+       -1.7976931348623157e+308
+      ],
+      [
+       0.6,
+       0.4,
+       1.7976931348623157e+308,
+       -1.7976931348623157e+308
+      ],
+      [
+       1.0,
+       1.0,
+       1.7976931348623157e+308,
+       -1.7976931348623157e+308
+      ]
+     ],
+     "p": 3,
+     "u": [
+      0,
+      0,
+      0,
+      0,
+      1,
+      1,
+      1,
+      1
+     ]
+    },
+    "dmax": 0.0,
+    "delete": false,
+    "fail": null
+   }
+  },
+  {
+   "name": "mouse_setuv_new_owner_eu7",
+   "upstream_ref": "tests/prog_test/src/smFeatureTest.cpp:63",
+   "note": "SetUVTrimCurve(new curve) makes the SAME member of the pair the owner; compared as an edge use index on both sides.",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Mouse.smb",
+     "rebuild": true
+    },
+    "op": "set_uv",
+    "eu": 7,
+    "kind": 2,
+    "curve": {
+     "dim": 2,
+     "cpts": [
+      [
+       0.0,
+       0.0,
+       1.7976931348623157e+308,
+       -1.7976931348623157e+308
+      ],
+      [
+       0.2,
+       0.5,
+       1.7976931348623157e+308,
+       -1.7976931348623157e+308
+      ],
+      [
+       0.6,
+       0.4,
+       1.7976931348623157e+308,
+       -1.7976931348623157e+308
+      ],
+      [
+       1.0,
+       1.0,
+       1.7976931348623157e+308,
+       -1.7976931348623157e+308
+      ]
+     ],
+     "p": 3,
+     "u": [
+      0,
+      0,
+      0,
+      0,
+      1,
+      1,
+      1,
+      1
+     ]
+    },
+    "dmax": 0.0,
+    "delete": false,
+    "fail": null
+   }
+  }
+ ]
+}

@@ -19,8 +19,9 @@
 //! curves, each `p n+1 (n+1) x [x y z w] (n+p+2) knots`, built as
 //! `SmBSplineCurve(gw_CURVE*, 3, FALSE)`; at most [`MAX_SKIN_CURVES`]) or `8 O[3] radius`
 //! (`SmApiCreatePlanarCircle`) or `9 O[3] radius
-//! height` (`SmApiCreateCylinder`, the `SmBrep*&` overload). Nested blocks are at most
-//! [`MAX_DEPTH`] deep.
+//! height` (`SmApiCreateCylinder`, the `SmBrep*&` overload) or `10 O[3] radius_base
+//! radius_top height` (`SmApiCreateCone`, the `SmBrep*&` overload). Nested blocks are at
+//! most [`MAX_DEPTH`] deep.
 //!
 //! | [`Call`]        | op | args                                   | output after the status (on success)            |
 //! |-----------------|----|----------------------------------------|-------------------------------------------------|
@@ -43,6 +44,7 @@
 //! | `Attributed`    | 17 | brep brep `operation` `behavior` [`copy_first` flags] | two-B-rep record, then the attribute rows |
 //! | `TessellateBoundaries` | 18 | brep `angle_tol_deg` `nd`, `nd` edge indices | (also after `SM_ERR`) `ne` edge indices, `nc` counts, `np` points `x y z` |
 //! | `AttributedList` | 19 | `behavior`, a `MergeBreps` / `Lists` / `Trees` call | its record, then the attribute rows |
+//! | `Checked`       | 20 | brep brep `operation` `level`          | two-B-rep record, then the result's check       |
 //!
 //! The two-B-rep record is `has [is_first kept brep [brep]]` (the second B-rep when
 //! upstream keeps it); a B-rep is `faces edges vertices regions manifold_solid`, then per
@@ -96,6 +98,16 @@
 //! successful record with the `faces rows... edges rows...` of each output B-rep (the
 //! result; each list output; each non-null tree slot), then the number of those values.
 //!
+//! `Checked` runs `SmApiBoolean`, then on success the capi check sequence on the result at
+//! `level` (`SmAssertTestLevel`, 0 to 2): `SmBrep::ValidatePointers` (its default
+//! `SM_NO_WALK`), then `SmBrep::AssertValid` with `SM_WALK` unless the pointer check
+//! reported a failure. After the two-B-rep record come `pointers_status failed...
+//! assert_valid failed...` and the number of those values ([`split_measures`]):
+//! `assert_valid` is `-1` when skipped, else `0`/`1`; each `failed` is `groups` then per
+//! failed test, in ascending order, `reporting_type list_index test_index count` (which
+//! tests fail and how often; the sides number a result's entities differently, so the
+//! entities a report names are not compared).
+//!
 //! [`run`] accepts only what upstream handles without undefined behaviour: finite
 //! operand data with positive box and plane dimensions and a nonzero sphere radius (torus
 //! radii are not limited: `SmTorus::CreateCanonical` fails cleanly for a radius
@@ -105,7 +117,8 @@
 //! at most [`MAX_LIST`] B-reps per list and [`MAX_TREE`] tree nodes in -64..=64; tree
 //! executed B-rep nodes in range and binary operands non-null (`SmMerge::BooleanTrees`
 //! indexes unchecked and clears each leaf slot). Safe repeated leaves remain accepted.
-//! A disk radius is finite (`SmPrimitiveCreation::CreateCircle` fails cleanly otherwise);
+//! A disk radius is finite (`SmPrimitiveCreation::CreateCircle` fails cleanly otherwise),
+//! as are a cone's dimensions (`SmApiConeDimsValid` rejects the rest);
 //! sweep vectors, distances and angles are finite. Selection indices past the operand's
 //! lists are `SC_ERR_ARG` from the shim.
 
@@ -239,6 +252,18 @@ pub enum BrepSpec {
         origin: [f64; 3],
         /// Radius.
         radius: f64,
+    },
+    /// `SmApiCreateCone(origin, radius_base, radius_top, height)` (axis +Z, the `SmBrep*&`
+    /// overload).
+    Cone {
+        /// Center of the base.
+        origin: [f64; 3],
+        /// Radius at the base (at least zero).
+        radius_base: f64,
+        /// Radius at the top (at least zero; not both zero).
+        radius_top: f64,
+        /// Height (positive).
+        height: f64,
     },
 }
 
@@ -546,6 +571,18 @@ pub enum Call {
         /// `SmAttributeBehaviorType` value of the tags (0 to 4).
         behavior: u8,
     },
+    /// `SmApiBoolean`, followed by the capi check (`ValidatePointers`, then
+    /// `AssertValid`) of its result.
+    Checked {
+        /// First operand.
+        a: BrepSpec,
+        /// Second operand.
+        b: BrepSpec,
+        /// `SmBooleanOperationType` value.
+        operation: i32,
+        /// `SmAssertTestLevel` value (0 to 2).
+        level: u8,
+    },
 }
 
 fn check_spec(s: &BrepSpec, depth: usize) -> Result<(), FfiError> {
@@ -651,6 +688,22 @@ fn check_spec(s: &BrepSpec, depth: usize) -> Result<(), FfiError> {
         BrepSpec::Disk { origin, radius } => {
             if !origin.iter().all(|x| x.is_finite()) || !radius.is_finite() {
                 return Err(bad("disk: non-finite value"));
+            }
+        }
+        BrepSpec::Cone {
+            origin,
+            radius_base,
+            radius_top,
+            height,
+        } => {
+            // `SmApiConeDimsValid` rejects the rest cleanly (`SM_ERR_INVALID_INPUT`, a
+            // failing constructor: `SC_ERR_ARG`)
+            if !origin.iter().all(|x| x.is_finite())
+                || !radius_base.is_finite()
+                || !radius_top.is_finite()
+                || !height.is_finite()
+            {
+                return Err(bad("cone: non-finite value"));
             }
         }
     }
@@ -760,6 +813,16 @@ fn push_checked(o: &mut Vec<f64>, s: &BrepSpec) {
             o.push(8.0);
             o.extend_from_slice(origin);
             o.push(*radius);
+        }
+        BrepSpec::Cone {
+            origin,
+            radius_base,
+            radius_top,
+            height,
+        } => {
+            o.push(10.0);
+            o.extend_from_slice(origin);
+            o.extend([*radius_base, *radius_top, *height]);
         }
     }
 }
@@ -1002,6 +1065,22 @@ fn encode(call: &Call) -> Result<Vec<f64>, FfiError> {
             o.push(f64::from(*behavior));
             o.extend(encode(call)?);
         }
+        Call::Checked {
+            a,
+            b,
+            operation,
+            level,
+        } => {
+            check_op(*operation)?;
+            if *level > 2 {
+                return Err(bad("level is not an SmAssertTestLevel value (0 to 2)"));
+            }
+            o.push(20.0);
+            push_spec(&mut o, a)?;
+            push_spec(&mut o, b)?;
+            o.push(f64::from(*operation));
+            o.push(f64::from(*level));
+        }
     }
     Ok(o)
 }
@@ -1096,5 +1175,42 @@ mod tests {
         };
         assert!(encode(&call(&slice(10))).is_ok());
         assert!(encode(&call(&slice(6))).is_err());
+    }
+
+    #[test]
+    fn checked_takes_a_cone_and_only_assert_test_levels() {
+        let cone = BrepSpec::Cone {
+            origin: [0.0; 3],
+            radius_base: 0.0,
+            radius_top: 3.0,
+            height: 2.0,
+        };
+        let shape = BrepSpec::Box {
+            origin: [0.0; 3],
+            size: [1.0; 3],
+        };
+        let call = |level| Call::Checked {
+            a: shape.clone(),
+            b: cone.clone(),
+            operation: 1,
+            level,
+        };
+        let encoded = encode(&call(2)).unwrap();
+        assert_eq!(encoded.first(), Some(&19.0));
+        assert_eq!(&encoded[8..13], &[10.0, 0.0, 0.0, 0.0, 0.0]);
+        assert_eq!(&encoded[encoded.len() - 2..], &[1.0, 2.0]);
+        assert!(encode(&call(3)).is_err());
+        let bad = Call::Checked {
+            a: shape,
+            b: BrepSpec::Cone {
+                origin: [0.0; 3],
+                radius_base: f64::NAN,
+                radius_top: 3.0,
+                height: 2.0,
+            },
+            operation: 1,
+            level: 2,
+        };
+        assert!(encode(&bad).is_err());
     }
 }

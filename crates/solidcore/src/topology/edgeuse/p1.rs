@@ -869,7 +869,8 @@ pub type ReplacedUvTrimCurve = (Option<Curve>, Option<Box<DropCurveFail<ObjectHa
 
 /// `SetMemberUVTrimCurve`: places `curve` (and `drop_curve_fail` when given) on the
 /// [`OrientType::Same`] member of the mated pair (this edge use when it is the `SAME`
-/// one, else its mate) without any other bookkeeping; returns what the slots held.
+/// one, else its mate) and makes that member the curve's owner, without any other
+/// bookkeeping; returns what the slots held.
 ///
 /// # Errors
 ///
@@ -878,7 +879,7 @@ pub type ReplacedUvTrimCurve = (Option<Curve>, Option<Box<DropCurveFail<ObjectHa
 pub fn set_member_uv_trim_curve(
     b: &mut Brep,
     eu: EdgeuseId,
-    curve: Curve,
+    mut curve: Curve,
     drop_curve_fail: Option<DropCurveFail<ObjectHandle>>,
 ) -> Result<ReplacedUvTrimCurve> {
     let owner = if b.edgeuse(eu)?.orientation == OrientType::Same {
@@ -886,6 +887,11 @@ pub fn set_member_uv_trim_curve(
     } else {
         mate(b, eu)?.ok_or_else(|| null("SetMemberUVTrimCurve: edge use without mate"))?
     };
+    // pUVTrimCurve->SetOwner(pOwner), under the B-rep's naming (a UV trim curve notifies
+    // nothing), as `set_uv_trim_curve`
+    if let Some(key) = owner_ref_in(b, owner) {
+        let _ = curve.set_owner(Some(key), None);
+    }
     let r = b.edgeuse_mut(owner)?;
     let old_curve = r.uv_trim_curve.replace(curve);
     let old_fail = match drop_curve_fail {
@@ -2002,6 +2008,18 @@ mod tests {
             set_member_uv_trim_curve(&mut b, b0, uv_line([0.0, 0.0], [1.0, 0.0]), None).unwrap();
         assert!(old.is_none());
         assert!(uv_trim_curve_pointer(&b, a0).unwrap().is_some());
+
+        // the SAME member owns the curve it is given, whichever use of the pair placed
+        // it (SmEdgeuse::SetMemberUVTrimCurve's pUVTrimCurve->SetOwner(pOwner))
+        b.set_naming(NamingScheme::Notify);
+        let mut stale = uv_line([0.0, 1.0], [1.0, 1.0]);
+        let _ = stale.set_owner(owner_ref_in(&b, b0), None);
+        set_member_uv_trim_curve(&mut b, b0, stale, None).unwrap();
+        let owner = uv_trim_curve_pointer(&b, a0)
+            .unwrap()
+            .and_then(Curve::owner);
+        assert_eq!(owner, owner_ref_in(&b, a0));
+        assert!(owner.is_some());
     }
 
     #[test]
