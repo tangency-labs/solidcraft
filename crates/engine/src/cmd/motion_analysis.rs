@@ -30,10 +30,10 @@ pub const INTERFERENCE_DOC: &str = "study: id|name; occurrences?: [ids or names]
      default every occurrence), with against?: [ids or names] (then each of `occurrences` is checked only against these, such \
      as an arm against the parts it must miss), or contact_sets?: true (the pairs of the design's contact sets); samples? \
      (2…1000, default the study's steps + 1) → collisions: [{a, b, first_step, last_step, steps: [[from, to]…] (the step ranges where they overlap), \
-     volume_mm3 (the most volume they share at a sample, worked out exactly from the bodies; null when it was not cheap to \
-     work out at every sample they overlap), deepest_step (the first sample sharing that volume; with volume_mm3 null, the \
-     one of the greatest depth_mm), depth_mm (how far into each other at most: an estimate from points of the bodies' \
-     contact meshes, not exact)}], clear, \
+     volume_mm3 (the most volume they share at a sample, worked out exactly from the bodies), deepest_step (the first sample \
+     sharing that volume), not_measured (null, or why the volume was not worked out at every sample they overlap, such as \
+     a budget it ran past: then volume_mm3 and deepest_step are null, never an estimate), depth_mm (how far into each \
+     other at most: an estimate from points of the bodies' contact meshes, not exact)}], clear, \
      pairs (checked), samples (taken), truncated (the work budget ran out; checked_to: the last step checked), stopped_at, \
      stopped_by_loop. The study plays as motion.play plays it but contact sets do not stop it, on a copy (the design is not \
      changed). Parts are tested at the samples only: one that passes wholly through another between two samples is missed";
@@ -252,34 +252,26 @@ struct Collision {
     names: (String, String),
     /// The samples where they overlap, in order.
     samples: Vec<usize>,
-    /// The most sampled mesh depth, and the first sample reaching it.
+    /// The most sampled mesh depth.
     depth: f64,
-    deepest: usize,
-    /// The most exact shared volume and the first sample sharing it; `None` once a sample's
-    /// volume was not worked out (the pair got no volume slot, or the booleans ran out).
-    most_volume: Option<(f64, usize)>,
+    /// The most exact shared volume and the first sample sharing it, or why it is not measured
+    /// (a sample's volume was not worked out).
+    most_volume: std::result::Result<(f64, usize), String>,
 }
 
 impl Collision {
-    /// Takes the exact shared volume at sample `k` (`None`: not worked out). A volume larger by
-    /// no more than the booleans' rounding is a tie, which keeps the earlier sample.
-    fn take_volume(&mut self, k: usize, volume: Option<f64>) {
-        self.most_volume = match (self.most_volume, volume) {
-            (Some((best, at)), Some(v)) => Some(if v > best + 1e-9 * best.max(1.0) { (v, k) } else { (best, at) }),
-            _ => None,
-        };
-    }
-
-    /// The sample the collision is deepest at: where they share the most volume, else (no
-    /// volume) where the sampled depth is greatest.
-    fn deepest_sample(&self) -> usize {
-        self.most_volume.map_or(self.deepest, |(_, at)| at)
+    /// Takes the exact shared volume at sample `k`, or why it was not worked out. A volume
+    /// larger by no more than the booleans' rounding is a tie, which keeps the earlier sample.
+    fn take_volume(&mut self, k: usize, volume: std::result::Result<f64, String>) {
+        if let Ok((best, at)) = self.most_volume {
+            self.most_volume = volume.map(|v| if v > best + 1e-9 * best.max(1.0) { (v, k) } else { (best, at) });
+        }
     }
 }
 
-/// The volume the parts under occurrences `a` and `b` share, placed as in `doc` (`None`: not
-/// worked out). Only bodies whose boxes overlap are intersected, at most `booleans` of them.
-fn shared_volume(s: &Session, doc: &Document, a: u64, b: u64, booleans: &mut usize) -> Option<f64> {
+/// The volume the parts under occurrences `a` and `b` share, placed as in `doc`, or why it was
+/// not worked out. Only bodies whose boxes overlap are intersected, at most `booleans` of them.
+fn shared_volume(s: &Session, doc: &Document, a: u64, b: u64, booleans: &mut usize) -> std::result::Result<f64, String> {
     let st = s.model.state();
     // The bodies under each (and not under the other), with their world frames and boxes.
     let mut sides: [Vec<(Mat, Aabb3, &solidcraft_doc::ModelBody)>; 2] = Default::default();
@@ -299,24 +291,31 @@ fn shared_volume(s: &Session, doc: &Document, a: u64, b: u64, booleans: &mut usi
                 let corner = Vec3::new(pick(1, local.min.x, local.max.x), pick(2, local.min.y, local.max.y), pick(4, local.min.z, local.max.z));
                 world.add(apply_point(&frame, corner));
             }
-            sides.get_mut(side)?.push((frame, world, body));
+            if let Some(list) = sides.get_mut(side) {
+                list.push((frame, world, body));
+            }
         }
     }
+    let [first, second] = &sides;
     let mut total = 0.0;
-    for (fa, xa, ba) in sides.first()? {
-        for (fb, xb, bb) in sides.get(1)? {
+    for (fa, xa, ba) in first {
+        for (fb, xb, bb) in second {
             if xa.max.x < xb.min.x || xb.max.x < xa.min.x || xa.max.y < xb.min.y || xb.max.y < xa.min.y || xa.max.z < xb.min.z || xb.max.z < xa.min.z
             {
                 continue;
             }
-            *booleans = booleans.checked_sub(1)?;
-            let (pa, pb) = (solidcraft_kernel::transform_matrix(&ba.body, *fa).ok()?, solidcraft_kernel::transform_matrix(&bb.body, *fb).ok()?);
-            if let Some(shared) = solidcraft_kernel::boolean(&pa, &pb, solidcraft_kernel::BoolOp::Intersect).ok()? {
-                total += solidcraft_kernel::measure(&shared).ok()?.volume;
+            *booleans = booleans.checked_sub(1).ok_or_else(|| format!("the check's {MAX_BOOLEANS} body intersections ran out"))?;
+            let failed = |e: &dyn std::fmt::Display| format!("the intersection of {} and {} could not be made ({e})", ba.name, bb.name);
+            let (pa, pb) = (
+                solidcraft_kernel::transform_matrix(&ba.body, *fa).map_err(|e| failed(&e))?,
+                solidcraft_kernel::transform_matrix(&bb.body, *fb).map_err(|e| failed(&e))?,
+            );
+            if let Some(shared) = solidcraft_kernel::boolean(&pa, &pb, solidcraft_kernel::BoolOp::Intersect).map_err(|e| failed(&e))? {
+                total += solidcraft_kernel::measure(&shared).map_err(|e| failed(&e))?.volume;
             }
         }
     }
-    Some(total)
+    Ok(total)
 }
 
 /// Contiguous runs of samples, as study step ranges.
@@ -412,17 +411,18 @@ pub(super) fn interference(s: &mut Session, p: &Value) -> Result<Value> {
                 names: (an, bn),
                 samples: Vec::new(),
                 depth: 0.0,
-                deepest: k,
-                most_volume: slots.then_some((0.0, k)),
+                most_volume: if slots {
+                    Ok((0.0, k))
+                } else {
+                    Err(format!("more than {MAX_VOLUMES} pairs collide: only the first {MAX_VOLUMES} found have their volumes worked out"))
+                },
             });
             if c.samples.last() == Some(&k) {
                 continue;
             }
             c.samples.push(k);
-            if depth > c.depth {
-                (c.depth, c.deepest) = (depth, k);
-            }
-            if c.most_volume.is_some() {
+            c.depth = c.depth.max(depth);
+            if c.most_volume.is_ok() {
                 c.take_volume(k, shared_volume(s, &t.doc, a, b, &mut booleans));
             }
         }
@@ -437,11 +437,14 @@ pub(super) fn interference(s: &mut Session, p: &Value) -> Result<Value> {
     let collisions: Vec<Value> = list
         .iter()
         .map(|(_, c)| {
-            let volume = c.most_volume.map(|(v, _)| v);
+            let (volume, deepest, not_measured) = match &c.most_volume {
+                Ok((v, at)) => (Some(*v), Some(step_of(&m, *at, n)), None),
+                Err(why) => (None, None, Some(why.clone())),
+            };
             let first = c.samples.first().map(|k| step_of(&m, *k, n));
             let last = c.samples.last().map(|k| step_of(&m, *k, n));
             json!({"a": c.names.0, "b": c.names.1, "first_step": first, "last_step": last, "steps": ranges(&m, &c.samples, n),
-                "depth_mm": c.depth, "deepest_step": step_of(&m, c.deepest_sample(), n), "volume_mm3": volume})
+                "depth_mm": c.depth, "deepest_step": deepest, "volume_mm3": volume, "not_measured": not_measured})
         })
         .collect();
     let mut out = json!({"study": m.name, "steps": m.steps, "clear": collisions.is_empty(), "collisions": collisions,
