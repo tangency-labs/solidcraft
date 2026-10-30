@@ -623,3 +623,61 @@ fn one_fillet_over_stacked_boxes_rounds_the_upper_box_s_edge_even_when_saved_nam
     s.refresh();
     check(&s, "saved by an older build");
 }
+
+/// A line extruded into a surface and thickened into a slab. Every face of the slab is named
+/// from that history, and a sketch on the offset face attaches and follows the thickness (#7641).
+#[test]
+fn a_sketch_on_a_thickened_surface_follows_the_face() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "thick", "expression": "2 mm"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Line"}));
+    run(&mut s, "sketch.line", json!({"points": [[0, 0], [40, 0]], "ids": ["l1"]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "surface.extrude", json!({"sketch": "Line", "curves": ["l1"], "distance": 30, "body_name": "Sheet"}));
+    run(&mut s, "surface.thicken", json!({"bodies": ["Sheet"], "thickness": "thick", "body_name": "Slab"}));
+    // The offset face is the copy at y = -2. Its frame is X and Z, origin on that plane.
+    let made = run(&mut s, "sketch.create", json!({"plane": {"face": [30.0, -2.0, 10.0]}, "name": "OnFace"}));
+    assert_eq!(made["attachment"], "exact_face", "{made}");
+    let named = names(&s, "Slab");
+    assert!(named.iter().all(|(_, exact)| *exact), "a thickened face must keep exact history: {named:?}");
+    // Kept face keeps the sheet's name; the offset and the edge walls are the thicken feature's.
+    assert!(named.iter().any(|(n, _)| n == "F2:side:l1"), "{named:?}");
+    assert!(named.iter().any(|(n, _)| n == "F3:inner:F2:side:l1"), "{named:?}");
+    assert_eq!(named.iter().filter(|(n, _)| n.starts_with("F3:blend:")).count(), 4, "{named:?}");
+    run(&mut s, "sketch.circle.center", json!({"center": [20, 15], "radius": 3}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "OnFace", "distance": 4, "operation": "join", "name": "Boss"}));
+    // An end wall (the face at x = 0) takes a sketch too.
+    let wall = run(&mut s, "sketch.create", json!({"plane": {"face": [0.0, -1.0, 15.0]}, "name": "OnWall"}));
+    assert_eq!(wall["attachment"], "exact_face", "{wall}");
+    run(&mut s, "sketch.finish", json!({}));
+
+    let slab = |s: &Session| {
+        let body = s.model.state().body("Slab").unwrap().body.clone();
+        let measured = solidcraft_kernel::measure(&body).unwrap();
+        (measured.volume, measured.bbox.min.y)
+    };
+    let (volume, min_y) = slab(&s);
+    let boss = std::f64::consts::PI * 9.0 * 4.0;
+    // The join of the cylinder is a hair under the analytic sum (about 0.02 mm³ here).
+    assert!((volume - (2400.0 + boss)).abs() < 0.05, "slab 40×30×2 plus the boss {}: got {volume}", 2400.0 + boss);
+    assert!((min_y - (-6.0)).abs() < 1e-6, "the boss stands 4 mm off y = -2: {min_y}");
+    assert_eq!(error(&s, "OnFace"), None);
+    assert_eq!(error(&s, "Boss"), None);
+    assert_eq!(warning(&s, "Boss"), None);
+
+    change(&mut s, "thick", "4 mm");
+    assert_eq!(error(&s, "OnFace"), None);
+    assert_eq!(error(&s, "Boss"), None);
+    assert_eq!(warning(&s, "OnFace"), None);
+    assert_eq!(warning(&s, "Boss"), None);
+    let (volume, min_y) = slab(&s);
+    assert!((volume - (4800.0 + boss)).abs() < 0.05, "the slab grew with the thickness and the boss stayed whole {}: got {volume}", 4800.0 + boss);
+    assert!((min_y - (-8.0)).abs() < 1e-6, "the boss followed the face to y = -4: {min_y}");
+
+    let mut cold = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+    cold.refresh();
+    let (volume, min_y) = slab(&cold);
+    assert!((volume - (4800.0 + boss)).abs() < 0.05 && (min_y - (-8.0)).abs() < 1e-6, "reopened: {volume} {min_y}");
+    assert_eq!(error(&cold, "Boss"), None);
+}

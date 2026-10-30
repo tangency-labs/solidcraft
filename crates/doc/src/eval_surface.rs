@@ -59,13 +59,16 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
             let t = val(vals, thickness, Kind::Length)?;
             let mut tools = Vec::new();
             for n in bodies {
-                let b = st.body(n).ok_or_else(|| DocError::Unknown(format!("body `{n}`")))?;
-                tools.push(kernel::thicken(&b.body, t, *symmetric)?);
+                let b = st.body(n).cloned().ok_or_else(|| DocError::Unknown(format!("body `{n}`")))?;
+                // Kept face, offset and edge walls. Carry that history so a sketch can attach
+                // to the solid's faces and follow the thickness (#7641).
+                let thickened = kernel::thicken(&b.body, t, *symmetric)?;
+                tools.push(Traced::step(thickened, &[&b.traced()]));
             }
             if tools.is_empty() {
                 return Err(DocError::Invalid("pick the surfaces to thicken".into()));
             }
-            apply_op(doc, st, f, tools, *operation, &crate::plain(targets))
+            apply_traced(doc, st, f, tools, *operation, &crate::plain(targets))
         }
         FeatureKind::SurfaceTrim { body, plane, tool, keep, keep_more, curves, with, keep_with, stitch, extend } => {
             let i = st.bodies.iter().position(|b| &b.name == body).ok_or_else(|| DocError::Unknown(format!("body `{body}`")))?;
