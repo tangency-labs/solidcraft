@@ -393,7 +393,7 @@ impl Harness {
     }
 
     /// Centres of the visible widgets whose label or value is `text`, last drawn first.
-    fn widgets(&self, text: &str) -> Vec<[f64; 2]> {
+    pub fn widgets(&self, text: &str) -> Vec<[f64; 2]> {
         let Some(tree) = self.output.accesskit_update.as_ref() else { return Vec::new() };
         let centre =
             |n: &egui::accesskit::Node| n.bounds().filter(|b| b.x1 > b.x0 && b.y1 > b.y0).map(|b| [(b.x0 + b.x1) / 2.0, (b.y0 + b.y1) / 2.0]);
