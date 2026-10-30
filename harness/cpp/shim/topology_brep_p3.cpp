@@ -2,8 +2,9 @@
 // difftest shim for unit `topology.brep_p3`: the SmBrep members of the unit
 // (source/SMLib/src/SmBrep.cpp) and SmApiBrepCopy (source/SM_API/src/SmApiQueries.cpp)
 // on real SmBrep objects built by the shared topology fixture (sc_topology_fixture.h),
-// built and normalised exactly as the topology.brep_p2 shim does, so that its Export
-// and Extras ops describe the B-rep this shim runs on.
+// built exactly as the topology.brep_p2 shim builds it (its Export gives the entity
+// counts the selectors are resolved on). The ops run on the B-rep's real geometry:
+// analytic surfaces and curves are not replaced by B-spline copies.
 //
 // One entry point, sc_topology_brep_p3_eval(op, path, in, n_in, out, cap, out_len).
 // `in` is the fixture's B-rep block, then `editing` (-1 keep, 0/1 set
@@ -46,11 +47,6 @@ enum P3Op : int32_t
     P3_ATTRIBUTED_COPY = 13,
 };
 
-struct EdgePeek : SmEdge
-{
-    static SmCurve* SmEdge::*curve() { return &EdgePeek::m_pCurve; }
-};
-
 struct BrepPeek : SmBrep
 {
     static double SmBrep::*mse() { return &BrepPeek::m_dThisModelSizeEstimate; }
@@ -66,53 +62,6 @@ struct ShellPeek : SmShell
 {
     static SM_TYPE SmShell::*shell_type() { return &ShellPeek::m_tShellType; }
 };
-
-// A plain SmBSplineCurve of `c`'s NURB, or nullptr when `c` already is one (or a line)
-// or has no NURB (as the topology.brep_p2 shim).
-SmBSplineCurve* plain_curve(SmCurve* c)
-{
-    if (c == nullptr || !c->IsKindOf(SmBSplineCurve_TYPE) || c->GetType() == SmBSplineCurve_TYPE ||
-        c->GetType() == SmLine_TYPE)
-        return nullptr;
-    SmBSplineCurve* b = (SmBSplineCurve*)c;
-    gw_CURVE* nurb = b->GetGwNurbPointer();
-    if (nurb == nullptr)
-        return nullptr;
-    return new (the_context()) SmBSplineCurve(sm_AllocateAndCopyNurbCurve(nurb), b->GetDim(), FALSE);
-}
-
-// Gives every analytic face and edge a plain B-spline copy owned by it (the
-// topology.brep_p2 shim's normalisation, so that the Rust import of its export is exact).
-void normalise(Graph& g)
-{
-    for (SmFace* f : g.faces)
-    {
-        SmSurface* s = f->*FPeek::srf();
-        if (s == nullptr || !s->IsKindOf(SmBSplineSurface_TYPE) || s->GetType() == SmBSplineSurface_TYPE ||
-            s->GetType() == SmPlane_TYPE)
-            continue;
-        SmBSplineSurface* b = (SmBSplineSurface*)s;
-        gw_SURFACE* nurb = b->GetGwNurbPointer();
-        if (nurb == nullptr)
-            continue;
-        SmBSplineSurface* nb = new (the_context()) SmBSplineSurface(sm_AllocateAndCopyNurbSurface(nurb), FALSE, NULL);
-        nb->GetOutOfBoundsEnabled() = b->GetOutOfBoundsEnabled();
-        nb->SetBSplineSurfaceForm(b->GetBSplineSurfaceForm());
-        if (s->GetOwner() == (SmObject*)f)
-            nb->SetOwner(f);
-        f->*FPeek::srf() = nb;
-    }
-    for (SmEdge* e : g.edges)
-    {
-        SmCurve* c = e->*EdgePeek::curve();
-        SmBSplineCurve* nc = plain_curve(c);
-        if (nc == nullptr)
-            continue;
-        if (c->GetOwner() == (SmObject*)e)
-            nc->SetOwner(e);
-        e->*EdgePeek::curve() = nc;
-    }
-}
 
 template <class T> T* at(std::vector<T*>& v, int64_t i)
 {
@@ -141,7 +90,6 @@ SmBrep* prepare(Rd& rd, const char* path, Graph& g, SmStatus& bst)
     for (ULONG i = 0; i < vs.GetSize(); i++)
         g.vertex(vs[i]);
     walk(brep, g, true);
-    normalise(g);
     return brep;
 }
 

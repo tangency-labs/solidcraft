@@ -3,20 +3,20 @@
 //!
 //! The C++ side builds a real `SmBrep` per call with the shared topology fixture (an
 //! upstream `.smb` file, a wire edge, a one-face B-rep or the `my_test_topology` wire
-//! network), normalised as the `topology.brep_p2` shim does, and runs one member of the
-//! unit (the constructors and `SmApiBrepCopy` too). The Rust side builds a wire edge,
-//! face or network source itself ([`crate::own_builder`] under the `topology.brep_p2`
-//! shim's conventions; the normalisation only replaces analytic geometry, which these
-//! sources lack). For an `.smb` file it imports the graph the `topology.brep_p2` shim
-//! exports for the same input (the `topology.vertexuse` importer), restores what the
-//! import cannot carry (the B-rep tolerance, infinite region, region list head, editing
-//! flag, each vertex's vertex use order, the geometry owners and each face's upward
-//! face use). It runs the port and writes the same output layout (`out`).
+//! network), as the `topology.brep_p2` shim builds it, and runs one member of the unit
+//! (the constructors and `SmApiBrepCopy` too) on its real geometry, analytic surfaces
+//! and curves included. The Rust side builds a wire edge, face or network source itself
+//! ([`crate::own_builder`] under the `topology.brep_p2` shim's conventions) and reads an
+//! `.smb` file with the Rust reader, renumbered the same way; the B-rep tolerance,
+//! infinite region, region list head, editing flag, each vertex's vertex use order, the
+//! geometry owners and each face's upward face use are the Rust build's own. No C++
+//! export reaches the Rust side. It runs the port and writes the same output layout
+//! (`out`).
 //!
 //! Entity selectors are taken modulo the matching entity count (`-1` selects null);
 //! an op that needs an entity the B-rep lacks is skipped on both sides (`no target`).
 //! `Merge` / `CopyVertices` target a second build of the same B-rep (a second build
-//! or import on the Rust side), whose objects the Rust side notifies under identities of their
+//! on the Rust side), whose objects the Rust side notifies under identities of their
 //! own ([`source_key_of`]). `DeleteFace` always passes a deleted list
 //! (`pOptDeletedEdgesVertices`); the header default `NULL` only skips its `Add`s and
 //! is not compared. `CopyVertices` also appends the source and existing destination
@@ -72,7 +72,7 @@ use solidcore_ffi::units::topology_brep_p3::{self as ffi, Op};
 use solidcore_ffi::units::topology_vertexuse::counts;
 
 use super::topology_vertexuse::{
-    gen_brep, gen_curve, import, path_of, push_curve, push_surface, BrepIn, CrvIn,
+    gen_brep, gen_curve, path_of, push_curve, push_surface, BrepIn, CrvIn,
 };
 use crate::case::CaseContext;
 use crate::runner::default_cases;
@@ -407,98 +407,10 @@ pub(super) fn source_key_of(e: EntityRef) -> ObjectRef {
     }
 }
 
-/// The Rust B-rep of the case (with the shim's extras restored).
-fn rust_brep(path: &str, h: &[f64], c: &[usize; 10]) -> Result<Brep, HarnessError> {
-    let export = ffi2::eval(ffi2::Op::Export, path, h).map_err(|e| ffi_err(&e))?;
-    let (mut b, exact) = import(&export)?;
-    if exact.iter().any(|e| !e) {
-        return Err(harness("a face surface was not imported exactly"));
-    }
-    let ex = ffi2::eval(ffi2::Op::Extras, path, h).map_err(|e| ffi_err(&e))?;
-    let mut at = 1usize;
-    let mut next = || -> Result<f64, HarnessError> {
-        let v = ex
-            .get(at)
-            .copied()
-            .ok_or_else(|| harness("extras too short"))?;
-        at += 1;
-        Ok(v)
-    };
-    let tol = next()?;
-    let inf = next()?;
-    let head_r = next()?;
-    let editing = next()? != 0.0;
-    b.set_tolerance(tol);
-    b.set_infinite_region((inf >= 0.0).then(|| RegionId::from_index(inf as u32)));
-    b.set_region_list_head((head_r >= 0.0).then(|| RegionId::from_index(head_r as u32)));
-    b.set_editing_enabled(editing);
-    for v in 0..c[9] {
-        let n = next()? as usize;
-        let mut list = Vec::new();
-        for _ in 0..n {
-            let i = next()?;
-            if i < 0.0 {
-                return Err(harness("unregistered vertex use in a vertex list"));
-            }
-            list.push(VertexuseId::from_index(i as u32));
-        }
-        b.vertex_mut(VertexId::from_index(v as u32))
-            .map_err(|e| harness(e.to_string()))?
-            .vertexuses = list;
-    }
-    // the geometry's owners (set by the B-rep build upstream): the arena identities
-    // (a face surface only when the export says the face owns it)
-    let edge_ids: Vec<EdgeId> = b.edges().ids().collect();
-    for id in edge_ids {
-        if let Some(curve) = b
-            .edge_mut(id)
-            .map_err(|e| harness(e.to_string()))?
-            .curve
-            .as_mut()
-        {
-            let _ = curve.set_owner(
-                Some(arena_identity(CacheObject::Edge(id))),
-                Some(arena_identity(CacheObject::Brep)),
-            );
-        }
-    }
-    let face_ids: Vec<FaceId> = b.faces().ids().collect();
-    for id in face_ids {
-        if let Some(surface) = b
-            .face_mut(id)
-            .map_err(|e| harness(e.to_string()))?
-            .surface
-            .as_mut()
-        {
-            if surface.owner().is_some() {
-                let _ = surface.set_owner(Some(arena_identity(CacheObject::Face(id))));
-            }
-        }
-        // the face's tolerance, as the face upstream answers GetTolerance with
-        b.sync_face_surface_tolerance(id)
-            .map_err(|e| harness(e.to_string()))?;
-    }
-    // the shared import leaves `m_pFU` unset: the face's upward (SAME) face use
-    let ups: Vec<(FaceId, FaceuseId)> = b
-        .faceuses()
-        .iter()
-        .filter(|(_, r)| r.orientation == OrientType::Same)
-        .filter_map(|(id, r)| r.face.map(|f| (f, id)))
-        .collect();
-    for (f, fu) in ups {
-        if let Ok(face) = b.face_mut(f) {
-            if face.faceuse.is_none() {
-                face.faceuse = Some(fu);
-            }
-        }
-    }
-    Ok(b)
-}
-
 /// The shim's build conventions (`sc_topology_fixture.h` as the `topology.brep_p2`
-/// shim, whose export this runner reads, uses it: the face, edge and vertex lists
-/// registered before the traversal, `GetVertexEdgeGap` in the `init_gaps` walk), with
-/// the geometry owned under the arena identities [`rust_brep`] gives it.
+/// shim uses it: the face, edge and vertex lists registered before the traversal,
+/// `GetVertexEdgeGap` in the `init_gaps` walk), with the geometry owned under the arena
+/// identities.
 const CONVENTIONS: crate::own_builder::Conventions<'static> = crate::own_builder::Conventions {
     prefix_lists: true,
     vertex_edge_gaps: true,
@@ -507,16 +419,27 @@ const CONVENTIONS: crate::own_builder::Conventions<'static> = crate::own_builder
 };
 
 /// The Rust B-rep of the case and its entity counts, or the build failure's output:
-/// shim-built sources are built by the Rust kernel ([`crate::own_builder`], the
-/// shim's `editing` flag applied after); `.smb` files are imported from the shim's
-/// export ([`rust_brep`]).
+/// shim-built sources are built by the Rust kernel ([`crate::own_builder`]) and `.smb`
+/// files read by the Rust reader ([`crate::own_reader::file_in_order`]), both in the
+/// shim's traversal order under [`CONVENTIONS`]; the shim's `editing` flag is applied
+/// after. No C++ export reaches the Rust side.
 fn own_brep(
     k: &mut Kernel,
     i: &Inputs,
 ) -> Result<Result<(Brep, [usize; 10]), Output>, HarnessError> {
     use crate::own_builder::{build_as, build_status, counts, Built};
-    match build_as(k, &i.brep, i.validate_only, i.init_gaps, &CONVENTIONS)? {
-        Some(Built::Brep(b)) => {
+    let built = if let Some(b) = build_as(k, &i.brep, i.validate_only, i.init_gaps, &CONVENTIONS)? {
+        b
+    } else {
+        let BrepIn::File { rebuild, .. } = &i.brep else {
+            return Err(harness("own builder: a non-file source was not built"));
+        };
+        let path = path_of(&i.brep)?;
+        let (vo, gaps) = (i.validate_only, i.init_gaps);
+        crate::own_reader::file_in_order(k, &path, *rebuild, vo, gaps, &CONVENTIONS)?
+    };
+    match built {
+        Built::Brep(b) => {
             let mut b = *b;
             if i.editing >= 0 {
                 b.set_editing_enabled(i.editing != 0);
@@ -524,17 +447,10 @@ fn own_brep(
             let c = counts(&b);
             Ok(Ok((b, c)))
         }
-        Some(Built::Failed(e)) => match Output::unported(&e) {
+        Built::Failed(e) => match Output::unported(&e) {
             Some(o) => Ok(Err(o)),
             None => Ok(Err(Output::new().values("out", vec![-1.0, build_status(&e)]))),
         },
-        None => {
-            let (path, h, c) = match prepare(i)? {
-                Ok(x) => x,
-                Err(o) => return Ok(Err(o)),
-            };
-            Ok(Ok((rust_brep(&path, &h, &c)?, c)))
-        }
     }
 }
 

@@ -6,9 +6,9 @@
 //! Except for `Construct` and `ApiCopyNull`, every input is a B-rep block of
 //! [`super::topology_vertexuse`] (kinds `0..=3`), then `editing` (`-1` keep, `0` / `1`
 //! set `m_bEditingEnabled`), then the op's parameters: the head of
-//! [`super::topology_brep_p2`], whose shim builds (and normalises) the same B-rep, so
-//! its `Export` / `Extras` describe the B-rep these ops run on. Indices name entities
-//! in that export's order. Every output starts with `0`, or `-1 status` when the B-rep
+//! [`super::topology_brep_p2`], whose shim builds the same B-rep, so its `Export`
+//! gives the entity counts of the B-rep these ops run on (on its real geometry,
+//! analytic kinds included). Indices name entities in that export's order. Every output starts with `0`, or `-1 status` when the B-rep
 //! could not be built. `counts` is `faces edges vertices regions` of the B-rep after
 //! the op (a fresh walk), then per region (list order) `void infinite nshells` and per
 //! shell of it `type size has_head` (`m_tShellType`, `GetSize`, `m_pList != NULL`),
