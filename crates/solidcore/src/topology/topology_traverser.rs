@@ -8,6 +8,7 @@
 //! | [`collect_faces`] | `SmTopologyTraverser::CollectFaces`, `sm_CollectFaces` |
 //! | [`collect_wire_edges`] | `SmTopologyTraverser::CollectWireEdges`, `sm_CollectWires` |
 //! | [`closure_traversal`], [`faceuse_traversal`] | `ClosureTraversal`, `FaceuseTraversal` |
+//! | [`closure_traversal_from_both_sides`] | `ClosureTraversalFromBothSides` (fork tangency-labs/smlib@69c5198, WR-584) |
 //! | [`remove_shell`], [`faceuse_shell_replacement`] | `RemoveShell`, `FaceuseShellReplacement` |
 //! | [`shell_traversal`], `shell_connectivity` (private) | `ShellTraversal`, `sm_ShellConnectivity` |
 //! | [`is_inner_shell`] | `IsInnerShell`, `IsOdd` |
@@ -31,6 +32,11 @@
 //! per intersection, and a failed build is kept too instead of being retried on every
 //! ray (the build is deterministic, so a retry fails the same way).
 //! Existing co-ported accessors are reused.
+//! `ClosureTraversalFromBothSides` is not in the pinned upstream: it is the fork's
+//! (tangency-labs/smlib@69c5198), used only under
+//! [`UpstreamFixes::boolean_new_face_closure_both_sides`](crate::kernel::UpstreamFixes::boolean_new_face_closure_both_sides)
+//! (WR-584). Its `std::unordered_map` side table becomes a vector indexed by face-use
+//! arena slot (lookups only, as the fork; no iteration).
 
 use std::collections::BTreeMap;
 
@@ -376,6 +382,83 @@ pub fn closure_traversal(
     }
     lock.new_mark(std::slice::from_mut(&mut k.context))?;
     faceuse_traversal(k, b, marks, start, lock.mark_type(), faceuses)
+}
+
+/// `ClosureTraversalFromBothSides` (fork tangency-labs/smlib@69c5198, WR-584):
+/// [`closure_traversal`]'s answer, found by two breadth-first searches through edge-use
+/// radials, one from `start` and one from its mate, expanding one face use of each in
+/// turn. The searches meet (the mate is reachable: not closed) or one side runs out
+/// first (closed). Visits at most twice the face uses on the smaller side; marks
+/// nothing and claims no mark. A face with a lamina edge is not closed. A missing
+/// radial or radial face use is skipped, as the fork does.
+///
+/// # Errors
+///
+/// A missing face or mate (`NER` upstream), dangling ids, or those of the lamina test.
+pub fn closure_traversal_from_both_sides(b: &Brep, start: FaceuseId) -> Result<bool> {
+    // A face with any lamina edges is not closed (as ClosureTraversal).
+    let f = required(b.faceuse(start)?.face)?;
+    if has_lamina_edge(b, f)? {
+        return Ok(false);
+    }
+    let mate = required(b.faceuse(start)?.mate)?;
+
+    // the side (0 = from the face use, 1 = from its mate) each visited face use was
+    // reached from, by arena slot
+    let mut side: Vec<Option<usize>> = Vec::new();
+    let set_side = |side: &mut Vec<Option<usize>>, fu: FaceuseId, k: usize| {
+        let i = fu.index() as usize;
+        if side.len() <= i {
+            side.resize(i + 1, None);
+        }
+        if let Some(slot) = side.get_mut(i) {
+            *slot = Some(k);
+        }
+    };
+    set_side(&mut side, start, 0);
+    set_side(&mut side, mate, 1);
+
+    // a breadth-first queue per side: the face uses still to expand are [head[k], len)
+    let mut queue: [Vec<FaceuseId>; 2] = [vec![start], vec![mate]];
+    let mut head = [0usize; 2];
+
+    loop {
+        for k in 0..2 {
+            let (Some(q), Some(h)) = (queue.get(k), head.get_mut(k)) else {
+                return Err(SolidError::invalid_input(OP, "closure search side"));
+            };
+            // this side has nothing left: its component does not hold the other start
+            let Some(&fu) = q.get(*h) else {
+                return Ok(true);
+            };
+            *h += 1;
+
+            // for every faceuse->loopuse->edgeuse: the edgeuse's radial neighbour's faceuse
+            let mut found = Vec::new();
+            for &lu in &b.faceuse(fu)?.loopuses {
+                for edgeuse in eu::loopuse_edgeuses(b, lu)? {
+                    let Some(radial) = eu::radial(b, edgeuse)? else {
+                        continue;
+                    };
+                    let Some(neighbor) = eu::faceuse(b, radial)? else {
+                        continue;
+                    };
+                    match side.get(neighbor.index() as usize).copied().flatten() {
+                        None => {
+                            set_side(&mut side, neighbor, k);
+                            found.push(neighbor);
+                        }
+                        // the two searches meet: the mate is reachable, the shell is open
+                        Some(other) if other != k => return Ok(false),
+                        Some(_) => {}
+                    }
+                }
+            }
+            if let Some(q) = queue.get_mut(k) {
+                q.extend(found);
+            }
+        }
+    }
 }
 
 /// Transfer a shell's children to its replacement (`RemoveShell`: `SER` on
