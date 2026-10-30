@@ -5,9 +5,12 @@
  ],
  "what": "an R7 round of the outer top edge of a 2 mm wall alone: past the sharp inside corner it is cut from the wall as if the hollow were not there, opening a slit along the hollow",
  "source": "analytic",
- "method": "box 100x60x40 shelled outward 2 mm open at the bottom: 104x64x42 less 100x60x40 = 39552. The round's circle about (y, z) = (25, 35), r 7, takes (1-pi/4) 49 along the edge's 104, less its part over the hollow (y < 30, z < 40), the square [25,30]x[35,40] outside the circle: Int_sqrt24^5 (5 - sqrt(49-u^2)) du = 5(5-sqrt24) - (F(5) - F(sqrt24)), F(t) = (t sqrt(49-t^2) + 49 asin(t/7))/2, = 0.005068, along the hollow's 100 (the end walls x = +-50..52 are solid). V = 38458.895826",
+ "method": "box 100x60x40 shelled outward 2 mm open at the bottom: 104x64x42 less 100x60x40 = 39552. The round's circle about (y, z) = (25, 35), r 7, takes (1-pi/4) 49 along the edge's 104, less its part over the hollow (y < 30, z < 40), the square [25,30]x[35,40] outside the circle: Int_sqrt24^5 (5 - sqrt(49-u^2)) du = 5(5-sqrt24) - (F(5) - F(sqrt24)), F(t) = (t sqrt(49-t^2) + 49 asin(t/7))/2, = 0.005068, along the hollow's 100 (the end walls x = +-50..52 are solid). V = 38458.895826, exact: the tolerance holds it to 0.04 mm^3",
  "body_count": 1,
  "volume_mm3": 38458.89582646349,
+ "tolerance": {
+  "rel": 1e-06
+ },
  "continuity": {
   "order": "g1"
  }
