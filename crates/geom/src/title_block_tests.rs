@@ -502,7 +502,7 @@ fn fuzzed_definitions_never_panic_and_an_accepted_one_lays_out_inside_its_outlin
         let clear = sheet.drawing_border.inflated(-line_mm / 2.0 - PADDING_MM + 1e-9);
         for (i, (cell, placed)) in block.cells.iter().zip(&layout.cells).enumerate() {
             assert!(outline.contains(placed.rect.min) && outline.contains(placed.rect.max), "{} {:?}", cell.name, placed.rect);
-            assert!(layout.cells.iter().take(i).all(|other| !overlap(other.rect, placed.rect)), "{}", cell.name);
+            assert!(layout.cells.iter().take(i).all(|other| !other.rect.overlaps(&placed.rect)), "{}", cell.name);
             let inside = placed.rect.inflated(1e-9);
             assert!(inside.contains(placed.value_box.min) && inside.contains(placed.value_box.max), "{}", cell.name);
             let room = placed.value_box.size();

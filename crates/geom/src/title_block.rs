@@ -123,11 +123,6 @@ fn require(condition: bool, message: &'static str) -> Result<()> {
     if condition { Ok(()) } else { Err(Invalid(message)) }
 }
 
-/// Whether two rectangles share more than an edge.
-fn overlap(a: Aabb2, b: Aabb2) -> bool {
-    a.min.x < b.max.x && b.min.x < a.max.x && a.min.y < b.max.y && b.min.y < a.max.y
-}
-
 impl Cell {
     /// The cell's rectangle with the block's lower-right corner at `corner`.
     fn rect(&self, corner: Vec2) -> Aabb2 {
@@ -258,7 +253,7 @@ impl TitleBlock {
             let [x0, y0, x1, y1] = cell.rect_mm;
             require(-width <= x0 && x0 < x1 && x1 <= 0.0 && 0.0 <= y0 && y0 < y1 && y1 <= height, "a cell lies inside its block")?;
             let rect = cell.rect(Vec2::ZERO);
-            require(earlier().all(|other| !overlap(other.rect(Vec2::ZERO), rect)), "no two cells overlap")?;
+            require(earlier().all(|other| !other.rect(Vec2::ZERO).overlaps(&rect)), "no two cells overlap")?;
             if let Some(label) = &cell.label {
                 require(label.cap_mm.is_finite() && label.cap_mm > 0.0, "a label's cap height is finite and above 0")?;
                 cell::check_label(&label.text).map_err(|cell::Invalid(message)| Invalid(message))?;

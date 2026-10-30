@@ -53,7 +53,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .params(
             "sheet: id or name; name?, size?, orientation?, title_block?: a definition or null (a new block keeps the overrides of the text cells it still has), dpi?; \
              documents?: {source: id, component: id (0 the design)} or null; excluded?: {count?, print?}; title_block_overrides?: {cell: text, shown in place of \
-             its value, or null to drop it} or null to drop them all → the drawing's sheets, and after a change of paper `outside`: the sheet's views whose \
+             its value, or null to drop it} or null to drop them all → the drawing's sheets, and after a change of paper or title block `outside`: the sheet's views whose \
              boundary leaves its drawing space (none is moved). One undo step, none when nothing changes.",
         ),
     CommandSpec::new("drawing.sheet.reorder", "Reorder Sheets", crate::checked!("drawing.sheet.reorder", reorder))
@@ -198,16 +198,16 @@ fn add(s: &mut Session, p: &Value) -> Result<Value> {
 
 fn set(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "drawing.sheet.set";
-    let (id, paper) = s.edit_drawing(cmd, |d| {
+    let (id, room) = s.edit_drawing(cmd, |d| {
         let at = sheet_at(cmd, d, p, "sheet")?;
         let sheet = Arc::make_mut(d.sheets.get_mut(at).ok_or_else(|| bad(cmd, "no such sheet"))?);
-        let was = sheet.sheet;
+        let was = (sheet.sheet, sheet.title_block.clone());
         apply(cmd, sheet, p)?;
-        Ok((sheet.id, sheet.sheet != was))
+        Ok((sheet.id, (sheet.sheet, sheet.title_block.clone()) != was))
     })?;
-    // Only a change of paper moves the drawing space; each view measured once.
+    // Only a change of paper or block changes the room views have; each view measured once.
     let d = s.drawing(cmd)?;
-    let on: Vec<u64> = if paper { d.on_sheet(id).views } else { Vec::new() };
+    let on: Vec<u64> = if room { d.on_sheet(id).views } else { Vec::new() };
     let outside = super::drawing_view::outside_results(crate::drawing_view::outside(s, d, &on, cmd)?);
     answer(s, cmd, None, outside)
 }

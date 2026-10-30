@@ -209,6 +209,15 @@ impl Sheet {
             None => Ok(Aabb2 { min: Vec2::ZERO, max: self.sheet.size_mm().map_err(from_sheet)? }),
         }
     }
+
+    /// Where its title block sits, in paper millimetres (none without one), once its drawing border
+    /// and the block on it lay out on the paper: the rule a sheet is held to, as drawing them uses it.
+    pub fn title_block_outline(&self) -> Result<Option<Aabb2>> {
+        let border = self.border.as_ref().map(|border| border.layout(&self.sheet)).transpose().map_err(from_sheet)?;
+        let Some(block) = &self.title_block else { return Ok(None) };
+        let border = border.ok_or_else(|| DocError::Invalid("its title block sits on a drawing border, and it has none".into()))?;
+        Ok(Some(block.layout(&border).map_err(|e| DocError::Invalid(e.to_string()))?.outline))
+    }
 }
 
 /// What is on one of a drawing's sheets ([`Drawing::on_sheet`]), each kind by id.
@@ -400,12 +409,8 @@ impl Drawing {
     fn check_sheet(&self, sheet: &Sheet) -> Result<()> {
         check_name(&sheet.name, "its")?;
         sheet.sheet.size_mm().map_err(from_sheet)?;
-        // The border, and the title block on it, must lay out on the sheet: the one rule, as
-        // drawing them uses it.
-        let border = sheet.border.as_ref().map(|border| border.layout(&sheet.sheet)).transpose().map_err(from_sheet)?;
+        sheet.title_block_outline()?;
         if let Some(block) = &sheet.title_block {
-            let border = border.ok_or_else(|| DocError::Invalid("its title block sits on a drawing border, and it has none".into()))?;
-            block.layout(&border).map_err(|e| DocError::Invalid(e.to_string()))?;
             fields::check_block(block)?;
         }
         // Each override names a text cell of its block, and its text is a cell's.

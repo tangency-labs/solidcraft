@@ -206,8 +206,9 @@ pub fn on_sheet(s: &Session, drawing: &Drawing, id: u64, cmd: &str) -> Result<On
 }
 
 /// Each of `views` of `drawing` (one of `s`'s design's) whose boundary leaves its sheet's drawing
-/// space ([`solidcraft_doc::drawing::Sheet::drawing_space`]), sides included, with where it sits:
-/// what a change of paper or a move to another sheet leaves outside. Nothing is moved.
+/// space ([`solidcraft_doc::drawing::Sheet::drawing_space`]), sides included, or lies over its title
+/// block, with where it sits: what a change of paper or block, or a move to another sheet, leaves
+/// outside. Nothing is moved.
 pub fn outside(s: &Session, drawing: &Drawing, views: &[u64], cmd: &str) -> Result<Vec<(u64, OnSheet)>> {
     let mut out = Vec::new();
     for &id in views {
@@ -215,8 +216,11 @@ pub fn outside(s: &Session, drawing: &Drawing, views: &[u64], cmd: &str) -> Resu
         let sheet = drawing.sheets.iter().find(|s| s.id == view.sheet).ok_or_else(|| bad(cmd, format!("no sheet {}", ids::encode(view.sheet))))?;
         // A view drawn up to the border, its sides on it, is inside: the margin takes rounding.
         let space = sheet.drawing_space().map_err(|e| bad(cmd, e.to_string()))?.inflated(EPS);
+        // A view drawn up to the block, a side on its outline, is clear of it.
+        let block = sheet.title_block_outline().map_err(|e| bad(cmd, e.to_string()))?.map(|outline| outline.inflated(-EPS));
         let placed = on_sheet(s, drawing, id, cmd)?;
-        if !(space.contains(placed.boundary.min) && space.contains(placed.boundary.max)) {
+        let over_block = block.is_some_and(|block| block.overlaps(&placed.boundary));
+        if over_block || !(space.contains(placed.boundary.min) && space.contains(placed.boundary.max)) {
             out.push((id, placed));
         }
     }

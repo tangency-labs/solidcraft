@@ -36,7 +36,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&TEMPLATE_APPLY_CONTRACT)
         .output(output_schema_for::<TemplateApplyResult>)
         .params(
-            "template: a template's name (drawing.template.list); dry_run?: true to answer without changing anything. Each sheet takes the paper, drawing border and title block of the template's sheet in its place (its last for sheets past its own); text typed over a cell stays while the new block has a text cell of that name. Nothing moves → changed: [{sheet, paper, border, title_block, lost: [cells whose typed text is dropped]}] for each sheet that changes, outside: the views on a sheet whose new paper leaves them outside its drawing space (as drawing.sheet.set lists them), dry_run. One undo step, none when nothing changes.",
+            "template: a template's name (drawing.template.list); dry_run?: true to answer without changing anything. Each sheet takes the paper, drawing border and title block of the template's sheet in its place (its last for sheets past its own); text typed over a cell stays while the new block has a text cell of that name. Nothing moves → changed: [{sheet, paper, border, title_block, lost: [cells whose typed text is dropped]}] for each sheet that changes, outside: the views on a restyled sheet that fall outside its drawing space or over its title block (as drawing.sheet.set lists them), dry_run. One undo step, none when nothing changes.",
         ),
     CommandSpec::new("drawing.template.list", "List Drawing Templates", crate::checked!("drawing.template.list", template_list))
         .any_part()
@@ -166,8 +166,8 @@ fn template_apply(s: &mut Session, p: &Value) -> Result<Value> {
         Some(_) => return Err(bad(cmd, "`dry_run` is true or false")),
     };
     let (applied, changed) = template::apply(s.drawing(cmd)?, &chosen).map_err(fail)?;
-    // The views on a sheet whose paper changed: listed when they fall outside, never moved.
-    let views: Vec<u64> = changed.iter().filter(|c| c.paper).flat_map(|c| applied.on_sheet(c.sheet).views).collect();
+    // The views on a sheet whose room changed: listed when they fall outside or over the block, never moved.
+    let views: Vec<u64> = changed.iter().filter(|c| c.paper || c.border || c.title_block).flat_map(|c| applied.on_sheet(c.sheet).views).collect();
     let outside = super::drawing_view::outside_results(crate::drawing_view::outside(s, &applied, &views, cmd)?);
     let listed = changed
         .iter()

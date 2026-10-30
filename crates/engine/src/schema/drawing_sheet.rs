@@ -226,8 +226,9 @@ pub struct SheetsResult {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub sheet: Option<String>,
     pub sheets: Vec<SheetName>,
-    /// After a change of paper, the sheet's views whose boundary leaves its drawing space. None is
-    /// moved: what goes where stays the drawing's author's choice.
+    /// After a change of paper or title block, the sheet's views whose boundary leaves its drawing
+    /// space or lies over its title block. None is moved: what goes where stays the drawing's
+    /// author's choice.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub outside: Vec<super::drawing_view::OutsideResult>,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
