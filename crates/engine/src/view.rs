@@ -786,6 +786,7 @@ fn build_scene(
     let mut sc = Scene {
         background: Some(p.background),
         clip: section.iter().map(|c| c.clip()).collect(),
+        clip_hatch: section.iter().map(SectionPlane::hatch).collect(),
         cap: Some(p.cap),
         plain_cap: !s.section_hatch,
         part_hatch: Some([p.cap, p.hatch[0], p.hatch[1]]),

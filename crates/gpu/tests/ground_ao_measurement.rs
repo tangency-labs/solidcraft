@@ -217,6 +217,7 @@ fn comparison_frame(scene: GpuScene, cam: &Camera, width: u32, height: u32, key:
         back: cam.back().to_f32(),
         size_px: [width as f32, height as f32],
         clip: [[0.0; 4]; gpu::view::MAX_SECTION_PLANES],
+        clip_hatch: [0; gpu::view::MAX_SECTION_PLANES],
         cap: [0.0; 4],
         images: Vec::new(),
         clouds: Vec::new(),
