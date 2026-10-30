@@ -435,36 +435,8 @@ mod tests {
     /// beyond `a` along x), each face's source that of the face of its own operand on the same
     /// plane (none from `b` when `b_sources` is false).
     fn side_by_side(a: &Body, b: &Body, b_sources: bool) -> Body {
-        let (ra, rb) = (a.record(), b.record());
-        let mut r = ra.clone();
-        let (nf, ne, nv, ns) = (r.faces.len() as u32, r.edges.len() as u32, r.vertices.len() as u32, r.shells.len() as u32);
-        for mut face in rb.faces.clone() {
-            for l in &mut face.loops {
-                match l {
-                    brep::Loop::Edges { edges } => edges.iter_mut().for_each(|e| e.edge += ne),
-                    brep::Loop::Vertex { vertex } => *vertex += nv,
-                }
-            }
-            r.faces.push(face);
-        }
-        for mut e in rb.edges.clone() {
-            e.vertices = e.vertices.map(|v| v + nv);
-            e.uses.iter_mut().for_each(|u| u.face += nf);
-            r.edges.push(e);
-        }
-        r.vertices.extend(rb.vertices.iter().cloned());
-        for mut sh in rb.shells.clone() {
-            if let brep::Shell::Faces { faces, wires } = &mut sh {
-                faces.iter_mut().for_each(|o| o.face += nf);
-                wires.iter_mut().for_each(|w| *w += ne);
-            }
-            r.shells.push(sh);
-        }
-        for mut region in rb.regions.clone().into_iter().filter(|g| !g.void) {
-            region.shells.iter_mut().for_each(|s| *s += ns);
-            r.regions.push(region);
-        }
-        let mut combined = Body::from_record(r).unwrap();
+        let part = brep::part::compound(&[a.record(), b.record()]).unwrap();
+        let mut combined = Body::from_record(part.brep).unwrap();
         let planes = |x: &Body| actual_planes(x).unwrap();
         let (pa, pb, pc) = (planes(a), planes(b), planes(&combined));
         let a_right = a.outline_bounds().max.x;
