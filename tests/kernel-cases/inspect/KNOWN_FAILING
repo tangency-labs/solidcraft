@@ -2,4 +2,3 @@
 # with --known-failing fails on a case that fails and is not listed here, and on a listed case
 # that passes: a fix removes its line in the same pull request.
 # Baseline: rig-cases-construction-inspect 45f69c0e5 with SMLib 60b1c6a, aarch64 Linux.
-cov-compare-taller-box inspect.compare integrates a region's volume along sampling lines: the 40 x 30 x 5 slab only B has comes out 5976.49, not 6000 (0.4% short)

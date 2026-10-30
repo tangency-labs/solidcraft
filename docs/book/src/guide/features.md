@@ -201,12 +201,15 @@ gives the largest and the mean distance each way. Samples further than `toleranc
 the **regions**: `only_in_a` where `a` has material and `b` has none, `only_in_b` the other way
 round. Each region gives its volume, the deviating surface area, the largest deviation and where
 it is, its centre and box, and the faces of each body it lies on (`faces_a`, `faces_b`, numbered
-as `model.faces` lists them), largest volume first. The volume is integrated along a grid of
-parallel lines through the region (`resolution` gives their spacing), so a thin sliver is
-measured as well as a block. `identical` is true when no region is found, and `verdict` says it in
-one line. `warnings` lists what makes the result less certain: a body whose surface does not
-enclose the volume it measures (open, or with faces that failed to import), and lines left out of
-a region's volume because they crossed a gap. With `color`, the faces that hold a region turn
+as `model.faces` lists them), largest volume first. The volume, centre and box are exact
+(`measured_by: "boolean"`): the pieces of the cut a − b (or b − a) that lie in the region,
+measured as `inspect.measure` measures a body. When the cut cannot be made, the volume is
+integrated along a grid of parallel lines through the region instead (`measured_by: "lines"`,
+`resolution` gives their spacing), with a warning. `identical` is true when no region is found,
+and `verdict` says it in one line. `warnings` lists what makes the result less certain: a body
+whose surface does not enclose the volume it measures (open, or with faces that failed to
+import), a cut that could not be made, and lines left out of a region's volume because they
+crossed a gap. With `color`, the faces that hold a region turn
 red where only `a` has material and green where only `b` has, on both bodies: the faces mostly
 beyond the tolerance (a small change on a large face leaves the face alone), or, for a region
 with none, the face with the largest share.
