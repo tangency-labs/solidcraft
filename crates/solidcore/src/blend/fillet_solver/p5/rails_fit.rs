@@ -6,7 +6,10 @@
 //! intervals is judged once, WR-302, tangency-labs/solidcore#841 and #1024). Used only
 //! with the opt-in `Kernel::fixes.fillet_refuse_rails_leaving_faces`.
 //!
-//! Deviations: the fork's later cliff-overflow construction (`SmFilletCliffOverflow.cpp`,
+//! Deviations: a run of off-face intervals between two stretches on the face is skipped
+//! when it both leaves and returns past an end of the filleted edge (#1580); `518566f`
+//! tries [`leaves_past_an_end`] only for the first and last runs and refuses such a
+//! round. The fork's later cliff-overflow construction (`SmFilletCliffOverflow.cpp`,
 //! which builds a convex blend over a cliff and subtracts what it removes) is not
 //! ported, so every blend that leaves its face between its ends is refused, as in
 //! `fc43974`.
@@ -213,17 +216,19 @@ impl FilletSolver {
                     } else {
                         (&ivl.start, ivl.interval.min())
                     };
-                    if (j == 0 || j_last + 1 == n)
-                        && leaves_past_an_end(
-                            solver.solver(),
-                            k,
-                            target,
-                            face,
-                            &curve,
-                            d_leave,
-                            leave,
-                        )?
+                    let past_end = |point: &PointClassification<FilletClassObject>, d: f64| {
+                        leaves_past_an_end(solver.solver(), k, target, face, &curve, d, point)
+                    };
+                    if j == 0 || j_last + 1 == n {
+                        if past_end(leave, d_leave)? {
+                            continue;
+                        }
+                    } else if past_end(leave, d_leave)? && past_end(&last.end, last.interval.max())?
                     {
+                        // A run between two stretches on the face that lies wholly past an
+                        // end (it leaves and comes back past it) is trimmed by the corner
+                        // there too (tangency-labs/solidcore#1580; the fork's `518566f`
+                        // tried only the first and last runs).
                         continue;
                     }
                     let side = match (leave.point_class(), leave.object()) {
