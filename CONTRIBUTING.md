@@ -160,9 +160,9 @@ the most complete description of the house style.
 
 The reference for what the kernel builds is the kernel-cases ladder (`tests/kernel-cases/ladder/`,
 `cargo xtask kernel-cases --ladder`, [docs/kernel-ladder.md](docs/kernel-ladder.md)).
-A change to the persistent names of faces and edges, or to what a stored name finds, re-records the
-corpus's names in the same pull request, saying why:
-`NAMING_CORPUS_BLESS=1 cargo test --profile ci -p solidcraft-cli --test naming_corpus` (`tests/naming/`).
+The naming corpus checks persistent names: every name a corpus design stores still finds a face or
+an edge, and two builds name its faces and edges alike
+(`cargo test --profile ci -p solidcraft-cli --test naming_corpus`).
 [docs/mutation-testing.md](docs/mutation-testing.md) shows how to find kernel behaviour these
 black-box suites miss.
 

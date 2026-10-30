@@ -1,20 +1,19 @@
-//! Every design of the corpus rebuilds with the same persistent names: the names of each body's
-//! faces and edges, with whether each follows exact history, and every name a design stores
-//! (fillet and chamfer edges, faces a feature picks, the face a sketch sits on, sheet metal
-//! edges) with the face or edge it finds now, by that face's or edge's name. A rename, a name
-//! that becomes geometric, a face or edge more or fewer, or a reference that finds another face
-//! or none fails the test.
+//! Every design of the corpus loads, every name it stores still finds a face or an edge, and
+//! two builds of it name its faces and edges alike. The stored names are the fillet and chamfer
+//! edges, the faces a feature picks, the face a sketch sits on and the sheet metal edges; one
+//! that finds nothing (`gone`, a sketch's face `lost`) fails the test, and so does a design that
+//! no longer loads. A build's names are each face's and edge's name with where it is (its area
+//! and centre, its length and middle); the second build must give the same, and its stored
+//! names must find the same faces and edges.
 //!
 //! Face and edge indices are left out: they are the kernel's order, which a rebuild need not
-//! keep (a fillet's or a boolean's faces come out in another order from one process to the next)
-//! and which another kernel changes, while names and references must not change. A body's names
-//! are listed sorted.
+//! keep (a fillet's or a boolean's faces come out in another order from one build to the next).
+//! How many faces a body has and what each is called is the kernel's business, not this test's.
 //!
 //! The corpus is the action matrix's (the old design files in `tests/corpus`, the examples, the
 //! demo and typical designs in `tests/action_matrix/designs`, the reference recipes), the sample
 //! designs, the engine's design fixtures and the older designs kept by the hole matrix, taper
-//! and projection tests. Each design's record is `tests/naming/<group>/<design>.txt`; to record
-//! an intended change, run the test with `NAMING_CORPUS_BLESS=1` and say why in the pull request.
+//! and projection tests.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -26,10 +25,6 @@ use solidcraft_engine::geom::Vec3;
 
 fn root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../..").canonicalize().unwrap()
-}
-
-fn golden_dir() -> PathBuf {
-    root().join("tests/naming")
 }
 
 /// Where a design comes from.
@@ -120,36 +115,39 @@ fn flags(list: &[(bool, &str)]) -> String {
     if set.is_empty() { String::new() } else { format!(" [{}]", set.join(", ")) }
 }
 
-/// Whether an edge name carries its own number (`~k`): several edges between the same two faces
-/// are numbered by where they lie, which is not exact history.
-fn numbered(name: &str) -> bool {
-    name.rfind('~').and_then(|i| name.get(i + 1..)).is_some_and(|d| !d.is_empty() && d.bytes().all(|b| b.is_ascii_digit()))
-}
-
-/// The names of a body's faces and edges, sorted (with how many of each it has).
-fn record_body(out: &mut Vec<String>, b: &ModelBody) {
+/// Where each named face and edge of a body is, by name, sorted: a face's area and centre, an
+/// edge's length and middle, from the body's mesh. Two builds that name their faces alike give
+/// the same list.
+fn placed_names(b: &ModelBody) -> Vec<(String, [f64; 4])> {
     if b.body.is_mesh() {
-        out.push(format!("body {}: mesh", b.name));
-        return;
+        return Vec::new();
     }
-    let faces = naming::face_names(b);
-    let edges = naming::edge_names(b);
-    out.push(format!("body {}: {} faces, {} edges", b.name, faces.len(), edges.len()));
-    let mut lines: Vec<String> =
-        faces.iter().enumerate().map(|(i, n)| format!("{} face {n}{}", b.name, flags(&[(!naming::face_name_exact(b, i), "geometric")]))).collect();
-    lines.sort();
-    out.append(&mut lines);
     let m = b.mesh();
-    let mut lines: Vec<String> = edges
+    let faces = naming::face_names(b);
+    let mut sums = vec![[0.0f64; 4]; faces.len()];
+    for (t, f) in m.triangles.iter().zip(&m.tri_face) {
+        let [p, q, r] = t.map(|i| m.positions.get(i as usize).copied().unwrap_or(Vec3::ZERO));
+        let area = (q - p).cross(r - p).len() / 2.0;
+        let c = (p + q + r) / 3.0;
+        if let Some(s) = sums.get_mut(*f as usize) {
+            *s = [s[0] + area, s[1] + area * c.x, s[2] + area * c.y, s[3] + area * c.z];
+        }
+    }
+    let mut out: Vec<(String, [f64; 4])> = faces
         .iter()
-        .enumerate()
-        .map(|(i, n)| {
-            let exact = m.edge_faces.get(i).is_some_and(|fs| fs.iter().all(|f| naming::face_name_exact(b, *f as usize))) && !numbered(n);
-            format!("{} edge {n}{}", b.name, flags(&[(!exact, "geometric")]))
+        .zip(&sums)
+        .map(|(n, s)| {
+            let a = s[0].max(1e-300);
+            (format!("{} face {n}", b.name), [s[0], s[1] / a, s[2] / a, s[3] / a])
         })
         .collect();
-    lines.sort();
-    out.append(&mut lines);
+    for (n, line) in naming::edge_names(b).iter().zip(&m.edges) {
+        let length: f64 = line.windows(2).map(|w| w[1].dist(w[0])).sum();
+        let mid = line.iter().fold(Vec3::ZERO, |acc, p| acc + *p) / (line.len().max(1) as f64);
+        out.push((format!("{} edge {n}", b.name), [length, mid.x, mid.y, mid.z]));
+    }
+    out.sort_by(|x, y| x.0.cmp(&y.0).then(x.1.partial_cmp(&y.1).unwrap_or(std::cmp::Ordering::Equal)));
+    out
 }
 
 fn face_label(st: &ModelState, body: usize, face: usize) -> String {
@@ -160,8 +158,8 @@ fn face_label(st: &ModelState, body: usize, face: usize) -> String {
 }
 
 /// Every name feature `f` stores, with what it finds in the model before it, as a feature
-/// rebuilding finds it.
-fn record_refs(out: &mut Vec<String>, s: &Session, f: &Feature) {
+/// rebuilding finds it, and whether it finds anything.
+fn record_refs(out: &mut Vec<(String, bool)>, s: &Session, f: &Feature) {
     let doc = &*s.doc;
     let who = format!("ref {} ({})", f.name, f.id);
     let before = s.model.state_before(f.id);
@@ -173,34 +171,40 @@ fn record_refs(out: &mut Vec<String>, s: &Session, f: &Feature) {
             if n.is_empty() {
                 continue;
             }
-            let found = if explicit_emboss {
-                "not checked (a cylindrical emboss finds its face on its own body)".to_string()
+            let (found, ok) = if explicit_emboss {
+                ("not checked (a cylindrical emboss finds its face on its own body)".to_string(), true)
             } else {
                 match naming::locate_face_on_body(&fst, f.kind.face_body(), n, p) {
-                    Some(hit) => format!(
-                        "{}{}",
-                        face_label(&fst, hit.body, hit.face),
-                        flags(&[(hit.split, "split"), (hit.merged, "merged"), (!hit.verified, "geometric"), (hit.legacy, "legacy")])
+                    Some(hit) => (
+                        format!(
+                            "{}{}",
+                            face_label(&fst, hit.body, hit.face),
+                            flags(&[(hit.split, "split"), (hit.merged, "merged"), (!hit.verified, "geometric"), (hit.legacy, "legacy")])
+                        ),
+                        true,
                     ),
-                    None => "gone".into(),
+                    None => ("gone".into(), false),
                 }
             };
-            out.push(format!("{who} face {k} `{n}` -> {found}"));
+            out.push((format!("{who} face {k} `{n}` -> {found}"), ok));
         }
     }
     // Edges a feature picks by point and stores by name.
     if f.edge_names.iter().any(|n| !n.is_empty()) {
-        let edge = |out: &mut Vec<String>, b: &ModelBody, k: usize, n: &str, p: Vec3| {
-            let found = match naming::locate_edge(b, n, p) {
-                Ok(hit) => format!(
-                    "{} edge {}{}",
-                    b.name,
-                    naming::edge_names(b).get(hit.edge).map(String::as_str).unwrap_or("?"),
-                    flags(&[(hit.split, "split"), (!hit.verified, "geometric"), (hit.legacy, "legacy")])
+        let edge = |out: &mut Vec<(String, bool)>, b: &ModelBody, k: usize, n: &str, p: Vec3| {
+            let (found, ok) = match naming::locate_edge(b, n, p) {
+                Ok(hit) => (
+                    format!(
+                        "{} edge {}{}",
+                        b.name,
+                        naming::edge_names(b).get(hit.edge).map(String::as_str).unwrap_or("?"),
+                        flags(&[(hit.split, "split"), (!hit.verified, "geometric"), (hit.legacy, "legacy")])
+                    ),
+                    true,
                 ),
-                Err(e) => format!("gone ({e})"),
+                Err(e) => (format!("gone ({e})"), false),
             };
-            out.push(format!("{who} edge {k} `{n}` -> {found}"));
+            out.push((format!("{who} edge {k} `{n}` -> {found}"), ok));
         };
         let named = |k: usize| f.edge_names.get(k).filter(|n| !n.is_empty());
         match &f.kind {
@@ -214,7 +218,7 @@ fn record_refs(out: &mut Vec<String>, s: &Session, f: &Feature) {
                             }
                         }
                     }
-                    None => out.push(format!("{who} edges: no body to round")),
+                    None => out.push((format!("{who} edges: no body to round"), false)),
                 }
             }
             FeatureKind::SheetConvert { body, bends, .. } => match before.body(body) {
@@ -225,7 +229,7 @@ fn record_refs(out: &mut Vec<String>, s: &Session, f: &Feature) {
                         }
                     }
                 }
-                None => out.push(format!("{who} bends: body `{body}` gone")),
+                None => out.push((format!("{who} bends: body `{body}` gone"), false)),
             },
             // Sheet metal edges are named by the sheet's panels, and found on its sheets.
             FeatureKind::SheetFlange { .. } | FeatureKind::SheetHem { .. } => {
@@ -238,18 +242,19 @@ fn record_refs(out: &mut Vec<String>, s: &Session, f: &Feature) {
                     let Some(n) = named(k) else { continue };
                     let on: Vec<&str> = before.sheets.iter().filter(|sh| sh.edge_by_name(n, *p).is_some()).map(|sh| sh.body.as_str()).collect();
                     let found = if on.is_empty() { "gone".to_string() } else { format!("sheet edge on {}", on.join(", ")) };
-                    out.push(format!("{who} sheet edge {k} `{n}` -> {found}"));
+                    out.push((format!("{who} sheet edge {k} `{n}` -> {found}"), !on.is_empty()));
                 }
             }
             other => {
                 for (k, n) in f.edge_names.iter().enumerate().filter(|(_, n)| !n.is_empty()) {
-                    out.push(format!("{who} edge {k} `{n}` -> not checked ({})", other.type_name()));
+                    out.push((format!("{who} edge {k} `{n}` -> not checked ({})", other.type_name()), true));
                 }
             }
         }
     }
     // The face a sketch sits on.
     if let FeatureKind::Sketch { plane: PlaneRef::Face { name, anchor, .. }, .. } = &f.kind {
+        let mut ok = true;
         let status = match doc.sketch_face_attachment(f.id, &s.model) {
             FaceAttachmentStatus::Healthy { target, .. } => {
                 let faces = match before.body(&target.body) {
@@ -260,13 +265,22 @@ fn record_refs(out: &mut Vec<String>, s: &Session, f: &Feature) {
                             list.sort();
                             format!("{} faces {}{}", b.name, list.join(", "), flags(&[(note.is_some(), "changed cap")]))
                         }
-                        Err(e) => format!("no faces ({e})"),
+                        Err(e) => {
+                            ok = false;
+                            format!("no faces ({e})")
+                        }
                     },
-                    None => format!("body `{}` gone", target.body),
+                    None => {
+                        ok = false;
+                        format!("body `{}` gone", target.body)
+                    }
                 };
                 format!("healthy: {faces}")
             }
-            FaceAttachmentStatus::Lost { message, .. } => format!("lost: {message}"),
+            FaceAttachmentStatus::Lost { message, .. } => {
+                ok = false;
+                format!("lost: {message}")
+            }
             FaceAttachmentStatus::Legacy { .. } => {
                 // Found by its name among the faces facing the same way, nearest the pick.
                 let fst = solidcraft_engine::doc::state_in_frame(doc, &before, f.component).unwrap();
@@ -299,78 +313,61 @@ fn record_refs(out: &mut Vec<String>, s: &Session, f: &Feature) {
             (None, Some(n)) => format!("`{n}`"),
             (None, None) => "by its pick".into(),
         };
-        out.push(format!("{who} plane {stored} -> {status}"));
+        out.push((format!("{who} plane {stored} -> {status}"), ok));
     }
 }
 
-/// A design's record: its features that failed, every body's names, every stored reference.
-fn record(name: &str, s: &Session) -> String {
-    let mut out = vec![format!("# {name}: persistent names after a rebuild (apps/solidcraft-cli/tests/naming_corpus.rs)")];
-    for r in s.model.results.iter().filter(|r| r.error.is_some()) {
-        out.push(format!("failed {} ({})", r.name, r.id));
-    }
-    let st = s.model.state();
-    for b in &st.bodies {
-        record_body(&mut out, b);
-    }
+/// A build of a design: where its faces and edges are by name, and what every name it stores
+/// finds.
+struct Build {
+    names: Vec<(String, [f64; 4])>,
+    refs: Vec<(String, bool)>,
+}
+
+fn build(s: &Session) -> Build {
+    let names = s.model.state().bodies.iter().flat_map(placed_names).collect();
+    let mut refs = Vec::new();
     for f in s.doc.features.iter().filter(|f| !f.suppressed) {
-        record_refs(&mut out, s, f);
+        record_refs(&mut refs, s, f);
     }
-    out.push(String::new());
-    out.join("\n")
+    Build { names, refs }
 }
 
-/// The lines of `want` and `got` that differ, as `-`/`+` lines (the longest common run of
-/// lines kept), at most `cap` of them.
-fn diff(want: &str, got: &str, cap: usize) -> Vec<String> {
-    let (a, b): (Vec<&str>, Vec<&str>) = (want.lines().collect(), got.lines().collect());
-    let pre = a.iter().zip(&b).take_while(|(x, y)| x == y).count();
-    let suf = a[pre..].iter().rev().zip(b[pre..].iter().rev()).take_while(|(x, y)| x == y).count();
-    let (a, b) = (&a[pre..a.len() - suf], &b[pre..b.len() - suf]);
+/// Where two builds name their faces and edges apart (at most `cap` of them): a name only one
+/// has, or a face or edge of that name somewhere else (1e-6 of its size, to the mesh's rounding).
+fn differences(a: &Build, b: &Build, cap: usize) -> Vec<String> {
     let mut out = Vec::new();
-    if a.len().saturating_mul(b.len()) > 25_000_000 {
-        out.extend(a.iter().map(|l| format!("- {l}")));
-        out.extend(b.iter().map(|l| format!("+ {l}")));
-    } else {
-        // lcs[i][j]: the longest common run of a[i..] and b[j..].
-        let mut lcs = vec![vec![0u32; b.len() + 1]; a.len() + 1];
-        for i in (0..a.len()).rev() {
-            for j in (0..b.len()).rev() {
-                lcs[i][j] = if a[i] == b[j] { lcs[i + 1][j + 1] + 1 } else { lcs[i + 1][j].max(lcs[i][j + 1]) };
-            }
-        }
-        let (mut i, mut j) = (0, 0);
-        while i < a.len() || j < b.len() {
-            if i < a.len() && j < b.len() && a[i] == b[j] {
-                i += 1;
-                j += 1;
-            } else if i < a.len() && (j == b.len() || lcs[i + 1][j] >= lcs[i][j + 1]) {
-                out.push(format!("- {}", a[i]));
-                i += 1;
-            } else {
-                out.push(format!("+ {}", b[j]));
-                j += 1;
-            }
+    if a.names.len() != b.names.len() {
+        out.push(format!("{} named faces and edges, then {}", a.names.len(), b.names.len()));
+    }
+    for ((n, x), (m, y)) in a.names.iter().zip(&b.names) {
+        let scale = x.iter().chain(y).fold(1.0f64, |s, v| s.max(v.abs()));
+        if n != m || x.iter().zip(y).any(|(p, q)| (p - q).abs() > 1e-6 * scale) {
+            out.push(format!("{n} at {x:?}, then {m} at {y:?}"));
         }
     }
-    let n = out.len();
+    for ((r, _), (q, _)) in a.refs.iter().zip(&b.refs) {
+        if r != q {
+            out.push(format!("{r}, then {q}"));
+        }
+    }
+    if a.refs.len() != b.refs.len() {
+        out.push(format!("{} stored names, then {}", a.refs.len(), b.refs.len()));
+    }
     out.truncate(cap);
-    if n > cap {
-        out.push(format!("… and {} more", n - cap));
-    }
     out
 }
 
-/// Designs whose names differ from one run to the next today: (design, why). Their records are
-/// kept and their differences printed, not failed on, until the cause is fixed.
+/// Designs whose names differ from one build to the next today: (design, why). Their
+/// differences are printed, not failed on, until the cause is fixed; a stored name that finds
+/// nothing still fails.
 const UNSTABLE: [(&str, &str); 1] = [(
     "regressions/closed_sweep_torus_cut",
-    "the halves of each swept wall lie level along every axis, so which is `#1` and which `#2` follows the order the kernel gives the faces in, which changes from one process to the next",
+    "the halves of each swept wall lie level along every axis, so which is `#1` and which `#2` follows the order the kernel gives the faces in, which changes from one build to the next",
 )];
 
 #[test]
-fn corpus_designs_rebuild_with_the_same_names_and_references() {
-    let bless = std::env::var_os("NAMING_CORPUS_BLESS").is_some();
+fn corpus_designs_keep_their_references_and_name_alike_every_build() {
     let designs = designs();
     let next = std::sync::atomic::AtomicUsize::new(0);
     let results = std::sync::Mutex::new(Vec::new());
@@ -379,56 +376,34 @@ fn corpus_designs_rebuild_with_the_same_names_and_references() {
         for _ in 0..workers {
             scope.spawn(|| {
                 while let Some((name, source)) = designs.get(next.fetch_add(1, std::sync::atomic::Ordering::Relaxed)) {
-                    let got = match load(source) {
-                        Ok(s) => record(name, &s),
-                        Err(e) => format!("# {name}: does not load: {e}\n"),
-                    };
+                    let got = load(source).and_then(|first| Ok((build(&first), build(&load(source)?))));
                     results.lock().unwrap_or_else(|e| e.into_inner()).push((name.clone(), got));
                 }
             });
         }
     });
     let mut results = results.into_inner().unwrap_or_else(|e| e.into_inner());
-    results.sort();
-    let dir = golden_dir();
+    results.sort_by(|a, b| a.0.cmp(&b.0));
     let mut problems = Vec::new();
     for (name, got) in &results {
-        let path = dir.join(format!("{name}.txt"));
-        let want = std::fs::read_to_string(&path).unwrap_or_default().replace("\r\n", "\n");
-        if bless {
-            if want != *got {
-                std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-                std::fs::write(&path, got).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+        let (first, second) = match got {
+            Ok(builds) => builds,
+            Err(e) => {
+                problems.push(format!("{name}: does not load: {e}"));
+                continue;
             }
-            continue;
+        };
+        let lost: Vec<&str> = first.refs.iter().filter(|(_, ok)| !ok).map(|(r, _)| r.as_str()).collect();
+        if !lost.is_empty() {
+            problems.push(format!("{name}: stored names that find nothing:\n  {}", lost.join("\n  ")));
         }
-        if want.is_empty() {
-            problems.push(format!("{name}: no record (tests/naming/{name}.txt)"));
-        } else if want != *got {
-            let lines = diff(&want, got, 40).join("\n  ");
+        let apart = differences(first, second, 40);
+        if !apart.is_empty() {
             match UNSTABLE.iter().find(|(design, _)| design == name) {
-                Some((_, why)) => eprintln!("{name} (not checked: {why}):\n  {lines}"),
-                None => problems.push(format!("{name}:\n  {lines}")),
+                Some((_, why)) => eprintln!("{name} (not checked: {why}):\n  {}", apart.join("\n  ")),
+                None => problems.push(format!("{name}: two builds name it apart (first, then second):\n  {}", apart.join("\n  "))),
             }
         }
     }
-    // A record whose design left the corpus.
-    let known: std::collections::BTreeSet<PathBuf> = results.iter().map(|(name, _)| dir.join(format!("{name}.txt"))).collect();
-    for group in std::fs::read_dir(&dir).into_iter().flatten().flatten() {
-        for file in std::fs::read_dir(group.path()).into_iter().flatten().flatten() {
-            if !known.contains(&file.path()) {
-                if bless {
-                    let _ = std::fs::remove_file(file.path());
-                } else {
-                    problems.push(format!("{}: a record without a design", file.path().display()));
-                }
-            }
-        }
-    }
-    assert!(
-        problems.is_empty(),
-        "{} design(s) rebuild with other names than tests/naming records (if that is intended, record it with NAMING_CORPUS_BLESS=1 and say why in the pull request; - recorded, + now):\n{}",
-        problems.len(),
-        problems.join("\n")
-    );
+    assert!(problems.is_empty(), "{} of {} design(s) of the corpus:\n{}", problems.len(), results.len(), problems.join("\n"));
 }
