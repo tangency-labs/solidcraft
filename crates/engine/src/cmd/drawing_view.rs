@@ -98,21 +98,21 @@ pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new(CMD, "Drawing View Snap
         .doc_only()
         .contract(&MOVE_CONTRACT)
         .output(output_schema_for::<ToSheetResult>)
-        .params("view: a saved view's id; sheet: id or name; position_mm?: [x, y] for its centre (default: where it is, or the sheet's centre for a view lined up with its parent); break_alignment?: true to move a view lined up with its parent, which is then placed apart → {view, sheet, views: [it, then the views lined up with it, which go with it], outside?: [those whose boundary leaves the sheet's drawing space, none moved back in]}. One undo step, none for the sheet it is on."),
+        .params("view: a saved view's id; sheet: id or name; position_mm?: [x, y] for its centre (default: where it is, or the sheet's centre for a view lined up with its parent); break_alignment?: true to move a view lined up with its parent, which is then placed apart → {view, sheet, views: [it, then the views lined up with it, which go with it], outside?: [those whose boundary leaves the sheet's drawing space or lies over its title block, none moved back in]}. One undo step, none for the sheet it is on."),
     CommandSpec::new(COPY, "Copy View to Sheet", crate::checked!("drawing.view.copy_to_sheet", copy_to_sheet))
         .icon("copy")
         .in_drawing()
         .doc_only()
         .contract(&COPY_CONTRACT)
         .output(output_schema_for::<ToSheetResult>)
-        .params("view: a saved view's id; sheet: id or name; position_mm?: [x, y] for the copy's centre (default the sheet's centre); with_linked?: the views lined up with it copied too, lined up with the copy (true), or not (false); needed when it has any → {view: the copy, sheet, views: [the copies, its first], outside?: [those whose boundary leaves the sheet's drawing space]}. A copy follows none of the views it was copied from: a projected view copied alone becomes a base view, looking the way it did, with the settings it had. Each view's dimensions and balloons are copied with it, with ids of their own. One undo step."),
+        .params("view: a saved view's id; sheet: id or name; position_mm?: [x, y] for the copy's centre (default the sheet's centre); with_linked?: the views lined up with it copied too, lined up with the copy (true), or not (false); needed when it has any → {view: the copy, sheet, views: [the copies, its first], outside?: [those whose boundary leaves the sheet's drawing space or lies over its title block]}. A copy follows none of the views it was copied from: a projected view copied alone becomes a base view, looking the way it did, with the settings it had. Each view's dimensions and balloons are copied with it, with ids of their own. One undo step."),
     CommandSpec::new(BASE, "Base View", crate::checked!("drawing.view.base", base))
         .icon("new")
         .in_drawing()
         .doc_only()
         .contract(&BASE_CONTRACT)
         .output(output_schema_for::<CreateResult>)
-        .params("sheet: id or name; view?: as drawing.view.snapshot's (front by default); scale?: \"paper:model\" (default: the largest ISO 5455 preset at which it lies inside the sheet's drawing space, centred where it goes, or 1:1 with nothing to measure; saved either way); position_mm?: [x, y] for its centre (default the sheet's centre); display_style?, reference_style?, reference_hides_model?, reference_shown_percent?, tangent_edges?: settings it sets itself (each left out follows the default) → {view, sheet, scale: {text, factor, fitted}, boundary_mm, outside?: [it, when its boundary leaves the sheet's drawing space]}. A view of the drawing's design. One undo step; no model is evaluated."),
+        .params("sheet: id or name; view?: as drawing.view.snapshot's (front by default); scale?: \"paper:model\" (default: the largest ISO 5455 preset at which it lies inside the sheet's drawing space, centred where it goes, or 1:1 with nothing to measure; saved either way); position_mm?: [x, y] for its centre (default the sheet's centre); display_style?, reference_style?, reference_hides_model?, reference_shown_percent?, tangent_edges?: settings it sets itself (each left out follows the default) → {view, sheet, scale: {text, factor, fitted}, boundary_mm, outside?: [it, when its boundary leaves the sheet's drawing space or lies over its title block]}. A view of the drawing's design. One undo step; no model is evaluated."),
     CommandSpec::new(PROJECTED, "Projected View", crate::checked!("drawing.view.projected", projected))
         .icon("new")
         .in_drawing()

@@ -37,7 +37,8 @@ pub struct SheetTemplateChange {
 pub struct TemplateApplyResult {
     /// Each sheet that changes, in order.
     pub changed: Vec<SheetTemplateChange>,
-    /// The views on a sheet whose new paper leaves them outside its drawing space. None is moved.
+    /// The views on a restyled sheet that fall outside its drawing space or over its title block.
+    /// None is moved.
     pub outside: Vec<super::drawing_view::OutsideResult>,
     /// Whether the call only answered, changing nothing.
     pub dry_run: bool,

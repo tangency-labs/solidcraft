@@ -263,8 +263,8 @@ pub fn placed(view: &ResolvedView, measured: std::result::Result<(Extents, Aabb2
 }
 
 /// Each of `views` of `drawing` (one of `s`'s design's) whose boundary leaves its sheet's drawing
-/// space ([`Sheet::drawing_space`]), sides included, with where it sits:
-/// what a change of paper or a move to another sheet leaves outside. Nothing is moved.
+/// space ([`Sheet::drawing_space`]), sides included, or lies over its title block, with where it
+/// sits: what a change of paper or block, or a move to another sheet, leaves outside. Nothing is moved.
 pub fn outside(s: &Session, drawing: &Drawing, views: &[u64], cmd: &str) -> Result<Vec<(u64, OnSheet)>> {
     let mut out = Vec::new();
     for &id in views {
@@ -282,12 +282,15 @@ pub fn sheet<'a>(drawing: &'a Drawing, id: u64, cmd: &str) -> Result<&'a Sheet> 
     drawing.sheets.iter().find(|s| s.id == id).map(|s| &**s).ok_or_else(|| bad(cmd, format!("no sheet {}", ids::encode(id))))
 }
 
-/// Whether a view `placed` on `sheet` leaves its drawing space
-/// ([`Sheet::drawing_space`]), sides included: [`outside`]'s rule.
+/// Whether a view `placed` on `sheet` leaves its drawing space ([`Sheet::drawing_space`]), sides
+/// included, or lies over its title block: [`outside`]'s rule.
 pub fn leaves(sheet: &Sheet, placed: &OnSheet, cmd: &str) -> Result<bool> {
     // A view drawn up to the border, its sides on it, is inside: the margin takes rounding.
     let space = sheet.drawing_space().map_err(|e| bad(cmd, e.to_string()))?.inflated(EPS);
-    Ok(!(space.contains(placed.boundary.min) && space.contains(placed.boundary.max)))
+    // A view drawn up to the block, a side on its outline, is clear of it.
+    let block = sheet.title_block_outline().map_err(|e| bad(cmd, e.to_string()))?.map(|outline| outline.inflated(-EPS));
+    let over_block = block.is_some_and(|block| block.overlaps(&placed.boundary));
+    Ok(over_block || !(space.contains(placed.boundary.min) && space.contains(placed.boundary.max)))
 }
 
 #[cfg(test)]

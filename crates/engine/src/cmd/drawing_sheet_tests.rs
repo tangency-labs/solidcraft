@@ -259,6 +259,31 @@ fn a_sheets_title_block_by_command() {
     assert_eq!((sheets(&s)[0].title_block.is_some(), sheets(&s)[1].title_block.is_some()), (true, false));
 }
 
+/// A view a new block covers is listed with the ones the drawing space leaves out, and nothing
+/// moves; a block clear of every view lists none.
+#[test]
+fn a_new_block_lists_the_views_it_covers() {
+    let (mut s, [_, right, top]) = three_views();
+    let views = s.drawing("test").unwrap().views.clone();
+    let tall = |height: f64| {
+        let mut b = block();
+        b["size_mm"] = json!([180.0, height]);
+        for cell in b["cells"].as_array_mut().unwrap() {
+            cell["rect_mm"][3] = json!(height);
+        }
+        b
+    };
+    // An empty list is left out of the reply.
+    let listed = |r: &Value| r["outside"].as_array().into_iter().flatten().map(|v| v["view"].as_str().unwrap().to_string()).collect::<Vec<_>>();
+    let clear = run(&mut s, "drawing.sheet.set", json!({"sheet": "Sheet 1", "title_block": tall(30.0)}));
+    assert_eq!(listed(&clear), Vec::<String>::new(), "{clear}");
+    let covered = run(&mut s, "drawing.sheet.set", json!({"sheet": "Sheet 1", "title_block": tall(250.0)}));
+    assert!(listed(&covered).contains(&ids::encode(right)) && listed(&covered).contains(&ids::encode(top)), "{covered}");
+    assert_eq!(s.drawing("test").unwrap().views, views, "nothing moves");
+    let unchanged = run(&mut s, "drawing.sheet.set", json!({"sheet": "Sheet 1", "dpi": 600}));
+    assert_eq!(listed(&unchanged), Vec::<String>::new(), "only a change of paper or block lists them");
+}
+
 /// The cells `drawing.inspect` lists for the first sheet, by name: their text, and the value an
 /// override hides.
 fn cells(s: &mut Session) -> BTreeMap<String, (String, Option<String>)> {
