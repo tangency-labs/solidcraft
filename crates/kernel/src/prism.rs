@@ -485,8 +485,8 @@ mod planar_tests {
     /// Two edges lying on one another within the tolerance, a hair from parallel, meet at a
     /// point somewhere along their overlap. Taken for a crossing, that point split the square's
     /// edge once more: 5e-8 mm before its end, which left an edge shorter than the tolerance in
-    /// the result, or in the middle of a straight edge. The ends of an overlap are what split
-    /// the edges.
+    /// the result, or in the middle of a straight edge. Edges on one line within the tolerance
+    /// are one edge of the result: where they meet is no corner.
     #[test]
     fn overlapping_lines_a_hair_from_parallel_do_not_cross() {
         let square = rectangle(Vec2::ZERO, Vec2::new(10.0, 10.0));
@@ -507,20 +507,22 @@ mod planar_tests {
         };
         let same = |got: &[f64], want: &[f64]| got.len() == want.len() && got.iter().zip(want).all(|(g, w)| (g - w).abs() < 1e-6);
         for meet in [10.0 - 5e-8, 7.0] {
-            // Below the square, against its bottom edge: cut away, it leaves the square, the
-            // bottom edge split only at x = 4, where the quadrilateral's corner lies on it.
+            // Below the square, against its bottom edge: cut away, it leaves the square, its four
+            // edges whole (the quadrilateral's corner at x = 4 lies within 1e-8 of the bottom
+            // edge, on its line, and its edge from there is no more than 1e-8 off it).
             let below = quad(meet, -5.0);
             let cut = planar_regions_boolean(std::slice::from_ref(&square), std::slice::from_ref(&below), BoolOp::Cut, 1e-7).unwrap();
             assert_eq!(cut.len(), 1, "{meet}");
-            assert!(same(&lengths(&cut[0]), &[4.0, 6.0, 10.0, 10.0, 10.0]), "{meet}: cut edges {:?}", lengths(&cut[0]));
+            assert!(same(&lengths(&cut[0]), &[10.0, 10.0, 10.0, 10.0]), "{meet}: cut edges {:?}", lengths(&cut[0]));
             assert!((cut[0].area() - 100.0).abs() < 1e-6, "{meet}: {}", cut[0].area());
             // Over the square, flush with that edge and reaching past it to x = 14: the
-            // union's outline runs along y = 0 once, in the pieces 0..4, 4..10 and 10..14.
+            // union's outline runs along y = 0 once, one edge from 0 to 14 (the quadrilateral's
+            // bottom edge lies within 1e-8 of the line y = 0 all along).
             let flush = quad(meet, 5.0);
             let union = planar_regions_boolean(std::slice::from_ref(&square), std::slice::from_ref(&flush), BoolOp::Union, 1e-7)
                 .unwrap_or_else(|e| panic!("{meet}: union {e}"));
             assert_eq!(union.len(), 1, "{meet}");
-            assert!(same(&lengths(&union[0]), &[4.0, 4.0, 4.0, 5.0, 5.0, 6.0, 10.0, 10.0]), "{meet}: union edges {:?}", lengths(&union[0]));
+            assert!(same(&lengths(&union[0]), &[4.0, 5.0, 5.0, 10.0, 10.0, 14.0]), "{meet}: union edges {:?}", lengths(&union[0]));
             assert!((union[0].area() - 120.0).abs() < 1e-6, "{meet}: {}", union[0].area());
         }
     }
@@ -606,7 +608,8 @@ mod planar_tests {
     /// there left a sliver of edge shorter than the distance within which the loops join their
     /// pieces; the chaining took it for a second way out of the corner, and a loop of that one
     /// sliver is open, its area not zero away from the origin: a hole no outline held (no
-    /// result at all) or a region of its own. The union is the plate and the strip, whole.
+    /// result at all) or a region of its own. The union is the plate and the strip, whole: six
+    /// edges, the strip's end and the plate's on the line x = 150 one edge from y = 47 to 80.
     #[test]
     fn a_bent_edge_crossing_its_neighbour_by_their_corner_leaves_no_sliver() {
         let union_is_whole = |(plate, strip): (Region2, Region2), what: &str| {
@@ -617,7 +620,7 @@ mod planar_tests {
                 assert_eq!(out.len(), 1, "{what}: {out:?}");
                 let lp = &out[0].outer;
                 let shortest = lp.segs.iter().map(Seg2::length).fold(f64::MAX, f64::min);
-                assert!(out[0].holes.is_empty() && lp.segs.len() == 7 && shortest > 2.9, "{what}: {} edges, shortest {shortest:e}", lp.segs.len());
+                assert!(out[0].holes.is_empty() && lp.segs.len() == 6 && shortest > 2.9, "{what}: {} edges, shortest {shortest:e}", lp.segs.len());
                 assert!((out[0].area() - want).abs() < 1e-6, "{what}: {} vs {want}", out[0].area());
             }
         };
