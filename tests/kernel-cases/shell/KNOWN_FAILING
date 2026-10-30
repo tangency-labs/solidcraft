@@ -2,4 +2,3 @@
 # rig gate (.github/workflows/kernel-rig.yml) fails on a case that fails and is not listed here,
 # and on a listed case that passes: a fix removes its line in the same pull request.
 # Baseline: 45f69c0e5 with SMLib 60b1c6a, aarch64 Linux.
-cov-replace-face-step-onto-the-higher-face not supported yet: SMLib's offset of faces refuses (Unsupported) a move that closes a neighbouring face (the step wall) to nothing
