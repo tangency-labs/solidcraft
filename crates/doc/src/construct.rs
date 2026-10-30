@@ -428,31 +428,66 @@ fn centre(ctx: &Ctx, g: &GeoRef) -> Result<Vec3> {
     }
 }
 
-/// Point and unit tangent at fraction `t` along a polyline.
-fn along(pts: &[Vec3], t: f64) -> Option<(Vec3, Vec3)> {
-    let total: f64 = pts.windows(2).map(|w| (w[1] - w[0]).len()).sum();
-    if !(total > 0.0) {
-        return None;
-    }
-    let mut left = t.clamp(0.0, 1.0) * total;
-    for w in pts.windows(2) {
-        let l = (w[1] - w[0]).len();
-        if l <= 0.0 {
-            continue;
-        }
-        if left <= l {
-            return Some((w[0] + (w[1] - w[0]) * (left / l), (w[1] - w[0]) * (1.0 / l)));
-        }
-        left -= l;
-    }
-    let (a, b) = (pts.get(pts.len() - 2)?, pts.last()?);
-    Some((*b, (*b - *a).normalized()?))
+/// The point a fraction `t` (0…1) of the way along a picked edge or sketch curve by arc length,
+/// and the unit direction of travel there ([`kernel::along_path`]): exact on the curve itself.
+fn along(ctx: &Ctx, g: &GeoRef, t: f64) -> Result<(Vec3, Vec3)> {
+    Ok(kernel::along_path(&path_segs(ctx, g)?, t)?)
 }
 
-fn path_points(ctx: &Ctx, g: &GeoRef) -> Result<Vec<Vec3>> {
+/// A picked edge or sketch curve as the path segments that are its curve exactly, from the end
+/// the drawn curve starts at: a body edge's record curve ([`kernel::edge_path`]), a planar sketch
+/// curve's exact pieces, a 3D sketch curve's arc, spline, line or linked exact curves. Only a
+/// curve that exists as points alone runs along them: an intersection edge (its record holds no
+/// exact curve, only the surfaces and a leader near it), a 3D curve known only as its points
+/// (projected onto a face, iso curves), a spline above the exact pieces' degree.
+fn path_segs(ctx: &Ctx, g: &GeoRef) -> Result<Vec<kernel::PathSeg>> {
+    let lines = |pts: &[Vec3]| -> Vec<kernel::PathSeg> {
+        pts.windows(2).filter(|w| w[0].dist(w[1]) > 0.0).map(|w| kernel::PathSeg::Line { a: w[0], b: w[1] }).collect()
+    };
     match g {
-        GeoRef::Edge { at, name } => edge_points(ctx.st, *at, name),
-        GeoRef::SketchCurve { sketch, curve } => sketch_curve_points(ctx, *sketch, curve),
+        GeoRef::Edge { at, name } => {
+            let (b, i, pts) = edge_pick(ctx.st, *at, name)?;
+            let procedural =
+                b.body.record().edges.get(i).is_some_and(|e| matches!(e.parameters(), solidcraft_geom::brep::Curve::SurfaceIntersection { .. }));
+            if procedural {
+                return Ok(lines(&pts));
+            }
+            let segs = kernel::edge_path(&b.body, i)?;
+            // The drawn edge sets which way t runs, as the picked edge's polyline has it.
+            let (Some(first), Some(start)) = (pts.first(), segs.first().map(kernel::PathSeg::start)) else { return Ok(segs) };
+            let end = segs.last().map(kernel::PathSeg::end).unwrap_or(start);
+            Ok(if end.dist(*first) < start.dist(*first) { segs.iter().rev().map(kernel::PathSeg::reversed).collect() } else { segs })
+        }
+        GeoRef::SketchCurve { sketch, curve } => {
+            let ss = ctx.st.sketch(*sketch).ok_or_else(|| DocError::Unknown(format!("sketch {sketch}")))?;
+            // Evaluation has already mapped wires into this component's frame: their coordinates
+            // are independent of the sketch plane.
+            if let Some(wire) = ss.sketch.wires.iter().find(|wire| wire.id == *curve) {
+                if let Some(arc) = &wire.arc {
+                    let angle = solidcraft_sketch::arc_sweep(arc);
+                    return Ok(vec![kernel::PathSeg::Arc { a: arc.start, center: arc.center, axis: arc.normal, angle }]);
+                }
+                if wire.fit.len() >= 3 {
+                    let spline = kernel::PathPiece::Spline { fit: wire.fit.clone(), reversed: false };
+                    if let Some(spans) = spline.spans()? {
+                        return Ok(spans);
+                    }
+                }
+                if let [a, b] = wire.fit.as_slice() {
+                    return Ok(vec![kernel::PathSeg::Line { a: *a, b: *b }]);
+                }
+                if !wire.exact.is_empty() {
+                    let mut segs = Vec::new();
+                    for c in &wire.exact {
+                        segs.extend(kernel::curve_path(&c.curve, c.interval)?);
+                    }
+                    return Ok(segs);
+                }
+                return Ok(lines(&wire.pts));
+            }
+            let ci = ss.sketch.curve_index(curve).ok_or_else(|| DocError::Unknown(format!("curve `{curve}`")))?;
+            Ok(ss.sketch.exact_pieces(ci).iter().map(|s| kernel::PathSeg::of_sketch(&ss.plane, s)).collect())
+        }
         _ => Err(bad("pick an edge or sketch curve as the path")),
     }
 }
@@ -571,7 +606,7 @@ pub(crate) fn resolve_point(ctx: &Ctx, d: &PointDef) -> Result<Vec3> {
         }
         PointDef::AlongPath { path, t } => {
             let t = Document::eval_in(ctx.vals, t, Kind::Unitless)?;
-            along(&path_points(ctx, path)?, t).map(|(p, _)| p).ok_or_else(|| bad("the path has no length"))
+            along(ctx, path, t).map(|(p, _)| p)
         }
     }
 }
@@ -634,7 +669,7 @@ pub(crate) fn resolve_geo_plane(ctx: &Ctx, p: &PlaneRef) -> Result<Plane> {
         }
         PlaneRef::AlongPath { path, t } => {
             let t = Document::eval_in(ctx.vals, t, Kind::Unitless)?;
-            let (p, tan) = along(&path_points(ctx, path)?, t).ok_or_else(|| bad("the path has no length"))?;
+            let (p, tan) = along(ctx, path, t)?;
             Plane::from_normal(p, tan).ok_or_else(degenerate)
         }
         PlaneRef::ThroughPoint { base, point: at } => {

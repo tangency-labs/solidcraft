@@ -65,7 +65,7 @@ impl PathPiece {
     /// The piece's exact segments in the direction of travel: a spline of three or more fit
     /// points as its spans ([`PathSeg::Bezier`]), a curve held exactly as its segments; `None`
     /// for a polyline (and a spline of one or two points, a point or a line).
-    pub(crate) fn spans(&self) -> Result<Option<Vec<PathSeg>>> {
+    pub fn spans(&self) -> Result<Option<Vec<PathSeg>>> {
         let (fit, reversed) = match self {
             PathPiece::Spline { fit, reversed } => (fit, reversed),
             PathPiece::Segs(segs) => return Ok(Some(segs.clone())),
@@ -139,6 +139,33 @@ impl PointPath {
 pub fn sweep_point_path_with(plane: &Plane, region: &Region2, path: &PointPath, ctl: &SweepControl) -> Result<Body> {
     ctl.check()?;
     crate::sweep_path::smlib_sweep_points(plane, region, path, ctl)
+}
+
+/// The point a fraction `t` of the way along `path` (its segments end to end) by arc length, and
+/// the unit direction of travel there: 0 is where the path starts, 1 where it ends. Each
+/// segment's length and its point at a length are exact ([`PathSeg::length`],
+/// [`PathSeg::along`]): closed forms for lines and arcs, the arc-length parameter of a free-form
+/// span. A `t` outside 0…1 is refused: the path does not go on past its ends.
+pub fn along_path(path: &[PathSeg], t: f64) -> Result<(Vec3, Vec3)> {
+    if !(0.0..=1.0).contains(&t) {
+        return Err(KernelError::Invalid(format!("t is {t}: a point along a path is 0 (its start) to 1 (its end) of the way along it")));
+    }
+    let bad = || KernelError::Invalid("a segment of the path does not evaluate".into());
+    let lengths: Vec<f64> = path.iter().map(|s| s.length().ok_or_else(bad)).collect::<Result<_>>()?;
+    let total: f64 = lengths.iter().sum();
+    if !(total > 0.0 && total.is_finite()) {
+        return Err(KernelError::Invalid("the path has no length".into()));
+    }
+    let mut left = t * total;
+    let live = || path.iter().zip(&lengths).filter(|(_, l)| **l > 0.0);
+    let last = live().next_back().ok_or_else(bad)?;
+    for (seg, &l) in live() {
+        if left <= l || std::ptr::eq(seg, last.0) {
+            return seg.along((left / l).min(1.0)).ok_or_else(bad);
+        }
+        left -= l;
+    }
+    Err(bad())
 }
 
 /// Most segments one edge's curve may give a path.

@@ -1,0 +1,49 @@
+{
+ "commands": [
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": "XY",
+    "name": "Path"
+   }
+  },
+  {
+   "command": "sketch.spline.control_point",
+   "params": {
+    "points": [
+     [
+      0,
+      0
+     ],
+     [
+      10,
+      10
+     ],
+     [
+      30,
+      10
+     ],
+     [
+      40,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "construct.point.along_path",
+   "params": {
+    "path": {
+     "sketch": "Path",
+     "curve": "s1"
+    },
+    "t": 0.5,
+    "name": "P"
+   }
+  }
+ ]
+}

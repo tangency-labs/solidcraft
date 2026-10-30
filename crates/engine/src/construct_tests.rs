@@ -213,6 +213,24 @@ fn point_along_a_path() {
     run(&mut s, "construct.point.along_path", json!({"path": {"edge": [20, 0, 0]}, "t": 0.25, "name": "P"}));
     let p = point(&s, "P");
     assert!(near(p, Vec3::new(10.0, 0.0, 0.0)) || near(p, Vec3::new(30.0, 0.0, 0.0)), "{p:?}");
+    // On an arc it is the arc's own point by arc length, to rounding: a third of a quarter turn
+    // of radius 10 is 30° round. A t past either end is refused, not moved onto it.
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Round"}));
+    let arc = run(&mut s, "sketch.arc.center_point", json!({"center": [0, 0], "start": [10, 0], "end": [0, 10]}))["created"]["curves"][0]
+        .as_str()
+        .unwrap()
+        .to_string();
+    run(&mut s, "sketch.finish", json!({}));
+    let path = json!({"sketch": "Round", "curve": arc});
+    run(&mut s, "construct.point.along_path", json!({"path": path, "t": "1/3", "name": "Third"}));
+    let third = point(&s, "Third");
+    let want = Vec3::new(10.0 * (std::f64::consts::PI / 6.0).cos(), 5.0, 0.0);
+    assert!(third.dist(want) < 1e-12, "{third:?} is {:e} off", third.dist(want));
+    for t in [json!(1.5), json!(-0.25), json!("2")] {
+        let e = s.execute("construct.point.along_path", &json!({"path": path, "t": t})).unwrap_err();
+        assert!(e.to_string().contains("0 (its start) to 1 (its end)"), "t {t}: {e}");
+        assert!(s.execute("construct.plane.along_path", &json!({"path": path, "t": t})).is_err(), "plane at t {t}");
+    }
 }
 
 #[test]

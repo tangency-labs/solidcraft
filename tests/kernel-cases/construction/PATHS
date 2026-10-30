@@ -4,6 +4,8 @@ crates/engine/src/cmd/construct.rs
 # How a construction reference resolves, and the planes the document resolves.
 crates/doc/src/construct.rs
 crates/doc/src/document.rs
+# A point along a path: the path's exact curves by arc length.
+crates/kernel/src/point_path.rs
 # The constructions as evaluated, which the grader reads.
 crates/engine/src/view.rs
 tests/kernel-cases/construction/**
