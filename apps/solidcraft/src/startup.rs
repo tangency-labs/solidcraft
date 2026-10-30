@@ -306,13 +306,18 @@ pub const SYSTEM_VERSION_COMPAT_ENV: &str = "SYSTEM_VERSION_COMPAT";
 #[cfg(target_os = "macos")]
 pub const OCLP_NVRAM_KEY: &str = "4D1FDA02-38C7-4A6A-9CC6-4BCCA8B30102:OCLP-Version";
 
+/// Where macOS keeps its `nvram` tool.
+#[cfg(target_os = "macos")]
+const NVRAM_TOOL: &str = "/usr/sbin/nvram";
+
 /// `true` if the OCLP NVRAM key is present on this system.
 ///
-/// Runs `nvram <key>` and treats exit 0 as present. Any error (missing binary,
-/// permission denied, key absent) returns `false` — this is a best-effort probe.
+/// Runs `/usr/sbin/nvram <key>` and treats exit 0 as present. The full path keeps a `PATH` that
+/// lacks `/usr/sbin`, or lists a look-alike first, from changing the answer. Any error (missing
+/// binary, permission denied, key absent) returns `false`: this is a best-effort probe.
 #[cfg(target_os = "macos")]
 pub fn oclp_nvram_present() -> bool {
-    std::process::Command::new("nvram").arg(OCLP_NVRAM_KEY).output().map(|o| o.status.success()).unwrap_or(false)
+    std::process::Command::new(NVRAM_TOOL).arg(OCLP_NVRAM_KEY).output().map(|o| o.status.success()).unwrap_or(false)
 }
 
 /// Whether to re-launch with `SYSTEM_VERSION_COMPAT=1`: it is not set yet and OCLP shows through
@@ -329,8 +334,8 @@ fn compat_wanted(compat_set: bool, nvram: impl FnOnce() -> bool) -> bool {
 ///
 /// `SYSTEM_VERSION_COMPAT=1` must be present **before** the process starts: setting it
 /// with `std::env::set_var` inside `main` is too late because the macOS frameworks have
-/// already queried the OS version by then. Re-launching is the only safe approach that
-/// works without `unsafe` (a true `execve` replacement would require it).
+/// already queried the OS version by then, so the program starts itself again with the variable
+/// set and waits for that child.
 ///
 /// Returns `Ok(false)` immediately when:
 /// - `SYSTEM_VERSION_COMPAT` is already set (re-launched process, no loop), or
