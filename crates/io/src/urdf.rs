@@ -13,8 +13,10 @@ use std::collections::{BTreeMap, BTreeSet, HashSet, VecDeque};
 
 use solidcraft_doc::joints::{self, Joint, JointDynamics, JointKind};
 use solidcraft_doc::{
-    Document, IDENTITY, MAX_PLACEMENT_DEPTH, MAX_PLACEMENTS, Mat, ModelState, Occurrence, PhysicalOverride, apply_point, mat_inverse, mat_mul,
+    CollisionShape, Document, IDENTITY, MAX_PLACEMENT_DEPTH, MAX_PLACEMENTS, Mat, ModelState, Occurrence, PhysicalOverride, apply_point, mat_inverse,
+    mat_mul,
 };
+use solidcraft_geom::hull3::{convex_hull, fit_box, fit_cylinder, fit_sphere};
 use solidcraft_geom::{Mesh, Vec3};
 
 use crate::{IoError, Result, export_mesh, stl_binary, weld, weld_eps};
@@ -26,6 +28,8 @@ const TOKEN_INERTIA: f64 = 1e-12;
 const UNLIMITED_TRAVEL_MM: f64 = 1e6;
 const DEFAULT_EFFORT: f64 = 1000.0;
 const DEFAULT_VELOCITY: f64 = 10.0;
+/// Thinnest collision primitive (mm): URDF has no use for one of no size, as a flat body's would be.
+const MIN_SHAPE: f64 = 1e-3;
 
 /// Choices for [`urdf`] (`file.export` parameters).
 #[derive(Clone, Debug, Default)]
@@ -37,6 +41,8 @@ pub struct UrdfOptions {
     pub velocity: Option<f64>,
     /// Write `<mimic>` for motion links. `file.export` sets it unless told not to.
     pub mimic: bool,
+    /// What a body left on `Auto` becomes.
+    pub collision: CollisionDefault,
 }
 
 /// The URDF, its mesh files (name next to the `.urdf`, bytes) and what was approximated.
@@ -64,10 +70,54 @@ pub struct Link {
     /// Mesh coordinates (the component's frame) to the link frame.
     pub mesh_origin: Mat,
     pub visual: Option<String>,
-    pub collision: Option<String>,
+    pub collision: Vec<CollisionGeom>,
     /// sRGB and opacity, 0..1.
     pub color: Option<[f32; 4]>,
     pub inertial: Option<Inertial>,
+}
+
+/// One `<collision>` of a link: `origin` from the link frame, lengths in mm.
+#[derive(Clone, Debug, PartialEq)]
+pub enum CollisionGeom {
+    Mesh {
+        file: String,
+        origin: Mat,
+    },
+    Box {
+        origin: Mat,
+        size: Vec3,
+    },
+    /// Along the origin's z.
+    Cylinder {
+        origin: Mat,
+        radius: f64,
+        length: f64,
+    },
+    Sphere {
+        origin: Mat,
+        radius: f64,
+    },
+}
+
+impl CollisionGeom {
+    /// With `origin` read from `to_link` instead of the frame it is in.
+    fn in_frame(&self, to_link: &Mat) -> CollisionGeom {
+        let mut out = self.clone();
+        let (CollisionGeom::Mesh { origin, .. }
+        | CollisionGeom::Box { origin, .. }
+        | CollisionGeom::Cylinder { origin, .. }
+        | CollisionGeom::Sphere { origin, .. }) = &mut out;
+        *origin = mat_mul(to_link, origin);
+        out
+    }
+}
+
+/// What a body with no collision shape of its own (`Auto`) becomes.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum CollisionDefault {
+    #[default]
+    Mesh,
+    ConvexHull,
 }
 
 /// Mass (kg), centre of mass (mm, link frame) and inertia about it (kg m², link axes).
@@ -225,21 +275,32 @@ type BodyMass = (f64, Vec3, [[f64; 3]; 3]);
 /// A component's meshes and masses.
 struct Part {
     visual: Option<String>,
-    collision: Option<String>,
+    /// In the component's frame.
+    collision: Vec<CollisionGeom>,
     color: Option<[f32; 4]>,
     masses: Vec<BodyMass>,
     physical_override: Option<PhysicalOverride>,
 }
 
 /// Mesh files and masses per component (0: the root's bodies, named `base`).
-fn parts(doc: &Document, st: &ModelState, stem: &str, names: &mut Names, out: &mut UrdfPackage) -> Result<BTreeMap<u64, Part>> {
+fn parts(
+    doc: &Document,
+    st: &ModelState,
+    stem: &str,
+    options: &UrdfOptions,
+    names: &mut Names,
+    out: &mut UrdfPackage,
+) -> Result<BTreeMap<u64, Part>> {
     let mut used: BTreeSet<u64> = doc.occurrences.iter().map(|o| o.component).collect();
     used.insert(0);
     let mut parts = BTreeMap::new();
     for c in used {
         let label = if c == 0 { "base".to_string() } else { doc.components.iter().find(|x| x.id == c).map(|x| x.name.clone()).unwrap_or_default() };
         let (mut visual, mut collision) = (Mesh::default(), Mesh::default());
-        let (mut masses, mut color, mut open) = (Vec::new(), None, false);
+        let (mut masses, mut color) = (Vec::new(), None);
+        // Every body collides as drawn: the collision mesh is the visual one.
+        let mut shared = true;
+        let (mut hulls, mut fitted) = (Vec::new(), Vec::new());
         for b in st.bodies.iter().filter(|b| doc.model_body_component(b) == c) {
             let mut m = export_mesh(&b.body)?;
             if let Some(o) = doc.model_body_offset(b) {
@@ -252,17 +313,49 @@ fn parts(doc: &Document, st: &ModelState, stem: &str, names: &mut Names, out: &m
             let opacity = b.body.paint().map(|p| p.opacity).filter(|o| o.is_finite()).map_or(1.0, |o| o.clamp(0.0, 1.0));
             color = color.or(b.body.color().map(|[r, g, b]| [r, g, b, opacity]));
             append(&mut visual, &welded);
-            match welded.mass_properties() {
-                Some(mp) => {
-                    // g/cm³ to kg/mm³.
-                    let rho = doc.density(&b.name) * 1e-6;
-                    masses.push((rho * mp.volume, mp.centroid, mp.inertia.map(|r| r.map(|x| x * rho))));
-                    append(&mut collision, &welded);
-                }
-                None => {
-                    open = true;
-                    out.warnings.push(format!("body `{}` is not a closed solid: it is drawn but adds no mass or collision", b.name));
-                }
+            let closed = welded.mass_properties();
+            if let Some(mp) = closed {
+                // g/cm³ to kg/mm³.
+                let rho = doc.density(&b.name) * 1e-6;
+                masses.push((rho * mp.volume, mp.centroid, mp.inertia.map(|r| r.map(|x| x * rho))));
+            }
+            let shape = match doc.collision_shape(&b.name) {
+                CollisionShape::Auto if options.collision == CollisionDefault::ConvexHull => CollisionShape::ConvexHull,
+                CollisionShape::Auto => CollisionShape::Mesh,
+                shape => shape,
+            };
+            shared &= shape == CollisionShape::Mesh && closed.is_some();
+            if closed.is_none() {
+                let adds = if shape == CollisionShape::Mesh { "adds no mass or collision" } else { "adds no mass" };
+                out.warnings.push(format!("body `{}` is not a closed solid: it is drawn but {adds}", b.name));
+            }
+            let fit_failed = |out: &mut UrdfPackage, what: &str| {
+                out.warnings.push(format!("body `{}` has no {what} to collide with: it has no collision", b.name))
+            };
+            match shape {
+                CollisionShape::Mesh if closed.is_some() => append(&mut collision, &welded),
+                CollisionShape::Auto | CollisionShape::Mesh | CollisionShape::None => {}
+                CollisionShape::ConvexHull => match convex_hull(&welded.positions) {
+                    Some(hull) => hulls.push((b.name.clone(), hull)),
+                    None => fit_failed(out, "convex hull, since it spans no volume,"),
+                },
+                CollisionShape::Box => match fit_box(&welded) {
+                    Some(f) => fitted.push(CollisionGeom::Box {
+                        origin: f.frame,
+                        size: Vec3::new(f.size.x.max(MIN_SHAPE), f.size.y.max(MIN_SHAPE), f.size.z.max(MIN_SHAPE)),
+                    }),
+                    None => fit_failed(out, "box"),
+                },
+                CollisionShape::Cylinder => match fit_cylinder(&welded) {
+                    Some(f) => {
+                        fitted.push(CollisionGeom::Cylinder { origin: f.frame, radius: f.size.x.max(MIN_SHAPE), length: f.size.z.max(MIN_SHAPE) })
+                    }
+                    None => fit_failed(out, "cylinder"),
+                },
+                CollisionShape::Sphere => match fit_sphere(&welded) {
+                    Some(f) => fitted.push(CollisionGeom::Sphere { origin: f.frame, radius: f.size.x.max(MIN_SHAPE) }),
+                    None => fit_failed(out, "sphere"),
+                },
             }
         }
         let saved = doc.components.iter().find(|x| x.id == c).and_then(|x| x.physical_override);
@@ -270,19 +363,26 @@ fn parts(doc: &Document, st: &ModelState, stem: &str, names: &mut Names, out: &m
         if saved.is_some() && physical_override.is_none() {
             out.warnings.push(format!("the physical override of `{label}` is not usable numbers: ignored"));
         }
-        let mut part = Part { visual: None, collision: None, color, masses, physical_override };
+        let mut part = Part { visual: None, collision: Vec::new(), color, masses, physical_override };
         if !visual.triangles.is_empty() {
             let file = names.file(&format!("{stem}-{label}"));
             out.meshes.push((file.clone(), stl_binary(&[metres(&visual)], &label)));
             part.visual = Some(file.clone());
-            if !open {
-                part.collision = Some(file);
-            } else if !collision.triangles.is_empty() {
-                let file = names.file(&format!("{stem}-{label}-collision"));
-                out.meshes.push((file.clone(), stl_binary(&[metres(&collision)], &label)));
-                part.collision = Some(file);
+            if shared {
+                part.collision.push(CollisionGeom::Mesh { file, origin: IDENTITY });
             }
         }
+        if !shared && !collision.triangles.is_empty() {
+            let file = names.file(&format!("{stem}-{label}-collision"));
+            out.meshes.push((file.clone(), stl_binary(&[metres(&collision)], &label)));
+            part.collision.push(CollisionGeom::Mesh { file, origin: IDENTITY });
+        }
+        for (body, hull) in hulls {
+            let file = names.file(&format!("{stem}-{label}-{body}-collision"));
+            out.meshes.push((file.clone(), stl_binary(&[metres(&hull)], &label)));
+            part.collision.push(CollisionGeom::Mesh { file, origin: IDENTITY });
+        }
+        part.collision.extend(fitted);
         parts.insert(c, part);
     }
     Ok(parts)
@@ -345,7 +445,7 @@ impl<'a> Tree<'a> {
             path,
             mesh_origin,
             visual: part.and_then(|p| p.visual.clone()),
-            collision: part.and_then(|p| p.collision.clone()),
+            collision: part.map(|p| p.collision.iter().map(|g| g.in_frame(&mesh_origin)).collect()).unwrap_or_default(),
             color: part.and_then(|p| p.color),
             inertial: part.and_then(|p| link_inertial(p, &mesh_origin)).or(Some(token())),
         };
@@ -388,7 +488,15 @@ impl<'a> Tree<'a> {
             };
             let name = self.names.take(&o.name);
             let child = self.model.links.len();
-            self.model.links.push(Link { name, path: Vec::new(), mesh_origin: IDENTITY, visual: None, collision: None, color: None, inertial: None });
+            self.model.links.push(Link {
+                name,
+                path: Vec::new(),
+                mesh_origin: IDENTITY,
+                visual: None,
+                collision: Vec::new(),
+                color: None,
+                inertial: None,
+            });
             self.fixed(parent, child, origin);
         }
     }
@@ -496,7 +604,7 @@ impl<'a> Tree<'a> {
                     path: Vec::new(),
                     mesh_origin: IDENTITY,
                     visual: None,
-                    collision: None,
+                    collision: Vec::new(),
                     color: None,
                     inertial: Some(token()),
                 });
@@ -588,7 +696,7 @@ pub fn urdf(doc: &Document, st: &ModelState, stem: &str, options: &UrdfOptions) 
     let mut out = UrdfPackage { xml: String::new(), meshes: Vec::new(), model: UrdfModel::default(), warnings: Vec::new() };
     let base = names.take("base_link");
     let robot = sanitise(stem, false);
-    let parts = parts(doc, st, stem, &mut names, &mut out)?;
+    let parts = parts(doc, st, stem, options, &mut names, &mut out)?;
     let mut tree = Tree {
         doc,
         st,
@@ -605,7 +713,7 @@ pub fn urdf(doc: &Document, st: &ModelState, stem: &str, options: &UrdfOptions) 
         path: Vec::new(),
         mesh_origin: IDENTITY,
         visual: root.and_then(|p| p.visual.clone()),
-        collision: root.and_then(|p| p.collision.clone()),
+        collision: root.map(|p| p.collision.clone()).unwrap_or_default(),
         color: root.and_then(|p| p.color),
         inertial: root.and_then(|p| inertial(&p.masses, &IDENTITY)),
     };
@@ -926,12 +1034,16 @@ fn write_xml(model: &UrdfModel, name: &str, options: &UrdfOptions) -> String {
             }
             s += "    </visual>\n";
         }
-        if let Some(file) = &l.collision {
-            s += &format!(
-                "    <collision>\n      {}\n      <geometry><mesh filename=\"{prefix}{}\"/></geometry>\n    </collision>\n",
-                origin_xml(&l.mesh_origin),
-                attr(file)
-            );
+        for g in &l.collision {
+            let (origin, geometry) = match g {
+                CollisionGeom::Mesh { file, origin } => (origin, format!("<mesh filename=\"{prefix}{}\"/>", attr(file))),
+                CollisionGeom::Box { origin, size } => (origin, format!("<box size=\"{}\"/>", triple(*size * 1e-3))),
+                CollisionGeom::Cylinder { origin, radius, length } => {
+                    (origin, format!("<cylinder radius=\"{}\" length=\"{}\"/>", num(radius * 1e-3), num(length * 1e-3)))
+                }
+                CollisionGeom::Sphere { origin, radius } => (origin, format!("<sphere radius=\"{}\"/>", num(radius * 1e-3))),
+            };
+            s += &format!("    <collision>\n      {}\n      <geometry>{geometry}</geometry>\n    </collision>\n", origin_xml(origin));
         }
         s += "  </link>\n";
     }

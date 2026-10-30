@@ -5,7 +5,7 @@ use std::path::PathBuf;
 
 use serde_json::{Value, json};
 use solidcraft_doc::{Mat, joints, mat_mul};
-use solidcraft_io::urdf::{Step, UrdfModel, UrdfOptions, UrdfPackage};
+use solidcraft_io::urdf::{CollisionDefault, CollisionGeom, Step, UrdfModel, UrdfOptions, UrdfPackage};
 
 use crate::Session;
 
@@ -415,7 +415,7 @@ fn urdf_collision_skips_open_bodies() {
     run(&mut s, "surface.extrude", json!({"sketch": "S", "curves": ["l1"], "distance": 10, "body_name": "Wall"}));
     let p = package(&s);
     let Some(l) = p.model.links.iter().find(|l| l.name == "Part") else { panic!("{:?}", names(&p.model)) };
-    let (Some(v), Some(c)) = (&l.visual, &l.collision) else { panic!("{l:?}") };
+    let (Some(v), [CollisionGeom::Mesh { file: c, .. }]) = (&l.visual, l.collision.as_slice()) else { panic!("{l:?}") };
     assert_ne!(v, c, "a separate collision mesh");
     let bytes = &p.meshes.iter().find(|(f, _)| f == c).unwrap().1;
     assert!(stl_volume(bytes).is_some(), "the collision mesh is closed");
@@ -435,7 +435,7 @@ fn urdf_open_only_component_is_drawn() {
     run(&mut s, "surface.extrude", json!({"sketch": "S", "curves": ["l1"], "distance": 10, "body_name": "Wall"}));
     let p = package(&s);
     let Some(l) = p.model.links.iter().find(|l| l.name == "Sheet") else { panic!("{:?}", names(&p.model)) };
-    assert!(l.visual.is_some() && l.collision.is_none(), "{l:?}");
+    assert!(l.visual.is_some() && l.collision.is_empty(), "{l:?}");
     assert!(l.inertial.is_some_and(|i| i.mass == 1e-6), "{l:?}");
 }
 
@@ -955,7 +955,7 @@ fn a_flagged_origin_becomes_a_fixed_massless_link() {
     let p = package(&s);
     assert!(p.xml.contains(r#"<link name="tool0">"#) || p.xml.contains(r#"<link name="tool0"/>"#), "{}", p.xml);
     let l = p.model.links.iter().find(|l| l.name == "tool0").unwrap_or_else(|| panic!("{}", p.xml));
-    assert!(l.inertial.is_none() && l.visual.is_none() && l.collision.is_none());
+    assert!(l.inertial.is_none() && l.visual.is_none() && l.collision.is_empty());
     let at = p.model.links.iter().position(|l| l.name == "tool0");
     let j = p.model.joints.iter().find(|j| Some(j.child) == at).unwrap_or_else(|| panic!("{}", p.xml));
     assert_eq!(j.step, Step::Fixed);
@@ -1241,4 +1241,159 @@ fn a_pasted_component_gets_its_bodies_shapes() {
     run(&mut s, "component.paste_new", json!({"component": "C"}));
     assert_eq!(s.doc.collision_shapes.len(), 2, "{:?}", s.doc.collision_shapes);
     assert!(s.doc.collision_shapes.values().all(|x| *x == solidcraft_doc::CollisionShape::Sphere));
+}
+
+fn package_with(s: &Session, collision: CollisionDefault) -> UrdfPackage {
+    let options = UrdfOptions { collision, ..Default::default() };
+    solidcraft_io::urdf(&s.doc, &s.doc.painted(&s.model.state()), "t", &options).unwrap_or_else(|e| panic!("urdf: {e}"))
+}
+
+fn collisions_of<'a>(p: &'a UrdfPackage, link: &str) -> &'a [CollisionGeom] {
+    p.model.links.iter().find(|l| l.name == link).map_or(&[], |l| l.collision.as_slice())
+}
+
+/// Volume of a binary STL by name.
+fn named_stl_volume(p: &UrdfPackage, file: &str) -> f64 {
+    let (_, bytes) = p.meshes.iter().find(|(n, _)| n == file).unwrap_or_else(|| panic!("no {file}"));
+    stl_volume(bytes).unwrap_or_else(|| panic!("{file} is not closed"))
+}
+
+#[test]
+fn an_unconfigured_design_shares_the_visual_mesh_as_before() {
+    let p = package(&two_cubes());
+    let files: Vec<&str> = p.meshes.iter().map(|m| m.0.as_str()).collect();
+    assert_eq!(files, ["t-A.stl", "t-B.stl"]);
+    assert!(matches!(collisions_of(&p, "B"), [CollisionGeom::Mesh { file, .. }] if file == "t-B.stl"));
+}
+
+#[test]
+fn none_writes_no_collision_and_no_warning() {
+    let mut s = two_cubes();
+    run(&mut s, "body.collision", json!({"component": "B", "shape": "none"}));
+    let p = package(&s);
+    assert!(collisions_of(&p, "B").is_empty());
+    assert!(!collisions_of(&p, "A").is_empty());
+    assert!(!p.warnings.iter().any(|w| w.contains("collision")), "{:?}", p.warnings);
+    assert_eq!(p.meshes.len(), 2, "no mesh for a body with no collision: {:?}", p.meshes.iter().map(|m| &m.0).collect::<Vec<_>>());
+}
+
+#[test]
+fn a_box_shape_writes_a_metre_primitive_with_its_origin() {
+    let mut s = two_cubes();
+    run(&mut s, "body.collision", json!({"component": "B", "shape": "box"}));
+    let p = package(&s);
+    assert!(p.xml.contains(r#"<box size="0.01 0.01 0.01"/>"#), "{}", p.xml);
+    let [CollisionGeom::Box { origin, .. }] = collisions_of(&p, "B") else { panic!("{}", p.xml) };
+    // The cube at x 20..30, y 0..10, z 0..10 is centred at (25, 5, 5).
+    let link = frame_of(&p, &s, "B");
+    let at = mat_mul(&link, origin);
+    assert!((at[3][0] - 25.0).abs() < 1e-9 && (at[3][1] - 5.0).abs() < 1e-9 && (at[3][2] - 5.0).abs() < 1e-9, "{at:?}");
+}
+
+#[test]
+fn a_cylinder_shape_points_along_urdf_z() {
+    let mut s = Session::default();
+    run(&mut s, "component.create", json!({"name": "Post"}));
+    // Long along world y: the cylinder's z has to turn onto it.
+    run(&mut s, "solid.box", json!({"length": 10, "width": 40, "height": 10, "corner": [0, 0, 0]}));
+    run(&mut s, "body.collision", json!({"component": "Post", "shape": "cylinder"}));
+    let p = package(&s);
+    let [CollisionGeom::Cylinder { origin, radius, length }] = collisions_of(&p, "Post") else { panic!("{}", p.xml) };
+    assert!((length - 40.0).abs() < 1e-9, "{length}");
+    assert!((radius - 50f64.sqrt()).abs() < 1e-9, "{radius}");
+    let at = mat_mul(&frame_of(&p, &s, "Post"), origin);
+    assert!(at[2][1].abs() > 1.0 - 1e-9, "{at:?}");
+    assert!((at[3][1] - 20.0).abs() < 1e-9, "{at:?}");
+}
+
+#[test]
+fn a_sphere_shape_holds_the_body() {
+    let mut s = two_cubes();
+    run(&mut s, "body.collision", json!({"component": "B", "shape": "sphere"}));
+    let p = package(&s);
+    let [CollisionGeom::Sphere { radius, .. }] = collisions_of(&p, "B") else { panic!("{}", p.xml) };
+    assert!((radius - 75f64.sqrt()).abs() < 1e-9, "{radius}");
+}
+
+#[test]
+fn convex_hull_writes_one_stl_per_body_and_each_is_closed() {
+    let mut s = Session::default();
+    run(&mut s, "component.create", json!({"name": "C"}));
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "One"}));
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [20, 0, 0], "body_name": "Two", "operation": "new"}));
+    run(&mut s, "body.collision", json!({"component": "C", "shape": "convex_hull"}));
+    let p = package(&s);
+    let geoms = collisions_of(&p, "C");
+    assert_eq!(geoms.len(), 2, "{}", p.xml);
+    for g in geoms {
+        let CollisionGeom::Mesh { file, .. } = g else { panic!("{g:?}") };
+        assert!(file.ends_with("-collision.stl"), "{file}");
+        // In metres: 1 cm³.
+        assert!((named_stl_volume(&p, file) - 1e-6).abs() < 1e-12);
+    }
+}
+
+#[test]
+fn the_collision_option_applies_only_to_auto_bodies() {
+    let mut s = two_cubes();
+    run(&mut s, "body.collision", json!({"component": "A", "shape": "sphere"}));
+    let p = package_with(&s, CollisionDefault::ConvexHull);
+    assert!(matches!(collisions_of(&p, "A"), [CollisionGeom::Sphere { .. }]), "{}", p.xml);
+    assert!(matches!(collisions_of(&p, "B"), [CollisionGeom::Mesh { file, .. }] if file != "t-B.stl"), "{}", p.xml);
+}
+
+#[test]
+fn a_mesh_body_keeps_the_mesh_under_a_hull_default() {
+    let mut s = two_cubes();
+    run(&mut s, "body.collision", json!({"component": "B", "shape": "mesh"}));
+    let p = package_with(&s, CollisionDefault::ConvexHull);
+    assert!(matches!(collisions_of(&p, "B"), [CollisionGeom::Mesh { file, .. }] if file == "t-B.stl"), "{}", p.xml);
+}
+
+/// A flat open surface in component "Sheet", body "Wall".
+fn sheet() -> Session {
+    let mut s = Session::default();
+    run(&mut s, "component.create", json!({"name": "Sheet"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "S"}));
+    run(&mut s, "sketch.line", json!({"points": [[30, 0], [40, 0]], "ids": ["l1"]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "surface.extrude", json!({"sketch": "S", "curves": ["l1"], "distance": 10, "body_name": "Wall"}));
+    s
+}
+
+#[test]
+fn a_flat_body_given_a_hull_has_none_and_warns() {
+    let mut s = sheet();
+    run(&mut s, "body.collision", json!({"component": "Sheet", "shape": "convex_hull"}));
+    let p = package(&s);
+    assert!(collisions_of(&p, "Sheet").is_empty(), "{}", p.xml);
+    assert!(p.warnings.iter().any(|w| w.contains("Wall") && w.contains("hull")), "{:?}", p.warnings);
+}
+
+#[test]
+fn an_open_surface_given_a_box_collides_and_adds_no_mass() {
+    let mut s = sheet();
+    run(&mut s, "body.collision", json!({"component": "Sheet", "shape": "box"}));
+    let p = package(&s);
+    assert!(matches!(collisions_of(&p, "Sheet"), [CollisionGeom::Box { .. }]), "{}", p.xml);
+    assert_eq!(inertial_of(&p, "Sheet").mass, 1e-6);
+}
+
+#[test]
+fn hull_stls_stay_inside_allow_paths() {
+    let mut s = two_cubes();
+    run(&mut s, "body.collision", json!({"component": "B", "shape": "convex_hull"}));
+    let dir = temp("hull-files");
+    let urdf = dir.join("robot.urdf");
+    let r = run(&mut s, "file.export", json!({"path": urdf.to_string_lossy()}));
+    let files = r["files"].as_array().cloned().unwrap_or_default();
+    assert!(files.iter().any(|f| f.as_str().is_some_and(|f| f.ends_with("-collision.stl"))), "{r}");
+    assert!(files.iter().all(|f| f.as_str().is_some_and(|f| f.starts_with(&*dir.to_string_lossy()))), "{r}");
+}
+
+#[test]
+fn file_export_refuses_an_unknown_collision_default() {
+    let mut s = two_cubes();
+    let urdf = temp("collision-word").join("r.urdf");
+    assert!(s.execute("file.export", &json!({"path": urdf.to_string_lossy(), "collision": "blob"})).is_err());
 }

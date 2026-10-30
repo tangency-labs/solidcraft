@@ -146,6 +146,11 @@ const URDF_OPTIONS: &[OptionSpec] = &[
     OptionSpec { param: "effort", label: "Joint effort", kind: OptionKind::Number { default: 1000.0, min: 0.0, max: 1e9, unit: "" } },
     OptionSpec { param: "velocity", label: "Joint velocity", kind: OptionKind::Number { default: 10.0, min: 0.0, max: 1e9, unit: "" } },
     OptionSpec { param: "mimic", label: "Couple motion links", kind: OptionKind::Bool { default: true } },
+    OptionSpec {
+        param: "collision",
+        label: "Collision",
+        kind: OptionKind::Choice { choices: &[("mesh", "Full mesh"), ("convex_hull", "Convex hull")], default: 0 },
+    },
 ];
 
 const VIEW_DXF_OPTIONS: &[OptionSpec] = &[
