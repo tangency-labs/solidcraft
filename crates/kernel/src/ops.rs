@@ -49,7 +49,9 @@ pub fn union_all(bodies: &[&Body]) -> Result<Body> {
         if bodies.is_empty() {
             return Err(KernelError::Invalid("a union of no bodies".into()));
         }
-        guard("SMLib union", || crate::smlib_boolean::smlib_union_all(bodies))?.with_preserved_union_planar_sources(bodies)
+        guard("SMLib union", || crate::smlib_boolean::smlib_union_all(bodies))?
+            .inherit_split_lines(bodies)
+            .with_preserved_union_planar_sources(bodies)
     })
 }
 
@@ -64,9 +66,10 @@ fn apart(a: &Body, b: &Body) -> Result<bool> {
 }
 
 /// A boolean's result with what its operands' faces stood for carried over: regularization
-/// protection and the planar construction and shell roles on supports it kept.
+/// protection, the lines they were split along on purpose, and the planar construction and shell roles on supports it kept.
 fn with_operand_roles(a: &Body, b: &Body, op: BoolOp, r: Result<Option<Body>>) -> Result<Option<Body>> {
-    let r = r.map(|result| result.map(|body| body.inherit_regularization_protection(a).inherit_regularization_protection(b)));
+    let r = r
+        .map(|result| result.map(|body| body.inherit_regularization_protection(a).inherit_regularization_protection(b).inherit_split_lines(&[a, b])));
     match op {
         BoolOp::Cut => r.and_then(|result| result.map(|body| body.with_preserved_boolean_planar_sources(a, b, true)).transpose()),
         BoolOp::Union => r.and_then(|result| result.map(|body| body.with_preserved_union_planar_sources(&[a, b])).transpose()),
