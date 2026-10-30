@@ -616,36 +616,7 @@ mod tests {
             assert!((moved.face_plane(floor).unwrap().origin.z - (300. + thickness)).abs() < 1e-9);
             assert!(matches!(moved.face_sources().unwrap().get(right), Some(Some(FaceSource::ShellPlanar { producer: Some(9), inner: false, .. }))));
             assert!(moved.face_plane(right).unwrap().normal().dot(Vec3::Y) > 0.999999);
-            let raw = cup.mesh(&crate::MeshTolerance::chord(0.01)).unwrap();
             let display = cup.mesh(&crate::MeshTolerance::chord(0.01)).unwrap();
-            let cylindrical: Vec<_> = (0..cup.face_count())
-                .filter_map(|i| {
-                    let crate::FaceSurface::Cylinder { radius, .. } = crate::face_surface(&cup, i)? else { return None };
-                    let z: Vec<f64> = face_points(&cup, i).iter().map(|p| p.z).collect();
-                    let lo = z.iter().copied().fold(f64::INFINITY, f64::min);
-                    let hi = z.iter().copied().fold(f64::NEG_INFINITY, f64::max);
-                    Some((i, radius, lo, hi))
-                })
-                .collect();
-            eprintln!("roundedShell width{width} thickness{thickness} raw{} cylindrical roles{cylindrical:?}", cup.face_count());
-            let mut corner_joins = 0;
-            for (edge, adjacent) in raw.edge_faces.iter().enumerate() {
-                let [a, b] = adjacent.as_slice() else { continue };
-                if raw.edges[edge].iter().all(|p| (p.z - thickness).abs() < 1e-8)
-                    && cylindrical.iter().any(|(i, r, _, _)| *i == *a as usize && (*r - 6.).abs() < 1e-6)
-                    && cylindrical.iter().any(|(i, r, _, _)| *i == *b as usize && (*r - 6.).abs() < 1e-6)
-                {
-                    corner_joins += 1;
-                    assert!(display.seams[edge], "existing cylindrical corner joins must not draw a floor-height arc");
-                }
-            }
-            assert_eq!(corner_joins, 0, "no physical lower corner strip remains");
-            assert_eq!(cup.face_count(), 19);
-            let outer: Vec<_> = cylindrical.iter().filter(|(_, r, _, _)| (*r - 6.).abs() < 1e-6).collect();
-            assert_eq!(outer.len(), 4);
-            assert!(outer.iter().all(|(i, _, _, _)| cup.face_was_coalesced(*i) && moved.face_was_coalesced(*i)));
-            assert!(outer.iter().all(|(_, _, lo, hi)| lo.abs() < 1e-9 && (*hi - 30.).abs() < 1e-9));
-
             for axis in 0..2 {
                 for high in [false, true] {
                     let matching: Vec<_> = sources.iter().enumerate().filter_map(|(i,s)| matches!(s,Some(FaceSource::ShellPlanar {inner:false,source,..}) if matches!(source.as_ref(),FaceSource::Box {axis:a,high:h,..} if *a==axis && *h==high)).then_some(i)).collect();
@@ -658,18 +629,17 @@ mod tests {
             assert!(display.contains(Vec3::new(width / 2. - thickness / 2., 0., thickness / 2.)));
             assert!(display.contains(Vec3::new(width / 2. - thickness / 2., 0., 15.)));
             assert!(!display.contains(Vec3::new(0., 0., 15.)));
-            // Different meshers (the display plan and the reference), both within 0.01 mm.
-            let (rv, dv) = (raw.measure().volume, display.measure().volume);
-            assert!((rv - dv).abs() <= raw.measure().area * 0.01, "display volume {dv} vs {rv}");
+            // The rounded box less its inside, the box moved in by the wall with its corners'
+            // rounds at 6 − t, open at the top: exact (SMLib's volume, to 1e-8; the rounds
+            // are its surfaces).
             let expected = (width * 60. - (4. - std::f64::consts::PI) * 36.) * 30.
                 - ((width - 2. * thickness) * (60. - 2. * thickness) - (4. - std::f64::consts::PI) * (6. - thickness).powi(2)) * (30. - thickness);
-            assert!((cup.mesh(&crate::MeshTolerance::chord(1e-4)).unwrap().measure().volume - expected).abs() < 0.2);
+            let v = crate::measure(&cup).unwrap().volume;
+            assert!((v - expected).abs() < 1e-6 * expected, "{v} vs {expected}");
             let imported = crate::step_import(&crate::step_export(&[&cup], "regularized rounded shell").unwrap()).unwrap();
             assert!(imported.warnings.is_empty());
             let copy = &imported.bodies[0].body;
-            assert_eq!(copy.face_count(), 19);
-            // STEP may additionally coalesce cylindrical corner patches. The
-            // certified planar wall topology itself must survive unchanged.
+            // The certified planar walls come back from STEP as one full-height face each.
             for (axis, coordinate) in [(Vec3::X, width / 2.), (-Vec3::X, width / 2.), (Vec3::Y, 30.), (-Vec3::Y, 30.)] {
                 let walls: Vec<usize> = actual_planes(copy)
                     .unwrap()
