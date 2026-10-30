@@ -1,4 +1,4 @@
-//! Delete Face with healing: faces are removed and their planar neighbours extend to close the
+//! Delete Face with healing: faces are removed and their neighbours extend to close the
 //! gap, as when a fillet, chamfer, boss or hole is taken off a part.
 //!
 //! The body is rebuilt from its own topology. Faces away from the gap are kept as they are.
@@ -7,8 +7,9 @@
 //! at the moved corners for a face enclosed by rounds. A corner on the
 //! gap moves to where its planes meet the neighbours across the gap (a fillet's tangent points
 //! go to the sharp corner), and the stretch of loop that bordered deleted faces closes with a
-//! straight edge between the moved corners. Anything else (curved neighbours, a gap the
-//! neighbours cannot close) is refused, naming the face.
+//! straight edge between the moved corners. Two equal-radius cylindrical neighbours may
+//! instead meet at a conic on their bisector plane. Other curved neighbours, and gaps the
+//! neighbours cannot close, are refused.
 
 use std::collections::{BTreeSet, HashMap};
 
@@ -45,6 +46,225 @@ fn face_plane(f: &mt::Face, tol: f64) -> Option<(Vec3, f64)> {
     let (p0, n0) = *pts.first()?;
     let d = n0.dot(p0);
     pts.iter().all(|(p, n)| n.dot(n0) > 1.0 - 1e-9 && (n0.dot(*p) - d).abs() <= tol).then_some((n0, d))
+}
+
+/// Two equal-radius cylinders meeting across a removed corner can be extended to a
+/// bisector plane. Their intersection there is the same conic from either cylinder.
+/// Keep this deliberately narrow: arbitrary curved neighbours still need a general
+/// surface/surface intersection and must not be healed with straight chords.
+struct CylinderMitre {
+    faces: HashMap<usize, (Vec3, mt::Edge)>,
+    normal: Vec3,
+    offset: f64,
+    closing_plane: Option<usize>,
+}
+
+impl CylinderMitre {
+    fn project(&self, face: usize, p: Vec3) -> Option<Vec3> {
+        let (axis, _) = self.faces.get(&face)?;
+        Some(p + *axis * ((self.offset - self.normal.dot(p)) / self.normal.dot(*axis)))
+    }
+
+    fn matrix(&self, face: usize) -> Option<mt::Matrix4> {
+        let (axis, _) = self.faces.get(&face)?;
+        let a = *axis / self.normal.dot(*axis);
+        let col = |v: Vec3, w| mt::Vector4::new(v.x, v.y, v.z, w);
+        Some(mt::Matrix4::from_cols(
+            col(Vec3::X - a * self.normal.x, 0.0),
+            col(Vec3::Y - a * self.normal.y, 0.0),
+            col(Vec3::Z - a * self.normal.z, 0.0),
+            col(a * self.offset, 1.0),
+        ))
+    }
+
+    fn surface(&self, fi: usize, face: &mt::Face, size: f64) -> Result<mt::Surface> {
+        use mt::{BoundedCurve, ParametricCurve, ParametricSurface3D, SearchNearestParameter};
+        let (axis, edge) = self.faces.get(&fi).ok_or_else(|| fail("missing cylinder"))?;
+        // Sweep the original section far enough to include both the old and new trim.
+        // A trimmed NURBS cylinder's original parameter rectangle may be too short.
+        let base = builder::translated(edge, crate::body::v3(-*axis * size));
+        let swept: mt::Face = builder::tsweep(&base, crate::body::v3(*axis * (2.0 * size)));
+        let mut surface = swept.oriented_surface();
+        let c = edge.oriented_curve();
+        let (lo, hi) = c.range_tuple();
+        let p = c.subs((lo + hi) * 0.5);
+        let old = face.oriented_surface();
+        let (u, v) = old.search_nearest_parameter(p, None, 100).ok_or_else(|| fail("cannot orient the old cylinder"))?;
+        let n = old.normal(u, v);
+        let (u, v) = surface.search_nearest_parameter(p, None, 100).ok_or_else(|| fail("cannot orient the extended cylinder"))?;
+        let m = surface.normal(u, v);
+        if n.x * m.x + n.y * m.y + n.z * m.z < 0.0 {
+            surface = mt::Invertible::inverse(&surface);
+        }
+        Ok(surface)
+    }
+}
+
+fn cylinder_mitre(
+    all: &[mt::Face],
+    curved: &[usize],
+    del: &BTreeSet<usize>,
+    efaces: &HashMap<mt::EdgeID, Vec<usize>>,
+    size: f64,
+) -> Option<CylinderMitre> {
+    use crate::surface_kind::{FaceSurface, surface_of};
+    use mt::{BoundedCurve, ParametricCurve};
+    let [first, second] = curved else { return None };
+    let cylinder = |fi: usize| {
+        let f = all.get(fi)?;
+        let FaceSurface::Cylinder { origin, axis, radius } = surface_of(f, size)? else { return None };
+        let edges: Vec<_> = f.edge_iter().filter(|e| efaces.get(&e.id()).is_some_and(|fs| fs.iter().any(|i| del.contains(i)))).collect();
+        let [edge] = edges.as_slice() else { return None };
+        let axis = Vec3::new(axis.x, axis.y, axis.z);
+        let c = edge.oriented_curve();
+        let (lo, hi) = c.range_tuple();
+        let sample: Vec<_> = (0..=16).map(|i| from_p3(c.subs(lo + (hi - lo) * f64::from(i) / 16.0))).collect();
+        let start = *sample.first()?;
+        // Only a transverse section, not a seam or a partial longitudinal cut.
+        if sample.iter().any(|p| (*p - start).dot(axis).abs() > size * 1e-7) || start.dist(*sample.last()?) < size * 1e-7 {
+            return None;
+        }
+        Some((origin, axis, radius, (*edge).clone(), sample))
+    };
+    let (o1, a1, r1, e1, s1) = cylinder(*first)?;
+    let (o2, a2, r2, e2, s2) = cylinder(*second)?;
+    let tol = size * 1e-6;
+    if (r1 - r2).abs() > tol {
+        return None;
+    }
+    let dot = a1.dot(a2);
+    let den = 1.0 - dot * dot;
+    if den < 1e-6 {
+        return None;
+    }
+    let w = o2 - o1;
+    let t = (w.dot(a1) - dot * w.dot(a2)) / den;
+    let u = (dot * w.dot(a1) - w.dot(a2)) / den;
+    let center = o1 + a1 * t;
+    if center.dist(o2 + a2 * u) > tol {
+        return None;
+    }
+    let mut best: Option<(f64, CylinderMitre)> = None;
+    for sign in [-1.0, 1.0] {
+        let normal = (a1 + a2 * sign).normalized()?;
+        let candidate = CylinderMitre {
+            faces: HashMap::from([(*first, (a1, e1.clone())), (*second, (a2, e2.clone()))]),
+            normal,
+            offset: normal.dot(center),
+            closing_plane: None,
+        };
+        let p1: Vec<_> = s1.iter().filter_map(|p| candidate.project(*first, *p)).collect();
+        let p2: Vec<_> = s2.iter().filter_map(|p| candidate.project(*second, *p)).collect();
+        if p1.len() != s1.len() || p2.len() != s2.len() {
+            continue;
+        }
+        // Adjacent oriented faces must traverse their shared edge in opposite directions.
+        if p1.iter().zip(p2.iter().rev()).any(|(a, b)| a.dist(*b) > tol) {
+            continue;
+        }
+        let travel = p1.iter().zip(&s1).chain(p2.iter().zip(&s2)).map(|(a, b)| a.dist(*b)).fold(0.0, f64::max);
+        if !travel.is_finite() || travel > size {
+            continue;
+        }
+        if best.as_ref().is_none_or(|(d, _)| travel < *d) {
+            best = Some((travel, candidate));
+        }
+    }
+    best.map(|(_, m)| m)
+}
+
+/// Continue cylindrical neighbours to one remaining plane (the ends of a removed
+/// edge round). Unlike a mitre, the two cylinders need not intersect each other.
+fn cylinder_ends(
+    all: &[mt::Face],
+    curved: &[usize],
+    del: &BTreeSet<usize>,
+    efaces: &HashMap<mt::EdgeID, Vec<usize>>,
+    planes: &HashMap<usize, (Vec3, f64)>,
+    size: f64,
+) -> Option<CylinderMitre> {
+    use crate::surface_kind::{FaceSurface, surface_of};
+    use mt::{BoundedCurve, ParametricCurve};
+    if curved.is_empty() || curved.len() > 8 {
+        return None;
+    }
+    let mut faces = HashMap::new();
+    for &fi in curved {
+        let f = all.get(fi)?;
+        let FaceSurface::Cylinder { axis, .. } = surface_of(f, size)? else { return None };
+        let edges: Vec<_> = f.edge_iter().filter(|e| efaces.get(&e.id()).is_some_and(|fs| fs.iter().any(|i| del.contains(i)))).collect();
+        let [edge] = edges.as_slice() else { return None };
+        faces.insert(fi, (axis.vec(), (*edge).clone()));
+    }
+    let mut candidates = Vec::new();
+    for (&fi, &(normal, offset)) in planes {
+        if faces.values().any(|(axis, _)| normal.dot(*axis).abs() < 1e-6) {
+            continue;
+        }
+        let m = CylinderMitre { faces: faces.clone(), normal, offset, closing_plane: Some(fi) };
+        let mut valid = true;
+        for (&i, (_, e)) in &faces {
+            let c = e.oriented_curve();
+            let (lo, hi) = c.range_tuple();
+            for k in 0..=16 {
+                let p = from_p3(c.subs(lo + (hi - lo) * f64::from(k) / 16.0));
+                let q = m.project(i, p)?;
+                if !q.is_finite() || p.dist(q) > size {
+                    valid = false;
+                }
+            }
+        }
+        if valid {
+            candidates.push(m);
+        }
+    }
+    if candidates.len() == 1 { candidates.pop() } else { None }
+}
+
+/// Add the preserved end arcs around a planar gap, then its straight middle.
+/// Each arc must connect to one end of this gap; disconnected arcs are refused.
+fn close_with_arcs(a: Vec3, b: Vec3, arcs: &[mt::Edge], tol: f64) -> Result<(Vec<mt::Edge>, Vec3, Vec3, Vec<mt::Edge>)> {
+    let mut left = Vec::new();
+    let mut right = Vec::new();
+    let (mut a, mut b) = (a, b);
+    let mut unused = arcs.to_vec();
+    while !unused.is_empty() {
+        let mut found = None;
+        for (i, e) in unused.iter().enumerate() {
+            let (x, y) = (from_p3(e.front().point()), from_p3(e.back().point()));
+            if x.dist(a) <= tol {
+                left.push(e.clone());
+                a = y;
+                found = Some(i);
+                break;
+            }
+            if y.dist(a) <= tol {
+                left.push(e.inverse());
+                a = x;
+                found = Some(i);
+                break;
+            }
+            if y.dist(b) <= tol {
+                right.push(e.clone());
+                b = x;
+                found = Some(i);
+                break;
+            }
+            if x.dist(b) <= tol {
+                right.push(e.inverse());
+                b = y;
+                found = Some(i);
+                break;
+            }
+        }
+        if let Some(i) = found {
+            unused.remove(i);
+        } else {
+            return Err(fail("a cylindrical end does not join the planar gap"));
+        }
+    }
+    right.reverse();
+    Ok((left, a, b, right))
 }
 
 type Key = (i64, i64, i64);
@@ -100,6 +320,7 @@ pub fn delete_faces(body: &Body, faces: &[usize]) -> Result<Body> {
         return Err(fail("the faces don't border the rest of the body"));
     }
     let mut planes: HashMap<usize, (Vec3, f64)> = HashMap::new();
+    let mut curved = Vec::new();
     for &f in &neighbours {
         // Planar by its geometry (boolean results may carry a plane as another surface type).
         match all.get(f).and_then(|x| face_plane(x, size * 1e-6)) {
@@ -107,15 +328,18 @@ pub fn delete_faces(body: &Body, faces: &[usize]) -> Result<Body> {
                 planes.insert(f, p);
             }
             None => {
-                let by = efaces
-                    .values()
-                    .find(|fs| fs.contains(&f) && fs.iter().any(|x| del.contains(x)))
-                    .and_then(|fs| fs.iter().find(|x| del.contains(x)).copied())
-                    .unwrap_or(0);
-                return Err(fail(format!("face {by} borders face {f}, which is curved; only planar neighbours can extend to close the gap yet")));
+                curved.push(f);
             }
         }
     }
+    let mitre = if curved.is_empty() {
+        None
+    } else {
+        Some(guard("delete face curved neighbours", || {
+            cylinder_mitre(&all, &curved, &del, &efaces, size).or_else(||cylinder_ends(&all,&curved,&del,&efaces,&planes,size))
+                .ok_or_else(|| fail("curved neighbours cannot close this gap; supported repairs include matching cylindrical mitres and cylindrical ends meeting a common plane"))
+        })?)
+    };
     // Corners across the gap: three neighbour planes meeting near the deleted faces.
     let gap: Aabb3 = del.iter().flat_map(|f| all.get(*f).into_iter().flat_map(|x| x.vertex_iter())).map(|v| from_p3(v.point())).collect();
     let near_gap = gap.inflated(gap.diagonal().max(size * 1e-3));
@@ -151,6 +375,16 @@ pub fn delete_faces(body: &Body, faces: &[usize]) -> Result<Body> {
             if keep.is_empty() || keep.len() >= 3 {
                 continue;
             }
+            if let Some(m) = &mitre {
+                let projected: Vec<_> = keep.iter().filter_map(|i| m.project(*i, from_p3(v.point()))).collect();
+                if let Some(p) = projected.first() {
+                    if projected.iter().any(|q| p.dist(*q) > size * 1e-6) || keep.iter().filter(|i| planes.contains_key(i)).any(|i| !on(*p, *i)) {
+                        return Err(fail("the cylindrical intersection cannot meet the neighbouring planes"));
+                    }
+                    moved.insert(v.id(), *p);
+                    continue;
+                }
+            }
             if keep.iter().any(|x| !planes.contains_key(x)) {
                 return Err(fail(format!("a corner of face {f} touches a face that cannot move")));
             }
@@ -170,6 +404,7 @@ pub fn delete_faces(body: &Body, faces: &[usize]) -> Result<Body> {
                 verts.insert(key(from_p3(v.point()), q), v.clone());
             }
         }
+        let mut curves: HashMap<(Key, Key), mt::Edge> = HashMap::new();
         let mut lines: HashMap<(Key, Key), mt::Edge> = HashMap::new();
         let mut line = |a: Vec3, b: Vec3, verts: &mut HashMap<Key, mt::Vertex>| -> mt::Edge {
             let (ka, kb) = (key(a, q), key(b, q));
@@ -189,6 +424,25 @@ pub fn delete_faces(body: &Body, faces: &[usize]) -> Result<Body> {
         // close the gap are new.
         let mut rec = crate::record::Rebuild::default();
         let mut out: Vec<mt::Face> = Vec::new();
+        let mut end_arcs = Vec::new();
+        if let Some(m) = &mitre
+            && m.closing_plane.is_some()
+        {
+            use mt::Transformed;
+            for (&fi, (_, e)) in &m.faces {
+                let a = m.project(fi, from_p3(e.front().point())).ok_or_else(|| fail("cylinder end"))?;
+                let b = m.project(fi, from_p3(e.back().point())).ok_or_else(|| fail("cylinder end"))?;
+                let (ka, kb) = (key(a, q), key(b, q));
+                let va = verts.entry(ka).or_insert_with(|| builder::vertex(p3(a))).clone();
+                let vb = verts.entry(kb).or_insert_with(|| builder::vertex(p3(b))).clone();
+                let matrix = m.matrix(fi).ok_or_else(|| fail("cylinder projection"))?;
+                let edge = mt::Edge::try_new(&va, &vb, e.oriented_curve().transformed(matrix)).map_err(|e| fail(format!("cylinder end: {e}")))?;
+                rec.piece(&edge, e);
+                curves.insert((ka, kb), edge.clone());
+                end_arcs.push(edge);
+            }
+        }
+
         for (fi, f) in all.iter().enumerate() {
             if del.contains(&fi) {
                 continue;
@@ -279,14 +533,46 @@ pub fn delete_faces(body: &Body, faces: &[usize]) -> Result<Body> {
                 };
                 for k in 0..m {
                     let Some(e) = edges.get((start + k) % m) else { continue };
+                    if gap(e)
+                        && let Some(matrix) = mitre.as_ref().and_then(|m| m.matrix(fi))
+                    {
+                        use mt::Transformed;
+                        let (a, b) = (pos(e.front()), pos(e.back()));
+                        let (ka, kb) = (key(a, q), key(b, q));
+                        let edge = if let Some(old) = curves.get(&(ka, kb)) {
+                            old.clone()
+                        } else if let Some(old) = curves.get(&(kb, ka)) {
+                            old.inverse()
+                        } else {
+                            let va = verts.entry(ka).or_insert_with(|| builder::vertex(p3(a))).clone();
+                            let vb = verts.entry(kb).or_insert_with(|| builder::vertex(p3(b))).clone();
+                            let curve = e.oriented_curve().transformed(matrix);
+                            let edge = mt::Edge::try_new(&va, &vb, curve).map_err(|err| fail(format!("cylindrical intersection: {err}")))?;
+                            curves.insert((ka, kb), edge.clone());
+                            edge
+                        };
+                        rec.piece(&edge, e);
+                        new_edges.push(edge);
+                        continue;
+                    }
                     if gap(e) {
                         pending.get_or_insert_with(Vec::new).extend([pos(e.front()), pos(e.back())]);
                         continue;
                     }
                     let (a, b) = (pos(e.front()), pos(e.back()));
                     if let Some(p) = pending.take() {
-                        for (x, y) in close(p, a) {
-                            new_edges.push(line(x, y, &mut verts));
+                        if mitre.as_ref().is_some_and(|m| m.closing_plane == Some(fi)) {
+                            let start = *p.first().ok_or_else(|| fail("empty planar gap"))?;
+                            let (left, x, y, right) = close_with_arcs(start, a, &end_arcs, q * 10.0)?;
+                            new_edges.extend(left);
+                            if x.dist(y) > q * 10.0 {
+                                new_edges.push(line(x, y, &mut verts));
+                            }
+                            new_edges.extend(right);
+                        } else {
+                            for (x, y) in close(p, a) {
+                                new_edges.push(line(x, y, &mut verts));
+                            }
                         }
                     }
                     let moves = moved.contains_key(&e.front().id()) || moved.contains_key(&e.back().id());
@@ -305,14 +591,32 @@ pub fn delete_faces(body: &Body, faces: &[usize]) -> Result<Body> {
                 // A gap stretch at the end closes back to the first edge.
                 if let (Some(p), Some(first)) = (pending, new_edges.first()) {
                     let a = from_p3(first.front().point());
-                    for (x, y) in close(p, a) {
-                        new_edges.push(line(x, y, &mut verts));
+                    if mitre.as_ref().is_some_and(|m| m.closing_plane == Some(fi)) {
+                        let start = *p.first().ok_or_else(|| fail("empty planar gap"))?;
+                        let (left, x, y, right) = close_with_arcs(start, a, &end_arcs, q * 10.0)?;
+                        new_edges.extend(left);
+                        if x.dist(y) > q * 10.0 {
+                            new_edges.push(line(x, y, &mut verts));
+                        }
+                        new_edges.extend(right);
+                    } else {
+                        for (x, y) in close(p, a) {
+                            new_edges.push(line(x, y, &mut verts));
+                        }
                     }
                 }
                 if new_edges.is_empty() {
                     return Err(fail(format!("face {fi} would lose its boundary")));
                 }
                 wires.push(new_edges.into());
+            }
+            if let Some(m) = &mitre
+                && m.faces.contains_key(&fi)
+            {
+                let face = mt::Face::try_new(wires, m.surface(fi, f, size)?).map_err(|e| fail(format!("extended cylinder {fi}: {e}")))?;
+                rec.face(&face, f);
+                out.push(face);
+                continue;
             }
             let face = builder::try_attach_plane(&wires).map_err(|e| fail(format!("face {fi} cannot close: {e}")))?;
             // Keep the face's outward side.
@@ -354,6 +658,85 @@ mod tests {
                 m.triangles.iter().zip(&m.tri_face).filter(|(_, x)| **x as usize == *f).all(|(t, _)| m.tri(t).unwrap().iter().all(|p| keep(*p)))
             })
             .collect()
+    }
+
+    /// Remove a vertical round and its toroidal cap while retaining the two top
+    /// edge rounds. The reference is constructed independently by omitting that
+    /// corner before rounding the top; deletion must produce that same solid.
+    #[test]
+    fn delete_corner_round_under_two_cylindrical_neighbours() {
+        let b = box_solid(Vec3::ZERO, Vec3::new(80.0, 50.0, 8.0)).unwrap();
+        let vertical = [Vec3::new(0.0, 0.0, 4.0), Vec3::new(80.0, 0.0, 4.0), Vec3::new(80.0, 50.0, 4.0), Vec3::new(0.0, 50.0, 4.0)];
+        let rounded = fillet(&b, &vertical, 6.0).unwrap();
+        let h = 6.0 * (1.0 - std::f64::consts::FRAC_1_SQRT_2);
+        let top = [
+            Vec3::new(40.0, 0.0, 8.0),
+            Vec3::new(h, h, 8.0),
+            Vec3::new(80.0 - h, h, 8.0),
+            Vec3::new(80.0, 25.0, 8.0),
+            Vec3::new(80.0 - h, 50.0 - h, 8.0),
+            Vec3::new(40.0, 50.0, 8.0),
+            Vec3::new(h, 50.0 - h, 8.0),
+            Vec3::new(0.0, 25.0, 8.0),
+        ];
+        let rounded = fillet(&rounded, &top, 2.0).unwrap();
+        let selected = faces_where(&rounded, |p| p.x >= 74.0 - 1e-6 && p.y <= 6.0 + 1e-6);
+        assert_eq!(selected.len(), 2, "{selected:?}");
+        let restored = delete_faces(&rounded, &selected).unwrap();
+        let reference = fillet(&b, &[vertical[0], vertical[2], vertical[3]], 6.0).unwrap();
+        let reference = fillet(&reference, &top.iter().enumerate().filter(|(i, _)| *i != 2).map(|(_, p)| *p).collect::<Vec<_>>(), 2.0).unwrap();
+        assert_eq!(restored.face_count(), reference.face_count());
+        assert_eq!(restored.unmeshed_faces(), 0);
+        let fine_volume = |b: &crate::Body| b.tessellate(1e-5).unwrap().measure().volume;
+        // Analytic horizontal sections: three remaining corners of radius 6
+        // below z=6, then radius 4+sqrt(4-(z-6)^2) under the top round.
+        // Mesh volume includes chord/trim discretisation, so use a 5 ppm bound.
+        let pi = std::f64::consts::PI;
+        let k = 1.0 - pi / 4.0;
+        let expected = 6.0 * (4000.0 - 108.0 * k) + 8000.0 - 260.0 * (4.0 - pi) + 4.0 * (40.0 / 3.0 - 4.0 * pi) - 3.0 * k * (112.0 / 3.0 + 8.0 * pi);
+        for b in [&restored, &reference] {
+            assert!((fine_volume(b) - expected).abs() < expected * 5e-6, "{} vs {expected}", fine_volume(b));
+            assert_eq!(b.crossed_face_loops().unwrap(), 0);
+        }
+        for p in [Vec3::new(79.9, 0.1, 3.0), Vec3::new(79.0, 1.0, 7.0), Vec3::new(79.9, 0.1, 7.9)] {
+            assert_eq!(restored.contains(p), reference.contains(p), "{p:?}");
+        }
+        // A lone cap has a third cylindrical neighbour and remains unsupported;
+        // it must not silently remove or straighten an unselected round.
+        let cap = faces_where(&rounded, |p| p.x >= 74.0 - 1e-6 && p.y <= 6.0 + 1e-6 && p.z >= 6.0 - 1e-6);
+        assert_eq!(cap.len(), 1);
+        assert!(delete_faces(&rounded, &cap).is_err());
+    }
+
+    #[test]
+    fn delete_edge_round_with_cylindrical_ends_in_four_directions() {
+        for (origin, l, w, h, r) in [(Vec3::ZERO, 40.0, 30.0, 20.0, 3.0), (Vec3::new(-120.0, 70.0, 15.0), 21.0, 17.0, 9.0, 1.2)] {
+            let b = box_solid(origin, origin + Vec3::new(l, w, h)).unwrap();
+            let picks =
+                [Vec3::new(l / 2.0, 0.0, h), Vec3::new(l, w / 2.0, h), Vec3::new(l / 2.0, w, h), Vec3::new(0.0, w / 2.0, h)].map(|p| p + origin);
+            let rounded = fillet(&b, &picks, r).unwrap();
+            for side in 0..4 {
+                let selected = faces_where(&rounded, |p| {
+                    let p = p - origin;
+                    p.z >= h - r - 1e-6
+                        && match side {
+                            0 => p.y <= r + 1e-6,
+                            1 => p.x >= l - r - 1e-6,
+                            2 => p.y >= w - r - 1e-6,
+                            _ => p.x <= r + 1e-6,
+                        }
+                });
+                assert_eq!(selected.len(), 1);
+                let restored = delete_faces(&rounded, &selected).unwrap();
+                let keep: Vec<_> = picks.iter().enumerate().filter(|(i, _)| *i != side).map(|(_, p)| *p).collect();
+                let reference = fillet(&b, &keep, r).unwrap();
+                assert_eq!(restored.face_count(), reference.face_count());
+                assert_eq!(restored.unmeshed_faces(), 0);
+                assert_eq!(restored.crossed_face_loops().unwrap(), 0);
+                let v = |b: &crate::Body| b.tessellate(1e-5).unwrap().measure().volume;
+                assert!((v(&restored) - v(&reference)).abs() < l * w * h * 2e-5, "side {side}: {} vs {}", v(&restored), v(&reference));
+            }
+        }
     }
 
     #[test]
