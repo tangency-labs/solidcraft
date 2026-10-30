@@ -298,12 +298,19 @@ mod tests {
         }
     }
 
-    /// A chamfer of a basin's rim loop whose leg would run off the 1 mm rim over the slab's front
-    /// edge is refused as too large, the kind a fit can reduce. (The largest size that fits is
-    /// the doc layer's to name; it and the loop's blends that fit, with their exact mitred
-    /// volumes, are graded by the rig's fillets/1080-*-equal-slope-basin-* cases.)
+    /// A chamfer 2 of a basin's rim loop (walls all sloping 10 over 20, the front rim 1 mm wide)
+    /// whose front leg runs off the rim over the slab's front edge builds, cut by the front face
+    /// (the owner's ruling of 2026-10-30, d7: a chamfer that reaches or runs past a rim builds).
+    /// Sliced at depth t below the top, each chamfer's strip beside its wall is
+    /// w(t) = d (1 − t/δ) wide, δ = d / √(1 + k²) with k = 1/2 the walls' run over drop; the four
+    /// meet in mitres at the rim's corners, so the section removed is the pocket's rectangle at t,
+    /// [20 + t/2, 80 − t/2] × [1 + t/2, 50 − t/2], grown by w(t) on every side and clipped to the
+    /// slab's front face y >= 0, less that rectangle. Its area is quadratic in t between δ and
+    /// where the front strip's edge 1 + t/2 − w(t) crosses y = 0, so Simpson's rule is exact on
+    /// each piece: 375.673069 taken from V0 = 140333.333333 (the prismatoid), 139957.660264.
     #[test]
-    fn a_rim_loop_chamfer_running_off_its_rim_is_refused() {
+    #[ignore = "fails until SMLib builds the cliff overflow of a blended loop: CloseRemovalRegion refuses it (SM_FILERR_NO_ROOM, its fillet boundary closes on one face)"]
+    fn a_rim_loop_chamfer_running_off_its_rim_builds() {
         use solidcraft_geom::{Loop2, Plane, Vec2};
         let rectangle = |x0, y0, x1, y1| Loop2::polygon(&[Vec2::new(x0, y0), Vec2::new(x1, y0), Vec2::new(x1, y1), Vec2::new(x0, y1)]);
         let slab = box_solid(Vec3::ZERO, Vec3::new(100.0, 60.0, 30.0)).unwrap();
@@ -312,10 +319,25 @@ mod tests {
                 .unwrap();
         let basin = crate::boolean(&slab, &pocket, crate::BoolOp::Cut).unwrap().unwrap();
         let picks = [Vec3::new(50.0, 1.0, 30.0), Vec3::new(80.0, 27.0, 30.0), Vec3::new(50.0, 50.0, 30.0), Vec3::new(20.0, 27.0, 30.0)];
-        match crate::chamfer(&basin, &picks, 2.0) {
-            Err(KernelError::TooLarge(_)) => {}
-            Err(e) => panic!("refused, but not as too large: {e}"),
-            Ok(_) => panic!("a chamfer whose leg runs off the rim was built"),
-        }
+        let (d, k) = (2.0_f64, 0.5_f64);
+        let delta = d / (1.0 + k * k).sqrt();
+        let area = |t: f64| {
+            let w = d * (1.0 - t / delta);
+            let (x0, x1, y0, y1) = (20.0 + k * t, 80.0 - k * t, 1.0 + k * t, 50.0 - k * t);
+            (x1 - x0 + 2.0 * w) * (y1 + w - (y0 - w).max(0.0)) - (x1 - x0) * (y1 - y0)
+        };
+        // 1 + k t − d (1 − t/δ) = 0.
+        let crossing = (d - 1.0) / (k + d / delta);
+        let removed: f64 = [(0.0, crossing), (crossing, delta)]
+            .iter()
+            .map(|&(a, b)| (b - a) / 6.0 * (area(a) + 4.0 * area(0.5 * (a + b)) + area(b)))
+            .sum();
+        assert!((removed - 375.673069).abs() < 1e-6, "{removed}");
+        let before = crate::measure(&basin).unwrap().volume;
+        assert!((before - 140333.333333).abs() < 1e-5, "{before}");
+        let result = crate::chamfer(&basin, &picks, d).unwrap_or_else(|e| panic!("{e}"));
+        assert!(result.validity().is_empty(), "{:?}", result.validity());
+        let v = crate::measure(&result).unwrap().volume;
+        assert!((v - (before - removed)).abs() < 1e-6 * before, "{v} vs {}", before - removed);
     }
 }

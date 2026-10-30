@@ -1104,31 +1104,79 @@ fn chamfer_sloped_basin_rim() {
     assert!(mesh.contains(Vec3::new(50.0, 3.5, 28.0)));
 }
 
-/// A chamfer wider than a basin's thin rim (`chamfer_sloped_basin_rim`'s basin with the rim
-/// `margin` wide at the top) would run its leg off the rim's top, over the slab's front edge; as
-/// wide as the rim it would use the rim's top up. Both are refused as too large, the kind a fit
-/// can reduce, the body unchanged (the owner's blend-overflow ruling, 2026-10-30). The largest
-/// size that fits is named by the doc layer (`with_largest_fit`) and graded, with the chamfers
-/// that fit, by the rig's fillets/1080-chamfer-sloped-basin-* cases.
-#[test]
-fn chamfer_wider_than_sloped_basin_rim_is_refused() {
+/// `chamfer_sloped_basin_rim`'s basin with its front rim `margin` wide at the top.
+fn sloped_basin(margin: f64) -> Body {
     let rectangle = |x0, y0, x1, y1| Loop2::polygon(&[Vec2::new(x0, y0), Vec2::new(x1, y0), Vec2::new(x1, y1), Vec2::new(x0, y1)]);
-    let basin = |margin: f64| {
-        let slab = box_solid(Vec3::ZERO, Vec3::new(100.0, 60.0, 30.0)).unwrap();
-        let pocket =
-            loft(&[(Plane::XY.offset(30.0), rectangle(20.0, margin, 80.0, 50.0)), (Plane::XY.offset(10.0), rectangle(30.0, 20.0, 70.0, 40.0))])
-                .unwrap();
-        boolean(&slab, &pocket, BoolOp::Cut).unwrap().unwrap()
+    let slab = box_solid(Vec3::ZERO, Vec3::new(100.0, 60.0, 30.0)).unwrap();
+    let pocket =
+        loft(&[(Plane::XY.offset(30.0), rectangle(20.0, margin, 80.0, 50.0)), (Plane::XY.offset(10.0), rectangle(30.0, 20.0, 70.0, 40.0))])
+            .unwrap();
+    boolean(&slab, &pocket, BoolOp::Cut).unwrap().unwrap()
+}
+
+/// What an equal-distance chamfer `d` of [`sloped_basin`]'s rim edge at y = `margin` takes, built
+/// as if the top went on past the slab's front face y = 0 and then cut by it (the owner's ruling
+/// of 2026-10-30, d7: a chamfer that reaches or runs past a rim builds). Its section in (y, z) is
+/// the triangle of the edge (margin, 30), the top's contact (margin − d, 30) and the wall's
+/// contact d down the wall towards (20, 10) (run 20 − margin over the drop 20), clipped to
+/// y >= 0. At height z it runs between the sloped end walls x = 20 + (30 − z)/2 and
+/// 80 − (30 − z)/2 (planar, x by z alone), which cut it, so its length there is 30 + z: it takes
+/// ∬ (30 + z) dy dz over the clipped section, area · 30 + ∬ z, both exact by the shoelace sums
+/// over the polygon (the first moment Σ (z₀ + z₁)(y₀ z₁ − y₁ z₀) / 6).
+fn sloped_basin_rim_chamfer_removed(margin: f64, d: f64) -> f64 {
+    let len = ((20.0 - margin).powi(2) + 400.0).sqrt();
+    let (e, t) = ((margin, 30.0), (margin - d, 30.0));
+    let w = (margin + d * (20.0 - margin) / len, 30.0 - d * 20.0 / len);
+    let poly = if t.0 >= 0.0 {
+        vec![e, t, w]
+    } else {
+        let s = -t.0 / (w.0 - t.0);
+        vec![e, (0.0, 30.0), (0.0, t.1 + s * (w.1 - t.1)), w]
     };
-    for (margin, distance) in [(1.0, 2.0), (1.0, 3.0), (0.5, 4.0), (0.5, 0.5), (1.0, 1.0)] {
-        let b = basin(margin);
-        let before = measure(&b).unwrap().volume;
-        match chamfer(&b, &[Vec3::new(50.0, margin, 30.0)], distance) {
-            Err(KernelError::TooLarge(_)) => {}
-            Err(e) => panic!("{margin}, {distance}: refused, but not as too large: {e}"),
-            Ok(_) => panic!("{margin}, {distance}: a chamfer whose leg runs off the rim was built"),
-        }
-        assert_eq!(measure(&b).unwrap().volume, before);
+    let (mut area, mut moment) = (0.0, 0.0);
+    for i in 0..poly.len() {
+        let ((y0, z0), (y1, z1)) = (poly[i], poly[(i + 1) % poly.len()]);
+        let c = y0 * z1 - y1 * z0;
+        area += c / 2.0;
+        moment += (z0 + z1) * c / 6.0;
+    }
+    area.abs() * 30.0 + moment.abs()
+}
+
+/// A chamfer as wide as a basin's thin rim (`chamfer_sloped_basin_rim`'s basin with the rim
+/// `margin` wide at the top) uses the rim's top up, its leg ending on the slab's front edge:
+/// it builds (the owner's ruling of 2026-10-30, d7), taking the whole triangle
+/// ([`sloped_basin_rim_chamfer_removed`]: unclipped, d · drop / 2 · (60 − drop / 3) with
+/// drop = 20 d / √((20 − margin)² + 400)): 21.662379 at 1 on the 1 mm rim, 5.359321 at 0.5 on
+/// the 0.5 mm one.
+#[test]
+fn chamfer_as_wide_as_sloped_basin_rim_builds() {
+    // The formula reads the fitting chamfer of `chamfer_sloped_basin_rim` as that test does.
+    let drop = 2.0 / (1.0 + 0.8f64.powi(2)).sqrt();
+    assert!(rel(sloped_basin_rim_chamfer_removed(4.0, 2.0), drop * (60.0 - drop / 3.0)) < 1e-12);
+    for margin in [0.5, 1.0] {
+        let b = sloped_basin(margin);
+        let made = chamfer(&b, &[Vec3::new(50.0, margin, 30.0)], margin).unwrap_or_else(|e| panic!("{margin}: {e}"));
+        assert!(made.validity().is_empty(), "{margin}: {:?}", made.validity());
+        let want = measure(&b).unwrap().volume - sloped_basin_rim_chamfer_removed(margin, margin);
+        assert!(rel(measure(&made).unwrap().volume, want) < 1e-8, "{margin}: {} vs {want}", measure(&made).unwrap().volume);
+    }
+}
+
+/// A chamfer wider than a basin's thin rim runs its leg off the rim's top, over the slab's front
+/// edge (a cliff): it builds as if the top went on and is cut by the front face (the owner's
+/// ruling of 2026-10-30, d7), lowering the front face where it crosses it
+/// ([`sloped_basin_rim_chamfer_removed`], clipped to y >= 0): 73.450475 for 2 and 142.112912 for
+/// 3 on the 1 mm rim, 184.526613 for 4 on the 0.5 mm one.
+#[test]
+#[ignore = "fails until SMLib builds the cliff overflow: CloseRemovalRegion refuses it (SM_FILERR_NO_ROOM, its fillet boundary along the side edge's line lies on the surfaces of two faces)"]
+fn chamfer_wider_than_sloped_basin_rim_builds() {
+    for (margin, distance) in [(1.0, 2.0), (1.0, 3.0), (0.5, 4.0)] {
+        let b = sloped_basin(margin);
+        let made = chamfer(&b, &[Vec3::new(50.0, margin, 30.0)], distance).unwrap_or_else(|e| panic!("{margin}, {distance}: {e}"));
+        assert!(made.validity().is_empty(), "{margin}, {distance}: {:?}", made.validity());
+        let want = measure(&b).unwrap().volume - sloped_basin_rim_chamfer_removed(margin, distance);
+        assert!(rel(measure(&made).unwrap().volume, want) < 1e-8, "{margin}, {distance}: {} vs {want}", measure(&made).unwrap().volume);
     }
 }
 
