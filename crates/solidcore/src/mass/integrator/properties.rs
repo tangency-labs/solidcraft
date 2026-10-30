@@ -21,6 +21,9 @@
 //! has a fixed two-level call structure, not input-driven recursion. With
 //! `UpstreamFixes::precise_properties_split_at_surface_knots` (WR-494) both levels split
 //! at the surface's knots, as the SolidCraft fork's tangency-labs/smlib@08d9a14 does.
+//! With `UpstreamFixes::brep_area_between_solid_and_void` (WR-535) a volume-separating
+//! faceuse adds its volume only where it bounds a non void region and its area only
+//! where the area behaviour selects it (tangency-labs/smlib@d2d9586).
 use super::{OdeIntegrator, OdeOptions};
 use crate::curve::curve::Curve;
 use crate::geom::attribute::{ids, AttributeStore, AttributeValue, ObjectKey};
@@ -481,6 +484,30 @@ fn add(total: &mut PreciseProperties, delta: &PreciseProperties, density: f64) {
         *t += if i > 3 { *d * density } else { *d };
     }
 }
+/// [`add`] of a volume-separating faceuse with WR-535: its volume, mass and volume
+/// moments (`4..`) only with `volume`, its area and area moments (`..4`) only with
+/// `area`.
+fn add_selected(
+    total: &mut PreciseProperties,
+    delta: &PreciseProperties,
+    density: f64,
+    volume: bool,
+    area: bool,
+) {
+    if volume {
+        total.volume += delta.volume;
+        total.mass += delta.volume * density;
+        for (t, d) in total.moments.iter_mut().zip(delta.moments.iter()).skip(4) {
+            *t += *d * density;
+        }
+    }
+    if area {
+        total.area += delta.area;
+        for (t, d) in total.moments.iter_mut().zip(delta.moments.iter()).take(4) {
+            *t += *d;
+        }
+    }
+}
 /// `SmBrep::ComputePreciseProperties`, including density attributes and wire/point solids.
 /// Missing UV trim curves of the integrated faces are made on `b`.
 pub fn brep_properties(
@@ -561,7 +588,16 @@ pub fn brep_properties(
                     if separating { 0.0 } else { mass.y },
                     PPF_ALL,
                 )?;
-                add(&mut total, &delta, mass.x);
+                if separating && k.fixes.brep_area_between_solid_and_void {
+                    // Not upstream (WR-535, the fork's tangency-labs/smlib@d2d9586): the
+                    // faceuse's volume and mass enter only when it bounds a non void region,
+                    // its area and area moments only when the area behaviour selects it: a
+                    // face between two solid regions bounds both volumes but is no part of
+                    // the area
+                    add_selected(&mut total, &delta, mass.x, do_volume, do_area);
+                } else {
+                    add(&mut total, &delta, mass.x);
+                }
                 if !separating {
                     break;
                 }
@@ -867,5 +903,34 @@ mod tests {
             b.edgeuses().iter().any(|(_, u)| u.uv_trim_curve.is_some()),
             "the trims are made on the box itself"
         );
+    }
+    /// WR-535 (the fork's tangency-labs/smlib@d2d9586): the merge of two overlapping 10
+    /// mm cubes has three solid regions; its area counts only the faces between solid
+    /// and void (800, not 1200 with the two inner faces counted from both sides), and
+    /// its volume is the union's.
+    #[test]
+    fn merged_cubes_area_counts_solid_void_faces_only() {
+        use crate::primitive::api_primitives::create_box;
+        let mut k = Kernel::default();
+        k.fixes.brep_area_between_solid_and_void = true;
+        let a = create_box(&mut k, Point3::ZERO, 10.0, 10.0, 10.0).unwrap();
+        let b = create_box(&mut k, Point3::new(5.0, 0.0, 0.0), 10.0, 10.0, 10.0).unwrap();
+        let mut merged = crate::boolean::api_brep::boolean_merge(&mut k, a, b).unwrap();
+        let store = AttributeStore::default();
+        let attrs = PropertyAttributes {
+            store: &store,
+            key_of: &|_| ObjectKey(0),
+        };
+        let p = brep_properties(
+            &k,
+            &mut merged,
+            1e-6,
+            Point3::ZERO,
+            MassPropertyBehavior::default(),
+            &attrs,
+        )
+        .unwrap();
+        assert!((p.area - 800.0).abs() <= 1e-6, "area {}", p.area);
+        assert!((p.volume - 1500.0).abs() <= 1e-6, "volume {}", p.volume);
     }
 }
