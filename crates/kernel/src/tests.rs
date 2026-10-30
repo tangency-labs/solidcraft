@@ -1924,23 +1924,16 @@ fn fillet_sharp_arc_and_arc_loop() {
 /// with the R25 arc moved in by `da` and the tab's run (its sides, R2 corners and top) by `dt`,
 /// each element parallel to itself, by Green's theorem: an arc about c of radius ρ from a to b
 /// gives ½ (ρ² (b − a) + ρ (cx (sin b − sin a) − cy (cos b − cos a))), a segment p→q ½ (p × q).
-/// Where only one side of a concave corner at (±4, y) moves the elements meet where they cross
-/// (the round runs into the other wall); where both do, the corner is swept, an arc of radius d
-/// about the corner (the owner's ruling for rounds meeting at a concave corner, 2026-10-30).
+/// At the concave corners (±4, y) the moved elements meet where they cross: where one side moves
+/// the round runs into the other wall, where both do the two rounds are mitred (the owner's
+/// ruling for rounds meeting at a concave corner beside an unpicked sharp edge, 2026-10-30).
 fn tabbed_plate_area(da: f64, dt: f64) -> f64 {
-    let (y, cy) = ((625.0_f64 - 16.0).sqrt(), 280.0 / 9.0);
-    let theta = (4.0_f64 / 25.0).acos();
+    let cy = 280.0 / 9.0;
     let (big, rho) = (25.0 - da, 2.0 - dt);
     let tab = rho * rho * PI + 2.0 * rho * (2.0 + cy) + 4.0 * (cy + rho);
-    if da > 0.0 && dt > 0.0 {
-        assert!((da - dt).abs() < 1e-15, "a swept corner of one size");
-        let corner = -da * da * theta + da * (4.0 * theta.sin() + y * (1.0 - theta.cos()));
-        0.5 * (big * big * (PI + 2.0 * theta) + 2.0 * corner + tab) + (4.0 - dt) * (cy - y)
-    } else {
-        let yc = (big * big - (4.0 - dt).powi(2)).sqrt();
-        let at = yc.atan2(4.0 - dt);
-        0.5 * (big * big * (PI + 2.0 * at) + tab) + (4.0 - dt) * (cy - yc)
-    }
+    let yc = (big * big - (4.0 - dt).powi(2)).sqrt();
+    let at = yc.atan2(4.0 - dt);
+    0.5 * (big * big * (PI + 2.0 * at) + tab) + (4.0 - dt) * (cy - yc)
 }
 
 #[test]
