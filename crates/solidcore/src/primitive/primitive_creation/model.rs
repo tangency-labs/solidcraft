@@ -12,8 +12,14 @@
 //! the model owns the B-reps (the first is the one being built, later ones are
 //! scratch B-reps from `new SmBrep()`) and borrows the caller's [`Kernel`]. Edits
 //! notify an arena-only store ([`ArenaNotifyState`]): no observer holds identities for
-//! these objects. Tags and offset-map attributes live in the model (`SmAObject`
-//! attributes); topology marks use
+//! these objects. Each B-rep's own attributes ([`Brep::add_attribute`], `SmAObject`
+//! attributes, `SM_AI_TAG` tags among them) ride every edit's notifications: the edit's
+//! store is the B-rep's, under the same identities ([`notify_ref`]); a two-B-rep edit
+//! (copy, merge, the HCR scene copy) names the source's objects apart (`source_ref`, private)
+//! and keeps the destination's lists; a merge stage moves the operands' lists into its
+//! engine and back. The sweep stitch edits through those stores too (the default
+//! stitch edits call-local ones). Offset-map attributes live in the model; topology
+//! marks use
 //! [`Marks`] per B-rep under the kernel context's mark locks. `SmMerge` objects are
 //! retained sessions over the model's B-reps (`merge`). A retained HCR session
 //! (`SmHCR`) is kept by the model: its scene B-rep moves into a model slot of its own
@@ -27,7 +33,7 @@ use crate::blend::hcr::Hcr;
 use crate::boolean::topology_intersector::p1::Relations;
 use crate::curve::composite_curve::OffsetMapAttribute;
 use crate::error::{EntityRef, Result, SolidError};
-use crate::geom::attribute::TagData;
+use crate::geom::attribute::{ids, Attribute, AttributeStore, AttributeValue, Behavior, TagData};
 use crate::geom::context::{MarkLock, MarkType};
 use crate::geom::object::ObjectRef;
 use crate::kernel::Kernel;
@@ -47,12 +53,24 @@ use crate::topology::loopuse::notify_ref;
 use crate::topology::topology_traverser::{Entity, Marks};
 use crate::topology::{Brep, BrepId, FaceId};
 
+mod attributes;
 mod merge;
+
+use attributes::{notify_entity, source_entity, source_ref};
 
 const OP: &str = "primitive::primitive_creation::model";
 
 fn face_ref(f: FaceId) -> ObjectRef {
     notify_ref(EntityRef::Face(f))
+}
+
+fn sweep_entity_ref(e: SweepEntity) -> (BrepId, EntityRef) {
+    match e {
+        SweepEntity::Vertex(b, v) => (b, EntityRef::Vertex(v)),
+        SweepEntity::Edge(b, x) => (b, EntityRef::Edge(x)),
+        SweepEntity::Face(b, f) => (b, EntityRef::Face(f)),
+        SweepEntity::Region(b, r) => (b, EntityRef::Region(r)),
+    }
 }
 
 /// The B-reps an `SmPrimitiveCreation` call works on, with the caller's kernel.
@@ -61,12 +79,13 @@ pub struct PrimitiveModel<'k> {
     k: &'k mut Kernel,
     breps: Vec<Option<Brep>>,
     marks: Vec<Marks>,
-    tags: BTreeMap<SweepEntity, TagData>,
     offset_maps: BTreeMap<FaceRef, OffsetMapAttribute>,
     locks: Vec<(MarkType, MarkLock)>,
     merges: Vec<Option<merge::Session>>,
     /// Retained HCR sessions by scene id; each scene B-rep lives in its slot.
     hcrs: BTreeMap<u32, Hcr>,
+    /// The attributes of every model B-rep's objects (`model/attributes.rs`).
+    attributes: AttributeStore,
 }
 
 impl<'k> PrimitiveModel<'k> {
@@ -79,11 +98,11 @@ impl<'k> PrimitiveModel<'k> {
             k,
             breps: vec![Some(brep)],
             marks: vec![Marks::default()],
-            tags: BTreeMap::new(),
             offset_maps: BTreeMap::new(),
             locks: Vec::new(),
             merges: Vec::new(),
             hcrs: BTreeMap::new(),
+            attributes: AttributeStore::default(),
         }
     }
 
@@ -93,10 +112,7 @@ impl<'k> PrimitiveModel<'k> {
     ///
     /// `SM_ERR_NULL_POINTER` if it was deleted.
     pub fn into_brep(mut self) -> Result<Brep> {
-        self.breps
-            .get_mut(0)
-            .and_then(Option::take)
-            .ok_or_else(|| SolidError::null_pointer(OP))
+        self.take_brep(Self::MAIN)
     }
 
     /// Adds `brep` to the model (a caller's B-rep whose objects an operation reads);
@@ -167,10 +183,78 @@ impl<'k> PrimitiveModel<'k> {
     ///
     /// `SM_ERR_NULL_POINTER` for an unknown or deleted B-rep.
     pub fn take_brep(&mut self, id: BrepId) -> Result<Brep> {
-        self.breps
+        let mut b = self
+            .breps
             .get_mut(id.index() as usize)
             .and_then(Option::take)
-            .ok_or_else(|| SolidError::null_pointer(OP))
+            .ok_or_else(|| SolidError::null_pointer(OP))?;
+        // (not upstream) its objects take their attributes with them
+        attributes::write_back(&mut self.attributes, id, &mut b)?;
+        Ok(b)
+    }
+
+    /// (not upstream) Readies B-rep `id`'s attributes for an edit that notifies its
+    /// objects under `view`'s identities (`model/attributes.rs`).
+    fn enter_view(&mut self, id: BrepId, view: &dyn Fn(EntityRef) -> ObjectRef) -> Result<()> {
+        let b = self
+            .breps
+            .get_mut(id.index() as usize)
+            .and_then(Option::as_mut)
+            .ok_or_else(|| SolidError::null_pointer(OP))?;
+        attributes::adopt(&mut self.attributes, id, b)?;
+        attributes::enter(&mut self.attributes, id, view)
+    }
+
+    /// (not upstream) Ends [`Self::enter_view`]: `decode` recognises the edit's
+    /// identities of B-rep `id`'s objects.
+    fn leave_view(
+        &mut self,
+        id: BrepId,
+        decode: &dyn Fn(crate::geom::attribute::ObjectKey) -> Option<EntityRef>,
+    ) -> Result<()> {
+        let b = self.breps.get(id.index() as usize).and_then(Option::as_ref);
+        attributes::leave(&mut self.attributes, id, b, decode)
+    }
+
+    /// Runs `body` on B-rep `id` with its records and the model's attributes under
+    /// [`notify_ref`], notifying through `context` (`None`: no callbacks; `Some`: the
+    /// kernel's notification context).
+    fn notified<T>(
+        &mut self,
+        id: BrepId,
+        with_context: bool,
+        body: impl FnOnce(&mut Kernel, &mut Brep, &mut NotifyEnv<'_>) -> Result<T>,
+    ) -> Result<T> {
+        self.enter_view(id, &notify_ref)?;
+        let result = (|| {
+            let b = self
+                .breps
+                .get_mut(id.index() as usize)
+                .and_then(Option::as_mut)
+                .ok_or_else(|| SolidError::null_pointer(OP))?;
+            let mut state = ArenaNotifyState::new(b);
+            let attributes = &mut self.attributes;
+            let run = |k: &mut Kernel, context: Option<&mut crate::geom::context::Context>| {
+                let mut env = NotifyEnv {
+                    records: &mut state.records,
+                    attributes: &mut *attributes,
+                    context,
+                    key_of: &notify_ref,
+                };
+                body(k, b, &mut env)
+            };
+            if with_context {
+                crate::geom::context::Context::with_notification_context(self.k, |k, context| {
+                    run(k, Some(context))
+                })?
+            } else {
+                run(self.k, None)
+            }
+        })();
+        let left = self.leave_view(id, &notify_entity);
+        let value = result?;
+        left?;
+        Ok(value)
     }
 
     /// Runs `action` on merge `id` with the model's kernel; the session returns to its
@@ -191,6 +275,7 @@ impl<'k> PrimitiveModel<'k> {
             breps: &mut self.breps,
             marks: &mut self.marks,
             offset_maps: &mut self.offset_maps,
+            attributes: &mut self.attributes,
             session: &mut session,
         };
         let result = action(self.k, &mut driver);
@@ -243,14 +328,8 @@ impl SweepAccess for PrimitiveModel<'_> {
             &mut NotifyEnv<'_>,
         ) -> Result<T>,
     ) -> Result<T> {
-        let b = self
-            .breps
-            .get_mut(brep.index() as usize)
-            .and_then(Option::as_mut)
-            .ok_or_else(|| SolidError::null_pointer(OP))?;
-        let mut state = ArenaNotifyState::new(b);
-        let mut env = state.env(None);
-        body(self.k, b, &face_ref, &mut env)
+        // the model's attributes ride the edit's notifications (`SmAObject`)
+        self.notified(brep, false, |k, b, env| body(k, b, &face_ref, env))
     }
     fn with_breps_mut<T>(
         &mut self,
@@ -287,23 +366,175 @@ impl SweepAccess for PrimitiveModel<'_> {
             .and_then(Option::as_mut)
             .ok_or_else(|| SolidError::null_pointer(OP))?;
         let mut state = ArenaNotifyState::new(dst);
-        state.seed(src);
-        let mut env = state.env(None);
-        body(self.k, src, dst, &notify_ref, &face_ref, None, &mut env)
+        // (not upstream) The model's attributes ride the edit's notifications: the
+        // destination's objects under their identities (`notify_ref`), the source's
+        // apart (`source_ref`), so a copy's notifications carry the source's attributes
+        // to the new objects, sharing reference attributes, as upstream's do.
+        crate::topology::brep::p3::seed_records(&mut state.records, src, &source_ref);
+        let entered = attributes::adopt(&mut self.attributes, source, src)
+            .and_then(|()| attributes::adopt(&mut self.attributes, destination, dst))
+            .and_then(|()| attributes::enter(&mut self.attributes, source, &source_ref))
+            .and_then(|()| attributes::enter(&mut self.attributes, destination, &notify_ref));
+        let result = entered.and_then(|()| {
+            let mut env = NotifyEnv {
+                records: &mut state.records,
+                attributes: &mut self.attributes,
+                context: None,
+                key_of: &notify_ref,
+            };
+            body(self.k, src, dst, &source_ref, &face_ref, None, &mut env)
+        });
+        let left = attributes::leave(&mut self.attributes, source, Some(&*src), &source_entity)
+            .and_then(|()| {
+                attributes::leave(
+                    &mut self.attributes,
+                    destination,
+                    Some(&*dst),
+                    &notify_entity,
+                )
+            });
+        let value = result?;
+        left?;
+        Ok(value)
     }
     fn with_brep_notifications<T>(
         &mut self,
         brep: BrepId,
         body: impl FnOnce(&mut Brep, &mut NotifyEnv<'_>) -> Result<T>,
     ) -> Result<T> {
-        let b = self
-            .breps
-            .get_mut(brep.index() as usize)
-            .and_then(Option::as_mut)
-            .ok_or_else(|| SolidError::null_pointer(OP))?;
-        let mut state = ArenaNotifyState::new(b);
-        let mut env = state.env(Some(&mut self.k.context));
-        body(b, &mut env)
+        self.enter_view(brep, &notify_ref)?;
+        let result = (|| {
+            let b = self
+                .breps
+                .get_mut(brep.index() as usize)
+                .and_then(Option::as_mut)
+                .ok_or_else(|| SolidError::null_pointer(OP))?;
+            let mut state = ArenaNotifyState::new(b);
+            let mut env = NotifyEnv {
+                records: &mut state.records,
+                attributes: &mut self.attributes,
+                context: Some(&mut self.k.context),
+                key_of: &notify_ref,
+            };
+            body(b, &mut env)
+        })();
+        let left = self.leave_view(brep, &notify_entity);
+        let value = result?;
+        left?;
+        Ok(value)
+    }
+    /// `SmBrep::RemoveFaces`, notifying the model's records and attributes (the
+    /// default notifies call-local ones), so the removed faces' lists are cleared as
+    /// upstream's destructors do; the kernel's notification context sees the events.
+    fn remove_faces(&mut self, brep: BrepId, faces: &[FaceId]) -> Result<()> {
+        self.notified(brep, true, |k, b, env| {
+            crate::topology::brep::p5::remove_faces_notified(k, b, b.editing_enabled(), faces, env)
+        })
+    }
+    /// `SmBrep::RemoveAllTopology`, notifying as [`Self::remove_faces`].
+    fn remove_all_topology(&mut self, brep: BrepId) -> Result<()> {
+        self.notified(brep, true, |k, b, env| {
+            crate::topology::brep::p10::remove_all_topology_notified(k, b, env)
+        })
+    }
+    /// The sweep stitch, editing through the B-rep's own records and attributes (the
+    /// default stitch edits through call-local stores), so its splits, glues and
+    /// deletions carry the B-rep's attributes as upstream's notifications do. The
+    /// kernel's notification context sees the events, and split curves get the
+    /// default stitch's call-local identities.
+    fn stitch(
+        &mut self,
+        brep: BrepId,
+        sweep: &mut crate::sweep::topology_sweep::TopologySweep,
+        tolerance: f64,
+        making_manifold_solid: bool,
+    ) -> Result<()> {
+        let new_curve = |edge: crate::topology::EdgeId, type_code: i64| ObjectRef {
+            type_code,
+            key: crate::geom::attribute::ObjectKey(
+                (type_code.unsigned_abs() << 32) | u64::from(edge.index()),
+            ),
+        };
+        self.notified(brep, true, |k, b, env| {
+            let mut edits = crate::heal::stitch::p1::BorrowedStitchEdits {
+                env,
+                curve_identity: crate::topology::brep::p9::CurveIdentity::Legacy(&new_curve),
+            };
+            let mut callback =
+                crate::sweep::topology_sweep::access::SweepStitchCallback { brep, sweep };
+            let mut stitch =
+                crate::heal::stitch::p1::Stitch::new(&mut callback, tolerance, true, true);
+            stitch.making_manifold_solid = making_manifold_solid;
+            stitch.edits = Some(&mut edits);
+            stitch
+                .do_stitching(
+                    k,
+                    b,
+                    None,
+                    None,
+                    crate::heal::stitch::p2::MinGapRequest::default(),
+                )
+                .map(|_| ())
+        })
+    }
+    /// The trait's HCR scene, whose copy of the B-rep also copies its attributes (the
+    /// copy's notifications carry them, as upstream's scene `CopyFaces` does).
+    fn hcr(
+        &mut self,
+        brep: BrepId,
+        inverse: crate::geom::axis2_placement::Axis2Placement,
+        tolerance: f64,
+        angle: f64,
+        seams: bool,
+        smooth: bool,
+        silhouettes: bool,
+    ) -> Result<crate::sweep::topology_sweep::access::SweepScene> {
+        let opts = crate::blend::hcr::HcrOptions {
+            approx_tol_3d: tolerance,
+            ang_tol_rad: angle,
+            display_seams: seams,
+            display_smooth_edges: smooth,
+        };
+        // (not upstream) the scene copy's notifications carry the attributes: the
+        // original's objects under `source_ref`, the scene's (the next model B-rep)
+        // under `notify_ref`
+        let scene = BrepId::from_index(
+            u32::try_from(self.breps.len())
+                .map_err(|_| SolidError::invalid_input(OP, "too many B-reps"))?,
+        );
+        self.enter_view(brep, &source_ref)?;
+        let made = (|| {
+            let model = self
+                .breps
+                .get(brep.index() as usize)
+                .and_then(Option::as_ref)
+                .ok_or_else(|| SolidError::null_pointer(OP))?;
+            let mut state = ArenaNotifyState::default();
+            crate::topology::brep::p3::seed_records(&mut state.records, model, &source_ref);
+            let mut env = NotifyEnv {
+                records: &mut state.records,
+                attributes: &mut self.attributes,
+                context: None,
+                key_of: &notify_ref,
+            };
+            Hcr::with_transform(self.k, &mut env, model, &source_ref, &inverse, opts)
+        })();
+        let left = self.leave_view(brep, &source_entity);
+        let mut hcr = made?;
+        left?;
+        attributes::leave(
+            &mut self.attributes,
+            scene,
+            Some(hcr.scene_brep_mut()),
+            &notify_entity,
+        )?;
+        hcr.set_hcr_for_silhouettes(silhouettes);
+        crate::error::ignore_status(hcr.compute_global_visibility(self.k))?;
+        let id = self.retain_hcr(brep, hcr)?;
+        if id != scene {
+            return Err(SolidError::port_invariant(OP, "HCR scene id moved"));
+        }
+        Ok(crate::sweep::topology_sweep::access::SweepScene { brep: id })
     }
     fn retain_hcr(&mut self, _: BrepId, mut hcr: Hcr) -> Result<BrepId> {
         // the scene, with its identities, becomes the session's model B-rep
@@ -332,6 +563,9 @@ impl SweepAccess for PrimitiveModel<'_> {
                 *slot = None;
             }
             self.hcrs.remove(&id.index());
+            // upstream's object destructors clear their lists; the call is infallible
+            // here (`SmBrep` deletion), and a failure leaves only unreachable lists
+            let _ = attributes::release(&mut self.attributes, id);
         }
     }
     fn delete_merge(&mut self, merge: SweepMergeId) {
@@ -410,11 +644,51 @@ impl SweepAccess for PrimitiveModel<'_> {
         self.run_merge(merge, |k, driver| driver.union(k))
     }
     fn tag(&self, e: SweepEntity) -> Result<Option<TagData>> {
-        Ok(self.tags.get(&e).copied())
+        // `FindAttribute(SM_AI_TAG)` on the object: the model's list, or the B-rep's own
+        // while no edit has adopted it
+        let (id, entity) = sweep_entity_ref(e);
+        let b = self.brep(id)?;
+        let value = |a: &Attribute| match a.value() {
+            AttributeValue::Tag(t) => Some(*t),
+            _ => None,
+        };
+        if let Some(t) = b.find_attribute(entity, ids::TAG) {
+            return Ok(value(t));
+        }
+        if !b.is_live_entity(entity) {
+            return Ok(None);
+        }
+        let Some(key) = attributes::model_key(id, entity) else {
+            return Ok(None);
+        };
+        Ok(self
+            .attributes
+            .find_attribute(key, ids::TAG)
+            .and_then(|h| self.attributes.get(h))
+            .and_then(value))
     }
     fn add_tag(&mut self, e: SweepEntity, tag: TagData) -> Result<()> {
-        self.tags.insert(e, tag);
-        Ok(())
+        // `AddAttribute(new SmTagAttribute(SM_AI_TAG, ...))`: an `SmAObject` attribute
+        // (copy behaviour), so later edits carry it as upstream's notifications do
+        let (id, entity) = sweep_entity_ref(e);
+        let b = self
+            .breps
+            .get_mut(id.index() as usize)
+            .and_then(Option::as_mut)
+            .ok_or_else(|| SolidError::null_pointer(OP))?;
+        if !b.is_live_entity(entity) {
+            return Err(SolidError::NotFound {
+                operation: OP,
+                entity,
+            });
+        }
+        attributes::adopt(&mut self.attributes, id, b)?;
+        let key = attributes::model_key(id, entity)
+            .ok_or_else(|| SolidError::invalid_input(OP, "too many B-reps"))?;
+        let h = self
+            .attributes
+            .insert(Attribute::tag(ids::TAG, tag, Behavior::Copy))?;
+        self.attributes.add_attribute(key, h)
     }
     fn curve_tag(&self, edge: EdgeRef) -> Result<Option<TagData>> {
         self.brep(edge.0)?
@@ -557,30 +831,23 @@ impl PrimitiveCreationAccess for PrimitiveModel<'_> {
             keys: &keys,
             owner_of: &|_| None,
         };
-        let b = self
-            .breps
-            .get_mut(brep.index() as usize)
-            .and_then(Option::as_mut)
-            .ok_or_else(|| SolidError::null_pointer(OP))?;
         // the merges' edits notify the B-rep's records under the same identities
-        let mut state = ArenaNotifyState::new(b);
-        let mut notify = state.env(None);
-        // `const SmBSplineCurve&` of the B-spline class itself (its knots untouched)
-        let curve = crate::curve::curve::Curve::from(curve.clone_exact());
-        crate::topology::brep::p10::project_and_trim(
-            self.k,
-            b,
-            &env,
-            &mut notify,
-            &curve,
-            direction,
-            reference,
-            trim_type,
-            &crate::topology::brep::p10::ProjectAndTrimOptions {
-                approximation_tol_3d: Some(approx_tol),
-                ..Default::default()
-            },
-        )
+        self.notified(brep, false, |k, b, notify| {
+            crate::topology::brep::p10::project_and_trim(
+                k,
+                b,
+                &env,
+                notify,
+                curve,
+                direction,
+                reference,
+                trim_type,
+                &crate::topology::brep::p10::ProjectAndTrimOptions {
+                    approximation_tol_3d: Some(approx_tol),
+                    ..Default::default()
+                },
+            )
+        })
     }
 }
 

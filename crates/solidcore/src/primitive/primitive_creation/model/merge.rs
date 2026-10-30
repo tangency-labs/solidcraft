@@ -301,11 +301,53 @@ impl StageMaps {
     }
 }
 
+/// (not upstream) Starts a merge stage on the model's attributes: the operands'
+/// lists are renamed to the engine's operand identities and the engine's own lists
+/// (surface maps) join them, and the whole store becomes the engine's for the stage,
+/// so the stage's notifications reach every attribute, sharing included.
+fn begin_stage(
+    model: &mut AttributeStore,
+    engine: &mut MergeEngine,
+    operands: [(BrepId, &mut Brep, bool); 2],
+) -> Result<()> {
+    for (id, body, other) in operands {
+        super::attributes::adopt(model, id, body)?;
+        super::attributes::enter(model, id, &|e| notification_key(NAMESPACE, other, e))?;
+    }
+    let internal = core::mem::take(&mut engine.attributes);
+    model.absorb(internal, &Ok)?;
+    core::mem::swap(model, &mut engine.attributes);
+    Ok(())
+}
+
+/// (not upstream) Ends [`begin_stage`]: the engine keeps its own lists, the model gets
+/// the objects' lists back under its names (those of objects the stage deleted, or of
+/// a consumed operand, `None`, are cleared).
+fn end_stage(
+    model: &mut AttributeStore,
+    engine: &mut MergeEngine,
+    operands: [(BrepId, Option<&Brep>, bool); 2],
+) -> Result<()> {
+    core::mem::swap(model, &mut engine.attributes);
+    let mut internal = model.clone();
+    internal.retain_rekeyed(&|key| (!super::attributes::is_object_key(key)).then_some(key))?;
+    engine.attributes = internal;
+    model.retain_rekeyed(&|key| super::attributes::is_object_key(key).then_some(key))?;
+    for (id, body, other) in operands {
+        super::attributes::leave(model, id, body, &|key| {
+            super::attributes::engine_entity(other, key)
+        })?;
+    }
+    Ok(())
+}
+
 /// The operand access of one merge call over the model's slots.
 pub(super) struct Driver<'a> {
     pub(super) breps: &'a mut Vec<Option<Brep>>,
     pub(super) marks: &'a mut Vec<Marks>,
     pub(super) offset_maps: &'a mut BTreeMap<FaceRef, OffsetMapAttribute>,
+    /// The model's attributes (`model/attributes.rs`).
+    pub(super) attributes: &'a mut AttributeStore,
     pub(super) session: &'a mut Session,
 }
 
@@ -331,6 +373,12 @@ impl Driver<'_> {
         let (pa, pb) = self.session.operands()?;
         let (a, b) = pair_mut(self.breps, pa, pb)?;
         let engine = &mut self.session.engine;
+        // (not upstream) the model's attributes ride the stage's notifications
+        begin_stage(
+            self.attributes,
+            engine,
+            [(pa, &mut *a, false), (pb, &mut *b, true)],
+        )?;
         let mut stage = StageMaps { table: Vec::new() };
         stage.place(&mut engine.attributes, self.offset_maps, pa, a, false)?;
         stage.place(&mut engine.attributes, self.offset_maps, pb, b, true)?;
@@ -358,6 +406,11 @@ impl Driver<'_> {
         rebind_owners(b, notify_ref)?;
         stage.take_back(&mut engine.attributes, self.offset_maps, pa, a, false)?;
         stage.take_back(&mut engine.attributes, self.offset_maps, pb, b, true)?;
+        end_stage(
+            self.attributes,
+            engine,
+            [(pa, Some(&*a), false), (pb, Some(&*b), true)],
+        )?;
         result
     }
 
@@ -497,6 +550,15 @@ impl BooleanDriver for Driver<'_> {
                     )
                 })
         });
+        // (not upstream) the model's attributes ride the Boolean's notifications
+        let placed = placed.and_then(|()| {
+            begin_stage(
+                self.attributes,
+                engine,
+                [(a, &mut primary_body, false), (b, &mut other_body, true)],
+            )
+        });
+        let begun = placed.is_ok();
         let mut operands = (Some(primary_body), Some(other_body));
         let result = placed.and_then(|()| {
             engine.intersector.set_intersect_lamina_edges(*lamina);
@@ -518,8 +580,9 @@ impl BooleanDriver for Driver<'_> {
         // Survivors return to their slots, including after an error; a consumed
         // operand's handle no longer resolves.
         let mut restored = Ok(());
-        for (id, mut body, is_other) in [(a, operands.0, false), (b, operands.1, true)] {
-            if let Some(body) = &mut body {
+        let mut survivors = (operands.0.take(), operands.1.take());
+        for (id, body, is_other) in [(a, &mut survivors.0, false), (b, &mut survivors.1, true)] {
+            if let Some(body) = body {
                 let rebound = rebind_owners(body, notify_ref);
                 if restored.is_ok() {
                     restored = rebound;
@@ -530,6 +593,23 @@ impl BooleanDriver for Driver<'_> {
                     restored = back;
                 }
             }
+        }
+        let returned = if begun {
+            end_stage(
+                self.attributes,
+                engine,
+                [
+                    (a, survivors.0.as_ref(), false),
+                    (b, survivors.1.as_ref(), true),
+                ],
+            )
+        } else {
+            Ok(())
+        };
+        if restored.is_ok() {
+            restored = returned;
+        }
+        for (id, body) in [(a, survivors.0), (b, survivors.1)] {
             if let Some(s) = self.breps.get_mut(id.index() as usize) {
                 *s = body;
             }
@@ -697,6 +777,8 @@ impl PiecewiseAccess for Driver<'_> {
             if let Some(s) = self.breps.get_mut(id.index() as usize) {
                 *s = None;
             }
+            // its objects' destructors clear their lists
+            super::attributes::release(self.attributes, id)?;
         }
         Ok(())
     }

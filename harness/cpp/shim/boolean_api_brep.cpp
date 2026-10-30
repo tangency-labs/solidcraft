@@ -39,6 +39,7 @@
 #include <SmApiQueries.h>
 #include <SmAssertArray.h>
 #include <SmAttribute.h>
+#include <SmTopology.h>
 #include <SmBSplineCurve.h>
 #include <SmBrep.h>
 #include <SmContext.h>
@@ -87,9 +88,8 @@ enum : int32_t
     OP_NM_SWEEP = 15,
     OP_NM_ROTATIONAL_SWEEP = 16,
     OP_ATTRIBUTED = 17,
-    OP_TESSELLATE_BOUNDARIES = 18,
-    OP_ATTRIBUTED_LIST = 19,
-    OP_CHECKED = 20,
+    OP_ATTRIBUTED_NM_SWEEP = 18,            // `behavior` then OP_NM_SWEEP's program
+    OP_ATTRIBUTED_NM_ROTATIONAL_SWEEP = 19, // `behavior` then OP_NM_ROTATIONAL_SWEEP's
 };
 
 // Most entries of one non-manifold sweep selection array (MAX_SELECTION in the Rust module).
@@ -589,7 +589,7 @@ void tag_operand(SmBrep* b, ULONG operand, SmAttributeBehaviorType behavior)
 }
 
 // One object's row: `measure n` then per attribute `id behavior value users` (value: an
-// SmLongAttribute's GetValue, else 0; users: GetUsers' size), the attributes in ascending
+// SmLongAttribute's GetValue, else 0; users: the GetUsers that are SmTopology objects), the attributes in ascending
 // order: which of two merged coplanar faces survives (and so whose attributes come first
 // in its list) depends on the C++ process's earlier heap use, the set does not.
 std::vector<double> attribute_row(const SmAObject* obj, double measure,
@@ -608,16 +608,13 @@ std::vector<double> attribute_row(const SmAObject* obj, double measure,
         e.push_back((double)a->GetAttributeID());
         e.push_back((double)a->GetBehavior());
         e.push_back(l != NULL ? (double)l->GetValue() : 0.0);
-        double n = (double)users.GetSize();
-        if (scope != NULL)
-        {
-            // only the users that are objects of the same B-rep
-            n = 0.0;
-            for (ULONG u = 0; u < users.GetSize(); u++)
-                if (scope->count(users[u]) != 0)
-                    n += 1.0;
-        }
-        e.push_back(n);
+        // the topology users: the port keeps no attributes on geometry, whose
+        // objects (an edge's curve) also use an edge's reference attribute here
+        ULONG topology_users = 0;
+        for (ULONG u = 0; u < users.GetSize(); u++)
+            if (users[u] != NULL && users[u]->IsKindOf(SmTopology_TYPE))
+                topology_users++;
+        e.push_back((double)topology_users);
         entries.push_back(e);
     }
     std::sort(entries.begin(), entries.end());
@@ -1130,8 +1127,11 @@ bool read_selection(Rd& rd, const SmTArray<T*>& all, SmTArray<T*>& out)
 // OP_NM_ROTATIONAL_SWEEP (`brep base[3] axis[3] angle stitch merge region` then the
 // selections): the status, then the swept B-rep and its areas (put_areas) on success, the
 // untouched B-rep on SM_ERR_INVALID_INPUT. `region` is pRegionBrep: 0 NULL, 1 the swept
-// B-rep, 2 another B-rep (SmApiCreateBox(origin, 1, 1, 1)).
-void run_sweep(Rd& rd, int32_t api, std::vector<double>& o)
+// B-rep, 2 another B-rep (SmApiCreateBox(origin, 1, 1, 1)). With `behavior` (>= 0, the
+// OP_ATTRIBUTED_* ops) every face and edge of the B-rep is tagged first (tag_operand,
+// operand 0), and a successful sweep's record ends with its attribute rows
+// (put_attributes) and the number of those values, after the areas.
+void run_sweep(Rd& rd, int32_t api, std::vector<double>& o, int64_t behavior = -1)
 {
     BrepSpec spec = read_spec(rd);
     double v[7] = {0, 0, 0, 0, 0, 0, 0};
@@ -1174,6 +1174,8 @@ void run_sweep(Rd& rd, int32_t api, std::vector<double>& o)
         delete brep;
         throw Bad();
     }
+    if (behavior >= 0)
+        tag_operand(brep, 0, (SmAttributeBehaviorType)behavior);
     SmBrep* region_brep = region == 0 ? NULL : region == 1 ? brep : other;
     SmTArray<SmFace*>* pf = has_faces ? &sel_faces : NULL;
     SmTArray<SmEdge*>* pe = has_edges ? &sel_edges : NULL;
@@ -1192,6 +1194,12 @@ void run_sweep(Rd& rd, int32_t api, std::vector<double>& o)
         put_brep(o, brep);
     if (stat == SM_SUCCESS)
         put_areas(o, brep);
+    if (stat == SM_SUCCESS && behavior >= 0)
+    {
+        size_t start = o.size();
+        put_attributes(o, brep);
+        o.push_back((double)(o.size() - start));
+    }
     delete brep;
     delete other;
 }
@@ -1257,7 +1265,7 @@ void run_tessellate_boundaries(Rd& rd, std::vector<double>& o)
 
 void run(Rd& rd, std::vector<double>& o)
 {
-    int32_t api = (int32_t)rd.idx(1, 20);
+    int32_t api = (int32_t)rd.idx(1, 19);
     switch (api)
     {
     case OP_BOOLEAN:
@@ -1277,9 +1285,13 @@ void run(Rd& rd, std::vector<double>& o)
     case OP_NM_SWEEP:
     case OP_NM_ROTATIONAL_SWEEP: run_sweep(rd, api, o); break;
     case OP_ATTRIBUTED: run_attributed(rd, o); break;
-    case OP_TESSELLATE_BOUNDARIES: run_tessellate_boundaries(rd, o); break;
-    case OP_ATTRIBUTED_LIST: run_attributed_list(rd, o); break;
-    case OP_CHECKED: run_checked(rd, o); break;
+    case OP_ATTRIBUTED_NM_SWEEP:
+    case OP_ATTRIBUTED_NM_ROTATIONAL_SWEEP:
+    {
+        int64_t behavior = rd.idx(0, 4);
+        run_sweep(rd, api - 3, o, behavior);
+        break;
+    }
     default: throw Bad();
     }
 }

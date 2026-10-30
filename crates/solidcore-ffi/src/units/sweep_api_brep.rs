@@ -43,6 +43,16 @@
 //! success `has` and, when there is a B-rep, its face, edge and vertex counts; the
 //! curve sweeps then add the start, side and end face counts.
 //!
+//! `FromFaces` / `FromEdges` with `attributed` are ops `12` / `13`: `behavior`, then
+//! the args of op `7` / `8`. They first give every face (`GetFaces` order) and edge
+//! (`GetEdges` order) of disc `d` its own `SmLongAttribute`, whose id and value are
+//! [`ATTRIBUTE_BASE`] plus `1000 d + 500 kind + index` (kind 0 face, 1 edge), with
+//! behaviour `behavior` (an `SmAttributeBehaviorType` value). The record then ends
+//! with the result's attribute rows (on success) and each disc's:
+//! `faces rows... edges rows...`, a row being `n` then per attribute in ascending
+//! order `id behavior value users` (users: the topology users), the rows of each
+//! list sorted.
+//!
 //! [`run`] accepts only what upstream handles without undefined behaviour or a hang:
 //! finite data; `SmApiCreateCurve` with 4 to 512 points and positive arc / circle
 //! radii (a failing constructor is `SC_ERR_ARG`); at most 64 curves per list; a
@@ -72,6 +82,9 @@ use crate::{call_with_buffer, FfiError};
 pub const MAX_CURVES: usize = 64;
 /// Most points of an `SmApiCreateCurve` curve.
 pub const MAX_POINTS: usize = 512;
+/// The first attribute id of the attributed `FromFaces` / `FromEdges`.
+pub const ATTRIBUTE_BASE: u64 = 10007;
+
 /// Most planar circle faces of `FromFaces` / `FromEdges`.
 pub const MAX_DISCS: usize = 16;
 /// Most repetitions of `LinearReps` / `RotationalReps`.
@@ -240,6 +253,8 @@ pub enum Call {
         circles: Vec<([f64; 3], f64)>,
         /// Path, scale curves and options.
         args: SweepArgs,
+        /// `Some(behavior)`: op `12` (see the module docs).
+        attributed: Option<u8>,
     },
     /// `SmApiCreateCurveSweepFromEdges` on the edges of those faces.
     FromEdges {
@@ -247,6 +262,8 @@ pub enum Call {
         circles: Vec<([f64; 3], f64)>,
         /// Path, scale curves and options.
         args: SweepArgs,
+        /// `Some(behavior)`: op `13` (see the module docs).
+        attributed: Option<u8>,
     },
     /// `SmApiCreateTaperExtrude(curves, height, angle, caps, fillet)`.
     Taper {
@@ -634,12 +651,26 @@ fn encode(call: &Call) -> Result<Vec<f64>, FfiError> {
             push_curves(&mut o, profile, false, true, false)?;
             push_sweep_args(&mut o, args)?;
         }
-        Call::FromFaces { circles, args } | Call::FromEdges { circles, args } => {
-            o.push(if matches!(call, Call::FromFaces { .. }) {
+        Call::FromFaces {
+            circles,
+            args,
+            attributed,
+        }
+        | Call::FromEdges {
+            circles,
+            args,
+            attributed,
+        } => {
+            let op = if matches!(call, Call::FromFaces { .. }) {
                 7.0
             } else {
                 8.0
-            });
+            };
+            match attributed {
+                None => o.push(op),
+                Some(behavior) if *behavior <= 4 => o.extend([op + 5.0, f64::from(*behavior)]),
+                Some(_) => return Err(bad("behavior is not an SmAttributeBehaviorType value")),
+            }
             push_discs(&mut o, circles)?;
             push_sweep_args(&mut o, args)?;
         }

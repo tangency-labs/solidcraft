@@ -60,6 +60,13 @@
 //!   selections are ids into it ([`SweepSelection`]); a `None` entry is a `NULL`
 //!   handle, and every entry must be live topology of the B-rep. On an error after
 //!   validation the B-rep keeps the sweep's partial edits, as upstream.
+//! - **Attributes.** A B-rep owns its attributes ([`Brep::add_attribute`]). The
+//!   non-manifold sweeps carry the swept B-rep's attributes through the sweep's
+//!   copies, splits, merges and deletions as upstream's notifications do, through
+//!   [`PrimitiveModel`]'s attribute store. The curve sweeps from faces and edges copy
+//!   only the edges' curves, as upstream, so the result carries none of the input
+//!   objects' attributes (upstream's would sit on the curves, which hold no
+//!   attributes here) and the inputs keep theirs.
 //! - Every entry point validates and copies its inputs as upstream, then runs the
 //!   `SmPrimitiveCreation` method it wraps on a new B-rep through a
 //!   [`PrimitiveModel`]. Path and scale curves become their `SmBSplineCurve` part.

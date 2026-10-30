@@ -366,6 +366,10 @@ enum Inputs {
         region: RegionIn,
         #[serde(default)]
         selection: SelectionIn,
+        /// Tag every face and edge first (operand 0 of [`Inputs::Attributed`], this
+        /// behaviour) and compare the swept B-rep's attribute rows too.
+        #[serde(default)]
+        attributed: Option<u8>,
     },
     /// `SmApiNonManifoldRotationalSweep(brep, region, ...)`.
     RotationalSweep {
@@ -381,6 +385,10 @@ enum Inputs {
         region: RegionIn,
         #[serde(default)]
         selection: SelectionIn,
+        /// Tag every face and edge first (operand 0 of [`Inputs::Attributed`], this
+        /// behaviour) and compare the swept B-rep's attribute rows too.
+        #[serde(default)]
+        attributed: Option<u8>,
     },
     /// Both operands' faces and edges tagged with their own long attribute (behaviour
     /// `behavior`, an `SmAttributeBehaviorType` value), then `SmApiBoolean`; the record
@@ -616,6 +624,7 @@ fn to_call(i: &Inputs) -> Call {
             merge,
             region,
             selection: sel,
+            attributed,
         } => Call::Sweep {
             brep: spec(brep),
             dir: *dir,
@@ -624,6 +633,7 @@ fn to_call(i: &Inputs) -> Call {
             merge: *merge,
             region: region.ffi(),
             selection: selection(sel),
+            attributed: *attributed,
         },
         Inputs::RotationalSweep {
             brep,
@@ -634,6 +644,7 @@ fn to_call(i: &Inputs) -> Call {
             merge,
             region,
             selection: sel,
+            attributed,
         } => Call::RotationalSweep {
             brep: spec(brep),
             base: *base,
@@ -643,6 +654,7 @@ fn to_call(i: &Inputs) -> Call {
             merge: *merge,
             region: region.ffi(),
             selection: selection(sel),
+            attributed: *attributed,
         },
         Inputs::Attributed {
             a,
@@ -734,6 +746,18 @@ fn cpp(i: &Inputs) -> Result<Output, HarnessError> {
             Inputs::Checked { .. } => checked_output(&o),
             Inputs::Boolean2d { .. } => {
                 areas_output(&o, o.first() == Some(&0.0) && o.get(1) == Some(&1.0))
+            }
+            Inputs::Sweep {
+                attributed: Some(_),
+                ..
+            }
+            | Inputs::RotationalSweep {
+                attributed: Some(_),
+                ..
+            } if o.first() == Some(&0.0) => {
+                let (head, rows) = ffi::split_measures(&o)
+                    .ok_or_else(|| harness("cpp: attributed sweep record too short"))?;
+                Ok(areas_output(head, true)?.values("attributes", rows.to_vec()))
             }
             Inputs::Sweep { .. } | Inputs::RotationalSweep { .. } => {
                 areas_output(&o, o.first() == Some(&0.0))
@@ -1410,6 +1434,7 @@ fn sweep_record(
     k: &Kernel,
     r: solidcore::Result<()>,
     b: &mut Brep,
+    attributed: bool,
     seen: &dyn Fn(&SolidError),
 ) -> Result<Output, Stop> {
     match r {
@@ -1417,7 +1442,13 @@ fn sweep_record(
             let mut o = Vec::new();
             put_brep(&mut o, b)?;
             let a = areas(k, b)?;
-            Ok(record(0, o).values("areas", a))
+            let out = record(0, o).values("areas", a);
+            if !attributed {
+                return Ok(out);
+            }
+            let mut rows = Vec::new();
+            put_attributes(k, &mut rows, b)?;
+            Ok(out.values("attributes", rows))
         }
         Err(e) if matches!(e, SolidError::InvalidInput { .. }) => {
             seen(&e);
@@ -1721,9 +1752,15 @@ fn rust_call_with(k: &mut Kernel, i: &Inputs, seen: &dyn Fn(&SolidError)) -> Res
             merge,
             region,
             selection: sel,
+            attributed,
         } => {
             let mut b = build(k, brep)?;
             let (f, e, v) = picked(&b, sel)?;
+            if let Some(behavior) = attributed {
+                let behavior = Behavior::from_code(i32::from(*behavior))
+                    .map_err(|e| Stop::Harness(harness(format!("behavior: {e}"))))?;
+                tag_operand(&mut b, 0, behavior)?;
+            }
             let other = region_other(k, *region)?;
             let selection = SweepSelection {
                 faces: f.as_deref(),
@@ -1733,7 +1770,7 @@ fn rust_call_with(k: &mut Kernel, i: &Inputs, seen: &dyn Fn(&SolidError)) -> Res
             let dir = Vec3::new(dir[0], dir[1], dir[2]);
             let region = region_arg(*region, other.as_ref());
             let r = non_manifold_sweep(k, &mut b, region, dir, *dist, *stitch, *merge, selection);
-            sweep_record(k, r, &mut b, seen)
+            sweep_record(k, r, &mut b, attributed.is_some(), seen)
         }
         Inputs::RotationalSweep {
             brep,
@@ -1744,9 +1781,15 @@ fn rust_call_with(k: &mut Kernel, i: &Inputs, seen: &dyn Fn(&SolidError)) -> Res
             merge,
             region,
             selection: sel,
+            attributed,
         } => {
             let mut b = build(k, brep)?;
             let (f, e, v) = picked(&b, sel)?;
+            if let Some(behavior) = attributed {
+                let behavior = Behavior::from_code(i32::from(*behavior))
+                    .map_err(|e| Stop::Harness(harness(format!("behavior: {e}"))))?;
+                tag_operand(&mut b, 0, behavior)?;
+            }
             let other = region_other(k, *region)?;
             let selection = SweepSelection {
                 faces: f.as_deref(),
@@ -1766,7 +1809,7 @@ fn rust_call_with(k: &mut Kernel, i: &Inputs, seen: &dyn Fn(&SolidError)) -> Res
                 *merge,
                 selection,
             );
-            sweep_record(k, r, &mut b, seen)
+            sweep_record(k, r, &mut b, attributed.is_some(), seen)
         }
         Inputs::TessellateBoundaries {
             brep,
@@ -2141,6 +2184,7 @@ fn gen_more(rng: &mut Rng) -> Inputs {
                 merge: rng.chance(0.3),
                 region: gen_region(rng),
                 selection,
+                attributed: None,
             }
         }
         _ => {
@@ -2166,6 +2210,7 @@ fn gen_more(rng: &mut Rng) -> Inputs {
                 merge: rng.chance(0.3),
                 region: gen_region(rng),
                 selection,
+                attributed: None,
             }
         }
     }

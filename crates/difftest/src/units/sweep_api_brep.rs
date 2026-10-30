@@ -33,6 +33,8 @@ use serde_json::Value;
 
 use solidcore::curve::curve::Curve as SmCurve;
 use solidcore::curve::hermite_curve::HermiteCurve;
+use solidcore::error::EntityRef;
+use solidcore::geom::attribute::{Attribute, Behavior};
 use solidcore::geom::vector3d::{Point3, Vec3};
 use solidcore::kernel::Kernel;
 use solidcore::primitive::api_curves;
@@ -146,10 +148,16 @@ enum Inputs {
     FromFaces {
         circles: Vec<(P3, f64)>,
         sweep: SweepIn,
+        /// Tag every disc face and edge first (this behaviour) and compare the
+        /// attribute sets of the result and of the discs.
+        #[serde(default)]
+        attributed: Option<u8>,
     },
     FromEdges {
         circles: Vec<(P3, f64)>,
         sweep: SweepIn,
+        #[serde(default)]
+        attributed: Option<u8>,
     },
     Taper {
         curves: Vec<CrvIn>,
@@ -288,13 +296,23 @@ fn call_of(i: &Inputs) -> Call {
             profile: specs(profile),
             args: sweep_args(sweep),
         },
-        Inputs::FromFaces { circles, sweep } => Call::FromFaces {
+        Inputs::FromFaces {
+            circles,
+            sweep,
+            attributed,
+        } => Call::FromFaces {
             circles: circles.clone(),
             args: sweep_args(sweep),
+            attributed: *attributed,
         },
-        Inputs::FromEdges { circles, sweep } => Call::FromEdges {
+        Inputs::FromEdges {
+            circles,
+            sweep,
+            attributed,
+        } => Call::FromEdges {
             circles: circles.clone(),
             args: sweep_args(sweep),
+            attributed: *attributed,
         },
         Inputs::Taper {
             curves,
@@ -379,6 +397,10 @@ fn to_output(i: &Inputs, flat: &[f64]) -> Result<Output, HarnessError> {
         ) {
             out = out.values("faces", take(flat, &mut at, 3)?.to_vec());
         }
+    }
+    if attributed(i).is_some() {
+        out = out.values("attributes", flat.get(at..).unwrap_or_default().to_vec());
+        at = flat.len();
     }
     if observes(i) && out.values.get("has").and_then(|v| v.first()) == Some(&1.0) {
         let counts = out
@@ -623,7 +645,17 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
             )
             .map(Swept::CurveSweep)
         }
-        Inputs::FromFaces { circles, sweep } | Inputs::FromEdges { circles, sweep } => {
+        Inputs::FromFaces {
+            circles,
+            sweep,
+            attributed: Some(behavior),
+        }
+        | Inputs::FromEdges {
+            circles,
+            sweep,
+            attributed: Some(behavior),
+        } => return rust_attributed(&mut k, i, circles, sweep, *behavior),
+        Inputs::FromFaces { circles, sweep, .. } | Inputs::FromEdges { circles, sweep, .. } => {
             let path = curve(&k, &sweep.path)?;
             let sref = curve(&k, &sweep.scale_reference)?;
             let scl = curve(&k, &sweep.scale_curve)?;
@@ -737,6 +769,141 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
             None => to_output(i, &[status(&e)]),
         },
     }
+}
+
+/// The behaviour of an attributed curve sweep's tags.
+fn attributed(i: &Inputs) -> Option<u8> {
+    match i {
+        Inputs::FromFaces { attributed, .. } | Inputs::FromEdges { attributed, .. } => *attributed,
+        _ => None,
+    }
+}
+
+/// The shim's `tag_disc`: every face and edge of disc `disc` gets its own long attribute.
+fn tag_disc(b: &mut Brep, disc: u64, behavior: Behavior) -> solidcore::Result<()> {
+    use solidcore::topology::brep::p1;
+    let faces = p1::faces(b, None)?;
+    let edges = p1::edges(b, None)?;
+    let tagged = faces
+        .into_iter()
+        .enumerate()
+        .map(|(i, f)| (EntityRef::Face(f), 0, i))
+        .chain(
+            edges
+                .into_iter()
+                .enumerate()
+                .map(|(i, e)| (EntityRef::Edge(e), 1, i)),
+        );
+    for (entity, kind, index) in tagged {
+        let id = ffi::ATTRIBUTE_BASE + 1000 * disc + 500 * kind + index as u64;
+        b.add_attribute(entity, Attribute::long(id, id as i64, behavior))?;
+    }
+    Ok(())
+}
+
+/// The shim's `put_attribute_rows`: the sorted face rows then edge rows of `b`.
+fn put_attribute_rows(o: &mut Vec<f64>, b: &Brep) -> solidcore::Result<()> {
+    use solidcore::topology::brep::p1;
+    let row = |e: EntityRef| -> Vec<f64> {
+        let mut entries: Vec<[f64; 4]> = b
+            .entity_attributes(e)
+            .into_iter()
+            .map(|(_, a)| {
+                [
+                    a.attribute_id() as f64,
+                    f64::from(a.behavior() as u8),
+                    a.long_value().map_or(0.0, |v| v as f64),
+                    a.users().len() as f64,
+                ]
+            })
+            .collect();
+        entries.sort_by(|x, y| total(x, y));
+        let mut r = vec![entries.len() as f64];
+        r.extend(entries.into_iter().flatten());
+        r
+    };
+    let faces: Vec<EntityRef> = p1::faces(b, None)?.into_iter().map(EntityRef::Face).collect();
+    let edges: Vec<EntityRef> = p1::edges(b, None)?.into_iter().map(EntityRef::Edge).collect();
+    for list in [faces, edges] {
+        let mut rows: Vec<Vec<f64>> = list.into_iter().map(row).collect();
+        rows.sort_by(|x, y| total(x, y));
+        o.push(rows.len() as f64);
+        o.extend(rows.into_iter().flatten());
+    }
+    Ok(())
+}
+
+/// Lexicographic `total_cmp` order (the shim's `std::sort` of value vectors).
+fn total(x: &[f64], y: &[f64]) -> core::cmp::Ordering {
+    x.iter()
+        .zip(y)
+        .map(|(p, q)| p.total_cmp(q))
+        .find(|o| o.is_ne())
+        .unwrap_or_else(|| x.len().cmp(&y.len()))
+}
+
+/// An attributed `FromFaces` / `FromEdges`: the discs tagged as the shim tags them, the
+/// sweep, then the result's and the discs' attribute rows.
+fn rust_attributed(
+    k: &mut Kernel,
+    i: &Inputs,
+    circles: &[(P3, f64)],
+    sweep: &SweepIn,
+    behavior: u8,
+) -> Result<Output, HarnessError> {
+    let behavior = Behavior::from_code(i32::from(behavior))
+        .map_err(|e| harness(format!("behavior: {e}")))?;
+    let path = curve(k, &sweep.path)?;
+    let sref = curve(k, &sweep.scale_reference)?;
+    let scl = curve(k, &sweep.scale_curve)?;
+    let opts = options_of(sweep.options);
+    let from_faces = matches!(i, Inputs::FromFaces { .. });
+    let mut discs = built(discs(k, circles), "discs")?;
+    for (d, b) in discs.iter_mut().enumerate() {
+        built(tag_disc(b, d as u64, behavior), "tag")?;
+    }
+    let result = (|| -> solidcore::Result<api::CurveSweep> {
+        let faces = disc_faces(&discs)?;
+        if from_faces {
+            api::create_curve_sweep_from_faces(
+                k,
+                &faces,
+                path.as_ref(),
+                sref.as_ref(),
+                scl.as_ref(),
+                opts.as_ref(),
+            )
+        } else {
+            let mut edges: Vec<(&Brep, EdgeId)> = Vec::new();
+            for (b, f) in &faces {
+                let fe = solidcore::topology::face::p4::edges(b, *f, None, false, None)?;
+                edges.extend(fe.into_iter().map(|e| (*b, e)));
+            }
+            api::create_curve_sweep_from_edges(
+                k,
+                &edges,
+                path.as_ref(),
+                sref.as_ref(),
+                scl.as_ref(),
+                opts.as_ref(),
+            )
+        }
+    })();
+    let mut rows = Vec::new();
+    let out = match &result {
+        Ok(c) => {
+            built(put_attribute_rows(&mut rows, &c.brep), "attributes")?;
+            success(&Swept::CurveSweep(c.clone()))
+        }
+        Err(e) => match Output::unported(e) {
+            Some(out) => return Ok(out),
+            None => Output::new().values("status", vec![status(e)]),
+        },
+    };
+    for b in &discs {
+        built(put_attribute_rows(&mut rows, b), "attributes")?;
+    }
+    Ok(out.values("attributes", rows))
 }
 
 fn observes(i: &Inputs) -> bool {
@@ -1144,9 +1311,17 @@ fn gen_case_at(rng: &mut Rng, s: f64) -> Inputs {
                 .collect();
             let sweep = gen_sweep_in(rng, s);
             if rng.chance(0.5) {
-                Inputs::FromFaces { circles, sweep }
+                Inputs::FromFaces {
+                    circles,
+                    sweep,
+                    attributed: None,
+                }
             } else {
-                Inputs::FromEdges { circles, sweep }
+                Inputs::FromEdges {
+                    circles,
+                    sweep,
+                    attributed: None,
+                }
             }
         }
         8 => Inputs::Taper {

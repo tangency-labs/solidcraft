@@ -41,10 +41,9 @@
 //! | `Piecewise`     | 14 | brep brep `create_new`                 | `has [is_first brep brep]`                      |
 //! | `Sweep`         | 15 | brep `D[3] dist stitch merge region` sel | brep (also on `SM_ERR_INVALID_INPUT`)         |
 //! | `RotationalSweep` | 16 | brep `P[3] A[3] angle stitch merge region` sel | brep (also on `SM_ERR_INVALID_INPUT`)  |
-//! | `Attributed`    | 17 | brep brep `operation` `behavior` [`copy_first` flags] | two-B-rep record, then the attribute rows |
-//! | `TessellateBoundaries` | 18 | brep `angle_tol_deg` `nd`, `nd` edge indices | (also after `SM_ERR`) `ne` edge indices, `nc` counts, `np` points `x y z` |
-//! | `AttributedList` | 19 | `behavior`, a `MergeBreps` / `Lists` / `Trees` call | its record, then the attribute rows |
-//! | `Checked`       | 20 | brep brep `operation` `level`          | two-B-rep record, then the result's check       |
+//! | `Attributed`    | 17 | brep brep `operation` `behavior`       | two-B-rep record, then the attribute rows       |
+//! | `Sweep` (attributed) | 18 | `behavior`, then op 15's args     | op 15's record, then the attribute rows         |
+//! | `RotationalSweep` (attributed) | 19 | `behavior`, then op 16's args | op 16's record, then the attribute rows |
 //!
 //! The two-B-rep record is `has [is_first kept brep [brep]]` (the second B-rep when
 //! upstream keeps it); a B-rep is `faces edges vertices regions manifold_solid`, then per
@@ -89,24 +88,14 @@
 //! success the two-B-rep record is followed by `faces rows... edges rows...` of the result
 //! and, when upstream keeps it, of the second B-rep, then the number of those values
 //! ([`split_measures`]). A row is `measure n` then per attribute (in ascending order)
-//! `id behavior value users` (value: the long value, else 0; users: `GetUsers`' size); the
+//! `id behavior value users` (value: the long value, else 0; users: the `GetUsers` that are `SmTopology` objects, as the port keeps no attributes on geometry); the
 //! measure is the face's `SmApiFaceComputeArea` at [`AREA_ACCURACY`] or the edge's
 //! `SmApiEdgeComputeLength` at [`LENGTH_ACCURACY`] (minus the status on failure); rows are
 //! sorted by their attribute part, then by measure ([`sort_rows`]).
-//! `AttributedList` tags every B-rep `i` of a `MergeBreps`, `Lists` or `Trees` call's
-//! lists (in input order, `breps1` then `breps2`) as operand `i`, runs the call, and ends a
-//! successful record with the `faces rows... edges rows...` of each output B-rep (the
-//! result; each list output; each non-null tree slot), then the number of those values.
-//!
-//! `Checked` runs `SmApiBoolean`, then on success the capi check sequence on the result at
-//! `level` (`SmAssertTestLevel`, 0 to 2): `SmBrep::ValidatePointers` (its default
-//! `SM_NO_WALK`), then `SmBrep::AssertValid` with `SM_WALK` unless the pointer check
-//! reported a failure. After the two-B-rep record come `pointers_status failed...
-//! assert_valid failed...` and the number of those values ([`split_measures`]):
-//! `assert_valid` is `-1` when skipped, else `0`/`1`; each `failed` is `groups` then per
-//! failed test, in ascending order, `reporting_type list_index test_index count` (which
-//! tests fail and how often; the sides number a result's entities differently, so the
-//! entities a report names are not compared).
+//! An attributed sweep (op `18` / `19`: [`Call::Sweep`] / [`Call::RotationalSweep`] with
+//! `attributed`) tags the swept B-rep's faces and edges the same way (operand 0) before
+//! the sweep; a successful record ends, after the areas tail, with that B-rep's
+//! `faces rows... edges rows...` and the number of those values.
 //!
 //! [`run`] accepts only what upstream handles without undefined behaviour: finite
 //! operand data with positive box and plane dimensions and a nonzero sphere radius (torus
@@ -518,6 +507,10 @@ pub enum Call {
         region: RegionArg,
         /// The optional selections.
         selection: Selection,
+        /// `Some(behavior)`: every face and edge of the B-rep is tagged first, as
+        /// [`Call::Attributed`] tags operand 0 (op `18`/`19`), and the record ends with
+        /// the swept B-rep's attribute rows.
+        attributed: Option<u8>,
     },
     /// `SmApiNonManifoldRotationalSweep(brep, region, ...)`.
     RotationalSweep {
@@ -537,6 +530,10 @@ pub enum Call {
         region: RegionArg,
         /// The optional selections.
         selection: Selection,
+        /// `Some(behavior)`: every face and edge of the B-rep is tagged first, as
+        /// [`Call::Attributed`] tags operand 0 (op `18`/`19`), and the record ends with
+        /// the swept B-rep's attribute rows.
+        attributed: Option<u8>,
     },
     /// Both operands' faces and edges tagged, then `SmApiBoolean`, followed by the
     /// attribute rows of the B-reps it returns.
@@ -854,6 +851,17 @@ fn push_list(o: &mut Vec<f64>, l: &[BrepSpec], max: usize) -> Result<(), FfiErro
     Ok(())
 }
 
+/// A sweep's op code: `op`, or with `attributed` the attributed op (`op + 3`) and the
+/// behaviour.
+fn push_attributed(o: &mut Vec<f64>, op: f64, attributed: Option<u8>) -> Result<(), FfiError> {
+    match attributed {
+        None => o.push(op),
+        Some(behavior) if behavior <= 4 => o.extend([op + 3.0, f64::from(behavior)]),
+        Some(_) => return Err(bad("behavior is not an SmAttributeBehaviorType value")),
+    }
+    Ok(())
+}
+
 fn flag(b: bool) -> f64 {
     if b {
         1.0
@@ -978,11 +986,12 @@ fn encode(call: &Call) -> Result<Vec<f64>, FfiError> {
             merge,
             region,
             selection,
+            attributed,
         } => {
             if !dir.iter().all(|x| x.is_finite()) || !dist.is_finite() {
                 return Err(bad("sweep: non-finite value"));
             }
-            o.push(15.0);
+            push_attributed(&mut o, 15.0, *attributed)?;
             push_spec(&mut o, brep)?;
             o.extend_from_slice(dir);
             o.push(*dist);
@@ -998,11 +1007,12 @@ fn encode(call: &Call) -> Result<Vec<f64>, FfiError> {
             merge,
             region,
             selection,
+            attributed,
         } => {
             if !base.iter().chain(axis).all(|x| x.is_finite()) || !angle_deg.is_finite() {
                 return Err(bad("rotational sweep: non-finite value"));
             }
-            o.push(16.0);
+            push_attributed(&mut o, 16.0, *attributed)?;
             push_spec(&mut o, brep)?;
             o.extend_from_slice(base);
             o.extend_from_slice(axis);

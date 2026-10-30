@@ -19,6 +19,9 @@
 //! the unported native B-rep destructor is not emulated. `RemoveFaces`,
 //! `RemoveAllTopology` and the sweep stitch edit through the context the store has
 //! already lent to the edit (the trait defaults lend it again and fail).
+//! A body's own attributes ([`Brep::add_attribute`]) move into the shared store
+//! when it is inserted or adopted, and a taken body gets a copy of its live objects'
+//! lists back.
 
 pub(crate) mod classification;
 mod merge;
@@ -46,7 +49,6 @@ use crate::topology::edge::NotifyEnv;
 use crate::topology::topology::Topology;
 use crate::topology::topology_traverser::{self as traverser, Entity, FaceTraversalMarks};
 use crate::topology::{Brep, BrepId, EdgeId, FaceId};
-#[cfg(test)]
 use std::collections::BTreeMap;
 
 const OP: &str = "sweep::topology_sweep::store";
@@ -300,6 +302,22 @@ fn entity(value: SweepEntity) -> (BrepId, EntityRef) {
     }
 }
 
+/// Every live topology object of `b` that can carry attributes, in arena order.
+fn live_entities(b: &Brep) -> Vec<EntityRef> {
+    let mut out: Vec<EntityRef> = Vec::new();
+    out.extend(b.regions().ids().map(EntityRef::Region));
+    out.extend(b.shells().ids().map(EntityRef::Shell));
+    out.extend(b.faces().ids().map(EntityRef::Face));
+    out.extend(b.faceuses().ids().map(EntityRef::Faceuse));
+    out.extend(b.loops().ids().map(EntityRef::Loop));
+    out.extend(b.loopuses().ids().map(EntityRef::Loopuse));
+    out.extend(b.edges().ids().map(EntityRef::Edge));
+    out.extend(b.edgeuses().ids().map(EntityRef::Edgeuse));
+    out.extend(b.vertices().ids().map(EntityRef::Vertex));
+    out.extend(b.vertexuses().ids().map(EntityRef::Vertexuse));
+    out
+}
+
 fn validate(b: &Brep, value: EntityRef) -> Result<()> {
     match value {
         EntityRef::Brep(_) => {}
@@ -469,6 +487,8 @@ impl<'a> SweepStore<'a> {
 
     /// Adopt an unregistered body. Existing external identities are rejected before
     /// mutation; owned curves/surfaces receive their actual enclosing topology owner.
+    /// The body's own attributes ([`Brep::add_attribute`], `SmAObject` attributes)
+    /// join the shared store under its identities, where the store's edits carry them.
     pub fn insert_brep(&mut self, context: ContextId, brep: Brep) -> Result<BrepId> {
         if brep.key() != ObjectKey(0)
             || brep.edges().iter().any(|(_, e)| {
@@ -483,13 +503,32 @@ impl<'a> SweepStore<'a> {
         {
             return Err(invalid("body already has external object identities"));
         }
-        self.insert_body(context, Body::Owned(Box::new(brep)))
+        let mut brep = brep;
+        let own = brep.take_attributes();
+        let id = self.insert_body(context, Body::Owned(Box::new(brep)))?;
+        self.seed_attributes(id, own)?;
+        Ok(id)
+    }
+
+    /// (not upstream) Moves a body's own attributes (`SmAObject` attributes, keyed by
+    /// [`crate::topology::loopuse::notify_ref`]) into the shared store under the
+    /// body's identities, where the store's edits carry them.
+    fn seed_attributes(&mut self, id: BrepId, own: AttributeStore) -> Result<()> {
+        let namespace = entry(&self.bodies, id)?.namespace;
+        let identities = self.identities;
+        self.attributes.absorb(own, &|key| {
+            crate::topology::loopuse::entity_of_notify_key(key)
+                .map(|e| identities.object(namespace, e).key)
+                .ok_or(invalid("attribute list names no object"))
+        })
     }
 
     /// Move in a caller body whose objects already carry the caller's identities for
     /// the handle it receives (its key and records, as the caller notified them
     /// before). Unlike [`Self::insert_brep`] nothing is re-keyed: the store edits the
     /// body under those same identities, and a Boolean may consume it.
+    /// The body's own attributes ([`Brep::add_attribute`]) join the shared store under
+    /// those identities, as [`Self::insert_brep`]'s do.
     ///
     /// # Errors
     /// An unknown context, exhausted handles, no caller identities, or a B-rep key
@@ -512,17 +551,22 @@ impl<'a> SweepStore<'a> {
                 "adopted B-rep identity disagrees with caller resolver",
             ));
         }
+        let mut brep = brep;
+        let own = brep.take_attributes();
         self.bodies.push(Some(BodyEntry {
             context,
             namespace,
             body: Body::Owned(Box::new(brep)),
         }));
+        self.seed_attributes(id, own)?;
         Ok(id)
     }
 
     /// Move an owned body out to the caller, with its records and attributes left in
     /// the caller's stores under its identities (the counterpart of
-    /// [`Self::adopt_brep`]). The id is not reused.
+    /// [`Self::adopt_brep`]). The id is not reused. The body also takes a copy of the lists of its
+    /// live objects as its own attributes ([`Brep::entity_attributes`]), `SM_AI_TAG`
+    /// tags of a tagging sweep among them, as upstream's objects keep theirs.
     ///
     /// # Errors
     /// An unknown or released id, or a borrowed or retained HCR body.
@@ -530,14 +574,40 @@ impl<'a> SweepStore<'a> {
         if !matches!(entry(&self.bodies, id)?.body, Body::Owned(_)) {
             return Err(invalid("only an owned body can be taken"));
         }
+        // (not upstream) the body's objects take their attribute lists with them, as
+        // `SmAObject` attributes travel with their objects; the shared store keeps its
+        // own (the caller's stores, under the body's identities)
+        let own = self.body_attributes(id)?;
         let slot = self
             .bodies
             .get_mut(id.index() as usize)
             .ok_or_else(|| invalid("unknown body"))?;
         match slot.take().map(|e| e.body) {
-            Some(Body::Owned(b)) => Ok(*b),
+            Some(Body::Owned(mut b)) => {
+                b.set_attributes(own);
+                Ok(*b)
+            }
             _ => Err(invalid("only an owned body can be taken")),
         }
+    }
+
+    /// (not upstream) A copy of the shared store's lists for the live objects of body
+    /// `id`, keyed by [`crate::topology::loopuse::notify_ref`] (the body's own
+    /// attributes once it leaves the store).
+    fn body_attributes(&self, id: BrepId) -> Result<AttributeStore> {
+        let e = entry(&self.bodies, id)?;
+        let names: BTreeMap<ObjectKey, ObjectKey> = live_entities(e.body.brep())
+            .into_iter()
+            .map(|x| {
+                (
+                    self.identities.object(e.namespace, x).key,
+                    crate::topology::loopuse::notify_ref(x).key,
+                )
+            })
+            .collect();
+        let mut own = (*self.attributes).clone();
+        own.retain_rekeyed(&|key| names.get(&key).copied())?;
+        Ok(own)
     }
 
     /// `SmMerge::PiecewiseMerge(pOptSkipPairs, bUseExistingTopology,
@@ -1722,6 +1792,37 @@ mod tests {
         store.delete_brep(id);
         assert!(store.hcr_session(id).is_err());
         assert!(store.contains_brep(original));
+    }
+
+    #[test]
+    fn inserted_bodies_bring_their_attributes_and_taken_bodies_take_them_back() {
+        // #1462: a B-rep's own attributes join the shared store under the body's
+        // identities, and a taken body carries the lists of its live objects again
+        let mut store = SweepStore::owned();
+        let c = store.insert_kernel(Kernel::default()).unwrap();
+        let mut raw = Brep::new_with_infinite_region().unwrap();
+        let shell = raw.add_shell().unwrap();
+        let f = raw.add_face(shell).unwrap();
+        raw.add_attribute(
+            EntityRef::Face(f),
+            Attribute::long(10007, 7, Behavior::Copy),
+        )
+        .unwrap();
+        let b = store.insert_brep(c, raw).unwrap();
+        let key = store.object_ref(b, EntityRef::Face(f)).unwrap().key;
+        let h = store
+            .attributes(b)
+            .unwrap()
+            .find_attribute(key, 10007)
+            .unwrap();
+        assert_eq!(
+            store.attributes(b).unwrap().get(h).unwrap().long_value(),
+            Some(7)
+        );
+        let back = store.take_brep(b).unwrap();
+        let a = back.find_attribute(EntityRef::Face(f), 10007).unwrap();
+        assert_eq!(a.long_value(), Some(7));
+        assert_eq!(back.entity_attributes(EntityRef::Face(f)).len(), 1);
     }
 
     #[test]
