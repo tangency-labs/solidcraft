@@ -25,6 +25,7 @@ pub mod fill;
 pub mod fill_general;
 mod grid;
 pub mod hlr;
+pub mod hull3;
 pub mod inertia;
 mod mesh;
 pub mod mesh_distance;
