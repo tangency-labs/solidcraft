@@ -501,6 +501,11 @@ pub struct MotionLink {
 }
 
 impl MotionLink {
+    /// The follower's value is `ratio · a + offset`; a cam's comes from its table.
+    pub fn coupling_is_linear(&self) -> bool {
+        !matches!(self.coupling, Some(Coupling::Cam(_)))
+    }
+
     /// b's value for a's value `x` (before b's limits). A cam's table that is not whole (a
     /// hand-edited file) gives no value, so b keeps where it is; a table on any other link is
     /// not read.

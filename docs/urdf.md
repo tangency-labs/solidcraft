@@ -32,6 +32,7 @@ way, the error names the files already written and the one that failed.
 | `mesh_prefix` | none | Put before each mesh file name. Leave it empty for loaders that resolve against the URDF's folder (Isaac Sim, PyBullet, MuJoCo, yourdfpy). RViz and other ROS tools need `package://<pkg>/meshes/` or an absolute folder. |
 | `effort` | 1000 | Effort limit for joint values with none saved, in N (sliding) or N m (turning). |
 | `velocity` | 10 | Velocity limit for joint values with none saved, in m/s or rad/s. |
+| `mimic` | true | Write `<mimic>` for motion links. `false` leaves each joint free, as older versions did. |
 
 URDF requires `effort` and `velocity` on every moving joint. A joint's own values come first, then
 these parameters, then the defaults, with a warning naming the joints that used them. A value that
@@ -89,7 +90,11 @@ set. In a chain, each step uses the values of the joint value it follows.
   reversed, so the values still match.
 - **Limits** are written as `lower <= upper` in radians or metres. A sliding step without a
   limit gets ±1000 m, since URDF requires one, with a warning.
-- **Motion links** are not written as `<mimic>`. Each joint's own value is free in the URDF.
+- **Motion links** (gears, racks, screws and plain links) are written as `<mimic>` on the driven
+  joint, converted to metres and radians. A chain of links is composed down to its first driver,
+  since many tools accept only a mimic of a joint that is not one itself. A warning names a driven
+  joint left free: a cam (not linear), a cycle, or a driver that is not in the URDF. A driver whose
+  range can exceed the driven joint's limit also gets a warning.
 
 The URDF is written at the design's current joint values, with every part where it is shown,
 including moves not captured yet. The exception is a part the joints place: it exports where its
@@ -119,7 +124,6 @@ the copies move together, which a URDF could only express with `<mimic>`.) The e
 
 ## Not covered
 
-- `<mimic>` for motion links.
 - Simplified collision shapes: the collision mesh is the visual mesh.
 - SDF and MJCF export, and URDF import.
 - Joint motion inside the copies of a component placed several times.

@@ -33,6 +33,8 @@ pub struct UrdfOptions {
     /// `<limit effort>` (N or N m) and `velocity` (m/s or rad/s); defaults with a warning.
     pub effort: Option<f64>,
     pub velocity: Option<f64>,
+    /// Write `<mimic>` for motion links. `file.export` sets it unless told not to.
+    pub mimic: bool,
 }
 
 /// The URDF, its mesh files (name next to the `.urdf`, bytes) and what was approximated.
@@ -96,6 +98,16 @@ pub struct UrdfJoint {
     pub source: Option<(u64, usize)>,
     /// What the design saves for that value, without what a hand-edited file could hold.
     pub dynamics: JointDynamics,
+    /// The joint whose value sets this one's (a motion link).
+    pub mimic: Option<Mimic>,
+}
+
+/// `value = multiplier · joints[joint]'s value + offset`, in URDF units (m, rad).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Mimic {
+    pub joint: usize,
+    pub multiplier: f64,
+    pub offset: f64,
 }
 
 impl UrdfModel {
@@ -346,6 +358,7 @@ impl<'a> Tree<'a> {
             limit: None,
             source: None,
             dynamics: JointDynamics::default(),
+            mimic: None,
         });
     }
 
@@ -436,6 +449,7 @@ impl<'a> Tree<'a> {
                 limit: None,
                 source: None,
                 dynamics: JointDynamics::default(),
+                mimic: None,
             });
             return Some(());
         }
@@ -483,6 +497,7 @@ impl<'a> Tree<'a> {
                 limit,
                 source: Some((j.id, dof)),
                 dynamics,
+                mimic: None,
             });
             from = to;
         }
@@ -621,6 +636,9 @@ pub fn urdf(doc: &Document, st: &ModelState, stem: &str, options: &UrdfOptions) 
         }
     }
     tree.copies(&jointed);
+    if options.mimic {
+        resolve_mimics(&mut tree.model, doc, &mut tree.warnings);
+    }
 
     let on_fallback: Vec<&str> = tree
         .model
@@ -642,6 +660,64 @@ pub fn urdf(doc: &Document, st: &ModelState, stem: &str, options: &UrdfOptions) 
     out.model = tree.model;
     out.warnings = tree.warnings;
     Ok(out)
+}
+
+/// A motion link as `<mimic>`: the follower's URDF joint takes its value from the driver's. Tools
+/// accept a mimic only of a joint that is not one itself, so a chain of links is composed down to
+/// its first driver. Values stay in stored units (mm, rad) until the last step.
+fn resolve_mimics(model: &mut UrdfModel, doc: &Document, warnings: &mut Vec<String>) {
+    let name = |id: u64| doc.assembly.joints.iter().find(|j| j.id == id).map_or_else(|| id.to_string(), |j| j.name.clone());
+    let index: BTreeMap<(u64, usize), usize> = model.joints.iter().enumerate().filter_map(|(i, j)| Some((j.source?, i))).collect();
+    let links = &doc.assembly.links;
+    let linear: BTreeMap<(u64, usize), &joints::MotionLink> = links.iter().filter(|l| l.coupling_is_linear()).map(|l| ((l.b, l.ib), l)).collect();
+    for l in links {
+        let follower = name(l.b);
+        if !l.coupling_is_linear() {
+            warnings.push(format!("the cam driving `{follower}` is not linear: `{follower}` is left free in the URDF"));
+            continue;
+        }
+        let Some(&at) = index.get(&(l.b, l.ib)) else {
+            warnings.push(format!("the motion link to `{follower}` is left out: that joint is not in the URDF"));
+            continue;
+        };
+        // value of b = ratio · value of driver + offset, walking back to the first driver.
+        let (mut driver, mut ratio, mut offset) = ((l.a, l.ia), l.ratio, l.offset);
+        let mut seen = BTreeSet::from([(l.b, l.ib)]);
+        let mut cycle = false;
+        while let Some(prev) = linear.get(&driver) {
+            if !seen.insert(driver) {
+                cycle = true;
+                break;
+            }
+            offset += ratio * prev.offset;
+            ratio *= prev.ratio;
+            driver = (prev.a, prev.ia);
+        }
+        if cycle {
+            warnings.push(format!("motion links form a cycle through `{follower}`: it is left free in the URDF"));
+            continue;
+        }
+        let Some(&from) = index.get(&driver) else {
+            warnings.push(format!("the joint driving `{follower}` is not in the URDF: `{follower}` is left free"));
+            continue;
+        };
+        if !ratio.is_finite() || !offset.is_finite() {
+            warnings.push(format!("the motion link to `{follower}` is not usable numbers: `{follower}` is left free in the URDF"));
+            continue;
+        }
+        let (Some(d), Some(f)) = (model.joints.get(from), model.joints.get(at)) else { continue };
+        let unit = |step| if step == Step::Prismatic { 1e-3 } else { 1.0 };
+        let mimic = Mimic { joint: from, multiplier: ratio * unit(f.step) / unit(d.step), offset: offset * unit(f.step) };
+        if let Some((lo, hi)) = f.limit {
+            let reach = d.limit.map(|(a, b)| (ratio * a + offset, ratio * b + offset));
+            if !reach.is_some_and(|(a, b)| a.min(b) >= lo - 1e-9 && a.max(b) <= hi + 1e-9) {
+                warnings.push(format!("the range of `{}` can exceed the limit of `{follower}` it drives", d.name));
+            }
+        }
+        if let Some(f) = model.joints.get_mut(at) {
+            f.mimic = Some(mimic);
+        }
+    }
 }
 
 fn token() -> Inertial {
@@ -808,6 +884,14 @@ fn write_xml(model: &UrdfModel, name: &str, options: &UrdfOptions) -> String {
                 }
                 None => s += &format!("    <limit effort=\"{}\" velocity=\"{}\"/>\n", num(effort), num(velocity)),
             }
+            if let Some(driver) = j.mimic.and_then(|m| Some((model.joints.get(m.joint)?, m))) {
+                s += &format!(
+                    "    <mimic joint=\"{}\" multiplier=\"{}\" offset=\"{}\"/>\n",
+                    attr(&driver.0.name),
+                    num(driver.1.multiplier),
+                    num(driver.1.offset)
+                );
+            }
             if j.dynamics.damping.is_some() || j.dynamics.friction.is_some() {
                 s += "    <dynamics";
                 if let Some(x) = j.dynamics.damping {
@@ -892,6 +976,7 @@ mod tests {
                 limit: Some((-1.0, 2.0)),
                 source: None,
                 dynamics: JointDynamics::default(),
+                mimic: None,
             });
         }
         let xml = write_xml(&model, "r", &UrdfOptions::default());

@@ -715,3 +715,212 @@ fn hand_edited_dynamics_are_ignored_with_a_warning() {
     assert!(p.xml.contains(r#"effort="1000" velocity="10""#), "{}", p.xml);
     assert!(has_warning(&p, "dynamics"), "{:?}", p.warnings);
 }
+
+/// A grounded cube and `kinds.len()` more, each on a joint to it named `J0`, `J1`...
+fn fan(kinds: &[&str]) -> Session {
+    let mut s = Session::default();
+    run(&mut s, "component.create", json!({"name": "Hub"}));
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [0, 0, 0]}));
+    ground(&mut s, "Hub", true);
+    for (i, kind) in kinds.iter().enumerate() {
+        let x = 20 * (i + 1);
+        run(&mut s, "component.activate", json!({"component": "root"}));
+        run(&mut s, "component.create", json!({"name": format!("P{i}")}));
+        run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [x, 0, 0]}));
+        run(&mut s, "joint.create", json!({"type": kind, "a": {"face": [5, 5, 10]}, "b": {"face": [x + 5, 5, 0]}, "name": format!("J{i}")}));
+    }
+    s
+}
+
+/// `b = ratio · a + offset` in stored units (rad, mm), between values 0 of two joints.
+fn link(s: &mut Session, a: &str, b: &str, ratio: f64, offset: f64) {
+    let id = |s: &Session, n: &str| s.doc.assembly.joints.iter().find(|j| j.name == n).map_or(0, |j| j.id);
+    let (a, b) = (id(s, a), id(s, b));
+    s.doc_mut().assembly.links.push(joints::MotionLink { a, ia: 0, b, ib: 0, ratio, offset, coupling: None, lift: Vec::new() });
+}
+
+fn mimic_package(s: &Session) -> UrdfPackage {
+    let options = UrdfOptions { mimic: true, ..Default::default() };
+    match solidcraft_io::urdf(&s.doc, &s.doc.painted(&s.model.state()), "t", &options) {
+        Ok(p) => p,
+        Err(e) => panic!("urdf: {e}"),
+    }
+}
+
+/// (driver's name, multiplier, offset) of a URDF joint.
+fn mimic_of(p: &UrdfPackage, joint: &str) -> Option<(String, f64, f64)> {
+    let m = p.model.joints.iter().find(|j| j.name == joint)?.mimic?;
+    Some((p.model.joints.get(m.joint)?.name.clone(), m.multiplier, m.offset))
+}
+
+#[test]
+fn a_gear_pair_writes_mimic() {
+    let mut s = fan(&["revolute", "revolute"]);
+    run(&mut s, "joint.gear", json!({"a": "J0", "b": "J1", "ra": 10, "rb": 20}));
+    let p = mimic_package(&s);
+    let (driver, multiplier, offset) = mimic_of(&p, "J1").unwrap_or_else(|| panic!("{}", p.xml));
+    assert_eq!(driver, "J0");
+    // A gear twice the size turns half as far, the other way.
+    assert!((multiplier + 0.5).abs() < 1e-12, "{multiplier}");
+    assert!(offset.abs() < 1e-12, "{offset}");
+    assert!(p.xml.contains(r#"<mimic joint="J0" multiplier="-0.5" offset="0"/>"#), "{}", p.xml);
+    assert!(mimic_of(&p, "J0").is_none());
+}
+
+#[test]
+fn a_rack_and_pinion_converts_mm_per_rad_to_m_per_rad() {
+    let mut s = fan(&["revolute", "slider"]);
+    run(&mut s, "joint.rack_pinion", json!({"a": "J0", "b": "J1", "radius": 5}));
+    let p = mimic_package(&s);
+    let (_, multiplier, _) = mimic_of(&p, "J1").unwrap_or_else(|| panic!("{}", p.xml));
+    assert!((multiplier.abs() - 0.005).abs() < 1e-12, "{multiplier}");
+}
+
+#[test]
+fn a_prismatic_driver_converts_rad_per_mm_to_rad_per_m() {
+    let mut s = fan(&["slider", "revolute"]);
+    link(&mut s, "J0", "J1", 2.0, 0.25);
+    let p = mimic_package(&s);
+    assert_eq!(mimic_of(&p, "J1"), Some(("J0".into(), 2000.0, 0.25)), "{}", p.xml);
+}
+
+#[test]
+fn a_prismatic_follower_writes_its_offset_in_metres() {
+    let mut s = fan(&["slider", "slider"]);
+    link(&mut s, "J0", "J1", 3.0, 7.0);
+    let p = mimic_package(&s);
+    assert_eq!(mimic_of(&p, "J1"), Some(("J0".into(), 3.0, 0.007)), "{}", p.xml);
+}
+
+#[test]
+fn linked_links_are_flattened_to_the_first_driver() {
+    let mut s = fan(&["revolute", "revolute", "revolute"]);
+    link(&mut s, "J0", "J1", 2.0, 0.0);
+    link(&mut s, "J1", "J2", 3.0, 0.1);
+    let p = mimic_package(&s);
+    assert_eq!(mimic_of(&p, "J1"), Some(("J0".into(), 2.0, 0.0)), "{}", p.xml);
+    assert_eq!(mimic_of(&p, "J2"), Some(("J0".into(), 6.0, 0.1)), "{}", p.xml);
+}
+
+#[test]
+fn flattening_scales_the_earlier_offset() {
+    let mut s = fan(&["revolute", "revolute", "revolute"]);
+    link(&mut s, "J0", "J1", 2.0, 0.5);
+    link(&mut s, "J1", "J2", 3.0, 0.1);
+    let p = mimic_package(&s);
+    let (_, m, o) = mimic_of(&p, "J2").unwrap_or_else(|| panic!("{}", p.xml));
+    assert_eq!(m, 6.0);
+    assert!((o - 1.6).abs() < 1e-12, "{o}");
+}
+
+#[test]
+fn a_cycle_of_links_writes_no_mimic_and_warns() {
+    let mut s = fan(&["revolute", "revolute"]);
+    link(&mut s, "J0", "J1", 2.0, 0.0);
+    link(&mut s, "J1", "J0", 0.5, 0.0);
+    let p = mimic_package(&s);
+    assert!(!p.xml.contains("<mimic"), "{}", p.xml);
+    assert!(has_warning(&p, "cycle"), "{:?}", p.warnings);
+}
+
+#[test]
+fn a_suppressed_driver_leaves_the_follower_free_and_warns() {
+    let mut s = fan(&["revolute", "revolute"]);
+    link(&mut s, "J0", "J1", 2.0, 0.0);
+    run(&mut s, "joint.edit", json!({"joint": "J0", "suppressed": true}));
+    let p = mimic_package(&s);
+    assert!(!p.xml.contains("<mimic"), "{}", p.xml);
+    assert!(p.warnings.iter().any(|w| w.contains("J1") && w.contains("free")), "{:?}", p.warnings);
+}
+
+#[test]
+fn a_driver_that_closes_a_loop_leaves_the_follower_free_and_warns() {
+    let mut s = fan(&["revolute", "revolute"]);
+    // P0 to P1 closes the loop Hub, P0, P1: the tree leaves this joint out.
+    run(
+        &mut s,
+        "joint.create",
+        json!({"type": "revolute", "a": {"occurrence": "P0:1", "face": [25, 5, 10]}, "b": {"occurrence": "P1:1", "face": [45, 5, 0]}, "name": "Closing"}),
+    );
+    let id = s.doc.assembly.joints.iter().find(|j| j.name == "Closing").map_or(0, |j| j.id);
+    let j1 = s.doc.assembly.joints.iter().find(|j| j.name == "J1").map_or(0, |j| j.id);
+    s.doc_mut().assembly.links.push(joints::MotionLink { a: id, ia: 0, b: j1, ib: 0, ratio: 2.0, offset: 0.0, coupling: None, lift: Vec::new() });
+    let p = mimic_package(&s);
+    assert!(!p.xml.contains("<mimic"), "{}", p.xml);
+    assert!(p.warnings.iter().any(|w| w.contains("J1") && w.contains("free")), "{:?}", p.warnings);
+}
+
+#[test]
+fn mimic_values_match_solidcraft_when_the_chain_runs_reversed() {
+    // The Hub is on B's side of the follower: its chain runs backwards.
+    let mut s = Session::default();
+    for (name, x) in [("Hub", 0), ("Driver", 20), ("Follower", 40)] {
+        run(&mut s, "component.activate", json!({"component": "root"}));
+        run(&mut s, "component.create", json!({"name": name}));
+        run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [x, 0, 0]}));
+    }
+    ground(&mut s, "Hub", true);
+    run(
+        &mut s,
+        "joint.create",
+        json!({"type": "revolute", "a": {"occurrence": "Hub:1", "face": [5, 5, 10]}, "b": {"occurrence": "Driver:1", "face": [25, 5, 0]}, "name": "D"}),
+    );
+    run(
+        &mut s,
+        "joint.create",
+        json!({"type": "revolute", "a": {"occurrence": "Follower:1", "face": [45, 5, 0]}, "b": {"occurrence": "Hub:1", "face": [5, 5, 0]}, "name": "F"}),
+    );
+    link(&mut s, "D", "F", 2.0, 0.1);
+    run(&mut s, "joint.drive", json!({"joint": "D", "values": [20]}));
+    let p = mimic_package(&s);
+    let (driver, m, o) = mimic_of(&p, "F").unwrap_or_else(|| panic!("{}", p.xml));
+    assert_eq!(driver, "D");
+    let driver_value = 20f64.to_radians();
+    let frames = p.model.link_frames(|j| match j.name.as_str() {
+        "D" => driver_value,
+        "F" => m * driver_value + o,
+        _ => 0.0,
+    });
+    let placements = s.doc.placements();
+    for (l, f) in p.model.links.iter().zip(&frames) {
+        if l.path.is_empty() {
+            continue;
+        }
+        let Some((_, _, want)) = placements.iter().find(|x| x.1 == l.path) else { panic!("{}", l.name) };
+        assert!(close(&mat_mul(f, &l.mesh_origin), want), "{}", l.name);
+    }
+}
+
+#[test]
+fn mimic_false_gives_the_previous_output() {
+    let mut s = fan(&["revolute", "revolute"]);
+    link(&mut s, "J0", "J1", 2.0, 0.0);
+    assert!(!package(&s).xml.contains("<mimic"));
+}
+
+#[test]
+fn file_export_writes_mimic_unless_told_not_to() {
+    let mut s = fan(&["revolute", "revolute"]);
+    link(&mut s, "J0", "J1", 2.0, 0.0);
+    let dir = temp("mimic");
+    let on = dir.join("on.urdf");
+    let off = dir.join("off.urdf");
+    run(&mut s, "file.export", json!({"path": on.to_string_lossy()}));
+    run(&mut s, "file.export", json!({"path": off.to_string_lossy(), "mimic": false}));
+    assert!(std::fs::read_to_string(&on).unwrap_or_default().contains("<mimic"));
+    assert!(!std::fs::read_to_string(&off).unwrap_or_default().contains("<mimic"));
+}
+
+#[test]
+fn a_follower_limit_the_driver_can_exceed_warns() {
+    let mut s = fan(&["revolute", "revolute"]);
+    link(&mut s, "J0", "J1", 2.0, 0.0);
+    run(&mut s, "joint.limits", json!({"joint": "J0", "min": -30, "max": 30}));
+    run(&mut s, "joint.limits", json!({"joint": "J1", "min": -20, "max": 20}));
+    assert!(has_warning(&mimic_package(&s), "exceed"), "driver reaches 60 deg");
+    let mut s = fan(&["revolute", "revolute"]);
+    link(&mut s, "J0", "J1", 2.0, 0.0);
+    run(&mut s, "joint.limits", json!({"joint": "J0", "min": -30, "max": 30}));
+    run(&mut s, "joint.limits", json!({"joint": "J1", "min": -90, "max": 90}));
+    assert!(!has_warning(&mimic_package(&s), "exceed"));
+}
