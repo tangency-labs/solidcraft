@@ -11,8 +11,8 @@
 //!   issued history, so an issued revision is never given out again. A revision typed by hand is
 //!   kept as typed; in letters one with a skipped letter is accepted with [`SkippedLetter`].
 //! - Hiding and deleting rows changes what the table shows. [`RevisionRecord::issue`] appends a
-//!   copy of a row to the issued history, which nothing here removes or changes. Release, approval
-//!   and frozen snapshots build on it later.
+//!   copy of a row to the issued history, once for each row and under the row's id, which nothing
+//!   here removes or changes. Release, approval and frozen snapshots build on it later.
 //! - Row and tag ids come from the caller (the design's random ids), never from a counter here, so
 //!   two people adding rows to one drawing never take the same id. An id in use is refused.
 //! - A [`Tag`] (a triangle with the revision in it) is bound to a row by its id and shows its
@@ -21,6 +21,8 @@
 //!
 //! This is the drawing's revision only: the model's revision is its component's part property and
 //! the time of an export is the writer's, and neither is kept or stood in for here.
+
+use std::collections::{BTreeSet, HashSet};
 
 use serde::{Deserialize, Serialize};
 
@@ -94,7 +96,17 @@ pub struct RevisionRow {
     /// The model version an issued copy was issued against, for the release step to pin: none
     /// until version control gives versions (#2869).
     #[serde(default)]
-    pub model_version: Option<String>,
+    pub model_version: Option<ModelVersion>,
+}
+
+/// The design a revision was issued from, in the version history's words, both opaque here. A
+/// change rather than a commit: the row is saved in the file it describes, so it can't name that
+/// file's own commit, and a change's id survives an amend.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ModelVersion {
+    pub path: String,
+    pub change: String,
 }
 
 /// One of a row's texts.
@@ -231,8 +243,10 @@ impl RevisionRow {
     }
 
     fn check(&self) -> Result<()> {
-        for label in std::iter::once(&self.revision).chain(&self.model_version) {
-            check_label(label).map_err(cell_rule)?;
+        check_label(&self.revision).map_err(cell_rule)?;
+        if let Some(version) = &self.model_version {
+            check_label(&version.path).map_err(cell_rule)?;
+            check_label(&version.change).map_err(cell_rule)?;
         }
         check_text([&self.description, &self.designer, &self.checker, &self.date].map(String::as_str)).map_err(cell_rule)
     }
@@ -257,15 +271,19 @@ impl RevisionRecord {
         require(self.issued.len() <= MAX_ISSUED, "a record's issued history holds at most 10,000 entries")?;
         require(self.tags.len() <= MAX_ISSUED, "a record has at most 10,000 tags")?;
         require(matches!(self.numbering, Numbering::Letters | Numbering::Numbers { start: 0 | 1 }), "numbers start at 0 or 1")?;
-        let mut ids = std::collections::HashSet::new();
+        let mut ids = HashSet::new();
         for row in &self.rows {
             require(ids.insert(row.id), "each row and tag has its own id")?;
             require(row.sheet.is_some() == self.per_sheet, "a row has a sheet when the record is kept per sheet, and only then")?;
             row.check()?;
         }
+        let mut issued = HashSet::new();
         for row in &self.issued {
+            require(issued.insert(row.id), "a row is issued once")?;
             row.check()?;
         }
+        // An issued copy keeps its row's id, row or no row: only a tag can't have it.
+        ids.extend(issued);
         for tag in &self.tags {
             require(ids.insert(tag.id), "each row and tag has its own id")?;
             require(tag.lost.is_some() || self.rows.iter().any(|r| r.id == tag.row), "a tag is bound to a row")?;
@@ -277,9 +295,16 @@ impl RevisionRecord {
         Ok(())
     }
 
-    /// Every id the record holds: its rows', its issued copies' and its tags'.
+    /// Every id the record holds, each once: its rows', its issued copies' (a copy has its row's) and
+    /// its tags'.
     pub fn ids(&self) -> impl Iterator<Item = u64> + '_ {
-        self.rows.iter().chain(&self.issued).map(|r| r.id).chain(self.tags.iter().map(|t| t.id))
+        let rows: BTreeSet<u64> = self.rows.iter().chain(&self.issued).map(|r| r.id).collect();
+        rows.into_iter().chain(self.tags.iter().map(|t| t.id))
+    }
+
+    /// Whether row `id` has an issued copy.
+    pub fn is_issued(&self, id: u64) -> bool {
+        self.issued.iter().any(|r| r.id == id)
     }
 
     /// Whether a row, an issued copy or a tag has `id`, or a tag is bound to it.
@@ -349,11 +374,12 @@ impl RevisionRecord {
     }
 
     /// Appends a copy of a row, as it reads now, to the issued history, with the model version it
-    /// was issued against when there is one.
-    pub fn issue(&mut self, id: u64, model_version: Option<&str>) -> Result<()> {
+    /// was issued against when there is one. A row is issued once: a change is a new revision.
+    pub fn issue(&mut self, id: u64, model_version: Option<ModelVersion>) -> Result<()> {
         require(self.issued.len() < MAX_ISSUED, "a record's issued history holds at most 10,000 entries")?;
         let mut row = self.rows.iter().find(|r| r.id == id).ok_or(Invalid("no row has that id"))?.clone();
-        row.model_version = model_version.map(str::to_string);
+        require(!self.is_issued(id), "a row is issued once: make a new revision")?;
+        row.model_version = model_version;
         row.check()?;
         self.issued.push(row);
         Ok(())
