@@ -15,6 +15,11 @@
 //   7 extrusion: origin[3] vec[3] domain[4] swap, generator: p n rational pts[n*4]
 //                knots[n+p+1], then `stale cp[3] cv[3]` (stale != 0: SetCurvePoint(cp)
 //                and SetCurveVec(cv) after construction, a stale cached plane or line)
+//   8 curve-bounded: reports depth O X Y scale[2] domain[4] n3d nuv implicit,
+//                   then per boundary: dim bad_owner start[3] end[3]. Each boundary
+//                   is a real composite of one degree-1 B-spline. Only the outer
+//                   wrapper has boundaries; depth is 1..8. A bad owner is the basis
+//                   plane, an invalid Curve owner, in the same context.
 // `make` calls MakeNurb before the check. Output: `result n` then per report
 // `type list test assert_type ok reporter owner other owner_type other_type tol value
 // dist3d name message message_for_file owner_string other_string` (texts as
@@ -27,6 +32,8 @@
 #include <SmBSplineCurve.h>
 #include <SmBSplineSurface.h>
 #include <SmCone.h>
+#include <SmCompositeCurve.h>
+#include <SmCurveBoundedSurface.h>
 #include <SmContext.h>
 #include <SmCylinder.h>
 #include <SmPlane.h>
@@ -145,6 +152,7 @@ SC_EXPORT int32_t sc_surface_surface_assert_valid_eval(const double* input, int6
     int64_t kind = rd.idx();
     int64_t level = rd.idx();
     bool make = rd.num() != 0.0;
+    bool want_reports = true;
     SmSurface* surface = NULL;
     const void* placement = NULL;
     if (kind == 0)
@@ -278,12 +286,107 @@ SC_EXPORT int32_t sc_surface_surface_assert_valid_eval(const double* input, int6
             e->stale(cp, cv);
         surface = e;
     }
+    else if (kind == 8)
+    {
+        want_reports = rd.b() != FALSE;
+        int64_t depth = rd.idx();
+        SmPoint3d o = rd.vec();
+        SmVector3d x = rd.vec(), y = rd.vec();
+        double sx = rd.num(), sy = rd.num();
+        SmExtent2d domain = rd.dom();
+        int64_t n3d = rd.idx(), nuv = rd.idx();
+        SmBoolean implicit = rd.b();
+        if (!rd.ok || depth < 1 || depth > 8 || n3d < 0 || nuv < 0 || n3d > 8 || nuv > 8)
+            return SC_ERR_ARG;
+        struct BoundaryInput
+        {
+            int64_t dim;
+            bool bad_owner;
+            SmPoint3d start, end;
+        };
+        std::vector<BoundaryInput> boundaries;
+        for (int64_t i = 0; i < n3d + nuv; ++i)
+        {
+            int64_t dim = rd.idx();
+            bool bad_owner = rd.b() != FALSE;
+            SmPoint3d a = rd.vec(), b = rd.vec();
+            if (!rd.ok || (dim != 2 && dim != 3))
+                return SC_ERR_ARG;
+            boundaries.push_back({dim, bad_owner, a, b});
+        }
+        SmPlane* basis = new (ctx) SmPlane(o, x, y, SmVector2d(sx, sy), domain, &ctx);
+        surface = basis;
+        SmTArray<SmCurve*> curves3d(ctx), curvesuv(ctx);
+        bool invalid_boundary_owner = false;
+        for (int64_t i = 0; i < n3d + nuv; ++i)
+        {
+            const BoundaryInput& boundary_input = boundaries[(size_t)i];
+            int64_t dim = boundary_input.dim;
+            const SmPoint3d& a = boundary_input.start;
+            const SmPoint3d& b = boundary_input.end;
+            gw_CPOINT points[2] = {{a.x, a.y, a.z, NL_NOW}, {b.x, b.y, b.z, NL_NOW}};
+            double knots[4] = {0.0, 0.0, 1.0, 1.0};
+            SmBSplineCurve* segment = new (ctx) SmBSplineCurve((ULONG)dim, 1, 3, 1, points, knots);
+            SmTArray<SmCurve*> segments(ctx);
+            segments.Add(segment);
+            SmCompositeCurve* boundary = new (ctx) SmCompositeCurve((ULONG)dim, segments, FALSE);
+            if (boundary_input.bad_owner)
+                invalid_boundary_owner = true;
+            if (i < n3d)
+                curves3d.Add(boundary);
+            else
+                curvesuv.Add(boundary);
+        }
+        for (int64_t i = 0; i < depth; ++i)
+        {
+            const bool outer = i + 1 == depth;
+            surface = new (ctx) SmCurveBoundedSurface(*surface, outer ? &curves3d : NULL,
+                                                     outer ? &curvesuv : NULL, implicit);
+        }
+        // The fixture represents one kernel context, including every owned object.
+        surface->SetContext(&ctx);
+        // Install corruption after SetContext, so context propagation cannot
+        // accidentally repair the bad-owner input before the check.
+        for (int64_t i = 0; i < n3d + nuv; ++i)
+        {
+            if (boundaries[(size_t)i].bad_owner)
+            {
+                SmCurve* boundary = i < n3d ? curves3d[(ULONG)i] : curvesuv[(ULONG)(i - n3d)];
+                boundary->SetOwner(basis);
+            }
+        }
+        // The pinned SM_GetAssertLabelList omits CurveBoundedSurface. Failed
+        // boundary reports 1/2 therefore read past its one-entry default table.
+        // A composite inherits Curve::AssertValid, whose bad-owner test runs at
+        // every level. With no report list the same inputs are defined and run.
+        if (want_reports && invalid_boundary_owner)
+        {
+            delete surface;
+            return SC_ERR_ARG;
+        }
+    }
     else
         return SC_ERR_ARG;
     if (!rd.ok || rd.at != n)
     {
         delete surface;
         return SC_ERR_ARG;
+    }
+    if (kind == 8 && level != 4)
+    {
+        // The generic GetKnots of a curve-bounded surface fails before
+        // CalculateContinuities writes the minima. The base AssertValid ignores
+        // the status and reads them. Probe with initialized outputs and reject
+        // exactly the early failures that leave the continuity arrays empty.
+        SmContinuityType min_u = SM_CT_G1, min_v = SM_CT_G1;
+        SmTArray<SmContinuityType> cu(ctx), cv(ctx);
+        SmStatus su = surface->CalculateContinuities(SM_SP_U, min_u, cu);
+        SmStatus sv = surface->CalculateContinuities(SM_SP_V, min_v, cv);
+        if ((su != SM_SUCCESS && cu.GetSize() == 0) || (sv != SM_SUCCESS && cv.GetSize() == 0))
+        {
+            delete surface;
+            return SC_ERR_ARG;
+        }
     }
     if (make)
     {
@@ -293,7 +396,7 @@ SC_EXPORT int32_t sc_surface_surface_assert_valid_eval(const double* input, int6
     }
     // sm_AssertTestSurface6 reads uninitialised iso curves when CreateIsoBoundaries
     // fails (undefined behaviour): reject the inputs where the base check would reach it.
-    bool base_runs = level != 4 && (kind <= 1 || make);
+    bool base_runs = level != 4 && (kind <= 1 || kind == 8 || make);
     if (base_runs)
     {
         SmApproxTol3d tol = SmTol::GetApproxTol3d(surface);
@@ -315,7 +418,7 @@ SC_EXPORT int32_t sc_surface_surface_assert_valid_eval(const double* input, int6
         }
     }
     SmAssertArray reports;
-    SmBoolean ok = surface->AssertValid(&reports, (SmAssertTestLevel)level, SM_NO_WALK);
+    SmBoolean ok = surface->AssertValid(want_reports ? &reports : NULL, (SmAssertTestLevel)level, SM_NO_WALK);
     std::vector<double> v;
     v.push_back(ok ? 1.0 : 0.0);
     v.push_back((double)reports.GetSize());

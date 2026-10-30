@@ -1,6 +1,6 @@
 //! The surface validity checks (`AssertValid`): the base class `SmSurface` and its
 //! virtual dispatch over the B-spline, plane, cone, cylinder, sphere, torus,
-//! surface-of-revolution and surface-of-extrusion overrides, with the predicates only
+//! surface-of-revolution, surface-of-extrusion and curve-bounded overrides, with the predicates only
 //! they use.
 //!
 //! Upstream: `source/SMLib/src/SmSurface.cpp`, `source/SMLib/src/SmBSplineSurface.cpp`,
@@ -8,7 +8,7 @@
 //! `source/SMLib/src/SmCone.cpp`, `source/SMLib/src/SmCylinder.cpp`,
 //! `source/SMLib/src/SmSphere.cpp`, `source/SMLib/src/SmTorus.cpp`,
 //! `source/SMLib/src/SmSurfOfRevolution.cpp`, `source/SMLib/src/SmSurfOfExtrusion.cpp`,
-//! `source/SMLib/src/SmAxis2Placement.cpp`,
+//! `source/SMLib/src/SmAxis2Placement.cpp`, `source/SMLib/src/SmCurveBoundedSurface.cpp`,
 //! `source/SMLib/src/SmPointSet.cpp`, `source/SMLib/inc/SmAssertArray.h`.
 //!
 //! | Rust                                  | Upstream                                              |
@@ -24,6 +24,7 @@
 //! | `torus_assert_valid` (private)        | `SmTorus::AssertValid`                                |
 //! | `surf_of_revolution_assert_valid` (private) | `SmSurfOfRevolution::AssertValid`               |
 //! | `surf_of_extrusion_assert_valid` (private) | `SmSurfOfExtrusion::AssertValid`                 |
+//! | `curve_bounded_surface_assert_valid` (private) | `SmCurveBoundedSurface::AssertValid`             |
 //! | [`axis2_placement_assert_valid`]      | `SmAxis2Placement::AssertValid`                       |
 //! | [`has_knot_multiplicity_greater_than_degree`] | `SmBSplineSurface::HasKnotMultiplicityGreaterThanDegree`, `sm_HasKnotMultiplicityGreaterThanDegree` |
 //! | [`has_internal_pole`]                 | `SmBSplineSurface::HasInternalPole`                   |
@@ -44,7 +45,8 @@
 //!   class. The placement's reports (`m_vPosition.AssertValid`, its own object
 //!   upstream) also name `key`: their reporting type differs, so they never collide
 //!   with the surface's.
-//! - **Context tests** (`SmSurfOfRevolution` 0, 1, `SmSurfOfExtrusion` 27) always
+//! - **Context tests** (`SmSurfOfRevolution` 0, 1, `SmSurfOfExtrusion` 27 and
+//!   `SmCurveBoundedSurface` 3..5) always
 //!   hold: one kernel is the only context.
 //! - **Generator owner** (`SmSurfOfRevolution` 14, `SmSurfOfExtrusion` 26): the
 //!   generator is held by value, so it is owned by the surface unless its owner handle
@@ -73,15 +75,29 @@
 //! - **Extrusion origin zero (WR-511, #1508).** Test 8 uses the pinned unscaled
 //!   `SM_EFF_ZERO` by default; `Kernel::fixes.extrusion_origin_scaled_zero` uses
 //!   `SM_EFF_ZERO * (1 + origin.max_dimension())` for that solve only.
-//! - **Unported overrides.** `SmCurveBoundedSurface` has its own `AssertValid`, not
-//!   ported here; it returns [`SolidError::Unported`]. `SmSTEPSurface` has none and
+//! - **Unported overrides.** `SmSrfInVolume` and
+//!   `SmOffsetSurface` have their own `AssertValid`, not ported here; they return
+//!   [`SolidError::Unported`]. `SmSTEPSurface` has none and
 //!   runs the base check.
-//! - **Wrapping surfaces.** `SmOffsetSurface` and `SmSrfInVolume` are in the `wrapped`
-//!   submodule (its own deviations); the latter calls `Volume::assert_valid`.
-//! - **Recursion.** Only a surface in a volume recurses (into its base surface), after
-//!   checking its owned geometry nests at most `MAX_GEOMETRY_NESTING` (32) deep.
+//! - **Contained checks.** Curve-bounded basis checks carry an explicit nesting
+//!   counter bounded by `MAX_GEOMETRY_NESTING` (32; fixtures reach at most 3).
+//!   Contained report keys are assigned in traversal order, distinct from the root
+//!   even when its key is `u64::MAX`; callers accumulating checks can supply a
+//!   contained-key resolver when accumulating independent geometry checks.
+//!   Boundary curves are exact evaluation copies
+//!   for the existing mutable virtual curve validator; lazily made NURBs on those
+//!   copies are not retained by this const surface check.
+//! - **Curve-bounded labels.** Upstream declares a six-entry table but omits this
+//!   class from `SM_GetAssertLabelList`: failed test 0 uses the one-entry default
+//!   table, and a failed test 1..5 with a report list reads past it. The port keeps
+//!   that lookup; the out-of-range report is `InvalidInput`. With no report list,
+//!   failed boundary checks return false normally, as upstream. At levels 0..2,
+//!   the inherited base continuity test reads an unwritten output: this class uses
+//!   the generic failing `GetKnots`. The existing continuity guard returns
+//!   `InvalidInput`; `LEVEL_GIVEN` skips that base call and is defined.
 
 use std::borrow::Cow;
+use std::collections::BTreeSet;
 
 use crate::curve::curve::p1::GlobalPointSolveOptions;
 use crate::curve::curve::p2::TANGENT_FIELD_TYPE;
@@ -127,6 +143,7 @@ use crate::surface::surf_of_extrusion::{CurveOrientType, SurfOfExtrusion};
 use crate::surface::surf_of_revolution::SurfOfRevolution;
 use crate::surface::torus::Torus;
 
+use super::p2::{CURVE_BOUNDED_SURFACE_TYPE, MAX_GEOMETRY_NESTING};
 use super::{Surface, SurfaceKind};
 
 mod wrapped;
@@ -247,6 +264,32 @@ impl Reporter<'_> {
     }
 }
 
+/// Per-call identities and depth for checks on owned geometry. No addresses or
+/// global state participate in the identities of reports.
+struct ContainedChecks<'a> {
+    allocate: &'a mut dyn FnMut(u64) -> Result<ObjectKey>,
+    root: ObjectKey,
+    assigned: BTreeSet<ObjectKey>,
+    ordinal: u64,
+    depth: usize,
+}
+
+impl ContainedChecks<'_> {
+    fn key(&mut self) -> Result<ObjectKey> {
+        self.ordinal = self
+            .ordinal
+            .checked_add(1)
+            .ok_or_else(|| invalid("contained report key space exhausted"))?;
+        let key = (self.allocate)(self.ordinal)?;
+        if key == self.root || !self.assigned.insert(key) {
+            return Err(invalid(
+                "contained report key duplicates another geometry key",
+            ));
+        }
+        Ok(key)
+    }
+}
+
 impl Surface {
     /// `AssertValid` (virtual, `SM_NO_WALK`; the walk argument is unused by every
     /// surface): the checks of this surface's class and, unless `level` is
@@ -260,6 +303,9 @@ impl Surface {
     /// errors of the evaluations and queries the tests run (statuses upstream
     /// ignores); [`SolidError::InvalidInput`] where upstream's behaviour is undefined
     /// (see the module docs).
+    /// For a compound surface, contained keys are `key + ordinal` (wrapping),
+    /// in traversal order. Reserve that range when accumulating independent checks,
+    /// or use [`Surface::assert_valid_with_keys`] with the caller's identity map.
     pub fn assert_valid(
         &self,
         k: &Kernel,
@@ -267,6 +313,52 @@ impl Surface {
         level: u8,
         key: ObjectKey,
     ) -> Result<bool> {
+        self.assert_valid_with_keys(k, list, level, key, &mut |ordinal| {
+            Ok(ObjectKey(key.0.wrapping_add(ordinal)))
+        })
+    }
+
+    /// Runs [`Surface::assert_valid`] with identities for contained geometry.
+    ///
+    /// `contained_key` receives each contained object's one-based traversal ordinal.
+    /// It must return a distinct key for each ordinal, separate from `key` and the
+    /// keys of other objects in the accumulating report list. Repeated checks of
+    /// the same surface should resolve an ordinal to the same key. A curve's
+    /// embedded polar converter also reserves an ordinal.
+    ///
+    /// # Errors
+    ///
+    /// Those of [`Surface::assert_valid`], the key callback, or `InvalidInput` for
+    /// a repeated contained key or input-driven validity nesting deeper than 32.
+    pub fn assert_valid_with_keys(
+        &self,
+        k: &Kernel,
+        list: Option<&mut AssertArray>,
+        level: u8,
+        key: ObjectKey,
+        contained_key: &mut dyn FnMut(u64) -> Result<ObjectKey>,
+    ) -> Result<bool> {
+        let mut walk = ContainedChecks {
+            allocate: contained_key,
+            root: key,
+            assigned: BTreeSet::new(),
+            ordinal: 0,
+            depth: 0,
+        };
+        self.assert_valid_with_walk(k, list, level, key, &mut walk)
+    }
+
+    fn assert_valid_with_walk(
+        &self,
+        k: &Kernel,
+        list: Option<&mut AssertArray>,
+        level: u8,
+        key: ObjectKey,
+        walk: &mut ContainedChecks<'_>,
+    ) -> Result<bool> {
+        if walk.depth > MAX_GEOMETRY_NESTING {
+            return Err(invalid("contained surface validity nesting exceeds 32"));
+        }
         let mut r = Reporter {
             list,
             key,
@@ -283,17 +375,76 @@ impl Surface {
             SurfaceKind::SurfOfRevolution(_) => surf_of_revolution_assert_valid(k, self, &mut r),
             SurfaceKind::Step(_) => surface_assert_valid(k, self, &mut r),
             SurfaceKind::CurveBounded(_) => {
-                // UNPORTED(surface.curve_bounded_surface): SmCurveBoundedSurface::AssertValid
-                Err(SolidError::unported(
-                    "SmCurveBoundedSurface::AssertValid",
-                    "surface.curve_bounded_surface",
-                ))
+                curve_bounded_surface_assert_valid(k, self, &mut r, walk)
             }
             SurfaceKind::SrfInVolume(_) => wrapped::srf_in_volume_assert_valid(k, self, &mut r),
             SurfaceKind::OffsetSurface(_) => wrapped::offset_surface_assert_valid(k, self, &mut r),
             SurfaceKind::SurfOfExtrusion(_) => surf_of_extrusion_assert_valid(k, self, &mut r),
         }
     }
+}
+
+/// `SmCurveBoundedSurface::AssertValid`, retaining the order of the contained
+/// checks and the separate context reports. Its declared label table is not used
+/// by upstream's global label dispatcher; `Reporter` uses the same default table.
+fn curve_bounded_surface_assert_valid(
+    k: &Kernel,
+    s: &Surface,
+    r: &mut Reporter<'_>,
+    walk: &mut ContainedChecks<'_>,
+) -> Result<bool> {
+    let SurfaceKind::CurveBounded(bounded) = s.kind() else {
+        return Err(invalid(
+            "curve-bounded validity requires a curve-bounded surface",
+        ));
+    };
+    let mut rtn = if r.bases() {
+        surface_assert_valid(k, s, r)?
+    } else {
+        true
+    };
+
+    let basis_key = walk.key()?;
+    let depth = walk.depth;
+    walk.depth = depth + 1;
+    let basis_result =
+        bounded
+            .basis()
+            .assert_valid_with_walk(k, r.list.as_deref_mut(), r.level, basis_key, walk);
+    walk.depth = depth;
+    let basis_ok = basis_result?;
+    rtn &= r.report(CURVE_BOUNDED_SURFACE_TYPE, 0, 0, basis_ok, UNDEF, UNDEF)?;
+    // Every owned value is evaluated through the same kernel context.
+    rtn &= r.report(CURVE_BOUNDED_SURFACE_TYPE, 3, 0, true, UNDEF, UNDEF)?;
+
+    for (curves, test, context_test) in [
+        (bounded.boundaries_3d(), 1, 4),
+        (bounded.boundaries_uv(), 2, 5),
+    ] {
+        for curve in curves {
+            let key = walk.key()?;
+            let polar_key = walk.key()?;
+            let mut curve = curve.clone_for_evaluation()?;
+            let ok = crate::topology::brep::validation::standalone_curve_assert_valid(
+                k,
+                &mut curve,
+                r.list.as_deref_mut(),
+                r.level,
+                key,
+                polar_key,
+            )?;
+            rtn &= r.report(CURVE_BOUNDED_SURFACE_TYPE, test, 0, ok, UNDEF, UNDEF)?;
+            rtn &= r.report(
+                CURVE_BOUNDED_SURFACE_TYPE,
+                context_test,
+                0,
+                true,
+                UNDEF,
+                UNDEF,
+            )?;
+        }
+    }
+    Ok(rtn)
 }
 
 // ---- SmSurface ----------------------------------------------------------------------
@@ -2643,5 +2794,161 @@ mod tests {
                 "m_vOrigin is a point on m_pGenCurve",
             )],
         );
+    }
+}
+
+#[cfg(test)]
+mod curve_bounded_tests {
+    use super::*;
+    use crate::curve::composite_curve::CompositeCurve;
+    use crate::geom::extent2d::Extent2d;
+    use crate::geom::object::ObjectRef;
+    use crate::geom::vector2d::Vec2;
+    use crate::surface::curve_bounded_surface::CurveBoundedSurface;
+
+    fn plane(scale: f64) -> Surface {
+        Surface::from(Plane::new(
+            Point3::new(0.0, 0.0, 0.0),
+            Vec3::new(1.0, 0.0, 0.0),
+            Vec3::new(0.0, 1.0, 0.0),
+            Vec2::new(scale, 1.0),
+            &Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0),
+        ))
+    }
+
+    fn wrap(basis: Surface, curves3d: Vec<Curve>, curvesuv: Vec<Curve>) -> Surface {
+        Surface::from(CurveBoundedSurface::new(basis, curves3d, curvesuv, true).unwrap())
+    }
+
+    #[test]
+    fn curve_bounded_given_is_defined_and_base_continuity_is_guarded() {
+        let k = Kernel::default();
+        let surface = wrap(wrap(plane(1.0), vec![], vec![]), vec![], vec![]);
+        let mut list = AssertArray::new();
+        assert!(surface
+            .assert_valid(&k, Some(&mut list), LEVEL_GIVEN, ObjectKey(1))
+            .unwrap());
+        assert!(list.is_empty());
+        assert!(!list.last_add());
+        for level in [0, 1, 2] {
+            assert!(matches!(
+                surface.assert_valid(&k, None, level, ObjectKey(1)),
+                Err(SolidError::InvalidInput {
+                    reason: "continuity output never written (upstream reads it uninitialised)",
+                    ..
+                })
+            ));
+        }
+    }
+
+    #[test]
+    fn curve_bounded_failing_basis_retains_default_label_and_distinct_identities() {
+        let k = Kernel::default();
+        let surface = wrap(
+            wrap(wrap(plane(-1.0), vec![], vec![]), vec![], vec![]),
+            vec![],
+            vec![],
+        );
+        let mut list = AssertArray::new();
+        assert!(!surface
+            .assert_valid(&k, Some(&mut list), LEVEL_GIVEN, ObjectKey(u64::MAX))
+            .unwrap());
+        assert_eq!(list.len(), 4);
+        let nested = list
+            .reports()
+            .iter()
+            .filter(|r| r.reporting_type == CURVE_BOUNDED_SURFACE_TYPE)
+            .collect::<Vec<_>>();
+        assert_eq!(nested.len(), 3);
+        assert!(nested
+            .iter()
+            .all(|r| r.test_index == 0 && r.name == "Unknown_Assert"));
+        assert_eq!(
+            nested
+                .iter()
+                .map(|r| r.reporter)
+                .collect::<BTreeSet<_>>()
+                .len(),
+            3
+        );
+        assert!(!list.last_add());
+    }
+
+    #[test]
+    fn curve_bounded_checks_both_boundary_lists_without_reports() {
+        let k = Kernel::default();
+        for uv in [false, true] {
+            let dim = if uv { 2 } else { 3 };
+            let mut curve =
+                Curve::from(CompositeCurve::with_curves(dim, vec![], false, None, None).unwrap());
+            curve.set_owner(
+                Some(ObjectRef {
+                    type_code: PLANE_TYPE,
+                    key: crate::geom::attribute::ObjectKey(99),
+                }),
+                None,
+            );
+            let (curves3d, curvesuv) = if uv {
+                (vec![], vec![curve])
+            } else {
+                (vec![curve], vec![])
+            };
+            let surface = wrap(plane(1.0), curves3d, curvesuv);
+            {
+                let level = LEVEL_GIVEN;
+                assert!(!surface.assert_valid(&k, None, level, ObjectKey(1)).unwrap());
+                let mut list = AssertArray::new();
+                assert!(matches!(
+                    surface.assert_valid(&k, Some(&mut list), level, ObjectKey(1)),
+                    Err(SolidError::InvalidInput { .. })
+                ));
+            }
+        }
+    }
+
+    #[test]
+    fn curve_bounded_identity_callback_keeps_accumulated_roots_separate() {
+        let k = Kernel::default();
+        let surface = wrap(wrap(plane(-1.0), vec![], vec![]), vec![], vec![]);
+        let mut list = AssertArray::new();
+        let mut next = 1000;
+        for root in [1, 2] {
+            let mut allocate = |_| {
+                let key = ObjectKey(next);
+                next += 1;
+                Ok(key)
+            };
+            assert!(!surface
+                .assert_valid_with_keys(
+                    &k,
+                    Some(&mut list),
+                    LEVEL_GIVEN,
+                    ObjectKey(root),
+                    &mut allocate
+                )
+                .unwrap());
+        }
+        assert_eq!(list.len(), 6);
+        let mut invalid_keys = |_| Ok(ObjectKey(1));
+        assert!(surface
+            .assert_valid_with_keys(&k, None, LEVEL_GIVEN, ObjectKey(1), &mut invalid_keys)
+            .is_err());
+    }
+
+    #[test]
+    fn curve_bounded_validity_depth_is_explicitly_bounded() {
+        let k = Kernel::default();
+        let surface = plane(1.0);
+        let mut allocate = |_| Ok(ObjectKey(2));
+        let mut walk = ContainedChecks {
+            allocate: &mut allocate,
+            root: ObjectKey(1),
+            assigned: BTreeSet::new(),
+            ordinal: 0,
+            depth: MAX_GEOMETRY_NESTING + 1,
+        };
+        assert!(surface
+            .assert_valid_with_walk(&k, None, 0, ObjectKey(1), &mut walk)
+            .is_err());
     }
 }

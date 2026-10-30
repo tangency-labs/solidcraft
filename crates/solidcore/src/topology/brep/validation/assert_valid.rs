@@ -62,6 +62,19 @@ use crate::kernel::Kernel;
 use crate::math::UNDEF_DOUBLE;
 use crate::topology::{Brep, BrepId};
 
+/// The existing virtual curve check for owned geometry outside an edge or UV trim.
+/// A curve-bounded surface uses it for its contained 3D and UV boundary curves.
+pub(crate) fn standalone_curve_assert_valid(
+    k: &Kernel,
+    curve: &mut crate::curve::curve::Curve,
+    list: Option<&mut AssertArray>,
+    level: u8,
+    key: ObjectKey,
+    polar_key: ObjectKey,
+) -> Result<bool> {
+    edge::curve(k, curve, list, level, key, polar_key, None)
+}
+
 /// `SM_LEVEL_GIVEN`: every test, no base classes.
 const LEVEL_GIVEN: u8 = 4;
 

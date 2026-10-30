@@ -1,6 +1,7 @@
 //! Safe wrapper for unit `surface.surface_assert_valid`: the pinned virtual
 //! `SmSurface::AssertValid` on a real B-spline surface, plane, cylinder, cone, sphere,
-//! torus, surface of revolution or surface of extrusion built from plain data (block
+//! torus, surface of revolution, surface of extrusion or curve-bounded surface built
+//! from plain data (block
 //! layout in `harness/cpp/shim/surface_surface_assert_valid.cpp`).
 
 use crate::{call_with_buffer, FfiError};
@@ -190,13 +191,32 @@ fn internal_pole_indices(
 
 fn check(block: &[f64]) -> Result<(), FfiError> {
     let mut rd = Rd { v: block, at: 0 };
-    let kind = rd.int(0.0, 7.0)?;
+    let kind = rd.int(0.0, 8.0)?;
     let level = rd.int(0.0, 4.0)?;
     if level == 3 {
         return Err(bad("level"));
     }
     let make = rd.flag()?;
-    if kind == 0 {
+    if kind == 8 {
+        rd.flag()?; // report list supplied
+        rd.int(1.0, 8.0)?; // nesting is bounded in both builders
+        rd.vec()?;
+        let x = rd.vec()?;
+        let y = rd.vec()?;
+        axes(x, y)?;
+        rd.num()?;
+        rd.num()?;
+        rd.dom()?;
+        let n3d = rd.int(0.0, 8.0)?;
+        let nuv = rd.int(0.0, 8.0)?;
+        rd.flag()?;
+        for _ in 0..n3d + nuv {
+            rd.int(2.0, 3.0)?;
+            rd.flag()?;
+            rd.vec()?;
+            rd.vec()?;
+        }
+    } else if kind == 0 {
         let p = rd.int(1.0, 5.0)?;
         let q = rd.int(1.0, 5.0)?;
         let nu = rd.int(2.0, 32.0)?;

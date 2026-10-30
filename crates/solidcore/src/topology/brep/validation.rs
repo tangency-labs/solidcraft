@@ -19,6 +19,7 @@
 //! requests and run tests whose level is at most the requested level, as upstream.
 
 mod assert_valid;
+pub(crate) use assert_valid::standalone_curve_assert_valid;
 mod coincidence;
 mod pointers;
 pub(crate) mod spatial;

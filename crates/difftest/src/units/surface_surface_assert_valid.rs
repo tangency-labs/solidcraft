@@ -1,6 +1,6 @@
 //! Runner for unit `surface.surface_assert_valid`: the virtual `SmSurface::AssertValid`
 //! on real B-spline surfaces, planes, cylinders, cones, spheres, tori, surfaces of
-//! revolution and surfaces of extrusion.
+//! revolution, surfaces of extrusion and curve-bounded surfaces.
 //!
 //! C++: `solidcore_ffi::units::surface_surface_assert_valid` (shim
 //! `harness/cpp/shim/surface_surface_assert_valid.cpp`, which documents the block).
@@ -20,6 +20,14 @@
 //! along the extrusion and stale cached planes and lines, at huge and tiny scales. The
 //! named extrusion fixtures (`fixtures/surface.surface_assert_valid/extrusion.json`) cover
 //! every generator orientation with and without a tangent along the extrusion.
+//! Curve-bounded `cbdNNNN` cases use a separate seed stream, nested plane bases,
+//! actual composite boundary curves and optional null report lists. A failed
+//! boundary report with a non-null list is guarded in C++: its global label lookup
+//! omits CurveBoundedSurface and would index past the one-entry default table.
+//! Defined basis-failure reports retain that default label and are compared.
+//! The inherited base check at levels 0..2 reads unwritten continuity outputs
+//! (generic GetKnots fails); the native guard probes initialized outputs and
+//! rejects that undefined path. Most new draws use LEVEL_GIVEN, which skips it.
 
 // The generator indexes the nets and knot vectors it has just built (as other runners do).
 #![allow(clippy::indexing_slicing)]
@@ -28,6 +36,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use solidcore::curve::curve::Curve;
+use solidcore::curve::composite_curve::CompositeCurve;
+use solidcore::surface::curve_bounded_surface::CurveBoundedSurface;
+use solidcore::geom::object::ObjectRef;
 use solidcore::geom::assert_array::{AssertArray, ObjectKey};
 use solidcore::geom::extent2d::Extent2d;
 use solidcore::geom::vector2d::Vec2;
@@ -95,7 +106,11 @@ fn cpp(i: &Inputs) -> Result<Output, HarnessError> {
         Ok(v) => Ok(output(v)),
         Err(solidcore_ffi::FfiError::InvalidArgument(r)) => Ok(Output::rejected(r)),
         Err(solidcore_ffi::FfiError::Status(solidcore_ffi::SC_ERR_ARG)) => Ok(Output::rejected(
-            "CreateIsoBoundaries fails: sm_AssertTestSurface6 reads uninitialised curves",
+            if i.block.first() == Some(&8.0) {
+                "curve-bounded native guard: unwritten base continuity, missing boundary report labels, or uninitialised iso curves"
+            } else {
+                "CreateIsoBoundaries fails: sm_AssertTestSurface6 reads uninitialised curves"
+            },
         )),
         Err(e) => Err(herr(e)),
     }
@@ -151,6 +166,55 @@ fn generator(rd: &mut Rd<'_>) -> Result<Curve, HarnessError> {
 }
 
 fn build(k: &Kernel, rd: &mut Rd<'_>, kind: usize) -> Result<Surface, HarnessError> {
+    if kind == 8 {
+        let depth = rd.int()?;
+        let o = rd.vec()?;
+        let x = rd.vec()?;
+        let y = rd.vec()?;
+        let scale = Vec2::new(rd.num()?, rd.num()?);
+        let domain = rd.dom()?;
+        let n3d = rd.int()?;
+        let nuv = rd.int()?;
+        let implicit = rd.flag()?;
+        let mut boundaries_3d = Vec::new();
+        let mut boundaries_uv = Vec::new();
+        for index in 0..n3d + nuv {
+            let dim = rd.int()?;
+            let bad_owner = rd.flag()?;
+            let a = rd.vec()?;
+            let b = rd.vec()?;
+            let points = vec![CPoint::new(a.x, a.y, a.z, NOW), CPoint::new(b.x, b.y, b.z, NOW)];
+            let segment = Curve::from(BSplineCurve::from_nurb(
+                NlCurve::new(points, 1, vec![0.0, 0.0, 1.0, 1.0]).map_err(herr)?,
+                dim as u64, false,
+            ));
+            let mut boundary = Curve::from(CompositeCurve::with_curves(
+                dim as u64, vec![segment], false, None, None,
+            ).map_err(herr)?);
+            if bad_owner {
+                boundary.set_owner(Some(ObjectRef {
+                    type_code: solidcore::geom::assert_array::labels::PLANE_TYPE,
+                    key: solidcore::geom::attribute::ObjectKey(9000),
+                }), None);
+            }
+            if index < n3d {
+                boundaries_3d.push(boundary);
+            } else {
+                boundaries_uv.push(boundary);
+            }
+        }
+        let mut basis = Surface::from(Plane::new(o, x, y, scale, &domain));
+        for index in 0..depth {
+            let outer = index + 1 == depth;
+            basis = Surface::from(CurveBoundedSurface::new(
+                basis,
+                if outer { std::mem::take(&mut boundaries_3d) } else { Vec::new() },
+                if outer { std::mem::take(&mut boundaries_uv) } else { Vec::new() },
+                implicit,
+            ).map_err(herr)?);
+        }
+        return Ok(basis);
+    }
     if kind == 7 {
         let origin = rd.vec()?;
         let vec = rd.vec()?;
@@ -256,6 +320,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
     let kind = rd.int()?;
     let level = rd.int()?;
     let make = rd.flag()?;
+    let want_reports = if kind == 8 { rd.flag()? } else { true };
     let mut surface = build(&k, &mut rd, kind)?;
     if make {
         // MakeNurb (status ignored)
@@ -273,7 +338,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
             SurfaceKind::Plane(p) => {
                 let _ = p.base_with_nurb();
             }
-            SurfaceKind::BSpline(_) => {}
+            SurfaceKind::BSpline(_) | SurfaceKind::CurveBounded(_) => {}
             _ => {
                 if let Err(e) = surface.kind_with_nurb(&k) {
                     if let Some(o) = Output::unported(&e) {
@@ -285,7 +350,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
     }
     let mut reports = AssertArray::new();
     let level = u8::try_from(level).map_err(herr)?;
-    let ok = match surface.assert_valid(&k, Some(&mut reports), level, ObjectKey(1)) {
+    let ok = match surface.assert_valid(&k, want_reports.then_some(&mut reports), level, ObjectKey(1)) {
         Ok(ok) => ok,
         Err(e) => {
             return Ok(Output::unported(&e).unwrap_or_else(|| Output::err(e.to_string())));
@@ -769,6 +834,33 @@ fn gen_case_with(rng: &mut Rng, extra: Extra) -> Inputs {
     Inputs { block: b }
 }
 
+/// Curve-bounded cases have their own stream, preserving every legacy input.
+fn gen_curve_bounded_case(rng: &mut Rng) -> Inputs {
+    let level_draw = rng.below(18);
+    let level = if level_draw < 15 { 4.0 } else { (level_draw - 15) as f64 };
+    let want_reports = flag(rng, 0.6);
+    let depth = 1 + rng.below(3);
+    let mut b = vec![8.0, level, flag(rng, 0.5), want_reports, depth as f64];
+    let scale = scale(rng);
+    frame(rng, &mut b, scale);
+    let sx = scale * if rng.chance(0.3) { -1.0 } else { 1.0 };
+    let u0 = rng.uniform(-1.0, 0.2);
+    let v0 = rng.uniform(-1.0, 0.2);
+    b.extend([sx, scale, u0, v0, u0 + rng.uniform(0.1, 2.0), v0 + rng.uniform(0.1, 2.0)]);
+    let n3d = rng.below(4);
+    let nuv = rng.below(4);
+    b.extend([n3d as f64, nuv as f64, flag(rng, 0.5)]);
+    for index in 0..n3d + nuv {
+        let dim = if index < n3d { 3.0 } else { 2.0 };
+        b.extend([dim, flag(rng, 0.12)]);
+        let x = rng.uniform(-1.0, 1.0) * scale;
+        let y = rng.uniform(-1.0, 1.0) * scale;
+        let z = if dim == 3.0 { rng.uniform(-1.0, 1.0) * scale } else { 0.0 };
+        b.extend([x, y, z, x + scale, y + scale * 0.5, z]);
+    }
+    Inputs { block: b }
+}
+
 impl UnitDiff for Runner {
     fn id(&self) -> &'static str {
         "surface.surface_assert_valid"
@@ -797,15 +889,11 @@ impl UnitDiff for Runner {
             c.unit = self.id().to_string();
             v.push(c);
         }
-        // overfull knots and past-pole spheres: their own seed stream too; `ovfNNNN`
-        let ovf = CaseContext {
-            seeds: ctx.seeds.max(OVERFULL_CASES),
-            ..ctx.clone()
-        };
-        for mut c in ovf.generated_cases("surface.surface_assert_valid:overfull", |rng| {
-            serde_json::to_value(gen_overfull_case(rng)).ok()
+        let cb = CaseContext { seeds: ctx.seeds.max(400), ..ctx.clone() };
+        for mut c in cb.generated_cases("surface.surface_assert_valid:curve-bounded", |rng| {
+            serde_json::to_value(gen_curve_bounded_case(rng)).ok()
         }) {
-            c.name = c.name.replacen("gen", "ovf", 1);
+            c.name = c.name.replacen("gen", "cbd", 1);
             c.unit = self.id().to_string();
             v.push(c);
         }
