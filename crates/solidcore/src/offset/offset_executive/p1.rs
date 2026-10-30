@@ -901,7 +901,7 @@ impl OffsetExecutive {
     /// `RemoveExcessFaces`' forgetting of the removed faces: `m_vFUToF`, `m_vEToF`,
     /// `m_vVToF` and `m_vBlendToFaces` forget the pairs whose second is gone, and
     /// `m_vBlendToFaces` also those whose first is gone.
-    fn forget_faces(&mut self, gone: &BTreeSet<FaceId>) -> Result<()> {
+    pub(super) fn forget_faces(&mut self, gone: &BTreeSet<FaceId>) -> Result<()> {
         forget_seconds(&mut self.faceuse_to_faces, gone, None)?;
         forget_seconds(&mut self.edge_to_faces, gone, None)?;
         forget_seconds(&mut self.vertex_to_faces, gone, None)?;
@@ -3062,7 +3062,7 @@ fn notify_edge_and_vertices(
 
 /// `sm_ForgetSeconds`: forgets the pairs of `relation` whose second is in `gone` or,
 /// with `live`, is not in `live`.
-fn forget_seconds<A: Ord + Copy, B: Ord + Copy>(
+pub(super) fn forget_seconds<A: Ord + Copy, B: Ord + Copy>(
     relation: &mut Relation<A, B>,
     gone: &BTreeSet<B>,
     live: Option<&BTreeSet<B>>,

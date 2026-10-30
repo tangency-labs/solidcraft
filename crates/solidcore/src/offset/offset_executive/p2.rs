@@ -778,7 +778,7 @@ impl OffsetExecutive {
             let step_walls = kernel.fixes.local_operation_step_walls
                 && self.operation() == OffsetOperation::LocalOperation;
             if step_walls {
-                self.close_loop_gaps(kernel, notifications)?;
+                self.close_loop_gaps(kernel, original, notifications)?;
             }
 
             // Not upstream (WR-531), opt-in `Kernel::fixes.offset_point_vertex_caps` (the

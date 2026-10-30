@@ -1,5 +1,5 @@
 //! The loop gaps an extended offset leaves and their closing edges (opt-in, fork
-//! tangency-labs/smlib 5d428ae, 7ff0a94, 34318f4).
+//! tangency-labs/smlib 5d428ae, 7ff0a94, 34318f4, ccbf77a).
 //!
 //! Upstream: the SolidCraft fork's `source/SMLib/src/SmOffsetExecutive.cpp` (not in the
 //! pinned SMLib).
@@ -14,10 +14,14 @@
 //! on every return. `MakeVertexSplitEdge`'s `SM_ERR` (a split refused near an end) is a
 //! successful Rust return with `split == false`; it fails here as the fork's `SER` does.
 //! `GetCreateExtendedSurface` keys the face's surface by the result identity of its face,
-//! as the executive's edge offsets do. Bounds: each face's gap search stops with `SM_ERR`
+//! as the executive's edge offsets do. The fork's `m_sClosedEdgeFaces` /
+//! `m_sClosedEdgeAcross` (ccbf77a), filled by `CloseLoopGap` and read once at the end of
+//! the same `CloseLoopGaps`, are one local list of pairs. Bounds: each face's gap search stops with `SM_ERR`
 //! after 64 passes (the fork's guard); the other loops run over finite lists.
 
-use super::p1::OffsetExecutive;
+use std::collections::BTreeSet;
+
+use super::p1::{forget_seconds, OffsetExecutive};
 use super::p2::OffsetNotifications;
 use crate::curve::curve::p1::GlobalPointSolveOptions;
 use crate::curve::curve::{Curve, CurveKind};
@@ -32,10 +36,11 @@ use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use crate::query::edge::closest_point;
 use crate::surface::surface::p4::{global_point_solve_starts, NoObject};
 use crate::topology::brep::p1 as bp1;
+use crate::topology::brep::p3::{delete_face_with_body_identity, squeeze_edge, DeleteFaceOptions};
 use crate::topology::brep::p9::make_vertex_split_edge_with_state;
 use crate::topology::edge::{self, NotificationStores, NotifyState, SetCurveOptions};
 use crate::topology::edgeuse::{p1 as eu, p3 as eu3};
-use crate::topology::face::{p2 as face2, p4 as face4};
+use crate::topology::face::{p2 as face2, p3 as face3, p4 as face4};
 use crate::topology::{vertexuse, Brep, EdgeId, EdgeuseId, FaceId, VertexId};
 
 const OP: &str = "offset::offset_executive::step_gaps";
@@ -107,15 +112,20 @@ impl OffsetExecutive {
     /// [`SM_ERR_OFFSET_EDGE_VANISHES`] where the vertex moved to or past the edge's other
     /// end; those of the evaluations, solves, curve edits
     /// and the split; [`SolidError::InvalidInput`] for missing topology.
+    ///
+    /// With `Kernel::fixes.local_operation_closes_walls_to_nothing` (fork ccbf77a) an edge
+    /// closed to a point is squeezed out instead, and once every gap is closed the faces
+    /// that closed to nothing with such edges are deleted (see `remove_closed_faces`).
     pub(super) fn close_loop_gaps(
         &mut self,
         kernel: &mut Kernel,
+        original: &Brep,
         notifications: &mut OffsetNotifications<'_>,
     ) -> Result<()> {
         let mut b = self
             .take_offset_brep()
             .ok_or_else(|| null("no offset B-rep"))?;
-        let r = self.close_loop_gaps_in(kernel, &mut b, notifications);
+        let r = self.close_loop_gaps_in(kernel, original, &mut b, notifications);
         self.set_offset_brep(b);
         r
     }
@@ -123,10 +133,14 @@ impl OffsetExecutive {
     fn close_loop_gaps_in(
         &mut self,
         kernel: &mut Kernel,
+        original: &Brep,
         b: &mut Brep,
         notifications: &mut OffsetNotifications<'_>,
     ) -> Result<()> {
         let approx_tol = self.approximation_tol_3d();
+        // (fork ccbf77a) each edge that closed to a point: its offset face and the original
+        // face across it
+        let mut closed_edges: Vec<(FaceId, Option<FaceId>)> = Vec::new();
         for f in bp1::faces(b, None)? {
             // Each gap closed changes the loop: look again until none is left (each gap
             // is closed once).
@@ -171,9 +185,31 @@ impl OffsetExecutive {
                         }
                         let sv = b.vertex(v)?.point;
                         if end.distance(sv) <= tol && start.distance(sv) > tol {
-                            self.close_loop_gap(kernel, b, f, next, true, sv, tol, notifications)?;
+                            self.close_loop_gap(
+                                kernel,
+                                original,
+                                b,
+                                f,
+                                next,
+                                true,
+                                sv,
+                                tol,
+                                notifications,
+                                &mut closed_edges,
+                            )?;
                         } else if start.distance(sv) <= tol && end.distance(sv) > tol {
-                            self.close_loop_gap(kernel, b, f, this, false, sv, tol, notifications)?;
+                            self.close_loop_gap(
+                                kernel,
+                                original,
+                                b,
+                                f,
+                                this,
+                                false,
+                                sv,
+                                tol,
+                                notifications,
+                                &mut closed_edges,
+                            )?;
                         } else {
                             return Err(sm_err());
                         }
@@ -183,7 +219,92 @@ impl OffsetExecutive {
                 }
             }
         }
+        if !closed_edges.is_empty() {
+            self.remove_closed_faces(kernel, original, b, &closed_edges, notifications)?;
+        }
         Ok(())
+    }
+
+    /// The end of the fork's `CloseLoopGaps` (ccbf77a, opt-in
+    /// `Kernel::fixes.local_operation_closes_walls_to_nothing`): the offset faces that
+    /// closed to nothing as their edges closed to points (`IsDegenerate`: a step's wall
+    /// whose low top moved onto the high top's plane, its edges along the tops now
+    /// coinciding) are deleted, in the order they closed, with their pairs in the
+    /// executive's relations; the merge joins the faces either side along their
+    /// coinciding edges. Every closed edge must be one of theirs or lie across from one of
+    /// them (the sides' edges along the wall).
+    ///
+    /// # Errors
+    ///
+    /// [`SM_ERR_OFFSET_EDGE_VANISHES`] for a closed edge of a face that did not close to
+    /// nothing and across from none that did (a face turned inside out past it); those of
+    /// `IsDegenerate`, the edge and face queries and `DeleteFace`.
+    fn remove_closed_faces(
+        &mut self,
+        kernel: &mut Kernel,
+        original: &Brep,
+        b: &mut Brep,
+        closed_edges: &[(FaceId, Option<FaceId>)],
+        notifications: &mut OffsetNotifications<'_>,
+    ) -> Result<()> {
+        // offset faces closed to nothing, in the order they closed, and the original faces
+        // they were offset from
+        let mut gone_list: Vec<FaceId> = Vec::new();
+        let mut gone: BTreeSet<FaceId> = BTreeSet::new();
+        let mut gone_orig: BTreeSet<FaceId> = BTreeSet::new();
+        for &(face, _) in closed_edges {
+            if gone.contains(&face) || !face3::is_degenerate(kernel, b, face, false, None)? {
+                continue;
+            }
+            gone.insert(face);
+            gone_list.push(face);
+            for fu in self.faceuse_to_faces.firsts(face) {
+                if let Some(orig) = eu::faceuse_face(original, fu)? {
+                    gone_orig.insert(orig);
+                }
+            }
+        }
+        for &(face, across) in closed_edges {
+            let explained = gone.contains(&face) || across.is_some_and(|a| gone_orig.contains(&a));
+            if !explained {
+                return Err(SolidError::Upstream {
+                    operation: OP,
+                    code: SM_ERR_OFFSET_EDGE_VANISHES,
+                    entity: None,
+                });
+            }
+        }
+        let mut gone_eus: BTreeSet<EdgeuseId> = BTreeSet::new();
+        let body = notifications.result_brep;
+        for &face in &gone_list {
+            for e in face4::edges(b, face, None, false, None)? {
+                gone_eus.extend(edge::edgeuses(b, e, None, None)?);
+            }
+            let mut stores = NotificationStores {
+                records: &mut *notifications.records,
+                attributes: &mut *notifications.attributes,
+                key_of: notifications.result_key_of,
+            };
+            NotifyState::from_kernel_stores(&mut stores).with_kernel_env(
+                kernel,
+                |kernel, env| {
+                    delete_face_with_body_identity(
+                        kernel,
+                        b,
+                        env,
+                        face,
+                        DeleteFaceOptions {
+                            delete_edges_vertices: true,
+                            do_region_nesting: true,
+                            region_to_keep: None,
+                        },
+                        body,
+                    )
+                },
+            )?;
+        }
+        forget_seconds(&mut self.edgeuse_to_edgeuses, &gone_eus, None)?;
+        self.forget_faces(&gone)
     }
 
     /// `CloseLoopGap(pFace, pEdgeuse, bAtStart, crVertexPoint, dTol)`: one gap closed
@@ -192,6 +313,7 @@ impl OffsetExecutive {
     fn close_loop_gap(
         &mut self,
         kernel: &mut Kernel,
+        original: &Brep,
         b: &mut Brep,
         f: FaceId,
         u: EdgeuseId,
@@ -199,6 +321,7 @@ impl OffsetExecutive {
         vertex_point: Point3,
         tol: f64,
         notifications: &mut OffsetNotifications<'_>,
+        closed_edges: &mut Vec<(FaceId, Option<FaceId>)>,
     ) -> Result<()> {
         let e = eu::edge(b, u)?.ok_or_else(|| null("edge use without edge"))?;
         let surface = b
@@ -232,8 +355,30 @@ impl OffsetExecutive {
                 };
                 let long_enough = keep.length() > EFF_ZERO * (1.0 + ivl.max_dimension());
                 if !long_enough {
-                    // (fork 34318f4) the vertex moved to the edge's other end or past it:
-                    // the edge vanishes, the face turns inside out
+                    // (fork ccbf77a, opt-in) the vertex moved to the edge's other end, where
+                    // the edge's other vertex is: the edge closed to a point. That is sound
+                    // only where a face closes to nothing with it, which `close_loop_gaps`
+                    // checks once every gap is closed. The edge is squeezed out, its two
+                    // vertices one, and noted with the original face across it.
+                    if kernel.fixes.local_operation_closes_walls_to_nothing
+                        && self.squeeze_closed_edge(
+                            kernel,
+                            original,
+                            b,
+                            f,
+                            u,
+                            e,
+                            at_start,
+                            vertex_point,
+                            tol,
+                            notifications,
+                            closed_edges,
+                        )?
+                    {
+                        return Ok(());
+                    }
+                    // (fork 34318f4) elsewhere the vertex moved past the edge's end: the edge
+                    // vanishes, the face turns inside out
                     return Err(SolidError::Upstream {
                         operation: OP,
                         code: SM_ERR_OFFSET_EDGE_VANISHES,
@@ -305,6 +450,66 @@ impl OffsetExecutive {
         }
         output.vertex.ok_or_else(|| null("split without vertex"))?;
         Ok(())
+    }
+
+    /// `CloseLoopGap`'s closed edge (fork ccbf77a): when the edge's other vertex is at
+    /// `vertex_point`, the edge is squeezed into the vertex at the gap and noted with
+    /// `face` and the original face across it (`None` where the edge use maps to no single
+    /// original edge use); `false` (nothing done) otherwise.
+    #[allow(clippy::too_many_arguments)] // one fork branch
+    fn squeeze_closed_edge(
+        &mut self,
+        kernel: &mut Kernel,
+        original: &Brep,
+        b: &mut Brep,
+        face: FaceId,
+        u: EdgeuseId,
+        e: EdgeId,
+        at_start: bool,
+        vertex_point: Point3,
+        tol: f64,
+        notifications: &mut OffsetNotifications<'_>,
+        closed_edges: &mut Vec<(FaceId, Option<FaceId>)>,
+    ) -> Result<bool> {
+        let at = if at_start {
+            edgeuse_vertex(b, u)?
+        } else {
+            edgeuse_vertex(
+                b,
+                eu::mate(b, u)?.ok_or_else(|| null("edge use without mate"))?,
+            )?
+        };
+        let Some(far) = edge::other_vertex(b, e, Some(at))? else {
+            return Ok(false);
+        };
+        if far == at || b.vertex(far)?.point.distance(vertex_point) > tol {
+            return Ok(false);
+        }
+        let mut across = None;
+        let mut orig_eus = self.edgeuse_to_edgeuses.firsts(u);
+        if orig_eus.is_empty() {
+            let mate = eu::mate(b, u)?.ok_or_else(|| null("edge use without mate"))?;
+            orig_eus = self.edgeuse_to_edgeuses.firsts(mate);
+        }
+        if let [orig_eu] = orig_eus.as_slice() {
+            let orig_edge =
+                eu::edge(original, *orig_eu)?.ok_or_else(|| null("edge use without edge"))?;
+            let orig_face = eu::face(original, *orig_eu)?;
+            for of in edge::faces(original, orig_edge, None)? {
+                if Some(of) != orig_face {
+                    across = Some(of);
+                }
+            }
+        }
+        let mut stores = NotificationStores {
+            records: &mut *notifications.records,
+            attributes: &mut *notifications.attributes,
+            key_of: notifications.result_key_of,
+        };
+        NotifyState::from_kernel_stores(&mut stores)
+            .with_kernel_env(kernel, |kernel, env| squeeze_edge(kernel, b, env, e, at))?;
+        closed_edges.push((face, across));
+        Ok(true)
     }
 
     /// `SplitEdgesAtStepCorners` (fork 7ff0a94, opt-in
