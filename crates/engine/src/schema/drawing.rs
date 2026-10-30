@@ -9,8 +9,9 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct TemplateApplyParams {
-    /// The template's name, as `drawing.template.list` lists it. Its sheet in each sheet's place
-    /// is applied, its last for the sheets past its own.
+    /// A built-in's name, as `drawing.template.list` lists it, or a .json template file
+    /// (`drawing.template.save`). Its sheet in each sheet's place is applied, its last for the
+    /// sheets past its own.
     pub template: String,
     /// True to answer what would change without changing anything. Default: false.
     #[serde(default, deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]
@@ -42,6 +43,28 @@ pub struct TemplateApplyResult {
     pub outside: Vec<super::drawing_view::OutsideResult>,
     /// Whether the call only answered, changing nothing.
     pub dry_run: bool,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
+/// Write the drawing open as a template file: its sheets, borders, title blocks and the text typed
+/// over their cells, its projection, units, language and properties, and nothing it draws or
+/// documents.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct TemplateSaveParams {
+    /// The file to write: a .json path, at most 4096 bytes long.
+    pub path: String,
+}
+
+/// What `drawing.template.save` returns.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct TemplateSaveResult {
+    /// The file written.
+    pub path: String,
+    /// How many bytes it holds.
+    pub bytes: usize,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,
