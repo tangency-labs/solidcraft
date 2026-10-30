@@ -423,14 +423,20 @@ fn put_tags(o: &mut Vec<f64>, b: &Brep) -> SolidResult<()> {
     Ok(())
 }
 
-/// Drops what the comparison does not record: the faces' `loops` lists (Rust-only
-/// logical records the native export walk never has, so the import leaves them empty).
-/// The edge uses' UV trim curves are compared through the geometry record (sampled on
-/// both sides as stored, `m_pUVTrimCurve`; nothing is made).
+/// Drops what the comparison does not record: the faces' `loops` and the loops' `edges`
+/// lists (Rust-only logical records the native export walk never has, so the import
+/// leaves them empty; `local_operation` refreshes them before it returns, as
+/// `topology.brep_mirror`'s `clear_logical_lists` clears both). The edge uses' UV trim
+/// curves are compared through the geometry record (sampled on both sides as stored,
+/// `m_pUVTrimCurve`; nothing is made).
 fn strip_unrecorded(b: &mut Brep) -> SolidResult<()> {
     let faces: Vec<_> = b.faces().ids().collect();
     for id in faces {
         b.face_mut(id)?.loops.clear();
+    }
+    let loops: Vec<_> = b.loops().ids().collect();
+    for id in loops {
+        b.loop_mut(id)?.edges.clear();
     }
     Ok(())
 }

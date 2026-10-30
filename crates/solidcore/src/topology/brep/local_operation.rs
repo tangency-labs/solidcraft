@@ -22,7 +22,9 @@
 //! recursion is introduced here. Opt-in (WR-534,
 //! `Kernel::fixes.local_operation_box_holds_new_surfaces`, the fork's
 //! tangency-labs/smlib@a1ee273): the box that sizes the executive's offset distance also
-//! holds the replacement surfaces.
+//! holds the replacement surfaces. (not upstream) The B-rep's cached topology fields are
+//! refreshed before the operation returns ([`Brep::refresh_cached_topology`]), as every
+//! public operation leaves them.
 
 use std::collections::BTreeSet;
 
@@ -193,6 +195,8 @@ pub fn local_operation(
     b.set_editing_enabled(true);
     let moved = move_faces(k, b, &mut new_brep);
     b.set_editing_enabled(editing);
+    // (not upstream: the port's cached topology fields, true again for the caller)
+    b.refresh_cached_topology();
     moved
 }
 
@@ -337,6 +341,8 @@ mod tests {
         })
         .unwrap();
         assert_eq!(bp1::faces(&b, None).unwrap().len(), 6);
+        // the cached topology fields agree with the links (the public integrity check)
+        crate::topology::integrity::check(&b).unwrap();
         let e = calculate_bounding_box(&k, &mut b, BoundingBoxOptions::default()).unwrap();
         // the box carries the body's tolerance
         let near = |a: f64, b: f64| (a - b).abs() < 1e-4;
