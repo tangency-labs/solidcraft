@@ -36,7 +36,8 @@
 //!   test (`m_pCurve == rOther.m_pCurve`) therefore becomes the base curves'
 //!   `operator==`. The ownership flag is kept ([`OffsetCurve::owns_curve`]) for
 //!   callers that mirror upstream; the base curve's owner link back to the offset
-//!   curve (`SetOwner(this)`) is not modelled (the offset curve has no object key).
+//!   curve (`SetOwner(this)`) is recorded as [`OffsetCurve::base_linked`] (the
+//!   offset curve has no object key), which `AssertValid` reads.
 //!   The copy constructor's failure path for a base curve without `Copy` (upstream
 //!   then shares the pointer and deletes it twice) is a plain clone.
 //! - **`Clone`.** `Clone` is the copy constructor: a borrowed base curve becomes an
@@ -67,7 +68,7 @@
 //!   upstream and dropped). The base curve is read through
 //!   [`Curve::read_from_db`].
 //! - **Not ported here.** `WriteToDB`, `SetOffsetDistance`, `AssertValid`
-//!   (unused upstream), `GetMemoryUsed`, `Dump`, `GetBaseCurve`, `GetRootCurve`,
+//!   (ported with the other B-rep checks in `topology::brep::validation`), `GetMemoryUsed`, `Dump`, `GetBaseCurve`, `GetRootCurve`,
 //!   `GetOffsetDistance`, `GetOffsetNormal` and `GetMaxAnalyticDomain` are not part
 //!   of this unit; plain getters are provided for the data.
 //! - **Derivative order bound.** `Evaluate` returns [`SolidError::InvalidInput`] when
@@ -122,6 +123,11 @@ pub struct OffsetCurve {
     reversed: i32,
     /// Whether upstream would own (delete) the base curve (`m_bOwnsCurve`).
     owns_curve: i32,
+    /// Whether upstream's base curve names this object as its owner
+    /// (`m_pCurve->GetOwner() == this`): the constructor links an owned base and
+    /// `ReadFromDB` the base it reads; the copy constructor's copied (or shared) base
+    /// is not linked to the copy.
+    base_linked: bool,
 }
 
 impl Clone for OffsetCurve {
@@ -151,6 +157,7 @@ impl Clone for OffsetCurve {
             interval: self.interval,
             reversed: self.reversed,
             owns_curve: i32::from(self.owns_curve != 0),
+            base_linked: false,
         }
     }
 }
@@ -169,6 +176,7 @@ impl OffsetCurve {
             interval: self.interval,
             reversed: self.reversed,
             owns_curve: self.owns_curve,
+            base_linked: self.base_linked,
         }
     }
 
@@ -187,6 +195,7 @@ impl OffsetCurve {
             interval: self.interval,
             reversed: self.reversed,
             owns_curve: self.owns_curve,
+            base_linked: self.base_linked,
         })
     }
 
@@ -219,6 +228,8 @@ impl OffsetCurve {
             interval,
             reversed: 0,
             owns_curve: i32::from(owns_curve),
+            // if ( m_bOwnsCurve == TRUE ) { m_pCurve->SetOwner(this) ; }
+            base_linked: owns_curve,
         })
     }
 
@@ -235,6 +246,7 @@ impl OffsetCurve {
             interval: Extent1d::new(),
             reversed: UNSURE,
             owns_curve: UNSURE,
+            base_linked: false,
         }
     }
 
@@ -260,6 +272,7 @@ impl OffsetCurve {
             interval: self.interval,
             reversed: self.reversed,
             owns_curve: i32::from(self.owns_curve != 0),
+            base_linked: false,
         })
     }
 
@@ -303,6 +316,13 @@ impl OffsetCurve {
     #[must_use]
     pub const fn owns_curve(&self) -> i32 {
         self.owns_curve
+    }
+
+    /// Whether upstream's base curve names this object as its owner (see the
+    /// `base_linked` field).
+    #[must_use]
+    pub const fn base_linked(&self) -> bool {
+        self.base_linked
     }
 
     /// The base curve, or `SM_ERR_NULL_POINTER` for an empty curve (upstream
@@ -757,6 +777,7 @@ impl OffsetCurve {
         let _ = c.interval.set_min_max(ivl_min, ivl_max);
         c.reversed = reversed;
         c.owns_curve = 1;
+        c.base_linked = true;
         Ok(c)
     }
 

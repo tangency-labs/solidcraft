@@ -28,6 +28,7 @@ use serde_json::Value;
 use solidcore::curve::curve::p2::Curve;
 use solidcore::curve::hermite_curve::HermiteCurve;
 use solidcore::curve::offset_curve::OffsetCurve;
+use solidcore::geom::assert_array::{AssertArray, ObjectKey};
 use solidcore::geom::extent1d::Extent1d;
 use solidcore::geom::vector3d::Vec3;
 use solidcore::kernel::Kernel;
@@ -35,12 +36,14 @@ use solidcore::nurbs::b_spline_curve::BSplineCurve;
 use solidcore::nurbs::b_spline_curve_n_lib::TrimMode;
 use solidcore::nurbs::math::NOW;
 use solidcore::nurbs::nurbs_crv::allocate_nurb_curve;
+use solidcore::topology::brep::validation::curve_assert_valid;
 use solidcore::topology::database_io::{DatabaseReader, FileType};
 use solidcore::SolidError;
 use solidcore_ffi::units::curve_offset_curve::{self as ffi, Op};
 
 use crate::case::CaseContext;
 use crate::runner::default_cases;
+use crate::util::assert_reports::put_assert_reports;
 use crate::{Case, HarnessError, Output, Rng, UnitDiff};
 
 /// Generated cases per run, whatever `--seeds` says (it can only raise this).
@@ -154,6 +157,12 @@ enum OpIn {
         #[serde(rename = "type")]
         type_code: i64,
     },
+    /// `AssertValid` at `level` (0..2, 4 = `SM_LEVEL_GIVEN`), with or without a
+    /// report list; the reports as `crate::util::assert_reports` writes them.
+    AssertValid {
+        level: u8,
+        list: bool,
+    },
     ReadDb {
         binary: bool,
         version: u64,
@@ -257,6 +266,7 @@ fn op_of(op: &OpIn) -> Op {
         OpIn::Copy { .. } => Op::Copy,
         OpIn::CloneCtor { .. } => Op::CloneCtor,
         OpIn::IsKindOf { .. } => Op::IsKindOf,
+        OpIn::AssertValid { .. } => Op::AssertValid,
         OpIn::ReadDb { .. } => Op::ReadDb,
     }
 }
@@ -339,6 +349,7 @@ fn cpp_input(i: &Inputs) -> Result<(Op, Vec<f64>), HarnessError> {
         }
         OpIn::Copy { probes } | OpIn::CloneCtor { probes } => probe_block(&mut v, probes),
         OpIn::IsKindOf { type_code } => v.push(*type_code as f64),
+        OpIn::AssertValid { level, list } => v.extend([f64::from(*level), b(*list)]),
     }
     Ok((op, v))
 }
@@ -687,6 +698,13 @@ fn rust_op(k: &Kernel, i: &Inputs, o: &mut Vec<f64>) -> Result<(), SolidError> {
             o.push(0.0);
             o.push(b(c.is_kind_of(*type_code)));
         }
+        OpIn::AssertValid { level, list } => {
+            let mut reports = AssertArray::new();
+            let key = ObjectKey(1);
+            let ok = curve_assert_valid(k, &mut c, list.then_some(&mut reports), *level, key)?;
+            o.push(0.0);
+            put_assert_reports(o, ok, &reports, key);
+        }
         OpIn::ReadDb { .. } => {}
     }
     Ok(())
@@ -1010,6 +1028,20 @@ fn finish(mut i: Inputs) -> Option<Inputs> {
     Some(i)
 }
 
+/// Generated `assert_valid` cases (their own seed stream, `<unit>:assert_valid`).
+pub const ASSERT_VALID_CASES: usize = 300;
+
+/// An `assert_valid` case: a generated offset (owned or borrowed base, maybe an
+/// offset of an offset), any test level, with or without a report list.
+fn gen_assert_valid(rng: &mut Rng) -> Inputs {
+    let mut i = gen_case(rng);
+    i.op = OpIn::AssertValid {
+        level: *rng.choose(&[0u8, 1, 2, 4]).unwrap_or(&0),
+        list: rng.chance(0.8),
+    };
+    i
+}
+
 impl UnitDiff for Runner {
     fn id(&self) -> &'static str {
         "curve.offset_curve"
@@ -1039,11 +1071,25 @@ impl UnitDiff for Runner {
     }
 
     fn cases(&self, ctx: &CaseContext) -> Result<Vec<Case>, HarnessError> {
-        let ctx = CaseContext {
+        let main = CaseContext {
             seeds: ctx.seeds.max(MIN_GENERATED),
             ..ctx.clone()
         };
-        default_cases(self, &ctx)
+        let mut v = default_cases(self, &main)?;
+        // AssertValid with native report comparison: their own seed stream (the other
+        // generated cases are unchanged); named `avNNNN`
+        let av = CaseContext {
+            seeds: ctx.seeds.max(ASSERT_VALID_CASES),
+            ..ctx.clone()
+        };
+        for mut c in av.generated_cases("curve.offset_curve:assert_valid", |rng| {
+            serde_json::to_value(gen_assert_valid(rng)).ok()
+        }) {
+            c.name = c.name.replacen("gen", "av", 1);
+            c.unit = self.id().to_string();
+            v.push(c);
+        }
+        Ok(v)
     }
 
     fn run_cpp(&self, case: &Case) -> Result<Output, HarnessError> {

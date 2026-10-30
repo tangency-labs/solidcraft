@@ -11,7 +11,9 @@
 #include "sc_shim.h"
 
 #include "StdAfx.h"
+#include <SmAssertArray.h>
 #include <SmAxis2Placement.h>
+#include <SmBSplineCurve.h>
 #include <cmath>
 #include <SmBendVolume.h>
 #include <SmBSplineSurface.h>
@@ -25,6 +27,7 @@
 #include <SmSrfInVolume.h>
 #include <SmSurface.h>
 #include <SmTArray.h>
+#include <SmTol.h>
 #include <SmTransform.h>
 #include <SmTwistVolume.h>
 #include <SmUnbendVolume.h>
@@ -70,6 +73,7 @@ enum : int32_t
     OP_MIRROR = 18,
     OP_EXACT = 19,
     OP_COPY_CTOR = 20, // the copy constructor: SmSrfInVolume(const SmSrfInVolume&)
+    OP_ASSERT_VALID = 21,
     OP_READ_DB = 40,  // static: SmSrfInVolume::ReadFromDB
     OP_WRITE_DB = 41, // generator helper: WriteToDB of the object
 };
@@ -434,6 +438,56 @@ void put_derivs(std::vector<double>& o, const SmVector3d* d, ULONG hu, ULONG hv,
                 put_vec(o, d[i * (hv + 1) + j]);
 }
 
+// A refused actual state (never an SMLib result): the entry point returns SC_ERR_ARG.
+struct SivUnsafeInput
+{
+};
+
+// A report text as `len chars...`.
+void av_text(std::vector<double>& o, const TCHAR* text)
+{
+    std::vector<double> t;
+    for (const TCHAR* p = text; p && *p; p++)
+        t.push_back((double)*p);
+    o.push_back((double)t.size());
+    o.insert(o.end(), t.begin(), t.end());
+}
+
+// A report object: 0 null, 1 the checked object, 9 another.
+double av_id(const void* p, const SmSurface* s)
+{
+    if (p == NULL)
+        return 0.0;
+    return p == s ? 1.0 : 9.0;
+}
+
+// The inherited SmSurface::AssertValid (levels 0..2) ignores two statuses and reads
+// what the failed call left (undefined): sm_AssertTestSurface6 the iso curves of a
+// failed CreateIsoBoundaries, sm_AssertTestSurface4 the continuity minima of a
+// CalculateContinuities that failed before writing them. Whether `s` reaches either.
+bool base_check_reads_unwritten(const SmContext& ctx, SmSurface* s)
+{
+    SmApproxTol3d tol = SmTol::GetApproxTol3d(s);
+    for (int ii = 0; ii < 2; ii++)
+    {
+        SmSurfParamType dir = ii == 1 ? SM_SP_V : SM_SP_U;
+        if (s->IsClosed(s->GetNaturalUVDomain(), dir))
+            continue;
+        SmBSplineCurve *c1 = NULL, *c2 = NULL;
+        SmStatus st = s->CreateIsoBoundaries(ctx, dir, tol, c1, c2);
+        bool good = st == SM_SUCCESS && c1 != NULL && c2 != NULL;
+        delete c1;
+        delete c2;
+        if (!good)
+            return true;
+    }
+    SmContinuityType min_u = SM_CT_G1, min_v = SM_CT_G1;
+    SmTArray<SmContinuityType> cu(ctx), cv(ctx);
+    SmStatus su = s->CalculateContinuities(SM_SP_U, min_u, cu);
+    SmStatus sv = s->CalculateContinuities(SM_SP_V, min_v, cv);
+    return (su != SM_SUCCESS && cu.GetSize() == 0) || (sv != SM_SUCCESS && cv.GetSize() == 0);
+}
+
 void siv_op(int32_t op, Rd& rd, const SmContext& ctx, Built& bb, std::vector<double>& o)
 {
     SmSrfInVolume* c = bb.siv;
@@ -746,6 +800,38 @@ void siv_op(int32_t op, Rd& rd, const SmContext& ctx, Built& bb, std::vector<dou
         delete b;
         break;
     }
+    case OP_ASSERT_VALID:
+    {
+        int64_t level = rd.idx();
+        // the base surface's own check runs the inherited SmSurface tests below
+        // SM_LEVEL_GIVEN (this class has no base-class call)
+        if (level != SM_LEVEL_GIVEN && base_check_reads_unwritten(ctx, c->GetSurface()))
+            throw SivUnsafeInput{};
+        SmAssertArray reports;
+        SmSurface* srf = c;
+        SmBoolean ok = srf->AssertValid(&reports, (SmAssertTestLevel)level, SM_NO_WALK);
+        o.push_back(0.0);
+        o.push_back(ok ? 1.0 : 0.0);
+        o.push_back((double)reports.GetSize());
+        for (ULONG i = 0; i < reports.GetSize(); i++)
+        {
+            SmAssertReport* r = reports[i];
+            o.insert(o.end(), {(double)r->m_lReportingType, (double)r->m_lListIndex,
+                               (double)r->m_lTestIndex, (double)r->m_eAssertType, r->m_bOK ? 1.0 : 0.0});
+            o.push_back(av_id(r->m_pReporter, c));
+            o.push_back(av_id(r->m_pOwner, c));
+            o.push_back(av_id(r->m_pOther, c));
+            o.insert(o.end(), {(double)r->m_lOwnerType, (double)r->m_lOtherType, (double)r->m_sTol3d,
+                               r->m_dValue, r->m_dDist3d});
+            av_text(o, r->m_pName);
+            av_text(o, r->m_pMessage);
+            av_text(o, r->m_pMessageForFile);
+            av_text(o, r->m_sOwnerTypeString);
+            av_text(o, r->m_sOtherTypeString);
+        }
+        o.push_back(reports.GetLastAdd() ? 1.0 : 0.0);
+        break;
+    }
     case OP_WRITE_DB:
     {
         // generator helper: the bytes upstream WriteToDB produces (ASCII with 17 digits)
@@ -810,7 +896,15 @@ SC_EXPORT int32_t sc_surface_srf_in_volume_eval(int32_t op, const double* in, in
         return sc_copy_out(o.data(), (int64_t)o.size(), out, cap, out_len);
     }
     Built b = read_siv(rd, ctx);
-    siv_op(op, rd, ctx, b, o);
+    try
+    {
+        siv_op(op, rd, ctx, b, o);
+    }
+    catch (const SivUnsafeInput&)
+    {
+        free_siv(b);
+        return SC_ERR_ARG;
+    }
     free_siv(b);
     return sc_copy_out(o.data(), (int64_t)o.size(), out, cap, out_len);
     SC_CATCH

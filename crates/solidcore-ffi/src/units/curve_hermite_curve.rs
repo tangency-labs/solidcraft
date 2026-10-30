@@ -89,6 +89,8 @@ pub enum Op {
     /// Accepted for finite vectors and versions up to 1000 (a non-finite ASCII value is
     /// written as text the reader cannot extract).
     WriteRead = 11,
+    /// `AssertValid(list or NULL, level n, SM_NO_WALK)` (flags bit 0: with a list).
+    AssertValid = 12,
 }
 
 /// Curve description.
@@ -119,6 +121,18 @@ pub struct Operands {
     pub file_type: i32,
 }
 
+impl Built {
+    /// The dimension the construction gives the curve.
+    #[must_use]
+    pub const fn effective_dim(&self) -> u32 {
+        match self.kind {
+            Kind::ThreeDDefault => 3,
+            Kind::TwoDDefault => 2,
+            Kind::ThreeD | Kind::TwoD => self.dim,
+        }
+    }
+}
+
 /// Run `op` on curves `a`, `b` with operands `x`.
 pub fn op(op: Op, a: &Built, b: &Built, x: &Operands) -> Result<Vec<f64>, FfiError> {
     match op {
@@ -140,6 +154,23 @@ pub fn op(op: Op, a: &Built, b: &Built, x: &Operands) -> Result<Vec<f64>, FfiErr
         {
             return Err(FfiError::InvalidArgument(
                 "write_read: version or non-finite value".into(),
+            ))
+        }
+        Op::AssertValid if !matches!(x.n, 0..=2 | 4) => {
+            return Err(FfiError::InvalidArgument("assert_valid: test level".into()))
+        }
+        // a failed test 1 ("Power Basis Vector is uninitialized") with a report list
+        // reads past the one-entry default label table (no Hermite table is
+        // registered): only dimensions 2 and 3 with moderate 3D values keep the
+        // power basis defined
+        Op::AssertValid
+            if x.flags & 1 != 0
+                && !(a.effective_dim() == 2
+                    || (a.effective_dim() == 3
+                        && a.v.iter().flatten().all(|c| c.is_finite() && c.abs() <= 1e16))) =>
+        {
+            return Err(FfiError::InvalidArgument(
+                "assert_valid: undefined power basis reads past the label table".into(),
             ))
         }
         _ => {}

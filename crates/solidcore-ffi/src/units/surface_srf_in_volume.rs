@@ -41,6 +41,7 @@
 //! | `SetVolume`   | `SetVolume`                                | volume block `copy owns`      | state |
 //! | `Mirror`      | `CreateMirrorSurface`                      | `O X Y`                       | state of the mirrored surface |
 //! | `Exact`       | `MakeExactBSplineIfPossible`               |                               | on success: `made [surface]` |
+//! | `AssertValid` | `AssertValid(&list, level, SM_NO_WALK)` (virtual, through `SmSurface*`) | `level` (`0`, `1`, `2` or `4`) | `ok n` then per report `type list test assert_type ok reporter owner other owner_type other_type tol value dist3d name message message_for_file owner_string other_string` (texts `len chars...`; objects `0` null, `1` the object, `9` another), then `last_add` |
 //! | `WriteDb`     | `WriteToDB` (ASCII, 17 digits; a generator helper) | `version`            | the bytes |
 //! | `ReadDb`      | `SmSrfInVolume::ReadFromDB` (static, ASCII) | `version nb B[nb]` (no object block) | `made [state]` |
 //!
@@ -115,6 +116,9 @@ pub enum Op {
     Exact,
     /// The copy constructor `SmSrfInVolume(const SmSrfInVolume&)`, invoked directly.
     CopyCtor,
+    /// `AssertValid` (the shim refuses, at levels `0..=2`, a base surface whose
+    /// inherited `SmSurface` checks read outputs a failed call left unwritten).
+    AssertValid,
     /// `SmSrfInVolume::ReadFromDB` (static, ASCII).
     ReadDb = 40,
     /// `WriteToDB` of an object block (a generator helper).
@@ -435,6 +439,12 @@ fn validate_op(op: Op, rd: &mut Reader<'_>, c: &Block) -> Result<(), FfiError> {
             rd.flag()?;
         }
         Op::SwapUv | Op::MakeOwner | Op::Exact => {}
+        Op::AssertValid => {
+            let level = rd.index(4)?;
+            if level == 3 {
+                return Err(bad("assert valid level"));
+            }
+        }
         Op::Trim => {
             let [u0, v0, u1, v1] = [rd.finite()?, rd.finite()?, rd.finite()?, rd.finite()?];
             if let Some([a0, b0, a1, b1]) = c.domain {

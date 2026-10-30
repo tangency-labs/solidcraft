@@ -1,5 +1,6 @@
 //! Small conversions shared by the unit runners in [`crate::units`].
 
+pub mod assert_reports;
 #[cfg(feature = "cpp")]
 pub(crate) mod exact_curve;
 pub mod primitive;

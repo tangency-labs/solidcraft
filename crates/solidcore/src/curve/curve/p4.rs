@@ -1027,6 +1027,8 @@ pub fn assert_valid_base(
                 | super::p2::CRV_IN_VOLUME_TYPE
                 | super::p2::OFFSET_CURVE_TYPE
                 | super::p2::CRV_ON_SURF_TYPE
+                // IsKindOf(SmCrvOnSurf_TYPE) of an SmTangentField owner
+                | super::p2::TANGENT_FIELD_TYPE
         ) || (dim == 2 && o.type_code == labels::FACE_TYPE)
     });
     rtn &= if owner_ok {

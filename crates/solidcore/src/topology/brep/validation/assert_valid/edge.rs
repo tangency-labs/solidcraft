@@ -8,7 +8,7 @@
 //! | `edge` | `SmEdge::AssertValid` |
 //! | `assert_test_edge14` | `sm_AssertTestEdge14` |
 //! | `edgeuse` | `SmEdgeuse::AssertValid` |
-//! | `curve` | the virtual `SmCurve::AssertValid` (`m_pCurve->AssertValid`, `m_pUVTrimCurve->AssertValid`) |
+//! | `curve`, `curve_in_walk` | the virtual `SmCurve::AssertValid` (`m_pCurve->AssertValid`, `m_pUVTrimCurve->AssertValid`; the compound and Hermite overrides are in `curves`) |
 //!
 //! Deviations: the radial edge-use walks are bounded by the edge's use count (upstream
 //! loops forever on a non-loop edge use) and return
@@ -25,7 +25,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use super::{base, class, geometry_key, seams, Cx};
+use super::{base, class, curves, geometry_key, seams, Cx};
 use crate::curve::curve::{Curve, CurveKind};
 use crate::error::{EntityRef, Result};
 use crate::geom::assert_array::{AssertArray, ObjectKey};
@@ -56,6 +56,22 @@ pub(super) fn curve(
     key: ObjectKey,
     polar_key: ObjectKey,
     trim_surface: Option<&Surface>,
+) -> Result<bool> {
+    let mut walk = curves::Walk::new(key);
+    curve_in_walk(k, c, list, level, key, polar_key, trim_surface, &mut walk)
+}
+
+/// [`curve`] within the walk `walk` over an outer curve's contained objects.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn curve_in_walk(
+    k: &Kernel,
+    c: &mut Curve,
+    list: Option<&mut AssertArray>,
+    level: u8,
+    key: ObjectKey,
+    polar_key: ObjectKey,
+    trim_surface: Option<&Surface>,
+    walk: &mut curves::Walk,
 ) -> Result<bool> {
     let given = level == super::LEVEL_GIVEN;
     let owner = c.owner();
@@ -110,13 +126,13 @@ pub(super) fn curve(
                 },
             )
         }
-        CurveKind::Hermite(_) => seams::hermite_curve_assert_valid(k, c, list, level, key),
-        CurveKind::Projected(_) => seams::projected_curve_assert_valid(k, c, list, level, key),
-        CurveKind::Offset(_) => seams::offset_curve_assert_valid(k, c, list, level, key),
+        CurveKind::Hermite(_) => curves::hermite_curve(k, c, list, level, key),
+        CurveKind::Projected(_) => curves::projected_curve(k, c, list, level, key, walk),
+        CurveKind::Offset(_) => curves::offset_curve(k, c, list, level, key),
         CurveKind::CrvOnSurf(_) | CurveKind::TangentField(_) => {
-            seams::crv_on_surf_assert_valid(k, c, list, level, key)
+            curves::crv_on_surf(k, c, list, level, key, walk)
         }
-        CurveKind::CrvInVolume(_) => seams::crv_in_volume_assert_valid(k, c, list, level, key),
+        CurveKind::CrvInVolume(_) => curves::crv_in_volume(k, c, list, level, key, walk),
         // no override: SmCurve::AssertValid
         CurveKind::Iso(_) | CurveKind::Conic(_) | CurveKind::Composite(_) => {
             c.assert_valid(list, given, key)

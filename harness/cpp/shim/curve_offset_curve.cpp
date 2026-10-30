@@ -6,6 +6,7 @@
 // layout is documented (and validated) in crates/solidcore-ffi/src/units/curve_offset_curve.rs:
 //   curve ops:  op  base-block  spec  has_outer [spec]  args...
 //   READ_DB:    op  file_type version nb bytes[nb]  probes
+//   ASSERT_VALID: curve op with args `level with_list` (output: sc_assert_reports.h)
 //   WRITE_DB:   curve op with args `file_type version` (a fixture helper: upstream
 //               WriteToDB, not part of the unit)
 // base-block: 0 dim oob n p m cpts(x y z w) knots   (SmBSplineCurve(gw_CURVE*, dim, FALSE);
@@ -38,6 +39,7 @@
 #include <string>
 #include <vector>
 
+#include "sc_assert_reports.h"
 #include "sc_sm.h"
 
 using sc::Rd;
@@ -61,7 +63,8 @@ enum ScOcOp : int32_t
     OP_READ_DB = 10,
     OP_WRITE_DB = 11,
     OP_CLONE_CTOR = 12,
-    OP_LAST = 12,
+    OP_ASSERT_VALID = 13,
+    OP_LAST = 13,
 };
 
 double st(SmStatus s) { return s == SM_SUCCESS ? 0.0 : (double)s; }
@@ -419,6 +422,17 @@ int32_t run(int32_t op, Rd& rd, std::vector<double>& o)
         SM_TYPE t = (SM_TYPE)rd.idx();
         o.push_back(0.0);
         o.push_back(flg(c->IsKindOf(t)));
+        break;
+    }
+    case OP_ASSERT_VALID:
+    {
+        // level (0..2, 4 = SM_LEVEL_GIVEN), with a report list
+        SmAssertTestLevel level = (SmAssertTestLevel)rd.idx();
+        bool with_list = rd.flag();
+        SmAssertArray list;
+        SmBoolean ok = c->AssertValid(with_list ? &list : NULL, level, SM_NO_WALK, NULL);
+        o.push_back(0.0);
+        sc::put_assert_reports(o, ok, list, c);
         break;
     }
     default: return SC_ERR_ARG;

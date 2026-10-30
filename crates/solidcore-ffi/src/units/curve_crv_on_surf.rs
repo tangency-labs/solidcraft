@@ -132,6 +132,7 @@ pub enum ObjOp {
     Gap,
     State,
     CopyEval,
+    AssertValid,
 }
 
 impl ObjOp {
@@ -161,6 +162,7 @@ impl ObjOp {
             ObjOp::Gap => 19,
             ObjOp::State => 20,
             ObjOp::CopyEval => 21,
+            ObjOp::AssertValid => 22,
         }
     }
 
@@ -188,6 +190,7 @@ impl ObjOp {
             ObjOp::Gap,
             ObjOp::State,
             ObjOp::CopyEval,
+            ObjOp::AssertValid,
         ]
         .into_iter()
         .find(|o| i64::from(o.code()) == c)
@@ -205,6 +208,8 @@ impl ObjOp {
                 | ObjOp::Equal
                 | ObjOp::Copy
                 | ObjOp::CopyEval
+                // the UV curve's own box and the surface's checks
+                | ObjOp::AssertValid
         )
     }
 }
@@ -487,6 +492,12 @@ fn validate_op(op: ObjOp, rd: &mut Reader<'_>, c: &mut Block) -> Result<(), FfiE
             }
         }
         ObjOp::State | ObjOp::Nnk | ObjOp::Copy => {}
+        ObjOp::AssertValid => {
+            if rd.index(4)? == 3 {
+                return Err(bad("assert_valid: test level 3"));
+            }
+            rd.flag()?;
+        }
         ObjOp::Eval | ObjOp::CopyEval => {
             param(rd, c)?;
             rd.index(MAX_DERIVS)?;

@@ -92,6 +92,8 @@ pub enum Op {
     CloneCtor,
     Equal,
     Ends,
+    /// `AssertValid(list or NULL, level, SM_NO_WALK)`: args `level with_list`.
+    AssertValid,
     ReadDb,
 }
 
@@ -114,6 +116,7 @@ impl Op {
             Op::Equal => 11,
             Op::Ends => 12,
             Op::CloneCtor => 13,
+            Op::AssertValid => 14,
             Op::ReadDb => 20,
         }
     }
@@ -210,6 +213,9 @@ fn bspline(rd: &mut Reader<'_>) -> Result<Range, FfiError> {
 struct BaseBlock {
     range: Range,
     kind: usize,
+    /// A Hermite base whose power basis may be undefined (dimension 3 with a member
+    /// component beyond `1e16`).
+    hermite_big: bool,
 }
 
 /// A projected-curve block: the base curve block and the ownership flag (`0`
@@ -218,6 +224,8 @@ struct BaseBlock {
 struct Block {
     base: BaseBlock,
     owns: usize,
+    /// `SmProjectionType`.
+    ptype: usize,
 }
 
 /// A base curve block.
@@ -228,16 +236,22 @@ fn curve_block(rd: &mut Reader<'_>) -> Result<BaseBlock, FfiError> {
         return Err(bad("curve block: dimension must be 2 or 3"));
     }
     // 2: a B-spline whose raw knots are written back after construction
+    let mut hermite_big = false;
     let range = if kind == 0 || kind == 2 {
         rd.flag()?;
         bspline(rd)?
     } else {
         for _ in 0..4 {
-            rd.vec3()?;
+            let v = rd.vec3()?;
+            hermite_big |= dim == 3 && v.iter().any(|c| c.abs() > 1e16);
         }
         Range { a: 0.0, b: 1.0 }
     };
-    Ok(BaseBlock { range, kind })
+    Ok(BaseBlock {
+        range,
+        kind,
+        hermite_big,
+    })
 }
 
 /// A projected-curve block (see the module docs).
@@ -248,9 +262,9 @@ fn projected_block(rd: &mut Reader<'_>) -> Result<Block, FfiError> {
         rd.flag()?;
         rd.vec3()?;
     }
-    rd.index(3)?; // SmProjectionType
+    let ptype = rd.index(3)?; // SmProjectionType
     let owns = rd.index(2)?; // SmBoolean
-    Ok(Block { base, owns })
+    Ok(Block { base, owns, ptype })
 }
 
 /// A parameter within [`MAX_REL_DIST`] ranges of the curve's.
@@ -330,6 +344,18 @@ pub fn validate(op: Op, input: &[f64]) -> Result<(), FfiError> {
         Op::Equal => {
             if !rd.flag()? {
                 projected_block(&mut rd)?;
+            }
+        }
+        Op::AssertValid => {
+            if rd.index(4)? == 3 {
+                return Err(bad("assert_valid: test level 3"));
+            }
+            // the base curve's check (projection type known): a Hermite base's failed
+            // test 1 with a report list reads past the one-entry default label table
+            if rd.flag()? && c.ptype != 3 && c.base.hermite_big {
+                return Err(bad(
+                    "assert_valid: undefined Hermite power basis reads past the label table",
+                ));
             }
         }
     }

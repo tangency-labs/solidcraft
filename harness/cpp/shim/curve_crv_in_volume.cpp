@@ -46,6 +46,7 @@
 #include <string>
 #include <vector>
 
+#include "sc_assert_reports.h"
 #include "sc_sm.h"
 #include "sc_gw.h"
 
@@ -74,6 +75,7 @@ enum : int32_t
     OP_COPY_CTOR = 13,
     OP_READ_DB = 40,
     OP_EXACT = 41,
+    OP_ASSERT_VALID = 42,
 };
 
 // Map kinds of an OP_EXACT volume chain (as the surface.srf_in_volume shim).
@@ -659,6 +661,56 @@ void static_op(int32_t op, Rd& rd, const SmContext& ctx, std::vector<double>& o)
         }
         delete b;
         delete civ;
+        break;
+    }
+    case OP_ASSERT_VALID:
+    {
+        // `curve in_param copy owner has_cache [need nb B nc C] volume level with_list`:
+        // SmCrvInVolume(curve, in_param, volume chain, copy, owner) with the cache loaded,
+        // then AssertValid (output: sc_assert_reports.h)
+        Built b;
+        b.curve = read_exact_curve(rd, ctx);
+        bool in_param = rd.flag();
+        ULONG copy = (ULONG)rd.idx();
+        ULONG owner = (ULONG)rd.idx();
+        bool has_cache = rd.flag();
+        bool need = false;
+        SmTArray<double> br;
+        SmTArray<SmContinuityType> co;
+        if (has_cache)
+        {
+            need = rd.flag();
+            int64_t nb = rd.idx();
+            for (int64_t i = 0; i < nb; i++)
+                br.Add(rd.num());
+            int64_t nc = rd.idx();
+            for (int64_t i = 0; i < nc; i++)
+                co.Add((SmContinuityType)rd.idx());
+        }
+        SmVolume* head = read_volume(rd, ctx);
+        b.civ = new (ctx) ScCiv(*b.curve, in_param ? TRUE : FALSE, *head, copy, owner, &ctx);
+        if (has_cache)
+            b.civ->SetCache(need ? TRUE : FALSE, br, co);
+        SmAssertTestLevel level = (SmAssertTestLevel)rd.idx();
+        bool with_list = rd.flag();
+        SmAssertArray list;
+        SmBoolean ok = b.civ->AssertValid(with_list ? &list : NULL, level, SM_NO_WALK, NULL);
+        o.push_back(0.0);
+        sc::put_assert_reports(o, ok, list, (const SmCurve*)b.civ);
+        // free as free_civ does, with the chain head as the volume
+        SmCurve* cc = b.civ->GetCurve();
+        SmVolume* cv = b.civ->GetVolume();
+        bool civ_deletes_curve = b.civ->OwnsCurve() != FALSE;
+        bool civ_deletes_volume = b.civ->OwnsVolume() != FALSE;
+        if (cc != b.curve && !civ_deletes_curve)
+            delete cc;
+        if (!(cc == b.curve && civ_deletes_curve))
+            delete b.curve;
+        if (cv != head && !civ_deletes_volume)
+            delete cv;
+        if (!(cv == head && civ_deletes_volume))
+            delete head;
+        delete b.civ;
         break;
     }
     default: o.push_back((double)SC_ERR_ARG); break;

@@ -29,6 +29,7 @@
 //! | `Trim`       | `Trim(ivl, notify, FALSE)`                 | `a b mode` (0 `TRUE`, 1 `FALSE`, 2 `UNSURE`) | `a' b'` state |
 //! | `Transform`  | `Transform`                                | `O X Y has_scale S`     | state |
 //! | `ReadDb`     | `SmCrvInVolume::ReadFromDB` (static, ASCII) | `version nb B[nb]`     | `made [state]` |
+//! | `AssertValid` | `AssertValid` (static: builds its own object) | `curve in_param copy owner has_cache [need nb B nc C] volume level with_list` | the reports (`sc_assert_reports.h`) |
 //! | `Exact`      | `MakeExactBSplineIfPossible` (static: builds its own object) | `curve in_param volume` | `made [exact]` (on success) |
 //!
 //! A cache is `need nb B[nb] nc C[nc]`; a state is `owner_flag in_param` cache and the
@@ -100,6 +101,8 @@ pub enum Op {
     Transform,
     ReadDb,
     Exact,
+    /// `AssertValid` (static: builds its own object; see the module docs).
+    AssertValid,
 }
 
 impl Op {
@@ -123,6 +126,7 @@ impl Op {
             Op::CopyCtor => 13,
             Op::ReadDb => 40,
             Op::Exact => 41,
+            Op::AssertValid => 42,
         }
     }
 
@@ -383,7 +387,7 @@ fn validate_object_op(op: Op, rd: &mut Reader<'_>, c: &Block) -> Result<(), FfiE
             rd.flag()?;
             rd.vec3()?;
         }
-        Op::ReadDb | Op::Exact => return Err(bad("not an object op")),
+        Op::ReadDb | Op::Exact | Op::AssertValid => return Err(bad("not an object op")),
     }
     Ok(())
 }
@@ -399,6 +403,12 @@ fn nonzero3(rd: &mut Reader<'_>) -> Result<[f64; 3], FfiError> {
 
 /// An `Exact` curve block (see the module docs); returns whether it is a Hermite curve.
 fn exact_curve(rd: &mut Reader<'_>) -> Result<bool, FfiError> {
+    exact_curve_ext(rd).map(|(hermite, _)| hermite)
+}
+
+/// [`exact_curve`], also returning whether a Hermite curve may have an undefined power
+/// basis (dimension 3 with a member component beyond `1e16`).
+fn exact_curve_ext(rd: &mut Reader<'_>) -> Result<(bool, bool), FfiError> {
     let kind = rd.index(3)?;
     match kind {
         0 | 1 => {
@@ -406,20 +416,22 @@ fn exact_curve(rd: &mut Reader<'_>) -> Result<bool, FfiError> {
             if dim < 2 {
                 return Err(bad("curve block: dimension must be 2 or 3"));
             }
+            let mut big = false;
             if kind == 0 {
                 rd.flag()?;
                 bspline(rd)?;
             } else {
                 for _ in 0..4 {
-                    rd.vec3()?;
+                    let v = rd.vec3()?;
+                    big |= dim == 3 && v.iter().any(|c| c.abs() > 1e16);
                 }
             }
-            Ok(kind == 1)
+            Ok((kind == 1, big))
         }
         2 => {
             rd.vec3()?;
             rd.vec3()?;
-            Ok(false)
+            Ok((false, false))
         }
         _ => {
             rd.vec3()?;
@@ -444,7 +456,7 @@ fn exact_curve(rd: &mut Reader<'_>) -> Result<bool, FfiError> {
             if a0 < -360.0 || a1 > a0 + 360.0 || a1 <= a0 || a1 > 360.0 {
                 return Err(bad("circle: need -360 <= a0 < a1 <= a0 + 360"));
             }
-            Ok(false)
+            Ok((false, false))
         }
     }
 }
@@ -527,6 +539,35 @@ fn validate_static(op: Op, rd: &mut Reader<'_>) -> Result<(), FfiError> {
             let head_twist = volume(rd)?;
             if hermite && head_twist {
                 return Err(bad("exact: a twist copies the curve; a Hermite copy fails"));
+            }
+        }
+        Op::AssertValid => {
+            let (_, hermite_big) = exact_curve_ext(rd)?;
+            rd.flag()?; // in_param
+            // copy flag 0 or 1 (a volume chain's virtual Copy is not exercised)
+            rd.index(1)?;
+            rd.index(3)?; // owner flag
+            if rd.flag()? {
+                rd.flag()?;
+                let nb = rd.index(MAX_ARRAY)?;
+                for _ in 0..nb {
+                    rd.finite()?;
+                }
+                let nc = rd.index(MAX_ARRAY)?;
+                for _ in 0..nc {
+                    rd.int(0, 13)?;
+                }
+            }
+            volume(rd)?;
+            if rd.index(4)? == 3 {
+                return Err(bad("assert_valid: test level 3"));
+            }
+            // a Hermite base's failed test 1 with a report list reads past the
+            // one-entry default label table
+            if rd.flag()? && hermite_big {
+                return Err(bad(
+                    "assert_valid: undefined Hermite power basis reads past the label table",
+                ));
             }
         }
         _ => return Err(bad("not a static op")),

@@ -2,8 +2,8 @@
 //!
 //! Upstream: `source/SMLib/src/SmEdgeuse.cpp`, `SmBSplineCurve.cpp`, `SmLoopuse.cpp`,
 //! `SmVertex.cpp`, `SmShell.cpp`, `SmFace.cpp`, `SmEdge.cpp`, `SmSurface.cpp` (and the
-//! surface classes), `SmOffsetCurve.cpp`, `SmProjectedCurve.cpp`, `SmHermiteCurve.cpp`,
-//! `SmCrvOnSurf.cpp`, `SmCrvInVolume.cpp`.
+//! surface classes). The compound and Hermite curve checks, once seams here, are
+//! ported in `curves`.
 //!
 //! | Rust (private seam)          | Upstream                                  |
 //! |------------------------------|-------------------------------------------|
@@ -14,11 +14,6 @@
 //! | `is_inner_shell_of`          | `SmShell::IsInnerShellOf`                 |
 //! | `assert_test_face37`         | `sm_AssertTestFace37`                     |
 //! | `surface_assert_valid`       | `SmSurface::AssertValid` (virtual; wired) |
-//! | `offset_curve_assert_valid`  | `SmOffsetCurve::AssertValid`              |
-//! | `projected_curve_assert_valid` | `SmProjectedCurve::AssertValid`         |
-//! | `hermite_curve_assert_valid` | `SmHermiteCurve::AssertValid`             |
-//! | `crv_on_surf_assert_valid`   | `SmCrvOnSurf::AssertValid`                |
-//! | `crv_in_volume_assert_valid` | `SmCrvInVolume::AssertValid`              |
 //! | `assert_test_face32`         | `sm_AssertTestFace32`                     |
 //! | `assert_test_face33`         | `sm_AssertTestFace33`                     |
 //! | `assert_test_face38`         | `sm_AssertTestFace38`                     |
@@ -40,10 +35,6 @@ use crate::geom::assert_array::{AssertArray, ObjectKey};
 use crate::geom::extent2d::Extent2d;
 use crate::kernel::Kernel;
 use crate::topology::{Brep, EdgeId, EdgeuseId, FaceId, LoopuseId, ShellId, VertexId};
-
-fn unported(upstream: &'static str, unit: &'static str) -> SolidError {
-    SolidError::Unported { upstream, unit }
-}
 
 // ---- level-0 helpers (WP2, wired: #1472) ------------------------------------------------------------
 
@@ -117,76 +108,6 @@ pub(super) fn surface_assert_valid(
         "topology::brep::validation::assert_valid",
     ))?;
     surface.assert_valid(k, list, level, key)
-}
-
-/// `SmOffsetCurve::AssertValid` of `curve` (an offset curve), reporting about `key`.
-pub(super) fn offset_curve_assert_valid(
-    _k: &Kernel,
-    _curve: &mut Curve,
-    _list: Option<&mut AssertArray>,
-    _level: u8,
-    _key: ObjectKey,
-) -> Result<bool> {
-    // UNPORTED(curve.offset_curve): SmOffsetCurve::AssertValid
-    Err(unported("SmOffsetCurve::AssertValid", "curve.offset_curve"))
-}
-
-/// `SmProjectedCurve::AssertValid` of `curve` (a projected curve), reporting about `key`.
-pub(super) fn projected_curve_assert_valid(
-    _k: &Kernel,
-    _curve: &mut Curve,
-    _list: Option<&mut AssertArray>,
-    _level: u8,
-    _key: ObjectKey,
-) -> Result<bool> {
-    // UNPORTED(curve.projected_curve): SmProjectedCurve::AssertValid
-    Err(unported(
-        "SmProjectedCurve::AssertValid",
-        "curve.projected_curve",
-    ))
-}
-
-/// `SmHermiteCurve::AssertValid` of `curve` (a Hermite curve), reporting about `key`.
-pub(super) fn hermite_curve_assert_valid(
-    _k: &Kernel,
-    _curve: &mut Curve,
-    _list: Option<&mut AssertArray>,
-    _level: u8,
-    _key: ObjectKey,
-) -> Result<bool> {
-    // UNPORTED(curve.hermite_curve): SmHermiteCurve::AssertValid
-    Err(unported(
-        "SmHermiteCurve::AssertValid",
-        "curve.hermite_curve",
-    ))
-}
-
-/// `SmCrvOnSurf::AssertValid` of `curve` (a curve on surface or a tangent field, which
-/// inherits it), reporting about `key`.
-pub(super) fn crv_on_surf_assert_valid(
-    _k: &Kernel,
-    _curve: &mut Curve,
-    _list: Option<&mut AssertArray>,
-    _level: u8,
-    _key: ObjectKey,
-) -> Result<bool> {
-    // UNPORTED(curve.crv_on_surf): SmCrvOnSurf::AssertValid
-    Err(unported("SmCrvOnSurf::AssertValid", "curve.crv_on_surf"))
-}
-
-/// `SmCrvInVolume::AssertValid` of `curve` (a curve in volume), reporting about `key`.
-pub(super) fn crv_in_volume_assert_valid(
-    _k: &Kernel,
-    _curve: &mut Curve,
-    _list: Option<&mut AssertArray>,
-    _level: u8,
-    _key: ObjectKey,
-) -> Result<bool> {
-    // UNPORTED(curve.crv_in_volume): SmCrvInVolume::AssertValid
-    Err(unported(
-        "SmCrvInVolume::AssertValid",
-        "curve.crv_in_volume",
-    ))
 }
 
 // ---- level-2 tests (WP4) --------------------------------------------------------------

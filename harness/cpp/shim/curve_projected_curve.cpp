@@ -33,6 +33,7 @@
 #include <string>
 #include <vector>
 
+#include "sc_assert_reports.h"
 #include "sc_sm.h"
 #include "sc_gw.h"
 
@@ -105,6 +106,7 @@ enum : int32_t
     OP_EQUAL = 11,
     OP_ENDS = 12,
     OP_CLONE_CTOR = 13,
+    OP_ASSERT_VALID = 14,
     OP_READ_DB = 20,
 };
 
@@ -485,6 +487,17 @@ void curve_op(int32_t op, Rd& rd, const SmContext& ctx, Built& b, std::vector<do
         put_vec(o, bb);
         o.push_back(wa);
         o.push_back(wb);
+        break;
+    }
+    case OP_ASSERT_VALID:
+    {
+        // `level with_list` (output: sc_assert_reports.h)
+        SmAssertTestLevel level = (SmAssertTestLevel)rd.idx();
+        bool with_list = rd.flag();
+        SmAssertArray list;
+        SmBoolean ok = c->AssertValid(with_list ? &list : NULL, level, SM_NO_WALK, NULL);
+        o.push_back(0.0);
+        sc::put_assert_reports(o, ok, list, c);
         break;
     }
     default: o.push_back((double)SC_ERR_ARG); break;

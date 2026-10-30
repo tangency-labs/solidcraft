@@ -41,6 +41,7 @@ use serde_json::Value;
 use solidcore::curve::curve::p2::{Curve, CurveKind};
 use solidcore::curve::hermite_curve::HermiteCurve;
 use solidcore::curve::projected_curve::{OwnsCurve, ProjectedCurve};
+use solidcore::geom::assert_array::{AssertArray, ObjectKey};
 use solidcore::geom::axis2_placement::Axis2Placement;
 use solidcore::geom::extent1d::Extent1d;
 use solidcore::geom::vector3d::Vec3;
@@ -49,12 +50,14 @@ use solidcore::nurbs::b_spline_curve::{BSplineCurve, ProjectionType};
 use solidcore::nurbs::b_spline_curve_n_lib::TrimMode;
 use solidcore::nurbs::math::{NOW, NOZ};
 use solidcore::nurbs::nurbs_crv::allocate_nurb_curve;
+use solidcore::topology::brep::validation::curve_assert_valid;
 use solidcore::topology::database_io::{DatabaseReader, FileType};
 use solidcore::SolidError;
 use solidcore_ffi::units::curve_projected_curve::{self as ffi, Op};
 
 use crate::case::CaseContext;
 use crate::runner::default_cases;
+use crate::util::assert_reports::put_assert_reports;
 use crate::{Case, HarnessError, Output, Rng, UnitDiff};
 
 /// Generated cases per run, whatever `--seeds` says (it can only raise this).
@@ -182,6 +185,12 @@ enum OpIn {
         other: Option<PcIn>,
     },
     Ends,
+    /// `AssertValid` at `level` (0..2, 4 = `SM_LEVEL_GIVEN`), with or without a
+    /// report list; the reports as `crate::util::assert_reports` writes them.
+    AssertValid {
+        level: u8,
+        list: bool,
+    },
     ReadDb(DbIn),
 }
 
@@ -379,6 +388,7 @@ fn op_of(op: &OpIn) -> Op {
         OpIn::CloneCtor => Op::CloneCtor,
         OpIn::Equal { .. } => Op::Equal,
         OpIn::Ends => Op::Ends,
+        OpIn::AssertValid { .. } => Op::AssertValid,
         OpIn::ReadDb(_) => Op::ReadDb,
     }
 }
@@ -433,6 +443,7 @@ fn cpp_input(i: &Inputs) -> Result<(Op, Vec<f64>), HarnessError> {
                 pc_block(&mut v, o);
             }
         }
+        OpIn::AssertValid { level, list } => v.extend([f64::from(*level), b(*list)]),
     }
     Ok((op, v))
 }
@@ -895,6 +906,17 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
                 }
             }
         }
+        OpIn::AssertValid { level, list } => {
+            let mut c = Curve::from(pc);
+            let mut reports = AssertArray::new();
+            let key = ObjectKey(1);
+            let ok = tri!(
+                o,
+                curve_assert_valid(&k, &mut c, list.then_some(&mut reports), *level, key)
+            );
+            o.push(0.0);
+            put_assert_reports(&mut o, ok, &reports, key);
+        }
         OpIn::Ends => {
             let c = Curve::from(pc);
             let e = tri!(o, c.ends(&k,));
@@ -1233,6 +1255,22 @@ fn gen_case(rng: &mut Rng) -> Inputs {
     Inputs { pc: Some(pc), op }
 }
 
+/// Generated `assert_valid` cases (their own seed stream, `<unit>:assert_valid`).
+pub const ASSERT_VALID_CASES: usize = 300;
+
+/// An `assert_valid` case: a generated projected curve (any projection type, given
+/// or missing vectors, either constructor, B-spline or Hermite base), any test
+/// level, with or without a report list.
+fn gen_assert_valid(rng: &mut Rng) -> Inputs {
+    Inputs {
+        pc: Some(gen_pc(rng)),
+        op: OpIn::AssertValid {
+            level: *rng.choose(&[0u8, 1, 2, 4]).unwrap_or(&0),
+            list: rng.chance(0.8),
+        },
+    }
+}
+
 impl UnitDiff for Runner {
     fn id(&self) -> &'static str {
         "curve.projected_curve"
@@ -1252,11 +1290,34 @@ impl UnitDiff for Runner {
     }
 
     fn cases(&self, ctx: &CaseContext) -> Result<Vec<Case>, HarnessError> {
-        let ctx = CaseContext {
+        let main = CaseContext {
             seeds: ctx.seeds.max(MIN_GENERATED),
             ..ctx.clone()
         };
-        default_cases(self, &ctx)
+        let mut v = default_cases(self, &main)?;
+        // AssertValid with native report comparison: their own seed stream (the other
+        // generated cases are unchanged); named `avNNNN`
+        let av = CaseContext {
+            seeds: ctx.seeds.max(ASSERT_VALID_CASES),
+            ..ctx.clone()
+        };
+        for mut c in av.generated_cases("curve.projected_curve:assert_valid", |rng| {
+            for _ in 0..64 {
+                let i = gen_assert_valid(rng);
+                let Ok((op, input)) = cpp_input(&i) else {
+                    continue;
+                };
+                if ffi::validate(op, &input).is_ok() {
+                    return serde_json::to_value(i).ok();
+                }
+            }
+            None
+        }) {
+            c.name = c.name.replacen("gen", "av", 1);
+            c.unit = self.id().to_string();
+            v.push(c);
+        }
+        Ok(v)
     }
 
     fn run_cpp(&self, case: &Case) -> Result<Output, HarnessError> {

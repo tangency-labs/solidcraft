@@ -88,6 +88,8 @@ pub enum Op {
     ReadDb = 10,
     WriteDb = 11,
     CloneCtor = 12,
+    /// `AssertValid(list or NULL, level, SM_NO_WALK)`: args `level with_list`.
+    AssertValid = 13,
 }
 
 mod sys {
@@ -313,6 +315,12 @@ pub fn validate(op: Op, input: &[f64]) -> Result<(), FfiError> {
         Op::WriteDb => {
             rd.index(1)?;
             rd.index(64)?;
+        }
+        Op::AssertValid => {
+            if rd.index(4)? == 3 {
+                return Err(bad("assert_valid: test level 3"));
+            }
+            rd.flag()?;
         }
     }
     rd.done()

@@ -31,6 +31,7 @@
 //! | `has_same_parameterization` (private) | `SmBSplineSurface::HasSameParameterization` (curve)   |
 //! | [`grid_has_non_monotonic_points`]     | `SmPointGrid(...)`, `SmPointGrid::SetUpMonotonic`, `HasNonMonotonicPoints` |
 //! | [`LEVEL_GIVEN`]                       | `SM_LEVEL_GIVEN`                                      |
+//! | `wrapped` (private module)            | `SmOffsetSurface::AssertValid`, `SmSrfInVolume::AssertValid` |
 //!
 //! Deviations:
 //! - **Levels.** `level` is the `SmAssertTestLevel` value (`SM_LEVEL_0` .. `SM_LEVEL_2`,
@@ -72,11 +73,13 @@
 //! - **Extrusion origin zero (WR-511, #1508).** Test 8 uses the pinned unscaled
 //!   `SM_EFF_ZERO` by default; `Kernel::fixes.extrusion_origin_scaled_zero` uses
 //!   `SM_EFF_ZERO * (1 + origin.max_dimension())` for that solve only.
-//! - **Unported overrides.** `SmCurveBoundedSurface`, `SmSrfInVolume` and
-//!   `SmOffsetSurface` have their own `AssertValid`, not ported here; they return
-//!   [`SolidError::Unported`]. `SmSTEPSurface` has none and
+//! - **Unported overrides.** `SmCurveBoundedSurface` has its own `AssertValid`, not
+//!   ported here; it returns [`SolidError::Unported`]. `SmSTEPSurface` has none and
 //!   runs the base check.
-//! - No recursion.
+//! - **Wrapping surfaces.** `SmOffsetSurface` and `SmSrfInVolume` are in the `wrapped`
+//!   submodule (its own deviations); the latter calls `Volume::assert_valid`.
+//! - **Recursion.** Only a surface in a volume recurses (into its base surface), after
+//!   checking its owned geometry nests at most `MAX_GEOMETRY_NESTING` (32) deep.
 
 use std::borrow::Cow;
 
@@ -125,6 +128,8 @@ use crate::surface::surf_of_revolution::SurfOfRevolution;
 use crate::surface::torus::Torus;
 
 use super::{Surface, SurfaceKind};
+
+mod wrapped;
 
 /// `SM_LEVEL_GIVEN`: run the tests of the called class only (base classes skipped).
 pub const LEVEL_GIVEN: u8 = 4;
@@ -251,7 +256,7 @@ impl Surface {
     /// # Errors
     ///
     /// [`SolidError::Unported`] for the surface kinds with their own unported check
-    /// (curve bounded, surface in volume, offset) and from callees; the
+    /// (curve bounded) and from callees; the
     /// errors of the evaluations and queries the tests run (statuses upstream
     /// ignores); [`SolidError::InvalidInput`] where upstream's behaviour is undefined
     /// (see the module docs).
@@ -284,20 +289,8 @@ impl Surface {
                     "surface.curve_bounded_surface",
                 ))
             }
-            SurfaceKind::SrfInVolume(_) => {
-                // UNPORTED(surface.srf_in_volume): SmSrfInVolume::AssertValid
-                Err(SolidError::unported(
-                    "SmSrfInVolume::AssertValid",
-                    "surface.srf_in_volume",
-                ))
-            }
-            SurfaceKind::OffsetSurface(_) => {
-                // UNPORTED(surface.offset_surface): SmOffsetSurface::AssertValid
-                Err(SolidError::unported(
-                    "SmOffsetSurface::AssertValid",
-                    "surface.offset_surface",
-                ))
-            }
+            SurfaceKind::SrfInVolume(_) => wrapped::srf_in_volume_assert_valid(k, self, &mut r),
+            SurfaceKind::OffsetSurface(_) => wrapped::offset_surface_assert_valid(k, self, &mut r),
             SurfaceKind::SurfOfExtrusion(_) => surf_of_extrusion_assert_valid(k, self, &mut r),
         }
     }

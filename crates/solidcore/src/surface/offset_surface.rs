@@ -47,7 +47,8 @@
 //!   keeps it in step) and [`Surface::face`] of the base returns it. A non-owned base
 //!   keeps its caller's owner, as upstream's shared base does. The `SetBaseSurface` setter, the
 //!   unused copy constructor, `CreateMirrorSurface`, `GetMemoryUsed`, `WriteToDB`,
-//!   `Draw`, `DrawUV`, `Dump` and `AssertValid` are not ported (unused upstream).
+//!   `Draw`, `DrawUV` and `Dump` are not ported (unused upstream); `AssertValid` is
+//!   ported with the other surface checks (`surface::surface::assert_valid`).
 //! - **Context.** Every surface has a context here, so the clamp-instead-of-extend
 //!   branch for `GetContext() == NULL` is never taken; `SetContext` has nothing to set.
 //!   The constructor and every member that constructs an offset ([`OffsetSurface::copy`],

@@ -34,6 +34,7 @@ use serde_json::Value;
 
 use solidcore::curve::crv_on_surf::CrvOnSurf;
 use solidcore::curve::curve::{Curve, CurveKind};
+use solidcore::geom::assert_array::{AssertArray, ObjectKey};
 use solidcore::geom::axis2_placement::Axis2Placement;
 use solidcore::geom::extent1d::Extent1d;
 use solidcore::geom::extent2d::Extent2d;
@@ -49,12 +50,14 @@ use solidcore::nurbs::math::CPoint;
 use solidcore::nurbs::srf_basic::Surface;
 use solidcore::surface::offset_surface::{OffsetSurface, SS_UNKNOWN};
 use solidcore::surface::surface::{Surface as SmSurface, SurfaceKind};
+use solidcore::topology::brep::validation::curve_assert_valid;
 use solidcore::topology::database_io::{DatabaseReader, FileType, InputStream};
 use solidcore::SolidError;
 use solidcore_ffi::units::curve_crv_on_surf::{self as ffi, ObjOp, Op, NOW, NOZ};
 
 use crate::case::CaseContext;
 use crate::runner::default_cases;
+use crate::util::assert_reports::put_assert_reports;
 use crate::{Case, HarnessError, Output, Rng, UnitDiff};
 
 /// Generated cases per run, whatever `--seeds` says (it can only raise this).
@@ -146,6 +149,12 @@ enum OpIn {
         types: Vec<i64>,
     },
     State,
+    /// `AssertValid` at `level` (0..2, 4 = `SM_LEVEL_GIVEN`), with or without a
+    /// report list; the reports as `crate::util::assert_reports` writes them.
+    AssertValid {
+        level: u8,
+        list: bool,
+    },
     Eval {
         t: f64,
         n: usize,
@@ -349,6 +358,7 @@ fn obj_op_of(op: &OpIn) -> ObjOp {
     match op {
         OpIn::Info { .. } => ObjOp::Info,
         OpIn::State => ObjOp::State,
+        OpIn::AssertValid { .. } => ObjOp::AssertValid,
         OpIn::Eval { .. } => ObjOp::Eval,
         OpIn::EvalPoint { .. } => ObjOp::EvalPoint,
         OpIn::EvalUv { .. } => ObjOp::EvalUv,
@@ -379,6 +389,7 @@ fn op_params(v: &mut Vec<f64>, op: &OpIn) -> Result<(), HarnessError> {
             v.extend(types.iter().map(|&t| t as f64));
         }
         OpIn::State | OpIn::Nnk | OpIn::Copy => {}
+        OpIn::AssertValid { level, list } => v.extend([f64::from(*level), b(*list)]),
         OpIn::Eval {
             t,
             n,
@@ -740,6 +751,21 @@ fn rust_op(o: &mut Vec<f64>, c: &mut CrvOnSurf, op: &OpIn, k: &Kernel) -> Result
         OpIn::State => {
             o.push(0.0);
             put_state(o, c);
+        }
+        OpIn::AssertValid { level, list } => {
+            // the object itself, not a copy (`Clone` is the copy constructor, which
+            // links the parts it copies to the copy)
+            let stand_in = CrvOnSurf::empty(c.uv_curve().clone(), c.surface().clone())
+                .map_err(|e| Stop::Harness(harness(e.to_string())))?;
+            let mut w = Curve::from(std::mem::replace(c, stand_in));
+            let mut reports = AssertArray::new();
+            let key = ObjectKey(1);
+            let r = curve_assert_valid(k, &mut w, list.then_some(&mut reports), *level, key);
+            *c = cos_of(w).map_err(Stop::Harness)?;
+            o.push(st(&r)?);
+            if let Ok(ok) = r {
+                put_assert_reports(o, ok, &reports, key);
+            }
         }
         OpIn::Eval {
             t,
@@ -1656,6 +1682,24 @@ fn gen_case(rng: &mut Rng) -> Option<Inputs> {
     })
 }
 
+/// Generated `assert_valid` cases (their own seed stream, `<unit>:assert_valid`).
+pub const ASSERT_VALID_CASES: usize = 300;
+
+/// An `assert_valid` case: a generated curve on a B-spline surface (any owner flag,
+/// domain and cache; a fifth with the UV curve leaving the domain), any test level,
+/// with or without a report list.
+fn gen_assert_valid(rng: &mut Rng) -> Inputs {
+    let outside = rng.chance(0.2);
+    let (c, _) = gen_cos(rng, outside);
+    Inputs::Object {
+        cos: Box::new(c),
+        ops: vec![OpIn::AssertValid {
+            level: *rng.choose(&[0u8, 1, 2, 4]).unwrap_or(&0),
+            list: rng.chance(0.8),
+        }],
+    }
+}
+
 impl UnitDiff for Runner {
     fn id(&self) -> &'static str {
         "curve.crv_on_surf"
@@ -1677,11 +1721,34 @@ impl UnitDiff for Runner {
     }
 
     fn cases(&self, ctx: &CaseContext) -> Result<Vec<Case>, HarnessError> {
-        let ctx = CaseContext {
+        let main = CaseContext {
             seeds: ctx.seeds.max(MIN_GENERATED),
             ..ctx.clone()
         };
-        default_cases(self, &ctx)
+        let mut v = default_cases(self, &main)?;
+        // AssertValid with native report comparison: their own seed stream (the other
+        // generated cases are unchanged); named `avNNNN`
+        let av = CaseContext {
+            seeds: ctx.seeds.max(ASSERT_VALID_CASES),
+            ..ctx.clone()
+        };
+        for mut c in av.generated_cases("curve.crv_on_surf:assert_valid", |rng| {
+            for _ in 0..64 {
+                let i = gen_assert_valid(rng);
+                let Ok((op, input)) = cpp_input(&i) else {
+                    continue;
+                };
+                if ffi::validate(op, &input).is_ok() {
+                    return serde_json::to_value(i).ok();
+                }
+            }
+            None
+        }) {
+            c.name = c.name.replacen("gen", "av", 1);
+            c.unit = self.id().to_string();
+            v.push(c);
+        }
+        Ok(v)
     }
 
     fn run_cpp(&self, case: &Case) -> Result<Output, HarnessError> {

@@ -45,6 +45,7 @@ use solidcore::curve::curve::p2::{Curve, CurveKind};
 use solidcore::curve::ellipse::{Ellipse, EllipseOptions};
 use solidcore::curve::hermite_curve::HermiteCurve;
 use solidcore::curve::line::Line;
+use solidcore::geom::assert_array::{AssertArray, ObjectKey};
 use solidcore::geom::axis2_placement::Axis2Placement;
 use solidcore::geom::extent1d::Extent1d;
 use solidcore::geom::transform::Transform;
@@ -58,12 +59,14 @@ use solidcore::surface::bend_volume::BendVolume;
 use solidcore::surface::twist_volume::TwistVolume;
 use solidcore::surface::unbend_volume::UnbendVolume;
 use solidcore::surface::volume::{Volume, VolumeKind};
+use solidcore::topology::brep::validation::curve_assert_valid;
 use solidcore::topology::database_io::{DatabaseReader, FileType, InputStream};
 use solidcore::SolidError;
 use solidcore_ffi::units::curve_crv_in_volume::{self as ffi, Op};
 
 use crate::case::CaseContext;
 use crate::runner::default_cases;
+use crate::util::assert_reports::put_assert_reports;
 use crate::{Case, CaseSource, HarnessError, Output, Rng, UnitDiff};
 
 /// Generated cases per run, whatever `--seeds` says (it can only raise this).
@@ -235,6 +238,20 @@ enum OpIn {
         in_param: bool,
         volume: Vec<MapIn>,
     },
+    /// `AssertValid` (static) of `SmCrvInVolume(curve, in_param, volume, copy, owner)`
+    /// with the cache loaded, at `level` (0..2, 4 = `SM_LEVEL_GIVEN`), with or without
+    /// a report list; the reports as `crate::util::assert_reports` writes them.
+    AssertValid {
+        curve: ExactCurveIn,
+        in_param: bool,
+        copy: u64,
+        owner: u64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        cache: Option<CacheIn>,
+        volume: Vec<MapIn>,
+        level: u8,
+        list: bool,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -287,6 +304,43 @@ fn civ_block(v: &mut Vec<f64>, c: &CivIn) {
     }
 }
 
+fn cache_block(v: &mut Vec<f64>, cache: Option<&CacheIn>) {
+    match cache {
+        None => v.push(0.0),
+        Some(k) => {
+            v.extend([1.0, b(k.need), k.breaks.len() as f64]);
+            v.extend_from_slice(&k.breaks);
+            v.push(k.conts.len() as f64);
+            v.extend(k.conts.iter().map(|&c| c as f64));
+        }
+    }
+}
+
+fn exact_curve_block(v: &mut Vec<f64>, curve: &ExactCurveIn) {
+    match curve {
+        ExactCurveIn::Curve(c) => curve_block(v, c),
+        ExactCurveIn::Line { p1, p2 } => {
+            v.push(2.0);
+            v.extend_from_slice(p1);
+            v.extend_from_slice(p2);
+        }
+        ExactCurveIn::Circle {
+            c,
+            x,
+            y,
+            a0,
+            a1,
+            r,
+        } => {
+            v.push(3.0);
+            for p in [c, x, y] {
+                v.extend_from_slice(p);
+            }
+            v.extend([*a0, *a1, *r]);
+        }
+    }
+}
+
 fn vol_block(v: &mut Vec<f64>, vol: &[MapIn]) {
     v.push(vol.len() as f64);
     for m in vol {
@@ -334,6 +388,7 @@ fn op_of(op: &OpIn) -> Op {
         OpIn::Transform { .. } => Op::Transform,
         OpIn::ReadDb { .. } => Op::ReadDb,
         OpIn::Exact { .. } => Op::Exact,
+        OpIn::AssertValid { .. } => Op::AssertValid,
     }
 }
 
@@ -400,30 +455,25 @@ fn cpp_input(i: &Inputs) -> Result<(Op, Vec<f64>), HarnessError> {
             in_param,
             volume,
         } => {
-            match curve {
-                ExactCurveIn::Curve(c) => curve_block(&mut v, c),
-                ExactCurveIn::Line { p1, p2 } => {
-                    v.push(2.0);
-                    v.extend_from_slice(p1);
-                    v.extend_from_slice(p2);
-                }
-                ExactCurveIn::Circle {
-                    c,
-                    x,
-                    y,
-                    a0,
-                    a1,
-                    r,
-                } => {
-                    v.push(3.0);
-                    for p in [c, x, y] {
-                        v.extend_from_slice(p);
-                    }
-                    v.extend([*a0, *a1, *r]);
-                }
-            }
+            exact_curve_block(&mut v, curve);
             v.push(b(*in_param));
             vol_block(&mut v, volume);
+        }
+        OpIn::AssertValid {
+            curve,
+            in_param,
+            copy,
+            owner,
+            cache,
+            volume,
+            level,
+            list,
+        } => {
+            exact_curve_block(&mut v, curve);
+            v.extend([b(*in_param), *copy as f64, *owner as f64]);
+            cache_block(&mut v, cache.as_ref());
+            vol_block(&mut v, volume);
+            v.extend([f64::from(*level), b(*list)]);
         }
     }
     Ok((op, v))
@@ -635,6 +685,9 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
     {
         return rust_exact(curve, *in_param, volume);
     }
+    if let OpIn::AssertValid { .. } = &i.op {
+        return rust_assert_valid(&i.op);
+    }
     let civ_in = i.civ.as_ref().ok_or_else(|| harness("object op without civ"))?;
     let mut civ = build(civ_in)?;
     let k = Kernel::default();
@@ -792,7 +845,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
             });
             put_state(&mut o, &civ);
         }
-        OpIn::ReadDb { .. } | OpIn::Exact { .. } => return Err(harness("static op")),
+        OpIn::ReadDb { .. } | OpIn::Exact { .. } | OpIn::AssertValid { .. } => return Err(harness("static op")),
     }
     Ok(to_output(&o))
 }
@@ -1239,6 +1292,129 @@ fn rust_exact(curve: &ExactCurveIn, in_param: bool, volume: &[MapIn]) -> Result<
         tri!(o, put_exact_curve(&mut o, &k, &c));
     }
     Ok(to_output(&o))
+}
+
+fn rust_assert_valid(op: &OpIn) -> Result<Output, HarnessError> {
+    let OpIn::AssertValid {
+        curve,
+        in_param,
+        copy,
+        owner,
+        cache,
+        volume,
+        level,
+        list,
+    } = op
+    else {
+        return Err(harness("not an assert_valid op"));
+    };
+    let k = Kernel::default();
+    let mut o: Vec<f64> = Vec::new();
+    let mut civ = CrvInVolume::new(
+        build_exact_curve(&k, curve)?,
+        *in_param,
+        build_volume(volume)?,
+        *copy,
+        *owner,
+    )
+    .map_err(|e| HarnessError::new(e.to_string()))?;
+    if let Some(kc) = cache {
+        let conts = kc
+            .conts
+            .iter()
+            .map(|&x| continuity_from_code(x).ok_or_else(|| harness("bad continuity code")))
+            .collect::<Result<Vec<_>, _>>()?;
+        civ.set_breaks_cache(kc.need, kc.breaks.clone(), conts);
+    }
+    let mut c = Curve::from(civ);
+    let mut reports = AssertArray::new();
+    let key = ObjectKey(1);
+    let ok = tri!(
+        o,
+        curve_assert_valid(&k, &mut c, list.then_some(&mut reports), *level, key)
+    );
+    o.push(0.0);
+    put_assert_reports(&mut o, ok, &reports, key);
+    Ok(to_output(&o))
+}
+
+/// An `assert_valid` case: the curve and bend, unbend or twist chain of an exact case
+/// (sometimes a chain of plain, transform and default maps with orient maps instead,
+/// or a component frame whose mid direction is not square to the axis), any copy
+/// (curve only) and owner flags, maybe a loaded (possibly inconsistent) cache, any
+/// test level, with or without a report list.
+fn gen_assert_valid_case(rng: &mut Rng) -> OpIn {
+    let OpIn::Exact {
+        curve,
+        in_param,
+        mut volume,
+    } = gen_exact_volume_case(rng)
+    else {
+        return OpIn::Nnk;
+    };
+    match rng.below(4) {
+        0 => {
+            // a chain of plain, transform and default maps, some with orient maps
+            let n = 1 + rng.below(3) as usize;
+            volume = (0..n)
+                .map(|_| {
+                    let kind = rng.below(5) as u8;
+                    MapIn {
+                        kind,
+                        comp: None,
+                        t: (kind == 1).then(|| gen_transform(rng, 1.0)),
+                        orient: rng.chance(0.4).then(|| gen_transform(rng, 1.0)),
+                    }
+                })
+                .collect();
+        }
+        1 => {
+            // a mid direction off square to the axis (not an orthonormal frame)
+            if let Some(c) = volume.first_mut().and_then(|m| m.comp.as_mut()) {
+                let t = rng.uniform(0.05, 0.9);
+                c.mid = add3(c.mid, scale3(t, c.axis));
+            }
+        }
+        _ => {}
+    }
+    let cache = rng.chance(0.4).then(|| {
+        let nb = rng.below(4) as usize;
+        let nc = if rng.chance(0.6) { nb } else { rng.below(4) as usize };
+        CacheIn {
+            need: rng.chance(0.5),
+            breaks: (0..nb).map(|_| rng.unit()).collect(),
+            conts: (0..nc).map(|_| rng.range_i64(0, 13)).collect(),
+        }
+    });
+    OpIn::AssertValid {
+        curve,
+        in_param,
+        copy: rng.below(2),
+        owner: rng.below(4),
+        cache,
+        volume,
+        level: *rng.choose(&[0u8, 1, 2, 4]).unwrap_or(&0),
+        list: rng.chance(0.8),
+    }
+}
+
+/// Generated `AssertValid` cases (native report comparison) the ffi wrapper
+/// accepts, from a fixed seed.
+fn assert_valid_cases() -> Result<Vec<Case>, HarnessError> {
+    const WANT: usize = 300;
+    let mut cases = Vec::new();
+    let mut rng = Rng::new(0x5eed_a55e);
+    for _ in 0..20_000 {
+        if cases.len() >= WANT {
+            break;
+        }
+        let op = gen_assert_valid_case(&mut rng);
+        let name = format!("assert_valid_{}", cases.len());
+        if let Some(c) = exact_case(name, op)? {
+            cases.push(c);
+        }
+    }
+    Ok(cases)
 }
 
 fn add3(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {
@@ -1709,6 +1885,7 @@ impl UnitDiff for Runner {
         };
         let mut cases = default_cases(self, &ctx)?;
         cases.extend(exact_volume_cases()?);
+        cases.extend(assert_valid_cases()?);
         Ok(cases)
     }
 

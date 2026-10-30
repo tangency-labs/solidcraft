@@ -54,10 +54,16 @@
 //! `fixtures/surface.srf_in_volume/copy_volume_domain.json` compares real copied
 //! surface and volume-chain state, including raw knots and a non-identity next map.
 //! Existing generated inputs retain their copyable-head sampling domain.
+//!
+//! The `avNNNN` cases (their own seed stream, so the `genNNNN` inputs are unchanged) run
+//! `AssertValid` on a generated object (every owner flag, default and component bend,
+//! unbend and twist maps, orient maps and next-map chains) and compare every report,
+//! including the nested reports of the base surface and the volume chain.
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use solidcore::geom::assert_array::{AssertArray, ObjectKey};
 use solidcore::geom::axis2_placement::Axis2Placement;
 use solidcore::geom::extent1d::Extent1d;
 use solidcore::geom::extent2d::Extent2d;
@@ -257,6 +263,9 @@ enum OpIn {
         y: [f64; 3],
     },
     Exact,
+    AssertValid {
+        level: u8,
+    },
     /// `SmSrfInVolume::ReadFromDB` of the text upstream's `WriteToDB` wrote for `siv`
     /// (the object is only the text's source: neither side builds it).
     ReadDb {
@@ -369,6 +378,7 @@ fn op_of(op: &OpIn) -> Op {
         OpIn::SetVolume { .. } => Op::SetVolume,
         OpIn::Mirror { .. } => Op::Mirror,
         OpIn::Exact => Op::Exact,
+        OpIn::AssertValid { .. } => Op::AssertValid,
         OpIn::ReadDb { .. } => Op::ReadDb,
     }
 }
@@ -426,6 +436,7 @@ fn cpp_input(i: &Inputs) -> Result<(Op, Vec<f64>), HarnessError> {
             v.push(*tol);
         }
         OpIn::Reverse { v_dir } => v.push(b(*v_dir)),
+        OpIn::AssertValid { level } => v.push(f64::from(*level)),
         OpIn::SwapUv
         | OpIn::Copy
         | OpIn::CopyCtor
@@ -816,6 +827,22 @@ fn put_derivs(o: &mut Vec<f64>, d: &[Vec<Vec3>], hu: usize, hv: usize, upper: bo
 }
 
 #[allow(clippy::too_many_lines)]
+fn av_text(o: &mut Vec<f64>, s: Option<&str>) {
+    o.push(s.map_or(0, str::len) as f64);
+    if let Some(s) = s {
+        o.extend(s.bytes().map(f64::from));
+    }
+}
+
+/// A report object as the shim writes it: `0` null, `1` the checked object, `9` another.
+fn av_id(key: Option<ObjectKey>) -> f64 {
+    match key {
+        None => 0.0,
+        Some(ObjectKey(1)) => 1.0,
+        Some(_) => 9.0,
+    }
+}
+
 fn rust(i: &Inputs) -> Result<Output, HarnessError> {
     let mut o: Vec<f64> = Vec::new();
     let k = Kernel::default();
@@ -1022,6 +1049,34 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
             let m = tri!(o, siv_of(&s)?.create_mirror_surface(&k, &ax));
             o.push(0.0);
             put_state(&mut o, &m);
+        }
+        OpIn::AssertValid { level } => {
+            let mut list = AssertArray::new();
+            let ok = tri!(o, s.assert_valid(&k, Some(&mut list), *level, ObjectKey(1)));
+            o.extend([0.0, b(ok), list.len() as f64]);
+            for r in list.reports() {
+                o.extend([
+                    r.reporting_type as f64,
+                    r.list_index as f64,
+                    r.test_index as f64,
+                    f64::from(r.assert_type.code()),
+                    b(r.ok),
+                    av_id(r.reporter),
+                    av_id(r.owner),
+                    av_id(r.other),
+                    r.owner_type as f64,
+                    r.other_type as f64,
+                    r.tol3d,
+                    r.value,
+                    r.dist3d,
+                ]);
+                av_text(&mut o, Some(r.name));
+                av_text(&mut o, r.message.as_deref());
+                av_text(&mut o, r.message_for_file);
+                av_text(&mut o, r.owner_type_string);
+                av_text(&mut o, r.other_type_string);
+            }
+            o.push(b(list.last_add()));
         }
         OpIn::Exact => {
             let exact = tri!(o, siv_of(&s)?.make_exact_b_spline_if_possible_with(&k));
@@ -1273,6 +1328,23 @@ fn gen_read_db(rng: &mut Rng) -> Option<Inputs> {
         siv,
         op: OpIn::ReadDb { version, bytes },
     })
+}
+
+/// An `AssertValid` case: mostly `SM_LEVEL_GIVEN`, else a level that also runs the base
+/// surface's inherited checks (the shim refuses the bases where those read unwritten
+/// outputs; such draws are dropped).
+fn gen_assert_valid_case(rng: &mut Rng) -> Option<Inputs> {
+    let (siv, _) = gen_siv(rng);
+    let level = if rng.chance(0.75) { 4 } else { rng.below(3) as u8 };
+    let i = Inputs {
+        siv,
+        op: OpIn::AssertValid { level },
+    };
+    let (op, input) = cpp_input(&i).ok()?;
+    match ffi::eval(op, &input) {
+        Ok(_) => Some(i),
+        Err(_) => None,
+    }
 }
 
 fn gen_case(rng: &mut Rng) -> Inputs {
@@ -2030,6 +2102,16 @@ impl UnitDiff for Runner {
         cases.extend(inline_cases()?);
         cases.extend(mirror_cases()?);
         cases.extend(exact_volume_cases()?);
+        // as many as the generated cases (each check is cheap)
+        for mut c in ctx.generated_cases("surface.srf_in_volume:assert-valid", |rng| {
+            (0..16)
+                .find_map(|_| gen_assert_valid_case(rng))
+                .and_then(|i| serde_json::to_value(i).ok())
+        }) {
+            c.name = c.name.replacen("gen", "av", 1);
+            c.unit = self.id().to_string();
+            cases.push(c);
+        }
         Ok(cases)
     }
 

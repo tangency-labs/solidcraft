@@ -38,6 +38,7 @@
 #include <string>
 #include <vector>
 
+#include "sc_assert_reports.h"
 #include "sc_sm.h"
 
 using sc::Rd;
@@ -70,6 +71,7 @@ enum : int32_t
     OP_GAP = 19,
     OP_STATE = 20,
     OP_COPY_EVAL = 21,
+    OP_ASSERT_VALID = 22,
     OP_READ_DB = 40,
     OP_WRITE_DB = 41,
 };
@@ -734,6 +736,17 @@ void cos_op(int32_t op, Rd& rd, const SmContext& ctx, Built& bb, std::vector<dou
         }
         if (!self_other)
             free_cos(other);
+        break;
+    }
+    case OP_ASSERT_VALID:
+    {
+        // `level with_list` (output: sc_assert_reports.h)
+        SmAssertTestLevel level = (SmAssertTestLevel)rd.idx();
+        bool with_list = rd.flag();
+        SmAssertArray list;
+        SmBoolean ok = c->AssertValid(with_list ? &list : NULL, level, SM_NO_WALK, NULL);
+        o.push_back(0.0);
+        sc::put_assert_reports(o, ok, list, (const SmCurve*)c);
         break;
     }
     default: o.push_back((double)SC_ERR_ARG); break;

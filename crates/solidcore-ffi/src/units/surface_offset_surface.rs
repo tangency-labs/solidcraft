@@ -40,6 +40,7 @@
 //! | `IsPlanar`     | `IsPlanar` (`SmSurface` body, virtual box) | `planar P N dev`                  |
 //! | `IsKindOf`     | `IsKindOf`                            | `flag`                                 |
 //! | `BaseOffset`   | `GetBaseSurface()->CreateOffsetSurface` (virtual) | the result's state         |
+//! | `AssertValid`  | `AssertValid(&list, level, SM_NO_WALK)` (virtual, through `SmSurface*`) | `ok n` then per report `type list test assert_type ok reporter owner other owner_type other_type tol value dist3d name message message_for_file owner_string other_string` (texts `len chars...`; objects `0` null, `1` the offset, `9` another), then `last_add` |
 //!
 //! [`script`] accepts only what upstream handles without undefined behaviour or runaway
 //! work: well-formed clamped B-splines, planes with a non-zero normal, offsets nested at
@@ -319,6 +320,13 @@ pub enum Step {
         /// `sApproxTol3d`.
         tol: f64,
     },
+    /// `AssertValid(&list, level, SM_NO_WALK)`: refused like `IsPlanar` (its
+    /// self-intersection boxes the natural domain); at levels `0..=2` the shim also
+    /// refuses the surfaces whose inherited `SmSurface` checks read unwritten outputs.
+    AssertValid {
+        /// `SmAssertTestLevel`: `0`, `1`, `2` or `4` (`SM_LEVEL_GIVEN`).
+        level: u8,
+    },
 }
 
 impl Step {
@@ -348,6 +356,7 @@ impl Step {
             Step::IsPlanar { .. } => 21,
             Step::IsKindOf { .. } => 22,
             Step::BaseOffset { .. } => 23,
+            Step::AssertValid { .. } => 24,
         })
     }
 }
@@ -815,6 +824,16 @@ fn push_steps(o: &mut Vec<f64>, off: &Off, info: BaseInfo, steps: &[Step]) -> Re
                     return Err(bad("offset tolerance"));
                 }
                 o.extend([*d, *tol]);
+            }
+            Step::AssertValid { level } => {
+                // the self-intersection boxes the natural domain, as IsPlanar's box
+                if unboxable || ext_possible {
+                    return Err(bad("assert valid: box not computable without UB"));
+                }
+                if !matches!(level, 0 | 1 | 2 | 4) {
+                    return Err(bad("assert valid level"));
+                }
+                o.push(f64::from(*level));
             }
         }
     }

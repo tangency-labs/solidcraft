@@ -53,7 +53,10 @@
 //!   for flag 2 and then discards the copy, as upstream. The copy constructor copies both
 //!   parts when it owns the curve. Unowned parts and temporary `this` copies use
 //!   exact snapshots, retaining their NURBS data and owner chains; native owned
-//!   branches still use virtual `Copy`. Notifications and contexts are not modelled.
+//!   branches still use virtual `Copy`. Whether upstream links each part back to the
+//!   curve (`SetOwner(this)`) is recorded ([`CrvOnSurf::owner_links`], read by
+//!   `AssertValid`): the UV-line constructor, `SetUVCurve` and `ReadFromDB` link
+//!   nothing. Notifications and contexts are not modelled.
 //! - **Caches.** Upstream's const knot queries update the break cache. Here that
 //!   value-only cache uses interior mutability; no cache borrow spans a geometry
 //!   call. `breaks()` returns an owned snapshot. Shared [`Curve`] knot dispatch
@@ -321,6 +324,11 @@ pub struct CrvOnSurf {
     /// `m_lOwnerFlag`: 0 shares both parts, 1 owns (a copy of) the curve, 2 owns copies
     /// of both, 3 owns both originals.
     owner_flag: u64,
+    /// Whether upstream's UV curve and surface name this object as their owner
+    /// (`GetOwner() == this`): the constructor links what owner flags 1..3 / 2..3 own
+    /// and the copy constructor what it copies; the UV-line constructor, `SetUVCurve`
+    /// (for the new curve) and `ReadFromDB` link nothing.
+    owner_links: (bool, bool),
     /// `m_pBSApproxCurve`, `m_dMaxGap3d`, `m_bParametrizationMatches`: mutable even
     /// in upstream's const queries, as `break_cache`.
     approx_cache: Mutex<ApproxCache>,
@@ -343,6 +351,9 @@ impl Clone for CrvOnSurf {
         if matches!(self.owner_flag, 1..=3) {
             c.surface.detach_nurb_cells();
         }
+        // the copy constructor's SetOwner of what it copies
+        let owns_curve = matches!(self.owner_flag, 1..=3);
+        c.owner_links = (owns_curve, owns_curve);
         let approx = c.approx_cache_mut();
         if let Some(bs) = approx.bs_approx.take() {
             approx.bs_approx = Some(Box::new(bs.copy()));
@@ -362,6 +373,7 @@ impl CrvOnSurf {
             uv_domain: self.uv_domain,
             break_cache: Mutex::new(self.lock_break_cache().clone()),
             owner_flag: self.owner_flag,
+            owner_links: self.owner_links,
             approx_cache: Mutex::new(self.lock_approx_cache().clone_exact()),
             curve_cache: Mutex::new(None),
         }
@@ -379,6 +391,7 @@ impl CrvOnSurf {
             uv_domain: self.uv_domain,
             break_cache: Mutex::new(self.lock_break_cache().clone()),
             owner_flag: self.owner_flag,
+            owner_links: self.owner_links,
             approx_cache: Mutex::new(self.lock_approx_cache().clone_exact()),
             curve_cache: Mutex::new(None),
         })
@@ -452,6 +465,7 @@ impl CrvOnSurf {
                 breaks: Vec::new(),
             }),
             owner_flag,
+            owner_links: (false, false),
             approx_cache: Mutex::new(ApproxCache {
                 bs_approx: None,
                 max_gap_3d: BIG_DOUBLE,
@@ -495,6 +509,9 @@ impl CrvOnSurf {
         if owner_flag == 2 {
             *c.surface = c.surface.copy(k)?;
         }
+
+        // when Curve or Surface is owned (copied or not) - set the obj's owner to be this
+        c.owner_links = (matches!(owner_flag, 1..=3), matches!(owner_flag, 2 | 3));
         Ok(c)
     }
 
@@ -578,6 +595,9 @@ impl CrvOnSurf {
             .unwrap_or_else(PoisonError::into_inner)
             .need_breaks = self.need_breaks();
 
+        // the copies name this object as their owner
+        c.owner_links = (owns_curve, owns_curve || owns_surface);
+
         // set the owner flag
         c.owner_flag = if owns_curve && owns_surface {
             2
@@ -644,6 +664,13 @@ impl CrvOnSurf {
     #[must_use]
     pub const fn uv_domain(&self) -> &Extent2d {
         &self.uv_domain
+    }
+
+    /// Whether the UV curve and the surface name this object as their owner
+    /// (`GetOwner() == this`; see the `owner_links` field).
+    #[must_use]
+    pub const fn owner_links(&self) -> (bool, bool) {
+        self.owner_links
     }
 
     /// The owner flag (`m_lOwnerFlag`).
@@ -716,6 +743,8 @@ impl CrvOnSurf {
         Surface::check_curve_evaluation_copy_depth(&uv_curve, 1)?;
         *self.uv_curve = uv_curve;
         *self.curve_cache_mut() = None;
+        // (no SetOwner of the new curve)
+        self.owner_links.0 = false;
         Ok(())
     }
 

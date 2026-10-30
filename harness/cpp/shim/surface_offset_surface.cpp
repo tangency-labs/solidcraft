@@ -4,7 +4,7 @@
 // the constructor, Copy, operator==, CalculateBoundingBox, GetKnots, EvaluateNormal,
 // EvaluatePoint, Evaluate, EvaluateSimple, GetNaturalUVDomain, Reverse, SplitAt,
 // STEPInversion, SwapUV, Transform, TrimWithDomain, CreateOffsetSurface, ReadFromDB,
-// IsKindOf and the setters, run as a script on one offset so that the extension upstream's
+// IsKindOf, AssertValid and the setters, run as a script on one offset so that the extension upstream's
 // const evaluators store is seen by the following ops. WriteToDB is a generator helper.
 // CreateExtendedSurface steps are refused: UB-107 and the HANG-6/HANG-22 searches inside it
 // cannot be guarded in process.
@@ -16,6 +16,7 @@
 #include "sc_shim.h"
 
 #include "StdAfx.h"
+#include <SmAssertArray.h>
 #include <SmAxis2Placement.h>
 #include <SmBSplineCurve.h>
 #include <SmBSplineSurface.h>
@@ -39,6 +40,7 @@
 #include <SmSurfOfRevolution.h>
 #include <SmSurface.h>
 #include <SmTArray.h>
+#include <SmTol.h>
 #include <SmVector2d.h>
 #include <SmVector3d.h>
 #include <nurbs.h>
@@ -99,6 +101,7 @@ enum : int64_t
     S_IS_PLANAR = 21,
     S_IS_KIND_OF = 22,
     S_BASE_OFFSET = 23,
+    S_ASSERT_VALID = 24,
 };
 
 // Generator kinds and construction modes of a surface-of-revolution block.
@@ -519,6 +522,51 @@ bool box_reaches_surface_body(SmOffsetSurface* s, const SmExtent2d& d)
     return false;
 }
 
+// A report text as `len chars...`.
+void av_text(std::vector<double>& o, const TCHAR* text)
+{
+    std::vector<double> t;
+    for (const TCHAR* p = text; p && *p; p++)
+        t.push_back((double)*p);
+    o.push_back((double)t.size());
+    o.insert(o.end(), t.begin(), t.end());
+}
+
+// A report object: 0 null, 1 the checked offset, 9 another.
+double av_id(const void* p, const SmSurface* s)
+{
+    if (p == NULL)
+        return 0.0;
+    return p == s ? 1.0 : 9.0;
+}
+
+// The inherited SmSurface::AssertValid (levels 0..2) ignores two statuses and reads
+// what the failed call left (undefined): sm_AssertTestSurface6 the iso curves of a
+// failed CreateIsoBoundaries, sm_AssertTestSurface4 the continuity minima of a
+// CalculateContinuities that failed before writing them. Whether `s` reaches either.
+bool base_check_reads_unwritten(const SmContext& ctx, SmSurface* s)
+{
+    SmApproxTol3d tol = SmTol::GetApproxTol3d(s);
+    for (int ii = 0; ii < 2; ii++)
+    {
+        SmSurfParamType dir = ii == 1 ? SM_SP_V : SM_SP_U;
+        if (s->IsClosed(s->GetNaturalUVDomain(), dir))
+            continue;
+        SmBSplineCurve *c1 = NULL, *c2 = NULL;
+        SmStatus st = s->CreateIsoBoundaries(ctx, dir, tol, c1, c2);
+        bool good = st == SM_SUCCESS && c1 != NULL && c2 != NULL;
+        delete c1;
+        delete c2;
+        if (!good)
+            return true;
+    }
+    SmContinuityType min_u = SM_CT_G1, min_v = SM_CT_G1;
+    SmTArray<SmContinuityType> cu(ctx), cv(ctx);
+    SmStatus su = s->CalculateContinuities(SM_SP_U, min_u, cu);
+    SmStatus sv = s->CalculateContinuities(SM_SP_V, min_v, cv);
+    return (su != SM_SUCCESS && cu.GetSize() == 0) || (sv != SM_SUCCESS && cv.GetSize() == 0);
+}
+
 // ---- the script -----------------------------------------------------------------------------
 
 void run_step(int64_t step, Rd& rd, const SmContext& ctx, SmOffsetSurface* s, std::vector<double>& o)
@@ -785,6 +833,37 @@ void run_step(int64_t step, Rd& rd, const SmContext& ctx, SmOffsetSurface* s, st
         std::unique_ptr<SmSurface> result(r);
         o.push_back(st(stt));
         if (stt == SM_SUCCESS && r) put_result(o, r);
+        break;
+    }
+    case S_ASSERT_VALID:
+    {
+        int64_t level = rd.idx();
+        // the self-intersection test boxes the natural domain, as IsPlanar (UB-173)
+        if (box_reaches_surface_body(s, s->GetNaturalUVDomain())) throw ScOffsetUnsafeInput{};
+        if (level != SM_LEVEL_GIVEN && base_check_reads_unwritten(ctx, s)) throw ScOffsetUnsafeInput{};
+        SmAssertArray reports;
+        SmSurface* srf = s;
+        SmBoolean ok = srf->AssertValid(&reports, (SmAssertTestLevel)level, SM_NO_WALK);
+        o.push_back(0.0);
+        o.push_back(ok ? 1.0 : 0.0);
+        o.push_back((double)reports.GetSize());
+        for (ULONG i = 0; i < reports.GetSize(); i++)
+        {
+            SmAssertReport* r = reports[i];
+            o.insert(o.end(), {(double)r->m_lReportingType, (double)r->m_lListIndex,
+                               (double)r->m_lTestIndex, (double)r->m_eAssertType, r->m_bOK ? 1.0 : 0.0});
+            o.push_back(av_id(r->m_pReporter, s));
+            o.push_back(av_id(r->m_pOwner, s));
+            o.push_back(av_id(r->m_pOther, s));
+            o.insert(o.end(), {(double)r->m_lOwnerType, (double)r->m_lOtherType, (double)r->m_sTol3d,
+                               r->m_dValue, r->m_dDist3d});
+            av_text(o, r->m_pName);
+            av_text(o, r->m_pMessage);
+            av_text(o, r->m_pMessageForFile);
+            av_text(o, r->m_sOwnerTypeString);
+            av_text(o, r->m_sOtherTypeString);
+        }
+        o.push_back(reports.GetLastAdd() ? 1.0 : 0.0);
         break;
     }
     default: o.push_back((double)SC_ERR_ARG); break;

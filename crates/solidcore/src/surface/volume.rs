@@ -5,8 +5,10 @@
 //! The file is split over the plan units `surface.volume_p1` and `_p2`; each lives
 //! in its own submodule and adds methods to [`Volume`].
 
+pub mod assert_valid;
 pub mod p1;
 pub mod p2;
 
+pub use assert_valid::MAX_VOLUME_CHAIN;
 pub use p1::{DirectionDiscontinuities, Discontinuities3d, EvalOptions, Volume, VolumeKind};
 pub use p2::InvPoints;

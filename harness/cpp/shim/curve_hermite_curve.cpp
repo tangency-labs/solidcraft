@@ -19,6 +19,7 @@
 #include <string>
 #include <vector>
 
+#include "sc_assert_reports.h"
 #include "sc_sm.h"
 
 using sc::put_vec;
@@ -48,7 +49,8 @@ enum ScHcOp : int32_t
     OP_TYPE_STRINGS = 9,
     OP_READ_DB = 10,
     OP_WRITE_READ = 11,
-    OP_LAST = 11,
+    OP_ASSERT_VALID = 12,
+    OP_LAST = 12,
 };
 
 static SmVector3d sc_vec(const double* v, int i)
@@ -353,6 +355,16 @@ SC_EXPORT int32_t sc_curve_hermite_curve_op(int32_t op, int32_t kind_a, const do
         if (st == SM_SUCCESS)
             put_bytes(o, again);
         delete c;
+        break;
+    }
+    case OP_ASSERT_VALID:
+    {
+        // n: SmAssertTestLevel (0..2, 4 = SM_LEVEL_GIVEN); flags bit 0: with a report list
+        if (n < 0 || n > 4 || n == 3)
+            return SC_ERR_ARG;
+        SmAssertArray list;
+        SmBoolean ok = a.AssertValid((flags & 1) ? &list : NULL, (SmAssertTestLevel)n, SM_NO_WALK, NULL);
+        sc::put_assert_reports(o, ok, list, &a);
         break;
     }
     default: return SC_ERR_ARG;
