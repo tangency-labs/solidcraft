@@ -2081,6 +2081,7 @@ int32_t p3_run(int32_t op, Rd& rd, std::vector<double>& o)
         SmLine* l = new (M.ctx) SmLine(a, b, 3, &M.ctx);
         l->GetOrCreateGwNurbPointer();
         e->SetCurve(l, TRUE);
+        l->SetOwner(e); // upstream follows SetCurve with SetOwner(edge)
     }
     // pseudo edges whose curve becomes a real SmCircle (SmEllipse::JoinWith in 3x2)
     int64_t na = rd.idx();
@@ -2097,6 +2098,7 @@ int32_t p3_run(int32_t op, Rd& rd, std::vector<double>& o)
                                            SmExtent1d(d0, d1), r, 3, &M.ctx);
         c->GetOrCreateGwNurbPointer();
         e->SetCurve(c, TRUE);
+        c->SetOwner(e);
     }
     // solvers on the model's geometries: `n (approx tang fsg)..` and, when n > 0, per
     // geometry its solver index (-1 none); a base solver (angle tolerance SM_EFF_ZERO_RAD)

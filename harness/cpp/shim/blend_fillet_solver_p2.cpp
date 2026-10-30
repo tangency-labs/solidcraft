@@ -609,6 +609,7 @@ void run_misc(Rd& rd, const char* path, const SmContext& ctx, std::vector<double
             SmBSplineCurve* r0 = NULL;
             SmBSplineCurve::CreateLineSegment(ctx, 3, SmPoint3d(0.0, 0.0, 0.0), SmPoint3d(1.0, 0.0, 0.0), r0);
             rails[0]->SetCurve(r0, TRUE);
+            r0->SetOwner(rails[0]); // as upstream's rail producers do after SetCurve
             t.CrvPos() = SmPoint3d(fs->target, fs->radius, fs->GetThisApproxTol3d());
             arr.Add(&t);
         }
@@ -617,6 +618,7 @@ void run_misc(Rd& rd, const char* path, const SmContext& ctx, std::vector<double
             SmBSplineCurve* r1 = NULL;
             SmBSplineCurve::CreateLineSegment(ctx, 3, SmPoint3d(0.0, 0.0, 0.0), SmPoint3d(0.0, 1.0, 0.0), r1);
             rails[1]->SetCurve(r1, TRUE);
+            r1->SetOwner(rails[1]);
             fillet_surface = new (ctx) SmPlane(SmPoint3d(0.0, 0.0, 0.0), SmVector3d(0.0, 0.0, 1.0));
             fillet_surface->MakeNurb();
             fg->SetFilletSurface(fillet_surface);
@@ -633,7 +635,9 @@ void run_misc(Rd& rd, const char* path, const SmContext& ctx, std::vector<double
             SmBSplineCurve::CreateLineSegment(ctx, 3, SmPoint3d(0.0, 0.0, 0.0), SmPoint3d(1.0, 0.0, 0.0), r0);
             SmBSplineCurve::CreateLineSegment(ctx, 3, SmPoint3d(0.0, 0.0, 0.0), SmPoint3d(0.0, 1.0, 0.0), r1);
             rails[0]->SetCurve(r0, TRUE);
+            r0->SetOwner(rails[0]);
             rails[1]->SetCurve(r1, TRUE);
+            r1->SetOwner(rails[1]);
             arr.Add(&t); // CrvPos left uninitialized
         }
 
