@@ -20,6 +20,7 @@ pub mod catmull_rom;
 pub mod cell;
 mod chain;
 pub mod compare;
+pub mod drawing_detail;
 pub mod drawing_measure;
 pub mod drawing_sheet;
 pub mod drawing_view;
