@@ -19,13 +19,17 @@ check flat lengths against hand-computed bend allowances.
 
 A rule's **Unfold Method** says where that K-factor comes from:
 
-- **K Factor**, the default: the value typed in. Below it the manager shows what a 90° bend then
-  gets, its bend allowance and bend deduction, to check the rule against a press brake chart.
+- **K Factor**, the default: the value typed in.
 - **Bend Deduction** or **Bend Allowance**: the chart's value for a 90° bend at the rule's
   thickness and bend radius, a length like the other fields. The rule then uses the K-factor
   that makes a 90° bend come out at exactly that value, and the manager shows it to 10 decimal
   places. Bends at other angles, and flanges with a radius of their own, follow from the same
   K-factor, so a 45° bend gets half the 90° bend allowance.
+
+Switching the method keeps the part as it is: the manager fills in the value the rule already
+gives. Picking Bend Deduction first shows the deduction the K-factor gives a 90° bend, so a
+K-factor rule can be checked against a chart before its value is typed over; switching back to
+K Factor fills in the K-factor the 90° value works out to.
 
 For example, 1.6 mm sheet with a 1.6 mm bend radius and a bend deduction of 2.83 mm unfolds with
 a K-factor of 0.4204578671, and a channel 20 + 50 + 20 mm over its outside flattens to
