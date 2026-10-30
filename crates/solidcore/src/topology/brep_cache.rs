@@ -670,7 +670,11 @@ impl crate::intersect::topology_solver::p1::TopologyObjects<CacheObject> for Bre
                 None => Ok(system),
             },
             // SmBrep: GetZoneTol3d(const SmBrep*)
-            CacheObject::Brep => Ok(self.brep.tolerance()),
+            CacheObject::Brep => Ok(crate::geom::tol::brep_zone_tol_3d(
+                k,
+                self.brep,
+                SmallTopoType::NormalSize,
+            )),
             // UNPORTED(query.poly): SmPolyVertex/SmPolyEdge/SmPolyFace::GetTolerance (the
             // poly B-rep is not in this view)
             CacheObject::PolyVertex(_) | CacheObject::PolyEdge(_) | CacheObject::PolyFace(_) => {

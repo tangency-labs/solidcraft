@@ -783,7 +783,7 @@ fn gen_box(rng: &mut Rng) -> Option<Value> {
 }
 
 /// A closed box solid (two regions) with a random corner and size.
-fn gen_box_solid(rng: &mut Rng) -> BrepIn {
+pub(crate) fn gen_box_solid(rng: &mut Rng) -> BrepIn {
     let size = *rng.choose(&[1e-2, 1.0, 1.0, 10.0, 1e3]).unwrap_or(&1.0);
     BrepIn::Box {
         origin: rng.point3(-10.0, 10.0),
@@ -798,7 +798,7 @@ fn gen_box_solid(rng: &mut Rng) -> BrepIn {
 /// Isolated vertices and wire line segments with their own tolerances; `large` is past
 /// the approximation threshold of `SmBrep::CalculateBoundingBox` (500 vertices, 100
 /// edges).
-fn gen_points_brep(rng: &mut Rng, large: bool) -> BrepIn {
+pub(crate) fn gen_points_brep(rng: &mut Rng, large: bool) -> BrepIn {
     let tol = |rng: &mut Rng| *rng.choose(&[0.0, 1e-7, 1e-5, 1e-3, 0.1]).unwrap_or(&1e-5);
     let (nv, ne) = if large {
         (300 + rng.below(250) as usize, 101 + rng.below(49) as usize)

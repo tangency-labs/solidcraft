@@ -43,6 +43,11 @@
 //! | [`scaled_zero_of_equations`]           | `SmTol::GetScaledZero(const SmEvalNFunctionsObject&)` |
 //! | [`scaled_zero_of_volume`]              | `SmTol::GetScaledZero(const SmVolume&)`        |
 //! | [`scaled_zero_of_curve`]               | `SmTol::GetScaledZero(const SmCurve&)` (CO-PORTED by `intersect.surface_drop_lib_p3`) |
+//! | [`brep_model_size_estimate`], [`set_brep_model_size_estimate`] | `SmTol::GetModelSizeEstimate(const SmBrep&)`, `SmTol::SetModelSizeEstimate(SmBrep&, double)` |
+//! | [`brep_large_small_size_ratio`], [`set_brep_large_small_size_ratio`] | `SmTol::GetLargeSmallSizeRatio(const SmBrep&)`, `SmTol::SetLargeSmallSizeRatio(SmBrep&, double)` |
+//! | [`brep_zone_tol_3d`], [`brep_approx_tol_3d`], [`brep_xsect_tol_3d`] | `SmTol::GetZoneTol3d(const SmBrep*, SmSmallTopoType)`, `GetApproxTol3d(const SmBrep*, ..)`, `GetXSectTol3d(const SmBrep*, ..)` |
+//! | [`brep_calc_face_zone_tol_3d`], [`brep_calc_edge_zone_tol_3d`], [`brep_calc_vertex_zone_tol_3d`] | `SmTol::CalcFaceZoneTol3d(SmBrep*)`, `CalcEdgeZoneTol3d(double, double, SmBrep*, SmZoneTol3d*)`, `CalcVertexZoneTol3d(double, double, SmBrep*, SmZoneTol3d*)` |
+//! | [`scaled_zero_of_brep`]                | `SmTol::GetScaledZero(const SmBrep&)`          |
 //! | [`map_to_1d`]                          | `SmTol::MapTo1d(SmTol3d&, SmVector3d&, const SmExtent1d&)` |
 //! | [`map_to_1d_on_curve`]                 | `SmTol::MapTo1d(SmTol3d&, double, const SmCurve&)` (PR #136 round 2) |
 //! | [`is_degenerate_curve`], [`zone_tol_3d_of_curve`] | `SmTol::IsDegenerate(const SmCurve*, SmExtent1d, SmXSectTol3d*)`, the `SmCurve` branch of `SmTol::GetZoneTol3d(const SmObject*)` |
@@ -74,7 +79,7 @@
 //!
 //! Not here yet (they need types of later units; see the `UNPORTED` markers below):
 //! every overload taking an `SmObject`, `SmCurve`, `SmSurface`, `SmVolume`,
-//! `SmPseudoBox`, `SmBrep`, `SmBrepData`, a topology
+//! `SmPseudoBox`, `SmBrepData`, a topology
 //! entity, a classification / interval object, or `SmEvalNFunctionsObject`.
 //!
 //! Deviations:
@@ -95,6 +100,11 @@
 //!   (the `SmObject` run-time type system) are replaced by Rust's static types.
 //! - `SM_ASSERT*`, `WARN`, `ERR_MSG` and `SM_DEBUG_CODE` blocks are not ported (they do
 //!   not change results in the release build).
+//! - The `SmBrep` overloads take the [`Brep`] by reference (a null `SmBrep*`
+//!   dereferences upstream); the B-rep's context is the kernel context.
+//!   [`scaled_zero_of_brep`] returns the error of `SmBrep::CalculateBoundingBox`
+//!   (`query::brep::calculate_bounding_box`) where upstream ignores the status and
+//!   takes the scaled zero of whatever box the call left.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -114,14 +124,11 @@ use crate::math::{
 use crate::surface::volume::Volume;
 use crate::topology::{Brep, EdgeId, FaceId, VertexId};
 
-// UNPORTED(geom.tol): SmTol::GetModelSizeEstimate(const SmBrep&),
-// SmTol::SetModelSizeEstimate(SmBrep&, double), SmTol::GetZoneTol3d(const SmBrep*),
-// SmTol::GetApproxTol3d(const SmBrep*), SmTol::CalcFaceZoneTol3d(SmBrep*),
-// SmTol::CalcEdgeZoneTol3d(.., SmBrep*, ..), SmTol::CalcVertexZoneTol3d(.., SmBrep*, ..)
-// can now be written over `topology::Brep` (`Brep::tolerance`,
-// `Brep::this_model_size_estimate`, `Brep::set_this_model_size_estimate`, unit
-// topology.brep_p1); SmTol::GetScaledZero(const SmBrep&) needs SmBrep::CalculateBoundingBox
-// (query.brep).
+// The SmBrep overloads (GetModelSizeEstimate / SetModelSizeEstimate /
+// GetLargeSmallSizeRatio / SetLargeSmallSizeRatio(SmBrep&), GetZoneTol3d /
+// GetApproxTol3d / GetXSectTol3d(const SmBrep*), CalcFaceZoneTol3d(SmBrep*),
+// CalcEdgeZoneTol3d / CalcVertexZoneTol3d(.., SmBrep*, ..) and GetScaledZero(const
+// SmBrep&)) are the `brep_*` functions below.
 // UNPORTED(geom.tol) (the owner in harness/callgraph/units.json; every call site of
 // these overloads carries this tag): SmTol::GetZoneTol3d(const
 // SmObject*), SmTol::GetZoneTol3d(const SmBrepData*), SmTol::GetApproxTol3d(const
@@ -132,8 +139,10 @@ use crate::topology::{Brep, EdgeId, FaceId, VertexId};
 // virtual GetTolerance: the base is topology::topology::Topology::tolerance, the
 // overrides belong to SmVertex, SmEdge, SmFace, SmEdgeuse), SmSurface/SmCurve
 // (GetFace/GetEdge), SmBrep, SmBrepData and SmCurveClassification; those classes have
-// no Rust object type yet (the SmBrep arm itself, SmBrep::GetTolerance, is
-// `Brep::tolerance`).
+// no Rust object type yet: an `SmObject*` handle needs its owning B-rep arena, which
+// these signatures do not carry. The SmBrep arm itself is brep_zone_tol_3d, and the
+// adapters that do hold the arena dispatch the other arms themselves (e.g.
+// topology::brep_cache's object_zone_tol_3d).
 // SmTol::IsDegenerate(const SmCurve*, SmExtent1d, ..) is is_degenerate_curve,
 // SmTol::MapTo1d(SmTol3d&, double, const SmCurve&) is map_to_1d_on_curve and
 // SmTol::GetScaledZero(const SmCurve&) is scaled_zero_of_curve (PR #136). The edge branch
@@ -476,7 +485,7 @@ pub fn calc_edge_zone_tol_3d(
         edge_edge_max_gap,
         edge_face_max_gap,
         max_face_zone_tol,
-        ctx,
+        context_zone_tol_3d(k, ctx, SmallTopoType::NormalSize),
     )
 }
 
@@ -497,25 +506,140 @@ pub fn calc_vertex_zone_tol_3d(
         vertex_edge_max_gap,
         vertex_face_max_gap,
         max_edge_zone_tol,
-        ctx,
+        context_zone_tol_3d(k, ctx, SmallTopoType::NormalSize),
     )
 }
 
 /// Shared body of `CalcEdgeZoneTol3d` / `CalcVertexZoneTol3d`.
-fn calc_gap_zone_tol(
-    k: &Kernel,
-    gap_1d: f64,
-    gap_2d: f64,
-    max_up: Option<f64>,
-    ctx: Option<&Context>,
-) -> f64 {
-    let def = context_zone_tol_3d(k, ctx, SmallTopoType::NormalSize);
+fn calc_gap_zone_tol(k: &Kernel, gap_1d: f64, gap_2d: f64, max_up: Option<f64>, def: f64) -> f64 {
     let gain = gap_gain(k);
     let r = match max_up {
         Some(up) => max4(def, up, gain * gap_1d / 2.0, gain * gap_2d - def),
         None => max3(def, gain * gap_1d / 2.0, gain * gap_2d - def),
     };
     zone_tol3d(k, r)
+}
+
+// ---- B-rep tolerances ---------------------------------------------------------------
+
+/// A B-rep's model size estimate, its context's when it has none
+/// (`SmTol::GetModelSizeEstimate(const SmBrep&)`: `GetThisModelSizeEstimate()` with
+/// its default `bChaseDefaults = TRUE`).
+#[must_use]
+pub fn brep_model_size_estimate(k: &Kernel, b: &Brep) -> f64 {
+    b.this_model_size_estimate(k, true)
+}
+
+/// Sets a B-rep's model size estimate (and its context's) and returns the B-rep's new
+/// zone tolerance (`SmTol::SetModelSizeEstimate(SmBrep&, double)`; upstream default
+/// [`USE_DEFAULT`]).
+pub fn set_brep_model_size_estimate(k: &mut Kernel, b: &mut Brep, model_size_estimate: f64) -> f64 {
+    b.set_this_model_size_estimate(k, model_size_estimate)
+}
+
+/// A B-rep's large/small size ratio, its context's (else the system's) when it has
+/// none (`SmTol::GetLargeSmallSizeRatio(const SmBrep&)`).
+#[must_use]
+pub fn brep_large_small_size_ratio(k: &Kernel, b: &Brep) -> f64 {
+    b.this_large_small_size_ratio(k, true)
+}
+
+/// Sets a B-rep's large/small size ratio and its context's
+/// (`SmTol::SetLargeSmallSizeRatio(SmBrep&, double)`; upstream default
+/// [`USE_DEFAULT`]).
+pub fn set_brep_large_small_size_ratio(k: &mut Kernel, b: &mut Brep, large_small_size_ratio: f64) {
+    b.set_this_large_small_size_ratio(k, large_small_size_ratio);
+}
+
+/// A B-rep's zone tolerance (`SmTol::GetZoneTol3d(const SmBrep*, SmSmallTopoType)`):
+/// `SmBrep::GetTolerance` as a zone tolerance; `small` is ignored, as upstream.
+#[must_use]
+pub fn brep_zone_tol_3d(k: &Kernel, b: &Brep, _small: SmallTopoType) -> f64 {
+    let tol = b.tolerance();
+    if tol == UNINIT_TOL {
+        // upstream: smos_AssertErrorMessage(.., "Uninit-Tol", ..)
+        zone_tol3d(k, UNINIT_TOL)
+    } else {
+        zone_tol3d(k, tol)
+    }
+}
+
+/// A B-rep's approximation tolerance, half its zone tolerance
+/// (`SmTol::GetApproxTol3d(const SmBrep*, SmSmallTopoType)`).
+#[must_use]
+pub fn brep_approx_tol_3d(k: &Kernel, b: &Brep, small: SmallTopoType) -> f64 {
+    approx_tol3d(k, 0.5 * brep_zone_tol_3d(k, b, small))
+}
+
+/// A B-rep's intersection tolerance, twice its zone tolerance
+/// (`SmTol::GetXSectTol3d(const SmBrep*, SmSmallTopoType)`).
+#[must_use]
+pub fn brep_xsect_tol_3d(k: &Kernel, b: &Brep, small: SmallTopoType) -> f64 {
+    xsect_tol3d(k, 2.0 * brep_zone_tol_3d(k, b, small))
+}
+
+/// A face's zone tolerance in a B-rep: the B-rep zone tolerance
+/// (`SmTol::CalcFaceZoneTol3d(SmBrep*)`).
+#[must_use]
+pub fn brep_calc_face_zone_tol_3d(k: &Kernel, b: &Brep) -> f64 {
+    brep_zone_tol_3d(k, b, SmallTopoType::NormalSize)
+}
+
+/// An edge's zone tolerance in a B-rep from its largest edge/edge and edge/face gaps
+/// (`SmTol::CalcEdgeZoneTol3d(double, double, SmBrep*, SmZoneTol3d*)`): as
+/// [`calc_edge_zone_tol_3d`] with the B-rep zone tolerance as the default.
+#[must_use]
+pub fn brep_calc_edge_zone_tol_3d(
+    k: &Kernel,
+    edge_edge_max_gap: f64,
+    edge_face_max_gap: f64,
+    b: &Brep,
+    max_face_zone_tol: Option<f64>,
+) -> f64 {
+    calc_gap_zone_tol(
+        k,
+        edge_edge_max_gap,
+        edge_face_max_gap,
+        max_face_zone_tol,
+        brep_zone_tol_3d(k, b, SmallTopoType::NormalSize),
+    )
+}
+
+/// A vertex's zone tolerance in a B-rep from its largest vertex/edge and vertex/face
+/// gaps (`SmTol::CalcVertexZoneTol3d(double, double, SmBrep*, SmZoneTol3d*)`): as
+/// [`calc_vertex_zone_tol_3d`] with the B-rep zone tolerance as the default.
+#[must_use]
+pub fn brep_calc_vertex_zone_tol_3d(
+    k: &Kernel,
+    vertex_edge_max_gap: f64,
+    vertex_face_max_gap: f64,
+    b: &Brep,
+    max_edge_zone_tol: Option<f64>,
+) -> f64 {
+    calc_gap_zone_tol(
+        k,
+        vertex_edge_max_gap,
+        vertex_face_max_gap,
+        max_edge_zone_tol,
+        brep_zone_tol_3d(k, b, SmallTopoType::NormalSize),
+    )
+}
+
+/// The scaled zero of a B-rep: that of its bounding box
+/// (`SmTol::GetScaledZero(const SmBrep&)`; `SmBrep::CalculateBoundingBox` with its
+/// default arguments).
+///
+/// # Errors
+///
+/// Those of [`crate::query::brep::calculate_bounding_box`] (upstream ignores the
+/// status).
+pub fn scaled_zero_of_brep(k: &Kernel, b: &Brep) -> Result<f64> {
+    let bbox = crate::query::brep::calculate_bounding_box(
+        k,
+        b,
+        crate::query::brep::BoundingBoxOptions::default(),
+    )?;
+    Ok(bbox.scaled_zero())
 }
 
 // ---- predicates --------------------------------------------------------------------
@@ -1118,6 +1242,105 @@ impl<A: Ord + Copy, B: Ord + Copy> Relation<A, B> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ---- the SmBrep overloads ----------------------------------------------------------
+
+    #[test]
+    fn brep_zone_tolerances_are_the_brep_tolerance_as_a_zone_tolerance() {
+        let k = Kernel::default();
+        let mut b = Brep::new();
+        assert_eq!(
+            brep_zone_tol_3d(&k, &b, SmallTopoType::NormalSize),
+            ZONE_TOL_3D
+        );
+        // SmZoneTol3d(double): fabs, and SM_USE_DEFAULT is the system zone tolerance
+        b.set_tolerance(-2e-4);
+        for small in [SmallTopoType::NormalSize, SmallTopoType::SmallSize] {
+            assert_eq!(brep_zone_tol_3d(&k, &b, small), 2e-4);
+            assert_eq!(brep_approx_tol_3d(&k, &b, small), 1e-4);
+            assert_eq!(brep_xsect_tol_3d(&k, &b, small), 4e-4);
+        }
+        assert_eq!(brep_calc_face_zone_tol_3d(&k, &b), 2e-4);
+        b.set_tolerance(USE_DEFAULT);
+        assert_eq!(
+            brep_zone_tol_3d(&k, &b, SmallTopoType::NormalSize),
+            k.tolerances.zone_tol_3d
+        );
+        b.set_tolerance(UNINIT_TOL);
+        assert_eq!(
+            brep_zone_tol_3d(&k, &b, SmallTopoType::NormalSize),
+            UNINIT_TOL
+        );
+    }
+
+    #[test]
+    fn brep_model_size_estimate_and_ratio_chase_the_context() {
+        let mut k = Kernel::default();
+        let mut b = Brep::new();
+        assert_eq!(brep_model_size_estimate(&k, &b), MODEL_SIZE_ESTIMATE);
+        assert_eq!(brep_large_small_size_ratio(&k, &b), LARGE_SMALL_SIZE_RATIO);
+        // 500..50000 -> 1e-4; the context gets the estimate too
+        assert_eq!(set_brep_model_size_estimate(&mut k, &mut b, 5000.0), 1e-4);
+        assert_eq!(brep_model_size_estimate(&k, &b), 5000.0);
+        assert_eq!(context_model_size_estimate(&k, &k.context), 5000.0);
+        assert_eq!(brep_zone_tol_3d(&k, &b, SmallTopoType::NormalSize), 1e-4);
+        set_brep_large_small_size_ratio(&mut k, &mut b, 10.0);
+        assert_eq!(brep_large_small_size_ratio(&k, &b), 10.0);
+        assert_eq!(k.context.stored_large_small_size_ratio(), 10.0);
+    }
+
+    #[test]
+    fn brep_gap_zone_tolerances_default_to_the_brep_tolerance() {
+        let k = Kernel::default();
+        let mut b = Brep::new();
+        b.set_tolerance(1e-3);
+        let gain = gap_gain(&k);
+        // the default dominates small gaps
+        assert_eq!(brep_calc_edge_zone_tol_3d(&k, 1e-6, 1e-6, &b, None), 1e-3);
+        assert_eq!(brep_calc_vertex_zone_tol_3d(&k, 1e-6, 1e-6, &b, None), 1e-3);
+        // half the gain-scaled 1D gap, the 2D gap less the default, the optional max
+        assert_eq!(
+            brep_calc_edge_zone_tol_3d(&k, 0.1, 0.0, &b, None),
+            gain * 0.1 / 2.0
+        );
+        assert_eq!(
+            brep_calc_vertex_zone_tol_3d(&k, 0.0, 0.1, &b, None),
+            gain * 0.1 - 1e-3
+        );
+        assert_eq!(brep_calc_edge_zone_tol_3d(&k, 0.0, 0.0, &b, Some(0.5)), 0.5);
+        assert_eq!(
+            brep_calc_vertex_zone_tol_3d(&k, 0.0, 0.0, &b, Some(0.5)),
+            0.5
+        );
+        // not the context's tolerance
+        assert_ne!(
+            brep_calc_edge_zone_tol_3d(&k, 0.0, 0.0, &b, None),
+            calc_edge_zone_tol_3d(&k, 0.0, 0.0, None, Some(&k.context))
+        );
+    }
+
+    #[test]
+    fn brep_scaled_zero_is_that_of_its_bounding_box() {
+        let mut k = Kernel::default();
+        let b = crate::primitive::api_primitives::create_box(
+            &mut k,
+            Vec3::new(-3.0, 1.0, 2.0),
+            1000.0,
+            1.0,
+            1.0,
+        )
+        .unwrap();
+        let bbox = crate::query::brep::calculate_bounding_box(
+            &k,
+            &b,
+            crate::query::brep::BoundingBoxOptions::default(),
+        )
+        .unwrap();
+        let sz = scaled_zero_of_brep(&k, &b).unwrap();
+        assert_eq!(sz, bbox.scaled_zero());
+        // SM_EFF_ZERO * (1 + the far corner x = 997, expanded by the entity tolerances)
+        assert!((sz - EFF_ZERO * 998.0).abs() <= 1e-7 * sz, "{sz:e}");
+    }
 
     #[test]
     fn relation_removal_preserves_other_pairs_and_releases_empty_keys() {

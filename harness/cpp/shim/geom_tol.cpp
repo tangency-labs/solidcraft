@@ -3,10 +3,15 @@
 // Wraps upstream SmTol (source/SMLib/inc/SmTol.h, source/SMLib/src/SmTol.cpp) and
 // SmRelation (source/SMLib/inc/SmRelation.h).
 #include "sc_shim.h"
+#include "support/topology_fixture.h"
 
 #include "StdAfx.h"
 #include <SmBSplineCurve.h>
 #include <SmBSplineVolume.h>
+#include <SmBrep.h>
+#include <SmCacheMgr.h>
+#include <SmFace.h>
+#include <SmSurface.h>
 #include <SmCircle.h>
 #include <SmCurve.h>
 #include <SmLine.h>
@@ -574,6 +579,82 @@ SC_EXPORT int32_t sc_geom_tol_curve(const double* in, int64_t n_in, double* out,
         return SC_ERR_ARG;
     }
     delete c;
+    return sc_copy_out(o.data(), (int64_t)o.size(), out, cap, out_len);
+    SC_CATCH
+}
+
+namespace
+{
+// Points a B-rep at `ctx` for the scope (the fixture B-rep lives in the shared fixture
+// context, which SmTol::SetModelSizeEstimate(SmBrep&, ..) would change for later cases).
+struct ScBrepContext
+{
+    SmBrep& brep;
+    const SmContext* orig;
+    ScBrepContext(SmBrep& b, const SmContext* ctx) : brep(b), orig(b.GetContext()) { brep.SetContext(ctx); }
+    ~ScBrepContext() { brep.SetContext(orig); }
+};
+} // namespace
+
+// The SmBrep overloads of SmTol on the B-rep of `path` / `block`, with the system
+// tolerances set from (model_size, ratio) and the B-rep moved into a fresh SmContext.
+//   args: set_est est set_ratio ratio small gap1 gap2 has_max max  (9 doubles)
+//   out : SetModelSizeEstimate (0 when not set), GetModelSizeEstimate,
+//         GetLargeSmallSizeRatio, GetZoneTol3d, GetApproxTol3d, GetXSectTol3d,
+//         CalcFaceZoneTol3d, CalcEdgeZoneTol3d, CalcVertexZoneTol3d, GetScaledZero (10)
+SC_EXPORT int32_t sc_geom_tol_brep(const char* path, const double* block, int64_t n_block,
+                                   double model_size, double ratio, const double* args, int64_t n_args,
+                                   double* out, int64_t cap, int64_t* out_len)
+{
+    if (path == nullptr || block == nullptr || n_block < 1 || args == nullptr || n_args != 9 ||
+        out_len == nullptr || (out == nullptr && cap > 0))
+        return SC_ERR_ARG;
+    for (int64_t i = 0; i < n_args; ++i)
+        if (!std::isfinite(args[i]))
+            return SC_ERR_ARG;
+    int64_t small = (int64_t)args[4];
+    if (small < 0 || small > 4)
+        return SC_ERR_ARG;
+    SC_TRY
+    std::vector<double> o;
+    int32_t rc = sc_topology_fixture::apply(path, block, n_block, [&](const sc_topology_fixture::View& g) -> int32_t {
+        // the trimmed surface caches a file read leaves on face surfaces (the port has
+        // no object caches)
+        for (SmFace* f : g.faces)
+        {
+            SmSurface* srf = f->GetSurface();
+            if (srf == nullptr)
+                return SC_ERR_ARG; // SmFace::CalculateBoundingBox dereferences it unchecked
+            if (SmCacheMgr::GetObjectCache(SM_OC_TRIMSRF, srf) != nullptr)
+                SmCacheMgr::DeleteObjectsCache(SM_OC_TRIMSRF, srf);
+        }
+        ScSystemTol sSys(model_size, ratio);
+        SmContext ctx;
+        ScBrepContext sCtx(g.brep, &ctx);
+        SmBrep& b = g.brep;
+        const SmBrep* cb = &b;
+        SmSmallTopoType eSmall = (SmSmallTopoType)small;
+        double z = 0.0;
+        if (args[0] != 0.0)
+            z = (double)SmTol::SetModelSizeEstimate(b, args[1]);
+        if (args[2] != 0.0)
+            SmTol::SetLargeSmallSizeRatio(b, args[3]);
+        SmZoneTol3d sMax(args[8]);
+        SmZoneTol3d* pMax = args[7] != 0.0 ? &sMax : NULL;
+        o.push_back(z);
+        o.push_back(SmTol::GetModelSizeEstimate(*cb));
+        o.push_back(SmTol::GetLargeSmallSizeRatio(*cb));
+        o.push_back((double)SmTol::GetZoneTol3d(cb, eSmall));
+        o.push_back((double)SmTol::GetApproxTol3d(cb, eSmall));
+        o.push_back((double)SmTol::GetXSectTol3d(cb, eSmall));
+        o.push_back((double)SmTol::CalcFaceZoneTol3d(&b));
+        o.push_back((double)SmTol::CalcEdgeZoneTol3d(args[5], args[6], &b, pMax));
+        o.push_back((double)SmTol::CalcVertexZoneTol3d(args[5], args[6], &b, pMax));
+        o.push_back((double)SmTol::GetScaledZero(*cb));
+        return 0;
+    });
+    if (rc != 0)
+        return rc;
     return sc_copy_out(o.data(), (int64_t)o.size(), out, cap, out_len);
     SC_CATCH
 }

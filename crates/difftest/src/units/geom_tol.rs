@@ -24,6 +24,17 @@
 //! inverted interval, tolerances around the intersection tolerance, and an optional
 //! override; the result is `r = [scaled zero, tol1d, degenerate]`.
 //!
+//! A B-rep case (`op = "brep"`) runs the `SmBrep` overloads of `SmTol`
+//! (`SetModelSizeEstimate` when `set_est`, `SetLargeSmallSizeRatio` when `set_ratio`,
+//! then `GetModelSizeEstimate`, `GetLargeSmallSizeRatio`, `GetZoneTol3d`,
+//! `GetApproxTol3d`, `GetXSectTol3d`, `CalcFaceZoneTol3d`, `CalcEdgeZoneTol3d` /
+//! `CalcVertexZoneTol3d` with `a = [gap1, gap2, max]` (`flag`: pass `max`) and
+//! `GetScaledZero`) on the `query.brep` fixture B-rep `brep` (a box solid or points and
+//! wire segments), moved into a fresh context, with the system tolerances from `model`
+//! and `ratio`; the Rust side imports the B-rep's export and uses a fresh kernel with
+//! the same system tolerances. The result is `r` (10 values, the first 0 without
+//! `set_est`). They are generated under their own seeds (`brep` cases).
+//!
 //! Every run uses at least [`MIN_GENERATED`] generated inputs (more with `--seeds`).
 
 use serde::{Deserialize, Serialize};
@@ -46,12 +57,18 @@ use solidcore_ffi::units::geom_tol::{self as ffi, Op, OpArgs, RelationStep};
 use super::intersect_surface_drop_lib_p2::{
     add3, ffi_curve, gen_knots, gen_scale, pick, rust_curve, scale3, unit_dir, CurveIn,
 };
+use super::query_brep::{gen_box_solid, gen_points_brep};
+use super::query_face_p1::{everything, inexact, model};
+use super::topology_edgeuse_p1::fixture_input;
 use crate::case::CaseContext;
 use crate::runner::default_cases;
 use crate::{Case, HarnessError, Output, Rng, UnitDiff};
 
 /// Generated cases per run, whatever `--seeds` says (it can only raise this).
 pub const MIN_GENERATED: usize = 3000;
+
+/// Generated B-rep cases per run, whatever `--seeds` says.
+pub const BREP_GENERATED: usize = 160;
 
 /// `geom.tol` runner.
 pub struct Runner;
@@ -92,6 +109,9 @@ const RELATION: &str = "relation";
 /// const SmCurve&)` and `IsDegenerate(const SmCurve*, SmExtent1d, ..)` on `curve`, with
 /// `a = [param, tol, ivl0, ivl1, xsect]` (`flag`: pass `xsect`).
 const CURVE: &str = "curve";
+
+/// Name of the B-rep pseudo-op (see the module docs).
+const BREP: &str = "brep";
 
 /// Name of the volume pseudo-op: `GetScaledZero(const SmVolume&)` on the supplied
 /// eight Cartesian poles, k index fastest, with degree 1, knots 0011 and unit weights.
@@ -146,6 +166,12 @@ struct Inputs {
     curve: Option<CurveIn>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     poles: Option<[[f64; 3]; 8]>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    brep: Option<Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    set_est: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    set_ratio: Option<f64>,
 }
 
 fn lookup(name: &str) -> Result<Op, HarnessError> {
@@ -229,6 +255,9 @@ fn cpp(i: &Inputs) -> Result<Output, HarnessError> {
     if i.op == CURVE {
         return cpp_curve(i);
     }
+    if i.op == BREP {
+        return cpp_brep(i);
+    }
     if i.op == VOLUME {
         let p = volume_ffi_poles(i)?;
         return match ffi::volume_scaled_zero(&p) {
@@ -302,6 +331,124 @@ fn rust_volume_case(i: &Inputs) -> Result<Output, HarnessError> {
 }
 
 // ---- Rust side ----------------------------------------------------------------------
+
+fn brep_args(i: &Inputs) -> ffi::BrepTolArgs {
+    ffi::BrepTolArgs {
+        set_estimate: i.set_est,
+        set_ratio: i.set_ratio,
+        small: i.small,
+        gap1: arg(i, 0),
+        gap2: arg(i, 1),
+        max: i.flag.then(|| arg(i, 2)),
+    }
+}
+
+fn brep_value(i: &Inputs) -> Result<&Value, HarnessError> {
+    i.brep
+        .as_ref()
+        .ok_or_else(|| HarnessError::new("brep case without brep"))
+}
+
+fn cpp_brep(i: &Inputs) -> Result<Output, HarnessError> {
+    let (path, block) = fixture_input(brep_value(i)?.clone())?;
+    match ffi::brep_tols(&path, &block, i.model, i.ratio, &brep_args(i)) {
+        Ok(v) => Ok(Output::new().values("r", v)),
+        Err(e) => Err(HarnessError::new(e.to_string())),
+    }
+}
+
+fn rust_brep(i: &Inputs) -> Result<Output, HarnessError> {
+    let m = model(brep_value(i)?)?;
+    let (faces, edges) = everything(&m.brep);
+    if let Some(o) = inexact(&m, &faces, &edges) {
+        return Ok(o);
+    }
+    let mut b = m.brep;
+    let mut k = kernel(i.model, i.ratio);
+    let small = SmallTopoType::from_code(i.small)
+        .ok_or_else(|| HarnessError::new(format!("small {}", i.small)))?;
+    let a = brep_args(i);
+    let z = match a.set_estimate {
+        Some(est) => tol::set_brep_model_size_estimate(&mut k, &mut b, est),
+        None => 0.0,
+    };
+    if let Some(ratio) = a.set_ratio {
+        tol::set_brep_large_small_size_ratio(&mut k, &mut b, ratio);
+    }
+    let mut r = vec![
+        z,
+        tol::brep_model_size_estimate(&k, &b),
+        tol::brep_large_small_size_ratio(&k, &b),
+        tol::brep_zone_tol_3d(&k, &b, small),
+        tol::brep_approx_tol_3d(&k, &b, small),
+        tol::brep_xsect_tol_3d(&k, &b, small),
+        tol::brep_calc_face_zone_tol_3d(&k, &b),
+        tol::brep_calc_edge_zone_tol_3d(&k, a.gap1, a.gap2, &b, a.max),
+        tol::brep_calc_vertex_zone_tol_3d(&k, a.gap1, a.gap2, &b, a.max),
+    ];
+    match tol::scaled_zero_of_brep(&k, &b) {
+        Ok(v) => r.push(v),
+        Err(e) => {
+            return Ok(Output::unported(&e)
+                .unwrap_or_else(|| Output::err(format!("rust_error: {e}"))))
+        }
+    }
+    Ok(Output::new().values("r", r))
+}
+
+/// A generated B-rep case (see the module docs).
+fn brep_case(rng: &mut Rng) -> Inputs {
+    let brep = if rng.chance(0.6) {
+        gen_box_solid(rng)
+    } else {
+        gen_points_brep(rng, false)
+    };
+    let est = |rng: &mut Rng| -> f64 {
+        const E: [f64; 12] = [
+            tol::USE_DEFAULT, 0.00005, 0.003, 0.5, 0.7, 50.0, 500.0, 2000.0, 50000.0, 6e6, 0.0,
+            -3.0,
+        ];
+        if rng.chance(0.7) {
+            *rng.choose(&E).unwrap_or(&50.0)
+        } else {
+            10f64.powf(rng.uniform(-6.0, 8.0))
+        }
+    };
+    let ratio = |rng: &mut Rng| -> f64 {
+        *rng.choose(&[tol::USE_DEFAULT, 1.0, 10.0, 1000.0, 1e5, 0.0])
+            .unwrap_or(&1000.0)
+    };
+    let gap = |rng: &mut Rng| -> f64 {
+        if rng.chance(0.2) {
+            0.0
+        } else {
+            10f64.powf(rng.uniform(-8.0, 0.0))
+        }
+    };
+    let model = if rng.chance(0.5) { tol::USE_DEFAULT } else { est(rng) };
+    let sys_ratio = ratio(rng);
+    let set_est = rng.chance(0.75).then(|| est(rng));
+    let set_ratio = rng.chance(0.4).then(|| ratio(rng));
+    let a = vec![gap(rng), gap(rng), gap(rng)];
+    Inputs {
+        op: BREP.to_string(),
+        model,
+        ratio: sys_ratio,
+        a,
+        flag: rng.chance(0.5),
+        small: rng.below(5) as i32,
+        objs: Vec::new(),
+        card: 0,
+        n1: 0,
+        n2: 0,
+        steps: Vec::new(),
+        curve: None,
+        poles: None,
+        brep: serde_json::to_value(brep).ok(),
+        set_est,
+        set_ratio,
+    }
+}
 
 /// The kernel `SmTol::SetModelSizeEstimate(model)` +
 /// `SmTol::SetLargeSmallSizeRatio(ratio)` would leave behind.
@@ -550,6 +697,9 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
     if i.op == VOLUME {
         return rust_volume_case(i);
     }
+    if i.op == BREP {
+        return rust_brep(i);
+    }
     let op = lookup(&i.op)?;
     match rust_values(op, i)? {
         Ok(v) => Ok(Output::new().values("r", v)),
@@ -687,6 +837,9 @@ fn relation_case(rng: &mut Rng) -> Inputs {
         steps,
         curve: None,
         poles: None,
+        brep: None,
+        set_est: None,
+        set_ratio: None,
     }
 }
 
@@ -791,6 +944,9 @@ fn curve_case(rng: &mut Rng) -> Inputs {
         steps: Vec::new(),
         curve: Some(curve),
         poles: None,
+        brep: None,
+        set_est: None,
+        set_ratio: None,
     }
 }
 
@@ -910,6 +1066,9 @@ fn gen_case(rng: &mut Rng) -> Inputs {
         steps: Vec::new(),
         curve: None,
         poles: None,
+        brep: None,
+        set_est: None,
+        set_ratio: None,
     }
 }
 
@@ -923,11 +1082,25 @@ impl UnitDiff for Runner {
     }
 
     fn cases(&self, ctx: &CaseContext) -> Result<Vec<Case>, HarnessError> {
-        let ctx = CaseContext {
+        let gen_ctx = CaseContext {
             seeds: ctx.seeds.max(MIN_GENERATED),
             ..ctx.clone()
         };
-        default_cases(self, &ctx)
+        let mut v = default_cases(self, &gen_ctx)?;
+        // the B-rep cases under their own names and seeds, so that each `gen` case
+        // stays the one the baseline has
+        let brep_ctx = CaseContext {
+            seeds: BREP_GENERATED,
+            ..ctx.clone()
+        };
+        for mut c in brep_ctx.generated_cases("geom.tol:brep", |rng| {
+            serde_json::to_value(brep_case(rng)).ok()
+        }) {
+            c.unit = self.id().to_string();
+            c.name = c.name.replacen("gen", "brep", 1);
+            v.push(c);
+        }
+        Ok(v)
     }
 
     fn run_cpp(&self, case: &Case) -> Result<Output, HarnessError> {

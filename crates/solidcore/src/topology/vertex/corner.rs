@@ -96,7 +96,7 @@ fn brep_xsect_tol_3d(k: &Kernel, b: &Brep, v: VertexId) -> Result<f64> {
 /// (`SmXSectTol3d(double)`).
 #[must_use]
 pub fn xsect_tol_3d_of_brep(k: &Kernel, brep: &Brep) -> f64 {
-    tol::xsect_tol3d(k, 2.0 * tol::zone_tol3d(k, brep.tolerance()))
+    tol::brep_xsect_tol_3d(k, brep, tol::SmallTopoType::NormalSize)
 }
 
 /// `SmVertex::IsWithinXSectTol3dOfFaces(&maxGap3d, &maxGapFace, bForceCalc)`: whether

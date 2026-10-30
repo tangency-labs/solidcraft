@@ -595,8 +595,11 @@ impl FilletSession<'_> {
         if self.executive.options.global_merge {
             // SmTol::GetApproxTol3d(m_pTargetBrep), then m_vTI.IntersectInsertRelate()
             // between the target and the intermediate body.
-            let tolerance =
-                crate::geom::tol::approx_tol3d(k, 0.5 * self.objects.target.tolerance());
+            let tolerance = crate::geom::tol::brep_approx_tol_3d(
+                k,
+                &*self.objects.target,
+                crate::geom::tol::SmallTopoType::NormalSize,
+            );
             self.executive.intersector.set_this_approx_tol_3d(tolerance);
             self.with_insertion_geometry(k, |k, ti, geometry| {
                 ti.intersect_insert_relate(k, geometry, FilletObject::Intersector)

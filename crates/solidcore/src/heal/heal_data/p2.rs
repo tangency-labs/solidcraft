@@ -87,15 +87,17 @@ use crate::geom::hash_table::{
     gap_histogram_index, FindPairsOptions, ObjsInVoxels, GAP_HISTOGRAM_BUCKETS,
 };
 use crate::geom::tol::{
-    approx_tol_3d, calc_edge_zone_tol_3d, calc_vertex_zone_tol_3d, context_model_size_estimate,
-    context_zone_tol_3d, gap_gain, size_estimate_to_zone_tol_3d, zone_tol3d, SmallTopoType,
+    approx_tol_3d, brep_calc_edge_zone_tol_3d, brep_calc_face_zone_tol_3d,
+    brep_calc_vertex_zone_tol_3d, brep_model_size_estimate, calc_edge_zone_tol_3d,
+    calc_vertex_zone_tol_3d, context_model_size_estimate, context_zone_tol_3d,
+    set_brep_model_size_estimate, size_estimate_to_zone_tol_3d, zone_tol3d, SmallTopoType,
     USE_DEFAULT,
 };
 use crate::heal::face_props::{
     FaceProps, HealerOpType, LoopObject, MixedLinkType, PropStage, Tri, TriedLinkType,
 };
 use crate::kernel::Kernel;
-use crate::math::{max3, max4, BIG_DOUBLE, EFF_ZERO, UNDEF_DOUBLE};
+use crate::math::{BIG_DOUBLE, EFF_ZERO, UNDEF_DOUBLE};
 use crate::topology::edgeuse::p1 as eu1;
 use crate::topology::face::p2 as face_p2;
 use crate::topology::{
@@ -1971,23 +1973,6 @@ pub struct HealData<O: LoopObject> {
     pub new_shells_from_closed_sheets: Vec<ShellId>,
 }
 
-/// `SmZoneTol3d sZoneTol3d = SmTol::GetZoneTol3d(pBrep)` and the other `SmBrep`
-/// overloads of `SmTol` (`SmBrep::GetTolerance`).
-fn brep_zone_tol_3d(b: &Brep) -> f64 {
-    b.tolerance()
-}
-
-/// `SmTol::GetModelSizeEstimate(const SmBrep&)` (`SmBrep::GetThisModelSizeEstimate`).
-fn brep_model_size_estimate(k: &Kernel, b: &Brep) -> f64 {
-    b.this_model_size_estimate(k, true)
-}
-
-/// `SmTol::SetModelSizeEstimate(SmBrep&, double)` (`SmBrep::SetThisModelSizeEstimate`;
-/// the returned value is not used upstream).
-fn set_brep_model_size_estimate(k: &mut Kernel, b: &mut Brep, size: f64) -> f64 {
-    b.set_this_model_size_estimate(k, size)
-}
-
 /// `SmBrep::SetTolerance(sZoneTol3d)` (`SM_OLDTOL_LINE`, default arguments).
 fn set_brep_tolerance(k: &Kernel, b: &mut Brep, zone_tol_3d: f64) -> Result<()> {
     crate::topology::brep::p2::set_tolerance(k, b, zone_tol_3d, true, true)
@@ -2007,23 +1992,6 @@ fn set_face_tolerance(
 /// `SmFace::IsDegenerate(bSkipQuickCheck)` (`pOptZoneTol3d` default `NULL`).
 fn face_is_degenerate(k: &Kernel, b: &mut Brep, f: FaceId, skip_quick_check: bool) -> Result<bool> {
     crate::topology::face::p3::is_degenerate(k, b, f, skip_quick_check, None)
-}
-
-/// `SmTol::CalcEdgeZoneTol3d` / `CalcVertexZoneTol3d` with an `SmBrep`: the context
-/// formula over the B-rep's zone tolerance `def`.
-fn calc_brep_gap_zone_tol(
-    k: &Kernel,
-    def: f64,
-    gap_1d: f64,
-    gap_2d: f64,
-    max_up: Option<f64>,
-) -> f64 {
-    let gain = gap_gain(k);
-    let r = match max_up {
-        Some(up) => max4(def, up, gain * gap_1d / 2.0, gain * gap_2d - def),
-        None => max3(def, gain * gap_1d / 2.0, gain * gap_2d - def),
-    };
-    zone_tol3d(k, r)
 }
 
 /// A fresh gap-size histogram.
@@ -3094,7 +3062,7 @@ impl<O: LoopObject> HealData<O> {
             })?;
 
             // update the tolerance (SmTol::CalcFaceZoneTol3d(pBrep))
-            let zone_tol_3d = brep_zone_tol_3d(b);
+            let zone_tol_3d = brep_calc_face_zone_tol_3d(k, b);
 
             if self.face_props.props(id)?.props.orig_zone_tol_3d == UNDEF_DOUBLE {
                 let t = face_p2::tolerance(b, face)?;
@@ -3135,12 +3103,11 @@ impl<O: LoopObject> HealData<O> {
             // update the tolerance
             let max_edge_edge_gap_3d_length = p.max_edge_edge_gap_length(b)?;
             let max_edge_face_gap_3d_length = p.max_edge_face_gap_length(b)?;
-            let def = brep_zone_tol_3d(b);
-            let zone_tol_3d = calc_brep_gap_zone_tol(
+            let zone_tol_3d = brep_calc_edge_zone_tol_3d(
                 k,
-                def,
                 max_edge_edge_gap_3d_length,
                 max_edge_face_gap_3d_length,
+                b,
                 Some(max_face_tol),
             );
             if p.orig_zone_tol_3d == UNDEF_DOUBLE {
@@ -3182,12 +3149,11 @@ impl<O: LoopObject> HealData<O> {
             // update the tolerance
             let max_vertex_edge_gap_3d_length = p.max_vtx_edge_gap_length(b)?;
             let max_vertex_face_gap_3d_length = p.max_vtx_face_gap_length(b)?;
-            let def = brep_zone_tol_3d(b);
-            let zone_tol_3d = calc_brep_gap_zone_tol(
+            let zone_tol_3d = brep_calc_vertex_zone_tol_3d(
                 k,
-                def,
                 max_vertex_edge_gap_3d_length,
                 max_vertex_face_gap_3d_length,
+                b,
                 Some(max_edge_tol_3d),
             );
             if p.orig_zone_tol_3d == UNDEF_DOUBLE {

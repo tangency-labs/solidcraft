@@ -10,6 +10,7 @@
 //! | [`relation`] | `sc_geom_tol_relation` | a script of `SmRelation<int, int>` calls |
 //! | [`curve_tols`] | `sc_geom_tol_curve`  | the `SmCurve` overloads of `GetScaledZero`, `MapTo1d`, `IsDegenerate` |
 //! | [`volume_scaled_zero`] | `sc_geom_tol_volume` | `SmTol::GetScaledZero(const SmVolume&)` |
+//! | [`brep_tols`] | `sc_geom_tol_brep`     | the `SmBrep` overloads of `SmTol` on a fixture B-rep |
 
 use crate::{call_with_buffer, check, FfiError};
 
@@ -40,6 +41,18 @@ mod sys {
         pub fn sc_geom_tol_volume(
             input: *const f64,
             n_in: i64,
+            out: *mut f64,
+            cap: i64,
+            out_len: *mut i64,
+        ) -> i32;
+        pub fn sc_geom_tol_brep(
+            path: *const std::ffi::c_char,
+            block: *const f64,
+            n_block: i64,
+            model_size: f64,
+            ratio: f64,
+            args: *const f64,
+            n_args: i64,
             out: *mut f64,
             cap: i64,
             out_len: *mut i64,
@@ -346,6 +359,96 @@ pub fn volume_scaled_zero(poles: &[f64; 24]) -> Result<Vec<f64>, FfiError> {
         )));
     }
     Ok(out.to_vec())
+}
+
+/// The operands of [`brep_tols`].
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct BrepTolArgs {
+    /// Call `SmTol::SetModelSizeEstimate(SmBrep&, est)` first.
+    pub set_estimate: Option<f64>,
+    /// Call `SmTol::SetLargeSmallSizeRatio(SmBrep&, ratio)` first.
+    pub set_ratio: Option<f64>,
+    /// `SmSmallTopoType` (`0..=4`).
+    pub small: i32,
+    /// The first gap of `CalcEdgeZoneTol3d` / `CalcVertexZoneTol3d`.
+    pub gap1: f64,
+    /// The second gap.
+    pub gap2: f64,
+    /// The optional maximum face / edge zone tolerance.
+    pub max: Option<f64>,
+}
+
+/// Number of values [`brep_tols`] returns.
+pub const BREP_TOLS_LEN: usize = 10;
+
+/// Runs the `SmBrep` overloads of `SmTol` on the native B-rep of `path` / `block` (the
+/// [`super::topology_edgeuse_p1`] fixture encoding) moved into a fresh `SmContext`,
+/// with the system tolerances set from `model_size` and `ratio` (as [`op`]). Returns
+/// `SetModelSizeEstimate` (0 when not set), `GetModelSizeEstimate`,
+/// `GetLargeSmallSizeRatio`, `GetZoneTol3d`, `GetApproxTol3d`, `GetXSectTol3d`,
+/// `CalcFaceZoneTol3d`, `CalcEdgeZoneTol3d`, `CalcVertexZoneTol3d`, `GetScaledZero`.
+///
+/// # Errors
+///
+/// [`FfiError::InvalidArgument`] for a block the graph wrapper rejects, a B-rep that
+/// cannot be built, non-finite operands, a `small` outside `0..=4`; the shim's status
+/// (also for a face without surface).
+pub fn brep_tols(
+    path: &str,
+    block: &[f64],
+    model_size: f64,
+    ratio: f64,
+    a: &BrepTolArgs,
+) -> Result<Vec<f64>, FfiError> {
+    let bad = |m: &str| FfiError::InvalidArgument(format!("brep_tols: {m}"));
+    let flag = |b: bool| if b { 1.0 } else { 0.0 };
+    let args = [
+        flag(a.set_estimate.is_some()),
+        a.set_estimate.unwrap_or(0.0),
+        flag(a.set_ratio.is_some()),
+        a.set_ratio.unwrap_or(0.0),
+        f64::from(a.small),
+        a.gap1,
+        a.gap2,
+        flag(a.max.is_some()),
+        a.max.unwrap_or(0.0),
+    ];
+    if args.iter().any(|x| !x.is_finite()) || !model_size.is_finite() || !ratio.is_finite() {
+        return Err(bad("non-finite operand"));
+    }
+    if !(0..=4).contains(&a.small) {
+        return Err(bad("small topology type"));
+    }
+    let export = super::topology_edgeuse_p1::eval(super::topology_edgeuse_p1::Op::Export, path, block)?;
+    if super::topology_edgeuse_p1::counts(&export).is_none() {
+        return Err(bad("native fixture construction failed"));
+    }
+    let path = std::ffi::CString::new(path).map_err(|_| bad("path contains NUL"))?;
+    let n_block = i64::try_from(block.len()).map_err(|_| bad("block too large"))?;
+    let out = call_with_buffer(BREP_TOLS_LEN, |buf, len| {
+        // SAFETY: the block was validated (and built) by the graph wrapper and the
+        // operands checked above; all buffers and the C string stay live for the call,
+        // and the shim honours `cap`.
+        unsafe {
+            sys::sc_geom_tol_brep(
+                path.as_ptr(),
+                block.as_ptr(),
+                n_block,
+                model_size,
+                ratio,
+                args.as_ptr(),
+                args.len() as i64,
+                buf.as_mut_ptr(),
+                buf.len() as i64,
+                &raw mut *len,
+            )
+        }
+    })?;
+    if out.len() == BREP_TOLS_LEN {
+        Ok(out)
+    } else {
+        Err(bad("unexpected output length"))
+    }
 }
 
 #[cfg(test)]
