@@ -387,8 +387,9 @@ A plane of a Section Analysis; the view hides what lies beyond every section pla
 One section plane hides its normal's side. Two square to each other cut a quarter away, three an
 eighth. A section has at most six.
 
-- **In SolidCraft:** `inspect.section` (`plane`, `add`, `replace`, `remove`, `clear`); the `section_plane`
-  of a `view.pick` hit on a cut face; the viewport menu's Section View and Turn Off Section View.
+- **In SolidCraft:** `inspect.section` (`plane`, `add`, `replace`, `remove`, `hide`, `show`, `clear`); the
+  `section_plane` of a `view.pick` hit on a cut face; the viewport menu's Section View, Edit Section View
+  and Turn Off Section View; the Analysis folder's Section 1, Section 2 rows.
 - **Don't use:** cutting plane, clip plane, section view (for the plane).
 - **Elsewhere:** section plane, cutting plane, clipping plane.
 - **For translators:** a view-only cut that changes no geometry, not a Split Body or a Plane

@@ -203,26 +203,32 @@ reference-object placement and multi-curve chains are not yet available in this 
 
 Section Analysis cuts the view, not the design: what lies beyond the section's planes is hidden
 and the cut faces are hatched (Hatch off draws them in each body's own colour). It changes no
-geometry and is no step in the undo history. A section has up to six planes, and it hides what
-lies beyond all of them at once: one plane hides its side, two square to each other cut a quarter
+geometry and is not saved with the design, but each change to it is a step in the undo history:
+Undo brings back the section as it was. A section has up to six planes, and it hides what lies
+beyond all of them at once: one plane hides its side, two square to each other cut a quarter
 away. As on a drawing, each plane's cut faces are hatched their own way, at 45° on the first
-plane, 135° on the second, then 30°, 60°, 120° and 150°, measured on the plane as seen from the
-side it cuts away (upright on a wall, along X on a floor).
+plane on show, 135° on the second, then 30°, 60°, 120° and 150°, measured on the plane as seen
+from the side it cuts away (upright on a wall, along X on a floor).
 
 - The toolbar's **Section Analysis** starts a new section on a plane or planar face; its arrow
-  and **Distance** move the cut along the plane's normal.
+  and **Distance** move the cut. A positive distance cuts more away: into the part from a face,
+  against the normal of a plane (below XY, for instance). A negative one moves the cut the other
+  way. **Flip** hides the other side of the plane being edited and leaves it where it is.
 - Right-click a planar face and choose **Section View**: the dialog starts on the face's plane,
-  facing out of the part, so dragging the arrow inward cuts into it. With a section on, the
-  face's plane joins it as another plane, flipped to face into the part: at distance 0 the cut
-  stays as it was, and dragging the arrow inward brings back what lies in front of the plane.
-- Right-click a cut face and choose **Turn Off Section View**: with one plane the section goes;
-  with several, only the plane of the face you clicked.
-- The browser's **Analysis** folder lists the section: its eye hides and shows it, Edit reopens
-  the dialog (on the last plane, the others kept, when the section has several) and Delete
-  removes it.
+  so dragging the arrow inward cuts into the part. With a section on, the face's plane joins it
+  as another plane, cutting the same way: at distance 0 it hides nothing more, and dragged in it
+  cuts away what lies beyond it and every other plane, such as a corner.
+- Right-click a cut face and choose **Edit Section View** to move or flip its plane (the others
+  stay as they are), or **Turn Off Section View** to take that plane out; the last one turns the
+  section off.
+- The browser's **Analysis** folder lists each plane as **Section 1**, **Section 2** and so on,
+  by the plane's number. Its eye hides and shows that plane, a double-click edits it, and Delete
+  in its menu removes it. The folder's own eye hides and shows them all.
 
 Scripts use `inspect.section`: a `plane` replaces the section, `add: true` adds the plane to it,
-`replace` moves one plane by its id, `remove` takes a plane out by its id, and `clear: true` removes them all.
+`replace` moves one plane by its id, `remove` takes a plane out by its id, `hide` and `show` take
+plane ids, and `clear: true` removes them all. `offset` moves the cut against the plane's normal,
+so a positive offset cuts more away; `at` is a world coordinate on a named plane's axis.
 
 ## Comparing two bodies
 
