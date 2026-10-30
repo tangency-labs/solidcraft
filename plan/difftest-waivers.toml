@@ -15,6 +15,18 @@ case = "nm_box_linear_z_stitch"
 reason = "ND-491 C++ heap-order nondeterminism: 993/1000 C++ runs succeed with Rust's result, 7/1000 SM_ERR (main CI run 40862396783 at 881b040f9); parked like its 7 siblings"
 
 [[waiver]]
+unit = "intersect.api_intersectors"
+check = "ratchet"
+case = "upstream-surfaces-net-cylinder"
+reason = "renamed, not lost: #1662 replaces the hand-built 5x7 net stand-in with upstream's exact SmApiCreateSurfaceFromOrderedPoints input (TestSmIntersectors.cpp); the case now runs as upstream-surfaces-ordered-cylinder"
+
+[[waiver]]
+unit = "intersect.api_intersectors"
+check = "ratchet"
+case = "upstream-surfaces-net-revolution"
+reason = "renamed, not lost: #1662 replaces the hand-built 5x7 net stand-in with upstream's exact SmApiCreateSurfaceFromOrderedPoints input (TestSmIntersectors.cpp); the case now runs as upstream-surfaces-ordered-revolution"
+
+[[waiver]]
 unit = "topology.brep_local_operation"
 check = "ratchet"
 case = "nurb_fillet_face5_same"

@@ -349,9 +349,10 @@ bool ub_null_types(SmSurface* s1, SmSurface* s2)
 // 3 = SmApiCreateSurfaceRevolution(SmApiCreateCurve(points), origin, axis, angle),
 // 4 = SmApiCreateRuledSurface(SmApiCreateCurve(points), SmApiCreateCurve(points)),
 // 5 = SmApiCreateSurfaceFromCornerPoints(uminvmin, umaxvmin, uminvmax, umaxvmax),
-// 6 = an analytic surface (build_analytic).
+// 6 = an analytic surface (build_analytic),
+// 7 = SmApiCreateSurfaceFromOrderedPoints(rows x columns points, row by row).
 SmSurface* build_surface(Args& in, SmStatus& status) {
-    ULONG kind = in.count(1, 6);
+    ULONG kind = in.count(1, 7);
     if (!in.ok) { status = SM_ERR_INVALID_INPUT; return nullptr; }
     if (kind == 1) {
         ULONG nu = in.count(2, 16), nv = in.count(2, 16);
@@ -388,6 +389,17 @@ SmSurface* build_surface(Args& in, SmStatus& status) {
         return s;
     }
     if (kind == 6) return build_analytic(in, status);
+    if (kind == 7) {
+        ULONG rows = in.count(2, 16), cols = in.count(2, 16);
+        if (!in.ok) { status = SM_ERR_INVALID_INPUT; return nullptr; }
+        SmTArray<SmPoint3d> pts;
+        for (ULONG i = 0; i < rows * cols; ++i) pts.Add(in.point());
+        if (!in.ok) { status = SM_ERR_INVALID_INPUT; return nullptr; }
+        SmSurface* s = nullptr;
+        status = SmApiCreateSurfaceFromOrderedPoints(pts, rows, cols, s);
+        if (status != SM_SUCCESS) { delete s; return nullptr; }
+        return s;
+    }
     auto points_curve = [&](SmBSplineCurve*& c) {
         ULONG n = in.count(4, 64);
         SmTArray<SmPoint3d> pts;

@@ -16,7 +16,9 @@
 //! `d + 1`), `2 o r h` (`SmApiCreateCylinder`, the `SmSurface` overload),
 //! `3 curve-points o axis angle` (`SmApiCreateSurfaceRevolution` of an `SmApiCreateCurve`),
 //! `4 curve-points curve-points` (`SmApiCreateRuledSurface`), where `curve-points` is
-//! `n p*`, `5 p p p p` (`SmApiCreateSurfaceFromCornerPoints`) or `6 type data has_domain
+//! `n p*`, `5 p p p p` (`SmApiCreateSurfaceFromCornerPoints`), `7 rows cols p*`
+//! (`SmApiCreateSurfaceFromOrderedPoints` of a grid, `2..=16` each, row by row) or
+//! `6 type data has_domain
 //! [umin vmin umax vmax]`, an analytic surface's `CreateCanonical` then, with `has_domain`
 //! 1, `AdjustSTEPUVDomain`: type `1 frame` (`SmPlane`), `2 frame r` (`SmCylinder`),
 //! `3 frame rbot rtop h` (`SmCone`), `4 frame r` (`SmSphere`), with `frame` = `o x y`

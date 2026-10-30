@@ -100,6 +100,13 @@ enum SurfaceIn {
     Ruled { curve1: Vec<P>, curve2: Vec<P> },
     /// `SmApiCreateSurfaceFromCornerPoints(uminvmin, umaxvmin, uminvmax, umaxvmax)`.
     Corners { corners: [P; 4] },
+    /// `SmApiCreateSurfaceFromOrderedPoints(points, rows, cols)`: the bicubic
+    /// least-squares surface of a `rows x cols` grid (`points[i * cols + j]`).
+    Ordered {
+        rows: usize,
+        cols: usize,
+        points: Vec<P>,
+    },
     /// An analytic surface's `CreateCanonical`, then `AdjustSTEPUVDomain(domain)` when
     /// given (`[umin, vmin, umax, vmax]`, STEP parameters).
     Analytic {
@@ -304,6 +311,12 @@ fn push_surface(o: &mut Vec<f64>, s: &SurfaceIn) {
         SurfaceIn::Corners { corners } => {
             o.push(5.);
             for p in corners {
+                o.extend(p);
+            }
+        }
+        SurfaceIn::Ordered { rows, cols, points } => {
+            o.extend([7., *rows as f64, *cols as f64]);
+            for p in points {
                 o.extend(p);
             }
         }
@@ -608,6 +621,25 @@ fn build_surface(k: &mut Kernel, s: &SurfaceIn) -> SolidResult<Surface> {
         SurfaceIn::Corners { corners: [a, b, c, d] } => Surface::from(
             BSplineSurface::create_bilinear_surface(v(*a), v(*b), v(*c), v(*d))?,
         ),
+        SurfaceIn::Ordered { rows, cols, points } => {
+            // the shim's guard (its stream holds rows * cols points)
+            if !(2..=16).contains(rows)
+                || !(2..=16).contains(cols)
+                || points.len() != rows * cols
+            {
+                return Err(SolidError::invalid_input(
+                    "difftest::intersect_api_intersectors::build_surface",
+                    "ordered grid",
+                ));
+            }
+            Surface::from(
+                solidcore::primitive::api_surface_ops::create_surface_from_ordered_points(
+                    &points_of(points),
+                    *rows as u64,
+                    *cols as u64,
+                )?,
+            )
+        }
         SurfaceIn::Analytic { shape, domain } => {
             let frame = |origin: &P, x: &P, y: &P| -> SolidResult<Axis2Placement> {
                 let mut f = Axis2Placement::default();

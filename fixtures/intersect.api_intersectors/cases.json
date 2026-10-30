@@ -309,16 +309,14 @@
       }
     },
     {
-      "name": "upstream-surfaces-net-revolution",
+      "name": "upstream-surfaces-ordered-revolution",
       "upstream_ref": "tests/SM_API_test/src/TestSmIntersectors.cpp:TestSmIntersectSurfaces (the 5x7 points as a cubic control net; the line revolved as a cubic through 4 collinear points)",
       "inputs": {
         "op": "surfaces",
         "surface1": {
-          "kind": "net",
-          "nu": 5,
-          "nv": 7,
-          "du": 3,
-          "dv": 3,
+          "kind": "ordered",
+          "rows": 5,
+          "cols": 7,
           "points": [
             [
               -9.99999999999999,
@@ -536,16 +534,14 @@
       }
     },
     {
-      "name": "upstream-surfaces-net-cylinder",
+      "name": "upstream-surfaces-ordered-cylinder",
       "upstream_ref": "tests/SM_API_test/src/TestSmIntersectors.cpp:TestSmIntersectSurfaces (the revolved line as SmApiCreateCylinder)",
       "inputs": {
         "op": "surfaces",
         "surface1": {
-          "kind": "net",
-          "nu": 5,
-          "nv": 7,
-          "du": 3,
-          "dv": 3,
+          "kind": "ordered",
+          "rows": 5,
+          "cols": 7,
           "points": [
             [
               -9.99999999999999,
