@@ -763,6 +763,16 @@ impl OffsetExecutive {
                 }
             }
 
+            // Not upstream (opt-in, fork tangency-labs/smlib 5d428ae and 7ff0a94): a local
+            // operation closes the loop gaps its step walls leave at their ends, then splits
+            // the edges that run past a step wall's corner
+            let step_walls = kernel.fixes.local_operation_step_walls
+                && self.operation() == OffsetOperation::LocalOperation;
+            if step_walls {
+                self.close_loop_gaps(kernel, notifications)?;
+                self.split_edges_at_step_corners(kernel, notifications)?;
+            }
+
             // Not upstream (WR-341, tangency-labs/solidcore#977), opt-in
             // `Kernel::fixes.offset_excess_faces_after_merge`: the excess faces are found after
             // the merge only, where each merged face lies wholly on the offset or wholly in

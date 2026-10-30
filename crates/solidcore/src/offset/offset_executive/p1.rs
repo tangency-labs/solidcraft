@@ -1244,6 +1244,14 @@ impl OffsetExecutive {
                 &[],
                 &mut notifications.rekey(offset_key_of),
             )?;
+            // Not upstream (opt-in `Kernel::fixes.local_operation_step_walls`, fork
+            // tangency-labs/smlib 5d428ae): a step wall spans the gap between two edges
+            // exactly, as a lamina side wall does, and is kept out of the face extensions
+            // as one (extended along its rulings it can pass through its own axis, a step
+            // round a circle, and fold over itself).
+            if cap.closing_wall {
+                self.closing_faces.push(new_face);
+            }
             // map origEdge to its offset capFaces
             new_faces.push(new_face);
             self.relate_edge_face(edge, new_face);
