@@ -210,6 +210,7 @@ pub fn render(scene: &Scene, cam: &Camera, w: usize, h: usize) -> Canvas {
                         let i = y * sw + x;
                         let hid = hidden(at, &scene.clip, slack);
                         if !pass.glass()
+                            && !sm.open
                             && let Some(span) = kept_span(at, ray(at), &scene.clip, slack).filter(|s| s.past_entry(perspective))
                         {
                             if let Some(n) = count.get_mut(i) {
@@ -551,7 +552,7 @@ mod tests {
 
     /// A front panel over a back one, with a line between them, seen from the front.
     fn two_panels(front_opacity: f32) -> (Scene, Camera) {
-        let glass = SceneMesh { mesh: Arc::new(panel(-5.0)), color: Rgb(255, 0, 0), face_colors: Vec::new(), opacity: front_opacity };
+        let glass = SceneMesh { opacity: front_opacity, ..SceneMesh::solid(Arc::new(panel(-5.0)), Rgb(255, 0, 0)) };
         let scene = Scene {
             meshes: vec![SceneMesh::solid(Arc::new(panel(5.0)), Rgb(0, 255, 0)), glass],
             lines: vec![SceneLine {
@@ -875,6 +876,44 @@ mod tests {
                 }
                 let above = Vec3::new(0.0, 10.0, top + 26.0);
                 assert!(!warm(pixel_at(&c, &cam, above)), "fov {fov}, {} planes: a cap above the block", clip.len());
+            }
+        }
+    }
+
+    /// An open sheet the section hides has no inside, so it shows no cap: alone, facing either
+    /// way, and in front of a hidden block (whose far wall it would otherwise paint), with two
+    /// planes, orthographic and in perspective. The picture is the one without the sheet.
+    #[test]
+    fn a_hidden_open_sheet_shows_no_cap() {
+        let quad = |flip: bool| {
+            let mut m = Mesh::default();
+            m.positions.extend([
+                Vec3::new(-30.0, -5.0, 0.0),
+                Vec3::new(-12.0, -5.0, 0.0),
+                Vec3::new(-12.0, -5.0, 20.0),
+                Vec3::new(-30.0, -5.0, 20.0),
+            ]);
+            m.normals.extend([if flip { Vec3::Y } else { -Vec3::Y }; 4]);
+            m.triangles.extend(if flip { [[0, 2, 1], [0, 3, 2]] } else { [[0, 1, 2], [0, 2, 3]] });
+            m.tri_face.extend([0u32; 2]);
+            m
+        };
+        let behind = || SceneMesh::solid(Arc::new(block(Vec3::new(-40.0, -30.0, 0.0), Vec3::new(-25.0, -20.0, 20.0))), Rgb(150, 160, 175));
+        let clip = vec![(Vec3::X, 0.0), (-Vec3::Y, 0.0)];
+        for fov in [0.0f64, 0.5] {
+            let mut cam = Camera { distance: if fov > 0.0 { 60.0 / (fov * 0.5).tan() } else { 120.0 }, fov, ..Default::default() };
+            cam = cam.looking_from(Vec3::new(1.0, 0.5, 0.7));
+            for with_block in [false, true] {
+                let without =
+                    Scene { meshes: if with_block { vec![behind()] } else { Vec::new() }, radius: 40.0, clip: clip.clone(), ..Default::default() };
+                let want = render(&without, &cam, 240, 240);
+                for flip in [false, true] {
+                    let mut meshes = vec![SceneMesh::sheet(Arc::new(quad(flip)), Rgb(150, 160, 175))];
+                    meshes.extend(with_block.then(behind));
+                    let c = render(&Scene { meshes, radius: 40.0, clip: clip.clone(), ..Default::default() }, &cam, 240, 240);
+                    let differ = c.rgba.chunks(4).zip(want.rgba.chunks(4)).filter(|(a, b)| a != b).count();
+                    assert_eq!(differ, 0, "fov {fov}, flipped {flip}, block {with_block}: the hidden sheet changes {differ} pixels");
+                }
             }
         }
     }

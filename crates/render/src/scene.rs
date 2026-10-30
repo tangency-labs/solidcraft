@@ -27,12 +27,20 @@ pub struct SceneMesh {
     /// drawn see-through, so what lies inside it shows, as the viewport draws glass. A body
     /// without an appearance of its own is solid.
     pub opacity: f32,
+    /// An open sheet (a surface body): it has no inside, so a section's cap never comes from it
+    /// where it is hidden.
+    pub open: bool,
 }
 
 impl SceneMesh {
     /// A solid body in `color`, with no face of its own look.
     pub fn solid(mesh: Arc<Mesh>, color: Rgb) -> SceneMesh {
-        SceneMesh { mesh, color, face_colors: Vec::new(), opacity: 1.0 }
+        SceneMesh { mesh, color, face_colors: Vec::new(), opacity: 1.0, open: false }
+    }
+
+    /// An open sheet in `color` ([`SceneMesh::open`]).
+    pub fn sheet(mesh: Arc<Mesh>, color: Rgb) -> SceneMesh {
+        SceneMesh { open: true, ..SceneMesh::solid(mesh, color) }
     }
 
     /// Is the body drawn see-through? (Its opacity is below [`SEE_THROUGH`].)

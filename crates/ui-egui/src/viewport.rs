@@ -1116,6 +1116,8 @@ struct BodyDraw {
     /// The render class of each face (opaque, glass or faded).
     face_classes: Vec<crate::gpu::TriClass>,
     faded: bool,
+    /// A surface body's open sheet ([`solidcraft_gpu::view::OPEN_SHEET`]).
+    sheet: bool,
     /// Its faces are drawn elsewhere, from its plan on the GPU or as an instance of shared
     /// triangles (only its edges are built here).
     on_gpu: bool,
@@ -1132,13 +1134,14 @@ impl BodyDraw {
         let mut h = std::collections::hash_map::DefaultHasher::new();
         (std::sync::Arc::as_ptr(&self.mesh) as usize).hash(&mut h);
         self.place.iter().flatten().flatten().for_each(|v| v.to_bits().hash(&mut h));
-        (self.faded, self.on_gpu, shaded, edges, hidden_edges, markers, self.slot_base, self.edge.0, self.hidden_edge.0).hash(&mut h);
+        (self.faded, self.sheet, self.on_gpu, shaded, edges, hidden_edges, markers, self.slot_base, self.edge.0, self.hidden_edge.0).hash(&mut h);
         h.finish()
     }
 
     fn build(&self, out: &mut crate::gpu::BlockBuilder, shaded: bool, edges: bool, hidden_edges: bool, markers: bool) {
         let m = &self.mesh;
-        let color = |ti: usize| m.tri_face.get(ti).and_then(|f| self.face_colors.get(*f as usize)).copied().unwrap_or(self.body_color);
+        let color =
+            |ti: usize| m.tri_face.get(ti).and_then(|f| self.face_colors.get(*f as usize)).copied().unwrap_or(self.body_color).sheet(self.sheet);
         let class = |ti: usize| {
             if self.faded {
                 return crate::gpu::TriClass::Faded;
@@ -1542,8 +1545,9 @@ pub(crate) fn build_scene(app: &SolveApp) -> GpuScene {
         let class = plan_class(app, &face_classes);
         let planned = class.and_then(|class| drawn_plan(app, b, true).map(|plan| (plan, class)));
         let on_gpu = planned.is_some();
+        let sheet = b.is_surface();
         if let Some((plan, class)) = planned {
-            sc.planned.push(crate::gpu::PlannedBody { plan, face_colors: face_colors.clone(), class });
+            sc.planned.push(crate::gpu::PlannedBody { plan, face_colors: face_colors.iter().map(|c| c.sheet(sheet)).collect(), class });
         }
         // Opaque, faded and see-through bodies alike, in one colour (faces of their own colour
         // are built as before).
@@ -1560,7 +1564,7 @@ pub(crate) fn build_scene(app: &SolveApp) -> GpuScene {
             crate::gpu::InstanceLook::Opaque => 255,
         };
         set_palette_color(&mut arena, &mut sc.palette, slots.instance, [col[0], col[1], col[2], alpha]);
-        let instanced = (!on_gpu && face_looks.is_empty()).then(|| instances.place(b, slots.instance, look)).flatten();
+        let instanced = (!on_gpu && face_looks.is_empty()).then(|| instances.place(b, slots.instance.sheet(sheet), look)).flatten();
         let name = b.name.clone();
         let body = match instanced {
             Some((mesh, place)) => BodyDraw {
@@ -1571,6 +1575,7 @@ pub(crate) fn build_scene(app: &SolveApp) -> GpuScene {
                 body_color: slots.body,
                 face_classes,
                 faded,
+                sheet,
                 on_gpu: true,
                 slot_base: slots.faces,
                 edge: slots.edge,
@@ -1584,6 +1589,7 @@ pub(crate) fn build_scene(app: &SolveApp) -> GpuScene {
                 body_color: slots.body,
                 face_classes,
                 faded,
+                sheet,
                 on_gpu,
                 slot_base: slots.faces,
                 edge: slots.edge,
@@ -9611,6 +9617,43 @@ mod tests {
         let merged = lit.merged();
         assert!(!merged.tris.is_empty(), "the selected face is lit");
         assert!(!merged.lines.is_empty() || !merged.overlay.is_empty() || !merged.hidden.is_empty(), "the selected edge is lit");
+    }
+
+    /// A surface body's triangles carry the open-sheet bit, so a section's count of the bodies
+    /// behind its cut leaves them out, built on the CPU or drawn from the body's plan; a solid's
+    /// do not.
+    #[test]
+    fn a_surface_bodys_triangles_are_marked_open() {
+        let mut s = solidcraft_engine::Session::default();
+        for (c, p) in [
+            ("sketch.create", json!({"plane": "XY", "name": "L"})),
+            ("sketch.line", json!({"points": [[-30, -5], [-12, -5]], "ids": ["w"]})),
+            ("sketch.finish", json!({})),
+            ("surface.extrude", json!({"sketch": "L", "curves": ["w"], "distance": "20 mm", "name": "Sheet", "body_name": "Sheet"})),
+            ("solid.box", json!({"length": 15, "width": 10, "height": 20, "corner": [-45, -35, 0], "operation": "new_body"})),
+        ] {
+            s.execute(c, &p).unwrap();
+        }
+        let mut app = SolveApp::new(s, crate::Services::default());
+        let st = app.session.world_state();
+        let sheet = st.bodies.iter().find(|b| b.is_surface()).expect("a surface body").mesh().triangles.len();
+        let solid = st.bodies.iter().find(|b| !b.is_surface()).expect("a solid body").mesh().triangles.len();
+        let open = |w: u32| w & solidcraft_gpu::view::OPEN_SHEET != 0;
+        let sc = build_scene(&app);
+        let words: Vec<u32> = sc
+            .blocks
+            .iter()
+            .flat_map(|b| b.bytes.vertices.as_chunks::<{ crate::gpu::TRI_SIZE }>().0.to_vec())
+            .filter_map(|v| v.get(24..28).and_then(|w| w.try_into().ok()).map(u32::from_le_bytes))
+            .collect();
+        assert_eq!(words.len(), 3 * (sheet + solid));
+        assert_eq!(words.iter().filter(|w| open(**w)).count(), 3 * sheet, "the sheet's vertices, and only those, are open");
+        assert!(words.iter().all(|w| sc.palette.get(crate::gpu::PaletteIndex(*w)).is_some()), "an open word is still its colour's");
+        app.viewport.gpu = Some(GpuTarget { format: egui_wgpu::wgpu::TextureFormat::Rgba8Unorm, depth: None, samples: 1, tess: true, oit: false });
+        let sc = build_scene(&app);
+        let planned: Vec<(usize, usize)> =
+            sc.planned.iter().map(|p| (p.face_colors.iter().filter(|c| open(c.0)).count(), p.face_colors.len())).collect();
+        assert_eq!(planned, [(1, 1), (0, 6)], "the sheet's one face is open, the box's six are not");
     }
 
     /// A whole highlighted body is lit from the model's own triangles, not by copying every one

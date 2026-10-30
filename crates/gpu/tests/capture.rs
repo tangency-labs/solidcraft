@@ -371,6 +371,44 @@ fn pictures_cap_a_cut_that_reaches_past_another_plane() {
     }
 }
 
+/// A surface body the section hides shows no cap: an open sheet has no inside, so it takes no
+/// part in the count of bodies behind the cut, nor paints a hidden block's far wall. With two
+/// planes hiding a sheet and a block, the picture is the block's alone, on the GPU and the CPU.
+#[test]
+fn a_hidden_surface_body_shows_no_cap() {
+    let Some(c) = capturer() else { return };
+    let block = ("solid.box", json!({"length": 15, "width": 10, "height": 20, "corner": [-45, -35, 0], "operation": "new_body"}));
+    let mut s = session(&[
+        ("sketch.create", json!({"plane": "XY", "name": "L"})),
+        ("sketch.line", json!({"points": [[-30, -5], [-12, -5]], "ids": ["w"]})),
+        ("sketch.finish", json!({})),
+        ("surface.extrude", json!({"sketch": "L", "curves": ["w"], "distance": "20 mm", "name": "Sheet", "body_name": "Sheet"})),
+        block.clone(),
+    ]);
+    assert!(s.world_state().body("Sheet").is_some_and(|b| b.is_surface()));
+    let mut alone = session(&[block]);
+    for s in [&mut s, &mut alone] {
+        s.execute("inspect.section", &json!({"plane": {"origin": [0, 0, 0], "normal": [1, 0, 0]}})).unwrap();
+        s.execute("inspect.section", &json!({"plane": {"origin": [0, 0, 0], "normal": [0, -1, 0]}, "add": true})).unwrap();
+    }
+    let size = (300, 240);
+    for from in [Vec3::new(1.0, 0.5, 0.7), Vec3::new(1.0, 0.6, -0.5)] {
+        for fov in [0.0, 0.5] {
+            let mut cam = view::home_camera(&s).looking_from(from);
+            cam.fov = fov;
+            let picture = |s: &Session| {
+                let sc = view::scene_with_guides(s, &cam, &s.section, Guides { grid: false, axes: false });
+                (c.rgba(&sc, &cam, size.0 as u32, size.1 as u32).unwrap(), solidcraft_engine::render::render(&sc, &cam, size.0, size.1).rgba)
+            };
+            let ((gpu, cpu), (want_gpu, want_cpu)) = (picture(&s), picture(&alone));
+            let differ = |a: &[u8], b: &[u8]| pixels(a).zip(pixels(b)).filter(|(a, b)| a != b).count();
+            let count = |img: &[u8]| pixels(img).filter(|p| warm(*p)).count();
+            assert_eq!((count(&gpu), count(&cpu)), (0, 0), "from {from:?}, fov {fov}: cap pixels on the GPU and the CPU");
+            assert_eq!((differ(&gpu, &want_gpu), differ(&cpu, &want_cpu)), (0, 0), "from {from:?}, fov {fov}: the hidden sheet shows");
+        }
+    }
+}
+
 /// The parts of a section hides cast no occlusion: with ambient occlusion on, the top of a plate
 /// cut short by a plane (and a block standing on its hidden end) is lit beside the cut as the
 /// top of a plate made that short is. The cap's depth on the far walls behind the kept top face

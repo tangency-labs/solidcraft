@@ -444,7 +444,7 @@ pub fn scene_geometry(scene: &Scene) -> GpuScene {
         let faces: HashMap<u32, Rgb> = m.face_colors.iter().copied().collect();
         let mesh = &m.mesh;
         for (ti, t) in mesh.triangles.iter().enumerate() {
-            let col = sc.color(c4(mesh.tri_face.get(ti).and_then(|f| faces.get(f)).copied().unwrap_or(m.color)));
+            let col = sc.color(c4(mesh.tri_face.get(ti).and_then(|f| faces.get(f)).copied().unwrap_or(m.color))).sheet(m.open);
             let [Some(a), Some(b), Some(c)] = t.map(|k| mesh.positions.get(k as usize).copied()) else { continue };
             let flat = (b - a).cross(c - a).normalized().unwrap_or(Vec3::Z);
             for (k, p) in t.iter().zip([a, b, c]) {
@@ -604,7 +604,7 @@ mod tests {
     /// headless picture of a translucent target shows the tool inside it.
     #[test]
     fn a_see_through_body_is_glass_at_its_own_alpha_and_a_solid_one_is_not() {
-        let mesh = |opacity: f32| SceneMesh { mesh: sheet(), color: Rgb(200, 30, 30), face_colors: Vec::new(), opacity };
+        let mesh = |opacity: f32| SceneMesh { opacity, ..SceneMesh::solid(sheet(), Rgb(200, 30, 30)) };
         let geometry = |opacity: f32| scene_geometry(&Scene { meshes: vec![mesh(opacity)], ..Default::default() });
 
         let solid = geometry(1.0);
@@ -628,7 +628,7 @@ mod tests {
     /// painting one face does not make the body solid again.
     #[test]
     fn a_painted_face_keeps_its_bodys_opacity() {
-        let mesh = SceneMesh { mesh: sheet(), color: Rgb(200, 30, 30), face_colors: vec![(0, Rgb(0, 255, 0))], opacity: 0.5 };
+        let mesh = SceneMesh { face_colors: vec![(0, Rgb(0, 255, 0))], opacity: 0.5, ..SceneMesh::solid(sheet(), Rgb(200, 30, 30)) };
         let sc = scene_geometry(&Scene { meshes: vec![mesh], ..Default::default() });
         assert_eq!(sc.tris.len(), 0);
         assert_eq!(color(&sc, &sc.glass), Some([0, 255, 0, 128]), "the face's own colour at the body's alpha");

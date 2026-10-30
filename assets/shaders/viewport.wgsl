@@ -61,8 +61,13 @@ fn sectioned() -> bool {
 // so the viewport draws on WebGL2 (which has no storage buffers) as well.
 @group(0) @binding(1) var pal: texture_2d<u32>;
 
-/// The colour at palette entry `i`, as byte/255 (the old Unorm8x4 conversion, bit for bit).
-fn palette(i: u32) -> vec4<f32> {
+/// The palette word's top bit (`OPEN_SHEET`): the triangle is an open sheet's.
+const OPEN_SHEET: u32 = 0x80000000u;
+
+/// The colour at palette entry `i` (its `OPEN_SHEET` bit aside), as byte/255 (the old Unorm8x4
+/// conversion, bit for bit).
+fn palette(word: u32) -> vec4<f32> {
+    let i = word & ~OPEN_SHEET;
     let v = textureLoad(pal, vec2<i32>(i32(i & 2047u), i32(i >> 11u)), 0).x;
     return vec4<f32>(f32(v & 255u), f32((v >> 8u) & 255u), f32((v >> 16u) & 255u), f32((v >> 24u) & 255u)) / 255.0;
 }
@@ -85,13 +90,30 @@ struct TOut {
     @location(2) wp: vec3<f32>,
 };
 
-@vertex
-fn vs_tri(@location(0) p: vec3<f32>, @location(1) n: vec3<f32>, @location(2) c: u32) -> TOut {
+fn tri_out(p: vec3<f32>, n: vec3<f32>, c: u32) -> TOut {
     var o: TOut;
     o.pos = u.vp * vec4<f32>(p, 1.0);
     o.n = n;
     o.c = palette(c);
     o.wp = p;
+    return o;
+}
+
+@vertex
+fn vs_tri(@location(0) p: vec3<f32>, @location(1) n: vec3<f32>, @location(2) c: u32) -> TOut {
+    return tri_out(p, n, c);
+}
+
+/// A vertex of a closed body where it is drawn, an open sheet's outside the view: a section's
+/// count and hole (`Cut::count`) take only bodies whose faces pair up along every ray.
+fn closed_only(pos: vec4<f32>, c: u32) -> vec4<f32> {
+    return select(pos, vec4<f32>(2.0, 2.0, 2.0, 1.0), (c & OPEN_SHEET) != 0u);
+}
+
+@vertex
+fn vs_tri_closed(@location(0) p: vec3<f32>, @location(1) n: vec3<f32>, @location(2) c: u32) -> TOut {
+    var o = tri_out(p, n, c);
+    o.pos = closed_only(o.pos, c);
     return o;
 }
 
@@ -107,6 +129,24 @@ fn vs_tri_inst(
     @location(5) r2: vec4<f32>,
     @location(6) c: u32,
 ) -> TOut {
+    return tri_inst_out(p, n, r0, r1, r2, c);
+}
+
+@vertex
+fn vs_tri_inst_closed(
+    @location(0) p: vec3<f32>,
+    @location(1) n: vec3<f32>,
+    @location(3) r0: vec4<f32>,
+    @location(4) r1: vec4<f32>,
+    @location(5) r2: vec4<f32>,
+    @location(6) c: u32,
+) -> TOut {
+    var o = tri_inst_out(p, n, r0, r1, r2, c);
+    o.pos = closed_only(o.pos, c);
+    return o;
+}
+
+fn tri_inst_out(p: vec3<f32>, n: vec3<f32>, r0: vec4<f32>, r1: vec4<f32>, r2: vec4<f32>, c: u32) -> TOut {
     let q = vec4<f32>(p, 1.0);
     let wp = vec3<f32>(dot(r0, q), dot(r1, q), dot(r2, q));
     var o: TOut;
@@ -137,6 +177,23 @@ fn vs_tri_inst_flat(
     @location(5) r2: vec4<f32>,
     @location(6) c: u32,
 ) -> FOut {
+    return tri_inst_flat_out(p, r0, r1, r2, c);
+}
+
+@vertex
+fn vs_tri_inst_flat_closed(
+    @location(0) p: vec3<f32>,
+    @location(3) r0: vec4<f32>,
+    @location(4) r1: vec4<f32>,
+    @location(5) r2: vec4<f32>,
+    @location(6) c: u32,
+) -> FOut {
+    var o = tri_inst_flat_out(p, r0, r1, r2, c);
+    o.pos = closed_only(o.pos, c);
+    return o;
+}
+
+fn tri_inst_flat_out(p: vec3<f32>, r0: vec4<f32>, r1: vec4<f32>, r2: vec4<f32>, c: u32) -> FOut {
     let q = vec4<f32>(p, 1.0);
     let wp = vec3<f32>(dot(r0, q), dot(r1, q), dot(r2, q));
     var o: FOut;
