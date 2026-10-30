@@ -3,13 +3,18 @@ use crate::brep::eval::SurfaceEval;
 use crate::brep::{Curve, Frame, Surface};
 use crate::linkage::surface_jet;
 
+/// A homogeneous point of an edge.
+fn eval_edge_h(e: &IsoEdge, t: f64) -> SplineResult<HPoint> {
+    Space::new(e.degree, e.knots.clone())?.eval(&e.homogeneous(), t, 0)
+}
+
 const R: f64 = 10.0;
 /// The window's half-widths in longitude and latitude.
 const ALPHA: f64 = 0.5;
 const BETA: f64 = 0.35;
 
 fn spec() -> IsoSpec<'static> {
-    IsoSpec { tol: 1e-6, angle_tol: 0.05f64.to_radians(), crown: 0.0, points: &[] }
+    IsoSpec { tol: 1e-6, angle_tol: 0.05f64.to_radians(), crown: 0.0, corner_turn: 1f64.to_radians(), points: &[] }
 }
 
 /// The arc of the circle about `frame`'s z of radius `r` from angle `a0` to `a1`, on its NURBS
@@ -205,7 +210,7 @@ fn hostile_edges_are_refused() {
 #[test]
 fn a_rational_patch_s_derivatives_are_its_differences() {
     let edges = window();
-    let q = Quilt::new(&edges, &[Vec::new(), Vec::new()], 3).unwrap();
+    let q = Quilt::new(&edges, &loop_sides(&edges, spec().corner_turn), &[Vec::new(), Vec::new()], 3).unwrap();
     let p = &q.patches[0];
     assert!(p.rational);
     let (u, v, h) = (0.3, 0.6, 1e-5);
@@ -325,5 +330,43 @@ fn patches_about_a_centre_have_proper_corners_there() {
             .fold((180.0f64, f64::MAX), |(a, l), (b, x, y)| (a.min(b).min(180.0 - b), l.min(x).min(y)));
         eprintln!("{n} sides: at the centre the patches' corners are at least {:.2}° from flat, derivatives at least {:.3e} long", worst.0, worst.1);
         assert!(worst.0 > 0.5 && worst.1 > 1e-3, "{n} sides: a flat corner at the centre {worst:?}");
+    }
+}
+
+/// Half a round post's side, as SMLib holds it: its half circles are each two arcs, split at the
+/// cylinder's seam (35.12° round), so the loop has six edges but four corners. The seam vertices,
+/// where the loop runs straight on, are not corners of the region: one patch on four sides, each
+/// edge a straight line on its stretch of a side, and no flat corner.
+#[test]
+fn a_loop_whose_edges_run_straight_on_at_seams_is_one_patch_on_its_corners() {
+    let seam = 35.12f64.to_radians();
+    let h = std::f64::consts::FRAC_PI_2;
+    let (bottom, top) = (frame(Vec3::ZERO, Vec3::X, Vec3::Y), frame(Vec3::Z * 20.0, Vec3::X, Vec3::Y));
+    let line = |a: Vec3, b: Vec3| IsoEdge { degree: 1, knots: vec![0.0, 0.0, 1.0, 1.0], points: vec![a, b], weights: None };
+    let edges = vec![
+        arc(bottom.clone(), 10.0, [seam, h], false),
+        line(Vec3::new(0.0, 10.0, 0.0), Vec3::new(0.0, 10.0, 20.0)),
+        arc(top.clone(), 10.0, [seam, h], true),
+        arc(top, 10.0, [-h, seam], true),
+        line(Vec3::new(0.0, -10.0, 20.0), Vec3::new(0.0, -10.0, 0.0)),
+        arc(bottom, 10.0, [-h, seam], false),
+    ];
+    let mut g0 = |_k: usize, ts: &[f64]| -> Result<Vec<Option<Across>>, String> { Ok(vec![None; ts.len()]) };
+    let fill = iso_fill(&edges, &mut g0, &IsoSpec { tol: 2e-5, ..spec() }).unwrap();
+    assert_eq!(fill.patches.len(), 1, "four corners, one patch");
+    let sides = &fill.patches[0].sides;
+    assert_eq!(sides.len(), 6, "every edge on the patch's boundary");
+    // Round the square, each edge from where the one before it ends.
+    let uv = |s: &IsoSide| match s {
+        IsoSide::Edge { uv, .. } | IsoSide::Spoke { uv, .. } => *uv,
+    };
+    for (a, b) in sides.iter().zip(sides.iter().cycle().skip(1)) {
+        assert_eq!(uv(a)[1], uv(b)[0], "{sides:?}");
+    }
+    assert!(!any_fold(&fill), "the patch folds");
+    // Its corners are the loop's four, none flat.
+    for c in [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]] {
+        let (angle, ..) = corner_angle(&fill.patches[0], c);
+        assert!(angle > 0.5 && angle < 179.5, "a flat corner at {c:?}: {angle}°");
     }
 }
