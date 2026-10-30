@@ -250,6 +250,77 @@ pub fn guarded() -> bool {
     GUARDED.with(std::cell::Cell::get) > 0
 }
 
+/// Is this thread a Rayon pool thread?
+///
+/// Pool workers do not inherit the calling thread's [`guarded`] flag. Crash reports use this so
+/// a panic there during a command is held with that command, instead of being written at once.
+/// The browser build has no pool.
+pub fn on_pool_thread() -> bool {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        rayon::current_thread_index().is_some()
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        false
+    }
+}
+
+/// Panic on a Rayon worker and catch it here, as parallel meshing does: the worker runs the
+/// panic hook, then the panic resumes on this thread inside [`guard`] and becomes
+/// [`KernelError::Internal`].
+///
+/// `diagnostics.crash_test` mode `worker` uses this. Not a modelling operation.
+#[doc(hidden)]
+pub fn crash_test_worker_panic(message: &str) -> Result<()> {
+    let caught = catch_worker_panic(message)?;
+    guard("crash test", || match caught {
+        Ok(()) => Ok(()),
+        Err(payload) => std::panic::resume_unwind(payload),
+    })
+}
+
+/// Panic on a Rayon worker and resume that panic on this thread, outside [`guard`].
+///
+/// `diagnostics.crash_test` mode `worker_raw` uses this. Not a modelling operation.
+#[doc(hidden)]
+#[allow(clippy::panic)]
+pub fn crash_test_worker_panic_raw(message: &str) -> Result<()> {
+    let caught = catch_worker_panic(message)?;
+    match caught {
+        Ok(()) => Ok(()),
+        Err(payload) => std::panic::resume_unwind(payload),
+    }
+}
+
+/// Run `message` as a panic on a private one-thread pool and return what the worker caught.
+/// The panic hook runs on that worker before this returns.
+#[allow(clippy::panic)]
+fn catch_worker_panic(message: &str) -> Result<std::thread::Result<()>> {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let _ = message;
+        Err(KernelError::Failed("no worker pool in this build".into()))
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let message = message.to_string();
+        let pool = rayon::ThreadPoolBuilder::new()
+            .num_threads(1)
+            .thread_name(|i| format!("solidcraft-pool-{i}"))
+            .build()
+            .map_err(|e| KernelError::Failed(format!("cannot start worker: {e}")))?;
+        let (tx, rx) = std::sync::mpsc::channel();
+        pool.spawn(move || {
+            let caught = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                std::panic::panic_any(message);
+            }));
+            let _ = tx.send(caught);
+        });
+        rx.recv().map_err(|_| KernelError::Failed("worker ended without a result".into()))
+    }
+}
+
 /// Run third-party kernel code, converting a panic into an error.
 pub fn guard<T>(what: &str, f: impl FnOnce() -> Result<T>) -> Result<T> {
     struct Depth;

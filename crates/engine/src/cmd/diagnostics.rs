@@ -23,9 +23,10 @@ pub static COMMANDS: &[CommandSpec] = &[
         .noundo()
         .params("id?: one report (default: all). Returns {deleted}"),
     CommandSpec::new("diagnostics.crash_test", "Crash Test", crash_test).icon("bug_report").noundo().enabled(crash_test_enabled).params(
-        "mode: panic | kernel | abort. Checks that crash reports work: panic = an internal error in this command (caught; \
-         the design is unchanged), kernel = one inside the geometry kernel (caught), abort = the app ends at once (reported \
-         at the next start). Only when the SOLIDCRAFT_CRASH_TEST environment variable is set",
+        "mode: panic | kernel | worker | worker_raw | abort. Checks that crash reports work: panic = an internal error in this command (caught; \
+         the design is unchanged), kernel = one inside the geometry kernel (caught), worker = one on a Rayon worker inside the kernel \
+         (caught; reported with this command), worker_raw = one on a Rayon worker outside the kernel guard (caught as a command panic), \
+         abort = the app ends at once (reported at the next start). Only when the SOLIDCRAFT_CRASH_TEST environment variable is set",
     ),
 ];
 
@@ -69,7 +70,15 @@ fn crash_test(_: &mut Session, p: &Value) -> Result<Value> {
             })?;
             Err(EngineError::Other("crash test: the kernel error was not caught".into()))
         }
+        Some("worker") => {
+            solidcraft_kernel::crash_test_worker_panic("an internal error in the kernel on a worker")?;
+            Err(EngineError::Other("crash test: the kernel error was not caught".into()))
+        }
+        Some("worker_raw") => {
+            solidcraft_kernel::crash_test_worker_panic_raw("a worker panic in a command")?;
+            Err(EngineError::Other("crash test: the worker panic was not resumed".into()))
+        }
         Some("abort") => std::process::abort(),
-        _ => Err(bad(cmd, "`mode` must be panic, kernel or abort")),
+        _ => Err(bad(cmd, "`mode` must be panic, kernel, worker, worker_raw or abort")),
     }
 }

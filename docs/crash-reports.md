@@ -63,9 +63,11 @@ Without the CLI, run `solidcraft-cli run <report>/replay.json --in <report>/desi
 A fixed crash turns into a regression test with the same two files.
 
 **Check that reporting works:** with `SOLIDCRAFT_CRASH_TEST=1` set for the app, the command
-`diagnostics.crash_test` has three modes:
+`diagnostics.crash_test` has these modes:
 - `panic`: an internal error in a command
 - `kernel`: an internal error inside the geometry kernel
+- `worker`: an internal error on a Rayon worker inside the geometry kernel (caught; reported with the command, recovered)
+- `worker_raw`: an internal error on a Rayon worker outside the kernel guard (caught as a command panic)
 - `abort`: the app ends at once, and the report appears at the next start. On macOS the
   signal handler catches it, so the report names SIGABRT and the frames that called `abort()`.
 
@@ -76,8 +78,8 @@ A folder `crashes/<YYYYMMDD-HHMMSS>-<signature>/`:
 - `report.json` (`"format": "solidcraft-crash/1"`):
   - `kind`: one of
     - `command_panic`: a command hit an internal error; it was caught and the design was left unchanged
-    - `kernel_panic_recovered`: the third-party geometry kernel panicked and was caught. This is harmless on the desktop, but it would crash the web build.
-    - `panic`: an internal error outside any command
+    - `kernel_panic_recovered`: the third-party geometry kernel panicked and was caught. This is harmless on the desktop, but it would crash the web build. A panic on a Rayon worker during a command is recorded this way, with that command and design, when the worker was inside the kernel guard or the command fails with a kernel error.
+    - `panic`: an internal error outside any command. A Rayon worker panic while no command is running is still this kind, written at once.
     - `unclean_exit`: a previous session ended without recording a clean exit. It is detected at the next start, which may be days later. Possible causes include an abort, a stack overflow, a segfault, a crash inside a graphics driver, a system shutdown, or the process being forcibly stopped. This kind alone does not identify the cause. When the app died while starting up, the message and `location` name the startup step (see below). On Windows and macOS, a captured native crash also says the exception or signal, the module it happened in and the offset into it.
   - `message`, `location` (file:line), `thread`
   - `backtrace`: frames `symbol (file:line)`, without the panic machinery, std internals or the user's home folder
