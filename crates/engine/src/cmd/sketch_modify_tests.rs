@@ -1259,8 +1259,12 @@ fn free_form_profiles_extrude_exactly() {
     run(&mut s, "solid.extrude", json!({"distance": 5}));
     let v = vol(&mut s);
     assert!((v - pi * 40.0 * 5.0).abs() / (pi * 200.0) < 2e-4, "{v}");
+    // An exact ellipse: its side's area is h times the perimeter, 4a E(e), e² = 1 − b²/a²
+    // (by the Gauss–Kummer series, P = 46.026225), and only the top and bottom are planes.
     let m = run(&mut s, "inspect.measure", json!({}));
-    assert_eq!(m["bodies"][0]["faces"], 3, "an exact ellipse: top, bottom and one side ({m})");
+    let area = m["bodies"][0]["area_mm2"].as_f64().unwrap_or(f64::NAN);
+    assert!((area - (2.0 * pi * 40.0 + 5.0 * 46.026_225_191_329_7)).abs() < 1e-4, "{area} ({m})");
+    assert_eq!(m["bodies"][0]["face_types"]["plane"], 2, "{m}");
     // A region closed by a fit spline and a line.
     let mut s = new_sketch();
     let sp = ids(&run(&mut s, "sketch.spline.fit_point", json!({"points": [[0, 0], [10, 8], [20, 0]]}))["curves"])[0].clone();
@@ -1270,8 +1274,9 @@ fn free_form_profiles_extrude_exactly() {
     run(&mut s, "solid.extrude", json!({"distance": 2}));
     let v = vol(&mut s);
     assert!((v - a * 2.0).abs() / (a * 2.0) < 2e-4, "{v} vs {}", a * 2.0);
+    // Exact: the spline's side is curved, the planes are the top, the bottom and the line's side.
     let m = run(&mut s, "inspect.measure", json!({}));
-    assert!(m["bodies"][0]["faces"].as_u64().unwrap() <= 5, "{m}");
+    assert_eq!(m["bodies"][0]["face_types"]["plane"], 3, "{m}");
 }
 
 #[test]
