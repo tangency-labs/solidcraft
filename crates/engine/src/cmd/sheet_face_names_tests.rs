@@ -59,9 +59,10 @@ fn a_trays_faces_have_readable_sheet_names_that_follow_its_size() {
     let mut s = Session::default();
     let (width, fb, sd) = tray(&mut s, 320.0);
     let all = faces(&mut s);
-    // Every face but the hole's wall (two halves) has a sheet name, and no two faces share one.
+    // Every face but the hole's wall (r 3.3, however many faces the kernel makes it of) has a
+    // sheet name, and no two faces share one.
     let unnamed: Vec<_> = all.iter().filter(|f| f.0.is_none()).collect();
-    assert!(unnamed.len() == 2 && unnamed.iter().all(|f| f.2.is_some_and(|r| (r - 3.3).abs() < 1e-6)), "only the hole's wall: {unnamed:?}");
+    assert!(!unnamed.is_empty() && unnamed.iter().all(|f| f.2.is_some_and(|r| (r - 3.3).abs() < 1e-6)), "only the hole's wall: {unnamed:?}");
     let mut names: Vec<&str> = all.iter().filter_map(|f| f.0.as_deref()).collect();
     names.sort_unstable();
     let n = names.len();
@@ -84,7 +85,9 @@ fn a_trays_faces_have_readable_sheet_names_that_follow_its_size() {
     let radius = |name: &str| named(&all, name).first().and_then(|f| f.2);
     assert_eq!(radius(&format!("sheet:Body1:F{fb}.0:bend.inner")).map(|r| (r * 1e6).round() / 1e6), Some(1.0));
     assert_eq!(radius(&format!("sheet:Body1:F{fb}.0:bend.outer")).map(|r| (r * 1e6).round() / 1e6), Some(2.0));
-    // 80 mm wider: the same names, each on the same face where it now is.
+    // 80 mm wider: the same names, each on the same face where it now is. A name's point is
+    // somewhere on its face: the right flange's top is the plane x = w − 1, the back flange's
+    // far rim the strip z = 30, 199 <= y <= 200 (the flange 1 thick, its outside at y = 200).
     let right = point(&s, &format!("sheet:Body1:F{sd}.1:top"));
     assert!((right.x - 319.0).abs() < 1e-3, "{right:?}");
     run(&mut s, "parameters.change", json!({"name": width, "expression": "400"}));
@@ -95,7 +98,7 @@ fn a_trays_faces_have_readable_sheet_names_that_follow_its_size() {
     let right = point(&s, &format!("sheet:Body1:F{sd}.1:top"));
     assert!((right.x - 399.0).abs() < 1e-3, "{right:?}");
     let far = point(&s, &format!("sheet:Body1:F{fb}.1:rim.far"));
-    assert!((far.y - 199.5).abs() < 1e-3 && (far.z - 30.0).abs() < 1e-3, "{far:?}");
+    assert!((199.0 - 1e-3..=200.0 + 1e-3).contains(&far.y) && (0.0..=400.0).contains(&far.x) && (far.z - 30.0).abs() < 1e-3, "{far:?}");
 }
 
 #[test]
