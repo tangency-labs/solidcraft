@@ -293,6 +293,7 @@ fn groups(t: &Tokens) -> Vec<Group> {
         // Every axis drawn: origin, view triad, navigation cube, Move gizmo… (one set, #976).
         group("axes", &[("axis_x", t.axis_x), ("axis_y", t.axis_y), ("axis_z", t.axis_z)], &[("viewport_top", t.viewport_top)]),
         group("bend lines", &[("bend_up", t.bend_up), ("bend_down", t.bend_down)], &[("viewport_top", t.viewport_top)]),
+        group("curvature comb", &[("comb_envelope", t.comb_envelope), ("comb_teeth", t.comb_teeth)], &[("viewport_top", t.viewport_top)]),
         group("box select", &[("box_window", t.box_window), ("box_crossing", t.box_crossing)], &[("viewport_top", t.viewport_top)]),
         group(
             "selection",

@@ -657,9 +657,10 @@ pub fn blend_edges(body: &Body, picks: &[Vec3]) -> Result<Vec<usize>> {
 /// tangentially (within 0.5° at a shared vertex), until no more do. Each pick takes its edge as a
 /// blend does (a pick at a vertex where a seam meets a rim takes the rim). An edge only one face
 /// uses ends a chain, and so do a seam and a smooth edge (its two faces meet tangentially, within
-/// 0.5°): they have no corner to round. A chain does not run on into an edge of the other
-/// convexity (a boss's concave base running on tangentially as the convex rim of its overhang):
-/// a round cannot pass from one side of the faces to the other, so it ends at that vertex.
+/// 0.5°, all along it): they have no corner to round. A chain does not run on into an edge of the
+/// other convexity (a boss's concave base running on tangentially as the convex rim of its
+/// overhang): a round cannot pass from one side of the faces to the other, so it ends at that
+/// vertex.
 /// Picks that find no edge are refused.
 pub fn tangent_chain(body: &Body, picks: &[Vec3]) -> Result<Vec<Vec3>> {
     if picks.is_empty() || picks.len() > 1000 || picks.iter().any(|p| !p.is_finite()) {
@@ -673,7 +674,7 @@ pub fn tangent_chain(body: &Body, picks: &[Vec3]) -> Result<Vec<Vec3>> {
             picked.push(e);
         }
     }
-    let chain = chain_of(&rec, &picked, &hidden);
+    let chain = chain_of(&rec, &picked, &hidden)?;
     let mut out = picks.to_vec();
     for e in chain.into_iter().skip(picked.len()) {
         out.push(edge_middle(&rec, e).ok_or_else(|| KernelError::Failed("a point on a chain edge".into()))?);
@@ -696,35 +697,34 @@ fn normal_reach(rec: &Faces) -> f64 {
     rec.rec.tolerance.max(1e-7) * 10.0
 }
 
-/// Stations along an edge, as fractions of its interval, where [`smooth_join`] compares its
-/// faces' normals: its ends, and between them.
-const SMOOTH_STATIONS: [f64; 5] = [0.0, 0.25, 0.5, 0.75, 1.0];
-
-/// Whether edge `e`'s two faces meet tangentially (within [`TANGENT_DEGREES`]) all along it: a
-/// smooth edge, with no corner to blend. An edge whose faces are tangent at one end only (a
-/// round running into a wall it is tangent to where the wall meets its face) is a crease
-/// everywhere else, which is not smooth.
-fn smooth_join(rec: &Faces, e: usize) -> bool {
-    let cos = TANGENT_DEGREES.to_radians().cos();
-    let accept = normal_reach(rec);
-    let faces: Vec<u32> = rec.faces_of(e).into_iter().collect();
-    let ([a, b], Some(edge)) = (faces.as_slice(), rec.rec.edges.get(e)) else { return false };
-    let Ok(curve) = CurveEval::new(edge.parameters()) else { return false };
-    let [t0, t1] = edge.interval;
-    SMOOTH_STATIONS.iter().all(|s| {
-        let Some(p) = curve.point(t0 + (t1 - t0) * s) else { return false };
-        match (rec.normal_at(*a as usize, p, accept), rec.normal_at(*b as usize, p, accept)) {
-            (Some(na), Some(nb)) => na.dot(nb) > cos,
-            _ => false,
-        }
-    })
+/// Whether edge `e`'s two uses meet tangentially (within [`TANGENT_DEGREES`]) all along it: a
+/// smooth edge, with no corner to blend (a seam a face meets itself across is one). An edge
+/// whose faces are tangent at one end only (a round running into a wall it is tangent to where
+/// the wall meets its face) is a crease everywhere else, which is not smooth; nor is a cusp, its
+/// faces folded back on each other (outward normals opposite), which SMLib rounds like any other
+/// edge. Decided exactly from the faces' surfaces and the uses' pcurves
+/// ([`crate::tangent_edge`]).
+fn smooth_join(rec: &Faces, e: usize) -> Result<bool> {
+    crate::tangent_edge::tangent_all_along(&rec.rec, |f| rec.side(f), e, TANGENT_DEGREES.to_radians())
 }
 
 /// `seeds` (edges in the record's order, each once), then every other edge that continues one
 /// of them tangentially, as [`tangent_chain`] follows them; `hidden` marks the edges a pick
 /// passes over.
-fn chain_of(rec: &Faces, seeds: &[usize], hidden: &[bool]) -> Vec<usize> {
+fn chain_of(rec: &Faces, seeds: &[usize], hidden: &[bool]) -> Result<Vec<usize>> {
     let mut chain = seeds.to_vec();
+    // Each edge's smoothness, decided once.
+    let mut smooth: Vec<Option<bool>> = vec![None; rec.rec.edges.len()];
+    let mut smooth_at = |f: usize| -> Result<bool> {
+        if let Some(known) = smooth.get(f).copied().flatten() {
+            return Ok(known);
+        }
+        let s = smooth_join(rec, f)?;
+        if let Some(slot) = smooth.get_mut(f) {
+            *slot = Some(s);
+        }
+        Ok(s)
+    };
     // The unit direction edge `e` leaves its end `v` in.
     let leaving = |e: usize, v: u32| -> Option<Vec3> {
         let [a, b] = rec.rec.edges.get(e)?.vertices;
@@ -761,7 +761,7 @@ fn chain_of(rec: &Faces, seeds: &[usize], hidden: &[bool]) -> Vec<usize> {
             let Some(d) = leaving(e, v) else { continue };
             for (f, other) in rec.rec.edges.iter().enumerate() {
                 let passed_over = hidden.get(f).copied().unwrap_or(false);
-                if passed_over || chain.contains(&f) || other.uses.len() < 2 || !other.vertices.contains(&v) || smooth_join(rec, f) {
+                if passed_over || chain.contains(&f) || other.uses.len() < 2 || !other.vertices.contains(&v) || smooth_at(f)? {
                     continue;
                 }
                 let turns_over = matches!((convex(e, v), convex(f, v)), (Some(a), Some(b)) if a != b);
@@ -771,7 +771,7 @@ fn chain_of(rec: &Faces, seeds: &[usize], hidden: &[bool]) -> Vec<usize> {
             }
         }
     }
-    chain
+    Ok(chain)
 }
 
 /// Before blending exactly `edges` (the record's edges `picks` took, in order): refuses an edge
@@ -783,7 +783,7 @@ pub(crate) fn unfinished_chain(body: &Body, picks: &[Vec3], edges: &[usize], hid
     let rec = Faces::of(body)?;
     let at = |i: usize| picks.get(i).map(|p| format!("({:.3}, {:.3}, {:.3})", p.x, p.y, p.z)).unwrap_or_default();
     for (i, &e) in edges.iter().enumerate() {
-        if smooth_join(&rec, e) {
+        if smooth_join(&rec, e)? {
             return Err(KernelError::Invalid(format!("the edge at {} is smooth: its faces meet tangentially, so there is nothing to round", at(i))));
         }
     }
@@ -793,7 +793,7 @@ pub(crate) fn unfinished_chain(body: &Body, picks: &[Vec3], edges: &[usize], hid
             seeds.push(e);
         }
     }
-    Ok(chain_of(&rec, &seeds, hidden).get(seeds.len()).and_then(|&next| edge_middle(&rec, next)))
+    Ok(chain_of(&rec, &seeds, hidden)?.get(seeds.len()).and_then(|&next| edge_middle(&rec, next)))
 }
 
 /// A blend's failure where a picked edge continues tangentially into `next`, an edge left out
@@ -855,6 +855,33 @@ mod tests {
         // the boss's tangentially but has no corner to blend.
         let side = (top + Vec3::new(top.x, top.y, 21.0)) * 0.5;
         assert_eq!(tangent_chain(&rounded, &[side]).unwrap(), vec![side], "the chain ran into the round's seam");
+    }
+
+    /// Smoothness is decided all along an edge. A bar 40 × 16 × 10 whose front face runs tangent
+    /// into a cylinder R8 at its far end, its front top edge rounded r2: the round's contact with
+    /// the front face and the front face's tangent line with the wall are smooth (plane against
+    /// cylinder, tangent all along); the round's edge with the wall is tangent at its lower end
+    /// (40, 0, 8) only, a crease everywhere else; a box edge is a crease. A knife edge (a wall of
+    /// radius 21 running out into a plane, #851: its faces tangent all along but folded back on
+    /// each other) is a cusp, which is not smooth.
+    #[test]
+    fn an_edge_is_smooth_only_where_its_faces_are_tangent_all_along_it() {
+        let bar = crate::build::box_solid(Vec3::ZERO, Vec3::new(40.0, 16.0, 10.0)).unwrap();
+        let post = crate::build::cylinder(Vec3::new(40.0, 8.0, 0.0), Vec3::Z, 8.0, 20.0).unwrap();
+        let peg = crate::boolean(&bar, &post, crate::BoolOp::Union).unwrap().unwrap();
+        let rounded = fillet(&peg, &[Vec3::new(20.0, 0.0, 10.0)], 2.0).unwrap();
+        let rec = Faces::of(&rounded).unwrap();
+        let smooth = |p: Vec3| smooth_join(&rec, blend_edges(&rounded, &[p]).unwrap()[0]).unwrap();
+        assert!(smooth(Vec3::new(20.0, 0.0, 8.0)), "the round's contact with the front face");
+        assert!(smooth(Vec3::new(40.0, 0.0, 4.0)), "the front face's tangent line with the wall");
+        assert!(!smooth(Vec3::new(37.2641, 0.4827, 9.3025)), "the round's edge with the wall");
+        assert!(!smooth(Vec3::new(20.0, 0.0, 0.0)), "the bar's front bottom edge");
+        let tip = 62.0 + 1.0 / 6.0;
+        let slab = crate::build::box_solid(Vec3::new(0.0, -21.0, 0.0), Vec3::new(tip, 0.0, 10.0)).unwrap();
+        let disc = crate::build::cylinder(Vec3::new(tip, -21.0, 0.0), Vec3::Z, 21.0, 10.0).unwrap();
+        let knife = crate::boolean(&slab, &disc, crate::BoolOp::Cut).unwrap().unwrap();
+        let rec = Faces::of(&knife).unwrap();
+        assert!(!smooth_join(&rec, blend_edges(&knife, &[Vec3::new(tip, 0.0, 5.0)]).unwrap()[0]).unwrap(), "the knife edge");
     }
 
     #[test]

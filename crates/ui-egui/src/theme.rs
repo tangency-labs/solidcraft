@@ -811,6 +811,10 @@ pub struct Tokens {
     pub bend_down: Color32,
     /// Interference: the clash fill, before its shading.
     pub interference: Color32,
+    /// Curvature Comb: the envelope through the teeth tips (purple) and the teeth, the scaled
+    /// normals (orange).
+    pub comb_envelope: Color32,
+    pub comb_teeth: Color32,
     /// Continuity Analysis seams, best to worst as `inspect.continuity` judges them: smooth (G2),
     /// tangent with a curvature jump (G1), a crease (G0) and a gap. Bluish green, blue, yellow
     /// and reddish purple stay apart in every colour vision mode, so no mode changes them.
@@ -920,6 +924,8 @@ impl Tokens {
             bend_up: view.bend_up,
             bend_down: view.bend_down,
             interference: view.interference,
+            comb_envelope: view.comb_envelope,
+            comb_teeth: view.comb_teeth,
             continuity: view.continuity,
             analysis: view.analysis,
             ..self

@@ -490,10 +490,10 @@ fn combs(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
             let mut tips: Vec<Pos2> = Vec::new();
             for [a, b] in comb {
                 let (Some(p), Some(q)) = (proj.to_screen(*a), proj.to_screen(*b)) else { continue };
-                painter.line_segment([p, q], Stroke::new(1.0, tk.warning.gamma_multiply(0.8)));
+                painter.line_segment([p, q], Stroke::new(1.0, tk.comb_teeth));
                 tips.push(q);
             }
-            painter.add(egui::Shape::line(tips, Stroke::new(1.4, tk.warning)));
+            painter.add(egui::Shape::line(tips, Stroke::new(1.4, tk.comb_envelope)));
         }
     });
 }
