@@ -300,9 +300,45 @@ pub(super) fn srf_srf_intersection(
     skip_two_pnts_intersection: bool,
     ref_point: Option<Point3>,
 ) -> Result<SrfSrfCurves> {
+    srf_srf_intersection_with_context(
+        k,
+        fb,
+        start_fv,
+        end_fv,
+        dir,
+        end_dir,
+        surface1,
+        surface2,
+        approx_tol,
+        ang_tol,
+        skip_two_pnts_intersection,
+        ref_point,
+        None,
+    )
+}
+
+/// [`srf_srf_intersection`] with the general intersector's face-aware cache context
+/// ([`super::p2::srf_srf_intersection_with_context`]). Also used by
+/// `blend.fillet_geom_p5`.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn srf_srf_intersection_with_context(
+    k: &Kernel,
+    fb: &FilletBrep,
+    start_fv: Option<VertexId>,
+    end_fv: Option<VertexId>,
+    dir: Option<&mut Vec3>,
+    end_dir: Option<Vec3>,
+    surface1: &Surface,
+    surface2: &Surface,
+    approx_tol: f64,
+    ang_tol: f64,
+    skip_two_pnts_intersection: bool,
+    ref_point: Option<Point3>,
+    context: Option<super::p2::SrfSrfContext<'_>>,
+) -> Result<SrfSrfCurves> {
     let start = start_fv.map(|v| fb.vertex_point(v)).transpose()?;
     let end = end_fv.map(|v| fb.vertex_point(v)).transpose()?;
-    let r = super::p2::srf_srf_intersection(
+    let r = super::p2::srf_srf_intersection_with_context(
         k,
         start,
         end,
@@ -316,6 +352,7 @@ pub(super) fn srf_srf_intersection(
             skip_two_pnts_intersection,
             ref_point,
         },
+        context,
     )?;
     let part = |c: Option<Curve>| c.filter(|curve| as_b_spline(curve).is_some());
     Ok(SrfSrfCurves {
@@ -485,7 +522,6 @@ pub struct UvCurves {
 /// a surface that is not an `SmBSplineSurface` in the plane branch; those of the
 /// evaluations, solves and line creations; [`SolidError::Unported`] from the plane
 /// branch's `sm_SrfSrfIntersection` ([`super::p2::srf_srf_intersection`]).
-#[allow(clippy::too_many_lines)] // one upstream routine
 pub fn create_uv_curve(
     k: &Kernel,
     fb: &FilletBrep,
@@ -494,6 +530,39 @@ pub fn create_uv_curve(
     create_two_boundary_curves: bool,
     surface: &Surface,
     approx_tol: f64,
+) -> Result<UvCurves> {
+    create_uv_curve_on_face(
+        k,
+        fb,
+        start_fv,
+        end_fv,
+        create_two_boundary_curves,
+        surface,
+        approx_tol,
+        None,
+    )
+}
+
+/// [`create_uv_curve`] of `surface` standing for the surface of face `f` of `b`
+/// (`on_face`): the point drops' fast-drop trim test classifies on the face
+/// (`pFace->PointClassify` in `GlobalPointSolve`), making the face's trimmed surface
+/// cache when it has none, as upstream's face-owned surface does
+/// ([`crate::intersect::point_class::live_face_fast_drop_test`]). With `None` the
+/// drops run as [`create_uv_curve`]'s.
+///
+/// # Errors
+///
+/// As [`create_uv_curve`], and those of the face classification.
+#[allow(clippy::too_many_lines, clippy::too_many_arguments)] // one upstream routine
+pub fn create_uv_curve_on_face(
+    k: &Kernel,
+    fb: &FilletBrep,
+    start_fv: VertexId,
+    end_fv: VertexId,
+    create_two_boundary_curves: bool,
+    surface: &Surface,
+    approx_tol: f64,
+    mut on_face: Option<(&mut Brep, FaceId)>,
 ) -> Result<UvCurves> {
     // init output
     let mut out = UvCurves::default();
@@ -645,17 +714,43 @@ pub fn create_uv_curve(
 
     // the solutions name pSurface (SmFilletGeom.cpp:4461-4504), see UvSurfaceHandle
     let handle = UvSurfaceHandle(surface.natural_uv_domain_with_nurb(k)?);
-    let solve = |pnt: Point3, op: SolverOperation, tol: f64, req: SolutionRequested| {
-        surface.global_point_solve(
-            k,
-            Some(handle),
-            &uv_domain,
-            op,
-            pnt,
-            zone_tol3d(k, tol),
-            None,
-            req,
-        )
+    let mut solve = |pnt: Point3, op: SolverOperation, tol: f64, req: SolutionRequested| {
+        if let Some((b, f)) = on_face.as_mut() {
+            let f = *f;
+            let mut test_on: Option<bool> = None;
+            let mut classify = |k: &Kernel, uv: Point2, src_tol: f64| -> Result<bool> {
+                crate::intersect::point_class::live_face_fast_drop_test(
+                    k,
+                    b,
+                    f,
+                    &mut test_on,
+                    uv,
+                    src_tol,
+                )
+            };
+            surface.global_point_solve_face_tested(
+                k,
+                Some(handle),
+                &uv_domain,
+                op,
+                pnt,
+                zone_tol3d(k, tol),
+                None,
+                req,
+                Some(&mut classify),
+            )
+        } else {
+            surface.global_point_solve(
+                k,
+                Some(handle),
+                &uv_domain,
+                op,
+                pnt,
+                zone_tol3d(k, tol),
+                None,
+                req,
+            )
+        }
     };
 
     // try increasing tolerance sized drops of Start/End Pts to surface

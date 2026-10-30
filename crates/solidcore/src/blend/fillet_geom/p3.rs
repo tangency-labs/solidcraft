@@ -586,7 +586,7 @@ impl FilletBrep {
             .fillet_corner()
             .ok_or_else(|| SolidError::null_pointer(OP_CORNER_EDGE))?;
         match edge.fillet_edge_type() {
-            FilletEdgeType::CrossSection => self.calc_cross_section_with_lookup(
+            FilletEdgeType::CrossSection => self.calc_cross_section_with_lookup_live(
                 k,
                 e,
                 Some(corner),

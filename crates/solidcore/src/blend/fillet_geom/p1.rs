@@ -135,13 +135,11 @@
 //! - **Surface cache flags.** `sm_SurfaceDropPoint` and `sm_FindStepoffUV` temporarily
 //!   turn off the surface cache's point test (`m_bPointTestEnabled`) and turn on its
 //!   boundary-curve processing around `GlobalPointSolve`, so every solution is kept
-//!   unclassified. The Rust surface cache has no such switch yet: for a standalone
-//!   surface the flags change nothing (the point test only runs for a face's surface,
-//!   `m_bProcessBoundaryCurves` defaults to `TRUE`), and for a face-owned surface
-//!   `Surface::global_point_solve` returns `Unported(query.face_p2)` at the point test
-//!   itself (`surface::surface::p4`, where the switch is noted for that porter: once it
-//!   exists, these two callers must disable the test or their solutions will be
-//!   classified against the trim boundaries, unlike upstream). `sm_SurfaceDropPoint`'s
+//!   unclassified. The port solves with
+//!   [`Surface::global_point_solve_point_test_off`] (the same switch for this solve,
+//!   so a face-owned surface's solutions are not classified against the trim
+//!   boundaries); `m_bProcessBoundaryCurves` defaults to `TRUE`, so its switch changes
+//!   nothing. `sm_SurfaceDropPoint`'s
 //!   own cache fetch (`smsurf_GetSurfaceCache` + `NER`) is ported: a surface whose
 //!   cache cannot be built (its Bezier decomposition fails, as for UB-166's u direction)
 //!   returns `SM_ERR_NULL_POINTER` before any solve; the solve then fetches the cache
@@ -2713,7 +2711,9 @@ pub fn surface_drop_point<O: SolutionObject>(
     for _ in 0..5 {
         // intersect the point with the surface; the double converts to the solve's
         // SmZoneTol3d parameter (USE_DEFAULT -> zone tolerance, then fabs)
-        let solutions = surface.global_point_solve::<O>(
+        // with point testing off (`m_bPointTestEnabled = FALSE` around the solves), so
+        // every solution is kept without classifying it against the trim boundaries
+        let solutions = surface.global_point_solve_point_test_off::<O>(
             k,
             handle,
             &domain,
@@ -2948,8 +2948,8 @@ pub fn find_stepoff_uv(
         let surface =
             face2::surface(brep, face)?.ok_or_else(|| SolidError::null_pointer(OP_STEPOFF))?;
         let tol = solver.solver.approx_tol_3d;
-        // Make the surface think that it is a standalone surface.
-        let solutions = surface.global_point_solve::<NoObject>(
+        // Make the surface think that it is a standalone surface (point testing off).
+        let solutions = surface.global_point_solve_point_test_off::<NoObject>(
             k,
             Some(NoObject),
             &face2::uv_domain(brep, face)?,

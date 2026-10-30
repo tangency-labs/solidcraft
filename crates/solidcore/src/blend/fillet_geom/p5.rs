@@ -119,7 +119,10 @@ use super::p1::{
     FilletCornerId, FilletCornerType, FilletEdgeType, FilletErrorType, FilletGeom, FilletGeomId,
     FilletGeomType, FilletSolverId, FilletVertex, FilletVertexType, FilletVertexuse,
 };
-use super::p4::{srf_srf_intersection, SrfSrfCurves};
+use super::p4::{srf_srf_intersection, srf_srf_intersection_with_context, SrfSrfCurves};
+use crate::query::brep::BrepFaceServices;
+use crate::surface::surface::p1::SurfaceSolveContext;
+use crate::topology::brep_cache::CacheObject;
 
 const OP_INT_FILLET: &str = "blend::fillet_geom::p5::FilletBrep::calc_fillet_int_fillet";
 const OP_CROSS: &str = "blend::fillet_geom::p5::FilletBrep::calc_cross_section";
@@ -694,7 +697,6 @@ impl FilletBrep {
     /// `SM_ERR_NULL_POINTER` for missing uses, surfaces, solvers, original face or
     /// curves; those of the UV curve creation and the lift; those of [`CornerLookup::corner`] (`corners` resolves the corner);
     /// [`SolidError::Unported`] for the callees' gaps.
-    #[allow(clippy::too_many_lines)] // one upstream routine
     pub fn calc_cross_section(
         &mut self,
         k: &Kernel,
@@ -702,9 +704,9 @@ impl FilletBrep {
         corner: Option<FilletCornerId>,
         corners: CornerLookup<'_>,
         solvers: &[FilletSolver],
-        target: &Brep,
+        target: &mut Brep,
     ) -> Result<()> {
-        self.calc_cross_section_with_lookup(
+        self.calc_cross_section_with_lookup_live(
             k,
             e,
             corner,
@@ -714,7 +716,11 @@ impl FilletBrep {
         )
     }
 
-    /// Calculate a cross-section using borrowed records from the actual solver store.
+    /// Calculate a cross-section using borrowed records from the actual solver store,
+    /// with read-only access to the target: the fast drop's trim test on the original
+    /// face (`pFace->PointClassify` in `GlobalPointSolve`) can only reuse a trimmed
+    /// cache the face's surface keeps ([`Self::calc_cross_section_with_lookup_live`]
+    /// makes one).
     ///
     /// # Errors
     /// As [`Self::calc_cross_section`], including the caller's solver lookup errors.
@@ -727,6 +733,55 @@ impl FilletBrep {
         resolve: &impl Fn(FilletSolverId) -> Result<&'solver FilletSolver>,
         target: &Brep,
     ) -> Result<()> {
+        self.calc_cross_section_in(
+            k,
+            e,
+            corner,
+            corners,
+            resolve,
+            CrossSectionTarget::Shared(target),
+        )
+    }
+
+    /// [`Self::calc_cross_section_with_lookup`] with the target at hand mutably: when the
+    /// cross section lies on the original face's surface, its point drops
+    /// (`sm_CreateUVCurve`'s `GlobalPointSolve`) classify on that face as upstream's
+    /// face-owned surface does, making the face's trimmed surface cache when it has none.
+    ///
+    /// # Errors
+    /// As [`Self::calc_cross_section`], including the caller's solver lookup errors.
+    pub fn calc_cross_section_with_lookup_live<'solver>(
+        &mut self,
+        k: &Kernel,
+        e: EdgeId,
+        corner: Option<FilletCornerId>,
+        corners: CornerLookup<'_>,
+        resolve: &impl Fn(FilletSolverId) -> Result<&'solver FilletSolver>,
+        target: &mut Brep,
+    ) -> Result<()> {
+        self.calc_cross_section_in(
+            k,
+            e,
+            corner,
+            corners,
+            resolve,
+            CrossSectionTarget::Live(target),
+        )
+    }
+
+    #[allow(clippy::too_many_lines)] // one upstream routine
+    fn calc_cross_section_in<'solver>(
+        &mut self,
+        k: &Kernel,
+        e: EdgeId,
+        corner: Option<FilletCornerId>,
+        corners: CornerLookup<'_>,
+        resolve: &impl Fn(FilletSolverId) -> Result<&'solver FilletSolver>,
+        mut target: CrossSectionTarget<'_>,
+    ) -> Result<()> {
+        // the original face whose surface the cross section lies on (`None` on a
+        // fillet surface)
+        let mut surface1_face: Option<FaceId> = None;
         let (start_fv, end_fv) = self.edge_ends(e, OP_CROSS)?;
         let (prim, mate) = self.p5_prim_mate(e, OP_CROSS)?;
         let g1 = self.eu_geom(prim)?;
@@ -775,7 +830,7 @@ impl FilletBrep {
                     let filleted_vertex = the_corner.filleted_vertex();
                     match the_corner.corner_type() {
                         FilletCornerType::NByTwo => {
-                            at_start_of_geom1 = fs1.vertex(target, 0)? == filleted_vertex;
+                            at_start_of_geom1 = fs1.vertex(target.brep(), 0)? == filleted_vertex;
                             // pFilSolver2 stays NULL when both uses share the geometry
                             if g2 == g1 {
                                 return Err(SolidError::null_pointer(OP_CROSS));
@@ -785,7 +840,7 @@ impl FilletBrep {
                                     .fillet_solver()
                                     .ok_or_else(|| SolidError::null_pointer(OP_CROSS))?,
                             )?;
-                            at_start_of_geom2 = fs2.vertex(target, 0)? == filleted_vertex;
+                            at_start_of_geom2 = fs2.vertex(target.brep(), 0)? == filleted_vertex;
                             check_connectivity = true;
                         }
                         FilletCornerType::NByOneClosed if the_corner.is_blending_corner() => {
@@ -840,14 +895,15 @@ impl FilletBrep {
                 .fillet_edge(e)?
                 .original_face()
                 .ok_or_else(|| SolidError::null_pointer(OP_CROSS))?;
-            let face = target.face(orig_face)?;
+            let face = target.brep().face(orig_face)?;
             surface1 = face
                 .surface
                 .as_ref()
                 .map(exact_surface)
                 .transpose()?
                 .ok_or_else(|| SolidError::null_pointer(OP_CROSS))?;
-            tol = crate::topology::face::p2::tolerance(target, orig_face)?;
+            surface1_face = Some(orig_face);
+            tol = crate::topology::face::p2::tolerance(target.brep(), orig_face)?;
         }
 
         // Drop start & end points onto pFilletSurface1, then join them with a uv-curve
@@ -864,8 +920,13 @@ impl FilletBrep {
         if closed_blending {
             create_two_boundary_curves = true;
         }
-
-        let uv = super::p4::create_uv_curve(
+        // `pSurface1` of the original face is the face's own surface: its drops classify
+        // on the face (with the target at hand)
+        let on_face = match (&mut target, surface1_face) {
+            (CrossSectionTarget::Live(b), Some(f)) => Some((&mut **b, f)),
+            _ => None,
+        };
+        let uv = super::p4::create_uv_curve_on_face(
             k,
             self,
             start_fv,
@@ -873,6 +934,7 @@ impl FilletBrep {
             create_two_boundary_curves,
             &surface1,
             50.0 * tol,
+            on_face,
         )?;
         let mut curve_3d: Option<Curve> = uv.curve_3d;
         let uv_curve1 = uv.uv_curve1;
@@ -958,7 +1020,7 @@ impl FilletBrep {
         corner: Option<FilletCornerId>,
         corners: CornerLookup<'_>,
         solvers: &[FilletSolver],
-        target: &Brep,
+        target: &mut Brep,
     ) -> Result<()> {
         self.calc_fillet_int_side_face_with_error_info(k, e, corner, corners, solvers, target, None)
     }
@@ -976,7 +1038,7 @@ impl FilletBrep {
         corner: Option<FilletCornerId>,
         corners: CornerLookup<'_>,
         solvers: &[FilletSolver],
-        target: &Brep,
+        target: &mut Brep,
         error_info: Option<&mut ErrorInfo<ExecutiveErrorObject>>,
     ) -> Result<()> {
         self.calc_fillet_int_side_face_with_context_and_error_info(
@@ -1005,7 +1067,7 @@ impl FilletBrep {
         corner: Option<FilletCornerId>,
         corners: CornerLookup<'_>,
         context: &impl FilletEdgeContext,
-        target: &Brep,
+        target: &mut Brep,
     ) -> Result<()> {
         self.calc_fillet_int_side_face_with_context_and_error_info(
             k, e, corner, corners, context, target, None,
@@ -1025,7 +1087,7 @@ impl FilletBrep {
         corner: Option<FilletCornerId>,
         corners: CornerLookup<'_>,
         context: &impl FilletEdgeContext,
-        target: &Brep,
+        target: &mut Brep,
         error_info: Option<&mut ErrorInfo<ExecutiveErrorObject>>,
     ) -> Result<()> {
         // get filletEdge->vertices
@@ -1128,25 +1190,43 @@ impl FilletBrep {
                         Some(ExecutiveErrorObject::TempEndPlane(e)),
                     )
                 };
-
             // do Surface/surface xSect
             let ang_tol = fs1.ang_tol_rad;
             let mut dir = end_pnt - start_pnt;
             let intersection = match &surface {
-                Some(surface) => srf_srf_intersection(
-                    k,
-                    self,
-                    Some(start_fv),
-                    Some(end_fv),
-                    Some(&mut dir),
-                    None,
-                    &fillet_surface1,
-                    surface,
-                    approx_tol,
-                    ang_tol,
-                    false,
-                    None,
-                ),
+                Some(surface) => {
+                    // the original face's own surface (`pFace->GetSurface()`): its
+                    // trimmed surface cache is the face's, made with its boundary
+                    let mut services;
+                    let face_context = match surface2_id {
+                        Some(ExecutiveErrorObject::TargetFaceSurface {
+                            face,
+                            extended: false,
+                        }) => {
+                            services = BrepFaceServices::new(target);
+                            Some((
+                                &mut services as &mut dyn SurfaceSolveContext<CacheObject>,
+                                [None, Some(CacheObject::Surface(face))],
+                            ))
+                        }
+                        _ => None,
+                    };
+                    srf_srf_intersection_with_context(
+                        k,
+                        self,
+                        Some(start_fv),
+                        Some(end_fv),
+                        Some(&mut dir),
+                        None,
+                        &fillet_surface1,
+                        surface,
+                        approx_tol,
+                        ang_tol,
+                        false,
+                        None,
+                        face_context,
+                    )
+                }
                 // NER(pSurf2)
                 None => Err(SolidError::null_pointer(OP_SIDE)),
             };
@@ -2500,15 +2580,29 @@ impl FilletBrep {
     }
 }
 
+/// The target of [`FilletBrep::calc_cross_section_with_lookup`]: read-only, or at hand
+/// mutably so that a face's trimmed surface cache can be made.
+enum CrossSectionTarget<'a> {
+    Shared(&'a Brep),
+    Live(&'a mut Brep),
+}
+
+impl CrossSectionTarget<'_> {
+    fn brep(&self) -> &Brep {
+        match self {
+            Self::Shared(b) => b,
+            Self::Live(b) => b,
+        }
+    }
+}
+
 /// The surface upstream's pointer (`GetFilletSurface()`, `pFace->GetSurface()`, an
 /// extended surface) stands for, as a copy: the knots exactly as they are (the copy
-/// constructor's `sm_FixupKnotVector` can move near-coincident knots), without owner as
-/// the port's copies have always run here (an owned copy classifies points on the face,
-/// `SmFace::PointClassify`, which `query.face_p2` does not port for these callers yet).
+/// constructor's `sm_FixupKnotVector` can move near-coincident knots) and the owner
+/// kept, as the pointer has it (a face-owned copy's solves classify on its face where
+/// upstream's do).
 fn exact_surface(s: &Surface) -> Result<Surface> {
-    let mut c = s.clone_for_evaluation()?;
-    c.set_owner(None);
-    Ok(c)
+    s.clone_for_evaluation()
 }
 
 /// `DropVectors(uv, TRUE, TRUE, 1, &direction, &uv_dir)`.
@@ -2562,6 +2656,29 @@ mod tests {
             ids.push(v);
         }
         (fb, ids)
+    }
+
+    /// The copies stand for upstream's pointers (`pFace->GetSurface()`,
+    /// `GetFilletSurface()`), so they keep the surface's owner.
+    #[test]
+    fn exact_surface_keeps_the_owner() {
+        use crate::geom::assert_array::labels::FACE_TYPE;
+        use crate::geom::attribute::ObjectKey;
+        use crate::geom::object::ObjectRef;
+        let mut plane = Surface::from(Plane::new(
+            Vec3::new(0.0, 0.0, 0.0),
+            Vec3::new(1.0, 0.0, 0.0),
+            Vec3::new(0.0, 1.0, 0.0),
+            Vec2::new(1.0, 1.0),
+            &Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0),
+        ));
+        let owner = ObjectRef {
+            type_code: FACE_TYPE,
+            key: ObjectKey(7),
+        };
+        plane.set_owner(Some(owner));
+        let copy = exact_surface(&plane).unwrap();
+        assert_eq!(copy.owner(), Some(owner));
     }
 
     #[test]

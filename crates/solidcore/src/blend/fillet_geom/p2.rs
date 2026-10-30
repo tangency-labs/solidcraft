@@ -108,6 +108,7 @@ use crate::nurbs::b_spline_curve_n_lib::TrimMode;
 use crate::nurbs::b_spline_surface_n_lib::p2::{EvaluateFlags, OrientType};
 use crate::nurbs::knots::Side;
 use crate::surface::plane::Plane;
+use crate::surface::surface::p1::SurfaceSolveContext;
 use crate::surface::surface::p2::SurfaceIntersection;
 use crate::surface::surface::p4::NoObject;
 use crate::surface::surface::{Surface, SurfaceKind};
@@ -798,7 +799,7 @@ struct Candidate {
 /// not derived from `SmBSplineCurve`; those of the general intersector, the drops,
 /// trims, reversals and evaluations; [`SolidError::Unported`] from
 /// `sm_TwoPntsIntersection`.
-#[allow(clippy::too_many_arguments, clippy::too_many_lines)] // one upstream routine
+#[allow(clippy::too_many_arguments)] // one upstream routine
 pub fn srf_srf_intersection(
     k: &Kernel,
     start: Option<Point3>,
@@ -810,6 +811,50 @@ pub fn srf_srf_intersection(
     approx_tol: f64,
     angle_tol: f64,
     opts: SrfSrfOptions,
+) -> Result<SrfSrfCurves> {
+    srf_srf_intersection_with_context(
+        k,
+        start,
+        end,
+        opt_dir,
+        opt_end_dir,
+        surf1,
+        surf2,
+        approx_tol,
+        angle_tol,
+        opts,
+        None,
+    )
+}
+
+/// The face-aware surface cache context of a [`srf_srf_intersection_with_context`]: the
+/// caller's context and the two surfaces' handles in it (a face's surface is named
+/// by its face, so its trimmed surface cache is made with the face's boundary, as
+/// upstream's `smsurf_GetSurfaceCache` of a face-owned surface does).
+pub type SrfSrfContext<'a> = (
+    &'a mut dyn SurfaceSolveContext<CacheObject>,
+    [Option<CacheObject>; 2],
+);
+
+/// [`srf_srf_intersection`] whose general surface/surface intersection runs through the
+/// caller's face-aware cache `context` (`None`: as [`srf_srf_intersection`]).
+///
+/// # Errors
+///
+/// As [`srf_srf_intersection`], and those of the context's cache preparation.
+#[allow(clippy::too_many_arguments, clippy::too_many_lines)] // one upstream routine
+pub fn srf_srf_intersection_with_context(
+    k: &Kernel,
+    start: Option<Point3>,
+    end: Option<Point3>,
+    opt_dir: Option<&mut Vec3>,
+    opt_end_dir: Option<Vec3>,
+    surf1: &Surface,
+    surf2: &Surface,
+    approx_tol: f64,
+    angle_tol: f64,
+    opts: SrfSrfOptions,
+    context: Option<SrfSrfContext<'_>>,
 ) -> Result<SrfSrfCurves> {
     // SmApproxTol3d dApproxTol: the double converts at the call
     let approx_tol = approx_tol3d(k, approx_tol);
@@ -939,15 +984,29 @@ pub fn srf_srf_intersection(
 
     // general surf/surf intersector
     if curves_3d.is_empty() {
-        let xs = surf1.global_surface_intersect(
-            k,
-            &domain1,
-            surf2,
-            &domain2,
-            [true, true],
-            Some(ssi_tol),
-            Some(angle_tol),
-        )?;
+        let xs = if let Some((context, handles)) = context {
+            surf1.global_surface_intersect_with_context(
+                k,
+                handles,
+                context,
+                &domain1,
+                surf2,
+                &domain2,
+                [true, true],
+                Some(ssi_tol),
+                Some(angle_tol),
+            )?
+        } else {
+            surf1.global_surface_intersect(
+                k,
+                &domain1,
+                surf2,
+                &domain2,
+                [true, true],
+                Some(ssi_tol),
+                Some(angle_tol),
+            )?
+        };
         curves_3d.extend(xs.curves_3d);
         surface1_uv_curves.extend(xs.surface1_uv_curves);
         surface2_uv_curves.extend(xs.surface2_uv_curves);

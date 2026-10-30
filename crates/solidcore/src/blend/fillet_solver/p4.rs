@@ -4165,7 +4165,7 @@ fn calc_cross_section(ops: &dyn FilletSolverOps, cx: &mut Cx<'_>, edge: EdgeId) 
             solvers,
             cx.target,
         ),
-        GeometrySolvers::Live(context) => cx.fillets.calc_cross_section_with_lookup(
+        GeometrySolvers::Live(context) => cx.fillets.calc_cross_section_with_lookup_live(
             cx.k,
             edge,
             None,
