@@ -81,6 +81,7 @@ fn export(s: &mut Session, p: &Value) -> Result<Value> {
         svg,
         report: ExportReport { widths_snapped: written.widths_snapped, pieces_merged: written.pieces_merged },
         views: built.views.into_iter().map(Into::into).collect(),
+        dimensions: super::drawing_scene::dimension_results(built.dimensions),
         param_warnings: Vec::new(),
     };
     serde_json::to_value(reply).map_err(|e| EngineError::Other(e.to_string()))

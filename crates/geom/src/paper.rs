@@ -149,6 +149,8 @@ pub enum ObjectKind {
     SheetImage,
     /// A drawing view's lines.
     View,
+    /// A dimension's lines and arrowheads.
+    Dimension,
 }
 
 impl ObjectKind {
@@ -163,6 +165,7 @@ impl ObjectKind {
             ObjectKind::RevisionTable => "REVISION_TABLE",
             ObjectKind::SheetImage => "SHEET_IMAGE",
             ObjectKind::View => "VIEW",
+            ObjectKind::Dimension => "DIMENSION",
         }
     }
 }

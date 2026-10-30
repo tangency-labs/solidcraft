@@ -429,17 +429,24 @@ fn a_view_past_the_sheets_records_leaves_out_only_itself() {
     let lines = |n: usize| {
         let path = (0..n).map(|i| Seg2::Line { a: Vec2::new(i as f64 * 1e-3, 0.0), b: Vec2::new((i + 1) as f64 * 1e-3, 0.0) }).collect();
         let items = vec![Item::Stroke { path, closed: false, width_mm: 0.5, pattern: None }];
-        Drawn { group: Some(Group { object: n as u64, kind: ObjectKind::View, items }), status: Status::Drawn, stats: None, boundary: None }
+        Drawn {
+            group: Some(Group { object: n as u64, kind: ObjectKind::View, items }),
+            status: Status::Drawn,
+            stats: None,
+            boundary: None,
+            frame: None,
+        }
     };
     for title_block in [None, Some(solidcraft_geom::title_block::default_block())] {
         let record = Sheet { title_block, ..(**d.sheets.iter().find(|x| x.id == sheet).unwrap()).clone() };
-        let (empty, _, _) = assemble(&record, Projection::Third, &[], std::iter::empty::<(u64, Vec2, Drawn)>()).unwrap();
+        let (empty, ..) = assemble(&record, Projection::Third, &[], std::iter::empty::<(u64, Vec2, Drawn)>()).unwrap().finish().unwrap();
         assert_eq!(empty.groups.len(), if record.title_block.is_some() { 4 } else { 3 });
         let left = MAX_RECORDS - empty.groups.iter().map(Group::records).sum::<usize>();
         // The first leaves 20 records; the second needs 32; the third takes the last 20.
         let views = [lines(left - 22), lines(30), lines(18)];
         let centre = Vec2::new(100.0, 100.0);
-        let (scene, states, _) = assemble(&record, Projection::Third, &[], views.iter().enumerate().map(|(i, v)| (i as u64, centre, v))).unwrap();
+        let views = views.iter().enumerate().map(|(i, v)| (i as u64, centre, v));
+        let (scene, states, ..) = assemble(&record, Projection::Third, &[], views).unwrap().finish().unwrap();
         let statuses: Vec<&'static str> = states.iter().map(|v| v.status.name()).collect();
         assert_eq!(statuses, ["drawn", "failed", "drawn"]);
         let records = scene.groups.iter().map(Group::records).sum::<usize>();
@@ -682,9 +689,14 @@ fn a_views_box_is_what_it_draws() {
     let moved = [101.0, 102.0];
     let moved_to = [105.0, 107.0];
     for (items, min, max) in [(vec![], [70.0, 80.0], [130.0, 120.0]), (vec![fill], moved, moved_to), (vec![picture], moved, moved_to)] {
-        let drawn =
-            Drawn { group: Some(Group { object: 7, kind: ObjectKind::View, items }), status: Status::Drawn, stats: None, boundary: Some(boundary) };
-        let (_, _, objects) = assemble(&record, Projection::Third, &[], [(7, centre, &drawn)].into_iter()).unwrap();
+        let drawn = Drawn {
+            group: Some(Group { object: 7, kind: ObjectKind::View, items }),
+            status: Status::Drawn,
+            stats: None,
+            boundary: Some(boundary),
+            frame: None,
+        };
+        let (_, _, objects, _) = assemble(&record, Projection::Third, &[], [(7, centre, &drawn)].into_iter()).unwrap().finish().unwrap();
         let object = objects.iter().find(|o| o.object == 7).unwrap();
         assert!(near(&object.bounds_mm, min, max), "{object:?}");
     }
@@ -870,7 +882,7 @@ fn overfill(s: &mut Session, view: u64) -> Drawn {
     let items = vec![Item::Stroke { path, closed: false, width_mm: 0.5, pattern: None }];
     let group = Group { object: view, kind: ObjectKind::View, items };
     entry.serial = serial;
-    std::mem::replace(&mut entry.drawn, Drawn { group: Some(group), status: Status::Drawn, stats: None, boundary: None })
+    std::mem::replace(&mut entry.drawn, Drawn { group: Some(group), status: Status::Drawn, stats: None, boundary: None, frame: None })
 }
 
 /// Each dimension's word is the one inspect uses: read, then lost when its body goes, with why. A
@@ -892,4 +904,200 @@ fn status_says_where_each_dimension_stands() {
     assert_eq!(lost["status"], json!("lost"), "{reply}");
     assert!(!lost["why"].as_str().unwrap().is_empty(), "{reply}");
     assert!(s.execute("drawing.status", &json!({"sheet": "x"})).is_err());
+}
+
+/// A dimension of the block's top front edge on view `view`, 10 from it; its id.
+fn top_edge(s: &mut Session, view: u64) -> u64 {
+    let added = run(s, "drawing.dimension.add", json!({"view": ids::encode(view), "kind": {"linear": {"a": [0, 0, 20], "b": [100, 0, 20]}}}));
+    ids::decode(added["dimension"].as_str().unwrap()).unwrap()
+}
+
+/// `id`'s group in `scene`.
+fn group_of(scene: &Scene, id: u64) -> &Group {
+    scene.groups.iter().find(|g| g.object == id).unwrap()
+}
+
+/// A dimension draws after the views, at paper size and on its view: the top edge of the block at
+/// 1:2, centred at (150, 150), has its tips 50 apart, 10 above the edge. `build` and the provider
+/// give the same bytes, and its place is listed with the scene's other objects.
+#[test]
+fn a_dimension_is_drawn_after_the_views_on_the_sheet() {
+    let (mut s, sheet, [front, _]) = front_and_top();
+    let id = top_edge(&mut s, front);
+    let built = built(&s, sheet);
+    let group = group_of(&built.scene, id);
+    assert_eq!(group.kind, ObjectKind::Dimension);
+    assert_eq!(built.scene.groups.last().map(|g| g.object), Some(id));
+    let tips: Vec<Vec2> = group
+        .items
+        .iter()
+        .filter_map(|item| match item {
+            Item::Fill { region } => Some(region.outer.segs[0].start()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(tips.len(), 2);
+    assert!(((tips[0].x - tips[1].x).abs() - 50.0).abs() < 1e-9, "{tips:?}");
+    assert!(tips.iter().all(|t| (t.y - 165.0).abs() < 1e-9), "{tips:?}");
+    let object = built.objects.iter().find(|o| o.object == id).unwrap();
+    assert_eq!(object.kind, ObjectKind::Dimension);
+    assert_eq!(
+        built.dimensions,
+        vec![DimensionState { dimension: id, view: front, status: solidcraft_doc::drawing::dimension::Status::Ok, drawn: true, why: None }]
+    );
+    let provided = settled(&mut s, sheet);
+    assert_eq!(bytes(&provided.scene), bytes(&built.scene));
+    assert_eq!(&*provided.objects, built.objects.as_slice());
+    assert_eq!(provided.dimensions, built.dimensions);
+    assert!(provided.stale_dimensions.is_empty());
+}
+
+/// Moving a view moves its dimensions, the same bytes moved, with no projection and no new read. An
+/// edit of one dimension reads that one alone, and projects nothing.
+#[test]
+fn a_moved_view_moves_its_dimensions_and_an_edit_reads_one() {
+    let (mut s, sheet, [front, _]) = front_and_top();
+    let id = top_edge(&mut s, front);
+    let other = run(&mut s, "drawing.dimension.add", json!({"view": ids::encode(front), "kind": {"linear": {"a": [0, 0, 0], "b": [0, 0, 20]}}}));
+    let other = ids::decode(other["dimension"].as_str().unwrap()).unwrap();
+    let before = settled(&mut s, sheet);
+    let (projections, serial) = (s.drawing_scenes.projections, s.drawing_scenes.dimensions[&other].serial);
+
+    run(&mut s, "drawing.view.edit", json!({"view": ids::encode(front), "set": {"place": {"at": [170.0, 130.0]}}}));
+    let after = settled(&mut s, sheet);
+    assert_eq!(s.drawing_scenes.projections, projections, "a move projects nothing");
+    assert_eq!(s.drawing_scenes.dimensions[&other].serial, serial, "and reads nothing");
+    assert_eq!(bytes_of(group_of(&after.scene, id)), bytes_of(&moved(group_of(&before.scene, id), Vec2::new(20.0, -20.0))));
+
+    run(&mut s, "drawing.dimension.edit", json!({"dimension": ids::encode(id), "set": {"offset_mm": 20.0}}));
+    let edited = settled(&mut s, sheet);
+    assert_eq!(s.drawing_scenes.projections, projections, "an edit projects nothing");
+    assert_eq!(s.drawing_scenes.dimensions[&other].serial, serial, "the other dimension isn't read");
+    assert_ne!(bytes_of(group_of(&edited.scene, id)), bytes_of(group_of(&after.scene, id)));
+    assert_eq!(bytes(&edited.scene), bytes(&built(&s, sheet).scene));
+}
+
+fn bytes_of(group: &Group) -> String {
+    serde_json::to_string(group).unwrap()
+}
+
+/// The block with a hole 12 across through its front, and a dimension of the hole on the front view:
+/// the session, the sheet, the view, the dimension and the drawing's id.
+fn holed() -> (Session, u64, u64, u64, String) {
+    let (mut s, sheet, [front, _]) = front_and_top();
+    let drawing = ids::encode(s.open_drawing.unwrap());
+    run(&mut s, "drawing.close", json!({}));
+    let cut = json!({"radius": 6, "height": 52, "base": [50, -1, 10], "axis": "Y", "operation": "cut", "targets": ["Block"], "name": "Hole"});
+    run(&mut s, "solid.cylinder", cut);
+    run(&mut s, "drawing.open", json!({"drawing": drawing}));
+    let added = run(&mut s, "drawing.dimension.add", json!({"view": ids::encode(front), "kind": {"radial": {"edge": [56, 0, 10]}}}));
+    (s, sheet, front, ids::decode(added["dimension"].as_str().unwrap()).unwrap(), drawing)
+}
+
+/// The hole deleted, with the drawing closed as a model edit has it.
+fn delete_hole(s: &mut Session, drawing: &str) {
+    run(s, "drawing.close", json!({}));
+    run(s, "timeline.delete", json!({"feature": "Hole"}));
+    run(s, "drawing.open", json!({"drawing": drawing}));
+}
+
+/// A dimension whose view isn't drawn isn't drawn and says so. A lost one has no lines, is listed,
+/// and leaves the sheet drawn; undo finds it again, the same bytes. A model edit that moves what it
+/// measures moves its lines.
+#[test]
+fn a_lost_dimension_leaves_the_sheet_drawn_and_is_listed() {
+    let (mut s, sheet, [front, top]) = front_and_top();
+    let on_top = top_edge(&mut s, top);
+    run(&mut s, "drawing.view.edit", json!({"view": ids::encode(top), "set": {"display_style": "visible_hidden"}}));
+    let view_failed = settled(&mut s, sheet);
+    let held = view_failed.dimensions.iter().find(|d| d.dimension == on_top).unwrap();
+    assert!(!held.drawn && held.why.as_deref() == Some("its view isn't drawn"), "{held:?}");
+    assert!(view_failed.scene.groups.iter().all(|g| g.object != on_top));
+    assert_eq!(bytes(&view_failed.scene), bytes(&built(&s, sheet).scene));
+
+    // Taller: the view is drawn again first, then its dimension, at the new place.
+    let id = top_edge(&mut s, front);
+    let before = settled(&mut s, sheet);
+    let drawing = ids::encode(s.open_drawing.unwrap());
+    run(&mut s, "drawing.close", json!({}));
+    let block = s.doc.features[0].id;
+    run(&mut s, "timeline.edit", json!({"feature": block.to_string(), "set": {"height": 40}}));
+    run(&mut s, "drawing.open", json!({"drawing": drawing}));
+    let view = extract(&mut s, sheet).unwrap();
+    assert!(view.stale.contains(&front) && view.stale_dimensions.is_empty(), "the views first");
+    assert_ne!(bytes_of(group_of(&settled(&mut s, sheet).scene, id)), bytes_of(group_of(&before.scene, id)));
+
+    let (mut s, sheet, front, id, drawing) = holed();
+    let before = settled(&mut s, sheet);
+    delete_hole(&mut s, &drawing);
+    let lost = settled(&mut s, sheet);
+    let state = lost.dimensions.iter().find(|d| d.dimension == id).unwrap();
+    assert!(!state.drawn && matches!(state.status, solidcraft_doc::drawing::dimension::Status::Lost(_)), "{state:?}");
+    assert!(lost.scene.groups.iter().all(|g| g.object != id));
+    assert!(lost.scene.groups.iter().any(|g| g.object == front), "the sheet is still drawn");
+    assert_eq!(bytes(&lost.scene), bytes(&built(&s, sheet).scene));
+
+    run(&mut s, "drawing.close", json!({}));
+    run(&mut s, "edit.undo", json!({}));
+    run(&mut s, "drawing.open", json!({"drawing": drawing}));
+    let again = settled(&mut s, sheet);
+    assert_eq!(bytes_of(group_of(&again.scene, id)), bytes_of(group_of(&before.scene, id)), "found again, drawn the same");
+}
+
+/// A dimension past a paper scene's records is left out and says so, and the rest of the sheet is
+/// still drawn. So is one whose lines no paper scene holds.
+#[test]
+fn a_dimension_past_the_scenes_limits_is_left_out_and_says_why() {
+    let (s, sheet, [front, _]) = front_and_top();
+    let d = s.drawing("test").unwrap().clone();
+    let record = sheet_of(&d, sheet).unwrap();
+    let group = |items| Group { object: front, kind: ObjectKind::View, items };
+    let view = Drawn {
+        group: Some(group(Vec::new())),
+        status: Status::Drawn,
+        stats: None,
+        boundary: None,
+        frame: Some(ViewFrame::new(solidcraft_geom::Plane::XY, "1:1".parse().unwrap(), Vec2::ZERO, Vec2::ZERO).unwrap()),
+    };
+    let mut assembly = assemble(record, Projection::Third, &[], std::iter::once((front, Vec2::new(100.0, 100.0), view))).unwrap();
+    let stroke = |to: Vec2| Item::Stroke { path: vec![Seg2::Line { a: Vec2::ZERO, b: to }], closed: false, width_mm: 0.25, pattern: None };
+    let dimension = |id, items| DrawnDimension {
+        dimension: id,
+        view: front,
+        status: solidcraft_doc::drawing::dimension::Status::Ok,
+        group: Some(Group { object: id, kind: ObjectKind::Dimension, items }),
+        why: None,
+    };
+    let too_many = dimension(1, vec![stroke(Vec2::X); MAX_RECORDS + 1]);
+    let off_paper = dimension(2, vec![stroke(Vec2::new(1e9, 0.0))]);
+    let fits = dimension(3, vec![stroke(Vec2::X)]);
+    assembly.add_dimensions([&too_many, &off_paper, &fits].into_iter());
+    let (scene, _, objects, states) = assembly.finish().unwrap();
+    assert!(!states[0].drawn && states[0].why.as_deref().is_some_and(|w| w.contains("records")), "{:?}", states[0]);
+    assert!(!states[1].drawn && states[1].why.is_some(), "{:?}", states[1]);
+    assert!(states[2].drawn && states[2].why.is_none(), "{:?}", states[2]);
+    assert!(scene.groups.iter().any(|g| g.object == 3) && !scene.groups.iter().any(|g| g.object == 1 || g.object == 2));
+    assert!(objects.iter().any(|o| o.object == 3 && o.kind == ObjectKind::Dimension));
+}
+
+/// The scene's reply lists its dimensions in its schema, with a dimension's group in the scene, and
+/// an export writes the sheet with a lost dimension and reports it.
+#[test]
+fn replies_list_the_dimensions_and_an_export_reports_a_lost_one() {
+    let (mut s, sheet, [front, _]) = front_and_top();
+    let id = top_edge(&mut s, front);
+    let reply = run(&mut s, "drawing.scene", json!({"sheet": ids::encode(sheet)}));
+    let schema = output_schema_for::<SheetSceneResult>();
+    assert!(conforms(schema.as_value(), schema.as_value(), &reply), "{reply}");
+    assert_eq!(reply["dimensions"], json!([{"dimension": ids::encode(id), "view": ids::encode(front), "status": "ok", "drawn": true}]));
+    let groups = reply["scene"]["groups"].as_array().unwrap();
+    assert_eq!(groups.last().unwrap()["kind"], json!("dimension"), "{reply}");
+    let exported = run(&mut s, "drawing.export", json!({"sheet": ids::encode(sheet)}));
+    assert_eq!(exported["dimensions"][0]["drawn"], json!(true), "{exported}");
+
+    let (mut s, sheet, _, _, drawing) = holed();
+    delete_hole(&mut s, &drawing);
+    let exported = run(&mut s, "drawing.export", json!({"sheet": ids::encode(sheet)}));
+    assert_eq!((&exported["dimensions"][0]["drawn"], &exported["dimensions"][0]["status"]), (&json!(false), &json!("lost")), "{exported}");
+    assert!(exported["svg"].as_str().is_some_and(|svg| svg.contains("<svg")), "still written");
 }

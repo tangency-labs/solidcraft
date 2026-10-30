@@ -3,7 +3,7 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use super::drawing_scene::SheetSceneView;
+use super::drawing_scene::{SheetSceneDimension, SheetSceneView};
 use super::drawing_sheet::sheet_ref;
 
 /// Write one sheet of the open drawing to a file, or return it.
@@ -59,6 +59,9 @@ pub struct ExportResult {
     pub report: ExportReport,
     /// Each view on the sheet, in id order, as `drawing.scene` reports it.
     pub views: Vec<SheetSceneView>,
+    /// Each dimension of a view on the sheet, as `drawing.scene` reports it: one that isn't drawn
+    /// leaves the file written, and says why here.
+    pub dimensions: Vec<SheetSceneDimension>,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,
