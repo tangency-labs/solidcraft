@@ -467,11 +467,13 @@ fn peg_front_round(from: f64) -> f64 {
     simpson(|y| spandrel(y) * (wall(y) - from), 0.0, 2.0, 20_000)
 }
 
-/// The peg's front top edge rounded r2: SMLib's result holds the cylinder's wall as a rational
-/// spline whose parameter range runs more than a turn round. As a cylinder over that range (past
-/// 360°) SMLib refused it on the way back (SM_ERR_INVALID_INPUT), so the round seemed to build
-/// and the body could not be measured or changed. It stays the spline: the body measures, and a
-/// round of the three edges at the bar's other top corner builds on it.
+/// The peg's front top edge rounded r2: SMLib's result holds the upper half of the cylinder's
+/// wall as a rational spline whose parameter range runs more than a turn round, past the face's
+/// trims (half a turn). Taken as a cylinder over the spline's range (past 360°) SMLib refused it
+/// on the way back (SM_ERR_INVALID_INPUT), so the round seemed to build and the body could not
+/// be measured or changed. It goes back as the cylinder over the face's own range: the body
+/// measures, a round of the three edges at the bar's other top corner builds on it, and that
+/// wall comes back from SMLib a cylinder of radius 8.
 #[test]
 fn rounds_on_a_bar_running_tangent_into_a_cylinder() {
     let mut s = Session::default();
@@ -491,6 +493,25 @@ fn rounds_on_a_bar_running_tangent_into_a_cylinder() {
         let bad = b.body.validity();
         assert!(bad.is_empty(), "{}: {bad:?}", b.name);
     }
+    // The wall's upper half (x < 40, z in [10, 20], round (40, 8)): every face on the surface
+    // through (32, 8, 15) is a cylinder of radius 8.
+    let state = s.model.state();
+    let rec = state.bodies[0].body.record();
+    let p0 = solidcraft_geom::Vec3::new(32.0, 8.0, 15.0);
+    let on: Vec<&solidcraft_geom::brep::Surface> = rec
+        .faces
+        .iter()
+        .map(|f| &f.surface)
+        .filter(|s| {
+            let e = solidcraft_geom::brep::eval::SurfaceEval::new(s).ok();
+            e.and_then(|e| e.project(p0, None, 1e-6).and_then(|uv| e.point(uv))).is_some_and(|q| q.dist(p0) < 1e-6)
+        })
+        .collect();
+    let kinds: Vec<String> = on.iter().map(|s| format!("{s:?}").chars().take(48).collect()).collect();
+    assert!(
+        !on.is_empty() && on.iter().all(|s| matches!(s, solidcraft_geom::brep::Surface::Cylinder { radius, .. } if (radius - 8.0).abs() < 1e-9)),
+        "{kinds:?}"
+    );
 }
 
 /// After the peg's front top round, the edge where that round runs into the cylinder's wall: its

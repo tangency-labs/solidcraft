@@ -52,4 +52,4 @@ every-pocket-rim-edges-r5-as-deep-as-pocket a corner patch where two rim rounds 
 report-fillet-concave-arc-bar-top-into-cylinder-solver-residues SMLib status 1001: SmFilletNx1Corner cannot make the topology at the arc's end (fillet error 3, corner type 8)
 report-fillet-corner-after-round-running-into-cylinder-solver-residues SMLib's check refuses the round: its corner's surface of revolution is close to singular at its boundary (SmSurface test 5)
 report-fillet-curvature-three-edges-at-bar-corner SMLib's check refuses the open setback sheet of curvature rounds: a 2D B-spline curve cusp (SmBSplineCurve test 13)
-report-fillet-edge-tangent-at-one-end-into-cylinder SMLib's check refuses the round that fades out at the edge's tangent end: internal poles, coincident control points, cusps
+report-fillet-edge-tangent-at-one-end-into-cylinder SMLib refuses the round as larger than the faces beside its edges allow (SMLIB_ERR_NO_ROOM): it fades to nothing at the edge's tangent end, on the wall SMLib now gets back as its cylinder
