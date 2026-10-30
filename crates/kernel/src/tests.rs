@@ -1920,6 +1920,29 @@ fn fillet_sharp_arc_and_arc_loop() {
     assert!(rel(removed, want) < 1e-3, "{removed} vs {want}");
 }
 
+/// The area of the tabbed plate's outline (`fillet_tabbed_plate_outer_loop_and_partial_selection_after_hole`)
+/// with the R25 arc moved in by `da` and the tab's run (its sides, R2 corners and top) by `dt`,
+/// each element parallel to itself, by Green's theorem: an arc about c of radius ρ from a to b
+/// gives ½ (ρ² (b − a) + ρ (cx (sin b − sin a) − cy (cos b − cos a))), a segment p→q ½ (p × q).
+/// Where only one side of a concave corner at (±4, y) moves the elements meet where they cross
+/// (the round runs into the other wall); where both do, the corner is swept, an arc of radius d
+/// about the corner (the owner's ruling for rounds meeting at a concave corner, 2026-10-30).
+fn tabbed_plate_area(da: f64, dt: f64) -> f64 {
+    let (y, cy) = ((625.0_f64 - 16.0).sqrt(), 280.0 / 9.0);
+    let theta = (4.0_f64 / 25.0).acos();
+    let (big, rho) = (25.0 - da, 2.0 - dt);
+    let tab = rho * rho * PI + 2.0 * rho * (2.0 + cy) + 4.0 * (cy + rho);
+    if da > 0.0 && dt > 0.0 {
+        assert!((da - dt).abs() < 1e-15, "a swept corner of one size");
+        let corner = -da * da * theta + da * (4.0 * theta.sin() + y * (1.0 - theta.cos()));
+        0.5 * (big * big * (PI + 2.0 * theta) + 2.0 * corner + tab) + (4.0 - dt) * (cy - y)
+    } else {
+        let yc = (big * big - (4.0 - dt).powi(2)).sqrt();
+        let at = yc.atan2(4.0 - dt);
+        0.5 * (big * big * (PI + 2.0 * at) + tab) + (4.0 - dt) * (cy - yc)
+    }
+}
+
 #[test]
 fn fillet_tabbed_plate_outer_loop_and_partial_selection_after_hole() {
     use solidcraft_geom::Seg2;
@@ -1942,7 +1965,20 @@ fn fillet_tabbed_plate_outer_loop_and_partial_selection_after_hole() {
     };
     let body =
         extrude(&Plane::XY, &[Region2 { outer: outline, holes: vec![Loop2::circle(Vec2::new(0.0, hole_y), 1.5)] }], 0.0, 2.0).unwrap().pop().unwrap();
-    let inner = fillet(&body, &[Vec3::new(1.5, hole_y, 2.0)], 0.5).unwrap();
+    let r = 0.5;
+    // The section a round takes off, (1 − π/4) r², and its centroid's distance from both faces.
+    let (spandrel, centroid) = ((1.0 - PI / 4.0) * r * r, r * (10.0 - 3.0 * PI) / (3.0 * (4.0 - PI)));
+    // The outline's area (Green's theorem, checked against the disc, the tab's rectangle and its
+    // two R2 corners), the plate its prism 2 high less the hole.
+    let outline_area = tabbed_plate_area(0.0, 0.0);
+    let parts = 312.5 * (PI + 2.0 * theta) + 4.0 * y + 8.0 * (corner_y - y) + 8.0 + 2.0 * PI;
+    assert!(rel(outline_area, parts) < 1e-14, "{outline_area} vs {parts}");
+    assert!(rel(measure(&body).unwrap().volume, 2.0 * (outline_area - PI * 2.25)) < 1e-9);
+    // The hole's rim round (Pappus: the spandrel about the hole's axis at 1.5 + its centroid).
+    let inner = fillet(&body, &[Vec3::new(1.5, hole_y, 2.0)], r).unwrap();
+    let rim = spandrel * 2.0 * PI * (1.5 + centroid);
+    let holed = measure(&inner).unwrap().volume;
+    assert!(rel(measure(&body).unwrap().volume - holed, rim) < 1e-5, "{} vs {rim}", measure(&body).unwrap().volume - holed);
     let edges = [
         Vec3::new(-24.91935125502191, -2.0064727829797544, 2.0),
         Vec3::new(24.919351255429795, -2.006472777913911, 2.0),
@@ -1952,6 +1988,30 @@ fn fillet_tabbed_plate_outer_loop_and_partial_selection_after_hole() {
         Vec3::new(-3.4142135648720653, 32.52532467287703, 2.0),
         Vec3::new(-4.0000000025087745, 27.89451823429679, 2.0),
     ];
+    // The selections that end only at the sharp concave corners at (±4, y): the R25 arc (its two
+    // edges, tangent at the bottom), the tab's run (tangent through its R2 corners), and both.
+    // Each takes off the outline's section less the section moved in by d = r (1 − cos φ) at the
+    // height r sin φ into the round, integrated over that height (midpoint rule in φ).
+    let removed = |arc: bool, tab: bool, steps: u32| {
+        let dphi = (PI / 2.0) / f64::from(steps);
+        (0..steps)
+            .map(|i| {
+                let phi = (f64::from(i) + 0.5) * dphi;
+                let d = r * (1.0 - phi.cos());
+                (outline_area - tabbed_plate_area(if arc { d } else { 0.0 }, if tab { d } else { 0.0 })) * r * phi.cos() * dphi
+            })
+            .sum::<f64>()
+    };
+    for (mask, arc, tab) in [(0b0000011_u32, true, false), (0b1111100, false, true), (0b1111111, true, true)] {
+        let want = removed(arc, tab, 8192);
+        assert!((want - removed(arc, tab, 4096)).abs() < 1e-7 * want, "the reference quadrature must converge");
+        let picks: Vec<_> = edges.iter().enumerate().filter(|(i, _)| mask & (1 << i) != 0).map(|(_, p)| *p).collect();
+        let blended = fillet(&inner, &picks, r).unwrap_or_else(|e| panic!("{picks:?}: {e}"));
+        assert!(blended.validity().is_empty(), "{picks:?}: {:?}", blended.validity());
+        // Exact volumes (SMLib's, to 1e-8); the blend's surfaces are SMLib's fits.
+        let got = holed - measure(&blended).unwrap().volume;
+        assert!(rel(got, want) < 1e-5, "arc {arc}, tab {tab}: removed {got}, expected {want}");
+    }
     // All 127 nonempty subsets: the whole rim, each individual edge, and every
     // contiguous or disjoint partial selection of the issue's seven picks.
     for mask in 1_u32..(1 << edges.len()) {
