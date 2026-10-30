@@ -48,3 +48,148 @@ impl TabThrough {
         response.has_focus() || response.clicked()
     }
 }
+
+#[derive(Clone, Copy)]
+struct Scope {
+    id: egui::Id,
+    layer: egui::LayerId,
+    frame: u64,
+    pass: u64,
+}
+
+#[derive(Clone, Copy, Default)]
+struct Traversal {
+    backwards: bool,
+    pending: bool,
+}
+
+fn active_id() -> egui::Id {
+    egui::Id::new("dialog_tab_scope")
+}
+fn current_id() -> egui::Id {
+    egui::Id::new("dialog_tab_current")
+}
+fn first(id: egui::Id) -> egui::Id {
+    id.with("tab_first")
+}
+fn last(id: egui::Id) -> egui::Id {
+    id.with("tab_last")
+}
+fn traversal(id: egui::Id) -> egui::Id {
+    id.with("tab_traversal")
+}
+
+/// Run after expression completion, before the canvas or background widgets handle Tab.
+pub(crate) fn prepare_active(ctx: &egui::Context) {
+    if let Some(scope) = ctx.data(|d| d.get_temp::<Scope>(active_id()))
+        && scope.frame.saturating_add(1) >= ctx.cumulative_frame_nr()
+    {
+        prepare(ctx, scope);
+    }
+}
+
+fn prepare(ctx: &egui::Context, scope: Scope) {
+    // Let a popup finish opening before its own scope takes over.
+    if egui::Popup::is_any_open(ctx) && scope.layer.order != egui::Order::Foreground {
+        return;
+    }
+    let backwards = ctx.input(|i| {
+        i.events.iter().find_map(|event| match event {
+            egui::Event::Key { key: egui::Key::Tab, pressed: true, modifiers, .. } if !modifiers.any() => Some(false),
+            egui::Event::Key { key: egui::Key::Tab, pressed: true, modifiers, .. } if modifiers.shift_only() => Some(true),
+            _ => None,
+        })
+    });
+    let Some(backwards) = backwards else { return };
+    ctx.data_mut(|d| d.insert_temp(traversal(scope.id), Traversal { backwards, pending: true }));
+    let inside = ctx.memory(|m| m.focused()).and_then(|id| ctx.read_response(id)).is_some_and(|r| r.layer_id == scope.layer);
+    ctx.input_mut(|i| {
+        i.events.retain(|event| {
+            !matches!(event,
+                egui::Event::Key { key: egui::Key::Tab, modifiers, .. } if !modifiers.any() || modifiers.shift_only()
+            )
+        })
+    });
+    ctx.memory_mut(|m| {
+        if !inside {
+            m.request_focus(if backwards { last(scope.id) } else { first(scope.id) });
+        }
+        m.move_focus(if backwards { egui::FocusDirection::Previous } else { egui::FocusDirection::Next });
+    });
+}
+
+/// Invisible boundaries keep egui's native field/action order, skipping disabled controls.
+/// They do not allocate space, block canvas picking, or require a second list of widgets.
+pub(crate) fn scope<R>(ui: &mut egui::Ui, id: egui::Id, add: impl FnOnce(&mut egui::Ui) -> R) -> R {
+    if !ui.is_enabled() || !ui.is_visible() {
+        return add(ui);
+    }
+    let ctx = ui.ctx().clone();
+    let scope = Scope { id, layer: ui.layer_id(), frame: ctx.cumulative_frame_nr(), pass: ctx.cumulative_pass_nr() };
+    let previous = ctx.data(|d| d.get_temp::<Scope>(active_id()));
+    let behind = previous.is_some_and(|p| {
+        p.pass == scope.pass
+            && (p.layer.order > scope.layer.order
+                || (p.layer != scope.layer && ctx.memory(|m| m.areas().top_layer_id(scope.layer.order)) == Some(p.layer)))
+    });
+    if !behind {
+        prepare(&ctx, scope);
+        ctx.data_mut(|d| d.insert_temp(active_id(), scope));
+    }
+    let parent = ctx.data(|d| d.get_temp::<egui::Id>(current_id()));
+    ctx.data_mut(|d| d.insert_temp(current_id(), id));
+    let mut state = ctx.data(|d| d.get_temp::<Traversal>(traversal(id))).unwrap_or_default();
+    if state.pending && ctx.memory(|m| m.has_focus(first(id))) {
+        ctx.memory_mut(|m| {
+            if state.backwards {
+                m.request_focus(last(id));
+            }
+            m.move_focus(if state.backwards { egui::FocusDirection::Previous } else { egui::FocusDirection::Next });
+        });
+        if !state.backwards {
+            state.pending = false;
+        }
+    }
+    ui.interact(egui::Rect::from_min_size(ui.min_rect().min, egui::Vec2::ZERO), first(id), egui::Sense::focusable_noninteractive());
+    let result = add(ui);
+    if ctx.memory(|m| m.has_focus(last(id))) {
+        ctx.memory_mut(|m| m.move_focus(if state.backwards && state.pending { egui::FocusDirection::Previous } else { egui::FocusDirection::None }));
+    }
+    let end = ui.interact(egui::Rect::from_min_size(ui.min_rect().min, egui::Vec2::ZERO), last(id), egui::Sense::focusable_noninteractive());
+    if state.pending && end.has_focus() {
+        if state.backwards {
+            state.pending = false;
+        } else {
+            ctx.memory_mut(|m| m.request_focus(first(id)));
+        }
+        ctx.request_repaint();
+    }
+    // Kit buttons use explicit borders, so native focus styling alone is not visible.
+    // Paint once for the whole scope, including dropdowns and custom dialog actions.
+    if let Some(response) = ctx.memory(|m| m.focused()).and_then(|focused| ctx.read_response(focused))
+        && response.layer_id == ui.layer_id()
+        && response.enabled()
+        && response.rect.is_positive()
+    {
+        let t = crate::theme::Tokens::get();
+        ui.painter().rect_stroke(
+            response.rect.expand(t.space_2),
+            t.control_radius,
+            egui::Stroke::new(1.0, crate::theme::TabAccent::current(&ctx).color),
+            egui::StrokeKind::Inside,
+        );
+    }
+    ctx.data_mut(|d| {
+        d.insert_temp(traversal(id), state);
+        d.remove::<egui::Id>(current_id());
+        if let Some(parent) = parent {
+            d.insert_temp(current_id(), parent);
+        }
+    });
+    result
+}
+
+/// A dialog's dropdown is a nested focus loop while its popup is open.
+pub(crate) fn popup<R>(ui: &mut egui::Ui, add: impl FnOnce(&mut egui::Ui) -> R) -> R {
+    if ui.ctx().data(|d| d.get_temp::<egui::Id>(current_id())).is_some() { scope(ui, ui.id().with("tab_popup"), add) } else { add(ui) }
+}

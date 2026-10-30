@@ -340,7 +340,7 @@ fn searchable_dropdown_with(
     } else {
         combo.icon(dropdown_arrow)
     };
-    let popup = super::container::show_combo(ui, ui.make_persistent_id(egui::IdSalt::new(id)), combo, |ui| {
+    let draw_menu = |ui: &mut Ui| {
         let search = ui.add(
             text_input(egui::TextEdit::singleline(filter))
                 .id_salt(format!("{id}_search"))
@@ -382,7 +382,8 @@ fn searchable_dropdown_with(
                     ui.label(pending);
                 }
             });
-    });
+    };
+    let popup = super::container::show_combo(ui, ui.make_persistent_id(egui::IdSalt::new(id)), combo, |ui| crate::dialog_focus::popup(ui, draw_menu));
     let response = popup.response;
     if popup.inner.is_some() && ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
         response.request_focus();
@@ -852,12 +853,14 @@ fn dropdown_arrow(ui: &Ui, rect: egui::Rect, _visuals: &egui::style::WidgetVisua
 pub(crate) fn dropdown(ui: &mut Ui, id: &str, selected: &mut usize, options: &[&str]) -> Response {
     let text = options.get(*selected).copied().map(crate::i18n::tr_label).unwrap_or("");
     let row = label(ui).to_string();
-    dropdown_menu(ui, id, text, |ui| {
+    let mut response = dropdown_menu(ui, id, text, |ui| {
         for (index, option) in options.iter().enumerate() {
             let response = ui.selectable_value(selected, index, crate::i18n::tr_label(option));
             scenario::publish_target(&format!("dialog:{row}:{option}"), response.rect);
         }
-    })
+    });
+    step_dropdown(ui, &mut response, selected, options.len());
+    response
 }
 
 /// The standard dropdown with a leading application icon on the current value and each option.
@@ -922,14 +925,46 @@ pub(crate) fn dropdown_picked(ui: &mut Ui, id: &str, selected: &mut usize, optio
     let text = options.get(*selected).copied().map(crate::i18n::tr_label).unwrap_or("");
     let row = label(ui).to_string();
     let mut picked = false;
-    dropdown_menu(ui, id, text, |ui| {
+    let mut response = dropdown_menu(ui, id, text, |ui| {
         for (index, option) in options.iter().enumerate() {
             let response = ui.selectable_value(selected, index, crate::i18n::tr_label(option));
             picked |= response.clicked();
             scenario::publish_handle(&format!("dialog:{row}:{option}"), response.rect.center());
         }
     });
-    picked
+    let stepped = step_dropdown(ui, &mut response, selected, options.len());
+    picked || stepped
+}
+
+/// A closed, focused choice owns Up/Down; open menus retain native option navigation.
+fn step_dropdown(ui: &Ui, response: &mut Response, selected: &mut usize, count: usize) -> bool {
+    if !response.has_focus() || count == 0 {
+        return false;
+    }
+    let open = egui::Popup::is_any_open(ui.ctx());
+    ui.memory_mut(|m| m.set_focus_lock_filter(response.id, egui::EventFilter { vertical_arrows: !open, ..Default::default() }));
+    if open {
+        return false;
+    }
+    let step = ui.input_mut(|i| {
+        if i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowDown) {
+            Some(1)
+        } else if i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowUp) {
+            Some(-1)
+        } else {
+            None
+        }
+    });
+    let Some(step) = step else { return false };
+    ui.memory_mut(|m| m.move_focus(egui::FocusDirection::None));
+    let next = selected.saturating_add_signed(step).min(count.saturating_sub(1));
+    let changed = next != *selected;
+    if changed {
+        *selected = next;
+        response.mark_changed();
+        ui.ctx().request_repaint();
+    }
+    changed
 }
 
 /// Dropdown with caller-supplied kit choices/actions, including disabled entries and stable
@@ -986,7 +1021,7 @@ fn dropdown_menu_width(
         .selected_text(selected_text)
         .icon(dropdown_arrow)
         .close_behavior(close_behavior);
-    let popup = super::container::show_combo(ui, widget, combo, add);
+    let popup = super::container::show_combo(ui, widget, combo, |ui| crate::dialog_focus::popup(ui, add));
     let response = popup.response;
     // The native popup closes on Escape; keep the same key from reaching the enclosing window.
     // Only this dropdown's shown popup owns the key, and its trigger regains keyboard focus.
@@ -1858,7 +1893,7 @@ pub(crate) fn library_cell(ui: &mut Ui, id: egui::Id, value: &mut String, hint: 
     scenario::publish_rect("dialog:menu:Library", button);
     let popup = Container::new(ui.ctx(), Surface::Popup).menu(&library);
     let open = popup.is_open();
-    popup.show(|ui| super::scope(ui, menu));
+    popup.show(|ui| crate::dialog_focus::popup(ui, |ui| super::scope(ui, menu)));
     if open {
         ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape));
     }

@@ -698,6 +698,18 @@ impl<'a> Panel<'a> {
         self.joined.map_or(container, |edges| container.joined(edges)).tool_frame(self.frame, right >= self.viewport.right() - 0.5)
     }
 
+    /// Show a feature/manager dialog with its native Tab order confined to the card.
+    pub(crate) fn show<R>(
+        &self,
+        ctx: &egui::Context,
+        open: Option<&mut bool>,
+        add: impl FnOnce(&mut Ui) -> R,
+    ) -> Option<egui::InnerResponse<Option<R>>> {
+        let window = self.window(ctx);
+        let window = if let Some(open) = open { window.open(open) } else { window };
+        window.show(ctx, |ui| crate::dialog_focus::scope(ui, self.id, add))
+    }
+
     pub(crate) fn window(&self, ctx: &egui::Context) -> super::container::FeatureWindow<'a> {
         self.window_placed(ctx, None)
     }
@@ -1241,7 +1253,7 @@ impl<'a> Window<'a> {
                 .frame(frame)
                 .show(ctx, |ui| {
                     ui.set_width(inner_width);
-                    let result = add(ui);
+                    let result = crate::dialog_focus::scope(ui, self.id, add);
                     super::Container::finish_content(ui, frame);
                     result
                 });
@@ -1267,7 +1279,7 @@ impl<'a> Window<'a> {
             (None, None) => window.pivot(egui::Align2::CENTER_CENTER).default_pos(ctx.content_rect().center() - vec2(0.0, row_height() * 2.5)),
         };
         let shown = super::container::FeatureWindow::new(window, self.id, frame).show(ctx, |ui| {
-            let result = add(ui);
+            let result = crate::dialog_focus::scope(ui, self.id, add);
             super::Container::finish_content(ui, frame);
             result
         });
