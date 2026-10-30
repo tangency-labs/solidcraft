@@ -146,9 +146,14 @@ fn a_parameter_edit_rebuilds_like_a_fresh_build_and_reverts_exactly() {
 /// wall at 24) into strips along the openings' tops and bottoms.
 #[test]
 fn pi_case_faces_per_step_at_both_heights() {
-    // Sketch1 (1) .. RectangularPattern2 (14): the faces once features 1..=k are built.
+    // Sketch1 (1) .. RectangularPattern2 (14): the faces once features 1..=k are built. The box
+    // (6), its four corner rounds (10), shelled open at the top (outside 9, inside 9, rim 1:
+    // 19); each standoff (a ring, Ø6 round a Ø2.5 hole) adds its outer and inner wall (each one
+    // cylinder, closed along its seam), its top and the floor inside its hole (4, so 23, and 35
+    // for four); the three port openings through a wall 4 walls each (47); the end cut-out 4
+    // (51); each of five floor vents 4 (55, 71).
     const FACES: [(usize, usize); 13] =
-        [(2, 6), (3, 10), (4, 19), (5, 19), (6, 25), (7, 43), (8, 43), (9, 55), (10, 55), (11, 59), (12, 59), (13, 63), (14, 79)];
+        [(2, 6), (3, 10), (4, 19), (5, 19), (6, 23), (7, 35), (8, 35), (9, 47), (10, 47), (11, 51), (12, 51), (13, 55), (14, 71)];
     let dir = scratch_dir("pi");
     let design: Value = serde_json::from_slice(&std::fs::read(root().join("tests/action_matrix/designs/pi-case.solidcraft")).unwrap()).unwrap();
     let at = |height: &str, file: &str| {
