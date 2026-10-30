@@ -61,7 +61,8 @@ pub struct Body {
     pub(crate) unchecked: Option<std::sync::Arc<crate::validation::Unchecked>>,
     /// The constant-radius rounds that made this body from another, when they did
     /// ([`crate::blend_corner::Rounds`]): a later round at a corner where they meet blends them
-    /// again with it. Anything else that makes a body leaves it out.
+    /// again with it. Anything else that makes a body leaves it out, and so does every new
+    /// history: the rounds are over the body its history is over.
     pub(crate) rounds: Option<std::sync::Arc<crate::blend_corner::Rounds>>,
 }
 
@@ -618,6 +619,7 @@ impl Body {
     pub(crate) fn with_history(mut self, history: crate::history::History, operands: &[&Body]) -> Result<Self> {
         history.check(&self, operands)?;
         self.history = Some(std::sync::Arc::new(history));
+        self.rounds = None;
         Ok(self)
     }
 
@@ -625,6 +627,7 @@ impl Body {
     pub(crate) fn with_history_counts(mut self, history: crate::history::History, operands: &[(usize, usize)]) -> Result<Self> {
         history.check_counts((self.face_count(), self.edge_count()), operands)?;
         self.history = Some(std::sync::Arc::new(history));
+        self.rounds = None;
         Ok(self)
     }
 
@@ -640,6 +643,7 @@ impl Body {
                 None
             }
         });
+        self.rounds = None;
         self
     }
 
@@ -650,9 +654,34 @@ impl Body {
         self
     }
 
+    /// The constant-radius rounds that made this body, when they did: the body they were made
+    /// on, and each edge they rounded (its index in that body's edge order) with its radius. A
+    /// later round at a corner where they meet blends them again with it, so a saved model
+    /// keeps this with the body ([`Body::with_rounds_of`]).
+    pub fn rounds(&self) -> Option<(&Body, &[(usize, f64)])> {
+        self.rounds.as_deref().map(|r| (&r.before, r.edges.as_slice()))
+    }
+
+    /// This body as the rounds of `edges` made it from `before`, as [`Body::rounds`] gave them
+    /// (read back from a saved model). Refused unless every edge is one of `before`'s, every
+    /// radius a fillet's, and this body's history is over `before`.
+    pub fn with_rounds_of(self, before: &Body, edges: Vec<(usize, f64)>) -> Result<Body> {
+        let bad = |what: &str| KernelError::Invalid(format!("rounds: {what}"));
+        if edges.is_empty() || edges.len() > before.edge_count() {
+            return Err(bad("no edges, or more than the body has"));
+        }
+        if edges.iter().any(|(e, r)| *e >= before.edge_count() || !(r.is_finite() && *r > 1e-6 && *r < 1e6)) {
+            return Err(bad("an edge the body before them does not have, or a radius no fillet takes"));
+        }
+        let history = self.history().filter(|h| h.operands == 1).ok_or_else(|| bad("the body has no history over the body before them"))?;
+        history.check_counts((self.face_count(), self.edge_count()), &[(before.face_count(), before.edge_count())])?;
+        Ok(self.with_rounds(before, edges))
+    }
+
     /// This body with no history: an operation whose history is not known.
     pub(crate) fn without_history(mut self) -> Self {
         self.history = None;
+        self.rounds = None;
         self
     }
 
