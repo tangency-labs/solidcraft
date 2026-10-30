@@ -637,6 +637,54 @@ pub fn certified_prism_equivalent(a: &crate::Body, b: &crate::Body) -> crate::Re
     })
 }
 
+/// A uniform prism along a plane's normal, read off a body's record: its levels above the plane
+/// and its section in the plane's coordinates.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PrismSection {
+    /// The levels of its bottom and its top cap above the plane (`lo < hi`).
+    pub lo: f64,
+    pub hi: f64,
+    /// Its section, exact: lines and arcs, the outer loop counter-clockwise, the holes clockwise.
+    pub region: solidcraft_geom::Region2,
+    /// How far the levels may be off the body's caps (the caps' vertices lie within it of them).
+    pub tolerance: f64,
+}
+
+/// The uniform prism `body` is along `plane`'s normal, when its record proves it one: two caps
+/// square to the normal, every other face a wall running straight between them along the
+/// normal and standing on both caps' edges, the two caps one section (see [`certified_prism_equivalent`]
+/// for the profiles it proves: a convex straight outline or a circle, with separate round
+/// holes). The body's current geometry, not how it was made: a tool trimmed by a boolean that
+/// left it a prism is one. `None` when that is not proved.
+pub fn certified_prism_section(body: &crate::Body, plane: &Plane) -> crate::Result<Option<PrismSection>> {
+    crate::guard("certified prism section", || {
+        if body.is_mesh() || !body.size().is_finite() {
+            return Ok(None);
+        }
+        let record = crate::native::brep_record(body)?;
+        let tol = body.size().max(1.) * 1e-10;
+        let Some(c) = certificate(&record, body.size(), plane, tol) else { return Ok(None) };
+        let mut outer = None;
+        let mut holes = Vec::new();
+        for lp in c.loops {
+            let positive = lp.area.lo > 0.;
+            let lp = solidcraft_geom::Loop2 { segs: lp.segments.into_vec() };
+            if positive {
+                if outer.replace(lp).is_some() {
+                    return Ok(None);
+                }
+            } else {
+                holes.push(lp);
+            }
+        }
+        let Some(outer) = outer else { return Ok(None) };
+        // The caps' vertices are within twice the tolerance of their levels (`certificate`), and
+        // the levels are worked out from the plane's origin.
+        let tolerance = 2. * tol + 128. * f64::EPSILON * (plane.origin.len() + c.lo.abs() + c.hi.abs()).max(1.);
+        Ok(Some(PrismSection { lo: c.lo, hi: c.hi, region: solidcraft_geom::Region2 { outer, holes }, tolerance }))
+    })
+}
+
 /// [`certified_prism_equivalent`] of the records `a` and `b` of bodies of sizes `size_a` and
 /// `size_b`.
 fn equivalent(a: &Brep, size_a: f64, b: &Brep, size_b: f64) -> Option<bool> {
@@ -821,6 +869,31 @@ mod tests {
     /// The first face of `r` not on a plane.
     fn curved(r: &Brep) -> usize {
         r.faces.iter().position(|f| plane_of(&f.surface).is_none()).unwrap()
+    }
+
+    /// A 10 x 10 tool from z = 0 cut by a pin of radius 2 standing through it, joined to a plate
+    /// at z 1 ... 2 (a To Object tool trimmed by its curved target): the lump under the plate is
+    /// a prism from 0 to 1 whose section is the square less the pin's circle, 100 - 4π; the lump
+    /// above it steps (the pin stands up through it) and is no prism.
+    #[test]
+    fn a_trimmed_tool_reads_as_the_prism_of_its_current_section() {
+        use solidcraft_geom::{Loop2, Region2};
+        let pin = crate::cylinder(Vec3::new(25., 25., 0.), Vec3::Z, 2., 20.).unwrap();
+        let stop = crate::box_solid(Vec3::new(19., 19., 1.), Vec3::new(31., 31., 2.)).unwrap();
+        let roof = crate::boolean(&pin, &stop, crate::BoolOp::Union).unwrap().unwrap();
+        let square =
+            Region2 { outer: Loop2::polygon(&[Vec2::new(20., 20.), Vec2::new(30., 20.), Vec2::new(30., 30.), Vec2::new(20., 30.)]), holes: vec![] };
+        let tool = crate::extrude(&Plane::XY, &[square], 0., 25.).unwrap().remove(0);
+        let lumps = crate::boolean(&tool, &roof, crate::BoolOp::Cut).unwrap().unwrap().lumps().unwrap();
+        assert_eq!(lumps.len(), 2);
+        let sections: Vec<Option<PrismSection>> = lumps.iter().map(|l| certified_prism_section(l, &Plane::XY).unwrap()).collect();
+        let lower = sections.iter().flatten().collect::<Vec<_>>();
+        assert_eq!(lower.len(), 1, "only the lump under the plate is a prism");
+        let lower = lower[0];
+        assert!(lower.lo.abs() <= lower.tolerance && (lower.hi - 1.).abs() <= lower.tolerance, "{} … {}", lower.lo, lower.hi);
+        assert_eq!(lower.region.holes.len(), 1);
+        assert!(lower.region.outer.signed_area() > 0. && lower.region.holes[0].signed_area() < 0.);
+        assert!((lower.region.area() - (100. - 4. * std::f64::consts::PI)).abs() < 1e-8, "{}", lower.region.area());
     }
 
     #[test]

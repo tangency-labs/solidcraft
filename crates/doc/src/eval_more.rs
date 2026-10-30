@@ -843,9 +843,21 @@ pub(super) fn sheet_eval(
     }
 }
 
-/// Current unmodified extrusion caps, including placement, certify the tool's depth.
-/// Tessellation can drift in thickness at distant coordinates and cannot certify a slab.
+/// The tool's depth along the sketch normal (from `source`), the roundoff of that depth and the
+/// tool's current footprint where it differs from the profile: from its current unmodified
+/// extrusion caps, including placement, else from its exact record proving it a uniform prism
+/// along the normal (a To Object tool trimmed by the body it runs to, whose boolean leaves no
+/// extrusion faces: its section is its footprint). Tessellation can drift in thickness at
+/// distant coordinates and cannot certify a slab.
 fn sheet_tool_span(body: &Body, source: &Plane) -> Option<(f64, f64, f64, Option<(Plane, Region2)>)> {
+    extrusion_tool_span(body, source).or_else(|| {
+        let prism = kernel::certified_prism_section(body, source).ok().flatten()?;
+        (prism.tolerance <= 1e-7).then_some((prism.lo, prism.hi, prism.tolerance, Some((*source, prism.region))))
+    })
+}
+
+/// [`sheet_tool_span`] from the tool's extrusion caps.
+fn extrusion_tool_span(body: &Body, source: &Plane) -> Option<(f64, f64, f64, Option<(Plane, Region2)>)> {
     use kernel::FaceSource;
     #[derive(PartialEq)]
     enum Signature<'a> {
