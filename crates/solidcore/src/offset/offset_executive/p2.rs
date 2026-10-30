@@ -326,7 +326,9 @@ impl OffsetExecutive {
                 // stop when no lamina edges remain or the next tolerance exceeds
                 // abs(distance) / 2.0. Preserve retained input on MergeBrep error,
                 // but report ownership transferred on a later stitch error.
-                // the sheet's faces as copied into the shell (#978; only with the opt-in)
+                // the sheet's faces as copied into the shell (#978, #1599; only with an opt-in)
+                let side_walls =
+                    options.merge_sheet_side_walls || kernel.fixes.thicken_planar_side_walls;
                 let mut sheet_faces: Vec<FaceId> = Vec::new();
                 {
                     let source = required(input.as_ref(), OP_SHELL)?;
@@ -340,7 +342,7 @@ impl OffsetExecutive {
                     // and bAddAnalytics = TRUE; the opt-in keeps the sheet-to-copy map
                     // (the fork's MergeBrep(*pBrepToShell, NULL, &sSheetToCopy): original to copy)
                     let mut sheet_to_copy = CopyBrepMap::new();
-                    let reverse_map = options.merge_sheet_side_walls.then_some(&mut sheet_to_copy);
+                    let reverse_map = side_walls.then_some(&mut sheet_to_copy);
                     NotifyState::from_kernel_stores(&mut stores).with_kernel_env(
                         kernel,
                         |kernel, env| {
@@ -356,7 +358,7 @@ impl OffsetExecutive {
                             )
                         },
                     )?;
-                    if options.merge_sheet_side_walls {
+                    if side_walls {
                         for f in bp1::faces(source, None)? {
                             match sheet_to_copy.get_at(Some(EntityRef::Face(f)))? {
                                 Some(EntityRef::Face(copy)) => sheet_faces.push(copy),
@@ -384,9 +386,15 @@ impl OffsetExecutive {
                     }
                     ii += 1;
                 }
-                if options.merge_sheet_side_walls {
+                if side_walls {
                     // SER_DELETE: an error drops the shell
-                    merge_sheet_side_walls(kernel, &mut shell, &sheet_faces, notifications)?;
+                    merge_sheet_side_walls(
+                        kernel,
+                        &mut shell,
+                        &sheet_faces,
+                        options.merge_sheet_side_walls,
+                        notifications,
+                    )?;
                 }
                 make_shell_edges_exact(kernel, &mut shell, notifications)?;
                 return Ok(shell);
@@ -1730,6 +1738,11 @@ fn collapse_offset_status<T>(result: Result<T>) -> Result<T> {
 /// and every topological vertex, are kept), each wall it bounds first going onto its plane
 /// ([`put_planar_face_on_its_plane`]). Editing is enabled meanwhile.
 ///
+/// With [`crate::kernel::UpstreamFixes::thicken_planar_side_walls`] (WR-564, #1599; the
+/// fork's tangency-labs/smlib#62) every wall goes onto its plane first, in the shell's
+/// face order, and its old surface's seams are deleted; the walls are then merged only
+/// with `merge` (the #978 opt-in).
+///
 /// # Errors
 ///
 /// Those of the plane replacement and of `RemoveTopologicalEdgesAndVertices`.
@@ -1737,6 +1750,7 @@ fn merge_sheet_side_walls(
     kernel: &mut Kernel,
     shell: &mut Brep,
     sheet_faces: &[FaceId],
+    merge: bool,
     notifications: &mut OffsetNotifications<'_>,
 ) -> Result<()> {
     // the walls: the faces along the sheet's boundary, other than the sheet's own
@@ -1771,7 +1785,8 @@ fn merge_sheet_side_walls(
             }
         }
     }
-    if merging.is_empty() {
+    let every_wall = kernel.fixes.thicken_planar_side_walls;
+    if merging.is_empty() && !every_wall {
         return Ok(());
     }
 
@@ -1779,8 +1794,20 @@ fn merge_sheet_side_walls(
     let editing = shell.editing_enabled();
     shell.set_editing_enabled(true);
     let result = (|| {
-        for &f in &merging {
-            put_planar_face_on_its_plane(kernel, shell, f, notifications)?;
+        if every_wall {
+            // every wall onto its plane, in GetFaces order (#1599)
+            for f in bp1::faces(shell, None)? {
+                if walls.contains(&f) {
+                    put_planar_face_on_its_plane(kernel, shell, f, true, notifications)?;
+                }
+            }
+        } else {
+            for &f in &merging {
+                put_planar_face_on_its_plane(kernel, shell, f, false, notifications)?;
+            }
+        }
+        if !merge || merging.is_empty() {
+            return Ok(());
         }
         crate::topology::brep::p5::remove_topological_edges_and_vertices(
             kernel,
@@ -1800,6 +1827,13 @@ fn merge_sheet_side_walls(
 /// with as much again round them; `ReplaceSurface(.., FALSE, NULL, TRUE)` remakes its
 /// UV trim curves. A face on a plane, or on a surface that is not planar, is left.
 ///
+/// With `delete_seams` (WR-564, #1599; the fork's tangency-labs/smlib#62) the face's
+/// edges that are seams of its old surface (`SmEdge::IsSeam`, found before the
+/// replacement) are deleted after it: a surface closed round on itself (the wall
+/// between a circle and its offset about one axis, a flat ring) bounds the face along
+/// its seam too, which on the plane is a slit through the ring; `DeleteEdge` splits the
+/// loop into the ring's outer and inner circles.
+///
 /// # Errors
 ///
 /// `SM_ERR_NULL_POINTER` for a face without surface; those of the planarity test, the
@@ -1808,6 +1842,7 @@ fn put_planar_face_on_its_plane(
     kernel: &mut Kernel,
     b: &mut Brep,
     f: FaceId,
+    delete_seams: bool,
     notifications: &mut OffsetNotifications<'_>,
 ) -> Result<()> {
     use crate::nurbs::knots::Side;
@@ -1866,6 +1901,16 @@ fn put_planar_face_on_its_plane(
         crate::math::Point2::new(u_max + margin, v_max + margin),
     );
 
+    // the old surface's seams (#1599; only with the opt-in)
+    let mut seams: Vec<EdgeId> = Vec::new();
+    if delete_seams {
+        for e in crate::topology::face::p4::edges(&*b, f, None, false, None)? {
+            if crate::topology::edge::is_seam_of_surface(kernel, b, e, f)? {
+                seams.push(e);
+            }
+        }
+    }
+
     let mut plane = Plane::new(
         origin,
         x_axis,
@@ -1890,8 +1935,17 @@ fn put_planar_face_on_its_plane(
             face_ref,
             crate::topology::brep::p2::OldSurface::Delete,
             true,
-        )
-        .map(drop)
+        )?;
+        for &e in &seams {
+            crate::topology::brep::p4::delete_edge(
+                kernel,
+                b,
+                &mut crate::topology::brep::p4::DeleteEnv::from_notify(env),
+                e,
+                None,
+            )?;
+        }
+        Ok(())
     })
 }
 

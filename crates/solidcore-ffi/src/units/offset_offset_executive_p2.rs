@@ -247,13 +247,25 @@ pub enum Fixture {
         /// Path of the file: non-empty, at most [`MAX_FILE_PATH`] bytes, no NUL.
         path: String,
     },
+    /// A one-face cylinder sheet: `CreateFaceFromSurface` on a bounded `SmCylinder`
+    /// (`origin`, X axis `(1,0,0)`, Y axis `(0,1,0)`, 0 to 360 degrees, `height` up,
+    /// line generator) over its natural domain, closed round along a seam edge. Its
+    /// two circles are lamina edges, so thickening it builds a wall on each.
+    CylinderSheet {
+        /// Centre of the base circle.
+        origin: [f64; 3],
+        /// Radius.
+        radius: f64,
+        /// Height along Z.
+        height: f64,
+    },
 }
 
 impl Fixture {
     fn face_count(&self) -> usize {
         match self {
             Self::EmptyBrep | Self::Wire { .. } => 0,
-            Self::PlaneSheet { .. } | Self::Sphere { .. } => 1,
+            Self::PlaneSheet { .. } | Self::Sphere { .. } | Self::CylinderSheet { .. } => 1,
             Self::Box { .. } => 6,
             Self::Cylinder { .. } => 3,
             Self::File { .. } => MAX_FILE_FACES,
@@ -548,6 +560,20 @@ fn pack_fixture(fixture: Option<&Fixture>, out: &mut Vec<f64>) -> Result<(), Ffi
             out.push(7.0);
             out.push(bytes.len() as f64);
             out.extend(bytes.iter().map(|&b| f64::from(b)));
+        }
+        Fixture::CylinderSheet {
+            origin,
+            radius,
+            height,
+        } => {
+            primitive_finite(origin, *radius)?;
+            finite(&[*height, origin[2] + height])?;
+            if *radius <= 0.0 || *height <= 0.0 {
+                return Err(invalid("cylinder sheet needs a positive radius and height"));
+            }
+            out.push(8.0);
+            out.extend_from_slice(origin);
+            out.extend_from_slice(&[*radius, *height]);
         }
     }
     Ok(())

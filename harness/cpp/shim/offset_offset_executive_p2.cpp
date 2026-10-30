@@ -28,6 +28,7 @@
 #include <SmBSplineSurface.h>
 #include <SmBrep.h>
 #include <SmContext.h>
+#include <SmCylinder.h>
 #include <SmEdge.h>
 #include <SmEdgeuse.h>
 #include <SmFace.h>
@@ -92,12 +93,12 @@ struct Spec {
     std::string path; // kind 7: an ASCII .smb file
     int64_t faces() const {
         return kind == 3 ? 1 : kind == 4 ? 6 : kind == 5 ? 3 : kind == 6 ? 1
-            : kind == 7 ? max_file_faces : 0;
+            : kind == 7 ? max_file_faces : kind == 8 ? 1 : 0;
     }
 };
 Spec read_spec(Reader& rd) {
     Spec s;
-    s.kind = (int)rd.integer(0, 7);
+    s.kind = (int)rd.integer(0, 8);
     if (s.kind == 7) {
         // the byte count, then one value per byte (no NUL)
         int64_t n = rd.integer(1, max_file_path);
@@ -105,7 +106,7 @@ Spec read_spec(Reader& rd) {
         return s;
     }
     int n = s.kind == 2 ? 10 : s.kind == 3 ? 15 : s.kind == 4 ? 6 : s.kind == 5 ? 5
-        : s.kind == 6 ? 4 : 0;
+        : s.kind == 6 ? 4 : s.kind == 8 ? 5 : 0;
     for (int i=0; i<n; ++i) s.v[i] = rd.number();
     const auto& v = s.v;
     if (s.kind == 2) {
@@ -133,6 +134,11 @@ Spec read_spec(Reader& rd) {
         for (int i=0; i<3; ++i) { finite(v[i]+v[3]); finite(v[i]-v[3]); }
         finite(v[3]*v[3]);
         if (s.kind == 5) finite(v[2]+v[4]);
+    } else if (s.kind == 8) {
+        // Cylinder sheet (origin, radius, height): positive radius and height.
+        for (int i=0; i<3; ++i) { finite(v[i]+v[3]); finite(v[i]-v[3]); }
+        finite(v[3]*v[3]); finite(v[2]+v[4]);
+        if (!(v[3] > 0) || !(v[4] > 0)) throw Argument{};
     }
     return s;
 }
@@ -318,6 +324,17 @@ SmBrep* build(const Spec& s, SmContext& ctx, double tolerance) {
         // pending guard only deletes it if it still has no native topology owner.
         constructed(result->MakeWireEdge(nullptr, first, second, line, trim, SM_OT_SAME, edge));
         if (!edge) throw std::runtime_error("successful wire constructor returned null");
+    } else if (s.kind == 8) {
+        // A cylinder sheet: CreateFaceFromSurface on a bounded SmCylinder over its
+        // natural domain (closed round along a seam edge).
+        PendingGeometry<SmSurface> pending{
+            new (ctx) SmCylinder(point(v,0), SmVector3d(1,0,0), SmVector3d(0,1,0), v[3],
+                                 0.0, 360.0, v[4], FALSE, FALSE, FALSE, &ctx)
+        };
+        SmExtent2d domain = pending.ptr->GetNaturalUVDomain();
+        SmFace* face = nullptr;
+        constructed(result->CreateFaceFromSurface(pending.ptr, domain, face));
+        if (!face) throw std::runtime_error("successful sheet constructor returned null");
     } else if (s.kind == 3) {
         SmExtent2d domain(SmPoint2d(v[11],v[12]), SmPoint2d(v[13],v[14]));
         PendingGeometry<SmSurface> pending{

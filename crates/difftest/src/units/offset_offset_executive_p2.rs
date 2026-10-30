@@ -179,6 +179,16 @@ enum Fixture {
     /// tolerance, as `smOffsetTest.cpp`'s `ShellBrep` reads it; the case's
     /// `tolerance` is not applied.
     File { path: String },
+    /// A one-face cylinder sheet: `CreateFaceFromSurface` on a bounded `SmCylinder`
+    /// (X axis `(1,0,0)`, Y axis `(0,1,0)`, 0 to 360 degrees, `height` up, line
+    /// generator) over its natural domain, closed round along a seam edge. Thickened
+    /// (`create_offset_solid`), it is a tube whose end rings are the walls on its two
+    /// circles (tangency-labs/solidcore#1599).
+    CylinderSheet {
+        origin: [f64; 3],
+        radius: f64,
+        height: f64,
+    },
 }
 impl Fixture {
     fn native(&self) -> ffi::Fixture {
@@ -220,6 +230,15 @@ impl Fixture {
             },
             Self::Sphere { origin, radius } => ffi::Fixture::Sphere { origin, radius },
             Self::File { ref path } => ffi::Fixture::File { path: path.clone() },
+            Self::CylinderSheet {
+                origin,
+                radius,
+                height,
+            } => ffi::Fixture::CylinderSheet {
+                origin,
+                radius,
+                height,
+            },
         }
     }
     /// Built by a native primitive constructor (and its Rust port), or read from an
@@ -227,7 +246,11 @@ impl Fixture {
     const fn primitive(&self) -> bool {
         matches!(
             self,
-            Self::Box { .. } | Self::Cylinder { .. } | Self::Sphere { .. } | Self::File { .. }
+            Self::Box { .. }
+                | Self::Cylinder { .. }
+                | Self::Sphere { .. }
+                | Self::File { .. }
+                | Self::CylinderSheet { .. }
         )
     }
     /// The face count a selection index is checked against; a file's faces are
@@ -235,7 +258,7 @@ impl Fixture {
     const fn face_count(&self) -> usize {
         match self {
             Self::Empty | Self::Wire { .. } => 0,
-            Self::PlaneSheet { .. } | Self::Sphere { .. } => 1,
+            Self::PlaneSheet { .. } | Self::Sphere { .. } | Self::CylinderSheet { .. } => 1,
             Self::Box { .. } => 6,
             Self::Cylinder { .. } => 3,
             Self::File { .. } => ffi::MAX_FILE_FACES,
@@ -514,6 +537,17 @@ fn validate(input: &Inputs) -> HResult<()> {
                 finite(&[height, origin[2] + height])?;
             }
             Fixture::Sphere { origin, radius } => primitive_finite(origin, radius)?,
+            Fixture::CylinderSheet {
+                origin,
+                radius,
+                height,
+            } => {
+                primitive_finite(origin, radius)?;
+                finite(&[height, origin[2] + height])?;
+                if radius <= 0.0 || height <= 0.0 {
+                    return Err(bad("cylinder sheet needs a positive radius and height"));
+                }
+            }
         }
     }
     Ok(())
@@ -761,6 +795,51 @@ fn build(kernel: &mut Kernel, fixture: &Fixture, tolerance: f64, namespace: u64)
                 point2(scale),
                 &domain,
             ));
+            let mut records = solidcore::topology::topology::NotifyRecords::new();
+            let mut attributes = AttributeStore::default();
+            let key_of = |entity| notification_key(entity, namespace);
+            let mut env = solidcore::topology::edge::NotifyEnv {
+                records: &mut records,
+                attributes: &mut attributes,
+                context: None,
+                key_of: &key_of,
+            };
+            let mut marks = solidcore::topology::topology_traverser::Marks::default();
+            let this_face = |face: FaceId| key_of(EntityRef::Face(face));
+            let mut fenv = solidcore::topology::brep::p8::FaceBuildEnv {
+                env: &mut env,
+                marks: &mut marks,
+                this_face: &this_face,
+            };
+            solidcore::topology::brep::p8::create_face_from_surface(
+                kernel,
+                &mut brep,
+                Some(surface),
+                &domain,
+                &mut fenv,
+            )
+            .map_err(setup)?;
+        }
+        Fixture::CylinderSheet {
+            origin,
+            radius,
+            height,
+        } => {
+            // The native fixture: `CreateFaceFromSurface(new SmCylinder(..),
+            // GetNaturalUVDomain())` on the new B-rep.
+            let surface = Surface::from(solidcore::surface::cone::p1::Cone::new_cylinder_bounded(
+                v3(origin),
+                Vec3::new(1.0, 0.0, 0.0),
+                Vec3::new(0.0, 1.0, 0.0),
+                radius,
+                0.0,
+                360.0,
+                height,
+                false,
+                false,
+                false,
+            ));
+            let domain = surface.natural_uv_domain_with_nurb(kernel).map_err(setup)?;
             let mut records = solidcore::topology::topology::NotifyRecords::new();
             let mut attributes = AttributeStore::default();
             let key_of = |entity| notification_key(entity, namespace);

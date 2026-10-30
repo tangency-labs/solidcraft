@@ -48,7 +48,8 @@ fn fixture_key(entity: EntityRef, namespace: u64) -> ObjectRef {
     }
 }
 
-fn original_key(entity: EntityRef) -> ObjectRef {
+/// The notification identity of an entity of the original B-rep.
+pub fn original_key(entity: EntityRef) -> ObjectRef {
     fixture_key(entity, 100_000_000_000)
 }
 
