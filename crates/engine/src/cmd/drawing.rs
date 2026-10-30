@@ -13,6 +13,7 @@ use solidcraft_doc::drawing::{self, Drawing, Source, Units};
 use solidcraft_doc::ids;
 use solidcraft_geom::cell::Projection;
 use solidcraft_geom::drawing_sheet::{DrawingBorderProfile, Orientation, PaperSize, Sheet};
+use solidcraft_geom::title_block;
 
 use super::CommandSpec;
 use crate::params::{bad, str_};
@@ -20,7 +21,7 @@ use crate::{Result, Session};
 
 pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("drawing.create", "Create Drawing", create).any_part().icon("new").doc_only().params(
-        "name?: the drawing's name (default: the design's); language?: the drawing's content language, a BCP 47 tag (default en); units?: \"follow_model\" (default) or one length unit such as \"mm\". Adds a drawing of this design, one ISO A3 landscape sheet with the ISO border, and opens it (one undo step of the model) → as drawing.inspect",
+        "name?: the drawing's name (default: the design's); language?: the drawing's content language, a BCP 47 tag (default en); units?: \"follow_model\" (default) or one length unit such as \"mm\". Adds a drawing of this design, one ISO A3 landscape sheet with the ISO border and the built-in title block, and opens it (one undo step of the model) → as drawing.inspect",
     ),
     CommandSpec::new("drawing.list", "List Drawings", list)
         .any_part()
@@ -110,6 +111,9 @@ fn create(s: &mut Session, p: &Value) -> Result<Value> {
     let a3 = Sheet::standard(PaperSize::A3, Orientation::Landscape);
     let fail = |e: solidcraft_doc::DocError| bad(cmd, e.to_string());
     let mut d = Drawing::new(&name, language, "Sheet 1", a3, Some(DrawingBorderProfile::iso()), &taken, &mut s.ids).map_err(fail)?;
+    if let Some(first) = d.sheets.first_mut() {
+        Arc::make_mut(first).title_block = Some(title_block::default_block());
+    }
     let source = d.allocate_id(&mut s.ids).map_err(fail)?;
     d.sources.push(Source { id: source });
     if let Some(units) = units(cmd, p)? {
