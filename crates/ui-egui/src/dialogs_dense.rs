@@ -710,6 +710,14 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
             }
             crate::op_auto::op_row(ui, "rv_op", operation);
         }
+        Kind::DeleteFaces => {
+            let mut heal = d.extra.get("heal").and_then(Value::as_bool).unwrap_or(true);
+            let label = app.tr("ui.delete_face_heal");
+            ui_kit::row(ui, label, |ui| ui_kit::checkbox(ui, "", &mut heal));
+            d.extra.insert("heal".into(), json!(heal));
+            let help = app.tr("ui.delete_face_heal_hint");
+            ui.label(help);
+        }
         Kind::Shell { thickness } => {
             // The direction below says which side the wall grows to; the label stays short enough
             // for the label column.
