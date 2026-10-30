@@ -970,8 +970,10 @@ pub fn loop_edgeuses(b: &Brep, l: LoopId) -> Result<Vec<EdgeuseId>> {
 }
 
 /// The identity a topology entity is notified under by [`face_notify_edit`]: its type
-/// code and arena index (the B-rep keeps no attributes for it to select).
-pub(crate) fn notify_ref(e: EntityRef) -> ObjectRef {
+/// code and arena index (the B-rep keeps no attributes for it to select). Public so a
+/// caller that builds bodies itself (an importer) names their entities exactly as
+/// solidcore's Euler operators and primitives do (#1766).
+pub fn notify_ref(e: EntityRef) -> ObjectRef {
     let (type_code, kind, index) = match e {
         EntityRef::Brep(x) => (16011, 0u64, x.index()),
         EntityRef::Region(x) => (16012, 1, x.index()),
