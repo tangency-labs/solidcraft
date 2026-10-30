@@ -1904,4 +1904,63 @@ mod tests {
         assert!(record_naming(&mut b, &conv).is_err());
         assert_eq!(b.naming(), NamingScheme::Unknown);
     }
+
+    /// The UV trim curves of a file read under [`Conventions::EDGEUSE_GRAPH`] are owned
+    /// by their holding edge use under its notification identity, which
+    /// [`uv_owner_index`] maps back to that edge use; a curve the library attaches
+    /// afterwards (`SetUVTrimCurve`, which owns it by the B-rep's naming) is owned the
+    /// same way, with no `set_naming` call by the runner (the conventions record
+    /// `Arena`, whose edge-use identity is the notification one). Skipped when the
+    /// pinned upstream checkout is absent.
+    #[test]
+    fn read_trim_owners_map_to_their_edge_uses() {
+        use solidcore::topology::edgeuse::p1::{set_uv_trim_curve, UvTrimCurveArg};
+        let root = crate::case::repo_root();
+        let Ok(path) = crate::fixtures::upstream_test_file(&root, "Solids/box.smb") else {
+            eprintln!("unavailable upstream test file: Solids/box.smb");
+            return;
+        };
+        let k = &mut Kernel::default();
+        let path = path.to_string_lossy();
+        let conv = &Conventions::EDGEUSE_GRAPH;
+        let mut b = match read_with(k, &path, false, false, false, conv).unwrap() {
+            Built::Brep(b) => *b,
+            Built::Failed(e) => panic!("box read failed: {e}"),
+        };
+        let held: Vec<EdgeuseId> = b
+            .edgeuses()
+            .iter()
+            .filter_map(|(id, r)| r.uv_trim_curve.as_ref().map(|_| id))
+            .collect();
+        assert!(!held.is_empty(), "the box has no UV trim curves");
+        for &eu in &held {
+            assert_eq!(
+                uv_owner_index(&b, eu, None),
+                f64::from(eu.index()),
+                "read trim of {eu:?}"
+            );
+        }
+        // an unowned copy (`Curve::clone` drops the owner) attached by SetUVTrimCurve
+        let eu = held.first().copied().unwrap();
+        let copy = b.edgeuse(eu).unwrap().uv_trim_curve.clone().unwrap();
+        assert_eq!(copy.owner(), None);
+        set_uv_trim_curve(
+            &mut b,
+            eu,
+            UvTrimCurveArg::New(Box::new(copy)),
+            0.0,
+            true,
+            None,
+        )
+        .unwrap();
+        for (id, r) in b.edgeuses().iter() {
+            if r.uv_trim_curve.is_some() {
+                assert_eq!(
+                    uv_owner_index(&b, id, None),
+                    f64::from(id.index()),
+                    "trim of {id:?} after SetUVTrimCurve"
+                );
+            }
+        }
+    }
 }
