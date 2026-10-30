@@ -652,6 +652,18 @@ fn exploded_views_show_without_changing_the_design() {
     assert!((bb(&mut s, &names[0]) + 10.0).abs() < 1e-6, "{names:?}");
     assert!((bb(&mut s, &names[1]) - 30.0).abs() < 1e-6);
     assert_eq!(s.doc.occurrences, before, "shown only");
+    // The design's placements are not the view's: the properties report where the design
+    // places B, and Capture Position has nothing of the view's to keep (it stays shown).
+    let b_id = occ(&s, "B");
+    let centre =
+        |s: &mut Session| run(s, "occurrence.properties", json!({"occurrence": b_id}))["total"]["center_of_mass"][0].as_f64().unwrap_or(f64::NAN);
+    run(&mut s, "explode.show", json!({"view": null}));
+    let placed = centre(&mut s);
+    run(&mut s, "explode.show", json!({"view": "Apart"}));
+    assert!((centre(&mut s) - placed).abs() < 1e-9, "{} shown, {placed} placed", centre(&mut s));
+    assert_eq!(run(&mut s, "component.capture_position", json!({}))["captured"], 0);
+    assert_eq!(s.doc.occurrences, before, "the exploded view is never captured");
+    assert!((bb(&mut s, &names[1]) - 30.0).abs() < 1e-6, "still shown");
     run(&mut s, "explode.show", json!({"view": null}));
     assert!(bb(&mut s, &names[0]).abs() < 1e-6);
     run(&mut s, "explode.create", json!({"name": "Hand", "moves": [{"occurrence": "B", "translate": [0, 0, 50]}]}));

@@ -2091,8 +2091,12 @@ fn placed_bodies(s: &Session, names: Vec<String>, cmd: &str) -> Result<(Vec<Stri
     if !crate::frames::placed(s) && picked.iter().all(|(_, component, _)| *component == s.active_component) {
         return Ok((names, Vec::new()));
     }
-    if let Some((name, ..)) = picked.iter().find(|(_, _, path)| path.iter().any(|id| s.pending_moves.contains_key(id))) {
+    let uncaptured = s.uncaptured_moves();
+    if let Some((name, ..)) = picked.iter().find(|(_, _, path)| path.iter().any(|id| uncaptured.contains_key(id))) {
         return Err(bad(cmd, format!("`{name}` has a position that is not captured yet: Capture Position (component.capture_position) first")));
+    }
+    if let Some((name, ..)) = picked.iter().find(|(_, _, path)| path.iter().any(|id| s.pending_moves.contains_key(id))) {
+        return Err(bad(cmd, format!("`{name}` is shown in an exploded view: show it assembled (explode.show with no view) first")));
     }
     Ok(picked.into_iter().map(|(own, _, path)| (own, path)).unzip())
 }

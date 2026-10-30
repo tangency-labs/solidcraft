@@ -400,6 +400,11 @@ pub struct Session {
     pub active_occurrence_path: Option<Vec<u64>>,
     /// Occurrence moves not captured yet (Capture Position keeps them, a recompute drops them).
     pub pending_moves: std::collections::BTreeMap<u64, solidcraft_doc::Mat>,
+    /// The placements the exploded view (`explode.show`) put in `pending_moves` to be shown:
+    /// display only. An entry of `pending_moves` still equal to its one here is the exploded view's,
+    /// not a move of the design's, so the placements the design reports and Capture Position
+    /// keeps leave it out ([`Session::uncaptured_moves`]).
+    pub exploded: std::collections::BTreeMap<u64, solidcraft_doc::Mat>,
     world_cache: std::sync::Mutex<Option<WorldCache>>,
     /// The design the joints were last solved for, as the solve left it, and the model it read
     /// (see [`Session::solve_joints`]).
@@ -611,6 +616,7 @@ impl Session {
             active_component: 0,
             active_occurrence_path: None,
             pending_moves: Default::default(),
+            exploded: Default::default(),
             world_cache: Default::default(),
             joints_settled: None,
             occurrence_visibility_cache: Default::default(),
@@ -1420,6 +1426,7 @@ impl Session {
             active_component: self.active_component,
             active_occurrence_path: self.active_occurrence_path.clone(),
             pending_moves: self.pending_moves.clone(),
+            exploded: self.exploded.clone(),
             world_cache: std::sync::Mutex::new(self.world_cache.lock().ok().and_then(|cache| cache.clone())),
             joints_settled: self.joints_settled.clone(),
             occurrence_visibility_cache: Default::default(),
@@ -1609,6 +1616,7 @@ impl Session {
         self.active_component = computed.active_component;
         self.active_occurrence_path = computed.active_occurrence_path;
         self.pending_moves = computed.pending_moves;
+        self.exploded = computed.exploded;
         // Joints the computation hid (an import's rigid group) stay hidden.
         for j in computed.visibility.hidden_joints {
             if !self.visibility.hidden_joints.contains(&j) {

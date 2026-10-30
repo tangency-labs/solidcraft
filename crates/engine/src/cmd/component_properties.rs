@@ -15,13 +15,7 @@ fn descendants(p: &Value, cmd: &str) -> Result<bool> {
 }
 
 fn placed_doc(s: &Session) -> Document {
-    let mut doc = (*s.doc).clone();
-    for occurrence in &mut doc.occurrences {
-        if let Some(transform) = s.pending_moves.get(&occurrence.id) {
-            occurrence.transform = *transform;
-        }
-    }
-    doc
+    s.design_document().into_owned()
 }
 
 /// A property total must cover the entire assembly. The display traversal intentionally
@@ -97,7 +91,7 @@ fn properties(s: &Session, doc: &Document, selected: &[u64], descendants: bool, 
     let selected_placements = if selected.is_empty() {
         if descendants { placements(doc, cmd)? } else { vec![(0, Vec::new(), solidcraft_doc::IDENTITY)] }
     } else {
-        let placement = s.occurrence_placement(selected).map_err(|e| bad(cmd, e.to_string()))?;
+        let placement = s.occurrence_placement_with(selected, &s.uncaptured_moves()).map_err(|e| bad(cmd, e.to_string()))?;
         let mut out = vec![(placement.component, selected.to_vec(), placement.world)];
         let mut stack = if descendants { out.clone() } else { Vec::new() };
         while let Some((component, path, transform)) = stack.pop() {
