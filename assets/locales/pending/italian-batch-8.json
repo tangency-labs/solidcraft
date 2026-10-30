@@ -1,0 +1,33 @@
+{
+  "it": {
+    "browser.calibrate_click_a": "Fai clic sull'immagine per il punto A, oppure digitane le coordinate.",
+    "browser.calibrate_click_b": "Fai clic sull'immagine per il punto B, oppure digitane le coordinate.",
+    "help.sketch.construction_line": "Crea una retta di costruzione infinita passante per due punti. Usala per impostare uno schizzo senza dividere i profili.",
+    "help.sketch.construction_line.angle": "Crea una retta di costruzione infinita con un angolo rispetto all'asse X dello schizzo. Seleziona il punto e digita l'angolo, oppure scegli la direzione.",
+    "help.sketch.construction_line.bisector": "Seleziona due linee rette dello schizzo che si intersecano, poi scegli una delle due bisettrici. Il risultato segue le linee di origine.",
+    "help.sketch.construction_line.horizontal": "Crea una retta di costruzione orizzontale infinita passante per un punto. Il suo vincolo orizzontale resta valido anche nelle modifiche successive.",
+    "help.sketch.construction_line.parallel": "Seleziona una linea retta dello schizzo, poi posiziona una retta di costruzione infinita parallela. Fai clic destro per scegliere un altro riferimento.",
+    "help.sketch.construction_line.perpendicular": "Seleziona una linea retta dello schizzo, poi posiziona una retta di costruzione infinita perpendicolare. Fai clic destro per scegliere un altro riferimento.",
+    "help.sketch.construction_line.tangent_at": "Crea una tangente in un punto di un cerchio o di un arco di cerchio, oppure in un estremo di una spline aperta o di una conica. Seleziona la curva, poi il suo punto di contatto.",
+    "help.sketch.construction_line.tangent_external": "Seleziona un cerchio o un arco di cerchio, poi un punto esterno e una soluzione di tangente. Le anteprime mostrano solo i contatti sull'arco disegnato.",
+    "help.sketch.construction_line.tangent_two": "Seleziona due cerchi o archi di cerchio, poi scegli una tangente comune nell'anteprima. I contatti devono trovarsi sulle curve disegnate.",
+    "help.sketch.construction_line.vertical": "Crea una retta di costruzione verticale infinita passante per un punto. Il suo vincolo verticale resta valido anche nelle modifiche successive.",
+    "prefs.persistent_ribbon_pressed": "Evidenzia i comandi attivi della barra multifunzione",
+    "prefs.persistent_ribbon_pressed_help": "Evidenzia i comandi della barra multifunzione finché i loro effetti sono attivi. Disattiva per mantenere l'aspetto neutro precedente e la guida dei comandi.",
+    "prefs.sketch_construction_lines": "Strumenti estesi per le rette di costruzione",
+    "prefs.sketch_open_look_at": "Ruota la vista verso lo schizzo quando si apre",
+    "prefs.sketch_open_look_at_note": "Disattivato: creando o modificando uno schizzo la vista resta com'è. Vista normale orienta la vista sullo schizzo quando vuoi.",
+    "recovery.discard_all": "Scarta tutto",
+    "recovery.discard_all_detail": "Questa azione non può essere annullata.",
+    "recovery.discard_all_title": "Scartare {count} salvataggi automatici?",
+    "recovery.discard_all_title_one": "Scartare 1 salvataggio automatico?",
+    "ui.construction.angle_hint": "Retta di costruzione: fai clic su un punto, poi digita un angolo o seleziona una direzione",
+    "ui.construction.bisector_hint": "Bisettrice: seleziona due linee rette che si intersecano, poi la soluzione desiderata",
+    "ui.construction.common_hint": "Tangente comune: seleziona due cerchi/archi, poi la soluzione desiderata",
+    "ui.construction.contact_hint": "Tangente: seleziona un cerchio/arco o una spline/conica aperta, poi il punto di contatto (curve a forma libera: estremi)",
+    "ui.construction.external_hint": "Tangente: seleziona un cerchio o un arco, un punto esterno, poi la soluzione desiderata",
+    "ui.construction.free_hint": "Retta di costruzione: fai clic su due punti; clic destro per ricominciare",
+    "ui.construction.point_hint": "Retta di costruzione: fai clic sul punto di passaggio",
+    "ui.construction.reference_hint": "Retta di costruzione: seleziona una linea retta, poi un punto; clic destro per cambiare il riferimento"
+  }
+}
