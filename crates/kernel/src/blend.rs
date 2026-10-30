@@ -682,17 +682,28 @@ fn normal_reach(rec: &Faces) -> f64 {
     rec.rec.tolerance.max(1e-7) * 10.0
 }
 
-/// Whether edge `e`'s two faces meet tangentially (within [`TANGENT_DEGREES`]) at its start: a
-/// smooth edge, with no corner to blend.
+/// Stations along an edge, as fractions of its interval, where [`smooth_join`] compares its
+/// faces' normals: its ends, and between them.
+const SMOOTH_STATIONS: [f64; 5] = [0.0, 0.25, 0.5, 0.75, 1.0];
+
+/// Whether edge `e`'s two faces meet tangentially (within [`TANGENT_DEGREES`]) all along it: a
+/// smooth edge, with no corner to blend. An edge whose faces are tangent at one end only (a
+/// round running into a wall it is tangent to where the wall meets its face) is a crease
+/// everywhere else, which is not smooth.
 fn smooth_join(rec: &Faces, e: usize) -> bool {
     let cos = TANGENT_DEGREES.to_radians().cos();
     let accept = normal_reach(rec);
     let faces: Vec<u32> = rec.faces_of(e).into_iter().collect();
-    let (Some(&a), Some(&b), Some((p, _))) = (faces.first(), faces.get(1), rec.ends(e)) else { return false };
-    match (rec.normal_at(a as usize, p, accept), rec.normal_at(b as usize, p, accept)) {
-        (Some(na), Some(nb)) => faces.len() == 2 && na.dot(nb) > cos,
-        _ => false,
-    }
+    let ([a, b], Some(edge)) = (faces.as_slice(), rec.rec.edges.get(e)) else { return false };
+    let Ok(curve) = CurveEval::new(edge.parameters()) else { return false };
+    let [t0, t1] = edge.interval;
+    SMOOTH_STATIONS.iter().all(|s| {
+        let Some(p) = curve.point(t0 + (t1 - t0) * s) else { return false };
+        match (rec.normal_at(*a as usize, p, accept), rec.normal_at(*b as usize, p, accept)) {
+            (Some(na), Some(nb)) => na.dot(nb) > cos,
+            _ => false,
+        }
+    })
 }
 
 /// `seeds` (edges in the record's order, each once), then every other edge that continues one

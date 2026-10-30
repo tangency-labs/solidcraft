@@ -96,7 +96,7 @@ fn a_fillet_face_comes_from_its_edge() {
     let mut h = History { operands: 1, faces, edges: vec![edge(4, 6), edge(5, 6), edge(0, 6), edge(2, 6), edge(0, 4)] };
     // The operand's own edges: edge 0 between faces 4 and 5, edge 1 between 0 and 4.
     let operand = vec![edge(4, 5), edge(0, 4)];
-    blends(&mut h, &operand, &[0, 1]);
+    blends(&mut h, &operand, &[0], &[1]);
     assert_eq!(h.faces[6].origins, vec![FaceOrigin::Edge { operand: 0, edge: 0 }]);
     assert!(h.faces[..6].iter().all(|f| f.origins.len() == 1));
 }
