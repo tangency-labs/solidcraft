@@ -44,10 +44,16 @@
 //!   formulation ([`crate::linkage`]): at stations along an edge, the iso-parameter curve `c`
 //!   of the fill leaving across it (σ growing into the fill) must have its height above the
 //!   neighbour vanish to order n:
-//!   - order 1: `n·c′ = 0` (`n` the neighbour's normal), with weak rows `w·c′ = s`, `t·c′ = 0`
-//!     (`w` the neighbour's leave direction, `t = n × w` along the edge, `s` how fast the Coons
-//!     start leaves along `w`) that keep the fill leaving into itself, about as fast; they act
-//!     in the tangent plane only, so they never pull against the G1 row;
+//!   - order 1: `n·c′ = 0` (`n` the neighbour's normal), with weak rows `w·c′ = s`, `t·c′ = a`
+//!     (`w` the neighbour's leave direction, `t = n × w` along the edge) that keep the fill
+//!     leaving into itself, about as fast: `(a, s)` is the Coons start's own cross derivative
+//!     `d` turned about the edge into the neighbour's tangent plane (`a = t·d`, `s` the length of
+//!     the rest of `d`). The Coons start is compatible at every corner (its cross derivative there
+//!     is the tangent of the side it meets, as any tensor patch's must be: the two share the
+//!     corner's next control point), so the target is too wherever that side lies in the
+//!     neighbour's tangent plane; a target that is not (`t·c′ = 0` up to the corner) is a
+//!     contradiction the least squares can only fold the corner's spans over. They act in the
+//!     tangent plane only, so they never pull against the G1 row;
 //!   - order k = 2 … n: `n·c⁽ᵏ⁾ = k!·[σᵏ] Σ_m H_m(x(σ))/m!` ([`crate::linkage::Jet::targets`]):
 //!     the normal curvature (G2), its rate of change (G3) and that rate's (G4) are the
 //!     neighbour's, in the fill's own leave direction. The right-hand side reads `c′ … c⁽ᵏ⁻¹⁾`
@@ -813,7 +819,10 @@ struct Station {
     tilt: f64,
     held: bool,
     clear: bool,
+    /// The weak rows' target for the cross derivative `c′` ([`stations`]): `w·c′ = speed`,
+    /// `t·c′ = slide`.
     speed: f64,
+    slide: f64,
 }
 
 impl Station {
@@ -1180,13 +1189,28 @@ fn stations(
             let ask = Asked::near(asked, [(corners.get(k).copied(), f), (corners.get((k + 1) % n).copied(), 1.0 - f)]);
             let clear = f > CORNER_SHARE && f < 1.0 - CORNER_SHARE && ask.full == asked;
             let (uv, (du, dv, sign)) = station_on(side, t);
-            // How fast the Coons start leaves into the leave direction: it blends the sides
-            // across, so it leaves as fast as the opposite sides lie apart; the side's own speed
-            // where it does not leave into the patch at all.
-            let along = p.eval(uv[0], uv[1], dv, du).map(|d| d.len()).unwrap_or(0.0);
-            let speed = p.eval(uv[0], uv[1], du, dv).map(|d| (d * sign).dot(c.leave)).ok().filter(|x| *x > 0.0).unwrap_or(along);
+            // The Coons start's cross derivative turned about the edge into the neighbour's
+            // tangent plane: its part along the edge kept, the rest laid along the leave
+            // direction at its own length. At a corner it is the next side's tangent, which the
+            // patch's cross derivative is there whatever its inside (module docs).
+            let d = p.eval(uv[0], uv[1], du, dv)? * sign;
+            let slide = d.dot(c.normal.cross(c.leave));
+            let speed = (d.dot(d) - slide * slide).max(0.0).sqrt();
             let tilt = edges.get(k).and_then(|e| e.tangent(param)).map_or(0.0, |d| d.dot(c.normal).abs().clamp(0.0, 1.0).asin());
-            out.push(Station { patch, side, t, across: c, order: ask.order(), full: ask.full, fade: ask.fade, tilt, held: ask.held, clear, speed });
+            out.push(Station {
+                patch,
+                side,
+                t,
+                across: c,
+                order: ask.order(),
+                full: ask.full,
+                fade: ask.fade,
+                tilt,
+                held: ask.held,
+                clear,
+                speed,
+                slide,
+            });
         }
     }
     Ok(out)
@@ -1296,7 +1320,7 @@ fn knot_line_rows(quilt: &Quilt, angle_tol: f64) -> SplineResult<Vec<Row>> {
 }
 
 /// A station's rows (module docs), linearised about the patch as it stands:
-/// - G1: `n·c′ = 0`, and the weak Hermite rows `w·c′ = s`, `t·c′ = 0` in the neighbour's tangent
+/// - G1: `n·c′ = 0`, and the weak Hermite rows `w·c′ = s`, `t·c′ = a` in the neighbour's tangent
 ///   plane only (`t = n × w`), so they never pull against the G1 row;
 /// - orders k = 2 … n: `n·c⁽ᵏ⁾ = T_k(x₁ … x_{k−1})` ([`crate::linkage::Jet::linearised`]) by
 ///   Newton's method: `T_k` is replaced by its tangent at the last solution's `x⁰`, so the row is
@@ -1318,7 +1342,7 @@ fn linkage_rows(rows: &mut Vec<Row>, patch: &Patch, s: &Station, span: f64) -> S
         .collect::<SplineResult<_>>()?;
     let Some(first) = derivative.first() else { return Ok(()) };
     rows.push(Row { terms: along(s.patch, first, n), value: 0.0, weight: 1.0 });
-    for (dir, value) in [(w, s.speed), (t, 0.0)] {
+    for (dir, value) in [(w, s.speed), (t, s.slide)] {
         rows.push(Row { terms: along(s.patch, first, dir), value, weight: HERMITE_WEIGHT });
     }
     let Some(jet) = s.across.jet else { return Ok(()) };
