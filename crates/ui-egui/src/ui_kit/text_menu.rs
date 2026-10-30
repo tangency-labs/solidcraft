@@ -154,7 +154,7 @@ const OPEN: &str = "sc_text_menu_open";
 /// meanwhile, rather than cover the menu.
 pub(crate) fn menu_open(ctx: &egui::Context, field: egui::Id) -> bool {
     let pass = ctx.cumulative_pass_nr();
-    ctx.data(|d| d.get_temp::<(egui::Id, u64)>(egui::Id::new(OPEN))).is_some_and(|(id, drawn)| id == field && drawn == pass)
+    ctx.data(|d| d.get_temp::<(egui::Id, u64)>(egui::Id::unique(OPEN))).is_some_and(|(id, drawn)| id == field && drawn == pass)
 }
 
 #[cfg(test)]
@@ -262,7 +262,7 @@ pub(crate) fn menu(ui: &Ui, response: &mut Response, text: &mut dyn TextBuffer, 
     .is_some();
     if open {
         let pass = ui.ctx().cumulative_pass_nr();
-        ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new(OPEN), (id, pass)));
+        ui.ctx().data_mut(|d| d.insert_temp(egui::Id::unique(OPEN), (id, pass)));
     }
     if open && ui.ctx().input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
         // Esc closes the menu alone: the field keeps its focus, and its owner (a dimension's box,

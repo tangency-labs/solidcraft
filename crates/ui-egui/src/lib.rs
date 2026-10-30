@@ -758,6 +758,9 @@ pub struct SolveApp {
     pending_shots: Vec<(u64, Option<String>, std::sync::mpsc::Sender<Value>, f64)>,
     shot_chat_turns: std::collections::HashMap<u64, std::sync::Arc<std::sync::atomic::AtomicBool>>,
     queued_shots: Vec<(u64, f64, u32)>,
+    /// Screenshots egui hands back, by token; egui calls back, `collect_screenshots` reads them.
+    shot_tx: std::sync::mpsc::Sender<(u64, std::sync::Arc<egui::ColorImage>)>,
+    shot_rx: std::sync::mpsc::Receiver<(u64, std::sync::Arc<egui::ColorImage>)>,
     shot_token: u64,
     styled: bool,
     fitted: bool,
@@ -813,6 +816,7 @@ impl SolveApp {
         #[cfg(not(target_arch = "wasm32"))]
         solidcraft_engine::slicer_files::clean_old();
         let tree = browser::TreeState::for_session(session.uid);
+        let (shot_tx, shot_rx) = std::sync::mpsc::channel();
         let mut app = SolveApp {
             panel_runtime: None,
             viewport_status: Default::default(),
@@ -933,6 +937,8 @@ impl SolveApp {
             pending_shots: Vec::new(),
             shot_chat_turns: Default::default(),
             queued_shots: Vec::new(),
+            shot_tx,
+            shot_rx,
             shot_token: 0,
             styled: false,
             fitted: false,
@@ -3417,10 +3423,15 @@ impl SolveApp {
         // A view that just moved is drawn with fewer AO samples: shoot the full-quality frame
         // that follows (#7165), or after half a second a view that keeps moving as it is.
         let settled = viewport::ao_settled(self, ctx);
+        let shot_tx = &self.shot_tx;
         self.queued_shots.retain_mut(|(token, at, frames)| {
             *frames += 1;
             if now >= *at && *frames >= 3 && (settled || now >= *at + 500.0) {
-                ctx.send_viewport_cmd(egui::ViewportCommand::Screenshot(egui::UserData::new(*token)));
+                let (token, tx, ctx2) = (*token, shot_tx.clone(), ctx.clone());
+                ctx.request_screenshot(move |image| {
+                    let _ = tx.send((token, image));
+                    ctx2.request_repaint();
+                });
                 false
             } else {
                 true
@@ -3448,20 +3459,8 @@ impl SolveApp {
         if self.pending_shots.is_empty() && !issue_report::pending(self) {
             return;
         }
-        let events: Vec<_> = ctx.input(|i| {
-            i.raw
-                .events
-                .iter()
-                .filter_map(|e| match e {
-                    egui::Event::Screenshot { user_data, image, .. } => {
-                        let token = user_data.data.as_ref().and_then(|d| d.downcast_ref::<u64>()).copied()?;
-                        Some((token, image.clone()))
-                    }
-                    _ => None,
-                })
-                .collect()
-        });
-        for (token, image) in events {
+        let shots: Vec<_> = self.shot_rx.try_iter().collect();
+        for (token, image) in shots {
             issue_report::receive(self, token, image.clone());
             if let Some(i) = self.pending_shots.iter().position(|(t, ..)| *t == token) {
                 let (_, path, reply, _) = self.pending_shots.remove(i);

@@ -2209,6 +2209,7 @@ fn result_navigation_uses_shared_pan_zoom_and_leaves_product_camera_unchanged() 
         &mut time,
         Modifiers::NONE,
         vec![Event::MouseWheel {
+            source: egui::MouseWheelSource::Unknown,
             unit: egui::MouseWheelUnit::Line,
             delta: vec2(0.0, 3.0),
             modifiers: Modifiers::NONE,
@@ -2663,7 +2664,13 @@ fn render_preview_navigates_like_the_modelling_viewport_in_every_preset() {
             // Wheel over the model, then modifier-only motion (Touchpad: Shift pans, Alt orbits).
             let before = design.cam;
             both(vec![Event::PointerMoved(model)], none, &mut design, &mut render);
-            let wheel = Event::MouseWheel { unit: egui::MouseWheelUnit::Line, delta: vec2(0.0, 3.0), modifiers: none, phase: egui::TouchPhase::Move };
+            let wheel = Event::MouseWheel {
+                source: egui::MouseWheelSource::Unknown,
+                unit: egui::MouseWheelUnit::Line,
+                delta: vec2(0.0, 3.0),
+                modifiers: none,
+                phase: egui::TouchPhase::Move,
+            };
             both(vec![wheel], none, &mut design, &mut render);
             for _ in 0..30 {
                 both(vec![], none, &mut design, &mut render);

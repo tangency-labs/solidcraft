@@ -114,8 +114,11 @@ pub(super) fn rows(app: &mut SolveApp, ui: &mut egui::Ui, component: u64, path: 
             .collect()
     };
     let (status, tip) = crate::timeline::worst_status(app, &ids);
-    let r =
-        draw_row(ui, ui.id().with(&key), &Row { depth, fold: Some(open), icon: "folder", label, status, tip: tip.as_deref(), ..Default::default() });
+    let r = draw_row(
+        ui,
+        ui.scope_id().with(&key),
+        &Row { depth, fold: Some(open), icon: "folder", label, status, tip: tip.as_deref(), ..Default::default() },
+    );
     if r.fold || r.clicked {
         toggle(app, &key, compact);
     }
@@ -289,7 +292,7 @@ fn feature_row(
     let cut = app.cut.features.contains(&id);
     let r = draw_row(
         ui,
-        ui.id().with(("browser_feature", id)),
+        ui.scope_id().with(("browser_feature", id)),
         &Row {
             depth,
             fold,

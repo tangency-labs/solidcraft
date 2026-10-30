@@ -378,7 +378,7 @@ fn rotated_second_occurrence_keeps_saved_from_and_to_points_exact() {
 fn dragging_to_update_value_reselects_whole_value_box_text() {
     let mut h = make(json!({"distance":"4 mm"}));
     open(&mut h);
-    let id = egui::Id::new("sc_canvas_value");
+    let id = egui::Id::unique("sc_canvas_value");
     let selection = |h: &Harness| {
         let range = egui::text_edit::TextEditState::load(&h.ctx, id).unwrap().cursor.char_range().unwrap();
         let (a, b) = (range.primary.index, range.secondary.index);

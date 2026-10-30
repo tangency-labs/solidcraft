@@ -174,7 +174,7 @@ fn icon_action(ui: &mut Ui, item: &StatusItem, part: &str, icon: &str, label: &s
     } else {
         crate::icons::paint_icon(ui.painter(), glyph, icon, 1.0);
     }
-    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), label));
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled(), label));
     scenario::publish_target(&target(item, part), response.rect);
     scenario::publish_target(&target(item, &format!("{part}_glyph")), glyph);
     response.backing_on_hover_text(hint)
@@ -250,9 +250,9 @@ pub(crate) fn viewport_status_item(ui: &mut Ui, item: &StatusItem, state: &mut S
             });
         })
         .response;
-    let focus = ui.interact(response.rect, Id::new(target(item, "item")), egui::Sense::focusable_noninteractive());
+    let focus = ui.interact(response.rect, Id::unique(target(item, "item")), egui::Sense::focusable_noninteractive());
     state.focus_ids.push(focus.id);
-    focus.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), format!("{} {}", item.name, item.setting)));
+    focus.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, ui.is_enabled(), format!("{} {}", item.name, item.setting)));
     if focus.has_focus() {
         ui.painter().rect_stroke(response.rect.expand(t.space_3), frame.corner_radius, ui.visuals().selection.stroke, egui::StrokeKind::Outside);
     }
@@ -281,7 +281,7 @@ pub(crate) fn viewport_status_row(
     let mut actions = Vec::new();
     let mut key_anchor = None;
     let row = container
-        .area(Id::new("viewport_status_row"))
+        .area(Id::unique("viewport_status_row"))
         .movable(false)
         .pivot(egui::Align2::CENTER_TOP)
         .fixed_pos(egui::pos2(free.center().x, free.top() + t.space_8))

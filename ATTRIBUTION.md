@@ -896,11 +896,10 @@ copied into SolidCraft.
 
 | Directory | Source | Licence | Changes |
 |---|---|---|---|
-| vendor/accesskit_macos | accesskit_macos 0.26.3, https://github.com/AccessKit/accesskit (The AccessKit contributors) | MIT OR Apache-2.0 | the subclassing adapter and its tests from 0.27.2: dropping the adapter keeps AppKit's key-value observers (vendor/README.md) |
 
 ## Vendored renderer compatibility fix
 
-`vendor/egui-wgpu` is egui-wgpu 0.36.2 from https://github.com/emilk/egui
+`vendor/egui-wgpu` is egui-wgpu 0.37.0 from https://github.com/emilk/egui
 (MIT OR Apache-2.0; both original licence texts are included). Rust sources and
 its original `egui.wgsl` shader are retained; no images or other artwork are copied.
 SolidCraft's narrow patch selects a safe 1x MSAA path on the chosen OpenGL adapter

@@ -1226,15 +1226,15 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
             m.surrender_focus(id);
         }
     });
-    let id = egui::Id::new("file_loading");
+    let id = egui::Id::unique("file_loading");
     let card_id = id.with("card");
     // Above the dialogs over the design; menus, tooltips and the resize edges stay above it.
     ctx.move_to_top(egui::LayerId::new(egui::Order::Middle, id));
     ctx.move_to_top(egui::LayerId::new(egui::Order::Middle, card_id));
     Container::new(ctx, Surface::InputShield).area(id).order(egui::Order::Middle).fixed_pos(cover.min).interactable(true).show(ctx, |ui| {
         ui.set_min_size(cover.size());
-        ui.interact(cover, egui::Id::new("file_loading_block"), egui::Sense::click_and_drag());
-        let shield = Container::new(ctx, Surface::InputShield);
+        ui.interact(cover, egui::Id::unique("file_loading_block"), egui::Sense::click_and_drag());
+        let shield = Container::unique(ctx, Surface::InputShield);
         shield.paint_background(ui.painter(), shield.frame(ctx, egui::Color32::from_black_alpha(70), crate::frame::Side::Left), cover);
     });
     // Anchored at its top: the card grows downwards (the saved preview) and Cancel stays put.

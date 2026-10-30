@@ -187,13 +187,13 @@ pub(crate) fn tree_row(ui: &mut egui::Ui, id: egui::Id, row: &Row) -> RowResp {
                     if show {
                         super::quiet_icon_button_at(ui, rect, action.icon, action.label)
                     } else {
-                        ui.interact(rect, ui.id().with(action.target), Sense::hover())
+                        ui.interact(rect, ui.scope_id().with(action.target), Sense::hover())
                     }
                 })
                 .inner
             })
             .inner;
-        response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, response.enabled(), action.label));
+        response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, response.enabled(), action.label));
         let response = match action.reason {
             Some(reason) => response.backing_on_disabled_hover_text(format!("{}\n{reason}", action.label)),
             None => response.backing_on_hover_text(action.label),
