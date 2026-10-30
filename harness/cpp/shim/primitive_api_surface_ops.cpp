@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // difftest shim for unit `primitive.api_surface_ops`: the SM_API surface utilities of
 // source/SM_API/src/SmApiSurfaces.cpp (SmApiCreateSurface, SmApiCreateSurfaceFromCornerPoints,
-// SmApiCreateOffsetSurface) and the curve-on-surface ones of SmApiCurves.cpp
+// SmApiCreateSurfaceFromOrderedPoints, SmApiCreateOffsetSurface) and the curve-on-surface ones of SmApiCurves.cpp
 // (SmApiDropCurveToSrf, SmApiLiftUVCurveFromSrf), called exactly as a caller of the API would,
 // on surfaces and curves made by the SM_API constructors.
 //
@@ -48,6 +48,7 @@ enum : int32_t
     OP_OFFSET = 3,
     OP_DROP = 4,
     OP_LIFT = 5,
+    OP_ORDERED = 6,
 };
 
 // Input surface kinds.
@@ -57,6 +58,7 @@ enum : int32_t
     S_CORNERS = 1, // SmApiCreateSurfaceFromCornerPoints(4 corners)
     S_SPHERE = 2,  // the first face's surface of SmApiCreateSphere(center, radius)
     S_TORUS = 3,   // SmApiCreateTorus(center, major, minor, SmSurface*&)
+    S_ORDERED = 4, // SmApiCreateSurfaceFromOrderedPoints(points, rows, columns)
 };
 
 // Input curve kinds.
@@ -251,9 +253,9 @@ struct InSrf
 // face) or `3 center(3) major minor` (torus).
 void read_surface(Rd& rd, InSrf& srf)
 {
-    int64_t kind = rd.idx(S_GRID, S_TORUS);
+    int64_t kind = rd.idx(S_GRID, S_ORDERED);
     SmStatus s;
-    if (kind == S_GRID)
+    if (kind == S_GRID || kind == S_ORDERED)
     {
         ULONG rows = (ULONG)rd.idx(0, (int64_t)1 << 40);
         ULONG cols = (ULONG)rd.idx(0, (int64_t)1 << 40);
@@ -261,7 +263,10 @@ void read_surface(Rd& rd, InSrf& srf)
         SmTArray<SmPoint3d> pts;
         for (int64_t i = 0; i < np; i++)
             pts.Add(rd.vec());
-        s = SmApiCreateSurface(pts, rows, cols, srf.own.p);
+        if (kind == S_GRID)
+            s = SmApiCreateSurface(pts, rows, cols, srf.own.p);
+        else
+            s = SmApiCreateSurfaceFromOrderedPoints(pts, rows, cols, srf.own.p);
         srf.p = srf.own.p;
     }
     else if (kind == S_CORNERS)
@@ -353,16 +358,17 @@ SmBSplineCurve* read_curve(Rd& rd)
 
 void run(Rd& rd, std::vector<double>& o)
 {
-    int64_t op = rd.idx(OP_SURFACE, OP_LIFT);
+    int64_t op = rd.idx(OP_SURFACE, OP_ORDERED);
     switch (op)
     {
     case OP_SURFACE:
     case OP_CORNERS:
+    case OP_ORDERED:
     {
         // the surface spec of the matching kind (its own status is the record's)
         Own<SmSurface> res;
         SmStatus s;
-        if (op == OP_SURFACE)
+        if (op == OP_SURFACE || op == OP_ORDERED)
         {
             ULONG rows = (ULONG)rd.idx(0, (int64_t)1 << 40);
             ULONG cols = (ULONG)rd.idx(0, (int64_t)1 << 40);
@@ -370,7 +376,10 @@ void run(Rd& rd, std::vector<double>& o)
             SmTArray<SmPoint3d> pts;
             for (int64_t i = 0; i < np; i++)
                 pts.Add(rd.vec());
-            s = SmApiCreateSurface(pts, rows, cols, res.p);
+            if (op == OP_SURFACE)
+                s = SmApiCreateSurface(pts, rows, cols, res.p);
+            else
+                s = SmApiCreateSurfaceFromOrderedPoints(pts, rows, cols, res.p);
         }
         else
         {

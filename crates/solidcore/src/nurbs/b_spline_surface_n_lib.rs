@@ -8,5 +8,6 @@
 //! each lives in its own submodule and adds methods to
 //! [`BSplineSurface`](crate::nurbs::b_spline_surface::BSplineSurface).
 
+pub mod approx;
 pub mod p1;
 pub mod p2;

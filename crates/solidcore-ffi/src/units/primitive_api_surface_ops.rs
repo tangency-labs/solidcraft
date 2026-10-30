@@ -1,7 +1,8 @@
 //! FFI wrappers for unit `primitive.api_surface_ops`. Shim:
 //! `harness/cpp/shim/primitive_api_surface_ops.cpp`. Upstream:
 //! `source/SM_API/src/SmApiSurfaces.cpp` (`SmApiCreateSurface`,
-//! `SmApiCreateSurfaceFromCornerPoints`, `SmApiCreateOffsetSurface`) and
+//! `SmApiCreateSurfaceFromCornerPoints`, `SmApiCreateSurfaceFromOrderedPoints`,
+//! `SmApiCreateOffsetSurface`) and
 //! `source/SM_API/src/SmApiCurves.cpp` (`SmApiDropCurveToSrf`, `SmApiLiftUVCurveFromSrf`).
 //!
 //! Program layout (all `f64`): `op args...`, with `op` the [`Call`] discriminant:
@@ -13,18 +14,20 @@
 //! | 3 offset | `surface distance` |
 //! | 4 drop | `curve surface lift` |
 //! | 5 lift | `uv_curve surface` |
+//! | 6 ordered-points surface | `rows columns n pts(3n)` |
 //!
 //! A `surface` is `kind args` ([`InSurface`]): `0 rows columns n pts(3n)`
 //! (`SmApiCreateSurface`), `1 corners(4x3)` (`SmApiCreateSurfaceFromCornerPoints`), `2
 //! center(3) radius` (the first face's surface of `SmApiCreateSphere`) or `3 center(3) major
-//! minor` (`SmApiCreateTorus`, surface overload). A
+//! minor` (`SmApiCreateTorus`, surface overload) or `4 rows columns n pts(3n)`
+//! (`SmApiCreateSurfaceFromOrderedPoints`). A
 //! `curve` is `kind args` ([`InCurve`]): `0 n pts(3n)` (`SmApiCreateCurve`), `1 center(3)
 //! radius` (`SmApiCreateCircle`), `2 center(3) radius start_deg end_deg`
 //! (`SmApiCreateArc`), `3 start(3) end(3)` (`SmApiCreateLineSegment`).
 //!
 //! Output: `-2` when an input's constructor fails; else the API status (`0` =
 //! `SM_SUCCESS`, else the `SmStatus`), then on success:
-//! - ops 1 and 2: `type`, the B-spline surface `has_nurb knot_type form [n m p q r s
+//! - ops 1, 2 and 6: `type`, the B-spline surface `has_nurb knot_type form [n m p q r s
 //!   Pw(4(n+1)(m+1)) U(r+1) V(s+1)]`, then the samples;
 //! - op 3: the samples of the offset surface;
 //! - op 4: `count` then each UV curve, then with `lift` `count` then each 3D curve;
@@ -87,6 +90,15 @@ pub enum InSurface {
         /// Minor radius.
         minor: f64,
     },
+    /// `SmApiCreateSurfaceFromOrderedPoints(points, rows, columns)`.
+    Ordered {
+        /// Row count (at most [`MAX_COUNT`]).
+        rows: u64,
+        /// Column count (at most [`MAX_COUNT`]).
+        columns: u64,
+        /// The grid points, row by row (at most [`MAX_POINTS`]).
+        points: Vec<[f64; 3]>,
+    },
 }
 
 /// One input curve, made by an `SM_API` constructor.
@@ -141,6 +153,15 @@ pub enum Call {
         /// The corners (`umin_vmin`, `umax_vmin`, `umin_vmax`, `umax_vmax`).
         corners: [[f64; 3]; 4],
     },
+    /// `SmApiCreateSurfaceFromOrderedPoints(points, rows, columns, rpResult)`.
+    Ordered {
+        /// Row count.
+        rows: u64,
+        /// Column count.
+        columns: u64,
+        /// The grid points, row by row.
+        points: Vec<[f64; 3]>,
+    },
     /// `SmApiCreateOffsetSurface(surface, distance, rpResult)`.
     Offset {
         /// The surface.
@@ -166,13 +187,17 @@ pub enum Call {
     },
 }
 
+/// A net or grid `rows columns n pts(3n)`.
 fn put_net(o: &mut Vec<f64>, rows: u64, columns: u64, points: &[[f64; 3]]) -> Result<(), FfiError> {
     if rows > MAX_COUNT || columns > MAX_COUNT || points.len() > MAX_POINTS {
         return Err(bad("net too large"));
     }
-    // a product that wraps would make upstream build knot vectors of the wrapped sizes
-    if rows.checked_mul(columns).is_none() {
-        return Err(bad("rows times columns overflows"));
+    // inputs undefined in C++ are refused (held record)
+    if rows.checked_mul(columns).is_none() && rows.wrapping_mul(columns) == points.len() as u64 {
+        return Err(bad("unsupported grid size"));
+    }
+    if (rows == 0 || columns == 0) && rows.max(columns) > MAX_POINTS as u64 {
+        return Err(bad("unsupported grid size"));
     }
     o.extend([rows as f64, columns as f64, points.len() as f64]);
     o.extend(points.iter().flatten());
@@ -206,6 +231,14 @@ fn put_surface(o: &mut Vec<f64>, s: &InSurface) -> Result<(), FfiError> {
             o.push(3.0);
             o.extend_from_slice(center);
             o.extend([*major, *minor]);
+        }
+        InSurface::Ordered {
+            rows,
+            columns,
+            points,
+        } => {
+            o.push(4.0);
+            put_net(o, *rows, *columns, points)?;
         }
     }
     Ok(())
@@ -258,6 +291,14 @@ fn encode(call: &Call) -> Result<Vec<f64>, FfiError> {
         Call::Corners { corners } => {
             o.push(2.0);
             o.extend(corners.iter().flatten());
+        }
+        Call::Ordered {
+            rows,
+            columns,
+            points,
+        } => {
+            o.push(6.0);
+            put_net(&mut o, *rows, *columns, points)?;
         }
         Call::Offset { surface, distance } => {
             o.push(3.0);
@@ -312,12 +353,24 @@ mod tests {
     use super::*;
 
     #[test]
-    fn an_overflowing_net_is_refused() {
-        let call = Call::Net {
-            rows: MAX_COUNT,
-            columns: MAX_COUNT,
+    fn ffi_refuses_unsupported_grid_sizes() {
+        let net = |rows, columns| Call::Net {
+            rows,
+            columns,
             points: Vec::new(),
         };
-        assert!(encode(&call).is_err());
+        let ordered = |rows, columns| Call::Ordered {
+            rows,
+            columns,
+            points: Vec::new(),
+        };
+        for call in [net, ordered] {
+            assert!(encode(&call(MAX_COUNT, MAX_COUNT)).is_err());
+            assert!(encode(&call(MAX_COUNT, MAX_COUNT - 1)).is_ok());
+            assert!(encode(&call(MAX_COUNT, 0)).is_err());
+            assert!(encode(&call(0, MAX_COUNT)).is_err());
+            assert!(encode(&call(7, 0)).is_ok());
+            assert!(encode(&call(0, 0)).is_ok());
+        }
     }
 }

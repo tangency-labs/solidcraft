@@ -9,6 +9,7 @@
 //! |---------------------------------------|---------------------------------------|
 //! | [`create_surface`]                    | `SmApiCreateSurface`                  |
 //! | [`create_surface_from_corner_points`] | `SmApiCreateSurfaceFromCornerPoints`  |
+//! | [`create_surface_from_ordered_points`] | `SmApiCreateSurfaceFromOrderedPoints` |
 //! | [`create_offset_surface`]             | `SmApiCreateOffsetSurface`            |
 //! | [`drop_curve_to_srf`], [`DroppedCurves`] | `SmApiDropCurveToSrf`              |
 //! | [`lift_uv_curve_from_srf`]            | `SmApiLiftUVCurveFromSrf`             |
@@ -39,6 +40,7 @@ use crate::surface::surface::Surface;
 
 const OP_SURFACE: &str = "primitive::api_surface_ops::create_surface";
 const OP_OFFSET: &str = "primitive::api_surface_ops::create_offset_surface";
+const OP_ORDERED: &str = "primitive::api_surface_ops::create_surface_from_ordered_points";
 
 /// The cubic B-spline surface with the control net `control_points` (`num_rows` rows
 /// of `num_columns` points), clamped knots 0 and 1 at the ends and uniform interior
@@ -131,6 +133,36 @@ pub fn create_surface_from_corner_points(
     umax_vmax: Point3,
 ) -> Result<BSplineSurface> {
     BSplineSurface::create_bilinear_surface(umin_vmin, umax_vmin, umin_vmax, umax_vmax)
+}
+
+/// The bicubic B-spline surface approximating the ordered grid `points` (`num_rows`
+/// rows of `num_columns` points, row by row) in the least-squares sense, one control
+/// point per sample (`SmApiCreateSurfaceFromOrderedPoints`, through
+/// [`BSplineSurface::approximate_points`] with degrees 3: upstream's
+/// `SmBSplineSurface::ApproximatePoints` with `pdOptTolerance == NULL`).
+///
+/// # Errors
+///
+/// `InvalidInput` when the grid size is not the point count; `SM_ERR` when the fit
+/// fails (fewer than 4 rows or columns, a degenerate grid).
+pub fn create_surface_from_ordered_points(
+    points: &[Point3],
+    num_rows: u64,
+    num_columns: u64,
+) -> Result<BSplineSurface> {
+    let degree_u = 3;
+    let degree_v = 3;
+
+    let count = u64::try_from(points.len())
+        .map_err(|_| SolidError::invalid_input(OP_ORDERED, "too many points"))?;
+    if num_rows.checked_mul(num_columns) != Some(count) {
+        return Err(SolidError::invalid_input(
+            OP_ORDERED,
+            "rows times columns is not the point count",
+        ));
+    }
+
+    BSplineSurface::approximate_points(points, num_rows, num_columns, degree_u, degree_v)
 }
 
 /// The offset of `surface` by `distance` along its normal (`SmApiCreateOffsetSurface`,

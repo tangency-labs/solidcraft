@@ -1,6 +1,7 @@
 //! Runner for unit `primitive.api_surface_ops`: the `SM_API` surface utilities
-//! (`SmApiCreateSurface`, `SmApiCreateSurfaceFromCornerPoints`, `SmApiCreateOffsetSurface`,
-//! `SmApiDropCurveToSrf`, `SmApiLiftUVCurveFromSrf`).
+//! (`SmApiCreateSurface`, `SmApiCreateSurfaceFromCornerPoints`,
+//! `SmApiCreateSurfaceFromOrderedPoints`, `SmApiCreateOffsetSurface`, `SmApiDropCurveToSrf`,
+//! `SmApiLiftUVCurveFromSrf`).
 //!
 //! C++: `solidcore_ffi::units::primitive_api_surface_ops` (upstream
 //! `source/SM_API/src/SmApiSurfaces.cpp`, `SmApiCurves.cpp`). Rust:
@@ -38,6 +39,9 @@ use crate::{Case, HarnessError, Output, Rng, UnitDiff};
 
 /// Generated cases per run, whatever `--seeds` says (it can only raise this).
 pub const MIN_GENERATED: usize = 400;
+
+/// Generated `SmApiCreateSurfaceFromOrderedPoints` cases (stream `ordered`, own seeds).
+pub const MIN_GENERATED_ORDERED: usize = 120;
 
 /// `primitive.api_surface_ops` runner.
 pub struct Runner;
@@ -87,6 +91,7 @@ enum Srf {
     Corners { corners: [P3; 4] },
     SphereFace { center: P3, radius: F },
     Torus { center: P3, major: F, minor: F },
+    Ordered { rows: u64, columns: u64, points: Vec<P3> },
 }
 
 /// One input curve, made by an `SM_API` constructor.
@@ -109,6 +114,11 @@ enum In {
     },
     Corners {
         corners: [P3; 4],
+    },
+    Ordered {
+        rows: u64,
+        columns: u64,
+        points: Vec<P3>,
     },
     Offset {
         surface: Srf,
@@ -161,6 +171,15 @@ fn in_surface(s: &Srf) -> InSurface {
             major: major.0,
             minor: minor.0,
         },
+        Srf::Ordered {
+            rows,
+            columns,
+            points,
+        } => InSurface::Ordered {
+            rows: *rows,
+            columns: *columns,
+            points: points.iter().map(a3).collect(),
+        },
     }
 }
 
@@ -204,6 +223,15 @@ fn to_call(i: &In) -> Call {
         },
         In::Corners { corners } => Call::Corners {
             corners: corners.each_ref().map(a3),
+        },
+        In::Ordered {
+            rows,
+            columns,
+            points,
+        } => Call::Ordered {
+            rows: *rows,
+            columns: *columns,
+            points: points.iter().map(a3).collect(),
         },
         In::Offset { surface, distance } => Call::Offset {
             surface: in_surface(surface),
@@ -383,6 +411,14 @@ fn surface_of(k: &mut Kernel, s: &Srf) -> Result<Surface, Box<Output>> {
             let [a, b, c, d] = corners.each_ref().map(v3);
             api::create_surface_from_corner_points(a, b, c, d)
         }
+        Srf::Ordered {
+            rows,
+            columns,
+            points,
+        } => {
+            let pts: Vec<Vec3> = points.iter().map(v3).collect();
+            api::create_surface_from_ordered_points(&pts, *rows, *columns)
+        }
         Srf::SphereFace { center, radius } => {
             let b = api_primitives::create_sphere(k, v3(center), radius.0)
                 .map_err(|e| build_failed(&e))?;
@@ -430,7 +466,7 @@ fn curve_of(c: &Crv) -> Result<Curve, Box<Output>> {
     made.map_err(|e| build_failed(&e))
 }
 
-/// The record of a created B-spline surface (ops net and corners).
+/// The record of a created B-spline surface (ops net, corners and ordered).
 fn created(k: &Kernel, r: solidcore::Result<BSplineSurface>) -> Output {
     match r {
         Ok(b) => {
@@ -462,6 +498,14 @@ fn rust(i: &In) -> Result<Output, HarnessError> {
         In::Corners { corners } => {
             let [a, b, c, d] = corners.each_ref().map(v3);
             created(&k, api::create_surface_from_corner_points(a, b, c, d))
+        }
+        In::Ordered {
+            rows,
+            columns,
+            points,
+        } => {
+            let pts: Vec<Vec3> = points.iter().map(v3).collect();
+            created(&k, api::create_surface_from_ordered_points(&pts, *rows, *columns))
         }
         In::Offset { surface, distance } => {
             let s = match surface_of(&mut k, surface) {
@@ -546,6 +590,27 @@ fn net(rng: &mut Rng, rows: u64, columns: u64) -> Vec<P3> {
     v
 }
 
+/// An ordered grid of `rows x columns` samples of a smooth height field over the unit
+/// lattice (sometimes jittered, sometimes with a row repeated), at a random scale from
+/// `1e-3` to `1e3`.
+fn ordered_grid(rng: &mut Rng, rows: u64, columns: u64) -> Vec<P3> {
+    let scale = 10f64.powi(rng.range_i64(-3, 3) as i32);
+    let amp = rng.uniform(0.0, 3.0);
+    let jitter = if rng.chance(0.5) { rng.uniform(0.0, 0.3) } else { 0.0 };
+    let repeat_row = rng.chance(0.08).then(|| rng.below(rows.max(1)));
+    let mut v = Vec::new();
+    for i in 0..rows {
+        let ii = if repeat_row == Some(i) && i > 0 { i - 1 } else { i };
+        for j in 0..columns {
+            let x = ii as f64 + jitter * rng.uniform(-1.0, 1.0);
+            let y = j as f64 + jitter * rng.uniform(-1.0, 1.0);
+            let z = amp * ((x * 0.6).sin() * (y * 0.4).cos());
+            v.push(p3([x * scale, y * scale, z * scale]));
+        }
+    }
+    v
+}
+
 fn gen_surface(rng: &mut Rng) -> Srf {
     if rng.chance(0.5) {
         let rows = 4 + rng.below(4);
@@ -597,6 +662,47 @@ fn gen_curve(rng: &mut Rng, lo: f64, hi: f64, z: f64) -> Crv {
     }
 }
 
+/// A case of the `ordered` stream: mostly an `SmApiCreateSurfaceFromOrderedPoints` call
+/// (grids of 0 to 10 rows and columns, fewer than 4 failing the fit, sometimes a point
+/// short), else an offset, drop or lift on an ordered-points surface.
+fn gen_ordered(rng: &mut Rng) -> In {
+    if rng.chance(0.3) {
+        let rows = 4 + rng.below(5);
+        let columns = 4 + rng.below(5);
+        let surface = Srf::Ordered {
+            rows,
+            columns,
+            points: ordered_grid(rng, rows, columns),
+        };
+        return match rng.below(3) {
+            0 => In::Offset {
+                surface,
+                distance: F(rng.uniform(-0.5, 0.5)),
+            },
+            1 => In::Drop {
+                curve: gen_curve(rng, 0.5, rows.min(columns) as f64 - 1.5, 2.0),
+                surface,
+                lift: rng.chance(0.7),
+            },
+            _ => In::Lift {
+                uv_curve: gen_curve(rng, 0.05, 0.95, 0.0),
+                surface,
+            },
+        };
+    }
+    let rows = if rng.chance(0.8) { 4 + rng.below(7) } else { rng.below(4) };
+    let columns = if rng.chance(0.8) { 4 + rng.below(7) } else { rng.below(4) };
+    let mut points = ordered_grid(rng, rows, columns);
+    if rng.chance(0.05) {
+        points.pop();
+    }
+    In::Ordered {
+        rows,
+        columns,
+        points,
+    }
+}
+
 fn gen_case(rng: &mut Rng) -> In {
     match rng.below(5) {
         0 => {
@@ -614,8 +720,8 @@ fn gen_case(rng: &mut Rng) -> In {
         }
         1 => match gen_surface(rng) {
             Srf::Corners { corners } => In::Corners { corners },
-            // (gen_surface makes no sphere face or torus)
-            Srf::Net { .. } | Srf::SphereFace { .. } | Srf::Torus { .. } => In::Corners {
+            // (gen_surface makes no sphere face, torus or ordered-points surface)
+            Srf::Net { .. } | Srf::SphereFace { .. } | Srf::Torus { .. } | Srf::Ordered { .. } => In::Corners {
                 corners: [
                     p3(rng.point3(-20.0, 20.0)),
                     p3(rng.point3(-20.0, 20.0)),
@@ -677,11 +783,25 @@ impl UnitDiff for Runner {
     }
 
     fn cases(&self, ctx: &CaseContext) -> Result<Vec<Case>, HarnessError> {
-        let ctx = CaseContext {
+        let gen_ctx = CaseContext {
             seeds: ctx.seeds.max(MIN_GENERATED),
             ..ctx.clone()
         };
-        default_cases(self, &ctx)
+        let mut v = default_cases(self, &gen_ctx)?;
+        // the ordered-points cases under their own names and seeds, so that each `gen`
+        // case stays the one the baseline has
+        let ordered_ctx = CaseContext {
+            seeds: ctx.seeds.max(MIN_GENERATED_ORDERED),
+            ..ctx.clone()
+        };
+        for mut c in ordered_ctx.generated_cases("primitive.api_surface_ops:ordered", |rng| {
+            serde_json::to_value(gen_ordered(rng)).ok()
+        }) {
+            c.unit = self.id().to_string();
+            c.name = c.name.replacen("gen", "ordered", 1);
+            v.push(c);
+        }
+        Ok(v)
     }
 
     fn run_cpp(&self, case: &Case) -> Result<Output, HarnessError> {
