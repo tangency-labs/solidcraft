@@ -140,6 +140,10 @@
 //!   the earlier [`SolidError::Unported`] deferral, and an `IsConnectedTo` target in another
 //!   B-rep is connected to nothing. `SmFace::IsConnectedTo` (`topology.face_p4`) and the
 //!   B-rep of `GetBrep` (a [`BrepId`] the handle hooks cannot name) are still unported.
+//! - **Opt-in (WR-537).** With `Kernel::fixes.seam_point_solutions_are_one`,
+//!   `ComputePointParameters` keeps the nearest of a face or surface solve's solutions
+//!   when they all evaluate to one point within the source zone tolerance (a point on a
+//!   closed face's seam; the fork's tangency-labs/smlib@577f7be).
 //! - **Not in this unit.** `GetLoop`, `GetSurfaceObject`, `GetVolumeObject`,
 //!   `operator==`, `AssertValid`, `Dump`, `Draw` and the RTTI of
 //!   `SmPointClassification` are unreachable from the in-scope entry points
@@ -1342,6 +1346,16 @@ impl<O: ClassObject> PointClassification<O> {
             // find point/face->surface intersection point to face->Tolerance
             let mut solutions =
                 access.global_point_solve(k, target, &uv_domain, point, self.src_zone_tol_3d)?;
+            // not upstream (WR-537, opt-in): solutions that are one point are one
+            if k.fixes.seam_point_solutions_are_one {
+                one_point(
+                    k,
+                    access.geometry(),
+                    target,
+                    &mut solutions,
+                    self.src_zone_tol_3d,
+                )?;
+            }
 
             // when a distinct solution was not found
             if solutions.len() != 1 {
@@ -1353,6 +1367,15 @@ impl<O: ClassObject> PointClassification<O> {
                     point,
                     zone_tol3d(k, self.src_zone_tol_3d * 100.0),
                 )?;
+                if k.fixes.seam_point_solutions_are_one {
+                    one_point(
+                        k,
+                        access.geometry(),
+                        target,
+                        &mut solutions,
+                        self.src_zone_tol_3d,
+                    )?;
+                }
 
                 // still no solutions - return an error
                 if solutions.len() != 1 {
@@ -2178,6 +2201,64 @@ fn fast_drop_good_point(status: Result<()>, pc: &PointClassification<EntityRef>)
 enum DropTarget<O> {
     Surface(O),
     Face(O),
+}
+
+/// Not upstream (WR-537, opt-in `Kernel::fixes.seam_point_solutions_are_one`; the fork's
+/// tangency-labs/smlib@577f7be): a point on the seam of a face that closes on itself (a
+/// whole cylinder's wall) has its parameters at both ends of the period, several
+/// solutions that are one point. When every solution evaluates within `tol` of the
+/// first's point, only the nearest (the first of the smallest solution values) is
+/// kept; a failed evaluation keeps them all.
+///
+/// # Errors
+///
+/// [`SolidError::Unported`] from the evaluations; [`SolidError::InvalidInput`] for an
+/// object that does not resolve to a surface or face with a surface.
+fn one_point<O: ClassObject>(
+    k: &Kernel,
+    geometry: &impl ClassGeometry<O>,
+    target: DropTarget<O>,
+    solutions: &mut Vec<SolutionEnd>,
+    tol: f64,
+) -> Result<()> {
+    if solutions.len() < 2 {
+        return Ok(());
+    }
+    let surface = match target {
+        DropTarget::Surface(o) => geometry.surface(o).ok_or_else(|| unresolved(OP_COMPUTE))?,
+        DropTarget::Face(o) => {
+            let (b, f) = topology_face(geometry, o, OP_COMPUTE)?;
+            face::p2::surface(b, f)?.ok_or_else(|| null_object(OP_COMPUTE))?
+        }
+    };
+    let evaluate = |sol: &SolutionEnd| -> Result<Option<Point3>> {
+        let uv = Point2::new(sol.param(0)?, sol.param(1)?);
+        match surface.evaluate_point(k, uv) {
+            Ok(p) => Ok(Some(p)),
+            Err(e) if e.is_unported() => Err(e),
+            Err(_) => Ok(None),
+        }
+    };
+    let Some(first) = solutions.first() else {
+        return Ok(());
+    };
+    let Some(first_point) = evaluate(first)? else {
+        return Ok(());
+    };
+    let mut best = *first;
+    for sol in solutions.iter().skip(1) {
+        match evaluate(sol)? {
+            Some(p) if p.distance(first_point) > tol => return Ok(()),
+            Some(_) => {}
+            None => return Ok(()),
+        }
+        if sol.solution_value < best.solution_value {
+            best = *sol;
+        }
+    }
+    solutions.clear();
+    solutions.push(best);
+    Ok(())
 }
 
 /// How `ComputePointParameters` reaches its objects: the geometry, and the point solve

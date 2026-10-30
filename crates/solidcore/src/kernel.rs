@@ -283,6 +283,8 @@ pub struct UpstreamFixes {
     pub boolean_cleanup_removes_slits: bool,
     /// `SmFace::CurveOnClassify` classifies an interval whose two ends lie on one face edge (or its vertices) and whose midpoint is within the intersection tolerance of it as on that edge (the fork's `ClassifyEdgeInterval`, WR-305, #1057).
     pub classify_edge_interval: bool,
+    /// `SmPointClassification::ComputePointParameters` takes the nearest of a face's (or surface's) point-solve solutions when they all evaluate to the same point within the source zone tolerance: a point on the seam of a face that closes on itself has its parameters at both ends of the period, and upstream, finding no single solution, drops the classification to `SM_PC_UNKNOWN` (a boolean of a hole and a pin a hair off its axis then fails in `Homogenize`) (WR-537; the fork's tangency-labs/smlib@577f7be).
+    pub seam_point_solutions_are_one: bool,
     /// `sm_GetEllipseTrimIntervals` evaluates the two seam lines on the cone's whole height (only their sweep from the given domain), as the end circles and the classification are, so a face trimmed along its axis keeps an ellipse whose only seam crossing lies in its trimmed-off part (WR-490, #871; the SolidCraft fork's fix; `plan/upstream-issues/WR-490--ellipse-trim-seam-lines-on-trimmed-domain.md`).
     pub ellipse_trim_seam_lines_span_cone_height: bool,
     /// `SmProtoEdge::Resolve` treats a proto edge from a proto vertex back to itself whose ends find one vertex definition as degenerate below twice the proto vertex's containment radius, and `ImprintIntersections` fits that vertex to its edges (WR-306, #1058).
