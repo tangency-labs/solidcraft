@@ -1,0 +1,24 @@
+{
+ "sources": [],
+ "what": "both rims of a hole through a plate chamfered 1 in one chamfer",
+ "source": "analytic",
+ "method": "plate 40x40x10 with a through hole R5 at (20, 20): V0 = 16000 - 250 pi = 15214.6018. Each rim's chamfer removes 2 pi (5 + 1/3) 0.5 = 16.7552 (every-hole-top-rim-chamfer-1): V = 15181.0915. Faces 9.",
+ "body_count": 1,
+ "volume_mm3": 15181.09151496426,
+ "faces": 9,
+ "bbox": {
+  "min": [
+   0,
+   0,
+   0
+  ],
+  "max": [
+   40,
+   40,
+   10
+  ]
+ },
+ "continuity": {
+  "order": "g0"
+ }
+}

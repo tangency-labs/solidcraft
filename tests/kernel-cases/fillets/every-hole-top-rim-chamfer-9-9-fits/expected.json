@@ -1,0 +1,24 @@
+{
+ "sources": [],
+ "what": "the top rim of a hole through a 10 mm plate chamfered 9.9: its leg down the hole's wall stops 0.1 short of the bottom, so it fits",
+ "source": "analytic",
+ "method": "plate 40x40x10 with a through hole R5 at (20, 20): V0 = 16000 - 250 pi = 15214.6018. The chamfer's legs are 9.9 along the top face (to rho = 14.9, inside the plate's 20 to its sides) and 9.9 down the wall (0.1 of wall left): the triangle 9.9^2/2 at centroid rho = 5 + 3.3, revolved once: 2555.6322. V = 12658.9696. Faces 8.",
+ "body_count": 1,
+ "volume_mm3": 12658.969619982365,
+ "faces": 8,
+ "bbox": {
+  "min": [
+   0,
+   0,
+   0
+  ],
+  "max": [
+   40,
+   40,
+   10
+  ]
+ },
+ "continuity": {
+  "order": "g0"
+ }
+}

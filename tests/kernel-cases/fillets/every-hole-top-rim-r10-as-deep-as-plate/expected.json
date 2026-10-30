@@ -1,0 +1,24 @@
+{
+ "sources": [],
+ "what": "the top rim of a hole through a 10 mm plate rounded r10: the round uses up the hole's wall and meets the bottom face at the bottom rim",
+ "source": "analytic",
+ "method": "plate 40x40x10 with a through hole R5 at (20, 20): V0 = 16000 - 250 pi = 15214.6018. The r10 round is tangent to the wall at z = 0, its bottom rim, and to the top at rho = 15 (inside the plate's 20): the wall is used up. It removes the spandrel (1-pi/4) 100 = 21.460184, first moment 1000 (5/6-pi/4) = 47.935170 outside rho = 5, revolved once: 2 pi (5 A + M) = 975.3771. V = 14239.2247. Faces 6 + round = 7.",
+ "body_count": 1,
+ "volume_mm3": 14239.224727846788,
+ "faces": 7,
+ "bbox": {
+  "min": [
+   0,
+   0,
+   0
+  ],
+  "max": [
+   40,
+   40,
+   10
+  ]
+ },
+ "continuity": {
+  "order": "g1"
+ }
+}

@@ -7,6 +7,8 @@
 5158-fillet-round-just-past-a-10mm-face SMLib status 1001: a convex round 0.01 past its face is not yet built by subtraction (10.0001-10.04 open)
 9-fillet-corner-curvature-with-reduce-fit not supported yet: solid.fillet builds corner g2 with the exact fit only
 9-fillet-corner-curvature-with-taper-fit not supported yet: solid.fillet builds corner g2 with the exact fit only
+every-hole-top-rim-chamfer-10-full-depth-refused the full-width chamfer (leg as deep as the 10 mm plate) builds instead of being refused
+every-hole-top-rim-r12-past-plate-bottom SMLib status 1001: a convex round past its face on the tangent side is not yet built by subtraction
 every-pocket-floor-and-rim-edges-r2 a corner patch where two rim rounds meet at each concave pocket corner (23 faces, not 19) instead of the mitre the rounds make running into each other
 every-pocket-rim-edges-r2 a corner patch where two rim rounds meet at each concave pocket corner (19 faces, not 15) instead of the mitre the rounds make running into each other
 every-pocket-rim-edges-r5-as-deep-as-pocket a corner patch where two rim rounds meet at each concave pocket corner (15 faces, not 11) instead of the mitre the rounds make running into each other
