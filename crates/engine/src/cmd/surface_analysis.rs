@@ -678,6 +678,45 @@ mod tests {
         }
     }
 
+    /// The status item shows the section's planes on show: every plane hidden (or undone away)
+    /// gives up its slot, and the section shown again comes after what was turned on meanwhile.
+    #[test]
+    fn status_items_section_slot_follows_the_planes_on_show() {
+        use crate::status_items::StatusId::{Section, SurfaceAnalysis};
+        let ids = |s: &mut Session| status(s).iter().map(|item| item.id).collect::<Vec<_>>();
+        let mut s = Session::default();
+        s.execute("inspect.section", &json!({"plane": "XY"})).unwrap();
+        s.execute("inspect.section", &json!({"plane": "XZ", "add": true})).unwrap();
+        s.execute("inspect.section", &json!({"hide": 1})).unwrap();
+        let shown = status(&mut s);
+        assert!(
+            matches!(&shown[..], [item] if item.setting == crate::status_items::StatusSetting::Section { origin_mm: s.section[0].origin.into(), normal: s.section[0].normal.into(), hatch: true })
+        );
+        s.execute("inspect.section", &json!({"hide": 2})).unwrap();
+        assert_eq!(ids(&mut s), vec![], "every plane hidden: no section on show");
+        s.execute("inspect.zebra", &json!({})).unwrap();
+        s.execute("inspect.section", &json!({"show": [1, 2]})).unwrap();
+        assert_eq!(ids(&mut s), vec![SurfaceAnalysis, Section]);
+        // The Analysis folder's eye: hidden, no section on show; shown, or a plane added, it is back.
+        s.execute("inspect.section", &json!({"folder": false})).unwrap();
+        assert_eq!(ids(&mut s), vec![SurfaceAnalysis], "the folder hidden: no section on show");
+        s.execute("inspect.section", &json!({"folder": true})).unwrap();
+        assert_eq!(ids(&mut s), vec![SurfaceAnalysis, Section]);
+        s.execute("inspect.section", &json!({"folder": false})).unwrap();
+        s.execute("inspect.section", &json!({"plane": "YZ", "add": true})).unwrap();
+        assert_eq!(ids(&mut s), vec![SurfaceAnalysis, Section], "a plane added shows the folder again");
+        s.execute("edit.undo", &json!({})).unwrap();
+        assert_eq!(ids(&mut s), vec![SurfaceAnalysis], "undone to the folder hidden");
+
+        let mut s = Session::default();
+        s.execute("inspect.section", &json!({"plane": "XY"})).unwrap();
+        s.execute("edit.undo", &json!({})).unwrap();
+        assert!(s.section.is_empty() && ids(&mut s).is_empty());
+        s.execute("inspect.zebra", &json!({})).unwrap();
+        s.execute("edit.redo", &json!({})).unwrap();
+        assert_eq!(ids(&mut s), vec![SurfaceAnalysis, Section], "redone after Zebra, it comes after it");
+    }
+
     #[test]
     fn status_items_continuity_shares_the_analysis_slot_and_failures_keep_effects() {
         use crate::status_items::{StatusId, StatusSetting};
