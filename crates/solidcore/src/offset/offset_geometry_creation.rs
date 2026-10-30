@@ -372,6 +372,13 @@ pub trait OffsetExecutive<O> {
     /// `GetOffsetEdgeuse`: the offset edge use related to `original`, only when exactly
     /// one is (`m_vEUToEU` is a many-to-many `SmRelation`; none or several give `None`).
     fn offset_edgeuse(&self, original: O) -> Option<O>;
+    /// Not upstream (WR-344 refinement, tangency-labs/solidcore#1795): `EdgeuseOffset`
+    /// could not mate the offsets of `original`'s edge (`MateEdges` failed, which upstream
+    /// only reports), so the merge must still intersect them; called only with
+    /// `Kernel::fixes.offset_extended_edges_mated`. The default ignores it.
+    fn note_unmated_edgeuse(&mut self, original: O) {
+        let _ = original;
+    }
     /// `GetCreateExtendedSurface(pBase, rUVDomainOfOffset, rpExtSurface)`: the extension
     /// of `base` cached by the executive (`m_vSurfExtSurf`), created on a miss by
     /// extending `base` by five offset distances
@@ -4039,7 +4046,7 @@ impl OffsetGeometryCreation {
             }
 
             // Mate a couple of edges by extension and intersection (a problem is only reported).
-            let _ = ignore_soft(self.mate_edges(
+            let mated = ignore_soft(self.mate_edges(
                 k,
                 brep,
                 executive,
@@ -4049,6 +4056,11 @@ impl OffsetGeometryCreation {
                 other_offset_edgeuse,
                 mark,
             ))?;
+            // Not upstream (WR-344 refinement, #1795): the merge must still intersect the
+            // offsets of an edge that could not be mated
+            if mated.is_none() && k.fixes.offset_extended_edges_mated {
+                executive.note_unmated_edgeuse(original_edgeuse);
+            }
             return Ok(out);
         } // end when extending convex edges
 

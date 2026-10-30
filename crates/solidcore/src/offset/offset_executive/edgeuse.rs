@@ -1218,6 +1218,12 @@ impl CreatorExecutive<Handle> for Executive<'_> {
         }
     }
 
+    fn note_unmated_edgeuse(&mut self, original: Handle) {
+        if let Object::Topology(Arena::Original, EntityRef::Edgeuse(u)) = original.object {
+            self.inner.unmated_edgeuses.insert(u);
+        }
+    }
+
     fn get_create_extended_surface<B: OffsetBrep<Handle>>(
         &mut self,
         k: &Kernel,
