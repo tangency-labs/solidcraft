@@ -1584,10 +1584,17 @@ mod tests {
             let off = edges_off_surface(&full);
             assert!(off <= super::face_tolerance(&open), "an edge is {off} off the crowned face");
             mesh_is_clean(&full);
-            // The middle of the loop's box moved by crown × its diagonal (the bump is 1 there).
+            // The middle of the fill's box moved by crown × its diagonal (the bump is 1 there).
             let (ra, rb) = (record(&plain), record(&full));
             let (a, b) = (SurfaceEval::new(ra.faces[0].parameters()).unwrap(), SurfaceEval::new(rb.faces[0].parameters()).unwrap());
-            let [[bu0, bu1], [bv0, bv1]] = ra.faces[0].domain;
+            // The height field's box is its surface's whole domain (the loop's box and 1% more
+            // each way, where the bubble is nought), not the face's: SMLib holds a face's domain
+            // as its loop's extent, 2% less across.
+            let (b::Surface::Spline { u_knots, v_knots, .. } | b::Surface::RationalSpline { u_knots, v_knots, .. }) = ra.faces[0].parameters() else {
+                panic!("a height field is a spline")
+            };
+            let ends = |k: &[f64]| [k[0], k[k.len() - 1]];
+            let ([bu0, bu1], [bv0, bv1]) = (ends(u_knots), ends(v_knots));
             let (uc, vc) = ((bu0 + bu1) / 2.0, (bv0 + bv1) / 2.0);
             let size = (bu1 - bu0).hypot(bv1 - bv0);
             let bump = a.point([uc, vc]).unwrap().dist(b.point([uc, vc]).unwrap());
