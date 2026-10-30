@@ -97,7 +97,7 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
         ui.horizontal_wrapped(|ui| {
             ui.spacing_mut().item_spacing.x = t.space_8;
             for (index, (mode, label)) in
-                [(OrbitAround::Origin, "Origin"), (OrbitAround::ViewCentre, "View centre"), (OrbitAround::Cursor, "prefs.under_cursor")]
+                [(OrbitAround::Origin, "Origin"), (OrbitAround::ViewCentre, "View center"), (OrbitAround::Cursor, "prefs.under_cursor")]
                     .into_iter()
                     .enumerate()
             {

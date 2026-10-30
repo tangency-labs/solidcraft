@@ -147,7 +147,7 @@ fn optional_field_keeps_empty_default_and_options_use_two_columns() {
 /// really is too narrow.
 #[test]
 fn segments_stay_segments_when_a_scrollbar_appears_and_disappears() {
-    let options = ["Origin", "View centre", "Point under the cursor"];
+    let options = ["Origin", "View center", "Point under the cursor"];
     let solid = egui::style::ScrollStyle::solid();
     let scrollbar = solid.allocated_width();
     assert!(scrollbar > 0.0);

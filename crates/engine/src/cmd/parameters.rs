@@ -35,7 +35,7 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("parameters.delete", "Delete Parameter", delete)
         .icon("delete")
         .params("name (refused while something uses it; the error lists the users)"),
-    CommandSpec::new("parameters.favorite", "Favourite Parameter", favorite).icon("star").params("name, favorite?: bool (default true)"),
+    CommandSpec::new("parameters.favorite", "Favorite Parameter", favorite).icon("star").params("name, favorite?: bool (default true)"),
     CommandSpec::new("parameters.move", "Move Parameter", move_param)
         .icon("reorder")
         .params("name, before | after: another user parameter; the user parameter is listed just before or after it"),

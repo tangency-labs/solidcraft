@@ -123,7 +123,7 @@ const ELEMENTS: &[Element] = &[
             });
             navigation_tile(ui, "grid", "Grid", "style", false);
             row(ui, "Position", |ui| {
-                segmented(ui, &mut state.selected, &["Left", "Centre", "Right"], Default::default());
+                segmented(ui, &mut state.selected, &["Left", "Center", "Right"], Default::default());
             });
             checkbox(ui, "Show navigation bar", &mut state.checked);
             button(ui, "Reset to default", Button::Normal);
@@ -271,7 +271,7 @@ const ELEMENTS: &[Element] = &[
         let actions = [
             StageAction { icon: Some("chain"), label: "Appearance Chain", enabled: true, primary: false, reason: None },
             StageAction { icon: Some("reorder"), label: "Replace All", enabled: true, primary: false, reason: None },
-            StageAction { icon: Some("star"), label: "Favourite Look", enabled: true, primary: true, reason: None },
+            StageAction { icon: Some("star"), label: "Favorite Look", enabled: true, primary: true, reason: None },
             StageAction { icon: Some("suppress"), label: "Hide", enabled: true, primary: false, reason: None },
         ];
         selection_actions(ui, "Boss", &actions);
@@ -695,7 +695,7 @@ const ELEMENTS: &[Element] = &[
         });
     }),
     element!("file_action", |ui, _| {
-        FileView::action_tile(ui, "gallery:file:new", ui.available_width(), "new", "New design", "Millimetres · opens in Design", true);
+        FileView::action_tile(ui, "gallery:file:new", ui.available_width(), "new", "New design", "Millimeters · opens in Design", true);
     }),
     element!("file_recovery_banner", |ui, _| {
         FileView::recovery_banner(

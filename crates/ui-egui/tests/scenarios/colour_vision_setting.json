@@ -5,7 +5,7 @@
   {"widget": "Interface"},
   {"call": "ui.scroll", "params": {"x": 1000, "y": 500, "delta": -5000}},
   {"call": "ui.inspect", "params": {}},
-  {"expect": {"shown": "Colour vision", "prefs": {"dialog": "Interface"}, "same_width": "prefs:window"}},
+  {"expect": {"shown": "Color vision", "prefs": {"dialog": "Interface"}, "same_width": "prefs:window"}},
   {"widget": "Deutan"},
   {"expect": {"prefs": {"color_vision": "deutan"}, "same_width": "prefs:window"}},
   {"widget": "Cancel"},

@@ -77,7 +77,7 @@ fn measurement_axis_distances_follow_the_upstream_centre_min_and_max_choices() {
     assert!(measured["distance_mm"].as_f64().unwrap() < 50. && measured["max"].as_f64().unwrap() > 50.);
 
     for (label, distance, from, to) in [
-        ("Centre to centre", "center_distance", "center_from", "center_to"),
+        ("Center to center", "center_distance", "center_from", "center_to"),
         ("Min", "distance_mm", "from", "to"),
         ("Max", "max", "max_from", "max_to"),
     ] {

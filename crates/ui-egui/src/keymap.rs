@@ -574,7 +574,7 @@ pub fn page(app: &mut SolveApp, ui: &mut egui::Ui) {
                     label: app.tr_label("Export…"),
                     icon: Some("export_tray"),
                     visible: true,
-                    tooltip: Some(app.tr_label("Keys, S box favourites and the toolbar, as a file")),
+                    tooltip: Some(app.tr_label("Keys, S box favorites and the toolbar, as a file")),
                 },
             ];
             let (filter, toolbar_action) = ui_kit::search_actions_row(

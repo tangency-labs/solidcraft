@@ -497,6 +497,6 @@ reports a different name (`EdgeFlangeFeature`), so a script can't match one agai
 
 ## Open questions for the maintainer
 
-- **British or American spelling** for labels and docs. Today both are in use (colour and color,
-  centre and center, favourite and favorite); ids and keys use American spelling. #2501 proposes
-  an English (UK) language option, so either base spelling can be read in the other.
+- **British or American spelling** in the docs. The labels are settled: `en.json` is American
+  English, and English (UK) (`en-GB.json`, #2501) holds the British spelling. The docs still use
+  both (colour and color, centre and center); ids and keys use American spelling.
