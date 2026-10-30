@@ -1786,7 +1786,10 @@ fn fillet_edges_meeting_at_the_front_corner_of_the_arc() {
 }
 
 /// The long top front edge rounded, then the small front-left upright as a fillet of its own
-/// (as in the app): the new round ends in the earlier one, taking off what both take together.
+/// (as in the app). The upright's tangent chain (the Fillet default, since 84bd2daad) runs on
+/// through the first round's end, the quarter circle on the left face, to the top-left edge, so
+/// the second fillet rounds the upright and the top-left edge: it takes off what the three edges
+/// take together.
 #[test]
 fn fillet_the_long_edge_then_the_small_left_edge() {
     let mut s = knife_edge_part();
@@ -1795,7 +1798,7 @@ fn fillet_the_long_edge_then_the_small_left_edge() {
     run(&mut s, "solid.fillet", json!({"edges": [[0.0, -21.0, 5.0]], "radius": 2}));
     let one_by_one = before - planned(&s);
     let mut s = knife_edge_part();
-    run(&mut s, "solid.fillet", json!({"edges": [[20.0, -21.0, 10.0], [0.0, -21.0, 5.0]], "radius": 2}));
+    run(&mut s, "solid.fillet", json!({"edges": [[20.0, -21.0, 10.0], [0.0, -21.0, 5.0], [0.0, -10.0, 10.0]], "radius": 2}));
     let together = before - planned(&s);
     // Within the display meshes' accuracy (the two are built of different faces).
     assert!(rel(one_by_one, together) < 2e-4, "one by one {one_by_one} vs together {together}");
