@@ -57,6 +57,7 @@ thread_local! {
 }
 
 /// The face the arrow stopped at in the last frame drawn, if any.
+#[cfg(test)]
 pub fn current() -> Option<Stop> {
     CURRENT.with(|c| c.borrow().clone())
 }
@@ -79,7 +80,7 @@ fn flat_faces_of(body: &str, m: &Mesh) -> Vec<FlatFace> {
             by_face.resize_with(f + 1, || (Vec3::ZERO, Vec::new()));
         }
         let Some((n, pts)) = by_face.get_mut(f) else { continue };
-        *n = *n + (b - a).cross(c - a);
+        *n += (b - a).cross(c - a);
         if pts.len() + 3 <= MAX_POINTS {
             pts.extend([a, b, c]);
         }
