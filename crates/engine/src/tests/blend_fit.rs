@@ -44,3 +44,45 @@ fn chamfer_that_fits_still_builds() {
         assert!((volume(&mut s) - want).abs() < 1e-6, "{d} mm: {} (want {want})", volume(&mut s));
     }
 }
+
+/// Edges of the part as written to STL that are not shared by exactly two triangles (keyed by
+/// their exact f32 ends, as #784's test does): none when the part is closed.
+fn open_edges(s: &Session) -> usize {
+    let state = s.model.state();
+    let name = state.bodies[0].name.clone();
+    let bytes = solidcraft_io::export(&state, std::slice::from_ref(&name), solidcraft_io::Format::StlBinary, &name).unwrap();
+    let mut edges = std::collections::HashMap::new();
+    for t in &solidcraft_io::read_stl(&bytes).unwrap() {
+        for (a, b) in [(t[0], t[1]), (t[1], t[2]), (t[2], t[0])] {
+            let (a, b) = (a.map(f32::to_bits), b.map(f32::to_bits));
+            *edges.entry(if a < b { (a, b) } else { (b, a) }).or_insert(0) += 1;
+        }
+    }
+    edges.values().filter(|n| **n != 2).count()
+}
+/// A T: a 100 × 20 × 15 bar on a pin. A chamfer on the bar's bottom long edge that reaches past
+/// the pin's side used to leave the part open where it met the pin (the pin's top under the
+/// chamfer had no face), and larger ones were refused. Each now takes away exactly the chamfer's
+/// triangle along the bar, keeps the pin whole, and leaves the part closed. (At 4 mm on the 8 mm
+/// pin it still leaves one seam on the pin doubled, though its volume is right.)
+#[test]
+fn a_chamfer_past_a_joined_pin_keeps_the_pin_and_the_part_closed() {
+    for (radius, sizes) in [(8.0, vec![2.5, 3.0, 5.0]), (6.0, vec![3.0, 5.0])] {
+        let mut s = Session::default();
+        run(&mut s, "solid.cylinder", json!({"radius": radius, "height": 30}));
+        run(
+            &mut s,
+            "solid.box",
+            json!({"length": 100, "width": 20, "height": 15, "corner": [-50, -10, 30], "operation": "join", "targets": ["Body1"]}),
+        );
+        let before = volume(&mut s);
+        for d in sizes {
+            run(&mut s, "solid.chamfer", json!({"edges": [[-30, -10, 30]], "distance": d}));
+            let want = before - 0.5 * d * d * 100.0;
+            // The pin is faceted where the chamfer crosses it, so allow a little.
+            assert!((volume(&mut s) - want).abs() < 0.5, "pin r{radius}, {d} mm: {} (want {want})", volume(&mut s));
+            assert_eq!(open_edges(&s), 0, "pin r{radius}, {d} mm: the part is closed");
+            run(&mut s, "edit.undo", json!({}));
+        }
+    }
+}
