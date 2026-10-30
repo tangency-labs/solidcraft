@@ -482,6 +482,9 @@ fn shell_planar(b: &Body, open: &[Vec3], thickness: f64) -> Result<Body> {
     if opened.is_empty() {
         return Err(KernelError::Invalid("select at least one face to remove".into()));
     }
+    // A cone or cylinder stored in seam halves: opening one half without the other moves them
+    // opposite ways and the rim corners miss (#6210). Take every piece of each opened surface.
+    let opened = crate::offset::with_same_surface(&healed, &opened);
     // A successful Boolean is not evidence that a tangential rim has wall thickness.
     // Refuse only when the entire planar opening loses its rim. A single collapsed
     // round can still end in a valid sharp edge (the tutorial plate, for example).

@@ -63,3 +63,20 @@ fn offset_torus_face() {
     let v = volume(&mut s);
     assert!((v - 2.0 * PI * PI * 20.0 * 36.0).abs() < 1e-3 * v, "{v}");
 }
+
+/// #6210: shelling a truncated cone by its conical wall (one seam half) must open the whole
+/// side — opening only one half used to fail with "a corner whose faces don't meet".
+#[test]
+fn shell_truncated_cone_by_its_side() {
+    use std::f64::consts::PI;
+    let mut s = Session::default();
+    // 80 mm base diameter, 40 mm top, 80 mm tall (the report's frustum).
+    run(&mut s, "solid.cone", json!({"radius": 40, "top_radius": 20, "height": 80, "body_name": "Cup"}));
+    let before = volume(&mut s);
+    let solid = PI * 80.0 / 3.0 * (40.0 * 40.0 + 40.0 * 20.0 + 20.0 * 20.0);
+    assert!((before - solid).abs() < 1e-3 * solid, "{before} vs {solid}");
+    run(&mut s, "solid.shell", json!({"body": "Cup", "faces": [[30.0, 0.0, 40.0]], "thickness": 2, "tangent_chain": false}));
+    let vol = volume(&mut s);
+    assert!(vol > 0.0 && vol < before * 0.5, "side-open shell should hollow the frustum: {vol} of {before}");
+}
+
