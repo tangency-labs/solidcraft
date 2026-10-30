@@ -1,5 +1,13 @@
-//! Wire/shell-vertex boolean stage on identical raw input topology. Construction
-//! uses the shared real-B-rep fixture builder; no C++ merge results enter Rust.
+//! Wire/shell-vertex boolean stage on identical raw input topology. The C++ side builds
+//! each operand with the shared real-B-rep fixture builder (`sc_merge_fixture.h`
+//! `operand`). The Rust side builds the same operand itself ([`own_operand`]): an
+//! `.smb` file read by the Rust reader, a wire, face or network built by the Rust
+//! kernel ([`crate::own_builder`]), an isolated shell vertex (`make_shell_vertex`) or
+//! an empty B-rep. Each is renumbered into the shim's `native_graph` order
+//! ([`crate::own_builder::renumber_native`]: the edge and vertex lists, then the walk),
+//! so the mark and mate selectors name the same edges and vertices. Nothing of the shim's
+//! export reaches the Rust side: its record counts, vertex use lists and geometry are
+//! its own.
 use super::boolean_merge_p1::Canon;
 use super::topology_vertexuse::{self as shared, BrepIn};
 use crate::{Case, HarnessError, Output, Rng, UnitDiff};
@@ -16,7 +24,7 @@ use solidcore::geom::object::ObjectRef;
 use solidcore::kernel::Kernel;
 use solidcore::topology::topology::Topology;
 use solidcore::topology::topology_traverser::{Entity, Marks};
-use solidcore::topology::{edge, vertex, vertexuse, Brep, EdgeId, VertexId, VertexuseId};
+use solidcore::topology::{edge, vertex, vertexuse, Brep, EdgeId};
 use solidcore_ffi::units::boolean_merge_p5::{self as ffi, Operand, Request};
 
 /// Differential runner for `SmMerge::ProcessWiresAndShellVertices`.
@@ -114,19 +122,86 @@ fn mapping(i: &Inputs, a: [usize; 10], b: [usize; 10]) -> Vec<i64> {
             .collect()
     })
 }
-pub(crate) fn import(
-    f: &solidcore_ffi::units::topology_topology_traverser::Fixture,
-) -> Result<Brep, HarnessError> {
-    let (mut b, _) = shared::import(&f.graph)?;
-    // (the B-rep cache of Point3DClassify's boundary solve reads geometry owners)
-    crate::util::own_arena_geometry(&mut b);
-    for (i, list) in f.vertexuses.iter().enumerate() {
-        b.vertex_mut(VertexId::from_index(i as u32))
-            .map_err(|e| err(&e))?
-            .vertexuses = list.iter().map(|&j| VertexuseId::from_index(j)).collect();
-    }
-    Ok(b)
+/// The conventions of the operands' build and of their renumbering into the shim's
+/// `native_graph` order ([`crate::own_builder::renumber_native`]): geometry the build
+/// owned keeps its owner, renamed to the arena identities; nothing gains an owner.
+const NATIVE_GRAPH: crate::own_builder::Conventions<'static> =
+    crate::own_builder::Conventions::EDGEUSE_GRAPH;
+
+/// The Rust side's own B-rep of operand `s`, as the shim's `operand`
+/// (`sc_merge_fixture.h`) builds it: `[5]` an empty `SmBrep`, `[4, x, y, z]`
+/// `MakeShellVertex` on its infinite region, otherwise the shared `build` (an `.smb`
+/// file read by the Rust reader, a wire, face or network built by the Rust kernel; no
+/// `m_bValidateOnly`, no gap walk), renumbered into the shim's `native_graph` order
+/// (`GetEdges`, `GetVertices`, then `walk`: [`crate::own_builder::renumber_native`]).
+/// The owners are the Rust build's own (geometry it left unowned stays unowned), named
+/// and recorded under the arena scheme
+/// (`Brep::use_arena_naming`), which the B-rep cache of `Point3DClassify`'s boundary
+/// solve reads. No C++ state is read.
+///
+/// The error is the Rust build's failure (the shim's `operand` returns NULL or a
+/// non-success status, which its caller rejects).
+///
+/// # Errors
+///
+/// A harness error when the file cannot be opened, a non-file source is not built, or
+/// the renumbering finds a dangling reference.
+pub(crate) fn own_operand(
+    k: &mut Kernel,
+    s: &Spec,
+) -> Result<Result<Brep, solidcore::SolidError>, HarnessError> {
+    use crate::own_builder::{build_as, finish, in_new_brep, read_as, Built};
+    let built = match s {
+        Spec::Empty => {
+            let raw = in_new_brep(k, |_, _| Ok(()))?;
+            finish(k, raw, false, false, &NATIVE_GRAPH)?
+        }
+        Spec::Vertex { point } => {
+            let p = solidcore::geom::vector3d::Vec3::new(point[0], point[1], point[2]);
+            let raw = in_new_brep(k, |_, b| {
+                let region = b.infinite_region();
+                let mut state = solidcore::topology::brep::p2::ArenaNotifyState::new(b);
+                let mut env = state.env(None);
+                solidcore::topology::brep::p9::make_shell_vertex(b, region, p, &mut env)
+                    .map(|_| ())
+            })?;
+            finish(k, raw, false, false, &NATIVE_GRAPH)?
+        }
+        Spec::Graph { brep } => match brep {
+            BrepIn::File { rebuild, .. } => {
+                read_as(k, &shared::path_of(brep)?, *rebuild, false, false, &NATIVE_GRAPH)?
+            }
+            _ => build_as(k, brep, false, false, &NATIVE_GRAPH)?
+                .ok_or_else(|| err("own builder: a non-file source was not built"))?,
+        },
+    };
+    Ok(match built {
+        Built::Brep(b) => {
+            // the shim's `native_graph` numbering (the edge and vertex lists first)
+            let mut b = crate::own_builder::renumber_native(&b, &NATIVE_GRAPH)?;
+            // record the arena naming of the owners the build gave (no owner is added)
+            b.use_arena_naming().map_err(|e| err(&e))?;
+            Ok(b)
+        }
+        Built::Failed(e) => Err(e),
+    })
 }
+
+/// [`own_operand`] for the runner: a failed build defers on an unported callee, any
+/// other failure is a harness error (the shim's caller rejects the operand).
+pub(crate) fn own_operand_or_output(
+    k: &mut Kernel,
+    s: &Spec,
+) -> Result<Result<Brep, Output>, HarnessError> {
+    match own_operand(k, s)? {
+        Ok(b) => Ok(Ok(b)),
+        Err(e) => match Output::unported(&e) {
+            Some(o) => Ok(Err(o)),
+            None => Err(err(&format!("Rust operand build failed: {e}"))),
+        },
+    }
+}
+
 fn seed(
     k: &Kernel,
     b: &Brep,
@@ -328,22 +403,23 @@ impl UnitDiff for Runner {
     }
     fn run_rust(&self, case: &Case) -> Result<Output, HarnessError> {
         let i: Inputs = case.parse()?;
-        let a = program(&i.primary)?;
-        let b = program(&i.other)?;
-        let aa = ffi::export(operand(&a)).map_err(|e| err(&e))?;
-        let bb = ffi::export(operand(&b)).map_err(|e| err(&e))?;
-        let ac = solidcore_ffi::units::topology_vertexuse::counts(&aa.graph)
-            .ok_or_else(|| err("primary graph"))?;
-        let bc = solidcore_ffi::units::topology_vertexuse::counts(&bb.graph)
-            .ok_or_else(|| err("other graph"))?;
+        // both operands built by the Rust side itself, in the shim's order
+        let mut k = Kernel::default();
+        let mut a = match own_operand_or_output(&mut k, &i.primary)? {
+            Ok(b) => b,
+            Err(o) => return Ok(o),
+        };
+        let mut b = match own_operand_or_output(&mut k, &i.other)? {
+            Ok(b) => b,
+            Err(o) => return Ok(o),
+        };
+        let ac = crate::own_builder::counts(&a);
+        let bc = crate::own_builder::counts(&b);
         let edge_mates = mapping(&i, ac, bc);
         ffi::validate_mates(&edge_mates, ac[7], bc[7]).map_err(|e| err(&e))?;
-        let mut a = import(&aa)?;
-        let mut b = import(&bb)?;
         // the shim's caller state: editing on for both B-reps (SmMerge.cpp:2645-2646)
         a.set_editing_enabled(true);
         b.set_editing_enabled(true);
-        let mut k = Kernel::default();
         let la = MarkLock::new(std::slice::from_mut(&mut k.context), 0, i.marks[0])
             .map_err(|e| err(&e))?;
         let lb = if i.marks[0] == i.marks[1] {

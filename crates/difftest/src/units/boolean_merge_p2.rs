@@ -3,9 +3,11 @@
 //! topology. C++: `solidcore_ffi::units::boolean_merge_p2`. Rust:
 //! `solidcore::boolean::merge::p2`.
 //!
-//! Operands are built by the shared real-B-rep fixture builder of `boolean.merge_p5`
-//! and imported into Rust as raw arena records before either side runs; the fixture's
-//! mates are established on both sides with `Relate` (edges, vertices, faces). Outputs
+//! Operands are built on each side by its own kernel: the C++ by the shared real-B-rep
+//! fixture builder of `boolean.merge_p5`'s shim, the Rust by the Rust kernel
+//! ([`p5::own_operand`], in the shim's native order); no C++ export reaches the Rust
+//! side. The fixture's mates are established on both sides with `Relate` (edges,
+//! vertices, faces), the default by-index mates from each side's own counts. Outputs
 //! are the request's results followed by snapshots of the operands, as `merge_p5`'s.
 //! `MergeAddedTopology` runs on the Rust side through the intersector runner's
 //! two-B-rep adapter (`Two`), which implements [`MergeBrep`] here.
@@ -170,7 +172,7 @@ fn mates_of(m: &MatesIn, a: [usize; 10], b: [usize; 10]) -> [Vec<i64>; 3] {
     ]
 }
 
-/// Everything both engines need: construction programs, counts and the mates.
+/// Everything the C++ engine needs: construction programs, counts and the mates.
 struct Prepared {
     a: (String, Vec<f64>),
     b: Option<(String, Vec<f64>)>,
@@ -543,17 +545,23 @@ fn handles<I: ArenaId>(brep: H, kind: u8, ids: &[I]) -> Vec<H> {
     ids.iter().map(|i| hd(brep.b, kind, i.index())).collect()
 }
 
-fn import_operand(p: &(String, Vec<f64>)) -> Result<Brep, HarnessError> {
-    p5::import(
-        &solidcore_ffi::units::boolean_merge_p5::export(p5::operand(p)).map_err(|e| err(&e))?,
-    )
-}
-
-fn run_rust(i: &Inputs, p: &Prepared) -> Result<Output, HarnessError> {
-    let mut a = import_operand(&p.a)?;
-    let mut b = p.b.as_ref().map(import_operand).transpose()?;
-    let options = i.options.map(options_of);
+fn run_rust(i: &Inputs) -> Result<Output, HarnessError> {
     let mut k = Kernel::default();
+    let mut a = match p5::own_operand_or_output(&mut k, &i.primary)? {
+        Ok(a) => a,
+        Err(o) => return Ok(o),
+    };
+    let mut b = match &i.other {
+        Some(s) => match p5::own_operand_or_output(&mut k, s)? {
+            Ok(b) => Some(b),
+            Err(o) => return Ok(o),
+        },
+        None => None,
+    };
+    let counts = crate::own_builder::counts;
+    let mates = mates_of(&i.mates, counts(&a), b.as_ref().map_or([0; 10], counts));
+    let (tol, ang) = (float(&i.tol)?, float(&i.ang)?);
+    let options = i.options.map(options_of);
     let mut ids = Vec::new();
     let mut values = Vec::new();
     match &i.op {
@@ -562,8 +570,8 @@ fn run_rust(i: &Inputs, p: &Prepared) -> Result<Output, HarnessError> {
                 &k,
                 (&a, brep_h(0)),
                 b.as_ref().map(|b| (b, brep_h(1))),
-                p.tol,
-                p.ang,
+                tol,
+                ang,
                 options.as_ref(),
             ) {
                 Ok(m) => m,
@@ -596,7 +604,7 @@ fn run_rust(i: &Inputs, p: &Prepared) -> Result<Output, HarnessError> {
         }
         Op::MergeEdge { .. } | Op::MakeFaceuse { .. } => {
             let b = b.as_mut().ok_or_else(|| err("no other B-rep"))?;
-            let mut relations = relate(&mut a, b, &p.mates)?;
+            let mut relations = relate(&mut a, b, &mates)?;
             // A fresh SmTopology record per vertex, edge and face of both operands,
             // under the identities notified below (copies propagate their flags).
             let mut records = topology::topology::NotifyRecords::new();
@@ -721,8 +729,8 @@ fn run_rust(i: &Inputs, p: &Prepared) -> Result<Output, HarnessError> {
                 &k,
                 (&a, brep_h(0)),
                 None,
-                p.tol,
-                p.ang,
+                tol,
+                ang,
                 options.as_ref(),
             ) {
                 Ok(m) => m,
@@ -807,8 +815,7 @@ impl UnitDiff for Runner {
     }
     fn run_rust(&self, case: &Case) -> Result<Output, HarnessError> {
         let i: Inputs = case.parse()?;
-        let p = prepare(&i)?;
-        run_rust(&i, &p)
+        run_rust(&i)
     }
     fn generate(&self, rng: &mut Rng) -> Option<Value> {
         generate(rng)

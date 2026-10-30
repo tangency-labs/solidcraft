@@ -1087,15 +1087,39 @@ pub(crate) fn walk(b: &Brep) -> Result<Walk, SolidError> {
 ///
 /// A dangling id.
 pub(crate) fn walk_with(b: &Brep, prefix_lists: bool) -> Result<Walk, SolidError> {
-    walk_order(b, prefix_lists, false, false)
+    walk_order(b, ListPrefix::of(prefix_lists), false, false)
 }
 
-/// [`walk_with`]; with `vertex_lists_last` the vertex use lists are followed after the
-/// loops' loop uses ([`Conventions::vertex_lists_last`]); with `skip_edge_list` the edge
-/// list is not registered ahead of the traversal ([`Conventions::skip_edge_list`]).
+/// The B-rep lists a traversal registers before it starts.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ListPrefix {
+    /// None.
+    None,
+    /// The face, edge and vertex lists ([`Conventions::prefix_lists`]).
+    All,
+    /// The edge and vertex lists alone (the merge shims' `native_graph`,
+    /// [`renumber_native`]).
+    Native,
+}
+
+impl ListPrefix {
+    /// [`ListPrefix::All`] when `prefix_lists`, else [`ListPrefix::None`].
+    const fn of(prefix_lists: bool) -> Self {
+        if prefix_lists {
+            Self::All
+        } else {
+            Self::None
+        }
+    }
+}
+
+/// [`walk_with`] with the lists `prefix` registers first; with `vertex_lists_last` the
+/// vertex use lists are followed after the loops' loop uses
+/// ([`Conventions::vertex_lists_last`]); with `skip_edge_list` the edge list is not
+/// registered ahead of the traversal ([`Conventions::skip_edge_list`]).
 fn walk_order(
     b: &Brep,
-    prefix_lists: bool,
+    prefix: ListPrefix,
     vertex_lists_last: bool,
     skip_edge_list: bool,
 ) -> Result<Walk, SolidError> {
@@ -1111,10 +1135,18 @@ fn walk_order(
         vertexuses: Reg::new(),
         vertices: Reg::new(),
     };
-    if prefix_lists {
+    if prefix == ListPrefix::All {
         for &id in b.face_list() {
             g.faces.add(Some(id), FaceId::index);
         }
+        for &id in b.edge_list() {
+            g.edges.add(Some(id), EdgeId::index);
+        }
+        for &id in b.vertex_list() {
+            g.vertices.add(Some(id), VertexId::index);
+        }
+    }
+    if prefix == ListPrefix::Native {
         for &id in b.edge_list() {
             g.edges.add(Some(id), EdgeId::index);
         }
@@ -1343,11 +1375,34 @@ fn opt<T, F: Fn(T) -> Result<T, HarnessError>>(
 pub(crate) fn renumber_with(src: &Brep, conv: &Conventions<'_>) -> Result<Brep, HarnessError> {
     let g = walk_order(
         src,
-        conv.prefix_lists,
+        ListPrefix::of(conv.prefix_lists),
         conv.vertex_lists_last,
         conv.skip_edge_list,
     )
     .map_err(solid)?;
+    renumber_walk(src, &g, conv)
+}
+
+/// [`renumber_with`] into the order of the merge shims' `native_graph`
+/// (`sc_merge_fixture.h`): the B-rep's edge and vertex lists (`GetEdges`,
+/// `GetVertices`) registered before the traversal.
+///
+/// # Errors
+///
+/// As [`renumber_with`].
+pub(crate) fn renumber_native(src: &Brep, conv: &Conventions<'_>) -> Result<Brep, HarnessError> {
+    // (with `prefix_lists` the edge and vertex lists are registered first anyway)
+    let prefix = if conv.prefix_lists {
+        ListPrefix::All
+    } else {
+        ListPrefix::Native
+    };
+    let g = walk_order(src, prefix, conv.vertex_lists_last, conv.skip_edge_list).map_err(solid)?;
+    renumber_walk(src, &g, conv)
+}
+
+/// The copy of [`renumber_with`] under the traversal order `g`.
+fn renumber_walk(src: &Brep, g: &Walk, conv: &Conventions<'_>) -> Result<Brep, HarnessError> {
     // the geometry `src` itself counts as owned by its face / edge (`GetSurfaces` /
     // `GetCurves`, under its own naming; either errs on a face without surface or an
     // edge without curve, then any recorded owner counts): relabelled to the new ids
@@ -1361,7 +1416,7 @@ pub(crate) fn renumber_with(src: &Brep, conv: &Conventions<'_>) -> Result<Brep, 
         .into_iter()
         .map(std::ptr::from_ref)
         .collect();
-    let m = Map(&g);
+    let m = Map(g);
     let mut b = Brep::new();
     b.set_validate_only(src.validate_only());
     b.set_tolerance(src.tolerance());
