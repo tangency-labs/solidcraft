@@ -5424,8 +5424,10 @@ fn flat_exports(s: &mut Session) -> Vec<std::result::Result<Value, String>> {
 
 /// A sheet metal body mirrored, or patterned, into new bodies makes sheet metal bodies (#3353):
 /// each copy has a flat pattern and a bend table, and a sheet metal feature on a copy rebuilds it
-/// from its moved model where it is. A mirrored copy's model is its source's turned over: the
-/// same blank, bent the other way, its pocket on the other face.
+/// from its moved model where it is. A mirrored copy's model is its source's mirrored in the
+/// flat (x → −x) with the same thickness side (`SheetBody::copied`, d9d6af51c, as
+/// `a_mirrored_sheet_copy_is_the_opposite_hand_with_the_mirror_image_flat_pattern` has it): the
+/// opposite hand's blank, each bend turning the same way, its pocket on the same face.
 #[test]
 fn a_mirrored_or_patterned_sheet_body_is_sheet_metal_with_its_flat_pattern() {
     use solidcraft_geom::Vec3;
@@ -5443,10 +5445,13 @@ fn a_mirrored_or_patterned_sheet_body_is_sheet_metal_with_its_flat_pattern() {
     let copy = s.model.state().bodies[1].name.clone();
     assert!(rel(volume(&mut s), 2.0 * before) < 1e-9);
     let mirrored = run(&mut s, "sheet.flat_pattern", json!({"body": copy}));
-    assert_eq!(mirrored["outline"], blank["outline"], "the same blank");
-    assert_eq!(blank["pockets"][0]["side"], "bottom");
-    assert_eq!(mirrored["pockets"][0]["side"], "top", "{mirrored}");
-    assert_eq!((&blank["bends"][0]["direction"], &mirrored["bends"][0]["direction"]), (&json!("up"), &json!("down")), "{mirrored}");
+    // The source's blank and pocket mirrored, the same size, bend and pocket side.
+    assert_eq!(mirrored["flat_size_mm"], blank["flat_size_mm"], "{mirrored}");
+    assert_eq!(flat_points(&mirrored["outline"], 1.0), flat_points(&blank["outline"], -1.0), "the mirrored blank: {mirrored}");
+    let pocket = |f: &Value| json!([f["pockets"][0]["outline"]]);
+    assert_eq!(flat_points(&pocket(&mirrored), 1.0), flat_points(&pocket(&blank), -1.0), "{mirrored}");
+    assert_eq!((&blank["pockets"][0]["side"], &mirrored["pockets"][0]["side"]), (&json!("bottom"), &json!("bottom")), "{mirrored}");
+    assert_eq!((&blank["bends"][0]["direction"], &mirrored["bends"][0]["direction"]), (&json!("up"), &json!("up")), "{mirrored}");
     run(&mut s, "sheet.export_bend_table", json!({"body": copy}));
 
     // The copy's model is where its body is: a flange on the copy rebuilds it in place, its
