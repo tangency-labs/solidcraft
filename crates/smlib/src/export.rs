@@ -1259,6 +1259,10 @@ fn canonical(parts: Parts, n_vertices: usize, flat: View, tolerances: &Tolerance
             uses,
         });
     }
+    let record_geometry = |e: u32| {
+        let edge = edge_records.get(e as usize)?;
+        Some(EdgeGeometry { curve: edge.nurbs.as_ref().unwrap_or(&edge.curve), interval: edge.interval, tolerance: edge.tolerance })
+    };
     let mut face_records = Vec::with_capacity(face_order.len());
     for (fi, &f) in face_order.iter().enumerate() {
         let face = faces.get(f as usize).ok_or_else(|| invalid("face"))?;
@@ -1271,7 +1275,7 @@ fn canonical(parts: Parts, n_vertices: usize, flat: View, tolerances: &Tolerance
             })
             .collect::<Res<_>>()?;
         let mut curves =
-            pcurves(face.nurbs.as_ref().unwrap_or(&face.surface), face.domain, &renumbered, &face.given, &edge_records, tolerance)?.into_iter();
+            pcurves(face.nurbs.as_ref().unwrap_or(&face.surface), face.domain, &renumbered, &face.given, record_geometry, tolerance)?.into_iter();
         let mut loops = Vec::with_capacity(renumbered.len());
         for (li, l) in renumbered.iter().enumerate() {
             loops.push(match l {
@@ -1532,15 +1536,23 @@ fn split_touching(faces: &mut [Face], edges: &mut Vec<Edge>, edge_source: &mut V
     Ok(())
 }
 
+/// What the pcurve routine needs of one edge: the curve its parameter is on, its interval and its
+/// tolerance.
+struct EdgeGeometry<'a> {
+    curve: &'a b::Curve,
+    interval: [f64; 2],
+    tolerance: f64,
+}
+
 /// A face's pcurves, edge loop by edge loop: SMLib's own UV trims where `given` (loop by loop as
 /// `loops`) has them, the plain-record routine on the face's records for the rest; each loop moved
-/// by whole periods into the face's domain.
-fn pcurves(
+/// by whole periods into the face's domain. `edge` looks up an edge of `loops` by its index.
+fn pcurves<'a>(
     surface: &b::Surface,
     domain: [[f64; 2]; 2],
     loops: &[Loop],
-    given: &[Vec<Option<b::Curve2>>],
-    edges: &[b::Edge],
+    given: &'a [Vec<Option<b::Curve2>>],
+    edge: impl Fn(u32) -> Option<EdgeGeometry<'a>>,
     tolerance: f64,
 ) -> Res<Vec<Vec<b::Curve2>>> {
     if given.len() != loops.len() {
@@ -1554,13 +1566,13 @@ fn pcurves(
         }
         let mut loop_uses = Vec::with_capacity(l.len());
         for (&(e, forward), given) in l.iter().zip(g) {
-            let edge = edges.get(e as usize).ok_or_else(|| invalid("edge"))?;
+            let geometry = edge(e).ok_or_else(|| invalid("edge"))?;
             loop_uses.push(b::pcurve::EdgeUse {
                 edge: e,
-                curve: edge.nurbs.as_ref().unwrap_or(&edge.curve),
-                interval: edge.interval,
+                curve: geometry.curve,
+                interval: geometry.interval,
                 forward,
-                tolerance: edge.tolerance,
+                tolerance: geometry.tolerance,
                 given: given.as_ref(),
             });
         }
@@ -1575,12 +1587,12 @@ fn pcurves(
 /// (positive: counter-clockwise, the record's convention); 0 where it has no edge loop.
 fn outer_area(face: &Face, edges: &[Edge], tolerance: f64) -> Res<f64> {
     let Some(Loop::Edges(outer)) = face.loops.first() else { return Ok(0.0) };
-    let records: Vec<b::Edge> = edges
-        .iter()
-        .map(|e| b::Edge { nurbs: e.nurbs.clone(), curve: e.curve.clone(), interval: e.interval, vertices: e.vertices, tolerance, uses: Vec::new() })
-        .collect();
+    let geometry = |e: u32| {
+        let edge = edges.get(e as usize)?;
+        Some(EdgeGeometry { curve: edge.nurbs.as_ref().unwrap_or(&edge.curve), interval: edge.interval, tolerance })
+    };
     let given = face.given.first().map(std::slice::from_ref).unwrap_or(&[]);
-    let curves = pcurves(face.nurbs.as_ref().unwrap_or(&face.surface), face.domain, &[Loop::Edges(outer.clone())], given, &records, tolerance)?;
+    let curves = pcurves(face.nurbs.as_ref().unwrap_or(&face.surface), face.domain, &[Loop::Edges(outer.clone())], given, geometry, tolerance)?;
     let mut pts: Vec<[f64; 2]> = Vec::new();
     for (pc, &(e, forward)) in curves.first().map(Vec::as_slice).unwrap_or(&[]).iter().zip(outer) {
         let edge = edges.get(e as usize).ok_or_else(|| invalid("edge"))?;

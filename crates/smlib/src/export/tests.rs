@@ -281,6 +281,95 @@ mod native_tests {
         assert!(native(&shifted(1e-3)).map(|(r, _)| r.validate()).map_or(true, |v| v.is_err()), "a real overshoot is not moved");
     }
 
+    /// [`outer_area`] as it was: every edge of the body copied into a record for each face.
+    #[allow(clippy::unwrap_used)] // test reference
+    fn outer_area_copying_every_edge(face: &Face, edges: &[Edge], tolerance: f64) -> Res<f64> {
+        let Some(Loop::Edges(outer)) = face.loops.first() else { return Ok(0.0) };
+        let records: Vec<b::Edge> = edges
+            .iter()
+            .map(|e| b::Edge {
+                nurbs: e.nurbs.clone(),
+                curve: e.curve.clone(),
+                interval: e.interval,
+                vertices: e.vertices,
+                tolerance,
+                uses: Vec::new(),
+            })
+            .collect();
+        let lookup = |e: u32| {
+            let edge = records.get(e as usize)?;
+            Some(EdgeGeometry { curve: edge.nurbs.as_ref().unwrap_or(&edge.curve), interval: edge.interval, tolerance: edge.tolerance })
+        };
+        let given = face.given.first().map(std::slice::from_ref).unwrap_or(&[]);
+        let curves = pcurves(face.nurbs.as_ref().unwrap_or(&face.surface), face.domain, &[Loop::Edges(outer.clone())], given, lookup, tolerance)?;
+        let mut pts: Vec<[f64; 2]> = Vec::new();
+        for (pc, &(e, forward)) in curves.first().map(Vec::as_slice).unwrap_or(&[]).iter().zip(outer) {
+            let [a, z] = edges.get(e as usize).unwrap().interval;
+            let mut run: Vec<[f64; 2]> = (0..=32).filter_map(|i| point2(pc, a + (z - a) * f64::from(i) / 32.0)).collect();
+            if !forward {
+                run.reverse();
+            }
+            pts.extend(run);
+        }
+        let n = pts.len();
+        Ok(0.5 * (0..n).map(|k| (pts[k], pts[(k + 1) % n])).map(|(p, q)| p[0] * q[1] - q[0] * p[1]).sum::<f64>())
+    }
+
+    /// A face's outer area reads only its own loop's edges, and is bit for bit what copying every
+    /// edge of the body gave: the export's face turns, and so its records and numbering, are
+    /// unchanged. Each body's record faces are counter-clockwise by convention, so positive.
+    #[test]
+    fn a_faces_outer_area_reads_only_its_own_loop_and_is_unchanged() {
+        let block = Brep::make_box([0.0; 3], [31.0, 29.0, 10.0]).unwrap();
+        let hole = Brep::make_cylinder([12.0, 14.5, -1.0], 5.0, 12.0).unwrap();
+        let rounded = Brep::make_box([0.0; 3], [60.0, 40.0, 20.0]).unwrap().fillet(&[[60.0, 40.0, 10.0]], 0.1, 5.0).unwrap();
+        let mut bodies: Vec<(&str, Brep)> = primitives().into_iter().map(|(name, b, _)| (name, b)).collect();
+        bodies.push(("box minus cylinder", block.boolean(&hole, crate::BooleanOp::Subtract).unwrap().unwrap()));
+        bodies.push(("rounded box", rounded));
+        for (name, body) in bodies {
+            let record = body.to_native().unwrap_or_else(|e| panic!("{name}: {e}"));
+            let edges: Vec<Edge> = record
+                .edges
+                .iter()
+                .map(|e| Edge {
+                    curve: e.curve.clone(),
+                    nurbs: e.nurbs.clone(),
+                    interval: e.interval,
+                    vertices: e.vertices,
+                    reversed: false,
+                    trim_map: None,
+                })
+                .collect();
+            for (f, rf) in record.faces.iter().enumerate() {
+                // Without SMLib's trims (the pcurve routine) and with the record's pcurves as them.
+                for with_given in [false, true] {
+                    let loops: Vec<Loop> = rf
+                        .loops
+                        .iter()
+                        .map(|l| match l {
+                            b::Loop::Edges { edges } => Loop::Edges(edges.iter().map(|u| (u.edge, u.forward)).collect()),
+                            b::Loop::Vertex { vertex } => Loop::Vertex(*vertex),
+                        })
+                        .collect();
+                    let given = rf
+                        .loops
+                        .iter()
+                        .map(|l| match l {
+                            b::Loop::Edges { edges } => edges.iter().map(|u| with_given.then(|| u.pcurve.clone())).collect(),
+                            b::Loop::Vertex { .. } => Vec::new(),
+                        })
+                        .collect();
+                    let records = loops.iter().map(|_| Vec::new()).collect();
+                    let face = Face { nurbs: rf.nurbs.clone(), surface: rf.surface.clone(), domain: rf.domain, agrees: true, loops, records, given };
+                    let now = outer_area(&face, &edges, record.tolerance).unwrap_or_else(|e| panic!("{name}: face {f}: {e}"));
+                    let before = outer_area_copying_every_edge(&face, &edges, record.tolerance).unwrap();
+                    assert_eq!(now.to_bits(), before.to_bits(), "{name}: face {f}, trims given {with_given}: {now} != {before}");
+                    assert!(now > 0.0, "{name}: face {f}, trims given {with_given}: area {now}");
+                }
+            }
+        }
+    }
+
     #[test]
     fn hostile_arrays_are_errors_never_panics() {
         let good = Brep::make_box([0.0; 3], [1.0, 2.0, 3.0]).unwrap().arrays().unwrap();
