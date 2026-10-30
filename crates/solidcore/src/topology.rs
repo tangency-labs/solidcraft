@@ -680,7 +680,9 @@ impl Default for Vertexuse {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum NamingScheme {
     /// Not recorded: such routines leave the new geometry without owner (the caller
-    /// names it with its own identities).
+    /// names it with its own identities), except a UV trim curve, which
+    /// `SetUVTrimCurve` always owns by its holder: under the edge use's identity of
+    /// [`NamingScheme::Arena`] (its notification identity).
     #[default]
     Unknown,
     /// The Euler operators' notification identities
@@ -932,11 +934,14 @@ impl Brep {
 
     /// Relabels geometry owned by this B-rep's own topology records under
     /// [`NamingScheme::Arena`] ([`brep_cache::arena_identity`]), preserving shared or
-    /// unowned geometry and syncing face surface tolerances.
+    /// unowned geometry and syncing face surface tolerances. An edge use's own UV trim
+    /// curve takes the edge use's notification identity, the arena scheme's name for an
+    /// edge use (`edgeuse::p1::owner_ref`, `check_brep`).
     ///
     /// # Errors
     ///
-    /// [`SolidError::NotFound`] for a dangling face or edge id (none in practice).
+    /// [`SolidError::NotFound`] for a dangling face, edge or edge use id (none in
+    /// practice).
     pub fn use_arena_naming(&mut self) -> Result<()> {
         let edges: Vec<EdgeId> = self.edges.ids().collect();
         for edge in edges {
@@ -957,6 +962,28 @@ impl Brep {
             });
             if rebound {
                 self.set_geometry_owner_key(entity, Some(arena));
+            }
+        }
+        let uses: Vec<EdgeuseId> = self.edgeuses.ids().collect();
+        for eu in uses {
+            let entity = EntityRef::Edgeuse(eu);
+            let notify = loopuse::notify_ref(entity);
+            let proven = self.geometry_owner_key(entity);
+            let rebound = self
+                .edgeuse_mut(eu)?
+                .uv_trim_curve
+                .as_mut()
+                .is_some_and(|curve| {
+                    let matched = curve
+                        .owner()
+                        .is_some_and(|o| o == notify || Some(o) == proven);
+                    if matched {
+                        curve.set_owner(Some(notify), None);
+                    }
+                    matched
+                });
+            if rebound {
+                self.set_geometry_owner_key(entity, Some(notify));
             }
         }
         let faces: Vec<FaceId> = self.faces.ids().collect();

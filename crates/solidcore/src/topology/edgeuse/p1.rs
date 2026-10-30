@@ -94,7 +94,6 @@
 
 use crate::curve::curve::Curve;
 use crate::error::{EntityRef, Result, SolidError};
-use crate::geom::attribute::ObjectKey;
 use crate::geom::extent1d::Extent1d;
 use crate::geom::global_solver::SolverOperation;
 use crate::geom::local_solve_nd::EvalNFunctions;
@@ -842,16 +841,21 @@ pub(crate) fn owner_ref_in(b: &Brep, eu: EdgeuseId) -> Option<ObjectRef> {
 }
 
 /// The identity edge use `eu` owns geometry under in a B-rep with naming `naming`
-/// ([`NamingScheme`]); `None` when the B-rep records no scheme, or names its owners by
-/// a caller's keys (see [`owner_ref_in`]).
+/// ([`NamingScheme`]); `None` when the B-rep names its owners by a caller's keys (see
+/// [`owner_ref_in`]). Both the notify and the arena scheme name an edge use by its
+/// notification identity: [`Brep::use_arena_naming`] rebinds edge uses' UV trim curves
+/// to it, and the arena keys of `check_brep` and the merge's `adopt_namespace_owners`
+/// fall back to it for edge uses. A B-rep that records no scheme names its edge uses as the
+/// arena scheme does: upstream `SetUVTrimCurve` always owns the new curve by its holder
+/// (`pUVTrimCurve->SetOwner(eu)`), so leaving it without owner would differ from
+/// upstream for every B-rep made by `Brep::new` / `Brep::new_with_infinite_region`
+/// (`plan/findings/topology.edgeuse_p1--uv-trim-owner-under-unknown-naming.md`).
 pub(crate) fn owner_ref(naming: NamingScheme, eu: EdgeuseId) -> Option<ObjectRef> {
     match naming {
-        NamingScheme::Unknown | NamingScheme::Caller => None,
-        NamingScheme::Notify => Some(crate::topology::loopuse::notify_ref(EntityRef::Edgeuse(eu))),
-        NamingScheme::Arena => Some(ObjectRef {
-            type_code: TYPE,
-            key: ObjectKey(u64::from(eu.index())),
-        }),
+        NamingScheme::Caller => None,
+        NamingScheme::Unknown | NamingScheme::Notify | NamingScheme::Arena => {
+            Some(crate::topology::loopuse::notify_ref(EntityRef::Edgeuse(eu)))
+        }
     }
 }
 
