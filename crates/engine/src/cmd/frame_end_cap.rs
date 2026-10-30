@@ -16,7 +16,7 @@ pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new("frame.end_cap", "End C
     .at("WELDMENTS", "CREATE")
     .icon("end_cap")
     .enabled(not_in_sketch)
-    .params("faces: [{face:[x,y,z],body,index,path?}] planar end faces of frame members, picked in world mm (1–256); thickness: length in design units or a parameter expression; offset?: inset of the plate from the profile's outer edge, a length; ratio?: the inset as a share of the thickness (default 0.5; give offset or ratio, not both); chamfer?: corner chamfer length along each edge from the corner (default 0; a rounded corner needs at least its rounding); direction?: outward|inward (default outward: past the end; inward: the member is cut back by the thickness and the cap takes its place). One separate body per face, named `<member> End Cap`; the plate is the profile's outer outline on a closed section (tube, pipe, bar), the rectangle round the profile on an open one (angle, channel, beam). Common name/body_names fields supported.")];
+    .params("faces: [{face:[x,y,z],body,index,path?}] planar end faces of frame members, picked in world mm (1–256); thickness: length in design units or a parameter expression; offset?: inset of the plate from the outside of the profile, a length; ratio?: the inset as a share of the thickness (give offset or ratio, not both; neither: the plate is flush with the outside of the profile); chamfer?: corner chamfer length along each edge from the corner (default 0; a rounded corner needs at least its rounding); direction?: outward|inward (default outward: past the end; inward: the member is cut back by the thickness and the cap takes its place). One separate body per face, named `<member> End Cap`; the plate is the profile's outer outline on a closed section (tube, pipe, bar), the rectangle round the profile on an open one (angle, channel, beam). Common name/body_names fields supported.")];
 
 fn end_cap_cmd(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "frame.end_cap";
@@ -56,15 +56,11 @@ fn end_cap_cmd(s: &mut Session, p: &Value) -> Result<Value> {
         super::sketch::face::capture_positions(s, &plane)?;
         ends.push(end_cap::End { plane, member });
     }
-    let ratio = match (&args.offset, args.ratio) {
-        (None, None) => Some(end_cap::DEFAULT_RATIO.to_string().into()),
-        (_, r) => r.map(|r| r.0),
-    };
     let kind = FeatureKind::FrameEndCap {
         ends,
         thickness: args.thickness.0,
         offset: args.offset.map(|v| v.0),
-        ratio,
+        ratio: args.ratio.map(|r| r.0),
         chamfer: args.chamfer.map(|v| v.0).unwrap_or_else(|| "0 mm".into()),
         direction: match args.direction {
             Direction::Outward => end_cap::Direction::Outward,

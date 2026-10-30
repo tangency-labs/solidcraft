@@ -11,8 +11,6 @@ use solidcraft_kernel::{self as kernel, BoolOp};
 
 /// Most end faces one end cap feature closes.
 pub const MAX_FACES: usize = 256;
-/// The default inset as a share of the thickness.
-pub const DEFAULT_RATIO: f64 = 0.5;
 
 /// The member a capped face belongs to: its feature and line, which outlive body renames.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, solidcraft_derive::Walk)]
@@ -404,7 +402,9 @@ pub(crate) fn evaluate(doc: &Document, vals: &BTreeMap<String, Value>, f: &Featu
             }
             r * t
         }
-        _ => return Err(invalid("give the end cap's inset as either a length or a ratio of the thickness")),
+        // Neither: flush with the outside of the profile.
+        (None, None) => 0.0,
+        _ => return Err(invalid("give the end cap's inset as either a length or a ratio of the thickness, not both")),
     };
     let c = length(crate::eval::val(vals, chamfer, Kind::Length)?, "chamfer", 0.0)?;
     let mut planned = Vec::with_capacity(ends.len());

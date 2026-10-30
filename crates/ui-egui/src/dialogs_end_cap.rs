@@ -2,7 +2,7 @@
 //! faces and the plate.
 use crate::{
     SolveApp,
-    dialogs::{Kind, shown_expr},
+    dialogs::{Kind, check, shown_expr},
     selection::{PLANAR_FACES, SelInput},
     ui_kit::{IconSegment, choice_row, expr_row, row, segmented_icons},
 };
@@ -17,6 +17,8 @@ pub struct EndCap {
     pub thickness: String,
     /// 0: outward, 1: inward.
     pub direction: usize,
+    /// The plate set in from the profile's outside; off: flush with it.
+    pub use_offset: bool,
     /// 0: the inset as a ratio of the thickness, 1: as a length.
     pub inset_kind: usize,
     pub ratio: String,
@@ -26,7 +28,15 @@ pub struct EndCap {
 
 impl Default for EndCap {
     fn default() -> Self {
-        Self { thickness: "6 mm".into(), direction: 0, inset_kind: 0, ratio: "0.5".into(), offset: "3 mm".into(), chamfer: "0 mm".into() }
+        Self {
+            thickness: "6 mm".into(),
+            direction: 0,
+            use_offset: false,
+            inset_kind: 0,
+            ratio: "0.5".into(),
+            offset: "3 mm".into(),
+            chamfer: "0 mm".into(),
+        }
     }
 }
 
@@ -44,17 +54,21 @@ pub fn rows(app: &SolveApp, ui: &mut egui::Ui, c: &mut EndCap) -> bool {
         ];
         segmented_icons(ui, &mut c.direction, &options, &[]);
     });
-    choice_row(
-        ui,
-        app.tr("ui.end_cap.inset_kind"),
-        "end_cap_inset_kind",
-        &mut c.inset_kind,
-        &[app.tr("ui.end_cap.ratio"), app.tr("ui.end_cap.length")],
-    );
-    if c.inset_kind == 0 {
-        enter |= expr_row(ui, app.tr("ui.end_cap.inset_ratio"), &mut c.ratio);
-    } else {
-        enter |= expr_row(ui, app.tr("ui.end_cap.inset"), &mut c.offset);
+    // Off: the plate is flush with the outside of the profile.
+    row(ui, app.tr("ui.offset"), |ui| check(ui, &mut c.use_offset));
+    if c.use_offset {
+        choice_row(
+            ui,
+            app.tr("ui.end_cap.inset_kind"),
+            "end_cap_inset_kind",
+            &mut c.inset_kind,
+            &[app.tr("ui.end_cap.ratio"), app.tr("ui.end_cap.length")],
+        );
+        if c.inset_kind == 0 {
+            enter |= expr_row(ui, app.tr("ui.end_cap.inset_ratio"), &mut c.ratio);
+        } else {
+            enter |= expr_row(ui, app.tr("ui.end_cap.inset"), &mut c.offset);
+        }
     }
     enter |= expr_row(ui, app.tr("ui.end_cap.chamfer"), &mut c.chamfer);
     enter
@@ -74,10 +88,10 @@ pub fn commands(app: &SolveApp, c: &EndCap, inputs: &[SelInput], extra: &Map<Str
     let direction = if c.direction == 1 { "inward" } else { "outward" };
     let mut args = json!({"faces": faces, "thickness": c.thickness, "direction": direction, "chamfer": c.chamfer});
     if let Value::Object(args) = &mut args {
-        if c.inset_kind == 0 {
-            args.insert("ratio".into(), json!(c.ratio));
-        } else {
-            args.insert("offset".into(), json!(c.offset));
+        // Neither: the plate is flush with the outside of the profile.
+        if c.use_offset {
+            let (key, value) = if c.inset_kind == 0 { ("ratio", &c.ratio) } else { ("offset", &c.offset) };
+            args.insert(key.into(), json!(value));
         }
         for (k, v) in extra {
             args.entry(k.clone()).or_insert_with(|| v.clone());
@@ -93,6 +107,7 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind) -> Option<(Kind, Vec<SelI
     let c = EndCap {
         thickness: length(thickness),
         direction: usize::from(*direction == Direction::Inward),
+        use_offset: offset.is_some() || ratio.is_some(),
         inset_kind: usize::from(offset.is_some()),
         ratio: ratio.as_ref().map_or_else(|| "0.5".into(), |e| shown_expr(e, ValueKind::Unitless)),
         offset: offset.as_ref().map_or_else(|| "3 mm".into(), length),

@@ -243,6 +243,7 @@ fn control_role(command: &str, label: &str) -> Option<egui::accesskit::Role> {
         "Radius" if command == "joint.rack_pinion" => Role::Label,
         "Pitch" if command == "solid.thread" => Role::ComboBox,
         "Automatic size" | "Reverse" | "Other side" | "All Lines" | "Mirror" => Role::CheckBox,
+        "Offset" if command == "frame.end_cap" => Role::CheckBox,
         "Animate" => Role::Button,
         "Ratio" if command.starts_with("joint.") && command != "joint.motion_link" => return None,
         _ => Role::TextInput,
@@ -258,7 +259,7 @@ form_case!(revolve, "solid.revolve", ["Angle", "Direction", "Type"]);
 form_case!(shell, "solid.shell", ["Thickness", "Direction"]);
 form_case!(draft, "solid.draft", ["Angle"]);
 form_case!(mirror, "solid.mirror", ["Operation"]);
-form_case!(end_cap, "frame.end_cap", ["Thickness", "Direction", "Inset By", "Inset Ratio", "Corner Chamfer"]);
+form_case!(end_cap, "frame.end_cap", ["Thickness", "Direction", "Offset", "Corner Chamfer"]);
 
 /// The Motion Study's and Motion Trace's hints read in the user's language: the dialogs drew them
 /// as they got them, in English.

@@ -672,20 +672,21 @@ fn measured(s: &mut Session, name: &str) -> Measured {
 }
 
 #[test]
-fn an_end_cap_closes_the_top_inset_by_half_its_thickness() {
+fn an_end_cap_is_flush_with_the_outside_unless_offset() {
     let mut s = capped_post(square_tube());
     let top = face_pick(&s, "Post", [18.5, 0.0, 300.0], [0.0, 0.0, 1.0]);
     let r = run(&mut s, "frame.end_cap", json!({"faces": [top], "thickness": 6}));
     assert_eq!(r["created_bodies"], json!(["Post End Cap"]), "{r}");
-    // The default inset is half the thickness: a 34 x 34 plate, 6 thick, on top.
+    // No offset: the plate is the profile's outside, 40 x 40, 6 thick, on top.
     let cap = measured(&mut s, "Post End Cap");
-    assert!(rel(cap.1, 34.0 * 34.0 * 6.0) < 1e-9, "{cap:?}");
-    assert!(near3(cap.2, [-17.0, -17.0, 300.0]) && near3(cap.3, [17.0, 17.0, 306.0]), "{cap:?}");
-    // The bottom end faces down: its cap hangs below the post.
+    assert!(rel(cap.1, 40.0 * 40.0 * 6.0) < 1e-9, "{cap:?}");
+    assert!(near3(cap.2, [-20.0, -20.0, 300.0]) && near3(cap.3, [20.0, 20.0, 306.0]), "{cap:?}");
+    // The bottom end faces down: its cap hangs below the post. Offset by half its thickness of
+    // 4: a 36 x 36 plate.
     let bottom = face_pick(&s, "Post", [18.5, 0.0, 0.0], [0.0, 0.0, -1.0]);
-    run(&mut s, "frame.end_cap", json!({"faces": [bottom], "thickness": 4, "offset": 0}));
+    run(&mut s, "frame.end_cap", json!({"faces": [bottom], "thickness": 4, "ratio": 0.5}));
     let cap = measured(&mut s, "Post End Cap (2)");
-    assert!(near3(cap.2, [-20.0, -20.0, -4.0]) && near3(cap.3, [20.0, 20.0, 0.0]), "{cap:?}");
+    assert!(near3(cap.2, [-18.0, -18.0, -4.0]) && near3(cap.3, [18.0, 18.0, 0.0]), "{cap:?}");
 }
 
 #[test]
@@ -704,15 +705,15 @@ fn end_cap_on_a_rounded_tube_keeps_the_rounding_less_the_inset() {
     let mut s = capped_post(tube());
     let top = face_pick(&s, "Post", [18.5, 0.0, 300.0], [0.0, 0.0, 1.0]);
     let before = s.doc.to_json();
-    let e = s.execute("frame.end_cap", &json!({"faces": [top.clone()], "thickness": 6, "chamfer": 2})).unwrap_err().to_string();
+    let e = s.execute("frame.end_cap", &json!({"faces": [top.clone()], "thickness": 6, "ratio": 0.5, "chamfer": 2})).unwrap_err().to_string();
     assert!(e.contains("at least the corner rounding"), "{e}");
     assert_eq!(s.doc.to_json(), before);
-    run(&mut s, "frame.end_cap", json!({"faces": [top.clone()], "thickness": 6}));
+    run(&mut s, "frame.end_cap", json!({"faces": [top.clone()], "thickness": 6, "ratio": 0.5}));
     let v = measured(&mut s, "Post End Cap").1;
     assert!(rel(v, (34.0 * 34.0 - (4.0 - PI) * 9.0) * 6.0) < MEASURED, "{v}");
     run(&mut s, "edit.undo", json!({}));
     // A chamfer as long as the rounding cuts it away: four 3 x 3 triangles off the 34 square.
-    run(&mut s, "frame.end_cap", json!({"faces": [top], "thickness": 6, "chamfer": 3}));
+    run(&mut s, "frame.end_cap", json!({"faces": [top], "thickness": 6, "ratio": 0.5, "chamfer": 3}));
     let v = measured(&mut s, "Post End Cap").1;
     assert!(rel(v, (34.0 * 34.0 - 4.0 * 4.5) * 6.0) < 1e-9, "{v}");
 }
@@ -762,7 +763,7 @@ fn end_caps_follow_member_edits_renames_undo_and_reopen() {
     let mut s = capped_post(square_tube());
     let top = face_pick(&s, "Post", [18.5, 0.0, 300.0], [0.0, 0.0, 1.0]);
     let bottom = face_pick(&s, "Post", [18.5, 0.0, 0.0], [0.0, 0.0, -1.0]);
-    run(&mut s, "frame.end_cap", json!({"faces": [top, bottom], "thickness": 6, "name": "Caps"}));
+    run(&mut s, "frame.end_cap", json!({"faces": [top, bottom], "thickness": 6, "ratio": 0.5, "name": "Caps"}));
     run(&mut s, "body.rename", json!({"body": "Post", "name": "Column"}));
     let params = json!({"sketch": "Post path", "body_name": "Column", "profile": {"kind": "rect_tube", "width": 60, "height": 40, "wall": 3, "outer_radius": 0}});
     run(&mut s, "timeline.redefine", json!({"feature": "Post member", "command": "frame.member", "params": params}));
@@ -796,7 +797,7 @@ fn end_caps_refuse_bad_picks_and_values_atomically() {
         (json!({"offset": 20}), "leaves no plate"),
         (json!({"ratio": 4}), "leaves no plate"),
         (json!({"offset": 1, "ratio": 0.5}), "not both"),
-        (json!({"chamfer": 20}), "too large"),
+        (json!({"chamfer": 25}), "too large"),
         (json!({"thickness": -1}), "thickness"),
         (json!({"thickness": "1e99 mm"}), ""),
         (json!({"thickness": 0}), "thickness"),
@@ -818,7 +819,7 @@ fn end_caps_refuse_bad_picks_and_values_atomically() {
     // An angle is open too: its cap is the 40 x 40 square round it, in by 1 (half of 2).
     let mut s = capped_post(json!({"kind": "angle", "width": 40, "height": 40, "thickness": 4}));
     let end = face_pick(&s, "Post", [-18.0, -19.0, 300.0], [0.0, 0.0, 1.0]);
-    run(&mut s, "frame.end_cap", json!({"faces": [end], "thickness": 2}));
+    run(&mut s, "frame.end_cap", json!({"faces": [end], "thickness": 2, "ratio": 0.5}));
     let v = measured(&mut s, "Post End Cap").1;
     assert!(rel(v, 38.0 * 38.0 * 2.0) < 1e-9, "{v}");
 }

@@ -80,11 +80,13 @@ from a sketch: draw it or insert the vendor's DXF.
 separate body per end, named after the member (`Post End Cap`). Pick the end faces in the view:
 each must be a flat end of a frame member, square to its line.
 
-- On a closed section (a square or rectangular tube, a pipe, a bar) the plate follows the
-  profile's outer outline. On an open section (an angle, a channel, a beam) it is the rectangle
-  round the profile, so the whole end is closed. Either is set in from its edge by the **Inset**: a length,
-  or a **Ratio of thickness** (default 0.5, so a 6 mm cap sits 3 mm in from the edge). A rounded
-  corner keeps its rounding less the inset; a corner rounded less than the inset becomes sharp.
+- The plate covers the outside of the profile: on a closed section (a square or rectangular
+  tube, a pipe, a bar) it is the profile's outer outline; on an open section (an angle, a
+  channel, a beam) it is the rectangle round the profile, so the whole end is closed.
+- **Offset** sets the plate in from that outside edge: tick it, then give the inset as a
+  **Ratio of thickness** (0.5 puts a 6 mm cap 3 mm in from the edge) or a **Length**. Unticked,
+  the plate is flush with the outside of the profile. A rounded corner keeps its rounding less
+  the inset; a corner rounded less than the inset becomes sharp.
 - **Thickness** is the plate's thickness. **Outward** puts it past the end, so the frame gets
   longer by the thickness; **Inward** cuts the member back by the thickness and puts the plate
   where the end was, so the frame keeps its length.
