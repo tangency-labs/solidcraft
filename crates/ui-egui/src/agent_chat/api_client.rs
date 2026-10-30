@@ -30,6 +30,8 @@ const MAX_HISTORY: usize = 240;
 const MAX_HISTORY_IMAGES: usize = 2;
 /// What an older view becomes in the history.
 const DROPPED_VIEW_NOTE: &str = "[an earlier picture of the view, removed to keep the request small]";
+/// What an earlier answer that was only thinking says once its thinking is left out (#9417).
+const DROPPED_THOUGHT_NOTE: &str = "[earlier reasoning, left out]";
 /// How long one tool call may take (it may wait for the user's Allow, declined after four
 /// minutes). It does not depend on the endpoint's request timeout: a tool call is SolidCraft's own
 /// work and the user's answer, never a wait for the model, so a longer request timeout does not
@@ -876,8 +878,7 @@ impl Worker {
 
     fn turn(&mut self, parts: Vec<PromptPart>) {
         self.history.push(user_message(self.cfg.protocol, &parts));
-        drop_old_views(&mut self.history, MAX_HISTORY_IMAGES);
-        self.trim_history();
+        bound_history(&mut self.history, self.cfg.protocol);
         // No cap on requests: Stop sets `cancel`, checked at the top of every round.
         loop {
             // The history as of here is complete (every tool call answered): a cancelled request
@@ -960,17 +961,6 @@ impl Worker {
             if self.cfg.protocol == Protocol::Anthropic && !results.is_empty() {
                 self.history.push(json!({"role": "user", "content": results}));
             }
-        }
-    }
-
-    /// Keep the conversation bounded and starting at a user message, so neither protocol sees a
-    /// reply or a tool result without the message it answers.
-    fn trim_history(&mut self) {
-        while self.history.len() > MAX_HISTORY {
-            self.history.remove(0);
-        }
-        while self.history.first().is_some_and(|m| !starts_a_turn(m)) {
-            self.history.remove(0);
         }
     }
 
@@ -1441,11 +1431,48 @@ fn anthropic_reply(body: &Value) -> Reply {
     Reply { text, calls, assistant }
 }
 
+/// The history bounded before a new turn's first request: older pictures of the view swapped for
+/// a note, the oldest messages dropped, and the conversation starting at a user message.
+///
+/// Claude signs each thinking block against everything before it, so once an earlier picture
+/// or message goes, the earlier answers' thinking no longer matches and the request is refused
+/// ("Invalid `signature` in `thinking` block", #9417). Those answers are from finished turns,
+/// whose thinking the API leaves out of the model's context anyway: it goes too.
+fn bound_history(history: &mut Vec<Value>, protocol: Protocol) {
+    let mut changed = drop_old_views(history, MAX_HISTORY_IMAGES);
+    while history.len() > MAX_HISTORY {
+        history.remove(0);
+        changed = true;
+    }
+    while history.first().is_some_and(|m| !starts_a_turn(m)) {
+        history.remove(0);
+        changed = true;
+    }
+    if changed && protocol == Protocol::Anthropic {
+        drop_earlier_thinking(history);
+    }
+}
+
+/// Takes the `thinking` and `redacted_thinking` blocks out of the assistant messages; an answer
+/// that held nothing else keeps a short note, as an answer can't be empty.
+fn drop_earlier_thinking(history: &mut [Value]) {
+    for msg in history.iter_mut().filter(|m| m.get("role").and_then(Value::as_str) == Some("assistant")) {
+        let Some(content) = msg.get_mut("content").and_then(Value::as_array_mut) else { continue };
+        let before = content.len();
+        content.retain(|b| !matches!(b.get("type").and_then(Value::as_str), Some("thinking" | "redacted_thinking")));
+        if content.is_empty() && before > 0 {
+            content.push(json!({"type": "text", "text": DROPPED_THOUGHT_NOTE}));
+        }
+    }
+}
+
 /// Keeps the newest `keep` pictures of the view in the history and swaps every older one for a
 /// short note, so the model still knows a view was shown. Text is never touched. Pictures come
-/// as OpenAI `image_url` parts or Anthropic `image` blocks, depending on the endpoint.
-fn drop_old_views(history: &mut [Value], keep: usize) {
+/// as OpenAI `image_url` parts or Anthropic `image` blocks, depending on the endpoint. Whether
+/// any picture was swapped.
+fn drop_old_views(history: &mut [Value], keep: usize) -> bool {
     let mut seen = 0;
+    let mut swapped = false;
     for msg in history.iter_mut().rev() {
         let Some(content) = msg.get_mut("content").and_then(Value::as_array_mut) else { continue };
         for part in content.iter_mut().rev() {
@@ -1455,9 +1482,11 @@ fn drop_old_views(history: &mut [Value], keep: usize) {
             seen += 1;
             if seen > keep {
                 *part = json!({"type": "text", "text": DROPPED_VIEW_NOTE});
+                swapped = true;
             }
         }
     }
+    swapped
 }
 
 /// MCP `tools/list` as OpenAI function tools (the hidden ones left out).
@@ -1760,6 +1789,59 @@ mod tests {
         let size = json!({"messages": h}).to_string().len();
         assert_eq!(pictures(&h).len(), MAX_HISTORY_IMAGES);
         assert!(size < (MAX_HISTORY_IMAGES + 1) * big.len(), "request body is {size} bytes");
+    }
+
+    /// #9417: Claude signs each thinking block against everything before it, so once an older
+    /// view becomes a note, the earlier answers' thinking goes; the current answer's (a tool
+    /// round still running) is never touched, as a turn's rounds don't bound the history again.
+    /// Untouched history keeps its thinking, and OpenAI's history is not read for it at all.
+    #[test]
+    fn a_dropped_view_takes_the_earlier_answers_thinking_with_it() {
+        let view = |n: u8| {
+            user_message(
+                Protocol::Anthropic,
+                &[PromptPart::Text(format!("look {n}")), PromptPart::Image { mime: "image/png".into(), base64: format!("V{n}") }],
+            )
+        };
+        let answer = |n: u8| {
+            json!({"role": "assistant", "content": [
+                {"type": "thinking", "thinking": format!("thought {n}"), "signature": format!("s{n}")},
+                {"type": "redacted_thinking", "data": "r"},
+                {"type": "text", "text": format!("answer {n}")},
+            ]})
+        };
+        let thoughts = |h: &[Value]| {
+            h.iter()
+                .filter_map(|m| m["content"].as_array())
+                .flatten()
+                .filter(|b| matches!(b["type"].as_str(), Some("thinking" | "redacted_thinking")))
+                .count()
+        };
+        // Two views fit: nothing changes, the thinking stays as signed.
+        let mut h = vec![view(1), answer(1), view(2)];
+        bound_history(&mut h, Protocol::Anthropic);
+        assert_eq!(thoughts(&h), 2);
+        // A third view swaps the first for a note: the answers before it lose their thinking.
+        h.push(answer(2));
+        h.push(view(3));
+        bound_history(&mut h, Protocol::Anthropic);
+        assert_eq!(thoughts(&h), 0, "{h:?}");
+        assert_eq!(h[1]["content"], json!([{"type": "text", "text": "answer 1"}]));
+        assert_eq!(h[3]["content"], json!([{"type": "text", "text": "answer 2"}]));
+        // An answer that was only thinking keeps a note: an answer can't be empty.
+        let mut only =
+            vec![view(1), json!({"role": "assistant", "content": [{"type": "thinking", "thinking": "t", "signature": "s"}]}), view(2), view(3)];
+        bound_history(&mut only, Protocol::Anthropic);
+        assert_eq!(only[1]["content"], json!([{"type": "text", "text": DROPPED_THOUGHT_NOTE}]));
+        // The oldest messages trimmed away count as a change too.
+        let mut long: Vec<Value> =
+            (0..MAX_HISTORY + 2).map(|i| if i % 2 == 0 { json!({"role": "user", "content": "go"}) } else { answer(1) }).collect();
+        bound_history(&mut long, Protocol::Anthropic);
+        assert!(long.len() <= MAX_HISTORY && thoughts(&long) == 0);
+        // OpenAI keeps its answers as they are.
+        let mut openai = vec![view(1), answer(1), view(2), view(3)];
+        bound_history(&mut openai, Protocol::OpenAi);
+        assert_eq!(thoughts(&openai), 2);
     }
 
     #[test]
