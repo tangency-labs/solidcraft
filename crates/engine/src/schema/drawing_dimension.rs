@@ -399,9 +399,9 @@ pub struct DimensionResult {
     pub view: String,
     /// The record, as the drawing saves it.
     pub record: Value,
-    /// `ok`, `overridden`, `ambiguous`, `suppressed`, `lost` or `unmeasurable`.
+    /// `ok`, `overridden`, `ambiguous`, `suppressed`, `failed`, `lost` or `unmeasurable`.
     pub status: String,
-    /// Why it is lost or unmeasurable.
+    /// Why it failed, is lost or is unmeasurable.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub why: Option<String>,
     /// What it reads: model millimetres, or degrees for an angle; a chain's overall.

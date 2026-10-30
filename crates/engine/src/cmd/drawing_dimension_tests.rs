@@ -518,6 +518,31 @@ fn two_flat_faces_read_the_distance_between_them() {
     }
     assert_eq!(s.drawing("test").unwrap().to_json().unwrap(), before);
 }
+
+/// A dimension says its feature failed, with why, and that it is suppressed: the words a script reads.
+#[test]
+fn a_dimension_says_its_feature_failed_or_is_suppressed() {
+    let (mut s, view) = front_view();
+    let drawing = json!({"drawing": ids::encode(s.drawing("test").unwrap().id)});
+    run(&mut s, "drawing.close", json!({}));
+    run(&mut s, "solid.fillet", json!({"edges": [[80, 20, 30]], "radius": 5, "body": "Box", "name": "Round"}));
+    run(&mut s, "drawing.open", drawing.clone());
+    let fillet = json!({"body": "Box", "index": round_index(&s, [75.0, 0.0, 25.0], 5.0)});
+    let id = add(&mut s, view, json!({"radial": {"edge": fillet}}))["dimension"].clone();
+    let status = |s: &mut Session, change: &str, p: Value| {
+        run(s, "drawing.close", json!({}));
+        run(s, change, p);
+        run(s, "drawing.open", drawing.clone());
+        run(s, INSPECT, json!({"dimension": id}))
+    };
+    let read = status(&mut s, "timeline.suppress", json!({"feature": "Round", "suppressed": true}));
+    assert_eq!(read["status"], "suppressed", "{read}");
+    let read = status(&mut s, "timeline.suppress", json!({"feature": "Round", "suppressed": false}));
+    assert_eq!(read["status"], "ok", "{read}");
+    let read = status(&mut s, "timeline.reorder", json!({"feature": "Round", "position": 0, "allow_errors": true}));
+    assert_eq!(read["status"], "failed", "{read}");
+    assert!(read["why"].as_str().is_some_and(|why| !why.is_empty()), "{read}");
+}
 /// A setting its kind hasn't got, and a value the record would refuse, are refused with the
 /// drawing unchanged; an angle takes its other side.
 #[test]

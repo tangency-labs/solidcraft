@@ -81,7 +81,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&INSPECT_CONTRACT)
         .output(output_schema_for::<DimensionResult>)
         .params(
-            "dimension: its id → {dimension, view, record: as saved, status: ok, overridden, ambiguous, suppressed, lost or unmeasurable, \
+            "dimension: its id → {dimension, view, record: as saved, status: ok, overridden, ambiguous, suppressed, failed, lost or unmeasurable, \
              why?, value? (model mm, or degrees for an angle; a chain's overall), foreshortened?, text? (none for a chain), \
              members?: a chain's [{value, text}] from its first point, last_good? (the value it last read, kept when the design \
              is saved, when it has none now), exact, candidates?: [{edge: {body, index}}, {corner: [x, y, z]} or {face: {body, index}}]}. \
@@ -324,6 +324,7 @@ pub(super) fn status_words(status: Status) -> (&'static str, Option<String>, Vec
         Status::Overridden => ("overridden", None, Vec::new()),
         Status::Ambiguous(found) => ("ambiguous", None, found.into_iter().map(candidate).collect()),
         Status::Suppressed => ("suppressed", None, Vec::new()),
+        Status::Failed(why) => ("failed", Some(why), Vec::new()),
         Status::Lost(why) => ("lost", Some(why), Vec::new()),
         Status::Unmeasurable(why) => ("unmeasurable", Some(why), Vec::new()),
     }

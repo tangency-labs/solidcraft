@@ -440,8 +440,47 @@ fn a_holes_centre_is_found_through_its_rim() {
     assert_reads(&r, 40.0, false);
     assert!(!r.exact, "{r:?}");
     run(&mut f.s, "timeline.suppress", json!({"feature": hole, "suppressed": true}));
-    let r = f.resolve(across);
-    assert!(matches!(&r.status, Status::Lost(why) if why.contains("no longer exists")), "{r:?}");
+    assert_eq!(f.resolve(across).status, Status::Suppressed);
+}
+
+/// A reference to what a feature made says what became of that feature, not that it is lost: a hole
+/// suppressed or rolled back is suppressed, and a fillet put before what it rounds has failed, with
+/// why. Each reads again when its feature is back. A deleted feature's is lost.
+#[test]
+fn a_suppressed_or_failed_feature_is_not_lost() {
+    let mut f = boxed();
+    let body = f.s.doc.features.last().unwrap().name.clone();
+    run(&mut f.s, "solid.cylinder", json!({"radius": 6, "height": 42, "base": [40, -1, 15], "axis": "Y", "operation": "cut", "targets": ["Box"]}));
+    let hole = f.s.doc.features.last().unwrap().name.clone();
+    let rim = f.round([40.0, 0.0, 15.0], 6.0);
+    let across = f.add(f.front, radial(&rim, true), None);
+    let centre =
+        ModelPoint { body: rim.body.clone(), origin_feature: rim.origin_feature, edges: vec![rim.name.clone()], centre: true, path: Vec::new() };
+    let to_centre =
+        DimensionKind::Linear { a: f.corner([0.0, 0.0, 0.0]), b: centre, direction: LinearDirection::Vertical, reading: Reading::Projected };
+    let up = f.add(f.front, to_centre, None);
+    let both = |f: &Fixture| [f.resolve(across).status, f.resolve(up).status];
+    run(&mut f.s, "timeline.suppress", json!({"feature": hole, "suppressed": true}));
+    assert_eq!(both(&f), [Status::Suppressed, Status::Suppressed]);
+    run(&mut f.s, "timeline.suppress", json!({"feature": hole, "suppressed": false}));
+    assert_eq!(both(&f), [Status::Ok, Status::Ok]);
+    run(&mut f.s, "timeline.roll_to", json!({"feature": body}));
+    assert_eq!(both(&f), [Status::Suppressed, Status::Suppressed]);
+    run(&mut f.s, "timeline.roll_to", json!({}));
+    assert_eq!(both(&f), [Status::Ok, Status::Ok]);
+
+    run(&mut f.s, "solid.fillet", json!({"edges": [[80, 20, 30]], "radius": 5, "body": "Box", "name": "Round"}));
+    let round = f.round([75.0, 0.0, 25.0], 5.0);
+    let arc = f.add(f.front, radial(&round, false), None);
+    assert_reads(&f.resolve(arc), 5.0, false);
+    run(&mut f.s, "timeline.reorder", json!({"feature": "Round", "position": 0, "allow_errors": true}));
+    let r = f.resolve(arc);
+    assert!(matches!(&r.status, Status::Failed(why) if !why.is_empty()) && r.measured.is_none(), "{r:?}");
+    run(&mut f.s, "edit.undo", json!({}));
+    assert_reads(&f.resolve(arc), 5.0, false);
+
+    run(&mut f.s, "timeline.delete", json!({"feature": hole}));
+    assert!(matches!(&f.resolve(across).status, Status::Lost(why) if why.contains("no longer exists")), "{:?}", f.resolve(across));
 }
 
 fn radial(edge: &ModelEdge, diameter: bool) -> DimensionKind {
@@ -535,7 +574,8 @@ fn a_cylinders_diameter_is_found_through_all_its_faces() {
     assert!(!r.exact, "found through pieces: {r:?}");
     run(&mut f.s, "timeline.suppress", json!({"feature": boss, "suppressed": true}));
     let r = f.resolve(front);
-    assert!(matches!(&r.status, Status::Lost(why) if why.contains("no longer exists")), "{r:?}");
+    // The boss that made its face is suppressed, so the dimension says so: it isn't lost.
+    assert!(matches!(&r.status, Status::Suppressed), "{r:?}");
 }
 
 /// Two bosses along X on the box's right face, radius 5 at z = 15 and radius 3 at z = 25: in the

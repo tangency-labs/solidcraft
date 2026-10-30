@@ -71,6 +71,7 @@ use solidcraft_kernel::{FaceSurface, face_surface};
 use crate::appearance::face_index_at;
 use crate::name_lookup::{BodyEdges, EdgeMatch, face_has_name, faces_with_stem};
 use crate::naming::{face_name_exact, face_names};
+use crate::persistent_name::{EdgeName, FaceName, FeatureId};
 use crate::{
     DocError, Document, MAX_PLACEMENT_DEPTH, Mat, Model, ModelBody, ModelState, Result, apply_point, apply_vector, ids, map_plane, mat_inverse,
 };
@@ -421,8 +422,10 @@ pub enum Status {
     /// A name finds several things, and none is chosen: at most [`MAX_CANDIDATES`] of them, in
     /// the model's order.
     Ambiguous(Vec<Candidate>),
-    /// The feature that made its body is suppressed or rolled back.
+    /// A feature it depends on is suppressed or rolled back.
     Suppressed,
+    /// A feature it depends on failed: why. It comes back when that feature works again.
+    Failed(String),
     /// What it measures is gone: why.
     Lost(String),
     /// Found, but the view can't measure it so: why (such as an angle to a line the view sees
@@ -662,6 +665,26 @@ pub(super) struct Edges {
     frame: Mat,
 }
 
+/// The features that made the faces an edge's name says it separates.
+fn edge_makers(name: &str) -> Vec<FeatureId> {
+    EdgeName::parse(name).map_or_else(|_| Vec::new(), |edge| edge.faces.iter().filter_map(FaceName::feature).collect())
+}
+
+/// The feature that made the face a name says: none for a name without history.
+fn face_maker(name: &str) -> Option<FeatureId> {
+    FaceName::parse(name).ok()?.feature()
+}
+
+/// How a reference stands when what it names isn't found, by the features that made it: suppressed
+/// or rolled back, failed, or else lost, and why.
+fn gone(model: &Model, makers: &[FeatureId], lost: String) -> Status {
+    let results = || model.results.iter().filter(|r| makers.iter().any(|m| m.0 == r.id));
+    if results().any(|r| r.skipped) {
+        return Status::Suppressed;
+    }
+    results().find_map(|r| r.error.clone()).map_or(Status::Lost(lost), Status::Failed)
+}
+
 impl<'a> Lookup<'a> {
     pub(super) fn new(doc: &'a Document, model: &'a Model) -> Lookup<'a> {
         Lookup { doc, model, state: model.state(), named: BTreeMap::new(), cylinders: BTreeMap::new() }
@@ -748,15 +771,9 @@ impl<'a> Lookup<'a> {
     fn body(&self, body: &str, feature: u64, path: &[u64]) -> std::result::Result<(usize, Mat), Status> {
         let found = self.state.bodies.iter().enumerate().find(|(_, b)| b.name == body && b.feature == feature && !b.body.is_mesh());
         let Some((i, b)) = found else {
-            if self.model.results.iter().any(|r| r.id == feature && r.skipped) {
-                return Err(Status::Suppressed);
-            }
             let remade = self.state.bodies.iter().any(|b| b.name == body);
-            return Err(Status::Lost(if remade {
-                format!("body `{body}` is made by another feature now")
-            } else {
-                format!("body `{body}` no longer exists")
-            }));
+            let why = if remade { format!("body `{body}` is made by another feature now") } else { format!("body `{body}` no longer exists") };
+            return Err(gone(self.model, &[FeatureId(feature)], why));
         };
         let frame = self.doc.body_frame_at(b, path).map_err(|_| Status::Lost("the occurrence its body is placed through no longer exists".into()))?;
         Ok((i, frame))
@@ -776,7 +793,7 @@ impl<'a> Lookup<'a> {
         let (indices, named) = match names.matching(&edge.name) {
             Some(EdgeMatch::Edge(e)) => (vec![e], true),
             Some(EdgeMatch::Pieces(pieces)) => (pieces, false),
-            None => return Err(Status::Lost(format!("edge `{}` no longer exists", edge.name))),
+            None => return Err(gone(self.model, &edge_makers(&edge.name), format!("edge `{}` no longer exists", edge.name))),
         };
         let whole = named || indices.len() == 1;
         let exact = named && indices.iter().all(|e| names.verified(*e));
@@ -844,7 +861,7 @@ impl<'a> Lookup<'a> {
             let (indices, whole) = match names.matching(name) {
                 Some(EdgeMatch::Edge(e)) => (vec![e], true),
                 Some(EdgeMatch::Pieces(pieces)) => (pieces, false),
-                None => return Err(Status::Lost(format!("edge `{name}` no longer exists"))),
+                None => return Err(gone(self.model, &edge_makers(name), format!("edge `{name}` no longer exists"))),
             };
             exact &= whole && indices.iter().all(|e| names.verified(*e));
             let lines = indices.iter().filter_map(|e| names.mesh.edges.get(*e));
@@ -881,7 +898,13 @@ impl<'a> Lookup<'a> {
         let cylinders = self.cylinders.entry(i).or_insert_with(|| cylinders_of(b));
         let on = |f: &usize| cylinders.get(*f).copied().flatten();
         let first = match found.first() {
-            None => return Err(Status::Lost(format!("face `{}` no longer exists", face.name))),
+            None => {
+                return Err(gone(
+                    self.model,
+                    &face_maker(&face.name).into_iter().collect::<Vec<_>>(),
+                    format!("face `{}` no longer exists", face.name),
+                ));
+            }
             Some(f) => on(f).ok_or_else(|| Status::Unmeasurable(format!("face `{}` isn't a cylinder", face.name)))?,
         };
         let tol = cylinder_tolerance(b);
@@ -933,7 +956,8 @@ impl<'a> Lookup<'a> {
         let state = Arc::clone(&self.state);
         let b = state.bodies.get(i).ok_or_else(|| Status::Lost("its body no longer exists".into()))?;
         let (found, exact) = faces_named(b, &face.name);
-        let first = found.first().ok_or_else(|| Status::Lost(format!("face `{}` no longer exists", face.name)))?;
+        let makers: Vec<FeatureId> = face_maker(&face.name).into_iter().collect();
+        let first = found.first().ok_or_else(|| gone(self.model, &makers, format!("face `{}` no longer exists", face.name)))?;
         let plane = b.body.planar_face(*first).ok_or_else(|| Status::Unmeasurable(format!("face `{}` isn't flat", face.name)))?;
         if self.doc.coplanar_pieces(b, &found, |_| true).is_err() {
             return Err(Status::Ambiguous(face_candidates(b, &found)));
