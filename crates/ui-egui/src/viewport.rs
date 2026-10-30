@@ -602,9 +602,15 @@ fn scene_key(app: &SolveApp) -> u64 {
     h.finish()
 }
 
+#[cfg(test)]
 fn sketch_scene_key(app: &SolveApp, proj: &Proj) -> u64 {
+    sketch_scene_key_for(app, proj, scene_key(app))
+}
+
+/// [`sketch_scene_key`] given the frame's [`scene_key`] (computed once per frame).
+fn sketch_scene_key_for(app: &SolveApp, proj: &Proj, scene: u64) -> u64 {
     let mut h = std::collections::hash_map::DefaultHasher::new();
-    scene_key(app).hash(&mut h);
+    scene.hash(&mut h);
     // The grid this scene draws follows the view when the preference says so (#1470): turning it
     // on or off redraws even while the camera holds still.
     app.ui.show_grid.hash(&mut h);
@@ -3255,8 +3261,64 @@ fn edge_of(m: &solidcraft_engine::geom::Mesh, index: usize, point: Vec3) -> Opti
     m.edges.iter().min_by(|a, b| near(a).total_cmp(&near(b))).filter(|e| near(e) < tol * 1e3)
 }
 
-fn face_tris(sc: &mut GpuScene, m: &solidcraft_engine::geom::Mesh, face: usize, col: [u8; 4], lit: bool) {
-    mesh_tris(sc, m, col, lit, |f| f as usize == face);
+/// How many meshes keep their [`FaceIndex`](solidcraft_engine::geom::FaceIndex) (the bodies lit
+/// last, each with its drawn and its shown mesh).
+const FACE_INDEX_CACHE: usize = 8;
+
+/// The face index of mesh `m`, made once per mesh: lighting a face, or a surface of hundreds of
+/// faces, then reads only their triangles and edges instead of scanning the body's every
+/// triangle and edge once per face, at each hover change.
+///
+/// Kept by the mesh's identity (its `Arc`) for the meshes lit last. A held `Weak` keeps the
+/// allocation, so its address is not reused by another mesh while it is cached, and an `Arc`'s
+/// mesh is not changed in place while a `Weak` to it exists (`Arc::get_mut` refuses).
+fn face_index(m: &std::sync::Arc<solidcraft_engine::geom::Mesh>) -> std::sync::Arc<solidcraft_engine::geom::FaceIndex> {
+    use std::sync::{Arc, Mutex, Weak};
+    type Entry = (Weak<solidcraft_engine::geom::Mesh>, Arc<solidcraft_engine::geom::FaceIndex>);
+    static CACHE: Mutex<Vec<Entry>> = Mutex::new(Vec::new());
+    let is = |e: &Entry| std::ptr::eq(e.0.as_ptr(), Arc::as_ptr(m));
+    {
+        let mut cache = CACHE.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(i) = cache.iter().position(is) {
+            let entry = cache.remove(i);
+            let index = entry.1.clone();
+            cache.insert(0, entry);
+            return index;
+        }
+    }
+    let index = Arc::new(m.face_index());
+    let mut cache = CACHE.lock().unwrap_or_else(|e| e.into_inner());
+    cache.retain(|e| e.0.strong_count() > 0 && !is(e));
+    cache.insert(0, (Arc::downgrade(m), index.clone()));
+    cache.truncate(FACE_INDEX_CACHE);
+    index
+}
+
+fn face_tris(sc: &mut GpuScene, m: &std::sync::Arc<solidcraft_engine::geom::Mesh>, face: usize, col: [u8; 4], lit: bool) {
+    faces_tris(sc, m, &face_index(m), &[face], col, lit);
+}
+
+/// The triangles of `faces`, face by face in that order, each face's in mesh order: what calling
+/// [`face_tris`] for each of them drew, without a pass over the whole mesh per face.
+fn faces_tris(
+    sc: &mut GpuScene,
+    m: &solidcraft_engine::geom::Mesh,
+    index: &solidcraft_engine::geom::FaceIndex,
+    faces: &[usize],
+    col: [u8; 4],
+    lit: bool,
+) {
+    let col = sc.color(col);
+    for &face in faces {
+        for t in index.triangles(m, face).iter().filter_map(|&t| m.triangles.get(t as usize)) {
+            for k in t {
+                let i = *k as usize;
+                if let (Some(p), Some(n)) = (m.positions.get(i), m.normals.get(i)) {
+                    sc.tri(p.to_f32(), if lit { n.to_f32() } else { [0.0; 3] }, col);
+                }
+            }
+        }
+    }
 }
 
 /// Emit a set of faces in one mesh pass. Whole-body feedback must not scan every triangle
@@ -3341,11 +3403,13 @@ fn edge_normals(m: &solidcraft_engine::geom::Mesh, e: &[Vec3]) -> Vec<[[f32; 3];
 }
 
 /// The outline of a highlighted face where the model hides it (dimmed).
-fn hidden_face_outline(sc: &mut GpuScene, m: &solidcraft_engine::geom::Mesh, face: usize, col: Color32) {
+fn hidden_face_outline(sc: &mut GpuScene, m: &std::sync::Arc<solidcraft_engine::geom::Mesh>, face: usize, col: Color32) {
     let col = sc.color(c4(col.gamma_multiply(0.45)));
-    for (ei, e) in m.edges.iter().enumerate() {
-        let on = m.edge_faces.get(ei).is_some_and(|f| f.iter().any(|x| *x as usize == face));
-        if on && m.edge_pickable(ei) {
+    for &ei in face_index(m).edges(m, face).iter() {
+        let ei = ei as usize;
+        if let Some(e) = m.edges.get(ei)
+            && m.edge_pickable(ei)
+        {
             for p in e.windows(2) {
                 sc.hidden_line(p[0].to_f32(), p[1].to_f32(), col, 1.4);
             }
@@ -3427,6 +3491,45 @@ fn hover_drawn(hover: &Option<Hit>) -> String {
     }
 }
 
+/// Every field of each item, hashed as it is (what the key used to take from the items' JSON).
+/// Faster than writing the JSON out: a frame hashes the selection, and Select All on a large
+/// assembly, or a surface of hundreds of faces, is a long list.
+fn hash_selection(items: &[Sel], h: &mut impl std::hash::Hasher) {
+    use std::hash::Hash;
+    let point = |p: &Vec3, h: &mut _| [p.x, p.y, p.z].map(f64::to_bits).hash(h);
+    items.len().hash(h);
+    for item in items {
+        std::mem::discriminant(item).hash(h);
+        match item {
+            Sel::Occurrence { path } => path.hash(h),
+            Sel::Body { name } | Sel::Plane { name } | Sel::ConstructionPoint { name } | Sel::Axis { name } => name.hash(h),
+            Sel::Edge { body, index, point: p } | Sel::Face { body, index, point: p } => {
+                body.hash(h);
+                index.hash(h);
+                point(p, h);
+            }
+            Sel::Feature { id } => id.hash(h),
+            Sel::SketchCurve { id, sketch } => {
+                id.hash(h);
+                sketch.hash(h);
+            }
+            Sel::SketchPoint { id } | Sel::SketchMidpoint { id } | Sel::SketchConstraint { id } => id.hash(h),
+            Sel::ExternalSketchCurve { sketch, id } | Sel::ExternalSketchPoint { sketch, id } => {
+                sketch.hash(h);
+                id.hash(h);
+            }
+            Sel::Profile { sketch, index } => {
+                sketch.hash(h);
+                index.hash(h);
+            }
+            Sel::Vertex { body, point: p } => {
+                body.hash(h);
+                point(p, h);
+            }
+        }
+    }
+}
+
 /// The body the current hover actually selects, after the active dialog's filter.
 fn hovered_body(app: &SolveApp) -> Option<String> {
     if app.tool.is_some() {
@@ -3440,12 +3543,18 @@ fn hovered_body(app: &SolveApp) -> Option<String> {
     }
 }
 
+#[cfg(test)]
 fn highlight_geometry_key(app: &SolveApp) -> u64 {
+    highlight_geometry_key_for(app, scene_key(app), &app.highlighted())
+}
+
+/// [`highlight_geometry_key`] given the frame's [`scene_key`] and [`SolveApp::highlighted`]
+/// (each computed once per frame).
+fn highlight_geometry_key_for(app: &SolveApp, scene: u64, selected: &[Sel]) -> u64 {
     let mut h = std::collections::hash_map::DefaultHasher::new();
-    let selected = app.highlighted();
     app.session.revision.hash(&mut h);
     (std::sync::Arc::as_ptr(&crate::open_meshing::shown_world(app)) as usize).hash(&mut h);
-    serde_json::to_string(&selected).unwrap_or_default().hash(&mut h);
+    hash_selection(selected, &mut h);
     hover_drawn(&app.viewport.hover).hash(&mut h);
     hovered_body(app).hash(&mut h);
     app.viewport.hover_feature.hash(&mut h);
@@ -3457,7 +3566,7 @@ fn highlight_geometry_key(app: &SolveApp) -> u64 {
     lod_generation(app).hash(&mut h);
     // Whole-body highlights redraw the model scene's own blocks: they must be the scene's
     // current ones (their keys and the bodies' ranges in them).
-    scene_key(app).hash(&mut h);
+    scene.hash(&mut h);
     // And the mode the model draws bodies in: from their plans on the GPU, or built here.
     app.viewport.gpu.is_some_and(|g| g.tess).hash(&mut h);
     app.session.active_component.hash(&mut h);
@@ -3497,15 +3606,20 @@ fn highlight_geometry_key(app: &SolveApp) -> u64 {
 }
 
 pub(crate) fn highlight_key(app: &SolveApp) -> u64 {
-    let mut h = std::collections::hash_map::DefaultHasher::new();
-    highlight_geometry_key(app).hash(&mut h);
     let selected = app.highlighted();
+    highlight_key_for(app, highlight_geometry_key_for(app, scene_key(app), &selected), &selected)
+}
+
+/// [`highlight_key`] from the frame's [`highlight_geometry_key`] and highlighted items.
+fn highlight_key_for(app: &SolveApp, geometry: u64, selected: &[Sel]) -> u64 {
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    geometry.hash(&mut h);
     app.cam.half_height().to_bits().hash(&mut h);
     // Body triangles and outlines live in world space; the GPU applies the new camera.
     // Only sketch feedback needs projected tessellation and the profile's lift toward the eye.
     let projected = selected.iter().any(|s| matches!(s, Sel::Profile { .. } | Sel::SketchCurve { .. } | Sel::ExternalSketchCurve { .. }))
         || matches!(app.viewport.hover, Some(Hit::Profile { .. }))
-        || !selected_sketches(app, &selected).is_empty();
+        || !selected_sketches(app, selected).is_empty();
     if projected {
         crate::sketch_display::projection_key(&display_proj(app), app.viewport.pixels_per_point()).hash(&mut h);
     }
@@ -3716,13 +3830,18 @@ fn light_whole_body(
 
 /// The highlight scene: origin widget, construction planes, selection and hover.
 pub(crate) fn build_highlight(app: &SolveApp) -> GpuScene {
+    let selected = app.highlighted();
+    build_highlight_keyed(app, highlight_geometry_key_for(app, scene_key(app), &selected))
+}
+
+/// [`build_highlight`] given its [`highlight_geometry_key`], which the frame has already made.
+fn build_highlight_keyed(app: &SolveApp, key: u64) -> GpuScene {
     let began = crate::now_ms();
     let t = Tokens::get();
     // The model scene's stable palette slots first: whole faded or see-through bodies are drawn
     // again from the model's own vertices in this palette, their slots set to the highlight's
     // colour (see `light_whole_body`); this scene's own colours follow.
-    // The key first: it reads the arena (`scene_key`), which is held below.
-    let key = highlight_geometry_key(app);
+    // The key is made first: it reads the arena (`scene_key`), which is held below.
     let body_slots = app.viewport.palette.lock().unwrap_or_else(|e| e.into_inner());
     let mut sc = GpuScene::with_palette(crate::gpu::Palette::with_stable(body_slots.entries()));
     let st = crate::open_meshing::shown_world(app);
@@ -3743,10 +3862,45 @@ pub(crate) fn build_highlight(app: &SolveApp) -> GpuScene {
     let drawn = |b: &solidcraft_engine::doc::ModelBody| carried_mesh(carry(b), drawn_mesh(app, b));
     let items = app.highlighted();
     let sketches = selected_sketches(app, &items);
-    let mut sel = Vec::new();
+    let mut sel: Vec<Sel> = Vec::new();
+    // Faces and edges are the same item by body and index (`selection::same_item`), bodies by
+    // name: found in a set, as a selected surface of hundreds of pieces lists each piece once per
+    // piece, and Select All on an assembly is thousands of bodies.
+    let mut parts: std::collections::HashMap<String, std::collections::HashSet<(u8, usize)>> = std::collections::HashMap::new();
+    // Faces whose whole surface a selected face has listed: a surface is the same from any of its
+    // pieces, so a selected face among them adds nothing when expanded again.
+    let mut surfaces: std::collections::HashSet<(String, usize)> = std::collections::HashSet::new();
     for item in &items {
+        let face = match item {
+            Sel::Face { body, index, .. } => Some((body.clone(), *index)),
+            _ => None,
+        };
+        if face.as_ref().is_some_and(|f| surfaces.contains(f)) {
+            continue;
+        }
         for piece in displayed_selection(app, item).into_iter().filter(|s| !product || matches!(s, Sel::Body { .. } | Sel::Face { .. })) {
-            if !sel.iter().any(|x| crate::selection::same_item(x, &piece)) {
+            if face.is_some()
+                && let Sel::Face { body, index, .. } = &piece
+            {
+                surfaces.insert((body.clone(), *index));
+            }
+            let part = match &piece {
+                Sel::Face { body, index, .. } => Some((body, (0, *index))),
+                Sel::Edge { body, index, .. } => Some((body, (1, *index))),
+                Sel::Body { name } => Some((name, (2, 0))),
+                _ => None,
+            };
+            let new = match part {
+                Some((body, key)) => match parts.get_mut(body.as_str()) {
+                    Some(keys) => keys.insert(key),
+                    None => {
+                        parts.insert(body.clone(), std::collections::HashSet::from([key]));
+                        true
+                    }
+                },
+                None => !sel.iter().any(|x| crate::selection::same_item(x, &piece)),
+            };
+            if new {
                 sel.push(piece);
             }
         }
@@ -4028,6 +4182,7 @@ pub(crate) fn build_highlight(app: &SolveApp) -> GpuScene {
             continue;
         }
         let m = drawn_mesh(app, b);
+        let face_set: std::collections::HashSet<usize> = faces.iter().copied().collect();
         let base = body_color(&s.doc, b).unwrap_or(t.body);
         let k = t.hover_face_lift;
         let hover_col = [base.r().saturating_add(k), base.g().saturating_add(k), base.b().saturating_add(k), 255];
@@ -4041,16 +4196,15 @@ pub(crate) fn build_highlight(app: &SolveApp) -> GpuScene {
             } else {
                 let lit = shown(b);
                 let selected_faces = selected_faces.get(b.name.as_str());
-                let hovered_faces: std::collections::HashSet<usize> = faces.iter().copied().collect();
                 let keeps = |f: u32| {
                     let f = f as usize;
-                    hovered_faces.contains(&f) && selected_faces.is_none_or(|s| !s.contains(&f))
+                    face_set.contains(&f) && selected_faces.is_none_or(|s| !s.contains(&f))
                 };
                 mesh_tris(&mut feedback, &lit, hover_col, true, keeps);
             }
         }
         for (ei, e) in m.edges.iter().enumerate() {
-            if m.edge_pickable(ei) && (whole || m.edge_faces.get(ei).is_some_and(|fs| fs.iter().any(|f| faces.contains(&(*f as usize))))) {
+            if m.edge_pickable(ei) && (whole || m.edge_faces.get(ei).is_some_and(|fs| fs.iter().any(|f| face_set.contains(&(*f as usize))))) {
                 edge_lines(&mut feedback, e, hover_edge, 1.5, &[]);
             }
         }
@@ -4066,12 +4220,14 @@ pub(crate) fn build_highlight(app: &SolveApp) -> GpuScene {
                 let k = t.hover_face_lift;
                 let c = body_rgb(app, body);
                 let m = drawn(b);
-                let patch = m.surface_patch(*index);
+                // The surface's pieces, their triangles and their edges, from the meshes' face
+                // indexes: work in the faces lit, not in faces × the body's triangles.
+                let edges_index = face_index(&m);
+                let patch = edges_index.surface_patch(&m, *index);
                 let lit = shown(b);
-                for &f in &patch {
-                    face_tris(&mut feedback, &lit, f, [c.0.saturating_add(k), c.1.saturating_add(k), c.2.saturating_add(k), 255], true);
-                }
-                for (e, _) in m.edge_faces.iter().enumerate().filter(|(_, fs)| fs.iter().any(|f| patch.contains(&(*f as usize)))) {
+                let colour = [c.0.saturating_add(k), c.1.saturating_add(k), c.2.saturating_add(k), 255];
+                faces_tris(&mut feedback, &lit, &face_index(&lit), &patch, colour, true);
+                for e in edges_index.edges_of(&m, &patch) {
                     if let Some(p) = m.edges.get(e)
                         && m.edge_pickable(e)
                     {
@@ -4379,7 +4535,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             app.viewport.build_ms = crate::now_ms() - t0;
             crate::frame_watch::step(app, "model scene");
         }
-        let sk = sketch_scene_key(app, &proj);
+        let sk = sketch_scene_key_for(app, &proj, key);
         if sk != app.viewport.sketch_key {
             let scene = build_sketch_scene(app, &proj);
             if let Ok(mut slot) = app.viewport.sketch_slot.lock() {
@@ -4387,9 +4543,12 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             }
             app.viewport.sketch_key = sk;
         }
-        let hk = highlight_key(app);
+        // The keys once a frame: the scene key (above) and the highlighted items feed both.
+        let selected = app.highlighted();
+        let geometry = highlight_geometry_key_for(app, key, &selected);
+        let hk = highlight_key_for(app, geometry, &selected);
         if hk != app.viewport.hl_key {
-            let hl = build_highlight(app);
+            let hl = build_highlight_keyed(app, geometry);
             if let Ok(mut slot) = app.viewport.hl_slot.lock() {
                 *slot = Some(hl);
             }
@@ -5850,8 +6009,12 @@ pub(crate) fn grouped_selection(s: &solidcraft_engine::Session, sel: &Sel) -> Ve
         }
         Sel::Face { body, index, .. } => {
             if let Some(b) = st.body(body) {
+                // From the mesh's face index: the highlight expands every selected face this way
+                // at each hover change, and a selected surface of hundreds of pieces is hundreds
+                // of faces, each found in the body's triangles once per piece without it.
                 let m = b.mesh();
-                let mut patch = m.surface_patch(*index);
+                let faces = face_index(&m);
+                let mut patch = faces.surface_patch(&m, *index);
                 patch.sort_by_key(|i| usize::from(i != index));
                 return patch
                     .into_iter()
@@ -5859,11 +6022,8 @@ pub(crate) fn grouped_selection(s: &solidcraft_engine::Session, sel: &Sel) -> Ve
                         if i == *index {
                             return Some(sel.clone());
                         }
-                        m.triangles.iter().zip(&m.tri_face).find_map(|(t, f)| {
-                            if *f as usize != i {
-                                return None;
-                            }
-                            let [a, b, c] = m.tri(t)?;
+                        faces.triangles(&m, i).iter().find_map(|&t| {
+                            let [a, b, c] = m.tri(m.triangles.get(t as usize)?)?;
                             Some(Sel::Face { body: body.clone(), index: i, point: (a + b + c) / 3.0 })
                         })
                     })
@@ -9387,7 +9547,7 @@ mod tests {
                 })
                 .collect()
         };
-        let mesh_tris = |m: &solidcraft_engine::geom::Mesh| -> std::collections::HashSet<[u32; 9]> {
+        let mesh_tris = |m: &std::sync::Arc<solidcraft_engine::geom::Mesh>| -> std::collections::HashSet<[u32; 9]> {
             let mut sc = GpuScene::default();
             for f in 0..m.tri_face.iter().map(|f| *f as usize + 1).max().unwrap_or(0) {
                 face_tris(&mut sc, m, f, [0; 4], true);
@@ -9977,6 +10137,98 @@ mod tests {
                 assert_eq!(grouped_selection(&app.session, &sel).len(), 2);
             }
         }
+    }
+
+    /// A hovered surface of many pieces is lit from the meshes' face indexes: the same
+    /// triangles, in the same order and colours, and the same edges, as the scans per face it
+    /// replaced (`surface_patch`, then one pass over the body's triangles per piece, then every
+    /// edge tested against the patch), on a wall of 32 pieces, as drawn
+    /// and refined finer; and the whole highlight lights every piece of the wall.
+    #[test]
+    fn a_hovered_surface_of_many_pieces_lights_what_the_scans_per_face_lit() {
+        let pieces = 32usize;
+        let mut s = solidcraft_engine::Session::default();
+        s.execute("sketch.create", &json!({"plane": "XY"})).unwrap();
+        let at = |i: usize| {
+            let a = std::f64::consts::TAU * (i % pieces) as f64 / pieces as f64;
+            [20.0 * a.cos(), 20.0 * a.sin()]
+        };
+        for i in 0..pieces {
+            s.execute("sketch.arc.center_point", &json!({"center": [0, 0], "start": at(i), "end": at(i + 1)})).unwrap();
+        }
+        s.execute("sketch.finish", &json!({})).unwrap();
+        s.execute("solid.extrude", &json!({"sketch": 1, "distance": 40})).unwrap();
+        let mut app = SolveApp::new(s, crate::Services::default());
+        app.set_origin_shown(false);
+        let colour = [200, 100, 50, 255];
+        let mut largest = 0;
+        for quality in ["drawn", "refined"] {
+            let st = app.session.world_state();
+            if quality == "refined" {
+                app.viewport.gpu =
+                    Some(GpuTarget { format: egui_wgpu::wgpu::TextureFormat::Rgba8Unorm, depth: None, samples: 1, tess: false, oit: false });
+                for b in &st.bodies {
+                    assert!(app.viewport.lod.lock().unwrap().force(b, solidcraft_engine::doc::display_quality::current(), 2));
+                    assert!(refined(&app, b).is_some());
+                }
+            }
+            for b in &st.bodies {
+                let (m, lit) = (drawn_mesh(&app, b), shown_mesh(&app, b, &None));
+                for face in 0..b.body.face_count() + 1 {
+                    let patch = m.surface_patch(face);
+                    largest = largest.max(patch.len());
+                    let mut old = GpuScene::default();
+                    for &f in &patch {
+                        mesh_tris(&mut old, &lit, colour, true, |x| x as usize == f);
+                    }
+                    let mut new = GpuScene::default();
+                    let index = face_index(&m);
+                    assert_eq!(index.surface_patch(&m, face), patch, "{quality} {} face {face}: patch", b.name);
+                    faces_tris(&mut new, &lit, &face_index(&lit), &patch, colour, true);
+                    assert_eq!(new.tris, old.tris, "{quality} {} face {face}: triangles", b.name);
+                    assert_eq!(new.palette.entries(), old.palette.entries());
+                    let old_edges: Vec<usize> =
+                        m.edge_faces.iter().enumerate().filter(|(_, fs)| fs.iter().any(|f| patch.contains(&(*f as usize)))).map(|(e, _)| e).collect();
+                    assert_eq!(index.edges_of(&m, &patch), old_edges, "{quality} {} face {face}: edges", b.name);
+                    if face < b.body.face_count() {
+                        app.viewport.hover = Some(Hit::Face { body: b.name.clone(), index: face, point: Vec3::ZERO });
+                        let lit_count: usize = patch.iter().map(|&f| lit.tri_face.iter().filter(|x| **x as usize == f).count()).sum();
+                        assert_eq!(build_highlight(&app).merged().tris.len(), lit_count * 3 * crate::gpu::TRI_SIZE, "{quality} face {face}");
+                    }
+                }
+            }
+        }
+        assert!(largest >= pieces - 2, "the wall is one surface of many pieces ({largest})");
+        // The whole wall selected (as picking one piece selects it): the highlight fills every
+        // piece once, also while a cap is hovered.
+        let st = app.session.world_state();
+        let b = &st.bodies[0];
+        let m = drawn_mesh(&app, b);
+        let wall = (0..b.body.face_count()).max_by_key(|&f| m.surface_patch(f).len()).unwrap();
+        let patch = m.surface_patch(wall);
+        // Each piece expands to the wall as the scans did: the picked piece first, the others at
+        // the centre of their first triangle.
+        let mesh = b.mesh();
+        for &f in &patch {
+            let picked = Sel::Face { body: b.name.clone(), index: f, point: Vec3::ZERO };
+            let mut expected = vec![picked.clone()];
+            for &g in mesh.surface_patch(f).iter().filter(|&&g| g != f) {
+                let (t, _) = mesh.triangles.iter().zip(&mesh.tri_face).find(|(_, x)| **x as usize == g).unwrap();
+                let [p, q, r] = mesh.tri(t).unwrap();
+                expected.push(Sel::Face { body: b.name.clone(), index: g, point: (p + q + r) / 3.0 });
+            }
+            assert_eq!(grouped_selection(&app.session, &picked), expected);
+        }
+        app.viewport.hover = None;
+        app.session.selection = grouped_selection(&app.session, &Sel::Face { body: b.name.clone(), index: wall, point: Vec3::ZERO });
+        assert_eq!(app.session.selection.len(), patch.len());
+        let lit = shown_mesh(&app, b, &None);
+        let wall_tris = lit.tri_face.iter().filter(|f| patch.contains(&(**f as usize))).count();
+        assert_eq!(build_highlight(&app).merged().tris.len(), wall_tris * 3 * crate::gpu::TRI_SIZE);
+        let cap = (0..b.body.face_count()).find(|f| !patch.contains(f)).unwrap();
+        app.viewport.hover = Some(Hit::Face { body: b.name.clone(), index: cap, point: Vec3::ZERO });
+        let cap_tris = lit.tri_face.iter().filter(|f| **f as usize == cap).count();
+        assert_eq!(build_highlight(&app).merged().tris.len(), (wall_tris + cap_tris) * 3 * crate::gpu::TRI_SIZE);
     }
 
     #[test]
