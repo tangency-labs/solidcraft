@@ -1,0 +1,7 @@
+{
+ "sources": [],
+ "what": "four squares drawn edge to edge, three extruded 10 up and three 10 down and joined, shelled 0.346 mm open at a side wall (action matrix (apps/solidcraft-cli/tests/action_matrix.rs): typical/up-down-join, Body1/F2:side:l1 face.shell)",
+ "source": "invariants",
+ "method": "every wall is 10 x 10 or more and the shell thin: the cavity's corners where the up and down parts overlap only along an edge are the offset's own choice, so no closed form: one closed valid solid is the right answer",
+ "body_count": 1
+}

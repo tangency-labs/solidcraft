@@ -1,0 +1,9 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#616"
+ ],
+ "what": "#616's lid (a 2.4 mm plate with R3 corners, a 3 mm skirt, three openings and four 1.6 mm ribs, all boxes) shelled 0.5 mm with a rib's outer side face open (action matrix (apps/solidcraft-cli/tests/action_matrix.rs): corpus/issue-616-lid-ribs, Lid/F8:-x face.shell)",
+ "source": "invariants",
+ "method": "every wall is at least 1.4 thick, so a 0.5 shell fits everywhere; the cavity's corners at the openings and the R3 rounds' offsets make the volume long but not unknown, and the case guards the build: one closed valid solid is the right answer",
+ "body_count": 1
+}

@@ -1,0 +1,102 @@
+{
+ "commands": [
+  {
+   "command": "parameters.change",
+   "params": {
+    "name": "height",
+    "expression": "30 mm"
+   }
+  },
+  {
+   "command": "parameters.change",
+   "params": {
+    "name": "wall",
+    "expression": "2 mm"
+   }
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": "XY",
+    "name": "Outline"
+   }
+  },
+  {
+   "command": "sketch.rectangle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "corner": [
+     35,
+     25
+    ]
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.extrude",
+   "params": {
+    "distance": "height"
+   }
+  },
+  {
+   "command": "solid.fillet",
+   "params": {
+    "edges": [
+     [
+      35,
+      25,
+      15
+     ],
+     [
+      -35,
+      25,
+      15
+     ],
+     [
+      35,
+      -25,
+      15
+     ],
+     [
+      -35,
+      -25,
+      15
+     ]
+    ],
+    "radius": 6
+   }
+  },
+  {
+   "command": "solid.shell",
+   "params": {
+    "faces": [
+     [
+      0,
+      0,
+      30
+     ]
+    ],
+    "thickness": "wall"
+   }
+  },
+  {
+   "command": "solid.shell",
+   "params": {
+    "faces": [
+     [
+      -24.166666666667016,
+      -22.999999915917346,
+      4.666666666666665
+     ]
+    ],
+    "thickness": 0.5
+   }
+  }
+ ]
+}

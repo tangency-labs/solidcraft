@@ -2,3 +2,12 @@
 # rig gate (.github/workflows/kernel-rig.yml) fails on a case that fails and is not listed here,
 # and on a listed case that passes: a fix removes its line in the same pull request.
 # Baseline: 45f69c0e5 with SMLib 60b1c6a, aarch64 Linux.
+316-shell-open-beside-a-bottom-round-r2-4-as-large-as-the-wall-refused builds a shell where the rim has no thickness instead of refusing it
+316-shell-open-beside-a-bottom-round-r2-as-large-as-the-wall-refused builds a shell where the rim has no thickness instead of refusing it
+545-shell-ring-cut-frame-open-at-an-outer-wall SMLib status 1001
+616-shell-open-a-rib-side-face-of-a-lid SMLib status 1001
+cov-shell-again-open-at-an-inner-wall-of-a-shelled-box SMLib status 1001
+cov-shell-plate-with-a-hole-through-its-arc-side SMLib status 1001 where the hole's wall meets the arc side
+cov-shell-pocket-whose-floor-falls-to-a-drain SMLib status 1001 where four faces meet at the pocket floor's corners
+cov-shell-trough-whose-floor-falls-to-a-drain SMLib status 1001 where four faces meet at a corner
+cov-shell-up-down-joined-squares-open-at-a-side-wall SMLib status 1001

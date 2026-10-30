@@ -1,0 +1,91 @@
+{
+ "commands": [
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": "XY"
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      0,
+      0
+     ],
+     [
+      42.5,
+      0
+     ],
+     [
+      42.5,
+      20.0
+     ],
+     [
+      0,
+      20.0
+     ]
+    ]
+   }
+  },
+  {
+   "command": "sketch.arc.three_point",
+   "params": {
+    "end": [
+     0,
+     0
+    ],
+    "start": [
+     0,
+     20.0
+    ],
+    "through": [
+     -10.0,
+     10.0
+    ]
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.extrude",
+   "params": {
+    "distance": 27.5
+   }
+  },
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "radius": 5.0,
+    "height": 17.5,
+    "base": [
+     -10.0,
+     12.5,
+     12.5
+    ],
+    "axis": [
+     1.0,
+     0.0,
+     0.0
+    ],
+    "operation": "cut"
+   }
+  },
+  {
+   "command": "solid.shell",
+   "params": {
+    "faces": [
+     [
+      42.5,
+      10.0,
+      13.75
+     ]
+    ],
+    "thickness": 2.0
+   }
+  }
+ ]
+}
