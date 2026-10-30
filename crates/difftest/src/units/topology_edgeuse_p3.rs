@@ -3,11 +3,13 @@
 //!
 //! The B-reps are those of unit `topology.edgeuse_p1` (upstream `.smb` files, wire edges,
 //! faces from B-spline surfaces and real `SmPlane`s, the wire network of `prog_test`
-//! `my_test_topology`): the C++ side builds a real `SmBrep` per call, the Rust side
-//! builds a non-file source itself ([`crate::own_builder`]) and for an `.smb` file
-//! imports the graph the shim exports ([`super::topology_edgeuse_p1::import`]), and the
-//! ported functions run on both. Edge use arguments are selectors taken modulo the edge
-//! use count.
+//! `my_test_topology`), plus the `Fillet/` files of the fillet executive sweeps
+//! (`own_reader_fillet.json`, e.g. `sphere_diff_3cylinders.smb`): the C++ side builds a
+//! real `SmBrep` per call, the Rust side builds a non-file source itself and reads an
+//! `.smb` file with the Rust reader ([`crate::own_builder::build_any`]), renumbered
+//! into the shim's traversal order, so no C++ export (graph, gap cache, cache tree
+//! states or geometry types) reaches the Rust side, and the ported functions run on
+//! both. Edge use arguments are selectors taken modulo the edge use count.
 //!
 //! `CreateUVTrimCurve` and every path that has to make a UV trim curve run
 //! `SmSurface::DropCurve` (the plane override or the general drop, unit
@@ -19,20 +21,13 @@
 //! interval and tolerance, then the full records of the edge use's and its mate's UV trim
 //! curves ([`crate::util::trim_curve`]: type, degree, control points, weights, knots,
 //! interval and samples, a failed sample as its status); `CreateUVTrimCurve`'s result
-//! curve is compared with the same record. A unit-local auxiliary export carries the complete initial
-//! maximum edge/face gap cache, so `GetOrCreateUVTrimCurve` compares cached distances too.
+//! curve is compared with the same record. Each side computes its own maximum
+//! edge/face gap cache (the reader's healer, then the shim's `init_gaps` walk), so
+//! `GetOrCreateUVTrimCurve` compares cached distances too.
 //! `EvaluateBinormal` builds the face's trimmed surface cache; on the tiny adversarial
 //! surfaces that tree grows to about 2 million nodes on both sides (2 014 255 in the C++
 //! for the `1e-4`-scale faces), below the port's `MAX_SUBDIVISION_NODES` bound; a case
 //! past that bound would be deferred to `surface.surface_cache_p3`.
-//!
-//! Known mismatches (`known_mismatches/topology.edgeuse_p3.toml`): `EvaluateBinormal` with `bUse3DOnly` on
-//! `Endcap.smb` (a file without UV trim curves). `SmBrep::ReadFromFile`'s healer leaves
-//! an `SmTrimSrfCache` without a tree on each face's surface; `EvaluateBinormal`
-//! reuses it, and its tree is built later with the surface's owner cleared
-//! (`GlobalPointSolve`), so no `CreateUVTrimCurves` runs. The Rust B-rep keeps no
-//! per-surface cache, so the port builds the face's trimmed cache and attaches the UV
-//! trim curves. The graph export does not carry the cache's existence.
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -48,8 +43,7 @@ use solidcore_ffi::units::topology_edgeuse_p1 as ffi1;
 use solidcore_ffi::units::topology_edgeuse_p3::{self as ffi, Op};
 
 use super::topology_edgeuse_p1::{
-    brep_block_of, domain, gen_brep, gen_surface, harness, import_with_types, path_of,
-    seed_cache_tree_states, sel, BrepIn, SrfIn, FILES,
+    brep_block_of, domain, gen_brep, gen_surface, harness, path_of, sel, BrepIn, SrfIn, FILES,
 };
 use super::topology_edgeuse_p2::{flag, inexact_geometry, put_eu_state, Setup};
 use crate::util::trim_curve::put_trim_curve;
@@ -114,94 +108,35 @@ impl OpIn {
     }
 }
 
-/// Build the Rust scene independently; only file sources retain the legacy
-/// graph/gap import until their reader migration.
+/// Build the Rust scene independently: a non-file source with the Rust kernel's
+/// builders, an `.smb` file with the Rust reader ([`crate::own_builder::build_any`]),
+/// both renumbered into the shim's traversal order, so no C++ state reaches the Rust
+/// side.
 fn setup(i: &Inputs) -> Result<Result<Setup, Output>, HarnessError> {
-    use crate::own_builder::{build, counts, failed_output, Built};
+    use crate::own_builder::{build_any, counts, failed_output, Built, Conventions};
     let path = path_of(Some(&i.brep))?;
     let block = brep_block_of(Some(&i.brep), i.validate_only, i.init_gaps)?;
     let mut k = Kernel::default();
-    match build(&mut k, &i.brep, i.validate_only, i.init_gaps)? {
-        Some(Built::Brep(b)) => {
+    let conv = &Conventions::EDGEUSE_GRAPH;
+    match build_any(&mut k, &i.brep, i.validate_only, i.init_gaps, conv)? {
+        Built::Brep(b) => {
             let brep = *b;
             let s = sel(i.op.eu(), counts(&brep)[6]);
             if s < 0 {
                 return Ok(Err(Output::err("no_entity_of_that_kind")));
             }
             let eu = EdgeuseId::from_index(u32::try_from(s).map_err(|_| harness("index"))?);
-            return Ok(Ok(Setup {
+            Ok(Ok(Setup {
                 path,
                 block,
                 brep,
                 eu,
+                // the Rust side holds its own exact geometry: nothing to defer
                 types: super::topology_edgeuse_p1::ImportTypes::default(),
-            }));
+            }))
         }
-        Some(Built::Failed(e)) => return Ok(Err(failed_output(&e))),
-        None => {}
+        Built::Failed(e) => Ok(Err(failed_output(&e))),
     }
-    let ex = crate::export_memo::export("topology_edgeuse_p1", &[&path], &block, || {
-        ffi1::eval(ffi1::Op::Export, &path, &block)
-    })
-    .map_err(|e| harness(format!("c++ export: {e}")))?;
-    let Some(c) = ffi1::counts(&ex) else {
-        let st = ex.get(1).copied().unwrap_or(0.0);
-        return Ok(Err(Output::err(format!("brep_build_status_{st}"))));
-    };
-    let n_eu = c.get(6).copied().unwrap_or(0);
-    let s = sel(i.op.eu(), n_eu);
-    if s < 0 {
-        return Ok(Err(Output::err("no_entity_of_that_kind")));
-    }
-    let (mut brep, types) = import_with_types(&ex)?;
-    let gaps = crate::export_memo::export("topology_edgeuse_p3_gaps", &[&path], &block, || {
-        ffi::eval(Op::ExportGaps, &path, &block)
-    })
-    .map_err(|e| harness(format!("c++ gap export: {e}")))?;
-    import_gaps(&mut brep, &gaps, n_eu)?;
-    let eu = EdgeuseId::from_index(u32::try_from(s).map_err(|_| harness("index"))?);
-    Ok(Ok(Setup {
-        path,
-        block,
-        brep,
-        eu,
-        types,
-    }))
-}
-
-/// Restore input cache fields, without invoking or copying the tested operation.
-fn import_gaps(brep: &mut Brep, data: &[f64], count: usize) -> Result<(), HarnessError> {
-    let expected = count
-        .checked_mul(5)
-        .and_then(|n| n.checked_add(2))
-        .ok_or_else(|| harness("gap snapshot overflow"))?;
-    if data.first() != Some(&0.0) || data.get(1) != Some(&(count as f64)) || data.len() != expected
-    {
-        return Err(harness("invalid gap snapshot"));
-    }
-    for (index, values) in data
-        .get(2..)
-        .ok_or_else(|| harness("gap records"))?
-        .as_chunks::<5>()
-        .0
-        .iter()
-        .enumerate()
-    {
-        let &[owner, gap_3d, edge_t, u, v] = values;
-        if owner.fract() != 0.0 || owner < -1.0 || owner >= count as f64 {
-            return Err(harness("invalid gap owner"));
-        }
-        let id = EdgeuseId::from_index(u32::try_from(index).map_err(|_| harness("gap index"))?);
-        brep.edgeuse_mut(id)
-            .map_err(|e| harness(e.to_string()))?
-            .max_edge_face_gap = solidcore::heal::gap::EdgeFaceGap {
-            edgeuse: (owner >= 0.0).then(|| EdgeuseId::from_index(owner as u32)),
-            gap_3d,
-            edge_t,
-            face_uv: solidcore::math::Point2::new(u, v),
-        };
-    }
-    Ok(())
 }
 
 // ---- C++ side ---------------------------------------------------------------------------
@@ -491,11 +426,6 @@ fn run_rust(i: &Inputs) -> Result<Output, HarnessError> {
     };
     if let Some(o) = inexact_geometry(&s) {
         return Ok(o);
-    }
-    // File readers still use the legacy cache snapshot. Independently built
-    // sources keep the state their own Rust construction produced.
-    if matches!(&i.brep, BrepIn::File { .. }) {
-        seed_cache_tree_states(&s.brep, &s.path, &s.block)?;
     }
     match run_rust_op(&i.op, &mut s.brep, s.eu) {
         Ok(body) => Ok(output_of(&body)),

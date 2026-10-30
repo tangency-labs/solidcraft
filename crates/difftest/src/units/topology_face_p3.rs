@@ -13,6 +13,11 @@
 //! ([`crate::util::trim_curve`]) and sampled curve points (see the FFI module docs for
 //! each op's output).
 //!
+//! `own_reader_fillet.json` runs `CreateUVTrimCurves` on every face of the `Fillet/`
+//! files of the fillet executive sweeps (e.g. `sphere_diff_3cylinders.smb`, whose face
+//! 7 trim of edge 30 diverged before #1215), as read and with rebuilt UV trim curves,
+//! each side reading the file with its own reader.
+//!
 //! Face, loop and other-face selectors are taken modulo the B-rep's counts, so
 //! generated cases need no counts; a B-rep without faces gives `no face` on both sides.
 //!
