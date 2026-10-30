@@ -330,7 +330,7 @@ fn face_names(path: &Path) -> Arc<Vec<FaceNames>> {
 }
 
 /// Lower-case letters and digits only: "DejaVu_Sans", "Dejavu Sans" and "dejavu-sans" are one name.
-fn normalize(s: &str) -> String {
+pub(crate) fn normalize(s: &str) -> String {
     s.chars().filter(|c| c.is_alphanumeric()).flat_map(char::to_lowercase).collect()
 }
 
