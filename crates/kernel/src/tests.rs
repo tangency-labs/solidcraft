@@ -668,28 +668,47 @@ fn tapered_extrude_of_cubics_is_close_to_the_true_offset() {
     assert!(rel(m.volume, v) < 5e-4, "{} vs {v}", m.volume);
 }
 
-/// A wedge whose tip is a flat line far shorter than the taper moves its sides in: the tip line
-/// goes, the two long sides meet, and its side is the flat triangle up to there. The solid is a
-/// prismatoid, its volume h/6 · (A₀ + 4·A_mid + A₁).
+/// A wedge whose tip is a flat line far shorter than the taper moves its sides in: every wall,
+/// the tip's too, leans by the taper, so the tip's wall is a triangle that closes where the two
+/// long sides meet across it (z* ≈ 0.126 of h = 2), and above that the long sides meet each
+/// other along a ridge. The section at height z is the profile's lines moved in by z·tan(a): a
+/// quadrilateral below z*, a triangle above, each with an area quadratic in z, so the volume is
+/// exact as Simpson's rule on each of the two pieces.
 #[test]
 fn tapered_extrude_swallows_a_short_tip() {
     let (h, a) = (2.0, 5f64.to_radians());
-    let d = h * a.tan();
     let pts = [Vec2::new(0.0, -2.0), Vec2::new(20.0, -0.01), Vec2::new(20.0, 0.01), Vec2::new(0.0, 2.0)];
     let b = extrude_tapered(&Plane::XY, &Region2 { outer: Loop2::polygon(&pts), holes: vec![] }, h, 1.0, -a, crate::DraftCorner::default()).unwrap();
-    // The top: the three long lines moved in by d (to their left, the loop running
-    // counter-clockwise), meeting each other.
-    let moved = |p: Vec2, q: Vec2| {
-        let t = (q - p).normalized().unwrap();
-        (p + t.perp() * d, t)
+    // Side i (from pts[i] to the next) moved in by t (to its left, the loop running
+    // counter-clockwise), as a point and its direction.
+    let moved = |i: usize, t: f64| {
+        let (p, q) = (pts[i], pts[(i + 1) % pts.len()]);
+        let u = (q - p).normalized().unwrap();
+        (p + u.perp() * t, u)
     };
     let meet = |(p0, t0): (Vec2, Vec2), (p1, t1): (Vec2, Vec2)| p0 + t0 * ((p1 - p0).cross(t1) / t0.cross(t1));
-    let (low, high, left) = (moved(pts[0], pts[1]), moved(pts[2], pts[3]), moved(pts[3], pts[0]));
-    let top = [meet(left, low), meet(low, high), meet(high, left)];
-    let area = |q: &[Vec2]| solidcraft_geom::Ring::from(q.to_vec()).signed_area();
-    // Halfway up, each side edge's midpoint (the two tip corners both run to the top's tip).
-    let mid = [pts[0].lerp(top[0], 0.5), pts[1].lerp(top[1], 0.5), pts[2].lerp(top[1], 0.5), pts[3].lerp(top[2], 0.5)];
-    let v = h / 6.0 * (area(&pts) + 4.0 * area(&mid) + area(&top));
+    // Where the long sides meet, measured off the moved tip line (into the solid positive): it
+    // runs linearly with t, and its root is the offset at which the tip's wall closes.
+    let past_tip = |t: f64| {
+        let (q, u) = moved(1, t);
+        (meet(moved(0, t), moved(2, t)) - q).cross(u)
+    };
+    let d = h * a.tan();
+    let closes = d * past_tip(0.0) / (past_tip(0.0) - past_tip(d));
+    let z_closes = closes / a.tan();
+    assert!(z_closes > 0.0 && z_closes < h, "the tip's wall closes partway up, at {z_closes}");
+    let section = |z: f64| -> Vec<Vec2> {
+        let t = z * a.tan();
+        if t <= closes {
+            (0..4).map(|i| meet(moved((i + 3) % 4, t), moved(i, t))).collect()
+        } else {
+            let (low, high, left) = (moved(0, t), moved(2, t), moved(3, t));
+            vec![meet(left, low), meet(low, high), meet(high, left)]
+        }
+    };
+    let area = |z: f64| solidcraft_geom::Ring::from(section(z)).signed_area();
+    let simpson = |z0: f64, z1: f64| (z1 - z0) / 6.0 * (area(z0) + 4.0 * area(0.5 * (z0 + z1)) + area(z1));
+    let v = simpson(0.0, z_closes) + simpson(z_closes, h);
     let m = measure(&b).unwrap();
     assert!(rel(m.volume, v) < 1e-6, "{} vs {v}", m.volume);
     assert_eq!(m.merged.faces, 6, "bottom, top, three sides and the tip's triangle");
