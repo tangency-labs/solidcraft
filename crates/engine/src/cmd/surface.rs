@@ -1293,9 +1293,10 @@ mod tests {
 
     /// Extend a cylinder strip: naturally 5 along its axis (10 · π/2 · 25, one face, still a
     /// cylinder), up to the plane z = 30 (10 · π/2 · 30), and by tangent and curvature run-offs
-    /// (a second face along a straight edge, 20 long: the tangent one a flat 5 × 20, the
-    /// curvature one the parabola s ↦ s·R + ½κs²·n with the cylinder's κ = 1/10, its section
-    /// ∫₀⁵ √(1 + κ²s²) ds long). Undo, redo and reopening; the default saves nothing new.
+    /// along a straight edge, 20 long: each SMLib's G1 or G2 extension of the surface, so the
+    /// strip stays one face (the tangent one a flat 5 × 20, the curvature one the parabola
+    /// s ↦ s·R + ½κs²·n with the cylinder's κ = 1/10, its section ∫₀⁵ √(1 + κ²s²) ds long).
+    /// Undo, redo and reopening; the default saves nothing new.
     #[test]
     fn extend_a_cylinder_strip_every_way() {
         let pi = std::f64::consts::PI;
@@ -1326,7 +1327,7 @@ mod tests {
         for (mode, run_off) in [("tangent", 5.0), ("curvature", parabola)] {
             run(&mut s, "surface.extend", json!({"body": "Strip", "edges": [side], "distance": 5, "mode": mode}));
             let st = s.world_state().unwrap();
-            assert_eq!(st.body("Strip").unwrap().body.face_count(), 2, "{mode}");
+            assert_eq!(st.body("Strip").unwrap().body.face_count(), 1, "{mode}");
             let want = 10.0 * pi / 2.0 * 20.0 + run_off * 20.0;
             assert!((area(&s, "Strip") - want).abs() < want * 1e-3, "{mode}: {} vs {want}", area(&s, "Strip")); // (measured on meshes)
             let cold = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
