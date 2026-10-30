@@ -343,9 +343,10 @@ pub fn tool_definitions_with(opts: Options) -> Vec<Value> {
                     "format": {"type": "string", "enum": ["step", "stp", "iges", "igs", "3mf", "3mf-tagged", "stl", "stla", "obj", "glb", "usd", "usda", "usdc", "usdz", "urdf", "sdf"]},
                     "bodies": {"type": "array", "items": {"type": "string"}, "description": "Body names (default: all; not with urdf)"},
                     "mesh_prefix": string("urdf: put before each mesh file name (default: none, so relative to the .urdf)"),
-                    "effort": {"type": "number", "description": "urdf: joint effort limit, N or N m (default 1000)"},
-                    "velocity": {"type": "number", "description": "urdf: joint velocity limit, m/s or rad/s (default 10)"},
+                    "effort": {"type": "number", "description": "urdf: effort limit for joints with none saved, N or N m (default 1000)"},
+                    "velocity": {"type": "number", "description": "urdf: velocity limit for joints with none saved, m/s or rad/s (default 10)"},
                     "images": {"type": "boolean", "description": "urdf: also write each picture shown on the model as a textured visual (default false)"},
+                    "mimic": {"type": "boolean", "description": "urdf: write <mimic> for motion links (default true)"},
                     "name": string("sdf: the model's name (default: the folder's name)"),
                     "static": {"type": "boolean", "description": "sdf: scenery Gazebo never moves (default true); false gives it the bodies' mass"},
                     "model_uris": {"type": "boolean", "description": "sdf: name files as model://<folder>/<file> (default false: relative to model.sdf)"},
@@ -1010,7 +1011,7 @@ fn dispatch(b: &mut dyn Backend, name: &str, a: &Map<String, Value>) -> Result<V
         "export" => exec(
             b,
             "file.export",
-            pick(a, &["path", "format", "bodies", "mesh_prefix", "effort", "velocity", "images", "name", "static", "model_uris"]),
+            pick(a, &["path", "format", "bodies", "mesh_prefix", "effort", "velocity", "mimic", "images", "name", "static", "model_uris"]),
         ),
         "crash_reports" => match a.get("id") {
             Some(_) => exec(b, "diagnostics.crash_report", pick(a, &["id"])),
@@ -1221,7 +1222,7 @@ fn batch_step(step: &Value) -> Result<(String, Value, Option<Narrow>), String> {
         "redo" => mapped("edit.redo", json!({})),
         "export" => mapped(
             "file.export",
-            pick(a, &["path", "format", "bodies", "mesh_prefix", "effort", "velocity", "images", "name", "static", "model_uris"]),
+            pick(a, &["path", "format", "bodies", "mesh_prefix", "effort", "velocity", "mimic", "images", "name", "static", "model_uris"]),
         ),
         "save" => mapped("file.save", pick(a, &["path", "format"])),
         "open" => mapped("doc.open", pick(a, &["path", "up", "names", "geometry"])),
