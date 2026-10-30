@@ -1,4 +1,4 @@
-//! tangency-labs/solidcore#1477 (WR-501): `SmPrimitiveCreation::CreateLinearSweep` makes
+//! tangency-labs/solidcore#1477 (WR-565): `SmPrimitiveCreation::CreateLinearSweep` makes
 //! an `SmCylinder` only of a whole circle swept along its axis. A circular arc short of a
 //! whole turn becomes an `SmSurfOfExtrusion`, which exports as a NURBS, so a sheet-metal
 //! convert finds no cylinder at a modelled bend. The opt-in
