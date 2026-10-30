@@ -202,6 +202,13 @@ fn saving_refuses_a_rule_the_design_could_not_use() {
     assert!(Rule::capture(sm(&mut h), "Good", &doc).is_ok());
     let Sm::Rules { values, .. } = sm(&mut h) else { panic!() };
     values[1] = "1.5".into();
+    // The manager reports the refusal a few frames later, which moves its rows: click once it has.
+    for _ in 0..10 {
+        if crate::scenario::handle_at("dialog:report:error").is_some() {
+            break;
+        }
+        h.frames(1);
+    }
     h.frames(1);
     save_personal(&mut h, "Bad K");
     assert_eq!(library_json(&h), json!([]), "nothing is saved while the prompt reports the error");
