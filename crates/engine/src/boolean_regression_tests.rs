@@ -1060,8 +1060,15 @@ fn cut_keeps_posts_joined_while_apart_in_one_body() {
     // A cut through the middle of the case still leaves two bodies, and says it made the second.
     s.execute("solid.box", &json!({"length": 2, "width": 80, "height": 80, "center": [0, 0, 20], "operation": "new", "body_name": "Saw"})).unwrap();
     let saw = s.execute("solid.combine", &json!({"target": "Case", "tools": ["Saw"], "operation": "cut"})).unwrap();
-    assert_eq!(saw["bodies"], json!(["Case", "Case (1)"]), "{saw}");
+    // `bodies` lists them in the kernel's order. The piece whose least face name sorts first keeps
+    // the name (`lineage::order_lumps`): the +x half, whose `F1:+x` sorts before the -x half's
+    // least, its piece of the case's `F1:+y`.
+    let mut bodies: Vec<&str> = saw["bodies"].as_array().unwrap().iter().filter_map(Value::as_str).collect();
+    bodies.sort_unstable();
+    assert_eq!(bodies, ["Case", "Case (1)"], "{saw}");
     assert_eq!(saw["created_bodies"], json!(["Case (1)"]), "{saw}");
+    let low_x = |name: &str| s.model.state().body(name).unwrap().mesh().bounds().min.x;
+    assert!((low_x("Case") - 1.0).abs() < 1e-9 && (low_x("Case (1)") + 30.0).abs() < 1e-9);
     let half = (60.0 - 2.0) / 2.0 * 40.0 * 10.0 + posts / 2.0;
     for name in ["Case", "Case (1)"] {
         assert!((volume(&s, name) - half).abs() < 1e-6 * half, "{name}: {} vs {half}", volume(&s, name));
