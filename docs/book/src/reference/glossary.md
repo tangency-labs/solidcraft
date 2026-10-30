@@ -246,6 +246,13 @@ features are computed.
 - **Elsewhere:** folder, group.
 - **For translators:** not a rigid group (a joint) and not a fixed browser *folder*.
 
+### lay
+
+The predominant pattern or direction of marks left on a manufactured surface.
+
+- **In SolidCraft:** `solidcraft_geom::surface_texture::Lay`, used by a surface texture indication.
+- **For translators:** use the manufacturing sense of direction and pattern.
+
 ### material
 
 The physical substance of a body, which sets its density and mechanical properties.
@@ -338,6 +345,16 @@ a standard size.
 - **Don't use:** library part, part (on its own), content.
 - **Elsewhere:** standard part, library part, fastener, catalogue part.
 - **For translators:** see *Words with more than one meaning*, "part".
+
+### surface texture indication
+
+A drawing requirement for the small-scale shape of a manufactured surface, expressed by
+parameters and a production-process symbol.
+
+- **In SolidCraft:** `solidcraft_geom::surface_texture::Indication`; the record retains its
+  standard, parameter limits, lay, process note and all-round intent.
+- **Don't use:** appearance, render material.
+- **For translators:** describes manufactured geometry and acceptance requirements.
 
 ### timeline
 
