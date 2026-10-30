@@ -15,3 +15,7 @@ mutants.out*/
 # external corpus downloads (cargo xtask external-corpus, #1397): fetched at test time,
 # hash-pinned in tests/external-corpus.toml; never commit case data
 /corpus/
+
+# Separately compiled original plugin example.
+/examples/plugins/example-box/target/
+/examples/plugins/example-box/plugin.wasm

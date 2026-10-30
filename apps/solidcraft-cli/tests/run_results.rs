@@ -739,3 +739,49 @@ fn render_setup_overrides_obey_shared_validation_before_host_initialization() {
         assert!(!out.exists());
     }
 }
+
+#[test]
+fn explicit_plugin_host_settings_allow_reviewed_larger_requests_and_reject_bad_policy() {
+    let scratch = Scratch::new();
+    let package = scratch.0.join("sample");
+    std::fs::create_dir(&package).unwrap();
+    let wat = include_str!("../../../crates/engine/src/plugin/fixture.wat").replace("\r\n", "\n").replace(
+        "      call $box\n      call $box\n",
+        "      call $box\n      call $box i32.const 2048 memory.grow i32.const -1 i32.eq if unreachable end\n",
+    );
+    assert!(wat.contains("memory.grow"), "the fixture must actually request more than 128 MiB");
+    std::fs::write(package.join("plugin.wasm"), wat::parse_str(wat).unwrap()).unwrap();
+    let manifest = json!({"id":"sample","name":"Sample","version":"1","runtime":{"api":solidcraft_engine::plugin::API,"module":"plugin.wasm","entries":["make"],"commands":["solid.box"],"limits":{"fuel":200_000_000_000_u64,"memory_mib":256,"deadline_ms":30000}}});
+    std::fs::write(package.join("plugin.json"), manifest.to_string()).unwrap();
+    let args = json!({"path":package}).to_string();
+    let inspected = json_output(cli().args(["exec", "plugin.inspect", &args]).output().unwrap());
+    assert_eq!(inspected["within_host_limits"], false);
+    let run = json!({"path":package,"approval":inspected["approval"],"entry":"make"}).to_string();
+    let refused = cli().args(["exec", "plugin.run", &run]).output().unwrap();
+    assert!(!refused.status.success());
+    assert!(String::from_utf8_lossy(&refused.stderr).contains("user host limits"));
+    let policy = scratch.0.join("limits.json");
+    std::fs::write(&policy, json!({"max_fuel":u64::MAX,"max_memory_mib":512}).to_string()).unwrap();
+    let high = json_output(cli().arg("--plugin-limits").arg(&policy).args(["exec", "plugin.inspect", &args]).output().unwrap());
+    assert_eq!(high["within_host_limits"], true);
+    assert_eq!(high["host_limits"]["max_fuel"].as_u64(), Some(u64::MAX));
+    let output = cli().arg("--plugin-limits").arg(&policy).args(["exec", "plugin.run", &run]).output().unwrap();
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    let mut bom = vec![0xef, 0xbb, 0xbf];
+    bom.extend(json!({"max_memory_mib":512}).to_string().as_bytes());
+    std::fs::write(&policy, bom).unwrap();
+    let high = json_output(cli().arg("--plugin-limits").arg(&policy).args(["exec", "plugin.inspect", &args]).output().unwrap());
+    assert_eq!(high["host_limits"]["max_fuel"].as_u64(), Some(100_000_000_000));
+    assert_eq!(high["host_limits"]["max_memory_mib"], 512);
+    assert_eq!(high["within_host_limits"], false, "omitted fields keep the original ceiling");
+    for extra in [vec!["exec", "plugin.inspect", "{}", "--connect", "127.0.0.1:1"], vec!["mcp"]] {
+        let output = cli().arg(format!("--plugin-limits={}", policy.display())).args(extra).output().unwrap();
+        assert!(!output.status.success());
+        assert!(String::from_utf8_lossy(&output.stderr).contains("controls local sessions"), "refuse before any connection attempt");
+    }
+    for bad in [json!({"max_fuel":0}), json!({"max_memory_mib":4097}), json!({"max_fuel":1.25}), json!({"unknown":true})] {
+        std::fs::write(&policy, bad.to_string()).unwrap();
+        let o = cli().arg("--plugin-limits").arg(&policy).args(["exec", "plugin.run", &run]).output().unwrap();
+        assert!(!o.status.success());
+    }
+}

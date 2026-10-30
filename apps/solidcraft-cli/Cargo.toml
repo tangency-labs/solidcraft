@@ -34,3 +34,4 @@ serde_json = { workspace = true }
 [dev-dependencies]
 # Snapshot tests decode the pictures to compare them with a tolerance.
 image = { workspace = true }
+wat = "1"

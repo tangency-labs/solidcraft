@@ -9,7 +9,8 @@ license.workspace = true
 workspace = true
 
 [features]
-default = []
+default = ["plugins"]
+plugins = ["dep:wasmtime"]
 # Optional authored texture/HDR bytes; the command registry and metadata remain available.
 bundled-render-library = []
 raytrace-cpu = ["solidcraft-render/raytrace-cpu"]
@@ -40,6 +41,7 @@ solidcraft-render = { workspace = true }
 image = { workspace = true, features = ["jpeg"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
+sha2 = { workspace = true }
 toml_edit = "0.25"
 schemars = { workspace = true }
 serde_path_to_error = { workspace = true }
@@ -56,3 +58,10 @@ solidcraft-sketch = { workspace = true, features = ["solver-profiling"] }
 [[example]]
 name = "render_resource_workflow"
 required-features = ["raytrace-cpu"]
+
+[target.'cfg(any(target_arch = "x86_64", target_arch = "aarch64"))'.dependencies]
+# Component-model sandbox; no WASI, cache deserialization, network or process imports.
+wasmtime = { version = "48.0.8", optional = true, default-features = false, features = ["component-model", "cranelift", "runtime", "std"] }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+wat = "1"

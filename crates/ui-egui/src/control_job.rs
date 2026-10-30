@@ -73,7 +73,7 @@ const ANSWERED_ON_A_COPY: &[&str] = &["file.export", "file.save_mesh"];
 /// body, an inspection that measures them, #4604; a clearance or interference check of every pair
 /// of bodies, minutes on an assembly of 150): they run on a copy too, whatever the preference,
 /// since an answer from the design as it was when asked has no order to keep.
-const READ_ON_A_COPY: &[&str] = &["inspect.measure", "document.inspect", "inspect.clearance", "inspect.interference"];
+const READ_ON_A_COPY: &[&str] = &["document.inspect", "inspect.clearance", "inspect.interference", "inspect.measure", "model.mesh", "plugin.inspect"];
 
 /// Exports and readings computing at once; more run here.
 const MAX_ANSWERING: usize = 4;
@@ -107,7 +107,7 @@ fn executed(params: &Value) -> Option<(&str, Value)> {
     Some((command, params.get("params").cloned().filter(|v| !v.is_null()).unwrap_or(json!({}))))
 }
 
-/// A request that only reads the design and can take long ([`READ_ON_A_COPY`]): an
+/// A request that only reads design data or an inert package and can take long ([`READ_ON_A_COPY`]): an
 /// `engine.execute` of such a command, or the `document.inspect` method. The command and its
 /// parameters.
 fn reading(req: &ControlRequest) -> Option<(&'static str, Value)> {
@@ -133,6 +133,12 @@ enum Work {
     Ahead { commands: Vec<(String, Value)>, doc: Arc<solidcraft_engine::doc::Document>, revision: u64, tries: u8, kept: Arc<KeptResults> },
     /// Run on a copy; the reply comes from there.
     Answer,
+    /// External code executes once on its worker. Stale/cancelled results are discarded.
+    Plugin {
+        prepared: Receiver<Result<solidcraft_engine::ComputedCommands, String>>,
+        disabled: std::collections::BTreeSet<String>,
+        limits: solidcraft_engine::plugin::HostLimits,
+    },
 }
 
 /// A control request computing off the window thread.
@@ -365,6 +371,52 @@ impl SolveApp {
     /// Take a control request off the window thread when it computes long (see the module
     /// notes). Returns it when it should simply run here now.
     pub(crate) fn offload_control(&mut self, ctx: &egui::Context, req: ControlRequest) -> Option<ControlRequest> {
+        crate::plugins::sync_policy(self);
+        if cfg!(not(target_arch = "wasm32"))
+            && matches!(req.method.as_str(), "engine.execute" | "command")
+            && let Some(("plugin.run", params)) = executed(&req.params)
+        {
+            if self.control_job.is_some() {
+                self.control_held.push_back(req);
+                return None;
+            }
+            let scope = match crate::control::request_scope(self, &req.params) {
+                Ok(scope) => scope,
+                Err(e) => {
+                    let _ = req.reply.send(json!({"ok":false,"error":e}));
+                    return None;
+                }
+            };
+            let copy = self.session.scratch();
+            let quality = solidcraft_engine::doc::display_quality::current();
+            let (tx, prepared) = std::sync::mpsc::channel();
+            #[cfg(test)]
+            let gate = self.apply_gate.clone();
+            let Some(done) = spawn(scope, move || {
+                #[cfg(test)]
+                if let Some(gate) = gate {
+                    let _ = gate.lock().ok()?.recv();
+                }
+                let result = copy.compute_commands(&[("plugin.run".into(), params)], None).map_err(|e| e.to_string());
+                if let Ok(prepared) = &result {
+                    prepared.warm_display(quality, || true);
+                }
+                let _ = tx.send(result);
+                None
+            }) else {
+                let _ = req.reply.send(json!({"ok":false,"error":self.tr("ui.plugin_start_failed")}));
+                return None;
+            };
+            self.control_job = Some(ControlJob {
+                label: label(self, "plugin.run"),
+                req,
+                work: Work::Plugin { prepared, disabled: self.preferences.disabled_plugins.clone(), limits: self.session.plugin_limits },
+                done,
+                started: crate::now_ms(),
+                steps: None,
+            });
+            return None;
+        }
         if self.apply_off_thread.is_none() || self.file_load.busy() || self.file_picker.is_some() {
             return Some(req);
         }
@@ -476,6 +528,44 @@ impl SolveApp {
             return;
         }
         let Some(job) = self.control_job.take() else { return };
+        if let Work::Plugin { prepared, disabled, limits } = &job.work {
+            let result = if self.file_load.busy()
+                || self.file_picker.is_some()
+                || disabled != &self.preferences.disabled_plugins
+                || *limits != crate::plugins::host_limits(&self.preferences)
+            {
+                Err(self.tr("ui.plugin_context_changed").to_string())
+            } else {
+                prepared
+                    .try_recv()
+                    .map_err(|_| self.tr("ui.plugin_no_result").to_string())
+                    .and_then(|r| r)
+                    .and_then(|prepared| {
+                        let before = self.session.doc.clone();
+                        // Move the redo stack instead of cloning the whole history on the window thread.
+                        let redo = std::mem::take(&mut self.session.redo);
+                        let replies = self.session.accept_commands(prepared);
+                        if replies.is_err() || Arc::ptr_eq(&before, &self.session.doc) {
+                            self.session.redo = redo;
+                        }
+                        replies.map_err(|_| self.tr("ui.plugin_context_changed").to_string())
+                    })
+                    .and_then(|replies| replies.into_iter().last().map(|(_, reply)| reply).ok_or_else(|| self.tr("ui.plugin_no_result").to_string()))
+            };
+            self.big_operation |= crate::now_ms() - job.started >= crate::recovery_ui::BIG_OPERATION_MS;
+            let result = result.and_then(|reply| {
+                crate::render_workspace::apply_command(self, "plugin.run", &reply)?;
+                Ok(reply)
+            });
+            let result = self.command_completed("plugin.run", result);
+            let reply = match result {
+                Ok(result) => json!({"ok":true,"result":result}),
+                Err(error) => json!({"ok":false,"error":error}),
+            };
+            let _ = job.req.reply.send(reply);
+            ctx.request_repaint();
+            return;
+        }
         // A file opening meanwhile: the request waits for it as any design change does.
         if self.file_load.busy() || self.file_picker.is_some() {
             self.control_held.push_front(job.req);

@@ -952,3 +952,90 @@ fn a_body_renamed_in_the_browser_keeps_the_pattern_after_it() {
     assert!(kept, "no feature computed again");
     assert_eq!(h.app.session.visibility.locked_bodies, ["Plate"]);
 }
+
+#[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
+fn plugin_package_for_worker_test(tag: &str) -> std::path::PathBuf {
+    let root = std::env::temp_dir().join(format!("solidcraft-plugin-worker-{}-{tag}", std::process::id()));
+    let dir = root.join("sample");
+    std::fs::create_dir_all(&dir).unwrap();
+    let wat = include_str!("plugin_fixture.wat");
+    std::fs::write(dir.join("plugin.wasm"), wat::parse_str(wat).unwrap()).unwrap();
+    std::fs::write(
+        dir.join("plugin.json"),
+        json!({"id":"sample","name":"Worker sample","version":"1","runtime":{
+        "api":solidcraft_engine::plugin::API,"module":"plugin.wasm","entries":["make"],"commands":[]}})
+        .to_string(),
+    )
+    .unwrap();
+    root
+}
+
+#[test]
+#[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
+fn plugin_execution_is_off_thread_even_with_agent_off_thread_disabled() {
+    let (mut h, tx) = agent_harness();
+    h.app.preferences.agent_off_thread = false;
+    h.app.run("solid.box", json!({"length":1,"width":1,"height":1,"corner":[100,100,100]})).unwrap();
+    h.app.run("edit.undo", json!({})).unwrap();
+    let history = (h.app.session.undo.len(), h.app.session.redo.len());
+    let root = plugin_package_for_worker_test("responsive");
+    let path = root.join("sample").to_string_lossy().into_owned();
+    let inspected = h.app.run("plugin.inspect", json!({"path":path})).unwrap();
+    let (release, gate) = std::sync::mpsc::channel();
+    h.app.apply_gate = Some(std::sync::Arc::new(std::sync::Mutex::new(gate)));
+    let request = ask(&tx, "engine.execute", json!({"command":"plugin.run","params":{"path":path,"approval":inspected["approval"],"entry":"make"}}));
+    h.frames(1);
+    assert!(h.app.agent_computing().is_some());
+    let view = ask(&tx, "ui.inspect", json!({}));
+    h.frames(1);
+    assert_eq!(view.try_recv().unwrap()["ok"], true, "window answers while external code waits");
+    release.send(()).unwrap();
+    let reply = reply_to(&mut h, &request);
+    assert_eq!(reply["ok"], true, "{reply}");
+    assert_eq!(reply["result"]["result"], serde_json::Value::Null);
+    assert_eq!((h.app.session.undo.len(), h.app.session.redo.len()), history, "a read-only plugin preserves history");
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+#[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
+fn a_plugin_result_is_discarded_after_design_or_selection_changes() {
+    for context in ["document", "selection", "plugin_limits"] {
+        let (mut h, tx) = agent_harness();
+        h.app.preferences.language = if context == "selection" { "ja" } else { "en" }.into();
+        h.app.run("solid.box", json!({"length":1,"width":1,"height":1,"corner":[200,200,200]})).unwrap();
+        h.app.run("edit.undo", json!({})).unwrap();
+        assert!(!h.app.session.redo.is_empty());
+        let root = plugin_package_for_worker_test(&format!("stale-{context}"));
+        let path = root.join("sample").to_string_lossy().into_owned();
+        let inspected = h.app.run("plugin.inspect", json!({"path":path})).unwrap();
+        let (release, gate) = std::sync::mpsc::channel();
+        h.app.apply_gate = Some(std::sync::Arc::new(std::sync::Mutex::new(gate)));
+        let request =
+            ask(&tx, "engine.execute", json!({"command":"plugin.run","params":{"path":path,"approval":inspected["approval"],"entry":"make"}}));
+        h.frames(1);
+        assert!(h.app.agent_computing().is_some());
+        if context == "document" {
+            h.app.run("solid.box", json!({"length":2,"width":2,"height":2,"corner":[100,100,100]})).unwrap();
+        } else if context == "plugin_limits" {
+            crate::prefs::set(&mut h.app, &json!({"plugin_max_memory_mib":512})).unwrap();
+        } else {
+            let selection = vec![solidcraft_engine::Sel::Feature { id: feature_ids(&h)[0] }];
+            if h.app.session.selection == selection {
+                h.app.session.selection.clear();
+            } else {
+                h.app.session.selection = selection;
+            }
+        }
+        let before = h.app.session.doc.to_json();
+        let history = (h.app.session.undo.len(), h.app.session.redo.len());
+        release.send(()).unwrap();
+        let reply = reply_to(&mut h, &request);
+        assert_eq!(reply["ok"], false, "{context}: {reply}");
+        let language = crate::i18n::Locale::for_language(&h.app.preferences.language);
+        assert_eq!(reply["error"], language.text("ui.plugin_context_changed"), "{context}: {reply}");
+        assert_eq!(h.app.session.doc.to_json(), before);
+        assert_eq!((h.app.session.undo.len(), h.app.session.redo.len()), history);
+        let _ = std::fs::remove_dir_all(root);
+    }
+}

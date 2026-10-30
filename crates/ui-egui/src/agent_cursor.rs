@@ -339,6 +339,10 @@ pub fn intercept(app: &mut SolveApp, req: &crate::control::ControlRequest) -> bo
     let stops: VecDeque<_> = match method {
         "engine.execute" | "command" => {
             let Some(cmd) = params.get("command").or(params.get("id")).and_then(Value::as_str) else { return false };
+            // External code is handed to the dedicated transaction worker, never replayed by the cursor.
+            if cmd == "plugin.run" {
+                return false;
+            }
             let inner = params.get("params").cloned().unwrap_or(json!({}));
             let label = solidcraft_engine::find_command(cmd).map_or("", |c| c.label);
             stops(app, cmd, &inner).into_iter().map(|at| (at, label)).collect()

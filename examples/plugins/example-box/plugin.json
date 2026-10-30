@@ -1,0 +1,21 @@
+{
+  "id": "example-box",
+  "name": "Example box",
+  "version": "0.1.0",
+  "description": "Create an ordinary editable box from dimensions.",
+  "runtime": {
+    "api": "solidcraft:plugin@0.1.0",
+    "module": "plugin.wasm",
+    "entries": [
+      "make"
+    ],
+    "commands": [
+      "solid.box"
+    ],
+    "limits": {
+      "fuel": 10000000,
+      "memory_mib": 64,
+      "deadline_ms": 5000
+    }
+  }
+}

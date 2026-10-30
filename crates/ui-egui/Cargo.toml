@@ -57,6 +57,7 @@ proc-macro2 = { workspace = true }
 arboard = { version = "3.6", default-features = false, features = ["image-data"] }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+wat = "1"
 # The offscreen viewport render test opens a device without a window.
 pollster = { workspace = true }
 

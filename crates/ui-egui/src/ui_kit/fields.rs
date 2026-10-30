@@ -265,6 +265,9 @@ fn editor_reserving(ui: &mut Ui, value: &mut String, hint: &str, completion: boo
         edit = edit.margin(egui::Margin { left: inset, right: inset.saturating_add(reserve.round() as i8), top: 0, bottom: 0 });
     }
     let mut response = ui.add_sized(vec2(width, row_height()), edit);
+    if response.has_focus() {
+        crate::prefs_search::note_key_sink(ui.ctx());
+    }
     super::text_menu::menu(ui, &mut response, value, super::text_menu::Field::LINE);
     if completion && ui.is_enabled() {
         ui.ctx().data_mut(|data| {

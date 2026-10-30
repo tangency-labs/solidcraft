@@ -23,6 +23,7 @@
 //! solidcraft-cli licences                                     SolidCraft's licence and the third-party licences
 //! solidcraft-cli icon --out F.png|F.ico [--size N]             the app icon (packaging; drawn, not a file)
 //!
+//! --plugin-limits FILE.json (local sessions only)              user fuel/memory ceilings; connected desktops use their own preferences
 //! --debug (with any command)                                  SolidCraft's debug log on stderr (or RUST_LOG=LEVEL)
 //! --max-file-size SIZE (with any command)                     read STEP and design files up to SIZE (2GB, 1500MB; at most 16GB)
 //! ```
@@ -103,6 +104,8 @@ const USAGE_SAVE_STRESS: &str = "  solidcraft-cli save-stress <path> <rounds>\n"
 /// The flags every command takes, at the end of the top-level usage.
 const USAGE_DEBUG: &str = "  --debug, with any command: what SolidCraft logs (why a body has no display plan, why a save left its\n      model cache out), on stderr; RUST_LOG=error|warn|info|debug|trace sets one level for every crate\n  --max-file-size SIZE, with any command: read STEP and import files and design files up to SIZE for this run\n      (for example 2GB or 1500MB; at most 16GB; the defaults are 512 MB and 256 MB, and a smaller SIZE keeps them)\n";
 
+const USAGE_PLUGIN_LIMITS: &str = "  --plugin-limits FILE.json, with local commands: user ceilings {max_fuel, max_memory_mib}; defaults 100000000000 / 128, invocation defaults remain 10000000 / 64 MiB. With mcp use --headless; connected desktops keep their own preferences.\n";
+
 /// The commands the CLI takes, in the order the top-level usage lists them.
 const COMMANDS: &[Command] = &[
     Command { name: "run", usage: USAGE_RUN, listed: true },
@@ -134,6 +137,10 @@ fn main() -> ExitCode {
     let mut args: Vec<String> = std::env::args().skip(1).collect();
     logger::init(&mut args);
     if let Err(e) = max_file_size(&mut args) {
+        eprintln!("error: {e}");
+        return ExitCode::FAILURE;
+    }
+    if let Err(e) = plugin_limits(&mut args) {
         eprintln!("error: {e}");
         return ExitCode::FAILURE;
     }
@@ -233,6 +240,43 @@ fn max_file_size(args: &mut Vec<String>) -> Result<(), String> {
     solidcraft_engine::io::limits::set_override(Some(bytes))
 }
 
+/// Explicit host policy for local sessions only. A script or package cannot change this.
+fn plugin_limits(args: &mut Vec<String>) -> Result<(), String> {
+    let mut path = None;
+    let mut i = 0;
+    while let Some(arg) = args.get(i) {
+        let value = if arg == "--plugin-limits" {
+            let value = args.get(i + 1).filter(|v| !v.starts_with("--")).cloned().ok_or("--plugin-limits needs a JSON settings file")?;
+            args.drain(i..i + 2);
+            Some(value)
+        } else if let Some(value) = arg.strip_prefix("--plugin-limits=") {
+            let value = value.to_string();
+            args.remove(i);
+            Some(value)
+        } else {
+            i += 1;
+            None
+        };
+        if let Some(value) = value
+            && (value.is_empty() || path.replace(value).is_some())
+        {
+            return Err("provide one --plugin-limits JSON settings file".into());
+        }
+    }
+    let Some(path) = path else { return Ok(()) };
+    if args.iter().any(|v| v == "--connect" || v.starts_with("--connect="))
+        || (args.first().map(String::as_str) == Some("mcp") && !args.iter().any(|v| v == "--headless"))
+    {
+        return Err("--plugin-limits controls local sessions; use mcp --headless or change the connected desktop's Preferences > Plugins".into());
+    }
+    let bytes =
+        solidcraft_engine::io::vfs::read(&path, solidcraft_engine::plugin::MAX_MANIFEST_BYTES).map_err(|e| format!("--plugin-limits: {e}"))?;
+    // Windows editors and PowerShell 5.1 may write a UTF-8 BOM in this user settings file.
+    let bytes = bytes.strip_prefix(&[0xef, 0xbb, 0xbf]).unwrap_or(&bytes);
+    let limits: solidcraft_engine::plugin::HostLimits = serde_json::from_slice(bytes).map_err(|e| format!("--plugin-limits: {e}"))?;
+    solidcraft_engine::plugin::configure_process_host_limits(limits).map_err(|e| e.to_string())
+}
+
 fn pretty(v: &Value) -> String {
     serde_json::to_string_pretty(v).unwrap_or_default()
 }
@@ -245,6 +289,7 @@ fn usage() -> String {
         s.push_str(c.usage);
     }
     s.push_str(USAGE_DEBUG);
+    s.push_str(USAGE_PLUGIN_LIMITS);
     s
 }
 

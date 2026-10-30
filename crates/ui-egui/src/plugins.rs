@@ -2,8 +2,8 @@
 //!
 //! A plugin is a directory of `{data}/plugins/<id>/plugin.json`. The page searches that list.
 //! It reads `plugin.json` and records which ids are turned off. It does not load or run anything
-//! from the folder. Running a plugin (the wasm host in docs/plugins.md) is a later step; it will
-//! honour `disabled_plugins`.
+//! from the folder. Explicit `plugin.run` calls use the native component host and honour
+//! `disabled_plugins`; listing or enabling a package never executes its code.
 
 use std::path::{Path, PathBuf};
 
@@ -92,8 +92,8 @@ fn read_plugin(dir: &Path, folder: &str) -> Result<Plugin, String> {
         return Err("plugin.json is missing or larger than 16 KiB".into());
     }
     let text = std::fs::read_to_string(&path).map_err(|e| format!("plugin.json could not be read ({e})"))?;
-    let manifest: Manifest = serde_json::from_str(&text).map_err(|e| format!("plugin.json is not a plugin manifest ({e})"))?;
-    check(manifest, folder)
+    let parsed = solidcraft_engine::plugin::parse_manifest(text.as_bytes(), folder).map_err(|e| e.to_string())?;
+    check(Manifest { id: parsed.id, name: parsed.name, version: parsed.version, description: parsed.description }, folder)
 }
 
 /// The plugins in `dir`, and the folders that were not. A missing directory is an empty list.
@@ -123,6 +123,71 @@ pub fn scan(dir: &Path) -> (Vec<Plugin>, Vec<Skipped>) {
     plugins.sort_by(|a, b| a.name.cmp(&b.name).then(a.id.cmp(&b.id)));
     skipped.sort_by(|a, b| a.folder.cmp(&b.folder));
     (plugins, skipped)
+}
+
+/// Exact integer controls retain all u64 fuel values, without a float slider conversion.
+pub(crate) struct LimitInputs {
+    applied: solidcraft_engine::plugin::HostLimits,
+    fuel: String,
+    memory: String,
+}
+impl From<solidcraft_engine::plugin::HostLimits> for LimitInputs {
+    fn from(applied: solidcraft_engine::plugin::HostLimits) -> Self {
+        Self { fuel: applied.max_fuel.to_string(), memory: applied.max_memory_mib.to_string(), applied }
+    }
+}
+pub(crate) fn host_limits(p: &crate::prefs::Prefs) -> solidcraft_engine::plugin::HostLimits {
+    solidcraft_engine::plugin::HostLimits { max_fuel: p.plugin_max_fuel, max_memory_mib: p.plugin_max_memory_mib }
+}
+pub(crate) fn sync_policy(app: &mut SolveApp) {
+    app.session.disabled_plugins.clone_from(&app.preferences.disabled_plugins);
+    app.session.plugin_limits = host_limits(&app.preferences);
+}
+fn parsed_limits(input: &LimitInputs) -> Option<solidcraft_engine::plugin::HostLimits> {
+    let limits =
+        solidcraft_engine::plugin::HostLimits { max_fuel: input.fuel.trim().parse().ok()?, max_memory_mib: input.memory.trim().parse().ok()? };
+    limits.validate().ok()?;
+    Some(limits)
+}
+pub(crate) fn resource_pending(app: &SolveApp) -> bool {
+    let current = host_limits(&app.preferences);
+    app.prefs_window.plugin_limit_inputs.as_ref().is_some_and(|input| {
+        input.applied == current && (input.fuel != current.max_fuel.to_string() || input.memory != current.max_memory_mib.to_string())
+    })
+}
+/// Enter, Apply and OK commit both exact integers together. An incomplete edit cannot save a prefix.
+pub(crate) fn commit_resource_inputs(app: &mut SolveApp) -> Result<(), String> {
+    let Some(input) = app.prefs_window.plugin_limit_inputs.take() else { return Ok(()) };
+    // A control client has already changed the preferences: never overwrite that newer policy.
+    if input.applied != host_limits(&app.preferences) {
+        return Ok(());
+    }
+    let Some(limits) = parsed_limits(&input) else {
+        app.prefs_window.plugin_limit_inputs = Some(input);
+        return Err(app.tr("prefs.plugin_limits_invalid").to_string());
+    };
+    app.preferences.plugin_max_fuel = limits.max_fuel;
+    app.preferences.plugin_max_memory_mib = limits.max_memory_mib;
+    app.prefs_window.plugin_limit_inputs = Some(limits.into());
+    sync_policy(app);
+    Ok(())
+}
+fn resource_controls(app: &mut SolveApp, ui: &mut egui::Ui) {
+    let current = host_limits(&app.preferences);
+    let mut input = app.prefs_window.plugin_limit_inputs.take().filter(|v| v.applied == current).unwrap_or_else(|| current.into());
+    let (fuel_enter, _) = crate::ui_kit::text_row(ui, app.tr("prefs.plugin_max_fuel"), &mut input.fuel, "");
+    let (memory_enter, _) = crate::ui_kit::text_row(ui, app.tr("prefs.plugin_max_memory"), &mut input.memory, "");
+    if parsed_limits(&input).is_none() {
+        crate::ui_kit::text(ui, app.tr("prefs.plugin_limits_invalid"), crate::ui_kit::Text::Error("plugin_limits"));
+    }
+    crate::ui_kit::text(ui, app.tr("prefs.plugin_limits_note"), crate::ui_kit::Text::Hint("plugin_limits"));
+    app.prefs_window.plugin_limit_inputs = Some(input);
+    if (fuel_enter || memory_enter)
+        && let Err(error) = commit_resource_inputs(app)
+    {
+        app.set_status(error, true);
+    }
+    ui.separator();
 }
 
 /// Whether an installed plugin is offered. Unknown ids are on; an id in `disabled_plugins` is off.
@@ -166,6 +231,7 @@ pub fn page(app: &mut SolveApp, ui: &mut egui::Ui) {
             egui::Label::new(RichText::new(crate::i18n::format("ui.plugins_note", &[("path", &path)])).size(t.font_small).color(t.text_dim)).wrap(),
         );
     }
+    resource_controls(app, ui);
     ui.add_space(8.0);
     if !searching && crate::ui_kit::button(ui, crate::i18n::tr_label("Show in folder"), crate::ui_kit::Button::Normal).clicked() {
         // `show_in_folder` opens the parent of the path it is given, so the argument is a name
@@ -298,6 +364,77 @@ mod tests {
         assert!(crate::prefs::control(&mut app, &json!({"open": "NoSuch"})).is_err());
     }
 
+    #[test]
+    fn resource_ceilings_preserve_defaults_precision_persistence_and_page_transactions() {
+        use serde_json::json;
+        let mut h = crate::scenario::Harness::new();
+        let initial = host_limits(&h.app.preferences);
+        assert_eq!(initial, solidcraft_engine::plugin::HostLimits::default());
+        let before = h.app.session.doc.to_json();
+        let changed = json!({"plugin_max_fuel":u64::MAX,"plugin_max_memory_mib":512});
+        let reply = h.call("ui.prefs", changed.clone());
+        assert_eq!(reply["ok"], true, "{reply}");
+        assert_eq!(h.app.preferences.plugin_max_fuel, u64::MAX);
+        assert_eq!(h.app.session.plugin_limits.max_memory_mib, 512);
+        for bad in [
+            json!({"plugin_max_fuel":0}),
+            json!({"plugin_max_fuel":-1}),
+            json!({"plugin_max_fuel":1.5}),
+            json!({"plugin_max_memory_mib":4097}),
+            json!({"plugin_max_memory_mib":0}),
+        ] {
+            assert_eq!(h.call("ui.prefs", bad)["ok"], false);
+            assert_eq!(h.app.preferences.plugin_max_fuel, u64::MAX);
+        }
+        let mut restored = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+        restored.load_prefs(&h.app.prefs());
+        assert_eq!(host_limits(&restored.preferences), host_limits(&h.app.preferences));
+        assert_eq!(restored.session.plugin_limits.max_fuel, u64::MAX);
+        h.call("ui.prefs", json!({"open":"Plugins"}));
+        h.call("ui.prefs", json!({"plugin_max_memory_mib":1024}));
+        h.call("ui.prefs", json!({"button":"cancel"}));
+        assert_eq!(h.app.preferences.plugin_max_memory_mib, 512);
+        h.call("ui.prefs", json!({"open":"Plugins","button":"defaults"}));
+        assert_eq!(host_limits(&h.app.preferences), initial);
+        if let Some(input) = &h.app.prefs_window.plugin_limit_inputs {
+            assert_eq!(input.applied, initial);
+        }
+        h.call("ui.prefs", json!({"button":"cancel"}));
+        assert_eq!(h.app.preferences.plugin_max_memory_mib, 512);
+        assert_eq!(h.app.session.doc.to_json(), before);
+        assert!(h.app.session.undo.is_empty());
+        let read = crate::prefs::lenient(&json!({"plugin_max_fuel":0,"plugin_max_memory_mib":99999,"language":"en"}));
+        assert_eq!(host_limits(&read), initial);
+        assert_eq!(read.language, "en");
+    }
+    #[test]
+    fn resource_text_edits_require_complete_valid_confirmation() {
+        use serde_json::json;
+        let mut h = crate::scenario::Harness::new();
+        h.call("ui.prefs", json!({"open":"Plugins"}));
+        let initial = host_limits(&h.app.preferences);
+        h.app.prefs_window.plugin_limit_inputs = Some(LimitInputs { applied: initial, fuel: u64::MAX.to_string(), memory: "512".into() });
+        assert!(resource_pending(&h.app));
+        assert_eq!(h.app.session.plugin_limits, initial, "typing alone does not authorize a higher ceiling");
+        assert_eq!(h.call("ui.prefs", json!({}))["result"]["apply_enabled"], true);
+        assert_eq!(h.call("ui.prefs", json!({"button":"apply"}))["ok"], true);
+        assert_eq!(h.app.session.plugin_limits.max_fuel, u64::MAX);
+        assert_eq!(h.app.session.plugin_limits.max_memory_mib, 512);
+        let applied = h.app.session.plugin_limits;
+        for text in ["", "0", "18446744073709551616", "1.5"] {
+            h.app.prefs_window.plugin_limit_inputs = Some(LimitInputs { applied, fuel: text.into(), memory: "1024".into() });
+            assert_eq!(h.call("ui.prefs", json!({"button":"ok"}))["ok"], false);
+            assert!(h.app.prefs_window.open);
+            assert_eq!(h.app.session.plugin_limits, applied);
+        }
+        h.call("ui.prefs", json!({"button":"cancel"}));
+        assert_eq!(h.app.session.plugin_limits, applied, "Cancel retains the last Apply");
+        assert!(h.app.prefs_window.plugin_limit_inputs.is_none());
+        h.call("ui.prefs", json!({"open":"Plugins","button":"defaults"}));
+        assert_eq!(h.app.session.plugin_limits, initial);
+        h.call("ui.prefs", json!({"button":"cancel"}));
+        assert_eq!(h.app.session.plugin_limits, applied);
+    }
     #[test]
     fn search_matches_the_name_the_id_and_the_description() {
         let plugin = Plugin {

@@ -1,5 +1,8 @@
 # Plugins (design)
 
+The initial native one-shot command runtime is described in [plugin-runtime.md](plugin-runtime.md).
+The parametric feature shell and later phases below remain design work.
+
 Design companion to [#1221](https://github.com/bherbruck/solidcraft/issues/1221): sandboxed
 WebAssembly plugins with a WIT interface, the same `run(command, args)` JSON as
 [MCP](mcp.md) and the [control protocol](control-protocol.md). Browser hosting is in
