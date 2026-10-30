@@ -3031,6 +3031,7 @@ impl SolveApp {
     /// capture hides the report waits for it (the control channel's typing too).
     pub fn raw_input_hook(&mut self, raw: &mut egui::RawInput) {
         self.synthetic_input(raw);
+        finite_input(raw);
         issue_report::hold_input(self, raw);
     }
 
@@ -3480,6 +3481,17 @@ impl SolveApp {
             false
         });
     }
+}
+
+/// Drop pointer, wheel and gesture events that carry a non-finite number: egui 0.37 asserts on them.
+fn finite_input(raw: &mut egui::RawInput) {
+    raw.events.retain(|event| match event {
+        egui::Event::PointerMoved(pos) | egui::Event::PointerButton { pos, .. } | egui::Event::MiddleClickPaste { pos, .. } => pos.is_finite(),
+        egui::Event::MouseMoved(delta) | egui::Event::MouseWheel { delta, .. } => delta.is_finite(),
+        egui::Event::Zoom(amount) | egui::Event::Rotate(amount) => amount.is_finite(),
+        egui::Event::Touch { pos, force, .. } => pos.is_finite() && force.is_none_or(f32::is_finite),
+        _ => true,
+    });
 }
 
 /// The window is minimised or fully covered, so it presents no frames (#1677). Unknown counts as
