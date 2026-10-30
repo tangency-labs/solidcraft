@@ -58,6 +58,39 @@ fn a_drawing_starts_from_a_template() {
     assert_eq!(tolerances(&made), json!(template::ASSEMBLY_TOLERANCES));
 }
 
+/// A template applied to the drawing open: a dry run answers what would change and changes nothing;
+/// applying it is one undo step, and applying it again none. The views the new paper leaves
+/// outside are listed and stay where they were.
+#[test]
+fn a_template_applied_restyles_the_sheets_and_moves_nothing() {
+    let (mut s, [front, right, top]) = crate::cmd::drawing_view::tests::three_views();
+    let before = open_one(&s);
+    let (steps, sheet) = (s.undo.len(), ids::encode(before.sheets[0].id));
+    let dry = run(&mut s, "drawing.template.apply", json!({"template": "iso-a4-part", "dry_run": true}));
+    assert_eq!(dry["changed"], json!([{"sheet": sheet, "paper": true, "border": false, "title_block": false, "lost": []}]));
+    let outside: Vec<&str> = dry["outside"].as_array().unwrap().iter().map(|v| v["view"].as_str().unwrap()).collect();
+    assert!(outside.contains(&ids::encode(right).as_str()) && outside.contains(&ids::encode(top).as_str()), "{dry}");
+    assert!(!outside.contains(&ids::encode(front).as_str()), "{dry}");
+    assert_eq!((open_one(&s), s.undo.len()), (before.clone(), steps), "a dry run changes nothing");
+    let applied = run(&mut s, "drawing.template.apply", json!({"template": "iso-a4-part"}));
+    assert_eq!((&applied["changed"], &applied["outside"], &applied["dry_run"]), (&dry["changed"], &dry["outside"], &json!(false)));
+    let after = open_one(&s);
+    assert_eq!(after.sheets[0].sheet, template::built_in("iso-a4-part").unwrap().unwrap().sheets[0].sheet);
+    assert_eq!(after.views, before.views, "nothing moves");
+    assert_eq!(s.undo.len(), steps + 1);
+    let again = run(&mut s, "drawing.template.apply", json!({"template": "iso-a4-part"}));
+    assert_eq!((again["changed"].clone(), s.undo.len()), (json!([]), steps + 1), "nothing to change, no step");
+    for (p, why) in [
+        (json!({"template": "iso-b2-part"}), "no template `iso-b2-part`"),
+        (json!({}), "`template` must be a template's name"),
+        (json!({"template": "iso-a3-part", "dry_run": "yes"}), "`dry_run` is true or false"),
+    ] {
+        assert!(refused(&mut s, "drawing.template.apply", p.clone()).contains(why), "{p}");
+    }
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(open_one(&s).sheets, before.sheets, "undo puts the paper back");
+}
+
 /// The drawing open, as the design holds it.
 fn open_one(s: &Session) -> Arc<Drawing> {
     s.drawing("test").unwrap().clone()
