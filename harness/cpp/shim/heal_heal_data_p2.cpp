@@ -690,6 +690,78 @@ void put_repair_summary(SmBrep* brep, SmHealData& h, std::vector<double>& o)
         o.insert(o.end(), p.begin(), p.end());
 }
 
+// The geometry owners of the live B-rep, after its build and after a successful repair
+// step. Order-free, as `put_repair_summary` (a repair may have edited the fixture graph):
+// `-102`, then the face count and per face (sorted) its surface's owner class and loop
+// count, the edge count and per edge (sorted) its curve's owner class and edge use count,
+// and the edge use count and the sorted owner classes of each edge use's own UV trim
+// curve. Owner classes: `1` the holding object itself, `2` another object of its kind in
+// the B-rep, `-1` no owner, `-2` no geometry, `-3` any other owner.
+double owner_class(const SmObject* owner, const SmObject* self, const std::set<const SmObject*>& kind)
+{
+    if (owner == nullptr)
+        return -1.0;
+    if (owner == self)
+        return 1.0;
+    return kind.count(owner) ? 2.0 : -3.0;
+}
+
+void put_owner_block(SmBrep* brep, std::vector<double>& o)
+{
+    o.push_back(-102.0);
+    SmTArray<SmFace*> faces;
+    SmTArray<SmEdge*> edges;
+    SmTArray<SmEdgeuse*> uses;
+    brep->GetFaces(faces);
+    brep->GetEdges(edges);
+    brep->GetEdgeuses(uses);
+    std::set<const SmObject*> fs, es, us;
+    for (ULONG i = 0; i < faces.GetSize(); ++i)
+        fs.insert((const SmObject*)faces[i]);
+    for (ULONG i = 0; i < edges.GetSize(); ++i)
+        es.insert((const SmObject*)edges[i]);
+    for (ULONG i = 0; i < uses.GetSize(); ++i)
+        us.insert((const SmObject*)uses[i]);
+    std::vector<std::pair<double, double>> per_face;
+    for (ULONG i = 0; i < faces.GetSize(); ++i)
+    {
+        SmSurface* s = faces[i]->GetSurface();
+        SmTArray<SmLoop*> loops;
+        faces[i]->GetLoops(loops);
+        double cls = s ? owner_class(s->GetOwner(), (const SmObject*)faces[i], fs) : -2.0;
+        per_face.emplace_back(cls, (double)loops.GetSize());
+    }
+    std::vector<std::pair<double, double>> per_edge;
+    for (ULONG i = 0; i < edges.GetSize(); ++i)
+    {
+        SmCurve* c = edges[i]->GetCurve();
+        SmTArray<SmEdgeuse*> eus;
+        edges[i]->GetEdgeuses(eus);
+        double cls = c ? owner_class(c->GetOwner(), (const SmObject*)edges[i], es) : -2.0;
+        per_edge.emplace_back(cls, (double)eus.GetSize());
+    }
+    std::vector<double> per_use;
+    for (ULONG i = 0; i < uses.GetSize(); ++i)
+    {
+        SmBSplineCurve* uv = uses[i]->*EuPeek::uv();
+        per_use.push_back(uv ? owner_class(uv->GetOwner(), (const SmObject*)uses[i], us) : -2.0);
+    }
+    std::sort(per_face.begin(), per_face.end());
+    std::sort(per_edge.begin(), per_edge.end());
+    std::sort(per_use.begin(), per_use.end());
+    for (const auto* list : {&per_face, &per_edge})
+    {
+        o.push_back((double)list->size());
+        for (const auto& x : *list)
+        {
+            o.push_back(x.first);
+            o.push_back(x.second);
+        }
+    }
+    o.push_back((double)per_use.size());
+    o.insert(o.end(), per_use.begin(), per_use.end());
+}
+
 void dump(SmHealData& h, Graph& g, Registry& r, std::vector<double>& o)
 {
     o.push_back(-100.0);
@@ -1104,6 +1176,7 @@ void run_heal(Rd& rd, const char* path, std::vector<double>& o)
     if (brep == nullptr)
         return;
     o.push_back(0.0);
+    put_owner_block(brep, o);
     SmTArray<SmVertex*> vs;
     SmTArray<SmEdge*> es;
     SmTArray<SmFace*> fs;
@@ -1605,7 +1678,11 @@ void run_heal(Rd& rd, const char* path, std::vector<double>& o)
                 o.push_back((double)p->m_eBeenThroughSplitEdgesAtSeam);
             }
         }
-        if (repair && stat == SM_SUCCESS) put_repair_summary(brep, *h, o);
+        if (repair && stat == SM_SUCCESS)
+        {
+            put_repair_summary(brep, *h, o);
+            put_owner_block(brep, o);
+        }
         if (repair) { r.note(*h); stop = true; }
         o.push_back(st(stat));
         o.push_back(flg(bNew));

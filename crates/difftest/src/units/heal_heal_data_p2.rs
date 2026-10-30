@@ -84,7 +84,7 @@ use super::topology_vertexuse::{gen_brep, path_of, push_curve, push_surface, Bre
 use crate::case::CaseContext;
 use crate::own_builder::{
     build_any, build_status, counts as own_counts, create_face, finish, in_new_brep, init_gap_walk,
-    Built, Conventions,
+    resolve_owner, Built, Conventions,
 };
 use crate::runner::default_cases;
 use crate::{Case, HarnessError, Output, Rng, UnitDiff};
@@ -1113,6 +1113,73 @@ fn put_repair_summary(h: &HealData<H>, b: &Brep, o: &mut Vec<f64>) -> Result<(),
     Ok(())
 }
 
+/// The shim's `put_owner_block`: the geometry owners of the B-rep, after its build and
+/// after a successful repair step, order-free as [`put_repair_summary`]: `-102`, then
+/// the face count and per face (sorted) its surface's owner class and loop count, the
+/// edge count and per edge (sorted) its curve's owner class and edge use count, and the
+/// edge use count and the sorted owner classes of each edge use's own UV trim curve.
+/// Owner classes: `1` the holding object itself, `2` another object of its kind in the
+/// B-rep, `-1` no owner, `-2` no geometry, `-3` any other owner. A surface (curve)
+/// `GetSurfaces` (`GetCurves`) lists is owned by its face (edge); any other owner is
+/// resolved under the harness's identities and the kernel identities of the B-rep's
+/// notify serial ([`resolve_owner`]): a kernel-named edit (`kernel_named_edit`, the heal
+/// repairs' `tracked_edit`) owns the geometry it makes by those (e.g. the seam edge's UV
+/// trim curves of `MakeEdgeInFaceWithVU`).
+fn put_owner_block(b: &Brep, o: &mut Vec<f64>) -> Result<(), SolidError> {
+    use solidcore::topology::brep::{p1 as bp1, p2 as bp2};
+    use solidcore::topology::edge::edgeuses as edge_uses;
+    use solidcore::topology::face::p2 as fp2;
+    let serial = b.notify_serial();
+    let class = |owner: Option<ObjectRef>, own: EntityRef| match owner {
+        None => -1.0,
+        Some(r) => match resolve_owner(b, r, serial, own) {
+            Some(e) if e == own => 1.0,
+            Some(e) if std::mem::discriminant(&e) == std::mem::discriminant(&own) => 2.0,
+            _ => -3.0,
+        },
+    };
+    let by_pair = |x: &[f64; 2], y: &[f64; 2]| x[0].total_cmp(&y[0]).then(x[1].total_cmp(&y[1]));
+    o.push(-102.0);
+    // (a face without surface makes GetSurfaces fail; the resolution still applies)
+    let listed_surfaces = bp1::surfaces(b, None).unwrap_or_default();
+    let mut per_face = Vec::new();
+    for f in bp1::faces(b, None)? {
+        let c = match b.face(f)?.surface.as_ref() {
+            None => -2.0,
+            Some(s) if listed_surfaces.iter().any(|x| std::ptr::eq(*x, s)) => 1.0,
+            Some(s) => class(s.owner(), EntityRef::Face(f)),
+        };
+        per_face.push([c, fp2::loops(b, f, false, None)?.len() as f64]);
+    }
+    let listed_curves = bp1::curves(b, None).unwrap_or_default();
+    let mut per_edge = Vec::new();
+    for e in bp1::edges(b, None)? {
+        let c = match b.edge(e)?.curve.as_ref() {
+            None => -2.0,
+            Some(cv) if listed_curves.iter().any(|x| std::ptr::eq(*x, cv)) => 1.0,
+            Some(cv) => class(cv.owner(), EntityRef::Edge(e)),
+        };
+        per_edge.push([c, edge_uses(b, e, None, None)?.len() as f64]);
+    }
+    let mut per_use = Vec::new();
+    for eu in bp2::edgeuses(b, None)? {
+        per_use.push(match b.edgeuse(eu)?.uv_trim_curve.as_ref() {
+            None => -2.0,
+            Some(uv) => class(uv.owner(), EntityRef::Edgeuse(eu)),
+        });
+    }
+    per_face.sort_by(by_pair);
+    per_edge.sort_by(by_pair);
+    per_use.sort_by(f64::total_cmp);
+    for list in [per_face, per_edge] {
+        o.push(list.len() as f64);
+        o.extend(list.into_iter().flatten());
+    }
+    o.push(per_use.len() as f64);
+    o.extend(per_use);
+    Ok(())
+}
+
 fn dump(h: &HealData<H>, b: &Brep, o: &mut Vec<f64>) -> Result<(), SolidError> {
     o.push(STATE);
     o.push(h.tgt_vertices.len() as f64);
@@ -1772,6 +1839,7 @@ fn rust_heal(
     h.z_cnt = voxels[2] as usize;
 
     let mut o = vec![0.0];
+    put_owner_block(&b, &mut o).map_err(|e| harness(e.to_string()))?;
     let mut stop = false;
     for s in steps {
         let code = match s {
@@ -2289,6 +2357,7 @@ fn rust_heal(
             Ok(new_probs) if last_without_state => {
                 if repair {
                     put_repair_summary(&h, &b, &mut o).map_err(|e| harness(e.to_string()))?;
+                    put_owner_block(&b, &mut o).map_err(|e| harness(e.to_string()))?;
                 }
                 o.extend([0.0, flag(new_probs)]);
                 stop = true;
