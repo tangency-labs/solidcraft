@@ -1,0 +1,1911 @@
+{
+  "cases": [
+    {
+      "name": "api_fillet_box_z7",
+      "upstream_ref": "tests/SM_API_test/src/TestSmIntersectors.cpp TestSmIntersectBrepWithPlane",
+      "inputs": {
+        "want_3d": true,
+        "body": {
+          "box": {
+            "size": [
+              5,
+              10,
+              15
+            ],
+            "fillet": 0.5
+          }
+        },
+        "api": true,
+        "point": [
+          0,
+          0,
+          7
+        ],
+        "normal": [
+          0,
+          0,
+          1
+        ]
+      }
+    },
+    {
+      "name": "api_fillet_box_z7_long_normal",
+      "upstream_ref": "tests/SM_API_test/src/TestSmIntersectors.cpp TestSmIntersectBrepWithPlane",
+      "inputs": {
+        "want_3d": true,
+        "body": {
+          "box": {
+            "size": [
+              5,
+              10,
+              15
+            ],
+            "fillet": 0.5
+          }
+        },
+        "api": true,
+        "point": [
+          0,
+          0,
+          7
+        ],
+        "normal": [
+          0,
+          0,
+          5
+        ]
+      }
+    },
+    {
+      "name": "api_fillet_box_zero_normal",
+      "upstream_ref": "tests/SM_API_test/src/TestSmIntersectors.cpp TestSmIntersectBrepWithPlane",
+      "inputs": {
+        "want_3d": true,
+        "body": {
+          "box": {
+            "size": [
+              5,
+              10,
+              15
+            ],
+            "fillet": 0.5
+          }
+        },
+        "api": true,
+        "point": [
+          0,
+          0,
+          7
+        ],
+        "normal": [
+          0,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "name": "issue_1451_box_x5",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::CreatePlanarSectionCurves",
+      "inputs": {
+        "want_3d": true,
+        "body": {
+          "box": {
+            "size": [
+              10,
+              10,
+              10
+            ],
+            "fillet": 0.0
+          }
+        },
+        "point": [
+          5,
+          5,
+          5
+        ],
+        "normal": [
+          1,
+          0,
+          0
+        ],
+        "want_faces": true
+      }
+    },
+    {
+      "name": "box_x5_uv_faces",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::CreatePlanarSectionCurves",
+      "inputs": {
+        "want_3d": true,
+        "body": {
+          "box": {
+            "size": [
+              10,
+              10,
+              10
+            ],
+            "fillet": 0.0
+          }
+        },
+        "point": [
+          5,
+          5,
+          5
+        ],
+        "normal": [
+          1,
+          0,
+          0
+        ],
+        "want_uv": true,
+        "want_faces": true
+      }
+    },
+    {
+      "name": "box_x5_uv_forced",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::CreatePlanarSectionCurves",
+      "inputs": {
+        "want_3d": true,
+        "body": {
+          "box": {
+            "size": [
+              10,
+              10,
+              10
+            ],
+            "fillet": 0.0
+          }
+        },
+        "point": [
+          5,
+          5,
+          5
+        ],
+        "normal": [
+          1,
+          0,
+          0
+        ],
+        "want_uv": true,
+        "want_faces": true,
+        "force_uv_classify": true
+      }
+    },
+    {
+      "name": "box_faces_only",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::CreatePlanarSectionCurves",
+      "inputs": {
+        "want_3d": false,
+        "body": {
+          "box": {
+            "size": [
+              10,
+              10,
+              10
+            ],
+            "fillet": 0.0
+          }
+        },
+        "point": [
+          5,
+          5,
+          5
+        ],
+        "normal": [
+          0,
+          1,
+          0
+        ],
+        "want_faces": true
+      }
+    },
+    {
+      "name": "box_plane_on_face_x0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::CreatePlanarSectionCurves",
+      "inputs": {
+        "want_3d": true,
+        "body": {
+          "box": {
+            "size": [
+              10,
+              10,
+              10
+            ],
+            "fillet": 0.0
+          }
+        },
+        "point": [
+          0,
+          5,
+          5
+        ],
+        "normal": [
+          1,
+          0,
+          0
+        ],
+        "want_uv": true,
+        "want_faces": true
+      }
+    },
+    {
+      "name": "box_plane_misses",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::CreatePlanarSectionCurves",
+      "inputs": {
+        "want_3d": true,
+        "body": {
+          "box": {
+            "size": [
+              10,
+              10,
+              10
+            ],
+            "fillet": 0.0
+          }
+        },
+        "point": [
+          20,
+          5,
+          5
+        ],
+        "normal": [
+          1,
+          0,
+          0
+        ],
+        "want_uv": true,
+        "want_faces": true
+      }
+    },
+    {
+      "name": "box_plane_through_edge",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::CreatePlanarSectionCurves",
+      "inputs": {
+        "want_3d": true,
+        "body": {
+          "box": {
+            "size": [
+              10,
+              10,
+              10
+            ],
+            "fillet": 0.0
+          }
+        },
+        "point": [
+          0,
+          0,
+          0
+        ],
+        "normal": [
+          1,
+          1,
+          0
+        ],
+        "want_faces": true
+      }
+    },
+    {
+      "name": "box_diagonal",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::CreatePlanarSectionCurves",
+      "inputs": {
+        "want_3d": true,
+        "body": {
+          "box": {
+            "size": [
+              10,
+              10,
+              10
+            ],
+            "fillet": 0.0
+          }
+        },
+        "point": [
+          5,
+          5,
+          5
+        ],
+        "normal": [
+          1,
+          1,
+          1
+        ],
+        "want_uv": true,
+        "want_faces": true
+      }
+    },
+    {
+      "name": "box_tiny",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::CreatePlanarSectionCurves",
+      "inputs": {
+        "want_3d": true,
+        "body": {
+          "box": {
+            "size": [
+              0.0001,
+              0.0002,
+              0.0003
+            ],
+            "fillet": 0.0
+          }
+        },
+        "point": [
+          5e-05,
+          0.0001,
+          0.00015
+        ],
+        "normal": [
+          0,
+          0,
+          1
+        ],
+        "want_uv": true
+      }
+    },
+    {
+      "name": "box_huge",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::CreatePlanarSectionCurves",
+      "inputs": {
+        "want_3d": true,
+        "body": {
+          "box": {
+            "size": [
+              100000.0,
+              200000.0,
+              300000.0
+            ],
+            "fillet": 0.0
+          }
+        },
+        "point": [
+          50000.0,
+          100000.0,
+          150000.0
+        ],
+        "normal": [
+          0.3,
+          0.4,
+          1
+        ],
+        "want_faces": true
+      }
+    },
+    {
+      "name": "box_tolerance_given",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::CreatePlanarSectionCurves",
+      "inputs": {
+        "want_3d": true,
+        "body": {
+          "box": {
+            "size": [
+              10,
+              10,
+              10
+            ],
+            "fillet": 0.0
+          }
+        },
+        "point": [
+          5,
+          5,
+          5
+        ],
+        "normal": [
+          0,
+          0,
+          1
+        ],
+        "tol": 1e-06,
+        "ang_tol": 0.3,
+        "want_uv": true
+      }
+    },
+    {
+      "name": "fillet_box_z7_uv_faces",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::CreatePlanarSectionCurves",
+      "inputs": {
+        "want_3d": true,
+        "body": {
+          "box": {
+            "size": [
+              5,
+              10,
+              15
+            ],
+            "fillet": 0.5
+          }
+        },
+        "point": [
+          0,
+          0,
+          7
+        ],
+        "normal": [
+          0,
+          0,
+          1
+        ],
+        "want_uv": true,
+        "want_faces": true
+      }
+    },
+    {
+      "name": "fillet_box_x_through_fillets",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::CreatePlanarSectionCurves",
+      "inputs": {
+        "want_3d": true,
+        "body": {
+          "box": {
+            "size": [
+              5,
+              10,
+              15
+            ],
+            "fillet": 0.5
+          }
+        },
+        "point": [
+          2.5,
+          0,
+          0
+        ],
+        "normal": [
+          1,
+          0,
+          0
+        ],
+        "want_uv": true,
+        "want_faces": true
+      }
+    },
+    {
+      "name": "fillet_box_y_forced",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::CreatePlanarSectionCurves",
+      "inputs": {
+        "want_3d": true,
+        "body": {
+          "box": {
+            "size": [
+              5,
+              10,
+              15
+            ],
+            "fillet": 0.5
+          }
+        },
+        "point": [
+          0,
+          9.8,
+          0
+        ],
+        "normal": [
+          0,
+          1,
+          0
+        ],
+        "want_uv": true,
+        "force_uv_classify": true
+      }
+    },
+    {
+      "name": "extra_torus_y_origin",
+      "upstream_ref": "tests/prog_test/src/smAdvancedTest.cpp my_test_tsurf_section (torus.smb, tol 1e-2), extra planes through the origin (not the upstream walk)",
+      "inputs": {
+        "want_3d": true,
+        "body": {
+          "file": {
+            "file": "torus.smb"
+          }
+        },
+        "point": [
+          0,
+          0,
+          0
+        ],
+        "normal": [
+          0,
+          1,
+          0
+        ],
+        "tol": 0.01,
+        "want_uv": true
+      }
+    },
+    {
+      "name": "extra_torus_z_origin",
+      "upstream_ref": "tests/prog_test/src/smAdvancedTest.cpp my_test_tsurf_section (torus.smb, tol 1e-2), extra planes through the origin (not the upstream walk)",
+      "inputs": {
+        "want_3d": true,
+        "body": {
+          "file": {
+            "file": "torus.smb"
+          }
+        },
+        "point": [
+          0,
+          0,
+          0
+        ],
+        "normal": [
+          0,
+          0,
+          1
+        ],
+        "tol": 0.01,
+        "want_uv": true
+      }
+    },
+    {
+      "name": "extra_torus_x_origin",
+      "upstream_ref": "tests/prog_test/src/smAdvancedTest.cpp my_test_tsurf_section (torus.smb, tol 1e-2), extra planes through the origin (not the upstream walk)",
+      "inputs": {
+        "want_3d": true,
+        "body": {
+          "file": {
+            "file": "torus.smb"
+          }
+        },
+        "point": [
+          0,
+          0,
+          0
+        ],
+        "normal": [
+          1,
+          0,
+          0
+        ],
+        "tol": 0.01,
+        "want_uv": true
+      }
+    },
+    {
+      "name": "extra_torus_diagonal_tol_1e4",
+      "upstream_ref": "tests/prog_test/src/smTopoTest.cpp my_test_tsurf_section (tol 1e-4, normal (1,1,1)), extra plane (not the upstream walk)",
+      "inputs": {
+        "want_3d": true,
+        "body": {
+          "file": {
+            "file": "torus.smb"
+          }
+        },
+        "point": [
+          1,
+          1,
+          1
+        ],
+        "normal": [
+          1,
+          1,
+          1
+        ],
+        "tol": 0.0001,
+        "want_uv": true,
+        "want_faces": true
+      }
+    },
+    {
+      "name": "cylinder_axis_forced",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::CreatePlanarSectionCurves",
+      "inputs": {
+        "want_3d": true,
+        "body": {
+          "file": {
+            "file": "Solids/cylinder.smb"
+          }
+        },
+        "point": [
+          0,
+          0,
+          0
+        ],
+        "normal": [
+          1,
+          0,
+          0
+        ],
+        "want_uv": true,
+        "want_faces": true,
+        "force_uv_classify": true
+      }
+    },
+    {
+      "name": "sphere_equator",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::CreatePlanarSectionCurves",
+      "inputs": {
+        "want_3d": true,
+        "body": {
+          "file": {
+            "file": "Solids/sphere.smb"
+          }
+        },
+        "point": [
+          0,
+          0,
+          0
+        ],
+        "normal": [
+          0,
+          0,
+          1
+        ],
+        "want_uv": true,
+        "want_faces": true
+      }
+    },
+    {
+      "name": "cone_slant",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::CreatePlanarSectionCurves",
+      "inputs": {
+        "want_3d": true,
+        "body": {
+          "file": {
+            "file": "cone.smb"
+          }
+        },
+        "point": [
+          0,
+          0,
+          1
+        ],
+        "normal": [
+          0.2,
+          0,
+          1
+        ],
+        "want_uv": true
+      }
+    },
+    {
+      "name": "nurb_fillet_section",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::CreatePlanarSectionCurves",
+      "inputs": {
+        "want_3d": true,
+        "body": {
+          "file": {
+            "file": "Solids/nurb_fillet.smb"
+          }
+        },
+        "point": [
+          0,
+          0,
+          0
+        ],
+        "normal": [
+          0,
+          1,
+          0
+        ],
+        "want_uv": true,
+        "want_faces": true
+      }
+    },
+    {
+      "name": "upstream_torus_a_plane0",
+      "upstream_ref": "tests/prog_test/src/smAdvancedTest.cpp:59/84/109 my_test_tsurf_section(torus.smb translated, 1e-2, normal, 7 planes) -> smTopoTest.cpp:1629",
+      "inputs": {
+        "body": {
+          "file": {
+            "file": "torus.smb"
+          }
+        },
+        "translate": [
+          0,
+          0,
+          0
+        ],
+        "plane_walk": [
+          7,
+          0
+        ],
+        "normal": [
+          0,
+          1,
+          0
+        ],
+        "tol": 0.01,
+        "want_3d": true,
+        "want_uv": true
+      }
+    },
+    {
+      "name": "upstream_torus_a_plane1",
+      "upstream_ref": "tests/prog_test/src/smAdvancedTest.cpp:59/84/109 my_test_tsurf_section(torus.smb translated, 1e-2, normal, 7 planes) -> smTopoTest.cpp:1629",
+      "inputs": {
+        "body": {
+          "file": {
+            "file": "torus.smb"
+          }
+        },
+        "translate": [
+          0,
+          0,
+          0
+        ],
+        "plane_walk": [
+          7,
+          1
+        ],
+        "normal": [
+          0,
+          1,
+          0
+        ],
+        "tol": 0.01,
+        "want_3d": true,
+        "want_uv": true
+      }
+    },
+    {
+      "name": "upstream_torus_a_plane2",
+      "upstream_ref": "tests/prog_test/src/smAdvancedTest.cpp:59/84/109 my_test_tsurf_section(torus.smb translated, 1e-2, normal, 7 planes) -> smTopoTest.cpp:1629",
+      "inputs": {
+        "body": {
+          "file": {
+            "file": "torus.smb"
+          }
+        },
+        "translate": [
+          0,
+          0,
+          0
+        ],
+        "plane_walk": [
+          7,
+          2
+        ],
+        "normal": [
+          0,
+          1,
+          0
+        ],
+        "tol": 0.01,
+        "want_3d": true,
+        "want_uv": true
+      }
+    },
+    {
+      "name": "upstream_torus_a_plane3",
+      "upstream_ref": "tests/prog_test/src/smAdvancedTest.cpp:59/84/109 my_test_tsurf_section(torus.smb translated, 1e-2, normal, 7 planes) -> smTopoTest.cpp:1629",
+      "inputs": {
+        "body": {
+          "file": {
+            "file": "torus.smb"
+          }
+        },
+        "translate": [
+          0,
+          0,
+          0
+        ],
+        "plane_walk": [
+          7,
+          3
+        ],
+        "normal": [
+          0,
+          1,
+          0
+        ],
+        "tol": 0.01,
+        "want_3d": true,
+        "want_uv": true
+      }
+    },
+    {
+      "name": "upstream_torus_a_plane4",
+      "upstream_ref": "tests/prog_test/src/smAdvancedTest.cpp:59/84/109 my_test_tsurf_section(torus.smb translated, 1e-2, normal, 7 planes) -> smTopoTest.cpp:1629",
+      "inputs": {
+        "body": {
+          "file": {
+            "file": "torus.smb"
+          }
+        },
+        "translate": [
+          0,
+          0,
+          0
+        ],
+        "plane_walk": [
+          7,
+          4
+        ],
+        "normal": [
+          0,
+          1,
+          0
+        ],
+        "tol": 0.01,
+        "want_3d": true,
+        "want_uv": true
+      }
+    },
+    {
+      "name": "upstream_torus_a_plane5",
+      "upstream_ref": "tests/prog_test/src/smAdvancedTest.cpp:59/84/109 my_test_tsurf_section(torus.smb translated, 1e-2, normal, 7 planes) -> smTopoTest.cpp:1629",
+      "inputs": {
+        "body": {
+          "file": {
+            "file": "torus.smb"
+          }
+        },
+        "translate": [
+          0,
+          0,
+          0
+        ],
+        "plane_walk": [
+          7,
+          5
+        ],
+        "normal": [
+          0,
+          1,
+          0
+        ],
+        "tol": 0.01,
+        "want_3d": true,
+        "want_uv": true
+      }
+    },
+    {
+      "name": "upstream_torus_a_plane6",
+      "upstream_ref": "tests/prog_test/src/smAdvancedTest.cpp:59/84/109 my_test_tsurf_section(torus.smb translated, 1e-2, normal, 7 planes) -> smTopoTest.cpp:1629",
+      "inputs": {
+        "body": {
+          "file": {
+            "file": "torus.smb"
+          }
+        },
+        "translate": [
+          0,
+          0,
+          0
+        ],
+        "plane_walk": [
+          7,
+          6
+        ],
+        "normal": [
+          0,
+          1,
+          0
+        ],
+        "tol": 0.01,
+        "want_3d": true,
+        "want_uv": true
+      }
+    },
+    {
+      "name": "upstream_torus_b_plane0",
+      "upstream_ref": "tests/prog_test/src/smAdvancedTest.cpp:59/84/109 my_test_tsurf_section(torus.smb translated, 1e-2, normal, 7 planes) -> smTopoTest.cpp:1629",
+      "inputs": {
+        "body": {
+          "file": {
+            "file": "torus.smb"
+          }
+        },
+        "translate": [
+          0,
+          -40,
+          0
+        ],
+        "plane_walk": [
+          7,
+          0
+        ],
+        "normal": [
+          0,
+          0,
+          1
+        ],
+        "tol": 0.01,
+        "want_3d": true,
+        "want_uv": true
+      }
+    },
+    {
+      "name": "upstream_torus_b_plane1",
+      "upstream_ref": "tests/prog_test/src/smAdvancedTest.cpp:59/84/109 my_test_tsurf_section(torus.smb translated, 1e-2, normal, 7 planes) -> smTopoTest.cpp:1629",
+      "inputs": {
+        "body": {
+          "file": {
+            "file": "torus.smb"
+          }
+        },
+        "translate": [
+          0,
+          -40,
+          0
+        ],
+        "plane_walk": [
+          7,
+          1
+        ],
+        "normal": [
+          0,
+          0,
+          1
+        ],
+        "tol": 0.01,
+        "want_3d": true,
+        "want_uv": true
+      }
+    },
+    {
+      "name": "upstream_torus_b_plane2",
+      "upstream_ref": "tests/prog_test/src/smAdvancedTest.cpp:59/84/109 my_test_tsurf_section(torus.smb translated, 1e-2, normal, 7 planes) -> smTopoTest.cpp:1629",
+      "inputs": {
+        "body": {
+          "file": {
+            "file": "torus.smb"
+          }
+        },
+        "translate": [
+          0,
+          -40,
+          0
+        ],
+        "plane_walk": [
+          7,
+          2
+        ],
+        "normal": [
+          0,
+          0,
+          1
+        ],
+        "tol": 0.01,
+        "want_3d": true,
+        "want_uv": true
+      }
+    },
+    {
+      "name": "upstream_torus_b_plane3",
+      "upstream_ref": "tests/prog_test/src/smAdvancedTest.cpp:59/84/109 my_test_tsurf_section(torus.smb translated, 1e-2, normal, 7 planes) -> smTopoTest.cpp:1629",
+      "inputs": {
+        "body": {
+          "file": {
+            "file": "torus.smb"
+          }
+        },
+        "translate": [
+          0,
+          -40,
+          0
+        ],
+        "plane_walk": [
+          7,
+          3
+        ],
+        "normal": [
+          0,
+          0,
+          1
+        ],
+        "tol": 0.01,
+        "want_3d": true,
+        "want_uv": true
+      }
+    },
+    {
+      "name": "upstream_torus_b_plane4",
+      "upstream_ref": "tests/prog_test/src/smAdvancedTest.cpp:59/84/109 my_test_tsurf_section(torus.smb translated, 1e-2, normal, 7 planes) -> smTopoTest.cpp:1629",
+      "inputs": {
+        "body": {
+          "file": {
+            "file": "torus.smb"
+          }
+        },
+        "translate": [
+          0,
+          -40,
+          0
+        ],
+        "plane_walk": [
+          7,
+          4
+        ],
+        "normal": [
+          0,
+          0,
+          1
+        ],
+        "tol": 0.01,
+        "want_3d": true,
+        "want_uv": true
+      }
+    },
+    {
+      "name": "upstream_torus_b_plane5",
+      "upstream_ref": "tests/prog_test/src/smAdvancedTest.cpp:59/84/109 my_test_tsurf_section(torus.smb translated, 1e-2, normal, 7 planes) -> smTopoTest.cpp:1629",
+      "inputs": {
+        "body": {
+          "file": {
+            "file": "torus.smb"
+          }
+        },
+        "translate": [
+          0,
+          -40,
+          0
+        ],
+        "plane_walk": [
+          7,
+          5
+        ],
+        "normal": [
+          0,
+          0,
+          1
+        ],
+        "tol": 0.01,
+        "want_3d": true,
+        "want_uv": true
+      }
+    },
+    {
+      "name": "upstream_torus_b_plane6",
+      "upstream_ref": "tests/prog_test/src/smAdvancedTest.cpp:59/84/109 my_test_tsurf_section(torus.smb translated, 1e-2, normal, 7 planes) -> smTopoTest.cpp:1629",
+      "inputs": {
+        "body": {
+          "file": {
+            "file": "torus.smb"
+          }
+        },
+        "translate": [
+          0,
+          -40,
+          0
+        ],
+        "plane_walk": [
+          7,
+          6
+        ],
+        "normal": [
+          0,
+          0,
+          1
+        ],
+        "tol": 0.01,
+        "want_3d": true,
+        "want_uv": true
+      }
+    },
+    {
+      "name": "upstream_torus_c_plane0",
+      "upstream_ref": "tests/prog_test/src/smAdvancedTest.cpp:59/84/109 my_test_tsurf_section(torus.smb translated, 1e-2, normal, 7 planes) -> smTopoTest.cpp:1629",
+      "inputs": {
+        "body": {
+          "file": {
+            "file": "torus.smb"
+          }
+        },
+        "translate": [
+          -40,
+          -40,
+          0
+        ],
+        "plane_walk": [
+          7,
+          0
+        ],
+        "normal": [
+          1,
+          0,
+          0
+        ],
+        "tol": 0.01,
+        "want_3d": true,
+        "want_uv": true
+      }
+    },
+    {
+      "name": "upstream_torus_c_plane1",
+      "upstream_ref": "tests/prog_test/src/smAdvancedTest.cpp:59/84/109 my_test_tsurf_section(torus.smb translated, 1e-2, normal, 7 planes) -> smTopoTest.cpp:1629",
+      "inputs": {
+        "body": {
+          "file": {
+            "file": "torus.smb"
+          }
+        },
+        "translate": [
+          -40,
+          -40,
+          0
+        ],
+        "plane_walk": [
+          7,
+          1
+        ],
+        "normal": [
+          1,
+          0,
+          0
+        ],
+        "tol": 0.01,
+        "want_3d": true,
+        "want_uv": true
+      }
+    },
+    {
+      "name": "upstream_torus_c_plane2",
+      "upstream_ref": "tests/prog_test/src/smAdvancedTest.cpp:59/84/109 my_test_tsurf_section(torus.smb translated, 1e-2, normal, 7 planes) -> smTopoTest.cpp:1629",
+      "inputs": {
+        "body": {
+          "file": {
+            "file": "torus.smb"
+          }
+        },
+        "translate": [
+          -40,
+          -40,
+          0
+        ],
+        "plane_walk": [
+          7,
+          2
+        ],
+        "normal": [
+          1,
+          0,
+          0
+        ],
+        "tol": 0.01,
+        "want_3d": true,
+        "want_uv": true
+      }
+    },
+    {
+      "name": "upstream_torus_c_plane3",
+      "upstream_ref": "tests/prog_test/src/smAdvancedTest.cpp:59/84/109 my_test_tsurf_section(torus.smb translated, 1e-2, normal, 7 planes) -> smTopoTest.cpp:1629",
+      "inputs": {
+        "body": {
+          "file": {
+            "file": "torus.smb"
+          }
+        },
+        "translate": [
+          -40,
+          -40,
+          0
+        ],
+        "plane_walk": [
+          7,
+          3
+        ],
+        "normal": [
+          1,
+          0,
+          0
+        ],
+        "tol": 0.01,
+        "want_3d": true,
+        "want_uv": true
+      }
+    },
+    {
+      "name": "upstream_torus_c_plane4",
+      "upstream_ref": "tests/prog_test/src/smAdvancedTest.cpp:59/84/109 my_test_tsurf_section(torus.smb translated, 1e-2, normal, 7 planes) -> smTopoTest.cpp:1629",
+      "inputs": {
+        "body": {
+          "file": {
+            "file": "torus.smb"
+          }
+        },
+        "translate": [
+          -40,
+          -40,
+          0
+        ],
+        "plane_walk": [
+          7,
+          4
+        ],
+        "normal": [
+          1,
+          0,
+          0
+        ],
+        "tol": 0.01,
+        "want_3d": true,
+        "want_uv": true
+      }
+    },
+    {
+      "name": "upstream_torus_c_plane5",
+      "upstream_ref": "tests/prog_test/src/smAdvancedTest.cpp:59/84/109 my_test_tsurf_section(torus.smb translated, 1e-2, normal, 7 planes) -> smTopoTest.cpp:1629",
+      "inputs": {
+        "body": {
+          "file": {
+            "file": "torus.smb"
+          }
+        },
+        "translate": [
+          -40,
+          -40,
+          0
+        ],
+        "plane_walk": [
+          7,
+          5
+        ],
+        "normal": [
+          1,
+          0,
+          0
+        ],
+        "tol": 0.01,
+        "want_3d": true,
+        "want_uv": true
+      }
+    },
+    {
+      "name": "upstream_torus_c_plane6",
+      "upstream_ref": "tests/prog_test/src/smAdvancedTest.cpp:59/84/109 my_test_tsurf_section(torus.smb translated, 1e-2, normal, 7 planes) -> smTopoTest.cpp:1629",
+      "inputs": {
+        "body": {
+          "file": {
+            "file": "torus.smb"
+          }
+        },
+        "translate": [
+          -40,
+          -40,
+          0
+        ],
+        "plane_walk": [
+          7,
+          6
+        ],
+        "normal": [
+          1,
+          0,
+          0
+        ],
+        "tol": 0.01,
+        "want_3d": true,
+        "want_uv": true
+      }
+    },
+    {
+      "name": "upstream_ellips_ts2_plane0",
+      "upstream_ref": "tests/prog_test/src/smAdvancedTest.cpp:2106 my_topo_regression_test(ellips_ts2.smb) -> smTopoTest.cpp:2640 my_test_tsurf_section(1e-4, (1,1,1), 10 planes)",
+      "inputs": {
+        "body": {
+          "file": {
+            "file": "ellips_ts2.smb"
+          }
+        },
+        "plane_walk": [
+          10,
+          0
+        ],
+        "normal": [
+          1,
+          1,
+          1
+        ],
+        "tol": 0.0001,
+        "want_3d": true,
+        "want_uv": true
+      }
+    },
+    {
+      "name": "upstream_ellips_ts2_plane1",
+      "upstream_ref": "tests/prog_test/src/smAdvancedTest.cpp:2106 my_topo_regression_test(ellips_ts2.smb) -> smTopoTest.cpp:2640 my_test_tsurf_section(1e-4, (1,1,1), 10 planes)",
+      "inputs": {
+        "body": {
+          "file": {
+            "file": "ellips_ts2.smb"
+          }
+        },
+        "plane_walk": [
+          10,
+          1
+        ],
+        "normal": [
+          1,
+          1,
+          1
+        ],
+        "tol": 0.0001,
+        "want_3d": true,
+        "want_uv": true
+      }
+    },
+    {
+      "name": "upstream_ellips_ts2_plane2",
+      "upstream_ref": "tests/prog_test/src/smAdvancedTest.cpp:2106 my_topo_regression_test(ellips_ts2.smb) -> smTopoTest.cpp:2640 my_test_tsurf_section(1e-4, (1,1,1), 10 planes)",
+      "inputs": {
+        "body": {
+          "file": {
+            "file": "ellips_ts2.smb"
+          }
+        },
+        "plane_walk": [
+          10,
+          2
+        ],
+        "normal": [
+          1,
+          1,
+          1
+        ],
+        "tol": 0.0001,
+        "want_3d": true,
+        "want_uv": true
+      }
+    },
+    {
+      "name": "upstream_ellips_ts2_plane3",
+      "upstream_ref": "tests/prog_test/src/smAdvancedTest.cpp:2106 my_topo_regression_test(ellips_ts2.smb) -> smTopoTest.cpp:2640 my_test_tsurf_section(1e-4, (1,1,1), 10 planes)",
+      "inputs": {
+        "body": {
+          "file": {
+            "file": "ellips_ts2.smb"
+          }
+        },
+        "plane_walk": [
+          10,
+          3
+        ],
+        "normal": [
+          1,
+          1,
+          1
+        ],
+        "tol": 0.0001,
+        "want_3d": true,
+        "want_uv": true
+      }
+    },
+    {
+      "name": "upstream_ellips_ts2_plane4",
+      "upstream_ref": "tests/prog_test/src/smAdvancedTest.cpp:2106 my_topo_regression_test(ellips_ts2.smb) -> smTopoTest.cpp:2640 my_test_tsurf_section(1e-4, (1,1,1), 10 planes)",
+      "inputs": {
+        "body": {
+          "file": {
+            "file": "ellips_ts2.smb"
+          }
+        },
+        "plane_walk": [
+          10,
+          4
+        ],
+        "normal": [
+          1,
+          1,
+          1
+        ],
+        "tol": 0.0001,
+        "want_3d": true,
+        "want_uv": true
+      }
+    },
+    {
+      "name": "upstream_ellips_ts2_plane5",
+      "upstream_ref": "tests/prog_test/src/smAdvancedTest.cpp:2106 my_topo_regression_test(ellips_ts2.smb) -> smTopoTest.cpp:2640 my_test_tsurf_section(1e-4, (1,1,1), 10 planes)",
+      "inputs": {
+        "body": {
+          "file": {
+            "file": "ellips_ts2.smb"
+          }
+        },
+        "plane_walk": [
+          10,
+          5
+        ],
+        "normal": [
+          1,
+          1,
+          1
+        ],
+        "tol": 0.0001,
+        "want_3d": true,
+        "want_uv": true
+      }
+    },
+    {
+      "name": "upstream_ellips_ts2_plane6",
+      "upstream_ref": "tests/prog_test/src/smAdvancedTest.cpp:2106 my_topo_regression_test(ellips_ts2.smb) -> smTopoTest.cpp:2640 my_test_tsurf_section(1e-4, (1,1,1), 10 planes)",
+      "inputs": {
+        "body": {
+          "file": {
+            "file": "ellips_ts2.smb"
+          }
+        },
+        "plane_walk": [
+          10,
+          6
+        ],
+        "normal": [
+          1,
+          1,
+          1
+        ],
+        "tol": 0.0001,
+        "want_3d": true,
+        "want_uv": true
+      }
+    },
+    {
+      "name": "upstream_ellips_ts2_plane7",
+      "upstream_ref": "tests/prog_test/src/smAdvancedTest.cpp:2106 my_topo_regression_test(ellips_ts2.smb) -> smTopoTest.cpp:2640 my_test_tsurf_section(1e-4, (1,1,1), 10 planes)",
+      "inputs": {
+        "body": {
+          "file": {
+            "file": "ellips_ts2.smb"
+          }
+        },
+        "plane_walk": [
+          10,
+          7
+        ],
+        "normal": [
+          1,
+          1,
+          1
+        ],
+        "tol": 0.0001,
+        "want_3d": true,
+        "want_uv": true
+      }
+    },
+    {
+      "name": "upstream_ellips_ts2_plane8",
+      "upstream_ref": "tests/prog_test/src/smAdvancedTest.cpp:2106 my_topo_regression_test(ellips_ts2.smb) -> smTopoTest.cpp:2640 my_test_tsurf_section(1e-4, (1,1,1), 10 planes)",
+      "inputs": {
+        "body": {
+          "file": {
+            "file": "ellips_ts2.smb"
+          }
+        },
+        "plane_walk": [
+          10,
+          8
+        ],
+        "normal": [
+          1,
+          1,
+          1
+        ],
+        "tol": 0.0001,
+        "want_3d": true,
+        "want_uv": true
+      }
+    },
+    {
+      "name": "upstream_ellips_ts2_plane9",
+      "upstream_ref": "tests/prog_test/src/smAdvancedTest.cpp:2106 my_topo_regression_test(ellips_ts2.smb) -> smTopoTest.cpp:2640 my_test_tsurf_section(1e-4, (1,1,1), 10 planes)",
+      "inputs": {
+        "body": {
+          "file": {
+            "file": "ellips_ts2.smb"
+          }
+        },
+        "plane_walk": [
+          10,
+          9
+        ],
+        "normal": [
+          1,
+          1,
+          1
+        ],
+        "tol": 0.0001,
+        "want_3d": true,
+        "want_uv": true
+      }
+    },
+    {
+      "name": "strut_box_x6_embedded_edge",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::CreatePlanarSectionCurves (planar face with an embedded strut edge: SmEdge::IsEmbedded)",
+      "inputs": {
+        "body": {
+          "box_strut": {
+            "size": [
+              10,
+              10,
+              10
+            ],
+            "strut": [
+              6,
+              4,
+              10
+            ]
+          }
+        },
+        "point": [
+          6,
+          0,
+          0
+        ],
+        "normal": [
+          1,
+          0,
+          0
+        ],
+        "want_3d": true,
+        "want_uv": true,
+        "want_faces": true
+      }
+    },
+    {
+      "name": "strut_box_y4_embedded_edge",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::CreatePlanarSectionCurves (planar face with an embedded strut edge: SmEdge::IsEmbedded)",
+      "inputs": {
+        "body": {
+          "box_strut": {
+            "size": [
+              10,
+              10,
+              10
+            ],
+            "strut": [
+              6,
+              4,
+              10
+            ]
+          }
+        },
+        "point": [
+          0,
+          4,
+          0
+        ],
+        "normal": [
+          0,
+          1,
+          0
+        ],
+        "want_3d": true,
+        "want_faces": true
+      }
+    },
+    {
+      "name": "strut_box_diagonal_forced",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::CreatePlanarSectionCurves (embedded strut edge, forced UV)",
+      "inputs": {
+        "body": {
+          "box_strut": {
+            "size": [
+              10,
+              8,
+              6
+            ],
+            "strut": [
+              3,
+              5,
+              6
+            ]
+          }
+        },
+        "point": [
+          3,
+          5,
+          6
+        ],
+        "normal": [
+          1,
+          1,
+          0
+        ],
+        "want_3d": true,
+        "want_uv": true,
+        "force_uv_classify": true
+      }
+    },
+    {
+      "name": "faces_box_x5",
+      "upstream_ref": "source/SMLib/src/SmSurface.cpp SmSurface::CreatePlanarSectionCurves (per face, the call SmBrep::CreatePlanarSectionCurves makes) (shows which faces' intersectors give no UV curve, the forced-UV continuation's input)",
+      "inputs": {
+        "body": {
+          "box": {
+            "size": [
+              10,
+              10,
+              10
+            ],
+            "fillet": 0.0
+          }
+        },
+        "faces": true,
+        "point": [
+          5,
+          5,
+          5
+        ],
+        "normal": [
+          1,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "name": "faces_fillet_box_y98",
+      "upstream_ref": "source/SMLib/src/SmSurface.cpp SmSurface::CreatePlanarSectionCurves (per face, the call SmBrep::CreatePlanarSectionCurves makes) (shows which faces' intersectors give no UV curve, the forced-UV continuation's input)",
+      "inputs": {
+        "body": {
+          "box": {
+            "size": [
+              5,
+              10,
+              15
+            ],
+            "fillet": 0.5
+          }
+        },
+        "faces": true,
+        "point": [
+          0,
+          9.8,
+          0
+        ],
+        "normal": [
+          0,
+          1,
+          0
+        ]
+      }
+    },
+    {
+      "name": "faces_fillet_box_z7",
+      "upstream_ref": "source/SMLib/src/SmSurface.cpp SmSurface::CreatePlanarSectionCurves (per face, the call SmBrep::CreatePlanarSectionCurves makes) (shows which faces' intersectors give no UV curve, the forced-UV continuation's input)",
+      "inputs": {
+        "body": {
+          "box": {
+            "size": [
+              5,
+              10,
+              15
+            ],
+            "fillet": 0.5
+          }
+        },
+        "faces": true,
+        "point": [
+          0,
+          0,
+          7
+        ],
+        "normal": [
+          0,
+          0,
+          1
+        ]
+      }
+    },
+    {
+      "name": "faces_strut_box_x6",
+      "upstream_ref": "source/SMLib/src/SmSurface.cpp SmSurface::CreatePlanarSectionCurves (per face, the call SmBrep::CreatePlanarSectionCurves makes) (shows which faces' intersectors give no UV curve, the forced-UV continuation's input)",
+      "inputs": {
+        "body": {
+          "box_strut": {
+            "size": [
+              10,
+              10,
+              10
+            ],
+            "strut": [
+              6,
+              4,
+              10
+            ]
+          }
+        },
+        "faces": true,
+        "point": [
+          6,
+          0,
+          0
+        ],
+        "normal": [
+          1,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "name": "faces_cylinder_axis",
+      "upstream_ref": "source/SMLib/src/SmSurface.cpp SmSurface::CreatePlanarSectionCurves (per face, the call SmBrep::CreatePlanarSectionCurves makes)",
+      "inputs": {
+        "body": {
+          "file": {
+            "file": "Solids/cylinder.smb"
+          }
+        },
+        "faces": true,
+        "point": [
+          0,
+          0,
+          0
+        ],
+        "normal": [
+          1,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "name": "faces_torus_y",
+      "upstream_ref": "source/SMLib/src/SmSurface.cpp SmSurface::CreatePlanarSectionCurves (per face, the call SmBrep::CreatePlanarSectionCurves makes)",
+      "inputs": {
+        "body": {
+          "file": {
+            "file": "torus.smb"
+          }
+        },
+        "faces": true,
+        "point": [
+          0,
+          0,
+          0
+        ],
+        "normal": [
+          0,
+          1,
+          0
+        ]
+      }
+    },
+    {
+      "name": "faces_sphere_equator",
+      "upstream_ref": "source/SMLib/src/SmSurface.cpp SmSurface::CreatePlanarSectionCurves (per face, the call SmBrep::CreatePlanarSectionCurves makes)",
+      "inputs": {
+        "body": {
+          "file": {
+            "file": "Solids/sphere.smb"
+          }
+        },
+        "faces": true,
+        "point": [
+          0,
+          0,
+          0
+        ],
+        "normal": [
+          0,
+          0,
+          1
+        ]
+      }
+    },
+    {
+      "name": "box_tolerance_zero",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::CreatePlanarSectionCurves (a given 3D tolerance of 0)",
+      "inputs": {
+        "body": {
+          "box": {
+            "size": [
+              10,
+              10,
+              10
+            ],
+            "fillet": 0.0
+          }
+        },
+        "point": [
+          5,
+          5,
+          5
+        ],
+        "normal": [
+          0,
+          0,
+          1
+        ],
+        "tol": 0.0,
+        "want_3d": true,
+        "want_uv": true
+      }
+    },
+    {
+      "name": "forced_fillet_box_y98",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::CreatePlanarSectionCurves (its forced-UV continuation: SmSurface::DropAndTrimCurve and LiftCurve per face)",
+      "inputs": {
+        "body": {
+          "box": {
+            "size": [
+              5,
+              10,
+              15
+            ],
+            "fillet": 0.5
+          }
+        },
+        "forced": true,
+        "point": [
+          0,
+          9.8,
+          0
+        ],
+        "normal": [
+          0,
+          1,
+          0
+        ]
+      }
+    },
+    {
+      "name": "forced_box_x5",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::CreatePlanarSectionCurves (its forced-UV continuation: SmSurface::DropAndTrimCurve and LiftCurve per face)",
+      "inputs": {
+        "body": {
+          "box": {
+            "size": [
+              10,
+              10,
+              10
+            ],
+            "fillet": 0.0
+          }
+        },
+        "forced": true,
+        "point": [
+          5,
+          5,
+          5
+        ],
+        "normal": [
+          1,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "name": "forced_cylinder_axis",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::CreatePlanarSectionCurves (its forced-UV continuation: SmSurface::DropAndTrimCurve and LiftCurve per face)",
+      "inputs": {
+        "body": {
+          "file": {
+            "file": "Solids/cylinder.smb"
+          }
+        },
+        "forced": true,
+        "point": [
+          0,
+          0,
+          0
+        ],
+        "normal": [
+          1,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "name": "fillet_box_y98_uv_unforced",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::CreatePlanarSectionCurves",
+      "inputs": {
+        "body": {
+          "box": {
+            "size": [
+              5,
+              10,
+              15
+            ],
+            "fillet": 0.5
+          }
+        },
+        "point": [
+          0,
+          9.8,
+          0
+        ],
+        "normal": [
+          0,
+          1,
+          0
+        ],
+        "want_3d": true,
+        "want_uv": true
+      }
+    }
+  ]
+}

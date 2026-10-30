@@ -1,0 +1,12 @@
+id = "topology.brep_planar_section"
+upstream = ["source/SMLib/src/SmBrep.cpp", "source/SMLib/src/SmSurface.cpp", "source/SMLib/src/SmEdge.cpp", "source/SMLib/src/SmExtent3d.cpp", "source/SM_API/src/SmApiIntersectors.cpp"]
+rust_module = "topology::brep::planar_section"
+depends_on = ["geom.extent3d", "nurbs.b_spline_surface_p1", "surface.plane_p2", "surface.surface_p2", "surface.surface_p11", "curve.curve_p6", "intersect.surface_drop_lib_p1", "query.face_p3", "topology.brep_p1", "topology.edge", "topology.face_p2", "topology.face_p4"]
+soft_depends_on = []
+est_lines = 520
+layer = 48
+tests = ["tests/SM_API_test/src/TestSmIntersectors.cpp:TestSmIntersectBrepWithPlane", "tests/prog_test/src/smAdvancedTest.cpp:my_test_tsurf_section", "tests/prog_test/src/smTopoTest.cpp:my_test_tsurf_section"]
+status = "green"
+claimed_by = "PR #1534"
+claimed_at = "2026-10-29"
+notes = "NOT IN callgraph/units.json: SmBrep::CreatePlanarSectionCurves (SmBrep.cpp:5169), SmSurface::CreatePlanarSectionCurves (SmSurface.cpp:9795), SmSurface::CreatePlaneFromBBox (SmSurface.cpp:9707), SmEdge::IsEmbedded (SmEdge.cpp:5521) and SmApiIntersectBrepWithPlane (SmApiIntersectors.cpp:261) are listed in harness/callgraph/unused_functions.txt (no in-scope root reaches them); issue #1451. Rust: topology::brep::planar_section::{create_planar_section_curves, surface_planar_section_curves, create_plane_from_bbox}; intersect::api_intersectors::intersect_brep_with_plane; co-ported edge::is_embedded (topology.edge) and Extent3d::distance_to_plane (SmExtent3d::DistanceToPlane, geom.extent3d). Status set when the difftest gate has run."

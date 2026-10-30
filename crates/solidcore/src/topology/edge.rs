@@ -35,6 +35,7 @@
 //! | [`insert_manifold_edge_end`]            | `SmEdge::InsertManifoldEdgeEnd`                   |
 //! | [`is_lamina`], [`is_manifold`], [`is_spine`] | `SmEdge::IsLamina`, `IsManifold`, `IsSpine`  |
 //! | [`is_seam`], [`is_seam_of_surface`]     | the two `SmEdge::IsSeam`                          |
+//! | [`is_embedded`]                         | `SmEdge::IsEmbedded`                              |
 //! | `cover_other_coincident_face` (private) | `sm_CoverOtherCoincidentFace` (static)            |
 //! | [`is_topological`], [`Topological`]     | `SmEdge::IsTopological`                           |
 //! | [`is_tangent_edge`]                     | `SmEdge::IsTangentEdge`                           |
@@ -1595,6 +1596,48 @@ pub fn is_spine(b: &Brep, e: EdgeId) -> Result<bool> {
         Some(&head) => eu1::is_loop_edgeuse(b, head),
         None => Ok(false),
     }
+}
+
+/// `IsEmbedded(pOptFace, bFaceHasSeam)`: the edge has four edge uses on `face` (on any
+/// of its faces when `None`): an edge embedded within a single face, e.g. a crack. A
+/// seam is not embedded; with `face_has_seam` false the (expensive) seam test is
+/// skipped. An embedded edge can connect to other faces.
+///
+/// # Errors
+///
+/// Those of [`faces`], [`edgeuses`], the edge uses' faces and [`is_seam`].
+pub fn is_embedded(
+    k: &Kernel,
+    b: &mut Brep,
+    e: EdgeId,
+    face: Option<FaceId>,
+    face_has_seam: bool,
+) -> Result<bool> {
+    // search face or all faces connected to this edge when face is None
+    let tgt_faces = match face {
+        None => faces(b, e, None)?,
+        Some(f) => vec![f],
+    };
+    let uses = edgeuses(b, e, None, None)?;
+
+    // for every face
+    for tgt in tgt_faces {
+        // count the edgeuses that connect to this face
+        let mut count = 0usize;
+        for &eu in &uses {
+            if eu1::face(b, eu)? == Some(tgt) {
+                count += 1;
+            }
+        }
+
+        // when we found a face being embedded
+        if count == 4 && (!face_has_seam || !is_seam(k, b, e)?) {
+            return Ok(true);
+        }
+    }
+
+    // else - edge is not embedded
+    Ok(false)
 }
 
 /// `IsSeam()`: the edge is a seam of the surface of any of its faces

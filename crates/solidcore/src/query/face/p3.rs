@@ -276,7 +276,13 @@ fn owning_face_tolerance(b: &Brep, f: FaceId, s: &Surface) -> Result<Option<f64>
 }
 
 /// `pSurface->IsPlanar(dTol3d)` of face `f`'s surface.
-fn surface_is_planar(k: &Kernel, b: &Brep, f: FaceId, s: &Surface, tol_3d: f64) -> Result<bool> {
+pub(crate) fn surface_is_planar(
+    k: &Kernel,
+    b: &Brep,
+    f: FaceId,
+    s: &Surface,
+    tol_3d: f64,
+) -> Result<bool> {
     let base = match s.kind_with_nurb(k)? {
         SurfaceKind::BSpline(bs) => Some(bs),
         SurfaceKind::SurfOfRevolution(r) => Some(r.base()),
@@ -312,7 +318,7 @@ fn surface_is_planar(k: &Kernel, b: &Brep, f: FaceId, s: &Surface, tol_3d: f64) 
 
 /// `pSurface->CalculateBoundingBox(crUVDomain, &sBox)` (axis-aligned box only, expanded
 /// by the zone tolerance) of face `f`'s surface.
-fn surface_bounding_box(
+pub(crate) fn surface_bounding_box(
     k: &Kernel,
     b: &Brep,
     f: FaceId,

@@ -1460,6 +1460,45 @@ impl Surface {
         )
     }
 
+    /// [`Surface::global_point_solve_into_with_context`] with the surface cache's point
+    /// testing off for the call (`m_bPointTestEnabled` FALSE, as `SmSurface::DropCurve`
+    /// sets it for its whole call): the fast drop keeps every solution, the face's trim
+    /// boundaries are not tested.
+    ///
+    /// # Errors
+    /// As [`Surface::global_point_solve_into_with_context`].
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn global_point_solve_into_with_context_point_test_off<O: SolutionObject>(
+        &self,
+        k: &Kernel,
+        surface: Option<O>,
+        cache: Option<&crate::surface::surface_cache::SurfaceCache<O>>,
+        context: &mut dyn super::p1::SurfaceSolveContext<O>,
+        uv_domain: &Extent2d,
+        op: SolverOperation,
+        test_point: Point3,
+        src_zone_tol_3d: f64,
+        opt_target_distance: Option<f64>,
+        requested: SolutionRequested,
+        solutions: &mut SolutionArray<O>,
+    ) -> Result<()> {
+        self.global_point_solve_in(
+            k,
+            surface,
+            cache,
+            Some(context),
+            uv_domain,
+            op,
+            test_point,
+            src_zone_tol_3d,
+            opt_target_distance,
+            requested,
+            solutions,
+            None,
+            true,
+        )
+    }
+
     /// [`Surface::global_point_solve`] of a face's surface by a caller that holds the
     /// face and the surface's cache: the trim boundary test of the fast drop
     /// (`pFace->PointClassify(uv, tol, TRUE, FALSE, ..)` of each solution, keeping

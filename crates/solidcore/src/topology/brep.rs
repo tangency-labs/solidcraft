@@ -13,6 +13,7 @@
 //! | [`p5`]    | B-rep editing and transformation operations, part 5             |
 //! | [`p6`]    | see the module                                                  |
 //! | [`p7`]    | see the module                                                  |
+//! | [`planar_section`] | `CreatePlanarSectionCurves` (unit `topology.brep_planar_section`) |
 //! | [`p8`]    | making faces from surfaces and from loops of curves              |
 //! | [`p10`]   | `MakeTopologyFromData`, `ProjectAndTrim`, `RemoveAllTopology`, `TestClosureSplitRegion` (edge version) |
 //!
@@ -30,4 +31,5 @@ pub mod p6;
 pub mod p7;
 pub mod p8;
 pub mod p9;
+pub mod planar_section;
 pub mod validation;

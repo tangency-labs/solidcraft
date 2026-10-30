@@ -14,7 +14,7 @@
 //! | [`Curve::global_point_solve_step`]                      | `SmCurve::GlobalPointSolveSTEP` (and its dispatch) |
 //! | [`Curve::curve_max_distance_between`], [`MaxDistance`]  | `SmCurve::CurveMaxDistanceBetween`    |
 //! | [`Curve::simple_coincidence_checker`]                   | `SmCurve::SimpleCoincidenceChecker`   |
-//! | [`Curve::global_coincidence_checker`], [`Coincidence`]  | `SmCurve::GlobalCoincidenceChecker`   |
+//! | [`Curve::global_coincidence_checker`], [`Curve::global_coincidence_checker_with_partial`], [`Coincidence`]  | `SmCurve::GlobalCoincidenceChecker`   |
 //! | [`Curve::deform_to_end_point_targets`]                  | `SmCurve::DeformToEndPointTargets`    |
 //!
 //! Deviations: endpoint deformation rejects non-B-spline UV curves with
@@ -1494,6 +1494,42 @@ impl Curve {
         )
     }
 
+    /// [`Curve::global_coincidence_checker`] for a caller that ignores its status, as
+    /// upstream's callers that read `rSolutions` whatever the call returned: the check
+    /// and, with its error, the solutions it had added before failing (the end to end
+    /// point solutions; a split check adds its parts only once all of them succeeded).
+    pub fn global_coincidence_checker_with_partial<O: SolutionObject>(
+        &self,
+        k: &Kernel,
+        interval: &Extent1d,
+        other: &Self,
+        other_interval: &Extent1d,
+        tol: f64,
+        snap_to_ends: bool,
+        objects: [Option<O>; 2],
+    ) -> (Coincidence<O>, Result<()>) {
+        let mut caches = [None, None];
+        let mut calls = 0;
+        let mut out = Coincidence {
+            additional_work_needed: false,
+            solutions: Vec::new(),
+        };
+        let r = self.global_coincidence_checker_into(
+            k,
+            interval,
+            other,
+            other_interval,
+            tol,
+            snap_to_ends,
+            objects,
+            0,
+            &mut caches,
+            &mut calls,
+            &mut out,
+        );
+        (out, r)
+    }
+
     /// [`Curve::global_coincidence_checker`] at split depth `depth`; `calls` counts the
     /// calls of the whole check.
     fn global_coincidence_checker_at<O: SolutionObject>(
@@ -1509,6 +1545,43 @@ impl Curve {
         caches: &mut [Option<CurveCache<CurveHandle>>; 2],
         calls: &mut usize,
     ) -> Result<Coincidence<O>> {
+        let mut out = Coincidence {
+            additional_work_needed: false,
+            solutions: Vec::new(),
+        };
+        self.global_coincidence_checker_into(
+            k,
+            interval,
+            other,
+            other_interval,
+            tol,
+            snap_to_ends,
+            objects,
+            depth,
+            caches,
+            calls,
+            &mut out,
+        )?;
+        Ok(out)
+    }
+
+    /// [`Curve::global_coincidence_checker_at`] into `out` (upstream's `rSolutions` and
+    /// `rbAdditionalWorkNeeded`): on an error `out` keeps what the check had added
+    /// before it (the end to end point solutions).
+    fn global_coincidence_checker_into<O: SolutionObject>(
+        &self,
+        k: &Kernel,
+        interval: &Extent1d,
+        other: &Self,
+        other_interval: &Extent1d,
+        tol: f64,
+        snap_to_ends: bool,
+        objects: [Option<O>; 2],
+        depth: usize,
+        caches: &mut [Option<CurveCache<CurveHandle>>; 2],
+        calls: &mut usize,
+        out: &mut Coincidence<O>,
+    ) -> Result<()> {
         *calls += 1;
         if depth > MAX_COINCIDENCE_DEPTH {
             return Err(SolidError::invalid_input(
@@ -1524,17 +1597,17 @@ impl Curve {
         }
 
         // init output
-        let mut out = Coincidence {
+        *out = Coincidence {
             additional_work_needed: false,
             solutions: Vec::new(),
         };
 
         // no work - either curve is degenerate - no solutions possible
         if self.is_degenerate(k, tol / 2.0, Some(interval))? {
-            return Ok(out);
+            return Ok(());
         }
         if other.is_degenerate(k, tol / 2.0, Some(other_interval))? {
-            return Ok(out);
+            return Ok(());
         }
 
         // Cheap reject: segments whose bounding boxes are farther apart than the
@@ -1551,7 +1624,7 @@ impl Curve {
                 {
                     if let (Some(a), Some(b)) = (this_box.normal, other_box.normal) {
                         if a.are_disjoint(&b, tol) {
-                            return Ok(out);
+                            return Ok(());
                         }
                     }
                 }
@@ -1580,7 +1653,7 @@ impl Curve {
                     .solutions,
                 );
             }
-            return self.merge_split_solutions(
+            *out = self.merge_split_solutions(
                 k,
                 &parts,
                 interval,
@@ -1588,7 +1661,8 @@ impl Curve {
                 other_interval,
                 true,
                 objects,
-            );
+            )?;
+            return Ok(());
         }
 
         // Do the same recursive division if the second curve is closed.
@@ -1612,7 +1686,7 @@ impl Curve {
                     .solutions,
                 );
             }
-            return self.merge_split_solutions(
+            *out = self.merge_split_solutions(
                 k,
                 &parts,
                 interval,
@@ -1620,7 +1694,8 @@ impl Curve {
                 other_interval,
                 false,
                 objects,
-            );
+            )?;
+            return Ok(());
         }
 
         // Two non closed intervals: drop the endPoints, sort them and test the
@@ -1735,7 +1810,7 @@ impl Curve {
         // No work - No points dropped so far no solutions possible
         if drops.is_empty() {
             out.additional_work_needed = true;
-            return Ok(out);
+            return Ok(());
         }
 
         // drop thisCurve EndPoint onto otherCurve
@@ -1755,7 +1830,7 @@ impl Curve {
 
         let (Some(&first), Some(&last)) = (drops.first(), drops.last()) else {
             out.additional_work_needed = true;
-            return Ok(out);
+            return Ok(());
         };
         let num_t = drops.len();
 
@@ -1770,7 +1845,7 @@ impl Curve {
                     || (last.1 - first.1).abs() < scaled_zero2))
         {
             out.additional_work_needed = true;
-            return Ok(out);
+            return Ok(());
         }
 
         // Test additional points for intersection.
@@ -1793,7 +1868,7 @@ impl Curve {
         if gap.distance > tol {
             // we need additional work - to pull out the sub-intervals that are coincident
             out.additional_work_needed = true;
-            return Ok(out);
+            return Ok(());
         }
 
         // Add coincident Intersection to solution
@@ -1850,7 +1925,7 @@ impl Curve {
         }
 
         // all done
-        Ok(out)
+        Ok(())
     }
 
     /// Whether [`Curve::global_coincidence_checker`] splits this curve over

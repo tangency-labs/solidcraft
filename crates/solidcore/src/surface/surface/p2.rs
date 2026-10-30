@@ -591,7 +591,7 @@ impl Clone for Surface {
 impl Surface {
     /// A temporary evaluation copy: retain the owner and exact NURBS data rather
     /// than invoking the upstream copy constructor's knot fix-up.
-    pub(crate) fn clone_for_evaluation(&self) -> Result<Self> {
+    pub fn clone_for_evaluation(&self) -> Result<Self> {
         self.clone_for_evaluation_depth(0)
     }
 

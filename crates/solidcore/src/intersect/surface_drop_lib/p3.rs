@@ -49,8 +49,9 @@
 //!   for the call (`SmTemporaryChangeValue`) runs on an evaluation copy with the flag
 //!   set. The surface cache flags (`m_bPointTestEnabled` off, `m_bProcessBoundaryCurves`
 //!   on) are modelled by the start point drop keeping every solution
-//!   ([`Surface::global_point_solve_point_test_off`], `SmSurfaceDropLib.cpp:4310-4316`)
-//!   unless the caller's face test or context replaces it. The
+//!   ([`Surface::global_point_solve_point_test_off`], `SmSurfaceDropLib.cpp:4310-4316`;
+//!   through the caller's context, its point-test-off variant) unless the caller's face
+//!   test replaces it. The
 //!   curve cache is built fresh (`make_curve_cache`); a failed build is
 //!   `SM_ERR_NULL_POINTER` (`NER`).
 //! - **Offset surface.** `SmOffsetSurface(1.0, *this, FALSE, lSingularities)` is a
@@ -750,10 +751,12 @@ impl Surface {
             *dst = *src;
         }
 
-        // Drop curve StartPoint to surface (SM_SO_MINIMIZE, all solutions)
+        // Drop curve StartPoint to surface (SM_SO_MINIMIZE, all solutions; the cache's
+        // point testing is off for the whole call, `sChange1`, SmSurfaceDropLib.cpp:4315:
+        // the face's cache comes from the context, its trims are not tested)
         let mut solutions: SolutionArray<O> = if let Some(ctx) = context {
             let mut solutions = SolutionArray::new();
-            this.global_point_solve_into_with_context(
+            this.global_point_solve_into_with_context_point_test_off(
                 k,
                 ctx.handle,
                 None,

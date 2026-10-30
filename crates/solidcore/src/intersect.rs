@@ -6,6 +6,7 @@
 //! `SM_API/SmApiIntersectors`.
 
 pub mod adv_surface_intersector;
+pub mod api_intersectors;
 pub mod curve_class;
 pub mod point_class;
 pub mod ray_tracer;

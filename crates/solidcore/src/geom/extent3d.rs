@@ -39,6 +39,7 @@
 //! | [`Extent3d::planes`]                   | `GetPlanes`                                    |
 //! | [`Extent3d::x_length`] .. [`Extent3d::z_length`] | `XLength`, `YLength`, `ZLength`      |
 //! | [`Extent3d::sphere_bound`]             | `ComputeSphereBound`                           |
+//! | [`Extent3d::distance_to_plane`]        | `DistanceToPlane`                              |
 //! | [`Extent3d::cone_bound_to`]            | `ComputeConeBoundTo`                           |
 //! | [`Extent3d::are_disjoint`]             | `AreDisjoint`                                  |
 //! | [`Extent3d::is_contained_by`]          | `IsContainedBy`                                |
@@ -848,6 +849,35 @@ impl Extent3d {
     #[must_use]
     pub fn z_length(&self) -> f64 {
         self.max.z - self.min.z
+    }
+
+    /// The signed distance along the unit `plane_unit_normal` from the plane through
+    /// `plane_point` to the nearest corner of the box, `0` when corners lie on both
+    /// sides of (or in) the plane (`DistanceToPlane`).
+    #[must_use]
+    pub fn distance_to_plane(&self, plane_point: Point3, plane_unit_normal: Vec3) -> f64 {
+        let mut min_dist = BIG_DOUBLE;
+        let mut x = self.min.x;
+        for _ in 0..2 {
+            let mut y = self.min.y;
+            for _ in 0..2 {
+                let mut z = self.min.z;
+                for _ in 0..2 {
+                    let this_pt = Point3::new(x, y, z);
+                    let this_dist = plane_unit_normal.dot(this_pt - plane_point);
+                    if min_dist < BIG_DOUBLE - 1.0 && this_dist * min_dist <= 0.0 {
+                        return 0.0; // opposite sides of (or in) plane
+                    }
+                    if this_dist.abs() < min_dist.abs() {
+                        min_dist = this_dist;
+                    }
+                    z = self.max.z;
+                }
+                y = self.max.y;
+            }
+            x = self.max.x;
+        }
+        min_dist
     }
 
     /// Centre and radii of the enclosing and the inscribed centred spheres
