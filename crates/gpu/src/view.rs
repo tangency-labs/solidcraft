@@ -1037,7 +1037,7 @@ pub struct Frame {
     /// Viewport size in physical pixels.
     pub size_px: [f32; 2],
     /// Section cut: up to [`MAX_SECTION_PLANES`] planes (normal, d), the first ones; fragments
-    /// with normal·p > d for every one are hidden. A zero normal: no plane (the first: no section).
+    /// with normal·p > d for any one are hidden. A zero normal: no plane (the first: no section).
     pub clip: [[f32; 4]; MAX_SECTION_PLANES],
     /// Each clip plane's hatch, an index into `solidcraft_render::SECTION_HATCH_ANGLES`.
     pub clip_hatch: [usize; MAX_SECTION_PLANES],
@@ -2139,20 +2139,22 @@ impl Batches {
 const STENCIL_BASE: u32 = 128;
 
 /// The section's pipelines (see `Renderer::tri_cut`), drawn in this order. The cap shows where
-/// the section plane lies inside a body: where the faces behind the plane, on the view ray
-/// through the pixel, are left by the ray more often than entered. The stencil counts them, so
+/// the view ray comes into what the section keeps (inside every plane) inside a body: where the
+/// faces past that point, on the view ray through the pixel, are left by the ray more often than
+/// entered. The stencil counts them, so
 /// no depth is compared where bodies touch: a cut body's far wall and the face of the body it
 /// rests on lie at one depth, and settling that by depth let the other body show through the
 /// cap in specks, stripes and triangles. The display meshes are watertight, so the count is
 /// exact for closed bodies; an open one (a surface body, a solid with faces left out) gets no
 /// cap.
 struct Cut {
-    /// Counts the crossings in the stencil from [`STENCIL_BASE`]: a back face behind the plane
-    /// adds one, a front face takes one away. No colour, no depth. Above the base, the plane is
+    /// Counts the crossings in the stencil from [`STENCIL_BASE`]: a back face past where the view
+    /// ray comes into what the section keeps adds one, a front face takes one away. No colour, no depth. Above the base, the plane is
     /// inside a body; at or below it, outside (an open sheet seen from its front counts below).
     count: wgpu::RenderPipeline,
-    /// Where the count is above the base, the nearest back face, by its true depth, in its body's cut
-    /// colour (the body the plane lies inside: the ray leaves it there).
+    /// Where the count is above the base, the nearest back face past that point, by its true
+    /// depth, in its body's cut colour (the body the cut lies inside: the ray leaves it there),
+    /// hidden itself where the body reaches past another plane first.
     fill: wgpu::RenderPipeline,
     /// The cap again, only there, at the section plane's depth (pushed as faces are), so what
     /// lies on the cut face draws over it: depth only, as `fill` drew its colour (#6728).
@@ -2953,8 +2955,8 @@ impl Renderer {
         let marks = |source: TriSource| {
             cut_states.as_ref().map(|(count, fill, rest, _)| {
                 (
-                    solid_writes("sc_tris_count", "fs_clip", None, Some(count.clone()), source, false),
-                    solid("sc_tris_fill", "fs_solid", Some(wgpu::Face::Front), Some(fill.clone()), source),
+                    solid_writes("sc_tris_count", "fs_section_count", None, Some(count.clone()), source, false),
+                    solid("sc_tris_fill", "fs_section_fill", Some(wgpu::Face::Front), Some(fill.clone()), source),
                     solid("sc_tris_rest", "fs_solid_open", None, rest.clone(), source),
                 )
             })
