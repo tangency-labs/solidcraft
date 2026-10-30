@@ -446,6 +446,14 @@ mod sys {
             cap: i64,
             out_len: *mut i64,
         ) -> i32;
+        pub fn sc_offset_offset_executive_p2_eval_measured(
+            input: *const f64,
+            input_len: i64,
+            volume_query: i32,
+            out: *mut f64,
+            cap: i64,
+            out_len: *mut i64,
+        ) -> i32;
     }
 }
 
@@ -884,6 +892,86 @@ pub fn eval(request: &Request) -> Result<Outcome, FfiError> {
         }
     })?;
     decode(&raw, request.operation, request.attributed.is_some())
+}
+
+/// Which volumes [`eval_measured`] queries with `SmApiBrepComputeVolume` (accuracy `1e-6`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum VolumeQuery {
+    /// The result's volume after the call.
+    Result,
+    /// Also the source's volume, queried on the operand before the call (#1528).
+    SourceFirst,
+}
+
+/// `status volume` pairs of [`eval_measured`]: the source's before the call (`-1 0`
+/// unless [`VolumeQuery::SourceFirst`] or without source) and the result's after it
+/// (`-1 0` without result); the status is the native one ([`NATIVE_SUCCESS`] on
+/// success), a failure keeps volume `0`. Also the operand state the shim reads right
+/// after the (optional) query and before the call (its `put_operand_state` layout:
+/// trimmed edge use count, per edge use its trim's end control points, per vertex use
+/// its vertex/face gap).
+#[derive(Debug, Clone, PartialEq)]
+pub struct Volumes {
+    /// The source's volume query before the call.
+    pub source_before: [f64; 2],
+    /// The result's volume query after the call.
+    pub result: [f64; 2],
+    /// The operand state before the call (empty without source).
+    pub operand: Vec<f64>,
+}
+
+/// [`eval`] with the volume queries of `query` (the shim's
+/// `sc_offset_offset_executive_p2_eval_measured`). A fixture rejection has no volumes.
+pub fn eval_measured(
+    request: &Request,
+    query: VolumeQuery,
+) -> Result<(Outcome, Option<Volumes>), FfiError> {
+    let input = pack(request)?;
+    let code = match query {
+        VolumeQuery::Result => 0,
+        VolumeQuery::SourceFirst => 1,
+    };
+    let raw = call_with_buffer(4096, |out, len| {
+        if out.len() > MAX_OUTPUT_VALUES {
+            return crate::SC_ERR_ARG;
+        }
+        // SAFETY: as for [`eval`]; `code` is 0 or 1.
+        unsafe {
+            sys::sc_offset_offset_executive_p2_eval_measured(
+                input.as_ptr(),
+                input.len() as i64,
+                code,
+                out.as_mut_ptr(),
+                out.len() as i64,
+                &raw mut *len,
+            )
+        }
+    })?;
+    // a fixture rejection (`-1 status`) ends before the volumes
+    if raw.first().is_some_and(|&tag| tag < 0.0) {
+        return Ok((
+            decode(&raw, request.operation, request.attributed.is_some())?,
+            None,
+        ));
+    }
+    // `operand_state... operand_len pre_status pre_volume post_status post_volume`
+    let short = || invalid("measured snapshot without its tail");
+    let split = raw.len().checked_sub(5).ok_or_else(short)?;
+    let (rest, tail) = raw.split_at(split);
+    let [len, a, b, c, d] = <[f64; 5]>::try_from(tail).map_err(|_| short())?;
+    if len < 0.0 || len.fract() != 0.0 || len > rest.len() as f64 {
+        return Err(invalid("operand state length"));
+    }
+    let (snapshot, operand) = rest.split_at(rest.len() - len as usize);
+    let outcome = decode(snapshot, request.operation, request.attributed.is_some())?;
+    Ok((
+        outcome,
+        Some(Volumes {
+            source_before: [a, b],
+            result: [c, d],
+            operand: operand.to_vec(),
+        }),
+    ))
 }
 
 #[cfg(test)]

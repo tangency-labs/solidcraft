@@ -85,6 +85,7 @@ use solidcore::geom::extent1d::Extent1d;
 use solidcore::geom::extent2d::Extent2d;
 use solidcore::geom::object::{FaceKey, ObjectRef};
 use solidcore::kernel::Kernel;
+use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
 use solidcore::math::Vec3;
 use solidcore::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use solidcore::nurbs::knots::Side;
@@ -375,6 +376,102 @@ struct Inputs {
     /// and edge attribute sets are compared (`attributes`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     attributed: Option<u8>,
+    /// Volume queries (#1528: a query that changes a later operation, fixtures only):
+    /// `result` compares the result's `SmApiBrepComputeVolume` after the call;
+    /// `source_first` also queries the operand's volume before the call (the shim's
+    /// measured entry point, `brep_volume` here), both compared as `volumes`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    volume_query: Option<VolumeQuery>,
+}
+/// [`Inputs::volume_query`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum VolumeQuery {
+    Result,
+    SourceFirst,
+}
+impl VolumeQuery {
+    const fn native(self) -> ffi::VolumeQuery {
+        match self {
+            Self::Result => ffi::VolumeQuery::Result,
+            Self::SourceFirst => ffi::VolumeQuery::SourceFirst,
+        }
+    }
+}
+/// The accuracy of the volume queries (the shim's `volume_accuracy`).
+const VOLUME_ACCURACY: f64 = 1e-6;
+/// `SmApiBrepComputeVolume` of `brep` as the shim's `put_volume`: `status volume` (the
+/// native status, volume `0` on failure), `-1 0` without B-rep.
+fn volume_pair(kernel: &Kernel, brep: Option<&mut Brep>) -> RResult<[f64; 2]> {
+    let Some(brep) = brep else {
+        return Ok([-1.0, 0.0]);
+    };
+    let store = AttributeStore::default();
+    let attributes = PropertyAttributes {
+        store: &store,
+        key_of: &|_| ObjectKey(0),
+    };
+    let (status, volume) = operation(brep_volume(kernel, brep, VOLUME_ACCURACY, &attributes))?;
+    Ok([f64::from(status), volume.unwrap_or(0.0)])
+}
+/// The operand state a volume query can write, as the shim's `put_operand_state` (read
+/// without writing): the number of edge uses holding a UV trim curve, then per edge use
+/// (`SmBrep::GetEdgeuses` order: each edge's uses, edges in `GetEdges` order) `0` without
+/// trim, `2` for one without NURB, else `1` and its first and last homogeneous control
+/// points `x y w`; then per vertex use (`GetVertexuses` order) `0` when its vertex/face
+/// gap is not initialised, else `1 gap u v`. Empty without B-rep.
+fn operand_state(brep: Option<&Brep>) -> HResult<Vec<f64>> {
+    let Some(brep) = brep else {
+        return Ok(Vec::new());
+    };
+    let mut edgeuses = Vec::new();
+    for e in brep_p1::edges(brep, None).map_err(setup)? {
+        edgeuses.extend(solidcore::topology::edge::edgeuses(brep, e, None, None).map_err(setup)?);
+    }
+    let mut vertexuses = Vec::new();
+    for v in brep_p1::vertices(brep, None).map_err(setup)? {
+        vertexuses.extend(solidcore::topology::vertex::vertexuses(brep, v).map_err(setup)?);
+    }
+    let trims = edgeuses
+        .iter()
+        .map(|&eu| {
+            brep.edgeuse(eu)
+                .map(|r| r.uv_trim_curve.as_ref())
+                .map_err(setup)
+        })
+        .collect::<HResult<Vec<_>>>()?;
+    let mut out = vec![trims.iter().filter(|t| t.is_some()).count() as f64];
+    for trim in trims {
+        let Some(curve) = trim else {
+            out.push(0.0);
+            continue;
+        };
+        let base = match curve.kind() {
+            CurveKind::BSpline(x) => Some(x),
+            CurveKind::Ellipse(x) => Some(x.base()),
+            CurveKind::Hyperbola(x) => Some(x.base()),
+            CurveKind::Parabola(x) => Some(x.base()),
+            CurveKind::Line(x) => Some(x.base()),
+            _ => None,
+        };
+        let points = base.and_then(|b| b.gw_nurb()).map(solidcore::nurbs::crv_basic::Curve::cpts);
+        match points.and_then(|p| p.first().zip(p.last())) {
+            Some((first, last)) => {
+                out.push(1.0);
+                out.extend([first.x, first.y, first.w, last.x, last.y, last.w]);
+            }
+            None => out.push(2.0),
+        }
+    }
+    for vu in vertexuses {
+        let gap = &brep.vertexuse(vu).map_err(setup)?.vertex_face_gap;
+        if gap.is_init() {
+            out.extend([1.0, gap.gap_3d, gap.face_uv.x, gap.face_uv.y]);
+        } else {
+            out.push(0.0);
+        }
+    }
+    Ok(out)
 }
 impl Inputs {
     fn native(&self) -> ffi::Request {
@@ -1893,6 +1990,18 @@ fn rust_output(input: &Inputs) -> RResult<Output> {
             tag_source(brep, behavior)?;
         }
     }
+    // the shim's `volume_query == 1`: the operand's volume, queried before the call
+    let source_volume = if input.volume_query == Some(VolumeQuery::SourceFirst) {
+        volume_pair(&kernel, source.as_mut())?
+    } else {
+        [-1.0, 0.0]
+    };
+    // the operand state right after the (optional) query, before the call
+    let source_state = if input.volume_query.is_some() {
+        operand_state(source.as_ref())?
+    } else {
+        Vec::new()
+    };
     if let Some(brep) = foreign.as_mut() {
         register_notification_brep(&mut records, brep, NAMESPACE_FOREIGN);
     }
@@ -1996,7 +2105,7 @@ fn rust_output(input: &Inputs) -> RResult<Output> {
             &mut notifications,
         ),
     };
-    let (status, result) = operation(result)?;
+    let (status, mut result) = operation(result)?;
     let result_projection = result.as_ref().map(rust_result_projection).transpose()?;
     let offset_projection = exec
         .as_ref()
@@ -2076,6 +2185,13 @@ fn rust_output(input: &Inputs) -> RResult<Output> {
     ] {
         output = project(output, key, projection);
     }
+    if input.volume_query.is_some() {
+        // the result's volume, after every snapshot (as the shim's tail)
+        let result_volume = volume_pair(&kernel, result.as_mut())?;
+        output = output
+            .values("volumes", [source_volume, result_volume].concat())
+            .values("operand", source_state);
+    }
     Ok(output)
 }
 
@@ -2086,9 +2202,20 @@ impl UnitDiff for Runner {
     fn run_cpp(&self, case: &Case) -> HResult<Output> {
         let input: Inputs = case.parse()?;
         // FFI argument errors are NEVER constructor rejections or native statuses.
-        let outcome = ffi::eval(&input.native())
+        let Some(query) = input.volume_query else {
+            let outcome = ffi::eval(&input.native())
+                .map_err(|error| bad(format!("native p2 adapter: {error}")))?;
+            return native_outcome(&input, outcome);
+        };
+        let (outcome, volumes) = ffi::eval_measured(&input.native(), query.native())
             .map_err(|error| bad(format!("native p2 adapter: {error}")))?;
-        native_outcome(&input, outcome)
+        let output = native_outcome(&input, outcome)?;
+        Ok(match volumes {
+            Some(v) => output
+                .values("volumes", [v.source_before, v.result].concat())
+                .values("operand", v.operand),
+            None => output,
+        })
     }
     fn run_rust(&self, case: &Case) -> HResult<Output> {
         match rust_output(&case.parse()?) {
@@ -2176,6 +2303,7 @@ fn generated(rng: &mut Rng) -> Inputs {
         },
         heap_ordered_vertices: false,
         attributed: None,
+        volume_query: None,
     };
     match category {
         0 | 1 => {
@@ -2295,6 +2423,7 @@ mod tests {
             config: Config::default(),
             heap_ordered_vertices: false,
             attributed: None,
+            volume_query: None,
         }
     }
     fn case(input: &Inputs) -> Case {

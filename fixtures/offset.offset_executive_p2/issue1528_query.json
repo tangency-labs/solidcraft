@@ -1,0 +1,57 @@
+{
+ "coverage": "tangency-labs/solidcore#1528 follow-up: does a volume query on the operand change what the shell sees? Each case shells as issue1528.json does (SmApiShellBrepFull -2, extended convex edges, merged results, open at x = 42.5) through the measured entry point (sc_offset_offset_executive_p2_eval_measured), at the default fixes: volume_query result = the result's SmApiBrepComputeVolume (accuracy 1e-6) after the call; source_first = also the operand's volume queried before the call (brep_volume on the Rust side). Both report the operand state right after the (optional) query and before the call (operand: trimmed edge-use count, each trim's end control points in GetEdgeuses order, each vertex use's vertex/face gap in GetVertexuses order), so result is the no-query baseline and source_first shows what the query wrote.",
+ "cases": [
+  {
+   "name": "issue1528_plate_api_shell_2_volume",
+   "upstream_ref": "tangency-labs/solidcore#1528 (operand: issue_1528_write_operand.rs)",
+   "inputs": {
+    "operation": "api_shell",
+    "source": {
+     "kind": "file",
+     "path": {
+      "$repo_file": "fixtures/offset.offset_executive_p2/data/issue1528_plate.smb"
+     }
+    },
+    "faces": [
+     {
+      "origin": "source",
+      "index": 1
+     }
+    ],
+    "tolerance": 1e-06,
+    "config": {
+     "offset_distance": -2.0,
+     "extend_convex": true,
+     "merge_results": true
+    },
+    "volume_query": "result"
+   }
+  },
+  {
+   "name": "issue1528_plate_api_shell_2_volume_first",
+   "upstream_ref": "tangency-labs/solidcore#1528 (operand: issue_1528_write_operand.rs)",
+   "inputs": {
+    "operation": "api_shell",
+    "source": {
+     "kind": "file",
+     "path": {
+      "$repo_file": "fixtures/offset.offset_executive_p2/data/issue1528_plate.smb"
+     }
+    },
+    "faces": [
+     {
+      "origin": "source",
+      "index": 1
+     }
+    ],
+    "tolerance": 1e-06,
+    "config": {
+     "offset_distance": -2.0,
+     "extend_convex": true,
+     "merge_results": true
+    },
+    "volume_query": "source_first"
+   }
+  }
+ ]
+}
