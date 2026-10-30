@@ -2,9 +2,9 @@
  "sources": [
   "tangency-labs/solidcraft#9"
  ],
- "what": "three r1 rounds at a box corner with the curvature (g2) corner at its default setback 1.5 r: the corner patch must meet the rounds and faces G2 (today it is G1 at the corner point)",
+ "what": "three r1 rounds at a box corner with the curvature (g2) corner at its default setback 1.5 r: the corner patch meets the rounds and faces G2 clear of the vertices where the seams turn",
  "source": "invariants",
- "method": "as ladder 07-fillets/015 at r1: the corner set back 1.5 and filled with one patch; no closed-form volume: one valid body, 6 faces + 3 rounds + the patch, within the box",
+ "method": "as ladder 07-fillets/015 at r1: the corner set back 1.5 and filled with one patch; no closed-form volume: one valid body, 6 faces + 3 rounds + the patch, within the box Graded as ladder 07/019, scaled by r: at a hole corner the round is only tangent (G1) to the plane, its curvature jumping by 1/r, so no patch is G2 to both there; the curvature jump is bounded at stations at least 0.24 mm (0.24 r) from each turn, within 2.2 mm of the corner, at most 0.005 per mm (0.5% of 1/r).",
  "body_count": 1,
  "faces": 10,
  "bbox": {
@@ -20,7 +20,13 @@
   ]
  },
  "continuity": {
-  "order": "g2",
-  "edges": "corner"
+  "near": [
+   60,
+   40,
+   20
+  ],
+  "within_mm": 2.2,
+  "clear_mm": 0.24,
+  "curvature_jump_per_mm": 0.005
  }
 }
