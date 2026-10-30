@@ -1,0 +1,90 @@
+{
+  "en": {
+    "color.recent": "Recent colors",
+    "color.recent_help": "Colors you pick in any color field appear here",
+    "color.saturation": "Saturation (percent)",
+    "color.step_down": "Step down",
+    "color.step_up": "Step up",
+    "color.value": "Value, the brightness (percent)"
+  },
+  "en-GB": {
+    "color.recent": "Recent colours",
+    "color.recent_help": "Colours you pick in any colour field appear here",
+    "color.saturation": "Saturation (per cent)",
+    "color.step_down": "Step down",
+    "color.step_up": "Step up",
+    "color.value": "Value, the brightness (per cent)"
+  },
+  "ar": {
+    "color.recent": "الألوان الأخيرة",
+    "color.recent_help": "تظهر هنا الألوان التي تختارها في أي حقل لون",
+    "color.saturation": "التشبع (بالمئة)",
+    "color.step_down": "إنقاص خطوة",
+    "color.step_up": "زيادة خطوة",
+    "color.value": "القيمة، أي السطوع (بالمئة)"
+  },
+  "de": {
+    "color.recent": "Zuletzt verwendete Farben",
+    "color.recent_help": "Farben, die Sie in einem beliebigen Farbfeld wählen, erscheinen hier",
+    "color.saturation": "Sättigung (Prozent)",
+    "color.step_down": "Schritt nach unten",
+    "color.step_up": "Schritt nach oben",
+    "color.value": "Hellwert (Prozent)"
+  },
+  "es": {
+    "color.recent": "Colores recientes",
+    "color.recent_help": "Los colores que elija en cualquier campo de color aparecen aquí",
+    "color.saturation": "Saturación (porcentaje)",
+    "color.step_down": "Bajar un paso",
+    "color.step_up": "Subir un paso",
+    "color.value": "Valor, el brillo (porcentaje)"
+  },
+  "fr": {
+    "color.recent": "Couleurs récentes",
+    "color.recent_help": "Les couleurs choisies dans n'importe quel champ de couleur apparaissent ici",
+    "color.saturation": "Saturation (pour cent)",
+    "color.step_down": "Diminuer d'un pas",
+    "color.step_up": "Augmenter d'un pas",
+    "color.value": "Valeur, la luminosité (pour cent)"
+  },
+  "he": {
+    "color.recent": "צבעים אחרונים",
+    "color.recent_help": "צבעים שבוחרים בכל שדה צבע מופיעים כאן",
+    "color.saturation": "רוויה (אחוזים)",
+    "color.step_down": "צעד למטה",
+    "color.step_up": "צעד למעלה",
+    "color.value": "ערך, הבהירות (אחוזים)"
+  },
+  "it": {
+    "color.recent": "Colori recenti",
+    "color.recent_help": "I colori scelti in qualsiasi campo colore compaiono qui",
+    "color.saturation": "Saturazione (percentuale)",
+    "color.step_down": "Diminuisci di un passo",
+    "color.step_up": "Aumenta di un passo",
+    "color.value": "Valore, la luminosità (percentuale)"
+  },
+  "ja": {
+    "color.recent": "最近使った色",
+    "color.recent_help": "どの色フィールドで選んだ色もここに表示されます",
+    "color.saturation": "彩度（パーセント）",
+    "color.step_down": "1 ステップ下げる",
+    "color.step_up": "1 ステップ上げる",
+    "color.value": "明度（パーセント）"
+  },
+  "vi": {
+    "color.recent": "Màu gần đây",
+    "color.recent_help": "Các màu bạn chọn ở bất kỳ ô màu nào sẽ hiện ở đây",
+    "color.saturation": "Độ bão hòa (phần trăm)",
+    "color.step_down": "Giảm một bước",
+    "color.step_up": "Tăng một bước",
+    "color.value": "Giá trị, độ sáng (phần trăm)"
+  },
+  "zh": {
+    "color.recent": "最近使用的颜色",
+    "color.recent_help": "在任意颜色字段中选择的颜色会显示在这里",
+    "color.saturation": "饱和度（百分比）",
+    "color.step_down": "减少一步",
+    "color.step_up": "增加一步",
+    "color.value": "明度（百分比）"
+  }
+}
