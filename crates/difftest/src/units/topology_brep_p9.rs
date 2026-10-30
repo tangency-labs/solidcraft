@@ -149,9 +149,12 @@ fn request<'a>(i: &Inputs, path: &'a str, block: &'a [f64]) -> ffi::Request<'a> 
 fn target<I: ArenaId>(count: usize, selector: u8) -> Option<I> {
     (count > 0).then(|| I::from_index(u32::from(selector) % count as u32))
 }
-/// The shim's build conventions (`sc_topology_fixture.h`'s `build` and `walk`).
+/// The shim's build conventions (`sc_topology_fixture.h`'s `build` and `walk`; the
+/// fixture's traversal, `GetVertexEdgeGap` only matters with `init_gaps`, which is off),
+/// faces and edges owning their surfaces and curves under the arena identities op 0's
+/// `BrepQuery::default()` names them by.
 const CONVENTIONS: crate::own_builder::Conventions<'static> =
-    crate::own_builder::Conventions::TOPOLOGY_FIXTURE;
+    crate::own_builder::Conventions::EDGEUSE_GRAPH;
 
 /// The shim's setup edits of the built B-rep `b` (in its walk order) before the
 /// export: op 5 variant 0 with editing, two `MakeVertexLoop`s on the selected face at
@@ -311,11 +314,10 @@ fn rust_input(i: &Inputs) -> Result<(Brep, [f64; 2]), HarnessError> {
 }
 
 fn rust(i: &Inputs, mut b: Brep, initial: [f64; 2]) -> Result<Output, HarnessError> {
-    // As the native B-rep: each edge owns its curve and each face its surface, under the
-    // arena keys op 0's `BrepQuery::default()` names them by (the import leaves curves
-    // unowned and owns face f's surface as `1 + f`), and a face-owned surface carries the
-    // face's tolerance. Without it the B-rep cache trees hold no edges or faces.
-    crate::util::own_arena_geometry(&mut b);
+    // The build owns each edge's curve and each face's surface under the arena keys op
+    // 0's `BrepQuery::default()` names them by ([`CONVENTIONS`]; no owner is added to
+    // geometry the build left without one); a face-owned surface carries the face's
+    // tolerance.
     for f in b.faces().ids().collect::<Vec<_>>() {
         b.sync_face_surface_tolerance(f).map_err(|e| error(&e))?;
     }
