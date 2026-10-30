@@ -1347,11 +1347,11 @@ pub enum FeatureKind {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         body: Option<BodyName>,
     },
-    /// A perforation field (#732): round holes of `diameter` on a staggered (60°) or square grid of `pitch` over the
-    /// whole flat sheet, or inside the closed profiles of `sketch` when it is given, kept `margin` (default: the
-    /// diameter) clear of its edges, cut-outs, bend zones and the outline. Stored like a cosmetic thread: the holes go
-    /// to the flat pattern, the DXF and the measured volume, not into the B-rep, so a panel can carry tens of thousands
-    /// of them.
+    /// A perforation field (#732): holes of `diameter` (round, hexagonal across flats, or slots `length` long along
+    /// the rows) on a staggered (60°) or square grid of `pitch` (rows `row_pitch` apart) over the whole flat sheet, or
+    /// inside the closed profiles of `sketch` when it is given, kept `margin` (default: the diameter) clear of its
+    /// edges, cut-outs, bend zones and the outline. Stored like a cosmetic thread: the holes go to the flat pattern, the
+    /// DXF and the measured volume, not into the B-rep, so a panel can carry tens of thousands of them.
     SheetPerforate {
         #[walk(length = "Diameter")]
         diameter: Expr,
@@ -1371,6 +1371,17 @@ pub enum FeatureKind {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         #[walk(profiles_of = sketch)]
         profiles: Option<ProfileSel>,
+        /// The holes' shape: "round" (None), "hex" or "slot".
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        shape: Option<String>,
+        /// A slot's length overall.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(length = "Slot length")]
+        length: Option<Expr>,
+        /// The distance between rows. None: from the pitch and the pattern.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(length = "Row pitch")]
+        row_pitch: Option<Expr>,
     },
     /// Fold a sheet along a line on its base face: a sketch line (followed when the sketch
     /// changes), else the points `a`, `b`.

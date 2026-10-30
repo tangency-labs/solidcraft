@@ -64,7 +64,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&PERFORATE_CONTRACT)
         .output(output_schema_for::<FeatureResult>)
         .params(
-        "diameter, pitch: expr; margin?: expr (clear of edges, cut-outs, bends and the outline; default: the diameter); pattern?: staggered (60°, default) | square; body?; sketch? + profiles? (the outline: closed profiles of a sketch on a face of the sheet; holes only inside them, out of their inner loops) - a perforation field over the whole flat sheet or inside the outline: holes in the flat pattern (perforations), the DXF (layer PERFORATION) and the measured volume, not cut into the B-rep (#732)",
+        "diameter, pitch: expr; margin?: expr (clear of edges, cut-outs, bends and the outline; default: the diameter); pattern?: staggered (60°, default) | square; shape?: round (default) | hex (diameter across flats, a corner up: a honeycomb on the staggered pattern) | slot (diameter wide, length? long overall, along the rows); row_pitch?: expr (between rows; default: from the pitch and pattern); body?; sketch? + profiles? (the outline: closed profiles of a sketch on a face of the sheet; holes only inside them, out of their inner loops) - a perforation field over the whole flat sheet or inside the outline: holes in the flat pattern (perforations, with their count and open share), the DXF (layer PERFORATION) and the measured volume (#732)",
     ),
     CommandSpec::new("sheet.hem", "Hem", crate::checked!("sheet.hem", hem))
         .at("SHEET METAL", "CREATE")
@@ -471,6 +471,14 @@ pub(crate) fn perforation_pattern(t: &str) -> std::result::Result<&str, &'static
     }
 }
 
+/// A perforation's `shape`.
+pub(crate) fn perforation_shape(t: &str) -> std::result::Result<&str, &'static str> {
+    match t {
+        "round" | "hex" | "slot" => Ok(t),
+        _ => Err("`shape` is \"round\" (default), \"hex\" or \"slot\""),
+    }
+}
+
 fn perforate(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sheet.perforate";
     let diameter = req_expr(cmd, p, "diameter")?;
@@ -482,6 +490,18 @@ fn perforate(s: &mut Session, p: &Value) -> Result<Value> {
         check_expr(s, m, Kind::Length, cmd, "margin")?;
     }
     let pattern = str_(p, "pattern").map(|t| perforation_pattern(t).map(str::to_string).map_err(|why| bad(cmd, why))).transpose()?;
+    let shape = str_(p, "shape").map(|t| perforation_shape(t).map(str::to_string).map_err(|why| bad(cmd, why))).transpose()?;
+    let length = expr(p, "length");
+    match (&length, shape.as_deref()) {
+        (Some(l), Some("slot")) => check_expr(s, l, Kind::Length, cmd, "length")?,
+        (None, Some("slot")) => return Err(bad(cmd, "a slot needs its `length` (overall, along the rows)")),
+        (Some(_), _) => return Err(bad(cmd, "`length` is a slot's: it needs `shape: \"slot\"`")),
+        (None, _) => {}
+    }
+    let row_pitch = expr(p, "row_pitch");
+    if let Some(r) = &row_pitch {
+        check_expr(s, r, Kind::Length, cmd, "row_pitch")?;
+    }
     // The outline: only a sketch named here, never the active one.
     let sketch = match p.get("sketch") {
         Some(_) => Some(SketchId(feature_sketch(s, p, cmd)?)),
@@ -489,7 +509,8 @@ fn perforate(s: &mut Session, p: &Value) -> Result<Value> {
         None => None,
     };
     let profiles = p.get("profiles").map(|_| profiles(p, cmd)).transpose()?;
-    add_feature(s, p, FeatureKind::SheetPerforate { diameter, pitch, margin, pattern, body: str_(p, "body").map(BodyName::from), sketch, profiles })
+    let body = str_(p, "body").map(BodyName::from);
+    add_feature(s, p, FeatureKind::SheetPerforate { diameter, pitch, margin, pattern, body, sketch, profiles, shape, length, row_pitch })
 }
 
 fn hem(s: &mut Session, p: &Value) -> Result<Value> {
@@ -796,10 +817,19 @@ fn flat_json(sh: &SheetBody) -> Result<Value> {
         .collect();
     let mut perforations = Vec::new();
     for p in &sh.perforations {
-        let n = sh.perforation_holes(p)?.len();
-        perforations.push(json!({"feature": p.feature, "diameter": p.diameter, "pitch": p.pitch, "margin": p.margin,
-            "pattern": if p.square { "square" } else { "staggered" }, "count": n,
-            "open_area_mm2": n as f64 * std::f64::consts::PI * (p.diameter / 2.0).powi(2)}));
+        let stats = sh.perforation_stats(p)?;
+        let mut v = json!({"feature": p.feature, "diameter": p.diameter, "pitch": p.pitch, "row_pitch": p.row_spacing(), "margin": p.margin,
+            "pattern": if p.square { "square" } else { "staggered" }, "count": stats.holes, "open_area_mm2": stats.open_area,
+            "field_area_mm2": stats.field_area, "open_share": stats.open_share, "nominal_open_share": p.nominal_open_share()});
+        match p.shape {
+            sheet::PerforationShape::Round => v["shape"] = json!("round"),
+            sheet::PerforationShape::Hex => v["shape"] = json!("hex"),
+            sheet::PerforationShape::Slot { length } => {
+                v["shape"] = json!("slot");
+                v["length"] = json!(length);
+            }
+        }
+        perforations.push(v);
     }
     let bend_zones: Vec<Value> = sh
         .bend_zones()
@@ -921,14 +951,17 @@ pub fn flat_dxf(sh: &SheetBody, o: &DxfOptions) -> Result<String> {
         };
         format!("POCKET_{side}_Z{:.6}_TO_{:.6}_MM", p.z0, p.z1)
     };
-    let perforation: Vec<(Vec2, f64)> = sh
-        .perforations
-        .iter()
-        .map(|p| sh.perforation_holes(p).map(|h| h.into_iter().map(|c| (c, p.diameter / 2.0)).collect::<Vec<_>>()))
-        .collect::<std::result::Result<Vec<_>, _>>()?
-        .into_iter()
-        .flatten()
-        .collect();
+    // A round hole is one CIRCLE; another shape its lines and arcs.
+    let mut perforation: Vec<DxfShape> = Vec::new();
+    for p in &sh.perforations {
+        for c in sh.perforation_holes(p)? {
+            if p.shape.is_round() {
+                perforation.push(DxfShape::Circle { c, r: p.diameter / 2.0 });
+            } else {
+                perforation.extend(solidcraft_io::loop_shapes(&p.hole_loop(c)));
+            }
+        }
+    }
     // A piece inside another piece's hole (a letter's counter, the middle of a ring cut) is no
     // outline of the sheet but a loose piece the cut leaves.
     let nested: Vec<bool> = regions
@@ -1004,8 +1037,8 @@ pub fn flat_dxf(sh: &SheetBody, o: &DxfOptions) -> Result<String> {
             entities.push(DxfEntity { layer: "BEND_NOTES".into(), shape: bend_note(&b, height, sh.angle_display) });
         }
     }
-    for (c, r) in perforation {
-        entities.push(DxfEntity { layer: "PERFORATION".into(), shape: DxfShape::Circle { c, r } });
+    for shape in perforation {
+        entities.push(DxfEntity { layer: "PERFORATION".into(), shape });
     }
     // One layer: every entity on layer 0, which every drawing has.
     if o.one_layer {

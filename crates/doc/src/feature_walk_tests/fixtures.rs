@@ -150,7 +150,7 @@ pub(super) fn fixtures() -> Vec<(&'static str, Value)> {
             "sheet_perforate",
             json!({
                 "type": "sheet_perforate", "diameter": "perforate.diameter", "pitch": "perforate.pitch", "margin": "perforate.margin",
-                "sketch": 1, "profiles": {"type": "all"}
+                "sketch": 1, "profiles": {"type": "all"}, "shape": "slot", "length": "perforate.length", "row_pitch": "perforate.row_pitch"
             }),
         ),
         (

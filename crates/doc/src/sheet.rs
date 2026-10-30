@@ -22,9 +22,12 @@ use crate::{DocError, Document, IDENTITY, Mat, Result, apply_point, apply_vector
 mod convert;
 #[path = "sheet_face_names.rs"]
 mod face_names;
+#[path = "sheet_perforation.rs"]
+mod perforation;
 pub use convert::{bend_edge_names, convert_body};
 pub(crate) use convert::{outline_loop, round_wall};
 pub use face_names::body_sheet_face_names;
+pub use perforation::{PerforationShape, PerforationStats};
 
 // Bound the aggregate geometry, including sampled curves and intermediate clipping pieces.
 // These are work limits, never geometry truncation: a larger input returns a useful error.
@@ -707,6 +710,12 @@ pub struct SheetPerforation {
     /// regions, margin clear of their edges, on a grid that starts from their bounding box. None: the whole flat.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub outline: Option<Vec<Region2>>,
+    /// The holes' shape. Default: round.
+    #[serde(default, skip_serializing_if = "PerforationShape::is_round")]
+    pub shape: PerforationShape,
+    /// The distance between rows. None: the pitch's 60° rows (staggered) or the pitch (square).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub row_pitch: Option<f64>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -2445,7 +2454,8 @@ impl SheetBody {
     pub fn perforation_holes(&self, p: &SheetPerforation) -> Result<Vec<Vec2>> {
         let regions = self.flat_regions()?;
         let zones = self.bend_zones();
-        let clear = p.diameter / 2.0 + p.margin;
+        // How far a hole's centre stays from the edges: its reach and the margin.
+        let clear = p.reach() + p.margin;
         let mut segs: Vec<(Vec2, Vec2)> = Vec::new();
         let mut add = |l: &Loop2| {
             let pts = l.polyline(1e-3);
@@ -2494,32 +2504,33 @@ impl SheetBody {
                 }
             }
         }
-        let dist = |c: Vec2, (a, b): (Vec2, Vec2)| -> f64 {
-            let (d, l) = (b - a, (b - a).dot(b - a));
-            let t = if l > 0.0 { ((c - a).dot(d) / l).clamp(0.0, 1.0) } else { 0.0 };
-            c.dist(a + d * t)
-        };
-        let dy = if p.square { p.pitch } else { p.pitch * 3f64.sqrt() / 2.0 };
+        let dy = p.row_spacing();
+        if !(dy > 0.0) {
+            return Ok(Vec::new());
+        }
+        // The first and last rows and columns: a hole's half width (or height) and the margin in.
+        let half = p.half_extent();
+        let (cx, cy) = (half.x + p.margin, half.y + p.margin);
         let mut out = Vec::new();
         let mut row = 0usize;
         let Aabb2 { min: flo, max: fhi } = field;
         loop {
-            let y = flo.y + clear + row as f64 * dy;
-            if y > fhi.y - clear + 1e-9 {
+            let y = flo.y + cy + row as f64 * dy;
+            if y > fhi.y - cy + 1e-9 {
                 break;
             }
             let shift = if !p.square && row % 2 == 1 { p.pitch / 2.0 } else { 0.0 };
             // Steps across the row from its first hole; a mirrored field counts from the right.
             let mut step = 0.0;
-            while flo.x + clear + shift + step <= fhi.x - clear + 1e-9 {
-                let x = if p.from_right { fhi.x - clear - shift - step } else { flo.x + clear + shift + step };
+            while flo.x + cx + shift + step <= fhi.x - cx + 1e-9 {
+                let x = if p.from_right { fhi.x - cx - shift - step } else { flo.x + cx + shift + step };
                 let c = Vec2::new(x, y);
                 let (i, j) = idx(x, y);
                 let near = grid.get(j * nx + i).map(Vec::as_slice).unwrap_or(&[]);
                 if regions.iter().any(|r| r.contains(c))
                     && p.outline.as_ref().is_none_or(|o| o.iter().any(|r| r.contains(c)))
                     && !zones.iter().any(|z| z.contains(c))
-                    && near.iter().all(|&k| segs.get(k).is_none_or(|&s| dist(c, s) >= clear - 1e-9))
+                    && near.iter().all(|&k| segs.get(k).is_none_or(|&(a, b)| p.clearance(c, a, b) >= p.margin - 1e-9))
                 {
                     out.push(c);
                 }
@@ -2532,10 +2543,7 @@ impl SheetBody {
 
     /// Open area of all perforation fields (mm²): what they take out of the sheet's faces.
     pub fn perforated_area(&self) -> f64 {
-        self.perforations
-            .iter()
-            .map(|p| self.perforation_holes(p).map_or(0.0, |h| h.len() as f64) * std::f64::consts::PI * (p.diameter / 2.0).powi(2))
-            .sum()
+        self.perforations.iter().map(|p| self.perforation_holes(p).map_or(0.0, |h| h.len() as f64) * p.hole_area()).sum()
     }
 
     /// Topology counted by faces and loops: a round hole is one face bounded by two closed circular

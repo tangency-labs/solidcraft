@@ -182,7 +182,7 @@ fn measure(s: &mut Session, p: &Value) -> Result<Value> {
             }
             b["sheet_metal"] = json!(true);
             // A perforation field (#732) is not cut into the B-rep: take its open area out of the volume, the mass
-            // and the area (both faces minus the holes, plus the bores).
+            // and the area (both faces minus the holes, plus their walls).
             let open = sh.perforated_area();
             if open > 0.0 {
                 if let Some(v) = b["volume_mm3"].as_f64() {
@@ -192,11 +192,8 @@ fn measure(s: &mut Session, p: &Value) -> Result<Value> {
                     }
                     b["volume_mm3"] = json!(nv);
                 }
-                let bores: f64 = sh
-                    .perforations
-                    .iter()
-                    .map(|p| sh.perforation_holes(p).map_or(0.0, |h| h.len() as f64) * std::f64::consts::PI * p.diameter * sh.t)
-                    .sum();
+                let bores: f64 =
+                    sh.perforations.iter().map(|p| sh.perforation_holes(p).map_or(0.0, |h| h.len() as f64) * p.hole_perimeter() * sh.t).sum();
                 b["area_mm2"] = json!(b["area_mm2"].as_f64().unwrap_or(0.0) - 2.0 * open + bores);
             }
         }

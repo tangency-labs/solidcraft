@@ -695,7 +695,7 @@ pub(super) fn sheet_eval(
             tag_flanges(sh, n0, f.id);
             rebuild_sheet(st, i)
         }
-        FeatureKind::SheetPerforate { diameter, pitch, margin, pattern, body, sketch, profiles } => {
+        FeatureKind::SheetPerforate { diameter, pitch, margin, pattern, body, sketch, profiles, shape, length, row_pitch } => {
             // Without a body name the field goes on the newest sheet, as the command's own body lookup does.
             let i = match body {
                 Some(_) => sheet_for(st, body, None)?,
@@ -717,6 +717,24 @@ pub(super) fn sheet_eval(
                     "perforation needs diameter > 0, pitch > diameter and margin >= 0 (diameter {d}, pitch {pitch}, margin {margin})"
                 )));
             }
+            let shape = match (shape.as_deref(), length) {
+                (None | Some("round"), None) => crate::sheet::PerforationShape::Round,
+                (Some("hex"), None) => crate::sheet::PerforationShape::Hex,
+                (Some("slot"), Some(l)) => {
+                    let length = val(vals, l, Kind::Length)?;
+                    if !(length > d) {
+                        return Err(DocError::Invalid(format!("a perforation slot is longer than it is wide (length {length}, diameter {d})")));
+                    }
+                    crate::sheet::PerforationShape::Slot { length }
+                }
+                (Some("slot"), None) => return Err(DocError::Invalid("a perforation slot needs its length".into())),
+                (None | Some("round" | "hex"), Some(_)) => return Err(DocError::Invalid("a perforation's length is a slot's".into())),
+                (Some(o), _) => return Err(DocError::Invalid(format!("perforation shape {o:?}: use \"round\", \"hex\" or \"slot\""))),
+            };
+            let row_pitch = row_pitch.as_ref().map(|e| val(vals, e, Kind::Length)).transpose()?;
+            if let Some(r) = row_pitch.filter(|r| !(*r > 0.0)) {
+                return Err(DocError::Invalid(format!("a perforation's row pitch is more than 0 (row pitch {r})")));
+            }
             // The outline sketch's profiles, where they lie on the sheet now.
             let outline = match sketch {
                 Some(sk) => {
@@ -728,7 +746,10 @@ pub(super) fn sheet_eval(
                 None => None,
             };
             let sh = st.sheets.get_mut(i).ok_or_else(|| DocError::Invalid("sheet".into()))?;
-            sh.perforations.push(crate::sheet::SheetPerforation { feature: f.id, diameter: d, pitch, margin, square, from_right: false, outline });
+            let field =
+                crate::sheet::SheetPerforation { feature: f.id, diameter: d, pitch, margin, square, from_right: false, outline, shape, row_pitch };
+            field.check_spacing()?;
+            sh.perforations.push(field);
             Ok(())
         }
         FeatureKind::SheetHem { edges, length, gap, flip, body } => {

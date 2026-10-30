@@ -5886,6 +5886,122 @@ fn a_mirrored_sheet_copy_mirrors_its_perforation_outline() {
     assert_eq!(holes(&mut s, "Body1 (2)", 1.0), original);
 }
 
+/// The entities on layer PERFORATION, counted by type.
+fn perforation_entities(dxf: &str) -> std::collections::BTreeMap<String, usize> {
+    let lines: Vec<&str> = dxf.lines().map(str::trim).collect();
+    let mut out = std::collections::BTreeMap::new();
+    let mut i = 0;
+    while i + 1 < lines.len() {
+        if lines[i] == "0" {
+            let kind = lines[i + 1];
+            let (mut layer, mut j) = ("", i + 2);
+            while j + 1 < lines.len() && lines[j] != "0" {
+                if lines[j] == "8" {
+                    layer = lines[j + 1];
+                }
+                j += 2;
+            }
+            if layer == "PERFORATION" {
+                *out.entry(kind.to_string()).or_insert(0) += 1;
+            }
+            i = j;
+        } else {
+            i += 1;
+        }
+    }
+    out
+}
+
+/// The box round the ends of the lines on layer PERFORATION: (min x, min y), (max x, max y).
+fn perforation_line_bounds(dxf: &str) -> ((f64, f64), (f64, f64)) {
+    let lines: Vec<&str> = dxf.lines().map(str::trim).collect();
+    let (mut lo, mut hi) = ((f64::INFINITY, f64::INFINITY), (f64::NEG_INFINITY, f64::NEG_INFINITY));
+    let mut i = 0;
+    while i + 1 < lines.len() {
+        if lines[i] == "0" && lines[i + 1] == "LINE" {
+            let (mut layer, mut pts, mut j) = ("", [0.0; 4], i + 2);
+            while j + 1 < lines.len() && lines[j] != "0" {
+                let v = lines[j + 1].parse().unwrap_or(f64::NAN);
+                match lines[j] {
+                    "8" => layer = lines[j + 1],
+                    "10" => pts[0] = v,
+                    "20" => pts[1] = v,
+                    "11" => pts[2] = v,
+                    "21" => pts[3] = v,
+                    _ => {}
+                }
+                j += 2;
+            }
+            if layer == "PERFORATION" {
+                for (x, y) in [(pts[0], pts[1]), (pts[2], pts[3])] {
+                    lo = (lo.0.min(x), lo.1.min(y));
+                    hi = (hi.0.max(x), hi.1.max(y));
+                }
+            }
+            i = j;
+        } else {
+            i += 1;
+        }
+    }
+    (lo, hi)
+}
+
+/// #732: hexagonal holes (3 across flats on a 4 pitch: a honeycomb, 9/16 open) and slots (2 wide, 6 long, 8 apart on
+/// rows 3 apart) on a 60 x 40 x 0.8 sheet: the flat pattern counts them with their area and open share, and the DXF
+/// draws each as its lines and arcs, margin clear of the sheet's edges.
+#[test]
+fn hexagonal_and_slotted_perforations_reach_the_flat_pattern_and_the_dxf() {
+    let mut s = Session::default();
+    outline_blank(&mut s, json!([[0, 0], [60, 0], [60, 40], [0, 40]]));
+    let hex = run(&mut s, "sheet.perforate", json!({"diameter": "3", "pitch": "4", "margin": "1", "shape": "hex"}));
+    let f = &flat(&mut s)["perforations"][0];
+    let n = f["count"].as_u64().unwrap_or(0) as f64;
+    assert!(n > 50.0, "{f}");
+    assert_eq!(f["shape"], "hex");
+    assert!(rel(f["open_area_mm2"].as_f64().unwrap_or(0.0), n * 3f64.sqrt() / 2.0 * 9.0) < 1e-12, "{f}");
+    assert!(rel(f["nominal_open_share"].as_f64().unwrap_or(0.0), 9.0 / 16.0) < 1e-12, "{f}");
+    assert!(rel(f["open_share"].as_f64().unwrap_or(0.0), n * 3f64.sqrt() / 2.0 * 9.0 / 2400.0) < 1e-9, "{f}");
+    let dxf = run(&mut s, "sheet.export_dxf", json!({}))["dxf"].as_str().unwrap_or_default().to_string();
+    let e = perforation_entities(&dxf);
+    assert_eq!(e.get("LINE").copied(), Some(6 * n as usize), "{e:?}");
+    assert_eq!(e.get("CIRCLE"), None, "{e:?}");
+    assert!(rel(f["row_pitch"].as_f64().unwrap_or(0.0), 2.0 * 3f64.sqrt()) < 1e-12, "{f}");
+    // The holes' corners stay the margin inside the sheet; the lowest row's bottom corners lie on it.
+    let (lo, hi) = perforation_line_bounds(&dxf);
+    assert!(lo.0 >= 1.0 - 1e-9 && lo.1 >= 1.0 - 1e-9 && hi.0 <= 59.0 + 1e-9 && hi.1 <= 39.0 + 1e-9, "{lo:?} {hi:?}");
+    assert!((lo.1 - 1.0).abs() < 1e-9, "{lo:?}");
+    run(&mut s, "timeline.delete", json!({"feature": hex["feature"]}));
+    run(&mut s, "sheet.perforate", json!({"diameter": "2", "pitch": "8", "row_pitch": "3", "margin": "1", "shape": "slot", "length": "6"}));
+    let f = &flat(&mut s)["perforations"][0];
+    let n = f["count"].as_u64().unwrap_or(0) as usize;
+    assert!(n > 20, "{f}");
+    assert_eq!((f["shape"].as_str(), f["length"].as_f64(), f["row_pitch"].as_f64()), (Some("slot"), Some(6.0), Some(3.0)), "{f}");
+    assert!(rel(f["open_area_mm2"].as_f64().unwrap_or(0.0), n as f64 * (2.0 * 4.0 + PI)) < 1e-12, "{f}");
+    let dxf = run(&mut s, "sheet.export_dxf", json!({}))["dxf"].as_str().unwrap_or_default().to_string();
+    let e = perforation_entities(&dxf);
+    assert_eq!((e.get("LINE").copied(), e.get("ARC").copied()), (Some(2 * n), Some(2 * n)), "{e:?}");
+}
+
+/// #732: shapes that cannot be made are refused, each with its reason.
+#[test]
+fn perforation_shapes_that_cannot_be_made_are_refused() {
+    let mut s = Session::default();
+    outline_blank(&mut s, json!([[0, 0], [30, 0], [30, 20], [0, 20]]));
+    for (bad, why) in [
+        (json!({"diameter": "1", "pitch": "4", "shape": "slot"}), "needs its `length`"),
+        (json!({"diameter": "1", "pitch": "4", "length": "3"}), "`length` is a slot's"),
+        (json!({"diameter": "1", "pitch": "4", "shape": "oval"}), "`shape` is"),
+        (json!({"diameter": "1", "pitch": "4", "shape": "slot", "length": "1"}), "longer than it is wide"),
+        (json!({"diameter": "1", "pitch": "4", "shape": "slot", "length": "5"}), "meet their neighbours"),
+        (json!({"diameter": "1", "pitch": "4", "row_pitch": "0.5", "pattern": "square"}), "meet their neighbours"),
+        (json!({"diameter": "1", "pitch": "4", "row_pitch": "0"}), "row pitch is more than 0"),
+        (json!({"diameter": "3", "pitch": "3.2", "shape": "hex", "pattern": "square", "row_pitch": "3.2"}), "meet their neighbours"),
+    ] {
+        let e = s.execute("sheet.perforate", &bad).map(|_| ()).unwrap_err().to_string();
+        assert!(e.contains(why), "{bad}: {e}");
+    }
+}
+
 /// A 100 x 60 tray with one 45° flange 40 high on its y = 0 edge (2.5 mm, R 2.5, K 0.44), and on
 /// it a return 10 high when asked. Returns the far edge of the last panel in the flat pattern:
 /// the base starts at the setback s = (t + R)·tan 22.5°, each bend's zone is (π/4)·(R + K·t) long,
