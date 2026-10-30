@@ -758,10 +758,10 @@ fn find_holes(s: &mut Session, p: &Value) -> Result<Value> {
     {
         return Err(bad(cmd, format!("no feature `{want}`")));
     }
-    let want_bodies = string_list(p, "bodies");
+    let want_bodies = string_list(cmd, p, "bodies")?;
     let holes_only = bool_(p, "holes_only").unwrap_or(true);
     let feats = hole_features(s);
-    let st = s.world_state();
+    let st = s.world_state()?;
     let selected: Vec<_> = st.bodies.iter().filter(|b| want_bodies.is_empty() || want_bodies.iter().any(|n| n == &b.name)).collect();
     if !want_bodies.is_empty() && selected.len() != want_bodies.len() {
         return Err(bad(cmd, "unknown body name"));
@@ -836,7 +836,15 @@ fn find_holes(s: &mut Session, p: &Value) -> Result<Value> {
             for pt in &group.edges {
                 sum += Vec3::from(*pt);
             }
-            let center = if group.edges.is_empty() { group.origin } else { Vec3::new(sum.x / n, sum.y / n, sum.z / n) };
+            let center = if group.edges.is_empty() {
+                group.origin
+            } else {
+                // An edge's mid lies on its closing circle, not on the axis: pull the mean back
+                // onto the axis so the hole's center names the bore, not a point on its wall.
+                let avg = Vec3::new(sum.x / n, sum.y / n, sum.z / n);
+                let d = avg - group.origin;
+                group.origin + group.axis * d.dot(group.axis)
+            };
             let feat = attribute_hole(&feats, group.radius * 2.0, group.axis, center, &group.names, tol);
             if let Some(want) = feature_filter
                 && !feat.as_ref().is_some_and(|f| f.name.eq_ignore_ascii_case(want) || f.id.to_string() == want)
@@ -973,22 +981,30 @@ fn radial_distance(p: Vec3, origin: Vec3, axis: Vec3) -> f64 {
 }
 
 fn cylinder_leans_in(mesh: &solidcraft_geom::Mesh, face: usize, origin: Vec3, axis: Vec3, centroid: Vec3) -> Option<bool> {
-    let mut n = Vec3::ZERO;
+    // Sum each triangle's normal against its own radial direction: a full cylindrical wall's
+    // normals cancel when summed as vectors, so the sign must be folded in per triangle.
+    let mut score = 0.0;
+    let mut weight = 0.0;
     for (t, f) in mesh.triangles.iter().zip(&mesh.tri_face) {
         if *f as usize != face {
             continue;
         }
         if let Some([a, b, c]) = mesh.tri(t) {
-            n += (b - a).cross(c - b);
+            let n = (b - a).cross(c - b);
+            let d = (a + b + c) / 3.0 - origin;
+            let radial = d - axis * d.dot(axis);
+            let r = radial.len();
+            if r > 1e-9 {
+                score += n.dot(radial) / r;
+                weight += n.len();
+            }
         }
     }
-    let len = n.dot(n).sqrt();
-    if !(len > 1e-9) {
+    if !(weight > 1e-9) {
         return None;
     }
-    let d = centroid - origin;
-    let radial = d - axis * d.dot(axis);
-    Some(n.dot(radial) < 0.0)
+    let _ = centroid;
+    Some(score < 0.0)
 }
 
 fn commands(s: &mut Session, _p: &Value) -> Result<Value> {
