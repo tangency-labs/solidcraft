@@ -26,15 +26,18 @@
 //! | `RemoveUv`      | - | `-2 \| status curve*n_eu` (`RemoveUVTrimCurves`) |
 //! | `SwapUv`        | - | `-2 \| status domain orientation curve*n_eu` (`SwapUV`) |
 //! | `Shrink`        | - | `status domain (surface_domain \| -1)` (`ShrinkGeometry`) |
-//! | `MoveSeam`      | `props crossed missing near closed_u closed_v center split` | `-2 \| -3 \| -4 \| seam status res_u res_v n_faces n_edges n_vertices` |
-//! | `SplitAtSeam`   | as `MoveSeam` | `-2 \| -3 \| -4 \| seam status n_faces n_edges n_vertices` |
+//! | `MoveSeam`      | `props crossed missing near closed_u closed_v center split` | `-2 \| -3 \| -4 \| seam status res_u res_v n_faces n_edges n_vertices owners` |
+//! | `SplitAtSeam`   | as `MoveSeam` | `-2 \| -3 \| -4 \| seam status n_faces n_edges n_vertices owners` |
 //! | `DeleteInnerLoop` | `attributed n l0 l1 l2 l3` (`n` loops, the rest `-1`) | `-2 \| status*n after` (`DeleteInnerLoop` of each loop in turn) |
 //!
 //! The seam ops classify the face's seams with `HasSeamProblem` first, record what it
 //! found (`seam` = `has crossed missing near_miss class_u class_v`, a class being
 //! `tgt_only n mid_class*n`) and pass its classifications and enums on; with `props` an `SmFaceProps` carrying the given
 //! `m_eBadCrossedSeam`, `m_eBadMissingSeam`, `m_eBadNearMissSeam` (`SmSurfParamType`
-//! values) and `m_bClosedU` / `m_bClosedV` (`SmBoolean`) is passed too.
+//! values) and `m_bClosedU` / `m_bClosedV` (`SmBoolean`) is passed too. `owners` counts the
+//! B-rep's geometry owners after the call, for the faces' surfaces, the edges' curves and
+//! the edge uses' UV trim curves in turn (an entity without one skipped): `n own none
+//! other` each, owned by its face (edge, edge use), by nothing, by another object.
 //!
 //! `DeleteInnerLoop` deletes `n` (1 to 4) distinct loops (traversal indices) one after
 //! another; `-2` when the face has no loop or a loop lacks a loop use or its mate (upstream

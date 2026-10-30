@@ -1181,11 +1181,8 @@ fn eu_state(k: &Kernel, b: &Brep, eu: EdgeuseId, out: &mut Vec<f64>) -> Result<(
     out.push(1.0);
     let r = b.edgeuse(eu)?;
     curve_id(k, r.uv_trim_curve.as_ref(), out);
-    out.push(if r.uv_trim_curve.is_some() {
-        f64::from(eu.index())
-    } else {
-        -1.0
-    });
+    // the curve's owner, as the shim's `g.find(6, uv->GetOwner())`
+    out.push(crate::own_builder::uv_owner_index(b, eu, None));
     match r.drop_curve_fail.as_deref() {
         Some(f) => out.extend([1.0, f64::from(f.fail_status), flag(f.brep.is_some())]),
         None => out.extend([0.0, 0.0, 0.0]),
@@ -1271,7 +1268,7 @@ fn idx<I: solidcore::topology::ArenaId>(id: Option<I>) -> f64 {
 /// shim's graph order, and the shim re-walks the healed B-rep, so the two agree while
 /// the heal leaves the topology lists as they are; a step that reorders or adds records
 /// shows up as a disagreement, never as a silent pass.
-fn put_healed(k: &Kernel, b: &Brep, types: &ImportTypes, o: &mut Vec<f64>) -> Result<(), Fail> {
+fn put_healed(k: &Kernel, b: &Brep, o: &mut Vec<f64>) -> Result<(), Fail> {
     o.push(idx(b.infinite_region()));
     o.push(flag(b.editing_enabled()));
     o.push(b.this_model_size_estimate(k, false));
@@ -1313,19 +1310,15 @@ fn put_healed(k: &Kernel, b: &Brep, types: &ImportTypes, o: &mut Vec<f64>) -> Re
         ]);
         o.extend(ids(&fu.loopuses));
     }
-    for (id, f) in b.faces().iter() {
+    for (_, f) in b.faces().iter() {
         match f.surface.as_ref() {
             Some(s) => put_surface(o, s)?,
             None => o.push(-1.0),
         }
         let d = &f.uv_domain;
         o.extend([d.min().x, d.min().y, d.max().x, d.max().y, f.tolerance]);
-        o.push(
-            types
-                .face_surface_types
-                .get(id.index() as usize)
-                .map_or(-1.0, |&t| t as f64),
-        );
+        // `GetSurface()->GetType()` of the Rust surface itself (the shim's value)
+        o.push(f.surface.as_ref().map_or(-1.0, |s| s.type_code() as f64));
     }
     for (_, lu) in b.loopuses().iter() {
         o.extend([idx(lu.faceuse), idx(lu.loop_), idx(lu.mate)]);
@@ -1362,15 +1355,11 @@ fn put_healed(k: &Kernel, b: &Brep, types: &ImportTypes, o: &mut Vec<f64>) -> Re
             flag(eu.edge_ccw_edge_gap.is_init()),
         ]);
     }
-    for (id, e) in b.edges().iter() {
+    for (_, e) in b.edges().iter() {
         o.extend([e.tolerance, e.interval.min(), e.interval.max()]);
         o.extend(ids(&e.edgeuses));
-        o.push(
-            types
-                .edge_curve_types
-                .get(id.index() as usize)
-                .map_or(-1.0, |&t| t as f64),
-        );
+        // `GetCurve()->GetType()` of the Rust curve itself (the shim's value)
+        o.push(e.curve.as_ref().map_or(-1.0, |c| c.type_code() as f64));
         curve_id(k, e.curve.as_ref(), o);
     }
     for (_, vu) in b.vertexuses().iter() {
@@ -1801,7 +1790,7 @@ fn run_rust_op(
             let d = b.face(f)?.uv_domain;
             o.extend([d.min().x, d.min().y, d.max().x, d.max().y]);
             if swaps {
-                put_healed(k, b, types, &mut o)?;
+                put_healed(k, b, &mut o)?;
             }
         }
         OpIn::CheckUv { eu } => {
@@ -2165,7 +2154,7 @@ fn run_rust_op(
                 return Ok(Err(d));
             }
             o.push(0.0);
-            put_healed(k, b, types, &mut o)?;
+            put_healed(k, b, &mut o)?;
         }
     }
     Ok(Ok(o))
@@ -2205,8 +2194,8 @@ fn run_rust(i: &Inputs) -> Result<Output, HarnessError> {
 
 /// The Rust B-rep of the case, its geometry types and entity counts, or the output of
 /// a failed build: shim-built sources are built by the Rust kernel
-/// ([`crate::own_builder`]); only `.smb` file sources are still imported from this
-/// unit's export.
+/// ([`crate::own_builder`]); `.smb` file sources are read by the Rust reader
+/// ([`crate::own_reader::brep_in_order`]).
 fn rust_brep(
     k: &mut Kernel,
     i: &Inputs,
@@ -2232,12 +2221,24 @@ fn rust_brep(
             )))),
         },
         None => {
-            let ex = export(i)?;
-            let Some((c, graph_at)) = ffi::counts(&ex) else {
-                return Ok(Err(build_failure(&ex)));
-            };
-            let (b, types) = import(&ex, graph_at)?;
-            Ok(Ok((b, types, c)))
+            // an `.smb` file: the Rust reader's B-rep in the shim's traversal order, its
+            // geometry owned as the Rust reader owns it (no C++ export reaches the Rust
+            // side)
+            let conv = &crate::own_builder::Conventions::EDGEUSE_GRAPH;
+            match crate::own_reader::brep_in_order(k, src, i.validate_only, i.init_gaps, conv)? {
+                Built::Brep(b) => {
+                    let b = *b;
+                    let c = counts(&b);
+                    Ok(Ok((b, ImportTypes::default(), c)))
+                }
+                Built::Failed(e) => match Output::unported(&e) {
+                    Some(o) => Ok(Err(o)),
+                    None => Ok(Err(Output::err(format!(
+                        "brep_build_status_{}",
+                        build_status(&e)
+                    )))),
+                },
+            }
         }
     }
 }

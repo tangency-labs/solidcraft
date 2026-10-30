@@ -249,6 +249,13 @@ void run(int32_t op, Graph& g, const double* a, std::vector<double>& o)
         put_eu_state(o, g);
         for (SmEdgeuse* eu : g.edgeuses)
             sc_trim_curve::put_trim_curve(o, eu->*EuPeek::uv());
+        // each UV trim curve's owner (the curves handed back are matched to edge uses
+        // again): the edge use it names, -1 for none, -3 for an owner that is no edge use
+        for (SmEdgeuse* eu : g.edgeuses)
+        {
+            SmBSplineCurve* c = eu->*EuPeek::uv();
+            o.push_back(c ? (double)g.find(6, c->GetOwner()) : -1.0);
+        }
         break;
     }
     case P3_INTERSECT:

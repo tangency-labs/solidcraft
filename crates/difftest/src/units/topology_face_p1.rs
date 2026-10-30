@@ -26,6 +26,13 @@
 //! that follows defers: the caller's classification geometry here cannot borrow the
 //! B-rep the call mutates, so its merges resolve no topology (`plan/findings.md`).
 //!
+//! After a seam op both sides also count the B-rep's geometry owners (`owners`, the ffi
+//! module): how many faces' surfaces, edges' curves and edge uses' UV trim curves are owned
+//! by their own entity, by nothing or by another object. Counted, so the two sides'
+//! numbering of the faces and edges the op made does not matter; each side reads its own
+//! B-rep (the Rust side resolves an owner key with `own_builder::resolve_owner`, or as
+//! this runner's own [`key_of`] names the entity).
+//!
 //! Deferred: the cone `TrimWithDomain` callbacks of `ShrinkGeometry`
 //! (`surface.surface_p2`), and the `MoveSeam` splits past the recomputed seam problem
 //! (merges whose handles the geometry cannot resolve). Rejected: the seam calls the C++ crash trap (below) catches.
@@ -714,6 +721,59 @@ fn ok_round_trip(b: &Brep, f: FaceId, l: LoopId) -> Result<bool, SolidError> {
     Ok(true)
 }
 
+/// The shim's `fp1_put_owners`: for the faces' surfaces, the edges' curves and the edge
+/// uses' UV trim curves of `b` (reached from its faces and edges; an entity without one
+/// skipped), `n own none other`. An owner is the entity's own when it is the entity's
+/// [`key_of`] or names it under the harness identities (`own_builder::resolve_owner`,
+/// with `b`'s notify serial `serial`).
+fn put_owners(o: &mut Vec<f64>, b: &Brep, serial: u64) -> Result<(), SolidError> {
+    let class = |owner: Option<ObjectRef>, own: EntityRef| match owner {
+        None => 1,
+        Some(r) if r == key_of(own) => 0,
+        Some(r) => {
+            if crate::own_builder::resolve_owner(b, r, Some(serial), own) == Some(own) {
+                0
+            } else {
+                2
+            }
+        }
+    };
+    let mut put = |classes: Vec<usize>| {
+        let mut counts = [0.0; 3];
+        for c in &classes {
+            if let Some(n) = counts.get_mut(*c) {
+                *n += 1.0;
+            }
+        }
+        o.push(classes.len() as f64);
+        o.extend(counts);
+    };
+    let faces = solidcore::topology::brep::p1::faces(b, None)?;
+    let edges = solidcore::topology::brep::p1::edges(b, None)?;
+    let mut surfaces = Vec::new();
+    for &f in &faces {
+        if let Some(srf) = b.face(f)?.surface.as_ref() {
+            surfaces.push(class(srf.owner(), EntityRef::Face(f)));
+        }
+    }
+    let mut curves = Vec::new();
+    let mut uvs = Vec::new();
+    for &x in &edges {
+        if let Some(c) = b.edge(x)?.curve.as_ref() {
+            curves.push(class(c.owner(), EntityRef::Edge(x)));
+        }
+        for eu in solidcore::topology::edge::edgeuses(b, x, None, None)? {
+            if let Some(uv) = b.edgeuse(eu)?.uv_trim_curve.as_ref() {
+                uvs.push(class(uv.owner(), EntityRef::Edgeuse(eu)));
+            }
+        }
+    }
+    put(surfaces);
+    put(curves);
+    put(uvs);
+    Ok(())
+}
+
 /// `GetBrep() != NULL` as the shim checks it: the upward face use's shell reaches a B-rep.
 fn reaches_brep(b: &Brep, f: FaceId) -> Result<bool, SolidError> {
     let Some(fu) = b.face(f)?.faceuse else {
@@ -935,6 +995,9 @@ fn rust_record(i: &Inputs, mut b: Brep) -> Result<Vec<f64>, Fail> {
                 r.split.edges.len() as f64,
                 r.split.vertices.len() as f64,
             ]);
+            let serial =
+                solidcore::topology::brep::p3::notify_serial(&mut k.context, &mut b).map_err(e)?;
+            put_owners(&mut o, &b, serial).map_err(e)?;
         }
         OpIn::SplitAtSeam { props } => {
             let face = b.face(f).map_err(e)?;
@@ -961,6 +1024,9 @@ fn rust_record(i: &Inputs, mut b: Brep) -> Result<Vec<f64>, Fail> {
                 r.edges.len() as f64,
                 r.vertices.len() as f64,
             ]);
+            let serial =
+                solidcore::topology::brep::p3::notify_serial(&mut k.context, &mut b).map_err(e)?;
+            put_owners(&mut o, &b, serial).map_err(e)?;
         }
         OpIn::DeleteInnerLoop { loops, attributed } => {
             delete_inner_loop_record(&mut k, &mut b, f, loops, *attributed, &mut o)?;

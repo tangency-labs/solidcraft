@@ -26,8 +26,8 @@ use solidcore::{Result as SolidResult, SolidError};
 use solidcore_ffi::units::topology_brep_p5::{self as ffi, Op};
 use solidcore_ffi::FfiError;
 
-use super::boolean_merge_p1::graph;
-use super::topology_vertexuse::import_raw;
+use super::boolean_merge_p1::{graph_owned, OwnerSource};
+use super::topology_vertexuse::import_raw_with_owners;
 use crate::{Case, CaseContext, HarnessError, Output, Rng, UnitDiff};
 
 /// Part 5's runner.
@@ -638,7 +638,7 @@ impl UnitDiff for Runner {
             .get(1..=n)
             .ok_or_else(|| HarnessError::new("short record"))?
             .to_vec();
-        let (mut b, _) = import_raw(
+        let (mut b, owners) = import_raw_with_owners(
             raw.get(n + 1..)
                 .ok_or_else(|| HarnessError::new("short graph"))?,
         )?;
@@ -646,7 +646,7 @@ impl UnitDiff for Runner {
         // from the exported uses as the Rust B-rep holds them (the Rust side builds its
         // input itself, so its faces and loops have them)
         b.refresh_cached_topology();
-        Ok(graph(&b, record))
+        graph_owned(&b, record, OwnerSource::Native(&owners))
     }
     fn run_rust(&self, case: &Case) -> Result<Output, HarnessError> {
         let i: Inputs = case.parse()?;
@@ -672,7 +672,13 @@ impl UnitDiff for Runner {
             // a use or shell the edit unlinked stays in its arena (append-only records)
             // where upstream deletes it; [`graph`] compares only the records reachable
             // from the B-rep, as the native export walk emits only those
-            Ok(record) => Ok(graph(&b, record)),
+            Ok(record) => {
+                // (the serial plain edits and `bind_transform_owners` name geometry under)
+                let serial =
+                    solidcore::topology::brep::p3::notify_serial(&mut kernel.context, &mut b)
+                        .map_err(|e| HarnessError::new(e.to_string()))?;
+                graph_owned(&b, record, OwnerSource::Rust { serial: Some(serial) })
+            }
             Err(e) => Output::unported(&e).ok_or_else(|| HarnessError::new(e.to_string())),
         }
     }

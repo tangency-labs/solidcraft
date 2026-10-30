@@ -677,6 +677,8 @@ void export_graph(SmBrep* brep, Graph& g, std::vector<double>& o)
             v.push_back(g.find(6, t));
         put_list(o, v);
         sc_exact_curve_export::put_export_curve(o, p->GetCurve(), the_context(), put_curve);
+        // the curve's owner: the export index of the owning edge (-1 none, -3 any other object)
+        o.push_back(p->GetCurve() ? (double)g.find(7, p->GetCurve()->GetOwner()) : -1.0);
     }
     for (SmVertexuse* p : g.vertexuses)
     {

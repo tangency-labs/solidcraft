@@ -877,7 +877,8 @@ void tt_normalise(Graph& g)
     }
 }
 
-// Every edge use's own UV trim curve, in order.
+// Every edge use's own UV trim curve, in order, then each one's owner (the index of the
+// edge use it names, -1 for no curve or no owner, -3 for an owner that is no edge use).
 void tt_put_uv_curves(std::vector<double>& o, Graph& g)
 {
     o.push_back((double)g.edgeuses.size());
@@ -891,6 +892,11 @@ void tt_put_uv_curves(std::vector<double>& o, Graph& g)
             o.push_back((double)c->GetDim());
             tt_put_nurb(o, c);
         }
+    }
+    for (SmEdgeuse* p : g.edgeuses)
+    {
+        SmBSplineCurve* c = p->*EuPeek::uv();
+        o.push_back(c ? (double)g.find(6, c->GetOwner()) : -1.0);
     }
 }
 

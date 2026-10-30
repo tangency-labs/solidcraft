@@ -148,7 +148,8 @@ type CaseSetup = (Setup, Option<ffi::PreparedBrep>);
 
 /// The case's setup. `prepare` (the C++ side) also keeps the shim's prepared B-rep;
 /// without it (the Rust side) a shim-built source is built by the Rust kernel
-/// ([`crate::own_builder`]) and only an `.smb` file's graph export is imported.
+/// ([`crate::own_builder`]) and an `.smb` file is read by the Rust reader
+/// ([`crate::own_reader::brep_in_order`]); only the C++ side imports the graph export.
 fn setup(i: &Inputs, prepare: bool) -> Result<Result<CaseSetup, Output>, HarnessError> {
     use crate::own_builder::{build, counts, failed_output, Built};
     let path = path_of(Some(&i.brep))?;
@@ -175,7 +176,38 @@ fn setup(i: &Inputs, prepare: bool) -> Result<Result<CaseSetup, Output>, Harness
                 )));
             }
             Some(Built::Failed(e)) => return Ok(Err(failed_output(&e))),
-            None => {}
+            None => {
+                // an `.smb` file: the Rust reader's B-rep in the shim's traversal order,
+                // its geometry owned as the Rust reader owns it (no C++ export reaches
+                // the Rust side)
+                let conv = &crate::own_builder::Conventions::EDGEUSE_GRAPH;
+                let built = crate::own_reader::brep_in_order(
+                    &mut k,
+                    &i.brep,
+                    i.validate_only,
+                    i.init_gaps,
+                    conv,
+                )?;
+                let brep = match built {
+                    Built::Brep(b) => *b,
+                    Built::Failed(e) => return Ok(Err(failed_output(&e))),
+                };
+                let s = sel(i.op.eu(), counts(&brep)[6]);
+                if s < 0 {
+                    return Ok(Err(Output::err("no_entity_of_that_kind")));
+                }
+                let eu = EdgeuseId::from_index(u32::try_from(s).map_err(|_| harness("index"))?);
+                return Ok(Ok((
+                    Setup {
+                        path,
+                        block,
+                        brep,
+                        eu,
+                        types: ImportTypes::default(),
+                    },
+                    None,
+                )));
+            }
         }
     }
     let prepared = prepare
@@ -477,12 +509,8 @@ pub(super) fn put_eu_state(k: &Kernel, o: &mut Vec<f64>, b: &Brep, eu: Option<Ed
             }
         }
     }
-    // the curve's owner is the edge use holding it
-    o.push(if r.uv_trim_curve.is_some() {
-        f64::from(eu.index())
-    } else {
-        -1.0
-    });
+    // the curve's owner, as the shim's `g.find(6, uv->GetOwner())`
+    o.push(crate::own_builder::uv_owner_index(b, eu, None));
     let fail = r.drop_curve_fail.as_deref();
     o.push(flag(fail.is_some()));
     o.push(fail.map_or(0.0, |f| f64::from(f.fail_status)));

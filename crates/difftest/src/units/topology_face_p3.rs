@@ -1234,6 +1234,10 @@ fn run_rust_case(i: &Inputs) -> Result<Output, HarnessError> {
             for (_, eu) in b.edgeuses().iter() {
                 value!(put_trim_curve(&k, &mut out, eu.uv_trim_curve.as_ref()));
             }
+            // each UV trim curve's owner (the shim's `g.find(6, uv->GetOwner())`)
+            for (eu, _) in b.edgeuses().iter() {
+                out.push(crate::own_builder::uv_owner_index(&b, eu, None));
+            }
         }
         OpIn::Intersect { .. } => {
             let other = FaceId::from_index(a[1] as u32);

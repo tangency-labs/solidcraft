@@ -35,11 +35,9 @@ use solidcore::Result as SolidResult;
 use solidcore_ffi::units::topology_brep_local_operation::{self as ffi, Replacement};
 use solidcore_ffi::FfiError;
 
-use super::boolean_merge_p1::graph;
-use super::topology_brep_mirror::{
-    bind_owners, geometry, herr, normalize_face_shells, set_native_lists, status, FILES,
-};
-use super::topology_vertexuse::{import, import_raw, path_of, BrepIn};
+use super::boolean_merge_p1::{graph_owned, OwnerSource};
+use super::topology_brep_mirror::{geometry, herr, normalize_face_shells, status, FILES};
+use super::topology_vertexuse::{import_raw_with_owners, path_of, BrepIn};
 use crate::{Case, CaseContext, HarnessError, Output, Rng, UnitDiff};
 
 /// The runner of `SmBrep::LocalOperation`.
@@ -261,24 +259,24 @@ impl UnitDiff for Runner {
         };
         let n = *raw.first().ok_or_else(|| herr("short record"))? as usize;
         let record = raw.get(1..=n).ok_or_else(|| herr("short record"))?.to_vec();
-        let (mut b, _) = import_raw(raw.get(n + 1..).ok_or_else(|| herr("short graph"))?)?;
+        let (mut b, owners) =
+            import_raw_with_owners(raw.get(n + 1..).ok_or_else(|| herr("short graph"))?)?;
         strip_unrecorded(&mut b).map_err(herr)?;
         normalize_face_shells(&mut b).map_err(herr)?;
-        Ok(graph(&b, record))
+        graph_owned(&b, record, OwnerSource::Native(&owners))
     }
 
     fn run_rust(&self, case: &Case) -> Result<Output, HarnessError> {
         let i: Inputs = case.parse()?;
-        // the native side rejects the case: nothing is compared
-        let Ok(raw) = native(&i, 0)? else {
-            return Ok(Output::new());
-        };
-        let (mut b, _) = import(&raw)?;
-        // the native face and vertex list orders (the import orders them by the walk)
-        let lists = native(&i, 2)?.map_err(|_| herr("native lists"))?;
-        set_native_lists(&mut b, &lists)?;
         let mut k = Kernel::default();
-        bind_owners(&mut k, &mut b).map_err(herr)?;
+        // the Rust reader's B-rep of the same file, its geometry owners named by the
+        // Rust reader (no C++ export or owner reaches the Rust side)
+        let mut b = match crate::own_reader::read_file_rebuild(&mut k, &path(&i)?, i.rebuild)? {
+            Ok(b) => b,
+            Err(e) => {
+                return Output::unported(&e).ok_or_else(|| herr(format!("rust read: {e}")));
+            }
+        };
         let mut run = || -> SolidResult<Option<Vec<f64>>> {
             let Some((faces, surfaces)) = planes(&k, &b, &i)? else {
                 return Ok(None);
@@ -301,7 +299,10 @@ impl UnitDiff for Runner {
             Ok(Some(record)) => {
                 strip_unrecorded(&mut b).map_err(herr)?;
                 normalize_face_shells(&mut b).map_err(herr)?;
-                Ok(graph(&b, record))
+                // (the serial whose topology keys name the edit's new geometry)
+                let serial = solidcore::topology::brep::p3::notify_serial(&mut k.context, &mut b)
+                    .map_err(herr)?;
+                graph_owned(&b, record, OwnerSource::Rust { serial: Some(serial) })
             }
             Err(e) => Output::unported(&e).ok_or_else(|| herr(e)),
         }

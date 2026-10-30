@@ -618,6 +618,28 @@ pub(crate) fn import_raw(ex: &[f64]) -> Result<(Brep, Vec<bool>), HarnessError> 
 
 /// [`import_raw`], also with each face's exported surface subclass type code.
 pub(crate) fn import_raw_with_types(ex: &[f64]) -> Result<TypedImport, HarnessError> {
+    import_raw_owned(ex).map(|(t, _)| t)
+}
+
+/// The geometry owners a native export records, by imported index: per face whether
+/// its surface's owner is the face (`pSurface->GetOwner() == pFace`), per edge use the
+/// export index of the edge use owning its own UV trim curve, per edge the export index
+/// of the edge owning its curve (`-1`: no curve or no owner, `-3`: an owner outside the
+/// export's kind).
+#[derive(Debug, Clone, Default)]
+pub(crate) struct ImportOwners {
+    pub(crate) surface_owned: Vec<bool>,
+    pub(crate) uv_owner: Vec<f64>,
+    pub(crate) edge_owner: Vec<f64>,
+}
+
+/// [`import_raw`], also with the geometry owners the export records ([`ImportOwners`]).
+pub(crate) fn import_raw_with_owners(ex: &[f64]) -> Result<(Brep, ImportOwners), HarnessError> {
+    import_raw_owned(ex).map(|((b, _, _), owners)| (b, owners))
+}
+
+fn import_raw_owned(ex: &[f64]) -> Result<(TypedImport, ImportOwners), HarnessError> {
+    let mut owners = ImportOwners::default();
     let c = ffi::counts(ex).ok_or_else(|| harness("import of a failed build"))?;
     let [n_r, n_s, n_fu, n_f, n_lu, n_l, n_eu, n_e, n_vu, n_v] = c;
     let mut rd = Rd { v: ex, at: 1 };
@@ -680,6 +702,7 @@ pub(crate) fn import_raw_with_types(ex: &[f64]) -> Result<TypedImport, HarnessEr
         let rect = rd.idx()?;
         let tolerance = rd.num()?;
         let owned = rd.num()? != 0.0;
+        owners.surface_owned.push(owned);
         if owned {
             if let Some(s) = surface.as_mut() {
                 s.set_owner(Some(ObjectRef {
@@ -730,7 +753,8 @@ pub(crate) fn import_raw_with_types(ex: &[f64]) -> Result<TypedImport, HarnessEr
         let vertexuse = opt(rd.idx()?, VertexuseId::from_index)?;
         let orientation = orient_of(rd.idx()?)?;
         let uv_trim_curve = read_curve(&mut rd, true)?;
-        rd.idx()?; // the curve's owner: the holding edge use
+        // the curve's owner (normally the holding edge use)
+        owners.uv_owner.push(rd.num()?);
         let has_fail = rd.num()? != 0.0;
         let fail_status = rd.idx()?;
         let fail_brep = rd.num()? != 0.0;
@@ -780,6 +804,8 @@ pub(crate) fn import_raw_with_types(ex: &[f64]) -> Result<TypedImport, HarnessEr
             .map(|x| opt(x, EdgeuseId::from_index)?.ok_or_else(|| harness("null edge use")))
             .collect::<Result<Vec<_>, _>>()?;
         let curve = read_curve(&mut rd, false)?;
+        // the curve's owner (normally the edge)
+        owners.edge_owner.push(rd.num()?);
         let interval = Extent1d::from_raw(a, b);
         edges.push((tolerance, interval, list, curve));
     }
@@ -925,7 +951,7 @@ pub(crate) fn import_raw_with_types(ex: &[f64]) -> Result<TypedImport, HarnessEr
         b.add_vertexuse_record(vu)
             .map_err(|e| harness(e.to_string()))?;
     }
-    Ok((b, exact_faces, face_types))
+    Ok(((b, exact_faces, face_types), owners))
 }
 
 fn id<I: Copy>(o: Option<I>, f: impl Fn(I) -> u32) -> i64 {

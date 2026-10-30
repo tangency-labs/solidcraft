@@ -178,6 +178,125 @@ fn fixture_edge_owner(e: EdgeId) -> (ObjectRef, ObjectRef) {
     )
 }
 
+/// The entities of `b` an owner identity `r` can name, under every identity the
+/// harness's B-reps use, whatever naming scheme `b` records:
+/// - the notification identity (`loopuse::notify_ref`; `edgeuse::p1::owner_ref` under
+///   both the `Notify` and the `Arena` scheme, [`notify_edgeuse_owner`]):
+///   `(type, 1 + (kind << 32) + index)`;
+/// - the arena identity of a face or an edge (`arena_identity`);
+/// - the fixture identity ([`fixture_key`]);
+/// - the topology key of notify serial `serial` (`topology::brep::p3::topology_ref`).
+///
+/// (A `Caller` scheme's proven keys are reached through `p1::surfaces` / `p1::curves`
+/// for faces and edges; edge uses have no public resolver for them.)
+pub(crate) fn owner_candidates(b: &Brep, r: ObjectRef, serial: Option<u64>) -> Vec<EntityRef> {
+    use EntityRef as E;
+    let mut out = Vec::new();
+    if let Some(n) = serial {
+        if let Some(e) = solidcore::topology::brep::p3::topology_entity(n, r.key) {
+            if solidcore::topology::brep::p3::topology_ref(n, e) == r {
+                out.push(e);
+            }
+        }
+    }
+    // (type code, notify kind) of the kinds whose geometry has an owner
+    let kinds = [
+        (solidcore::topology::face::p2::TYPE, 4u64),
+        (eu1::TYPE, 7),
+        (solidcore::topology::edge::TYPE, 8),
+    ];
+    let entity = |kind: u64, i: u32| match kind {
+        4 => E::Face(FaceId::from_index(i)),
+        7 => E::Edgeuse(EdgeuseId::from_index(i)),
+        _ => E::Edge(EdgeId::from_index(i)),
+    };
+    let live = |e: E| match e {
+        E::Face(f) => b.face(f).is_ok(),
+        E::Edgeuse(eu) => b.edgeuse(eu).is_ok(),
+        E::Edge(x) => b.edge(x).is_ok(),
+        _ => false,
+    };
+    for (type_code, kind) in kinds {
+        if r.type_code != type_code {
+            continue;
+        }
+        let k = r.key.0;
+        let mut add = |e: E| {
+            if live(e) && !out.contains(&e) {
+                out.push(e);
+            }
+        };
+        // notify (`loopuse::notify_ref`): 1 + (kind << 32) + index
+        if k > kind << 32 && (k - 1) >> 32 == kind {
+            if let Ok(i) = u32::try_from((k - 1) & 0xffff_ffff) {
+                add(entity(kind, i));
+            }
+        }
+        // arena (`arena_identity`, faces and edges only: an edge use is named by its
+        // notification identity under the arena scheme too)
+        if let Ok(i) = u32::try_from(k) {
+            let e = entity(kind, i);
+            let o = match e {
+                E::Face(f) => Some(arena_identity(CacheObject::Face(f))),
+                E::Edge(x) => Some(arena_identity(CacheObject::Edge(x))),
+                _ => None,
+            };
+            if o == Some(r) {
+                add(e);
+            }
+        }
+        // fixture: a face `1 + index`, other kinds `(type << 32) | (1 + index)`
+        let fixture = if kind == 4 {
+            k.checked_sub(1)
+        } else if k >> 32 == type_code.unsigned_abs() {
+            (k & 0xffff_ffff).checked_sub(1)
+        } else {
+            None
+        };
+        if let Some(i) = fixture.and_then(|i| u32::try_from(i).ok()) {
+            if fixture_key(type_code, i) == r {
+                add(entity(kind, i));
+            }
+        }
+    }
+    out
+}
+
+/// The entity `r` names, preferring `own` (the object holding the geometry) when it is
+/// one of the candidates ([`owner_candidates`]); `None` when it names none or several.
+pub(crate) fn resolve_owner(
+    b: &Brep,
+    r: ObjectRef,
+    serial: Option<u64>,
+    own: EntityRef,
+) -> Option<EntityRef> {
+    let c = owner_candidates(b, r, serial);
+    if c.contains(&own) {
+        return Some(own);
+    }
+    match c.as_slice() {
+        [one] => Some(*one),
+        _ => None,
+    }
+}
+
+/// The shims' `g.find(6, uv->GetOwner())` of the UV trim curve `eu` holds, in arena
+/// numbering: the index of the edge use its owner names ([`resolve_owner`]), `-1` for
+/// no curve or no owner, `-3` for an owner that is no edge use of `b`.
+pub(crate) fn uv_owner_index(b: &Brep, eu: EdgeuseId, serial: Option<u64>) -> f64 {
+    let owner = b
+        .edgeuse(eu)
+        .ok()
+        .and_then(|x| x.uv_trim_curve.as_ref()?.owner());
+    match owner {
+        None => -1.0,
+        Some(r) => match resolve_owner(b, r, serial, EntityRef::Edgeuse(eu)) {
+            Some(EntityRef::Edgeuse(x)) => f64::from(x.index()),
+            _ => -3.0,
+        },
+    }
+}
+
 /// [`build_with`] for a runner's own source type: any value whose JSON has the shape
 /// of a [`BrepIn`] (the runners' `BrepIn` copies, `kind`-tagged).
 ///
@@ -1593,9 +1712,14 @@ fn renumber_walk(src: &Brep, g: &Walk, conv: &Conventions<'_>) -> Result<Brep, H
     for &id in &g.edgeuses.items {
         let e = src.edgeuse(id).map_err(solid)?;
         // `SetUVTrimCurve`'s `SetOwner(holder)`: an owned UV trim curve is relabelled
-        // to its edge use's new id, as the face and edge geometry above
+        // to its edge use's new id, as the face and edge geometry above (ownership read
+        // on the source: `Curve::clone` is the copy constructor and drops the owner)
+        let owned = e
+            .uv_trim_curve
+            .as_ref()
+            .is_some_and(|x| x.owner().is_some());
         let mut uv_trim_curve = e.uv_trim_curve.clone();
-        if let Some(c) = uv_trim_curve.as_mut().filter(|c| c.owner().is_some()) {
+        if let Some(c) = uv_trim_curve.as_mut().filter(|_| owned) {
             let _ = c.set_owner(Some((conv.edgeuse_owner)(m.edgeuse(id)?)), None);
         }
         let mut max_edge_face_gap = e.max_edge_face_gap;

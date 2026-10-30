@@ -263,6 +263,43 @@ void fp1_put_split(std::vector<double>& o, SmTArray<SmFace*>& fs, SmTArray<SmEdg
     o.push_back((double)vs.GetSize());
 }
 
+// The geometry owners of brep b after a seam op, counted so that the two sides' numbering
+// of the entities the op made does not matter: for the faces' surfaces, the edges' curves
+// and the edge uses' UV trim curves (in that order; an entity without one is skipped),
+// `n own none other`: how many there are, owned by their face (edge, edge use), owned by
+// nothing, owned by another object.
+void fp1_put_owners(std::vector<double>& o, SmBrep* b)
+{
+    Graph g;
+    walk(b, g);
+    auto put = [&](const std::vector<std::pair<const SmObject*, const SmObject*>>& geom) {
+        double own = 0, none = 0, other = 0;
+        for (const auto& p : geom)
+        {
+            if (p.second == p.first)
+                own++;
+            else if (p.second == nullptr)
+                none++;
+            else
+                other++;
+        }
+        o.insert(o.end(), {(double)geom.size(), own, none, other});
+    };
+    std::vector<std::pair<const SmObject*, const SmObject*>> faces, edges, uvs;
+    for (SmFace* f : g.faces)
+        if (f->GetSurface() != nullptr)
+            faces.push_back({f, f->GetSurface()->GetOwner()});
+    for (SmEdge* e : g.edges)
+        if (e->GetCurve() != nullptr)
+            edges.push_back({e, e->GetCurve()->GetOwner()});
+    for (SmEdgeuse* p : g.edgeuses)
+        if (SmBSplineCurve* uv = p->*EuPeek::uv())
+            uvs.push_back({p, uv->GetOwner()});
+    put(faces);
+    put(edges);
+    put(uvs);
+}
+
 // The number of op arguments after the face selector.
 // DeleteInnerLoop's attributes (`attributed`): every face, loop, edge, vertex and use gets
 // its own SM_AB_COPY attribute (FP1_ATTR_BASE + kind * FP1_ATTR_STRIDE + traversal
@@ -677,6 +714,7 @@ void fp1_brep_op(int32_t op, Rd& rd, const char* path, std::vector<double>& o)
                 to.push_back(st(f->SplitAtSeam(cu, cv, c, m, n, &fs, &es, &vs, pp)));
             }
             fp1_put_split(to, fs, es, vs);
+            fp1_put_owners(to, built.brep);
         });
         break;
     }

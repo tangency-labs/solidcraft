@@ -536,6 +536,153 @@ impl Canon {
             + self.vertices.items.len()
     }
 }
+/// Where [`owners`] reads the geometry owners from.
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum OwnerSource<'a> {
+    /// The owners a native export recorded, by imported index.
+    Native(&'a super::topology_vertexuse::ImportOwners),
+    /// The B-rep's own geometry, resolved under the identities the harness's B-reps
+    /// use; `serial` is the notify serial whose topology keys name its objects, if any.
+    Rust { serial: Option<u64> },
+}
+
+/// The geometry owners of `b` in the reachable walk's numbering ([`Canon::reachable`],
+/// the order of [`graph`]), as three value arrays:
+/// - `surface_owners`, per face: `1` when its surface is owned by the face
+///   (`pSurface->GetOwner() == pFace`), else `0` (the native export records only that);
+/// - `edge_curve_owners`, per edge: the number of the edge its curve's owner is, `-1`
+///   without curve or owner, `-3` for an owner that is no edge of the walk;
+/// - `uv_curve_owners`, per edge use: the number of the edge use its own UV trim
+///   curve's owner is, `-1` without curve or owner, `-3` for any other owner.
+///
+/// For a Rust B-rep a surface (a curve) counts as owned by its face (edge) when
+/// `topology::brep::p1::surfaces` (`curves`) lists it; otherwise its owner is resolved
+/// under every identity of [`owner_candidates`](crate::own_builder::owner_candidates).
+pub(crate) fn owners(b: &Brep, src: OwnerSource<'_>) -> Result<[Vec<f64>; 3], HarnessError> {
+    use crate::own_builder::resolve_owner;
+    use solidcore::EntityRef as E;
+    let c = Canon::reachable(b);
+    let flag = |x: bool| if x { 1.0 } else { 0.0 };
+    match src {
+        OwnerSource::Native(o) => {
+            let faces = c
+                .faces
+                .items
+                .iter()
+                .map(|f| {
+                    o.surface_owned
+                        .get(f.index() as usize)
+                        .map(|&x| flag(x))
+                        .ok_or_else(|| HarnessError::new("face owner index"))
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            let edges = c
+                .edges
+                .items
+                .iter()
+                .map(|e| {
+                    o.edge_owner
+                        .get(e.index() as usize)
+                        .map(|&x| c.edges.of_slot(x))
+                        .ok_or_else(|| HarnessError::new("edge owner index"))
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            let uses = c
+                .edgeuses
+                .items
+                .iter()
+                .map(|&eu| {
+                    // a UV trim curve the runner dropped from the import (a cache it
+                    // does not compare) has no owner to compare either
+                    if b.edgeuse(eu).ok().and_then(|x| x.uv_trim_curve.as_ref()).is_none() {
+                        return Ok(-1.0);
+                    }
+                    o.uv_owner
+                        .get(eu.index() as usize)
+                        .map(|&x| c.edgeuses.of_slot(x))
+                        .ok_or_else(|| HarnessError::new("UV owner index"))
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            Ok([faces, edges, uses])
+        }
+        OwnerSource::Rust { serial } => {
+            // (a face without surface makes GetSurfaces fail; the resolution still applies)
+            let listed = solidcore::topology::brep::p1::surfaces(b, None).unwrap_or_default();
+            let faces = c
+                .faces
+                .items
+                .iter()
+                .map(|&f| {
+                    let s = b.face(f).ok().and_then(|x| x.surface.as_ref());
+                    flag(s.is_some_and(|s| {
+                        listed.iter().any(|o| std::ptr::eq(*o, s))
+                            || s.owner().is_some_and(|r| {
+                                resolve_owner(b, r, serial, E::Face(f)) == Some(E::Face(f))
+                            })
+                    }))
+                })
+                .collect();
+            // (the default_edge_owner analog: the recorded naming scheme and proven keys)
+            let listed_curves =
+                solidcore::topology::brep::p1::curves(b, None).unwrap_or_default();
+            let edges = c
+                .edges
+                .items
+                .iter()
+                .map(|&e| {
+                    let curve = b.edge(e).ok().and_then(|x| x.curve.as_ref());
+                    let listed = |cv: &solidcore::curve::curve::Curve| {
+                        listed_curves.iter().any(|o| std::ptr::eq(*o, cv))
+                    };
+                    if curve.is_some_and(listed) {
+                        return c.edges.of(Some(e)) as f64;
+                    }
+                    let owner = curve.and_then(solidcore::curve::curve::Curve::owner);
+                    match owner {
+                        None => -1.0,
+                        Some(r) => match resolve_owner(b, r, serial, E::Edge(e)) {
+                            Some(E::Edge(x)) => c.edges.of(Some(x)) as f64,
+                            _ => -3.0,
+                        },
+                    }
+                })
+                .collect();
+            let uses = c
+                .edgeuses
+                .items
+                .iter()
+                .map(|&eu| {
+                    let owner = b
+                        .edgeuse(eu)
+                        .ok()
+                        .and_then(|x| x.uv_trim_curve.as_ref()?.owner());
+                    match owner {
+                        None => -1.0,
+                        Some(r) => match resolve_owner(b, r, serial, E::Edgeuse(eu)) {
+                            Some(E::Edgeuse(x)) => c.edgeuses.of(Some(x)) as f64,
+                            _ => -3.0,
+                        },
+                    }
+                })
+                .collect();
+            Ok([faces, edges, uses])
+        }
+    }
+}
+
+/// [`graph`] with the geometry owners of [`owners`].
+pub(crate) fn graph_owned(
+    b: &Brep,
+    record: Vec<f64>,
+    src: OwnerSource<'_>,
+) -> Result<Output, HarnessError> {
+    let [faces, edges, uses] = owners(b, src)?;
+    Ok(graph(b, record)
+        .values("surface_owners", faces)
+        .values("edge_curve_owners", edges)
+        .values("uv_curve_owners", uses))
+}
+
 /// The B-rep's records and links in [`Canon`] numbering, after `record` (which the
 /// caller has already put in that numbering, see [`Canon::of`]).
 pub(crate) fn graph(b: &Brep, record: Vec<f64>) -> Output {

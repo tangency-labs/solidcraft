@@ -1809,7 +1809,8 @@ fn put_reports(o: &mut Vec<f64>, a: &AssertArray) {
     o.push(flag(a.last_add()));
 }
 
-/// The shim's `tt_put_uv_curves`.
+/// The shim's `tt_put_uv_curves`: every edge use's UV trim curve, then each one's owner
+/// (the shim's `g.find(6, uv->GetOwner())`, [`crate::own_builder::uv_owner_index`]).
 fn put_uv_curves(o: &mut Vec<f64>, b: &Brep) {
     o.push(b.edgeuses().len() as f64);
     for (_, r) in b.edgeuses().iter() {
@@ -1820,6 +1821,9 @@ fn put_uv_curves(o: &mut Vec<f64>, b: &Brep) {
                 put_nurb(o, c);
             }
         }
+    }
+    for (eu, _) in b.edgeuses().iter() {
+        o.push(crate::own_builder::uv_owner_index(b, eu, None));
     }
 }
 
@@ -2142,6 +2146,11 @@ fn run_rust(i: &OpIn) -> Result<Output, HarnessError> {
             let Some(op) = resolve_op(i, counts(&b)) else {
                 return Ok(Output::err("no_entity_of_that_kind"));
             };
+            // the renumbered B-rep records no naming scheme, under which `SetUVTrimCurve`
+            // leaves a new UV trim curve without owner; upstream always owns it by its
+            // holder (`pUVTrimCurve->SetOwner(eu)`), so name the op's new curves by arena
+            // identity
+            b.set_naming(solidcore::topology::NamingScheme::Arena);
             run_rust_brep(&mut k, &mut b, &op)
         }
         Some(brep) => {
