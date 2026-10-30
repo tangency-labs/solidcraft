@@ -736,6 +736,36 @@ pub(crate) fn hostile_values() -> Vec<Value> {
     ]
 }
 
+/// A copy of `s` as it stands: its design and model (sharing their bodies, as undo does), its
+/// undo and redo, its open sketch and the design it was entered from, and its log.
+fn copy_with_history(s: &Session) -> Session {
+    Session { undo: s.undo.clone(), redo: s.redo.clone(), sketch_entry: s.sketch_entry.clone(), log: s.log.clone(), ..s.scratch() }
+}
+
+/// The hostile-parameter test's copy starts where a session built afresh stands: cancelling its
+/// sketch and undoing step for step give the same designs, and the copied session is untouched.
+#[test]
+fn a_copy_with_history_undoes_like_the_session_it_copies() {
+    let start = |s: &mut Session| {
+        run(s, "solid.box", json!({"length": 10, "width": 10, "height": 10}));
+        run(s, "sketch.create", json!({"plane": "XY"}));
+        run(s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [5, 5]}));
+    };
+    let mut fresh = Session::default();
+    start(&mut fresh);
+    let mut original = Session::default();
+    start(&mut original);
+    let before = original.doc.clone();
+    let mut copy = copy_with_history(&original);
+    for (command, params) in [("sketch.cancel", json!({})), ("edit.undo", json!({})), ("edit.undo", json!({})), ("edit.redo", json!({}))] {
+        run(&mut fresh, command, params.clone());
+        run(&mut copy, command, params);
+        assert_eq!(*fresh.doc, *copy.doc, "{command}");
+        assert_eq!(fresh.active_sketch, copy.active_sketch, "{command}");
+    }
+    assert!(std::sync::Arc::ptr_eq(&original.doc, &before) && original.active_sketch.is_some(), "the copied session is untouched");
+}
+
 /// Every command, every parameter name it documents, every hostile value: no panic escapes and
 /// no command panics internally.
 #[test]
@@ -880,16 +910,20 @@ fn hostile_params_never_panic() {
                 scope.spawn(|| {
                     let mut internal = Vec::new();
                     while let Some(&id) = ids.get(next.fetch_add(1, std::sync::atomic::Ordering::Relaxed)) {
+                        // A model with a sketch, a body and an active sketch, so most commands get far.
+                        // Built once per command and copied for each call: SMLib serialises every
+                        // call behind one lock, so building the box for each of the ~3000 calls
+                        // ran one after another on every thread (over half an hour in CI).
+                        let mut start = Session::default();
+                        let _ = start.execute("solid.box", &json!({"length": 10, "width": 10, "height": 10}));
+                        let _ = start.execute("sketch.create", &json!({"plane": "XY"}));
+                        let _ = start.execute("sketch.rectangle.two_point", &json!({"p0": [0, 0], "p1": [5, 5]}));
                         for v in hostile_values() {
                             for k in keys {
                                 if k == "path" && (id.starts_with("parameters.") || id == "timeline.export_script") {
                                     continue; // parameter and script files: covered by their own tests (no stray files)
                                 }
-                                let mut s = Session::default();
-                                // A model with a sketch, a body and an active sketch, so most commands get far.
-                                let _ = s.execute("solid.box", &json!({"length": 10, "width": 10, "height": 10}));
-                                let _ = s.execute("sketch.create", &json!({"plane": "XY"}));
-                                let _ = s.execute("sketch.rectangle.two_point", &json!({"p0": [0, 0], "p1": [5, 5]}));
+                                let mut s = copy_with_history(&start);
                                 let p = json!({ k: v.clone() });
                                 if let Err(EngineError::Internal(id, msg)) = s.execute(id, &p) {
                                     internal.push(format!("{id} {p}: {msg}"));

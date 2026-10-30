@@ -68,13 +68,8 @@ pub fn encode_native_body(body: &Body) -> Result<Vec<u8>> {
         let saved = SavedBody { solid: body.record().clone(), metadata: metadata::encode(body)?, runtime };
         // Structural validation does not invoke another geometric reconstruction.
         validate_topology(&saved)?;
-        let value = serde_json::to_value(saved).map_err(invalid)?;
-        validate_value(&value, 0)?;
-        if value_nodes(&value) > MAX_VALUES {
-            return Err(invalid("value budget"));
-        }
         let mut out = MAGIC.to_vec();
-        binary::write(&value, &mut out, 0)?;
+        binary::write_serialized(&saved, &mut out)?;
         Ok(out)
     })
 }
@@ -275,6 +270,8 @@ fn validate_value(v: &Value, depth: usize) -> Result<()> {
     Ok(())
 }
 
+/// How many values `v` is (a collection and each of its items): [`MAX_VALUES`] at most.
+#[cfg(test)]
 fn value_nodes(v: &Value) -> usize {
     match v {
         Value::Array(a) => a.iter().fold(1usize, |n, v| n.saturating_add(value_nodes(v))),
@@ -335,6 +332,63 @@ mod tests {
             if !body.is_surface() {
                 equal(&body, &restored);
             }
+        }
+    }
+
+    /// The encoding as it was made before the encoder wrote as it serialized: the whole record as
+    /// a JSON value, checked, then written.
+    fn encoded_through_a_value(body: &Body) -> Result<Vec<u8>> {
+        let runtime = Runtime { size: body.size, coarse_missing: None };
+        let saved = SavedBody { solid: body.record().clone(), metadata: metadata::encode(body)?, runtime };
+        validate_topology(&saved)?;
+        let value = serde_json::to_value(saved).map_err(invalid)?;
+        validate_value(&value, 0)?;
+        if value_nodes(&value) > MAX_VALUES {
+            return Err(invalid("value budget"));
+        }
+        let mut out = MAGIC.to_vec();
+        binary::write(&value, &mut out, 0)?;
+        Ok(out)
+    }
+
+    /// Written as it serializes, a body's encoding is the bytes its JSON value gave, byte for
+    /// byte: plain, blended, cut (history), extruded (face sources), coloured, painted, split
+    /// along lines, round (spline forms), open, and placed far off.
+    #[test]
+    fn the_encoding_is_the_bytes_of_the_record_as_a_json_value() {
+        use solidcraft_geom::{Loop2, Plane, Region2, Vec2};
+        let cube = crate::box_solid(Vec3::ZERO, Vec3::new(40., 30., 10.)).unwrap();
+        let rounded = crate::fillet(&cube, &[Vec3::new(20., 0., 10.)], 2.).unwrap();
+        let bore = crate::cylinder(Vec3::new(10., 10., -1.), Vec3::Z, 3., 12.).unwrap();
+        let cut = crate::boolean(&rounded, &bore, crate::BoolOp::Cut).unwrap().unwrap();
+        let region = Region2 {
+            outer: Loop2::polygon(&[Vec2::ZERO, Vec2::new(20., 0.), Vec2::new(20., 20.), Vec2::new(0., 20.)]),
+            holes: vec![Loop2::circle(Vec2::new(10., 10.), 4.)],
+        };
+        let extruded = crate::extrude(&Plane::XY, &[region], 0., 5.).unwrap().remove(0);
+        assert!(extruded.face_sources().is_some_and(|s| s.iter().any(Option::is_some)), "an extrusion carries its face sources");
+        assert!(cut.history().is_some(), "a cut carries its history");
+        let paint = crate::Paint { opacity: 0.5, faces: vec![crate::FacePaint { face: 1, color: [0.9, 0.1, 0.2], opacity: 0.75 }] };
+        let painted = cube.clone().with_color(Some([0.1, 0.5, 0.9])).with_paint(Some(paint));
+        let top = (0..cube.face_count()).find(|f| cube.planar_face(*f).is_some_and(|p| p.normal().z > 0.5 && p.origin.z > 9.)).unwrap();
+        let split =
+            crate::split_faces(&cube, &[top], &crate::SplitTool::Plane(Plane::from_normal(Vec3::new(20., 0., 0.), Vec3::X).unwrap())).unwrap();
+        let surface = crate::copy_faces(&cube, &[Vec3::new(20., 15., 10.)]).unwrap();
+        let far = crate::transform(&cut, Vec3::new(1.0e6, -2.5e5, 3.0e4), Vec3::ZERO, Vec3::Z, 0.7).unwrap();
+        let bodies = [
+            cube,
+            rounded,
+            cut,
+            extruded,
+            painted,
+            split,
+            surface,
+            crate::sphere(Vec3::ZERO, 12.).unwrap(),
+            crate::torus(Vec3::ZERO, 20., 4.).unwrap(),
+            far,
+        ];
+        for (i, body) in bodies.iter().enumerate() {
+            assert_eq!(encode_native_body(body).unwrap(), encoded_through_a_value(body).unwrap(), "body {i}");
         }
     }
 
