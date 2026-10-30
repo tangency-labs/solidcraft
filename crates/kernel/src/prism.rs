@@ -260,13 +260,22 @@ mod sheets {
                 let mid = hole.segs.first().map(|s| s.point_at(0.5)).ok_or_else(|| failed("face", format!("face {f} has an empty loop")))?;
                 let owner = out[first..]
                     .iter_mut()
-                    .filter(|r| r.outer.contains(mid))
+                    .filter(|r| holds(&r.outer, mid))
                     .min_by(|a, b| a.outer.signed_area().total_cmp(&b.outer.signed_area()))
                     .ok_or_else(|| failed("face", format!("face {f} has a hole outside its material")))?;
                 owner.holes.push(hole);
             }
         }
         Ok(Regions { regions: out, touching })
+    }
+
+    /// Whether the loop `outer` holds `p`: even-odd against its polyline within a quarter of
+    /// `p`'s distance from it, so the polyline's chords cannot pass `p` by (a loop's own
+    /// [`Loop2::contains`] reads it within 1e-3 mm, and a hole closer than that to an arc of the
+    /// outline was taken for one outside it, a chord cutting it off).
+    fn holds(outer: &Loop2, p: Vec2) -> bool {
+        let d = outer.segs.iter().map(|s| s.point_at(s.closest_param(p)).dist(p)).fold(f64::INFINITY, f64::min);
+        outer.polyline((d * 0.25).clamp(1e-9, 1e-3)).contains(p)
     }
 
     /// The natural normal of a planar surface record.
