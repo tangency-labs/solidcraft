@@ -11,7 +11,9 @@
 //! * `{"$pts": "Points.pts"}` → `[[x,y,z], ...]` read from
 //!   `upstream/TestFiles/pt_TestFiles/Points.pts`;
 //! * `{"$upstream_file": "Boolean/a.smb"}` → absolute path string of that file
-//!   (for runners whose C++ side reads the file directly).
+//!   (for runners whose C++ side reads the file directly);
+//! * `{"$repo_file": "fixtures/<unit>/data/a.smb"}` → absolute path string of that
+//!   file under `fixtures/` (an input generated for a case, read by both sides).
 
 #[cfg(feature = "cpp")]
 pub(crate) mod regions;
@@ -42,6 +44,25 @@ pub fn upstream_test_file(root: &Path, rel: &str) -> Result<PathBuf, HarnessErro
     } else {
         Err(HarnessError::new(format!(
             "upstream test file not found: {}",
+            p.display()
+        )))
+    }
+}
+
+/// Resolves and checks a file under the repository's `fixtures/` directory (`rel` is
+/// relative to the repository root and starts with `fixtures/`).
+pub fn repo_fixture_file(root: &Path, rel: &str) -> Result<PathBuf, HarnessError> {
+    if rel.split(['/', '\\']).any(|c| c == "..") || !rel.starts_with("fixtures/") {
+        return Err(HarnessError::new(format!(
+            "repo file `{rel}`: must be under `fixtures/` without `..`"
+        )));
+    }
+    let p = root.join(rel);
+    if p.is_file() {
+        Ok(p)
+    } else {
+        Err(HarnessError::new(format!(
+            "repo fixture file not found: {}",
             p.display()
         )))
     }
@@ -138,7 +159,7 @@ pub fn load_fixture_dir(root: &Path, unit: &str) -> Result<Vec<Case>, HarnessErr
     Ok(cases)
 }
 
-/// Expands the `$pts` / `$upstream_file` objects of a case's `inputs`, as
+/// Expands the `$pts` / `$upstream_file` / `$repo_file` objects of a case's `inputs`, as
 /// [`load_fixture_dir`] does (for case files kept outside `fixtures/`).
 pub fn expand_inputs(root: &Path, inputs: Value) -> Result<Value, HarnessError> {
     expand(root, inputs)
@@ -158,6 +179,10 @@ fn expand(root: &Path, v: Value) -> Result<Value, HarnessError> {
                 }
                 if let Some(Value::String(rel)) = o.get("$upstream_file") {
                     let p = upstream_test_file(root, rel)?;
+                    return Ok(Value::String(p.to_string_lossy().into_owned()));
+                }
+                if let Some(Value::String(rel)) = o.get("$repo_file") {
+                    let p = repo_fixture_file(root, rel)?;
                     return Ok(Value::String(p.to_string_lossy().into_owned()));
                 }
             }
@@ -189,5 +214,26 @@ mod tests {
         let pts = load_pts(&p).unwrap();
         assert_eq!(pts.len(), 12);
         assert_eq!(pts[0], [-11.0, 2.0, 0.0]);
+    }
+
+    #[test]
+    fn repo_file_key() {
+        let root = crate::case::repo_root();
+        let rel = "fixtures/offset.offset_executive_p2/data/issue1528_plate.smb";
+        let v = expand(&root, serde_json::json!({ "path": { "$repo_file": rel } })).unwrap();
+        assert_eq!(
+            v["path"],
+            Value::String(root.join(rel).to_string_lossy().into_owned())
+        );
+        for bad in [
+            "fixtures/../Cargo.toml",
+            "Cargo.toml",
+            "fixtures/offset.offset_executive_p2/data/absent.smb",
+        ] {
+            assert!(
+                expand(&root, serde_json::json!({ "$repo_file": bad })).is_err(),
+                "{bad}"
+            );
+        }
     }
 }
