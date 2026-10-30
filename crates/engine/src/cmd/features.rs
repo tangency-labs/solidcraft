@@ -1619,7 +1619,13 @@ fn press_pull(s: &mut Session, p: &Value) -> Result<Value> {
         }
         // Another curved face moves along its normal.
         let r = super::find_command("solid.offset_face").ok_or_else(|| bad(cmd, "solid.offset_face"))?;
-        return (r.run)(s, &json!({"faces": [face], "distance": distance}));
+        let mut q = json!({"faces": [face], "distance": distance});
+        // The face's body, when given, goes along: found by point alone, a face inside another
+        // part's box (a screw bore in a housing) can be looked for on that part instead.
+        if let Some(body) = p.get("body").filter(|b| b.is_string()) {
+            q["body"] = body.clone();
+        }
+        return (r.run)(s, &q);
     }
     // Pushed in: the extrude cuts the other way by as much (a bare number stays one, so it keeps
     // being read as a bare number typed into the extrude).
