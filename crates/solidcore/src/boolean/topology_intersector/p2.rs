@@ -62,6 +62,10 @@
 //!   pairs processed and their order are the same, and a join of two bodies of n faces
 //!   no longer walks all n^2 pairs to skip them. With an intersection table registered
 //!   every pair is still visited (its lookup copies curves before the box test).
+//! - **Opt-in (WR-528).** With `Kernel::fixes.close_loop_relates_only_coincident_edges`,
+//!   `CloseIntersectionLoop` relates the target edge to the sole other edge between the
+//!   mated vertices only when its midpoint drops within the edges' tolerance (the
+//!   fork's tangency-labs/smlib@e881cdb).
 //! - **Deleted curves.** `IntersectTopology` and `IntersectInsertRelate` return the
 //!   curve handles deleted (by `SplitIntersectingProtoEdges`, the resolution, the
 //!   imprint and the manager's destructor), as [`p1`](super::p1) does.
@@ -1055,8 +1059,24 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
                     SolverOperation::Minimize,
                 )?;
 
+                // Opt-in (WR-528, fork e881cdb): the closest point must lie within the
+                // edges' tolerance (the closest-point drop always succeeds): two
+                // different edges between the same pair of vertices, such as a circle's
+                // long arc and another solid's arc that only shares its ends, were
+                // related as one
+                let within = if k.fixes.close_loop_relates_only_coincident_edges {
+                    let tol = |e| {
+                        brep.topology_tolerance(e)
+                            .ok_or(invalid(OP_CLOSE_LOOP, "topology handle is unknown"))
+                    };
+                    let on_tol = max2(max_dist * 2.0, max2(tol(be)?, tol(o_edge)?));
+                    dropped.distance <= on_tol
+                } else {
+                    true
+                };
+
                 // when point dropped to curve within tolerance
-                if dropped.success {
+                if dropped.success && within {
                     // add the edge pair to the list of mated object
                     // thus filling a potential intersection loop gap
                     // (status unchecked)
