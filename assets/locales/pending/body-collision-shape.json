@@ -28,5 +28,35 @@
     "No collision": "ללא התנגשות",
     "Collision": "התנגשות",
     "Convex hull collision": "התנגשות במעטפת קמורה"
+  },
+  "ja": {
+    "cmd.body_collision": "衝突形状",
+    "Collision Shape": "衝突形状",
+    "Automatic": "自動",
+    "Convex hull": "凸包",
+    "Full mesh": "完全なメッシュ",
+    "No collision": "衝突なし",
+    "Collision": "衝突",
+    "Convex hull collision": "凸包で衝突"
+  },
+  "vi": {
+    "cmd.body_collision": "Hình dạng va chạm",
+    "Collision Shape": "Hình dạng va chạm",
+    "Automatic": "Tự động",
+    "Convex hull": "Bao lồi",
+    "Full mesh": "Lưới đầy đủ",
+    "No collision": "Không va chạm",
+    "Collision": "Va chạm",
+    "Convex hull collision": "Va chạm bằng bao lồi"
+  },
+  "zh": {
+    "cmd.body_collision": "碰撞形状",
+    "Collision Shape": "碰撞形状",
+    "Automatic": "自动",
+    "Convex hull": "凸包",
+    "Full mesh": "完整网格",
+    "No collision": "无碰撞",
+    "Collision": "碰撞",
+    "Convex hull collision": "凸包碰撞"
   }
 }
