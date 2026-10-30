@@ -1,6 +1,7 @@
 //! `drawing.scene` (#4890 W10): one sheet of the open drawing as one paper scene, drawn at once
-//! ([`crate::drawing_scene::build`]): its drawing border, each image on it, then each view on it by id. The sheet
-//! page draws the same scene through the provider, and the drawing export (A7) writes it.
+//! ([`crate::drawing_scene::build`]): its drawing border, each image on it, then each view on it by id, then
+//! its title block. The sheet page draws the same scene through the provider, and the drawing export
+//! (A7) writes it.
 //!
 //! `drawing.status` (#4894 WE2) says where the drawing open stands: each view as the provider last
 //! drew it, and each dimension as the model has it now, in one read.
@@ -35,7 +36,7 @@ pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new(STATUS, "Drawing Status
     .doc_only()
     .contract(&CONTRACT)
     .output(output_schema_for::<SheetSceneResult>)
-    .params("sheet: id or name → {sheet, scene: {size_mm, groups: [{object, kind: drawing_border|sheet_image|view, items: [{kind: stroke, path, closed, width_mm} or {kind: fill, region} or {kind: picture, source, rect: {min, max}, opacity}]}]} in paint order: the sheet's drawing border (object: the sheet), then each image on it by id (object and source: the placement), then each view on it by id (object: the view; its visible lines only for now), views: [{view, status: drawn|placeholder|failed, reason?, stats?}], objects: [{object, kind, bounds_mm: {min, max}, boundary_mm?}], where the border and each view sit on paper}. A view with nothing to measure, or one that can't be drawn yet, is left out and says why. Read-only; no model is evaluated.")];
+    .params("sheet: id or name → {sheet, scene: {size_mm, groups: [{object, kind: drawing_border|sheet_image|view|title_block, items: [{kind: stroke, path, closed, width_mm} or {kind: fill, region} or {kind: picture, source, rect: {min, max}, opacity}]}]} in paint order: the sheet's drawing border (object: the sheet), then each image on it by id (object and source: the placement), then each view on it by id (object: the view; its visible lines only for now), then its title block's lines (object: the sheet), views: [{view, status: drawn|placeholder|failed, reason?, stats?}], objects: [{object, kind, bounds_mm: {min, max}, boundary_mm?}], where the border and each view sit on paper}. A view with nothing to measure, or one that can't be drawn yet, is left out and says why. Read-only; no model is evaluated.")];
 
 fn status(s: &mut Session, p: &Value) -> Result<Value> {
     let _: DrawingStatusParams = crate::schema::read(STATUS, p)?;

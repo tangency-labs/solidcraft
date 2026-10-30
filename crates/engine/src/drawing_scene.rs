@@ -1,10 +1,11 @@
 //! The sheet scene (#4890 W10, #3890 W15): everything drawn on one sheet of a drawing as one paper
 //! scene ([`Scene`]), for the sheet page and every export, so the screen and the files draw the
 //! same thing. In paint order: the sheet's drawing border ([`SheetLayout::paper`]), then each view
-//! on the sheet by id, its visible lines as [`paper_group`] makes them. Images placed on the sheet
-//! sit between the two ([`groups`]), so a view's lines draw over a photo. Text, the title block,
-//! tables and hidden lines each join as one more kind of group. A shaded view's group holds its
-//! pictures under its lines; nothing here draws their pixels ([`crate::drawing_picture`]).
+//! on the sheet by id, its visible lines as [`paper_group`] makes them, then its title block's lines
+//! ([`TitleBlockLayout::paper`]). Images placed on the sheet sit between the border and the views
+//! ([`groups`]), so a view's lines draw over a photo. Text, tables and hidden lines each join as one
+//! more kind of group. A shaded view's group holds its pictures under its lines; nothing here draws
+//! their pixels ([`crate::drawing_picture`]).
 //!
 //! [`build`] draws a sheet at once, each view the one way: its lines worked out centred on the view,
 //! then moved to its centre, so the same lines on the same centre are the same bytes however they
@@ -19,6 +20,7 @@
 //!
 //! [`SheetLayout::paper`]: solidcraft_geom::drawing_sheet::SheetLayout::paper
 //! [`groups`]: crate::drawing_pictures::groups
+//! [`TitleBlockLayout::paper`]: solidcraft_geom::title_block::TitleBlockLayout::paper
 
 use std::borrow::Borrow;
 use std::collections::{BTreeMap, BTreeSet};
@@ -203,17 +205,22 @@ fn draw(s: &Session, shown: &std::result::Result<ShownSet, Unmeasured>, id: u64,
 }
 
 /// The scene of sheet `record`: its border, then `images`, then each of `views` (its id, centre and
-/// lines, in id order) moved to its centre. A view that would take the scene past a paper scene's limits is left
-/// out and says why, and the views after it are still drawn when they fit.
+/// lines, in id order) moved to its centre, then its title block. A view that would take the scene
+/// past a paper scene's limits is left out and says why, and the views after it are still drawn when
+/// they fit.
 fn assemble<D: Borrow<Drawn>>(
     record: &Sheet,
     images: &[Group],
     views: impl Iterator<Item = (u64, Vec2, D)>,
 ) -> Result<(Scene, Vec<ViewState>, Vec<SheetObject>)> {
     let size_mm = record.sheet.size_mm().map_err(|e| bad(CMD, e.to_string()))?;
-    let mut border = match &record.border {
-        Some(border) => border.layout(&record.sheet).map_err(|e| bad(CMD, e.to_string()))?.paper(record.id),
-        None => Vec::new(),
+    let layout = record.border.as_ref().map(|border| border.layout(&record.sheet)).transpose().map_err(|e| bad(CMD, e.to_string()))?;
+    let mut border = layout.as_ref().map_or_else(Vec::new, |layout| layout.paper(record.id));
+    // The block sits on the border. It's painted over the views, but counted with the border, so no
+    // view takes its records.
+    let block = match (&record.title_block, &layout) {
+        (Some(block), Some(layout)) => Some(block.layout(layout).map_err(|e| bad(CMD, e.to_string()))?.paper(record.id)),
+        _ => None,
     };
     let mut objects = Vec::new();
     if !border.is_empty() {
@@ -223,7 +230,7 @@ fn assemble<D: Borrow<Drawn>>(
         objects.push(SheetObject { object: record.id, kind: ObjectKind::DrawingBorder, bounds_mm, boundary_mm: None });
     }
     border.extend_from_slice(images);
-    let mut records = border.iter().map(Group::records).fold(0usize, usize::saturating_add);
+    let mut records = border.iter().chain(&block).map(Group::records).fold(0usize, usize::saturating_add);
     let mut scene = Scene::new(size_mm, border);
     // Each view's group is counted onto the scene and checked alone on the sheet first, so one past
     // the limits leaves out only itself, and checking costs one pass over each group.
@@ -260,6 +267,7 @@ fn assemble<D: Borrow<Drawn>>(
         }
         states.push(ViewState { view, status, stats: drawn.stats });
     }
+    scene.groups.extend(block);
     scene.validate().map_err(|e| bad(CMD, e.to_string()))?;
     Ok((scene, states, objects))
 }
