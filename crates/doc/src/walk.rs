@@ -462,6 +462,7 @@ impl GeoRef {
             Self::Axis { name } | Self::ConstructPoint { name } => f(Ref::FeatureName(name)),
             Self::Plane { plane } => plane.walk_feature_refs(f, depth + 1),
             Self::Point { .. }
+            | Self::Line { .. }
             | Self::Origin
             | Self::Vertex { .. }
             | Self::Edge { .. }
@@ -480,6 +481,7 @@ impl GeoRef {
             Self::Axis { name } | Self::ConstructPoint { name } => f(Ref::FeatureName(name)),
             Self::Plane { plane } => plane.walk_feature_refs_mut(f, depth + 1),
             Self::Point { .. }
+            | Self::Line { .. }
             | Self::Origin
             | Self::Vertex { .. }
             | Self::Edge { .. }

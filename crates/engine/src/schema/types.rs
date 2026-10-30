@@ -899,8 +899,8 @@ fn geo_problem(v: &Value) -> Option<String> {
 }
 
 /// The reference types a saved reference's `type` names (`solidcraft_doc::construct::GeoRef`).
-const SAVED_REFS: [&str; 11] =
-    ["point", "origin", "vertex", "edge", "face", "plane", "world", "axis", "construct_point", "sketch_point", "sketch_curve"];
+const SAVED_REFS: [&str; 12] =
+    ["point", "line", "origin", "vertex", "edge", "face", "plane", "world", "axis", "construct_point", "sketch_point", "sketch_curve"];
 
 /// `{key: point}`, unless it has `type` (then it is a saved reference).
 fn picked_at(key: &str, point: &Schema) -> Value {

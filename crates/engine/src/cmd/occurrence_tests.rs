@@ -14,6 +14,91 @@ fn near(value: &Value, expected: f64) {
 }
 
 #[test]
+fn component_origins_keep_nested_copies_and_visibility_separate() {
+    use crate::origins;
+    use solidcraft_geom::Vec3;
+    let mut s = Session::default();
+    let (parent, first) = created(&mut s, "Assembly");
+    run(&mut s, "occurrence.move", json!({"occurrence":first,"translate":[100,0,0]}));
+    let (_, child) = created(&mut s, "Child");
+    run(&mut s, "occurrence.move", json!({"occurrence":child,"translate":[20,0,0]}));
+    run(&mut s, "component.activate", json!({"component":0}));
+    let second = run(&mut s, "occurrence.copy", json!({"component":parent,"translate":[50,0,0]}))["occurrence"].as_u64().unwrap();
+    let (one, two) = (vec![first, child], vec![second, child]);
+    assert!(s.origin_plane(&origins::key(&one, "XY")).unwrap().origin.dist(Vec3::new(120., 0., 0.)) < 1e-8);
+    assert!(s.origin_plane(&origins::key(&two, "XY")).unwrap().origin.dist(Vec3::new(170., 0., 0.)) < 1e-8);
+    assert!(s.shown_component_origins().is_empty());
+    run(&mut s, "browser.visibility", json!({"tree_folders":[origins::folder(&two)],"visible":true}));
+    assert!(s.folder_hidden(&origins::folder(&one)));
+    assert!(!s.folder_hidden(&origins::folder(&two)));
+    assert_eq!(s.visibility.origin_hidden, None);
+    assert_eq!(s.shown_component_origins().len(), 7);
+    run(&mut s, "browser.visibility", json!({"items":[origins::key(&two,"X")],"visible":false}));
+    assert_eq!(s.shown_component_origins().len(), 6);
+    assert!(s.construction_visible("X"));
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(s.shown_component_origins().len(), 7);
+    run(&mut s, "edit.redo", json!({}));
+    let mut saved = (*s.doc).clone();
+    saved.visibility = s.visibility.clone();
+    let reopened = Session::new(serde_json::from_str(&serde_json::to_string(&saved).unwrap()).unwrap());
+    assert_eq!(reopened.visibility, s.visibility);
+    assert_eq!(reopened.shown_component_origins().len(), 6);
+    run(&mut s, "browser.visibility", json!({"paths":[[second]],"visible":false}));
+    assert!(s.shown_component_origins().is_empty(), "a hidden parent hides its origin too");
+    let before = s.visibility.clone();
+    assert!(s.execute("browser.visibility", &json!({"tree_folders":[origins::folder(&one),"o:999999/origin"],"visible":true})).is_err());
+    assert_eq!(s.visibility, before, "invalid batches must be atomic");
+    for invalid in ["o:/origin", "o:0/origin", "o:01/origin", "c0/origin"] {
+        assert!(s.execute("browser.visibility", &json!({"tree_folders":[invalid],"visible":true})).is_err(), "{invalid}");
+    }
+    let folded = run(&mut s, "browser.expand_all", json!({"path":one}));
+    assert!(folded["closed_by_default"].as_array().unwrap().contains(&json!(origins::folder(&one))));
+    run(&mut s, "occurrence.move", json!({"occurrence":child,"translate":[10,0,0],"capture":false}));
+    assert!(s.origin_plane(&origins::key(&one, "XY")).unwrap().origin.dist(Vec3::new(130., 0., 0.)) < 1e-8);
+}
+
+#[test]
+fn component_origin_picks_use_world_geometry_then_the_authoring_frame_once() {
+    use crate::origins;
+    use solidcraft_geom::Vec3;
+    let mut s = Session { param_check: crate::schema::ParamCheck::Strict, ..Session::default() };
+    let (component, occurrence) = created(&mut s, "Part");
+    run(&mut s, "occurrence.move", json!({"occurrence":occurrence,"translate":[20,30,40],"axis":[1,0,0],"angle":"90 deg"}));
+    let plane = origins::key(&[occurrence], "XY");
+    let expected = Vec3::new(20., 30., 40.);
+    assert!(s.origin_plane(&plane).unwrap().origin.dist(expected) < 1e-8);
+    assert!(s.origin_plane(&plane).unwrap().normal().dist(-Vec3::Y) < 1e-8);
+    s.selection = vec![crate::Sel::Plane { name: plane.clone() }];
+    run(&mut s, "view.normal_to", json!({}));
+    let camera = s.camera.unwrap();
+    assert!(camera.target.dist(expected) < 1e-8);
+    assert!(camera.back().dot(Vec3::Y).abs() > 1. - 1e-8);
+    for author in [0, component] {
+        run(&mut s, "component.activate", json!({"component":author}));
+        let sketch = run(&mut s, "sketch.create", json!({"plane":plane}))["sketch"].as_u64().unwrap();
+        let state = s.world_state();
+        let actual = state.sketch(sketch).unwrap().plane;
+        assert!(actual.origin.dist(expected) < 1e-8, "author {author}: {actual:?}");
+        assert!(actual.normal().dist(-Vec3::Y) < 1e-8);
+        run(&mut s, "sketch.finish", json!({}));
+    }
+    run(&mut s, "component.activate", json!({"component":0}));
+    run(&mut s, "construct.point.vertex", json!({"point":{"construct_point":origins::key(&[occurrence],"O")},"name":"Origin copy"}));
+    let point = crate::view::construction_points(&s).into_iter().find(|(_, n, _)| n == "Origin copy").unwrap().2;
+    assert!(point.dist(expected) < 1e-8);
+    run(&mut s, "construct.plane.at_angle", json!({"base":plane,"axis":origins::key(&[occurrence],"X"),"angle":"90 deg","name":"Turned"}));
+    let turned = crate::view::construction_planes(&s).into_iter().find(|(_, n, _)| n == "Turned").unwrap().2;
+    assert!(turned.origin.dist(expected) < 1e-8);
+    assert!(turned.normal().dot(Vec3::Z).abs() > 1. - 1e-8);
+    run(&mut s, "component.activate", json!({"component":component}));
+    run(&mut s, "construct.plane.perpendicular", json!({"plane":plane,"line":{"axis":origins::key(&[occurrence],"X")},"name":"Perpendicular"}));
+    let perpendicular = crate::view::construction_planes(&s).into_iter().find(|(_, n, _)| n.ends_with("Perpendicular")).unwrap().2;
+    assert!(perpendicular.origin.dist(expected) < 1e-8);
+    assert!(perpendicular.normal().dot(Vec3::Z).abs() > 1. - 1e-8);
+}
+
+#[test]
 fn component_create_rejects_bodies_without_changing_design() {
     let mut s = Session::default();
     run(&mut s, "solid.box", json!({"length":10,"width":10,"height":10,"body_name":"Body1"}));

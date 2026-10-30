@@ -1963,6 +1963,9 @@ pub fn previewed_sketch_plane(app: &SolveApp) -> Option<Plane> {
         (Some(name), _) | (None, Some(Hit::Plane { name, .. })) => name,
         _ => return None,
     };
+    if let Some(p) = app.session.origin_plane(name) {
+        return Some(p);
+    }
     solidcraft_engine::view::construction_planes(&app.session)
         .into_iter()
         .find(|(_, n, _)| n == name)
@@ -1994,8 +1997,12 @@ pub fn origin_axes(app: &SolveApp) -> Vec<(&'static str, Vec3)> {
 /// past it either side), at least the origin axes' length around the axis's origin: (name,
 /// from, to).
 pub fn construction_axis_segments(app: &SolveApp) -> Vec<(String, Vec3, Vec3)> {
-    let axes: Vec<_> =
+    let mut axes: Vec<_> =
         solidcraft_engine::view::construction_axes(&app.session).into_iter().filter(|(_, n, _, _)| app.session.construction_visible(n)).collect();
+    axes.extend(app.session.shown_component_origins().into_iter().filter_map(|(name, g)| match g {
+        solidcraft_engine::doc::construct::ConstructGeom::Axis { origin, dir } => Some((0, name, origin, dir)),
+        _ => None,
+    }));
     if axes.is_empty() {
         return Vec::new();
     }
@@ -2074,6 +2081,10 @@ pub fn construction_points(app: &SolveApp) -> Vec<(String, Vec3)> {
         .into_iter()
         .filter(|(_, n, _)| app.session.construction_visible(n))
         .map(|(_, n, p)| (n, p))
+        .chain(app.session.shown_component_origins().into_iter().filter_map(|(name, g)| match g {
+            solidcraft_engine::doc::construct::ConstructGeom::Point(p) => Some((name, p)),
+            _ => None,
+        }))
         .collect()
 }
 
@@ -2083,6 +2094,10 @@ pub fn construction_quads(app: &SolveApp) -> Vec<(String, Vec3, [Vec3; 4])> {
     solidcraft_engine::view::construction_planes(&app.session)
         .into_iter()
         .filter(|(_, n, _)| app.session.construction_visible(n))
+        .chain(app.session.shown_component_origins().into_iter().filter_map(|(name, g)| match g {
+            solidcraft_engine::doc::construct::ConstructGeom::Plane(p) => Some((0, name, p)),
+            _ => None,
+        }))
         .map(|(_, name, pl)| {
             let (o, x, y) = (pl.origin, pl.x * h, pl.y * h);
             (name, pl.normal(), [o - x - y, o + x - y, o + x + y, o - x + y])

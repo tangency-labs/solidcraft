@@ -185,7 +185,7 @@ fn normal_target(s: &Session) -> Option<(solidcraft_geom::Vec3, solidcraft_geom:
             let plane = state.body(body)?.body.planar_face(*index)?;
             Some((*point, plane.normal()))
         }
-        Sel::Plane { name } => solidcraft_geom::Plane::named(name).map(|plane| (plane.origin, plane.normal())),
+        Sel::Plane { name } => s.origin_plane(name).or_else(|| solidcraft_geom::Plane::named(name)).map(|plane| (plane.origin, plane.normal())),
         _ => None,
     })
 }

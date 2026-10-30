@@ -339,7 +339,9 @@ pub fn label(app: &SolveApp, sel: &Sel) -> String {
         Sel::Profile { sketch, index } => format!("Profile {} · {}", index + 1, sketch_name(app, *sketch)),
         Sel::Plane { name } if matches!(name.as_str(), "XY" | "XZ" | "YZ") => format!("{} Plane", app.preferences.origin_plane_names.label(name)),
         Sel::Axis { name } if matches!(name.as_str(), "X" | "Y" | "Z") => format!("{name} Axis"),
-        Sel::Plane { name } | Sel::Axis { name } | Sel::ConstructionPoint { name } => name.clone(),
+        Sel::Plane { name } | Sel::Axis { name } | Sel::ConstructionPoint { name } => {
+            crate::dialogs::component_origin_label(&app.session, app.preferences.origin_plane_names, name).unwrap_or_else(|| name.clone())
+        }
     }
 }
 

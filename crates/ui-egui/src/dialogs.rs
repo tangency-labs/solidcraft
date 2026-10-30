@@ -2611,10 +2611,23 @@ fn occurrence_paths(s: &Session, items: &[Sel]) -> Vec<Vec<u64>> {
     out
 }
 
+/// Distinguish a component's reference geometry without exposing its internal placement key.
+pub(crate) fn component_origin_label(s: &Session, names: crate::prefs::OriginPlaneNames, name: &str) -> Option<String> {
+    let (path, item) = solidcraft_engine::origins::item(name)?;
+    let placement =
+        path.iter().filter_map(|id| s.doc.occurrences.iter().find(|o| o.id == *id).map(|o| o.name.as_str())).collect::<Vec<_>>().join(" / ");
+    Some(format!("{placement} · {}", names.label(item)))
+}
+
 /// A picked item as its chip shows it. A round edge or face says what it stands for in `inp`:
 /// its axis in an axis input, a circle's centre in a point input. An origin plane goes by
 /// the name the preferences give it.
 pub(crate) fn selection_label(s: &Session, names: crate::prefs::OriginPlaneNames, d: &Dialog, inp: &SelInput, item: &Sel) -> String {
+    if let Sel::Plane { name } | Sel::Axis { name } | Sel::ConstructionPoint { name } = item
+        && let Some(label) = component_origin_label(s, names, name)
+    {
+        return label;
+    }
     let axis = inp.accept == selection::AXIS_PICKS && round_axis(s, item).is_some();
     match item {
         Sel::SketchCurve { id, .. } => id.clone(),
@@ -3942,6 +3955,12 @@ fn flip_toward_viewer(app: &SolveApp, name: &str) -> Option<&'static str> {
 /// the sketch, the view turning to it and the extrude all went the wrong way. `None` while the
 /// active component sits at the origin (the name says the same) or for a construction plane.
 fn shown_origin_plane(app: &SolveApp, name: &str) -> Option<Value> {
+    if let Some((path, item)) = solidcraft_engine::origins::item(name) {
+        let active = app.session.active_occurrence_path.clone().unwrap_or_else(|| app.session.doc.first_path(app.session.active_component));
+        if path == active {
+            return Some(json!(item));
+        }
+    }
     let p = solidcraft_engine::geom::Plane::named(name)?;
     if app.session.doc.find_feature(name).is_some() || solidcraft_engine::doc::is_identity(&app.session.active_component_frame()) {
         return None;
@@ -3951,6 +3970,9 @@ fn shown_origin_plane(app: &SolveApp, name: &str) -> Option<Value> {
 
 /// The world plane of an origin plane or a construction plane by name, where it is shown.
 pub(crate) fn plane_by_name(s: &Session, name: &str) -> Option<solidcraft_engine::geom::Plane> {
+    if let Some(p) = s.origin_plane(name) {
+        return Some(p);
+    }
     if let Some(p) = solidcraft_engine::geom::Plane::named(name) {
         return Some(p);
     }
@@ -4862,11 +4884,7 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
                     json!({"origin": pt(*point), "normal": pt(n)})
                 }
                 Some(Sel::Plane { name }) => {
-                    let pl = solidcraft_engine::view::construction_planes(s)
-                        .into_iter()
-                        .find(|(_, n, _)| n == name)
-                        .map(|(_, _, pl)| pl)
-                        .ok_or("unknown plane")?;
+                    let pl = plane_by_name(s, name).ok_or("unknown plane")?;
                     json!({"origin": pt(pl.origin), "normal": pt(pl.normal())})
                 }
                 _ => return Err("pick a plane or a planar face".into()),
@@ -5216,7 +5234,9 @@ pub fn axis_of(app: &SolveApp, sel: &Sel) -> Option<(Vec3, Vec3)> {
             "Y" => Some((Vec3::ZERO, Vec3::Y)),
             "Z" => Some((Vec3::ZERO, Vec3::Z)),
             // A construction axis.
-            n => solidcraft_engine::view::construction_axes(&app.session).into_iter().find(|(_, an, _, _)| an == n).map(|(_, _, o, d)| (o, d)),
+            n => app.session.origin_axis(n).or_else(|| {
+                solidcraft_engine::view::construction_axes(&app.session).into_iter().find(|(_, an, _, _)| an == n).map(|(_, _, o, d)| (o, d))
+            }),
         },
         Sel::SketchCurve { id, .. } => {
             let st = app.session.world_state();
