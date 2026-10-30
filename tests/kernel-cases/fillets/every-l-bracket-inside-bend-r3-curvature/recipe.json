@@ -1,0 +1,49 @@
+{
+ "commands": [
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 40,
+    "width": 20,
+    "height": 5,
+    "corner": [
+     0,
+     0,
+     0
+    ],
+    "body_name": "Bracket"
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 5,
+    "width": 20,
+    "height": 40,
+    "corner": [
+     0,
+     0,
+     0
+    ],
+    "operation": "join",
+    "targets": [
+     "Bracket"
+    ]
+   }
+  },
+  {
+   "command": "solid.fillet",
+   "params": {
+    "edges": [
+     [
+      5,
+      10,
+      5
+     ]
+    ],
+    "radius": 3,
+    "type": "curvature"
+   }
+  }
+ ]
+}

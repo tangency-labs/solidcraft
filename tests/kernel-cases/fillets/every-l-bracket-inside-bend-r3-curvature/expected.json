@@ -1,0 +1,24 @@
+{
+ "sources": [],
+ "what": "an L-bracket's inside bend rounded curvature-continuous (Type: Curvature) size 3",
+ "source": "analytic",
+ "method": "L-bracket: the legs 40x20x5 (x 0..40, z 0..5) and 5x20x40 (x 0..5, z 0..40) joined, 20 deep in y: V0 = 4000 + 4000 - 500 = 7500, 8 faces. The concave edge between two planes square to each other, its ends on the planar faces y = 0 and 20: the section is the quintic Bezier of setback 3 (fillets/862), area 113/756 9 = 1.345238, added along 20: V = 7526.9048. Faces 9; both seams G2.",
+ "body_count": 1,
+ "volume_mm3": 7526.9047619047615,
+ "faces": 9,
+ "bbox": {
+  "min": [
+   0,
+   0,
+   0
+  ],
+  "max": [
+   40,
+   20,
+   40
+  ]
+ },
+ "continuity": {
+  "order": "g2"
+ }
+}
