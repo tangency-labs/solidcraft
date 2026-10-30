@@ -1,0 +1,29 @@
+{
+  "fr": {
+    "browser.calibrate_click_a": "Cliquez sur l'image pour le point A, ou saisissez ses coordonnées.",
+    "browser.calibrate_click_b": "Cliquez sur l'image pour le point B, ou saisissez ses coordonnées.",
+    "help.sketch.construction_line": "Crée une droite de construction infinie passant par deux points. À utiliser pour structurer une esquisse sans diviser les profils.",
+    "help.sketch.construction_line.angle": "Crée une droite de construction infinie inclinée d'un angle par rapport à l'axe X de l'esquisse. Choisissez le point puis saisissez l'angle, ou choisissez sa direction.",
+    "help.sketch.construction_line.bisector": "Sélectionnez deux lignes droites sécantes de l'esquisse, puis choisissez l'une des deux bissectrices. Le résultat suit les lignes dont il provient.",
+    "help.sketch.construction_line.horizontal": "Crée une droite de construction horizontale infinie passant par un point. Sa contrainte horizontale est conservée lors des modifications ultérieures.",
+    "help.sketch.construction_line.parallel": "Sélectionnez une ligne droite de l'esquisse, puis placez une droite de construction infinie parallèle. Clic droit pour choisir une autre référence.",
+    "help.sketch.construction_line.perpendicular": "Sélectionnez une ligne droite de l'esquisse, puis placez une droite de construction infinie perpendiculaire. Clic droit pour choisir une autre référence.",
+    "help.sketch.construction_line.tangent_at": "Crée une tangente en un point d'un cercle ou d'un arc de cercle, ou à l'extrémité d'une spline ouverte ou d'une conique. Sélectionnez la courbe, puis son point de contact.",
+    "help.sketch.construction_line.tangent_external": "Sélectionnez un cercle ou un arc de cercle, puis un point extérieur et une solution de tangente. Les aperçus n'affichent que les points de contact situés sur l'arc dessiné.",
+    "help.sketch.construction_line.tangent_two": "Sélectionnez deux cercles ou arcs de cercle, puis choisissez une tangente commune dans l'aperçu. Les points de contact doivent se trouver sur les courbes dessinées.",
+    "help.sketch.construction_line.vertical": "Crée une droite de construction verticale infinie passant par un point. Sa contrainte verticale est conservée lors des modifications ultérieures.",
+    "prefs.persistent_ribbon_pressed": "Mettre en surbrillance les commandes actives du ruban",
+    "prefs.persistent_ribbon_pressed_help": "Met en surbrillance les commandes du ruban tant que leurs effets sont actifs. Désactivez cette option pour conserver l'apparence neutre précédente et l'aide des commandes.",
+    "prefs.sketch_construction_lines": "Outils étendus de droites de construction",
+    "prefs.sketch_open_look_at": "Se placer face à l'esquisse à son ouverture",
+    "prefs.sketch_open_look_at_note": "Désactivé : créer ou modifier une esquisse laisse la vue telle quelle. Vue normale place la vue face à l'esquisse quand vous le souhaitez.",
+    "ui.construction.angle_hint": "Droite de construction : cliquez sur un point, puis saisissez un angle ou choisissez une direction",
+    "ui.construction.bisector_hint": "Bissectrice : sélectionnez deux lignes droites sécantes, puis la solution souhaitée",
+    "ui.construction.common_hint": "Tangente commune : sélectionnez deux cercles/arcs, puis la solution souhaitée",
+    "ui.construction.contact_hint": "Tangente : sélectionnez un cercle/arc ou une spline/conique ouverte, puis le point de contact (courbes libres : extrémités)",
+    "ui.construction.external_hint": "Tangente : sélectionnez un cercle ou un arc, un point extérieur, puis la solution souhaitée",
+    "ui.construction.free_hint": "Droite de construction : cliquez sur deux points ; clic droit pour recommencer",
+    "ui.construction.point_hint": "Droite de construction : cliquez sur le point de passage",
+    "ui.construction.reference_hint": "Droite de construction : sélectionnez une ligne droite, puis un point ; clic droit pour changer la référence"
+  }
+}
