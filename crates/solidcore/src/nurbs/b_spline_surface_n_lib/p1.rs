@@ -15,7 +15,8 @@
 //! | [`BSplineSurface::approximate_offset_surface`], [`BSplineSurface::approximate_offset_surface_with`], [`OffsetParamType`] | `ApproximateOffsetSurface` |
 //! | [`create_non_rational_curve`]                         | `sm_CreateNonRationalCurve` (static)             |
 //! | [`create_coons_srf`], [`CoonsWarning`]                | `sm_CreateCoonsSrf` (static)                     |
-//! | [`BSplineSurface::create_coons_patch`]                | `CreateCoonsPatch`                               |
+//! | [`BSplineSurface::create_coons_patch`], [`BSplineSurface::create_coons_patch_on_faces`] | `CreateCoonsPatch` |
+//! | `face_side_twist` (private)                           | the fork's `sm_FaceSideTwist` (static)           |
 //! | [`BSplineSurface::create_extended_surface`]           | `CreateExtendedSurface` (distance from each side) |
 //! | [`BSplineSurface::create_extended_surface_dir`]       | `CreateExtendedSurface` (with `SmSurfParamType`) |
 //! | [`BSplineSurface::join_surface`]                      | `JoinSurface`                                    |
@@ -75,6 +76,11 @@
 //!   `sm_CheckTrimBoundaries`' negative "not set" indices are `None`.
 //! - **`sm_CreateCoonsSrf`** returns its warning level (`lWarning`, only logged
 //!   upstream) as [`CoonsWarning`]; `CreateCoonsPatch` ignores it as upstream.
+//! - **Face sides** (not upstream; WR-613, the fork's tangency-labs/smlib@7fd9fb0):
+//!   [`create_coons_srf`] and [`BSplineSurface::create_coons_patch_on_faces`] take the
+//!   fork's `lFaceSides` bits ([`COONS_FACE_LEFT`] ..), which give a corner between a
+//!   face side and another side that side's twist; `0` (all
+//!   [`BSplineSurface::create_coons_patch`] callers) is upstream.
 //! - **`CreateNSidedPatch`** unitizes the caller's center normal in place, as upstream
 //!   (`Unitize`'s status is ignored, so a zero vector becomes `(0, 0, 1)`).
 //! - **`EvaluateSimple`** returns the derivative matrix `D[i][j]` (`i <= u`, `j <= v`
@@ -409,6 +415,34 @@ fn match_cross_derivative(
     Ok(mis_match)
 }
 
+/// [`create_coons_srf`]'s face-side bit for the left boundary curve (`lr[0]`).
+pub const COONS_FACE_LEFT: u32 = 1;
+/// [`create_coons_srf`]'s face-side bit for the right boundary curve (`lr[1]`).
+pub const COONS_FACE_RIGHT: u32 = 2;
+/// [`create_coons_srf`]'s face-side bit for the bottom boundary curve (`bt[0]`).
+pub const COONS_FACE_BOTTOM: u32 = 4;
+/// [`create_coons_srf`]'s face-side bit for the top boundary curve (`bt[1]`).
+pub const COONS_FACE_TOP: u32 = 8;
+
+/// The fork's `sm_FaceSideTwist` (WR-613): the twist at a Coons corner between a u side
+/// (`(u_bit, u_twist)`, its bit and twist) and a v side (`(v_bit, v_twist)`) when
+/// exactly one of them lies on a face of the body (`face_sides`): the other (the
+/// blend's) side's twist. Otherwise `t` is left as it is.
+fn face_side_twist(
+    face_sides: u32,
+    (u_bit, u_twist): (u32, Vec3),
+    (v_bit, v_twist): (u32, Vec3),
+    t: &mut Vec3,
+) {
+    let u_face = (face_sides & u_bit) != 0;
+    let v_face = (face_sides & v_bit) != 0;
+    if u_face && !v_face {
+        *t = v_twist;
+    } else if v_face && !u_face {
+        *t = u_twist;
+    }
+}
+
 /// The average twist of two cross-boundary derivative derivatives at a corner; sets
 /// `warning` to [`CoonsWarning::TwistMismatch`] when they differ by more than
 /// `twist_tol`.
@@ -451,6 +485,12 @@ fn bezier_knots() -> Vec<f64> {
 /// derivatives meeting there. The surface is the sum of the u- and v-direction
 /// blends minus their tensor product, all made compatible.
 ///
+/// `face_sides` (not upstream; WR-613, the fork's tangency-labs/smlib@7fd9fb0) marks
+/// the boundary curves that lie on a face of the body ([`COONS_FACE_LEFT`],
+/// [`COONS_FACE_RIGHT`], [`COONS_FACE_BOTTOM`], [`COONS_FACE_TOP`]): a corner between
+/// one of them and an unmarked side takes the unmarked side's twist, so the patch meets
+/// the marked side's cross-boundary derivative there. `0` is upstream.
+///
 /// Returns the surface and the warning level.
 ///
 /// # Errors
@@ -462,6 +502,7 @@ pub fn create_coons_srf(
     mtol: f64,
     lr: &mut [Curve; 4],
     bt: &mut [Curve; 4],
+    face_sides: u32,
 ) -> Result<(Surface, CoonsWarning)> {
     const OP: &str = OP_COONS_SRF;
     let twist_tol = mtol * 1.0e4;
@@ -527,30 +568,43 @@ pub fn create_coons_srf(
 
     // Now compute the twist vectors to use: the mixed partials at the four corners,
     // the averages of the derivatives of the two cross-boundary derivative curves
-    // meeting there.
-    let t00 = twist(
-        deriv1(&lr[2], v0)?,
-        deriv1(&bt[2], u0)?,
-        twist_tol,
-        &mut warning,
+    // meeting there. Not upstream (WR-613): a corner between a face side and a blend's
+    // side takes the blend side's twist.
+    let (cd1, cd2) = (deriv1(&lr[2], v0)?, deriv1(&bt[2], u0)?);
+    let mut t00 = twist(cd1, cd2, twist_tol, &mut warning);
+    // left: CD1, bottom: CD2
+    face_side_twist(
+        face_sides,
+        (COONS_FACE_LEFT, cd1),
+        (COONS_FACE_BOTTOM, cd2),
+        &mut t00,
     );
-    let t10 = twist(
-        deriv1(&bt[2], ur)?,
-        deriv1(&lr[3], v0)?,
-        twist_tol,
-        &mut warning,
+    let (cd1, cd2) = (deriv1(&bt[2], ur)?, deriv1(&lr[3], v0)?);
+    let mut t10 = twist(cd1, cd2, twist_tol, &mut warning);
+    // bottom: CD1, right: CD2
+    face_side_twist(
+        face_sides,
+        (COONS_FACE_RIGHT, cd2),
+        (COONS_FACE_BOTTOM, cd1),
+        &mut t10,
     );
-    let t11 = twist(
-        deriv1(&lr[3], vs)?,
-        deriv1(&bt[3], ur)?,
-        twist_tol,
-        &mut warning,
+    let (cd1, cd2) = (deriv1(&lr[3], vs)?, deriv1(&bt[3], ur)?);
+    let mut t11 = twist(cd1, cd2, twist_tol, &mut warning);
+    // right: CD1, top: CD2
+    face_side_twist(
+        face_sides,
+        (COONS_FACE_RIGHT, cd1),
+        (COONS_FACE_TOP, cd2),
+        &mut t11,
     );
-    let t01 = twist(
-        deriv1(&bt[3], u0)?,
-        deriv1(&lr[2], vs)?,
-        twist_tol,
-        &mut warning,
+    let (cd1, cd2) = (deriv1(&bt[3], u0)?, deriv1(&lr[2], vs)?);
+    let mut t01 = twist(cd1, cd2, twist_tol, &mut warning);
+    // top: CD1, left: CD2
+    face_side_twist(
+        face_sides,
+        (COONS_FACE_LEFT, cd2),
+        (COONS_FACE_TOP, cd1),
+        &mut t01,
     );
 
     // ---- Compute the various surfaces ----
@@ -1144,6 +1198,26 @@ impl BSplineSurface {
         bdry_crvs: &mut [BSplineCurve],
         deriv_crvs: &mut [BSplineCurve],
     ) -> Result<BSplineSurface> {
+        Self::create_coons_patch_on_faces(tol, create_bilinear_patch, bdry_crvs, deriv_crvs, 0)
+    }
+
+    /// [`BSplineSurface::create_coons_patch`] with the fork's `lFaceSides` (WR-613,
+    /// tangency-labs/smlib@7fd9fb0): `face_sides` marks the boundary curves on a face of
+    /// the body, [`COONS_FACE_LEFT`] for `bdry_crvs[0]`, [`COONS_FACE_RIGHT`] for
+    /// `bdry_crvs[1]`, [`COONS_FACE_BOTTOM`] for `bdry_crvs[2]` and [`COONS_FACE_TOP`]
+    /// for `bdry_crvs[3]`, and goes to [`create_coons_srf`] (the bilinear patch ignores
+    /// it). `0` is upstream's `CreateCoonsPatch`.
+    ///
+    /// # Errors
+    ///
+    /// As [`BSplineSurface::create_coons_patch`].
+    pub fn create_coons_patch_on_faces(
+        tol: f64,
+        create_bilinear_patch: bool,
+        bdry_crvs: &mut [BSplineCurve],
+        deriv_crvs: &mut [BSplineCurve],
+        face_sides: u32,
+    ) -> Result<BSplineSurface> {
         const OP: &str = OP_COONS;
         // check input - 4 curves
         let [cur_l, cur_r, cur_b, cur_t] = bdry_crvs else {
@@ -1190,7 +1264,8 @@ impl BSplineSurface {
             let [der_l, der_r, der_b, der_t] = ders.ok_or_else(|| SolidError::sm_err(OP))?;
             let mut lr = [l, r, der_l, der_r];
             let mut bt = [b, t, der_b, der_t];
-            let res = create_coons_srf(tol, &mut lr, &mut bt);
+            // bits 1 left, 2 right, 4 bottom, 8 top: bdry_crvs' order
+            let res = create_coons_srf(tol, &mut lr, &mut bt, face_sides);
             let [l, r, der_l, der_r] = lr;
             let [b, t, der_b, der_t] = bt;
             cur_l.nurb = Some(l);
@@ -2082,6 +2157,80 @@ mod tests {
         )
         .unwrap();
         BSplineSurface::from_nurb(sur, false)
+    }
+
+    /// A cubic Bezier curve on [0, 1] through the four control points.
+    fn bezier(p: [(f64, f64, f64); 4]) -> Curve {
+        let pw = p
+            .iter()
+            .map(|&(x, y, z)| CPoint::new(x, y, z, NOW))
+            .collect();
+        Curve::new(pw, 3, bezier_knots()).unwrap()
+    }
+
+    /// WR-613 (the fork's tangency-labs/smlib@7fd9fb0): the unit square in z = 0 whose
+    /// left and right sides lie on the plane (cross derivative (1, 0, 0), no twist) and
+    /// whose bottom and top sides are a blend's, its cross derivative `(0, 1, u (1 - u))`
+    /// turning out of the plane (twist (0, 0, 1) at u = 0). The mean twist leaves the
+    /// patch's u derivative along the plane's sides off their cross derivative by up to
+    /// 0.048 out of the plane; with the plane's sides marked the corners take the
+    /// blend's twist and the patch meets the plane's cross derivative along them.
+    #[test]
+    fn wr_613_face_sides_meet_their_cross_derivative() {
+        let third = 1.0 / 3.0;
+        let along = |x: f64, y: f64, d: (f64, f64)| {
+            bezier([
+                (x, y, 0.0),
+                (x + d.0 * third, y + d.1 * third, 0.0),
+                (x + d.0 * 2.0 * third, y + d.1 * 2.0 * third, 0.0),
+                (x + d.0, y + d.1, 0.0),
+            ])
+        };
+        let across_plane = || bezier([(1.0, 0.0, 0.0); 4]);
+        let across_blend = || {
+            bezier([
+                (0.0, 1.0, 0.0),
+                (0.0, 1.0, third),
+                (0.0, 1.0, third),
+                (0.0, 1.0, 0.0),
+            ])
+        };
+        // the worst miss of the patch's u derivative along its left and right sides
+        let miss = |face_sides: u32| -> f64 {
+            let mut lr = [
+                along(0.0, 0.0, (0.0, 1.0)),
+                along(1.0, 0.0, (0.0, 1.0)),
+                across_plane(),
+                across_plane(),
+            ];
+            let mut bt = [
+                along(0.0, 0.0, (1.0, 0.0)),
+                along(0.0, 1.0, (1.0, 0.0)),
+                across_blend(),
+                across_blend(),
+            ];
+            let (sur, _) = create_coons_srf(1e-6, &mut lr, &mut bt, face_sides).unwrap();
+            let sur = BSplineSurface::from_nurb(sur, false);
+            let mut worst: f64 = 0.0;
+            for (u, der) in [(0.0, &lr[2]), (1.0, &lr[3])] {
+                for i in 0..=20 {
+                    let v = f64::from(i) / 20.0;
+                    let d = sur
+                        .evaluate_simple(Point2::new(u, v), 1, 0, u > 0.5, true, false)
+                        .unwrap();
+                    let want = der.derivs(v, Side::Left, 1).unwrap()[0];
+                    worst = worst.max((d[1][0] - want).length());
+                }
+            }
+            worst
+        };
+        let mean = miss(0);
+        assert!(mean > 0.04, "the mean twist misses by {mean}");
+        let faces = miss(COONS_FACE_LEFT | COONS_FACE_RIGHT);
+        assert!(faces < 1e-12, "the face sides miss by {faces}");
+        // marking the blend's sides instead does not help the plane's
+        let blend = miss(COONS_FACE_BOTTOM | COONS_FACE_TOP);
+        assert!(blend > 0.04, "{blend}");
     }
 
     #[test]

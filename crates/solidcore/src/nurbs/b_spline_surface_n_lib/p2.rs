@@ -6,6 +6,7 @@
 //! | Rust                                          | Upstream                                  |
 //! |-----------------------------------------------|-------------------------------------------|
 //! | [`BSplineSurface::create_corner_blend`], [`OrientType`], [`BlendNeighbour`] | `CreateCornerBlend`, `SmOrientType`, its `SmSurface*` |
+//! | [`BSplineSurface::create_corner_blend_on_faces`] | `CreateCornerBlend` with the fork's `lFaceSides` (WR-613) |
 //! | [`BSplineSurface::create_skinned_surface`], [`SkinnedSurfaceOptions`] | `CreateSkinnedSurface` |
 //! | [`BSplineSurface::trim_with_domain`], [`BSplineSurface::trim_with_domain_with`], [`TrimOptions`] | `TrimWithDomain` |
 //! | [`BSplineSurface::evaluate`], [`EvaluateFlags`] | `Evaluate`                              |
@@ -115,6 +116,7 @@ use crate::surface::surface::Surface as SmSurface;
 
 use super::p1::{
     create_nlib_curve, create_nlib_surface, create_non_rational_curve_with_context, make_knots,
+    COONS_FACE_BOTTOM, COONS_FACE_LEFT, COONS_FACE_RIGHT, COONS_FACE_TOP,
 };
 use crate::intersect::surface_drop_lib::p3::DropSolveContext;
 
@@ -746,6 +748,39 @@ impl BSplineSurface {
         tangency_tol_radians: f64,
         create_bilinear_patch: bool,
     ) -> Result<Vec<Self>> {
+        Self::create_corner_blend_on_faces(
+            k,
+            curves_3d,
+            curve_orients,
+            uv_curves,
+            neighbours,
+            approx_tol,
+            tangency_tol_radians,
+            create_bilinear_patch,
+            0,
+        )
+    }
+
+    /// [`BSplineSurface::create_corner_blend`] with the fork's `lFaceSides` (WR-613,
+    /// tangency-labs/smlib@7fd9fb0): bit `i` of `face_sides` marks `curves_3d[i]` as
+    /// lying on a face of the body. A four-sided bicubic patch passes the marks on to
+    /// [`BSplineSurface::create_coons_patch_on_faces`] in its left, right, bottom, top
+    /// order; other patches ignore them. `0` is upstream's `CreateCornerBlend`.
+    ///
+    /// # Errors
+    ///
+    /// As [`BSplineSurface::create_corner_blend`].
+    pub fn create_corner_blend_on_faces(
+        k: &crate::kernel::Kernel,
+        curves_3d: &[BSplineCurve],
+        curve_orients: &[OrientType],
+        uv_curves: &[Option<BSplineCurve>],
+        neighbours: &[Option<BlendNeighbour<'_>>],
+        approx_tol: f64,
+        tangency_tol_radians: f64,
+        create_bilinear_patch: bool,
+        face_sides: u32,
+    ) -> Result<Vec<Self>> {
         let refs: Vec<Option<&BSplineCurve>> = curves_3d.iter().map(Some).collect();
         Self::create_corner_blend_in::<crate::surface::surface::p4::NoObject>(
             k,
@@ -757,6 +792,7 @@ impl BSplineSurface {
             tangency_tol_radians,
             create_bilinear_patch,
             None,
+            face_sides,
         )
     }
 
@@ -805,6 +841,7 @@ impl BSplineSurface {
             tangency_tol_radians,
             create_bilinear_patch,
             context,
+            0,
         )
     }
 
@@ -822,6 +859,7 @@ impl BSplineSurface {
             &mut dyn crate::surface::surface::p1::SurfaceSolveContext<O>,
             &[Option<O>],
         )>,
+        face_sides: u32,
     ) -> Result<Vec<Self>> {
         const OP: &str = OP_CORNER;
 
@@ -899,6 +937,7 @@ impl BSplineSurface {
                 approx_tol,
                 tangency_tol_radians,
                 create_bilinear_patch,
+                face_sides,
             );
         }
 
@@ -1835,7 +1874,8 @@ const BOT: usize = 1;
 const RIGHT: usize = 2;
 const TOP: usize = 3;
 
-/// The four-sided branch of `CreateCornerBlend`.
+/// The four-sided branch of `CreateCornerBlend`; `face_sides` is the fork's
+/// `lFaceSides` (WR-613), bit `i` for curve `i`.
 fn corner_blend_4(
     k: &crate::kernel::Kernel,
     mut boundaries: Vec<BSplineCurve>,
@@ -1845,6 +1885,7 @@ fn corner_blend_4(
     approx_tol: f64,
     tangency_tol_radians: f64,
     create_bilinear_patch: bool,
+    face_sides: u32,
 ) -> Result<Vec<BSplineSurface>> {
     const OP: &str = OP_CORNER;
     let oob = || SolidError::invalid_input(OP, "curve index out of range");
@@ -1998,8 +2039,28 @@ fn corner_blend_4(
     }
 
     // build coons patch and save result
-    let coons =
-        BSplineSurface::create_coons_patch(tol, create_bilinear_patch, &mut bounds, &mut tans)?;
+    // Not upstream (WR-613; tangency-labs/smlib@7fd9fb0): the face sides in bounds'
+    // order (left, right, bottom, top)
+    let mut coons_face_sides = 0;
+    if face_sides & (1 << LEFT) != 0 {
+        coons_face_sides |= COONS_FACE_LEFT;
+    }
+    if face_sides & (1 << RIGHT) != 0 {
+        coons_face_sides |= COONS_FACE_RIGHT;
+    }
+    if face_sides & (1 << BOT) != 0 {
+        coons_face_sides |= COONS_FACE_BOTTOM;
+    }
+    if face_sides & (1 << TOP) != 0 {
+        coons_face_sides |= COONS_FACE_TOP;
+    }
+    let coons = BSplineSurface::create_coons_patch_on_faces(
+        tol,
+        create_bilinear_patch,
+        &mut bounds,
+        &mut tans,
+        coons_face_sides,
+    )?;
 
     // Not upstream (WR-547; tangency-labs/smlib@cae8618): the patch tangent to its sides'
     // surfaces
