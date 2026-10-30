@@ -70,6 +70,7 @@ file.slicers                      a listing of slicers
 frame.profile.list                a listing of the profile library
 frame.profile.properties          a profile's section properties from the library
 inspect.accessibility             display analysis: shading
+inspect.analysis                  display analysis: which one is on
 inspect.colored_components        display: component colours
 inspect.curvature_map             display analysis: shading
 inspect.environment_map           display analysis: shading
