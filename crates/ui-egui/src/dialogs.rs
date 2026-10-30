@@ -472,6 +472,8 @@ pub struct Dialog {
     value_focus: Option<egui::Id>,
     /// A viewport press or click returns the keyboard after selection and canvas updates.
     pub(crate) restore_value_focus: bool,
+    /// A right-click in the viewport asked for OK ([`right_click`]); taken on the next frame.
+    pub(crate) confirm: bool,
     /// Folded to its header (the shared disclosure chevron).
     pub collapsed: bool,
     reset_scroll: bool,
@@ -740,6 +742,7 @@ impl Dialog {
             focus: true,
             value_focus: None,
             restore_value_focus: false,
+            confirm: false,
             collapsed: false,
             reset_scroll: true,
             preview_enabled: true,
@@ -3313,12 +3316,15 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let (enter_free, esc) = ctx.input(|i| (i.key_pressed(egui::Key::Enter), i.key_pressed(egui::Key::Escape)));
     let nothing_focused = ctx.memory(|m| m.focused().is_none());
     let canvas_enter = enter_free && ctx.memory(|m| m.had_focus_last_frame(egui::Id::new("sc_canvas_value")));
-    // Tables (configurations, a study's keys) take Enter for their cells.
-    let enter_applies = !matches!(d.kind, Kind::Sketch | Kind::Measure { .. } | Kind::ConfirmDelete { .. })
-        && !matches!(&d.kind, Kind::Motion(k) if k.wide())
-        && !matches!(&d.kind, Kind::Material { editor, .. } if editor.editing());
+    let enter_applies = enter_applies(&d);
     let report_active = app.issue_report.draft.is_some();
-    if !preset_prompt && !report_active && enter_applies && app.applying.is_none() && (enter || canvas_enter || (enter_free && nothing_focused)) {
+    let confirm = std::mem::take(&mut d.confirm);
+    if !preset_prompt
+        && !report_active
+        && enter_applies
+        && app.applying.is_none()
+        && (enter || canvas_enter || (enter_free && nothing_focused) || confirm)
+    {
         ok = true;
     }
     if !preset_prompt && !report_active && esc && !app.esc_handled {
@@ -3478,6 +3484,50 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     if let Some(id) = then_start {
         app.start(id);
     }
+}
+
+/// Whether Enter (and a right-click in the viewport) runs OK: not where there is no OK, a
+/// deletion's confirmation, a table that takes Enter for its cells (configurations, a study's
+/// keys), or a material being edited.
+fn enter_applies(d: &Dialog) -> bool {
+    !matches!(d.kind, Kind::Sketch | Kind::Measure { .. } | Kind::ConfirmDelete { .. })
+        && !matches!(&d.kind, Kind::Motion(k) if k.wide())
+        && !matches!(&d.kind, Kind::Material { editor, .. } if editor.editing())
+}
+
+/// A right-click in the viewport with a dialog open confirms its active input (#6159): it goes
+/// on to the next input that is still empty, and once every input holds something, runs OK as
+/// Enter does. An empty input the dialog can't make its feature without stays active, and the
+/// status line says what to pick.
+pub(crate) fn right_click(app: &mut SolveApp) {
+    let Some(mut d) = app.dialog.take() else { return };
+    if enter_applies(&d) && app.applying.is_none() {
+        let empty = |i: &usize| d.inputs.get(*i).is_some_and(|input| input.items.is_empty());
+        let next = (d.active.saturating_add(1)..d.inputs.len()).chain(0..d.active.min(d.inputs.len())).find(empty);
+        match d.active_input().filter(|input| input.items.is_empty()) {
+            // An empty input is optional when the dialog makes its feature without it.
+            Some(input) if apply_commands(app, &d).is_err() => app.set_status(pick_first(input), false),
+            _ => {
+                // Moving on, the hint about an input before is out of date.
+                if app.status.as_ref().is_some_and(|(text, _, error)| !error && d.inputs.iter().any(|i| *text == pick_first(i))) {
+                    app.status = None;
+                }
+                match next {
+                    Some(i) => {
+                        d.active = i;
+                        d.error = None;
+                    }
+                    None => d.confirm = true,
+                }
+            }
+        }
+    }
+    app.dialog = Some(d);
+}
+
+/// The hint a right-click shows while `input` is empty and needed.
+fn pick_first(input: &SelInput) -> String {
+    crate::i18n::format("dialog.right_click_pick", &[("input", tr(input.label))])
 }
 
 /// Close the dialog without applying it (Esc, Cancel). An edit puts the timeline marker back.
@@ -6712,6 +6762,165 @@ fn same_face(a: &Sel, b: &Sel) -> bool {
 /// Where a face was picked.
 fn face_point(x: &Sel) -> Option<Value> {
     if let Sel::Face { point, .. } = x { Some(pt(*point)) } else { None }
+}
+
+#[cfg(test)]
+mod right_click_tests {
+    //! A right-click in the viewport confirms a dialog's input, and on the last one runs OK (#6159).
+
+    use super::*;
+    use crate::scenario::Harness;
+
+    /// A box in the iso view, and Mirror (Objects, then Mirror Plane) open with nothing picked.
+    fn mirror() -> Harness {
+        let mut h = Harness::new();
+        for s in [
+            json!({"call": "engine.execute", "params": {"command": "solid.box", "params": {"length": 50, "width": 30, "height": 20}}}),
+            json!({"call": "ui.view", "params": {"view": "iso"}}),
+            json!({"start": "solid.mirror"}),
+        ] {
+            h.step(&s).unwrap();
+        }
+        assert!(h.app.dialog.as_ref().is_some_and(|d| matches!(d.kind, Kind::Mirror) && d.active == 0));
+        h
+    }
+
+    fn right_click(h: &mut Harness, at: Value) {
+        h.step(&json!({"click": at, "button": "right"})).unwrap();
+        h.frames(2);
+    }
+
+    fn active(h: &Harness) -> Option<usize> {
+        h.app.dialog.as_ref().map(|d| d.active)
+    }
+
+    fn hint(h: &Harness) -> Option<String> {
+        h.app.status.as_ref().filter(|s| !s.2).map(|s| s.0.clone())
+    }
+
+    /// A right drag in empty space of the viewport.
+    fn right_drag(h: &mut Harness) {
+        let r = h.app.viewport.rect.unwrap();
+        let (a, b) = (r.left_top() + egui::vec2(40.0, 40.0), r.left_top() + egui::vec2(140.0, 90.0));
+        h.call("ui.drag", json!({"x0": a.x, "y0": a.y, "x1": b.x, "y1": b.y, "button": "right", "steps": 8}));
+        h.frames(2);
+    }
+
+    #[test]
+    fn a_right_click_goes_on_to_the_next_input_then_runs_ok() {
+        let mut h = mirror();
+        let features = h.app.session.doc.features.len();
+        // Nothing picked: it stays, and says what to pick.
+        right_click(&mut h, json!({"world": [25, 15, 20]}));
+        assert_eq!(active(&h), Some(0));
+        assert_eq!(hint(&h).as_deref(), Some("Select Objects first"));
+        // The body picked (a list: picking doesn't move on): the right-click does.
+        h.step(&json!({"click": {"world": [25, 15, 20]}})).unwrap();
+        assert_eq!(h.app.dialog.as_ref().map(|d| d.inputs[0].items.len()), Some(1));
+        assert_eq!(active(&h), Some(0));
+        right_click(&mut h, json!({"world": [25, 15, 20]}));
+        assert_eq!(active(&h), Some(1), "on to Mirror Plane");
+        assert!(hint(&h).is_none(), "the hint about Objects is gone");
+        // The plane is needed: no OK without it.
+        right_click(&mut h, json!({"world": [25, 15, 20]}));
+        assert_eq!(active(&h), Some(1));
+        assert_eq!(hint(&h).as_deref(), Some("Select Mirror Plane first"));
+        assert_eq!(h.app.session.doc.features.len(), features);
+        // The last input filled: OK.
+        h.step(&json!({"click": {"world": [50, 15, 10]}})).unwrap();
+        right_click(&mut h, json!({"world": [25, 15, 20]}));
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+        while h.app.dialog.is_some() {
+            assert!(std::time::Instant::now() < deadline, "OK did not finish: {:?}", h.app.dialog.as_ref().and_then(|d| d.error.clone()));
+            h.frames(1);
+        }
+        assert_eq!(h.app.session.doc.features.len(), features + 1, "the mirror is made");
+        assert!(hint(&h).is_none(), "and the hint about the plane is gone");
+        assert!(h.app.viewport.context_menu.is_none());
+    }
+
+    #[test]
+    fn with_every_input_filled_a_right_click_runs_ok() {
+        let mut h = mirror();
+        h.step(&json!({"click": {"world": [25, 15, 20]}})).unwrap();
+        // The plane picked into the second input, then the first made active again.
+        h.app.dialog.as_mut().unwrap().active = 1;
+        h.step(&json!({"click": {"world": [50, 15, 10]}})).unwrap();
+        let d = h.app.dialog.as_mut().unwrap();
+        d.active = 0;
+        assert!(!d.inputs[0].items.is_empty() && !d.inputs[1].items.is_empty());
+        // Both filled, from the first: OK straight away (no empty input to go to).
+        right_click(&mut h, json!({"world": [25, 15, 20]}));
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+        while h.app.dialog.is_some() {
+            assert!(std::time::Instant::now() < deadline, "OK did not finish");
+            h.frames(1);
+        }
+    }
+
+    #[test]
+    fn a_typed_value_is_taken_by_the_right_click_ok() {
+        // Extrude a rectangle: the value box has the keyboard, "25 mm" is typed without Enter,
+        // and a right-click in the view runs OK with it.
+        let mut h = Harness::new();
+        for s in [
+            json!({"call": "engine.execute", "params": {"command": "sketch.create", "params": {"plane": "XY"}}}),
+            json!({"call": "engine.execute", "params": {"command": "sketch.rectangle.two_point", "params": {"p0": [0, 0], "p1": [40, 20]}}}),
+            json!({"call": "engine.execute", "params": {"command": "sketch.finish", "params": {}}}),
+            json!({"call": "ui.view", "params": {"view": "iso"}}),
+            json!({"start": "solid.extrude"}),
+        ] {
+            h.step(&s).unwrap();
+        }
+        h.frames(2);
+        assert!(h.app.dialog.as_ref().is_some_and(|d| d.inputs.first().is_some_and(|i| !i.items.is_empty())), "the profile is picked");
+        h.step(&json!({"key": "A", "cmd": true})).unwrap();
+        h.step(&json!({"text": "25 mm"})).unwrap();
+        right_click(&mut h, json!({"world": [-30, -30, 0]}));
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+        while h.app.dialog.is_some() {
+            assert!(std::time::Instant::now() < deadline, "OK did not finish: {:?}", h.app.dialog.as_ref().and_then(|d| d.error.clone()));
+            h.frames(1);
+        }
+        let bounds = h.app.session.world_state().bodies.first().map(|b| b.mesh().bounds());
+        assert_eq!(bounds.map(|b| b.max.z - b.min.z), Some(25.0), "extruded by the typed value");
+    }
+
+    #[test]
+    fn with_the_preference_off_a_right_click_leaves_the_dialog_alone() {
+        let mut h = mirror();
+        h.app.preferences.right_click_confirms = false;
+        h.step(&json!({"click": {"world": [25, 15, 20]}})).unwrap();
+        right_click(&mut h, json!({"world": [25, 15, 20]}));
+        assert_eq!(active(&h), Some(0));
+        assert!(hint(&h).is_none());
+        assert!(h.app.viewport.context_menu.is_none(), "no menu over a dialog");
+    }
+
+    #[test]
+    fn a_right_drag_is_not_a_confirmation() {
+        for gestures in [false, true] {
+            let mut h = mirror();
+            if gestures {
+                h.app.preferences.nav = crate::mouse_gesture::MOUSE_MODE.into();
+                h.app.preferences.mouse_gestures.enabled = true;
+            }
+            h.step(&json!({"click": {"world": [25, 15, 20]}})).unwrap();
+            right_drag(&mut h);
+            assert_eq!(active(&h), Some(0), "gestures {gestures}");
+            assert!(h.app.dialog.as_ref().is_some_and(|d| !d.confirm));
+        }
+    }
+
+    #[test]
+    fn without_a_dialog_a_right_click_opens_the_menu() {
+        let mut h = mirror();
+        cancel(&mut h.app);
+        h.frames(2);
+        right_click(&mut h, json!({"world": [25, 15, 20]}));
+        assert!(h.app.viewport.context_menu.is_some());
+        assert!(hint(&h).is_none());
+    }
 }
 
 #[cfg(test)]
