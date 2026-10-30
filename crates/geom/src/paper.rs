@@ -3,6 +3,11 @@
 //! nothing here is saved, drawn on screen or made by a command yet. Text, clips, line patterns and
 //! styles are later additions.
 //!
+//! A picture (a shaded view, a logo) is a rectangle and the name of its pixels, never the pixels:
+//! a writer asks a [`Pictures`] provider for them on the pixel grid it draws on
+//! ([`crate::pixel_grid`]), so a PNG at 1200 dpi gets a picture drawn at 1200 dpi rather than one
+//! stretched.
+//!
 //! - Coordinates are millimetres from the sheet's lower-left corner, x to the right and y up;
 //!   angles are radians, anticlockwise. A line's width is its width on paper, centred on its path.
 //! - Paint goes on in order: the groups in turn, then the items of each group in turn, each over
@@ -23,20 +28,31 @@
 //!   within ±2e5 mm;
 //! - a stroke's pieces meeting end to start within [`EPS`], and its ends too when it is closed;
 //!   every loop of a fill closed the same way;
-//! - a line width above 0 and at most [`MAX_LINE_MM`].
+//! - a line width above 0 and at most [`MAX_LINE_MM`];
+//! - a picture's rectangle within the coordinate bound and above 0 on each side, and its opacity
+//!   above 0 and at most 1.
 //!
 //! It does not certify simple loops, holes inside their outer loop or a path that never doubles
 //! back. Validation after parsing cannot bound parsing allocations: an encoded-input boundary must
 //! also limit bytes and nesting.
 //!
 //! Writers read a [`Prepared`] scene, which only [`Scene::prepare`] makes, so none reads one that
-//! wasn't checked. Clipping will happen there too, once, before any writer (A8).
+//! wasn't checked, and format it on their number grid ([`Prepared::on_grid`], [`grid`]'s rules),
+//! so every format draws the same joints, closures and merges. Clipping will happen in
+//! `prepare` too, once, before any writer (A8).
 
 use serde::{Deserialize, Serialize};
 
 use std::f64::consts::FRAC_PI_2;
 
-use crate::{EPS, Region2, Seg2, Vec2};
+use crate::pixel_grid::{GridWindow, PixelGrid, PixelGridError};
+use crate::{Aabb2, EPS, Region2, Seg2, Vec2};
+
+pub mod flatten;
+pub mod grid;
+
+pub use flatten::flatten;
+pub use grid::{Grid, GridGroup, GridItem, GridPath, GridPoint, GridReport, OnGrid, Piece};
 
 /// The widest line a scene may draw, in millimetres.
 pub const MAX_LINE_MM: f64 = 10.0;
@@ -74,6 +90,7 @@ impl Group {
         let item = |item: &Item| match item {
             Item::Stroke { path, .. } => path.len(),
             Item::Fill { region } => region.loops().fold(0usize, |n, l| n.saturating_add(1).saturating_add(l.segs.len())),
+            Item::Picture(_) => 0,
         };
         self.items.iter().fold(1usize, |n, i| n.saturating_add(1).saturating_add(item(i)))
     }
@@ -122,6 +139,47 @@ pub enum Item {
     Stroke { path: Vec<Seg2>, closed: bool, width_mm: f64 },
     /// A region painted solid.
     Fill { region: Region2 },
+    /// Pixels drawn into a rectangle.
+    Picture(Picture),
+}
+
+/// A picture on the sheet: its pixels, named by `source`, drawn into `rect` over what is already
+/// there, `opacity` times as strongly as their own alpha says.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Picture {
+    /// Which pixels, opaque here: a writer asks [`Pictures`] for them.
+    pub source: u64,
+    /// Where it sits, millimetres.
+    pub rect: Aabb2,
+    /// Above 0, up to 1 (as its pixels are).
+    pub opacity: f64,
+}
+
+impl Picture {
+    /// Its own pixel grid at `dpi`, anchored at its rectangle's lower-left corner: what SVG and PDF
+    /// embed.
+    pub fn grid(&self, dpi: f64) -> std::result::Result<PixelGrid, PixelGridError> {
+        let size = self.rect.size();
+        PixelGrid::new(self.rect.min.x, self.rect.min.y, size.x, size.y, dpi)
+    }
+}
+
+/// Where a writer gets a picture's pixels.
+pub trait Pictures {
+    /// The pixels of picture `source` on `grid`, for the columns and rows of `window`: straight
+    /// (not premultiplied) alpha, sRGB, 8 bits a channel, RGBA, top row first, exactly `window`'s
+    /// size.
+    fn rows(&self, source: u64, grid: &PixelGrid, window: GridWindow) -> std::result::Result<Vec<u8>, String>;
+}
+
+/// No pictures: a writer given it refuses any picture it meets.
+pub struct NoPictures;
+
+impl Pictures for NoPictures {
+    fn rows(&self, source: u64, _: &PixelGrid, _: GridWindow) -> std::result::Result<Vec<u8>, String> {
+        Err(format!("no pixels for picture {source}"))
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
@@ -214,6 +272,15 @@ impl Scene {
                         pieces(&l.segs)?;
                         require(l.is_closed(EPS), "each loop of a fill is closed")?;
                     }
+                }
+                Item::Picture(Picture { rect, opacity, .. }) => {
+                    let within = |v: f64| v.abs() <= MAX_COORDINATE_MM;
+                    let corners = [rect.min.x, rect.min.y, rect.max.x, rect.max.y];
+                    require(
+                        corners.into_iter().all(within) && rect.min.x < rect.max.x && rect.min.y < rect.max.y,
+                        "a picture's rectangle is within 1e5 mm and above 0 on each side",
+                    )?;
+                    require(*opacity > 0.0 && *opacity <= 1.0, "a picture's opacity is above 0 and at most 1")?;
                 }
             }
         }
