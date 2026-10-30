@@ -409,3 +409,79 @@ fn output_radio_rows_keep_titles_summaries_and_disabled_choices_in_both_themes()
         }
     }
 }
+
+#[test]
+fn segmented_space_and_arrows_choose_while_enter_applies_the_dialog() {
+    for icons in [false, true] {
+        let ctx = crate::fonts::test_context();
+        let selected = std::cell::Cell::new(0);
+        let target = std::cell::Cell::new(egui::Id::NULL);
+        let applied = std::cell::Cell::new(false);
+        let mut draw = |ui: &mut Ui| {
+            crate::dialog_focus::prepare_active(ui.ctx());
+            let (_, action) = Window::new(egui::Id::new("segment_dialog"), "", "Test").show(ui.ctx(), true, |ui| {
+                row(ui, "Continuity", |ui| {
+                    target.set(ui.make_persistent_id((if icons { "icon_segment" } else { "segment" }, 1usize)));
+                    let mut value = selected.get();
+                    if icons {
+                        segmented_icons(
+                            ui,
+                            &mut value,
+                            &[IconSegment { key: "G1", icon: "line", tip: "G1".into() }, IconSegment { key: "G2", icon: "circle", tip: "G2".into() }],
+                            &[],
+                        );
+                    } else {
+                        segmented(ui, &mut value, &["G1", "G2"], Segments { compact: true, ..Default::default() });
+                    }
+                    selected.set(value);
+                });
+            });
+            if action == Action::Ok {
+                applied.set(true);
+            }
+        };
+        for _ in 0..3 {
+            frame(&ctx, vec![], &mut draw);
+        }
+        ctx.memory_mut(|m| m.request_focus(target.get()));
+        frame(&ctx, key(egui::Key::Enter), &mut draw);
+        assert_eq!(selected.get(), 0, "Enter must preserve the choice (icons={icons})");
+        assert!(applied.get(), "Enter must apply the dialog (icons={icons})");
+        applied.set(false);
+        ctx.memory_mut(|m| m.request_focus(target.get()));
+        frame(&ctx, key(egui::Key::Space), &mut draw);
+        assert_eq!(selected.get(), 1);
+        assert!(!applied.get(), "Space selects without applying");
+        for (arrow, expected) in [(egui::Key::ArrowLeft, 0), (egui::Key::ArrowRight, 1), (egui::Key::ArrowUp, 0), (egui::Key::ArrowDown, 1)] {
+            frame(&ctx, key(arrow), &mut draw);
+            assert_eq!(selected.get(), expected, "{arrow:?} must choose the adjacent option (icons={icons})");
+            assert!(!applied.get());
+        }
+    }
+}
+
+#[test]
+fn segmented_arrows_skip_disabled_options_and_stay_in_the_group() {
+    let ctx = crate::fonts::test_context();
+    let selected = std::cell::Cell::new(0);
+    let first = std::cell::Cell::new(egui::Id::NULL);
+    let mut draw = |ui: &mut Ui| {
+        row(ui, "Continuity", |ui| {
+            first.set(ui.make_persistent_id(("segment", 0usize)));
+            let mut value = selected.get();
+            segmented(ui, &mut value, &["G1", "G2", "G3"], Segments { enabled: &[true, false, true], compact: true, ..Default::default() });
+            selected.set(value);
+        });
+    };
+    for _ in 0..3 {
+        frame(&ctx, vec![], &mut draw);
+    }
+    ctx.memory_mut(|m| m.request_focus(first.get()));
+    frame(&ctx, key(egui::Key::ArrowRight), &mut draw);
+    assert_eq!(selected.get(), 2, "arrows skip disabled G2");
+    frame(&ctx, key(egui::Key::ArrowLeft), &mut draw);
+    assert_eq!(selected.get(), 0);
+    frame(&ctx, key(egui::Key::ArrowLeft), &mut draw);
+    assert_eq!(selected.get(), 0);
+    assert_eq!(ctx.memory(|m| m.focused()), Some(first.get()), "arrows at a boundary keep focus in the group");
+}

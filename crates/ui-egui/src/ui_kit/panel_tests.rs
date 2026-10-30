@@ -1338,7 +1338,7 @@ fn dialog_tab_window_wraps_in_both_directions_and_excludes_background_fields() {
             }
         }
         assert!(visited.contains(&first_id), "the loop must return to the first field");
-        assert_eq!(visited.len(), 5, "only two fields, two footer actions and Close belong in the loop");
+        assert_eq!(visited.len(), 4, "only two fields and two footer actions belong in the loop; Close is pointer-only");
     }
 }
 
@@ -1409,16 +1409,20 @@ fn dialog_tab_dropdown_wraps_then_returns_to_its_parent_dialog() {
 fn dialog_tab_dropdown_arrows_change_the_focused_choice() {
     let ctx = crate::fonts::test_context();
     let selected = std::cell::Cell::new(0);
+    let applied = std::cell::Cell::new(false);
     let dropdown_id = std::cell::Cell::new(None);
     let mut draw = |ui: &mut Ui| {
         crate::dialog_focus::prepare_active(ui.ctx());
-        Window::new(egui::Id::new("arrow_window"), "", "Test").show(ui.ctx(), true, |ui| {
+        let (_, action) = Window::new(egui::Id::new("arrow_window"), "", "Test").show(ui.ctx(), true, |ui| {
             row(ui, "Mode", |ui| {
                 let mut value = selected.get();
                 dropdown_id.set(Some(dropdown(ui, "mode", &mut value, &["First", "Second", "Third"]).id));
                 selected.set(value);
             });
         });
+        if action == Action::Ok {
+            applied.set(true);
+        }
     };
     for _ in 0..3 {
         frame(&ctx, vec![], &mut draw);
@@ -1431,7 +1435,7 @@ fn dialog_tab_dropdown_arrows_change_the_focused_choice() {
     assert_eq!(selected.get(), 0, "Up must change the focused dropdown choice");
     frame(&ctx, key(egui::Key::ArrowUp), &mut draw);
     assert_eq!(selected.get(), 0, "Up at the first choice must stay in bounds");
-    frame(&ctx, key(egui::Key::Enter), &mut draw);
+    frame(&ctx, key(egui::Key::Space), &mut draw);
     for _ in 0..3 {
         frame(&ctx, vec![], &mut draw);
     }
@@ -1440,6 +1444,7 @@ fn dialog_tab_dropdown_arrows_change_the_focused_choice() {
     frame(&ctx, key(egui::Key::ArrowDown), &mut draw);
     frame(&ctx, key(egui::Key::Enter), &mut draw);
     assert_eq!(selected.get(), 1, "open dropdown options must support arrows and Enter");
+    assert!(!applied.get(), "Enter choosing a popup option must not also apply its parent dialog");
 }
 
 #[test]
@@ -1476,5 +1481,67 @@ fn dialog_tab_dropdown_and_actions_paint_a_focus_outline() {
             output.shapes.iter().any(|s| outlined(&s.shape, rect, crate::theme::TabAccent::current(&ctx).color)),
             "focused control must have an accent outline: {id:?}"
         );
+    }
+}
+
+#[test]
+fn dialog_keyboard_closed_dropdown_enter_applies_and_space_opens_all_variants() {
+    for variant in 0..4 {
+        let ctx = crate::fonts::test_context();
+        let selected = std::cell::Cell::new(0);
+        let id = std::cell::Cell::new(egui::Id::NULL);
+        let applied = std::cell::Cell::new(false);
+        let mut filter = String::new();
+        let mut draw = |ui: &mut Ui| {
+            crate::dialog_focus::prepare_active(ui.ctx());
+            let (_, action) = Window::new(egui::Id::new("dropdown_enter"), "", "Test").show(ui.ctx(), true, |ui| {
+                row(ui, "Mode", |ui| {
+                    id.set(ui.make_persistent_id(egui::IdSalt::new("mode")));
+                    let mut value = selected.get();
+                    match variant {
+                        0 => {
+                            dropdown(ui, "mode", &mut value, &["First", "Second"]);
+                        }
+                        1 => {
+                            dropdown_picked(ui, "mode", &mut value, &["First", "Second"]);
+                        }
+                        2 => {
+                            dropdown_menu(ui, "mode", "First", |ui| {
+                                ui.selectable_value(&mut value, 0, "First");
+                                ui.selectable_value(&mut value, 1, "Second");
+                            });
+                        }
+                        _ => {
+                            searchable_dropdown(
+                                ui,
+                                "mode",
+                                "First",
+                                &mut filter,
+                                &[SearchOption { label: "First", value: "first", handle: None }],
+                                None,
+                                None,
+                            );
+                        }
+                    }
+                    selected.set(value);
+                });
+            });
+            if action == Action::Ok {
+                applied.set(true);
+            }
+        };
+        for _ in 0..3 {
+            frame(&ctx, vec![], &mut draw);
+        }
+        ctx.memory_mut(|m| m.request_focus(id.get()));
+        frame(&ctx, key(egui::Key::Enter), &mut draw);
+        assert!(applied.get(), "closed dropdown variant {variant}: Enter applies");
+        assert!(!egui::Popup::is_any_open(&ctx), "Enter must not open its popup");
+        assert_eq!(selected.get(), 0);
+        applied.set(false);
+        ctx.memory_mut(|m| m.request_focus(id.get()));
+        frame(&ctx, key(egui::Key::Space), &mut draw);
+        assert!(egui::Popup::is_any_open(&ctx), "Space still opens dropdown variant {variant}");
+        assert!(!applied.get());
     }
 }

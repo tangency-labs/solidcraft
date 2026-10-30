@@ -1173,3 +1173,212 @@ fn ok_on_a_rolled_back_pattern_editor_says_it_is_not_built() {
     assert!(!error, "{text}");
     assert!(text.starts_with("Pattern changed, but it is after the history marker"), "{text}");
 }
+
+fn keyboard_body_fixture(command: &str, placement: crate::ui_kit::DialogButtons, preselected: bool) -> Harness {
+    let mut h = Harness::new();
+    h.app.preferences.dialog_buttons = placement;
+    h.app.run("solid.box", json!({"length":4,"width":3,"height":2,"corner":[10,0,0]})).unwrap();
+    if preselected {
+        h.app.session.selection = vec![Sel::Body { name: "Body1".into() }];
+    }
+    h.app.start(command);
+    h.frames(6);
+    if !preselected {
+        h.step(&json!({"click":{"world":[12,1.5,2]}})).unwrap();
+    }
+    assert_eq!(h.app.dialog.as_ref().unwrap().inputs[0].items.len(), 1, "{command}: select the seed body");
+    h
+}
+
+#[test]
+fn dialog_keyboard_body_mirror_and_patterns_traverse_and_apply() {
+    use crate::test_support::{dialog_tab_cycle, dialog_tab_to};
+    for command in ["solid.mirror", "solid.pattern.rectangular", "solid.pattern.circular"] {
+        for placement in [crate::ui_kit::DialogButtons::Bottom, crate::ui_kit::DialogButtons::Top] {
+            for preselected in [false, true] {
+                let mut h = keyboard_body_fixture(command, placement, preselected);
+                let original = h.app.session.doc.to_json();
+                let undo = h.app.session.undo.len();
+                let picks = h.app.dialog.as_ref().unwrap().inputs[0].items.clone();
+                h.call("ui.dialogInput", json!({"index":0}));
+                h.step(&json!({"key":"Tab"})).unwrap();
+                assert_eq!(h.app.dialog.as_ref().unwrap().active, 1, "{command}: Tab advances from bodies to the reference");
+                h.step(&json!({"key":"Tab","shift":true})).unwrap();
+                assert_eq!(h.app.dialog.as_ref().unwrap().active, 0);
+                assert_eq!(h.app.dialog.as_ref().unwrap().inputs[0].items, picks);
+                h.step(&json!({"key":"Tab"})).unwrap();
+                let reference = h.app.dialog.as_ref().unwrap().inputs[1].label.to_string();
+                if command == "solid.mirror" {
+                    h.step(&json!({"click":{"plane":"YZ"}})).unwrap();
+                } else {
+                    h.step(&json!({"click":{"axis":if command.ends_with("circular") { "Z" } else { "X" }}})).unwrap();
+                    if command.ends_with("rectangular") {
+                        let second = h.app.dialog.as_ref().unwrap().inputs[2].label.to_string();
+                        dialog_tab_to(&mut h, &format!("dialog:{second}"));
+                        h.step(&json!({"click":{"axis":"Y"}})).unwrap();
+                        h.step(&json!({"click":{"handle":"dialog:Quantity 2"}})).unwrap();
+                        h.step(&json!({"key":"A","cmd":true})).unwrap();
+                        h.step(&json!({"text":"2"})).unwrap();
+                    }
+                    h.step(&json!({"click":{"handle":"dialog:Quantity"}})).unwrap();
+                    h.step(&json!({"key":"A","cmd":true})).unwrap();
+                    h.step(&json!({"text":"3"})).unwrap();
+                    h.step(&json!({"key":"Tab"})).unwrap();
+                    let next = if command.ends_with("rectangular") { "Spacing" } else { "Total angle" };
+                    let at = scenario::handle_at(&format!("dialog:{next}")).unwrap();
+                    let response = h.ctx.read_response(h.ctx.memory(|m| m.focused()).unwrap()).unwrap();
+                    assert!(response.rect.contains(at), "{command}: Quantity must be followed by {next}");
+                    h.step(&json!({"text":if command.ends_with("rectangular") { "25" } else { "180" }})).unwrap();
+                    match &h.app.dialog.as_ref().unwrap().kind {
+                        Kind::PatternRect { spacing, .. } => assert_eq!(spacing, "25 mm", "typing replaces only the number"),
+                        Kind::PatternCirc { angle, .. } => assert_eq!(angle, "180 deg", "typing preserves angle units"),
+                        _ => panic!("expected a body pattern dialog"),
+                    }
+                    if command.ends_with("rectangular") {
+                        for expected in ["Quantity 2", "Spacing 2"] {
+                            h.step(&json!({"key":"Tab"})).unwrap();
+                            let at = scenario::handle_at(&format!("dialog:{expected}")).unwrap();
+                            assert!(
+                                h.ctx.read_response(h.ctx.memory(|m| m.focused()).unwrap()).unwrap().rect.contains(at),
+                                "{expected} follows the first direction fields"
+                            );
+                        }
+                    }
+                }
+                dialog_tab_to(&mut h, &format!("dialog:{reference}"));
+                dialog_tab_cycle(&mut h);
+                assert_eq!(h.app.session.doc.to_json(), original);
+                h.step(&json!({"key":"Space"})).unwrap();
+                assert!(h.app.dialog.is_some(), "Space activates the reference without applying");
+                let target =
+                    if command == "solid.mirror" && !preselected { "dialog:Operation:Join".to_string() } else { format!("dialog:{reference}") };
+                dialog_tab_to(&mut h, &target);
+                h.step(&json!({"key":"Enter"})).unwrap();
+                assert!(
+                    h.app.dialog.is_none(),
+                    "{command} {placement:?} preselected={preselected}: Enter applies without activating a different choice"
+                );
+                let expected = if command == "solid.mirror" {
+                    2
+                } else if command.ends_with("rectangular") {
+                    6
+                } else {
+                    3
+                };
+                let state = h.app.session.world_state();
+                assert_eq!(state.bodies.len(), expected);
+                let volume: f64 = state.bodies.iter().map(|body| solidcraft_engine::doc::kernel::measure(&body.body).unwrap().volume).sum();
+                assert!((volume - 24.0 * expected as f64).abs() < 1e-6, "{command}: copies must preserve seed volume");
+                assert_eq!(h.app.session.undo.len(), undo + 1, "one application creates one undo step");
+            }
+        }
+    }
+}
+
+#[test]
+fn dialog_keyboard_body_missing_reference_and_invalid_quantity_do_not_apply() {
+    use crate::test_support::dialog_tab_to;
+    for command in ["solid.mirror", "solid.pattern.rectangular", "solid.pattern.circular"] {
+        let mut h = keyboard_body_fixture(command, crate::ui_kit::DialogButtons::Bottom, true);
+        let original = h.app.session.doc.to_json();
+        let undo = h.app.session.undo.len();
+        let source = h.app.dialog.as_ref().unwrap().inputs[0].label.to_string();
+        h.step(&json!({"click":{"handle":format!("dialog:clear:{source}")}})).unwrap();
+        dialog_tab_to(&mut h, &format!("dialog:{source}"));
+        h.step(&json!({"key":"Enter"})).unwrap();
+        assert!(h.app.dialog.is_some(), "{command}: empty source selection must not apply");
+        assert_eq!(h.app.session.doc.to_json(), original);
+        dialog_tab_to(&mut h, &format!("dialog:{source}"));
+        h.step(&json!({"click":{"world":[12,1.5,2]}})).unwrap();
+        let reference = h.app.dialog.as_ref().unwrap().inputs[1].label.to_string();
+        dialog_tab_to(&mut h, &format!("dialog:{reference}"));
+        h.step(&json!({"key":"Enter"})).unwrap();
+        assert!(h.app.dialog.is_some(), "{command}: an unfilled required reference must not apply");
+        assert_eq!(h.app.session.doc.to_json(), original);
+        if command != "solid.mirror" {
+            h.step(&json!({"click":{"axis":if command.ends_with("circular") { "Z" } else { "X" }}})).unwrap();
+            h.step(&json!({"click":{"handle":"dialog:Quantity"}})).unwrap();
+            h.step(&json!({"key":"A","cmd":true})).unwrap();
+            h.step(&json!({"text":"0"})).unwrap();
+            h.step(&json!({"key":"Enter"})).unwrap();
+            assert!(h.app.dialog.is_some(), "{command}: zero quantity must not apply");
+            assert_eq!(h.app.session.doc.to_json(), original);
+        }
+        h.step(&json!({"key":"Escape"})).unwrap();
+        assert!(h.app.dialog.is_none());
+        assert_eq!(h.app.session.doc.to_json(), original);
+        assert_eq!(h.app.session.undo.len(), undo);
+    }
+}
+
+#[test]
+fn dialog_keyboard_modified_tabs_do_not_advance_body_selection_inputs() {
+    for command in ["solid.mirror", "solid.pattern.rectangular", "solid.pattern.circular"] {
+        let mut h = keyboard_body_fixture(command, crate::ui_kit::DialogButtons::Bottom, true);
+        let reference = h.app.dialog.as_ref().unwrap().inputs[1].label.to_string();
+        crate::test_support::dialog_tab_to(&mut h, &format!("dialog:{reference}"));
+        h.frames(3);
+        let document = h.app.session.doc.to_json();
+        let active = h.app.dialog.as_ref().unwrap().active;
+        let picks = h.app.dialog.as_ref().unwrap().inputs[0].items.clone();
+        for base in [egui::Modifiers::CTRL, egui::Modifiers::ALT, egui::Modifiers::COMMAND] {
+            for shift in [false, true] {
+                let modifiers = egui::Modifiers { shift, ..base };
+                let focused_before = h.ctx.memory(|m| m.focused());
+                for pressed in [true, false] {
+                    h.app.synthetic.push(egui::Event::Key { key: egui::Key::Tab, physical_key: None, pressed, repeat: false, modifiers });
+                }
+                h.frames(3);
+                assert_eq!(
+                    h.app.dialog.as_ref().unwrap().active,
+                    active,
+                    "{command}: {modifiers:?} belongs to existing shortcuts; focus {focused_before:?} -> {:?}",
+                    h.ctx.memory(|m| m.focused())
+                );
+                assert_eq!(h.app.dialog.as_ref().unwrap().inputs[0].items, picks);
+                assert_eq!(h.app.session.doc.to_json(), document);
+            }
+        }
+    }
+}
+
+#[test]
+fn dialog_keyboard_body_valid_preview_escape_preserves_the_original_model() {
+    use crate::test_support::{dialog_tab_cycle, dialog_tab_to};
+    for command in ["solid.mirror", "solid.pattern.rectangular", "solid.pattern.circular"] {
+        for placement in [crate::ui_kit::DialogButtons::Bottom, crate::ui_kit::DialogButtons::Top] {
+            for preselected in [false, true] {
+                let mut h = keyboard_body_fixture(command, placement, preselected);
+                let document = h.app.session.doc.to_json();
+                let undo = h.app.session.undo.len();
+                let reference = h.app.dialog.as_ref().unwrap().inputs[1].label.to_string();
+                dialog_tab_to(&mut h, &format!("dialog:{reference}"));
+                if command == "solid.mirror" {
+                    h.step(&json!({"click":{"plane":"YZ"}})).unwrap();
+                } else {
+                    h.step(&json!({"click":{"axis":if command.ends_with("circular") { "Z" } else { "X" }}})).unwrap();
+                    dialog_tab_to(&mut h, "dialog:Quantity");
+                    h.step(&json!({"text":"4"})).unwrap();
+                }
+                h.settle();
+                let commands = apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
+                assert!(!commands.is_empty(), "{command}: cancellation must exercise valid pending geometry");
+                if command != "solid.mirror" {
+                    match &h.app.dialog.as_ref().unwrap().kind {
+                        Kind::PatternRect { count, .. } | Kind::PatternCirc { count, .. } => assert_eq!(count, "4"),
+                        _ => panic!("expected a body pattern dialog"),
+                    }
+                }
+                dialog_tab_to(&mut h, &format!("dialog:{reference}"));
+                dialog_tab_cycle(&mut h);
+                h.step(&json!({"key":"Escape"})).unwrap();
+                assert!(h.app.dialog.is_none(), "{command} {placement:?}: Escape closes the valid dialog");
+                assert_eq!(h.app.session.doc.to_json(), document, "cancel must not commit the preview or edited quantities");
+                assert_eq!(h.app.session.undo.len(), undo, "cancel must not add an undo step");
+                let state = h.app.session.world_state();
+                assert_eq!(state.bodies.len(), 1);
+                assert!((solidcraft_engine::doc::kernel::measure(&state.bodies[0].body).unwrap().volume - 24.0).abs() < 1e-6);
+            }
+        }
+    }
+}
