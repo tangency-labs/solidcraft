@@ -362,8 +362,8 @@ mod imp {
                 (Some(o), Some(ro)) => match r.history().map_err(|e| failed(what, "history", e))?.history(&[o], ro) {
                     Ok(mut h) => {
                         let operand = History::identity(body).edges;
-                        let replaced = blended(body, edges, &h);
-                        solidcraft_smlib::history::blends(&mut h, &operand, &replaced);
+                        let taken_up = taken_up(body, edges, &h);
+                        solidcraft_smlib::history::blends(&mut h, &operand, edges, &taken_up);
                         Some(with_corners(h))
                     }
                     Err(e) => {
@@ -414,10 +414,10 @@ mod imp {
         h
     }
 
-    /// The operand's edges the blend replaced: each picked edge, and every edge no result edge
-    /// comes from (one the blend's corners took up), in the operand's edge order.
-    fn blended(body: &Body, picked: &[usize], h: &History) -> Vec<usize> {
-        let mut out: BTreeSet<usize> = picked.iter().copied().collect();
+    /// The operand's edges the blend took up besides the picked ones: every edge no result edge
+    /// comes from (one the blend's corners took up, or one it ran over), in the operand's edge
+    /// order.
+    fn taken_up(body: &Body, picked: &[usize], h: &History) -> Vec<usize> {
         let kept: BTreeSet<usize> = h
             .edges
             .iter()
@@ -427,8 +427,7 @@ mod imp {
                 _ => None,
             })
             .collect();
-        out.extend((0..body.edge_count()).filter(|e| !kept.contains(e)));
-        out.into_iter().collect()
+        (0..body.edge_count()).filter(|e| !kept.contains(e) && !picked.contains(e)).collect()
     }
 }
 

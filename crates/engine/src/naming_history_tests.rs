@@ -691,3 +691,25 @@ fn a_shell_point_pick_moved_off_its_face_reopens_only_that_face() {
     assert!(solid_at(&s, [100.0, 16.0, 10.0]), "the bottom face stays closed");
     assert!(!solid_at(&s, [149.0, 25.0, 10.0]), "the end at x = 150 is open");
 }
+
+/// A two-distance chamfer of a plate's bottom front edge running 220 up the front face, past the
+/// 85 mm where the plate's sides start to taper (rig fillets/5181): the chamfer takes up the front
+/// face's straight side edges too, and lies between their faces, but it is made from the picked
+/// edge alone. Its one face has the picked edge's name everywhere on it (it was named after the
+/// left side's edge, l6, the first edge it took up).
+#[test]
+fn a_chamfer_running_past_the_side_edges_it_takes_up_is_named_by_its_edge() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": {"origin": [0, 0, 0], "x_dir": [1, 0, 0], "y_dir": [0, 0, 1]}, "name": "Bracket"}));
+    let taper = 30.675635228421154;
+    run(&mut s, "sketch.line", json!({"points": [[-50, 0], [50, 0], [50, 85], [taper, 222.5], [-taper, 222.5], [-50, 85]], "closed": true}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "Bracket", "distance": 23, "body_name": "Bracket"}));
+    run(&mut s, "solid.chamfer", json!({"edges": [[0, 0, 0]], "distance": 220, "distance2": 11}));
+    let blends: Vec<String> = names(&s, "Bracket").into_iter().map(|(n, _)| n).filter(|n| n.starts_with("F3:blend:")).collect();
+    assert_eq!(blends, vec!["F3:blend:F2:side:l1|F2:start".to_string()]);
+    // On the chamfer's plane, through (x, -11, 0) and (x, 0, 220): below and above z = 85.
+    let on = |z: f64| Vec3::new(0.0, -11.0 * (1.0 - z / 220.0), z);
+    let at = solidcraft_doc::naming::face_names_at(&s.model.state(), &[on(40.0), on(150.0)]);
+    assert_eq!(at, vec![blends[0].clone(), blends[0].clone()]);
+}

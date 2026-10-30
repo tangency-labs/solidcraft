@@ -202,13 +202,17 @@ impl Raw {
     }
 }
 
-/// A blend's faces (fillet, chamfer) in `h`, the history of a blend of edges `blended` of its
+/// A blend's faces (fillet, chamfer) in `h`, the history of a blend of edges `picked` of its
 /// one operand (operand 0), whose own edges `operand` lists (the faces each bounds, as in the
-/// operand's identity history): SMLib makes a blend face with no tag, so each Generated face is
-/// given [`FaceOrigin::Edge`] for every blended edge whose two faces both lie under faces next
-/// to it and no longer meet each other directly. A corner patch between several blends matches
-/// none of them and stays without origin.
-pub fn blends(h: &mut History, operand: &[EdgeProv], blended: &[usize]) {
+/// operand's identity history), which also took up edges `taken_up` (no result edge comes from
+/// them: a corner's short edge, or an edge the blend ran over): SMLib makes a blend face with no
+/// tag, so each Generated face is given [`FaceOrigin::Edge`] for every picked edge whose two
+/// faces both lie under faces next to it and no longer meet each other directly, and only where
+/// no picked edge is such, every taken-up edge that is. A chamfer running up past the end of the
+/// face beside it takes up that face's side edge and lies between its faces too: it is made from
+/// the picked edge alone. A corner patch between several blends matches none of them and stays
+/// without origin.
+pub fn blends(h: &mut History, operand: &[EdgeProv], picked: &[usize], taken_up: &[usize]) {
     let mut next_to: Vec<BTreeSet<FaceOrigin>> = vec![BTreeSet::new(); h.faces.len()];
     for e in &h.edges {
         for f in &e.faces {
@@ -238,14 +242,18 @@ pub fn blends(h: &mut History, operand: &[EdgeProv], blended: &[usize]) {
         if f.change != Change::Generated || !f.origins.is_empty() {
             continue;
         }
-        let edges = blended.iter().filter(|e| {
+        let under = |e: &&usize| {
             operand.get(**e).is_some_and(|p| {
                 let [a, b] = p.faces.as_slice() else { return false };
                 let (a, b) = (FaceOrigin::Face { operand: 0, face: *a }, FaceOrigin::Face { operand: 0, face: *b });
                 around.contains(&a) && around.contains(&b) && !meeting.contains(&(a.min(b), a.max(b)))
             })
-        });
-        f.origins = edges.map(|e| FaceOrigin::Edge { operand: 0, edge: *e }).collect();
+        };
+        let mut edges: Vec<usize> = picked.iter().filter(under).copied().collect();
+        if edges.is_empty() {
+            edges = taken_up.iter().filter(under).copied().collect();
+        }
+        f.origins = edges.into_iter().map(|e| FaceOrigin::Edge { operand: 0, edge: e }).collect();
     }
 }
 
