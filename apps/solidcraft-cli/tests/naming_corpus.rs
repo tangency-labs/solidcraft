@@ -1,10 +1,11 @@
-//! Every design of the corpus loads, every name it stores still finds a face or an edge, and
-//! two builds of it name its faces and edges alike. The stored names are the fillet and chamfer
-//! edges, the faces a feature picks, the face a sketch sits on and the sheet metal edges; one
-//! that finds nothing (`gone`, a sketch's face `lost`) fails the test, and so does a design that
-//! no longer loads. A build's names are each face's and edge's name with where it is (its area
-//! and centre, its length and middle); the second build must give the same, and its stored
-//! names must find the same faces and edges.
+//! Every design of the corpus loads, two builds of it name its faces and edges alike, and a
+//! name it stores that no longer finds its face or edge fails its feature. The stored names are
+//! the fillet and chamfer edges, the faces a feature picks, the face a sketch sits on and the
+//! sheet metal edges; one that finds nothing (`gone`, a sketch's face `lost`) must leave its
+//! feature failed (it asks for the reference to be picked again, never takes another face or
+//! edge), and a design that no longer loads fails the test. A build's names are each face's and
+//! edge's name with where it is (its area and centre, its length and middle); the second build
+//! must give the same, and its stored names must find the same faces and edges.
 //!
 //! Face and edge indices are left out: they are the kernel's order, which a rebuild need not
 //! keep (a fillet's or a boolean's faces come out in another order from one build to the next).
@@ -109,7 +110,7 @@ fn load(source: &Source) -> Result<Session, String> {
 }
 
 /// What decides a name beyond its text: `[geometric]` when it was worked out from geometry, not
-/// exact history; how a stored name was found.
+/// exact history.
 fn flags(list: &[(bool, &str)]) -> String {
     let set: Vec<&str> = list.iter().filter(|(on, _)| *on).map(|(_, f)| *f).collect();
     if set.is_empty() { String::new() } else { format!(" [{}]", set.join(", ")) }
@@ -175,9 +176,7 @@ fn record_refs(out: &mut Vec<(String, bool)>, s: &Session, f: &Feature) {
                 ("not checked (a cylindrical emboss finds its face on its own body)".to_string(), true)
             } else {
                 match naming::locate_face_on_body(&fst, f.kind.face_body(), n, p) {
-                    Some(hit) => {
-                        (format!("{}{}", face_label(&fst, hit.body, hit.face), flags(&[(!hit.verified, "geometric"), (hit.legacy, "legacy")])), true)
-                    }
+                    Some(hit) => (format!("{}{}", face_label(&fst, hit.body, hit.face), flags(&[(!hit.verified, "geometric")])), true),
                     None => ("gone".into(), false),
                 }
             };
@@ -193,7 +192,7 @@ fn record_refs(out: &mut Vec<(String, bool)>, s: &Session, f: &Feature) {
                         "{} edge {}{}",
                         b.name,
                         naming::edge_names(b).get(hit.edge).map(String::as_str).unwrap_or("?"),
-                        flags(&[(!hit.verified, "geometric"), (hit.legacy, "legacy")])
+                        flags(&[(!hit.verified, "geometric")])
                     ),
                     true,
                 ),
@@ -248,7 +247,7 @@ fn record_refs(out: &mut Vec<(String, bool)>, s: &Session, f: &Feature) {
         }
     }
     // The face a sketch sits on.
-    if let FeatureKind::Sketch { plane: PlaneRef::Face { name, anchor, .. }, .. } = &f.kind {
+    if let FeatureKind::Sketch { plane: PlaneRef::Face { name, anchor, at, .. }, .. } = &f.kind {
         let mut ok = true;
         let status = match doc.sketch_face_attachment(f.id, &s.model) {
             FaceAttachmentStatus::Healthy { target, .. } => {
@@ -276,26 +275,20 @@ fn record_refs(out: &mut Vec<(String, bool)>, s: &Session, f: &Feature) {
                 ok = false;
                 format!("lost: {message}")
             }
-            FaceAttachmentStatus::Legacy { .. } => {
-                // Found by its name among the faces facing the same way, nearest the pick.
-                let fst = solidcraft_engine::doc::state_in_frame(doc, &before, f.component).unwrap();
-                let mut list: Vec<String> = match name {
-                    Some(n) => fst
-                        .bodies
-                        .iter()
-                        .filter(|b| !b.body.is_mesh())
-                        .flat_map(|b| {
-                            let names = naming::face_names(b);
-                            naming::faces_with_stem(b, n)
-                                .into_iter()
-                                .map(move |i| format!("{} face {}", b.name, names.get(i).map(String::as_str).unwrap_or("?")))
-                        })
-                        .collect(),
-                    None => Vec::new(),
-                };
-                list.sort();
-                if list.is_empty() { "legacy, by its pick".into() } else { format!("legacy, by name among {}", list.join("; ")) }
-            }
+            FaceAttachmentStatus::Legacy { .. } => match name {
+                // The face its name finds, as the sketch finds it.
+                Some(n) => {
+                    let fst = solidcraft_engine::doc::state_in_frame(doc, &before, f.component).unwrap();
+                    match naming::locate_face(&fst, n, *at) {
+                        Some(hit) => format!("by name: {}{}", face_label(&fst, hit.body, hit.face), flags(&[(!hit.verified, "geometric")])),
+                        None => {
+                            ok = false;
+                            "by name: gone".into()
+                        }
+                    }
+                }
+                None => "by its pick".into(),
+            },
             FaceAttachmentStatus::Sheet { .. } => "sheet face".into(),
             FaceAttachmentStatus::Fixed { .. } => "fixed".into(),
         };
@@ -323,7 +316,13 @@ fn build(s: &Session) -> Build {
     let names = s.model.state().bodies.iter().flat_map(placed_names).collect();
     let mut refs = Vec::new();
     for f in s.doc.features.iter().filter(|f| !f.suppressed) {
+        let from = refs.len();
         record_refs(&mut refs, s, f);
+        // A name that finds nothing is sound when its feature fails: it asks for the reference
+        // to be picked again.
+        if s.model.result(f.id).is_some_and(|r| r.error.is_some()) {
+            refs.iter_mut().skip(from).for_each(|(_, ok)| *ok = true);
+        }
     }
     Build { names, refs }
 }
@@ -362,7 +361,7 @@ const UNSTABLE: [(&str, &str); 1] = [(
 )];
 
 #[test]
-fn corpus_designs_keep_their_references_and_name_alike_every_build() {
+fn corpus_designs_name_alike_every_build_and_fail_where_a_reference_is_gone() {
     let designs = designs();
     let next = std::sync::atomic::AtomicUsize::new(0);
     let results = std::sync::Mutex::new(Vec::new());
@@ -390,7 +389,7 @@ fn corpus_designs_keep_their_references_and_name_alike_every_build() {
         };
         let lost: Vec<&str> = first.refs.iter().filter(|(_, ok)| !ok).map(|(r, _)| r.as_str()).collect();
         if !lost.is_empty() {
-            problems.push(format!("{name}: stored names that find nothing:\n  {}", lost.join("\n  ")));
+            problems.push(format!("{name}: stored names that find nothing, in features that build:\n  {}", lost.join("\n  ")));
         }
         let apart = differences(first, second, 40);
         if !apart.is_empty() {

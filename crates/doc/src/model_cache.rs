@@ -37,9 +37,8 @@ fn bad(what: &str) -> DocError {
     DocError::Invalid(what.into())
 }
 
-/// A design whose stored face or edge names were saved before format 14 (marked
-/// [`crate::naming::LEGACY_MARK`]) finds them through names worked out from geometry on demand,
-/// which a saved model does not keep.
+/// A design holding a face or edge name saved before format 14 (marked
+/// [`crate::naming::LEGACY_MARK`]): it saves without a model.
 fn has_legacy_names(doc: &Document) -> bool {
     let mark = format!("\"{}", crate::naming::LEGACY_MARK);
     doc.features.iter().any(|f| match &f.kind {

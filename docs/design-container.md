@@ -130,9 +130,9 @@ the blend records later features read). States share what they share: a body tha
 later features pass through unchanged, its face names and a solved sketch are each
 recorded once. Face names are kept as worked out (saving works out any not asked
 for yet), so a body taken from the file is named exactly as when it was saved.
-A design whose stored names predate format 14 (marked `?`) finds them through
-names worked out from geometry on demand, which the cache does not keep: it saves
-without a model.
+A design whose stored names predate format 14 (marked `?`) saves without a model:
+those names find no face or edge, and the features holding them ask for their
+references to be picked again.
 
 Both entries are Deflate-compressed (level one) under either compression policy: the
 encoded bodies shrink about fourfold (an imported assembly) to tenfold (modelled parts),

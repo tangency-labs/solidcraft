@@ -230,7 +230,7 @@ fn regularized_shell_keeps_legacy_and_explicit_single_face_projections_closed() 
 }
 
 #[test]
-fn saved_former_strip_projection_reports_lost_without_expanding_healthy_material() {
+fn saved_former_strip_projection_asks_for_its_face_again_without_expanding_healthy_material() {
     let (mut doc, _, _) = shell_document();
     let mut model = Model::new();
     model.evaluate(&doc);
@@ -257,10 +257,9 @@ fn saved_former_strip_projection_reports_lost_without_expanding_healthy_material
         )
         .unwrap();
     sketch.links[0].face_name = Some(former.clone());
-    let original = sketch.clone();
     let sk = doc
         .add_feature(
-            FeatureKind::Sketch { plane: PlaneRef::Face { plane, at: Vec3::new(20., 6., 1.), name: Some(former), anchor: None }, sketch },
+            FeatureKind::Sketch { plane: PlaneRef::Face { plane, at: Vec3::new(20., 6., 1.), name: Some(former.clone()), anchor: None }, sketch },
             Some("Saved strip sketch"),
         )
         .unwrap();
@@ -288,21 +287,13 @@ fn saved_former_strip_projection_reports_lost_without_expanding_healthy_material
         let mut cold = Model::new();
         cold.evaluate(&loaded);
         for current in [&model, &cold] {
-            let warning = current.results.iter().find(|r| r.id == sk).unwrap().warning.as_deref().unwrap();
-            assert!(warning.contains("no longer exists; last geometry retained"), "{warning}");
-            let state = current.state();
-            let solved = state.sketch(sk).unwrap();
-            assert!(solved.sketch.links[0].lost);
-            assert_eq!(solved.sketch.curves, original.curves);
-            assert_eq!(solved.sketch.points, original.points);
-            let material = state.bodies.iter().find(|body| body.feature == boss).unwrap();
-            assert!(
-                (solidcraft_kernel::measure(&material.body).unwrap().volume - 24.).abs() < 1e-8,
-                "old24mm3 profile must not silently become120mm3 wall profile"
-            );
-            let bounds = material.mesh().bounds();
-            assert!((bounds.min.x - width).abs() < 1e-8 && (bounds.max.x - width - 1.).abs() < 1e-8);
-            assert!((bounds.max.y - 12.).abs() < 1e-8 && (bounds.max.z - 2.).abs() < 1e-8);
+            // The name was saved before format 14 (marked): it finds no face, so the sketch on it
+            // fails, asking for its face again, and so does the material made from it.
+            let result = current.results.iter().find(|r| r.id == sk).unwrap();
+            let reference = format!("{}{former}", crate::naming::LEGACY_MARK);
+            assert_eq!(result.error.as_deref().and_then(crate::reselect_parts), Some(("Saved strip sketch", reference.as_str())), "{result:?}");
+            assert!(current.results.iter().find(|r| r.id == boss).unwrap().error.is_some());
+            assert!(current.state().bodies.iter().all(|body| body.feature != boss), "old 24 mm3 profile must not silently become the 120 mm3 wall");
         }
     }
 }

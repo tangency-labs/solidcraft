@@ -6277,11 +6277,7 @@ fn face_plane(st: &ModelState, picked: &Plane, at: Vec3, name: Option<&str>) -> 
         if !face.plane_normal.is_some_and(|fnrm| fnrm.dot(n) > 1.0 - 1e-6) {
             return Err(DocError::reselect(name));
         }
-        // A name saved before format 14 is found as it was then, without a note.
-        let note = if crate::naming::legacy_name(name).is_none()
-            && !crate::naming::face_name_exact(b, hit.face)
-            && (face.centroid - at).dot(n).abs() > tol
-        {
+        let note = if !crate::naming::face_name_exact(b, hit.face) && (face.centroid - at).dot(n).abs() > tol {
             // Named from geometry and moved off the picked plane: geometry alone decided.
             Some(format!("face `{name}` was found by geometry, not exact history; check it"))
         } else {

@@ -387,8 +387,8 @@ const JSON_STEPS: [JsonStep; HAND_WRITTEN as usize - 1] = [
 ];
 
 /// Stored face and edge names were worked out from geometry before format 14; they get the
-/// legacy mark (`?`, see `naming::LEGACY_MARK`) so they are found again as those builds found
-/// them, and an older design evaluates as it was saved. The step marks the fields that store
+/// legacy mark (`?`, see `naming::LEGACY_MARK`), which finds no face or edge: a feature holding
+/// one fails, asking for its reference to be picked again. The step marks the fields that store
 /// such a name, by their place in the schema:
 /// - each feature's `face_names`, and fillets' and chamfers' `edge_names` (other features' edge
 ///   names are sheet metal's own);

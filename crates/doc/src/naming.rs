@@ -42,9 +42,7 @@ pub struct NameCell {
     /// What the body's faces came from, when the feature that made it reports it.
     lineage: Option<Arc<Lineage>>,
     names: Arc<OnceLock<Arc<Names>>>,
-    /// The names designs saved before format 14 gave its faces (see [`LEGACY_MARK`]).
-    legacy: Arc<OnceLock<Arc<Vec<String>>>>,
-    /// The body this one is a moved copy of (its legacy names are that body's).
+    /// The body this one is a moved copy of (its names are that body's).
     copy_of: Option<Arc<ModelBody>>,
     /// How deep the chain of features that named it is, for names taken from a saved model
     /// (which has no origin): see [`NameCell::depth`].
@@ -57,15 +55,11 @@ impl NameCell {
     }
     /// Names of a body made by `origin`'s feature, following `lineage` where it is known.
     pub(crate) fn traced(origin: Option<Arc<NamingOrigin>>, lineage: Option<Arc<Lineage>>) -> Self {
-        NameCell { origin, lineage, names: Arc::new(OnceLock::new()), legacy: Arc::new(OnceLock::new()), copy_of: None, saved_depth: None }
+        NameCell { origin, lineage, names: Arc::new(OnceLock::new()), copy_of: None, saved_depth: None }
     }
     /// Names already known, taken as they are.
     pub fn known(names: Arc<Vec<String>>) -> Self {
-        let legacy = OnceLock::new();
-        let _ = legacy.set(names.clone());
-        let mut cell = Self::shared(Arc::new(Names::given(names)));
-        cell.legacy = Arc::new(legacy);
-        cell
+        Self::shared(Arc::new(Names::given(names)))
     }
     /// The names of `body` (a moved copy of a body keeps its faces' names, and how sure they are).
     ///
@@ -102,7 +96,7 @@ impl NameCell {
     fn shared(names: Arc<Names>) -> Self {
         let cell = OnceLock::new();
         let _ = cell.set(names);
-        NameCell { origin: None, lineage: None, names: Arc::new(cell), legacy: Arc::new(OnceLock::new()), copy_of: None, saved_depth: None }
+        NameCell { origin: None, lineage: None, names: Arc::new(cell), copy_of: None, saved_depth: None }
     }
 }
 
@@ -166,7 +160,7 @@ const MAX_DEPTH: usize = 400;
 const SAMPLES: usize = 9;
 
 /// Up to this many sample points per face where a sheet's panel kept in place names the face it is
-/// part of (see [`geometric_from`]).
+/// part of (see [`geometric_names`]).
 const PANEL_SAMPLES: usize = 256;
 
 /// Unit normals of each face's triangles.
@@ -420,35 +414,6 @@ pub(crate) fn names(b: &ModelBody) -> Arc<Names> {
         .clone()
 }
 
-/// The names builds before format 14 gave a body's faces: from geometry, over the inputs' names
-/// as those builds gave them, pieces of a split face numbered along the longest axis of their
-/// spread (`#1`, `#2`, …).
-pub(crate) fn legacy_face_names(b: &ModelBody) -> Arc<Vec<String>> {
-    if let Some(source) = &b.names.copy_of {
-        return legacy_face_names(source);
-    }
-    b.names
-        .legacy
-        .get_or_init(|| {
-            let nf = face_count(b);
-            let names = match b.names.origin.as_ref() {
-                Some(o) if o.depth < MAX_DEPTH => {
-                    let mut names = geometric_from(b, o, nf, legacy_face_names);
-                    number_pieces(&mut names, &samples(&b.mesh(), nf), '#');
-                    names
-                }
-                _ => (0..nf).map(|k| format!("{}:face:{k}", b.name)).collect(),
-            };
-            Arc::new(names)
-        })
-        .clone()
-}
-
-/// The names builds before format 14 gave a body's edges.
-pub(crate) fn legacy_edge_names(b: &ModelBody) -> Vec<String> {
-    edge_names_from(b, &legacy_face_names(b))
-}
-
 /// Pairs of faces of a body that share an edge (from its mesh's edges).
 pub(crate) fn mesh_adjacency(b: &ModelBody) -> Vec<(usize, usize)> {
     crate::history_names::face_pairs(b.mesh().edge_faces.iter().map(|fs| fs.iter().map(|f| *f as usize)))
@@ -458,17 +423,12 @@ pub(crate) fn mesh_adjacency(b: &ModelBody) -> Vec<(usize, usize)> {
 /// geometry: where each face's sample points lie on the input's faces. Faces sharing a name are
 /// pieces of one, told apart afterwards.
 pub(crate) fn geometric_names(b: &ModelBody, o: &NamingOrigin, nf: usize) -> Vec<String> {
-    geometric_from(b, o, nf, face_names)
-}
-
-/// [`geometric_names`], the input bodies' faces named by `names_of`.
-fn geometric_from(b: &ModelBody, o: &NamingOrigin, nf: usize, names_of: fn(&ModelBody) -> Arc<Vec<String>>) -> Vec<String> {
     // A rigid Move changes coordinates, not topology or face ownership. Geometric
     // overlap with the unmoved input cannot recover the names at the new position.
     if matches!(o.feature.kind, FeatureKind::Move { .. })
         && let Some(input) = o.before.body(&b.name)
     {
-        return names_of(input).as_ref().clone();
+        return face_names(input).as_ref().clone();
     }
     let m = b.mesh();
     let size = b.body.size().max(1e-6);
@@ -505,7 +465,7 @@ fn geometric_from(b: &ModelBody, o: &NamingOrigin, nf: usize, names_of: fn(&Mode
         .take(64)
         .map(|x| {
             let n = face_count(x);
-            (x, FaceIndex::new(&x.mesh(), n), names_of(x))
+            (x, FaceIndex::new(&x.mesh(), n), face_names(x))
         })
         .collect();
     let fid = o.feature.id;
@@ -520,7 +480,7 @@ fn geometric_from(b: &ModelBody, o: &NamingOrigin, nf: usize, names_of: fn(&Mode
             .iter()
             .filter(|x| !x.body.is_mesh())
             .take(64)
-            .map(|x| (x, FaceIndex::new(&x.mesh(), face_count(x)), names_of(x)))
+            .map(|x| (x, FaceIndex::new(&x.mesh(), face_count(x)), face_names(x)))
             .collect();
         let mut best: Option<(usize, usize, Vec<Option<String>>)> = None;
         for (k, mat) in o.mats.iter().enumerate() {
@@ -1139,7 +1099,7 @@ mod tests {
 
     fn same_hit(a: &FaceHit, b: &FaceHit) {
         assert_eq!((a.body, a.face, a.point), (b.body, b.face, b.point));
-        assert_eq!((a.verified, a.on_point, a.legacy), (b.verified, b.on_point, b.legacy));
+        assert_eq!((a.verified, a.on_point), (b.verified, b.on_point));
     }
 
     #[test]

@@ -120,8 +120,8 @@ fn legacy_v9_imported_emboss_anchor_and_ordinary_face_paint_replay_without_renam
     let anchored =
         solidcraft_doc::Feature { shell_piece_order: true, kernel_piece_order: true, touching: solidcraft_doc::Touching::OneBody, ..anchored };
     assert_eq!(reopened.doc.feature(anchored.id).unwrap(), &anchored);
-    // Names saved before format 14 keep naming the face they named, marked so they are found as
-    // the build that saved them found them.
+    // Names saved before format 14 open with the legacy mark; the sketch is held by its anchor,
+    // not by its name.
     let mark = |name: &Option<String>| name.as_ref().map(|n| format!("{}{n}", solidcraft_doc::naming::LEGACY_MARK));
     let mut saved_plane = saved_plane;
     if let solidcraft_doc::PlaneRef::Face { name, .. } = &mut saved_plane {
@@ -175,7 +175,7 @@ fn certified_side_refuses_reused_body_name_from_a_new_producer() {
 }
 
 #[test]
-fn legacy_v9_annulus_outer_side_emboss_keeps_its_original_heuristic_anchor() {
+fn legacy_v9_annulus_outer_side_emboss_asks_for_its_face_again() {
     let mut s = Session::default();
     run(&mut s, "sketch.create", json!({"plane":"XY"}));
     run(&mut s, "sketch.circle.center", json!({"center":[0,0],"radius":10,"id":"outer"}));
@@ -200,19 +200,20 @@ fn legacy_v9_annulus_outer_side_emboss_keeps_its_original_heuristic_anchor() {
     let mut legacy: Value = serde_json::from_str(&s.doc.to_json()).unwrap();
     legacy["format"] = json!("solidcraft/9");
     // What a version 9 design stored for that pick: the centroid-family name of the outer wall
-    // piece holding the point. It keeps finding that piece, as it did when saved.
+    // piece holding the point, worked out from geometry. It names no face today (the outer wall
+    // is one face, named after its own curve): the emboss fails and asks for its face again,
+    // and the sleeve is built without it.
     for feature in legacy["features"].as_array_mut().unwrap() {
         if feature["id"] == json!(feature_id) {
             feature["face_names"] = json!(["F2:side:inner#4"]);
         }
     }
     let reopened = Session::new(solidcraft_doc::Document::from_json(&legacy.to_string()).unwrap());
-    assert!(reopened.model.result(feature_id).unwrap().error.is_none());
-    assert!(
-        (reopened.model.state().body("Sleeve").unwrap().body.mesh(&solidcraft_kernel::MeshTolerance::chord(1e-4)).unwrap().measure().volume - volume)
-            .abs()
-            < 1e-8
-    );
+    let error = reopened.model.result(feature_id).unwrap().error.clone().unwrap();
+    assert_eq!(solidcraft_doc::reselect_parts(&error), Some(("Raised Badge", "?F2:side:inner#4")), "{error}");
+    let sleeve = reopened.model.state().body("Sleeve").unwrap().body.mesh(&solidcraft_kernel::MeshTolerance::chord(1e-4)).unwrap().measure().volume;
+    assert!((sleeve - std::f64::consts::PI * 380.).abs() < 0.2, "volume {sleeve}");
+    assert!(reopened.model.results.iter().filter(|r| r.id != feature_id).all(|r| r.error.is_none()), "{:?}", reopened.model.results);
 }
 
 #[test]

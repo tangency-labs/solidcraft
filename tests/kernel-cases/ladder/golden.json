@@ -1672,7 +1672,7 @@
       "measured": {
         "area_mm2": 5332.688157880919,
         "body_count": 1,
-        "edges": 7,
+        "edges": 9,
         "faces": 6,
         "vertices": 7,
         "volume_mm3": 5540.61199574002

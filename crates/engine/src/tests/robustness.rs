@@ -304,10 +304,15 @@ fn fillet_into_an_earlier_round() {
     assert!((v - want).abs() < 2.0, "the upright's tangent chain: {v} vs {want}");
 }
 
-/// Clean seeds (seed 16: a partial face contact, fused), and the original seed 5 edge contact,
-/// kept as two bodies without distortion.
+/// Fixed seeds run without a panic and leave valid bodies (seed 16: a partial face contact,
+/// fused), and the original seed 5 edge contact is kept as two bodies without distortion. What a
+/// seed's steps come to is not compared with what the builds that chose the seeds made (truck's):
+/// the kernel's reference is the ladder (`tests/kernel-cases/ladder`).
 #[test]
 fn fixed_seeds_run_clean() {
+    // A panic, a body that is not valid or a step that moved the volume the wrong way; a step the
+    // kernel refuses is not one.
+    let clean = |r: &fuzz::Run| !matches!(r.outcome.kind.as_str(), "panic" | "invalid" | "volume");
     for seed in FIXED_SEEDS {
         if *seed == 5 {
             // Seed 5 originally joined these boxes along only an edge. Accepting it once required
@@ -351,11 +356,11 @@ fn fixed_seeds_run_clean() {
             assert!((total_volume(&s) - want).abs() < 0.2, "{} vs {want}", total_volume(&s));
             assert!(s.model.state().bodies.iter().all(|b| b.body.validity().is_empty()));
             let r = fuzz::run(*seed, 8);
-            assert!(!r.outcome.is_bug(), "seed {seed}: {:?}\n{}", r.outcome, r.script());
+            assert!(clean(&r), "seed {seed}: {:?}\n{}", r.outcome, r.script());
             continue;
         }
         let r = fuzz::run(*seed, 8);
-        assert!(!r.outcome.is_bug(), "seed {seed}: {:?}\n{}", r.outcome, r.script());
+        assert!(clean(&r), "seed {seed}: {:?}\n{}", r.outcome, r.script());
     }
 }
 

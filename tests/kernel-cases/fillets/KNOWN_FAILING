@@ -45,5 +45,3 @@ every-hole-top-rim-r12-past-plate-bottom SMLib status 1001: a convex round past 
 every-pocket-floor-and-rim-edges-r2 a corner patch where two rim rounds meet at each concave pocket corner (23 faces, not 19) instead of the mitre the rounds make running into each other
 every-pocket-rim-edges-r2 a corner patch where two rim rounds meet at each concave pocket corner (19 faces, not 15) instead of the mitre the rounds make running into each other
 every-pocket-rim-edges-r5-as-deep-as-pocket a corner patch where two rim rounds meet at each concave pocket corner (15 faces, not 11) instead of the mitre the rounds make running into each other
-report-fillet-curvature-three-edges-at-bar-corner SMLib's check refuses the open setback sheet of curvature rounds: a 2D B-spline curve cusp (SmBSplineCurve test 13)
-report-fillet-edge-tangent-at-one-end-into-cylinder SMLib refuses the round as larger than the faces beside its edges allow (SMLIB_ERR_NO_ROOM): it fades to nothing at the edge's tangent end, on the wall SMLib now gets back as its cylinder
