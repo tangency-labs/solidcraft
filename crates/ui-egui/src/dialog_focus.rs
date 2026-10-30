@@ -85,8 +85,81 @@ fn traversal(id: egui::Id) -> egui::Id {
     id.with("tab_traversal")
 }
 
+#[derive(Clone, Copy)]
+struct Dropdown {
+    owner: egui::Id,
+    parent: Option<Scope>,
+    frame: u64,
+}
+
+#[derive(Clone, Copy)]
+struct DropdownExit {
+    owner: egui::Id,
+    backwards: bool,
+}
+
+fn dropdown_id() -> egui::Id {
+    egui::Id::new("dialog_open_dropdown")
+}
+fn dropdown_exit_id() -> egui::Id {
+    egui::Id::new("dialog_dropdown_exit")
+}
+
+/// Close a dropdown before its options can intercept the parent's ordinary Tab traversal.
+fn leave_dropdown(ctx: &egui::Context) {
+    let Some(dropdown) = ctx.data(|d| d.get_temp::<Dropdown>(dropdown_id())) else { return };
+    if dropdown.frame.saturating_add(1) < ctx.cumulative_frame_nr() || !egui::Popup::is_id_open(ctx, dropdown.owner.with("popup")) {
+        return;
+    }
+    let direction = ctx.input(|i| {
+        i.events.iter().find_map(|event| match event {
+            egui::Event::Key { key: egui::Key::Tab, pressed: true, modifiers, .. } => tab_direction(modifiers),
+            _ => None,
+        })
+    });
+    let Some(direction) = direction else { return };
+    egui::Popup::close_id(ctx, dropdown.owner.with("popup"));
+    ctx.memory_mut(|m| m.request_focus(dropdown.owner));
+    ctx.data_mut(|d| {
+        d.insert_temp(dropdown_exit_id(), DropdownExit { owner: dropdown.owner, backwards: direction == egui::FocusDirection::Previous });
+        if let Some(parent) = dropdown.parent {
+            d.insert_temp(active_id(), parent);
+        }
+    });
+    if let Some(parent) = dropdown.parent {
+        prepare(ctx, parent);
+    } else {
+        ctx.input_mut(|i| {
+            i.events.retain(|event| {
+                !matches!(event,
+                    egui::Event::Key { key: egui::Key::Tab, modifiers, .. } if tab_direction(modifiers).is_some()
+                )
+            })
+        });
+        ctx.memory_mut(|m| m.move_focus(direction));
+    }
+    ctx.request_repaint();
+}
+
+/// ComboBox registers its button twice; ensure forward exit cannot reacquire that same button.
+pub(crate) fn dropdown_response(response: &egui::Response) {
+    let ctx = &response.ctx;
+    if let Some(exit) = ctx.data(|d| d.get_temp::<DropdownExit>(dropdown_exit_id()))
+        && exit.owner == response.id
+    {
+        ctx.data_mut(|d| d.remove::<DropdownExit>(dropdown_exit_id()));
+        if !exit.backwards && response.has_focus() {
+            ctx.memory_mut(|m| {
+                m.surrender_focus(response.id);
+                m.move_focus(egui::FocusDirection::Next);
+            });
+        }
+    }
+}
+
 /// Run after expression completion, before the canvas or background widgets handle Tab.
 pub(crate) fn prepare_active(ctx: &egui::Context) {
+    leave_dropdown(ctx);
     if let Some(scope) = ctx.data(|d| d.get_temp::<Scope>(active_id()))
         && scope.frame.saturating_add(1) >= ctx.cumulative_frame_nr()
     {
@@ -200,7 +273,27 @@ pub(crate) fn scope<R>(ui: &mut egui::Ui, id: egui::Id, add: impl FnOnce(&mut eg
     result
 }
 
-/// A dialog's dropdown is a nested focus loop while its popup is open.
-pub(crate) fn popup<R>(ui: &mut egui::Ui, add: impl FnOnce(&mut egui::Ui) -> R) -> R {
-    if ui.ctx().data(|d| d.get_temp::<egui::Id>(current_id())).is_some() { scope(ui, ui.id().with("tab_popup"), add) } else { add(ui) }
+/// Dropdowns remember their owner so Tab dismisses the popup and resumes its parent form.
+pub(crate) fn popup<R>(ui: &mut egui::Ui, owner: egui::Id, close_behavior: egui::PopupCloseBehavior, add: impl FnOnce(&mut egui::Ui) -> R) -> R {
+    let ctx = ui.ctx().clone();
+    let parent = ctx.data(|d| {
+        let current = d.get_temp::<egui::Id>(current_id());
+        d.get_temp::<Scope>(active_id()).filter(|scope| Some(scope.id) == current)
+    });
+    let frame = ctx.cumulative_frame_nr();
+    ctx.data_mut(|d| d.insert_temp(dropdown_id(), Dropdown { owner, parent, frame }));
+    let draw = |ui: &mut egui::Ui| {
+        let result = add(ui);
+        // Native CloseOnClick handles pointer picks; keyboard picks need the same dismissal.
+        if close_behavior == egui::PopupCloseBehavior::CloseOnClick
+            && ctx.input(|i| i.key_pressed(egui::Key::Space))
+            && !ctx.text_edit_focused()
+            && ctx.memory(|m| m.focused()).and_then(|id| ctx.read_response(id)).is_some_and(|r| r.layer_id == ui.layer_id())
+        {
+            ui.close();
+            ctx.memory_mut(|m| m.request_focus(owner));
+        }
+        result
+    };
+    if parent.is_some() { scope(ui, ui.id().with("tab_popup"), draw) } else { draw(ui) }
 }
