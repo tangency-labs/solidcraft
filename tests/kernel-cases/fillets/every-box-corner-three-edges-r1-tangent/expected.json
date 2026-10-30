@@ -1,0 +1,24 @@
+{
+ "sources": [],
+ "what": "the three edges at one corner of a box rounded r1 together, rolling-ball (Tangent) corner: three quarter-cylinder rounds and a sphere octant",
+ "source": "analytic",
+ "method": "box 40x30x20, the edges at (40,30,20) (lengths 40, 30, 20) rounded r1. Each round removes the spandrel A = (1-pi/4) r^2 = 0.214602 along its edge outside the corner cube [40-r,40]x[30-r,30]x[20-r,20] (lengths 40-r, 30-r, 20-r: A (90-3r)); inside the corner cube what is left is the octant of the ball of radius r about (40-r,30-r,20-r), pi r^3/6, so the cube loses r^3 (1-pi/6). V = 24000 - A (90-3r) - r^3 (1-pi/6) = 24000 - 19.1468 = 23980.8532. Faces 6 + 3 rounds + the sphere octant = 10; every blend seam tangent (G1).",
+ "body_count": 1,
+ "volume_mm3": 23980.853238991178,
+ "faces": 10,
+ "bbox": {
+  "min": [
+   0,
+   0,
+   0
+  ],
+  "max": [
+   40,
+   30,
+   20
+  ]
+ },
+ "continuity": {
+  "order": "g1"
+ }
+}

@@ -1,0 +1,30 @@
+{
+ "sources": [],
+ "what": "the three edges at one box corner rounded r3 with Corners: Curvature at its default setback (1.5 r = 4.5): the corner patch meets the rounds and faces G2",
+ "source": "invariants",
+ "method": "box 40x30x20, the edges at (40,30,20) rounded r3, corner g2: the corner is set back 4.5 along each edge and filled with one patch built G2 to the three rounds and the three faces (solid.fillet `corner`). The patch is a free-form surface SMLib fits, so no closed-form volume: one valid body, 6 faces + 3 rounds + the patch = 10, within the box. Graded as fillets/9-fillet-corner-r1-curvature-default-setback, scaled by r: at the points where a round's section ends on a face the round is only tangent (G1) to the plane, its curvature jumping by 1/r, so no patch is G2 to both there; the patch's curvature jump is bounded at stations at least 0.24 r from each turn, within 2.2 r of the corner, at most 0.5% of 1/r per mm.",
+ "body_count": 1,
+ "faces": 10,
+ "bbox": {
+  "min": [
+   0,
+   0,
+   0
+  ],
+  "max": [
+   40,
+   30,
+   20
+  ]
+ },
+ "continuity": {
+  "near": [
+   40,
+   30,
+   20
+  ],
+  "within_mm": 6.6,
+  "clear_mm": 0.72,
+  "curvature_jump_per_mm": 0.001667
+ }
+}

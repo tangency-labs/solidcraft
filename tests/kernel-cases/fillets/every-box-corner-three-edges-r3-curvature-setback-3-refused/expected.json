@@ -1,0 +1,8 @@
+{
+ "sources": [],
+ "what": "the three edges at one box corner rounded r3, Corners: Curvature set back exactly 3, the radius: refused, naming the least setback",
+ "source": "invariants",
+ "method": "on a corner of faces square to each other the rounds' contact lines meet r = 3 from the vertex along each edge; a setback of 3 starts the patch exactly there, which leaves it no room (the setback must be more than that), so the right answer is the refusal naming the radius, before SMLib runs (solid.fillet `setbacks`).",
+ "outcome": "refused",
+ "refusal": "the setback must be more than the radius (3 mm)"
+}
