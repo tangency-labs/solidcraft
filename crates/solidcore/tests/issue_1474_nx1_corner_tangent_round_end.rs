@@ -46,7 +46,7 @@ fn midpoint(k: &Kernel, b: &Brep, e: EdgeId) -> Point3 {
 
 /// The concave arc on the block's top (z = 5, radius 10.5, y > 0).
 fn junction_arc(k: &Kernel, b: &Brep) -> Vec<EdgeId> {
-    let edges: Vec<EdgeId> = b.edges().ids().collect();
+    let edges: Vec<EdgeId> = b.edge_list().to_vec();
     edges
         .into_iter()
         .filter(|&e| {
@@ -88,7 +88,7 @@ fn expected_volume() -> f64 {
 }
 
 fn has_vertex(b: &Brep, p: Point3) -> bool {
-    b.vertices().ids().any(|v| {
+    b.vertex_list().iter().any(|&v| {
         let q = b.vertex(v).unwrap().point;
         (q - p).length() < 1e-6
     })
@@ -116,9 +116,10 @@ fn round_ends_on_the_front_face_plane_with_the_fix() {
     let (mut b, k, r) = round(true, true);
     r.unwrap();
     assert!(is_manifold_solid(&b).unwrap());
-    assert_eq!(b.faces().ids().count(), 13);
-    assert_eq!(b.edges().ids().count(), 23);
-    assert_eq!(b.vertices().ids().count(), 15);
+    // the B-rep's faces, edges and vertices (deleted ones leave their arenas)
+    assert_eq!(b.face_list().len(), 10);
+    assert_eq!(b.edge_list().len(), 23);
+    assert_eq!(b.vertex_list().len(), 15);
     // Each end of the round lies in the front face's plane y = 0: its rail on the top
     // at radius 12.5, its rail on the cylinder 2 up.
     for x in [-1.0, 1.0] {

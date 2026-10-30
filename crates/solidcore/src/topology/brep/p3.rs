@@ -32,10 +32,14 @@
 //! (`pOptContextForStack`) is the kernel. Notifications go to the caller's
 //! [`NotifyEnv`] (the B-rep spatial cache is not kept: no `BrepCacheSlot`).
 //!
-//! - **Records.** Upstream `delete` of a topology object unlinks it from its owning
-//!   list (`~SmTopology`); records stay in their arenas, unreachable, as in
-//!   `topology.brep_p2` (faces, edges and vertices leave the B-rep's lists, regions
-//!   leave the region list). The copy constructors build a new [`Brep`] and return it;
+//! - **Records.** Upstream `delete` of a topology object is the removal of its arena
+//!   record, after the object left its owning list (`~SmTopology`): `DeleteFace` and
+//!   `SqueezeEdge` remove every record they delete (the face, its face uses, loops,
+//!   loop uses and vertex uses, the merged region; the squeezed edge, its edge uses and
+//!   vertex uses and the deleted vertex), each after its last read (finding
+//!   `plan/findings/topology.brep_p3--deleted-records-stay-in-arenas.md`). Arena ids
+//!   are never reused, so the other records keep theirs. The copy constructors build a
+//!   new [`Brep`] and return it;
 //!   `MergeBrep` copies from another [`Brep`] (a self-merge, `MergeBrep(*this)`, cannot
 //!   be expressed).
 //! - **Ignored statuses.** The copy constructor ignores `MergeBrep`'s status (`SE`):
@@ -531,8 +535,8 @@ fn faceuse_remove_loopuse(b: &mut Brep, fu: FaceuseId, lu: LoopuseId) -> Result<
 
 /// `m_pFaceListHead->Remove(pFace); delete pFace`: takes the face off the B-rep's face
 /// list, notifies its destruction (`~SmFace`: `SmFace::Notify`, unit
-/// `topology.face_p3`), drops the surface it owns and removes it from every attribute
-/// it uses (`~SmAObject`'s `ClearAttributes`).
+/// `topology.face_p3`), drops the surface it owns, removes it from every attribute
+/// it uses (`~SmAObject`'s `ClearAttributes`) and removes its record.
 fn destroy_face(b: &mut Brep, env: &mut NotifyEnv<'_>, f: FaceId) -> Result<()> {
     b.remove_from_face_list(f);
     ignore_soft(face_notify(
@@ -555,6 +559,8 @@ fn destroy_face(b: &mut Brep, env: &mut NotifyEnv<'_>, f: FaceId) -> Result<()> 
         face.surface = None;
         b.set_geometry_owner_key(EntityRef::Face(f), None);
     }
+    // delete pFace
+    b.remove_face_record(f)?;
     Ok(())
 }
 
@@ -2479,6 +2485,7 @@ fn delete_face_in(
 
         // Remove and Delete the DelRegion
         ignore_soft(b.remove_region_from_list(del_region))?;
+        b.remove_region_record(del_region)?;
     }
 
     let mut new_wire_edges: Vec<EdgeId> = Vec::new();
@@ -2501,6 +2508,8 @@ fn delete_face_in(
             // Remove vertexuses from the vertex.
             vertex_remove_vertexuse(b, v, other_vu)?;
             vertex_remove_vertexuse(b, v, vu)?;
+            // delete pOtherVU
+            b.remove_vertexuse_record(other_vu)?;
             if n_vus == 2 {
                 // If there were only two VU - convert vertex to a shell vertex
                 let new_s = b.add_shell_record(crate::topology::Shell::default())?;
@@ -2516,6 +2525,11 @@ fn delete_face_in(
 
                 // count the number of shell vertics made
                 new_shell_vertex_count += 1;
+            } else {
+                // vertex was attached to this face and through other vertexuses to
+                // other wires or other faces - just delete VU and straighten out the
+                // rest later.
+                b.remove_vertexuse_record(vu)?;
             }
         } else {
             for eu in lu1::edgeuses(b, lu, None, None)? {
@@ -2563,6 +2577,9 @@ fn delete_face_in(
                     if any_edgeuse == Some(eu) {
                         any_edgeuse = None;
                     }
+                    // delete pVU1; delete pVU2
+                    b.remove_vertexuse_record(vu1)?;
+                    b.remove_vertexuse_record(vu2)?;
                 }
             }
         }
@@ -2576,6 +2593,12 @@ fn delete_face_in(
         faceuse_remove_loopuse(b, lfu, lu)?;
         let ofu = lu1::faceuse(b, other_lu)?.ok_or(null_deref("loop use without face use"))?;
         faceuse_remove_loopuse(b, ofu, other_lu)?;
+        // delete pL; delete pLU; delete pOtherLU
+        if let Some(l) = l {
+            b.remove_loop_record(l)?;
+        }
+        b.remove_loopuse_record(lu)?;
+        b.remove_loopuse_record(other_lu)?;
     }
 
     // Take care of face and faceuses - remove from lists
@@ -2593,6 +2616,8 @@ fn delete_face_in(
 
     // delete pFU; delete pOtherFU
     delete_faceuses(b, [fu, other_fu])?;
+    b.remove_faceuse_record(fu)?;
+    b.remove_faceuse_record(other_fu)?;
 
     if do_region_nesting {
         // If there are no vertices and no edges then the entire shell goes away.
@@ -2843,7 +2868,8 @@ fn delete_face_nesting(
     shell::destroy(k, b, last, env)
 }
 
-/// `delete pFU` for each face use (the arena keeps the record): `SmTopology`'s destructor
+/// The unlinking part of `delete pFU` for each face use (the caller then removes the
+/// records): `SmTopology`'s destructor
 /// removes a member still in its owner's list (`m_pListOwner->Remove(this)`, status
 /// ignored). After region nesting merged the two shells, the mate face use is in the
 /// surviving shell, which upstream's explicit `Remove`s no longer reach.
@@ -3474,6 +3500,9 @@ fn squeeze_edge_in(
         let v = vertexuse::vertex(b, vu)?.ok_or(null_deref("vertex use without vertex"))?;
         edge_remove_edgeuse(b, e, eu)?;
         vertex_remove_vertexuse(b, v, vu)?;
+        // delete pEU; delete pVU
+        b.remove_edgeuse_record(eu)?;
+        b.remove_vertexuse_record(vu)?;
     }
 
     // inform public two vertices are being merged into one
@@ -3528,7 +3557,10 @@ fn squeeze_edge_in(
         b.edge_mut(e)?.curve = None;
         b.set_geometry_owner_key(EntityRef::Edge(e), None);
     }
-    b.remove_from_edge_list(e);
+    // delete pDelVertex; delete pEdgeToSqueeze (the vertex's record goes last, after
+    // the edge's destruction notification that still names it)
+    b.remove_edge_record(e)?;
+    b.remove_vertex_record(del_vertex)?;
     Ok(())
 }
 

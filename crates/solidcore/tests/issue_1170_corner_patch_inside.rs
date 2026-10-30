@@ -56,8 +56,9 @@ fn build(setback: f64, stay_inside: bool) -> solidcore::Result<(Kernel, Brep)> {
     Ok((k, b))
 }
 
-/// The tight bounding box maximum, the face count and the solidity of the box
-/// filleted with a setback at its far corner.
+/// The tight bounding box maximum, the face count (the B-rep's faces, not its face
+/// records: deleted faces leave the arena) and the solidity of the box filleted with a
+/// setback at its far corner.
 fn fillet_with_setback(
     setback: f64,
     stay_inside: bool,
@@ -66,7 +67,7 @@ fn fillet_with_setback(
     let x = brep_bounding_box(&k, &b, true)?;
     Ok((
         [x.max_at(0), x.max_at(1), x.max_at(2)],
-        b.faces().ids().count(),
+        b.face_list().len(),
         brep_is_manifold_solid(&b)?,
     ))
 }
@@ -131,7 +132,7 @@ fn a_setback_patch_stays_inside_the_box_with_the_fix() {
         for (m, limit) in max.iter().zip(CORNER) {
             assert!(*m <= limit + 1e-6, "setback {setback}: {max:?}");
         }
-        assert_eq!(faces, 21, "setback {setback}");
+        assert_eq!(faces, 15, "setback {setback}");
         assert!(solid, "setback {setback}");
     }
 }
@@ -141,10 +142,10 @@ fn upstream_bulges_past_the_faces_for_a_large_setback() {
     // Up to 10 (twice the radius) the patch stays inside; at 13 it is 0.08 outside.
     let (max, faces, _) = fillet_with_setback(10.0, false).unwrap();
     assert!(max[0] <= CORNER[0] + 1e-6, "{max:?}");
-    assert_eq!(faces, 21);
+    assert_eq!(faces, 15);
     let (max, faces, _) = fillet_with_setback(13.0, false).unwrap();
     for (m, limit) in max.iter().zip(CORNER) {
         assert!((m - limit - 0.0806).abs() < 1e-3, "{max:?}");
     }
-    assert_eq!(faces, 21);
+    assert_eq!(faces, 15);
 }

@@ -28,10 +28,10 @@ fn round(fixed: bool, r: f64) -> (Brep, Result<()>, bool) {
         })
         .collect();
     assert_eq!(vertical.len(), 4);
-    let faces_before = b.faces().ids().count();
+    let faces_before = b.face_list().len();
     let result = fillet_edges(&mut k, &mut b, &vertical, r, 1, 1, 1.0);
     if result.is_err() {
-        assert_eq!(b.faces().ids().count(), faces_before, "post left edited");
+        assert_eq!(b.face_list().len(), faces_before, "post left edited");
     }
     let solid = result.is_ok() && is_manifold_solid(&b).unwrap();
     (b, result, solid)

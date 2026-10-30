@@ -115,9 +115,15 @@ impl CornerInsertionContext for LiveGeometryInsertion<'_> {
         // the surface it owns) before insertion. Upstream `m_vSurfaces[jj]` then
         // dangles and `RegisterExistingSSI` only stores the pointer, so the entry
         // never matches a live face's surface: register it under the destroyed
-        // face's handle, which no face loop queries.
+        // face's handle, which no face loop queries. A deleted face's record has left
+        // the arena (`DeleteFace`); a face off the list whose record remains counts as
+        // deleted when it no longer holds a surface.
         if !self.intermediate.face_list().contains(&surface_face)
-            && self.intermediate.face(surface_face)?.surface.is_none()
+            && self
+                .intermediate
+                .faces()
+                .get(surface_face)
+                .is_none_or(|f| f.surface.is_none())
         {
             return self.register_bound_handle(
                 target,

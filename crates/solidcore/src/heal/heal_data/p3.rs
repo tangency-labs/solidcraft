@@ -1756,9 +1756,11 @@ mod tests {
             changes.added,
             vec![Some(EntityRef::Vertex(a)), Some(EntityRef::Edge(e1))]
         );
-        // the squeezed edge's uses and their vertex uses are gone; the deleted vertex's
-        // other use (of the second edge) moved to the survivor
-        assert!(b.edge(e0).unwrap().edgeuses.is_empty());
+        // the squeezed edge and the deleted vertex are gone with their records (upstream
+        // deletes them); the deleted vertex's other use (of the second edge) moved to the
+        // survivor
+        assert!(b.edge(e0).is_err());
+        assert!(b.vertex(bv).is_err());
         assert_eq!(b.vertex(a).unwrap().vertexuses.len(), 1);
     }
 
