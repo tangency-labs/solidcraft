@@ -2334,19 +2334,23 @@ fn tiny_cut_inside_exact_circle_survives_unfold_refold_and_dxf() {
         run(&mut s, "sheet.flange", json!({"sketch": "Disc"}));
         let circle = s.model.state().sheets[0].base.outer.clone();
         let displayed = circle.polyline(1e-3);
-        let at = (displayed[0] + displayed[1]).normalized().unwrap() * 9.9998;
+        // A square 0.2 µm across, centred 0.4 µm inside the circle on the bisector of the
+        // display polyline's first chord (its middle 0.98 µm inside): outside the polyline, inside
+        // the exact circle, each of its walls and its gap to the rim wider than SMLib's 0.1 µm
+        // modelling tolerance.
+        let (half, at) = (0.0001, (displayed[0] + displayed[1]).normalized().unwrap() * 9.9996);
         assert!(!circle.contains(at));
         if initially_flat {
             run(&mut s, "sheet.unfold", json!({}));
         }
         run(&mut s, "sketch.create", json!({"plane": "XY", "name": "TinyCut"}));
-        run(&mut s, "sketch.rectangle.two_point", json!({"p0": [at.x-0.000025,at.y-0.000025], "p1": [at.x+0.000025,at.y+0.000025]}));
+        run(&mut s, "sketch.rectangle.two_point", json!({"p0": [at.x-half,at.y-half], "p1": [at.x+half,at.y+half]}));
         run(&mut s, "sketch.finish", json!({}));
         run(&mut s, "solid.extrude", json!({"sketch": "TinyCut", "through_all": true, "operation": "cut", "direction": "symmetric"}));
         for stage in ["sheet.unfold", "sheet.refold"] {
             let regions = s.model.state().sheets[0].flat_regions().unwrap();
             assert_eq!(regions[0].holes.len(), 1);
-            assert!((regions[0].holes[0].signed_area().abs() - 2.5e-9).abs() < 1e-13);
+            assert!((regions[0].holes[0].signed_area().abs() - 4e-8).abs() < 1e-13);
             assert_eq!(s.model.state().bodies.len(), 1);
             let dxf = run(&mut s, "sheet.export_dxf", json!({}))["dxf"].as_str().unwrap().to_string();
             assert_eq!(solidcraft_io::read_dxf(&dxf).unwrap().len(), 5);
