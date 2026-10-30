@@ -122,7 +122,7 @@ impl Writer {
             return *i;
         }
         let names = crate::naming::names(b);
-        let info: Vec<Json> = names.info.iter().map(|i| json!([i.aliases, i.bounds, i.verified])).collect();
+        let info: Vec<Json> = names.info.iter().map(|i| json!([i.aliases, i.bounds, i.verified, i.synonyms])).collect();
         self.names.push(json!({"faces": *names.faces, "info": info}));
         self.names_index.insert(id, self.names.len() - 1);
         self.names.len() - 1
@@ -257,12 +257,12 @@ impl SavedModel {
         let mut names = Vec::new();
         for n in list("names")? {
             let faces: Vec<String> = serde_json::from_value(parse(n.get("faces"))?).map_err(|_| bad("saved model: names"))?;
-            let info: Vec<(Vec<String>, std::collections::BTreeSet<String>, bool)> =
+            let info: Vec<(Vec<String>, std::collections::BTreeSet<String>, bool, Vec<String>)> =
                 serde_json::from_value(parse(n.get("info"))?).map_err(|_| bad("saved model: names"))?;
             if info.len() != faces.len() {
                 return Err(bad("saved model: names"));
             }
-            let info = info.into_iter().map(|(aliases, bounds, verified)| FaceInfo { aliases, bounds, verified }).collect();
+            let info = info.into_iter().map(|(aliases, bounds, verified, synonyms)| FaceInfo { aliases, synonyms, bounds, verified }).collect();
             names.push(Arc::new(Names { faces: Arc::new(faces), info }));
         }
         let mut sketches = Vec::new();

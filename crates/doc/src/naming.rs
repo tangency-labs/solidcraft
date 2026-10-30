@@ -323,8 +323,8 @@ pub fn blend_seams(b: &ModelBody) -> Vec<BlendSeam> {
     // Per face: the names it answers to, and the edges a blend face replaced (each as
     // `<face>|<face>`, without qualifiers or numbers).
     let all = |i: usize| -> Vec<&str> {
-        let aliases = n.info.get(i).map(|f| f.aliases.as_slice()).unwrap_or_default();
-        n.faces.get(i).map(String::as_str).into_iter().chain(aliases.iter().map(String::as_str)).collect()
+        let (aliases, synonyms) = n.info.get(i).map(|f| (f.aliases.as_slice(), f.synonyms.as_slice())).unwrap_or_default();
+        n.faces.get(i).map(String::as_str).into_iter().chain(synonyms.iter().chain(aliases).map(String::as_str)).collect()
     };
     let replaced: Vec<Vec<(String, String)>> = (0..n.faces.len())
         .map(|i| {

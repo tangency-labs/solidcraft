@@ -4449,8 +4449,8 @@ fn a_side_drawn_in_two_collinear_pieces_extrudes_into_one_face() {
     assert_eq!(run(&mut s, "inspect.measure", json!({}))["bodies"][0]["kernel"]["faces"], 6);
     let names: Vec<&str> = f.iter().filter_map(|x| x["name"].as_str()).collect();
     assert!(names.contains(&format!("F2:side:{}", pieces[0]).as_str()), "{names:?}");
-    // The second piece's name answers for the same face, so a reference made when the side was
-    // two faces (an edge of the second piece) still finds its edge.
+    // The extrude made the side from both pieces: the second piece's role names that very face
+    // too, so an edge named after it is that edge.
     let st = s.model.state();
     let body = st.body("Body1").unwrap();
     let edge = format!("F2:side:{}|F2:top", pieces[1]);

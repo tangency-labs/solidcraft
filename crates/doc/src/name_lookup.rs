@@ -478,8 +478,10 @@ pub fn faces_with_stem(b: &ModelBody, name: &str) -> Vec<usize> {
         None => (face_names(b), name),
     };
     let stem = strip_piece(wanted);
-    let aliases =
-        |i: usize| legacy_name(name).is_none() && naming::names(b).info.get(i).is_some_and(|x| x.aliases.iter().any(|a| strip_piece(a) == stem));
+    let aliases = |i: usize| {
+        legacy_name(name).is_none()
+            && naming::names(b).info.get(i).is_some_and(|x| x.synonyms.iter().chain(&x.aliases).any(|a| strip_piece(a) == stem))
+    };
     (0..names.len()).filter(|i| names.get(*i).is_some_and(|n| strip_piece(n) == stem) || aliases(*i)).collect()
 }
 
