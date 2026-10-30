@@ -1,0 +1,33 @@
+{
+  "zh-TW": {
+    "browser.calibrate_click_a": "按一下影像以指定點 A，或輸入其座標。",
+    "browser.calibrate_click_b": "按一下影像以指定點 B，或輸入其座標。",
+    "help.sketch.construction_line": "建立通過兩點的無限長建構直線。可用來規劃草圖佈局，而不會分割輪廓。",
+    "help.sketch.construction_line.angle": "建立與草圖 X 軸夾指定角度的無限長建構直線。請選取點並輸入角度，或選取其方向。",
+    "help.sketch.construction_line.bisector": "選取兩條相交的草圖直線，再選擇其中一條角平分線。結果會跟隨其來源直線。",
+    "help.sketch.construction_line.horizontal": "建立通過某一點的水平無限長建構直線。其水平拘束會在後續編輯中持續維持。",
+    "help.sketch.construction_line.parallel": "選取一條草圖直線，再放置與其平行的無限長建構直線。按右鍵可選擇其他參考。",
+    "help.sketch.construction_line.perpendicular": "選取一條草圖直線，再放置與其垂直的無限長建構直線。按右鍵可選擇其他參考。",
+    "help.sketch.construction_line.tangent_at": "在圓或圓弧上的某一點，或在開放雲形線或圓錐曲線的端點建立切線。請先選取曲線，再選取其切點。",
+    "help.sketch.construction_line.tangent_external": "選取圓或圓弧，再選取外部點與一個切線解。預覽只會顯示位於所繪圓弧上的切點。",
+    "help.sketch.construction_line.tangent_two": "選取兩個圓或圓弧，再於預覽中選擇一條公切線。切點必須位於所繪曲線上。",
+    "help.sketch.construction_line.vertical": "建立通過某一點的鉛直無限長建構直線。其鉛直拘束會在後續編輯中持續維持。",
+    "prefs.persistent_ribbon_pressed": "醒目顯示作用中的功能區命令",
+    "prefs.persistent_ribbon_pressed_help": "在功能區命令的效果開啟期間醒目顯示這些命令。關閉可維持先前的中性外觀與命令說明。",
+    "prefs.sketch_construction_lines": "延伸建構直線工具",
+    "prefs.sketch_open_look_at": "開啟草圖時轉向正對草圖",
+    "prefs.sketch_open_look_at_note": "關閉：建立或編輯草圖時維持目前的檢視。需要時可用「注視」正對草圖。",
+    "recovery.discard_all": "全部捨棄",
+    "recovery.discard_all_detail": "此操作無法復原。",
+    "recovery.discard_all_title": "捨棄 {count} 個自動儲存檔？",
+    "recovery.discard_all_title_one": "捨棄 1 個自動儲存檔？",
+    "ui.construction.angle_hint": "建構直線：按一下一點，再輸入角度或選取方向",
+    "ui.construction.bisector_hint": "角平分線：選取兩條相交的直線，再選取所需的解",
+    "ui.construction.common_hint": "公切線：選取兩個圓/圓弧，再選取所需的解",
+    "ui.construction.contact_hint": "切線：選取圓/圓弧或開放雲形線/圓錐曲線，再選取切點（自由曲線：端點）",
+    "ui.construction.external_hint": "切線：選取圓或圓弧、一個外部點，再選取所需的解",
+    "ui.construction.free_hint": "建構直線：按一下兩點；按右鍵可重新開始",
+    "ui.construction.point_hint": "建構直線：按一下要通過的點",
+    "ui.construction.reference_hint": "建構直線：選取一條直線，再選取一點；按右鍵可變更參考"
+  }
+}
