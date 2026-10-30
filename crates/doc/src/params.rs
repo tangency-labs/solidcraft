@@ -356,6 +356,12 @@ impl Document {
     /// The parameters table (user, sketch dimensions, feature inputs).
     pub fn param_rows(&self) -> Vec<ParamRow> {
         let (vals, errs) = self.param_values();
+        self.param_rows_in(&vals, &errs)
+    }
+
+    /// [`Document::param_rows`] with the values and errors already worked out
+    /// ([`Document::param_values`]).
+    pub(crate) fn param_rows_in(&self, vals: &BTreeMap<String, Value>, errs: &BTreeMap<String, String>) -> Vec<ParamRow> {
         let all = self.all_param_exprs();
         let refs: BTreeMap<String, Vec<String>> = all.iter().map(|(n, e, _)| (n.clone(), expr::references(e))).collect();
         // Who uses each name, in name order: one pass over the references (a design an agent
@@ -374,7 +380,7 @@ impl Document {
                 name: p.name.clone(),
                 expression: p.expr.clone(),
                 unit: p.unit.clone(),
-                value: self.param_display_value(&vals, &p.name),
+                value: self.param_display_value(vals, &p.name),
                 error: errs.get(&p.name).cloned(),
                 comment: p.comment.clone(),
                 source: if p.model { "sketch" } else { "user" },

@@ -852,10 +852,9 @@ fn unknown_field(
 
 /// "unknown field `offset`; ConstructionPlane has `plane.base.name`, `plane.distance`…": the
 /// editable fields where it was given, as paths (each one timeline.edit's `set` takes as a key).
-fn unknown_field_message(field: &[Step], def: &Value, kind: &FeatureKind) -> String {
-    let type_name = kind.type_name();
-    let heavy = heavy_fields(kind);
-    let skip = |k: &str| NOT_EDITABLE.contains(&k) || heavy.iter().any(|(h, _)| *h == k);
+fn unknown_field_message(field: &[Step], def: &Value, f: &Feature) -> String {
+    let type_name = f.kind.type_name();
+    let skip = |k: &str| !f.field_role(k).in_definition();
     fn leaves(v: &Value, prefix: &str, skip: Option<&dyn Fn(&str) -> bool>, depth: usize, out: &mut Vec<String>) {
         match v {
             Value::Object(o) if depth < 4 && !o.is_empty() => {
@@ -1048,10 +1047,6 @@ fn command_profiles(set: &Value, cmd: &str) -> Result<Value> {
     Ok(set)
 }
 
-/// Fields of a stored feature left out of its definition: bookkeeping timeline.edit recomputes, and
-/// the name and suppression, which timeline.rename and timeline.suppress change.
-const NOT_EDITABLE: &[&str] = &["id", "type", "name", "suppressed", "param_names", "edge_refs", "edge_names", "face_names"];
-
 /// timeline.edit keeps accepting names for pattern and mirror seeds and for construction planes
 /// (#1134): each name in the merged definition resolves to the feature's id, refused when it
 /// finds no feature, as the commands that take names refuse it.
@@ -1088,17 +1083,6 @@ fn resolve_feature_names(v: &mut Value, doc: &solidcraft_doc::Document, cmd: &st
     }
 }
 
-/// Large payloads that timeline.edit cannot change, left out of a feature's definition: (field,
-/// what it holds).
-fn heavy_fields(kind: &FeatureKind) -> &'static [(&'static str, &'static str)] {
-    match kind {
-        FeatureKind::Sketch { .. } => &[("sketch", "the sketch geometry (sketch.inspect; edit it with the sketch commands)")],
-        FeatureKind::Import { .. } => &[("step", "the imported STEP text"), ("components", "the imported product tree")],
-        FeatureKind::MeshImport { .. } => &[("meshes", "the imported meshes")],
-        _ => &[],
-    }
-}
-
 fn inspect_feature(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "timeline.inspect";
     if p.get("group").is_some() {
@@ -1108,18 +1092,8 @@ fn inspect_feature(s: &mut Session, p: &Value) -> Result<Value> {
     }
     let id = feature_id(s, p.get("feature"), cmd)?;
     let f = s.doc.feature(id).ok_or_else(|| bad(cmd, "feature"))?;
-    let mut def = serde_json::to_value(f).map_err(|e| EngineError::Other(e.to_string()))?;
-    let mut omitted = Vec::new();
-    if let Some(o) = def.as_object_mut() {
-        for k in NOT_EDITABLE {
-            o.remove(*k);
-        }
-        for (k, why) in heavy_fields(&f.kind) {
-            if o.remove(*k).is_some() {
-                omitted.push(json!({"field": k, "what": why}));
-            }
-        }
-    }
+    let def = f.definition()?;
+    let omitted: Vec<Value> = def.omitted.iter().map(|(k, why)| json!({"field": k, "what": why})).collect();
     let inputs: Vec<Value> = f
         .kind
         .inputs()
@@ -1134,7 +1108,7 @@ fn inspect_feature(s: &mut Session, p: &Value) -> Result<Value> {
     let r = s.model.result(id);
     Ok(json!({
         "id": f.id, "name": f.name, "type": f.kind.type_name(), "suppressed": f.suppressed, "rolled_back": rolled_back,
-        "definition": def, "omitted": omitted, "inputs": inputs,
+        "definition": def.fields, "omitted": omitted, "inputs": inputs,
         "error": r.and_then(|r| r.error.clone()), "warning": r.and_then(|r| r.warning.clone()),
         "boolean_diagnostics": r.map(|r| &r.boolean_diagnostics),
     }))
@@ -1167,7 +1141,7 @@ fn edit_feature(s: &mut Session, p: &Value) -> Result<Value> {
     // would report success and change nothing.
     let after = serde_json::to_value(&nf).map_err(|e| EngineError::Other(e.to_string()))?;
     if let Some(field) = unknown_field(set, Some(&before), Some(&after), &v, &mut Vec::new(), 0) {
-        return Err(bad(cmd, unknown_field_message(&field, &before, &f.kind)));
+        return Err(bad(cmd, unknown_field_message(&field, &before, &f)));
     }
     if let FeatureKind::BodyTransfer { bodies, from, to, transform } = &nf.kind {
         solidcraft_doc::validate_body_transfer(&s.doc, &solidcraft_doc::plain(bodies), *from, *to, transform)?;

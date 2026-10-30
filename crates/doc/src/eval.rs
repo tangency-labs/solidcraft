@@ -787,7 +787,7 @@ fn one_by_one(input: Traced, edges: &[Vec3], blend: impl Fn(&kernel::Body, Vec3)
 }
 
 /// `Posts` for `Posts (1)`: the body a split piece was numbered after.
-fn split_piece_of(name: &str) -> Option<&str> {
+pub(crate) fn split_piece_of(name: &str) -> Option<&str> {
     let (base, n) = name.strip_suffix(')')?.rsplit_once(" (")?;
     (!n.starts_with('0') && n.parse::<u32>().is_ok()).then_some(base)
 }
@@ -1516,6 +1516,14 @@ fn adopt_solution(stored: &mut solidcraft_sketch::Sketch, solved: &solidcraft_sk
     true
 }
 
+/// Whether sketch `head` is `base` solved again: they differ at most in what a solve stores
+/// ([`adopt_solution`]) and in the display options. Clones `base` once.
+pub(crate) fn solved_again(base: &solidcraft_sketch::Sketch, head: &solidcraft_sketch::Sketch) -> bool {
+    let mut solved = base.clone();
+    solved.view.clone_from(&head.view);
+    solved == *head || (adopt_solution(&mut solved, head) && solved == *head)
+}
+
 impl Document {
     /// The values features are evaluated with: the parameters, and the design's length unit.
     pub fn evaluation_values(&self) -> BTreeMap<String, Value> {
@@ -1524,7 +1532,7 @@ impl Document {
 }
 
 /// The values features are evaluated with: the parameters, and the design's length unit.
-fn evaluation_values(doc: &Document) -> (BTreeMap<String, Value>, BTreeMap<String, String>) {
+pub(crate) fn evaluation_values(doc: &Document) -> (BTreeMap<String, Value>, BTreeMap<String, String>) {
     let (mut vals, perr) = doc.param_values();
     if let Some((Kind::Length, scale)) = expr::unit_info(doc.units.trim())
         && scale != 1.0

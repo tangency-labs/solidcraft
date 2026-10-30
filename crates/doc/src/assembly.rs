@@ -166,6 +166,23 @@ impl BomType {
     }
 }
 
+/// A design's components by parent ([`Document::component_tree`]).
+pub struct ComponentTree(std::collections::BTreeMap<u64, Vec<u64>>);
+
+impl ComponentTree {
+    /// Component `c` and every component inside it, by one walk down (a tree with a loop gives
+    /// what the walk reaches).
+    pub fn within(&self, c: u64) -> std::collections::BTreeSet<u64> {
+        let (mut seen, mut next) = (std::collections::BTreeSet::new(), vec![c]);
+        while let Some(c) = next.pop() {
+            if seen.insert(c) {
+                next.extend(self.0.get(&c).into_iter().flatten());
+            }
+        }
+        seen
+    }
+}
+
 /// How deep and how many placements [`Document::placements`] walks.
 pub const MAX_PLACEMENT_DEPTH: usize = 64;
 pub const MAX_PLACEMENTS: usize = 100_000;
@@ -416,6 +433,16 @@ impl Document {
             }
         }
         false
+    }
+
+    /// The component tree by parent, built once: for many questions about what is inside a
+    /// component, where [`Self::component_within`] walks up once per question.
+    pub fn component_tree(&self) -> ComponentTree {
+        let mut children: std::collections::BTreeMap<u64, Vec<u64>> = Default::default();
+        for c in &self.components {
+            children.entry(c.parent).or_default().push(c.id);
+        }
+        ComponentTree(children)
     }
 
     /// Would putting a placement of `component` into `parent` put it inside itself: is `parent`

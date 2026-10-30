@@ -2928,14 +2928,19 @@ impl Default for Document {
 }
 
 impl Document {
-    /// The next shared identity, including auxiliary lists written by older versions or
-    /// populated programmatically. Reading it does not reserve an id (used by joint previews).
+    /// The next shared identity: above `next_id` and every id in use (features, components,
+    /// placements, and auxiliary lists written by older versions or populated programmatically),
+    /// so a stale counter never hands out a taken id. Reading it does not reserve an id (used by
+    /// joint previews and the design compare).
     pub fn next_item_id(&self) -> Result<u64> {
         let a = &self.assembly;
         let largest = self
-            .browser_groups
+            .features
             .iter()
-            .map(|g| g.id)
+            .map(|f| f.id)
+            .chain(self.components.iter().map(|c| c.id))
+            .chain(self.occurrences.iter().map(|o| o.id))
+            .chain(self.browser_groups.iter().map(|g| g.id))
             .chain(self.timeline_groups.iter().map(|g| g.id))
             .chain(self.canvases.iter().map(|c| c.id))
             .chain(self.point_clouds.iter().map(|c| c.id))

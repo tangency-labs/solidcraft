@@ -20,3 +20,6 @@ thiserror = { workspace = true }
 log = { workspace = true }
 sha2 = { workspace = true }
 web-time = { workspace = true }
+
+[dev-dependencies]
+solidcraft-testkit = { workspace = true }

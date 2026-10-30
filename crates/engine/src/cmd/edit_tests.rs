@@ -1437,3 +1437,54 @@ fn timeline_joint_folders_reject_hostile_joint_references_atomically() {
         }
     }
 }
+
+/// #5184 (CE8): what timeline.inspect shows as a feature's definition, and what it leaves out. The
+/// picked edges' names, the inputs' parameter names, and who the feature is are not in it; the
+/// sketch geometry and imported payloads are listed as omitted. The pinned body names are in it.
+#[test]
+fn inspect_shows_the_definition_without_bookkeeping_or_heavy_fields() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "S"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [20, 20]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"distance": 20, "name": "Pad"}));
+    run(&mut s, "solid.fillet", json!({"edges": [[20, 0, 10]], "radius": 2, "name": "Round"}));
+    run(&mut s, "solid.box", json!({"length": 5, "width": 5, "height": 5, "corner": [40, 0, 0], "operation": "new", "name": "Block"}));
+    let mut doc = (*s.doc).clone();
+    for f in [
+        json!({"id": 90, "name": "Imp", "type": "import", "file": "a.step", "step": "", "components": [{"name": "A", "transform": [[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]]}]}),
+        json!({"id": 91, "name": "Scan", "type": "mesh_import", "file": "a.stl", "meshes": []}),
+    ] {
+        doc.features.push(serde_json::from_value(f).unwrap());
+    }
+    s = Session::new(doc);
+    let keys = |v: &Value| -> Vec<String> {
+        let mut k: Vec<String> = v.as_object().unwrap().keys().cloned().collect();
+        k.sort();
+        k
+    };
+    let omitted = |r: &Value| -> Vec<String> { r["omitted"].as_array().unwrap().iter().map(|o| o["field"].as_str().unwrap().to_string()).collect() };
+    let cases: [(&str, &[&str], &[&str]); 6] = [
+        ("S", &["plane"], &["sketch"]),
+        ("Pad", &["body_names", "extent", "operation", "profiles", "sketch"], &[]),
+        ("Round", &["edges", "radius"], &[]),
+        ("Block", &["body_names", "corner", "height", "length", "operation", "width"], &[]),
+        ("Imp", &["file"], &["step", "components"]),
+        ("Scan", &["file"], &["meshes"]),
+    ];
+    for (name, definition, left_out) in cases {
+        let r = run(&mut s, "timeline.inspect", json!({"feature": name}));
+        assert_eq!(keys(&r["definition"]), *definition, "{name}: {r}");
+        assert_eq!(omitted(&r), *left_out, "{name}: {r}");
+        assert_eq!(
+            keys(&r),
+            ["boolean_diagnostics", "definition", "error", "id", "inputs", "name", "omitted", "rolled_back", "suppressed", "type", "warning"],
+            "{name}"
+        );
+    }
+    let round = run(&mut s, "timeline.inspect", json!({"feature": "Round"}));
+    assert_eq!(round["inputs"], json!([{"label": "Radius", "param": "d2", "expression": "2", "unit": "mm"}]), "{round}");
+    assert_eq!(round["omitted"], json!([]));
+    let sketch = run(&mut s, "timeline.inspect", json!({"feature": "S"}));
+    assert_eq!(sketch["omitted"], json!([{"field": "sketch", "what": "the sketch geometry (sketch.inspect; edit it with the sketch commands)"}]));
+}
