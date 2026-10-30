@@ -55,7 +55,13 @@
 //!   appends). The `NotUsed` `bMakingManifoldSolid` of `EdgeEdgeIntersect` is kept.
 //! - **Opt-in (WR-527, #1526).** With `Kernel::fixes.boolean_skips_faces_apart`,
 //!   `IntersectTopology` skips a face pair whose face boxes are disjoint by the
-//!   intersection tolerance (the fork's tangency-labs/smlib@60b1c6a).
+//!   intersection tolerance (the fork's tangency-labs/smlib@60b1c6a). It then visits,
+//!   for each face of the B-rep, only the faces of the other B-rep a box search
+//!   (`SpatialIndex`) finds not disjoint from its box, in ascending order (the fork's
+//!   tangency-labs/smlib@84a7998): a superset of the pairs the box test keeps, so the
+//!   pairs processed and their order are the same, and a join of two bodies of n faces
+//!   no longer walks all n^2 pairs to skip them. With an intersection table registered
+//!   every pair is still visited (its lookup copies curves before the box test).
 //! - **Deleted curves.** `IntersectTopology` and `IntersectInsertRelate` return the
 //!   curve handles deleted (by `SplitIntersectingProtoEdges`, the resolution, the
 //!   imprint and the manager's destructor), as [`p1`](super::p1) does.
@@ -119,6 +125,7 @@ use crate::kernel::Kernel;
 use crate::math::{max2, max3, min2, Point3, BIG_DOUBLE, EFF_ZERO_SQRT};
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use crate::surface::surface::p2::TsectCurveType;
+use crate::topology::brep::validation::spatial::SpatialIndex;
 use crate::topology::proto_topology::p3::Mates;
 use crate::topology::proto_topology::{ProtoEdgeId, ProtoTopologyManager, ProtoVertexId};
 
@@ -1357,10 +1364,23 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
         } else {
             (Vec::new(), Vec::new())
         };
+        // (the fork's tangency-labs/smlib@84a7998) the other B-rep's faces whose box may
+        // lie within the tolerance of a face's box: a superset of the pairs the box test
+        // below keeps, in ascending order. The pairs it leaves out reach nothing before
+        // that test but lookups without effect (no intersection table is registered).
+        let pair_search = (skip_apart && self.intersection_table().is_none())
+            .then(|| SpatialIndex::new(boxes2.iter().copied().map(Some)));
 
         // Finally, the Face-Face intersections.
         for (ii, &f1) in faces1.iter().enumerate() {
-            for (jj, &f2) in faces2.iter().enumerate() {
+            let pairs: Vec<usize> = match (&pair_search, boxes1.get(ii)) {
+                (Some(search), Some(box1)) => search.boxes_in_box(box1, self.this_approx_tol_3d()),
+                _ => (0..faces2.len()).collect(),
+            };
+            for jj in pairs {
+                let Some(&f2) = faces2.get(jj) else {
+                    continue;
+                };
                 let s1 = brep
                     .face_surface(f1)
                     .ok_or(invalid(OP_INTERSECT_TOPOLOGY, "face handle is unknown"))?;
