@@ -55,6 +55,18 @@ fn navigation_sample(ui: &mut Ui, size: crate::navigation_bar::Size) {
 
 // One entry per element/variant: names, rendering and geometry expectations stay together.
 const ELEMENTS: &[Element] = &[
+    // The corner window's rows: the lines of one corner, its own Flip and the button that turns
+    // the cut off and on again (the row stays).
+    element!("corner_row", "dialog:list:gallery:corner_row:0", Some("dialog:list:gallery:corner_row:0:remove"), |ui, _| {
+        corner_row(ui, "gallery:corner_row:0", "Corner 0", "line-1-line-2", true, Some(false));
+        corner_row(ui, "gallery:corner_row:1", "Corner 1", "line-3-line-4", false, Some(true));
+    }),
+    // An on/off icon button inside a rectangle the caller placed, so rows keep their columns.
+    element!("toggle_icon_at", "dialog:gallery:Flip", Some("dialog:gallery:Flip"), |ui, _| {
+        let t = Tokens::get();
+        let (rect, _) = ui.allocate_exact_size(vec2(t.space_24 + t.space_4, t.control_height), egui::Sense::hover());
+        toggle_icon_at(ui, rect, "gallery", "pattern_flip", "Flip", false);
+    }),
     element!("viewport_status_item", "viewport_status:sample:item", Some("viewport_status:sample:close"), |ui, _| {
         let item = StatusItem {
             id: "sample".into(),
