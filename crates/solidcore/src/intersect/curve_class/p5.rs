@@ -973,11 +973,13 @@ impl<O: ClassObject> CurveClassification<O> {
                         let s = h.and_then(|h| geometry.surface(h)).ok_or(
                             SolidError::invalid_input(OP, "unresolved classification surface"),
                         )?;
-                        Ok(if core::ptr::eq(s, face_surface) {
-                            s.clone()
-                        } else {
-                            s.clone_keeping_owner()
-                        })
+                        // (upstream works on the surfaces themselves: exact copies,
+                        // without the copy constructor's knot fix-up)
+                        let mut c = s.clone_for_evaluation()?;
+                        if core::ptr::eq(s, face_surface) {
+                            c.set_owner(None);
+                        }
+                        Ok(c)
                     };
                 (resolve(self.surface1())?, resolve(self.surface2())?)
             };

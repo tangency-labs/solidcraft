@@ -574,8 +574,14 @@ impl FilletBrep {
 
             // check state - filletSurface must have been computed by now
             let (Some(surface1), Some(surface2)) = (
-                self.geom(g1)?.fillet_surface(None)?.cloned(),
-                self.geom(g2)?.fillet_surface(None)?.cloned(),
+                self.geom(g1)?
+                    .fillet_surface(None)?
+                    .map(exact_surface)
+                    .transpose()?,
+                self.geom(g2)?
+                    .fillet_surface(None)?
+                    .map(exact_surface)
+                    .transpose()?,
             ) else {
                 return Ok(()); // Fillet surfaces have not yet been computed
             };
@@ -735,7 +741,8 @@ impl FilletBrep {
             surface1 = self
                 .geom(g1)?
                 .fillet_surface(None)?
-                .cloned()
+                .map(exact_surface)
+                .transpose()?
                 .ok_or_else(|| SolidError::null_pointer(OP_CROSS))?;
 
             if let Some(g2) = g2.filter(|&g2| g2 != g1) {
@@ -748,7 +755,8 @@ impl FilletBrep {
                 surface2 = Some(
                     self.geom(g2)?
                         .fillet_surface(None)?
-                        .cloned()
+                        .map(exact_surface)
+                        .transpose()?
                         .ok_or_else(|| SolidError::null_pointer(OP_CROSS))?,
                 );
             }
@@ -812,13 +820,15 @@ impl FilletBrep {
                         surface1 = self
                             .geom(g1)?
                             .fillet_surface(None)?
-                            .cloned()
+                            .map(exact_surface)
+                            .transpose()?
                             .ok_or_else(|| SolidError::null_pointer(OP_CROSS))?;
                         if surface2.is_some() {
                             surface2 = Some(
                                 self.geom(g2)?
                                     .fillet_surface(None)?
-                                    .cloned()
+                                    .map(exact_surface)
+                                    .transpose()?
                                     .ok_or_else(|| SolidError::null_pointer(OP_CROSS))?,
                             );
                         }
@@ -833,7 +843,9 @@ impl FilletBrep {
             let face = target.face(orig_face)?;
             surface1 = face
                 .surface
-                .clone()
+                .as_ref()
+                .map(exact_surface)
+                .transpose()?
                 .ok_or_else(|| SolidError::null_pointer(OP_CROSS))?;
             tol = crate::topology::face::p2::tolerance(target, orig_face)?;
         }
@@ -1051,7 +1063,8 @@ impl FilletBrep {
             let fillet_surface1 = self
                 .geom(g1)?
                 .fillet_surface(None)?
-                .cloned()
+                .map(exact_surface)
+                .transpose()?
                 .ok_or_else(|| SolidError::null_pointer(OP_SIDE))?;
             // upstream calls `pCorner->IsExtendedSurfacePatch()` on the missing corner
             // (UB-214: a null dereference, tested only four lines later)
@@ -1070,14 +1083,19 @@ impl FilletBrep {
                         .ok_or_else(|| SolidError::null_pointer(OP_SIDE))?;
                     if let Some(s) = context.extended_surface(the_corner, face)? {
                         (
-                            Some(s.clone()),
+                            Some(exact_surface(s)?),
                             Some(ExecutiveErrorObject::TargetFaceSurface {
                                 face,
                                 extended: true,
                             }),
                         )
                     } else {
-                        let orig = target.face(face)?.surface.clone();
+                        let orig = target
+                            .face(face)?
+                            .surface
+                            .as_ref()
+                            .map(exact_surface)
+                            .transpose()?;
                         let id = orig
                             .as_ref()
                             .map(|_| ExecutiveErrorObject::TargetFaceSurface {
@@ -1185,7 +1203,10 @@ impl FilletBrep {
         target: &Brep,
     ) -> Result<()> {
         self.calc_edge_on_extended_edge_with_surfaces(k, e, corner, corners, target, |c, f| {
-            Ok(corners.extended_surface(c, f)?.cloned())
+            corners
+                .extended_surface(c, f)?
+                .map(exact_surface)
+                .transpose()
         })
     }
 
@@ -1204,7 +1225,10 @@ impl FilletBrep {
         target: &Brep,
     ) -> Result<()> {
         self.calc_edge_on_extended_edge_with_surfaces(k, e, corner, corners, target, |c, f| {
-            Ok(context.extended_surface(c, f)?.cloned())
+            context
+                .extended_surface(c, f)?
+                .map(exact_surface)
+                .transpose()
         })
     }
 
@@ -1258,7 +1282,12 @@ impl FilletBrep {
         for &f in faces.iter().take(2) {
             let surf = match extended_surface(the_corner, f)? {
                 Some(s) => Some(s),
-                None => target.face(f)?.surface.clone(),
+                None => target
+                    .face(f)?
+                    .surface
+                    .as_ref()
+                    .map(exact_surface)
+                    .transpose()?,
             };
             // SM_CAST_PTR(SmBSplineSurface, pSurf)
             surfaces.push(surf.filter(is_b_spline_surface));
@@ -1680,7 +1709,8 @@ impl FilletBrep {
         let fillet_surface = self
             .geom(g)?
             .fillet_surface(None)?
-            .cloned()
+            .map(exact_surface)
+            .transpose()?
             .ok_or_else(|| SolidError::null_pointer(OP_END))?;
         let mut eus = Vec::with_capacity(2);
         for i in 0..2 {
@@ -1909,7 +1939,8 @@ impl FilletBrep {
         let fillet_surface = self
             .geom(g)?
             .fillet_surface(None)?
-            .cloned()
+            .map(exact_surface)
+            .transpose()?
             .ok_or_else(|| SolidError::null_pointer(OP_TRIM))?;
 
         // locals: FilletSurface Natural domain and current tolerance
@@ -2211,7 +2242,8 @@ impl FilletBrep {
         let fillet_surface = self
             .geom(g)?
             .fillet_surface(None)?
-            .cloned()
+            .map(exact_surface)
+            .transpose()?
             .ok_or_else(|| SolidError::null_pointer(OP_CLIFF))?;
         let fil_srf_domain = fillet_surface.natural_uv_domain_with_nurb(k)?;
 
@@ -2293,13 +2325,21 @@ impl FilletBrep {
                         self.eu_geom(mate)?
                     };
                     let side_surface = if let Some(sg) = side_fg.filter(|&s| s != g) {
-                        self.geom(sg)?.fillet_surface(None)?.cloned()
+                        self.geom(sg)?
+                            .fillet_surface(None)?
+                            .map(exact_surface)
+                            .transpose()?
                     } else {
                         let face = self
                             .fillet_edge(rail)?
                             .original_face()
                             .ok_or_else(|| SolidError::null_pointer(OP_CLIFF))?;
-                        target.face(face)?.surface.clone()
+                        target
+                            .face(face)?
+                            .surface
+                            .as_ref()
+                            .map(exact_surface)
+                            .transpose()?
                     }
                     .ok_or_else(|| SolidError::null_pointer(OP_CLIFF))?;
 
@@ -2458,6 +2498,17 @@ impl FilletBrep {
         }
         Ok(())
     }
+}
+
+/// The surface upstream's pointer (`GetFilletSurface()`, `pFace->GetSurface()`, an
+/// extended surface) stands for, as a copy: the knots exactly as they are (the copy
+/// constructor's `sm_FixupKnotVector` can move near-coincident knots), without owner as
+/// the port's copies have always run here (an owned copy classifies points on the face,
+/// `SmFace::PointClassify`, which `query.face_p2` does not port for these callers yet).
+fn exact_surface(s: &Surface) -> Result<Surface> {
+    let mut c = s.clone_for_evaluation()?;
+    c.set_owner(None);
+    Ok(c)
 }
 
 /// `DropVectors(uv, TRUE, TRUE, 1, &direction, &uv_dir)`.

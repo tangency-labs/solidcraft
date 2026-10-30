@@ -565,8 +565,9 @@ fn face_surface(brep: &Brep, eu: EdgeuseId, op: &'static str) -> Result<(Surface
         .ok_or_else(|| SolidError::invalid_input(op, "edge use without face"))?;
     let s = face::surface(brep, f)?
         .ok_or_else(|| SolidError::invalid_input(op, "face without surface"))?;
-    // (the offset shares the face's surface: its owner is kept)
-    Ok((s.clone_keeping_owner(), SurfaceId::Face(f)))
+    // (the offset shares the face's surface, `m_pSurface(&rSurface)`: an exact copy,
+    // owner kept, without the copy constructor's knot fix-up)
+    Ok((s.clone_for_evaluation()?, SurfaceId::Face(f)))
 }
 
 /// `SmConstantRadiusFS(crContext, dThisApproxTol3d, dAngleTolerance,

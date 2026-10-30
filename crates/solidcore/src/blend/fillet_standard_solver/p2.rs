@@ -264,13 +264,14 @@ fn faceuse_opposite(brep: &Brep, eu: EdgeuseId, op: &'static str) -> Result<bool
 }
 
 /// `pEdgeuse->GetLoopuse()->GetFaceuse()->GetFace()->GetSurface()` as the base of an
-/// offset surface (the offset shares the face's surface: its owner is kept).
+/// offset surface (the offset shares the face's surface, `m_pSurface(&rSurface)`: an
+/// exact copy, owner kept, without the copy constructor's knot fix-up).
 fn face_base(brep: &Brep, eu: EdgeuseId, op: &'static str) -> Result<(Surface, SurfaceId)> {
     let f = edgeuse::face(brep, eu)?
         .ok_or_else(|| SolidError::invalid_input(op, "edge use without face"))?;
     let s = face::surface(brep, f)?
         .ok_or_else(|| SolidError::invalid_input(op, "face without surface"))?;
-    Ok((s.clone_keeping_owner(), SurfaceId::Face(f)))
+    Ok((s.clone_for_evaluation()?, SurfaceId::Face(f)))
 }
 
 /// The edge-use part of the `SmConstantDistanceFS` and `SmVariableRadiusFS`
