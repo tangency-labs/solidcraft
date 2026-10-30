@@ -1023,7 +1023,15 @@ impl FilletSolver {
         }
 
         let end_ang = rad_to_deg(span_ang);
-        let mut angle_span = end_ang - start_ang;
+        // Not upstream (WR-568, the fork's tangency-labs/smlib@985faae): the span is the
+        // turn from the start section to the end one; the start angle `IsArc` gives is
+        // measured from the arc's own frame (an `SmCircle`'s analytic domain, which need
+        // not start at 0), not from the start section, so it is no part of that turn
+        let mut angle_span = if k.fixes.fillet_torus_span_from_start_section {
+            end_ang
+        } else {
+            end_ang - start_ang
+        };
 
         // Determine if we need to extend the span even when 'm_bExtendBefore' is FALSE
         if !curve.is_closed(k, &ivl, 0.0)? && !s.extend_after {
