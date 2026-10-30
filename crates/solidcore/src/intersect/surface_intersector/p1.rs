@@ -866,7 +866,8 @@ impl<'s> SurfaceIntersector<'s> {
 
     /// Steps back from a surface pole along the curve and recomputes good first
     /// derivatives of surface `srf` (`StepBackFromSingularity`): copies the curve
-    /// tangent of one point to the other, drops the point at `t = 0.01` (from
+    /// tangent of one point to the other (not with
+    /// `Kernel::fixes.ssi_pole_point_keeps_its_tangent`, WR-550), drops the point at `t = 0.01` (from
     /// `previous`) or `t = 0.99` (from `current`, when `step_off_current`) of the
     /// Hermite span onto the surface, and stores the derivatives and the singular
     /// parameter found there in that point.
@@ -915,10 +916,18 @@ impl<'s> SurfaceIntersector<'s> {
         step_size: f64,
     ) -> Result<()> {
         // copy the curve tangent of the point stepped off to the other one
-        if step_off_current {
-            curr.curve_pv[1] = prev.crv_deriv();
-        } else {
-            prev.curve_pv[1] = curr.crv_deriv();
+        // Not upstream (WR-550, opt-in `fixes.ssi_pole_point_keeps_its_tangent`; the
+        // fork's tangency-labs/smlib@8d95600): the points keep their own curve tangents.
+        // The tangent at the singular point comes from the surface's limit normal there
+        // (`ComputePointValues`), so it is exact; copying the other point's tangent over
+        // it bent the fitted span into the pole. Only the surface derivatives are taken
+        // from the stepped-back point.
+        if !k.fixes.ssi_pole_point_keeps_its_tangent {
+            if step_off_current {
+                curr.curve_pv[1] = prev.crv_deriv();
+            } else {
+                prev.curve_pv[1] = curr.crv_deriv();
+            }
         }
 
         let herm = HermiteCurve::new(
