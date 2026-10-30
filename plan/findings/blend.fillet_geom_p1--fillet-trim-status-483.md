@@ -1,5 +1,9 @@
 # blend.fillet_geom_p1: FilletGeom Trim status propagation (#483, PR #674, 2026-10-24)
 
+Historical evidence from the initial unconditional implementation. The current
+policy and validation are in
+`blend.fillet_geom_p1--fillet-trim-status-483--addendum-2026-10-30-opt-in.md`.
+
 `blend.fillet_geom_p1` copied the pinned C++ `SmFilletGeom::Trim`'s dropped
 statuses. `FilletBrep::trim_geom` now returns the actual error from each primary
 rail, both other-rail lists, the center line, either interval intersection and

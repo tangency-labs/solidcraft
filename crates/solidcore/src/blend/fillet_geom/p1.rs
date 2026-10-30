@@ -4208,6 +4208,124 @@ mod tests {
     }
 
     #[test]
+    fn trim_geom_default_drops_each_rail_curve_error_and_continues() {
+        let k = Kernel::default();
+        assert!(!k.fixes.fillet_trim_status);
+        for failed in 0..4 {
+            let (mut fb, g, rails) = trim_test_geom();
+            fb.brep_mut().edge_mut(rails[failed]).unwrap().curve =
+                Some(Curve::from(trim_test_curve(0.5)));
+            fb.geom_mut(g).unwrap().center_line_curve = Some(Curve::from(trim_test_curve(1.0)));
+            fb.geom_mut(g)
+                .unwrap()
+                .set_fillet_surface(Some(bilinear_patch()));
+            let mut interval = Extent1d::from_min_max(0.25, 0.75);
+            fb.trim_geom(&k, g, &mut interval).unwrap();
+            for (i, rail) in rails.iter().enumerate() {
+                let edge = fb.brep().edge(*rail).unwrap();
+                assert_eq!(edge.interval, interval);
+                assert_eq!(
+                    edge.curve.as_ref().unwrap().natural_interval(),
+                    if i == failed {
+                        Extent1d::from_min_max(0.0, 0.5)
+                    } else {
+                        interval
+                    }
+                );
+            }
+            let geom = fb.geom(g).unwrap();
+            assert_eq!(
+                geom.center_line_curve.as_ref().unwrap().natural_interval(),
+                interval
+            );
+            assert_eq!(
+                geom.fillet_surface(None)
+                    .unwrap()
+                    .unwrap()
+                    .natural_uv_domain_if_built()
+                    .u_interval(),
+                interval
+            );
+        }
+    }
+
+    #[test]
+    fn trim_geom_default_installs_unset_rail_intersection_and_continues() {
+        let k = Kernel::default();
+        for failed in 0..4 {
+            let (mut fb, g, rails) = trim_test_geom();
+            fb.brep_mut().edge_mut(rails[failed]).unwrap().interval =
+                Extent1d::from_min_max(2.0, 3.0);
+            let mut interval = Extent1d::from_min_max(0.25, 0.75);
+            fb.trim_geom(&k, g, &mut interval).unwrap();
+            for (i, rail) in rails.iter().enumerate() {
+                let edge = fb.brep().edge(*rail).unwrap();
+                assert_eq!(
+                    edge.interval,
+                    if i == failed {
+                        Extent1d::new()
+                    } else {
+                        interval
+                    }
+                );
+                assert_eq!(edge.curve.as_ref().unwrap().natural_interval(), interval);
+            }
+        }
+    }
+
+    #[test]
+    fn trim_geom_default_drops_center_error_and_trims_surface() {
+        let k = Kernel::default();
+        let (mut fb, g, _) = trim_test_geom();
+        let geom = fb.geom_mut(g).unwrap();
+        geom.center_line_curve = Some(Curve::from(trim_test_curve(0.5)));
+        geom.set_fillet_surface(Some(bilinear_patch()));
+        let mut interval = Extent1d::from_min_max(0.25, 0.75);
+        fb.trim_geom(&k, g, &mut interval).unwrap();
+        let geom = fb.geom(g).unwrap();
+        assert_eq!(
+            geom.center_line_curve.as_ref().unwrap().natural_interval(),
+            Extent1d::from_min_max(0.0, 0.5)
+        );
+        assert_eq!(
+            geom.fillet_surface(None)
+                .unwrap()
+                .unwrap()
+                .natural_uv_domain_if_built()
+                .u_interval(),
+            interval
+        );
+    }
+
+    #[test]
+    fn trim_geom_default_drops_surface_intersection_and_trim_errors() {
+        let k = Kernel::default();
+        for mut interval in [
+            Extent1d::from_min_max(2.0, 3.0),
+            Extent1d::from_min_max(0.5, 0.5),
+        ] {
+            let (mut fb, g, rails) = trim_test_geom();
+            for rail in rails {
+                fb.brep_mut().edge_mut(rail).unwrap().curve = None;
+            }
+            fb.geom_mut(g)
+                .unwrap()
+                .set_fillet_surface(Some(bilinear_patch()));
+            fb.trim_geom(&k, g, &mut interval).unwrap();
+            assert_eq!(
+                fb.geom(g)
+                    .unwrap()
+                    .fillet_surface(None)
+                    .unwrap()
+                    .unwrap()
+                    .natural_uv_domain_if_built()
+                    .u_interval(),
+                Extent1d::from_min_max(0.0, 1.0)
+            );
+        }
+    }
+
+    #[test]
     fn trim_geom_propagates_each_rail_curve_error_and_stops() {
         let mut k = Kernel::default();
         k.fixes.fillet_trim_status = true;
@@ -4241,11 +4359,7 @@ mod tests {
         fb.brep_mut().edge_mut(rails[0]).unwrap().interval = old;
         let mut interval = Extent1d::from_min_max(0.25, 0.75);
         let expected = old.intersect(&interval).unwrap_err();
-        assert_eq!(
-            fb.trim_geom(&k, g, &mut interval)
-                .unwrap_err(),
-            expected
-        );
+        assert_eq!(fb.trim_geom(&k, g, &mut interval).unwrap_err(), expected);
         assert_eq!(fb.brep().edge(rails[0]).unwrap().interval, old);
         // Successful curve edits before the failure remain, but later rails are untouched.
         assert_eq!(
@@ -4270,8 +4384,8 @@ mod tests {
         k.fixes.fillet_trim_status = true;
         let (mut fb, g, _) = trim_test_geom();
         let geom = fb.geom_mut(g).unwrap();
-        geom.center_line_curve = Some(trim_test_curve(0.5));
-        geom.fillet_surface = Some(bilinear_patch());
+        geom.center_line_curve = Some(Curve::from(trim_test_curve(0.5)));
+        geom.set_fillet_surface(Some(bilinear_patch()));
         let mut interval = Extent1d::from_min_max(0.25, 0.75);
         let expected = trim_test_curve(0.5)
             .trim(&k, &mut interval, TrimMode::Notify)
@@ -4280,10 +4394,10 @@ mod tests {
         assert_eq!(
             fb.geom(g)
                 .unwrap()
-                .fillet_surface
-                .as_ref()
+                .fillet_surface(None)
                 .unwrap()
-                .natural_uv_domain()
+                .unwrap()
+                .natural_uv_domain_if_built()
                 .u_interval(),
             Extent1d::from_min_max(0.0, 1.0)
         );
@@ -4297,23 +4411,21 @@ mod tests {
         for rail in rails {
             fb.brep_mut().edge_mut(rail).unwrap().curve = None;
         }
-        fb.geom_mut(g).unwrap().fillet_surface = Some(bilinear_patch());
+        fb.geom_mut(g)
+            .unwrap()
+            .set_fillet_surface(Some(bilinear_patch()));
         let mut interval = Extent1d::from_min_max(2.0, 3.0);
         let expected = Extent1d::from_min_max(0.0, 1.0)
             .intersect(&interval)
             .unwrap_err();
-        assert_eq!(
-            fb.trim_geom(&k, g, &mut interval)
-                .unwrap_err(),
-            expected
-        );
+        assert_eq!(fb.trim_geom(&k, g, &mut interval).unwrap_err(), expected);
         assert_eq!(
             fb.geom(g)
                 .unwrap()
-                .fillet_surface
-                .as_ref()
+                .fillet_surface(None)
                 .unwrap()
-                .natural_uv_domain()
+                .unwrap()
+                .natural_uv_domain_if_built()
                 .u_interval(),
             Extent1d::from_min_max(0.0, 1.0)
         );
@@ -4328,9 +4440,11 @@ mod tests {
             fb.brep_mut().edge_mut(rail).unwrap().curve = None;
         }
         let mut surface = bilinear_patch();
-        fb.geom_mut(g).unwrap().fillet_surface = Some(bilinear_patch());
+        fb.geom_mut(g)
+            .unwrap()
+            .set_fillet_surface(Some(bilinear_patch()));
         let mut interval = Extent1d::from_min_max(0.5, 0.5);
-        let mut domain = surface.natural_uv_domain();
+        let mut domain = surface.natural_uv_domain_if_built();
         domain.set_u_interval(&interval);
         let expected = surface.trim_with_domain(&k, &mut domain).unwrap_err();
         assert_eq!(fb.trim_geom(&k, g, &mut interval).unwrap_err(), expected);
@@ -4341,8 +4455,10 @@ mod tests {
         let mut k = Kernel::default();
         k.fixes.fillet_trim_status = true;
         let (mut fb, g, rails) = trim_test_geom();
-        fb.geom_mut(g).unwrap().center_line_curve = Some(trim_test_curve(1.0));
-        fb.geom_mut(g).unwrap().fillet_surface = Some(bilinear_patch());
+        fb.geom_mut(g).unwrap().center_line_curve = Some(Curve::from(trim_test_curve(1.0)));
+        fb.geom_mut(g)
+            .unwrap()
+            .set_fillet_surface(Some(bilinear_patch()));
         let mut interval = Extent1d::from_min_max(-1e-14, 0.75);
         fb.trim_geom(&k, g, &mut interval).unwrap();
         assert_eq!(interval, Extent1d::from_min_max(0.0, 0.75));
@@ -4357,10 +4473,10 @@ mod tests {
             interval
         );
         assert_eq!(
-            geom.fillet_surface
-                .as_ref()
+            geom.fillet_surface(None)
                 .unwrap()
-                .natural_uv_domain()
+                .unwrap()
+                .natural_uv_domain_if_built()
                 .u_interval(),
             interval
         );

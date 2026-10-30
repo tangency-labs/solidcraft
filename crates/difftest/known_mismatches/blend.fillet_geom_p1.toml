@@ -1,0 +1,5 @@
+# Retained from PR #674's enlarged corpus; not a status-propagation exemption.
+[[mismatch]]
+unit = "blend.fillet_geom_p1"
+case = "gen1440"
+why = "The successful trim of the first rail (edge 2) keeps four rational degree-2 control points and seven knots in C++, but Rust keeps three control points and six knots. Default statuses agree; the same geometry mismatch remains with the later failing rail removed. No confirmed C++ defect or tolerance exemption is claimed. See plan/findings/blend.fillet_geom_p1--fillet-trim-status-483--addendum-2026-10-30-opt-in.md"
