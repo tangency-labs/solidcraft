@@ -10,7 +10,8 @@
 //!   parameter, raised to the side's degree, the pieces joined at a knot of full multiplicity),
 //!   so a vertex where the loop runs straight on (a seam) is never a patch's corner: a patch
 //!   corner there would be flat (its two derivatives parallel), degenerate and refused by a
-//!   B-rep's checks. A loop with fewer than three corners keeps its edges as its sides.
+//!   B-rep's checks. A loop with fewer than three corners keeps its edges as its sides, and must
+//!   have four of them (a tube's end, which the kernel gives in four pieces).
 //! - **The patches.** A loop of four sides `e₀ … e₃` bounds one patch on the unit square: `e₀`
 //!   runs along `v = 0` from `u = 0` to 1, `e₁` up `u = 1`, `e₂` back along `v = 1` and `e₃` down
 //!   `u = 0`. A loop of three has no `e₃`: the side `u = 0` collapses to the loop's first corner
@@ -20,8 +21,11 @@
 //!   `V_k, M_k, C, M_{k−1}` (`V_k` the corner where side `k` starts): the first half of side `k`
 //!   along `v = 0`, spoke `k` up `u = 1`, spoke `k − 1` back along `v = 1` and the second half of
 //!   side `k − 1` down `u = 0`. Each spoke is one row of the two patches it divides, the same
-//!   control points in both. Every edge's pcurve is a straight line on its stretch of a patch's
-//!   side, affine in its parameter.
+//!   control points in both. A loop with fewer than three corners has no N-gon whose corners
+//!   are not flat; it is the ring of structured meshing (an "O-grid"): four patches each on one
+//!   side, two meeting at every point of the loop, about one inner patch ([`Quilt::ring`]).
+//!   Every edge's pcurve is a straight line on its stretch of a patch's side, affine in its
+//!   parameter.
 //! - **Rational edges** (a circle's arc, as every conic is held) are boundary rows of a rational
 //!   patch: the fill works on homogeneous control points `(w·P, w)`. An edge's homogeneous points
 //!   may be scaled by a constant without changing its curve or its parameter, so each edge is
@@ -69,15 +73,18 @@
 //!   - across a patch's own C0 knot lines (a side's break where it is only C0 in its
 //!     parameter), the derivatives either side in the ratio of the crossing sides' speeds
 //!     ([`knot_line_rows`]): the fill is tangent continuous there too;
-//!   - across each spoke, the two patches' derivatives away from it opposed up to the linear
-//!     gluing function of G1 joins at an N-valent point (C. Loop, J. Peters, J. Hahn):
+//!   - across each spoke (a curve inside the fill two patches share: [`Seam`]), the two patches'
+//!     derivatives away from it opposed up to the linear gluing function of G1 joins at an
+//!     N-valent point (C. Loop, J. Peters, J. Hahn):
 //!     `∂S_k/∂u + ∂S_{k+1}/∂v = α(t)·∂S/∂t` on the shared parameter t (0 at the edge's
 //!     midpoint, 1 at the centre), `α(t) = 2·cos(2π/N)·t`: the patches join tangent there. At
 //!     the midpoint `α = 0` (the edge's two halves leave it at the same speed, opposed); at the
 //!     centre it is the value the spokes' tangents `d_k` meet when they are any affine image of
 //!     the regular N-star, `d_{k−1} + d_{k+1} = 2·cos(2π/N)·d_k`. Parametric C1 (`α = 0`) asks
 //!     `d_{k−1} + d_{k+1} = 0` there, which for N other than a multiple of four only `d = 0`
-//!     meets: every patch would have a flat corner at the centre;
+//!     meets: every patch would have a flat corner at the centre. The ring's spokes are glued
+//!     alike: at a valence-3 inner corner `α = ±2·cos(2π/3)`, at the loop by what its two sides'
+//!     derivatives there ask ([`foot_gluing`]);
 //!   - points the fill passes through, located on the last solution (nearest point of any patch)
 //!     and fitted again (Hoschek's parameter correction).
 //!
@@ -233,12 +240,25 @@ pub struct IsoPatch {
 #[derive(Clone, Debug, PartialEq)]
 pub struct IsoFill {
     pub patches: Vec<IsoPatch>,
-    /// Each spoke as a curve (degree, knots on `[0, 1]`, control points and, on a rational fill,
-    /// weights): from its edge's midpoint to the centre. Empty for a fill of one patch.
+    /// Each spoke (a curve inside the fill two patches share) as a curve (degree, knots on
+    /// `[0, 1]`, control points and, on a rational fill, weights), from its first end to its
+    /// second. Empty for a fill of one patch.
     pub spokes: Vec<IsoEdge>,
-    /// Where each spoke starts: on loop edge `.0` at its parameter `.1` (the middle of a side).
-    pub feet: Vec<(usize, f64)>,
+    /// Where each spoke starts and ends.
+    pub ends: Vec<[SpokeEnd; 2]>,
+    /// The fill's vertices inside the loop (the centre, or the inner patch's corners), where
+    /// spokes end ([`SpokeEnd::Inner`]).
+    pub inner: Vec<Vec3>,
     pub achieved: Achieved,
+}
+
+/// Where a spoke ends.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum SpokeEnd {
+    /// On loop edge `edge` at its parameter `t`.
+    Loop { edge: usize, t: f64 },
+    /// At the fill's inner vertex `.0` ([`IsoFill::inner`]).
+    Inner(usize),
 }
 
 /// What a fill achieves at its stations and points (its boundary is exact).
@@ -400,8 +420,9 @@ struct SidePiece {
 }
 
 /// The region's sides (module docs): the chains of edges between the loop's corners, the first
-/// starting at a corner; each edge its own side when the loop has fewer than three corners.
-fn loop_sides(edges: &[IsoEdge], corner_turn: f64) -> Vec<Vec<SidePiece>> {
+/// starting at a corner; each edge its own side when the loop has fewer than three corners. And
+/// whether it has three or more.
+fn loop_sides(edges: &[IsoEdge], corner_turn: f64) -> (Vec<Vec<SidePiece>>, bool) {
     let n = edges.len();
     let whole = |k: usize| SidePiece { edge: k, range: edges.get(k).map_or([0.0, 1.0], IsoEdge::domain), at: [0.0, 1.0] };
     // A corner where edge k starts: the tangents either side differ by more than the turn.
@@ -416,7 +437,7 @@ fn loop_sides(edges: &[IsoEdge], corner_turn: f64) -> Vec<Vec<SidePiece>> {
         .collect();
     let corners: Vec<usize> = (0..n).filter(|k| corner.get(*k).copied().unwrap_or(true)).collect();
     if corners.len() < 3 {
-        return (0..n).map(|k| vec![whole(k)]).collect();
+        return ((0..n).map(|k| vec![whole(k)]).collect(), false);
     }
     // Each edge's share of its side: its control polygon's length (any positive measure keeps the
     // side exact; this one keeps its speed near the edges' own).
@@ -436,7 +457,7 @@ fn loop_sides(edges: &[IsoEdge], corner_turn: f64) -> Vec<Vec<SidePiece>> {
         }
         sides.push(side);
     }
-    sides
+    (sides, true)
 }
 
 /// A side as one curve on `[0, 1]` (module docs): its edges (homogeneous points scaled by
@@ -704,10 +725,89 @@ struct Quilt {
     unknowns: usize,
     /// The loop edges' pieces on the patches' sides.
     pieces: Vec<Piece>,
-    /// Spokes: (patch on whose `u = 1` it runs, patch on whose `v = 1` it runs).
-    spokes: Vec<(usize, usize)>,
-    /// Where each spoke starts on the loop: (edge, parameter).
-    feet: Vec<(usize, f64)>,
+    /// The curves inside the fill two patches share, each joined G1 across.
+    spokes: Vec<Seam>,
+    /// The fill's vertices inside the loop: a patch and its control point there.
+    inner: Vec<(usize, usize, usize)>,
+    /// How the fill's middle is crowned.
+    layout: Layout,
+}
+
+/// How the region is laid out in patches (module docs).
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Layout {
+    /// One patch on three or four sides.
+    One,
+    /// N patches about a centre.
+    Centre,
+    /// Four patches round the loop and one inside them.
+    Ring,
+}
+
+/// A curve inside the fill shared by two patches: it runs along side `a.1` of patch `a.0` in that
+/// side's direction (`t` from 0 to 1) and back along side `b.1` of patch `b.0`. Across it, with
+/// `D_a`, `D_b` each patch's derivative across it away from itself and `L` the derivative along it,
+/// `D_a + β(t)·D_b = α(t)·L`: the linear gluing of a G1 join, `α` and `β` linear between their
+/// values at the ends (module docs).
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct Seam {
+    a: (usize, usize),
+    b: (usize, usize),
+    alpha: [f64; 2],
+    beta: [f64; 2],
+    ends: [SpokeEnd; 2],
+}
+
+impl Seam {
+    /// Where on each patch's side the seam is at its parameter `t`.
+    fn at(&self, t: f64) -> ([f64; 2], [f64; 2]) {
+        (station_on(self.a.1, t).0, station_on(self.b.1, 1.0 - t).0)
+    }
+
+    /// The gluing functions at `t`.
+    fn gluing(&self, t: f64) -> (f64, f64) {
+        let lerp = |x: [f64; 2]| x[0] + (x[1] - x[0]) * t;
+        (lerp(self.alpha), lerp(self.beta))
+    }
+
+    /// Whether `t` is within `share` of an end inside the loop (an inner vertex).
+    fn near_inner(&self, t: f64, share: f64) -> bool {
+        (matches!(self.ends[0], SpokeEnd::Inner(_)) && t < share) || (matches!(self.ends[1], SpokeEnd::Inner(_)) && t > 1.0 - share)
+    }
+}
+
+/// The gluing at a spoke's foot on the loop: `(β, α)` with `D_a + β·D_b = α·L` for the two
+/// patches' derivatives across it away from themselves (there, the loop's two sides' tangents, run
+/// apart) and the spoke's own `L`, least squares in their plane. Where the loop runs straight on,
+/// `α = 0` and `β` is the ratio of the sides' speeds.
+fn foot_gluing(da: Vec3, db: Vec3, l: Vec3) -> (f64, f64) {
+    // [db, −l]·(β, α) = −da.
+    let (a11, a12, a22) = (db.dot(db), -db.dot(l), l.dot(l));
+    let (r1, r2) = (-db.dot(da), l.dot(da));
+    let det = a11 * a22 - a12 * a12;
+    if !(det.abs() > 1e-300) {
+        return (1.0, 0.0);
+    }
+    ((r1 * a22 - a12 * r2) / det, (a11 * r2 - a12 * r1) / det)
+}
+
+/// The derivative of order one along side `s` of the unit square, in its running direction:
+/// `(du, dv, sign)`.
+fn along_side(s: usize) -> (usize, usize, f64) {
+    match s {
+        0 => (1, 0, 1.0),
+        1 => (0, 1, 1.0),
+        2 => (1, 0, -1.0),
+        _ => (0, 1, -1.0),
+    }
+}
+
+/// The gluing function `α` at an end of a seam at an inner vertex of `valence` patches: the value
+/// the regular characteristic map meets there, `2·cos(2π/m)` with the seam's parameter running
+/// towards the vertex (`towards`), its opposite running away (module docs).
+fn characteristic(valence: usize, towards: bool) -> f64 {
+    let a = 2.0 * (std::f64::consts::TAU / valence.max(1) as f64).cos();
+    if towards { a } else { -a }
 }
 
 /// The constants each edge's homogeneous points are scaled by so that the weights at every
@@ -741,7 +841,7 @@ impl Quilt {
     /// sides that run that way; about a centre, the space along each spoke is the two patches'
     /// either side of it (one's along v, the other's along u), holding the spoke and the two edge
     /// halves it meets those patches beside.
-    fn new(edges: &[IsoEdge], loop_sides: &[Vec<SidePiece>], extra: &[Vec<f64>; 2], degree: usize) -> SplineResult<Quilt> {
+    fn new(edges: &[IsoEdge], loop_sides: &[Vec<SidePiece>], ring: bool, extra: &[Vec<f64>; 2], degree: usize) -> SplineResult<Quilt> {
         let n = loop_sides.len();
         let scales = corner_scales(edges)?;
         let whole: Vec<Curve> = loop_sides.iter().map(|side| side_curve(edges, &scales, side)).collect::<SplineResult<_>>()?;
@@ -749,6 +849,9 @@ impl Quilt {
             let c = whole.get(k).ok_or_else(|| SplineError::Invalid("sides".into()))?;
             piece_on_unit(c.space.degree(), c.space.knots(), &c.points, range, reverse)
         };
+        if ring {
+            return Quilt::ring(loop_sides, &whole, extra, degree);
+        }
         if n <= 4 {
             // One patch: the loop's sides are its sides (side 2 and 3 run back along their rows).
             let mut sides: Vec<Curve> = (0..n).map(|k| part(k, [0.0, 1.0], k >= 2)).collect::<SplineResult<_>>()?;
@@ -778,7 +881,15 @@ impl Quilt {
             }
             let unknowns = inner_u * inner_v;
             let pieces = loop_sides.iter().enumerate().flat_map(|(k, side)| pieces_between(side, k, [0.0, 1.0], 0, k)).collect();
-            return Ok(Quilt { patches: vec![patch], slots: vec![slots], unknowns, pieces, spokes: Vec::new(), feet: Vec::new() });
+            return Ok(Quilt {
+                patches: vec![patch],
+                slots: vec![slots],
+                unknowns,
+                pieces,
+                spokes: Vec::new(),
+                inner: Vec::new(),
+                layout: Layout::One,
+            });
         }
         // N patches about the centre: halves of each side, and straight spokes to start.
         let middle: Vec<HPoint> = whole.iter().map(|c| c.space.eval(&c.points, 0.5, 0)).collect::<SplineResult<_>>()?;
@@ -867,14 +978,184 @@ impl Quilt {
             slots.push(s);
         }
         let mut pieces = Vec::with_capacity(2 * n);
-        let mut feet = Vec::with_capacity(n);
+        let mut spokes = Vec::with_capacity(n);
         for (k, side) in loop_sides.iter().enumerate() {
             pieces.extend(pieces_between(side, k, [0.0, 0.5], k, 0));
             pieces.extend(pieces_between(side, k, [0.5, 1.0], (k + 1) % n, 3));
-            feet.push(on_side(side, 0.5).ok_or_else(|| SplineError::Invalid("a side's middle".into()))?);
+            let (edge, t) = on_side(side, 0.5).ok_or_else(|| SplineError::Invalid("a side's middle".into()))?;
+            // Spoke k up patch k's u = 1 (from the midpoint to the centre), back along patch
+            // k + 1's v = 1; at the midpoint the edge's halves leave it at the same speed.
+            spokes.push(Seam {
+                a: (k, 1),
+                b: ((k + 1) % n, 2),
+                alpha: [0.0, characteristic(n, true)],
+                beta: [1.0, 1.0],
+                ends: [SpokeEnd::Loop { edge, t }, SpokeEnd::Inner(0)],
+            });
         }
-        let spokes = (0..n).map(|k| (k, (k + 1) % n)).collect();
-        Ok(Quilt { patches, slots, unknowns, pieces, spokes, feet })
+        let [cu, cv] = patches.first().map(Patch::counts).ok_or_else(|| SplineError::Invalid("patch".into()))?;
+        Ok(Quilt { patches, slots, unknowns, pieces, spokes, inner: vec![(0, cu - 1, cv - 1)], layout: Layout::Centre })
+    }
+
+    /// The ring (module docs): on four sides `P_k → P_{k+1}` of a loop with fewer than three
+    /// corners, ring patch `k` has the side along `v = 0`, spoke `r_{k+1}` (from `P_{k+1}` to the
+    /// inner corner `Q_{k+1}`) up `u = 1`, the inner patch's side `i_k` (from `Q_k` to `Q_{k+1}`)
+    /// along `v = 1` and spoke `r_k` down `u = 0`; the inner patch (patch 4) has the corners
+    /// `Q_0 … Q_3` and `i_k` as its side `k`. Every point of the loop is on two patches' sides, so
+    /// no patch has a corner where the loop runs straight on. The spaces: one along the loop and
+    /// the inner sides (holding each side and its reversal, so the inner patch holds `i_2` and
+    /// `i_3` run back), one along the spokes; `Q_k` starts half way from `P_k` to the centre.
+    fn ring(loop_sides: &[Vec<SidePiece>], whole: &[Curve], extra: &[Vec<f64>; 2], degree: usize) -> SplineResult<Quilt> {
+        let bad = || SplineError::Invalid("a ring of four sides".into());
+        if whole.len() != 4 || loop_sides.len() != 4 {
+            return Err(bad());
+        }
+        let start = |k: usize| whole.get(k).and_then(|c| c.points.first().copied()).unwrap_or(HPoint::ZERO);
+        let middle: Vec<Vec3> = whole
+            .iter()
+            .map(|c| c.space.eval(&c.points, 0.5, 0))
+            .collect::<SplineResult<Vec<HPoint>>>()?
+            .into_iter()
+            .filter_map(HPoint::project)
+            .collect();
+        let centre = middle.iter().fold(Vec3::ZERO, |s, p| s + *p) * (1.0 / middle.len().max(1) as f64);
+        let q: Vec<HPoint> = (0..4).map(|k| start(k).project().map_or(HPoint::ZERO, |p| HPoint::weighted(p + (centre - p) * 0.5, 1.0))).collect();
+        let at = |v: &[HPoint], k: usize| v.get(k % 4).copied().unwrap_or(HPoint::ZERO);
+        let radial: Vec<Curve> = (0..4).map(|k| line(start(k), at(&q, k))).collect::<SplineResult<_>>()?;
+        let inner: Vec<Curve> = (0..4).map(|k| line(at(&q, k), at(&q, k + 1))).collect::<SplineResult<_>>()?;
+        let reversed = |c: &Curve| piece_on_unit(c.space.degree(), c.space.knots(), &c.points, [0.0, 1.0], true);
+        let backs: Vec<Curve> = whole.iter().map(reversed).collect::<SplineResult<_>>()?;
+        let along: Vec<&Curve> = whole.iter().chain(&backs).chain(&inner).collect();
+        let (ring_space, rows) = compatible(&along, &extra[0], degree)?;
+        let (spoke_space, spoke_rows) = compatible(&radial.iter().collect::<Vec<_>>(), &extra[0], degree)?;
+        let row = |v: &[Vec<HPoint>], k: usize| v.get(k).cloned().ok_or_else(bad);
+        let back = |mut r: Vec<HPoint>| {
+            r.reverse();
+            r
+        };
+        let mut patches = Vec::with_capacity(5);
+        for k in 0..4 {
+            patches.push(coons(
+                [ring_space.clone(), spoke_space.clone()],
+                &row(&rows, k)?,
+                &row(&rows, 8 + k)?,
+                &row(&spoke_rows, k)?,
+                &row(&spoke_rows, (k + 1) % 4)?,
+                false,
+            )?);
+        }
+        patches.push(coons(
+            [ring_space.clone(), ring_space.clone()],
+            &row(&rows, 8)?,
+            &back(row(&rows, 10)?),
+            &back(row(&rows, 11)?),
+            &row(&rows, 9)?,
+            false,
+        )?);
+        let (cu, cv) = (ring_space.count(), spoke_space.count());
+        let mut unknowns = 0usize;
+        let mut next = || {
+            unknowns += 1;
+            unknowns - 1
+        };
+        let q_id: Vec<usize> = (0..4).map(|_| next()).collect();
+        let spoke_ids: Vec<Vec<usize>> = (0..4).map(|_| (1..cv.saturating_sub(1)).map(|_| next()).collect()).collect();
+        let side_ids: Vec<Vec<usize>> = (0..4).map(|_| (1..cu.saturating_sub(1)).map(|_| next()).collect()).collect();
+        // Point m (from Q_k) of the inner side i_k, and point j (from P_k) of the spoke r_k.
+        let on_side = |k: usize, m: usize| -> Option<usize> {
+            if m == 0 {
+                q_id.get(k % 4).copied()
+            } else if m + 1 == cu {
+                q_id.get((k + 1) % 4).copied()
+            } else {
+                side_ids.get(k % 4).and_then(|s| s.get(m - 1)).copied()
+            }
+        };
+        let on_spoke = |k: usize, j: usize| -> Option<usize> {
+            if j + 1 == cv { q_id.get(k % 4).copied() } else { spoke_ids.get(k % 4).and_then(|s| s.get(j - 1)).copied() }
+        };
+        let mut slots = Vec::with_capacity(5);
+        for k in 0..4 {
+            let mut s = vec![None; cu * cv];
+            for j in 1..cv {
+                for i in 0..cu {
+                    let id = if i == 0 {
+                        on_spoke(k, j)
+                    } else if i + 1 == cu {
+                        on_spoke(k + 1, j)
+                    } else if j + 1 == cv {
+                        on_side(k, i)
+                    } else {
+                        Some(next())
+                    };
+                    if let Some(slot) = s.get_mut(i + cu * j) {
+                        *slot = Some(id.ok_or_else(bad)?);
+                    }
+                }
+            }
+            slots.push(s);
+        }
+        let mut s = vec![None; cu * cu];
+        for j in 0..cu {
+            for i in 0..cu {
+                let id = if j == 0 {
+                    on_side(0, i)
+                } else if i + 1 == cu {
+                    on_side(1, j)
+                } else if j + 1 == cu {
+                    on_side(2, cu - 1 - i)
+                } else if i == 0 {
+                    on_side(3, cu - 1 - j)
+                } else {
+                    Some(next())
+                };
+                if let Some(slot) = s.get_mut(i + cu * j) {
+                    *slot = Some(id.ok_or_else(bad)?);
+                }
+            }
+        }
+        slots.push(s);
+        let pieces = loop_sides.iter().enumerate().flat_map(|(k, side)| pieces_between(side, k, [0.0, 1.0], k, 0)).collect();
+        // The seams: spoke r_k between ring patches k − 1 (its u = 1) and k (its u = 0), glued at
+        // P_k by what the loop's two sides there ask (their derivatives against each other, and
+        // the spoke's), at Q_k by the valence-3 characteristic; side i_k between ring patch k
+        // (its v = 1, from Q_{k+1} to Q_k) and the inner patch (its side k).
+        let mut spokes = Vec::with_capacity(8);
+        for k in 0..4 {
+            let prev = (k + 3) % 4;
+            let (Some(a), Some(b)) = (patches.get(prev), patches.get(k)) else { return Err(bad()) };
+            let (da, db) = (a.eval(1.0, 0.0, 1, 0)?, b.eval(0.0, 0.0, 1, 0)? * -1.0);
+            let l = b.eval(0.0, 0.0, 0, 1)?;
+            let (beta, alpha) = foot_gluing(da, db, l);
+            let foot = loop_sides.get(k).and_then(|s| s.first()).map(|sp| SpokeEnd::Loop { edge: sp.edge, t: sp.range[0] }).ok_or_else(bad)?;
+            spokes.push(Seam {
+                a: (prev, 1),
+                b: (k, 3),
+                alpha: [alpha, characteristic(3, true)],
+                beta: [beta, 1.0],
+                ends: [foot, SpokeEnd::Inner(k)],
+            });
+        }
+        for k in 0..4 {
+            let towards = characteristic(3, true);
+            spokes.push(Seam {
+                a: (k, 2),
+                b: (4, k),
+                alpha: [-towards, towards],
+                beta: [1.0, 1.0],
+                ends: [SpokeEnd::Inner((k + 1) % 4), SpokeEnd::Inner(k)],
+            });
+        }
+        let last = cu - 1;
+        Ok(Quilt {
+            patches,
+            slots,
+            unknowns,
+            pieces,
+            spokes,
+            inner: vec![(4, 0, 0), (4, last, 0), (4, last, last), (4, 0, last)],
+            layout: Layout::Ring,
+        })
     }
 
     /// Most free control points one solve takes, one patch or several about a centre.
@@ -1198,12 +1479,18 @@ pub fn iso_fill(
     if !(spec.corner_turn.is_finite() && spec.corner_turn >= 0.0) {
         return invalid("the corner turn must be a finite angle");
     }
-    let sides = loop_sides(edges, spec.corner_turn);
+    let (sides, cornered) = loop_sides(edges, spec.corner_turn);
+    if !cornered && sides.len() != 4 {
+        return Err(SplineError::Unsupported(format!(
+            "a patch on a loop of {} edges with fewer than three corners (such a loop is filled in four pieces)",
+            sides.len()
+        )));
+    }
     let corners = corner_orders(edges, &sides, &mut *across, size, spec.angle_tol)?;
     let mut extra: [Vec<f64>; 2] = [Vec::new(), Vec::new()];
     let mut spans = [1usize; 2];
     loop {
-        let quilt = Quilt::new(edges, &sides, &extra, degree)?;
+        let quilt = Quilt::new(edges, &sides, !cornered, &extra, degree)?;
         let stations = stations(edges, &quilt, &mut *across, &corners)?;
         let spaces = quilt.patches.first().map(|p| p.spaces.clone()).ok_or_else(|| SplineError::Invalid("no patch".into()))?;
         let shared = !quilt.spokes.is_empty();
@@ -1303,27 +1590,40 @@ fn finished(quilt: Quilt, achieved: Achieved) -> SplineResult<IsoFill> {
             let [from, to] = pc.piece.range;
             sides.push(((pc.side, pc.along[0]), IsoSide::Edge { edge: pc.piece.edge, from, to, uv: [lerp(pc.along[0]), lerp(pc.along[1])] }));
         }
-        if !quilt.spokes.is_empty() {
-            // Spoke k up u = 1 (from its midpoint to the centre), spoke k − 1 back along v = 1.
-            sides.push(((1, 0.0), IsoSide::Spoke { spoke: k, forward: true, uv: side_uv(1) }));
-            sides.push(((2, 0.0), IsoSide::Spoke { spoke: (k + n - 1) % n, forward: false, uv: side_uv(2) }));
+        for (i, seam) in quilt.spokes.iter().enumerate() {
+            if seam.a.0 == k {
+                sides.push(((seam.a.1, 0.0), IsoSide::Spoke { spoke: i, forward: true, uv: side_uv(seam.a.1) }));
+            }
+            if seam.b.0 == k {
+                sides.push(((seam.b.1, 0.0), IsoSide::Spoke { spoke: i, forward: false, uv: side_uv(seam.b.1) }));
+            }
         }
         // The loop's order round the patch.
         sides.sort_by(|a, b| a.0.0.cmp(&b.0.0).then(a.0.1.total_cmp(&b.0.1)));
         patches.push(IsoPatch { surface: patch.surface()?, sides: sides.into_iter().map(|(_, s)| s).collect() });
     }
-    let spokes = quilt
-        .spokes
-        .iter()
-        .filter_map(|&(left, _)| {
-            let p = quilt.patches.get(left)?;
-            let [cu, cv] = p.counts();
-            let weights = p.rational.then(|| (0..cv).map(|j| p.weight(cu - 1, j)).collect());
-            let along = &p.spaces[1];
-            Some(IsoEdge { degree: along.degree(), knots: along.knots().to_vec(), points: (0..cv).map(|j| p.at(cu - 1, j)).collect(), weights })
-        })
-        .collect();
-    Ok(IsoFill { patches, spokes, feet: quilt.feet.clone(), achieved })
+    let spokes = quilt.spokes.iter().map(|seam| boundary_row(&quilt, seam.a)).collect::<SplineResult<_>>()?;
+    let inner = quilt.inner.iter().map(|&(p, i, j)| quilt.patches.get(p).map(|x| x.at(i, j)).unwrap_or(Vec3::ZERO)).collect();
+    Ok(IsoFill { patches, spokes, ends: quilt.spokes.iter().map(|s| s.ends).collect(), inner, achieved })
+}
+
+/// The boundary row of side `s` of patch `p` as a curve in the side's running direction.
+fn boundary_row(quilt: &Quilt, (p, s): (usize, usize)) -> SplineResult<IsoEdge> {
+    let patch = quilt.patches.get(p).ok_or_else(|| SplineError::Invalid("patch".into()))?;
+    let [cu, cv] = patch.counts();
+    let space = patch.spaces.get(s % 2).ok_or_else(|| SplineError::Invalid("space".into()))?;
+    let cells: Vec<(usize, usize)> = match s {
+        0 => (0..cu).map(|i| (i, 0)).collect(),
+        1 => (0..cv).map(|j| (cu - 1, j)).collect(),
+        2 => (0..cu).rev().map(|i| (i, cv - 1)).collect(),
+        _ => (0..cv).rev().map(|j| (0, j)).collect(),
+    };
+    let mut knots = space.knots().to_vec();
+    if s >= 2 {
+        knots = knots.iter().rev().map(|k| 1.0 - k).collect();
+    }
+    let weights = patch.rational.then(|| cells.iter().map(|&(i, j)| patch.weight(i, j)).collect());
+    Ok(IsoEdge { degree: space.degree(), knots, points: cells.iter().map(|&(i, j)| patch.at(i, j)).collect(), weights })
 }
 
 /// Stations along a side: [`STATIONS_PER_SPAN`] a span and [`STATIONS_PER_POINT`] per control
@@ -1419,14 +1719,28 @@ fn solve(mut quilt: Quilt, stations: &[Station], spec: &IsoSpec) -> SplineResult
             linkage_rows(&mut rows, patch, s, span(patch).get(1 - s.side % 2).copied().unwrap_or(1.0))?;
         }
         // Across each spoke the two patches' derivatives away from it are opposed, up to the
-        // gluing function's share of the derivative along it (module docs).
-        let gluing = 2.0 * (std::f64::consts::TAU / quilt.patches.len() as f64).cos();
-        for &(left, right) in &quilt.spokes {
-            let (Some(a), Some(b)) = (quilt.patches.get(left), quilt.patches.get(right)) else { continue };
+        // gluing functions (module docs).
+        for seam in &quilt.spokes {
+            let ((pa, sa), (pb, sb)) = (seam.a, seam.b);
+            let (Some(a), Some(b)) = (quilt.patches.get(pa), quilt.patches.get(pb)) else { continue };
             for i in 0..spoke_count {
                 let t = (i as f64 + 0.5) / spoke_count as f64;
-                let along: Vec<(usize, usize, f64)> = a.row(1.0, t, 0, 1)?.into_iter().map(|(i, j, c)| (i, j, -gluing * t * c)).collect();
-                on_each_axis(&mut rows, &[(left, a.row(1.0, t, 1, 0)?), (right, b.row(t, 1.0, 0, 1)?), (left, along)], Vec3::ZERO, 1.0);
+                let (ua, ub) = seam.at(t);
+                let (alpha, beta) = seam.gluing(t);
+                // Away from each patch: against its derivative into it.
+                let ((_, (da, ea, ga)), (_, (db, eb, gb))) = (station_on(sa, t), station_on(sb, 1.0 - t));
+                let (la, ma, ha) = along_side(sa);
+                let scaled = |row: Vec<(usize, usize, f64)>, c: f64| row.into_iter().map(|(i, j, x)| (i, j, c * x)).collect::<Vec<_>>();
+                on_each_axis(
+                    &mut rows,
+                    &[
+                        (pa, scaled(a.row(ua[0], ua[1], da, ea)?, -ga)),
+                        (pb, scaled(b.row(ub[0], ub[1], db, eb)?, -gb * beta)),
+                        (pa, scaled(a.row(ua[0], ua[1], la, ma)?, -alpha * ha)),
+                    ],
+                    Vec3::ZERO,
+                    1.0,
+                );
             }
         }
         for (p, (patch, uv)) in spec.points.iter().zip(&located) {
@@ -2004,15 +2318,16 @@ fn measure(
             }
         }
     }
-    // Across the spokes, clear of the centre.
-    for &(left, right) in &quilt.spokes {
-        let (Some(a), Some(b)) = (quilt.patches.get(left), quilt.patches.get(right)) else { continue };
+    // Across the spokes, clear of the vertices inside the loop.
+    for seam in &quilt.spokes {
+        let (Some(a), Some(b)) = (quilt.patches.get(seam.a.0), quilt.patches.get(seam.b.0)) else { continue };
         for i in 0..spoke_count {
             let t = (i as f64 + 0.5) / spoke_count as f64;
-            if let (Some(na), Some(nb)) = (a.normal(1.0, t), b.normal(t, 1.0)) {
+            let (ua, ub) = seam.at(t);
+            if let (Some(na), Some(nb)) = (a.normal(ua[0], ua[1]), b.normal(ub[0], ub[1])) {
                 let a = na.dot(nb).clamp(-1.0, 1.0).acos();
                 r.normal_deviation_all = r.normal_deviation_all.max(a);
-                if t < 1.0 - CLASH_SHARE {
+                if !seam.near_inner(t, CLASH_SHARE) {
                     r.normal_deviation = r.normal_deviation.max(a);
                     r.normal_excess = r.normal_excess.max(a);
                     along.angle = along.angle.map(|x| x.max(a));
@@ -2136,19 +2451,30 @@ fn crowned(mut quilt: Quilt, stations: &[Station], crown: f64, size: f64) -> Spl
         }
     }
     let out = if facing < 0.0 { -1.0 } else { 1.0 };
-    let about_centre = !quilt.spokes.is_empty();
-    let bump = |x: f64, y: f64| if about_centre { x * (2.0 - x) * y * (2.0 - y) } else { 16.0 * x * (1.0 - x) * y * (1.0 - y) };
+    let layout = quilt.layout;
+    let about_centre = layout != Layout::One;
+    let bump = |k: usize, x: f64, y: f64| match layout {
+        Layout::One => 16.0 * x * (1.0 - x) * y * (1.0 - y),
+        Layout::Centre => x * (2.0 - x) * y * (2.0 - y),
+        // The ring's patches rise from the loop (v = 0) to one at the inner patch, which is one.
+        Layout::Ring if k < 4 => y * (2.0 - y),
+        Layout::Ring => 1.0,
+    };
     let mut moved = std::collections::HashMap::new();
     for (k, patch) in quilt.patches.iter().enumerate() {
         let [cu, cv] = patch.counts();
         let (gu, gv) = (greville(&patch.spaces[0]), greville(&patch.spaces[1]));
+        // The rows clear of those the conditions hold: from the loop's sides of each patch (a
+        // ring patch's sides across the loop are spokes, the inner patch has none).
+        let (ring, inside) = (layout == Layout::Ring && k < 4, layout == Layout::Ring && k >= 4);
+        let first = |across_loop: bool| if inside || (ring && across_loop) { 0 } else { held };
         let far = |c: usize| if about_centre { c } else { c.saturating_sub(held) };
-        for j in held..far(cv) {
-            for i in held..far(cu) {
+        for j in first(false)..far(cv) {
+            for i in first(true)..far(cu) {
                 let Some(Some(id)) = quilt.slots.get(k).and_then(|s| s.get(patch.flat(i, j))) else { continue };
                 let (x, y) = (gu.get(i).copied().unwrap_or(0.5), gv.get(j).copied().unwrap_or(0.5));
                 let Some(n) = patch.normal(x, y) else { continue };
-                moved.entry(*id).or_insert_with(|| patch.at(i, j) + n * (out * crown * size * bump(x, y)));
+                moved.entry(*id).or_insert_with(|| patch.at(i, j) + n * (out * crown * size * bump(k, x, y)));
             }
         }
     }

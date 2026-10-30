@@ -820,7 +820,7 @@ fn patch_body(body: &Body, record: &b::Brep, chain: &[(usize, bool)], surface: b
 /// straight line in (u, v) the patch gives its side. Its history is over `[body]`: every face is
 /// new, each loop edge (or half) a piece of the body's own, each spoke new.
 fn quilt_body(body: &Body, record: &b::Brep, chain: &[Piece], fill: &IsoFill, tol: f64) -> Result<Body> {
-    use solidcraft_geom::fill_iso::IsoSide;
+    use solidcraft_geom::fill_iso::{IsoSide, SpokeEnd};
     let fail = |m: &str| KernelError::Failed(format!("patch: {m}"));
     let index = |n: usize| u32::try_from(n).map_err(|_| fail("budget"));
     let mut vertices: Vec<[f64; 3]> = Vec::new();
@@ -831,13 +831,10 @@ fn quilt_body(body: &Body, record: &b::Brep, chain: &[Piece], fill: &IsoFill, to
     let mut origin: Vec<Option<usize>> = Vec::new();
     let mut piece_of: std::collections::HashMap<(usize, u64, u64), u32> = std::collections::HashMap::new();
     let mut spoke_of: std::collections::HashMap<usize, u32> = std::collections::HashMap::new();
-    let centre = match fill.spokes.first().and_then(|s| s.points.last()) {
-        Some(c) => {
-            vertices.push([c.x, c.y, c.z]);
-            Some(0u32)
-        }
-        None => None,
-    };
+    // The fill's vertices inside the loop first.
+    for c in &fill.inner {
+        vertices.push([c.x, c.y, c.z]);
+    }
     let mut faces = Vec::with_capacity(fill.patches.len());
     for patch in &fill.patches {
         let mut uses = Vec::with_capacity(patch.sides.len());
@@ -881,14 +878,23 @@ fn quilt_body(body: &Body, record: &b::Brep, chain: &[Piece], fill: &IsoFill, to
                         Some(id) => *id,
                         None => {
                             let curve = fill.spokes.get(spoke).ok_or_else(|| fail("spoke"))?;
-                            // Its foot on the loop, in the record edge's parameter as the sides'
-                            // pieces are (the same bits where a side's piece ends there).
-                            let &(k, t) = fill.feet.get(spoke).ok_or_else(|| fail("spoke"))?;
-                            let &Piece { edge: e, forward, interval: [plo, phi] } = chain.get(k).ok_or_else(|| fail("spoke"))?;
-                            let edge = record.edges.get(e).ok_or_else(|| fail("edge reference"))?;
-                            let [a, z] = edge.interval;
-                            let start = vertex_on(record, &mut vertices, &mut vertex_of, &mut middle_of, e, on_record(a, z, [plo, phi], forward, t))?;
-                            let end = centre.ok_or_else(|| fail("centre"))?;
+                            // Its ends: on the loop, in the record edge's parameter as the sides'
+                            // pieces are (the same bits where a side's piece ends there), or inside.
+                            let ends = fill.ends.get(spoke).ok_or_else(|| fail("spoke"))?;
+                            let mut at = [0u32; 2];
+                            for (slot, end) in at.iter_mut().zip(ends) {
+                                *slot = match *end {
+                                    SpokeEnd::Inner(i) if i < fill.inner.len() => index(i)?,
+                                    SpokeEnd::Inner(_) => return Err(fail("spoke end")),
+                                    SpokeEnd::Loop { edge: k, t } => {
+                                        let &Piece { edge: e, forward, interval: [plo, phi] } = chain.get(k).ok_or_else(|| fail("spoke"))?;
+                                        let edge = record.edges.get(e).ok_or_else(|| fail("edge reference"))?;
+                                        let [a, z] = edge.interval;
+                                        vertex_on(record, &mut vertices, &mut vertex_of, &mut middle_of, e, on_record(a, z, [plo, phi], forward, t))?
+                                    }
+                                };
+                            }
+                            let [start, end] = at;
                             let id = index(edges.len())?;
                             let spline = match &curve.weights {
                                 Some(w) => b::Curve::RationalSpline {

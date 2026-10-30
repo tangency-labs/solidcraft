@@ -210,7 +210,7 @@ fn hostile_edges_are_refused() {
 #[test]
 fn a_rational_patch_s_derivatives_are_its_differences() {
     let edges = window();
-    let q = Quilt::new(&edges, &loop_sides(&edges, spec().corner_turn), &[Vec::new(), Vec::new()], 3).unwrap();
+    let q = Quilt::new(&edges, &loop_sides(&edges, spec().corner_turn).0, false, &[Vec::new(), Vec::new()], 3).unwrap();
     let p = &q.patches[0];
     assert!(p.rational);
     let (u, v, h) = (0.3, 0.6, 1e-5);
@@ -272,8 +272,8 @@ fn any_fold(fill: &IsoFill) -> bool {
 }
 
 /// A tube's end: the circle in four quarter arcs, G1 to the tube's wall (its normal radial, the
-/// wall going on upwards). Every corner of the loop is a smooth vertex, where the cross derivative
-/// of one side is the next side's tangent, along the edge itself.
+/// wall going on upwards). Every vertex of the loop is smooth: the cross derivative of a side
+/// there is the next side's tangent, along the edge itself.
 #[test]
 fn a_tube_end_capped_g1_holds_the_wall_and_does_not_fold() {
     let edges = circle_quarters(30.0, 10.0);
@@ -283,6 +283,19 @@ fn a_tube_end_capped_g1_holds_the_wall_and_does_not_fold() {
     eprintln!("tube end g1: {} patches, {:?}", fill.patches.len(), fill.achieved);
     assert!(fill.achieved.normal_excess <= s.angle_tol);
     assert!(!any_fold(&fill), "the cap folds");
+    // No corner of the loop: four patches round it and one inside, none with a flat corner
+    // (two derivatives parallel), which a patch on the circle's own quarters would have.
+    assert_eq!(fill.patches.len(), 5, "the ring and the inner patch");
+    for (k, p) in fill.patches.iter().enumerate() {
+        for c in [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]] {
+            let (angle, ..) = corner_angle(p, c);
+            assert!(angle > 0.5 && angle < 179.5, "patch {k}: a flat corner at {c:?}: {angle}°");
+        }
+    }
+    // A crown fills the middle out of the tube, the inner patch whole.
+    let crowned = iso_fill(&edges, &mut beside_by(&edges, radial), &IsoSpec { crown: 0.1, ..s }).unwrap();
+    let top = |f: &IsoFill| f.patches[4].surface.eval(0.5, 0.5).unwrap().z;
+    assert!(top(&crowned) > top(&fill) + 0.5, "{} {}", top(&crowned), top(&fill));
 }
 
 /// The angle (degrees) between a patch's two derivatives at a corner of its square, and their
