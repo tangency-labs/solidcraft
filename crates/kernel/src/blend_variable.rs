@@ -730,8 +730,7 @@ mod tests {
         let f = fillet_variable_spline(&wedge, at, t.start, &t.spline).unwrap();
         let v = fine_volume(&f);
         assert!(rel(v, 6000.0 - removed(&law, 40.0)) < 1e-4, "{v} vs {}", 6000.0 - removed(&law, 40.0));
-        assert_eq!(f.unmeshed_faces(), 0);
-        assert!(faces_and_vertices(&f).0.contains(&3));
+        assert!(f.validity().is_empty(), "{:?}", f.validity());
     }
 
     /// A radius spline given directly: a cubic with its control radii pulling the radius up in
