@@ -267,14 +267,25 @@ pub fn begin(app: &mut SolveApp, path: &str, insert: bool) {
     let _ = begin_request(app, Request::new(path, if insert { Kind::Insert } else { Kind::Open }));
 }
 
+/// A STEP, IGES, FreeCAD or Rhino file the app opens or inserts gets no `Group #N` history folder
+/// while "Fold the History bar into groups" is off (#8885), unless the caller chose (`folder`).
+pub(crate) fn step_folder_option(app: &SolveApp, path: &str, options: &mut serde_json::Map<String, Value>) {
+    if !app.preferences.history_bar_groups && solidcraft_engine::io::is_step_path(path) {
+        options.entry("folder").or_insert(Value::Bool(false));
+    }
+}
+
 /// Queue a file operation; on the web (no threads) it runs now.
-pub fn begin_request(app: &mut SolveApp, request: Request) -> Result<(), String> {
+pub fn begin_request(app: &mut SolveApp, mut request: Request) -> Result<(), String> {
     if crate::control::chat_turn_cancelled(request.chat_turn.as_deref()) {
         request.answer(Err("the agent chat turn ended".into()));
         return Ok(());
     }
     if app.file_load.idle() && reuse_open(app, &request) {
         return Ok(());
+    }
+    if matches!(request.kind, Kind::Open | Kind::Insert) {
+        step_folder_option(app, &request.path, &mut request.options);
     }
     #[cfg(target_arch = "wasm32")]
     {

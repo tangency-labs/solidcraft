@@ -415,6 +415,21 @@ fn a_multi_object_step_insert_is_one_history_folder() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// `folder: false` (the app's "Fold the History bar into groups" turned off) keeps a
+/// multi-object import out of a folder, as before, when inserted and when opened as a design; a
+/// value that isn't true or false is refused.
+#[test]
+fn a_step_import_told_no_folder_makes_none() {
+    let mut s = Session::default();
+    let r = run(&mut s, "file.insert_step", json!({"path": corpus("cylinder_twice"), "folder": false}));
+    assert!(r.get("group").is_none() && s.doc.timeline_groups.is_empty(), "no folder: {r}");
+    assert_eq!(s.doc.assembly.joints.len(), 2, "its rigid joints are there all the same");
+    let r = run(&mut s, "doc.open", json!({"path": corpus("cylinder_twice"), "folder": false}));
+    assert!(s.doc.timeline_groups.is_empty(), "opened as a design, no folder either: {r}");
+    let e = s.execute("file.insert_step", &json!({"path": corpus("cylinder_twice"), "folder": "no"})).unwrap_err();
+    assert!(e.to_string().contains("`folder` must be true"), "{e}");
+}
+
 /// Grouping is refused, with a reason a menu can show, when the features aren't one run of the
 /// history or would split another folder; one or several neighbours group.
 #[test]

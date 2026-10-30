@@ -2640,4 +2640,40 @@ mod tests {
         assert_eq!(shown.len(), joints, "the button shows each joint");
         assert!(shown.iter().all(|(_, at)| at.x > import.x));
     }
+
+    /// With "Fold the History bar into groups" off, the bar shows each feature as it did before: a
+    /// long run of one component's features doesn't fold, a feature folder starts open (a click
+    /// still folds it), and a STEP assembly the app inserts gets no `Group #N` folder.
+    #[test]
+    fn with_its_groups_off_the_bar_shows_each_feature_and_a_step_insert_makes_no_folder() {
+        use crate::scenario::handle_at;
+        let corpus = |name: &str| format!("{}/../../tests/step-conformance/{name}.step", env!("CARGO_MANIFEST_DIR"));
+        let mut h = Harness::new();
+        assert_eq!(h.call("ui.prefs", json!({"history_bar_groups": false}))["ok"], true);
+        h.app.run("component.create", json!({"name": "Rig"})).unwrap();
+        for i in 0..crate::timeline_fold::FOLD_FROM {
+            h.app.run("sketch.create", json!({"plane": "XY", "name": format!("S{i}")})).unwrap();
+            h.app.run("sketch.finish", json!({})).unwrap();
+        }
+        h.app.run("component.activate", json!({"component": "root"})).unwrap();
+        h.app.run("timeline.group", json!({"name": "Pair", "features": ["S0", "S1"]})).unwrap();
+        h.frames(4);
+        assert!(handle_at("timeline-group:Rig").is_none(), "no run folds");
+        assert!(handle_at("timeline-folder-chip:Pair").is_some(), "the folder's chip");
+        assert!(handle_at("timeline:S0").is_some() && handle_at("timeline:S49").is_some(), "each feature shows, the folder's too");
+        h.step(&json!({"click": {"handle": "timeline-folder-chip:Pair"}})).unwrap();
+        assert!(handle_at("timeline:S0").is_none() && handle_at("timeline:S2").is_some(), "a click still folds the folder");
+
+        h.app.insert_path(&corpus("cylinder_twice"));
+        let (v, _) = h.call_queued("engine.execute", json!({"command": "file.insert_step", "params": {"path": corpus("cylinder_twice")}}));
+        assert_eq!(v["ok"], true, "{v}");
+        let names: Vec<&str> = h.app.session.doc.timeline_groups.iter().map(|g| g.name.as_str()).collect();
+        assert_eq!(names, ["Pair"], "neither insert made a folder");
+        assert_eq!(h.app.session.doc.assembly.joints.len(), 4, "their rigid joints are there all the same");
+
+        assert_eq!(h.call("ui.prefs", json!({"history_bar_groups": true}))["ok"], true);
+        h.app.run("component.activate", json!({"component": "root"})).unwrap();
+        h.frames(4);
+        assert!(handle_at("timeline-group:Rig").is_some(), "turned back on, the run folds again");
+    }
 }
