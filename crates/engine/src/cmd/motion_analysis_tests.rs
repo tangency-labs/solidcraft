@@ -199,6 +199,24 @@ fn interference_is_deepest_where_the_parts_share_the_most_volume() {
     }
 }
 
+/// Pushed through A at 1000 samples, B overlaps it at about 330 of them, one intersection each:
+/// past the check's 256, so the volume is not measured and no deepest step is guessed. Where
+/// they overlap is still answered.
+#[test]
+fn interference_past_its_intersection_budget_says_the_volume_is_not_measured() {
+    let mut s = rail();
+    run(&mut s, "motion.study", json!({"name": "Push", "steps": 15, "keys": [{"joint": "Rail", "points": [[0, 10], [15, -5]]}]}));
+    let r = run(&mut s, "motion.interference", json!({"study": "Push", "samples": 1000}));
+    let c = &r["collisions"][0];
+    assert!(r["clear"] == false && r["truncated"] == false && c["last_step"] == 15.0, "{r}");
+    assert!(c["first_step"].as_f64().is_some_and(|f| f > 10.0 && f < 10.1), "{r}");
+    assert!(c["volume_mm3"].is_null() && c["deepest_step"].is_null(), "{r}");
+    assert!(c["not_measured"].as_str().is_some_and(|w| w.contains("256 body intersections ran out")), "{r}");
+    // Within the budget, it is measured.
+    let r = run(&mut s, "motion.interference", json!({"study": "Push"}));
+    assert!(r["collisions"][0]["not_measured"].is_null() && r["collisions"][0]["deepest_step"] == 15.0, "{r}");
+}
+
 /// A number names a study by its id first, text by its name first: a study may be named like
 /// another's id.
 #[test]
