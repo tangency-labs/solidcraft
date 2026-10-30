@@ -1,0 +1,13 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#851"
+ ],
+ "what": "the knife edge where #851's concave R21 wall runs out tangent into the back face, rounded R2: the ball that fits 2 from both faces, 13 back from the tip",
+ "source": "analytic",
+ "method": "plate x 0..41.1667, y -21..0 and the corner x 41.1667..62.1667 less the cylinder r 21 about (62.1667, -21), 10 high (tessellation/1263): V0 = 10 (62.1667 x 21 - pi 21^2/4) = 9591.394099. The ball r 2 touches the back face (centre y = -2) and the wall from outside (centre 23 from its axis): centre x = 62.1667 - sqrt(4 x 21 x 2). It takes the cusp beyond it: the quadrilateral plane contact, tip, wall centre, ball centre less the wall's sector (angle acos(19/23)) and the ball's (pi - that), 11.964881 mm^2 (a 0.002 grid of the region no ball inside the part reaches gives the same to 1e-3), times 10: V = 9471.745287",
+ "body_count": 1,
+ "volume_mm3": 9471.745287300899,
+ "continuity": {
+  "order": "g1"
+ }
+}

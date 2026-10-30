@@ -1,0 +1,7 @@
+{
+ "sources": [],
+ "what": "a vertical outer corner edge of an 80 x 50 x 30 box shelled 2 mm open at the top with a 1 x 2 lip raised on its rim, chamfered 3: wider than the wall but clear of the inside corner, its top end on the lip (action matrix (apps/solidcraft-cli/tests/action_matrix.rs): corpus/modern-plastic, Body1 F1:+y|F1:-x edge.chamfer)",
+ "source": "invariants",
+ "method": "the chamfer's plane x + (50 - y) = 3 stays clear of the inside corner (2, 48), where x + 50 - y = 4, so it fits along the whole edge; where it ends on the lip's walls is the lip's geometry: one closed valid solid is the right answer",
+ "body_count": 1
+}

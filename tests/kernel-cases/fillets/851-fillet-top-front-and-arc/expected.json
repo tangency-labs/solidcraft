@@ -1,0 +1,11 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#851",
+  "tangency-labs/solidcraft#854"
+ ],
+ "what": "on #851's knife-edge part (tessellation/1263): the top front edge and the arc's top edge, R2 together",
+ "source": "invariants",
+ "method": "the rolling ball of R2 fits on every one of these edges and where they meet; the corner between rounds that end in each other has no closed form here: one closed valid solid whose display mesh closes is the right answer (where a round ends on a face or in another round the seam is not a blend's tangent seam, so no order is graded)",
+ "body_count": 1,
+ "watertight": true
+}

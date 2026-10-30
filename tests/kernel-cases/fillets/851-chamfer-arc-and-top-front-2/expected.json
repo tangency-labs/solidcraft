@@ -1,0 +1,11 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#851",
+  "tangency-labs/solidcraft#854"
+ ],
+ "what": "on #851's knife-edge part (tessellation/1263): the arc's top edge and the top front edge together chamfered 2",
+ "source": "invariants",
+ "method": "a 2 mm chamfer fits on these edges (the arc's chamfer is a cone cut by the back face where the arc runs into it); one closed valid solid whose display mesh closes is the right answer",
+ "body_count": 1,
+ "watertight": true
+}

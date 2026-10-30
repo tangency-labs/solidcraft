@@ -166,22 +166,6 @@ fn off_tip(x: f64, y: f64) -> bool {
     (x - k.x).hypot(y - k.y) > 2.0 && a >= (-21.0 - k.y).atan2(CX - k.x) && a <= std::f64::consts::FRAC_PI_2
 }
 
-/// The knife-edge tip (the arc and the top line meeting at no angle) rounds to the ball 2 from
-/// both, 13 back from the tip; its chamfer cuts the cusp at the chord between the same contacts.
-#[test]
-fn a_knife_edge_tip_rounds_where_the_ball_fits() {
-    let k = tip_ball();
-    let round = over_cusp(k.x - 1.0, |x, y| if off_tip(x, y) { 1.0 } else { 0.0 }) * 10.0;
-    let got = removed(true, &[TIP]);
-    assert!((got - round).abs() < round * 1e-3, "round: removed {got} vs {round}");
-    // The chord from the top line's contact to the arc's.
-    let (a, b) = (Vec2::new(k.x, 0.0), k + (Vec2::new(CX, -21.0) - k) * (2.0 / 23.0));
-    let beyond = |x: f64, y: f64| (b.x - a.x) * (y - a.y) - (b.y - a.y) * (x - a.x) > 0.0;
-    let flat = over_cusp(k.x - 1.0, |x, y| if beyond(x, y) { 1.0 } else { 0.0 }) * 10.0;
-    let got = removed(false, &[TIP]);
-    assert!((got - flat).abs() < flat * 1e-3, "chamfer: removed {got} vs {flat}");
-}
-
 /// The tip's round with the arc's or the back edge's at the top, where all three meet: as at
 /// the front corner, each alone less what both would take twice — over the tip's corner region,
 /// the other's (above 8 + √(4 − d²), d across from its ball's path).

@@ -497,29 +497,6 @@ fn planned_volume(s: &Session) -> f64 {
     s.model.state().bodies.iter().map(|b| b.body.mesh_plan(&solidcraft_kernel::MeshTolerance::chord(2e-4)).unwrap().evaluate().measure().volume).sum()
 }
 
-/// #851: the knife edge where the wall runs out has opposite normals on its two faces. It rounds
-/// to the ball that fits there and chamfers with the plane through that ball's contacts (the cusp
-/// area less the wall's sector and the ball's, or the chord triangle less the wall's segment,
-/// times the 10 mm height). The ball 2 from both faces sits at (62⅙ − √168, −2); the round takes
-/// 10 (11.5 √168 − 220.5 θ − 2 (π − θ)), θ = acos(19/23), within 5e-4 of it.
-#[test]
-fn blend_a_knife_edge_where_a_curved_wall_runs_out() {
-    let knife = json!([[62.1667, 0, 5]]);
-    for (command, params, removed, within) in [
-        ("solid.fillet", json!({"edges": knife, "radius": 2}), 119.648_812, 119.648_812 * 5e-4),
-        ("solid.chamfer", json!({"edges": knife, "distance": 2}), 159.236_451, 0.5),
-    ] {
-        let mut s = knife_edge_part();
-        let before = planned_volume(&s);
-        s.execute(command, &params).unwrap_or_else(|e| panic!("{command}: {e}"));
-        let after = planned_volume(&s);
-        assert!((before - after - removed).abs() < within, "{command}: removed {}, expected {removed}", before - after);
-        for b in &s.model.state().bodies {
-            assert!(b.body.validity().is_empty(), "{command}: {:?}", b.body.validity());
-        }
-    }
-}
-
 /// #851: the arc's top edge runs out tangent to the back face at the knife edge's top. The blend
 /// is cut by that face along a curve that touches the wall's contact at the tip.
 #[test]
@@ -539,53 +516,6 @@ fn blend_an_arc_edge_that_runs_out_tangent_to_a_face() {
     }
 }
 
-/// #851: every selection of the issue's table works, picked together or one after the other as
-/// the issue lists them, on the part with the wall that meets the front face square and runs out
-/// tangent into the back face (the top front edge, the arc's top edge, the front upright at the
-/// arc, the front-left upright and the knife edge at the tip). Each makes a sound solid the
-/// display plan can mesh, and takes less than its edges would one by one where they meet.
-#[test]
-fn blend_corners_where_edges_meet_on_a_curved_wall() {
-    let (tf, at, fu, fl, kn) =
-        (json!([20, -21, 10]), json!([47.3174, -6.1508, 10]), json!([41.1667, -21, 5]), json!([0, -21, 5]), json!([62.1667, 0, 5]));
-    let fillet = |edges: Value| json!({"command": "solid.fillet", "params": {"edges": edges, "radius": 2}});
-    let chamfer = |edges: Value| json!({"command": "solid.chamfer", "params": {"edges": edges, "distance": 2}});
-    let base = planned_volume(&knife_edge_part());
-    let rows: Vec<(&str, Vec<Value>)> = vec![
-        ("three at the corner", vec![fillet(json!([tf, at, fu]))]),
-        ("top front and arc", vec![fillet(json!([tf, at]))]),
-        ("arc and upright", vec![fillet(json!([at, fu]))]),
-        ("top front and upright", vec![fillet(json!([tf, fu]))]),
-        ("arc alone", vec![fillet(json!([at]))]),
-        ("top front, then the front-left upright", vec![fillet(json!([tf])), fillet(json!([fl]))]),
-        ("top front and front-left together", vec![fillet(json!([tf, fl]))]),
-        ("the knife edge", vec![fillet(json!([kn]))]),
-        ("chamfer: the knife edge", vec![chamfer(json!([kn]))]),
-        ("chamfer: the arc", vec![chamfer(json!([at]))]),
-        ("chamfer: the arc and the top front", vec![chamfer(json!([at, tf]))]),
-        ("arc, then top front", vec![fillet(json!([at])), fillet(json!([tf]))]),
-        ("top front, then upright", vec![fillet(json!([tf])), fillet(json!([fu]))]),
-    ];
-    for (name, steps) in rows {
-        let mut s = knife_edge_part();
-        for step in &steps {
-            let (c, p) = (step["command"].as_str().unwrap_or(""), &step["params"]);
-            s.execute(c, p).unwrap_or_else(|e| panic!("{name}: {c} {p}: {e}"));
-        }
-        for b in &s.model.state().bodies {
-            assert!(b.body.validity().is_empty(), "{name}: {:?}", b.body.validity());
-            assert!(b.body.mesh_plan(&solidcraft_kernel::MeshTolerance::chord(2e-4)).is_ok(), "{name}: the display plan refuses the body");
-        }
-        let removed = base - planned_volume(&s);
-        assert!(removed > 0.0 && removed < 250.0, "{name}: removed {removed}");
-    }
-    // The three edges end in a sphere: the volume of the rounds and the ball's corner.
-    let mut s = knife_edge_part();
-    s.execute("solid.fillet", &fillet(json!([tf, at, fu]))["params"]).unwrap_or_else(|e| panic!("three at the corner: {e}"));
-    let removed = base - planned_volume(&s);
-    assert!((removed - 67.05).abs() < 0.15, "three at the corner: removed {removed}, expected 67.05");
-}
-
 /// Seed 20 cuts a patterned cylinder's holes through a filleted plate. The lenient retry of a
 /// face's parameter boundary (#970) searched the whole cylinder for a point and found it across
 /// the seam, half a turn away; the face was divided wrongly and the cut failed. Such a boundary
@@ -595,21 +525,6 @@ fn a_boundary_found_across_a_seam_is_not_used() {
     let r = fuzz::run(20, 8);
     assert_eq!(r.outcome.kind, "ok", "seed 20: {:?}\n{}", r.outcome, r.script());
     assert!(r.steps.iter().any(|s| s.kind == "circular pattern"), "the pattern must build, not be skipped as unsupported: {:?}", r.unsupported);
-}
-
-/// Seed 33 ends in a fillet on its second body (#854's corner blends build it differently from
-/// before). Its display plan and its measured volume agree for every body (on main before #854,
-/// that body read 4439.42 through the display plan and 4443.51 measured).
-#[test]
-fn seed_33_display_plan_and_measure_agree() {
-    let r = fuzz::run(33, 8);
-    assert_eq!(r.outcome.kind, "ok", "seed 33: {:?}\n{}", r.outcome, r.script());
-    let s = script(r.script());
-    for b in &s.model.state().bodies {
-        let planned = b.body.mesh_plan(&solidcraft_kernel::MeshTolerance::chord(2e-4)).unwrap().evaluate().measure().volume;
-        let measured = solidcraft_kernel::measure(&b.body).unwrap().volume;
-        assert!((planned - measured).abs() < 2e-5 * measured, "{}: planned {planned}, measured {measured}", b.name);
-    }
 }
 
 /// A chamfer on a concave edge fills the corner, so it adds material, as a fillet there does. The

@@ -1,0 +1,14 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#1668",
+  "tangency-labs/solidcraft#1080"
+ ],
+ "what": "R7 rounds of the outer top edge and the inside edge of a 2 mm wall in one fillet: the inside round holds the material the outer one runs over, so the wall stays closed",
+ "source": "analytic",
+ "method": "as 1668-fillet-both-sides-of-thin-wall at R7: the inside (concave) round adds (1-pi/4) 49 along 100 about (23, 33); the outer one's part over the hollow lies at least 9.7 from (23, 33), inside the added material, so it takes its whole section (1-pi/4) 49 along 104. V = 39552 - (1-pi/4) 49 x 4 = 39509.938040",
+ "body_count": 1,
+ "volume_mm3": 39509.9380400259,
+ "continuity": {
+  "order": "g1"
+ }
+}

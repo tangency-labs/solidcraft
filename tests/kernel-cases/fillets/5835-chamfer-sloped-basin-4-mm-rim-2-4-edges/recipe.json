@@ -1,0 +1,105 @@
+{
+ "commands": [
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 100,
+    "width": 60,
+    "height": 30,
+    "body_name": "Slab"
+   }
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": "XY",
+    "offset": 30,
+    "name": "Top"
+   }
+  },
+  {
+   "command": "sketch.rectangle.two_point",
+   "params": {
+    "p0": [
+     20,
+     4
+    ],
+    "p1": [
+     80,
+     50
+    ]
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": "XY",
+    "offset": 10,
+    "name": "Bottom"
+   }
+  },
+  {
+   "command": "sketch.rectangle.two_point",
+   "params": {
+    "p0": [
+     30,
+     20
+    ],
+    "p1": [
+     70,
+     40
+    ]
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.loft",
+   "params": {
+    "sections": [
+     {
+      "sketch": "Top"
+     },
+     {
+      "sketch": "Bottom"
+     }
+    ],
+    "operation": "cut"
+   }
+  },
+  {
+   "command": "solid.chamfer",
+   "params": {
+    "edges": [
+     [
+      50,
+      4,
+      30
+     ],
+     [
+      80,
+      27,
+      30
+     ],
+     [
+      50,
+      50,
+      30
+     ],
+     [
+      20,
+      27,
+      30
+     ]
+    ],
+    "distance": 2
+   }
+  }
+ ]
+}

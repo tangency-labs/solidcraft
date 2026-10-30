@@ -1,0 +1,11 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#2893"
+ ],
+ "what": "a cylinder r5 tilted 26.6 deg from Z cut flat at z = 10, its elliptical rim chamfered 1 and 2: built, or refused as not supported, never a wrong solid",
+ "source": "invariants",
+ "method": "the axis (1, 0, 2)/sqrt5 through (0, 0, -10) meets z = 10 at (10, 0, 10); the rim is the ellipse there with semi-axes 5 (along y) and 5 sqrt5/2 (along x); (10, 5, 10) is on it. An unequal chamfer of an ellipse has no closed-form volume: one closed valid solid, or a refusal that names the rim as not supported yet (never an SMLib status).",
+ "outcome": "solid_or_refused",
+ "refusal": "not supported yet",
+ "body_count": 1
+}
