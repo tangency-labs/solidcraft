@@ -370,3 +370,24 @@ fn a_loop_whose_edges_run_straight_on_at_seams_is_one_patch_on_its_corners() {
         assert!(angle > 0.5 && angle < 179.5, "a flat corner at {c:?}: {angle}°");
     }
 }
+
+/// A crown fills the middle out to the side the neighbours' normals face, whichever way the
+/// patch itself is parameterised: the sphere window, its neighbours' normals outward, rises away
+/// from the centre; given them inward, it sinks.
+#[test]
+fn a_crown_fills_out_to_the_side_the_neighbours_face() {
+    let edges = window();
+    let middle = |f: &IsoFill| f.patches[0].surface.eval(0.5, 0.5).unwrap().len();
+    let plain = middle(&iso_fill(&edges, &mut sphere_beside(&edges, 1), &spec()).unwrap());
+    let crowned = IsoSpec { crown: 0.1, ..spec() };
+    let out = middle(&iso_fill(&edges, &mut sphere_beside(&edges, 1), &crowned).unwrap());
+    let mut inward = {
+        let mut beside = sphere_beside(&edges, 1);
+        move |k: usize, ts: &[f64]| -> Result<Vec<Option<Across>>, String> {
+            Ok(beside(k, ts)?.into_iter().map(|a| a.map(|a| Across { normal: a.normal * -1.0, ..a })).collect())
+        }
+    };
+    let sunk = middle(&iso_fill(&edges, &mut inward, &crowned).unwrap());
+    eprintln!("the window's middle {plain:.4} from the centre, crowned {out:.4}, crowned to inward neighbours {sunk:.4}");
+    assert!(out > plain + 0.1 && sunk < plain - 0.1, "{plain} {out} {sunk}");
+}

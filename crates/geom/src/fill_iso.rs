@@ -2117,7 +2117,8 @@ fn folds(patch: &Patch) -> bool {
     false
 }
 
-/// The fill with its middle filled out by `crown` times the loop's `size` along the normals, on
+/// The fill with its middle filled out by `crown` times the loop's `size` along the normals (to
+/// the side the neighbours' normals face), on
 /// control points clear of the rows the conditions hold (n + 1 rows from a G^n edge), so the loop and the conditions across it do not move. One patch
 /// rises by `16·u(1−u)·v(1−v)`; patches about a centre by `u(2−u)·v(2−v)`, nought on the loop and
 /// one at the centre, the same on a spoke from either side.
@@ -2126,6 +2127,15 @@ fn crowned(mut quilt: Quilt, stations: &[Station], crown: f64, size: f64) -> Spl
         return Ok(quilt);
     }
     let held = 1 + stations.iter().map(Station::order).max().unwrap_or(0);
+    // Out to the side the neighbours' normals face (the patches all turn one way).
+    let mut facing = 0.0;
+    for s in stations {
+        let (uv, _) = station_on(s.side, s.t);
+        if let Some(n) = quilt.patches.get(s.patch).and_then(|p| p.normal(uv[0], uv[1])) {
+            facing += n.dot(s.across.normal);
+        }
+    }
+    let out = if facing < 0.0 { -1.0 } else { 1.0 };
     let about_centre = !quilt.spokes.is_empty();
     let bump = |x: f64, y: f64| if about_centre { x * (2.0 - x) * y * (2.0 - y) } else { 16.0 * x * (1.0 - x) * y * (1.0 - y) };
     let mut moved = std::collections::HashMap::new();
@@ -2138,7 +2148,7 @@ fn crowned(mut quilt: Quilt, stations: &[Station], crown: f64, size: f64) -> Spl
                 let Some(Some(id)) = quilt.slots.get(k).and_then(|s| s.get(patch.flat(i, j))) else { continue };
                 let (x, y) = (gu.get(i).copied().unwrap_or(0.5), gv.get(j).copied().unwrap_or(0.5));
                 let Some(n) = patch.normal(x, y) else { continue };
-                moved.entry(*id).or_insert_with(|| patch.at(i, j) + n * (crown * size * bump(x, y)));
+                moved.entry(*id).or_insert_with(|| patch.at(i, j) + n * (out * crown * size * bump(x, y)));
             }
         }
     }
