@@ -23,6 +23,10 @@ pub(crate) struct Nodes {
     /// The curve's parameter at each node (the edge's interval, ends included): where each
     /// face's pcurve of the edge gives the node's (u, v).
     pub params: Vec<f64>,
+    /// The parameters of the nodes that are another edge's node, where the two edges touch
+    /// within the chord tolerance (see [`snap`]): in a face that runs both edges such a node is
+    /// the other's point of the face, a pinch, not a crossing.
+    pub snapped: Vec<f64>,
 }
 
 /// Nodes of edge `ei` of `b` from its start to its end: every chord within the tolerance of
@@ -56,7 +60,7 @@ pub(crate) fn sample_edge(b: &brep::Brep, ei: usize, rules: &Rules, h: f64) -> R
             *p = back;
             *t = t1;
         }
-        return Ok(Nodes { points: pts, params });
+        return Ok(Nodes { points: pts, params, snapped: Vec::new() });
     }
     let curve = CurveEval::new(edge.parameters()).map_err(|e| fail(e.to_string()))?;
     let at =
@@ -115,7 +119,7 @@ pub(crate) fn sample_edge(b: &brep::Brep, ei: usize, rules: &Rules, h: f64) -> R
     if let Some(p) = out.last_mut() {
         *p = (t1, back);
     }
-    Ok(Nodes { points: out.iter().map(|p| p.1).collect(), params: out.iter().map(|p| p.0).collect() })
+    Ok(Nodes { points: out.iter().map(|p| p.1).collect(), params: out.iter().map(|p| p.0).collect(), snapped: Vec::new() })
 }
 
 /// Edge `ei`'s nodes with each of its segments `segs` (counted from its start) halved at the
@@ -158,7 +162,45 @@ pub(crate) fn split_segments(b: &brep::Brep, ei: usize, nodes: &mut Nodes, segs:
         points.push(pm);
         params.push(m);
     }
-    *nodes = Nodes { points, params };
+    nodes.points = points;
+    nodes.params = params;
+    Ok(())
+}
+
+/// Edge `ei`'s nodes with `add` (each a parameter strictly inside a segment and the point there)
+/// put in, in order, each marked as snapped: the point is another edge's node within the chord
+/// tolerance of this edge's chord there (the edges touch), so the two edges share it. A parameter
+/// that is not strictly between its segment's two (a node already there) is left out. More than
+/// [`MAX_EDGE_NODES`] nodes is an error naming the edge.
+pub(crate) fn snap(ei: usize, nodes: &mut Nodes, add: &[(f64, Vec3)]) -> Result<()> {
+    let mut add: Vec<(f64, Vec3)> = add.iter().copied().filter(|(t, p)| t.is_finite() && p.is_finite()).collect();
+    add.sort_by(|a, b| a.0.total_cmp(&b.0));
+    add.dedup_by(|a, b| a.0 == b.0);
+    if nodes.points.len() + add.len() > MAX_EDGE_NODES {
+        return Err(KernelError::Failed(format!("tessellation: edge {ei}: more than {MAX_EDGE_NODES} nodes")));
+    }
+    let n = nodes.points.len().min(nodes.params.len());
+    let (mut points, mut params) = (Vec::with_capacity(n + add.len()), Vec::with_capacity(n + add.len()));
+    let mut next = add.iter().peekable();
+    for k in 0..n {
+        let (Some(&p), Some(&t)) = (nodes.points.get(k), nodes.params.get(k)) else { continue };
+        points.push(p);
+        params.push(t);
+        let Some(&u) = nodes.params.get(k + 1) else { continue };
+        while let Some(&&(m, q)) = next.peek() {
+            if m >= u {
+                break;
+            }
+            next.next();
+            if m > t {
+                points.push(q);
+                params.push(m);
+                nodes.snapped.push(m);
+            }
+        }
+    }
+    nodes.points = points;
+    nodes.params = params;
     Ok(())
 }
 

@@ -196,7 +196,7 @@ pub(crate) fn plan(b: &brep::Brep, tol: f64, turn: Option<size::Turn>) -> Result
     };
     let mut boundaries: Vec<Boundary> =
         crate::par::map("face boundaries", &indexed, curved >= PARALLEL_FACES, |&fi| face_boundary(fi, &nodes)).into_iter().collect::<Result<_>>()?;
-    let tangled = untangle(b, &evals, &edge_faces, &mut nodes, &mut boundaries, &face_boundary)?;
+    let tangled = untangle(b, &evals, &edge_faces, rules.tol, &mut nodes, &mut boundaries, &face_boundary)?;
     let planned = crate::par::map("face tessellation", &indexed, curved >= PARALLEL_FACES, |&fi| {
         let (Some(face), Some(eval), Some(size), Some(fb)) = (faces.get(fi), evals.get(fi), sizes.get(fi), boundaries.get(fi)) else {
             return Err(unsupported(format!("face {fi}: missing")));
@@ -294,10 +294,13 @@ fn boundary(
         .map(|e| (e.vertices[0].min(e.vertices[1]), e.vertices[0].max(e.vertices[1])))
         .collect();
     let vertex_point = |v: u32| b.vertices.get(v as usize).map(|x| (Vec3::new(x.point[0], x.point[1], x.point[2]), x.tolerance.max(0.0)));
+    // Each loop's nodes that are another edge's node (see [`edges::snap`]).
+    let mut snapped: Vec<Vec<bool>> = Vec::with_capacity(face.loops.len());
     for l in &face.loops {
         let Loop::Edges { edges } = l else { continue };
         let (mut pts, mut uvs): (Vec<Vec3>, Vec<[f64; 2]>) = (Vec::new(), Vec::new());
         let mut segs: Vec<(u32, u32)> = Vec::new();
+        let mut shared: Vec<bool> = Vec::new();
         // Where the previous edge ended, and the periods its pcurve was moved by.
         let (mut end, mut shift): (Option<[f64; 2]>, [f64; 2]) = (None, [0.0; 2]);
         for oe in edges {
@@ -312,6 +315,7 @@ fn boundary(
             // The edge's own tolerance: how far its curve may stand off the face.
             let accept = (rules.tol * 10.0).max(1e-6) + edge.tolerance.max(0.0);
             let mut ep: Vec<Vec3> = n.points.clone();
+            let mut es: Vec<bool> = n.params.iter().map(|t| n.snapped.contains(t)).collect();
             let mut eq: Vec<[f64; 2]> = Vec::with_capacity(ep.len());
             for (k, (t, p)) in n.params.iter().zip(&n.points).enumerate() {
                 let q = oe.pcurve.eval(t.clamp(p0, p1)).ok_or_else(|| fail(oe.edge, format!("its pcurve does not evaluate at t = {t}")))?;
@@ -326,6 +330,7 @@ fn boundary(
             if !oe.forward {
                 ep.reverse();
                 eq.reverse();
+                es.reverse();
             }
             if let (Some(e), Some(&start)) = (end, eq.first()) {
                 for d in 0..2 {
@@ -372,11 +377,13 @@ fn boundary(
             end = eq.last().copied();
             ep.pop();
             eq.pop();
+            es.pop();
             // The segment from each node on: the edge's own, counted from its start.
             let m = ep.len() as u32;
             segs.extend((0..m).map(|j| (oe.edge, if oe.forward { j } else { m - 1 - j })));
             pts.extend(ep);
             uvs.extend(eq);
+            shared.extend(es);
         }
         let n = uvs.len();
         let pole = |q: &[f64; 2]| (0..2).any(|d| pole_along(*q, d));
@@ -391,10 +398,37 @@ fn boundary(
             uvs.rotate_left(k);
             pts.rotate_left(k);
             segs.rotate_left(k);
+            shared.rotate_left(k);
         }
         if pts.len() >= 2 {
             out.loops.push(seam::Loop { uv: uvs, pts });
             out.segments.push(segs);
+            snapped.push(shared);
+        }
+    }
+    // A node snapped from another edge is that edge's node, the same point: where the face runs
+    // that edge too, the node takes the other's parameters, so the face's boundary passes one
+    // point of its (u, v) twice (a pinch) and does not cross itself there. Its own pcurve puts it
+    // within the chord tolerance of that point, not on it.
+    for (l, flags) in snapped.iter().enumerate() {
+        for (k, _) in flags.iter().enumerate().filter(|(_, f)| **f) {
+            let Some((&p, &q)) = out.loops.get(l).and_then(|lp| lp.pts.get(k).zip(lp.uv.get(k))) else { continue };
+            let partner = out
+                .loops
+                .iter()
+                .zip(&snapped)
+                .flat_map(|(lp, fs)| lp.pts.iter().zip(&lp.uv).zip(fs))
+                .filter(|((r, _), f)| !**f && **r == p)
+                .map(|((_, w), _)| *w)
+                .min_by(|a, b| (a[0] - q[0]).hypot(a[1] - q[1]).total_cmp(&(b[0] - q[0]).hypot(b[1] - q[1])));
+            if let (Some(mut w), Some(slot)) = (partner, out.loops.get_mut(l).and_then(|lp| lp.uv.get_mut(k))) {
+                for d in 0..2 {
+                    if dom.period[d].is_some() {
+                        w[d] = uv::unwrap(w[d], q[d], dom.period[d]);
+                    }
+                }
+                *slot = w;
+            }
         }
     }
     Ok(out)
@@ -418,10 +452,12 @@ struct Boundary {
 /// so every face of the edge gets the new nodes; the faces of every edge split are checked again,
 /// until no chords cross. Boundaries that still cross after [`MAX_UNTANGLE`] rounds, or would
 /// put more than [`edges::MAX_EDGE_NODES`] on an edge, are an error naming the face and edges.
+#[allow(clippy::too_many_arguments)]
 fn untangle(
     b: &brep::Brep,
     evals: &[EvalSurface],
     edge_faces: &[Vec<usize>],
+    tol: f64,
     nodes: &mut [edges::Nodes],
     boundaries: &mut [Boundary],
     face_boundary: &(dyn Fn(usize, &[edges::Nodes]) -> Result<Boundary> + Sync),
@@ -443,6 +479,10 @@ fn untangle(
             return Ok(Vec::new());
         }
         if round == MAX_UNTANGLE {
+            // Halving cannot part two curves that touch or cross: where they come within the chord
+            // tolerance of each other, they share nodes.
+            let faces: Vec<usize> = tangled.iter().map(|(fi, _)| *fi).collect();
+            tangled = snap_touches(evals, edge_faces, tol, nodes, boundaries, face_boundary, &faces)?;
             // Each face still crossing, with why: planned leniently, and named (`plan_or_fill`).
             return Ok(tangled
                 .iter()
@@ -481,6 +521,161 @@ fn untangle(
         }
     }
     Ok(Vec::new())
+}
+
+/// Rounds of [`snap_touches`] before a face that still crosses itself is refused.
+const MAX_SNAP: u32 = 8;
+
+/// The faces `faces` whose boundaries cross themselves where two curves touch or cross (halving
+/// their chords does not part them, see [`untangle`]), with every node that lies within the chord
+/// tolerance `tol` of a crossing chord of another edge put onto that edge as well (see
+/// [`edges::snap`]): the two edges share the point, the face's boundary passes it twice (a pinch,
+/// as at a vertex two loops share), and the chords meet there instead of crossing. Where the
+/// curves run within the tolerance of each other for a stretch (a sliver between two touches),
+/// the nodes on either side are shared in turn, so the boundary runs out and back along one
+/// polyline there: a slit, which bounds the face on neither side. A node is not snapped where the
+/// pinch would turn part of its loop inside out by more than the tolerance (two curves crossing
+/// at an angle: the boundary is wrong there, not within the tolerance). Every face of a changed
+/// edge has its boundary built again. Returns the faces whose boundaries still cross, with the
+/// crossing segments.
+#[allow(clippy::too_many_arguments)]
+fn snap_touches(
+    evals: &[EvalSurface],
+    edge_faces: &[Vec<usize>],
+    tol: f64,
+    nodes: &mut [edges::Nodes],
+    boundaries: &mut [Boundary],
+    face_boundary: &(dyn Fn(usize, &[edges::Nodes]) -> Result<Boundary> + Sync),
+    faces: &[usize],
+) -> Result<Vec<(usize, Vec<(u32, u32)>)>> {
+    let crossing = |fi: usize, fb: &Boundary| -> Vec<(usize, usize)> {
+        let Some(s) = evals.get(fi) else { return Vec::new() };
+        tangle::crossing(s, fb.reach, &fb.loops)
+    };
+    let mut tangled: Vec<usize> = faces.to_vec();
+    for _ in 0..MAX_SNAP {
+        let mut add: HashMap<u32, Vec<(f64, Vec3)>> = HashMap::new();
+        for &fi in &tangled {
+            let Some(fb) = boundaries.get(fi) else { continue };
+            for (l, k) in crossing(fi, fb) {
+                let Some(&(e, j)) = fb.segments.get(l).and_then(|s| s.get(k)) else { continue };
+                if let Some((t, p)) = touch(fb, nodes, (l, k), (e, j), tol) {
+                    add.entry(e).or_default().push((t, p));
+                }
+            }
+        }
+        if add.is_empty() {
+            break;
+        }
+        let mut redo: Vec<usize> = Vec::new();
+        for (e, points) in &add {
+            let Some(slot) = nodes.get_mut(*e as usize) else { continue };
+            edges::snap(*e as usize, slot, points)?;
+            redo.extend(edge_faces.get(*e as usize).into_iter().flatten().copied());
+        }
+        redo.extend(tangled.iter().copied());
+        redo.sort_unstable();
+        redo.dedup();
+        tangled.clear();
+        for fi in redo {
+            let fb = face_boundary(fi, nodes)?;
+            let crosses = !crossing(fi, &fb).is_empty();
+            if let Some(slot) = boundaries.get_mut(fi) {
+                *slot = fb;
+            }
+            if crosses {
+                tangled.push(fi);
+            }
+        }
+        if tangled.is_empty() {
+            return Ok(Vec::new());
+        }
+    }
+    Ok(tangled
+        .into_iter()
+        .filter_map(|fi| {
+            let fb = boundaries.get(fi)?;
+            let c: Vec<(u32, u32)> = crossing(fi, fb).into_iter().filter_map(|(l, k)| fb.segments.get(l)?.get(k).copied()).collect();
+            (!c.is_empty()).then_some((fi, c))
+        })
+        .collect())
+}
+
+/// The node of face boundary `fb` nearest the crossing chord `at` (loop, node) of its boundary,
+/// segment `seg` (edge, segment from its start) of that edge, within `tol` of the chord strictly
+/// between its ends, on another edge, and not yet on this one; with the parameter on the edge
+/// where it projects onto the chord. `None` when there is none, or snapping it would turn part
+/// of its loop inside out by more than the tolerance (see [`snap_touches`]).
+fn touch(fb: &Boundary, nodes: &[edges::Nodes], at: (usize, usize), seg: (u32, u32), tol: f64) -> Option<(f64, Vec3)> {
+    let (e, j) = seg;
+    let n = nodes.get(e as usize)?;
+    let j = j as usize;
+    let (a, c) = (*n.points.get(j)?, *n.points.get(j + 1)?);
+    let (ta, tc) = (*n.params.get(j)?, *n.params.get(j + 1)?);
+    let ac = c - a;
+    let len2 = ac.dot(ac);
+    if !(len2 > 0.0) {
+        return None;
+    }
+    let mut best: Option<(f64, f64, Vec3)> = None;
+    for (l, lp) in fb.loops.iter().enumerate() {
+        let segs = fb.segments.get(l)?;
+        let m = lp.pts.len();
+        for (k, &p) in lp.pts.iter().enumerate() {
+            // The node's edges: the segment starting at it and the one ending there.
+            let edges_at = [segs.get(k).map(|s| s.0), segs.get((k + m - 1) % m).map(|s| s.0)];
+            if edges_at.contains(&Some(e)) || n.points.contains(&p) {
+                continue;
+            }
+            let f = (p - a).dot(ac) / len2;
+            let d = p.dist_to_segment(a, c);
+            if !(f > 1e-6 && f < 1.0 - 1e-6 && d <= tol) || best.is_some_and(|(bd, _, _)| bd <= d) {
+                continue;
+            }
+            if l == at.0 && inside_out(lp, at.1, k, tol) {
+                continue;
+            }
+            best = Some((d, ta + f * (tc - ta), p));
+        }
+    }
+    best.map(|(_, t, p)| (t, p))
+}
+
+/// Whether pinching loop `lp` at node `k` and a new node (the same point) on its chord from node
+/// `at` would turn either part inside out by more than `tol`: a part whose winding in (u, v) is
+/// against the loop's, and whose area is more than `tol` across (twice its area in 3D over its
+/// length).
+fn inside_out(lp: &seam::Loop, at: usize, k: usize, tol: f64) -> bool {
+    let m = lp.uv.len();
+    if m < 3 {
+        return false;
+    }
+    // The two parts: from the node after the chord's start round to `k`, and from `k` round to the
+    // chord's start.
+    let part = |from: usize, to: usize| -> Vec<usize> {
+        let mut out = Vec::new();
+        let mut i = from % m;
+        loop {
+            out.push(i);
+            if i == to % m || out.len() > m {
+                break;
+            }
+            i = (i + 1) % m;
+        }
+        out
+    };
+    let whole = area2(&lp.uv);
+    [part(at + 1, k), part(k, at)].iter().any(|ids| {
+        let uv: Vec<[f64; 2]> = ids.iter().filter_map(|&i| lp.uv.get(i).copied()).collect();
+        let pts: Vec<Vec3> = ids.iter().filter_map(|&i| lp.pts.get(i).copied()).collect();
+        if uv.len() < 3 || area2(&uv) * whole >= 0.0 {
+            return false;
+        }
+        // Newell's vector: twice the area of the polygon in 3D.
+        let twice = pts.iter().zip(pts.iter().cycle().skip(1)).fold(Vec3::ZERO, |acc, (p, q)| acc + p.cross(*q)).len();
+        let length: f64 = pts.iter().zip(pts.iter().cycle().skip(1)).map(|(p, q)| p.dist(*q)).sum();
+        twice > tol * length
+    })
 }
 
 /// Bounded work for the facet angle: a face whose boundary would get more than
