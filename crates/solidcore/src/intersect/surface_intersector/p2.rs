@@ -76,7 +76,7 @@ use crate::nurbs::b_spline_curve_n_lib::TrimMode;
 use crate::nurbs::b_spline_surface::SurfParamType;
 use crate::nurbs::b_spline_surface_n_lib::p2::EvaluateFlags;
 use crate::nurbs::knots::Side;
-use crate::surface::surface::p2::{drop_vectors, TsectCurveType};
+use crate::surface::surface::p2::{drop_vectors, TsectCurveType, B_SPLINE_SURFACE_TYPE};
 use crate::surface::surface::{Surface, SurfaceKind};
 use crate::surface::surface_cache::PatchBoundaryBoundingPlanes;
 
@@ -268,11 +268,11 @@ impl SurfaceIntersector<'_> {
         let surf2 = self.surface(SrfIndex::Second);
 
         // Control polygons are not available for general surfaces: bail out if not
-        // a BSplineSurface (SM_CAST_PTR(SmBSplineSurface, ..): B-splines and planes;
-        // curve-bounded and STEP surfaces derive from SmSurface only)
-        let is_bss =
-            |s: &Surface| matches!(s.kind(), SurfaceKind::BSpline(_) | SurfaceKind::Plane(_));
-        if !is_bss(surf1) || !is_bss(surf2) {
+        // a BSplineSurface (SM_CAST_PTR(SmBSplineSurface, ..): every kind derived from
+        // it, planes, cones, spheres, tori and surfaces of revolution and extrusion;
+        // curve-bounded, STEP, offset and volume surfaces derive from SmSurface only)
+        let is_bss = |s: &Surface| s.is_kind_of(B_SPLINE_SURFACE_TYPE);
+        if !is_bss(surf1)? || !is_bss(surf2)? {
             return Ok(BoundaryPlaneTestResult::Unknown);
         }
 

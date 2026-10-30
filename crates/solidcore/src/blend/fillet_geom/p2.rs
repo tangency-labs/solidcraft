@@ -105,7 +105,6 @@ use crate::kernel::Kernel;
 use crate::math::{Point3, Vec3, BIG_DOUBLE, EFF_ZERO, PI};
 use crate::nurbs::b_spline_curve::BSplineCurve;
 use crate::nurbs::b_spline_curve_n_lib::TrimMode;
-use crate::nurbs::b_spline_surface::BSplineSurface;
 use crate::nurbs::b_spline_surface_n_lib::p2::{EvaluateFlags, OrientType};
 use crate::nurbs::knots::Side;
 use crate::surface::plane::Plane;
@@ -558,18 +557,6 @@ const fn is_b_spline_kind(c: &Curve) -> bool {
             | CurveKind::Hyperbola(_)
             | CurveKind::Parabola(_)
     )
-}
-
-/// `SM_CAST_PTR(SmBSplineSurface, ..)`: the B-spline net of a B-spline surface, a
-/// plane or a surface of revolution.
-fn b_spline_net(s: &Surface) -> Option<&BSplineSurface> {
-    match s.kind() {
-        SurfaceKind::BSpline(b) => Some(b),
-        SurfaceKind::Plane(p) => Some(p.base()),
-        SurfaceKind::SurfOfRevolution(r) => Some(r.base()),
-        SurfaceKind::SurfOfExtrusion(r) => Some(r.base()),
-        _ => None,
-    }
 }
 
 /// `pSurface->DropCurve(crContext, crDomain, cr3dCurve, crInterval, dApproxTol,
@@ -2430,14 +2417,18 @@ impl FilletBrep {
             .ok_or_else(|| SolidError::null_pointer(OP))?
             .clone();
         let face_srf = &face_srf;
-        let surf_net = b_spline_net(face_srf).ok_or_else(|| SolidError::null_pointer(OP))?;
+        // SM_CAST_PTR(SmBSplineSurface, ..) and NER: every kind derived from
+        // SmBSplineSurface (planes, cones and cylinders, spheres, tori, surfaces of
+        // revolution and extrusion), with the NURB its GetDegree reads
+        let surf_net = crate::topology::brep::p3::with_nurb(k, face_srf)?
+            .ok_or_else(|| SolidError::null_pointer(OP))?;
         let uv_domain = face_srf.natural_uv_domain_with_nurb(k)?;
         let tol = face2::tolerance(target, face)?;
 
         // Determine if we want to work on 2D or 3D
         let mut project_and_lift = false;
         let mut create_crv_on_3d = false;
-        let is_plane = match Plane::is_nurb_surface_plane(k, surf_net, 1.0) {
+        let is_plane = match Plane::is_nurb_surface_plane(k, &surf_net, 1.0) {
             Ok(p) => p.is_some(),
             Err(err) if err.is_unported() => return Err(err),
             // an SER status inside is a TRUE return upstream

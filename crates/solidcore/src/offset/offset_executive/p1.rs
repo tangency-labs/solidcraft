@@ -1731,6 +1731,16 @@ impl OffsetExecutive {
             SurfaceKind::SurfOfExtrusion(surface) if surface.base().gw_nurb().is_none() => {
                 ignore_status(surface.make_nurb(kernel))?;
             }
+            // (SmCone/SmCylinder, SmSphere and SmTorus are SmBSplineSurfaces too)
+            SurfaceKind::Cone(surface) if surface.rev().base().gw_nurb().is_none() => {
+                ignore_status(surface.make_nurb(kernel))?;
+            }
+            SurfaceKind::Sphere(surface) if surface.base().base().gw_nurb().is_none() => {
+                ignore_status(surface.make_nurb(kernel))?;
+            }
+            SurfaceKind::Torus(surface) if surface.base().base().gw_nurb().is_none() => {
+                ignore_status(surface.make_nurb(kernel))?;
+            }
             _ => {}
         }
         let original_faceuse = faceuse;

@@ -103,7 +103,7 @@ use crate::math::{Point3, Vec3, BIG_DOUBLE, EFF_ZERO, EFF_ZERO_SQRT, PI};
 use crate::query::face::p2::{
     point_classify_prepared, point_classify_requested, PointClassifyOptions,
 };
-use crate::surface::surface::p2::{surface_cache, Surface, SurfaceKind};
+use crate::surface::surface::p2::{surface_cache, Surface, B_SPLINE_SURFACE_TYPE};
 use crate::surface::surface_cache::p1::{AltCacheKey, AltSrfCacheType};
 use crate::surface::trim_srf_cache::POINT_CLASS_UNKNOWN;
 use crate::topology::face::p2::create_curves_by_trimming_snapshot;
@@ -1970,9 +1970,9 @@ pub(super) fn face_silhouettes<O: SolutionObject>(
     }
 
     // No cached trimmed silhouette curves in existance -- create them
-    // (SM_CAST_PTR(SmBSplineSurface, pSurface): upstream dereferences NULL for any
-    // other kind)
-    if !matches!(srf.kind(), SurfaceKind::BSpline(_) | SurfaceKind::Plane(_)) {
+    // (SM_CAST_PTR(SmBSplineSurface, pSurface): every kind derived from it; upstream
+    // dereferences NULL for any other kind)
+    if !srf.is_kind_of(B_SPLINE_SURFACE_TYPE)? {
         return Err(null_deref(
             OP_FACE_SIL,
             "face surface is not a B-spline surface",

@@ -211,7 +211,12 @@ pub(super) fn invalid(operation: &'static str, reason: &'static str) -> SolidErr
 /// `SmBSplineSurface` members: an `SmPlane` gives its B-spline part. Callers that
 /// reach a virtual member deal with planes first.
 pub(super) fn bspline_of(surface: &Surface) -> Option<&BSplineSurface> {
-    match surface.kind() {
+    bspline_of_kind(surface.kind())
+}
+
+/// [`bspline_of`] of a surface kind (a made kind with its NURB, say).
+fn bspline_of_kind(kind: &SurfaceKind) -> Option<&BSplineSurface> {
+    match kind {
         SurfaceKind::BSpline(b) => Some(b),
         SurfaceKind::Plane(p) => Some(p.base()),
         SurfaceKind::Cone(s) => Some(s.rev().base()),
@@ -775,12 +780,22 @@ impl PatchBoundaryBoundingPlanes {
         let tolerance = 0.0001;
 
         // local
-        let bs = bspline_of(surface).ok_or(SolidError::null_pointer(OP_PLANES))?;
-        // (the canonical form asks for the NURB through the virtual GetOrCreateGwNurbPointer,
-        // which makes a plane's)
-        let bs = match surface.kind() {
+        bspline_of(surface).ok_or(SolidError::null_pointer(OP_PLANES))?;
+        // (the control point count and the canonical form read the NURB, made through
+        // the virtual GetOrCreateGwNurbPointer when missing: a plane's, a cone's,
+        // sphere's, torus's or surface of revolution's or extrusion's)
+        let bs = match surface.kind_with_nurb(k)? {
             SurfaceKind::Plane(p) => p.base_for_query(),
-            _ => std::borrow::Cow::Borrowed(bs),
+            SurfaceKind::SurfOfExtrusion(_) => match surface.extrusion_base_with_nurb(k) {
+                Ok(base) => base,
+                Err(e) if e.is_unported() => return Err(e),
+                Err(_) => std::borrow::Cow::Borrowed(
+                    bspline_of(surface).ok_or(SolidError::null_pointer(OP_PLANES))?,
+                ),
+            },
+            made => std::borrow::Cow::Borrowed(
+                bspline_of_kind(made).ok_or(SolidError::null_pointer(OP_PLANES))?,
+            ),
         };
 
         // for every boundary

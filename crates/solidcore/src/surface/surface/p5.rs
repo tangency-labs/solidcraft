@@ -90,7 +90,7 @@ use crate::nurbs::knots::Side;
 use super::p1::{
     evaluate_1st_derivatives, get_surface_cache, FindPsNormalEnfo, SurfaceSolveContext,
 };
-use super::p2::{LsiGlobalSolver, SurfaceEval};
+use super::p2::{LsiGlobalSolver, SurfaceEval, B_SPLINE_SURFACE_TYPE};
 use super::p4::is_point_on_normal;
 use super::p4::NoObject;
 use super::p7::{good_drop_result, load_guesses, SpGlobalSolver};
@@ -1771,9 +1771,9 @@ impl Surface {
         };
 
         let is_plane = |s: &Self| matches!(s.kind(), SurfaceKind::Plane(_));
-        // SM_CAST_PTR(SmBSplineSurface, ..): a plane is one too (tried before)
-        let is_bspline =
-            |s: &Self| matches!(s.kind(), SurfaceKind::BSpline(_) | SurfaceKind::Plane(_));
+        // SM_CAST_PTR(SmBSplineSurface, ..): every kind derived from it (a plane, tried
+        // before, a cone, sphere, torus or surface of revolution or extrusion)
+        let is_bspline = |s: &Self| s.is_kind_of(B_SPLINE_SURFACE_TYPE);
         let mut tried0 = false;
         let mut tried1 = false;
 
@@ -1842,7 +1842,7 @@ impl Surface {
         }
 
         // Next, favor SmBSplineSurfaces.
-        if !tried0 && is_bspline(self) {
+        if !tried0 && is_bspline(self)? {
             tried0 = true;
             if try_cover(
                 k,
@@ -1857,7 +1857,7 @@ impl Surface {
                 return Ok(done(&mut st, false));
             }
         }
-        if !tried1 && is_bspline(other) {
+        if !tried1 && is_bspline(other)? {
             tried1 = true;
             if try_cover(
                 k,
