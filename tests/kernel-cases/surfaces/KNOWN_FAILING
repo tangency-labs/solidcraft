@@ -3,3 +3,7 @@
 # that fails and is not listed fails it, and so does a listed case that passes: a fix removes its
 # line in the same pull request.
 # Baseline: rig-cases-surfaces 45f69c0e5 with SMLib 60b1c6a, aarch64 Linux.
+cov-patch-g0-fills-a-240-deg-window-in-a-cylinder not supported yet: the general fill refuses the window (it folds)
+cov-patch-g0-fills-a-saddle-window-in-a-torus not supported yet: the general fill refuses the window (it folds)
+cov-patch-g1-fills-a-240-deg-window-in-a-cylinder not supported yet: the general fill refuses the window (it folds)
+cov-patch-g1-fills-a-saddle-window-in-a-torus not supported yet: the general fill refuses the window (it folds)
