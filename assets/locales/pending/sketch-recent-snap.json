@@ -22,5 +22,17 @@
   "ko": {
     "prefs.sketch_recent_snap": "최근 중심과 중점에 자동 스냅",
     "prefs.sketch_recent_snap_note": "그리는 동안 최근에 사용한 두 원의 중심 또는 직선 모서리 중점의 안내선이 만나는 위치로 커서를 스냅합니다. 끄기: 안내선은 보기만 하고 커서는 움직이지 않습니다."
+  },
+  "ar": {
+    "prefs.sketch_recent_snap": "الالتقاط التلقائي إلى المراكز ونقاط المنتصف الأخيرة",
+    "prefs.sketch_recent_snap_note": "أثناء الرسم، يلتقط المؤشر الموضع الذي يتقاطع فيه دليلا آخر مركزي دائرتين أو نقطتي منتصف حافتين مستقيمتين. إيقاف: تبقى الأدلة للعرض فقط ولا يتحرك المؤشر."
+  },
+  "he": {
+    "prefs.sketch_recent_snap": "הצמדה אוטומטית למרכזים ולנקודות אמצע אחרונים",
+    "prefs.sketch_recent_snap_note": "בזמן שרטוט, הסמן נצמד למקום שבו נחתכים קווי העזר של שני מרכזי המעגלים או נקודות האמצע של קצוות ישרים האחרונים. כבוי: קווי העזר נשארים לתצוגה בלבד והסמן אינו זז."
+  },
+  "vi": {
+    "prefs.sketch_recent_snap": "Tự động bắt điểm vào tâm và trung điểm gần đây",
+    "prefs.sketch_recent_snap_note": "Khi vẽ, con trỏ được bắt vào nơi các đường dẫn của hai tâm đường tròn hoặc trung điểm cạnh thẳng gần nhất cắt nhau. Tắt: các đường dẫn chỉ để xem và con trỏ không di chuyển."
   }
 }

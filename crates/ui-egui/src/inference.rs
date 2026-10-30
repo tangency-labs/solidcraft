@@ -337,7 +337,7 @@ impl Tracking {
         let mut nearest = 8.0;
         let mut nearest_id = None;
         for (index, curve) in sk.curves.iter().enumerate() {
-            let Some(p) = Self::reference(sk, index).and_then(&to).filter(|p| proj.rect.contains(*p)) else { continue };
+            let Some(p) = Self::reference(sk, index).and_then(to).filter(|p| proj.rect.contains(*p)) else { continue };
             let distance = cursor.distance(p);
             if distance < nearest {
                 nearest = distance;
@@ -417,7 +417,7 @@ pub(crate) fn track_and_show(app: &mut SolveApp, painter: &egui::Painter, proj: 
         painter.circle_stroke(a, 4.0, Stroke::new(1.0, tk.rubber_band));
         Some(b)
     };
-    let ends = [tracking.guide.and_then(&draw), tracking.remembered_guide.and_then(&draw)];
+    let ends = [tracking.guide.and_then(draw), tracking.remembered_guide.and_then(draw)];
     if let (Some(a), Some(b)) = (ends[0], ends[1])
         && a.distance(b) < 1.0
     {
