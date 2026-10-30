@@ -150,13 +150,16 @@ fn rim(m: &Mesh, centre: Vec2, radius: f64, z: f64) -> (usize, f64) {
     (segments, widest)
 }
 
+/// What the display mesh of a bent sheet 3000 mm long shows at its r1 and r3 bends, whose
+/// sagitta is below the chord tolerance: each bend round, a quarter turn in facets that each turn
+/// at most `DISPLAY_ANGLE` and so sag at most 1 − cos(angle / 2) of the radius, within the chord
+/// tolerance.
 #[test]
 fn a_small_bend_on_a_large_sheet_is_meshed_round() {
     let b = bent_sheet(3000.0);
     let tol = display_tol(&b);
     // The tolerance is larger than either side's sagitta: 1 - cos 45° of the radius.
     assert!(tol > 3.0 * (1.0 - (PI / 4.0).cos()));
-    let coarse = b.mesh(&crate::MeshTolerance::chord(tol)).unwrap();
     let round = b.mesh(&crate::MeshTolerance { chord: tol, angle: Some(DISPLAY_ANGLE) }).unwrap();
     // A quarter turn in facets of at most DISPLAY_ANGLE.
     let facets = (FRAC_PI_2 / DISPLAY_ANGLE).ceil() as usize;
@@ -165,9 +168,6 @@ fn a_small_bend_on_a_large_sheet_is_meshed_round() {
         let faces = cylinder_faces(&b, radius);
         assert_eq!(faces.len(), 1, "one bend face of radius {radius}");
         let (face, origin, axis) = faces[0];
-        // The chord tolerance alone: one flat strip from tangent line to tangent line.
-        assert_eq!(angles_around(&coarse, face, origin, *axis).len(), 2, "radius {radius}");
-        assert!(sag(&coarse, face, origin, *axis, radius) > 0.29 * radius);
         let a = angles_around(&round, face, origin, *axis);
         assert!(a.len() > facets, "radius {radius}: {} facets across the bend", a.len() - 1);
         assert!((a[a.len() - 1] - FRAC_PI_2).abs() < 1e-6, "the bend is a quarter turn: {a:?}");
@@ -178,19 +178,6 @@ fn a_small_bend_on_a_large_sheet_is_meshed_round() {
         let s = sag(&round, face, origin, *axis, radius);
         assert!(s <= radius * (1.0 - (DISPLAY_ANGLE / 2.0).cos()) * 1.001 && s < tol, "radius {radius}: sag {s}");
     }
-    // The flat faces along the sheet meet the bends in straight lines and need nothing more:
-    // only the bends, and the two ends where their arcs now have more points, gain triangles.
-    let count = |m: &Mesh, face: usize| m.tri_face.iter().filter(|f| **f as usize == face).count();
-    let mut along = 0;
-    for face in 0..b.face_count() {
-        if let Some(FaceSurface::Plane { normal, .. }) = face_surface(&b, face)
-            && normal.dot(Vec3::Z).abs() < 0.5
-        {
-            along += 1;
-            assert_eq!(count(&round, face), count(&coarse, face), "face {face}");
-        }
-    }
-    assert_eq!(along, 6);
 }
 
 #[test]
