@@ -2232,7 +2232,7 @@ pub fn apply_point_solution<O, S: Copy>(
 ) -> Result<ApplyPointSolution> {
     if input.edge.is_some() {
         // this entry point has no B-rep for the edge ([`apply_point_solution_in`] has)
-        // UNPORTED(topology.edge): SmEdge::GetCurve
+        // DISPATCH GAP: SmEdge::GetCurve (topology.edge, green)
         // Proof (unreachable): B-rep-less entry point; library callers use the `_in` twin,
         // only difftest and a unit test call this one; 0 hits in the green difftest sweep.
         return Err(SolidError::unported("SmEdge::GetCurve", "topology.edge"));

@@ -1190,7 +1190,7 @@ impl<O: ClassObject> PointClassification<O> {
             // set vertex position when appropriate
             if self.point_class == Pc::Vertex {
                 let Some(set_vertex_point) = set_vertex_point else {
-                    // UNPORTED(topology.vertex): SmVertex::SetPoint
+                    // DISPATCH GAP: SmVertex::SetPoint (topology.vertex, green)
                     // Proof (unreachable): needs a None vertex setter with an SSS point on
                     // a vertex class; 0 hits in the green difftest sweep.
                     return Err(SolidError::unported(
@@ -2431,7 +2431,7 @@ fn volume_evaluate_point(volume: &Volume, uvw: Point3) -> Result<Point3> {
 
 /// `SmVertex::GetPoint`.
 fn vertex_point<O>(_vertex: O) -> Result<Point3> {
-    // UNPORTED(topology.vertex): SmVertex::GetPoint
+    // DISPATCH GAP: SmVertex::GetPoint (topology.vertex, green)
     // Proof (unreachable): adapter-less free fn used only by
     // PointClassification::merge_into_object (Vertex arm); library callers use the
     // B-rep-carrying variants (merge_into_brep, Mutable); 0 hits in the green difftest
@@ -2444,7 +2444,7 @@ fn vertex_point<O>(_vertex: O) -> Result<Point3> {
 
 /// `SmVertex::SetPoint`.
 fn set_vertex_point<O>(_vertex: O, _point: Point3) -> Result<()> {
-    // UNPORTED(topology.vertex): SmVertex::SetPoint
+    // DISPATCH GAP: SmVertex::SetPoint (topology.vertex, green)
     // Proof (unreachable): adapter-less free fn used only by
     // PointClassification::merge_into_object (Vertex arm); library callers use the
     // B-rep-carrying variants (merge_into_brep, Mutable); 0 hits in the green difftest
@@ -2457,7 +2457,7 @@ fn set_vertex_point<O>(_vertex: O, _point: Point3) -> Result<()> {
 
 /// `SmVertex::SetTolerance(zone_tol_3d)` (defaults `bUpdateOnlyIfLarger = TRUE`, ...).
 fn set_vertex_tolerance<O>(_vertex: O, _zone_tol_3d: f64) -> Result<()> {
-    // UNPORTED(topology.vertex): SmVertex::SetTolerance
+    // DISPATCH GAP: SmVertex::SetTolerance (topology.vertex, green)
     // Proof (unreachable): adapter-less free fn used only by
     // PointClassification::merge_into_object (Vertex arm); library callers use the
     // B-rep-carrying variants (merge_into_brep, Mutable); 0 hits in the green difftest
@@ -2470,7 +2470,7 @@ fn set_vertex_tolerance<O>(_vertex: O, _zone_tol_3d: f64) -> Result<()> {
 
 /// `SmVertex::SetExact`.
 fn set_vertex_exact<O>(_vertex: O, _exact: bool) -> Result<()> {
-    // UNPORTED(topology.vertex): SmVertex::SetExact
+    // DISPATCH GAP: SmVertex::SetExact (topology.vertex, green)
     // Proof (unreachable): adapter-less free fn used only by
     // PointClassification::merge_into_object (Vertex arm); library callers use the
     // B-rep-carrying variants (merge_into_brep, Mutable); 0 hits in the green difftest
@@ -2483,7 +2483,8 @@ fn set_vertex_exact<O>(_vertex: O, _exact: bool) -> Result<()> {
 
 /// `SmTol::GetScaledZero(const SmVertex&)`.
 fn vertex_scaled_zero<O>(_vertex: O) -> Result<f64> {
-    // UNPORTED(topology.vertex): SmTol::GetScaledZero(const SmVertex&) (SmVertex::GetPoint)
+    // DISPATCH GAP: SmTol::GetScaledZero(const SmVertex&) (SmVertex::GetPoint;
+    // topology.vertex, green)
     // Proof (unreachable): adapter-less free fn used only by
     // PointClassification::merge_into_object (Vertex arm); library callers use the
     // B-rep-carrying variants (merge_into_brep, Mutable); 0 hits in the green difftest
@@ -2496,7 +2497,7 @@ fn vertex_scaled_zero<O>(_vertex: O) -> Result<f64> {
 
 /// `SmTol::GetZoneTol3d(const SmVertex*)`.
 fn vertex_tolerance<O>(_vertex: O) -> Result<f64> {
-    // UNPORTED(topology.vertex): SmVertex::GetTolerance
+    // DISPATCH GAP: SmVertex::GetTolerance (topology.vertex, green)
     // Proof (unreachable): adapter-less free fn used only by
     // PointClassification::merge_into_object (Vertex arm); library callers use the
     // B-rep-carrying variants (merge_into_brep, Mutable); 0 hits in the green difftest
