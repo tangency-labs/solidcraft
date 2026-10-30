@@ -1,0 +1,83 @@
+{
+  "order": 260,
+  "provenance": "Original dark theme of translucent frosted panels with a green accent",
+  "format": "solidcraft-theme/1",
+  "name": "Solid Glass",
+  "base": "dark",
+  "colors": {
+    "accent": "#44d62c",
+    "accent_soft": "#1f4a18",
+    "on_accent": "#000000",
+    "chip": "#2e7d22",
+    "selected_bg": "#1f4a18",
+    "selected_ink": "#8ff07f",
+    "form_primary": "#44d62c",
+    "box_window": "#44d62c",
+    "box_crossing": "#2cc4d6",
+    "rubber_band": "#44d62c",
+    "sel_face": "#3fae2a",
+    "sel_edge": "#44d62c",
+    "body_selected": "#7fd96f",
+    "app_bar": "#000000",
+    "app_bar_tab_active": "#303530",
+    "toolbar": "#373d378c",
+    "panel": "#373d378c",
+    "panel_header": "#3f453f99",
+    "timeline": "#3035308c",
+    "timeline_item": "#424842cc",
+    "dialog_bg": "#373d37a6",
+    "dialog_body": "#373d37a6",
+    "dialog_footer": "#3f453fb3",
+    "dialog_rule": "#4f564f",
+    "dialog_border": "#44d62c66",
+    "border": "#4f564f",
+    "control_fill": "#1c201ccc",
+    "control_border": "#5f665f",
+    "field": "#1c201cd0",
+    "overlay": "#303530a6",
+    "glyph_bg": "#262a26",
+    "hover": "#4a514a",
+    "file_background": "#222722b3",
+    "file_surface": "#303530cc",
+    "file_border": "#4f564f",
+    "file_rail": "#1e221e80",
+    "file_rail_hover": "#44d62c33",
+    "file_rail_ink": "#e6f5e3",
+    "file_primary": "#1f4a18cc",
+    "file_primary_ink": "#8ff07f",
+    "file_primary_border": "#44d62c"
+  },
+  "radii": {
+    "radius_md": 10,
+    "radius_lg": 14,
+    "radius_xl": 18,
+    "control_radius": 8
+  },
+  "borders": {
+    "container": {
+      "width": 0.53,
+      "color": "#000000b3"
+    },
+    "primary": {
+      "width": 0.53,
+      "color": "#000000b3"
+    },
+    "primary_inset": {
+      "width": 0.35,
+      "color": "#ffffff2e",
+      "gap": 0.5
+    }
+  },
+  "icon_palette": {
+    "line": "#e0e6e0",
+    "passive-1": "#9aa09a",
+    "passive-2": "#7a807a",
+    "passive-3": "#5c625c",
+    "guide": "#8a928a",
+    "solid": [
+      "#5fd14a",
+      "#3cbf26",
+      "#2a9a1c"
+    ]
+  }
+}

@@ -1038,6 +1038,8 @@ preference_settings! {
     /// `dark`, `light` or `system` (follow the operating system), or a theme file's id: a
     /// built-in one (`gruvbox-dark`, …) or one of `custom_themes` (#2255).
     theme: String = "dark".into(), PAGE_INTERFACE;
+    /// An accent colour (`#rrggbb`) over every theme's own; empty (the default): the theme's.
+    accent: String = String::new(), PAGE_INTERFACE;
     /// The 3D view's colours: the theme's own, or the Light or Dark theme's whatever the window
     /// uses (#4146).
     viewport_theme: crate::theme::ViewportTheme = crate::theme::ViewportTheme::Theme, PAGE_INTERFACE;
@@ -1982,6 +1984,9 @@ pub fn apply(app: &mut SolveApp, ctx: &egui::Context) {
     }
     sync_window_theme(app, ctx, follows_system);
     if crate::theme::set_logo_accent(app.preferences.logo_accent) {
+        app.styled = false;
+    }
+    if crate::theme::set_accent(crate::theme::parse_accent(&app.preferences.accent)) {
         app.styled = false;
     }
     // egui's end-of-frame shortcuts only change its context; the saved preference would
@@ -3048,6 +3053,13 @@ pub fn control(app: &mut SolveApp, p: &serde_json::Value) -> Result<serde_json::
         // Choosing a theme stops following a file, as clicking a theme tile does.
         None if rest.contains_key("theme") => stop_following(app),
         None => {}
+    }
+    // An accent is `#rrggbb` or "" (the theme's): anything else is refused, not saved and ignored.
+    if let Some(a) = rest.get("accent") {
+        let a = a.as_str().unwrap_or("#");
+        if !a.is_empty() && crate::theme::parse_accent(a).is_none() {
+            return Err(format!("`accent` must be a colour as #rrggbb, or \"\" for the theme's own (got `{a}`)"));
+        }
     }
     let export = rest.remove("theme_export").and_then(|v| v.as_bool()).unwrap_or(false);
     let button = rest.remove("button");
