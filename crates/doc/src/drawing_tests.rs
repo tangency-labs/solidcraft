@@ -91,7 +91,7 @@ pub(crate) fn plate() -> Drawing {
         d.add_dimensions([Arc::new(Dimension { id, view: front, kind, offset_mm: -10.0, text, decimals: 1, override_text, last_good: None })]);
     }
     let id = d.allocate_id(&mut id_source).unwrap();
-    d.add_balloons([Arc::new(Balloon { id, view: front, edge: edge("F1:front|F1:top"), at: [60.0, 45.0] })]);
+    d.balloons.add([Arc::new(Balloon { id, view: front, edge: edge("F1:front|F1:top"), at: [60.0, 45.0] })]);
     d.validate().unwrap();
     d
 }
