@@ -300,28 +300,32 @@ fn fillet_into_an_earlier_round() {
 }
 
 /// Clean seeds (seed 16: a partial face contact, fused), and the original seed 5 edge contact,
-/// now rejected without distortion.
+/// kept as two bodies without distortion.
 #[test]
 fn fixed_seeds_run_clean() {
     for seed in FIXED_SEEDS {
         if *seed == 5 {
-            // Seed 5 originally joined these boxes along only an edge. Accepting
-            // it required silently shifting the tool; that is now invalid input.
+            // Seed 5 originally joined these boxes along only an edge. Accepting it once required
+            // silently shifting the tool; since 94ee28d5c ("a join keeps solids that only touch as
+            // separate bodies") the join keeps the new box a body of its own and says why, as
+            // `join_touching_along_an_edge_keeps_a_separate_body` asserts in tests.rs.
             let mut s = Session::default();
             run(&mut s, "solid.box", json!({"length": 25, "width": 15, "height": 10}));
-            let error = s
-                .execute(
-                    "solid.box",
-                    &json!({
-                        "corner": [25, 2.5, 10], "length": 17.5, "width": 17.5,
-                        "height": 20, "operation": "join"
-                    }),
-                )
-                .unwrap_err();
-            assert!(error.to_string().contains("zero-thickness edge contact"), "{error}");
-            assert!((total_volume(&s) - 3750.0).abs() < 1e-6);
-            assert_eq!(s.model.state().bodies.len(), 1);
-            assert!(s.model.state().bodies.first().unwrap().body.validity().is_empty());
+            let r = run(
+                &mut s,
+                "solid.box",
+                json!({
+                    "corner": [25, 2.5, 10], "length": 17.5, "width": 17.5,
+                    "height": 20, "operation": "join"
+                }),
+            );
+            assert_eq!(r["notice"]["contact"], "along_edge", "{r}");
+            // 25 x 15 x 10 and 17.5 x 17.5 x 20, unmoved and sharing no volume.
+            assert!((total_volume(&s) - (3750.0 + 6125.0)).abs() < 1e-6, "{}", total_volume(&s));
+            assert_eq!(s.model.state().bodies.len(), 2);
+            for b in &s.model.state().bodies {
+                assert!(b.body.validity().is_empty(), "{}: {:?}", b.name, b.body.validity());
+            }
             continue;
         }
         if *seed == 16 {

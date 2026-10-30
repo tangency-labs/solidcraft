@@ -49,6 +49,7 @@ pub fn convert_prismatic_mesh(body: &Body, tolerance: f64) -> Result<Body> {
                 return Err(invalid("triangle refers to a missing vertex"));
             };
             let cross = (*pb - *pa).cross(*pc - *pa);
+            // `weld` dropped the triangles of no area, so none is left here.
             let Some(mut n) = cross.normalized() else { return Err(invalid("degenerate triangle")) };
             for (a, b) in [(a, b), (b, c), (c, a)] {
                 let entry = edges.entry((a.min(b), a.max(b))).or_default();
@@ -126,17 +127,39 @@ fn weld(mesh: &crate::meshbody::TriMesh, tolerance: f64) -> Result<Body> {
         };
         remap.push(i);
     }
-    let triangles = mesh
-        .triangles
-        .iter()
-        .map(|t| {
-            let (Some(&a), Some(&b), Some(&c)) = (remap.get(t[0] as usize), remap.get(t[1] as usize), remap.get(t[2] as usize)) else {
-                return Err(invalid("missing triangle vertex"));
-            };
-            Ok([a, b, c])
-        })
-        .collect::<Result<Vec<_>>>()?;
-    crate::mesh_body(&positions, &triangles)
+    // A triangle of no area (its corners on one line, or welded into one another) adds no
+    // surface, so it is dropped rather than refused (#4561); the closed-manifold check that
+    // follows still refuses a mesh that needed it to close. Only the vertices the kept triangles
+    // use stay, so a dropped triangle's corner cannot widen the part's extent.
+    let mut used: Vec<Option<u32>> = vec![None; positions.len()];
+    let mut kept_positions: Vec<Vec3> = Vec::new();
+    let mut triangles = Vec::with_capacity(mesh.triangles.len());
+    for t in &mesh.triangles {
+        let (Some(&a), Some(&b), Some(&c)) = (remap.get(t[0] as usize), remap.get(t[1] as usize), remap.get(t[2] as usize)) else {
+            return Err(invalid("missing triangle vertex"));
+        };
+        let (Some(&pa), Some(&pb), Some(&pc)) = (positions.get(a as usize), positions.get(b as usize), positions.get(c as usize)) else {
+            return Err(invalid("missing triangle vertex"));
+        };
+        if (pb - pa).cross(pc - pa).normalized().is_none() {
+            continue;
+        }
+        let mut keep = |i: u32| -> Result<u32> {
+            let slot = used.get_mut(i as usize).ok_or_else(|| invalid("missing triangle vertex"))?;
+            if let Some(k) = *slot {
+                return Ok(k);
+            }
+            let k = u32::try_from(kept_positions.len()).map_err(|_| invalid("too many vertices"))?;
+            kept_positions.push(positions.get(i as usize).copied().ok_or_else(|| invalid("missing triangle vertex"))?);
+            *slot = Some(k);
+            Ok(k)
+        };
+        triangles.push([keep(a)?, keep(b)?, keep(c)?]);
+    }
+    if triangles.is_empty() {
+        return Err(invalid("the mesh has no triangle of any area"));
+    }
+    crate::mesh_body(&kept_positions, &triangles)
 }
 
 fn extrusion(mesh: &crate::meshbody::TriMesh, axis: Vec3, tolerance: f64) -> Result<Option<Body>> {
@@ -473,6 +496,30 @@ mod tests {
             let mesh = crate::meshbody::TriMesh { positions: vec![Vec3::new(coordinate, 0., 0.)], triangles: vec![] };
             assert!(weld(&mesh, 0.05).is_err());
         }
+    }
+
+    /// #4561: a closed box mesh with one extra triangle of no area along its bottom front edge
+    /// ((0,0,0), (10,0,0), (20,0,0)) converts to the box: the triangle adds no surface and is
+    /// dropped, its middle corner with it. V = 20 * 10 * 5 = 1000, six faces.
+    #[test]
+    fn a_zero_area_triangle_is_dropped() {
+        let source = crate::box_solid(Vec3::ZERO, Vec3::new(20., 10., 5.)).unwrap();
+        let mesh = source.mesh(&crate::MeshTolerance::chord(0.005)).unwrap();
+        let mut positions = mesh.positions.clone();
+        let mut triangles = mesh.triangles.clone();
+        let at = |ps: &[Vec3], p: Vec3| ps.iter().position(|q| q.dist(p) < 1e-9).and_then(|i| u32::try_from(i).ok()).unwrap();
+        let (a, b) = (at(&positions, Vec3::ZERO), at(&positions, Vec3::new(20., 0., 0.)));
+        positions.push(Vec3::new(10., 0., 0.));
+        let m = u32::try_from(positions.len() - 1).unwrap();
+        triangles.push([a, m, b]);
+        let body = crate::mesh_body(&positions, &triangles).unwrap();
+        let result = convert_prismatic_mesh(&body, 0.01).unwrap();
+        assert_eq!(result.faces(0.01).unwrap().len(), 6);
+        assert!((crate::measure(&result).unwrap().volume - 1000.).abs() < 1e-6);
+        // A mesh of nothing but a triangle of no area has nothing left to convert.
+        let sliver = crate::mesh_body(&[Vec3::ZERO, Vec3::X, Vec3::new(2., 0., 0.)], &[[0, 1, 2]]).unwrap();
+        let refused = convert_prismatic_mesh(&sliver, 0.05).unwrap_err();
+        assert!(refused.to_string().contains("no triangle of any area"), "{refused}");
     }
 
     #[test]
