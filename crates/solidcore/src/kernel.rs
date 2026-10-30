@@ -225,6 +225,8 @@ pub struct UpstreamFixes {
     pub uv_trim_reversal_on_surface: bool,
     /// Before the piecewise merge, `do_extended_offset` rebuilds every offset face whose loops cross from the stretches of its loops that bound it (WR-345, #854).
     pub offset_resolve_crossing_loops: bool,
+    /// `SmBrep::LocalOperation` sizes the offset executive's distance (by which it extends the neighbouring surfaces to meet the moved ones) from a box that also holds the replacement surfaces, not from the original body alone, so a face moved further than about the body's size away is still reached (WR-534; the fork's tangency-labs/smlib@a1ee273).
+    pub local_operation_box_holds_new_surfaces: bool,
     /// With `offset_resolve_crossing_loops` (it has no effect without it), loops of an offset face that touch without crossing (run along one another, meet tangentially, or come up to one another and go back on the same side) are refused, before any crossing is resolved, with `SM_ERR_OFFSET_WALLS_TOUCH` (1042) instead of `SM_ERR_BAD_INTERSECTIONS` (1027): the offset walls meet along a line (WR-345 addendum, #1442; tangency-labs/smlib a759622).
     pub offset_walls_touch_refused: bool,
     /// `SmBrep::LocalOperation` returns the failed extended offset's own status (e.g. `SM_ERR_OFFSET_WALLS_TOUCH`, 1042, or `SM_ERR_BAD_INTERSECTIONS`, 1027) instead of a generic `SM_ERR` (WR-345 addendum, #1442; tangency-labs/smlib a759622).

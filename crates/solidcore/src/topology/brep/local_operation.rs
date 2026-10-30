@@ -15,7 +15,10 @@
 //! copies the faces of the offset B-rep in with a merge (`RemoveFaces`, `CopyFaces`), as
 //! here; the copy notifies through an arena-only store. `SmTemporaryChangeValue` of
 //! `m_bEditingEnabled` is a set and restore of the flag. The debug drawing code is omitted. No
-//! recursion is introduced here.
+//! recursion is introduced here. Opt-in (WR-534,
+//! `Kernel::fixes.local_operation_box_holds_new_surfaces`, the fork's
+//! tangency-labs/smlib@a1ee273): the box that sizes the executive's offset distance also
+//! holds the replacement surfaces.
 
 use crate::error::{Result, SolidError};
 use crate::kernel::Kernel;
@@ -66,8 +69,13 @@ pub fn local_operation(
     let all_faces = bp1::faces(b, None)?;
     let mut given: Vec<Option<Surface>> = surfaces.into_iter().map(Some).collect();
     let mut new_list = Vec::with_capacity(all_faces.len());
+    // (WR-534) where each given surface went in the new list
+    let mut placed: Vec<Option<usize>> = vec![None; given.len()];
     for &face in &all_faces {
         let surface = if let Some(index) = faces.iter().position(|&f| f == face) {
+            if let Some(slot) = placed.get_mut(index) {
+                *slot = Some(new_list.len());
+            }
             let mut new = given
                 .get_mut(index)
                 .and_then(Option::take)
@@ -98,9 +106,28 @@ pub fn local_operation(
     }
 
     // the Brep's bounding sphere gives the executive an offset distance it does not use
-    let radius = calculate_bounding_box(k, &mut *b, BoundingBoxOptions::default())?
-        .sphere_bound()
-        .radius;
+    let mut bbox = calculate_bounding_box(k, &mut *b, BoundingBoxOptions::default())?;
+    // Not upstream (WR-534), opt-in `local_operation_box_holds_new_surfaces` (the fork's
+    // tangency-labs/smlib@a1ee273): the box also holds the replacement surfaces. Their
+    // faces' edges are found by extending the neighbouring surfaces to meet them, by a
+    // distance sized from this box: sized from the original body alone, a face moved
+    // further than about its size away left the extended neighbours short of it.
+    if k.fixes.local_operation_box_holds_new_surfaces {
+        for (j, slot) in placed.iter().enumerate() {
+            let surface = match (given.get(j).and_then(Option::as_ref), slot) {
+                (Some(surface), _) => surface,
+                (None, Some(at)) => new_list.get(*at).ok_or_else(null)?,
+                (None, None) => continue,
+            };
+            let domain = surface.natural_uv_domain_with_nurb(k)?;
+            let surf_box = surface
+                .calculate_bounding_box(k, &domain, [true, false, false], true)?
+                .normal_box
+                .ok_or_else(null)?;
+            bbox = bbox.union(&surf_box);
+        }
+    }
+    let radius = bbox.sphere_bound().radius;
     let tolerance = b.tolerance();
     let mut executive = OffsetExecutive::new(
         OffsetOperation::LocalOperation,
@@ -299,5 +326,48 @@ mod tests {
             local_operation(&mut k, b, &[face], Vec::new(), notes)
         });
         assert!(r.is_err());
+    }
+
+    /// WR-534 (the fork's tangency-labs/smlib@a1ee273): a 20 mm cube's top moved up by
+    /// 60, further than the cube's size, is a 20 x 20 x 80 box with the opt-in.
+    #[test]
+    fn moves_the_top_of_a_box_further_than_its_size() {
+        let mut k = Kernel::default();
+        k.fixes.local_operation_box_holds_new_surfaces = true;
+        let mut b = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 20.0, 20.0, 20.0).unwrap();
+        let top = bp1::faces(&b, None)
+            .unwrap()
+            .into_iter()
+            .find(|&f| {
+                let s = face_ops::surface(&b, f).unwrap().unwrap();
+                let p = s
+                    .evaluate_point(
+                        &k,
+                        s.natural_uv_domain_with_nurb(&k)
+                            .unwrap()
+                            .evaluate(0.5, 0.5),
+                    )
+                    .unwrap();
+                (p.z - 20.0).abs() < 1e-9
+            })
+            .unwrap();
+        let raised = Surface::from(Plane::new(
+            Vec3::new(0.0, 0.0, 80.0),
+            Vec3::X,
+            Vec3::Y,
+            crate::math::Vec2::new(20.0, 20.0),
+            &crate::geom::extent2d::Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0),
+        ));
+        with_notifications(&mut b, |b, notes| {
+            local_operation(&mut k, b, &[top], vec![raised], notes)
+        })
+        .unwrap();
+        assert_eq!(bp1::faces(&b, None).unwrap().len(), 6);
+        let e = calculate_bounding_box(&k, &mut b, BoundingBoxOptions::default()).unwrap();
+        let near = |a: f64, b: f64| (a - b).abs() < 1e-3;
+        assert!(
+            near(e.max_at(2), 80.0) && near(e.min_at(2), 0.0) && near(e.max_at(0), 20.0),
+            "{e:?}"
+        );
     }
 }
