@@ -227,6 +227,12 @@ pub struct UpstreamFixes {
     pub thicken_planar_side_walls: bool,
     /// A volumetric Boolean removes the zero-area loops a contact curve inside a face leaves, and splits shells joined only through them (WR-360, #746).
     pub remove_slit_loops_where_solids_touch: bool,
+    /// Regularize non-merged, in-place whole-body translational sweeps (#1937):
+    /// squeeze newly swept faces degenerate at one quarter of the body tolerance,
+    /// and remove isolated open-edge inner slit loops. Existing Euler operations
+    /// preserve the remaining boundaries; mappings to deleted results become null.
+    /// Disabled by default to retain the pinned native result.
+    pub translation_sweep_regularize: bool,
     /// A face a Boolean takes over from its second operand keeps that operand's exact UV trims (WR-361, #488).
     pub keep_operand_uv_trims: bool,
     /// `smgu_EvaluateCurveContinuity`'s G2 test compares the two sides' Frenet curvatures and normals (WR-380, #933/#838).

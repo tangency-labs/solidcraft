@@ -2563,7 +2563,7 @@ pub fn squeeze_face(
 }
 
 /// [`squeeze_face`] under the edit's notification environment ([`plain_edit`]).
-fn squeeze_face_in(
+pub(crate) fn squeeze_face_in(
     k: &mut Kernel,
     b: &mut Brep,
     editing_enabled: bool,

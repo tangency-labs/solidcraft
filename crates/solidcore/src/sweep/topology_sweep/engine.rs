@@ -22,6 +22,8 @@
 //! `SweepEdgeHigh` makes a swept face's missing extrusion NURB (a recognised tiny-turn
 //! revolution) before its degenerate test, where upstream's lazy
 //! `GetOrCreateGwNurbPointer` in `EdgeSweepHigher` already made it in place.
+//! Opt-in `translation_sweep_regularize` removes degenerate swept faces and
+//! isolated slit loops after non-merged in-place whole-body translations.
 
 use super::access::{
     EdgeRef, EdgeuseRef, FaceBuild, FaceInput, FaceRef, RegionRef, SweepAccess, VertexRef,
@@ -901,6 +903,15 @@ impl TopologySweep {
                     wire_temporaries.retain(|&id| id != wire_brep);
                     wire = WireSweep::Absent;
                 }
+            }
+            if whole
+                && self.repetitions > 0
+                && !self.do_merge
+                && original == destination_brep
+                && matches!(g, SweepGeometry::Translation(_))
+                && a.kernel(original)?.fixes.translation_sweep_regularize
+            {
+                self.regularize_translation(a, original)?;
             }
             Ok(())
         })();
