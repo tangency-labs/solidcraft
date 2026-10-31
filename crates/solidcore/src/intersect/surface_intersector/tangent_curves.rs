@@ -20,7 +20,11 @@
 //! of the through points is their list order. Loops are bounded as the fork's are (50
 //! nodes, 12 refinement passes, 6000 points per curve); no recursion.
 //! `IsDegenerate` is a plain bool in the fork: an evaluation error there counts as not
-//! degenerate (`Unported` still stops the pass).
+//! degenerate (`Unported` still stops the pass). Not the fork's (#2089): a crossing
+//! branch through nodes that a marcher curve covers except where it runs inside the
+//! band where the surfaces are within tolerance of each other is dropped
+//! (`covers_crossing`), so the marcher's curve is not replaced by one running on along
+//! a tangency past the point where the surfaces turn tangent.
 
 use crate::curve::curve::Curve;
 use crate::error::{ignored, Result};
@@ -124,6 +128,37 @@ fn covers(k: &Kernel, c: &Curve, rc: &[TcPt], tol: f64, cov_tol: f64) -> Result<
         i += stride;
     }
     Ok(true)
+}
+
+/// Whether the regular marcher's curve `c` covers the crossing branch `rc` (not the
+/// fork's; #2089): as [`covers`], except that a sample off `c` is passed over where the
+/// branch crosses at so small an angle that it lies in the band where the surfaces are
+/// within tolerance of each other, the band the replacement test below caps at
+/// `0.02 * size` (`20 tol / sin(angle) >= 0.02 size`). There the branch's course is
+/// not determined by the surfaces, and the marcher stops where they turn tangent. At
+/// least one sample outside that band must lie on `c`.
+fn covers_crossing(
+    k: &Kernel,
+    c: &Curve,
+    rc: &[TcPt],
+    tol: f64,
+    cov_tol: f64,
+    size: f64,
+) -> Result<bool> {
+    let stride = (rc.len() / 40).max(1);
+    let mut on = false;
+    let mut i = 0;
+    while i < rc.len() {
+        let Some(p) = rc.get(i) else { break };
+        let in_band = 20.0 * tol >= 0.02 * size * p.ang.sin();
+        match drop_distance(k, c, p.p, tol * 10.0)? {
+            Some(d) if d <= cov_tol => on |= !in_band,
+            _ if in_band => {}
+            _ => return Ok(false),
+        }
+        i += stride;
+    }
+    Ok(on)
 }
 
 /// Removes curve `ii` from the five output arrays (`delete pC; RemoveAt(ii)` and the
@@ -590,8 +625,9 @@ pub(crate) fn find_tangent_curves(
     }
 
     // a crossing branch an existing curve already covers is dropped (the regular
-    // marcher's curve is kept); existing curves lying along the remaining crossing
-    // branches are replaced by them
+    // marcher's curve is kept), also when it runs on past that curve only inside the
+    // band where the surfaces are within tolerance (not the fork's; #2089); existing
+    // curves lying along the remaining crossing branches are replaced by them
     let mut keep = vec![true; new_curves.len()];
     for (nc, kp) in new_curves.iter().zip(keep.iter_mut()) {
         if !nc.cross {
@@ -604,7 +640,9 @@ pub(crate) fn find_tangent_curves(
             if ignored(c.is_degenerate(k, EFF_ZERO, None))?.unwrap_or(false) {
                 continue;
             }
-            if covers(k, c, &nc.pts, tol, near_tol)? {
+            if covers(k, c, &nc.pts, tol, near_tol)?
+                || covers_crossing(k, c, &nc.pts, tol, near_tol, size)?
+            {
                 *kp = false;
             }
         }
