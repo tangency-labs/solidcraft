@@ -5,12 +5,86 @@
 
 use std::collections::BTreeSet;
 
-use crate::history::{Change, FaceOrigin};
-use crate::{Body, KernelError, Result, SplitTool};
-use solidcraft_geom::Vec3;
+use truck_modeling::{self as mt, builder};
+
+use crate::history::{Change, EdgeOrigin, EdgeProv, FaceOrigin, FaceProv, History};
+use crate::{Body, BoolOp, KernelError, Result, SplitTool};
+use solidcraft_geom::{Plane, Vec3};
 
 fn fail(s: impl Into<String>) -> KernelError {
     KernelError::Invalid(format!("Replace Face: {}", s.into()))
+}
+
+/// The plane a target names, when it is a plane or a flat face.
+fn target_plane(tool: &SplitTool) -> Option<Plane> {
+    match tool {
+        SplitTool::Plane(p) => Some(*p),
+        SplitTool::Face { body, face } => match crate::face_surface(body, *face) {
+            Some(crate::FaceSurface::Plane { normal, point }) => Plane::from_normal(point, normal.vec()),
+            _ => None,
+        },
+        SplitTool::Curves { .. } => None,
+    }
+}
+
+/// Move one flat face to a parallel plane too far for the offset path (a face beside it would
+/// turn inside out): sweep the face there and join or cut, so the boolean trims the neighbours
+/// — a hole in a face reaching its edge opens as a notch, which the offset path refuses.
+fn extend_to_plane(body: &Body, chosen: &BTreeSet<usize>, plane: &Plane) -> Result<Option<Body>> {
+    let only: Vec<usize> = chosen.iter().copied().collect();
+    let [index] = only.as_slice() else { return Ok(None) };
+    let Some(crate::FaceSurface::Plane { normal, point }) = crate::face_surface(body, *index) else { return Ok(None) };
+    let n = normal.vec();
+    if plane.normal().dot(n).abs() < 1.0 - 1e-9 {
+        return Ok(None);
+    }
+    let distance = (plane.origin - point).dot(n);
+    if !distance.is_finite() || distance.abs() <= body.size() * 1e-9 {
+        return Ok(None);
+    }
+    let face = body.solid.face_iter().nth(*index).cloned().ok_or_else(|| fail("the selected face is gone"))?;
+    let tool = crate::guard("replace face sweep", || Body::new(builder::tsweep(&face, crate::body::v3(n * distance))))?;
+    let op = if distance > 0.0 { BoolOp::Union } else { BoolOp::Cut };
+    let Some(result) = crate::guard("replace face sweep boolean", || crate::boolean(body, &tool, op))? else {
+        return Ok(None);
+    };
+    Ok(Some(keep_body_origins(result, body)))
+}
+
+/// `result`'s history over `[body, tool]` as one over `[body]`: the body's faces keep their
+/// origins, faces the sweep and boolean made come from nothing (they are named geometrically).
+fn keep_body_origins(result: Body, body: &Body) -> Body {
+    let counts = crate::record::counts(&[body]);
+    let Some(h) = result.history() else { return result.without_history() };
+    let faces: Vec<FaceProv> = h
+        .faces
+        .iter()
+        .map(|f| {
+            let origins: Vec<FaceOrigin> = f
+                .origins
+                .iter()
+                .copied()
+                .filter(|o| {
+                    matches!(o, FaceOrigin::Face { operand: 0, .. } | FaceOrigin::Edge { operand: 0, .. } | FaceOrigin::Offset { operand: 0, .. })
+                })
+                .collect();
+            let change = match origins.len() {
+                0 => Change::Generated,
+                1 => Change::Modified,
+                _ => Change::Merged,
+            };
+            FaceProv { origins, change }
+        })
+        .collect();
+    let edges: Vec<EdgeProv> = h
+        .edges
+        .iter()
+        .map(|e| EdgeProv {
+            faces: e.faces.clone(),
+            origins: e.origins.iter().cloned().filter(|o| matches!(o, EdgeOrigin::Edge { operand: 0, .. })).collect(),
+        })
+        .collect();
+    result.with_checked_history(Some(History { operands: 1, faces, edges }), &counts)
 }
 
 /// When the target is a neighbour's plane, the replacement joins that face instead
@@ -152,10 +226,21 @@ pub fn replace_faces(body: &Body, at: &[Vec3], tool: &SplitTool) -> Result<Body>
     if !reach.is_finite() || reach > 1e6 {
         return Err(fail("target is too far from the source"));
     }
+    // A parallel target too far for the offset path: sweep the face there and let the boolean
+    // trim its neighbours, which is what a large move asks for.
+    let sweep = |tool: &SplitTool| -> Result<Option<Body>> {
+        match target_plane(tool) {
+            Some(plane) if chosen.len() == 1 => extend_to_plane(body, &chosen, &plane),
+            _ => Ok(None),
+        }
+    };
     let growth = reach.max(body.size() * 0.1);
     let grown = match crate::offset_faces(body, at, growth) {
         Ok(grown) => grown,
         Err(e) => {
+            if let Some(result) = sweep(tool)? {
+                return Ok(result);
+            }
             return Err(match merge_failure {
                 Some(m) => fail(format!("the faces around the selection cannot close onto the target ({m})")),
                 None => fail(format!("the selected faces cannot be extended to the target ({e})")),
@@ -164,9 +249,12 @@ pub fn replace_faces(body: &Body, at: &[Vec3], tool: &SplitTool) -> Result<Body>
     };
     match attempt(&grown, true)? {
         Some(result) => Ok(result),
-        None => Err(match merge_failure {
-            Some(m) => fail(format!("the faces around the selection cannot close onto the target ({m})")),
-            None => fail("the target cannot replace only the selected faces while retaining their neighbours"),
-        }),
+        None => match sweep(tool)? {
+            Some(result) => Ok(result),
+            None => Err(match merge_failure {
+                Some(m) => fail(format!("the faces around the selection cannot close onto the target ({m})")),
+                None => fail("the target cannot replace only the selected faces while retaining their neighbours"),
+            }),
+        },
     }
 }
