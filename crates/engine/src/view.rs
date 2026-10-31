@@ -852,8 +852,12 @@ pub fn sketch_shown(s: &Session, id: u64) -> bool {
 /// built from the sketch, and hiding the sketch would take its other points from the next
 /// Single hole's snap.
 pub fn sketch_consumed(s: &Session, id: u64) -> bool {
+    sketch_consumed_doc(&s.doc, id)
+}
+
+pub fn sketch_consumed_doc(doc: &solidcraft_doc::Document, id: u64) -> bool {
     use solidcraft_doc::{FeatureKind, SketchPoints};
-    s.doc.features.iter().any(|f| {
+    doc.features.iter().any(|f| {
         matches!(f.kind, FeatureKind::Extrude { sketch, .. } | FeatureKind::Revolve { sketch, .. }
             | FeatureKind::SheetBase { sketch, .. } | FeatureKind::SheetContour { sketch, .. }
             | FeatureKind::Hole { points: Some(SketchPoints { sketch, single: false, .. }), .. } if sketch == id)

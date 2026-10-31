@@ -584,7 +584,7 @@ fn visibility(s: &mut Session, p: &Value) -> Result<Value> {
             Shown::Sketch(id) => {
                 if visible {
                     v.hidden_sketches.retain(|x| x != id);
-                    if !v.shown_sketches.contains(id) {
+                    if crate::view::sketch_consumed_doc(&s.doc, *id) && !v.shown_sketches.contains(id) {
                         v.shown_sketches.push(*id);
                     }
                 } else {
@@ -2545,5 +2545,32 @@ mod tests {
         // The components folder takes placements of that component, and nothing else.
         refused(&mut s, "browser.order", json!({"folder": "components", "order": ["424242"]}));
         refused(&mut s, "browser.order", json!({"folder": "components", "order": [outer]}));
+    }
+
+    /// #9954: hiding and showing an unconsumed sketch does not mark it as shown_sketches,
+    /// so it correctly hides itself once an extrude or other feature consumes it.
+    #[test]
+    fn unconsumed_sketch_hidden_and_shown_still_hides_after_extrude() {
+        let mut s = Session::default();
+        let sk_id = run(&mut s, "sketch.create", json!({"plane": "XY"}))["sketch"].as_u64().unwrap();
+        run(&mut s, "sketch.rectangle.center", json!({"center": [0, 0], "corner": [10, 10]}));
+        run(&mut s, "sketch.finish", json!({}));
+        assert!(crate::view::sketch_shown(&s, sk_id), "sketch is shown by default before consumed");
+
+        // Hide sketch
+        run(&mut s, "browser.visibility", json!({"items": [sk_id], "visible": false}));
+        assert!(!crate::view::sketch_shown(&s, sk_id));
+        assert!(s.visibility.hidden_sketches.contains(&sk_id));
+        assert!(!s.visibility.shown_sketches.contains(&sk_id));
+
+        // Show sketch again before it is consumed
+        run(&mut s, "browser.visibility", json!({"items": [sk_id], "visible": true}));
+        assert!(crate::view::sketch_shown(&s, sk_id));
+        assert!(!s.visibility.hidden_sketches.contains(&sk_id));
+        assert!(!s.visibility.shown_sketches.contains(&sk_id), "unconsumed sketch is not added to shown_sketches");
+
+        // Now extrude the sketch
+        run(&mut s, "solid.extrude", json!({"sketch": sk_id, "distance": 10.0}));
+        assert!(!crate::view::sketch_shown(&s, sk_id), "consumed sketch hides itself after extrude");
     }
 }
