@@ -528,39 +528,39 @@
   ],
   "tabs": {
     "MODEL": {
-      "panel_header": "#303438",
       "viewport_top": "#24292d",
-      "viewport_bottom": "#1b2023"
+      "viewport_bottom": "#1b2023",
+      "panel": "#303438"
     },
     "SURFACE": {
-      "panel_header": "#36332f",
       "viewport_top": "#292622",
-      "viewport_bottom": "#211e1b"
+      "viewport_bottom": "#211e1b",
+      "panel": "#36332f"
     },
     "MESH": {
-      "panel_header": "#35352e",
       "viewport_top": "#282820",
-      "viewport_bottom": "#202019"
+      "viewport_bottom": "#202019",
+      "panel": "#35352e"
     },
     "FORM": {
-      "panel_header": "#343137",
       "viewport_top": "#26232b",
-      "viewport_bottom": "#1e1b22"
+      "viewport_bottom": "#1e1b22",
+      "panel": "#343137"
     },
     "SHEET METAL": {
-      "panel_header": "#303631",
       "viewport_top": "#222923",
-      "viewport_bottom": "#1a211c"
+      "viewport_bottom": "#1a211c",
+      "panel": "#303631"
     },
     "RENDER": {
-      "panel_header": "#373130",
       "viewport_top": "#2b2423",
-      "viewport_bottom": "#221c1b"
+      "viewport_bottom": "#221c1b",
+      "panel": "#373130"
     },
     "SKETCH": {
-      "panel_header": "#33362f",
       "viewport_top": "#252921",
-      "viewport_bottom": "#1d211a"
+      "viewport_bottom": "#1d211a",
+      "panel": "#33362f"
     }
   }
 }

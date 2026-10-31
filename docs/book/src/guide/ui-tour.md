@@ -455,7 +455,7 @@ and a restrained blue-grey accent. Its defaults pair **90% Opacity** with a broa
 Opacity sets how much of the scene shows through; Blur sets how widely its detail softens.
 It also offers **Contrast** (Soft or Defined), **Edge finish** (Flat, Etched or Soft bevel),
 **Accent** (Slate blue, Silver or Sage), and optional **Tab colours** with a Fade control.
-Tab colours gently tint the panel header and viewport while preserving the selected accent.
+Tab colours gently tint panels and the viewport while preserving the selected accent.
 Accent changes selection and Model controls; functional workspace and status colours keep
 their meaning. As with other themes, the existing blur availability and readability limits apply.
 
