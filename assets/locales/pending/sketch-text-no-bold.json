@@ -1,0 +1,20 @@
+{
+  "en": {
+    "sketch_text.no_bold": "The built-in font has no bold face: choose an installed font"
+  },
+  "ar": {
+    "sketch_text.no_bold": "الخط المدمج لا يحتوي على نمط غامق: اختر خطاً مثبتاً"
+  },
+  "he": {
+    "sketch_text.no_bold": "לגופן המובנה אין משקל מודגש: בחר גופן מותקן"
+  },
+  "ja": {
+    "sketch_text.no_bold": "組み込みフォントには太字がありません: インストール済みのフォントを選択してください"
+  },
+  "vi": {
+    "sketch_text.no_bold": "Phông chữ tích hợp không có kiểu in đậm: chọn một phông chữ đã cài đặt"
+  },
+  "zh": {
+    "sketch_text.no_bold": "内置字体没有粗体字形：请选择已安装的字体"
+  }
+}
