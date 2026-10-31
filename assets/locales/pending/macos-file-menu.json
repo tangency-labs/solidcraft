@@ -3,6 +3,18 @@
     "prefs.window_file_menu": "إظهار قائمة «ملف» أيضًا في نافذة التطبيق",
     "prefs.window_file_menu_note": "إظهار قائمة «ملف» في شريط التطبيق أيضًا. تظل جميع إجراءات الملفات متاحة في شريط قوائم macOS."
   },
+  "bs": {
+    "prefs.window_file_menu": "Prikaži meni Datoteka i u prozoru aplikacije",
+    "prefs.window_file_menu_note": "Prikazuje meni Datoteka i u traci aplikacije. Sve radnje s datotekama ostaju dostupne u traci menija sistema macOS."
+  },
+  "cs": {
+    "prefs.window_file_menu": "Zobrazovat nabídku Soubor také v okně aplikace",
+    "prefs.window_file_menu_note": "Zobrazí nabídku Soubor také na panelu aplikace. Všechny operace se soubory zůstávají dostupné v řádku nabídek macOS."
+  },
+  "da": {
+    "prefs.window_file_menu": "Vis også menuen Filer i appvinduet",
+    "prefs.window_file_menu_note": "Vis også menuen Filer på applinjen. Alle filhandlinger er fortsat tilgængelige på menulinjen i macOS."
+  },
   "de": {
     "prefs.window_file_menu": "Dateimenü zusätzlich im App-Fenster anzeigen",
     "prefs.window_file_menu_note": "Zeigt das Dateimenü auch in der App-Leiste an. Alle Dateiaktionen bleiben in der macOS-Menüleiste verfügbar."
@@ -11,9 +23,45 @@
     "prefs.window_file_menu": "Also show the File menu in the app window",
     "prefs.window_file_menu_note": "Show the File menu in the application bar as well. All file actions remain available in the macOS menu bar."
   },
+  "en-GB": {
+    "prefs.window_file_menu": "Also show the File menu in the app window",
+    "prefs.window_file_menu_note": "Show the File menu in the application bar as well. All file actions remain available in the macOS menu bar."
+  },
+  "es": {
+    "prefs.window_file_menu": "Mostrar también el menú Archivo en la ventana de la aplicación",
+    "prefs.window_file_menu_note": "Muestra también el menú Archivo en la barra de la aplicación. Todas las acciones con archivos siguen disponibles en la barra de menús de macOS."
+  },
+  "fi": {
+    "prefs.window_file_menu": "Näytä Tiedosto-valikko myös sovellusikkunassa",
+    "prefs.window_file_menu_note": "Näyttää Tiedosto-valikon myös sovelluspalkissa. Kaikki tiedostotoiminnot ovat edelleen käytettävissä macOS:n valikkorivillä."
+  },
+  "fr": {
+    "prefs.window_file_menu": "Afficher aussi le menu Fichier dans la fenêtre de l’application",
+    "prefs.window_file_menu_note": "Affiche aussi le menu Fichier dans la barre de l’application. Toutes les actions sur les fichiers restent disponibles dans la barre des menus de macOS."
+  },
+  "gl": {
+    "prefs.window_file_menu": "Amosar tamén o menú Ficheiro na xanela da aplicación",
+    "prefs.window_file_menu_note": "Amosa tamén o menú Ficheiro na barra da aplicación. Todas as accións cos ficheiros seguen dispoñibles na barra de menús de macOS."
+  },
   "he": {
     "prefs.window_file_menu": "הצגת התפריט ״קובץ״ גם בחלון היישום",
     "prefs.window_file_menu_note": "הצגת התפריט ״קובץ״ גם בסרגל היישום. כל פעולות הקבצים נשארות זמינות בשורת התפריטים של macOS."
+  },
+  "hr": {
+    "prefs.window_file_menu": "Prikaži izbornik Datoteka i u prozoru aplikacije",
+    "prefs.window_file_menu_note": "Prikazuje izbornik Datoteka i na traci aplikacije. Sve radnje s datotekama i dalje su dostupne na traci izbornika sustava macOS."
+  },
+  "hu": {
+    "prefs.window_file_menu": "A Fájl menü megjelenítése az alkalmazás ablakában is",
+    "prefs.window_file_menu_note": "A Fájl menüt az alkalmazás sávjában is megjeleníti. Minden fájlművelet továbbra is elérhető a macOS menüsorában."
+  },
+  "id": {
+    "prefs.window_file_menu": "Tampilkan juga menu File di jendela aplikasi",
+    "prefs.window_file_menu_note": "Tampilkan juga menu File pada bilah aplikasi. Semua tindakan berkas tetap tersedia di bilah menu macOS."
+  },
+  "it": {
+    "prefs.window_file_menu": "Mostra il menu File anche nella finestra dell'applicazione",
+    "prefs.window_file_menu_note": "Mostra il menu File anche nella barra dell'applicazione. Tutte le operazioni sui file restano disponibili nella barra dei menu di macOS."
   },
   "ja": {
     "prefs.window_file_menu": "アプリのウィンドウにもファイルメニューを表示",
@@ -23,6 +71,50 @@
     "prefs.window_file_menu": "앱 창에도 파일 메뉴 표시",
     "prefs.window_file_menu_note": "앱 표시줄에도 파일 메뉴를 표시합니다. 모든 파일 작업은 macOS 메뉴 막대에서 계속 사용할 수 있습니다."
   },
+  "ms": {
+    "prefs.window_file_menu": "Paparkan juga menu Fail dalam tetingkap aplikasi",
+    "prefs.window_file_menu_note": "Paparkan juga menu Fail pada bar aplikasi. Semua tindakan fail masih tersedia pada bar menu macOS."
+  },
+  "nb": {
+    "prefs.window_file_menu": "Vis også Fil-menyen i appvinduet",
+    "prefs.window_file_menu_note": "Vis også Fil-menyen i applinjen. Alle filhandlinger er fortsatt tilgjengelige på menylinjen i macOS."
+  },
+  "nl": {
+    "prefs.window_file_menu": "Het menu Bestand ook in het appvenster tonen",
+    "prefs.window_file_menu_note": "Toont het menu Bestand ook in de appbalk. Alle bestandsacties blijven beschikbaar in de menubalk van macOS."
+  },
+  "pl": {
+    "prefs.window_file_menu": "Pokazuj menu Plik także w oknie aplikacji",
+    "prefs.window_file_menu_note": "Pokazuje menu Plik także na pasku aplikacji. Wszystkie operacje na plikach pozostają dostępne na pasku menu macOS."
+  },
+  "pt-BR": {
+    "prefs.window_file_menu": "Mostrar o menu Arquivo também na janela do aplicativo",
+    "prefs.window_file_menu_note": "Mostra o menu Arquivo também na barra do aplicativo. Todas as ações com arquivos continuam disponíveis na barra de menus do macOS."
+  },
+  "ro": {
+    "prefs.window_file_menu": "Afișează meniul Fișier și în fereastra aplicației",
+    "prefs.window_file_menu_note": "Afișează meniul Fișier și în bara aplicației. Toate acțiunile asupra fișierelor rămân disponibile în bara de meniu macOS."
+  },
+  "ru": {
+    "prefs.window_file_menu": "Показывать меню «Файл» также в окне приложения",
+    "prefs.window_file_menu_note": "Показывает меню «Файл» также на панели приложения. Все действия с файлами остаются доступны в строке меню macOS."
+  },
+  "sr": {
+    "prefs.window_file_menu": "Прикажи мени Датотека и у прозору апликације",
+    "prefs.window_file_menu_note": "Приказује мени Датотека и на траци апликације. Све радње са датотекама остају доступне у траци менија система macOS."
+  },
+  "sv": {
+    "prefs.window_file_menu": "Visa även Arkiv-menyn i appfönstret",
+    "prefs.window_file_menu_note": "Visar även Arkiv-menyn i appfältet. Alla filåtgärder är fortfarande tillgängliga i menyraden i macOS."
+  },
+  "tr": {
+    "prefs.window_file_menu": "Dosya menüsünü uygulama penceresinde de göster",
+    "prefs.window_file_menu_note": "Dosya menüsünü uygulama çubuğunda da gösterir. Tüm dosya işlemleri macOS menü çubuğunda kullanılabilir olmaya devam eder."
+  },
+  "uk": {
+    "prefs.window_file_menu": "Показувати меню «Файл» також у вікні застосунку",
+    "prefs.window_file_menu_note": "Показує меню «Файл» також на панелі застосунку. Усі дії з файлами залишаються доступними в рядку меню macOS."
+  },
   "vi": {
     "prefs.window_file_menu": "Hiển thị thêm menu Tệp trong cửa sổ ứng dụng",
     "prefs.window_file_menu_note": "Hiển thị menu Tệp trong thanh ứng dụng. Tất cả thao tác với tệp vẫn có trong thanh menu macOS."
@@ -30,5 +122,9 @@
   "zh": {
     "prefs.window_file_menu": "同时在应用窗口中显示文件菜单",
     "prefs.window_file_menu_note": "在应用栏中也显示文件菜单。所有文件操作仍可通过 macOS 菜单栏使用。"
+  },
+  "zh-TW": {
+    "prefs.window_file_menu": "同時在應用程式視窗中顯示檔案選單",
+    "prefs.window_file_menu_note": "在應用程式列中也顯示檔案選單。所有檔案操作仍可透過 macOS 選單列使用。"
   }
 }
