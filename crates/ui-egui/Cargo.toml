@@ -26,6 +26,9 @@ ttf-parser = { workspace = true }
 # strings in display order, which egui does not do itself (MIT OR Apache-2.0).
 unicode-bidi = "0.3"
 semver = { workspace = true }
+quick-xml = { workspace = true }
+url = "2"
+percent-encoding = "2"
 # Updates: the downloaded package's SHA-256 (against the release's SHA256SUMS.txt), its optional
 # minisign signature (MIT), and the portable .zip's executables.
 sha2 = { workspace = true }

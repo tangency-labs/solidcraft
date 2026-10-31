@@ -170,8 +170,8 @@ in the full app in a new tab. `?embed` without `open` keeps the normal app layou
 
 The web app is also a container image, `ghcr.io/tangency-labs/solidcraft-web`, for Linux on x86_64
 and ARM64: `latest` is the latest release, `0.14.0` or `0.14` a release, `edge` the newest `main`.
-It serves the app with nginx on port 8080 and keeps nothing on the server: designs stay in each
-visitor's browser.
+It serves the app with nginx on port 8080. By default, designs stay in each visitor's browser;
+an optional shared server folder is described below.
 
 ```sh
 docker run -d --name solidcraft -p 8080:8080 --restart unless-stopped ghcr.io/tangency-labs/solidcraft-web:latest
@@ -191,6 +191,45 @@ Then open `http://localhost:8080/`. On another machine the browser only saves de
 so put a reverse proxy with a certificate in front (Caddy, Traefik, nginx); the app works under
 any URL path, such as `https://example.com/cad/`. To build the image without Compose, from the
 repository root: `docker build -f packaging/docker/Dockerfile -t solidcraft-web .`
+
+#### Shared server folder
+
+The image keeps designs in each browser by default. To share designs between devices,
+mount a writable folder at `/designs` and enable `SOLIDCRAFT_SERVER_FOLDER=1`:
+
+```yaml
+services:
+  solidcraft:
+    image: ghcr.io/tangency-labs/solidcraft-web:latest
+    ports:
+      - "8080:8080"
+    environment:
+      SOLIDCRAFT_SERVER_FOLDER: "1"
+    volumes:
+      - /mnt/nas/solidcraft:/designs:rw
+    read_only: true
+    tmpfs:
+      - /tmp
+```
+
+Mount the NAS share on the host first and give the container's user (uid 101) read/write
+access to the design folder. The container filesystem stays read-only; the design mount
+and `/tmp` are writable. Without the environment variable the folder endpoint stays off.
+
+Open and Save As then offer **Server folder**, beside **Computer** and **Browser storage**.
+Browse folders, create a new folder, and open or save a design. Save writes back to the
+server file and asks before overwriting a version changed elsewhere. A same-origin link
+such as `/?open=/designs/Converted/part.solidcraft` opens that file in place, so Save
+updates it. Other design links still open unsaved copies.
+
+The `/designs/` endpoint provides GET/HEAD, PUT, DELETE, MKCOL and OPTIONS with JSON
+folder listings and ETags; it is not a full WebDAV server. File names cannot contain
+traversal segments, backslashes, URL delimiters or hidden path components. Symlinks are
+not served. Uploads are limited to 256 MiB and listings to 10,000 entries.
+
+The folder has no built-in authentication. Restrict the whole site, including `/designs/`,
+through a reverse proxy with basic authentication, a VPN, or your existing access controls.
+Use HTTPS when accessing it over a network.
 
 ### 3D mouse in the browser
 
@@ -372,3 +411,86 @@ earlier builds carry over. Every compatibility shim is listed in the
 
 Use the SolidCraft documentation and web-app URLs. GitHub redirects links to the renamed
 repository; old-name Pages and Flatpak URLs are not maintained as permanent aliases.
+
+### WebDAV: Nextcloud, ownCloud and NAS folders
+
+In **Preferences → General**, enable **Use WebDAV for Server folder** and enter
+an existing folder's WebDAV URL, user and password. This option is off by default.
+Open and Save As then offer the WebDAV **Server folder** picker; **Other storage** opens
+the usual storage picker. Disabling WebDAV restores the previous picker. Existing
+open WebDAV documents retain their connection until they are closed.
+
+For Nextcloud or ownCloud, copy the WebDAV address shown in the Files settings,
+then append an existing folder for designs, ending in `/`. A typical address is
+`https://cloud.example.com/remote.php/dav/files/user/Designs/` (replace the host,
+user and folder with your own). Use the account's login name and an app password
+if the account uses two-factor authentication. For a NAS, use its WebDAV service's
+HTTPS folder address. The folder must already exist and allow reading and writing.
+Redirects are refused: use the final HTTPS address directly.
+
+Passwords are never stored in a design or in preferences. On desktop they are
+stored under **SolidCraft WebDAV** in the OS keychain when connecting; leave the
+password field empty to reuse the saved password. To remove a saved password,
+delete its entry using the operating system's credential manager. The browser
+keeps credentials only in memory for the current SolidCraft origin: enter the
+password again after reloading. Plain HTTP is refused except for `localhost`,
+`127.0.0.1` and `::1`, for local testing.
+
+The picker lists one folder at a time with `PROPFIND` and `Depth: 1`, opens with
+`GET`, and saves with `PUT`. Opening requires a strong `ETag`. Saving sends that
+ETag in `If-Match`; saving a new name sends `If-None-Match: *`. A `412` keeps the
+design unsaved and offers the existing **Save a copy / Overwrite / Cancel**
+question. Only choosing Overwrite removes the precondition for that save. A save
+response must include a strong ETag too; a missing or inaccessible ETag is reported
+as a failed save, even if the server accepted the bytes. Standalone `file.save`
+control requests wait for the remote write; programmatic conflicts return an error
+without opening the question. Refresh the folder and
+reopen the file to establish its current version before editing further.
+
+Listings are limited to 4 MiB and 10,000 children, XML nesting to 32 levels, and
+design downloads to the usual design size limit. XML entity declarations,
+traversal, external-origin entries and encoded path separators are refused.
+This is file storage, without background synchronisation, WebDAV locks, sharing,
+or folder creation. Desktop editing uses a temporary local copy; close the design
+only after the remote save succeeds.
+
+#### Browser CORS limits
+
+Browsers require the WebDAV server to allow the SolidCraft origin. Many Nextcloud,
+ownCloud and NAS installations do not send those CORS headers by default. The
+preflight must allow `PROPFIND`, `GET` and `PUT`, and the `Authorization`, `Depth`,
+`Content-Type`, `If-Match` and `If-None-Match` request headers. The response must
+expose `ETag`. Browser cookie credentials are omitted; authentication uses the
+configured Basic credentials.
+
+There are two usual workarounds:
+
+- Reverse proxy the WebDAV path under the same HTTPS origin as SolidCraft. For
+  example, add this location to the nginx server that serves SolidCraft, replacing
+  the upstream host with yours. Keeping the original DAV path means the server's
+  absolute-path `href` values still resolve correctly:
+
+  ```nginx
+  location /remote.php/dav/ {
+      proxy_pass https://cloud.example.com/remote.php/dav/;
+      proxy_set_header Host cloud.example.com;
+      proxy_set_header Authorization $http_authorization;
+      proxy_ssl_server_name on;
+      proxy_redirect off;
+      client_max_body_size 256m;
+  }
+  ```
+
+  Configure the WebDAV URL using the **SolidCraft origin** and that same path,
+  for example `https://app.solidcraft.io/remote.php/dav/files/user/Designs/`.
+  Preserve ETag and conditional headers in the proxy. If the upstream emits full
+  URLs in `href`, configure its public DAV URL to use the proxy origin as well.
+- Use the desktop app, which is not subject to browser CORS checks.
+
+For a local test, run your WebDAV service on `127.0.0.1:8080` with a writable
+`/dav/` collection and a test account. Configure `http://127.0.0.1:8080/dav/` in
+the desktop app. Save a new synthetic design, close it, and open it from Server
+folder. Open the same file in a second app, save there, then edit and save in the
+first app: it must show the changed-elsewhere question. A browser test additionally
+needs an allowed CORS origin or a same-origin proxy; an HTTPS page may block a
+plain-HTTP endpoint as mixed content.

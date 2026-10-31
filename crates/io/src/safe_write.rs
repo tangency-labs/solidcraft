@@ -213,9 +213,10 @@ pub fn create_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     }
     let tmp = temp_beside(path, "create");
     // Only remove a temporary file that this invocation successfully created.
-    let mut file = OpenOptions::new().write(true).create_new(true).open(&tmp)?;
-    let result = file.write_all(bytes).and_then(|_| flush(&file));
-    drop(file);
+    let result = {
+        let mut file = OpenOptions::new().write(true).create_new(true).open(&tmp)?;
+        file.write_all(bytes).and_then(|_| flush(&file))
+    };
     let result = result.and_then(|_| fs::hard_link(&tmp, path));
     let _ = fs::remove_file(&tmp);
     if result.is_ok() {

@@ -12,7 +12,7 @@ use crate::SolveApp;
 
 /// A host picker answer: a selected path, or `None` when cancelled.
 pub type FilePickerFuture = Pin<Box<dyn Future<Output = Option<String>>>>;
-type Completion = Box<dyn FnOnce(&mut SolveApp, Option<String>)>;
+pub(crate) type Completion = Box<dyn FnOnce(&mut SolveApp, Option<String>)>;
 
 pub(crate) struct Pending {
     future: FilePickerFuture,
@@ -31,7 +31,7 @@ impl SolveApp {
     /// Keep the target design and editors unchanged until the picker answers.
     /// (A save being written keeps it unchanged too, see [`crate::save_job`].)
     pub fn file_picker_busy(&self) -> bool {
-        self.file_picker.is_some() || self.saving.is_some() || self.disk_prompt
+        crate::webdav::busy(self) || self.file_picker.is_some() || self.saving.is_some() || self.host_save.is_some() || self.disk_prompt
     }
 
     pub(crate) fn pick_open(&mut self, complete: impl FnOnce(&mut SolveApp, Option<String>) + 'static) {
@@ -43,6 +43,10 @@ impl SolveApp {
         if self.file_picker_busy() {
             return;
         }
+        let complete = match crate::webdav::pick(self, None, extensions, Box::new(complete)) {
+            Ok(()) => return,
+            Err(complete) => complete,
+        };
         let future = self.services.pick_open.as_ref().map(|pick| pick(extensions));
         self.begin_picker(future, Box::new(complete));
     }
@@ -66,6 +70,10 @@ impl SolveApp {
         if self.file_picker_busy() {
             return;
         }
+        let complete = match crate::webdav::pick(self, Some(name), extensions, Box::new(complete)) {
+            Ok(()) => return,
+            Err(complete) => complete,
+        };
         let future = self.services.pick_save.as_ref().map(|pick| pick(name, extensions));
         self.begin_picker(future, Box::new(complete));
     }
@@ -77,6 +85,10 @@ impl SolveApp {
         }
         let future = self.services.pick_program.as_ref().map(|pick| pick());
         self.begin_picker(future, Box::new(complete));
+    }
+
+    pub(crate) fn begin_webdav_fallback(&mut self, future: Option<FilePickerFuture>, complete: Completion) {
+        self.begin_picker(future, complete);
     }
 
     fn begin_picker(&mut self, future: Option<FilePickerFuture>, complete: Completion) {
@@ -141,6 +153,68 @@ mod tests {
     use super::*;
     use std::cell::{Cell, RefCell};
     use std::rc::Rc;
+
+    #[test]
+    fn webdav_listing_and_connection_bound_untrusted_input() {
+        use crate::webdav::*;
+        let base = connection("https://solidcraft.io/dav/").unwrap();
+        let response = |href: &str, properties: &str| {
+            format!(
+                "<d:response><d:href>{href}</d:href><d:propstat><d:prop>{properties}</d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response>"
+            )
+        };
+        let xml = |body: &str| format!("<d:multistatus xmlns:d=\"DAV:\">{body}</d:multistatus>");
+        let body = [
+            response("/dav/", "<d:resourcetype><d:collection/></d:resourcetype>"),
+            response("/dav/Parts/", "<d:resourcetype><d:collection/></d:resourcetype>"),
+            response("/dav/a%20%26b.solidcraft", "<d:getcontentlength>12</d:getcontentlength>"),
+        ]
+        .concat();
+        assert_eq!(
+            listing(xml(&body).as_bytes(), &base).unwrap(),
+            vec![Entry { name: "Parts".into(), directory: true }, Entry { name: "a &b.solidcraft".into(), directory: false }]
+        );
+        assert!(listing(xml(&response("https://solidcraft.io/dav/a.solidcraft", "")).as_bytes(), &base).is_ok());
+        for href in [
+            "/dav/../private.solidcraft",
+            "/dav/%2e%2e/private.solidcraft",
+            "/dav/a%2fb.solidcraft",
+            "/dav/a%5cb.solidcraft",
+            "https://other.solidcraft.io/dav/a.solidcraft",
+            "/dav/deep/a.solidcraft",
+        ] {
+            assert!(listing(xml(&response(href, "")).as_bytes(), &base).is_err(), "{href}");
+        }
+        assert!(listing(&vec![b' '; MAX_LIST_BYTES + 1], &base).is_err());
+        assert!(
+            listing(xml(&response("/dav/a.solidcraft", "<d:getcontentlength>18446744073709551615</d:getcontentlength>")).as_bytes(), &base).is_err()
+        );
+        assert!(
+            listing(xml(&(0..MAX_ENTRIES + 2).map(|i| response(&format!("/dav/a{i}.solidcraft"), "")).collect::<String>()).as_bytes(), &base)
+                .is_err()
+        );
+        for hostile in [
+            "<!DOCTYPE x [<!ENTITY x 'bad'>]><d:multistatus xmlns:d=\"DAV:\"/>",
+            "<multistatus xmlns='DAV:'><a></multistatus>",
+            "<multistatus xmlns='DAV:'><a>",
+            "<multistatus xmlns='other'/>",
+        ] {
+            assert!(listing(hostile.as_bytes(), &base).is_err());
+        }
+        assert!(listing(format!("<multistatus xmlns='DAV:'>{}{}</multistatus>", "<a>".repeat(33), "</a>".repeat(33)).as_bytes(), &base).is_err());
+        for value in [
+            "http://solidcraft.io/dav/",
+            "ftp://localhost/dav/",
+            "https://user:password@solidcraft.io/dav/",
+            "https://solidcraft.io/dav/?token=secret",
+            "http://localhost.solidcraft.io/",
+        ] {
+            assert!(connection(value).is_err(), "{value}");
+        }
+        for value in ["http://localhost:8080/dav/", "http://127.0.0.1/dav/", "http://[::1]:8080/dav/", "https://solidcraft.io/dav/"] {
+            assert!(connection(value).is_ok(), "{value}");
+        }
+    }
 
     #[derive(Default)]
     struct Answer {

@@ -9,23 +9,36 @@ use wasm_bindgen_futures::{JsFuture, spawn_local};
 
 use crate::{check_download_size, design_url};
 
-type Reply = Result<(String, Vec<u8>), String>;
+enum Source {
+    Copy(String, Vec<u8>),
+    Server(String),
+}
+type Reply = Result<Source, String>;
 
 #[derive(Default)]
 pub struct Download {
     reply: Rc<RefCell<Option<Reply>>>,
-    pending: Option<(String, Vec<u8>)>,
+    pending: Option<Source>,
 }
 
 impl Download {
-    pub fn start(url: Option<&str>, ctx: &egui::Context) -> Self {
+    pub fn start(url: Option<&str>, ctx: &egui::Context, files: &Rc<crate::files::Files>) -> Self {
         let download = Self::default();
         if let Some(url) = url {
             let url = url.to_owned();
             let slot = download.reply.clone();
             let ctx = ctx.clone();
+            let files = files.clone();
             spawn_local(async move {
-                *slot.borrow_mut() = Some(fetch(&url).await);
+                let origin = web_sys::window().and_then(|w| w.location().origin().ok()).unwrap_or_default();
+                let server_path = crate::server_link_path(&url, &origin);
+                let result = if server_path.is_some() && crate::server::available().await {
+                    files.server.enabled.set(true);
+                    crate::server::load(&files, server_path.as_deref().unwrap_or("")).await.map(Source::Server)
+                } else {
+                    fetch(&url).await.map(|(name, bytes)| Source::Copy(name, bytes))
+                };
+                *slot.borrow_mut() = Some(result);
                 ctx.request_repaint();
             });
         }
@@ -70,7 +83,14 @@ impl Download {
                 None => return,
             }
         }
-        let Some((name, bytes)) = self.pending.take() else { return };
+        let Some(source) = self.pending.take() else { return };
+        let (name, bytes) = match source {
+            Source::Server(path) => {
+                app.open_path(&path);
+                return;
+            }
+            Source::Copy(name, bytes) => (name, bytes),
+        };
         // The extension selects the design loader even when the URL has no extension.
         let path = &format!("/linked/design.{}", solidcraft_engine::io::DESIGN_EXT);
         vfs::insert(path, bytes);
@@ -86,7 +106,7 @@ impl Download {
     }
 }
 
-async fn fetch(value: &str) -> Reply {
+async fn fetch(value: &str) -> Result<(String, Vec<u8>), String> {
     let window = web_sys::window().ok_or("No browser window")?;
     let page_origin = window.location().origin().map_err(|_| "Cannot read page origin")?;
     let url = design_url(value, &page_origin)?;
@@ -115,7 +135,7 @@ async fn fetch(value: &str) -> Reply {
     }
     let stream = response.body().ok_or("Download has no body")?;
     let reader: web_sys::ReadableStreamDefaultReader = stream.get_reader().dyn_into().map_err(|_| "Cannot read download stream")?;
-    let result = read(&reader).await;
+    let result = read(&reader, solidcraft_engine::io::MAX_DESIGN_BYTES).await;
     if result.is_err() {
         let _ = JsFuture::from(reader.cancel()).await;
     }
@@ -125,7 +145,7 @@ async fn fetch(value: &str) -> Reply {
     Ok((name, bytes))
 }
 
-async fn read(reader: &web_sys::ReadableStreamDefaultReader) -> Result<Vec<u8>, String> {
+pub(crate) async fn read(reader: &web_sys::ReadableStreamDefaultReader, cap: usize) -> Result<Vec<u8>, String> {
     let mut bytes = Vec::new();
     // Bound even a stream which keeps returning empty chunks.
     for _ in 0..1_000_000 {
@@ -135,7 +155,9 @@ async fn read(reader: &web_sys::ReadableStreamDefaultReader) -> Result<Vec<u8>, 
         }
         let value = Reflect::get(&chunk, &JsValue::from_str("value")).map_err(|_| "Invalid download chunk")?;
         let chunk: Uint8Array = value.dyn_into().map_err(|_| "Invalid download bytes")?;
-        check_download_size(bytes.len(), u64::from(chunk.length()))?;
+        if u64::from(chunk.length()) > cap.saturating_sub(bytes.len()) as u64 {
+            return Err("Download exceeds the size limit".into());
+        }
         bytes.extend_from_slice(&chunk.to_vec());
     }
     Err("Download returned too many chunks".into())
