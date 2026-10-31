@@ -26,6 +26,9 @@ pub(crate) mod clearance;
 mod clipboard;
 mod clipboard_foreign;
 mod compare;
+mod compare_picture;
+#[cfg(test)]
+mod compare_picture_tests;
 mod component;
 mod component_clone;
 mod component_clone_assembly;
@@ -341,6 +344,7 @@ pub fn command_specs() -> Vec<&'static CommandSpec> {
     v.extend(metadata::COMMANDS.iter());
     v.extend(inspect::COMMANDS.iter());
     v.extend(compare::COMMANDS.iter());
+    v.extend(compare_picture::COMMANDS.iter());
     v.extend(silhouette::COMMANDS.iter());
     v.extend(materials::COMMANDS.iter());
     v.extend(material_properties::COMMANDS.iter());

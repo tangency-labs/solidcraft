@@ -15,3 +15,5 @@ serde_json = { workspace = true }
 [dev-dependencies]
 # The renderer `solidcraft-cli mcp` installs, so the tests' screenshots are drawn as the server's.
 solidcraft-gpu = { workspace = true }
+# Synthetic reference pictures for the compare_picture test.
+image = { workspace = true }

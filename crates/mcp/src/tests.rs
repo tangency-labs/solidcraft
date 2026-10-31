@@ -137,6 +137,7 @@ fn handshake_and_tools_list() {
         "set_parameter",
         "check_parameters",
         "screenshot",
+        "compare_picture",
         "export",
         "undo",
         "redo",
@@ -1369,6 +1370,46 @@ fn legacy_design_files_and_resource_uris() {
     tool(&mut s, "open", json!({"path": new.to_string_lossy()}));
     assert!(old.is_file() && new.is_file(), "save as leaves the old file");
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// `compare_picture` (#1486): the overlay comes back as an image block and the numbers as text.
+#[test]
+fn compare_picture_returns_the_overlay_as_an_image() {
+    use image::ImageEncoder as _;
+    use std::io::Cursor;
+    // A scoped server, like `solidcraft-cli mcp`: the reference must be inside the folders.
+    let base = solidcraft_engine::io::vfs::temp_dir().join(format!("solidcraft-mcp-compare-{}", std::process::id()));
+    let recovery = base.join("recovery");
+    std::fs::create_dir_all(&recovery).unwrap();
+    let scope = crate::agent_scope_with(Some(recovery.clone()), []);
+    let mut s = Server::new(Box::new(Headless::default())).with_path_scope(Some(scope));
+    tool(&mut s, "execute", json!({"command": "solid.box", "params": {"length": 20, "width": 10, "height": 30}}));
+    // A white rectangle on grey with the box's front-view proportions (20 x 30 mm).
+    let (w, h) = (200u32, 300u32);
+    let mut img = image::RgbaImage::from_pixel(w, h, image::Rgba([200, 200, 200, 255]));
+    for y in 20..280 {
+        for x in 20..180 {
+            img.put_pixel(x, y, image::Rgba([255, 255, 255, 255]));
+        }
+    }
+    let mut png = Cursor::new(Vec::new());
+    image::codecs::png::PngEncoder::new(&mut png).write_image(img.as_raw(), w, h, image::ExtendedColorType::Rgba8).unwrap();
+    let path = recovery.join("target.png");
+    std::fs::write(&path, png.into_inner()).unwrap();
+
+    let r = raw_tool(&mut s, "compare_picture", json!({"reference": path.to_string_lossy(), "view": "front"}));
+    assert_ne!(r["result"]["isError"], json!(true), "{r}");
+    let content = r["result"]["content"].as_array().unwrap().clone();
+    assert_eq!(content[0]["type"], "image", "{content:?}");
+    assert_eq!(content[0]["mimeType"], "image/png");
+    assert!(content[0]["data"].as_str().unwrap().starts_with("iVBORw0KGgo"), "not a PNG");
+    let info: Value = serde_json::from_str(content[1]["text"].as_str().unwrap()).unwrap();
+    assert!(info["overlap"].as_f64().unwrap() > 0.9, "{info}");
+    assert!(info.get("overlay_png").is_none(), "the base64 blob belongs in the image block only");
+    // A reference outside the server's folders is refused through the existing path rules.
+    let outside = raw_tool(&mut s, "compare_picture", json!({"reference": "/etc/hostname"}));
+    assert_eq!(outside["result"]["isError"], json!(true), "{outside}");
+    let _ = std::fs::remove_dir_all(&base);
 }
 
 /// The default folders (#205): the recovery folder works out of the box, `screenshot` without a

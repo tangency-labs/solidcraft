@@ -147,7 +147,7 @@ pub fn tool_definitions() -> Vec<Value> {
              (as list_commands lists them). A step may also name one of these tools with that tool's arguments as params, \
              and runs the engine command it stands for: set_parameter (parameters.change; `value` or `expression`), \
              list_commands (engine.commands, with `filter`), describe_command (engine.describe), execute ({command, params}), \
-             measure (inspect.measure), \
+             measure (inspect.measure), compare_picture (inspect.compare_picture, numbers only: no overlay PNG), \
              inspect_design (document.inspect), undo, redo, export, save, open, new_design, crash_reports; screenshot, \
              body_topology, batch and pending can't be steps. On an error the steps already run are undone (unless \
              rollback: false), so the batch is all-or-nothing; the reply names the failing step (index from 0), its error, \
@@ -303,6 +303,34 @@ pub fn tool_definitions() -> Vec<Value> {
                     "axes": {"type": "boolean", "description": "false: leave the origin's three axes out of the render (see `grid`). Axes hidden with browser.visibility stay hidden"},
                 }),
                 &[],
+            ),
+            Effect::Files,
+        ),
+        tool(
+            "compare_picture",
+            "Compare with a reference picture",
+            "Compare the model's outline with the part in a reference picture — a concept render, a product photo, one view off a design board. \
+             The model's outline is `inspect.silhouette` from `view` (default front), `camera` and `bodies`; the picture's part is found by growing \
+             the background in from the border, so a backdrop's gradual shading stays background. The compare is outline only: holes are not \
+             compared — both the picture's and the model's holes are filled. `reference` is a PNG or JPEG inside the server's \
+             folders. `crop_px` / `crop_fraction` take one view off a board: [x, y, w, h] in pixels or as fractions 0..1 of the picture; \
+             `part_fills_crop: true` says the crop box is the part itself, for a crop that tightly frames it. `fit` names \
+             the dimension the scale comes from (\"width\", \"height\", \"both\"; default \"width\") — one uniform scale, never stretched per axis; \
+             \"both\" scales by width and reports `aspect_mismatch` when the shapes differ. Returns as text the overlap (0..1) and the model's top, \
+             bottom, left and right edges against the picture's in mm at nine stations (positive where the model reaches past the picture), and as \
+             an image the overlay PNG: model red, picture blue.",
+            obj(
+                json!({
+                    "reference": string("PNG or JPEG to match, inside the server's folders"),
+                    "view": string("Standard view (front, top, right, iso, ...) the picture is seen from (default front)"),
+                    "camera": {"type": "object", "description": "Look from this camera instead: {target: [x,y,z], yaw, pitch, distance, fov?} (radians, mm; as view.apply). A photo taken in perspective gets an fov"},
+                    "bodies": {"type": "array", "items": {"type": "string"}, "description": "Body names to outline (default: the visible bodies)"},
+                    "crop_px": {"type": "array", "items": {"type": "number"}, "description": "[x, y, w, h] in pixels"},
+                    "crop_fraction": {"type": "array", "items": {"type": "number"}, "description": "[x, y, w, h] as fractions 0..1 of the picture"},
+                    "fit": {"type": "string", "enum": ["width", "height", "both"], "description": "The dimension the one uniform scale comes from (default width); both scales by width and reports aspect_mismatch"},
+                    "rows": {"type": "integer", "description": "The model outline's height in pixels (default 240)"},
+                }),
+                &["reference"],
             ),
             Effect::Files,
         ),
@@ -496,6 +524,7 @@ pub fn call_tool(b: &mut dyn Backend, name: &str, args: &Value) -> Value {
     let a = args.as_object().unwrap_or(&empty);
     let r = match name {
         "screenshot" => return screenshot(b, a),
+        "compare_picture" => return compare_picture(b, a),
         "batch" => return batch(b, a),
         "check_parameters" => return check_parameters(b, a),
         "execute" => return execute(b, a),
@@ -945,6 +974,14 @@ fn batch_step(step: &Value) -> Result<(String, Value, Option<Narrow>), String> {
                 Ok(("inspect.measure".into(), p, summary.then_some(Narrow::MeasureSummary)))
             }
         },
+        "compare_picture" => {
+            // A batch step gets the numbers; the overlay PNG would be a base64 blob in text.
+            let mut p = pick(a, &["reference", "view", "camera", "bodies", "crop_px", "crop_fraction", "fit", "rows"]);
+            if let Some(obj) = p.as_object_mut() {
+                obj.entry("overlay".to_string()).or_insert(json!(false));
+            }
+            mapped("inspect.compare_picture", p)
+        }
         "inspect_design" => mapped("document.inspect", json!({"measure": a.get("measure").and_then(Value::as_bool).unwrap_or(true)})),
         "undo" => mapped("edit.undo", json!({})),
         "redo" => mapped("edit.redo", json!({})),
@@ -973,6 +1010,7 @@ const TOOL_STEPS: &[&str] = &[
     "batch",
     "body_topology",
     "check_parameters",
+    "compare_picture",
     "crash_reports",
     "describe_command",
     "execute",
@@ -1726,6 +1764,28 @@ fn screenshot(b: &mut dyn Backend, a: &Map<String, Value>) -> Value {
             {"type": "image", "data": base64(&png), "mimeType": "image/png"},
             {"type": "text", "text": info.to_string()},
         ]}),
+        Err(e) => text_result(&Value::String(e), true),
+    }
+}
+
+/// `compare_picture`: run the engine comparison and hand the overlay PNG back as an MCP
+/// image block, the numbers as text — an agent sees the picture, not a base64 blob.
+fn compare_picture(b: &mut dyn Backend, a: &Map<String, Value>) -> Value {
+    let mut params = pick(a, &["reference", "view", "camera", "bodies", "crop_px", "crop_fraction", "fit", "rows"]);
+    params["overlay"] = json!(true);
+    match exec(b, "inspect.compare_picture", params) {
+        Ok(v) => {
+            let overlay = v.get("overlay_png").and_then(Value::as_str).unwrap_or_default().to_string();
+            let mut info = v;
+            if let Some(obj) = info.as_object_mut() {
+                obj.remove("overlay_png");
+            }
+            let mut content = vec![json!({"type": "text", "text": info.to_string()})];
+            if !overlay.is_empty() {
+                content.insert(0, json!({"type": "image", "data": overlay, "mimeType": "image/png"}));
+            }
+            json!({"content": content})
+        }
         Err(e) => text_result(&Value::String(e), true),
     }
 }

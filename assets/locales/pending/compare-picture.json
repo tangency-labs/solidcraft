@@ -1,0 +1,20 @@
+{
+  "en": {
+    "cmd.inspect_compare_picture": "Compare Picture"
+  },
+  "ar": {
+    "cmd.inspect_compare_picture": "مقارنة بصورة مرجعية"
+  },
+  "he": {
+    "cmd.inspect_compare_picture": "השוואה לתמונת ייחוס"
+  },
+  "ja": {
+    "cmd.inspect_compare_picture": "参考画像と比較"
+  },
+  "vi": {
+    "cmd.inspect_compare_picture": "So sánh với ảnh tham chiếu"
+  },
+  "zh": {
+    "cmd.inspect_compare_picture": "比较参考图"
+  }
+}
