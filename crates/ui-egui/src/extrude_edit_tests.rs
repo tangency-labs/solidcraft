@@ -992,8 +992,8 @@ mod targets {
         assert_eq!(serde_json::to_value(&h.app.session.doc.feature(feature).unwrap().kind).unwrap(), before);
     }
 
-    /// Editing a feature made with no targets keeps it that way, whatever is hidden now; one
-    /// stored with `*` keeps it, and the field names each.
+    /// Editing a Join made with no targets, sketched off any body, keeps it that way, whatever is
+    /// hidden now; one stored with `*` keeps it, and the field names each.
     #[test]
     fn editing_keeps_a_feature_without_targets_as_it_is() {
         let mut h = plate_and_copy(false);
@@ -1015,6 +1015,28 @@ mod targets {
         assert_eq!(edited[0].1["params"]["targets"], json!(["*"]), "{}", edited[0].1);
         assert!(h.widget("All bodies").is_some(), "a stored `*` is every body of the design");
         assert!(h.widget("All bodies of the component").is_none());
+    }
+
+    /// A Join saved without targets from a sketch on a body's face (a design saved before it
+    /// stored them): editing it saves that body as its target, as a new Join does.
+    #[test]
+    fn editing_a_join_without_targets_on_a_face_saves_the_face_body() {
+        let mut h = plate_and_copy(true);
+        h.app.run("solid.extrude", json!({"sketch":"Rim","profiles":[0],"distance":3,"operation":"join","name":"Lip"})).unwrap();
+        let feature = h.app.session.doc.find_feature("Lip").unwrap().id;
+        if let Some(FeatureKind::Extrude { targets, .. }) = h.app.session.doc_mut().feature_mut(feature).map(|f| &mut f.kind) {
+            targets.clear();
+        }
+        h.app.session.refresh();
+        assert_eq!(h.app.session.model.state().bodies.len(), 1, "without targets it joins every body it meets");
+        h.app.edit_feature(feature);
+        h.frames(2);
+        assert!(h.widget("All bodies of the component").is_some());
+        h.step(&json!({"key":"Enter"})).unwrap();
+        assert!(h.app.dialog.is_none(), "{:?}", h.app.dialog);
+        let FeatureKind::Extrude { targets, .. } = &h.app.session.doc.feature(feature).unwrap().kind else { panic!("an extrude") };
+        assert_eq!(targets.iter().map(|t| t.to_string()).collect::<Vec<_>>(), ["Plate"]);
+        assert_eq!(h.app.session.model.state().bodies.len(), 2, "the copy stays a body of its own");
     }
 
     /// A Cut or Intersect saved without targets, edited with a body hidden and OK'd unchanged,

@@ -69,8 +69,10 @@ bodies are highlighted only while Targets is active, so a profile's highlight st
 bodies are saved as the extrude's `targets`, so showing or hiding bodies later never changes the
 model.
 
-Editing an extrude shows its saved targets. One saved without `targets` reads **All bodies of the
-component** and keeps changing every body of the active component it meets, hidden or shown; one
+Editing an extrude shows its saved targets. A Cut or Intersect saved without `targets` reads **All
+bodies of the component** and keeps changing every body of the active component it meets, hidden or
+shown. A Join saved without them reads the same; editing it saves the body its sketch lies on as its
+target, as a new Join does, and one sketched off any body keeps joining every body it meets. One
 saved with `targets: ["*"]` reads **All bodies** and changes every body in the design. A New Body
 changed to a Join, Cut or Intersect lists the bodies a new one would.
 
