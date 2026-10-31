@@ -31,6 +31,7 @@ pub mod mesh_distance;
 pub mod network;
 pub mod paper;
 mod plane;
+pub mod poly_mesh;
 mod profile;
 pub mod section;
 pub mod simplify;
