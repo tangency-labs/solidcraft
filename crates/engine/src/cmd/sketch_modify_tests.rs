@@ -222,6 +222,43 @@ fn an_arc_extended_from_an_end_a_tangent_line_ends_on_adds_no_arc_of_no_length()
     }
 }
 
+/// #7410: two lines drawn as one chain share their corner point. Break at that point gives the
+/// picked line its own end there: both stay in place, and each can move without the other.
+#[test]
+fn break_at_a_shared_point_separates_the_curves_that_meet_there() {
+    let mut s = new_sketch();
+    let chain = ids(&run(&mut s, "sketch.line", json!({"points": [[0, 0], [20, 0], [20, 10]]}))["curves"]);
+    let (first, second) = (chain[0].clone(), chain[1].clone());
+    let ends = |s: &Session, id: &str| {
+        let sk = sketch(s);
+        let (a, b) = sk.curves[sk.curve_index(id).unwrap()].kind.ends().unwrap();
+        (a, b, sk.point(a).unwrap(), sk.point(b).unwrap())
+    };
+    let (_, shared, ..) = ends(&s, &first);
+    assert_eq!(ends(&s, &second).0, shared, "the chain shares its corner");
+    let points = sketch(&s).points.len();
+
+    let out = run(&mut s, "sketch.break", json!({"curve": second, "at": [20, 0]}));
+    assert_eq!(ids(&out["curves"]), vec![second.clone()], "{out}");
+    let (own, _, at, far) = ends(&s, &second);
+    let (_, kept, ..) = ends(&s, &first);
+    assert_eq!(kept, shared, "the first line keeps the point");
+    assert_ne!(own, shared, "the second line has its own end");
+    assert_eq!(sketch(&s).points.len(), points + 1);
+    assert!(at.dist(Vec2::new(20.0, 0.0)) < 1e-9 && far.dist(Vec2::new(20.0, 10.0)) < 1e-9, "the second line stays put: {at:?} {far:?}");
+    let own_id = sketch(&s).points[own].id.clone();
+    assert_eq!(own_id, format!("{second}.start"));
+
+    // Moving the second line's new end leaves the first line where it was.
+    run(&mut s, "sketch.move_point", json!({"point": own_id, "to": [25, 0]}));
+    let (_, _, a, b) = ends(&s, &first);
+    assert!(a.dist(Vec2::new(0.0, 0.0)) < 1e-9 && b.dist(Vec2::new(20.0, 0.0)) < 1e-9, "{a:?} {b:?}");
+
+    // A point only one curve ends at has nothing to separate: Break there still refuses.
+    let lone = s.execute("sketch.break", &json!({"curve": second, "at": [20, 10]}));
+    assert!(lone.is_err(), "{lone:?}");
+}
+
 #[test]
 fn trim_circle_makes_an_arc_and_a_profile() {
     let mut s = new_sketch();

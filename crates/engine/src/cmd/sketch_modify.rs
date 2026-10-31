@@ -76,7 +76,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .at("SKETCH", "MODIFY")
         .icon("sketch_break")
         .enabled(in_sketch)
-        .params(concat!("curve: id, at: [x,y] (split at intersections) | points: [[x,y]…] (1…1000 positions projected onto the curve; duplicates are merged)", created_doc!())),
+        .params(concat!("curve: id, at: [x,y] (split at intersections; at a point where the curve ends and another curve meets, the curve gets its own end there and the two are no longer joined) | points: [[x,y]…] (1…1000 positions projected onto the curve; duplicates are merged)", created_doc!())),
     CommandSpec::new("sketch.scale", "Sketch Scale", scale)
         .at("SKETCH", "MODIFY")
         .icon("sketch_scale")
@@ -598,6 +598,12 @@ fn break_cmd(s: &mut Session, p: &Value) -> Result<Value> {
     let points = if p.get("points").is_some() { Some(vec2_list(cmd, p, "points", 1000)?) } else { None };
     let (out, info) = edit(s, p, cmd, false, |sk, doc| {
         let ci = curve_arg(sk, p, cmd)?;
+        if points.is_none()
+            && let Some(end) = shared_end(sk, ci, req_vec2(cmd, p, "at")?)
+        {
+            separate_end(sk, ci, end)?;
+            return Ok(ids_of(sk, &[ci]));
+        }
         if sk.curves.get(ci).is_some_and(|c| c.kind.is_freeform()) {
             let r = if let Some(points) = &points {
                 super::sketch_freeform::break_at_points(sk, ci, points, cmd)?
@@ -634,6 +640,32 @@ fn break_cmd(s: &mut Session, p: &Value) -> Result<Value> {
         Ok(ids_of(sk, &pieces))
     })?;
     Ok(json!({"curves": out, "sketch": info}))
+}
+
+/// The end of curve `ci` at `at` that another curve also ends at or passes through: Break there
+/// separates the two (#7410).
+fn shared_end(sk: &Sketch, ci: usize, at: Vec2) -> Option<usize> {
+    let (a, b) = sk.curves.get(ci)?.kind.ends()?;
+    let end = [a, b].into_iter().find(|&e| sk.point(e).is_some_and(|q| q.dist(at) <= 1e-6))?;
+    sk.curves.iter().enumerate().any(|(oi, c)| oi != ci && uses(c, end)).then_some(end)
+}
+
+/// Give curve `ci` its own point in place of `end`, at the same place (`<curve>.start` or
+/// `.end` when that id is free): the curves that met there stay where they are, no longer joined.
+fn separate_end(sk: &mut Sketch, ci: usize, end: usize) -> Result<()> {
+    let pos = sk.point(end).ok_or_else(|| bad("sketch.break", "point"))?;
+    let curve = sk.curves.get(ci).ok_or_else(|| bad("sketch.break", "curve"))?;
+    let role = if curve.kind.ends().is_some_and(|(a, _)| a == end) { "start" } else { "end" };
+    let name = format!("{}.{role}", curve.id);
+    let own = match sk.add_point(pos, Some(&name)) {
+        Ok(i) => i,
+        Err(solidcraft_sketch::SketchError::Duplicate(_)) => sk.add_point(pos, None)?,
+        Err(e) => return Err(e.into()),
+    };
+    if let Some(c) = sk.curves.get_mut(ci) {
+        c.kind.map_points(&|q| if q == end { own } else { q });
+    }
+    Ok(())
 }
 
 /// How far a line with nothing in its way extends: the reach its preview draws, and the length
