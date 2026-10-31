@@ -1067,17 +1067,22 @@ mod targets {
         }
     }
 
+    fn operation(h: &mut Harness, op: usize) {
+        if let Kind::Extrude { operation, .. } = &mut h.app.dialog.as_mut().unwrap().kind {
+            *operation = op;
+        }
+        crate::scenario::clear_handles();
+        h.frames(2);
+    }
+
+    fn listed(h: &Harness) -> Vec<Sel> {
+        h.app.dialog.as_ref().unwrap().inputs.iter().find(|i| i.label == TARGETS).unwrap().items.clone()
+    }
+
     /// A New Body edited into a Cut lists what a new Cut would, the shown bodies, and OK stores
     /// them; back to New Body there is no row and no targets (#2464).
     #[test]
     fn a_new_body_edited_into_a_cut_targets_the_shown_bodies() {
-        fn operation(h: &mut Harness, op: usize) {
-            if let Kind::Extrude { operation, .. } = &mut h.app.dialog.as_mut().unwrap().kind {
-                *operation = op;
-            }
-            crate::scenario::clear_handles();
-            h.frames(2);
-        }
         let mut h = plate_and_copy(false);
         h.app.run("solid.extrude", json!({"sketch":"Rim","profiles":[0],"distance":-3,"operation":"new","name":"Groove"})).unwrap();
         let feature = h.app.session.doc.find_feature("Groove").unwrap().id;
@@ -1099,6 +1104,31 @@ mod targets {
         let FeatureKind::Extrude { targets, .. } = &h.app.session.doc.feature(feature).unwrap().kind else { panic!("an extrude") };
         assert_eq!(targets.iter().map(|t| t.to_string()).collect::<Vec<_>>(), ["Plate"]);
         assert!((volume(&h, "Plate") - (8000.0 - RIM)).abs() < 1e-6, "{}", volume(&h, "Plate"));
+        assert!((volume(&h, "Plate (2)") - 8000.0).abs() < 1e-6, "{}", volume(&h, "Plate (2)"));
+    }
+
+    /// A New Body edited into a Cut, its list then edited by hand: the list stays as edited when
+    /// what is shown changes, and OK stores it (#2464).
+    #[test]
+    fn a_new_body_edited_into_a_cut_keeps_a_hand_edited_list() {
+        let mut h = plate_and_copy(false);
+        h.app.run("solid.extrude", json!({"sketch":"Rim","profiles":[0],"distance":-3,"operation":"new","name":"Groove"})).unwrap();
+        let feature = h.app.session.doc.find_feature("Groove").unwrap().id;
+        h.app.edit_feature(feature);
+        h.frames(2);
+        operation(&mut h, 2);
+        let plate = Sel::Body { name: "Plate".into() };
+        assert_eq!(listed(&h), vec![plate.clone(), Sel::Body { name: "Plate (2)".into() }]);
+        h.step(&json!({"click":{"handle":"dialog:list:Targets:Plate (2):remove"}})).unwrap();
+        h.frames(2);
+        assert_eq!(listed(&h), vec![plate.clone()]);
+        hide(&mut h, "Plate");
+        h.frames(2);
+        assert_eq!(listed(&h), vec![plate], "an edited list stays");
+        h.step(&json!({"key":"Enter"})).unwrap();
+        assert!(h.app.dialog.is_none(), "{:?}", h.app.dialog);
+        let FeatureKind::Extrude { targets, .. } = &h.app.session.doc.feature(feature).unwrap().kind else { panic!("an extrude") };
+        assert_eq!(targets.iter().map(|t| t.to_string()).collect::<Vec<_>>(), ["Plate"]);
         assert!((volume(&h, "Plate (2)") - 8000.0).abs() < 1e-6, "{}", volume(&h, "Plate (2)"));
     }
 
@@ -1124,7 +1154,7 @@ mod targets {
         assert_eq!(h.app.session.visibility, shown);
     }
 
-    /// An edit that empties a stored target list is refused, as a new Join is.
+    /// An edit that empties a stored target list asks for bodies and is refused, as a new Join is.
     #[test]
     fn an_edit_that_empties_its_targets_is_refused() {
         let mut h = plate_and_copy(false);
@@ -1132,10 +1162,16 @@ mod targets {
         let feature = h.app.session.doc.find_feature("Lip").unwrap().id;
         h.app.edit_feature(feature);
         h.frames(2);
-        let d = h.app.dialog.as_mut().unwrap();
-        d.inputs.iter_mut().find(|i| i.label == TARGETS).unwrap().items.clear();
+        h.step(&json!({"click":{"handle":"dialog:clear:Targets"}})).unwrap();
+        h.frames(2);
+        assert!(listed(&h).is_empty());
+        assert!(h.widget_near("Select", "Targets").is_some());
+        assert!(h.widget("All bodies of the component").is_none());
         let refused = apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap_err();
         assert!(refused.contains("New Body"), "{refused}");
+        h.step(&json!({"key":"Enter"})).unwrap();
+        let d = h.app.dialog.as_ref().expect("the window stays open");
+        assert_eq!(d.error.as_deref(), Some("Pick the bodies to change, or choose New Body"));
     }
 
     /// A face picked before Extrude is still extruded (Press Pull style), not taken as a target.

@@ -291,21 +291,25 @@ mod targets {
         assert_eq!(auto_operation(&s, &p(json!({"participants": ["Plate"]}))), Some("join"));
     }
 
-    /// A Cut from a face, rolled back before a feature that removes a body: the body is shown
-    /// there, so the cut keeps no targets and changes it too (#2464).
+    /// A Cut from a face, or from `faces`, rolled back before a feature that removes a body: the
+    /// body is shown there, so the cut keeps no targets and changes it too (#2464).
     #[test]
     fn a_cut_from_a_face_before_a_removal_keeps_the_removed_body() {
-        let mut s = Session::default();
-        run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 5, "body_name": "A"}));
-        run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 5, "corner": [20, 0, 0], "operation": "new", "body_name": "B"}));
-        run(&mut s, "solid.box", json!({"length": 30, "width": 10, "height": 1, "corner": [0, 0, 5], "operation": "new", "body_name": "Lid"}));
-        run(&mut s, "solid.remove", json!({"bodies": ["B"], "name": "Drop"}));
-        run(&mut s, "timeline.roll_to", json!({"position": 3}));
-        run(&mut s, "solid.extrude", json!({"face": [15, 5, 5], "face_body": "Lid", "distance": 2, "operation": "cut", "name": "Cut"}));
-        let solidcraft_doc::FeatureKind::Extrude { targets, .. } = &s.doc.find_feature("Cut").unwrap().kind else { panic!("an extrude") };
-        assert!(targets.is_empty(), "{targets:?}");
-        for body in ["A", "B"] {
-            assert!((volume(&s, body) - 300.0).abs() < 1e-6, "{body}: {}", volume(&s, body));
+        for pick in [json!({"face": [15, 5, 5]}), json!({"faces": [[15, 5, 5]]})] {
+            let mut s = Session::default();
+            run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 5, "body_name": "A"}));
+            run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 5, "corner": [20, 0, 0], "operation": "new", "body_name": "B"}));
+            run(&mut s, "solid.box", json!({"length": 30, "width": 10, "height": 1, "corner": [0, 0, 5], "operation": "new", "body_name": "Lid"}));
+            run(&mut s, "solid.remove", json!({"bodies": ["B"], "name": "Drop"}));
+            run(&mut s, "timeline.roll_to", json!({"position": 3}));
+            let mut p = json!({"face_body": "Lid", "distance": 2, "operation": "cut", "name": "Cut"});
+            p.as_object_mut().unwrap().extend(pick.as_object().unwrap().clone());
+            run(&mut s, "solid.extrude", p);
+            let solidcraft_doc::FeatureKind::Extrude { targets, .. } = &s.doc.find_feature("Cut").unwrap().kind else { panic!("an extrude") };
+            assert!(targets.is_empty(), "{pick}: {targets:?}");
+            for body in ["A", "B"] {
+                assert!((volume(&s, body) - 300.0).abs() < 1e-6, "{pick}: {body} {}", volume(&s, body));
+            }
         }
     }
 
