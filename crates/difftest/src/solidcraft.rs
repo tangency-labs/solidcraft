@@ -1429,6 +1429,7 @@ fn enable_fix(k: &mut Kernel, name: &str) -> Result<(), String> {
         }
         "delete_vertex_joins_seam_iso_curve" => &mut k.fixes.delete_vertex_joins_seam_iso_curve,
         "cover_refuses_folded_continuation" => &mut k.fixes.cover_refuses_folded_continuation,
+        "fillet_cleanup_removes_input_slits" => &mut k.fixes.fillet_cleanup_removes_input_slits,
         "cover_wraps_across_closed_seam" => &mut k.fixes.cover_wraps_across_closed_seam,
         "fillet_refuse_non_manifold_result" => &mut k.fixes.fillet_refuse_non_manifold_result,
         "fillet_refuse_crossing_rails" => &mut k.fixes.fillet_refuse_crossing_rails,

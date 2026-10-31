@@ -43,6 +43,9 @@
 //! it on both sides (slits), skipping any a later removal deleted.
 //! Opt-in `Kernel::fixes.fillet_cleanup_keeps_target_faces` (WR-459, #423): the edges in
 //! `CleanupRelations::kept_edges`, and those whose faces are all in `kept_faces`, stay.
+//! Opt-in `Kernel::fixes.fillet_cleanup_removes_input_slits` (WR-602, the fork's
+//! tangency-labs/smlib@cac11ea): of those, an edge with one face on both sides (a slit)
+//! is checked all the same, and the kept-faces test needs two faces.
 //! Opt-in `Kernel::fixes.cover_wraps_across_closed_seam` (WR-599, the fork's
 //! tangency-labs/smlib@16bf1cb): after each face merge `boolean_post_process` runs
 //! `HasSeamProblem` on the merged face and `SplitAtSeam` when a seam is crossed or missing.
@@ -579,12 +582,20 @@ pub(crate) fn boolean_post_process_with_notifications(
         } else if !check_all_edges && relations.mates.edges.other(e).is_none() {
             continue;
         }
-        if relations.kept_edges.contains(&e) {
+        // WR-602 (`Kernel::fixes.fillet_cleanup_removes_input_slits`, the fork's
+        // tangency-labs/smlib@cac11ea): an edge of the fillet's input, or one between two
+        // of its faces, stays, unless one face lies on both its sides: removing that slit
+        // merges no faces.
+        let input_slits = k.fixes.fillet_cleanup_removes_input_slits;
+        if relations.kept_edges.contains(&e)
+            && !(input_slits && edge::faces(brep, e, None)?.len() == 1)
+        {
             continue;
         }
         if !relations.kept_faces.is_empty() {
             let faces = edge::faces(brep, e, None)?;
-            if !faces.is_empty() && faces.iter().all(|f| relations.kept_faces.contains(f)) {
+            let least = if input_slits { 2 } else { 1 };
+            if faces.len() >= least && faces.iter().all(|f| relations.kept_faces.contains(f)) {
                 continue;
             }
         }
