@@ -40,6 +40,7 @@ solidcraft-render = { workspace = true }
 image = { workspace = true, features = ["jpeg"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
+rhai = { workspace = true }
 toml_edit = "0.25"
 schemars = { workspace = true }
 serde_path_to_error = { workspace = true }

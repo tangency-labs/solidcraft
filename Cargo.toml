@@ -37,6 +37,7 @@ proc-macro2 = "1"
 quote = "1"
 syn = { version = "2", features = ["full"] }
 serde_json = { version = "1", features = ["float_roundtrip"] }
+rhai = { version = "1.22", default-features = false, features = ["std", "serde"] }
 # command parameter and result schemas
 schemars = "1.2"
 serde_path_to_error = "0.1"

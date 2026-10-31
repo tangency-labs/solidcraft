@@ -383,6 +383,33 @@ pub(crate) fn local_geometry() -> LocalGeometry {
     LocalGeometry(MAPPED.with(|m| m.replace(true)))
 }
 
+/// Steps out of the enclosing command's scope so every command run inside it behaves as the
+/// outermost one: its parameters are mapped from the world the way a command run from the UI or
+/// from a script has them. `macro.play` uses it to replay recorded commands exactly as they ran.
+pub struct TopLevel {
+    depth: u32,
+    mapped: bool,
+}
+
+impl TopLevel {
+    pub fn enter() -> Self {
+        let depth = DEPTH.with(|d| {
+            let n = d.get();
+            d.set(0);
+            n
+        });
+        let mapped = MAPPED.with(|m| m.replace(false));
+        TopLevel { depth, mapped }
+    }
+}
+
+impl Drop for TopLevel {
+    fn drop(&mut self) {
+        DEPTH.with(|d| d.set(self.depth));
+        MAPPED.with(|m| m.set(self.mapped));
+    }
+}
+
 pub(crate) struct LocalGeometry(bool);
 
 impl Drop for LocalGeometry {

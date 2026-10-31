@@ -871,7 +871,7 @@ fn hostile_params_never_panic() {
                     while let Some(&id) = ids.get(next.fetch_add(1, std::sync::atomic::Ordering::Relaxed)) {
                         for v in hostile_values() {
                             for k in keys {
-                                if k == "path" && (id.starts_with("parameters.") || id == "timeline.export_script") {
+                                if k == "path" && (id.starts_with("parameters.") || id == "timeline.export_script" || id.starts_with("macro.")) {
                                     continue; // parameter and script files: covered by their own tests (no stray files)
                                 }
                                 let mut s = Session::default();
@@ -956,7 +956,7 @@ fn only_own_ids_name_commands() {
 fn unknown_commands_suggest_the_closest_ids() {
     let mut s = Session::default();
     let mut msg = |id: &str| s.execute(id, &serde_json::json!({})).unwrap_err().to_string();
-    assert_eq!(msg("file.open"), "unknown command `file.open` (did you mean `doc.open`?)");
+    assert_eq!(msg("file.open"), "unknown command `file.open` (did you mean `doc.open` or `macro.open`?)");
     assert!(msg("solid.extrud").starts_with("unknown command `solid.extrud` (did you mean `solid.extrude`"), "{}", msg("solid.extrud"));
     assert!(msg("Extrude").contains("`solid.extrude`"), "{}", msg("Extrude"));
     assert_eq!(msg("FusionFilletEdgesCommand"), "unknown command `FusionFilletEdgesCommand`");

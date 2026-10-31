@@ -1743,6 +1743,11 @@ fn fillet(s: &mut Session, p: &Value) -> Result<Value> {
 
 fn chamfer(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "solid.chamfer";
+    // An empty edge list is a no-op, not an error: a macro that chamfers "every found hole edge"
+    // runs cleanly on a design where the query matched nothing (docs/macros.md).
+    if p.get("edges").and_then(Value::as_array).is_some_and(|a| a.is_empty()) {
+        return Ok(json!({"skipped": true, "edges": 0}));
+    }
     let edges = edge_points(s, p, cmd)?;
     let distance = req_expr(cmd, p, "distance")?;
     check_expr(s, &distance, Kind::Length, cmd, "distance")?;
