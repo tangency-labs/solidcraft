@@ -89,6 +89,10 @@
 //!   (next edge use = radial of the clockwise neighbour) is a permutation of the edge
 //!   uses, so it returns to its start; it is bounded by the B-rep's edge use count (an
 //!   error past it, which only corrupt topology reaches). There is no recursion.
+//!
+//! With `fillet_corner_statuses` (#483), the Nx1 selector returns failed binormal
+//! statuses instead of reading a nonzero error status as a successful degeneracy test.
+//!
 
 use std::collections::BTreeMap;
 
@@ -3173,10 +3177,17 @@ fn test_g1_continuity(
 /// degenerate input, as `SmOffsetCurve::Evaluate`'s zero binormal). Only an unported
 /// callee stays an error (the case is deferred).
 fn check_nx1_degeneracy(k: &Kernel, b: &mut Brep, vertex: VertexId, eu: EdgeuseId) -> Result<bool> {
+    // With fillet_corner_statuses, a native status stays an error instead of a
+    // successful degeneracy classification. Off by default,
     // the status a failed side binormal evaluation returns through the SmBoolean is
     // nonzero (true); the guards (a null dereference, a dangling id, an unported callee)
     // stay errors
-    Ok(p1::check_nx1_degeneracy_status(k, b, vertex, eu)?.unwrap_or(true))
+    let status = p1::check_nx1_degeneracy_status(k, b, vertex, eu)?;
+    if k.fixes.fillet_corner_statuses {
+        status
+    } else {
+        Ok(status.unwrap_or(true))
+    }
 }
 
 #[cfg(test)]
@@ -3301,7 +3312,7 @@ mod tests {
         use crate::geom::extent1d::Extent1d;
         use crate::topology::{Edgeuse, EdgeuseOwner, Vertexuse, VertexuseOwner};
 
-        let k = Kernel::default();
+        let mut k = Kernel::default();
         let mut b = Brep::new();
         let v = b.add_vertex(Point3::new(0.0, 0.0, 0.0)).unwrap();
         let w = b.add_vertex(Point3::new(0.0, 0.0, 1.0)).unwrap();
@@ -3385,6 +3396,16 @@ mod tests {
         let (exec, solvers) = one_solver(fil);
         let c = FilletCorner::create(&k, &mut b, v, &[fil], &exec, &solvers).unwrap();
         assert_eq!(c.map(|c| c.kind), Some(FilletCornerKind::Degenerate));
+        let expected = p1::check_nx1_degeneracy(&k, &mut b, v, fil).unwrap_err();
+        k.fixes.fillet_corner_statuses = true;
+        assert_eq!(
+            check_nx1_degeneracy(&k, &mut b, v, fil).unwrap_err(),
+            expected
+        );
+        assert_eq!(
+            FilletCorner::create(&k, &mut b, v, &[fil], &exec, &solvers).unwrap_err(),
+            expected
+        );
     }
 
     fn box_corner() -> Result<(Kernel, Brep, VertexId, Vec<EdgeuseId>)> {

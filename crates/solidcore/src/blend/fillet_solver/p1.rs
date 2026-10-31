@@ -109,6 +109,10 @@
 //!   [`SolidError::InvalidInput`].
 //! - **Iteration.** No loop here depends on more than the caller's array sizes; there
 //!   is no recursion.
+//!
+//! With `Kernel::fixes.fillet_edge_curve_domain_statuses`, failed edge-curve
+//! copy/trim statuses propagate before returning the copy as trimmed (#483).
+//!
 
 use crate::blend::fillet_classification::{FilletClassObject, LegacyClassificationObjects};
 use crate::blend::fillet_corner::p3::FilletCorner;
@@ -124,7 +128,7 @@ use crate::blend::fillet_standard_solver::p1::{
 };
 use crate::curve::curve::{Curve, CurveKind};
 use crate::curve::iso_curve::IsoCurve;
-use crate::error::{ignore_status, ignored, EntityRef, Result, SolidError};
+use crate::error::{checked_or_ignored, ignore_status, ignored, EntityRef, Result, SolidError};
 use crate::geom::extent1d::{Extent1d, ExtentNd};
 use crate::geom::extent2d::Extent2d;
 use crate::geom::matrix::Matrix;
@@ -2934,8 +2938,9 @@ pub fn tol_ang_tol_rad(solver: Option<&FilletSolver>) -> f64 {
 /// # Errors
 ///
 /// [`SolidError::InvalidInput`] for an edge without curve (upstream dereferences
-/// `NULL`); the trim's status is ignored as upstream ([`SolidError::Unported`] still
-/// propagates).
+/// `NULL`). With `fillet_edge_curve_domain_statuses`, copy/trim failures propagate
+/// before returning the copy. Off by default the trim status is ignored as upstream
+/// ([`SolidError::Unported`] still propagates).
 pub fn check_edge_curve_domains(
     k: &Kernel,
     b: &Brep,
@@ -2958,9 +2963,14 @@ pub fn check_edge_curve_domains(
         t1 = edge_ivl.max();
     }
     if trim {
-        if let Some(mut copy) = ignored(curve.copy(k))? {
+        if let Some(mut copy) =
+            checked_or_ignored(curve.copy(k), k.fixes.fillet_edge_curve_domain_statuses)?
+        {
             let mut trim_ivl = Extent1d::from_min_max(t0, t1);
-            ignore_status(copy.trim(k, &mut trim_ivl, TrimMode::Notify))?;
+            checked_or_ignored(
+                copy.trim(k, &mut trim_ivl, TrimMode::Notify),
+                k.fixes.fillet_edge_curve_domain_statuses,
+            )?;
             return Ok(Some(copy));
         }
     }
@@ -3259,6 +3269,42 @@ pub use rails::{compute_support_edge, split_rail, RailOwnership, RetainedRailOwn
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn audit_483_edge_domain_does_not_return_failed_trim_as_success() {
+        let mut k = Kernel::default();
+        let mut b = Brep::new();
+        let first = b.add_vertex(Vec3::ZERO).unwrap();
+        let last = b.add_vertex(Vec3::X).unwrap();
+        let edge = b.add_edge(first, last).unwrap();
+        let curve = Curve::from(BSplineCurve::create_line_segment(3, Vec3::ZERO, Vec3::X).unwrap());
+        b.edge_mut(edge).unwrap().curve = Some(curve.clone());
+        let ivl = Extent1d::from_min_max(0.5, 0.5);
+        b.edge_mut(edge).unwrap().interval = ivl;
+        assert!(check_edge_curve_domains(&k, &b, edge, false, false)
+            .unwrap()
+            .is_some());
+        k.fixes.fillet_edge_curve_domain_statuses = true;
+        let mut expected_curve = curve.copy(&k).unwrap();
+        let mut trim_ivl = ivl;
+        let expected = expected_curve
+            .trim(&k, &mut trim_ivl, TrimMode::Notify)
+            .unwrap_err();
+        assert_eq!(
+            check_edge_curve_domains(&k, &b, edge, false, false).unwrap_err(),
+            expected
+        );
+        assert_eq!(
+            edge::curve(&b, edge).unwrap().unwrap().natural_interval(),
+            curve.natural_interval()
+        );
+        b.edge_mut(edge).unwrap().interval = Extent1d::from_min_max(0.25, 0.75);
+        let copy = check_edge_curve_domains(&k, &b, edge, false, false)
+            .unwrap()
+            .unwrap();
+        assert_eq!(copy.natural_interval(), Extent1d::from_min_max(0.25, 0.75));
+    }
+
     use crate::surface::plane::Plane;
 
     #[test]

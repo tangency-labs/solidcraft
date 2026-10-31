@@ -13,17 +13,21 @@
 //! Opt-in `Kernel::fixes.taper_pivot_nearest_corner` (WR-402): when the two links of a
 //! corner meet at both ends (a two-curve loop), the pivot is the joint nearest the
 //! corner's offset curve, not `sm_FindPivotPoint`'s first coincident pair.
+//!
+//! With `primitive_path_curve_statuses` (#483), pivot endpoint failures propagate
+//! through both pivot policies instead of using undefined points.
+//!
 
 use crate::curve::composite_curve::OffsetMapAttribute;
 use crate::curve::curve::Curve;
-use crate::error::{ignore_status, ignored, Result, SolidError};
+use crate::error::{checked_or_ignored, ignore_status, ignored, Result, SolidError};
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::geom_utility::p1::circle_from_3_points;
 use crate::kernel::Kernel;
 use crate::math::{Vec3, EFF_ZERO};
 use crate::nurbs::b_spline_curve::p1::{BSplineCurve, BSplineCurveForm};
 use crate::nurbs::b_spline_surface::p1::{BSplineSurface, SurfParamType};
-use crate::primitive::primitive_creation::p1::find_pivot_point;
+use crate::primitive::primitive_creation::p1::find_pivot_point_with_kernel;
 
 const OP: &str = "primitive::primitive_creation::p3::ruled_surface_from_offset";
 
@@ -83,9 +87,9 @@ pub fn ruled_surface_from_offset(
             .get(other)
             .ok_or_else(|| SolidError::sm_err(OP))?;
         let pivot = if k.fixes.taper_pivot_nearest_corner {
-            pivot_nearest_corner(source, other, options.same_point_tolerance, &first)?
+            pivot_nearest_corner(k, source, other, options.same_point_tolerance, &first)?
         } else {
-            find_pivot_point(source, other, options.same_point_tolerance)?
+            find_pivot_point_with_kernel(k, source, other, options.same_point_tolerance)?
         };
         second = BSplineCurve::create_point_curve(pivot)?;
         second_is_generator = false;
@@ -178,13 +182,17 @@ pub fn ruled_surface_from_offset(
 /// `find_pivot_point` gives both corners the same joint; with one joint this is
 /// `find_pivot_point`. Coincidence uses its squared-distance test.
 fn pivot_nearest_corner(
+    k: &Kernel,
     first: &BSplineCurve,
     second: &BSplineCurve,
     tol: f64,
     corner: &BSplineCurve,
 ) -> Result<Vec3> {
     let point = |c: &BSplineCurve, t: f64| -> Result<Vec3> {
-        Ok(ignored(c.evaluate_point(t))?.unwrap_or(Vec3::UNDEF))
+        Ok(
+            checked_or_ignored(c.evaluate_point(t), k.fixes.primitive_path_curve_statuses)?
+                .unwrap_or(Vec3::UNDEF),
+        )
     };
     let (a, b, c) = (
         first.natural_interval(),
@@ -204,7 +212,7 @@ fn pivot_nearest_corner(
     .map(|(_, q)| q)
     .collect();
     if joints.len() < 2 {
-        return find_pivot_point(first, second, tol);
+        return find_pivot_point_with_kernel(k, first, second, tol);
     }
     let (corner_start, corner_end) = (point(corner, c.min())?, point(corner, c.max())?);
     let mut best: Option<(f64, Vec3)> = None;
@@ -216,7 +224,7 @@ fn pivot_nearest_corner(
     }
     match best {
         Some((_, joint)) => Ok(joint),
-        None => find_pivot_point(first, second, tol),
+        None => find_pivot_point_with_kernel(k, first, second, tol),
     }
 }
 

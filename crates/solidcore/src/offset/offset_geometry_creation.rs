@@ -142,6 +142,11 @@
 //!   for each edge: the face caches are not kept from one edge to the next, where
 //!   upstream's stay on the surfaces between curve replacements.
 //! - **Recursion.** None.
+//!
+//! With `offset_tangent_gap_statuses` (#483), `HaveTangentGaps` returns failed
+//! evaluations and closest-point statuses before consuming their outputs; a successful
+//! query without a solution retains its existing meaning.
+//!
 
 use crate::blend::fillet_standard_solver::p1::CircularCrossSectionFsg;
 use crate::curve::curve::p1::GlobalPointSolveOptions;
@@ -330,6 +335,40 @@ pub struct ReplaceEdgeCurves {
     pub delete_3d_curve: bool,
     /// `rbDeleteUVCurve`.
     pub delete_uv_curve: bool,
+}
+
+/// Sample the two geometry services in their original order; a no-solution closest
+/// point is a successful query and does not establish a gap.
+fn tangent_gap_samples<B>(
+    k: &Kernel,
+    brep: &mut B,
+    num_samples: u64,
+    tol: f64,
+    mut evaluate: impl FnMut(&Kernel, &mut B, f64) -> Result<Vec3>,
+    mut closest: impl FnMut(&Kernel, &mut B, Vec3) -> Result<Option<f64>>,
+) -> Result<bool> {
+    for i in 0..=num_samples {
+        let param = (i as f64 * 1.0) / (num_samples as f64 * 1.0);
+        let evaluation = evaluate(k, brep, param);
+        let pnt = if k.fixes.offset_tangent_gap_statuses {
+            Some(evaluation?)
+        } else {
+            ignore_soft(evaluation)?
+        }
+        .unwrap_or(Vec3::new(UNDEF_DOUBLE, UNDEF_DOUBLE, UNDEF_DOUBLE));
+        let cp = closest(k, brep, pnt);
+        let cp = if k.fixes.offset_tangent_gap_statuses {
+            Some(cp?)
+        } else {
+            ignore_soft(cp)?
+        };
+        if let Some(Some(distance)) = cp {
+            if distance > tol {
+                return Ok(true);
+            }
+        }
+    }
+    Ok(false)
 }
 
 // ---- what the unit needs from the executive and the B-reps --------------------------------
@@ -3713,9 +3752,10 @@ impl OffsetGeometryCreation {
     ///
     /// # Errors
     ///
-    /// Those of the closest point (`SmEdgeuse::NormalizedEvaluate`'s status is ignored,
-    /// [`SolidError::Unported`] aside); [`SolidError::InvalidInput`]
-    /// for an edge use without edge.
+    /// Evaluation and closest-point errors with `offset_tangent_gap_statuses`;
+    /// otherwise their statuses are ignored (`Unported` aside). A successful
+    /// closest-point query without a solution does not establish a gap.
+    /// [`SolidError::InvalidInput`] for an edge use without edge.
     pub fn have_tangent_gaps<O: ClassObject + SolutionObject>(
         &self,
         k: &Kernel,
@@ -3729,28 +3769,19 @@ impl OffsetGeometryCreation {
             .ok_or(dangling("edge use without edge"))?;
         let tol = brep.edge_tolerance(edge)?;
 
-        for i in 0..=num_samples {
-            let param = (i as f64 * 1.0) / (num_samples as f64 * 1.0);
-            // (the evaluation's status is not checked upstream: a failed evaluation leaves
-            // sPnt at SmPoint3d's SM_UNDEF_DOUBLE default)
-            let pnt = ignore_soft(edgeuse_normalized_evaluate(
-                k,
-                brep,
-                other_offset_edgeuse,
-                param,
-                false,
-                false,
-                true,
-            ))? // FALSE = 3d Eval
-            .unwrap_or(Vec3::new(UNDEF_DOUBLE, UNDEF_DOUBLE, UNDEF_DOUBLE));
-            // (ClosestPoint's status is not checked either; only bSuccess && d > tol is)
-            if let Some(Some(cp)) = ignore_soft(brep.edge_closest_point(k, edge, pnt))? {
-                if cp.distance > tol {
-                    return Ok(true);
-                }
-            }
-        }
-        Ok(false)
+        tangent_gap_samples(
+            k,
+            brep,
+            num_samples,
+            tol,
+            |k, b, t| {
+                edgeuse_normalized_evaluate(k, b, other_offset_edgeuse, t, false, false, true)
+            },
+            |k, b, p| {
+                b.edge_closest_point(k, edge, p)
+                    .map(|cp| cp.map(|cp| cp.distance))
+            },
+        )
     }
 
     /// Not upstream (`IsStepAcrossEdge`, fork tangency-labs/smlib 5d428ae, opt-in
@@ -4725,6 +4756,73 @@ impl<O: ClassObject + SolutionObject> LocalOperationGeometryCreation<O> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn audit_483_tangent_gaps_preserve_errors_and_no_solution() {
+        let mut k = Kernel::default();
+        let error = SolidError::sm_err("injected tangent-gap service");
+        for checked in [false, true] {
+            k.fixes.offset_tangent_gap_statuses = checked;
+            for fail_evaluation in [false, true] {
+                let mut calls = Vec::new();
+                let result = tangent_gap_samples(
+                    &k,
+                    &mut calls,
+                    2,
+                    1e-6,
+                    |_, calls, _| {
+                        calls.push("evaluate");
+                        if fail_evaluation {
+                            Err(error.clone())
+                        } else {
+                            Ok(Vec3::ZERO)
+                        }
+                    },
+                    |_, calls, _| {
+                        calls.push("closest");
+                        Err(error.clone())
+                    },
+                );
+                if checked {
+                    assert_eq!(result.unwrap_err(), error);
+                    assert_eq!(
+                        calls,
+                        if fail_evaluation {
+                            vec!["evaluate"]
+                        } else {
+                            vec!["evaluate", "closest"]
+                        }
+                    );
+                } else {
+                    assert!(!result.unwrap());
+                    assert_eq!(calls.len(), 6);
+                }
+            }
+            let mut samples = Vec::new();
+            assert!(!tangent_gap_samples(
+                &k,
+                &mut samples,
+                2,
+                1e-6,
+                |_, calls, t| {
+                    calls.push(t);
+                    Ok(Vec3::X * t)
+                },
+                |_, _, _| Ok(None)
+            )
+            .unwrap());
+            assert_eq!(samples, vec![0.0, 0.5, 1.0]);
+            assert!(tangent_gap_samples(
+                &k,
+                &mut (),
+                2,
+                1e-6,
+                |_, (), _| Ok(Vec3::X),
+                |_, (), _| Ok(Some(2e-6))
+            )
+            .unwrap());
+        }
+    }
 
     #[test]
     fn creation_defaults() {

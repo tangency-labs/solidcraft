@@ -19,7 +19,9 @@
 //! `CopyEntityMaps` copies FROM the primitive TO the sweep, despite its name.
 //! Ignored statuses retain the previous output and propagate only Unported; with
 //! `Kernel::fixes.planar_path_profile_placement_statuses`, `position_profile_curves`
-//! returns the first failed placement status instead (WR-632). The `SetCanonical` of
+//! returns the first failed box, normal, evaluation or placement status instead (WR-632, #483).
+//! `primitive_path_curve_statuses` controls the kernel-aware pivot/extension variants;
+//! the original signatures retain pinned behavior. The `SetCanonical` of
 //! an identity profile-normal frame is elided (it always succeeds upstream).
 //! No recursion. Primitive topology construction stops at the first unported
 //! B-rep edit; it never fabricates faces from arena records.
@@ -35,7 +37,7 @@ use std::collections::BTreeMap;
 
 use crate::curve::curve::p2::Curve;
 use crate::curve::curve::p3::compute_crvs_normal;
-use crate::error::{ignore_status, ignored, EntityRef, Result};
+use crate::error::{checked_or_ignored, ignore_status, ignored, EntityRef, Result};
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::extent3d::Extent3d;
 use crate::geom::geom_utility::p2::ContinuityType;
@@ -111,22 +113,49 @@ impl PrimitiveCreation {
 /// without squaring that tolerance; otherwise it returns the second curve's end.
 /// Failed evaluations keep the default undefined point.
 pub fn find_pivot_point(first: &BSplineCurve, second: &BSplineCurve, tol: f64) -> Result<Point3> {
+    find_pivot_point_impl(first, second, tol, false)
+}
+
+/// Kernel-aware pivot selection. With `primitive_path_curve_statuses`, failed
+/// evaluations propagate before comparing or returning their outputs.
+pub fn find_pivot_point_with_kernel(
+    k: &Kernel,
+    first: &BSplineCurve,
+    second: &BSplineCurve,
+    tol: f64,
+) -> Result<Point3> {
+    find_pivot_point_impl(first, second, tol, k.fixes.primitive_path_curve_statuses)
+}
+
+fn find_pivot_point_impl(
+    first: &BSplineCurve,
+    second: &BSplineCurve,
+    tol: f64,
+    checked: bool,
+) -> Result<Point3> {
     let a = first.natural_interval();
     let b = second.natural_interval();
-    let start1 = ignored(first.evaluate_point(a.min()))?.unwrap_or(Vec3::UNDEF);
-    let start2 = ignored(second.evaluate_point(b.min()))?.unwrap_or(Vec3::UNDEF);
+    let start1 = checked_or_ignored(first.evaluate_point(a.min()), checked)?.unwrap_or(Vec3::UNDEF);
+    let start2 =
+        checked_or_ignored(second.evaluate_point(b.min()), checked)?.unwrap_or(Vec3::UNDEF);
     if (start1 - start2).length_squared() < tol {
         return Ok(start2);
     }
-    let end1 = ignored(first.evaluate_point(a.max()))?.unwrap_or(Vec3::UNDEF);
+    let end1 = checked_or_ignored(first.evaluate_point(a.max()), checked)?.unwrap_or(Vec3::UNDEF);
     if (end1 - start2).length_squared() < tol {
         return Ok(start2);
     }
-    Ok(ignored(second.evaluate_point(b.max()))?.unwrap_or(Vec3::UNDEF))
+    Ok(checked_or_ignored(second.evaluate_point(b.max()), checked)?.unwrap_or(Vec3::UNDEF))
 }
 
-fn evaluate_keep(curve: &BSplineCurve, t: f64, from_left: bool, out: &mut [Vec3; 2]) -> Result<()> {
-    if let Some(values) = ignored(curve.evaluate(t, 1, from_left, false))? {
+fn evaluate_keep(
+    curve: &BSplineCurve,
+    t: f64,
+    from_left: bool,
+    out: &mut [Vec3; 2],
+    checked: bool,
+) -> Result<()> {
+    if let Some(values) = checked_or_ignored(curve.evaluate(t, 1, from_left, false), checked)? {
         for (target, value) in out.iter_mut().zip(values) {
             *target = value;
         }
@@ -134,10 +163,11 @@ fn evaluate_keep(curve: &BSplineCurve, t: f64, from_left: bool, out: &mut [Vec3;
     Ok(())
 }
 
-fn extend(curve: &mut BSplineCurve, distance: f64, end: CurveEnd) -> Result<()> {
-    if let Some(Some(next)) =
-        ignored(curve.create_extended_curve_by_distance(distance, end, ContinuityType::G1))?
-    {
+fn extend(curve: &mut BSplineCurve, distance: f64, end: CurveEnd, checked: bool) -> Result<()> {
+    if let Some(Some(next)) = checked_or_ignored(
+        curve.create_extended_curve_by_distance(distance, end, ContinuityType::G1),
+        checked,
+    )? {
         *curve = next;
     }
     Ok(())
@@ -153,6 +183,34 @@ pub fn extend_path_curves(
     periodic: bool,
     distance: f64,
 ) -> Result<Vec<BSplineCurve>> {
+    extend_path_curves_impl(paths, closed, periodic, distance, false)
+}
+
+/// Kernel-aware path extension. Failed evaluations and extensions propagate with
+/// `primitive_path_curve_statuses`; the input curves remain unchanged.
+pub fn extend_path_curves_with_kernel(
+    k: &Kernel,
+    paths: &[BSplineCurve],
+    closed: bool,
+    periodic: bool,
+    distance: f64,
+) -> Result<Vec<BSplineCurve>> {
+    extend_path_curves_impl(
+        paths,
+        closed,
+        periodic,
+        distance,
+        k.fixes.primitive_path_curve_statuses,
+    )
+}
+
+pub(super) fn extend_path_curves_impl(
+    paths: &[BSplineCurve],
+    closed: bool,
+    periodic: bool,
+    distance: f64,
+    checked: bool,
+) -> Result<Vec<BSplineCurve>> {
     let mut output = Vec::new();
     let mut before = [Vec3::UNDEF; 2];
     let mut after = [Vec3::UNDEF; 2];
@@ -164,32 +222,51 @@ pub fn extend_path_curves(
                 previous.natural_interval().max(),
                 true,
                 &mut before,
+                checked,
             )?;
-            evaluate_keep(&path, path.natural_interval().min(), false, &mut after)?;
+            evaluate_keep(
+                &path,
+                path.natural_interval().min(),
+                false,
+                &mut after,
+                checked,
+            )?;
             if !before
                 .get(1)
                 .copied()
                 .unwrap_or(Vec3::UNDEF)
                 .is_parallel_to(after.get(1).copied().unwrap_or(Vec3::UNDEF), 2.0)
             {
-                extend(&mut path, distance, CurveEnd::Start)?;
+                extend(&mut path, distance, CurveEnd::Start, checked)?;
             }
         } else if closed && !periodic {
-            extend(&mut path, distance, CurveEnd::Start)?;
+            extend(&mut path, distance, CurveEnd::Start, checked)?;
         }
         if let Some(next) = paths.get(index + 1) {
-            evaluate_keep(&path, path.natural_interval().max(), true, &mut before)?;
-            evaluate_keep(next, next.natural_interval().min(), false, &mut after)?;
+            evaluate_keep(
+                &path,
+                path.natural_interval().max(),
+                true,
+                &mut before,
+                checked,
+            )?;
+            evaluate_keep(
+                next,
+                next.natural_interval().min(),
+                false,
+                &mut after,
+                checked,
+            )?;
             if !before
                 .get(1)
                 .copied()
                 .unwrap_or(Vec3::UNDEF)
                 .is_parallel_to(after.get(1).copied().unwrap_or(Vec3::UNDEF), 2.0)
             {
-                extend(&mut path, distance, CurveEnd::End)?;
+                extend(&mut path, distance, CurveEnd::End, checked)?;
             }
         } else if closed && !periodic {
-            extend(&mut path, distance, CurveEnd::End)?;
+            extend(&mut path, distance, CurveEnd::End, checked)?;
         }
         output.push(path);
     }
@@ -201,35 +278,56 @@ pub fn extend_path_curves(
 /// the entire output list, including any entries supplied by the caller.
 ///
 /// With `Kernel::fixes.planar_path_profile_placement_statuses` the first failing
-/// status of the two `SetCanonical` calls, the three transforms or
-/// `MakeUnitOrthoVectors` is returned instead of ignored (WR-632, #483); the edits
+/// status of bounding boxes, profile normals, angles, path evaluations, the two
+/// `SetCanonical` calls, the three transforms or `MakeUnitOrthoVectors` is returned (WR-632, #483); the edits
 /// already made stay, and the partial axes are not used after a failed
 /// `MakeUnitOrthoVectors`. Off by default, the statuses are ignored as upstream does.
 ///
 /// # Errors
 ///
 /// Copy failures and unported callees propagate. With the placement-status opt-in,
-/// failures of the placement, orthogonal-axis and transform calls also propagate,
+/// failures of the box, normal, angle, evaluation, placement and transform calls propagate,
 /// without rolling back earlier edits.
 pub fn position_profile_curves(
+    k: &Kernel,
+    profiles: &[Curve],
+    tol: f64,
+    path: &Curve,
+    output: &mut Vec<Curve>,
+) -> Result<()> {
+    position_profile_curves_impl(
+        k,
+        profiles,
+        tol,
+        path,
+        output,
+        k.fixes.planar_path_profile_placement_statuses,
+    )
+}
+
+pub(super) fn position_profile_curves_impl(
     k: &Kernel,
     profiles: &[Curve],
     _tol: f64,
     path: &Curve,
     output: &mut Vec<Curve>,
+    checked: bool,
 ) -> Result<()> {
     let mut total = Extent3d::new();
     let mut bounds = Extent3d::new();
     for profile in profiles {
-        if let Some(boxes) = ignored(profile.calculate_bounding_box(
-            k,
-            &profile.natural_interval(),
-            BoundingBoxRequest {
-                normal: true,
-                ..BoundingBoxRequest::default()
-            },
-            true,
-        ))? {
+        if let Some(boxes) = checked_or_ignored(
+            profile.calculate_bounding_box(
+                k,
+                &profile.natural_interval(),
+                BoundingBoxRequest {
+                    normal: true,
+                    ..BoundingBoxRequest::default()
+                },
+                true,
+            ),
+            checked,
+        )? {
             if let Some(normal) = boxes.normal {
                 bounds = normal;
             }
@@ -240,33 +338,37 @@ pub fn position_profile_curves(
         output.push(profile.copy(k)?);
     }
     let mut translation = Axis2Placement::IDENTITY;
-    if k.fixes.planar_path_profile_placement_statuses {
+    if checked {
         translation.set_canonical(-total.mid(), Vec3::X, Vec3::Y)?;
     } else {
         ignore_status(translation.set_canonical(-total.mid(), Vec3::X, Vec3::Y))?;
     }
     for curve in output.iter_mut() {
         let status = curve.transform(k, &translation, None);
-        if k.fixes.planar_path_profile_placement_statuses {
+        if checked {
             status?;
         } else {
             ignore_status(status)?;
         }
     }
-    let normal = ignored(compute_crvs_normal(k, profiles))?.unwrap_or(Vec3::UNDEF);
+    let normal =
+        checked_or_ignored(compute_crvs_normal(k, profiles), checked)?.unwrap_or(Vec3::UNDEF);
     let mut orientation = Axis2Placement::IDENTITY;
-    let angle = ignored(Vec3::X.angle_between(normal))?.unwrap_or(0.0);
+    let angle = checked_or_ignored(Vec3::X.angle_between(normal), checked)?.unwrap_or(0.0);
     orientation.rotate_about_axis(-angle, Vec3::X.cross(normal));
     for curve in output.iter_mut() {
         let status = curve.transform(k, &orientation, None);
-        if k.fixes.planar_path_profile_placement_statuses {
+        if checked {
             status?;
         } else {
             ignore_status(status)?;
         }
     }
     let mut start = [Vec3::UNDEF; 2];
-    if let Some(values) = ignored(path.evaluate(k, path.natural_interval().min(), 1, true, true))? {
+    if let Some(values) = checked_or_ignored(
+        path.evaluate(k, path.natural_interval().min(), 1, true, true),
+        checked,
+    )? {
         for (target, value) in start.iter_mut().zip(values) {
             *target = value;
         }
@@ -281,7 +383,7 @@ pub fn position_profile_curves(
     // Its caller ignores that status but still uses the partially written axes.
     let mut x = tangent.unitize_or_z();
     let ortho = tangent.make_unit_ortho_vectors(Some(y));
-    if k.fixes.planar_path_profile_placement_statuses {
+    if checked {
         let [next_x, next_y, _] = ortho?;
         x = next_x;
         y = next_y;
@@ -290,14 +392,14 @@ pub fn position_profile_curves(
         y = next_y;
     }
     let mut placement = Axis2Placement::IDENTITY;
-    if k.fixes.planar_path_profile_placement_statuses {
+    if checked {
         placement.set_canonical(origin, x, y)?;
     } else {
         ignore_status(placement.set_canonical(origin, x, y))?;
     }
     for curve in output.iter_mut() {
         let status = curve.transform(k, &placement, None);
-        if k.fixes.planar_path_profile_placement_statuses {
+        if checked {
             status?;
         } else {
             ignore_status(status)?;
@@ -309,6 +411,81 @@ pub fn position_profile_curves(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn audit_483_pivot_and_extensions_stop_at_failed_evaluations() {
+        let empty = BSplineCurve::default();
+        let line = BSplineCurve::create_line_segment(3, Vec3::ZERO, Vec3::X).unwrap();
+        let mut k = Kernel::default();
+        assert!(!k.fixes.primitive_path_curve_statuses);
+        assert_eq!(find_pivot_point(&empty, &line, 1e-9).unwrap(), Vec3::ZERO);
+        assert!(extend_path_curves(&[empty.clone(), line.clone()], false, false, 1.0).is_ok());
+        k.fixes.primitive_path_curve_statuses = true;
+        let error = empty
+            .evaluate_point(empty.natural_interval().min())
+            .unwrap_err();
+        assert_eq!(
+            find_pivot_point_with_kernel(&k, &empty, &line, 1e-9).unwrap_err(),
+            error
+        );
+        let error = empty
+            .evaluate(empty.natural_interval().max(), 1, true, false)
+            .unwrap_err();
+        assert_eq!(
+            extend_path_curves_with_kernel(&k, &[empty, line.clone()], false, false, 1.0)
+                .unwrap_err(),
+            error
+        );
+        assert_eq!(
+            find_pivot_point_with_kernel(&k, &line, &line, 1e-9).unwrap(),
+            Vec3::ZERO
+        );
+    }
+
+    #[test]
+    fn audit_483_placement_read_failures_keep_the_successful_prefix() {
+        let mut k = Kernel::default();
+        k.fixes.planar_path_profile_placement_statuses = true;
+        let profile =
+            Curve::from(BSplineCurve::create_line_segment(3, Vec3::ZERO, Vec3::X).unwrap());
+        let path = Curve::from(BSplineCurve::create_line_segment(3, Vec3::ZERO, Vec3::Z).unwrap());
+        let expected = compute_crvs_normal(&k, std::slice::from_ref(&profile)).unwrap_err();
+        let mut output = Vec::new();
+        assert_eq!(
+            position_profile_curves(&k, &[profile], 1e-9, &path, &mut output).unwrap_err(),
+            expected
+        );
+        assert_eq!(output.len(), 1);
+        assert_eq!(
+            output[0].evaluate_point(&k, 0.0).unwrap(),
+            Vec3::new(-0.5, 0.0, 0.0)
+        );
+    }
+
+    #[test]
+    fn audit_483_placement_rejects_failed_box_before_appending_copy() {
+        let mut k = Kernel::default();
+        k.fixes.planar_path_profile_placement_statuses = true;
+        let bad = Curve::from(BSplineCurve::default());
+        let path = Curve::from(BSplineCurve::create_line_segment(3, Vec3::ZERO, Vec3::Z).unwrap());
+        let expected = bad
+            .calculate_bounding_box(
+                &k,
+                &bad.natural_interval(),
+                BoundingBoxRequest {
+                    normal: true,
+                    ..Default::default()
+                },
+                true,
+            )
+            .unwrap_err();
+        let mut output = vec![path.clone()];
+        let result = position_profile_curves(&k, &[bad], 1e-9, &path, &mut output);
+        assert_eq!(result.unwrap_err(), expected);
+        assert_eq!(output.len(), 1);
+        assert_eq!(output[0].evaluate_point(&k, 0.0).unwrap(), Vec3::ZERO);
+    }
+
     use crate::error::SolidError;
     use crate::nurbs::b_spline_curve::p1::NurbCircleParam;
 

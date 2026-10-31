@@ -380,6 +380,26 @@ pub struct UpstreamFixes {
     pub slice_coincident_faces_sheet_side: bool,
     /// After step 8, a Union, Difference or Intersection whose result is a manifold solid with more than two regions (the infinite region first) runs `SetRegionIsVoidFlagsForNestedSolids`, which puts each region's enclosing shell first (the fork's tangency-labs/smlib `abastran/void-shell-check`). It also rewrites the void flags by nesting from the infinite region, so where step 7 left flags that disagree with the nesting the result's void flags change too, not only its shell order (WR-265, #388; `plan/upstream-issues/WR-265--manifold-boolean-void-shell-first.md` and its 2026-10-26 addendum).
     pub boolean_outer_shell_first: bool,
+    /// The Boolean's temporary origin shift returns failed bounding-box and operand-transform statuses instead of continuing with differently placed bodies or reporting success after a failed restoration (WR-586, #483). If shifting the second operand fails, the first is restored; cleanup attempts every surviving operand and returns its first error. Off by default for pinned SMLib compatibility.
+    pub boolean_temporary_transform_statuses: bool,
+    /// Pivot selection and path extension return failed curve evaluations or extensions
+    /// before consuming their outputs (#483). Off by default for pinned compatibility.
+    pub primitive_path_curve_statuses: bool,
+    /// Planar path sweeps propagate mandatory operation failures and delete their
+    /// owned temporary B-reps on failure (#483). Off by default for pinned compatibility.
+    pub planar_path_sweep_statuses: bool,
+    /// Fillet corners return failed tangent/binormal evaluations, angles and UV
+    /// refinements before installing invalid geometry (#483). Off by default.
+    pub fillet_corner_statuses: bool,
+    /// Fillet edge-domain preparation returns copy/trim failures instead of using
+    /// an untrimmed curve as the requested domain (#483). Off by default.
+    pub fillet_edge_curve_domain_statuses: bool,
+    /// Offset tangent-gap checks return evaluation and closest-point errors;
+    /// a successful query without a solution keeps its existing meaning (#483).
+    pub offset_tangent_gap_statuses: bool,
+    /// Surface-intersection singularity alignment returns failed direction angles
+    /// instead of treating them as zero (#483). Captured when the intersector is built.
+    pub ssi_alignment_statuses: bool,
     /// `SmShell::IsInnerShellOf` passes on the statuses it ignores (fork 4038552): `UNSURE` when the outer shell's closure, the B-rep's box, the sample points or a crossing face's point or normal cannot be computed; a ray that cannot be solved or classified decides nothing and the next ray is tried (WR-497, #1473).
     pub shell_inner_shell_of_statuses: bool,
     /// `SmEdge::ReverseOrientation` returns a failed curve reversal's status before installing the interval, flipping the edge uses or deleting their UV trims, and an edge without curve keeps its interval (WR-260, #521; WR-260 addendum, tangency-labs/smlib 47507b6).

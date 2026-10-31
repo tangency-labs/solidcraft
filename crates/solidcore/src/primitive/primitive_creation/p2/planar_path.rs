@@ -13,14 +13,20 @@
 //! ignores keep the previous values of their outputs, as its reused locals do; a
 //! cutting curve that was never built (a null dereference upstream) is an error.
 //! `CreateExtendedCurve`'s end flag 1 is the start and 0 or 2 the end, as in NLib.
-//! B-reps of a failed sweep stay with the access, as upstream leaves them. Not upstream
+//! With `planar_path_sweep_statuses` (#483), mandatory statuses propagate and every
+//! owned temporary B-rep is released on failure. Successful prefix edits are kept;
+//! the caller's context body and a transferred result are never released. The path
+//! plane normal is computed only at a mitre (a straight path needs none). Failed
+//! optional intersection searches can still fall back to the independently built
+//! cutting line. Off by default, failed B-reps stay with the access, as upstream.
+//! Not upstream
 //! (WR-400, tangency-labs/solidcore#837, opt-in `Kernel::fixes.planar_path_uncapped_open_profiles`):
 //! `SweepProfilesAlongPath` asks for caps only for a profile that closes. No recursion.
 
 use super::{as_bspline, PrimitiveCreationAccess};
 use crate::curve::curve::p9::CurveSolveOptions;
 use crate::curve::curve::Curve;
-use crate::error::{ignore_status, ignored, Result, SolidError};
+use crate::error::{checked_or_ignored, ignored, native_failure, Result, SolidError};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent3d::Extent3d;
 use crate::geom::geom_utility::p2::ContinuityType;
@@ -32,7 +38,7 @@ use crate::nurbs::b_spline_curve::p1::BSplineCurve;
 use crate::nurbs::b_spline_curve::p2::BoundingBoxRequest;
 use crate::nurbs::crv_adv::p1::CurveEnd;
 use crate::primitive::primitive_creation::p1::{
-    extend_path_curves, position_profile_curves, PrimitiveCreation,
+    extend_path_curves_with_kernel, position_profile_curves_impl, PrimitiveCreation,
 };
 use crate::primitive::primitive_creation::SweepOptions;
 use crate::topology::brep::p10::TrimType;
@@ -61,7 +67,10 @@ fn evaluate_keep(
     from_left: bool,
     out: &mut [Vec3; 2],
 ) -> Result<()> {
-    if let Some(values) = ignored(curve.evaluate(k, t, 1, from_left, true))? {
+    if let Some(values) = checked_or_ignored(
+        curve.evaluate(k, t, 1, from_left, true),
+        k.fixes.planar_path_sweep_statuses,
+    )? {
         for (target, value) in out.iter_mut().zip(values) {
             *target = value;
         }
@@ -71,22 +80,26 @@ fn evaluate_keep(
 
 /// `CreateExtendedCurve(dist, end, SM_CT_G1, out)` whose ignored status leaves `out`.
 fn extend_into(
+    checked: bool,
     curve: &BSplineCurve,
     distance: f64,
     end: CurveEnd,
     out: &mut Option<BSplineCurve>,
 ) -> Result<()> {
-    if let Some(Some(next)) =
-        ignored(curve.create_extended_curve_by_distance(distance, end, ContinuityType::G1))?
-    {
+    if let Some(Some(next)) = checked_or_ignored(
+        curve.create_extended_curve_by_distance(distance, end, ContinuityType::G1),
+        checked,
+    )? {
         *out = Some(next);
     }
     Ok(())
 }
 
 /// `CreateLineSegment(3, start, end, out)` whose ignored status leaves `out`.
-fn line_into(start: Vec3, end: Vec3, out: &mut Option<BSplineCurve>) -> Result<()> {
-    if let Some(line) = ignored(BSplineCurve::create_line_segment(3, start, end))? {
+fn line_into(checked: bool, start: Vec3, end: Vec3, out: &mut Option<BSplineCurve>) -> Result<()> {
+    if let Some(line) =
+        checked_or_ignored(BSplineCurve::create_line_segment(3, start, end), checked)?
+    {
         *out = Some(line);
     }
     Ok(())
@@ -123,7 +136,8 @@ fn cap_profile_ends(k: &Kernel, profiles: &[Curve], tol: f64) -> Result<bool> {
 
 /// `SweepProfilesAlongPath`: sweep the positioned profiles along one path segment,
 /// always capped (see [`cap_profile_ends`]), then remove the unwanted caps. The
-/// sweep's and removals' statuses are ignored, as upstream (only `Unported` passes).
+/// sweep's and removals' statuses propagate with `planar_path_sweep_statuses`;
+/// off by default they are ignored, as upstream (only `Unported` passes).
 fn sweep_profiles_along_path(
     a: &mut impl PrimitiveCreationAccess,
     profiles: &[Curve],
@@ -134,6 +148,7 @@ fn sweep_profiles_along_path(
     move_profile_center_to_path: bool,
     brep: BrepId,
 ) -> Result<()> {
+    let checked = a.kernel(brep)?.fixes.planar_path_sweep_statuses;
     let cap_ends = cap_profile_ends(a.kernel(brep)?, profiles, tol)?;
 
     // CreateCurveSweep somehow mangles the path curve
@@ -153,28 +168,31 @@ fn sweep_profiles_along_path(
     let region = a.infinite_region(brep)?;
     let mut primitive = PrimitiveCreation::new(Some(region), 0, false);
     let profiles: Vec<Option<Curve>> = profiles.iter().map(|c| Some(c.clone())).collect();
-    ignore_status(primitive.create_curve_sweep(
-        a,
-        brep,
-        &profiles,
-        &path,
-        None,
-        None,
-        tol,
-        options,
-        false,
-        &mut start_faces,
-        &mut side_faces,
-        &mut end_faces,
-    ))?;
+    checked_or_ignored(
+        primitive.create_curve_sweep(
+            a,
+            brep,
+            &profiles,
+            &path,
+            None,
+            None,
+            tol,
+            options,
+            false,
+            &mut start_faces,
+            &mut side_faces,
+            &mut end_faces,
+        ),
+        checked,
+    )?;
 
     if !cap_start {
         a.set_editing(brep, true)?;
-        ignore_status(a.remove_faces(brep, &start_faces))?;
+        checked_or_ignored(a.remove_faces(brep, &start_faces), checked)?;
     }
     if !cap_end {
         a.set_editing(brep, true)?;
-        ignore_status(a.remove_faces(brep, &end_faces))?;
+        checked_or_ignored(a.remove_faces(brep, &end_faces), checked)?;
     }
     Ok(())
 }
@@ -190,23 +208,41 @@ fn trim_both(
     tol: f64,
 ) -> Result<()> {
     let [before, after] = breps;
+    let checked = a.kernel(before)?.fixes.planar_path_sweep_statuses;
     let [reference1, reference2] = references;
-    ignore_status(a.project_and_trim(
-        before,
-        cutting,
-        normal,
-        reference2,
-        TrimType::DeletePoint,
-        tol,
-    ))?;
-    ignore_status(a.project_and_trim(
-        after,
-        cutting,
-        normal,
-        reference1,
-        TrimType::DeletePoint,
-        tol,
-    ))
+    checked_or_ignored(
+        a.project_and_trim(
+            before,
+            cutting,
+            normal,
+            reference2,
+            TrimType::DeletePoint,
+            tol,
+        ),
+        checked,
+    )?;
+    checked_or_ignored(
+        a.project_and_trim(
+            after,
+            cutting,
+            normal,
+            reference1,
+            TrimType::DeletePoint,
+            tol,
+        ),
+        checked,
+    )
+    .map(|_| ())
+}
+
+/// Compute the normal only before the first operation that consumes it.
+fn path_plane_normal(k: &Kernel, paths: &[Curve], cached: &mut Option<Vec3>) -> Result<Vec3> {
+    if let Some(normal) = *cached {
+        return Ok(normal);
+    }
+    let normal = crate::curve::curve::p3::compute_crvs_normal(k, paths)?;
+    *cached = Some(normal);
+    Ok(normal)
 }
 
 impl PrimitiveCreation {
@@ -221,7 +257,10 @@ impl PrimitiveCreation {
     /// `InvalidInput` for no path curves or a path curve that is not a B-spline;
     /// `SM_ERR` when the pieces do not unite into one B-rep, or for a manifold
     /// result without material; those of the union, the final stitch and the
-    /// region classification (the result is deleted on those).
+    /// region classification (the result is deleted on those). With
+    /// `planar_path_sweep_statuses`, mandatory evaluations, geometry construction,
+    /// cap removals, trims and cleanup also propagate; every owned temporary is
+    /// deleted on any error. No transaction is imposed on the caller's B-rep.
     pub fn create_sweep_along_planar_path(
         a: &mut impl PrimitiveCreationAccess,
         context_of: BrepId,
@@ -232,6 +271,39 @@ impl PrimitiveCreation {
         cap_end: bool,
         move_profile_center_to_path: bool,
     ) -> Result<BrepId> {
+        let checked = a.kernel(context_of)?.fixes.planar_path_sweep_statuses;
+        let mut owned = Vec::new();
+        let result = Self::create_sweep_along_planar_path_owned(
+            a,
+            context_of,
+            profiles,
+            paths,
+            tol,
+            cap_start,
+            cap_end,
+            move_profile_center_to_path,
+            &mut owned,
+        );
+        if checked && result.is_err() {
+            for id in owned {
+                a.delete_brep(id);
+            }
+        }
+        result
+    }
+
+    fn create_sweep_along_planar_path_owned(
+        a: &mut impl PrimitiveCreationAccess,
+        context_of: BrepId,
+        profiles: &[Curve],
+        paths: &[Curve],
+        tol: f64,
+        cap_start: bool,
+        cap_end: bool,
+        move_profile_center_to_path: bool,
+        owned: &mut Vec<BrepId>,
+    ) -> Result<BrepId> {
+        let checked = a.kernel(context_of)?.fixes.planar_path_sweep_statuses;
         let first_path = paths
             .first()
             .ok_or_else(|| SolidError::invalid_input(OP, "no path curves"))?;
@@ -273,15 +345,18 @@ impl PrimitiveCreation {
         let mut total = Extent3d::new();
         let mut bounds = Extent3d::new();
         for profile in profiles {
-            if let Some(boxes) = ignored(profile.calculate_bounding_box(
-                k,
-                &profile.natural_interval(),
-                BoundingBoxRequest {
-                    normal: true,
-                    ..BoundingBoxRequest::default()
-                },
-                true,
-            ))? {
+            if let Some(boxes) = checked_or_ignored(
+                profile.calculate_bounding_box(
+                    k,
+                    &profile.natural_interval(),
+                    BoundingBoxRequest {
+                        normal: true,
+                        ..BoundingBoxRequest::default()
+                    },
+                    true,
+                ),
+                checked,
+            )? {
                 if let Some(normal) = boxes.normal {
                     bounds = normal;
                 }
@@ -294,11 +369,29 @@ impl PrimitiveCreation {
         extend *= 2.0;
 
         // Extend all the path curves at start and end to make sure sweeps go past corner
-        let extended = extend_path_curves(&bspline_paths, closed, periodic, extend)?;
+        let extended = if checked {
+            super::super::p1::extend_path_curves_impl(
+                &bspline_paths,
+                closed,
+                periodic,
+                extend,
+                true,
+            )?
+        } else {
+            extend_path_curves_with_kernel(k, &bspline_paths, closed, periodic, extend)?
+        };
 
-        // get the normal to the plane of the path
-        let path_normal =
-            ignored(crate::curve::curve::p3::compute_crvs_normal(k, paths))?.unwrap_or(Vec3::UNDEF);
+        // A plane normal is only needed at a mitre. A single straight path has
+        // no unique normal (`ComputeCrvsNormal` returns SM_ERR) and needs none.
+        // Legacy mode retains the original eager call and undefined fallback.
+        let mut path_normal = if checked {
+            None
+        } else {
+            Some(
+                ignored(crate::curve::curve::p3::compute_crvs_normal(k, paths))?
+                    .unwrap_or(Vec3::UNDEF),
+            )
+        };
 
         // Prepare for loop where we position profile curves, sweep, and trim
         let mut new_breps: Vec<BrepId> = Vec::new();
@@ -320,16 +413,21 @@ impl PrimitiveCreation {
 
             // position profile curves at the start of the path segment
             let mut new_profiles = Vec::new();
-            position_profile_curves(
+            position_profile_curves_impl(
                 a.kernel(context_of)?,
                 profiles,
                 tol,
                 &Curve::from(extended_path.clone()),
                 &mut new_profiles,
+                checked
+                    || a.kernel(context_of)?
+                        .fixes
+                        .planar_path_profile_placement_statuses,
             )?;
 
             // sweep the profiles along this path segment creating new brep
             let after_brep = a.new_brep(context_of)?;
+            owned.push(after_brep);
             let cap_this_start = ii == 0 && !closed && cap_start;
             let cap_this_end = ii == paths.len() - 1 && !closed && cap_end;
             sweep_profiles_along_path(
@@ -350,12 +448,17 @@ impl PrimitiveCreation {
                 first_brep = Some(after_brep);
                 first_pv = after;
             } else if !before[1].is_parallel_to(after[1], 2.0) {
+                let path_normal =
+                    path_plane_normal(a.kernel(context_of)?, paths, &mut path_normal)?;
                 // Average the derivatives to determine cutting plane normal.
                 let mut average = (-before[1]) + after[1];
                 average = average.unitize_or_z();
 
                 // An inner corner flips the average direction to extend correctly.
-                if let Some(angle) = ignored(path_normal.ccw_angle_between(-before[1], after[1]))? {
+                if let Some(angle) = checked_or_ignored(
+                    path_normal.ccw_angle_between(-before[1], after[1]),
+                    checked,
+                )? {
                     angle_between = angle;
                 }
                 angle_between = rad_to_deg(angle_between);
@@ -366,11 +469,11 @@ impl PrimitiveCreation {
                 // Create temp cutting curve: the line from the corner along the
                 // average derivative, then extended backwards.
                 let cutting_point = after[0] + (average * extend);
-                line_into(after[0], cutting_point, &mut cut_line)?;
+                line_into(checked, after[0], cutting_point, &mut cut_line)?;
                 let line = cut_line
                     .as_ref()
                     .ok_or_else(|| SolidError::null_pointer(OP))?;
-                extend_into(line, extend, CurveEnd::Start, &mut temp_cutting)?;
+                extend_into(checked, line, extend, CurveEnd::Start, &mut temp_cutting)?;
 
                 cutting = None;
                 let previous = ii
@@ -390,15 +493,17 @@ impl PrimitiveCreation {
                     // `pBrepBefore->BrepIntersect(crContext, pBrepAfter, ..)`: the faces'
                     // caches, UV trim curves and classifications are made on their own
                     // B-reps (`after_brep` is of `context_of`'s context)
-                    let intersections = ignored(a.with_breps_mut(
-                        before_id,
-                        after_brep,
-                        |k, before, after, _, _, _, _| {
+                    let intersection_search =
+                        a.with_breps_mut(before_id, after_brep, |k, before, after, _, _, _, _| {
                             crate::topology::brep::p1::brep_intersect_mut(
                                 k, before, after, tol, 2.0, false,
                             )
-                        },
-                    ))?
+                        });
+                    let intersections = if checked {
+                        native_failure(intersection_search)?
+                    } else {
+                        ignored(intersection_search)?
+                    }
                     .map(|(curves, _)| curves)
                     .unwrap_or_default();
                     if intersections.len() > 1 {
@@ -419,7 +524,7 @@ impl PrimitiveCreation {
                                     Some(PathCurve(1, intersection.natural_interval())),
                                 ],
                             };
-                            let solutions = ignored(temp.global_curve_solve(
+                            let search = temp.global_curve_solve(
                                 a.kernel(context_of)?,
                                 &temp.natural_interval(),
                                 intersection,
@@ -428,24 +533,33 @@ impl PrimitiveCreation {
                                 tol,
                                 &options,
                                 SolutionRequested::Single,
-                            ))?;
+                            );
+                            let solutions = if checked {
+                                native_failure(search)?
+                            } else {
+                                ignored(search)?
+                            };
                             let Some(solutions) = solutions else {
                                 continue;
                             };
                             for index in 0..solutions.len() {
                                 let solution = solutions.get_at(index)?;
                                 let on_line = match solution.start.param(0) {
-                                    Ok(t) => {
-                                        ignored(temp.evaluate_point(a.kernel(context_of)?, t))?
-                                            .unwrap_or(Vec3::UNDEF)
-                                    }
+                                    Ok(t) => checked_or_ignored(
+                                        temp.evaluate_point(a.kernel(context_of)?, t),
+                                        checked,
+                                    )?
+                                    .unwrap_or(Vec3::UNDEF),
+                                    Err(e) if checked => return Err(e),
                                     Err(_) => Vec3::UNDEF,
                                 };
                                 let on_intersection = match solution.start.param(1) {
-                                    Ok(t) => ignored(
+                                    Ok(t) => checked_or_ignored(
                                         intersection.evaluate_point(a.kernel(context_of)?, t),
+                                        checked,
                                     )?
                                     .unwrap_or(Vec3::UNDEF),
+                                    Err(e) if checked => return Err(e),
                                     Err(_) => Vec3::UNDEF,
                                 };
                                 let dist = on_intersection.distance(on_line);
@@ -468,14 +582,14 @@ impl PrimitiveCreation {
                             && best.distance(best2) > tol * 10.0
                         {
                             let mut line = None;
-                            line_into(best, best2, &mut line)?;
+                            line_into(checked, best, best2, &mut line)?;
                             let mut line = line.ok_or_else(|| SolidError::null_pointer(OP))?;
                             let mut extended_line = None;
-                            extend_into(&line, extend, CurveEnd::End, &mut extended_line)?;
+                            extend_into(checked, &line, extend, CurveEnd::End, &mut extended_line)?;
                             if let Some(next) = extended_line {
                                 line = next;
                             }
-                            extend_into(&line, extend, CurveEnd::Start, &mut cutting)?;
+                            extend_into(checked, &line, extend, CurveEnd::Start, &mut cutting)?;
                         }
                     }
                 }
@@ -514,12 +628,15 @@ impl PrimitiveCreation {
 
                 // tangent continuous paths need no trim
                 if !before[1].is_parallel_to(after[1], 2.0) {
+                    let path_normal =
+                        path_plane_normal(a.kernel(context_of)?, paths, &mut path_normal)?;
                     before[1] = before[1].unitize_or_z();
                     after[1] = after[1].unitize_or_z();
                     let mut average = (-before[1]) + after[1];
-                    if let Some(angle) =
-                        ignored(path_normal.ccw_angle_between(-before[1], after[1]))?
-                    {
+                    if let Some(angle) = checked_or_ignored(
+                        path_normal.ccw_angle_between(-before[1], after[1]),
+                        checked,
+                    )? {
                         angle_between = angle;
                     }
                     angle_between = rad_to_deg(angle_between);
@@ -529,11 +646,11 @@ impl PrimitiveCreation {
 
                     // the cutting line runs 50 along the average and back
                     let cutting_point = after[0] + (average * 50.0);
-                    line_into(after[0], cutting_point, &mut cut_line)?;
+                    line_into(checked, after[0], cutting_point, &mut cut_line)?;
                     let line = cut_line
                         .as_ref()
                         .ok_or_else(|| SolidError::null_pointer(OP))?;
-                    extend_into(line, 50.0, CurveEnd::Start, &mut cutting)?;
+                    extend_into(checked, line, 50.0, CurveEnd::Start, &mut cutting)?;
                     let curve = cutting
                         .as_ref()
                         .ok_or_else(|| SolidError::null_pointer(OP))?;
@@ -551,15 +668,18 @@ impl PrimitiveCreation {
                         )
                     };
                     if before_id == after_id {
-                        ignore_status(a.stitch_faces(before_id, 0.01))?;
-                        ignore_status(a.project_and_trim(
-                            before_id,
-                            curve,
-                            path_normal,
-                            reference2,
-                            TrimType::Split,
-                            tol,
-                        ))?;
+                        checked_or_ignored(a.stitch_faces(before_id, 0.01), checked)?;
+                        checked_or_ignored(
+                            a.project_and_trim(
+                                before_id,
+                                curve,
+                                path_normal,
+                                reference2,
+                                TrimType::Split,
+                                tol,
+                            ),
+                            checked,
+                        )?;
                         let mut remove = Vec::new();
                         let brep = a.brep(before_id)?;
                         for edge in crate::topology::brep::p1::edges(brep, None)? {
@@ -567,8 +687,11 @@ impl PrimitiveCreation {
                                 remove.extend(crate::topology::edge::faces(brep, edge, None)?);
                             }
                         }
-                        ignore_status(a.remove_faces(before_id, &remove))?;
-                        ignore_status(a.remove_topological_edges_and_vertices(before_id))?;
+                        checked_or_ignored(a.remove_faces(before_id, &remove), checked)?;
+                        checked_or_ignored(
+                            a.remove_topological_edges_and_vertices(before_id),
+                            checked,
+                        )?;
                     } else {
                         trim_both(
                             a,
@@ -602,12 +725,14 @@ impl PrimitiveCreation {
         let sweep = *ordered.first().ok_or_else(|| SolidError::sm_err(OP))?;
 
         if let Err(e) = a.stitch_faces(sweep, tol) {
-            a.delete_brep(sweep);
+            if !checked {
+                a.delete_brep(sweep);
+            }
             return Err(e);
         }
-        ignore_status(a.remove_topological_edges_and_vertices(sweep))?;
+        checked_or_ignored(a.remove_topological_edges_and_vertices(sweep), checked)?;
         // A second attempt can remove additional edges
-        ignore_status(a.remove_topological_edges_and_vertices(sweep))?;
+        checked_or_ignored(a.remove_topological_edges_and_vertices(sweep), checked)?;
 
         // Solid intent with a manifold boundary gets the nested-solid parity
         // classification.
@@ -617,7 +742,9 @@ impl PrimitiveCreation {
             if let Err(e) = a.with_primitive_brep(sweep, |k, b| {
                 crate::topology::brep::p1::set_region_is_void_flags_for_nested_solids(k, b)
             }) {
-                a.delete_brep(sweep);
+                if !checked {
+                    a.delete_brep(sweep);
+                }
                 return Err(e);
             }
         }
@@ -632,7 +759,9 @@ impl PrimitiveCreation {
             }
         }
         if manifold && !has_material {
-            a.delete_brep(sweep);
+            if !checked {
+                a.delete_brep(sweep);
+            }
             return Err(SolidError::sm_err(OP));
         }
         Ok(sweep)
@@ -688,3 +817,6 @@ mod tests {
         assert!(!crate::topology::brep::p2::is_manifold_solid(&sheet).unwrap());
     }
 }
+
+#[cfg(test)]
+mod audit_tests;
