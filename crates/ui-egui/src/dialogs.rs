@@ -3885,7 +3885,7 @@ pub(crate) fn kept_without_targets(s: &Session, editing: Option<(u64, Option<usi
 fn join_face_target(s: &Session, f: &solidcraft_engine::doc::Feature) -> Option<String> {
     match &f.kind {
         FeatureKind::Extrude { sketch, operation: Operation::Join, targets, .. } if targets.is_empty() && f.participants.is_empty() => {
-            solidcraft_engine::join_sketch_face_body(s, sketch.0)
+            solidcraft_engine::join_sketch_face_body(s, sketch.0, f.component)
         }
         _ => None,
     }

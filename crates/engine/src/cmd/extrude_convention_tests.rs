@@ -330,8 +330,25 @@ mod targets {
         assert_eq!(join_face_body(&s, &json!({"face": [10, 10, 10], "face_body": "Base"})).as_deref(), Some("Base"));
         assert_eq!(join_face_body(&s, &json!({"face": [10, 10, 10]})), None);
         let id = |name: &str| s.doc.find_feature(name).unwrap().id;
-        assert_eq!(join_sketch_face_body(&s, id("OnTop")).as_deref(), Some("Base"));
-        assert_eq!(join_sketch_face_body(&s, id("Free")), None);
+        assert_eq!(join_sketch_face_body(&s, id("OnTop"), 0).as_deref(), Some("Base"));
+        assert_eq!(join_sketch_face_body(&s, id("Free"), 0), None);
+    }
+
+    /// A sketch's face body is looked up in the component given, whichever one is active.
+    #[test]
+    fn join_sketch_face_body_is_looked_up_in_the_component_given() {
+        let mut s = Session::default();
+        run(&mut s, "component.create", json!({"name": "Part"}));
+        let part = s.active_component;
+        run(&mut s, "solid.box", json!({"length": 20, "width": 20, "height": 10, "body_name": "Base"}));
+        run(&mut s, "sketch.create", json!({"plane": {"face": [10, 10, 10]}, "name": "OnTop"}));
+        run(&mut s, "sketch.circle.center", json!({"center": [0, 0], "radius": 2}));
+        run(&mut s, "sketch.finish", json!({}));
+        let sketch = s.doc.find_feature("OnTop").unwrap().id;
+        run(&mut s, "component.create", json!({"name": "Other", "parent": 0}));
+        assert_ne!(s.active_component, part);
+        assert_eq!(join_sketch_face_body(&s, sketch, s.active_component), None);
+        assert_eq!(join_sketch_face_body(&s, sketch, part).as_deref(), Some("Base"));
     }
 
     /// The bodies the active component works on: its own, else those of the components inside

@@ -650,7 +650,10 @@ mod targets {
     /// A 40 x 40 x 5 plate, a copy of it where it is, and a rim sketched over the plate's top: on
     /// the plate's face, or on a plane at its height.
     fn plate_and_copy(on_face: bool) -> Harness {
-        let mut h = Harness::new();
+        plate_and_copy_on(Harness::new(), on_face)
+    }
+
+    fn plate_and_copy_on(mut h: Harness, on_face: bool) -> Harness {
         h.app.run("solid.box", json!({"length":40,"width":40,"height":5,"body_name":"Plate"})).unwrap();
         h.app.run("solid.move", json!({"bodies":["Plate"],"copy":true})).unwrap();
         let plane = if on_face {
@@ -1041,6 +1044,33 @@ mod targets {
         let FeatureKind::Extrude { targets, .. } = &h.app.session.doc.feature(feature).unwrap().kind else { panic!("an extrude") };
         assert_eq!(targets.iter().map(|t| t.to_string()).collect::<Vec<_>>(), ["Plate"]);
         assert_eq!(h.app.session.model.state().bodies.len(), 2, "the copy stays a body of its own");
+    }
+
+    /// The same Join in a component, edited while a sibling is active: its face body is looked
+    /// up in its own component, which OK runs it in (#2464).
+    #[test]
+    fn editing_a_join_without_targets_from_another_component_saves_the_face_body() {
+        let mut h = Harness::new();
+        h.app.run("component.create", json!({"name":"Part"})).unwrap();
+        let mut h = plate_and_copy_on(h, true);
+        h.app.run("solid.extrude", json!({"sketch":"Rim","profiles":[0],"distance":3,"operation":"join","name":"Lip"})).unwrap();
+        let feature = h.app.session.doc.find_feature("Lip").unwrap().id;
+        if let Some(FeatureKind::Extrude { targets, .. }) = h.app.session.doc_mut().feature_mut(feature).map(|f| &mut f.kind) {
+            targets.clear();
+        }
+        h.app.session.refresh();
+        h.app.run("component.create", json!({"name":"Other","parent":0})).unwrap();
+        assert_ne!(h.app.session.active_component, h.app.session.doc.feature(feature).unwrap().component);
+        h.app.edit_feature(feature);
+        h.frames(2);
+        let d = h.app.dialog.as_ref().unwrap();
+        assert_eq!(d.inputs.iter().find(|i| i.label == TARGETS).unwrap().items, vec![Sel::Body { name: "Plate".into() }]);
+        assert!(h.widget("All bodies of the component").is_none());
+        assert_eq!(params(&h)["params"]["targets"], json!(["Plate"]));
+        h.step(&json!({"key":"Enter"})).unwrap();
+        assert!(h.app.dialog.is_none(), "{:?}", h.app.dialog);
+        let FeatureKind::Extrude { targets, .. } = &h.app.session.doc.feature(feature).unwrap().kind else { panic!("an extrude") };
+        assert_eq!(targets.iter().map(|t| t.to_string()).collect::<Vec<_>>(), ["Plate"]);
     }
 
     /// A Cut or Intersect saved without targets, edited with a body hidden and OK'd unchanged,

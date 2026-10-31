@@ -1005,23 +1005,28 @@ fn into_body_frame(s: &Session, b: &solidcraft_doc::ModelBody) -> Option<solidcr
 /// its bodies come from a linked design file, or the face was picked on a further placement of a
 /// component placed more than once (the change is drawn at the first).
 fn face_body_reached(s: &Session, sketch: u64) -> Result<Option<String>> {
+    face_body_reached_in(s, sketch, s.active_component)
+}
+
+/// [`face_body_reached`] for a join or cut made in `active`.
+fn face_body_reached_in(s: &Session, sketch: u64, active: u64) -> Result<Option<String>> {
     let Some(FeatureKind::Sketch { plane: solidcraft_doc::PlaneRef::Face { anchor: Some(anchor), .. }, .. }) = s.doc.feature(sketch).map(|f| &f.kind)
     else {
         return Ok(None);
     };
     let st = s.model.state();
-    if let Some(own) = active_scope(s, &st).into_iter().find(|b| b.name == anchor.target.body) {
+    if let Some(own) = active_scope_in(s, &st, active).into_iter().find(|b| b.name == anchor.target.body) {
         return Ok(Some(own.name.clone()));
     }
     let Some(body) = st.body(&anchor.target.body) else { return Ok(None) };
     let component = s.doc.model_body_component(body);
-    if !s.doc.component_within(component, s.active_component) {
+    if !s.doc.component_within(component, active) {
         return Ok(None);
     }
     let name = |c: u64| s.doc.components.iter().find(|x| x.id == c).map_or_else(|| format!("component {c}"), |x| x.name.clone());
     let mut c = component;
     for _ in 0..1000 {
-        if c == s.active_component || c == 0 {
+        if c == active || c == 0 {
             break;
         }
         if s.doc.links.contains_key(&c) {
@@ -1058,10 +1063,10 @@ pub fn join_face_body(s: &Session, p: &Value) -> Option<String> {
     sketch_face_body(s, feature_sketch(s, p, "solid.extrude").ok()?)
 }
 
-/// The body a Join from `sketch` with no targets or participants stores, as `solid.extrude`
-/// picks it ([`face_body_reached`]); `None` when it picks none or is refused.
-pub fn join_sketch_face_body(s: &Session, sketch: u64) -> Option<String> {
-    face_body_reached(s, sketch).ok().flatten()
+/// The body a Join of `component` from `sketch` with no targets or participants stores, as
+/// `solid.extrude` picks it ([`face_body_reached`]); `None` when it picks none or is refused.
+pub fn join_sketch_face_body(s: &Session, sketch: u64, component: u64) -> Option<String> {
+    face_body_reached_in(s, sketch, component).ok().flatten()
 }
 
 /// The bodies the active component works on when a feature names none ([`active_scope`]).
@@ -1115,7 +1120,11 @@ pub fn shown_scope(s: &Session) -> Option<Vec<String>> {
 /// in its own frame, as an import places it: a profile sketched on such a part's face meets the
 /// part where it is shown (#3223).
 fn active_scope<'a>(s: &Session, st: &'a solidcraft_doc::ModelState) -> Vec<&'a solidcraft_doc::ModelBody> {
-    let active = s.active_component;
+    active_scope_in(s, st, s.active_component)
+}
+
+/// [`active_scope`] for `active`.
+fn active_scope_in<'a>(s: &Session, st: &'a solidcraft_doc::ModelState, active: u64) -> Vec<&'a solidcraft_doc::ModelBody> {
     let own: Vec<_> = st.bodies.iter().filter(|b| s.doc.model_body_component(b) == active).collect();
     if !own.is_empty() {
         return own;
