@@ -1457,6 +1457,51 @@ mod tests {
     }
 
     #[test]
+    fn body_rename_reusing_a_hidden_name_preserves_visibility_and_history() {
+        for computed in [false, true] {
+            for hidden in [false, true] {
+                let mut s = Session::default();
+                two_boxes(&mut s);
+                let retired = s.doc.features[0].id;
+                run(&mut s, "browser.visibility", json!({"items": ["A"], "visible": false}));
+                run(&mut s, "timeline.delete", json!({"feature": retired}));
+                if hidden {
+                    run(&mut s, "browser.visibility", json!({"items": ["B"], "visible": false}));
+                }
+                let before = s.visibility.clone();
+                assert_eq!(s.body_visible("B"), !hidden);
+                if computed {
+                    let mut scratch = s.scratch();
+                    run(&mut scratch, "body.rename", json!({"body": "B", "name": "A"}));
+                    s.accept_computed(scratch);
+                } else {
+                    run(&mut s, "body.rename", json!({"body": "B", "name": "A"}));
+                }
+                assert_eq!(names(&s), ["A"]);
+                assert_eq!(s.body_visible("A"), !hidden, "computed={computed}, hidden={hidden}: rename preserves visibility");
+                assert_eq!(s.visibility.hidden_bodies, if hidden { vec!["A"] } else { vec![] });
+                run(&mut s, "edit.undo", json!({}));
+                assert_eq!(names(&s), ["B"]);
+                assert_eq!(s.visibility, before, "undo restores the original hidden names, including the deleted body's");
+                assert_eq!(s.body_visible("B"), !hidden, "undo must not transfer the stale hide to B");
+                if !hidden {
+                    run(&mut s, "edit.undo", json!({}));
+                    assert_eq!(names(&s), ["A", "B"]);
+                    assert!(!s.body_visible("A") && s.body_visible("B"), "restoring the deleted body restores its own visibility");
+                    run(&mut s, "edit.redo", json!({}));
+                }
+                run(&mut s, "edit.redo", json!({}));
+                assert_eq!(s.body_visible("A"), !hidden, "redo preserves visibility");
+                let mut saved = (*s.doc).clone();
+                saved.visibility = s.visibility.clone();
+                let reopened = Session::new(serde_json::from_str(&serde_json::to_string(&saved).unwrap()).unwrap());
+                assert_eq!(names(&reopened), ["A"]);
+                assert_eq!(reopened.body_visible("A"), !hidden, "reopening preserves visibility");
+            }
+        }
+    }
+
+    #[test]
     fn renamed_body_keeps_its_users() {
         let mut s = Session::default();
         run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10}));

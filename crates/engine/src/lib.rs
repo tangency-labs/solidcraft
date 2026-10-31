@@ -1097,16 +1097,19 @@ impl Session {
     /// [`Session::refresh`] after the design changed from `previous`; a change that only renamed
     /// a body or a feature (or undid or redid such a rename) renames it in the model instead,
     /// which keeps every result and mesh (#3044).
-    fn refresh_from(&mut self, previous: &Arc<Document>) {
-        self.follow_plane_renames(previous);
-        self.follow_axis_point_renames(previous);
+    fn refresh_from(&mut self, previous: &Arc<Document>, visibility_restored: bool) {
         let rename = self.body_rename(previous);
-        self.remap_hidden_bodies(previous, &self.model.state(), rename.as_ref().map(|(old, new, _)| (old.as_str(), new.as_str())));
-        // Locked bodies follow the rename here rather than in `body.rename`, so a rename that
-        // reaches the design any other way (undo, an outside edit) is covered too (#9737).
-        if let Some((old, new, _)) = &rename {
-            for b in self.visibility.locked_bodies.iter_mut().filter(|b| **b == *old) {
-                *b = new.clone();
+        // Undo/redo restored visibility in the target document's names already. Remapping
+        // those names again can transfer a deleted body's stale hide to the restored body.
+        if !visibility_restored {
+            self.follow_plane_renames(previous);
+            self.follow_axis_point_renames(previous);
+            self.remap_hidden_bodies(previous, &self.model.state(), rename.as_ref().map(|(old, new, _)| (old.as_str(), new.as_str())));
+            // Locked bodies follow explicit renames and outside edits too (#9737).
+            if let Some((old, new, _)) = &rename {
+                for b in self.visibility.locked_bodies.iter_mut().filter(|b| **b == *old) {
+                    *b = new.clone();
+                }
             }
         }
         if let Some((old, new, names_only)) = rename
@@ -1515,7 +1518,7 @@ impl Session {
                         }
                         None if render_only => self.refresh_render(&previous_doc),
                         None if display_only => self.refresh_display(),
-                        None => self.refresh_from(&previous_doc),
+                        None => self.refresh_from(&previous_doc, matches!(spec.id, "edit.undo" | "edit.redo")),
                     }
                     if pin {
                         self.pin_body_names();
