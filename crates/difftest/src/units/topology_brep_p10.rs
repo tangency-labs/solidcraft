@@ -1,13 +1,15 @@
 //! Runner for unit `topology.brep_p10`: building a B-rep from serialized B-rep data
 //! (`SmBrep::MakeTopologyFromData`), then `TestClosureSplitRegion` (edge version),
-//! `RemoveAllTopology` or `ProjectAndTrim`.
+//! `RemoveAllTopology`, `ProjectAndTrim` or `SubdivideFaceAtDiscontinuities`.
 //!
 //! C++: `solidcore_ffi::units::topology_brep_p10` (upstream
 //! `source/SMLib/src/SmBrep.cpp`). Rust: `solidcore::topology::brep::p10`.
 //!
 //! A case names an upstream test file (`file`, relative to `TestFiles/pt_TestFiles`, or
 //! `fixture:<name>` for a crafted file of this unit: three triangles around one spine
-//! edge, and the same with a doubled triangle),
+//! edge, and the same with a doubled triangle; `subdivide_*`, a unit-square sheet on
+//! a degree-1 B-spline surface with interior knots, flat (`g1`: only G1 at the
+//! knots), kinked (`c0`), or with one U knot and two V knots, none in U or none in V),
 //! the six `MakeTopologyFromData` flags (`options`; the default is `ReadFromFile`'s
 //! call), patches to the read B-rep data and an op. Both sides read the file
 //! (`SmBrepData::ReadFromFile` / [`BrepData::read_from_file`]), patch it, build the
@@ -33,10 +35,11 @@ use solidcore::geom::vector2d::Point2;
 use solidcore::math::Vec3;
 use solidcore::nurbs::b_spline_curve::BSplineCurve;
 use solidcore::surface::surface::Surface;
+use solidcore::geom::geom_utility::p2::ContinuityType;
 use solidcore::topology::brep::p10::{
     make_topology_from_data, project_and_trim, remove_all_topology_notified,
-    test_closure_split_region, MakeTopologyOptions, ProjectAndTrimOptions, ProjectEnv, TopologyEnv,
-    TrimType, HEALER_VERSION,
+    subdivide_face_at_discontinuities, test_closure_split_region, MakeTopologyOptions,
+    ProjectAndTrimOptions, ProjectEnv, TopologyEnv, TrimType, HEALER_VERSION,
 };
 use solidcore::topology::brep_cache::CacheObject;
 use solidcore::topology::brep_data::{BrepData, TopologyData};
@@ -121,6 +124,12 @@ enum OpIn {
         approx_tol: Option<f64>,
         #[serde(default)]
         angle_tol: Option<f64>,
+    },
+    /// `SubdivideFaceAtDiscontinuities` of face `face` (modulo the face count) in
+    /// graph order, at `SmContinuityType` `continuity`.
+    Subdivide {
+        face: i64,
+        continuity: i64,
     },
 }
 
@@ -368,6 +377,7 @@ fn cpp(i: &Inputs) -> Result<Output, HarnessError> {
             approx_tol,
             angle_tol,
         },
+        OpIn::Subdivide { face, continuity } => Op::Subdivide { face, continuity },
     };
     let req = Request {
         path: path_of(i)?,
@@ -387,6 +397,11 @@ fn cpp(i: &Inputs) -> Result<Output, HarnessError> {
         Err(solidcore_ffi::FfiError::Status(ffi::STATUS_UNDEFINED_PROJECTION_DEGREE)) => {
             return Ok(Output::rejected(
                 "projecting a raw curve above NL_MAXDEG into a face overruns native surface scratch arrays",
+            ));
+        }
+        Err(solidcore_ffi::FfiError::Status(ffi::STATUS_UNDEFINED_SUBDIVIDE)) => {
+            return Ok(Output::rejected(
+                "subdivide: more U knots than V knots, or a refused iso line (not compared)",
             ));
         }
         Err(e) => return Err(harness(format!("ffi: {e}"))),
@@ -759,8 +774,74 @@ fn rust(i: &Inputs) -> Result<Dump, HarnessError> {
                 out.push(Item::Int(retained));
             }
         }
+        OpIn::Subdivide { face, continuity } => {
+            let n = g.faces.items.len();
+            let picked = usize::try_from(face).ok().and_then(|f| f.checked_rem(n));
+            let Some(&face) = picked.and_then(|f| g.faces.items.get(f)) else {
+                out.push(Item::Int(-3));
+                return Ok(Ok(out));
+            };
+            if b.face(face).map_err(|e| harness(e.to_string()))?.surface.is_none() {
+                out.push(Item::Int(-3));
+                return Ok(Ok(out));
+            }
+            let continuity = continuity_type(continuity)?;
+            let curve_ref = |e: EdgeId, _type_code: i64| key_of(EntityRef::Edge(e));
+            let mut notify = NotifyEnv {
+                records: &mut records,
+                attributes: &mut store,
+                context: None,
+                key_of: &key_of,
+            };
+            let faces = match subdivide_face_at_discontinuities(
+                &mut k,
+                &mut b,
+                &mut notify,
+                &curve_ref,
+                face,
+                continuity,
+            ) {
+                Ok(faces) => {
+                    out.push(Item::Int(0));
+                    faces
+                }
+                Err(e @ SolidError::Unported { .. }) => return Ok(Err(e)),
+                Err(e) => {
+                    out.push(Item::Int(status(&e)));
+                    Vec::new()
+                }
+            };
+            let g2 = Graph::walk(&b).map_err(|e| harness(e.to_string()))?;
+            out.push(Item::Int(faces.len() as i64));
+            for f in faces {
+                out.push(Item::Int(g2.faces.find(Some(f), FaceId::index)));
+            }
+            export(&k, &b, &g2, &records, &mut out).map_err(|e| harness(e.to_string()))?;
+        }
     }
     Ok(Ok(out))
+}
+
+/// The `SmContinuityType` of an upstream code (0 to 13).
+fn continuity_type(code: i64) -> Result<ContinuityType, HarnessError> {
+    use ContinuityType as C;
+    Ok(match code {
+        0 => C::Undefined,
+        1 => C::Discontinuous,
+        2 => C::C0,
+        3 => C::G1,
+        4 => C::G1R,
+        5 => C::G1G2,
+        6 => C::G1G2G3,
+        7 => C::C1,
+        8 => C::C1G2,
+        9 => C::C1G2G3,
+        10 => C::C1C2,
+        11 => C::C1C2G3,
+        12 => C::C1C2C3,
+        13 => C::CInfinity,
+        _ => return Err(harness("continuity code out of range")),
+    })
 }
 
 // ---- traversal-order registry (mirrors the shim's walk) ---------------------------------

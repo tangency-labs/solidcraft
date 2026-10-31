@@ -2,7 +2,8 @@
 //!
 //! Shim: `harness/cpp/shim/topology_brep_p10.cpp`.
 //! Upstream: `source/SMLib/src/SmBrep.cpp` (`SmBrep::MakeTopologyFromData`,
-//! `TestClosureSplitRegion` (edge version), `RemoveAllTopology`, `ProjectAndTrim`).
+//! `TestClosureSplitRegion` (edge version), `RemoveAllTopology`, `ProjectAndTrim`,
+//! `SubdivideFaceAtDiscontinuities`).
 //!
 //! | Rust    | shim                         | upstream                                 |
 //! |---------|------------------------------|------------------------------------------|
@@ -28,7 +29,11 @@
 //!   * [`Op::RemoveAll`]: after setting `m_bEditingEnabled = flag`, the
 //!     `RemoveAllTopology` status and the graph;
 //!   * [`Op::Project`]: the `CreateLineSegment` status, and on success the
-//!     `ProjectAndTrim` status and the graph.
+//!     `ProjectAndTrim` status and the graph;
+//!   * [`Op::Subdivide`]: `-3` alone for a B-rep without faces or a face without
+//!     surface (upstream dereferences it); else the `SubdivideFaceAtDiscontinuities`
+//!     status, the resulting faces (a list of their numbers in the new graph; empty
+//!     after a failure) and the graph.
 //!
 //! The graph is the B-rep tolerance (d), editing flag, the ten entity counts (regions,
 //! shells, face uses, faces, loop uses, loops, edge uses, edges, vertex uses,
@@ -73,6 +78,11 @@ use crate::{check, FfiError, SC_ERR_BUFFER};
 /// whose evaluation overruns NLib's fixed scratch arrays. Classification with an
 /// empty face subset uses the separate SMLib evaluator and remains valid below 32.
 pub const STATUS_UNDEFINED_PROJECTION_DEGREE: i32 = -1101;
+
+/// `SubdivideFaceAtDiscontinuities` on a face whose surface has more U knots than V
+/// knots, or whose iso lines `CreateLineOnSurf` refuses: not compared (the shim does
+/// not call it).
+pub const STATUS_UNDEFINED_SUBDIVIDE: i32 = -1102;
 
 mod sys {
     extern "C" {
@@ -121,6 +131,14 @@ pub enum Op {
         approx_tol: Option<f64>,
         /// `cpdOptAngleTolRadians`.
         angle_tol: Option<f64>,
+    },
+    /// `SubdivideFaceAtDiscontinuities` of face `face` (modulo the face count) in
+    /// graph order.
+    Subdivide {
+        /// Face number in the graph.
+        face: i64,
+        /// `SmContinuityType` (0 to 13).
+        continuity: i64,
     },
 }
 
@@ -215,6 +233,7 @@ fn encode(req: &Request) -> Result<(Vec<i64>, Vec<f64>), FfiError> {
         Op::Closure { .. } => 1,
         Op::RemoveAll { .. } => 2,
         Op::Project { .. } => 3,
+        Op::Subdivide { .. } => 4,
     };
     ints.push(op);
     ints.push(i64::from(req.binary));
@@ -262,6 +281,12 @@ fn encode(req: &Request) -> Result<(Vec<i64>, Vec<f64>), FfiError> {
         Op::Make => {}
         Op::Closure { do_infinite } => ints.push(i64::from(do_infinite)),
         Op::RemoveAll { editing } => ints.push(i64::from(editing)),
+        Op::Subdivide { face, continuity } => {
+            if face < 0 || !(0..=13).contains(&continuity) {
+                return Err(bad("bad subdivide arguments"));
+            }
+            ints.extend([face, continuity]);
+        }
         Op::Project {
             trim,
             a,

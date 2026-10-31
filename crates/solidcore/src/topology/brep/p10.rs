@@ -15,6 +15,7 @@
 //! | [`remove_all_topology_notified`]  | `SmBrep::RemoveAllTopology` (caller's records)  |
 //! | [`test_closure_split_region`]     | `SmBrep::TestClosureSplitRegion(SmBoolean, SmEdge*, ...)` |
 //! | [`HEALER_VERSION`]                | `SM_HEALER_VERSION`                              |
+//! | [`subdivide_face_at_discontinuities`] | `SmBrep::SubdivideFaceAtDiscontinuities`     |
 //!
 //! Deviations:
 //! - **Out-params -> return values.** `rpNewShells` / `rpNewRegions` are returned in a
@@ -69,18 +70,34 @@
 //!   (upstream dereferences it) is [`SolidError::InvalidInput`].
 //! - **UV trim curves.** `m_pUVTrimCurve = SM_CAST_PTR(SmBSplineCurve, pNewUV)`: a copy
 //!   that is not a B-spline curve is made and owned but not stored.
+//! - **`SubdivideFaceAtDiscontinuities`.** The V pass of the iso-line loop counts the V
+//!   knots, where upstream takes the U knot count (`SmBrep.cpp:18483`, WR-589: upstream
+//!   leaves V knots past the U count uncut, cuts none in V when there are no U knots,
+//!   and reads past its V knots when there are more U knots). Not upstream: a fixed
+//!   defect, on the default path, since no upstream caller reaches the function. A failed
+//!   `CreateLineOnSurf` (its status is ignored upstream) is
+//!   [`SolidError::InvalidInput`] (not compared). The null-segment clean-up loop
+//!   revisits an edge whose trim changed its knot count, as upstream, and stops with
+//!   [`SolidError::InvalidInput`] once its edge list grows past
+//!   [`MAX_NULL_SEGMENT_REVISITS`] entries beyond the face's edges (upstream would not
+//!   end). The curve trims there notify nothing beyond the curve itself (the edge
+//!   owning it is not told). The UV trim curves the merge makes are bound to their edge
+//!   uses afterwards, as in [`project_and_trim`].
 
 use crate::curve::curve::p2::{BSPLINE_CURVE_TYPE, LINE_TYPE};
 use crate::curve::curve::Curve;
-use crate::error::{ignored, EntityRef, Result, SolidError};
+use crate::error::{ignore_status, ignored, EntityRef, Result, SolidError};
 use crate::geom::a_object;
 use crate::geom::attribute::{AttributeHandle, AttributeStore, ObjectKey};
+use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
 use crate::geom::extent3d::Extent3d;
 use crate::geom::geom_utility::p1::line_closest_point;
+use crate::geom::geom_utility::p2::ContinuityType;
 use crate::geom::global_solver::{SolutionRequested, SolverOperation};
 use crate::geom::object::{NotifyOperation, ObjectRef, Shape};
 use crate::geom::solution_array::Solution;
+use crate::geom::tol::{are_same, ZONE_TOL_3D};
 use crate::heal::face_props::HealerOpType;
 use crate::intersect::curve_class::p5::ClassGeometryMut;
 use crate::intersect::curve_class::p6::{MergeContext, MergeIntervalBrep};
@@ -88,8 +105,9 @@ use crate::intersect::point_class::ClassGeometry;
 use crate::intersect::topology_solver::p1::{CurveRef, TopologySolver};
 use crate::intersect::topology_solver::p2::TopologySolveOptions;
 use crate::kernel::Kernel;
-use crate::math::{max2, Point3, Vec3, BIG_DOUBLE, EFF_ZERO};
+use crate::math::{max2, Point2, Point3, Vec3, BIG_DOUBLE, EFF_ZERO};
 use crate::nurbs::b_spline_curve::BSplineCurve;
+use crate::nurbs::b_spline_curve_n_lib::TrimMode;
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use crate::query::brep::{self as qbrep, BoundingBoxOptions};
 use crate::query::face::p2::{CurveOnClassifyBrep, CurveOnClassifyObjects, FaceBrep};
@@ -97,6 +115,7 @@ use crate::surface::surface::Surface;
 use crate::topology::brep::p1;
 use crate::topology::brep::p4;
 use crate::topology::brep::p6;
+use crate::topology::brep::p9;
 use crate::topology::brep_cache::{make_brep_cache, CacheObject, CacheSource};
 use crate::topology::brep_data::{BrepData, TopologyData, NO_OBJECT, UNSURE};
 use crate::topology::edge::NotifyEnv;
@@ -2475,6 +2494,237 @@ fn find_and_set_infinite_region(
     status
 }
 
+// ---- subdividing a face at its surface's discontinuities ---------------------------
+
+/// How many entries the edge list of [`subdivide_face_at_discontinuities`]'s
+/// null-segment clean-up may gain beyond the face's edges (an edge is listed again
+/// after a trim changed its knot count, the two halves after a split). Far above
+/// what a face's edges need: each null segment is cut once.
+pub const MAX_NULL_SEGMENT_REVISITS: usize = 65_536;
+
+const OP_SUBDIVIDE: &str = "topology::brep::p10::subdivide_face_at_discontinuities";
+
+/// `SmBrep::SubdivideFaceAtDiscontinuities(pFace, rResultingFaces, eContinuity)`: splits
+/// `face` along the iso lines of its surface's knots of `continuity` or less
+/// (`FindKnotsByMaxContinuity(eContinuity, FALSE, ..)`), first cutting the null
+/// segments (spans whose curve maps to a point) out of the face's edge curves. Returns
+/// `[face]` when the surface has no such knots, else the new faces of the merge
+/// (`MergeCurvesOnSurface` at `SM_ZONE_TOL_3D` with projection; the face itself is not
+/// listed). Editing is enabled meanwhile; edits notify through `env`, new edge curves
+/// named by `curve_ref`.
+///
+/// # Errors
+///
+/// [`SolidError::InvalidInput`] for a face without surface or an edge without curve
+/// (upstream dereferences them), a failed iso line and a
+/// clean-up past [`MAX_NULL_SEGMENT_REVISITS`]; `SM_ERR` for a refused edge split;
+/// those of the knot search, the curve edits, [`p9::make_vertex_split_edge`] and
+/// [`merge_curves_on_surface`].
+pub fn subdivide_face_at_discontinuities(
+    k: &mut Kernel,
+    b: &mut Brep,
+    env: &mut NotifyEnv<'_>,
+    curve_ref: &dyn Fn(EdgeId, i64) -> ObjectRef,
+    face: FaceId,
+    continuity: ContinuityType,
+) -> Result<Vec<FaceId>> {
+    // enable Brep editing during this method
+    let editing = b.editing_enabled();
+    b.set_editing_enabled(true);
+    let result = subdivide_face_body(k, b, env, curve_ref, face, continuity);
+    b.set_editing_enabled(editing);
+    result
+}
+
+fn subdivide_face_body(
+    k: &mut Kernel,
+    b: &mut Brep,
+    env: &mut NotifyEnv<'_>,
+    curve_ref: &dyn Fn(EdgeId, i64) -> ObjectRef,
+    face: FaceId,
+    continuity: ContinuityType,
+) -> Result<Vec<FaceId>> {
+    // locals
+    let surface = surface_of_face(b, face)?;
+    let domain = surface.natural_uv_domain_with_nurb(k)?;
+
+    // get all surface Knot discontinuties
+    let (u_knots, v_knots) = surface.find_knots_by_max_continuity(k, continuity, false)?;
+
+    // no work - no discontinuities
+    if u_knots.is_empty() && v_knots.is_empty() {
+        return Ok(vec![face]);
+    }
+
+    // inform the public - Editing Brep
+    face_pre_edit(b, env, face)?;
+
+    // First remove NULL segments from boundary curves: an edge cleaned up more than
+    // once is listed again at the end
+    let mut edges = face_edges(b, face)?;
+    let bound = edges.len().saturating_add(MAX_NULL_SEGMENT_REVISITS);
+    let mut ii = 0;
+    while let Some(&e) = edges.get(ii) {
+        ii += 1;
+        if edges.len() > bound {
+            return Err(SolidError::invalid_input(
+                OP_SUBDIVIDE,
+                "null segment clean-up does not end",
+            ));
+        }
+        let segments = curve_of_edge(b, e)?.null_segments(k)?;
+
+        // When BSpline curve has an interval that maps to a point in 3 space
+        let (Some(&first), Some(&second)) = (segments.first(), segments.get(1)) else {
+            continue;
+        };
+        let mut edge_ivl = edge::interval(b, e)?;
+        if !(edge_ivl.contains_value(first, 0.0) && edge_ivl.contains_value(second, 0.0)) {
+            continue;
+        }
+        let last = segments.last().copied().unwrap_or(second);
+        if are_same(edge_ivl.min(), first) {
+            // Null segment at beginning of curve: trim it out of the edge interval,
+            // then reparameterize to the edge's interval
+            let _ = edge_ivl.set_min_max(second, edge_ivl.max());
+            trim_null_segment(k, b, e, edge_ivl, &mut edges)?;
+        } else if are_same(edge_ivl.max(), last) {
+            // Null segment at end of curve
+            let before_last = segments
+                .len()
+                .checked_sub(2)
+                .and_then(|n| segments.get(n))
+                .copied()
+                .unwrap_or(first);
+            let _ = edge_ivl.set_min_max(edge_ivl.min(), before_last);
+            trim_null_segment(k, b, e, edge_ivl, &mut edges)?;
+        } else {
+            // Null segment at interior of curve: split the edge, both halves inspected
+            let split = p9::make_vertex_split_edge(k, b, e, first, env, curve_ref)?;
+            if !split.split {
+                return Err(SolidError::sm_err(OP_SUBDIVIDE));
+            }
+            let [e1, e2] = split.edges.ok_or(SolidError::invalid_input(
+                OP_SUBDIVIDE,
+                "split without edges",
+            ))?;
+            edges.push(e1);
+            edges.push(e2);
+        }
+    }
+
+    // for U and V directions - build the iso lines to split the face along (the V pass
+    // over the V knots: WR-589, upstream counts the U knots there)
+    let mut curves_3d: Vec<Curve> = Vec::new();
+    let iso_lines = u_knots
+        .iter()
+        .map(|&u| {
+            (
+                Point2::new(u, domain.min().y),
+                Point2::new(u, domain.max().y),
+            )
+        })
+        .chain(v_knots.iter().map(|&v| {
+            (
+                Point2::new(domain.min().x, v),
+                Point2::new(domain.max().x, v),
+            )
+        }));
+    for (start, end) in iso_lines {
+        // create IsoLineCrvOnSurf (status ignored upstream; a failure is not compared)
+        let line = match surface_of_face(b, face)?.create_line_on_surf(k, start, end) {
+            Ok(line) => line,
+            Err(e) if e.is_unported() => return Err(e),
+            Err(_) => return Err(SolidError::invalid_input(OP_SUBDIVIDE, "no iso line")),
+        };
+        curves_3d.push(Curve::from(line));
+    }
+
+    // split the face at all the split isoparam lines
+    face_pre_edit(b, env, face)?;
+    let merged = merge_curves_on_surface(
+        k,
+        b,
+        env,
+        curve_ref,
+        face,
+        ZONE_TOL_3D,
+        &curves_3d,
+        None,
+        true,
+    );
+    // the UV trim curves the merge made, owned by their edge uses
+    let bound = bind_uv_trim_owners(b, env.key_of);
+    let (new_faces, _) = merged?;
+    bound?;
+    Ok(new_faces)
+}
+
+/// `pCurve->Trim(sEdgeIvl)` then `pCurve->EditParameterization(pEdge->GetInterval())`
+/// (status ignored) of edge `e`'s curve; the edge is listed again when the trim
+/// changed the curve's number of knots.
+fn trim_null_segment(
+    k: &Kernel,
+    b: &mut Brep,
+    e: EdgeId,
+    mut edge_ivl: Extent1d,
+    edges: &mut Vec<EdgeId>,
+) -> Result<()> {
+    let num_knots = curve_of_edge(b, e)?.number_natural_knots(k)?;
+    // SmTol::GetZoneTol3d(curve) follows its edge
+    let tol = b.edge(e)?.tolerance;
+    curve_of_edge_mut(b, e)?.trim_with_zone_tol(k, &mut edge_ivl, TrimMode::Notify, tol)?;
+    let edge_ivl = edge::interval(b, e)?;
+    ignore_status(curve_of_edge_mut(b, e)?.edit_parameterization(k, &edge_ivl))?;
+    if curve_of_edge(b, e)?.number_natural_knots(k)? != num_knots {
+        edges.push(e);
+    }
+    Ok(())
+}
+
+/// `pFace->GetSurface()`, dereferenced upstream.
+fn surface_of_face(b: &Brep, f: FaceId) -> Result<&Surface> {
+    b.face(f)?.surface.as_ref().ok_or(SolidError::invalid_input(
+        OP_SUBDIVIDE,
+        "face without surface",
+    ))
+}
+
+/// `pEdge->GetCurve()`, dereferenced upstream.
+fn curve_of_edge(b: &Brep, e: EdgeId) -> Result<&Curve> {
+    edge::curve(b, e)?.ok_or(SolidError::invalid_input(
+        OP_SUBDIVIDE,
+        "edge without curve",
+    ))
+}
+
+fn curve_of_edge_mut(b: &mut Brep, e: EdgeId) -> Result<&mut Curve> {
+    b.edge_mut(e)?
+        .curve
+        .as_mut()
+        .ok_or(SolidError::invalid_input(
+            OP_SUBDIVIDE,
+            "edge without curve",
+        ))
+}
+
+/// `pFace->Notify(SM_NO_PRE_EDIT, pFace, this, NULL)` (status ignored upstream).
+fn face_pre_edit(b: &mut Brep, env: &mut NotifyEnv<'_>, f: FaceId) -> Result<()> {
+    let data = [
+        Some((env.key_of)(EntityRef::Face(f))),
+        Some(super::p2::brep_ref(b)),
+        None,
+    ];
+    ignore_status(crate::topology::face::p3::notify(
+        b,
+        f,
+        env,
+        None,
+        NotifyOperation::PreEdit,
+        data,
+    ))
+}
+
 /// Completes the native `SetUVTrimCurve` owner binding (`pUVTrimCurve->SetOwner(eu)`)
 /// under the caller's names `key_of` for the UV trim curves the B-rep's own routines
 /// left without owner (a B-rep under [`crate::topology::NamingScheme::Caller`]: lazy
@@ -2744,7 +2994,7 @@ mod tests {
                 start_vertex: i as u64,
                 end_vertex: n as u64,
                 prim_eu: i as i64,
-                interval: crate::geom::extent1d::Extent1d::from_raw(0.0, 1.0),
+                interval: Extent1d::from_raw(0.0, 1.0),
                 zone_tol_3d: 1e-6,
                 ..EdgeData::zeroed()
             });
@@ -2985,7 +3235,7 @@ mod tests {
                         start_vertex: key.0 as u64,
                         end_vertex: key.1 as u64,
                         prim_eu: d.edgeuses.len() as i64,
-                        interval: crate::geom::extent1d::Extent1d::from_raw(0.0, 1.0),
+                        interval: Extent1d::from_raw(0.0, 1.0),
                         ..EdgeData::zeroed()
                     });
                     edges.len() - 1

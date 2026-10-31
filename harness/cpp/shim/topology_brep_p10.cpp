@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 // difftest shim for unit `topology.brep_p10`: SmBrep::MakeTopologyFromData,
-// SmBrep::TestClosureSplitRegion (edge version), SmBrep::RemoveAllTopology and
-// SmBrep::ProjectAndTrim (source/SMLib/src/SmBrep.cpp) on B-rep data read from an
-// upstream test file.
+// SmBrep::TestClosureSplitRegion (edge version), SmBrep::RemoveAllTopology,
+// SmBrep::ProjectAndTrim and SmBrep::SubdivideFaceAtDiscontinuities
+// (source/SMLib/src/SmBrep.cpp) on B-rep data read from an upstream test file.
 //
 // One entry point, sc_topology_brep_p10_run(path, ints, n_ints, dbls, n_dbls, out, cap,
 // out_len). The request and output layouts are documented in
@@ -59,6 +59,7 @@ enum Op : int64_t
     OP_CLOSURE = 1,
     OP_REMOVE_ALL = 2,
     OP_PROJECT = 3,
+    OP_SUBDIVIDE = 4,
 };
 
 enum Patch : int64_t
@@ -78,6 +79,9 @@ enum Patch : int64_t
 const int64_t ST_GUARD = -2;
 // Matches the per-unit Rust FFI status; no unsafe projection is attempted.
 const int32_t STATUS_UNDEFINED_PROJECTION_DEGREE = -1101;
+// SubdivideFaceAtDiscontinuities on a surface with more U knots than V knots, or
+// whose iso lines CreateLineOnSurf refuses: not compared.
+const int32_t STATUS_UNDEFINED_SUBDIVIDE = -1102;
 
 struct Out
 {
@@ -1026,7 +1030,7 @@ int32_t run(const char* path, Rd& rd, Out& o)
     SmBoolean opt[6];
     for (int k = 0; k < 6; k++)
         opt[k] = rd.i() != 0 ? TRUE : FALSE;
-    if (!rd.ok || op < OP_MAKE || op > OP_PROJECT)
+    if (!rd.ok || op < OP_MAKE || op > OP_SUBDIVIDE)
         return SC_ERR_ARG;
 
     Owned own;
@@ -1050,6 +1054,14 @@ int32_t run(const char* path, Rd& rd, Out& o)
     std::vector<double> raw_points, raw_knots;
     if (op == OP_CLOSURE || op == OP_REMOVE_ALL)
         flag = rd.i();
+    int64_t sub_face = 0, sub_cont = 0;
+    if (op == OP_SUBDIVIDE)
+    {
+        sub_face = rd.i();
+        sub_cont = rd.i();
+        if (sub_face < 0 || sub_cont < SM_CT_UNDEFINED || sub_cont > SM_CT_CINFINITY)
+            return SC_ERR_ARG;
+    }
     if (op == OP_PROJECT)
     {
         trim = rd.i();
@@ -1182,6 +1194,65 @@ int32_t run(const char* path, Rd& rd, Out& o)
                 }
             o.i(retained);
         }
+    }
+    else if (op == OP_SUBDIVIDE)
+    {
+        if (g.faces.empty())
+        {
+            o.i(-3);
+            return SC_OK;
+        }
+        SmFace* face = g.faces[(size_t)sub_face % g.faces.size()];
+        SmSurface* surface = face->GetSurface();
+        if (surface == nullptr)
+        {
+            o.i(-3);
+            return SC_OK;
+        }
+        SmContinuityType ct = (SmContinuityType)sub_cont;
+        // inputs that are not compared: more U knots than V knots, or an iso line
+        // CreateLineOnSurf refuses
+        SmTArray<double> su, sv;
+        if (surface->FindKnotsByMaxContinuity(ct, FALSE, su, sv) == SM_SUCCESS &&
+            (su.GetSize() > 0 || sv.GetSize() > 0))
+        {
+            if (su.GetSize() > sv.GetSize())
+                return STATUS_UNDEFINED_SUBDIVIDE;
+            SmExtent2d dom = surface->GetNaturalUVDomain();
+            for (int ii = 0; ii < 2; ii++)
+                for (ULONG jj = 0; jj < su.GetSize(); jj++)
+                {
+                    SmPoint2d a, b;
+                    if (ii == 0)
+                    {
+                        a.x = su[jj];
+                        a.y = dom.GetVMin();
+                        b.x = su[jj];
+                        b.y = dom.GetVMax();
+                    }
+                    else
+                    {
+                        a.x = dom.GetUMin();
+                        a.y = sv[jj];
+                        b.x = dom.GetUMax();
+                        b.y = sv[jj];
+                    }
+                    if (!((b - a).Length() > SM_EFF_ZERO_PARAM) || !dom.ContainsPoint2d(a, SM_EFF_ZERO) ||
+                        !dom.ContainsPoint2d(b, SM_EFF_ZERO))
+                        return STATUS_UNDEFINED_SUBDIVIDE;
+                }
+        }
+        SmTArray<SmFace*> faces;
+        SmStatus ss = own.brep->SubdivideFaceAtDiscontinuities(face, faces, ct);
+        o.i(st(ss));
+        Graph g2;
+        walk(own.brep, g2);
+        // the resulting faces of a successful call (a failed one returns none)
+        ULONG n_faces = ss == SM_SUCCESS ? faces.GetSize() : 0;
+        o.i((int64_t)n_faces);
+        for (ULONG i = 0; i < n_faces; ++i)
+            o.i(g2.find(3, faces[i]));
+        export_graph(own.brep, g2, o);
     }
     return SC_OK;
 }

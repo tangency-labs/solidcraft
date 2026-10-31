@@ -36,6 +36,7 @@
 //! | [`Curve::step_inversion`]                         | `STEPInversion`                                  |
 //! | [`Curve::transform`], [`Curve::trim`]             | `Transform`, `Trim`                              |
 //! | [`Curve::knots`], [`Curve::ends`], [`base_ends`]  | `GetKnots`, `GetEnds`                            |
+//! | [`Curve::null_segments`]                          | `GetNullSegments` (`SmBSplineCurve`'s override)  |
 //! | [`Curve::intersect_with_line`], [`LineIntersection`] | `IntersectWithLine`                           |
 //! | [`approximate_length`], [`Curve::approximate_length`] | `ApproximateLength`                          |
 //! | [`Curve::convert_t_from_nurbs_to_step`], [`Curve::convert_t_from_step_to_nurbs`] | `ConvertTFromNURBSToSTEP`, `ConvertTFromSTEPToNURBS` |
@@ -1533,6 +1534,46 @@ impl Curve {
             CurveKind::TangentField(c) => c.base().knots_ref(k, interval),
             CurveKind::Line(c) => c.base_with_nurb()?.knots(interval),
         }
+    }
+
+    /// The parameter pairs bounding the knot spans whose first derivative is zero at
+    /// both ends (`GetNullSegments`): `[p0, p1, p2, p3]` means `[p0, p1]` and
+    /// `[p2, p3]` map to a point. Empty for curves that are not an `SmBSplineCurve`
+    /// (the `SmCurve` default); the B-spline kinds run `SmBSplineCurve`'s version, whose
+    /// `GetKnots` and `Evaluate` calls dispatch on the kind.
+    ///
+    /// # Errors
+    ///
+    /// Those of [`Curve::knots`] and [`Curve::evaluate`].
+    pub fn null_segments(&self, k: &Kernel) -> Result<Vec<f64>> {
+        let mut segments = Vec::new();
+        if !matches!(
+            self.kind,
+            CurveKind::BSpline(_)
+                | CurveKind::Hyperbola(_)
+                | CurveKind::Line(_)
+                | CurveKind::Ellipse(_)
+                | CurveKind::Parabola(_)
+        ) {
+            return Ok(segments);
+        }
+        let (knots, _) = self.knots(k, None)?;
+        for pair in knots.windows(2) {
+            let &[t0, t1] = pair else { continue };
+            let pv = self.evaluate(k, t0, 1, true, true)?;
+            if at(&pv, 1).length_squared() > EFF_ZERO_SQ {
+                continue;
+            }
+
+            let pv = self.evaluate(k, t1, 1, false, true)?;
+
+            // save NULL length intervals
+            if at(&pv, 1).length_squared() < EFF_ZERO_SQ {
+                segments.push(t0);
+                segments.push(t1);
+            }
+        }
+        Ok(segments)
     }
 
     /// The end points and end weights (`GetEnds`; base: the natural interval end

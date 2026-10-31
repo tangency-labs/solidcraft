@@ -14,6 +14,7 @@
 //! | [`SurfaceEval::eval_normal_section`]              | `SmSurfaceEval::EvalNormalSection`               |
 //! | [`pass_sp_convergence_test`]                      | `sm_PassSPConvergenceTest` (static)              |
 //! | [`Surface::create_seam_curve`]                    | `SmSurface::CreateSeamCurve`                     |
+//! | [`Surface::create_line_on_surf`]                  | `SmSurface::CreateLineOnSurf`                    |
 //! | [`Surface::is_on_seam`], [`SeamInfo`]             | `SmSurface::IsOnSeam`                            |
 //! | [`Surface::global_point_solve`], [`Surface::global_point_solve_point_test_off`], [`Surface::global_point_solve_face_tested`], [`FaceTest`], [`global_point_solve_starts`], [`NoObject`] | `SmSurface::GlobalPointSolve` |
 //! | [`classify_curve_surface_xsect_point`], [`XsectClassification`] | `sm_ClassifyCurveSurfaceXSectPoint` (static) |
@@ -93,7 +94,8 @@ use crate::geom::vector2d::Vec2;
 use crate::geom::vector3d::{asin, sqrt as sm_sqrt};
 use crate::kernel::Kernel;
 use crate::math::{
-    Point2, Point3, Vec3, EFF_ZERO, EFF_ZERO_RAD, EFF_ZERO_SQ, EFF_ZERO_SQRT, PI, UNDEF_DOUBLE,
+    Point2, Point3, Vec3, EFF_ZERO, EFF_ZERO_PARAM, EFF_ZERO_RAD, EFF_ZERO_SQ, EFF_ZERO_SQRT, PI,
+    UNDEF_DOUBLE,
 };
 use crate::nurbs::b_spline_surface::SurfParamType;
 use crate::nurbs::b_spline_surface_n_lib::p2::EvaluateFlags;
@@ -118,6 +120,7 @@ const OP_SSI_NORMALIZE: &str = "surface::surface::p4::SsiNormalizeEnfo::evaluate
 const OP_SS_NORMALIZE: &str = "surface::surface::p4::SsNormalizeEnfo::evaluate";
 const OP_EVAL_NORMAL: &str = "surface::surface::p4::SurfaceEval::eval_normal";
 const OP_CLASSIFY: &str = "surface::surface::p4::classify_curve_surface_xsect_point";
+const OP_LINE_ON_SURF: &str = "surface::surface::p4::Surface::create_line_on_surf";
 
 /// The trim boundary test a caller holding a face gives
 /// [`Surface::global_point_solve_face_tested`]: whether the solution at `uv` (classified
@@ -1195,6 +1198,53 @@ impl Surface {
             2,
         )?;
         Ok(Some(seam))
+    }
+
+    /// The line from `start_uv` to `end_uv` in the surface's parameter space, as a 3d
+    /// curve on the surface (`CreateLineOnSurf`): a dimension-2 [`Line`] over `[0, 1]`
+    /// on this surface, over its natural UV domain (owner flag 1: the line copied).
+    ///
+    /// # Errors
+    ///
+    /// [`SolidError::InvalidInput`] (`SM_ERR_INVALID_INPUT`) when the points are not
+    /// farther apart than `SM_EFF_ZERO_PARAM`; `SM_ERR` when either is outside the
+    /// natural UV domain (by more than `SM_EFF_ZERO`); those of the domain, the
+    /// surface copy and the curve construction.
+    pub fn create_line_on_surf(
+        &self,
+        kernel: &Kernel,
+        start_uv: Point2,
+        end_uv: Point2,
+    ) -> Result<CrvOnSurf> {
+        // locals
+        let uv_domain = self.natural_uv_domain_with_nurb(kernel)?;
+
+        // check state - Degenerate Line
+        if (end_uv - start_uv).length() <= EFF_ZERO_PARAM {
+            return Err(SolidError::invalid_input(
+                OP_LINE_ON_SURF,
+                "start and end UV points are too close together",
+            ));
+        }
+
+        // check state - input UVPoints not in sUVDomain
+        if !(uv_domain.contains_point(start_uv, EFF_ZERO)
+            && uv_domain.contains_point(end_uv, EFF_ZERO))
+        {
+            return Err(SolidError::sm_err(OP_LINE_ON_SURF));
+        }
+
+        // Build the UV line
+        let start = Point3::new(start_uv.x, start_uv.y, 0.0);
+        let end = Point3::new(end_uv.x, end_uv.y, 0.0);
+        let line = Line::from_points(start, end, 2);
+        CrvOnSurf::new(
+            kernel,
+            Curve::from(line),
+            self.clone_for_evaluation()?,
+            Some(uv_domain),
+            1,
+        )
     }
 
     /// Whether `uv` is on a seam of the surface (`IsOnSeam`): on a domain boundary
