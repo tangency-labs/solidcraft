@@ -3986,7 +3986,7 @@
   "ui.agent_chat_permission": "The agent asks to run: {title}",
   "ui.agent_chat_pick": "Agent",
   "ui.agent_chat_pick_context": "Pick context",
-  "ui.agent_chat_pick_context_tip": "Choose faces, edges, features and bodies in the model for the agent to look at, then press OK",
+  "ui.agent_chat_pick_context_tip": "Choose faces, edges, features and bodies in the model, then press OK: they are put into the message as a pill where the cursor is (typing @ does the same)",
   "ui.agent_chat_placeholder": "Ask the agent to change the design…",
   "ui.agent_chat_placeholder_busy": "Queue a message for when the agent is done (Ctrl+Enter: send now)",
   "ui.agent_chat_pop_out": "Open in its own window, which you can move to another screen",

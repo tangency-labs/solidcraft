@@ -52,6 +52,26 @@ pub struct Entry {
     pub kind: Kind,
     pub label: String,
     pub detail: String,
+    /// What it stands for in the model (one selection item, or the pieces of a rim): to light it up
+    /// and to tell later whether it is still there.
+    pub sels: Vec<Sel>,
+    /// The persistent names of its faces or edges: they survive an edit, so an item whose names are
+    /// all gone was changed away or deleted.
+    pub names: Vec<String>,
+    /// The pill in the message it was picked for (`«n: …»`), 0 for what is not placed in the text
+    /// (Attach selection).
+    pub group: u32,
+}
+
+impl Entry {
+    /// Whether both stand for the same thing, whichever pill each is in.
+    pub fn same_item(&self, other: &Entry) -> bool {
+        self.kind == other.kind && self.label == other.label && self.detail == other.detail && self.sels == other.sels
+    }
+
+    fn new(kind: Kind, label: String, detail: String) -> Entry {
+        Entry { kind, label, detail, sels: Vec::new(), names: Vec::new(), group: 0 }
+    }
 }
 
 /// The things a message was sent with.
@@ -60,6 +80,8 @@ pub struct Context {
     pub items: Vec<Entry>,
     /// Selected things past [`MAX_ITEMS`], not described.
     pub omitted: usize,
+    /// The pills of the message: their numbers and labels, in reading order.
+    pub groups: Vec<(u32, String)>,
 }
 
 impl Context {
@@ -75,6 +97,11 @@ impl Context {
     /// Add the items of another message (queued messages go as one prompt), up to the limit.
     pub fn merge(&mut self, other: Context) {
         self.omitted += other.omitted;
+        for group in other.groups {
+            if !self.groups.iter().any(|(n, _)| *n == group.0) {
+                self.groups.push(group);
+            }
+        }
         for item in other.items {
             if self.items.len() < MAX_ITEMS {
                 self.items.push(item);
@@ -84,17 +111,60 @@ impl Context {
         }
     }
 
-    /// The block of text the agent gets after the message, `""` when nothing was selected.
-    pub fn prompt_block(&self) -> String {
-        if self.is_empty() {
-            return String::new();
+    /// These items as the pick the pill `id` stands for.
+    pub fn in_group(mut self, id: u32, label: &str) -> Context {
+        for item in &mut self.items {
+            item.group = id;
         }
-        let mut out = format!(
-            "[Selected in SolidCraft when this message was sent: {} item(s). The names, indices and points are the ones the tools take.]",
-            self.total()
-        );
+        self.groups = vec![(id, label.to_string())];
+        self
+    }
+
+    /// The same with every pill number raised by `by`: a queued message joining an earlier one in
+    /// one prompt must not reuse its numbers.
+    pub fn shifted(mut self, by: u32) -> Context {
+        for item in &mut self.items {
+            if item.group > 0 {
+                item.group = item.group.saturating_add(by);
+            }
+        }
+        for group in &mut self.groups {
+            group.0 = group.0.saturating_add(by);
+        }
+        self
+    }
+
+    /// The same with the groups renumbered: `order` lists the old number of each group that is
+    /// still in the text, in reading order (it becomes 1, 2, ...); the items of any other group
+    /// are not placed any more.
+    pub fn regrouped(mut self, order: &[u32]) -> Context {
+        let number = |old: u32| order.iter().position(|o| *o == old).map(|n| u32::try_from(n + 1).unwrap_or(u32::MAX)).unwrap_or(0);
+        let labels: Vec<(u32, String)> = order
+            .iter()
+            .enumerate()
+            .filter_map(|(n, old)| {
+                let label = self.groups.iter().find(|(g, _)| g == old)?.1.clone();
+                Some((u32::try_from(n + 1).unwrap_or(u32::MAX), label))
+            })
+            .collect();
+        for item in &mut self.items {
+            if item.group > 0 {
+                item.group = number(item.group);
+            }
+        }
+        self.groups = labels;
+        self
+    }
+
+    /// The highest pill number.
+    pub fn last_group(&self) -> u32 {
+        self.groups.iter().map(|(n, _)| *n).max().unwrap_or(0)
+    }
+
+    /// The items of one group (0: those not placed in the text), a section per kind.
+    fn sections(&self, group: u32, out: &mut String) {
         for kind in Kind::ALL {
-            let mut lines = self.items.iter().filter(|i| i.kind == kind).peekable();
+            let mut lines = self.items.iter().filter(|i| i.kind == kind && i.group == group).peekable();
             if lines.peek().is_none() {
                 continue;
             }
@@ -106,11 +176,176 @@ impl Context {
                 }
             }
         }
+    }
+
+    /// The block of text the agent gets after the message, `""` when nothing was selected. Picks
+    /// made at a place in the text come numbered, as the marks in the text are.
+    pub fn prompt_block(&self) -> String {
+        if self.is_empty() {
+            return String::new();
+        }
+        let placed = !self.groups.is_empty();
+        let mut out = format!("[Selected in SolidCraft when this message was sent: {} item(s). ", self.total());
+        if placed {
+            out.push_str("A mark like «1: …» in the message stands for the numbered group below, at the place where the user picked it. ");
+        }
+        out.push_str(
+            "A face or edge name stays the same when the model is edited; indices and points are as they were then (`model.faces` and `model.edges` list the current ones).]",
+        );
+        if placed {
+            let mut groups = self.groups.clone();
+            groups.sort_by_key(|(n, _)| *n);
+            for (n, label) in groups {
+                // The same mark as in the message (made safe the same way).
+                out.push('\n');
+                out.push_str(&super::pills::marker(n, &label));
+                if self.items.iter().any(|i| i.group == n) {
+                    self.sections(n, &mut out);
+                } else {
+                    out.push_str("\n(none listed: past the limit)");
+                }
+            }
+            if self.items.iter().any(|i| i.group == 0) {
+                out.push_str("\nSelected as well, not placed in the message:");
+            }
+        }
+        self.sections(0, &mut out);
         if self.omitted > 0 {
             out.push_str(&format!("\n(and {} more, not listed)", self.omitted));
         }
         out
     }
+
+    /// The short phrase for a pick: the item's own label for one, else what it holds, "3 faces + 1
+    /// edge", and the body when they are all of one.
+    pub fn group_label(&self) -> String {
+        if self.items.len() == 1 {
+            return self.items.first().map(|i| i.label.clone()).unwrap_or_default();
+        }
+        let (mut faces, mut edges, mut vertices, mut features, mut bodies, mut other) = (0, 0, 0, 0, 0, 0);
+        let mut body: Option<Option<&str>> = None;
+        for item in &self.items {
+            let sel = item.sels.first();
+            match sel {
+                Some(Sel::Face { .. }) => faces += 1,
+                Some(Sel::Edge { .. }) => edges += 1,
+                Some(Sel::Vertex { .. }) => vertices += 1,
+                Some(Sel::Feature { .. }) => features += 1,
+                Some(Sel::Body { .. }) => bodies += 1,
+                _ => other += 1,
+            }
+            let of = match sel {
+                Some(Sel::Face { body, .. } | Sel::Edge { body, .. } | Sel::Vertex { body, .. } | Sel::Body { name: body }) => Some(body.as_str()),
+                _ => None,
+            };
+            body = match body {
+                None => Some(of),
+                Some(prev) if prev == of => Some(prev),
+                Some(_) => Some(None),
+            };
+        }
+        let count = |n: usize, one: &str, many: &str| (n > 0).then(|| format!("{n} {}", if n == 1 { one } else { many }));
+        let parts: Vec<String> = [
+            count(faces, "face", "faces"),
+            count(edges, "edge", "edges"),
+            count(vertices, "vertex", "vertices"),
+            count(features, "feature", "features"),
+            count(bodies, "body", "bodies"),
+            count(other, "item", "items"),
+        ]
+        .into_iter()
+        .flatten()
+        .collect();
+        let what = parts.join(" + ");
+        match body {
+            Some(Some(name)) if faces + edges + vertices > 0 && !name.is_empty() => format!("{name} · {what}"),
+            _ => what,
+        }
+    }
+}
+
+/// Persistent names of a body's faces and of its edges, kept per body while checking a batch, and
+/// only worked out for what is asked (edge names cost more than face names).
+#[derive(Default)]
+pub struct NameCache {
+    faces: HashMap<String, Vec<String>>,
+    edges: HashMap<String, Vec<String>>,
+}
+
+impl NameCache {
+    pub fn new() -> NameCache {
+        NameCache::default()
+    }
+
+    /// The names of a body's faces (`edges`: of its edges), made by `make` the first time.
+    fn names(&mut self, body: &str, edges: bool, make: impl FnOnce() -> Vec<String>) -> &[String] {
+        let map = if edges { &mut self.edges } else { &mut self.faces };
+        map.entry(body.to_string()).or_insert_with(make)
+    }
+}
+
+/// Whether what `entry` stands for has left the design: its body or feature is gone, or none of its
+/// faces or edges has its persistent name any more (they survive edits, so the item was changed
+/// away or deleted). Items that cannot tell, and ones with no names, count as there.
+pub fn is_gone(session: &Session, entry: &Entry, names: &mut NameCache) -> bool {
+    let Some(sel) = entry.sels.first() else { return false };
+    let state = session.world_state();
+    match sel {
+        Sel::Body { name } => state.body(name).is_none(),
+        Sel::Feature { id } => session.doc.feature(*id).is_none(),
+        Sel::Face { body, .. } | Sel::Edge { body, .. } | Sel::Vertex { body, .. } => {
+            let Some(model_body) = state.body(body) else { return true };
+            if entry.names.is_empty() {
+                return false;
+            }
+            let edges = !matches!(sel, Sel::Face { .. });
+            let current = names.names(body, edges, || {
+                if edges {
+                    solidcraft_engine::doc::naming::edge_names(model_body)
+                } else {
+                    solidcraft_engine::doc::naming::face_names(model_body).to_vec()
+                }
+            });
+            !entry.names.iter().any(|n| current.contains(n))
+        }
+        _ => false,
+    }
+}
+
+/// What `entry` stands for in the design as it is now. A face or edge is looked up by its persistent
+/// name: its number shifts when the design is edited, and the number it was picked with would light
+/// another face. What has gone from the design (see [`is_gone`]) stands for nothing.
+pub fn current_sels(session: &Session, entry: &Entry, names: &mut NameCache) -> Vec<Sel> {
+    if is_gone(session, entry, names) {
+        return Vec::new();
+    }
+    let Some(first) = entry.sels.first() else { return Vec::new() };
+    let (body, is_face) = match first {
+        Sel::Face { body, .. } => (body, true),
+        Sel::Edge { body, .. } => (body, false),
+        _ => return entry.sels.clone(),
+    };
+    if entry.names.is_empty() {
+        return entry.sels.clone();
+    }
+    let state = session.world_state();
+    let Some(model_body) = state.body(body) else { return Vec::new() };
+    let current = names.names(body, !is_face, || {
+        if is_face { solidcraft_engine::doc::naming::face_names(model_body).to_vec() } else { solidcraft_engine::doc::naming::edge_names(model_body) }
+    });
+    // The names go with the pieces in order; the point to look at stays the piece's.
+    let paired = entry.names.len() == entry.sels.len();
+    let mut lit = Vec::new();
+    for (at, name) in entry.names.iter().enumerate() {
+        let Some(index) = current.iter().position(|n| n == name) else { continue };
+        let piece = if paired { entry.sels.get(at) } else { entry.sels.first() };
+        match piece {
+            Some(Sel::Face { point, .. }) => lit.push(Sel::Face { body: body.clone(), index, point: *point }),
+            Some(Sel::Edge { point, .. }) => lit.push(Sel::Edge { body: body.clone(), index, point: *point }),
+            _ => {}
+        }
+    }
+    lit
 }
 
 /// The message as the agent gets it: the text, then what was selected.
@@ -177,6 +412,7 @@ pub fn describe_groups(session: &mut Session, groups: &[Vec<Sel>]) -> Context {
             if group.len() > 1 {
                 join_pieces(session, group, &mut item, &mut listings);
             }
+            item.sels = group.clone();
             context.items.push(item);
         }
     }
@@ -208,7 +444,7 @@ fn join_pieces(session: &mut Session, group: &[Sel], item: &mut Entry, listings:
             _ => None,
         };
         if let Some(f) = found {
-            if let Some(n) = f["name"].as_str() {
+            if let Some(n) = f["name"].as_str().filter(|n| !n.is_empty()) {
                 names.push(n.to_string());
             }
             if let Some(v) = f[if unit == "mm" { "length" } else { "area" }].as_f64() {
@@ -224,8 +460,9 @@ fn join_pieces(session: &mut Session, group: &[Sel], item: &mut Entry, listings:
         item.label = format!("{} ({pieces} pieces)", item.label);
     }
     let whole = if sizes.len() == pieces { format!(", total {} {unit}", num(total)) } else { String::new() };
-    let names = if names.is_empty() { String::new() } else { format!(", names {}", names.join(" + ")) };
-    item.detail = format!("clicked as one: {pieces} pieces, indices {indices:?}{names}{whole}; first piece: {}", item.detail);
+    let said = if names.is_empty() { String::new() } else { format!(", names {}", names.join(" + ")) };
+    item.detail = format!("clicked as one: {pieces} pieces, indices {indices:?}{said}{whole}; first piece: {}", item.detail);
+    item.names = names;
 }
 
 fn entry(session: &mut Session, sel: &Sel, listings: &mut HashMap<(&'static str, String), Value>) -> Entry {
@@ -260,7 +497,9 @@ fn entry(session: &mut Session, sel: &Sel, listings: &mut HashMap<(&'static str,
                 parts.push(format!("index {index}"));
             }
             parts.push(format!("pick point {}", point3(&json!(point))));
-            Entry { kind: Kind::Element, label: format!("{shape} · {body}"), detail: parts.join(", ") }
+            let mut entry = Entry::new(Kind::Element, format!("{shape} · {body}"), parts.join(", "));
+            entry.names = face.as_ref().and_then(|f| f["name"].as_str()).filter(|n| !n.is_empty()).map(str::to_string).into_iter().collect();
+            entry
         }
         Sel::Edge { body, index, point } => {
             let edge = listed_edge(session, listings, body, *index, *point);
@@ -278,17 +517,17 @@ fn entry(session: &mut Session, sel: &Sel, listings: &mut HashMap<(&'static str,
                 parts.push(format!("index {index}"));
             }
             parts.push(format!("pick point {}", point3(&json!(point))));
-            Entry { kind: Kind::Element, label: format!("{shape} · {body}"), detail: parts.join(", ") }
+            let mut entry = Entry::new(Kind::Element, format!("{shape} · {body}"), parts.join(", "));
+            entry.names = edge.as_ref().and_then(|e| e["name"].as_str()).filter(|n| !n.is_empty()).map(str::to_string).into_iter().collect();
+            entry
         }
-        Sel::Vertex { body, point } => {
-            Entry { kind: Kind::Element, label: format!("Vertex of {body}"), detail: format!("at {}", point3(&json!(point))) }
-        }
-        Sel::Body { name } => Entry { kind: Kind::Body, label: name.clone(), detail: String::new() },
-        Sel::Occurrence { path } => Entry {
-            kind: Kind::Body,
-            label: format!("Component occurrence {}", path.iter().map(u64::to_string).collect::<Vec<_>>().join("/")),
-            detail: format!("occurrence path {path:?}"),
-        },
+        Sel::Vertex { body, point } => Entry::new(Kind::Element, format!("Vertex of {body}"), format!("at {}", point3(&json!(point)))),
+        Sel::Body { name } => Entry::new(Kind::Body, name.clone(), String::new()),
+        Sel::Occurrence { path } => Entry::new(
+            Kind::Body,
+            format!("Component occurrence {}", path.iter().map(u64::to_string).collect::<Vec<_>>().join("/")),
+            format!("occurrence path {path:?}"),
+        ),
         Sel::Feature { id } => {
             let feature = session.doc.find_feature(&id.to_string());
             let name = feature.map(|f| f.name.clone()).unwrap_or_else(|| format!("#{id}"));
@@ -300,7 +539,7 @@ fn entry(session: &mut Session, sel: &Sel, listings: &mut HashMap<(&'static str,
             if feature.is_some_and(|f| f.suppressed) {
                 detail.push_str(", suppressed");
             }
-            Entry { kind: Kind::Feature, label: name, detail }
+            Entry::new(Kind::Feature, name, detail)
         }
         other => {
             // Planes, axes and sketch geometry: named by their kind and whatever identifies them.
@@ -316,7 +555,7 @@ fn entry(session: &mut Session, sel: &Sel, listings: &mut HashMap<(&'static str,
                 None => kind,
             };
             let label: String = label.chars().take(60).collect();
-            Entry { kind: Kind::Other, label: capitalised(&label), detail: String::new() }
+            Entry::new(Kind::Other, capitalised(&label), String::new())
         }
     }
 }

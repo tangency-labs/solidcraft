@@ -762,18 +762,13 @@ impl Dialog {
         }
     }
 
-    /// The picker for the agent chat's context, holding what is already picked.
-    pub fn chat_context(picked: &[Sel]) -> Dialog {
-        let mut inputs = vec![
+    /// The picker for a pill in the agent chat's message: elements, features and bodies.
+    pub fn chat_context() -> Dialog {
+        let inputs = vec![
             SelInput::new("Elements", FACES | EDGES | selection::VERTICES, true),
             SelInput::new("Features", selection::FEATURES, true),
             SelInput::new("Bodies", BODIES, true),
         ];
-        for sel in picked {
-            if let Some(input) = inputs.iter_mut().find(|i| fits(i.accept, sel)) {
-                input.items.push(sel.clone());
-            }
-        }
         Dialog::new(Kind::ChatContext, inputs)
     }
 
@@ -3211,7 +3206,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let has_ok = !matches!(d.kind, Kind::Sketch | Kind::Measure { .. });
     let valid = match &d.kind {
         Kind::Sketch => false,
-        // Nothing picked is an answer too: OK empties the chat's tray.
+        // Nothing picked is an answer too: OK adds no pill.
         Kind::ChatContext => true,
         Kind::Material { editor, .. } => !editor.editing() && apply_commands(app, &d).is_ok(),
         Kind::SaveMesh(_) => crate::dialogs_save_mesh::ready(&d.inputs),

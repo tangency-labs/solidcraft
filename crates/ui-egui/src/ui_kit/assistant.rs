@@ -229,29 +229,43 @@ pub(crate) fn assistant_approval<R>(ui: &mut Ui, title: &str, body: impl FnOnce(
 
 /// Unframed growing editor inside the composer. The caller retains focus ID and Enter routing.
 /// Tokens: font_label, control_height, space_8 and shared text_input alignment.
-#[cfg(any(not(target_arch = "wasm32"), test))]
+#[cfg(test)]
 pub(crate) fn assistant_input(ui: &mut Ui, id: egui::Id, value: &mut String, hint: &str) -> Response {
+    composer_edit(ui, id, value, hint, None).response.response
+}
+
+/// The editor of `assistant_input`, with `layouter` drawing its text when given.
+#[cfg(any(not(target_arch = "wasm32"), test))]
+fn composer_edit<'a>(
+    ui: &mut Ui,
+    id: egui::Id,
+    value: &mut String,
+    hint: &str,
+    layouter: Option<&'a mut dyn FnMut(&Ui, &dyn egui::TextBuffer, f32) -> std::sync::Arc<egui::Galley>>,
+) -> egui::text_edit::TextEditOutput {
     let t = Tokens::get();
     // The hint is painted here, not by the TextEdit: a multiline edit wraps its hint onto
     // several rows, and the hint must stay on one row, ending in an ellipsis when it does not fit.
-    let mut response = ui.add(
-        super::fields::text_input(egui::TextEdit::multiline(value))
-            .id(id)
-            .frame(egui::Frame::NONE)
-            .background_color(egui::Color32::TRANSPARENT)
-            .desired_rows(2)
-            .desired_width(f32::INFINITY)
-            .min_size(vec2(0.0, t.control_height + t.space_8))
-            .font(egui::FontId::proportional(t.font_label)),
-    );
-    super::text_menu::menu(ui, &mut response, value, super::text_menu::Field::LINES);
+    let mut edit = super::fields::text_input(egui::TextEdit::multiline(value))
+        .id(id)
+        .frame(egui::Frame::NONE)
+        .background_color(egui::Color32::TRANSPARENT)
+        .desired_rows(2)
+        .desired_width(f32::INFINITY)
+        .min_size(vec2(0.0, t.control_height + t.space_8));
+    edit = match layouter {
+        Some(layouter) => edit.layouter(layouter),
+        None => edit.font(egui::FontId::proportional(t.font_label)),
+    };
+    let mut out = edit.show(ui);
+    super::text_menu::menu(ui, &mut out.response.response, value, super::text_menu::Field::LINES);
     if value.is_empty() {
-        let width = (response.rect.width() - 2.0 * t.form_inset).max(0.0);
+        let width = (out.response.response.rect.width() - 2.0 * t.form_inset).max(0.0);
         let galley = assistant_hint_galley(ui, hint, width);
-        let pos = egui::pos2(response.rect.left() + t.form_inset, response.rect.center().y - galley.size().y / 2.0);
+        let pos = egui::pos2(out.response.response.rect.left() + t.form_inset, out.response.response.rect.center().y - galley.size().y / 2.0);
         ui.painter().galley(pos, galley, ui.visuals().weak_text_color());
     }
-    response
+    out
 }
 
 /// The composer hint laid out on one row of at most `width`, cut with an ellipsis.
@@ -261,6 +275,20 @@ pub(crate) fn assistant_hint_galley(ui: &Ui, hint: &str, width: f32) -> std::syn
     let mut job = egui::text::LayoutJob::simple_singleline(hint.to_owned(), egui::FontId::proportional(t.font_label), ui.visuals().weak_text_color());
     job.wrap = egui::text::TextWrapping { max_width: width, max_rows: 1, break_anywhere: true, overflow_character: Some('\u{2026}') };
     ui.fonts_mut(|f| f.layout_job(job))
+}
+
+/// The composer's editor with a caller-supplied text layout (the pills of a message are drawn by
+/// it). Everything else is as `assistant_input`; the output carries the galley and the caret.
+/// Tokens: as `assistant_input`.
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn assistant_input_laid_out(
+    ui: &mut Ui,
+    id: egui::Id,
+    value: &mut String,
+    hint: &str,
+    layouter: &mut dyn FnMut(&Ui, &dyn egui::TextBuffer, f32) -> std::sync::Arc<egui::Galley>,
+) -> egui::text_edit::TextEditOutput {
+    composer_edit(ui, id, value, hint, Some(layouter))
 }
 
 /// Compact right-aligned approval actions; wrapping grows by control rows, not the remaining card height.
