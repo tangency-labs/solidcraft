@@ -112,9 +112,20 @@ fn listed_for<'a>(
     key: Option<&ListingKey>,
 ) -> (&'a [acp::ModelInfo], Option<String>) {
     match key.and_then(|key| listings.get(key)) {
+        Some(Ok(models)) if models.is_empty() => (&[], Some(tr("ui.agent_chat_models_none").to_string())),
         Some(Ok(models)) => (models, None),
         Some(Err(error)) => (&[], Some(trf("ui.agent_chat_models_failed", &[("error", error)]))),
         None => (&[], key.map(|_| tr("ui.agent_chat_models_listing").to_string())),
+    }
+}
+
+/// Whether a listing is worth asking for again: it failed, or it listed nothing.
+#[cfg_attr(target_arch = "wasm32", allow(dead_code))]
+fn listing_wants_retry(listing: Option<&Result<Vec<acp::ModelInfo>, String>>) -> bool {
+    match listing {
+        Some(Err(_)) => true,
+        Some(Ok(models)) => models.is_empty(),
+        None => false,
     }
 }
 
@@ -192,11 +203,14 @@ pub(super) fn poll_listing(app: &mut SolveApp, ctx: &egui::Context) {
 fn list_for_dialog(app: &mut SolveApp, ctx: &egui::Context) {
     let state = &mut app.agent_chat.settings;
     let Some(s) = state.add.as_mut().filter(|s| s.kind == AddKind::Api) else { return };
+    let typed = Some(s.key.trim().to_string()).filter(|typed| !typed.is_empty());
+    // Editing an agent whose key is kept: the listing goes with that key, read on its thread.
+    let stored = s.editing.clone().filter(|_| s.saved_key && typed.is_none());
     if std::mem::take(&mut s.list_again) {
-        s.listing = listing_key(s.protocol, &s.base_url, !s.key.trim().is_empty());
+        s.listing = listing_key(s.protocol, &s.base_url, typed.is_some() || stored.is_some());
         // Asked again: what failed may work now, with another key or the server back up.
         if let Some(key) = &s.listing
-            && matches!(state.endpoint_models.get(key), Some(Err(_)))
+            && listing_wants_retry(state.endpoint_models.get(key))
         {
             state.endpoint_models.remove(key);
         }
@@ -205,8 +219,12 @@ fn list_for_dialog(app: &mut SolveApp, ctx: &egui::Context) {
     if state.listing.is_some() || state.endpoint_models.contains_key(&key) {
         return;
     }
-    let secret = Some(s.key.trim().to_string()).filter(|secret| key.2 && !secret.is_empty());
-    start_listing(app, ctx, key, move || Ok(secret));
+    let typed = typed.filter(|_| key.2);
+    let stored = stored.filter(|_| key.2).and_then(|agent| app.services.secrets.clone().map(|secrets| (secrets, agent)));
+    start_listing(app, ctx, key, move || match stored {
+        Some((secrets, agent)) => secrets.get(&agent).map_err(|e| trf("ui.ai_keychain_error", &[("error", &e)])),
+        None => Ok(typed),
+    });
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -313,6 +331,7 @@ pub fn open_edit(app: &mut SolveApp, id: &str) -> bool {
         request_timeout_s: c.request_timeout_s.clamp(agents::MIN_REQUEST_TIMEOUT_S, agents::MAX_REQUEST_TIMEOUT_S),
         reasoning_effort: c.reasoning_effort.clone(),
         editing: Some(c.id.clone()),
+        list_again: true,
         ..Default::default()
     };
     if c.kind.is_api() {
@@ -712,7 +731,7 @@ fn agents_section(app: &mut SolveApp, ui: &mut egui::Ui) {
                                     && let Some(key) = key
                                 {
                                     // Asked again: what failed may work now.
-                                    if matches!(chat.settings.endpoint_models.get(&key), Some(Err(_))) {
+                                    if listing_wants_retry(chat.settings.endpoint_models.get(&key)) {
                                         chat.settings.endpoint_models.remove(&key);
                                     }
                                     chat.settings.card_listing = Some((key, entry.id.clone()));
@@ -1418,9 +1437,85 @@ mod card_tests {
             if request.url.contains("refused") {
                 return Ok((401, br#"{"error":{"message":"no such key"}}"#.to_vec()));
             }
+            if request.url.contains("/page/") {
+                return Ok((200, b"<!doctype html><html><body>Control UI</body></html>".to_vec()));
+            }
+            if request.url.contains("/empty/") {
+                return Ok((200, br#"{"data":[]}"#.to_vec()));
+            }
             Ok((200, json!({"data": [{"id": "vendor/big", "name": "Vendor: Big"}, {"id": "vendor/small"}]}).to_string().into_bytes()))
         }));
         seen
+    }
+
+    /// A web page where the models should be, or a list with nothing in it, says so under the
+    /// picker, and is asked for again the next time.
+    #[test]
+    fn a_listing_that_is_no_list_or_lists_nothing_says_so_and_is_asked_again() {
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        h.app.preferences.ai_features = true;
+        h.app.agent_chat.detection = Some(Default::default());
+        let seen = listing_http(&mut h);
+        let requests = || seen.lock().unwrap().len();
+        open_add(&mut h.app);
+        h.frames(3);
+        h.step(&json!({"click":{"handle":"ai_add:ui.ai_add_endpoint"}})).unwrap();
+        list_settled(&mut h);
+        assert_eq!(requests(), 1);
+        let note = |h: &Harness| {
+            let add = h.app.agent_chat.settings.add.as_ref().unwrap();
+            listed_for(&h.app.agent_chat.settings.endpoint_models, add.listing.as_ref()).1.unwrap_or_default()
+        };
+        let ask = |h: &mut Harness, url: &str| {
+            let add = h.app.agent_chat.settings.add.as_mut().unwrap();
+            add.base_url = url.into();
+            add.list_again = true;
+            list_settled(h);
+        };
+        ask(&mut h, "http://localhost:18789/page/v1");
+        assert_eq!(requests(), 2);
+        assert!(note(&h).contains(tr("ui.agent_chat_models_not_a_list")), "{}", note(&h));
+        ask(&mut h, "http://localhost:18789/page/v1");
+        assert_eq!(requests(), 3, "a page where the list should be is asked for again");
+        ask(&mut h, "http://localhost:18789/empty/v1");
+        assert_eq!(requests(), 4);
+        assert_eq!(note(&h), tr("ui.agent_chat_models_none"));
+        ask(&mut h, "http://localhost:18789/empty/v1");
+        assert_eq!(requests(), 5, "an empty list is asked for again");
+        ask(&mut h, "http://localhost:11434/v1");
+        assert_eq!(requests(), 5, "a list that had models is kept");
+        assert_eq!(note(&h), "");
+    }
+
+    /// Editing an endpoint whose key is kept lists its models at once, with that key from the
+    /// keychain (never shown).
+    #[test]
+    fn editing_an_endpoint_lists_with_its_stored_key() {
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        h.app.preferences.ai_features = true;
+        h.app.agent_chat.detection = Some(Default::default());
+        let keys = std::sync::Arc::new(MemoryKeys::default());
+        h.app.services.secrets = Some(keys.clone());
+        keys.set("api-1", "test-key-1").unwrap();
+        let seen = listing_http(&mut h);
+        let requests = || seen.lock().unwrap().clone();
+        h.app.preferences.agents.push(AgentConfig {
+            id: "api-1".into(),
+            name: "Endpoint".into(),
+            kind: Kind::Api,
+            base_url: "https://openrouter.ai/api/v1".into(),
+            model: "vendor/big".into(),
+            key: true,
+            ..Default::default()
+        });
+        h.call("ui.prefs", json!({"open": "AI"}));
+        h.frames(3);
+        assert!(open_edit(&mut h.app, "api-1"));
+        list_settled(&mut h);
+        assert_eq!(requests(), [("https://openrouter.ai/api/v1/models".to_string(), true)], "listed on opening, with the kept key");
+        assert!(h.app.agent_chat.settings.add.as_ref().unwrap().key.is_empty(), "the kept key stays out of the field");
     }
 
     fn list_settled(h: &mut Harness) {

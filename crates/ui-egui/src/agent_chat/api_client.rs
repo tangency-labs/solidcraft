@@ -1648,7 +1648,7 @@ pub fn anthropic_model_list(http: &HttpFn, base_url: &str, key: Option<&str>) ->
     if status != 200 {
         return Err(http_error(status, &v));
     }
-    Ok(listed_models(&v, "display_name")
+    Ok(listed_models(&v, "display_name")?
         .into_iter()
         .map(|(id, name)| ModelInfo { name: name.unwrap_or_else(|| id.clone()), id, description: String::new() })
         .collect())
@@ -1726,10 +1726,13 @@ fn tool_title(name: &str, args: &Value) -> String {
 
 /// The ids of a `/models` body and the names the endpoint gives them (when not just the id), in
 /// its order. The body is the endpoint's to write: an id that could not be sent back is left out,
-/// and a name is cut.
-fn listed_models(body: &Value, name_key: &str) -> Vec<(String, Option<String>)> {
-    let Some(entries) = body.get("data").and_then(Value::as_array) else { return Vec::new() };
-    entries
+/// and a name is cut. A body without a `data` array is no model list (a web page where the
+/// endpoint should be, say): an error, so the picker says so and asks again later.
+fn listed_models(body: &Value, name_key: &str) -> Result<Vec<(String, Option<String>)>, String> {
+    let Some(entries) = body.get("data").and_then(Value::as_array) else {
+        return Err(crate::i18n::tr("ui.agent_chat_models_not_a_list").to_string());
+    };
+    Ok(entries
         .iter()
         .filter_map(|m| {
             let id = m.get("id").and_then(Value::as_str).filter(|id| super::model_id_valid(id))?;
@@ -1737,7 +1740,7 @@ fn listed_models(body: &Value, name_key: &str) -> Vec<(String, Option<String>)> 
             Some((id.to_string(), name))
         })
         .take(MODEL_LIST_CAP)
-        .collect()
+        .collect())
 }
 
 /// `GET {base_url}/models`: the models, in the order the endpoint lists them. The picker shows the
@@ -1749,7 +1752,7 @@ fn model_entries(http: &HttpFn, base_url: &str, headers: Vec<(String, String)>) 
     if status != 200 {
         return Err(http_error(status, &v));
     }
-    Ok(listed_models(&v, "name").into_iter().map(|(id, name)| ModelInfo { name: id.clone(), id, description: name.unwrap_or_default() }).collect())
+    Ok(listed_models(&v, "name")?.into_iter().map(|(id, name)| ModelInfo { name: id.clone(), id, description: name.unwrap_or_default() }).collect())
 }
 
 /// The endpoint's models for the picker.
@@ -2642,6 +2645,21 @@ mod tests {
         assert_eq!(same.name, "Same One");
         assert_eq!(long.name.chars().count(), MODEL_NAME_CAP);
         assert!(test_endpoint(&http, "https://openrouter.ai/api/v1", None, "openai/gpt-x").unwrap().contains(&MODEL_LIST_CAP.to_string()));
+    }
+
+    /// A 200 that is no model list (a web page where the endpoint should be) is an error, so the
+    /// picker says why and asks again later; a list with nothing in it is a list.
+    #[test]
+    fn an_answer_that_is_no_model_list_is_an_error() {
+        let expected = crate::i18n::tr("ui.agent_chat_models_not_a_list").to_string();
+        let page: HttpFn = Arc::new(|_: &HttpRequest| Ok((200, b"<!doctype html><html><body>Control UI</body></html>".to_vec())));
+        assert_eq!(model_list(&page, "http://localhost:18789/v1", None).unwrap_err(), expected);
+        assert_eq!(anthropic_model_list(&page, "http://localhost:18789/v1", None).unwrap_err(), expected);
+        assert_eq!(test_endpoint(&page, "http://localhost:18789/v1", None, "").unwrap_err(), expected);
+        let object: HttpFn = Arc::new(|_: &HttpRequest| Ok((200, json!({"object": "list"}).to_string().into_bytes())));
+        assert_eq!(model_list(&object, "http://localhost:18789/v1", None).unwrap_err(), expected);
+        let empty: HttpFn = Arc::new(|_: &HttpRequest| Ok((200, json!({"data": []}).to_string().into_bytes())));
+        assert!(model_list(&empty, "http://localhost:18789/v1", None).unwrap().is_empty());
     }
 
     #[test]

@@ -6,7 +6,9 @@
     "ui.agent_chat_model_search": "Search models…",
     "ui.agent_chat_models_failed": "Couldn't list models: {error}",
     "ui.agent_chat_models_heading": "Available models",
-    "ui.agent_chat_models_listing": "Listing models…"
+    "ui.agent_chat_models_listing": "Listing models…",
+    "ui.agent_chat_models_none": "The endpoint lists no models",
+    "ui.agent_chat_models_not_a_list": "The answer was no model list"
   },
   "de": {
     "ui.agent_chat_custom_heading": "Eigenes Modell",
@@ -15,7 +17,9 @@
     "ui.agent_chat_model_search": "Modelle suchen…",
     "ui.agent_chat_models_failed": "Modelle konnten nicht abgerufen werden: {error}",
     "ui.agent_chat_models_heading": "Verfügbare Modelle",
-    "ui.agent_chat_models_listing": "Modelle werden abgerufen…"
+    "ui.agent_chat_models_listing": "Modelle werden abgerufen…",
+    "ui.agent_chat_models_none": "Der Endpunkt listet keine Modelle",
+    "ui.agent_chat_models_not_a_list": "Die Antwort war keine Modellliste"
   },
   "ko": {
     "ui.agent_chat_custom_heading": "사용자 지정 모델",
@@ -24,7 +28,9 @@
     "ui.agent_chat_model_search": "모델 검색…",
     "ui.agent_chat_models_failed": "모델 목록을 가져올 수 없습니다: {error}",
     "ui.agent_chat_models_heading": "사용 가능한 모델",
-    "ui.agent_chat_models_listing": "모델 목록을 가져오는 중…"
+    "ui.agent_chat_models_listing": "모델 목록을 가져오는 중…",
+    "ui.agent_chat_models_none": "엔드포인트에 나열된 모델이 없습니다",
+    "ui.agent_chat_models_not_a_list": "응답이 모델 목록이 아닙니다"
   },
   "ar": {
     "ui.agent_chat_custom_heading": "نموذج مخصص",
@@ -33,7 +39,9 @@
     "ui.agent_chat_model_search": "البحث عن النماذج…",
     "ui.agent_chat_models_failed": "تعذّر جلب قائمة النماذج: {error}",
     "ui.agent_chat_models_heading": "النماذج المتاحة",
-    "ui.agent_chat_models_listing": "جارٍ جلب قائمة النماذج…"
+    "ui.agent_chat_models_listing": "جارٍ جلب قائمة النماذج…",
+    "ui.agent_chat_models_none": "لا تسرد نقطة النهاية أي نماذج",
+    "ui.agent_chat_models_not_a_list": "لم يكن الرد قائمة نماذج"
   },
   "he": {
     "ui.agent_chat_custom_heading": "מודל מותאם אישית",
@@ -42,7 +50,9 @@
     "ui.agent_chat_model_search": "חיפוש מודלים…",
     "ui.agent_chat_models_failed": "לא ניתן היה לטעון את רשימת המודלים: {error}",
     "ui.agent_chat_models_heading": "מודלים זמינים",
-    "ui.agent_chat_models_listing": "טוען רשימת מודלים…"
+    "ui.agent_chat_models_listing": "טוען רשימת מודלים…",
+    "ui.agent_chat_models_none": "נקודת הקצה אינה מציגה מודלים",
+    "ui.agent_chat_models_not_a_list": "התשובה לא הייתה רשימת מודלים"
   },
   "ja": {
     "ui.agent_chat_custom_heading": "カスタムモデル",
@@ -51,7 +61,9 @@
     "ui.agent_chat_model_search": "モデルを検索…",
     "ui.agent_chat_models_failed": "モデルを一覧表示できませんでした: {error}",
     "ui.agent_chat_models_heading": "利用可能なモデル",
-    "ui.agent_chat_models_listing": "モデルを一覧表示中…"
+    "ui.agent_chat_models_listing": "モデルを一覧表示中…",
+    "ui.agent_chat_models_none": "エンドポイントにモデルがありません",
+    "ui.agent_chat_models_not_a_list": "応答はモデル一覧ではありませんでした"
   },
   "vi": {
     "ui.agent_chat_custom_heading": "Mô hình tùy chỉnh",
@@ -60,7 +72,9 @@
     "ui.agent_chat_model_search": "Tìm mô hình…",
     "ui.agent_chat_models_failed": "Không thể lấy danh sách mô hình: {error}",
     "ui.agent_chat_models_heading": "Các mô hình có sẵn",
-    "ui.agent_chat_models_listing": "Đang lấy danh sách mô hình…"
+    "ui.agent_chat_models_listing": "Đang lấy danh sách mô hình…",
+    "ui.agent_chat_models_none": "Điểm cuối không liệt kê mô hình nào",
+    "ui.agent_chat_models_not_a_list": "Phản hồi không phải là danh sách mô hình"
   },
   "zh": {
     "ui.agent_chat_custom_heading": "自定义模型",
@@ -69,6 +83,8 @@
     "ui.agent_chat_model_search": "搜索模型…",
     "ui.agent_chat_models_failed": "无法列出模型:{error}",
     "ui.agent_chat_models_heading": "可用模型",
-    "ui.agent_chat_models_listing": "正在列出模型…"
+    "ui.agent_chat_models_listing": "正在列出模型…",
+    "ui.agent_chat_models_none": "该端点未列出任何模型",
+    "ui.agent_chat_models_not_a_list": "响应不是模型列表"
   }
 }

@@ -2326,7 +2326,8 @@ done
 }
 
 /// An agent that lists `models` but does not serve the unstable `session/set_model` answers
-/// "method not found": the choice stays and no error shows (#9970). Other errors still show.
+/// "method not found": the choice stays and no error shows (#9970). Other errors still show, as
+/// the refusal of the model they were about.
 #[cfg(unix)]
 #[test]
 fn set_model_method_not_found_shows_no_error() {
@@ -2368,12 +2369,13 @@ done
     set_model(&mut app, "fast");
     // Replies come in order: once the second one's error shows, the first reply was handled too.
     let t = std::time::Instant::now();
-    while !errors(&app).iter().any(|e| e == "model unavailable") {
+    let refused = trf("ui.agent_chat_model_rejected", &[("model", "fast"), ("error", "model unavailable")]);
+    while !errors(&app).contains(&refused) {
         poll(&mut app, &ctx);
         assert!(t.elapsed() < std::time::Duration::from_secs(20), "no error for the second choice: {:?}", errors(&app));
         std::thread::sleep(std::time::Duration::from_millis(10));
     }
-    assert_eq!(errors(&app), ["model unavailable"], "method not found is no error to show");
+    assert_eq!(errors(&app), [refused], "method not found is no error to show");
     assert!(app.agent_chat.state().running(), "the chat goes on");
     assert_eq!(std::fs::read_to_string(&log).unwrap().matches("session/set_model").count(), 2);
     disconnect(&mut app);
