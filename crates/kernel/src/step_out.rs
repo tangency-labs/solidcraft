@@ -79,7 +79,7 @@ fn real(x: f64) -> String {
 }
 
 /// A STEP string literal (quotes doubled, non-ASCII as `\X2\` UTF-16 runs).
-fn string(s: &str) -> String {
+pub fn string(s: &str) -> String {
     let mut o = String::from("'");
     for c in s.chars() {
         match c {
