@@ -779,6 +779,19 @@ fn graphics() -> Option<serde_json::Value> {
     graphics_path().and_then(|p| std::fs::read_to_string(p).ok()).and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
 }
 
+/// Restore startup choices after loading the separately saved UI preferences.
+fn restore_graphics_preferences(app: &mut SolveApp, saved: Option<&serde_json::Value>) {
+    app.preferences.graphics_adapter = saved.and_then(|v| v.get("adapter").and_then(serde_json::Value::as_str)).unwrap_or_default().to_string();
+    // graphics.json chooses the window before app.ron is loaded. Reflect that saved choice,
+    // not the current session's window system (which an environment override may change).
+    app.preferences.window_system = saved
+        .and_then(|v| v.get("window_system").and_then(serde_json::Value::as_str))
+        .map(str::trim)
+        .filter(|choice| matches!(*choice, "wayland" | "x11"))
+        .unwrap_or("auto")
+        .to_string();
+}
+
 /// The graphics backend preference (`graphics.json`'s `backend`: `auto`, `dx12`, `vulkan`, `gl`).
 fn backend_preference() -> Option<String> {
     graphics().and_then(|v| v.get("backend").and_then(serde_json::Value::as_str).map(str::to_string))
@@ -1113,8 +1126,7 @@ fn main() -> eframe::Result {
                 reason: String::new(),
             });
             if !safe_mode {
-                app.preferences.graphics_adapter =
-                    graphics().and_then(|v| v.get("adapter").and_then(serde_json::Value::as_str).map(str::to_string)).unwrap_or_default();
+                restore_graphics_preferences(&mut app, graphics().as_ref());
             }
             if let Some(rs) = &cc.wgpu_render_state {
                 app.services.graphics_adapters = rs
@@ -1707,6 +1719,50 @@ mod viewport_tests {
 
 #[cfg(test)]
 mod msaa_tests {
+    #[test]
+    fn missing_or_invalid_startup_window_system_uses_automatic() {
+        use serde_json::json;
+
+        for saved in [None, Some(json!(null)), Some(json!({})), Some(json!({"window_system": 7})), Some(json!({"window_system": "unknown"}))] {
+            let mut app = super::SolveApp::new(super::Session::default(), super::Services::default());
+            app.preferences.window_system = "wayland".into();
+            super::restore_graphics_preferences(&mut app, saved.as_ref());
+            assert_eq!(app.preferences.window_system, "auto", "{saved:?}");
+        }
+    }
+
+    /// A manual graphics.json choice wins over stale app.ron preferences and survives an
+    /// unrelated graphics edit (#10116), including on a fresh launch with no saved UI state.
+    #[test]
+    fn startup_window_system_survives_changing_antialiasing() {
+        use serde_json::{Value, json};
+        use solidcraft_ui_egui::scenario::Harness;
+
+        for choice in ["wayland", "x11", "auto", " wayland ", " x11 "] {
+            for stale in [None, Some("auto"), Some("wayland"), Some("x11")] {
+                let mut h = Harness::new();
+                if let Some(stale) = stale {
+                    h.app.load_prefs(&json!({"preferences": {"window_system": stale}}).to_string());
+                }
+                let path = h.dir.join("graphics.json");
+                std::fs::write(&path, json!({"window_system": choice, "backend": "vulkan", "adapter": "Selected GPU", "msaa": 4}).to_string())
+                    .unwrap();
+                h.app.services.graphics_path = Some(path.to_string_lossy().into_owned());
+                let saved: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+                super::restore_graphics_preferences(&mut h.app, Some(&saved));
+
+                let result = h.call("ui.prefs", json!({"msaa": 2}));
+                assert_eq!(result["ok"], true, "{result}");
+                let after: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+                assert_eq!(after["window_system"], choice.trim(), "saved choice {choice:?}, stale UI choice {stale:?}");
+                assert_eq!(result["result"]["window_system"], choice.trim());
+                assert_eq!(after["msaa"], 2);
+                assert_eq!(after["backend"], "vulkan");
+                assert_eq!(after["adapter"], "Selected GPU");
+            }
+        }
+    }
+
     #[test]
     fn first_launch_adopts_the_previous_release_settings() {
         let d = std::env::temp_dir().join(format!("solidcraft-adopt-settings-{}", std::process::id()));
