@@ -490,6 +490,10 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
             res
         }
         Inputs::Sweep { curve, path } => {
+            // an input the FFI refuses is a harness error on both sides: the path
+            // polygonization does not return upstream for a long curved path (HANG-5),
+            // so the Rust port does not run it either
+            ffi::check_path_extent(&spec(path)).map_err(|e| harness(e.to_string()))?;
             let c = need(bspline(curve)?)?;
             let p = need(bspline(path)?)?;
             surface_result(&mut o, api::create_sweep(&c, &p))
@@ -1024,6 +1028,57 @@ impl UnitDiff for Runner {
 mod tests {
     use super::*;
     use std::collections::BTreeMap;
+
+    /// The `fuzz00746` input of the 2026-10-20 fuzz sweep (HANG-5): an arc swept along a
+    /// five-point `SmApiCreateCurve` path whose fourth point is at `y`.
+    fn spike_path_sweep(y: f64) -> Inputs {
+        serde_json::from_value(serde_json::json!({
+            "op": "sweep",
+            "curve": {"kind": "arc", "center": [9.691279491139237, -0.25065508872083697,
+                      0.10543616211517737], "radius": 0.5613553819727618,
+                      "start_deg": -21.215518313383996, "end_deg": 221.33817097968685},
+            "path": {"kind": "curve", "points": [
+                [9.310532027500017, 0.03441225140058868, 0.10543616211517737],
+                [9.543316912856312, -0.2627291077483791, 0.8765544036562793],
+                [9.795804103350964, -0.5334509891102114, 1.6476726451973813],
+                [9.493750182254796, y, 2.418790886738483],
+                [9.416473612794082, 0.040403946082708864, 0.0]
+            ]}
+        }))
+        .unwrap()
+    }
+
+    /// A unit circle swept along a quarter arc of `radius`.
+    fn arc_path_sweep(radius: f64) -> Inputs {
+        serde_json::from_value(serde_json::json!({
+            "op": "sweep",
+            "curve": {"kind": "circle", "center": [0.0, 0.0, 0.0], "radius": 1.0},
+            "path": {"kind": "arc", "center": [0.0, 0.0, 0.0], "radius": radius,
+                     "start_deg": 0.0, "end_deg": 90.0}
+        }))
+        .unwrap()
+    }
+
+    /// HANG-5: the C++ path polygonization never returns for a path point of `1e300`
+    /// and gives no result in 30 s for a quarter-arc path of radius `1e8`; both sides
+    /// refuse them with the same message. The spike path with a control polygon just
+    /// inside the bound (`9.8e7`) runs on both sides and agrees.
+    #[cfg(feature = "cpp")]
+    #[test]
+    fn huge_curved_sweep_path_is_refused_on_both_sides() {
+        for i in [spike_path_sweep(1e300), arc_path_sweep(1e8)] {
+            let c = cpp(&i).unwrap_err().to_string();
+            let r = rust(&i).unwrap_err().to_string();
+            assert!(c.contains("(HANG-5)"), "{c}");
+            assert_eq!(c, r);
+        }
+
+        let i = spike_path_sweep(4.9e7);
+        let (c, r) = (cpp(&i).unwrap(), rust(&i).unwrap());
+        assert!(r.deferred.is_none(), "{:?}", r.deferred);
+        let d = crate::compare(&c, &r, Runner.abs_floors());
+        assert!(d.mismatches.is_empty(), "{:?}", d.mismatches);
+    }
 
     #[cfg(feature = "cpp")]
     #[test]

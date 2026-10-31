@@ -34,8 +34,14 @@
 //! [`eval`] accepts what [`super::topology_edgeuse_p1::eval`] accepts for the block,
 //! indices inside the export (`-1` where a null argument is allowed), finite domains and
 //! tolerances, orientations `0..=2` and at most [`MAX_ATTRIBUTED`] attributed objects.
+//!
+//! Blocks with a value above [`super::topology_edgeuse_p2::MAX_BLOCK_MAGNITUDE`] are
+//! refused first, by [`eval`] and by [`export`], before the block's `Export` builds the
+//! B-rep (HANG-29: building a face on a surface with a `±1e155`..`±1e300` control point
+//! never returns upstream; 2026-10-20 fuzz sweep `fuzz00839`).
 
 use super::topology_edgeuse_p1::{self as p1, bad, brep_block, Reader};
+use super::topology_edgeuse_p2::check_block_magnitudes;
 use crate::{call_with_buffer, FfiError};
 
 /// Largest number of objects `LuLists` attaches the attribute to.
@@ -184,17 +190,47 @@ fn raw(op: Op, path: &str, input: &[f64]) -> Result<Vec<f64>, FfiError> {
     })
 }
 
+/// The graph export ([`super::topology_edgeuse_p1`]'s `Export`) of the B-rep `block`,
+/// which the ops' indices refer to; `block` holds the B-rep block only.
+///
+/// # Errors
+///
+/// [`FfiError::InvalidArgument`] for a malformed block or one with a value above
+/// [`super::topology_edgeuse_p2::MAX_BLOCK_MAGNITUDE`] (HANG-29, refused before the
+/// native export); [`FfiError::Status`] for a shim failure.
+pub fn export(path: &str, block: &[f64]) -> Result<Vec<f64>, FfiError> {
+    export_with(path, block, || p1::eval(p1::Op::Export, path, block))
+}
+
+fn export_with(
+    path: &str,
+    block: &[f64],
+    native: impl FnOnce() -> Result<Vec<f64>, FfiError>,
+) -> Result<Vec<f64>, FfiError> {
+    let mut rd = Reader {
+        input: block,
+        at: 0,
+    };
+    brep_block(&mut rd, path)?;
+    rd.done()?;
+    // HANG-29: the export builds the B-rep, which never returns for such a value
+    check_block_magnitudes(block)?;
+    native()
+}
+
 /// Runs `op` on `input` (see the module docs); `path` is the `.smb` file of a file
 /// B-rep block (ignored otherwise).
 ///
 /// # Errors
 ///
-/// [`FfiError::InvalidArgument`] for a malformed input; [`FfiError::Status`] for a shim
-/// failure.
+/// [`FfiError::InvalidArgument`] for a malformed input or a block value above
+/// [`super::topology_edgeuse_p2::MAX_BLOCK_MAGNITUDE`] (HANG-29); [`FfiError::Status`]
+/// for a shim failure.
 pub fn eval(op: Op, path: &str, input: &[f64]) -> Result<Vec<f64>, FfiError> {
     let mut rd = Reader { input, at: 0 };
     brep_block(&mut rd, path)?;
     let block = input.get(..rd.at).ok_or_else(|| bad("input too short"))?;
+    check_block_magnitudes(block)?;
     let export = p1::eval(p1::Op::Export, path, block)?;
     let Some(c) = p1::counts(&export) else {
         // the B-rep could not be built: the op reports the same failure
@@ -257,4 +293,30 @@ pub fn side_in_surface(path: &str, periodic_u: f64, periodic_v: f64, block: &[f6
             )
         }
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// HANG-29: the magnitude refusal comes before the native export (no native call:
+    /// the callback stands in for it and must not run), and [`eval`] refuses the same
+    /// block before its own export.
+    #[test]
+    fn magnitude_refusal_precedes_native_export() {
+        let called = std::cell::Cell::new(false);
+        // a point block p1's parser accepts, with a value in the HANG-29 regime
+        let block = [4.0, 1.0, -1e300, 0.0, 0.0, 0.0, 0.0];
+        let error = export_with("", &block, || {
+            called.set(true);
+            Err(bad("unexpected export callback"))
+        })
+        .unwrap_err();
+        let msg = "invalid argument: B-rep value above 1e150 (HANG-29)";
+        assert_eq!(error.to_string(), msg);
+        assert!(!called.get());
+        let mut input = block.to_vec();
+        input.push(0.0);
+        assert_eq!(eval(Op::LuQuery, "", &input).unwrap_err().to_string(), msg);
+    }
 }

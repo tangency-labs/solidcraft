@@ -63,6 +63,21 @@ pub const MAX_DEGREE: usize = 17;
 /// trajectory whose control polygon is longer than `1e-5 / 1e-6 = 10` makes
 /// the tolerance fall below floating-point resolution and hangs.
 pub const MIN_SWEEP_TOL_FRACTION: f64 = 1e-6;
+/// Longest `Sweep` trajectory of any kind, by control-polygon length (HANG-5): a path
+/// control point at `±1e300` never returns upstream.
+pub const MAX_TRAJECTORY_LENGTH: f64 = 1.0e12;
+/// Longest curved `Sweep` trajectory (any path but a degree-1 NURB), by
+/// control-polygon length; `sweep.api_brep` bounds its curve sweeps the same way.
+///
+/// HANG-5: `SmApiCreateSweep` -> `SmBSplineSurface::CreateSweepSurface` (fixed
+/// `dTol = 1e-5`) -> `N_CreateSweepScale` approximates the path by a polyline within
+/// `dTol / 2` (`N_ApproxCrvWithPolyline`, growing its arrays by 150 points per
+/// reallocation) and relaxes the tolerance only after that pass returns. On a
+/// quarter-arc path the C++ takes 0.4 s at radius `1e5`, 4.8 s at `1e6`, 26 s at `3e6`
+/// and gives no result in 30 s at `1e7`, `1e8` and `1e9`. A straight path returns at
+/// once at any length (a degree-1 NURB or four collinear points at `1e12`). The bound
+/// keeps every fixture and generated path.
+pub const MAX_PATH_EXTENT: f64 = 1.0e8;
 mod sys {
     extern "C" {
         pub fn sc_sweep_api_surfaces_run(
@@ -429,6 +444,34 @@ fn path_poly_len(c: &CurveSpec) -> f64 {
     }
 }
 
+/// Rejects a `Sweep` trajectory too long for upstream's fixed tolerance (HANG-5): one
+/// whose control-polygon length is not finite or exceeds [`MAX_TRAJECTORY_LENGTH`], or
+/// a curved one (any path but a degree-1 NURB or a line segment) above
+/// [`MAX_PATH_EXTENT`]. [`run`] applies it to every `Sweep`; the difftest runner's
+/// Rust side applies it too.
+///
+/// # Errors
+///
+/// [`FfiError::InvalidArgument`] for such a path.
+pub fn check_path_extent(path: &CurveSpec) -> Result<(), FfiError> {
+    let traj_len = path_poly_len(path);
+    // a line segment is refused as a path before this check (upstream takes an
+    // SmBSplineCurve); a degree-1 NURB is its own polyline
+    let straight = matches!(
+        path,
+        CurveSpec::LineSegment { .. } | CurveSpec::Nurb { p: 1, .. }
+    );
+    if !traj_len.is_finite()
+        || traj_len > MAX_TRAJECTORY_LENGTH
+        || (!straight && traj_len > MAX_PATH_EXTENT)
+    {
+        return Err(bad(
+            "sweep: trajectory too long for the fixed tolerance (HANG-5)",
+        ));
+    }
+    Ok(())
+}
+
 /// Validates `call` and encodes it as the shim's program.
 fn encode(call: &Call) -> Result<Vec<f64>, FfiError> {
     let mut o = Vec::new();
@@ -443,15 +486,7 @@ fn encode(call: &Call) -> Result<Vec<f64>, FfiError> {
         Call::Sweep { curve, path } => {
             check_curve(curve, Need::BSplinePosWeights, false)?;
             check_curve(path, Need::BSplinePosWeights, false)?;
-            // HANG-5: fixed dTol = 1e-5 must stay above MIN_SWEEP_TOL_FRACTION
-            // times the trajectory's control polygon length.
-            let traj_len = path_poly_len(path);
-            // Reject only the extreme inputs that hang C++ (control points at
-            // +/-1e300); keep normal and large-but-finite sweeps covered.
-            if !traj_len.is_finite() || traj_len > 1e12 {
-                return Err(bad("sweep: trajectory too long for the fixed tolerance"));
-            }
-
+            check_path_extent(path)?;
             o.push(2.0);
             push_curve(&mut o, curve);
             push_curve(&mut o, path);
@@ -561,4 +596,46 @@ pub fn run(call: &Call) -> Result<Vec<f64>, FfiError> {
             )
         }
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// HANG-5: a curved `Sweep` trajectory above [`MAX_PATH_EXTENT`] (control-polygon
+    /// length) is refused before the kernel; a degree-1 NURB path up to
+    /// [`MAX_TRAJECTORY_LENGTH`] and a curved path inside the bound are not. Only
+    /// `encode` runs: no native call.
+    #[test]
+    fn huge_curved_path_is_refused() {
+        let call = |path: CurveSpec| Call::Sweep {
+            curve: CurveSpec::ApiCircle {
+                center: [0.0; 3],
+                radius: 1.0,
+            },
+            path,
+        };
+        let arc = |radius: f64| CurveSpec::ApiArc {
+            center: [0.0; 3],
+            radius,
+            start_deg: 0.0,
+            end_deg: 90.0,
+        };
+        let spike = |y: f64| CurveSpec::ApiCurve {
+            points: vec![[0.0; 3], [0.2, 0.3, 0.8], [0.5, y, 1.6], [0.1, 0.0, 2.4]],
+        };
+        let line = |z: f64| CurveSpec::Nurb {
+            dim: 3,
+            p: 1,
+            cpts: vec![[0.0, 0.0, 0.0, NOW], [0.0, 0.0, z, NOW]],
+            knots: vec![0.0, 0.0, 1.0, 1.0],
+        };
+        let msg = "invalid argument: sweep: trajectory too long for the fixed tolerance (HANG-5)";
+        for path in [arc(1e8), arc(1e9), spike(1e300), spike(6e7), line(2e12)] {
+            assert_eq!(encode(&call(path)).unwrap_err().to_string(), msg);
+        }
+        for path in [arc(6e7), spike(4.9e7), line(1e12)] {
+            assert!(encode(&call(path)).is_ok());
+        }
+    }
 }
