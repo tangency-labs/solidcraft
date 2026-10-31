@@ -195,6 +195,12 @@ pub struct UpstreamFixes {
     /// the whole knot range before mapping into the sample interval, so trimmed
     /// geometry can miss a gap peak (WR-89). Off by default for pinned C++ parity.
     pub gap_samples_use_trimmed_spans: bool,
+    /// `SmGapFunction::BuildSampleSet` normalizes the interior V parameter samples of
+    /// non-B-spline surfaces by the V sample index `(jj - cu) / (cv - 1)`, keeping them
+    /// within `[0.0, 1.0]`. Upstream divides the raw array index `jj / (cv - 1)`, which
+    /// starts at `cu + 1` and extrapolates interior V parameters well beyond `[0.0, 1.0]`
+    /// (WR-88). Off by default for pinned C++ parity.
+    pub gap_samples_non_bspline_v_stride: bool,
     /// `SmCurveLoops::GetLoopStartEnd` starts a later loop after the previous loop
     /// ends, keeping adjacency within that loop (WR-96). Off by default for C++ parity.
     pub curve_loop_start_after_previous_end: bool,
