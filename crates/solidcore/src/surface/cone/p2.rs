@@ -1093,25 +1093,21 @@ impl Cone {
         // (upstream also computes the STEP Y axis from the top frame's X axis here;
         // it is unused)
 
-        // Not upstream (WR-385, tangency-labs/solidcore#713): with the opt-in, an
-        // SmCylinder's radii within SM_EFF_ZERO_SQRT * (1 + r) are its one radius (their
-        // mean); further apart, the NURB is no longer a cylinder
-        if self.cylinder && k.fixes.cylinder_rebuild_mean_radius {
+        // when top and bot radius values are nearly equal - make them exactly equal
+        if (bot.radius - top.radius).abs() < EFF_ZERO * (1.0 + bot.radius) {
+            top.radius = bot.radius;
+        } else if self.cylinder && k.fixes.cylinder_rebuild_mean_radius {
+            // Not upstream (WR-385, tangency-labs/solidcore#713; the fork's 5df5b27):
+            // with the opt-in, an SmCylinder's radii within SM_EFF_ZERO_SQRT * (1 + r)
+            // are its one radius (their mean); further apart, the NURB is no longer a
+            // cylinder
             if (bot.radius - top.radius).abs() < EFF_ZERO_SQRT * (1.0 + bot.radius) {
                 let mean = 0.5 * (bot.radius + top.radius);
                 bot.radius = mean;
                 top.radius = mean;
-                // Equal radii skip the angle update below. Clear any angle left
-                // by a previous rebuild under the pinned rule, too (#713).
-                self.semi_angle_deg = 0.0;
             } else {
                 return Err(SolidError::sm_err(OP_REBUILD));
             }
-        }
-
-        // when top and bot radius values are nearly equal - make them exactly equal
-        if (bot.radius - top.radius).abs() < EFF_ZERO * (1.0 + bot.radius) {
-            top.radius = bot.radius;
         }
 
         // modify m_dSemiAngleDeg for nonCylinder shapes
@@ -1122,6 +1118,12 @@ impl Cone {
         };
         if radius_diff.abs() > EFF_ZERO {
             self.semi_angle_deg = radius_diff.atan2(height) * 180.0 / PI;
+        }
+        // Not upstream (WR-385, #713): an SmCylinder's angle is always 0, so with the
+        // opt-in clear any angle left by a previous rebuild under the pinned rule
+        // (its radii are equal here, which skips the update above)
+        if self.cylinder && k.fixes.cylinder_rebuild_mean_radius {
+            self.semi_angle_deg = 0.0;
         }
 
         // set Analytic parameters
@@ -1798,6 +1800,34 @@ mod tests {
         fixed.rebuild_step_from_nurb_parameters(&k).unwrap();
         assert_eq!(fixed.semi_angle_deg(), 0.0);
         assert!((fixed.base_radius() - 9.0).abs() < 1e-9);
+    }
+
+    /// The fork's 5df5b27 order (WR-385): radii within `SM_EFF_ZERO` * (1 + r) are made
+    /// equal by upstream's own copy of the bottom radius before the opt-in's mean is
+    /// considered, so the opt-in's radius is bit-for-bit the pinned rebuild's there.
+    #[test]
+    fn rebuild_cylinder_within_eff_zero_copies_the_bottom_radius() {
+        let mut k = kernel();
+        k.fixes.cylinder_rebuild_mean_radius = true;
+        for radius in [0.009, 5.123456789, 9.0, 90_000.0] {
+            for factor in [1.0 - 1e-13, 1.0 + 1e-13] {
+                for swap in [false, true] {
+                    for inside in [false, true] {
+                        let c = edited_cylinder(&k, radius, radius * factor, swap, inside);
+                        let mut pinned = c.clone();
+                        pinned.rebuild_step_from_nurb_parameters(&kernel()).unwrap();
+                        let mut fixed = c;
+                        fixed.rebuild_step_from_nurb_parameters(&k).unwrap();
+                        let at = format!("{radius} {factor} {swap} {inside}");
+                        assert_eq!(pinned.bot_radius(), pinned.top_radius(), "{at}");
+                        assert_eq!(fixed.base_radius(), pinned.base_radius(), "{at}");
+                        assert_eq!(fixed.bot_radius(), pinned.bot_radius(), "{at}");
+                        assert_eq!(fixed.top_radius(), pinned.top_radius(), "{at}");
+                        assert_eq!(fixed.semi_angle_deg(), 0.0, "{at}");
+                    }
+                }
+            }
+        }
     }
 
     #[test]

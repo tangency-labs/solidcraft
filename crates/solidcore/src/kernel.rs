@@ -376,7 +376,7 @@ pub struct UpstreamFixes {
     /// instead of removing the first member (WR-81). Off by default for pinned
     /// C++ parity.
     pub cpoly_remove_poly_face_check_member: bool,
-    /// `SmCone::RebuildSTEPFromNURBParameters` gives a cylinder the mean of near-equal radii (semi-angle 0) (WR-385, #713).
+    /// `SmCone::RebuildSTEPFromNURBParameters` gives a cylinder the mean of near-equal radii (semi-angle 0) where upstream's own copy within `SM_EFF_ZERO` does not apply, as the fork's 5df5b27 (WR-385, #713).
     pub cylinder_rebuild_mean_radius: bool,
     /// `SmCylinder::IsNurbSurfaceCylinder` gives an inside-out NURB (its iso circles turning against the line through their centres) the frame `IsNurbSurfaceCone` gives one: Z against the NURB's linear direction, origin at its top-knot circle; upstream keeps the bottom-knot circle and the NURB's direction, so the cylinder's Z is reversed and its STEP evaluation is mirrored in height (WR-496, #1463).
     pub nurb_cylinder_inside_out_frame: bool,
