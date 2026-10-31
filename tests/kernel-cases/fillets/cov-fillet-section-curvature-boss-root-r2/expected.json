@@ -2,9 +2,9 @@
  "sources": [],
  "what": "a boss's root on a plate rounded curvature-continuous size 2: the order-2 section of the square corner turned about the boss's axis, a certified fit",
  "source": "analytic",
- "method": "plate 60x40x10 with a boss R8 x 10 at (30, 20): V0 = 24000 + 640 pi = 26010.6193. In each meridian plane (rho, z) the plate's top and the boss's wall are the lines z = 10 and rho = 8, the feet of the point at distance d from both (8 + d, 10) and (8, 10 + d): the order-2 section at the default thumbweight 0 is that of a square corner (cov-fillet-section-curvature-box-edge-r3), area 0.154192655384275 s^2 = 0.616770622 (s = 2), first moment about the wall 0.233402637 (Green's theorem on the section), revolved (Pappus): 2 pi (8 A + M) = 32.469. V = 26043.0881. Faces 9; the seams at least G2 (the surface is a certified fit of the section turned about the axis: G3 to the plate along its rail, G2 to the wall at Continuity Analysis's tolerances).",
+ "method": "plate 60x40x10 with a boss R8 x 10 at (30, 20): V0 = 24000 + 640 pi = 26010.6193. In each meridian plane (rho, z) the plate's top and the boss's wall are the lines z = 10 and rho = 8, the feet of the point at distance d from both (8 + d, 10) and (8, 10 + d): the order-2 section at the equal-area thumbweight is that of a square corner (cov-fillet-section-curvature-box-edge-r3), area 0.214601836603 s^2 = 0.616770622 (s = 2), first moment about the wall 0.233402637 (Green's theorem on the section), revolved (Pappus): 2 pi (8 A + M) = 32.469. V = 26043.0881. Faces 9; the seams at least G2 (the surface is a certified fit of the section turned about the axis: G3 to the plate along its rail, G2 to the wall at Continuity Analysis's tolerances). [the curvature section at the equal-area thumbweight (the default): on the same rails it takes off what the ball's circle does, so between square planes w = -0.5252123889 and it cuts A = (1 - pi/4) s^2 = 0.214601836603 s^2, first moment about either face M = 0.0474559669443 s^3 (Green's theorem on S); V = 26056.152955]",
  "body_count": 1,
- "volume_mm3": 26043.0880831714,
+ "volume_mm3": 26056.152954783724,
  "faces": 9,
  "continuity": {
   "order": "g2"
