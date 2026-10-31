@@ -250,7 +250,9 @@ pub(crate) fn scope<R>(ui: &mut egui::Ui, id: egui::Id, add: impl FnOnce(&mut eg
     }
     // Kit buttons use explicit borders, so native focus styling alone is not visible.
     // Paint once for the whole scope, including dropdowns and custom dialog actions.
-    if let Some(response) = ctx.memory(|m| m.focused()).and_then(|focused| ctx.read_response(focused))
+    // read_response replays click-to-blur. Do not undo a child editor/menu's focus handoff.
+    if !ctx.input(|i| i.pointer.any_pressed() || i.pointer.any_released())
+        && let Some(response) = ctx.memory(|m| m.focused()).and_then(|focused| ctx.read_response(focused))
         && response.layer_id == ui.layer_id()
         && response.enabled()
         && response.rect.is_positive()
