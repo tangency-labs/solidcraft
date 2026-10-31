@@ -1,0 +1,50 @@
+{
+  "ar": {
+    "prefs.cut_preview_tint": "إظهار المادة المُزالة باللون الأحمر",
+    "prefs.cut_preview_tint_help": "تملأ المعاينة المادة التي تزيلها الميزة، والشكل الذي تستبدله، بطيف أحمر شبه شفاف. عند الإيقاف تكون هذه التعبئة شفافة تمامًا ولا تُرسم سوى مخططاتها.",
+    "prefs.preview_tint_new_faces": "تلوين السطح الجديد في المعاينة",
+    "prefs.preview_tint_new_faces_help": "يمكن لمعاينة ميزة تغيّر جسمًا أن ترسم السطح المضاف بلون المعاينة. عند الإيقاف يُرسم الجسم بلونه الأصلي."
+  },
+  "de": {
+    "prefs.cut_preview_tint": "Entferntes Material rot anzeigen",
+    "prefs.cut_preview_tint_help": "Eine Vorschau füllt das Material, das ein Feature entfernt, sowie die ersetzte Form mit einem roten, durchscheinenden Geist. Wenn deaktiviert, sind diese Füllungen völlig transparent und es werden nur ihre Umrisse gezeichnet.",
+    "prefs.preview_tint_new_faces": "Neue Fläche in der Vorschau einfärben",
+    "prefs.preview_tint_new_faces_help": "Eine Vorschau eines Features, das einen Körper ändert, kann die hinzugefügte Fläche in der Vorschaufarbe zeichnen. Wenn deaktiviert, wird der Körper wie er ist gezeichnet."
+  },
+  "en": {
+    "prefs.cut_preview_tint": "Show removed material in red",
+    "prefs.cut_preview_tint_help": "A preview fills the material a feature removes, and the shape it replaces, with a red see-through ghost. When off, those fills are fully transparent and only their outlines are drawn.",
+    "prefs.preview_tint_new_faces": "Tint new surface in a preview",
+    "prefs.preview_tint_new_faces_help": "A preview of a feature that changes a body can draw the surface it adds in the preview colour. When off, the body is drawn as itself."
+  },
+  "he": {
+    "prefs.cut_preview_tint": "הצגת חומר שהוסר באדום",
+    "prefs.cut_preview_tint_help": "תצוגה מקדימה ממלאת את החומר שהפעולה מסירה, ואת הצורה שהיא מחליפה, ברוח אדומה שקופה. כשהאפשרות כבויה המילויים האלה שקופים לחלוטין ומצוירים רק קווי המתאר שלהם.",
+    "prefs.preview_tint_new_faces": "צביעת משטח חדש בתצוגה מקדימה",
+    "prefs.preview_tint_new_faces_help": "תצוגה מקדימה של פעולה שמשנה גוף יכולה לצבוע את המשטח שנוסף בצבע התצוגה המקדימה. כשהאפשרות כבויה הגוף מצויר בצבעו שלו."
+  },
+  "ja": {
+    "prefs.cut_preview_tint": "除去される材料を赤で表示",
+    "prefs.cut_preview_tint_help": "プレビューでは、フィーチャーが除去する材料と置き換えられる形状を、赤い透過ゴーストで塗りつぶします。オフにすると、この塗りつぶしは完全に透明になり、輪郭のみが描画されます。",
+    "prefs.preview_tint_new_faces": "プレビューで新しい面に色を付ける",
+    "prefs.preview_tint_new_faces_help": "ボディを変更するフィーチャーのプレビューで、追加される面をプレビュー色で描画できます。オフにすると、ボディはそのままの色で描画されます。"
+  },
+  "ko": {
+    "prefs.cut_preview_tint": "제거되는 재료를 빨간색으로 표시",
+    "prefs.cut_preview_tint_help": "미리 보기는 피처가 제거하는 재료와 대체되는 형상을 빨간색 반투명 고스트로 채웁니다. 끄면 이 채움이 완전히 투명해지고 윤곽선만 그려집니다.",
+    "prefs.preview_tint_new_faces": "미리 보기에서 새 면에 색 입히기",
+    "prefs.preview_tint_new_faces_help": "바디를 변경하는 피처의 미리 보기에서 추가되는 면을 미리 보기 색으로 그릴 수 있습니다. 끄면 바디가 원래 색으로 그려집니다."
+  },
+  "vi": {
+    "prefs.cut_preview_tint": "Hiển thị vật liệu bị loại bỏ bằng màu đỏ",
+    "prefs.cut_preview_tint_help": "Bản xem trước tô vật liệu mà đặc trưng loại bỏ, và hình dạng mà nó thay thế, bằng một bóng mờ màu đỏ. Khi tắt, các phần tô này hoàn toàn trong suốt và chỉ vẽ đường viền của chúng.",
+    "prefs.preview_tint_new_faces": "Tô màu bề mặt mới trong bản xem trước",
+    "prefs.preview_tint_new_faces_help": "Bản xem trước của một đặc trưng làm thay đổi một khối có thể vẽ bề mặt được thêm vào bằng màu xem trước. Khi tắt, khối được vẽ bằng màu của chính nó."
+  },
+  "zh": {
+    "prefs.cut_preview_tint": "以红色显示被移除的材料",
+    "prefs.cut_preview_tint_help": "预览会用红色半透明幻影填充特征所移除的材料以及被替换的形状。关闭时，这些填充完全透明，仅绘制其轮廓。",
+    "prefs.preview_tint_new_faces": "在预览中为新表面着色",
+    "prefs.preview_tint_new_faces_help": "更改实体的特征，其预览可以用预览颜色绘制新增的表面。关闭时，实体按自身颜色绘制。"
+  }
+}

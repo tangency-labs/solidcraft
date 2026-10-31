@@ -172,6 +172,10 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 });
                 crate::prefs::view_angles_checkbox(app, left);
                 setting::reference_geometry_through_bodies(app, left).on_hover_text(app.tr("settings.reference_geometry_through_bodies_help"));
+                let tint_new = setting::preview_tint_new_faces(app, left).on_hover_text(app.tr("prefs.preview_tint_new_faces_help"));
+                crate::scenario::publish_target("prefs:preview_tint_new_faces", tint_new.rect);
+                let cut_tint = setting::cut_preview_tint(app, left).on_hover_text(app.tr("prefs.cut_preview_tint_help"));
+                crate::scenario::publish_target("prefs:cut_preview_tint", cut_tint.rect);
                 setting::sketch_halo(app, left);
                 setting::vertex_markers(app, left);
             }

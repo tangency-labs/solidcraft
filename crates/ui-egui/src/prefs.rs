@@ -985,6 +985,13 @@ preference_settings! {
     /// A small dot at every vertex wherever edges are drawn (#7834). Off by default: the viewport
     /// draws edges only, as it always has.
     vertex_markers: bool = false => check("Vertex markers", "Show a small dot at every vertex wherever edges are drawn");
+    /// A preview of a feature that changes a body draws the surface it adds in the preview
+    /// colour, working out face by face which surface that is. Off: the body is drawn as itself
+    /// and nothing is worked out (`preview::Colors::tint_new`).
+    preview_tint_new_faces: bool = true, PAGE_GRAPHICS => check_id("prefs.preview_tint_new_faces");
+    /// A preview that removes material shows the removed shape as a red see-through ghost. Off:
+    /// the ghost is fully transparent and only its outline is drawn (`preview::Colors::cut_tint`).
+    cut_preview_tint: bool = true, PAGE_GRAPHICS => check_id("prefs.cut_preview_tint");
     /// Restore the previous platform-specific fixed Render preview geometry budget.
     render_previous_geometry_budget: bool = false, PAGE_GRAPHICS => check_id("prefs.render_previous_geometry_budget");
     /// How finely the viewport tessellates curved faces and edges: `coarse`, `normal`, `fine` or
