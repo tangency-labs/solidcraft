@@ -64,6 +64,7 @@ use solidcore::topology::brep::p2::ArenaNotifyState;
 use solidcore::topology::brep::p3;
 use solidcore::topology::brep::p7;
 use solidcore::topology::brep::p8::FaceBuildEnv;
+use solidcore::topology::face::p2 as fp2;
 use solidcore::topology::topology_traverser::Marks;
 use solidcore::topology::trimming_tools;
 use solidcore::topology::{Brep, FaceId};
@@ -620,6 +621,9 @@ pub struct BuildOptions {
     /// UV trims this builder creates make healing unnecessary for well-formed bodies,
     /// and the healer is expensive on large real-world bodies.
     pub heal: bool,
+    /// Skip inserted seams on non-cylindrical cones. Fallback for unbounded ST-ACIS
+    /// cones whose generated seam runs out to `SolidCore`'s infinity marker.
+    pub skip_cone_seams: bool,
 }
 
 /// Builds one neutral body into a solidcore B-rep and stitches it.
@@ -629,7 +633,27 @@ pub fn build(body: &Body) -> Result<Brep, BuildError> {
 
 /// Like [`build`], then runs the healer on the seam-fixed, trimmed body.
 pub fn build_healed(body: &Body) -> Result<Brep, BuildError> {
-    build_with_options(body, BuildOptions { heal: true })
+    build_with_options(
+        body,
+        BuildOptions {
+            heal: true,
+            ..BuildOptions::default()
+        },
+    )
+}
+
+/// [`build`] without generated seams on non-cylindrical cones.
+///
+/// Fallback for unbounded ST-ACIS cones whose generated seam would be parameterized
+/// at `SolidCore`'s infinity marker.
+pub fn build_without_cone_seams(body: &Body) -> Result<Brep, BuildError> {
+    build_with_options(
+        body,
+        BuildOptions {
+            skip_cone_seams: true,
+            ..BuildOptions::default()
+        },
+    )
 }
 
 /// Builds one neutral body into a solidcore B-rep with explicit options.
@@ -709,7 +733,13 @@ pub fn build_with_options(body: &Body, options: BuildOptions) -> Result<Brep, Bu
     // `HasSeamProblem`'s first-call return).
     let faces: Vec<FaceId> = brep.face_list().to_vec();
     for face in faces {
-        trimming_tools::split_at_seams(&mut kernel, &mut brep, face)?;
+        let cone = options.skip_cone_seams
+            && fp2::surface(&brep, face).ok().flatten().is_some_and(
+                |surface| matches!(surface.kind(), SurfaceKind::Cone(cone) if !cone.is_cylinder()),
+            );
+        if !cone {
+            trimming_tools::split_at_seams(&mut kernel, &mut brep, face)?;
+        }
     }
     let faces: Vec<FaceId> = brep.face_list().to_vec();
     for face in faces {
