@@ -301,6 +301,12 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.fillet_refuse_crossing_rails = true;
     f.proto_edge_split_upper_keeps_the_old_max = true;
     f.point_on_start_point_squared_tolerance = true;
+    f.bspline_trim_keeps_rational_end_spans = true;
+    f.fillet_exact_round_classes = true;
+    f.curve_check_zero_speed_tangent_end = true;
+    f.cpoly_remove_poly_face_check_member = true;
+    f.check_seam_crossing_unclosed = true;
+    f.ascii_doubles_round_trip = true;
     f
 }
 
@@ -311,9 +317,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
 /// against its closed form is a win.
 #[cfg(test)]
 const HELD_BACK: &[&str] = &[
-    // sheet-metal/3078-flange-on-the-side-edge-of-a-flange: with it on the body's check fails with
-    // "SmBSplineCurve::Test #15 Bad Repeated CPts" (volume unchanged, 31362.04580633055); off it passes.
-    "bspline_trim_keeps_rational_end_spans",
     // crashes/2992-join-disk-and-36-twisted-loft-blades takes 121 s with it on, 31 s off, run alone on one
     // machine (the C++ kernel: 26 s), and times out in a loaded rig. The result is the same.
     "geometric_g2_continuity",
