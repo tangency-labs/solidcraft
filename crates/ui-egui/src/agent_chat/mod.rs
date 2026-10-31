@@ -967,6 +967,7 @@ pub fn connect(app: &mut SolveApp, ctx: &egui::Context) {
                         key,
                         http,
                         request_timeout_s: entry.request_timeout_s,
+                        reasoning_effort: entry.reasoning_effort.clone(),
                     },
                     start,
                 )
