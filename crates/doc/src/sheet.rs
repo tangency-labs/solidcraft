@@ -1942,6 +1942,11 @@ impl SheetBody {
         Ok(body)
     }
 
+    /// Whether the sheet holds all the bores it may: [`Self::add_bore`] refuses any more.
+    pub(crate) fn bores_full(&self) -> bool {
+        self.bores.len() >= MAX_BORES
+    }
+
     /// Record a round bore drilled along the sheet (a hole into a rim): the world cylinder from
     /// `base` along `axis`, one record per panel whose material it meets. Ok(false) when it
     /// meets no material; an error when it meets a bend, or crosses a panel other than along
@@ -1951,7 +1956,7 @@ impl SheetBody {
         if ![base.x, base.y, base.z, radius, height].iter().all(|v| v.is_finite()) || !(radius > 0.0) || height == 0.0 {
             return Err(DocError::Invalid("invalid sheet bore".into()));
         }
-        if self.bores.len() >= MAX_BORES {
+        if self.bores_full() {
             return Err(flat_budget_error());
         }
         let mut work = FlatWork::new();
