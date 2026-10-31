@@ -15,15 +15,21 @@
 //! | `MakeFaceWithCurves`| `surface u0 v0 u1 v1 orient region_null crv_on_surf nloops count* has3d has_uv ncurves (curve3d? curveuv? orient)* npts pt[3]*` | `-2 \| status [face shell region counts]` (`-2`: `crv_on_surf` TRUE with 3D but no UV curves, where upstream dereferences the null UV array) |
 //! | `MakeFace`          | `kind side orient region_null` (`kind` 0: null surface, 1: a square wire loop on `z = 0`) | `-3 \| status [face shell region counts]` (`-3`: the square's lines cannot be made) |
 //! | `Glue`              | `e1 e2 orient gap nesting`, B-rep block | `0 (-2 \| status counts edge_tols vertex_tols)` (tolerances sorted) (`-2`: `SM_OT_SAME`, equal intervals and one edge without curve) (`-1 status` when the B-rep build fails) |
-//! | `Copy`              | `n use_merge repeat`, B-rep block | `0 status*repeat nfaces counts` (the faces copied `repeat` times, 1 to [`MAX_COPIES`], into one B-rep; `nfaces` over all copies) |
+//! | `Copy`              | `n use_merge repeat`, B-rep block | `0 status*repeat nfaces counts faces nedges edges` (the faces copied `repeat` times, 1 to [`MAX_COPIES`], into one B-rep; `nfaces` over all copies; then the whole destination graph after every copy) |
 //! | `MergeSelf`         | `face tol ncurves (raw curve3d raw curveuv1 raw curveuv2)*`, B-rep block | `0 (-2 \| status nedges counts edges*)` (UV curves 2D) |
 //!
 //! `counts` are the region, shell, face, loop, edge and vertex counts of the B-rep made.
 //! Each returned edge contains its used interval, optional endpoint positions, curve
 //! type (or -1), and, when present, its natural interval and five evaluated samples
 //! with statuses; its edge uses follow in list order with each UV trim's type,
-//! natural interval and five UV samples if present. Raw flags restore supplied knots
-//! after construction; distinct raw knots must be more than `1e-12` apart (UB-266).
+//! natural interval and five UV samples if present. For `Copy`, after `counts`, `faces`
+//! and `nedges` delimit the whole destination graph after every copy in the shim's walk
+//! order: each face is its surface type (or -1), natural UV domain `u0 v0 u1 v1` and
+//! five UV samples (natural corners and centre, each a status then `x y z` on success);
+//! each edge is the block above. These finite samples are evidence of the copied
+//! geometry, not a full equivalence claim (no knots or control points are compared).
+//! Raw flags restore supplied knots after construction; distinct raw knots must be more
+//! than `1e-12` apart (UB-266).
 //!
 //! [`eval`] accepts only what upstream handles without undefined behaviour: clamped
 //! B-splines of degree 1 to 5 with at most 33 control points, positive (or `NOW`)

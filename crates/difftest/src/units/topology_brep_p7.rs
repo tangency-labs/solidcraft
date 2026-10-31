@@ -10,7 +10,13 @@
 //! (`MergeSelfIntersectionCurves` with and without curves, including raw-knot splines).
 //! The output includes status and topology counts, and for returned edges their used
 //! intervals, endpoint vertices, curve types, natural intervals, point samples and
-//! each edge use's UV trim type, interval and samples when present.
+//! each edge use's UV trim type, interval and samples when present. `copy` additionally
+//! exports the whole destination graph after every copy: each copied face's surface
+//! type, natural UV domain and five UV samples (natural corners and centre) evaluated
+//! to 3D, then every destination edge with the same block `merge_self` uses. The
+//! surface samples are finite evidence that the copied face carries the expected
+//! geometry, not a full geometric equivalence check (no knots or control points are
+//! compared).
 //! The raw-knot plane fixtures construct their B-reps independently on each side.
 //! For `glue`, `copy` and `merge_self` the C++ side builds the fixture B-rep and the Rust
 //! side makes the same source itself ([`own_brep`]: the Rust kernel's build, or the Rust
@@ -989,6 +995,77 @@ fn brep_tolerances(b: &Brep) -> Vec<f64> {
     te
 }
 
+/// One edge's used interval, endpoint vertices, curve (type, natural interval and five
+/// samples) and edge uses (UV trim type, natural interval and five samples), in that
+/// order: the shim's `p7_put_edge_geometry`, shared by the `merge_self` and `copy`
+/// records.
+fn push_edge_geometry(b: &Brep, k: &Kernel, id: EdgeId, o: &mut Vec<f64>) -> Result<(), Fail> {
+    let edge = b.edge(id).map_err(hfail)?;
+    o.extend([edge.interval.min(), edge.interval.max()]);
+    let (start, end) = ed::start_end_vertices(b, id).map_err(hfail)?;
+    for vertex in [start, end] {
+        o.push(flag(vertex.is_some()));
+        if let Some(vertex) = vertex {
+            let p = b.vertex(vertex).map_err(hfail)?.point;
+            o.extend([p.x, p.y, p.z]);
+        }
+    }
+    if let Some(curve) = &edge.curve {
+        let natural = curve.natural_interval();
+        o.extend([curve.type_code() as f64, natural.min(), natural.max()]);
+        for fraction in [0.0, 0.25, 0.5, 0.75, 1.0] {
+            let point = curve.evaluate_point(k, edge.interval.evaluate(fraction));
+            o.push(status(&point)?);
+            if let Ok(p) = point {
+                o.extend([p.x, p.y, p.z]);
+            }
+        }
+    } else {
+        o.push(-1.0);
+    }
+    o.push(edge.edgeuses.len() as f64);
+    for &eu in &edge.edgeuses {
+        let (trim, _) = solidcore::topology::edgeuse::p1::uv_trim_curve(b, eu).map_err(hfail)?;
+        if let Some(trim) = trim {
+            let natural = trim.natural_interval();
+            o.extend([trim.type_code() as f64, natural.min(), natural.max()]);
+            for fraction in [0.0, 0.25, 0.5, 0.75, 1.0] {
+                let point = trim.evaluate_point(k, natural.evaluate(fraction));
+                o.push(status(&point)?);
+                if let Ok(p) = point {
+                    o.extend([p.x, p.y]);
+                }
+            }
+        } else {
+            o.push(-1.0);
+        }
+    }
+    Ok(())
+}
+
+/// A copied destination face's surface: type, natural UV domain and five UV samples
+/// (the natural corners and centre) evaluated to 3D, as the shim's
+/// `p7_put_face_geometry`. A face without a surface reports `-1` only.
+fn push_face_geometry(b: &Brep, k: &Kernel, id: FaceId, o: &mut Vec<f64>) -> Result<(), Fail> {
+    let Some(surface) = b.face(id).map_err(hfail)?.surface.as_ref() else {
+        o.push(-1.0);
+        return Ok(());
+    };
+    o.push(surface.type_code() as f64);
+    let dom = surface.natural_uv_domain_with_nurb(k).map_err(hfail)?;
+    let lo = dom.min();
+    let hi = dom.max();
+    o.extend([lo.x, lo.y, hi.x, hi.y]);
+    for (nx, ny) in [(0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0), (0.5, 0.5)] {
+        let point = surface.evaluate_point(k, dom.evaluate(nx, ny));
+        o.push(status(&point)?);
+        if let Ok(p) = point {
+            o.extend([p.x, p.y, p.z]);
+        }
+    }
+    Ok(())
+}
+
 /// Whether `MakeFaceWithCurves` fails its input checks (`SmBrep.cpp:15722-15741`) on a
 /// face with 3D curves: no loops, or a surface degenerate to a curve or a point (the
 /// port's tests, which fail soft as upstream's flags).
@@ -1366,6 +1443,19 @@ fn rust_record(k: &mut Kernel, i: &Inputs, built: Option<Brep>) -> Record {
             }
             o.push(made as f64);
             o.extend(brep_counts(&dest));
+            // The whole destination graph after every copy (CopyFaces resets the new-face
+            // list first, so the last returned list is not the destination): each copied
+            // face's surface, then each destination edge's geometry, in the shim's walk
+            // order.
+            let w = crate::own_builder::walk(&dest).map_err(hfail)?;
+            o.push(w.faces.items.len() as f64);
+            for &id in &w.faces.items {
+                push_face_geometry(&dest, k, id, &mut o)?;
+            }
+            o.push(w.edges.items.len() as f64);
+            for &id in &w.edges.items {
+                push_edge_geometry(&dest, k, id, &mut o)?;
+            }
             Ok(o)
         }
         Inputs::MergeSelf {
@@ -1461,47 +1551,7 @@ fn rust_record(k: &mut Kernel, i: &Inputs, built: Option<Brep>) -> Record {
             o.extend(brep_counts(&b));
             if let Ok(edges) = r {
                 for id in edges {
-                    let edge = b.edge(id).map_err(hfail)?;
-                    o.extend([edge.interval.min(), edge.interval.max()]);
-                    let (start, end) = ed::start_end_vertices(&b, id).map_err(hfail)?;
-                    for vertex in [start, end] {
-                        o.push(flag(vertex.is_some()));
-                        if let Some(vertex) = vertex {
-                            let p = b.vertex(vertex).map_err(hfail)?.point;
-                            o.extend([p.x, p.y, p.z]);
-                        }
-                    }
-                    if let Some(curve) = &edge.curve {
-                        let natural = curve.natural_interval();
-                        o.extend([curve.type_code() as f64, natural.min(), natural.max()]);
-                        for fraction in [0.0, 0.25, 0.5, 0.75, 1.0] {
-                            let point = curve.evaluate_point(k, edge.interval.evaluate(fraction));
-                            o.push(status(&point)?);
-                            if let Ok(p) = point {
-                                o.extend([p.x, p.y, p.z]);
-                            }
-                        }
-                    } else {
-                        o.push(-1.0);
-                    }
-                    o.push(edge.edgeuses.len() as f64);
-                    for &eu in &edge.edgeuses {
-                        let (trim, _) = solidcore::topology::edgeuse::p1::uv_trim_curve(&b, eu)
-                            .map_err(hfail)?;
-                        if let Some(trim) = trim {
-                            let natural = trim.natural_interval();
-                            o.extend([trim.type_code() as f64, natural.min(), natural.max()]);
-                            for fraction in [0.0, 0.25, 0.5, 0.75, 1.0] {
-                                let point = trim.evaluate_point(k, natural.evaluate(fraction));
-                                o.push(status(&point)?);
-                                if let Ok(p) = point {
-                                    o.extend([p.x, p.y]);
-                                }
-                            }
-                        } else {
-                            o.push(-1.0);
-                        }
-                    }
+                    push_edge_geometry(&b, k, id, &mut o)?;
                 }
             }
             Ok(o)
@@ -2431,5 +2481,196 @@ mod tests {
         let cpp = run_cpp(&i).unwrap();
         let rust = run_rust(&i).unwrap();
         assert!(crate::compare(&cpp, &rust, &[]).mismatches.is_empty());
+    }
+
+    /// Offsets of the destination geometry a `copy` record appends after its counts.
+    struct CopyOffsets {
+        /// The first appended float (the existing record's length).
+        prefix_end: usize,
+        /// The first face's five sample x offsets.
+        face_samples: Vec<usize>,
+        /// The first edge's used-interval minimum.
+        edge_interval: usize,
+        /// The first edge's end vertex x.
+        end_vertex: usize,
+        /// The first edge's five curve sample x offsets.
+        curve_samples: Vec<usize>,
+    }
+
+    /// Reads the `copy` layout the shim writes (`0 status*repeat made counts faces
+    /// face* edges edge*`) and records the offsets of the new geometry. `None` when the
+    /// record does not follow the layout (a malformed record must not be silently
+    /// accepted).
+    fn copy_geometry_offsets(rec: &[f64], repeat: usize) -> Option<CopyOffsets> {
+        struct Cursor<'a> {
+            rec: &'a [f64],
+            at: usize,
+        }
+        impl Cursor<'_> {
+            fn take(&mut self) -> Option<f64> {
+                let v = *self.rec.get(self.at)?;
+                self.at += 1;
+                Some(v)
+            }
+            fn skip(&mut self, n: usize) -> Option<()> {
+                self.at = self.at.checked_add(n)?;
+                (self.at <= self.rec.len()).then_some(())
+            }
+        }
+        let mut c = Cursor { rec, at: 0 };
+        c.take()?; // the 0 build mark
+        c.skip(repeat)?;
+        c.take()?; // made
+        c.skip(6)?; // counts
+        let prefix_end = c.at;
+        let faces = c.take()? as usize;
+        let mut face_samples = Vec::new();
+        for face in 0..faces {
+            if c.take()? < 0.0 {
+                continue; // a face without surface
+            }
+            c.skip(4)?; // natural UV domain
+            for _ in 0..5 {
+                if c.take()? == 0.0 {
+                    if face == 0 && face_samples.len() < 5 {
+                        face_samples.push(c.at);
+                    }
+                    c.skip(3)?;
+                }
+            }
+        }
+        let edges = c.take()? as usize;
+        let mut edge_interval = None;
+        let mut end_vertex = None;
+        let mut curve_samples = Vec::new();
+        for edge in 0..edges {
+            if edge_interval.is_none() {
+                edge_interval = Some(c.at);
+            }
+            c.skip(2)?; // used interval
+            for which in 0..2 {
+                if c.take()? != 0.0 {
+                    if which == 1 && end_vertex.is_none() {
+                        end_vertex = Some(c.at);
+                    }
+                    c.skip(3)?;
+                }
+            }
+            if c.take()? >= 0.0 {
+                c.skip(2)?; // natural interval
+                for _ in 0..5 {
+                    if c.take()? == 0.0 {
+                        if edge == 0 && curve_samples.len() < 5 {
+                            curve_samples.push(c.at);
+                        }
+                        c.skip(3)?;
+                    }
+                }
+            }
+            for _ in 0..(c.take()? as usize) {
+                if c.take()? >= 0.0 {
+                    c.skip(2)?; // natural interval
+                    for _ in 0..5 {
+                        if c.take()? == 0.0 {
+                            c.skip(2)?;
+                        }
+                    }
+                }
+            }
+        }
+        (c.at == rec.len()).then_some(CopyOffsets {
+            prefix_end,
+            face_samples,
+            edge_interval: edge_interval?,
+            end_vertex: end_vertex?,
+            curve_samples,
+        })
+    }
+
+    /// Whether the samples at `starts` (x offsets of `x y z` triples) are finite and not
+    /// all the same point: real copied geometry, not a repeated count.
+    fn distinct_samples(rec: &[f64], starts: &[usize]) -> bool {
+        let points: Vec<[f64; 3]> = starts
+            .iter()
+            .filter_map(|&at| Some([*rec.get(at)?, *rec.get(at + 1)?, *rec.get(at + 2)?]))
+            .collect();
+        points.len() == starts.len()
+            && points.iter().all(|p| p.iter().all(|x| x.is_finite()))
+            && points.windows(2).any(|w| w.first() != w.get(1))
+    }
+
+    /// The destination geometry `copy` appends is compared: the old prefix still agrees,
+    /// the new surface and curve samples are real copied geometry, and mutating only a
+    /// new surface sample, curve interval, end vertex or curve sample fails the
+    /// comparison where the old prefix would pass.
+    #[test]
+    fn copy_destination_geometry_is_compared() {
+        let v = serde_json::json!({
+            "brep": {"kind": "file", "file": "plane_square.smb", "rebuild": false},
+            "merge": false, "n": 1, "op": "copy", "repeat": 2
+        });
+        let i: Inputs = serde_json::from_value(v).unwrap();
+        let cpp = run_cpp(&i).unwrap();
+        let rust = run_rust(&i).unwrap();
+        let cppv = cpp.values.get("out").expect("cpp record");
+        let rv = rust.values.get("out").expect("rust record");
+        assert!(
+            crate::compare(&cpp, &rust, &[]).mismatches.is_empty(),
+            "real copied geometry must agree: {:?}",
+            crate::compare(&cpp, &rust, &[]).mismatches
+        );
+        let off = copy_geometry_offsets(cppv, 2).expect("copy record layout");
+        assert_eq!(&cppv[..off.prefix_end], &rv[..off.prefix_end]);
+        assert!(cppv.len() > off.prefix_end, "new geometry must be appended");
+        assert!(
+            off.face_samples.len() == 5 && distinct_samples(cppv, &off.face_samples),
+            "the copied face's surface samples must vary"
+        );
+        assert!(
+            off.curve_samples.len() == 5 && distinct_samples(cppv, &off.curve_samples),
+            "the copied edge's curve samples must vary"
+        );
+        // (the five samples of the first face/edge: parse every one to prove they vary)
+        for (name, at) in [
+            ("surface sample", off.face_samples[0]),
+            ("curve interval", off.edge_interval),
+            ("end vertex", off.end_vertex),
+            ("curve sample", off.curve_samples[0]),
+        ] {
+            let mut m = rv.clone();
+            let x = m.get_mut(at).expect("offset");
+            *x = if *x == 0.0 { 1.0e-6 } else { *x * (1.0 + 1.0e-6) };
+            let out = Output::new().values("out", m);
+            assert!(
+                !crate::compare(&cpp, &out, &[]).mismatches.is_empty(),
+                "{name} at {at} is not compared"
+            );
+        }
+    }
+
+    /// The merge branch's destination graph is compared too: a real copied face and its
+    /// edges (through `SmMerge`) agree on the appended surface and edge geometry.
+    #[test]
+    fn copy_merge_destination_geometry_is_compared() {
+        let v = serde_json::json!({
+            "brep": {"kind": "file", "file": "plane_square.smb", "rebuild": false},
+            "merge": true, "n": 1, "op": "copy", "repeat": 2
+        });
+        let i: Inputs = serde_json::from_value(v).unwrap();
+        let cpp = run_cpp(&i).unwrap();
+        let rust = run_rust(&i).unwrap();
+        let diff = crate::compare(&cpp, &rust, &[]);
+        assert!(
+            diff.mismatches.is_empty(),
+            "real merged copied geometry must agree: {:?}",
+            diff.mismatches
+        );
+        let cppv = cpp.values.get("out").expect("cpp record");
+        let off = copy_geometry_offsets(cppv, 2).expect("copy record layout");
+        assert!(cppv.len() > off.prefix_end, "new geometry must be appended");
+        assert!(
+            off.face_samples.len() == 5 && distinct_samples(cppv, &off.face_samples),
+            "the merged copied face's surface samples must vary"
+        );
     }
 }

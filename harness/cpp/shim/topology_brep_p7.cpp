@@ -284,9 +284,109 @@ void p7_glue(SmBrep* b, Graph& g, Rd& rd, std::vector<double>& o)
     p7_put_tolerances(o, b);
 }
 
+// One edge's used interval, endpoint vertices, curve (type, natural interval and five
+// samples) and edge uses (UV trim type, natural interval and five samples), in that
+// order. Shared by the merge and copy exports (both read a B-rep after the op).
+void p7_put_edge_geometry(std::vector<double>& o, SmEdge* e)
+{
+    SmExtent1d interval = e->GetInterval();
+    o.push_back(interval.GetMin());
+    o.push_back(interval.GetMax());
+    for (SmVertex* vertex : {e->GetStartVertex(), e->GetEndVertex()})
+    {
+        o.push_back(vertex ? 1.0 : 0.0);
+        if (vertex)
+        {
+            SmPoint3d point = vertex->GetPoint();
+            o.push_back(point.x);
+            o.push_back(point.y);
+            o.push_back(point.z);
+        }
+    }
+    SmCurve* curve = e->GetCurve();
+    o.push_back(curve ? (double)curve->GetType() : -1.0);
+    if (curve)
+    {
+        SmExtent1d natural = curve->GetNaturalInterval();
+        o.push_back(natural.GetMin());
+        o.push_back(natural.GetMax());
+        for (double fraction : {0.0, 0.25, 0.5, 0.75, 1.0})
+        {
+            SmPoint3d point;
+            SmStatus status = curve->EvaluatePoint(interval.Evaluate(fraction), point);
+            o.push_back(st(status));
+            if (status == SM_SUCCESS)
+            {
+                o.push_back(point.x);
+                o.push_back(point.y);
+                o.push_back(point.z);
+            }
+        }
+    }
+    std::vector<SmTopology*> uses = list_of(e->GetList());
+    o.push_back((double)uses.size());
+    for (SmTopology* topology : uses)
+    {
+        SmEdgeuse* use = (SmEdgeuse*)topology;
+        SmBSplineCurve* trim = use->GetUVTrimCurve();
+        o.push_back(trim ? (double)trim->GetType() : -1.0);
+        if (trim)
+        {
+            SmExtent1d natural = trim->GetNaturalInterval();
+            o.push_back(natural.GetMin());
+            o.push_back(natural.GetMax());
+            for (double fraction : {0.0, 0.25, 0.5, 0.75, 1.0})
+            {
+                SmPoint3d point;
+                SmStatus status = trim->EvaluatePoint(natural.Evaluate(fraction), point);
+                o.push_back(st(status));
+                if (status == SM_SUCCESS)
+                {
+                    o.push_back(point.x);
+                    o.push_back(point.y);
+                }
+            }
+        }
+    }
+}
+
+// A copied destination face's surface: its type, natural UV domain and five UV samples
+// (the natural corners and centre) evaluated to 3D. A face without a surface (not made
+// by CopyFaces) reports `-1` only.
+void p7_put_face_geometry(std::vector<double>& o, SmFace* f)
+{
+    SmSurface* s = f->GetSurface();
+    o.push_back(s ? (double)s->GetType() : -1.0);
+    if (s == NULL)
+        return;
+    SmExtent2d dom = s->GetNaturalUVDomain();
+    SmPoint2d lo = dom.GetMin();
+    SmPoint2d hi = dom.GetMax();
+    o.push_back(lo.x);
+    o.push_back(lo.y);
+    o.push_back(hi.x);
+    o.push_back(hi.y);
+    const double samples[5][2] = {{0.0, 0.0}, {1.0, 0.0}, {1.0, 1.0}, {0.0, 1.0}, {0.5, 0.5}};
+    for (int i = 0; i < 5; i++)
+    {
+        SmPoint3d point;
+        SmStatus status = s->EvaluatePoint(dom.Evaluate(samples[i][0], samples[i][1]), point);
+        o.push_back(st(status));
+        if (status == SM_SUCCESS)
+        {
+            o.push_back(point.x);
+            o.push_back(point.y);
+            o.push_back(point.z);
+        }
+    }
+}
+
 // `n use_merge repeat`, B-rep block: the first `n` faces (in traversal order) copied
 // `repeat` times into one new B-rep. Output `status... nfaces counts_of_destination`
-// (one status per copy, the new faces of all copies).
+// (one status per copy, the new faces of all copies), then the whole destination graph
+// after every copy: `nfaces face* nedges edge*` (each face its surface, each edge as
+// `p7_put_edge_geometry`). The new-face list is reset by every CopyFaces call, so the
+// destination is walked, not the returned list.
 void p7_copy(SmBrep* b, Graph& g, Rd& rd, std::vector<double>& o)
 {
     int64_t n = rd.idx();
@@ -306,6 +406,14 @@ void p7_copy(SmBrep* b, Graph& g, Rd& rd, std::vector<double>& o)
     }
     o.push_back(made);
     p7_put_counts(o, dest.brep);
+    Graph dg;
+    walk(dest.brep, dg);
+    o.push_back((double)dg.faces.size());
+    for (SmFace* f : dg.faces)
+        p7_put_face_geometry(o, f);
+    o.push_back((double)dg.edges.size());
+    for (SmEdge* e : dg.edges)
+        p7_put_edge_geometry(o, e);
 }
 
 // The self-intersection curves of a merge: 3D curve and the UV curves on both sheets.
@@ -363,68 +471,7 @@ void p7_merge_self(SmBrep* b, Graph& g, Rd& rd, const SelfCurves& cs, std::vecto
     o.push_back((double)es.GetSize());
     p7_put_counts(o, b);
     for (ULONG i = 0; i < es.GetSize(); ++i)
-    {
-        SmEdge* e = es[i];
-        SmExtent1d interval = e->GetInterval();
-        o.push_back(interval.GetMin());
-        o.push_back(interval.GetMax());
-        for (SmVertex* vertex : {e->GetStartVertex(), e->GetEndVertex()})
-        {
-            o.push_back(vertex ? 1.0 : 0.0);
-            if (vertex)
-            {
-                SmPoint3d point = vertex->GetPoint();
-                o.push_back(point.x);
-                o.push_back(point.y);
-                o.push_back(point.z);
-            }
-        }
-        SmCurve* curve = e->GetCurve();
-        o.push_back(curve ? (double)curve->GetType() : -1.0);
-        if (curve)
-        {
-            SmExtent1d natural = curve->GetNaturalInterval();
-            o.push_back(natural.GetMin());
-            o.push_back(natural.GetMax());
-            for (double fraction : {0.0, 0.25, 0.5, 0.75, 1.0})
-            {
-                SmPoint3d point;
-                SmStatus status = curve->EvaluatePoint(interval.Evaluate(fraction), point);
-                o.push_back(st(status));
-                if (status == SM_SUCCESS)
-                {
-                    o.push_back(point.x);
-                    o.push_back(point.y);
-                    o.push_back(point.z);
-                }
-            }
-        }
-        std::vector<SmTopology*> uses = list_of(e->GetList());
-        o.push_back((double)uses.size());
-        for (SmTopology* topology : uses)
-        {
-            SmEdgeuse* use = (SmEdgeuse*)topology;
-            SmBSplineCurve* trim = use->GetUVTrimCurve();
-            o.push_back(trim ? (double)trim->GetType() : -1.0);
-            if (trim)
-            {
-                SmExtent1d natural = trim->GetNaturalInterval();
-                o.push_back(natural.GetMin());
-                o.push_back(natural.GetMax());
-                for (double fraction : {0.0, 0.25, 0.5, 0.75, 1.0})
-                {
-                    SmPoint3d point;
-                    SmStatus status = trim->EvaluatePoint(natural.Evaluate(fraction), point);
-                    o.push_back(st(status));
-                    if (status == SM_SUCCESS)
-                    {
-                        o.push_back(point.x);
-                        o.push_back(point.y);
-                    }
-                }
-            }
-        }
-    }
+        p7_put_edge_geometry(o, es[i]);
 }
 
 void p7_brep_op(int32_t op, Rd& rd, const char* path, std::vector<double>& o)
