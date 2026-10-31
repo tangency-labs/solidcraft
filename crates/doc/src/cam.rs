@@ -310,7 +310,7 @@ impl CamStock {
     }
 
     pub fn validate(&self) -> Result<()> {
-        let ok = |n: f64| n.is_finite() && n >= 0.0 && n <= 1.0e6;
+        let ok = |n: f64| n.is_finite() && (0.0..=1.0e6).contains(&n);
         match self {
             CamStock::Box { width, depth, height } if ok(*width) && *width > 0.0 && ok(*depth) && *depth > 0.0 && ok(*height) && *height > 0.0 => {
                 Ok(())
@@ -670,6 +670,19 @@ pub struct CamPocketParams {
     pub ramp_angle: Expr,
 }
 
+/// Adaptive-clearing settings held as expressions. There is no ramp angle:
+/// the engine enters through its own helical entries.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct CamAdaptiveParams {
+    pub stepover: Expr,
+    #[serde(default = "true_val")]
+    pub climb: bool,
+    #[serde(default = "zero_mm")]
+    pub stock_to_leave: Expr,
+    #[serde(default = "tol_mm")]
+    pub tolerance: Expr,
+}
+
 /// Heights and feeds as expressions (`depth + 1 mm`).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct CamCut {
@@ -753,30 +766,41 @@ pub enum CamOperation {
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         coolant: bool,
     },
+    Adaptive {
+        name: String,
+        tool: u32,
+        geometry: CamGeometry,
+        params: CamAdaptiveParams,
+        cut: CamCut,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        spindle_rpm: Option<f64>,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        coolant: bool,
+    },
 }
 
 impl CamOperation {
     pub fn name(&self) -> &str {
         match self {
-            CamOperation::Contour { name, .. } | CamOperation::Pocket { name, .. } => name,
+            CamOperation::Contour { name, .. } | CamOperation::Pocket { name, .. } | CamOperation::Adaptive { name, .. } => name,
         }
     }
 
     pub fn tool(&self) -> u32 {
         match self {
-            CamOperation::Contour { tool, .. } | CamOperation::Pocket { tool, .. } => *tool,
+            CamOperation::Contour { tool, .. } | CamOperation::Pocket { tool, .. } | CamOperation::Adaptive { tool, .. } => *tool,
         }
     }
 
     pub fn geometry(&self) -> &CamGeometry {
         match self {
-            CamOperation::Contour { geometry, .. } | CamOperation::Pocket { geometry, .. } => geometry,
+            CamOperation::Contour { geometry, .. } | CamOperation::Pocket { geometry, .. } | CamOperation::Adaptive { geometry, .. } => geometry,
         }
     }
 
     pub fn cut(&self) -> &CamCut {
         match self {
-            CamOperation::Contour { cut, .. } | CamOperation::Pocket { cut, .. } => cut,
+            CamOperation::Contour { cut, .. } | CamOperation::Pocket { cut, .. } | CamOperation::Adaptive { cut, .. } => cut,
         }
     }
 
@@ -808,16 +832,22 @@ impl CamOperation {
                 check_expr(&params.ramp_angle, "ramp_angle")?;
                 check_spindle(*spindle_rpm)?;
             }
+            CamOperation::Adaptive { params, spindle_rpm, .. } => {
+                check_expr(&params.stepover, "stepover")?;
+                check_expr(&params.stock_to_leave, "stock_to_leave")?;
+                check_expr(&params.tolerance, "tolerance")?;
+                check_spindle(*spindle_rpm)?;
+            }
         }
         Ok(())
     }
 }
 
 fn check_spindle(spindle: Option<f64>) -> Result<()> {
-    if let Some(rpm) = spindle {
-        if !(rpm > 0.0) || !rpm.is_finite() || rpm > 1.0e6 {
-            return Err(DocError::Invalid("spindle_rpm must be above 0".into()));
-        }
+    if let Some(rpm) = spindle
+        && (!(rpm > 0.0) || !rpm.is_finite() || rpm > 1.0e6)
+    {
+        return Err(DocError::Invalid("spindle_rpm must be above 0".into()));
     }
     Ok(())
 }
@@ -830,6 +860,11 @@ pub fn default_contour_params() -> CamContourParams {
 /// Default pocket params; `stepover` must still be set by the caller.
 pub fn default_pocket_params(stepover: Expr) -> CamPocketParams {
     CamPocketParams { stepover, climb: true, stock_to_leave: zero_mm(), tolerance: tol_mm(), ramp_angle: zero_deg() }
+}
+
+/// Default adaptive-clearing params; `stepover` must still be set by the caller.
+pub fn default_adaptive_params(stepover: Expr) -> CamAdaptiveParams {
+    CamAdaptiveParams { stepover, climb: true, stock_to_leave: zero_mm(), tolerance: tol_mm() }
 }
 
 /// Default cut expressions. `bottom` and `stepdown` come from the command.

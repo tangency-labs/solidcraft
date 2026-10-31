@@ -660,3 +660,104 @@ fn work_offsets_go_where_the_post_writes_them() {
     }
     assert_eq!(work_offset_code(6).unwrap(), "G59");
 }
+
+#[test]
+fn adaptive_stays_inside_the_walls_and_clears_everything_the_tool_can_reach() {
+    let regions = [rect(0.0, 0.0, 40.0, 30.0)];
+    let params = AdaptiveParams { stepover: 2.5, climb: true, stock_to_leave: 0.0, tolerance: 0.01 };
+    let path = adaptive(&regions, &tool(6.0), &params, &cut(0.0, -5.0, 2.0)).unwrap();
+    let stats = path.stats();
+    assert_eq!(stats.lowest_z, Some(-5.0));
+    // The depth passes are the same as the pocket's.
+    let mut levels: Vec<i64> = cutting_points(&path, 0.0).iter().map(|p| (p.z * 1e6).round() as i64).collect();
+    levels.sort();
+    levels.dedup();
+    assert!(levels.len() >= 3 && levels.contains(&-5_000_000) && levels.contains(&-1_666_667), "{levels:?}");
+    for p in cutting_points(&path, 0.0) {
+        assert!(p.x >= 3.0 - 1e-6 && p.x <= 37.0 + 1e-6 && p.y >= 3.0 - 1e-6 && p.y <= 27.0 + 1e-6, "gouge at {p:?}");
+    }
+    // Everything a 3 mm-radius tool can reach is cut at the bottom.
+    for i in 0..=34 {
+        for j in 0..=24 {
+            let q = v(3.0 + i as f64, 3.0 + j as f64);
+            let d = dist_to_cuts(&path, -5.0 + 1e-6, q);
+            assert!(d <= 3.0 + 0.01, "{q:?} is {d} from the nearest pass");
+        }
+    }
+}
+
+#[test]
+fn adaptive_keeps_the_stock_to_leave_on_the_walls() {
+    let regions = [rect(0.0, 0.0, 40.0, 30.0)];
+    let params = AdaptiveParams { stepover: 2.5, climb: true, stock_to_leave: 0.5, tolerance: 0.01 };
+    let path = adaptive(&regions, &tool(6.0), &params, &cut(0.0, -2.0, 2.0)).unwrap();
+    for p in cutting_points(&path, 0.0) {
+        assert!(p.x >= 3.5 - 0.01 && p.x <= 36.5 + 0.01 && p.y >= 3.5 - 0.01 && p.y <= 26.5 + 0.01, "cut into the stock at {p:?}");
+    }
+}
+
+#[test]
+fn adaptive_goes_round_an_island() {
+    let regions = [Region2 {
+        outer: Loop2::polygon(&[v(0.0, 0.0), v(40.0, 0.0), v(40.0, 30.0), v(0.0, 30.0)]),
+        holes: vec![Loop2::polygon(&[v(15.0, 10.0), v(25.0, 10.0), v(25.0, 20.0), v(15.0, 20.0)])],
+    }];
+    let params = AdaptiveParams { stepover: 2.0, climb: true, stock_to_leave: 0.0, tolerance: 0.01 };
+    let path = adaptive(&regions, &tool(6.0), &params, &cut(0.0, -4.0, 4.0)).unwrap();
+    // The walls and the island are kept a tool radius away at the bottom. On
+    // the way down, the planner's entries are placed against its region
+    // approximation and may come about half a millimetre closer.
+    let island_dist = |p: Vec3| {
+        let (dx, dy) = ((15.0 - p.x).max(0.0).max(p.x - 25.0), (10.0 - p.y).max(0.0).max(p.y - 20.0));
+        (dx * dx + dy * dy).sqrt()
+    };
+    // The clamp keeps every cutting point a tool radius from the walls and
+    // the island at every depth.
+    for p in cutting_points(&path, 0.0) {
+        assert!(island_dist(p) >= 3.0 - 0.01, "gouge into the island at {p:?}");
+        assert!(p.x >= 3.0 - 0.01 && p.x <= 37.0 + 0.01 && p.y >= 3.0 - 0.01 && p.y <= 27.0 + 0.01, "gouge at {p:?}");
+    }
+}
+
+#[test]
+fn adaptive_refuses_what_it_cannot_cut() {
+    let regions = [rect(0.0, 0.0, 40.0, 30.0)];
+    // A drill cannot mill.
+    let drill = Tool::new(1, ToolKind::Drill, 6.0, 20.0);
+    let params = AdaptiveParams { stepover: 2.5, climb: true, stock_to_leave: 0.0, tolerance: 0.01 };
+    assert!(adaptive(&regions, &drill, &params, &cut(0.0, -5.0, 2.0)).is_err());
+    // A stepover above the tool diameter.
+    let wide = AdaptiveParams { stepover: 7.0, ..params };
+    assert!(adaptive(&regions, &tool(6.0), &wide, &cut(0.0, -5.0, 2.0)).is_err());
+    // A pocket the tool does not fit in.
+    let tight = [rect(0.0, 0.0, 4.0, 4.0)];
+    assert!(adaptive(&tight, &tool(6.0), &params, &cut(0.0, -5.0, 2.0)).is_err());
+    // No regions at all.
+    assert!(adaptive(&[], &tool(6.0), &params, &cut(0.0, -5.0, 2.0)).is_err());
+}
+
+#[test]
+fn adaptive_splits_a_pocket_at_a_narrow_passage() {
+    // Two wide areas joined by a 5 mm-wide neck: with a 6 mm tool, the left
+    // area is cleared and the neck is left alone — the tool does not fit into
+    // it, and the engine crosses (never clears) a passage. The in-tree pocket
+    // operation is the one for pockets a tool only partially fits.
+    let regions = [polygon(&[(0.0, 0.0), (30.0, 0.0), (30.0, 12.5), (50.0, 12.5), (50.0, 17.5), (30.0, 17.5), (30.0, 30.0), (0.0, 30.0)])];
+    let params = AdaptiveParams { stepover: 2.0, climb: true, stock_to_leave: 0.0, tolerance: 0.01 };
+    let path = adaptive(&regions, &tool(6.0), &params, &cut(0.0, -3.0, 3.0)).unwrap();
+    for p in cutting_points(&path, 0.0) {
+        assert!(p.y >= 3.0 - 0.01 || (p.x >= 27.0 && p.x <= 53.0), "gouge at {p:?}");
+        assert!(p.y <= 27.0 + 0.01 || (p.x >= 27.0 && p.x <= 53.0), "gouge at {p:?}");
+        assert!(p.x >= 3.0 - 0.01 && p.x <= 47.0 + 0.01, "gouge at {p:?}");
+    }
+    // The room is cleared to its middle.
+    let room = v(8.0, 15.0);
+    let d = dist_to_cuts(&path, -3.0 + 1e-6, room);
+    assert!(d <= 3.0 + 0.01, "{room:?} is {d} from the nearest pass");
+    // The neck is never entered: its middle is farther from every cut than
+    // the tool radius, and so is the wall beside it.
+    for spot in [v(35.0, 15.0), v(40.0, 10.0)] {
+        let d = dist_to_cuts(&path, -3.0 + 1e-6, spot);
+        assert!(d > 3.0, "{spot:?} is {d} from the nearest pass");
+    }
+}

@@ -5,11 +5,13 @@
 
 use serde_json::{Value, json};
 use solidcraft_cam::{
-    ContourParams, Cut, Feeds, Heights, Operation, PocketParams, Post, Program, Side, Tool, ToolKind, contour, emit, pocket, readback,
+    AdaptiveParams, ContourParams, Cut, Feeds, Heights, Operation, PocketParams, Post, Program, Side, Tool, ToolKind, adaptive, contour, emit,
+    pocket, readback,
 };
 use solidcraft_doc::cam::{
-    CamContourParams, CamCut, CamFaceRef, CamGeometry, CamOperation, CamPocketParams, CamSettings, CamSetup, CamSide, MAX_OPS, MAX_SETUPS, MAX_TOOLS,
-    PolygonRegion, StockBox, WcsOriginMode, default_contour_params, default_cut, default_pocket_params,
+    CamAdaptiveParams, CamContourParams, CamCut, CamFaceRef, CamGeometry, CamOperation, CamPocketParams, CamSettings, CamSetup, CamSide, MAX_OPS,
+    MAX_SETUPS, MAX_TOOLS, PolygonRegion, StockBox, WcsOriginMode, default_adaptive_params, default_contour_params, default_cut,
+    default_pocket_params,
 };
 use solidcraft_doc::expr::Kind;
 use solidcraft_doc::project::resolve_face_indices;
@@ -45,6 +47,12 @@ pub static COMMANDS: &[CommandSpec] = &[
         "setup; name; tool (number); sketch?: id or name, with profiles?; faces?; or outer/regions; holes?; \
          stepover? (default half the tool diameter); climb?; stock_to_leave?; tolerance?; ramp_angle?: deg; \
          clearance?; retract?; top?; bottom; stepdown?; feed?; plunge_feed?; spindle_rpm?; coolant?",
+    ),
+    CommandSpec::new("cam.op.adaptive", "Adaptive Clear", adaptive_cmd).icon("hole").params(
+        "setup; name; tool (number); sketch?: id or name, with profiles?; faces?; or outer/regions; holes?; \
+         stepover? (default half the tool diameter); climb?; stock_to_leave?; tolerance?; \
+         clearance?; retract?; top?; bottom; stepdown?; feed?; plunge_feed?; spindle_rpm?; coolant? \
+         → constant-engagement clearing; narrow slots are crossed, not cleared",
     ),
     CommandSpec::new("cam.op.remove", "Remove CAM Operation", delete_op).icon("delete").params("setup; name"),
     CommandSpec::new("cam.post", "Post Process", post_cmd).icon("export").noundo().params(
@@ -241,14 +249,26 @@ fn stock_box(cmd: &str, v: &Value) -> Result<StockBox> {
 }
 
 fn contour_cmd(s: &mut Session, p: &Value) -> Result<Value> {
-    op_cmd(s, p, "cam.op.contour", true)
+    op_cmd(s, p, "cam.op.contour", OpKind::Contour)
 }
 
 fn pocket_cmd(s: &mut Session, p: &Value) -> Result<Value> {
-    op_cmd(s, p, "cam.op.pocket", false)
+    op_cmd(s, p, "cam.op.pocket", OpKind::Pocket)
 }
 
-fn op_cmd(s: &mut Session, p: &Value, cmd: &str, is_contour: bool) -> Result<Value> {
+fn adaptive_cmd(s: &mut Session, p: &Value) -> Result<Value> {
+    op_cmd(s, p, "cam.op.adaptive", OpKind::Adaptive)
+}
+
+/// Which operation `op_cmd` builds.
+#[derive(Clone, Copy, PartialEq)]
+enum OpKind {
+    Contour,
+    Pocket,
+    Adaptive,
+}
+
+fn op_cmd(s: &mut Session, p: &Value, cmd: &str, kind: OpKind) -> Result<Value> {
     let setup_name = str_(p, "setup").map(str::trim).filter(|n| !n.is_empty()).ok_or_else(|| bad(cmd, "`setup` is required"))?.to_string();
     let name = str_(p, "name").map(str::trim).filter(|n| !n.is_empty() && n.len() <= 128).ok_or_else(|| bad(cmd, "`name` is required"))?.to_string();
     let tool_n =
@@ -258,46 +278,64 @@ fn op_cmd(s: &mut Session, p: &Value, cmd: &str, is_contour: bool) -> Result<Val
     let cut = cut_param(cmd, p, &tool)?;
     let spindle_rpm = num(p, "spindle_rpm").or(tool.spindle_rpm);
     let coolant = bool_(p, "coolant").unwrap_or(false);
-    let op = if is_contour {
-        let mut params = default_contour_params();
-        if let Some(side) = str_(p, "side") {
-            params.side = parse_side(cmd, side)?;
+    let op = match kind {
+        OpKind::Contour => {
+            let mut params = default_contour_params();
+            if let Some(side) = str_(p, "side") {
+                params.side = parse_side(cmd, side)?;
+            }
+            if let Some(c) = bool_(p, "climb") {
+                params.climb = c;
+            }
+            if let Some(v) = expr(p, "stock_to_leave") {
+                params.stock_to_leave = v;
+            }
+            if let Some(v) = expr(p, "tolerance") {
+                params.tolerance = v;
+            }
+            if let Some(v) = expr(p, "ramp_angle") {
+                params.ramp_angle = v;
+            }
+            CamOperation::Contour { name: name.clone(), tool: tool_n, geometry, params, cut, spindle_rpm, coolant }
         }
-        if let Some(c) = bool_(p, "climb") {
-            params.climb = c;
+        OpKind::Pocket | OpKind::Adaptive => {
+            let stepover = match expr(p, "stepover") {
+                Some(e) => e,
+                None => match tool.stepover {
+                    Some(v) => Expr::new(format!("{v} mm")),
+                    None => Expr::new(format!("{} mm", tool.diameter * 0.5)),
+                },
+            };
+
+            if kind == OpKind::Pocket {
+                let mut params = default_pocket_params(stepover);
+                if let Some(c) = bool_(p, "climb") {
+                    params.climb = c;
+                }
+                if let Some(v) = expr(p, "stock_to_leave") {
+                    params.stock_to_leave = v;
+                }
+                if let Some(v) = expr(p, "tolerance") {
+                    params.tolerance = v;
+                }
+                if let Some(v) = expr(p, "ramp_angle") {
+                    params.ramp_angle = v;
+                }
+                CamOperation::Pocket { name: name.clone(), tool: tool_n, geometry, params, cut, spindle_rpm, coolant }
+            } else {
+                let mut params = default_adaptive_params(stepover);
+                if let Some(c) = bool_(p, "climb") {
+                    params.climb = c;
+                }
+                if let Some(v) = expr(p, "stock_to_leave") {
+                    params.stock_to_leave = v;
+                }
+                if let Some(v) = expr(p, "tolerance") {
+                    params.tolerance = v;
+                }
+                CamOperation::Adaptive { name: name.clone(), tool: tool_n, geometry, params, cut, spindle_rpm, coolant }
+            }
         }
-        if let Some(v) = expr(p, "stock_to_leave") {
-            params.stock_to_leave = v;
-        }
-        if let Some(v) = expr(p, "tolerance") {
-            params.tolerance = v;
-        }
-        if let Some(v) = expr(p, "ramp_angle") {
-            params.ramp_angle = v;
-        }
-        CamOperation::Contour { name: name.clone(), tool: tool_n, geometry, params, cut, spindle_rpm, coolant }
-    } else {
-        let stepover = match expr(p, "stepover") {
-            Some(e) => e,
-            None => match tool.stepover {
-                Some(v) => Expr::new(format!("{v} mm")),
-                None => Expr::new(format!("{} mm", tool.diameter * 0.5)),
-            },
-        };
-        let mut params = default_pocket_params(stepover);
-        if let Some(c) = bool_(p, "climb") {
-            params.climb = c;
-        }
-        if let Some(v) = expr(p, "stock_to_leave") {
-            params.stock_to_leave = v;
-        }
-        if let Some(v) = expr(p, "tolerance") {
-            params.tolerance = v;
-        }
-        if let Some(v) = expr(p, "ramp_angle") {
-            params.ramp_angle = v;
-        }
-        CamOperation::Pocket { name: name.clone(), tool: tool_n, geometry, params, cut, spindle_rpm, coolant }
     };
     op.validate().map_err(|e| bad(cmd, e.to_string()))?;
     let setup = s.doc.cam.setup(&setup_name).cloned().ok_or_else(|| bad(cmd, format!("no setup `{setup_name}` (cam.setup first)")))?;
@@ -476,9 +514,9 @@ fn post_cmd(s: &mut Session, p: &Value) -> Result<Value> {
         let tool = s.doc.cam.tool(op.tool()).cloned().ok_or_else(|| bad(cmd, format!("operation `{}` needs tool {}", op.name(), op.tool())))?;
         let path = build_path(s, &setup, op).map_err(|e| bad(cmd, e))?;
         let (spindle_rpm, coolant) = match op {
-            CamOperation::Contour { spindle_rpm, coolant, .. } | CamOperation::Pocket { spindle_rpm, coolant, .. } => {
-                (spindle_rpm.or(tool.spindle_rpm).unwrap_or(6000.0), *coolant)
-            }
+            CamOperation::Contour { spindle_rpm, coolant, .. }
+            | CamOperation::Pocket { spindle_rpm, coolant, .. }
+            | CamOperation::Adaptive { spindle_rpm, coolant, .. } => (spindle_rpm.or(tool.spindle_rpm).unwrap_or(6000.0), *coolant),
         };
         program.operations.push(Operation { name: op.name().into(), tool, spindle_rpm, coolant, path });
     }
@@ -721,6 +759,15 @@ fn engine_pocket(s: &Session, p: &CamPocketParams) -> std::result::Result<Pocket
     })
 }
 
+fn engine_adaptive(s: &Session, p: &CamAdaptiveParams) -> std::result::Result<AdaptiveParams, String> {
+    Ok(AdaptiveParams {
+        stepover: eval_len(s, &p.stepover, "stepover")?,
+        climb: p.climb,
+        stock_to_leave: eval_len(s, &p.stock_to_leave, "stock_to_leave")?,
+        tolerance: eval_len(s, &p.tolerance, "tolerance")?,
+    })
+}
+
 fn build_path(s: &Session, setup: &CamSetup, op: &CamOperation) -> std::result::Result<solidcraft_cam::Toolpath, String> {
     let regions = resolve_geometry(s, setup, op.geometry())?;
     let cut = engine_cut(s, op.cut())?;
@@ -733,6 +780,10 @@ fn build_path(s: &Session, setup: &CamSetup, op: &CamOperation) -> std::result::
         CamOperation::Pocket { params, .. } => {
             let params = engine_pocket(s, params)?;
             pocket(&regions, tool, &params, &cut).map_err(|e| e.to_string())
+        }
+        CamOperation::Adaptive { params, .. } => {
+            let params = engine_adaptive(s, params)?;
+            adaptive(&regions, tool, &params, &cut).map_err(|e| e.to_string())
         }
     }
 }
@@ -764,6 +815,10 @@ fn setup_json(setup: &CamSetup) -> Value {
             }),
             CamOperation::Pocket { name, tool, geometry, params, cut, spindle_rpm, coolant } => json!({
                 "type": "pocket", "name": name, "tool": tool, "geometry": geometry,
+                "params": params, "cut": cut, "spindle_rpm": spindle_rpm, "coolant": coolant,
+            }),
+            CamOperation::Adaptive { name, tool, geometry, params, cut, spindle_rpm, coolant } => json!({
+                "type": "adaptive", "name": name, "tool": tool, "geometry": geometry,
                 "params": params, "cut": cut, "spindle_rpm": spindle_rpm, "coolant": coolant,
             }),
         }).collect::<Vec<_>>(),
@@ -826,6 +881,39 @@ mod tests {
 
         let forced = run(&mut Session::new(s.doc.as_ref().clone()), "cam.post", json!({"setup": "Top", "verify": false}));
         assert!(forced["readback"]["within"].as_bool().unwrap());
+    }
+
+    #[test]
+    fn adaptive_clears_and_posts_to_verified_gcode() {
+        let mut s = Session::default();
+        run(
+            &mut s,
+            "cam.tool.define",
+            json!({"number": 1, "diameter": 6, "flute_length": 20, "spindle_rpm": 8000, "feed": 600, "plunge_feed": 200, "stepdown": 3}),
+        );
+        run(&mut s, "cam.setup", json!({"name": "Top", "work_offset": 1, "stock": {"min": [0, 0, -10], "max": [40, 30, 0]}}));
+        run(
+            &mut s,
+            "cam.op.adaptive",
+            json!({
+                "setup": "Top", "name": "Clear", "tool": 1,
+                "outer": [[0,0],[40,0],[40,30],[0,30]],
+                "holes": [[[15,10],[25,10],[25,20],[15,20]]],
+                "stepover": 2.0, "bottom": -4, "stepdown": 4,
+            }),
+        );
+        let posted = run(&mut s, "cam.post", json!({"setup": "Top"}));
+        let gcode = posted["gcode"].as_str().unwrap();
+        assert!(gcode.contains("G54"));
+        assert!(gcode.contains("M30"));
+        assert!(posted["readback"]["within"].as_bool().unwrap(), "read back: {}", posted["readback"]);
+
+        // The island survives a save, a reload and a fresh post.
+        let cold = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+        assert_eq!(cold.doc.cam.setups[0].operations.len(), 1);
+        assert!(matches!(cold.doc.cam.setups[0].operations[0], CamOperation::Adaptive { .. }));
+        let again = run(&mut Session::new(cold.doc.as_ref().clone()), "cam.post", json!({"setup": "Top"}));
+        assert!(again["readback"]["within"].as_bool().unwrap());
     }
 
     #[test]
