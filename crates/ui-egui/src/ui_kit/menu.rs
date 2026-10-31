@@ -31,7 +31,17 @@ impl Menu {
 
     /// A row whose popup opens beside it, on the left only when the right has no room (#8267).
     pub(crate) fn item_button<R>(ui: &mut Ui, item: &MenuItem<'_>, add: impl FnOnce(&mut Ui) -> R) -> egui::InnerResponse<Option<R>> {
-        Self::button_at(ui, |ui, _| item.show(ui), add, true)
+        Self::item_button_preview(ui, item, false, add)
+    }
+
+    /// Keep a flyout visible while a command-search result previews one of its rows.
+    pub(crate) fn item_button_preview<R>(
+        ui: &mut Ui,
+        item: &MenuItem<'_>,
+        preview: bool,
+        add: impl FnOnce(&mut Ui) -> R,
+    ) -> egui::InnerResponse<Option<R>> {
+        Self::button_at(ui, |ui, _| item.show(ui), add, true, preview)
     }
 
     pub(crate) fn button_with<R>(
@@ -39,7 +49,7 @@ impl Menu {
         button: impl FnOnce(&mut Ui, bool) -> Response,
         add: impl FnOnce(&mut Ui) -> R,
     ) -> egui::InnerResponse<Option<R>> {
-        Self::button_at(ui, button, add, false)
+        Self::button_at(ui, button, add, false, false)
     }
 
     fn button_at<R>(
@@ -47,6 +57,7 @@ impl Menu {
         button: impl FnOnce(&mut Ui, bool) -> Response,
         add: impl FnOnce(&mut Ui) -> R,
         beside: bool,
+        preview: bool,
     ) -> egui::InnerResponse<Option<R>> {
         let previous = ui.style().clone();
         let frame = Self::frame();
@@ -87,7 +98,7 @@ impl Menu {
             };
             submenu.show(ui, &response, content)
         } else if beside {
-            let open = Self::flyout_open(ui, &response, popup_id);
+            let open = Self::flyout_open(ui, &response, popup_id) || preview;
             let popup = Container::new(ui.ctx(), Surface::Popup).menu(&response).open(open).frame(frame);
             // Last pass's size; the first pass assumes the flyout fits on the right.
             let size = popup.get_expected_size().unwrap_or(egui::Vec2::ZERO);
