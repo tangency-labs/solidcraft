@@ -3,7 +3,6 @@
 # and on a listed case that passes: a fix removes its line in the same pull request.
 # Baseline: develop 242bbc89f with the SMLib fixes of 2026-10-29 (integration-overnight + b78bd4a), aarch64 Linux.
 1080-fillet-equal-slope-basin-1-mm-rim-loop-4 builds to the analytic volume (rel 5e-9), but the continuity check (g1 at every blend seam) takes in the mitre's creases, G0 by the mitre ruling: the case's continuity seams need the owner's word
-1080-fillet-sloped-basin-0-5-mm-rim-r4-4-edges builds to the analytic volume (rel 3e-9), but the continuity check (g1 at every blend seam) takes in the mitre's creases, G0 by the mitre ruling: the case's continuity seams need the owner's word
 1080-fillet-sloped-basin-1-mm-rim-r4-2-edges builds to the analytic volume (rel 6e-9), but the continuity check (g1 at every blend seam) takes in the mitre's creases, G0 by the mitre ruling: the case's continuity seams need the owner's word
 1080-fillet-sloped-basin-1-mm-rim-r4-4-edges builds to the analytic volume (rel 3e-9), but the continuity check (g1 at every blend seam) takes in the mitre's creases, G0 by the mitre ruling: the case's continuity seams need the owner's word
 1207-fillet-bar-top-edge-after-boss-arc-round-r0-5 SMLib's check refuses the round: internal coincident control points in its end rib on the boss, which starts where the round and the boss are tangent (the boss's intersection marched there in spans down to 6e-8 mm)
