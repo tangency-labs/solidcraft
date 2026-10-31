@@ -4898,6 +4898,29 @@ pub fn revolve_extent_with_convention(
     to: Option<Vec3>,
     convention: crate::RevolveConvention,
 ) -> Result<RevolveExtent> {
+    let extent = revolve_extent_for_handle(st, plane, regions, (origin, axis), (angle, angle2), symmetric, to, convention)?;
+    // A solid needs an open sweep inside one full turn. Zero and a turn past 360° keep a
+    // handle frame (`revolve_extent_for_handle`) and still fail here, with the same message.
+    if !(extent.sweep.abs() > 1e-9 && extent.sweep.abs() <= std::f64::consts::TAU + 1e-9) {
+        return Err(DocError::Invalid("the revolve angle must be more than 0 and at most 360°".into()));
+    }
+    Ok(extent)
+}
+
+/// Where the angle handle sits. A sweep of zero, or past a full turn, builds no solid and
+/// [`revolve_extent_with_convention`] refuses it. The boundary is still a point on the circle,
+/// and the grab point stays there so the angle can be dragged back into range.
+#[allow(clippy::too_many_arguments)]
+pub fn revolve_extent_for_handle(
+    st: &ModelState,
+    plane: &Plane,
+    regions: &[Region2],
+    (origin, axis): (Vec3, Vec3),
+    (angle, angle2): (f64, Option<f64>),
+    symmetric: bool,
+    to: Option<Vec3>,
+    convention: crate::RevolveConvention,
+) -> Result<RevolveExtent> {
     let (start, sweep) = match (to, angle2, symmetric) {
         (Some(point), _, _) => {
             let points: Vec<Vec2> = regions.iter().flat_map(|r| r.outer.polyline(1e-2)).collect();
@@ -4936,7 +4959,7 @@ pub fn revolve_extent_with_convention(
         (None, None, true) => (-angle / 2.0, angle),
         (None, None, false) => (0.0, angle),
     };
-    if !(sweep.is_finite() && start.is_finite() && sweep.abs() > 1e-9 && sweep.abs() <= std::f64::consts::TAU + 1e-9) {
+    if !(sweep.is_finite() && start.is_finite()) {
         return Err(DocError::Invalid("the revolve angle must be more than 0 and at most 360°".into()));
     }
     let points: Vec<Vec2> = regions.iter().flat_map(|r| r.outer.polyline(1e-2)).collect();
