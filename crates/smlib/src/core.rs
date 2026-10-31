@@ -74,7 +74,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.fillet_refuse_rails_leaving_faces = true;
     f.fillet_refuse_face_consuming_blends = true;
     f.fillet_refuse_non_manifold_result = true;
-    f.fillet_refuse_crossing_rails = true;
     f.fillet_vertex_error_diagnostics = true;
     f.fillet_corner_ball_patch = true;
     f.fillet_chamfer_cone_on_arc = true;
@@ -255,6 +254,11 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.fillet_trim_status = true;
     f.perspective_sphere_offsets = true;
     f.plane_recognition_origin_after_axes = true;
+    f.fillet_corner_face_curve_halves = true;
+    f.brep_edit_statuses_pass_on = true;
+    f.fillet_run_on_bspline_trims = true;
+    f.offset_tangent_gap_statuses = true;
+    f.ssi_alignment_statuses = true;
     f
 }
 
@@ -282,9 +286,25 @@ pub(crate) fn fixes() -> UpstreamFixes {
 ///
 /// The fork carries on softly where these refuse: `temporary_radius_setup_errors` (#458: a scope guard
 /// cannot report), `fillet_corner_statuses` (`sm_TestG1Continuity`: no tangent is no tangency),
-/// `fillet_edge_curve_domain_statuses` (`sm_CheckEdgeCurveDomains`: a failed trim keeps the edge's
-/// curve), `offset_tangent_gap_statuses` (`HaveTangentGaps`: a failed sample shows no gap) and
-/// `ssi_alignment_statuses` (`ALIGN_DIR_WITH_PREVIOUS_POINT`: no angle, no alignment).
+/// and `fillet_edge_curve_domain_statuses` (`sm_CheckEdgeCurveDomains`: a failed trim keeps the
+/// edge's curve).
+///
+/// Upstream's defect is still in the fork's source at `SMLIB_REV` 2fc375f:
+/// `offset_swap_uv_extended_distance` (WR-164: `SmOffsetSurface::SwapUV` negates twice),
+/// `circumscribe_axis_map_by_basis` (WR-5: `SmExtent3d::Circumscribe` reads the map by axis),
+/// `planar_path_profile_in_path_frame` (WR-660: `PositionProfileCurves` orients by global axes),
+/// `validation_does_not_make_uv_trims` (WR-446: `sm_CheckEdgeuseGeometry` evaluates with TRUE),
+/// `iso_curve_uv_line_both_params` (WR-30: `CreateUVIsoLine` tests `SM_SP_U` twice),
+/// `extrusion_step_uses_clamped_uv` (WR-61: `EvaluateSTEP*` evaluate `crUV`) and
+/// `analytic_corner_failure_is_false` (WR-254: `MakeAnalyticCornerSurface`'s `SER` reads as TRUE).
+///
+/// The fork has no such code: `offset_splits_corner_vertices` (WR-657: `CloseLoopGaps` splits no
+/// corner and an offset's result is not refused for being open), `defeature_refuses_open_base`
+/// (WR-656: `DoDefeature` drops `BuildPatches`' outcome) and `ssi_start_loop_trace_budget` (HANG-52:
+/// `DoIntersection`'s start-point loop has no budget). `fillet_refuse_crossing_rails` (WR-460: "not
+/// upstream"; the fork stops such rounds with the overlapping bands' check, SmFilletExecutive.cpp:3654,
+/// and refuses a result that is no closed solid) also fails sound rounds, with the closest-point
+/// query's 1001 (a box's top loop, R4 on R8 corners).
 ///
 /// On since `SMLIB_REV` eaa998a: `fillet_trim_inside_by_best_dot` (fork de4dae6),
 /// `fillet_half_degree_crease` (2e8758b), `fillet_split_edge_keeps_near_half` (ceb3272) and
@@ -303,10 +323,8 @@ pub(crate) fn fixes() -> UpstreamFixes {
 ///
 /// The fork handles a failed status softly where these flags refuse (solidcore#1775, #483), so the
 /// flags would fail where the C++ kernel carries on: `fillet_corner_statuses` (`sm_TestG1Continuity`:
-/// no tangent is no tangency), `fillet_edge_curve_domain_statuses` (`sm_CheckEdgeCurveDomains`: a
-/// failed trim keeps the edge's curve), `offset_tangent_gap_statuses` (`HaveTangentGaps`: a failed
-/// sample shows no gap) and `ssi_alignment_statuses` (`ALIGN_DIR_WITH_PREVIOUS_POINT`: no angle, no
-/// alignment). `translation_sweep_regularize` (solidcore#1937) has no fork commit, and the fork keeps
+/// no tangent is no tangency) and `fillet_edge_curve_domain_statuses` (`sm_CheckEdgeCurveDomains`: a
+/// failed trim keeps the edge's curve). `translation_sweep_regularize` (solidcore#1937) has no fork commit, and the fork keeps
 /// upstream's `gap_samples_use_trimmed_spans` (WR-89: `BuildSampleSet` spans from the first knot) and
 /// `twist_simple_duw_sign` (WR-46: `EvaluateSimple`'s Duw y is -per cos).
 #[cfg(test)]
@@ -330,11 +348,20 @@ const HELD_BACK: &[&str] = &[
     "extent3d_contains_both_segment_endpoints",
     "fillet_corner_statuses",
     "fillet_edge_curve_domain_statuses",
-    "offset_tangent_gap_statuses",
-    "ssi_alignment_statuses",
     "translation_sweep_regularize",
     "gap_samples_use_trimmed_spans",
     "twist_simple_duw_sign",
+    "offset_swap_uv_extended_distance",
+    "circumscribe_axis_map_by_basis",
+    "planar_path_profile_in_path_frame",
+    "validation_does_not_make_uv_trims",
+    "offset_splits_corner_vertices",
+    "iso_curve_uv_line_both_params",
+    "extrusion_step_uses_clamped_uv",
+    "analytic_corner_failure_is_false",
+    "defeature_refuses_open_base",
+    "ssi_start_loop_trace_budget",
+    "fillet_refuse_crossing_rails",
 ];
 
 fn fresh() -> Kernel {

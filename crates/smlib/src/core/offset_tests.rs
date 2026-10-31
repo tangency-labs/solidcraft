@@ -783,7 +783,6 @@ mod history {
     }
 
     #[test]
-    #[ignore = "solidcore#1973 (PR #1977): the stitch in the shell drops the flat sheet's edge tags"]
     fn tags_cross_a_thicken_of_a_flat_sheet() {
         let _cpp = crate::route::on_cpp();
         thicken_parity(false);
@@ -849,8 +848,11 @@ fn offset_faces_close_a_step_wall() {
 
 /// Rig case shell/4492's rounded box: four mitred rounds, r 3, come off a 40 x 30 x 10 box's top
 /// together and follow it. From height 0 the outline is the 34 x 24 top moved out by the round's
-/// w(z) = sqrt(9 - (z - axis)^2), or 3 below the axis. With the fork's values at +19, and a body
-/// whose rounds go all the way down at -7. With SMLib built, the C++ kernel gives the same.
+/// w(z) = sqrt(9 - (z - axis)^2), or 3 below the axis. With the fork's values at +19, and bodies
+/// whose rounds go all the way down from -7 and are cut short from -7.5 (solidcore#2027). At -9
+/// solidcore refuses to put the rounds back (solidcore#2020, open): SolidCraft says it does not
+/// make that move, where the C++ kernel gives the analytic value, also checked here. With SMLib
+/// built, the C++ kernel gives the same at every other move.
 #[test]
 fn mitred_rounds_follow_a_moved_top() {
     #[cfg(feature = "native")]
@@ -870,13 +872,23 @@ fn mitred_rounds_follow_a_moved_top() {
             })
             .sum::<f64>()
     };
-    let moves = [(19.0, [10, 20, 12]), (1.0, [10, 20, 12]), (-1.0, [10, 20, 12]), (-6.9, [10, 20, 12]), (-7.0, [6, 12, 8])];
+    let moves = [
+        (19.0, [10, 20, 12]),
+        (1.0, [10, 20, 12]),
+        (-1.0, [10, 20, 12]),
+        (-6.9, [10, 20, 12]),
+        (-7.0, [6, 12, 8]),
+        (-7.5, [6, 12, 8]),
+        (-8.0, [6, 12, 8]),
+        (-9.5, [6, 12, 8]),
+    ];
     for (d, n) in moves {
         let moved = offset_faces(&rounded, &[top], 0.1, d).unwrap();
         let v = volume(&moved, 1e-8).unwrap();
         assert_eq!(counts(&moved).unwrap(), n, "d {d}");
         assert!(rel(v, analytic(d)) < 1e-6, "d {d}: {v} vs {}", analytic(d));
     }
+    assert!(matches!(offset_faces(&rounded, &[top], 0.1, -9.0), Err(Error::Unsupported)));
     #[cfg(feature = "native")]
     {
         use crate::ffi;
@@ -886,7 +898,13 @@ fn mitred_rounds_follow_a_moved_top() {
         for (d, _) in moves {
             let cpp = ffi::ops::pick_op(ffi::ops::Pick::OffsetFaces, &round, &[top], 0.1, d).unwrap();
             let ours = offset_faces(&rounded, &[top], 0.1, d).unwrap();
-            assert!(rel(volume(&ours, 1e-8).unwrap(), ffi::volume(&cpp, 1e-8).unwrap()) < 1e-9, "d {d}");
+            let (o, c) = (volume(&ours, 1e-8).unwrap(), ffi::volume(&cpp, 1e-8).unwrap());
+            // Below -7 the rounds are cut short, and the two differ in the seventh digit: each is
+            // within 1e-6 of the analytic value, and of the other.
+            let agree = if d < -7.0 { 1e-6 } else { 1e-9 };
+            assert!(rel(o, c) < agree, "d {d}: {o} vs the C++ kernel's {c}");
         }
+        let cpp = ffi::ops::pick_op(ffi::ops::Pick::OffsetFaces, &round, &[top], 0.1, -9.0).unwrap();
+        assert!(rel(ffi::volume(&cpp, 1e-8).unwrap(), analytic(-9.0)) < 1e-6, "d -9");
     }
 }

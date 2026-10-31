@@ -543,12 +543,10 @@ fn picked_on(b: &Brep, e: EdgeId) -> Option<(solidcore::geom::attribute::Attribu
     a.application_value::<Picked>().map(|p| (h, p.0))
 }
 
-/// Whether the rounds that overflow go first ([`overflow_first`]), held back: solidcore's
-/// `SubtractRemovalRegion` loses the attributes of target edges the subtraction replaces, so a picked
-/// edge the overflow only shortened reads as removed whole and is silently left unrounded (the rig's
-/// fillets/5158-fillet-adjacent-plate-edges-as-thick-as-plate, 1706.89 against 1681.90). Off, the
-/// rounds are blended together, and those that need the order are refused.
-const OVERFLOW_GOES_FIRST: bool = false;
+/// Whether the rounds that overflow go first ([`overflow_first`]): on since solidcore#1980, which
+/// keeps the attributes of the target edges the subtraction replaces, so a picked edge the overflow
+/// only shortened still reads as picked.
+const OVERFLOW_GOES_FIRST: bool = true;
 
 /// `overflow_first`: the rounds of [`blend_call`] when blends of several edges overflow their
 /// faces (`round_edges` stopped in the copy `w` of `body`, `picked` its picked edges, `each` their
