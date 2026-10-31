@@ -1175,7 +1175,8 @@ const MAX_CONE_SIZE: f64 = 1e7;
 /// of `top_radius` `height` along `axis` (a negative height goes the other way). A top radius of
 /// 0 (or below a micrometre) makes a full cone ending in an apex. Built, as the torus is, by
 /// revolving its half section, a trapezoid (a triangle for a full cone) with an edge on the axis.
-pub(super) fn cone(base: Vec3, axis: Vec3, radius: f64, top_radius: f64, height: f64) -> Result<Body> {
+/// Its faces are named `bottom`, `side` and `top` ([`crate::lineage::cone_roles`]).
+pub(super) fn cone(base: Vec3, axis: Vec3, radius: f64, top_radius: f64, height: f64) -> Result<Traced> {
     let in_range = |v: f64| v.is_finite() && v.abs() <= MAX_CONE_SIZE;
     if !(in_range(base.x) && in_range(base.y) && in_range(base.z)) {
         return Err(DocError::Invalid("the cone's base is out of range".into()));
@@ -1209,14 +1210,16 @@ pub(super) fn cone(base: Vec3, axis: Vec3, radius: f64, top_radius: f64, height:
         (Some(b), true) => b,
         _ => return Err(DocError::Invalid("the cone could not be built".into())),
     };
+    // Read off the revolve's own history; moving the body keeps its faces' order.
+    let roles = crate::lineage::cone_roles(&body);
     if (dir - Vec3::Z).len() < 1e-12 && base.len() == 0.0 {
-        return Ok(body);
+        return Ok(Traced::made(body, roles));
     }
     // A rotation taking +Z onto the axis (x and y square to it, right-handed), then the base.
     let x = Plane::from_normal(base, dir).ok_or_else(|| DocError::Invalid("the cone's axis has no direction".into()))?.x;
     let y = dir.cross(x);
     let m = [[x.x, x.y, x.z, 0.0], [y.x, y.y, y.z, 0.0], [dir.x, dir.y, dir.z, 0.0], [base.x, base.y, base.z, 1.0]];
-    Ok(kernel::transform_matrix(&body, m)?)
+    Ok(Traced::made(kernel::transform_matrix(&body, m)?, roles))
 }
 
 /// A primitive tool's exact geometry, for [`sheet_primitive_cut`].
