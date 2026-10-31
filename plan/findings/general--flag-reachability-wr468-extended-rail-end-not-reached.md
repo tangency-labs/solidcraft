@@ -1,0 +1,7 @@
+# General: WR-468 `fillet_through_extended_rail_end`: no constructible boss reaches the extended-rail-end branch (2026-10-31)
+
+- **Flag:** `Kernel::fixes.fillet_through_extended_rail_end` (WR-468, #1022; the SolidCraft fork's "a round's surface reaches its edge's end at an extended-edge rail end").
+- **Audit:** `plan/findings/audits/flag-reachability-2026-10-31/` classifies it as C. Only the ignored all-on `issue_1476` test sets it, and the helper `c1_extended_rail_end_knots` is unit-tested without the flag. All-on SolidCraft fillet cases read the guard with identical output.
+- **Tried:** a round along a boss's base where the boss overhangs a wall: a 30 x 60 x 10 block united with a cylinder boss (height 10 on the block's top) that overhangs the block's side x = 0. Boss centre and radius (4, 33) r 5, (3, 30) r 5, (1, 30) r 5 and (2, 30) r 6; the base arcs rounded r 2 (r 1.5 for the r 6 boss) with `fillet_edges`, flag on and off.
+- **Result:** every variant fails with 1001 in `fillet_executive::session::finish`, with and without the flag. The flag's guard (`fillet_solver/p4.rs`, the extended rail ends) is not reached, so these bodies stop before `CalcFilletGeom` gets to the rail ends.
+- **Waits on:** the rig fillets/4369 part (not public), or a geometry whose round gets past the corner set-up to the trace. Whether the 1001 above is another missing fix or this geometry's own is not established.
