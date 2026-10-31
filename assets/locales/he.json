@@ -4961,6 +4961,8 @@
   "ui.right": "ימין",
   "ui.save": "שמירה",
   "ui.save_as": "שמירה בשם",
+  "ui.save_mesh_bad_deviation": "\"{value}\" אינו מספר חיובי במילימטרים",
+  "ui.save_mesh_deviation": "סטייה (מ\"מ)",
   "ui.save_mesh_no_slicer_open": "לא נמצא סלייסר: יש לבחור „מותאם אישית…” ולבחור את תוכנת הסלייסר",
   "ui.save_mesh_pick_bodies": "יש לבחור את הגופים לשמירה",
   "ui.saved_to": "נשמר: {path}",
