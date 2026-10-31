@@ -501,12 +501,12 @@ mod tests {
 
     #[test]
     fn every_upstream_fix_is_on() {
-        let f = format!("{:?}", fixes());
-        let off: Vec<&str> =
-            f.split([',', '{', '}']).filter_map(|kv| kv.trim().strip_suffix(": false")).filter(|name| !HELD_BACK.contains(name)).collect();
+        let f = fixes();
+        let flags: Vec<(&str, bool)> = f.flags().collect();
+        let off: Vec<&str> = flags.iter().filter(|(name, on)| !on && !HELD_BACK.contains(name)).map(|(name, _)| *name).collect();
         assert!(off.is_empty(), "UpstreamFixes flags are off: {off:?}");
         for name in HELD_BACK {
-            assert!(f.contains(&format!("{name}: false")), "{name} is on or gone: drop it from HELD_BACK");
+            assert!(flags.contains(&(*name, false)), "{name} is on or gone: drop it from HELD_BACK");
         }
     }
 
