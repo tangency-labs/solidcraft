@@ -1113,3 +1113,32 @@ fn inch_joint_offsets_limits_and_drive_values_keep_their_units() {
     let Kind::Assembly(Asm::Joint(f)) = edit.kind else { panic!("no edit") };
     assert_eq!((f.limits[0].1.as_str(), f.limits[0].2.as_str()), ("0 in", "0.5 in"));
 }
+
+#[test]
+fn joint_dialog_picks_origin_plane_and_axis() {
+    let mut app = two_boxes();
+    app.start("joint.create");
+    let mut d = app.dialog.clone().unwrap();
+
+    // 1. Pick origin plane XY
+    let plane_sel = Sel::Plane { name: "XY".into() };
+    let snap_plane = snap_of(&app.session, &plane_sel).expect("snap for XY plane");
+    assert_eq!(snap_plane.kind, SnapKind::FaceCenter);
+    assert_eq!(snap_plane.z, Vec3::Z);
+    d.pick(&app.session, plane_sel);
+
+    // 2. Pick a face on Component B
+    let face_b = face_sel(&app.session, Vec3::new(40.0, 10.0, 0.0)).unwrap();
+    d.pick(&app.session, face_b);
+
+    let cmds = apply_commands(&app, &d).expect("joint between plane and component B");
+    assert_eq!(cmds[0].0, "joint.create");
+    assert_eq!(cmds[0].1["a"]["plane"], "XY");
+    assert_eq!(cmds[0].1["b"]["occurrence"], occ(&app, "B"));
+
+    // Apply the command and verify the joint is created in the document
+    for (cmd, params) in cmds {
+        app.run(&cmd, params).unwrap();
+    }
+    assert_eq!(app.session.doc.assembly.joints.len(), 1);
+}
