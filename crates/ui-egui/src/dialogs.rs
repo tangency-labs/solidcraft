@@ -2795,11 +2795,6 @@ fn error_rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: &mut 
     {
         d.refuse(app, error);
     }
-    // For Corner dialogs (fillet/chamfer), propagate preview errors to `d.error`
-    // so impossible sizes still show a refusal message and tests can check it.
-    if matches!(d.kind, Kind::SketchModify(crate::sketch_modify_ui::Mod::Corner { .. })) && app.preview.error.is_some() && d.error.is_none() {
-        d.error = app.preview.error.clone();
-    }
     let shown_id = egui::Id::new("sc_dialog_refusal_shown");
     if d.error.is_none() && app.preview.error.is_none() {
         ui.data_mut(|m| m.remove::<String>(shown_id));

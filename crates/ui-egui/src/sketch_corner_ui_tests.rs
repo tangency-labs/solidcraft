@@ -545,6 +545,27 @@ fn escape_leaves_the_sketch_and_the_history_untouched() {
     assert_eq!((h.app.session.doc.to_json(), h.app.session.undo.len()), before);
 }
 
+/// #9316: the refusal of a size being typed (`4 m` on the way to `4 mm`) goes once the size fits.
+#[test]
+fn a_refused_size_gives_way_to_one_that_fits() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+    h.app.run("sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[20,30]})).unwrap();
+    h.frames(2);
+    h.step(&json!({"start":"sketch.fillet"})).unwrap();
+    h.frames(2);
+    h.step(&json!({"click":{"world":[0,0,0]}})).unwrap();
+    h.frames(2);
+    let shown = |h: &mut crate::scenario::Harness, size: &str| {
+        set_size(&mut h.app, size);
+        h.settle();
+        h.frames(2);
+        h.app.dialog.as_ref().and_then(|d| d.error.clone()).or_else(|| h.app.preview.error.clone())
+    };
+    assert!(shown(&mut h, "4 m").is_some_and(|e| e.contains("too large")));
+    assert_eq!(shown(&mut h, "4 mm"), None);
+}
+
 /// A size the corner cannot take is refused with a reason, and the window stays open on it.
 #[test]
 fn an_impossible_size_keeps_the_window_open_with_its_reason() {
