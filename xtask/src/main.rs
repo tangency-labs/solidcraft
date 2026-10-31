@@ -81,7 +81,8 @@ commands:
                   uses and tests/kernel-cases/EXEMPT does not list, and on a stale EXEMPT line
   known-failing --junit PATH... [--list FILE]
                   grade a nextest run's junit report (a file, or every .xml under a directory)
-                  against the tests known to fail today, tests/KNOWN_FAILING_TESTS (FILE): fails
+                  against the tests known to fail today on the default kernel,
+                  tests/KNOWN_FAILING_TESTS (FILE: .smlib is the C++ kernel's): fails
                   on a test that failed and is not listed, and on a listed test that passed
                   (fixed: take its line off); a listed test that did not run is neither. CI's
                   test jobs run it after nextest

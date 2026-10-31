@@ -19,7 +19,7 @@ The long form is `docs/book/src/dev/testing.md`.
 - The rig (`tests/kernel-cases/`) asserts geometry: exact volumes, shapes, seam continuity, geometric refusals, through commands with a hand-derived answer, so it survives a kernel swap (`fillets/190-fillet-disc-rim-past-its-2mm-wall`). A test doing both keeps only its logic.
 
 ## A failing test needs its fix
-A failing test cannot merge without its fix (it turns `main` red): include it, or list the test and cause in `tests/KNOWN_FAILING_TESTS` (`cargo xtask known-failing`); the fix drops the line.
+A failing test cannot merge without its fix (it turns `main` red): include it, or list the test and cause in `tests/KNOWN_FAILING_TESTS` (`cargo xtask known-failing`; `.smlib` is the same for the C++ kernel); the fix drops the line.
 
 ## Running
 - `cargo xtask test` builds with the `ci` profile and runs every test binary at once; arguments after `--` go to each binary (`cargo xtask test -- shell`). It builds several times faster than `--release`; a test failing only in a debug build: say so in the PR.

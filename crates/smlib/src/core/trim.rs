@@ -42,16 +42,16 @@ use solidcore::surface::cone::p1::Cone;
 use solidcore::surface::surface::Surface;
 use solidcore::surface::surface::SurfaceKind;
 use solidcore::topology::brep::p1 as brep_p1;
-use solidcore::topology::brep::p2::ArenaNotifyState;
+use solidcore::topology::brep::p2::{CopyNotifyState, copy_source_ref};
 use solidcore::topology::brep::p3::{DeleteFaceOptions, delete_face, new_brep, with_kernel_callbacks};
 use solidcore::topology::brep::p5::{EdgeInFace, make_edge_in_face};
-use solidcore::topology::brep::p7::copy_faces;
+use solidcore::topology::brep::p7::copy_faces_from;
 use solidcore::topology::brep::p8::create_face_from_surface;
 use solidcore::topology::brep::p9::make_vertex_loop;
 use solidcore::topology::edgeuse::p1 as eu_p1;
 use solidcore::topology::edgeuse::p3::get_or_create_uv_trim_curve;
 use solidcore::topology::face::{p1 as face_p1, p2 as face_p2, p4 as face_p4};
-use solidcore::topology::loopuse::{loop_edges, loop_loopuses};
+use solidcore::topology::loopuse::{loop_edges, loop_loopuses, notify_ref};
 use solidcore::topology::topology_traverser::Marks;
 use solidcore::topology::{Brep, BrepId, EdgeId, FaceId, LoopId, edge};
 
@@ -310,13 +310,14 @@ pub(crate) fn untrim_face(body: &Body, point: [f64; 3], tol: f64, holes: Option<
             let Some(src) = face_at(k, &mut whole, at, tol)? else { return Ok(Err(Error::NoMatch { point: 0 })) };
             let mut w = new_brep(k, USE_DEFAULT, USE_DEFAULT)?;
             w.set_tolerance(whole.tolerance());
-            // Through SmMerge, which copies the topology with its attributes (history tags).
+            // Through SmMerge, with both bodies' attributes in the notifications, so the copy
+            // carries its source's history tags (`SM_NO_COPY`).
             let copied = {
-                let mut state = ArenaNotifyState::new(&w);
-                let mut env = state.env(None);
-                let key_of = env.key_of;
-                let this_face = |f: FaceId| key_of(EntityRef::Face(f));
-                copy_faces(k, &mut whole, &[src], &mut w, true, &this_face, &mut env)
+                let mut state = CopyNotifyState::with_attributes_of(&mut whole, &mut w)?;
+                let this_face = |f: FaceId| notify_ref(EntityRef::Face(f));
+                let copied = copy_faces_from(k, &mut whole, &[src], &mut w, true, &copy_source_ref, &this_face, &mut state.env(None));
+                state.restore_attributes(&mut whole, &mut w)?;
+                copied
             };
             let copied = match copied {
                 Ok((c, _)) => c,

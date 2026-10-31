@@ -583,14 +583,21 @@ static KERNEL_TESTS: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 /// Every case through `backend`'s GlobalSurfaceIntersect at approximation tolerance 1e-6, scored as
 /// score.py scores the corpus runner's `gsi 1e-6` run. Prints each case that does not pass.
-fn global_intersect_scores(backend: solidcraft_smlib::route::Backend) -> Vec<Score> {
-    use solidcraft_smlib::route::{Choice, set_choice};
+/// `None` when `SOLIDCRAFT_KERNEL` chose the other kernel: it wins over `set_choice`, and scoring
+/// the wrong kernel against this one's list says nothing.
+fn global_intersect_scores(backend: solidcraft_smlib::route::Backend) -> Option<Vec<Score>> {
+    use solidcraft_smlib::route::{Choice, Op, set_choice};
     use solidcraft_smlib::ssi::{Method, intersect};
     let t0 = std::time::Instant::now();
     let cases = all_cases();
     let outcomes: Vec<Outcome> = {
         let _kernel = KERNEL_TESTS.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         set_choice(Choice::Only(backend));
+        if Op::Ssi.backend() != backend {
+            set_choice(Choice::Routed);
+            eprintln!("skipped: SOLIDCRAFT_KERNEL chose the other kernel");
+            return None;
+        }
         // The kernels serialise their calls, so the cases run one after another; only the scoring is parallel.
         let outcomes = cases
             .iter()
@@ -642,14 +649,14 @@ fn global_intersect_scores(backend: solidcraft_smlib::route::Backend) -> Vec<Sco
     for s in scores.iter().filter(|s| s.verdict != Verdict::Pass) {
         println!("  {:<40} {:<15} {}", s.id, s.verdict.as_str(), s.flags.join("; "));
     }
-    scores
+    Some(scores)
 }
 
 /// Exactly [`GSI_1E6_PASS`] pass on the C++ kernel.
 #[cfg(feature = "native")]
 #[test]
 fn smlib_global_intersect_at_1e_6() {
-    let scores = global_intersect_scores(solidcraft_smlib::route::Backend::Smlib);
+    let Some(scores) = global_intersect_scores(solidcraft_smlib::route::Backend::Smlib) else { return };
     let passed: std::collections::BTreeSet<&str> = scores.iter().filter(|s| s.verdict == Verdict::Pass).map(|s| s.id.as_str()).collect();
     let listed: std::collections::BTreeSet<&str> = GSI_1E6_PASS.iter().copied().collect();
     assert_eq!(listed.len(), GSI_1E6_PASS.len(), "GSI_1E6_PASS lists a case twice");
@@ -674,7 +681,7 @@ const SOLIDCORE_GSI_1E6_MISSES: [&str; 6] = [
 #[cfg(feature = "native")]
 #[test]
 fn solidcore_global_intersect_at_1e_6() {
-    let scores = global_intersect_scores(solidcraft_smlib::route::Backend::Solidcore);
+    let Some(scores) = global_intersect_scores(solidcraft_smlib::route::Backend::Solidcore) else { return };
     let passed: std::collections::BTreeSet<&str> = scores.iter().filter(|s| s.verdict == Verdict::Pass).map(|s| s.id.as_str()).collect();
     let listed: std::collections::BTreeSet<&str> = GSI_1E6_PASS.iter().copied().collect();
     let lost: Vec<&str> = listed.difference(&passed).copied().collect();

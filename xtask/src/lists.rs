@@ -5,7 +5,7 @@
 //!
 //! - The message catalogs (`assets/locales/*.json`): one message per line, sorted by id, no
 //!   duplicate ids, as `serde_json` pretty-prints them.
-//! - `tests/KNOWN_FAILING_TESTS`: one test a line with its cause, sorted, each test once
+//! - `tests/KNOWN_FAILING_TESTS` and `.smlib`: one test a line with its cause, sorted, each test once
 //!   (checked only; `cargo xtask known-failing` reads it).
 
 use std::path::Path;

@@ -192,9 +192,11 @@ mod tests {
         let k = row("kernel", "boolean").unwrap_or_else(|| panic!("{rep:?}"));
         assert!(k.count >= 1 && row("kernel", "box_solid").is_some(), "{rep:?}");
         if r.is_ok() {
-            // With SMLib built, its calls are children of the boolean: their time is not its self time.
-            let smlib: std::time::Duration = rep.rows.iter().filter(|r| r.category == "smlib").map(|r| r.total).sum();
-            assert!(smlib > std::time::Duration::ZERO && k.self_time < k.total, "{rep:?}");
+            // The geometry kernel's calls, on whichever answers, are children of the boolean: their
+            // time is not its self time.
+            let calls: std::time::Duration =
+                rep.rows.iter().filter(|r| matches!(r.category, "smlib" | "solidcore")).map(|r| r.total).sum();
+            assert!(calls > std::time::Duration::ZERO && k.self_time < k.total, "{rep:?}");
         }
     }
 }
