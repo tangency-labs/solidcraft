@@ -1,0 +1,207 @@
+use std::sync::Arc;
+
+#[expect(unused_imports)] // Used for doclinks
+use crate::Ui;
+use crate::{
+    AsIdSalt, ClosableTag, Id, IdSalt, LayerId, Layout, Rect, Sense, Style, UiStackInfo,
+    widget_style::{Classes, HasClasses},
+};
+
+/// The properties specified when creating a top-level or child [`Ui`].
+///
+/// By default, everything is inherited from the parent,
+/// except for `max_rect` which by default is set to
+/// the parent [`Ui::available_rect_before_wrap`].
+///
+/// See also [`Ui::new`] and [`Ui::new_child`] for uses.
+#[must_use]
+#[derive(Clone, Default)]
+pub struct UiBuilder {
+    pub id_source: Option<IdSource>,
+    pub ui_stack_info: UiStackInfo,
+    pub layer_id: Option<LayerId>,
+    pub max_rect: Option<Rect>,
+    pub layout: Option<Layout>,
+    pub disabled: bool,
+    pub invisible: bool,
+    pub sizing_pass: bool,
+    pub style: Option<Arc<Style>>,
+    pub sense: Option<Sense>,
+    pub accessibility_parent: Option<Id>,
+    pub classes: Classes,
+}
+
+/// Is this [`Ui`] a root or a child of another [`Ui`]?
+#[derive(Clone)]
+pub enum IdSource {
+    /// Explicitly use this [`Id`]
+    Explicit(Id),
+
+    /// Salt the parent [`Id`] with this.
+    Child(IdSalt),
+}
+
+impl UiBuilder {
+    #[inline]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Seed the child `Ui` with this `id_salt`, which will be mixed
+    /// with the [`Ui::id`] of the parent.
+    ///
+    /// You should give each [`Ui`] an `id_salt` that is unique
+    /// within the parent, or give it none at all.
+    #[inline]
+    pub fn id_salt(mut self, id_salt: impl AsIdSalt) -> Self {
+        self.id_source = Some(IdSource::Child(IdSalt::new(id_salt)));
+        self
+    }
+
+    /// Set an id of the new `Ui` that is independent of the parent `Ui`.
+    /// This way child widgets can be moved in the ui tree without losing state.
+    /// You have to ensure that in a frame the child widgets do not get rendered in multiple places.
+    ///
+    /// You should set the same unique `id` at every place in the ui tree where you want the
+    /// child widgets to share state.
+    /// If the child widgets are not moved in the ui tree, use [`UiBuilder::id_salt`] instead.
+    ///
+    /// This is a shortcut for `.id_salt(my_id).global_scope(true)`.
+    #[inline]
+    pub fn id(mut self, id: Id) -> Self {
+        self.id_source = Some(IdSource::Explicit(id));
+        self
+    }
+
+    /// Provide some information about the new `Ui` being built.
+    #[inline]
+    pub fn ui_stack_info(mut self, ui_stack_info: UiStackInfo) -> Self {
+        self.ui_stack_info = ui_stack_info;
+        self
+    }
+
+    /// Show the [`Ui`] in a different [`LayerId`] from its parent.
+    #[inline]
+    pub fn layer_id(mut self, layer_id: LayerId) -> Self {
+        self.layer_id = Some(layer_id);
+        self
+    }
+
+    /// Set the max rectangle, within which widgets will go.
+    ///
+    /// New widgets will *try* to fit within this rectangle.
+    ///
+    /// Text labels will wrap to fit within `max_rect`.
+    /// Separator lines will span the `max_rect`.
+    ///
+    /// If a new widget doesn't fit within the `max_rect` then the
+    /// [`Ui`] will make room for it by expanding both `min_rect` and
+    ///
+    /// If not set, this will be set to the parent
+    /// [`Ui::available_rect_before_wrap`].
+    #[inline]
+    pub fn max_rect(mut self, max_rect: Rect) -> Self {
+        self.max_rect = Some(max_rect);
+        self
+    }
+
+    /// Override the layout.
+    ///
+    /// Will otherwise be inherited from the parent.
+    #[inline]
+    pub fn layout(mut self, layout: Layout) -> Self {
+        self.layout = Some(layout);
+        self
+    }
+
+    /// Make the new `Ui` disabled, i.e. grayed-out and non-interactive.
+    ///
+    /// Note that if the parent `Ui` is disabled, the child will always be disabled.
+    ///
+    /// See also [`crate::Ui::add_enabled`], [`crate::Ui::add_enabled_ui`] and [`crate::Ui::is_enabled`].
+    #[inline]
+    pub fn disabled(mut self) -> Self {
+        self.disabled = true;
+        self
+    }
+
+    /// Make the contents invisible.
+    ///
+    /// Will also disable the `Ui` (see [`Self::disabled`]).
+    ///
+    /// If the parent `Ui` is invisible, the child will always be invisible.
+    #[inline]
+    pub fn invisible(mut self) -> Self {
+        self.invisible = true;
+        self.disabled = true;
+        self
+    }
+
+    /// Set to true in special cases where we do one frame
+    /// where we size up the contents of the Ui, without actually showing it.
+    ///
+    /// If the `sizing_pass` flag is set on the parent,
+    /// the child will inherit it automatically.
+    #[inline]
+    pub fn sizing_pass(mut self) -> Self {
+        self.sizing_pass = true;
+        self
+    }
+
+    /// Override the style.
+    ///
+    /// Otherwise will inherit the style of the parent.
+    #[inline]
+    pub fn style(mut self, style: impl Into<Arc<Style>>) -> Self {
+        self.style = Some(style.into());
+        self
+    }
+
+    /// Set if you want sense clicks and/or drags. Default is [`Sense::hover`].
+    ///
+    /// The sense will be registered below the Senses of any widgets contained in this [`Ui`], so
+    /// if the user clicks a button contained within this [`Ui`], that button will receive the click
+    /// instead.
+    ///
+    /// The response can be read early with [`Ui::response`].
+    #[inline]
+    pub fn sense(mut self, sense: Sense) -> Self {
+        self.sense = Some(sense);
+        self
+    }
+
+    /// Make this [`Ui`] closable.
+    ///
+    /// Calling [`Ui::close`] in a child [`Ui`] will mark this [`Ui`] for closing.
+    /// After [`Ui::close`] was called, [`Ui::should_close`] and [`crate::Response::should_close`] will
+    /// return `true` (for this frame).
+    ///
+    /// This works by adding a [`ClosableTag`] to the [`UiStackInfo`].
+    #[inline]
+    pub fn closable(mut self) -> Self {
+        self.ui_stack_info
+            .tags
+            .insert(ClosableTag::NAME, Some(Arc::new(ClosableTag::default())));
+        self
+    }
+
+    /// Set the accessibility parent for this [`Ui`].
+    ///
+    /// This will override the automatic parent assignment for accessibility purposes.
+    /// If not set, the parent [`Ui`]'s ID will be used as the accessibility parent.
+    #[inline]
+    pub fn accessibility_parent(mut self, parent_id: Id) -> Self {
+        self.accessibility_parent = Some(parent_id);
+        self
+    }
+}
+
+impl HasClasses for UiBuilder {
+    fn classes(&self) -> &Classes {
+        &self.classes
+    }
+
+    fn classes_mut(&mut self) -> &mut Classes {
+        &mut self.classes
+    }
+}

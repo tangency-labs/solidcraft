@@ -1,0 +1,809 @@
+//! All the data egui returns to the backend at the end of each frame.
+
+use core::ops::Range;
+
+use epaint::text::CharIndex;
+
+use crate::{OrderedViewportIdMap, RepaintCause, ViewportOutput, WidgetType};
+
+/// What egui emits each frame from [`crate::Context::run_ui`].
+///
+/// The backend should use this.
+#[derive(Clone, Default)]
+pub struct FullOutput {
+    /// Non-rendering related output.
+    pub platform_output: PlatformOutput,
+
+    /// Texture changes since last frame (including the font texture).
+    ///
+    /// The backend needs to apply [`crate::TexturesDelta::push`] _before_ painting,
+    /// and free any texture in [`crate::TexturesDelta::free`] _after_ painting.
+    ///
+    /// It is assumed that all egui viewports share the same painter and texture namespace.
+    pub textures_delta: epaint::textures::TexturesDelta,
+
+    /// What to paint.
+    ///
+    /// You can use [`crate::Context::tessellate`] to turn this into triangles.
+    pub shapes: Vec<epaint::ClippedShape>,
+
+    /// The number of physical pixels per logical ui point, for the viewport that was updated.
+    ///
+    /// You can pass this to [`crate::Context::tessellate`] together with [`Self::shapes`].
+    pub pixels_per_point: f32,
+
+    /// All the active viewports, including the root.
+    ///
+    /// It is up to the integration to spawn a native window for each viewport,
+    /// and to close any window that no longer has a viewport in this map.
+    pub viewport_output: OrderedViewportIdMap<ViewportOutput>,
+}
+
+impl FullOutput {
+    /// Add on new output.
+    pub fn append(&mut self, newer: Self) {
+        use std::collections::btree_map::Entry;
+
+        let Self {
+            platform_output,
+            textures_delta,
+            shapes,
+            pixels_per_point,
+            viewport_output,
+        } = newer;
+
+        self.platform_output.append(platform_output);
+        self.textures_delta.append(textures_delta);
+        self.shapes = shapes; // Only paint the latest
+        self.pixels_per_point = pixels_per_point; // Use latest
+
+        for (id, new_viewport) in viewport_output {
+            match self.viewport_output.entry(id) {
+                Entry::Vacant(entry) => {
+                    entry.insert(new_viewport);
+                }
+                Entry::Occupied(mut entry) => {
+                    entry.get_mut().append(new_viewport);
+                }
+            }
+        }
+    }
+
+    /// [`epaint::textures::TexturesDelta`] will panic when dropped with still unapplied deltas,
+    /// this is a helper to clear the deltas.
+    pub fn drop_without_applying_deltas(mut self) {
+        self.textures_delta.clear();
+    }
+}
+
+/// What egui emits from [`crate::Context::run_logic`], i.e. from a tick where no ui was shown.
+///
+/// There is nothing to paint, but the app may still have asked the integration to do things,
+/// e.g. to show a hidden window again with [`crate::ViewportCommand::Focus`].
+#[derive(Clone, Default)]
+pub struct LogicOutput {
+    /// Non-rendering related output.
+    pub platform_output: PlatformOutput,
+
+    /// The commands sent with [`crate::Context::send_viewport_cmd`] and friends.
+    ///
+    /// Note that this contains no information about which viewports exist:
+    /// the integration should leave its viewports as they are.
+    pub viewport_commands: OrderedViewportIdMap<Vec<crate::ViewportCommand>>,
+}
+
+/// Information about text being edited.
+///
+/// Useful for IME.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
+pub struct IMEOutput {
+    /// IME's purpose.
+    pub purpose: crate::IMEPurpose,
+
+    /// Where the [`crate::TextEdit`] is located on screen.
+    pub rect: crate::Rect,
+
+    /// Where the primary cursor is.
+    ///
+    /// This is a very thin rectangle.
+    pub cursor_rect: crate::Rect,
+
+    /// Whether any ongoing IME composition should be interrupted.
+    pub should_interrupt_composition: bool,
+}
+
+/// Commands that the egui integration should execute at the end of a frame.
+///
+/// Commands that are specific to a viewport should be put in [`crate::ViewportCommand`] instead.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
+pub enum OutputCommand {
+    /// Put this text to the system clipboard.
+    ///
+    /// This is often a response to [`crate::Event::Copy`] or [`crate::Event::Cut`].
+    CopyText(String),
+
+    /// Put this image to the system clipboard.
+    CopyImage(crate::ColorImage),
+
+    /// Open this url in a browser.
+    OpenUrl(OpenUrl),
+}
+
+/// The non-rendering part of what egui emits each frame.
+///
+/// You can access (and modify) this with [`crate::Context::output`].
+///
+/// The backend should use this.
+#[derive(Default, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
+pub struct PlatformOutput {
+    /// Commands that the egui integration should execute at the end of a frame.
+    pub commands: Vec<OutputCommand>,
+
+    /// Set the cursor to this icon.
+    pub cursor_icon: CursorIcon,
+
+    /// If set, the integration should display this RGBA image as the OS
+    /// cursor (via e.g. `winit::window::CustomCursor`) instead of the
+    /// standard `cursor_icon`. Set per frame; integrations that don't
+    /// support custom cursors fall back to `cursor_icon`.
+    ///
+    /// Skipped from serde because the bitmap is ephemeral and shouldn't
+    /// roundtrip through persisted state.
+    #[cfg_attr(feature = "serde", serde(skip))]
+    pub cursor_image: Option<CustomCursorImage>,
+
+    /// Events that may be useful to e.g. a screen reader.
+    pub events: Vec<OutputEvent>,
+
+    /// Is there a mutable [`TextEdit`](crate::TextEdit) under the cursor?
+    /// Use by `eframe` web to show/hide mobile keyboard and IME agent.
+    pub mutable_text_under_cursor: bool,
+
+    /// This is set if, and only if, the user is currently editing text.
+    ///
+    /// Useful for IME.
+    ///
+    /// This field should only be set by the widget that currently owns IME
+    /// events (see [`crate::Memory::owns_ime_events`]).
+    pub ime: Option<IMEOutput>,
+
+    /// The difference in the widget tree since last frame.
+    ///
+    /// NOTE: this needs to be per-viewport.
+    pub accesskit_update: Option<accesskit::TreeUpdate>,
+
+    /// How many ui passes is this the sum of?
+    ///
+    /// See [`crate::Context::request_discard`] for details.
+    ///
+    /// This is incremented at the END of each frame,
+    /// so this will be `0` for the first pass.
+    pub num_completed_passes: usize,
+
+    /// Was [`crate::Context::request_discard`] called during the latest pass?
+    ///
+    /// If so, what was the reason(s) for it?
+    ///
+    /// If empty, there was never any calls.
+    #[cfg_attr(feature = "serde", serde(skip))]
+    pub request_discard_reasons: Vec<RepaintCause>,
+}
+
+impl PlatformOutput {
+    /// This can be used by a text-to-speech system to describe the events (if any).
+    pub fn events_description(&self) -> String {
+        // only describe last event:
+        if let Some(event) = self.events.iter().next_back() {
+            match event {
+                OutputEvent::Clicked(widget_info)
+                | OutputEvent::DoubleClicked(widget_info)
+                | OutputEvent::TripleClicked(widget_info)
+                | OutputEvent::FocusGained(widget_info)
+                | OutputEvent::TextSelectionChanged(widget_info)
+                | OutputEvent::ValueChanged(widget_info) => {
+                    return widget_info.description();
+                }
+            }
+        }
+        Default::default()
+    }
+
+    /// Add on new output.
+    pub fn append(&mut self, newer: Self) {
+        let Self {
+            mut commands,
+            cursor_icon,
+            cursor_image,
+            mut events,
+            mutable_text_under_cursor,
+            ime,
+            accesskit_update,
+            num_completed_passes,
+            mut request_discard_reasons,
+        } = newer;
+
+        self.commands.append(&mut commands);
+        self.cursor_icon = cursor_icon;
+        self.cursor_image = cursor_image;
+        self.events.append(&mut events);
+        self.mutable_text_under_cursor = mutable_text_under_cursor;
+        self.ime = ime.or(self.ime);
+        self.num_completed_passes += num_completed_passes;
+        self.request_discard_reasons
+            .append(&mut request_discard_reasons);
+
+        // egui produces a complete AccessKit tree for each frame, so overwrite rather than append:
+        self.accesskit_update = accesskit_update;
+    }
+
+    /// Take everything ephemeral (everything except `cursor_icon` and
+    /// `cursor_image` currently)
+    pub fn take(&mut self) -> Self {
+        let taken = core::mem::take(self);
+        self.cursor_icon = taken.cursor_icon; // sticky between frames
+        self.cursor_image = taken.cursor_image.clone(); // sticky between frames
+        taken
+    }
+
+    /// Was [`crate::Context::request_discard`] called?
+    pub fn requested_discard(&self) -> bool {
+        !self.request_discard_reasons.is_empty()
+    }
+}
+
+/// What URL to open, and how.
+///
+/// Use with [`crate::Context::open_url`].
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
+pub struct OpenUrl {
+    pub url: String,
+
+    /// If `true`, open the url in a new tab.
+    /// If `false` open it in the same tab.
+    /// Only matters when in a web browser.
+    pub new_tab: bool,
+}
+
+impl OpenUrl {
+    #[expect(clippy::needless_pass_by_value)]
+    pub fn same_tab(url: impl ToString) -> Self {
+        Self {
+            url: url.to_string(),
+            new_tab: false,
+        }
+    }
+
+    #[expect(clippy::needless_pass_by_value)]
+    pub fn new_tab(url: impl ToString) -> Self {
+        Self {
+            url: url.to_string(),
+            new_tab: true,
+        }
+    }
+}
+
+/// Types of attention to request from a user when a native window is not in focus.
+///
+/// See [winit's documentation][user_attention_type] for platform-specific meaning of the attention types.
+///
+/// [user_attention_type]: https://docs.rs/winit/latest/winit/window/enum.UserAttentionType.html
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
+pub enum UserAttentionType {
+    /// Request an elevated amount of animations and flair for the window and the task bar or dock icon.
+    Critical,
+
+    /// Request a standard amount of attention-grabbing actions.
+    Informational,
+
+    /// Reset the attention request and interrupt related animations and flashes.
+    Reset,
+}
+
+/// A bitmap cursor pushed to the integration via [`PlatformOutput::cursor_image`].
+///
+/// The integration is expected to upload this to the OS as a real cursor
+/// (so the image is not clipped by the egui window — what `egui::Painter`
+/// drawn cursors suffer from). Backends that don't support it should fall
+/// back to [`PlatformOutput::cursor_icon`].
+///
+/// `rgba` is straight (non-premultiplied) RGBA — same encoding as
+/// `winit::window::CustomCursor::from_rgba`. The buffer length must be
+/// exactly `size[0] * size[1] * 4` bytes. `size` and `hotspot` use
+/// `u16` to match winit's native types and avoid a lossy cast in the
+/// integration layer.
+///
+/// `Arc<[u8]>` is used so integrations can dedupe / cache by pointer
+/// identity (`Arc::ptr_eq`) and avoid re-uploading the same bitmap to
+/// the OS every frame.
+#[derive(Clone, PartialEq, Eq)]
+pub struct CustomCursorImage {
+    pub rgba: std::sync::Arc<[u8]>,
+    pub size: [u16; 2],
+    pub hotspot: [u16; 2],
+}
+
+impl core::fmt::Debug for CustomCursorImage {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("CustomCursorImage")
+            .field("size", &self.size)
+            .field("hotspot", &self.hotspot)
+            .field("rgba_len", &self.rgba.len())
+            .finish()
+    }
+}
+
+/// A mouse cursor icon.
+///
+/// egui emits a [`CursorIcon`] in [`PlatformOutput`] each frame as a request to the integration.
+///
+/// Loosely based on <https://developer.mozilla.org/en-US/docs/Web/CSS/cursor>.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
+pub enum CursorIcon {
+    /// Normal cursor icon, whatever that is.
+    #[default]
+    Default,
+
+    /// Show no cursor
+    None,
+
+    // ------------------------------------
+    // Links and status:
+    /// A context menu is available
+    ContextMenu,
+
+    /// Question mark
+    Help,
+
+    /// Pointing hand, used for e.g. web links
+    PointingHand,
+
+    /// Shows that processing is being done, but that the program is still interactive.
+    Progress,
+
+    /// Not yet ready, try later.
+    Wait,
+
+    // ------------------------------------
+    // Selection:
+    /// Hover a cell in a table
+    Cell,
+
+    /// For precision work
+    Crosshair,
+
+    /// Text caret, e.g. "Click here to edit text"
+    Text,
+
+    /// Vertical text caret, e.g. "Click here to edit vertical text"
+    VerticalText,
+
+    // ------------------------------------
+    // Drag-and-drop:
+    /// Indicated an alias, e.g. a shortcut
+    Alias,
+
+    /// Indicate that a copy will be made
+    Copy,
+
+    /// Omnidirectional move icon (e.g. arrows in all cardinal directions)
+    Move,
+
+    /// Can't drop here
+    NoDrop,
+
+    /// Forbidden
+    NotAllowed,
+
+    /// The thing you are hovering can be grabbed
+    Grab,
+
+    /// You are grabbing the thing you are hovering
+    Grabbing,
+
+    // ------------------------------------
+    /// Something can be scrolled in any direction (panned).
+    AllScroll,
+
+    // ------------------------------------
+    // Resizing in two directions:
+    /// Horizontal resize `-` to make something wider or more narrow (left to/from right)
+    ResizeHorizontal,
+
+    /// Diagonal resize `/` (right-up to/from left-down)
+    ResizeNeSw,
+
+    /// Diagonal resize `\` (left-up to/from right-down)
+    ResizeNwSe,
+
+    /// Vertical resize `|` (up-down or down-up)
+    ResizeVertical,
+
+    // ------------------------------------
+    // Resizing in one direction:
+    /// Resize something rightwards (e.g. when dragging the right-most edge of something)
+    ResizeEast,
+
+    /// Resize something down and right (e.g. when dragging the bottom-right corner of something)
+    ResizeSouthEast,
+
+    /// Resize something downwards (e.g. when dragging the bottom edge of something)
+    ResizeSouth,
+
+    /// Resize something down and left (e.g. when dragging the bottom-left corner of something)
+    ResizeSouthWest,
+
+    /// Resize something leftwards (e.g. when dragging the left edge of something)
+    ResizeWest,
+
+    /// Resize something up and left (e.g. when dragging the top-left corner of something)
+    ResizeNorthWest,
+
+    /// Resize something up (e.g. when dragging the top edge of something)
+    ResizeNorth,
+
+    /// Resize something up and right (e.g. when dragging the top-right corner of something)
+    ResizeNorthEast,
+
+    // ------------------------------------
+    /// Resize a column
+    ResizeColumn,
+
+    /// Resize a row
+    ResizeRow,
+
+    // ------------------------------------
+    // Zooming:
+    /// Enhance!
+    ZoomIn,
+
+    /// Let's get a better overview
+    ZoomOut,
+}
+
+impl CursorIcon {
+    pub const ALL: [Self; 35] = [
+        Self::Default,
+        Self::None,
+        Self::ContextMenu,
+        Self::Help,
+        Self::PointingHand,
+        Self::Progress,
+        Self::Wait,
+        Self::Cell,
+        Self::Crosshair,
+        Self::Text,
+        Self::VerticalText,
+        Self::Alias,
+        Self::Copy,
+        Self::Move,
+        Self::NoDrop,
+        Self::NotAllowed,
+        Self::Grab,
+        Self::Grabbing,
+        Self::AllScroll,
+        Self::ResizeHorizontal,
+        Self::ResizeNeSw,
+        Self::ResizeNwSe,
+        Self::ResizeVertical,
+        Self::ResizeEast,
+        Self::ResizeSouthEast,
+        Self::ResizeSouth,
+        Self::ResizeSouthWest,
+        Self::ResizeWest,
+        Self::ResizeNorthWest,
+        Self::ResizeNorth,
+        Self::ResizeNorthEast,
+        Self::ResizeColumn,
+        Self::ResizeRow,
+        Self::ZoomIn,
+        Self::ZoomOut,
+    ];
+}
+
+/// Things that happened during this frame that the integration may be interested in.
+///
+/// In particular, these events may be useful for accessibility, i.e. for screen readers.
+#[derive(Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
+pub enum OutputEvent {
+    /// A widget was clicked.
+    Clicked(WidgetInfo),
+
+    /// A widget was double-clicked.
+    DoubleClicked(WidgetInfo),
+
+    /// A widget was triple-clicked.
+    TripleClicked(WidgetInfo),
+
+    /// A widget gained keyboard focus (by tab key).
+    FocusGained(WidgetInfo),
+
+    /// Text selection was updated.
+    TextSelectionChanged(WidgetInfo),
+
+    /// A widget's value changed.
+    ValueChanged(WidgetInfo),
+}
+
+impl OutputEvent {
+    pub fn widget_info(&self) -> &WidgetInfo {
+        match self {
+            Self::Clicked(info)
+            | Self::DoubleClicked(info)
+            | Self::TripleClicked(info)
+            | Self::FocusGained(info)
+            | Self::TextSelectionChanged(info)
+            | Self::ValueChanged(info) => info,
+        }
+    }
+}
+
+impl core::fmt::Debug for OutputEvent {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Self::Clicked(wi) => write!(f, "Clicked({wi:?})"),
+            Self::DoubleClicked(wi) => write!(f, "DoubleClicked({wi:?})"),
+            Self::TripleClicked(wi) => write!(f, "TripleClicked({wi:?})"),
+            Self::FocusGained(wi) => write!(f, "FocusGained({wi:?})"),
+            Self::TextSelectionChanged(wi) => write!(f, "TextSelectionChanged({wi:?})"),
+            Self::ValueChanged(wi) => write!(f, "ValueChanged({wi:?})"),
+        }
+    }
+}
+
+/// Describes a widget such as a [`crate::Button`] or a [`crate::TextEdit`].
+#[derive(Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
+pub struct WidgetInfo {
+    /// The type of widget this is.
+    pub typ: WidgetType,
+
+    /// Whether the widget is enabled.
+    pub enabled: bool,
+
+    /// The text on labels, buttons, checkboxes etc.
+    pub label: Option<String>,
+
+    /// The contents of some editable text (for [`TextEdit`](crate::TextEdit) fields).
+    pub current_text_value: Option<String>,
+
+    /// The previous text value.
+    pub prev_text_value: Option<String>,
+
+    /// The current value of checkboxes and radio buttons.
+    pub selected: Option<bool>,
+
+    /// The current value of sliders etc.
+    pub value: Option<f64>,
+
+    /// Selected range of characters in [`Self::current_text_value`].
+    ///
+    /// The range is `start..end` in *character* offsets (not bytes), with `end` exclusive.
+    pub text_selection: Option<Range<CharIndex>>,
+
+    /// The hint text for text edit fields.
+    pub hint_text: Option<String>,
+}
+
+impl core::fmt::Debug for WidgetInfo {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        let Self {
+            typ,
+            enabled,
+            label,
+            current_text_value: text_value,
+            prev_text_value,
+            selected,
+            value,
+            text_selection,
+            hint_text,
+        } = self;
+
+        let mut s = f.debug_struct("WidgetInfo");
+
+        s.field("typ", typ);
+
+        if !enabled {
+            s.field("enabled", enabled);
+        }
+
+        if let Some(label) = label {
+            s.field("label", label);
+        }
+        if let Some(text_value) = text_value {
+            s.field("text_value", text_value);
+        }
+        if let Some(prev_text_value) = prev_text_value {
+            s.field("prev_text_value", prev_text_value);
+        }
+        if let Some(selected) = selected {
+            s.field("selected", selected);
+        }
+        if let Some(value) = value {
+            s.field("value", value);
+        }
+        if let Some(text_selection) = text_selection {
+            s.field("text_selection", text_selection);
+        }
+        if let Some(hint_text) = hint_text {
+            s.field("hint_text", hint_text);
+        }
+
+        s.finish()
+    }
+}
+
+impl WidgetInfo {
+    pub fn new(typ: WidgetType) -> Self {
+        Self {
+            typ,
+            enabled: true,
+            label: None,
+            current_text_value: None,
+            prev_text_value: None,
+            selected: None,
+            value: None,
+            text_selection: None,
+            hint_text: None,
+        }
+    }
+
+    #[expect(clippy::needless_pass_by_value)]
+    pub fn labeled(typ: WidgetType, enabled: bool, label: impl ToString) -> Self {
+        Self {
+            enabled,
+            label: Some(label.to_string()),
+            ..Self::new(typ)
+        }
+    }
+
+    /// checkboxes, radio-buttons etc
+    #[expect(clippy::needless_pass_by_value)]
+    pub fn selected(typ: WidgetType, enabled: bool, selected: bool, label: impl ToString) -> Self {
+        Self {
+            enabled,
+            label: Some(label.to_string()),
+            selected: Some(selected),
+            ..Self::new(typ)
+        }
+    }
+
+    pub fn drag_value(enabled: bool, value: f64) -> Self {
+        Self {
+            enabled,
+            value: Some(value),
+            ..Self::new(WidgetType::DragValue)
+        }
+    }
+
+    #[expect(clippy::needless_pass_by_value)]
+    pub fn slider(enabled: bool, value: f64, label: impl ToString) -> Self {
+        let label = label.to_string();
+        Self {
+            enabled,
+            label: if label.is_empty() { None } else { Some(label) },
+            value: Some(value),
+            ..Self::new(WidgetType::Slider)
+        }
+    }
+
+    #[expect(clippy::needless_pass_by_value)]
+    pub fn text_edit(
+        enabled: bool,
+        prev_text_value: impl ToString,
+        text_value: impl ToString,
+        hint_text: impl ToString,
+    ) -> Self {
+        let text_value = text_value.to_string();
+        let prev_text_value = prev_text_value.to_string();
+        let hint_text = hint_text.to_string();
+        let prev_text_value = if text_value == prev_text_value {
+            None
+        } else {
+            Some(prev_text_value)
+        };
+        Self {
+            enabled,
+            current_text_value: Some(text_value),
+            prev_text_value,
+            hint_text: Some(hint_text),
+            ..Self::new(WidgetType::TextEdit)
+        }
+    }
+
+    #[expect(clippy::needless_pass_by_value)]
+    pub fn text_selection_changed(
+        enabled: bool,
+        text_selection: Range<CharIndex>,
+        current_text_value: impl ToString,
+    ) -> Self {
+        Self {
+            enabled,
+            text_selection: Some(text_selection),
+            current_text_value: Some(current_text_value.to_string()),
+            ..Self::new(WidgetType::TextEdit)
+        }
+    }
+
+    /// This can be used by a text-to-speech system to describe the widget.
+    pub fn description(&self) -> String {
+        let Self {
+            typ,
+            enabled,
+            label,
+            current_text_value: text_value,
+            prev_text_value: _,
+            selected,
+            value,
+            text_selection: _,
+            hint_text: _,
+        } = self;
+
+        // TODO(emilk): localization
+        let widget_type = match typ {
+            WidgetType::Link => "link",
+            WidgetType::TextEdit => "text edit",
+            WidgetType::Button => "button",
+            WidgetType::Checkbox => "checkbox",
+            WidgetType::RadioButton => "radio",
+            WidgetType::RadioGroup => "radio group",
+            WidgetType::SelectableLabel => "selectable",
+            WidgetType::ComboBox => "combo",
+            WidgetType::Slider => "slider",
+            WidgetType::DragValue => "drag value",
+            WidgetType::ColorButton => "color button",
+            WidgetType::Image => "image",
+            WidgetType::CollapsingHeader => "collapsing header",
+            WidgetType::Panel => "panel",
+            WidgetType::ProgressIndicator => "progress indicator",
+            WidgetType::Window => "window",
+            WidgetType::ScrollBar => "scroll bar",
+            WidgetType::ResizeHandle => "resize handle",
+            WidgetType::Label | WidgetType::Other => "",
+        };
+
+        let mut description = widget_type.to_owned();
+
+        if let Some(selected) = selected {
+            if *typ == WidgetType::Checkbox {
+                let state = if *selected { "checked" } else { "unchecked" };
+                description = format!("{state} {description}");
+            } else {
+                description += if *selected { "selected" } else { "" };
+            }
+        }
+
+        if let Some(label) = label {
+            description = format!("{label}: {description}");
+        }
+
+        if typ == &WidgetType::TextEdit {
+            let text = if let Some(text_value) = text_value {
+                if text_value.is_empty() {
+                    "blank".into()
+                } else {
+                    text_value.clone()
+                }
+            } else {
+                "blank".into()
+            };
+            description = format!("{text}: {description}");
+        }
+
+        if let Some(value) = value {
+            description += " ";
+            description += &value.to_string();
+        }
+
+        if !enabled {
+            description += ": disabled";
+        }
+        description.trim().to_owned()
+    }
+}
