@@ -6902,10 +6902,13 @@ mod tests {
         let mut h = crate::scenario::Harness::new();
         h.app.home.open = false;
         let source = json!({"format":"solidcraft-theme/1","name":"Blur parent","base":"dark","options":[
-            {"id":"enabled","type":"bool","default":true}, {"id":"blur","type":"range","default":0,"parent":"enabled"}
+            {"id":"enabled","type":"bool","default":true}, {"id":"blur","type":"range","default":0,"parent":"enabled"},
+            {"id":"amount","type":"range","default":5,"min":0,"max":10,"step":1,"parent":"enabled"}
         ]});
-        control(&mut h.app, &json!({"theme_import":source,"theme_options":{"blur-parent":{"blur":18.25}}})).unwrap();
+        control(&mut h.app, &json!({"theme_import":source,"theme_options":{"blur-parent":{"blur":18.25,"amount":7.5}}})).unwrap();
         let file = active_theme_file(&h.app).unwrap().clone();
+        assert_eq!(file.options.iter().find(|o| o.id == "blur").unwrap().parent, None, "reserved blur ignores authored parenting");
+        assert_eq!(file.options.iter().find(|o| o.id == "amount").unwrap().parent.as_deref(), Some("enabled"));
         let saved = h.app.preferences.theme_options.clone();
         let values = effective_theme_options(&h.app.preferences, &file).0;
         for reason in ["prefs.blur_software", "prefs.blur_web", "prefs.blur_reduce_transparency"] {
@@ -6924,17 +6927,32 @@ mod tests {
             },
         ];
         assert_eq!(
-            crate::theme_options::availability(&file, "blur", &providers, Availability::Available),
+            crate::theme_options::availability(&file, "amount", &providers, Availability::Available),
             Availability::Unavailable("prefs.blur_software")
         );
+        assert_eq!(
+            crate::theme_options::availability(&file, "blur", &providers, Availability::Available),
+            Availability::Available,
+            "standard blur remains independent of the unavailable custom parent"
+        );
         let rows = theme_option_rows(&file, "en", &providers, Availability::Available);
-        assert!(rows.iter().all(|r| r.reason.is_some()), "unavailable ancestor disables its child too");
+        let parent = rows.iter().find(|r| r.definition.id == "enabled").unwrap();
+        let child = rows.iter().find(|r| r.definition.id == "amount").unwrap();
+        let blur = rows.iter().find(|r| r.definition.id == "blur").unwrap();
+        assert!(parent.reason.is_some());
+        assert_eq!(child.reason, parent.reason, "the genuine custom child inherits its parent's unavailable reason");
+        assert!(blur.reason.is_none(), "the reserved blur control is unaffected by custom-parent availability");
         let reduced = std::rc::Rc::new(std::cell::Cell::new(true));
         let reading = reduced.clone();
         h.app.services.reduce_transparency = Some(Box::new(move |_| Some(reading.get())));
         assert_eq!(blur_availability(&h.app), Availability::Unavailable("prefs.blur_reduce_transparency"));
         let reply = control(&mut h.app, &json!({})).unwrap();
         assert_eq!(reply["theme_option_values"]["blur"], 18.25);
+        h.frames(2);
+        assert_eq!(h.app.blur.radius(), 18.25, "OS unavailability preserves requested intent");
+        assert_eq!(h.app.preferences.theme_options, saved);
+        assert_eq!(h.app.blur.counters().textures_created, 0);
+        assert_eq!(h.app.blur.counters().markers_emitted, 0);
         reduced.set(false);
         assert_ne!(blur_availability(&h.app), Availability::Unavailable("prefs.blur_reduce_transparency"));
         h.frames(2);
@@ -6942,11 +6960,18 @@ mod tests {
         assert_eq!(h.app.blur.counters().textures_created, 0);
         control(&mut h.app, &json!({"theme_options":{"blur-parent":{"enabled":false}}})).unwrap();
         h.frames(2);
-        assert_eq!(h.app.blur.radius(), 0.0, "inactive parent prevents rendering");
+        assert_eq!(h.app.blur.radius(), 18.25, "an inactive custom parent cannot turn independent standard blur off");
+        assert_eq!(crate::theme::blur_intent(&h.ctx).radius, 18.25);
+        let reply = control(&mut h.app, &json!({})).unwrap();
+        assert_eq!(reply["theme_option_values"]["enabled"], false);
+        assert_eq!(reply["theme_option_values"]["amount"], 7.5, "an inactive custom child retains its saved value");
         assert_eq!(h.app.preferences.theme_options["blur-parent"]["blur"], 18.25);
         control(&mut h.app, &json!({"theme_options":{"blur-parent":{"enabled":true}}})).unwrap();
         h.frames(2);
         assert_eq!(h.app.blur.radius(), 18.25);
+        assert_eq!(h.app.preferences.theme_options["blur-parent"]["amount"], 7.5);
+        let counts = h.app.blur.counters();
+        assert_eq!((counts.textures_created, counts.markers_emitted, counts.markers_drawn, counts.live_bytes), (0, 0, 0, 0));
     }
 
     #[test]
