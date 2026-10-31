@@ -506,6 +506,18 @@ fn fs_hl_selected(i: TOut) -> @location(0) vec4<f32> {
     return lit_color(i, 1.0, vec4<f32>(u.sel.rgb, i.c.a));
 }
 
+/// A preview's ghost (the material a change removes): its near side only. Seen through it, the
+/// far side of the removed corner (the old wall behind a round, facing away) laid a second,
+/// darker layer over it in facet-shaped wedges. Told by the vertex normals, which point out of
+/// the old body however its triangles are wound.
+@fragment
+fn fs_ghost(i: TOut) -> @location(0) vec4<f32> {
+    if (clipped(i.wp)) { discard; }
+    let toward = select(u.back.xyz, u.eye.xyz - i.wp, u.eye.w > 0.5);
+    if (dot(i.n, toward) < 0.0) { discard; }
+    return shade(i);
+}
+
 /// Reference planes: shaded like `fs_tri`, but never cut by the section plane.
 @fragment
 fn fs_tri_all(i: TOut) -> @location(0) vec4<f32> {
