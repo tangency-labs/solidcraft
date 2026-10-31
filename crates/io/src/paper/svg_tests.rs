@@ -1,7 +1,7 @@
 use std::f64::consts::{FRAC_PI_2, PI, TAU};
 
-use solidcraft_geom::paper::{Group, ObjectKind, Scene};
-use solidcraft_geom::{Loop2, Region2};
+use solidcraft_geom::paper::{Group, Item, ObjectKind, Scene};
+use solidcraft_geom::{Loop2, Region2, Seg2, Vec2};
 
 use super::*;
 use crate::{Geom2, read_svg};
@@ -85,30 +85,29 @@ fn arcs_are_written_in_quarter_turns_with_the_flipped_sweep() {
     assert_eq!(first_d(&open(arc(c, 10.0, 0.0, FRAC_PI_2 + 1e-6))).matches('A').count(), 2);
 }
 
-/// Cubics as `C`, parabolas as `Q`; ellipses, hyperbolas and higher Béziers refused until A3b.
+/// Cubics as `C`, parabolas as `Q`; ellipses, hyperbolas and higher Béziers as cubics (A3b).
 #[test]
-fn cubics_and_parabolas_are_written_and_other_conics_refused() {
+fn cubics_and_parabolas_are_written_and_other_curves_as_cubics() {
     let cubic = Seg2::Cubic { p0: p(0.0, 0.0), p1: p(10.0, 20.0), p2: p(30.0, 20.0), p3: p(40.0, 0.0) };
     assert_eq!(first_d(&sheet(vec![stroke(vec![cubic], false, 0.25)])), "M0 297C10 277 30 277 40 297");
     let parabola = Seg2::Conic { a: p(0.0, 0.0), apex: p(10.0, 10.0), b: p(20.0, 0.0), w: 1.0 };
     assert_eq!(first_d(&sheet(vec![stroke(vec![parabola], false, 0.25)])), "M0 297Q10 287 20 297");
-    for w in [0.5, 2.0] {
-        let conic = Seg2::Conic { a: p(0.0, 0.0), apex: p(10.0, 10.0), b: p(20.0, 0.0), w };
-        let scene = sheet(vec![stroke(vec![conic], false, 0.25)]);
-        let e = paper_svg(&scene.prepare().unwrap()).err().map(|e| e.to_string()).unwrap();
-        assert!(e.contains("not supported yet"), "{w}: {e}");
+    let mut controls = [p(0.0, 0.0); solidcraft_geom::MAX_BEZIER_CTRL];
+    controls[..5].copy_from_slice(&[p(0.0, 0.0), p(5.0, 10.0), p(10.0, 0.0), p(15.0, 10.0), p(20.0, 0.0)]);
+    let quartic = Seg2::Bezier { n: 4, p: controls };
+    for curve in [0.5, 2.0].map(|w| Seg2::Conic { a: p(0.0, 0.0), apex: p(10.0, 10.0), b: p(20.0, 0.0), w }).into_iter().chain([quartic]) {
+        let d = first_d(&sheet(vec![stroke(vec![curve], false, 0.25)]));
+        assert!(d.starts_with("M0 297C") && d.ends_with(" 20 297") && !d.contains('Q') && !d.contains('A'), "{curve:?}: {d}");
     }
 }
 
 /// Numbers are whole nanometres: no exponent, no "-0", trailing zeros trimmed; a width under half
-/// a nanometre is written as one and reported.
+/// a nanometre is written as one and reported (the grid's own rounding is `geom`'s test).
 #[test]
 fn numbers_are_whole_nanometres() {
     for (n, text) in [(0, "0"), (1, "0.000001"), (-1, "-0.000001"), (1_500_000, "1.5"), (-420_000_000, "-420"), (123_456_789, "123.456789")] {
         assert_eq!(number(n), text);
     }
-    assert_eq!((nano(-0.0).unwrap(), nano(4e-7).unwrap(), nano(6e-7).unwrap()), (0, 0, 1));
-    assert!(nano(f64::NAN).is_err() && nano(1e10).is_err());
     let thin = sheet(vec![stroke(vec![line(p(0.0, 0.0), p(1.0, 0.0))], false, 1e-9)]);
     let (text, report) = svg(&thin);
     assert!(text.contains("stroke-width=\"0.000001\""), "{text}");
