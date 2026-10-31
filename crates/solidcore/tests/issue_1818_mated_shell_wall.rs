@@ -33,7 +33,7 @@ use solidcore::geom::extent1d::Extent1d;
 use solidcore::kernel::UpstreamFixes;
 use solidcore::math::Vec3;
 use solidcore::offset::offset_executive::p1::OffsetExecutive;
-use solidcore::offset::offset_executive::p2::{OffsetOptions, ShellOptions};
+use solidcore::offset::offset_executive::p2::{OffsetOptions, ShellOptions, ShellOutcome};
 use solidcore::primitive::api_curves::create_line_segment;
 use solidcore::query::api_queries::brep_is_manifold_solid;
 use solidcore::sweep::api_surfaces::create_skin_primitive;
@@ -88,7 +88,7 @@ fn loft(k: &mut Kernel, square: bool) -> Brep {
 
 /// The loft shelled 1 inward open at its top (`SmApiShellBrepFull(b, -1, TRUE, TRUE,
 /// TRUE, [top])`), under `fixes`.
-fn shell(fixes: UpstreamFixes, square: bool) -> (Kernel, solidcore::Result<Brep>) {
+fn shell(fixes: UpstreamFixes, square: bool) -> (Kernel, ShellOutcome) {
     let mut k = Kernel::default();
     k.fixes.clone_from(&fixes);
     let mut part = loft(&mut k, square);
@@ -111,8 +111,7 @@ fn shell(fixes: UpstreamFixes, square: bool) -> (Kernel, solidcore::Result<Brep>
         },
         &top,
         &mut notes.context(),
-    )
-    .result;
+    );
     (k, result)
 }
 
@@ -146,15 +145,25 @@ fn assert_sm_err(result: solidcore::Result<Brep>, operation: &str, label: &str) 
 #[test]
 fn default_fixes_refuse_the_square_to_circle_shell() {
     let (_, result) = shell(UpstreamFixes::default(), true);
-    assert_sm_err(result, "boolean::merge::p2::make_faceuse", "default fixes");
+    // The early merge refusal happens before shell_difference takes ownership.
+    assert!(result.retained_input.is_some());
+    assert!(!result.input_ownership_transferred());
+    assert_sm_err(
+        result.result,
+        "boolean::merge::p2::make_faceuse",
+        "default fixes",
+    );
 }
 
 /// The flag alone: the difference's broken wall is refused, not returned.
 #[test]
 fn mated_offsets_alone_refuse_the_broken_wall() {
     let (_, result) = shell(mated(), true);
+    // The final-wall refusal must not return an input already consumed by the difference.
+    assert!(result.retained_input.is_none());
+    assert!(result.input_ownership_transferred());
     assert_sm_err(
-        result,
+        result.result,
         "offset::offset_executive::p2::shell_brep",
         "offset_extended_edges_mated",
     );
@@ -167,7 +176,7 @@ fn mated_offsets_with_loop_gaps_refuse_earlier() {
     fixes.offset_closes_loop_gaps = true;
     let (_, result) = shell(fixes, true);
     assert_sm_err(
-        result,
+        result.result,
         "offset::offset_executive::step_gaps",
         "offset_extended_edges_mated + offset_closes_loop_gaps",
     );
@@ -179,7 +188,7 @@ fn mated_offsets_with_loop_gaps_refuse_earlier() {
 fn solidcraft_fixes_refuse_the_broken_wall() {
     let (_, result) = shell(solidcraft_fixes(), true);
     assert_sm_err(
-        result,
+        result.result,
         "offset::offset_executive::p2::shell_brep",
         "SolidCraft fixes",
     );
@@ -192,7 +201,7 @@ fn mated_offsets_shell_the_circle_control() {
     let analytic = std::f64::consts::PI * (15.0 * 15.0 * 60.0 - 14.0 * 14.0 * 59.0);
     for fixes in [UpstreamFixes::default(), mated()] {
         let (k, result) = shell(fixes, false);
-        let mut wall = result.unwrap();
+        let mut wall = result.result.unwrap();
         wall.refresh_cached_topology();
         assert!(solidcore::topology::integrity::check(&wall).is_ok());
         assert!(brep_is_manifold_solid(&wall).unwrap());
