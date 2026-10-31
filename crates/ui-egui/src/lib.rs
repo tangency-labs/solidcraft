@@ -676,7 +676,7 @@ pub struct SolveApp {
     pub native_resize_border: bool,
     /// macOS: the traffic lights sit over the application bar's left end.
     pub integrated_titlebar: bool,
-    /// The desktop host installed native menus alongside the application bar controls.
+    /// The desktop host installed a native File menu, replacing the in-window menu by default.
     pub native_file_menu: bool,
     /// Build bodies' display meshes on the CPU even where the GPU could (safe mode). Read by
     /// [`SolveApp::set_wgpu`].

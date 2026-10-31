@@ -1068,6 +1068,8 @@ preference_settings! {
     viewport_background: Option<[u8; 3]> = None, PAGE_INTERFACE;
     /// The application bar's logo in the theme's accent instead of the theme's logo colours.
     logo_accent: bool = false, PAGE_INTERFACE;
+    /// Keep the in-window File menu alongside the macOS system menu. Other hosts always show it.
+    window_file_menu: bool = false, PAGE_INTERFACE => check_id("prefs.window_file_menu");
     /// Imported theme files (`theme_files`), kept here so they also work in the browser.
     #[serde(deserialize_with = "themes_that_read")]
     custom_themes: Vec<crate::theme_files::ThemeFile> = Vec::new();
@@ -5485,6 +5487,7 @@ mod tests {
             ("viewport_status_summary", json!(false), PAGE_INTERFACE),
             ("sketch_tab_always", json!(true), PAGE_INTERFACE),
             ("keep_work_on_tab_switch", json!(true), PAGE_INTERFACE),
+            ("window_file_menu", json!(true), PAGE_INTERFACE),
             ("ribbon_reveal", json!(true), PAGE_INTERFACE),
             ("dialog_buttons", json!("top"), PAGE_INTERFACE),
             ("toast_place", json!("centre"), PAGE_INTERFACE),

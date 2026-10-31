@@ -353,7 +353,7 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
         // While a file loads the design waits: no menus or commands from the bar.
         // The File menu: a text button (New, Open, Save, Save As, Export…). Its handle keeps the
         // old `appbar:folder` name too, for scripts written against the folder button.
-        let file = {
+        let file = window_file_menu_shown(app) && {
             let label = app.tr("ui.file").to_string();
             let galley = ui.painter().layout_no_wrap(label.clone(), FontId::proportional(t.font_button), t.app_bar_text);
             let br = Rect::from_min_size(pos2(x - 13.0, r.center().y - 13.0), vec2(galley.size().x + 16.0, 26.0));
@@ -566,6 +566,7 @@ impl FileAction {
             Self::Undo => !app.session.undo.is_empty(),
             Self::Redo => !app.session.redo.is_empty(),
             Self::ClearRecent => !app.home.recent.is_empty(),
+            Self::Command("file.send_to_slicer") => crate::dialogs_save_mesh::available(app),
             Self::AgentChat => crate::agent_chat::app_bar_button_shown(app),
             _ => true,
         };
@@ -614,8 +615,16 @@ impl FileAction {
     }
 }
 
+fn window_file_menu_shown(app: &SolveApp) -> bool {
+    !app.native_file_menu || app.preferences.window_file_menu
+}
+
 fn file_menu(app: &mut SolveApp, ctx: &egui::Context) {
     let id = egui::Id::new("sc_file_menu");
+    if !window_file_menu_shown(app) {
+        ctx.data_mut(|d| d.insert_temp(id, false));
+        return;
+    }
     if !ctx.data(|d| d.get_temp::<bool>(id).unwrap_or(false)) {
         return;
     }
@@ -670,7 +679,7 @@ fn file_menu(app: &mut SolveApp, ctx: &egui::Context) {
                     close = true;
                 }
                 if item_if(ui, &format!("{}…", app.tr_label("Insert Point Cloud")), "", "import", shown) {
-                    app.start("pointcloud.insert");
+                    FileAction::Command("pointcloud.insert").run(app);
                     close = true;
                 }
                 if item_if(ui, &format!("{}…", app.tr_label("Insert Design")), "", "component", shown) {
@@ -712,7 +721,7 @@ fn file_menu(app: &mut SolveApp, ctx: &egui::Context) {
                     close = true;
                 }
                 if item_if(ui, "Send to Slicer", "", "mesh_export", shown && crate::dialogs_save_mesh::available(app)) {
-                    app.start("file.send_to_slicer");
+                    FileAction::Command("file.send_to_slicer").run(app);
                     close = true;
                 }
                 if item_if(ui, "Export STEP…", "", "export", shown) {
@@ -2964,7 +2973,7 @@ pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
     // File is a custom Area, so it must claim Escape before the underlying editors and
     // sketch shortcuts. Clear raw events too: egui may replay them on a layout pass.
     let file_menu_id = egui::Id::new("sc_file_menu");
-    if !app.native_file_menu
+    if window_file_menu_shown(app)
         && ctx.data(|d| d.get_temp::<bool>(file_menu_id).unwrap_or(false))
         && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape))
     {
@@ -3231,20 +3240,17 @@ mod header_report_tests {
         let mut h = crate::scenario::Harness::new();
         h.app.home.open = false;
         h.app.run("solid.box", json!({"length":2,"width":3,"height":4})).unwrap();
-        for native in [false, true] {
+        for (native, window_menu) in [(false, false), (true, false), (true, true), (false, true)] {
             h.app.native_file_menu = native;
+            h.app.preferences.window_file_menu = window_menu;
             h.app.integrated_titlebar = native;
             h.frames(3);
-            for name in [
-                "appbar:file",
-                "appbar:save",
-                "appbar:undo",
-                "appbar:redo",
-                "appbar:help",
-                "titlebar:preferences",
-                "titlebar:assistant",
-                "titlebar:report",
-            ] {
+            let show_file = !native || window_menu;
+            assert_eq!(crate::scenario::handle_at("appbar:file").is_some(), show_file);
+            assert_eq!(crate::scenario::handle_at("appbar:folder").is_some(), show_file);
+            assert_eq!(h.widget("File").is_some(), show_file);
+            for name in ["appbar:save", "appbar:undo", "appbar:redo", "appbar:help", "titlebar:preferences", "titlebar:assistant", "titlebar:report"]
+            {
                 assert!(crate::scenario::handle_at(name).is_some(), "native={native}: {name}");
             }
             let tabs = crate::scenario::rect_of("tab:design:0").unwrap();
@@ -3255,9 +3261,18 @@ mod header_report_tests {
             assert_eq!(h.app.session.undo.len(), depth - 1);
             h.step(&json!({"click":{"handle":"appbar:redo"}})).unwrap();
             assert_eq!(h.app.session.undo.len(), depth);
-            h.step(&json!({"click":{"handle":"appbar:file"}})).unwrap();
-            assert!(h.widget("Save As JSON…").is_some(), "the in-window File menu still opens");
-            h.step(&json!({"click":{"handle":"appbar:file"}})).unwrap();
+            if show_file {
+                h.step(&json!({"click":{"handle":"appbar:file"}})).unwrap();
+                assert!(h.widget("Save As JSON…").is_some(), "the optional in-window File menu still opens");
+                h.step(&json!({"key":"Escape"})).unwrap();
+                assert!(!h.ctx.data(|data| data.get_temp::<bool>(egui::Id::new("sc_file_menu")).unwrap_or(false)));
+                if native {
+                    h.step(&json!({"click":{"handle":"appbar:file"}})).unwrap();
+                    h.app.preferences.window_file_menu = false;
+                    h.frames(3);
+                    assert!(h.widget("Save As JSON…").is_none(), "hiding File also closes its popup");
+                }
+            }
             assert!(!h.ctx.data(|data| data.get_temp::<bool>(egui::Id::new("sc_file_menu")).unwrap_or(false)));
             h.step(&json!({"click":{"handle":"appbar:help"}})).unwrap();
             assert!(h.app.help.menu);
@@ -3309,9 +3324,15 @@ mod header_report_tests {
         assert!(!FileAction::Export("step").enabled(&h.app));
         assert!(!FileAction::ExportMesh("stl").enabled(&h.app));
         assert!(!FileAction::Command("document.metadata").enabled(&h.app));
+        assert!(!FileAction::Command("pointcloud.insert").enabled(&h.app));
+        assert!(!FileAction::Command("file.send_to_slicer").enabled(&h.app));
         h.app.home.open = false;
         assert!(FileAction::Save.enabled(&h.app));
         assert!(FileAction::Export("step").enabled(&h.app));
+        assert!(FileAction::Command("pointcloud.insert").enabled(&h.app));
+        assert!(!FileAction::Command("file.send_to_slicer").enabled(&h.app));
+        h.app.services.pick_program = Some(Box::new(|| Box::pin(async { None })));
+        assert!(FileAction::Command("file.send_to_slicer").enabled(&h.app));
     }
 
     /// New designs are saved as `.sc`. A design opened from a `.solidcraft` file is saved back to
