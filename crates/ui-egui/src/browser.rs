@@ -28,7 +28,9 @@ mod point_clouds;
 pub use point_clouds::CloudPanel;
 pub(crate) use point_clouds::point_cloud_tracks;
 
+/// Find for a feature shows the whole tree, so it ends a search (#1413).
 pub(crate) fn reveal_feature(app: &mut SolveApp, id: u64, body: &str) {
+    app.tree.search.clear();
     features::reveal(app, id, body);
 }
 
@@ -47,9 +49,11 @@ fn follows_view(app: &SolveApp) -> bool {
     rows_start_open(app)
 }
 
-/// Find in Browser for a body: show the Browser and find the body there ([`find_in_tree`]).
+/// Find in Browser for a body: show the Browser and find the body there ([`find_in_tree`]). It
+/// shows the whole tree, so it ends a search; a pick in the view keeps one ([`reveal_pick`], #1413).
 pub(crate) fn reveal_body(app: &mut SolveApp, body: &str) {
     sync_reveals(app);
+    app.tree.search.clear();
     app.ui.show_browser = true;
     app.preferences.timeline_left_browser_collapsed = false;
     find_in_tree(app, body);
@@ -133,6 +137,7 @@ pub(crate) fn placement_named(app: &SolveApp, source: &str, component: u64, body
 }
 
 pub(crate) fn reveal_in_history(app: &mut SolveApp, id: u64) {
+    app.tree.search.clear();
     features::reveal_in_history(app, id);
 }
 
@@ -188,6 +193,8 @@ pub struct TreeState {
     found: Option<Found>,
     /// A native feature to reveal in its placed component's Features folder (Find in Timeline).
     pub(super) reveal_feature: Option<features::Reveal>,
+    /// The search above the tree (#1413).
+    pub search: crate::browser_search::BrowserSearch,
     /// The Move/Copy panel of an occurrence.
     pub occurrence_move: Option<OccMove>,
     /// The Redefine Sketch Plane panel (sketch id).
@@ -867,12 +874,14 @@ pub(crate) fn picked_body(sel: &Sel) -> Option<&str> {
 }
 
 /// A pick in the viewport, while the Browser is shown and follows the 3D view ([`follows_view`]):
-/// the Browser finds the body of the last item picked, as Find in Browser does (#3005).
+/// the Browser finds the body of the last item picked, as Find in Browser does (#3005). A search
+/// stays (#1413): a body it found opens in it, and one it didn't leaves the tree as it is.
 pub(crate) fn reveal_pick(app: &mut SolveApp) {
     sync_reveals(app);
     if follows_view(app)
         && app.ui.show_browser
         && let Some(body) = app.session.selection.last().and_then(picked_body).map(str::to_string)
+        && app.tree.search.hits().is_none_or(|hits| hits.found_body(&body))
     {
         find_in_tree(app, &body);
     }
@@ -907,17 +916,29 @@ pub(crate) fn placement_open(app: &SolveApp, key: &str) -> bool {
     !app.tree.collapsed.contains(key) && ((app.preferences.browser_components_open && rows_start_open(app)) || app.tree.expanded.contains(key))
 }
 
+/// Is the row with this fold key open? During a search every row is, unless it was closed in
+/// the search; the tree's own folds come back when it ends.
 pub(crate) fn is_open(app: &SolveApp, key: &str, default: bool) -> bool {
+    if app.tree.search.on() {
+        return !app.tree.search.closed(key);
+    }
+    fold_open(app, key, default)
+}
+
+/// Whether a row is open in the tree's own folds, whatever a search shows.
+fn fold_open(app: &SolveApp, key: &str, default: bool) -> bool {
     if is_placement_key(key) {
         return placement_open(app, key);
     }
     if default { !app.tree.collapsed.contains(key) } else { app.tree.expanded.contains(key) }
 }
 
-/// Open or close a row, whichever way it starts; whether that changed it.
+/// Open or close a row in the tree's own folds, whichever way it starts; whether that changed it.
+/// Opening it also lifts a close made during a search, so a revealed row shows either way.
 fn set_open(app: &mut SolveApp, key: &str, default: bool, open: bool) -> bool {
-    let was = is_open(app, key, default);
+    let was = fold_open(app, key, default);
     if open {
+        app.tree.search.open(key);
         app.tree.collapsed.remove(key);
         app.tree.expanded.insert(key.to_string());
     } else {
@@ -927,8 +948,13 @@ fn set_open(app: &mut SolveApp, key: &str, default: bool, open: bool) -> bool {
     was != open
 }
 
-/// A row opened or closed by hand: the next Find in Browser leaves it as it is.
+/// A row opened or closed by hand: the next Find in Browser leaves it as it is. During a search it
+/// folds in the search only, and the tree's own folds come back when the search ends.
 pub(crate) fn toggle(app: &mut SolveApp, key: &str, default: bool) {
+    if app.tree.search.on() {
+        app.tree.search.toggle_closed(key);
+        return;
+    }
     app.tree.found_rows.retain(|(row, _)| row != key);
     let open = is_open(app, key, default);
     set_open(app, key, default, !open);
@@ -1407,6 +1433,16 @@ fn browser_contents(app: &mut SolveApp, ui: &mut egui::Ui, collapsible: bool) {
     let t = Tokens::get();
     // Only the floating card folds; the docked column keeps its full height.
     let render = crate::render_workspace::active(app);
+    if render {
+        // Render has its own search, and its tree never filters by this one.
+        app.tree.search.clear();
+    } else if ui.rect_contains_pointer(ui.max_rect())
+        && !ui.ctx().text_edit_focused()
+        && ui.input(|i| i.modifiers.command_only() && i.key_pressed(egui::Key::F))
+    {
+        // A field being typed in keeps the keyboard.
+        show_search(app);
+    }
     if !render {
         browser_header(app, ui, collapsible);
     }
@@ -1437,9 +1473,17 @@ fn browser_contents(app: &mut SolveApp, ui: &mut egui::Ui, collapsible: bool) {
     }
 }
 
-/// The header: the title, the body count and (on the floating card) a chevron that folds the
-/// card to just this row. The whole row is the button. A browser that reveals on hover never
-/// folds: the whole card is what the pointer finds.
+/// Gives the search's field the keyboard, showing its bar and unfolding the card it sits in.
+fn show_search(app: &mut SolveApp) {
+    app.preferences.browser_collapsed = false;
+    app.preferences.timeline_left_browser_collapsed = false;
+    app.tree.search.show();
+}
+
+/// The header: the title, the body count, the search action (unless its bar is always there) and
+/// (on the floating card) a chevron
+/// that folds the card to just this row. The whole row is the button. A browser that reveals on
+/// hover never folds: the whole card is what the pointer finds.
 fn browser_header(app: &mut SolveApp, ui: &mut egui::Ui, collapsible: bool) {
     let collapsible = collapsible && !reveals(app);
     let t = Tokens::get();
@@ -1460,17 +1504,31 @@ fn browser_header(app: &mut SolveApp, ui: &mut egui::Ui, collapsible: bool) {
     let kind = if collapsible { egui::Role::Button } else { egui::Role::Label };
     response.widget_info(|| egui::WidgetInfo::labeled(kind, true, &title));
     let galley = ui.painter().layout_no_wrap(title, crate::fonts::semibold(t.font_heading), t.text);
+    let title_right = rect.left() + t.space_6 + galley.size().x;
     ui.painter().galley(pos2(rect.left() + t.space_6, rect.center().y - galley.size().y / 2.0), galley, t.text);
     let mut right = rect.right() - t.space_6;
     if collapsible {
         crate::ui_kit::disclosure(ui.painter(), pos2(right - t.form_section_icon_size / 2.0, rect.center().y), !collapsed, t.text_dim);
         right -= 18.0;
     }
+    let searching = crate::browser_search::bar_shown(app);
+    let mut search_clicked = false;
+    if app.preferences.browser_search_bar == crate::prefs::BrowserSearchBar::Magnifier {
+        let search = Rect::from_center_size(pos2(right - t.space_12, rect.center().y), vec2(t.space_24, t.space_24));
+        search_clicked = crate::ui_kit::quiet_icon_toggle_at(ui, search, "zoom", crate::i18n::tr("ui.browser_search_hint"), searching).clicked();
+        crate::scenario::publish_handle("browser:search:show", search.center());
+        right = search.left() - t.space_4;
+    }
     let bodies = app.session.model.state().bodies.len();
     let key = if bodies == 1 { "ui.browser_bodies_one" } else { "ui.browser_bodies_other" };
     let count = crate::i18n::format(key, &[("count", &bodies.to_string())]);
     let galley = ui.painter().layout_no_wrap(count, FontId::proportional(t.font_body), t.text_dim);
-    ui.painter().galley(pos2(right - galley.size().x, rect.center().y - galley.size().y / 2.0), galley, t.text_dim);
+    // A narrow card has no room for the count beside the title and any action.
+    if right - galley.size().x >= title_right + t.space_4 {
+        let at = pos2(right - galley.size().x, rect.center().y - galley.size().y / 2.0);
+        crate::scenario::publish_rect("browser:body-count", egui::Rect::from_min_size(at, galley.size()));
+        ui.painter().galley(at, galley, t.text_dim);
+    }
     if collapsible {
         let tip = crate::i18n::tr(if collapsed { "ui.browser_expand" } else { "ui.browser_collapse" });
         if response.on_hover_cursor(egui::CursorIcon::PointingHand).backing_on_hover_text(tip).clicked() {
@@ -1481,6 +1539,13 @@ fn browser_header(app: &mut SolveApp, ui: &mut egui::Ui, collapsible: bool) {
             } else {
                 app.preferences.browser_collapsed = !app.preferences.browser_collapsed;
             }
+        }
+    }
+    if search_clicked {
+        if searching {
+            app.tree.search.clear();
+        } else {
+            show_search(app);
         }
     }
 }
@@ -1567,6 +1632,22 @@ fn browser_rows_hugging(app: &mut SolveApp, ui: &mut egui::Ui) {
 
 fn rows_scrolling(app: &mut SolveApp, ui: &mut egui::Ui, acts: &mut Actions, shrink_height: bool) {
     prepare_model(app);
+    if crate::browser_search::bar_shown(app) {
+        // Above the rows and never scrolled with them, but clipped to the card's height, so it folds
+        // away with the card as the rows do. The bar ends with its own gap, so none between the two.
+        ui.spacing_mut().item_spacing.y = 0.0;
+        egui::ScrollArea::vertical()
+            .id_salt("browser_search_bar")
+            .max_height(ui.available_height())
+            .min_scrolled_height(0.0)
+            .auto_shrink([false, true])
+            .scroll_source(egui::scroll_area::ScrollSource::NONE)
+            .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
+            .show(ui, |ui| crate::browser_search::bar(app, ui));
+        if app.tree.search.hits().is_some_and(|h| h.total() == 0) {
+            return;
+        }
+    }
     let mut cache = app.tree.cache.take().unwrap_or_default();
     cache.prepare(app);
     egui::ScrollArea::vertical()
@@ -1595,7 +1676,12 @@ pub(crate) fn render_content(app: &mut SolveApp, ui: &mut egui::Ui, request: cra
     let mut acts = Actions { session: Some(app.session.uid), lit: Lit::of(app), ..Default::default() };
     match request {
         crate::semantic_content::ContentRequest::Browser { shrink_height } => rows_scrolling(app, ui, &mut acts, shrink_height),
-        crate::semantic_content::ContentRequest::ActiveBodiesOrigin => active_bodies_origin(app, ui, &mut acts),
+        crate::semantic_content::ContentRequest::ActiveBodiesOrigin => {
+            // History's rows are never filtered by the Browser's search.
+            let search = std::mem::take(&mut app.tree.search);
+            active_bodies_origin(app, ui, &mut acts);
+            app.tree.search = search;
+        }
     }
     acts
 }
@@ -1740,6 +1826,8 @@ fn component_rows_inner(
     let name = &root.name;
     let badges: &[&str] = if root.grounded { &["pin"] } else { &[] };
     let appearance = crate::render_workspace::scene::decoration(app, bodies);
+    // A search never matches the design itself: it is the matches' parent, dimmed.
+    let searching = app.tree.search.on();
     let row = Row {
         depth,
         fold: Some(open),
@@ -1748,7 +1836,7 @@ fn component_rows_inner(
         label: name,
         name: true,
         selected: app.tree.picked_components.contains(&id),
-        dim: faded,
+        dim: faded || searching,
         radio: Some(active),
         badges,
         swatch: appearance.swatch,
@@ -1821,7 +1909,7 @@ fn component_rows_inner(
         return;
     }
     let d = depth + 1;
-    if id == 0 && !crate::render_workspace::active(app) {
+    if id == 0 && !crate::render_workspace::active(app) && !searching {
         doc_settings(app, ui, d);
         named_view_rows(app, ui, d, acts);
         origin_rows(app, ui, d, acts);
@@ -1884,6 +1972,11 @@ fn occurrence_rows_inner(
     cache: &mut cache::Cache,
     placement: &mut cache::Node,
 ) {
+    // A search lists the placements that match, and dimmed, those that hold a match.
+    let (listed, matches, folds) = app.tree.search.hits().map_or((true, true, true), |h| (h.lists(path), h.matches(path), h.holds(path)));
+    if !listed {
+        return;
+    }
     let key = &placement.key;
     let open = is_open(app, key, true);
     let on_screen = ui.is_rect_visible(row_rect(ui));
@@ -1908,7 +2001,7 @@ fn occurrence_rows_inner(
         ui.scope_id().with(key),
         &Row {
             depth,
-            fold: Some(open),
+            fold: folds.then_some(open),
             eye: Some(own_visible),
             icon: "component",
             label: &placement.label,
@@ -1917,7 +2010,7 @@ fn occurrence_rows_inner(
             count: &appearance.count,
             name: true,
             selected,
-            dim: faded || !visible,
+            dim: faded || !visible || !matches,
             cut,
             radio: Some(active),
             badges,
@@ -2024,7 +2117,7 @@ fn occurrence_rows_inner(
             DropAction::Reparent { occurrence, path: d.path.clone(), parent: placement.component, parent_path: Some(path.to_vec()) },
         );
     }
-    if !open {
+    if !open || !folds {
         return;
     }
     let render = crate::render_workspace::active(app);
@@ -2854,6 +2947,11 @@ fn folder_rows_at(
     if data.key.is_empty() {
         return;
     }
+    // A search lists the folders that hold a match (`folder_level` lists the matches).
+    let searching = app.tree.search.on();
+    if app.tree.search.hits().is_some_and(|h| !h.folder(path.unwrap_or(&[]), folder)) {
+        return;
+    }
     let fstatic = folder_static(folder);
     let key = &data.key;
     let prefix = key.rsplit_once('/').map_or(key.as_str(), |(prefix, _)| prefix);
@@ -2884,7 +2982,7 @@ fn folder_rows_at(
                     eye: Some(shown),
                     icon: "folder",
                     label: folder_label(folder),
-                    dim: folder_faded,
+                    dim: folder_faded || searching,
                     mark: if acts.lit.any() { acts.lit.branch(app, data.entries()) } else { Mark::None },
                     ..Default::default()
                 },
@@ -2962,6 +3060,8 @@ fn folder_level(
 ) {
     let render = crate::render_workspace::active(app);
     let start_open = rows_start_open(app);
+    let searching = app.tree.search.on();
+    let at = path.unwrap_or(&[]);
     // The render workspace has always listed a folder's loose items above its groups.
     let items_first = render && holder.is_none();
     let rows = rows
@@ -2971,11 +3071,16 @@ fn folder_level(
     for row in rows {
         let group = match row {
             cache::Row::Item(e) => {
-                entry_row(app, ui, comp, path, fstatic, e, depth, holder, top, faded, acts);
+                if app.tree.search.hits().is_none_or(|h| h.row(at, fstatic, &e.key)) {
+                    entry_row(app, ui, comp, path, fstatic, e, depth, holder, top, faded, acts);
+                }
                 continue;
             }
             cache::Row::Group(g) => g,
         };
+        if app.tree.search.hits().is_some_and(|h| !group.any_entry(&|e| h.row(at, fstatic, &e.key))) {
+            continue;
+        }
         let (id, gkey) = (group.id, &group.key);
         let gopen = is_open(app, gkey, start_open);
         let gshown = !app.session.folder_hidden(gkey);
@@ -2996,7 +3101,7 @@ fn folder_level(
                 icon: if render { "" } else { "folder" },
                 label,
                 name: true,
-                dim: group_faded || (render && !gopen),
+                dim: group_faded || (render && !gopen) || searching,
                 count: &count,
                 mark: if acts.lit.any() { acts.lit.branch(app, group.entries()) } else { Mark::None },
                 ..Default::default()
@@ -3024,6 +3129,7 @@ fn folder_level(
             // Dragging a group row moves the group; a press on its arrow or eye is not a drag.
             if resp.drag_started()
                 && !r.on_control
+                && !searching
                 && let Some(source) = crate::semantic_content::current_source(app)
             {
                 resp.dnd_set_drag_payload(Drag { source, comp, folder: fstatic, keys: Vec::new(), groups: vec![id] });
@@ -3271,6 +3377,7 @@ fn entry_row(
     // Drag: the selected items of this folder when this one is selected, else just this one.
     if resp.drag_started()
         && !r.on_control
+        && !app.tree.search.on()
         && let Some(source) = crate::semantic_content::current_source(app)
     {
         let keys: Vec<String> = if selected { selected_keys(app, comp, folder) } else { vec![e.key.clone()] };
