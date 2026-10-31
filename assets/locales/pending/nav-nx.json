@@ -1,21 +1,21 @@
 {
   "en": {
-    "Middle drag orbits, Shift+middle pans (NX's middle + right), Ctrl+middle zooms (NX's middle + left); right drag leaves the camera": "Middle drag orbits, Shift+middle pans (NX's middle + right), Ctrl+middle zooms (NX's middle + left); right drag leaves the camera"
+    "nav.nx.help": "Middle drag orbits, Shift+middle pans (NX's middle + right), Ctrl+middle zooms (NX's middle + left); right drag leaves the camera"
   },
   "zh": {
-    "Middle drag orbits, Shift+middle pans (NX's middle + right), Ctrl+middle zooms (NX's middle + left); right drag leaves the camera": "中键拖动旋转，Shift+中键平移（对应 NX 的中键+右键），Ctrl+中键缩放（对应 NX 的中键+左键）；右键拖动不旋转视图"
+    "nav.nx.help": "中键拖动旋转，Shift+中键平移（对应 NX 的中键+右键），Ctrl+中键缩放（对应 NX 的中键+左键）；右键拖动不旋转视图"
   },
   "ja": {
-    "Middle drag orbits, Shift+middle pans (NX's middle + right), Ctrl+middle zooms (NX's middle + left); right drag leaves the camera": "中ボタンのドラッグで回転、Shift+中ボタンで平行移動（NXの中ボタン+右ボタン）、Ctrl+中ボタンでズーム（NXの中ボタン+左ボタン）。右ボタンのドラッグではカメラは動きません"
+    "nav.nx.help": "中ボタンのドラッグで回転、Shift+中ボタンで平行移動（NXの中ボタン+右ボタン）、Ctrl+中ボタンでズーム（NXの中ボタン+左ボタン）。右ボタンのドラッグではカメラは動きません"
   },
   "ar": {
-    "Middle drag orbits, Shift+middle pans (NX's middle + right), Ctrl+middle zooms (NX's middle + left); right drag leaves the camera": "السحب بالزر الأوسط يدير العرض، وShift+الزر الأوسط يزيح العرض (في NX: الأوسط + الأيمن)، وCtrl+الزر الأوسط يقرّب ويبعّد (في NX: الأوسط + الأيسر)؛ والسحب بالزر الأيمن لا يحرّك الكاميرا"
+    "nav.nx.help": "السحب بالزر الأوسط يدير العرض، وShift+الزر الأوسط يزيح العرض (في NX: الأوسط + الأيمن)، وCtrl+الزر الأوسط يقرّب ويبعّد (في NX: الأوسط + الأيسر)؛ والسحب بالزر الأيمن لا يحرّك الكاميرا"
   },
   "he": {
-    "Middle drag orbits, Shift+middle pans (NX's middle + right), Ctrl+middle zooms (NX's middle + left); right drag leaves the camera": "גרירה בלחצן האמצעי מסובבת, Shift+האמצעי מזיז את התצוגה (ב-NX: אמצעי + ימני), Ctrl+האמצעי מקרב ומרחיק (ב-NX: אמצעי + שמאלי); גרירה בלחצן הימני לא מזיזה את המצלמה"
+    "nav.nx.help": "גרירה בלחצן האמצעי מסובבת, Shift+האמצעי מזיז את התצוגה (ב-NX: אמצעי + ימני), Ctrl+האמצעי מקרב ומרחיק (ב-NX: אמצעי + שמאלי); גרירה בלחצן הימני לא מזיזה את המצלמה"
   },
   "vi": {
-    "Middle drag orbits, Shift+middle pans (NX's middle + right), Ctrl+middle zooms (NX's middle + left); right drag leaves the camera": "Kéo chuột giữa để xoay, Shift+chuột giữa để kéo ngang (NX: giữa + phải), Ctrl+chuột giữa để thu phóng (NX: giữa + trái); kéo chuột phải không di chuyển camera"
+    "nav.nx.help": "Kéo chuột giữa để xoay, Shift+chuột giữa để kéo ngang (NX: giữa + phải), Ctrl+chuột giữa để thu phóng (NX: giữa + trái); kéo chuột phải không di chuyển camera"
   },
   "de": {},
   "ko": {}
