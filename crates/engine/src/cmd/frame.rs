@@ -16,7 +16,12 @@ use super::features::{add_feature, check_expr, sketch_id};
 use super::sketch::edit;
 use super::{CommandSpec, in_sketch, not_in_sketch};
 use crate::params::{bad, bool_, expr, num, str_, string_list, vec2};
+use crate::schema::features::FeatureResult;
+use crate::schema::frame::MemberParams;
+use crate::schema::{TypedContract, output_schema_for};
 use crate::{Result, Session};
+
+const MEMBER_CONTRACT: TypedContract<MemberParams> = TypedContract::new();
 
 #[cfg(test)]
 #[path = "frame_tests.rs"]
@@ -30,10 +35,10 @@ macro_rules! profile_doc {
 }
 
 pub static COMMANDS: &[CommandSpec] = &[
-    CommandSpec::new("frame.member", "Frame Member", member).at("WELDMENTS", "CREATE").icon("frame_member").enabled(not_in_sketch).params(concat!(
-        "sketch: the frame sketch (id or name; 2D or 3D); lines?: [curve ids] (one member each; default: every straight line drawn in the sketch: not construction, not projected or otherwise linked, not of no length); ",
+    CommandSpec::new("frame.member", "Frame Member", crate::checked!("frame.member", member)).at("WELDMENTS", "CREATE").icon("frame_member").enabled(not_in_sketch).contract(&MEMBER_CONTRACT).output(output_schema_for::<FeatureResult>).params(concat!(
+        "sketch: the frame sketch (id or name; 2D or 3D); lines?: [line or circular arc ids] (one member each; default: every straight line drawn in the sketch: not construction, not projected or otherwise linked, not of no length); continuous?: bool (default false; true: one member along explicit lines in connected tangent path order, reversing individual curves as needed; open paths only; its name uses the stable names key `$path`); ",
         profile_doc!(),
-        " | profile_sketch: a sketch whose profile is the section, in its own x and y around its origin, with profiles?: picks as solid.extrude takes them (default: its material, nested loops alternating, so two circles make a tube); anchor?: origin|center|centroid|top_left|top|top_right|left|right|bottom_left|bottom|bottom_right (the profile point that sits on each line, default origin); angle?: angle expr (the profile turned about the line; default 0: its y as near world up as the line allows, a vertical member's x along world X); mirror?: bool (the profile mirrored across its y axis); name?; body_name? (what the members are named after, then numbered: `Rail`, `Rail (2)`…; default the profile's description, `Rect Tube 40x40x3`, or the profile sketch's name); names?: {line id: name} (names to keep, as Edit Feature keeps them). One body per line, from its start to its end; each member keeps its name when other lines are added or deleted. Returns the feature and the bodies it made"
+        " | profile_sketch: a sketch whose profile is the section, in its own x and y around its origin, with profiles?: picks as solid.extrude takes them (default: its material, nested loops alternating, so two circles make a tube); anchor?: origin|center|centroid|top_left|top|top_right|left|right|bottom_left|bottom|bottom_right (the profile point that sits on each line, default origin); angle?: angle expr (the profile turned about the line; default 0: its y as near world up as the line allows, a vertical member's x along world X); mirror?: bool (the profile mirrored across its y axis); name?; body_name? (what the members are named after, then numbered: `Rail`, `Rail (2)`…; default the profile's description, `Rect Tube 40x40x3`, or the profile sketch's name); names?: {line id: name} (names to keep, as Edit Feature keeps them). One body per selected curve, or one body for a continuous path; each member keeps its name when other members are added or deleted. Returns the feature and the bodies it made"
     )),
     CommandSpec::new("frame.profile.list", "Profile Library", list).icon("library")
         .noundo()
@@ -197,6 +202,13 @@ fn member(s: &mut Session, p: &Value) -> Result<Value> {
         }
         Some(_) => Err(bad(cmd, format!("`lines` must list 1…{} curve ids", frame::MAX_MEMBERS)))?,
     };
+    let continuous = match p.get("continuous") {
+        None | Some(Value::Null) => false,
+        Some(_) => bool_(p, "continuous").ok_or_else(|| bad(cmd, "`continuous` must be true or false"))?,
+    };
+    if continuous && lines.is_empty() {
+        return Err(bad(cmd, "a continuous member needs explicit `lines` in path order"));
+    }
     let body_name = match p.get("body_name") {
         None | Some(Value::Null) => None,
         Some(_) => Some(
@@ -255,8 +267,17 @@ fn member(s: &mut Session, p: &Value) -> Result<Value> {
         Some(_) => return Err(bad(cmd, format!("`names` must map up to {} line ids to names", frame::MAX_MEMBERS))),
     };
     let base = body_name.clone().unwrap_or(default_name);
-    let mut kind =
-        FeatureKind::FrameMember { path_sketch: SketchId(path_sketch), lines, profile, anchor, angle, mirror, body_name, names: BTreeMap::new() };
+    let mut kind = FeatureKind::FrameMember {
+        path_sketch: SketchId(path_sketch),
+        lines,
+        continuous,
+        profile,
+        anchor,
+        angle,
+        mirror,
+        body_name,
+        names: BTreeMap::new(),
+    };
     // Each member's name is pinned to its line as the feature is made, so deleting or adding a
     // line later leaves the other members' names alone.
     let st = s.model.state();

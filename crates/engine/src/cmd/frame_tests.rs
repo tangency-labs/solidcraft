@@ -331,7 +331,7 @@ fn bad_members_are_refused() {
     rectangle_frame(&mut s);
     run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Arc"}));
     let arc = run(&mut s, "sketch.arc.three_point", json!({"start": [0, 0], "end": [100, 0], "through": [50, 30]}));
-    let arc_id = arc["created"]["curves"][0].as_str().unwrap().to_string();
+    let _arc_id = arc["created"]["curves"][0].as_str().unwrap().to_string();
     run(&mut s, "sketch.finish", json!({}));
     run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Empty"}));
     run(&mut s, "sketch.finish", json!({}));
@@ -343,7 +343,6 @@ fn bad_members_are_refused() {
         (json!({"sketch": "Frame", "profile": {"kind": "rect_tube", "width": 10, "height": 10, "wall": 5}}), "wall"),
         (json!({"sketch": "Frame", "profile": tube(), "lines": []}), "`lines`"),
         (json!({"sketch": "Frame", "profile": tube(), "lines": ["nope"]}), "nope"),
-        (json!({"sketch": "Arc", "profile": tube(), "lines": [arc_id]}), "not a straight line"),
         (json!({"sketch": "Arc", "profile": tube()}), "no lines"),
         (json!({"sketch": "Empty", "profile": tube()}), "no lines"),
         (json!({"sketch": "Frame", "profile": tube(), "anchor": "middle"}), "`anchor`"),
@@ -637,4 +636,174 @@ fn editing_the_feature_keeps_member_names_until_it_names_them() {
     assert_eq!(boxes(&mut s).into_keys().collect::<Vec<_>>(), ["Rail", "Rail (2)", "Rail (3)", "Rail (4)"]);
     run(&mut s, "edit.undo", json!({}));
     assert_eq!(boxes(&mut s).into_keys().collect::<Vec<_>>(), names);
+}
+
+/// One 100 mm radius quarter bend between a 200 mm and a 300 mm straight.
+fn chassis_path(s: &mut Session) -> Vec<String> {
+    run(s, "sketch.create", json!({"plane": "XY", "name": "Chassis"}));
+    let mut ids = Vec::new();
+    for (cmd, p) in [
+        ("sketch.line", json!({"points": [[100, -200], [100, 0]]})),
+        ("sketch.arc.three_point", json!({"start": [100, 0], "through": [100.0 / 2f64.sqrt(), 100.0 / 2f64.sqrt()], "end": [0, 100]})),
+        // Deliberately drawn backwards: selection order, rather than drawing direction,
+        // decides how the segments connect.
+        ("sketch.line", json!({"points": [[-300, 100], [0, 100]]})),
+    ] {
+        ids.extend(run(s, cmd, p)["created"]["curves"].as_array().unwrap().iter().map(|v| v.as_str().unwrap().to_string()));
+    }
+    run(s, "sketch.finish", json!({}));
+    ids
+}
+
+#[test]
+fn explicit_arcs_make_round_and_rectangular_members_without_changing_all_lines() {
+    for (profile, area) in [
+        (json!({"kind": "round_tube", "diameter": 20, "wall": 2}), 36.0 * PI),
+        (json!({"kind": "rect_tube", "width": 20, "height": 10, "wall": 2, "outer_radius": 0}), 200.0 - 16.0 * 6.0),
+    ] {
+        let mut s = Session::default();
+        let ids = chassis_path(&mut s);
+        run(&mut s, "frame.member", json!({"sketch": "Chassis", "lines": [ids[1]], "profile": profile}));
+        assert_eq!(bodies(&mut s).len(), 1);
+        let expected = area * 100.0 * PI / 2.0;
+        assert!(rel(total_volume(&mut s), expected) < MEASURED, "{} vs {expected}", total_volume(&mut s));
+        run(&mut s, "edit.undo", json!({}));
+        run(&mut s, "frame.member", json!({"sketch": "Chassis", "profile": profile}));
+        assert_eq!(bodies(&mut s).len(), 2, "all lines still selects only straight lines");
+        assert!(rel(total_volume(&mut s), area * 500.0) < MEASURED);
+    }
+}
+
+#[test]
+fn continuous_member_keeps_one_identity_through_reversal_edit_reopen_and_undo() {
+    let mut s = Session::default();
+    let ids = chassis_path(&mut s);
+    let profile = json!({"kind": "round_tube", "diameter": 20, "wall": 2});
+    let params = json!({"sketch": "Chassis", "lines": ids, "continuous": true, "profile": profile, "body_name": "Hoop"});
+    let fid = run(&mut s, "frame.member", params)["feature"].clone();
+    let bs = bodies(&mut s);
+    assert_eq!(bs.len(), 1);
+    assert_eq!(bs[0].0, "Hoop");
+    let expected = 36.0 * PI * (500.0 + 100.0 * PI / 2.0);
+    assert!(rel(bs[0].1, expected) < MEASURED, "{} vs {expected}", bs[0].1);
+    assert!(near3(bs[0].2, [-300.0, -200.0, -10.0]) && near3(bs[0].3, [110.0, 110.0, 10.0]), "{bs:?}");
+    run(&mut s, "edit.undo", json!({}));
+    assert!(bodies(&mut s).is_empty());
+    run(&mut s, "edit.redo", json!({}));
+    run(&mut s, "body.rename", json!({"body": "Hoop", "name": "Main hoop"}));
+    run(
+        &mut s,
+        "timeline.redefine",
+        json!({"feature": fid, "command": "frame.member", "params": {
+            "sketch": "Chassis", "lines": ids, "continuous": true,
+            "profile": {"kind": "round_tube", "diameter": 20, "wall": 3}, "body_name": "Hoop"
+        }}),
+    );
+    let bs = bodies(&mut s);
+    assert_eq!(bs[0].0, "Main hoop");
+    assert!(rel(bs[0].1, 51.0 * PI * (500.0 + 50.0 * PI)) < MEASURED);
+    let mut reopened = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+    assert_eq!(bodies(&mut reopened), bs);
+    run(&mut s, "edit.undo", json!({}));
+    assert!(rel(total_volume(&mut s), expected) < MEASURED);
+    // Reverse the whole traversal, including the bend, without changing its physical volume.
+    run(
+        &mut s,
+        "timeline.redefine",
+        json!({"feature": fid, "command": "frame.member", "params": {
+            "sketch": "Chassis", "lines": ids.into_iter().rev().collect::<Vec<_>>(), "continuous": true, "profile": profile, "body_name": "Hoop"
+        }}),
+    );
+    assert_eq!(bodies(&mut s)[0].0, "Main hoop");
+    assert!(rel(total_volume(&mut s), expected) < MEASURED);
+}
+
+#[test]
+fn compound_spatial_bends_stay_exact_and_carry_a_rectangular_section() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Spatial"}));
+    run(&mut s, "sketch.options", json!({"sketch_3d": true}));
+    let d = 100.0 / 2f64.sqrt();
+    let mut ids = Vec::new();
+    for (cmd, p) in [
+        ("sketch.line3d", json!({"points": [[100, -200, 0], [100, 0, 0]]})),
+        ("sketch.arc3d", json!({"start": [100, 0, 0], "through": [d, d, 0], "end": [0, 100, 0]})),
+        ("sketch.line3d", json!({"points": [[0, 100, 0], [-200, 100, 0]]})),
+        ("sketch.arc3d", json!({"start": [-200, 100, 0], "through": [-200.0-d, 100, 100.0-d], "end": [-300, 100, 100]})),
+        ("sketch.line3d", json!({"points": [[-300, 100, 100], [-300, 100, 400]]})),
+    ] {
+        ids.extend(run(&mut s, cmd, p)["curves"].as_array().unwrap().iter().map(|v| v.as_str().unwrap().to_string()));
+    }
+    run(&mut s, "sketch.finish", json!({}));
+    run(
+        &mut s,
+        "frame.member",
+        json!({"sketch": "Spatial", "lines": ids, "continuous": true,
+        "profile": {"kind": "bar", "width": 20, "height": 10}, "body_name": "Compound"}),
+    );
+    let bs = bodies(&mut s);
+    assert_eq!(bs.len(), 1);
+    // Two quarter bends, one in XY and one in XZ, plus 700 mm of straight stock.
+    assert!(rel(bs[0].1, 200.0 * (700.0 + 100.0 * PI)) < MEASURED, "{bs:?}");
+    // At the final vertical end the 20 mm width remains along Y; the 10 mm height has
+    // transported to X. Restarting the world-up frame here would swap them.
+    assert!((bs[0].2[0] + 305.0).abs() < 1e-6 && (bs[0].3[1] - 110.0).abs() < 1e-6, "{bs:?}");
+    let mut reopened = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+    assert_eq!(bodies(&mut reopened), bs);
+}
+
+#[test]
+fn invalid_continuous_paths_and_tight_bends_are_atomic() {
+    let mut s = Session::default();
+    let ids = chassis_path(&mut s);
+    let original = s.doc.to_json();
+    for (extra, why) in [
+        (json!({"continuous": true}), "explicit"),
+        (json!({"continuous": 1, "lines": ids}), "continuous"),
+        (json!({"continuous": true, "lines": [ids[0], ids[2]]}), "connected"),
+        (json!({"continuous": true, "lines": [ids[0], ids[1], ids[1]]}), "twice"),
+        (json!({"lines": [ids[1]], "profile": {"kind": "round_tube", "diameter": 250, "wall": 2}}), "radius"),
+    ] {
+        let mut p = json!({"sketch": "Chassis", "profile": {"kind": "round_tube", "diameter": 20, "wall": 2}});
+        p.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+        let err = s.execute("frame.member", &p).unwrap_err().to_string();
+        assert!(err.contains(why), "{p}: {err}");
+        assert_eq!(s.doc.to_json(), original);
+        assert!(bodies(&mut s).is_empty());
+    }
+    rectangle_frame(&mut s);
+    let err = s.execute("frame.member", &json!({"sketch": "Frame", "lines": ["l1", "l2"], "continuous": true, "profile": tube()})).unwrap_err();
+    assert!(err.to_string().contains("tangent"), "{err}");
+}
+
+#[test]
+fn curved_member_follows_radius_parameters_and_a_different_component_frame() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "R", "expression": "100 mm"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Bend"}));
+    let arc = run(
+        &mut s,
+        "sketch.arc.three_point",
+        json!({
+            "start": ["R", 0], "through": ["R * 0.7071067811865476", "R * 0.7071067811865476"], "end": [0, "R"]
+        }),
+    )["created"]["curves"][0]
+        .clone();
+    run(&mut s, "sketch.finish", json!({}));
+    let c = run(&mut s, "component.create", json!({"name": "Bent tube", "grounded": false}))["component"].as_u64().unwrap();
+    let o = s.doc.occurrence_of(c).unwrap().id;
+    run(&mut s, "occurrence.move", json!({"occurrence": o, "translate": [0, 0, 100], "capture": true}));
+    run(
+        &mut s,
+        "frame.member",
+        json!({"sketch": "Bend", "lines": [arc], "continuous": true,
+        "profile": {"kind": "round_tube", "diameter": 20, "wall": 2}}),
+    );
+    let b = bodies(&mut s).remove(0);
+    assert!((b.2[2] + 10.0).abs() < 1e-6 && (b.3[2] - 10.0).abs() < 1e-6, "{b:?}");
+    assert!(rel(b.1, 36.0 * PI * 100.0 * PI / 2.0) < MEASURED);
+    run(&mut s, "parameters.change", json!({"name": "R", "expression": "150 mm"}));
+    let after = bodies(&mut s).remove(0);
+    assert_eq!(after.0, b.0);
+    assert!(rel(after.1, 36.0 * PI * 150.0 * PI / 2.0) < MEASURED);
 }
