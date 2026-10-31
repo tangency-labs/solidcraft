@@ -2163,11 +2163,11 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
                 response.response.on_hover_text(crate::i18n::tr_label("More toolbar panels"));
             });
         }
-        fade.end_ordered(ui, "ribbon_panels", &tab, ribbon_tab_order(app, &tab), Rect::from_min_max(pos2(ribbon_left, top), r.max));
-
         // Resolve persistent paint only after large buttons, dropdowns and overflow have
         // dispatched their actions. No already-painted old analysis can survive replacement.
         paint_persistent_ribbon(app, ui, persistent_paints, &tab, "ribbon");
+        // After the persistent paint, so the buttons that stay on fade and drift with their panels.
+        fade.end_ordered(ui, "ribbon_panels", &tab, ribbon_tab_order(app, &tab), Rect::from_min_max(pos2(ribbon_left, top), r.max));
 
         // Dragging a command: its icon follows the pointer; a toolbar button dragged off the
         // toolbar (or into the open drop-down) shows it will be removed.
@@ -5511,7 +5511,9 @@ mod persistent_ribbon_tests {
         for id in PERSISTENT_COMMANDS {
             crate::toolbar_custom::pin(&mut h.app, "INSPECT", id).unwrap();
         }
-        h.frames(3);
+        // Past the switch to INSPECT's cross-fade (0.2 s at 60 frames a second), so the paint
+        // checked below is at full strength.
+        h.frames(16);
         h
     }
 
