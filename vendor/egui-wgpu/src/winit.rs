@@ -790,10 +790,13 @@ impl Painter {
         let texture = frame.texture.clone();
         let output_frame = crate::AcquiredFrame::new(frame, texture);
 
-        // SolidCraft: before the uploads, an empty submission asks the driver whether the device
-        // is still there. The first queue write to meet a lost device panics inside wgpu (#4172);
-        // the submission meets it instead, marks it lost, and the frame is dropped unpresented.
-        if render_state.device_lost.probe(&render_state.queue) {
+        // SolidCraft: before the uploads, a probe asks the driver whether the device is still
+        // there. The first queue write to meet a lost device panics inside wgpu (#4172, #6528);
+        // the probe meets it instead, marks it lost, and the frame is dropped unpresented.
+        if render_state
+            .device_lost
+            .probe(&render_state.device, &render_state.queue)
+        {
             render_queue_guard.commands_submitted = true;
             log::error!(
                 "The graphics device was lost: {}",
