@@ -1,0 +1,34 @@
+{
+  "en": {
+    "prefs.keep_work_on_tab_switch": "Keep dialogs and tools open when switching designs",
+    "prefs.keep_work_on_tab_switch_note": "Each design tab keeps its open dialog or tool, with what you picked and typed in it, and its toolbar tab. They are there again when you come back to the design. Off: switching designs cancels them and shows the Model tab."
+  },
+  "ar": {
+    "prefs.keep_work_on_tab_switch": "إبقاء مربعات الحوار والأدوات مفتوحة عند التبديل بين التصاميم",
+    "prefs.keep_work_on_tab_switch_note": "تحتفظ كل علامة تبويب تصميم بمربع الحوار أو الأداة المفتوحة، بما حددته وكتبته فيها، وبعلامة تبويب شريط الأدوات. وتجدها كما هي عند العودة إلى التصميم. عند الإيقاف: يؤدي التبديل بين التصاميم إلى إلغائها وعرض علامة التبويب «النموذج»."
+  },
+  "de": {
+    "prefs.keep_work_on_tab_switch": "Dialoge und Werkzeuge beim Wechsel zwischen Konstruktionen offen lassen",
+    "prefs.keep_work_on_tab_switch_note": "Jeder Konstruktions-Tab behält seinen offenen Dialog oder sein Werkzeug mit allem, was darin ausgewählt und eingegeben wurde, sowie seinen Werkzeugleisten-Tab. Beim Zurückkehren zur Konstruktion ist alles wieder da. Aus: Ein Wechsel bricht sie ab und zeigt den Tab Modell."
+  },
+  "fr": {
+    "prefs.keep_work_on_tab_switch": "Garder dialogues et outils ouverts en changeant de conception",
+    "prefs.keep_work_on_tab_switch_note": "Chaque onglet de conception garde son dialogue ou son outil ouvert, avec ce que vous y avez sélectionné et saisi, ainsi que son onglet de barre d'outils. Vous les retrouvez en revenant à la conception. Désactivé : changer de conception les annule et affiche l'onglet Modèle."
+  },
+  "he": {
+    "prefs.keep_work_on_tab_switch": "השארת תיבות דו־שיח וכלים פתוחים במעבר בין עיצובים",
+    "prefs.keep_work_on_tab_switch_note": "כל לשונית עיצוב שומרת את תיבת הדו־שיח או הכלי הפתוחים בה, עם מה שבחרת והקלדת בהם, ואת לשונית סרגל הכלים שלה. הם מחכים לך כשתחזור לעיצוב. כבוי: מעבר בין עיצובים מבטל אותם ומציג את הלשונית מודל."
+  },
+  "ja": {
+    "prefs.keep_work_on_tab_switch": "デザインを切り替えてもダイアログとツールを開いたままにする",
+    "prefs.keep_work_on_tab_switch_note": "各デザインのタブが、開いているダイアログまたはツール（選択や入力した内容を含む）とツールバーのタブを保持します。デザインに戻ると元のまま表示されます。オフ: デザインを切り替えるとそれらはキャンセルされ、モデル タブが表示されます。"
+  },
+  "vi": {
+    "prefs.keep_work_on_tab_switch": "Giữ hộp thoại và công cụ mở khi chuyển giữa các thiết kế",
+    "prefs.keep_work_on_tab_switch_note": "Mỗi thẻ thiết kế giữ hộp thoại hoặc công cụ đang mở, cùng những gì bạn đã chọn và nhập trong đó, và thẻ thanh công cụ của nó. Chúng vẫn còn đó khi bạn quay lại thiết kế. Tắt: chuyển thiết kế sẽ hủy chúng và hiển thị thẻ Mô hình."
+  },
+  "zh": {
+    "prefs.keep_work_on_tab_switch": "切换设计时保持对话框和工具打开",
+    "prefs.keep_work_on_tab_switch_note": "每个设计标签页保留其打开的对话框或工具（包括其中已选择和输入的内容）以及工具栏选项卡。回到该设计时它们仍在原处。关闭时：切换设计会取消它们并显示“模型”选项卡。"
+  }
+}

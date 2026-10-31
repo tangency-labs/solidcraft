@@ -115,6 +115,11 @@ pub(super) fn interface(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
                         let check = setting::sketch_tab_always(app, ui).on_hover_text(app.tr("prefs.sketch_tab_always_note"));
                         crate::scenario::publish_target("prefs:sketch_tab_always", check.rect);
                     });
+                    // Each design tab keeps its dialog, tool and toolbar tab across a switch (#9360).
+                    ui_kit::row(ui, "", |ui| {
+                        let check = setting::keep_work_on_tab_switch(app, ui).on_hover_text(app.tr("prefs.keep_work_on_tab_switch_note"));
+                        crate::scenario::publish_target("prefs:keep_work_on_tab_switch", check.rect);
+                    });
                     // Search results point out their place in the ribbon (#7287).
                     ui_kit::row(ui, "", |ui| {
                         let check = setting::ribbon_reveal(app, ui).on_hover_text(app.tr("prefs.ribbon_reveal_note"));
