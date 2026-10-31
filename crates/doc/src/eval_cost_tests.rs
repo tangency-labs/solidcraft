@@ -16,7 +16,8 @@ use crate::eval::{PlacementReads, body_world, hash_placement, placement_digest};
 use crate::*;
 
 /// Work counted on this thread: bodies moved, STEP texts digested, joint faces and bodies
-/// measured, bodies searched for by name, features searched for by id.
+/// measured, bodies searched for by name, features searched for by id, and bodies a cut (or
+/// intersect) ran its booleans on.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub(super) struct Counts {
     pub moved: usize,
@@ -25,11 +26,13 @@ pub(super) struct Counts {
     pub measures: usize,
     pub body_searches: usize,
     pub feature_searches: usize,
+    pub cut: usize,
 }
 
 thread_local! {
-    static COUNTS: Cell<Counts> =
-        const { Cell::new(Counts { moved: 0, digested: 0, joint_faces: 0, measures: 0, body_searches: 0, feature_searches: 0 }) };
+    static COUNTS: Cell<Counts> = const {
+        Cell::new(Counts { moved: 0, digested: 0, joint_faces: 0, measures: 0, body_searches: 0, feature_searches: 0, cut: 0 })
+    };
 }
 
 pub(super) fn count(f: impl FnOnce(&mut Counts)) {
@@ -1063,4 +1066,115 @@ fn a_placed_tap_follows_its_body_offset() {
     let expected =
         apply_point(&mat_mul(&doc.component_transform(comp), &rigid(Vec3::new(0.0, 0.0, 7.0), Vec3::ZERO, Vec3::Z, 0.0)), Vec3::new(1.0, 1.0, 0.0));
     assert!(tap.axis_point.dist(expected) < 1e-9, "{:?} {expected:?}", tap.axis_point);
+}
+
+/// What adding a feature of `kind` at the end of `doc` did to the bodies already there: how many
+/// its cut ran booleans on, and which it left exactly as they were (the same geometry, its name,
+/// key and face names carried over). A cut that cannot reach a body hands it back as it was, and
+/// must not pay a whole boolean to find that out (#10225); the sheet metal hole (#10226) and the
+/// cosmetic thread (#10227) check their own shortcuts with it too.
+pub(super) struct CutWork {
+    pub cut: usize,
+    pub kept: Vec<String>,
+    pub model: Model,
+}
+
+pub(super) fn cut_work(doc: &mut Document, kind: FeatureKind) -> CutWork {
+    let mut model = Model::new();
+    model.evaluate(doc);
+    let id = doc.add_feature(kind, None).unwrap();
+    let work = counted(|| model.evaluate(doc));
+    let result = model.result(id).unwrap();
+    assert_eq!(result.error, None, "the feature builds");
+    let before = model.state_before(id);
+    let kept = result
+        .state
+        .bodies
+        .iter()
+        .filter(|b| {
+            before
+                .body(&b.name)
+                .is_some_and(|old| old.body.same(&b.body) && old.key == b.key && crate::naming::face_names(old) == crate::naming::face_names(b))
+        })
+        .map(|b| b.name.clone())
+        .collect();
+    CutWork { cut: work.cut, kept, model }
+}
+
+/// A box body named `name`, `size` long on each side from `corner`.
+fn block(doc: &mut Document, name: &str, corner: Vec3, size: [f64; 3]) {
+    let id = doc
+        .add_feature(
+            FeatureKind::Box {
+                corner: point_expr(corner),
+                length: size[0].to_string().into(),
+                width: size[1].to_string().into(),
+                height: size[2].to_string().into(),
+                operation: Operation::NewBody,
+            },
+            None,
+        )
+        .unwrap();
+    doc.feature_mut(id).unwrap().body_names = vec![name.into()];
+}
+
+/// A cylinder that cuts, standing on `base` along Z.
+fn cutter(base: Vec3, radius: f64, height: f64) -> FeatureKind {
+    FeatureKind::Cylinder {
+        base: point_expr(base),
+        axis: Dir(Vec3::Z),
+        radius: radius.to_string().into(),
+        height: height.to_string().into(),
+        operation: Operation::Cut,
+        references: Vec::new(),
+    }
+}
+
+/// A cut still goes through the boolean wherever its tool reaches a body or comes close: on a
+/// face, along a line, a hair beside it, into a dome above its edge circle. (Bodies its tool
+/// cannot reach are left out of it: `a_cut_leaves_bodies_it_cannot_reach_as_they_were`.)
+#[test]
+fn a_cut_still_runs_where_its_tool_touches_grazes_or_meets_a_curved_face() {
+    // A cylinder whose side is tangent to the face x = 50, one a hair clear of it, one 0.1 mm in.
+    for (x, cuts) in [(53.0, false), (53.0005, false), (52.9, true)] {
+        let mut doc = Document::new("graze");
+        block(&mut doc, "A", Vec3::ZERO, [50.0, 40.0, 30.0]);
+        let work = cut_work(&mut doc, cutter(Vec3::new(x, 20.0, 0.0), 3.0, 30.0));
+        assert_eq!(work.cut, 1, "the tool at x = {x} goes through the boolean");
+        let v = volume(&work.model, "A");
+        assert_eq!(v < 60_000.0 - 1.0, cuts, "the tool at x = {x} cuts material: {v}");
+        assert!(!cuts || work.kept.is_empty(), "a body cut is a new body");
+    }
+    // A box meeting the block only along its top edge.
+    let mut doc = Document::new("edge");
+    block(&mut doc, "A", Vec3::ZERO, [50.0, 40.0, 30.0]);
+    let along = FeatureKind::Box {
+        corner: point_expr(Vec3::new(50.0, 0.0, 30.0)),
+        length: "10".into(),
+        width: "40".into(),
+        height: "10".into(),
+        operation: Operation::Cut,
+    };
+    assert_eq!(cut_work(&mut doc, along).cut, 1);
+    // A dome: a sphere's cap rising 10 mm above the circle it stands on. A thin tool drilled into
+    // its top near the apex, well above that circle, cuts it.
+    let mut doc = Document::new("dome");
+    doc.add_feature(FeatureKind::Sphere { center: point_expr(Vec3::new(0.0, 0.0, -10.0)), radius: "20".into(), operation: Operation::NewBody }, None)
+        .unwrap();
+    let below = FeatureKind::Box {
+        corner: point_expr(Vec3::new(-30.0, -30.0, -40.0)),
+        length: "60".into(),
+        width: "60".into(),
+        height: "40".into(),
+        operation: Operation::Cut,
+    };
+    doc.add_feature(below, None).unwrap();
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    let dome = model.state().bodies[0].name.clone();
+    let whole = volume(&model, &dome);
+    let work = cut_work(&mut doc, cutter(Vec3::new(2.0, 1.0, 8.0), 1.0, 5.0));
+    assert_eq!(work.cut, 1);
+    assert!(volume(&work.model, &dome) < whole - 1.0, "the drill cuts into the dome");
+    assert!(work.kept.is_empty());
 }

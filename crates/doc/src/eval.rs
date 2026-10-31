@@ -3292,6 +3292,8 @@ fn apply_traced_with(
                 let Some(mut acc) = state.bodies.get(ti).map(|b| Some(b.traced())) else { continue };
                 // The tools meet the target where it is shown: in its frame (#3383).
                 let into = state.bodies.get(ti).and_then(|b| tool_frame(&b.name));
+                #[cfg(test)]
+                cost_tests::count(|c| c.cut += 1);
                 for t in &tools {
                     let t = &tool_in(t, into)?;
                     acc = match acc {
