@@ -57,7 +57,8 @@
 //! trim curves, which offset queries may make lazily and the native block omits.
 //! Static/member shell lists currently support source faces only; nullable and
 //! foreign lists are exercised through the API's origin-qualified interface.
-//! Positive B-rep tolerances avoid the unported automatic `SetTolerance` path;
+//! Nonpositive B-rep tolerances follow the shim's `SmZoneTol3d` conversion and
+//! automatic `SetTolerance` path;
 //! member approximation tolerance still covers zero, negative and -1 sentinel.
 //! All numeric keys have ZERO absolute floor; signed-zero inputs are retained.
 //! A fixture case whose native vertex positions follow heap addresses (upstream
@@ -524,11 +525,6 @@ fn validate(input: &Inputs) -> HResult<()> {
         cfg.member_distance,
         cfg.member_approx_tol,
     ])?;
-    if input.tolerance <= 0.0 {
-        return Err(bad(
-            "automatic B-rep tolerance is outside this Rust fixture projection",
-        ));
-    }
     if cfg.member_operation > 4 || (input.operation.member() && cfg.member_distance < 0.0) {
         return Err(bad("invalid native member constructor parameters"));
     }
@@ -793,6 +789,18 @@ fn primitive_finite(origin: [f64; 3], radius: f64) -> HResult<()> {
     Ok(())
 }
 
+fn set_fixture_tolerance(kernel: &Kernel, brep: &mut Brep, tolerance: f64) -> HResult<()> {
+    if tolerance <= 0.0 {
+        // The shim converts double to SmZoneTol3d (fabs) before SetTolerance;
+        // zero computes a tolerance from the B-rep's bounds at this point.
+        solidcore::topology::brep::p2::set_tolerance(kernel, brep, tolerance.abs(), false, true)
+            .map_err(setup)?;
+    } else {
+        brep.set_tolerance(tolerance);
+    }
+    Ok(())
+}
+
 fn build(kernel: &mut Kernel, fixture: &Fixture, tolerance: f64, namespace: u64) -> HResult<Brep> {
     if let Fixture::File { path } = fixture {
         // The Rust reader alone (`SmBrep::ReadFromFile` into `new SmBrep(ctx)`, as the
@@ -816,18 +824,18 @@ fn build(kernel: &mut Kernel, fixture: &Fixture, tolerance: f64, namespace: u64)
             height,
         )
         .map_err(setup)?;
-        brep.set_tolerance(tolerance);
+        set_fixture_tolerance(kernel, &mut brep, tolerance)?;
         return Ok(brep);
     }
     if let Fixture::Sphere { origin, radius } = *fixture {
         let mut brep =
             solidcore::primitive::api_primitives::create_sphere(kernel, v3(origin), radius)
                 .map_err(setup)?;
-        brep.set_tolerance(tolerance);
+        set_fixture_tolerance(kernel, &mut brep, tolerance)?;
         return Ok(brep);
     }
     let mut brep = Brep::new();
-    brep.set_tolerance(tolerance);
+    set_fixture_tolerance(kernel, &mut brep, tolerance)?;
     // SmBrep.cpp:532–537: the constructor explicitly creates a void infinite region.
     let region = brep
         .add_region_record(Region {
@@ -988,7 +996,7 @@ fn build_box(
     let [dx, dy, dz] = size;
     let mut brep = solidcore::primitive::api_primitives::create_box(kernel, v3(origin), dx, dy, dz)
         .map_err(setup)?;
-    brep.set_tolerance(tolerance);
+    set_fixture_tolerance(kernel, &mut brep, tolerance)?;
     Ok(brep)
 }
 
@@ -2432,6 +2440,43 @@ mod tests {
             name: "unit-test".into(),
             source: CaseSource::Inline,
             inputs: serde_json::to_value(input).unwrap(),
+        }
+    }
+
+    #[test]
+    fn nonpositive_brep_tolerances_match_native_setup() {
+        for fixture in [
+            Fixture::Empty,
+            wire([0.0; 3], 2.0),
+            sheet([0.0; 3], 2.0, 0),
+            Fixture::Box {
+                origin: [0.0; 3],
+                size: [3.0, 4.0, 12.0],
+            },
+            Fixture::Sphere {
+                origin: [0.0; 3],
+                radius: 2.0,
+            },
+            Fixture::Cylinder {
+                origin: [0.0; 3],
+                radius: 2.0,
+                height: 3.0,
+            },
+        ] {
+            for tolerance in [0.0, -0.0, -1.0, -1e300] {
+                let mut input = input(Operation::Solid);
+                input.source = Some(fixture.clone());
+                input.tolerance = tolerance;
+                input.config.member_distance = 0.0;
+                let case = case(&input);
+                let native = Runner.run_cpp(&case).unwrap();
+                let rust = Runner.run_rust(&case).unwrap();
+                assert!(rust.deferred.is_none());
+                assert!(
+                    crate::compare::compare(&native, &rust, Runner.abs_floors()).pass(),
+                    "{fixture:?}, tolerance={tolerance}: native={native:?}, rust={rust:?}"
+                );
+            }
         }
     }
     fn empty_block(tolerance: f64) -> ffi::BrepSnapshot {
