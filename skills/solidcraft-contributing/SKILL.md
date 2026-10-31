@@ -60,6 +60,26 @@ not modelling a part through MCP.
 - **Do not open a second PR** for an issue a lower-numbered open PR already closes, and keep the `Changes a default:` line filled in: `pr-checks.yml` fails both.
 - **The gate reads the working tree.** Do not switch branches while `cargo xtask ci` runs: it compiles the other branch's code and fails on a change not in the PR. Run it in the background and wait for its log.
 
+## Working as an agent
+
+- **The code is English. The comments are English. Always.** Identifiers, doc comments,
+  inline comments, commit messages, branch names, test names, error messages and
+  documentation are all in English. This is not a preference: a comment in another
+  language is a defect, it is not reviewable by the people who maintain this code, and a
+  reviewer rejects it. If something is not obvious, write it in English and keep it
+  short. A user-visible string is not inline in the code: it goes to the message
+  catalogs in `assets/locales/` (a new one to `assets/locales/pending/<slug>.json`),
+  and `skills/solidcraft-ui-text/SKILL.md` says how to name and translate it.
+- **Parallel work runs in parallel.** When a task splits into independent parts (several
+  files, several areas, several checks that do not depend on each other), dispatch one
+  subagent per part and let them run concurrently instead of walking the list one item at
+  a time. Give every subagent a self-contained brief: what to change, what not to touch,
+  and what to report back. Read the answers before you continue; a subagent's report is
+  not a result you can assume.
+- **Do not parallelize what depends on itself.** A fix and the test that proves it, a
+  refactor and the callers it breaks, two edits to the same file: those stay sequential.
+  One subagent per independent unit of work, and no two units may write the same file.
+
 ## 1. Check the environment
 
 Explain what you are checking and why, in everyday language. Run:
