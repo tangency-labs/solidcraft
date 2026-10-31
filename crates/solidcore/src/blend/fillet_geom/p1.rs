@@ -2500,10 +2500,13 @@ impl FilletBrep {
 
         // Rails and OtherRails:
         for rail in rails {
+            // `Trim` reads `SmTol::GetZoneTol3d(pRailCurve)`: the rail edge's tolerance
+            let rail_tol = super::p5::held_curve_zone_tol_3d(k, &self.brep, Some(rail))?;
             let edge = self.brep.edge_mut(rail)?;
             if let Some(curve) = edge.curve.as_mut() {
                 // may snap sIvl by tol to existing knots
-                let trimmed = curve.trim(k, trim_interval, TrimMode::Notify);
+                let trimmed =
+                    curve.trim_with_zone_tol(k, trim_interval, TrimMode::Notify, rail_tol);
                 if k.fixes.fillet_trim_status {
                     trimmed?;
                 } else {
@@ -4524,6 +4527,49 @@ mod tests {
                 .u_interval(),
             interval
         );
+    }
+
+    /// gen1440 (`blend.fillet_geom_p1`): `SmBSplineCurve::Trim` maps
+    /// `SmTol::GetZoneTol3d(this)`, the rail edge's tolerance (zero on a fillet B-rep's
+    /// rails), to find degenerate end spans. A tiny rail whose short last span is far
+    /// below the system zone tolerance keeps its interior knot, as in C++; with the
+    /// system tolerance the span was removed (3 control points instead of 4).
+    #[test]
+    fn trim_geom_maps_the_rail_edges_tolerance() {
+        let k = Kernel::default();
+        let (mut fb, g, rails) = trim_test_geom();
+        let tiny = || {
+            let nurb = crate::nurbs::crv_basic::Curve::new(
+                vec![
+                    CPoint::new(0.0, 0.0, 0.0, NOW),
+                    CPoint::new(1e-9, 1e-9, 0.0, NOW),
+                    CPoint::new(2e-9, 0.0, 0.0, NOW),
+                    CPoint::new(3e-9, 1e-9, 0.0, NOW),
+                ],
+                2,
+                vec![0.0, 0.0, 0.0, 0.5, 1.0, 1.0, 1.0],
+            )
+            .unwrap();
+            Curve::from(BSplineCurve::from_nurb(nurb, 3, false))
+        };
+        for rail in rails {
+            assert_eq!(edge_unit::tolerance(fb.brep(), rail).unwrap(), 0.0);
+            fb.brep_mut().edge_mut(rail).unwrap().curve = Some(tiny());
+        }
+        let mut interval = Extent1d::from_min_max(0.1, 0.55);
+        fb.trim_geom(&k, g, &mut interval).unwrap();
+        assert_eq!(interval, Extent1d::from_min_max(0.1, 0.55));
+        for rail in rails {
+            let curve = fb.brep().edge(rail).unwrap().curve.as_ref().unwrap();
+            assert_eq!(curve.natural_interval(), interval);
+            let crate::curve::curve::CurveKind::BSpline(b) = curve.kind() else {
+                panic!("a B-spline rail");
+            };
+            assert_eq!(
+                b.knots(None).unwrap(),
+                (vec![0.1, 0.5, 0.55], vec![3, 1, 3])
+            );
+        }
     }
 
     #[test]
