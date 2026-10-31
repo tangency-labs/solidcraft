@@ -10,12 +10,15 @@ use crate::dialogs_plastic::Pl;
 
 pub(super) static SPEC: Spec = Spec {
     name: "boss",
-    serves: |d| matches!(d.kind, Kind::Plastic(Pl::Boss { .. })),
+    serves: |app, d| super::on(app) && matches!(d.kind, Kind::Plastic(Pl::Boss { .. })),
     snap_commands: &["plastic.boss"],
     move_tip: "Drag to move the boss across the model. It snaps to sketch points on the face.",
-    frame: crate::dialogs_plastic::handle_frame,
-    move_to: crate::dialogs_plastic::handle_move,
+    many: false,
+    places: |app, d| super::one(crate::dialogs_plastic::handle_frame(app, d)),
+    move_to: |app, d, hits, _| crate::dialogs_plastic::handle_move(app, d, hits),
+    click: None,
     footprint,
+    freedom: super::anywhere,
     turn: None,
 };
 

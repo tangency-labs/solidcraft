@@ -381,10 +381,11 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj
     {
         draw(app, ui, painter, proj, &mut d, base, bs, dir);
     }
-    crate::place_gizmo::show(app, ui, painter, proj, &mut d);
     app.dialog = Some(d);
-    // A Single hole's handles, over the depth arrow's stem: a press on a hole moves it.
-    crate::hole_place::show(app, ui, painter, proj);
+    // The placement handles (a Single hole's among them), over the depth arrow's stem: a press
+    // on a marker moves the feature.
+    crate::place_gizmo::show(app, ui, painter, proj);
+    crate::hole_place::marks(app, painter, proj);
 }
 
 struct MoveRotation {

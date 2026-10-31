@@ -446,18 +446,14 @@ pub(crate) fn handle_frame(app: &SolveApp, d: &crate::dialogs::Dialog) -> Option
 }
 
 /// The placement handles' move for a feature placed through its first input: re-place it where a
-/// click at `pos` would (snapped to a sketch point as a click is when the input takes points), with
-/// the stored `direction` and in-face `along` carried onto the new face. False when nothing there
-/// can take it.
-pub(crate) fn handle_move(app: &SolveApp, d: &mut crate::dialogs::Dialog, proj: &crate::viewport::Proj, pos: egui::Pos2) -> bool {
+/// click with `hits` (the pick under the pointer) would (snapped to a sketch point as a click is
+/// when the input takes points), with the stored `direction` and in-face `along` carried onto the
+/// new face. False when nothing there can take it.
+pub(crate) fn handle_move(app: &SolveApp, d: &mut crate::dialogs::Dialog, hits: &[crate::viewport::Hit]) -> bool {
     use crate::place_gizmo::{angle_of, dir_at};
     let s = &app.session;
     let turned = handle_frame(app, d).and_then(|(_, n)| d.extra.get("along").and_then(crate::dialogs::vec3_of).map(|a| angle_of(a, n)));
-    let hits = crate::viewport::pick(app, proj, pos);
-    let snap = d.face_snap(s, &hits);
-    let Some(to) = hits.iter().find_map(|h| d.candidate_on(s, h, snap.as_ref()).filter(|c| matches!(c, Sel::Face { .. }))) else {
-        return false;
-    };
+    let Some(to) = crate::place_gizmo::face_pick(d, s, hits) else { return false };
     if let Sel::Face { body, index, .. } = &to
         && let Some((_, nn)) = crate::dialogs::planar_face(s, body, *index)
     {
