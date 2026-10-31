@@ -47,9 +47,14 @@ handler and everything it passes `p` to:
   feature is evaluated (`crates/doc/src/eval.rs`). `participants` takes its description from
   `FeatureCommon`, shared by every feature, so say what it does for this one elsewhere: where it
   and another key override each other (a primitive's `targets` gives way to it; an extrude's
-  `targets` overrides it), in that key's description; where it has no effect, in the summary.
-  For the primitives (box, cylinder, sphere, torus) `add_feature` also reads `targets`; a new
-  primitive must join the `primitive` match in `add_feature_in`, and its contract declares
+  `targets` overrides it), in that key's description; where it has no effect, in the summary or
+  in the description of the key it might seem to change (bounding solid's `bodies`). A feature
+  that makes no body (scale) declares `name` and `participants` itself instead, as `body_name`
+  and `body_names` would do nothing; a construction axis, point or plane flattens
+  `ConstructionCommon` or `PlaneCommon`, which hold just those two. It keeps `participants` because `timeline.redefine` passes
+  a feature's own back, though for a scale it changes nothing either; its own description says
+  so. For the primitives (box, cylinder, sphere, torus, cone) `add_feature` also reads `targets`;
+  a new primitive must join the `primitive` match in `add_feature_in`, and its contract declares
   `targets`. The commands that combine bodies read `operation` (and usually `targets`) in their
   own handlers;
 - keys read around the command: `frames::to_local` reads `body` (and `face_body`) for commands
@@ -123,7 +128,8 @@ pub struct WedgeParams {
   someone who has only the schema. Check what each value does where the feature is evaluated
   (`crates/doc/src/eval.rs` and the kernel), not only how the handler reads it: a limit the
   evaluation enforces (a torus's `minor` must be less than its `major`) or a key it ignores
-  belongs in the description.
+  belongs in the description. A scale's `factor`, for one, has no effect when `factors` is
+  given, though it must still evaluate.
 - **Required or optional** follows the handler: a key it can't do without is a plain field;
   any other is `#[serde(default)] Option<T>`.
 - **`null`:** the common readers (`str_`, `num`, `bool_`, `expr`, `string_list`) read `null` as
@@ -208,7 +214,9 @@ In the module's tests file:
   and a list of names) in Warn, and check those replies have no `param_warnings`: Warn runs a
   call the contract refuses anyway, so a matching reply doesn't show the contract accepts the
   call. A reply that isn't an object never carries `param_warnings`; run those calls in Strict,
-  where a refused call is an error.
+  where a refused call is an error. In the same file,
+  `converted_primitives_and_body_commands_reply_with_feature_result` shows the Warn and
+  no-`param_warnings` checks across several commands.
 
 `schema_defaults_are_valid` checks the `default` of each top-level parameter on its own; a
 nested type's defaults are yours to check.
@@ -238,6 +246,7 @@ calling that reader.
 | Type | For | Matches |
 | --- | --- | --- |
 | `LengthExpr`, `AngleExpr` | a number or an expression (`"w / 2"`, `"30 deg"`) | `params::expr` |
+| `NumberExpr` | a number or an expression with no unit (a ratio, a factor) | `params::expr` |
 | `Point3`, `Point2` | `[x, y, z]` / `[x, y]` or `{x, y, z}` of numbers, in mm | `params::vec3`, `params::vec2` |
 | `PointExpr3` | a placement point whose coordinates may be expressions | `features::point_param` |
 | `IdOrName` | a feature by id or name (extrude's `sketch`) | `features::feature_sketch` |
@@ -248,7 +257,15 @@ calling that reader.
 | `FaceRefs` | the `faces` list of shell, draft, offset face, split face and `face.delete` (not `solid.replace_face`, whose messages differ) | `features::face_points` |
 | `EdgeRef`, `EdgeRefs` | an edge by a point on it or `{body, index}`; fillet's and chamfer's `edges` | `features::edge_points` |
 | `ProfilesParam` | which sketch profiles | `features::profiles` |
+| `ScaleFactors` | scale's `factors`: three `NumberExpr`s (strict words a bad item differently; see its doc) | `features::scale` |
+| `AxisDir` | X, Y or Z, or a non-zero `[x, y, z]` / `{x, y, z}` (cylinder's, cone's and coil's `axis`) | `features::axis_dir_form` |
 | `FeatureCommon` | `name`, `body_name`, `body_names`, `participants`, flattened | `features::add_feature` |
+| `ConstructionCommon`, `PlaneCommon` | `name` and `participants` of a construction axis or point, or of a construction plane (whose `name` is a `PlaneName`), flattened | `features::add_feature` |
+| `PlaneName` | a construction plane's name, which may not be an origin plane's (strict names the command called; see its doc) | `features::check_plane_name` |
+| `PlaneParam` | a plane: an origin or construction plane's name, a construction plane's id, or `{origin?, x_dir, y_dir}` / `{origin?, normal}` | `features::plane_param` |
+| `PlaneOrFace` | a plane, or a planar face of a body `{face, body?, index?, path?, fixed?}` (offset and at-angle planes' `base`) | `features::plane_param`, `sketch::face::face_pick_form` |
+| `GeoRefParam` | geometry a construction feature is built from: a picked face, edge or vertex, a sketch point or curve, a point, a plane, an axis, a construction point | `construct::geo_form` |
+| `AxisLine` | an at-angle plane's `axis`: X, Y, Z, a construction axis, `{origin?, dir}` or a model edge or face | `features::axis_line_object`, `construct::geo_form` |
 
 ### When no shared type fits
 
@@ -264,19 +281,32 @@ Add one to `types.rs`, next to the reader it mirrors:
   sentence, such as the handler's ``unknown operation `x` (…)``, in `whole(…)`, and the check
   passes it on as it is. Otherwise start it with "must": the check names the key, so "must be a
   point [x, y, z] of numbers" becomes ``"`corner` must be a point [x, y, z] of numbers"``. (Any
-  other message comes out as ``"`corner`: …"``.)
+  other message comes out as ``"`corner`: …"``.) Where the handler puts serde's own message
+  after the key (``"`point`: missing field `p`"``), wrap it in `keyed(…)`: the check puts the key
+  and a colon in front and leaves the rest as it is, instead of rewording "missing field" and
+  "invalid type" as it does for the type's own fields.
 - Its `JsonSchema` describes the same values, with a description. Where JSON Schema can't say
-  something the reader checks (ignoring case, a byte length), say it in the description.
+  something the reader checks (ignoring case, a byte length), say it in the description. A
+  pattern that allows surrounding whitespace must allow exactly what Rust's `trim` removes:
+  build it from `WHITESPACE`, as `not_blank_pattern` and `AxisDir` do, rather than writing a
+  regex's whitespace class by hand (it differs, and the escapes are easy to get wrong).
+  `conforms` doesn't read patterns, so pin the pattern's text in a test.
 - Test both: values the reader accepts and refuses are accepted and refused by the type, and
   they match the schema (the `conforms` helper in `schema/tests.rs`; see
   `face_and_edge_refs_match_the_pick_readers`).
 - A handler that reads a key more leniently than any type can (a wrong-typed value read as if
   the key were absent) gets the stricter type: that difference is what warn and strict report.
+- A reader that tries forms in order, where some forms, once chosen, refuse the value rather
+  than letting a later form take it (`construct::geo`: `{sketch, point: [1, 2, 3]}` is a
+  sketch reference without a point, never a fixed point), needs a schema that keeps that order:
+  give each later form a `not` naming the keys of the earlier forms that refuse, as
+  `GeoRefParam` does, and test values that two forms would read differently.
 
 ## Checklist
 
-1. The contract's keys are exactly the handler's reads, including `add_feature`'s, the frame
-   mapping's and `live`.
+1. The contract's keys are exactly the handler's reads, including `add_feature`'s (less
+   `body_name` and `body_names` for a feature that makes no body), the frame mapping's and
+   `live`.
 2. The struct and every field have descriptions, with defaults and when a key is ignored.
 3. Shared types wherever they fit; a new type calls the handler's reader and gives its message.
 4. `FeatureResult` for a command that returns `add_feature`'s reply unchanged, else a reply type

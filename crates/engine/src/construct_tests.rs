@@ -398,6 +398,29 @@ fn a_plane_through_three_vertices_follows_them() {
     }
 }
 
+/// A corner of one box where another box's edge runs past it, as where a wall meets the side
+/// wall it stands against (the render-studio example, #8650): the vertex stays that corner. Its
+/// edges were found by name and then picked again by a point, which took the first edge through
+/// the corner of any body, the side wall's, and so its end 3 mm away. Three such corners were
+/// "on one line".
+#[test]
+fn a_vertex_where_another_bodys_edge_runs_past_stays_its_corner() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"corner": [29, -22, 4], "length": 3, "width": 44, "height": 19, "body_name": "Side"}));
+    run(&mut s, "solid.box", json!({"corner": [-29, 19, 4], "length": 58, "width": 3, "height": 19, "body_name": "Back"}));
+    run(&mut s, "construct.point.vertex", json!({"point": {"vertex": [29, 19, 23]}, "name": "P"}));
+    assert!(near(point(&s, "P"), Vec3::new(29.0, 19.0, 23.0)), "{:?}", point(&s, "P"));
+    run(
+        &mut s,
+        "construct.plane.three_points",
+        json!({"a": {"vertex": [29, 22, 23]}, "b": {"vertex": [29, 22, 4]}, "c": {"vertex": [29, 19, 23]}, "name": "T"}),
+    );
+    let t = plane(&s, "T");
+    for p in [Vec3::new(29.0, 22.0, 23.0), Vec3::new(29.0, 22.0, 4.0), Vec3::new(29.0, 19.0, 23.0)] {
+        assert!(on_plane(&t, p), "{p:?} is off {t:?}");
+    }
+}
+
 /// In a component moved 50 mm along X, picks given in the world land on its geometry, and the
 /// axis and point move with the occurrence.
 #[test]
@@ -579,4 +602,26 @@ fn offset_plane_through_a_point_follows_the_point() {
     assert!(near(plane(&cold, "Side").origin, plane(&s, "Side").origin));
     // A distance and a point at once is refused.
     assert!(s.execute("construct.plane.offset", &json!({"base": "XY", "offset": 5, "through": {"vertex": [0, 0, 0]}})).is_err());
+}
+
+/// Hiding the placement a component is shown at hides its construction geometry too, as it
+/// hides its bodies and sketches.
+#[test]
+fn hiding_an_occurrence_hides_its_construction_geometry() {
+    let mut s = Session::default();
+    run(&mut s, "component.create", json!({"name": "Part"}));
+    run(&mut s, "construct.plane.offset", json!({"base": "XY", "offset": "5 mm", "name": "Shelf"}));
+    run(&mut s, "construct.axis.two_planes", json!({"a": "XZ", "b": "YZ", "name": "Spine"}));
+    run(&mut s, "construct.point.three_planes", json!({"a": "XY", "b": "XZ", "c": "YZ", "name": "Pin"}));
+    let component = s.doc.features.iter().find(|f| f.name == "Shelf").map(|f| f.component).unwrap();
+    assert_ne!(component, 0);
+    let path = s.doc.first_path(component);
+    run(&mut s, "component.activate", json!({"component": 0}));
+    for name in ["Shelf", "Spine", "Pin"] {
+        assert!(s.construction_visible(name), "{name}");
+    }
+    run(&mut s, "browser.visibility", json!({"paths": [path], "visible": false}));
+    for name in ["Shelf", "Spine", "Pin"] {
+        assert!(!s.construction_visible(name), "{name} shows in a hidden placement");
+    }
 }

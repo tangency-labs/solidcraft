@@ -135,6 +135,16 @@ pub(crate) fn start(app: &mut SolveApp, remember: Option<String>) {
     }
 }
 
+/// Take the camera as the one the open framed, after a fit the app itself resolved (the view is
+/// framed again as the design goes in, once the layout is known): `tick` frames the meshes only
+/// while the camera is still the one it framed, which is how the user taking the view over keeps
+/// their own framing.
+pub(crate) fn note_framed(app: &mut SolveApp) {
+    if let Some(m) = app.open_meshing.as_mut().filter(|m| !m.complete && m.framed.is_some()) {
+        m.framed = Some(app.cam);
+    }
+}
+
 /// How far the meshing is: bodies done, and of how many.
 pub(crate) fn progress(app: &SolveApp) -> Option<(usize, usize)> {
     app.open_meshing.as_ref().filter(|m| !m.complete).map(|m| (m.done.load(Ordering::Acquire).min(m.world.bodies.len()), m.world.bodies.len()))

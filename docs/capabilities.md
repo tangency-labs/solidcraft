@@ -54,7 +54,7 @@ and help is welcome: see [CONTRIBUTING.md](../CONTRIBUTING.md).
   retained shallow prismatic pockets, exact line/arc/circle DXF outlines and bend tables;
   plastic enclosure features and rules. Pocket depth and side survive unfold/refold and appear
   separately from through-hole outlines in the flat preview and DXF.
-- **Files**: design containers (`.solidcraft`) with lossless binary mesh payloads;
+- **Files**: design containers (`.sc`; `.solidcraft` still opens) with lossless binary mesh payloads;
   plain JSON remains supported for opening, Save As and export. Desktop Open can show a saved
   provisional picture from warm geometry caches while rebuilding before editing; caches never
   replace the parametric design. Export to STEP (AP242 with body names, colours and

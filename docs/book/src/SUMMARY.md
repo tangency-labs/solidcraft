@@ -7,6 +7,7 @@
 - [Getting started](guide/getting-started.md)
 - [A tour of the window](guide/ui-tour.md)
 - [Sketching and constraints](guide/sketching.md)
+  - [Equation curves](guide/equation-curves.md)
 - [Solid features](guide/features.md)
 - [Parameters and expressions](guide/parameters.md)
 - [Components and joints](guide/assemblies.md)

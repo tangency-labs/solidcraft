@@ -1122,4 +1122,48 @@ mod tests {
         assert!(fill_loop(6, &mut lifted(&hex, &dome), 2e-5, MAX_CROWN).is_ok());
         assert!(fill_loop(6, &mut lifted(&hex, &dome), 2e-5, MIN_CROWN).is_ok());
     }
+
+    #[test]
+    fn inside_loop_classifies_points_against_a_square_and_an_l_shape() {
+        // A 4x4 square: the ray cast toggles at an edge only when exactly one of its
+        // endpoints has y strictly greater than the point's y, so the bottom and left
+        // edges (where the point's own y matches the lower endpoint) are treated as part
+        // of the inside, while the top and right edges (where it matches the higher
+        // endpoint) are not. The same rule resolves the corners: only the bottom-left one,
+        // which lies on two "inside" edges, counts as inside.
+        let square = [[0.0, 0.0], [4.0, 0.0], [4.0, 4.0], [0.0, 4.0]];
+        assert!(inside_loop([2.0, 2.0], &square), "the middle is inside");
+        assert!(!inside_loop([6.0, 6.0], &square), "outside the box is outside");
+        assert!(inside_loop([2.0, 0.0], &square), "the bottom edge is inside");
+        assert!(!inside_loop([2.0, 4.0], &square), "the top edge is outside");
+        assert!(inside_loop([0.0, 2.0], &square), "the left edge is inside");
+        assert!(!inside_loop([4.0, 2.0], &square), "the right edge is outside");
+        assert!(inside_loop([0.0, 0.0], &square), "the bottom-left corner is inside");
+        assert!(!inside_loop([4.0, 0.0], &square), "the bottom-right corner is outside");
+        assert!(!inside_loop([4.0, 4.0], &square), "the top-right corner is outside");
+        assert!(!inside_loop([0.0, 4.0], &square), "the top-left corner is outside");
+
+        // An L shape (the square above with its top-right quadrant missing): the notch
+        // is outside even though it sits inside the square's bounding box, and every leg
+        // of the L is inside.
+        let l_shape = [[0.0, 0.0], [4.0, 0.0], [4.0, 2.0], [2.0, 2.0], [2.0, 4.0], [0.0, 4.0]];
+        assert!(!inside_loop([3.0, 3.0], &l_shape), "the notch is outside");
+        assert!(inside_loop([1.0, 1.0], &l_shape), "the bottom-left leg is inside");
+        assert!(inside_loop([3.0, 1.0], &l_shape), "the bottom-right leg is inside");
+        assert!(inside_loop([1.0, 3.0], &l_shape), "the top-left leg is inside");
+    }
+
+    #[test]
+    fn segments_meet_detects_crossing_touching_and_overlapping_segments() {
+        // Crossing: the square's two diagonals.
+        assert!(segments_meet([0.0, 0.0], [4.0, 4.0], [0.0, 4.0], [4.0, 0.0]), "the diagonals cross");
+        // Apart: neither collinear nor crossing.
+        assert!(!segments_meet([0.0, 0.0], [1.0, 0.0], [5.0, 1.0], [6.0, 2.0]), "the segments are apart");
+        // Sharing only an endpoint still counts as meeting: the segments are closed.
+        assert!(segments_meet([0.0, 0.0], [2.0, 2.0], [2.0, 2.0], [4.0, 0.0]), "sharing an endpoint meets");
+        // Collinear and overlapping (sharing the stretch from x = 2 to x = 4).
+        assert!(segments_meet([0.0, 0.0], [4.0, 0.0], [2.0, 0.0], [6.0, 0.0]), "collinear and overlapping meets");
+        // Collinear but apart: a gap from x = 2 to x = 3 between them.
+        assert!(!segments_meet([0.0, 0.0], [2.0, 0.0], [3.0, 0.0], [5.0, 0.0]), "collinear but apart does not meet");
+    }
 }

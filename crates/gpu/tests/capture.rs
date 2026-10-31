@@ -105,8 +105,8 @@ fn the_renderer_counts_what_it_draws() {
         let cam = view::home_camera(s).unwrap();
         let scene = view::scene_with_guides(s, &cam, None, Guides { grid: false, axes: false }).unwrap();
         let triangles: usize = scene.meshes.iter().map(|m| m.mesh.triangles.len()).sum();
-        c.rgba(&scene, &cam, 160, 100).unwrap();
-        (c.last_stats(), triangles as u64)
+        let (_, stats) = c.rgba_with_stats(&scene, &cam, 160, 100).unwrap();
+        (stats, triangles as u64)
     };
     let (empty, _) = drawn(&Session::default());
     assert_eq!((empty.triangles, empty.line_segments), (0, 0), "{empty:?}");
@@ -119,6 +119,32 @@ fn the_renderer_counts_what_it_draws() {
     ]));
     assert!(two_mesh > one_mesh && two.triangles >= two_mesh && two.triangles > one.triangles, "{two:?} for {two_mesh}");
     assert!(two.line_segments > one.line_segments, "{two:?}");
+}
+
+/// Each picture's counts are its own while other threads draw on the same capturer: an empty
+/// design never reports another thread's box, and a box never reports an empty design's
+/// nothing. The counts were once read in a second call after the picture, and another thread's
+/// picture could land in between.
+#[test]
+fn pictures_drawn_at_once_each_count_their_own() {
+    let Some(c) = capturer() else { return };
+    let scene = |s: &Session| {
+        let cam = view::home_camera(s);
+        (view::scene_with_guides(s, &cam, None, Guides { grid: false, axes: false }), cam)
+    };
+    let empty = scene(&Session::default());
+    let solid = scene(&session(&[("solid.box", json!({"length": 40, "width": 30, "height": 20}))]));
+    std::thread::scope(|t| {
+        for k in 0..8 {
+            let (name, (sc, cam), drawn) = if k % 2 == 0 { ("empty", &empty, false) } else { ("box", &solid, true) };
+            t.spawn(move || {
+                for i in 0..50 {
+                    let (_, stats) = c.rgba_with_stats(sc, cam, 64, 48).unwrap();
+                    assert_eq!(stats.triangles > 0, drawn, "{name}, picture {i}: {stats:?}");
+                }
+            });
+        }
+    });
 }
 
 /// The ground grid and the origin's axes each change the picture.
@@ -296,6 +322,28 @@ fn pictures_show_the_surface_analysis() {
     assert!(reachable > 1000 && under > 1000, "accessibility: {reachable} reachable, {under} blocked pixels");
 }
 
+/// A flat face of a box keeps its zebra colour while the view turns a little at a time (#2153):
+/// a horizontal face reflected straight ahead, on the edge between a black and a white stripe,
+/// and rounding flipped it from one step to the next.
+#[test]
+fn zebra_on_flat_faces_holds_still_while_the_view_turns() {
+    let Some(c) = capturer() else { return };
+    let mut s = session(&[("solid.box", json!({"length": 60, "width": 40, "height": 20}))]);
+    s.execute("inspect.zebra", &json!({})).unwrap();
+    let home = view::home_camera(&s);
+    let whites: Vec<usize> = (0..24)
+        .map(|step| {
+            let mut cam = home;
+            cam.yaw += f64::from(step) * 0.11_f64.to_radians();
+            let img = c.rgba(&view::scene_with_guides(&s, &cam, None, Guides { grid: false, axes: false }), &cam, 320, 200).unwrap();
+            pixels(&img).filter(|p| p[0] > 225 && p[1] > 225 && p[2] > 225).count()
+        })
+        .collect();
+    let (least, most) = (whites.iter().min().copied().unwrap_or(0), whites.iter().max().copied().unwrap_or(0));
+    assert!(most > 1000, "white stripes: {whites:?}");
+    assert!((most - least) * 10 < most, "white pixels jump while the view turns by 0.11 degree steps: {whites:?}");
+}
+
 fn colors_of(c: [[f32; 3]; 2]) -> [[u8; 3]; 2] {
     c.map(|rgb| rgb.map(|x| (x * 255.0).round() as u8))
 }
@@ -321,5 +369,44 @@ fn bad_picture_sizes_are_errors() {
         assert!(c.rgba(&sc, &Camera::default(), w, h).is_err(), "{w} x {h}");
     }
     // And the device still draws.
-    assert!(c.rgba(&sc, &Camera::default(), 8, 8).is_ok());
+    let drawn = c.rgba(&sc, &Camera::default(), 8, 8);
+    assert!(drawn.is_ok(), "{:?}", drawn.err());
+}
+
+/// Pictures read back while another thread uses their device: the app's window submits its
+/// frames on the device its thumbnails and `ui.render` pictures are drawn on, and on the shared
+/// capturer every picture checks its device while another one reads back. Any submit or poll can
+/// take a picture's finished read-back and answer it on its own thread a moment after the
+/// picture's wait is over; the picture used to give up then ("reading a picture back without
+/// waiting for the browser", now and then in this binary's other tests).
+#[test]
+fn pictures_read_back_while_another_thread_uses_the_device() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    let policy = solidcraft_gpu::select::Policy::from_env().unwrap();
+    let Some((adapter, _)) = solidcraft_gpu::select::pick(policy) else {
+        assert!(std::env::var_os("SOLIDCRAFT_REQUIRE_GPU").is_none(), "no GPU adapter under the {} policy", policy.name());
+        eprintln!("skipping: no GPU adapter under the {} policy", policy.name());
+        return;
+    };
+    let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
+        required_features: solidcraft_gpu::depth_features(&adapter),
+        required_limits: wgpu::Limits::downlevel_defaults().using_resolution(adapter.limits()),
+        ..Default::default()
+    }))
+    .unwrap();
+    let c = Capturer::new(&adapter, device.clone(), queue).unwrap();
+    let sc = solidcraft_engine::render::Scene::default();
+    const PICTURES: usize = 2000;
+    let done = AtomicBool::new(false);
+    let failed: Vec<String> = std::thread::scope(|t| {
+        t.spawn(|| {
+            while !done.load(Ordering::Relaxed) {
+                let _ = device.poll(wgpu::PollType::Poll);
+            }
+        });
+        let failed = (0..PICTURES).filter_map(|i| c.rgba(&sc, &Camera::default(), 8, 8).err().map(|e| format!("picture {i}: {e}"))).collect();
+        done.store(true, Ordering::Relaxed);
+        failed
+    });
+    assert!(failed.is_empty(), "{} of {PICTURES} pictures failed, the first: {:?}", failed.len(), failed.first());
 }

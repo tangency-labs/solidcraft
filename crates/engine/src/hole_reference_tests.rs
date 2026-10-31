@@ -1,7 +1,7 @@
 //! A Single hole placed by distances from reference edges (#37): the centre sits at the typed
 //! distances from straight edges of its face, measured in the face's plane, follows the edges
 //! when the part changes (also after the design is saved and reopened), and a bad reference is
-//! refused with an error.
+//! refused with an error. A cylinder takes the same references for its base (#6380).
 
 use std::f64::consts::PI;
 
@@ -164,4 +164,122 @@ fn hostile_references_never_panic() {
         }
     }
     assert!(panicked.is_empty(), "solid.hole panicked:\n{}", panicked.join("\n"));
+}
+
+/// The last feature's base and reference edges.
+fn cylinder(s: &Session) -> (solidcraft_doc::PointExpr, Vec<solidcraft_doc::HoleReference>) {
+    match &s.doc.features.last().map(|f| &f.kind) {
+        Some(FeatureKind::Cylinder { base, references, .. }) => (base.clone(), references.clone()),
+        other => panic!("the last feature is not a cylinder: {other:?}"),
+    }
+}
+
+/// A Ø6 × 5 cylinder joined onto the plate's top (z = 10), picked at (30, 25), with these
+/// references.
+fn standing(references: Value) -> Value {
+    json!({"base": [30, 25, 10], "axis": [0, 0, 1], "radius": 3, "height": 5, "operation": "join", "name": "C", "references": references})
+}
+
+/// The cylinder (Ø6, from z = 10 to 15) stands about (x, y): solid on its axis and up to 2 mm
+/// from it, empty 4 mm from it in every direction.
+fn pin_at(s: &Session, x: f64, y: f64) {
+    let at = Vec3::new(x, y, 12.5);
+    for k in 0..8 {
+        let a = PI / 4.0 * f64::from(k);
+        let p = |r: f64| at + Vec3::new(a.cos(), a.sin(), 0.0) * r;
+        assert!(solid_at(s, p(0.0)) && solid_at(s, p(2.0)), "the cylinder about ({x}, {y}) is solid {a} rad from +x");
+        assert!(!solid_at(s, p(4.0)), "beside the cylinder about ({x}, {y}) is empty {a} rad from +x");
+    }
+}
+
+#[test]
+fn a_cylinder_follows_its_edges_when_the_plate_changes() {
+    let mut s = plate();
+    // 10 mm from the far edge (x = len), 12 mm from the front edge (y = 0).
+    let refs = json!([{"edge": [50, 20, 10], "distance": 10}, {"edge": [25, 0, 10], "distance": "12 mm"}]);
+    run(&mut s, "solid.cylinder", standing(refs.clone()));
+    let (base, references) = cylinder(&s);
+    assert_eq!(base.map(|c| c.to_string()), ["40", "12", "10"].map(String::from), "the base keeps where the distances put it");
+    assert_eq!(references.len(), 2);
+    pin_at(&s, 40.0, 12.0);
+    let f = s.doc.find_feature("C").unwrap();
+    let id = f.id;
+    assert_eq!(f.edge_names.len(), 2, "each reference edge keeps its persistent name");
+    // The distances are inputs (Inspect Feature lists them) and parameters.
+    let inspected = run(&mut s, "timeline.inspect", json!({"feature": "C"}));
+    let labels: Vec<&str> = inspected["inputs"].as_array().unwrap().iter().filter_map(|i| i["label"].as_str()).collect();
+    assert_eq!(labels.iter().filter(|l| **l == "Reference distance").count(), 2, "{labels:?}");
+    // The plate grows: the cylinder stays 10 mm from its far edge.
+    run(&mut s, "parameters.change", json!({"name": "len", "expression": "80 mm"}));
+    assert!(s.model.result(id).is_some_and(|r| r.error.is_none()), "{:?}", s.model.result(id).map(|r| &r.error));
+    pin_at(&s, 70.0, 12.0);
+    assert!(!solid_at(&s, Vec3::new(40.0, 12.0, 12.5)), "nothing stands at the old spot");
+    // A distance changed as a parameter moves it.
+    let d = s.doc.find_feature("C").unwrap().param_names.last().cloned().unwrap();
+    run(&mut s, "parameters.change", json!({"name": d, "expression": "20 mm"}));
+    pin_at(&s, 70.0, 20.0);
+    // Undo and redo.
+    run(&mut s, "edit.undo", json!({}));
+    pin_at(&s, 70.0, 12.0);
+    run(&mut s, "edit.redo", json!({}));
+    pin_at(&s, 70.0, 20.0);
+    // Saved and reopened, it keeps its references and its place.
+    let mut t = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+    t.refresh();
+    pin_at(&t, 70.0, 20.0);
+    assert_eq!(cylinder(&t).1, cylinder(&s).1);
+    run(&mut t, "parameters.change", json!({"name": "len", "expression": "60 mm"}));
+    pin_at(&t, 50.0, 20.0);
+}
+
+#[test]
+fn a_cylinder_without_references_stays_at_its_base() {
+    let mut s = plate();
+    run(&mut s, "solid.cylinder", standing(json!([])));
+    assert!(cylinder(&s).1.is_empty());
+    assert!(!s.doc.to_json().contains("references"), "a cylinder without references is saved as before");
+    pin_at(&s, 30.0, 25.0);
+    run(&mut s, "parameters.change", json!({"name": "len", "expression": "80 mm"}));
+    pin_at(&s, 30.0, 25.0);
+    // One reference: it moves square to that edge and keeps its place along it.
+    run(&mut s, "edit.undo", json!({}));
+    run(&mut s, "edit.undo", json!({}));
+    run(&mut s, "solid.cylinder", standing(json!([{"edge": [0, 20, 10], "distance": 10}])));
+    pin_at(&s, 10.0, 25.0);
+}
+
+#[test]
+fn a_bad_cylinder_reference_is_refused() {
+    let mut s = plate();
+    let before = s.doc.features.len();
+    let edge = |p: [f64; 3], d: Value| json!({"edge": p, "distance": d});
+    for (refs, why) in [
+        (json!([edge([25.0, 30.0, 10.0], json!(5))]), "no edge"),
+        (json!([edge([0.0, 20.0, 10.0], json!(5)), edge([50.0, 20.0, 10.0], json!(5))]), "parallel"),
+        (json!([edge([0.0, 20.0, 10.0], json!(5)), edge([25.0, 0.0, 10.0], json!(5)), edge([50.0, 20.0, 10.0], json!(5))]), "at most 2"),
+        (json!([edge([0.0, 20.0, 10.0], json!("-5 mm"))]), "0 or more"),
+        (json!([edge([0.0, 20.0, 10.0], json!(500))]), "off its face"),
+        (json!([edge([0.0, 20.0, 10.0], json!("5 deg"))]), "references"),
+    ] {
+        match s.execute("solid.cylinder", &standing(refs.clone())) {
+            Err(EngineError::Internal(..)) | Ok(_) => panic!("{refs} is refused"),
+            Err(e) => assert!(e.to_string().contains(why), "{refs}: {e}"),
+        }
+        assert_eq!(s.doc.features.len(), before, "{refs} adds nothing");
+    }
+    let p = json!({"base": ["30 mm", "25 mm", "10 mm"], "radius": 3, "height": 5, "references": [edge([0.0, 20.0, 10.0], json!(5))]});
+    assert!(s.execute("solid.cylinder", &p).is_err(), "not with a base given as expressions");
+    let values = crate::tests::hostile_values();
+    let mut panicked = Vec::new();
+    for v in &values {
+        for refs in [v.clone(), json!([v]), json!([{"edge": v, "distance": 5}]), json!([{"edge": [0, 20, 10], "distance": v}])] {
+            for base in [json!([30, 25, 10]), json!([1e300, 0, 10]), v.clone()] {
+                let p = json!({"base": base, "radius": 3, "height": 5, "references": refs});
+                if let Err(EngineError::Internal(id, msg)) = s.execute("solid.cylinder", &p) {
+                    panicked.push(format!("{id} {p}: {msg}"));
+                }
+            }
+        }
+    }
+    assert!(panicked.is_empty(), "solid.cylinder panicked:\n{}", panicked.join("\n"));
 }

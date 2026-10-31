@@ -191,7 +191,7 @@ fn each_installation_gets_its_own_file() {
         InstallKind::Snap { store: false }.update_command(Some("solidcraft-linux-x86_64.snap")).as_deref(),
         Some("sudo snap install --dangerous ./solidcraft-linux-x86_64.snap")
     );
-    assert_eq!(InstallKind::Flatpak(APP_ID.into()).update_command(None).as_deref(), Some("flatpak update ai.storyteller.solidcraft"));
+    assert_eq!(InstallKind::Flatpak(APP_ID.into()).update_command(None).as_deref(), Some("flatpak update io.tangencylabs.solidcraft"));
     assert_eq!(
         InstallKind::Deb.update_command(Some("solidcraft-linux-x86_64.deb")).as_deref(),
         Some("sudo apt install ./solidcraft-linux-x86_64.deb")
@@ -356,6 +356,149 @@ fn turning_off_automatic_checks_stops_the_launch_check() {
     h.frames(3);
     assert_eq!(h.app.updater.status, Status::Idle);
     assert!(h.app.updater.release.is_none());
+}
+
+#[test]
+fn help_menu_checks_with_automatic_checks_off_and_offers_installation() {
+    let dir = scratch();
+    let (feed, version) = next_release_feed(&dir.0);
+    let mut h = crate::scenario::Harness::new();
+    h.app.preferences.check_updates = false;
+    h.app.preferences.update.skipped = format!("v{version}");
+    h.app.preferences.update.remind_after = unix_now() + REMIND_DELAY_S;
+    h.app.updater.feed = Some(feed);
+    h.app.updater.kind = Some(InstallKind::MacApp("/Applications/SolidCraft.app".into()));
+    h.app.updater.managed = Some(None);
+    h.app.services.http_get = Some(Arc::new(|_| panic!("the check must use the test feed")));
+    h.app.services.http_download = Some(Arc::new(|_, _, _| panic!("offering an update must not install it")));
+    h.app.help.menu = true;
+    h.frames(2);
+    let [x, y] = h.widget("Check for updates").expect("the Help menu has an update check");
+    h.call("ui.click", json!({"x": x, "y": y}));
+    wait_for_check(&mut h);
+    h.frames(2);
+    assert!(!h.app.help.menu);
+    assert!(h.app.updater.open);
+    assert!(h.app.preferences.update.skipped.is_empty());
+    assert_eq!(h.app.preferences.update.remind_after, 0.0);
+    assert!(h.widget(&format!("SolidCraft {version} is available")).is_some());
+    assert!(h.widget("Download and open").is_some(), "the macOS installation is offered immediately");
+    assert!(h.app.updater.job.is_none());
+}
+
+/// Hold an automatic check at its result channel so the manual request can join it without
+/// a second HTTP request or a wall-clock race.
+fn pending_check() -> (crate::scenario::Harness, std::sync::mpsc::Sender<Result<Release, FetchError>>) {
+    let mut h = crate::scenario::Harness::new();
+    h.app.preferences.check_updates = false;
+    h.app.updater.kind = Some(InstallKind::WindowsMsi);
+    h.app.services.http_get = Some(Arc::new(|_| panic!("do not start a second check")));
+    let (tx, rx) = std::sync::mpsc::channel();
+    h.app.updater.rx = Some((rx, false));
+    h.app.updater.status = Status::Checking;
+    (h, tx)
+}
+
+#[test]
+fn help_check_shows_progress_and_up_to_date_then_closes() {
+    let (mut h, tx) = pending_check();
+    h.call("ui.help", json!({"item": "updates"}));
+    assert!(h.app.updater.open);
+    assert!(h.app.updater.rx.as_ref().unwrap().1, "the in-flight automatic check becomes manual");
+    assert!(h.widget("Checking…").is_some());
+    let release = Release::parse(
+        json!({"tag_name": format!("v{}", comparable(&parse_version(current_version()).unwrap())), "assets": []}).to_string().as_bytes(),
+    )
+    .unwrap();
+    tx.send(Ok(release)).unwrap();
+    h.frames(2);
+    assert_eq!(h.app.updater.status, Status::UpToDate);
+    assert!(h.widget("SolidCraft is up to date.").is_some());
+    assert!(h.widget("Download").is_none() && h.widget("Update now").is_none());
+    let [x, y] = h.widget("Close").unwrap();
+    h.call("ui.click", json!({"x": x, "y": y}));
+    assert!(!h.app.updater.open);
+    // Reopening during the cooldown still shows the result, without another request.
+    h.app.updater.last_manual = unix_now();
+    h.call("ui.help", json!({"item": "updates"}));
+    assert!(h.widget("SolidCraft is up to date.").is_some());
+    assert!(h.app.updater.rx.is_none());
+}
+
+#[test]
+fn help_check_reports_network_errors_and_rate_limits_in_the_window() {
+    for error in [FetchError::Failed("offline".into()), FetchError::RateLimited { retry_after_s: 3600 }] {
+        let (mut h, tx) = pending_check();
+        h.call("ui.help", json!({"item": "updates"}));
+        tx.send(Err(error.clone())).unwrap();
+        h.frames(2);
+        assert_eq!(h.app.updater.status, Status::Failed(error.to_string()));
+        assert!(h.widget(&format!("Couldn't check: {error}")).is_some());
+        assert!(h.widget("SolidCraft is up to date.").is_none());
+        if matches!(error, FetchError::RateLimited { .. }) {
+            h.call("ui.help", json!({"item": "updates"}));
+            assert!(h.app.updater.rx.is_none(), "the server's rate limit is honoured");
+            assert!(matches!(h.app.updater.status, Status::Failed(_)));
+        }
+    }
+}
+
+#[test]
+fn help_check_result_follows_the_selected_language() {
+    let (mut h, tx) = pending_check();
+    h.call("ui.prefs", json!({"language": "de"}));
+    h.call("ui.help", json!({"item": "updates"}));
+    let release = Release::parse(json!({"tag_name": current_version(), "assets": []}).to_string().as_bytes()).unwrap();
+    tx.send(Ok(release)).unwrap();
+    h.frames(2);
+    assert!(h.widget("SolidCraft ist aktuell.").is_some());
+    for (language, title, message) in [
+        ("fr", "Rechercher des mises à jour", "SolidCraft est à jour."),
+        ("ja", "アップデートを確認", "SolidCraft は最新です。"),
+        ("zh-TW", "檢查更新", "SolidCraft 已是最新版本。"),
+    ] {
+        h.call("ui.prefs", json!({"language": language}));
+        assert!(h.widget(title).is_some(), "the window title follows {language}");
+        assert!(h.widget(message).is_some(), "the result follows {language}");
+        assert!(h.widget("SolidCraft is up to date.").is_none());
+    }
+}
+
+#[test]
+fn help_check_explains_when_checks_are_unavailable() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.updater.off = true;
+    h.call("ui.help", json!({"item": "updates"}));
+    assert!(h.widget("Update checks are not available for this installation.").is_some());
+    assert!(h.widget("SolidCraft is up to date.").is_none());
+    assert!(h.app.updater.rx.is_none());
+}
+
+#[test]
+fn closing_a_manual_check_does_not_reopen_it_when_an_update_arrives() {
+    let (mut h, tx) = pending_check();
+    h.call("ui.help", json!({"item": "updates"}));
+    let [x, y] = h.widget("Close").unwrap();
+    h.call("ui.click", json!({"x": x, "y": y}));
+    assert!(!h.app.updater.open);
+    let release = Release::parse(br#"{"tag_name":"v999.0.0","assets":[]}"#).unwrap();
+    tx.send(Ok(release)).unwrap();
+    h.frames(2);
+    assert!(!h.app.updater.open);
+    assert!(offered(&h.app).is_some(), "the update remains available from the title bar");
+}
+
+#[test]
+fn help_check_keeps_an_active_installation_on_screen() {
+    let (mut h, dir) = open_update_window(None);
+    let (_tx, rx) = std::sync::mpsc::channel();
+    h.app.updater.job = Some((rx, Arc::new(install::Progress::default())));
+    h.app.updater.open = false;
+    h.call("ui.help", json!({"item": "updates"}));
+    assert!(h.app.updater.open && h.app.updater.job.is_some());
+    assert!(h.app.updater.rx.is_none());
+    assert!(h.widget("Cancel").is_some());
+    drop(dir);
 }
 
 #[test]
@@ -545,4 +688,253 @@ fn web_preferences_explain_reload_without_update_controls() {
     assert!(!texts.iter().any(|t| t == crate::i18n::tr("update.check_automatically")), "{texts:?}");
     assert!(!texts.iter().any(|t| t == crate::i18n::tr("update.check_now")), "{texts:?}");
     assert!(texts.iter().any(|t| t == crate::i18n::tr("update.prefs_web")), "{texts:?}");
+}
+
+fn no_env(_: &str) -> Option<String> {
+    None
+}
+
+fn record(path: &str) -> Vec<u8> {
+    json!({"apps": {"solidcraft": {"version": "0.25.1", "kind": "AppImage", "path": path, "installed_at": 1}}}).to_string().into_bytes()
+}
+
+#[test]
+fn the_variable_names_the_manager() {
+    let nothing = |_: &Path| None;
+    let kind = InstallKind::LinuxTarball;
+    let with = |value: &'static str| {
+        let env = move |k: &str| (k == MANAGED_ENV).then(|| value.to_string());
+        managed_by("linux", &env, Some(Path::new("/opt/sc/solidcraft")), &kind, &nothing)
+    };
+    assert_eq!(with("ArtCraft Launcher").as_deref(), Some("ArtCraft Launcher"));
+    assert_eq!(with("  Other \u{7}Manager\n").as_deref(), Some("Other Manager"), "padding and control characters are dropped");
+    assert_eq!(with("   "), None, "an empty value is not a manager");
+    assert_eq!(with(&"x".repeat(500).leak()[..]).map(|n| n.len()), Some(64), "a long name is cut");
+    assert_eq!(managed_by("linux", &no_env, Some(Path::new("/opt/sc/solidcraft")), &kind, &nothing), None);
+}
+
+#[test]
+fn the_launchers_record_marks_the_install_it_made() {
+    let exe = Path::new("/home/me/Apps/SolidCraft.AppImage");
+    let appimage = InstallKind::AppImage(exe.to_path_buf());
+    let env = |k: &str| (k == "HOME").then(|| "/home/me".to_string());
+    let seen = std::cell::RefCell::new(Vec::new());
+    let read = |bytes: Vec<u8>| {
+        let seen = &seen;
+        move |p: &Path| {
+            seen.borrow_mut().push(p.to_path_buf());
+            Some(bytes.clone())
+        }
+    };
+    // The AppImage the launcher recorded; the running executable is inside its mount.
+    let run = |path: &str| managed_by("linux", &env, Some(Path::new("/tmp/.mount_SolidXYZ/usr/bin/solidcraft")), &appimage, &read(record(path)));
+    assert_eq!(run("/home/me/Apps/SolidCraft.AppImage").as_deref(), Some("ArtCraft Launcher"));
+    assert_eq!(seen.borrow().as_slice(), [PathBuf::from("/home/me/.local/share/artcraft-launcher/installed.json")]);
+    // Another copy, a prefix that is not a folder of ours, the root and a relative path are not ours.
+    assert_eq!(run("/home/me/Apps/Other.AppImage"), None);
+    assert_eq!(run("/home/me/Apps/SolidCraft.AppImage.old"), None);
+    assert_eq!(run("/"), None);
+    assert_eq!(run("Apps/SolidCraft.AppImage"), None);
+    // No record, a damaged one, one without SolidCraft, and a record file of any other shape.
+    let one = |bytes: &'static [u8]| managed_by("linux", &env, Some(exe), &appimage, &|_: &Path| Some(bytes.to_vec()));
+    assert_eq!(one(b"{not json"), None);
+    assert_eq!(one(br#"{"apps": {"photocraft": {"path": "/home/me/Apps/SolidCraft.AppImage"}}}"#), None);
+    assert_eq!(one(br#"{"apps": {"solidcraft": {"path": 7}}}"#), None);
+    assert_eq!(one(b"[]"), None);
+    assert_eq!(managed_by("linux", &env, Some(exe), &appimage, &|_: &Path| None), None);
+    // XDG_DATA_HOME moves the record.
+    let xdg = |k: &str| (k == "XDG_DATA_HOME").then(|| "/data".to_string());
+    let paths = std::cell::RefCell::new(Vec::new());
+    managed_by("linux", &xdg, Some(exe), &appimage, &|p: &Path| {
+        paths.borrow_mut().push(p.to_path_buf());
+        None
+    });
+    assert_eq!(paths.into_inner(), [PathBuf::from("/data/artcraft-launcher/installed.json")]);
+}
+
+#[test]
+fn the_record_matches_folders_bundles_and_windows_paths() {
+    let nothing_else = |bytes: Vec<u8>| move |_: &Path| Some(bytes.clone());
+    // An unpacked tarball: the record names the folder, and the launcher's own HOME is no help,
+    // so the record is found beside the `apps` folder the app runs from.
+    let exe = Path::new("/home/me/.local/share/artcraft-launcher/apps/solidcraft/bin/solidcraft");
+    let read = |p: &Path| {
+        (p == Path::new("/home/me/.local/share/artcraft-launcher/installed.json"))
+            .then(|| record("/home/me/.local/share/artcraft-launcher/apps/solidcraft"))
+    };
+    let home = |k: &str| (k == "HOME").then(|| "/home/me/.local/share/artcraft-launcher/apps/solidcraft/home".to_string());
+    assert_eq!(managed_by("linux", &home, Some(exe), &InstallKind::LinuxTarball, &read).as_deref(), Some("ArtCraft Launcher"));
+    // macOS: the bundle.
+    let bundle = PathBuf::from("/Applications/SolidCraft.app");
+    let mac = InstallKind::MacApp(bundle.clone());
+    let exe = Path::new("/Applications/SolidCraft.app/Contents/MacOS/solidcraft");
+    let home = |k: &str| (k == "HOME").then(|| "/Users/me".to_string());
+    let read = |p: &Path| {
+        assert_eq!(p, Path::new("/Users/me/Library/Application Support/ArtCraft Launcher/installed.json"));
+        Some(record("/Applications/SolidCraft.app"))
+    };
+    assert_eq!(managed_by("macos", &home, Some(exe), &mac, &read).as_deref(), Some("ArtCraft Launcher"));
+    // Windows: case and the verbatim prefix don't matter, and the record is under LOCALAPPDATA.
+    let local = |k: &str| (k == "LOCALAPPDATA").then(|| r"C:\Users\me\AppData\Local".to_string());
+    let exe = Path::new(r"C:\Users\me\AppData\Local\Programs\SolidCraft\solidcraft.exe");
+    let read = nothing_else(record(r"\\?\c:\users\me\appdata\local\programs\solidcraft\SOLIDCRAFT.EXE"));
+    assert_eq!(managed_by("windows", &local, Some(exe), &InstallKind::WindowsExe, &read).as_deref(), Some("ArtCraft Launcher"));
+    let read = nothing_else(record(r"C:\Users\me\AppData\Local\Programs\SolidCraft2"));
+    assert_eq!(managed_by("windows", &local, Some(exe), &InstallKind::WindowsExe, &read), None, "a folder whose name only starts the same");
+    // Linux paths are case-sensitive.
+    let read = nothing_else(record("/OPT/SC"));
+    assert_eq!(managed_by("linux", &no_env, Some(Path::new("/opt/sc/solidcraft")), &InstallKind::LinuxTarball, &read), None);
+}
+
+/// A harness with a newer release found and the Update window open, on an AppImage that a
+/// launcher may manage. The host can download, so the one-click update is on offer unless managed.
+fn open_update_window(managed: Option<&str>) -> (crate::scenario::Harness, Scratch) {
+    let dir = scratch();
+    let (feed, _) = next_release_feed(&dir.0);
+    let mut h = crate::scenario::Harness::new();
+    let get: HttpGet = Arc::new(|_| Err(FetchError::Failed("offline".into())));
+    let download: install::HttpDownload = Arc::new(|_, _, _| Err(FetchError::Failed("offline".into())));
+    h.app.services.http_get = Some(get);
+    h.app.services.http_download = Some(download);
+    h.app.updater.kind = Some(InstallKind::AppImage("/home/me/SolidCraft.AppImage".into()));
+    h.app.updater.managed = Some(managed.map(str::to_string));
+    h.app.updater.feed = Some(feed);
+    h.frame();
+    wait_for_check(&mut h);
+    h.frames(2);
+    h.app.updater.open = true;
+    h.frames(3);
+    (h, dir)
+}
+
+#[test]
+fn a_managed_install_points_to_its_manager_instead_of_updating_itself() {
+    let (mut h, _dir) = open_update_window(Some("ArtCraft Launcher"));
+    assert_eq!(install_method(&mut h.app), None, "no AppImage self-replace");
+    assert!(h.widget("Update available: update SolidCraft in ArtCraft Launcher").is_some());
+    for gone in ["Update now", "Download", "Open release page"] {
+        assert!(h.widget(gone).is_none(), "{gone} is not offered");
+    }
+    assert!(h.widget("Skip this version").is_some() && h.widget("Remind me later").is_some());
+    // It still checked and still shows the pill.
+    assert!(h.app.updater.release.is_some() && offered(&h.app).is_some());
+    assert!(crate::scenario::rect_of("titlebar:update").is_some());
+}
+
+#[test]
+fn an_unmanaged_install_updates_itself_as_before() {
+    let (mut h, _dir) = open_update_window(None);
+    assert_eq!(install_method(&mut h.app), Some(install::Method::AppImage("/home/me/SolidCraft.AppImage".into())));
+    assert!(h.widget("Update now").is_some());
+    assert!(h.widget("Download").is_some());
+    assert!(h.widget("Update available: update SolidCraft in ArtCraft Launcher").is_none());
+}
+
+#[test]
+fn periodic_checks_refresh_the_offered_label() {
+    let dir = scratch();
+    let (feed, first) = next_release_feed(&dir.0);
+    let mut h = crate::scenario::Harness::new();
+    h.app.updater.feed = Some(feed.clone());
+    h.frame();
+    wait_for_check(&mut h);
+    h.frames(2);
+    assert!(h.widget(&format!("Update to {first}")).is_some());
+    h.app.updater.installed = Some(Ok(install::Outcome::Restart(dir.0.join("SolidCraft.AppImage"))));
+    let v = parse_version(&first).unwrap();
+    let next = format!("{}.{}.0", v.major, v.minor + 1);
+    std::fs::write(feed, json!({"tag_name": format!("v{next}")}).to_string()).unwrap();
+    h.app.preferences.update.next_check = 0.0;
+    h.frame();
+    wait_for_check(&mut h);
+    h.frames(2);
+    assert!(h.widget(&format!("Update to {next}")).is_some());
+    assert!(h.widget(&format!("Update to {first}")).is_none());
+}
+
+#[test]
+fn install_selection_refreshes_the_button_and_progress_before_completion() {
+    let dir = scratch();
+    let target = dir.0.join("SolidCraft.AppImage");
+    let name = asset_name(&InstallKind::AppImage(target.clone()), std::env::consts::ARCH, "999.1.0").unwrap();
+    let mut h = crate::scenario::Harness::new();
+    h.app.preferences.check_updates = false;
+    let mut shown = release();
+    shown.tag = "v999.0.0".into();
+    h.app.updater.release = Some(shown);
+    h.app.updater.kind = Some(InstallKind::AppImage(target));
+    h.app.updater.open = true;
+    h.app.services.http_get = Some(Arc::new(move |url| {
+        if url == LATEST_API {
+            return Ok(json!({"tag_name":"v999.1.0", "assets":[
+                {"name": name, "browser_download_url":format!("https://github.com/tangency-labs/solidcraft/releases/download/v999.1.0/{name}")},
+                {"name": install::SUMS, "browser_download_url":"https://github.com/tangency-labs/solidcraft/releases/download/v999.1.0/SHA256SUMS.txt"}
+            ]}).to_string().into_bytes());
+        }
+        Ok(format!("{}  {name}\n", "a".repeat(64)).into_bytes())
+    }));
+    let (tx, rx) = std::sync::mpsc::channel();
+    let rx = std::sync::Mutex::new(rx);
+    h.app.services.http_download = Some(Arc::new(move |_, _, _| {
+        rx.lock().unwrap().recv().unwrap();
+        Err(FetchError::Failed("download stopped".into()))
+    }));
+    start_install(&mut h.app, &egui::Context::default());
+    for _ in 0..500 {
+        poll_install(&mut h.app);
+        if h.app.updater.release.as_ref().unwrap().version() == "999.1.0" {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(2));
+    }
+    h.frames(2);
+    assert!(h.widget("Update to 999.1.0").is_some());
+    assert!(h.widget("Updating to 999.1.0.").is_some());
+    assert!(h.app.updater.installed.is_none());
+    tx.send(()).unwrap();
+}
+
+#[test]
+fn cancel_download_leaves_downloading_immediately() {
+    // Cancel must clear the job from the UI at once so the card leaves "Downloading" without
+    // waiting for a stalled feed or checksum GET (#8908).
+    let dir = scratch();
+    let target = dir.0.join("SolidCraft.AppImage");
+    let name = asset_name(&InstallKind::AppImage(target.clone()), std::env::consts::ARCH, "999.1.0").unwrap();
+    let mut h = crate::scenario::Harness::new();
+    h.app.preferences.check_updates = false;
+    let mut shown = release();
+    shown.tag = "v999.0.0".into();
+    h.app.updater.release = Some(shown);
+    h.app.updater.kind = Some(InstallKind::AppImage(target));
+    h.app.updater.open = true;
+    let (gate_tx, gate_rx) = std::sync::mpsc::channel();
+    let gate_rx = std::sync::Mutex::new(gate_rx);
+    h.app.services.http_get = Some(Arc::new(move |url| {
+        if url == LATEST_API {
+            return Ok(json!({"tag_name":"v999.1.0", "assets":[
+                {"name": name, "browser_download_url":format!("https://github.com/tangency-labs/solidcraft/releases/download/v999.1.0/{name}")},
+                {"name": install::SUMS, "browser_download_url":"https://github.com/tangency-labs/solidcraft/releases/download/v999.1.0/SHA256SUMS.txt"}
+            ]}).to_string().into_bytes());
+        }
+        // Stall checksum GET until the test ends so Cancel has to work before the body download.
+        let _ = gate_rx.lock().unwrap().recv();
+        Ok(format!("{}  {name}\n", "a".repeat(64)).into_bytes())
+    }));
+    h.app.services.http_download = Some(Arc::new(|_, _, _| Err(FetchError::Failed("download must not start".into()))));
+    start_install(&mut h.app, &egui::Context::default());
+    assert!(h.app.updater.job.is_some());
+    h.frames(2);
+    let cancel = h.widget("Cancel").expect("Cancel while Downloading");
+    h.call("ui.click", json!({"x": cancel[0], "y": cancel[1]}));
+    assert!(h.app.updater.job.is_none(), "Cancel clears the job immediately");
+    assert!(h.app.updater.installed.is_none());
+    assert!(h.app.updater.open, "Cancel leaves the Update window open on Offer");
+    h.frames(2);
+    assert!(
+        h.widget("Remind me later").is_some() || h.widget("Skip this version").is_some() || h.widget("Update now").is_some(),
+        "Offer returns after Cancel"
+    );
+    assert!(h.widget("Updating to 999.1.0.").is_none());
+    let _ = gate_tx.send(());
 }

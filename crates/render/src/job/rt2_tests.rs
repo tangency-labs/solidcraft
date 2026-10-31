@@ -6,6 +6,7 @@ use solidcraft_geom::Aabb3;
 
 fn request(integrator: Integrator) -> ImageRequest {
     ImageRequest {
+        studio_weights: None,
         environment: None,
         textures: None,
         integrator,

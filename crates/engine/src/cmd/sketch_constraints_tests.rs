@@ -1,5 +1,6 @@
 use serde_json::{Value, json};
 use solidcraft_geom::Vec2;
+use solidcraft_sketch::ConstraintKind;
 
 use crate::Session;
 
@@ -46,6 +47,37 @@ fn redundant_dimensions_are_refused_driven_ones_measure() {
     let driven = g["glyphs"].as_array().unwrap().iter().find(|x| x["driven"] == true).unwrap().clone();
     assert!((driven["value"].as_f64().unwrap() - 25.0).abs() < 1e-7, "{driven}");
     assert_eq!(g["fully_constrained"], true);
+}
+
+/// The same constraint between the same two lines, picked again (in either order), adds nothing:
+/// the one already there is reported back as redundant, and the sketch keeps one glyph (#5224).
+#[test]
+fn the_same_constraint_twice_adds_nothing() {
+    let mut s = new_sketch();
+    let a = ids(&run(&mut s, "sketch.line", json!({"points": [[1, 1], [10, 1]]}))["curves"])[0].clone();
+    let b = ids(&run(&mut s, "sketch.line", json!({"points": [[0, 5], [10, 7]]}))["curves"])[0].clone();
+    let first = run(&mut s, "sketch.constraint.parallel", json!({"a": a, "b": b}));
+    for (x, y) in [(&a, &b), (&b, &a), (&a, &b)] {
+        let r = run(&mut s, "sketch.constraint.parallel", json!({"a": x, "b": y}));
+        assert_eq!(r["redundant"], true, "{r}");
+        assert_eq!(r["constraint"], first["constraint"], "the one already there: {r}");
+    }
+    let e = s.execute("sketch.constraint.parallel", &json!({"a": a, "b": b, "if_redundant": "refuse"})).unwrap_err().to_string();
+    assert!(e.contains("already determined"), "{e}");
+    let parallels = sketch(&s).constraints.iter().filter(|c| matches!(c.kind, ConstraintKind::Parallel { .. })).count();
+    assert_eq!(parallels, 1);
+    let g = run(&mut s, "sketch.glyphs", json!({}));
+    assert_eq!(g["glyphs"].as_array().map(Vec::len), Some(1), "{g}");
+    // The sketch model itself hands back the one already there.
+    let mut sk = sketch(&s);
+    let n = sk.constraints.len();
+    let k = sk.constraints.iter().find(|c| matches!(c.kind, ConstraintKind::Parallel { .. })).unwrap().clone();
+    let (ia, ib) = match k.kind {
+        ConstraintKind::Parallel { a, b } => (a, b),
+        _ => (0, 0),
+    };
+    assert_eq!(sk.add_constraint(ConstraintKind::Parallel { a: ib, b: ia }, None).unwrap(), k.id);
+    assert_eq!(sk.constraints.len(), n);
 }
 
 /// `measured` is the dimension on the solved sketch: a trough drawn 99.84 long and dimensioned
@@ -285,6 +317,62 @@ fn smart_constrain_and_driven_toggle() {
     assert_eq!(r["driven"], false);
 }
 
+/// #7499: a circle's or an arc's dimension switches between its radius and its diameter, the
+/// circle keeping its size: the parameter is halved or doubled, an expression wrapped.
+#[test]
+fn a_radius_dimension_switches_to_a_diameter_and_back() {
+    use solidcraft_sketch::ConstraintKind;
+    let mut s = new_sketch();
+    let dim = |s: &Session, param: &str| sketch(s).constraints.iter().find(|c| c.param.as_deref() == Some(param)).unwrap().clone();
+    let c1 = ids(&run(&mut s, "sketch.circle.center", json!({"center": [0, 0], "radius": 10}))["curves"])[0].clone();
+    let d = run(&mut s, "sketch.dimension", json!({"entities": [c1]}));
+    let p1 = d["param"].as_str().unwrap().to_string();
+    let did = dim(&s, &p1).id;
+    assert!(matches!(dim(&s, &p1).kind, ConstraintKind::Diameter { .. }), "a circle is dimensioned by its diameter");
+    let r = run(&mut s, "sketch.toggle_diameter", json!({"constraint": did}));
+    assert_eq!(r["diameter"], false, "{r}");
+    assert!(matches!(dim(&s, &p1).kind, ConstraintKind::Radius { value, .. } if (value - 10.0).abs() < 1e-9), "{:?}", dim(&s, &p1).kind);
+    assert_eq!(s.doc.param(&p1).unwrap().expr, "10 mm");
+    assert!((sketch(&s).radius(0).unwrap() - 10.0).abs() < 1e-9, "the circle keeps its size");
+    // Asking for what it already is changes nothing; then back to the diameter.
+    let r = run(&mut s, "sketch.toggle_diameter", json!({"constraint": did, "diameter": false}));
+    assert_eq!(r["diameter"], false, "{r}");
+    run(&mut s, "sketch.toggle_diameter", json!({"constraint": did}));
+    assert!(matches!(dim(&s, &p1).kind, ConstraintKind::Diameter { value, .. } if (value - 20.0).abs() < 1e-9));
+    assert_eq!(s.doc.param(&p1).unwrap().expr, "20 mm");
+
+    // An expression is wrapped, so it still reads the parameters it names.
+    run(&mut s, "parameters.add", json!({"name": "w", "expression": "30 mm"}));
+    let c2 = ids(&run(&mut s, "sketch.circle.center", json!({"center": [50, 0], "radius": 10}))["curves"])[0].clone();
+    let p2 = run(&mut s, "sketch.dimension", json!({"entities": [c2], "value": "w"}))["param"].as_str().unwrap().to_string();
+    let d2 = dim(&s, &p2).id;
+    run(&mut s, "sketch.toggle_diameter", json!({"constraint": d2}));
+    assert_eq!(s.doc.param(&p2).unwrap().expr, "(w) / 2");
+    assert!((sketch(&s).radius(1).unwrap() - 15.0).abs() < 1e-6, "{:?}", sketch(&s).radius(1));
+
+    // Another user of the parameter would change size with it: refused, nothing changes.
+    run(&mut s, "parameters.add", json!({"name": "k", "expression": format!("{p1} + 1 mm")}));
+    let e = s.execute("sketch.toggle_diameter", &json!({"constraint": did})).unwrap_err().to_string();
+    assert!(e.contains("also used by parameter k"), "{e}");
+    assert!(matches!(dim(&s, &p1).kind, ConstraintKind::Diameter { .. }));
+    assert_eq!(s.doc.param(&p1).unwrap().expr, "20 mm");
+
+    // An arc's driven radius becomes its driven diameter; a line's length is no radius.
+    let a = ids(&run(&mut s, "sketch.arc.center_point", json!({"center": [0, 80], "start": [20, 80], "sweep": 90}))["curves"])[0].clone();
+    run(&mut s, "sketch.dimension", json!({"entities": [a], "driven": true}));
+    let arc = sketch(&s).curves.iter().position(|c| c.id == a).unwrap();
+    let driven = sketch(&s).constraints.iter().find(|c| matches!(c.kind, ConstraintKind::Radius { c, .. } if c == arc)).unwrap().clone();
+    assert!(driven.driven && driven.param.is_none());
+    run(&mut s, "sketch.toggle_diameter", json!({"constraint": driven.id}));
+    let now = sketch(&s).constraints.iter().find(|c| c.id == driven.id).unwrap().clone();
+    assert!(now.driven && matches!(now.kind, ConstraintKind::Diameter { value, .. } if (value - 40.0).abs() < 1e-6), "{now:?}");
+    let l = ids(&run(&mut s, "sketch.line", json!({"points": [[0, -50], [10, -50]]}))["curves"])[0].clone();
+    let pl = run(&mut s, "sketch.dimension", json!({"entities": [l], "value": 10}))["param"].as_str().unwrap().to_string();
+    let dl = dim(&s, &pl).id;
+    let e = s.execute("sketch.toggle_diameter", &json!({"constraint": dl})).unwrap_err().to_string();
+    assert!(e.contains("is not a circle's or an arc's radius or diameter dimension"), "{e}");
+}
+
 /// #4691: a point put on a line's midpoint snap is held there (a MidPoint constraint), and one
 /// put on a curve stays on it, as a line's end does: they no longer move freely.
 #[test]
@@ -365,6 +453,27 @@ fn drawing_at_a_curve_crossing_keeps_the_point_on_both() {
     assert!(sk.shape(ia).expect("circle a").dist(st) < 1e-5, "on the resized circle: {st:?}");
     assert!(sk.shape(ib).expect("circle b").dist(st) < 1e-5, "still on the other circle: {st:?}");
     assert!(st.y > 0.0, "the upper crossing: {st:?}");
+}
+
+#[test]
+fn drawing_at_an_infinite_line_crossing_keeps_the_point_on_both() {
+    let mut s = new_sketch();
+    let a = ids(&run(&mut s, "sketch.construction_line.vertical", json!({"at": [20, 40]}))["curves"])[0].clone();
+    let b = ids(&run(&mut s, "sketch.construction_line.horizontal", json!({"at": [40, 15]}))["curves"])[0].clone();
+    let r = run(&mut s, "sketch.line", json!({"points": [format!("x:{a}+{b}:20.4,15.4"), [30, 25]], "infer": false, "connect": false}));
+    let line = ids(&r["curves"])[0].clone();
+    let sk = sketch(&s);
+    let start = sk.resolve_point(&format!("{line}.start")).unwrap();
+    assert!(sk.point(start).unwrap().dist(Vec2::new(20.0, 15.0)) < 1e-9);
+    for name in [a, b] {
+        let curve = sk.curve_index(&name).unwrap();
+        assert!(sk.constraints.iter().any(|k| matches!(k.kind, crate::sketch::ConstraintKind::PointOnCurve { p, c } if p == start && c == curve)));
+    }
+    let before_undo = s.doc.to_json();
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(sketch(&s).curves.len(), 2);
+    run(&mut s, "edit.redo", json!({}));
+    assert_eq!(s.doc.to_json(), before_undo);
 }
 
 #[test]
@@ -922,6 +1031,10 @@ fn midpoint_rejects_wrong_picks_without_changing_the_sketch() {
         json!({"a":"l1","b":"missing"}),
         json!({"a":"l1"}),
         json!({"a":12,"b":"l1"}),
+        // The line's own end: it would shrink the line to a point.
+        json!({"a":"l1.end","b":"l1"}),
+        json!({"a":"l1","b":"l1.start"}),
+        json!({"point":"l1.end","line":"l1"}),
     ] {
         let before = s.doc.to_json();
         let undo = s.undo.len();
@@ -929,6 +1042,38 @@ fn midpoint_rejects_wrong_picks_without_changing_the_sketch() {
         assert_eq!(s.doc.to_json(), before, "{params}");
         assert_eq!(s.undo.len(), undo, "{params}");
     }
+}
+
+/// A two-curve constraint picked on one curve twice is refused, leaving the sketch and the undo
+/// history as they were. Parallel, collinear, equal or concentric with itself always held (a
+/// constraint that did nothing); perpendicular or tangent to itself never could, and the refusal
+/// blamed geometry that can't move.
+#[test]
+fn a_two_curve_constraint_on_one_curve_twice_is_refused() {
+    let mut s = new_sketch();
+    run(&mut s, "sketch.line", json!({"points":[[0,0],[60,10]],"infer":false,"connect":false}));
+    run(&mut s, "sketch.circle.center", json!({"center":[40,50],"radius":3}));
+    for (cmd, curve) in [
+        ("parallel", "l1"),
+        ("perpendicular", "l1"),
+        ("collinear", "l1"),
+        ("tangent", "c1"),
+        ("equal", "l1"),
+        ("equal", "c1"),
+        ("concentric", "c1"),
+        ("parallel", "x"),
+    ] {
+        let before = s.doc.to_json();
+        let undo = s.undo.len();
+        let err = match s.execute(&format!("sketch.constraint.{cmd}"), &json!({"a":curve,"b":curve})) {
+            Ok(v) => panic!("{cmd} of {curve} with itself was accepted: {v}"),
+            Err(e) => e.to_string(),
+        };
+        assert!(err.contains("same curve"), "{cmd} {curve}: {err}");
+        assert_eq!(s.doc.to_json(), before, "{cmd} {curve}");
+        assert_eq!(s.undo.len(), undo, "{cmd} {curve}");
+    }
+    run(&mut s, "sketch.constraint.parallel", json!({"a":"l1","b":"x"}));
 }
 
 /// A parameter's row in `parameters.list` (Null when there is none).
@@ -1089,6 +1234,113 @@ fn undoing_a_defining_dimension_removes_the_parameter_too() {
 /// Coincident on two circles (or arcs) lays the second on the first: one centre and one
 /// radius, in one step, and the first stays. It used to be refused ("two curves must both be
 /// straight lines").
+#[test]
+fn coincident_refuses_a_lines_two_ends() {
+    let mut s = new_sketch();
+    run(&mut s, "sketch.line", json!({"points":[[0,0],[60,0]],"infer":false,"connect":false}));
+    run(&mut s, "sketch.line", json!({"points":[[0,20],[60,20]],"infer":false,"connect":false}));
+    // The line would shrink to a point, leaving a later Parallel or Perpendicular on it no
+    // direction to hold.
+    for params in [json!({"a":"l1.start","b":"l1.end"}), json!({"a":"l1.end","b":"l1.start"})] {
+        let before = s.doc.to_json();
+        let undo = s.undo.len();
+        let err = s.execute("sketch.constraint.coincident", &params).unwrap_err().to_string();
+        assert!(err.contains("shrink to a point"), "{params}: {err}");
+        assert_eq!(s.doc.to_json(), before, "{params}");
+        assert_eq!(s.undo.len(), undo, "{params}");
+    }
+    // Ends of two different lines still join.
+    run(&mut s, "sketch.constraint.coincident", json!({"a":"l1.end","b":"l2.end"}));
+}
+
+/// A constraint whose solve finds only a far solution is not allowed to throw points far away:
+/// the held solve is tried without it, or the constraint is refused. Here a centre that is
+/// already the midpoint of two lines is made the midpoint of a third, and the solve threw two
+/// line ends to x = -2.2e8 mm while the sketch said solved (found by a local sketch fuzzer).
+#[test]
+fn a_constraint_never_throws_the_sketch_far_away() {
+    let mut s = Session::default();
+    for (id, p) in [
+        ("sketch.create", json!({"plane": "XY"})),
+        ("sketch.arc.three_point", json!({"end": [-15, 6], "start": [-24, -21], "through": [-12, -1]})),
+        ("sketch.arc.three_point", json!({"end": [-18, -27], "start": [3, 13], "through": [22, 21]})),
+        ("sketch.dimension", json!({"entities": ["a1.start", "a2.center"], "value": 29})),
+        ("sketch.dimension", json!({"entities": ["a2.end", "a1.start"], "value": 38})),
+        ("sketch.circle.center", json!({"center": [-23, -10], "radius": 7})),
+        ("sketch.constraint.coincident", json!({"a": "a2.start", "b": "a1.end"})),
+        ("sketch.rectangle.two_point", json!({"p0": [22, -9], "p1": [19, -10]})),
+        ("sketch.line", json!({"ids": ["l16"], "points": [[-14, -29], [-5, 5]]})),
+        ("sketch.circle.center", json!({"center": [-14, 19], "radius": 14})),
+        ("sketch.constraint.fix", json!({"entity": "c1.center"})),
+        ("sketch.rectangle.two_point", json!({"p0": [-10, 23], "p1": [16, 13]})),
+        ("sketch.line", json!({"ids": ["l22"], "points": [[-8, 21], [25, 14]]})),
+        ("sketch.circle.center", json!({"center": [6, 10], "radius": 10})),
+        ("sketch.circle.center", json!({"center": [8, -12], "radius": 11})),
+        ("sketch.rectangle.two_point", json!({"p0": [-4, -7], "p1": [-5, -27]})),
+        ("sketch.constraint.concentric", json!({"a": "a1", "b": "c4"})),
+        ("sketch.rectangle.two_point", json!({"p0": [-12, -14], "p1": [-1, -17]})),
+        ("sketch.constraint.midpoint", json!({"line": "l12", "point": "c4.center"})),
+        ("sketch.constraint.midpoint", json!({"line": "l14", "point": "c4.center"})),
+        ("sketch.rectangle.two_point", json!({"p0": [23, 22], "p1": [-28, 8]})),
+        ("sketch.constraint.fix", json!({"entity": "p15"})),
+        ("sketch.dimension", json!({"entities": ["p17", "a1.start"], "value": 35})),
+        ("sketch.constraint.coincident", json!({"a": "p19", "b": "p12"})),
+        ("sketch.constraint.tangent", json!({"a": "c1", "b": "l11"})),
+        ("sketch.line", json!({"closed": true, "points": [[8, -29], [-5, 24], [-9, -6], [26, -8]]})),
+        ("sketch.constraint.perpendicular", json!({"a": "l15", "b": "l17"})),
+        ("sketch.dimension", json!({"entities": ["l12"], "value": 13})),
+        ("sketch.dimension", json!({"entities": ["l26", "l17"], "type": "angle", "value": 14})),
+        ("sketch.constraint.fix", json!({"entity": "p18"})),
+        ("sketch.constraint.tangent", json!({"a": "l23", "b": "c4"})),
+        ("sketch.constraint.coincident", json!({"a": "origin", "b": "l23.start"})),
+        ("sketch.constraint.midpoint", json!({"line": "l18", "point": "c4.center"})),
+    ] {
+        let _ = s.execute(id, &p);
+    }
+    let sk = sketch(&s);
+    let far = sk.points.iter().map(|p| p.pos.len()).fold(0.0_f64, f64::max);
+    assert!(far < 1e4, "a point went {far} mm away");
+}
+
+/// A constraint that can only be met by shrinking curves to a point is refused, as one that
+/// throws the sketch far away is: making a rectangle's corner the midpoint of the opposite side,
+/// or two opposite corners coincident, squeezed the whole rectangle to a point while the sketch
+/// said solved (found by a local sketch fuzzer).
+#[test]
+fn a_constraint_that_would_shrink_a_rectangle_to_a_point_is_refused() {
+    for (id, p) in
+        [("sketch.constraint.midpoint", json!({"line": "l4", "point": "p2"})), ("sketch.constraint.coincident", json!({"a": "p1", "b": "p3"}))]
+    {
+        let mut s = new_sketch();
+        run(&mut s, "sketch.rectangle.two_point", json!({"p0": [-30, 4], "p1": [11, 27]}));
+        let before = sketch(&s);
+        let e = s.execute(id, &p).unwrap_err().to_string();
+        assert!(e.contains("shrink") && e.contains("to a point"), "{id} {p}: {e}");
+        assert_eq!(sketch(&s), before, "{id} {p}");
+    }
+}
+
+/// Two rectangles, a corner of one made coincident with a corner of the other and then a second
+/// pair of corners made coincident: one solve squeezed a 49 mm side to about 1.2e-6 mm, just
+/// longer than the check took for a point, and the next took it the rest of the way, so the
+/// constraint was taken (found by a local sketch fuzzer).
+#[test]
+fn a_constraint_that_squeezes_a_side_to_a_hair_is_refused() {
+    let mut s = new_sketch();
+    for (id, p) in [
+        ("sketch.rectangle.two_point", json!({"p0": [27, 29], "p1": [1, 19]})),
+        ("sketch.rectangle.two_point", json!({"p0": [23, -8], "p1": [-21, -20]})),
+        ("sketch.constraint.perpendicular", json!({"a": "l5", "b": "l4"})),
+        ("sketch.constraint.coincident", json!({"a": "p5", "b": "p1"})),
+    ] {
+        run(&mut s, id, p);
+    }
+    let before = sketch(&s);
+    let e = s.execute("sketch.constraint.coincident", &json!({"a": "p6", "b": "p3"})).unwrap_err().to_string();
+    assert!(e.contains("shrink") && e.contains("to a point"), "{e}");
+    assert_eq!(sketch(&s), before);
+}
+
 #[test]
 fn coincident_circles_lie_on_each_other() {
     let mut s = new_sketch();
@@ -1364,4 +1616,98 @@ fn an_arc_and_its_end_point_dimension_the_arc_length() {
     run(&mut s, "sketch.point", json!({"point": [20, 20], "id": "p9"}));
     let e = s.execute("sketch.dimension", &json!({"entities": ["a1", "p9"]})).map(|v| v["type"].clone());
     assert!(!matches!(e, Ok(ref t) if t == "ArcLengthDimension"), "a point off the arc's ends is not an arc length: {e:?}");
+}
+
+/// #7464: the distance between a slot's two arc caps measures the centre-to-centre distance
+/// (the slot's length), not the gap between their inner edges.
+#[test]
+fn slot_caps_dimension_is_the_centre_to_centre_distance() {
+    let mut s = new_sketch();
+    // Centre [0,0], one arc centre [20,0], width 10: caps at ±20 of radius 5, centre-to-centre 40.
+    let sl = run(&mut s, "sketch.slot.center_point", json!({"center": [0, 0], "end": [20, 0], "width": 10}));
+    // The slot returns its curves as [bottom line, right cap, top line, left cap].
+    let curves = ids(&sl["curves"]);
+    let d = run(&mut s, "sketch.dimension", json!({"entities": [curves[1], curves[3]], "driven": true}));
+    assert!((d["measured"].as_f64().unwrap() - 40.0).abs() < 1e-6, "{d}");
+    let sk = sketch(&s);
+    assert!(
+        sk.constraints.iter().any(|c| matches!(c.kind, ConstraintKind::Distance { .. })),
+        "{:?}",
+        sk.constraints.iter().map(|c| &c.kind).collect::<Vec<_>>()
+    );
+    // Two circles drawn apart, not joined as a slot, still measure the gap between their edges (#4064).
+    let mut s = new_sketch();
+    let c1 = ids(&run(&mut s, "sketch.circle.center", json!({"center": [0, 0], "radius": 5}))["curves"])[0].clone();
+    let c2 = ids(&run(&mut s, "sketch.circle.center", json!({"center": [30, 0], "radius": 5}))["curves"])[0].clone();
+    let d = run(&mut s, "sketch.dimension", json!({"entities": [c1, c2], "driven": true}));
+    assert!((d["measured"].as_f64().unwrap() - 20.0).abs() < 1e-6, "{d}");
+}
+
+/// Two arcs joined by two lines but bulging inward are not a slot's caps: their distance stays
+/// the gap between the edges, not a centre-to-centre distance.
+#[test]
+fn inward_bulging_arc_pairs_keep_the_gap_dimension() {
+    let mut s = new_sketch();
+    run(&mut s, "sketch.line", json!({"points": [[0, 0], [40, 0]], "ids": ["l1"]}));
+    run(&mut s, "sketch.line", json!({"points": [[0, 10], [40, 10]], "ids": ["l2"]}));
+    run(&mut s, "sketch.arc.three_point", json!({"start": "l1.start", "through": [3, 5], "end": "l2.start", "id": "ca"}));
+    run(&mut s, "sketch.arc.three_point", json!({"start": "l1.end", "through": [37, 5], "end": "l2.end", "id": "cb"}));
+    let d = run(&mut s, "sketch.dimension", json!({"entities": ["ca", "cb"], "driven": true}));
+    // The shape spans x 0..40; the gap between the inward edges is 34 mm, not an overall length.
+    assert!((d["measured"].as_f64().unwrap() - 34.0).abs() < 1e-6, "{d}");
+    let sk = sketch(&s);
+    assert!(
+        sk.constraints.iter().any(|c| matches!(c.kind, ConstraintKind::CircleCircleDistance { .. })),
+        "{:?}",
+        sk.constraints.iter().map(|c| &c.kind).collect::<Vec<_>>()
+    );
+}
+
+/// #9735: the over-constrain conflict list named the refused dimension's own id — the trial
+/// sketch already holds the new constraint under the id it would get, and the next constraint
+/// added takes that id. The list names only constraints the sketch already has.
+#[test]
+fn over_constrain_message_leaves_out_the_refused_dimensions_own_id() {
+    let mut s = new_sketch();
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [40, 20]}));
+    run(&mut s, "sketch.dimension", json!({"entities": ["l1"], "value": 50}));
+    // The sketch holds k1..k6: the refused dimension would take k7, which is not yet one of them.
+    let e = s.execute("sketch.dimension", &json!({"entities": ["l3"], "value": 30})).unwrap_err().to_string();
+    assert!(e.contains("would over-constrain the sketch (conflicts with"), "{e}");
+    assert!(e.contains("k3") && e.contains("k4") && e.contains("k6"), "{e}");
+    assert!(!e.contains("k7"), "{e}: the refused dimension's own id must not be listed");
+    // The next constraint takes k7: the id the message must not have burned.
+    run(&mut s, "sketch.dimension", json!({"entities": ["l2"], "value": 25}));
+    assert_eq!(sketch(&s).constraints.last().unwrap().id, "k7");
+}
+
+/// #9735: "neither entity can move … (they are fixed or fully constrained)" fired for sketches
+/// with free degrees of freedom. The refusal now lists the constraints the new one conflicts
+/// with by id, as the over-constrain message does.
+#[test]
+fn conflict_lists_the_constraints_instead_of_claiming_the_entities_are_fixed() {
+    // A rectangle from (10,10): 4 degrees of freedom, nothing fixed; its bottom side cannot be
+    // made parallel to its right side — the conflict is with the rectangle's own constraints.
+    let mut s = new_sketch();
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [10, 10], "p1": [50, 30]}));
+    let before = serde_json::to_value(sketch(&s)).unwrap();
+    let e = s.execute("sketch.constraint.parallel", &json!({"a": "l1", "b": "l2"})).unwrap_err().to_string();
+    assert!(!e.contains("fixed or fully constrained"), "{e}");
+    // The horizontal on l1 (k1) and the vertical on l2 (k3) are what the parallel conflicts with.
+    assert!(e.contains("conflicts with k1, k3"), "{e}");
+    assert!(!e.contains("k5"), "{e}: the refused constraint's own id must not be listed");
+    assert_eq!(serde_json::to_value(sketch(&s)).unwrap(), before, "the sketch does not change");
+    // A rectangle drawn from the origin (2 degrees of freedom): the same refusals name the
+    // constraints they conflict with, not fixed entities.
+    for (cmd, params) in [
+        ("sketch.constraint.parallel", json!({"a": "l1", "b": "l2"})),
+        ("sketch.constraint.coincident", json!({"a": "p1", "b": "p3"})),
+        ("sketch.constraint.perpendicular", json!({"a": "l1", "b": "l3"})),
+    ] {
+        let mut s = new_sketch();
+        run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [40, 20]}));
+        let e = s.execute(cmd, &params).unwrap_err().to_string();
+        assert!(!e.contains("fixed or fully constrained"), "{cmd} {params}: {e}");
+        assert!(e.contains("conflicts with"), "{cmd} {params}: {e}");
+    }
 }

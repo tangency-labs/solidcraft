@@ -28,6 +28,9 @@ const ANGLE: usize = 3;
 const ANGLE_END: usize = 4;
 const LINE_SPACING: usize = 5;
 
+/// Starts the words' expression in the Text field (`='W' + number(Width)`, #9281).
+const FORMULA: char = '=';
+
 /// No input is active: a click on the canvas picks no path until the Path chip is clicked.
 const NO_INPUT: usize = usize::MAX;
 
@@ -36,8 +39,11 @@ const NO_INPUT: usize = usize::MAX;
 pub struct Tx {
     sketch: u64,
     pub(crate) link: String,
+    /// The words as typed, or `=` and the expression they follow.
     pub(crate) text: String,
     initial_text: String,
+    /// The saved words follow an expression: an untouched Text field keeps it.
+    initial_formula: bool,
     /// The font as typed: an installed font's family name or a font file's path; empty is the built-in font.
     pub(crate) font: String,
     initial_font: String,
@@ -70,8 +76,8 @@ pub struct Tx {
     shown: Option<Source>,
 }
 
-/// A text source as the dialog sees it: text, font (empty: built-in), its values, its style and
-/// the expressions behind its values.
+/// A text source as the dialog sees it: text (`=` and its expression when the words follow one),
+/// font (empty: built-in), its values, its style and the expressions behind its values.
 type Source = (String, String, [f64; FIELDS], TextStyle, [Option<String>; FIELDS]);
 
 /// What the Text tool puts down, ready to be typed over.
@@ -222,8 +228,15 @@ fn source(app: &SolveApp, sketch: u64, link: &str) -> Option<Source> {
     let source = sk.link(link).filter(|source| source.kind == LinkKind::Text)?;
     let LinkSource::Text { text, at, height, angle, font, style, exprs } = &source.source else { return None };
     let values = [at.x, at.y, *height, *angle, style.letter_spacing, style.line_spacing];
+    let text = exprs.text.as_ref().map_or_else(|| text.clone(), |e| format!("{FORMULA}{e}"));
     let exprs = [exprs.x.clone(), exprs.y.clone(), exprs.height.clone(), exprs.angle.clone(), None, None];
-    Some((text.clone(), font.clone().unwrap_or_default(), values, style.clone(), exprs))
+    Some((text, font.clone().unwrap_or_default(), values, style.clone(), exprs))
+}
+
+/// Whether the saved words of `link` follow an expression.
+fn formula_saved(app: &SolveApp, sketch: u64, link: &str) -> bool {
+    let source = app.session.doc.sketch(sketch).ok().and_then(|sk| sk.link(link).map(|l| l.source.clone()));
+    matches!(source, Some(LinkSource::Text { exprs, .. }) if exprs.text.is_some())
 }
 
 /// The fields as shown: a value, or the expression behind it.
@@ -281,6 +294,7 @@ fn kind_for(app: &SolveApp, entity: &str) -> Option<Kind> {
     let (scale, unit) = crate::prefs::unit_scale(&app.session.doc.units);
     let values = fields(&original, &exprs, unit, scale);
     let mut tx = Tx {
+        initial_formula: formula_saved(app, sketch, &link),
         sketch,
         link,
         initial_text: text.clone(),
@@ -385,6 +399,17 @@ pub(crate) fn preview(app: &mut SolveApp, k: &mut Tx) -> Option<Result<(), Strin
     }
     let mut live = params;
     live["live"] = json!(true);
+    // The live edit runs on the design itself: a typed definition is made once, by OK, and the
+    // preview shows its value (#4071).
+    let at = live.get_mut("at").and_then(Value::as_array_mut).map(|a| a.iter_mut().collect::<Vec<_>>()).unwrap_or_default();
+    for v in at {
+        value_of_definition(v);
+    }
+    for key in ["height", "angle"] {
+        if let Some(v) = live.get_mut(key) {
+            value_of_definition(v);
+        }
+    }
     Some(
         folded(app, k, |app| app.session.execute("sketch.edit_text", &live))
             .map(|_| {
@@ -392,6 +417,13 @@ pub(crate) fn preview(app: &mut SolveApp, k: &mut Tx) -> Option<Result<(), Strin
             })
             .map_err(|error| error.to_string()),
     )
+}
+
+/// A field typed as `name = value`, as just its value.
+fn value_of_definition(v: &mut Value) {
+    if let Some((_, rhs)) = v.as_str().and_then(solidcraft_engine::doc::expr::definition) {
+        *v = json!(rhs);
+    }
 }
 
 /// OK: the fields' final edit (which also brings the features after the sketch up to date), in
@@ -450,6 +482,7 @@ pub(crate) fn refresh(app: &SolveApp, k: &mut Tx) -> bool {
             k.text = text.clone();
         }
         k.initial_text = text;
+        k.initial_formula = formula_saved(app, k.sketch, &k.link);
     }
     if font != k.initial_font {
         if k.font == k.initial_font {
@@ -460,6 +493,13 @@ pub(crate) fn refresh(app: &SolveApp, k: &mut Tx) -> bool {
     true
 }
 
+/// Whether the font (or built-in font when empty) has a bold face.
+fn font_has_bold_face(name: &str) -> bool {
+    let trimmed = name.trim();
+    let font = if trimmed.is_empty() { None } else { Some(trimmed) };
+    solidcraft_engine::sketch::font_data_styled(font, true, false).is_ok()
+}
+
 /// The dialog's rows; true when Enter was pressed in a value field or in the text (Shift+Enter
 /// starts a new line there). `inputs` and `active`: the dialog's Path input.
 pub(crate) fn rows(ui: &mut egui::Ui, k: &mut Tx, inputs: &mut [SelInput], active: &mut usize) -> bool {
@@ -468,7 +508,7 @@ pub(crate) fn rows(ui: &mut egui::Ui, k: &mut Tx, inputs: &mut [SelInput], activ
     if ui.memory(|m| m.has_focus(id)) {
         enter |= ui.input_mut(|i| !i.modifiers.shift && i.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
     }
-    let response = ui_kit::multiline_text_field(ui, "Text", id, &mut k.text);
+    let response = ui_kit::multiline_text_field(ui, "Text", id, &mut k.text).on_hover_text(crate::i18n::tr("sketch_text.formula"));
     crate::scenario::publish_handle("dialog:Text", response.rect.center());
     if k.focus {
         response.request_focus();
@@ -478,8 +518,12 @@ pub(crate) fn rows(ui: &mut egui::Ui, k: &mut Tx, inputs: &mut [SelInput], activ
         state.store(ui.ctx(), id);
         k.focus = false;
     }
+    let font_has_bold = font_has_bold_face(&k.font);
+    if !font_has_bold && k.style.bold {
+        k.style.bold = false;
+    }
     ui_kit::row(ui, "Font", |ui| font_row(ui, k));
-    ui_kit::row(ui, "Style", |ui| ui_kit::text_emphasis(ui, &mut k.style.bold, &mut k.style.italic));
+    ui_kit::row(ui, "Style", |ui| ui_kit::text_emphasis(ui, &mut k.style.bold, &mut k.style.italic, font_has_bold));
     ui_kit::row(ui, "Alignment", |ui| {
         let mut selected = match k.style.align {
             TextAlign::Left => 0,
@@ -643,7 +687,9 @@ fn edit_params(app: &SolveApp, k: &Tx) -> Result<Value, String> {
             }
             v
         };
-        let names_parameters = i < ANGLE_END && !solidcraft_engine::doc::expr::references(value).is_empty();
+        // A field that names parameters, or names its value (`h = 10`, #4071), goes as typed.
+        let names_parameters = i < ANGLE_END
+            && (!solidcraft_engine::doc::expr::references(value).is_empty() || solidcraft_engine::doc::expr::definition(value).is_some());
         sent[i] = match given {
             Some(e) => json!(e),
             None if value != initial && names_parameters => json!(value.trim()),
@@ -657,12 +703,20 @@ fn edit_params(app: &SolveApp, k: &Tx) -> Result<Value, String> {
         TextAlign::Center => "center",
         TextAlign::Right => "right",
     };
+    let bold = k.style.bold && font_has_bold_face(&k.font);
     let mut params = json!({
-        "link": k.link, "text": k.text, "at": [sent_x, sent_y], "height": sent_height,
-        "bold": k.style.bold, "italic": k.style.italic, "align": align,
+        "link": k.link, "at": [sent_x, sent_y], "height": sent_height,
+        "bold": bold, "italic": k.style.italic, "align": align,
         "letter_spacing": letter_spacing, "line_spacing": line_spacing,
         "path": k.style.path.clone().unwrap_or_default(), "reverse": k.style.reverse,
     });
+    // `=` starts the words' expression; an untouched text keeps what it was, so a typed text that
+    // happens to start with `=` stays typed.
+    let untouched = k.text == k.initial_text;
+    match k.text.trim_start().strip_prefix(FORMULA).filter(|_| !untouched || k.initial_formula) {
+        Some(e) => params["text_expression"] = json!(e.trim()),
+        None => params["text"] = json!(k.text),
+    }
     // Omitting an unchanged angle keeps its exact saved radians (or its expression).
     if k.values.get(ANGLE) != k.initial.get(ANGLE) {
         params["angle"] = sent_angle;
@@ -1139,6 +1193,60 @@ mod tests {
         assert!(editing(&h.app), "the dialog stays open on a field that cannot be used");
     }
 
+    fn words_of(h: &Harness, link: &str) -> String {
+        let sid = h.app.session.active_sketch.unwrap();
+        let LinkSource::Text { text, .. } = h.app.session.doc.sketch(sid).unwrap().link(link).unwrap().source.clone() else { panic!("text source") };
+        text
+    }
+
+    /// #9281: a Text starting with `=` is the words' expression: OK keeps it; reopened, the field
+    /// shows it with its `=` and an untouched OK keeps it; typed words replace it; a typed text
+    /// that happens to start with `=` stays typed; the rebuilt design's words follow the parameter.
+    #[test]
+    fn a_text_starting_with_equals_builds_its_words_from_parameters() {
+        let (mut h, link, _) = setup();
+        let formula = |h: &mut Harness| {
+            h.app.start("sketch.edit_text");
+            h.frames(3);
+            replace(h, "dialog:Text", "='W' + number(Width)");
+            ok(h);
+            assert!(!editing(&h.app), "{:?}", h.app.dialog.as_ref().and_then(|d| d.error.clone()));
+            assert_eq!(exprs_of(h, &link).text.as_deref(), Some("'W' + number(Width)"));
+        };
+        let reopen = |h: &mut Harness| {
+            select_text(h, &link);
+            h.app.start("sketch.edit_text");
+            h.frames(3);
+        };
+        h.app.run("parameters.add", json!({"name":"Width","expression":"85 mm"})).unwrap();
+        formula(&mut h);
+        assert_eq!(words_of(&h, &link), "W85");
+
+        reopen(&mut h);
+        assert_eq!(tx(&h.app).text, "='W' + number(Width)");
+        ok(&mut h);
+        assert_eq!(exprs_of(&h, &link).text.as_deref(), Some("'W' + number(Width)"));
+
+        reopen(&mut h);
+        replace(&mut h, "dialog:Text", "Plain");
+        ok(&mut h);
+        assert_eq!((exprs_of(&h, &link).text, words_of(&h, &link).as_str()), (None, "Plain"));
+
+        h.app.run("sketch.edit_text", json!({"link": link, "text": "=5"})).unwrap();
+        reopen(&mut h);
+        ok(&mut h);
+        assert_eq!((exprs_of(&h, &link).text, words_of(&h, &link).as_str()), (None, "=5"));
+
+        select_text(&mut h, &link);
+        formula(&mut h);
+        let sid = h.app.session.active_sketch.unwrap();
+        h.app.run("sketch.finish", json!({})).unwrap();
+        h.app.run("parameters.change", json!({"name":"Width","expression":"90 mm"})).unwrap();
+        let state = h.app.session.model.state();
+        let LinkSource::Text { text, .. } = &state.sketch(sid).unwrap().sketch.link(&link).unwrap().source else { panic!("text source") };
+        assert_eq!(text, "W90");
+    }
+
     #[test]
     fn fields_take_expressions_with_units_and_parameters() {
         let (mut h, link, _) = setup();
@@ -1432,30 +1540,30 @@ mod tests {
         assert_eq!(tx(&h.app).values[5], "1.25");
     }
 
+    /// #9940: built-in font has no bold face; Bold toggle is disabled so clicking it
+    /// does not set bold or trigger errors, and alignment and other options succeed.
     #[test]
-    fn bold_in_a_font_without_a_bold_face_is_refused_with_the_reason() {
+    fn bold_in_a_font_without_a_bold_face_is_disabled() {
         let (mut h, link, _) = setup();
         let before = (h.app.session.doc.to_json(), h.app.session.undo.len());
         h.app.start("sketch.edit_text");
         h.frames(3);
+        assert!(!font_has_bold_face(&tx(&h.app).font));
+        assert!(!tx(&h.app).style.bold);
+        // Clicking disabled bold does not toggle it, preview stays clean without errors.
         h.step(&json!({"click":{"handle":"dialog:Bold"}})).unwrap();
         h.frames(2);
-        assert!(!style_of(&h, &link).bold, "the canvas keeps the last text it could make");
-        let error = h.app.dialog.as_ref().unwrap().error.clone().unwrap_or_default();
-        assert!(error.contains("no bold face"), "the preview must explain the unchanged text before OK: {error}");
+        assert!(!tx(&h.app).style.bold);
+        assert!(!style_of(&h, &link).bold);
+        assert!(h.app.dialog.as_ref().unwrap().error.is_none());
+        // Changing alignment succeeds without error.
+        h.step(&json!({"click":{"handle":"dialog:Align center"}})).unwrap();
         h.frames(2);
-        assert_eq!(h.app.dialog.as_ref().unwrap().error.as_deref(), Some(error.as_str()), "the reason stays visible on unchanged frames");
-        h.step(&json!({"click":{"handle":"dialog:Bold"}})).unwrap();
-        h.frames(2);
-        assert!(h.app.dialog.as_ref().unwrap().error.is_none(), "a valid preview clears the refusal");
-        h.step(&json!({"click":{"handle":"dialog:Bold"}})).unwrap();
-        h.frames(2);
+        assert_eq!(tx(&h.app).style.align, TextAlign::Center);
         ok(&mut h);
-        assert!(editing(&h.app));
-        let error = h.app.dialog.as_ref().unwrap().error.clone().unwrap_or_default();
-        assert!(error.contains("no bold face"), "{error}");
-        h.step(&json!({"widget":"Cancel"})).unwrap();
-        assert_eq!((h.app.session.doc.to_json(), h.app.session.undo.len()), before);
+        assert!(!editing(&h.app));
+        assert_eq!(style_of(&h, &link).align, TextAlign::Center);
+        assert_eq!(h.app.session.undo.len(), before.1 + 1);
     }
 
     #[test]

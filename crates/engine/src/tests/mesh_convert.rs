@@ -232,6 +232,7 @@ fn send_to_slicer_needs_a_slicer_and_bodies() {
 }
 
 /// The chosen-programs list is process-wide: tests that set it take turns.
+#[cfg(unix)]
 static CHOSEN_PROGRAMS: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 /// `file.save_mesh` with a `slicer` writes where the caller said and hands that file over, by the
@@ -438,7 +439,10 @@ fn send_to_slicer_writes_3mf_and_starts_the_program_with_it() {
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
     let (script, seen) = (dir.join("fake-slicer"), dir.join("seen"));
-    std::fs::write(&script, format!("#!/bin/sh\necho \"$@\" > {}\n", seen.display())).unwrap();
+    // Publish the acknowledgement only after writing it: cleanup must wait for every launch.
+    let writing = dir.join("writing");
+    std::fs::write(&script, format!("#!/bin/sh\nprintf '%s\\n' \"$@\" > '{}'\nmv '{}' '{}'\n", writing.display(), writing.display(), seen.display()))
+        .unwrap();
     std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
     run(&mut s, "select.set", json!({"items":[{"type":"body","name":"Mesh"}]}));
     // A program nobody chose is refused; once it is among the user's chosen ones it starts.
@@ -453,19 +457,26 @@ fn send_to_slicer_writes_3mf_and_starts_the_program_with_it() {
     assert_eq!(r["format"], "3mf");
     let file = r["path"].as_str().unwrap().to_string();
     assert!(std::fs::read(&file).unwrap().starts_with(b"PK"));
-    for _ in 0..100 {
-        if seen.exists() && std::fs::metadata(&seen).unwrap().len() > 0 {
-            break;
+    let await_launch = |expected: &str| {
+        for _ in 0..100 {
+            if seen.exists() {
+                assert_eq!(std::fs::read_to_string(&seen).unwrap().trim(), expected);
+                std::fs::remove_file(&seen).unwrap();
+                return;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(50));
         }
-        std::thread::sleep(std::time::Duration::from_millis(50));
-    }
-    assert_eq!(std::fs::read_to_string(&seen).unwrap().trim(), file);
+        panic!("fake slicer did not acknowledge {expected}");
+    };
+    await_launch(&file);
     // Sending the same bodies again replaces the file; the same name in the same private folder.
     let again = s.execute("file.send_to_slicer", &json!({"slicer": script})).unwrap();
     assert_eq!((again["path"].as_str(), again["numbered"].as_bool()), (Some(file.as_str()), Some(false)));
+    await_launch(&file);
     let stl = s.execute("file.send_to_slicer", &json!({"slicer": script, "format": "stl"})).unwrap();
     assert!(stl["path"].as_str().unwrap().ends_with(".stl"));
     assert_ne!(stl["path"], r["path"]);
+    await_launch(stl["path"].as_str().unwrap());
     crate::slicers::set_chosen_programs(&[]);
     std::fs::remove_dir_all(std::path::Path::new(&file).parent().unwrap()).unwrap();
     std::fs::remove_dir_all(dir).unwrap();

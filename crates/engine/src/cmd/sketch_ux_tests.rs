@@ -574,6 +574,70 @@ fn v(x: f64, y: f64) -> solidcraft_geom::Vec2 {
     solidcraft_geom::Vec2::new(x, y)
 }
 
+/// The corners of the polygon drawn by `out`, in order, and its support circle's centre and radius.
+fn polygon_shape(s: &Session, out: &Value) -> (Vec<solidcraft_geom::Vec2>, solidcraft_geom::Vec2, f64) {
+    use solidcraft_sketch::CurveKind;
+    let sk = sketch(s);
+    let corners = out["curves"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|id| match &sk.curves[sk.curve_index(id.as_str().unwrap()).unwrap()].kind {
+            CurveKind::Line { a, .. } => sk.point(*a).unwrap(),
+            other => panic!("a side is a line: {other:?}"),
+        })
+        .collect();
+    let support = &sk.curves[sk.curve_index(out["support_circle"].as_str().unwrap()).unwrap()].kind;
+    let CurveKind::Circle { c, r } = support else { panic!("support circle: {support:?}") };
+    (corners, sk.point(*c).unwrap(), *r)
+}
+
+/// A regular polygon: corners equally far from `c`, sides equally long.
+fn assert_regular(corners: &[solidcraft_geom::Vec2], c: solidcraft_geom::Vec2, what: &str) {
+    let n = corners.len();
+    let reach: Vec<f64> = corners.iter().map(|q| q.dist(c)).collect();
+    let sides: Vec<f64> = (0..n).map(|i| corners[i].dist(corners[(i + 1) % n])).collect();
+    let even = |xs: &[f64]| xs.iter().all(|x| (x - xs[0]).abs() < 1e-6);
+    assert!(even(&reach) && even(&sides), "{what}: corners {reach:?}, sides {sides:?}");
+}
+
+/// #7395: a circumscribed polygon had equal sides tangent to its circle only, which leaves every
+/// other corner free (dof 9 for a hexagon); dragging its centre or a corner pulled it out of
+/// shape. It is held regular now, as an inscribed one: dof 4 (centre, size, turn), and a drag
+/// moves or turns it without deforming it.
+#[test]
+fn dragging_a_circumscribed_polygon_keeps_it_regular() {
+    for sides in [4, 5, 6] {
+        for drag_corner in [false, true] {
+            let mut s = new_sketch();
+            let out = run(&mut s, "sketch.polygon.circumscribed", json!({"center": [50, 50], "radius": 10, "sides": sides}));
+            assert_eq!(out["sketch"]["dof"], 4, "{sides} sides: centre, size and turn only: {}", out["sketch"]);
+            let (corners, c, r) = polygon_shape(&s, &out);
+            assert_regular(&corners, c, "as drawn");
+            assert!((r - 10.0).abs() < 1e-9);
+            let support = out["support_circle"].as_str().unwrap();
+            if drag_corner {
+                let from = corners[0];
+                let to = from + v(3.0, -4.0);
+                drag(&mut s, &format!("{}.start", out["curves"][0].as_str().unwrap()), [from.x, from.y], [to.x, to.y]);
+            } else {
+                drag(&mut s, &format!("{support}.center"), [50.0, 50.0], [70.0, 60.0]);
+            }
+            run(&mut s, "sketch.drag_end", json!({}));
+            let (corners, c, r) = polygon_shape(&s, &out);
+            let what = format!("{sides} sides, dragged by its {}", if drag_corner { "corner" } else { "centre" });
+            assert_regular(&corners, c, &what);
+            let apothem = corners[0].dist(corners[1]) / (2.0 * (std::f64::consts::PI / sides as f64).tan());
+            assert!((apothem - r).abs() < 1e-6, "{what}: the sides touch the support circle (apothem {apothem}, radius {r})");
+            // A drag may change a free size by a hair (an inscribed polygon's too); the polygon
+            // went from radius 10 to 8.02.
+            if !drag_corner {
+                assert!((r - 10.0).abs() < 1e-2 && c.dist(v(70.0, 60.0)) < 1e-6, "{what}: moved whole, radius {r}, centre {c:?}");
+            }
+        }
+    }
+}
+
 #[test]
 fn dragging_a_line_slides_it_and_an_end_keeps_the_other_end() {
     let mut s = new_sketch();
@@ -628,16 +692,16 @@ fn dragging_a_conic_reads_rho_off_the_cursor_and_its_apex_slides_like_any_point(
     // Grabbed on the curve itself (its midpoint, at the default rho of 0.5): `rho` follows the
     // cursor, read off where it falls between the chord's midpoint (20, 0) and the apex (20,
     // 20). The three defining points stay exactly where they were.
-    drag(&mut s, "k1", [20.0, 10.0], [20.0, 14.0]);
+    drag(&mut s, "n1", [20.0, 10.0], [20.0, 14.0]);
     assert!((rho(&s) - 0.7).abs() < 1e-6, "rho after drag: {}", rho(&s));
-    assert!(pt(&s, "k1.start").dist(v(0.0, 0.0)) < 1e-9);
-    assert!(pt(&s, "k1.end").dist(v(40.0, 0.0)) < 1e-9);
-    assert!(pt(&s, "k1.apex").dist(v(20.0, 20.0)) < 1e-9);
+    assert!(pt(&s, "n1.start").dist(v(0.0, 0.0)) < 1e-9);
+    assert!(pt(&s, "n1.end").dist(v(40.0, 0.0)) < 1e-9);
+    assert!(pt(&s, "n1.apex").dist(v(20.0, 20.0)) < 1e-9);
 
     // Grabbed on the apex itself: it slides like any other point (not a `rho` edit), and `rho`
     // is unaffected.
-    drag(&mut s, "k1.apex", [20.0, 20.0], [10.0, 30.0]);
-    assert!(pt(&s, "k1.apex").dist(v(10.0, 30.0)) < 1e-9);
+    drag(&mut s, "n1.apex", [20.0, 20.0], [10.0, 30.0]);
+    assert!(pt(&s, "n1.apex").dist(v(10.0, 30.0)) < 1e-9);
     assert!((rho(&s) - 0.7).abs() < 1e-6, "rho after apex drag: {}", rho(&s));
 }
 
@@ -1356,15 +1420,15 @@ fn pipe_and_sweep_follow_3d_sketch_curves() {
 }
 
 /// Between two points, or on a line, that don't line up with an axis, an `auto` dimension takes
-/// its orientation from where its text goes: across from the two the distance between them,
-/// past that above or below them the horizontal distance, beside them the vertical one (#257).
+/// its orientation from where its text goes relative to the box the two span: inside it the
+/// distance between them, above or below it the horizontal distance, beside it the vertical
+/// one, in its outer corners the distance again (#257, #7295).
 #[test]
 fn auto_dimension_orientation_follows_where_its_text_is_placed() {
     use solidcraft_sketch::ConstraintKind;
-    // The ends of a 30 × 40 line: 50 long, and the slope keeps "across" and "past" distinct.
-    let dimension = |end: [f64; 2], entities: Value, extra: Value| {
+    let dimension = |start: [f64; 2], end: [f64; 2], entities: Value, extra: Value| {
         let mut s = new_sketch();
-        run(&mut s, "sketch.line", json!({"points": [[0, 0], end], "connect": false}));
+        run(&mut s, "sketch.line", json!({"points": [start, end], "connect": false}));
         let mut p = json!({"entities": entities});
         if let (Some(p), Some(extra)) = (p.as_object_mut(), extra.as_object()) {
             p.extend(extra.clone());
@@ -1375,38 +1439,74 @@ fn auto_dimension_orientation_follows_where_its_text_is_placed() {
         (kind, r["measured"].as_f64().unwrap_or(f64::NAN), sk)
     };
     let points = json!(["l1.start", "l1.end"]);
-    for entities in [points.clone(), json!(["l1"])] {
-        for (at, expected) in [
-            ([15.0, 60.0], "horizontal"),
-            ([15.0, -20.0], "horizontal"),
-            ([-30.0, 5.0], "vertical"),
-            ([55.0, 38.0], "vertical"),
-            ([-20.0, 25.0], "aligned"),
-            ([45.0, 10.0], "aligned"),
-            ([-20.0, -20.0], "aligned"),
-        ] {
-            let (kind, measured, _) = dimension([30.0, 40.0], entities.clone(), json!({"text_at": at}));
-            let (got, value) = match kind {
-                ConstraintKind::DistanceX { .. } => ("horizontal", 30.0),
-                ConstraintKind::DistanceY { .. } => ("vertical", 40.0),
-                ConstraintKind::Distance { .. } | ConstraintKind::Length { .. } => ("aligned", 50.0),
-                other => panic!("{entities} at {at:?}: {other:?}"),
-            };
-            assert_eq!(got, expected, "{entities} with its text at {at:?}");
-            assert!((measured - value).abs() < 1e-9, "{entities} at {at:?} measured {measured}");
+    // A 30 × 40 line (50 long), and a shallow one, 50 × 10, whose box is a thin strip: above
+    // the middle of it is horizontal, not the distance between its ends.
+    let shallow = 2600_f64.sqrt();
+    let cases: [([f64; 2], [f64; 2], [f64; 3], &[([f64; 2], &str)]); 2] = [
+        (
+            [0.0, 0.0],
+            [30.0, 40.0],
+            [30.0, 40.0, 50.0],
+            &[
+                ([15.0, 60.0], "horizontal"),
+                ([15.0, 41.0], "horizontal"),
+                ([15.0, -20.0], "horizontal"),
+                ([-30.0, 5.0], "vertical"),
+                ([55.0, 38.0], "vertical"),
+                ([-20.0, 25.0], "vertical"),
+                ([45.0, 10.0], "vertical"),
+                ([20.0, 10.0], "aligned"),
+                ([10.0, 30.0], "aligned"),
+                ([-20.0, -20.0], "aligned"),
+                ([40.0, 50.0], "aligned"),
+            ],
+        ),
+        (
+            [10.0, 10.0],
+            [60.0, 0.0],
+            [50.0, 10.0, shallow],
+            &[
+                ([35.0, 30.0], "horizontal"),
+                ([35.0, -20.0], "horizontal"),
+                ([12.0, 40.0], "horizontal"),
+                ([80.0, 5.0], "vertical"),
+                ([0.0, 3.0], "vertical"),
+                ([35.0, 6.0], "aligned"),
+                ([80.0, 40.0], "aligned"),
+                ([0.0, -10.0], "aligned"),
+            ],
+        ),
+    ];
+    for (start, end, [dx, dy, len], placements) in cases {
+        for entities in [points.clone(), json!(["l1"])] {
+            for &(at, expected) in placements {
+                let (kind, measured, _) = dimension(start, end, entities.clone(), json!({"text_at": at}));
+                let (got, value) = match kind {
+                    ConstraintKind::DistanceX { .. } => ("horizontal", dx),
+                    ConstraintKind::DistanceY { .. } => ("vertical", dy),
+                    ConstraintKind::Distance { .. } | ConstraintKind::Length { .. } => ("aligned", len),
+                    other => panic!("{entities} at {at:?}: {other:?}"),
+                };
+                assert_eq!(got, expected, "{start:?}–{end:?}: {entities} with its text at {at:?}");
+                assert!((measured - value).abs() < 1e-6, "{entities} at {at:?} measured {measured}");
+            }
         }
+    }
+    for entities in [points.clone(), json!(["l1"])] {
         // No text, an explicit type, or two ends already on an axis keep today's dimension.
-        let (kind, ..) = dimension([30.0, 40.0], entities.clone(), json!({}));
+        let (kind, ..) = dimension([0.0, 0.0], [30.0, 40.0], entities.clone(), json!({}));
         assert!(matches!(kind, ConstraintKind::Distance { .. } | ConstraintKind::Length { .. }), "{kind:?}");
-        let (kind, ..) = dimension([30.0, 40.0], entities.clone(), json!({"type": "distance", "text_at": [15, 60]}));
+        let (kind, ..) = dimension([0.0, 0.0], [30.0, 40.0], entities.clone(), json!({"type": "distance", "text_at": [15, 60]}));
         assert!(matches!(kind, ConstraintKind::Distance { .. } | ConstraintKind::Length { .. }), "{kind:?}");
-        let (kind, ..) = dimension([30.0, 40.0], entities.clone(), json!({"type": "vertical", "text_at": [15, 60]}));
+        let (kind, ..) = dimension([0.0, 0.0], [30.0, 40.0], entities.clone(), json!({"type": "vertical", "text_at": [15, 60]}));
         assert!(matches!(kind, ConstraintKind::DistanceY { .. }), "{kind:?}");
-        let (kind, ..) = dimension([40.0, 0.0], json!(["l1.start", "l1.end"]), json!({"text_at": [60, 5]}));
+        let (kind, ..) = dimension([0.0, 0.0], [40.0, 0.0], json!(["l1.start", "l1.end"]), json!({"text_at": [60, 5]}));
+        assert!(matches!(kind, ConstraintKind::Distance { .. }), "{kind:?}");
+        let (kind, ..) = dimension([0.0, 0.0], [40.0, 0.0], json!(["l1.start", "l1.end"]), json!({"text_at": [20, 15]}));
         assert!(matches!(kind, ConstraintKind::Distance { .. }), "{kind:?}");
     }
     // The chosen dimension drives that coordinate: 24 across X, the 40 in Y kept.
-    let (_, _, sk) = dimension([30.0, 40.0], points, json!({"text_at": [15, 60], "value": 24}));
+    let (_, _, sk) = dimension([0.0, 0.0], [30.0, 40.0], points, json!({"text_at": [15, 60], "value": 24}));
     let end = sk.point(sk.resolve_point("l1.end").expect("end")).expect("end point");
     let start = sk.point(sk.resolve_point("l1.start").expect("start")).expect("start point");
     assert!(((end.x - start.x).abs() - 24.0).abs() < 1e-6 && ((end.y - start.y).abs() - 40.0).abs() < 1e-6, "{start:?} {end:?}");
@@ -1891,4 +1991,51 @@ fn a_changed_length_dimension_keeps_its_first_point() {
     let width = run(&mut s, "sketch.dimension", json!({"entities": [bottom]}))["param"].as_str().unwrap().to_string();
     run(&mut s, "parameters.change", json!({"name": width, "expression": "60 mm"}));
     assert!((at(&s, "p1").x + 30.0).abs() < 1e-6 && (at(&s, "p2").x - 30.0).abs() < 1e-6, "{:?} {:?}", at(&s, "p1"), at(&s, "p2"));
+}
+
+/// #7912: a dimension can measure a model edge: the edge is projected into the sketch and the
+/// dimension measures the distance from the sketch's point to it.
+#[test]
+fn a_dimension_measures_a_model_edge() {
+    let mut s = Session::default();
+    // A sheet-metal base flange: a 100 x 50 plate whose front edge runs along y = 0.
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Base"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [100, 50]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "sheet.flange", json!({"sketch": "Base", "body_name": "Flange"}));
+    // A sketch with a point 25 above the flange's front edge.
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Near"}));
+    let point = run(&mut s, "sketch.point", json!({"point": [50, 25]}))["point"].as_str().unwrap().to_string();
+    let out = run(&mut s, "sketch.dimension", json!({"entities": [point, {"edge": [50, 0, 0], "body": "Flange"}]}));
+    assert!((out["measured"].as_f64().unwrap() - 25.0).abs() < 1e-6, "the distance to the edge: {out}");
+    // The edge is projected into the sketch, and the dimension measures that projection.
+    let sk = sketch(&s);
+    assert_eq!(sk.links.len(), 1, "{:?}", sk.links);
+}
+
+/// #7912: a dimension refuses a long list of entities before projecting any of them, so one
+/// request cannot make the engine resolve thousands of model edges.
+#[test]
+fn a_dimension_refuses_a_long_list_of_entities() {
+    // The most entities one call may project (the engine's `MAX_PROJECTED_ENTITIES`).
+    const MAX_PROJECTED: usize = 1_000;
+    let mut s = Session::default();
+    // A sheet-metal base flange: a 100 x 50 plate whose front edge runs along y = 0.
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Base"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [100, 50]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "sheet.flange", json!({"sketch": "Base", "body_name": "Flange"}));
+    // A sketch with a point 25 above the flange's front edge.
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Near"}));
+    let point = run(&mut s, "sketch.point", json!({"point": [50, 25]}))["point"].as_str().unwrap().to_string();
+    // More entities than a call may project, every one of them a model edge to project.
+    let mut entities = vec![json!(point)];
+    for _ in 0..MAX_PROJECTED {
+        entities.push(json!({"edge": [50, 0, 0], "body": "Flange"}));
+    }
+    let before = serde_json::to_value(&s.doc).unwrap();
+    let error = s.execute("sketch.dimension", &json!({"entities": entities})).unwrap_err();
+    assert!(error.to_string().contains("at most"), "{error}");
+    // The refused request leaves the design as it was.
+    assert_eq!(serde_json::to_value(&s.doc).unwrap(), before);
 }

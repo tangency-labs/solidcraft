@@ -18,7 +18,7 @@ use solidcraft_render::{
 
 use crate::{Result, Session, params::bad};
 
-const KINDS: [&str; 12] = [
+const KINDS: &[&str] = &[
     "materials",
     "lighting",
     "environments",
@@ -45,7 +45,7 @@ fn catalog(kind: &str, command: &str) -> Result<&'static [Value]> {
     }
     let cached = CATALOGS.get_or_init(|| {
         let mut catalogs = BTreeMap::new();
-        for kind in KINDS {
+        for &kind in KINDS {
             let source = super::library_data::catalog(kind).ok_or_else(|| format!("missing built-in catalog {kind}"))?;
             let value: Value = serde_json::from_str(source).map_err(|e| format!("invalid built-in catalog {kind}: {e}"))?;
             if !value.get("items").is_some_and(Value::is_array) {
@@ -320,12 +320,6 @@ fn triple(value: &Value, command: &str) -> Result<[f64; 3]> {
 fn number(value: &Value, command: &str) -> Result<f64> {
     value.as_f64().filter(|n| n.is_finite()).ok_or_else(|| bad(command, "missing finite authored value"))
 }
-fn srgb(v: f64) -> u8 {
-    let v = v.clamp(0.0, 1.0);
-    let encoded = if v <= 0.0031308 { 12.92 * v } else { 1.055 * v.powf(1.0 / 2.4) - 0.055 };
-    (encoded * 255.0).round().clamp(0.0, 255.0) as u8
-}
-
 pub(super) fn apply_appearance(s: &mut Session, params: &Value) -> Result<Value> {
     let command = "render.library.appearance.apply";
     let input: Appearance = serde_json::from_value(params.clone()).map_err(|e| bad(command, e.to_string()))?;
@@ -339,7 +333,7 @@ pub(super) fn apply_appearance(s: &mut Session, params: &Value) -> Result<Value>
         let value = item("surfaces", &input.id, command)?;
         let lo = triple(&value["base_linear_low"], command)?;
         let hi = triple(&value["base_linear_high"], command)?;
-        let color = std::array::from_fn::<_, 3, _>(|i| srgb((lo[i] + hi[i]) * 0.5));
+        let color = std::array::from_fn::<_, 3, _>(|i| crate::geom::srgb::encode8((lo[i] + hi[i]) * 0.5));
         (
             value,
             json!({"color":color,"opacity":1.0,"pbr":{"metallic":value["metallic"],"roughness":value["roughness"],"dielectric_ior":1.5}}),

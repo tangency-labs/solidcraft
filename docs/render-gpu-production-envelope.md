@@ -12,7 +12,7 @@ At most 32 disjoint dielectric bodies can be selected. Closed-medium topology, o
 
 ## Reusable headless studio
 
-`solidcraft-cli mcp --in model.solidcraft --render-gpu --allow-path OUTPUT_DIRECTORY` explicitly installs the native path-tracing host once. Subsequent `render.scene`, `render.preflight`, `render.start`, `render.status` and `render.export` commands reuse the same evaluated native design and device. Without `--render-gpu`, MCP does not discover a path-tracing GPU. The flag is rejected with `--connect`, because a connected application owns its device. `SOLIDCRAFT_GPU` is respected; hardware-only workflows use `hardware` and never substitute software.
+`solidcraft-cli mcp --in model.sc --render-gpu --allow-path OUTPUT_DIRECTORY` explicitly installs the native path-tracing host once. Subsequent `render.scene`, `render.preflight`, `render.start`, `render.status` and `render.export` commands reuse the same evaluated native design and device. Without `--render-gpu`, MCP does not discover a path-tracing GPU. The flag is rejected with `--connect`, because a connected application owns its device. `SOLIDCRAFT_GPU` is respected; hardware-only workflows use `hardware` and never substitute software.
 
 `tools/render-library/selene_studio.py` is a development-only orchestration helper for the pinned functional master. Start it with `python -i`, an explicitly selected freshly built CLI, and a new output directory. Review `studio.scene`, submit an explicit request with `studio.render(label, params)`, and call `studio.close()`. The helper records the unmodified master hash, executable hash, exact request, preflight, job identity, exported PNG hash and completion state. Numerical completion is not visual approval.
 

@@ -8,7 +8,7 @@ use serde_json::{Value, json};
 use solidcraft_doc::{FeatureKind, PlaneRef};
 
 use super::CommandSpec;
-use crate::params::{bad, string_list, vec3};
+use crate::params::{bad, name_or_id_values, vec3};
 use crate::{Result, Session};
 
 pub static COMMANDS: &[CommandSpec] = &[
@@ -16,32 +16,29 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("timeline.paste", "Paste Features", paste).icon("paste").params(
         "translate?: [x,y,z] (moves the copies' geometry); component?: where the copies go (default: the active one), \
          component_path?: its placement (default: the active one, else its only one); the copies go at the marker, each where \
-         its original is in the world (copies into their own component keep its coordinates)",
+         its original is in the world (copies into their own component keep its coordinates); body transfers are left out; \
+         from_design?: true to paste sketch features from the host's cross-design clipboard snapshot",
     ),
 ];
 
 fn copy(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "timeline.copy";
-    let mut keys = string_list(p, "features");
-    if let Some(Value::Array(a)) = p.get("features") {
-        keys.extend(a.iter().filter_map(Value::as_u64).map(|n| n.to_string()));
-    }
+    // The features are named or numbered, and both kinds can sit in one list.
+    let keys = name_or_id_values(cmd, p, "features")?;
     if keys.is_empty() || keys.len() > 1000 {
         return Err(bad(cmd, "`features` must list 1…1000 features"));
     }
-    let mut ids = Vec::new();
-    for k in &keys {
-        ids.push(s.doc.find_feature(k).map(|f| f.id).ok_or_else(|| bad(cmd, format!("no feature `{k}`")))?);
-    }
+    let ids = keys.iter().map(|key| super::edit::feature_id(s, Some(key), cmd)).collect::<Result<Vec<_>>>()?;
     // Keep timeline order so sketches come before the features that use them.
     let copied: Vec<solidcraft_doc::Feature> = s.doc.features.iter().filter(|f| ids.contains(&f.id)).cloned().collect();
     let names: Vec<String> = copied.iter().map(|f| f.name.clone()).collect();
     s.clipboard = copied;
+    s.foreign_copy = Some(std::sync::Arc::new(crate::ForeignCopy::of_features(s)));
     Ok(json!({"copied": names}))
 }
 
 /// Origin planes become explicit planes so a translation can move them.
-fn explicit_planes(p: &mut PlaneRef) {
+pub(in crate::cmd) fn explicit_planes(p: &mut PlaneRef) {
     match p {
         PlaneRef::Origin { name } => {
             if let Some(plane) = solidcraft_geom::Plane::named(name) {
@@ -57,6 +54,11 @@ fn explicit_planes(p: &mut PlaneRef) {
 
 fn paste(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "timeline.paste";
+    match p.get("from_design") {
+        Some(Value::Bool(true)) => return super::clipboard_foreign::paste(s, p),
+        None | Some(Value::Bool(false)) => {}
+        _ => return Err(bad(cmd, "`from_design` must be true or false")),
+    }
     if s.clipboard.is_empty() {
         return Err(bad(cmd, "nothing copied (timeline.copy first)"));
     }
@@ -64,7 +66,13 @@ fn paste(s: &mut Session, p: &Value) -> Result<Value> {
         Some(v) => Some(vec3(v).ok_or_else(|| bad(cmd, "`translate` must be [x, y, z]"))?),
         None => None,
     };
-    let feats = s.clipboard.clone();
+    // A body transfer records which component bodies moved to, but the copies go into the
+    // component they are pasted into: a copy of the transfer would move nothing that is there, and
+    // it would belong to its destination rather than to the target. It is left out.
+    let (transfers, feats): (Vec<_>, Vec<_>) = s.clipboard.iter().cloned().partition(|f| matches!(f.kind, FeatureKind::BodyTransfer { .. }));
+    if feats.is_empty() {
+        return Err(bad(cmd, "body transfers are not pasted: the copies go into the component they are pasted into"));
+    }
     let comp = match p.get("component") {
         None => s.active_component,
         Some(v) => {
@@ -88,7 +96,7 @@ fn paste(s: &mut Session, p: &Value) -> Result<Value> {
     let mut sketches: BTreeMap<u64, u64> = BTreeMap::new();
     let mut bodies: BTreeMap<String, String> = BTreeMap::new();
     let mut used: std::collections::BTreeSet<String> = s.model.state().bodies.iter().map(|body| body.name.clone()).collect();
-    let mut notices = Vec::new();
+    let mut notices: Vec<String> = transfers.iter().map(|f| format!("{} is a body transfer and was not pasted", f.name)).collect();
     // The placement the copies are authored in: the one named, the active one (into the active
     // component, as before), else the target's only (or active) placement.
     let author_path = match given_path {
@@ -243,6 +251,212 @@ mod tests {
 
     fn volume(s: &mut Session) -> f64 {
         run(s, "inspect.measure", json!({}))["total"]["volume_mm3"].as_f64().unwrap_or(f64::NAN)
+    }
+
+    fn dimensioned_sketch() -> Session {
+        let mut s = Session::default();
+        run(&mut s, "parameters.change", json!({"name": "base", "expression": "5 mm"}));
+        run(&mut s, "parameters.change", json!({"name": "width", "expression": "base * 4"}));
+        run(&mut s, "sketch.create", json!({"plane": "XY", "name": "S"}));
+        run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [20, 10]}));
+        run(&mut s, "sketch.constraint.coincident", json!({"a": "p1", "b": "origin"}));
+        let width = run(&mut s, "sketch.dimension", json!({"entities": ["l1"], "value": "width"}))["param"].as_str().unwrap().to_string();
+        run(&mut s, "sketch.dimension", json!({"entities": ["l2"], "value": format!("{width} / 2")}));
+        run(&mut s, "sketch.finish", json!({}));
+        s
+    }
+
+    fn sketch_area(s: &Session, id: u64) -> f64 {
+        s.model.state().sketch(id).unwrap().profiles.iter().map(|p| p.area).sum()
+    }
+
+    #[test]
+    fn foreign_sketch_paste_keeps_parameter_graph_snapshot_and_undo() {
+        let mut source = dimensioned_sketch();
+        run(&mut source, "timeline.copy", json!({"features": ["S"]}));
+        let mut target = dimensioned_sketch();
+        run(&mut target, "document.units", json!({"units": "in"}));
+        run(&mut target, "parameters.change", json!({"name": "base", "expression": "7 mm"}));
+        target.foreign_copy = source.foreign_copy.clone();
+        run(&mut source, "parameters.change", json!({"name": "base", "expression": "30 mm"}));
+        drop(source);
+        let before = target.doc.to_json();
+        let undo = target.undo.len();
+        let result = run(&mut target, "timeline.paste", json!({"from_design": true}));
+        let id = result["pasted"][0]["id"].as_u64().unwrap();
+        assert_eq!(result["pasted"][0]["name"], "S (2)");
+        assert!((sketch_area(&target, id) - 200.).abs() < 1e-6);
+        assert_eq!(target.doc.param("base").unwrap().expr, "7 mm");
+        assert_eq!(target.doc.param("base_2").unwrap().expr, "5 mm");
+        assert_eq!(target.doc.param("width_2").unwrap().expr, "base_2 * 4");
+        assert_eq!(target.undo.len(), undo + 1);
+        let after = target.doc.to_json();
+        run(&mut target, "edit.undo", json!({}));
+        assert_eq!(target.doc.to_json(), before);
+        run(&mut target, "edit.redo", json!({}));
+        assert_eq!(target.doc.to_json(), after);
+        let second = run(&mut target, "timeline.paste", json!({"from_design": true}))["pasted"][0]["id"].as_u64().unwrap();
+        assert!((sketch_area(&target, second) - 200.).abs() < 1e-6);
+        run(&mut target, "parameters.change", json!({"name": "base_2", "expression": "10 mm"}));
+        assert!((sketch_area(&target, id) - 800.).abs() < 1e-6);
+        assert!((sketch_area(&target, second) - 200.).abs() < 1e-6, "each paste owns its parameters");
+        assert!(solidcraft_doc::Document::from_json(&target.doc.to_json()).is_ok());
+    }
+
+    #[test]
+    fn foreign_sketch_paste_preserves_world_position_in_a_placed_component() {
+        use solidcraft_geom::Vec3;
+
+        let mut source = dimensioned_sketch();
+        let arc = [Vec3::new(1., 0., 0.), Vec3::new(0., 0., 1.), Vec3::new(-1., 0., 0.)];
+        for space in [solidcraft_sketch::WireSpace::World, solidcraft_sketch::WireSpace::Component] {
+            source.doc_mut().sketch_mut(1).unwrap().add_drawn_arc_in(&arc, space).unwrap();
+        }
+        source.refresh();
+        run(&mut source, "timeline.copy", json!({"features": ["S"]}));
+        let mut target = Session::default();
+        let made = run(&mut target, "component.create", json!({"name": "Target", "activate": false}));
+        let component = made["component"].as_u64().unwrap();
+        let occurrence = made["occurrence"].as_u64().unwrap();
+        run(&mut target, "occurrence.ground", json!({"occurrence": occurrence, "grounded": false}));
+        run(&mut target, "occurrence.move", json!({"occurrence": occurrence, "translate": [100, 20, 30], "axis": [0, 0, 1], "angle": "90 deg"}));
+        target.foreign_copy = source.foreign_copy.clone();
+        let id = run(&mut target, "timeline.paste", json!({"from_design": true, "component": component, "component_path": [occurrence]}))["pasted"]
+            [0]["id"]
+            .as_u64()
+            .unwrap();
+        let original = source.world_state().sketch(1).unwrap().plane;
+        let pasted = target.world_state().sketch(id).unwrap().plane;
+        assert!(pasted.origin.dist(original.origin) < 1e-6, "{original:?} vs {pasted:?}");
+        assert!(pasted.x.dist(original.x) < 1e-6);
+        assert!(pasted.y.dist(original.y) < 1e-6);
+        assert!((sketch_area(&target, id) - 200.).abs() < 1e-6);
+        assert_eq!(target.doc.feature(id).unwrap().component, component);
+        for (original, pasted) in
+            source.world_state().sketch(1).unwrap().sketch.wires.iter().zip(&target.world_state().sketch(id).unwrap().sketch.wires)
+        {
+            for (a, b) in original.pts.iter().chain(&original.fit).zip(pasted.pts.iter().chain(&pasted.fit)) {
+                assert!(a.dist(*b) < 1e-6, "wire {:?}: {a:?} vs {b:?}", original.space);
+            }
+            let (a, b) = (original.arc.unwrap(), pasted.arc.unwrap());
+            assert!(a.center.dist(b.center) < 1e-6);
+            assert!(a.normal.dist(b.normal) < 1e-6);
+            assert!((a.radius - b.radius).abs() < 1e-6);
+        }
+        let moved = run(
+            &mut target,
+            "timeline.paste",
+            json!({"from_design": true, "component": component, "component_path": [occurrence], "translate": [2, 3, 4]}),
+        )["pasted"][0]["id"]
+            .as_u64()
+            .unwrap();
+        let frame = target.placed_document().path_transform(component, &[occurrence]).unwrap();
+        let delta = solidcraft_doc::apply_vector(&frame, Vec3::new(2., 3., 4.));
+        for (original, pasted) in
+            source.world_state().sketch(1).unwrap().sketch.wires.iter().zip(&target.world_state().sketch(moved).unwrap().sketch.wires)
+        {
+            for (a, b) in original.pts.iter().chain(&original.fit).zip(pasted.pts.iter().chain(&pasted.fit)) {
+                assert!((*a + delta).dist(*b) < 1e-6, "translated wire {:?}: {a:?} vs {b:?}", original.space);
+            }
+        }
+    }
+
+    #[test]
+    fn foreign_sketch_paste_refuses_external_references_and_bad_parameters_atomically() {
+        let mut source = dimensioned_sketch();
+        let mut target = dimensioned_sketch();
+        // The same numeric ID in the target must never become the sketch's missing plane.
+        if let solidcraft_doc::FeatureKind::Sketch { plane, .. } = &mut source.doc_mut().feature_mut(1).unwrap().kind {
+            *plane = solidcraft_doc::PlaneRef::Construction { feature: 1.into() };
+        }
+        run(&mut source, "timeline.copy", json!({"features": ["S"]}));
+        target.foreign_copy = source.foreign_copy.clone();
+        let before = target.doc.to_json();
+        let undo = target.undo.len();
+        let error = target.execute("timeline.paste", &json!({"from_design": true})).unwrap_err().to_string();
+        assert!(error.contains("fixed plane"), "{error}");
+        assert_eq!(target.doc.to_json(), before);
+        assert_eq!(target.undo.len(), undo);
+        for params in
+            [json!({"from_design":"yes"}), json!({"from_design":true,"translate":"bad"}), json!({"from_design":true,"component_path":["bad"]})]
+        {
+            assert!(target.execute("timeline.paste", &params).is_err());
+            assert_eq!(target.doc.to_json(), before);
+        }
+    }
+
+    #[test]
+    fn foreign_sketch_paste_remaps_links_and_rejects_missing_source_sketches() {
+        let mut source = dimensioned_sketch();
+        run(&mut source, "sketch.create", json!({"plane":"XY","offset":5,"name":"Projected"}));
+        run(&mut source, "sketch.project", json!({"refs":[{"sketch":1,"curve":"l1"}]}));
+        run(&mut source, "sketch.finish", json!({}));
+        let mut target = dimensioned_sketch();
+        run(&mut source, "timeline.copy", json!({"features":["Projected"]}));
+        target.foreign_copy = source.foreign_copy.clone();
+        let before = target.doc.to_json();
+        let err = target.execute("timeline.paste", &json!({"from_design":true})).unwrap_err().to_string();
+        assert!(err.contains("external projected geometry"), "{err}");
+        assert_eq!(before, target.doc.to_json());
+        run(&mut source, "timeline.copy", json!({"features":["S","Projected"]}));
+        target.foreign_copy = source.foreign_copy.clone();
+        let result = run(&mut target, "timeline.paste", json!({"from_design":true}));
+        let first = result["pasted"][0]["id"].as_u64().unwrap();
+        let second = result["pasted"][1]["id"].as_u64().unwrap();
+        let copied = target.doc.sketch(second).unwrap();
+        assert!(matches!(copied.links[0].source, solidcraft_sketch::LinkSource::SketchCurve { sketch, .. } if sketch == first));
+        assert!(target.model.result(second).unwrap().error.is_none());
+    }
+
+    #[test]
+    fn foreign_sketch_paste_keeps_plane_input_units_and_text_parameters() {
+        let mut source = Session::default();
+        run(&mut source, "document.units", json!({"units":"in"}));
+        run(&mut source, "parameters.add", json!({"name":"height","expression":"2","unit":""}));
+        run(&mut source, "parameters.add", json!({"name":"Label","expression":"ABC","unit":"text"}));
+        run(&mut source, "sketch.create", json!({"plane":"XY","offset":"height","name":"Text"}));
+        run(&mut source, "sketch.text", json!({"text_expression":"Label + '-X'","at":[0,0],"height":"5 mm"}));
+        run(&mut source, "sketch.finish", json!({}));
+        run(&mut source, "timeline.copy", json!({"features":["Text"]}));
+        let mut target = Session::default();
+        run(&mut target, "parameters.add", json!({"name":"Label","expression":"other","unit":"text"}));
+        run(&mut target, "parameters.add", json!({"name":"d1","expression":"reserved","unit":"text"}));
+        target.foreign_copy = source.foreign_copy.clone();
+        let id = run(&mut target, "timeline.paste", json!({"from_design":true}))["pasted"][0]["id"].as_u64().unwrap();
+        assert!((target.model.state().sketch(id).unwrap().plane.origin.z - 50.8).abs() < 1e-9);
+        assert_eq!(target.doc.text_param("Label").unwrap().text, "other");
+        assert_eq!(target.doc.text_param("Label_2").unwrap().text, "ABC");
+        assert_eq!(target.doc.text_param("d1").unwrap().text, "reserved");
+        assert!(target.doc.param("d1").is_none());
+        let state = target.model.state();
+        let text = &state.sketch(id).unwrap().sketch.links[0].source;
+        assert!(matches!(text, solidcraft_sketch::LinkSource::Text { text, .. } if text == "ABC-X"));
+        assert!(solidcraft_doc::Document::from_json(&target.doc.to_json()).is_ok());
+    }
+
+    #[test]
+    fn foreign_sketch_paste_copies_equation_parameters_but_not_the_local_variable() {
+        let mut source = Session::default();
+        run(&mut source, "parameters.add", json!({"name":"height","expression":"3 mm"}));
+        run(&mut source, "sketch.create", json!({"plane":"XY","name":"Curve"}));
+        run(&mut source, "sketch.equation_curve", json!({"x":"t","y":"height + t * t","start":-2,"end":2}));
+        run(&mut source, "sketch.finish", json!({}));
+        run(&mut source, "timeline.copy", json!({"features":["Curve"]}));
+        let mut target = Session::default();
+        run(&mut target, "parameters.add", json!({"name":"height","expression":"99 mm"}));
+        target.foreign_copy = source.foreign_copy.clone();
+        let id = run(&mut target, "timeline.paste", json!({"from_design":true}))["pasted"][0]["id"].as_u64().unwrap();
+        let state = target.model.state();
+        let sketch = &state.sketch(id).unwrap().sketch;
+        let equation = &sketch.equations[0];
+        assert_eq!(equation.x.as_deref(), Some("t"));
+        assert_eq!(equation.y, "height_2 + t * t");
+        let curve = sketch.curves.iter().find(|c| c.id == equation.curve).unwrap();
+        for point in curve.kind.point_ids() {
+            let p = sketch.points[point].pos;
+            assert!((p.y - 3. - p.x * p.x).abs() < 1e-8, "{p:?}");
+        }
+        assert!(target.doc.param("t").is_none());
     }
 
     /// Features pasted into a component placed elsewhere (offset and turned) are carried into its
@@ -626,5 +840,31 @@ mod tests {
         // (one moved 50 mm), which the boolean and the measure each round in their own way:
         // a few 1e-6 mm³ on 5000.
         assert!((v("Plate") - v("Plate (2)")).abs() < 1e-8 * v("Plate"), "each plate carries one spring: {} vs {}", v("Plate"), v("Plate (2)"));
+    }
+
+    /// A copied body transfer is left out of a paste: the copies go into the component they are
+    /// pasted into. A pasted transfer belonged to that component and not to its destination, and
+    /// the saved design no longer loaded.
+    #[test]
+    fn a_copied_body_transfer_is_left_out_of_the_paste() {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "name": "Base", "body_name": "Block"}));
+        let a = run(&mut s, "component.create", json!({"name": "A", "activate": false}))["component"].as_u64().unwrap_or_default();
+        run(&mut s, "component.move_bodies", json!({"bodies": ["Block"], "component": "A"}));
+        let transfer = s.doc.features.iter().find(|f| matches!(f.kind, solidcraft_doc::FeatureKind::BodyTransfer { .. })).map(|f| f.name.clone());
+        let transfer = transfer.unwrap_or_default();
+        run(&mut s, "timeline.copy", json!({"features": ["Base", transfer]}));
+        let r = run(&mut s, "timeline.paste", json!({"translate": [20, 0, 0]}));
+        assert_eq!(r["pasted"].as_array().map(Vec::len), Some(1), "{r}");
+        assert_eq!(r["notices"], json!([format!("{transfer} is a body transfer and was not pasted")]), "{r}");
+        let state = s.model.state();
+        assert_eq!(state.body("Block").map(|b| s.doc.model_body_component(b)), Some(a));
+        assert_eq!(state.body("Block (2)").map(|b| s.doc.model_body_component(b)), Some(0), "the copy is in the root, where it was pasted");
+        if let Err(e) = solidcraft_doc::Document::from_json(&s.doc.to_json()) {
+            panic!("the design loads back: {e}");
+        }
+        run(&mut s, "timeline.copy", json!({"features": [transfer]}));
+        let err = s.execute("timeline.paste", &json!({})).map(|v| v.to_string()).unwrap_or_else(|e| e.to_string());
+        assert!(err.contains("body transfers are not pasted"), "{err}");
     }
 }

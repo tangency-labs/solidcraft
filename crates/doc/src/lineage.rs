@@ -733,7 +733,12 @@ pub(crate) fn order_lumps(bodies: &mut [crate::ModelBody], origin: &Arc<crate::n
     }
     for (_, members) in families.into_iter().filter(|(_, m)| m.len() > 1) {
         let feature = members.first().and_then(|i| bodies.get(*i)).map(|b| b.feature);
-        if members.iter().any(|i| bodies.get(*i).map(|b| b.feature) != feature) {
+        // A cut's pieces past the first belong to the cut itself (#10123), so its family spans
+        // two features: the piece that kept the body's name comes from the body's own feature
+        // and the rest from this feature. Any other mix is not a split's family: leave it be.
+        let same = members.iter().all(|i| bodies.get(*i).map(|b| b.feature) == feature);
+        let foreign = members.iter().filter(|i| bodies.get(**i).map(|b| b.feature) != Some(origin.feature.id)).count();
+        if !same && foreign > 1 {
             continue;
         }
         let least = |b: &crate::ModelBody| {

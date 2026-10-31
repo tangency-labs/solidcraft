@@ -6,6 +6,55 @@ use super::*;
 use crate::Services;
 use crate::dialogs::{Kind, apply_commands, preview_commands};
 
+#[test]
+fn missing_joint_messages_are_drawn_in_full() {
+    for language in ["en", "de", "vi"] {
+        let _language = crate::i18n::scope(language);
+        for (command, message) in [
+            ("joint.screw", "needs a joint that turns and one that slides"),
+            ("joint.gear", "needs two joints that turn"),
+            ("joint.rack_pinion", "needs a joint that turns and one that slides"),
+        ] {
+            let mut app = SolveApp::new(Session::default(), Services::default());
+            app.preferences.language = language.to_owned();
+            app.start(command);
+            let ctx = crate::fonts::test_context();
+            let mut textures = std::collections::HashMap::new();
+            let mut draw = |app: &mut SolveApp| {
+                let input =
+                    egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 600.0))), ..Default::default() };
+                let mut output = ctx.run_ui(input, |ui| crate::dialogs::show(app, ui.ctx()));
+                crate::ui_kit::test_textures_update(&mut textures, &output.textures_delta);
+                output.textures_delta.clear();
+                output
+            };
+            for _ in 0..3 {
+                draw(&mut app);
+            }
+            let output = draw(&mut app);
+            if let Ok(dir) = std::env::var("SOLIDCRAFT_DIALOG_STATUS_EVIDENCE") {
+                std::fs::create_dir_all(&dir).unwrap();
+                crate::ui_kit::test_raster(
+                    &ctx,
+                    output.shapes.clone(),
+                    output.pixels_per_point,
+                    app.viewport.dialog_rect.expect("dialog bounds").expand(4.0),
+                    &textures,
+                )
+                .save(std::path::Path::new(&dir).join(format!("{command}-{language}.png")))
+                .unwrap();
+            }
+            let message = crate::i18n::tr_label(message);
+            let text = crate::test_support::text_shapes(&output).find(|text| text.galley.text() == message).expect("missing-joint message");
+            assert!(!text.galley.elided, "{command} ({language}) cuts off: {message}");
+            let bounds = text.galley.rect.translate(text.pos.to_vec2());
+            let clip =
+                output.shapes.iter().find(|shape| matches!(&shape.shape, egui::Shape::Text(t) if t.galley.text() == message)).unwrap().clip_rect;
+            assert!(clip.contains_rect(bounds), "{command} ({language}) clips the message: {bounds:?} outside {clip:?}");
+        }
+    }
+}
+
 /// A grounded base with discs G1 (radius 10 at x = 0) and G2 (radius 20 at x = 30) turning on
 /// revolute joints about +Z, and a nut on a cylindrical joint.
 fn discs() -> SolveApp {

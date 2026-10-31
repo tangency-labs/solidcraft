@@ -2,12 +2,14 @@
 //! boxes (line length and angle, rectangle width and height, circle diameter…) sit next to the
 //! segment they measure and follow the cursor. Typing goes straight into the first box and
 //! locks that value; Tab moves to the next box; Enter places the shape with the typed values,
-//! which become dimension constraints. Values are expressions ("25", "1 in", "d1 * 2").
+//! which become dimension constraints. Values are expressions ("25", "1 in", "d1 * 2"), or
+//! `name = expression`, which also defines the user parameter `name` (#7567).
 
 use crate::ui_kit::{Container, Surface};
 use egui::{Pos2, vec2};
 use serde_json::{Value, json};
-use solidcraft_engine::doc::expr::Kind as ValueKind;
+use solidcraft_engine::doc::Document;
+use solidcraft_engine::doc::expr::{Kind as ValueKind, definition};
 use solidcraft_engine::geom::Vec2;
 
 use crate::SolveApp;
@@ -37,12 +39,14 @@ pub fn boxes_for(cmd: &str, n: usize) -> Vec<DimBox> {
     use ValueKind::*;
     let b = DimBox::new;
     match (cmd, n) {
+        ("sketch.construction_line.angle", 1) => vec![b("Angle", Angle)],
         ("sketch.line" | "sketch.line.midpoint", n) if n >= 1 => vec![b("Length", Length), b("Angle", Angle)],
         ("sketch.rectangle.two_point" | "sketch.rectangle.center", 1) => vec![b("Width", Length), b("Height", Length)],
         ("sketch.rectangle.rounded", 1) => vec![b("Width", Length), b("Height", Length), b("Radius", Length)],
         ("sketch.circle.center", 1) => vec![b("Diameter", Length)],
         // The two points are a diameter's ends (#3278).
         ("sketch.circle.two_point", 1) => vec![b("Diameter", Length)],
+        ("sketch.circle.two_tangent", 2) => vec![b("Radius", Length)],
         ("sketch.arc.center_point" | "sketch.slot.arc_center", 1) => vec![b("Radius", Length)],
         ("sketch.arc.center_point" | "sketch.slot.arc_center", 2) => vec![b("Sweep", Angle)],
         ("sketch.polygon.inscribed" | "sketch.polygon.circumscribed", 1) => vec![b("Radius", Length), b("Sides", Unitless)],
@@ -57,7 +61,22 @@ pub fn boxes_for(cmd: &str, n: usize) -> Vec<DimBox> {
 /// A locked box's value (mm or radians).
 fn locked(app: &SolveApp, t: &Tool, label: &str) -> Option<f64> {
     let b = t.dims.iter().chain(&t.dim_history).find(|b| b.label == label && b.locked)?;
-    crate::length_input::eval(&app.session.doc, &b.value, b.kind).ok().filter(|v| v.is_finite())
+    eval(&app.session.doc, &b.value, b.kind).ok().filter(|v| v.is_finite())
+}
+
+/// A box value's size. `name = expression` is the right-hand side's: the size the parameter
+/// `name` will hold once the shape is placed.
+fn eval(doc: &Document, text: &str, kind: ValueKind) -> solidcraft_engine::doc::Result<f64> {
+    crate::length_input::eval(doc, definition(text).map_or(text, |(_, rhs)| rhs), kind)
+}
+
+/// Whether a box becomes one of the shape's dimensions. A rounded rectangle's radius is its own
+/// parameter (sent with the shape); sides and rho are counts and shape factors.
+fn is_dimension(t: &Tool, label: &str) -> bool {
+    if solidcraft_engine::cmd::construction_line_mode(t.cmd).is_some() {
+        return t.cmd == "sketch.construction_line.angle" && label == "Angle";
+    }
+    !matches!(label, "Sides" | "Rho") && !(t.cmd == "sketch.rectangle.rounded" && label == "Radius")
 }
 
 fn dir_or_x(v: Vec2) -> Vec2 {
@@ -73,6 +92,7 @@ pub fn effective(app: &SolveApp, t: &Tool, h: Vec2) -> Vec2 {
     let Some(a) = t.pts.last().map(|p| p.0) else { return h };
     let lk = |l: &str| locked(app, t, l);
     match (t.cmd, t.pts.len()) {
+        ("sketch.construction_line.angle", 1) => a + Vec2::from_angle(lk("Angle").unwrap_or_else(|| (h - a).angle())) * (h - a).len().max(1.0),
         ("sketch.line", _) | ("sketch.slot.center_to_center" | "sketch.slot.overall", 1) => {
             let v = h - a;
             let len = lk("Length").unwrap_or(v.len());
@@ -228,6 +248,7 @@ fn live(app: &SolveApp, t: &Tool, e: Vec2, px: f64) -> Vec<(f64, Vec2)> {
     let first = t.pts.first().map(|p| p.0).unwrap_or(a);
     let off = 20.0 * px;
     match (t.cmd, t.pts.len()) {
+        ("sketch.construction_line.angle", 1) => vec![((e - a).angle(), (a + e) * 0.5 + dir_or_x(e - a).perp() * off)],
         ("sketch.line", _) | ("sketch.slot.center_to_center" | "sketch.slot.overall", 1) => line_boxes(a, e, px, off),
         // The midpoint line runs from the end's mirror image through the midpoint to the end,
         // so its length is the whole line: twice the distance from the midpoint to the cursor.
@@ -257,6 +278,9 @@ fn live(app: &SolveApp, t: &Tool, e: Vec2, px: f64) -> Vec<(f64, Vec2)> {
         }
         ("sketch.circle.center", 1) => vec![(2.0 * (e - a).len(), (a + e) * 0.5 + dir_or_x(e - a).perp() * off)],
         ("sketch.circle.two_point", 1) => vec![((e - a).len(), (a + e) * 0.5 + dir_or_x(e - a).perp() * off)],
+        ("sketch.circle.two_tangent", 2) => {
+            vec![(crate::sketch_tools::two_tangent_default_radius(app, t), (first + a) * 0.5 + dir_or_x(a - first).perp() * off)]
+        }
         ("sketch.arc.center_point" | "sketch.slot.arc_center", 1) | ("sketch.polygon.inscribed" | "sketch.polygon.circumscribed", 1) => {
             vec![((e - a).len(), (a + e) * 0.5), (6.0, a + (e - a) * 0.5 + (e - a).perp() * 0.3)]
         }
@@ -264,7 +288,12 @@ fn live(app: &SolveApp, t: &Tool, e: Vec2, px: f64) -> Vec<(f64, Vec2)> {
             let a0 = (a - first).angle();
             // Out along the radius, clear of the cursor: a box on it would take the hover and
             // the click meant for a point there (#2201).
-            vec![(((e - first).angle() - a0).rem_euclid(std::f64::consts::TAU), e + dir_or_x(e - first) * (2.5 * off))]
+            // A centre-point arc runs the way the cursor went round (#6645): its sweep is signed.
+            let sweep = match t.cmd {
+                "sketch.arc.center_point" => crate::tools::center_arc_sweep(t, e),
+                _ => ((e - first).angle() - a0).rem_euclid(std::f64::consts::TAU),
+            };
+            vec![(sweep, e + dir_or_x(e - first) * (2.5 * off))]
         }
         ("sketch.conic", 2) => {
             // `rho` is the curve's fullness, not a distance: the conic passes through
@@ -336,6 +365,21 @@ pub fn reset(t: &mut Tool) {
     t.dims_focus = false;
 }
 
+/// After a draw-drag press that only placed the first point, a short release (or one that lands
+/// on the same sketch point, #8899) must keep the stage-1 value boxes rather than wiping them
+/// with [`reset`] and waiting for the next frame to rebuild them.
+pub fn keep_stage_one(t: &mut Tool) {
+    if t.pts.len() != 1 {
+        return;
+    }
+    if t.dims_stage != 1 || t.dims.is_empty() {
+        t.dim_history.clear();
+        t.dims = boxes_for(t.cmd, 1);
+        t.dims_stage = 1;
+    }
+    t.dims_focus = !t.dims.is_empty();
+}
+
 pub fn has_locked(t: &Tool, label: &str) -> bool {
     t.dims.iter().chain(&t.dim_history).any(|dimension| dimension.locked && dimension.label == label)
 }
@@ -346,10 +390,7 @@ pub fn dimensions(t: &Tool) -> Value {
         .dim_history
         .iter()
         .chain(&t.dims)
-        // A rounded rectangle's radius is its own parameter (sent with the shape), not a dimension.
-        .filter(|dimension| {
-            dimension.locked && !matches!(dimension.label, "Sides" | "Rho") && !(t.cmd == "sketch.rectangle.rounded" && dimension.label == "Radius")
-        })
+        .filter(|dimension| dimension.locked && is_dimension(t, dimension.label))
         .map(|dimension| (dimension.label.to_ascii_lowercase(), json!(dimension.value)))
         .collect::<serde_json::Map<_, _>>();
     Value::Object(values)
@@ -361,8 +402,15 @@ pub fn validate(app: &SolveApp, t: &Tool) -> Result<(), String> {
         if dimension.value.len() > 4096 {
             return Err(format!("{} expression is too long", dimension.label));
         }
-        let value =
-            crate::length_input::eval(&app.session.doc, &dimension.value, dimension.kind).map_err(|error| format!("{}: {error}", dimension.label))?;
+        if let Some((name, rhs)) = definition(&dimension.value) {
+            if !is_dimension(t, dimension.label) {
+                return Err(format!("{}: only a box that becomes a dimension can define `{name}`; type the value alone", dimension.label));
+            }
+            if rhs.is_empty() {
+                return Err(format!("{}: `{name} =` needs a value after the `=`", dimension.label));
+            }
+        }
+        let value = eval(&app.session.doc, &dimension.value, dimension.kind).map_err(|error| format!("{}: {error}", dimension.label))?;
         if !value.is_finite() || value.abs() > 1e9 {
             return Err(format!("{} must be finite and within the model's size limits", dimension.label));
         }
@@ -410,6 +458,11 @@ pub fn locked_value(app: &SolveApp, t: &Tool, label: &str) -> Option<f64> {
     locked(app, t, label)
 }
 
+/// The expression typed into a locked value box, kept verbatim for a command parameter.
+pub(crate) fn locked_expression<'a>(t: &'a Tool, label: &str) -> Option<&'a str> {
+    t.dims.iter().chain(&t.dim_history).find(|dimension| dimension.label == label && dimension.locked).map(|dimension| dimension.value.as_str())
+}
+
 /// Give the keyboard back to the box it was in, after a click in another panel took it (#2927).
 /// The box that owned the keyboard is still the one that had it last frame; the active tool must
 /// still show its boxes, so a finished or restarted shape is left alone.
@@ -445,7 +498,10 @@ fn boxes(app: &SolveApp, ui: &mut egui::Ui, proj: &Proj, t: &mut Tool) -> Option
     let sid = app.session.active_sketch?;
     let st = crate::open_meshing::session_world(&app.session);
     let plane = st.sketch(sid)?.plane;
-    let e = shown(app, t, t.hover.as_ref()?);
+    // When the pointer is over the value box itself after releasing on a shared centre (#8899),
+    // the tool may have no hover for a frame: still show the boxes from the first point.
+    let hover = t.hover.clone().or_else(|| t.pts.last().map(|(p, id)| (*p + Vec2::X, id.clone())));
+    let e = shown(app, t, hover.as_ref()?);
     let px = 2.0 * app.cam.half_height() / f64::from(proj.rect.height().max(1.0));
     let lv = live(app, t, e, px);
     let focus = std::mem::take(&mut t.dims_focus);
@@ -475,11 +531,31 @@ fn boxes(app: &SolveApp, ui: &mut egui::Ui, proj: &Proj, t: &mut Tool) -> Option
     let mut completed = false;
     let mut any_focused = false;
     let view = app.viewport.layout.as_ref().map(|l| l.drawable).filter(|r| r.is_finite() && r.is_positive());
-    for (i, b) in t.dims.iter_mut().enumerate() {
-        let Some((v, at)) = lv.get(i).copied() else { continue };
+    let field_frame = Container::popup_frame(ui.style()).inner_margin(egui::Margin::symmetric(tk.space_3 as i8, 1));
+    for (b, (v, _)) in t.dims.iter_mut().zip(&lv) {
         if !b.locked {
-            b.value = fmt(app, b.label, b.kind, v);
+            b.value = fmt(app, b.label, b.kind, *v);
         }
+    }
+    // Polygon values used to sit inside the radius, so both boxes covered a small polygon
+    // and each other. Place them together outside its projected outline, in screen space:
+    // their separation must not shrink with the shape or a tilted sketch plane.
+    let polygon_positions = if matches!(t.cmd, "sketch.polygon.inscribed" | "sketch.polygon.circumscribed") {
+        let corners = crate::tools::polygon_outline(t, e, locked(app, t, "Sides").unwrap_or(6.0))
+            .unwrap_or_else(|| t.pts.iter().map(|p| p.0).chain(std::iter::once(e)).collect());
+        let points: Vec<_> = corners.iter().filter_map(|p| proj.to_screen(plane.to_world(*p))).collect();
+        let bounds = egui::Rect::from_points(&points);
+        let sizes: Vec<_> = t
+            .dims
+            .iter()
+            .map(|b| crate::ui_kit::placement_field_content_size(ui, &b.value) + vec2(2.0 * tk.form_inset, 0.0) + field_frame.total_margin().sum())
+            .collect();
+        bounds.is_finite().then(|| polygon_input_positions(bounds, &sizes, view, tk.space_8))
+    } else {
+        None
+    };
+    for (i, b) in t.dims.iter_mut().enumerate() {
+        let Some((_, at)) = lv.get(i).copied() else { continue };
         let Some(sp) = proj.to_screen(plane.to_world(at)) else { continue };
         let id = egui::Id::new(("sc_dim", i));
         let has_focus = ui.ctx().memory(|m| m.has_focus(id));
@@ -490,12 +566,16 @@ fn boxes(app: &SolveApp, ui: &mut egui::Ui, proj: &Proj, t: &mut Tool) -> Option
             s.cursor.set_char_range(Some(egui::text_selection::CCursorRange::two(egui::text::CCursor::new(0), egui::text::CCursor::new(n))));
             s.store(ui.ctx(), id);
         }
-        let pos = in_view(sp + vec2(-34.0, -11.0), view, ui.ctx().pointer_latest_pos());
-        Container::new(ui.ctx(), Surface::Canvas).area(egui::Id::new(("sc_dim_area", i))).fixed_pos(pos).order(egui::Order::Foreground).show(
+        let pos = polygon_positions
+            .as_ref()
+            .and_then(|positions| positions.get(i).copied())
+            .unwrap_or_else(|| in_view(sp + vec2(-34.0, -11.0), view, ui.ctx().pointer_latest_pos()));
+        // Background: under Preferences and Report a bug (#9016), like canvas value boxes.
+        Container::new(ui.ctx(), Surface::Canvas).area(egui::Id::new(("sc_dim_area", i))).fixed_pos(pos).order(egui::Order::Background).show(
             ui.ctx(),
             |ui| {
                 let fill = if b.locked { tk.accent_soft } else { tk.panel };
-                Container::popup_frame(ui.style()).fill(fill).inner_margin(egui::Margin::symmetric(tk.space_3 as i8, 1)).show(ui, |ui| {
+                field_frame.fill(fill).show(ui, |ui| {
                     let r = crate::ui_kit::placement_field(ui, id, &mut b.value, b.label);
                     // A completion gets first use of forward Tab. Shift+Tab always moves back;
                     // the box reached by egui's generic traversal must not complete its text.
@@ -531,6 +611,34 @@ fn boxes(app: &SolveApp, ui: &mut egui::Ui, proj: &Proj, t: &mut Tool) -> Option
     let enter = ui.input(|i| i.key_pressed(egui::Key::Enter));
     let nothing = ui.ctx().memory(|m| m.focused().is_none());
     (enter && (any_focused || nothing)).then_some(e)
+}
+
+/// Stack the polygon inputs beside its screen bounds. Try each side before falling back to
+/// the drawing area's edge when the polygon fills the view; keep the boxes separate even then.
+fn polygon_input_positions(bounds: egui::Rect, sizes: &[egui::Vec2], view: Option<egui::Rect>, gap: f32) -> Vec<Pos2> {
+    let size =
+        vec2(sizes.iter().map(|s| s.x).fold(0.0, f32::max), sizes.iter().map(|s| s.y).sum::<f32>() + gap * sizes.len().saturating_sub(1) as f32);
+    let candidates = [
+        egui::pos2(bounds.center().x - size.x * 0.5, bounds.top() - gap - size.y),
+        egui::pos2(bounds.center().x - size.x * 0.5, bounds.bottom() + gap),
+        egui::pos2(bounds.left() - gap - size.x, bounds.center().y - size.y * 0.5),
+        egui::pos2(bounds.right() + gap, bounds.center().y - size.y * 0.5),
+    ];
+    let inside = |pos: Pos2| view.map_or(pos, |view| pos.clamp(view.min, (view.max - size).max(view.min)));
+    let start = candidates
+        .into_iter()
+        .map(inside)
+        .find(|pos| !egui::Rect::from_min_size(*pos, size).intersects(bounds.expand(gap * 0.5)))
+        .unwrap_or_else(|| inside(candidates[0]));
+    let mut y = start.y;
+    sizes
+        .iter()
+        .map(|size| {
+            let pos = egui::pos2(start.x, y);
+            y += size.y + gap;
+            pos
+        })
+        .collect()
 }
 
 /// About the size of a value box, for keeping it in view.

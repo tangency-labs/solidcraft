@@ -331,13 +331,13 @@ fn tapped_thread_depth_field_keeps_focus_and_typing_separate_from_acceptance() {
     assert_eq!(h.app.session.doc.to_json(), original, "Cancel preserves the accepted design");
 }
 
-/// The upstream Preferences split must retain both Hole controls on Design.
+/// The Preferences split must retain both Hole controls on Tools.
 #[test]
 fn hole_design_preferences_keep_both_controls_and_cancel_after_page_split() {
     let mut h = Harness::new();
-    h.call("ui.prefs", json!({"language":"en", "open":"Design"}));
+    h.call("ui.prefs", json!({"language":"en", "open":"Tools"}));
     let page = rect_of("prefs:page_body").unwrap();
-    for label in ["Snap to face and edge centres", "Move holes by clicking or dragging"] {
+    for label in ["Snap to face and edge centers", "Move holes by clicking or dragging"] {
         let mut point = None;
         for _ in 0..12 {
             point = h.output.accesskit_update.as_ref().and_then(|tree| {
@@ -356,7 +356,7 @@ fn hole_design_preferences_keep_both_controls_and_cancel_after_page_split() {
             h.call("ui.scroll", json!({"x":page.center().x,"y":page.center().y,"delta":-100}));
             h.frames(12);
         }
-        let p = point.unwrap_or_else(|| panic!("Hole preference missing from Design: {label}"));
+        let p = point.unwrap_or_else(|| panic!("Hole preference missing from Tools: {label}"));
         h.call("ui.click", json!({"x":p.x,"y":p.y}));
     }
     assert!(h.app.preferences.hole_snaps && h.app.preferences.hole_moves);
