@@ -1,4 +1,5 @@
-"""AppRun puts a `solidcraft-cli` wrapper on PATH (~/.local/bin) and the wrapper runs the bundled CLI."""
+"""AppRun puts a `solidcraft-cli` wrapper on PATH (~/.local/bin), the wrapper runs the bundled
+CLI, and the desktop entry it writes is marked so a user-edited entry is never overwritten."""
 import os
 import shutil
 import subprocess
@@ -81,6 +82,39 @@ class AppRunCli(unittest.TestCase):
     def test_opt_out_installs_nothing(self):
         self.run_apprun(SOLIDCRAFT_NO_DESKTOP_INTEGRATION="1")
         self.assertFalse(self.wrapper.exists())
+
+    def test_generated_entry_carries_the_marker(self):
+        self.run_apprun()
+        entry = (self.home / ".local/share/applications/io.tangencylabs.solidcraft.desktop").read_text()
+        self.assertIn("X-SolidCraft-Generated=true", entry)
+        self.assertIn(f'Exec="{self.image}" %F', entry)
+
+    def test_unmarked_entry_is_never_rewritten(self):
+        # A user-edited entry (no marker) survives untouched, even when the AppImage
+        # moves: rewriting it mid-launch makes GNOME lose the window (#9679).
+        entry = self.home / ".local/share/applications/io.tangencylabs.solidcraft.desktop"
+        entry.parent.mkdir(parents=True)
+        edited = '[Desktop Entry]\nExec="/home/you/Applications/solidcraft.AppImage" %F\nStartupNotify=false\n'
+        entry.write_text(edited)
+        self.run_apprun()
+        self.assertEqual(entry.read_text(), edited)
+        moved = self.tmp / "moved.AppImage"
+        shutil.move(self.image, moved)
+        self.env["APPIMAGE"] = str(moved)
+        self.run_apprun()
+        self.assertEqual(entry.read_text(), edited)
+
+    def test_marked_entry_follows_a_moved_appimage(self):
+        entry = self.home / ".local/share/applications/io.tangencylabs.solidcraft.desktop"
+        self.run_apprun()
+        moved = self.tmp / "moved.AppImage"
+        shutil.move(self.image, moved)
+        self.env["APPIMAGE"] = str(moved)
+        self.run_apprun()
+        after = entry.read_text()
+        self.assertIn(str(moved), after)
+        self.assertNotIn(str(self.image), after)
+        self.assertIn("X-SolidCraft-Generated=true", after)
 
 
 if __name__ == "__main__":
