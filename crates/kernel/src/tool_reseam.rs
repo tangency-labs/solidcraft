@@ -94,6 +94,68 @@ pub(super) fn cut(target: &Body, tool: &Body) -> Option<Body> {
     result
 }
 
+/// The centre of the sphere a closed body is made of, every face a patch of that one sphere (the
+/// sphere primitive's six patches, a sphere read from STEP).
+fn sphere_centre(body: &Body) -> Option<Vec3> {
+    if body.is_mesh() || body.shell_count() != 1 || body.face_count() > 64 {
+        return None;
+    }
+    let tol = (body.size() * 1e-9).max(1e-10);
+    let mut sphere: Option<(Vec3, f64)> = None;
+    for i in 0..body.face_count() {
+        let crate::FaceSurface::Sphere { center, radius } = crate::face_surface(body, i)? else { return None };
+        match sphere {
+            None => sphere = Some((center, radius)),
+            Some((c, r)) if (center - c).len() < tol && (radius - r).abs() < tol => {}
+            Some(_) => return None,
+        }
+    }
+    sphere.map(|(c, _)| c)
+}
+
+/// Retry a failed boolean with a sphere operand turned about its centre (#3633): the same solid,
+/// with the boundaries between its patches elsewhere. A body whose faces and edges lie along
+/// them (a pyramid with its apex at the centre and its edges through the patches' corners) meets
+/// the turned sphere across its faces instead.
+pub(super) fn sphere(a: &Body, b: &Body, op: BoolOp) -> Option<Body> {
+    if ACTIVE.with(|x| x.get()) {
+        return None;
+    }
+    let (k, centre) = match (sphere_centre(a), sphere_centre(b)) {
+        (Some(c), _) => (0, c),
+        (None, Some(c)) => (1, c),
+        (None, None) => return None,
+    };
+    ACTIVE.with(|x| x.set(true));
+    let result = guard("boolean with a turned sphere", || {
+        let counts = record::counts(&[a, b]);
+        // A skew axis: a turn about one of the frame's axes keeps patch boundaries in the
+        // planes a box or a pyramid on that frame has its faces in.
+        let axis = Vec3::new(1.0, 2.0, 3.0).normalized().unwrap_or(Vec3::Z);
+        for angle in [0.3, -0.3, 0.7, -0.7] {
+            let turned = transform(if k == 0 { a } else { b }, Vec3::ZERO, centre, axis, angle)?;
+            let (x, y) = if k == 0 { (&turned, b) } else { (a, &turned) };
+            let (result, diagnostics) = capture_boolean_diagnostics(|| boolean_via(x, y, op, &boolean_whole));
+            if let Ok(Some(body)) = result
+                && crate::boolean_guard::check_retry(a, b, op, Some(&body)).is_ok()
+            {
+                let history = crate::boolean_record::through(&body, k, turned.history());
+                let body = body.with_checked_history(history, &counts);
+                merge(diagnostics);
+                let mut event = BooleanFallback::new(BooleanStrategy::SphereReseam);
+                event.rotation_rad = angle;
+                record(event);
+                return Ok(Some(body));
+            }
+        }
+        Ok(None)
+    })
+    .ok()
+    .flatten();
+    ACTIVE.with(|x| x.set(false));
+    result
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -120,5 +182,30 @@ mod tests {
         assert!(axis(&scaled).is_none());
         let block = crate::box_solid(Vec3::ZERO, Vec3::new(10., 20., 30.)).unwrap();
         assert!(axis(&block).is_none());
+    }
+
+    /// A pyramid with its apex at the sphere's centre, its four edges through the corners of the
+    /// sphere's -X patch and its sides in the planes of that patch's edges (#3633). The two meet
+    /// in exactly a sixth of the sphere.
+    #[test]
+    fn a_pyramid_along_a_spheres_patches_meets_it_in_a_sixth() {
+        let s = std::f64::consts::FRAC_1_SQRT_2;
+        let side = |y: f64, z: f64| crate::HalfSpace { n: Vec3::new(s, y * s, z * s), d: 0.0 };
+        let pyramid =
+            crate::convex_polyhedron(&[crate::HalfSpace { n: -Vec3::X, d: 10.0 }, side(1.0, 0.0), side(-1.0, 0.0), side(0.0, 1.0), side(0.0, -1.0)])
+                .unwrap();
+        let sphere = crate::sphere(Vec3::ZERO, 10.0).unwrap();
+        assert!(sphere_centre(&sphere).is_some_and(|c| c.len() < 1e-12));
+        assert!(sphere_centre(&pyramid).is_none());
+        let whole = 4.0 / 3.0 * std::f64::consts::PI * 1000.0;
+        for (a, b) in [(&sphere, &pyramid), (&pyramid, &sphere)] {
+            let common = crate::boolean(a, b, BoolOp::Intersect).unwrap().expect("a sixth of the sphere");
+            let v = crate::measure(&common).unwrap().volume;
+            assert!((v - whole / 6.0).abs() < whole * 1e-3, "{v}");
+            assert!(common.validity().is_empty(), "{:?}", common.validity());
+        }
+        let rest = crate::boolean(&sphere, &pyramid, BoolOp::Cut).unwrap().expect("five sixths of the sphere");
+        let v = crate::measure(&rest).unwrap().volume;
+        assert!((v - whole * 5.0 / 6.0).abs() < whole * 1e-3, "{v}");
     }
 }
