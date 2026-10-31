@@ -3187,10 +3187,25 @@ fn apply_traced_with(
         return Ok(());
     }
     if matches!(op, Operation::Cut | Operation::Intersect) {
+        // A cut that cannot reach a sheet leaves it as it is (#10226): a sheet whose box lies
+        // clear of every tool's, in its own frame, needs no boolean to show it. An intersect
+        // removes the sheets it misses, and checks each one as before.
+        let mut reach: Option<Vec<Option<solidcraft_geom::Aabb3>>> = None;
         for &i in &target_idx {
             if let Some(mb) = state.bodies.get(i).filter(|b| state.sheets.iter().any(|s| s.body == b.name)) {
                 let m = tool_frame(&mb.name);
+                if op == Operation::Cut && m.is_none() && !mb.body.is_mesh() && !tools.iter().any(|t| t.body.is_mesh()) {
+                    let reach = reach.get_or_insert_with(|| tools.iter().map(|t| more::body_box(&t.body)).collect());
+                    if !reach.is_empty()
+                        && let Some(target) = more::mesh_box(mb)
+                        && reach.iter().all(|tool| more::boxes_apart(&Some(target), tool))
+                    {
+                        continue;
+                    }
+                }
                 let bodies: Vec<Body> = tools.iter().map(|t| tool_in(t, m).map(|t| t.body)).collect::<Result<_>>()?;
+                #[cfg(test)]
+                cost_tests::count(|c| c.cut += 1);
                 sheet_boolean_unchanged(&mb.body, &bodies, op)?;
             }
         }

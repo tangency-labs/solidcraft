@@ -1196,3 +1196,34 @@ fn a_cut_still_runs_where_its_tool_touches_grazes_or_meets_a_curved_face() {
     assert!(volume(&work.model, &dome) < whole - 1.0, "the drill cuts into the dome");
     assert!(work.kept.is_empty());
 }
+
+/// A flat sheet of the default rule (2.5 mm steel) on a `w` x `h` rectangle from `corner` on XY.
+fn flat_sheet(doc: &mut Document, corner: Vec2, w: f64, h: f64) {
+    let mut sk = Sketch::new();
+    let p = [corner, corner + Vec2::new(w, 0.0), corner + Vec2::new(w, h), corner + Vec2::new(0.0, h)].map(|q| sk.add_point(q, None).unwrap());
+    for k in 0..4 {
+        sk.add_line_pts(p[k], p[(k + 1) % 4], None).unwrap();
+    }
+    let sketch = doc.add_feature(FeatureKind::Sketch { plane: PlaneRef::Origin { name: "XY".into() }, sketch: sk }, None).unwrap();
+    doc.add_feature(FeatureKind::SheetBase { sketch: SketchId(sketch), profiles: ProfileSel::All, rule: None, flip: false }, None).unwrap();
+}
+
+/// The sheet metal bodies of a model.
+fn sheet_bodies(model: &Model) -> Vec<String> {
+    model.state().sheets.iter().map(|s| s.body.clone()).collect()
+}
+
+/// A cut leaves the sheets it cannot reach as they were, without checking that it would leave
+/// each one unchanged (#10226).
+#[test]
+fn a_cut_leaves_sheets_it_cannot_reach_as_they_were() {
+    let mut doc = Document::new("far sheets");
+    for i in 0..5 {
+        flat_sheet(&mut doc, Vec2::new(200.0 * i as f64, 0.0), 150.0, 100.0);
+    }
+    block(&mut doc, "Plate", Vec3::new(0.0, -200.0, 0.0), [60.0, 60.0, 12.0]);
+    let work = cut_work(&mut doc, cutter(Vec3::new(30.0, -170.0, -1.0), 3.0, 20.0));
+    assert_eq!(work.cut, 1, "only the plate goes through a boolean");
+    assert_eq!(work.kept, sheet_bodies(&work.model), "every sheet is left as it was");
+    assert!(volume(&work.model, "Plate") < 43_200.0 - 300.0, "and the plate is cut");
+}
