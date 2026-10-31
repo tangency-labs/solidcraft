@@ -17,6 +17,7 @@
 //! | [`BSplineCurve::create_extended_curve`]                | `SmBSplineCurve::CreateExtendedCurve` (parameter) |
 //! | [`BSplineCurve::create_extended_curve_by_distance`]    | `SmBSplineCurve::CreateExtendedCurve` (distance) |
 //! | [`BSplineCurve::create_interpolating_curve`]           | `SmBSplineCurve::CreateInterpolatingCurve`     |
+//! | [`BSplineCurve::create_interpolating_curve_with_params`] | `SmBSplineCurve::CreateInterpolatingCurve` (fork `cpOptParams`) |
 //! | [`BSplineCurve::create_approximating_curve`]           | `SmBSplineCurve::CreateApproximatingCurve` (unit `nlib.crv_fit_p4`) |
 //! | [`BSplineCurve::dampen_knot_spacing`]                  | `SmBSplineCurve::DampenKnotSpacing`            |
 //! | [`BSplineCurve::degree_reduction`]                     | `SmBSplineCurve::DegreeReduction`              |
@@ -67,6 +68,11 @@
 //!   `short`), so on its unchecked one-vector path a degree of 32768 or more wraps; the
 //!   port takes a `usize` (no wrap), and the difftest FFI caps the degree at
 //!   `NL_MAXDEG` (17).
+//! - **Given parameters (SolidCraft fork `0cc8cd4`).** The fork's optional last
+//!   argument `cpOptParams` of `CreateInterpolatingCurve` is
+//!   [`BSplineCurve::create_interpolating_curve_with_params`];
+//!   [`BSplineCurve::create_interpolating_curve`] is it with `None` (the pinned
+//!   routine, unchanged).
 //! - **Input arrays.** `CreateInterpolatingCurve` reinterprets its `const` vector array
 //!   as the in/out `D` of `N_FitCrvFirstDeriv`, which rescales the caller's vectors in
 //!   place when their magnitudes are ignored; the port works on a copy.
@@ -134,8 +140,8 @@ use crate::nurbs::crv_basic::Curve;
 use crate::nurbs::crv_fit::p1::ParamMethod;
 use crate::nurbs::crv_fit::p2::interp;
 use crate::nurbs::crv_fit::p3::{
-    approx_closed_conditions, interp_first_derivs, interp_high_derivs, interp_knots_and_tangents,
-    EndTangents, ParamSource, VectorKind,
+    approx_closed_conditions, interp_first_derivs, interp_high_derivs, interp_high_derivs_params,
+    interp_knots_and_tangents, EndTangents, ParamSource, VectorKind,
 };
 use crate::nurbs::crv_fit::p4::approx_end_derivs;
 use crate::nurbs::crv_geom::ToleranceKind;
@@ -738,10 +744,46 @@ impl BSplineCurve {
         more_vectors: Option<&[Vec3]>,
         ignore_vector_magnitude: bool,
     ) -> Result<Self> {
+        Self::create_interpolating_curve_with_params(
+            par,
+            dim,
+            degree,
+            points,
+            vectors,
+            more_vectors,
+            ignore_vector_magnitude,
+            None,
+        )
+    }
+
+    /// [`BSplineCurve::create_interpolating_curve`] with optional parameters of the
+    /// points (SolidCraft fork `cpOptParams` of `CreateInterpolatingCurve`). With
+    /// `params`, one per point and strictly increasing, the end-derivative branches
+    /// (no vectors, a start vector, start and end vectors, with their higher
+    /// derivatives) interpolate at them in place of `par`, the end derivatives taken
+    /// with respect to them, and degree 1 with two points is no longer the line
+    /// segment shortcut. `None` is [`BSplineCurve::create_interpolating_curve`].
+    ///
+    /// # Errors
+    ///
+    /// Those of [`BSplineCurve::create_interpolating_curve`]; `InvalidInput`
+    /// (`SM_ERR_INVALID_INPUT`) when `params` is given with a length other than the
+    /// point count, with one vector per point (more than two points), or not strictly
+    /// increasing.
+    pub fn create_interpolating_curve_with_params(
+        par: ParamMethod,
+        dim: u64,
+        degree: usize,
+        points: &[Point3],
+        vectors: &[Vec3],
+        more_vectors: Option<&[Vec3]>,
+        ignore_vector_magnitude: bool,
+        params: Option<&[f64]>,
+    ) -> Result<Self> {
         const OP: &str = OP_INTERP_CRV;
         let mut degree = degree;
 
-        if degree == 1 && points.len() == 2 {
+        if degree == 1 && points.len() == 2 && params.is_none() {
             let p0 = vec_at(points, 0, OP)?;
             let p1 = vec_at(points, 1, OP)?;
             return Self::create_line_segment(dim, p0, p1);
@@ -752,6 +794,27 @@ impl BSplineCurve {
         }
 
         let more = more_vectors.unwrap_or(&[]);
+
+        // SolidCraft change: the given parameters, one per point, strictly increasing
+        if let Some(u) = params {
+            if u.len() != points.len() || (vectors.len() == points.len() && points.len() > 2) {
+                return Err(SolidError::invalid_input(
+                    OP,
+                    "parameters: one per point, not with a vector per point",
+                ));
+            }
+            if u.windows(2).any(|w| !matches!(w, [a, b] if b > a)) {
+                return Err(SolidError::invalid_input(
+                    OP,
+                    "parameters not strictly increasing",
+                ));
+            }
+        }
+        // the end-derivative interpolation, at the given parameters or by the parametrization
+        let fit_high_derivs = |ds: &[Vec3], de: &[Vec3], degree: usize| match params {
+            Some(u) => interp_high_derivs_params(points, degree, ds, de, u),
+            None => interp_high_derivs(points, degree, ds, de, par),
+        };
 
         // branch to construct new gw_CURVE
         let cur = if vectors.len() == points.len() && points.len() > 2 {
@@ -785,16 +848,16 @@ impl BSplineCurve {
                     }
                 }
             }
-            interp_high_derivs(points, degree, &ds, &de, par).map_err(SolidError::nl_ser(OP))?
+            fit_high_derivs(&ds, &de, degree).map_err(SolidError::nl_ser(OP))?
         } else if vectors.len() == 1 {
             // Start Vector
             let mut ds = vec![vec_at(vectors, 0, OP)?];
             if more_vectors.is_some() && !more.is_empty() {
                 ds.push(vec_at(more, 0, OP)?);
             }
-            interp_high_derivs(points, degree, &ds, &[], par).map_err(SolidError::nl_ser(OP))?
+            fit_high_derivs(&ds, &[], degree).map_err(SolidError::nl_ser(OP))?
         } else if vectors.is_empty() {
-            interp_high_derivs(points, degree, &[], &[], par).map_err(SolidError::nl_ser(OP))?
+            fit_high_derivs(&[], &[], degree).map_err(SolidError::nl_ser(OP))?
         } else {
             return Err(SolidError::sm_err(OP));
         };
@@ -2349,6 +2412,111 @@ mod tests {
         }
         c.knots_mut().copy_from_slice(&u);
         BSplineCurve::from_nurb(c, 3, false)
+    }
+
+    /// The fork's tangent-end call (cd47efd): degree 3, a zero start vector and a
+    /// start second derivative, at given stations on [1, 3]. The fit reproduces
+    /// X(t) = (s^2, s^3, 2 s^2 - s^3), s = t - 1, which lies in its spline space.
+    #[test]
+    fn interpolating_curve_at_given_params() {
+        let x = |t: f64| {
+            let s = t - 1.0;
+            Vec3::new(s * s, s * s * s, 2.0 * s * s - s * s * s)
+        };
+        let u = [1.0, 1.1, 1.5, 2.2, 3.0];
+        let pts: Vec<Point3> = u.iter().map(|&t| x(t)).collect();
+        let d1 = [Vec3::ZERO];
+        let d2 = [Vec3::new(2.0, 0.0, 4.0)];
+        let c = BSplineCurve::create_interpolating_curve_with_params(
+            ParamMethod::Uniform,
+            3,
+            3,
+            &pts,
+            &d1,
+            Some(&d2),
+            false,
+            Some(&u),
+        )
+        .unwrap();
+        for i in 0..=40 {
+            let t = 1.0 + 2.0 * f64::from(i) / 40.0;
+            let p = c.evaluate_point(t).unwrap();
+            assert!((p - x(t)).length() < 1e-12, "t = {t}: {p:?}");
+        }
+        let d = c.evaluate(1.0, 2, false, false).unwrap();
+        assert!(d[1].length() < 1e-12);
+        assert!((d[2] - d2[0]).length() < 1e-11);
+
+        // None is the pinned routine.
+        let a = BSplineCurve::create_interpolating_curve(
+            ParamMethod::ChordLength,
+            3,
+            3,
+            &pts,
+            &d1,
+            Some(&d2),
+            false,
+        )
+        .unwrap();
+        let b = BSplineCurve::create_interpolating_curve_with_params(
+            ParamMethod::ChordLength,
+            3,
+            3,
+            &pts,
+            &d1,
+            Some(&d2),
+            false,
+            None,
+        )
+        .unwrap();
+        assert_eq!(format!("{a:?}"), format!("{b:?}"));
+
+        // Degree 1 with two points and parameters: no line-segment shortcut, the
+        // domain is the parameters'.
+        let two = [Vec3::new(0.0, 0.0, 0.0), Vec3::new(4.0, 2.0, 0.0)];
+        let l = BSplineCurve::create_interpolating_curve_with_params(
+            ParamMethod::Uniform,
+            3,
+            1,
+            &two,
+            &[],
+            None,
+            false,
+            Some(&[2.0, 6.0]),
+        )
+        .unwrap();
+        let m = l.evaluate_point(3.0).unwrap();
+        assert!((m - Vec3::new(1.0, 0.5, 0.0)).length() < 1e-15);
+
+        // Refused: wrong count, not strictly increasing, a vector per point.
+        let bad = |params: &[f64], vectors: &[Vec3]| {
+            BSplineCurve::create_interpolating_curve_with_params(
+                ParamMethod::Uniform,
+                3,
+                3,
+                &pts,
+                vectors,
+                None,
+                false,
+                Some(params),
+            )
+        };
+        assert!(matches!(
+            bad(&u[..4], &[]),
+            Err(SolidError::InvalidInput { .. })
+        ));
+        assert!(matches!(
+            bad(&[1.0, 1.1, 1.1, 2.2, 3.0], &[]),
+            Err(SolidError::InvalidInput { .. })
+        ));
+        assert!(matches!(
+            bad(&[1.0, 1.1, f64::NAN, 2.2, 3.0], &[]),
+            Err(SolidError::InvalidInput { .. })
+        ));
+        assert!(matches!(
+            bad(&u, &[Vec3::ZERO; 5]),
+            Err(SolidError::InvalidInput { .. })
+        ));
     }
 
     #[test]
