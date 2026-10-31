@@ -139,7 +139,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .at("SKETCH", "CONSTRAINTS")
         .icon("c_coincident")
         .enabled(in_sketch)
-        .params(concat!("a, b: points, a point and a curve or sketch axis (x / y: the sketch's own axes, unless a curve has that id; an axis becomes a linked construction line on it, reported in created), or two distinct lines (joins their closest endpoints), or two circles/arcs (the second lies on the first: concentric and equal, `constraints` lists both)", model_operand_doc!())),
+        .params(concat!("a, b: points (or a line's middle as {midpoint: line}, which becomes a point tied there), a point and a curve or sketch axis (x / y: the sketch's own axes, unless a curve has that id; an axis becomes a linked construction line on it, reported in created), or two distinct lines (joins their closest endpoints), or two circles/arcs (the second lies on the first: concentric and equal, `constraints` lists both)", model_operand_doc!())),
     CommandSpec::new("sketch.constraint.tangent", "Tangent", c_tangent)
         .at("SKETCH", "CONSTRAINTS")
         .icon("c_tangent")
@@ -2215,17 +2215,38 @@ fn c_coincident(s: &mut Session, p: &Value) -> Result<Value> {
         if let Some((a, b)) = line_points {
             return Ok(ConstraintKind::Coincident { p: a, q: b });
         }
+        // A line's middle, `{midpoint: line}` as a selected midpoint is sent (#10311): the point
+        // tied there by a Midpoint constraint stands for it, made as Horizontal/Vertical makes it.
+        let middle = |sk: &mut Sketch, key: &str| -> Result<Option<usize>> {
+            let Some(line) = p.get(key).and_then(|v| v.get("midpoint")) else { return Ok(None) };
+            let l = curve_ref(sk, Some(line), cmd, "midpoint")?;
+            AlignmentTarget::Midpoint(l).materialize(sk, cmd).map(Some)
+        };
+        let (a_mid, b_mid) = (middle(sk, "a")?, middle(sk, "b")?);
         let aref = p.get("a").and_then(Value::as_str).unwrap_or_default();
-        let bref = p.get("b").and_then(Value::as_str).ok_or_else(|| bad(cmd, "`b` must be a point or curve"))?;
+        let bref = p.get("b").and_then(Value::as_str);
+        let b_point = match (b_mid, bref) {
+            (Some(b), _) => Some(b),
+            (None, Some(r)) => sk.resolve_point(r),
+            (None, None) => return Err(bad(cmd, "`b` must be a point or curve")),
+        };
+        let bref = bref.unwrap_or_default();
         // A curve (or sketch axis) picked first and a point second: the point goes onto it.
-        if sk.resolve_point(aref).is_none()
-            && let Some(q) = sk.resolve_point(bref)
+        if a_mid.is_none()
+            && sk.resolve_point(aref).is_none()
+            && let Some(q) = b_point
             && let Some(c) = curve_or_axis(sk, aref)?
         {
             return Ok(ConstraintKind::PointOnCurve { p: q, c });
         }
-        let a = point_ref(sk, p.get("a"), cmd, "a")?;
-        if let Some(b) = sk.resolve_point(bref) {
+        let a = match a_mid {
+            Some(a) => a,
+            None => point_ref(sk, p.get("a"), cmd, "a")?,
+        };
+        if let Some(b) = b_point {
+            if a == b && (a_mid.is_some() || b_mid.is_some()) {
+                return Err(bad(cmd, "that point is already the line's midpoint"));
+            }
             return Ok(ConstraintKind::Coincident { p: a, q: b });
         }
         let c = curve_or_axis(sk, bref)?.ok_or_else(|| bad(cmd, format!("unknown entity `{bref}`")))?;

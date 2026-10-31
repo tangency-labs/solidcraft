@@ -1100,7 +1100,10 @@ fn sketch_entity_items(app: &SolveApp) -> Vec<Item> {
     let st = app.session.world_state();
     let Some(ss) = st.sketch(sid) else { return Vec::new() };
     if app.session.selection.iter().any(|sel| matches!(sel, Sel::SketchMidpoint { .. })) {
-        return alignment_items(&app.session.selection);
+        // A midpoint with a point or curve can also be made coincident with it (#10311).
+        let coincident = crate::selection::coincident_operands(&app.session.selection)
+            .map(|operands| cmd(app, "sketch.constraint.coincident", "Coincident").with(operands));
+        return coincident.into_iter().chain(alignment_items(&app.session.selection)).collect();
     }
     let mut lines = Vec::new();
     let mut rounds = Vec::new();
