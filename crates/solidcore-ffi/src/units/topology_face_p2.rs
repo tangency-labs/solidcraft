@@ -560,24 +560,54 @@ fn raw(op: Op, path: &str, input: &[f64]) -> Result<Vec<f64>, FfiError> {
 /// [`FfiError::InvalidArgument`] for a malformed input; [`FfiError::Status`] for a shim
 /// failure.
 pub fn eval(op: Op, path: &str, input: &[f64]) -> Result<Vec<f64>, FfiError> {
-    let mut rd = Reader::new(input);
     if !op.is_brep() {
-        geom_args(op, &mut rd)?;
-        rd.done()?;
+        validate(op, "", input, None)?;
         return raw(op, "", input);
     }
-    brep_block(&mut rd, path)?;
-    let block = input.get(..rd.at).ok_or_else(|| bad("input too short"))?;
+    let at = validate(op, path, input, None)?;
+    let block = input.get(..at).ok_or_else(|| bad("input too short"))?;
     let export = raw(Op::Export, path, block)?;
     if op == Op::Export {
-        rd.done()?;
         return Ok(export);
     }
     let Some(c) = counts(&export) else {
         // the B-rep could not be built: the op reports the same failure
         return Ok(export);
     };
-    brep_args(op, &mut rd, c)?;
-    rd.done()?;
+    validate(op, path, input, Some(c))?;
     raw(op, path, input)
+}
+
+/// The checks [`eval`] makes before it calls the shim, without calling it, for a caller
+/// that runs the Rust side on its own B-rep (the runner, PR #502's convention: an input
+/// the shim never sees is a harness error on both sides). A geometry op: its whole
+/// `input`. A B-rep op: the B-rep block (`path` as for [`eval`]; an [`Op::Export`] must be
+/// the block alone) and, given the B-rep's entity counts `c` ([`counts`] order), the
+/// arguments after it; without `c` the arguments are not checked. Returns the B-rep
+/// block's length (`0` for a geometry op).
+///
+/// # Errors
+///
+/// [`FfiError::InvalidArgument`] for a malformed input.
+pub fn validate(
+    op: Op,
+    path: &str,
+    input: &[f64],
+    c: Option<[usize; 10]>,
+) -> Result<usize, FfiError> {
+    let mut rd = Reader::new(input);
+    if !op.is_brep() {
+        geom_args(op, &mut rd)?;
+        rd.done()?;
+        return Ok(0);
+    }
+    brep_block(&mut rd, path)?;
+    let at = rd.at;
+    if op == Op::Export {
+        rd.done()?;
+    } else if let Some(c) = c {
+        brep_args(op, &mut rd, c)?;
+        rd.done()?;
+    }
+    Ok(at)
 }

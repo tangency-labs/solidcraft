@@ -1092,6 +1092,13 @@ fn setup(
 }
 
 fn rust(i: &Inputs) -> Result<Output, HarnessError> {
+    // an input the FFI refuses is a harness error on both sides (PR #502's convention):
+    // the shim never runs it, so the Rust side must not either. Nightly fuzz case
+    // fuzz00209 (run 41040730716) moved a UV line's end to v = 1e300: the FFI refuses a
+    // line end outside the face domain for the C++ side, while this side built the face
+    // and classified its loops for 48 s (the curve coincidence search along a 1e300-long
+    // trim). The checks see the same input vector as `run_ffi`.
+    ffi::validate(&path_of(i)?, &input_of(i)?).map_err(|e| harness(e.to_string()))?;
     let k = Kernel::default();
     // the B-rep: the Rust kernel's own build of the source (no C++ state)
     let (mut b, _) = match own_brep(&i.brep, i.validate_only, i.init_gaps)? {
@@ -1511,6 +1518,33 @@ impl UnitDiff for Runner {
 mod tests {
     use super::*;
     use std::collections::BTreeMap;
+
+    /// Nightly fuzz case `query.face_p4/fuzz00209` (run 41040730716): a UV line ending at
+    /// v = 1e300 on a cylinder face. The FFI refuses a line end outside the face domain for
+    /// the C++ side, and the Rust side must be refused the same way instead of classifying
+    /// the face's loops along a 1e300-long trim (48 s).
+    #[test]
+    fn line_end_outside_the_domain_is_refused_on_both_sides() {
+        let v = serde_json::json!({
+            "brep": {
+                "copies": 1, "kind": "curves", "points": [],
+                "loops": [
+                    [{"a": 0.0, "b": 0.35403041722463596, "c": 1.0, "d": 1e300,
+                      "rev": false, "t": "line"}],
+                    [{"a": 1.0, "b": 0.30845071908772786, "c": 0.0,
+                      "d": 0.30845071908772786, "rev": false, "t": "line"}]
+                ],
+                "surface": {"a": 1.7697804728715845, "c": 4.514774976811207,
+                            "kind": "cylinder", "scale": 1.0, "swap": false}
+            },
+            "face": 18, "init_gaps": true, "loops": 0, "props": 1, "validate_only": false
+        });
+        let i: Inputs = serde_json::from_value(v).unwrap();
+        let cpp = cpp(&i).unwrap_err().to_string();
+        let rust = rust(&i).unwrap_err().to_string();
+        assert_eq!(cpp, "c++: invalid argument: line: end outside the domain");
+        assert_eq!(rust, cpp.trim_start_matches("c++: "));
+    }
 
     /// Most generated cases reach a real classification on the C++ side (not a build
     /// failure or a rejection), and the Rust side compares most of those.

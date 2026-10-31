@@ -1639,7 +1639,17 @@ impl ClassObject for H {
 }
 
 fn run_rust(i: &Inputs) -> Result<Output, HarnessError> {
+    // an input the FFI refuses is a harness error on both sides (PR #502's convention):
+    // the shim never runs it, so the Rust side must not either. Nightly fuzz case
+    // fuzz00020 (run 41040730716) made one control point of a non-rational face surface
+    // rational (weight 1, the others the non-rational marker -f64::MAX): the FFI refuses
+    // the mixed rationality for the C++ side, while this side built the face on those
+    // weights and ran `best_uv` past the fuzz time limit. The checks see the same input
+    // vectors as `run_cpp`: a geometry op's arguments; a B-rep op's B-rep block before
+    // the build, then its arguments against this side's own B-rep counts.
     if !i.op.is_brep() {
+        let (code, args) = op_args(&i.op)?;
+        ffi::validate(code, "", &args, None).map_err(|e| harness(e.to_string()))?;
         return match run_rust_geom(&i.op) {
             Ok(o) => Ok(geom_output(&i.op, o)),
             Err(Fail::Solid(e)) => rust_err(&e),
@@ -1647,8 +1657,11 @@ fn run_rust(i: &Inputs) -> Result<Output, HarnessError> {
         };
     }
     let brep = i.brep.as_ref().ok_or_else(|| harness("B-rep op without B-rep"))?;
+    let path = path_of(i)?;
+    let block = brep_block(i)?;
+    ffi::validate(Op::Export, &path, &block, None).map_err(|e| harness(format!("export: {e}")))?;
     let mut k = Kernel::default();
-    let (mut b, c) = match own_brep(&mut k, brep, &path_of(i)?, i.validate_only, i.init_gaps)? {
+    let (mut b, c) = match own_brep(&mut k, brep, &path, i.validate_only, i.init_gaps)? {
         Ok(x) => x,
         Err(o) => return Ok(o),
     };
@@ -1656,6 +1669,10 @@ fn run_rust(i: &Inputs) -> Result<Output, HarnessError> {
         Ok(op) => op,
         Err(name) => return Ok(Output::err(name)),
     };
+    let (code, args) = op_args(&op)?;
+    let mut input = block;
+    input.extend(args);
+    ffi::validate(code, &path, &input, Some(c)).map_err(|e| harness(e.to_string()))?;
     match run_rust_op(&mut b, &op) {
         Ok(body) => {
             let body = match &op {
@@ -2361,4 +2378,23 @@ impl UnitDiff for Runner {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
 
+    /// Nightly fuzz case `topology.face_p2/fuzz00020` (run 41040730716): a non-rational face
+    /// surface (weights the marker `-f64::MAX`) with one weight set to 1, under a `best_uv`
+    /// op. The FFI refuses the mixed rationality for the C++ side, and the Rust side must
+    /// be refused the same way instead of building the face on those weights.
+    #[test]
+    fn mixed_rationality_is_refused_on_both_sides() {
+        let i: Inputs = serde_json::from_str(FUZZ00020).unwrap();
+        let cpp = run_cpp(&i).unwrap_err().to_string();
+        let rust = run_rust(&i).unwrap_err().to_string();
+        assert_eq!(cpp, "c++ export: invalid argument: surface: mixed rationality");
+        assert_eq!(rust, cpp.trim_start_matches("c++ "));
+    }
+
+    /// The inputs of nightly fuzz case `topology.face_p2/fuzz00020`.
+    const FUZZ00020: &str = r#"{"brep":{"dom":[0.0,0.0,1.0,1.0],"kind":"face","surface":{"bspline":{"form":0,"net":[[[0.0,0.0,0.48290885450886867,1.0],[0.0,1.0,0.026558355163892045,-1.7976931348623157e+308],[0.0,2.0,0.3236024010000994,-1.7976931348623157e+308]],[[1.0,0.0,0.16008492196929902,-1.7976931348623157e+308],[1.0,1.0,-0.3818595663202652,-1.7976931348623157e+308],[1.0,2.0,0.42438880397299017,-1.7976931348623157e+308]],[[2.0,0.0,-0.39686080956013436,-1.7976931348623157e+308],[2.0,1.0,0.05611566788706901,-1.7976931348623157e+308],[2.0,2.0,0.3283143419234992,-1.7976931348623157e+308]],[[3.0,0.0,0.363745333750945,-1.7976931348623157e+308],[3.0,1.0,0.36228231985820736,-1.7976931348623157e+308],[3.0,2.0,0.027268171389889018,-1.7976931348623157e+308]],[[4.0,0.0,-0.345322603754885,-1.7976931348623157e+308],[4.0,1.0,-0.32212985152181606,-1.7976931348623157e+308],[4.0,2.0,-0.4060463095725655,-1.7976931348623157e+308]]],"oob":false,"p":3,"q":1,"u":[0.0,0.0,0.0,0.0,0.5811054631449626,1.0,1.0,1.0,1.0],"v":[0.0,0.0,0.8672390488922626,1.0,1.0]}}},"cands":[{"curve":{"cpts":[[0.7895661339805444,-0.17171284016679556,1.7976931348623157e+308,-1.7976931348623157e+308],[0.8055199936793002,0.08681972422832687,1.7976931348623157e+308,-1.7976931348623157e+308],[0.7898024725911749,0.32205588150363834,1.7976931348623157e+308,-1.7976931348623157e+308]],"dim":2,"p":1,"u":[-1.5099557060603712,-1.5099557060603712,3.4113170103733608,5.537417838142818,5.537417838142818]},"kind":1,"orient":1},{"curve":{"cpts":[[0.41791217040037293,0.6071607649021995,-1e+300,1.846060688685256],[0.44522646681436484,0.38625390666912246,1.7976931348623157e+308,1.2398708818883835],[0.7494185757767893,0.6328648305934458,1.7976931348623157e+308,1.8680767293062457],[0.7900457641165108,0.4428112016048782,1.7976931348623157e+308,1.7317769440249347],[0.8780064788048215,0.3577346108988606,1.7976931348623157e+308,1.8293958767881109]],"dim":2,"p":3,"u":[0.0,0.0,0.0,0.0,0.6994601289283375,1.0,1.0,1.0,1.0]},"kind":1,"orient":1},{"curve":null,"kind":2,"orient":1}],"eu":870782,"init_gaps":true,"op":"best_uv","validate_only":false}"#;
+}

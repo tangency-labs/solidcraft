@@ -464,6 +464,22 @@ pub fn check_brep_block(input: &[f64], path: &str) -> Result<usize, FfiError> {
     Ok(rd.at)
 }
 
+/// The checks [`eval`] makes before it calls the shim, without calling it: the B-rep block
+/// and the case block of `input` (`path` as for [`eval`]). The runner applies them to its
+/// Rust side too, so an input the shim never sees is a harness error on both sides.
+///
+/// # Errors
+///
+/// [`FfiError::InvalidArgument`] for input the shim would not handle safely (module docs).
+pub fn validate(path: &str, input: &[f64]) -> Result<(), FfiError> {
+    let mut rd = Reader { input, at: 0 };
+    brep_block(&mut rd, path)?;
+    rd.index(1 << 20)?;
+    rd.index(1)?;
+    rd.index(4)?;
+    rd.done()
+}
+
 /// Runs `op` on `input` (a B-rep block and the case block); `path` is the `.smb` file of
 /// a kind `0` block (ignored otherwise).
 ///
@@ -472,12 +488,7 @@ pub fn check_brep_block(input: &[f64], path: &str) -> Result<usize, FfiError> {
 /// [`FfiError::InvalidArgument`] for input the shim would not handle safely (module
 /// docs); [`FfiError::Status`] for a shim failure.
 pub fn eval(op: Op, path: &str, input: &[f64]) -> Result<Vec<f64>, FfiError> {
-    let mut rd = Reader { input, at: 0 };
-    brep_block(&mut rd, path)?;
-    rd.index(1 << 20)?;
-    rd.index(1)?;
-    rd.index(4)?;
-    rd.done()?;
+    validate(path, input)?;
     let c_path = std::ffi::CString::new(path).map_err(|_| bad("path contains NUL"))?;
     call_with_buffer(1 << 16, |buf, len| {
         // SAFETY: input is valid for input.len() reads, c_path is a NUL-terminated

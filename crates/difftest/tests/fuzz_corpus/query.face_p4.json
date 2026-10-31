@@ -1,0 +1,6 @@
+{
+  "unit": "query.face_p4",
+  "cases": [
+    {"name": "fuzz00209_line_end_v_1e300", "origin": "nightly fuzz run 41040730716: query.face_p4/fuzz00209 (timeout: rust: no result after 20 s; base gen0117, mutations /brep/loops/0/0/d = 1e+300)", "issue": "runner: the Rust side built the face and classified its loops for 48 s (the curve coincidence search along the 1e300-long trim) where the FFI refuses a line end outside the face domain for the C++ side; fixed by applying the FFI's checks on the Rust side (query_face_p4::validate)", "cpp": "harness: c++: invalid argument: line: end outside the domain", "rust": "harness: invalid argument: line: end outside the domain", "inputs": {"brep": {"copies": 1, "kind": "curves", "loops": [[{"a": 0.0, "b": 0.35403041722463596, "c": 1.0, "d": 1e+300, "rev": false, "t": "line"}], [{"a": 1.0, "b": 0.30845071908772786, "c": 0.0, "d": 0.30845071908772786, "rev": false, "t": "line"}]], "points": [], "surface": {"a": 1.7697804728715845, "c": 4.514774976811207, "kind": "cylinder", "scale": 1.0, "swap": false}}, "face": 18, "init_gaps": true, "loops": 0, "props": 1, "validate_only": false}}
+  ]
+}
