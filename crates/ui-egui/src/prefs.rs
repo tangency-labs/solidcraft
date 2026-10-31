@@ -1109,6 +1109,8 @@ preference_settings! {
     /// Leave the commands the ribbon shows as buttons (pinned ones) out of its panel drop-downs,
     /// which then list only the rest (#4739).
     ribbon_menus_skip_pinned: bool = false, PAGE_INTERFACE => check_tr("ui.ribbon_menus_skip_pinned");
+    /// Group sketch chamfer modes into a submenu in Modify.
+    sketch_chamfer_submenu: bool = true, PAGE_INTERFACE => check_id("prefs.sketch_chamfer_submenu");
     /// Interface scale (1 = 100 %).
     ui_scale: f32 = 1.0, PAGE_INTERFACE, accept(0.5..=2.5);
     /// Interface font: an installed font family (or a font file), or empty for the built-in one
