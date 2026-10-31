@@ -850,6 +850,7 @@ fn extrude(s: &mut Session, p: &Value) -> Result<Value> {
             .ok_or_else(|| bad(cmd, "faces must contain between 1 and 1024 points"))?;
         let points = faces.iter().map(|point| vec3(point).ok_or_else(|| bad(cmd, "faces must be points [x,y,z]"))).collect::<Result<Vec<_>>>()?;
         let (id, points, body) = super::face::sketch_of_faces(s, &points, cmd, str_(p, "face_body"))?;
+        s.active_sketch = None;
         Some((id, Some(ProfileSel::Points { points }), Some(body)))
     } else {
         None
@@ -861,6 +862,7 @@ fn extrude(s: &mut Session, p: &Value) -> Result<Value> {
         match p.get("face").and_then(vec3) {
             Some(fp) => {
                 let (id, inside, body) = super::face::sketch_of_face(s, fp, cmd, str_(p, "face_body"))?;
+                s.active_sketch = None;
                 (id, Some(ProfileSel::Points { points: vec![inside] }), Some(body))
             }
             None => (feature_sketch(s, p, cmd)?, None, None),
