@@ -176,6 +176,9 @@ pub struct ViewportState {
     pub orbit_pivot: Option<Vec3>,
     /// The orbit drag under way, summed from where it began (see [`crate::navigation::orbit`]).
     pub orbit_from: Option<crate::navigation::OrbitFrom>,
+    /// A drag (an orbit or pan in the view, or on the navigator) moved the cursor to the view's
+    /// other side: the jump, until the pointer reports it (see [`crate::navigation::wrap_cursor`]).
+    pub(crate) cursor_wrap: Option<egui::Vec2>,
     /// Continuous orbit: the view turns about the vertical until the next click or key.
     pub spin: bool,
     /// The point continuous orbit turns about (Orbit around: origin or the cursor's model point),
@@ -6369,8 +6372,9 @@ fn axis_hit(tips: &[(&str, Vec3, Pos2, f64)], p: Pos2) -> Option<usize> {
     tips.iter().enumerate().rev().find(|(_, (_, _, at, _))| at.distance(p) <= AXIS_RADIUS).map(|(i, _)| i)
 }
 
-/// Dragging anywhere on the axis gizmo orbits about the view centre. A stationary press
-/// on a tip chooses its view. Floating windows own their input over the gizmo.
+/// Dragging anywhere on the axis gizmo orbits about the view centre, and goes on past the edge
+/// of the view: the cursor wraps to the other side, as in an orbit drag on the view. A stationary
+/// press on a tip chooses its view. Floating windows own their input over the gizmo.
 fn axis_view_orbit(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) -> bool {
     let (pressed, down, decided, origin, pos, shift) = ui.input(|i| {
         let p = &i.pointer;
@@ -6389,13 +6393,19 @@ fn axis_view_orbit(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) -> bool {
     }
     if !down && app.viewport.axis_drag.take().is_some() {
         app.viewport.orbit_free = None;
+        // A cursor move this drag asked for and never got (Wayland) must not correct a later drag.
+        app.viewport.cursor_wrap = None;
     }
     let Some(last) = app.viewport.axis_drag.filter(|_| decided) else { return false };
     ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
     if let Some(p) = pos {
         app.cancel_view_animation();
-        orbit_drag(app, rect, f64::from(p.x - last.x), f64::from(p.y - last.y), None, shift, false);
+        // The frame that reports a cursor wrap turns the view only by the hand's motion.
+        let delta = crate::navigation::unwrapped_delta(app, p - last);
+        orbit_drag(app, rect, f64::from(delta.x), f64::from(delta.y), None, shift, false);
         app.viewport.axis_drag = Some(p);
+        // At the edge of the view the cursor moves to the other side and the drag keeps turning.
+        crate::navigation::wrap_cursor(app, ui, rect);
         ui.ctx().request_repaint();
     }
     true
@@ -10518,6 +10528,89 @@ mod tests {
                 assert!(h.app.viewport.boxsel.is_none());
             }
         }
+    }
+
+    /// A drag on the navigator that reaches the edge of the view keeps turning like an orbit in
+    /// the view: the cursor moves to the other side, and the frame that reports the jump turns the
+    /// view only by the hand's motion, with the view's own navigation running first in the frame
+    /// as in the app. Events from before the move don't ask for a second one. With
+    /// `orbit_cursor_wrap` off the cursor is never moved.
+    #[test]
+    fn a_navigator_drag_at_the_edge_moves_the_cursor_across_and_keeps_turning() {
+        use egui::{Event, Modifiers, PointerButton, ViewportCommand, pos2, vec2};
+        let mut s = solidcraft_engine::Session::default();
+        s.execute("solid.box", &json!({"length":40,"width":30,"height":20})).unwrap();
+        let mut app = SolveApp::new(s, crate::Services::default());
+        let ctx = egui::Context::default();
+        crate::fonts::setup_bundled_fonts(&ctx);
+        let view = Rect::from_min_size(Pos2::ZERO, vec2(800.0, 600.0));
+        let mut time = 0.0;
+        let mut frame = |app: &mut SolveApp, events: Vec<Event>| {
+            time += 1.0 / 60.0;
+            let raw = egui::RawInput { screen_rect: Some(view), time: Some(time), focused: true, events, ..Default::default() };
+            let mut out = ctx.run_ui(raw, |ui| {
+                let rect = ui.max_rect();
+                app.viewport.rect = Some(rect);
+                let resp = ui.interact(rect, ui.id().with("model"), egui::Sense::click_and_drag());
+                // The app's order: the view's navigation first, then the navigator over it.
+                handle(app, ui, rect, &resp, NavCaps::MODEL);
+                axis_view(app, ui, rect);
+            });
+            out.textures_delta.clear();
+            let commands = out.viewport_output.remove(&egui::ViewportId::ROOT).map(|v| v.commands).unwrap_or_default();
+            commands.into_iter().filter_map(|c| if let ViewportCommand::CursorPosition(p) = c { Some(p) } else { None }).collect::<Vec<_>>()
+        };
+        let turn = |a: f64, b: f64| (b - a + std::f64::consts::PI).rem_euclid(std::f64::consts::TAU) - std::f64::consts::PI;
+        let button = PointerButton::Primary;
+        let mods = Modifiers::NONE;
+        // The compass sits at the view's top right, so a drag to the right reaches the edge soon.
+        let at = axis_center(&app, view);
+        assert!(at.x > 700.0 && at.y < 100.0, "{at:?}");
+        frame(&mut app, vec![Event::PointerMoved(at)]);
+        frame(&mut app, vec![Event::PointerButton { pos: at, button, pressed: true, modifiers: mods }]);
+        assert!(app.viewport.axis_drag.is_some(), "the press takes the navigator");
+        let mut x = at.x;
+        let mut step = 0.0;
+        while x < 780.0 {
+            x += 20.0;
+            let before = app.cam.yaw;
+            assert!(frame(&mut app, vec![Event::PointerMoved(pos2(x, at.y))]).is_empty(), "no move inside the view ({x})");
+            step = turn(before, app.cam.yaw);
+            assert!(step.abs() > 1e-4, "the drag turns the view ({x})");
+        }
+        // Past the right edge: the cursor goes to the left edge, and the view turns on as usual.
+        let before = app.cam.yaw;
+        x += 20.0;
+        assert_eq!(frame(&mut app, vec![Event::PointerMoved(pos2(x, at.y))]), vec![pos2(x - 792.0, at.y)]);
+        assert!((turn(before, app.cam.yaw) - step).abs() < step.abs() * 0.01);
+        assert!(app.viewport.axis_drag.is_some() && app.viewport.cursor_wrap.is_some());
+        // A move the window had queued before the cursor moved: no second request.
+        assert!(frame(&mut app, vec![Event::PointerMoved(pos2(x + 6.0, at.y))]).is_empty());
+        assert!(app.viewport.cursor_wrap.is_some(), "the view's navigation leaves the navigator's wrap alone");
+        // The pointer reports the jump plus 20 points more of the hand's motion.
+        let before = app.cam.yaw;
+        x = x + 6.0 - 792.0 + 20.0;
+        assert!(frame(&mut app, vec![Event::PointerMoved(pos2(x, at.y))]).is_empty());
+        let after = turn(before, app.cam.yaw);
+        assert!((after - step).abs() < step.abs() * 0.01, "the jump doesn't turn the view: {after} vs {step}");
+        assert_eq!(app.viewport.cursor_wrap, None);
+        let before = app.cam.yaw;
+        x += 20.0;
+        frame(&mut app, vec![Event::PointerMoved(pos2(x, at.y))]);
+        assert!((turn(before, app.cam.yaw) - step).abs() < step.abs() * 0.01, "and keeps turning the same way");
+        frame(&mut app, vec![Event::PointerButton { pos: pos2(x, at.y), button, pressed: false, modifiers: mods }]);
+        frame(&mut app, vec![]);
+        assert!(app.viewport.axis_drag.is_none(), "release clears the axis gesture");
+        assert_eq!(app.viewport.cursor_wrap, None);
+        // With the preference off, the same drag reaches the edge and the cursor stays there.
+        app.preferences.orbit_cursor_wrap = false;
+        frame(&mut app, vec![Event::PointerButton { pos: at, button, pressed: true, modifiers: mods }]);
+        assert!(app.viewport.axis_drag.is_some());
+        for dx in [20.0, 40.0, 60.0, 66.0, 100.0] {
+            assert!(frame(&mut app, vec![Event::PointerMoved(pos2(at.x + dx, at.y))]).is_empty(), "no cursor move with wrapping off ({dx})");
+        }
+        assert_eq!(app.viewport.cursor_wrap, None);
+        frame(&mut app, vec![Event::PointerButton { pos: pos2(at.x + 100.0, at.y), button, pressed: false, modifiers: mods }]);
     }
 
     #[test]
