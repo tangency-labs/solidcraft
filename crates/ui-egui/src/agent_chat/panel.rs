@@ -1070,7 +1070,7 @@ fn switcher(app: &mut SolveApp, ui: &mut egui::Ui) {
                         add = true;
                     }
                     if ui_kit::list_picker(ui, "settings", tr("ui.ai_settings"), false).clicked() {
-                        crate::prefs::open_at(app, crate::prefs::PAGE_AI);
+                        crate::prefs::open_at(app, crate::prefs::PAGE_ASSISTANT);
                     }
                 })
             })
@@ -1808,7 +1808,7 @@ fn conversation(app: &mut SolveApp, ui: &mut egui::Ui) {
         if agents::entries(app).is_empty() && app.agent_chat.detecting.is_none() {
             ui_kit::assistant_empty(ui, tr("ui.agent_chat_setup_title"), tr("ui.agent_chat_setup_body"), |ui| {
                 if ui_kit::primary_button(ui, tr("ui.agent_chat_open_settings")).clicked() {
-                    crate::prefs::open_at(app, crate::prefs::PAGE_AI);
+                    crate::prefs::open_at(app, crate::prefs::PAGE_ASSISTANT);
                 }
             });
         } else {

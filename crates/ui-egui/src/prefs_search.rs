@@ -905,7 +905,7 @@ mod tests {
     fn preferences_search_finds_settings_in_rows_without_a_label() {
         let mut h = crate::scenario::Harness::new();
         h.app.home.open = false;
-        crate::prefs::open_at(&mut h.app, crate::prefs::PAGE_INTERFACE);
+        crate::prefs::open_at(&mut h.app, crate::prefs::PAGE_LAYOUT);
         h.frames(2);
         // Drawn, not merely present: a hidden row's controls still exist, far off screen.
         let drawn = |h: &crate::scenario::Harness, label: &str| {
@@ -938,5 +938,30 @@ mod tests {
         h.app.prefs_window.filter = "zzzz-no-setting".into();
         h.frames(4);
         assert!(!drawn(&h, "Status bar"), "a miss shows nothing");
+    }
+    #[test]
+    fn moved_preferences_search_paths_and_enter_follow_window_groups() {
+        for (query, path, page) in [
+            ("Direct interaction", "Work > Tools", crate::prefs::PAGE_TOOLS),
+            ("Navigate with the 3D mouse", "Input > 3D mouse", crate::prefs::PAGE_MOUSE3D),
+            ("Origin plane names", "Work > Design", crate::prefs::PAGE_DESIGN),
+            ("Status bar", "Look > Layout", crate::prefs::PAGE_LAYOUT),
+        ] {
+            let mut h = crate::scenario::Harness::new();
+            h.app.home.open = false;
+            crate::prefs::open_at(&mut h.app, crate::prefs::PAGE_GENERAL);
+            h.app.prefs_window.filter = query.into();
+            h.frames(4);
+            assert!(h.widget(path).is_some(), "{query} shows {path}");
+            let (_, _, hits) = nav(&h.ctx);
+            let index = hits.iter().position(|hit| hit.page == page && hit.label == query).expect("moved control is keyboard reachable");
+            set_cursor(&h.ctx, index);
+            h.frames(2);
+            h.step(&serde_json::json!({"key":"Enter"})).unwrap();
+            h.frames(2);
+            assert_eq!(h.app.prefs_window.section, page);
+            assert!(h.app.prefs_window.filter.is_empty());
+            assert!(h.widget(query).is_some());
+        }
     }
 }

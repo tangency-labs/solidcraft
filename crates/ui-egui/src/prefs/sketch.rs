@@ -3,7 +3,12 @@ use super::*;
 
 pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     let t = Tokens::get();
-    ui_kit::settings_heading(ui, app.tr("prefs.sketch_selection_heading"), app.tr("prefs.sketch_selection_note"));
+    ui_kit::settings_heading_with_tag(
+        ui,
+        app.tr("prefs.structure.sketch"),
+        app.tr("prefs.sketch_selection_note"),
+        Some(crate::settings_profiles::tag),
+    );
     ui_kit::settings_section(ui, "sketch", app.tr("prefs.sketching"), |ui| {
         ui_kit::checkbox(ui, app.tr("prefs.sketch_tracking_guides"), &mut app.preferences.sketch_tracking_guides)
             .on_hover_text(app.tr("prefs.sketch_tracking_guides_note"));

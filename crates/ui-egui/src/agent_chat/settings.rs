@@ -321,7 +321,7 @@ pub fn page(app: &mut SolveApp, ui: &mut egui::Ui) {
     if !cfg!(target_arch = "wasm32") && app.preferences.ai_features {
         #[cfg(not(target_arch = "wasm32"))]
         {
-            let browsing = !crate::prefs_search::querying(ui) || app.prefs_window.section == crate::prefs::PAGE_AI;
+            let browsing = !crate::prefs_search::querying(ui) || app.prefs_window.section == crate::prefs::PAGE_ASSISTANT;
             if browsing && app.agent_chat.detection.is_none() && app.agent_chat.detecting.is_none() {
                 refresh(app, &ui.ctx().clone());
             }
