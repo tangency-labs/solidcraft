@@ -4741,6 +4741,16 @@ fn parallel_tapped_wall(st: &ModelState, entry: Vec3, inward: Vec3, radius: f64)
     let tol = (radius * 1e-6).max(1e-6);
     let mut best: Option<(f64, Vec3)> = None;
     for body in &st.bodies {
+        // A wall found lies on the line through `entry` along `inward`, give or take its radius
+        // (and the slant its axis may have off `inward` over the body's distance), and its
+        // triangles are among the body's mesh: a body whose box that line misses by more holds
+        // none, and its faces are not read one by one (#10227).
+        let far = more::mesh_box(body).map_or(f64::INFINITY, |b| (b.min - entry).len().max((b.max - entry).len()) + b.diagonal());
+        if far.is_finite() && more::line_beyond_reach(body, entry, inward, radius * 1.01 + tol + 1e-3 + 2e-4 * far) {
+            continue;
+        }
+        #[cfg(test)]
+        cost_tests::count(|c| c.tapped_wall += 1);
         let mesh = body.mesh();
         for face in 0..body.body.face_count() {
             let Some(c) = kernel::cylinder_face(&body.body, &mesh, face) else { continue };

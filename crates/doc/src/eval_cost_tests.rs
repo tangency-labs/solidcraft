@@ -17,7 +17,8 @@ use crate::*;
 
 /// Work counted on this thread: bodies moved, STEP texts digested, joint faces and bodies
 /// measured, bodies searched for by name, features searched for by id, bodies a cut (or
-/// intersect) ran its booleans on, and bodies searched for the cylinder a tap marking lies on.
+/// intersect) ran its booleans on, bodies searched for the cylinder a tap marking lies on, and
+/// bodies whose faces a tapped hole read for its wall.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub(super) struct Counts {
     pub moved: usize,
@@ -28,6 +29,7 @@ pub(super) struct Counts {
     pub feature_searches: usize,
     pub cut: usize,
     pub cylinder_search: usize,
+    pub tapped_wall: usize,
 }
 
 thread_local! {
@@ -41,6 +43,7 @@ thread_local! {
             feature_searches: 0,
             cut: 0,
             cylinder_search: 0,
+            tapped_wall: 0,
         })
     };
 }
@@ -1278,6 +1281,7 @@ fn a_tap_marking_searches_only_the_bodies_near_it() {
     };
     let (work, threads) = marking_work(&mut doc, hole);
     assert_eq!(work.cylinder_search, 1, "only the plate is searched");
+    assert_eq!(work.tapped_wall, 1, "only the plate's faces are read for the wall");
     assert_eq!(threads.len(), 1);
     assert_eq!(threads[0].body, "Plate");
     assert!(threads[0].internal && (threads[0].radius - 2.5).abs() < 1e-6);
@@ -1324,4 +1328,35 @@ fn a_tap_marking_still_searches_the_bodies_within_its_reach() {
         assert_eq!(threads[0].body, body);
         assert_eq!(threads[0].internal, internal);
     }
+}
+
+/// A tapped hole reads for its wall the faces of the bodies its drill line comes near: the plate
+/// it is drilled in, a block far below on the same line, and one whose side lies a radius off the
+/// line; not a block beside it. The marking stays in the plate's hole.
+#[test]
+fn a_tapped_hole_reads_the_bodies_along_its_drill_line() {
+    let mut doc = Document::new("line");
+    block(&mut doc, "Plate", Vec3::ZERO, [60.0, 60.0, 12.0]);
+    block(&mut doc, "Below", Vec3::new(20.0, 20.0, -150.0), [20.0, 20.0, 20.0]);
+    block(&mut doc, "Grazing", Vec3::new(32.5, 20.0, -60.0), [20.0, 20.0, 20.0]);
+    block(&mut doc, "Beside", Vec3::new(50.0, 20.0, -60.0), [20.0, 20.0, 20.0]);
+    let hole = FeatureKind::Hole {
+        position: FacePick(Vec3::new(30.0, 30.0, 12.0)),
+        at: None,
+        direction: Dir(-Vec3::Z),
+        diameter: "5".into(),
+        depth: Some("10".into()),
+        hole: HoleKind::default(),
+        points: None,
+        thread: Some("M6".into()),
+        thread_depth: None,
+        handedness: ThreadHandedness::Right,
+        to: None,
+        references: Vec::new(),
+    };
+    let (work, threads) = marking_work(&mut doc, hole);
+    assert_eq!(work.tapped_wall, 3, "Plate, Below and Grazing are read");
+    assert_eq!(threads.len(), 1);
+    assert_eq!(threads[0].body, "Plate");
+    assert!(threads[0].internal && (threads[0].radius - 2.5).abs() < 1e-6);
 }

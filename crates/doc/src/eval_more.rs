@@ -1588,6 +1588,27 @@ pub(super) fn beyond_cylinder_reach(mb: &ModelBody, p: Vec3) -> bool {
     off.len() > reach
 }
 
+/// Whether the line through `at` along `dir` is known to pass farther than `reach` from the box
+/// of `mb` ([`mesh_box`]) everywhere, and so from every point of the mesh the body keeps. Unknown
+/// is never.
+pub(super) fn line_beyond_reach(mb: &ModelBody, at: Vec3, dir: Vec3, reach: f64) -> bool {
+    let Some(b) = mesh_box(mb) else { return false };
+    let b = b.inflated(reach);
+    let (mut lo, mut hi) = (f64::NEG_INFINITY, f64::INFINITY);
+    for (a, d, min, max) in [(at.x, dir.x, b.min.x, b.max.x), (at.y, dir.y, b.min.y, b.max.y), (at.z, dir.z, b.min.z, b.max.z)] {
+        if d == 0.0 {
+            if a < min || a > max {
+                return true;
+            }
+            continue;
+        }
+        let (t0, t1) = ((min - a) / d, (max - a) / d);
+        lo = lo.max(t0.min(t1));
+        hi = hi.min(t0.max(t1));
+    }
+    lo > hi
+}
+
 /// Whether two boxes are known to be apart (an unknown box is never apart).
 pub(super) fn boxes_apart(a: &Option<Aabb3>, b: &Option<Aabb3>) -> bool {
     let (Some(a), Some(b)) = (a, b) else { return false };
