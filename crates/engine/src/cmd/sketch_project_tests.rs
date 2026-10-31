@@ -250,13 +250,17 @@ fn a_construction_axis_projects_and_stays_linked() {
     let link = &state.sketch(sketch).unwrap().sketch.links[0];
     assert_eq!(link.source, solidcraft_sketch::LinkSource::Axis { name: "Hinge axis".into() });
     assert!(!link.lost, "renamed, the axis is still found");
-    // A design with the axis after the sketch opens with the link lost, saying why.
+    // Moved after the sketch, the axis can't be found from it: the link is lost, saying why, at
+    // once and when the design is opened again (#9544). Moved back, it is found again.
     run(&mut s, "timeline.reorder", json!({"feature": "Hinge axis", "position": 1}));
     let opened = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
-    assert!(opened.model.state().sketch(sketch).unwrap().sketch.links[0].lost);
-    let warnings = opened.model.result(sketch).and_then(|r| r.warning.clone()).unwrap_or_default();
-    assert!(warnings.contains("it must come earlier in the timeline"), "{warnings}");
+    for session in [&s, &opened] {
+        assert!(session.model.state().sketch(sketch).unwrap().sketch.links[0].lost);
+        let warnings = session.model.result(sketch).and_then(|r| r.warning.clone()).unwrap_or_default();
+        assert!(warnings.contains("it must come earlier in the timeline"), "{warnings}");
+    }
     run(&mut s, "timeline.reorder", json!({"feature": "Hinge axis", "position": 0}));
+    assert!(!s.model.state().sketch(sketch).unwrap().sketch.links[0].lost);
     // An axis that is no origin axis and no construction axis is refused, by its name.
     run(&mut s, "sketch.edit", json!({"sketch": sketch}));
     let error = s.execute("sketch.project", &json!({"refs": [{"axis": "Axis9"}]})).unwrap_err().to_string();
