@@ -25,6 +25,15 @@ impl<'a> FeatureWindow<'a> {
         self
     }
 
+    /// Borrow a caller's open flag only for this showing, retaining stock close handling.
+    pub(crate) fn open<'open>(self, open: &'open mut bool) -> FeatureWindow<'open>
+    where
+        'a: 'open,
+    {
+        let window: egui::Window<'open> = self.window;
+        FeatureWindow { window: window.open(open), id: self.id, frame: self.frame }
+    }
+
     pub(crate) fn show<R>(self, ctx: &Context, body: impl FnOnce(&mut egui::Ui) -> R) -> Option<egui::InnerResponse<Option<R>>> {
         let background = Container::floating_card(Surface::Feature).background(ctx, self.frame);
         self.show_background(ctx, background, body)

@@ -119,8 +119,10 @@ panel entry point.
 
 Only `Panel::window_placed` creates an adaptive stock Window. Its small
 `FeatureWindow` wrapper keeps the existing builder private and forwards only
-`fixed_size` and `show`. These sheets explicitly disable native title bars,
-collapse, resize, scrolling and fades, and use an explicit persistent ID and
+`fixed_size`, `open` and `show`. The open flag is forwarded with a shortened borrow
+lifetime; stock Window owns visibility and close-request handling. These sheets
+explicitly disable native title bars, collapse, resize, scrolling and fades,
+and use an explicit persistent ID and
 Middle layer. The early slot is on that exact layer. The final Area response
 includes the outer margins; subtracting the original total margins reconstructs
 the content rectangle for marker geometry even though stock Window relocates
@@ -253,13 +255,15 @@ cargo test --locked --profile ci -p solidcraft-ui-egui --lib blur_ -- --nocaptur
 cargo build --locked --profile ci -p solidcraft
 ```
 
-The four `blur_stock_` tests compare stock and app-owned hosts without a GPU:
+The five `blur_stock_` tests compare stock and app-owned hosts without a GPU:
 zero output includes identical Noop counts; positive output preserves chrome,
 semantic fill/frame information and persistent IDs; asymmetric margins, stroke
 width, host clipping, final joined corners and late layer transforms are covered.
 They replace the old test of the vendored Window hook. They are authored only,
-not executed by this worker. The existing seven GPU/radius/budget tests and
-zero marker/tint test remain; the broader `blur_` filter selects twelve tests.
+not executed by this worker. Open-flag forwarding also covers initially hidden,
+closed and reopened windows, including stock close-request propagation. The
+existing seven GPU/radius/budget tests and zero marker/tint test remain; the
+broader `blur_` filter selects thirteen tests.
 
 Cargo.lock was restored as text to the egui 0.36.2 registry source and checksum
 from the matching local crates.io index entry; dependency versions are unchanged.

@@ -41,13 +41,12 @@ fn blur_host_fixture(host: BlurHost, mode: u8, position: egui::Pos2, transform: 
     let ctx = crate::fonts::test_context();
     let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(640.0, 480.0));
     let container = Container::for_layout(crate::shell::LayoutMode::Floating, Surface::Feature);
-    let frame = egui::Frame::NONE
-        .fill(egui::Color32::from_rgba_unmultiplied(40, 80, 100, 180))
+    let frame = container
+        .frame(&ctx, egui::Color32::from_rgba_unmultiplied(40, 80, 100, 180), crate::frame::Side::Left)
         .stroke(egui::Stroke::new(2.5, egui::Color32::WHITE))
         .inner_margin(egui::Margin { left: 9, right: 13, top: 7, bottom: 11 })
         .outer_margin(egui::Margin { left: -2, right: 3, top: -1, bottom: 4 })
-        .corner_radius(egui::CornerRadius { nw: 3, ne: 7, sw: 11, se: 15 })
-        .shadow(Tokens::get().shell_shadow());
+        .corner_radius(egui::CornerRadius { nw: 3, ne: 7, sw: 11, se: 15 });
     let id = egui::Id::new("stock host fixture");
     let mut output = egui::FullOutput::default();
     let mut observation = String::new();
@@ -136,6 +135,79 @@ fn blur_stock_hosts_zero_has_identical_shapes_noops_geometry_and_ids() {
         assert_eq!(semantics, off_semantics, "{host:?}");
         assert_eq!(blur_host_shapes(&stock, false), blur_host_shapes(&off, false), "no extra shapes, including Noop slots: {host:?}");
     }
+}
+
+#[test]
+fn blur_stock_window_open_flag_preserves_closed_close_and_reopen_behavior() {
+    fn record(mode: u8, omit_markers: bool) -> Vec<(Vec<String>, String)> {
+        let ctx = crate::fonts::test_context();
+        let container = Container::for_layout(crate::shell::LayoutMode::Floating, Surface::Feature);
+        let frame = container.frame(&ctx, Tokens::get().dialog_body, crate::frame::Side::Left);
+        let id = egui::Id::new("open flag fixture");
+        let mut recorded = Vec::new();
+        for (index, mut keep) in [false, false, true, true, true, false, false, false, true, true, true].into_iter().enumerate() {
+            let mut observation = String::new();
+            let mut called = false;
+            let output = crate::test_support::frame(&ctx, egui::RawInput { time: Some(index as f64), ..Default::default() }, |_| {
+                let window = container
+                    .window("Open flag fixture")
+                    .id(id)
+                    .title_bar(false)
+                    .collapsible(false)
+                    .resizable(false)
+                    .scroll(false)
+                    .fade_in(false)
+                    .fade_out(false)
+                    .frame(frame);
+                let mut body = |ui: &mut egui::Ui| {
+                    called = true;
+                    ui.label("Window body");
+                    if index == 4 {
+                        ui.close();
+                    }
+                };
+                let shown = if mode == 0 {
+                    window.open(&mut keep).show(&ctx, &mut body)
+                } else {
+                    // A long-lived builder must accept this frame-local mutable borrow.
+                    let window: container::FeatureWindow<'static> = container::FeatureWindow::new(window, id, frame);
+                    let window = window.open(&mut keep);
+                    if mode == 1 { window.show(&ctx, &mut body) } else { window.show_background(&ctx, Some(host_marker), &mut body) }
+                };
+                if index == 0 {
+                    assert!(shown.is_none(), "initially closed windows stay hidden");
+                }
+                observation = format!("{:?}", (keep, shown.map(|shown| (shown.response.id, shown.response.rect, shown.inner))));
+            });
+            if index == 0 {
+                assert!(!called);
+            }
+            if index == 4 {
+                assert!(!keep, "stock close requests update the caller's flag");
+            }
+            if index == 10 {
+                assert!(called && keep, "the same persistent window can reopen");
+            }
+            let mut markers = 0;
+            for clipped in &output.shapes {
+                crate::test_support::each_shape(&clipped.shape, &mut |shape| {
+                    if matches!(shape, egui::Shape::Callback(cb) if cb.callback.is::<HostMarker>()) {
+                        markers += 1;
+                    }
+                });
+            }
+            if !called {
+                assert_eq!(markers, 0, "hidden windows emit no marker");
+            }
+            if mode == 2 && index == 10 {
+                assert_eq!(markers, 1, "reopened windows regain their marker");
+            }
+            recorded.push((blur_host_shapes(&output, omit_markers), observation));
+        }
+        recorded
+    }
+    assert_eq!(record(0, false), record(1, false), "zero keeps stock shapes, including Noop counts and hidden windows");
+    assert_eq!(record(0, true), record(2, true), "positive markers preserve stock visibility, close handling, geometry and IDs");
 }
 
 #[test]
