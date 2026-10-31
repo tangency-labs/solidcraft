@@ -1,9 +1,110 @@
-# Blur behind panels (#9809)
+# Blur behind panels (#9809, #9810)
 
-Implementation note for PR 5 of the #8876 series. Native implementation and
-manager-run harnesses are present. No preference, product UI or default changes
-are introduced. No build, test, GPU run, screenshot, benchmark or pixel comparison
-has been run by this worker. Direct rustfmt is the only executable formatting work.
+Implementation note for PRs 5 and 6 of the #8876 series. Native rendering,
+theme-declared controls, runtime availability and a transient quality guard are
+present. Built-in themes/defaults are unchanged. No build, test, GPU run,
+screenshot, benchmark or pixel comparison has been run by this worker.
+The 22 ms/60-sample threshold remains a starting policy, not a measured tuning result.
+
+## Theme controls and runtime intent
+
+Only a theme declaring `blur` offers its registered 0..40 physical-pixel range.
+The slider edits in steps of one; finite fractional persisted/API values remain
+valid and merely opening the control does not round them. Zero has a muted hollow
+thumb, Off readout and flat 2 px cost line. Positive values use accent fill/thumb,
+a px readout, and five bars of height 4/6/8/11/14 px: `ceil(radius / 8)` are filled.
+The tooltip describes relative cost; it is not a timing or resource estimate.
+The readout, meter and any disabled reason reserve space beside the slider.
+An inactive parent prevents activation without changing the stored child value.
+
+The app resolves availability once per UI/API composition and before positive
+runtime activation. It uses the actual installed adapter's device type (cached
+at installation, `Cpu` means `gpu-software`) and PR5's lazy cached renderer
+capabilities, rather than renderer-name matching. Both current browser paths
+are unavailable because they lack the native compositor integration. Unsupported
+source/device paths and device/resource failures also fall back to ordinary painting.
+There are no effect resources or markers on unavailable paths or at zero.
+Opening Preferences alone does not activate a declared zero-radius effect.
+
+Saved/raw intent is separate from runtime availability. Clearing an OS/device
+restriction restores it automatically when the renderer can support it. Suspending
+for a restriction never toggles the radius through zero to clear a latched resource
+failure. Actual radius/host/size/background changes retain PR5's explicit recovery
+boundaries; no polling loop retries a failed effect allocation every frame.
+
+Authored declaration/ancestry and effective radius are resolved only on
+`prepare_tabs`' existing theme/raw-option cache miss. Its borrowed content comparison
+also catches followed reloads with unchanged id/base. Steady built-in, undeclared,
+and offered-zero frames read a small copyable intent/revision: they do not order
+option vectors, normalize raw maps, serialize/hash strings, or clone theme ids.
+Runtime OS/device availability stays outside this cache and palette tokens.
+The cache test counts normalization calls; it is not a global allocator measurement.
+
+## Accessibility signals
+
+The desktop injects a cached `Services::reduce_transparency` reading. Observation
+starts lazily when a theme offers blur, reads on a background thread every five
+seconds while needed, and repaints only when the cached signal changes. No UI-thread
+registry/Objective-C IO, external processes, OS-setting writes, notification
+registration or new unsafe code is used. The first unavailable/failed reading is
+unknown, leaving other availability checks in charge; an idle thread stops reading
+when the theme no longer offers blur.
+
+- Windows: safe `winreg` reads HKCU
+  `Software\Microsoft\Windows\CurrentVersion\Themes\Personalize\EnableTransparency`.
+  `0` disables blur (system transparency off), `1` permits it; missing/unexpected
+  values are unknown.
+- macOS: safe objc2 `NSWorkspace::sharedWorkspace()` /
+  `accessibilityDisplayShouldReduceTransparency()`, with `NSWorkspace` and
+  `NSAccessibility` features and an autorelease pool on the observer thread.
+- Other operating systems currently have no signal here. Unknown does not disable
+  blur. Browser rendering is independently unavailable as described above.
+
+Platform readings and propagation latency still require manager validation on
+their respective systems. Evidence fixtures never modify the host OS settings.
+
+## Automatic quality guard
+
+The guard uses elapsed **native queue-submission intervals**, not `app.frame_ms`
+(UI construction time) and not GPU timestamps. The pass owner records evidence
+only after an actual composition/presentation with a visible blur marker has
+been submitted. Sampling consumes each egui frame at most once and requires the
+immediately preceding painted frame, continued repaint activity on both sides,
+positive radius, runtime availability, and a viewport not reported minimized or
+occluded. Missing/logic-only paints, idle waits, unavailability, zero, or a changed
+theme revision/radius reset the streak. egui layout re-passes cannot add samples.
+Monitoring requests no continuous repaint.
+
+After **60 consecutive eligible intervals strictly over 22 ms**, lower the effective
+pass tier by one, down to two down/up steps. The natural tier remains determined
+by radius; the effective tier is `min(natural tier, session cap)`. Radius is never
+reduced or switched off. Recompute the normalized Kawase offset for that step
+count, include the cap in the source cache signature, and reset the streak.
+
+One inline notice is offered per session. Dismiss hides it; further eligible
+reductions can continue to the minimum without reannouncing it. **Undo restores
+the cap from before the first guard reduction and opts out of all further automatic
+reductions for this session**, including across theme changes. This is transient
+UI state, not a preference, design edit or document Undo entry.
+
+Submission intervals include CPU/event-loop scheduling, presentation pacing and
+other rendering work; they do not isolate blur or GPU execution. A low-refresh or
+loaded system can exceed the starting budget for unrelated reasons. A cached blur
+image still counts when visibly composited. Visibility depends on host reporting;
+unsupported occlusion reporting cannot be inferred. Deterministic tests exercise
+threshold/eligibility behavior; hardware measurements and threshold tuning are
+still manager work. No measured GPU timing claim is made.
+
+## Theme notices
+
+Invalid saved entries, unsupported newer requirements and guard reduction share
+a compact inline notice inside the existing Preferences host, before the empty-row
+return. Dismissal is session-only, bounded to 64 problem identities and keyed by
+theme, problem kind and raw value/requirement identity. A changed problem reappears.
+Dismiss never changes invalid raw JSON or the API's notices; defaults remain in
+effect. Newer-requirements imports discard unsupported definitions, so the warning
+instructs users to upgrade and **reimport the original theme**, not to expect discarded
+tables to recover automatically. No controls/no notices produces no header or spacer.
 
 ## Accepted CPU budget
 
@@ -211,7 +312,7 @@ readback, or GPU completion wait was added to production painting.
 distinguishes missing GPU/native split integration, software adapter, unsupported
 filterable/renderable formats, unsupported source context, missing source frame,
 resource/size refusal and lost device. The actual window adapter is classified
-with the same `gpu::select::tier_of` as headless captures; no renderer-name guessing.
+from its actual cached `DeviceType` (`Cpu` is software); no renderer-name guessing.
 Software adapters and web paths allocate no effect resources or markers.
 
 Web still uses eframe's unvendored `src/web/web_painter_wgpu.rs`, not the native
@@ -226,17 +327,20 @@ The full GPU fixture in existing `gpu.rs::tests` renders actual app egui output,
 font textures, viewport callbacks and compositor into a readback target. Tests
 remain in the existing area modules; no per-issue test module was added.
 
-PR 6 must consume the capability/reason and finite 0..40 contract, leave saved
-user intent intact on fallback, and request a frame on changes. It must not create
-resources by opening Preferences. There is no persistent blur preference in PR 5.
+The PR6 controls consume this capability/reason and finite 0..40 contract, leave
+saved intent intact on fallback, and request a frame on changes. They do not create
+resources merely by opening Preferences. Blur remains a theme option, with no
+independent global switch or quality preference.
 
 ## Internal activation and manager-only validation
 
-The control hook is `ui.blur {radius_px?, surface_alpha?}`. `surface_alpha` is an
+The control hook is `ui.blur {radius_px?, surface_alpha?, fixture?}`. `surface_alpha` is an
 internal capture-only override in 0..1; null restores ordinary fills. Transparent
 host frames remain transparent. The hook returns requested radius, maximum,
-capability and cumulative counters. Activation is control-only and session-only;
-default construction is zero and performs no environment lookup or GPU probe.
+capability, app-aware availability, transient guard/evidence state and cumulative
+counters. Explicit radius activation is an internal session-only override;
+ordinary product activation comes from a declared theme option. Default construction
+is zero and performs no environment lookup or GPU capability probe.
 The adapter capability probe is cached lazily on activation or an explicit query.
 
 Counters increment at actual `create_texture`, buffer/bind-group/pipeline creation,
@@ -264,12 +368,15 @@ not executed by this worker. Open-flag forwarding also covers initially hidden,
 closed and reopened windows, including stock close-request propagation via
 `ui.close_kind(egui::UiKind::Window)`. Plain `ui.close()` targets Window's nearer
 internal Collapsible, even when native title/collapse controls are disabled.
-The other blur tests remain; the broader `blur_` filter selects fourteen tests.
+The other blur tests remain; PR5's broader `blur_` filter selected fourteen tests
+before the PR6 additions listed below.
 
 Cargo.lock was restored as text to the egui 0.36.2 registry source and checksum
 from the matching local crates.io index entry; dependency versions are unchanged.
 The full vendored egui copy and its path patch were removed; the egui-wgpu patch
-and licences remain. No cargo execution was used. Set `SOLIDCRAFT_REQUIRE_GPU=1` to require an adapter
+and licences remain. PR6 additionally lists the already-locked winreg dependency
+for the desktop app; dependency versions are unchanged. No cargo execution was
+used. Set `SOLIDCRAFT_REQUIRE_GPU=1` to require an adapter
 (hardware or software); a missing adapter/device fails every blur fixture consumer.
 The explicit `cfg(test)` rendering fixture runs all positive compositor, cache,
 pixel and suspension assertions on CI software adapters independently of production
@@ -277,6 +384,14 @@ software policy, retaining real adapter identity and format/device requirements.
 A separate production-policy test asserts that actual software adapters report
 `Unavailable("software adapter (gpu-software)")`, allocate no blur resources and
 emit no markers. Production software blur remains unavailable.
+Its requested radius remains 18 throughout UI preparation: fallback must not silently
+replace the request with zero. Positive fixtures use isolated harness intent so theme
+preparation cannot erase their explicit radius.
+
+`FixturePolicy::Production` and `FixturePolicy::Rendering` exist only under
+`cfg(test)`. Rendering bypasses only CPU policy through State's capability result;
+the shared Preferences availability resolver consumes that result instead of
+independently vetoing the real software identity. No production bypass is added.
 
 To export fixed-scene 8/18/40 and zero light/dark images, counters, and warmed
 UI/encode/GPU-completion benchmark samples:
@@ -339,3 +454,119 @@ restored UI/model settings. Current validation records belong in the PR body;
 the new fixture is not a substitute for that comparison. Later manager gates are
 wasm, layers, licences, lists, containers/clippy, then full CI before commit/merge.
 Worker execution counts: tests/builds/checks/cargo/xtask/UI runs/screenshots = 0.
+
+## PR6 manager reproduction and focused validation
+
+These instructions are prepared, **not executed or visually verified by the worker**.
+Use only the manager's isolated settings instance and control port (for example
+38877); do not contact, restart or change the user's preview on 38876. No host OS
+setting changes are needed for the injected examples. A real OS-signal review must
+be reported separately from fixture screenshots.
+
+The original theme fixture is
+`crates/ui-egui/tests/fixtures/theme-blur.json` (id `blur-review`). It offers opacity,
+blur and tab colours, defaults blur to zero, and includes Sketch/Render surfaces.
+Send its JSON object as `ui.prefs`' `theme_import`, together with `open:"Interface"`.
+For light screenshots, copy the object in memory, change `name` to `Blur review light`
+and `base` to `light` (id `blur-review-light`), and import that. Model uses the base
+palette; switch to Sketch/Render separately to review the authored tab colours.
+Builds, launches, authenticated transport and screenshot saving belong to the manager.
+
+For each light/dark fixture, keep model, camera, layout, scale and window dimensions
+fixed. Use normal `ui.prefs`, with the active theme id, for each **0, 8, 18, 40**:
+
+```json
+{"method":"ui.blur","params":{"fixture":"clear","surface_alpha":null}}
+{"method":"ui.prefs","params":{"theme_options":{"blur-review":{"opacity":75,"blur":18}}}}
+{"method":"ui.screenshot","params":{"path":"ABSOLUTE-NEW-OUTPUT-PATH.png"}}
+```
+
+At zero expect Off, a hollow muted thumb and one flat cost line; at 8/18/40 expect
+one/three/five filled bars. Verify the slider consumes remaining width, the readout
+and meter do not overlap, and the disabled reason remains beside its control.
+Also send `blur:18.25`, reopen Preferences and query `ui.prefs`: the value must remain
+18.25 until an actual edit. At opacity 75 capture matched **blur 0 versus 18** views;
+repeat with opacity 100 as the opaque comparison. The fixture's opacity option
+enforces PR3's readability floors; do not assume opacity 0 means invisible text.
+If an explicit opacity-zero comparison is desired, send `opacity:0` at both blur
+0 and 18 and report that readability floor. These are real UI captures, not `ui.render`.
+
+To display two unavailable reasons without changing this machine's OS/adapter:
+
+```json
+{"method":"ui.blur","params":{"fixture":"gpu-software"}}
+{"method":"ui.prefs","params":{}}
+{"method":"ui.blur","params":{"fixture":"reduce-transparency"}}
+{"method":"ui.prefs","params":{}}
+{"method":"ui.blur","params":{"fixture":"clear"}}
+```
+
+Capture each disabled slider with its adjacent reason. Label these screenshots
+**injected availability evidence**, include the `evidence_fixture` reply, and verify
+saved blur remains 18. Clearing the fixture restores normal real capability checks;
+it cannot make a software/unsupported renderer capable. Compare effect counter
+deltas/live counts while unavailable; there must be no new effect work and no live
+effect resources. `web-unsupported` is an optional third reason fixture.
+
+For the guard notice, set blur 40 via `ui.prefs`, let the value apply, then send:
+
+```json
+{"method":"ui.blur","params":{"fixture":"guard-60"}}
+{"method":"ui.blur","params":{}}
+```
+
+This explicitly injects sixty eligible 23 ms samples, without inventing GPU timing
+or starting a repaint loop. Capture the notice with **injected guard evidence** in
+its description. Repeat the fixture to exercise cap 4 → 3 → 2 (no radius change).
+Click Undo (`prefs:theme_notice_undo:guard`): cap returns to 5 and `opted_out` is true;
+another `guard-60`, even after switching themes, cannot reduce it. In a separate fresh
+session, Dismiss (`prefs:theme_notice_dismiss:guard`) hides the notice but subsequent
+injections may keep reducing to 2 without reannouncing. `fixture:"clear"` removes
+the injection/legacy radius override, not Undo's session opt-out. Restart the
+manager's isolated app when a fresh session policy is needed.
+
+For raw/newer warnings, the extended existing `prefs_theme_files` scenario saves
+blur through `ui.prefs`, reimports that theme without the declaration, dismisses
+the now-unknown-entry notice, checks that raw JSON and API notices persist, and
+reintroduces the definition to restore the saved value. It also imports `requires:2`
+and dismisses its warning without adding a controls header. The unit test additionally
+loads malformed raw JSON, changes it to ensure reappearance, and bounds dismissal
+storage. For a manager screenshot, import a copy of the fixture with name `Future
+blur review`, `requires:2`, then open Interface; retain the original file for reimport
+after upgrading, as its unsupported tables are discarded.
+
+All nine new unit tests match the **`blur_`** filter, in the existing area modules:
+
+- `blur_availability_preserves_saved_intent_and_parent_state`
+- `blur_evidence_fixtures_are_atomic_transient_and_never_fake_support`
+- `blur_guard_requires_consecutive_visible_actual_paints`
+- `blur_guard_threshold_idle_minimum_and_session_undo`
+- `blur_intent_cache_resolves_only_when_theme_or_raw_values_change`
+- `blur_meter_boundaries_and_off_thumb`
+- `blur_notices_dismiss_by_problem_identity_and_preserve_raw_json`
+- `blur_offered_zero_has_no_effect_work`
+- `blur_slider_reserves_readout_meter_and_disabled_reason`
+
+The existing `blur_radius_schedule_and_hostile_values` also checks capped offsets.
+The zero test uses actual GPU fixture counters with a declared zero option; the
+cache test asserts normalization counts on 100 repeated built-in/zero/undeclared
+cache hits. Neither pretends to count the application's global allocator. The
+headless UI tests inspect constructed shapes/geometry, not screenshots.
+
+Manager-only focused filters (none run by the worker):
+
+```powershell
+cargo test --locked --profile ci -p solidcraft-ui-egui --lib blur_ -- --nocapture
+cargo test --locked --profile ci -p solidcraft-ui-egui --lib theme_options_ -- --nocapture
+cargo test --locked --profile ci -p solidcraft-ui-egui --test scenarios prefs_theme_files -- --nocapture
+```
+
+The zero GPU fixture uses `FixturePolicy::Production`, a declared zero option and
+no harness radius override. It follows the same adapter-availability gate:
+`SOLIDCRAFT_REQUIRE_GPU=1` requires any adapter, including software, and a missing
+adapter/device fails. `blur_production_policy_rejects_software_adapter` separately
+checks production CPU fallback; positive shader tests select `FixturePolicy::Rendering`.
+The PR5 fixture policy and PR6 integration have been reconciled in source only.
+GPU pixels, platform builds/APIs, wasm, actual OS propagation,
+real visible slow-frame behavior, allocator traces and threshold calibration remain
+unverified here. No test/build/check or app interaction has been performed by this worker.

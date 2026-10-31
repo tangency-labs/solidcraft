@@ -24,6 +24,8 @@ mod come_forward;
 mod control_server;
 #[cfg(target_os = "linux")]
 mod desktop_theme;
+#[cfg(any(target_os = "windows", target_os = "macos"))]
+mod desktop_transparency;
 mod device_lost;
 #[cfg(target_os = "windows")]
 mod native_crash;
@@ -539,6 +541,10 @@ fn services(cc: &eframe::CreationContext<'_>, folder: &DialogFolder) -> Services
         desktop_dark: Some(desktop_theme::start(&cc.egui_ctx)),
         #[cfg(not(target_os = "linux"))]
         desktop_dark: None,
+        #[cfg(any(target_os = "windows", target_os = "macos"))]
+        reduce_transparency: Some(desktop_transparency::cached(&cc.egui_ctx)),
+        #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+        reduce_transparency: None,
         http_get: Some(std::sync::Arc::new(http_get)),
         http_download: Some(std::sync::Arc::new(http_download)),
         // Already an installed app: only the browser build offers to install.

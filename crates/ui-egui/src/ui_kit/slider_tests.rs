@@ -3,6 +3,38 @@ use crate::{scenario, theme::Tokens};
 use egui::{Rect, Ui, pos2, vec2};
 
 #[test]
+fn blur_meter_boundaries_and_off_thumb() {
+    for (radius, bars) in [(0.0, 0), (1.0, 1), (8.0, 1), (9.0, 2), (18.0, 3), (33.0, 5), (40.0, 5)] {
+        assert_eq!(blur_cost_bars(radius), bars, "{radius}");
+    }
+    for dark in [false, true] {
+        crate::theme::set_dark(dark);
+        for radius in [0.0, 18.25] {
+            let ctx = crate::fonts::test_context();
+            let t = Tokens::get();
+            let mut value = radius;
+            let out = ctx.run_ui(egui::RawInput::default(), |ui| {
+                scope(ui, |ui| {
+                    slider(ui, &mut value, 0.0..=40.0, Slider { step: Some(1.0), show_value: false, off_endpoint: true, ..Default::default() });
+                });
+            });
+            assert_eq!(value, radius, "drawing cannot round persisted fractional values");
+            let thumb = out
+                .shapes
+                .iter()
+                .rev()
+                .find_map(|s| match &s.shape {
+                    egui::Shape::Circle(c) if c.radius == t.space_8 => Some(c),
+                    _ => None,
+                })
+                .unwrap();
+            assert_eq!(thumb.fill, if radius == 0.0 { egui::Color32::TRANSPARENT } else { t.form_primary });
+            assert_eq!(thumb.stroke.color, if radius == 0.0 { t.form_dim } else { t.form_primary });
+        }
+    }
+}
+
+#[test]
 fn every_slider_option_uses_the_same_token_thumb_in_both_themes() {
     let previous = crate::theme::is_dark();
     for dark in [false, true] {
@@ -27,6 +59,7 @@ fn every_slider_option_uses_the_same_token_thumb_in_both_themes() {
                                         show_value,
                                         integer,
                                         workspace_accent: false,
+                                        off_endpoint: false,
                                     },
                                 );
                             });
