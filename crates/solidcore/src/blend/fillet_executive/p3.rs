@@ -591,6 +591,24 @@ pub struct FilletExecutive<O> {
     /// `m_vOpenEnds` (the fork's, WR-631): the fillet's ends the Nx1 corner there left
     /// uncut, in a cliff overflow.
     pub open_ends: Vec<OpenEnd<O>>,
+    /// `m_bOverflowFirst` (the fork's, WR-634, tangency-labs/smlib@241f7ba; `FALSE` from
+    /// the constructor, kept by `SetFilletParameters`): when blends of several edges
+    /// overflow across cliffs (and none of the cliff overflow's refusals applies),
+    /// `CreateFilletBrep` stops after classifying the rails, building nothing, with
+    /// `FilletErrorType::OverflowFirst` and [`Self::overflow_edges`]: the caller blends
+    /// the edges that overflow on their own first, then what is left of the others. Acts
+    /// only with `fixes.fillet_refuse_rails_leaving_faces` and `fixes.fillet_cliff_overflow`
+    /// (the fork's rail classification).
+    pub overflow_first: bool,
+    /// `m_bClassifyOnly` (the fork's, WR-634; `FALSE` from the constructor, kept by
+    /// `SetFilletParameters`): `CreateFilletBrep` always stops after classifying the
+    /// rails, building nothing, with `FilletErrorType::OverflowFirst` and
+    /// [`Self::overflow_edges`] the edges whose blends overflow (possibly none). Acts only
+    /// with the flags of [`Self::overflow_first`].
+    pub classify_only: bool,
+    /// `m_vOverflowEdges` (the fork's, WR-634; cleared by `SetFilletParameters`): the
+    /// edges of the blends that overflow, in solver order, when stopped so.
+    pub overflow_edges: Vec<O>,
 }
 
 /// `SmFilletExecutive::SmFilletOpenEnd` (the fork's, WR-631): an end of a fillet the Nx1
@@ -2090,6 +2108,15 @@ pub trait SolverGeometryAccess<O: ClassObject + SolutionObject + Ord> {
     /// # Errors
     /// Missing actual solver topology.
     fn geometry_edge(&self, solver: O) -> Result<O>;
+    /// `pFilSolver->GetEdgeuse(0) != NULL ? pFilSolver->GetEdgeuse(0)->GetEdge()` of the
+    /// fork's overflow-first stop (WR-634): the edge of `solver`'s first edge use, `None`
+    /// without one. Defaults to [`Self::geometry_edge`].
+    ///
+    /// # Errors
+    /// Missing actual solver topology other than an absent first edge use.
+    fn geometry_overflow_edge(&self, solver: O) -> Result<Option<O>> {
+        self.geometry_edge(solver).map(Some)
+    }
     /// The fork's `SmFilletSolver::RailsFitTheirFaces` for `solver` (not upstream; opt-in
     /// `fixes.fillet_refuse_rails_leaving_faces`, WR-302): whether every rail of its
     /// untrimmed fillet stays on the face it rolls on. Only an accessor with a live
@@ -2494,6 +2521,7 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
         let mut concave_overflow = false;
         let mut round_into_material = false;
         let mut rolls_over = false;
+        let mut overflowing = Vec::new();
         let mut index = 0;
         while let Some(solver) = self.solvers.get(index).copied() {
             index += 1;
@@ -2505,6 +2533,10 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
                 continue;
             }
             overflow = true;
+            // the fork's (WR-634): the edges of the blends that overflow
+            if let Some(edge) = access.geometry_overflow_edge(solver)? {
+                overflowing.push(edge);
+            }
             if access.geometry_blend_adds_material(k, solver)? {
                 concave_overflow = true;
             }
@@ -2520,6 +2552,25 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
             };
             index += 1;
             concave = access.geometry_blend_adds_material(k, solver)?;
+        }
+        // The fork's overflow-first stop (WR-634, tangency-labs/smlib@241f7ba): with
+        // `SetOverflowFirst`, when blends of several edges overflow, nothing is built; with
+        // `SetClassifyOnly`, nothing is built either way. The overflowing edges are kept.
+        if self.classify_only
+            || (self.overflow_first
+                && overflow
+                && self.solvers.len() > 1
+                && !concave_overflow
+                && !concave
+                && !round_into_material)
+        {
+            self.overflow_edges = overflowing;
+            // The generic NoteError overload changes exactly these two members.
+            self.error.code = FilletErrorType::OverflowFirst as i32;
+            self.error.comment =
+                "Fillet Note: stopped after classifying the rails (blends that overflow go first)"
+                    .into();
+            return Err(failure());
         }
         if overflow {
             let why = if concave_overflow {

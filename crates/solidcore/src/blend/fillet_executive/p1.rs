@@ -701,6 +701,9 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
             mark_corner_patches: false,
             cliff_overflow: false,
             open_ends: Vec::new(),
+            overflow_first: false,
+            classify_only: false,
+            overflow_edges: Vec::new(),
         }
     }
 
@@ -845,6 +848,26 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
     /// `DoFilleting`.
     pub fn set_mark_corner_patches(&mut self, value: bool) {
         self.mark_corner_patches = value;
+    }
+
+    /// `SetOverflowFirst` (the fork's, WR-634, tangency-labs/smlib@241f7ba): before
+    /// `CreateFilletBrep`.
+    pub fn set_overflow_first(&mut self, value: bool) {
+        self.overflow_first = value;
+    }
+
+    /// `SetClassifyOnly` (the fork's, WR-634, tangency-labs/smlib@241f7ba): before
+    /// `CreateFilletBrep`.
+    pub fn set_classify_only(&mut self, value: bool) {
+        self.classify_only = value;
+    }
+
+    /// `GetOverflowEdges` (the fork's, WR-634, tangency-labs/smlib@241f7ba): the edges of
+    /// the blends that overflow, when `CreateFilletBrep` stopped with
+    /// `FilletErrorType::OverflowFirst`; empty otherwise.
+    #[must_use]
+    pub fn overflow_edges(&self) -> &[O] {
+        &self.overflow_edges
     }
 
     /// `SetSelfIntersectionHandler`.

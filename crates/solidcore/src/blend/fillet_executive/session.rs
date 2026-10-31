@@ -104,6 +104,7 @@ mod ease;
 pub(crate) mod finish;
 mod original_merge;
 mod original_trim;
+mod overflow_first;
 mod piecewise;
 mod surface;
 mod trace_reach;
@@ -3460,6 +3461,21 @@ impl SolverGeometryAccess<FilletObject> for SessionObjects<'_> {
             FilletBody::Target,
             EntityRef::Edge(edge),
         ))
+    }
+    fn geometry_overflow_edge(&self, solver: FilletObject) -> Result<Option<FilletObject>> {
+        let FilletObject::Solver(id) = solver else {
+            return Err(invalid("object is not a solver"));
+        };
+        // the fork adds the edge only when the solver has a first edge use
+        let Some(edgeuse) = self.solver(id)?.base().edgeuse(0)? else {
+            return Ok(None);
+        };
+        let edge = crate::topology::edgeuse::p1::edge(self.target, edgeuse)?
+            .ok_or_else(|| invalid("solver edgeuse without edge"))?;
+        Ok(Some(FilletObject::Topology(
+            FilletBody::Target,
+            EntityRef::Edge(edge),
+        )))
     }
     fn geometry_rails_fit(
         &mut self,

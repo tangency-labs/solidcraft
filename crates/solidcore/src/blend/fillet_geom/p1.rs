@@ -321,6 +321,14 @@ pub enum FilletErrorType {
     /// [`FilletErrorType::CornerUnsupported`], gives it 10. Only `fixes.fillet_cliff_overflow`
     /// records it.
     NotExact = 10,
+    /// `SM_FILERR_OVERFLOW_FIRST` (SolidCraft change, tangency-labs/smlib@241f7ba, WR-634):
+    /// `CreateFilletBrep` stopped after classifying the rails, building nothing
+    /// (`SetClassifyOnly`, or `SetOverflowFirst` when blends of several edges overflow
+    /// across cliffs); `GetOverflowEdges` holds the edges whose blends overflow. The fork
+    /// numbers it one past its `SM_FILERR_CORNER_UNSUPPORTED` (11); this port gives it 11,
+    /// after its own [`FilletErrorType::NotExact`]. Only the session's
+    /// `set_overflow_first`/`set_classify_only` record it.
+    OverflowFirst = 11,
 }
 
 /// `SmFilletCornerType`: the kind of corner where fillets meet.
