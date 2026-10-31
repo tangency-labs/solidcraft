@@ -305,6 +305,13 @@ pub struct UpstreamFixes {
     /// Volume line-domain checks using `SmExtent3d::ContainsLineSeg3d` require
     /// both endpoints inside the natural parameter box instead of either (WR-3).
     pub extent3d_contains_both_segment_endpoints: bool,
+    /// `SmExtent3d::Circumscribe` reads `SmPseudoBox::IsAxisAligned`'s map by basis:
+    /// basis `ii`'s interval lands on axis `|map[ii]| - 1`, negated when the basis is
+    /// reversed, so a basis that is a non-involutive permutation of the axes (e.g.
+    /// `y, z, x`) keeps its intervals on their own axes. Upstream indexes the basis
+    /// with the axis map entry of axis `ii`, which is right for swaps and sign flips
+    /// but cycles a 3-cycle (WR-5). Off by default for pinned C++ parity.
+    pub circumscribe_axis_map_by_basis: bool,
     /// Perspective culling projects each sphere's own radius offsets about its center (WR-608, #525).
     pub perspective_sphere_offsets: bool,
     /// `SmCone::RebuildSTEPFromNURBParameters` gives a cylinder the mean of near-equal radii (semi-angle 0) (WR-385, #713).

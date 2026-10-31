@@ -55,8 +55,8 @@
 //! | [`Extent3d::u_interval`], [`Extent3d::v_interval`], [`Extent3d::w_interval`] | `GetUInterval`, `GetVInterval`, `GetWInterval` |
 //! | [`Extent3d::set_u_interval`], [`Extent3d::set_v_interval`] | `SetUInterval`, `SetVInterval` |
 //! | [`Extent3d::approximate_unbounded`], [`Extent3d::approximate_unbounded_expanded`] | `ApproximateUnbounded` |
-//! | [`Extent3d::from_pseudo_box`]          | `SmExtent3d(const SmPseudoBox&)`               |
-//! | [`Extent3d::circumscribe`]             | `Circumscribe`                                 |
+//! | [`Extent3d::from_pseudo_box`], [`Extent3d::from_pseudo_box_with`] | `SmExtent3d(const SmPseudoBox&)` |
+//! | [`Extent3d::circumscribe`], [`Extent3d::circumscribe_with`] | `Circumscribe`                       |
 //! | [`BoundaryType`]                       | `SmBoundaryType` (`SmTypes.h`)                 |
 //!
 //! Deviations:
@@ -78,15 +78,18 @@
 //! - `SM_ASSERT*` debug checks are not ported (they do not change results).
 //! - Upstream bug kept: `ContainsLineSeg3d` returns true when *either* end point is
 //!   inside (it ORs the two tests). See `plan/findings.md`.
-//! - Upstream quirk kept: `Circumscribe` of an axis-aligned pseudo box reads the
-//!   `IsAxisAligned` map (basis -> axis) as if it were axis -> basis, so a basis that is
-//!   a non-involutive permutation of the axes (e.g. `y, z, x`) gets its intervals on the
-//!   wrong axes. See `plan/findings.md`.
+//! - Upstream quirk kept by default: `Circumscribe` of an axis-aligned pseudo box
+//!   reads the `IsAxisAligned` map (basis -> axis) as if it were axis -> basis, so a
+//!   basis that is a non-involutive permutation of the axes (e.g. `y, z, x`) gets its
+//!   intervals on the wrong axes. [`Extent3d::circumscribe_with`] reads it by basis
+//!   behind `Kernel::fixes.circumscribe_axis_map_by_basis` (WR-5;
+//!   `plan/upstream-issues/WR-5--addendum-2026-10-31-opt-in-axis-map-by-basis.md`).
 
 use crate::error::{Result, SolidError};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::pseudo_box::PseudoBox;
 use crate::geom::vector3d::{asin, sqrt};
+use crate::kernel::Kernel;
 use crate::math::{
     is_infinite_param, max2, max3, min2, min3, Point3, Vec3, BIG_DOUBLE, EFF_ZERO, EFF_ZERO_SQ,
     INFINITE_PARAMETER, PI, UNDEF_DOUBLE,
@@ -324,36 +327,71 @@ impl Extent3d {
         }
     }
 
-    /// The box circumscribing `pb` (`SmExtent3d(const SmPseudoBox&)`); see
-    /// [`Extent3d::circumscribe`].
+    /// The box circumscribing `pb` with a default kernel
+    /// (`SmExtent3d(const SmPseudoBox&)`); see [`Extent3d::from_pseudo_box_with`].
     #[must_use]
     pub fn from_pseudo_box(pb: &PseudoBox) -> Self {
+        Self::from_pseudo_box_with(pb, &Kernel::default())
+    }
+
+    /// The box circumscribing `pb` with `k`'s opt-in fixes
+    /// (`SmExtent3d(const SmPseudoBox&)`); see [`Extent3d::circumscribe_with`].
+    #[must_use]
+    pub fn from_pseudo_box_with(pb: &PseudoBox, k: &Kernel) -> Self {
         let mut e = Self::new();
-        e.circumscribe(pb);
+        e.circumscribe_with(pb, k);
         e
+    }
+
+    /// Becomes the box circumscribing `pb` with a default kernel (`Circumscribe`); see
+    /// [`Extent3d::circumscribe_with`].
+    pub fn circumscribe(&mut self, pb: &PseudoBox) {
+        self.circumscribe_with(pb, &Kernel::default());
     }
 
     /// Becomes the box circumscribing `pb` (`Circumscribe`): the same size for an
     /// axis-aligned pseudo box (copied from its intervals, so partially unbounded
     /// pseudo boxes stay partially unbounded), fully unbounded for an unaligned
-    /// unbounded one, else the bounding box of its corners.
-    pub fn circumscribe(&mut self, pb: &PseudoBox) {
+    /// unbounded one, else the bounding box of its corners. With
+    /// `Kernel::fixes.circumscribe_axis_map_by_basis` the axis-aligned map is read by
+    /// basis (WR-5); otherwise its entries are read as bases, as upstream does.
+    pub fn circumscribe_with(&mut self, pb: &PseudoBox, k: &Kernel) {
         // low work - axis aligned PseudoBox
         if let Some(axis_map) = pb.is_axis_aligned() {
-            for (ii, &m) in axis_map.iter().enumerate() {
-                // upstream indexes the basis with the axis map entry of axis `ii`
-                let lx = (m.unsigned_abs() as usize).wrapping_sub(1);
-                let ivl = pb.interval(lx).unwrap_or_default();
-                let (lo, hi) = if m > 0 {
-                    (ivl.min(), ivl.max())
-                } else {
-                    (-ivl.max(), -ivl.min())
-                };
-                if let Ok(c) = self.min.component_mut(ii) {
-                    *c = lo;
+            if k.fixes.circumscribe_axis_map_by_basis {
+                // Basis `ii` is parallel to axis `|axis_map[ii]| - 1`: its interval
+                // belongs on that axis, negated when the basis is reversed.
+                for (ii, &m) in axis_map.iter().enumerate() {
+                    let ivl = pb.interval(ii).unwrap_or_default();
+                    let (lo, hi) = if m < 0 {
+                        (-ivl.max(), -ivl.min())
+                    } else {
+                        (ivl.min(), ivl.max())
+                    };
+                    let axis = (m.unsigned_abs() as usize).wrapping_sub(1);
+                    if let Ok(c) = self.min.component_mut(axis) {
+                        *c = lo;
+                    }
+                    if let Ok(c) = self.max.component_mut(axis) {
+                        *c = hi;
+                    }
                 }
-                if let Ok(c) = self.max.component_mut(ii) {
-                    *c = hi;
+            } else {
+                for (ii, &m) in axis_map.iter().enumerate() {
+                    // upstream indexes the basis with the axis map entry of axis `ii`
+                    let lx = (m.unsigned_abs() as usize).wrapping_sub(1);
+                    let ivl = pb.interval(lx).unwrap_or_default();
+                    let (lo, hi) = if m > 0 {
+                        (ivl.min(), ivl.max())
+                    } else {
+                        (-ivl.max(), -ivl.min())
+                    };
+                    if let Ok(c) = self.min.component_mut(ii) {
+                        *c = lo;
+                    }
+                    if let Ok(c) = self.max.component_mut(ii) {
+                        *c = hi;
+                    }
                 }
             }
             return;
