@@ -21,6 +21,10 @@
 //! | [`FilletBrep::destroy_geom`]                      | `SmFilletGeom::~SmFilletGeom`                |
 //!
 //! Deviations:
+//! - **Rail end on the continued surface (WR-630, #960).** With
+//!   `fixes.fillet_rail_end_on_continued_surface`, `CalcRailIntEdgeuse` evaluates the
+//!   rail's end on its base surface with out-of-bounds evaluation on (the fork's
+//!   tangency-labs/smlib@3f22e97).
 //! - **Object model.** As in `blend.fillet_geom_p1` and `_p4`, fillet vertices, edges
 //!   and geometries are ids of the [`FilletBrep`] (`self`). `GetFilletSolver()` is an
 //!   opaque [`FilletSolverId`] resolved in the caller's `solvers` table (index `id.0`;
@@ -121,6 +125,7 @@ use crate::surface::surface::p1::SurfaceSolveContext;
 use crate::surface::surface::p2::SurfaceIntersection;
 use crate::surface::surface::p4::NoObject;
 use crate::surface::surface::{Surface, SurfaceKind};
+use crate::surface::surface_point_solve::p2::with_out_of_bounds_enabled_in_place;
 use crate::topology::brep_cache::CacheObject;
 use crate::topology::edgeuse::p1::{self as eu1, primary_edgeuse};
 use crate::topology::edgeuse::p3::{
@@ -1863,11 +1868,20 @@ impl FilletBrep {
 
             // force solution to lie on SideEdge->Curve: the rail/base surface point
             let uv = tsect1.uv_pos(srf(rail_index, OP)?);
-            let pnt = solvers
+            let base = solvers
                 .offset_surface(self, g1, rail_index)?
                 .ok_or_else(|| SolidError::null_pointer(OP))?
-                .base_surface()
-                .evaluate_point(k, uv)?;
+                .base_surface();
+            // Opt-in, not upstream (`fixes.fillet_rail_end_on_continued_surface`, WR-630;
+            // the fork's tangency-labs/smlib@3f22e97): on the base surface continued, as
+            // the solve found it (over the surface's extended domain). Clamped to the
+            // surface's own domain, a rail meeting a side edge's line just past the
+            // edge's end (a cliff overflow) was placed on the edge's end vertex instead.
+            let pnt = if k.fixes.fillet_rail_end_on_continued_surface {
+                with_out_of_bounds_enabled_in_place(base, || base.evaluate_point(k, uv))?
+            } else {
+                base.evaluate_point(k, uv)?
+            };
 
             // project it onto the side edge's curve
             let side_e =
