@@ -135,6 +135,20 @@ pub fn weld(positions: &[Vec3], triangles: &[[u32; 3]], eps: f64) -> (Vec<Vec3>,
 /// [`weld`] keeping a tag per triangle (pieces of a split triangle keep its tag; missing tags
 /// are 0).
 pub fn weld_tagged(positions: &[Vec3], triangles: &[[u32; 3]], tags: &[u32], eps: f64) -> (Vec<Vec3>, Vec<[u32; 3]>, Vec<u32>) {
+    let (verts, tris, tags, _) = weld_tagged_lines(positions, triangles, tags, eps, &[]);
+    (verts, tris, tags)
+}
+
+/// [`weld_tagged`], and each of `lines` (polylines on the mesh, such as its B-rep edges) as the
+/// welded vertices along it, in order, the vertices T-junction splits put on its sides included.
+/// A line with a point no vertex is welded to is empty.
+pub fn weld_tagged_lines(
+    positions: &[Vec3],
+    triangles: &[[u32; 3]],
+    tags: &[u32],
+    eps: f64,
+    lines: &[Vec<Vec3>],
+) -> (Vec<Vec3>, Vec<[u32; 3]>, Vec<u32>, Vec<Vec<u32>>) {
     // Merge on a grid of cell `eps` (a vertex joins one already in its own or a neighbour cell).
     let cell = |p: Vec3| [(p.x / eps).round() as i64, (p.y / eps).round() as i64, (p.z / eps).round() as i64];
     let mut grid: HashMap<[i64; 3], Vec<u32>> = HashMap::new();
@@ -166,6 +180,28 @@ pub fn weld_tagged(positions: &[Vec3], triangles: &[[u32; 3]], tags: &[u32], eps
         };
         remap.push(i);
     }
+    // The lines' points: the vertex each was welded to.
+    let find = |p: &Vec3| -> Option<u32> {
+        let c = cell(*p);
+        for dx in -1..=1 {
+            for dy in -1..=1 {
+                for dz in -1..=1 {
+                    for &i in grid.get(&[c[0].saturating_add(dx), c[1].saturating_add(dy), c[2].saturating_add(dz)]).into_iter().flatten() {
+                        if verts.get(i as usize).is_some_and(|q| q.dist(*p) <= eps) {
+                            return Some(i);
+                        }
+                    }
+                }
+            }
+        }
+        None
+    };
+    let mut paths: Vec<Vec<u32>> = lines.iter().map(|l| l.iter().map(find).collect::<Option<Vec<u32>>>().unwrap_or_default()).collect();
+    for path in &mut paths {
+        path.dedup();
+    }
+    // Every split side, with the vertices put on it (from its start).
+    let mut split_sides: HashMap<(u32, u32), Vec<u32>> = HashMap::new();
     let (mut tris, mut tags): (Vec<[u32; 3]>, Vec<u32>) = triangles
         .iter()
         .enumerate()
@@ -215,6 +251,9 @@ pub fn weld_tagged(positions: &[Vec3], triangles: &[[u32; 3]], tags: &[u32], eps
         if splits.is_empty() {
             break;
         }
+        for (side, on) in &splits {
+            split_sides.insert(*side, on.iter().map(|(_, v)| *v).collect());
+        }
         let mut next = Vec::with_capacity(tris.len() + splits.len() * 2);
         let mut next_tags = Vec::with_capacity(next.capacity());
         for (t, tag) in tris.iter().zip(&tags) {
@@ -240,7 +279,39 @@ pub fn weld_tagged(positions: &[Vec3], triangles: &[[u32; 3]], tags: &[u32], eps
         tris = next;
         tags = next_tags;
     }
-    (verts, tris, tags)
+    if !split_sides.is_empty() {
+        for path in &mut paths {
+            *path = expand_splits(path, &split_sides);
+        }
+    }
+    (verts, tris, tags, paths)
+}
+
+/// `path` with the vertices splits put on its sides (either way round) inserted, splits of
+/// splits too (each pass of [`weld_tagged_lines`] splits a side at most once more).
+fn expand_splits(path: &[u32], splits: &HashMap<(u32, u32), Vec<u32>>) -> Vec<u32> {
+    let mut out: Vec<u32> = path.to_vec();
+    for _ in 0..8 {
+        let mut next = Vec::with_capacity(out.len());
+        let mut changed = false;
+        for (k, v) in out.iter().enumerate() {
+            if let Some(prev) = k.checked_sub(1).and_then(|k| out.get(k)) {
+                if let Some(on) = splits.get(&(*prev, *v)) {
+                    next.extend(on.iter().copied());
+                    changed = true;
+                } else if let Some(on) = splits.get(&(*v, *prev)) {
+                    next.extend(on.iter().rev().copied());
+                    changed = true;
+                }
+            }
+            next.push(*v);
+        }
+        out = next;
+        if !changed {
+            break;
+        }
+    }
+    out
 }
 
 /// The model part's XML.

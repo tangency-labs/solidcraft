@@ -1,0 +1,146 @@
+{
+    "features": [
+        {
+            "id": 1,
+            "name": "Outline",
+            "plane": {
+                "name": "XY",
+                "type": "origin"
+            },
+            "sketch": {
+                "constraints": [],
+                "counters": {
+                    "p": 8,
+                    "s": 1
+                },
+                "curves": [
+                    {
+                        "construction": false,
+                        "degree": 3,
+                        "id": "s1",
+                        "periodic": true,
+                        "pts": [
+                            1,
+                            2,
+                            3,
+                            4,
+                            5,
+                            6,
+                            7,
+                            8,
+                            1
+                        ],
+                        "type": "spline"
+                    }
+                ],
+                "points": [
+                    {
+                        "fixed": true,
+                        "id": "origin",
+                        "pos": [
+                            0.0,
+                            0.0
+                        ]
+                    },
+                    {
+                        "fixed": false,
+                        "id": "p1",
+                        "pos": [
+                            20.0,
+                            0.0
+                        ]
+                    },
+                    {
+                        "fixed": false,
+                        "id": "p2",
+                        "pos": [
+                            14.0,
+                            14.0
+                        ]
+                    },
+                    {
+                        "fixed": false,
+                        "id": "p3",
+                        "pos": [
+                            0.0,
+                            22.0
+                        ]
+                    },
+                    {
+                        "fixed": false,
+                        "id": "p4",
+                        "pos": [
+                            -15.0,
+                            12.0
+                        ]
+                    },
+                    {
+                        "fixed": false,
+                        "id": "p5",
+                        "pos": [
+                            -20.0,
+                            0.0
+                        ]
+                    },
+                    {
+                        "fixed": false,
+                        "id": "p6",
+                        "pos": [
+                            -12.0,
+                            -15.0
+                        ]
+                    },
+                    {
+                        "fixed": false,
+                        "id": "p7",
+                        "pos": [
+                            0.0,
+                            -18.0
+                        ]
+                    },
+                    {
+                        "fixed": false,
+                        "id": "p8",
+                        "pos": [
+                            16.0,
+                            -12.0
+                        ]
+                    }
+                ]
+            },
+            "suppressed": false,
+            "type": "sketch"
+        },
+        {
+            "body_names": [
+                "Blob"
+            ],
+            "extent": {
+                "convention": "total_distance",
+                "direction": "positive",
+                "distance": "15"
+            },
+            "id": 2,
+            "name": "Extrude1",
+            "operation": "new_body",
+            "param_names": [
+                "d1"
+            ],
+            "profiles": {
+                "type": "all"
+            },
+            "sketch": 1,
+            "suppressed": false,
+            "type": "extrude"
+        }
+    ],
+    "format": "solidcraft/42",
+    "format_pending": [
+        "linked-body-properties"
+    ],
+    "name": "blob",
+    "next_component_color_index": 0,
+    "next_id": 3,
+    "params": [],
+    "units": "mm"
+}
