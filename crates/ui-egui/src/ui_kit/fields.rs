@@ -53,7 +53,14 @@ pub(crate) fn count_field(ui: &mut Ui, value: &mut String, limits: &Count<'_>) -
         let next = step_count(value, delta, limits);
         let arrow = ui.interact(half, ui.id().with(("sc_count_step", &row, name)), egui::Sense::click());
         let enabled = ui.is_enabled() && next.is_some();
-        if enabled && arrow.hovered() {
+        // The arrows stand inside the editor, which claims the text cursor across its whole
+        // rect: they are not text, so each one takes the ordinary cursor back after it. The
+        // pointer is read from the rect rather than from the hover the editor competes for.
+        let over = ui.rect_contains_pointer(half);
+        if over {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::Default);
+        }
+        if enabled && over {
             painter.rect_filled(half.shrink(1.0), t.control_radius, t.selected_bg);
         }
         let ink = if enabled { t.form_ink } else { t.form_dim };
