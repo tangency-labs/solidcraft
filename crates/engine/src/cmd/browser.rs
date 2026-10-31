@@ -1278,12 +1278,20 @@ mod tests {
         run(&mut s, "component.create", json!({"name": "K"}));
         run(&mut s, "solid.box", json!({"body_name": "KB", "length": 10, "width": 10, "height": 10}));
         run(&mut s, "occurrence.copy", json!({"component": "K", "translate": [30, 0, 0]}));
+        // The copy hidden first stays hidden under its new name, and one undo brings both names
+        // back.
+        run(&mut s, "browser.visibility", json!({"items": ["KB (K:2)"], "visible": false}));
         let r = run(&mut s, "body.rename", json!({"body": "KB (K:2)", "name": "Lid"}));
         assert_eq!((r["body"].as_str(), r["name"].as_str()), (Some("KB"), Some("Lid")), "{r}");
-        let world: Vec<String> = s.world_state().bodies.iter().map(|b| b.name.clone()).collect();
-        assert!(world.iter().any(|n| n == "Lid") && world.iter().any(|n| n == "Lid (K:2)"), "{world:?}");
-        assert!(!world.iter().any(|n| n.starts_with("KB")), "{world:?}");
+        let world = |s: &Session| s.world_state().bodies.iter().map(|b| b.name.clone()).collect::<Vec<_>>();
+        let renamed = world(&s);
+        assert!(renamed.iter().any(|n| n == "Lid") && renamed.iter().any(|n| n == "Lid (K:2)"), "{renamed:?}");
+        assert!(!renamed.iter().any(|n| n.starts_with("KB")), "{renamed:?}");
+        assert!(!s.body_visible("Lid (K:2)") && s.body_visible("Lid"), "{:?}", s.visibility.hidden_bodies);
         assert!(s.execute("body.rename", &json!({"body": "Lid (K:9)", "name": "Other"})).is_err());
+        run(&mut s, "edit.undo", json!({}));
+        let back = world(&s);
+        assert!(back.iter().any(|n| n == "KB") && back.iter().any(|n| n == "KB (K:2)"), "{back:?}");
     }
 
     #[test]
