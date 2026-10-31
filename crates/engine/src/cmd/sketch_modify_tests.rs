@@ -2210,6 +2210,32 @@ fn offset_both_sides_of_a_circle_are_concentric() {
 }
 
 #[test]
+fn an_offset_of_a_fully_constrained_circle_is_fully_constrained() {
+    // #5301: a 20 mm circle on the origin with its diameter dimensioned, offset 5 inward. The
+    // offset's radius is the source's less the offset distance, so the sketch has no freedom
+    // left, and the offset follows both dimensions.
+    let mut s = new_sketch();
+    let c = ids(&run(&mut s, "sketch.circle.center", json!({"center": [0, 0], "diameter": 20}))["curves"])[0].clone();
+    run(&mut s, "sketch.constraint.coincident", json!({"a": format!("{c}.center"), "b": "origin"}));
+    let diameter = run(&mut s, "sketch.dimension", json!({"entities": [c], "value": "20"}));
+    let o = run(&mut s, "sketch.offset", json!({"curves": [c], "distance": 5}));
+    let made = ids(&o["curves"]);
+    let check = |s: &mut Session, radius: f64| {
+        let info = run(s, "sketch.inspect", json!({}));
+        assert_eq!(info["dof"], 0, "{info}");
+        assert_eq!(info["fully_constrained"], true, "{info}");
+        let sk = sketch(s);
+        let CurveKind::Circle { r, .. } = sk.curves[sk.curve_index(&made[0]).unwrap()].kind else { panic!("not a circle") };
+        assert!(close(r, radius), "{r}");
+    };
+    check(&mut s, 5.0);
+    run(&mut s, "parameters.change", json!({"name": diameter["param"], "expression": "30 mm"}));
+    check(&mut s, 10.0);
+    run(&mut s, "parameters.change", json!({"name": o["param"], "expression": "3 mm"}));
+    check(&mut s, 12.0);
+}
+
+#[test]
 fn offset_refuses_the_combinations_that_would_be_guesswork() {
     let mut s = new_sketch();
     let r = run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [40, 30]}));
