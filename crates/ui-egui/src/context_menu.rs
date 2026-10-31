@@ -1878,8 +1878,13 @@ pub fn toggle_visibility(app: &mut SolveApp) {
 }
 
 /// Rename what is selected (F2): one body, sketch or feature, construction plane, component
-/// picked in the browser, or canvas.
+/// picked in the browser, canvas, or a group whose Browser row was clicked.
 pub fn rename_selection(app: &mut SolveApp, at: Pos2) -> bool {
+    // A clicked group row takes precedence, as it does for V: groups have no selection of their own.
+    if let Some(g) = crate::browser::picked_group(app) {
+        start_rename(app, RenameWhat::Group(g), at);
+        return true;
+    }
     let what = match (app.session.selection.as_slice(), app.tree.picked_components.as_slice(), app.tree.picked_canvases.as_slice()) {
         ([Sel::Body { name }], [], []) => RenameWhat::Body(name.clone()),
         ([Sel::Feature { id }], [], []) => RenameWhat::Feature(*id),
