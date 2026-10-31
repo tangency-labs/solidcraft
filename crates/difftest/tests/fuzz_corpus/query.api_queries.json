@@ -1,6 +1,7 @@
 {
   "unit": "query.api_queries",
   "cases": [
-    {"name": "fuzz00500_op_0_is_not_a_compared", "origin": "fuzz-out/n2000/query.api_queries/fuzz00500.json (timeout: cpp: no result after 20 s)", "issue": "HANG-45", "cpp": "harness: op 0 is not a compared query (1..=25)", "rust": "harness: op 0 is not a compared query (1..=25)", "inputs": {"data": [0.0, 0.0, 0.0, 1.0, 0.0, 1.0, 1e-05, 0.0, 0.0, 1.0, 1.0, 0, 0, 1e-05, 0.0, 0.0, 0.0, 0.0, 0.0, 1e-05, 0.0, 9], "op": 0}}
+    {"name": "fuzz00500_op_0_is_not_a_compared", "origin": "fuzz-out/n2000/query.api_queries/fuzz00500.json (timeout: cpp: no result after 20 s)", "issue": "HANG-45", "cpp": "harness: op 0 is not a compared query (1..=25)", "rust": "harness: op 0 is not a compared query (1..=25)", "inputs": {"data": [0.0, 0.0, 0.0, 1.0, 0.0, 1.0, 1e-05, 0.0, 0.0, 1.0, 1.0, 0, 0, 1e-05, 0.0, 0.0, 0.0, 0.0, 0.0, 1e-05, 0.0, 9], "op": 0}},
+    {"name": "fuzz00024_null_vertex", "origin": "nightly query.api_queries/fuzz00024; gen0607, /data/16 = 1.0", "issue": "runner: null pointers have no typed Rust equivalent; native null contracts remain in the FFI tests", "cpp": "harness: null pointers have no typed Rust equivalent; use the FFI contract tests", "rust": "harness: null pointers have no typed Rust equivalent; use the FFI contract tests", "inputs": {"data": [6.273648571702447e-06, 1.0719039110682626e-06, -9.29759095191448e-06, 1.0, 0.3, 0.7, 1e-05, 0.0, 0.0, 1.0, 1.0, 7.26566469001894e-06, 2.0277604779163627e-05, 8.539645775994224e-06, 0.2779760887772096, 0.0, 1.0, 0.0, 0.0, 1e-05, 13.0, 5.0], "op": 25}}
   ]
 }

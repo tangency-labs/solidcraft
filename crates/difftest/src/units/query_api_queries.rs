@@ -92,6 +92,18 @@ fn compared_op(op: i32) -> std::result::Result<(), HarnessError> {
     }
 }
 
+// Native null contracts are covered by the FFI tests; typed Rust APIs cannot
+// represent them. Refuse these fixtures on both sides of the comparison.
+fn compared_input(i: &Inputs) -> std::result::Result<(), HarnessError> {
+    compared_op(i.op)?;
+    if i.data[16] != 0. {
+        return Err(HarnessError::new(
+            "null pointers have no typed Rust equivalent; use the FFI contract tests",
+        ));
+    }
+    Ok(())
+}
+
 // Integer topology and status fields are compared exactly; only geometric
 // measurements use the harness's fixed relative tolerance.
 fn decode(op: i32, values: Vec<f64>) -> Output {
@@ -954,7 +966,7 @@ impl UnitDiff for Runner {
     }
     fn run_cpp(&self, c: &Case) -> std::result::Result<Output, HarnessError> {
         let i: Inputs = c.parse()?;
-        compared_op(i.op)?;
+        compared_input(&i)?;
         let mut input = i.data.to_vec();
         if let Some(other) = i.other_box {
             input.extend(other);
@@ -971,14 +983,9 @@ impl UnitDiff for Runner {
     }
     fn run_rust(&self, c: &Case) -> std::result::Result<Output, HarnessError> {
         let i: Inputs = c.parse()?;
-        compared_op(i.op)?;
+        compared_input(&i)?;
         let a = &i.data;
         let mut k = Kernel::default();
-        if a[16] != 0. {
-            return Err(HarnessError::new(
-                "null pointers have no typed Rust equivalent; use the FFI contract tests",
-            ));
-        }
         let point = v([a[11], a[12], a[13]]);
         let result = match i.op {
             1 => curve(&k, a)
