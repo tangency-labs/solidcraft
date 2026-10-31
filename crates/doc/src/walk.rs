@@ -150,6 +150,28 @@ macro_rules! walk_each {
 
 walk_each!([T: Walk] Option<T>, [T: Walk] Vec<T>, [T: Walk, const N: usize] [T; N]);
 
+/// A boxed value walks as the value (a large field boxed to keep its enum small).
+impl<T: Walk> Walk for Box<T> {
+    fn walk_exprs<'a>(&'a self, f: &mut dyn FnMut(ExprItem<'a>)) {
+        (**self).walk_exprs(f)
+    }
+    fn walk_exprs_mut<'a>(&'a mut self, f: &mut dyn FnMut(ExprItemMut<'a>)) {
+        (**self).walk_exprs_mut(f)
+    }
+    fn walk_refs<'a>(&'a self, f: &mut dyn FnMut(RefItem<'a>)) {
+        (**self).walk_refs(f)
+    }
+    fn walk_refs_mut<'a>(&'a mut self, f: &mut dyn FnMut(RefItemMut<'a>)) {
+        (**self).walk_refs_mut(f)
+    }
+    fn walk_geometry<'a>(&'a self, f: &mut dyn FnMut(GeoItem<'a>)) {
+        (**self).walk_geometry(f)
+    }
+    fn walk_geometry_mut<'a>(&'a mut self, f: &mut dyn FnMut(GeoItemMut<'a>)) {
+        (**self).walk_geometry_mut(f)
+    }
+}
+
 /// The values of a field with a role (`T`, an optional one or a list), in order.
 pub(crate) trait Each<T> {
     fn each<'a>(&'a self, f: &mut dyn FnMut(&'a T));

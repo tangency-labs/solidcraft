@@ -37,7 +37,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .key("E")
         .contract(&EXTRUDE_CONTRACT)
         .output(output_schema_for::<FeatureResult>)
-        .params("distance: expr (or through_all: true); taper?: angle expr (positive: outward, so the far end is larger along the extrusion direction; negative: inward, so the far end is smaller); sketch?: id|name (default: active or last sketch); profiles?: all | [index] | [{curves: [ids]}] (the profile whose outer loop is made of exactly these curves, or pieces of them; found again on every recompute, so it follows parameter changes; islands inside are its holes; an error when no profile or several match) | [{point:[x,y]}] (index and point picks are stored by their curves when that finds the same profile; a pick on a drawn profile that reference geometry, such as the projected outline of the face the sketch is on, cuts into regions takes the whole drawn profile); exact_regions?: bool (each index or point pick is exactly the region it names, as the dialogs send); default: every drawn profile, except that a loop inside another is its hole and a loop inside that hole is material again; face?: [x,y,z] (extrude a planar body face instead of a sketch profile); faces?: [[x,y,z],…] (coplanar faces of one body); face_body?: name (whose face, where faces of several bodies meet at the point); direction?: positive|negative|symmetric (distance is total thickness, split evenly around the start plane); convention?: total_distance|legacy_per_side (default total_distance; legacy preserves older symmetric extents); distance2?: expr (Two Sides: a second distance the other way from the first side, which may be through_all or to; with direction: negative the first side goes against the normal and distance2 along it); start_offset?: expr (along the sketch normal, also with direction: negative); to?: [x,y,z] (To Object: a face, vertex or point; to_offset?: expr past it); from?: [x,y,z] (From Object: start at that face or point); operation?: new|join|cut|intersect|auto (cut into a body, otherwise join existing solids; new in an empty component); targets?: [body] (Join from a face, or from a sketch on a body's face, defaults to that face's body; explicit targets or participants override); name?; body_name?; thin?: true (Thin: a wall along sketch curves instead of the profiles) with curves?: [curve ids] (open chains and closed loops, joined where they meet end to end; default: every drawn curve of the sketch), thickness: expr, side?: center|inside|outside|two_sides (a closed loop's inside is the area it encloses, an open chain's the side it bends toward, a straight line's the left of its first curve as drawn; default center), thickness2?: expr (two_sides: the thickness outside); corners are mitred, crossing walls are one"),
+        .params("distance: expr (or through_all: true); taper?: angle expr (positive: outward, so the far end is larger along the extrusion direction; negative: inward, so the far end is smaller); sketch?: id|name (default: active or last sketch); profiles?: all | [index] | [{curves: [ids]}] (the profile whose outer loop is made of exactly these curves, or pieces of them; found again on every recompute, so it follows parameter changes; islands inside are its holes; an error when no profile or several match) | [{point:[x,y]}] (index and point picks are stored by their curves when that finds the same profile; a pick on a drawn profile that reference geometry, such as the projected outline of the face the sketch is on, cuts into regions takes the whole drawn profile); exact_regions?: bool (each index or point pick is exactly the region it names, as the dialogs send); default: every drawn profile, except that a loop inside another is its hole and a loop inside that hole is material again; face?: [x,y,z] (extrude a planar body face instead of a sketch profile); faces?: [[x,y,z],…] (coplanar faces of one body); face_body?: name (whose face, where faces of several bodies meet at the point); direction?: positive|negative|symmetric (distance is total thickness, split evenly around the start plane); convention?: total_distance|legacy_per_side (default total_distance; legacy preserves older symmetric extents); distance2?: expr (Two Sides: a second distance the other way from the first side, which may be through_all or to; with direction: negative the first side goes against the normal and distance2 along it); start_offset?: expr (along the sketch normal, also with direction: negative); to?: [x,y,z] (To Object: a face, vertex or point) or a reference followed when it moves: {sketch, point|curve, at?: [x,y,z] where picked} | {plane: XY|name} | {axis: X|name} | {construct_point: name} | {vertex|edge: [x,y,z]} (a point ends at the plane through it, a parallel plane, axis or curve at its height, a slanted plane along it, a curve running away from the profile where it begins); to_offset?: expr past it; from?: [x,y,z] or a reference (From Object: start at that face, point or reference); operation?: new|join|cut|intersect|auto (cut into a body, otherwise join existing solids; new in an empty component); targets?: [body] (Join from a face, or from a sketch on a body's face, defaults to that face's body; explicit targets or participants override); name?; body_name?; thin?: true (Thin: a wall along sketch curves instead of the profiles) with curves?: [curve ids] (open chains and closed loops, joined where they meet end to end; default: every drawn curve of the sketch), thickness: expr, side?: center|inside|outside|two_sides (a closed loop's inside is the area it encloses, an open chain's the side it bends toward, a straight line's the left of its first curve as drawn; default center), thickness2?: expr (two_sides: the thickness outside); corners are mitred, crossing walls are one"),
     CommandSpec::new("solid.revolve", "Revolve", revolve)
         .at("SOLID", "CREATE")
         .icon("revolve")
@@ -87,7 +87,7 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("solid.pattern.rectangular", "Rectangular Pattern", pattern_rect)
         .at("SOLID", "CREATE")
         .icon("pattern_rect")
-        .params("features: [names] | bodies: [names] | components: [names]; dir1: [x,y,z]; count1; spacing1; dir2?, count2?, spacing2?; alignment?, alignment2?: left|center|right (default right; counts include the original); reversed?, reversed2?: bool (Flip)"),
+        .params("features: [names] | bodies: [names] | components: [names]; dir1: [x,y,z]; count1; spacing1; dir2?, count2?, spacing2?; type1?, type2?: spacing|extent|to_object (default spacing: between neighbours; extent: spacing<k> is the distance from the first copy to the last; to_object: the copy furthest along the direction reaches to<k>, measured from the middle of what is copied, and follows it; no spacing<k> needed); to1?, to2?: [x,y,z] (a point on the face, vertex or point to go to) or a reference followed when it moves, as solid.extrude's `to` takes it ({sketch, point|curve, at?} | {plane: XY|name} | {axis: X|name} | {construct_point: name} | {vertex|edge: [x,y,z]}); implies to_object; not with components; a face or curve running along the direction is reached where it begins, a slanted plane where the line from the middle meets it; to_offset1?, to_offset2?: expr (past the object, the way the copies go; negative stops short); alignment?, alignment2?: left|center|right (default right; counts include the original); reversed?, reversed2?: bool (Flip; To Object takes its side from the object)"),
     CommandSpec::new("solid.pattern.circular", "Circular Pattern", pattern_circ)
         .at("SOLID", "CREATE")
         .icon("pattern_circ")
@@ -205,6 +205,12 @@ pub fn extrude_reach(s: &Session, p: &Value) -> Option<f64> {
     if let Some(t) = p.get("to").and_then(vec3) {
         let (base, n) = extrude_base(s, p)?;
         return Some((t - base).dot(n)).filter(|h| h.is_finite());
+    }
+    // A reference: where it ends the profiles (see `object_end_height`).
+    if let Some(to) = p.get("to") {
+        let (base, n) = extrude_base(s, p)?;
+        let plane = solidcraft_geom::Plane::from_normal(base, n)?;
+        return object_end_height(s, to, &plane, base).filter(|h| h.is_finite());
     }
     let d = s.doc.eval(&expr(p, "distance")?, Kind::Length).ok()?;
     let dir = str_(p, "direction").map(str::to_ascii_lowercase);
@@ -1166,12 +1172,8 @@ fn thin_regions(s: &Session, ss: &solidcraft_doc::SolvedSketch, thin: &ThinWall)
 pub(super) fn extent_param(s: &Session, p: &Value, cmd: &str) -> Result<Extent> {
     let through_all = bool_(p, "through_all").unwrap_or(false) || str_(p, "extent").is_some_and(|e| e.eq_ignore_ascii_case("through_all"));
     let to_object = p.get("to").is_some();
-    if to_object && p.get("to").and_then(vec3).is_none() {
-        return Err(bad(cmd, "`to` must be a point [x, y, z] on the face, vertex or point to extrude to"));
-    }
-    if p.get("from").is_some() && p.get("from").and_then(vec3).is_none() {
-        return Err(bad(cmd, "`from` must be a point [x, y, z] on the face or point to start from"));
-    }
+    let (to, to_ref) = object_param(s, p.get("to"), cmd, "to")?;
+    let (from, from_ref) = object_param(s, p.get("from"), cmd, "from")?;
     let distance = if through_all || to_object { expr(p, "distance").unwrap_or_else(|| "0".into()) } else { req_expr(cmd, p, "distance")? };
     check_expr(s, &distance, Kind::Length, cmd, "distance")?;
     let taper = expr(p, "taper");
@@ -1206,10 +1208,51 @@ pub(super) fn extent_param(s: &Session, p: &Value, cmd: &str) -> Result<Extent> 
         start_offset,
         through_all,
         taper,
-        to: p.get("to").and_then(vec3).map(FacePick),
+        to,
         to_offset: expr(p, "to_offset"),
-        from: p.get("from").and_then(vec3).map(FacePick),
+        from,
+        to_ref,
+        from_ref,
     })
+}
+
+/// How far above `plane` (along its normal) a To / From Object parameter ends an extrusion of
+/// profiles around `centre`: a point `[x, y, z]` on a face or vertex, or a reference as `solid.extrude` takes it ([`solidcraft_doc::object_end`]).
+/// `None` when it can't be found. For the dialog's arrow and distance.
+pub fn object_end_height(s: &Session, v: &Value, plane: &solidcraft_geom::Plane, centre: Vec3) -> Option<f64> {
+    let (at, g) = object_param(s, Some(v), "solid.extrude", "to").ok()?;
+    let (vals, _) = s.doc.param_values();
+    // Picks are in world space, as the dialog's profiles' plane is.
+    solidcraft_doc::object_end(&s.doc, &vals, &s.world_state(), plane, centre, at?.0, None, g.as_ref()).ok().map(|(h, _)| h)
+}
+
+/// A To / From Object: a point `[x, y, z]` on the face, vertex or place, or a reference
+/// (`{sketch, point|curve}`, `{plane: XY|name}`, `{axis: X|name}`, `{construct_point: name}`,
+/// `{vertex: [x,y,z]}`, `{face: [x,y,z]}`… as the CONSTRUCT commands take them, with `at?:
+/// [x,y,z]` where it was picked), kept as the reference so the extent follows it. A face is kept
+/// as its point, as a face pick always was.
+fn object_param(s: &Session, v: Option<&Value>, cmd: &str, what: &str) -> Result<(Option<FacePick>, Option<solidcraft_doc::construct::GeoRef>)> {
+    use solidcraft_doc::construct::GeoRef;
+    let Some(v) = v else { return Ok((None, None)) };
+    if let Some(p) = vec3(v) {
+        return Ok((Some(FacePick(p)), None));
+    }
+    if !v.is_object() && !v.is_string() {
+        // As the typed contract words it (`schema::types::ToPoint`, `FromPoint`).
+        let target = if what == "from" { "on the face or point to start from" } else { "on the face, vertex or point to extrude to" };
+        return Err(bad(cmd, format!("`{what}` must be a point [x, y, z] {target}, or a reference")));
+    }
+    let g = super::construct::geo(s, Some(v), cmd, what)?;
+    if let GeoRef::Face { at, .. } = g {
+        return Ok((Some(FacePick(at)), None));
+    }
+    let (vals, _) = s.doc.param_values();
+    let target = solidcraft_doc::extent_target(&s.doc, &vals, &s.model.state(), &g).map_err(|e| bad(cmd, format!("`{what}`: {e}")))?;
+    let at = match v.get("at").and_then(vec3).or_else(|| target.anchor()) {
+        Some(at) => at,
+        None => return Err(bad(cmd, format!("`{what}`: the reference has no place"))),
+    };
+    Ok((Some(FacePick(at)), Some(g)))
 }
 
 fn revolve(s: &mut Session, p: &Value) -> Result<Value> {
@@ -2019,16 +2062,27 @@ fn pattern_rect(s: &mut Session, p: &Value) -> Result<Value> {
     let (features, bodies) = pattern_sources(s, p, cmd)?;
     let dir1 = p.get("dir1").and_then(vec3).ok_or_else(|| bad(cmd, "`dir1` must be [x, y, z]"))?;
     let count1 = req_expr(cmd, p, "count1")?;
-    let spacing1 = req_expr(cmd, p, "spacing1")?;
     check_count(s, &count1, cmd, "count1")?;
+    let (extent1, to1, to1_ref) = distance_type(s, p, cmd, "1")?;
+    // To Object needs no spacing: a stored one is kept for switching back.
+    let spacing1 = if to1.is_some() { expr(p, "spacing1").unwrap_or_else(|| "0".into()) } else { req_expr(cmd, p, "spacing1")? };
     check_expr(s, &spacing1, Kind::Length, cmd, "spacing1")?;
     let dir2 = p.get("dir2").and_then(vec3);
     let (count2, spacing2) = (expr(p, "count2"), expr(p, "spacing2"));
+    let (extent2, to2, to2_ref) = distance_type(s, p, cmd, "2")?;
     if let Some(c) = &count2 {
         check_count(s, c, cmd, "count2")?;
     }
     if let Some(c) = &spacing2 {
         check_expr(s, c, Kind::Length, cmd, "spacing2")?;
+    }
+    for k in ["to_offset1", "to_offset2"] {
+        if let Some(e) = expr(p, k) {
+            check_expr(s, &e, Kind::Length, cmd, k)?;
+        }
+    }
+    if (to1.is_some() || to2.is_some()) && !string_list(cmd, p, "components")?.is_empty() {
+        return Err(bad(cmd, "not supported yet: To Object in a pattern of components"));
     }
     let pattern = solidcraft_doc::PatternKind::Rectangular {
         dir1: Dir(dir1),
@@ -2036,13 +2090,42 @@ fn pattern_rect(s: &mut Session, p: &Value) -> Result<Value> {
         spacing1,
         dir2: dir2.map(Dir),
         count2,
-        spacing2,
+        spacing2: spacing2.or_else(|| to2.map(|_| "0".into())),
         alignment: super::alignment_param(p, "alignment", cmd)?,
         alignment2: super::alignment_param(p, "alignment2", cmd)?,
         reversed: super::reversed_param(p, "reversed", cmd)?,
         reversed2: super::reversed_param(p, "reversed2", cmd)?,
+        to1_ref: to1_ref.map(Box::new),
+        to2_ref: to2_ref.map(Box::new),
+        to_offset1: to1.and(expr(p, "to_offset1")),
+        to_offset2: to2.and(expr(p, "to_offset2")),
+        extent1,
+        extent2,
+        to1,
+        to2,
     };
     finish_pattern(s, p, features, pattern, bodies)
+}
+
+/// A rectangular pattern direction's distance type (#8523), from `type<k>`: `spacing` (the
+/// default), `extent` (`spacing<k>` runs from the first copy to the last) or `to_object` (the
+/// copies run to `to<k>`, a point on a face or vertex or a reference, as an extrude's `to`
+/// (#8527); a `to<k>` alone means To Object too).
+type DistanceType = (bool, Option<FacePick>, Option<solidcraft_doc::construct::GeoRef>);
+fn distance_type(s: &Session, p: &Value, cmd: &str, k: &str) -> Result<DistanceType> {
+    let key = format!("to{k}");
+    let to = p.get(key.as_str());
+    let object = || match object_param(s, to, cmd, &key)? {
+        (Some(at), g) => Ok((false, Some(at), g)),
+        (None, _) => Err(bad(cmd, format!("`{key}` must be a point [x, y, z] on the face, vertex or point the pattern runs to, or a reference"))),
+    };
+    match str_(p, &format!("type{k}")).map(str::to_ascii_lowercase).as_deref() {
+        None if to.is_some() => object(),
+        None | Some("spacing") => Ok((false, None, None)),
+        Some("extent") => Ok((true, None, None)),
+        Some("to_object" | "to object" | "object") => object(),
+        Some(t) => Err(bad(cmd, format!("unknown `type{k}` `{t}` (spacing, extent or to_object)"))),
+    }
 }
 
 fn pattern_circ(s: &mut Session, p: &Value) -> Result<Value> {

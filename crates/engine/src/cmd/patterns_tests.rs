@@ -1066,6 +1066,96 @@ fn pattern_count_integer_parameters_survive_save_and_reject_fractional_edits() -
     Ok(())
 }
 
+/// Whether `body` has a hole through (x, y): no material there, material 2 mm beside it.
+fn hole_at(s: &Session, x: f64, y: f64) -> bool {
+    use solidcraft_geom::Vec3;
+    let st = s.world_state();
+    let body = &st.bodies[0].body;
+    !body.contains(Vec3::new(x, y, 2.5)) && body.contains(Vec3::new(x, y + 2.0, 2.5))
+}
+
+/// Extent (#8523): a direction's value runs from the first copy to the last, whatever the
+/// alignment; the other direction keeps its Spacing. It saves, reopens and edits back to Spacing.
+#[test]
+fn rectangular_extent_spans_first_to_last_copy() {
+    let mut s = feature_pattern_plate();
+    run(
+        &mut s,
+        "solid.pattern.rectangular",
+        json!({"features":["Hole"],"dir1":[1,0,0],"count1":4,"spacing1":30,"type1":"extent","dir2":[0,1,0],"count2":3,"spacing2":15,"name":"Pattern"}),
+    );
+    for x in [60.0, 70.0, 80.0, 90.0] {
+        for y in [60.0, 75.0, 90.0] {
+            assert!(hole_at(&s, x, y), "hole at ({x}, {y})");
+        }
+    }
+    assert!(!hole_at(&s, 100.0, 60.0) && !hole_at(&s, 60.0, 105.0));
+    let saved = s.doc.to_json();
+    let compact = saved.replace([' ', '\n'], "");
+    assert!(compact.contains("\"extent1\":true") && !compact.contains("extent2"), "{saved}");
+    let reopened = Session::new(solidcraft_doc::Document::from_json(&saved).unwrap());
+    assert!(hole_at(&reopened, 90.0, 90.0));
+    // Centred, the extent is still the whole span: two copies on each side, 7.5 mm apart.
+    run(
+        &mut s,
+        "timeline.redefine",
+        json!({"feature":"Pattern","command":"solid.pattern.rectangular","params":{
+        "features":["Hole"],"dir1":[1,0,0],"count1":5,"spacing1":30,"type1":"extent","alignment":"center"}}),
+    );
+    for x in [45.0, 52.5, 60.0, 67.5, 75.0] {
+        assert!(hole_at(&s, x, 60.0), "hole at x = {x}");
+    }
+    assert!(!hole_at(&s, 82.5, 60.0));
+    // Back to Spacing: the same value now spaces neighbours.
+    run(
+        &mut s,
+        "timeline.redefine",
+        json!({"feature":"Pattern","command":"solid.pattern.rectangular","params":{
+        "features":["Hole"],"dir1":[1,0,0],"count1":2,"spacing1":30}}),
+    );
+    assert!(hole_at(&s, 90.0, 60.0));
+    assert!(!s.doc.to_json().contains("extent1"));
+}
+
+/// To Object (#8523): the last copy's centre reaches the picked face, measured from the middle of
+/// the copied hole, and follows the face when it moves. Each direction picks its own object.
+#[test]
+fn rectangular_to_object_reaches_the_face_and_follows_it() {
+    let mut s = feature_pattern_plate();
+    // A stop block beside the plate: its left face at x = 100, its front face at y = 130.
+    run(&mut s, "solid.box", json!({"length":10,"width":10,"height":5,"corner":[100,130,0],"name":"Stop","body_name":"Stop"}));
+    run(
+        &mut s,
+        "solid.pattern.rectangular",
+        json!({"features":["Hole"],"dir1":[1,0,0],"count1":5,"type1":"to_object","to1":[100,135,2.5],
+               "dir2":[0,1,0],"count2":4,"type2":"to_object","to2":[30,120,2.5],"name":"Pattern"}),
+    );
+    // 40 mm to the stop in 4 steps; 60 mm to the plate's back face in 3.
+    for x in [60.0, 70.0, 80.0, 90.0, 100.0] {
+        for y in [60.0, 80.0, 100.0] {
+            assert!(hole_at(&s, x, y), "hole at ({x}, {y})");
+        }
+    }
+    assert!(!hole_at(&s, 65.0, 60.0) && !hole_at(&s, 60.0, 70.0));
+    // The block moves 20 mm closer: the copies close up to it.
+    run(
+        &mut s,
+        "timeline.redefine",
+        json!({"feature":"Stop","command":"solid.box","params":{"length":10,"width":10,"height":5,"corner":[80,130,0],"body_name":"Stop"}}),
+    );
+    let err = s.model.results.iter().find_map(|r| r.error.clone());
+    assert!(err.is_none(), "{err:?}");
+    for x in [60.0, 65.0, 70.0, 75.0, 80.0] {
+        assert!(hole_at(&s, x, 60.0) && hole_at(&s, x, 100.0), "holes at x = {x} after the move");
+    }
+    assert!(!hole_at(&s, 90.0, 60.0));
+    // An object where the copies start is refused, and a To Object without its point.
+    let e = s.execute("solid.pattern.rectangular", &json!({"features":["Hole"],"dir1":[1,0,0],"count1":3,"type1":"to_object"}));
+    assert!(e.is_err_and(|e| e.to_string().contains("to1")));
+    let e = s.execute("solid.pattern.rectangular", &json!({"features":["Hole"],"dir1":[1,0,0],"count1":3,"spacing1":5,"type1":"sideways"}));
+    assert!(e.is_err_and(|e| e.to_string().contains("type1")));
+}
+
 /// Editing a pattern behind the history marker (double-clicking its greyed-out item and pressing
 /// OK) changes nothing in the model: the reply says so, where the edit used to look as if it had
 /// silently failed, and it still carries what building the copies met (#8100).
@@ -1102,4 +1192,84 @@ fn editing_a_rolled_back_pattern_says_it_is_not_built() {
     let reply = run(&mut s, "timeline.redefine", redefine(2, [0.0, 0.0, 0.0]));
     assert_eq!(reply["rolled_back"], json!(true), "{reply}");
     assert_eq!(reply["warning"], "1 of 1 cut copies remove no material", "{reply}");
+}
+
+/// To Object as an extrude's (#7780): a face running along the direction (the stop's top) is
+/// reached where it begins, not at the pick on it, and To Offset moves the end, negative short.
+#[test]
+fn rectangular_to_object_face_along_the_direction_and_offset() {
+    let mut s = feature_pattern_plate();
+    run(&mut s, "solid.box", json!({"length":20,"width":10,"height":5,"corner":[100,130,0],"name":"Stop","body_name":"Stop"}));
+    // Picked far along the top (x = 115): the copies still end at its near edge, x = 100.
+    run(
+        &mut s,
+        "solid.pattern.rectangular",
+        json!({"features":["Hole"],"dir1":[1,0,0],"count1":3,"type1":"to_object","to1":[115,135,5],"name":"Pattern"}),
+    );
+    for x in [60.0, 80.0, 100.0] {
+        assert!(hole_at(&s, x, 60.0), "hole at x = {x}");
+    }
+    // 10 mm short of it: 30 mm in two steps.
+    run(
+        &mut s,
+        "timeline.redefine",
+        json!({"feature":"Pattern","command":"solid.pattern.rectangular","params":{
+        "features":["Hole"],"dir1":[1,0,0],"count1":3,"type1":"to_object","to1":[115,135,5],"to_offset1":"-10 mm"}}),
+    );
+    for x in [60.0, 75.0, 90.0] {
+        assert!(hole_at(&s, x, 60.0), "hole at x = {x} with the offset");
+    }
+    assert!(!hole_at(&s, 100.0, 60.0));
+    assert!(s.doc.to_json().contains("\"to_offset1\""));
+}
+
+/// To Object a reference, as an extrude's (#8527): a construction plane and a sketch point the
+/// copies run to, followed when a parameter moves them, also once saved and opened again.
+#[test]
+fn rectangular_to_object_references_follow_them() {
+    let mut s = feature_pattern_plate();
+    run(&mut s, "parameters.add", json!({"name": "stop", "expression": "100 mm"}));
+    run(&mut s, "construct.plane.offset", json!({"base": "YZ", "offset": "stop", "name": "Stop"}));
+    let marks = run(&mut s, "sketch.create", json!({"plane": "XY"}))["sketch"].as_u64().unwrap();
+    run(&mut s, "sketch.point", json!({"point": [30, "stop"], "id": "tip"}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(
+        &mut s,
+        "solid.pattern.rectangular",
+        json!({"features":["Hole"],"dir1":[1,0,0],"count1":3,"to1":{"plane":"Stop"},
+               "dir2":[0,1,0],"count2":3,"to2":{"sketch":marks,"point":"tip"},"name":"Pattern"}),
+    );
+    let doc = s.doc.to_json();
+    assert!(doc.contains("\"to1_ref\"") && doc.contains("\"to2_ref\""), "{doc}");
+    for (x, y) in [(80.0, 80.0), (100.0, 100.0), (60.0, 100.0)] {
+        assert!(hole_at(&s, x, y), "hole at ({x}, {y})");
+    }
+    run(&mut s, "parameters.change", json!({"name": "stop", "expression": "80 mm"}));
+    for (x, y) in [(70.0, 70.0), (80.0, 80.0), (60.0, 80.0)] {
+        assert!(hole_at(&s, x, y), "hole at ({x}, {y}) after the move");
+    }
+    assert!(!hole_at(&s, 100.0, 100.0));
+    let restored = solidcraft_doc::format::read(&s.doc.to_json()).unwrap();
+    let mut cold = Session { doc: restored.into(), ..Default::default() };
+    cold.refresh();
+    assert!(hole_at(&cold, 80.0, 80.0) && !hole_at(&cold, 100.0, 100.0));
+}
+
+/// A construction plane later in the timeline than the pattern is refused, as for an extrude: the
+/// pattern could not follow it (#8527), and keeps the copies it had.
+#[test]
+fn rectangular_to_a_later_construction_plane_is_refused() {
+    let mut s = feature_pattern_plate();
+    run(&mut s, "solid.pattern.rectangular", json!({"features":["Hole"],"dir1":[1,0,0],"count1":2,"spacing1":20,"name":"Pattern"}));
+    run(&mut s, "construct.plane.offset", json!({"base": "YZ", "offset": 100, "name": "Late"}));
+    let err = s
+        .execute(
+            "timeline.redefine",
+            &json!({"feature":"Pattern","command":"solid.pattern.rectangular","params":{
+            "features":["Hole"],"dir1":[1,0,0],"count1":2,"to1":{"plane":"Late"}}}),
+        )
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("must come earlier in the timeline"), "{err}");
+    assert!(hole_at(&s, 80.0, 60.0) && !hole_at(&s, 100.0, 60.0));
 }
