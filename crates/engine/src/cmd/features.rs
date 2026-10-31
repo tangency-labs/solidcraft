@@ -381,6 +381,11 @@ pub(super) fn stable_profiles(s: &Session, kind: &mut FeatureKind, exact: bool) 
     let st = s.model.state();
     for (sketch, sel) in kind.profile_sels_mut() {
         let Some(ss) = st.sketch(sketch) else { continue };
+        // An empty selection (a patch asked for only the sketch's 3D loops, #741) has nothing to
+        // capture: it stays empty.
+        if matches!(sel, ProfileSel::Indices { indices } if indices.is_empty()) {
+            continue;
+        }
         let indices = match sel {
             ProfileSel::Indices { indices } => {
                 let have = ss.profiles.len();

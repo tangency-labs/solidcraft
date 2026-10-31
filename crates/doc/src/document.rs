@@ -1415,6 +1415,10 @@ pub enum FeatureKind {
         #[serde(default = "all_profiles")]
         #[walk(profiles_of = sketch)]
         profiles: ProfileSel,
+        /// Indices into the sketch's planar 3D loops (`sketch.inspect`'s `profiles_3d`): each is
+        /// patched in the plane it lies in (#741).
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        profiles_3d: Vec<usize>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         body: Option<BodyName>,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]

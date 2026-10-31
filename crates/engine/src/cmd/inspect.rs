@@ -247,6 +247,23 @@ fn sketch_json(s: &Session, id: u64) -> Option<Value> {
             json!({"index": i, "area_mm2": p.area, "centroid_sketch": p.centroid, "curves": solidcraft_sketch::distinct_curves(&p.outer_curves), "holes": holes})
         })
         .collect();
+    // Planar loops the 3D sketch curves close in planes of their own (#741): the plane is given
+    // as an origin and a unit normal, and the centroid is in the same frame as the sketch plane.
+    let profiles_3d: Vec<Value> = ss
+        .profiles_3d
+        .iter()
+        .enumerate()
+        .map(|(i, p)| {
+            json!({
+                "index": i,
+                "area_mm2": p.area,
+                "plane": { "origin": p.plane.origin, "normal": p.plane.normal() },
+                "centroid": p.centroid,
+                "curves": p.outer_curves,
+                "holes": p.hole_curves,
+            })
+        })
+        .collect();
     Some(json!({
         "id": id,
         "name": ss.name,
@@ -259,6 +276,7 @@ fn sketch_json(s: &Session, id: u64) -> Option<Value> {
         "points": points,
         "constraints": constraints,
         "profiles": profiles,
+        "profiles_3d": profiles_3d,
         "links": sk.links,
         "wires": sk.wires.iter().map(|w| json!({"id": w.id, "points": w.pts.len(), "start": w.pts.first(), "end": w.pts.last(), "link": w.link, "arc": w.arc.map(|a| json!({"center": a.center, "radius": a.radius, "start": a.start, "end": a.end, "sweep_deg": solidcraft_sketch::arc_sweep(&a).to_degrees()}))})).collect::<Vec<_>>(),
         "visible": crate::view::sketch_shown(s, id),
