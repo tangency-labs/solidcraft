@@ -66,7 +66,9 @@
 //! - **Side edge run on (WR-610, #960).** With `fixes.fillet_trace_reaches_rails`,
 //!   `RailEdgeuseIntersect` widens a straight side edge's parameter interval on a planar
 //!   base surface past both ends (`run_side_edge_on_along_its_line`, the fork's
-//!   tangency-labs/smlib@6e77631).
+//!   tangency-labs/smlib@6e77631). With `fixes.fillet_run_on_past_far_end_only` too, past
+//!   the end away from the filleted edge's vertex only (WR-643, the fork's
+//!   tangency-labs/smlib@7224896).
 
 use crate::blend::fillet_custom_solver::OffsetSurface;
 use crate::blend::fillet_executive::p3::ErrorInfo;
@@ -553,10 +555,47 @@ fn run_side_edge_on_along_its_line(
     };
     if length > EFF_ZERO_SQRT {
         let past = reach * edge_ivl.length() / length;
+        if !k.fixes.fillet_run_on_past_far_end_only {
+            set_interval(
+                intervals,
+                0,
+                Extent1d::from_min_max(edge_ivl.min() - past, edge_ivl.max() + past),
+            );
+            return Ok(());
+        }
+        // Opt-in (`fixes.fillet_run_on_past_far_end_only`, WR-643; the fork's
+        // tangency-labs/smlib@7224896): only past the end away from the corner. The side
+        // edge leaves the corner's vertex into the sector the blend fills, and a point of
+        // its line behind that vertex lies on the far side of the filleted edge, where no
+        // rail of the blend can be.
+        let filleted = match solver.edgeuse(0)? {
+            Some(eu) => eu::edge(b, eu)?,
+            None => None,
+        };
+        let (filleted_start, filleted_end) = match filleted {
+            Some(e) => edge::start_end_vertices(b, e)?,
+            None => (None, None),
+        };
+        let on_filleted = |v: Option<VertexId>| {
+            v.is_some() && filleted.is_some() && (v == filleted_start || v == filleted_end)
+        };
+        let (side_start, side_end) = edge::start_end_vertices(b, side_edge)?;
+        let corner_at_start = on_filleted(side_start);
+        let corner_at_end = on_filleted(side_end);
+        let before = if corner_at_start && !corner_at_end {
+            0.0
+        } else {
+            past
+        };
+        let after = if corner_at_end && !corner_at_start {
+            0.0
+        } else {
+            past
+        };
         set_interval(
             intervals,
             0,
-            Extent1d::from_min_max(edge_ivl.min() - past, edge_ivl.max() + past),
+            Extent1d::from_min_max(edge_ivl.min() - before, edge_ivl.max() + after),
         );
     }
     Ok(())
@@ -2848,6 +2887,7 @@ mod tests {
         size: usize,
         extension_calls: std::cell::Cell<usize>,
         loaded_dimension: std::cell::Cell<Option<usize>>,
+        loaded_edge_interval: std::cell::Cell<Option<(f64, f64)>>,
     }
 
     impl FilletSolverOps for JacobianSizeOps {
@@ -2886,6 +2926,8 @@ mod tests {
             _guess_t: &mut Vec<f64>,
         ) -> Result<Option<crate::blend::fillet_custom_solver::InitialValues>> {
             self.loaded_dimension.set(Some(intervals.dimension()));
+            self.loaded_edge_interval
+                .set(intervals.get(0).map(|i| (i.min(), i.max())));
             Err(sm_err())
         }
     }
@@ -2937,7 +2979,107 @@ mod tests {
             size,
             extension_calls: std::cell::Cell::new(0),
             loaded_dimension: std::cell::Cell::new(None),
+            loaded_edge_interval: std::cell::Cell::new(None),
         }
+    }
+
+    /// The parameter interval of a side edge use that `RailEdgeuseIntersect` loads,
+    /// with `fillet_trace_reaches_rails` and `fillet_run_on_past_far_end_only` as given,
+    /// on a 10 cube: the filleted edge is the top front edge (0,0,10)-(10,0,10). The side
+    /// edge is the top left edge, (0,0,10)-(0,10,10), which meets it at the corner (0,0,10),
+    /// or, with `at_corner` false, the top back edge, (0,10,10)-(10,10,10), which does not.
+    /// Returns the loaded interval, the side edge use's natural interval, and the end of
+    /// it (0 start, 1 end) at the corner, if any.
+    fn run_on_interval(
+        far_end_only: bool,
+        at_corner: bool,
+    ) -> ((f64, f64), (f64, f64), Option<usize>) {
+        use crate::primitive::api_primitives::create_box;
+        use crate::topology::vertex;
+        let mut k = Kernel::default();
+        k.fixes.fillet_trace_reaches_rails = true;
+        k.fixes.fillet_run_on_past_far_end_only = far_end_only;
+        let mut ops = jacobian_size_ops(&k, 2);
+        let mut b = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 10.0, 10.0, 10.0).unwrap();
+        let ends = |b: &Brep, e: EdgeId| {
+            let (s, t) = edge::start_end_vertices(b, e).unwrap();
+            (
+                vertex::point(b, s.unwrap()).unwrap(),
+                vertex::point(b, t.unwrap()).unwrap(),
+            )
+        };
+        let find = |b: &Brep, p: Point3, q: Point3| {
+            b.edge_list()
+                .iter()
+                .copied()
+                .find(|&e| {
+                    let (s, t) = ends(b, e);
+                    (s == p && t == q) || (s == q && t == p)
+                })
+                .unwrap()
+        };
+        let corner = Point3::new(0.0, 0.0, 10.0);
+        let filleted = find(&b, corner, Point3::new(10.0, 0.0, 10.0));
+        let side = if at_corner {
+            find(&b, corner, Point3::new(0.0, 10.0, 10.0))
+        } else {
+            find(
+                &b,
+                Point3::new(0.0, 10.0, 10.0),
+                Point3::new(10.0, 10.0, 10.0),
+            )
+        };
+        let filleted_eu = edge::edgeuses(&b, filleted, None, None).unwrap()[0];
+        let side_eu = edge::edgeuses(&b, side, None, None).unwrap()[0];
+        ops.solver.edgeuses = [Some(filleted_eu), None];
+        let (s, t) = ends(&b, side);
+        let corner_end = if s == corner {
+            Some(0)
+        } else if t == corner {
+            Some(1)
+        } else {
+            None
+        };
+        let mut tsect = TsectPnt::default();
+        let result =
+            FilletSolver::rail_edgeuse_intersect(&mut ops, &k, &mut b, 0, side_eu, 0.5, &mut tsect);
+        assert_eq!(result, Err(sm_err()), "the mock's LoadInitialValues fails");
+        let natural = eu::uv_trim_curve(&b, side_eu)
+            .unwrap()
+            .0
+            .unwrap()
+            .natural_interval();
+        (
+            ops.loaded_edge_interval.get().expect("intervals loaded"),
+            (natural.min(), natural.max()),
+            corner_end,
+        )
+    }
+
+    /// WR-643 (the SolidCraft fork's tangency-labs/smlib@7224896): with
+    /// `fillet_run_on_past_far_end_only`, the side edge runs on past its far end only,
+    /// never behind the filleted edge's vertex (where the fork's knife-edge round took the
+    /// ball's mirror image); without it, past both ends (WR-610), as does a side edge that
+    /// does not meet the filleted edge.
+    #[test]
+    fn wr643_side_edge_runs_on_past_its_far_end_only() {
+        // WR-610 alone: past both ends, also behind the corner
+        let ((lo, hi), (a, z), corner_end) = run_on_interval(false, true);
+        let corner_end = corner_end.expect("the side edge meets the filleted edge");
+        let past = a - lo;
+        assert!(past > 0.0, "the side edge runs on: {lo} from {a}");
+        assert_eq!((lo, hi), (a - past, z + past));
+        // with the flag: never behind the corner
+        let on = run_on_interval(true, true).0;
+        if corner_end == 0 {
+            assert_eq!(on, (a, z + past));
+        } else {
+            assert_eq!(on, (a - past, z));
+        }
+        // a side edge with no end on the filleted edge still runs on past both
+        let ((lo, hi), (a, z), none) = run_on_interval(true, false);
+        assert_eq!(none, None);
+        assert_eq!((lo, hi), (a - past, z + past));
     }
 
     fn edgeuse_with_uv_trim() -> (Brep, EdgeuseId) {
