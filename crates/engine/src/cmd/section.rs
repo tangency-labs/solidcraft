@@ -9,6 +9,7 @@ use crate::params::{bad, bool_, expr, vec3};
 use crate::schema::{TypedContract, output_schema_for, section as contract};
 use crate::{Result, Session};
 const SECTION: TypedContract<contract::SectionParams> = TypedContract::new();
+const SECTION_CURVES: TypedContract<contract::SectionCurvesParams> = TypedContract::new();
 
 #[path = "section_curves.rs"]
 mod curves;
@@ -21,7 +22,12 @@ pub static COMMANDS: &[CommandSpec] = &[
          at?: expr, the cut's world coordinate on the named plane's axis (XY: Z, XZ: Y, YZ: X), instead of offset; \
          flip?: bool; hatch?: bool (hatch the cut faces, in each body's colour; default true); or clear: true. Returns the cut's origin and normal, and for a named plane its axis and at",
     ),
-    CommandSpec::new(curves::CMD, "Section Curves", curves::section_curves).icon("section").noundo().params(curves::PARAMS),
+    CommandSpec::new(curves::CMD, "Section Curves", crate::checked!("inspect.section_curves", curves::section_curves))
+        .contract(&SECTION_CURVES)
+        .output(output_schema_for::<contract::SectionCurvesResult>)
+        .icon("section")
+        .noundo()
+        .params(curves::PARAMS),
 ];
 
 fn section(s: &mut Session, p: &Value) -> Result<Value> {

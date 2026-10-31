@@ -1,11 +1,12 @@
 //! Section curves: the cut of bodies by a plane as 2D lines, arcs and splines in the plane's
 //! frame, returned as JSON. It changes nothing in the design.
 
-use serde_json::{Value, json};
+use serde_json::Value;
 use solidcraft_doc::project::{SectionLoop, SectionSeg, section_loops};
 use solidcraft_geom::Vec2;
 
 use crate::params::bad;
+use crate::schema::section as contract;
 use crate::{Result, Session};
 
 pub(super) const CMD: &str = "inspect.section_curves";
@@ -18,8 +19,8 @@ pub(super) const PARAMS: &str = "plane: XY|XZ|YZ | construction plane name or id
 
 const MAX_BODIES: usize = 10_000;
 
-fn pt(p: Vec2) -> Value {
-    json!([p.x, p.y])
+fn pt(p: Vec2) -> [f64; 2] {
+    [p.x, p.y]
 }
 
 /// The bodies the request names (none: every visible body). Read whole rather than with
@@ -68,37 +69,37 @@ pub(super) fn section_curves(s: &mut Session, p: &Value) -> Result<Value> {
             cut.push((b.name.clone(), loops));
         }
     }
-    let loops: Vec<Value> = cut
+    let loops = cut
         .iter()
         .flat_map(|(body, loops)| {
-            loops.iter().map(move |l| {
-                let mut v = json!({"body": body, "closed": l.closed, "segments": l.segments.iter().map(seg_json).collect::<Vec<_>>()});
-                if let Some(a) = l.area {
-                    v["area"] = json!(a);
-                }
-                v
+            loops.iter().map(move |l| contract::SectionCurveLoop {
+                body: body.clone(),
+                closed: l.closed,
+                area: l.area,
+                segments: l.segments.iter().map(segment).collect(),
             })
         })
         .collect();
-    Ok(json!({
-        "frame": {"origin": plane.origin, "x": plane.x, "y": plane.y, "normal": plane.normal()},
-        "units": "mm",
-        "loops": loops,
-    }))
+    let v3 = |v: solidcraft_geom::Vec3| [v.x, v.y, v.z];
+    let reply = contract::SectionCurvesResult {
+        frame: contract::SectionFrame { origin: v3(plane.origin), x: v3(plane.x), y: v3(plane.y), normal: v3(plane.normal()) },
+        units: "mm".into(),
+        loops,
+        param_warnings: Vec::new(),
+    };
+    serde_json::to_value(reply).map_err(|e| bad(CMD, e.to_string()))
 }
 
-fn seg_json(s: &SectionSeg) -> Value {
+fn segment(s: &SectionSeg) -> contract::SectionCurveSegment {
+    use contract::SectionCurveSegment as Seg;
     match s {
-        SectionSeg::Line { a, b } => json!({"type": "line", "start": pt(*a), "end": pt(*b)}),
+        SectionSeg::Line { a, b } => Seg::Line { start: pt(*a), end: pt(*b) },
         SectionSeg::Arc { c, r, sweep, .. } => {
-            json!({"type": "arc", "center": pt(*c), "radius": r, "start": pt(s.start()), "end": pt(s.end()), "sweep_deg": sweep.to_degrees()})
+            Seg::Arc { center: pt(*c), radius: *r, start: pt(s.start()), end: pt(s.end()), sweep_deg: sweep.to_degrees() }
         }
-        SectionSeg::Spline { pts, periodic, .. } => json!({
-            "type": "spline",
-            "closed": periodic,
-            "points": pts.iter().map(|p| pt(*p)).collect::<Vec<_>>(),
-            "beziers": s.beziers().iter().map(|b| b.iter().map(|p| pt(*p)).collect::<Vec<_>>()).collect::<Vec<_>>(),
-        }),
+        SectionSeg::Spline { pts, periodic, .. } => {
+            Seg::Spline { closed: *periodic, points: pts.iter().map(|p| pt(*p)).collect(), beziers: s.beziers().iter().map(|b| b.map(pt)).collect() }
+        }
     }
 }
 
