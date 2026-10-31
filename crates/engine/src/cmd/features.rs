@@ -2878,7 +2878,12 @@ fn hole(s: &mut Session, p: &Value) -> Result<Value> {
         },
         "countersink" => solidcraft_doc::HoleKind::Countersink {
             cs_diameter: get("cs_diameter")?,
-            cs_angle: expr(p, "cs_angle").unwrap_or_else(|| "90 deg".into()),
+            // The default only when no angle is given: a supplied one out of range is refused (#9625).
+            cs_angle: match p.get("cs_angle") {
+                None | Some(Value::Null) => "90 deg".into(),
+                Some(Value::String(t)) if t.trim().is_empty() => "90 deg".into(),
+                Some(_) => req_expr(cmd, p, "cs_angle")?,
+            },
             tip_angle: expr(p, "tip_angle"),
         },
         other => return Err(bad(cmd, format!("unknown hole type `{other}`"))),

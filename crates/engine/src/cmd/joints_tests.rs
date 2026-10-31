@@ -136,10 +136,13 @@ fn a_joint_value_out_of_range_says_so() {
     run(&mut s, "joint.create", hinge);
     for value in [json!(1e9), json!(-5e15)] {
         let e = s.execute("joint.drive", &json!({"joint": "Hinge", "value": value})).err().map(|e| e.to_string()).unwrap_or_default();
-        assert!(e.contains("a joint value must be a number between -1e9 and 1e9") && !e.contains("numbers or expressions"), "{value}: {e}");
+        assert!(
+            e.contains("a joint value must be a number between -1e9 and 1e9") && !e.contains("a joint value must be a number or"),
+            "{value}: {e}"
+        );
     }
     let e = s.execute("joint.drive", &json!({"joint": "Hinge", "value": true})).err().map(|e| e.to_string()).unwrap_or_default();
-    assert!(e.contains("a joint value must be a number or an expression"), "{e}");
+    assert!(e.contains("a joint value must be a number or an expression") && !e.contains("between"), "{e}");
 }
 
 /// Two 10 mm cubes in components A (grounded) and B.

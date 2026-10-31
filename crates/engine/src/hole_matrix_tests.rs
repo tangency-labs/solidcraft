@@ -1023,10 +1023,21 @@ fn a_refused_hole_names_the_value_at_fault() {
     assert!(e.contains("`fit` must be close, normal or loose, not `tight`") && !e.contains("M1.6"), "{e}");
     let e = refused(json!({"clearance": "M100"}));
     assert!(e.contains("no clearance hole for `M100`") && e.contains("M1.6 to M64"), "{e}");
-    for angle in [0, 200, -90] {
+    for angle in [json!(0), json!(200), json!(-90), json!(0.1)] {
         let e = refused(json!({"diameter": 3, "type": "countersink", "cs_diameter": 6, "cs_angle": angle}));
-        assert!(e.contains("the countersink angle must be more than 0° and less than 180°") && !e.contains("wider"), "{angle}: {e}");
+        assert!(e.contains("the countersink angle must be more than 0.115° and less than 180°") && !e.contains("wider"), "{angle}: {e}");
     }
+    // 0.1° is refused by the floor the message names, and gives the angle as typed.
+    let e = refused(json!({"diameter": 3, "type": "countersink", "cs_diameter": 6, "cs_angle": 0.1}));
+    assert!(e.contains("not 0.1°"), "{e}");
+    // An angle that is no usable number is refused, not replaced by the 90° default.
+    let e = refused(json!({"diameter": 3, "type": "countersink", "cs_diameter": 6, "cs_angle": 1e9}));
+    assert!(e.contains("`cs_angle` must be a number between -1e9 and 1e9"), "{e}");
+    // A blank angle field still means the 90° default, as an omitted one does.
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 40, "width": 40, "height": 10, "center": [0, 0, 5]})).unwrap();
+    let blank = json!({"position": [0, 0, 10], "diameter": 3, "type": "countersink", "cs_diameter": 6, "cs_angle": " "});
+    s.execute("solid.hole", &blank).unwrap_or_else(|e| panic!("a blank cs_angle was refused: {e}"));
     let e = refused(json!({"diameter": 6, "type": "countersink", "cs_diameter": 3}));
     assert!(e.contains("the countersink must be wider than the hole") && !e.contains("angle"), "{e}");
     for d in [json!(1e9), json!(-2e12)] {
