@@ -28,7 +28,7 @@ fn rectangle(min: Vec2, max: Vec2) -> Loop2 {
 
 /// An A3 landscape sheet with one object's items.
 fn sheet(items: Vec<Item>) -> Scene {
-    Scene { size_mm: p(420.0, 297.0), groups: vec![Group { object: 1, kind: ObjectKind::DrawingBorder, items }] }
+    Scene::new(p(420.0, 297.0), vec![Group { object: 1, kind: ObjectKind::DrawingBorder, items }])
 }
 
 fn open(path: Vec<Seg2>) -> Scene {
@@ -245,7 +245,7 @@ fn every_loop_of_a_fill_is_closed_within_1e_9_mm() {
 fn at_most_100_000_records_are_counted_before_any_geometry() {
     const REFUSED: Invalid = Invalid("more than 100,000 groups, items, loops and pieces");
     let group = |items| Group { object: 7, kind: ObjectKind::PartsList, items };
-    let scene = |groups| Scene { size_mm: p(420.0, 297.0), groups };
+    let scene = |groups| Scene::new(p(420.0, 297.0), groups);
     // Groups alone.
     scene(vec![group(vec![]); MAX_RECORDS]).validate().unwrap();
     assert_eq!(scene(vec![group(vec![]); MAX_RECORDS + 1]).validate(), Err(REFUSED));

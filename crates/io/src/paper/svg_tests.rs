@@ -25,7 +25,7 @@ fn rectangle(min: Vec2, max: Vec2) -> Loop2 {
 
 /// An A3 landscape sheet with one object's items.
 fn sheet(items: Vec<Item>) -> Scene {
-    Scene { size_mm: p(420.0, 297.0), groups: vec![Group { object: 1, kind: ObjectKind::DrawingBorder, items }] }
+    Scene::new(p(420.0, 297.0), vec![Group { object: 1, kind: ObjectKind::DrawingBorder, items }])
 }
 
 fn svg(scene: &Scene) -> (String, SvgReport) {
@@ -162,4 +162,44 @@ fn the_svg_reader_reads_it_back() {
     assert_eq!(arcs.len(), 1, "{read:?}");
     let (c, a, b) = arcs[0];
     assert!(c.dist(p(50.0, 50.0)) < 3e-6 && a.dist(p(60.0, 50.0)) < 3e-6 && b.dist(p(50.0, 60.0)) < 3e-6, "{:?}", arcs[0]);
+}
+
+/// Text isn't written yet (B2): a scene with a run is refused by name, never written without it.
+#[test]
+fn text_is_refused_by_name_until_the_writer_learns_it() {
+    use solidcraft_geom::paper::text::{Cluster, Font, FontFlags, FontGlyph, FontMetrics, PlacedGlyph, TextRun};
+    let metrics = FontMetrics {
+        ascent: 900,
+        descent: -200,
+        cap_height: 700,
+        bbox: [0, 0, 500, 700],
+        italic_angle: 0.0,
+        flags: FontFlags::default(),
+        stem_v: 80,
+    };
+    let glyph = FontGlyph { advance: 600, outline: vec![rectangle(p(0.0, 0.0), p(500.0, 700.0))] };
+    let font = Font {
+        id: [1; 32],
+        bytes: std::sync::Arc::from(vec![1u8]),
+        face: 0,
+        postscript_name: "MadeUp".into(),
+        num_glyphs: 2,
+        units_per_em: 1000,
+        metrics,
+        glyphs: [(1, glyph)].into(),
+    };
+    let run = TextRun {
+        font: [1; 32],
+        scale: 0.005,
+        origin: p(20.0, 30.0),
+        angle: 0.0,
+        slant: 0.0,
+        glyphs: vec![PlacedGlyph { id: 1, x: 0.0, rise: 0.0, advance: 3.0 }],
+        text: "A".into(),
+        clusters: vec![Cluster { glyphs: 0..1, text: 0..1 }],
+        rtl: false,
+    };
+    let scene = Scene { fonts: vec![font], ..sheet(vec![Item::Text(run)]) };
+    let refusal = paper_svg(&scene.prepare().unwrap()).unwrap_err().to_string();
+    assert!(refusal.contains("not supported yet: text in an SVG"), "{refusal}");
 }
