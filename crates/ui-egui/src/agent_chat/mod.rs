@@ -2639,8 +2639,6 @@ pub fn status(app: &SolveApp) -> Value {
         "toolsPort": c.tools_port,
         "pid": pid,
         "waiting": c.waiting(),
-        "input": c.input,
-        "pills": c.pills.iter().map(|p| json!({"id": p.id, "label": p.label, "items": p.context.items.iter().map(|i| json!({"label": i.label, "detail": i.detail})).collect::<Vec<_>>()})).collect::<Vec<_>>(),
         "pending": c.pending.iter().map(|p| json!({"text": p.text, "image": p.image, "context": p.context.total(), "files": p.files.iter().map(|f| f.name.clone()).collect::<Vec<_>>()})).collect::<Vec<_>>(),
         "attachments": c.attachments.iter().map(|f| f.name.clone()).collect::<Vec<_>>(),
         "loading": c.loading.iter().map(|f| f.name.clone()).collect::<Vec<_>>(),
@@ -2654,6 +2652,9 @@ pub fn status(app: &SolveApp) -> Value {
     if let Some(state) = state.as_object_mut() {
         state.insert("modelsNote".into(), json!(c.models_note));
         state.insert("customModels".into(), json!(custom_models_accepted(app)));
+        // What the box holds, and what the pill marks in it stand for.
+        state.insert("input".into(), json!(c.input));
+        state.insert("pills".into(), Value::Array(c.pills.iter().map(|p| json!({"id": p.id, "label": p.label, "items": p.context.items.iter().map(|i| json!({"label": i.label, "detail": i.detail})).collect::<Vec<_>>()})).collect::<Vec<_>>()));
     }
     state
 }
