@@ -8,6 +8,13 @@
   {"key": "Enter"},
   {"frames": 2},
   {"expect": {"shown": "Reverse zoom direction", "prefs": {"dialog": "Navigation"}}},
+  {"call": "ui.prefs", "params": {"open": "General"}},
+  {"text": "Direct interaction"},
+  {"frames": 3},
+  {"expect": {"shown": "Work > Tools"}},
+  {"key": "Enter"},
+  {"frames": 2},
+  {"expect": {"shown": "Direct interaction", "prefs": {"dialog": "Tools"}}},
   {"key": "Escape"},
   {"expect": {"not_shown": "Restore Defaults", "prefs": {"dialog": null}}}
 ]

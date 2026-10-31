@@ -1,34 +1,13 @@
-//! Interface settings composition, using shared controls and previews.
+//! Appearance and Layout settings composition, using shared controls and previews.
 use super::*;
 
-/// Origin plane names: each choice shows the three names it gives (`XY / XZ / YZ`), with a note
-/// that only the names shown change.
-fn origin_plane_names(app: &mut SolveApp, ui: &mut egui::Ui) {
-    ui_kit::settings_section(ui, "origin_plane_names", app.tr("prefs.origin_plane_names"), |ui| {
-        let choices: Vec<String> =
-            OriginPlaneNames::ALL.iter().map(|names| OriginPlaneNames::PLANES.map(|plane| names.label(plane)).join(" / ")).collect();
-        let options: Vec<&str> = choices.iter().map(String::as_str).collect();
-        let mut selected = OriginPlaneNames::ALL.iter().position(|names| *names == app.preferences.origin_plane_names).unwrap_or(0);
-        if ui_kit::settings_segments(ui, app.tr("prefs.origin_plane_names"), &mut selected, &options)
-            && let Some(names) = OriginPlaneNames::ALL.get(selected)
-        {
-            app.preferences.origin_plane_names = *names;
-        }
-        // Handles that don't depend on the language, by the choice's saved value.
-        for (choice, key) in choices.iter().zip(["xyz", "top_front_right"]) {
-            if let Some(at) = crate::scenario::handle_at(&format!("dialog:{}:{choice}", app.tr("prefs.origin_plane_names"))) {
-                crate::scenario::publish_handle(&format!("prefs:origin_plane_names:{key}"), at);
-            }
-        }
-        let top = OriginPlaneNames::TopFrontRight;
-        let note =
-            crate::i18n::format("prefs.origin_plane_names_note", &[("top", top.label("XY")), ("front", top.label("XZ")), ("right", top.label("YZ"))]);
-        ui_kit::text(ui, &note, ui_kit::Text::Hint("origin_plane_names"));
-    });
-}
-
-pub(super) fn interface(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
-    ui_kit::settings_heading(ui, app.tr("prefs.interface"), app.tr("prefs.interface_note"));
+pub(super) fn appearance(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
+    ui_kit::settings_heading_with_tag(
+        ui,
+        app.tr("prefs.structure.appearance"),
+        app.tr("prefs.structure.appearance_note"),
+        Some(crate::settings_profiles::tag),
+    );
     ui_kit::settings_section(ui, "theme", app.tr("ui.theme"), |ui| {
         theme_row(app, ui);
         theme_options_row(app, ui);
@@ -73,6 +52,95 @@ pub(super) fn interface(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
             }
         });
     });
+    ui_kit::settings_section(ui, "scale", app.tr("prefs.scale_text"), |ui| {
+        ui_kit::settings_pair(
+            ui,
+            |ui| {
+                let response = ui_kit::slider(
+                    ui,
+                    &mut app.preferences.ui_scale,
+                    0.5..=2.5,
+                    ui_kit::Slider { step: Some(0.05), format: |v| format!("{:.0} %", v * 100.0), ..Default::default() },
+                );
+                crate::scenario::publish_target("prefs:scale", response.rect);
+                ui.horizontal_wrapped(|ui| {
+                    for value in [0.75, 1.0, 1.1, 1.25, 1.5, 2.0] {
+                        if ui_kit::button(
+                            ui,
+                            format!("{:.0}%", value * 100.0),
+                            if (app.preferences.ui_scale - value).abs() < 0.001 { ui_kit::Button::SmallSelected } else { ui_kit::Button::Small },
+                        )
+                        .clicked()
+                        {
+                            app.preferences.ui_scale = value;
+                        }
+                    }
+                });
+                ui_kit::text(ui, app.tr("prefs.scale_note"), ui_kit::Text::Hint("scale"));
+                app.preferences.ui_scale
+            },
+            ui_kit::scale_specimen,
+        );
+        ui_kit::divider(ui, "scale_font");
+        if !cfg!(target_arch = "wasm32") {
+            ui_kit::settings_font_row(ui, crate::i18n::tr("prefs.font"), |ui, part| {
+                if part == 0 {
+                    ui_font_row(app, ui);
+                    return;
+                }
+                if ui_kit::button(ui, app.tr("prefs.choose_font"), ui_kit::Button::Normal).clicked() {
+                    app.pick_open_for(&["ttf", "otf", "ttc"], |app, path| {
+                        if let Some(path) = path {
+                            if crate::fonts::ui_font(&path).is_some() {
+                                app.preferences.ui_font = path;
+                            } else {
+                                app.set_status(crate::i18n::tr("prefs.font_unreadable"), true);
+                            }
+                        }
+                    });
+                }
+                if ui_kit::button(ui, app.tr_label("Reset"), ui_kit::Button::Ghost).clicked() {
+                    app.preferences.ui_font.clear();
+                }
+            });
+            ui_kit::font_specimen(ui, app.tr("prefs.font_sample"));
+            ui_kit::text(ui, app.tr("prefs.font_fallback"), ui_kit::Text::Hint("font_fallback"));
+        }
+    });
+    ui_kit::settings_section(ui, "colour_vision", app.tr("ui.colour_vision"), |ui| {
+        let mode = app.preferences.color_vision;
+        ui.horizontal_wrapped(|ui| {
+            let modes = crate::theme::ColorVision::ALL;
+            let labels: Vec<_> = modes.iter().map(|m| crate::i18n::tr(m.label_id())).collect();
+            let mut selected = modes.iter().position(|m| *m == mode).unwrap_or(0);
+            if ui_kit::settings_segments(ui, app.tr("ui.colour_vision_mode"), &mut selected, &labels)
+                && let Some(mode) = modes.get(selected)
+            {
+                app.preferences.color_vision = *mode;
+            }
+            if let Some(rect) = crate::scenario::rect_of(&format!("dialog:segments:{}", app.tr("ui.colour_vision_mode"))) {
+                crate::scenario::publish_target("prefs:color_vision", rect);
+            }
+            ui_kit::status_palette_sample(ui, app.preferences.color_vision);
+        });
+        // What the modes recolour, in the mode being chosen (#7152): the status chips above keep
+        // their colours in every mode.
+        ui_kit::colour_vision_sample(ui, &crate::theme::Tokens::get_in(app.preferences.color_vision));
+        if app.preferences.color_vision != mode {
+            ui.ctx().request_repaint();
+        }
+        ui_kit::text(ui, app.tr("ui.colour_vision_note"), ui_kit::Text::Hint("colour_vision"));
+    });
+}
+
+pub(super) fn layout(app: &mut SolveApp, ui: &mut egui::Ui) {
+    let t = Tokens::get();
+    ui_kit::settings_heading_with_tag(
+        ui,
+        app.tr("prefs.structure.layout"),
+        app.tr("prefs.structure.layout_note"),
+        Some(crate::settings_profiles::tag),
+    );
     ui_kit::settings_section(ui, "layout", app.tr("prefs.layout"), |ui| {
         ui_kit::settings_pair(
             ui,
@@ -98,22 +166,6 @@ pub(super) fn interface(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
                     ui_kit::row(ui, "", |ui| {
                         let check = setting::persistent_ribbon_pressed(app, ui).on_hover_text(app.tr("prefs.persistent_ribbon_pressed_help"));
                         crate::scenario::publish_target("prefs:persistent_ribbon_pressed", check.rect);
-                    });
-                    ui_kit::row(ui, "", |ui| {
-                        let check = setting::viewport_analysis_status(app, ui).on_hover_text(app.tr("prefs.viewport_analysis_status_help"));
-                        crate::scenario::publish_target("prefs:viewport_analysis_status", check.rect);
-                    });
-                    ui_kit::row(ui, "", |ui| {
-                        let check = setting::viewport_section_status(app, ui).on_hover_text(app.tr("prefs.viewport_section_status_help"));
-                        crate::scenario::publish_target("prefs:viewport_section_status", check.rect);
-                    });
-                    ui_kit::row(ui, "", |ui| {
-                        let check = setting::viewport_status_details(app, ui).on_hover_text(app.tr("prefs.viewport_status_details_help"));
-                        crate::scenario::publish_target("prefs:viewport_status_details", check.rect);
-                    });
-                    ui_kit::row(ui, "", |ui| {
-                        let check = setting::viewport_status_summary(app, ui).on_hover_text(app.tr("prefs.viewport_status_summary_help"));
-                        crate::scenario::publish_target("prefs:viewport_status_summary", check.rect);
                     });
                     // The SKETCH tab outside a sketch too (#7904).
                     ui_kit::row(ui, "", |ui| {
@@ -292,11 +344,6 @@ pub(super) fn interface(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
                         let check = setting::status_bar(app, ui).on_hover_text(app.tr("prefs.status_bar_note"));
                         crate::scenario::publish_target("prefs:status_bar", check.rect);
                     });
-                    // The selection's measurement in the view's corner (#7000).
-                    ui_kit::row(ui, "", |ui| {
-                        let check = setting::quick_measure(app, ui).on_hover_text(app.tr("prefs.quick_measure_note"));
-                        crate::scenario::publish_target("prefs:quick_measure", check.rect);
-                    });
                     ui_kit::text(ui, app.tr("prefs.layout_note"), ui_kit::Text::Hint("layout"));
                     ui_kit::text(ui, app.tr("prefs.history_sketches_note"), ui_kit::Text::Hint("history_sketches"));
                     ui_kit::LayoutPreview {
@@ -316,7 +363,6 @@ pub(super) fn interface(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
             ui_kit::layout_preview,
         );
     });
-    origin_plane_names(app, ui);
     super::navbar::show(app, ui);
     // The same choice as the toolbar's own menu (the plus after the tabs, or right-click a tab).
     ui_kit::settings_section(ui, "toolbar_tabs", app.tr("prefs.toolbar_tabs"), |ui| {
@@ -328,84 +374,5 @@ pub(super) fn interface(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
                 crate::workspace::set_tab_shown(app, tab, on);
             }
         }
-    });
-    ui_kit::settings_section(ui, "scale", app.tr("prefs.scale_text"), |ui| {
-        ui_kit::settings_pair(
-            ui,
-            |ui| {
-                let response = ui_kit::slider(
-                    ui,
-                    &mut app.preferences.ui_scale,
-                    0.5..=2.5,
-                    ui_kit::Slider { step: Some(0.05), format: |v| format!("{:.0} %", v * 100.0), ..Default::default() },
-                );
-                crate::scenario::publish_target("prefs:scale", response.rect);
-                ui.horizontal_wrapped(|ui| {
-                    for value in [0.75, 1.0, 1.1, 1.25, 1.5, 2.0] {
-                        if ui_kit::button(
-                            ui,
-                            format!("{:.0}%", value * 100.0),
-                            if (app.preferences.ui_scale - value).abs() < 0.001 { ui_kit::Button::SmallSelected } else { ui_kit::Button::Small },
-                        )
-                        .clicked()
-                        {
-                            app.preferences.ui_scale = value;
-                        }
-                    }
-                });
-                ui_kit::text(ui, app.tr("prefs.scale_note"), ui_kit::Text::Hint("scale"));
-                app.preferences.ui_scale
-            },
-            ui_kit::scale_specimen,
-        );
-        ui_kit::divider(ui, "scale_font");
-        if !cfg!(target_arch = "wasm32") {
-            ui_kit::settings_font_row(ui, crate::i18n::tr("prefs.font"), |ui, part| {
-                if part == 0 {
-                    ui_font_row(app, ui);
-                    return;
-                }
-                if ui_kit::button(ui, app.tr("prefs.choose_font"), ui_kit::Button::Normal).clicked() {
-                    app.pick_open_for(&["ttf", "otf", "ttc"], |app, path| {
-                        if let Some(path) = path {
-                            if crate::fonts::ui_font(&path).is_some() {
-                                app.preferences.ui_font = path;
-                            } else {
-                                app.set_status(crate::i18n::tr("prefs.font_unreadable"), true);
-                            }
-                        }
-                    });
-                }
-                if ui_kit::button(ui, app.tr_label("Reset"), ui_kit::Button::Ghost).clicked() {
-                    app.preferences.ui_font.clear();
-                }
-            });
-            ui_kit::font_specimen(ui, app.tr("prefs.font_sample"));
-            ui_kit::text(ui, app.tr("prefs.font_fallback"), ui_kit::Text::Hint("font_fallback"));
-        }
-    });
-    ui_kit::settings_section(ui, "colour_vision", app.tr("ui.colour_vision"), |ui| {
-        let mode = app.preferences.color_vision;
-        ui.horizontal_wrapped(|ui| {
-            let modes = crate::theme::ColorVision::ALL;
-            let labels: Vec<_> = modes.iter().map(|m| crate::i18n::tr(m.label_id())).collect();
-            let mut selected = modes.iter().position(|m| *m == mode).unwrap_or(0);
-            if ui_kit::settings_segments(ui, app.tr("ui.colour_vision_mode"), &mut selected, &labels)
-                && let Some(mode) = modes.get(selected)
-            {
-                app.preferences.color_vision = *mode;
-            }
-            if let Some(rect) = crate::scenario::rect_of(&format!("dialog:segments:{}", app.tr("ui.colour_vision_mode"))) {
-                crate::scenario::publish_target("prefs:color_vision", rect);
-            }
-            ui_kit::status_palette_sample(ui, app.preferences.color_vision);
-        });
-        // What the modes recolour, in the mode being chosen (#7152): the status chips above keep
-        // their colours in every mode.
-        ui_kit::colour_vision_sample(ui, &crate::theme::Tokens::get_in(app.preferences.color_vision));
-        if app.preferences.color_vision != mode {
-            ui.ctx().request_repaint();
-        }
-        ui_kit::text(ui, app.tr("ui.colour_vision_note"), ui_kit::Text::Hint("colour_vision"));
     });
 }

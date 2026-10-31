@@ -180,12 +180,29 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 right.add_enabled_ui(app.ui.show_grid, |ui| {
                     setting::grid_follows_view(app, ui);
                 });
-                let response = setting::measure_axis_distances(app, right);
-                crate::scenario::publish_rect("prefs:measure_axis_distances", response.rect);
-                response.on_hover_text(app.tr("settings.measure_axis_distances_help"));
             }
         });
         ui_kit::settings_form(ui, t.space_24 * 6.0 + t.space_6, |ui| {
+            ui_kit::row(ui, "", |ui| {
+                let check = setting::quick_measure(app, ui).on_hover_text(app.tr("prefs.quick_measure_note"));
+                crate::scenario::publish_target("prefs:quick_measure", check.rect);
+            });
+            ui_kit::row(ui, "", |ui| {
+                let check = setting::viewport_analysis_status(app, ui).on_hover_text(app.tr("prefs.viewport_analysis_status_help"));
+                crate::scenario::publish_target("prefs:viewport_analysis_status", check.rect);
+            });
+            ui_kit::row(ui, "", |ui| {
+                let check = setting::viewport_section_status(app, ui).on_hover_text(app.tr("prefs.viewport_section_status_help"));
+                crate::scenario::publish_target("prefs:viewport_section_status", check.rect);
+            });
+            ui_kit::row(ui, "", |ui| {
+                let check = setting::viewport_status_details(app, ui).on_hover_text(app.tr("prefs.viewport_status_details_help"));
+                crate::scenario::publish_target("prefs:viewport_status_details", check.rect);
+            });
+            ui_kit::row(ui, "", |ui| {
+                let check = setting::viewport_status_summary(app, ui).on_hover_text(app.tr("prefs.viewport_status_summary_help"));
+                crate::scenario::publish_target("prefs:viewport_status_summary", check.rect);
+            });
             ui_kit::row(ui, app.tr_label("Visual style"), |ui| {
                 let mut selected = usize::from(app.ui.visual_style.min(3));
                 ui_kit::dropdown(ui, "pref_style", &mut selected, &["Shaded with edges", "Shaded", "Wireframe", "Shaded with hidden edges"]);

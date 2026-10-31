@@ -526,7 +526,7 @@ and output schema types live in `solidcraft_engine::schema::ui_prefs` (`PrefsPar
 
 Other `ui.prefs` parameters:
 
-- `open` (a page: General, Interface, Design, Navigation, Keyboard Shortcuts, Sketch, Graphics, AI, Plugins; Shortcuts, Assistant and Sketch & selection are aliases, and the former Selection page opens Sketch) opens the Preferences dialog there
+- `open` opens Preferences at General; Look: Appearance, Layout, Graphics; Work: Design, Sketch, Tools; Input: Navigation, 3D mouse, Shortcuts; or Extend: Assistant, Plugins. Names are case-insensitive. Legacy aliases remain accepted: Interface → Appearance, Interface/navigation bar → Layout, Keyboard Shortcuts → Shortcuts, AI → Assistant, and Selection, Sketch & selection or Sketch and selection → Sketch. Replies use the canonical page name. The corresponding legacy `prefs:page:<name>` scenario handles also remain aliases of the canonical page rows.
 - `button`: `ok`, `cancel`, `apply`, `defaults`
 - `stand_up: true` stands up a just-opened Y-up file, `stand_up: false` leaves it as it is ("Leave it": the offer, dialog or note, closes and `offer_stand_up` stays on)
 - the dialog's buttons are the handles `stand_up:stand`, `stand_up:leave` and `stand_up:never`

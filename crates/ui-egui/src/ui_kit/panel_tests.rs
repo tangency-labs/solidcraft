@@ -856,6 +856,19 @@ fn preferences_preserves_every_page_and_footer_in_both_themes() {
             }
             assert!(scenario::rect_of("prefs:page_body").is_some());
             assert!(h.widget(h.app.tr("ui.restore_defaults")).is_some());
+            let footer = scenario::rect_of("dialog:pages_footer").expect("pinned profile footer");
+            assert!(nav.contains_rect(footer));
+            assert!(footer.contains_rect(scenario::rect_of("prefs:profile").expect("real switcher")));
+            let tagged = [
+                crate::prefs::PAGE_GENERAL,
+                crate::prefs::PAGE_APPEARANCE,
+                crate::prefs::PAGE_LAYOUT,
+                crate::prefs::PAGE_SKETCH,
+                crate::prefs::PAGE_NAVIGATION,
+                crate::prefs::PAGE_SHORTCUTS,
+            ]
+            .contains(&index);
+            assert_eq!(scenario::rect_of("prefs:in_profile").is_some(), tagged, "{page}");
         }
     }
     crate::theme::set_dark(previous);
@@ -1280,4 +1293,31 @@ fn a_left_panel_in_an_inside_out_view_keeps_an_anchor() {
     );
     let anchor = panel.bounded_anchor(&ctx);
     assert!(anchor.x.is_finite() && anchor.y.is_finite(), "{anchor:?}");
+}
+
+#[test]
+fn page_sidebar_footer_stays_visible_when_the_page_list_scrolls() {
+    for theme in ["light", "dark"] {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.preferences.theme = theme.into();
+        h.call("ui.resize", serde_json::json!({"width":1200,"height":620}));
+        crate::prefs::open_at(&mut h.app, crate::prefs::PAGE_GENERAL);
+        h.frames(6);
+        let footer = scenario::rect_of("dialog:pages_footer").unwrap();
+        let nav = scenario::rect_of("dialog:pages").unwrap();
+        h.frame_with(vec![
+            egui::Event::PointerMoved(egui::pos2(nav.center().x, nav.top() + 30.0)),
+            egui::Event::MouseWheel {
+                unit: egui::MouseWheelUnit::Point,
+                delta: egui::vec2(0.0, -1000.0),
+                modifiers: egui::Modifiers::NONE,
+                phase: egui::TouchPhase::Move,
+            },
+        ]);
+        h.frames(60);
+        assert_eq!(scenario::rect_of("dialog:pages_footer"), Some(footer));
+        assert!(footer.contains_rect(scenario::rect_of("prefs:profile").unwrap()));
+        assert!(nav.contains_rect(scenario::rect_of("prefs:page:Plugins").unwrap()), "last page is reachable in {theme}");
+    }
 }
