@@ -2806,17 +2806,96 @@ fn feature_parts(app: &SolveApp, id: u64, shown_only: bool) -> Vec<Sel> {
         let names = solidcraft_engine::doc::naming::face_names(b);
         let m = b.mesh();
         for (index, _) in names.iter().enumerate().filter(|(_, n)| solidcraft_engine::doc::persistent_name::made_by(n) == Some(id)) {
-            if let Some(point) = m.triangles.iter().zip(&m.tri_face).find_map(|(t, f)| {
-                if *f as usize != index {
-                    return None;
+            if let Some(point) = first_triangle_point(&m, index) {
+                out.push(Sel::Face { body: b.name.clone(), index, point });
+            }
+        }
+    }
+    if out.is_empty() {
+        // A later edit renamed the faces this feature made (an Offset Face, Replace Face or
+        // Delete Face leaves them named after whatever last touched them): light the faces it
+        // changed, found by comparing the states either side of it.
+        out = changed_faces(app, id, &st, shown_only);
+    }
+    out
+}
+
+/// A point on face `index` of `m`: the middle of its first triangle.
+fn first_triangle_point(m: &solidcraft_engine::geom::Mesh, index: usize) -> Option<solidcraft_engine::geom::Vec3> {
+    m.triangles.iter().zip(&m.tri_face).find_map(|(t, f)| (*f as usize == index).then(|| m.tri(t)).flatten().map(|[a, b, c]| (a + b + c) / 3.0))
+}
+
+/// The faces a feature changed, for the states either side of it, on the bodies as they are now:
+/// a face whose name is new, or whose area, centroid or plane moved. A face a later feature
+/// renamed is found again by its plane and nearest centre.
+fn changed_faces(app: &SolveApp, id: u64, now: &solidcraft_engine::doc::ModelState, shown_only: bool) -> Vec<Sel> {
+    let Some(index) = app.session.doc.features.iter().position(|f| f.id == id) else { return Vec::new() };
+    let after = match app.session.doc.features.get(index + 1) {
+        Some(next) => app.session.model.state_before(next.id),
+        None => app.session.model.state(),
+    };
+    let before = app.session.model.state_before(id);
+    let mut out = Vec::new();
+    for b in &after.bodies {
+        if shown_only && (!app.session.body_visible(&b.name) || app.preview.effective_replaced().contains(&b.name)) {
+            continue;
+        }
+        let (Some(now_body), Some(old)) = (now.body(&b.name), before.body(&b.name)) else { continue };
+        let tol = (b.body.size() * 1e-3).max(1e-4);
+        let (Ok(new_faces), Ok(old_faces)) = (b.body.faces(tol), old.body.faces(tol)) else { continue };
+        let names = solidcraft_engine::doc::naming::face_names(b);
+        let old_names = solidcraft_engine::doc::naming::face_names(old);
+        for (i, name) in names.iter().enumerate() {
+            let Some(new) = new_faces.get(i) else { continue };
+            // A face the feature moved takes a new name (Offset Face); a face it only trimmed
+            // or stretched keeps its own. Either is a face the feature changed.
+            let moved = match old_names.iter().position(|old| old == name) {
+                None => true,
+                Some(j) => {
+                    let Some(was) = old_faces.get(j) else { continue };
+                    (new.area - was.area).abs() > new.area.max(1e-9) * 1e-4
+                        || new.centroid.dist(was.centroid) > tol
+                        || matches!((new.plane_normal, was.plane_normal), (Some(a), Some(b)) if a.dot(b) < 1.0 - 1e-7)
                 }
-                m.tri(t).map(|[a, b, c]| (a + b + c) / 3.0)
-            }) {
+            };
+            if !moved {
+                continue;
+            }
+            let Some((index, point)) = current_face(now_body, name, new, tol) else { continue };
+            if !out.iter().any(|s| matches!(s, Sel::Face { body, index: i, .. } if body == &b.name && *i == index)) {
                 out.push(Sel::Face { body: b.name.clone(), index, point });
             }
         }
     }
     out
+}
+
+/// Face `name` of `now` (or the nearest face on its plane when a later feature renamed it),
+/// with a point on it.
+fn current_face(
+    now: &solidcraft_engine::doc::ModelBody,
+    name: &str,
+    sample: &solidcraft_engine::kernel::FaceInfo,
+    tol: f64,
+) -> Option<(usize, solidcraft_engine::geom::Vec3)> {
+    let m = now.mesh();
+    let names = solidcraft_engine::doc::naming::face_names(now);
+    if let Some(index) = names.iter().position(|n| n == name) {
+        return first_triangle_point(&m, index).map(|point| (index, point));
+    }
+    let normal = sample.plane_normal?;
+    let faces = now.body.faces(tol).ok()?;
+    // The same face, moved on by later edits: the nearest centre on a parallel plane, a face
+    // still on the plane it was on winning over one that only faces the same way.
+    let mut best: Option<(f64, f64, usize)> = None;
+    for f in faces.iter().filter(|f| f.plane_normal.is_some_and(|n| n.dot(normal) > 1.0 - 1e-7)) {
+        let (off, d) = ((f.centroid - sample.centroid).dot(normal).abs(), f.centroid.dist(sample.centroid));
+        if best.is_none_or(|b| off.total_cmp(&b.0).then(d.total_cmp(&b.1)).is_lt()) {
+            best = Some((off, d, f.index));
+        }
+    }
+    let index = best?.2;
+    first_triangle_point(&m, index).map(|point| (index, point))
 }
 
 /// The sketches picked among `items` (a sketch row in the Browser or the timeline) that the
@@ -12235,5 +12314,24 @@ mod standalone_point_tests {
         assert!(points[0].dist(Vec3::new(5.0, 4.0, 0.0)) < 1e-9, "{points:?}");
         app.session.visibility.hidden_folders.push("c0/sketches".into());
         assert!(standalone_points(&app).is_empty(), "sketches hidden");
+    }
+}
+
+#[cfg(test)]
+mod feature_highlight_tests {
+    use super::*;
+
+    /// A feature's faces take a new name when a later Offset Face moves them again; selecting
+    /// the feature still lights the faces it changed.
+    #[test]
+    fn a_feature_whose_face_was_renamed_later_still_lights_it() {
+        let mut s = solidcraft_engine::Session::default();
+        s.execute("solid.box", &json!({"length": 40, "width": 30, "height": 20, "body_name": "Base"})).unwrap();
+        let first =
+            s.execute("solid.offset_face", &json!({"faces": [[20, 15, 20]], "distance": 5, "name": "Raise"})).unwrap()["feature"].as_u64().unwrap();
+        s.execute("solid.offset_face", &json!({"faces": [[20, 15, 25]], "distance": 2, "name": "RaiseAgain"})).unwrap();
+        let app = SolveApp::new(s, crate::Services::default());
+        let parts = feature_parts(&app, first, true);
+        assert!(parts.iter().any(|p| matches!(p, Sel::Face { .. })), "{parts:?}");
     }
 }
