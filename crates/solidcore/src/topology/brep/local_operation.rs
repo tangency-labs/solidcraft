@@ -29,7 +29,7 @@
 
 use std::collections::BTreeSet;
 
-use crate::error::{Result, SolidError};
+use crate::error::{EntityRef, Result, SolidError};
 use crate::geom::attribute::ObjectKey;
 use crate::kernel::Kernel;
 use crate::nurbs::b_spline_surface::p1::SurfParamType;
@@ -41,7 +41,6 @@ use crate::surface::surface::Surface;
 use crate::topology::brep::p1 as bp1;
 use crate::topology::brep::p2;
 use crate::topology::brep::p5;
-use crate::topology::brep_cache::{arena_identity, CacheObject};
 use crate::topology::face::p2 as face_ops;
 use crate::topology::{Brep, FaceId};
 
@@ -216,7 +215,12 @@ fn move_faces(k: &mut Kernel, b: &mut Brep, new_brep: &mut Brep) -> Result<()> {
     let old_faces = bp1::faces(b, None)?;
     p5::remove_faces(k, b, true, &old_faces)?;
     let new_faces = bp1::faces(new_brep, None)?;
-    let face_ref = |face| arena_identity(CacheObject::Face(face));
+    // (not upstream: upstream's surface owner is the face itself) the copied faces'
+    // surfaces are owned under the identity `b`'s naming scheme names a face by when it
+    // records none: the notification identity of a `Notify` B-rep, else the arena
+    // identity (tangency-labs/solidcore#2047)
+    let naming = b.naming();
+    let face_ref = |face| crate::topology::scheme_owner_identity(naming, EntityRef::Face(face));
     // the arena entry carries no attribute records: the copy notifies through an
     // arena-only store (a default record per object of both B-reps) whose source
     // identities are distinct from `b`'s, holding both B-reps' attributes; `b` gets the
@@ -231,7 +235,6 @@ mod tests {
     use crate::primitive::api_primitives::create_box;
     use crate::surface::plane::Plane;
 
-    use crate::error::EntityRef;
     use crate::geom::attribute::{AttributeStore, ObjectKey};
     use crate::geom::object::ObjectRef;
     use crate::topology::topology::Topology;
