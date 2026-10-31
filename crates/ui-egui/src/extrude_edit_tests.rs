@@ -1041,6 +1041,41 @@ mod targets {
         }
     }
 
+    /// A New Body edited into a Cut lists what a new Cut would, the shown bodies, and OK stores
+    /// them; back to New Body there is no row and no targets (#2464).
+    #[test]
+    fn a_new_body_edited_into_a_cut_targets_the_shown_bodies() {
+        fn operation(h: &mut Harness, op: usize) {
+            if let Kind::Extrude { operation, .. } = &mut h.app.dialog.as_mut().unwrap().kind {
+                *operation = op;
+            }
+            crate::scenario::clear_handles();
+            h.frames(2);
+        }
+        let mut h = plate_and_copy(false);
+        h.app.run("solid.extrude", json!({"sketch":"Rim","profiles":[0],"distance":-3,"operation":"new","name":"Groove"})).unwrap();
+        let feature = h.app.session.doc.find_feature("Groove").unwrap().id;
+        hide(&mut h, "Plate (2)");
+        h.app.edit_feature(feature);
+        h.frames(2);
+        operation(&mut h, 2);
+        let d = h.app.dialog.as_ref().unwrap();
+        assert_eq!(d.inputs.iter().find(|i| i.label == TARGETS).unwrap().items, vec![Sel::Body { name: "Plate".into() }]);
+        assert!(h.widget("1 selected").is_some());
+        assert!(h.widget("All bodies of the component").is_none());
+        assert_eq!(params(&h)["params"]["targets"], json!(["Plate"]));
+        operation(&mut h, 0);
+        assert!(crate::scenario::handle_at("dialog:row:Targets").is_none(), "no Targets for a new body");
+        assert!(params(&h)["params"].get("targets").is_none());
+        operation(&mut h, 2);
+        h.step(&json!({"key":"Enter"})).unwrap();
+        assert!(h.app.dialog.is_none(), "{:?}", h.app.dialog);
+        let FeatureKind::Extrude { targets, .. } = &h.app.session.doc.feature(feature).unwrap().kind else { panic!("an extrude") };
+        assert_eq!(targets.iter().map(|t| t.to_string()).collect::<Vec<_>>(), ["Plate"]);
+        assert!((volume(&h, "Plate") - (8000.0 - RIM)).abs() < 1e-6, "{}", volume(&h, "Plate"));
+        assert!((volume(&h, "Plate (2)") - 8000.0).abs() < 1e-6, "{}", volume(&h, "Plate (2)"));
+    }
+
     /// A Join with a target hidden since: the editor shows it without unhiding it, lists it, and
     /// an unchanged OK keeps the feature and the visibility as they were.
     #[test]

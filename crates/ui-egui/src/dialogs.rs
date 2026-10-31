@@ -1231,7 +1231,7 @@ impl Dialog {
 
     /// Targets set to [`default_targets`] while they follow what is shown.
     pub(crate) fn follow_targets(&mut self, s: &Session) {
-        if !self.targets_follow || self.editing.is_some() {
+        if !self.targets_follow {
             return;
         }
         let Kind::Extrude { operation, auto_op, .. } = self.kind else { return };
@@ -3872,12 +3872,19 @@ fn chip_info(ui: &egui::Ui, chip: &egui::Response, label: &str, text: &str) {
     });
 }
 
+/// Whether the extrude being edited is a Join, Cut or Intersect saved without targets.
+pub(crate) fn kept_without_targets(s: &Session, editing: Option<(u64, Option<usize>)>) -> bool {
+    editing
+        .and_then(|(id, _)| s.doc.feature(id))
+        .is_some_and(|f| matches!(&f.kind, FeatureKind::Extrude { operation, targets, .. } if *operation != Operation::NewBody && targets.is_empty()))
+}
+
 /// What an empty Targets field says: a stored `*`, no stored targets, or nothing picked yet.
-pub(crate) fn targets_placeholder(editing: bool, extra: &serde_json::Map<String, Value>) -> &'static str {
-    match (editing, extra.contains_key("targets")) {
-        (true, true) => "All bodies",
-        (true, false) => "All bodies of the component",
-        (false, _) => "dialog.select",
+pub(crate) fn targets_placeholder(kept: bool, extra: &serde_json::Map<String, Value>) -> &'static str {
+    match (extra.contains_key("targets"), kept) {
+        (true, _) => "All bodies",
+        (false, true) => "All bodies of the component",
+        (false, false) => "dialog.select",
     }
 }
 
@@ -4579,11 +4586,7 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
                 common["targets"] = json!(targets);
             }
             // An edit of a feature stored without targets may keep having none.
-            let stored = d.editing.and_then(|(id, _)| match &s.doc.feature(id)?.kind {
-                FeatureKind::Extrude { targets, .. } => Some(!targets.is_empty()),
-                _ => None,
-            });
-            if op != "new" && targets.is_empty() && !d.extra.contains_key("targets") && stored != Some(false) {
+            if op != "new" && targets.is_empty() && !d.extra.contains_key("targets") && !kept_without_targets(s, d.editing) {
                 return Err(tr("Pick the bodies to change, or choose New Body").to_string());
             }
             let with = |extra: Value| -> Value {
@@ -6006,6 +6009,8 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             if let Some(input) = d.inputs.iter_mut().find(|i| i.label == TARGETS) {
                 input.items = if every { Vec::new() } else { targets.iter().map(|t| Sel::Body { name: t.to_string() }).collect() };
             }
+            // A New Body turned into a Join, Cut or Intersect lists what a new one would.
+            d.targets_follow = *operation == Operation::NewBody;
             d
         }
         FeatureKind::Revolve { sketch, profiles, axis, angle, operation, targets, angle2, symmetric, convention, to } => {

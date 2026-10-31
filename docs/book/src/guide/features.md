@@ -71,7 +71,8 @@ model.
 
 Editing an extrude shows its saved targets. One saved without `targets` reads **All bodies of the
 component** and keeps changing every body of the active component it meets, hidden or shown; one
-saved with `targets: ["*"]` reads **All bodies** and changes every body in the design.
+saved with `targets: ["*"]` reads **All bodies** and changes every body in the design. A New Body
+changed to a Join, Cut or Intersect lists the bodies a new one would.
 
 A taper slopes the sides of any profile, sketch text included: lines, arcs and spline or conic
 curves move in or out together, and a flat tip shorter than the taper closes to a point. On
