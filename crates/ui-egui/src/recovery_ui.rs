@@ -113,6 +113,12 @@ pub fn close(app: &mut SolveApp) {
 
 pub(crate) fn ago(secs: u64) -> String {
     let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(secs);
+    ago_between(now, secs)
+}
+
+/// How long before `now` the moment `secs` was (both in seconds since 1970), as "just now",
+/// "5 min ago"…: for hosts whose clock isn't `SystemTime` (the browser, #10220).
+pub fn ago_between(now: u64, secs: u64) -> String {
     let d = now.saturating_sub(secs);
     match d {
         0..=59 => crate::i18n::tr("recovery.just_now").to_string(),

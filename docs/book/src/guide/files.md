@@ -305,3 +305,15 @@ browser can write to a folder it saves back to that file, otherwise it works on 
 in the browser. Use **Rename** beside a stored file to change its name. Autosave and recovery
 stay in the browser's private storage in every browser. Exports such as STEP and STL are
 downloaded.
+
+By default, closing or reloading the tab while a design has unsaved changes shows your browser's
+own "Leave site?" box. To skip it, turn on **Preferences → General → Saving → Keep unsaved work in
+this browser instead of asking when the tab closes**. SolidCraft then keeps a copy of each open
+design's unsaved changes in this browser's private storage, updated about a second after each
+change and again when the tab is hidden, so the box isn't needed. A change made in the last moment
+before closing can still bring the box up while its copy is written. On your next visit,
+SolidCraft asks **Restore unsaved design: <name>, changed <time>?** (one window lists them all when
+there are several). **Restore** opens the design with its changes, still unsaved, **Open saved
+version** opens its file as last saved, and **Discard** drops the copy. A copy older than the
+design's last save isn't offered. Closing a design inside SolidCraft (its tab's ×, **File → Close**
+or Ctrl+W) still asks **Save changes to <name>?**, and **Don't Save** drops its copy.

@@ -16,6 +16,8 @@ mod easyprint;
 mod files;
 #[cfg(target_arch = "wasm32")]
 mod install;
+#[cfg(any(target_arch = "wasm32", test))]
+mod keep;
 #[cfg(target_arch = "wasm32")]
 mod linked;
 #[cfg(any(target_arch = "wasm32", test))]
@@ -168,6 +170,7 @@ mod web {
     use crate::api::Api;
     use crate::disk::{self, SaveTarget};
     use crate::files::{self, Files, Intent};
+    use crate::keep;
     use crate::space_mouse::SpaceMouse;
 
     const CANVAS_ID: &str = "solidcraft_canvas";
@@ -227,7 +230,9 @@ mod web {
     }
 
     /// The browser's "leave site? changes you made may not be saved" prompt while a design has
-    /// unsaved changes (the page can't show its own dialog when it is being closed).
+    /// unsaved changes (the page can't show its own dialog when it is being closed). With "keep
+    /// unsaved work in this browser" on, there is nothing to ask once every unsaved design's copy
+    /// is current (`keep::asks_before_unload`, #10220).
     fn ask_before_unload(window: &web_sys::Window) {
         let on_unload = wasm_bindgen::closure::Closure::<dyn FnMut(web_sys::BeforeUnloadEvent)>::new(|e: web_sys::BeforeUnloadEvent| {
             if UNSAVED.with(std::cell::Cell::get) {
@@ -238,6 +243,50 @@ mod web {
         let _ = window.add_event_listener_with_callback("beforeunload", on_unload.as_ref().unchecked_ref());
         // The listener lives as long as the page.
         on_unload.forget();
+    }
+
+    /// With "keep unsaved work in this browser" on, the page brings every unsaved design's copy up
+    /// to date when it is hidden or goes (`pagehide`, `visibilitychange`): the browser may not
+    /// wait for that write, so the copies are written shortly after each change as well
+    /// (`Shell::keep_tick`, #10220).
+    fn keep_when_hidden(window: &web_sys::Window, runner: &eframe::WebRunner) {
+        let keep_now = {
+            let runner = runner.clone();
+            move || {
+                if let Some(mut shell) = runner.app_mut::<Shell>() {
+                    shell.keep_tick(None, true);
+                }
+            }
+        };
+        let on_hide = {
+            let keep_now = keep_now.clone();
+            wasm_bindgen::closure::Closure::<dyn FnMut(web_sys::Event)>::new(move |_: web_sys::Event| keep_now())
+        };
+        let on_visibility = wasm_bindgen::closure::Closure::<dyn FnMut(web_sys::Event)>::new(move |_: web_sys::Event| {
+            let hidden = web_sys::window()
+                .and_then(|w| w.document())
+                .and_then(|d| js_sys::Reflect::get(&d, &"visibilityState".into()).ok())
+                .and_then(|v| v.as_string())
+                .is_some_and(|v| v == "hidden");
+            if hidden {
+                keep_now();
+            }
+        });
+        let _ = window.add_event_listener_with_callback("pagehide", on_hide.as_ref().unchecked_ref());
+        if let Some(document) = window.document() {
+            let _ = document.add_event_listener_with_callback("visibilitychange", on_visibility.as_ref().unchecked_ref());
+        }
+        // The listeners live as long as the page.
+        on_hide.forget();
+        on_visibility.forget();
+    }
+
+    /// One open design followed for its kept copy: its revision, when that last changed, and since
+    /// when its copy has lacked a change (`None`: current, or being written).
+    struct Track {
+        revision: u64,
+        last_change: f64,
+        first_unwritten: Option<f64>,
     }
 
     /// eframe cancels the browser's action for every Tab it gets, so the browser couldn't switch
@@ -312,6 +361,10 @@ mod web {
         /// The settings this tab wrote or loaded last, and those another tab wrote since (#8644).
         prefs_writer: crate::PrefsWriter,
         other_tab_prefs: PrefsInbox,
+        /// The open designs followed for their kept copy, by `Session::uid` (#10220).
+        keep_track: std::collections::HashMap<u64, Track>,
+        /// Every unsaved design's kept copy is current (and the preference is on).
+        all_kept: bool,
     }
 
     impl Shell {
@@ -427,8 +480,14 @@ mod web {
                 self.sync_recents();
             }
             let now = ctx.input(|i| i.time);
+            // With "keep unsaved work in this browser" on, each design's own copy takes over from
+            // the single autosave (#10220).
+            if self.app.preferences.keep_unsaved_in_browser && self.autosaved.is_some() {
+                files::autosave(&self.files, None);
+                self.autosaved = None;
+            }
             // Unsaved work is kept (at most every AUTOSAVE_S); saved work needs no autosave.
-            if self.files.ready.get() && self.files.recovery.borrow().is_none() {
+            if self.files.ready.get() && self.files.recovery.borrow().is_none() && !self.app.preferences.keep_unsaved_in_browser {
                 let s = &self.app.session;
                 let changed = s.is_dirty() && self.autosaved != Some(s.revision);
                 let wait = AUTOSAVE_S - (now - self.autosaved_at);
@@ -446,6 +505,172 @@ mod web {
             }
             if !self.files.ready.get() || !self.files.incoming.borrow().is_empty() {
                 ctx.request_repaint_after(std::time::Duration::from_millis(100));
+            }
+            self.all_kept = self.keep_tick(Some(ctx), false);
+        }
+
+        /// Keep each open design's unsaved changes in the browser, when the preference asks for
+        /// it: a design's copy is written once it has been still a moment (`keep::due`), or at
+        /// once with `now` (the page is being hidden); a copy whose design is saved or closed, or
+        /// with the preference off, goes. Answers whether every unsaved design's copy is current.
+        fn keep_tick(&mut self, ctx: Option<&egui::Context>, now: bool) -> bool {
+            if !self.launch.persists() || !self.files.ready.get() {
+                return false;
+            }
+            let Shell { app, files, keep_track, .. } = self;
+            let on = app.preferences.keep_unsaved_in_browser;
+            let time = js_sys::Date::now();
+            let page = files.keep_page.borrow().clone();
+            let mut wanted = std::collections::HashSet::new();
+            let mut all_kept = true;
+            let mut wake: Option<f64> = None;
+            let mut error = None;
+            let mut soon = |ms: f64| wake = Some(wake.map_or(ms, |w: f64| w.min(ms)));
+            if on {
+                for s in solidcraft_ui_egui::documents::open_sessions(app).into_iter().filter(|s| s.is_dirty()) {
+                    let id = keep::entry_id(&page, s.uid);
+                    wanted.insert(s.uid);
+                    let t = keep_track.entry(s.uid).or_insert(Track { revision: s.revision, last_change: time, first_unwritten: None });
+                    if t.revision != s.revision {
+                        t.revision = s.revision;
+                        t.last_change = time;
+                    }
+                    if files.kept.borrow().get(&id).copied().flatten() == Some(s.revision) {
+                        t.first_unwritten = None;
+                        continue;
+                    }
+                    all_kept = false;
+                    if files.keeping.borrow().contains(&id) {
+                        soon(100.0);
+                        continue;
+                    }
+                    let first = *t.first_unwritten.get_or_insert(time);
+                    if now || keep::due(time, first, t.last_change) {
+                        match solidcraft_engine::io::write_design_container(&s.design()) {
+                            Ok(bytes) => {
+                                let entry = keep::Entry { id, name: s.doc.name.clone(), path: s.path.clone(), changed_at: t.last_change };
+                                files::write_kept(files, &entry, bytes, s.revision);
+                                t.first_unwritten = None;
+                            }
+                            Err(e) => error = Some(format!("keeping unsaved work in this browser: {e}")),
+                        }
+                        soon(100.0);
+                    } else {
+                        soon((keep::QUIET_MS - (time - t.last_change)).min(keep::MAX_WAIT_MS - (time - first)).max(16.0));
+                    }
+                }
+            }
+            // This page's copies no design needs any more: saved, closed, or the preference off.
+            let stale: Vec<String> = files
+                .kept
+                .borrow()
+                .keys()
+                .filter(|id| keep::page_of(id) == Some(page.as_str()))
+                .filter(|id| !wanted.iter().any(|uid| keep::entry_id(&page, *uid) == **id))
+                .cloned()
+                .collect();
+            for id in stale {
+                files::remove_kept(files, &id);
+                soon(100.0);
+            }
+            keep_track.retain(|uid, _| wanted.contains(uid));
+            if let Some(e) = error {
+                app.set_status(e, true);
+            }
+            if let (Some(ctx), Some(ms)) = (ctx, wake) {
+                ctx.request_repaint_after(std::time::Duration::from_secs_f64(ms / 1000.0));
+            }
+            on && all_kept
+        }
+
+        /// Offer the copies an earlier visit kept (#10220): "Restore unsaved design: <name>,
+        /// changed <time>?", one window for all of them, each with Restore, Open saved version
+        /// (when it has a file) and Discard.
+        fn keep_prompt(&mut self, ctx: &egui::Context) {
+            let offered = self.files.keep_offered.borrow().clone();
+            if offered.is_empty() || !self.files.ready.get() {
+                return;
+            }
+            let _language = solidcraft_ui_egui::i18n::scope(&self.app.preferences.language);
+            let now = js_sys::Date::now();
+            let when = |e: &keep::Entry| solidcraft_ui_egui::recovery_ui::ago_between((now / 1000.0) as u64, (e.changed_at / 1000.0) as u64);
+            let title = match offered.as_slice() {
+                [one] => solidcraft_ui_egui::i18n::format(
+                    "recovery.restore_title_one",
+                    &[("name", &solidcraft_ui_egui::i18n::tr_name(&one.name)), ("when", &when(one))],
+                ),
+                _ => solidcraft_ui_egui::i18n::tr("recovery.restore_title").to_string(),
+            };
+            let mut act: Option<(keep::Entry, keep::Answer)> = None;
+            let _ = ui_kit::Window::new(egui::Id::new("sc_browser_keep_restore"), "restore", &title).required().show_body(ctx, |ui| {
+                ui_kit::text(ui, solidcraft_ui_egui::i18n::tr("recovery.restore_intro"), ui_kit::Text::Report("intro", false));
+                for (index, e) in offered.iter().enumerate() {
+                    if offered.len() > 1 {
+                        ui_kit::divider(ui, &format!("entry:{index}"));
+                        let row = solidcraft_ui_egui::i18n::format(
+                            "recovery.restore_row",
+                            &[("name", &solidcraft_ui_egui::i18n::tr_name(&e.name)), ("when", &when(e))],
+                        );
+                        ui_kit::text(ui, &row, ui_kit::Text::Report(&format!("row:{index}"), false));
+                    }
+                    ui.horizontal(|ui| {
+                        for answer in keep::answers(e, self.saved_exists(e)) {
+                            let label = match answer {
+                                keep::Answer::Restore => solidcraft_ui_egui::i18n::tr("recovery.restore"),
+                                keep::Answer::OpenSaved => solidcraft_ui_egui::i18n::tr("recovery.open_saved"),
+                                keep::Answer::Discard => solidcraft_ui_egui::i18n::tr_label("Discard"),
+                            };
+                            if ui_kit::button(ui, label, ui_kit::Button::Normal).clicked() {
+                                act = Some((e.clone(), answer));
+                            }
+                        }
+                    });
+                }
+            });
+            if let Some((entry, answer)) = act {
+                self.keep_answer(&entry, answer);
+            }
+        }
+
+        /// Whether a kept copy's design file can still be opened: in the browser's storage, or a
+        /// file on the computer this browser remembers.
+        fn saved_exists(&self, e: &keep::Entry) -> bool {
+            e.path.as_deref().is_some_and(|p| vfs::exists(p) || disk::parse(p).is_some_and(|(id, _)| self.files.disk_known.borrow().contains(id)))
+        }
+
+        /// Act on an answer in the "Restore unsaved design?" window (`keep::plan`).
+        fn keep_answer(&mut self, entry: &keep::Entry, answer: keep::Answer) {
+            let Some(plan) = keep::plan(answer, entry, self.saved_exists(entry)) else { return };
+            if plan.open_copy {
+                let copy = match files::prepare_kept(&entry.id, entry.path.as_deref()) {
+                    Ok(copy) => copy,
+                    Err(error) => {
+                        self.app.set_status(error, true);
+                        return;
+                    }
+                };
+                self.app.open_path(&copy);
+                if self.app.session.path.as_deref() != Some(copy.as_str()) {
+                    // Not opened (the status says why): it stays offered.
+                    return;
+                }
+                // It is its own design again (saving goes to its file), with its changes unsaved.
+                self.app.session.path = entry.path.clone();
+                self.app.session.doc_mut().name = entry.name.clone();
+                self.app.session.mark_unsaved();
+                self.app.home.open = false;
+            }
+            if let Some(path) = &plan.open_saved {
+                if vfs::exists(path) {
+                    self.app.open_path(path);
+                } else {
+                    // A file on the computer: the browser asks for access again, in this click.
+                    disk::restore(&self.files, path);
+                }
+            }
+            if plan.drop_copy {
+                self.files.keep_offered.borrow_mut().retain(|e| e.id != entry.id);
+                files::remove_kept(&self.files, &entry.id);
             }
         }
 
@@ -683,6 +908,12 @@ mod web {
             files::autosave(&self.files, None);
         }
 
+        /// Whether leaving the page asks through the browser's own box (`keep::asks_before_unload`).
+        fn asks_before_unload(&self) -> bool {
+            let any = solidcraft_ui_egui::documents::any_dirty(&self.app);
+            keep::asks_before_unload(self.launch.persists(), self.app.preferences.keep_unsaved_in_browser, any, self.all_kept)
+        }
+
         /// Whether the shell already has the on-demand face the live language needs.
         fn script_font_ready(&self) -> bool {
             match solidcraft_ui_egui::fonts::web_script_font_kind(solidcraft_ui_egui::i18n::effective_language(&self.app.preferences.language)) {
@@ -794,7 +1025,7 @@ mod web {
             self.api.poll();
             self.space_mouse.logic(&mut self.app, ctx);
             self.files_tick(ctx);
-            UNSAVED.with(|u| u.set(solidcraft_ui_egui::documents::any_dirty(&self.app)));
+            UNSAVED.with(|u| u.set(self.asks_before_unload()));
             DESIGN_SHOWN.with(|d| d.set(solidcraft_ui_egui::toolbar::design_shown(&self.app)));
         }
         fn raw_input_hook(&mut self, ctx: &egui::Context, raw: &mut egui::RawInput) {
@@ -814,7 +1045,7 @@ mod web {
         }
         fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
             self.linked.tick(&mut self.app, ui.ctx());
-            UNSAVED.with(|u| u.set(self.launch.persists() && solidcraft_ui_egui::documents::any_dirty(&self.app)));
+            UNSAVED.with(|u| u.set(self.asks_before_unload()));
             if self.launch.embed {
                 ui_kit::Container::new(ui.ctx(), ui_kit::Surface::Chrome).edge("embed_header", ui_kit::Edge::Top).show(ui, |ui| {
                     if ui_kit::button(ui, solidcraft_ui_egui::i18n::tr("web.open_full"), ui_kit::Button::Normal).clicked()
@@ -829,9 +1060,14 @@ mod web {
             if self.launch.persists() {
                 self.file_panel(&ctx);
                 self.recovery_prompt(&ctx);
+                self.keep_prompt(&ctx);
             }
             self.watch_text_for_font(&ctx);
             self.store_prefs(&ctx);
+        }
+        #[cfg(target_arch = "wasm32")]
+        fn as_any_mut(&mut self) -> Option<&mut dyn std::any::Any> {
+            Some(&mut *self)
         }
         fn persist_egui_memory(&self) -> bool {
             self.launch.persists()
@@ -906,7 +1142,8 @@ mod web {
             {
                 create.instance_descriptor.backends = eframe::wgpu::Backends::GL;
             }
-            let result = eframe::WebRunner::new()
+            let runner = eframe::WebRunner::new();
+            let result = runner
                 .start(
                     canvas,
                     options,
@@ -1016,10 +1253,15 @@ mod web {
                             wheel_gestures: solidcraft_ui_egui::WebWheelGestures::default(),
                             prefs_writer: crate::PrefsWriter::default(),
                             other_tab_prefs,
+                            keep_track: Default::default(),
+                            all_kept: false,
                         }))
                     }),
                 )
                 .await;
+            if result.is_ok() && crate::Launch::parse(&query()).persists() {
+                keep_when_hidden(&window, &runner);
+            }
             if let Some(el) = document.get_element_by_id(LOADING_ID) {
                 match result {
                     Ok(()) => dismiss_loading(el),
