@@ -132,6 +132,18 @@ pub const NAV_PRESETS: &[NavPreset] = &[
         ],
     },
     NavPreset {
+        id: "nx",
+        label: "NX",
+        // NX's CAD1 scheme drags middle to rotate, middle + left to zoom and middle + right to
+        // pan; the bindings here hold one button at a time, so the two-button drags are the
+        // middle drag with Ctrl (zoom) and Shift (pan).
+        help: "Middle drag orbits, Shift+middle pans (NX's middle + right), Ctrl+middle zooms (NX's middle + left); right drag leaves the camera",
+        reverse_zoom: false,
+        middle_double_click: Some("fit"),
+        right_drag_orbits: Some(false),
+        bindings: &[bind(Middle, NavKeys::SHIFT, Pan), bind(Middle, NavKeys::CTRL, Zoom), bind(Middle, NavKeys::NONE, Orbit)],
+    },
+    NavPreset {
         id: "inventor",
         label: "Inventor",
         help: "Middle drag pans, Shift+middle orbits, Ctrl+middle zooms, right drag orbits",

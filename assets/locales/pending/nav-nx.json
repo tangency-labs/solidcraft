@@ -1,0 +1,11 @@
+{
+  "en": {
+    "Middle drag orbits, Shift+middle pans (NX's middle + right), Ctrl+middle zooms (NX's middle + left); right drag leaves the camera": "Middle drag orbits, Shift+middle pans (NX's middle + right), Ctrl+middle zooms (NX's middle + left); right drag leaves the camera"
+  },
+  "zh": {
+    "Middle drag orbits, Shift+middle pans (NX's middle + right), Ctrl+middle zooms (NX's middle + left); right drag leaves the camera": "中键拖动旋转，Shift+中键平移（对应 NX 的中键+右键），Ctrl+中键缩放（对应 NX 的中键+左键）；右键拖动不旋转视图"
+  },
+  "ja": {},
+  "de": {},
+  "ko": {}
+}
