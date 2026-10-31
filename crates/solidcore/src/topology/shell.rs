@@ -36,7 +36,10 @@
 //! | [`is_inner_shell_of`], [`SM_TRUE`], [`SM_FALSE`], [`SM_UNSURE`] | `SmShell::IsInnerShellOf` (its `SmBoolean`) |
 //!
 //! Deviations: circular lists are typed vectors in head-first order, as in the
-//! shared Brep arena model. `GetWireEdges`, `GetMatedShells` and `RayFire` claim and
+//! shared Brep arena model. [`Region::void_state`] and [`is_inner_shell_of_tri`]
+//! expose the same three-valued predicates through [`crate::Tri`], rejecting
+//! invalid raw integers without changing the original integer APIs. The
+//! `GetWireEdges`, `GetMatedShells` and `RayFire` claim and
 //! lock a context mark (`SmNewMarkAndLock`) and mark through
 //! [`crate::topology::topology_traverser::Marks`] (per-call, as the mark values on the
 //! objects are unique per claim), advancing the kernel context's mark counters as upstream. Incompatible array reinterpret casts return `InvalidInput`;
@@ -359,6 +362,13 @@ impl Region {
     #[must_use]
     pub const fn is_void(&self) -> i32 {
         self.is_void
+    }
+    /// The void predicate as a three-valued boolean, preserving `UNSURE`.
+    ///
+    /// # Errors
+    /// A raw flag other than `FALSE`, `TRUE` or `UNSURE`.
+    pub fn void_state(&self) -> Result<crate::Tri> {
+        crate::Tri::try_from(self.is_void())
     }
     /// Set the native void flag.
     pub fn set_is_void(&mut self, value: i32) {
@@ -1513,6 +1523,20 @@ fn checked<T>(k: &Kernel, r: Result<T>) -> Result<Checked<T>> {
         Err(_) if k.fixes.shell_inner_shell_of_statuses => Ok(Checked::Decides),
         Err(_) => Ok(Checked::Ignored),
     }
+}
+
+/// [`is_inner_shell_of`] with a typed three-valued result. `Unsure` is neither
+/// true nor false; all query side effects, RNG use and errors are preserved.
+///
+/// # Errors
+/// Those of [`is_inner_shell_of`].
+pub fn is_inner_shell_of_tri(
+    k: &mut Kernel,
+    b: &mut Brep,
+    id: ShellId,
+    outer: Option<ShellId>,
+) -> Result<crate::Tri> {
+    crate::Tri::try_from(is_inner_shell_of(k, b, id, outer)?)
 }
 
 /// `SmShell::IsInnerShellOf(pOptOuterShell)`: whether shell `id` lies directly inside

@@ -7,6 +7,7 @@
 //! | Rust | Upstream |
 //! |------|----------|
 //! | [`FilletExecutive::set_fillet_parameters`], [`FilletParameters`] | `SmFilletExecutive::SetFilletParameters` (edge pointers, per-edge parameters; the fork's `pOptSecondRadii`, `f653ac9`) |
+//! | `reset_parameter_state` (crate-private) | `SmFilletExecutive::SetFilletParameters` reset block |
 //! | `check_edges_are_in_brep` (private) | `SmFilletExecutive::CheckEdgesAreInBrep` |
 //! | [`FilletParametersAccess::parameters_split_blended_vertex_fans`] | the fork's `SmFilletExecutive::SplitBlendedVertexFans` (`e418750`, WR-665; with `fixes.fillet_corner_per_vertex_fan`) |
 //! | [`surface_surface_fillet`], [`SurfaceFilletOptions`] | `SmFilletExecutive::SurfaceSurfaceFillet` |
@@ -593,6 +594,27 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
         Ok(())
     }
 
+    /// Reset the execution switches and per-preparation bookkeeping shared by
+    /// native parameter setup and the session's two-offset convenience setup.
+    pub(crate) fn reset_parameter_state(&mut self) {
+        // First set some standard flags.
+        self.options = ExecutionOptions {
+            piecewise_merge: false,
+            topology_insertion: true,
+            global_merge: false,
+            trimming: true,
+            classification: true,
+        };
+        // the fork's (WR-631): no cliff overflow, no open ends yet
+        self.cliff_overflow = false;
+        self.open_ends.clear();
+        // the fork's (WR-634): no overflow edges yet, no mitred edges (9ba2b12)
+        self.overflow_edges.clear();
+        self.mitred_edges.clear();
+        // the fork's (WR-665, e418750): no fan split points yet
+        self.fan_split_points.clear();
+    }
+
     /// `SetFilletParameters`: resets the five operation switches to their common
     /// values and, for each edge, creates its fillet solver (of the edge's radius type
     /// and value, on its blend edge use) and gives it the surface generator of its
@@ -623,22 +645,7 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
             self.target = Some(brep);
         }
 
-        // First set some standard flags.
-        self.options = ExecutionOptions {
-            piecewise_merge: false,
-            topology_insertion: true,
-            global_merge: false,
-            trimming: true,
-            classification: true,
-        };
-        // the fork's (WR-631): no cliff overflow, no open ends yet
-        self.cliff_overflow = false;
-        self.open_ends.clear();
-        // the fork's (WR-634): no overflow edges yet, no mitred edges (9ba2b12)
-        self.overflow_edges.clear();
-        self.mitred_edges.clear();
-        // the fork's (WR-665, e418750): no fan split points yet
-        self.fan_split_points.clear();
+        self.reset_parameter_state();
 
         let num_filleted_edges = params.edges.len();
         if num_filleted_edges < 1 {

@@ -17,3 +17,6 @@ pub mod p1;
 pub mod p2;
 pub mod p3;
 pub mod p4;
+
+// Supported public paths; numbered modules are implementation partitions.
+pub use p1::{calculate_bounding_box, calculate_shell_bounding_box};

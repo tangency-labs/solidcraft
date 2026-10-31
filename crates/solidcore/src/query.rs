@@ -8,7 +8,10 @@ pub mod api_queries;
 pub mod brep;
 pub mod edge;
 pub mod face;
+mod face_surface;
 pub mod r#loop;
 pub mod poly;
 pub mod poly_properties;
 pub mod tess;
+
+pub use face_surface::face_surface_intersect;

@@ -14,7 +14,8 @@
 //! | [`brep_area`], [`brep_volume`], [`brep_mass_properties`] | `SmApiBrepComputeArea`, `SmApiBrepComputeVolume`, `SmApiBrepComputeMassProperties` |
 //!
 //! Deviations: arena ids replace pointers, results replace output arguments; attribute
-//! storage and object keys are supplied by the caller. Oriented trim construction,
+//! storage and object keys are supplied by the caller; the `_default` B-rep wrappers
+//! use a local empty attribute store. Oriented trim construction,
 //! B-rep enumeration, bounding boxes, and region classification remain calls into
 //! their unported units. `boundary_properties` exposes the integration after trim
 //! construction for callers already holding oriented trim curves. Nested integration
@@ -767,6 +768,8 @@ pub fn brep_area(k: &Kernel, b: &mut Brep, accuracy: f64) -> Result<f64> {
     Ok(area)
 }
 /// `SmApiBrepComputeVolume`, computed about the bounding-box midpoint.
+///
+/// Use [`brep_volume_default`] when per-entity attributes are not needed.
 pub fn brep_volume(
     k: &Kernel,
     b: &mut Brep,
@@ -784,6 +787,52 @@ pub fn brep_volume(
         attributes,
     )?
     .volume)
+}
+
+/// [`brep_volume`] without per-entity mass attributes. Attributes on `b` are
+/// neither read nor modified; UV trim construction has the same effects as
+/// [`brep_volume`].
+///
+/// # Errors
+/// Those of [`brep_volume`].
+pub fn brep_volume_default(k: &Kernel, b: &mut Brep, accuracy: f64) -> Result<f64> {
+    let store = AttributeStore::default();
+    brep_volume(
+        k,
+        b,
+        accuracy,
+        &PropertyAttributes {
+            store: &store,
+            key_of: &|_| ObjectKey(0),
+        },
+    )
+}
+
+/// [`brep_mass_properties`] without per-entity mass attributes. Uses `density`
+/// uniformly, ignoring attributes attached to `b` and leaving them intact.
+/// Missing UV trims may be created as in [`brep_mass_properties`].
+///
+/// # Errors
+/// Those of [`brep_mass_properties`].
+pub fn brep_mass_properties_default(
+    k: &Kernel,
+    b: &mut Brep,
+    accuracy: f64,
+    density: f64,
+    origin: Point3,
+) -> Result<MassProperties> {
+    let store = AttributeStore::default();
+    brep_mass_properties(
+        k,
+        b,
+        accuracy,
+        density,
+        origin,
+        &PropertyAttributes {
+            store: &store,
+            key_of: &|_| ObjectKey(0),
+        },
+    )
 }
 /// Result of `SmApiBrepComputeMassProperties`.
 #[derive(Debug, Clone, PartialEq)]

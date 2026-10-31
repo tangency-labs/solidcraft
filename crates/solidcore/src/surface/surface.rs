@@ -22,4 +22,6 @@ pub mod p8;
 pub mod p9;
 
 pub use p1::StepSurface;
-pub use p2::{CacheTreeState, Surface, SurfaceKind, TrimCacheSlot};
+pub use p2::{
+    CacheTreeState, Surface, SurfaceIntersection, SurfaceKind, TrimCacheSlot, TsectCurveType,
+};

@@ -21,3 +21,7 @@ pub use p2::{
     knots_ignoring_status, Curve, CurveEvaluate, CurveKind, CurvePropertyType, KnotsWithStatus,
     LineIntersection, OwnerChange, StepOff, TessStepResult,
 };
+
+// Supported public paths; numbered modules are implementation partitions.
+pub use p1::ApproximateCurveOptions;
+pub use p3::compute_crvs_normal;

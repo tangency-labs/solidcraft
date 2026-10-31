@@ -108,6 +108,7 @@ mod overflow_first;
 mod piecewise;
 mod surface;
 mod trace_reach;
+mod two_offsets;
 pub use original_trim::{OriginalSurfaceDeletion, OriginalSurfaceSelection};
 
 const OP: &str = "blend::fillet_executive::session";

@@ -14,3 +14,6 @@ pub mod p5;
 
 pub mod surfaces;
 pub mod trace_reach;
+
+// Supported public paths; numbered modules are implementation partitions.
+pub use p1::{FilletSurfaceGenerator, FilletSurfaceGeneratorType};

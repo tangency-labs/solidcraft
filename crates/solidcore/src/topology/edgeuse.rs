@@ -9,3 +9,6 @@
 pub mod p1;
 pub mod p2;
 pub mod p3;
+
+// Supported public paths; numbered modules are implementation partitions.
+pub use p3::{evaluate_binormal, get_or_create_uv_trim_curve, BinormalOptions};

@@ -37,3 +37,26 @@ pub mod p9;
 pub mod planar_section;
 pub mod validation;
 pub mod vertex_fans;
+
+// Supported public paths; numbered modules are implementation partitions.
+pub use p1::{create_parallel_projection_curves, edges, faces, regions, ParallelProjectionOptions};
+pub use p10::{
+    make_topology_from_data, merge_curves_on_surface_through_surface, MakeTopologyOptions,
+    TopologyEnv, HEALER_VERSION,
+};
+pub use p2::{is_manifold_solid, is_sheet, shell_vertices, ArenaNotifyState};
+pub use p3::{
+    api_brep_copy, delete_face, new_brep, orient_trimmed_surfaces, topology_ref,
+    with_kernel_callbacks, DeleteFaceOptions,
+};
+pub use p4::stitch_faces;
+pub use p5::{
+    make_edge_in_face, remove_topological_edges_and_vertices, stitch_and_orient, EdgeInFace,
+    StitchAndOrientOptions,
+};
+pub use p7::copy_faces;
+pub use p8::{
+    create_face_from_surface, create_faces_with_curves, create_planar_face_with_3d_curves,
+    create_planar_faces_with_3d_curves, FaceBuildEnv,
+};
+pub use p9::{make_vertex_loop, orient_sheet_surfaces};

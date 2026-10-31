@@ -19,3 +19,9 @@ pub mod p1;
 pub mod p2;
 mod step_gaps;
 mod vertex;
+
+// Supported public paths; numbered modules are implementation partitions.
+pub use p2::{
+    api_offset_brep_full, api_shell_brep_full, OffsetNotifications, OffsetOptions,
+    ShellCopyIdentities, ShellOptions,
+};

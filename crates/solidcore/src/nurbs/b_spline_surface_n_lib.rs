@@ -11,3 +11,6 @@
 pub mod approx;
 pub mod p1;
 pub mod p2;
+
+// Supported public paths; numbered modules are implementation partitions.
+pub use p2::{EvaluateFlags, OrientType};

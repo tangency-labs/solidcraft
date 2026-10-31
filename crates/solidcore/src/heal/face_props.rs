@@ -195,6 +195,23 @@ impl From<bool> for Tri {
     }
 }
 
+impl TryFrom<i32> for Tri {
+    type Error = SolidError;
+
+    /// Preserve all three native boolean values; reject other integers.
+    fn try_from(value: i32) -> Result<Self> {
+        match value {
+            crate::error::SM_FALSE => Ok(Self::False),
+            crate::error::SM_TRUE => Ok(Self::True),
+            crate::error::SM_UNSURE => Ok(Self::Unsure),
+            _ => Err(SolidError::invalid_input(
+                "Tri::try_from",
+                "invalid three-valued boolean",
+            )),
+        }
+    }
+}
+
 /// `SmPropStageType`: how far the face properties have been computed; ordered as
 /// upstream (`SM_PROPSTAGE_0` .. `SM_PROPSTAGE_3`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]

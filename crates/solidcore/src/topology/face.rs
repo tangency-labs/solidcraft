@@ -9,3 +9,8 @@ pub mod p1;
 pub mod p2;
 pub mod p3;
 pub mod p4;
+
+// Supported public paths; numbered modules are implementation partitions.
+pub use p1::delete_inner_loop_with_kernel_callbacks;
+pub use p2::{faceuses, loops, surface, tolerance, uv_domain, PPF_AREA, PPF_AREA_FIRST_MOMENTS};
+pub use p4::edges;

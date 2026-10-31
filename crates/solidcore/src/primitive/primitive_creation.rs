@@ -46,3 +46,6 @@ pub struct SweepOptions {
     /// (its first curve's start, or its box centre) is moved onto the path's start.
     pub profile_at_path_start: bool,
 }
+
+// Supported public paths; numbered modules are implementation partitions.
+pub use p1::{create_rectangle, Boolean2d, PrimitiveCreation};
