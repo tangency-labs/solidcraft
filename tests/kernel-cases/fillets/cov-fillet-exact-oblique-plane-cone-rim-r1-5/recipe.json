@@ -1,0 +1,53 @@
+{
+ "commands": [
+  {
+   "command": "solid.cone",
+   "params": {
+    "radius": 10,
+    "height": 30,
+    "top_radius": 4.710190578746051,
+    "base": [
+     0,
+     0,
+     0
+    ],
+    "operation": "new",
+    "body_name": "Post"
+   }
+  },
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "radius": 100,
+    "height": 100,
+    "base": [
+     0,
+     0,
+     15
+    ],
+    "axis": [
+     -0.2873478855663454,
+     0,
+     0.9578262852211513
+    ],
+    "operation": "cut",
+    "targets": [
+     "Post"
+    ]
+   }
+  },
+  {
+   "command": "solid.fillet",
+   "params": {
+    "edges": [
+     [
+      5.013316645912501,
+      5.013316645912501,
+      16.503994993773752
+     ]
+    ],
+    "radius": 1.5
+   }
+  }
+ ]
+}
