@@ -267,7 +267,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.fillet_rail_trim_at_near_knot = true;
     f.offset_splits_corner_vertices = true;
     f.precise_properties_trim_base_v = true;
-    f.bspline_trim_keeps_rational_end_spans = true;
     f.fillet_blend_curve_revolved_on_arc = true;
     f.temporary_radius_setup_errors = true;
     f.ellipse_step_interval_checks = true;
@@ -307,7 +306,11 @@ pub(crate) fn fixes() -> UpstreamFixes {
 /// the fork doesn't have stays on, and where solidcore builds what SMLib refuses, a result right
 /// against its closed form is a win.
 #[cfg(test)]
-const HELD_BACK: &[&str] = &[];
+const HELD_BACK: &[&str] = &[
+    // sheet-metal/3078-flange-on-the-side-edge-of-a-flange: with it on the body's check fails with
+    // "SmBSplineCurve::Test #15 Bad Repeated CPts" (volume unchanged, 31362.04580633055); off it passes.
+    "bspline_trim_keeps_rational_end_spans",
+];
 
 fn fresh() -> Kernel {
     let mut k = Kernel::new(&KernelOptions::default());
@@ -441,7 +444,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn every_upstream_fix_is_on() {
+    fn every_upstream_fix_is_on_unless_shown_broken() {
         let f = fixes();
         let flags: Vec<(&str, bool)> = f.flags().collect();
         let off: Vec<&str> = flags.iter().filter(|(name, on)| !on && !HELD_BACK.contains(name)).map(|(name, _)| *name).collect();
