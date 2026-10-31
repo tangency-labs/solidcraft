@@ -92,7 +92,8 @@ fn the_formerly_deferred_fixtures_run_real_surface_caches() {
 }
 
 /// An opaque surface label (`add_hier { surface: true }`) can be dumped but not
-/// expanded, even next to an explicit surface of the same numeric label.
+/// expanded: operation 9 emits the skip sentinel, even next to an explicit
+/// surface of the same numeric label.
 #[test]
 fn explicit_definition_does_not_resolve_an_opaque_label() {
     let explicit: Inputs = fixture(NEW_FIXTURES, "native_affine_hierarchy_single")
@@ -109,10 +110,12 @@ fn explicit_definition_does_not_resolve_an_opaque_label() {
         },
         Op::Expand { h: 0 },
     ];
-    assert!(matches!(
-        run_rust(&i, &mut Stats::default()),
-        Err(SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. })
-    ));
+    let cpp = ffi::run(&prog(&i)).unwrap();
+    assert_eq!(cpp.0, vec![0, 0, -2]);
+    let rust = run_rust(&i, &mut Stats::default()).unwrap();
+    assert_eq!(rust.0, cpp.0);
+    let r = compare(&output(cpp), &output(rust), &[]);
+    assert!(r.pass(), "{r:?}");
 }
 
 #[test]

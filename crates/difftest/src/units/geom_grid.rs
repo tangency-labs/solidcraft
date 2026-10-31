@@ -22,8 +22,8 @@
 //! `observe_cached` ops, which opt into real, explicitly defined surface caches
 //! (`SurfaceGridElement::init`, `Grid::expand_hierarchy` and `Grid::add_surface_node`
 //! run on the node of the actual cache). They do not resolve the opaque object labels
-//! of `add_hier { surface: true }`, which can be dumped but not expanded (the shim
-//! would dereference the fake pointer, so `expand` of one is an invalid program).
+//! of `add_hier { surface: true }`, which can be dumped but not expanded. For those
+//! labels, `expand` emits the shim's -2 skip sentinel without changing the grid.
 //! The observer records cache leaf order, surface identities, pool order, voxel
 //! memberships and all surface-leaf fields, in addition to the original dumps.
 
@@ -403,10 +403,11 @@ fn run_rust_controlled(
             Op::Dump => dump(&g, &mut oi, &mut of)?,
             Op::Expand { h } => {
                 let id = HierarchyId(*h as usize);
-                // The shim would dereference the fake surface of `add_hier { surface }`;
+                // Match shim operation 9: skip opaque surface labels;
                 // real surfaces are expanded with `expand_cached`.
                 if g.hierarchy_element(id).is_ok_and(|e| e.surface().is_some()) {
-                    return Err(native::invalid("expand of an opaque surface label"));
+                    oi.push(-2);
+                    continue;
                 }
                 // A base-class element fails before it reads the cache.
                 let kernel = Kernel::default();
