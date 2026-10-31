@@ -486,7 +486,7 @@ fn offset_radius(ops: &mut dyn FilletSolverOps, t: &TsectPnt) -> Result<f64> {
 /// `m_pFilletSurface = surface`, then for each rail `GetRail(i)->SetCurve(curve, TRUE)`
 /// (the edge owns the curve: `SetOwner`), `SetInterval` where upstream sets one, and
 /// `m_pCenterLineCurve`.
-fn store_parts(
+pub(crate) fn store_parts(
     s: &FilletSolver,
     pseudo: &mut FilletBrep,
     fillet_geom: Option<FilletGeomId>,

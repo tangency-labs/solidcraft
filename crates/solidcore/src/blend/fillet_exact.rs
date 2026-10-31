@@ -30,10 +30,11 @@
 //! Deviations:
 //! - **Out-params.** `FromSurface`, `ClassifyExactBlend` and `CalcExactFilletGeom` return
 //!   their results (`rQuadric`, `rBlend`, `rbBuilt`); `Implicit` returns `(A, b, c)`.
-//! - **Rational spines not ported yet.** The conic, conic-pair and nodal-quartic classes are
-//!   classified as the fork does, but [`calc_exact_fillet_geom`] traces them (returns
-//!   `false`): their builder (`CalcRationalSpineFilletGeom`, tangency-labs/smlib@0061c41,
-//!   1b5f1e7 and dda3b5d) extends this flag in a later change, at the marked arm.
+//! - **Nodal quartic not ported yet.** The conic and conic-pair classes are built exactly
+//!   by [`rational::calc_rational_spine_fillet_geom`] (tangency-labs/smlib@0061c41,
+//!   1b5f1e7); the nodal-quartic class is classified as the fork does, but
+//!   [`calc_exact_fillet_geom`] traces it (returns `false`): its arm
+//!   (tangency-labs/smlib@dda3b5d) extends this flag in a later change, at the marked arm.
 //! - **A chamfer round a circle** (a linear section, class circle) is traced unless
 //!   `fillet_chamfer_cone_on_arc` (WR-421) is on as well: the fork revolves it
 //!   unconditionally; here that revolution stays behind its own flag.
@@ -60,6 +61,8 @@ use crate::surface::surface::p2::PLANE_TYPE;
 use crate::surface::surface::{Surface, SurfaceKind};
 use crate::topology::edgeuse::p1 as eu;
 use crate::topology::Brep;
+
+pub mod rational;
 
 const OP: &str = "blend::fillet_exact";
 
@@ -1048,13 +1051,24 @@ pub fn calc_exact_fillet_geom(
             FilletSolver::calc_sphere_fillet_geom(ops, k, b, pseudo, tsects, fillet_geom)?;
             Ok(true)
         }
-        // Extension point (tangency-labs/smlib@0061c41, 1b5f1e7, dda3b5d): the rational
-        // spines' exact surface, `CalcRationalSpineFilletGeom`, is not ported yet; these
-        // rounds are traced, as the fork's before those commits.
-        BlendSpine::Conic
-        | BlendSpine::ConicPair
-        | BlendSpine::NodalQuartic
-        | BlendSpine::Traced => Ok(false),
+        // tangency-labs/smlib@0061c41 (conic) and 1b5f1e7 (conic pair): the exact
+        // rational surface of the ball's arcs
+        BlendSpine::Conic | BlendSpine::ConicPair => {
+            rational::calc_rational_spine_fillet_geom(
+                ops,
+                k,
+                b,
+                pseudo,
+                blend,
+                tsects,
+                fillet_geom,
+            )?;
+            Ok(true)
+        }
+        // Extension point (tangency-labs/smlib@dda3b5d): the nodal quartic's arm of
+        // `CalcRationalSpineFilletGeom` is not ported yet; these rounds are traced, as the
+        // fork's before that commit.
+        BlendSpine::NodalQuartic | BlendSpine::Traced => Ok(false),
     }
 }
 
