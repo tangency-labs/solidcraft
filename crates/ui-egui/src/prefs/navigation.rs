@@ -67,6 +67,8 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
         });
         // These are real navigation options absent from the static board; retain them below
         // the illustrated mapping rather than enlarging the diagram or repeating its legend.
+        let touch = setting::touchscreen_navigation(app, ui).on_hover_text(crate::i18n::tr("nav.touchscreen.help"));
+        crate::scenario::publish_target("prefs:touchscreen_navigation", touch.rect);
         let free_orbit = setting::free_orbit(app, ui);
         crate::scenario::publish_target("prefs:free_orbit", free_orbit.rect);
         if app.preferences.free_orbit {
