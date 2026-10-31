@@ -30,11 +30,10 @@
 //! Deviations:
 //! - **Out-params.** `FromSurface`, `ClassifyExactBlend` and `CalcExactFilletGeom` return
 //!   their results (`rQuadric`, `rBlend`, `rbBuilt`); `Implicit` returns `(A, b, c)`.
-//! - **Nodal quartic not ported yet.** The conic and conic-pair classes are built exactly
-//!   by [`rational::calc_rational_spine_fillet_geom`] (tangency-labs/smlib@0061c41,
-//!   1b5f1e7); the nodal-quartic class is classified as the fork does, but
-//!   [`calc_exact_fillet_geom`] traces it (returns `false`): its arm
-//!   (tangency-labs/smlib@dda3b5d) extends this flag in a later change, at the marked arm.
+//! - **Rational classes.** The conic, conic-pair and nodal-quartic classes are built
+//!   exactly by [`rational::calc_rational_spine_fillet_geom`] (tangency-labs/smlib@0061c41,
+//!   1b5f1e7, dda3b5d); a nodal-quartic round whose trace ends at the node stays traced,
+//!   as the fork's.
 //! - **A chamfer round a circle** (a linear section, class circle) is traced unless
 //!   `fillet_chamfer_cone_on_arc` (WR-421) is on as well: the fork revolves it
 //!   unconditionally; here that revolution stays behind its own flag.
@@ -1065,10 +1064,32 @@ pub fn calc_exact_fillet_geom(
             )?;
             Ok(true)
         }
-        // Extension point (tangency-labs/smlib@dda3b5d): the nodal quartic's arm of
-        // `CalcRationalSpineFilletGeom` is not ported yet; these rounds are traced, as the
-        // fork's before that commit.
-        BlendSpine::NodalQuartic | BlendSpine::Traced => Ok(false),
+        // tangency-labs/smlib@dda3b5d: faces touching at one point, exact on their nodal
+        // quartic
+        BlendSpine::NodalQuartic => {
+            // A round that runs into the node ends there tangentially: its contacts merge,
+            // the end event of the trace (the tangent end), which takes the traced round
+            // only. Such a round is traced until that event takes the exact one.
+            let tol = b.tolerance();
+            for t in [first, last] {
+                ops.setup_offset_values(t, None)?;
+                let centre = eval_offset(k, ops.solver_mut(), 0, t.uv_pos(SrfIndex::First))?;
+                if centre.distance(blend.point) <= tol {
+                    return Ok(false);
+                }
+            }
+            rational::calc_rational_spine_fillet_geom(
+                ops,
+                k,
+                b,
+                pseudo,
+                blend,
+                tsects,
+                fillet_geom,
+            )?;
+            Ok(true)
+        }
+        BlendSpine::Traced => Ok(false),
     }
 }
 

@@ -3,9 +3,13 @@
 //! and the ball's arc between them as Bernstein polynomials in the spine's parameter, and
 //! the round as the rational B-spline surface they make.
 //!
+//! The nodal quartic of two offsets touching at one point is swept the same way, as
+//! rational quartic segments.
+//!
 //! Not in the pinned upstream: the SolidCraft fork's `source/SMLib/src/SmFilletExact.cpp`
 //! and `source/SMLib/inc/SmFilletSolver.h` (tangency-labs/smlib@0061c41, with the conic-pair
-//! dispatch of tangency-labs/smlib@1b5f1e7), behind
+//! dispatch of tangency-labs/smlib@1b5f1e7 and the nodal quartic and conic span direction
+//! of tangency-labs/smlib@dda3b5d), behind
 //! [`UpstreamFixes::fillet_exact_round_classes`](crate::kernel::UpstreamFixes::fillet_exact_round_classes)
 //! (WR-669).
 //!
@@ -18,14 +22,12 @@
 //! | `Contact`, `contact_of` (private)      | `sm_Contact`, `sm_ContactOf`                      |
 //! | `round_rows` (private)                 | `sm_RoundRows`                                    |
 //! | `ConicKind`, `Conic`, `plane_section`, `conic_point`, `conic_param`, `conic_segment` (private) | `sm_ConicKind`, `sm_Conic`, `sm_PlaneSection`, `sm_ConicPoint`, `sm_ConicParam`, `sm_ConicSegment` |
+//! | `nodal_quartic`, `NodalArc` (private)  | `sm_NodalQuartic` (its out-params)                |
+//! | `power_to_bernstein`, `power_eval`, `bil` (private) | `sm_PowerToBernstein`, `sm_PowerEval`, its `bil` lambda |
 //!
 //! Deviations:
-//! - **Conic classes only.** The nodal-quartic arm of `CalcRationalSpineFilletGeom`
-//!   (`sm_NodalQuartic`, `sm_PowerToBernstein`, `sm_PowerEval`; reworked by
-//!   tangency-labs/smlib@dda3b5d, which also changes the conic span's direction) is not
-//!   ported: a nodal-quartic blend is `SM_ERR_INVALID_INPUT` here, and
-//!   [`super::calc_exact_fillet_geom`] traces that class without calling this builder.
-//! - **Out-params.** The polynomial helpers return their results; `sm_RoundRows` returns
+//! - **Out-params.** `sm_NodalQuartic` returns its coefficients and branch tangents.
+//!   The polynomial helpers return their results; `sm_RoundRows` returns
 //!   its rows.
 //! - **Storing.** The surface, rails and spine are built first and stored together; the
 //!   fork stores the surface and rails before it builds the spine, so a failure of the
@@ -565,8 +567,198 @@ fn conic_segment(k: &Conic, t0: f64, t1: f64) -> Segment {
     }
 }
 
+/// `sm_PowerToBernstein`: the power-basis polynomial `p` on `[a, b]` as Bernstein
+/// coefficients on `[0, 1]`.
+fn power_to_bernstein(p: &[f64], a: f64, b: f64) -> Poly {
+    let n = degree(p);
+    if p.is_empty() {
+        return Vec::new();
+    }
+    // compose with s = a + (b - a) t: Taylor coefficients at a, scaled
+    let mut st = vec![0.0; n + 1];
+    for (kk, tk) in st.iter_mut().enumerate() {
+        // k-th Taylor coefficient at a: sum_j C(j, k) p_j a^(j-k)
+        let mut s = 0.0;
+        for (j, &pj) in p.iter().enumerate().skip(kk) {
+            s += binom(j, kk) * pj * a.powf((j - kk) as f64);
+        }
+        *tk = s * (b - a).powf(kk as f64);
+    }
+    let mut sb = vec![0.0; n + 1];
+    for (i, bi) in sb.iter_mut().enumerate() {
+        for (j, &tj) in st.iter().enumerate().take(i + 1) {
+            *bi += binom(i, j) / binom(n, j) * tj;
+        }
+    }
+    sb
+}
+
+/// `sm_PowerEval`: the power-basis polynomial `p` at `s` (Horner).
+fn power_eval(p: &[f64], s: f64) -> f64 {
+    let mut v = 0.0;
+    for &c in p.iter().rev() {
+        v = v * s + c;
+    }
+    v
+}
+
+/// `x^T M y`, summed row by row as the fork's `bil`.
+fn bil(m: &[[f64; 3]; 3], x: &[f64; 3], y: &[f64; 3]) -> f64 {
+    let mut s = 0.0;
+    for (xi, row) in x.iter().zip(m) {
+        for (mij, yj) in row.iter().zip(y) {
+            s += xi * mij * yj;
+        }
+    }
+    s
+}
+
+/// The power-basis coefficients of a nodal quartic arc (`aX`, `rW`, `rG` of
+/// `sm_NodalQuartic`) and both branches' tangents at the node (`aBranch`).
+struct NodalArc {
+    x: [Poly; 3],
+    w: Poly,
+    g: Poly,
+    branch: [Vec3; 2],
+}
+
+/// `sm_NodalQuartic(crO1, crO2, crNode, crFrom, crTo, iBase, aBranch, aX, rW, rG)`: the
+/// nodal quartic two offsets meet in, through `node` where they touch, from the direction
+/// `from` (from the node) to `to`, as power-basis coefficients in `s` in `[0, 1]` of X
+/// (x, y, z) and W: the second point of the line from the node along each direction of
+/// the cone of directions the two quadrics share there. `base` picks the branch whose
+/// tangent is the sweep's base ray.
+///
+/// `Q1(q + s v) = 2 s g1.v + s^2 v.A1.v` and `Q2` likewise with `g2 = k g1` at the node:
+/// they meet again where `v.(A2 - k A1).v = 0`, a cone, swept rationally by the second
+/// point on it of the lines through one of its rays `v0` (a branch's tangent there) in
+/// the directions `w(s) = (1 - s) from + s to`; the point of the quartic along `v` is
+/// `q - 2 (g1.v) / (v.A1.v) v`.
+fn nodal_quartic(
+    o1: &BlendQuadric,
+    o2: &BlendQuadric,
+    node: Point3,
+    from: Vec3,
+    to: Vec3,
+    base: usize,
+) -> Result<NodalArc> {
+    let (a1, b1, _c1) = o1.implicit();
+    let (a2, b2, _c2) = o2.implicit();
+    let q = [node.x, node.y, node.z];
+    let mut g1 = [0.0; 3];
+    let mut g2 = [0.0; 3];
+    for (((g1i, g2i), (r1, r2)), (bi1, bi2)) in g1
+        .iter_mut()
+        .zip(g2.iter_mut())
+        .zip(a1.iter().zip(a2.iter()))
+        .zip(b1.iter().zip(b2.iter()))
+    {
+        *g1i = *bi1;
+        *g2i = *bi2;
+        for ((m1, m2), qj) in r1.iter().zip(r2.iter()).zip(q.iter()) {
+            *g1i += m1 * qj;
+            *g2i += m2 * qj;
+        }
+    }
+    let [g1x, g1y, g1z] = g1;
+    let [g2x, g2y, g2z] = g2;
+    let g11 = g1x * g1x + g1y * g1y + g1z * g1z;
+    if g11 <= 0.0 {
+        // no normal at the node
+        return Err(sm_err());
+    }
+    let kk = (g1x * g2x + g1y * g2y + g1z * g2z) / g11;
+    let mut c = [[0.0; 3]; 3];
+    for ((ci, r1), r2) in c.iter_mut().zip(a1.iter()).zip(a2.iter()) {
+        for ((cij, m1), m2) in ci.iter_mut().zip(r1.iter()).zip(r2.iter()) {
+            *cij = m2 - kk * m1;
+        }
+    }
+    // a ray of the cone square to g1: a branch's tangent
+    let sn = Vec3::new(g1x, g1y, g1z).unitize()?;
+    let mut st1 = if sn.x.abs() < 0.9 {
+        Vec3::new(1.0, 0.0, 0.0)
+    } else {
+        Vec3::new(0.0, 1.0, 0.0)
+    };
+    st1 = st1 - sn * st1.dot(sn);
+    st1 = st1.unitize()?;
+    let st2 = sn.cross(st1);
+    let t1 = [st1.x, st1.y, st1.z];
+    let t2 = [st2.x, st2.y, st2.z];
+    let c11 = bil(&c, &t1, &t1);
+    let c12 = bil(&c, &t1, &t2);
+    let c22 = bil(&c, &t2, &t2);
+    // c11 cos^2 + 2 c12 cos sin + c22 sin^2 = 0: the two branches' tangents
+    let d = c12 * c12 - c11 * c22;
+    if d < 0.0 || (c11 == 0.0 && c22 == 0.0) {
+        // the node is isolated
+        return Err(sm_err());
+    }
+    let mut branch = [Vec3::ZERO; 2];
+    for (kb, bk) in branch.iter_mut().enumerate() {
+        let root = if kb == 0 { 1.0 } else { -1.0 } * d.sqrt();
+        // (cos, sin) along (c22, -c12 + root) or (-c12 - root, c11), the better conditioned
+        let sb = if c22.abs() >= c11.abs() {
+            st1 * c22 + st2 * (-c12 + root)
+        } else {
+            st1 * (-c12 - root) + st2 * c11
+        };
+        *bk = sb.unitize()?;
+    }
+    let sv0 = *branch.get(base).ok_or_else(sm_err)?;
+    let v0 = [sv0.x, sv0.y, sv0.z];
+    let w0 = [from.x, from.y, from.z];
+    let w1 = [to.x - w0[0], to.y - w0[1], to.z - w0[2]];
+    // v(s) = Qc(w) v0 - 2 B(v0, w) w, w = w0 + s w1
+    let q0c = bil(&c, &w0, &w0);
+    let q1c = 2.0 * bil(&c, &w0, &w1);
+    let q2c = bil(&c, &w1, &w1);
+    let be0 = bil(&c, &v0, &w0);
+    let be1 = bil(&c, &v0, &w1);
+    let mut vc = [[0.0; 3]; 3]; // [power][coord]
+    for (i, ((v0i, w0i), w1i)) in v0.iter().zip(w0.iter()).zip(w1.iter()).enumerate() {
+        let [p0, p1, p2] = &mut vc;
+        if let (Some(a), Some(bb), Some(cc)) = (p0.get_mut(i), p1.get_mut(i), p2.get_mut(i)) {
+            *a = q0c * v0i - 2.0 * be0 * w0i;
+            *bb = q1c * v0i - 2.0 * (be0 * w1i + be1 * w0i);
+            *cc = q2c * v0i - 2.0 * be1 * w1i;
+        }
+    }
+    // G = g1.v (quadratic), W = v.A1.v (quartic)
+    let mut g = vec![0.0; 3];
+    for (gp, vp) in g.iter_mut().zip(vc.iter()) {
+        for (g1i, vpi) in g1.iter().zip(vp.iter()) {
+            *gp += g1i * vpi;
+        }
+    }
+    let mut w = vec![0.0; 5];
+    for (p, vp) in vc.iter().enumerate() {
+        for (r, vr) in vc.iter().enumerate() {
+            if let Some(wpr) = w.get_mut(p + r) {
+                *wpr += bil(&a1, vp, vr);
+            }
+        }
+    }
+    // X = q W - 2 G v
+    let mut x: [Poly; 3] = [vec![0.0; 5], vec![0.0; 5], vec![0.0; 5]];
+    for (i, (xi, qi)) in x.iter_mut().zip(q.iter()).enumerate() {
+        for (xp, wp) in xi.iter_mut().zip(w.iter()) {
+            *xp = qi * wp;
+        }
+        for (p, gp) in g.iter().enumerate() {
+            for (r, vr) in vc.iter().enumerate() {
+                if let (Some(xpr), Some(vri)) = (xi.get_mut(p + r), vr.get(i)) {
+                    *xpr -= 2.0 * gp * vri;
+                }
+            }
+        }
+    }
+    Ok(NodalArc { x, w, g, branch })
+}
+
 /// `SmFilletSolver::CalcRationalSpineFilletGeom(crBlend, rTsectPnts, pFilletGeom)`: the
-/// round of a conic or conic-pair class as the exact rational surface of the ball's arcs
+/// round of a conic, conic-pair or nodal-quartic class as the exact rational surface of the ball's arcs
 /// (a chamfer's lines), from the ball's centre at the trace's first point to its last
 /// (round the whole loop on a closed edge), extended at each end as the solver asks;
 /// stored in `fillet_geom` (`None`: the solver's first) with its rails (the v = min and
@@ -576,11 +768,11 @@ fn conic_segment(k: &Conic, t0: f64, t1: f64) -> Segment {
 ///
 /// # Errors
 ///
-/// `SM_ERR` when the plane misses the quadric or meets it in lines, the trace's ends run
-/// against the edge on a hyperbola or parabola, a spine segment's end weight or the
-/// round's weights do not stay positive, the weights range too far for a NURBS, or the
-/// round is not the ball's; [`SolidError::InvalidInput`] for a class other than conic or
-/// conic pair; those of `SetupOffsetValues`, the solves, evaluations and constructors.
+/// `SM_ERR` when the plane misses the quadric or meets it in lines, the nodal quartic has
+/// no normal or an isolated node, the trace starts and ends at the node or its arc runs
+/// through it, a spine segment's end weight or the round's weights do not stay positive,
+/// the weights range too far for a NURBS, or the round is not the ball's;
+/// [`SolidError::InvalidInput`] for a class other than conic, conic pair or nodal quartic; those of `SetupOffsetValues`, the solves, evaluations and constructors.
 #[allow(clippy::too_many_lines, clippy::too_many_arguments)] // one fork routine
 pub fn calc_rational_spine_fillet_geom(
     ops: &mut dyn FilletSolverOps,
@@ -619,6 +811,9 @@ pub fn calc_rational_spine_fillet_geom(
     ops.setup_offset_values(last, None)?;
     let end = eval_offset(k, ops.solver_mut(), 0, last.uv_pos(SrfIndex::First))?;
     let closed = curve.is_closed(k, &ivl, 0.0)?;
+    // the edge's middle, and its direction at the trace's first point (for a closed edge,
+    // the way round the trace runs)
+    let edge_mid = curve.evaluate_point(k, ivl.evaluate(0.5))?;
     let edge_dir = {
         let sols = curve.global_point_solve(
             k,
@@ -650,25 +845,36 @@ pub fn calc_rational_spine_fillet_geom(
         }
         let mut t0 = conic_param(&kc, start);
         let t1 = conic_param(&kc, end);
-        // the direction the edge runs
-        let h = 1e-6;
-        let tan = conic_point(&kc, t0 + h) - conic_point(&kc, t0 - h);
-        let dir = if tan.dot(edge_dir) >= 0.0 { 1.0 } else { -1.0 };
+        // from the first point to the last: round the loop the way the edge runs on a
+        // closed edge, else the way along an ellipse that passes the edge's middle
+        // (tangency-labs/smlib@dda3b5d)
         let mut span = t1 - t0;
+        let mut dir = if span >= 0.0 { 1.0 } else { -1.0 };
         if kc.kind == ConicKind::Ellipse {
             if closed {
+                let h = 1e-6;
+                let tan = conic_point(&kc, t0 + h) - conic_point(&kc, t0 - h);
+                dir = if tan.dot(edge_dir) >= 0.0 { 1.0 } else { -1.0 };
                 span = dir * 2.0 * PI;
             } else {
-                while span * dir <= 0.0 {
-                    span += dir * 2.0 * PI;
+                // the arc t0 -> t1 one way or the other, by where the edge's middle lies
+                let mid = conic_param(&kc, edge_mid);
+                let within = |a: f64, span: f64, t: f64| {
+                    let mut d = (t - a) * if span >= 0.0 { 1.0 } else { -1.0 };
+                    d -= 2.0 * PI * (d / (2.0 * PI)).floor();
+                    d <= span.abs()
+                };
+                while span <= 0.0 {
+                    span += 2.0 * PI;
                 }
-                while span * dir > 2.0 * PI {
-                    span -= dir * 2.0 * PI;
+                while span > 2.0 * PI {
+                    span -= 2.0 * PI;
                 }
+                if !within(t0, span, mid) {
+                    span -= 2.0 * PI;
+                }
+                dir = if span >= 0.0 { 1.0 } else { -1.0 };
             }
-        } else if span * dir <= 0.0 {
-            // the trace's ends run against the edge on the conic
-            return Err(sm_err());
         }
         // extensions
         if !closed {
@@ -708,9 +914,105 @@ pub fn calc_rational_spine_fillet_geom(
                 t0 + span * (i + 1) as f64 / n as f64,
             ));
         }
+    } else if blend.spine == BlendSpine::NodalQuartic {
+        // tangency-labs/smlib@dda3b5d: from the node toward the trace's ends; an end at the
+        // node (the round fading out there) leaves it along a branch's tangent
+        let from_pt = start - blend.point;
+        let to_pt = end - blend.point;
+        let from_node = from_pt.length() <= tol;
+        let to_node = to_pt.length() <= tol;
+        if from_node && to_node {
+            // the trace starts and ends at the node
+            return Err(sm_err());
+        }
+        let mut arc_q = nodal_quartic(&o0, &o1, blend.point, from_pt, to_pt, 0)?;
+        // the arc from start to end that keeps off the node: G (g1.v) is not zero inside
+        // it, nor W
+        let mut found = false;
+        let mut cand = 0;
+        while cand < 4 && !found {
+            let end_branch = cand / 2;
+            let sign = if cand % 2 == 0 { 1.0 } else { -1.0 };
+            cand += 1;
+            let eb = *arc_q.branch.get(end_branch).ok_or_else(sm_err)?;
+            let from = if from_node { eb } else { from_pt } * sign;
+            let to = if to_node { eb } else { to_pt };
+            if !from_node && !to_node && end_branch == 1 {
+                continue;
+            }
+            // the base ray: the branch no end leaves along
+            let base = if from_node || to_node {
+                1 - end_branch
+            } else {
+                0
+            };
+            arc_q = nodal_quartic(&o0, &o1, blend.point, from, to, base)?;
+            let mut ok = true;
+            let g = power_eval(&arc_q.g, 0.5);
+            let w = power_eval(&arc_q.w, 0.5);
+            let mut kk = 1;
+            while kk < 64 && ok {
+                let t = f64::from(kk) / 64.0;
+                if !positive(power_eval(&arc_q.g, t) * g) || !positive(power_eval(&arc_q.w, t) * w)
+                {
+                    ok = false;
+                }
+                kk += 1;
+            }
+            if !positive(power_eval(&arc_q.w, 0.0) * w) || !positive(power_eval(&arc_q.w, 1.0) * w)
+            {
+                ok = false;
+            }
+            found = ok;
+        }
+        if !found {
+            // the quartic's arc between the trace's ends runs through its node
+            return Err(sm_err());
+        }
+        // s runs from the trace's first point to its last
+        let mut s0 = 0.0;
+        let mut s1 = 1.0;
+        {
+            // extend, as far as the node and the point at infinity allow
+            let g0 = power_eval(&arc_q.g, 0.5);
+            let w0 = power_eval(&arc_q.w, 0.5);
+            let clear = |sv: f64| {
+                power_eval(&arc_q.g, sv) * g0 > 0.0 && power_eval(&arc_q.w, sv) * w0 > 0.0
+            };
+            let ext = s.surface_extension_factor;
+            for kk in 1..=32 {
+                let sv = -ext * f64::from(kk) / 32.0;
+                if !s.extend_before || !clear(sv - ext / 32.0) {
+                    break;
+                }
+                s0 = sv;
+            }
+            for kk in 1..=32 {
+                let sv = 1.0 + ext * f64::from(kk) / 32.0;
+                if !s.extend_after || !clear(sv + ext / 32.0) {
+                    break;
+                }
+                s1 = sv;
+            }
+        }
+        let wsign = if power_eval(&arc_q.w, 0.5) > 0.0 {
+            1.0
+        } else {
+            -1.0
+        };
+        let n = 16;
+        for i in 0..n {
+            let a = s0 + (s1 - s0) * f64::from(i) / f64::from(n);
+            let bb = s0 + (s1 - s0) * f64::from(i + 1) / f64::from(n);
+            let mut sg = Segment::default();
+            for (dst, src) in sg.m.a.iter_mut().zip(arc_q.x.iter()) {
+                *dst = scale(&power_to_bernstein(src, a, bb), wsign);
+            }
+            sg.w = scale(&power_to_bernstein(&arc_q.w, a, bb), wsign);
+            segs.push(sg);
+        }
     } else {
-        // the nodal quartic (tangency-labs/smlib@dda3b5d) is not ported
-        return Err(SolidError::invalid_input(OP, "not a conic spine"));
+        return Err(SolidError::invalid_input(OP, "not a rational spine"));
     }
 
     // each segment reparametrised (its weights times c^i) so that its end weights agree,
@@ -1017,5 +1319,52 @@ mod tests {
             let p = conic_point(&kc, t);
             assert!((conic_param(&kc, p) - t.sin().atan2(t.cos())).abs() < 1e-12);
         }
+    }
+
+    #[test]
+    fn two_touching_cylinders_meet_in_a_nodal_quartic_its_segments_on_both() {
+        // r3.5 about z and r1.5 about x through (0, 2, 0): touching at (0, 3.5, 0)
+        let cyl = |point: Point3, dir: Vec3, radius: f64| BlendQuadric {
+            kind: QuadricKind::Cylinder,
+            point,
+            dir,
+            radius,
+            angle: 0.0,
+            side: 1.0,
+        };
+        let a = cyl(Point3::ZERO, Vec3::new(0.0, 0.0, 1.0), 3.5);
+        let b = cyl(Point3::new(0.0, 2.0, 0.0), Vec3::new(1.0, 0.0, 0.0), 1.5);
+        let node = Point3::new(0.0, 3.5, 0.0);
+        let on = |phi: f64| {
+            let y = 2.0 + 1.5 * phi.cos();
+            Point3::new((3.5f64 * 3.5 - y * y).sqrt(), y, 1.5 * phi.sin())
+        };
+        let arc =
+            nodal_quartic(&a, &b, node, on(0.3) - node, on(2.0 * PI - 0.3) - node, 0).unwrap();
+        // the ends where they were asked for, every point on both
+        let end = |s: f64| {
+            let w = power_eval(&arc.w, s);
+            Point3::new(
+                power_eval(&arc.x[0], s) / w,
+                power_eval(&arc.x[1], s) / w,
+                power_eval(&arc.x[2], s) / w,
+            )
+        };
+        let mut worst = 0.0f64;
+        for i in 0..=64 {
+            let x = end(f64::from(i) / 64.0);
+            worst = worst.max(a.distance(x).abs()).max(b.distance(x).abs());
+        }
+        let seg = power_to_bernstein(&arc.w, 0.25, 0.5);
+        assert!(
+            (eval(&seg, 0.5) - power_eval(&arc.w, 0.375)).abs()
+                < 1e-12 * power_eval(&arc.w, 0.375).abs()
+        );
+        // the fork's formula in doubles: W cancels by about 1e4 at s = 1 (the second point
+        // of a short line from the node), leaving 1.3e-10 there (1e-14 in 60-digit
+        // arithmetic); the fork's exact-round criterion is 1e-9
+        assert!(worst < 1e-9, "{worst:e}");
+        assert!(end(0.0).distance(on(0.3)) < 1e-14);
+        assert!(end(1.0).distance(on(2.0 * PI - 0.3)) < 1e-9);
     }
 }
