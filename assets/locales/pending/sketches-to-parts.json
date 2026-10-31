@@ -1,0 +1,62 @@
+{
+  "en": {
+    "browser.sketches_to_parts_already_in_part": "already in their part",
+    "browser.sketches_to_parts_design_body": "on a body of the design itself",
+    "browser.sketches_to_parts_moved": "Moved {moved} sketches to the part they're on",
+    "browser.sketches_to_parts_no_exact_attachment": "on a face without an exact attachment",
+    "browser.sketches_to_parts_not_on_face": "not on a part's face",
+    "browser.sketches_to_parts_part_missing": "their part is gone",
+    "browser.sketches_to_parts_result": "Moved {moved} sketches to the part they're on; {stayed} stayed: {why}",
+    "cmd.component_move_sketches_to_parts": "Move Sketches to the Part They're On"
+  },
+  "ar": {
+    "browser.sketches_to_parts_already_in_part": "موجودة بالفعل في جزئها",
+    "browser.sketches_to_parts_design_body": "على جسم من التصميم نفسه",
+    "browser.sketches_to_parts_moved": "نُقلت {moved} رسومات إلى الجزء الذي رُسمت عليه",
+    "browser.sketches_to_parts_no_exact_attachment": "على وجه بلا ارتباط دقيق",
+    "browser.sketches_to_parts_not_on_face": "ليست على وجه جزء",
+    "browser.sketches_to_parts_part_missing": "جزؤها لم يعد موجودًا",
+    "browser.sketches_to_parts_result": "نُقلت {moved} رسومات إلى الجزء الذي رُسمت عليه؛ وبقيت {stayed}: {why}",
+    "cmd.component_move_sketches_to_parts": "نقل الرسومات إلى الجزء الذي رُسمت عليه"
+  },
+  "he": {
+    "browser.sketches_to_parts_already_in_part": "כבר בחלק שלהם",
+    "browser.sketches_to_parts_design_body": "על גוף של התכן עצמו",
+    "browser.sketches_to_parts_moved": "{moved} שרטוטים הועברו לחלק שעליו הם נמצאים",
+    "browser.sketches_to_parts_no_exact_attachment": "על פאה ללא הצמדה מדויקת",
+    "browser.sketches_to_parts_not_on_face": "לא על פאה של חלק",
+    "browser.sketches_to_parts_part_missing": "החלק שלהם כבר לא קיים",
+    "browser.sketches_to_parts_result": "{moved} שרטוטים הועברו לחלק שעליו הם נמצאים; {stayed} נשארו: {why}",
+    "cmd.component_move_sketches_to_parts": "העברת שרטוטים לחלק שעליו הם נמצאים"
+  },
+  "ja": {
+    "browser.sketches_to_parts_already_in_part": "すでにその部品にある",
+    "browser.sketches_to_parts_design_body": "デザイン自体のボディ上にある",
+    "browser.sketches_to_parts_moved": "{moved} 個のスケッチを描かれている部品に移動しました",
+    "browser.sketches_to_parts_no_exact_attachment": "正確なアタッチメントのない面上にある",
+    "browser.sketches_to_parts_not_on_face": "部品の面上にない",
+    "browser.sketches_to_parts_part_missing": "部品がもうない",
+    "browser.sketches_to_parts_result": "{moved} 個のスケッチを描かれている部品に移動しました。{stayed} 個はそのまま：{why}",
+    "cmd.component_move_sketches_to_parts": "スケッチを描かれている部品に移動"
+  },
+  "vi": {
+    "browser.sketches_to_parts_already_in_part": "đã ở trong chi tiết của chúng",
+    "browser.sketches_to_parts_design_body": "nằm trên một khối của chính thiết kế",
+    "browser.sketches_to_parts_moved": "Đã chuyển {moved} bản phác thảo vào chi tiết chứa chúng",
+    "browser.sketches_to_parts_no_exact_attachment": "nằm trên mặt không có liên kết chính xác",
+    "browser.sketches_to_parts_not_on_face": "không nằm trên mặt của một chi tiết",
+    "browser.sketches_to_parts_part_missing": "chi tiết của chúng không còn",
+    "browser.sketches_to_parts_result": "Đã chuyển {moved} bản phác thảo vào chi tiết chứa chúng; {stayed} giữ nguyên: {why}",
+    "cmd.component_move_sketches_to_parts": "Chuyển bản phác thảo vào chi tiết chứa chúng"
+  },
+  "zh": {
+    "browser.sketches_to_parts_already_in_part": "已在其零件中",
+    "browser.sketches_to_parts_design_body": "位于设计本身的实体上",
+    "browser.sketches_to_parts_moved": "已将 {moved} 个草图移到其所在的零件",
+    "browser.sketches_to_parts_no_exact_attachment": "位于没有精确附着的面上",
+    "browser.sketches_to_parts_not_on_face": "不在零件的面上",
+    "browser.sketches_to_parts_part_missing": "其零件已不存在",
+    "browser.sketches_to_parts_result": "已将 {moved} 个草图移到其所在的零件；{stayed} 个保留原处：{why}",
+    "cmd.component_move_sketches_to_parts": "将草图移到其所在的零件"
+  }
+}

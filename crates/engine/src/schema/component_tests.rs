@@ -2,7 +2,10 @@ use std::sync::Arc;
 
 use serde_json::{Value, json};
 
-use super::{EditInPlaceParams, FinishEditParams, MoveFeaturesParams, OccurrenceAlignParams, OccurrenceAlignResult, ReparentItemsParams};
+use super::{
+    EditInPlaceParams, FinishEditParams, MoveFeaturesParams, MoveSketchesToPartsParams, OccurrenceAlignParams, OccurrenceAlignResult,
+    ReparentItemsParams,
+};
 use crate::Session;
 use crate::schema::tests::{assert_keys, conforms};
 use crate::schema::{ParamCheck, input_schema_for, output_schema_for};
@@ -30,6 +33,7 @@ fn schemas_and_the_key_check_agree() {
         ],
     );
     assert_keys(input_schema_for::<MoveFeaturesParams>(), &["component", "features"]);
+    assert_keys(input_schema_for::<MoveSketchesToPartsParams>(), &["sketches"]);
     assert_keys(input_schema_for::<ReparentItemsParams>(), &["bodies", "component", "component_path", "features", "occurrences"]);
 }
 

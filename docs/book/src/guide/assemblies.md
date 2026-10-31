@@ -6,6 +6,16 @@ component has its own origin, bodies, sketches and timeline entries. The **activ
 (the radio button in the browser) receives new sketches and features; the others are drawn
 faded.
 
+Sketches drawn on a part's face while the design was active belong to the design, so they
+collect in its Sketches folder. **Move Sketches to the Part They're On**
+(`component.move_sketches.to_parts`), on a Sketches folder's menu and on a sketch's menu, moves
+the folder's sketches (or the selected ones) to the part whose face each is drawn on, as dragging
+it onto the part would. Each stays where it is on its face, and the whole move is one undo step.
+A sketch with no single part to go to stays where it is: one on an origin, construction or fixed
+plane, on a body of the design itself, on a face without an exact attachment, or already in its
+part. The status bar says how many moved and why the others stayed; the command's reply lists
+each sketch. With no `sketches` it looks at every sketch in the design.
+
 A component is placed by its **occurrences**. Paste creates another instance of the same
 component, and **Paste New** creates an independent copy. Move an occurrence with the move
 triad, then **Capture Position** to keep it or **Revert** to put it back. SolidCraft asks before

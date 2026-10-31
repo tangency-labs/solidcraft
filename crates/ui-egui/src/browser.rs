@@ -376,6 +376,11 @@ pub fn group_items(app: &SolveApp, id: u64, scope: &str) -> Vec<Item> {
     v
 }
 
+/// Move Sketches to the Part They're On (`component.move_sketches.to_parts`) for `sketches` (ids).
+pub(crate) fn sketches_to_parts_item(sketches: Vec<String>) -> Item {
+    Item::action("component.move_sketches.to_parts", "Move Sketches to the Part They're On", "move").with(json!({ "sketches": sketches }))
+}
+
 /// The menu of a folder row (Bodies, Sketches, Construction).
 pub fn folder_items(app: &SolveApp, component: u64, folder: &str, scope: &str) -> Vec<Item> {
     let sel: Vec<String> = selected_keys(app, component, folder);
@@ -388,6 +393,11 @@ pub fn folder_items(app: &SolveApp, component: u64, folder: &str, scope: &str) -
     }
     if folder == "sketches" {
         v.push(paste_item(app, component, scope, folder, None));
+        // The folder's selected sketches, or all of them, go to the part whose face they are on (#10218).
+        if !app.session.doc.components.is_empty() && !all.is_empty() {
+            let sketches = if sel.is_empty() { all.iter().map(|e| e.key.clone()).collect() } else { sel.clone() };
+            v.push(sketches_to_parts_item(sketches));
+        }
     }
     v.push(Item::action("ui.newGroup", "New Group", "folder").with(json!({ "component": component, "folder": folder })));
     if sel.len() > 1 {
