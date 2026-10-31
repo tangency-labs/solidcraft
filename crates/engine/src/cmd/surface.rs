@@ -1296,8 +1296,8 @@ mod tests {
     /// along a straight edge, 20 long: each SMLib's G1 or G2 extension of the surface, so the
     /// strip stays one face. The distance is measured across the surface (the run-off's section
     /// is 5 long, whatever its curvature) and the strip is its section swept 20 along z, so each
-    /// run-off adds 5 × 20: 10 · π/2 · 20 + 100.
-    /// Undo, redo and reopening; the default saves nothing new.
+    /// run-off adds 5 × 20: 10 · π/2 · 20 + 100 = 414.159265, exact to 1e-6. Areas are SMLib's,
+    /// integrated on the exact surfaces. Undo, redo and reopening; the default saves nothing new.
     #[test]
     fn extend_a_cylinder_strip_every_way() {
         let pi = std::f64::consts::PI;
@@ -1306,7 +1306,7 @@ mod tests {
         let top = [10.0 * (pi / 4.0).cos(), 10.0 * (pi / 4.0).sin(), 20.0];
         run(&mut s, "surface.extend", json!({"body": "Strip", "edges": [top], "distance": "5 mm", "name": "Up"}));
         let want = 10.0 * pi / 2.0 * 25.0;
-        assert!((area(&s, "Strip") - want).abs() < want * 1e-3, "{} vs {want}", area(&s, "Strip")); // (measured on meshes)
+        assert!((area(&s, "Strip") - want).abs() < want * 1e-3, "{} vs {want}", area(&s, "Strip"));
         assert_eq!(s.world_state().unwrap().body("Strip").unwrap().body.face_count(), 1);
         let saved = s.doc.to_json();
         assert!(!saved.contains("\"mode\"") && !saved.contains("\"up_to\"") && !saved.contains("\"neighbours\""), "the default saves as before");
@@ -1319,14 +1319,15 @@ mod tests {
 
         run(&mut s, "surface.extend", json!({"body": "Strip", "edges": [top], "up_to": {"origin": [0, 0, 30], "normal": [0, 0, 1]}}));
         let want = 10.0 * pi / 2.0 * 30.0;
-        assert!((area(&s, "Strip") - want).abs() < want * 1e-3, "{} vs {want}", area(&s, "Strip")); // (measured on meshes)
+        assert!((area(&s, "Strip") - want).abs() < want * 1e-3, "{} vs {want}", area(&s, "Strip"));
         run(&mut s, "edit.undo", json!({}));
 
         let side = [0.0, 10.0, 10.0];
         for mode in ["tangent", "curvature"] {
             run(&mut s, "surface.extend", json!({"body": "Strip", "edges": [side], "distance": 5, "mode": mode}));
             let want = 10.0 * pi / 2.0 * 20.0 + 5.0 * 20.0;
-            assert!((area(&s, "Strip") - want).abs() < want * 1e-3, "{mode}: {} vs {want}", area(&s, "Strip")); // (measured on meshes)
+            // SMLib's area, integrated on the exact surface to 1e-8: the run-off is exactly 5 long.
+            assert!((area(&s, "Strip") - want).abs() < want * 1e-6, "{mode}: {} vs {want}", area(&s, "Strip"));
             let cold = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
             assert!((area(&cold, "Strip") - area(&s, "Strip")).abs() < 1e-9, "{mode}");
             run(&mut s, "edit.undo", json!({}));

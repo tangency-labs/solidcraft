@@ -236,7 +236,7 @@ impl Parts {
 
 /// Whether each face of `r` is used along its surface's natural normal (by its first oriented
 /// face).
-fn face_sides(r: &Brep) -> Vec<bool> {
+pub(crate) fn face_sides(r: &Brep) -> Vec<bool> {
     let mut side = vec![None; r.faces.len()];
     for s in &r.shells {
         if let b::Shell::Faces { faces, .. } = s {
