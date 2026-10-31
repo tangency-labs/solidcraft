@@ -435,6 +435,16 @@ pub struct UpstreamFixes {
     pub edge_reversal_keeps_failed_edge: bool,
     /// `SmBSplineSurface::CreateIsoParametricCurve` with a domain of no length along the curve (a sliver cell at a double knot) returns a degenerate curve at that point, where upstream's `Trim` refuses the interval and the whole untrimmed iso curve is returned (WR-562; tangency-labs/smlib 8088f5e).
     pub iso_curve_sliver_domain_is_degenerate: bool,
+    /// `SmIsoCurve::CreateUVIsoLine` constructs the UV line for both directions: a
+    /// constant-`u` curve gets `UV(t) = (iso, t, 0)` over the domain's v interval and a
+    /// constant-`v` curve `UV(t) = (t, iso, 0)` over its u interval, with the varying
+    /// coordinate's origin at zero. Pinned v1.0.1 tests `SM_SP_U` in both branches, so a
+    /// constant-`u` line gets the u interval and a domain-minimum origin (the line is
+    /// `P + s*V`, so that minimum is also added to every returned point) and constant
+    /// `v` is `SM_ERR_INVALID_INPUT` (WR-30;
+    /// `plan/upstream-issues/WR-30--addendum-2026-10-31-uv-iso-line-both-params.md`).
+    /// Off by default for pinned C++ parity.
+    pub iso_curve_uv_line_both_params: bool,
     /// `GetUVCornerBoundaries`, `GetStartPointUVLoopGap` and `sm_CalcDistAndDev` return failed curve/surface evaluations and point drops instead of reading unwritten or earlier outputs (WR-262, WR-263, WR-264, #521).
     pub topology_failed_evaluations_propagate: bool,
     /// `SetProps_Stage3` returns a failed `ClassifyLoops` status before reading its outputs, and a failed stage drops its in-progress marker so a retry reruns it (WR-268, WR-266, #521).
