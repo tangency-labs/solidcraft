@@ -811,6 +811,17 @@ fn later_instances_show_the_first_instances_mesh_placed() {
     assert!(split.display_of.is_none());
 }
 
+#[test]
+fn repeated_open_step_instances_keep_their_warning() {
+    let text = two_instance_assembly();
+    let open = text.replace("#100=CLOSED_SHELL('',(#411,#431,#451,#471,#491,#511));", "#100=OPEN_SHELL('',(#411,#431,#451,#471,#491));");
+    assert_ne!(text, open);
+    let open = crate::step_import(&open).unwrap();
+    assert_eq!(open.bodies.len(), 2);
+    assert!(open.bodies.iter().all(|b| !b.closed));
+    assert_eq!(open.warnings.iter().filter(|w| w.contains("open body")).count(), 1);
+}
+
 /// A body knows the product that holds it and the assembly occurrence it is, next to the name of
 /// its solid: a caller can name bodies after the part or the instance when the solids carry the
 /// name of the last feature that made them (`Cut-Extrude3`), which says nothing about the part.
