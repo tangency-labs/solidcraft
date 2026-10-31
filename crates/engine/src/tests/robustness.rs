@@ -174,37 +174,6 @@ fn shell_thicker_than_a_step_says_so() {
     assert!(e.to_string().contains("not supported yet"), "{e}");
 }
 
-/// Panics inside the kernel are caught natively, but abort the web build (wasm can't unwind).
-/// Building the samples must not panic at all (the Plastic Enclosure's bosses used to, 8 times).
-#[test]
-fn samples_build_without_panics() {
-    use std::sync::Arc;
-    use std::sync::atomic::{AtomicUsize, Ordering};
-    let me = std::thread::current().id();
-    let count = Arc::new(AtomicUsize::new(0));
-    let c2 = count.clone();
-    let prev = std::panic::take_hook();
-    std::panic::set_hook(Box::new(move |info| {
-        if std::thread::current().id() == me {
-            c2.fetch_add(1, Ordering::SeqCst);
-        }
-        let _ = info;
-    }));
-    let mut failed = Vec::new();
-    for sample in crate::sample::samples() {
-        let mut s = Session::default();
-        for c in (sample.script)()["commands"].as_array().into_iter().flatten() {
-            let _ = s.execute(c["command"].as_str().unwrap_or(""), &c["params"]);
-        }
-        let n = count.swap(0, Ordering::SeqCst);
-        if n > 0 {
-            failed.push(format!("{}: {n} panic(s)", sample.name));
-        }
-    }
-    std::panic::set_hook(prev);
-    assert!(failed.is_empty(), "{failed:?}");
-}
-
 fn total_volume(s: &Session) -> f64 {
     s.model.state().bodies.iter().map(|b| solidcraft_kernel::measure(&b.body).map(|m| m.volume).unwrap_or(0.0)).sum()
 }

@@ -135,11 +135,13 @@ fn a_void_reads_as_a_cavity_whichever_way_its_shell_flag_points() {
     }
 }
 
+/// A ball whose one face is bounded by a meridian edge from the north pole that stops short of
+/// the south pole (at 2.5 rad), run out and back: the face is the whole sphere less a slit of no
+/// area, so it is the same 2 mm ball as when the seam runs pole to pole.
 #[test]
-fn non_antipodal_seam_sphere_does_not_panic() {
+fn non_antipodal_seam_sphere_imports_as_a_whole_ball() {
     let text = seam_sphere_step(Vec3::ZERO, 2.0, Vec3::Z, Vec3::X, 0.0, false, 2.5);
-    let result = std::panic::catch_unwind(|| step_import(&text));
-    assert!(result.is_ok());
+    assert_seam_sphere(&text, 2.0);
 }
 
 #[test]

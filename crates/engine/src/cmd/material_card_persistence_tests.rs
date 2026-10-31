@@ -77,6 +77,9 @@ fn omission_retains_null_clears_and_unrelated_material_edits_retain_cards() {
         .and_then(|c| c.in_format(solidcraft_io::catalog::V1_FORMAT))
         .unwrap_err();
     assert!(error.to_string().contains("engineering cards"));
+    // A library copy carries the card as it is.
+    let copy = solidcraft_io::catalog::LibraryMaterial::from_material(&s.doc.user_materials[1]).unwrap();
+    assert_eq!(copy.physical_card, original);
     s.execute("material.edit", &json!({"material":"Renamed","physical_card":null})).unwrap();
     assert!(s.doc.user_materials[1].physical_card.is_none());
     s.execute("edit.undo", &json!({})).unwrap();
@@ -137,15 +140,20 @@ fn configurations_rename_and_paste_new_keep_design_owned_material_semantics() {
     assert!(loaded.configs.rows.iter().any(|r| r.cells.iter().any(|c| c == "Renamed candidate")));
 }
 
+/// Formats 20 (before engineering cards) and 21 (with them), as they were written (no pending
+/// format list): materials without cards come in with their optical look unchanged, upgraded.
 #[test]
-fn format21_materials_without_cards_keep_their_optical_look() {
+fn format20_and_21_materials_without_cards_keep_their_optical_look() {
     let s = fixture();
-    let mut saved = serde_json::to_value(&*s.doc).unwrap();
-    saved["format"] = json!("solidcraft/21");
-    let loaded = Document::from_json(&saved.to_string()).unwrap();
-    assert_eq!(loaded.user_materials, s.doc.user_materials);
-    assert!(loaded.user_materials[0].physical_card.is_none());
-    assert_eq!(loaded.format, solidcraft_doc::format::format_string(solidcraft_doc::format::FORMAT));
+    for format in [20, 21] {
+        let mut saved = serde_json::to_value(&*s.doc).unwrap();
+        saved["format"] = json!(format!("solidcraft/{format}"));
+        saved.as_object_mut().unwrap().remove("format_pending");
+        let loaded = Document::from_json(&saved.to_string()).unwrap();
+        assert_eq!(loaded.user_materials, s.doc.user_materials, "format {format}");
+        assert!(loaded.user_materials[0].physical_card.is_none(), "format {format}");
+        assert_eq!(loaded.format, solidcraft_doc::format::format_string(solidcraft_doc::format::FORMAT), "format {format}");
+    }
 }
 
 #[test]
@@ -206,17 +214,6 @@ fn native_container_keeps_large_si_card_values_sources_conditions_and_density_se
     assert_eq!(material["density_comparison"]["assigned_density_kg_m3"], 800.0);
     assert_eq!(material["density_comparison"]["card_density_kg_m3"], 700.0);
     assert_eq!(material["physical_validation"]["source_review_required"], json!(["fixture"]));
-}
-
-#[test]
-fn format20_materials_without_cards_upgrade_to21_without_changing_their_optical_look() {
-    let s = fixture();
-    let mut saved = serde_json::to_value(&*s.doc).unwrap();
-    saved["format"] = json!("solidcraft/20");
-    let loaded = Document::from_json(&saved.to_string()).unwrap();
-    assert_eq!(loaded.user_materials, s.doc.user_materials);
-    assert!(loaded.user_materials[0].physical_card.is_none());
-    assert_eq!(loaded.format, solidcraft_doc::format::format_string(solidcraft_doc::format::FORMAT));
 }
 
 #[test]
