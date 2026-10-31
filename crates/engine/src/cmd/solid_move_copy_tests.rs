@@ -251,6 +251,35 @@ fn bodies_and_a_component_copied_together_are_one_undo_step() {
 }
 
 #[test]
+fn a_component_picked_with_its_parent_is_copied_once_inside_the_parents_copy() {
+    let mut s = Session::default();
+    // `Outer` at the root holds `Inner`, which holds a 20 mm cube.
+    let outer = run(&mut s, "component.create", json!({"name": "Outer", "grounded": false}))["occurrence"].as_u64().unwrap();
+    let inner = run(&mut s, "component.create", json!({"name": "Inner", "parent": "Outer"}))["occurrence"].as_u64().unwrap();
+    cube20(&mut s, "Peg");
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    let counts = |s: &Session| (s.doc.components.len(), s.doc.occurrences.len(), s.model.state().bodies.len());
+    assert_eq!(counts(&s), (2, 2, 1), "components, occurrences and bodies before the move");
+    let before = s.doc.clone();
+    let source = world_min(&s, &[outer, inner]);
+
+    // Both are picked, Inner inside Outer: Inner comes with its parent's copy, so one copy is made.
+    let reply = run(&mut s, "solid.move", json!({"bodies": [], "occurrences": [[outer], [outer, inner]], "copy": true, "translate": [50, 0, 0]}));
+    assert_eq!(reply["occurrences"].as_array().map(Vec::len), Some(1), "one copy: Inner is copied inside Outer's copy");
+    let copy = reply["occurrences"][0].as_u64().unwrap();
+    assert_eq!(counts(&s), (4, 4, 2), "the copy of Outer and its own Inner, with the cube copied once");
+    assert!(
+        world_min(&s, &[copy]).dist(Vec3::new(source.x + 50.0, source.y, source.z)) < 1e-6,
+        "the copied cube sits 50 mm along X from the original"
+    );
+    assert!(world_min(&s, &[outer, inner]).dist(source) < 1e-6, "the original cube stays where it was");
+
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(counts(&s), (2, 2, 1), "one undo puts back the two components, two occurrences and one body");
+    assert_eq!(s.doc, before, "one undo removes the whole copy");
+}
+
+#[test]
 fn a_copy_that_fails_part_way_changes_nothing() {
     let mut s = Session::default();
     let (_, occurrence) = part_with_cube(&mut s);
