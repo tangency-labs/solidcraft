@@ -1103,3 +1103,51 @@ fn editing_a_rolled_back_pattern_says_it_is_not_built() {
     assert_eq!(reply["rolled_back"], json!(true), "{reply}");
     assert_eq!(reply["warning"], "1 of 1 cut copies remove no material", "{reply}");
 }
+
+/// A 100 x 60 x 30 box shelled 5 mm (floor included) with a 20 x 11 boss joined to its +Y wall:
+/// 67,500 mm³ hollow, 73,500 mm³ with the boss, which adds 6,000 mm³ (#6452).
+fn hollow_box_with_join_boss() -> Session {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Base"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [-50, -30], "p1": [50, 30]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "Base", "distance": 30, "operation": "new", "name": "Block", "body_name": "Box"}));
+    run(&mut s, "solid.shell", json!({"faces": [[0, 0, 30]], "thickness": 5, "name": "Shell"}));
+    assert!(rel(volume(&mut s), 67500.0) < 1e-6, "hollow box");
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Boss"}));
+    run(&mut s, "sketch.line", json!({"closed": true, "points": [[20, 29], [40, 29], [40, 40], [20, 40]]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "Boss", "distance": 30, "operation": "join", "targets": ["Box"], "name": "Join Boss"}));
+    assert!(rel(volume(&mut s), 73500.0) < 1e-6, "joined boss");
+    s
+}
+
+/// The copy of a join is built where the source stands, and the source's own material used to
+/// read as the target already filling the copy's bottom band: the mirrored boss lost its
+/// 20 x 10 x 5 mm floor-level slice with no warning (#6452).
+#[test]
+fn mirror_of_a_join_on_a_hollow_part_copies_the_whole_boss() {
+    let mut s = hollow_box_with_join_boss();
+    run(&mut s, "solid.mirror", json!({"features": ["Join Boss"], "plane": "XZ", "name": "Mirror Boss"}));
+    assert!(rel(volume(&mut s), 79500.0) < 1e-6, "mirrored copy lost material");
+}
+
+#[test]
+fn mirror_of_a_join_on_a_hollow_part_copies_the_whole_boss_across_a_custom_plane() {
+    let mut s = hollow_box_with_join_boss();
+    run(&mut s, "solid.mirror", json!({"features": ["Join Boss"], "plane": {"origin": [0, 0, 0], "normal": [0, 1, 0]}, "name": "Mirror Boss"}));
+    assert!(rel(volume(&mut s), 79500.0) < 1e-6, "mirrored copy lost material");
+}
+
+/// A pure translation loses the same slice: the copy must be congruent to the original,
+/// whatever filled the space where its tool was rebuilt (#6452).
+#[test]
+fn rectangular_pattern_of_a_join_on_a_hollow_part_copies_the_whole_boss() {
+    let mut s = hollow_box_with_join_boss();
+    run(
+        &mut s,
+        "solid.pattern.rectangular",
+        json!({"features": ["Join Boss"], "dir1": [0, -1, 0], "count1": 2, "spacing1": 69, "name": "Pattern Boss"}),
+    );
+    assert!(rel(volume(&mut s), 79500.0) < 1e-6, "patterned copy lost material");
+}
