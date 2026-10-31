@@ -14,6 +14,7 @@
 //! | [`FilletBrep::calc_cross_section`]                | `SmFilletEdge::CalcCrossSection`                 |
 //! | [`FilletBrep::calc_fillet_int_side_face`]         | `SmFilletEdge::CalcFilletIntSideFace`            |
 //! | [`FilletBrep::calc_edge_on_extended_edge`]        | `SmFilletEdge::CalcEdgeOnExtendedEdge`           |
+//! | `calc_edge_on_tangent_seam` (private)             | `SmFilletEdge::CalcEdgeOnTangentSeam` (fork 856b54e) |
 //! | [`FilletBrep::make_fillet_edge`]                  | `SmFilletEdge::MakeFilletEdge`                   |
 //! | [`FilletGeom::new`] (in `blend.fillet_geom_p1`)   | `SmFilletGeom(SmFilletSolver*, SmFilletGeomType)` (CO-PORTED there) |
 //! | [`FilletBrep::copy_fillet_geom`]                  | `SmFilletGeom(SmFilletGeom*)`                    |
@@ -25,6 +26,14 @@
 //! | [`FilletBrep::update_geom_split_face`]            | `SmFilletGeom::UpdateSplitFace`                  |
 //!
 //! Deviations:
+//! - **Tangent ends (opt-in, WR-600's flag).** With
+//!   `fixes.fillet_nx1_tangent_side_edge_same_convexity` (the fork's
+//!   tangency-labs/smlib@856b54e), `CalcFilletIntSideFace` builds the end rib of a
+//!   fillet with a tangent end vertex from that end outward
+//!   ([`super::tangent_end_rib`]) instead of intersecting the surfaces, and
+//!   `CalcEdgeOnExtendedEdge` takes the cap edge on a tangent seam as the seam's own curve
+//!   (`calc_edge_on_tangent_seam`). Its tangency check (`EvaluateBinormal` may make a
+//!   missing UV trim) runs on a copy of the target, which the routine only reads.
 //! - **Near-knot rail trims (opt-in, not upstream).** With
 //!   `fixes.fillet_rail_trim_at_near_knot` (WR-664, the fork's tangency-labs/smlib@7d79866),
 //!   `TrimRailCurves` trims a rail at its knot next to a vertex's drop when the rail between
@@ -131,6 +140,18 @@ use crate::topology::brep_cache::CacheObject;
 const OP_INT_FILLET: &str = "blend::fillet_geom::p5::FilletBrep::calc_fillet_int_fillet";
 const OP_CROSS: &str = "blend::fillet_geom::p5::FilletBrep::calc_cross_section";
 const OP_SIDE: &str = "blend::fillet_geom::p5::FilletBrep::calc_fillet_int_side_face";
+/// The `SmBSplineCurve` of a curve that is one (`SM_CAST_PTR(SmBSplineCurve, ..)`).
+fn b_spline_part(c: &Curve) -> Option<&BSplineCurve> {
+    match c.kind() {
+        CurveKind::BSpline(c) => Some(c),
+        CurveKind::Line(c) => Some(&c.base),
+        CurveKind::Ellipse(c) => Some(c.base()),
+        CurveKind::Hyperbola(c) => Some(c.base()),
+        CurveKind::Parabola(c) => Some(c.base()),
+        _ => None,
+    }
+}
+
 const OP_EXT_EDGE: &str = "blend::fillet_geom::p5::FilletBrep::calc_edge_on_extended_edge";
 const OP_MAKE_EDGE: &str = "blend::fillet_geom::p5::FilletBrep::make_fillet_edge";
 const OP_COPY: &str = "blend::fillet_geom::p5::FilletBrep::copy_fillet_geom";
@@ -1209,42 +1230,78 @@ impl FilletBrep {
             // do Surface/surface xSect
             let ang_tol = fs1.ang_tol_rad;
             let mut dir = end_pnt - start_pnt;
-            let intersection = match &surface {
-                Some(surface) => {
-                    // the original face's own surface (`pFace->GetSurface()`): its
-                    // trimmed surface cache is the face's, made with its boundary
-                    let mut services;
-                    let face_context = match surface2_id {
-                        Some(ExecutiveErrorObject::TargetFaceSurface {
-                            face,
-                            extended: false,
-                        }) => {
-                            services = BrepFaceServices::new(target);
-                            Some((
-                                &mut services as &mut dyn SurfaceSolveContext<CacheObject>,
-                                [None, Some(CacheObject::Surface(face))],
-                            ))
-                        }
-                        _ => None,
-                    };
-                    srf_srf_intersection_with_context(
+            // With `fixes.fillet_nx1_tangent_side_edge_same_convexity` (WR-600's flag; the
+            // fork's tangency-labs/smlib@856b54e): at a tangent end
+            // (`make_nx1_corner_topology`) the fillet surface and the end face touch where
+            // the rail crosses the seam, and the end rib is built from that end outward
+            // (`tangent_end_rib`), never intersected into it.
+            let start_tangent = self.fillet_vertex(start_fv)?.is_tangent_end();
+            let end_tangent = self.fillet_vertex(end_fv)?.is_tangent_end();
+            let intersection = if k.fixes.fillet_nx1_tangent_side_edge_same_convexity
+                && (start_tangent || end_tangent)
+            {
+                if start_tangent && end_tangent {
+                    // an end rib between two tangent ends
+                    return Err(SolidError::sm_err(OP_SIDE));
+                }
+                let order = super::tangent_end_rib::section_contact_order(fs1)?;
+                match &surface {
+                    Some(surface) => super::tangent_end_rib::tangent_end_rib(
                         k,
-                        self,
-                        Some(start_fv),
-                        Some(end_fv),
-                        Some(&mut dir),
-                        None,
                         &fillet_surface1,
                         surface,
+                        order,
+                        if start_tangent { start_pnt } else { end_pnt },
+                        if start_tangent { end_pnt } else { start_pnt },
+                        !start_tangent,
                         approx_tol,
-                        ang_tol,
-                        false,
-                        None,
-                        face_context,
                     )
+                    .map(|rib| SrfSrfCurves {
+                        curve_3d: Some(Curve::from(rib.curve_3d)),
+                        uv_curve1: Some(Curve::from(rib.fillet_uv)),
+                        uv_curve2: Some(Curve::from(rib.end_uv)),
+                    }),
+                    // NER(pEnd)
+                    None => Err(SolidError::null_pointer(OP_SIDE)),
                 }
-                // NER(pSurf2)
-                None => Err(SolidError::null_pointer(OP_SIDE)),
+            } else {
+                match &surface {
+                    Some(surface) => {
+                        // the original face's own surface (`pFace->GetSurface()`): its
+                        // trimmed surface cache is the face's, made with its boundary
+                        let mut services;
+                        let face_context = match surface2_id {
+                            Some(ExecutiveErrorObject::TargetFaceSurface {
+                                face,
+                                extended: false,
+                            }) => {
+                                services = BrepFaceServices::new(target);
+                                Some((
+                                    &mut services as &mut dyn SurfaceSolveContext<CacheObject>,
+                                    [None, Some(CacheObject::Surface(face))],
+                                ))
+                            }
+                            _ => None,
+                        };
+                        srf_srf_intersection_with_context(
+                            k,
+                            self,
+                            Some(start_fv),
+                            Some(end_fv),
+                            Some(&mut dir),
+                            None,
+                            &fillet_surface1,
+                            surface,
+                            approx_tol,
+                            ang_tol,
+                            false,
+                            None,
+                            face_context,
+                        )
+                    }
+                    // NER(pSurf2)
+                    None => Err(SolidError::null_pointer(OP_SIDE)),
+                }
             };
             match intersection {
                 Err(err) if err.is_unported() => return Err(err),
@@ -1355,6 +1412,32 @@ impl FilletBrep {
             return Err(SolidError::sm_err(OP_EXT_EDGE));
         }
         let the_corner = corners.corner(corner)?;
+        // With `fixes.fillet_nx1_tangent_side_edge_same_convexity` (WR-600's flag; the
+        // fork's tangency-labs/smlib@856b54e): a tangent seam T, the edge whose faces meet
+        // tangentially, where a tangent end's rail crosses it
+        // (`make_nx1_corner_topology`). The cap edge from that end to the corner's vertex
+        // is a piece of T, on the edge or on its continuation past the vertex: the edge's
+        // own curve, continued as itself. Its faces' surfaces touch along T, so it is
+        // never their intersection.
+        if k.fixes.fillet_nx1_tangent_side_edge_same_convexity {
+            if let (Some(&seam_eu), Some(vertex)) = (
+                edge::edgeuses(target, orig_edge, None, None)?.first(),
+                the_corner.vertex,
+            ) {
+                // `EvaluateBinormal` may build a missing UV trim (a cached member upstream);
+                // the check runs on a scratch copy so the target stays as it is.
+                let mut scratch = target.clone();
+                if crate::blend::fillet_corner::topology::check_tangential_edgeuse_at_vertex(
+                    k,
+                    &mut scratch,
+                    seam_eu,
+                    vertex,
+                    crate::math::rad_to_deg(the_corner.tangency_tol_radians),
+                )? {
+                    return self.calc_edge_on_tangent_seam(k, e, the_corner, target, orig_edge);
+                }
+            }
+        }
         // Past a tangent side edge (`make_nx1_corner_topology`), the extended edge
         // bounds the end face and a face that is not the side face this edge runs in:
         // its extension is where that side face meets the end face's extension
@@ -1422,6 +1505,112 @@ impl FilletBrep {
             .ok_or_else(|| SolidError::null_pointer(OP_EXT_EDGE))?;
         // both UV curves are deleted
         set_edge_curve(self.brep_mut(), e, Some(curve))?;
+        Ok(())
+    }
+
+    /// `SmFilletEdge::CalcEdgeOnTangentSeam` (the fork's tangency-labs/smlib@856b54e, under
+    /// WR-600's `fillet_nx1_tangent_side_edge_same_convexity`): the curve of an
+    /// `SM_FE_ON_EXTEND_EDGE` fillet edge `e` on a tangent seam T, the cap edge from a
+    /// tangent end (where a rail crosses T) to the corner's vertex. It is T's own curve
+    /// (`orig_edge`'s) between the edge's two vertices, continued as itself
+    /// (`SM_CT_CINFINITY`, by twice the farther vertex's distance from T's nearer end)
+    /// where a vertex lies past T's ends.
+    ///
+    /// # Errors
+    ///
+    /// `SM_ERR_NULL_POINTER` without vertices or curve, or for a curve that is not an
+    /// `SmBSplineCurve`; `SM_ERR` (with the edge's status `SM_FE_END_PNT_DROP_FAILURE`)
+    /// when a vertex lies off T by more than the larger of T's tolerance and the
+    /// corner's approximation tolerance; those of the trims, extensions and drops.
+    fn calc_edge_on_tangent_seam(
+        &mut self,
+        k: &Kernel,
+        e: EdgeId,
+        corner: &FilletCorner,
+        target: &Brep,
+        orig_edge: EdgeId,
+    ) -> Result<()> {
+        const OP_SEAM: &str = "blend::fillet_geom::p5::FilletBrep::calc_edge_on_tangent_seam";
+        let (start_fv, end_fv) = self.edge_ends(e, OP_SEAM)?;
+        let seam_curve =
+            edge::curve(target, orig_edge)?.ok_or_else(|| SolidError::null_pointer(OP_SEAM))?;
+        // SM_CAST_PTR(SmBSplineCurve, pCopyCurve)
+        if !matches!(
+            seam_curve.kind(),
+            CurveKind::BSpline(_)
+                | CurveKind::Line(_)
+                | CurveKind::Ellipse(_)
+                | CurveKind::Hyperbola(_)
+                | CurveKind::Parabola(_)
+        ) {
+            return Err(SolidError::null_pointer(OP_SEAM));
+        }
+        let mut seam = seam_curve.clone();
+
+        // Continue T at both ends by as far as the farther vertex lies from the edge's ends.
+        let ivl = edge::interval(target, orig_edge)?;
+        let ends = [
+            seam.evaluate_point(k, ivl.min())?,
+            seam.evaluate_point(k, ivl.max())?,
+        ];
+        let points = [self.vertex_point(start_fv)?, self.vertex_point(end_fv)?];
+        let mut reach = 0.0;
+        for p in points {
+            reach = smax(reach, smin(p.distance(ends[0]), p.distance(ends[1])));
+        }
+        let curve = if reach > EFF_ZERO {
+            let mut trim = ivl;
+            seam.trim(k, &mut trim, TrimMode::Notify)?;
+            let mut extended = seam;
+            for end in [
+                crate::nurbs::crv_adv::p1::CurveEnd::Start,
+                crate::nurbs::crv_adv::p1::CurveEnd::End,
+            ] {
+                let base =
+                    b_spline_part(&extended).ok_or_else(|| SolidError::null_pointer(OP_SEAM))?;
+                let longer = base
+                    .create_extended_curve_by_distance(
+                        2.0 * reach,
+                        end,
+                        crate::geom::geom_utility::p2::ContinuityType::CInfinity,
+                    )?
+                    .ok_or_else(|| SolidError::null_pointer(OP_SEAM))?;
+                extended = Curve::from(longer);
+            }
+            extended
+        } else {
+            seam
+        };
+
+        // T's points at the two vertices: both lie on it, to the fillet's tolerance.
+        let tol = smax(
+            edge::tolerance(target, orig_edge)?,
+            corner.this_approx_tol_3d(),
+        );
+        let curve_ivl = curve.natural_interval();
+        let mut params = [0.0_f64; 2];
+        for (param, p) in params.iter_mut().zip(points) {
+            let drop =
+                curve.drop_point(k, &curve_ivl, p, None, tol, None, SolverOperation::Minimize)?;
+            if !drop.success || drop.distance > tol {
+                self.fillet_edge_mut(e)?
+                    .set_status(FilStatus::EndPntDropFailure);
+                return Err(SolidError::sm_err(OP_SEAM));
+            }
+            *param = drop.parameter;
+        }
+
+        let mut new_curve = curve;
+        let [p0, p1] = params;
+        let mut trim = Extent1d::from_min_max(smin(p0, p1), smax(p0, p1));
+        new_curve.trim(k, &mut trim, TrimMode::Notify)?;
+        if p0 > p1 {
+            // ReverseParameterization(sTrimIvl, sTrimIvl): the interval stays the same
+            let _ = new_curve.reverse_parameterization(k, &trim)?;
+        }
+
+        // side effect: delete current this->UVTrimCurves
+        set_edge_curve(self.brep_mut(), e, Some(new_curve))?;
         Ok(())
     }
 

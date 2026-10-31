@@ -845,6 +845,10 @@ pub struct FilletVertex {
     pub status: FilStatus,
     /// `m_cpCorner`: the corner this vertex belongs to.
     pub corner: Option<FilletCornerId>,
+    /// `m_bTangentEnd` (the fork's tangency-labs/smlib@856b54e, under WR-600's
+    /// `fillet_nx1_tangent_side_edge_same_convexity`): a rail's tangent end, where it
+    /// crosses a tangent seam into the end face. Always `false` without the fix.
+    pub tangent_end: bool,
 }
 
 impl FilletVertex {
@@ -859,7 +863,19 @@ impl FilletVertex {
             mates: [None, None],
             status: FilStatus::Unprocessed,
             corner,
+            tangent_end: false,
         }
+    }
+
+    /// `IsTangentEnd` (the fork's tangency-labs/smlib@856b54e).
+    #[must_use]
+    pub const fn is_tangent_end(&self) -> bool {
+        self.tangent_end
+    }
+
+    /// `SetTangentEnd` (the fork's tangency-labs/smlib@856b54e).
+    pub fn set_tangent_end(&mut self, tangent_end: bool) {
+        self.tangent_end = tangent_end;
     }
 
     /// `CopyPointClass`.
