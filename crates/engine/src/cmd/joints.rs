@@ -697,11 +697,47 @@ fn check_sides(a: &JointOrigin, b: &JointOrigin, cmd: &str) -> Result<()> {
     Ok(())
 }
 
+/// A path already joins the two sides, including paths through grounded occurrences.
+fn closes_loop(s: &Session, j: &Joint) -> bool {
+    let mut at: BTreeMap<u64, Vec<u64>> = BTreeMap::new();
+    for joint in s.doc.assembly.joints.iter().filter(|j| !j.suppressed).take(joints::MAX_JOINTS) {
+        at.entry(joint.a.occurrence).or_default().push(joint.b.occurrence);
+        at.entry(joint.b.occurrence).or_default().push(joint.a.occurrence);
+    }
+    // The solver fixes the root and every grounded occurrence in the same world frame.
+    for o in s.doc.occurrences.iter().filter(|o| o.grounded) {
+        at.entry(0).or_default().push(o.id);
+        at.entry(o.id).or_default().push(0);
+    }
+    let mut seen = BTreeSet::from([j.a.occurrence]);
+    let mut pending = vec![j.a.occurrence];
+    while let Some(occ) = pending.pop() {
+        if occ == j.b.occurrence {
+            return true;
+        }
+        for other in at.get(&occ).into_iter().flatten() {
+            if seen.insert(*other) {
+                pending.push(*other);
+            }
+        }
+    }
+    false
+}
+
 fn add_joint(s: &mut Session, mut j: Joint, p: &Value) -> Result<Value> {
     if s.doc.assembly.joints.len() >= 10_000 {
         return Err(EngineError::Other("too many joints".into()));
     }
     check_sides(&j.a, &j.b, "joint.create")?;
+    // Relations and loop-closing typed joints start where their parts are. A typed joint in
+    // an open chain keeps its usual initial values; explicitly supplied values also keep theirs.
+    if p.get("values").is_none()
+        && p.get("value").is_none()
+        && (j.kind.is_relation() || closes_loop(s, &j))
+        && let Some(q) = joints::relation_values(&s.doc, &s.model.state(), &j)
+    {
+        j.values = q;
+    }
     // It starts at its values inside its limits. A value moved to a limit moves the part as it
     // is joined, which the answer says.
     let mut q = j.values.clone();
@@ -798,13 +834,6 @@ fn joint(s: &mut Session, p: &Value) -> Result<Value> {
         suppressed: false,
         exprs: JointExprs { offset: typed(p.get("offset")), angle: typed(p.get("angle")), values: value_exprs(p) },
     };
-    // A relation given no values starts from where its parts are: B moves no further than it must.
-    if p.get("values").is_none()
-        && p.get("value").is_none()
-        && let Some(q) = joints::relation_values(&s.doc, &s.model.state(), &j)
-    {
-        j.values = q;
-    }
     // No angle given: B keeps its turn about the joint's axis where a half turn would otherwise
     // come only from how its origin's x was chosen. (An angle relation's angle is its tilt.)
     if angle.is_none() && !j.kind.is_relation() {
@@ -1515,7 +1544,7 @@ fn edit(s: &mut Session, p: &Value) -> Result<Value> {
     // A relation whose type, offset, tilt or flip changes starts again from where its parts are.
     let reseat = kind.is_some() || offset.is_some() || angle.is_some() || p.get("flip").is_some() || sides;
     if reseat {
-        let edited = s.doc.assembly.joints.iter().find(|j| j.id == id).cloned();
+        let edited = s.doc.assembly.joints.iter().find(|j| j.id == id).filter(|j| j.kind.is_relation()).cloned();
         if let Some(q) = edited.and_then(|j| joints::relation_values(&s.doc, &s.model.state(), &j))
             && let Some(j) = s.doc_mut().assembly.joints.iter_mut().find(|j| j.id == id)
         {
