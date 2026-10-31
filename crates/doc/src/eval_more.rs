@@ -1314,7 +1314,10 @@ fn sheet_prism_cut(
     // The cap certificate still qualifies their current physical slab above.
     let selected_edges =
         regions.iter().flat_map(|r| std::iter::once(&r.outer).chain(&r.holes)).map(|l| l.segs.len()).fold(0usize, usize::saturating_add);
-    work.charge(faces.saturating_mul(selected_edges).saturating_mul(16))?;
+    // What reads the cut's regions whole: each tool's footprint looked for among them, and each
+    // region's outline against the sketch's text. (Charged per face of the tools, a panel of
+    // hundreds of logos was refused before anything was cut: its one tool has a face per edge.)
+    work.charge(selected_edges.saturating_mul(tools.len().saturating_add(text.len().saturating_mul(3))).saturating_mul(16))?;
     let nominal = constructor.filter(|c| c.plane == *plane).and_then(|c| {
         let placed_basis = Plane::new(c.plane.origin, c.plane.x, c.plane.y)?;
         (current_footprints.len() == tools.len()

@@ -172,7 +172,12 @@ pub(crate) struct NearHoles<'a> {
 /// A loop's bounding box, a little larger than its chords so arcs stay inside.
 fn loop_box(lp: &Loop2) -> Result<Aabb2> {
     let b = flat_polyline(lp)?.bounds();
-    Ok(b.inflated(1e-3 + 1e-9 * (b.min.x.abs() + b.min.y.abs() + b.max.x.abs() + b.max.y.abs())))
+    Ok(b.inflated(box_slack(&b)))
+}
+
+/// How much a box is grown so a curve's chords and rounding stay inside it.
+fn box_slack(b: &Aabb2) -> f64 {
+    1e-3 + 1e-9 * (b.min.x.abs() + b.min.y.abs() + b.max.x.abs() + b.max.y.abs())
 }
 
 impl<'a> NearHoles<'a> {
@@ -201,10 +206,149 @@ pub(crate) fn material_boolean(a: &[Region2], b: &[Region2], op: kernel::BoolOp,
     Ok(regions)
 }
 
-// Merge in balanced rounds so hundreds of disjoint holes or adjoining panels do not
-// repeatedly arrange a growing accumulated boundary against just one small region.
+/// Every pair of `boxes` that meet, found in one sweep along x; each pair compared is charged.
+fn box_pairs(boxes: &[Aabb2], work: &mut FlatWork, mut pair: impl FnMut(usize, usize)) -> Result<()> {
+    let mut order: Vec<usize> = (0..boxes.len()).collect();
+    order.sort_by(|&i, &j| match (boxes.get(i), boxes.get(j)) {
+        (Some(a), Some(b)) => a.min.x.total_cmp(&b.min.x),
+        _ => std::cmp::Ordering::Equal,
+    });
+    let mut active: Vec<usize> = Vec::new();
+    for k in order {
+        let Some(bk) = boxes.get(k) else { continue };
+        active.retain(|&j| boxes.get(j).is_some_and(|bj| bj.max.x >= bk.min.x));
+        work.charge(active.len().saturating_add(1))?;
+        for &j in &active {
+            if boxes.get(j).is_some_and(|bj| bj.meets(bk)) {
+                pair(j, k);
+            }
+        }
+        active.push(k);
+    }
+    Ok(())
+}
+
+/// The cut-outs whose boxes meet no other cut-out's box and no box of an edge of `regions`, and
+/// have no islands, apart from the rest (each list in the order given). Such a cut-out lies wholly
+/// inside one region's material, wholly in one of its holes or wholly outside: cutting it changes
+/// nothing else.
+fn free_cuts(regions: &[Region2], cuts: Vec<Region2>, work: &mut FlatWork) -> Result<(Vec<Region2>, Vec<Region2>)> {
+    let mut boxes: Vec<Aabb2> = Vec::new();
+    for c in &cuts {
+        boxes.push(loop_box(&c.outer)?);
+    }
+    let n = cuts.len();
+    for r in regions {
+        for lp in std::iter::once(&r.outer).chain(&r.holes) {
+            for e in &lp.segs {
+                let b: Aabb2 = e.polyline(1e-3).into_iter().collect();
+                boxes.push(b.inflated(box_slack(&b)));
+            }
+        }
+    }
+    // A loop the planar booleans would refuse (open, not finite, far out, with a piece of no
+    // length) goes to them, to be refused there.
+    let plain = |lp: &Loop2| {
+        let ok = |p: Vec2| p.x.is_finite() && p.y.is_finite() && p.x.abs() < 1e9 && p.y.abs() < 1e9;
+        !lp.segs.is_empty()
+            && lp.segs.iter().all(|e| ok(e.start()) && ok(e.end()) && e.length() > 1e-9)
+            && lp.segs.iter().zip(lp.segs.iter().cycle().skip(1)).all(|(e, f)| e.end().dist(f.start()) <= 1e-6)
+    };
+    let mut touched: Vec<bool> = cuts.iter().map(|c| !c.holes.is_empty() || !plain(&c.outer)).collect();
+    box_pairs(&boxes, work, |i, j| {
+        if i < n || j < n {
+            for c in [i, j] {
+                if let Some(t) = touched.get_mut(c) {
+                    *t = true;
+                }
+            }
+        }
+    })?;
+    let (mut free, mut rest) = (Vec::new(), Vec::new());
+    for (c, t) in cuts.into_iter().zip(touched) {
+        if t { rest.push(c) } else { free.push(c) }
+    }
+    Ok((free, rest))
+}
+
+/// Each free cut-out (`free_cuts`) as a hole of the region whose material holds it; one in a hole
+/// of a region or outside every region cuts nothing.
+fn place_free_cuts(regions: &mut [Region2], free: Vec<Region2>) -> Result<()> {
+    if free.is_empty() {
+        return Ok(());
+    }
+    let rings: Vec<(Aabb2, Ring<Vec2>, Vec<Ring<Vec2>>)> = regions
+        .iter()
+        .map(|r| Ok((loop_box(&r.outer)?, flat_polyline(&r.outer)?, r.holes.iter().map(flat_polyline).collect::<Result<_>>()?)))
+        .collect::<Result<_>>()?;
+    for c in free {
+        let Some(at) = c.outer.segs.first().map(Seg2::start) else { continue };
+        let home = rings.iter().position(|(b, outer, holes)| b.contains(at) && outer.contains(at) && !holes.iter().any(|h| h.contains(at)));
+        if let Some(r) = home.and_then(|i| regions.get_mut(i)) {
+            if r.holes.len() >= MAX_FLAT_PIECES {
+                return Err(flat_budget_error());
+            }
+            r.holes.push(c.outer.ccw().reversed());
+        }
+    }
+    Ok(())
+}
+
 pub(crate) fn material_union(regions: Vec<Region2>, work: &mut FlatWork) -> Result<Vec<Region2>> {
     region_complexity(&regions)?;
+    // Only regions whose boxes meet, directly or through others, are merged: hundreds of apart
+    // cut-outs (a panel of logos) would otherwise be arranged against each other, at a cost that
+    // grows with the square of all their edges.
+    let boxes = regions.iter().map(|r| loop_box(&r.outer)).collect::<Result<Vec<_>>>()?;
+    let mut root: Vec<usize> = (0..regions.len()).collect();
+    fn find(root: &mut [usize], mut i: usize) -> usize {
+        while let Some(&r) = root.get(i) {
+            if r == i {
+                break;
+            }
+            let up = root.get(r).copied().unwrap_or(r);
+            if let Some(slot) = root.get_mut(i) {
+                *slot = up;
+            }
+            i = up;
+        }
+        i
+    }
+    box_pairs(&boxes, work, |i, j| {
+        let (a, b) = (find(&mut root, i), find(&mut root, j));
+        if let Some(slot) = root.get_mut(a.max(b)) {
+            *slot = a.min(b);
+        }
+    })?;
+    let mut clusters: Vec<Vec<Region2>> = Vec::new();
+    let mut slot_of: Vec<Option<usize>> = vec![None; regions.len()];
+    for (i, r) in regions.into_iter().enumerate() {
+        let top = find(&mut root, i);
+        let k = match slot_of.get(top).copied().flatten() {
+            Some(k) => k,
+            None => {
+                clusters.push(Vec::new());
+                let k = clusters.len() - 1;
+                if let Some(s) = slot_of.get_mut(top) {
+                    *s = Some(k);
+                }
+                k
+            }
+        };
+        if let Some(c) = clusters.get_mut(k) {
+            c.push(r);
+        }
+    }
+    let mut out = Vec::new();
+    for cluster in clusters {
+        out.extend(union_all(cluster, work)?);
+    }
+    Ok(out)
+}
+
+// Merge in balanced rounds so hundreds of disjoint holes or adjoining panels do not
+// repeatedly arrange a growing accumulated boundary against just one small region.
+fn union_all(regions: Vec<Region2>, work: &mut FlatWork) -> Result<Vec<Region2>> {
     let mut groups: Vec<Vec<Region2>> = regions.into_iter().map(|r| vec![r]).collect();
     while groups.len() > 1 {
         let mut next = Vec::new();
@@ -1359,7 +1503,10 @@ impl SheetBody {
             // budget for all of them once per piece.
             let panel_box = loop_box(&panel.outer)?;
             let near: Vec<Region2> = cuts.iter().zip(&cut_boxes).filter(|(_, b)| b.meets(&panel_box)).map(|(c, _)| c.clone()).collect();
-            let material = if near.is_empty() { vec![panel] } else { material_boolean(&[panel], &near, kernel::BoolOp::Cut, work)? };
+            let (free, near) = free_cuts(std::slice::from_ref(&panel), near, work)?;
+            let mut material = if near.is_empty() { vec![panel] } else { material_boolean(&[panel], &near, kernel::BoolOp::Cut, work)? };
+            place_free_cuts(&mut material, free)?;
+            region_complexity(&material)?;
             for region in material {
                 points = points.saturating_add(region_complexity(std::slice::from_ref(&region))?.1);
                 if points > MAX_FLAT_POINTS || out.len() >= MAX_FLAT_PIECES {
@@ -1389,8 +1536,35 @@ impl SheetBody {
         if edges > MAX_FLAT_POINTS || cells.len() > MAX_FLAT_PIECES {
             return Err(flat_budget_error());
         }
-        work.charge(edges.saturating_mul(edges).saturating_mul(4))?;
+        work.charge(edges)?;
         let corners: Vec<Vec2> = cells.iter().flat_map(|c| c.outer.iter().chain(c.holes.iter().flatten()).map(Seg2::start)).collect();
+        // The corners by square of a grid about one corner to a square, so each straight edge
+        // looks only at the corners in the squares it passes (a panel of hundreds of logos has
+        // tens of thousands of corners, and every edge once looked at all of them).
+        let bounds: Aabb2 = corners.iter().copied().collect();
+        let span = |lo: f64, hi: f64| (hi - lo).max(1e-3);
+        let side = (span(bounds.min.x, bounds.max.x) * span(bounds.min.y, bounds.max.y) / corners.len().max(1) as f64).sqrt().max(1e-3);
+        let square = |p: Vec2| (((p.x - bounds.min.x) / side).floor() as i64, ((p.y - bounds.min.y) / side).floor() as i64);
+        let mut grid: std::collections::HashMap<(i64, i64), Vec<usize>> = std::collections::HashMap::new();
+        for (i, p) in corners.iter().enumerate() {
+            grid.entry(square(*p)).or_default().push(i);
+        }
+        let mut nearby_of = |a: Vec2, b: Vec2| -> Result<Vec<Vec2>> {
+            let steps = ((b - a).len() / side).ceil().min(MAX_FLAT_POINTS as f64) as usize + 1;
+            work.charge(steps.saturating_mul(9))?;
+            let mut v = Vec::with_capacity(steps * 9);
+            for s in 0..=steps {
+                let (x, y) = square(a + (b - a) * (s as f64 / steps as f64));
+                for (dx, dy) in [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 0), (0, 1), (1, -1), (1, 0), (1, 1)] {
+                    v.push((x.saturating_add(dx), y.saturating_add(dy)));
+                }
+            }
+            v.sort_unstable();
+            v.dedup();
+            let near: Vec<Vec2> = v.iter().flat_map(|sq| grid.get(sq).into_iter().flatten()).filter_map(|&i| corners.get(i).copied()).collect();
+            work.charge(near.len())?;
+            Ok(near)
+        };
         let mut split_edges = 0usize;
         let mut split_loop = |segs: &[Seg2]| -> Result<Vec<Seg2>> {
             let mut v = Vec::new();
@@ -1410,7 +1584,7 @@ impl SheetBody {
                 // short edge beside a bend's end (the side of a ledge a little taller than the
                 // setback) used to be cut where the bend's corner lies, under a nanometre from
                 // its own.
-                let mut ts: Vec<f64> = corners
+                let mut ts: Vec<f64> = nearby_of(a, b)?
                     .iter()
                     .filter_map(|p| {
                         let t = (*p - a).dot(d) / l2.max(1e-30);
@@ -1443,23 +1617,35 @@ impl SheetBody {
             let holes = c.holes.iter().map(|h| split_loop(h)).collect::<Result<_>>()?;
             split_cells.push(Cell { piece: c.piece, outer, holes });
         }
-        // Reserve the complete adjacency scan before visiting any wall.
-        work.charge(split_edges.saturating_mul(split_edges).saturating_mul(2))?;
         let cells = split_cells;
+        work.charge(split_edges)?;
         let near = |p: Vec2, q: Vec2| p.dist(q) < 1e-6;
+        // The edges by where they start, on squares four times the weld distance: an edge's
+        // partner starts in the square its end lies in or a neighbouring one.
+        let key = |p: Vec2| ((p.x / 4e-6).floor() as i64, (p.y / 4e-6).floor() as i64);
+        let mut starts: std::collections::HashMap<(i64, i64), Vec<(usize, &Seg2)>> = std::collections::HashMap::new();
+        for (cj, c) in cells.iter().enumerate() {
+            for g in c.outer.iter().chain(c.holes.iter().flatten()) {
+                starts.entry(key(g.start())).or_default().push((cj, g));
+            }
+        }
+        // Each edge looks through nine squares of starts: many edges starting at one point cost
+        // the square of their number.
+        work.charge(starts.values().fold(0usize, |n, v| n.saturating_add(v.len().saturating_mul(v.len()).saturating_mul(9))))?;
         // Shared with a neighbour: the same flat edge the other way, landing in the same place
         // (flat neighbours across a corner of two bends do not).
         let shared = |ci: usize, e: &Seg2| {
             let Some(me) = cells.get(ci) else { return false };
             let here = self.map3(me.piece, e.point_at(0.5), z0);
-            cells.iter().enumerate().any(|(cj, c)| {
-                cj != ci
-                    && c.outer.iter().chain(c.holes.iter().flatten()).any(|g| {
-                        near(g.start(), e.end())
-                            && near(g.end(), e.start())
-                            && matches!((g, e), (Seg2::Line { .. }, Seg2::Line { .. }))
-                            && self.map3(c.piece, g.point_at(0.5), z0).dist(here) < 1e-6
-                    })
+            let (x, y) = key(e.end());
+            [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 0), (0, 1), (1, -1), (1, 0), (1, 1)].iter().any(|(dx, dy)| {
+                starts.get(&(x.saturating_add(*dx), y.saturating_add(*dy))).into_iter().flatten().any(|&(cj, g)| {
+                    cj != ci
+                        && near(g.start(), e.end())
+                        && near(g.end(), e.start())
+                        && matches!((g, e), (Seg2::Line { .. }, Seg2::Line { .. }))
+                        && cells.get(cj).is_some_and(|c| self.map3(c.piece, g.point_at(0.5), z0).dist(here) < 1e-6)
+                })
             })
         };
         let mut faces = Vec::new();
@@ -1962,8 +2148,14 @@ impl SheetBody {
             cuts.push(region);
         }
         cuts.extend(self.through_pocket_regions(&mut work)?);
+        // A cut-out that meets nothing (no other cut-out, no edge of the material) is a hole of
+        // the material it lies in as it is: only the others go through the booleans, whose work
+        // grows with the square of their edges (a panel of hundreds of logos was refused).
+        let (free, cuts) = free_cuts(&regions, cuts, &mut work)?;
         let cuts = material_union(cuts, &mut work)?;
-        let regions = if cuts.is_empty() { regions } else { material_boolean(&regions, &cuts, kernel::BoolOp::Cut, &mut work)? };
+        let mut regions = if cuts.is_empty() { regions } else { material_boolean(&regions, &cuts, kernel::BoolOp::Cut, &mut work)? };
+        place_free_cuts(&mut regions, free)?;
+        region_complexity(&regions)?;
         Ok(regions)
     }
 
@@ -5092,6 +5284,84 @@ mod tests {
         two.add_flange(Vec3::new(100.0, 100.0, 2.5), 40.0, std::f64::consts::FRAC_PI_2, 2.5, "outside", false).unwrap();
         let b = two.bends();
         assert!(b.len() == 2 && b[0].index == 1 && (b[0].length - 100.0).abs() < 1e-9 && b[1].index == 2 && b[1].length == 200.0, "{b:?}");
+    }
+
+    #[test]
+    fn cut_outs_apart_skip_the_booleans() {
+        let sq = |x: f64, y: f64, a: f64| rect(Vec2::new(x, y), Vec2::new(x + a, y), Vec2::new(x + a, y + a), Vec2::new(x, y + a));
+        // Free: wholly in the material, wholly in its hole, wholly outside. Not free: across the
+        // outline, across the hole's edge, two that overlap, and one with an island.
+        let mut material = sq(0.0, 0.0, 100.0);
+        material.holes.push(sq(40.0, 40.0, 20.0).outer.reversed());
+        let mut ring = sq(70.0, 10.0, 10.0);
+        ring.holes.push(sq(73.0, 13.0, 4.0).outer.reversed());
+        let cuts = vec![
+            sq(10.0, 10.0, 5.0),
+            sq(45.0, 45.0, 5.0),
+            sq(200.0, 0.0, 5.0),
+            sq(95.0, 50.0, 10.0),
+            sq(55.0, 30.0, 15.0),
+            sq(10.0, 70.0, 10.0),
+            sq(15.0, 75.0, 10.0),
+            ring,
+        ];
+        let mut work = FlatWork::new();
+        let (free, rest) = free_cuts(std::slice::from_ref(&material), cuts.clone(), &mut work).unwrap();
+        assert_eq!(free, cuts[..3].to_vec());
+        assert_eq!(rest, cuts[3..].to_vec());
+        let mut regions = vec![material];
+        place_free_cuts(&mut regions, free).unwrap();
+        // Only the one in the material is a new hole of it.
+        assert_eq!(regions[0].holes.len(), 2);
+        assert!((regions[0].area() - (100.0 * 100.0 - 400.0 - 25.0)).abs() < 1e-9);
+
+        // Two thousand apart cut-outs are merged for a sweep's work, not with each other.
+        let many: Vec<Region2> = (0..2000).map(|i| sq((i % 50) as f64 * 10.0, (i / 50) as f64 * 10.0, 5.0)).collect();
+        let mut work = FlatWork::new();
+        let merged = material_union(many.clone(), &mut work).unwrap();
+        assert_eq!(merged.len(), 2000);
+        assert!(MAX_FLAT_WORK - work.0 < 1_000_000, "{}", MAX_FLAT_WORK - work.0);
+        let mut joined = many[..2].to_vec();
+        joined.push(sq(3.0, 3.0, 10.0));
+        assert_eq!(material_union(joined, &mut FlatWork::new()).unwrap().len(), 1);
+
+        // A loop the booleans would refuse (open by a millimetre) is left to them.
+        let (a, b, c) = (Vec2::new(10.0, 10.0), Vec2::new(20.0, 10.0), Vec2::new(20.0, 20.0));
+        let open = Region2 {
+            outer: Loop2 { segs: vec![Seg2::Line { a, b }, Seg2::Line { a: b, b: c }, Seg2::Line { a: c, b: Vec2::new(10.0, 19.0) }] },
+            holes: vec![],
+        };
+        let (free, rest) = free_cuts(&[sq(0.0, 0.0, 100.0)], vec![open.clone()], &mut FlatWork::new()).unwrap();
+        assert!(free.is_empty() && rest == vec![open]);
+    }
+
+    #[test]
+    fn a_sheet_of_thousands_of_cut_outs_stays_within_its_budget() {
+        // 1600 squares on a 1000 × 500 plate with a flange: 6400 cut-out edges. Merging them
+        // with each other, cutting them from the base in one boolean and matching each wall's
+        // edges against every corner was refused for its work.
+        let mut s = plate(1000.0, 500.0);
+        s.add_flange(Vec3::new(500.0, 0.0, 2.5), 20.0, std::f64::consts::FRAC_PI_2, 2.5, "inside", false).unwrap();
+        let a = 4.0;
+        for i in 0..1600 {
+            let (x, y) = (20.0 + (i % 80) as f64 * 12.0, 20.0 + (i / 80) as f64 * 22.0);
+            s.holes.push(rect(Vec2::new(x, y), Vec2::new(x + a, y), Vec2::new(x + a, y + a), Vec2::new(x, y + a)));
+        }
+        let flat = s.flat_material().unwrap();
+        let unholed = {
+            let mut c = s.clone();
+            c.holes.clear();
+            c.flat_material().unwrap()
+        };
+        let area = |r: &[Region2]| r.iter().map(Region2::area).sum::<f64>();
+        assert!((area(&unholed) - area(&flat) - 1600.0 * a * a).abs() < 1e-6, "{} {}", area(&unholed), area(&flat));
+        let mut work = FlatWork::new();
+        let cells = s.cells_with_work(&mut work).unwrap();
+        let holes: usize = cells.iter().map(|c| c.holes.len()).sum();
+        assert_eq!(holes, 1600);
+        let faces = s.faces(&cells, 0.0, s.t, &mut work).unwrap();
+        // Top and bottom of each cell, a wall per cut-out edge and the outline's walls.
+        assert!(faces.len() > 2 * cells.len() + 6400, "{}", faces.len());
     }
 
     #[test]
