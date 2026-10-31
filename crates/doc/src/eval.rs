@@ -73,9 +73,61 @@ pub struct ModelBody {
     /// [`Body::is_surface`] of `body` (with the body it was measured on), worked out once and
     /// shared by clones.
     surface: Arc<OnceLock<(Body, bool)>>,
+    /// What cutting it by tools of a recipe gave (see [`ModelBody::cut`]), the latest first;
+    /// shared like the mesh, so every unchanged copy of it in later models knows them too.
+    cuts: Arc<std::sync::Mutex<Vec<Cut>>>,
 }
 
+/// A cut remembered by a body: the recipe of the tools and the body's name (its faces are
+/// named after it), what was left, and the boolean events it recorded.
+#[derive(Clone, Debug)]
+struct Cut {
+    key: u64,
+    left: Option<Traced>,
+    events: kernel::BooleanDiagnostics,
+}
+
+/// Cuts a body remembers.
+const CUTS_KEPT: usize = 2;
+
 impl ModelBody {
+    /// This body, an operand of the feature being evaluated, cut (`bop`) by `tools` in turn;
+    /// `None` when nothing is left. A body of the model before the feature, cut by tools that all
+    /// have a recipe, remembers what that gave (with the boolean events it recorded): a later
+    /// evaluation cutting it the same way takes that instead of cutting again.
+    fn cut(&self, tools: &[Traced], bop: BoolOp) -> Result<Option<Traced>> {
+        let key = recipe_of(tools).filter(|_| matches!(self.made, crate::lineage::Made::Before)).map(|recipe| {
+            let mut h = std::collections::hash_map::DefaultHasher::new();
+            (recipe, bop == BoolOp::Cut, &self.name).hash(&mut h);
+            h.finish()
+        });
+        let known = key.and_then(|k| self.cuts.lock().ok().and_then(|cuts| cuts.iter().find(|c| c.key == k).cloned()));
+        if let Some(c) = known {
+            kernel::merge_boolean_diagnostics(c.events);
+            return Ok(c.left);
+        }
+        let (left, events) = kernel::capture_boolean_diagnostics(|| -> Result<Option<Traced>> {
+            let mut acc = Some(self.traced());
+            for t in tools {
+                acc = match acc {
+                    Some(a) => kernel::boolean(&a.body, &t.body, bop)?.map(|r| Traced::step(r, &[&a, t])),
+                    None => None,
+                };
+            }
+            Ok(acc)
+        });
+        kernel::merge_boolean_diagnostics(events.clone());
+        let left = left?;
+        if let Some(key) = key
+            && let Ok(mut cuts) = self.cuts.lock()
+        {
+            cuts.retain(|c| c.key != key);
+            cuts.insert(0, Cut { key, left: left.clone(), events });
+            cuts.truncate(CUTS_KEPT);
+        }
+        Ok(left)
+    }
+
     pub fn new(name: String, body: Body, feature: u64) -> Self {
         ModelBody {
             name,
@@ -99,6 +151,7 @@ impl ModelBody {
             outline: Arc::new(OnceLock::new()),
             measured: Arc::new(OnceLock::new()),
             surface: Arc::new(OnceLock::new()),
+            cuts: Default::default(),
         }
     }
 
@@ -900,7 +953,7 @@ impl ModelState {
     }
 
     /// A digest of everything later features can read: bodies (by content identity), sketches,
-    /// the body counter, threads and sheet bodies.
+    /// the body counter, threads, sheet bodies and construction geometry.
     fn digest(&self) -> u64 {
         let mut h = std::collections::hash_map::DefaultHasher::new();
         for b in &self.bodies {
@@ -942,6 +995,8 @@ impl ModelState {
         }
         serde_json::to_string(&self.threads).unwrap_or_default().hash(&mut h);
         serde_json::to_string(&self.sheets).unwrap_or_default().hash(&mut h);
+        // A result restored whole brings its construction geometry back with it (#6183).
+        serde_json::to_string(&self.construct).unwrap_or_default().hash(&mut h);
         h.finish()
     }
 
@@ -1021,88 +1076,66 @@ impl ModelState {
 
 /// Evaluation results by cache key, shared by a model and its copies (previews, scratch
 /// sessions), so a result computed once is reused wherever the same inputs come back.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct EvalCache {
-    map: std::collections::HashMap<u64, CachedEval>,
-    order: std::collections::VecDeque<u64>,
-    /// What the stored results cost together.
-    bytes: usize,
-    /// The byte budget (0: [`CACHE_BYTES`]).
-    pub(crate) budget: usize,
+    /// The model after a feature, by the whole model it started from ([`EvalKey::whole`]).
+    states: Store<CachedEval<Arc<ModelState>>>,
+    /// What a feature changed, by what it read ([`EvalKey::reads`]): made again on the model as
+    /// it is now.
+    changes: Store<CachedEval<Change>>,
     pub hits: usize,
 }
 
+impl EvalCache {
+    /// Sets the model store's byte budget (0: [`CACHE_BYTES`]); for tests.
+    #[cfg(test)]
+    pub(crate) fn set_budget(&mut self, budget: usize) {
+        self.states.budget = if budget == 0 { CACHE_BYTES } else { budget };
+    }
+}
+
+impl Default for EvalCache {
+    fn default() -> Self {
+        EvalCache { states: Store::new(CACHE_BYTES), changes: Store::new(CHANGE_BYTES), hits: 0 }
+    }
+}
+
+impl EvalCache {
+    /// A cache that keeps `bytes` of models (always at least the last one): a small budget
+    /// stands in for a design whose states are large.
+    pub fn with_budget(bytes: usize) -> Self {
+        let mut c = EvalCache::default();
+        c.states.budget = bytes;
+        c
+    }
+
+    /// Models stored.
+    pub fn len(&self) -> usize {
+        self.states.map.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.states.map.is_empty()
+    }
+}
+
 #[derive(Clone, Debug)]
-struct CachedEval {
+struct CachedEval<S> {
     error: Option<String>,
     warning: Option<String>,
     boolean_diagnostics: kernel::BooleanDiagnostics,
     ms: f64,
-    state: Arc<ModelState>,
-    /// What the state costs, worked out once when it was stored (see
-    /// [`ModelState::retained_bytes`]).
-    bytes: usize,
-}
-
-/// Results kept (oldest dropped first).
-const CACHE_ENTRIES: usize = 4096;
-
-/// Bytes of results kept (oldest dropped first). A cached result is as big as the model it
-/// holds, so bounding the cache by entry count alone let a long editing session keep every
-/// superseded state: the entries nothing else refers to any more are exactly the ones a byte
-/// budget drops.
-const CACHE_BYTES: usize = 64 << 20;
-
-impl EvalCache {
-    /// A cache that keeps `bytes` of results (always at least the last one): a small budget
-    /// stands in for a design whose states are large.
-    pub fn with_budget(bytes: usize) -> Self {
-        EvalCache { budget: bytes, ..EvalCache::default() }
-    }
-
-    /// Results stored.
-    pub fn len(&self) -> usize {
-        self.map.len()
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.map.is_empty()
-    }
-
-    fn get(&mut self, key: u64) -> Option<CachedEval> {
-        let r = self.map.get(&key).cloned();
-        if r.is_some() {
-            self.hits += 1;
-        }
-        r
-    }
-    fn put(&mut self, key: u64, e: CachedEval) {
-        let bytes = e.bytes;
-        match self.map.insert(key, e) {
-            Some(old) => self.bytes = self.bytes.saturating_sub(old.bytes),
-            None => self.order.push_back(key),
-        }
-        self.bytes = self.bytes.saturating_add(bytes);
-        // One result is always kept, so a single state larger than the budget cannot empty the
-        // cache and force a full recompute on every undo.
-        let budget = if self.budget == 0 { CACHE_BYTES } else { self.budget };
-        while self.order.len() > CACHE_ENTRIES || (self.bytes > budget && self.order.len() > 1) {
-            if let Some(k) = self.order.pop_front()
-                && let Some(old) = self.map.remove(&k)
-            {
-                self.bytes = self.bytes.saturating_sub(old.bytes);
-            }
-        }
-    }
+    state: S,
 }
 
 /// The results an evaluation ahead on a copy of a model computed or took from the cache, kept for
 /// the run that follows on the model itself (#1989). The evaluation cache is bounded by bytes and
 /// charges every entry its whole model, so on a design with large bodies it holds only the last
 /// few states: by the time the run came, the cache had dropped most of what was computed ahead,
-/// and the run computed it all again, on the window thread.
+/// and the run computed it all again, on the window thread. A result made from a partial one
+/// ([`EvalKey::reads`]) is kept whole too.
 #[derive(Debug, Default)]
-pub struct KeptResults(std::sync::Mutex<std::collections::HashMap<u64, CachedEval>>);
+pub struct KeptResults(std::sync::Mutex<std::collections::HashMap<u64, CachedEval<Arc<ModelState>>>>);
 
 impl KeptResults {
     /// Results kept.
@@ -1114,11 +1147,11 @@ impl KeptResults {
         self.len() == 0
     }
 
-    fn get(&self, key: u64) -> Option<CachedEval> {
+    fn get(&self, key: u64) -> Option<CachedEval<Arc<ModelState>>> {
         self.0.lock().ok().and_then(|m| m.get(&key).cloned())
     }
 
-    fn put(&self, key: u64, e: &CachedEval) {
+    fn put(&self, key: u64, e: &CachedEval<Arc<ModelState>>) {
         if let Ok(mut m) = self.0.lock()
             && (m.len() < CACHE_ENTRIES || m.contains_key(&key))
         {
@@ -1135,6 +1168,113 @@ struct KeptSlot(Option<Arc<KeptResults>>);
 impl Clone for KeptSlot {
     fn clone(&self) -> Self {
         KeptSlot(None)
+    }
+}
+
+/// Results kept (the least worth dropped first, see [`Store`]).
+const CACHE_ENTRIES: usize = 4096;
+
+/// Bytes of results kept (the least worth dropped first). A cached result is as big as the model it
+/// holds, so bounding the cache by entry count alone let a long editing session keep every
+/// superseded state: the entries nothing else refers to any more are exactly the ones a byte
+/// budget drops.
+const CACHE_BYTES: usize = 64 << 20;
+
+/// Bytes of changes kept. A change holds only the bodies its feature made, so many more are
+/// kept than whole models: in a large design one model fills [`CACHE_BYTES`].
+const CHANGE_BYTES: usize = 256 << 20;
+
+/// Values by key, kept by what losing them would cost (GreedyDual-Size): past
+/// [`CACHE_ENTRIES`] values or `budget` bytes, the one worth least goes first. A value is worth
+/// the milliseconds it took to compute per byte it holds, on top of the worth of the last value
+/// dropped when it was stored or used, so a costly result outlasts many cheap ones (recomputing
+/// those is quick), and values not used for long still give way to new ones.
+#[derive(Debug)]
+struct Store<V> {
+    map: std::collections::HashMap<u64, Stored<V>>,
+    /// Keys by worth, the least first (worth as bits: non-negative, so they order as numbers).
+    by_worth: std::collections::BTreeSet<(u64, u64)>,
+    /// The worth of the last value dropped.
+    floor: f64,
+    /// What the values cost together.
+    bytes: usize,
+    budget: usize,
+}
+
+#[derive(Debug)]
+struct Stored<V> {
+    value: V,
+    bytes: usize,
+    /// Milliseconds it took to compute.
+    ms: f64,
+    worth: f64,
+}
+
+impl<V: Clone> Store<V> {
+    fn new(budget: usize) -> Self {
+        Store { map: Default::default(), by_worth: Default::default(), floor: 0.0, bytes: 0, budget }
+    }
+
+    fn worth(&self, ms: f64, bytes: usize) -> f64 {
+        let ms = if ms.is_finite() { ms.max(0.0) } else { 0.0 };
+        self.floor + (ms + 0.01) / bytes.max(1) as f64
+    }
+
+    /// The value at `key`, which counts as used now.
+    fn get(&mut self, key: u64) -> Option<V> {
+        let (ms, bytes) = self.map.get(&key).map(|e| (e.ms, e.bytes))?;
+        let worth = self.worth(ms, bytes);
+        let e = self.map.get_mut(&key)?;
+        self.by_worth.remove(&(e.worth.to_bits(), key));
+        e.worth = worth;
+        self.by_worth.insert((worth.to_bits(), key));
+        Some(e.value.clone())
+    }
+
+    /// Keep `value`, which took `ms` to compute and holds `bytes`. One value is always kept, so
+    /// a single model larger than the budget cannot empty the cache and force a full recompute
+    /// on every undo.
+    fn put(&mut self, key: u64, value: V, bytes: usize, ms: f64) {
+        let worth = self.worth(ms, bytes);
+        if let Some(old) = self.map.insert(key, Stored { value, bytes, ms, worth }) {
+            self.bytes = self.bytes.saturating_sub(old.bytes);
+            self.by_worth.remove(&(old.worth.to_bits(), key));
+        }
+        self.bytes = self.bytes.saturating_add(bytes);
+        self.by_worth.insert((worth.to_bits(), key));
+        while self.map.len() > CACHE_ENTRIES || (self.bytes > self.budget && self.map.len() > 1) {
+            let Some((bits, k)) = self.by_worth.pop_first() else { break };
+            if let Some(old) = self.map.remove(&k) {
+                self.bytes = self.bytes.saturating_sub(old.bytes);
+                self.floor = f64::from_bits(bits);
+            }
+        }
+    }
+}
+
+impl<S> CachedEval<S> {
+    /// The same evaluation, with `state` for its result.
+    fn with<T>(&self, state: T) -> CachedEval<T> {
+        CachedEval {
+            error: self.error.clone(),
+            warning: self.warning.clone(),
+            boolean_diagnostics: self.boolean_diagnostics.clone(),
+            ms: self.ms,
+            state,
+        }
+    }
+}
+
+impl EvalCache {
+    fn state(&mut self, key: u64) -> Option<CachedEval<Arc<ModelState>>> {
+        let r = self.states.get(key);
+        self.hits += usize::from(r.is_some());
+        r
+    }
+    fn change(&mut self, key: u64) -> Option<CachedEval<Change>> {
+        let r = self.changes.get(key);
+        self.hits += usize::from(r.is_some());
+        r
     }
 }
 
@@ -1546,7 +1686,7 @@ fn chain_fingerprint(
     steps: &StepDigests,
     st: Option<&ModelState>,
 ) -> u64 {
-    let mut fp = fingerprint(doc, prev, f, vals, rolled_back, steps) ^ placement_digest(doc, f, st);
+    let mut fp = fingerprint(doc, prev, f, vals, rolled_back, steps) ^ placement_digest(doc, f, st) ^ construct_digest(doc, vals, f, st);
     // Sheet metal features also depend on the rules (and the parameters they use).
     if f.kind.is_sheet() {
         let mut h = std::collections::hash_map::DefaultHasher::new();
@@ -1614,15 +1754,86 @@ fn replayed_sources<'a>(doc: &'a Document, features: &[crate::FeatureId]) -> Vec
     out
 }
 
-/// Document-level inputs any feature may read: construction planes (resolved by name), sheet
-/// metal and plastic rules (and the parameters they use), components and body placement.
+/// A construction plane, axis or point.
+fn is_construction(f: &Feature) -> bool {
+    matches!(f.kind, FeatureKind::ConstructionPlane { .. } | FeatureKind::ConstructionAxis { .. } | FeatureKind::ConstructionPoint { .. })
+}
+
+/// Every string in `v` (names of planes, axes, bodies and features among them).
+fn json_strings<'a>(v: &'a serde_json::Value, out: &mut std::collections::BTreeSet<&'a str>) {
+    match v {
+        serde_json::Value::String(s) => {
+            out.insert(s);
+        }
+        serde_json::Value::Array(a) => a.iter().for_each(|x| json_strings(x, out)),
+        serde_json::Value::Object(o) => o.values().for_each(|x| json_strings(x, out)),
+        _ => {}
+    }
+}
+
+/// The construction planes, axes and points feature `f` names (#6183), and those they are built
+/// on in turn, as `st` holds them (or by their definitions, for one not evaluated by then). A
+/// pattern or mirror also reads those its replayed features name. Taking any string in the
+/// definition that is a construction's name may take one too many, never one too few: the
+/// other construction geometry no longer goes into every feature's key.
+fn construct_digest(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st: Option<&ModelState>) -> u64 {
+    if !doc.features.iter().any(is_construction) {
+        return 0;
+    }
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    let mut todo: Vec<&Feature> = vec![f];
+    if let FeatureKind::Pattern { features, .. } | FeatureKind::Mirror { features, .. } = &f.kind {
+        todo.extend(features.iter().filter_map(|id| source_feature(doc, *id).ok()));
+    }
+    let mut seen = std::collections::BTreeSet::new();
+    // Bounded: a chain of constructions deeper than this is hashed as far as it goes, and the
+    // whole definition list is the fallback.
+    let mut steps = 0usize;
+    while let Some(g) = todo.pop() {
+        steps += 1;
+        if steps > 4096 {
+            "too deep".hash(&mut h);
+            for c in doc.features.iter().filter(|c| is_construction(c)) {
+                fingerprint(doc, 0, c, vals, false, &StepDigests::default()).hash(&mut h);
+            }
+            break;
+        }
+        let Ok(json) = serde_json::to_value(&g.kind) else {
+            "unreadable".hash(&mut h);
+            continue;
+        };
+        let mut names = std::collections::BTreeSet::new();
+        json_strings(&json, &mut names);
+        // Constructions are named by id too (a sketch's plane, #6858).
+        let mut ids = std::collections::BTreeSet::new();
+        crate::walk::Walk::walk_refs(&g.kind, &mut |r| {
+            if let crate::feature_refs::Ref::Feature(id) = r {
+                ids.insert(id.0);
+            }
+        });
+        for c in doc.features.iter().filter(|c| is_construction(c) && c.id != g.id && (ids.contains(&c.id) || names.contains(c.name.as_str()))) {
+            if !seen.insert(c.id) {
+                continue;
+            }
+            c.name.hash(&mut h);
+            match st.map(|st| st.construct.iter().filter(|x| x.name == c.name).collect::<Vec<_>>()).filter(|v| !v.is_empty()) {
+                // Evaluated already: as it came out (it may stand on faces and edges).
+                Some(done) => serde_json::to_string(&done).unwrap_or_default().hash(&mut h),
+                None => {
+                    fingerprint(doc, 0, c, vals, false, &StepDigests::default()).hash(&mut h);
+                    todo.push(c);
+                }
+            }
+        }
+    }
+    h.finish()
+}
+
+/// Document-level inputs any feature may read: sheet metal and plastic rules (and the
+/// parameters they use), components and body placement. Construction geometry is not among
+/// them: each feature reads only the constructions it names ([`construct_digest`]).
 fn context_digest(doc: &Document, vals: &BTreeMap<String, Value>) -> u64 {
     let mut h = std::collections::hash_map::DefaultHasher::new();
-    for f in doc.features.iter().filter(|f| {
-        matches!(f.kind, FeatureKind::ConstructionPlane { .. } | FeatureKind::ConstructionAxis { .. } | FeatureKind::ConstructionPoint { .. })
-    }) {
-        fingerprint(doc, 0, f, vals, false, &StepDigests::default()).hash(&mut h);
-    }
     doc.units.hash(&mut h);
     serde_json::to_string(&doc.sheet).unwrap_or_default().hash(&mut h);
     serde_json::to_string(&doc.plastic).unwrap_or_default().hash(&mut h);
@@ -1744,6 +1955,350 @@ impl PlacementReads {
             L::Origin | L::Axis { .. } | L::SketchAxis { .. } | L::Plane { .. } | L::Text { .. } => {}
         }
     }
+}
+
+/// The cache keys of a feature's evaluation.
+struct EvalKey {
+    /// From the whole model before it ([`cache_key`]).
+    whole: u64,
+    /// From what it reads alone, with that ([`Feature::reads`]); `None` when it may read
+    /// anything.
+    reads: Option<(u64, Reads)>,
+}
+
+impl EvalKey {
+    fn new(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, fp: u64, ctx: u64, st: &ModelState, steps: &StepDigests) -> EvalKey {
+        let local = fingerprint(doc, 0, f, vals, false, steps) ^ placement_digest(doc, f, Some(st)) ^ construct_digest(doc, vals, f, Some(st));
+        let whole = cache_key(f, fp, local, ctx, st);
+        let reads = f.reads(doc, st).map(|read| {
+            let mut h = std::collections::hash_map::DefaultHasher::new();
+            "reads".hash(&mut h);
+            local.hash(&mut h);
+            ctx.hash(&mut h);
+            f.id.hash(&mut h);
+            // A pattern replays its features' definitions.
+            if let FeatureKind::Pattern { features, .. } = &f.kind {
+                for id in features {
+                    source_feature(doc, *id).ok().map(|src| fingerprint(doc, 0, src, vals, false, steps)).hash(&mut h);
+                }
+            }
+            // Every body's name and component: new names avoid the names, a cut's pieces are
+            // numbered past them, a tool's default targets are its component's bodies.
+            for b in &st.bodies {
+                b.name.hash(&mut h);
+                b.component.hash(&mut h);
+                b.transferred.hash(&mut h);
+            }
+            for &i in &read.bodies {
+                i.hash(&mut h);
+                st.bodies.get(i).map(|b| (b.key, b.feature)).hash(&mut h);
+            }
+            for id in &read.sketches {
+                id.hash(&mut h);
+                st.sketch_keys.get(id).hash(&mut h);
+            }
+            st.body_counter.hash(&mut h);
+            // A cut drops the threads of bodies it removes.
+            serde_json::to_string(&st.threads).unwrap_or_default().hash(&mut h);
+            (h.finish(), read)
+        });
+        EvalKey { whole, reads }
+    }
+}
+
+/// What a feature reads of the model besides every body's name and component: bodies by index,
+/// sketches by feature id.
+#[derive(Clone, Debug, Default)]
+struct Reads {
+    bodies: Vec<usize>,
+    sketches: Vec<u64>,
+}
+
+/// A primitive or a coil: tools from numbers alone.
+fn numeric_tool(kind: &FeatureKind) -> bool {
+    matches!(
+        kind,
+        FeatureKind::Box { .. } | FeatureKind::Cylinder { .. } | FeatureKind::Sphere { .. } | FeatureKind::Torus { .. } | FeatureKind::Coil { .. }
+    )
+}
+
+/// What a sketch's projection of `source` reads: the bodies and sketches it names. `None` when
+/// a body it names is not there (it then takes the body nearest its point, wherever that is).
+fn link_reads(st: &ModelState, source: &solidcraft_sketch::LinkSource, read: &mut Reads) -> Option<()> {
+    use solidcraft_sketch::LinkSource as L;
+    let body = |name: &str, read: &mut Reads| -> Option<()> {
+        read.bodies.push(st.bodies.iter().position(|b| b.name == name)?);
+        Some(())
+    };
+    match source {
+        L::Edge { body: b, .. }
+        | L::Face { body: b, .. }
+        | L::Body { body: b }
+        | L::Vertex { body: b, .. }
+        | L::Iso { body: b, .. }
+        | L::Spun { body: b, .. } => body(b, read),
+        L::SketchCurve { sketch, .. } | L::SketchPoint { sketch, .. } => {
+            read.sketches.push(*sketch);
+            Some(())
+        }
+        L::OnSurface { sketch, body: b, .. } => {
+            read.sketches.push(*sketch);
+            body(b, read)
+        }
+        L::Intersection { a, b } => {
+            link_reads(st, a, read)?;
+            link_reads(st, b, read)
+        }
+        // In the sketch's own frame (construction axes it names are in its key), or text.
+        L::Origin | L::Axis { .. } | L::SketchAxis { .. } | L::Plane { .. } | L::Text { .. } => Some(()),
+    }
+}
+
+/// How far from a fillet's or chamfer's first edge point (mm) the edge it finds may lie for its
+/// body to be known from the bodies around the point alone.
+const BLEND_REACH: f64 = 1.0;
+
+/// The bodies a fillet or chamfer with no body named may pick ([`blend_target`]): those whose
+/// box reaches within [`BLEND_REACH`] of its first edge point. `None` when none of them has an
+/// edge that near, as a body further away could then be the nearest; or around a mesh body.
+fn blend_candidates(st: &ModelState, edges: &[Vec3]) -> Option<Vec<usize>> {
+    let p = *edges.first()?;
+    let near: Vec<usize> =
+        st.bodies.iter().enumerate().filter(|(_, b)| b.outline_bounds().inflated(BLEND_REACH).contains(p)).map(|(i, _)| i).collect();
+    let mut hit = false;
+    for b in near.iter().filter_map(|i| st.bodies.get(*i)) {
+        if b.body.is_mesh() {
+            return None;
+        }
+        let tol = (b.body.size() * 2e-3).max(1e-3);
+        hit |= matches!(b.body.nearest_edge(p, tol), Ok(Some((_, d))) if d <= BLEND_REACH);
+    }
+    hit.then_some(near)
+}
+
+/// A plane given by numbers alone or a construction plane (its geometry is in the feature's key,
+/// [`construct_digest`]): no face or edge to find.
+fn fixed_plane(plane: &PlaneRef) -> bool {
+    match plane {
+        PlaneRef::Origin { .. } | PlaneRef::Custom { .. } | PlaneRef::Placed { .. } | PlaneRef::Construction { .. } => true,
+        PlaneRef::Offset { base, .. } | PlaneRef::AtAngle { base, .. } | PlaneRef::Flipped { base, .. } => fixed_plane(base),
+        _ => false,
+    }
+}
+
+impl Feature {
+    /// What this feature reads of `st`, when that is known to be all it reads: a primitive or a
+    /// coil (or a rectangular or circular pattern of them) on the bodies it names or its
+    /// component's bodies, a move or pattern of named bodies, a sketch on a plane given by
+    /// numbers or a construction plane (its projections reading the bodies and sketches they
+    /// name), an extrude or revolve from a sketch of its component on the bodies it names or its
+    /// component's bodies (no To / From Object, through all or taper), a fillet or chamfer of
+    /// the body its edges lie on (#6183). Construction geometry it names is in its key already
+    /// ([`construct_digest`]). Never with a face picked by name, an edge picked by name outside
+    /// a fillet or chamfer, or sheet metal around; everything else may read anything (faces, To
+    /// Object, `*` for every body).
+    fn reads(&self, doc: &Document, st: &ModelState) -> Option<Reads> {
+        let by_name = |f: &Feature| f.face_names.iter().all(String::is_empty) && f.edge_names.iter().all(String::is_empty) && f.edge_refs.is_empty();
+        let blend = matches!(self.kind, FeatureKind::Fillet { .. } | FeatureKind::Chamfer { .. });
+        // A fillet or chamfer finds its edges by name on its own body alone.
+        let faces_by_name = self.face_names.iter().any(|n| !n.is_empty());
+        if !st.sheets.is_empty() || faces_by_name || (!blend && !by_name(self)) {
+            return None;
+        }
+        let named = |names: &[String]| -> Option<Vec<usize>> {
+            if names.iter().any(|n| n == "*") {
+                return None;
+            }
+            names.iter().map(|n| st.bodies.iter().position(|b| &b.name == n)).collect()
+        };
+        // The bodies a tool operates on, as `apply_traced` picks them.
+        let operated = |(op, targets): (Operation, Vec<String>)| -> Option<Vec<usize>> {
+            let targets = if targets.is_empty() { &self.participants } else { &targets };
+            match op {
+                Operation::NewBody => Some(Vec::new()),
+                _ if targets.is_empty() => Some(
+                    st.bodies.iter().enumerate().filter(|(_, b)| b.component == self.component || b.feature == self.id).map(|(i, _)| i).collect(),
+                ),
+                _ => named(targets),
+            }
+        };
+        let bodies = |bodies| Some(Reads { bodies, sketches: Vec::new() });
+        let sketch = |s: &crate::SketchId| {
+            let own = doc.feature(s.0).is_some_and(|x| x.component == self.component);
+            own.then(|| Reads { bodies: Vec::new(), sketches: vec![s.0] })
+        };
+        match &self.kind {
+            k if numeric_tool(k) => bodies(operated(feature_op(self))?),
+            FeatureKind::Pattern { bodies: copied, .. } if !copied.is_empty() => bodies(named(&crate::plain::<String, _>(copied))?),
+            FeatureKind::Pattern { features, pattern: crate::PatternKind::Rectangular { .. } | crate::PatternKind::Circular { .. }, .. }
+                if !features.is_empty() =>
+            {
+                let mut read = Vec::new();
+                for id in features {
+                    let src = source_feature(doc, *id).ok().filter(|src| numeric_tool(&src.kind) && by_name(src))?;
+                    read.extend(operated(feature_op(src))?);
+                }
+                read.sort_unstable();
+                read.dedup();
+                bodies(read)
+            }
+            FeatureKind::Move { bodies: moved, .. } => bodies(named(&crate::plain::<String, _>(moved))?),
+            FeatureKind::Combine { target, tools, .. } => {
+                let mut names = vec![target.0.clone()];
+                names.extend(crate::plain::<String, _>(tools));
+                bodies(named(&names)?)
+            }
+            FeatureKind::Sketch { plane, sketch } if fixed_plane(plane) => {
+                let mut read = Reads::default();
+                for link in &sketch.links {
+                    link_reads(st, &link.source, &mut read)?;
+                }
+                read.bodies.sort_unstable();
+                read.bodies.dedup();
+                read.sketches.sort_unstable();
+                read.sketches.dedup();
+                Some(read)
+            }
+            FeatureKind::Extrude { sketch: s, extent, .. }
+                if extent.to.is_none() && extent.from.is_none() && !extent.through_all && extent.taper.is_none() =>
+            {
+                Some(Reads { bodies: operated(feature_op(self))?, ..sketch(s)? })
+            }
+            // About an edge or round face of the model: that geometry is read too.
+            FeatureKind::Revolve { axis: crate::AxisRef::Model { .. }, .. } => None,
+            FeatureKind::Revolve { sketch: s, to: None, .. } => Some(Reads { bodies: operated(feature_op(self))?, ..sketch(s)? }),
+            FeatureKind::Fillet { edges, body, .. } | FeatureKind::Chamfer { edges, body, .. } => match body {
+                Some(n) => bodies(named(std::slice::from_ref(&n.0))?),
+                None => bodies(blend_candidates(st, &crate::plain(edges))?),
+            },
+            _ => None,
+        }
+    }
+}
+
+/// What a feature changed of the model (see [`ModelState::change_from`]): the bodies after it,
+/// the sketch it solved and the body counter.
+#[derive(Clone, Debug)]
+struct Change {
+    bodies: Arc<[Changed]>,
+    sketch: Option<Arc<SolvedSketch>>,
+    body_counter: usize,
+    /// A fillet's or chamfer's records of the edges it blended and the radii it used.
+    blend: Option<Vec<Vec3>>,
+    fitted: Option<Vec<f64>>,
+    tapered: Option<Vec<(Vec3, kernel::Taper)>>,
+}
+
+#[derive(Clone, Debug)]
+enum Changed {
+    /// The body at this index before the feature, as it was.
+    Kept(usize),
+    /// A body the feature made or changed.
+    Made(Box<ModelBody>),
+}
+
+impl Change {
+    /// What the bodies it made cost.
+    fn retained_bytes(&self) -> usize {
+        let made: usize = self
+            .bodies
+            .iter()
+            .map(|b| match b {
+                Changed::Made(b) => b.body.retained_bytes(),
+                Changed::Kept(_) => 0,
+            })
+            .sum();
+        made + self.bodies.len() * 64 + self.sketch.as_ref().map_or(0, |s| s.retained_bytes())
+    }
+}
+
+impl ModelState {
+    /// How feature `feature`, which read the bodies `read` of `before`, took it to this state
+    /// (not stamped yet); `None` when it changed anything else: a body it did not read, a sketch
+    /// other than its own, the construction, threads or blend records.
+    fn change_from(&self, before: &ModelState, feature: u64, read: &Reads) -> Option<Change> {
+        let (kept, sketch) = match self.sketches.split_last() {
+            Some((last, rest)) if last.feature == feature => (rest, Some(last.clone())),
+            _ => (self.sketches.as_slice(), None),
+        };
+        let others = before.sketches.iter().filter(|s| s.feature != feature);
+        let same_rest = self.sheets.is_empty()
+            && kept.len() == others.clone().count()
+            && kept.iter().zip(others).all(|(a, b)| Arc::ptr_eq(a, b))
+            && (sketch.is_some() || kept.len() == before.sketches.len())
+            && self.sketch_keys == before.sketch_keys
+            && self.construct.len() == before.construct.len()
+            && others_same(&self.blend_edges, &before.blend_edges, feature)
+            && others_same(&self.fitted, &before.fitted, feature)
+            && self.tapered.keys().filter(|k| **k != feature).eq(before.tapered.keys().filter(|k| **k != feature))
+            && serde_json::to_string(&self.threads).ok() == serde_json::to_string(&before.threads).ok();
+        if !same_rest {
+            return None;
+        }
+        // Bodies passed through keep their order: each is looked for after the last one found.
+        let mut from = 0;
+        let mut untouched = vec![false; before.bodies.len()];
+        let mut bodies = Vec::with_capacity(self.bodies.len());
+        for b in &self.bodies {
+            let at = before.bodies.iter().enumerate().skip(from).find(|(_, x)| x.name == b.name).map(|(j, _)| j);
+            match at.filter(|&j| before.bodies.get(j).is_some_and(|x| x.key == b.key && x.body.same(&b.body))) {
+                Some(j) => {
+                    bodies.push(Changed::Kept(j));
+                    if let Some(u) = untouched.get_mut(j) {
+                        *u = true;
+                    }
+                    from = j + 1;
+                }
+                None => bodies.push(Changed::Made(Box::new(b.clone()))),
+            }
+        }
+        let only_read = untouched.iter().enumerate().all(|(j, u)| *u || read.bodies.contains(&j));
+        only_read.then(|| Change {
+            bodies: bodies.into(),
+            sketch,
+            body_counter: self.body_counter,
+            blend: self.blend_edges.get(&feature).cloned(),
+            fitted: self.fitted.get(&feature).cloned(),
+            tapered: self.tapered.get(&feature).cloned(),
+        })
+    }
+
+    /// This state with `change` (feature `feature`'s) made to it: its bodies, those it kept taken
+    /// from here; `None` when this state does not line up with it.
+    fn with_change(&self, change: &Change, feature: u64) -> Option<ModelState> {
+        let bodies = change
+            .bodies
+            .iter()
+            .map(|b| match b {
+                Changed::Kept(j) => self.bodies.get(*j).map(|b| ModelBody { made: crate::lineage::Made::Before, ..b.clone() }),
+                Changed::Made(b) => Some((**b).clone()),
+            })
+            .collect::<Option<Vec<_>>>()?;
+        let mut sketches = self.sketches.clone();
+        if let Some(s) = &change.sketch {
+            sketches.retain(|s| s.feature != feature);
+            sketches.push(s.clone());
+        }
+        let mut next = ModelState { bodies, sketches, body_counter: change.body_counter, ..self.clone() };
+        next.blend_edges.remove(&feature);
+        next.fitted.remove(&feature);
+        next.tapered.remove(&feature);
+        if let Some(b) = &change.blend {
+            next.blend_edges.insert(feature, b.clone());
+        }
+        if let Some(r) = &change.fitted {
+            next.fitted.insert(feature, r.clone());
+        }
+        if let Some(t) = &change.tapered {
+            next.tapered.insert(feature, t.clone());
+        }
+        Some(next)
+    }
+}
+
+/// Whether `a` and `b` hold the same records for every feature but `feature`.
+fn others_same<V: PartialEq>(a: &BTreeMap<u64, V>, b: &BTreeMap<u64, V>, feature: u64) -> bool {
+    a.iter().filter(|(k, _)| **k != feature).eq(b.iter().filter(|(k, _)| **k != feature))
 }
 
 /// The frame of an occurrence path from the root (its occurrences' transforms in turn); `None`
@@ -2253,14 +2808,13 @@ impl Model {
                 continue;
             }
             // The same feature on the same inputs: its earlier result.
-            let key =
-                cache_key(f, fp, fingerprint(doc, 0, f, &vals, false, &self.step_digests) ^ placement_digest(doc, f, Some(&state)), ctx, &state);
+            let key = EvalKey::new(doc, &vals, f, fp, ctx, &state, &self.step_digests);
             let kept = self.kept.0.as_ref().filter(|_| !self.no_cache);
             if !self.no_cache
-                && let Some(c) = self.cache.lock().ok().and_then(|mut m| m.get(key)).or_else(|| kept.and_then(|k| k.get(key)))
+                && let Some(c) = self.cache.lock().ok().and_then(|mut m| m.state(key.whole)).or_else(|| kept.and_then(|k| k.get(key.whole)))
             {
                 if let Some(k) = kept {
-                    k.put(key, &c);
+                    k.put(key.whole, &c);
                 }
                 restored += 1;
                 if c.error.is_none() {
@@ -2294,17 +2848,32 @@ impl Model {
                 out.push(FeatureResult { state: state.clone(), unkept: false, ..r.clone() });
                 continue;
             }
-            recomputed += 1;
+            // Or what it changed when what it reads was as it is now, made again on the rest of the
+            // model as it is now.
+            let reads = key.reads.as_ref().filter(|_| !self.no_cache && param_names(f).iter().all(|n| !self.param_errors.contains_key(n)));
+            let reused = reads
+                .and_then(|(k, _)| self.cache.lock().ok().and_then(|mut m| m.change(*k)))
+                .and_then(|c| state.with_change(&c.state, f.id).map(|next| (next, c)));
             let before = state.clone();
             let t0 = now();
-            let mut next = (*state).clone();
-            // The names the design must not use again travel with the state (#4957, #4302).
-            next.reserved_body_names.clone_from(&reserved);
+            let (mut next, cached) = match reused {
+                Some((next, c)) => {
+                    restored += 1;
+                    (next, Some(c))
+                }
+                None => {
+                    recomputed += 1;
+                    let mut next = (*state).clone();
+                    // The names the design must not use again travel with the state (#4957, #4302).
+                    next.reserved_body_names.clone_from(&reserved);
+                    for b in &mut next.bodies {
+                        b.made = crate::lineage::Made::Before;
+                    }
+                    (next, None)
+                }
+            };
             next.frame_bodies = Arc::downgrade(&self.frame_bodies);
-            for b in &mut next.bodies {
-                b.made = crate::lineage::Made::Before;
-            }
-            let mut warning = None;
+            let mut warning = cached.as_ref().and_then(|c| c.warning.clone());
             // Face references by name: move each face point onto its named face (on the body the
             // feature names, when it names one and the face is there).
             let renamed;
@@ -2320,32 +2889,51 @@ impl Model {
             };
             // A parameter with an error fails the features using it, with that error.
             let bad_param = param_names(f).into_iter().find_map(|n| self.param_errors.get(&n).map(|e| format!("parameter `{n}`: {e}")));
-            let (r, mut boolean_diagnostics) = kernel::capture_boolean_diagnostics(|| match bad_param {
-                Some(e) => Err(kernel::KernelError::Failed(e)),
-                None => kernel::guard(&f.name, || {
-                    eval_feature(doc, &vals, f, &mut next, &mut warning).map_err(|e| kernel::KernelError::Failed(e.to_string()))
-                }),
-            });
-            if r.is_ok() {
-                // Profiles picked by curves that no longer bound a profile exactly were found
-                // by their best match: say which.
-                let thin = matches!(&f.kind, FeatureKind::Extrude { thin: Some(_), .. });
-                for (sketch, sel) in f.kind.profile_sels() {
-                    if let (false, Some(ss)) = (thin, state.sketch(sketch)) {
-                        for note in crate::profile_fallback_notes(ss, sel) {
+            let (r, boolean_diagnostics) = match &cached {
+                Some(c) => (Ok(()), c.boolean_diagnostics.clone()),
+                None => {
+                    let (r, boolean_diagnostics) = kernel::capture_boolean_diagnostics(|| match bad_param {
+                        Some(e) => Err(kernel::KernelError::Failed(e)),
+                        None => kernel::guard(&f.name, || {
+                            eval_feature(doc, &vals, f, &mut next, &mut warning).map_err(|e| kernel::KernelError::Failed(e.to_string()))
+                        }),
+                    });
+                    if r.is_ok() {
+                        // Profiles picked by curves that no longer bound a profile exactly were found
+                        // by their best match: say which.
+                        let thin = matches!(&f.kind, FeatureKind::Extrude { thin: Some(_), .. });
+                        for (sketch, sel) in f.kind.profile_sels() {
+                            if let (false, Some(ss)) = (thin, state.sketch(sketch)) {
+                                for note in crate::profile_fallback_notes(ss, sel) {
+                                    append_warning(&mut warning, note);
+                                }
+                            }
+                        }
+                        if let Some(note) = boolean_diagnostics.warning() {
                             append_warning(&mut warning, note);
                         }
+                        track_altered_sheets(&state, &mut next, f, &mut warning);
+                        note_join_apart(&state, &next, f, &mut warning);
+                        (r, boolean_diagnostics)
+                    } else {
+                        (r, Default::default())
                     }
                 }
-                if let Some(note) = boolean_diagnostics.warning() {
-                    append_warning(&mut warning, note);
-                }
-                track_altered_sheets(&state, &mut next, f, &mut warning);
-                note_join_apart(&state, &next, f, &mut warning);
-            } else {
-                boolean_diagnostics = Default::default();
-            }
-            let ms = t0.elapsed().as_secs_f64() * 1000.0;
+            };
+            let ms = match &cached {
+                Some(c) => c.ms,
+                None => t0.elapsed().as_secs_f64() * 1000.0,
+            };
+            // What it changed, when that is only what it read: kept for whatever the rest of the
+            // model holds, and its bodies are known by what it read.
+            let change = match (&cached, reads) {
+                (None, Some((_, read))) if r.is_ok() => next.change_from(&state, f.id, read),
+                _ => None,
+            };
+            let stamp_key = match reads {
+                Some((k, _)) if cached.is_some() || change.is_some() => *k,
+                _ => key.whole,
+            };
             let error = match r {
                 Ok(()) => {
                     // Copies are named after their sources through the instance transforms.
@@ -2363,7 +2951,7 @@ impl Model {
                         }
                         _ => mats,
                     };
-                    next.stamp(&state, f, key, mats);
+                    next.stamp(&state, f, stamp_key, mats);
                     for b in &mut next.bodies {
                         if !b.transferred {
                             b.component = match doc.body_components.get(&b.name) {
@@ -2380,19 +2968,22 @@ impl Model {
                 Err(e) => Some(e.to_string().trim_start_matches("the operation failed: ").to_string()),
             };
             if !self.no_cache && !watched.cancelled() {
-                let e = CachedEval {
+                let whole = CachedEval {
                     error: error.clone(),
                     warning: warning.clone(),
                     boolean_diagnostics: boolean_diagnostics.clone(),
                     ms,
-                    bytes: state.added_bytes(&before),
                     state: state.clone(),
                 };
-                if let Some(k) = &self.kept.0 {
-                    k.put(key, &e);
+                if let Some(k) = kept {
+                    k.put(key.whole, &whole);
                 }
                 if let Ok(mut m) = self.cache.lock() {
-                    m.put(key, e);
+                    if let (Some((k, _)), Some(change)) = (reads, change) {
+                        let bytes = change.retained_bytes();
+                        m.changes.put(*k, whole.with(change), bytes, ms);
+                    }
+                    m.states.put(key.whole, whole, state.added_bytes(&before), ms);
                 }
             }
             reuse &= error.is_none();
@@ -2932,6 +3523,29 @@ fn apply_op(doc: &Document, state: &mut ModelState, f: &Feature, tools: Vec<Body
     apply_traced(doc, state, f, tools.into_iter().map(Traced::unnamed).collect(), op, targets)
 }
 
+/// The recipe of a tool a primitive or coil feature `f` builds: its definition and the values it
+/// uses fix it.
+fn tool_recipe(doc: &Document, f: &Feature, vals: &BTreeMap<String, Value>) -> Option<u64> {
+    Some(fingerprint(doc, 0, f, vals, false, &StepDigests::default()))
+}
+
+/// The recipe of a tool of recipe `recipe` moved by `m`: copy `instance` of feature `feature`
+/// (its faces are named after the copy).
+fn moved_recipe(recipe: u64, m: &Mat, feature: u64, instance: usize) -> u64 {
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    (recipe, feature, instance).hash(&mut h);
+    m.iter().flatten().for_each(|x| x.to_bits().hash(&mut h));
+    h.finish()
+}
+
+/// The recipe of `tools` together, when each has one.
+fn recipe_of(tools: &[Traced]) -> Option<u64> {
+    let recipes = tools.iter().map(|t| t.recipe).collect::<Option<Vec<u64>>>()?;
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    recipes.hash(&mut h);
+    Some(h.finish())
+}
+
 /// Many cut tools clear of each other (a pattern's copies, the circles of a vent field in one
 /// sketch) as one tool of many pieces, so the target is cut once instead of rebuilding an ever
 /// more complex body for every tool (#261, #368). Tools that may meet are left as they are.
@@ -2942,7 +3556,10 @@ fn clear_tools_as_one(tools: Vec<Traced>) -> Vec<Traced> {
     let bodies: Vec<Body> = tools.iter().map(|t| t.body.clone()).collect();
     match kernel::union_apart(&bodies) {
         // Each piece's faces keep the names of the tool it is.
-        Ok(Some(one)) => vec![Traced::step(one, &tools.iter().collect::<Vec<_>>())],
+        Ok(Some(one)) => {
+            let recipe = recipe_of(&tools);
+            vec![Traced::step(one, &tools.iter().collect::<Vec<_>>()).with_recipe(recipe)]
+        }
         _ => tools,
     }
 }
@@ -3183,30 +3800,30 @@ fn apply_traced_with(
                 target_idx.iter().filter_map(|i| state.bodies.get(*i)).map(|b| (b.name.clone(), b.body.lumps().map_or(1, |l| l.len()))).collect();
             let mut remove = Vec::new();
             for &ti in &target_idx {
-                let Some(mut acc) = state.bodies.get(ti).map(|b| Some(b.traced())) else { continue };
+                let Some(target) = state.bodies.get(ti) else { continue };
                 // The tools meet the target where it is shown: in its frame (#3383).
-                let into = state.bodies.get(ti).and_then(|b| tool_frame(&b.name));
-                for t in &tools {
-                    let t = &tool_in(t, into)?;
-                    acc = match acc {
-                        Some(a) => kernel::boolean(&a.body, &t.body, bop)?.map(|r| Traced::step(r, &[&a, t])),
-                        None => None,
-                    };
-                }
+                let placed;
+                let tools: &[Traced] = match tool_frame(&target.name) {
+                    Some(into) => {
+                        placed = tools.iter().map(|t| tool_in(t, Some(into))).collect::<Result<Vec<_>>>()?;
+                        &placed
+                    }
+                    None => &tools,
+                };
+                let acc = target.cut(tools, bop)?;
                 if op == Operation::Intersect && acc.as_ref().is_none_or(|b| b.body.face_count() == 0) {
-                    let Some(mb) = state.bodies.get(ti) else { continue };
                     // A tool that meets the body yet leaves nothing is a failed boolean, not an empty result.
                     let mut met = false;
-                    if !named && !mb.body.is_mesh() {
-                        for t in &tools {
-                            if mb.body.meets(&tool_in(t, into)?.body)? {
+                    if !named && !target.body.is_mesh() {
+                        for t in tools {
+                            if target.body.meets(&t.body)? {
                                 met = true;
                                 break;
                             }
                         }
                     }
                     if named || met {
-                        return Err(empty_intersection(&[mb.name.as_str()]));
+                        return Err(empty_intersection(&[target.name.as_str()]));
                     }
                     remove.push(ti);
                     continue;
@@ -5508,7 +6125,7 @@ fn feature_tools_with_constructor(
                 tools = tools
                     .into_iter()
                     .enumerate()
-                    .map(|(body_index, Traced { body, lineage })| {
+                    .map(|(body_index, Traced { body, lineage, .. })| {
                         let curves: Vec<_> = body
                             .face_sources()
                             .into_iter()
@@ -5536,7 +6153,7 @@ fn feature_tools_with_constructor(
                         }
                         // Certificates set face sources only: the faces, and their lineage, stay.
                         let body = body.with_extrude_certificates(f.id, sketch.0, &curves)?.with_extrude_cap_certificates(f.id, sketch.0, &caps)?;
-                        Ok(Traced { body, lineage })
+                        Ok(Traced { body, lineage, recipe: None })
                     })
                     .collect::<Result<Vec<_>>>()?;
             }
@@ -5768,7 +6385,8 @@ fn feature_tools_with_constructor(
             let axis = if *clockwise { k * -1.0 } else { k };
             // A left-handed coil turns about −axis and climbs along +axis: mirror the pitch.
             let pitch = if *clockwise { -p } else { p };
-            Ok(unnamed(vec![kernel::sweep_helix(&plane, &region, *base, axis, pitch, n)?]))
+            let coil = Traced::unnamed(kernel::sweep_helix(&plane, &region, *base, axis, pitch, n)?);
+            Ok(vec![coil.with_recipe(tool_recipe(doc, f, vals))])
         }
         FeatureKind::Loft { sections, rails, rail_fit, .. } => {
             let mut secs = Vec::new();
@@ -5867,14 +6485,17 @@ fn feature_tools_with_constructor(
         FeatureKind::Box { corner, length, width, height, .. } => {
             let s = Vec3::new(val(vals, length, Kind::Length)?, val(vals, width, Kind::Length)?, val(vals, height, Kind::Length)?);
             let corner = point(vals, corner)?;
-            Ok(vec![crate::lineage::box_tool(kernel::box_solid(corner, corner + s)?)])
+            Ok(vec![crate::lineage::box_tool(kernel::box_solid(corner, corner + s)?).with_recipe(tool_recipe(doc, f, vals))])
         }
-        FeatureKind::Cylinder { base, axis, radius, height, .. } => Ok(vec![crate::lineage::cylinder_tool(kernel::cylinder(
-            cylinder_base(vals, st, f, base, axis.0)?,
-            axis.0,
-            val(vals, radius, Kind::Length)?,
-            val(vals, height, Kind::Length)?,
-        )?)]),
+        FeatureKind::Cylinder { base, axis, radius, height, .. } => {
+            let body = kernel::cylinder(
+                cylinder_base(vals, st, f, base, axis.0)?,
+                axis.0,
+                val(vals, radius, Kind::Length)?,
+                val(vals, height, Kind::Length)?,
+            )?;
+            Ok(vec![crate::lineage::cylinder_tool(body).with_recipe(tool_recipe(doc, f, vals))])
+        }
         FeatureKind::Sphere { center, radius, .. } => Ok(unnamed(vec![kernel::sphere(point(vals, center)?, val(vals, radius, Kind::Length)?)?])),
         FeatureKind::Torus { center, major, minor, .. } => {
             Ok(unnamed(vec![kernel::torus(point(vals, center)?, val(vals, major, Kind::Length)?, val(vals, minor, Kind::Length)?)?]))
@@ -6727,11 +7348,11 @@ fn replay(
                     let to = to.map(|t| crate::apply_point(m, t.0));
                     let depth = hole_depth_to(st, &at, d, &to, depth)?;
                     // Each copy's faces are named as the hole's, with the instance.
-                    copies.extend(
-                        hole_tools(vals, st, &at, d, diameter, &depth, hole)?
-                            .into_iter()
-                            .map(|t| Traced { lineage: t.lineage.map(|l| l.copied(src.id, first + k + 1)), body: t.body }),
-                    );
+                    copies.extend(hole_tools(vals, st, &at, d, diameter, &depth, hole)?.into_iter().map(|t| Traced {
+                        lineage: t.lineage.map(|l| l.copied(src.id, first + k + 1)),
+                        body: t.body,
+                        recipe: None,
+                    }));
                 }
                 instances.push(start..copies.len());
             }
@@ -6742,7 +7363,7 @@ fn replay(
                 for body in more::rib_tools(vals, st, src, Some(m))? {
                     // Each copy's faces are named as the rib's, with the instance.
                     let t = Traced::unnamed(body);
-                    copies.push(Traced { lineage: t.lineage.map(|l| l.copied(src.id, first + k + 1)), body: t.body });
+                    copies.push(Traced { lineage: t.lineage.map(|l| l.copied(src.id, first + k + 1)), body: t.body, recipe: None });
                 }
             }
         } else {
@@ -6754,7 +7375,8 @@ fn replay(
             for (k, m) in mats.iter().enumerate() {
                 let start = copies.len();
                 for t in &tools {
-                    copies.push(t.copied(kernel::transform_matrix(&t.body, *m)?, src.id, first + k + 1));
+                    let recipe = t.recipe.map(|r| moved_recipe(r, m, src.id, first + k + 1));
+                    copies.push(t.copied(kernel::transform_matrix(&t.body, *m)?, src.id, first + k + 1).with_recipe(recipe));
                 }
                 instances.push(start..copies.len());
             }
@@ -6947,7 +7569,7 @@ fn trim_to_body(tools: Vec<Traced>, target: &ModelBody, dist_to_start: impl Fn(V
             let touches =
                 lump.tessellate((lump.size() * 1e-2).max(1e-2)).map(|m| m.positions.iter().any(|q| dist_to_start(*q) < tol)).unwrap_or(false);
             if touches {
-                out.push(Traced { body: lump, lineage });
+                out.push(Traced { body: lump, lineage, recipe: None });
             }
         }
     }
@@ -7378,7 +8000,7 @@ fn eval_feature(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st:
             // The groove's faces are its triangles, with no role to name them by.
             let groove = crate::lineage::Lineage::unnamed_faces(groove.triangles.len());
             let lineage = input.lineage.and_then(|l| crate::lineage::Lineage::step(&nb, &[&l, &groove]));
-            let nb = Traced { body: nb, lineage };
+            let nb = Traced { body: nb, lineage, recipe: None };
             if let Some(slot) = st.bodies.get_mut(i) {
                 *slot = ModelBody::traced_new(mb.name, nb, mb.feature);
             }
@@ -7772,7 +8394,7 @@ fn eval_feature(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st:
             let b = kernel::box_solid(corner, corner + s)?;
             let b = if matches!(operation, Operation::NewBody | Operation::Join) { b.with_box_certificate(f.id)? } else { b };
             let handled = more::sheet_primitive_cut(f, st, &b, more::PrimitivePrism::Box { lo: corner, hi: corner + s }, *operation, false, warning)?;
-            let tools = vec![crate::lineage::box_tool(b)];
+            let tools = vec![crate::lineage::box_tool(b).with_recipe(tool_recipe(doc, f, vals))];
             if !handled.is_empty() {
                 return apply_beside_sheet_cut(doc, st, f, tools, *operation, &[], &handled);
             }
@@ -7785,7 +8407,7 @@ fn eval_feature(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st:
             let b = if matches!(operation, Operation::NewBody | Operation::Join) { b.with_cylinder_certificate(f.id)? } else { b };
             let prism = more::PrimitivePrism::Cylinder { base, axis: axis.0, radius, height };
             let handled = more::sheet_primitive_cut(f, st, &b, prism, *operation, false, warning)?;
-            let tools = vec![crate::lineage::cylinder_tool(b)];
+            let tools = vec![crate::lineage::cylinder_tool(b).with_recipe(tool_recipe(doc, f, vals))];
             if !handled.is_empty() {
                 return apply_beside_sheet_cut(doc, st, f, tools, *operation, &[], &handled);
             }
