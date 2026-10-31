@@ -1707,6 +1707,49 @@ fn the_header_model_picker_offers_no_typed_model_it_cannot_send_and_shows_why_li
     assert!(handle_at("agent_chat:model:custom").is_none());
 }
 
+/// A running endpoint's card uses the chat's list and changes the chat's model.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn the_card_of_a_running_endpoint_changes_the_chats_model() {
+    use crate::scenario::handle_at;
+    let mut h = crate::scenario::Harness::new();
+    h.app.home.open = false;
+    h.app.preferences.ai_features = true;
+    h.app.agent_chat.detection = Some(Default::default());
+    let script = Script::default();
+    h.app.agent_chat.backend = Some(Box::new(script.clone()));
+    h.app.agent_chat.state = Some(State::Ready);
+    h.app.agent_chat.running_id = "api-1".into();
+    h.app.agent_chat.running_endpoint = "http://localhost:1/v1".into();
+    h.app.preferences.agents.push(agents::AgentConfig {
+        id: "api-1".into(),
+        name: "Endpoint".into(),
+        kind: agents::Kind::Api,
+        base_url: "http://localhost:1/v1".into(),
+        model: "fast".into(),
+        ..Default::default()
+    });
+    script.report(models_reply("fast"));
+    h.step(&json!({"call": "ui.prefs", "params": {"open": "AI"}})).unwrap();
+    h.frames(4);
+    h.step(&json!({"click": {"handle": "prefs:ai_model:api-1"}})).unwrap();
+    h.frames(3);
+    assert!(handle_at("prefs:ai_model:api-1:smart").is_some());
+    h.step(&json!({"click": {"handle": "prefs:ai_model:api-1:smart"}})).unwrap();
+    h.frames(3);
+    assert_eq!(script.calls(), ["set_model: smart"]);
+    assert_eq!(h.app.agent_chat.model, "smart");
+    h.step(&json!({"click": {"handle": "prefs:ai_model:api-1"}})).unwrap();
+    h.frames(3);
+    h.step(&json!({"text": "zzz"})).unwrap();
+    h.frames(3);
+    h.step(&json!({"click": {"handle": "prefs:ai_model:api-1:custom"}})).unwrap();
+    h.frames(3);
+    assert_eq!(script.calls(), ["set_model: smart", "set_model: zzz"]);
+    assert_eq!(h.app.preferences.agents.iter().find(|a| a.id == "api-1").map(|a| a.model.as_str()), Some("zzz"));
+    disconnect(&mut h.app);
+}
+
 /// A listing that fails says why and leaves last time's list, with the configured model in it; the
 /// next connection starts without the note.
 #[cfg(not(target_arch = "wasm32"))]

@@ -1972,6 +1972,7 @@ pub fn poll(app: &mut SolveApp, ctx: &egui::Context) {
     #[cfg(not(target_arch = "wasm32"))]
     {
         settings::poll_capabilities(app, ctx);
+        settings::poll_listing(app, ctx);
         connect_at_start(app, ctx);
     }
     pump_tools(app);

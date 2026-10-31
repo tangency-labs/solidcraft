@@ -76,7 +76,7 @@ impl Kind {
 }
 
 /// The wire protocol of an endpoint the user added.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub enum Protocol {
     /// `{base}/chat/completions`, as Ollama, LM Studio, OpenAI and their kin speak.
     #[default]

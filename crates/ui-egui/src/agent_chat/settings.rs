@@ -38,6 +38,10 @@ pub struct AddState {
     /// Editing an endpoint whose key is in the keychain: an empty key field keeps it.
     pub saved_key: bool,
     test: Option<Test>,
+    /// The endpoint the model picker lists: what the fields said when they were last left.
+    listing: Option<ListingKey>,
+    /// The fields were left, or the picker opened: take what they say now.
+    list_again: bool,
 }
 
 /// A connection test running or done.
@@ -80,6 +84,129 @@ pub struct State {
     capabilities: std::collections::HashMap<(String, String), Option<bool>>,
     #[cfg(not(target_arch = "wasm32"))]
     checking: Option<CapabilityCheck>,
+    /// Endpoints' models as they were last listed here, or why they could not be.
+    endpoint_models: std::collections::HashMap<ListingKey, Result<Vec<acp::ModelInfo>, String>>,
+    #[cfg(not(target_arch = "wasm32"))]
+    listing: Option<ModelListing>,
+    /// An agent card's picker asked for this listing (with the agent whose key goes along).
+    #[cfg(not(target_arch = "wasm32"))]
+    card_listing: Option<(ListingKey, String)>,
+}
+
+/// What an endpoint's models are listed by: its protocol, its base URL, and whether a key goes along.
+type ListingKey = (Protocol, String, bool);
+
+/// Most endpoints' listings kept.
+const ENDPOINT_LISTINGS_CAP: usize = 128;
+
+/// The listing of `base_url`, if that is an address. A key goes along only where it may be sent.
+fn listing_key(protocol: Protocol, base_url: &str, with_key: bool) -> Option<ListingKey> {
+    let url = agents::normalize_url(base_url).ok().filter(|url| url.len() <= 4096)?;
+    let with_key = with_key && agents::key_safe_for(&url);
+    Some((protocol, url, with_key))
+}
+
+/// The models listed for `key`, and the note for under them: still listing, or why it could not.
+fn listed_for<'a>(
+    listings: &'a std::collections::HashMap<ListingKey, Result<Vec<acp::ModelInfo>, String>>,
+    key: Option<&ListingKey>,
+) -> (&'a [acp::ModelInfo], Option<String>) {
+    match key.and_then(|key| listings.get(key)) {
+        Some(Ok(models)) => (models, None),
+        Some(Err(error)) => (&[], Some(trf("ui.agent_chat_models_failed", &[("error", error)]))),
+        None => (&[], key.map(|_| tr("ui.agent_chat_models_listing").to_string())),
+    }
+}
+
+/// `models` as a model picker's rows: the id chooses, the endpoint's name for it is searched too.
+fn model_choices(models: &[acp::ModelInfo]) -> Vec<ui_kit::SearchChoice<'_>> {
+    models.iter().map(|m| ui_kit::SearchChoice { value: &m.id, label: &m.name, tip: &m.description, group: None }).collect()
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+struct ModelListing {
+    key: ListingKey,
+    rx: std::sync::mpsc::Receiver<Result<Vec<acp::ModelInfo>, String>>,
+}
+
+/// List an endpoint's models in the background, one listing at a time; a finished one stays until
+/// it is asked for again. `secret` runs on that thread too: a keychain may take its time to answer.
+#[cfg(not(target_arch = "wasm32"))]
+fn start_listing(app: &mut SolveApp, ctx: &egui::Context, key: ListingKey, secret: impl FnOnce() -> Result<Option<String>, String> + Send + 'static) {
+    let state = &mut app.agent_chat.settings;
+    if state.listing.is_some() || state.endpoint_models.contains_key(&key) {
+        return;
+    }
+    if state.endpoint_models.len() >= ENDPOINT_LISTINGS_CAP {
+        state.endpoint_models.clear();
+    }
+    let Some(http) = app.services.agent_http.clone() else {
+        state.endpoint_models.insert(key, Err(tr("ui.ai_no_http").to_string()));
+        return;
+    };
+    let (tx, rx) = std::sync::mpsc::channel();
+    let (protocol, url) = (key.0, key.1.clone());
+    let language = crate::i18n::language();
+    let wake = ctx.clone();
+    let spawned = std::thread::Builder::new().name("endpoint-models".into()).spawn(move || {
+        let _language = crate::i18n::scope(language);
+        let list = secret().and_then(|secret| match protocol {
+            Protocol::OpenAi => super::api_client::model_list(&http, &url, secret.as_deref()),
+            Protocol::Anthropic => super::api_client::anthropic_model_list(&http, &url, secret.as_deref()),
+        });
+        let _ = tx.send(list);
+        wake.request_repaint();
+    });
+    match spawned {
+        Ok(_) => state.listing = Some(ModelListing { key, rx }),
+        Err(e) => {
+            state.endpoint_models.insert(key, Err(e.to_string()));
+        }
+    }
+}
+
+/// Take in a finished listing, and start the one an agent card asked for.
+#[cfg(not(target_arch = "wasm32"))]
+pub(super) fn poll_listing(app: &mut SolveApp, ctx: &egui::Context) {
+    use std::sync::mpsc::TryRecvError;
+    let state = &mut app.agent_chat.settings;
+    if let Some(listing) = &state.listing {
+        let result = match listing.rx.try_recv() {
+            Ok(result) => result,
+            Err(TryRecvError::Disconnected) => Err(tr("ui.ai_no_answer").to_string()),
+            Err(TryRecvError::Empty) => return,
+        };
+        state.endpoint_models.insert(listing.key.clone(), result);
+        state.listing = None;
+    }
+    let Some((key, agent)) = state.card_listing.take() else { return };
+    let secrets = app.services.secrets.clone().filter(|_| key.2);
+    start_listing(app, ctx, key, move || match secrets {
+        Some(secrets) => secrets.get(&agent).map_err(|e| trf("ui.ai_keychain_error", &[("error", &e)])),
+        None => Ok(None),
+    });
+}
+
+/// The Add dialog's listing, of what its fields said when last left, never of a half-typed address.
+#[cfg(not(target_arch = "wasm32"))]
+fn list_for_dialog(app: &mut SolveApp, ctx: &egui::Context) {
+    let state = &mut app.agent_chat.settings;
+    let Some(s) = state.add.as_mut().filter(|s| s.kind == AddKind::Api) else { return };
+    if std::mem::take(&mut s.list_again) {
+        s.listing = listing_key(s.protocol, &s.base_url, !s.key.trim().is_empty());
+        // Asked again: what failed may work now, with another key or the server back up.
+        if let Some(key) = &s.listing
+            && matches!(state.endpoint_models.get(key), Some(Err(_)))
+        {
+            state.endpoint_models.remove(key);
+        }
+    }
+    let Some(key) = s.listing.clone() else { return };
+    if state.listing.is_some() || state.endpoint_models.contains_key(&key) {
+        return;
+    }
+    let secret = Some(s.key.trim().to_string()).filter(|secret| key.2 && !secret.is_empty());
+    start_listing(app, ctx, key, move || Ok(secret));
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -171,6 +298,7 @@ pub fn open_add(app: &mut SolveApp) {
         base_url: preset.map(|p| p.base_url.to_string()).unwrap_or_default(),
         name: preset.map(|p| p.name.to_string()).unwrap_or_default(),
         request_timeout_s: agents::DEFAULT_REQUEST_TIMEOUT_S,
+        list_again: true,
         ..Default::default()
     });
 }
@@ -222,6 +350,7 @@ pub(super) fn choose_preset(s: &mut AddState, protocol: Protocol, index: usize) 
     }
     s.error = None;
     s.test = None;
+    s.list_again = true;
 }
 
 /// Run a connection test in the background (it starts the agent briefly, or asks the endpoint
@@ -455,6 +584,7 @@ fn agents_section(app: &mut SolveApp, ui: &mut egui::Ui) {
     let mut edit: Option<String> = None;
     let mut retimed: Option<(String, u64)> = None;
     let mut reeffort: Option<(String, String)> = None;
+    let mut picked_model: Option<(String, ui_kit::Picked)> = None;
     let t = crate::theme::Tokens::get();
     ui_kit::settings_section(ui, "agents", tr("ui.ai_agents"), |ui| {
         if app.agent_chat.detecting.is_some() {
@@ -545,6 +675,53 @@ fn agents_section(app: &mut SolveApp, ui: &mut egui::Ui) {
                                 None => {}
                             }
                         });
+                        if let Some(protocol) = entry.kind.protocol() {
+                            ui_kit::row(ui, tr("ui.ai_model"), |ui| {
+                                let chat = &mut app.agent_chat;
+                                let running = chat.running_id == entry.id && chat.backend.is_some();
+                                let key = listing_key(protocol, &entry.base_url, entry.key);
+                                let (models, note) = if running {
+                                    (chat.models.as_slice(), chat.models_note.clone())
+                                } else if let Some(models) = chat.models_cache.get(&entry.base_url).filter(|models| !models.is_empty()) {
+                                    (models.as_slice(), None)
+                                } else {
+                                    listed_for(&chat.settings.endpoint_models, key.as_ref())
+                                };
+                                let listed = !models.is_empty();
+                                let choices = model_choices(models);
+                                let id = format!("sc_ai_model:{}", entry.id);
+                                let handles = format!("prefs:ai_model:{}", entry.id);
+                                let picker = ui_kit::search_picker(
+                                    ui,
+                                    ui_kit::SearchPicker {
+                                        id: &id,
+                                        handles: &handles,
+                                        current: &entry.model,
+                                        current_value: &entry.model,
+                                        hint: tr("ui.agent_chat_model_search"),
+                                        choices: &choices,
+                                        custom: true,
+                                        note: note.as_deref(),
+                                        enabled: true,
+                                    },
+                                );
+                                // Nobody is asked until the picker opens: not for looking at this page.
+                                if picker.response.clicked()
+                                    && !running
+                                    && !listed
+                                    && let Some(key) = key
+                                {
+                                    // Asked again: what failed may work now.
+                                    if matches!(chat.settings.endpoint_models.get(&key), Some(Err(_))) {
+                                        chat.settings.endpoint_models.remove(&key);
+                                    }
+                                    chat.settings.card_listing = Some((key, entry.id.clone()));
+                                }
+                                if let Some(pick) = picker.inner {
+                                    picked_model = Some((entry.id.clone(), pick));
+                                }
+                            });
+                        }
                     });
                     if entry.kind == Kind::Api
                         && let Some(c) = app.preferences.agents.iter_mut().find(|c| c.id == entry.id)
@@ -593,6 +770,25 @@ fn agents_section(app: &mut SolveApp, ui: &mut egui::Ui) {
     }
     if let Some(id) = edit {
         open_edit(app, &id);
+    }
+    if let Some((id, pick)) = picked_model {
+        if app.agent_chat.running_id == id && app.agent_chat.backend.is_some() {
+            match pick {
+                ui_kit::Picked::Listed(model) => set_model(app, &model),
+                ui_kit::Picked::Custom(model) => {
+                    set_custom_model(app, &model);
+                }
+            }
+        } else {
+            let (ui_kit::Picked::Listed(model) | ui_kit::Picked::Custom(model)) = pick;
+            let model = model.trim();
+            if model_id_valid(model) {
+                if let Some(c) = app.preferences.agents.iter_mut().find(|c| c.id == id) {
+                    c.model = model.to_string();
+                }
+                app.preferences.agent_models.insert(id, model.to_string());
+            }
+        }
     }
     // The running conversation uses a new timeout from its next request on.
     if let Some((id, secs)) = retimed
@@ -748,10 +944,32 @@ pub fn dialog(app: &mut SolveApp, ctx: &egui::Context) {
                         ui_kit::text_field(ui, &mut s.name, "");
                     });
                     ui_kit::row(ui, tr("ui.ai_base_url"), |ui| {
-                        ui_kit::text_field(ui, &mut s.base_url, tr("ui.ai_url_hint"));
+                        s.list_again |=
+                            ui_kit::cell_editor(ui, egui::Id::new("sc_ai_add_url"), &mut s.base_url, tr("ui.ai_url_hint"), false).lost_focus();
                     });
                     ui_kit::row(ui, tr("ui.ai_model"), |ui| {
-                        ui_kit::text_field(ui, &mut s.model, tr("ui.ai_model_hint"));
+                        let (models, note) = listed_for(&app.agent_chat.settings.endpoint_models, s.listing.as_ref());
+                        let choices = model_choices(models);
+                        let current = if s.model.is_empty() { tr("ui.agent_chat_choose_model") } else { s.model.as_str() };
+                        let picker = ui_kit::search_picker(
+                            ui,
+                            ui_kit::SearchPicker {
+                                id: "sc_ai_add_model",
+                                handles: "ai_add:model",
+                                current,
+                                current_value: &s.model,
+                                hint: tr("ui.agent_chat_model_search"),
+                                choices: &choices,
+                                custom: true,
+                                note: note.as_deref(),
+                                enabled: true,
+                            },
+                        );
+                        s.list_again |= picker.response.clicked();
+                        if let Some(ui_kit::Picked::Listed(model) | ui_kit::Picked::Custom(model)) = picker.inner {
+                            s.model = model;
+                            s.error = None;
+                        }
                     });
                     ui_kit::row(ui, tr("ui.ai_request_timeout"), |ui| {
                         timeout_field(ui, &mut s.request_timeout_s, "ai_add:request_timeout");
@@ -764,6 +982,7 @@ pub fn dialog(app: &mut SolveApp, ctx: &egui::Context) {
                             let hint = tr(if s.saved_key { "ui.ai_key_keep_hint" } else { "ui.ai_key_hint" });
                             let r = ui_kit::password_field(ui, egui::Id::new("sc_ai_add_key"), &mut s.key, hint);
                             crate::scenario::publish_target("ai_add:key", r.rect);
+                            s.list_again |= r.lost_focus();
                         });
                     });
                     ui_kit::text(ui, tr(if has_keychain { "ui.ai_key_note" } else { "ui.ai_no_keychain" }), ui_kit::Text::Note("keychain"));
@@ -782,6 +1001,8 @@ pub fn dialog(app: &mut SolveApp, ctx: &egui::Context) {
     }
     add |= action == ui_kit::Action::Ok;
     open &= !closed && action != ui_kit::Action::Cancel;
+    #[cfg(not(target_arch = "wasm32"))]
+    list_for_dialog(app, ctx);
     if test {
         #[cfg(not(target_arch = "wasm32"))]
         if let Some(s) = app.agent_chat.settings.add.as_ref() {
@@ -1178,5 +1399,183 @@ mod card_tests {
         h.app.preferences.agents.clear();
         assert_eq!(add_agent(&mut h.app), Err(tr("ui.ai_edit_gone").to_string()));
         assert!(h.app.preferences.agents.is_empty());
+    }
+
+    /// An `agent_http` that may not be called on the window's thread: it answers `/models` as
+    /// OpenRouter does, or 401 for an address with `refused` in it, and records what it was asked.
+    fn listing_http(h: &mut Harness) -> std::sync::Arc<std::sync::Mutex<Vec<(String, bool)>>> {
+        let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let log = seen.clone();
+        let ui_thread = std::thread::current().id();
+        h.app.services.agent_http = Some(std::sync::Arc::new(move |request: &super::super::backend::HttpRequest| {
+            assert_ne!(std::thread::current().id(), ui_thread);
+            // The running agent's capability check goes through here too.
+            if request.url.ends_with("/models")
+                && let Ok(mut log) = log.lock()
+            {
+                log.push((request.url.clone(), request.headers.iter().any(|(name, _)| name == "Authorization")));
+            }
+            if request.url.contains("refused") {
+                return Ok((401, br#"{"error":{"message":"no such key"}}"#.to_vec()));
+            }
+            Ok((200, json!({"data": [{"id": "vendor/big", "name": "Vendor: Big"}, {"id": "vendor/small"}]}).to_string().into_bytes()))
+        }));
+        seen
+    }
+
+    fn list_settled(h: &mut Harness) {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        h.frames(2);
+        while (h.app.agent_chat.settings.listing.is_some() || h.app.agent_chat.settings.card_listing.is_some())
+            && std::time::Instant::now() < deadline
+        {
+            std::thread::sleep(std::time::Duration::from_millis(1));
+            h.frames(1);
+        }
+        assert!(h.app.agent_chat.settings.listing.is_none());
+        h.frames(2);
+    }
+
+    /// The dialog lists an endpoint's models off the window's thread, once per endpoint and key, of
+    /// what the fields say when they are left and not while they are typed in; a key goes only
+    /// where it may. A row and a typed model both fill the field, and Add takes either.
+    #[test]
+    fn the_add_dialog_lists_an_endpoints_models_once_and_takes_a_row_or_a_typed_model() {
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        h.app.preferences.ai_features = true;
+        h.app.agent_chat.detection = Some(Default::default());
+        let seen = listing_http(&mut h);
+        let requests = || seen.lock().unwrap().clone();
+        open_add(&mut h.app);
+        h.frames(3);
+        assert!(requests().is_empty(), "no endpoint chosen yet");
+        h.step(&json!({"click":{"handle":"ai_add:ui.ai_add_endpoint"}})).unwrap();
+        list_settled(&mut h);
+        assert_eq!(requests(), [("http://localhost:11434/v1/models".to_string(), false)]);
+        h.frames(5);
+        assert_eq!(requests().len(), 1, "once");
+
+        h.step(&json!({"click":{"handle":"ai_add:preset"}})).unwrap();
+        h.frames(3);
+        h.step(&json!({"click":{"handle":"ai_add:preset:OpenRouter"}})).unwrap();
+        list_settled(&mut h);
+        assert_eq!(requests().last().cloned(), Some(("https://openrouter.ai/api/v1/models".to_string(), false)));
+
+        // Typed in: no request until the field is left, which here the flag stands for.
+        let add = h.app.agent_chat.settings.add.as_mut().unwrap();
+        add.base_url = "http://10.0.0.2:1234/v1".into();
+        add.key = "not-a-real-key".into();
+        h.frames(5);
+        assert_eq!(requests().len(), 2, "not while it is typed");
+        h.app.agent_chat.settings.add.as_mut().unwrap().list_again = true;
+        list_settled(&mut h);
+        assert_eq!(
+            requests().last().cloned(),
+            Some(("http://10.0.0.2:1234/v1/models".to_string(), false)),
+            "no key over plain http to another computer"
+        );
+        let add = h.app.agent_chat.settings.add.as_mut().unwrap();
+        add.base_url = "https://openrouter.ai/api/v1".into();
+        add.list_again = true;
+        list_settled(&mut h);
+        assert_eq!(requests().last().cloned(), Some(("https://openrouter.ai/api/v1/models".to_string(), true)), "with a key is another listing");
+
+        // A row and a typed model.
+        assert!(scenario::handle_at("ai_add:model").is_some());
+        h.step(&json!({"click":{"handle":"ai_add:model"}})).unwrap();
+        h.frames(3);
+        assert!(scenario::handle_at("ai_add:model:search").is_some());
+        h.step(&json!({"click":{"handle":"ai_add:model:vendor/big"}})).unwrap();
+        h.frames(3);
+        assert_eq!(h.app.agent_chat.settings.add.as_ref().unwrap().model, "vendor/big");
+        h.step(&json!({"click":{"handle":"ai_add:model"}})).unwrap();
+        h.frames(3);
+        h.step(&json!({"text":"vendor/own:free"})).unwrap();
+        h.frames(3);
+        h.step(&json!({"click":{"handle":"ai_add:model:custom"}})).unwrap();
+        h.frames(3);
+        assert_eq!(h.app.agent_chat.settings.add.as_ref().unwrap().model, "vendor/own:free");
+        assert_eq!(requests().len(), 4, "opening the picker asks nobody again");
+
+        // A refusal shows in the popup, and opening it again asks again.
+        let add = h.app.agent_chat.settings.add.as_mut().unwrap();
+        add.base_url = "https://refused.example/v1".into();
+        add.key.clear();
+        add.list_again = true;
+        list_settled(&mut h);
+        h.step(&json!({"click":{"handle":"ai_add:model"}})).unwrap();
+        list_settled(&mut h);
+        assert_eq!(requests().len(), 6, "asked again on opening");
+        let listing = h.app.agent_chat.settings.add.as_ref().unwrap().listing.clone();
+        let (models, note) = listed_for(&h.app.agent_chat.settings.endpoint_models, listing.as_ref());
+        assert!(models.is_empty());
+        assert!(note.as_deref().is_some_and(|note| note.contains("no such key")), "{note:?}");
+        h.step(&json!({"key":"Escape"})).unwrap();
+        h.frames(3);
+        let add = h.app.agent_chat.settings.add.as_mut().unwrap();
+        add.base_url = "https://openrouter.ai/api/v1".into();
+        h.step(&json!({"click":{"handle":"ai_add:add"}})).unwrap();
+        assert!(h.app.agent_chat.settings.add.is_none());
+        assert_eq!(h.app.preferences.agents.last().map(|a| a.model.as_str()), Some("vendor/own:free"));
+    }
+
+    /// The keychain answers on the listing's thread, not on the window's.
+    struct KeyOffTheWindow(std::thread::ThreadId);
+    impl super::super::backend::Secrets for KeyOffTheWindow {
+        fn get(&self, _: &str) -> Result<Option<String>, String> {
+            assert_ne!(std::thread::current().id(), self.0);
+            Ok(Some("not-a-real-key".into()))
+        }
+        fn set(&self, _: &str, _: &str) -> Result<(), String> {
+            Ok(())
+        }
+        fn delete(&self, _: &str) -> Result<(), String> {
+            Ok(())
+        }
+    }
+
+    /// An endpoint's card has a model row. The page asks nobody; opening the picker lists, with the
+    /// agent's key from the keychain, and a row or a typed model becomes an idle agent's model.
+    #[test]
+    fn the_card_lists_when_its_picker_opens_and_changes_an_idle_endpoints_model() {
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        h.app.preferences.ai_features = true;
+        h.app.agent_chat.detection = Some(Default::default());
+        h.app.services.secrets = Some(std::sync::Arc::new(KeyOffTheWindow(std::thread::current().id())));
+        let seen = listing_http(&mut h);
+        h.app.preferences.agents.push(AgentConfig {
+            id: "api-1".into(),
+            name: "Endpoint".into(),
+            kind: Kind::Api,
+            base_url: "http://localhost:1/v1".into(),
+            model: "local".into(),
+            key: true,
+            ..Default::default()
+        });
+        h.step(&json!({"call":"ui.prefs","params":{"open":"AI"}})).unwrap();
+        h.frames(4);
+        assert!(scenario::handle_at("prefs:ai_model:api-1").is_some());
+        assert!(seen.lock().unwrap().is_empty(), "looking at the page asks nobody");
+
+        h.step(&json!({"click":{"handle":"prefs:ai_model:api-1"}})).unwrap();
+        list_settled(&mut h);
+        assert_eq!(*seen.lock().unwrap(), [("http://localhost:1/v1/models".to_string(), true)]);
+        h.step(&json!({"click":{"handle":"prefs:ai_model:api-1:vendor/big"}})).unwrap();
+        h.frames(3);
+        let model = |h: &Harness| h.app.preferences.agents.iter().find(|a| a.id == "api-1").map(|a| a.model.clone());
+        assert_eq!(model(&h).as_deref(), Some("vendor/big"));
+        assert_eq!(h.app.preferences.agent_models.get("api-1").map(String::as_str), Some("vendor/big"));
+
+        h.step(&json!({"click":{"handle":"prefs:ai_model:api-1"}})).unwrap();
+        h.frames(3);
+        h.step(&json!({"text":"  vendor/own "})).unwrap();
+        h.frames(3);
+        h.step(&json!({"click":{"handle":"prefs:ai_model:api-1:custom"}})).unwrap();
+        h.frames(3);
+        assert_eq!(model(&h).as_deref(), Some("vendor/own"));
+        assert_eq!(h.app.preferences.agent_models.get("api-1").map(String::as_str), Some("vendor/own"));
+        assert_eq!(seen.lock().unwrap().len(), 1, "listed once");
     }
 }

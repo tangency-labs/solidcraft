@@ -5,7 +5,8 @@
     "ui.agent_chat_model_rejected": "The agent did not accept {model}: {error}",
     "ui.agent_chat_model_search": "Search models…",
     "ui.agent_chat_models_failed": "Couldn't list models: {error}",
-    "ui.agent_chat_models_heading": "Available models"
+    "ui.agent_chat_models_heading": "Available models",
+    "ui.agent_chat_models_listing": "Listing models…"
   },
   "de": {
     "ui.agent_chat_custom_heading": "Eigenes Modell",
@@ -13,7 +14,8 @@
     "ui.agent_chat_model_rejected": "Der Agent hat {model} nicht akzeptiert: {error}",
     "ui.agent_chat_model_search": "Modelle suchen…",
     "ui.agent_chat_models_failed": "Modelle konnten nicht abgerufen werden: {error}",
-    "ui.agent_chat_models_heading": "Verfügbare Modelle"
+    "ui.agent_chat_models_heading": "Verfügbare Modelle",
+    "ui.agent_chat_models_listing": "Modelle werden abgerufen…"
   },
   "ko": {
     "ui.agent_chat_custom_heading": "사용자 지정 모델",
@@ -21,7 +23,8 @@
     "ui.agent_chat_model_rejected": "에이전트가 {model}을(를) 받아들이지 않았습니다: {error}",
     "ui.agent_chat_model_search": "모델 검색…",
     "ui.agent_chat_models_failed": "모델 목록을 가져올 수 없습니다: {error}",
-    "ui.agent_chat_models_heading": "사용 가능한 모델"
+    "ui.agent_chat_models_heading": "사용 가능한 모델",
+    "ui.agent_chat_models_listing": "모델 목록을 가져오는 중…"
   },
   "ar": {
     "ui.agent_chat_custom_heading": "نموذج مخصص",
@@ -29,7 +32,8 @@
     "ui.agent_chat_model_rejected": "لم يقبل الوكيل {model}: {error}",
     "ui.agent_chat_model_search": "البحث عن النماذج…",
     "ui.agent_chat_models_failed": "تعذّر جلب قائمة النماذج: {error}",
-    "ui.agent_chat_models_heading": "النماذج المتاحة"
+    "ui.agent_chat_models_heading": "النماذج المتاحة",
+    "ui.agent_chat_models_listing": "جارٍ جلب قائمة النماذج…"
   },
   "he": {
     "ui.agent_chat_custom_heading": "מודל מותאם אישית",
@@ -37,7 +41,8 @@
     "ui.agent_chat_model_rejected": "הסוכן לא קיבל את {model}: {error}",
     "ui.agent_chat_model_search": "חיפוש מודלים…",
     "ui.agent_chat_models_failed": "לא ניתן היה לטעון את רשימת המודלים: {error}",
-    "ui.agent_chat_models_heading": "מודלים זמינים"
+    "ui.agent_chat_models_heading": "מודלים זמינים",
+    "ui.agent_chat_models_listing": "טוען רשימת מודלים…"
   },
   "ja": {
     "ui.agent_chat_custom_heading": "カスタムモデル",
@@ -45,7 +50,8 @@
     "ui.agent_chat_model_rejected": "エージェントは {model} を受け付けませんでした: {error}",
     "ui.agent_chat_model_search": "モデルを検索…",
     "ui.agent_chat_models_failed": "モデルを一覧表示できませんでした: {error}",
-    "ui.agent_chat_models_heading": "利用可能なモデル"
+    "ui.agent_chat_models_heading": "利用可能なモデル",
+    "ui.agent_chat_models_listing": "モデルを一覧表示中…"
   },
   "vi": {
     "ui.agent_chat_custom_heading": "Mô hình tùy chỉnh",
@@ -53,7 +59,8 @@
     "ui.agent_chat_model_rejected": "Tác tử không chấp nhận {model}: {error}",
     "ui.agent_chat_model_search": "Tìm mô hình…",
     "ui.agent_chat_models_failed": "Không thể lấy danh sách mô hình: {error}",
-    "ui.agent_chat_models_heading": "Các mô hình có sẵn"
+    "ui.agent_chat_models_heading": "Các mô hình có sẵn",
+    "ui.agent_chat_models_listing": "Đang lấy danh sách mô hình…"
   },
   "zh": {
     "ui.agent_chat_custom_heading": "自定义模型",
@@ -61,6 +68,7 @@
     "ui.agent_chat_model_rejected": "智能体未接受 {model}:{error}",
     "ui.agent_chat_model_search": "搜索模型…",
     "ui.agent_chat_models_failed": "无法列出模型:{error}",
-    "ui.agent_chat_models_heading": "可用模型"
+    "ui.agent_chat_models_heading": "可用模型",
+    "ui.agent_chat_models_listing": "正在列出模型…"
   }
 }

@@ -261,7 +261,6 @@ const SEARCH_ROWS_AWAITED: usize = 6;
 
 /// One row of a `search_picker`. The value, label and tip are searched; `tip` also shows on hover,
 /// and a change of `group` between rows draws a heading.
-#[cfg_attr(target_arch = "wasm32", allow(dead_code))] // Until the Add agent dialog uses it.
 pub(crate) struct SearchChoice<'a> {
     pub value: &'a str,
     pub label: &'a str,
@@ -270,7 +269,6 @@ pub(crate) struct SearchChoice<'a> {
 }
 
 /// What a `search_picker` shows.
-#[cfg_attr(target_arch = "wasm32", allow(dead_code))] // Until the Add agent dialog uses it.
 pub(crate) struct SearchPicker<'a> {
     /// ComboBox id salt; it also keys the search text, so one per picker in the window.
     pub id: &'a str,
@@ -302,7 +300,6 @@ pub(crate) enum Picked {
 /// the exact or first match, else the typed text. Only the rows in view are laid out, so a long
 /// list stays cheap. Returns the pick and the control's response.
 /// Tokens: dropdown tokens, field tokens, `space_24`, `font_small`, `text_dim`, `form_card_width`.
-#[cfg_attr(target_arch = "wasm32", allow(dead_code))] // Until the Add agent dialog uses it.
 pub(crate) fn search_picker(ui: &mut Ui, p: SearchPicker<'_>) -> egui::InnerResponse<Option<Picked>> {
     crate::prefs_search::note_current(ui, p.current);
     // As in `dropdown_menu_with_close_behavior`: only a search probe skips the real control.
@@ -360,9 +357,13 @@ fn search_picker_popup(ui: &mut Ui, p: &SearchPicker<'_>, state: egui::Id) -> Op
     );
     t.input_bevel(ui, &search);
     scenario::publish_target(&format!("{}:search", p.handles), search.rect);
+    // Asked until it has it: over a modal window egui drops the request of the opening's first frame.
     if !ui.data(|data| data.get_temp::<bool>(focused_id)).unwrap_or(false) {
-        search.request_focus();
-        ui.data_mut(|data| data.insert_temp(focused_id, true));
+        if search.has_focus() {
+            ui.data_mut(|data| data.insert_temp(focused_id, true));
+        } else {
+            search.request_focus();
+        }
     }
     if search.has_focus() {
         crate::prefs_search::note_key_sink(ui.ctx());
