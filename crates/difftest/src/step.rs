@@ -1065,6 +1065,15 @@ pub fn run_corpus(root: &Path, opts: &CorpusOptions) -> ExitCode {
     }
 }
 
+/// `file` relative to the corpus directory, with `/` on every platform: the globs,
+/// the body ids and the report all use this form.
+fn corpus_rel(file: &Path, dir: &Path) -> String {
+    file.strip_prefix(dir)
+        .unwrap_or(file)
+        .to_string_lossy()
+        .replace('\\', "/")
+}
+
 fn run_corpus_inner(root: &Path, opts: &CorpusOptions) -> Result<(), HarnessError> {
     let dir = root.join(CORPUS_DIR);
     let mut files = Vec::new();
@@ -1076,12 +1085,9 @@ fn run_corpus_inner(root: &Path, opts: &CorpusOptions) -> Result<(), HarnessErro
         )));
     }
     files.retain(|f| {
-        let rel = f
-            .strip_prefix(&dir)
-            .unwrap_or(f)
-            .to_string_lossy()
-            .into_owned();
-        opts.glob.as_deref().is_none_or(|g| glob_match(g, &rel))
+        opts.glob
+            .as_deref()
+            .is_none_or(|g| glob_match(g, &corpus_rel(f, &dir)))
     });
     // smallest first
     files.sort_by_key(|f| (std::fs::metadata(f).map_or(0, |m| m.len()), f.clone()));
@@ -1099,11 +1105,7 @@ fn run_corpus_inner(root: &Path, opts: &CorpusOptions) -> Result<(), HarnessErro
     let mut work_file: Vec<usize> = Vec::new();
     let mut unsupported: BTreeMap<String, usize> = BTreeMap::new();
     for (fi, f) in files.iter().enumerate() {
-        let rel = f
-            .strip_prefix(&dir)
-            .unwrap_or(f)
-            .to_string_lossy()
-            .into_owned();
+        let rel = corpus_rel(f, &dir);
         let bytes = std::fs::read(f).map_err(|e| HarnessError::new(format!("{rel}: {e}")))?;
         match step_import::import(&bytes, &step_import::Limits::default()) {
             Err(e) => file_entries.push(json!({"file": rel, "parse": e.to_string(), "bodies": []})),
@@ -1304,6 +1306,16 @@ mod tests {
             deferred: Some(("unit.x".into(), "SmX::Y".into())),
             ..built(1.0)
         }
+    }
+
+    #[test]
+    fn corpus_paths_use_forward_slashes() {
+        // Built with `join`, so this uses the platform's own separator.
+        let dir = Path::new("corpus").join("steptools");
+        let file = dir.join("ap203").join("block.stp");
+        let rel = corpus_rel(&file, &dir);
+        assert_eq!(rel, "ap203/block.stp");
+        assert!(glob_match("ap203/*", &rel));
     }
 
     #[test]
