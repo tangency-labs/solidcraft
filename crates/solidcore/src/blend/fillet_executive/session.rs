@@ -1514,6 +1514,57 @@ impl<'target> FilletSession<'target> {
         )
     }
 
+    /// The per-edge `SetFilletParameters` overload (`SmFilletExecutive.cpp:865`) with a
+    /// solver type per edge (`radius_types`, one per edge or one for all): what the
+    /// SolidCraft fork's `SmOffsetFacesExecutive` calls on a bare `SmFilletExecutive`
+    /// (not upstream's API wrappers: no `SetDoGlobalMerge`), default tolerances and no
+    /// laws.
+    ///
+    /// # Errors
+    /// Native invalid input for an empty edge list or mismatched list sizes; real
+    /// parameter/constructor/loader errors.
+    #[allow(clippy::too_many_arguments)] // the native overload's parameters
+    pub(crate) fn prepare_per_edge_solvers(
+        &mut self,
+        k: &mut Kernel,
+        edges: &[EdgeId],
+        sizes: &[f64],
+        xsect_types: &[FilletSurfaceGeneratorType],
+        radius_types: &[FilletSolverType],
+        continuity: u32,
+        thumbweight: f64,
+    ) -> Result<()> {
+        if edges.is_empty() {
+            return Err(SolidError::Upstream {
+                operation: OP,
+                code: crate::error::SM_ERR_INVALID_INPUT,
+                entity: None,
+            });
+        }
+        let edges = edges
+            .iter()
+            .map(|id| FilletObject::Topology(FilletBody::Target, EntityRef::Edge(*id)))
+            .collect::<Vec<_>>();
+        self.executive.set_fillet_parameters(
+            k,
+            &mut self.objects,
+            &FilletParameters {
+                brep: Some(FilletObject::Body(FilletBody::Target)),
+                edges: &edges,
+                xsect_types,
+                radius_types,
+                radius_values: sizes,
+                var_rad_laws: None,
+                approx_tol: -1.0,
+                ang_tol_deg: -1.0,
+                tan_tol_deg: -1.0,
+                xsect_tol: -1.0,
+                continuity,
+                thumbweight,
+            },
+        )
+    }
+
     #[allow(clippy::too_many_arguments)] // the native overload's parameters
     fn prepare_per_edge(
         &mut self,

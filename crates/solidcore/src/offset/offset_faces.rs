@@ -19,12 +19,25 @@
 //! | [`OffsetFacesExecutive::restore`]     | `OffsetFaces` step 6 (attributes put back)        |
 //! | `keep` / `put` (private)              | `sm_Keep` / `sm_Put`                              |
 //! | `face_across` (private)               | `sm_FaceAcross`                                   |
+//! | [`OffsetFacesExecutive::move_faces`]  | `OffsetFaces` step 4 (the faces moved)            |
+//! | [`OffsetFacesExecutive::reblend`]     | `OffsetFaces` step 5 (the sharp edges blended again) |
+//! | `outer_faceuse` (private)             | `sm_OuterFaceuse`                                 |
 //!
 //! Deviations:
 //! - **Scope (this change).** The marks, the collection of the followed blends, the
-//!   kept attributes and their restoring (steps 1, 2 and 6 of `OffsetFaces`); taking the
-//!   blends off, the move and the re-blend (steps 3 to 5) and `OffsetFaces` itself follow
-//!   in a later change (#1060 step 4, part 2).
+//!   kept attributes and their restoring (steps 1, 2 and 6 of `OffsetFaces`), the move
+//!   (step 4) and the re-blend (step 5); taking the blends off (step 3) and
+//!   `OffsetFaces` itself follow once the exact-only and ring removals have landed.
+//! - **"Moved no face".** The fork marks the new surfaces and, after the local operation,
+//!   asks whether some face's surface carries the mark. Surfaces here carry no attributes,
+//!   and the local operation's extended offset copies them, so a face is taken to lie on a
+//!   new surface when nine points of its surface over its UV domain drop onto that
+//!   surface within the B-rep's tolerance.
+//! - **Not exact.** The fork's fillet executive can fail with `SM_FILERR_NOT_EXACT`
+//!   (`SM_OFR_NOT_EXACT` then); the port's has no such code, so that branch of step 5
+//!   is never taken.
+//! - **The local operation** runs with notification identities of its own
+//!   ([`local_operation_simple`]), as the fork calls it on the B-rep directly.
 //! - **Marks.** `SmFollowedBlendMark` is an application attribute
 //!   ([`crate::geom::attribute::AttributeHandlers`]) whose merge unions the two objects'
 //!   codes, as the fork's `Merge`. A code added to an object that already has a mark
@@ -37,7 +50,10 @@
 //! - No recursion.
 
 use crate::blend::fillet_executive::p1::is_radius_supported;
+use crate::blend::fillet_executive::session::FilletSession;
+use crate::blend::fillet_geom::p1::FilletErrorType;
 use crate::blend::fillet_solver::p1::FilletSolverType;
+use crate::blend::fillet_solver::p1::FilletSurfaceGeneratorType;
 use crate::blend::identify_fillet::{identify_fillet, IdentifyFilletOptions};
 use crate::error::{EntityRef, Result, SolidError};
 use crate::geom::attribute::{
@@ -46,12 +62,17 @@ use crate::geom::attribute::{
 };
 use crate::geom::global_solver::SolverOperation;
 use crate::kernel::Kernel;
+use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use crate::nurbs::knots::Side;
+use crate::offset::offset_executive::p2::local_operation_simple;
+use crate::offset::offset_geometry_creation::{FaceOffsetBrep, OffsetGeometryCreation};
 use crate::surface::surface::p4::NoObject;
 use crate::surface::surface::p5::DropPointOptions;
+use crate::surface::surface::Surface;
+use crate::topology::brep::p5::{stitch_and_orient, StitchAndOrientOptions};
 use crate::topology::edgeuse::p1::primary_edgeuse;
 use crate::topology::edgeuse::p3::normalized_evaluate;
-use crate::topology::{edge, Brep, EdgeId, FaceId};
+use crate::topology::{edge, Brep, EdgeId, FaceId, FaceuseId};
 
 const OP: &str = "offset::offset_faces";
 
@@ -678,6 +699,286 @@ impl OffsetFacesExecutive {
     }
 }
 
+// ---- step 4: the faces moved ------------------------------------------------------------
+
+/// `sm_OuterFaceuse`: the face use of `f` on the outside of the solid (bounding its
+/// infinite region), or `None`.
+fn outer_faceuse(b: &Brep, f: FaceId) -> Result<Option<FaceuseId>> {
+    let Some(fu) = crate::topology::face::p2::upward_faceuse(b, f)? else {
+        return Ok(None);
+    };
+    let outside = match b.faceuse(fu)?.shell {
+        Some(shell) => b.shell(shell)?.region == b.infinite_region(),
+        None => false,
+    };
+    Ok(if outside {
+        Some(fu)
+    } else {
+        b.faceuse(fu)?.mate
+    })
+}
+
+/// The objects `FaceuseOffset` names: the B-rep's face uses, faces and face surfaces,
+/// and the surfaces and curves it makes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MoveHandle {
+    Faceuse(FaceuseId),
+    Face(FaceId),
+    FaceSurface(FaceId),
+    NewSurface(usize),
+    NewCurve(usize),
+}
+
+/// `SmOffsetGeometryCreation::FaceuseOffset` on a face use of a B-rep: the B-rep read,
+/// the offset surface (and any curve) kept here.
+struct MoveBrep<'a> {
+    b: &'a Brep,
+    surfaces: Vec<Surface>,
+    curves: Vec<crate::curve::curve::Curve>,
+}
+
+fn bad_handle() -> SolidError {
+    SolidError::invalid_input(OP, "not an object of the face move")
+}
+
+impl FaceOffsetBrep<MoveHandle> for MoveBrep<'_> {
+    fn faceuse_orientation(&self, faceuse: MoveHandle) -> Result<OrientType> {
+        match faceuse {
+            MoveHandle::Faceuse(fu) => Ok(self.b.faceuse(fu)?.orientation),
+            _ => Err(bad_handle()),
+        }
+    }
+
+    fn faceuse_face(&self, faceuse: MoveHandle) -> Result<Option<MoveHandle>> {
+        match faceuse {
+            MoveHandle::Faceuse(fu) => Ok(self.b.faceuse(fu)?.face.map(MoveHandle::Face)),
+            _ => Err(bad_handle()),
+        }
+    }
+
+    fn face_surface(&self, face: MoveHandle) -> Result<Option<MoveHandle>> {
+        match face {
+            MoveHandle::Face(f) => Ok(self
+                .b
+                .face(f)?
+                .surface
+                .as_ref()
+                .map(|_| MoveHandle::FaceSurface(f))),
+            _ => Err(bad_handle()),
+        }
+    }
+
+    fn surface(&self, surface: MoveHandle) -> Result<&Surface> {
+        match surface {
+            MoveHandle::FaceSurface(f) => ner(self.b.face(f)?.surface.as_ref()),
+            MoveHandle::NewSurface(i) => self.surfaces.get(i).ok_or_else(bad_handle),
+            _ => Err(bad_handle()),
+        }
+    }
+
+    fn insert_surface(&mut self, surface: Surface) -> Result<MoveHandle> {
+        self.surfaces.push(surface);
+        Ok(MoveHandle::NewSurface(self.surfaces.len() - 1))
+    }
+
+    fn insert_curve(&mut self, curve: crate::curve::curve::Curve) -> Result<MoveHandle> {
+        self.curves.push(curve);
+        Ok(MoveHandle::NewCurve(self.curves.len() - 1))
+    }
+}
+
+/// Whether face `f` lies on one of `targets` (the fork marks the target surfaces and
+/// asks whether a face's surface carries the mark; see the module deviations): nine
+/// points of the face's surface over its UV domain within `tol` of a target.
+fn on_target(k: &Kernel, b: &Brep, f: FaceId, targets: &[Surface], tol: f64) -> Result<bool> {
+    let Some(s) = crate::topology::face::p2::surface(b, f)? else {
+        return Ok(false);
+    };
+    let domain = crate::topology::face::p2::uv_domain(b, f)?;
+    let mut points = Vec::new();
+    for i in 0..3u32 {
+        for j in 0..3u32 {
+            let uv = domain.evaluate(f64::from(i) / 2.0, f64::from(j) / 2.0);
+            points.push(s.evaluate_point(k, uv)?);
+        }
+    }
+    for t in targets {
+        let t_domain = t.natural_uv_domain_with_nurb(k)?;
+        let mut all = true;
+        for &p in &points {
+            let d = t.drop_point::<NoObject>(k, p, &t_domain, &DropPointOptions::default())?;
+            if !(d.success && d.gap <= tol) {
+                all = false;
+                break;
+            }
+        }
+        if all {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+impl OffsetFacesExecutive {
+    /// `OffsetFaces` step 4: the faces marked [`MARK_MOVED`] moved, each onto its
+    /// surface's offset by `distance` along its outward normal (inward from its mate),
+    /// the faces around extended or trimmed to meet it (`SmBrep::LocalOperation`); some
+    /// face must then lie on one of the new surfaces.
+    ///
+    /// # Errors
+    ///
+    /// `SM_ERR_INVALID_INPUT` for a moved face without face use; `SM_ERR` for a face
+    /// whose offset is no surface (collapsed onto its spine, or not made); those of
+    /// `FaceuseOffset` and of the local operation; `SM_ERR` with
+    /// [`OffsetFacesRefusal::NoEffect`] when no face lies on a new surface.
+    pub fn move_faces(
+        &mut self,
+        k: &mut Kernel,
+        b: &mut Brep,
+        distance: f64,
+        tol: f64,
+    ) -> Result<()> {
+        let make = OffsetGeometryCreation::new(distance.abs(), tol);
+        let moved: Vec<FaceId> = crate::topology::brep::p1::faces(b, None)?
+            .into_iter()
+            .filter(|&f| FollowedBlendMark::has(b, Some(EntityRef::Face(f)), MARK_MOVED))
+            .collect();
+        let mut faces = Vec::new();
+        let mut surfaces = Vec::new();
+        for f in moved {
+            let mut fu = outer_faceuse(b, f)?;
+            if let (Some(x), true) = (fu, distance < 0.0) {
+                fu = b.faceuse(x)?.mate;
+            }
+            let Some(fu) = fu else {
+                return Err(SolidError::Upstream {
+                    operation: OP,
+                    code: crate::error::SM_ERR_INVALID_INPUT,
+                    entity: None,
+                });
+            };
+            let mut adapter = MoveBrep {
+                b,
+                surfaces: Vec::new(),
+                curves: Vec::new(),
+            };
+            let (surface, _) =
+                make.faceuse_offset_with_backend(k, &mut adapter, MoveHandle::Faceuse(fu), true)?;
+            // A face whose offset collapses onto its spine has no surface to move to (and
+            // since 758829c no other face's offset is missing without failing).
+            let Some(MoveHandle::NewSurface(i)) = surface else {
+                return Err(sm_err());
+            };
+            let surface = adapter.surfaces.into_iter().nth(i).ok_or_else(sm_err)?;
+            faces.push(f);
+            surfaces.push(surface);
+        }
+        let targets: Vec<Surface> = surfaces.clone();
+        // The local operation takes the surfaces over, also when it fails.
+        local_operation_simple(k, b, &faces, surfaces)?;
+
+        // Some face must lie on one of the surfaces, or the operation moved none.
+        let mut moved_any = false;
+        for f in crate::topology::brep::p1::faces(b, None)? {
+            if on_target(k, b, f, &targets, tol)? {
+                moved_any = true;
+                break;
+            }
+        }
+        if !moved_any {
+            return Err(self.refuse(
+                OffsetFacesRefusal::NoEffect,
+                "the local operation reported success but moved no face onto its new surface",
+                None,
+            ));
+        }
+        Ok(())
+    }
+
+    /// `OffsetFaces` step 5: the sharp edges each followed blend became ([`MARK_SHARP`]),
+    /// where they still lie between its two faces, blended again in one fillet executive
+    /// call at each blend's size and of its kind (circular sections), then
+    /// `StitchAndOrient`. Every face is marked [`MARK_BEFORE`] first, for step 6.
+    ///
+    /// # Errors
+    ///
+    /// `SM_ERR` with [`OffsetFacesRefusal::NoRoom`] when a blend's edge is gone or the
+    /// executive reports no room (its comment as the reason's detail); the executive's
+    /// and the stitch's own errors.
+    pub fn reblend(&mut self, k: &mut Kernel, b: &mut Brep, blends: &[Followed]) -> Result<()> {
+        let mut edges = Vec::new();
+        let mut sections = Vec::new();
+        let mut solvers = Vec::new();
+        let mut sizes = Vec::new();
+        let all = crate::topology::brep::p1::edges(b, None)?;
+        for (ii, rb) in blends.iter().enumerate() {
+            let base = i64::try_from(ii).map_err(|_| sm_err())? * MARK_STRIDE;
+            let mut found = 0usize;
+            for &e in &all {
+                if !FollowedBlendMark::has(b, Some(EntityRef::Edge(e)), base + MARK_SHARP) {
+                    continue;
+                }
+                let on = edge::faces(b, e, None)?;
+                let [f0, f1] = on.as_slice() else {
+                    continue;
+                };
+                let (f0, f1) = (Some(EntityRef::Face(*f0)), Some(EntityRef::Face(*f1)));
+                let s0 = base + MARK_SUPPORT;
+                let s1 = base + MARK_SUPPORT + 1;
+                // still where the blend's two faces meet
+                if !edge::is_manifold(b, e)?
+                    || !((FollowedBlendMark::has(b, f0, s0) && FollowedBlendMark::has(b, f1, s1))
+                        || (FollowedBlendMark::has(b, f0, s1) && FollowedBlendMark::has(b, f1, s0)))
+                {
+                    continue;
+                }
+                edges.push(e);
+                sections.push(FilletSurfaceGeneratorType::Circular);
+                solvers.push(rb.solver);
+                sizes.push(rb.size);
+                found += 1;
+            }
+            if found == 0 {
+                return Err(self.refuse(
+                    OffsetFacesRefusal::NoRoom,
+                    "the move took a blend's faces apart: the edge it rolls along is gone, so the blend no longer fits",
+                    None,
+                ));
+            }
+        }
+        for f in crate::topology::brep::p1::faces(b, None)? {
+            FollowedBlendMark::add(b, Some(EntityRef::Face(f)), MARK_BEFORE)?;
+        }
+        let (status, code, comment) = {
+            let mut session = FilletSession::new(k, b)?;
+            let status = session
+                .prepare_per_edge_solvers(k, &edges, &sizes, &sections, &solvers, 1, 1.0)
+                .and_then(|()| session.do_fillet(k));
+            let info = session.error_info();
+            (status, info.code, info.comment.clone())
+        };
+        if let Err(e) = status {
+            if e.is_unported() {
+                return Err(e);
+            }
+            if code == FilletErrorType::NoRoom as i32 {
+                return Err(self.refuse(
+                    OffsetFacesRefusal::NoRoom,
+                    "a blend that follows a moved face no longer fits",
+                    Some(&comment),
+                ));
+            }
+            // (the fork's SM_FILERR_NOT_EXACT has no counterpart here: see the module
+            // deviations)
+            if !comment.is_empty() {
+                self.reason = format!("putting back a blend that follows a moved face: {comment}");
+            }
+            return Err(e);
+        }
+        stitch_and_orient(k, b, &StitchAndOrientOptions::default())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     #![allow(clippy::unwrap_used, clippy::indexing_slicing)]
@@ -920,5 +1221,105 @@ mod tests {
         let mut ex = OffsetFacesExecutive::new();
         assert!(ex.collect(&k, &mut b, &[bottom], tol).unwrap().is_empty());
         assert_eq!(ex.followed_blends(), 0);
+    }
+
+    /// The volume at the integration tolerance 1e-9.
+    fn volume(k: &Kernel, b: &mut Brep) -> f64 {
+        let store = AttributeStore::default();
+        let attrs = crate::mass::integrator::properties::PropertyAttributes {
+            store: &store,
+            key_of: &|_| ObjectKey(0),
+        };
+        crate::mass::integrator::properties::brep_volume(k, b, 1e-9, &attrs).unwrap()
+    }
+
+    #[test]
+    fn moved_top_and_a_round_put_back_on_its_sharp_edge() {
+        // The state after step 3 on the block's top front round: the sharp block, its
+        // top front edge marked as the round's sharp edge, the top and front as the faces
+        // it rolls on, the top to move.
+        let mut k = Kernel::default();
+        let mut b = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 60.0, 40.0, 20.0).unwrap();
+        let top = face_where(&b, |p| (p.z - 20.0).abs() < 1e-6);
+        let front = face_where(&b, |p| (p.y - 0.0).abs() < 1e-6);
+        let sharp = edge_where(&b, |p| p.y.abs() < 1e-6 && (p.z - 20.0).abs() < 1e-6);
+        FollowedBlendMark::add(&mut b, Some(EntityRef::Face(top)), MARK_MOVED).unwrap();
+        FollowedBlendMark::add(&mut b, Some(EntityRef::Face(top)), MARK_SUPPORT).unwrap();
+        FollowedBlendMark::add(&mut b, Some(EntityRef::Face(front)), MARK_SUPPORT + 1).unwrap();
+        FollowedBlendMark::add(&mut b, Some(EntityRef::Edge(sharp)), MARK_SHARP).unwrap();
+        let blends = [Followed {
+            blend: None,
+            rails: [None, None],
+            solver: FilletSolverType::ConstRadius,
+            size: 2.0,
+            face_attrs: vec![Attribute::long(20001, 7, Behavior::Copy)],
+            rail_attrs: [Vec::new(), Vec::new()],
+            seam_attrs: Vec::new(),
+            end_attrs: Vec::new(),
+            end_across: Vec::new(),
+            taken_off: true,
+        }];
+        let tol = b.tolerance();
+        let mut ex = OffsetFacesExecutive::new();
+        ex.move_faces(&mut k, &mut b, 1.0, tol).unwrap();
+        ex.reblend(&mut k, &mut b, &blends).unwrap();
+        OffsetFacesExecutive::restore(&mut b, &blends).unwrap();
+        FollowedBlendMark::remove_from_topology(&mut b).unwrap();
+
+        // the block 21 high, its top front edge rounded r 2
+        assert_eq!(b.face_list().len(), 7);
+        let want = 60.0 * 40.0 * 21.0 - 60.0 * 4.0 * (1.0 - crate::math::PI / 4.0);
+        let got = volume(&k, &mut b);
+        assert!(
+            (got - want).abs() <= 1e-9 * want,
+            "volume {got}, expected {want}"
+        );
+        // the new round stands for the old one
+        let round = *b
+            .face_list()
+            .iter()
+            .find(|&&f| !face_surface_is_plane(&b, f))
+            .unwrap();
+        let tag = b.find_attribute(EntityRef::Face(round), 20001).unwrap();
+        assert_eq!(tag.long_value(), Some(7));
+        assert!(b
+            .attributed_entities()
+            .iter()
+            .all(|&e| FollowedBlendMark::on(&b, e).is_none()));
+    }
+
+    #[test]
+    fn a_blend_whose_edge_is_gone_no_longer_fits() {
+        let mut k = Kernel::default();
+        let mut b = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 10.0, 10.0, 10.0).unwrap();
+        let blends = [Followed {
+            blend: None,
+            rails: [None, None],
+            solver: FilletSolverType::ConstRadius,
+            size: 1.0,
+            face_attrs: Vec::new(),
+            rail_attrs: [Vec::new(), Vec::new()],
+            seam_attrs: Vec::new(),
+            end_attrs: Vec::new(),
+            end_across: Vec::new(),
+            taken_off: true,
+        }];
+        let mut ex = OffsetFacesExecutive::new();
+        assert!(ex.reblend(&mut k, &mut b, &blends).is_err());
+        assert_eq!(ex.refusal(), OffsetFacesRefusal::NoRoom);
+        assert!(ex.reason().contains("no longer fits"), "{}", ex.reason());
+    }
+
+    #[test]
+    fn a_move_onto_the_offset_surface_lies_on_it() {
+        let mut k = Kernel::default();
+        let mut b = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 10.0, 10.0, 10.0).unwrap();
+        let top = face_where(&b, |p| (p.z - 10.0).abs() < 1e-6);
+        FollowedBlendMark::add(&mut b, Some(EntityRef::Face(top)), MARK_MOVED).unwrap();
+        let tol = b.tolerance();
+        let mut ex = OffsetFacesExecutive::new();
+        ex.move_faces(&mut k, &mut b, -2.0, tol).unwrap();
+        let got = volume(&k, &mut b);
+        assert!((got - 800.0).abs() <= 1e-9 * 800.0, "volume {got}");
     }
 }
