@@ -116,7 +116,8 @@
 //!   caller's pointer); Rust returns [`SolidError::InvalidInput`] (see
 //!   `plan/upstream-issues.md`).
 //! - `SmCPolyFace::RemovePolyFace` of a face that is not a member removes the first
-//!   member (`FindElement` leaves the index at 0); kept (see `plan/upstream-issues.md`).
+//!   member (`FindElement` leaves the index at 0); kept by default for parity (WR-81;
+//!   opt-in fix [`UpstreamFixes::cpoly_remove_poly_face_check_member`]).
 //! - A composite face cannot be a member of a composite face, nor the source of
 //!   [`PolyBrep::add_cpoly_face`] ([`SolidError::InvalidInput`]). Upstream only ever
 //!   adds shell faces (`SmLineSegClass.cpp`), but `AddPolyFace` would accept a composite
@@ -176,7 +177,7 @@ use crate::geom::point_set::PointSet3d;
 use crate::geom::pseudo_box::PseudoBox;
 use crate::geom::tol;
 use crate::geom::vector2d::Vec2;
-use crate::kernel::Kernel;
+use crate::kernel::{Kernel, UpstreamFixes};
 use crate::math::{Point3, Vec3, BIG_DOUBLE, EFF_ZERO, EFF_ZERO_PARAM, EFF_ZERO_SQ, UNDEF_DOUBLE};
 use crate::topology::topology::TopologyRecords;
 use crate::topology::{vertex, Brep, FaceId, VertexId};
@@ -748,6 +749,8 @@ fn transform_poly_normal(
 pub struct PolyBrep {
     /// `m_sZoneTol3d`.
     tolerance: f64,
+    /// Opt-in upstream defect fixes.
+    pub fixes: UpstreamFixes,
     /// `m_bOKBackPtrs`.
     ok_back_ptrs: bool,
     /// `m_bOwnsContext`.
@@ -782,6 +785,7 @@ impl PolyBrep {
     pub fn new(k: &Kernel, zone_tol: f64) -> Self {
         Self {
             tolerance: tol::zone_tol3d(k, zone_tol),
+            fixes: k.fixes,
             ok_back_ptrs: false,
             owns_context: false,
             aobject: AObject::new(),
@@ -2556,8 +2560,12 @@ impl PolyBrep {
     }
 
     /// `SmCPolyFace::RemovePolyFace`: removes the first occurrence of `face` from the
-    /// members; a face that is not a member removes the first member (upstream's
-    /// found index stays 0), nothing when there are no members.
+    /// members.
+    ///
+    /// By default (upstream behaviour, WR-81), a face that is not a member removes
+    /// the first member (upstream's `FindElement` status is ignored and found index
+    /// stays 0). With [`Kernel::fixes.cpoly_remove_poly_face_check_member`](crate::kernel::UpstreamFixes::cpoly_remove_poly_face_check_member)
+    /// (or [`PolyBrep::fixes`]), removing a non-member does nothing.
     ///
     /// # Errors
     ///
@@ -2571,9 +2579,16 @@ impl PolyBrep {
         .composite
         .as_mut()
         .ok_or(dead("query::poly::PolyBrep::cpoly_remove_poly_face"))?;
-        let found = members.iter().position(|&m| m == face).unwrap_or(0);
-        if found < members.len() {
-            members.remove(found);
+        let pos = members.iter().position(|&m| m == face);
+        if self.fixes.cpoly_remove_poly_face_check_member {
+            if let Some(i) = pos {
+                members.remove(i);
+            }
+        } else {
+            let found = pos.unwrap_or(0);
+            if found < members.len() {
+                members.remove(found);
+            }
         }
         Ok(())
     }
@@ -3973,5 +3988,51 @@ mod tests {
         let mut d = DisplayList::new(3);
         assert_eq!(d.set_display_list_id(7), 3);
         assert_eq!(d.display_list_id(), 7);
+    }
+
+    #[test]
+    fn wr81_remove_poly_face_non_member() {
+        let mut k = Kernel::default();
+        let (mut b, f1, _, _) = square(&k);
+        let shell = b.face_poly_shell(f1).unwrap().unwrap();
+        let f2 = b.add_face(&k, shell, 1.0e-5, None).unwrap();
+        let c = b.add_cpoly_face(f1).unwrap();
+        b.cpoly_add_poly_face(c, f2, false).unwrap();
+        assert_eq!(b.cpoly_faces_of_composite(c).unwrap(), vec![f1, f2]);
+
+        // Default behavior (WR-81 bug preserved): removing non-member removes element 0 (f1)
+        let non_member = PolyFaceId::from_index(999);
+        b.cpoly_remove_poly_face(c, non_member).unwrap();
+        assert_eq!(b.cpoly_faces_of_composite(c).unwrap(), vec![f2]);
+
+        // Opt-in fix enabled: removing non-member does not remove anything
+        k.fixes.cpoly_remove_poly_face_check_member = true;
+        let (mut b_fixed, f3, _, _) = square(&k);
+        let shell_fixed = b_fixed.face_poly_shell(f3).unwrap().unwrap();
+        let f4 = b_fixed.add_face(&k, shell_fixed, 1.0e-5, None).unwrap();
+        let c_fixed = b_fixed.add_cpoly_face(f3).unwrap();
+        b_fixed.cpoly_add_poly_face(c_fixed, f4, false).unwrap();
+        assert_eq!(
+            b_fixed.cpoly_faces_of_composite(c_fixed).unwrap(),
+            vec![f3, f4]
+        );
+
+        b_fixed.cpoly_remove_poly_face(c_fixed, non_member).unwrap();
+        assert_eq!(
+            b_fixed.cpoly_faces_of_composite(c_fixed).unwrap(),
+            vec![f3, f4]
+        );
+
+        // Valid member removal works
+        b_fixed.cpoly_remove_poly_face(c_fixed, f3).unwrap();
+        assert_eq!(b_fixed.cpoly_faces_of_composite(c_fixed).unwrap(), vec![f4]);
+
+        // Trigger 1: removing a removed member a second time does not remove the remaining member
+        b_fixed.cpoly_remove_poly_face(c_fixed, f3).unwrap();
+        assert_eq!(b_fixed.cpoly_faces_of_composite(c_fixed).unwrap(), vec![f4]);
+
+        // Trigger 2: deleting a face after removing it from composite does not remove remaining members
+        b_fixed.delete_face(f3).unwrap();
+        assert_eq!(b_fixed.cpoly_faces_of_composite(c_fixed).unwrap(), vec![f4]);
     }
 }
