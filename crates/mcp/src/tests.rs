@@ -1005,12 +1005,15 @@ fn a_batch_with_a_matching_expect_reports_the_expectation_met() {
     let box40 = json!({"command": "solid.box", "params": {"length": 40, "width": 30, "height": 20, "corner": [0, 0, 0]}});
     let r = tool(&mut s, "batch", json!({"commands": [box40]}));
     assert!(r.get("expectation").is_none(), "{r}");
-    // `expect` is the tool's argument, not a step key: a step carrying one runs as any step with
-    // a stray key does, and nothing is checked.
+    // `expect` is the tool's argument, not a step key: a step carrying one is refused, as any step
+    // with a stray key is, saying where `expect` goes, instead of running with nothing checked.
     let sphere = json!({"command": "solid.sphere", "params": {"radius": 5, "center": [100, 0, 0]}, "expect": {"bodies": 7}});
-    let r = tool(&mut s, "batch", json!({"commands": [sphere]}));
-    assert_eq!(r["completed"], 1, "{r}");
-    assert!(r.get("expectation").is_none() && r["results"][0].get("expectation").is_none(), "{r}");
+    let r = raw_tool(&mut s, "batch", json!({"commands": [sphere]}));
+    assert_eq!(r["result"]["isError"], true, "{r}");
+    let body: Value = serde_json::from_str(r["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+    assert_eq!((body["completed"].clone(), body["failed"]["index"].clone()), (json!(0), json!(0)), "{body}");
+    assert!(body["failed"]["error"].as_str().is_some_and(|e| e.contains("`expect` is the batch's argument")), "{body}");
+    assert_eq!(tool(&mut s, "measure", json!({}))["body_count"], 1, "the sphere did not run");
 }
 
 /// A volume the design does not match flags the reply as an error that names the mismatch

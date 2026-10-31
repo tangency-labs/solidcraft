@@ -921,6 +921,9 @@ fn batch_step(step: &Value) -> Result<(String, Value, Option<Narrow>), String> {
     // Any other key would be dropped and the command run without its parameters, failing (if at
     // all) with an error about a parameter that seems to be there: `args` for `params`.
     if let Some(k) = step.as_object().into_iter().flat_map(Map::keys).find(|k| !matches!(k.as_str(), "command" | "id" | "params")) {
+        if k == "expect" {
+            return Err("unknown key `expect` in a step: `expect` is the batch's argument, checked after the last step".into());
+        }
         let k: String = k.chars().take(64).collect();
         return Err(format!("unknown key `{k}` in a step: a step is {{command, params}}, its parameters go in `params`"));
     }
