@@ -194,7 +194,7 @@ General › **Show text under ribbon icons** is a separate, saved option for eit
 layout. Turn it off for shorter icon-only command buttons; tooltips, section names
 and command menus remain available.
 
-Interface › Layout › **Show only the ribbon's tabs** (off by default) folds the ribbon to its tab
+Layout › **Show only the ribbon's tabs** (off by default) folds the ribbon to its tab
 row, so the view gets the room its panels took. Click a tab to show its panels over the view; they
 close again when a command starts, when the pointer leaves them, when Escape is pressed or when the
 open tab is clicked again. The command **Ribbon Tabs Only** (VIEW tab, the toolbar's right-click

@@ -154,7 +154,7 @@ Additional handles: `ribbon:workspace`, `ribbon:search`, and `ribbon:section:<TA
 
 ## Folded ribbon
 
-`ribbon_tabs_only` (Interface › Layout, off by default; `view.ribbon_tabs_only` switches it) keeps only the 30 px tab row, plus its 1 px line, from the view: `toolbar::reserved_height` gives the shell that height, in both layouts. The workspace column shows its name and arrow on one line. A tab's click opens the whole ribbon of that tab over the view in a Chrome area at the same place and size it has when not folded; nothing below it moves. It closes when a command starts (`SolveApp::start`), when the pointer leaves it (an open section list, a menu or a dragged button keep it open), on Escape, or when the open tab is clicked again. Render keeps its stage bar whole. Rectangles: `ribbon:folded` while folded, `ribbon:open` while open; the handles inside are the usual ones.
+`ribbon_tabs_only` (Preferences › Layout, off by default; `view.ribbon_tabs_only` switches it) keeps only the 30 px tab row, plus its 1 px line, from the view: `toolbar::reserved_height` gives the shell that height, in both layouts. The workspace column shows its name and arrow on one line. A tab's click opens the whole ribbon of that tab over the view in a Chrome area at the same place and size it has when not folded; nothing below it moves. It closes when a command starts (`SolveApp::start`), when the pointer leaves it (an open section list, a menu or a dragged button keep it open), on Escape, or when the open tab is clicked again. Render keeps its stage bar whole. Rectangles: `ribbon:folded` while folded, `ribbon:open` while open; the handles inside are the usual ones.
 
 ## Workspace and section lists
 
