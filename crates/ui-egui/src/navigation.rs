@@ -733,6 +733,23 @@ pub(crate) fn handle(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &e
     // floating shell card that disables the underlying egui response.
     let captured_orbit = app.viewport.orbit_from.is_some() && button.is_some();
     let dragging = resp.dragged() || (inside && button.is_some()) || captured_orbit;
+    // A middle or right drag keeps the mode it started with until its button is released, as a
+    // left one does (`primary_nav`): letting go of Shift partway through a Shift+middle orbit
+    // doesn't turn the rest into a pan (#9557). Off in Preferences, the keys held decide on every
+    // frame, as before.
+    let button_mode = match button {
+        Some(b) if dragging && app.viewport.axis_drag.is_none() => {
+            let kept = app.viewport.button_nav.filter(|(held, _)| *held == b && app.preferences.nav_drag_keeps_mode);
+            let mode = kept.map_or_else(|| crate::prefs::nav_mode(app, b, mods), |(_, mode)| mode);
+            app.viewport.button_nav = Some((b, mode));
+            mode
+        }
+        Some(_) => None,
+        None => {
+            app.viewport.button_nav = None;
+            None
+        }
+    };
     // Without orbit (a flat page), bindings that orbit do nothing.
     let allowed = |m: NavMode| caps.orbit || m != NavMode::Orbit;
     let motion = modifier_motion(app, ui, inside, hover, mods, picking).filter(|(m, _)| allowed(*m));
@@ -741,7 +758,7 @@ pub(crate) fn handle(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &e
         .or_else(|| {
             if dragging && app.viewport.axis_drag.is_none() {
                 match button {
-                    Some(b) => crate::prefs::nav_mode(app, b, mods),
+                    Some(_) => button_mode,
                     // A press held still that opened Select Other stays its own: egui calls it a
                     // drag after 0.8 s, and moving to a row must not turn the view under the list.
                     None if primary_down && !crate::select_other::is_open(app) => primary_nav,

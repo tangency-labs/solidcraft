@@ -154,6 +154,9 @@ pub struct ViewportState {
     pub primary_nav: Option<NavMode>,
     /// Button-free gesture and its last owned pointer position, kept through pauses.
     pub(crate) modifier_nav: Option<(NavMode, Pos2)>,
+    /// The mode the middle or right drag under way started with, kept until its button is
+    /// released when `nav_drag_keeps_mode` is on (#9557).
+    pub(crate) button_nav: Option<(crate::prefs::NavButton, Option<NavMode>)>,
     /// What a click would pick now (after the active command's filter).
     pub hover: Option<Hit>,
     /// The centre of the circle or arc of the sketch being edited whose edge was hovered last
@@ -10907,6 +10910,56 @@ mod tests {
             h.call("ui.view", json!({"view":"front"}));
             h.call("ui.drag", json!({"x0":800,"y0":500,"x1":1020,"y1":500,"button":"right","shift":true,"steps":40}));
             assert!((h.app.cam.yaw - std::f64::consts::FRAC_PI_2).abs() < 1e-6, "{preset}: {:?}", h.app.cam);
+        }
+    }
+
+    /// Shift let go partway through a Shift+middle orbit (Fusion): the rest of the drag still
+    /// orbits (#9557), and Shift pressed partway through a middle pan still pans. With
+    /// `nav_drag_keeps_mode` off, the keys held decide on every frame, as before.
+    #[test]
+    fn a_middle_drag_keeps_its_mode_when_shift_changes() {
+        let shift = egui::Modifiers { shift: true, ..Default::default() };
+        let send = |h: &mut crate::scenario::Harness, e: egui::Event| {
+            h.app.synthetic.push(e);
+            h.frame();
+        };
+        for keeps in [true, false] {
+            for (first, then) in [(shift, egui::Modifiers::NONE), (egui::Modifiers::NONE, shift)] {
+                let mut h = crate::scenario::Harness::new();
+                h.app.preferences.nav_drag_keeps_mode = keeps;
+                h.call("ui.view", json!({"view":"front"}));
+                let start = h.app.cam;
+                let at = h.app.viewport.rect.unwrap().center();
+                send(&mut h, egui::Event::ModifiersChanged(first));
+                send(&mut h, egui::Event::PointerMoved(at));
+                send(&mut h, egui::Event::PointerButton { pos: at, button: egui::PointerButton::Middle, pressed: true, modifiers: first });
+                for i in 1..=10 {
+                    send(&mut h, egui::Event::PointerMoved(at + vec2(4.0 * i as f32, 0.0)));
+                }
+                let half = h.app.cam;
+                send(&mut h, egui::Event::ModifiersChanged(then));
+                for i in 11..=20 {
+                    send(&mut h, egui::Event::PointerMoved(at + vec2(4.0 * i as f32, 0.0)));
+                }
+                send(
+                    &mut h,
+                    egui::Event::PointerButton { pos: at + vec2(80.0, 0.0), button: egui::PointerButton::Middle, pressed: false, modifiers: then },
+                );
+                let end = h.app.cam;
+                // Fusion: Shift+middle orbits, middle alone pans.
+                let case = format!("keeps={keeps}, Shift {} partway", if first.shift { "let go" } else { "pressed" });
+                let moved = |a: Camera, b: Camera, orbit: bool| {
+                    if orbit {
+                        assert_ne!(a.yaw, b.yaw, "{case}: orbits");
+                        assert_eq!(a.target, b.target, "{case}: doesn't pan");
+                    } else {
+                        assert_eq!(a.yaw, b.yaw, "{case}: doesn't orbit");
+                        assert_ne!(a.target, b.target, "{case}: pans");
+                    }
+                };
+                moved(start, half, first.shift);
+                moved(half, end, if keeps { first.shift } else { then.shift });
+            }
         }
     }
 

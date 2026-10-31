@@ -82,6 +82,8 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
             let right_drag = setting::right_drag_orbits(app, ui).on_hover_text(crate::i18n::tr("nav.right_drag_orbits.help"));
             crate::scenario::publish_target("prefs:right_drag_orbits", right_drag.rect);
         }
+        let keeps = setting::nav_drag_keeps_mode(app, ui).on_hover_text(crate::i18n::tr("nav.drag_keeps_mode.help"));
+        crate::scenario::publish_target("prefs:nav_drag_keeps_mode", keeps.rect);
         let help = if app.preferences.nav == TOUCHPAD_NAV {
             app.tr("nav.touchpad.help").to_owned()
         } else if !app.preferences.free_orbit && app.preferences.nav != OPENSCAD_NAV {
