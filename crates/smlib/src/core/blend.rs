@@ -49,9 +49,9 @@ use solidcore::topology::face::p4 as face_p4;
 use solidcore::topology::topology_traverser::Marks;
 use solidcore::topology::{Brep, EdgeId, EdgeuseId, FaceId, FaceuseId, VertexId, edge, vertex};
 
-use super::boolean::copy_of;
 use super::{Body, answer, run};
 use crate::{Blend, ChamferSecond, Error, Hole, HoleEdge, MAX_POINTS, Result};
+use solidcore::topology::brep::p3::brep_copy;
 
 /// The capi's statuses as SolidCraft errors: an operation's own result.
 type Out<T> = std::result::Result<T, Error>;
@@ -507,14 +507,14 @@ pub(super) fn finish(b: Brep, solid_in: bool) -> solidcore::Result<Out<Brep>> {
     Ok(Ok(b))
 }
 
-/// Runs `f` on a copy of `body` (`copy_of`) under the kernel's lock.
+/// Runs `f` on a copy of `body` (`brep_copy`) under the kernel's lock.
 pub(super) fn on_copy(call: &'static str, body: &Body, f: impl FnOnce(&mut Kernel, Brep) -> solidcore::Result<Out<Brep>>) -> Result<Body> {
     if body.0.is_poisoned() {
         return Err(Error::Internal(format!("{call}: the body was left unfinished by an earlier panic")));
     }
     run(call, |k| {
         let g = body.0.lock().unwrap_or_else(PoisonError::into_inner);
-        let c = copy_of(k, &g, 1)?;
+        let c = brep_copy(k, &g)?;
         drop(g);
         f(k, c)
     })?
@@ -584,7 +584,7 @@ fn overflow_first(
     }
     let mut fresh = {
         let g = body.0.lock().unwrap_or_else(PoisonError::into_inner);
-        copy_of(k, &g, 2)?
+        brep_copy(k, &g)?
     };
     let again = match pick_edges(k, &fresh, points, tolerance)? {
         Ok((again, _)) if again.len() == picked.len() => again,

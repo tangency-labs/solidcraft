@@ -475,7 +475,7 @@ mod history {
         let body = a.core().unwrap();
         let copy = super::run("copy", |k| {
             let g = body.0.lock().unwrap();
-            super::super::boolean::copy_of(k, &g, 7)
+            solidcore::topology::brep::p3::brep_copy(k, &g)
         })
         .unwrap();
         let core = Brep::made_core(super::Body::new(copy)).history().unwrap();
@@ -668,45 +668,6 @@ mod history {
             assert_eq!(core.canonical(), cpp.canonical(), "{op:?}");
         }
     }
-}
-
-/// Every object of a copy's naming has a key of its own past index 1,000,000, where a key of
-/// `type_code * 1_000_000 + index` made face 1,000,000 share one with loop 0 (solidcore refuses
-/// such a naming), and domains stay apart at the largest kinds and indices.
-#[test]
-fn object_names_stay_distinct_past_a_million() {
-    use solidcore::EntityRef;
-    use solidcore::topology::{BrepId, EdgeId, EdgeuseId, FaceId, FaceuseId, LoopId, LoopuseId, RegionId, ShellId, VertexId, VertexuseId};
-
-    use super::boolean::{domain, named};
-    let at = |i: u32| {
-        [
-            EntityRef::Region(RegionId::from_index(i)),
-            EntityRef::Shell(ShellId::from_index(i)),
-            EntityRef::Faceuse(FaceuseId::from_index(i)),
-            EntityRef::Face(FaceId::from_index(i)),
-            EntityRef::Loopuse(LoopuseId::from_index(i)),
-            EntityRef::Loop(LoopId::from_index(i)),
-            EntityRef::Edgeuse(EdgeuseId::from_index(i)),
-            EntityRef::Edge(EdgeId::from_index(i)),
-            EntityRef::Vertexuse(VertexuseId::from_index(i)),
-            EntityRef::Vertex(VertexId::from_index(i)),
-        ]
-    };
-    let mut keys = std::collections::HashSet::new();
-    let mut total = 0;
-    for d in 0..3 {
-        total += 1;
-        keys.insert(named(EntityRef::Brep(BrepId::from_index(0)), domain(d)).key);
-        for i in [0, 1, 1_000_000, 1_000_001, u32::MAX] {
-            for e in at(i) {
-                total += 1;
-                keys.insert(named(e, domain(d)).key);
-            }
-        }
-    }
-    assert_eq!(keys.len(), total);
-    assert_ne!(named(EntityRef::Face(FaceId::from_index(1_000_000)), 0).key, named(EntityRef::Loop(LoopId::from_index(0)), 0).key);
 }
 
 /// Rig case booleans/2928, reduced (fork c2e3d9d): a ring, r 3..5 about (0, 10), z 0..2, unioned

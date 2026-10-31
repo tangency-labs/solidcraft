@@ -1,6 +1,6 @@
 //! Booleans on solidcore: the C API's own logic round `SM_API`, ported from the fork's
 //! `capi/src/smlib_ops.cpp` (`smlib_boolean_with`, `smlib_boolean2d`,
-//! `smlib_boolean_union_all`, `finish`, `closed_nonmanifold`, `copy_of`) and
+//! `smlib_boolean_union_all`, `finish`, `closed_nonmanifold`) and
 //! `capi/src/smlib_imprint.cpp` (`smlib_imprint`).
 //!
 //! As there, every operation works on copies of its operands (`SmApiBrepCopy`): `SM_API` edits
@@ -8,17 +8,16 @@
 
 use std::sync::PoisonError;
 
+use solidcore::Result as SolidResult;
 use solidcore::SolidError;
 use solidcore::boolean::api_brep::{self as sm, Boolean2dOutcome};
 use solidcore::boolean::merge::MergeOptions;
 use solidcore::geom::a_object::BooleanOperation;
-use solidcore::geom::attribute::ObjectKey;
-use solidcore::geom::object::ObjectRef;
 use solidcore::kernel::Kernel;
 use solidcore::primitive::primitive_creation::p1::Boolean2d;
-use solidcore::topology::brep::{p1, p2, p3};
+use solidcore::topology::brep::p3::brep_copy;
+use solidcore::topology::brep::{p1, p2};
 use solidcore::topology::{Brep, edge};
-use solidcore::{EntityRef, Result as SolidResult};
 
 use super::{Body, run};
 use crate::{BooleanOp, Error, Result};
@@ -33,34 +32,6 @@ enum Done {
     NotSolid,
     /// `SMLIB_ERR_NO_CUT` (`smlib_imprint`).
     NoCut,
-}
-
-/// The start of key domain `n`: past every [`named`] key of the domain before it.
-pub(super) const fn domain(n: u64) -> u64 {
-    n << 36
-}
-
-/// The object names of a copy's source (domain 0) and of the copy itself: each copy in a call
-/// names its objects in its own key domain ([`domain`]), as solidcore's difftest copies do, so that
-/// the notification records of source and copy never collide. Within a domain the key is
-/// `(kind + 1) << 32 | index`, [`convert`](super::convert)'s, distinct for every 32-bit arena index
-/// (solidcore refuses namings in which two live objects share a key).
-pub(super) fn named(entity: EntityRef, domain: u64) -> ObjectRef {
-    let r = p3::topology_ref(0, entity);
-    // `topology_ref(0, ..)`'s kind (at most 10) and index.
-    let (kind, index) = ((r.key.0 >> 32) & 0xf, r.key.0 & 0xffff_ffff);
-    ObjectRef { type_code: r.type_code, key: ObjectKey(domain + (((kind + 1) << 32) | index)) }
-}
-
-/// `copy_of` (smlib_ops.cpp, smlib_imprint.cpp): `SmApiBrepCopy`, a copy that owns its geometry.
-/// A plain `Clone` is not one: its geometry keeps the source's owners. Copy `n` (from 1) names
-/// its objects in key domain `n`.
-pub(crate) fn copy_of(k: &mut Kernel, b: &Brep, n: u64) -> SolidResult<Brep> {
-    let target = move |e| named(e, domain(n));
-    let mut state = p2::ArenaNotifyState::new(&Brep::new());
-    let mut env = state.env(None);
-    env.key_of = &target;
-    p3::api_brep_copy(k, &mut env, Some(b), &|e| named(e, 0))
 }
 
 /// `GetNumFaces`.
@@ -113,7 +84,7 @@ fn copies(k: &mut Kernel, bodies: &[&Body]) -> SolidResult<Vec<Brep>> {
     let mut out = Vec::with_capacity(bodies.len());
     for (n, b) in bodies.iter().enumerate() {
         let g = b.0.lock().unwrap_or_else(PoisonError::into_inner);
-        let c = copy_of(k, &g, n as u64 + 1)?;
+        let c = brep_copy(k, &g)?;
         drop(g);
         out.push(c);
     }

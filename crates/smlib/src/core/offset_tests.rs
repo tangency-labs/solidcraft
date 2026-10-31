@@ -529,21 +529,16 @@ fn box_face_distances_are_exact(what: &str, d: &[(f64, Vec3)]) {
 }
 
 /// Picking faces on a solidcore box: on the body itself, on the working copy every operation
-/// makes (`copy_of`), and by solidcore's recommended usage, each face's distance is the closed
-/// form and the top face is picked. The copy names its geometry owners in its own key domain
-/// with no naming scheme of its own, so the body's identities (`BrepIdentity::of_brep`: the
-/// arena's) name none of them; the copy's proven owners (`BrepQuery::effective_identity`) do
-/// (solidcore#1440 was this). Under the arena's identities the solve fails, and the failure is
-/// an error, not a skipped face.
+/// makes (`brep_copy`), and by solidcore's recommended usage, each face's distance is the closed
+/// form and the top face is picked.
 #[test]
 fn faces_are_picked_on_the_box_and_on_its_working_copy() {
-    use solidcore::SolidError;
     use solidcore::query::brep::{BrepIdentity, BrepQuery};
     let p = Vec3::new(15.0, 10.0, 20.0);
     let on_top = [[15.0, 10.0, 10.0]];
     run("pick", |k| {
         let mut b = solidcore::primitive::api_primitives::create_box(k, Vec3::new(0.0, 0.0, 0.0), 30.0, 20.0, 10.0)?;
-        let mut w = super::boolean::copy_of(k, &b, 1)?;
+        let mut w = solidcore::topology::brep::p3::brep_copy(k, &b)?;
         let mut faces = Vec::new();
         for (what, x) in [("the body", &mut b), ("its copy", &mut w)] {
             let query = BrepQuery::of_brep(x);
@@ -559,14 +554,6 @@ fn faces_are_picked_on_the_box_and_on_its_working_copy() {
         for (what, x) in [("of_brep on the body", &mut b), ("of_brep on its copy", &mut w)] {
             let proven = BrepIdentity::of_brep(x);
             box_face_distances_are_exact(what, &face_distances(k, x, &proven.identity(), p)?);
-        }
-        // The copy under its naming scheme alone (the arena's identities): no face's geometry
-        // owner resolves, and the query says so rather than answering from the vertices. Since
-        // solidcore#1452 that is a port-side invariant, not an SMLib status.
-        let arena = BrepIdentity::of_naming_with_id(solidcore::topology::BrepId::from_index(0), &w);
-        match face_distances(k, &mut w, &arena, p) {
-            Err(e @ SolidError::PortInvariant { .. }) if e.sm_status().is_none() => {}
-            other => panic!("the copy under the arena's identities: {other:?}"),
         }
         Ok(())
     })

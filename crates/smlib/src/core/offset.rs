@@ -122,10 +122,7 @@ impl FaceSet {
 }
 
 /// The live view of `b` the closest-point solves read, under `identity`: `query`'s effective
-/// identity ([`BrepQuery::effective_identity`]). A working copy (`copy_of`) has no naming
-/// scheme of its own, so `BrepIdentity::of_brep` gives it the arena's identities, which name
-/// none of its geometry owners (`copy_of`'s keys, recorded on the copy as proven owners): every
-/// face and edge then drops out of a solve (solidcore#1440 was this).
+/// identity ([`BrepQuery::effective_identity`]).
 fn live<'a, 'i>(b: &'a mut Brep, identity: &'a BrepIdentity<'i>) -> solidcore::Result<LiveBrepObjects<'a, 'i>> {
     LiveBrepObjects::new(b, identity, None)
 }

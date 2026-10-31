@@ -23,10 +23,10 @@ use solidcore::topology::{Brep, EdgeId, VertexId, edge};
 use solidcore::{EntityRef, Point3, SolidError};
 use solidcraft_geom::brep::history::Change;
 
-use super::boolean::copy_of;
 use super::{Body, answer, with_body};
 use crate::history::{Raw, RawEdge, RawFace};
 use crate::{Error, Result};
+use solidcore::topology::brep::p3::brep_copy;
 
 /// `TAG_ID`: above SMLib's own ids (all below `SM_AI_USER_1`).
 const TAG_ID: u64 = ids::USER_1 + 7;
@@ -210,7 +210,7 @@ pub(crate) fn tag(body: &Body, operand: usize) -> Result<Body> {
         return Err(Error::Argument);
     }
     with_body("smlib_history_tag", body, |k, b| {
-        let mut r = copy_of(k, b, 1)?;
+        let mut r = brep_copy(k, b)?;
         let faces = r.face_list().to_vec();
         let edges = r.edge_list().to_vec();
         if faces.len() >= TAG_MAX || edges.len() >= TAG_MAX {

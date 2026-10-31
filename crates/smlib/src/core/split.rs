@@ -1,6 +1,6 @@
 //! Split Face and Split Body on solidcore: the C API's composition, ported from the fork's
 //! `capi/src/smlib_split.cpp` (`smlib_split_faces`, `smlib_split_body`, `cut_face`,
-//! `plane_covers`, `copy_of`, `slice`, `both_sides`, `smlib_split_body_by_sheet`) and the tool surfaces of `capi/src/smlib_ssi.cpp`
+//! `plane_covers`, `slice`, `both_sides`, `smlib_split_body_by_sheet`) and the tool surfaces of `capi/src/smlib_ssi.cpp`
 //! (`smlib_surface_plane`, `_cylinder`, `_cone`, `_sphere`, `_torus`, `_nurbs`).
 //!
 //! As there, every operation works on copies of its body (`SmApiBrepCopy`). A face is cut where
@@ -52,11 +52,11 @@ use solidcore::topology::face::p2 as face_p2;
 use solidcore::topology::{Brep, EdgeId, FaceId};
 
 use super::blend::status;
-use super::boolean::copy_of;
 use super::sweep::build_faces;
 use super::{Body, run};
 use crate::ssi::Spec;
 use crate::{Error, Result};
+use solidcore::topology::brep::p3::brep_copy;
 
 /// `SMLIB_SPLIT_MAX_FACES`, `SMLIB_SPLIT_MAX_TOOLS`.
 pub(crate) const MAX_FACES: usize = crate::ffi::split::MAX_FACES;
@@ -326,7 +326,7 @@ pub(crate) fn split_faces(body: &Body, faces: &[usize], tools: &[&Spec]) -> Resu
             if faces.iter().any(|&f| f >= count || !seen.insert(f)) {
                 return Ok(Err(Error::Argument));
             }
-            copy_of(k, &g, 1)?
+            brep_copy(k, &g)?
         };
         let all = brep_p1::faces(&a, None)?;
         // Each chosen face and, as tools cut it, its pieces.
@@ -373,6 +373,9 @@ pub(crate) fn split_faces(body: &Body, faces: &[usize], tools: &[&Spec]) -> Resu
         a.set_editing_enabled(editing);
         k.context.set_doing_boolean(doing);
         a.refresh_cached_topology();
+        // The cut's new edges own their curves under the kernel's identities (it records them),
+        // not the copy's Notify ones, and the check reads the owners by the body's naming.
+        a.set_naming(solidcore::topology::NamingScheme::Caller);
         Ok(match cut? {
             Err(e) => Err(e),
             Ok(0) => Ok(None),
@@ -387,7 +390,7 @@ pub(crate) fn split_faces(body: &Body, faces: &[usize], tools: &[&Spec]) -> Resu
 fn slice(k: &mut Kernel, body: &Body, sheet: Brep) -> solidcore::Result<Out<Option<Brep>>> {
     let a = {
         let g = body.0.lock().unwrap_or_else(PoisonError::into_inner);
-        copy_of(k, &g, 1)?
+        brep_copy(k, &g)?
     };
     let options = MergeOptions::new(false, false, false, false, false);
     let r = match boolean_with_options(k, a, sheet, BooleanOperation::Slice, options) {
@@ -487,7 +490,7 @@ pub(crate) fn split_body_by_sheet(body: &Body, sheet: &Body, face: usize) -> Res
         both_sides(k, body, true, |k, flip| {
             let mut copy = {
                 let g = sheet.0.lock().unwrap_or_else(PoisonError::into_inner);
-                copy_of(k, &g, 2)?
+                brep_copy(k, &g)?
             };
             let Some(&f) = brep_p1::faces(&copy, None)?.get(face) else { return Ok(Err(Error::Argument)) };
             let turned = orient_sheet_surfaces(k, &mut copy, Some(f), !flip);
