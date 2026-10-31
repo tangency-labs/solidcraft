@@ -25,6 +25,11 @@ uncompressed payload. Identical content with the same encoding is written once.
 Required parts, malformed references, ambiguous embedded payloads, incorrect hashes,
 invalid mesh data and unsupported versions produce errors before session adoption.
 
+Shared STEP sources use `.step-source` blobs containing a versioned entity library and
+explicit maps for the original copies. The maps retain entity labels and face identities;
+this is authoritative source data, not a native cache. Features that use the same source
+hydrate one shared value on reopen. Legacy `.step` blobs remain supported.
+
 ## Mesh encoding
 
 Mesh blobs begin with the eight ASCII bytes `SCMESH01`, followed by little-endian

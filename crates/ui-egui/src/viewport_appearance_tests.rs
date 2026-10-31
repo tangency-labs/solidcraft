@@ -78,6 +78,36 @@ fn a_finished_sketch_on_a_face_draws_a_halo_under_its_own_curves_only() {
 }
 
 #[test]
+fn face_colours_share_gpu_geometry_and_keep_transparency_and_picking_faces() {
+    let (mut h, _, first) = crate::test_support::component_box();
+    h.app.run("occurrence.copy", json!({"occurrence":first,"translate":[30,0,0]})).unwrap();
+    h.app.run("appearance.assign", json!({"body":"Body1","faces":[[5,5,10]],"color":"#ff0000","opacity":0.4})).unwrap();
+    h.app.viewport.gpu =
+        Some(super::GpuTarget { format: egui_wgpu::wgpu::TextureFormat::Rgba8Unorm, depth: None, samples: 1, tess: false, oit: false });
+    h.app.ui.ground_shadow = false;
+    h.app.set_origin_shown(false);
+    let scene = build_scene(&h.app);
+    assert!(scene.instanced.len() > 1, "the painted face and remaining triangles have separate draws");
+    let tris = &scene.instanced[0].tris;
+    assert!(scene.instanced.iter().all(|draw| std::sync::Arc::ptr_eq(tris, &draw.tris)), "appearances should not copy GPU geometry");
+    assert!(scene.instanced.iter().any(|draw| draw.look == crate::gpu::InstanceLook::Glass));
+    let expanded = scene.merged();
+    let transparent: Vec<_> = expanded.glass.as_chunks::<{ crate::gpu::TRI_SIZE }>().0.iter().collect();
+    assert!(!transparent.is_empty());
+    assert!(transparent.iter().all(|vertex| vertex_color(&expanded, *vertex) == [255, 0, 0, 102]));
+    assert!(!expanded.tris.is_empty());
+    let world = h.app.session.world_state();
+    let second = world.bodies.iter().find(|b| b.name != "Body1").unwrap();
+    let picked = doc::appearance::face_index_at(second, Vec3::new(35., 5., 10.)).unwrap();
+    assert!(h.app.session.doc.face_colors(second).iter().any(|(index, _)| *index == picked));
+    h.app.viewport.gpu.as_mut().unwrap().tess = true;
+    let scene = build_scene(&h.app);
+    assert!(scene.planned.is_empty());
+    assert!(scene.instanced.len() > 1);
+    assert!(scene.instanced.iter().all(|draw| std::sync::Arc::ptr_eq(&scene.instanced[0].tris, &draw.tris)));
+}
+
+#[test]
 fn placed_step_body_uses_imported_opacity_until_a_design_look_overrides_it() {
     let body = kernel::box_solid(Vec3::ZERO, Vec3::new(10.0, 10.0, 10.0))
         .unwrap()
@@ -89,7 +119,10 @@ fn placed_step_body_uses_imported_opacity_until_a_design_look_overrides_it() {
     let mut document = doc::Document::default();
     let component = document.add_component(Some("Imported part"), 0).unwrap();
     let feature = document
-        .add_feature(doc::FeatureKind::Import { file: "glass.step".into(), step: step.into(), components: Vec::new(), skip: Vec::new() }, None)
+        .add_feature(
+            doc::FeatureKind::Import { file: "glass.step".into(), step: step.into(), components: Vec::new(), skip: Default::default() },
+            None,
+        )
         .unwrap();
     document.features.iter_mut().find(|f| f.id == feature).unwrap().component = component;
     let mut session = Session::new(document);

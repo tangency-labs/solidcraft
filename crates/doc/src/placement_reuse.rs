@@ -226,7 +226,7 @@ fn same_feature(a: &Feature, b: &Feature) -> bool {
             (
                 FeatureKind::Import { file: a, step, components, skip },
                 FeatureKind::Import { file: b, step: other, components: other_components, skip: other_skip },
-            ) => a == b && Arc::ptr_eq(step, other) && components == other_components && skip == other_skip,
+            ) => a == b && step.same_source(other) && components == other_components && skip == other_skip,
             (a, b) => a == b,
         }
 }

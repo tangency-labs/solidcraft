@@ -32,11 +32,13 @@ struct Place {
     slot: usize,
     parent: Option<usize>,
     transform: Mat,
+    name: Option<String>,
 }
 
 /// How a STEP file's tree becomes components.
 #[derive(Default)]
 struct Plan {
+    share_parts: bool,
     slots: Vec<Slot>,
     places: Vec<Place>,
     /// Body index → the slot it goes to, and the transform from that slot's frame to the import
@@ -57,7 +59,7 @@ pub(crate) enum Tree<'a> {
     /// Nothing: every body in the import's component.
     Flat,
     /// A STEP file's products and placements.
-    Step(&'a StepImport),
+    Step { import: &'a StepImport, share_parts: bool },
     /// A mesh file's components (glTF nodes), bodies already in their component's frame
     /// (checked with [`mesh_plan_fits`] first).
     Mesh(&'a solidcraft_io::MeshPlan),
@@ -82,24 +84,24 @@ impl Plan {
             if p.slot == made {
                 made += 1;
             }
-            places.push(Place { slot: p.slot, parent: p.parent, transform: p.transform });
+            places.push(Place { slot: p.slot, parent: p.parent, transform: p.transform, name: None });
         }
         if plan.bodies.iter().flatten().any(|s| *s >= made) {
             return None;
         }
         let slots = plan.slots.iter().take(made).map(|n| Slot { name: n.clone() }).collect();
         let bodies = plan.bodies.iter().enumerate().filter_map(|(b, slot)| slot.map(|s| (b, s, IDENTITY))).collect();
-        Some(Plan { slots, places, bodies, skip: Vec::new() })
+        Some(Plan { slots, places, bodies, skip: Vec::new(), share_parts: false })
     }
 
-    fn of(imp: &StepImport) -> Plan {
-        let mut plan = Plan::default();
+    fn of(imp: &StepImport, share_parts: bool) -> Plan {
+        let mut plan = Plan { share_parts, ..Plan::default() };
         // One root product is the import's own component; several are components under it.
         let nodes: Vec<&StepNode> = match imp.tree.as_slice() {
             [root] => root.children.iter().collect(),
             roots => roots.iter().collect(),
         };
-        let mut seen: HashMap<u64, usize> = HashMap::new();
+        let mut seen: HashMap<u64, Vec<(usize, &StepNode, Mat)>> = HashMap::new();
         for n in nodes {
             plan.walk(imp, n, None, &IDENTITY, &mut seen, 0);
         }
@@ -108,7 +110,15 @@ impl Plan {
         plan
     }
 
-    fn walk(&mut self, imp: &StepImport, node: &StepNode, parent: Option<usize>, parent_world: &Mat, seen: &mut HashMap<u64, usize>, depth: usize) {
+    fn walk<'a>(
+        &mut self,
+        imp: &StepImport,
+        node: &'a StepNode,
+        parent: Option<usize>,
+        parent_world: &Mat,
+        seen: &mut HashMap<u64, Vec<(usize, &'a StepNode, Mat)>>,
+        depth: usize,
+    ) {
         if !has_bodies(node, 0) {
             return;
         }
@@ -120,18 +130,24 @@ impl Plan {
             self.flatten(node, parent, parent_world);
             return;
         };
-        let key = node_key(imp, node, 0);
-        if let Some(&slot) = seen.get(&key) {
+        let key = node_key(imp, node, &world, self.share_parts, 0);
+        if let Some(slot) = seen
+            .get(&key)
+            .and_then(|candidates| {
+                candidates.iter().find(|(_, other, other_world)| same_node(imp, node, &world, other, other_world, self.share_parts, 0))
+            })
+            .map(|(slot, _, _)| *slot)
+        {
             // Another placement of a part already made: an occurrence of its component, and the
             // file's copy of its bodies is not built.
-            self.places.push(Place { slot, parent, transform: node.transform });
+            self.places.push(Place { slot, parent, transform: node.transform, name: node.instance.clone() });
             collect_bodies(node, &mut self.skip, 0);
             return;
         }
         let slot = self.slots.len();
         self.slots.push(Slot { name: node.name.trim().to_string() });
-        seen.insert(key, slot);
-        self.places.push(Place { slot, parent, transform: node.transform });
+        seen.entry(key).or_default().push((slot, node, world));
+        self.places.push(Place { slot, parent, transform: node.transform, name: node.instance.clone() });
         for b in &node.bodies {
             self.bodies.push((*b, slot, inverse));
         }
@@ -169,22 +185,88 @@ fn collect_bodies(node: &StepNode, out: &mut Vec<u64>, depth: usize) {
 
 /// What makes two placements the same part: the product's name, the file items its bodies come
 /// from and, below it, the same parts placed the same way.
-fn node_key(imp: &StepImport, node: &StepNode, depth: usize) -> u64 {
+fn body_placement(body: &solidcraft_doc::kernel::ImportedBody, world: &Mat, inverse: Option<&Mat>) -> Option<Mat> {
+    // Ordinary B-reps have exactly the product's placement. Avoid inverse roundoff there;
+    // mapped items can also place geometry within the product, which must stay part of its identity.
+    if body.placement == *world {
+        return Some(IDENTITY);
+    }
+    let local = solidcraft_doc::mat_mul(inverse?, &body.placement);
+    local.iter().flatten().all(|v| v.is_finite()).then_some(local)
+}
+
+fn node_key(imp: &StepImport, node: &StepNode, world: &Mat, share_parts: bool, depth: usize) -> u64 {
     let mut h = std::collections::hash_map::DefaultHasher::new();
+    let inverse = solidcraft_doc::mat_inverse(world);
     node.name.hash(&mut h);
+    node.product.hash(&mut h);
+    if node.has_properties {
+        node.definition.hash(&mut h);
+    }
     for b in &node.bodies {
-        imp.bodies.get(*b).map(|b| b.source_item).hash(&mut h);
+        if let Some(b) = imp.bodies.get(*b) {
+            let item = if share_parts { b.geometry_item } else { b.source_item };
+            item.hash(&mut h);
+            b.geometry_units.map(f64::to_bits).hash(&mut h);
+            body_placement(b, world, inverse.as_ref()).map(|m| m.map(|column| column.map(f64::to_bits))).hash(&mut h);
+            b.name.hash(&mut h);
+            b.color.map(|c| c.map(f32::to_bits)).hash(&mut h);
+            if let Some(paint) = b.body.paint() {
+                paint.opacity.to_bits().hash(&mut h);
+                for face in &paint.faces {
+                    face.face.hash(&mut h);
+                    face.color.map(f32::to_bits).hash(&mut h);
+                    face.opacity.to_bits().hash(&mut h);
+                }
+            }
+        }
     }
     if depth < 64 {
         for c in &node.children {
-            node_key(imp, c, depth + 1).hash(&mut h);
+            node_key(imp, c, &solidcraft_doc::mat_mul(world, &c.transform), share_parts, depth + 1).hash(&mut h);
             for v in c.transform.iter().flatten() {
-                // Placements equal to within rounding are the same placement.
-                ((v * 1e6).round() as i64).hash(&mut h);
+                v.to_bits().hash(&mut h);
             }
         }
     }
     h.finish()
+}
+
+fn same_node(imp: &StepImport, a: &StepNode, a_world: &Mat, b: &StepNode, b_world: &Mat, share_parts: bool, depth: usize) -> bool {
+    let a_inverse = solidcraft_doc::mat_inverse(a_world);
+    let b_inverse = solidcraft_doc::mat_inverse(b_world);
+    depth < 64
+        && a.name == b.name
+        && a.product == b.product
+        && (!(a.has_properties || b.has_properties) || a.definition == b.definition)
+        && a.bodies.len() == b.bodies.len()
+        && a.children.len() == b.children.len()
+        && a.bodies.iter().zip(&b.bodies).all(|(a, b)| match (imp.bodies.get(*a), imp.bodies.get(*b)) {
+            (Some(a), Some(b)) => {
+                a.geometry_item == b.geometry_item
+                    && (share_parts || a.source_item == b.source_item)
+                    && a.geometry_units == b.geometry_units
+                    && body_placement(a, a_world, a_inverse.as_ref())
+                        .is_some_and(|local| Some(local) == body_placement(b, b_world, b_inverse.as_ref()))
+                    && a.name == b.name
+                    && a.closed == b.closed
+                    && a.color == b.color
+                    && a.body.paint() == b.body.paint()
+            }
+            _ => false,
+        })
+        && a.children.iter().zip(&b.children).all(|(a, b)| {
+            a.transform == b.transform
+                && same_node(
+                    imp,
+                    a,
+                    &solidcraft_doc::mat_mul(a_world, &a.transform),
+                    b,
+                    &solidcraft_doc::mat_mul(b_world, &b.transform),
+                    share_parts,
+                    depth + 1,
+                )
+        })
 }
 
 /// The import's component, as the command reports it.
@@ -238,14 +320,16 @@ pub(crate) fn add_in_component(
     s: &mut Session,
     mut kind: FeatureKind,
     feature_name: &str,
-    body_names: Vec<String>,
+    mut body_names: Vec<String>,
     name: &str,
     tree: Tree<'_>,
 ) -> Result<(u64, Placed)> {
+    let step_file = matches!(&kind, FeatureKind::Import { file, .. }
+        if std::path::Path::new(file).extension().and_then(|s| s.to_str()).is_some_and(|e| e.eq_ignore_ascii_case("step") || e.eq_ignore_ascii_case("stp")));
     let (top, top_occ) = new_component(s, name)?;
-    let (plan, imp) = match tree {
+    let (mut plan, imp) = match tree {
         Tree::Flat => (Plan::default(), None),
-        Tree::Step(imp) => (Plan::of(imp), Some(imp)),
+        Tree::Step { import, share_parts } => (Plan::of(import, share_parts), Some(import)),
         Tree::Mesh(m) => (Plan::of_mesh(m).ok_or_else(|| EngineError::Other("import: the file's node tree can't be placed".into()))?, None),
     };
     // The components, each made at its first placement; the others are further occurrences.
@@ -272,12 +356,33 @@ pub(crate) fn add_in_component(
             first_occ.push(Some(occ));
             occ
         };
+        if let Some(name) = &place.name
+            && let Some(o) = s.doc_mut().occurrences.iter_mut().find(|o| o.id == occ)
+        {
+            o.name.clone_from(name);
+        }
         if let Some(a) = parent_occ {
             joints.push((a, occ, place.transform));
         }
     }
     if let FeatureKind::Import { skip, .. } = &mut kind {
-        skip.clone_from(&plan.skip);
+        if let Some(imp) = imp.filter(|_| step_file) {
+            let capacity = imp.bodies.len().saturating_sub(plan.skip.len());
+            let mut only = Vec::with_capacity(capacity);
+            let mut kept_names = Vec::with_capacity(capacity);
+            let mut stored = body_names.into_iter();
+            for (i, body) in imp.bodies.iter().enumerate() {
+                let name = stored.next();
+                if plan.skip.binary_search(&(i as u64)).is_err() {
+                    only.push(body.planned_index as u64);
+                    kept_names.push(name.unwrap_or_else(|| body.name.clone()));
+                }
+            }
+            body_names = kept_names;
+            *skip = solidcraft_doc::ImportFilter::Only { only };
+        } else {
+            *skip = std::mem::take(&mut plan.skip).into();
+        }
     }
     // The bodies' names, as the feature will give them (checked once it is built).
     let names = match (&kind, imp) {
@@ -287,6 +392,15 @@ pub(crate) fn add_in_component(
         _ => Vec::new(),
     };
     let id = s.doc_mut().add_feature(kind, Some(feature_name))?;
+    if step_file {
+        let mut imported: std::collections::HashSet<_> = comps.iter().copied().collect();
+        imported.insert(top);
+        for component in &mut s.doc_mut().components {
+            if imported.contains(&component.id) {
+                component.imported_from = Some(id);
+            }
+        }
+    }
     if let Some(f) = s.doc_mut().feature_mut(id) {
         f.component = top;
         f.body_names = body_names;

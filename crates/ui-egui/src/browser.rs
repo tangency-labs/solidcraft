@@ -1562,9 +1562,7 @@ fn component_rows_inner(
     if id == 0 && !render {
         crate::dialogs_assembly::browser_joints(app, ui, d);
     }
-    for path in &root.children {
-        occurrence_rows(app, ui, path, d, acts, cache);
-    }
+    occurrence_children(app, ui, &[], d, acts, cache, root);
 }
 
 fn occurrence_key(path: &[u64]) -> String {
@@ -1758,8 +1756,73 @@ fn occurrence_rows_inner(
         crate::dialogs_assembly::component_joints(app, ui, path, key, depth + 1);
     }
     if path.len() < 64 {
+        occurrence_children(app, ui, path, depth + 1, acts, cache, placement);
+    }
+}
+
+fn occurrence_children(
+    app: &mut SolveApp,
+    ui: &mut egui::Ui,
+    path: &[u64],
+    depth: usize,
+    acts: &mut Actions,
+    cache: &mut cache::Cache,
+    placement: &cache::Node,
+) {
+    let Some(model) = app.tree.model.as_mut() else { return };
+    // A truncated or cyclic child list keeps the cache's placement budget and filtering.
+    if !app.preferences.share_imported_parts || placement.children.len() != model.children.get(&placement.component).map_or(0, Vec::len) {
         for child in &placement.children {
-            occurrence_rows(app, ui, child, depth + 1, acts, cache);
+            occurrence_rows(app, ui, child, depth, acts, cache);
+        }
+        return;
+    }
+    let rows = model.child_rows(placement.component, path);
+    let reveal = app.tree.reveal.as_deref().and_then(|body| model.body_path(&app.session, body));
+    for row in rows.iter() {
+        match row {
+            model::Child::Occurrence(child) => {
+                occurrence_rows(app, ui, child, depth, acts, cache);
+            }
+            model::Child::Group { key, label, members } => {
+                if reveal.as_deref().is_some_and(|p| members.iter().any(|member| p.starts_with(member))) {
+                    app.tree.expanded.insert(key.clone());
+                    app.tree.collapsed.remove(key);
+                }
+                let open = is_open(app, key, false);
+                let visible = members.iter().any(|member| !app.session.occurrence_hidden(member));
+                let r = draw_row(
+                    ui,
+                    ui.id().with(key),
+                    &Row { depth, fold: Some(open), eye: Some(visible), icon: "component", label, name: true, dim: !visible, ..Default::default() },
+                );
+                if let Some(rect) = r.rect {
+                    crate::scenario::publish_handle(&format!("row:{key}"), rect.center());
+                    crate::scenario::publish_handle(&format!("fold:{key}"), pos2(rect.left() + 8. + depth as f32 * INDENT, rect.center().y));
+                }
+                if r.fold {
+                    toggle(app, key, false);
+                }
+                if r.eye {
+                    let _ = app.run("browser.visibility", json!({"visible": !visible, "paths": members}));
+                } else if r.clicked && !r.double {
+                    let offered = if dialog_takes_body(app) {
+                        let names: Vec<_> = members.iter().flat_map(|path| app.session.occurrence_bodies(path, true).unwrap_or_default()).collect();
+                        offer_bodies(app, &names, Take::Toggle)
+                    } else {
+                        false
+                    };
+                    if !offered {
+                        let items: Vec<_> = members.iter().map(|path| Sel::Occurrence { path: path.clone() }).collect();
+                        let _ = app.run("select.set", json!({"items": items}));
+                    }
+                }
+                if open {
+                    for child in members {
+                        occurrence_rows(app, ui, child, depth + 1, acts, cache);
+                    }
+                }
+            }
         }
     }
 }

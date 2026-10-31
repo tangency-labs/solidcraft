@@ -46,6 +46,28 @@ fn invalid(detail: impl std::fmt::Display) -> KernelError {
     KernelError::Invalid(format!("native B-rep: {detail}"))
 }
 
+/// Number-for-number geometry and topology equality, without tessellating or comparing paint.
+/// An adapter that cannot describe either body exactly leaves the comparison undecided.
+pub fn exact_geometry_eq(a: &Body, b: &Body) -> Result<Option<bool>> {
+    if a.same_shape(b) {
+        return Ok(Some(true));
+    }
+    if a.is_mesh() || b.is_mesh() {
+        return Ok(None);
+    }
+    guard("compare exact geometry", || {
+        for body in [a, b] {
+            if body.face_count() > MAX_ITEMS || body.solid.edge_iter().take(MAX_ITEMS + 1).count() > MAX_ITEMS {
+                return Ok(None);
+            }
+        }
+        Ok(match (adapter::encode(&a.solid), adapter::encode(&b.solid)) {
+            (Ok(a), Ok(b)) => Some(a == b),
+            _ => None,
+        })
+    })
+}
+
 /// Explicit topology, spatial geometry, construction certificates and history, exactly.
 /// Failure is a cache miss at the IO boundary, never a failed document save.
 pub fn encode_native_body(body: &Body) -> Result<Vec<u8>> {
