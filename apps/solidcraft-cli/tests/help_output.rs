@@ -205,4 +205,9 @@ fn a_closed_stderr_does_not_stop_the_cli() {
         drop(child.stderr.take());
         assert_eq!(child.wait().unwrap().code(), Some(1));
     }
+    // The old name's alias writes its deprecation notice first: an agent still configured with
+    // `solvecraft-cli mcp` must get the server, not that panic.
+    let mut child = Command::new(env!("CARGO_BIN_EXE_solvecraft-cli")).arg("--help").stdout(Stdio::null()).stderr(Stdio::piped()).spawn().unwrap();
+    drop(child.stderr.take());
+    assert_eq!(child.wait().unwrap().code(), Some(0));
 }
