@@ -22,6 +22,7 @@ pub use design::{
 };
 mod legacy_dir;
 pub mod limits;
+pub mod live_mesh;
 #[cfg(test)]
 mod mutate;
 mod native_cad;
