@@ -1187,6 +1187,46 @@ pub struct Tokens {
     pub dialog_label: Color32,
     pub selected_ink: Color32,
     pub selected_bg: Color32,
+    /// Ground under every Preferences figure.
+    pub figure_ground: Color32,
+    /// Outlines and reference lines of Preferences figures.
+    pub figure_line: Color32,
+    /// Top face of the Preferences figure cube.
+    pub figure_face_top: Color32,
+    /// Left face of the Preferences figure cube.
+    pub figure_face_left: Color32,
+    /// Right face of the Preferences figure cube.
+    pub figure_face_right: Color32,
+    /// Paper, panels and pads drawn inside Preferences figures.
+    pub figure_card: Color32,
+    /// What a Preferences figure or selected card acts on.
+    pub figure_accent: Color32,
+    /// Reference point in a Preferences figure: pivot, origin, pointer.
+    pub figure_reference: Color32,
+    /// X axis in a Preferences figure.
+    pub figure_axis_x: Color32,
+    /// Y axis in a Preferences figure.
+    pub figure_axis_y: Color32,
+    /// Z axis in a Preferences figure.
+    pub figure_axis_z: Color32,
+    /// Done or fully constrained mark in a Preferences figure.
+    pub figure_ok: Color32,
+    /// Warning mark in a Preferences figure.
+    pub figure_warn: Color32,
+    /// Segmented control well and tint behind figures in Preferences.
+    pub pref_well: Color32,
+    /// Warning badge text and stroke in Preferences.
+    pub pref_note: Color32,
+    /// Warning badge fill in Preferences.
+    pub pref_note_fill: Color32,
+    /// Ink on a Preferences accent fill.
+    pub pref_on_accent: Color32,
+    /// Success badge text in Preferences.
+    pub pref_ok: Color32,
+    /// Success badge fill in Preferences.
+    pub pref_ok_fill: Color32,
+    /// Ink of a dimmed Preferences control.
+    pub pref_disabled: Color32,
     /// Timeline items: normal and failed.
     pub timeline_item: Color32,
     pub timeline_item_error: Color32,

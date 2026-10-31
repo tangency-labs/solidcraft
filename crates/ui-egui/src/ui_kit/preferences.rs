@@ -719,7 +719,7 @@ pub(crate) fn option_card(ui: &mut Ui, label: &str, note: Option<&str>, selected
     if enabled { response.on_hover_cursor(egui::CursorIcon::PointingHand) } else { response }
 }
 
-fn centred_text(p: &egui::Painter, rect: Rect, label: &str, font: FontId, ink: Color32) {
+pub(super) fn centred_text(p: &egui::Painter, rect: Rect, label: &str, font: FontId, ink: Color32) {
     centred_text_rows(p, rect, label, font, ink, 1);
 }
 
