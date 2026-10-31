@@ -4892,6 +4892,8 @@ mod tests {
         assert!(h.app.preferences.space_mouse_model_pivot, "traced is opt-in");
         scroll_to_and_click(&mut h, "prefs:3d_mouse_orbit_classic");
         assert!(!h.app.preferences.space_mouse_model_pivot, "classic again");
+        open_at(&mut h.app, PAGE_NAVIGATION);
+        h.frames(4);
         assert!(!h.app.preferences.zoom_stop_at_model, "stop-at-model zoom is off by default");
         scroll_to_and_click(&mut h, "prefs:zoom_stop_at_model");
         assert!(h.app.preferences.zoom_stop_at_model, "stop-at-model zoom is opt-in");
@@ -7798,9 +7800,13 @@ mod tests {
             h.step(step).unwrap();
         }
         h.call("ui.prefs", json!({"open":"Layout"}));
+        let page = crate::scenario::rect_of("prefs:page_body").unwrap();
+        h.call("ui.scroll", json!({"x":page.center().x,"y":page.center().y,"delta":-10000}));
+        h.frames(60);
         let at = h.widget("Under their feature").unwrap();
         let page = crate::scenario::rect_of("prefs:page_body").unwrap();
         assert!(!page.contains(egui::pos2(at[0] as f32, at[1] as f32)), "the real control begins scrolled out of view");
+        assert!((at[1] as f32) < page.top(), "scrolling to the bottom puts the target above the viewport");
         assert_eq!(h.app.preferences.history_sketches, HistorySketches::InOrder);
         h.step(&json!({"widget":"Under their feature", "near":"Sketches"})).unwrap();
         assert_eq!(h.app.preferences.history_sketches, HistorySketches::UnderFeature);

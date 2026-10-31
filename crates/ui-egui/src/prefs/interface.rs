@@ -64,10 +64,12 @@ pub(super) fn appearance(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
                 );
                 crate::scenario::publish_target("prefs:scale", response.rect);
                 ui.horizontal_wrapped(|ui| {
+                    let locale = crate::i18n::Locale::for_language(&app.preferences.language);
                     for value in [0.75, 1.0, 1.1, 1.25, 1.5, 2.0] {
+                        let percent = format!("{:.0}", value * 100.0);
                         if ui_kit::button(
                             ui,
-                            format!("{:.0}%", value * 100.0),
+                            locale.format("prefs.structure.scale_percent", &[("percent", &percent)]),
                             if (app.preferences.ui_scale - value).abs() < 0.001 { ui_kit::Button::SmallSelected } else { ui_kit::Button::Small },
                         )
                         .clicked()

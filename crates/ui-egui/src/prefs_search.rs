@@ -783,6 +783,13 @@ mod tests {
         h.step(&serde_json::json!({"key": "ArrowUp"})).expect("previous match");
         h.frames(1);
         assert_eq!(crate::scenario::handle_at("prefs:search:current"), first, "Up moves back");
+        let (_, _, hits) = nav(&h.ctx);
+        let cursor = hits
+            .iter()
+            .position(|hit| hit.page == crate::prefs::PAGE_NAVIGATION && hit.label == "Reverse zoom direction")
+            .expect("the Navigation setting remains keyboard reachable");
+        set_cursor(&h.ctx, cursor);
+        h.frames(2);
         h.step(&serde_json::json!({"key": "Enter"})).expect("open");
         h.frames(2);
         assert_eq!(h.app.prefs_window.section, crate::prefs::PAGE_NAVIGATION, "Enter opens the match's page");

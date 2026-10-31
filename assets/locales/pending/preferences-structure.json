@@ -1,4 +1,24 @@
 {
+  "ar": {
+    "prefs.structure.appearance": "المظهر",
+    "prefs.structure.appearance_note": "الألوان والنصوص وإمكانية الوصول.",
+    "prefs.structure.in_profile": "ضمن ملف التعريف",
+    "prefs.structure.layout": "التخطيط",
+    "prefs.structure.layout_note": "مواضع أجزاء النافذة.",
+    "prefs.structure.look": "المظهر",
+    "prefs.structure.measure_pointer": "القياس والمؤشر",
+    "prefs.structure.mouse3d": "فأرة ثلاثية الأبعاد",
+    "prefs.structure.mouse3d_note": "SpaceMouse وSpaceNavigator.",
+    "prefs.structure.navigation_note": "الفأرة ولوحة اللمس. للفأرة ثلاثية الأبعاد صفحة خاصة بها.",
+    "prefs.structure.profile": "ملف التعريف",
+    "prefs.structure.profile_edited": "تغيّر منذ الحفظ",
+    "prefs.structure.profile_hover": "محفوظ في ملفات تعريف الإعدادات",
+    "prefs.structure.scale_percent": "{percent}%",
+    "prefs.structure.sketch": "رسم",
+    "prefs.structure.tools": "الأدوات",
+    "prefs.structure.tools_note": "كيفية عمل أدوات النمذجة.",
+    "prefs.structure.work": "العمل"
+  },
   "de": {
     "prefs.structure.appearance": "Erscheinungsbild",
     "prefs.structure.appearance_note": "Farben, Text und Barrierefreiheit.",
@@ -13,6 +33,7 @@
     "prefs.structure.profile": "Profil",
     "prefs.structure.profile_edited": "Seit dem Speichern geändert",
     "prefs.structure.profile_hover": "Wird in Einstellungsprofilen gespeichert",
+    "prefs.structure.scale_percent": "{percent} %",
     "prefs.structure.sketch": "Skizze",
     "prefs.structure.tools": "Werkzeuge",
     "prefs.structure.tools_note": "Verhalten der Modellierungswerkzeuge.",
@@ -32,6 +53,7 @@
     "prefs.structure.profile": "Profile",
     "prefs.structure.profile_edited": "Changed since saved",
     "prefs.structure.profile_hover": "Saved in settings profiles",
+    "prefs.structure.scale_percent": "{percent}%",
     "prefs.structure.sketch": "Sketch",
     "prefs.structure.tools": "Tools",
     "prefs.structure.tools_note": "How modeling tools behave.",
@@ -40,6 +62,32 @@
   "en-GB": {
     "prefs.structure.appearance_note": "Colours, text and accessibility.",
     "prefs.structure.tools_note": "How modelling tools behave."
+  },
+  "fi": {
+    "prefs.structure.scale_percent": "{percent} %"
+  },
+  "fr": {
+    "prefs.structure.scale_percent": "{percent} %"
+  },
+  "he": {
+    "prefs.structure.appearance": "מראה",
+    "prefs.structure.appearance_note": "צבעים, טקסט ונגישות.",
+    "prefs.structure.in_profile": "כלול בפרופיל",
+    "prefs.structure.layout": "פריסה",
+    "prefs.structure.layout_note": "מיקום חלקי החלון.",
+    "prefs.structure.look": "מראה",
+    "prefs.structure.measure_pointer": "מדידה ומצביע",
+    "prefs.structure.mouse3d": "עכבר תלת־ממדי",
+    "prefs.structure.mouse3d_note": "SpaceMouse ו־SpaceNavigator.",
+    "prefs.structure.navigation_note": "עכבר ומשטח מגע. לעכבר התלת־ממדי יש עמוד משלו.",
+    "prefs.structure.profile": "פרופיל",
+    "prefs.structure.profile_edited": "השתנה מאז השמירה",
+    "prefs.structure.profile_hover": "נשמר בפרופילי הגדרות",
+    "prefs.structure.scale_percent": "{percent}%",
+    "prefs.structure.sketch": "סקיצה",
+    "prefs.structure.tools": "כלים",
+    "prefs.structure.tools_note": "אופן הפעולה של כלי המידול.",
+    "prefs.structure.work": "עבודה"
   },
   "ja": {
     "prefs.structure.appearance": "外観",
@@ -55,6 +103,7 @@
     "prefs.structure.profile": "プロファイル",
     "prefs.structure.profile_edited": "保存後に変更あり",
     "prefs.structure.profile_hover": "設定プロファイルに保存されます",
+    "prefs.structure.scale_percent": "{percent}%",
     "prefs.structure.sketch": "スケッチ",
     "prefs.structure.tools": "ツール",
     "prefs.structure.tools_note": "モデリングツールの動作。",
@@ -74,10 +123,34 @@
     "prefs.structure.profile": "프로필",
     "prefs.structure.profile_edited": "저장 후 변경됨",
     "prefs.structure.profile_hover": "설정 프로필에 저장됨",
+    "prefs.structure.scale_percent": "{percent}%",
     "prefs.structure.sketch": "스케치",
     "prefs.structure.tools": "도구",
     "prefs.structure.tools_note": "모델링 도구의 동작.",
     "prefs.structure.work": "작업"
+  },
+  "tr": {
+    "prefs.structure.scale_percent": "%{percent}"
+  },
+  "vi": {
+    "prefs.structure.appearance": "Giao diện",
+    "prefs.structure.appearance_note": "Màu sắc, văn bản và khả năng tiếp cận.",
+    "prefs.structure.in_profile": "Trong hồ sơ",
+    "prefs.structure.layout": "Bố cục",
+    "prefs.structure.layout_note": "Vị trí các phần của cửa sổ.",
+    "prefs.structure.look": "Hiển thị",
+    "prefs.structure.measure_pointer": "Đo lường và con trỏ",
+    "prefs.structure.mouse3d": "Chuột 3D",
+    "prefs.structure.mouse3d_note": "SpaceMouse và SpaceNavigator.",
+    "prefs.structure.navigation_note": "Chuột và bàn di chuột. Chuột 3D có trang riêng.",
+    "prefs.structure.profile": "Hồ sơ",
+    "prefs.structure.profile_edited": "Đã thay đổi kể từ lần lưu",
+    "prefs.structure.profile_hover": "Được lưu trong hồ sơ cài đặt",
+    "prefs.structure.scale_percent": "{percent}%",
+    "prefs.structure.sketch": "Phác thảo",
+    "prefs.structure.tools": "Công cụ",
+    "prefs.structure.tools_note": "Cách các công cụ dựng mô hình hoạt động.",
+    "prefs.structure.work": "Công việc"
   },
   "zh": {
     "prefs.structure.appearance": "外观",
@@ -93,6 +166,7 @@
     "prefs.structure.profile": "配置",
     "prefs.structure.profile_edited": "保存后已更改",
     "prefs.structure.profile_hover": "保存在设置配置中",
+    "prefs.structure.scale_percent": "{percent}%",
     "prefs.structure.sketch": "草图",
     "prefs.structure.tools": "工具",
     "prefs.structure.tools_note": "建模工具的行为。",

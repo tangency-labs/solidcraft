@@ -142,7 +142,7 @@ fn measurement_axis_distances_can_be_disabled_saved_and_restored_in_preferences(
     assert!(serde_json::from_value::<crate::prefs::Prefs>(json!({})).unwrap().measure_axis_distances, "existing settings get the default-on option");
     let mut h = vertex_measurement([0., 0., 0.], [-3., 4., -12.]);
     let measurement = result(&h).clone();
-    h.call("ui.prefs", json!({"open":"Graphics"}));
+    h.call("ui.prefs", json!({"open":"Tools"}));
     // The kit's 24 pt rows scroll inside the bounded Preferences page.
     let page = crate::scenario::rect_of("prefs:page_body").unwrap();
     for _ in 0..8 {
@@ -166,11 +166,11 @@ fn measurement_axis_distances_can_be_disabled_saved_and_restored_in_preferences(
     let mut restored = crate::SolveApp::new(Default::default(), Default::default());
     restored.load_prefs(&h.app.prefs());
     assert!(!restored.preferences.measure_axis_distances, "disabled preference survives restart");
-    h.call("ui.prefs", json!({"open":"Graphics","measure_axis_distances":true}));
+    h.call("ui.prefs", json!({"open":"Tools","measure_axis_distances":true}));
     assert!(crate::scenario::handle_at("measure:label:x").is_some());
     h.call("ui.prefs", json!({"button":"cancel"}));
     assert!(!h.app.preferences.measure_axis_distances, "Cancel restores the saved choice");
-    h.call("ui.prefs", json!({"open":"Graphics"}));
+    h.call("ui.prefs", json!({"open":"Tools"}));
     h.call("ui.prefs", json!({"button":"defaults"}));
     assert!(h.app.preferences.measure_axis_distances);
     h.call("ui.prefs", json!({"button":"apply"}));
