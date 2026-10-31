@@ -123,6 +123,173 @@ fn searchable_dropdown_filters_selects_and_accepts_custom_values() {
 }
 
 #[test]
+fn search_picker_filters_focuses_picks_and_takes_custom_values() {
+    let ctx = crate::fonts::test_context();
+    let picked = std::cell::RefCell::new(Vec::new());
+    let custom = std::cell::Cell::new(true);
+    let enabled = std::cell::Cell::new(true);
+    let choices = [
+        SearchChoice { value: "a/one", label: "One", tip: "The first model", group: None },
+        SearchChoice { value: "b/two", label: "Two", tip: "The second model", group: Some("Group") },
+        SearchChoice { value: "b/three", label: "Three", tip: "", group: Some("Group") },
+    ];
+    let draw = |ui: &mut Ui| {
+        row(ui, "Model", |ui| {
+            let shown = search_picker(
+                ui,
+                SearchPicker {
+                    id: "search_picker_test",
+                    handles: "test:model",
+                    current: "One",
+                    current_value: "a/one",
+                    hint: "Search models…",
+                    choices: &choices,
+                    custom: custom.get(),
+                    note: Some("Listing models…"),
+                    enabled: enabled.get(),
+                },
+            );
+            picked.borrow_mut().extend(shown.inner);
+        });
+    };
+    let open = || {
+        let at = scenario::handle_at("test:model").unwrap();
+        frame(&ctx, pointer(at, true), draw);
+        frame(&ctx, pointer(at, false), draw);
+        frame(&ctx, vec![], draw);
+    };
+    let click = |name: &str| {
+        let at = scenario::handle_at(name).unwrap_or_else(|| panic!("no {name}"));
+        frame(&ctx, pointer(at, true), draw);
+        frame(&ctx, pointer(at, false), draw);
+        frame(&ctx, vec![], draw);
+    };
+    let typing = |text: &str| {
+        frame(&ctx, vec![egui::Event::Text(text.into())], draw);
+        frame(&ctx, vec![], draw);
+    };
+    let is_open = || scenario::handle_at("test:model:search").is_some();
+    frame(&ctx, vec![], draw);
+    assert!(!is_open() && scenario::handle_at("test:model:a/one").is_none(), "closed: only the control");
+
+    // Opening focuses the box: what is typed filters over labels, tips and values.
+    open();
+    assert!(is_open());
+    assert!(ctx.memory(|m| m.has_focus(egui::Id::new("search_picker_test").with("search"))), "the box has the focus");
+    for row in ["a/one", "b/two", "b/three"] {
+        assert!(scenario::handle_at(&format!("test:model:{row}")).is_some(), "{row}");
+    }
+    assert!(scenario::handle_at("test:model:custom").is_none(), "nothing typed, nothing to use");
+    typing("SECOND");
+    assert!(scenario::handle_at("test:model:b/two").is_some(), "a tip is searched, whatever the case");
+    assert!(scenario::handle_at("test:model:a/one").is_none() && scenario::handle_at("test:model:b/three").is_none());
+    assert!(scenario::handle_at("test:model:custom").is_some(), "a substring is no listed value");
+
+    // A click picks the row, closes the popup and forgets the text.
+    click("test:model:b/two");
+    assert_eq!(picked.take(), [Picked::Listed("b/two".into())]);
+    assert!(!is_open());
+    open();
+    assert!(scenario::handle_at("test:model:a/one").is_some(), "the next opening starts unfiltered");
+
+    // A value exactly as listed needs no custom row; a text nothing matches gets one.
+    typing("b/three");
+    assert!(scenario::handle_at("test:model:custom").is_none());
+    assert!(scenario::handle_at("test:model:b/three").is_some());
+    frame(&ctx, key(egui::Key::Escape), draw);
+    frame(&ctx, vec![], draw);
+    assert!(!is_open() && picked.borrow().is_empty(), "Esc closes without a pick");
+    open();
+    typing("  vendor/model:free ");
+    assert!(scenario::handle_at("test:model:a/one").is_none());
+    click("test:model:custom");
+    assert_eq!(picked.take(), [Picked::Custom("vendor/model:free".into())], "trimmed");
+    assert!(!is_open());
+
+    // Enter picks the first row shown; with no match, the typed text.
+    open();
+    typing("t");
+    frame(&ctx, key(egui::Key::Enter), draw);
+    frame(&ctx, vec![], draw);
+    assert_eq!(picked.take(), [Picked::Listed("a/one".into())], "the first row with a t");
+    assert!(!is_open());
+    open();
+    typing("b/");
+    typing("three");
+    frame(&ctx, key(egui::Key::Enter), draw);
+    frame(&ctx, vec![], draw);
+    assert_eq!(picked.take(), [Picked::Listed("b/three".into())]);
+    open();
+    typing("nothing");
+    frame(&ctx, key(egui::Key::Enter), draw);
+    frame(&ctx, vec![], draw);
+    assert_eq!(picked.take(), [Picked::Custom("nothing".into())]);
+
+    // Enter on an empty box leaves the choice as it is.
+    open();
+    frame(&ctx, key(egui::Key::Enter), draw);
+    frame(&ctx, vec![], draw);
+    assert!(picked.borrow().is_empty() && !is_open());
+
+    // Without custom values, a miss offers nothing and Enter keeps the box.
+    custom.set(false);
+    open();
+    typing("nothing");
+    assert!(scenario::handle_at("test:model:custom").is_none());
+    frame(&ctx, key(egui::Key::Enter), draw);
+    frame(&ctx, vec![], draw);
+    assert!(picked.borrow().is_empty() && is_open());
+    typing("!");
+    frame(&ctx, key(egui::Key::Escape), draw);
+    frame(&ctx, vec![], draw);
+    assert!(!is_open());
+
+    // A disabled control does not open.
+    enabled.set(false);
+    open();
+    assert!(!is_open());
+}
+
+/// A long list costs only the rows in view, and a long label neither widens the popup past the
+/// window nor reaches past its edge.
+#[test]
+fn search_picker_lays_out_the_rows_in_view_inside_a_narrow_window() {
+    let ctx = crate::fonts::test_context();
+    let values: Vec<String> = (0..2000).map(|n| format!("vendor/a-model-with-a-rather-long-name-{n:04}-and-then-some-more-of-it-and-more")).collect();
+    let choices: Vec<SearchChoice<'_>> = values.iter().map(|v| SearchChoice { value: v, label: v, tip: "", group: None }).collect();
+    let draw = |ui: &mut Ui| {
+        ui.allocate_ui(egui::vec2(120.0, 28.0), |ui| {
+            search_picker(
+                ui,
+                SearchPicker {
+                    id: "search_picker_long",
+                    handles: "test:long",
+                    current: "One",
+                    current_value: "",
+                    hint: "",
+                    choices: &choices,
+                    custom: false,
+                    note: None,
+                    enabled: true,
+                },
+            );
+        });
+    };
+    frame(&ctx, vec![], draw);
+    let at = scenario::handle_at("test:long").unwrap();
+    frame(&ctx, pointer(at, true), draw);
+    frame(&ctx, pointer(at, false), draw);
+    frame(&ctx, vec![], draw);
+    frame(&ctx, vec![], draw);
+    let rows = scenario::handles("test:long:vendor/");
+    assert!(!rows.is_empty() && rows.len() < 30, "{} rows laid out", rows.len());
+    let row = scenario::rect_of("dialog:list:vendor/a-model-with-a-rather-long-name-0000-and-then-some-more-of-it-and-more").unwrap();
+    assert!(row.left() >= 0.0 && row.right() <= 320.0, "{row:?} reaches past the window");
+    let search = scenario::rect_of("test:long:search").unwrap();
+    assert!(search.left() >= 0.0 && search.right() <= 320.0, "{search:?} reaches past the window");
+}
+
+#[test]
 fn preference_dropdown_keeps_disabled_choices_inert_and_closes_after_selection() {
     let ctx = crate::fonts::test_context();
     let picked = std::cell::Cell::new(1);

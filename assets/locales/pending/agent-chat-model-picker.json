@@ -1,0 +1,42 @@
+{
+  "en": {
+    "ui.agent_chat_custom_heading": "Custom model",
+    "ui.agent_chat_model_custom": "Use custom: {model}",
+    "ui.agent_chat_models_heading": "Available models"
+  },
+  "de": {
+    "ui.agent_chat_custom_heading": "Eigenes Modell",
+    "ui.agent_chat_model_custom": "Eigenes verwenden: {model}",
+    "ui.agent_chat_models_heading": "Verfügbare Modelle"
+  },
+  "ko": {
+    "ui.agent_chat_custom_heading": "사용자 지정 모델",
+    "ui.agent_chat_model_custom": "직접 입력 사용: {model}",
+    "ui.agent_chat_models_heading": "사용 가능한 모델"
+  },
+  "ar": {
+    "ui.agent_chat_custom_heading": "نموذج مخصص",
+    "ui.agent_chat_model_custom": "استخدام المخصص: {model}",
+    "ui.agent_chat_models_heading": "النماذج المتاحة"
+  },
+  "he": {
+    "ui.agent_chat_custom_heading": "מודל מותאם אישית",
+    "ui.agent_chat_model_custom": "שימוש במותאם אישית: {model}",
+    "ui.agent_chat_models_heading": "מודלים זמינים"
+  },
+  "ja": {
+    "ui.agent_chat_custom_heading": "カスタムモデル",
+    "ui.agent_chat_model_custom": "カスタムを使用: {model}",
+    "ui.agent_chat_models_heading": "利用可能なモデル"
+  },
+  "vi": {
+    "ui.agent_chat_custom_heading": "Mô hình tùy chỉnh",
+    "ui.agent_chat_model_custom": "Dùng tùy chỉnh: {model}",
+    "ui.agent_chat_models_heading": "Các mô hình có sẵn"
+  },
+  "zh": {
+    "ui.agent_chat_custom_heading": "自定义模型",
+    "ui.agent_chat_model_custom": "使用自定义:{model}",
+    "ui.agent_chat_models_heading": "可用模型"
+  }
+}

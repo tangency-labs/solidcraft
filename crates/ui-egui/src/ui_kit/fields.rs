@@ -249,6 +249,250 @@ fn searchable_dropdown_with(
     chosen
 }
 
+/// Longest search text and custom value a `search_picker` takes.
+const SEARCH_TEXT_CAP: usize = 256;
+/// Characters of a label shown on a `search_picker` row, and of a tip or note shown with it.
+const SEARCH_LABEL_CAP: usize = 64;
+const SEARCH_NOTE_CAP: usize = 1024;
+
+/// One row of a `search_picker`. The value, label and tip are searched; `tip` also shows on hover,
+/// and a change of `group` between rows draws a heading.
+#[allow(dead_code)] // Until the agent chat's model pickers use it.
+pub(crate) struct SearchChoice<'a> {
+    pub value: &'a str,
+    pub label: &'a str,
+    pub tip: &'a str,
+    pub group: Option<&'a str>,
+}
+
+/// What a `search_picker` shows.
+#[allow(dead_code)] // Until the agent chat's model pickers use it.
+pub(crate) struct SearchPicker<'a> {
+    /// ComboBox id salt; it also keys the search text, so one per picker in the window.
+    pub id: &'a str,
+    /// Scenario names: the control `{handles}`, its box `{handles}:search`, its custom row
+    /// `{handles}:custom` and its rows `{handles}:{value}`.
+    pub handles: &'a str,
+    /// The text on the closed control, and the value of the row to highlight.
+    pub current: &'a str,
+    pub current_value: &'a str,
+    /// The search box's empty-text hint.
+    pub hint: &'a str,
+    pub choices: &'a [SearchChoice<'a>],
+    /// Offer what was typed as a value of its own when it is not a listed one.
+    pub custom: bool,
+    /// A dim line under the list: still listing, or why it could not.
+    pub note: Option<&'a str>,
+    pub enabled: bool,
+}
+
+/// A `search_picker` choice: a listed value, or one typed into the box.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum Picked {
+    Listed(String),
+    Custom(String),
+}
+
+/// Dropdown whose popup opens on a focused search box over a list of `choices`, filtered as the
+/// box is typed in, with an optional row taking the typed text as a value of its own. Enter picks
+/// the exact or first match, else the typed text. Only the rows in view are laid out, so a long
+/// list stays cheap. Returns the pick and the control's response.
+/// Tokens: dropdown tokens, field tokens, `space_24`, `font_small`, `text_dim`, `form_card_width`.
+#[allow(dead_code)] // Until the agent chat's model pickers use it.
+pub(crate) fn search_picker(ui: &mut Ui, p: SearchPicker<'_>) -> egui::InnerResponse<Option<Picked>> {
+    crate::prefs_search::note_current(ui, p.current);
+    // As in `dropdown_menu_with_close_behavior`: only a search probe skips the real control.
+    if crate::prefs_search::querying(ui)
+        && (!ui.is_visible() || (crate::prefs_search::suppress_chrome(ui) && !crate::prefs_search::texts_hit(ui, &[p.current])))
+    {
+        return egui::InnerResponse::new(None, crate::prefs_search::hidden_response(ui));
+    }
+    let state = egui::Id::new(p.id);
+    let mut picked = None;
+    let response = ui
+        .add_enabled_ui(p.enabled, |ui| {
+            let response = egui::ComboBox::from_id_salt(p.id)
+                .width(dimension(ui.available_width()))
+                .height(Tokens::get().space_24 * 16.0)
+                .selected_text(p.current)
+                .icon(dropdown_arrow)
+                .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+                .show_ui(ui, |ui| picked = search_picker_popup(ui, &p, state))
+                .response;
+            // Closed: the next opening starts with an empty box that has the focus.
+            if !egui::ComboBox::is_open(ui.ctx(), response.id) {
+                ui.data_mut(|data| {
+                    data.remove::<String>(state.with("filter"));
+                    data.remove::<bool>(state.with("focused"));
+                });
+            }
+            response
+        })
+        .inner;
+    publish(ui, &response, egui::WidgetType::ComboBox);
+    scenario::publish_target(p.handles, response.rect);
+    egui::InnerResponse::new(picked, response)
+}
+
+/// What a `search_picker` shows while it is open; the pick, if one was made this frame.
+fn search_picker_popup(ui: &mut Ui, p: &SearchPicker<'_>, state: egui::Id) -> Option<Picked> {
+    let t = Tokens::get();
+    let (filter_id, focused_id) = (state.with("filter"), state.with("focused"));
+    // Esc closes this popup only: left in the input, it would also cancel a dialog around it.
+    if ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
+        ui.close();
+    }
+    ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Truncate);
+    ui.set_min_width(search_popup_width(ui, p));
+    let mut filter: String = ui.data(|data| data.get_temp(filter_id)).unwrap_or_default();
+    let search = ui.add(
+        text_input(egui::TextEdit::singleline(&mut filter))
+            .id(state.with("search"))
+            .char_limit(SEARCH_TEXT_CAP)
+            .hint_text(p.hint)
+            .background_color(t.input_fill())
+            .desired_width(f32::INFINITY),
+    );
+    t.input_bevel(ui, &search);
+    scenario::publish_target(&format!("{}:search", p.handles), search.rect);
+    if !ui.data(|data| data.get_temp::<bool>(focused_id)).unwrap_or(false) {
+        search.request_focus();
+        ui.data_mut(|data| data.insert_temp(focused_id, true));
+    }
+    if search.has_focus() {
+        crate::prefs_search::note_key_sink(ui.ctx());
+    }
+    if search.changed() {
+        ui.data_mut(|data| data.insert_temp(filter_id, filter.clone()));
+    }
+    let typed = filter.trim();
+    let query = typed.to_lowercase();
+    let hit = |text: &str| text.chars().take(SEARCH_TEXT_CAP).collect::<String>().to_lowercase().contains(&query);
+    let visible: Vec<&SearchChoice<'_>> = p.choices.iter().filter(|c| query.is_empty() || hit(c.value) || hit(c.label) || hit(c.tip)).collect();
+    let custom = (p.custom && !typed.is_empty() && !p.choices.iter().any(|c| c.value == typed)).then_some(typed);
+    let mut picked = None;
+    if search.lost_focus() && ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Enter)) {
+        let found = visible.iter().find(|c| c.value == typed).or_else(|| visible.first());
+        picked = match (typed.is_empty(), found, custom) {
+            // Nothing asked for: the choice stands.
+            (true, ..) => {
+                ui.close();
+                None
+            }
+            (_, Some(choice), _) => Some(Picked::Listed(choice.value.to_owned())),
+            (_, None, Some(model)) => Some(Picked::Custom(model.to_owned())),
+            (_, None, None) => {
+                search.request_focus();
+                None
+            }
+        };
+    }
+    if let Some(model) = custom {
+        search_heading(ui, crate::i18n::tr("ui.agent_chat_custom_heading"), t.space_16);
+        let text = crate::i18n::format("ui.agent_chat_model_custom", &[("model", &compact(model, SEARCH_LABEL_CAP))]);
+        let row = super::list_picker(ui, "custom", &text, false);
+        scenario::publish_target(&format!("{}:custom", p.handles), row.rect);
+        if row.clicked() {
+            picked = Some(Picked::Custom(model.to_owned()));
+        }
+    }
+    if !visible.is_empty() {
+        search_heading(ui, crate::i18n::tr("ui.agent_chat_models_heading"), t.space_16);
+        // Rows of one height, group headings too: only those in view are laid out. The list's
+        // height follows the whole list, so the popup does not jump about while filtering.
+        let row_height = row_height();
+        let rows = search_rows(&visible);
+        let all = search_rows(&p.choices.iter().collect::<Vec<_>>()).len();
+        let height = (all as f32 * (row_height + ui.spacing().item_spacing.y)).clamp(row_height, t.space_24 * 10.0);
+        egui::ScrollArea::vertical()
+            .id_salt(state.with("list"))
+            .max_height(height)
+            .min_scrolled_height(height)
+            .auto_shrink([false, false])
+            .show_rows(ui, row_height, rows.len(), |ui, range| {
+                for row in rows.get(range).unwrap_or_default() {
+                    match row {
+                        SearchRow::Heading(group) => search_heading(ui, group, row_height),
+                        SearchRow::Choice(choice) => {
+                            let response =
+                                super::list_picker(ui, choice.value, &compact(choice.label, SEARCH_LABEL_CAP), choice.value == p.current_value);
+                            scenario::publish_handle(&format!("{}:{}", p.handles, choice.value), response.rect.center());
+                            let response =
+                                if choice.tip.is_empty() { response } else { response.on_hover_text(compact(choice.tip, SEARCH_NOTE_CAP)) };
+                            if response.clicked() {
+                                picked = Some(Picked::Listed(choice.value.to_owned()));
+                            }
+                        }
+                    }
+                }
+            });
+    }
+    if let Some(note) = p.note {
+        ui.add(egui::Label::new(RichText::new(compact(note, SEARCH_NOTE_CAP)).size(t.font_small).color(t.text_dim)).wrap());
+    }
+    if picked.is_some() {
+        ui.close();
+    }
+    picked
+}
+
+enum SearchRow<'a> {
+    Heading(&'a str),
+    Choice(&'a SearchChoice<'a>),
+}
+
+/// The list's rows: the choices, each group's heading before its first choice.
+fn search_rows<'a>(choices: &[&'a SearchChoice<'a>]) -> Vec<SearchRow<'a>> {
+    let mut rows = Vec::with_capacity(choices.len());
+    let mut group = None;
+    for choice in choices {
+        let next = choice.group.filter(|g| !g.is_empty());
+        if let Some(heading) = next
+            && next != group
+        {
+            rows.push(SearchRow::Heading(heading));
+        }
+        group = next;
+        rows.push(SearchRow::Choice(choice));
+    }
+    rows
+}
+
+/// A dim one-line heading in a `search_picker`'s popup.
+fn search_heading(ui: &mut Ui, text: &str, height: f32) {
+    let t = Tokens::get();
+    let (rect, response) = ui.allocate_exact_size(vec2(dimension(ui.available_width()), height), egui::Sense::hover());
+    paint_text(
+        ui,
+        rect.shrink2(vec2(t.form_inset, 0.0)),
+        &compact(text, SEARCH_LABEL_CAP),
+        egui::FontId::proportional(t.font_small),
+        t.text_dim,
+        false,
+    );
+    if text.chars().count() > SEARCH_LABEL_CAP {
+        response.on_hover_text(compact(text, SEARCH_NOTE_CAP));
+    }
+}
+
+/// A `search_picker` popup's width: the control's, wide enough for the longest label and to search
+/// in, and never wider than the window.
+fn search_popup_width(ui: &Ui, p: &SearchPicker<'_>) -> f32 {
+    let t = Tokens::get();
+    let longest = p.choices.iter().map(|c| c.label).max_by_key(|label| label.chars().take(SEARCH_LABEL_CAP + 1).count()).unwrap_or("");
+    let text = ui.painter().layout_no_wrap(compact(longest, SEARCH_LABEL_CAP), egui::TextStyle::Button.resolve(ui.style()), t.text).size().x;
+    let wanted = text + ui.spacing().button_padding.x * 2.0 + ui.spacing().scroll.bar_width + t.space_8;
+    let most = (ui.ctx().content_rect().width() - t.space_24 * 2.0).max(0.0);
+    dimension(wanted.max(ui.available_width()).max(t.form_card_width).min(most))
+}
+
+/// `text` cut to `max_chars`, with an ellipsis if anything was left out.
+fn compact(text: &str, max_chars: usize) -> String {
+    let mut chars = text.chars();
+    let short: String = chars.by_ref().take(max_chars).collect();
+    if chars.next().is_some() { format!("{short}…") } else { short }
+}
+
 /// Completion/focus implementation shared by field variants. Tokens: `same as field`.
 fn editor(ui: &mut Ui, value: &mut String, hint: &str, completion: bool) -> (bool, bool, Response) {
     editor_reserving(ui, value, hint, completion, 0.0)

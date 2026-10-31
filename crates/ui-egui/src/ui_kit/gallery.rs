@@ -1290,6 +1290,24 @@ const ELEMENTS: &[Element] = &[
             searchable_dropdown(ui, "gallery", "One", &mut String::new(), &[SearchOption { value: "one", label: "One", handle: None }], None, None);
         });
     }),
+    element!("search_picker", "dialog:row:Gallery", Some("dialog:Gallery"), |ui, _| {
+        row(ui, "Gallery", |ui| {
+            search_picker(
+                ui,
+                SearchPicker {
+                    id: "gallery_search_picker",
+                    handles: "gallery:search_picker",
+                    current: "One",
+                    current_value: "one",
+                    hint: "Search",
+                    choices: &[SearchChoice { value: "one", label: "One", tip: "", group: None }],
+                    custom: true,
+                    note: None,
+                    enabled: true,
+                },
+            );
+        });
+    }),
     element!("text_emphasis", "dialog:row:Gallery", Some("dialog:Bold"), |ui, s| {
         row(ui, "Gallery", |ui| {
             text_emphasis(ui, &mut s.checked, &mut false, true);
