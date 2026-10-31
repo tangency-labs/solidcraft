@@ -1101,6 +1101,13 @@ preference_settings! {
     /// Where notices and offers stack: the view's bottom-right corner (the default) or the bottom
     /// centre, as before #7893.
     toast_place: crate::viewport::ToastPlace = Default::default(), PAGE_INTERFACE;
+    /// The operations under way, with their progress and Cancel, in a panel in the view's
+    /// bottom-right corner. Off: a "Computing" notice and the agent's chip, as before.
+    operations_panel: bool = true, PAGE_INTERFACE => check_id("prefs.operations_panel");
+    /// While a file opens, is inserted or its links are read again, the design waits for it
+    /// behind a card with the file's progress and Cancel, as it always did. Off (the default): the
+    /// operation is a row of the operations panel and the design stays usable meanwhile.
+    file_operations_wait: bool = false, PAGE_INTERFACE => check_id("prefs.file_operations_wait");
     /// Toolbar tabs hidden by the person. An empty list keeps every existing tab visible.
     hidden_toolbar_tabs: Vec<String> = Vec::new(), PAGE_INTERFACE;
     /// Show the ribbon's panel drop-downs as a grid of large icons, their names in the tooltips,
@@ -5471,6 +5478,8 @@ mod tests {
             ("toast_place", json!("centre"), PAGE_INTERFACE),
             ("ribbon_icon_grid", json!(true), PAGE_INTERFACE),
             ("ribbon_menus_skip_pinned", json!(true), PAGE_INTERFACE),
+            ("operations_panel", json!(false), PAGE_INTERFACE),
+            ("file_operations_wait", json!(true), PAGE_INTERFACE),
             ("timeline_left", json!(true), PAGE_INTERFACE),
             ("timeline_under_browser", json!(true), PAGE_INTERFACE),
             ("history_sketches", json!("under_feature"), PAGE_INTERFACE),

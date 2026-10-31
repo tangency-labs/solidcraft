@@ -193,6 +193,7 @@ pub mod network_prompt;
 pub mod op_auto;
 pub mod open_elsewhere;
 pub(crate) mod open_meshing;
+pub mod operations;
 pub mod params_dialog;
 pub mod personal_sheet_rules;
 pub(crate) mod pick_index;
@@ -574,7 +575,8 @@ pub struct SolveApp {
     /// A command recomputing the history (the marker moved, undo) computing off the window
     /// thread, and those asked for meanwhile ([`deferred`]).
     pub deferred: Option<deferred::Deferred>,
-    pub deferred_queue: Vec<(String, Value)>,
+    /// Commands waiting their turn, each with its operation's serial ([`operations::serial`]).
+    pub deferred_queue: Vec<(String, Value, u64)>,
     /// A feature started from a sketch while the marker rolls back, and that sketch: it starts
     /// once the marker is back.
     pub start_after_roll: Option<(String, u64)>,
@@ -679,6 +681,8 @@ pub struct SolveApp {
     pub frame_ms: f64,
     /// The viewport's frame-rate readout ([`frame_rate`]).
     pub frame_rate: frame_rate::FrameRate,
+    /// The operations under way, in the view's corner ([`operations`]).
+    pub operations: operations::Panel,
     pub synthetic: Vec<egui::Event>,
     /// The modifiers of the synthetic press in progress (a Ctrl-drag keeps Ctrl while it moves).
     pub synthetic_mods: egui::Modifiers,
@@ -850,6 +854,7 @@ impl SolveApp {
             cpu_meshing: false,
             frame_ms: 0.0,
             frame_rate: frame_rate::FrameRate::default(),
+            operations: operations::Panel::default(),
             synthetic: Vec::new(),
             synthetic_mods: egui::Modifiers::default(),
             control_rx: None,
@@ -1111,7 +1116,7 @@ impl SolveApp {
 
     /// Run a command programmatically (JSON parameters, no dialogs).
     pub fn run(&mut self, id: &str, params: Value) -> Result<Value, String> {
-        if self.file_load.busy() || self.file_picker.is_some() || self.saving.is_some() {
+        if self.file_load_holds() || self.file_picker.is_some() || self.saving.is_some() {
             return Err("a file operation is in progress".into());
         }
         // Commands may start only detected slicers and the programs the user added under Custom….
@@ -1516,7 +1521,7 @@ impl SolveApp {
         }
         timeline::stop_playback(self);
         // A file is loading: the design waits for it.
-        if self.file_load.busy() || self.file_picker.is_some() {
+        if self.file_load_holds() || self.file_picker.is_some() {
             return;
         }
         if id != "occurrence.move" {
@@ -2906,8 +2911,9 @@ impl SolveApp {
         }
         let rx = self.control_rx.take();
         for _ in 0..PER_FRAME {
-            // A file loading, a save being written, an agent's design change computing, or the
-            // agent cursor acting one out: commands that change the design wait their turn (the
+            // A file loading (also when the person can go on working: an agent's open and the
+            // edit after it go in that order), a save being written, an agent's design change
+            // computing, or the agent cursor acting one out: commands that change the design wait their turn (the
             // window, inspection and screenshots still answer, #1989). `engine.script` runs
             // directly, past `SolveApp::run`'s guard, so without the save here it changed the
             // design the save was taken up for (#6003).

@@ -34,6 +34,10 @@ pub struct DocSlot {
     /// Its linked design files as the design last read them (`Documents::link_stamps`).
     link_stamps: Vec<(u64, crate::linked_source::Stamp)>,
     edit_in_place: Option<crate::edit_in_place::PartContext>,
+    /// Which tab it is ([`next_tab`]): the same for as long as the tab is open.
+    pub(crate) tab: u64,
+    /// Opened behind the shown design: framed when it is first shown.
+    fit: bool,
 }
 
 /// The per-design part of the UI state the session doesn't keep (what is hidden, shown or locked
@@ -67,8 +71,16 @@ impl DocSlot {
             agent_chat: Default::default(),
             link_stamps: Vec::new(),
             edit_in_place: None,
+            tab: next_tab(),
+            fit: false,
         }
     }
+}
+
+/// A new tab's number ([`DocSlot::tab`], [`Documents::active_tab`]).
+pub(crate) fn next_tab() -> u64 {
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+    NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
 }
 
 /// The open designs: one slot per tab; the active tab's slot is empty (its design is in the app).
@@ -93,6 +105,8 @@ pub struct Documents {
     /// the link (opened, adopted in place, the link just made).
     /// Coming back to its tab reads again those that differ (`linked_source::update_changed`).
     pub(crate) link_stamps: Vec<(u64, crate::linked_source::Stamp)>,
+    /// The shown tab's number ([`DocSlot::tab`]); 0 until it is first asked for ([`active_tab`]).
+    active_tab: u64,
 }
 
 impl Documents {
@@ -103,6 +117,19 @@ impl Documents {
     /// The designs in the tabs not shown.
     pub(crate) fn background(&self) -> impl Iterator<Item = &Session> {
         self.slots.iter().filter_map(Option::as_ref).map(|slot| &slot.session)
+    }
+
+    /// The shown tab's number: a file operation for its design waits for it to be shown again.
+    pub(crate) fn active_tab(&mut self) -> u64 {
+        if self.active_tab == 0 {
+            self.active_tab = next_tab();
+        }
+        self.active_tab
+    }
+
+    /// [`Self::active_tab`], without numbering a tab not asked for yet (0).
+    pub(crate) fn current_tab(&self) -> u64 {
+        self.active_tab
     }
 
     /// Number of open designs (at least the active one).
@@ -170,6 +197,8 @@ fn swap_in(app: &mut SolveApp, mut slot: DocSlot) -> DocSlot {
         agent_chat: slot.agent_chat,
         link_stamps: std::mem::replace(&mut app.docs.link_stamps, slot.link_stamps),
         edit_in_place: std::mem::replace(&mut app.edit_in_place.active, slot.edit_in_place),
+        tab: std::mem::replace(&mut app.docs.active_tab, slot.tab),
+        fit: false,
     };
     // Only the displayed design owns the process-wide crash replay journal.
     app.session.crash_journal = out.session.crash_journal;
@@ -229,7 +258,11 @@ pub fn switch(app: &mut SolveApp, i: usize) {
     }
     let Some(incoming) = app.docs.slots.get_mut(i).and_then(Option::take) else { return };
     crate::linked_source::note_unread(app);
+    let fit = incoming.fit;
     let out = swap_in(app, incoming);
+    if fit {
+        app.fit_view();
+    }
     let a = app.docs.active;
     if let Some(s) = app.docs.slots.get_mut(a) {
         *s = Some(out);
@@ -343,6 +376,22 @@ pub(crate) fn same_path(a: &str, b: &str) -> bool {
     false
 }
 
+/// Open `session` in a new tab after the active one, leaving the shown design as it is (a file
+/// opened while the person is busy in another design). Its view is framed when it is shown.
+pub(crate) fn open_tab_behind(app: &mut SolveApp, session: Session) -> Result<(), String> {
+    if app.docs.slots.is_empty() {
+        app.docs.slots.push(None);
+        app.docs.active = 0;
+    }
+    if app.docs.slots.len() >= MAX_OPEN {
+        return Err(format!("at most {MAX_OPEN} designs can be open"));
+    }
+    let mut slot = DocSlot::new(session);
+    slot.fit = true;
+    app.docs.slots.insert(app.docs.active + 1, Some(slot));
+    Ok(())
+}
+
 /// Open `session` in a new tab after the active one and switch to it (`fit`: frame its model).
 pub fn open_tab(app: &mut SolveApp, session: Session) -> Result<(), String> {
     if app.docs.slots.is_empty() {
@@ -376,6 +425,8 @@ pub fn adopt(app: &mut SolveApp, session: Session) {
         crate::design_properties::close_object(app);
         crate::sketch_attachment_ui::clear(app);
         app.session.replace_design(session);
+        // Another design in the tab: what waits for the blank one's tab no longer does.
+        app.docs.active_tab = next_tab();
         // The blank design's record of its links goes with it; the new one's start now.
         app.docs.link_stamps.clear();
         crate::linked_source::note_unread(app);
@@ -961,7 +1012,7 @@ pub fn tabs(app: &mut SolveApp, ui: &mut egui::Ui, r: Rect, x0: f32, x1: f32) {
         if presp.hovered() { 1.0 } else { 0.55 },
     );
     // A file loading into the window keeps the tabs as they are (dragging still moves it).
-    let idle = !app.file_load.busy();
+    let idle = !app.file_load_holds();
     crate::scenario::publish_handle("tab:new", pr.center());
     if presp.on_hover_text(app.tr("ui.start_page")).clicked() && idle {
         app.home.show(app.session.revision);

@@ -569,7 +569,7 @@ fn playback_blocked(app: &SolveApp) -> bool {
         || app.session.active_sketch.is_some()
         || app.dialog.is_some()
         || app.tool.is_some()
-        || app.file_load.busy()
+        || app.file_load_holds()
         || app.file_picker.is_some()
         || app.saving.is_some()
         || app.applying.is_some()
@@ -1532,7 +1532,7 @@ mod tests {
     fn playback_refuses_to_start_while_other_history_work_waits() {
         let mut h = two_boxes(false);
         h.app.run("timeline.roll_to", json!({"position": 0})).unwrap();
-        h.app.deferred_queue.push(("timeline.roll_to".into(), json!({"position": 1})));
+        h.app.deferred_queue.push(("timeline.roll_to".into(), json!({"position": 1}), 0));
         assert!(h.app.run("timeline.play", json!({"action": "play"})).is_err(), "refused up front, not stopped a frame later");
         assert!(h.app.timeline_playback.is_none());
         h.app.deferred_queue.clear();

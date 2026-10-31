@@ -199,9 +199,20 @@ impl Steps {
     /// What the chip says: the command running, and in a batch which step it is
     /// (`3/21 · Extrude`).
     pub(crate) fn shown(&self) -> String {
+        let (done, total) = self.counts();
+        let label = self.current();
+        if total > 1 { format!("{}/{total} · {label}", done + 1) } else { label }
+    }
+
+    /// The command running, as the toolbar names it.
+    pub(crate) fn current(&self) -> String {
         let now = self.now.load(Ordering::Relaxed).max(1);
-        let label = self.labels.get(now - 1).or(self.labels.last()).cloned().unwrap_or_default();
-        if self.total > 1 { format!("{now}/{} · {label}", self.total) } else { label }
+        self.labels.get(now - 1).or(self.labels.last()).cloned().unwrap_or_default()
+    }
+
+    /// Steps done (the one running not yet) and how many there are.
+    pub(crate) fn counts(&self) -> (usize, usize) {
+        (self.now.load(Ordering::Relaxed).max(1).saturating_sub(1).min(self.total), self.total)
     }
 }
 
@@ -270,7 +281,7 @@ impl Ahead {
     /// (not computed off the window thread, or nothing to compute).
     pub(crate) fn begin(app: &SolveApp, method: &str, request: &Value) -> Option<Ahead> {
         app.apply_off_thread?;
-        if !app.preferences.agent_off_thread || app.file_load.busy() || app.file_picker.is_some() {
+        if !app.preferences.agent_off_thread || app.file_load_holds() || app.file_picker.is_some() {
             return None;
         }
         let commands = ahead_commands(method, request);
@@ -345,6 +356,12 @@ impl SolveApp {
             .or_else(|| self.agent.computing())
     }
 
+    /// How far the agent's design change computing off the window thread is, when it counts its
+    /// steps ([`Steps`]).
+    pub(crate) fn agent_steps(&self) -> Option<Arc<Steps>> {
+        self.control_job.as_ref().map_or_else(|| self.agent.computing_steps(), |j| j.steps.clone())
+    }
+
     /// Stop waiting for the agent's design change that is computing: it is answered as stopped
     /// and nothing of it is applied (its worker finishes on its own, unseen). Requests waiting
     /// behind it go on.
@@ -365,7 +382,7 @@ impl SolveApp {
     /// Take a control request off the window thread when it computes long (see the module
     /// notes). Returns it when it should simply run here now.
     pub(crate) fn offload_control(&mut self, ctx: &egui::Context, req: ControlRequest) -> Option<ControlRequest> {
-        if self.apply_off_thread.is_none() || self.file_load.busy() || self.file_picker.is_some() {
+        if self.apply_off_thread.is_none() || self.file_load_holds() || self.file_picker.is_some() {
             return Some(req);
         }
         // Reading the design (a measure, an inspection that measures): on a copy, answered from
@@ -487,7 +504,7 @@ impl SolveApp {
         }
         let Some(job) = self.control_job.take() else { return };
         // A file opening meanwhile: the request waits for it as any design change does.
-        if self.file_load.busy() || self.file_picker.is_some() {
+        if self.file_load_holds() || self.file_picker.is_some() {
             self.control_held.push_front(job.req);
             return;
         }
