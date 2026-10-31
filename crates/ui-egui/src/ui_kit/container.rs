@@ -272,8 +272,7 @@ impl Container {
     pub(crate) fn paint_inset(painter: &egui::Painter, widget: egui::Rect, frame: Frame) {
         let t = Tokens::get();
         if let Some(bevel) = t.borders.bevel {
-            let mut chrome = painter.clone();
-            chrome.set_clip_rect(widget.intersect(painter.ctx().content_rect()));
+            let chrome = painter.with_clip_rect(widget);
             bevel.paint(&chrome, widget, frame.corner_radius, false, true);
         }
         let Some(inset) = t.borders.primary_inset else {
@@ -286,10 +285,7 @@ impl Container {
         }
         let reduce = |r: u8| r.saturating_sub(distance.ceil() as u8);
         let radius = frame.corner_radius;
-        // A host's content clip excludes its padding. The companion belongs to the whole
-        // host, so clip to that known surface and the viewport instead of the content well.
-        let mut painter = painter.clone();
-        painter.set_clip_rect(widget.intersect(painter.ctx().content_rect()));
+        let painter = painter.with_clip_rect(widget);
         painter.rect_stroke(
             rect,
             egui::CornerRadius { nw: reduce(radius.nw), ne: reduce(radius.ne), sw: reduce(radius.sw), se: reduce(radius.se) },
@@ -306,7 +302,12 @@ impl Container {
 
     /// Decorate the content-hugging frame of a popup or feature sheet after its contents.
     pub(crate) fn finish_content(ui: &egui::Ui, frame: Frame) {
-        Self::paint_inset(ui.painter(), frame.widget_rect(ui.min_rect()), frame);
+        // This top-level host's content clip excludes its own padding. Expand only here;
+        // nested frames must retain their parent's scroll clip in `paint_inset`.
+        let widget = frame.widget_rect(ui.min_rect());
+        let mut chrome = ui.painter().clone();
+        chrome.set_clip_rect(widget.intersect(ui.ctx().content_rect()));
+        Self::paint_inset(&chrome, widget, frame);
     }
 
     pub fn area(self, id: Id) -> egui::Area {

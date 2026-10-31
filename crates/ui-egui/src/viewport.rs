@@ -6194,7 +6194,13 @@ fn overlays(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
         };
         let msg = format!("{} — {status}", crate::i18n::tr_name(&ss.name));
         let c = if ss.report.ok() { v.sketch_accent } else { v.error };
-        painter.text(pos2(r.left() + 12.0, r.top() + 12.0), Align2::LEFT_TOP, msg, FontId::proportional(t.font_button), c);
+        painter.text(
+            pos2(r.left() + 12.0, r.top() + 12.0),
+            Align2::LEFT_TOP,
+            msg,
+            FontId::proportional(t.font_button),
+            v.readable_ink(c, v.viewport_top),
+        );
     }
 }
 

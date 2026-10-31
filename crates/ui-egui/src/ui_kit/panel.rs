@@ -1253,7 +1253,7 @@ fn page_list_sized<S>(
                 if on || response.hovered() || response.has_focus() {
                     ui.painter().rect_filled(rect, t.control_radius, if on { t.selected_bg } else { t.hover });
                 }
-                let ink = if on { t.form_primary } else { t.form_ink };
+                let ink = if on { t.selection_ink() } else { t.form_ink };
                 let icon =
                     egui::Rect::from_center_size(egui::pos2(rect.left() + t.space_10 + t.space_8, rect.center().y), vec2(t.space_16, t.space_16));
                 crate::icons::paint_ink(ui.painter(), icon, page.icon, if on { ink } else { t.form_dim });

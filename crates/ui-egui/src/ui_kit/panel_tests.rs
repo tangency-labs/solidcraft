@@ -5,6 +5,79 @@ use crate::{scenario, theme::Tokens};
 use egui::Ui;
 
 #[test]
+fn selected_preferences_pages_and_input_text_are_readable_in_shipped_themes() {
+    for file in crate::theme_files::builtin() {
+        let t = crate::theme_files::resolve(file);
+        let _theme = crate::theme::scoped_tokens(t);
+        let ctx = crate::fonts::test_context();
+        let output = crate::test_support::frame(&ctx, egui::RawInput::default(), |ui| {
+            ui.set_width(800.0);
+            super::page_list(
+                ui,
+                &mut 0,
+                &[WindowPage {
+                    icon: "settings",
+                    label: "Interface",
+                    group: None,
+                    handle: "test:interface",
+                    scroll: false,
+                    draw: |_, _: &mut ()| {},
+                }],
+                &mut (),
+            );
+        });
+        let text = crate::test_support::text_shapes(&output).find(|text| text.galley.job.text == "Interface").unwrap();
+        assert!(crate::theme::contrast_ratio(text.fallback_color, t.selected_bg) >= 4.5, "{}: selected page", file.id);
+        crate::test_support::frame(&ctx, egui::RawInput::default(), |ui| {
+            scope(ui, |ui| {
+                let selection = ui.visuals().selection;
+                assert!(crate::theme::contrast_ratio(selection.stroke.color, selection.bg_fill) >= 4.5, "{}: selected input", file.id);
+            });
+        });
+    }
+}
+
+#[test]
+fn scrolled_container_decorations_stay_inside_the_parent_clip() {
+    let mut t = crate::theme_files::resolve(crate::theme_files::find("solidcraft-95", &[]).unwrap());
+    t.borders.primary_inset = Some(crate::theme::InsetBorder { stroke: egui::Stroke::new(1.0, t.selected_ink), gap: 2.0 });
+    let _theme = crate::theme::scoped_tokens(t);
+    let ctx = crate::fonts::test_context();
+    let clip = egui::Rect::from_min_max(egui::pos2(0.0, 20.0), egui::pos2(300.0, 80.0));
+    let output = crate::test_support::frame(&ctx, egui::RawInput::default(), |ui| {
+        ui.set_clip_rect(clip);
+        let container = Container::for_layout(crate::shell::LayoutMode::Floating, Surface::Navigation);
+        let frame = container.frame(&ctx, t.panel, crate::frame::Side::Left);
+        container.show_frame(ui, frame, ui.max_rect(), |ui| {
+            ui.allocate_exact_size(egui::vec2(200.0, 160.0), egui::Sense::hover());
+        });
+    });
+    let mut decorations = 0;
+    for shape in &output.shapes {
+        if matches!(shape.shape, egui::Shape::LineSegment { .. } | egui::Shape::Rect(_)) {
+            decorations += 1;
+            assert!(clip.contains_rect(shape.clip_rect), "a scrolled decoration escaped its parent: {:?}", shape.clip_rect);
+        }
+    }
+    assert!(decorations > 1);
+}
+
+#[test]
+fn layout_preview_history_text_is_readable_on_its_selected_fill() {
+    let t = crate::theme_files::resolve(crate::theme_files::find("solidcraft-95", &[]).unwrap());
+    let _theme = crate::theme::scoped_tokens(t);
+    let ctx = crate::fonts::test_context();
+    for history in [0, 2] {
+        let output = crate::test_support::frame(&ctx, egui::RawInput::default(), |ui| {
+            ui.set_width(280.0);
+            layout_preview(ui, LayoutPreview { compact: false, labels: true, history, translucent: false });
+        });
+        let text = crate::test_support::text_shapes(&output).find(|text| text.galley.job.text == "History").unwrap();
+        assert!(crate::theme::contrast_ratio(text.fallback_color, t.selected_bg) >= 4.5);
+    }
+}
+
+#[test]
 fn checkbox_grid_and_close_header_are_clickable() {
     let ctx = crate::fonts::test_context();
     let (mut first, mut second, mut closed) = (false, true, false);
