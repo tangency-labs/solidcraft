@@ -450,6 +450,11 @@ pub struct Session {
     /// Opened read-only (`doc.open {read_only}`, the "open elsewhere" notice): saving to its own
     /// file is refused; Save As to another file is how its changes are kept.
     pub read_only: bool,
+    /// Whether the design's name is one its user chose for it (`file.new {name}`) rather than
+    /// one it borrowed — from a file's name, a sample's name, or a file that stored another
+    /// design's name. A borrowed name follows Save As to the new file's name (#4907); a name
+    /// the user chose is kept.
+    pub user_named: bool,
     /// One-shot display-only notification during doc.open, before authoritative evaluation.
     /// Interactive loaders may show it provisionally; it never becomes model state.
     pub open_preview: Option<Box<dyn Fn(solidcraft_io::DesignPreview) + Send + Sync>>,
@@ -688,6 +693,7 @@ impl Session {
             uid: NEXT_UID.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
             disk: None,
             read_only: false,
+            user_named: false,
             open_preview: None,
             log: Vec::new(),
             revision: 1,
@@ -1649,6 +1655,7 @@ impl Session {
             uid: self.uid,
             disk: self.disk,
             read_only: self.read_only,
+            user_named: self.user_named,
             open_preview: None,
             saved: self.saved.clone(),
             log: Vec::new(),
