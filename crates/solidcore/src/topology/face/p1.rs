@@ -201,6 +201,13 @@ use crate::error::SM_ERR_ASSERT_FAILURE;
 /// merge into the V merges of the faces it made).
 pub const MAX_SPLIT_AT_SEAM_DEPTH: usize = 8;
 
+/// A status SMLib drops and the fork passes on (`SER`, tangency-labs/smlib 6997962):
+/// returned with the opt-in [`crate::kernel::UpstreamFixes::query_statuses_pass_on`],
+/// handed on to the site's own ignore otherwise.
+fn pass<T>(k: &Kernel, r: Result<T>) -> Result<Result<T>> {
+    crate::error::passed_on(r, k.fixes.query_statuses_pass_on)
+}
+
 fn null(reason: &'static str) -> SolidError {
     SolidError::invalid_input(OP, reason)
 }
@@ -1466,7 +1473,10 @@ fn swap_uv_notifying(
     let x_axis = Vec3::new(1.0, 1.0, 0.0).unitize()?;
     let mut mirror = Axis2Placement::default();
     // x:[1 1 0] y:[0 0 1] z=cross(x,y):[1 -1 0] (status ignored)
-    let _ = mirror.set_canonical(Point3::new(0.0, 0.0, 0.0), x_axis, Vec3::new(0.0, 0.0, 1.0));
+    let _ = pass(
+        k,
+        mirror.set_canonical(Point3::new(0.0, 0.0, 0.0), x_axis, Vec3::new(0.0, 0.0, 1.0)),
+    )?;
 
     // Mirror the UV trims and swap the surface (the steps that can fail) before changing
     // the face, so that a failure leaves the face unchanged.
@@ -1674,11 +1684,12 @@ fn shrink_geometry_notifying(
 
     // Trim the surface (status ignored)
     if let Some(s) = b.face_mut(f)?.surface.as_mut() {
-        ignore_status(s.trim_with_domain_with(k, &mut new_domain, trim))?;
+        ignore_status(pass(k, s.trim_with_domain_with(k, &mut new_domain, trim))?)?;
     }
 
-    // remove all associated UVTrimCurves (status ignored)
-    ignore_status(remove_uv_trim_curves_notifying(b, f, notify))?;
+    // remove all associated UVTrimCurves (status ignored; passed on with the opt-in fix,
+    // tangency-labs/smlib 6997962, which keeps the curve trims below ignored)
+    ignore_status(pass(k, remove_uv_trim_curves_notifying(b, f, notify))?)?;
 
     // Now Trim all Curves to the face edges
     for e in face_edges(b, f)? {
@@ -1774,26 +1785,23 @@ fn sample_uv(
     param: f64,
     pv: &mut [Vec3; 2],
 ) -> Result<Point2> {
-    if let Some(v) = ignored(evaluate_geometric(k, curve, param, 1, true))? {
+    if let Some(v) = ignored(pass(k, evaluate_geometric(k, curve, param, 1, true))?)? {
         if let [p, d, ..] = v.as_slice() {
             *pv = [*p, *d];
         }
     }
     let mut uv = Vec2::UNDEF;
-    if let Some(r) =
-        ignored(surface.drop_point::<NoObject>(k, pv[0], uv_domain, &DropPointOptions::default()))?
-    {
+    if let Some(r) = ignored(pass(
+        k,
+        surface.drop_point::<NoObject>(k, pv[0], uv_domain, &DropPointOptions::default()),
+    )?)? {
         uv = r.result_uv;
     }
     // DropVectors of the tangent (its output is never read)
-    ignore_status(drop_vectors_at(
+    ignore_status(pass(
         k,
-        surface,
-        uv,
-        Side::Left,
-        Side::Left,
-        &pv[1..],
-    ))?;
+        drop_vectors_at(k, surface, uv, Side::Left, Side::Left, &pv[1..]),
+    )?)?;
     Ok(uv)
 }
 
@@ -1803,7 +1811,7 @@ fn vertexuse_uv(k: &Kernel, b: &mut Brep, vu: VertexuseId, prev: Point2) -> Resu
     if let Some(Some(gap)) = ignored(vu1::vertex_face_gap(k, b, vu, false))? {
         return Ok(gap.face_uv);
     }
-    Ok(ignored(vu1::compute_uv_point(k, b, vu, false))?.unwrap_or(prev))
+    Ok(ignored(pass(k, vu1::compute_uv_point(k, b, vu, false))?)?.unwrap_or(prev))
 }
 
 /// `MoveSeam`: on a periodic B-spline surface whose seam the face's edges cross (or
@@ -1903,9 +1911,9 @@ pub fn move_seam_notified<O: LoopObject>(
     let ivl_u = uv_domain.u_interval();
     let ivl_v = uv_domain.v_interval();
     let mut periodic_u = PeriodicExtent1d::full(ivl_u.length());
-    let _ = periodic_u.set_min_max(0.0, 0.0, None, true);
+    let _ = pass(k, periodic_u.set_min_max(0.0, 0.0, None, true))?;
     let mut periodic_v = PeriodicExtent1d::full(ivl_v.length());
-    let _ = periodic_v.set_min_max(0.0, 0.0, None, true);
+    let _ = pass(k, periodic_v.set_min_max(0.0, 0.0, None, true))?;
 
     // check State - SmBSplineSurfaces only
     if !surface0.is_kind_of(B_SPLINE_SURFACE_TYPE)? {
@@ -1994,7 +2002,7 @@ pub fn move_seam_notified<O: LoopObject>(
                     &mut periodic_v
                 };
                 let s = comp(uv_prev, ii) - ivl.min();
-                let _ = periodic.set_min_max(s, s, None, true);
+                let _ = pass(k, periodic.set_min_max(s, s, None, true))?;
             }
 
             'loops: for (j0, &lu) in loopuses.iter().enumerate() {
@@ -2183,7 +2191,7 @@ pub fn move_seam_notified<O: LoopObject>(
             let mut dist = BIG_DOUBLE;
             let mut this_ivl = periodic;
             this_ivl.set_full_period(false);
-            let knots = ignored(surface.knots_with_nurb(k, surf_param, None))?
+            let knots = ignored(pass(k, surface.knots_with_nurb(k, surf_param, None))?)?
                 .map(|(k, _)| k)
                 .unwrap_or_default();
             let k0 = knots.first().copied().unwrap_or(0.0);
@@ -2193,7 +2201,7 @@ pub fn move_seam_notified<O: LoopObject>(
                 if this_dist < dist {
                     let lo = periodic.map_value(this_knot - ivl.min() - far);
                     let hi = periodic.map_value(this_knot - ivl.min() + far);
-                    let _ = this_ivl.set_min_max(lo, hi, None, false);
+                    let _ = pass(k, this_ivl.set_min_max(lo, hi, None, false))?;
                     if periodic.are_disjoint(&this_ivl) {
                         best = Some(jj);
                         dist = this_dist;
@@ -2225,7 +2233,7 @@ pub fn move_seam_notified<O: LoopObject>(
             let mut joined = Surface::from(joined);
             if surface_is_analytic {
                 if let SurfaceKind::BSpline(j) = joined.kind() {
-                    if let Some(a) = ignored(j.copy_and_add_analytics(k))? {
+                    if let Some(a) = ignored(pass(k, j.copy_and_add_analytics(k))?)? {
                         if a.is_kind_of(B_SPLINE_SURFACE_TYPE)? {
                             joined = a;
                         }
@@ -2287,18 +2295,22 @@ pub fn move_seam_notified<O: LoopObject>(
         .unwrap_or(false)
     {
         // status ignored upstream
-        if let Some(s) = ignored(split_at_seam_depth(
-            k,
-            b,
-            env,
-            f,
-            crv_class_u,
-            crv_class_v,
-            problem,
-            props,
-            resolve,
-            0,
-        ))? {
+        let pass_on = k.fixes.query_statuses_pass_on;
+        if let Some(s) = ignored(crate::error::passed_on(
+            split_at_seam_depth(
+                k,
+                b,
+                env,
+                f,
+                crv_class_u,
+                crv_class_v,
+                problem,
+                props,
+                resolve,
+                0,
+            ),
+            pass_on,
+        )?)? {
             out.split = s;
         }
     }
@@ -2578,18 +2590,22 @@ fn split_at_seam_merges<O: LoopObject>(
             ))?
             .unwrap_or(false);
             if has {
-                let s = ignored(split_at_seam_depth(
-                    k,
-                    b,
-                    env.as_deref_mut(),
-                    f,
-                    &mut cu,
-                    &mut cv,
-                    this_problem,
-                    props,
-                    resolve,
-                    depth + 1,
-                ))?
+                let pass_on = k.fixes.query_statuses_pass_on;
+                let s = ignored(crate::error::passed_on(
+                    split_at_seam_depth(
+                        k,
+                        b,
+                        env.as_deref_mut(),
+                        f,
+                        &mut cu,
+                        &mut cv,
+                        this_problem,
+                        props,
+                        resolve,
+                        depth + 1,
+                    ),
+                    pass_on,
+                )?)?
                 .unwrap_or_default();
                 out.faces.extend_from_slice(&s.faces);
                 if tgt != f && !out.faces.contains(&tgt) {

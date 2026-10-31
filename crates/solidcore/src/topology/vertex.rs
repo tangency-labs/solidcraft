@@ -933,8 +933,13 @@ pub fn is_topological_vertex(k: &Kernel, b: &mut Brep, v: VertexId) -> Result<bo
         // a tangent nothing wrote is the default SmVector3d (SM_UNDEF_DOUBLE)
         let t1 = tan1.unwrap_or(Vec3::UNDEF);
         let t2 = tan2.unwrap_or(Vec3::UNDEF);
-        // AngleBetween sets the angle to 0 on failure (status ignored)
-        t1.angle_between(t2).unwrap_or(0.0)
+        // AngleBetween sets the angle to 0 on failure (status ignored); with the opt-in
+        // fix the curves are not shown to meet G1 without it, so the vertex stays
+        // (tangency-labs/smlib 7a35f33)
+        match t1.angle_between(t2) {
+            Err(_) if k.fixes.query_statuses_pass_on => return Ok(false),
+            r => r.unwrap_or(0.0),
+        }
     } else {
         0.0
     };
@@ -1846,6 +1851,22 @@ mod tests {
         assert!(!are_edges_tangent(&k, &b, v[1], e[0], e[1], 0.0).unwrap());
         // the parameters agree (0 and 0) and the angle test passes
         assert!(is_topological_vertex(&k, &mut b, v[1]).unwrap());
+    }
+
+    // tangency-labs/smlib 7a35f33 (SmVertex::IsTopologicalVertex): without the angle
+    // between the two tangents (the default zero tangent of a failed end evaluation)
+    // the curves are not shown to meet G1, so the vertex is kept.
+    #[test]
+    fn issue_2009_vertex_without_tangent_angle_is_kept() {
+        use crate::curve::composite_curve::CompositeCurve;
+        let (mut b, v, e) = chain(true, Vec3::X, Vec3::Y);
+        let e0 = b.edge_mut(e[0]).unwrap();
+        e0.curve = Some(Curve::from(CompositeCurve::new(3)));
+        e0.interval = Extent1d::from_min_max(-1.0, 0.0);
+        let mut k = Kernel::default();
+        assert!(is_topological_vertex(&k, &mut b, v[1]).unwrap());
+        k.fixes.query_statuses_pass_on = true;
+        assert!(!is_topological_vertex(&k, &mut b, v[1]).unwrap());
     }
 
     #[test]

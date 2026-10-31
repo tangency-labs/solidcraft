@@ -41,6 +41,9 @@
 //!   `AssertValid`'s evaluations and bounding box), the port does too, except that
 //!   [`SolidError::Unported`] is always passed on. Ignored evaluations leave
 //!   default-constructed `SmVector3d`s ([`Vec3::UNDEF`]), as upstream.
+//!   With the opt-in `Kernel::fixes.query_statuses_pass_on` (WR-663) `TrimGap` returns
+//!   `false` (gap not fixed) at the first of those that fails, as the fork
+//!   (tangency-labs/smlib 8843967).
 //! - **Crashes.** Where upstream dereferences a `NULL` (a curve without NURB in
 //!   `GetControlPoint` / `IsSegmentLine`, an extension `TrimGap` did not make, an
 //!   unclamped knot vector indexing before the control points in `HasInternalPole`)
@@ -404,12 +407,6 @@ const fn curve_is_bounded(_curve: &BSplineCurve) -> bool {
 
 fn invalid(operation: &'static str, reason: &'static str) -> SolidError {
     SolidError::InvalidInput { operation, reason }
-}
-
-/// An `EvaluatePoint` whose status is ignored: [`Vec3::UNDEF`] (the
-/// default-constructed point) on failure.
-fn point_or_undef(c: &BSplineCurve, t: f64) -> Result<Point3> {
-    Ok(ignored(c.evaluate_point(t))?.unwrap_or(Vec3::UNDEF))
 }
 
 /// The `SM_ASSERT_*_REPORT` macros of `AssertValid` (`SM_LEVEL_0` tests, so the
@@ -966,17 +963,30 @@ impl BSplineCurve {
         // only close gap if less than dMin
         let d_min_sq = d_min * d_min;
 
+        // with the opt-in fix each failed step leaves the gap unfixed (returns 0), as the
+        // fork has it (tangency-labs/smlib 8843967); upstream goes on with unset values
+        let soft = k.fixes.query_statuses_pass_on;
+        macro_rules! or_unfixed {
+            ($r:expr, $default:expr) => {
+                match ignored($r)? {
+                    Some(v) => v,
+                    None if soft => return Ok(false),
+                    None => $default,
+                }
+            };
+        }
+
         // curve 0 start and end points
         let mut extent0 = self.natural_interval();
         let t0size = extent0.max() - extent0.min();
-        let s0 = point_or_undef(self, extent0.min())?;
-        let e0 = point_or_undef(self, extent0.max())?;
+        let s0 = or_unfixed!(self.evaluate_point(extent0.min()), Vec3::UNDEF);
+        let e0 = or_unfixed!(self.evaluate_point(extent0.max()), Vec3::UNDEF);
 
         // curve 1 start and end points
         let mut extent1 = other.natural_interval();
         let t1size = extent1.max() - extent1.min();
-        let s1 = point_or_undef(other, extent1.min())?;
-        let e1 = point_or_undef(other, extent1.max())?;
+        let s1 = or_unfixed!(other.evaluate_point(extent1.min()), Vec3::UNDEF);
+        let e1 = or_unfixed!(other.evaluate_point(extent1.max()), Vec3::UNDEF);
 
         // Extend curves based on closest endpoints by domain * 0.3
         let d_s0s1 = (s0 - s1).length_squared();
@@ -1011,22 +1021,20 @@ impl BSplineCurve {
         let end1 = ext_case == 2 || ext_case == 4;
 
         // extend the input curves past the ends with the smallest gaps
-        let extend = |c: &Self, t: f64| -> Result<Option<Self>> {
-            Ok(ignored(c.create_extended_curve(t, ContinuityType::G1, true))?.flatten())
-        };
+        let extend = |c: &Self, t: f64| c.create_extended_curve(t, ContinuityType::G1, true);
         let mut curve0e = None;
         let mut curve1e = None;
         if start0 {
-            curve0e = extend(self, extent0.min() - 0.03 * t0size)?;
+            curve0e = or_unfixed!(extend(self, extent0.min() - 0.03 * t0size), None);
         }
         if end0 {
-            curve0e = extend(self, extent0.max() + 0.03 * t0size)?;
+            curve0e = or_unfixed!(extend(self, extent0.max() + 0.03 * t0size), None);
         }
         if start1 {
-            curve1e = extend(other, extent1.min() - 0.03 * t1size)?;
+            curve1e = or_unfixed!(extend(other, extent1.min() - 0.03 * t1size), None);
         }
         if end1 {
-            curve1e = extend(other, extent1.max() + 0.03 * t1size)?;
+            curve1e = or_unfixed!(extend(other, extent1.max() + 0.03 * t1size), None);
         }
         let (Some(mut curve0e), Some(mut curve1e)) = (curve0e, curve1e) else {
             return Err(invalid(OP_GAP, "curve extension missing"));
@@ -1063,8 +1071,8 @@ impl BSplineCurve {
 
                 let mut ext0 = Extent1d::from_min_max(tmin0, tmax0);
                 let mut ext1 = Extent1d::from_min_max(tmin1, tmax1);
-                ignored(curve0e.trim(k, &mut ext0, TrimMode::Notify))?;
-                ignored(curve1e.trim(k, &mut ext1, TrimMode::Notify))?;
+                or_unfixed!(curve0e.trim(k, &mut ext0, TrimMode::Notify), ());
+                or_unfixed!(curve1e.trim(k, &mut ext1, TrimMode::Notify), ());
 
                 // only do this once
                 break;
@@ -1078,16 +1086,16 @@ impl BSplineCurve {
         let mut p0 = Vec3::UNDEF;
         let mut p1 = Vec3::UNDEF;
         if start0 {
-            p0 = point_or_undef(&curve0e, extent0.min())?;
+            p0 = or_unfixed!(curve0e.evaluate_point(extent0.min()), Vec3::UNDEF);
         }
         if end0 {
-            p0 = point_or_undef(&curve0e, extent0.max())?;
+            p0 = or_unfixed!(curve0e.evaluate_point(extent0.max()), Vec3::UNDEF);
         }
         if start1 {
-            p1 = point_or_undef(&curve1e, extent1.min())?;
+            p1 = or_unfixed!(curve1e.evaluate_point(extent1.min()), Vec3::UNDEF);
         }
         if end1 {
-            p1 = point_or_undef(&curve1e, extent1.max())?;
+            p1 = or_unfixed!(curve1e.evaluate_point(extent1.max()), Vec3::UNDEF);
         }
 
         // the new common end point
@@ -1112,18 +1120,18 @@ impl BSplineCurve {
         // replace the endpoint of the original curves
         let form = ControlPointForm::NonRational;
         if start0 {
-            ignored(self.set_control_point(form, 0, mid, 1.0))?;
+            or_unfixed!(self.set_control_point(form, 0, mid, 1.0), ());
         }
         if end0 {
             let last = self.number_control_points()?.wrapping_sub(1);
-            ignored(self.set_control_point(form, last, mid, 1.0))?;
+            or_unfixed!(self.set_control_point(form, last, mid, 1.0), ());
         }
         if start1 {
-            ignored(other.set_control_point(form, 0, mid, 1.0))?;
+            or_unfixed!(other.set_control_point(form, 0, mid, 1.0), ());
         }
         if end1 {
             let last = other.number_control_points()?.wrapping_sub(1);
-            ignored(other.set_control_point(form, last, mid, 1.0))?;
+            or_unfixed!(other.set_control_point(form, last, mid, 1.0), ());
         }
 
         Ok(true) // success...we have modified the curves
@@ -1758,6 +1766,28 @@ mod tests {
         // on the plane the SmLine test is reached (false for a plain B-spline)
         let on = c.is_on_plane(Vec3::default(), z, 1e-6, None).unwrap();
         assert!(on.on_plane);
+    }
+
+    #[test]
+    fn issue_2009_trim_gap_unfixed_without_end_points() {
+        // tangency-labs/smlib 8843967 (SmBSplineCurve::TrimGap): an end point that
+        // cannot be evaluated leaves the gap unfixed (0); upstream measures the gap
+        // between unset points, finds none and reports the curves joined.
+        let mut on = Kernel::default();
+        on.fixes.query_statuses_pass_on = true;
+        let off = Kernel::default();
+        let mut a = BSplineCurve::new(3);
+        assert!(a.evaluate_point(0.0).is_err());
+        let mut b = curve(
+            1,
+            &[[0.0, 0.0, 0.0], [1.0, 1.0, 0.0]],
+            &[0.0, 0.0, 1.0, 1.0],
+        );
+        assert!(a
+            .clone()
+            .trim_gap(&off, &mut b.clone(), GapFix::Both, 0.1)
+            .unwrap());
+        assert!(!a.trim_gap(&on, &mut b, GapFix::Both, 0.1).unwrap());
     }
 
     #[test]

@@ -162,6 +162,9 @@
 //!   infallible) when `num_derivs` exceeds [`crate::curve::MAX_EVAL_DERIVS`]; the other
 //!   kinds' evaluators check the bound themselves or fail earlier (B-splines at
 //!   `NL_MAXDER`).
+//! - **No length (WR-663).** With the opt-in `Kernel::fixes.query_statuses_pass_on`,
+//!   `ApproximateLength` is `SM_UNDEF_DOUBLE` (no turn angle) when an evaluation or a
+//!   turn angle fails, as the fork (tangency-labs/smlib 8311f8e).
 
 use crate::curve::composite_curve::CompositeCurve;
 use crate::curve::conic::Conic;
@@ -2279,6 +2282,11 @@ pub fn approximate_length<C: CurveEvaluate + ?Sized>(
     // init output
     let mut ret = 0.0;
 
+    // with the opt-in fix a curve that cannot be evaluated has no length:
+    // SM_UNDEF_DOUBLE (tangency-labs/smlib 8311f8e)
+    let no_length = k.fixes.query_statuses_pass_on;
+    let undef = Ok((crate::math::UNDEF_DOUBLE, None));
+
     // switch for turning angles
     if curve.dim() == 2 && want_turn_angle {
         let z = Vec3::new(0.0, 0.0, 1.0);
@@ -2287,15 +2295,22 @@ pub fn approximate_length<C: CurveEvaluate + ?Sized>(
         let mut turn_ang_rad = 0.0;
 
         // Get Start and end Points
-        if let Some(v) = eval_ignored(k, curve, interval.min(), 1, true)? {
-            last = [at(&v, 0), at(&v, 1)];
+        match eval_ignored(k, curve, interval.min(), 1, true)? {
+            Some(v) => last = [at(&v, 0), at(&v, 1)],
+            None if no_length => return undef,
+            None => (),
         }
-        if let Some(v) = eval_ignored(k, curve, interval.max(), 1, true)? {
-            curr = [at(&v, 0), at(&v, 1)];
+        match eval_ignored(k, curve, interval.max(), 1, true)? {
+            Some(v) => curr = [at(&v, 0), at(&v, 1)],
+            None if no_length => return undef,
+            None => (),
         }
 
         // Get base of ActTurnAngRad = BaseTurnAngRad +- N*2PI
-        let base_turn_ang_rad = z.ccw_angle_between(last[1], curr[1])?;
+        let base_turn_ang_rad = match z.ccw_angle_between(last[1], curr[1]) {
+            Err(e) if no_length && !e.is_unported() => return undef,
+            r => r?,
+        };
 
         // for every sample point - assume enough sample points that every turn is less than 180 degrees
         for ii in 1..=samples {
@@ -2307,13 +2322,18 @@ pub fn approximate_length<C: CurveEvaluate + ?Sized>(
             };
 
             // Evaluate and accumulate distance
-            if let Some(v) = eval_ignored(k, curve, param, 1, true)? {
-                curr = [at(&v, 0), at(&v, 1)];
+            match eval_ignored(k, curve, param, 1, true)? {
+                Some(v) => curr = [at(&v, 0), at(&v, 1)],
+                None if no_length => return undef,
+                None => (),
             }
             ret += curr[0].distance(last[0]);
 
             // accumulate turn angle
-            let this_turn_ang_rad = z.ccw_angle_between(last[1], curr[1])?;
+            let this_turn_ang_rad = match z.ccw_angle_between(last[1], curr[1]) {
+                Err(e) if no_length && !e.is_unported() => return undef,
+                r => r?,
+            };
             turn_ang_rad += this_turn_ang_rad;
 
             // for next iter
@@ -2327,12 +2347,17 @@ pub fn approximate_length<C: CurveEvaluate + ?Sized>(
         let turn_deg = (base_turn_ang_rad + n * 2.0 * PI) * (180.0 / PI);
         Ok((ret, Some(turn_deg)))
     } else {
-        let point = |t: f64, prev: Point3| -> Result<Point3> {
-            Ok(ignored(curve.evaluate_point(k, t))?.unwrap_or(prev))
+        let point = |t: f64, prev: Point3| -> Result<Option<Point3>> {
+            match ignored(curve.evaluate_point(k, t))? {
+                None if no_length => Ok(None),
+                p => Ok(Some(p.unwrap_or(prev))),
+            }
         };
 
         // Get Start Point
-        let mut last = point(interval.min(), Vec3::UNDEF)?;
+        let Some(mut last) = point(interval.min(), Vec3::UNDEF)? else {
+            return undef;
+        };
         let mut curr = Vec3::UNDEF;
 
         // for every sample point
@@ -2345,7 +2370,10 @@ pub fn approximate_length<C: CurveEvaluate + ?Sized>(
             };
 
             // evaluate and accumulate distance
-            curr = point(param, curr)?;
+            let Some(p) = point(param, curr)? else {
+                return undef;
+            };
+            curr = p;
             ret += curr.distance(last);
 
             // next iter
@@ -4666,6 +4694,23 @@ mod tests {
         );
         // a cycle is an error
         assert!(g.edge(|_| Some(owner_curve)).is_err());
+    }
+
+    #[test]
+    fn issue_2009_unevaluable_curve_has_no_length() {
+        // tangency-labs/smlib 8311f8e (SmCurve::ApproximateLength): a curve that cannot
+        // be evaluated has no length (SM_UNDEF_DOUBLE); upstream sums distances
+        // between unset points.
+        let empty = Curve::from(BSplineCurve::new(3));
+        let ivl = Extent1d::from_min_max(0.0, 1.0);
+        let off = Kernel::default();
+        let mut on = Kernel::default();
+        on.fixes.query_statuses_pass_on = true;
+        let (len_off, _) = approximate_length(&off, &empty, &ivl, 5, false).unwrap();
+        assert_ne!(len_off, crate::math::UNDEF_DOUBLE);
+        let (len_on, turn) = approximate_length(&on, &empty, &ivl, 5, false).unwrap();
+        assert_eq!(len_on, crate::math::UNDEF_DOUBLE);
+        assert!(turn.is_none());
     }
 
     #[test]

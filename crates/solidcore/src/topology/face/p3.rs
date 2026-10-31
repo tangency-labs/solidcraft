@@ -141,6 +141,13 @@ pub use crate::topology::topology_traverser::has_lamina_edge;
 
 const OP: &str = "topology::face::p3";
 
+/// A status SMLib drops and the fork passes on (`SER`, tangency-labs/smlib 6997962):
+/// returned with the opt-in [`crate::kernel::UpstreamFixes::query_statuses_pass_on`],
+/// handed on to the site's own ignore otherwise.
+fn pass<T>(k: &Kernel, r: Result<T>) -> Result<Result<T>> {
+    crate::error::passed_on(r, k.fixes.query_statuses_pass_on)
+}
+
 fn null(reason: &'static str) -> SolidError {
     SolidError::invalid_input(OP, reason)
 }
@@ -253,16 +260,19 @@ fn point_3d_classify(
     tol: f64,
 ) -> Result<PointClassType> {
     let mut pc = PointClassification::<EntityRef>::new(tol);
-    ignore_status(crate::query::face::p1::point_3d_classify(
+    ignore_status(pass(
         k,
-        b,
-        f,
-        point,
-        tol,
-        true,
-        &mut pc,
-        crate::query::face::p1::Point3dClassifyOptions::default(),
-    ))?;
+        crate::query::face::p1::point_3d_classify(
+            k,
+            b,
+            f,
+            point,
+            tol,
+            true,
+            &mut pc,
+            crate::query::face::p1::Point3dClassifyOptions::default(),
+        ),
+    )?)?;
     Ok(pc.point_class())
 }
 
@@ -1304,17 +1314,20 @@ fn create_uv_trim_curves_body(
                     );
 
                     // status ignored upstream
-                    let fixed = ignored(face2::fix_uv_trim_curves_notified(
+                    let fixed = ignored(pass(
                         k,
-                        b,
-                        eu,
-                        cw,
-                        v,
-                        tol_3d,
-                        uv_gap_size,
-                        &uv_domain,
-                        env.as_deref_mut(),
-                    ))?
+                        face2::fix_uv_trim_curves_notified(
+                            k,
+                            b,
+                            eu,
+                            cw,
+                            v,
+                            tol_3d,
+                            uv_gap_size,
+                            &uv_domain,
+                            env.as_deref_mut(),
+                        ),
+                    )?)?
                     .unwrap_or(false);
 
                     if fixed {
@@ -2379,7 +2392,7 @@ pub fn face_intersect_breps_cached(
                 };
                 let mut interval = fb.edge(e)?.interval;
                 // may snap sIvl by tol to existing knots (status ignored)
-                ignored(new_crv.trim(k, &mut interval, TrimMode::Notify))?;
+                ignored(pass(k, new_crv.trim(k, &mut interval, TrimMode::Notify))?)?;
                 curves_3d.push(new_crv);
                 uv_curves1.push(None);
                 uv_curves2.push(None);
@@ -2454,7 +2467,7 @@ pub fn face_intersect_breps_cached(
                 continue;
             };
             // status ignored upstream
-            let point = ignored(curve.evaluate_point(k, 0.5))?.unwrap_or(Vec3::UNDEF);
+            let point = ignored(pass(k, curve.evaluate_point(k, 0.5))?)?.unwrap_or(Vec3::UNDEF);
             // `Point3DClassify` on both faces, in place on their own B-reps
             let pct1 = point_3d_classify(k, this_brep, f, point, this_zone_tol)?;
             let ob = other_brep.as_deref_mut().unwrap_or(&mut *this_brep);

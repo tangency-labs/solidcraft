@@ -67,6 +67,9 @@
 //!   `SmFindCCNormalENFO` (unit `curve.curve_p5`) and `SmFindPCExtremaEFO`
 //!   (`curve.curve_p3`) are not ported here: their structs carry only the
 //!   constructors' data, and those units add the trait implementations.
+//! - **No evidence (WR-663).** With the opt-in `Kernel::fixes.query_statuses_pass_on`,
+//!   `IsClosed` and `IsDegenerate` are `false` when a point or tangent cannot be
+//!   evaluated, as the fork (tangency-labs/smlib 8311f8e).
 
 #[cfg(doc)]
 use crate::curve::curve::p2::FindCurveDistanceExtrema;
@@ -114,8 +117,23 @@ pub(crate) fn point_or_undef<C: CurveEvaluate + ?Sized>(
     Ok(ignored(curve.evaluate_point(k, t))?.unwrap_or(Vec3::UNDEF))
 }
 
+/// [`point_or_undef`], or `None` when, with the opt-in
+/// [`crate::kernel::UpstreamFixes::query_statuses_pass_on`], the point cannot be
+/// evaluated (the fork's predicates then show nothing, tangency-labs/smlib 8311f8e).
+fn point_or_none<C: CurveEvaluate + ?Sized>(
+    k: &Kernel,
+    curve: &C,
+    t: f64,
+) -> Result<Option<Point3>> {
+    match ignored(curve.evaluate_point(k, t))? {
+        None if k.fixes.query_statuses_pass_on => Ok(None),
+        p => Ok(Some(p.unwrap_or(Vec3::UNDEF))),
+    }
+}
+
 /// `Evaluate` whose status upstream ignores into `pv` (entries not written keep
-/// their values); [`SolidError::Unported`] is propagated.
+/// their values); [`SolidError::Unported`] is propagated. `false` when, with the
+/// opt-in [`crate::kernel::UpstreamFixes::query_statuses_pass_on`], it fails.
 fn eval_into<C: CurveEvaluate + ?Sized>(
     k: &Kernel,
     curve: &C,
@@ -123,13 +141,17 @@ fn eval_into<C: CurveEvaluate + ?Sized>(
     num_derivs: usize,
     non_zero_tangents: bool,
     pv: &mut [Vec3],
-) -> Result<()> {
-    if let Some(v) = ignored(curve.evaluate(k, t, num_derivs, true, non_zero_tangents))? {
-        for (d, s) in pv.iter_mut().zip(v) {
-            *d = s;
+) -> Result<bool> {
+    match ignored(curve.evaluate(k, t, num_derivs, true, non_zero_tangents))? {
+        Some(v) => {
+            for (d, s) in pv.iter_mut().zip(v) {
+                *d = s;
+            }
         }
+        None if k.fixes.query_statuses_pass_on => return Ok(false),
+        None => (),
     }
-    Ok(())
+    Ok(true)
 }
 
 // ---- chaining ---------------------------------------------------------------------------
@@ -802,10 +824,17 @@ pub fn is_closed_base<C: CurveEvaluate + ?Sized>(
     interval: &Extent1d,
     tol: f64,
 ) -> Result<bool> {
-    // get curve start, end, and mid 3d Points
-    let p1 = point_or_undef(k, curve, interval.min())?;
-    let p2 = point_or_undef(k, curve, interval.max())?;
-    let p_mid = point_or_undef(k, curve, interval.evaluate(0.5))?;
+    // get curve start, end, and mid 3d Points (with the opt-in fix, ends that cannot be
+    // evaluated do not show it closed, tangency-labs/smlib 8311f8e)
+    let Some(p1) = point_or_none(k, curve, interval.min())? else {
+        return Ok(false);
+    };
+    let Some(p2) = point_or_none(k, curve, interval.max())? else {
+        return Ok(false);
+    };
+    let Some(p_mid) = point_or_none(k, curve, interval.evaluate(0.5))? else {
+        return Ok(false);
+    };
 
     // let dTol = dTolerance (when given) or dScaledZero
     let tol = if tol == 0.0 {
@@ -843,8 +872,14 @@ pub fn is_degenerate_base<C: CurveEvaluate + ?Sized>(
     if ivl.min() == ivl.max() {
         return Ok(true);
     }
-    let p1 = point_or_undef(k, curve, ivl.min())?;
-    let p2 = point_or_undef(k, curve, ivl.max())?;
+    // (with the opt-in fix a curve that cannot be evaluated is not shown degenerate,
+    // tangency-labs/smlib 8311f8e)
+    let Some(p1) = point_or_none(k, curve, ivl.min())? else {
+        return Ok(false);
+    };
+    let Some(p2) = point_or_none(k, curve, ivl.max())? else {
+        return Ok(false);
+    };
 
     // select a tolerance - scale it to p1 location
     let scaled_zero = EFF_ZERO * (1.0 + p1.max_dimension());
@@ -856,18 +891,24 @@ pub fn is_degenerate_base<C: CurveEvaluate + ?Sized>(
         let lsq = ivl.length() * ivl.length();
 
         // if start, mid, or end tangents are nonZero - the curve is not degenerate
-        eval_into(k, curve, ivl.min(), 1, false, &mut pv)?; // exact tangent lengths
+        if !eval_into(k, curve, ivl.min(), 1, false, &mut pv)? {
+            return Ok(false);
+        }
         if at(&pv, 1).length_squared() * lsq > tol2 {
             return Ok(false);
         }
 
-        eval_into(k, curve, ivl.max(), 1, false, &mut pv)?;
+        if !eval_into(k, curve, ivl.max(), 1, false, &mut pv)? {
+            return Ok(false);
+        }
         if at(&pv, 1).length_squared() * lsq > tol2 {
             return Ok(false);
         }
 
         // not the exact midpoint (a projected circle seen edge-on) [091023]
-        eval_into(k, curve, ivl.evaluate(0.4567), 1, false, &mut pv)?;
+        if !eval_into(k, curve, ivl.evaluate(0.4567), 1, false, &mut pv)? {
+            return Ok(false);
+        }
         if at(&pv, 1).length_squared() * lsq > tol2 {
             return Ok(false);
         }
@@ -2171,6 +2212,25 @@ mod tests {
         let r = fix_chain_curves_list(&Kernel::default(), curves, 1e-6, true).unwrap();
         assert_eq!(r.deleted, 1);
         assert_eq!(r.origin, vec![0]);
+    }
+
+    #[test]
+    fn issue_2009_unevaluable_curve_is_not_shown_degenerate_or_closed() {
+        // tangency-labs/smlib 8311f8e (SmCurve::IsDegenerate, SmCurve::IsClosed): a
+        // curve that cannot be evaluated is shown neither degenerate nor closed;
+        // upstream compares the unset points, which coincide.
+        let empty = Curve::from(crate::nurbs::b_spline_curve::BSplineCurve::new(3));
+        let ivl = Extent1d::from_min_max(0.0, 1.0);
+        assert!(empty.evaluate_point(&Kernel::default(), 0.0).is_err());
+        let off = Kernel::default();
+        let mut on = Kernel::default();
+        on.fixes.query_statuses_pass_on = true;
+        // IsDegenerate: discriminating
+        assert!(is_degenerate_base(&off, &empty, 0.0, Some(&ivl)).unwrap());
+        assert!(!is_degenerate_base(&on, &empty, 0.0, Some(&ivl)).unwrap());
+        // IsClosed: coverage only (the coincident unset points fail the mid test too)
+        assert!(!is_closed_base(&off, &empty, &ivl, 0.0).unwrap());
+        assert!(!is_closed_base(&on, &empty, &ivl, 0.0).unwrap());
     }
 
     #[test]

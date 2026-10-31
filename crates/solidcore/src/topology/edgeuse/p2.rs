@@ -61,6 +61,10 @@
 //!   [`topo::notify`] (`SmTopology::Notify`) with the caller's records, attribute
 //!   store and context; it propagates errors upstream does not report (`Notify`
 //!   returns `void`).
+//! - **No evidence (WR-663).** With the opt-in `Kernel::fixes.query_statuses_pass_on`,
+//!   `IsEdgeuseSideInSurface` answers `true` at a sample whose point or drop fails and
+//!   `HasDogLegNearPole` shows no dog-leg without the polygon or its angles, as the
+//!   fork (tangency-labs/smlib 666242b).
 
 use crate::curve::crv_on_surf::CrvOnSurf;
 use crate::curve::curve::Curve;
@@ -916,7 +920,9 @@ pub struct EdgeuseSide {
 /// without curve (upstream dereferences null); those of `IsPeriodic`, the curve and
 /// surface evaluations and `MapTo2d` that upstream does not ignore. The statuses of
 /// the evaluations and of `DropPoint` are ignored, as upstream ([`SolidError::Unported`]
-/// still propagates).
+/// still propagates); with the opt-in
+/// [`crate::kernel::UpstreamFixes::query_statuses_pass_on`] a sample whose point or drop
+/// fails answers `true` (its "cannot tell", tangency-labs/smlib 666242b).
 pub fn is_edgeuse_side_in_surface(
     k: &Kernel,
     b: &Brep,
@@ -1008,16 +1014,23 @@ pub fn is_edgeuse_side_in_surface(
         };
         let param = edge_interval.evaluate(norm_param);
 
-        // Edge->3d Point (status ignored: a failed evaluation leaves the last point)
-        if let Some(p) = ignored(edge_curve.evaluate_point(k, param))? {
-            edge_point = p;
+        // Edge->3d Point (status ignored: a failed evaluation leaves the last point;
+        // with the opt-in fix a sample that cannot be evaluated or dropped gives no
+        // evidence, TRUE, as the fork has it: tangency-labs/smlib 666242b)
+        let no_evidence = k.fixes.query_statuses_pass_on;
+        match ignored(edge_curve.evaluate_point(k, param))? {
+            Some(p) => edge_point = p,
+            None if no_evidence => return Ok(out),
+            None => (),
         }
 
         // next Drop GuessUV = UVTrimCurve(dParam) or last Drop point
         let mut guess = None;
         if let Some(trim) = uv_trim_curve {
-            if let Some(p) = ignored(trim.evaluate_point(k, param))? {
-                uv_trim_curve_3d = p;
+            match ignored(trim.evaluate_point(k, param))? {
+                Some(p) => uv_trim_curve_3d = p,
+                None if no_evidence => return Ok(out),
+                None => (),
             }
             guess = Some(Point2::new(uv_trim_curve_3d.x, uv_trim_curve_3d.y));
         } else if ii > 0 {
@@ -1037,6 +1050,7 @@ pub fn is_edgeuse_side_in_surface(
             // only by a successful drop
             Some(d) if d.success || guess.is_some() => uv_drop_point = d.result_uv,
             Some(_) => (),
+            None if no_evidence => return Ok(out),
             None => {
                 if let Some(g) = guess {
                     uv_drop_point = g;
@@ -1196,7 +1210,13 @@ pub fn has_dog_leg_near_pole(k: &Kernel, b: &Brep, eu: EdgeuseId) -> Result<DogL
             ))
         }
     };
-    let control_points = base.polygon(&base.natural_interval())?;
+    // with the opt-in fix, without the polygon or the angles the edge use is not shown
+    // to dog-leg (tangency-labs/smlib 666242b); upstream's polygon error is the port's
+    let no_evidence = k.fixes.query_statuses_pass_on;
+    let control_points = match base.polygon(&base.natural_interval()) {
+        Err(e) if no_evidence && !e.is_unported() => return Ok(out),
+        r => r?,
+    };
     let num = control_points.len();
     let uv = |i: usize| -> Result<Vec2> {
         control_points
@@ -1292,13 +1312,22 @@ pub fn has_dog_leg_near_pole(k: &Kernel, b: &Brep, eu: EdgeuseId) -> Result<DogL
 
                         // Angle in Control Polygon at target ControlPoint (a zero vector
                         // gives 0, as upstream)
-                        let ang_vec_rad = last_vec.angle_between(next_vec).unwrap_or(0.0);
+                        let ang_vec_rad = match last_vec.angle_between(next_vec) {
+                            Err(_) if no_evidence => return Ok(out),
+                            r => r.unwrap_or(0.0),
+                        };
 
                         // Angles between ControlPolygon Next/Last Vecs and the
                         // singularity direction (upstream sets [1 0 0] for both checks)
                         let sing_vec = Vec3::new(1.0, 0.0, 0.0);
-                        let ang_last_pole_rad = last_vec.angle_between(sing_vec).unwrap_or(0.0);
-                        let ang_next_pole_rad = next_vec.angle_between(sing_vec).unwrap_or(0.0);
+                        let ang_last_pole_rad = match last_vec.angle_between(sing_vec) {
+                            Err(_) if no_evidence => return Ok(out),
+                            r => r.unwrap_or(0.0),
+                        };
+                        let ang_next_pole_rad = match next_vec.angle_between(sing_vec) {
+                            Err(_) if no_evidence => return Ok(out),
+                            r => r.unwrap_or(0.0),
+                        };
 
                         let ang_last_pole_deg = rad_to_deg(ang_last_pole_rad);
                         let ang_next_pole_deg = rad_to_deg(ang_next_pole_rad);
@@ -1371,6 +1400,41 @@ mod tests {
             })
             .unwrap();
         (b, id)
+    }
+
+    // tangency-labs/smlib 666242b (SmEdgeuse::IsEdgeuseSideInSurface): a sample whose
+    // point cannot be evaluated gives no evidence, `TRUE`, as for what it cannot
+    // classify; upstream drops the unset point and classifies it. Coverage only: a
+    // box's planes have no natural boundary, so upstream answers `TRUE` as well.
+    #[test]
+    fn issue_2009_side_in_surface_without_sample_points_is_true() {
+        let mut k = Kernel::default();
+        let b0 = crate::primitive::api_primitives::create_box(&mut k, Vec3::ZERO, 1.0, 2.0, 3.0)
+            .unwrap();
+        let mut on_k = Kernel::default();
+        on_k.fixes.query_statuses_pass_on = true;
+        for eu in b0.edgeuses().ids() {
+            if face(&b0, eu).unwrap().is_none() {
+                continue;
+            }
+            let mut b = b0.clone();
+            let e = edge(&b, eu).unwrap().unwrap();
+            b.edge_mut(e).unwrap().curve = Some(Curve::from(
+                crate::nurbs::b_spline_curve::BSplineCurve::new(3),
+            ));
+            let on = is_edgeuse_side_in_surface(&on_k, &b, eu, 5, None, None).unwrap();
+            assert_eq!(
+                on,
+                EdgeuseSide {
+                    in_surface: true,
+                    on_natural_boundary: true
+                }
+            );
+            assert_eq!(
+                is_edgeuse_side_in_surface(&k, &b, eu, 5, None, None).unwrap(),
+                on
+            );
+        }
     }
 
     #[test]

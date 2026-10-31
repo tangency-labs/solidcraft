@@ -99,6 +99,10 @@
 //!   `EvaluateSTEP`, `GetFace` and the base `CalculateBoundingBox`
 //!   (`surface.surface_p1`; the solver constructors also hand over the caches holding
 //!   the patch data of tree nodes).
+//! - **No evidence (WR-663).** With the opt-in `Kernel::fixes.query_statuses_pass_on`,
+//!   `IsClosed` is `false` when an end, the continuity, the mid derivatives or the
+//!   Frenet frame cannot be evaluated, and the base `IsPlanar` is `false` without its
+//!   box, as the fork (tangency-labs/smlib 21dcf69).
 
 use crate::curve::curve::{Curve, CurveKind};
 use crate::error::{ignore_status, ignored, Result, SolidError};
@@ -539,6 +543,9 @@ pub fn base_is_closed<S: SurfaceEvaluate + ?Sized>(
     want_continuity: bool,
 ) -> Result<(bool, Option<ContinuityType>)> {
     let discontinuous = want_continuity.then_some(ContinuityType::Discontinuous);
+    // with the opt-in fix a surface that cannot be evaluated is not shown closed
+    // (tangency-labs/smlib 21dcf69)
+    let not_shown = k.fixes.query_statuses_pass_on;
 
     // locals
     let count = if param == SurfParamType::Both { 2 } else { 1 };
@@ -601,32 +608,40 @@ pub fn base_is_closed<S: SurfaceEvaluate + ?Sized>(
 
             // evaluate isoParameter endPoints
             if want_continuity {
-                if let Some(d) = ignored(evaluate_2nd_derivatives(
+                match ignored(evaluate_2nd_derivatives(
                     k,
                     surface,
                     uv_min,
                     Side::Left,
                     Side::Left,
                 ))? {
-                    d2_min = d;
+                    Some(d) => d2_min = d,
+                    None if not_shown => return Ok((false, discontinuous)),
+                    None => (),
                 }
-                if let Some(d) = ignored(evaluate_2nd_derivatives(
+                match ignored(evaluate_2nd_derivatives(
                     k,
                     surface,
                     uv_max,
                     Side::Left,
                     Side::Left,
                 ))? {
-                    d2_max = d;
+                    Some(d) => d2_max = d,
+                    None if not_shown => return Ok((false, discontinuous)),
+                    None => (),
                 }
                 p_min = d2_min.point;
                 p_max = d2_max.point;
             } else {
-                if let Some(p) = ignored(surface.evaluate_point(k, uv_min))? {
-                    p_min = p;
+                match ignored(surface.evaluate_point(k, uv_min))? {
+                    Some(p) => p_min = p,
+                    None if not_shown => return Ok((false, discontinuous)),
+                    None => (),
                 }
-                if let Some(p) = ignored(surface.evaluate_point(k, uv_max))? {
-                    p_max = p;
+                match ignored(surface.evaluate_point(k, uv_max))? {
+                    Some(p) => p_max = p,
+                    None if not_shown => return Ok((false, discontinuous)),
+                    None => (),
                 }
             }
 
@@ -648,7 +663,7 @@ pub fn base_is_closed<S: SurfaceEvaluate + ?Sized>(
                     } else {
                         (d2_min.dv, d2_min.dvv, d2_max.dv, d2_max.dvv)
                     };
-                let curve_continuity = evaluate_curve_continuity_with(
+                let curve_continuity = match evaluate_curve_continuity_with(
                     &CurveEval {
                         position: p_min,
                         first: first_min,
@@ -665,7 +680,10 @@ pub fn base_is_closed<S: SurfaceEvaluate + ?Sized>(
                     &ContinuityOptions {
                         geometric_g2: k.fixes.geometric_g2_continuity,
                     },
-                )?;
+                ) {
+                    Err(e) if not_shown && !e.is_unported() => return Ok((false, discontinuous)),
+                    r => r?,
+                };
 
                 // save lowest found continuity
                 if (min_continuity as i32) > (curve_continuity as i32) {
@@ -676,7 +694,7 @@ pub fn base_is_closed<S: SurfaceEvaluate + ?Sized>(
             // extra test
             if (min_continuity as i32) > (ContinuityType::Discontinuous as i32) {
                 // filter out very short curve passing as closed curves
-                if let Some(d) = ignored(evaluate_directional_derivs(
+                match ignored(evaluate_directional_derivs(
                     k,
                     surface,
                     uv_mid,
@@ -685,9 +703,13 @@ pub fn base_is_closed<S: SurfaceEvaluate + ?Sized>(
                     Side::Left,
                     Side::Left,
                 ))? {
-                    for (dst, src) in p_mid.iter_mut().zip(d) {
-                        *dst = src;
+                    Some(d) => {
+                        for (dst, src) in p_mid.iter_mut().zip(d) {
+                            *dst = src;
+                        }
                     }
+                    None if not_shown => return Ok((false, discontinuous)),
+                    None => (),
                 }
 
                 let p_mid0 = p_mid.first().copied().unwrap_or(Vec3::UNDEF);
@@ -704,6 +726,8 @@ pub fn base_is_closed<S: SurfaceEvaluate + ?Sized>(
                         for (dst, src) in g_mid.iter_mut().zip(g) {
                             *dst = src;
                         }
+                    } else if not_shown {
+                        return Ok((false, discontinuous));
                     } else {
                         for (dst, src) in g_mid.iter_mut().zip(p_mid.iter().take(2)) {
                             *dst = *src;
@@ -921,10 +945,18 @@ impl Surface {
                     &self.natural_uv_domain_with_nurb(k)?,
                     [false, true, false],
                     false,
-                ))?
-                .and_then(|b| b.pseudo_box)
-                .unwrap_or_else(PseudoBox::new);
-                Ok(pseudo.is_planar(tol_3d))
+                ))?;
+                // with the opt-in fix a surface that cannot be boxed is not shown planar
+                // (tangency-labs/smlib 21dcf69)
+                let not_shown = pseudo.is_none() && k.fixes.query_statuses_pass_on;
+                let pseudo = pseudo
+                    .and_then(|b| b.pseudo_box)
+                    .unwrap_or_else(PseudoBox::new);
+                let mut planar = pseudo.is_planar(tol_3d);
+                if not_shown {
+                    planar.is_planar = false;
+                }
+                Ok(planar)
             }
         }
     }
@@ -3084,6 +3116,31 @@ mod tests {
     use super::*;
     use crate::curve::hermite_curve::HermiteCurve;
     use crate::surface::plane::Plane;
+
+    #[test]
+    fn issue_2009_unevaluable_surface_is_not_shown_closed() {
+        // tangency-labs/smlib 21dcf69 (SmSurface::IsClosed): a surface that cannot be
+        // evaluated is not shown closed. Coverage only: upstream's unset ends coincide
+        // but its short-curve test then rejects them too.
+        let s = Surface::from(BSplineSurface::default());
+        let dom = Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0);
+        assert!(s
+            .evaluate_point(&Kernel::default(), Point2::new(0.0, 0.0))
+            .is_err());
+        let off = Kernel::default();
+        let mut on = Kernel::default();
+        on.fixes.query_statuses_pass_on = true;
+        let closed_off = s
+            .is_closed(&off, &dom, SurfParamType::U, None, false)
+            .unwrap()
+            .0;
+        let closed_on = s
+            .is_closed(&on, &dom, SurfParamType::U, None, false)
+            .unwrap()
+            .0;
+        assert!(!closed_on);
+        assert!(!closed_off);
+    }
 
     /// tangency-labs/solidcore#525 (WR-384): with the corner points wanted, upstream's
     /// `if (lRtn &= bit)` clears the other corners' bits (4 flat corners come back as
