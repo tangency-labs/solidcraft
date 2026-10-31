@@ -996,9 +996,9 @@ preference_settings! {
     /// The custom view gizmo's colours: the cube's (themed) or the body's own (modeled).
     navigator_texture: NavigatorTexture = NavigatorTexture::default(), PAGE_NAVIGATION;
     /// The custom view gizmo has the cube's orbit and roll arrows around it.
-    navigator_arrows: bool = false, PAGE_NAVIGATION;
+    navigator_arrows: bool = true, PAGE_NAVIGATION;
     /// The custom view gizmo has the cube's Home button beside it.
-    navigator_home: bool = false, PAGE_NAVIGATION;
+    navigator_home: bool = true, PAGE_NAVIGATION;
     /// Show the radial ring and enable hold/flick gestures for viewport context menus.
     radial_context_menu: bool = false, PAGE_NAVIGATION => check("Radial context menu");
     /// Work on the model directly in the viewport (pull a face to extrude or cut); off by default.
