@@ -89,6 +89,8 @@ pub struct NavPreset {
     pub help: &'static str,
     /// Choosing the preset turns the wheel the other way.
     pub reverse_zoom: bool,
+    /// Dragging down zooms in instead of out (independent of the wheel preference).
+    pub reverse_drag_zoom: bool,
     /// Choosing the preset sets what a middle double-click does (`None` leaves it as it is).
     pub middle_double_click: Option<&'static str>,
     /// Choosing the preset sets "Right drag orbits" (`None` leaves it as it is).
@@ -113,6 +115,7 @@ pub const NAV_PRESETS: &[NavPreset] = &[
         label: "Fusion",
         help: "Middle drag pans, Shift+middle orbits, right drag orbits",
         reverse_zoom: false,
+        reverse_drag_zoom: false,
         middle_double_click: None,
         right_drag_orbits: None,
         bindings: &[bind(Middle, NavKeys::SHIFT, Orbit), bind(Middle, NavKeys::NONE, Pan), bind(Right, NavKeys::NONE, Orbit)],
@@ -122,6 +125,7 @@ pub const NAV_PRESETS: &[NavPreset] = &[
         label: "SolidWorks",
         help: "Middle drag orbits, Ctrl+middle pans, Shift+middle zooms, right drag orbits",
         reverse_zoom: true,
+        reverse_drag_zoom: false,
         // Picked here, the right button is left to the context menu and mouse gestures (#6492).
         middle_double_click: Some("fit"),
         right_drag_orbits: Some(false),
@@ -131,6 +135,18 @@ pub const NAV_PRESETS: &[NavPreset] = &[
             bind(Middle, NavKeys::NONE, Orbit),
             bind(Right, NavKeys::NONE, Orbit),
         ],
+    },
+    // Public Creo Parametric dynamic-viewing bindings; no product code or assets are used.
+    // https://support.ptc.com/help/creo/creo_pma/r12/usascii/fundamentals/fundamentals/About_Dynamic_Viewing.html
+    NavPreset {
+        id: "creo",
+        label: "Creo",
+        help: "Middle drag orbits, Shift+middle pans, Ctrl+middle drag vertically zooms (down to zoom in); scroll the wheel to zoom",
+        reverse_zoom: false,
+        reverse_drag_zoom: true,
+        middle_double_click: None,
+        right_drag_orbits: None,
+        bindings: &[bind(Middle, NavKeys::CTRL, Zoom), bind(Middle, NavKeys::SHIFT, Pan), bind(Middle, NavKeys::NONE, Orbit)],
     },
     NavPreset {
         id: "nx",
@@ -149,6 +165,7 @@ pub const NAV_PRESETS: &[NavPreset] = &[
         label: "Inventor",
         help: "Middle drag pans, Shift+middle orbits, Ctrl+middle zooms, right drag orbits",
         reverse_zoom: false,
+        reverse_drag_zoom: false,
         middle_double_click: None,
         right_drag_orbits: None,
         bindings: &[
@@ -163,6 +180,7 @@ pub const NAV_PRESETS: &[NavPreset] = &[
         label: "Alias",
         help: "Shift+Alt+left drag orbits, Shift+Alt+middle pans, Shift+Alt+right zooms; middle drag also pans and right drag orbits",
         reverse_zoom: false,
+        reverse_drag_zoom: false,
         middle_double_click: None,
         right_drag_orbits: None,
         bindings: &[
@@ -179,6 +197,7 @@ pub const NAV_PRESETS: &[NavPreset] = &[
         label: "Maya",
         help: "Alt+left drag orbits, Alt+middle pans, Alt+right zooms; middle drag also pans",
         reverse_zoom: false,
+        reverse_drag_zoom: false,
         middle_double_click: None,
         right_drag_orbits: None,
         bindings: &[
@@ -193,6 +212,7 @@ pub const NAV_PRESETS: &[NavPreset] = &[
         label: "Blender",
         help: "Middle drag orbits, Shift+middle pans, Ctrl+middle zooms; right drag leaves the camera alone",
         reverse_zoom: false,
+        reverse_drag_zoom: false,
         middle_double_click: None,
         right_drag_orbits: None,
         bindings: &[bind(Middle, NavKeys::SHIFT, Pan), bind(Middle, NavKeys::CTRL, Zoom), bind(Middle, NavKeys::NONE, Orbit)],
@@ -202,6 +222,7 @@ pub const NAV_PRESETS: &[NavPreset] = &[
         label: "Tinkercad",
         help: "Right drag orbits, middle or Shift+right drag pans",
         reverse_zoom: false,
+        reverse_drag_zoom: false,
         middle_double_click: None,
         right_drag_orbits: None,
         bindings: &[bind(Right, NavKeys::SHIFT, Pan), bind(Right, NavKeys::NONE, Orbit), bind(Middle, NavKeys::NONE, Pan)],
@@ -211,6 +232,7 @@ pub const NAV_PRESETS: &[NavPreset] = &[
         label: "OpenSCAD",
         help: "Left drag on empty space orbits, Shift+left drag box-selects, sketch geometry drags edit; right or middle drag pans, Shift+right or Shift+middle drag zooms",
         reverse_zoom: false,
+        reverse_drag_zoom: false,
         middle_double_click: None,
         right_drag_orbits: None,
         bindings: &[
@@ -226,6 +248,7 @@ pub const NAV_PRESETS: &[NavPreset] = &[
         label: "HFSS",
         help: "Alt+left drag pans, Shift+Alt+left zooms, Ctrl+left drag on empty space orbits",
         reverse_zoom: false,
+        reverse_drag_zoom: false,
         middle_double_click: None,
         right_drag_orbits: None,
         // Ctrl+left orbit is the drag from empty space every preset has: as a binding it would
@@ -237,6 +260,7 @@ pub const NAV_PRESETS: &[NavPreset] = &[
         label: "Touchpad",
         help: "Hold Shift and move the pointer to pan; hold Alt/Option and move it to orbit. No mouse button is needed. Vertical scroll zooms.",
         reverse_zoom: false,
+        reverse_drag_zoom: false,
         middle_double_click: None,
         right_drag_orbits: None,
         bindings: &[bind(Middle, NavKeys::NONE, Pan), bind(Right, NavKeys::NONE, Orbit)],
@@ -257,7 +281,15 @@ impl NavPreset {
     }
 
     pub(crate) fn translated_label(&self) -> &str {
-        if self.id == TOUCHPAD_NAV { crate::i18n::tr("nav.touchpad.label") } else { crate::i18n::tr_label(self.label) }
+        match self.id {
+            "creo" => crate::i18n::tr("nav.creo.label"),
+            TOUCHPAD_NAV => crate::i18n::tr("nav.touchpad.label"),
+            _ => crate::i18n::tr_label(self.label),
+        }
+    }
+
+    pub(crate) fn translated_help(&self) -> &str {
+        if self.id == "creo" { crate::i18n::tr("nav.creo.help") } else { crate::i18n::tr_label(self.help) }
     }
 }
 
@@ -8534,6 +8566,79 @@ mod tests {
         assert_eq!(nav_mode(&app, NavButton::Right, none), Some(NavMode::Pan), "only an orbiting right drag is affected");
         set(&mut app, &json!({"right_drag_orbits": true, "nav": "solidworks"})).unwrap();
         assert_eq!(nav_mode(&app, NavButton::Right, none), Some(NavMode::Orbit), "turned back on, the right drag orbits again");
+    }
+
+    #[test]
+    fn creo_preset_maps_navigation_and_persists() {
+        let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+        assert_eq!(app.preferences.nav, "fusion");
+        choose_nav_preset(&mut app.preferences, nav_preset("creo"));
+        assert_eq!(app.preferences.nav, "creo");
+        assert!(!app.preferences.zoom_reverse);
+        for (mods, mode) in [
+            (Modifiers::NONE, NavMode::Orbit),
+            (Modifiers::SHIFT, NavMode::Pan),
+            (Modifiers::CTRL, NavMode::Zoom),
+            (Modifiers::COMMAND, NavMode::Zoom),
+        ] {
+            assert_eq!(nav_mode(&app, NavButton::Middle, mods), Some(mode));
+        }
+        for button in [NavButton::Left, NavButton::Right] {
+            assert_eq!(nav_mode(&app, button, Modifiers::NONE), None);
+        }
+        assert!(nav_preset("creo").reverse_drag_zoom);
+        for preset in NAV_PRESETS.iter().filter(|p| p.id != "creo") {
+            assert!(!preset.reverse_drag_zoom, "{} keeps its drag zoom direction", preset.id);
+        }
+        let mut other = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+        other.load_prefs(&app.prefs());
+        assert_eq!(other.preferences.nav, "creo");
+        assert_eq!(nav_mode(&other, NavButton::Middle, Modifiers::NONE), Some(NavMode::Orbit));
+    }
+
+    #[test]
+    fn creo_navigation_settings_show_localised_bindings() {
+        let _language = crate::i18n::scope("de");
+        let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+        control(&mut app, &json!({"open":"Navigation", "nav":"creo", "language":"de"})).unwrap();
+        let ctx = crate::fonts::test_context();
+        let screen = egui::Rect::from_min_size(Pos2::ZERO, egui::vec2(1400.0, 1000.0));
+        let mut textures = std::collections::HashMap::new();
+        let mut draw = || {
+            let raw = egui::RawInput { screen_rect: Some(screen), ..Default::default() };
+            let mut output = ctx.run_ui(raw, |ui| show(&mut app, ui.ctx()));
+            crate::ui_kit::test_textures_update(&mut textures, &output.textures_delta);
+            output.textures_delta.clear();
+            output
+        };
+        for _ in 0..3 {
+            draw();
+        }
+        let output = draw();
+        for label in ["Creo", crate::i18n::tr("prefs.gesture_orbit"), crate::i18n::tr("prefs.gesture_pan"), crate::i18n::tr("prefs.gesture_zoom")] {
+            assert!(crate::test_support::text_shapes(&output).any(|text| text.galley.text().contains(label)), "missing binding label: {label}");
+        }
+        assert_ne!(nav_preset("creo").translated_help(), nav_preset("creo").help);
+        if let Ok(dir) = std::env::var("SOLIDCRAFT_CREO_EVIDENCE") {
+            std::fs::create_dir_all(&dir).unwrap();
+            crate::ui_kit::test_raster(&ctx, output.shapes, output.pixels_per_point, screen, &textures)
+                .save(std::path::Path::new(&dir).join("creo-navigation-de.png"))
+                .unwrap();
+        }
+    }
+
+    #[test]
+    fn creo_preset_obeys_preference_transactions() {
+        let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+        control(&mut app, &json!({"open":"Navigation", "nav":"creo"})).unwrap();
+        assert_eq!(app.preferences.nav, "creo");
+        control(&mut app, &json!({"button":"cancel"})).unwrap();
+        assert_eq!(app.preferences.nav, "fusion");
+        control(&mut app, &json!({"open":"Navigation", "nav":"creo", "button":"apply"})).unwrap();
+        control(&mut app, &json!({"button":"defaults"})).unwrap();
+        assert_eq!(app.preferences.nav, "fusion");
+        control(&mut app, &json!({"button":"cancel"})).unwrap();
+        assert_eq!(app.preferences.nav, "creo");
     }
 
     #[test]

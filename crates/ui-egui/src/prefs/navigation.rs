@@ -61,7 +61,7 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
                         }
                     });
                     crate::scenario::publish_target("dialog:Pan, zoom, orbit", picker.rect);
-                    picker.on_hover_text(crate::i18n::tr_label(nav_preset(&app.preferences.nav).help));
+                    picker.on_hover_text(nav_preset(&app.preferences.nav).translated_help());
                 });
             });
         });
