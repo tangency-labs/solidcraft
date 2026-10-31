@@ -2472,3 +2472,90 @@ fn driving_one_cylindrical_coordinate_preserves_the_other_expression_and_reports
         assert!(s.execute("joint.drive", &json!({"joint":joint,"index":bad,"value":0})).is_err());
     }
 }
+
+#[test]
+fn joint_with_origin_plane_and_axis() {
+    let mut s = Session::default();
+    s.execute("component.create", &json!({"name": "PartA", "grounded": false})).unwrap();
+    s.execute("solid.box", &json!({"length": 20, "width": 20, "height": 10, "corner": [0, 0, 10]})).unwrap();
+    s.execute("component.activate", &json!({"component": "root"})).unwrap();
+    let part_a = occ(&s, "PartA");
+
+    // 1. Planar joint using origin plane XY
+    let r = s
+        .execute(
+            "joint.create",
+            &json!({
+                "type": "planar",
+                "a": {"plane": "XY"},
+                "b": {"occurrence": part_a, "face": [10, 10, 10]}
+            }),
+        )
+        .unwrap();
+    assert_eq!(r["conflicts"], json!([]));
+
+    // Delete the first joint before testing the axis joint on the same part
+    s.execute("joint.delete", &json!({"joint": r["joint"]})).unwrap();
+
+    // 2. Slider joint along origin axis Z
+    let r2 = s
+        .execute(
+            "joint.create",
+            &json!({
+                "type": "slider",
+                "a": {"axis": "Z"},
+                "b": {"occurrence": part_a, "face": [10, 10, 10]}
+            }),
+        )
+        .unwrap();
+    assert_eq!(r2["conflicts"], json!([]));
+}
+
+#[test]
+fn joint_with_construction_plane_and_axis() {
+    let mut s = Session::default();
+    s.execute("construct.plane.offset", &json!({"base": "XY", "offset": 15, "name": "WorkPlane"})).unwrap();
+    s.execute(
+        "construct.axis.two_points",
+        &json!({
+            "a": {"point": [0, 0, 0]},
+            "b": {"point": [0, 0, 50]},
+            "name": "WorkAxis"
+        }),
+    )
+    .unwrap();
+
+    s.execute("component.create", &json!({"name": "PartB", "grounded": false})).unwrap();
+    s.execute("solid.box", &json!({"length": 10, "width": 10, "height": 10, "corner": [20, 0, 0]})).unwrap();
+    s.execute("component.activate", &json!({"component": "root"})).unwrap();
+    let part_b = occ(&s, "PartB");
+
+    // 1. Joint with construction plane by name
+    let r = s
+        .execute(
+            "joint.create",
+            &json!({
+                "type": "planar",
+                "a": {"plane": "WorkPlane"},
+                "b": {"occurrence": part_b, "face": [25, 5, 0]}
+            }),
+        )
+        .unwrap();
+    assert_eq!(r["conflicts"], json!([]));
+
+    // Delete the first joint before testing the axis joint on the same part
+    s.execute("joint.delete", &json!({"joint": r["joint"]})).unwrap();
+
+    // 2. Joint with construction axis by name
+    let r2 = s
+        .execute(
+            "joint.create",
+            &json!({
+                "type": "revolute",
+                "a": {"axis": "WorkAxis"},
+                "b": {"occurrence": part_b, "face": [25, 5, 0]}
+            }),
+        )
+        .unwrap();
+    assert_eq!(r2["conflicts"], json!([]));
+}
