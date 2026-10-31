@@ -708,6 +708,45 @@ fn fillet_and_chamfers() {
     assert!(s.execute("sketch.fillet", &json!({"a": l[0], "b": l[2], "radius": 1})).is_err(), "no shared corner");
 }
 
+/// #2500, #5951, #7805: the second fillet of a side with a radius of half its length takes all
+/// that is left of the line, so the line goes and the two arcs meet: a 20 × 10 rectangle with
+/// r = 5 becomes a slot, a 10 × 10 square a circle.
+#[test]
+fn fillets_of_half_a_side_meet_and_the_side_goes() {
+    for (w, h, area) in [(20.0, 10.0, 10.0 * 10.0 + std::f64::consts::PI * 25.0), (10.0, 10.0, std::f64::consts::PI * 25.0)] {
+        let mut s = new_sketch();
+        let l = ids(&run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [w, h]}))["curves"]);
+        let mut last = Value::Null;
+        for k in 0..4 {
+            last = run(&mut s, "sketch.fillet", json!({"a": l[k], "b": l[(k + 1) % 4], "radius": 5}));
+        }
+        assert_eq!(last["sketch"]["solved"], true, "{last}");
+        let sk = sketch(&s);
+        let lines = sk.curves.iter().filter(|c| !c.construction && matches!(c.kind, CurveKind::Line { .. })).count();
+        let arcs = sk.curves.iter().filter(|c| matches!(c.kind, CurveKind::Arc { .. })).count();
+        assert_eq!((lines, arcs), (if w > h { 2 } else { 0 }, 4), "{w} x {h}");
+        let a = profiles(&s);
+        assert_eq!(a.len(), 1, "{a:?}");
+        assert!(close(a[0], area), "{w} x {h}: {a:?}");
+    }
+    // All four corners in one call: the arcs keep one radius dimension and equal constraints
+    // although the short sides go in between.
+    let mut s = new_sketch();
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [20, 10]}));
+    let f = run(&mut s, "sketch.fillet", json!({"points": ["l1.start", "l1.end", "l2.end", "l3.end"], "radius": 5}));
+    assert_eq!(ids(&f["curves"]).len(), 4, "{f}");
+    assert_eq!(f["sketch"]["solved"], true, "{f}");
+    let a = profiles(&s);
+    assert!(a.len() == 1 && close(a[0], 100.0 + std::f64::consts::PI * 25.0), "{a:?}");
+    let equal = sketch(&s).constraints.iter().filter(|c| matches!(c.kind, ConstraintKind::Equal { .. })).count();
+    assert!(equal >= 3, "the arcs stay equal to the first: {equal}");
+    // A radius past the line's length is still refused.
+    let mut s = new_sketch();
+    let l = ids(&run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [20, 10]}))["curves"]);
+    run(&mut s, "sketch.fillet", json!({"a": l[0], "b": l[1], "radius": 5}));
+    assert!(s.execute("sketch.fillet", &json!({"a": l[1], "b": l[2], "radius": 5.1})).is_err());
+}
+
 #[test]
 fn offset_chain_mirror_patterns_move_scale() {
     let mut s = new_sketch();

@@ -1659,19 +1659,20 @@ fn fillet(s: &mut Session, p: &Value) -> Result<Value> {
             return Err(bad(cmd, "radius must be positive"));
         }
         let pname = doc.new_model_param(&r_expr, "mm");
-        let (mut arcs, mut cons, mut kept) = (Vec::new(), Vec::new(), Vec::new());
+        // The arcs by id: a fillet that takes a whole line removes it, which renumbers the curves.
+        let (mut arcs, mut cons, mut kept): (Vec<String>, _, _) = (Vec::new(), Vec::new(), Vec::new());
         for q in &corners {
             let (arc, mut c, k) = fillet_corner(sk, q, r, cmd)?;
             kept.push(k);
             // One radius for them all: the first carries the dimension, the rest are equal to it.
-            match arcs.first() {
+            match arcs.first().and_then(|first| sk.curve_index(first)) {
                 None => c.push(sk.add_constraint(ConstraintKind::Radius { c: arc, value: r }, Some(pname.clone()))?),
-                Some(first) => c.push(add_c(sk, ConstraintKind::Equal { a: *first, b: arc })?),
+                Some(first) => c.push(add_c(sk, ConstraintKind::Equal { a: first, b: arc })?),
             }
             cons.extend(c);
-            arcs.push(arc);
+            arcs.push(sk.curves.get(arc).map(|c| c.id.clone()).unwrap_or_default());
         }
-        Ok((ids_of(sk, &arcs), cons, pname, kept_json(kept)))
+        Ok((arcs, cons, pname, kept_json(kept)))
     })?;
     let (vc, moved) = out.3;
     Ok(json!({"curves": out.0, "constraints": out.1, "param": out.2, "virtual_corners": vc, "moved_to_virtual_corner": moved, "sketch": info}))
@@ -1709,12 +1710,21 @@ fn fillet_corner(sk: &mut Sketch, p: &Value, r: f64, cmd: &str) -> Result<(usize
         return Err(bad(cmd, "the lines are parallel"));
     }
     let d = r / half.tan();
-    if d >= pa.dist(pc) - 1e-9 || d >= pb.dist(pc) - 1e-9 {
+    let (len_a, len_b) = (pa.dist(pc), pb.dist(pc));
+    // A radius that needs all of a line (the second corner of a side filleted with half its
+    // length, #2500): the line goes, and the arc meets what was at its far end.
+    let tol = 1e-7 * (1.0 + len_a.max(len_b));
+    if d > len_a + tol || d > len_b + tol {
         return Err(bad(cmd, format!("the radius is too large for that corner (it needs {d:.3} mm of each line)")));
     }
+    let (spent_a, spent_b) = (d >= len_a - tol, d >= len_b - tol);
+    // A spent line is cut just short of its far end, and the stub is removed below.
+    let short = |len: f64| len - (len * 1e-6).max(1e-6);
+    let far_ids = [fa, fb].map(|i| sk.points.get(i).map(|p| p.id.clone()).unwrap_or_default());
     let bis = (u + v).normalized().ok_or_else(|| bad(cmd, "the lines are parallel"))?;
     let center = pc + bis * (r / half.sin());
-    let (ta, tb, _, kept) = cut_corner(sk, la, lb, c, fa, fb, d, d, cmd)?;
+    let (da, db) = (if spent_a { short(len_a) } else { d }, if spent_b { short(len_b) } else { d });
+    let (ta, tb, _, kept) = cut_corner(sk, la, lb, c, fa, fb, da, db, cmd)?;
     let (qa, qb) = (sk.point(ta).unwrap_or_default(), sk.point(tb).unwrap_or_default());
     let ccw = (qa - center).cross(qb - center) > 0.0;
     let arc = if ccw {
@@ -1722,7 +1732,35 @@ fn fillet_corner(sk: &mut Sketch, p: &Value, r: f64, cmd: &str) -> Result<(usize
     } else {
         sk.add_arc(center, qb, qa, [None, Some(tb), Some(ta)], None)?
     };
-    let cons = vec![add_c(sk, ConstraintKind::Tangent { a: la, b: arc })?, add_c(sk, ConstraintKind::Tangent { a: lb, b: arc })?];
+    if !spent_a && !spent_b {
+        let cons = vec![add_c(sk, ConstraintKind::Tangent { a: la, b: arc })?, add_c(sk, ConstraintKind::Tangent { a: lb, b: arc })?];
+        return Ok((arc, cons, kept));
+    }
+    let id = |sk: &Sketch, i: usize| sk.curves.get(i).map(|c| c.id.clone()).unwrap_or_default();
+    let arc_id = id(sk, arc);
+    let mut cons = Vec::new();
+    let mut stubs = Vec::new();
+    for ((line, t, spent), far_id) in [(la, ta, spent_a), (lb, tb, spent_b)].into_iter().zip(&far_ids) {
+        if !spent {
+            cons.push(add_c(sk, ConstraintKind::Tangent { a: line, b: arc })?);
+            continue;
+        }
+        let Some(far) = sk.point_index(far_id) else { return Err(bad(cmd, "the line's far end is gone")) };
+        // The arc ends where the line did, tangent to the curve that goes on from there.
+        if let Some(cu) = sk.curves.get_mut(arc) {
+            cu.kind.map_points(&|i| if i == t { far } else { i });
+        }
+        let next = (0..sk.curves.len()).find(|&i| {
+            i != line && i != arc && sk.curves.get(i).is_some_and(|cu| !cu.construction && cu.kind.ends().is_some_and(|(a, b)| a == far || b == far))
+        });
+        if let Some(n) = next {
+            cons.push(add_c(sk, ConstraintKind::Tangent { a: n, b: arc })?);
+        }
+        stubs.push(id(sk, line));
+    }
+    let stubs: Vec<usize> = stubs.iter().filter_map(|s| sk.curve_index(s)).collect();
+    sk.remove_curves(&stubs);
+    let arc = sk.curve_index(&arc_id).ok_or_else(|| bad(cmd, "the fillet arc is gone"))?;
     Ok((arc, cons, kept))
 }
 
