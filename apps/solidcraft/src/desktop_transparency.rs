@@ -20,8 +20,7 @@ pub fn cached(ctx: &egui::Context) -> Box<dyn Fn(bool) -> Option<bool>> {
             let weak = Arc::downgrade(&state);
             let ctx = ctx.clone();
             if let Err(error) = std::thread::Builder::new().name("desktop-transparency".into()).spawn(move || {
-                loop {
-                    let Some(state) = weak.upgrade() else { break };
+                while let Some(state) = weak.upgrade() {
                     if state.needed.load(Ordering::Relaxed) {
                         let code = match read() {
                             Some(true) => 1,
