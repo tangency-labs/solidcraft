@@ -2049,7 +2049,12 @@ pub fn move_seam_notified<O: LoopObject>(
                         let no_seam = hi - lo;
                         let with_seam = periodic.period() - no_seam;
                         let forward = no_seam < with_seam;
-                        let _ = periodic.add_interval(lo - ivl.min(), hi - ivl.min(), forward);
+                        let _ = periodic.add_interval_with_kernel(
+                            k,
+                            lo - ivl.min(),
+                            hi - ivl.min(),
+                            forward,
+                        );
 
                         if fix_seam_both && ii == 0 {
                             let (lo, hi) = order(uv_prev.y, uv1.y);
@@ -2057,8 +2062,12 @@ pub fn move_seam_notified<O: LoopObject>(
                             // (upstream reads the U period and U minimum here)
                             let with_seam = periodic_u.period() - no_seam;
                             let forward = no_seam < with_seam;
-                            let _ =
-                                periodic_v.add_interval(lo - ivl.min(), hi - ivl.min(), forward);
+                            let _ = periodic_v.add_interval_with_kernel(
+                                k,
+                                lo - ivl.min(),
+                                hi - ivl.min(),
+                                forward,
+                            );
                         }
 
                         uv_prev = uv1;
