@@ -1540,30 +1540,30 @@ mod tests {
         assert_eq!(tx(&h.app).values[5], "1.25");
     }
 
+    /// #9940: built-in font has no bold face; Bold toggle is disabled so clicking it
+    /// does not set bold or trigger errors, and alignment and other options succeed.
     #[test]
-    fn bold_in_a_font_without_a_bold_face_is_refused_with_the_reason() {
+    fn bold_in_a_font_without_a_bold_face_is_disabled() {
         let (mut h, link, _) = setup();
         let before = (h.app.session.doc.to_json(), h.app.session.undo.len());
         h.app.start("sketch.edit_text");
         h.frames(3);
+        assert!(!font_has_bold_face(&tx(&h.app).font));
+        assert!(!tx(&h.app).style.bold);
+        // Clicking disabled bold does not toggle it, preview stays clean without errors.
         h.step(&json!({"click":{"handle":"dialog:Bold"}})).unwrap();
         h.frames(2);
-        assert!(!style_of(&h, &link).bold, "the canvas keeps the last text it could make");
-        let error = h.app.dialog.as_ref().unwrap().error.clone().unwrap_or_default();
-        assert!(error.contains("no bold face"), "the preview must explain the unchanged text before OK: {error}");
+        assert!(!tx(&h.app).style.bold);
+        assert!(!style_of(&h, &link).bold);
+        assert!(h.app.dialog.as_ref().unwrap().error.is_none());
+        // Changing alignment succeeds without error.
+        h.step(&json!({"click":{"handle":"dialog:Align center"}})).unwrap();
         h.frames(2);
-        assert_eq!(h.app.dialog.as_ref().unwrap().error.as_deref(), Some(error.as_str()), "the reason stays visible on unchanged frames");
-        h.step(&json!({"click":{"handle":"dialog:Bold"}})).unwrap();
-        h.frames(2);
-        assert!(h.app.dialog.as_ref().unwrap().error.is_none(), "a valid preview clears the refusal");
-        h.step(&json!({"click":{"handle":"dialog:Bold"}})).unwrap();
-        h.frames(2);
+        assert_eq!(tx(&h.app).style.align, TextAlign::Center);
         ok(&mut h);
-        assert!(editing(&h.app));
-        let error = h.app.dialog.as_ref().unwrap().error.clone().unwrap_or_default();
-        assert!(error.contains("no bold face"), "{error}");
-        h.step(&json!({"widget":"Cancel"})).unwrap();
-        assert_eq!((h.app.session.doc.to_json(), h.app.session.undo.len()), before);
+        assert!(!editing(&h.app));
+        assert_eq!(style_of(&h, &link).align, TextAlign::Center);
+        assert_eq!(h.app.session.undo.len(), before.1 + 1);
     }
 
     #[test]
@@ -1602,26 +1602,5 @@ mod tests {
         assert_eq!(style_of(&h, &link).path, None);
         h.step(&json!({"widget":"Cancel"})).unwrap();
         assert_eq!(style_of(&h, &link), TextStyle::default());
-    }
-
-    /// #9940: built-in font has no bold face; ensuring bold is disabled so alignment,
-    /// position, spacing and editing succeed without errors.
-    #[test]
-    fn built_in_font_disables_bold_and_options_work_without_error() {
-        let (mut h, _link, _) = setup();
-        h.app.start("sketch.edit_text");
-        h.frames(3);
-        assert!(!font_has_bold_face(&tx(&h.app).font));
-        assert!(!tx(&h.app).style.bold);
-        // Changing alignment succeeds without error
-        h.step(&json!({"widget": "dialog:Align center"})).unwrap();
-        h.frames(3);
-        assert_eq!(tx(&h.app).style.align, TextAlign::Center);
-        h.step(&json!({"widget": "dialog:Align right"})).unwrap();
-        h.frames(3);
-        assert_eq!(tx(&h.app).style.align, TextAlign::Right);
-        h.step(&json!({"widget": "OK"})).unwrap();
-        h.frames(3);
-        assert!(h.app.dialog.is_none());
     }
 }
