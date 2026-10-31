@@ -12,22 +12,10 @@
 5158-fillet-round-just-past-a-10mm-face SMLib status 1001: the round passes 5e-6 under the box's top back edge, inside the body's tolerance (1e-5), and subtracting its removal region maps that edge to two of the region's faces (SmTopologyIntersector); 10.0001-10.04 open
 9-fillet-corner-curvature-with-reduce-fit not supported yet: solid.fillet builds corner g2 with the exact fit only
 9-fillet-corner-curvature-with-taper-fit not supported yet: solid.fillet builds corner g2 with the exact fit only
-926-chamfer-top-edge-ending-on-boss-wall-above-it not supported yet: the chamfer is refused as larger than its faces where it ends on the boss's wall
-cov-chamfer-concave-edge-through-up-down-joined-squares SMLib status 1001 on the concave chamfer's tangent chain
-cov-chamfer-outer-corner-edge-of-a-shelled-box-with-a-lip SMLib's chamfer result is not a closed solid where it ends on the lip
-cov-fillet-arc-edge-on-an-oblique-cut-of-a-bar SMLib's check refuses the round: internal coincident control points in a B-spline curve
-cov-fillet-exact-cone-cylinder-sharing-a-ball-r1 the round is traced: two B-spline faces of degrees (3, 3), not one rational face of degrees (6, 2)
-cov-fillet-exact-cylinders-touching-at-a-point-r1 the round is traced: four B-spline faces of degrees (3, 3), not one rational face of degrees (12, 2)
-cov-fillet-exact-oblique-plane-cone-rim-r1-5 the round is traced: two B-spline faces of degrees (3, 3), not one rational face of degrees (4, 2)
-cov-fillet-exact-oblique-plane-cylinder-rim-r2 the round is traced: two B-spline faces of degrees (3, 3), not one rational face of degrees (4, 2); volume 1.2e-6 short
-cov-fillet-exact-sphere-coaxial-cone-r3 the round is traced (no sphere is taken as analytic): a B-spline of degrees (3, 3), not the revolved arc's (2, 2); volume 1.1e-6 over
-cov-fillet-exact-sphere-plane-rim-r2 the round is traced (no sphere is taken as analytic): a B-spline of degrees (3, 3), not the revolved arc's (2, 2); volume 1.9e-6 short
 cov-fillet-g2-corner-beside-a-cylinder not supported yet: the curvature fillet builds its sections only between planar faces ("a picked edge is not on the face beside it" on the cylinder's arc)
 cov-fillet-g2-five-edge-apex-corner refused: the default setback is shorter than where the rounds' contact lines meet (3.5056 mm from the apex); the corner should take a setback that works
 cov-fillet-g2-four-edge-apex-corner refused: the default setback is shorter than where the rounds' contact lines meet (3.9027 mm from the apex); the corner should take a setback that works
 cov-fillet-g2-mixed-corner not supported yet: SMLib sets back a corner only where its edges are all convex or all concave
-every-block-cylinder-crease-top-edge-after-arc-round-r1 the r1 round's contact seam with the block's side face reads 60 degrees (the cylinder wall's normal) at its end on the crease (8.660, 5, 15.284): G0 where the round is built tangent
-every-hole-top-rim-r12-past-plate-bottom SMLib status 1001: a convex round past its face on the tangent side is not yet built by subtraction
 report-drafted-peg-front-and-concave-rounds-together-r2 not supported yet: SMLib refuses the corner where the drafted front top edge runs tangent into the concave arc (on the cone) as of no kind its blend corners take
 report-fillet-concave-arc-and-front-top-edge-together-r5-solver-residues the corner patch where the convex and concave rounds meet stands 0.128 out of the front face (box y min -0.0699 against 0.0579)
 report-fillet-concave-arc-and-front-top-edge-together-r7-solver-residues the corner patch where the convex and concave rounds meet stands 0.230 out of the front face (box y min -0.1723 against 0.0579)
