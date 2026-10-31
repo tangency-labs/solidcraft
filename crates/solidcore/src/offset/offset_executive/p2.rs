@@ -259,7 +259,9 @@ pub fn offset_brep(
         SolidOffsetOptions::default(),
         notifications,
     ))?;
-    if refuse_broken && !brep_is_manifold_solid(&result)? {
+    // A result with no faces (the solid offset to nothing, #2092) is returned, as with
+    // the opt-in off.
+    if refuse_broken && !result.face_list().is_empty() && !brep_is_manifold_solid(&result)? {
         return Err(SolidError::sm_err(OP_OFFSET));
     }
     // (not upstream) the attributes the notifications left on the result's objects

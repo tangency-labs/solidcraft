@@ -20,10 +20,11 @@
 #[path = "support/offset_fixture.rs"]
 mod offset_fixture;
 
-use offset_fixture::{offset_full, planar_faces_at, report, shell};
+use offset_fixture::{offset_full, planar_faces_at, report, shell, Notifications};
 use solidcore::blend::fillet_executive::api::fillet_edges;
 use solidcore::error::{SolidError, SM_ERR};
-use solidcore::primitive::api_primitives::create_box;
+use solidcore::offset::offset_executive::p2::{api_offset_brep_full, OffsetOptions};
+use solidcore::primitive::api_primitives::{create_box, create_sphere};
 use solidcore::topology::brep::p1 as bp1;
 use solidcore::topology::brep::validation::{check_brep, CheckLevel};
 use solidcore::{Brep, FaceId, Kernel, Point3};
@@ -305,5 +306,27 @@ fn wr_657_fully_chamfered_box_inset_open_at_a_chamfer_is_refused() {
     match shell(&mut k, b, -1.0, &[open]) {
         Err(SolidError::Upstream { code, .. }) => assert_eq!(code, SM_ERR),
         other => panic!("SM_ERR expected: {other:?}"),
+    }
+}
+
+/// #2092: a sphere of radius 10 offset by -10 (convex edges not extended) leaves nothing.
+/// With both flags on, the empty body comes back as with either off: a result with no
+/// faces is not refused as a broken solid.
+#[test]
+fn issue_2092_sphere_offset_to_its_centre_is_empty() {
+    for flags in [(false, false), (true, false), (false, true), (true, true)] {
+        let mut k = Kernel::default();
+        k.fixes.offset_closes_loop_gaps = flags.0;
+        k.fixes.offset_splits_corner_vertices = flags.1;
+        let mut ball = create_sphere(&mut k, Point3::new(0.0, 0.0, 0.0), 10.0).unwrap();
+        let mut n = Notifications::new(&mut ball);
+        let options = OffsetOptions {
+            distance: -10.0,
+            extend_convex_edges: false,
+            merge_results: true,
+        };
+        let out = api_offset_brep_full(&mut k, Some(&mut ball), options, &mut n.context())
+            .unwrap_or_else(|e| panic!("flags {flags:?}: {e:?}"));
+        assert!(out.face_list().is_empty(), "flags {flags:?}: no faces");
     }
 }
