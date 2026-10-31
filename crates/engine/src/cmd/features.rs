@@ -726,6 +726,8 @@ fn add_feature_in(s: &mut Session, p: &Value, kind: FeatureKind, world: bool) ->
             names
         } else if pts.is_empty() {
             Vec::new()
+        } else if matches!(kind, FeatureKind::Hole { .. }) {
+            hole_face_names(s, p, &kind)
         } else {
             solidcraft_doc::face_point_names(&s.doc, &s.model.state(), &kind, s.active_component)
         }
@@ -1038,6 +1040,22 @@ fn face_body_reached(s: &Session, sketch: u64) -> Result<Option<String>> {
         )));
     }
     Ok(Some(body.name.clone()))
+}
+
+/// A hole's face points, named on the bodies it drills where one of theirs holds the point
+/// (#7520): a face of another body in the same plane, a hidden one the hole leaves alone, would
+/// otherwise take the name of the face that was picked. Over every body, as before, elsewhere.
+fn hole_face_names(s: &Session, p: &Value, kind: &FeatureKind) -> Vec<String> {
+    let st = s.model.state();
+    let all = solidcraft_doc::face_point_names(&s.doc, &st, kind, s.active_component);
+    let drilled = string_list_or_default(p, "participants");
+    if drilled.is_empty() || drilled.iter().any(|b| b == "*") {
+        return all;
+    }
+    let mut scoped = solidcraft_doc::ModelState::default();
+    scoped.bodies = st.bodies.iter().filter(|b| drilled.contains(&b.name)).cloned().collect();
+    let own = solidcraft_doc::face_point_names(&s.doc, &scoped, kind, s.active_component);
+    own.into_iter().zip(all).map(|(own, any)| if own.is_empty() { any } else { own }).collect()
 }
 
 /// The body whose face `sketch` is attached to (on the face itself, not offset from it), when
@@ -2631,6 +2649,13 @@ fn hole(s: &mut Session, p: &Value) -> Result<Value> {
             // placed) cuts that body: the pick is already in that body's frame, and the
             // component's own bodies alone would leave nothing to cut.
             p["participants"] = json!([body]);
+        } else {
+            // Like a cut (#3961), a hole leaves hidden bodies alone (#7520): while some are
+            // hidden, it drills the shown ones, stored so showing the others later changes
+            // nothing.
+            if let Some(shown) = shown_scope(s).filter(|shown| !shown.is_empty()) {
+                p["participants"] = json!(shown);
+            }
         }
     }
     add_feature(

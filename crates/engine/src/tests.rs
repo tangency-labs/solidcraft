@@ -3051,6 +3051,40 @@ fn hole_as_deep_as_the_plate() {
     }
 }
 
+/// #7520: a hole that names no bodies leaves hidden ones alone, as a cut does (#3961), and keeps
+/// doing so once they are shown again. Its face is named on the body it drills, not on a hidden
+/// one whose face lies in the same plane; with nothing hidden, it still drills every body.
+#[test]
+fn a_hole_leaves_hidden_bodies_alone() {
+    let setup = |hide: bool| {
+        let mut s = Session::default();
+        // Two bodies whose bottom faces share the plane z = 0, the hidden one made first.
+        run(&mut s, "solid.box", json!({"length": 40, "width": 40, "height": 20, "body_name": "Block"}));
+        run(&mut s, "solid.box", json!({"length": 40, "width": 40, "height": 5, "operation": "new", "body_name": "Plate"}));
+        if hide {
+            run(&mut s, "browser.visibility", json!({"items": ["Block"], "visible": false}));
+        }
+        // The name of the plate's face that is picked, before the hole takes the point away.
+        let picked = solidcraft_doc::naming::face_name_at_body(s.world_state().body("Plate").unwrap(), solidcraft_geom::Vec3::new(20.0, 20.0, 0.0));
+        let r = s.execute("solid.hole", &json!({"position": [20, 20, 0], "diameter": 5, "depth": 10, "name": "Hole1"})).unwrap();
+        (s, r, picked)
+    };
+    let vol = |s: &Session, name: &str| solidcraft_kernel::measure(&s.world_state().body(name).unwrap().body).unwrap().volume;
+    let (block, plate) = (40.0 * 40.0 * 20.0, 40.0 * 40.0 * 5.0);
+    let (mut hidden, r, picked) = setup(true);
+    assert_eq!(r["changed_bodies"], json!(["Plate"]));
+    assert!((vol(&hidden, "Block") - block).abs() < 1e-6, "the hidden body is not drilled");
+    assert!(vol(&hidden, "Plate") < plate - 1.0, "the shown one is");
+    let hole = hidden.doc.find_feature("Hole1").unwrap();
+    assert!(picked.is_some());
+    assert_eq!((hole.participants.clone(), hole.face_names.first().cloned()), (vec!["Plate".to_string()], picked));
+    run(&mut hidden, "browser.visibility", json!({"items": ["Block"], "visible": true}));
+    assert!((vol(&hidden, "Block") - block).abs() < 1e-6, "shown again, it stays as it was");
+    let (shown, r, _) = setup(false);
+    assert_eq!(r["changed_bodies"], json!(["Block", "Plate"]), "with nothing hidden, both are drilled");
+    assert!(vol(&shown, "Block") < block - 1.0 && vol(&shown, "Plate") < plate - 1.0);
+}
+
 /// Appearances outlive later features: a coloured face keeps its colour after a fillet on a
 /// neighbouring edge; an imported STEP's body and face colours survive a hole.
 #[test]
