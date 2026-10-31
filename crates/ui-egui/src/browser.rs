@@ -2,9 +2,9 @@
 //! construction planes, plus document settings and the origin.
 //!
 //! Rows are drawn in code (icons from [`icons`]) and act through commands. A click selects
-//! (Ctrl adds, Shift extends over the visible rows), hovering a body row lights it up in the
-//! viewport, a double-click on a sketch edits it, and a right-click opens the item's menu
-//! ([`crate::context_menu`]).
+//! (Ctrl adds, Shift extends over the visible rows), a slower second click on a name starts
+//! renaming it, hovering a body row lights it up in the viewport, a double-click on a sketch
+//! edits it, and a right-click opens the item's menu ([`crate::context_menu`]).
 
 use crate::ui_kit::{Container, Surface};
 
@@ -568,13 +568,34 @@ fn eye_left(ui: &egui::Ui) -> bool {
 
 pub(crate) fn draw_row(ui: &mut egui::Ui, id: egui::Id, row: &Row<'_>) -> RowResp {
     let compact = compact_tree(ui);
-    let out = crate::ui_kit::tree_row(ui, id, &Row { compact, eye_left: eye_left(ui), ..*row });
+    let mut out = crate::ui_kit::tree_row(ui, id, &Row { compact, eye_left: eye_left(ui), ..*row });
     if let Some(r) = out.rect.filter(|r| ui.is_rect_visible(*r)) {
         let x = r.left() + if compact { Tokens::get().space_8 } else { 2.0 } + row.depth as f32 * INDENT;
         let fold = row.fold.map(|_| Rect::from_min_max(pos2(x - 4.0, r.top()), pos2(x + 15.0, r.bottom())));
         DRAWN.with(|d| d.borrow_mut().push((row.label.to_string(), r, fold, row.fold)));
     }
+    let clicked = out.resp.as_ref().is_some_and(|resp| resp.clicked());
+    out.slow_rename = slow_rename_click(ui, id, clicked, row.name && out.clicked);
     out
+}
+
+fn slow_rename_click(ui: &egui::Ui, row: egui::Id, clicked: bool, is_name: bool) -> bool {
+    if !clicked {
+        return false;
+    }
+    let key = egui::Id::new("sc_browser_last_name_click");
+    let now = ui.input(|i| i.time);
+    let delay = ui.ctx().options(|options| options.input_options.max_double_click_delay);
+    let previous = ui.ctx().data_mut(|data| {
+        let previous = data.get_persisted::<(egui::Id, f64, bool)>(key);
+        data.insert_persisted(key, (row, now, is_name));
+        previous
+    });
+    is_name
+        && now.is_finite()
+        && previous.is_some_and(|(previous_row, previous_time, previous_was_name)| {
+            previous_row == row && previous_was_name && previous_time.is_finite() && now - previous_time > delay
+        })
 }
 
 /// A Ctrl/Shift-aware click on a selectable row.
@@ -1484,7 +1505,7 @@ fn component_rows_inner(
             app.session.visibility.hidden_bodies.retain(|b| !bodies.contains(b));
         }
     }
-    if r.clicked && !r.double {
+    if r.clicked && !r.double && !r.slow_rename {
         let names = bodies_of_component(app, id);
         if !offer_bodies(app, &names, Take::Toggle) {
             let ctrl = ui.input(|i| i.modifiers.command || i.modifiers.ctrl);
@@ -1499,13 +1520,16 @@ fn component_rows_inner(
             }
         }
     }
-    if r.double {
+    if r.slow_rename {
+        start_inline_rename(app, crate::context_menu::RenameWhat::Component(id), &r);
+    } else if r.double {
         if app.session.doc.parts.contains_key(&id) {
             crate::dialogs_part_size::open(app, id);
         } else {
             crate::edit_in_place::double_click_component(app, json!({ "component": id }));
         }
     }
+    inline_rename(app, ui, &r, name);
     if r.hovered {
         acts.hover(bodies.iter());
     }
@@ -1683,12 +1707,16 @@ fn occurrence_rows_inner(
             d.pick(&app.session, Sel::Occurrence { path: path.to_vec() });
             app.dialog = Some(d);
         }
-    } else if r.clicked && !r.double {
+    } else if r.clicked && !r.double && !r.slow_rename {
         let names = app.session.occurrence_bodies(path, true).unwrap_or_default();
         if !offer_bodies(app, &names, Take::Toggle) {
             click_select(app, ui, key.clone(), Some(Sel::Occurrence { path: path.to_vec() }));
         }
     }
+    if r.slow_rename {
+        start_inline_rename(app, crate::context_menu::RenameWhat::Component(placement.component), &r);
+    }
+    inline_rename(app, ui, &r, &placement.label);
     if r.hovered {
         let bodies = placement.hover_bodies.get_or_insert_with(|| app.session.occurrence_bodies(path, true).unwrap_or_default());
         acts.hover(bodies.iter());
@@ -1908,7 +1936,7 @@ fn origin_rows(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize, acts: &mut A
 pub const STANDARD_VIEWS: [(&str, &str); 4] = [("Top", "top"), ("Front", "front"), ("Right", "right"), ("Home", "home")];
 
 /// Named Views: the standard views, then the design's saved cameras. A double-click restores
-/// one (animated).
+/// one (animated); a slower second click renames a saved view.
 fn named_view_rows(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize, acts: &mut Actions) {
     let key = "namedviews";
     let open = is_open(app, key, false);
@@ -1938,9 +1966,12 @@ fn named_view_rows(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize, acts: &m
             ui.id().with(("view", &name)),
             &Row { depth: depth + 1, icon: "perspective", label: &name, name: true, ..Default::default() },
         );
-        if r.double {
+        if r.slow_rename {
+            start_inline_rename(app, crate::context_menu::RenameWhat::View(name.clone()), &r);
+        } else if r.double {
             restore_view(app, &name);
         }
+        inline_rename(app, ui, &r, &name);
         if let Some(p) = r.secondary {
             acts.menu = Some((p, Target::NamedView { name }));
         }
@@ -2123,21 +2154,29 @@ fn canvas_rows(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize, acts: &mut A
             let _ = app.run("canvas.edit", json!({ "canvas": id, "visible": !visible }));
         }
         if r.clicked {
-            if !ui.input(|i| i.modifiers.command || i.modifiers.ctrl) {
-                app.tree.picked_canvases.clear();
-                app.tree.picked_components.clear();
-                app.tree.picked_joints.clear();
-                let _ = app.run("select.clear", json!({}));
-            }
-            if selected {
-                app.tree.picked_canvases.retain(|c| *c != id);
+            if r.slow_rename {
+                app.tree.picked_canvases = vec![id];
             } else {
-                app.tree.picked_canvases.push(id);
+                if !ui.input(|i| i.modifiers.command || i.modifiers.ctrl) {
+                    app.tree.picked_canvases.clear();
+                    app.tree.picked_components.clear();
+                    app.tree.picked_joints.clear();
+                    let _ = app.run("select.clear", json!({}));
+                }
+                if selected {
+                    app.tree.picked_canvases.retain(|c| *c != id);
+                } else {
+                    app.tree.picked_canvases.push(id);
+                }
             }
         }
-        if r.double {
+        if r.slow_rename {
+            start_inline_rename(app, crate::context_menu::RenameWhat::Canvas(id), &r);
+        }
+        if r.double && !r.slow_rename {
             app.tree.canvas_panel = Some(CanvasPanel::new(app, id, false));
         }
+        inline_rename(app, ui, &r, &name);
         if let Some(p) = r.secondary {
             if !selected {
                 app.tree.picked_canvases = vec![id];
@@ -2702,7 +2741,9 @@ fn folder_level(
                 ..Default::default()
             },
         );
-        if r.fold {
+        if r.slow_rename {
+            start_inline_rename(app, crate::context_menu::RenameWhat::Group(id), &r);
+        } else if r.fold {
             toggle(app, gkey, true);
         } else if r.clicked {
             let names: Vec<String> = group.entries().into_iter().flat_map(|e| e.bodies.clone()).collect();
@@ -2711,6 +2752,7 @@ fn folder_level(
                 toggle(app, gkey, true);
             }
         }
+        inline_rename(app, ui, &r, &group.label);
         if r.eye {
             toggle_folder(app, gkey);
         }
@@ -2773,19 +2815,24 @@ fn order_before(top: &[BrowserEntry], dragged: &[BrowserEntry], before: Option<&
     order
 }
 
-/// The body's name edited in its row (started by a double-click): Enter or leaving the box keeps
-/// the name, Escape cancels.
-fn inline_rename(app: &mut SolveApp, ui: &mut egui::Ui, row: Rect, label_left: f32, e: &Entry) {
-    let editing = app.menu.rename.as_ref().is_some_and(|r| r.inline && matches!(&r.what, crate::context_menu::RenameWhat::Body(b) if *b == e.key));
+pub(crate) fn start_inline_rename(app: &mut SolveApp, what: crate::context_menu::RenameWhat, row: &RowResp) {
+    if let Some(row_id) = row.row_id {
+        crate::context_menu::start_inline_rename(app, what, row.rect.map(|rect| rect.left_bottom()).unwrap_or_default(), row_id);
+    }
+}
+
+/// Edit a browser name in its row: Enter or leaving the box keeps the name, Escape cancels.
+pub(crate) fn inline_rename(app: &mut SolveApp, ui: &mut egui::Ui, row: &RowResp, label: &str) {
+    let (Some(edit_rect), Some(row_id)) = (row.label_rect, row.row_id) else { return };
+    let editing = app.menu.rename.as_ref().is_some_and(|rename| rename.inline && rename.inline_id == Some(row_id));
     if !editing {
         return;
     }
     let Some(mut rename) = app.menu.rename.take() else { return };
-    let edit_rect = Rect::from_min_max(pos2(label_left, row.top() + 1.0), pos2(row.right() - 3.0, row.bottom() - 1.0));
     ui.painter().rect_filled(edit_rect, 3.0, Tokens::get().field);
-    let id = ui.id().with(("browser_rename", &e.row_key));
+    let id = ui.id().with(("browser_rename", row_id));
     let response = crate::ui_kit::inline_name(ui, edit_rect, id, &mut rename.text);
-    crate::scenario::publish_handle(&format!("rename:{}", e.key), edit_rect.center());
+    crate::scenario::publish_handle(&format!("rename:{label}"), edit_rect.center());
     let was_focused = rename.focused;
     if !rename.focused {
         if let Some(mut state) = egui::TextEdit::load_state(ui.ctx(), id) {
@@ -2914,23 +2961,19 @@ fn entry_row(
         } else {
             click_select(app, ui, e.row_key.clone(), e.sel.clone());
         }
-        // A double-click renames the row (sketch rows open for editing instead), like F2. A body
-        // is edited in its own row.
-        if r.double {
+        // A double-click or a slower second click renames the row (sketch double-clicks edit
+        // instead), like F2.
+        if r.double || r.slow_rename {
             crate::context_menu::rename_selection(app, r.rect.map(|x| x.left_bottom()).unwrap_or_default());
-            if folder == "bodies"
-                && let Some(rename) = app.menu.rename.as_mut()
-                && matches!(&rename.what, crate::context_menu::RenameWhat::Body(b) if *b == e.key)
+            if let Some(rename) = app.menu.rename.as_mut()
+                && let Some(row_id) = r.row_id
             {
                 rename.inline = true;
+                rename.inline_id = Some(row_id);
             }
         }
     }
-    if folder == "bodies"
-        && let (Some(rect), Some(label_left)) = (r.rect, r.label_left)
-    {
-        inline_rename(app, ui, rect, label_left, e);
-    }
+    inline_rename(app, ui, &r, &e.label);
     if r.hovered && !e.bodies.is_empty() {
         acts.hover(e.bodies.iter());
     }

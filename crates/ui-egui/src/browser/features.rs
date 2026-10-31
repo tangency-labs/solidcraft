@@ -273,6 +273,7 @@ fn feature_row(
             eye,
             icon,
             label: &label,
+            name: true,
             selected,
             dim: dim || (!is_sketch && eye == Some(false)),
             cut,
@@ -306,7 +307,10 @@ fn feature_row(
             app.tree.reveal_feature = None;
         }
     }
-    if r.double {
+    if r.slow_rename {
+        click_select(app, ui, format!("f:{id}"), Some(Sel::Feature { id }));
+        start_inline_rename(app, crate::context_menu::RenameWhat::Feature(id), &r);
+    } else if r.double {
         if !path.is_empty() {
             let _ = app.run("component.activate", json!({"component":component,"occurrence":path.last(),"path":path}));
         }
@@ -314,6 +318,7 @@ fn feature_row(
     } else if r.clicked {
         click_select(app, ui, format!("f:{id}"), Some(Sel::Feature { id }));
     }
+    inline_rename(app, ui, &r, &label);
     if let Some(at) = r.secondary {
         acts.menu = Some((at, if is_sketch { Target::Sketch { id } } else { Target::Feature { id } }));
     }
