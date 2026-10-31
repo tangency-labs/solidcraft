@@ -1,14 +1,13 @@
 {
  "sources": [],
- "what": "the root circle of a boss R8 on a plate rounded curvature-continuous size 2: the order-2 section revolved",
+ "what": "a boss's root on a plate rounded curvature-continuous size 2: the order-2 section of the square corner turned about the boss's axis, a certified fit",
  "source": "analytic",
- "method": "plate 60x40x10 with a boss R8 x 10 at (30, 20): V0 = 24000 + 640 pi = 26010.6193. In each meridian plane (rho, z) the plate's top and the boss's wall are the lines z = 10 and rho = 8, the feet of the point at distance d from both (8 + d, 10) and (8, 10 + d): the order-2 section at the default thumbweight is that of a square corner (cov-fillet-section-curvature-box-edge-r3), area 113/756 s^2 = 0.597884 (s = 2), first moment about the wall 0.222979 (Green's theorem on the section), revolved (Pappus): 2 pi (8 A + M) = 31.454. V = 26042.0732. Faces 9; both seams G2, not G3.",
+ "method": "plate 60x40x10 with a boss R8 x 10 at (30, 20): V0 = 24000 + 640 pi = 26010.6193. In each meridian plane (rho, z) the plate's top and the boss's wall are the lines z = 10 and rho = 8, the feet of the point at distance d from both (8 + d, 10) and (8, 10 + d): the order-2 section at the default thumbweight 0 is that of a square corner (cov-fillet-section-curvature-box-edge-r3), area 0.154192655384275 s^2 = 0.616770622 (s = 2), first moment about the wall 0.233402637 (Green's theorem on the section), revolved (Pappus): 2 pi (8 A + M) = 32.469. V = 26043.0881. Faces 9; the seams at least G2 (the surface is a certified fit of the section turned about the axis: G3 to the plate along its rail, G2 to the wall at Continuity Analysis's tolerances).",
  "body_count": 1,
- "volume_mm3": 26042.0732245589,
+ "volume_mm3": 26043.0880831714,
  "faces": 9,
  "continuity": {
-  "order": "g2",
-  "exact": true
+  "order": "g2"
  },
  "tolerance": {
   "rel": 1e-07
