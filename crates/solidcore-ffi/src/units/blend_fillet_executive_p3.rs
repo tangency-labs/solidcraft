@@ -445,8 +445,9 @@ pub const SOURCE_PARAMS: usize = 12;
 const MAX_SOURCE_EDGE: usize = 1 << 20;
 
 /// Validate the non-box real-solid wire: source kind (1 `.smb` file, 2 cylinder,
-/// 3 box union, 4 box difference), [`SOURCE_PARAMS`] source parameters, then radius,
-/// cross-section, continuity, thumbweight, selected-edge count (0 = every edge) and
+/// 3 box union, 4 box difference, 5 the union of a box (parameters 0..6) and a
+/// cylinder (base centre 6..9, radius 9, height 10)), [`SOURCE_PARAMS`] source
+/// parameters, then radius, cross-section, continuity, thumbweight, selected-edge count (0 = every edge) and
 /// owning-list edge indices. `has_path` says whether a file path accompanies it
 /// (exactly kind 1). Cylinder radius/height and box sizes must be positive, as
 /// `SmApiCreateCylinder` / `SmApiCreateBox` require.
@@ -455,7 +456,7 @@ pub fn validate_real_source(input: &[f64], has_path: bool) -> Result<(), FfiErro
         return Err(FfiError::InvalidArgument("non-finite source wire".into()));
     }
     let mut r = Cursor::new(input);
-    let kind = r.index(4)?;
+    let kind = r.index(5)?;
     if kind == 0 || (kind == 1) != has_path {
         return Err(FfiError::InvalidArgument("invalid solid source".into()));
     }
@@ -463,6 +464,7 @@ pub fn validate_real_source(input: &[f64], has_path: bool) -> Result<(), FfiErro
     let positive: &[usize] = match kind {
         2 => &[3, 4],
         3 | 4 => &[3, 4, 5, 9, 10, 11],
+        5 => &[3, 4, 5, 9, 10],
         _ => &[],
     };
     for &i in positive {
@@ -791,8 +793,8 @@ pub const ATTRIBUTED_FILLET_PARAMS: usize = 6;
 /// Validate the attributed-fillet wire (issue #1462): api (0 `SmApiFilletEdges`,
 /// 1 `SmApiFilletEdgesPerEdge`, 2 `SmApiVariableRadiusFillet`, 3 `SmApiCircularFillet`,
 /// 4 `SmApiChamferFillet`), attribute behaviour (`SmAttributeBehaviorType` 0..=4), body
-/// kind (0 box: origin and positive size; 2 cylinder, 3 box union, 4 box difference as
-/// on the [`real_source`] wire), [`SOURCE_PARAMS`] body parameters, then
+/// kind (0 box: origin and positive size; 2 cylinder, 3 box union, 4 box difference, 5 box
+/// and cylinder union as on the [`real_source`] wire), [`SOURCE_PARAMS`] body parameters, then
 /// [`ATTRIBUTED_FILLET_PARAMS`] and the `GetEdges` indices. The cross-section is a
 /// `ULONG` 0..=2 for apis 0 and 2 and an `SmFilletSurfaceGeneratorType` 1..=3 for api 1;
 /// continuity 1..=3. Apis 0..=2 take at least one edge, apis 3 and 4 none. The shim
@@ -808,13 +810,17 @@ pub fn validate_attributed(input: &[f64]) -> Result<(), FfiError> {
     else {
         return Err(bad("short wire"));
     };
-    if !int_in(api, 0.0, 4.0) || !int_in(behavior, 0.0, 4.0) || ![0.0, 2.0, 3.0, 4.0].contains(&kind) {
+    if !int_in(api, 0.0, 4.0)
+        || !int_in(behavior, 0.0, 4.0)
+        || ![0.0, 2.0, 3.0, 4.0, 5.0].contains(&kind)
+    {
         return Err(bad("api, behaviour or body kind"));
     }
     let p = input.get(3..3 + SOURCE_PARAMS).ok_or_else(|| bad("short wire"))?;
     let positive: &[usize] = match kind as u32 {
         0 => &[3, 4, 5],
         2 => &[3, 4],
+        5 => &[3, 4, 5, 9, 10],
         _ => &[3, 4, 5, 9, 10, 11],
     };
     if positive.iter().any(|&i| p.get(i).is_none_or(|&v| v <= 1e-12)) {

@@ -41,8 +41,9 @@ pub(super) enum Api {
     Chamfer,
 }
 
-/// The body: `SmApiCreateBox`, `SmApiCreateCylinder`, or the union / difference of
-/// two boxes.
+/// The body: `SmApiCreateBox`, `SmApiCreateCylinder`, the union / difference of two
+/// boxes, or the union of a box (`a`: origin, size) with a cylinder (base centre
+/// `origin`, `radius`, `height`; #1485).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub(super) enum Body {
@@ -50,6 +51,7 @@ pub(super) enum Body {
     Cylinder { origin: [f64; 3], radius: f64, height: f64 },
     BoxUnion { a: [[f64; 3]; 2], b: [[f64; 3]; 2] },
     BoxDifference { a: [[f64; 3]; 2], b: [[f64; 3]; 2] },
+    BoxCylinderUnion { a: [[f64; 3]; 2], origin: [f64; 3], radius: f64, height: f64 },
 }
 
 fn one() -> f64 {
@@ -117,6 +119,17 @@ impl AttributedFillet {
                     4.0
                 }
             }
+            Body::BoxCylinderUnion {
+                a,
+                origin,
+                radius,
+                height,
+            } => {
+                params.extend(a.iter().flatten());
+                params.extend(origin);
+                params.extend([*radius, *height]);
+                5.0
+            }
         };
         params.resize(ffi::SOURCE_PARAMS, 0.0);
         out.push(kind);
@@ -179,6 +192,16 @@ fn build(k: &mut Kernel, body: &Body) -> SolidResult<Brep> {
         Body::BoxDifference { a, b } => {
             let (a, b) = (boxed(k, a)?, boxed(k, b)?);
             solidcore::boolean::api_brep::boolean_difference(k, a, b)
+        }
+        Body::BoxCylinderUnion {
+            a,
+            origin,
+            radius,
+            height,
+        } => {
+            let a = boxed(k, a)?;
+            let b = primitives::create_cylinder(k, Vec3::from(*origin), *radius, *height)?;
+            solidcore::boolean::api_brep::boolean_union(k, a, b)
         }
     }
 }

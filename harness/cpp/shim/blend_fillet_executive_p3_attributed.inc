@@ -85,7 +85,8 @@ void put_attributes(std::vector<double>& o, SmBrep* b) {
 // Wire (validated by the Rust binding): api (0 SmApiFilletEdges, 1 SmApiFilletEdgesPerEdge,
 // 2 SmApiVariableRadiusFillet, 3 SmApiCircularFillet, 4 SmApiChamferFillet), behaviour
 // (SmAttributeBehaviorType), body kind (0 SmApiCreateBox(origin p0..p2, size p3..p5),
-// then the build_source kinds 2 cylinder, 3 box union, 4 box difference), 12 body
+// then the build_source kinds 2 cylinder, 3 box union, 4 box difference, 5 box and
+// cylinder union), 12 body
 // parameters, radius, end radius (api 2), cross-section (api 0/2: 0 linear, 1 circular,
 // 2 blend curve; api 1: the SmFilletSurfaceGeneratorType of every edge), continuity,
 // thumbweight, edge count, then GetEdges indices. Records `status V E F` then the face
