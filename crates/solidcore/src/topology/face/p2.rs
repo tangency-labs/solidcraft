@@ -988,6 +988,7 @@ fn offset_evaluate_simple(
     surface: &Surface,
     offset: f64,
     uv: Point2,
+    flags: EvaluateFlags,
 ) -> Result<Vec<Vec<Vec3>>> {
     let off = OffsetSurface::new(
         k,
@@ -996,7 +997,7 @@ fn offset_evaluate_simple(
         false,
         SS_UNKNOWN,
     )?;
-    off.evaluate_simple(k, uv, 1, 1, simple_flags())
+    off.evaluate_simple(k, uv, 1, 1, flags)
 }
 
 /// `EvaluateSimple(.., TRUE, TRUE, TRUE, ..)`: from the left, upper half.
@@ -1845,6 +1846,10 @@ pub struct OdeIsoCurveLength<'a> {
     origin: Point3,
     face_thickness: f64,
     layout: &'a PrecisePropertyLayout,
+    /// The v evaluated from the lower knot span (`bVFromLeft = FALSE`) rather than
+    /// upstream's upper one: the end of a span-wise piece under
+    /// `precise_properties_span_end_from_below` (WR-670); `None` upstream.
+    v_from_below: Option<f64>,
 }
 
 impl<'a> OdeIsoCurveLength<'a> {
@@ -1866,7 +1871,18 @@ impl<'a> OdeIsoCurveLength<'a> {
             origin,
             face_thickness,
             layout,
+            v_from_below: None,
         }
+    }
+
+    /// The same integrand, evaluated at `v = end` from the knot span below `end`
+    /// (`bVFromLeft = FALSE`), every other v as upstream (`TRUE`, the span above): the
+    /// end of a piece that stops at a v knot of the surface lies in the piece's own
+    /// span (WR-670, [`UpstreamFixes::precise_properties_span_end_from_below`](crate::kernel::UpstreamFixes::precise_properties_span_end_from_below)).
+    #[must_use]
+    pub const fn with_v_end_from_below(mut self, end: f64) -> Self {
+        self.v_from_below = Some(end);
+        self
     }
 
     /// `Evaluate`: fills `dydx` (all entries zeroed first) at `v = t`.
@@ -1893,20 +1909,22 @@ impl<'a> OdeIsoCurveLength<'a> {
             }
 
             let uv = Point2::new(self.u_iso_value, t);
+            let mut flags = simple_flags();
+            // (exact: the end is the piece's own break value)
+            if self.v_from_below == Some(t) {
+                flags.v_side = Side::Right;
+            }
 
             if self.face_thickness < EFF_ZERO {
-                self.surface.evaluate_simple_first_into(
-                    self.kernel,
-                    uv,
-                    simple_flags(),
-                    &mut pv,
-                )?;
+                self.surface
+                    .evaluate_simple_first_into(self.kernel, uv, flags, &mut pv)?;
             } else if i == 0 {
                 let r = offset_evaluate_simple(
                     self.kernel,
                     self.surface,
                     self.face_thickness / 2.0,
                     uv,
+                    flags,
                 )?;
                 copy_block(&mut pv, &r);
             } else {
@@ -1918,6 +1936,7 @@ impl<'a> OdeIsoCurveLength<'a> {
                     self.surface,
                     -self.face_thickness / 2.0,
                     uv,
+                    flags,
                 )?;
                 copy_block(&mut pv, &r);
             }
@@ -2189,9 +2208,19 @@ impl OdeArea<'_> {
                         continue;
                     };
                     piece_y.fill(0.0);
+                    // With `fixes.precise_properties_span_end_from_below` (WR-670,
+                    // #2091) each piece's end (a v knot, or the trim point) is evaluated
+                    // in the piece's own span: upstream's `TRUE` takes the span above,
+                    // so the integrand jumped at the piece's last point and the steps
+                    // shrank toward every knot (about 5x the evaluations a piece).
+                    let piece_eval = if k.fixes.precise_properties_span_end_from_below && b > a {
+                        eval.with_v_end_from_below(b)
+                    } else {
+                        eval
+                    };
                     // A failed inner integration is not a zero-area contribution.
                     runge_kutta_ode_integrate(
-                        &eval,
+                        &piece_eval,
                         &mut piece_y,
                         a,
                         b,
