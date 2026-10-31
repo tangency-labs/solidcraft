@@ -459,15 +459,18 @@ pub fn stl_binary(meshes: &[Mesh], name: &str) -> Vec<u8> {
 
 /// ASCII STL.
 pub fn stl_ascii(meshes: &[Mesh], name: &str) -> String {
+    use std::fmt::Write as _;
     let name: String = name.chars().filter(|c| c.is_ascii_graphic()).collect();
     let mut s = format!("solid {name}\n");
     for m in meshes {
         for t in &m.triangles {
             let Some([a, b, c]) = m.tri(t) else { continue };
             let n = (b - a).cross(c - a).normalized().unwrap_or_default();
-            s += &format!("  facet normal {:e} {:e} {:e}\n    outer loop\n", n.x, n.y, n.z);
+            // Written into the text rather than formatted apart and appended: the same bytes,
+            // without a string made and dropped per line.
+            let _ = write!(s, "  facet normal {:e} {:e} {:e}\n    outer loop\n", n.x, n.y, n.z);
             for v in [a, b, c] {
-                s += &format!("      vertex {:e} {:e} {:e}\n", v.x, v.y, v.z);
+                let _ = writeln!(s, "      vertex {:e} {:e} {:e}", v.x, v.y, v.z);
             }
             s += "    endloop\n  endfacet\n";
         }
@@ -542,6 +545,7 @@ pub fn obj_files(bodies: &[ObjBody<'_>], mtl_name: &str) -> ObjFiles {
 /// faces that use them. Returns the text and the bases the next body carries on from.
 fn mesh_text(mesh: &Mesh, vbase: usize, nbase: usize) -> (String, usize, usize) {
     use std::collections::HashMap;
+    use std::fmt::Write as _;
     let mut s = String::new();
     // `+ 0.0` turns -0 into 0, so both merge.
     let key = |x: f64, y: f64, z: f64| [x + 0.0, y + 0.0, z + 0.0].map(f64::to_bits);
@@ -553,7 +557,7 @@ fn mesh_text(mesh: &Mesh, vbase: usize, nbase: usize) -> (String, usize, usize) 
         .map(|p| {
             let next = vmap.len();
             *vmap.entry(key(p.x, p.y, p.z)).or_insert_with(|| {
-                s += &format!("v {} {} {}\n", p.x, p.y, p.z);
+                let _ = writeln!(s, "v {} {} {}", p.x, p.y, p.z);
                 next
             })
         })
@@ -564,7 +568,7 @@ fn mesh_text(mesh: &Mesh, vbase: usize, nbase: usize) -> (String, usize, usize) 
         .map(|n| {
             let next = nmap.len();
             *nmap.entry(key(n.x, n.y, n.z)).or_insert_with(|| {
-                s += &format!("vn {} {} {}\n", n.x, n.y, n.z);
+                let _ = writeln!(s, "vn {} {} {}", n.x, n.y, n.z);
                 next
             })
         })
@@ -575,9 +579,11 @@ fn mesh_text(mesh: &Mesh, vbase: usize, nbase: usize) -> (String, usize, usize) 
         match (ni.get(t[0] as usize), ni.get(t[1] as usize), ni.get(t[2] as usize)) {
             (Some(na), Some(nb), Some(nc)) => {
                 let (na, nb, nc) = (na + nbase, nb + nbase, nc + nbase);
-                s += &format!("f {a}//{na} {b}//{nb} {c}//{nc}\n");
+                let _ = writeln!(s, "f {a}//{na} {b}//{nb} {c}//{nc}");
             }
-            _ => s += &format!("f {a} {b} {c}\n"),
+            _ => {
+                let _ = writeln!(s, "f {a} {b} {c}");
+            }
         }
     }
     (s, vbase + vmap.len(), nbase + nmap.len())
@@ -638,7 +644,7 @@ pub fn export_obj(state: &ModelState, bodies: &[String], mtl_name: &str, quality
 
 /// The OBJ export of the given bodies: the mesh file and the material library beside it.
 fn obj_export(sel: &[&solidcraft_doc::ModelBody], mtl_name: &str, quality: MeshQuality) -> Result<ObjFiles> {
-    let meshes: Vec<Mesh> = sel.iter().map(|b| export_mesh_at(&b.body, quality)).collect::<Result<_>>()?;
+    let meshes: Vec<Mesh> = per_body(sel, |b| export_mesh_at(&b.body, quality))?;
     let bodies: Vec<ObjBody<'_>> = sel.iter().zip(&meshes).map(|(b, mesh)| ObjBody { name: b.name.as_str(), mesh, color: b.body.color() }).collect();
     Ok(obj_files(&bodies, mtl_name))
 }
@@ -714,20 +720,17 @@ pub fn export_with_parts(
         Format::StlBinary | Format::StlAscii => {
             // Each body welded on its own (as for 3MF), so shared vertices are written identically
             // and the file is closed where faces meet.
-            let meshes: Vec<Mesh> = sel
-                .iter()
-                .map(|b| {
-                    let m = export_mesh_at(&b.body, quality)?;
-                    let (positions, triangles) = weld(&m.positions, &m.triangles, weld_eps(&b.body));
-                    Ok(Mesh { positions, triangles, ..Mesh::default() })
-                })
-                .collect::<Result<_>>()?;
+            let meshes: Vec<Mesh> = per_body(&sel, |b| {
+                let m = export_mesh_at(&b.body, quality)?;
+                let (positions, triangles) = weld(&m.positions, &m.triangles, weld_eps(&b.body));
+                Ok(Mesh { positions, triangles, ..Mesh::default() })
+            })?;
             if format == Format::StlBinary { stl_binary(&meshes, name) } else { stl_ascii(&meshes, name).into_bytes() }
         }
         Format::Obj => {
             // One file, so no material library: a mesh file that names a library nobody wrote
             // would come out in the reader's default grey.
-            let meshes: Vec<(String, Mesh)> = sel.iter().map(|b| Ok((b.name.clone(), export_mesh_at(&b.body, quality)?))).collect::<Result<_>>()?;
+            let meshes: Vec<(String, Mesh)> = per_body(&sel, |b| Ok((b.name.clone(), export_mesh_at(&b.body, quality)?)))?;
             obj(&meshes).into_bytes()
         }
         Format::Step => {
@@ -741,7 +744,7 @@ pub fn export_with_parts(
             solidcraft_kernel::iges_export_bodies(&bs, &step_header(format!("{name}.igs"), meta))?.into_bytes()
         }
         Format::ThreeMf | Format::ThreeMfTagged => {
-            let objs: Vec<MeshObject> = sel.iter().map(|b| mesh_object(b, format == Format::ThreeMfTagged, quality)).collect::<Result<_>>()?;
+            let objs: Vec<MeshObject> = per_body(&sel, |b| mesh_object(b, format == Format::ThreeMfTagged, quality))?;
             let index = |n: &String| sel.iter().position(|b| &b.name == n);
             let parts: Vec<(String, Vec<usize>)> = parts.iter().map(|(p, names)| (p.clone(), names.iter().filter_map(index).collect())).collect();
             write_3mf_parts(&objs, &parts, &threemf_metadata(meta))?
@@ -749,6 +752,22 @@ pub fn export_with_parts(
         Format::Design => return Err(IoError::Format("sc (save the document instead)".into())),
         Format::Urdf => return Err(IoError::Format("urdf (an assembly package; use file.export)".into())),
     })
+}
+
+/// Most threads an export meshes its bodies on, as many as the model cache encodes them on.
+const EXPORT_THREADS: usize = 16;
+
+/// `f` for each body of an export, on threads (a body at a time each), the results in the order
+/// of the bodies. The bodies are meshed and welded on their own, so the file is the same, byte
+/// for byte, as made one body after the other; of several failing bodies the first one's error is
+/// the export's, as it was then. An assembly of many bodies meshed on one core took most of the
+/// export's time.
+fn per_body<R: Send>(sel: &[&solidcraft_doc::ModelBody], f: impl Fn(&solidcraft_doc::ModelBody) -> Result<R> + Sync) -> Result<Vec<R>> {
+    solidcraft_kernel::map_on_threads(sel, EXPORT_THREADS, |b| f(b))
+        .into_iter()
+        .zip(sel)
+        .map(|(r, b)| r.unwrap_or_else(|| Err(IoError::Invalid(format!("body {}: meshing it failed", b.name)))))
+        .collect()
 }
 
 /// A body as a 3MF mesh: welded watertight (T-junctions split), coloured, and with `tagged`

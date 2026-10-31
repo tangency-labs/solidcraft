@@ -189,6 +189,8 @@ pub fn weld_tagged(positions: &[Vec3], triangles: &[[u32; 3]], tags: &[u32], eps
         let mut cand: Vec<u32> = open.iter().flat_map(|(a, b)| [*a, *b]).collect();
         cand.sort_unstable();
         cand.dedup();
+        let near = SideGrid::new(&cand, &verts, &open, eps);
+        let mut around = Vec::new();
         // Vertices on each open side, ordered from its start.
         let mut splits: HashMap<(u32, u32), Vec<(f64, u32)>> = HashMap::new();
         for &(a, b) in &open {
@@ -198,7 +200,10 @@ pub fn weld_tagged(positions: &[Vec3], triangles: &[[u32; 3]], tags: &[u32], eps
             if !(l2 > 0.0) {
                 continue;
             }
-            let mut on: Vec<(f64, u32)> = cand
+            // The open-side vertices near the side, in the order of `cand`; all of them when the
+            // grid cannot narrow it down.
+            let looked = near.as_ref().is_some_and(|g| g.around(*pa, *pb, cand.len(), &mut around));
+            let mut on: Vec<(f64, u32)> = if looked { around.as_slice() } else { cand.as_slice() }
                 .iter()
                 .filter(|v| **v != a && **v != b)
                 .filter_map(|v| {
@@ -241,6 +246,80 @@ pub fn weld_tagged(positions: &[Vec3], triangles: &[[u32; 3]], tags: &[u32], eps
         tags = next_tags;
     }
     (verts, tris, tags)
+}
+
+/// The vertices of open sides binned on a grid, so the search for the vertices lying on a side
+/// looks only in the cells around it rather than at every open-side vertex: on a finely meshed
+/// body there are tens of thousands of open sides, and comparing each with every vertex took
+/// seconds to minutes.
+///
+/// A vertex found is one the full search could find (within `4 * eps` of the side, between its
+/// ends), so a side's box widened by more than that and its rounding holds all of them; the
+/// vertices come out in ascending order, as the full search goes through them, so the splits
+/// are the same, in the same order.
+struct SideGrid {
+    /// The edge of a cell: the mean length of the open sides, so a side spans a few cells.
+    size: f64,
+    /// The weld distance; a vertex on a side lies within `4 * eps` of it.
+    eps: f64,
+    cells: HashMap<[i64; 3], Vec<u32>>,
+}
+
+impl SideGrid {
+    /// The grid of `cand` (ascending vertex indices); `None` when the sides have no usable
+    /// length (then every side looks at every vertex, as before).
+    fn new(cand: &[u32], verts: &[Vec3], open: &[(u32, u32)], eps: f64) -> Option<SideGrid> {
+        let lengths: Vec<f64> =
+            open.iter().filter_map(|(a, b)| Some(verts.get(*a as usize)?.dist(*verts.get(*b as usize)?))).filter(|l| l.is_finite()).collect();
+        let mean = lengths.iter().sum::<f64>() / lengths.len().max(1) as f64;
+        let size = mean.max(eps * 8.0);
+        if !(size.is_finite() && size > 0.0) {
+            return None;
+        }
+        let mut grid = SideGrid { size, eps, cells: HashMap::new() };
+        for &v in cand {
+            // A vertex that is not finite never lies on a finite side (its projection is NaN or
+            // infinite), so it is left out of the grid.
+            let Some(p) = verts.get(v as usize).copied().filter(|p| p.x.is_finite() && p.y.is_finite() && p.z.is_finite()) else { continue };
+            grid.cells.entry(grid.cell(p)).or_default().push(v);
+        }
+        Some(grid)
+    }
+
+    /// The cell of a point. Saturating casts keep the order of the coordinates, so a point
+    /// inside a box falls in a cell between the cells of the box's corners.
+    fn cell(&self, p: Vec3) -> [i64; 3] {
+        [(p.x / self.size).floor() as i64, (p.y / self.size).floor() as i64, (p.z / self.size).floor() as i64]
+    }
+
+    /// The vertices in the cells around the side from `a` to `b`, ascending, into `out`. False
+    /// when the side is not finite or its box covers more than `most` cells: looking at every
+    /// vertex is then no slower.
+    fn around(&self, a: Vec3, b: Vec3, most: usize, out: &mut Vec<u32>) -> bool {
+        out.clear();
+        let (lo, hi) = (a.min(b), a.max(b));
+        let big = [lo.x, lo.y, lo.z, hi.x, hi.y, hi.z].iter().fold(0.0_f64, |m, x| m.max(x.abs()));
+        // Twice the reach of `4 * eps`, plus far more than the rounding of the coordinates.
+        let reach = 8.0 * self.eps + big * 1e-9;
+        if !(big.is_finite() && reach.is_finite()) {
+            return false;
+        }
+        let r = Vec3::new(reach, reach, reach);
+        let (c0, c1) = (self.cell(lo - r), self.cell(hi + r));
+        let span = |k: usize| i128::from(c1[k]) - i128::from(c0[k]) + 1;
+        if span(0) * span(1) * span(2) > most as i128 {
+            return false;
+        }
+        for x in c0[0]..=c1[0] {
+            for y in c0[1]..=c1[1] {
+                for z in c0[2]..=c1[2] {
+                    out.extend(self.cells.get(&[x, y, z]).into_iter().flatten());
+                }
+            }
+        }
+        out.sort_unstable();
+        true
+    }
 }
 
 /// The model part's XML.
@@ -1624,6 +1703,181 @@ pub(crate) mod tests {
         let (objs, warnings) = read_3mf(&package(&model, None)).unwrap();
         assert!(objs.len() < 4_000, "the shared budget must stop the later items: {} built", objs.len());
         assert!(warnings.iter().any(|w| w.contains("too many triangles")), "{warnings:?}");
+    }
+
+    /// [`weld_tagged`] as it was before the open-side vertices were binned on a grid: every open
+    /// side looks at every open-side vertex. The reference the grid's result must equal.
+    fn weld_tagged_all_pairs(positions: &[Vec3], triangles: &[[u32; 3]], tags: &[u32], eps: f64) -> (Vec<Vec3>, Vec<[u32; 3]>, Vec<u32>) {
+        // Merge on a grid of cell `eps` (a vertex joins one already in its own or a neighbour cell).
+        let cell = |p: Vec3| [(p.x / eps).round() as i64, (p.y / eps).round() as i64, (p.z / eps).round() as i64];
+        let mut grid: HashMap<[i64; 3], Vec<u32>> = HashMap::new();
+        let mut verts: Vec<Vec3> = Vec::new();
+        let mut remap = Vec::with_capacity(positions.len());
+        for p in positions {
+            let c = cell(*p);
+            let mut found = None;
+            'search: for dx in -1..=1 {
+                for dy in -1..=1 {
+                    for dz in -1..=1 {
+                        for &i in grid.get(&[c[0].saturating_add(dx), c[1].saturating_add(dy), c[2].saturating_add(dz)]).into_iter().flatten() {
+                            if verts.get(i as usize).is_some_and(|q| q.dist(*p) <= eps) {
+                                found = Some(i);
+                                break 'search;
+                            }
+                        }
+                    }
+                }
+            }
+            let i = match found {
+                Some(i) => i,
+                None => {
+                    let i = u32::try_from(verts.len()).unwrap_or(u32::MAX);
+                    verts.push(*p);
+                    grid.entry(c).or_default().push(i);
+                    i
+                }
+            };
+            remap.push(i);
+        }
+        let (mut tris, mut tags): (Vec<[u32; 3]>, Vec<u32>) = triangles
+            .iter()
+            .enumerate()
+            .filter_map(|(k, t)| {
+                let (a, b, c) = (*remap.get(t[0] as usize)?, *remap.get(t[1] as usize)?, *remap.get(t[2] as usize)?);
+                (a != b && b != c && c != a).then_some(([a, b, c], tags.get(k).copied().unwrap_or(0)))
+            })
+            .unzip();
+        // T-junctions: split open sides at open-side vertices lying on them.
+        for _ in 0..8 {
+            let mut half: HashMap<(u32, u32), usize> = HashMap::new();
+            for t in &tris {
+                for (a, b) in [(t[0], t[1]), (t[1], t[2]), (t[2], t[0])] {
+                    *half.entry((a, b)).or_default() += 1;
+                }
+            }
+            let open: Vec<(u32, u32)> = half.keys().filter(|(a, b)| !half.contains_key(&(*b, *a))).copied().collect();
+            if open.is_empty() || open.len() > 200_000 {
+                break;
+            }
+            let mut cand: Vec<u32> = open.iter().flat_map(|(a, b)| [*a, *b]).collect();
+            cand.sort_unstable();
+            cand.dedup();
+            // Vertices on each open side, ordered from its start.
+            let mut splits: HashMap<(u32, u32), Vec<(f64, u32)>> = HashMap::new();
+            for &(a, b) in &open {
+                let (Some(pa), Some(pb)) = (verts.get(a as usize), verts.get(b as usize)) else { continue };
+                let d = *pb - *pa;
+                let l2 = d.dot(d);
+                if !(l2 > 0.0) {
+                    continue;
+                }
+                let mut on: Vec<(f64, u32)> = cand
+                    .iter()
+                    .filter(|v| **v != a && **v != b)
+                    .filter_map(|v| {
+                        let p = *verts.get(*v as usize)?;
+                        let t = (p - *pa).dot(d) / l2;
+                        (t > 1e-9 && t < 1.0 - 1e-9 && (*pa + d * t).dist(p) <= eps * 4.0).then_some((t, *v))
+                    })
+                    .collect();
+                if !on.is_empty() {
+                    on.sort_by(|x, y| x.0.total_cmp(&y.0));
+                    splits.insert((a, b), on);
+                }
+            }
+            if splits.is_empty() {
+                break;
+            }
+            let mut next = Vec::with_capacity(tris.len() + splits.len() * 2);
+            let mut next_tags = Vec::with_capacity(next.capacity());
+            for (t, tag) in tris.iter().zip(&tags) {
+                // Rotate so the split side (if any) is (t0, t1); split one side per pass.
+                let rot = [[t[0], t[1], t[2]], [t[1], t[2], t[0]], [t[2], t[0], t[1]]];
+                match rot.iter().find_map(|r| splits.get(&(r[0], r[1])).map(|s| (r, s))) {
+                    Some((r, s)) => {
+                        let mut prev = r[0];
+                        for (_, v) in s {
+                            next.push([prev, *v, r[2]]);
+                            next_tags.push(*tag);
+                            prev = *v;
+                        }
+                        next.push([prev, r[1], r[2]]);
+                        next_tags.push(*tag);
+                    }
+                    None => {
+                        next.push(*t);
+                        next_tags.push(*tag);
+                    }
+                }
+            }
+            tris = next;
+            tags = next_tags;
+        }
+        (verts, tris, tags)
+    }
+
+    /// The weld of `positions` must be the all-pairs weld's, bit for bit: the same vertices, the
+    /// same triangles in the same order and the same tags.
+    fn assert_welds_as_all_pairs(positions: &[Vec3], triangles: &[[u32; 3]], eps: f64) -> usize {
+        let tags: Vec<u32> = (0..triangles.len() as u32).map(|t| t * 7 + 1).collect();
+        let (v, t, g) = weld_tagged(positions, triangles, &tags, eps);
+        let (rv, rt, rg) = weld_tagged_all_pairs(positions, triangles, &tags, eps);
+        let bits = |v: &[Vec3]| v.iter().map(|p| [p.x, p.y, p.z].map(f64::to_bits)).collect::<Vec<_>>();
+        assert_eq!(bits(&v), bits(&rv), "vertices");
+        assert_eq!(t, rt, "triangles");
+        assert_eq!(g, rg, "tags");
+        t.len()
+    }
+
+    /// The grid search of the T-junctions splits as the all-pairs search did, in the same order:
+    /// on a cube whose six faces are meshed apart at six resolutions (every edge of the cube a
+    /// row of T-junctions, split over several passes), with every vertex moved by a fraction of
+    /// the weld distance and a few broken triangles (NaN, infinite, degenerate); and on the
+    /// tessellation of a plate with nine holes cut through it.
+    #[test]
+    fn weld_grid_splits_as_the_all_pairs_search() {
+        let eps = 1e-5;
+        let (mut positions, mut triangles) = (Vec::new(), Vec::new());
+        let (x, y, z) = (Vec3::new(10.0, 0.0, 0.0), Vec3::new(0.0, 10.0, 0.0), Vec3::new(0.0, 0.0, 10.0));
+        let faces = [(Vec3::ZERO, y, x, 7), (z, x, y, 11), (Vec3::ZERO, x, z, 13), (y, z, x, 17), (Vec3::ZERO, z, y, 19), (x, y, z, 23)];
+        let mut seed = 0x2545_f491_4f6c_dd1d_u64;
+        let mut jitter = || {
+            seed = seed.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1_442_695_040_888_963_407);
+            ((seed >> 11) as f64 / (1u64 << 53) as f64 - 0.5) * 0.4 * eps
+        };
+        for (o, u, v, n) in faces {
+            let base = positions.len() as u32;
+            for j in 0..=n {
+                for i in 0..=n {
+                    let p = o + u * (i as f64 / n as f64) + v * (j as f64 / n as f64);
+                    positions.push(p + Vec3::new(jitter(), jitter(), jitter()));
+                }
+            }
+            let at = |i: u32, j: u32| base + j * (n + 1) + i;
+            for j in 0..n {
+                for i in 0..n {
+                    triangles.push([at(i, j), at(i + 1, j), at(i + 1, j + 1)]);
+                    triangles.push([at(i, j), at(i + 1, j + 1), at(i, j + 1)]);
+                }
+            }
+        }
+        let k = positions.len() as u32;
+        positions.extend([Vec3::new(f64::NAN, 0.0, 0.0), Vec3::new(f64::INFINITY, 1.0, 0.0), Vec3::new(5.0, 5.0, 20.0)]);
+        triangles.extend([[k, 0, 1], [k + 1, 0, 1], [k + 2, k + 2, 0], [k + 2, 0, 1]]);
+        let merged = triangles.len();
+        assert!(assert_welds_as_all_pairs(&positions, &triangles, eps) > merged, "the cube's edges must be split");
+
+        let plate = solidcraft_kernel::box_solid(Vec3::ZERO, Vec3::new(60.0, 60.0, 8.0)).unwrap();
+        let mut body = plate;
+        for i in 0..3 {
+            for j in 0..3 {
+                let at = Vec3::new(10.0 + 20.0 * i as f64, 10.0 + 20.0 * j as f64, -1.0);
+                let hole = solidcraft_kernel::cylinder(at, Vec3::new(0.0, 0.0, 1.0), 3.0 + i as f64, 10.0).unwrap();
+                body = solidcraft_kernel::boolean(&body, &hole, solidcraft_kernel::BoolOp::Cut).unwrap().unwrap();
+            }
+        }
+        let m = body.tessellate(body.size() * 1e-5).unwrap();
+        assert_welds_as_all_pairs(&m.positions, &m.triangles, (body.size() * 1e-6).max(1e-7));
     }
 
     /// A body far from the origin (a pattern spacing of "1e12 mm" gets there) welds without
