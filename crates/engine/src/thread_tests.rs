@@ -431,12 +431,12 @@ fn a_thin_shaft_or_one_the_part_surrounds_is_refused() {
     let mut s = Session::default();
     run(&mut s, "solid.cylinder", json!({"radius": 2.4, "height": 10, "body_name": "Shaft"}));
     let e = refused(&mut s, "Shaft", json!({"face": [2.4, 0, 5], "designation": "M6", "modeled": true}));
-    assert!(e.contains("does not fit a 4.80 mm shaft") || e.contains("too thin"), "{e}");
+    assert!(e.contains("does not fit this 4.80 mm shaft") || e.contains("too thin"), "{e}");
 
     let mut s = Session::default();
     run(&mut s, "solid.cylinder", json!({"radius": 4, "height": 10, "body_name": "Shaft"}));
     let e = refused(&mut s, "Shaft", json!({"face": [4, 0, 5], "designation": "M6"}));
-    assert!(e.contains("an M6 thread does not fit a 8.00 mm shaft"), "{e}");
+    assert!(e.contains("an M6 thread does not fit this 8.00 mm shaft"), "{e}");
 
     let mut s = Session::default();
     run(&mut s, "solid.box", json!({"corner": [2, -10, 0], "length": 10, "width": 20, "height": 10, "body_name": "Part"}));

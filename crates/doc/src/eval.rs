@@ -491,7 +491,7 @@ fn thread_on_impl(
         (major - dia).abs() < 0.15 * major || (turned && dia > major)
     };
     if !fits {
-        return Err(DocError::Invalid(format!("an {} thread does not fit a {dia:.2} mm {}", name, if cyl.internal { "hole" } else { "shaft" })));
+        return Err(DocError::Invalid(format!("an {} thread does not fit this {dia:.2} mm {}", name, if cyl.internal { "hole" } else { "shaft" })));
     }
     // From the end of the face nearest the point.
     let s = (p - cyl.axis_point).dot(cyl.axis);
@@ -4927,7 +4927,17 @@ fn hole_tools_and_prisms(
         }
         HoleKind::Countersink { cs_diameter, cs_angle, tip_angle } => {
             let (rc, half) = (val(vals, cs_diameter, Kind::Length)? / 2.0, val(vals, cs_angle, Kind::Angle)? / 2.0);
-            if !(rc > r && half > 1e-3 && half < std::f64::consts::FRAC_PI_2) {
+            // The angle and the width are told apart: an angle out of range is not a countersink
+            // too narrow (#9625). The cone's length grows as 1 / tan(half), so a near-flat angle
+            // is refused at a floor the message names, rather than built kilometres long.
+            const MIN_ANGLE_DEG: f64 = 0.115;
+            if !(2.0 * half > MIN_ANGLE_DEG.to_radians() && half < std::f64::consts::FRAC_PI_2) {
+                return Err(DocError::Invalid(format!(
+                    "the countersink angle must be more than {MIN_ANGLE_DEG}° and less than 180°, not {}°",
+                    ((2.0 * half).to_degrees() * 1e6).round() / 1e6
+                )));
+            }
+            if !(rc > r) {
                 return Err(DocError::Invalid("the countersink must be wider than the hole".into()));
             }
             // Cone from above the face to just inside the hole radius, then the hole.
@@ -5126,6 +5136,22 @@ fn whole_face_tool(
     }
 }
 
+/// How far from its sketch plane an extrude may reach, in mm. It mirrors the limit the kernel's
+/// `finite` check in `crates/kernel/src/build.rs` puts on an extrusion's start and end (a literal
+/// there, not exported), so a too-long extrusion is refused here, by name, before the kernel is
+/// called: the kernel's own message, `end = 1000000000`, names no field (#9625).
+const MAX_EXTRUDE_REACH: f64 = 1e7;
+
+/// Refuse an extrusion whose ends lie past [`MAX_EXTRUDE_REACH`] from the sketch plane.
+fn extrude_within_reach(ends: [f64; 2]) -> Result<()> {
+    match ends.into_iter().find(|x| x.abs() >= MAX_EXTRUDE_REACH) {
+        Some(x) => Err(DocError::Invalid(format!(
+            "the extrusion is too long: its end is {x} mm from the sketch plane, past the limit of {MAX_EXTRUDE_REACH} mm"
+        ))),
+        None => Ok(()),
+    }
+}
+
 /// Construct planar caps locally before placing the completed tool.
 fn centered_extrude(
     plane: &Plane,
@@ -5302,6 +5328,7 @@ fn feature_tools_with_constructor(
                         Some(e) => val(vals, e, Kind::Length)?,
                         None => 0.0,
                     };
+                extrude_within_reach([base, base + sign * len])?;
                 let start_plane = ss.plane.offset(base);
                 let caps = [
                     Some(crate::lineage::extrude_cap_role(base)),
@@ -5419,6 +5446,7 @@ fn feature_tools_with_constructor(
                     lo = hs.iter().cloned().fold(lo, f64::min) - margin;
                 }
             }
+            extrude_within_reach([lo + off, hi + off])?;
             let mut tools = Vec::new();
             let mut untrimmed = extent.to.is_none() && extent.from.is_none() && !extent.through_all;
             // The footprint of each tool in the sketch: a tool lies in the prism over it.
