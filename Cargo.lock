@@ -4356,6 +4356,7 @@ dependencies = [
  "solidcraft-doc",
  "solidcraft-geom",
  "solidcraft-kernel",
+ "solidcraft-sketch",
  "thiserror 2.0.21",
  "zip",
 ]
@@ -4410,6 +4411,7 @@ dependencies = [
  "harfrust",
  "serde",
  "serde_json",
+ "sha2 0.10.9",
  "solidcraft-geom",
  "thiserror 2.0.21",
  "ttf-parser",

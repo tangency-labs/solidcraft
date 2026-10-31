@@ -30,6 +30,7 @@ mod loci;
 mod model;
 mod offset;
 mod offset_topology;
+mod paper_text;
 mod pattern;
 mod periodic;
 mod profiles;
@@ -63,6 +64,7 @@ pub use model::{
 };
 pub use offset::OffsetChain;
 pub use offset_topology::{OffsetCreated, OffsetRole, OffsetRoleFlags, OffsetRoleKind, OffsetTopology};
+pub use paper_text::{DRAWING_FONTS, DrawingFont, paper_text};
 pub use pattern::{PatternAlignment, PatternInstance, SketchPattern, SketchPatternKind};
 pub use periodic::periodic_beziers;
 pub use profiles::{

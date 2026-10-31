@@ -20,6 +20,7 @@ required-features = ["solver-profiling"]
 harfrust = "0.12"
 solidcraft-geom = { workspace = true }
 serde = { workspace = true }
+sha2 = { workspace = true }
 thiserror = { workspace = true }
 ttf-parser = { workspace = true }
 unicode-bidi = "0.3"

@@ -1,7 +1,7 @@
 use std::f64::consts::{FRAC_PI_2, PI, TAU};
 
-use solidcraft_geom::paper::{Group, ObjectKind, Scene};
-use solidcraft_geom::{Loop2, Region2};
+use solidcraft_geom::paper::{Group, Item, ObjectKind, Scene};
+use solidcraft_geom::{Loop2, Region2, Seg2, Vec2};
 
 use super::*;
 use crate::{Geom2, read_svg};
@@ -25,7 +25,7 @@ fn rectangle(min: Vec2, max: Vec2) -> Loop2 {
 
 /// An A3 landscape sheet with one object's items.
 fn sheet(items: Vec<Item>) -> Scene {
-    Scene { size_mm: p(420.0, 297.0), groups: vec![Group { object: 1, kind: ObjectKind::DrawingBorder, items }] }
+    Scene::new(p(420.0, 297.0), vec![Group { object: 1, kind: ObjectKind::DrawingBorder, items }])
 }
 
 fn svg(scene: &Scene) -> (String, SvgReport) {
@@ -101,14 +101,12 @@ fn cubics_and_parabolas_are_written_and_other_conics_refused() {
 }
 
 /// Numbers are whole nanometres: no exponent, no "-0", trailing zeros trimmed; a width under half
-/// a nanometre is written as one and reported.
+/// a nanometre is written as one and reported (the grid's own rounding is `geom`'s test).
 #[test]
 fn numbers_are_whole_nanometres() {
     for (n, text) in [(0, "0"), (1, "0.000001"), (-1, "-0.000001"), (1_500_000, "1.5"), (-420_000_000, "-420"), (123_456_789, "123.456789")] {
         assert_eq!(number(n), text);
     }
-    assert_eq!((nano(-0.0).unwrap(), nano(4e-7).unwrap(), nano(6e-7).unwrap()), (0, 0, 1));
-    assert!(nano(f64::NAN).is_err() && nano(1e10).is_err());
     let thin = sheet(vec![stroke(vec![line(p(0.0, 0.0), p(1.0, 0.0))], false, 1e-9)]);
     let (text, report) = svg(&thin);
     assert!(text.contains("stroke-width=\"0.000001\""), "{text}");
@@ -162,4 +160,65 @@ fn the_svg_reader_reads_it_back() {
     assert_eq!(arcs.len(), 1, "{read:?}");
     let (c, a, b) = arcs[0];
     assert!(c.dist(p(50.0, 50.0)) < 3e-6 && a.dist(p(60.0, 50.0)) < 3e-6 && b.dist(p(50.0, 60.0)) < 3e-6, "{:?}", arcs[0]);
+}
+
+/// Text is its glyph outlines, one path a run, filled black with SVG's default nonzero rule.
+#[test]
+fn text_is_its_outlines_filled_black_nonzero() {
+    use solidcraft_geom::paper::text::{Cluster, Font, FontFlags, FontGlyph, FontMetrics, PlacedGlyph, TextRun};
+    let metrics = FontMetrics {
+        ascent: 900,
+        descent: -200,
+        cap_height: 700,
+        bbox: [0, 0, 500, 700],
+        italic_angle: 0.0,
+        flags: FontFlags::default(),
+        stem_v: 80,
+    };
+    let glyph = FontGlyph { advance: 600, outline: vec![rectangle(p(0.0, 0.0), p(500.0, 700.0))] };
+    let font = Font {
+        id: [1; 32],
+        bytes: std::sync::Arc::from(vec![1u8]),
+        face: 0,
+        postscript_name: "MadeUp".into(),
+        num_glyphs: 2,
+        units_per_em: 1000,
+        metrics,
+        glyphs: [(1, glyph)].into(),
+    };
+    let run = TextRun {
+        font: [1; 32],
+        scale: 0.005,
+        origin: p(20.0, 30.0),
+        angle: 0.0,
+        slant: 0.0,
+        glyphs: vec![PlacedGlyph { id: 1, x: 0.0, rise: 0.0, advance: 3.0 }],
+        text: "A".into(),
+        clusters: vec![Cluster { glyphs: 0..1, text: 0..1 }],
+        rtl: false,
+    };
+    let outlines: Vec<Loop2> = run.outlines(&font).collect();
+    let scene = Scene { fonts: vec![font], ..sheet(vec![Item::Text(run)]) };
+    let (text, _) = svg(&scene);
+    assert_eq!(text.matches("<path fill=\"#000\" stroke=\"none\" d=\"").count(), 1, "{text}");
+    // The same path a fill of the placed outlines gets, without its even-odd rule.
+    let (outer, holes) = outlines.split_first().unwrap();
+    let filled = sheet(vec![Item::Fill { region: Region2 { outer: outer.clone(), holes: holes.to_vec() } }]);
+    assert_eq!(first_d(&scene), first_d(&filled));
+}
+
+/// Real text in the drawing font: a dimension's symbols, and a line read right to left, each run one
+/// path holding a closed loop for each of its glyph loops.
+#[test]
+fn symbols_and_a_right_to_left_line_are_written() {
+    use solidcraft_sketch::{TextStyle, paper_text};
+    for line in ["Ø12 ±0.1 30°", "קו 12"] {
+        let (runs, fonts) = paper_text(line, None, p(20.0, 30.0), 3.5, 0.0, &TextStyle::default()).unwrap().unwrap();
+        let loops: usize = runs.iter().map(|r| r.outlines(&fonts[0]).count()).sum();
+        let count = runs.len();
+        let scene = Scene { fonts, ..sheet(runs.into_iter().map(Item::Text).collect()) };
+        let (text, _) = svg(&scene);
+        assert_eq!(text.matches("<path fill=\"#000\" stroke=\"none\" d=\"").count(), count, "{line}");
+        assert!(loops > 0 && text.matches('M').count() == loops && text.matches('Z').count() == loops, "{line}: {text}");
+    }
 }
