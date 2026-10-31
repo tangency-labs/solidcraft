@@ -157,3 +157,49 @@ fn wr_591_loops_apart_are_unchanged() {
     assert_eq!(on.orients, off.orients);
     assert!(on.closed && off.closed);
 }
+
+/// The 32 input orders of two unit squares touching at the corner (1, 1) (the fork's
+/// tangency-labs/smlib@b0ee3f9, capi test `loops_touching_from_outside_close_apart`):
+/// both counterclockwise or both clockwise, either square's lines first, every
+/// rotation of the list.
+fn squares_orders() -> Vec<(bool, bool, usize, Vec<Curve>)> {
+    const LOW: [[f64; 2]; 4] = [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]];
+    const HIGH: [[f64; 2]; 4] = [[1.0, 1.0], [2.0, 1.0], [2.0, 2.0], [1.0, 2.0]];
+    let mut out = Vec::new();
+    for clockwise in [false, true] {
+        for high_first in [false, true] {
+            let (a, b) = if high_first { (HIGH, LOW) } else { (LOW, HIGH) };
+            let mut lines = polygon(&a, clockwise);
+            lines.extend(polygon(&b, clockwise));
+            let n = lines.len();
+            for turn in 0..n {
+                let curves = (0..n)
+                    .map(|k| {
+                        let (a, b) = lines[(k + turn) % n];
+                        Curve::from(create_line_segment(a, b).unwrap())
+                    })
+                    .collect();
+                out.push((clockwise, high_first, turn, curves));
+            }
+        }
+    }
+    out
+}
+
+/// WR-591 addendum (fork b0ee3f9): loops touching at a vertex from outside each
+/// other close apart, two loops of area 1, in every order. Turning about a normal
+/// taken from the rays at the vertex in list order gave the figure-eight (one loop
+/// of area 2) in 12 of the 32 orders.
+#[test]
+fn wr_591_loops_touching_from_outside_close_apart() {
+    let mut k = Kernel::default();
+    k.fixes.loops_go_on_round_the_vertex = true;
+    let mut bad = Vec::new();
+    for (clockwise, high_first, turn, curves) in squares_orders() {
+        match loop_areas(&k, &curves) {
+            Some(areas) if areas.len() == 2 && areas.iter().all(|a| (a - 1.0).abs() < 1e-12) => {}
+            other => bad.push((clockwise, high_first, turn, other)),
+        }
+    }
+    assert!(bad.is_empty(), "{} of 32 orders: {bad:?}", bad.len());
+}

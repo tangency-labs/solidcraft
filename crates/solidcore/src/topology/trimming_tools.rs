@@ -38,7 +38,8 @@
 //!   SolidCraft change, tangency-labs/smlib 9209e76).** Where several curve ends meet
 //!   at a vertex, [`order_curves_into_loops`] goes on along the end next round the
 //!   vertex from the arriving curve (`next_round_the_vertex`, the fork's
-//!   `sm_NextRoundTheVertex`) instead of the first by index.
+//!   `sm_NextRoundTheVertex`) instead of the first by index, turning about one normal
+//!   for the whole list (`loops_turn_normal`, tangency-labs/smlib b0ee3f9).
 //! - **Object model.** Faces, loops and edge uses are ids into a [`Brep`]; the static
 //!   methods are free functions taking the B-rep (and the [`Kernel`] where tolerances or
 //!   solves are read). Out-params are return values. A UV trim curve is the
@@ -1488,9 +1489,11 @@ fn eval_point(k: &Kernel, c: &Curve, t: f64) -> Result<Point3> {
 /// its end), `close` the start of the loop's first curve, `found` the nearest end to
 /// `arrive`. The ends at that vertex (within `tol_3d` of `found`) that the loop can go
 /// on from are those of curves it has not used, and `close`. Of them it takes the one
-/// whose leaving tangent comes next round the vertex from the arriving curve's (about
-/// the plane those tangents span; ends leaving tangent to each other in the order they
-/// bend), so the loop never crosses itself there. Returns the end to go on from.
+/// whose leaving tangent comes next round the vertex from the arriving curve's,
+/// counterclockwise about `turn_normal` (unit, one for all the vertices of a call, from
+/// `loops_turn_normal`; zero where the curves lie on one line; tangency-labs/smlib
+/// b0ee3f9), ends leaving tangent to each other in the order they bend, so the loop
+/// never crosses itself there. Returns the end to go on from.
 ///
 /// # Errors
 ///
@@ -1500,6 +1503,7 @@ fn next_round_the_vertex(
     curves: &[Curve],
     ends: &[Point3],
     seen: &[bool],
+    turn_normal: Vec3,
     arrive: usize,
     close: usize,
     tol_3d: f64,
@@ -1538,7 +1542,7 @@ fn next_round_the_vertex(
         let tangent = if at_start { d1 } else { -1.0 * d1 };
         Ok((tangent, at(&d, 2)?))
     };
-    let (mut back, back_acc) = leaving(arrive)?;
+    let (mut back, _) = leaving(arrive)?;
     if back.length() <= 0.0 {
         return Err(SolidError::sm_err(OP));
     }
@@ -1555,35 +1559,11 @@ fn next_round_the_vertex(
         accs.push(acc);
     }
 
-    // the curves' plane: its normal from two rays there that are not parallel, else
-    // from the arriving curve's bending
-    let small = |v: Vec3| v.length() <= EFF_ZERO_SQRT;
-    let mut normal = Vec3::new(0.0, 0.0, 0.0);
-    for ray in &rays {
-        if !small(normal) {
-            break;
-        }
-        normal = back.cross(*ray / ray.length());
-    }
-    for (ii, ri) in rays.iter().enumerate() {
-        if !small(normal) {
-            break;
-        }
-        for rj in rays.iter().skip(ii + 1) {
-            if !small(normal) {
-                break;
-            }
-            normal = (*ri / ri.length()).cross(*rj / rj.length());
-        }
-    }
-    if small(normal) {
-        normal = back.cross(back_acc);
-    }
-    if small(normal) {
-        // every curve there on one line: they cannot touch from two sides
+    if turn_normal.length() <= 0.0 {
+        // every curve on one line: they cannot touch from two sides
         return Ok(found);
     }
-    normal /= normal.length();
+    let normal = turn_normal;
 
     // each ray's angle round the vertex from the arriving one, (0, 2 pi], and for rays
     // leaving along one line, its bending towards larger angles (curvature about the
@@ -1610,6 +1590,57 @@ fn next_round_the_vertex(
         }
     }
     at(&candidates, best)
+}
+
+/// Not upstream (WR-591, the fork's turn normal in `OrderCurvesIntoLoops`,
+/// tangency-labs/smlib b0ee3f9): the unit normal [`next_round_the_vertex`] turns about,
+/// one for the whole list so the way a loop goes on at a vertex does not depend on the
+/// order of the ends there. Each curve's samples `p_k` (at quarters of its natural
+/// interval) about the curves' centre `c` add `(p_k - c) x (p_k+1 - c)`: over closed
+/// loops twice the sum of their area vectors, whatever the list's order. Each term is
+/// square to the curves' plane, so the terms each taken the way of the largest give
+/// the plane even where the areas cancel; the normal is turned against the loops'
+/// area (a loop turns clockwise about it, keeping round the region its curves bound),
+/// so loops touching from outside each other close apart. Zero when every term is.
+///
+/// # Errors
+///
+/// Those of the curve evaluations.
+fn loops_turn_normal(k: &Kernel, curves: &[Curve], center: Point3) -> Result<Vec3> {
+    let mut terms = Vec::new();
+    let mut area = Vec3::new(0.0, 0.0, 0.0);
+    let mut largest = Vec3::new(0.0, 0.0, 0.0);
+    for c in curves {
+        let iv = c.natural_interval();
+        let mut prev = eval_point(k, c, iv.min())?;
+        for jj in 1..=4 {
+            let pt = eval_point(k, c, iv.evaluate(0.25 * f64::from(jj)))?;
+            let term = (prev - center).cross(pt - center);
+            terms.push(term);
+            area += term;
+            if term.length() > largest.length() {
+                largest = term;
+            }
+            prev = pt;
+        }
+    }
+    let mut plane = Vec3::new(0.0, 0.0, 0.0);
+    for term in &terms {
+        plane += if term.dot(largest) < 0.0 {
+            -1.0 * *term
+        } else {
+            *term
+        };
+    }
+    let plane_len = plane.length();
+    let mut normal = Vec3::new(0.0, 0.0, 0.0);
+    if plane_len > 0.0 {
+        normal = plane / plane_len;
+        if area.dot(normal) > EFF_ZERO_SQRT * plane_len {
+            normal = -1.0 * normal;
+        }
+    }
+    Ok(normal)
 }
 
 /// `OrderCurvesIntoLoops`: orders `curves` into closed loops by matching their end
@@ -1683,6 +1714,14 @@ pub fn order_curves_into_loops(k: &Kernel, curves: &[Curve], tol_3d: f64) -> Res
     // curve bounding box size scale
     let face_radius = out.curves_box.sphere_bound().radius;
     let feature_size = face_radius / 1000.0;
+
+    // Not upstream (WR-591, opt-in; tangency-labs/smlib b0ee3f9): the normal the loops
+    // turn about where several curve ends meet, one for the whole call
+    let turn_normal = if k.fixes.loops_go_on_round_the_vertex {
+        loops_turn_normal(k, curves, out.curves_box.sphere_bound().center)?
+    } else {
+        Vec3::new(0.0, 0.0, 0.0)
+    };
 
     let mut plane_base_count: usize = 0;
 
@@ -1771,6 +1810,7 @@ pub fn order_curves_into_loops(k: &Kernel, curves: &[Curve], tol_3d: f64) -> Res
                     curves,
                     &vertex_points,
                     &seen,
+                    turn_normal,
                     target,
                     2 * first_curve_index,
                     tol_3d,
