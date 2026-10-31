@@ -1,0 +1,27 @@
+{
+  "format": "solidcraft/1",
+  "name": "Acceptance block",
+  "units": "mm",
+  "params": [],
+  "features": [
+    {
+      "id": 1,
+      "name": "Stock",
+      "suppressed": false,
+      "body_names": [
+        "Block"
+      ],
+      "type": "box",
+      "corner": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "length": "10",
+      "width": "10",
+      "height": "20",
+      "operation": "new_body"
+    }
+  ],
+  "next_id": 2
+}
