@@ -25,7 +25,8 @@ online convex average avoids overflowing radiance multiplied by kernel weights.
 First-hit guides cannot describe an image seen through refraction or a sharp
 reflection. Pixels first hitting glass, metals with roughness below 0.25,
 near-mirror coats with roughness below 0.05, light emitters, background or
-partial coverage bypass the filter. Glossier coats are filtered: on the studio
+partial coverage bypass the filter. Speckle the filter leaves on smooth metal can
+be limited with the separate, biased [indirect clamp](render-path.md#clamping-indirect-light). Glossier coats are filtered: on the studio
 coffee scenes their broad reflections of the cyclorama and area lights keep
 their shape, while the grain from choosing between coat and base layers is
 removed. A coat reflecting fine detail can lose some of it. First-hit guides also do not model depth-of-field correspondences:

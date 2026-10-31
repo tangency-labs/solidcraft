@@ -29,7 +29,7 @@ struct Params {
     adaptive_error: vec4<f32>, // relative RGB, absolute RGB, absolute coverage, current production stratum
     volume_min: vec4<f32>, // camera-relative bounds minimum, extinction/mm
     volume_max: vec4<f32>, // camera-relative bounds maximum, HG mean cosine
-    volume_albedo: vec4<f32>, // RGB single-scattering albedo, reserved
+    volume_albedo: vec4<f32>, // RGB single-scattering albedo, indirect clamp limit (0 = off)
     aging: array<AgingLayer,8>,
     studio_weights: vec4<f32>,
 
@@ -615,6 +615,12 @@ fn sample_surface(t: Triangle, n: vec3<f32>, v: vec3<f32>, rng: ptr<function,u32
     let component = random(rng); let x = random(rng); let y = random(rng);
     return sample_surface_values(t,n,v,vec3<f32>(component,x,y));
 }
+// Share of the base (uncoated) continuation samples spent on the diffuse lobe: 0.5 at
+// metallic 0, none for a pure metal, whose diffuse response is zero. sample_surface_values
+// and surface_pdf both use it, so sampling and density agree (clear_coat::lobe_probabilities).
+fn diffuse_probability(t: Triangle) -> f32 {
+    return 0.5*(1.0-clamp(t.parameters.x,0.0,1.0));
+}
 // Conditional opaque mixture density; branch selection is accounted for by callers.
 fn surface_pdf(t: Triangle, n: vec3<f32>, v: vec3<f32>, l: vec3<f32>) -> f32 {
     let nl = dot(n,l);
@@ -622,7 +628,8 @@ fn surface_pdf(t: Triangle, n: vec3<f32>, v: vec3<f32>, l: vec3<f32>) -> f32 {
     let h = unit(v+l); let vh = max(dot(v,h),1e-20);
     let nh = max(dot(n,h),0.0);
     let alpha = t.parameters.y*t.parameters.y;
-    let base = 0.5*nl/PI+0.5*distribution(nh,alpha*alpha)*nh/(4.0*vh);
+    let diffuse = diffuse_probability(t);
+    let base = diffuse*nl/PI+(1.0-diffuse)*distribution(nh,alpha*alpha)*nh/(4.0*vh);
     if t.coat.x<=0.0 { return base; }
     let coat_alpha = t.coat.y*t.coat.y;
     let coat_pdf = distribution(nh,coat_alpha*coat_alpha)*nh/(4.0*vh);
@@ -801,6 +808,25 @@ fn primary_ray(uv: vec2<f32>, lens_sample: vec2<f32>) -> CameraRay {
     }
     return CameraRay(o,d);
 }
+// Optional, biased firefly control (JobOptions::clamp_indirect). True only in the pipeline of
+// jobs that ask for it (Context::clamped_pipeline); its limit is volume_albedo.w. Other jobs
+// keep the ordinary pipeline, where the clamp is compiled out: even an untaken branch at these
+// adds changes how the compiler fuses and orders them, which moves results by an ulp.
+override clamp_indirect: bool = false;
+// Scales a contribution so its largest channel is at most the limit, keeping its hue. A NaN
+// stays NaN and infinity becomes NaN, so checked_sample still reports a broken path.
+fn clamp_contribution(value: vec3<f32>, limit: f32) -> vec3<f32> {
+    let peak = max(value.x,max(value.y,value.z));
+    if limit <= 0.0 || peak <= limit { return value; }
+    return value*(limit/peak);
+}
+// Adds light a*b*w to a path's radiance at `bounce`: one vertex's direct light, or one emitter,
+// environment or sun hit. What the camera's first hit adds (bounce 0: emission it sees, direct
+// light there) is never clamped; with clamp_indirect, everything from the first bounce on is.
+fn add_light(radiance: vec3<f32>, a: vec3<f32>, b: vec3<f32>, w: f32, bounce: u32) -> vec3<f32> {
+    if clamp_indirect && bounce > 0u { return radiance+clamp_contribution(a*b*w,u.volume_albedo.w); }
+    return radiance+a*b*w;
+}
 fn sample_path_lane(pixel: u32, lane: u32) -> vec4<f32> {
     var ordinal = u.image.z;
     var salt = 0u;
@@ -876,7 +902,7 @@ fn sample_path_lane(pixel: u32, lane: u32) -> vec4<f32> {
                     throughput*=u.volume_albedo.xyz;
                     if !any(throughput>vec3<f32>(0.0)) { break; }
                     let remaining=u.sampling.y-bounce-1u;
-                    radiance+=throughput*volume_direct(position,d,remaining,&rng);
+                    radiance=add_light(radiance,throughput,volume_direct(position,d,remaining,&rng),1.0,bounce);
                     if remaining==0u { break; }
                     let next=volume_sample(d,&rng);
                     previous_pdf=volume_phase(dot(d,next));
@@ -910,7 +936,7 @@ fn sample_path_lane(pixel: u32, lane: u32) -> vec4<f32> {
                 let pdf = area_pdf(light,scatter_segment);
                 if pdf>0.0 && !suppress_direct {
                     let weight = select(power_weight(previous_pdf,pdf),1.0,previous_delta);
-                    radiance += throughput*light.radiance.xyz*weight;
+                    radiance = add_light(radiance,throughput,light.radiance.xyz,weight,bounce);
                 }
                 coverage = 1.0;
                 break;
@@ -923,11 +949,11 @@ fn sample_path_lane(pixel: u32, lane: u32) -> vec4<f32> {
                 // The backplate remains request.background; environment lights covered paths.
                 if bounce>0u && !suppress_direct {
                     let weight = select(power_weight(previous_pdf,env_pdf(d)),1.0,previous_delta);
-                    radiance += throughput*env_eval(d)*weight;
+                    radiance = add_light(radiance,throughput,env_eval(d),weight,bounce);
                     let sun_weight=select(power_weight(previous_pdf,sun_pdf(d)),1.0,previous_delta);
-                    radiance += throughput*sun_eval(d)*sun_weight;
+                    radiance = add_light(radiance,throughput,sun_eval(d),sun_weight,bounce);
                 }
-            } else if u.sampling.w == 0u || d.z < 0.0 { radiance += throughput * u.lighting.y; }
+            } else if u.sampling.w == 0u || d.z < 0.0 { radiance = add_light(radiance,throughput,vec3<f32>(1.0),u.lighting.y,bounce); }
             break;
         }
         coverage = 1.0;
@@ -965,7 +991,7 @@ fn sample_path_lane(pixel: u32, lane: u32) -> vec4<f32> {
         }
         previous_position = position; previous_position_low=position_low;
         o = position + geometric*(u.lighting.x*2.0); o_low=vec3<f32>(0.0);
-        radiance += throughput*direct_light(t,position,o,n,geometric,v,u.sampling.y-bounce-1u,&rng);
+        radiance = add_light(radiance,throughput,direct_light(t,position,o,n,geometric,v,u.sampling.y-bounce-1u,&rng),1.0,bounce);
         if t.base.w > 0.0 && random(&rng) < t.base.w {
             var nt = t.parameters.z;
             if t.parameters.w < 0.0 && entering && medium_count > 0u && u.lighting.w==0.0 {
@@ -1005,7 +1031,8 @@ fn sample_path_lane(pixel: u32, lane: u32) -> vec4<f32> {
             }
             // The first Fresnel choice is stratified conditionally on the same
             // primary/prefix path. Each stratum is weighted equally; later random
-            // dimensions use decorrelated streams, never clamped radiance.
+            // dimensions use decorrelated streams. Strata reduce variance without
+            // clamping: radiance is clamped only when the job sets clamp_indirect.
             var branch = random(&rng);
             if !stratified && u.adaptive_budget.z > 1u && u.image.z >= u.adaptive_budget.x {
                 branch = (f32(lane) + branch) / f32(u.adaptive_budget.z);
@@ -1081,6 +1108,8 @@ fn sample_path_lane(pixel: u32, lane: u32) -> vec4<f32> {
     return vec4<f32>(radiance,coverage);
 }
 
+// A negative, NaN or overflowing sample is a broken path. An optional indirect clamp
+// (add_light) bounds finite contributions only, so it never hides one.
 fn checked_sample(pixel: u32, lane: u32) -> vec4<f32> {
     let value = sample_path_lane(pixel, lane);
     if !all(value >= vec4<f32>(0.0)) || !all(value <= vec4<f32>(3.4e38)) {
@@ -1206,7 +1235,7 @@ fn sample_surface_values(t: Triangle, n: vec3<f32>, v: vec3<f32>, variates: vec3
     let component = variates.x;
     let x = variates.y; let phi = 2.0*PI*variates.z;
     let coat_probability = t.coat.x*0.5;
-    if component < (1.0-coat_probability)*0.5 {
+    if component < (1.0-coat_probability)*diffuse_probability(t) {
         let radius = sqrt(x);
         return from_local(vec3<f32>(radius*cos(phi),radius*sin(phi),sqrt(1.0-x)),n);
     }
@@ -1227,6 +1256,13 @@ fn surface_sample_reference() {
 @compute @workgroup_size(1)
 fn pdf_reference() {
     accumulation[0] = vec4<f32>(surface_pdf(triangle(0u),u.up.xyz,u.back.xyz,u.right.xyz),0.0,0.0,1.0);
+}
+
+// The production contribution clamp with the job's packed limit and pipeline: up.xyz added at
+// bounce sampling.x.
+@compute @workgroup_size(1)
+fn contribution_reference() {
+    accumulation[0] = vec4<f32>(add_light(vec3<f32>(0.0),u.up.xyz,vec3<f32>(1.0),1.0,u.sampling.x),1.0);
 }
 
 // Diagnostic entry point for independently specified closed-corner fixtures.

@@ -617,7 +617,7 @@ mod tests {
                 "area_samples":64,"seed":u32::MAX,"environment":{"color":[0.1,0.2,0.3],"intensity":0.5}
             }}},
             "GPU":{"camera":camera,"exposure_ev":-3.5,"job":{"method":"gpu_path","transparent_background":true,"options":{
-                "samples":4096,"max_depth":16,"seed":81,"tone_map":"aces_fitted","denoise":true,
+                "samples":4096,"max_depth":16,"seed":81,"tone_map":"aces_fitted","denoise":true,"clamp_indirect":8,
                 "lens":{"aperture_radius_mm":0.4,"focus_distance_mm":90},
                 "lighting":{"environment":[0.1,0.25,0.6],"sun":{"direction":[1,-1,-2],"angular_radius_rad":0.1,"radiance":[5,4,3]},
                     "area_lights":[{"center":[10,20,30],"u":[4,0,0],"v":[0,-2,0],"radiance":[3,2,1]}]},
@@ -646,7 +646,15 @@ mod tests {
         assert_eq!(runtime.exposure_ev, -3.5);
         assert_eq!(runtime.lighting.unwrap().environment, [0.1, 0.25, 0.6]);
         assert!(runtime.denoise);
+        assert_eq!(runtime.clamp_indirect, Some(8.0));
+        assert_eq!(saved["setups"]["GPU"]["job"]["options"]["clamp_indirect"], 8.0);
         assert!(saved["setups"]["GPU"]["job"]["options"].get("exposure_ev").is_none());
+        // Off is not written, and a limit that would round to zero or overflow in the shader is refused.
+        assert!(serde_json::to_value(GpuJob::default()).unwrap().get("clamp_indirect").is_none());
+        for limit in [0.0, -1.0, 2e6] {
+            let job = GpuJob { clamp_indirect: Some(limit), ..(**options).clone() };
+            assert!(job.validate(0.0).unwrap_err().to_string().contains("clamp_indirect"), "{limit}");
+        }
     }
 
     #[test]

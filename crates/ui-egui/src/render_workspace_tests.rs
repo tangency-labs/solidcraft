@@ -2860,6 +2860,7 @@ fn clicked_setup_save_reload_and_switch_keep_gpu_numeric_intent_without_a_host()
                 seed: 1977,
                 tone_map: ToneMap::AcesFitted,
                 denoise: true,
+                clamp_indirect: Some(8.0),
                 lens: Some(ThinLens { aperture_radius_mm: 0.5, focus_distance_mm: 123.0 }),
                 lighting: Some(StudioLighting {
                     environment: [0.25, 0.5, 0.75],

@@ -1183,7 +1183,8 @@ fn gpu_clear_coat_pdf_matches_f64_surface_oracle() {
         compilation_options: Default::default(),
         cache: None,
     });
-    for metallic in [0.0, 1.0] {
+    // The diffuse share of the density follows metallic: kept, halved and gone.
+    for metallic in [0.0, 0.5, 1.0] {
         for roughness in [0.045, 0.12, 0.5] {
             for ior in [1.5, 3.0] {
                 let surface = OpaqueSurface::new(Vec3::new(0.8, 0.5, 0.2), metallic, 0.3, 1.5)
@@ -1243,47 +1244,161 @@ fn gpu_clear_coat_samples_the_pdf_mixture_components() {
         compilation_options: Default::default(),
         cache: None,
     });
-    for weight in [0.0, 0.4, 1.0] {
-        let surface = OpaqueSurface::new(Vec3::new(0.02, 0.02, 0.02), 0.0, 0.45, 1.5)
-            .unwrap()
-            .with_clear_coat(solidcraft_render::clear_coat::ClearCoat::new(weight, 0.12, 1.5).unwrap());
-        let mut task = Task::new(context.clone(), sphere(surface), request(1), JobOptions::default(), CancelToken::default()).unwrap();
-        let p = weight * 0.5;
-        // One variate strictly inside each nonempty mixture interval.
-        for component in [(1.0 - p) * 0.25, (1.0 - p) * 0.75, 1.0 - p * 0.5] {
-            if component >= 1.0 {
-                continue;
-            }
-            for x in [0.125_f64, 0.75] {
-                let mut params = vec![0; 48];
-                scene::vector(&mut params, Vec3::ZERO, 0.0);
-                scene::vector(&mut params, Vec3::Z, 0.0);
-                scene::vector(&mut params, Vec3::Z, 0.0);
-                scene::vector(&mut params, Vec3::new(component, x, 0.25), 0.0);
-                context.queue.write_buffer(&task.uniform, 0, &params);
-                let mut encoder = context.device.create_command_encoder(&Default::default());
-                {
-                    let mut pass = encoder.begin_compute_pass(&Default::default());
-                    pass.set_pipeline(&pipeline);
-                    pass.set_bind_group(0, &task.bind, &[]);
-                    pass.dispatch_workgroups(1, 1, 1);
+    // The lobe intervals come from the f64 oracle that surface_pdf uses, so the GPU samples
+    // the mixture its density describes. A pure metal's diffuse interval is empty: even the
+    // first variate, zero, picks its specular lobe.
+    for metallic in [0.0, 0.5, 1.0] {
+        for weight in [0.0, 0.4, 1.0] {
+            let surface = OpaqueSurface::new(Vec3::new(0.02, 0.02, 0.02), metallic, 0.45, 1.5)
+                .unwrap()
+                .with_clear_coat(solidcraft_render::clear_coat::ClearCoat::new(weight, 0.12, 1.5).unwrap());
+            let mut task = Task::new(context.clone(), sphere(surface), request(1), JobOptions::default(), CancelToken::default()).unwrap();
+            let [diffuse, specular, coat] = solidcraft_render::clear_coat::lobe_probabilities(surface);
+            // One variate inside each interval (the start of an empty diffuse one).
+            for component in [diffuse * 0.5, diffuse + specular * 0.5, 1.0 - coat * 0.5] {
+                if component >= 1.0 {
+                    continue;
                 }
-                context.queue.submit([encoder.finish()]);
-                task.sample = 1;
-                let actual = task.read_linear().unwrap()[0];
-                let expected = if component < (1.0 - p) * 0.5 {
-                    Vec3::new(0.0, x.sqrt(), (1.0 - x).sqrt())
-                } else {
-                    let r = if component >= 1.0 - p { 0.12_f64 } else { 0.45_f64 };
-                    let c = ((1.0 - x) / (1.0 + (r.powi(4) - 1.0) * x)).sqrt();
-                    Vec3::new(0.0, 2.0 * c * (1.0 - c * c).sqrt(), 2.0 * c * c - 1.0)
-                } + Vec3::new(2.0, 2.0, 2.0);
-                for (a, b) in actual.iter().zip([expected.x, expected.y, expected.z]) {
-                    assert!((f64::from(*a) - b).abs() < 2e-5, "weight={weight}, component={component}, x={x}: {actual:?}, {expected:?}");
+                for x in [0.125_f64, 0.75] {
+                    let mut params = vec![0; 48];
+                    scene::vector(&mut params, Vec3::ZERO, 0.0);
+                    scene::vector(&mut params, Vec3::Z, 0.0);
+                    scene::vector(&mut params, Vec3::Z, 0.0);
+                    scene::vector(&mut params, Vec3::new(component, x, 0.25), 0.0);
+                    context.queue.write_buffer(&task.uniform, 0, &params);
+                    let mut encoder = context.device.create_command_encoder(&Default::default());
+                    {
+                        let mut pass = encoder.begin_compute_pass(&Default::default());
+                        pass.set_pipeline(&pipeline);
+                        pass.set_bind_group(0, &task.bind, &[]);
+                        pass.dispatch_workgroups(1, 1, 1);
+                    }
+                    context.queue.submit([encoder.finish()]);
+                    task.sample = 1;
+                    let actual = task.read_linear().unwrap()[0];
+                    let expected = if component < diffuse {
+                        Vec3::new(0.0, x.sqrt(), (1.0 - x).sqrt())
+                    } else {
+                        let r = if component >= 1.0 - coat { 0.12_f64 } else { 0.45_f64 };
+                        let c = ((1.0 - x) / (1.0 + (r.powi(4) - 1.0) * x)).sqrt();
+                        Vec3::new(0.0, 2.0 * c * (1.0 - c * c).sqrt(), 2.0 * c * c - 1.0)
+                    } + Vec3::new(2.0, 2.0, 2.0);
+                    for (a, b) in actual.iter().zip([expected.x, expected.y, expected.z]) {
+                        assert!(
+                            (f64::from(*a) - b).abs() < 2e-5,
+                            "metallic={metallic}, weight={weight}, component={component}, x={x}: {actual:?}, {expected:?}"
+                        );
+                    }
                 }
             }
         }
     }
+}
+
+#[test]
+fn gpu_indirect_clamp_keeps_hue_caps_the_brightest_channel_and_spares_the_first_hit() {
+    let Some(executor) = executor() else { return };
+    let context = &executor.context;
+    let shader = context
+        .device
+        .create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("indirect clamp oracle"), source: wgpu::ShaderSource::Wgsl(SHADER.into()) });
+    let layout = context.device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+        label: None,
+        bind_group_layouts: &[Some(&context.layout)],
+        immediate_size: 0,
+    });
+    // Like production, a job with a limit uses the pipeline with the clamp compiled in.
+    let pipeline = |constants| {
+        context.device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            label: None,
+            layout: Some(&layout),
+            module: &shader,
+            entry_point: Some("contribution_reference"),
+            compilation_options: wgpu::PipelineCompilationOptions { constants, ..Default::default() },
+            cache: None,
+        })
+    };
+    let (ordinary, clamped) = (pipeline(&[]), pipeline(CLAMP_INDIRECT));
+    // (limit, bounce, contribution, expected): the limit reaches the shader through the job's
+    // own uniform packing, with or without a volume.
+    let cases: &[(Option<f64>, u32, [f64; 3], [f64; 3])] = &[
+        (None, 1, [8.0, 4.0, 1.0], [8.0, 4.0, 1.0]),
+        (Some(2.0), 0, [8.0, 4.0, 1.0], [8.0, 4.0, 1.0]),
+        (Some(2.0), 1, [8.0, 4.0, 1.0], [2.0, 1.0, 0.25]),
+        (Some(2.0), 5, [0.0, 6.0, 3.0], [0.0, 2.0, 1.0]),
+        (Some(2.0), 1, [3.0, 1.5, 0.75], [2.0, 1.0, 0.5]),
+        (Some(2.0), 1, [1.5, 0.5, 0.25], [1.5, 0.5, 0.25]),
+        (Some(2.0), 1, [2.0, 2.0, 2.0], [2.0, 2.0, 2.0]),
+        (Some(0.000_001), 2, [1.0, 0.5, 0.0], [0.000_001, 0.000_000_5, 0.0]),
+    ];
+    for volume in [None, Some(solidcraft_render::job::volume::HomogeneousVolume { extinction_per_mm: 0.01, ..Default::default() })] {
+        for &(limit, bounce, value, expected) in cases {
+            let lighting = Some(solidcraft_render::job::StudioLighting { environment: [1.0; 3], sun: None, area_lights: Default::default() });
+            let options = JobOptions { clamp_indirect: limit, volume, lighting, ..Default::default() };
+            options.validate().unwrap();
+            let mut task = Task::new(context.clone(), sphere(white()), request(1), options, CancelToken::default()).unwrap();
+            let mut params = task.parameters(1);
+            params[16..20].copy_from_slice(&bounce.to_le_bytes());
+            let mut up = Vec::new();
+            scene::vector(&mut up, Vec3::new(value[0], value[1], value[2]), 0.0);
+            params[64..80].copy_from_slice(&up);
+            context.queue.write_buffer(&task.uniform, 0, &params);
+            let mut encoder = context.device.create_command_encoder(&Default::default());
+            {
+                let mut pass = encoder.begin_compute_pass(&Default::default());
+                pass.set_pipeline(if limit.is_some() { &clamped } else { &ordinary });
+                pass.set_bind_group(0, &task.bind, &[]);
+                pass.dispatch_workgroups(1, 1, 1);
+            }
+            context.queue.submit([encoder.finish()]);
+            task.sample = 1;
+            let actual = task.read_linear().unwrap()[0];
+            for (a, b) in actual.iter().zip(expected) {
+                assert!((f64::from(*a) - b).abs() <= 1e-6 * b, "limit={limit:?}, bounce={bounce}, {value:?}: {actual:?} vs {expected:?}");
+            }
+            // Hue: every channel keeps its share of the brightest one.
+            let peak = value.iter().copied().fold(0.0, f64::max);
+            let actual_peak = actual[..3].iter().copied().fold(0.0, f32::max);
+            for (a, v) in actual.iter().zip(value) {
+                assert!((f64::from(*a / actual_peak) - v / peak).abs() < 1e-6, "{actual:?} vs {value:?}");
+            }
+        }
+    }
+}
+
+#[test]
+fn gpu_indirect_clamp_bounds_every_bounce_and_leaves_what_the_camera_sees_directly() {
+    let Some(executor) = executor() else { return };
+    // White furnace: a camera ray that misses sees the environment (1.0) directly; one that hits
+    // the sphere adds light only from the first bounce on, each path at most once.
+    let furnace = |clamp_indirect| {
+        let options = JobOptions { samples: 16, max_depth: 8, seed: 11, clamp_indirect, ..Default::default() };
+        let mut task = Task::new(executor.context.clone(), sphere(white()), request(8), options, CancelToken::default()).unwrap();
+        task.environment = 1.0;
+        task.studio = 0.0;
+        for _ in 0..options.samples {
+            task.complete_sample().unwrap();
+        }
+        task.read_linear().unwrap()
+    };
+    let off = furnace(None);
+    // A limit above every contribution changes nothing, bit for bit.
+    assert_eq!(off, furnace(Some(1_000_000.0)));
+    let clamped = furnace(Some(0.25));
+    let (mut covered, mut background) = (0, 0);
+    for (raw, limited) in off.iter().zip(&clamped) {
+        assert_eq!(raw[3], limited[3], "coverage is never clamped");
+        if raw[3] == 1.0 {
+            covered += 1;
+            assert!(raw[0] > 0.5, "unclamped furnace sphere: {raw:?}");
+            assert!(limited[..3].iter().all(|c| *c <= 0.25 + 1e-6), "{limited:?}");
+        } else if raw[3] == 0.0 {
+            background += 1;
+            assert_eq!(raw, limited, "the environment seen directly is the camera's first hit");
+            assert_eq!(raw[0], 1.0);
+        }
+    }
+    assert!(covered >= 4 && background >= 4, "{covered} covered, {background} background pixels");
 }
 
 #[test]

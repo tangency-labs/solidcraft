@@ -65,7 +65,10 @@ The original integrator uses software BVH traversal, opaque GGX/Smith/Schlick an
 the symmetric diffuse attenuation defined by `render::surface`. Each hit evaluates
 the three existing directional studio lights with shadow visibility. Continuation
 samples a mixture of cosine-weighted diffuse and GGX normals with the combined
-PDF; Russian roulette begins after four hits. There are indirect bounces, but no
+PDF. The diffuse lobe gets 0.5 × (1 − metallic) of the uncoated samples, so a
+pure metal, which has no diffuse response, spends all of them on its specular
+lobe; the density weights the lobes the same way, so the estimate is unbiased.
+Russian roulette begins after four hits. There are indirect bounces, but no
 environment illumination in the default legacy lighting profile. All legacy opaque colors use
 linear-sRGB base color, metallic 0, roughness 0.5, IOR 1.5. Explicit face appearances
 take precedence over body appearances.
@@ -129,6 +132,39 @@ The ignored `path_performance` test builds a 1,048,576-triangle procedural spher
 and measures 1920×1080 dispatches, BVH construction and upload. Select sample count
 with `SOLIDCRAFT_PATH_BENCH_SAMPLES` (default 1). Run it explicitly with a clear GPU
 timing window; it is excluded from normal CI.
+
+## Clamping indirect light
+
+Polished metal can stay speckled however many samples a render takes: a rare path from
+a shiny surface to another and on to a bright light carries far more light than its
+neighbours, and the [denoiser](render-denoise.md) leaves smooth metal alone. The
+optional `clamp_indirect` job option limits such paths:
+
+```json
+{"command":"render.start","params":{"settings":{"width":800,"height":600},"progressive":true,"samples":1024,"denoise":true,"clamp_indirect":8}}
+```
+
+- From the first bounce on, each contribution a path adds (the direct light at one
+  surface or volume point, or one light, environment or sun hit) is scaled so its
+  largest channel is at most the limit, keeping its hue. What the camera's first hit
+  adds is never clamped: lights and the environment it sees directly, and the direct
+  light where it lands. Anything seen through glass or in a glass reflection is past
+  the first bounce, so it is clamped.
+- The limit is linear radiance before exposure, from 0.000001 to 1,000,000. Absent or
+  null means off; zero is refused rather than meaning off.
+- The clamp is compiled only into a second version of the path shader, which the first
+  job that sets it builds once per device and later ones reuse. Jobs without it keep the
+  ordinary shader, so their images do not change by a single bit: even an untaken branch
+  at the integrator's adds changes how the shader compiler fuses them.
+- It is biased: it removes light, so it also dims real caustics, glints and bright
+  reflections of lights in shiny surfaces. A limit a few times the brightest radiance
+  a reflection should show keeps most real highlights; a lower one removes more speckle
+  and more real light.
+- It changes the path samples themselves, so the raw linear EXR master is clamped too,
+  not only the PNG.
+- Only the native `gpu-path` executor applies it; non-progressive requests and other
+  executors refuse it. Preflight reports it in `options.clamp_indirect` and an
+  `indirect_clamp` summary, and a saved GPU setup keeps it in `job.options`.
 
 ## Dispatch and device-loss behavior
 

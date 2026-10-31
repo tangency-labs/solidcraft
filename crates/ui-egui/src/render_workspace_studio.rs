@@ -28,6 +28,8 @@ pub(super) struct View {
     pub export_exr: bool,
     pub tone_map: ToneMap,
     pub denoise: bool,
+    /// Kept from a loaded setup so saving it again keeps it; the workspace has no control for it yet.
+    pub clamp_indirect: Option<f64>,
     pub lens_enabled: bool,
     pub lens: ThinLens,
     pub environment: Environment,
@@ -58,6 +60,7 @@ impl Default for View {
             export_exr: false,
             tone_map: ToneMap::Reinhard,
             denoise: false,
+            clamp_indirect: None,
             lens_enabled: false,
             lens: ThinLens { aperture_radius_mm: 1.0, focus_distance_mm: 100.0 },
             environment: Environment::None,
@@ -79,6 +82,9 @@ pub(super) fn params(app: &SolveApp, params: &mut Value) -> Result<(), String> {
     let view = &app.render_workspace.view.studio;
     params["tone_map"] = json!(view.tone_map);
     params["denoise"] = json!(view.denoise);
+    if let Some(limit) = view.clamp_indirect {
+        params["clamp_indirect"] = json!(limit);
+    }
     params["finishing"] = json!(view.finishing);
     params["backdrop"] = json!(view.backdrop_enabled.then_some(view.backdrop));
     params["linear_exr"] = json!(view.linear_exr);

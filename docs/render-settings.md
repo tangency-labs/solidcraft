@@ -145,7 +145,7 @@ are millimetres, angles are radians and light colours/radiances are linear RGB.
 |---|---|---|
 | `raster` | `transparent_background` | Defaults to false; no nonzero exposure or raytrace controls |
 | `cpu_raytrace` | `options`: optional `progressive`, `primary_samples`, `preset`, `lights`, `punctual_lights`, `area_lights`, `area_samples`, `seed`, `shadows`, constant `environment`, embedded `hdr` | Primary samples 1/4/16 (default 1); shadows true; optional progressive/lists/preset/environment/HDR absent. At most 8 directional, 8 point/spot and 4 rectangular lights; progressive has the narrower contract below. |
-| `gpu_path` | `transparent_background`, `options`: `samples`, `max_depth`, `seed`, `tone_map`, `denoise`, `lens`, `lighting`, sky `environment`, embedded `hdr` | Samples 1..4096 (default 64), depth 1..16 (default 8), seed u32 (default 0), Reinhard tone map, denoise false, optional values absent |
+| `gpu_path` | `transparent_background`, `options`: `samples`, `max_depth`, `seed`, `tone_map`, `denoise`, `clamp_indirect`, `lens`, `lighting`, sky `environment`, embedded `hdr` | Samples 1..4096 (default 64), depth 1..16 (default 8), seed u32 (default 0), Reinhard tone map, denoise false, optional values absent; `clamp_indirect` is 0.000001..1000000 when present ([biased indirect clamp](render-path.md#clamping-indirect-light)) |
 
 CPU `preset` and explicit `lights` are mutually exclusive. An omitted/null light
 list remains unspecified; `lights: []` explicitly removes the default directional
