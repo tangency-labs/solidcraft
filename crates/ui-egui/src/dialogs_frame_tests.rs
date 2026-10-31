@@ -195,3 +195,69 @@ fn picked_lines_stay_in_the_sketch_they_were_picked_in() {
     d.inputs[0].items.push(Sel::ExternalSketchCurve { sketch: rails, id: ids[0].clone() });
     assert!(apply_commands(&app, &d).unwrap_err().contains("one sketch"));
 }
+
+fn plate_app() -> (SolveApp, Sel) {
+    let app = app_with(&[
+        ("sketch.create", json!({"plane":"XY","name":"Post"})),
+        ("sketch.options", json!({"sketch_3d":true})),
+        ("sketch.line3d", json!({"points":[[0,0,0],[0,0,300]]})),
+        ("sketch.finish", json!({})),
+        ("frame.member", json!({"sketch":"Post","profile":{"kind":"rect_tube","width":40,"height":40,"wall":3,"outer_radius":0},"body_name":"Post"})),
+    ]);
+    let state = app.session.world_state();
+    let body = state.body("Post").unwrap();
+    let face = body.body.faces(0.001).unwrap().into_iter().find(|f| f.plane_normal.is_some_and(|n| n.z > 0.999)).unwrap();
+    let mesh = body.mesh();
+    let (tri, _) = mesh.triangles.iter().zip(&mesh.tri_face).find(|(_, i)| **i as usize == face.index).unwrap();
+    let [a, b, c] = mesh.tri(tri).unwrap();
+    let pick = Sel::Face { body: body.name.clone(), index: face.index, point: (a + b + c) / 3. };
+    (app, pick)
+}
+
+#[test]
+fn mounting_plate_dialog_preselects_previews_and_edits_a_bolt_circle() {
+    let (mut app, pick) = plate_app();
+    app.session.selection = vec![pick.clone()];
+    app.start("frame.plate");
+    let mut dialog = app.dialog.clone().unwrap();
+    assert_eq!(dialog.inputs[0].items, [pick]);
+    let Kind::FramePlate(plate) = &mut dialog.kind else { panic!("plate dialog") };
+    plate.shape = 1;
+    plate.diameter = "120 mm".into();
+    plate.pattern = 2;
+    plate.count = "6".into();
+    plate.pitch_diameter = "90 mm".into();
+    plate.pattern_angle = "15 deg".into();
+    let commands = apply_commands(&app, &dialog).unwrap();
+    let before = app.session.doc.to_json();
+    let preview = app.session.preview_visible_world(&commands).unwrap();
+    assert_eq!(app.session.doc.to_json(), before, "preview leaves the document alone");
+    assert_eq!(preview.after.bodies.len(), 2);
+    run_all(&mut app, commands);
+    let feature = app.session.doc.features.last().unwrap().id;
+    let mut edited = edit_dialog(&app, feature, None).unwrap();
+    assert_eq!(edited.inputs[0].items.len(), 1, "support face restored on material, not in the tube's bore");
+    let Kind::FramePlate(plate) = &mut edited.kind else { panic!("plate dialog") };
+    assert_eq!((plate.shape, plate.pattern, plate.count.as_str()), (1, 2, "6"));
+    assert_eq!(plate.pattern_angle, "15 deg");
+    plate.thickness = "10 mm".into();
+    let commands = apply_commands(&app, &edited).unwrap();
+    assert_eq!(commands[0].0, "timeline.redefine");
+    run_all(&mut app, commands);
+    assert_eq!(app.session.world_state().bodies.len(), 2, "editing replaces the plate");
+    let FeatureKind::FramePlate { thickness, .. } = &app.session.doc.feature(feature).unwrap().kind else { panic!("plate feature") };
+    assert_eq!(thickness.as_str(), "10 mm");
+}
+
+#[test]
+fn mounting_plate_dialog_requires_a_face_and_whole_hole_count() {
+    let (mut app, pick) = plate_app();
+    app.start("frame.plate");
+    let mut dialog = app.dialog.clone().unwrap();
+    assert!(apply_commands(&app, &dialog).is_err());
+    dialog.inputs[0].items = vec![pick];
+    let Kind::FramePlate(plate) = &mut dialog.kind else { panic!("plate dialog") };
+    plate.pattern = 2;
+    plate.count = "4.5".into();
+    assert!(apply_commands(&app, &dialog).unwrap_err().contains("whole number"));
+}

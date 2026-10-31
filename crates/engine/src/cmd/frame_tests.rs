@@ -638,3 +638,278 @@ fn editing_the_feature_keeps_member_names_until_it_names_them() {
     run(&mut s, "edit.undo", json!({}));
     assert_eq!(boxes(&mut s).into_keys().collect::<Vec<_>>(), names);
 }
+
+// Mounting and bolted end plates (#7485).
+fn plate_post() -> Session {
+    plate_post_in(Session::default())
+}
+
+fn plate_post_in(mut s: Session) -> Session {
+    run(&mut s, "parameters.add", json!({"name":"PostHeight","expression":"300 mm"}));
+    run(&mut s, "sketch.create", json!({"plane":"XZ","name":"PostPath"}));
+    run(&mut s, "sketch.line", json!({"points":[[200,0],[200,"-PostHeight"]]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(
+        &mut s,
+        "frame.member",
+        json!({"sketch":"PostPath","profile":{"kind":"rect_tube","width":40,"height":40,"wall":3,"outer_radius":0},"body_name":"Post","name":"MemberFeature"}),
+    );
+    s
+}
+
+/// A point on the material of the cap, including a hollow cap whose centroid is in its bore.
+fn plate_pick(s: &Session, body: &str, high: bool) -> Value {
+    let state = s.world_state();
+    let body = state.body(body).unwrap();
+    let face =
+        body.body.faces(0.001).unwrap().into_iter().find(|f| f.plane_normal.is_some_and(|n| n.z * if high { 1. } else { -1. } > 0.999)).unwrap();
+    let mesh = body.mesh();
+    let (triangle, _) = mesh.triangles.iter().zip(&mesh.tri_face).find(|(_, index)| **index as usize == face.index).unwrap();
+    let [a, b, c] = mesh.tri(triangle).unwrap();
+    json!({"face":(a+b+c)/3.,"body":body.name,"index":face.index})
+}
+
+fn rectangular_plate(s: &Session, high: bool) -> Value {
+    let mut p = plate_pick(s, "Post", high);
+    p["width"] = json!(100);
+    p["height"] = json!(80);
+    p["thickness"] = json!(8);
+    p["body_name"] = json!(if high { "EndPlate" } else { "BasePlate" });
+    p
+}
+
+#[test]
+fn mounting_plates_are_centred_on_hollow_member_ends_and_leave_the_member_alone() {
+    let mut s = plate_post();
+    let before = bodies(&mut s)[0].clone();
+    let mut p = rectangular_plate(&s, true);
+    p["holes"] = json!({"pattern":"rectangle","diameter":10,"pitch_x":70,"pitch_y":50});
+    run(&mut s, "frame.plate", p);
+    let p = rectangular_plate(&s, false);
+    run(&mut s, "frame.plate", p);
+    let bs = bodies(&mut s);
+    let post = bs.iter().find(|b| b.0 == "Post").unwrap();
+    assert_eq!(post, &before, "plate holes never cut the supporting member");
+    let top = bs.iter().find(|b| b.0 == "EndPlate").unwrap();
+    assert!(near3(top.2, [150., -40., 300.]) && near3(top.3, [250., 40., 308.]), "{top:?}");
+    assert!(rel(top.1, (100. * 80. - 4. * PI * 25.) * 8.) < MEASURED, "{top:?}");
+    let bottom = bs.iter().find(|b| b.0 == "BasePlate").unwrap();
+    assert!(near3(bottom.2, [150., -40., -8.]) && near3(bottom.3, [250., 40., 0.]), "{bottom:?}");
+}
+
+#[test]
+fn round_bolted_end_plate_has_the_analytic_volume() {
+    let mut s = plate_post();
+    let mut p = plate_pick(&s, "Post", true);
+    p.as_object_mut().unwrap().extend(json!({"shape":"round","diameter":120,"thickness":8,"body_name":"Flange","holes":{"pattern":"circle","diameter":10,"pitch_diameter":90,"count":6,"angle":"15 deg"}}).as_object().unwrap().clone());
+    run(&mut s, "frame.plate", p);
+    let flange = bodies(&mut s).into_iter().find(|b| b.0 == "Flange").unwrap();
+    assert!(near3(flange.2, [140., -60., 300.]) && near3(flange.3, [260., 60., 308.]), "{flange:?}");
+    assert!(rel(flange.1, PI * (3600. - 6. * 25.) * 8.) < MEASURED, "{flange:?}");
+}
+
+#[test]
+fn plates_follow_frame_edits_and_renames_and_survive_undo_and_reopen() {
+    let mut s = plate_post();
+    let p = rectangular_plate(&s, true);
+    run(&mut s, "frame.plate", p);
+    run(&mut s, "parameters.change", json!({"name":"PostHeight","expression":"450 mm"}));
+    run(&mut s, "body.rename", json!({"body":"Post","name":"Upright"}));
+    let plate = bodies(&mut s).into_iter().find(|b| b.0 == "EndPlate").unwrap();
+    assert!(near3(plate.2, [150., -40., 450.]) && near3(plate.3, [250., 40., 458.]), "{plate:?}");
+    let json = s.doc.to_json();
+    let mut reopened = Session::new(solidcraft_doc::Document::from_json(&json).unwrap());
+    let after = bodies(&mut reopened).into_iter().find(|b| b.0 == "EndPlate").unwrap();
+    assert_eq!(after.0, plate.0);
+    assert!(rel(after.1, plate.1) < 1e-9 && near3(after.2, plate.2) && near3(after.3, plate.3) && near3(after.4, plate.4));
+    run(&mut s, "edit.undo", json!({}));
+    run(&mut s, "edit.undo", json!({}));
+    let old = bodies(&mut s).into_iter().find(|b| b.0 == "EndPlate").unwrap();
+    assert!((old.2[2] - 300.).abs() < 1e-6);
+    run(&mut s, "edit.redo", json!({}));
+    assert!(bodies(&mut s).iter().any(|b| b.0 == "EndPlate" && (b.2[2] - 450.).abs() < 1e-6));
+}
+
+#[test]
+fn plate_offsets_and_rotation_are_in_the_support_face_frame() {
+    let mut s = plate_post();
+    let mut p = rectangular_plate(&s, true);
+    p["offset"] = json!(2);
+    p["x_offset"] = json!(10);
+    p["y_offset"] = json!(20);
+    p["angle"] = json!("90 deg");
+    run(&mut s, "frame.plate", p);
+    let plate = bodies(&mut s).into_iter().find(|b| b.0 == "EndPlate").unwrap();
+    // The selected face's canonical frame is X/Y; offsets apply before the plate turns.
+    assert!(near3(plate.2, [170., -30., 302.]) && near3(plate.3, [250., 70., 310.]), "{plate:?}");
+}
+
+#[test]
+fn invalid_plates_and_hole_patterns_leave_the_design_unchanged() {
+    let mut s = plate_post();
+    let valid = rectangular_plate(&s, true);
+    for patch in [
+        json!({"thickness":0}),
+        json!({"width":-1}),
+        json!({"angle":1e20}),
+        json!({"offset":1e20}),
+        json!({"diameter":100}),
+        json!({"shape":"round"}),
+        json!({"index":99999}),
+        json!({"path":[999]}),
+        json!({"holes":{"pattern":"circle","diameter":10,"pitch_diameter":50,"count":129}}),
+        json!({"holes":{"pattern":"circle","diameter":10,"pitch_diameter":50,"count":0}}),
+        json!({"holes":{"pattern":"rectangle","diameter":10,"pitch_x":90,"pitch_y":50}}),
+        json!({"holes":{"pattern":"rectangle","diameter":10,"pitch_x":5,"pitch_y":50}}),
+        json!({"holes":{"pattern":"rectangle","diameter":10,"pitch_x":70,"pitch_y":50,"typo":3}}),
+    ] {
+        let mut p = valid.clone();
+        p.as_object_mut().unwrap().extend(patch.as_object().unwrap().clone());
+        let before = s.doc.to_json();
+        assert!(s.execute("frame.plate", &p).is_err(), "refuse {p}");
+        assert_eq!(s.doc.to_json(), before, "failed plate is atomic: {p}");
+    }
+}
+
+#[test]
+fn losing_the_support_face_never_attaches_a_plate_to_a_nearby_body() {
+    let mut s = plate_post();
+    let p = rectangular_plate(&s, true);
+    let id = run(&mut s, "frame.plate", p)["feature"].as_u64().unwrap();
+    run(&mut s, "solid.box", json!({"corner":[180,-20,0],"length":40,"width":40,"height":300,"body_name":"Replacement"}));
+    run(&mut s, "timeline.delete", json!({"features":["MemberFeature"]}));
+    assert!(s.model.result(id).unwrap().error.is_some());
+    assert!(s.model.state().body("EndPlate").is_none());
+    let reopened = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+    assert!(reopened.model.state().body("EndPlate").is_none());
+}
+
+#[test]
+fn plates_in_a_moved_component_keep_their_attachment_and_copy_independently() {
+    let mut s = Session::default();
+    let comp = run(&mut s, "component.create", json!({"name":"Bracket","grounded":false}))["component"].as_u64().unwrap();
+    s = plate_post_in(s);
+    let occurrence = s.doc.occurrence_of(comp).unwrap().id;
+    run(&mut s, "occurrence.move", json!({"occurrence":occurrence,"translate":[100,200,300],"capture":true}));
+    let mut p = plate_pick(&s, "Post", true);
+    p.as_object_mut().unwrap().extend(json!({"width":100,"height":80,"thickness":8,"body_name":"Pad"}).as_object().unwrap().clone());
+    run(&mut s, "frame.plate", p);
+    let pad = bodies(&mut s).into_iter().find(|b| b.0 == "Pad").unwrap();
+    assert!(near3(pad.2, [250., 160., 600.]) && near3(pad.3, [350., 240., 608.]), "{pad:?}");
+    run(&mut s, "component.activate", json!({"component":"root"}));
+    let copied = run(&mut s, "component.paste_new", json!({"component":comp,"translate":[500,0,0]}));
+    let state = s.model.state();
+    let copy = state.body("Pad (2)").unwrap();
+    let original = state.body("Pad").unwrap();
+    assert_ne!(copy.feature, original.feature);
+    let feature = s.doc.feature(copy.feature).unwrap();
+    let solidcraft_doc::FeatureKind::FramePlate { plane, member, .. } = &feature.kind else { panic!("copied plate") };
+    let anchor = solidcraft_doc::face_anchor::plane_face_anchor(plane).unwrap();
+    assert_eq!(anchor.target.body, "Post (2)");
+    assert_eq!(anchor.component, copied["component"].as_u64().unwrap());
+    assert_eq!(member.as_ref().unwrap().feature.0, anchor.target.origin_feature);
+    assert!(matches!(s.doc.feature(anchor.target.origin_feature).unwrap().kind, solidcraft_doc::FeatureKind::FrameMember { .. }));
+    let width = s.doc.feature(original.feature).unwrap().param_names[0].clone();
+    run(&mut s, "parameters.change", json!({"name":width,"expression":"140 mm"}));
+    let state = s.model.state();
+    let original = state.body("Pad").unwrap().mesh().bounds();
+    let copied_bounds = state.body("Pad (2)").unwrap().mesh().bounds();
+    assert!((original.max.x - original.min.x - 140.).abs() < 1e-6);
+    assert!((copied_bounds.max.x - copied_bounds.min.x - 100.).abs() < 1e-6);
+    let reopened = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+    assert!(reopened.model.state().body("Pad (2)").is_some());
+}
+
+#[test]
+fn a_root_plate_follows_later_rotation_and_translation_of_its_support_occurrence() {
+    let mut s = Session::default();
+    let comp = run(&mut s, "component.create", json!({"name":"PostPart","grounded":false}))["component"].as_u64().unwrap();
+    s = plate_post_in(s);
+    let occurrence = s.doc.occurrence_of(comp).unwrap().id;
+    run(&mut s, "occurrence.move", json!({"occurrence":occurrence,"translate":[100,200,300],"capture":true}));
+    run(&mut s, "component.activate", json!({"component":"root"}));
+    let p = rectangular_plate(&s, true);
+    run(&mut s, "frame.plate", p);
+    run(
+        &mut s,
+        "occurrence.move",
+        json!({"occurrence":occurrence,"space":"world","axis":[0,0,1],"angle":"90 deg","translate":[10,20,30],"capture":true}),
+    );
+    let plate = bodies(&mut s).into_iter().find(|b| b.0 == "EndPlate").unwrap();
+    assert!(near3(plate.2, [-230., 270., 630.]) && near3(plate.3, [-150., 370., 638.]), "{plate:?}");
+    let mut reopened = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+    let after = bodies(&mut reopened).into_iter().find(|b| b.0 == "EndPlate").unwrap();
+    assert!(near3(after.2, plate.2) && near3(after.3, plate.3));
+}
+
+#[test]
+fn plate_dimensions_are_parameter_expressions_and_bare_lengths_use_design_units() {
+    let mut s = plate_post();
+    run(&mut s, "parameters.add", json!({"name":"PlateWidth","expression":"100 mm"}));
+    let mut p = rectangular_plate(&s, true);
+    p["width"] = json!("PlateWidth");
+    run(&mut s, "frame.plate", p);
+    run(&mut s, "parameters.change", json!({"name":"PlateWidth","expression":"140 mm"}));
+    let plate = bodies(&mut s).into_iter().find(|b| b.0 == "EndPlate").unwrap();
+    assert!(near3(plate.2, [130., -40., 300.]) && near3(plate.3, [270., 40., 308.]), "{plate:?}");
+    let mut s = plate_post();
+    s.doc_mut().units = "cm".into();
+    let mut p = rectangular_plate(&s, true);
+    p["width"] = json!(10);
+    p["height"] = json!(8);
+    p["thickness"] = json!(0.8);
+    run(&mut s, "frame.plate", p);
+    let plate = bodies(&mut s).into_iter().find(|b| b.0 == "EndPlate").unwrap();
+    assert!(near3(plate.2, [150., -40., 300.]) && near3(plate.3, [250., 40., 308.]), "{plate:?}");
+}
+
+#[test]
+fn a_reused_name_in_the_same_frame_feature_does_not_steal_a_plate() {
+    let mut s = plate_post();
+    let source = s.doc.find_feature("MemberFeature").unwrap().id;
+    let old = sketch_lines(&s, "PostPath")[0].0.clone();
+    let p = rectangular_plate(&s, true);
+    let plate = run(&mut s, "frame.plate", p)["feature"].as_u64().unwrap();
+    run(&mut s, "sketch.edit", json!({"sketch":"PostPath"}));
+    run(&mut s, "sketch.line", json!({"points":[[400,0],[400,"-PostHeight"]]}));
+    run(&mut s, "sketch.finish", json!({}));
+    let new = sketch_lines(&s, "PostPath").into_iter().find(|line| line.0 != old).unwrap().0;
+    let names = serde_json::Map::from_iter([(old, json!("Other")), (new, json!("Post"))]);
+    run(
+        &mut s,
+        "timeline.redefine",
+        json!({"feature":source,"command":"frame.member","params":{"sketch":"PostPath","profile":{"kind":"rect_tube","width":40,"height":40,"wall":3,"outer_radius":0},"body_name":"Post","names":names}}),
+    );
+    assert!(s.model.result(plate).unwrap().error.is_some(), "the original line lost its body name; do not attach to the other line");
+    assert!(s.model.state().body("EndPlate").is_none());
+}
+
+#[test]
+fn a_plate_can_attach_to_a_member_from_a_line_added_after_the_member_feature() {
+    let mut s = plate_post();
+    run(&mut s, "sketch.edit", json!({"sketch":"PostPath"}));
+    run(&mut s, "sketch.line", json!({"points":[[400,0],[400,"-PostHeight"]]}));
+    run(&mut s, "sketch.finish", json!({}));
+    let mut p = plate_pick(&s, "Post (2)", true);
+    p.as_object_mut().unwrap().extend(json!({"width":100,"height":80,"thickness":8,"body_name":"New end plate"}).as_object().unwrap().clone());
+    let id = run(&mut s, "frame.plate", p)["feature"].as_u64().unwrap();
+    let solidcraft_doc::FeatureKind::FramePlate { member: Some(member), .. } = &s.doc.feature(id).unwrap().kind else { panic!("plate member") };
+    let solidcraft_doc::FeatureKind::FrameMember { names, .. } = &s.doc.feature(member.feature.0).unwrap().kind else { panic!("member") };
+    assert_eq!(names.get(&member.line).unwrap(), "Post (2)");
+    let plate = bodies(&mut s).into_iter().find(|b| b.0 == "New end plate").unwrap();
+    assert!(near3(plate.2, [350., -40., 300.]) && near3(plate.3, [450., 40., 308.]), "{plate:?}");
+}
+
+#[test]
+fn saved_plate_planes_cannot_silently_ignore_a_wrapped_offset() {
+    let mut s = plate_post();
+    let p = rectangular_plate(&s, true);
+    let id = run(&mut s, "frame.plate", p)["feature"].as_u64().unwrap();
+    let mut saved: Value = serde_json::from_str(&s.doc.to_json()).unwrap();
+    let feature = saved["features"].as_array_mut().unwrap().iter_mut().find(|f| f["id"].as_u64() == Some(id)).unwrap();
+    let plane = feature["plane"].take();
+    feature["plane"] = json!({"type":"offset","base":plane,"distance":"10 mm"});
+    let reopened = Session::new(solidcraft_doc::Document::from_json(&saved.to_string()).unwrap());
+    assert!(reopened.model.result(id).unwrap().error.as_deref().unwrap().contains("direct persistent planar face"));
+    assert!(reopened.model.state().body("EndPlate").is_none());
+}

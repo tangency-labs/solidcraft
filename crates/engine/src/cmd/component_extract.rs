@@ -309,7 +309,7 @@ fn part_design(s: &Session, sc: &Scope, stem: &str, cmd: &str) -> Result<(Sessio
                 local_path(&mut face.path, &sc.own);
                 local_path(&mut face.author_path, &sc.own);
             }
-            FeatureKind::Sketch { plane, .. } => {
+            FeatureKind::Sketch { plane, .. } | FeatureKind::FramePlate { plane, .. } => {
                 if let Some(anchor) = crate::cmd::sketch::face::anchor_mut(plane) {
                     anchor.component = to_root(anchor.component);
                     local_path(&mut anchor.path, &sc.own);
