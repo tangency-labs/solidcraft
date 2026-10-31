@@ -611,6 +611,7 @@ fn sketch_scene_key(app: &SolveApp, proj: &Proj) -> u64 {
     app.preferences.grid_follows_view.hash(&mut h);
     // Finished sketches are drawn over the bodies when the preference says so.
     app.preferences.reference_geometry_through_bodies.hash(&mut h);
+    app.preferences.section_clips_sketches.hash(&mut h);
     app.preferences.sketch_halo.hash(&mut h);
     // The grid previews the plane Create Sketch would take (#6975).
     previewed_sketch_plane(app).map(|p| [p.origin, p.x, p.y].map(|v| [v.x, v.y, v.z].map(f64::to_bits))).hash(&mut h);
@@ -1764,6 +1765,9 @@ fn build_sketch_scene(app: &SolveApp, proj: &Proj) -> GpuScene {
             }
         }
     }
+    // A section removes material, not sketch references (#8617). The guide passes keep their
+    // depth testing, so this does not make a finished sketch show through a body.
+    let whole_sketches = section_plane(app).is_some() && !app.preferences.section_clips_sketches;
     for sid in visible_sketches(app) {
         let Some(ss) = st.sketch(sid) else { continue };
         let active = s.active_sketch == Some(sid);
@@ -1775,7 +1779,12 @@ fn build_sketch_scene(app: &SolveApp, proj: &Proj) -> GpuScene {
             let display = crate::sketch_display::profile_region(app, sid, index, &ss.plane, proj);
             for tri in display.as_ref().as_ref().map_or_else(Vec::new, |region| crate::sketch_display::fill_triangles(region, &mut fill_budget)) {
                 for q in tri {
-                    sc.trans_tri((ss.plane.to_world(q) + lift).to_f32(), [0.0; 3], profile_fill);
+                    let p = (ss.plane.to_world(q) + lift).to_f32();
+                    if whole_sketches {
+                        sc.guide_tri(p, profile_fill);
+                    } else {
+                        sc.trans_tri(p, [0.0; 3], profile_fill);
+                    }
                 }
             }
         }
@@ -1808,12 +1817,20 @@ fn build_sketch_scene(app: &SolveApp, proj: &Proj) -> GpuScene {
         let halo = sc.color(c4(tk.sketch_halo));
         for (segs, _, width, _) in strokes.iter().filter(|stroke| stroke.3) {
             for (a, b) in segs {
-                sc.line(a.to_f32(), b.to_f32(), halo, width + SKETCH_HALO_WIDTH, through);
+                if whole_sketches && !through {
+                    sc.guide_line(a.to_f32(), b.to_f32(), halo, width + SKETCH_HALO_WIDTH);
+                } else {
+                    sc.line(a.to_f32(), b.to_f32(), halo, width + SKETCH_HALO_WIDTH, through);
+                }
             }
         }
         for (segs, color, width, _) in &strokes {
             for (a, b) in segs {
-                sc.line(a.to_f32(), b.to_f32(), *color, *width, through);
+                if whole_sketches && !through {
+                    sc.guide_line(a.to_f32(), b.to_f32(), *color, *width);
+                } else {
+                    sc.line(a.to_f32(), b.to_f32(), *color, *width, through);
+                }
             }
         }
     }
@@ -3366,18 +3383,28 @@ pub(crate) fn profile_fill(sc: &mut GpuScene, app: &SolveApp, sketch: u64, index
     let w = |q: solidcraft_engine::geom::Vec2| (plane.to_world(q) + lift).to_f32();
     let col = sc.color(c4(fill));
     let edge = sc.color(c4(edge));
+    let whole_sketches = section_plane(app).is_some() && !app.preferences.section_clips_sketches;
     // In the translucent pass (after the grid and edges) so it covers them.
     let proj = display_proj(app);
     let display = crate::sketch_display::profile_region(app, sketch, index, &plane, &proj);
     for [a, b, c] in display.as_ref().as_ref().map_or_else(Vec::new, |region| crate::sketch_display::fill_triangles(region, &mut 65_536)) {
-        sc.trans_tri(w(a), [0.0; 3], col);
-        sc.trans_tri(w(b), [0.0; 3], col);
-        sc.trans_tri(w(c), [0.0; 3], col);
+        for q in [a, b, c] {
+            if whole_sketches {
+                sc.guide_tri(w(q), col);
+            } else {
+                sc.trans_tri(w(q), [0.0; 3], col);
+            }
+        }
     }
     for lp in std::iter::once(&p.region.outer).chain(&p.region.holes) {
         for part in crate::sketch_display::boundary_parts(lp, &plane, &proj, app.viewport.pixels_per_point()) {
             for pair in part.windows(2) {
-                sc.line((pair[0] + lift).to_f32(), (pair[1] + lift).to_f32(), edge, 2.0, false);
+                let (a, b) = ((pair[0] + lift).to_f32(), (pair[1] + lift).to_f32());
+                if whole_sketches {
+                    sc.guide_line(a, b, edge, 2.0);
+                } else {
+                    sc.line(a, b, edge, 2.0, false);
+                }
             }
         }
     }
@@ -3485,6 +3512,7 @@ fn highlight_geometry_key(app: &SolveApp) -> u64 {
     app.origin_visible().hash(&mut h);
     app.picking_plane().hash(&mut h);
     app.preferences.reference_geometry_through_bodies.hash(&mut h);
+    app.preferences.section_clips_sketches.hash(&mut h);
     app.session.visibility.hidden_origin.hash(&mut h);
     app.session.visibility.hidden_bodies.hash(&mut h);
     app.dialog.as_ref().map(|d| &d.edit_source_bodies).hash(&mut h);
@@ -9865,6 +9893,68 @@ mod tests {
         assert_eq!(sc.xray.len(), planes * 6 * crate::gpu::TRI_SIZE);
         assert!(sc.trans.is_empty() && sc.guide_trans.is_empty() && sc.guide_lines.is_empty());
         assert!(sc.overlay.len() >= (planes * 4 + 3) * crate::gpu::LINE_SIZE);
+    }
+
+    /// #8617: sketch outlines, fills and profile feedback stay visible on the removed side.
+    #[test]
+    fn a_section_leaves_sketches_whole_and_profiles_available_to_extrude() {
+        let mut app = SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
+        app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+        let sketch = app.session.active_sketch.unwrap();
+        for x in [-20, 20] {
+            app.run("sketch.circle.center", json!({"center": [x, 0], "radius": 8})).unwrap();
+        }
+        app.run("sketch.finish", json!({})).unwrap();
+        app.cam = Camera { target: Vec3::ZERO, yaw: 0.0, pitch: std::f64::consts::FRAC_PI_2, distance: 70.0, ..Default::default() };
+        let rect = Rect::from_min_size(Pos2::ZERO, vec2(800.0, 600.0));
+        let proj = projection(&app, rect);
+        let before = build_sketch_scene(&app, &proj).merged();
+        assert!(!before.lines.is_empty() && !before.trans.is_empty());
+        app.run("inspect.section", json!({"plane": "YZ"})).unwrap();
+        let whole = build_sketch_scene(&app, &proj).merged();
+        assert_eq!(whole.guide_lines.len(), before.lines.len());
+        assert_eq!(whole.guide_trans.len(), before.trans.len());
+        assert!(whole.lines.is_empty() && whole.trans.is_empty() && whole.overlay.is_empty(), "whole sketches remain depth-tested");
+
+        let at = proj.to_screen(Vec3::new(20.0, 0.0, 0.0)).unwrap();
+        let index = pick(&app, &proj, at)
+            .iter()
+            .find_map(|hit| match hit {
+                Hit::Profile { sketch: sid, index } if *sid == sketch => Some(*index),
+                _ => None,
+            })
+            .expect("the circle on the cut-away side is pickable");
+        let profile = Sel::Profile { sketch, index };
+        let feedback = |app: &SolveApp| {
+            let mut sc = GpuScene::default();
+            profile_fill(&mut sc, app, sketch, index, Color32::WHITE, Color32::WHITE);
+            sc
+        };
+        let selected = feedback(&app);
+        assert!(!selected.guide_trans.is_empty() && !selected.guide_lines.is_empty());
+        assert!(selected.trans.is_empty() && selected.lines.is_empty());
+        let mut dialog = crate::dialogs::Dialog::for_command(&app, "solid.extrude").unwrap();
+        dialog.pick(&app.session, profile.clone());
+        assert!(dialog.items().contains(&profile), "Extrude accepts the visible profile");
+
+        let picture = |app: &SolveApp| {
+            let scene = crate::control::view_scene(app, solidcraft_engine::view::Guides { grid: false, axes: false });
+            solidcraft_engine::render::render(&scene, &app.cam, 300, 200).rgba
+        };
+        let captured = picture(&app);
+        let keys = (sketch_scene_key(&app, &proj), highlight_geometry_key(&app));
+        crate::prefs::set(&mut app, &json!({"section_clips_sketches": true})).unwrap();
+        assert_ne!(sketch_scene_key(&app, &proj), keys.0);
+        assert_ne!(highlight_geometry_key(&app), keys.1);
+        let clipped = build_sketch_scene(&app, &proj).merged();
+        assert_eq!((clipped.lines.len(), clipped.trans.len()), (before.lines.len(), before.trans.len()));
+        assert!(clipped.guide_lines.is_empty() && clipped.guide_trans.is_empty());
+        let selected = feedback(&app);
+        assert!(!selected.trans.is_empty() && !selected.lines.is_empty());
+        assert!(selected.guide_trans.is_empty() && selected.guide_lines.is_empty());
+        let clipped = picture(&app);
+        let changed = captured.chunks(4).zip(clipped.chunks(4)).filter(|(a, b)| a != b).count();
+        assert!(changed > 100, "the preference also restores clipping in model captures: {changed} changed pixels");
     }
 
     #[test]

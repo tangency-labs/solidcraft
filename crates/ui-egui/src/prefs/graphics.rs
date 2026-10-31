@@ -181,6 +181,7 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 });
                 crate::prefs::view_angles_checkbox(app, left);
                 setting::reference_geometry_through_bodies(app, left).on_hover_text(app.tr("settings.reference_geometry_through_bodies_help"));
+                setting::section_clips_sketches(app, left).on_hover_text(app.tr("settings.section_clips_sketches_help"));
                 setting::sketch_halo(app, left);
                 setting::vertex_markers(app, left);
             }

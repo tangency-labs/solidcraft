@@ -483,8 +483,8 @@ pub struct GpuScene {
     /// Lines drawn first, under everything (the ground grid: the model hides it, it never
     /// hides the model).
     pub under: Vec<u8>,
-    /// Origin and construction planes (translucent, like `trans`) and their axes (lines, like
-    /// `lines`): reference geometry, never cut away by a section (#1229).
+    /// Reference planes, axes and sketches: depth-tested translucent triangles and lines,
+    /// left whole by a section (#1229, #8617).
     pub guide_trans: Vec<u8>,
     pub guide_lines: Vec<u8>,
     /// Opaque bodies drawn from their plans on the GPU, like `tris`.
@@ -3746,8 +3746,10 @@ impl Renderer {
         tris(pass, &res.tri_hl, &h.tris);
         pass.set_bind_group(0, scene_bind(m, &res.bind), &[]);
         lines(pass, &res.line, &m.lines);
+        lines(pass, &res.guide_line, &m.guide_lines);
         pass.set_bind_group(0, scene_bind(sk, &res.bind), &[]);
         lines(pass, &res.line, &sk.lines);
+        lines(pass, &res.guide_line, &sk.guide_lines);
         pass.set_bind_group(0, scene_bind(m, &res.bind), &[]);
         lines(pass, &res.line_hidden, &m.hidden);
         pass.set_bind_group(0, scene_bind(h, &res.bind), &[]);
@@ -3807,6 +3809,7 @@ impl Renderer {
     ) {
         pass.set_bind_group(0, scene_bind(sk, &res.bind), &[]);
         tris(pass, &res.trans, &sk.trans);
+        tris(pass, &res.guide_trans, &sk.guide_trans);
         pass.set_bind_group(0, scene_bind(h, &res.bind), &[]);
         tris(pass, &res.trans, &h.trans);
         tris(pass, &res.guide_trans, &h.guide_trans);

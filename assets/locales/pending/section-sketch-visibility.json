@@ -1,0 +1,34 @@
+{
+  "ar": {
+    "settings.section_clips_sketches": "تحليل المقطع يقص الرسومات التخطيطية",
+    "settings.section_clips_sketches_help": "قص منحنيات الرسومات التخطيطية ومناطقها عند مستوى المقطع. عطّل هذا الخيار لإبقاء الرسومات كاملة أثناء عرض مقاطع الأجسام."
+  },
+  "de": {
+    "settings.section_clips_sketches": "Schnittanalyse schneidet Skizzen",
+    "settings.section_clips_sketches_help": "Skizzenkurven und Profile an der Schnittebene abschneiden. Ausschalten, um Skizzen beim Schneiden von Körpern vollständig anzuzeigen."
+  },
+  "en": {
+    "settings.section_clips_sketches": "Section Analysis clips sketches",
+    "settings.section_clips_sketches_help": "Clip sketch curves and profiles at the section plane. Turn off to keep sketches whole while sectioning bodies."
+  },
+  "he": {
+    "settings.section_clips_sketches": "ניתוח חתך חותך סקיצות",
+    "settings.section_clips_sketches_help": "חיתוך עקומות ופרופילים של סקיצות במישור החתך. יש להשבית כדי להציג סקיצות שלמות בעת חיתוך גופים."
+  },
+  "ja": {
+    "settings.section_clips_sketches": "断面解析でスケッチを切り取る",
+    "settings.section_clips_sketches_help": "断面平面でスケッチの曲線とプロファイルを切り取ります。オフにすると、ボディの断面表示中もスケッチ全体を表示します。"
+  },
+  "ko": {
+    "settings.section_clips_sketches": "단면 분석에서 스케치 자르기",
+    "settings.section_clips_sketches_help": "단면 평면에서 스케치 곡선과 프로파일을 자릅니다. 끄면 바디의 단면을 표시하는 동안에도 스케치 전체를 표시합니다."
+  },
+  "vi": {
+    "settings.section_clips_sketches": "Cắt bản phác thảo khi phân tích mặt cắt",
+    "settings.section_clips_sketches_help": "Cắt các đường cong và biên dạng phác thảo tại mặt phẳng cắt. Tắt tùy chọn này để giữ nguyên toàn bộ bản phác thảo khi cắt các khối."
+  },
+  "zh": {
+    "settings.section_clips_sketches": "剖面分析裁剪草图",
+    "settings.section_clips_sketches_help": "在剖面平面处裁剪草图曲线和轮廓。关闭后，剖切实体时仍显示完整草图。"
+  }
+}

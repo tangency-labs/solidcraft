@@ -897,7 +897,8 @@ fn build_scene(
             continue;
         }
         for (pts, col, cons) in sketch_lines_in(&ss.sketch, &ss.plane, active, &ss.report.curve_determined, &mut sampler, p) {
-            sc.lines.push(SceneLine { points: pts, color: col, alpha: 1.0, width: if cons { 1.0 } else { 1.6 }, on_top: active });
+            let lines = if section.is_some() { &mut sc.unclipped_lines } else { &mut sc.lines };
+            lines.push(SceneLine { points: pts, color: col, alpha: 1.0, width: if cons { 1.0 } else { 1.6 }, on_top: active });
         }
     }
     sc
@@ -1219,6 +1220,28 @@ mod tests {
         let img = solidcraft_render::render(&scene(&s, &cam), &cam, 400, 400);
         let dark = img.rgba.chunks(4).filter(|p| p[0] < 70 && p[1] < 70 && p[2] < 75).count();
         assert!(dark > 40, "silhouette pixels: {dark}");
+    }
+
+    /// #8617: a section cuts bodies, while sketches on either side remain whole.
+    #[test]
+    fn cpu_pictures_leave_sketches_whole_in_a_section() {
+        let mut s = Session::default();
+        s.execute("sketch.create", &json!({"plane": "XY"})).unwrap();
+        for x in [-20, 20] {
+            s.execute("sketch.circle.center", &json!({"center": [x, 0], "radius": 8})).unwrap();
+        }
+        let cam = Camera { target: Vec3::ZERO, yaw: 0.0, pitch: std::f64::consts::FRAC_PI_2, distance: 70.0, ..Default::default() };
+        for finished in [false, true] {
+            if finished {
+                s.execute("sketch.finish", &json!({})).unwrap();
+            }
+            let picture =
+                |section| solidcraft_render::render(&scene_with_guides(&s, &cam, section, Guides { grid: false, axes: false }), &cam, 300, 200).rgba;
+            let whole = picture(None);
+            let cut = picture(Some((Vec3::ZERO, Vec3::X)));
+            let changed = whole.chunks(4).zip(cut.chunks(4)).filter(|(a, b)| a != b).count();
+            assert_eq!(changed, 0, "a section clipped the sketch (finished: {finished})");
+        }
     }
 
     /// The CPU rasterizer: a section shows; the cut part is gone and the cut face is drawn.
