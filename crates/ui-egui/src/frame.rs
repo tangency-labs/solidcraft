@@ -61,7 +61,13 @@ pub fn offset_anchor(docked: Pos2, offset: egui::Vec2, vp: egui::Rect, side: Sid
 /// `moved` (as last frame left it; `applied` of it is where the dialog is now, after keeping
 /// it on screen). Called before the band's buttons are added, so they keep their clicks.
 pub fn drag_dock(ui: &Ui, band: egui::Rect, key: &str, moved: egui::Vec2, applied: egui::Vec2) {
-    crate::scenario::publish_handle("dialog:title", band.center());
+    drag_dock_named(ui, "dialog:title", band, key, moved, applied);
+}
+
+/// [`drag_dock`] for a panel that stays on screen beside a command dialog (the Sketch palette),
+/// so its band is published under its own scenario `handle` instead of the dialog's.
+pub fn drag_dock_named(ui: &Ui, handle: &str, band: egui::Rect, key: &str, moved: egui::Vec2, applied: egui::Vec2) {
+    crate::scenario::publish_handle(handle, band.center());
     let response = ui.interact(band, ui.id().with("sc_dock_drag"), egui::Sense::drag());
     if response.dragged() {
         let frame = ui.ctx().cumulative_frame_nr();

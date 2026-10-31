@@ -8,6 +8,9 @@
 //!
 //! The line type is also a drawing mode: with nothing selected, Construction (or X) makes what
 //! is drawn next construction geometry until it is switched back.
+//!
+//! The palette docks at the right edge but its header drags it, like a command dialog's title:
+//! it then stays where it was put for the rest of the session (#8923).
 
 use std::cell::Cell;
 
@@ -255,6 +258,25 @@ pub fn fits_beside_a_dialog(app: &SolveApp, ctx: &egui::Context) -> bool {
     vp.width() >= width(vp) + crate::frame::DIALOG_MIN_W + 40.0
 }
 
+/// The dock offset the palette's header drags.
+const DRAG_KEY: &str = "sketch_palette";
+
+/// Is the palette at its dock against the right edge, i.e. not dragged elsewhere?
+pub fn docked(ctx: &egui::Context) -> bool {
+    crate::frame::dock_offset(ctx, DRAG_KEY) == egui::Vec2::ZERO
+}
+
+/// The width a command dialog docked at the left edge of `vp` may take without covering the
+/// palette. A palette dragged to where it leaves less than a dialog's width gives up its claim:
+/// the dialog then takes the whole viewport and the two may overlap, as the user put them.
+pub fn room_left_of(app: &SolveApp, ctx: &egui::Context, vp: egui::Rect) -> f32 {
+    let space = Tokens::get().space_8;
+    match app.viewport.palette_rect.filter(|r| r.is_finite() && r.is_positive()) {
+        Some(r) if docked(ctx) || r.left() - vp.left() - space >= crate::frame::DIALOG_MIN_W => (r.left() - vp.left() - space).max(0.0),
+        _ => vp.width(),
+    }
+}
+
 /// Is the palette on screen? It stays for as long as a sketch is being edited, a command dialog
 /// open or not: the dialog takes the left edge of the viewport (or the left column) and the
 /// palette keeps the right.
@@ -342,7 +364,19 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let bottom = vp.bottom().min(ctx.content_rect().bottom()) - gap;
     let top = crate::shell::panel_top(app, vp, bottom, crate::frame::Side::Right);
     let frame = crate::ui_kit::Panel::palette_frame(ctx, app.ui.layout);
-    let anchor = egui::pos2(vp.right() - gap - frame.stroke.width, top + frame.stroke.width);
+    let docked = egui::pos2(vp.right() - gap - frame.stroke.width, top + frame.stroke.width);
+    // Dragged, the palette may go wherever a command dialog may: over Browser and History too.
+    let moved = crate::frame::dock_offset(ctx, DRAG_KEY);
+    let (anchor, bounds) = if moved == egui::Vec2::ZERO {
+        (docked, vp)
+    } else {
+        let bounds = crate::shell::tool_drag_rect(app, vp).union(vp);
+        let mut anchor = crate::frame::offset_anchor(docked, moved, bounds, crate::frame::Side::Right);
+        // Never so low that the palette folds into a scrolled sliver: it keeps the height its
+        // dock guarantees (the same 360 pt `shell::panel_top` keeps), so Finish stays in view.
+        anchor.y = anchor.y.min((bottom - 360.0).max(docked.y));
+        (anchor, bounds)
+    };
     let shown = |key: &str| match key {
         "grid" => !opts.hide_grid,
         "snap" => !opts.no_snap,
@@ -370,30 +404,48 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         app.tr_label("ui.palette_sketch_options"),
         egui::Id::new("sc_sketch_palette"),
         anchor,
-        vp,
+        bounds,
         crate::frame::Side::Right,
         frame,
     )
     .width(width(vp));
+    let placed = panel.bounded_anchor(ctx);
+    let top = placed.y - frame.stroke.width;
+    let header_height = egui::Id::new("sc_sketch_palette_header_height");
     let response = panel.window(ctx).show(ctx, |ui| {
         panel.palette(ui, bottom, top, |ui, part| match part {
             crate::ui_kit::Part::Header => {
+                // The header is the drag handle. It is laid down before the header's labels, as
+                // a dialog's title band is, so their tooltips stay; last frame's height sizes it.
+                if let Some(height) = ui.ctx().data(|d| d.get_temp::<f32>(header_height)).filter(|h| h.is_finite() && *h > 0.0) {
+                    let band = egui::Rect::from_min_size(ui.cursor().min, egui::vec2(ui.available_width(), height));
+                    // Undragged, it is docked even where a short view squeezes it: that is no move.
+                    let applied = if moved == egui::Vec2::ZERO { moved } else { placed - docked };
+                    crate::frame::drag_dock_named(ui, "sketch_palette:title", band, DRAG_KEY, moved, applied);
+                }
                 let status = if !solved || !geometry || remaining == 0 {
                     crate::i18n::tr_dyn(&dof_text(remaining, solved, geometry))
                 } else {
                     crate::i18n::format(if remaining == 1 { "sketch.dof_left_one" } else { "sketch.dof_left" }, &[("count", &remaining.to_string())])
                 };
-                crate::ui_kit::status_header(
-                    ui,
-                    "sketch_palette",
-                    &name,
-                    crate::ui_kit::StatusHeader {
-                        icon: "sketch",
-                        text: &status,
-                        complete: solved && remaining == 0 && geometry,
-                        fraction: constrained_fraction(remaining, total, solved && geometry),
-                    },
-                );
+                // Selectable text would take the drag from the band beneath it.
+                let header = ui
+                    .scope(|ui| {
+                        ui.style_mut().interaction.selectable_labels = false;
+                        crate::ui_kit::status_header(
+                            ui,
+                            "sketch_palette",
+                            &name,
+                            crate::ui_kit::StatusHeader {
+                                icon: "sketch",
+                                text: &status,
+                                complete: solved && remaining == 0 && geometry,
+                                fraction: constrained_fraction(remaining, total, solved && geometry),
+                            },
+                        )
+                    })
+                    .inner;
+                ui.ctx().data_mut(|d| d.insert_temp(header_height, header.rect.height()));
             }
             crate::ui_kit::Part::Body => {
                 let t = crate::theme::Tokens::get();
@@ -756,6 +808,58 @@ mod tests {
                 assert!(!p.intersect(d).is_positive(), "width {width}: palette {p:?} overlaps dialog {d:?}");
             }
             assert!(h.app.dialog.is_some(), "width {width}: the dialog stays open");
+        }
+    }
+
+    /// #8923: the header drags the palette like a dialog's title; it stays on screen, keeps
+    /// working where it is put, keeps its place for the next sketch, and a dialog opened while
+    /// it sits at the left is not squeezed to nothing beside it.
+    #[test]
+    fn the_header_drags_the_palette_and_it_keeps_its_place() {
+        for mode in [crate::shell::LayoutMode::Floating, crate::shell::LayoutMode::Docked] {
+            let mut h = crate::scenario::Harness::new();
+            h.call("ui.set", json!({"layout":mode}));
+            h.call("ui.resize", json!({"width":1400,"height":900}));
+            h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+            h.app.run("sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[40,30]})).unwrap();
+            h.settle();
+            let rest = h.app.viewport.palette_rect.unwrap();
+            assert!(docked(&h.ctx), "{mode:?}: the palette starts at its dock");
+            let view = h.app.viewport.rect.unwrap();
+            assert!(room_left_of(&h.app, &h.ctx, view) < view.width() - rest.width(), "{mode:?}: docked, the palette keeps its room");
+            let title = crate::scenario::handle_at("sketch_palette:title").expect("the header is a drag handle");
+            assert!(rest.contains(title), "{mode:?}: the handle {title:?} is on the palette {rest:?}");
+            h.call("ui.drag", json!({"x0": title.x, "y0": title.y, "x1": title.x - 600.0, "y1": title.y + 60.0, "steps": 8}));
+            h.frames(4);
+            let moved = h.app.viewport.palette_rect.unwrap();
+            assert!((moved.min - rest.min - egui::vec2(-600.0, 60.0)).length() < 2.0, "{mode:?}: {rest:?} -> {moved:?}");
+            assert!(!docked(&h.ctx), "{mode:?}: dragged, the palette is no longer docked");
+            assert!(h.app.session.active_sketch.is_some(), "{mode:?}: dragging the header keeps the sketch open");
+
+            // Dragged far off, it stays on screen.
+            let title = crate::scenario::handle_at("sketch_palette:title").unwrap();
+            h.call("ui.drag", json!({"x0": title.x, "y0": title.y, "x1": title.x - 3000.0, "y1": title.y + 3000.0, "steps": 8}));
+            h.frames(4);
+            let viewport = h.app.viewport.rect.unwrap();
+            let far = h.app.viewport.palette_rect.unwrap();
+            assert!(viewport.expand(1.0).contains(far.min), "{mode:?}: {far:?} left {viewport:?}");
+            assert!(crate::scenario::handle_at("sketch_palette:title").is_some_and(|t| viewport.contains(t)), "{mode:?}: the handle stays reachable");
+
+            // A palette at the left leaves a wide dialog docked there the whole view, not the
+            // sliver to its left; docked at the right it still keeps its own room.
+            assert_eq!(room_left_of(&h.app, &h.ctx, viewport), viewport.width(), "{mode:?}: {far:?}");
+
+            // Its controls still work where it is, and the next sketch finds it there.
+            let placed = h.app.viewport.palette_rect.unwrap();
+            let finish = crate::scenario::handle_at("sketch_palette:finish").unwrap();
+            assert!(placed.contains(finish), "{mode:?}: Finish {finish:?} rides with the palette {placed:?}");
+            h.call("ui.click", json!({"x": finish.x, "y": finish.y}));
+            h.settle();
+            assert!(h.app.session.active_sketch.is_none(), "{mode:?}: Finish Sketch works from the moved palette");
+            h.app.run("sketch.create", json!({"plane":"XZ"})).unwrap();
+            h.settle();
+            let again = h.app.viewport.palette_rect.unwrap();
+            assert!((again.min - placed.min).length() < 2.0, "{mode:?}: the next sketch keeps the place: {placed:?} -> {again:?}");
         }
     }
 

@@ -220,7 +220,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     .body_rows(16.0)
     .reset_scroll(d.reset_scroll);
     let panel = if side == crate::frame::Side::Left {
-        let available = palette.map_or(viewport.width(), |r| (r.left() - viewport.left() - crate::theme::Tokens::get().space_8).max(0.0));
+        let available = crate::sketch_palette::room_left_of(app, ctx, viewport);
         panel.width((crate::theme::Tokens::get().form_card_width * 3.0).min(available))
     } else {
         panel
