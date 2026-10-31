@@ -68,7 +68,7 @@ impl Sketch {
     /// `equation` kept beside it. Returns the curve's index.
     pub fn add_equation_curve(&mut self, at: &[Vec2], closed: bool, mut equation: EquationCurve) -> Result<usize> {
         let pts = self.equation_points(at, closed, None)?;
-        let curve = self.add_curve(CurveKind::Spline { pts, control: false, degree: 3, periodic: closed }, None)?;
+        let curve = self.add_curve(CurveKind::Spline { pts, control: false, degree: 3, periodic: closed, handles: Vec::new() }, None)?;
         equation.curve = self.curves.get(curve).map(|c| c.id.clone()).ok_or_else(|| SketchError::Invalid("the new curve is missing".into()))?;
         self.equations.push(equation);
         Ok(curve)
@@ -89,7 +89,7 @@ impl Sketch {
         let pts = self.equation_points(at, closed, Some((first, keep_end)))?;
         let unused: Vec<usize> = old.iter().copied().filter(|p| !pts.contains(p)).collect();
         if let Some(c) = self.curves.get_mut(curve) {
-            c.kind = CurveKind::Spline { pts, control: false, degree: 3, periodic: closed };
+            c.kind = CurveKind::Spline { pts, control: false, degree: 3, periodic: closed, handles: Vec::new() };
         }
         // The old points no other curve uses (the in-between points, and an end a closed curve
         // no longer has) go, with the constraints on them.

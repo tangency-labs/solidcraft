@@ -178,7 +178,7 @@ fn a_four_bar_edge_follows_a_stationary_pointer_and_keeps_the_grab() {
     let b = screen(&mut h, -7.0, 11.2);
     let undo = h.app.session.undo.len();
     press_and_move(&mut h, &[a, b]);
-    assert_eq!(h.app.viewport.point_drag.as_ref().map(|(id, _, _)| id.as_str()), Some("crank"), "grabbed the edge, not an endpoint");
+    assert_eq!(h.app.viewport.point_drag.as_ref().map(|(id, _, _, _, _)| id.as_str()), Some("crank"), "grabbed the edge, not an endpoint");
     h.frames(8);
     let nearest = Vec2::new(-10.0, 16.0).normalized().unwrap() * 10.0;
     assert!(point(&h, "crank.end").dist(nearest) < 0.05, "{:?}", point(&h, "crank.end"));
@@ -197,7 +197,7 @@ fn a_four_bar_release_uses_the_final_pointer_position() {
     let end = screen(&mut h, -10.0, 16.0);
     press_and_move(&mut h, &[a, b]);
     h.frames(8);
-    assert_eq!(h.app.viewport.point_drag.as_ref().map(|(id, _, _)| id.as_str()), Some("crank.end"));
+    assert_eq!(h.app.viewport.point_drag.as_ref().map(|(id, _, _, _, _)| id.as_str()), Some("crank.end"));
     release(&mut h, end);
     let nearest = Vec2::new(-10.0, 16.0).normalized().unwrap() * 10.0;
     assert!(point(&h, "crank.end").dist(nearest) < 0.05, "release left {:?}", point(&h, "crank.end"));
@@ -210,7 +210,7 @@ fn a_four_bar_edge_grab_keeps_its_pick_offset_when_rotating() {
     let a = screen(&mut h, -7.0, 0.25);
     let b = screen(&mut h, -7.0, 11.2);
     press_and_move(&mut h, &[a, b]);
-    assert_eq!(h.app.viewport.point_drag.as_ref().map(|(id, _, _)| id.as_str()), Some("crank"));
+    assert_eq!(h.app.viewport.point_drag.as_ref().map(|(id, _, _, _, _)| id.as_str()), Some("crank"));
     h.frames(8);
     release(&mut h, b);
     let local = Vec2::new(0.7, -0.025);

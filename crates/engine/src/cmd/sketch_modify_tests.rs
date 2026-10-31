@@ -1259,7 +1259,8 @@ fn a_point_added_to_a_spline_keeps_its_constraints_and_undoes() {
     run(&mut s, "sketch.line", json!({"points": [format!("{sid}.end"), [40, 6]], "connect": false}));
     let sk = sketch(&s);
     let si = sk.curve_index(&sid).unwrap();
-    let old = sk.curves[si].kind.point_ids();
+    let fit_ids = |k: &CurveKind| if let CurveKind::Spline { pts, .. } = k { pts.clone() } else { Vec::new() };
+    let old = fit_ids(&sk.curves[si].kind);
     let names: Vec<String> = old.iter().map(|i| sk.points[*i].id.clone()).collect();
     run(&mut s, "sketch.dimension", json!({"entities": [names[0], names[1]], "value": 12.8}));
     let before = sketch(&s);
@@ -1271,7 +1272,7 @@ fn a_point_added_to_a_spline_keeps_its_constraints_and_undoes() {
     let out = run(&mut s, "sketch.spline.insert_point", json!({"curve": sid, "at": [15, 6]}));
     let after = sketch(&s);
     let new = after.point_index(out["point"].as_str().unwrap()).unwrap();
-    let now = after.curves[si].kind.point_ids();
+    let now = fit_ids(&after.curves[si].kind);
     assert_eq!(now.len(), old.len() + 1);
     assert_eq!(now[2], new, "between the second and third fit points: {now:?}");
     let q = after.point(new).unwrap();
@@ -1334,10 +1335,18 @@ fn a_reversed_spline_runs_the_other_way_along_the_same_path() {
         let r = run(&mut s, "sketch.spline.reverse", json!({"curve": id}));
         assert_eq!(r["curve"], json!(id), "{r}");
         let after = sketch(&s);
-        let mut reversed = before.curves[ci].kind.point_ids();
+        let fit_points = |k: &CurveKind| match k {
+            CurveKind::Spline { pts, handles, .. } => (pts.clone(), handles.clone()),
+            _ => (Vec::new(), Vec::new()),
+        };
+        let (mut reversed, handles) = fit_points(&before.curves[ci].kind);
         reversed.reverse();
-        assert_eq!(after.curves[ci].kind.point_ids(), reversed, "{id}");
-        assert_eq!((&after.points, &after.constraints), (&before.points, &before.constraints), "{id}: points and constraints stay");
+        assert_eq!(fit_points(&after.curves[ci].kind).0, reversed, "{id}");
+        // Tangent handles (#6502) turn about their fit points; every other point stays.
+        let others = |sk: &solidcraft_sketch::Sketch| {
+            sk.points.iter().enumerate().filter(|(i, _)| !handles.contains(i)).map(|(_, p)| p.clone()).collect::<Vec<_>>()
+        };
+        assert_eq!((others(&after), &after.constraints), (others(&before), &before.constraints), "{id}: points and constraints stay");
         let segs = after.exact_segs(ci).unwrap();
         for (a, b) in [(&path, &segs), (&segs, &path)] {
             for seg in a {
@@ -1775,7 +1784,8 @@ fn irregular_closed_spline_offset_certificate_edits_undoes_and_reopens() {
     let result = run(&mut s, "sketch.offset", json!({"curves":["s1"],"distance":2.0,"chain":true}));
     let output = result["curves"][0].as_str().unwrap().to_string();
     let parameter = result["param"].as_str().unwrap().to_string();
-    let point_ids = sketch(&s).curves[1].kind.point_ids();
+    let output_index = sketch(&s).curve_index(&output).unwrap();
+    let point_ids = sketch(&s).curves[output_index].kind.point_ids();
     let verify = |s: &Session, distance: f64| {
         let state = s.world_state();
         let sk = &state.sketch(1).unwrap().sketch;
@@ -2931,12 +2941,13 @@ fn freeform_offsets_trim_folds_and_round_chain_corners_into_an_extrudable_wall()
     ]);
     let mut s = new_sketch();
     run(&mut s, "sketch.spline.fit_point", json!({"points": cookie, "periodic": true}));
+    let source_dof = run(&mut s, "sketch.inspect", json!({}))["dof"].as_u64().unwrap();
     let (before, params) = (s.doc.to_json(), s.doc.params.len());
     let out = run(&mut s, "sketch.offset", json!({"curves": ["s1"], "distance": 1.26}));
     let curves = ids(&out["curves"]);
     assert!(!curves.is_empty(), "{out}");
     assert_eq!(out["param"], Value::Null, "a trimmed offset has no distance to drive: {out}");
-    assert_eq!(out["sketch"]["dof"], 30, "the offset adds no freedom (only the source's fit points move): {out}");
+    assert_eq!(out["sketch"]["dof"], source_dof, "the offset adds no freedom: {out}");
     assert_eq!(s.doc.params.len(), params, "no orphan distance parameter");
     let sk = sketch(&s);
     assert!(sk.freeform_offsets.is_empty() && !sk.constraints.iter().any(|c| matches!(c.kind, ConstraintKind::OffsetDistance { .. })));

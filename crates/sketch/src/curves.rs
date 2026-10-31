@@ -8,6 +8,7 @@ use solidcraft_geom::Vec2;
 
 /// Polyline samples per spline span / conic / ellipse quarter.
 const SPAN_SAMPLES: usize = 24;
+pub(crate) const TANGENT_HANDLE_LENGTH_SCALE: f64 = 4.55;
 /// Most points a spline may have.
 pub const MAX_SPLINE_POINTS: usize = 500;
 
@@ -190,6 +191,164 @@ pub fn fit_beziers(p: &[Vec2]) -> Vec<[Vec2; 4]> {
 pub fn fit_beziers_mode(p: &[Vec2], periodic: bool) -> crate::model::Result<Vec<[Vec2; 4]>> {
     if periodic { crate::periodic_beziers(p) } else { Ok(fit_beziers(p)) }
 }
+
+/// Tangent endpoints for one editable handle at each fit point. Each handle stores 4.55 times the
+/// natural tangent derivative per unit chord length; evaluation compensates to preserve the
+/// natural interpolant until a handle is moved.
+pub fn fit_tangent_handles(p: &[Vec2], periodic: bool) -> crate::model::Result<Vec<Vec2>> {
+    let mut derivatives = Vec::new();
+    if periodic {
+        let pieces = crate::periodic_beziers(p)?;
+        let count = p.len().saturating_sub(1);
+        derivatives.reserve(count);
+        for i in 0..count {
+            let chord = p.get(i).zip(p.get(i + 1)).map_or(0.0, |(a, b)| a.dist(*b));
+            let Some(piece) = pieces.get(i) else {
+                return Err(crate::model::SketchError::Invalid("periodic spline tangent data is incomplete".into()));
+            };
+            derivatives.push((piece[1] - piece[0]) * (3.0 / chord));
+        }
+        let mut handles: Vec<Vec2> =
+            p.iter().take(count).enumerate().map(|(i, point)| *point + derivatives[i] * TANGENT_HANDLE_LENGTH_SCALE).collect();
+        for i in 0..count {
+            if handles[i].dist(p[i]) <= 1e-9 {
+                let next = p.get(i + 1).copied().unwrap_or(p[0]);
+                let direction =
+                    (next - p[i]).normalized().ok_or_else(|| crate::model::SketchError::Invalid("periodic spline has a degenerate chord".into()))?;
+                handles[i] = p[i] + direction * 1e-6;
+            }
+        }
+        return Ok(handles);
+    }
+
+    let spans = fit_spans(p);
+    if spans.is_empty() {
+        return Err(crate::model::SketchError::Invalid("a spline needs at least two fit points".into()));
+    }
+    for i in 0..p.len() {
+        let (span, tangent, chord) = if i == 0 { (spans.first(), true, p[0].dist(p[1])) } else { (spans.get(i - 1), false, p[i - 1].dist(p[i])) };
+        let Some(span) = span else {
+            return Err(crate::model::SketchError::Invalid("spline tangent data is incomplete".into()));
+        };
+        let derivative = if tangent { span.2 } else { span.3 } / chord.max(1e-9);
+        derivatives.push(derivative);
+    }
+    let mut handles: Vec<Vec2> = p
+        .iter()
+        .enumerate()
+        .map(|(i, point)| {
+            if i + 1 == p.len() {
+                *point - derivatives[i] * TANGENT_HANDLE_LENGTH_SCALE
+            } else {
+                *point + derivatives[i] * TANGENT_HANDLE_LENGTH_SCALE
+            }
+        })
+        .collect();
+    for i in 0..handles.len() {
+        if handles[i].dist(p[i]) <= 1e-9 {
+            let direction = if i + 1 < p.len() { (p[i + 1] - p[i]).normalized() } else { (p[i] - p[i - 1]).normalized() };
+            let direction = direction.ok_or_else(|| crate::model::SketchError::Invalid("spline has a degenerate tangent".into()))?;
+            handles[i] = if i + 1 == p.len() { p[i] - direction * 1e-6 } else { p[i] + direction * 1e-6 };
+        }
+    }
+    Ok(handles)
+}
+
+/// Cubic pieces using tangent-handle positions. The inverse handle scale preserves the natural
+/// interpolant; adjacent spans scale each derivative by their chord so the tangent remains smooth.
+pub fn fit_beziers_with_handles(p: &[Vec2], handles: &[Vec2], periodic: bool) -> crate::model::Result<Vec<[Vec2; 4]>> {
+    if handles.is_empty() {
+        return fit_beziers_mode(p, periodic);
+    }
+    let count = if periodic { p.len().saturating_sub(1) } else { p.len() };
+    if handles.len() != count || p.len() < 2 || p.iter().chain(handles).any(|point| !crate::model::in_range(*point)) {
+        return Err(crate::model::SketchError::Invalid("spline tangent handles do not match its fit points".into()));
+    }
+    if periodic {
+        crate::periodic::validate_periodic_points(p)?;
+    }
+    let derivatives: Vec<Vec2> = handles
+        .iter()
+        .enumerate()
+        .map(|(i, handle)| {
+            let point = p[i];
+            let vector = if periodic || i + 1 < p.len() { *handle - point } else { point - *handle };
+            vector / TANGENT_HANDLE_LENGTH_SCALE
+        })
+        .collect();
+    let spans = if periodic { count } else { p.len() - 1 };
+    let mut pieces = Vec::with_capacity(spans);
+    for i in 0..spans {
+        let next = if i + 1 == count { 0 } else { i + 1 };
+        let (Some(start), Some(end), Some(d0), Some(d1)) = (p.get(i), p.get(i + 1), derivatives.get(i), derivatives.get(next)) else {
+            return Err(crate::model::SketchError::Invalid("spline tangent data is incomplete".into()));
+        };
+        let chord = start.dist(*end).max(1e-9);
+        let piece = [*start, *start + *d0 * (chord / 3.0), *end - *d1 * (chord / 3.0), *end];
+        if piece.iter().any(|point| !crate::model::in_range(*point)) {
+            return Err(crate::model::SketchError::Invalid("spline tangent handle produces an out-of-range curve".into()));
+        }
+        pieces.push(piece);
+    }
+    Ok(pieces)
+}
+
+fn bezier_at(piece: [Vec2; 4], t: f64) -> Vec2 {
+    let u = 1.0 - t;
+    piece[0] * (u * u * u) + piece[1] * (3.0 * u * u * t) + piece[2] * (3.0 * u * t * t) + piece[3] * (t * t * t)
+}
+
+pub fn spline_point_with_handles(p: &[Vec2], handles: &[Vec2], periodic: bool, t: f64) -> Vec2 {
+    let Ok(pieces) = fit_beziers_with_handles(p, handles, periodic) else {
+        return p.first().copied().unwrap_or_default();
+    };
+    if pieces.is_empty() {
+        return p.first().copied().unwrap_or_default();
+    }
+    let t = t.clamp(0.0, 1.0);
+    if periodic {
+        let lengths: Vec<f64> = p.windows(2).map(|pair| pair[0].dist(pair[1])).collect();
+        let total: f64 = lengths.iter().sum();
+        if !total.is_finite() || total <= 1e-9 {
+            return p.first().copied().unwrap_or_default();
+        }
+        let mut remaining = t * total;
+        for (i, piece) in pieces.iter().enumerate() {
+            let length = lengths.get(i).copied().unwrap_or(0.0);
+            if remaining <= length || i + 1 == pieces.len() {
+                return bezier_at(*piece, (remaining / length.max(1e-9)).clamp(0.0, 1.0));
+            }
+            remaining -= length;
+        }
+        return p.first().copied().unwrap_or_default();
+    }
+    let x = t * pieces.len() as f64;
+    let i = (x.floor() as usize).min(pieces.len() - 1);
+    pieces.get(i).copied().map(|piece| bezier_at(piece, x - i as f64)).unwrap_or_default()
+}
+
+pub fn spline_polyline_with_handles(p: &[Vec2], handles: &[Vec2], periodic: bool) -> Vec<Vec2> {
+    let Ok(pieces) = fit_beziers_with_handles(p, handles, periodic) else {
+        return Vec::new();
+    };
+    let mut out = Vec::with_capacity(pieces.len() * SPAN_SAMPLES + 1);
+    for piece in pieces {
+        for i in 0..SPAN_SAMPLES {
+            out.push(bezier_at(piece, i as f64 / SPAN_SAMPLES as f64));
+        }
+    }
+    if let Some(last) = p.last() {
+        out.push(*last);
+    }
+    out
+}
+
+pub fn spline_end_tangent_with_handles(p: &[Vec2], handles: &[Vec2], periodic: bool, at_end: bool) -> Option<Vec2> {
+    let pieces = fit_beziers_with_handles(p, handles, periodic).ok()?;
+    let piece = if at_end { pieces.last()? } else { pieces.first()? };
+    if at_end { (piece[3] - piece[2]).normalized() } else { (piece[1] - piece[0]).normalized() }
+}
+
 pub fn spline_point_mode(p: &[Vec2], control: bool, degree: u8, periodic: bool, t: f64) -> Vec2 {
     if !periodic {
         return spline_point(p, control, degree, t);
@@ -340,12 +499,47 @@ mod tests {
     use super::*;
 
     #[test]
+    fn editable_fit_handles_preserve_natural_curves_and_change_the_curvature() {
+        let points = [Vec2::new(0.0, 0.0), Vec2::new(7.0, 8.0), Vec2::new(20.0, 4.0), Vec2::new(32.0, 13.0)];
+        let handles = fit_tangent_handles(&points, false).unwrap();
+        let natural = fit_beziers(&points);
+        let represented = fit_beziers_with_handles(&points, &handles, false).unwrap();
+        for (actual, expected) in represented.iter().zip(&natural) {
+            for (a, b) in actual.iter().zip(expected) {
+                assert!(a.dist(*b) < 1e-12, "{actual:?} differs from {expected:?}");
+            }
+        }
+
+        let mut edited = handles.clone();
+        edited[1] += Vec2::new(0.0, 3.0);
+        let changed = fit_beziers_with_handles(&points, &edited, false).unwrap();
+        assert_eq!(changed[0][0], points[0]);
+        assert_eq!(changed[0][3], points[1]);
+        assert_ne!(changed[0][2], represented[0][2]);
+        assert!(spline_end_tangent_with_handles(&points, &edited, false, false).is_some());
+    }
+
+    #[test]
+    fn editable_periodic_fit_handles_preserve_the_cyclic_interpolant() {
+        let points = [Vec2::new(0.0, 0.0), Vec2::new(8.0, 0.0), Vec2::new(6.0, 5.0), Vec2::new(-2.0, 4.0), Vec2::new(0.0, 0.0)];
+        let handles = fit_tangent_handles(&points, true).unwrap();
+        let natural = crate::periodic_beziers(&points).unwrap();
+        let represented = fit_beziers_with_handles(&points, &handles, true).unwrap();
+        for (actual, expected) in represented.iter().zip(&natural) {
+            for (a, b) in actual.iter().zip(expected) {
+                assert!(a.dist(*b) < 1e-12, "{actual:?} differs from {expected:?}");
+            }
+        }
+    }
+
+    #[test]
     fn fit_spline_passes_through_its_points_and_is_smooth() {
         let p = [Vec2::new(0.0, 0.0), Vec2::new(10.0, 5.0), Vec2::new(20.0, 0.0), Vec2::new(30.0, 8.0)];
         let poly = spline_polyline(&p, false, 3);
         for q in p {
             assert!(poly.iter().any(|x| x.dist(q) < 1e-9));
         }
+
         // A straight row of points stays straight.
         let line = [Vec2::new(0.0, 0.0), Vec2::new(1.0, 1.0), Vec2::new(3.0, 3.0)];
         assert!(spline_polyline(&line, false, 3).iter().all(|q| (q.x - q.y).abs() < 1e-9));

@@ -51,7 +51,7 @@ fn curve_centres_and_spline_interior_points_are_used_and_invalid_incidence_is_sa
     let last = point(&mut sk, 21., 21.);
     let mut spline = sk.curves[a].clone();
     spline.id = "interior_spline".into();
-    spline.kind = CurveKind::Spline { pts: vec![first, interior, last], control: false, degree: 3, periodic: false };
+    spline.kind = CurveKind::Spline { pts: vec![first, interior, last], control: false, degree: 3, periodic: false, handles: Vec::new() };
     sk.curves.push(spline);
     for p in [centre, interior] {
         for c in [a, b] {
@@ -91,7 +91,7 @@ fn oversized_reference_input_is_refused_without_scanning_or_mutating_it() {
     let mut sk = Sketch::new();
     let a = sk.add_line(Vec2::new(0., 1.), Vec2::new(2., 1.), None, None, None).unwrap();
     let before = sk.points.clone();
-    sk.curves[a].kind = CurveKind::Spline { pts: vec![usize::MAX; 1_000_001], control: false, degree: 3, periodic: false };
+    sk.curves[a].kind = CurveKind::Spline { pts: vec![usize::MAX; 1_000_001], control: false, degree: 3, periodic: false, handles: Vec::new() };
     assert!(sk.virtual_corners().is_empty());
     assert_eq!(sk.points, before);
     assert_eq!(sk.curves[a].kind.point_ids().len(), 1_000_001);

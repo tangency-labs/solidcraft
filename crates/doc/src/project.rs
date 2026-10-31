@@ -884,7 +884,19 @@ fn project_sketch_curve(sk: &Sketch, from: &Plane, ci: usize, to: &Plane) -> Vec
             (Some(c), Some(m)) => vec![LinkGeom::Ellipse { c: map(c), major: map(m), minor: *r }],
             _ => Vec::new(),
         },
-        Some(CurveKind::Spline { pts, control, degree, periodic }) if parallel => {
+        Some(CurveKind::Spline { pts, control: false, degree, periodic, handles }) if parallel && !handles.is_empty() => {
+            let p: Option<Vec<Vec2>> = pts.iter().map(|q| sk.point(*q).map(map)).collect();
+            let tangent_handles: Option<Vec<Vec2>> = handles.iter().map(|q| sk.point(*q).map(map)).collect();
+            let Some((p, tangent_handles)) = p.zip(tangent_handles) else { return Vec::new() };
+            if solidcraft_sketch::fit_tangent_handles(&p, *periodic)
+                .is_ok_and(|natural| natural.iter().zip(&tangent_handles).all(|(a, b)| a.dist(*b) <= 1e-9))
+            {
+                return vec![LinkGeom::Spline { pts: p, control: false, degree: *degree, periodic: *periodic }];
+            }
+            let Ok(pieces) = solidcraft_sketch::fit_beziers_with_handles(&p, &tangent_handles, *periodic) else { return Vec::new() };
+            pieces.into_iter().map(|piece| LinkGeom::Spline { pts: piece.to_vec(), control: true, degree: 3, periodic: false }).collect()
+        }
+        Some(CurveKind::Spline { pts, control, degree, periodic, .. }) if parallel => {
             let p: Option<Vec<Vec2>> = pts.iter().map(|q| sk.point(*q).map(map)).collect();
             p.map(|pts| vec![LinkGeom::Spline { pts, control: *control, degree: *degree, periodic: *periodic }]).unwrap_or_default()
         }

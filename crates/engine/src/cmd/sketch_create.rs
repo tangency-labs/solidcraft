@@ -73,7 +73,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .at("SKETCH", "CREATE")
         .icon("spline")
         .enabled(in_sketch)
-        .params(concat!("points: [[x,y] or point refs…] (2…500): the spline passes through them, periodic?: boolean (default false); periodic cubic fit closes smoothly through at least 3 distinct samples", created_doc!())),
+        .params(concat!("points: [[x,y] or point refs…] (2…500): the spline passes through them; each fit point has an editable tangent handle whose direction and length control curvature, periodic?: boolean (default false); periodic cubic fit closes smoothly through at least 3 distinct samples", created_doc!())),
     CommandSpec::new("sketch.spline.control_point", "Control Point Spline", spline_cv3)
         .at("SKETCH", "CREATE")
         .icon("spline_cv")
@@ -522,7 +522,8 @@ fn blend(s: &mut Session, p: &Value) -> Result<Value> {
         let (sp, cons) = if order <= 1 {
             let c1 = sk.add_point(qa + ta * (l / 3.0), None)?;
             let c2 = sk.add_point(qb + tb * (l / 3.0), None)?;
-            let sp = sk.add_curve(CurveKind::Spline { pts: vec![pa, c1, c2, pb], control: true, degree: 3, periodic: false }, None)?;
+            let sp =
+                sk.add_curve(CurveKind::Spline { pts: vec![pa, c1, c2, pb], control: true, degree: 3, periodic: false, handles: Vec::new() }, None)?;
             let cons = vec![add_c(sk, ConstraintKind::Tangent { a: ca, b: sp })?, add_c(sk, ConstraintKind::Tangent { a: cb, b: sp })?];
             (sp, cons)
         } else {
@@ -544,7 +545,7 @@ fn blend(s: &mut Session, p: &Value) -> Result<Value> {
                 });
             }
             let degree = u8::try_from(cps.len().saturating_sub(1)).map_err(|_| bad(cmd, "the blend curve needs too many control points"))?;
-            let sp = sk.add_curve(CurveKind::Spline { pts, control: true, degree, periodic: false }, None)?;
+            let sp = sk.add_curve(CurveKind::Spline { pts, control: true, degree, periodic: false, handles: Vec::new() }, None)?;
             (sp, Vec::new())
         };
         solve_new_only(sk, first_new);
@@ -672,7 +673,10 @@ fn spline(s: &mut Session, p: &Value, cmd: &str, control: bool, degree: u8) -> R
         {
             pts.push(*pts.first().ok_or_else(|| bad(cmd, "missing first point"))?);
         }
-        let c = sk.add_curve(CurveKind::Spline { pts, control, degree, periodic }, None)?;
+        let c = sk.add_curve(CurveKind::Spline { pts, control, degree, periodic, handles: Vec::new() }, None)?;
+        if !control {
+            sk.add_spline_handles(c)?;
+        }
         mark_construction(sk, &[c], p);
         Ok((ids_of(sk, &[c]), Vec::new()))
     })?;
@@ -795,12 +799,21 @@ pub(super) fn leaving_dir(sk: &Sketch, ci: usize, pi: usize) -> Option<Vec2> {
                 None
             }
         }
-        CurveKind::Spline { ref pts, control, periodic, .. } => {
+        CurveKind::Spline { ref pts, control, periodic, ref handles, .. } => {
             let q: Vec<Vec2> = pts.iter().filter_map(|i| sk.point(*i)).collect();
+            let tangent_handles: Vec<Vec2> = handles.iter().filter_map(|i| sk.point(*i)).collect();
             if pts.last() == Some(&pi) {
-                solidcraft_sketch::spline_end_tangent_mode(&q, control, periodic, true)
+                if handles.is_empty() {
+                    solidcraft_sketch::spline_end_tangent_mode(&q, control, periodic, true)
+                } else {
+                    solidcraft_sketch::spline_end_tangent_with_handles(&q, &tangent_handles, periodic, true)
+                }
             } else if pts.first() == Some(&pi) {
-                solidcraft_sketch::spline_end_tangent_mode(&q, control, periodic, false).map(|t| -t)
+                if handles.is_empty() {
+                    solidcraft_sketch::spline_end_tangent_mode(&q, control, periodic, false).map(|t| -t)
+                } else {
+                    solidcraft_sketch::spline_end_tangent_with_handles(&q, &tangent_handles, periodic, false).map(|t| -t)
+                }
             } else {
                 None
             }
@@ -1106,6 +1119,54 @@ mod blend_tests {
         s.model.state().sketch(id).unwrap().sketch.clone()
     }
 
+    #[test]
+    fn fit_spline_handles_are_visible_lines_and_accept_existing_constraints() {
+        let mut s = new_sketch();
+        let spline_id = ids(&run(&mut s, "sketch.spline.fit_point", json!({"points": [[0, 0], [8, 6], [17, 2], [25, 10]]}))["curves"])[0].clone();
+        let sk = sketch(&s);
+        let spline_index = sk.curve_index(&spline_id).unwrap();
+        let CurveKind::Spline { pts, handles, .. } = &sk.curves[spline_index].kind else { panic!("expected a fit spline") };
+        assert_eq!(handles.len(), pts.len());
+        let tangent_lines: Vec<_> = sk.curves.iter().filter(|curve| curve.spline_handle_of.as_deref() == Some(spline_id.as_str())).collect();
+        assert_eq!(tangent_lines.len(), pts.len());
+        assert!(tangent_lines.iter().all(|curve| curve.construction));
+        let handle_id = tangent_lines[0].id.clone();
+        let angle_handle_id = tangent_lines[1].id.clone();
+        let final_handle = *handles.last().unwrap();
+        let final_fit_point = *pts.last().unwrap();
+        assert!(
+            matches!(tangent_lines.last().map(|curve| &curve.kind), Some(CurveKind::Line { a, b }) if *a == final_handle && *b == final_fit_point)
+        );
+        drop(sk);
+        let before = s.doc.to_json();
+        assert!(
+            s.execute("sketch.trim", &json!({"curve": &handle_id, "at": [4, 3]})).is_err(),
+            "a tangent construction line cannot be trimmed independently of its spline"
+        );
+        assert_eq!(s.doc.to_json(), before);
+
+        let reference_id = ids(&run(&mut s, "sketch.line", json!({"points": [[40, 0], [40, 20]]}))["curves"])[0].clone();
+        run(&mut s, "sketch.constraint.perpendicular", json!({"a": handle_id, "b": reference_id}));
+        let solved = sketch(&s);
+        let handle = solved.curve_index(&handle_id).unwrap();
+        let reference = solved.curve_index(&reference_id).unwrap();
+        let direction = |index: usize| match solved.curves[index].kind {
+            CurveKind::Line { a, b } => solved.point(b).unwrap() - solved.point(a).unwrap(),
+            ref other => panic!("expected a line, got {other:?}"),
+        };
+        assert!(direction(handle).dot(direction(reference)).abs() < 1e-7);
+
+        let angle_reference = ids(&run(&mut s, "sketch.line", json!({"points": [[50, 0], [50, 20]]}))["curves"])[0].clone();
+        run(&mut s, "sketch.dimension", json!({"entities": [angle_handle_id, angle_reference], "type": "angle", "value": "90 deg"}));
+        let sketch = sketch(&s);
+        assert!(
+            sketch
+                .constraints
+                .iter()
+                .any(|constraint| { matches!(constraint.kind, solidcraft_sketch::ConstraintKind::Angle { .. }) && constraint.param.is_some() })
+        );
+    }
+
     fn factorial(n: usize) -> f64 {
         (1..=n).fold(1.0, |a, b| a * b as f64)
     }
@@ -1395,13 +1456,15 @@ mod blend_tests {
         let mut broken = solidcraft_sketch::Sketch::new();
         let p0 = broken.add_point(Vec2::new(1.0, 1.0), None).unwrap();
         let p1 = broken.add_point(Vec2::ZERO, None).unwrap();
-        let l = broken.add_curve(CurveKind::Spline { pts: vec![p1, p0], control: true, degree: 1, periodic: false }, None).unwrap();
+        let l =
+            broken.add_curve(CurveKind::Spline { pts: vec![p1, p0], control: true, degree: 1, periodic: false, handles: Vec::new() }, None).unwrap();
         broken.points[p0].pos = Vec2::new(f64::NAN, 4.0);
         assert!(super::joint_derivatives(&broken, l, p1, 2, true, "a", "sketch.blend_curve").is_err(), "non-finite geometry");
         let mut flat = solidcraft_sketch::Sketch::new();
         let q0 = flat.add_point(Vec2::new(3.0, 3.0), None).unwrap();
         let q1 = flat.add_point(Vec2::new(3.0, 3.0), None).unwrap();
-        let d = flat.add_curve(CurveKind::Spline { pts: vec![q0, q1], control: true, degree: 1, periodic: false }, None).unwrap();
+        let d =
+            flat.add_curve(CurveKind::Spline { pts: vec![q0, q1], control: true, degree: 1, periodic: false, handles: Vec::new() }, None).unwrap();
         let e = super::joint_derivatives(&flat, d, q0, 2, true, "a", "sketch.blend_curve").unwrap_err().to_string();
         assert!(e.contains("no tangent"), "{e}");
         assert!(solidcraft_geom::hermite_bezier(Vec2::ZERO, Vec2::X, &[Vec2::Y; 5], &[Vec2::Y; 5]).is_none(), "no order above g4");

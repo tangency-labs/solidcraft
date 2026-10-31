@@ -104,6 +104,10 @@ pub enum CurveKind {
         /// Explicit cyclic C2 fit interpolation; absent retains natural endpoints.
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         periodic: bool,
+        /// Editable control points for fit-spline tangent handles. Empty retains legacy
+        /// natural interpolation.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        handles: Vec<usize>,
     },
     /// Conic from `a` to `b` shaped by the `apex` point and `rho` in (0, 1) (0.5 parabola,
     /// less elliptical, more hyperbolic).
@@ -122,7 +126,7 @@ impl CurveKind {
             CurveKind::Circle { c, .. } => vec![*c],
             CurveKind::Arc { c, a, b } => vec![*c, *a, *b],
             CurveKind::Ellipse { c, m, .. } => vec![*c, *m],
-            CurveKind::Spline { pts, .. } => pts.clone(),
+            CurveKind::Spline { pts, handles, .. } => pts.iter().chain(handles).copied().collect(),
             CurveKind::Conic { a, b, apex, .. } => vec![*a, *b, *apex],
         }
     }
@@ -146,8 +150,11 @@ impl CurveKind {
                 *c = f(*c);
                 *m = f(*m);
             }
-            CurveKind::Spline { pts, .. } => {
+            CurveKind::Spline { pts, handles, .. } => {
                 for q in pts.iter_mut() {
+                    *q = f(*q);
+                }
+                for q in handles.iter_mut() {
                     *q = f(*q);
                 }
             }
@@ -200,6 +207,9 @@ pub struct Curve {
     /// a profile (it is construction too).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub infinite: bool,
+    /// The spline id owning a construction line used as one of its tangent handles.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub spline_handle_of: Option<String>,
 }
 
 /// How two circles lie, for a [`ConstraintKind::CircleCircleDistance`]: which gap between their
@@ -889,6 +899,7 @@ impl Sketch {
             centerline: false,
             fixed: false,
             infinite: false,
+            spline_handle_of: None,
         });
         Ok(self.curves.len() - 1)
     }
@@ -927,6 +938,7 @@ impl Sketch {
             centerline: false,
             fixed: false,
             infinite: false,
+            spline_handle_of: None,
         });
         Ok(self.curves.len() - 1)
     }
@@ -962,6 +974,7 @@ impl Sketch {
             centerline: false,
             fixed: false,
             infinite: false,
+            spline_handle_of: None,
         });
         Ok(self.curves.len() - 1)
     }
@@ -1318,7 +1331,7 @@ impl Sketch {
                 CurveKind::Line { .. } | CurveKind::Ellipse { .. } => 2,
                 CurveKind::Circle { .. } => 1,
                 CurveKind::Arc { .. } | CurveKind::Conic { .. } => 3,
-                CurveKind::Spline { pts, .. } => pts.len(),
+                CurveKind::Spline { pts, handles, .. } => pts.len().saturating_add(handles.len()),
             };
             let Some(left) = remaining.checked_sub(count) else { return Vec::new() };
             remaining = left;
@@ -1522,10 +1535,15 @@ impl Sketch {
                 )
             }
             CurveKind::Conic { a, b, apex, rho } => Some(vec![Seg2::Conic { a: pt(a)?, apex: pt(apex)?, b: pt(b)?, w: rho / (1.0 - rho).max(1e-9) }]),
-            CurveKind::Spline { pts, control: false, periodic, .. } => {
+            CurveKind::Spline { pts, control: false, periodic, handles, .. } => {
                 let p: Vec<Vec2> = pts.iter().map(pt).collect::<Option<_>>()?;
+                let handles: Vec<Vec2> = handles.iter().map(pt).collect::<Option<_>>()?;
                 Some(
-                    crate::curves::fit_beziers_mode(&p, *periodic).ok()?.into_iter().map(|[p0, p1, p2, p3]| Seg2::Cubic { p0, p1, p2, p3 }).collect(),
+                    crate::curves::fit_beziers_with_handles(&p, &handles, *periodic)
+                        .ok()?
+                        .into_iter()
+                        .map(|[p0, p1, p2, p3]| Seg2::Cubic { p0, p1, p2, p3 })
+                        .collect(),
                 )
             }
             CurveKind::Spline { pts, control: true, degree, .. } if (*degree as usize) <= solidcraft_geom::MAX_BEZIER_DEGREE => {
@@ -1558,9 +1576,14 @@ impl Sketch {
                 (Some(c), Some(m)) => crate::curves::ellipse_polyline(c, m, *r),
                 _ => Vec::new(),
             },
-            CurveKind::Spline { pts, control, degree, periodic } => {
+            CurveKind::Spline { pts, control, degree, periodic, handles } => {
                 let p: Option<Vec<Vec2>> = pts.iter().map(pt).collect();
-                p.map(|p| crate::curves::spline_polyline_mode(&p, *control, *degree, *periodic)).unwrap_or_default()
+                let handles: Option<Vec<Vec2>> = handles.iter().map(pt).collect();
+                match (p, handles) {
+                    (Some(p), Some(handles)) if !control => crate::curves::spline_polyline_with_handles(&p, &handles, *periodic),
+                    (Some(p), _) => crate::curves::spline_polyline_mode(&p, *control, *degree, *periodic),
+                    _ => Vec::new(),
+                }
             }
             CurveKind::Conic { a, b, apex, rho } => match (pt(a), pt(apex), pt(b)) {
                 (Some(a), Some(x), Some(b)) => crate::curves::conic_polyline(a, x, b, *rho),
@@ -1596,7 +1619,7 @@ impl Sketch {
                 }
                 "e"
             }
-            CurveKind::Spline { pts, control, degree, periodic } => {
+            CurveKind::Spline { pts, control, degree, periodic, handles } => {
                 if pts.len() < 2 || pts.len() > crate::curves::MAX_SPLINE_POINTS || !(1..=solidcraft_geom::MAX_BEZIER_DEGREE as u8).contains(degree) {
                     return Err(SketchError::Invalid(format!(
                         "a spline needs 2 to 500 points and degree 1 to {}",
@@ -1613,6 +1636,26 @@ impl Sketch {
                         .collect::<Result<Vec<_>>>()?;
                     crate::periodic_beziers(&p)?;
                 }
+                if !handles.is_empty() {
+                    let expected = if *periodic { pts.len().saturating_sub(1) } else { pts.len() };
+                    if *control
+                        || handles.len() != expected
+                        || handles.iter().any(|point| *point >= self.points.len())
+                        || handles.iter().any(|point| pts.contains(point))
+                        || handles.iter().copied().collect::<std::collections::BTreeSet<_>>().len() != handles.len()
+                    {
+                        return Err(SketchError::Invalid("invalid spline tangent handles".into()));
+                    }
+                    let fit: Vec<Vec2> = pts
+                        .iter()
+                        .map(|point| self.point(*point).ok_or_else(|| SketchError::Invalid("missing spline point".into())))
+                        .collect::<Result<_>>()?;
+                    let tangent: Vec<Vec2> = handles
+                        .iter()
+                        .map(|point| self.point(*point).ok_or_else(|| SketchError::Invalid("missing spline handle".into())))
+                        .collect::<Result<_>>()?;
+                    crate::curves::fit_beziers_with_handles(&fit, &tangent, *periodic)?;
+                }
                 "s"
             }
             CurveKind::Conic { rho, .. } => {
@@ -1623,21 +1666,204 @@ impl Sketch {
             }
         };
         let id = self.curve_id(id, prefix)?;
-        self.curves.push(Curve { id, kind, construction: false, reversed: false, link: None, centerline: false, fixed: false, infinite: false });
+        self.curves.push(Curve {
+            id,
+            kind,
+            construction: false,
+            reversed: false,
+            link: None,
+            centerline: false,
+            fixed: false,
+            infinite: false,
+            spline_handle_of: None,
+        });
         Ok(self.curves.len() - 1)
+    }
+
+    /// Give a fit spline one editable tangent handle at each fit point. The handles begin at
+    /// three times the natural cubic control offsets, preserving its exact curve.
+    pub fn add_spline_handles(&mut self, curve: usize) -> Result<()> {
+        let mut candidate = self.clone();
+        candidate.add_spline_handles_in_place(curve)?;
+        candidate.validate_spline_handles()?;
+        *self = candidate;
+        Ok(())
+    }
+
+    /// Add tangent handles to every fit spline that does not have them yet.
+    pub fn add_missing_spline_handles(&mut self) -> Result<()> {
+        let missing: Vec<usize> = self
+            .curves
+            .iter()
+            .enumerate()
+            .filter_map(|(index, curve)| match curve.kind {
+                CurveKind::Spline { control: false, ref handles, .. }
+                    if handles.is_empty()
+                        && curve.link.is_none()
+                        && !self.freeform_offsets.iter().any(|offset| offset.output == curve.id)
+                        && !self.offsets.iter().any(|offset| offset.owns_output(&curve.id)) =>
+                {
+                    Some(index)
+                }
+                _ => None,
+            })
+            .collect();
+        if missing.is_empty() {
+            return Ok(());
+        }
+        let mut candidate = self.clone();
+        for index in missing {
+            candidate.add_spline_handles_in_place(index)?;
+        }
+        candidate.validate_spline_handles()?;
+        *self = candidate;
+        Ok(())
+    }
+
+    fn add_spline_handles_in_place(&mut self, curve: usize) -> Result<()> {
+        let (points, periodic, existing, spline_id) = match self.curves.get(curve) {
+            Some(Curve { id, link: None, kind: CurveKind::Spline { pts, control: false, periodic, handles, .. }, .. }) => {
+                (pts.clone(), *periodic, handles.clone(), id.clone())
+            }
+            Some(_) => return Err(SketchError::Invalid("tangent handles require a fit spline".into())),
+            None => return Err(SketchError::Invalid("unknown spline".into())),
+        };
+        if !existing.is_empty() {
+            return Ok(());
+        }
+        let count = if periodic { points.len().saturating_sub(1) } else { points.len() };
+        if self.points.len().saturating_add(count) > MAX_POINTS || self.curves.len().saturating_add(count) > MAX_CURVES {
+            return Err(SketchError::TooLarge);
+        }
+        let fit_points: Vec<Vec2> = points
+            .iter()
+            .map(|point| self.point(*point).ok_or_else(|| SketchError::Invalid("missing spline point".into())))
+            .collect::<Result<_>>()?;
+        let handle_positions = crate::curves::fit_tangent_handles(&fit_points, periodic)?;
+        let mut handles = Vec::with_capacity(count);
+        for position in handle_positions {
+            handles.push(self.add_point(position, None)?);
+        }
+        if let Some(CurveKind::Spline { handles: target, .. }) = self.curves.get_mut(curve).map(|curve| &mut curve.kind) {
+            *target = handles.clone();
+        }
+        for (index, (point, handle)) in points.iter().take(count).zip(handles).enumerate() {
+            let (start, end) = if !periodic && index + 1 == points.len() { (handle, *point) } else { (*point, handle) };
+            let id = self.fresh("h")?;
+            let line = self.add_line_pts(start, end, Some(&id))?;
+            if let Some(curve) = self.curves.get_mut(line) {
+                curve.construction = true;
+                curve.spline_handle_of = Some(spline_id.clone());
+            }
+        }
+        Ok(())
+    }
+
+    /// Refuse malformed persisted tangent handles before they reach sketch evaluation.
+    pub fn validate_spline_handles(&self) -> Result<()> {
+        let mut work = 0usize;
+        let mut helper_lines_by_parent = std::collections::BTreeMap::<&str, Vec<&Curve>>::new();
+        let mut spline_ids = std::collections::BTreeSet::<&str>::new();
+        for curve in &self.curves {
+            if let Some(parent) = curve.spline_handle_of.as_deref() {
+                helper_lines_by_parent.entry(parent).or_default().push(curve);
+            }
+            if matches!(curve.kind, CurveKind::Spline { .. }) {
+                spline_ids.insert(curve.id.as_str());
+            }
+        }
+        for spline in &self.curves {
+            let CurveKind::Spline { pts, control, periodic, handles, .. } = &spline.kind else { continue };
+            let helper_lines = helper_lines_by_parent.get(spline.id.as_str()).map_or(&[][..], Vec::as_slice);
+            if handles.is_empty() {
+                if !helper_lines.is_empty() {
+                    return Err(SketchError::Invalid("spline has tangent lines without handle points".into()));
+                }
+                continue;
+            }
+            let count = if *periodic { pts.len().saturating_sub(1) } else { pts.len() };
+            work = work.saturating_add(count).saturating_add(pts.len());
+            if work > 1_000_000 || *control || handles.len() != count || helper_lines.len() != count {
+                return Err(SketchError::Invalid("invalid spline tangent handle count".into()));
+            }
+            let helper_points: std::collections::BTreeSet<(usize, usize)> = helper_lines
+                .iter()
+                .filter(|line| line.construction)
+                .filter_map(|line| match line.kind {
+                    CurveKind::Line { a, b } => Some((a.min(b), a.max(b))),
+                    _ => None,
+                })
+                .collect();
+            let unique: std::collections::BTreeSet<usize> = handles.iter().copied().collect();
+            if unique.len() != handles.len() || handles.iter().any(|handle| pts.contains(handle)) {
+                return Err(SketchError::Invalid("invalid spline tangent handle points".into()));
+            }
+            let fit: Vec<Vec2> = pts
+                .iter()
+                .map(|point| self.point(*point).ok_or_else(|| SketchError::Invalid("missing spline point".into())))
+                .collect::<Result<_>>()?;
+            let tangent: Vec<Vec2> = handles
+                .iter()
+                .map(|point| self.point(*point).ok_or_else(|| SketchError::Invalid("missing spline handle".into())))
+                .collect::<Result<_>>()?;
+            crate::curves::fit_beziers_with_handles(&fit, &tangent, *periodic)?;
+            for (point, handle) in pts.iter().take(count).zip(handles) {
+                if !helper_points.contains(&((*point).min(*handle), (*point).max(*handle))) {
+                    return Err(SketchError::Invalid("missing spline tangent construction line".into()));
+                }
+            }
+        }
+        for curve in &self.curves {
+            if let Some(parent) = &curve.spline_handle_of
+                && (!spline_ids.contains(parent.as_str()) || !matches!(curve.kind, CurveKind::Line { .. }) || !curve.construction)
+            {
+                return Err(SketchError::Invalid("invalid spline tangent construction line".into()));
+            }
+        }
+        Ok(())
     }
 
     /// Remove curves (by index) and then any points no longer used by a curve (except the
     /// origin and free points), and constraints that referred to removed entities.
     pub fn remove_curves(&mut self, which: &[usize]) {
+        let mut which = which.to_vec();
+        let removed_ids: std::collections::BTreeSet<String> = which
+            .iter()
+            .filter_map(|index| self.curves.get(*index))
+            .filter(|curve| matches!(curve.kind, CurveKind::Spline { .. }))
+            .map(|curve| curve.id.clone())
+            .collect();
+        for (index, curve) in self.curves.iter().enumerate() {
+            if curve.spline_handle_of.as_ref().is_some_and(|parent| removed_ids.contains(parent)) {
+                which.push(index);
+            }
+        }
+        let removed_handles: std::collections::BTreeSet<String> =
+            which.iter().filter_map(|index| self.curves.get(*index)).filter_map(|curve| curve.spline_handle_of.clone()).collect();
+        if !removed_handles.is_empty() {
+            for curve in &mut self.curves {
+                if removed_handles.contains(&curve.id)
+                    && let CurveKind::Spline { handles, .. } = &mut curve.kind
+                {
+                    handles.clear();
+                }
+            }
+            for (index, curve) in self.curves.iter().enumerate() {
+                if curve.spline_handle_of.as_ref().is_some_and(|parent| removed_handles.contains(parent)) {
+                    which.push(index);
+                }
+            }
+        }
+        which.sort_unstable();
+        which.dedup();
         let mut owned: Vec<usize> = Vec::new();
         for (i, c) in self.curves.iter().enumerate() {
             if which.contains(&i) {
                 owned.extend(c.kind.point_ids());
             }
         }
-        let on_ends = self.points_on_ends_of(which);
-        self.drop_curves(which);
+        let on_ends = self.points_on_ends_of(&which);
+        self.drop_curves(&which);
         for (p, q) in on_ends {
             // Only a full sketch refuses one more; the point then comes loose as before.
             let _ = self.add_constraint(ConstraintKind::Coincident { p, q }, None);

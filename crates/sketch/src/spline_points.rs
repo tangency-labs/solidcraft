@@ -5,11 +5,15 @@
 //! The spline keeps its curve index and every point it had (the new point is appended to
 //! `Sketch::points`), so constraints on its points and on the curve stay as they were.
 //!
+//! A spline with tangent handles (#6502) gets a handle and its construction line at the new
+//! point, and reversing it mirrors its handles so the curve keeps its shape.
+//!
 //! Control point splines take no new points yet: their knots are uniform, so one more control
 //! point re-spreads every span and the whole curve moves, wherever the point goes.
 
 use solidcraft_geom::Vec2;
 
+use crate::curves::TANGENT_HANDLE_LENGTH_SCALE;
 use crate::model::{ConstraintKind, CurveKind, Result, Sketch, SketchError};
 
 /// Closer than this (relative to the spline's size) to one of its points, a new point would
@@ -30,25 +34,55 @@ impl Sketch {
         // A fit spline has one exact piece between each pair of neighbouring fit points.
         let pieces = self.exact_segs(ci).filter(|p| !p.is_empty() && p.len() + 1 == pos.len());
         let pieces = pieces.ok_or_else(|| SketchError::Invalid("the spline has no exact pieces to place a point on".into()))?;
-        let (piece, new) = pieces
+        let (piece, new, slope) = pieces
             .iter()
             .enumerate()
             .map(|(i, seg)| {
-                let q = seg.point_at(seg.closest_param(at));
-                (i, q, q.dist(at))
+                let t = seg.closest_param(at);
+                let q = seg.point_at(t);
+                (i, q, seg.derivative(t), q.dist(at))
             })
-            .min_by(|a, b| a.2.total_cmp(&b.2))
-            .map(|(i, q, _)| (i, q))
+            .min_by(|a, b| a.3.total_cmp(&b.3))
+            .map(|(i, q, d, _)| (i, q, d))
             .ok_or_else(|| SketchError::Invalid("the spline has no exact pieces to place a point on".into()))?;
         let size = spread(&pos);
         if [pos.get(piece), pos.get(piece + 1)].into_iter().flatten().any(|p| p.dist(new) <= SAME_POINT * size) {
             return Err(SketchError::Invalid("there is already a spline point there".into()));
         }
+        // A handle at the new point follows the curve's slope there, per unit chord as the
+        // handles store it.
+        let chord = pos.get(piece).zip(pos.get(piece + 1)).map_or(1.0, |(a, b)| a.dist(*b).max(1e-9));
+        let handle = new + slope * (TANGENT_HANDLE_LENGTH_SCALE / chord);
         let p = self.add_point(new, None)?;
         if let Some(CurveKind::Spline { pts, .. }) = self.curves.get_mut(ci).map(|c| &mut c.kind) {
             pts.insert(piece + 1, p);
         }
+        self.add_spline_handle(ci, piece + 1, p, handle, false)?;
         Ok(p)
+    }
+
+    /// Give spline `ci`, when it has tangent handles, a handle at `handle` for its new fit point
+    /// `p` (handle number `at`), with its construction line. `last` when `p` is the open spline's
+    /// last point, whose handle points back along the curve.
+    fn add_spline_handle(&mut self, ci: usize, at: usize, p: usize, handle: Vec2, last: bool) -> Result<()> {
+        let Some(curve) = self.curves.get(ci) else { return Ok(()) };
+        let CurveKind::Spline { handles, .. } = &curve.kind else { return Ok(()) };
+        if handles.is_empty() {
+            return Ok(());
+        }
+        let spline_id = curve.id.clone();
+        let h = self.add_point(handle, None)?;
+        if let Some(CurveKind::Spline { handles, .. }) = self.curves.get_mut(ci).map(|c| &mut c.kind) {
+            handles.insert(at.min(handles.len()), h);
+        }
+        let id = self.fresh("h")?;
+        let (a, b) = if last { (h, p) } else { (p, h) };
+        let line = self.add_line_pts(a, b, Some(&id))?;
+        if let Some(curve) = self.curves.get_mut(line) {
+            curve.construction = true;
+            curve.spline_handle_of = Some(spline_id);
+        }
+        Ok(())
     }
 
     /// Add `to` to fit spline `ci` as its new first (`at_start`) or last point, and return its
@@ -76,14 +110,31 @@ impl Sketch {
         if pos.iter().any(|p| p.dist(to) <= SAME_POINT * spread(&pos)) {
             return Err(SketchError::Invalid("there is already a spline point there".into()));
         }
+        // With tangent handles, the old end becomes an inner point: a last point's handle points
+        // back along the curve, an inner one's forward, so it turns about its point. The new end
+        // takes a handle along the chord to it.
+        let old_end = pos.get(if at_start { 0 } else { pos.len().saturating_sub(1) }).copied().unwrap_or(to);
+        if !at_start
+            && let Some(CurveKind::Spline { handles, .. }) = self.curves.get(ci).map(|c| &c.kind)
+            && let Some(h) = handles.last().copied()
+            && let Some(q) = self.points.get_mut(h)
+        {
+            q.pos = old_end * 2.0 - q.pos;
+        }
+        let along = (to - old_end).normalized().unwrap_or(Vec2::new(1.0, 0.0));
+        let handle = to - along * TANGENT_HANDLE_LENGTH_SCALE;
         let p = self.add_point(to, None)?;
-        if let Some(CurveKind::Spline { pts, .. }) = self.curves.get_mut(ci).map(|c| &mut c.kind) {
+        let count = if let Some(CurveKind::Spline { pts, .. }) = self.curves.get_mut(ci).map(|c| &mut c.kind) {
             if at_start {
                 pts.insert(0, p);
             } else {
                 pts.push(p);
             }
-        }
+            pts.len()
+        } else {
+            0
+        };
+        self.add_spline_handle(ci, if at_start { 0 } else { count }, p, handle, !at_start)?;
         Ok(p)
     }
 
@@ -107,8 +158,30 @@ impl Sketch {
         if offset {
             return Err(SketchError::Invalid("the spline is part of an offset; break the offset association first".into()));
         }
-        if let Some(CurveKind::Spline { pts, .. }) = self.curves.get_mut(ci).map(|c| &mut c.kind) {
+        let mut mirrored = Vec::new();
+        if let Some(CurveKind::Spline { pts, handles, periodic, .. }) = self.curves.get_mut(ci).map(|c| &mut c.kind) {
             pts.reverse();
+            if !handles.is_empty() {
+                if *periodic {
+                    // The closing point repeats the first, which keeps its place: the handles of
+                    // the others run the other way after it.
+                    handles[1..].reverse();
+                    mirrored.extend(pts.iter().zip(handles.iter()).map(|(p, h)| (*p, *h)));
+                } else {
+                    // An open spline's end handles already point the other way along the curve;
+                    // its inner ones turn about their points.
+                    handles.reverse();
+                    let n = handles.len();
+                    mirrored.extend(pts.iter().zip(handles.iter()).enumerate().filter(|(i, _)| *i != 0 && *i + 1 != n).map(|(_, (p, h))| (*p, *h)));
+                }
+            }
+        }
+        for (p, h) in mirrored {
+            if let Some(at) = self.point(p)
+                && let Some(q) = self.points.get_mut(h)
+            {
+                q.pos = at * 2.0 - q.pos;
+            }
         }
         Ok(())
     }

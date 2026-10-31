@@ -167,7 +167,7 @@ mod tests {
         let curve = h.app.session.doc.sketch(1).unwrap().curves[0].id.clone();
         h.app.session.execute("sketch.drag", &json!({"entity":curve,"from":[0,0],"to":[2,3],"live":true})).unwrap();
         h.app.viewport.text_drag = Some((checkpoint, link));
-        h.app.viewport.point_drag = Some((curve, 0, None));
+        h.app.viewport.point_drag = Some((curve, 0, None, solidcraft_engine::geom::Vec2::ZERO, false));
         crate::documents::open_tab(&mut h.app, solidcraft_engine::Session::default()).unwrap();
         assert!(h.app.viewport.text_drag.is_none());
         assert!(h.app.viewport.point_drag.is_none());

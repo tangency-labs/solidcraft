@@ -25,7 +25,7 @@ fn spline_sketch(z: f64) -> FeatureKind {
     let fit = [(8.0, 0.0), (4.0, 6.0), (-3.0, 7.0), (-7.0, 1.0), (-4.0, -6.0), (3.0, -5.0)];
     let mut pts: Vec<usize> = fit.iter().map(|&(x, y)| sk.add_point(Vec2::new(x, y), None).unwrap()).collect();
     pts.push(pts[0]);
-    sk.add_curve(CurveKind::Spline { pts, control: false, degree: 3, periodic: true }, None).unwrap();
+    sk.add_curve(CurveKind::Spline { pts, control: false, degree: 3, periodic: true, handles: Vec::new() }, None).unwrap();
     let plane = Plane { origin: Vec3::new(0.0, 0.0, z), ..Plane::XY };
     FeatureKind::Sketch { plane: PlaneRef::Custom { plane }, sketch: sk }
 }

@@ -1,7 +1,7 @@
 use super::*;
 use serde_json::json;
 use solidcraft_geom::Vec2;
-use solidcraft_sketch::{LinkGeom, LinkKind, LinkSource};
+use solidcraft_sketch::{CurveKind, LinkGeom, LinkKind, LinkSource};
 
 fn line(sk: &mut Sketch, y: f64) -> usize {
     sk.add_line(Vec2::new(0., y), Vec2::new(2., y), None, None, None).unwrap()
@@ -118,6 +118,42 @@ fn hiding_construction_geometry_keeps_ordinary_curves_centerlines_and_projected_
     assert_eq!(drawn(&sk), vec![ordinary, construction, centerline]);
     // A curve index that does not exist is not visible, and nothing panics asking.
     assert!(!sketch_curve_visible(&sk, sk.curves.len()));
+}
+
+#[test]
+fn spline_tangent_guides_are_hidden_from_normal_sketch_drawing_and_extend_both_sides() {
+    let mut sk = Sketch::new();
+    let positions = [Vec2::new(0., 0.), Vec2::new(8., 6.), Vec2::new(17., 2.), Vec2::new(25., 10.)];
+    let points = positions.iter().map(|point| sk.add_point(*point, None).unwrap()).collect();
+    let spline =
+        sk.add_curve(CurveKind::Spline { pts: points, control: false, degree: 3, periodic: false, handles: Vec::new() }, Some("s1")).unwrap();
+    sk.add_spline_handles(spline).unwrap();
+
+    let CurveKind::Spline { pts, handles, .. } = &sk.curves[spline].kind else { panic!("expected a fit spline") };
+    let natural = solidcraft_sketch::fit_beziers(&positions);
+    for (index, handle) in handles.iter().enumerate() {
+        let position = sk.point(*handle).unwrap();
+        let fit_point = sk.point(pts[index]).unwrap();
+        let control_offset = if index == 0 { natural[0][1] - positions[index] } else { natural[index - 1][2] - positions[index] };
+        let chord = if index == 0 { positions[1].dist(positions[0]) } else { positions[index - 1].dist(positions[index]) };
+        assert!(
+            (position.dist(fit_point) - control_offset.len() * (3.0 * 4.55 / chord)).abs() < 1e-9,
+            "handle {index}: arm {}, expected 1.3 times the previous handle length {}",
+            position.dist(fit_point),
+            control_offset.len() * (3.0 * 4.55 / chord)
+        );
+    }
+
+    let helper = sk.curves.iter().position(|curve| curve.spline_handle_of.as_deref() == Some("s1")).unwrap();
+    assert!(!sketch_curve_visible(&sk, helper));
+    assert_eq!(spline_handle_display_line(&sk, helper), Some((positions[0] * 2.0 - sk.point(handles[0]).unwrap(), sk.point(handles[0]).unwrap())));
+
+    let mut sampled = Vec::new();
+    sketch_lines_with_sampler(&sk, &Plane::XY, true, &[], |_, index, _| {
+        sampled.push(index);
+        vec![vec![Vec3::ZERO, Vec3::X]]
+    });
+    assert!(!sampled.contains(&helper), "tangent guides are drawn only by the selected-spline viewport path");
 }
 
 #[test]

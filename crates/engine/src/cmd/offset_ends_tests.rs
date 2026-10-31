@@ -44,8 +44,7 @@ fn lines_drawn_from_offset_spline_ends_get_their_own_coincident_points() {
     assert!(sk.points[*l1_end].pos.dist(sk.points[start].pos) < 1e-9);
 
     // Moving the source moves the offset, and the lines follow its ends.
-    let from = sk.point(sk.resolve_point("s1.start").unwrap()).unwrap();
-    run(&mut s, "sketch.drag", json!({"entity":"s1.start","from":[from.x, from.y],"to":[from.x - 3.0, from.y + 2.0]}));
+    run(&mut s, "sketch.move", json!({"entities":["s1"],"translate":[-3.0,2.0]}));
     let moved = solved(&s, id);
     moved.validate_freeform_offsets().unwrap();
     assert!(moved.points[start].pos.dist(sk.points[start].pos) > 1.0, "the offset followed its source");

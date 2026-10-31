@@ -623,6 +623,7 @@ impl Sketch {
                     centerline: false,
                     fixed: false,
                     infinite: false,
+                    spline_handle_of: None,
                 });
                 outputs.push(output);
             }
@@ -777,6 +778,7 @@ impl Sketch {
                         centerline: role.flags.centerline,
                         fixed: role.flags.fixed,
                         infinite: role.flags.infinite,
+                        spline_handle_of: None,
                     });
                 }
                 outputs.push(role.output.clone());

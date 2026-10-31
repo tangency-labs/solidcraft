@@ -204,7 +204,26 @@ fn sketch_json(s: &Session, id: u64) -> Option<Value> {
                 CurveKind::Circle { c: cc, r } => json!({"id": c.id, "type": "circle", "center": pid(cc), "center_at": sk.point(cc), "radius": r, "construction": c.construction, "fixed": sk.curve_locked(i), "fully_constrained": det}),
                 CurveKind::Arc { c: cc, a, b } => json!({"id": c.id, "type": "arc", "center": pid(cc), "start": pid(a), "end": pid(b), "center_at": sk.point(cc), "start_at": sk.point(a), "end_at": sk.point(b), "radius": sk.radius(i), "construction": c.construction, "fixed": sk.curve_locked(i), "fully_constrained": det}),
                 CurveKind::Ellipse { c: cc, m, r } => json!({"id": c.id, "type": "ellipse", "center": pid(cc), "major": pid(m), "center_at": sk.point(cc), "major_at": sk.point(m), "minor_radius": r, "construction": c.construction, "fixed": sk.curve_locked(i), "fully_constrained": det}),
-                CurveKind::Spline { ref pts, control, degree, periodic } => json!({"id": c.id, "type": "spline", "points": pts.iter().map(|q| pid(*q)).collect::<Vec<_>>(), "points_at": pts.iter().map(|q| sk.point(*q)).collect::<Vec<_>>(), "control": control, "degree": degree, "periodic": periodic, "construction": c.construction, "fixed": sk.curve_locked(i), "fully_constrained": det}),
+                CurveKind::Spline { ref pts, control, degree, periodic, ref handles } => json!({
+                    "id": c.id,
+                    "type": "spline",
+                    "points": pts.iter().map(|q| pid(*q)).collect::<Vec<_>>(),
+                    "points_at": pts.iter().map(|q| sk.point(*q)).collect::<Vec<_>>(),
+                    "tangent_handles": handles.iter().map(|point| json!({
+                        "point": pid(*point),
+                        "at": sk.point(*point),
+                        "curve": sk.curves.iter().find(|candidate| {
+                            candidate.spline_handle_of.as_deref() == Some(c.id.as_str())
+                                && matches!(candidate.kind, CurveKind::Line { a, b } if a == *point || b == *point)
+                        }).map(|candidate| candidate.id.clone()),
+                    })).collect::<Vec<_>>(),
+                    "control": control,
+                    "degree": degree,
+                    "periodic": periodic,
+                    "construction": c.construction,
+                    "fixed": sk.curve_locked(i),
+                    "fully_constrained": det
+                }),
                 CurveKind::Conic { a, b, apex, rho } => json!({"id": c.id, "type": "conic", "start": pid(a), "end": pid(b), "apex": pid(apex), "start_at": sk.point(a), "end_at": sk.point(b), "apex_at": sk.point(apex), "rho": rho, "construction": c.construction, "fixed": sk.curve_locked(i), "fully_constrained": det}),
             };
             if let (Some(l), Some(o)) = (&c.link, v.as_object_mut()) {
