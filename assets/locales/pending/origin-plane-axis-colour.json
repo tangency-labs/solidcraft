@@ -1,0 +1,26 @@
+{
+  "en": {
+    "prefs.color_origin_planes_by_axis": "Colour origin planes by their normal axis",
+    "prefs.color_origin_planes_by_axis_help": "Each origin plane wears the colour of the axis normal to it: XY blue, YZ red, XZ green. Off: all three keep the neutral colour."
+  },
+  "ar": {
+    "prefs.color_origin_planes_by_axis": "تلوين مستويات الأصل حسب المحور العمودي عليها",
+    "prefs.color_origin_planes_by_axis_help": "يكتسب كل مستوى من مستويات الأصل لون المحور العمودي عليه: XY أزرق، YZ أحمر، XZ أخضر. عند الإيقاف تبقى المستويات الثلاثة بلون محايد."
+  },
+  "he": {
+    "prefs.color_origin_planes_by_axis": "צבע מישורי הבסיס לפי הציר הניצב להם",
+    "prefs.color_origin_planes_by_axis_help": "כל מישור בסיס מקבל את הצבע של הציר הניצב לו: XY כחול, YZ אדום, XZ ירוק. בכיבוי שלושת המישורים נשארים בצבע ניטרלי."
+  },
+  "ja": {
+    "prefs.color_origin_planes_by_axis": "基準面を法線軸の色で表示",
+    "prefs.color_origin_planes_by_axis_help": "各基準面に、その法線となる軸の色を付けます：XY は青、YZ は赤、XZ は緑。オフにすると 3 つとも中立色のままです。"
+  },
+  "vi": {
+    "prefs.color_origin_planes_by_axis": "Tô màu các mặt phẳng gốc theo trục pháp tuyến",
+    "prefs.color_origin_planes_by_axis_help": "Mỗi mặt phẳng gốc mang màu của trục vuông góc với nó: XY xanh lam, YZ đỏ, XZ xanh lục. Khi tắt, cả ba mặt phẳng giữ màu trung tính."
+  },
+  "zh": {
+    "prefs.color_origin_planes_by_axis": "按法线轴为基准面着色",
+    "prefs.color_origin_planes_by_axis_help": "每个基准面显示其法线轴的颜色：XY 蓝色，YZ 红色，XZ 绿色。关闭时，三个基准面保持中性颜色。"
+  }
+}
