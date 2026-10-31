@@ -1286,7 +1286,7 @@ preference_settings! {
     /// The application bar's logo in the theme's accent instead of the theme's logo colours.
     logo_accent: bool = false, PAGE_APPEARANCE;
     /// Keep the in-window File menu alongside the macOS system menu. Other hosts always show it.
-    window_file_menu: bool = false, PAGE_LAYOUT => check_id("prefs.window_file_menu");
+    window_file_menu: bool = false, PAGE_LAYOUT;
     /// Imported theme files (`theme_files`), kept here so they also work in the browser.
     #[serde(deserialize_with = "themes_that_read")]
     custom_themes: Vec<crate::theme_files::ThemeFile> = Vec::new();

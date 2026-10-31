@@ -292,6 +292,15 @@ pub(super) fn layout(app: &mut SolveApp, ui: &mut egui::Ui) {
                 },
                 ui_kit::layout_preview,
             );
+            if app.native_file_menu {
+                layout_check(
+                    ui,
+                    app.tr("prefs.window_file_menu"),
+                    app.tr("prefs.window_file_menu_note"),
+                    &mut app.preferences.window_file_menu,
+                    "window_file_menu",
+                );
+            }
             layout_check(
                 ui,
                 app.tr("prefs.keep_work_on_tab_switch"),
