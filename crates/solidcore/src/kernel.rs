@@ -264,6 +264,16 @@ pub struct UpstreamFixes {
     pub nurb_cylinder_inside_out_frame: bool,
     /// `SweepProfilesAlongPath` asks for caps only when the profile closes (WR-400, #837).
     pub planar_path_uncapped_open_profiles: bool,
+    /// `PositionProfileCurves` returns the first failing status of its two
+    /// `SmAxis2Placement::SetCanonical` calls, its three profile `Transform` calls and
+    /// `MakeUnitOrthoVectors`, instead of ignoring them and positioning the profiles
+    /// with the partial frame: a path start tangent whose squared length overflows
+    /// (a `1e300` component) unitizes to zero, `MakeUnitOrthoVectors` fails `SM_ERR`,
+    /// and upstream then transforms the profiles by an invalid partial frame (WR-632,
+    /// #483). The edits made before the first failure stay (no rollback); the identity
+    /// `SetCanonical` on the profile-normal frame (always successful upstream) is
+    /// elided. Off by default for pinned C++ parity.
+    pub planar_path_profile_placement_statuses: bool,
     /// A rotational sweep (whole or partial turn) makes each line and circular arc of its profile its cylinder, cone, sphere or torus, not only a one-curve profile's (WR-448, #545; SolidCraft change, tangency-labs/smlib 0b143f7).
     pub revolve_analytic_profile_faces: bool,
     /// With `revolve_analytic_profile_faces`, a revolved arc whose centre is within the B-rep tolerance of the axis is the sphere centred on the axis through the arc's ends, and an end within it of the axis is its pole, not a sphere (or torus) built on the arc's own off-axis circle with a pole row of radius about sqrt(2 tol R) (WR-471, #1123; tangency-labs/smlib, "a revolved arc centred within tolerance of the axis is a sphere through its ends").
