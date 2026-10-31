@@ -172,6 +172,39 @@ fn two_point_circle_takes_a_typed_diameter() {
     assert!((c - dir * 15.0).len() < 1e-6, "{c:?}");
 }
 
+/// #10279: the Ellipse tool shows a Major radius box after the centre and a Minor radius box after
+/// the end of the major axis. The typed values size the ellipse and become its two dimensions,
+/// the major radius one kept from the first stage.
+#[test]
+fn an_ellipse_takes_a_typed_major_and_minor_radius() {
+    use solidcraft_engine::doc::expr::Kind;
+    use solidcraft_engine::sketch::CurveKind;
+    let labels = |h: &Harness| h.app.tool.as_ref().unwrap().dims.iter().map(|b| b.label).collect::<Vec<_>>();
+    let mut h = drawing("sketch.ellipse");
+    assert_eq!(labels(&h), ["Major radius"]);
+    type_value(&mut h, "25");
+    h.step(&json!({"key": "Enter"})).unwrap();
+    h.step(&json!({"move": {"world": [0, 30, 0]}})).unwrap();
+    assert_eq!(labels(&h), ["Minor radius"]);
+    assert_focus(&h, 0);
+    type_value(&mut h, "8");
+    h.step(&json!({"key": "Enter"})).unwrap();
+    let state = h.app.session.world_state();
+    let sk = &state.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
+    assert_eq!(sk.curves.len(), 1, "{:?}", h.app.status);
+    let CurveKind::Ellipse { c, m, r } = sk.curves[0].kind.clone() else { panic!("{:?}", sk.curves[0].kind) };
+    let (c, m) = (sk.point(c).unwrap(), sk.point(m).unwrap());
+    // From the centre (the origin) toward the cursor at (20, 10).
+    let dir = solidcraft_engine::geom::Vec2::new(20.0, 10.0).normalized().unwrap();
+    assert!(c.len() < 1e-6 && (m - dir * 25.0).len() < 1e-6, "{c:?} {m:?}");
+    assert!((r - 8.0).abs() < 1e-6, "{r}");
+    let doc = &h.app.session.doc;
+    let mut sizes: Vec<f64> = doc.params.iter().filter(|p| p.model).filter_map(|p| doc.eval(&p.name, Kind::Length).ok()).collect();
+    sizes.sort_by(f64::total_cmp);
+    assert_eq!(sizes.len(), 2, "{sizes:?}");
+    assert!((sizes[0] - 8.0).abs() < 1e-6 && (sizes[1] - 25.0).abs() < 1e-6, "{sizes:?}");
+}
+
 #[test]
 fn inch_live_lengths_use_design_units_and_typed_four_digits_commit_in_inches() {
     let mut h = Harness::new();
