@@ -522,7 +522,8 @@ fn write(s: &mut Session, cmd: &str, path: &str, format: &str, compression: &str
     check_design_name(cmd, path)?;
     // A move not captured yet isn't in the document a file holds: refuse, rather than write the
     // file without it and say nothing (#9736). The app asks the Capture Position question first.
-    if !s.pending_moves.is_empty() {
+    // An exploded view shown saves as before: its placements aren't the design's.
+    if s.moved_uncaptured() {
         let moved: Vec<&str> = s.doc.occurrences.iter().filter(|o| s.pending_moves.contains_key(&o.id)).map(|o| o.name.as_str()).collect();
         return Err(EngineError::Other(format!(
             "{path}: {} moved and not captured yet; component.capture_position keeps the move and component.revert_position puts it back, then save",
@@ -1475,6 +1476,16 @@ mod tests {
         }
         let opened = Session::new(crate::io::read_design(&std::fs::read(&path).unwrap()).unwrap());
         assert!((arm_x(&opened) - 27.0).abs() < 1e-6, "the captured move is in the file: {}", arm_x(&opened));
+        // An exploded view shown places the components only while it is shown: no change to
+        // save, and the design saves as it is. A move on top of it is one.
+        s.execute("explode.create", &json!({"name": "Apart", "moves": [{"occurrence": arm, "translate": [0, 0, 40]}]})).unwrap();
+        s.execute("file.save", &json!({})).unwrap();
+        s.execute("explode.show", &json!({"view": "Apart"})).unwrap();
+        assert!(!s.pending_moves.is_empty() && !s.is_dirty(), "an exploded view shown");
+        s.execute("file.save", &json!({})).unwrap();
+        s.execute("occurrence.move", &json!({"occurrence": arm, "translate": [5, 0, 0], "capture": false})).unwrap();
+        assert!(s.is_dirty());
+        assert!(s.execute("file.save", &json!({})).is_err());
         let _ = std::fs::remove_dir_all(&dir);
     }
 
