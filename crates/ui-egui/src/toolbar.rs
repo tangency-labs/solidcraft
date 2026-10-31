@@ -2449,6 +2449,7 @@ fn skip_on_ribbon(cmds: Vec<&'static solidcraft_engine::CommandSpec>, on_ribbon:
     if rest.is_empty() { cmds } else { rest }
 }
 
+
 const SKETCH_CHAMFERS: &[&str] = &["sketch.chamfer.equal_distance", "sketch.chamfer.distance_angle", "sketch.chamfer.two_distance"];
 
 fn is_sketch_chamfer(id: &str) -> bool {
@@ -4050,6 +4051,51 @@ mod dropdown_tests {
         h.step(&json!({"key":"Enter"})).unwrap();
         h.frames(2);
         assert!(crate::scenario::handle_at("dropdown:sketch.chamfer.equal_distance").is_some());
+    }
+
+    #[test]
+    fn sketch_chamfer_grid_keyboard_reaches_and_navigates_family() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.preferences.ribbon_icon_grid = true;
+        h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+        h.frames(4);
+        h.step(&json!({"click":{"handle":"panel:SKETCH:MODIFY"}})).unwrap();
+        h.frames(4);
+        let mut reached = false;
+        for _ in 0..30 {
+            h.step(&json!({"key":"ArrowDown"})).unwrap();
+            let family = h.ctx.data(|d| d.get_temp::<(egui::Id, bool, u64)>(egui::Id::new("sketch_chamfer_family_state")));
+            if family.is_some_and(|(id, _, _)| h.ctx.memory(|m| m.focused()) == Some(id)) {
+                reached = true;
+                break;
+            }
+        }
+        assert!(reached, "Chamfer family must be reachable in the icon grid");
+        h.step(&json!({"key":"Enter"})).unwrap();
+        h.frames(2);
+        h.step(&json!({"key":"ArrowDown"})).unwrap();
+        assert_eq!(h.ctx.memory(|m| m.focused()), Some(dropdown_row_id(SKETCH_CHAMFERS[0])));
+        h.step(&json!({"key":"ArrowDown"})).unwrap();
+        assert_eq!(h.ctx.memory(|m| m.focused()), Some(dropdown_row_id(SKETCH_CHAMFERS[1])));
+    }
+
+    #[test]
+    fn sketch_chamfer_search_preview_reveals_each_mode() {
+        for grid in [false, true] {
+            for id in SKETCH_CHAMFERS {
+                let mut h = crate::scenario::Harness::new();
+                h.app.home.open = false;
+                h.app.preferences.ribbon_icon_grid = grid;
+                h.app.preferences.ribbon_reveal = true;
+                h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+                h.frames(4);
+                h.app.sbox.reveal = Some(crate::shortcut_box::Reveal { id, since: h.ctx.input(|i| i.time), preview: true, back: "SKETCH".into() });
+                h.frames(4);
+                let row = crate::scenario::rect_of("ribbon:reveal").expect("search preview must reveal a row");
+                assert!(row.contains(crate::scenario::handle_at(&format!("dropdown:{id}")).expect("matching chamfer must be visible")));
+            }
+        }
     }
 
     #[test]
