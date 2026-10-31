@@ -4603,7 +4603,7 @@
   "update.check_unavailable": "Проверка обновлений недоступна для этой установки.",
   "update.checking": "Проверка…",
   "update.copy": "Копировать",
-  "update.dmg_opened": "Образ диска открыт и проверен: перетащите SolidCraft в «Программы», заменив старую копию, затем перезапустите SolidCraft.",
+  "update.dmg_opened": "Образ диска открыт и проверен: завершите SolidCraft, перетащите новый SolidCraft в «Программы», заменив старую копию, затем снова откройте SolidCraft.",
   "update.download": "Скачать",
   "update.download_open": "Скачать и открыть",
   "update.downloading": "Загрузка и проверка… {done} из {total} МБ",

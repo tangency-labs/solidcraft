@@ -4712,7 +4712,7 @@
   "update.check_unavailable": "Semakan kemas kini tidak tersedia untuk pemasangan ini.",
   "update.checking": "Menyemak…",
   "update.copy": "Salin",
-  "update.dmg_opened": "Imej cakera telah dibuka dan disahkan: seret SolidCraft ke Applications untuk menggantikan salinan lama, kemudian mulakan semula SolidCraft.",
+  "update.dmg_opened": "Imej cakera telah dibuka dan disahkan: keluar dari SolidCraft, seret SolidCraft yang baharu ke Applications untuk menggantikan salinan lama, kemudian buka SolidCraft semula.",
   "update.download": "Muat turun",
   "update.download_open": "Muat turun dan buka",
   "update.downloading": "Memuat turun dan mengesahkan… {done} daripada {total} MB",

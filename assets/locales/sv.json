@@ -4712,7 +4712,7 @@
   "update.check_unavailable": "Sökning efter uppdateringar är inte tillgänglig för den här installationen.",
   "update.checking": "Söker…",
   "update.copy": "Kopiera",
-  "update.dmg_opened": "Diskavbilden är öppen och verifierad: dra SolidCraft till Program och ersätt den gamla kopian, starta sedan om SolidCraft.",
+  "update.dmg_opened": "Diskavbilden är öppen och verifierad: avsluta SolidCraft, dra det nya SolidCraft till Program och ersätt den gamla kopian, öppna sedan SolidCraft igen.",
   "update.download": "Ladda ned",
   "update.download_open": "Ladda ned och öppna",
   "update.downloading": "Laddar ned och verifierar… {done} av {total} MB",

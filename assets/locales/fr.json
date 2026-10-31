@@ -4737,7 +4737,7 @@
   "update.check_unavailable": "La recherche de mises à jour n’est pas disponible pour cette installation.",
   "update.checking": "Vérification…",
   "update.copy": "Copier",
-  "update.dmg_opened": "L'image disque est ouverte et vérifiée : faites glisser SolidCraft dans Applications en remplaçant l'ancienne copie, puis redémarrez SolidCraft.",
+  "update.dmg_opened": "L'image disque est ouverte et vérifiée : quittez SolidCraft, faites glisser le nouveau SolidCraft dans Applications en remplaçant l'ancienne copie, puis rouvrez SolidCraft.",
   "update.download": "Télécharger",
   "update.download_open": "Télécharger et ouvrir",
   "update.downloading": "Téléchargement et vérification… {done} sur {total} Mo",

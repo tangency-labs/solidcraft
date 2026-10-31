@@ -4736,7 +4736,7 @@
   "update.check_unavailable": "Перевірка оновлень недоступна для цього встановлення.",
   "update.checking": "Перевірка…",
   "update.copy": "Копіювати",
-  "update.dmg_opened": "Образ диска відкрито й перевірено: перетягніть SolidCraft до Applications, замінивши стару копію, а потім перезапустіть SolidCraft.",
+  "update.dmg_opened": "Образ диска відкрито й перевірено: завершіть SolidCraft, перетягніть новий SolidCraft до Applications, замінивши стару копію, а потім знову відкрийте SolidCraft.",
   "update.download": "Завантажити",
   "update.download_open": "Завантажити й відкрити",
   "update.downloading": "Завантаження та перевірка… {done} з {total} МБ",

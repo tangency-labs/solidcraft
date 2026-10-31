@@ -4879,7 +4879,7 @@
   "update.check_unavailable": "Không thể kiểm tra bản cập nhật cho bản cài đặt này.",
   "update.checking": "Đang kiểm tra…",
   "update.copy": "Sao chép",
-  "update.dmg_opened": "Ảnh đĩa đã mở và được xác thực: kéo SolidCraft vào thư mục Applications để thay thế bản cũ, sau đó khởi động lại SolidCraft.",
+  "update.dmg_opened": "Ảnh đĩa đã mở và được xác thực: thoát SolidCraft, kéo SolidCraft mới vào thư mục Applications để thay thế bản cũ, sau đó mở lại SolidCraft.",
   "update.download": "Tải về",
   "update.download_open": "Tải về và mở",
   "update.downloading": "Đang tải về và xác thực… {done} trên {total} MB",

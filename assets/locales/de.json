@@ -4549,7 +4549,7 @@
   "update.check_unavailable": "Für diese Installation ist keine Update-Prüfung verfügbar.",
   "update.checking": "Suche läuft…",
   "update.copy": "Kopieren",
-  "update.dmg_opened": "Das Disk-Image ist geöffnet und geprüft: SolidCraft in „Programme“ ziehen, die alte Version ersetzen und SolidCraft neu starten.",
+  "update.dmg_opened": "Das Disk-Image ist geöffnet und geprüft: SolidCraft beenden, das neue SolidCraft in „Programme“ ziehen, die alte Version ersetzen und SolidCraft wieder öffnen.",
   "update.download": "Herunterladen",
   "update.download_open": "Herunterladen und öffnen",
   "update.downloading": "Herunterladen und prüfen… {done} von {total} MB",

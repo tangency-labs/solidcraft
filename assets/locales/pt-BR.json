@@ -2404,7 +2404,7 @@
   "update.check_unavailable": "A verificação de atualizações não está disponível para esta instalação.",
   "update.checking": "Verificando…",
   "update.copy": "Copiar",
-  "update.dmg_opened": "A imagem de disco está aberta e verificada: arraste o SolidCraft para Aplicativos, substituindo a cópia antiga, e reinicie o SolidCraft.",
+  "update.dmg_opened": "A imagem de disco está aberta e verificada: encerre o SolidCraft, arraste o novo SolidCraft para Aplicativos, substituindo a cópia antiga, e abra o SolidCraft novamente.",
   "update.download": "Baixar",
   "update.download_open": "Baixar e abrir",
   "update.downloading": "Baixando e verificando… {done} de {total} MB",

@@ -4879,7 +4879,7 @@
   "update.check_unavailable": "التحقق من التحديثات غير متاح لهذا التثبيت.",
   "update.checking": "جارٍ التحقق…",
   "update.copy": "نسخ",
-  "update.dmg_opened": "صورة القرص مفتوحة وموثّقة: اسحب SolidCraft إلى مجلد التطبيقات مستبدلًا النسخة القديمة، ثم أعد تشغيل SolidCraft.",
+  "update.dmg_opened": "صورة القرص مفتوحة وموثّقة: أنهِ SolidCraft، ثم اسحب SolidCraft الجديد إلى مجلد التطبيقات مستبدلًا النسخة القديمة، ثم افتح SolidCraft من جديد.",
   "update.download": "تنزيل",
   "update.download_open": "تنزيل وفتح",
   "update.downloading": "جارٍ التنزيل والتحقق… {done} من {total} MB",

@@ -4712,7 +4712,7 @@
   "update.check_unavailable": "Ehhez a telepítéshez nem érhető el a frissítések keresése.",
   "update.checking": "Keresés…",
   "update.copy": "Másolás",
-  "update.dmg_opened": "A lemezkép meg van nyitva és ellenőrizve: húzza a SolidCraftot az Alkalmazások mappába, lecserélve a régi példányt, majd indítsa újra a SolidCraftot.",
+  "update.dmg_opened": "A lemezkép meg van nyitva és ellenőrizve: lépjen ki a SolidCraftból, húzza az új SolidCraftot az Alkalmazások mappába, lecserélve a régi példányt, majd nyissa meg újra a SolidCraftot.",
   "update.download": "Letöltés",
   "update.download_open": "Letöltés és megnyitás",
   "update.downloading": "Letöltés és ellenőrzés… {done}/{total} MB",

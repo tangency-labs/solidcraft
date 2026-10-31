@@ -4879,7 +4879,7 @@
   "update.check_unavailable": "בדיקת עדכונים אינה זמינה עבור התקנה זו.",
   "update.checking": "בבדיקה…",
   "update.copy": "העתקה",
-  "update.dmg_opened": "תמונת הדיסק פתוחה ואומתה: יש לגרור את SolidCraft לתיקיית היישומים במקום העותק הישן, ואז להפעיל מחדש את SolidCraft.",
+  "update.dmg_opened": "תמונת הדיסק פתוחה ואומתה: יש לצאת מ-SolidCraft, לגרור את SolidCraft החדש לתיקיית היישומים במקום העותק הישן, ואז לפתוח את SolidCraft מחדש.",
   "update.download": "הורדה",
   "update.download_open": "הורדה ופתיחה",
   "update.downloading": "הורדה ואימות… {done} מתוך {total} MB",
