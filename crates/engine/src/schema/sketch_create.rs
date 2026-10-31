@@ -4,7 +4,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use super::types::{AngleExpr, SketchRef, present};
+use super::types::{AngleExpr, LengthExpr, SketchRef, present};
 
 /// Create an infinite reference line in the active sketch.
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -28,6 +28,11 @@ pub struct ConstructionLineParams {
     pub alternate: Option<bool>,
     /// Direction measured counter-clockwise from sketch X, in degrees.
     pub angle: Option<AngleExpr>,
+    /// Positive distance from the reference, on the side of `at`. For a parallel line that is
+    /// the picked line; for a horizontal line, the sketch X axis; for a vertical line, the
+    /// sketch Y axis. A typed value becomes a driving dimension.
+    #[serde(default)]
+    pub offset: Option<LengthExpr>,
     /// The sketch (default: the one being edited).
     pub sketch: Option<SketchRef>,
 }

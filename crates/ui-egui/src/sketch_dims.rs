@@ -40,6 +40,9 @@ pub fn boxes_for(cmd: &str, n: usize) -> Vec<DimBox> {
     let b = DimBox::new;
     match (cmd, n) {
         ("sketch.construction_line.angle", 1) => vec![b("Angle", Angle)],
+        ("sketch.construction_line.parallel" | "sketch.construction_line.horizontal" | "sketch.construction_line.vertical", 1) => {
+            vec![b("Offset", Length)]
+        }
         ("sketch.line" | "sketch.line.midpoint", n) if n >= 1 => vec![b("Length", Length), b("Angle", Angle)],
         ("sketch.rectangle.two_point" | "sketch.rectangle.center", 1) => vec![b("Width", Length), b("Height", Length)],
         ("sketch.rectangle.rounded", 1) => vec![b("Width", Length), b("Height", Length), b("Radius", Length)],
@@ -74,7 +77,11 @@ fn eval(doc: &Document, text: &str, kind: ValueKind) -> solidcraft_engine::doc::
 /// parameter (sent with the shape); sides and rho are counts and shape factors.
 fn is_dimension(t: &Tool, label: &str) -> bool {
     if solidcraft_engine::cmd::construction_line_mode(t.cmd).is_some() {
-        return t.cmd == "sketch.construction_line.angle" && label == "Angle";
+        return matches!(
+            (t.cmd, label),
+            ("sketch.construction_line.angle", "Angle")
+                | ("sketch.construction_line.parallel" | "sketch.construction_line.horizontal" | "sketch.construction_line.vertical", "Offset")
+        );
     }
     !matches!(label, "Sides" | "Rho") && !(t.cmd == "sketch.rectangle.rounded" && label == "Radius")
 }
@@ -89,6 +96,9 @@ fn sign(x: f64) -> f64 {
 
 /// The next point the tool would place for the cursor at `h`, honouring locked values.
 pub fn effective(app: &SolveApp, t: &Tool, h: Vec2) -> Vec2 {
+    if let Some(at) = construction_offset_at(app, t, h) {
+        return at;
+    }
     let Some(a) = t.pts.last().map(|p| p.0) else { return h };
     let lk = |l: &str| locked(app, t, l);
     match (t.cmd, t.pts.len()) {
@@ -244,6 +254,9 @@ fn line_boxes(a: Vec2, e: Vec2, px: f64, off: f64) -> Vec<(f64, Vec2)> {
 /// `px` is the size of a screen pixel in sketch units: boxes sit a little off the segment they
 /// measure so they don't cover it.
 fn live(app: &SolveApp, t: &Tool, e: Vec2, px: f64) -> Vec<(f64, Vec2)> {
+    if let Some(rows) = construction_offset_live(app, t, e, px) {
+        return rows;
+    }
     let Some(a) = t.pts.last().map(|p| p.0) else { return Vec::new() };
     let first = t.pts.first().map(|p| p.0).unwrap_or(a);
     let off = 20.0 * px;
@@ -334,9 +347,62 @@ fn fmt(app: &SolveApp, label: &str, kind: ValueKind, v: f64) -> String {
     }
 }
 
+/// How far a construction line is into the input that shows its offset box. Other tools use the
+/// point count, which is also the stage those boxes are keyed by.
+fn input_stage(t: &Tool) -> usize {
+    match t.cmd {
+        "sketch.construction_line.horizontal" | "sketch.construction_line.vertical" => 1,
+        "sketch.construction_line.parallel" => usize::from(!t.picks.is_empty()),
+        _ => t.pts.len(),
+    }
+}
+
+/// The straight line a parallel construction offset is measured from.
+fn reference_line(app: &SolveApp, id: &str) -> Option<(Vec2, Vec2)> {
+    let state = app.session.world_state();
+    let sketch = &state.sketch(app.session.active_sketch?)?.sketch;
+    let index = sketch.curve_index(id)?;
+    let solidcraft_engine::sketch::CurveKind::Line { a, b } = sketch.curves.get(index)?.kind else { return None };
+    Some((sketch.point(a)?, sketch.point(b)?))
+}
+
+/// Where a locked offset puts the line: on the cursor's side of the reference, at the typed distance.
+fn construction_offset_at(app: &SolveApp, t: &Tool, h: Vec2) -> Option<Vec2> {
+    let distance = locked(app, t, "Offset")?;
+    match t.cmd {
+        "sketch.construction_line.horizontal" => Some(Vec2::new(h.x, sign(h.y) * distance)),
+        "sketch.construction_line.vertical" => Some(Vec2::new(sign(h.x) * distance, h.y)),
+        "sketch.construction_line.parallel" => {
+            let (a, b) = reference_line(app, t.picks.first()?)?;
+            let dir = (b - a).normalized()?;
+            let normal = dir.perp();
+            let foot = a + dir * ((h - a).dot(dir));
+            Some(foot + normal * (sign(normal.dot(h - a)) * distance))
+        }
+        _ => None,
+    }
+}
+
+/// The offset box: the distance from the reference, beside that measurement.
+fn construction_offset_live(app: &SolveApp, t: &Tool, e: Vec2, px: f64) -> Option<Vec<(f64, Vec2)>> {
+    let off = 20.0 * px;
+    match t.cmd {
+        "sketch.construction_line.horizontal" => Some(vec![(e.y.abs(), Vec2::new(e.x + off, e.y * 0.5))]),
+        "sketch.construction_line.vertical" => Some(vec![(e.x.abs(), Vec2::new(e.x * 0.5, e.y + off))]),
+        "sketch.construction_line.parallel" => {
+            let (a, b) = reference_line(app, t.picks.first()?)?;
+            let dir = (b - a).normalized()?;
+            let foot = a + dir * ((e - a).dot(dir));
+            Some(vec![((e - foot).len(), (foot + e) * 0.5 + dir * off)])
+        }
+        _ => None,
+    }
+}
+
 /// Make the tool's boxes match its stage (new boxes when a point was placed).
 pub fn sync(t: &mut Tool) {
-    if t.dims_stage != t.pts.len() {
+    let stage = input_stage(t);
+    if t.dims_stage != stage {
         if t.pts.len() == t.dims_stage.saturating_add(1)
             && matches!(
                 t.cmd,
@@ -351,8 +417,8 @@ pub fn sync(t: &mut Tool) {
         } else if t.pts.len() <= t.dims_stage || t.cmd == "sketch.line" {
             t.dim_history.clear();
         }
-        t.dims = boxes_for(t.cmd, t.pts.len());
-        t.dims_stage = t.pts.len();
+        t.dims = boxes_for(t.cmd, stage);
+        t.dims_stage = stage;
         t.dims_focus = !t.dims.is_empty();
     }
 }
