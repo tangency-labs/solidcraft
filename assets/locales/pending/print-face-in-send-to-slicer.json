@@ -1,0 +1,37 @@
+{
+  "en": {
+    "prefs.print_face_everywhere": "Print faces outside Send to Slicer",
+    "prefs.print_face_everywhere_box": "Mark print faces from the face menu and Ctrl+B, and always show them",
+    "prefs.print_face_everywhere_tip": "On: the face menu's Print Face and Print Face (Ctrl+B) mark the selected flat face, and the view shows every print face. Off: print faces are picked in Send to Slicer, and shown only while it is open, for the bodies being sent."
+  },
+  "de": {
+    "prefs.print_face_everywhere": "Auflageflächen außerhalb von „An Slicer senden“",
+    "prefs.print_face_everywhere_box": "Auflageflächen über das Flächenmenü und Strg+B festlegen und immer anzeigen",
+    "prefs.print_face_everywhere_tip": "An: „Auflagefläche“ im Flächenmenü und Auflagefläche (Strg+B) legen die gewählte ebene Fläche fest, und die Ansicht zeigt jede Auflagefläche. Aus: Auflageflächen werden in „An Slicer senden“ gewählt und nur angezeigt, solange es offen ist, für die gesendeten Körper."
+  },
+  "ar": {
+    "prefs.print_face_everywhere": "أوجه الطباعة خارج «إرسال إلى برنامج التقطيع»",
+    "prefs.print_face_everywhere_box": "تحديد أوجه الطباعة من قائمة الوجه وCtrl+B، وإظهارها دائمًا",
+    "prefs.print_face_everywhere_tip": "عند التشغيل: يحدد «وجه الطباعة» في قائمة الوجه و«وجه الطباعة» (Ctrl+B) الوجه المستوي المحدد، ويُظهر العرض كل أوجه الطباعة. عند الإيقاف: تُختار أوجه الطباعة في «إرسال إلى برنامج التقطيع»، ولا تظهر إلا وهي مفتوحة، للأجسام المُرسلة."
+  },
+  "he": {
+    "prefs.print_face_everywhere": "פאות הדפסה מחוץ ל„שליחה לסלייסר”",
+    "prefs.print_face_everywhere_box": "סימון פאות הדפסה מתפריט הפאה ומ־Ctrl+B, והצגתן תמיד",
+    "prefs.print_face_everywhere_tip": "מופעל: „פאת הדפסה” בתפריט הפאה ופאת הדפסה (Ctrl+B) מסמנים את הפאה השטוחה שנבחרה, והתצוגה מציגה כל פאת הדפסה. כבוי: פאות הדפסה נבחרות ב„שליחה לסלייסר”, ומוצגות רק כשהוא פתוח, עבור הגופים הנשלחים."
+  },
+  "ja": {
+    "prefs.print_face_everywhere": "「スライサーに送る」以外での造形面",
+    "prefs.print_face_everywhere_box": "面メニューと Ctrl+B で造形面を設定し、常に表示する",
+    "prefs.print_face_everywhere_tip": "オン：面メニューの「造形面」と造形面 (Ctrl+B) で選択した平面を造形面にし、ビューにすべての造形面を表示します。オフ：造形面は「スライサーに送る」で選び、それが開いている間だけ、送るボディについて表示します。"
+  },
+  "vi": {
+    "prefs.print_face_everywhere": "Mặt in ngoài Gửi sang phần mềm cắt lớp",
+    "prefs.print_face_everywhere_box": "Đặt mặt in từ menu mặt và Ctrl+B, và luôn hiển thị chúng",
+    "prefs.print_face_everywhere_tip": "Bật: Mặt in trong menu mặt và Mặt in (Ctrl+B) đặt mặt phẳng đang chọn, và khung nhìn hiển thị mọi mặt in. Tắt: mặt in được chọn trong Gửi sang phần mềm cắt lớp, và chỉ hiển thị khi cửa sổ đó mở, cho các thân được gửi."
+  },
+  "zh": {
+    "prefs.print_face_everywhere": "在“发送到切片软件”之外使用打印底面",
+    "prefs.print_face_everywhere_box": "通过面菜单和 Ctrl+B 设置打印底面，并始终显示",
+    "prefs.print_face_everywhere_tip": "开启：面菜单中的“打印底面”和打印底面 (Ctrl+B) 将所选平面设为打印底面，视图显示所有打印底面。关闭：打印底面在“发送到切片软件”中选取，仅在其打开时显示，且只显示要发送的实体。"
+  }
+}

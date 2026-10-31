@@ -67,14 +67,18 @@ with a `slicer`, which sends without a dialog. They can start only the slicers i
 list and programs you added under **Custom…**; any other program path is refused, and an AI agent's
 request to save a mesh or send it to a slicer asks first and names the slicer.
 
-A body can have a **print face**: the flat face it should lie on in the slicer. Select the face
-and press **Ctrl+B** (or **Print Face** in the face's right-click menu); press it again to clear
-it. The Send to Slicer window shows the print face of each body being sent in its **Print
-face** row. A face you pick there in the viewport becomes the print face of its body, in place
-of the one it had; take a face out of the row to clear its body's. Each send then turns a
-copy of the body so the print face points down at Z = 0, with its centre of mass over the
-origin; the design itself does not move. The face is tinted and outlined in the viewport, and a
-copy made with Move/Copy or Mirror keeps it. A print face that is gone or no longer flat is
+A body can have a **print face**: the flat face it should lie on in the slicer. Pick it in the
+Send to Slicer window's **Print face** row (**Ctrl+B** opens the window with that row ready, and
+the face's right-click menu has **Send to Slicer**): it takes one flat face per body, for every
+body being sent. Picking a face of a body that is not in **Bodies** adds that body, picking
+another face of a body replaces its print face, and taking a face out of the row clears it. The
+design keeps each body's print face. Each send then turns a copy of the body so the print face
+points down at Z = 0, with its centre of mass over the origin; the design itself does not move.
+While the window is open, the print faces of the bodies being sent are tinted and outlined in the
+viewport; closing it hides them again and returns the ribbon to the tab it was opened from. A copy
+made with Move/Copy or Mirror keeps its print face. To mark print faces with Ctrl+B and the face
+menu and see them at all times, as earlier versions did, turn on **Print faces outside Send to
+Slicer** in Preferences › General › Slicer. A print face that is gone or no longer flat is
 reported, and the body is sent as it lies. Curved faces and mesh bodies can't be print faces.
 Known limitation: after a shell of a body that is already shelled, no face of that body can be
 marked, as no sketch can be attached to one either; this needs kernel work, which is paused.

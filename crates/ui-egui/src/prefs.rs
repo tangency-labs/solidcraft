@@ -1374,6 +1374,10 @@ preference_settings! {
     /// How strongly a print face stands out in the viewport (#8429): the share of the section
     /// colour in its tint, 0 to 1; its outline follows. 0 draws no highlight.
     print_face_highlight: f32 = 0.2, PAGE_GENERAL, accept(0.0..=1.0);
+    /// Print faces outside Send to Slicer, as before: the face menu's Print Face and Print Face
+    /// (Ctrl+B) mark the selected face, and the view shows every print face at all times. Off (the
+    /// default): print faces are picked and shown in Send to Slicer only.
+    print_face_everywhere: bool = false, PAGE_GENERAL;
     /// The line about sending again replacing the slicer's file has been shown.
     slicer_resend_hint_seen: bool = false;
     /// The user has agreed to Open with EasyPrint uploading a model to Printables' servers.

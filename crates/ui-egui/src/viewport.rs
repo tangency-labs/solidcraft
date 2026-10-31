@@ -3493,6 +3493,8 @@ fn highlight_geometry_key(app: &SolveApp) -> u64 {
     app.session.visibility.hidden_folders.hash(&mut h);
     // How strongly print faces are tinted (Preferences › General › Slicer).
     app.preferences.print_face_highlight.to_bits().hash(&mut h);
+    // Which bodies show theirs: all, or those Send to Slicer is sending.
+    crate::print_face_ui::drawn_bodies(app).hash(&mut h);
     h.finish()
 }
 
@@ -3875,11 +3877,14 @@ pub(crate) fn build_highlight(app: &SolveApp) -> GpuScene {
     let mut selected_instances = HighlightInstances::default();
     // Print faces (#8429): tinted towards the colour section views give cut faces, and outlined,
     // so the face a slicer export lays its body on shows at a glance. Drawn before the selection,
-    // which lights over it.
+    // which lights over it. Only while Send to Slicer is open, for the bodies it sends, unless the
+    // user keeps them shown everywhere (`print_face_ui::drawn_bodies`).
     // The share of that colour is the user's (Preferences › General › Slicer, default a fifth); the
     // outline takes a little over twice it, so the face reads as marked without outshouting the model.
     let strength = app.preferences.print_face_highlight.clamp(0.0, 1.0);
-    if !product && strength > 0.0 {
+    let print_bodies = crate::print_face_ui::drawn_bodies(app);
+    let print_shown = |name: &str| print_bodies.as_ref().is_none_or(|names| names.iter().any(|n| n == name));
+    if !product && strength > 0.0 && print_bodies.as_ref().is_none_or(|names| !names.is_empty()) {
         let cap = t.section_cap;
         let blend = |from: u8, to: u8, k: f32| (f32::from(from) + (f32::from(to) - f32::from(from)) * k).round().clamp(0.0, 255.0) as u8;
         let mix = |body: u8, tint: u8| blend(body, tint, strength);
@@ -3887,7 +3892,11 @@ pub(crate) fn build_highlight(app: &SolveApp) -> GpuScene {
         let k = (strength * 2.25).min(1.0);
         let rim = Color32::from_rgb(blend(edge.r(), cap.r(), k), blend(edge.g(), cap.g(), k), blend(edge.b(), cap.b(), k));
         let outline = EdgeColours::new(&mut feedback, rim, rim);
-        for b in st.bodies.iter().filter(|b| app.session.body_visible(&b.name) && !app.preview.effective_replaced().contains(&b.name)) {
+        for b in st
+            .bodies
+            .iter()
+            .filter(|b| print_shown(&b.name) && app.session.body_visible(&b.name) && !app.preview.effective_replaced().contains(&b.name))
+        {
             let Some(Ok(face)) = s.doc.print_face(&st, b) else { continue };
             let (r, g, bl) = body_rgb(app, &b.name);
             face_tris(&mut feedback, &shown(b), face.index, [mix(r, cap.r()), mix(g, cap.g()), mix(bl, cap.b()), 255], true);

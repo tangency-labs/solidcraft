@@ -3,10 +3,13 @@
 //! send the bodies to: it always asks, and pre-selects the slicer used last time. The list also has
 //! a plain text row for EasyPrint (`file.open_in_easyprint`), which works in a browser too.
 //!
-//! Send to Slicer also has a Print face input (#8429): it shows the print face of each body being
-//! sent, takes a flat face picked in the viewport as its body's print face (in place of the one it
-//! had), and clears a body's when its face is taken out. Each change runs `body.print_face` at
-//! once, so it undoes like any other.
+//! Send to Slicer also has a Print face input (#8429): like Bodies it holds several picks, one flat
+//! face per body being sent, and shows each one's print face. A face picked there becomes its
+//! body's print face (replacing that body's last one) and adds the body to Bodies when it is not
+//! there yet; a face taken out clears it. Each change runs `body.print_face` at once, so it undoes
+//! like any other, and the design keeps it. The view shows print faces only while this window is
+//! open, and only for the bodies in its Bodies list (`print_face_ui::drawn_bodies`). Closing it
+//! puts the ribbon back on the tab it was opened from.
 //!
 //! Every place that saves a mesh opens this dialog: File › Export STL / Export 3MF, the Mesh tab, and the
 //! Save As Mesh item of the body menus. The slicer list (Send to Slicer only) holds the programs the user added (kept
@@ -52,9 +55,17 @@ pub struct SaveMesh {
     slicer: String,
     /// The slicer list has not been read for this opening yet.
     stale: bool,
-    /// Send to Slicer: the bodies and the print faces the Print face input last showed, to tell
-    /// a pick or a clear in it from a change of the bodies.
-    shown: Option<(Vec<String>, Vec<Sel>)>,
+    /// Send to Slicer: what the Print face input last showed, to tell a pick or a clear in it from
+    /// a change of the bodies or of the design.
+    shown: Option<Shown>,
+}
+
+/// What the Print face input showed, and for which bodies and design revision.
+#[derive(Clone, Debug, PartialEq)]
+struct Shown {
+    bodies: Vec<String>,
+    faces: Vec<Sel>,
+    revision: u64,
 }
 
 impl SaveMesh {
@@ -322,50 +333,77 @@ pub(crate) fn body_picks(app: &SolveApp, visible: bool) -> Vec<Sel> {
     st.bodies.iter().filter(|b| shown(&b.name)).map(|b| Sel::Body { name: b.name.clone() }).collect()
 }
 
-/// Keep the Print face input and the design in step: it holds the print face of each body being
-/// sent. A face picked into it becomes the print face of its body, in place of the one it had; a
-/// face taken out of it clears its body's. When the bodies change, it shows their print faces.
-fn sync_print_face(app: &mut SolveApp, k: &mut SaveMesh, inputs: &mut [SelInput]) {
+/// The body and face index of a face pick.
+fn face_key(sel: &Sel) -> Option<(&str, usize)> {
+    match sel {
+        Sel::Face { body, index, .. } => Some((body.as_str(), *index)),
+        _ => None,
+    }
+}
+
+/// The same faces, whatever spot on them was clicked.
+fn same_faces(a: &[Sel], b: &[Sel]) -> bool {
+    a.len() == b.len() && a.iter().zip(b).all(|(x, y)| face_key(x) == face_key(y))
+}
+
+/// Keep the Print face input and the design in step. A face picked into it becomes the print
+/// face of its body, replacing the one that body had, and the body joins Bodies when it is not
+/// there; a face taken out of it clears its body's print face. Otherwise it shows the print faces
+/// of the bodies being sent, again whenever they or the design change (an undo, say).
+pub(crate) fn sync_print_faces(app: &mut SolveApp, k: &mut SaveMesh, inputs: &mut [SelInput]) {
+    let Some(picked) = inputs.get(1).map(|i| i.items.clone()) else { return };
     let bodies = crate::selection::items(inputs, 0).body_names();
-    let Some(input) = inputs.get_mut(1) else { return };
-    match k.shown.take() {
-        Some((shown_bodies, shown)) if shown_bodies == bodies && shown != input.items => {
-            let picked = input.items.clone();
-            // New faces first: a body picked anew keeps its new face, and is not then cleared
-            // because its old one has left the input.
-            let mut done: Vec<String> = Vec::new();
-            for face in picked.iter().filter(|f| !shown.contains(f)) {
-                let Sel::Face { body, .. } = face else { continue };
-                if !bodies.contains(body) {
-                    app.set_status(crate::i18n::tr("ui.print_face_body_not_sent"), true);
-                } else if !done.contains(body) {
-                    crate::print_face_ui::set(app, body, Some(face));
-                    done.push(body.clone());
-                }
-            }
-            for face in shown.iter().filter(|f| !picked.contains(f)) {
-                let Sel::Face { body, .. } = face else { continue };
-                if !done.contains(body) {
-                    crate::print_face_ui::set(app, body, None);
-                    done.push(body.clone());
-                }
-            }
-        }
-        Some(shown) if shown.0 == bodies => {
+    if let Some(shown) = k.shown.take() {
+        let faces_same = same_faces(&shown.faces, &picked);
+        if faces_same && shown.bodies == bodies && shown.revision == app.session.revision {
             k.shown = Some(shown);
             return;
         }
-        _ => {}
+        if !faces_same {
+            apply_picks(app, &shown.faces, &picked, inputs);
+        }
     }
-    let current: Vec<Sel> = bodies.iter().filter_map(|b| crate::print_face_ui::current(app, b)).collect();
-    input.items = current.clone();
-    k.shown = Some((bodies, current));
+    let bodies = crate::selection::items(inputs, 0).body_names();
+    let faces: Vec<Sel> = bodies.iter().filter_map(|b| crate::print_face_ui::current(app, b)).collect();
+    if let Some(input) = inputs.get_mut(1) {
+        input.items = faces.clone();
+    }
+    k.shown = Some(Shown { bodies, faces, revision: app.session.revision });
+}
+
+/// Run `body.print_face` for what changed in the Print face input from `shown` to `picked`.
+fn apply_picks(app: &mut SolveApp, shown: &[Sel], picked: &[Sel], inputs: &mut [SelInput]) {
+    let had = |sel: &Sel| shown.iter().any(|s| face_key(s) == face_key(sel));
+    // The last face picked on a body wins: one print face per body.
+    let mut added: Vec<&Sel> = Vec::new();
+    for sel in picked.iter().filter(|s| !had(s)) {
+        let Some((body, _)) = face_key(sel) else { continue };
+        added.retain(|a| face_key(a).map(|(b, _)| b) != Some(body));
+        added.push(sel);
+    }
+    let set_bodies: Vec<&str> = added.iter().filter_map(|s| face_key(s).map(|(b, _)| b)).collect();
+    for sel in shown.iter().filter(|s| !picked.iter().any(|p| face_key(p) == face_key(s))) {
+        if let Some((body, _)) = face_key(sel).filter(|(b, _)| !set_bodies.contains(b)) {
+            crate::print_face_ui::set(app, body, None);
+        }
+    }
+    for sel in added {
+        let Some((body, _)) = face_key(sel) else { continue };
+        if crate::print_face_ui::set(app, body, Some(sel))
+            && let Some(input) = inputs.first_mut()
+        {
+            let pick = Sel::Body { name: body.to_string() };
+            if !input.items.contains(&pick) {
+                input.items.push(pick);
+            }
+        }
+    }
 }
 
 /// The rows after the Bodies input; true when Enter was pressed in a field.
 pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut SaveMesh, inputs: &mut [SelInput]) -> bool {
     if k.open {
-        sync_print_face(app, k, inputs);
+        sync_print_faces(app, k, inputs);
     }
     // One row each: the two side by side do not fit the dialog's width.
     for (label, visible) in [("Add all bodies", false), ("Add visible bodies", true)] {
@@ -1000,13 +1038,15 @@ mod tests {
         // Each change is a command of its own.
         h.app.run("edit.undo", json!({})).unwrap();
         assert!(crate::print_face_ui::is_print_face(&h.app, "One", one_top));
-        // With Two alone sent, the input shows its face; a face of One, not sent, is refused.
+        // With Two alone sent, the input shows its face; a face of One, not sent, becomes One's
+        // print face and adds One to the bodies sent.
         h.app.dialog.as_mut().unwrap().inputs[0].items = vec![Sel::Body { name: "Two".into() }];
         h.settle();
         assert_eq!(h.app.dialog.as_ref().unwrap().inputs[1].items.len(), 1);
         pick(&mut h, "One", [5.0, 5.0, 0.0]);
-        assert!(crate::print_face_ui::is_print_face(&h.app, "One", one_top), "One is not being sent: its print face stays");
-        assert!(matches!(&h.app.status, Some((_, _, true))));
-        assert_eq!(shown(&h), 1);
+        assert!(crate::print_face_ui::is_print_face(&h.app, "One", one_bottom));
+        use crate::selection::SelectionExt as _;
+        assert_eq!(crate::selection::items(&h.app.dialog.as_ref().unwrap().inputs, 0).body_names(), ["Two", "One"]);
+        assert_eq!(shown(&h), 2);
     }
 }

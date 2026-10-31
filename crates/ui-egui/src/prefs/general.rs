@@ -103,6 +103,10 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             crate::scenario::publish_target("prefs:print_face_highlight", response.rect);
             response.on_hover_text(tip);
         });
+        ui_kit::settings_block(ui, app.tr("prefs.print_face_everywhere"), labels, |ui| {
+            let (label, tip) = (app.tr("prefs.print_face_everywhere_box").to_string(), app.tr("prefs.print_face_everywhere_tip").to_string());
+            ui_kit::checkbox(ui, &label, &mut app.preferences.print_face_everywhere).on_hover_text(tip);
+        });
     });
     ui_kit::settings_section(ui, "updates", app.tr("prefs.updates"), |ui| {
         ui_kit::settings_block(ui, app.tr("update.prefs_label"), labels, |ui| crate::update::prefs_rows(app, ui));
