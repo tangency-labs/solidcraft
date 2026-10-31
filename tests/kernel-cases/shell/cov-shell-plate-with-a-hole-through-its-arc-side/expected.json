@@ -1,7 +1,27 @@
 {
  "sources": [],
  "what": "a 42.5 x 20 x 27.5 plate closed by a half-round side (r10), a blind hole r5 drilled in through that side, shelled 2 mm open at the far end: the edge where the hole's wall meets the arc side is neither a line nor an arc",
- "source": "invariants",
- "method": "the hole's wall moved 2 out meets the arc side moved 2 in along a curve of two cylinders; whether the cavity's corner at the hole's bottom is sharp or rounded is the offset's choice, so no closed form: one closed valid solid is the right answer",
- "body_count": 1
+ "source": "analytic",
+ "method": "the hole's wall moved 2 out meets the arc side moved 2 in along a curve of two cylinders; every edge is convex but the hole's bottom circle, so only the cavity's corner there is the offset's choice, sharp or rounded. Body: profile 42.5 x 20 + pi 10^2 / 2 times 27.5, less the hole r5 inside it (x 0..7.5 and, for x < 0, out to the arc x = -sqrt(100 - (y-10)^2)): int 2 sqrt(25 - (y-12.5)^2) (7.5 + sqrt(100 - (y-10)^2)) dy = 1321.0770; V0 = 26373.6129. Sharp cavity: profile 42.5 x 16 + pi 8^2 / 2 (open at x = 42.5) from z = 2 to 25.5, less the hole's offset r7 up to x = 9.5 where it lies in it (y <= 18): int 2 sqrt(49 - (y-12.5)^2) (9.5 + sqrt(64 - (y-10)^2)) dy = 2369.0772 (the offset r7 is exact up to the hole's mouth: its foot on the r5 wall stays inside the arc); cavity 15973.4005, material 10400.2124. Rounding the cavity's corner at the hole's bottom (the true offset, a torus r2) enlarges it by at most 2 pi int r dA over r 5..7, x 7.5..9.5 less the quarter disc r2: 2 pi (24 - pi (5 + 8/(3 pi))) = 35.3452, so material 10364.8671 .. 10400.2124. Faces: outer 7 (arc, two flat sides, top, bottom, hole wall and bottom) less the open end, inner 7, the rim; 16 with the torus. A shell that fails to open leaves 2 shells; the full solid is 26373.6",
+ "body_count": 1,
+ "faces": [
+  15,
+  16
+ ],
+ "volume_mm3": [
+  10364.8,
+  10400.3
+ ],
+ "bbox": {
+  "min": [
+   -10,
+   0,
+   0
+  ],
+  "max": [
+   42.5,
+   20,
+   27.5
+  ]
+ }
 }
