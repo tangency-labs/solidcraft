@@ -2725,7 +2725,6 @@ mod tests {
         let Shape::Line { a, b } = sk.shape(sk.curve_index(&output).unwrap()).unwrap() else { panic!("offset must be a line") };
         let cut = Vec2::new(15.0, a.y);
         assert!((a.dist(b) - 20.0).abs() < 1e-6);
-        assert!(h.app.run("sketch.trim", json!({"curve":output,"at":[cut.x,cut.y]})).is_err());
 
         h.call("ui.view", json!({"view":"top"}));
         h.app.cam.distance = 60.0;
