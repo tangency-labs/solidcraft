@@ -571,35 +571,35 @@ impl Seg2 {
             Seg2::Cubic { .. } | Seg2::Conic { .. } | Seg2::Bezier { .. } => self.integrate(|s, t| 0.5 * s.point_at(t).cross(s.derivative(t))),
         }
     }
-    /// Polyline approximation (including both end points) with at most `tol` chord error.
-    pub fn polyline(&self, tol: f64) -> Vec<Vec2> {
+    /// How many equal steps of `t` keep every chord within `tol` (above 0) of the segment, unrounded
+    /// and with no floor or cap: an arc by its chord's bulge, the others by the largest second
+    /// difference of their controls (Wang's bound).
+    pub fn chords(&self, tol: f64) -> f64 {
+        // A chord over 1/k of t strays at most an eighth of the second derivative's bound over k².
+        let bound = |d2: f64| (d2 / (8.0 * tol)).sqrt();
         match *self {
-            Seg2::Line { a, b } => vec![a, b],
+            Seg2::Line { .. } => 1.0,
             Seg2::Arc { radius, sweep, .. } => {
-                let tol = tol.max(radius.abs() * 1e-6).max(1e-9);
-                let step = if tol < radius { 2.0 * (1.0 - tol / radius).clamp(-1.0, 1.0).acos() } else { TAU / 8.0 };
-                let n = ((sweep.abs() / step.max(1e-6)).ceil() as usize).clamp(2, 4096);
-                (0..=n).map(|i| self.point_at(i as f64 / n as f64)).collect()
+                sweep.abs() / if tol < radius { 2.0 * (1.0 - tol / radius).clamp(-1.0, 1.0).acos() } else { TAU / 8.0 }
             }
-            Seg2::Cubic { p0, p1, p2, p3 } => {
-                // Chord error of n pieces ≈ max second difference / (8 n²).
-                let bow = (p0 - p1 * 2.0 + p2).len().max((p1 - p2 * 2.0 + p3).len()) * 6.0;
-                let n = ((bow / (8.0 * tol.max(1e-9))).sqrt().ceil() as usize).clamp(2, 4096);
-                (0..=n).map(|i| self.point_at(i as f64 / n as f64)).collect()
-            }
-            Seg2::Conic { a, apex, b, w } => {
-                let bow = (a - apex * 2.0 + b).len() * 2.0 * w.max(1.0);
-                let n = ((bow / (8.0 * tol.max(1e-9))).sqrt().ceil() as usize).clamp(2, 4096);
-                (0..=n).map(|i| self.point_at(i as f64 / n as f64)).collect()
-            }
+            Seg2::Cubic { p0, p1, p2, p3 } => bound((p0 - p1 * 2.0 + p2).len().max((p1 - p2 * 2.0 + p3).len()) * 6.0),
+            Seg2::Conic { a, apex, b, w } => bound((a - apex * 2.0 + b).len() * 2.0 * w.max(1.0)),
             Seg2::Bezier { n, ref p } => {
                 // Second derivative ≤ n(n−1) × the largest second difference of the controls.
                 let c = Self::bez(n, p);
-                let d2 = c.windows(3).map(|w| (w[0] - w[1] * 2.0 + w[2]).len()).fold(0.0, f64::max) * (n as f64) * (n as f64 - 1.0);
-                let k = ((d2 / (8.0 * tol.max(1e-9))).sqrt().ceil() as usize).clamp(2, 4096);
-                (0..=k).map(|i| self.point_at(i as f64 / k as f64)).collect()
+                bound(c.windows(3).map(|w| (w[0] - w[1] * 2.0 + w[2]).len()).fold(0.0, f64::max) * (n as f64) * (n as f64 - 1.0))
             }
         }
+    }
+    /// Polyline approximation (including both end points) with at most `tol` chord error
+    /// ([`Seg2::chords`]) in 2 to 4096 pieces, an arc's tolerance at least a millionth of its radius.
+    pub fn polyline(&self, tol: f64) -> Vec<Vec2> {
+        if let Seg2::Line { a, b } = *self {
+            return vec![a, b];
+        }
+        let tol = if let Seg2::Arc { radius, .. } = *self { tol.max(radius.abs() * 1e-6) } else { tol }.max(1e-9);
+        let n = (self.chords(tol).ceil() as usize).clamp(2, 4096);
+        (0..=n).map(|i| self.point_at(i as f64 / n as f64)).collect()
     }
 }
 
