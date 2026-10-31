@@ -500,3 +500,72 @@ fn a_changed_display_quality_warms_the_result_without_replaying_commands() {
     assert!(h.app.dialog.is_none());
     h.step(&json!({"expect":{"bodies":1,"volume":13000}})).unwrap();
 }
+
+fn imported_mesh_for_conversion() -> Harness {
+    use solidcraft_engine::{
+        Session,
+        doc::{Document, FeatureKind, MeshData},
+        geom::Vec3,
+        kernel,
+    };
+    let body = kernel::box_solid(Vec3::ZERO, Vec3::new(10., 20., 30.)).unwrap();
+    let mesh = body.tessellate(0.01).unwrap();
+    let mut doc = Document::default();
+    doc.add_feature(
+        FeatureKind::MeshImport {
+            file: "public-safe-box.stl".into(),
+            meshes: vec![MeshData {
+                name: "Mesh".into(),
+                positions: mesh.positions.iter().flat_map(|p| [p.x, p.y, p.z]).collect(),
+                triangles: mesh.triangles.iter().flatten().copied().collect(),
+                color: None,
+            }],
+        },
+        Some("Imported mesh"),
+    )
+    .unwrap();
+    doc.features.last_mut().unwrap().body_names = vec!["Mesh".into()];
+    let mut h = Harness::new();
+    h.app.session = Session::new(doc);
+    h.app.session.selection = vec![solidcraft_engine::Sel::Body { name: "Mesh".into() }];
+    h.app.start("mesh.convert");
+    h.frames(1);
+    assert!(!h.app.dialog.as_ref().unwrap().previews(), "conversion has no live preview");
+    h.app.apply_off_thread = Some(Duration::ZERO);
+    h
+}
+
+#[test]
+fn mesh_conversion_computes_beside_the_window_without_a_live_preview() {
+    let mut h = imported_mesh_for_conversion();
+    let (finish, gate) = std::sync::mpsc::channel();
+    h.app.apply_gate = Some(std::sync::Arc::new(std::sync::Mutex::new(gate)));
+    let before = h.app.session.doc.to_json();
+    h.step(&json!({"key":"Enter"})).unwrap();
+    assert!(h.app.applying.is_some(), "OK dispatches conversion to the worker");
+    assert_eq!(h.app.session.doc.to_json(), before, "nothing applied in the starting frame");
+    finish.send(()).unwrap();
+    let window = std::sync::Arc::new(solidcraft_engine::doc::progress::Progress::default());
+    solidcraft_engine::doc::progress::watch(window.clone(), || until_applied(&mut h));
+    assert_eq!(window.features(), (0, 0), "adoption does not evaluate on the window thread");
+    assert!(h.app.dialog.is_none());
+    assert!(!h.app.session.model.state().body("Mesh").unwrap().body.is_mesh());
+}
+
+#[test]
+fn cancelling_background_mesh_conversion_keeps_the_imported_mesh() {
+    let mut h = imported_mesh_for_conversion();
+    let (finish, gate) = std::sync::mpsc::channel();
+    h.app.apply_gate = Some(std::sync::Arc::new(std::sync::Mutex::new(gate)));
+    let before = h.app.session.doc.to_json();
+    h.step(&json!({"key":"Enter"})).unwrap();
+    assert!(h.app.applying.is_some());
+    let progress = h.app.applying.as_ref().unwrap().progress.clone();
+    h.step(&json!({"key":"Escape"})).unwrap();
+    assert!(h.app.applying.is_none() && h.app.dialog.is_none());
+    assert!(progress.is_cancelled());
+    finish.send(()).unwrap();
+    h.frames(2);
+    assert_eq!(h.app.session.doc.to_json(), before);
+    assert!(h.app.session.model.state().body("Mesh").unwrap().body.is_mesh());
+}

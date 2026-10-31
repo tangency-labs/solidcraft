@@ -618,7 +618,8 @@ fn display_quality(app: &SolveApp) -> solidcraft_engine::doc::display_quality::D
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn begin_applying(app: &SolveApp, d: &Dialog) -> Option<Applying> {
     let wait = app.apply_off_thread?;
-    if !d.previews() {
+    // Mesh reconstruction can be expensive even though it has no live preview.
+    if !d.previews() && !matches!(d.kind, Kind::MeshConvert { .. }) {
         return None;
     }
     let computation = DialogComputation::new(app, d).ok()?;

@@ -125,5 +125,12 @@ max-threads = 1
 
 [[profile.local-ci.overrides]]
 platform = "cfg(windows)"
-filter = "package(solidcraft-gpu) | package(solidcraft) | (package(solidcraft-ui-egui) & test(/(offscreen|gpu)/))"
+# Viewport tests also open real devices when their names do not contain "gpu".
+filter = """
+package(solidcraft-gpu) | package(solidcraft) | (package(solidcraft-ui-egui) & (
+    test(/(offscreen|gpu)/)
+    | test(/^viewport::tests::/)
+    | test(=render_workspace::tests::progressive_image_controls_route_to_the_registered_host)
+))
+"""
 test-group = "windows-gpu"

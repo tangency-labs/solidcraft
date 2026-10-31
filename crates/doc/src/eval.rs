@@ -8054,7 +8054,9 @@ fn eval_feature(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st:
             }
             let converted = kernel::convert_prismatic_mesh(&source.body, tolerance)?;
             let converted = converted.with_color(source.body.color());
-            let result = ModelBody::new(source.name.clone(), converted, f.id);
+            let input = source.body.tessellate(tolerance)?;
+            let converted = crate::lineage::reconstructed_tool(converted, &input, tolerance);
+            let result = ModelBody::traced_new(source.name.clone(), converted, f.id);
             let target = st.bodies.get_mut(index).ok_or_else(|| DocError::Unknown(format!("body `{body}`")))?;
             *target = result;
             Ok(())
