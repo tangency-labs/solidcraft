@@ -1100,7 +1100,36 @@ pub(crate) fn section(plane: &Plane, m: &Mesh, face: Option<u32>) -> Vec<LinkGeo
     // where they are) are kept when they take no more curves than the loose fit.
     let close = refine(fit_segments(&segs, size, true));
     let plain = |v: &[LinkGeom]| v.iter().all(|g| matches!(g, LinkGeom::Line(..) | LinkGeom::Arc { .. } | LinkGeom::Circle(..)));
-    if plain(&close) && close.len() <= lossy.len() { close } else { lossy }
+    // A loose fit with fewer curves can still be wrong: short faces beside a small round (2 mm
+    // walls each side of an R2 corner) fit within its tolerance as one larger arc. The exact
+    // crossings (on planes and rulings) show it: one of them off every curve of the fit.
+    // Any other curve counts as near, and past a work limit nothing is checked: the loose fit
+    // stands, as before.
+    let tight = size * 1e-4;
+    let checkable = exact.len().saturating_mul(close.len()) <= 4_000_000;
+    let strays = |v: &[LinkGeom]| exact.iter().any(|p| !v.iter().any(|g| plain_distance(g, *p).is_none_or(|d| d <= tight)));
+    if plain(&close) && (close.len() <= lossy.len() || (checkable && strays(&lossy) && !strays(&close))) { close } else { lossy }
+}
+
+/// How far `p` lies from a line, arc or circle; None for any other curve.
+fn plain_distance(g: &LinkGeom, p: Vec2) -> Option<f64> {
+    match *g {
+        LinkGeom::Line(a, b) => {
+            let d = b - a;
+            let t = if d.len2() > 0.0 { ((p - a).dot(d) / d.len2()).clamp(0.0, 1.0) } else { 0.0 };
+            Some(p.dist(a.lerp(b, t)))
+        }
+        LinkGeom::Circle(c, r) => Some((p.dist(c) - r).abs()),
+        LinkGeom::Arc { c, a, b } => {
+            let (s0, sw) = ((a - c).angle(), ((b - c).angle() - (a - c).angle()).rem_euclid(std::f64::consts::TAU));
+            if ((p - c).angle() - s0).rem_euclid(std::f64::consts::TAU) <= sw + 1e-9 {
+                Some((p.dist(c) - c.dist(a)).abs())
+            } else {
+                Some(p.dist(a).min(p.dist(b)))
+            }
+        }
+        _ => None,
+    }
 }
 
 /// The segments where the plane crosses the mesh's triangles (in plane coordinates, each with

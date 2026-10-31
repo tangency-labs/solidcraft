@@ -1121,6 +1121,47 @@ fn whole_body_intersect_of_a_filleted_plate_keeps_exact_lines_and_arcs() {
     assert!(arcs.iter().all(|r| (r - 2.).abs() < 5e-3), "{arcs:?}");
 }
 #[test]
+fn whole_body_intersect_keeps_a_small_round_between_short_walls() {
+    use solidcraft_sketch::CurveKind;
+    // A tapered groove on each side stops 2 mm short of the R2 corner rounds: walls of 2 mm, a
+    // round, walls of 2 mm, which a loose fit takes for one larger arc that misses the walls.
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 150, "width": 55, "height": 150, "corner": [-75, 0, -75], "body_name": "Part"}));
+    run(&mut s, "solid.fillet", json!({"edges": [[75, 27.5, 75], [-75, 27.5, 75], [75, 27.5, -75], [-75, 27.5, -75]], "radius": 2}));
+    for (plane, offset, direction, rect) in [
+        ("YZ", 75, "negative", [[7, -71], [48, 71]]),
+        ("YZ", -75, "positive", [[7, -71], [48, 71]]),
+        ("XY", 75, "negative", [[-71, 7], [71, 48]]),
+        ("XY", -75, "positive", [[-71, 7], [71, 48]]),
+    ] {
+        run(&mut s, "sketch.create", json!({"plane": plane, "offset": offset}));
+        run(&mut s, "sketch.rectangle.two_point", json!({"p0": rect[0], "p1": rect[1]}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "solid.extrude", json!({"distance": 6, "direction": direction, "taper": "-56.31 deg", "operation": "cut", "targets": ["Part"]}));
+    }
+    let sketch = run(&mut s, "sketch.create", json!({"plane": "XZ", "offset": 20, "project_edges": false}))["sketch"].as_u64().unwrap();
+    run(&mut s, "sketch.intersect", json!({"refs": [{"body": "Part"}]}));
+    let inspect = run(&mut s, "sketch.inspect", json!({}));
+    let state = s.model.state();
+    let sk = &state.sketch(sketch).unwrap().sketch;
+    let pos = |i: usize| sk.points[i].pos;
+    let arcs: Vec<f64> = sk
+        .curves
+        .iter()
+        .filter_map(|c| match c.kind {
+            CurveKind::Arc { c, a, .. } => Some(pos(c).dist(pos(a))),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(arcs.len(), 4, "{arcs:?}");
+    assert!(arcs.iter().all(|r| (r - 2.).abs() < 5e-3), "{arcs:?}");
+    // Square less the corners' (4 - pi) r^2 and four trapezoid grooves (142 + 124) / 2 * 6.
+    assert_eq!(inspect["profiles"].as_array().map(Vec::len), Some(1), "one closed outline");
+    let area = inspect["profiles"][0]["area_mm2"].as_f64().unwrap();
+    let expected = 150. * 150. - (4. - std::f64::consts::PI) * 4. - 4. * 798.;
+    assert!((area - expected).abs() < 0.5, "{area} vs {expected}");
+}
+#[test]
 fn a_rebuilt_projection_keeps_user_constraints_without_a_warning() {
     for dimensioned in [false, true] {
         let mut s = Session::default();
