@@ -575,6 +575,32 @@ outer
         survives("paper scene to SVG", &mutations(&json, true, 0x5a3), usize::MAX, write);
     }
 
+    /// The same scene's JSON, mutated, read, prepared and written as a 25 dpi sheet PNG: an error or
+    /// an image, never a panic.
+    #[test]
+    fn paper_scenes_survive_mutation_into_png() {
+        use solidcraft_geom::paper::{Group, Item, ObjectKind, Scene};
+        use solidcraft_geom::{Loop2, Region2, Seg2, Vec2};
+        let p = Vec2::new;
+        let border = Loop2::polygon(&[p(20.0, 10.0), p(410.0, 10.0), p(410.0, 287.0), p(20.0, 287.0)]);
+        let items = vec![
+            Item::Stroke { path: border.segs.clone(), closed: true, width_mm: 0.7 },
+            Item::Stroke { path: vec![Seg2::Arc { center: p(50.0, 50.0), radius: 10.0, start: 0.0, sweep: 4.0 }], closed: false, width_mm: 0.35 },
+            Item::Fill { region: Region2 { outer: border, holes: vec![Loop2::circle(p(100.0, 100.0), 20.0)] } },
+        ];
+        let scene = Scene { size_mm: p(420.0, 297.0), groups: vec![Group { object: 7, kind: ObjectKind::DrawingBorder, items }] };
+        let json = serde_json::to_vec(&scene).unwrap();
+        let options = crate::paper::PngOptions { dpi: 25.0, colour: crate::paper::PngColour::Grey };
+        let write = |b: &[u8]| -> Option<usize> {
+            let scene: Scene = serde_json::from_slice(b).ok()?;
+            let prepared = scene.prepare().ok()?;
+            let mut out = Vec::new();
+            crate::paper::paper_png(&prepared, options, &mut out).ok().map(|_| out.len())
+        };
+        assert!(write(&json).is_some());
+        survives("paper scene to PNG", &mutations(&json, true, 0x5a4), usize::MAX, write);
+    }
+
     /// Standard base64 (RFC 4648) of `bytes`, for a data URI.
     fn base64(bytes: &[u8]) -> String {
         const A: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
