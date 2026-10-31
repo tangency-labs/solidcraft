@@ -547,6 +547,8 @@ fn picked_on(b: &Brep, e: EdgeId) -> Option<(solidcore::geom::attribute::Attribu
 /// edge the overflow only shortened reads as removed whole and is silently left unrounded (the rig's
 /// fillets/5158-fillet-adjacent-plate-edges-as-thick-as-plate, 1706.89 against 1681.90). Off, the
 /// rounds are blended together, and those that need the order are refused.
+/// Turned on, this port still lacks the capi's rule from fork 9ba2b12, a round mitred to one that
+/// goes first goes with it: solidcore's session reports no mitred edges (`GetMitredEdges`).
 const OVERFLOW_GOES_FIRST: bool = false;
 
 /// `overflow_first`: the rounds of [`blend_call`] when blends of several edges overflow their

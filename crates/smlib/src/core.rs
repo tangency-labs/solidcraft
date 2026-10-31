@@ -256,7 +256,7 @@ pub(crate) fn fixes() -> UpstreamFixes {
 }
 
 /// Opt-in fixes left off because the C++ fork (`SMLIB_REV`) does not behave as they do, so turning
-/// them on would part this backend from the C++ one. Each was read in the fork's source at 2fc375f.
+/// them on would part this backend from the C++ one. Each was read in the fork's source at 26cc451.
 ///
 /// Upstream's defect is still there: `precise_properties_trim_base_v` (WR-563: `SmODEAreaIFEO` starts
 /// at the domain's lowest v), `fillet_blend_curve_revolved_on_arc` (WR-581: `CalcTorusFilletGeom` takes
@@ -290,7 +290,7 @@ pub(crate) fn fixes() -> UpstreamFixes {
 /// `geometric_g2_continuity`: no fork commit; the C++ still has the defect at SmGeomUtility.cpp:5822
 /// (crashes/2992: 183 faces against 831).
 ///
-/// Upstream's defect is still in the fork's source at `SMLIB_REV` 2fc375f:
+/// Upstream's defect is still in the fork's source at `SMLIB_REV` 26cc451:
 /// `fillet_corner_variable_radius_rail_on_opposite_fillet` (WR-645: `MakeVariableRadiusFillet` has
 /// only the concave corner's rail-rail test before resetting the edges, no test of the rail against
 /// the opposite fillet), `sphere_from_arcs_common_centre` (WR-103: `CreateSphereFromArcs` compares
