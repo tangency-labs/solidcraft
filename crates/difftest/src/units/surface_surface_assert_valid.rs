@@ -23,11 +23,11 @@
 //! Curve-bounded `cbdNNNN` cases use a separate seed stream, nested plane bases,
 //! actual composite boundary curves and optional null report lists. A failed
 //! boundary report with a non-null list is guarded in C++: its global label lookup
-//! omits CurveBoundedSurface and would index past the one-entry default table.
+//! omits `CurveBoundedSurface` and would index past the one-entry default table.
 //! Defined basis-failure reports retain that default label and are compared.
 //! The inherited base check at levels 0..2 reads unwritten continuity outputs
-//! (generic GetKnots fails); the native guard probes initialized outputs and
-//! rejects that undefined path. Most new draws use LEVEL_GIVEN, which skips it.
+//! (generic `GetKnots` fails); the native guard probes initialized outputs and
+//! rejects that undefined path. Most new draws use `LEVEL_GIVEN`, which skips it.
 
 // The generator indexes the nets and knot vectors it has just built (as other runners do).
 #![allow(clippy::indexing_slicing)]
