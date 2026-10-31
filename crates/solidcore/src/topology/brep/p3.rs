@@ -72,7 +72,10 @@
 //!   store to the edit under those identities and gives back the lists of `b`'s live
 //!   objects afterwards; [`api_brep_copy`] lends the source's to the copy and the copy
 //!   keeps what the `SM_NO_COPY` notifications give it (a reference attribute becomes
-//!   one per B-rep). [`copy_brep`] and [`merge_brep`] use only the caller's `env`.
+//!   one per B-rep). [`merge_brep`] lends `other`'s store the same way and gives `b` the
+//!   lists the merged-in objects end with, as upstream's `MergeBrep` carries the merged
+//!   B-rep's attributes (`topology.brep_p3`'s `attributed_merge` cases); [`copy_brep`]
+//!   uses only the caller's `env`.
 //! - **Notification identities.** Upstream names every object in a notification by
 //!   its address. Topology keeps the [`NotifyEnv`] contract: `b`'s objects are named
 //!   by the caller's `env.key_of`, the objects of a B-rep an edit only reads
@@ -1711,7 +1714,7 @@ pub fn merge_brep_with_context(
     add_analytics: bool,
 ) -> Result<()> {
     with_caller_identities(k, b, env, Some((other, source.key_of)), |k, b, env| {
-        merge_brep_in(
+        merge_brep_lending(
             k,
             env,
             b,
@@ -1722,6 +1725,140 @@ pub fn merge_brep_with_context(
             add_analytics,
         )
     })
+}
+
+/// (not upstream: upstream's attributes live on the objects `MergeBrep` copies, so the
+/// copies' `SM_NO_COPY` notifications carry them.) [`merge_brep_in`] with `other`'s own
+/// attributes ([`Brep::add_attribute`]) lent to the merge under the source naming, as
+/// [`api_brep_copy`] lends them (in a private domain when the source naming gives
+/// `other`'s objects the keys `env.key_of` gives them), taken back after it; the lists
+/// the notifications gave the merged-in objects then join `b`'s own store. `env` keeps
+/// those lists too, and `b`'s objects from before the merge keep theirs as they were.
+/// Nothing is lent when `other` has no own lists, or when `env` already holds lists
+/// under the source naming of `other`'s listed objects (a caller that seeded them,
+/// whose own give-back then names `b`'s lists).
+#[allow(clippy::too_many_arguments)]
+fn merge_brep_lending(
+    k: &Kernel,
+    env: &mut NotifyEnv<'_>,
+    b: &mut Brep,
+    other: &Brep,
+    source: CopySource<'_>,
+    copy_map: Option<&mut CopyBrepMap<EntityRef>>,
+    reverse_map: Option<&mut CopyBrepMap<EntityRef>>,
+    add_analytics: bool,
+) -> Result<()> {
+    let source_key = source.key_of;
+    let live = p2::live_entities(other);
+    let shift = private_source_shift(&live, source_key, env.key_of)?;
+    let own_listed: Vec<EntityRef> = other
+        .attribute_store()
+        .attributed_objects()
+        .into_iter()
+        .filter_map(crate::topology::loopuse::entity_of_notify_key)
+        .collect();
+    // a caller that keeps `other`'s lists in `env` itself, under the source naming (the
+    // primitive model, `boolean::merge`'s `combine_brep`), carries them already: nothing
+    // is lent, and `b`'s own store is that caller's to give back
+    let kept = shift.is_none()
+        && own_listed
+            .iter()
+            .any(|&e| !env.attributes.attributes(source_key(e).key).is_empty());
+    if own_listed.is_empty() || kept {
+        return merge_brep_in(
+            k,
+            env,
+            b,
+            other,
+            source,
+            copy_map,
+            reverse_map,
+            add_analytics,
+        );
+    }
+    let shifted = |e: EntityRef| {
+        let r = source_key(e);
+        ObjectRef {
+            type_code: r.type_code,
+            key: ObjectKey(r.key.0 + shift.unwrap_or(0)),
+        }
+    };
+    let named: &dyn Fn(EntityRef) -> ObjectRef = if shift.is_some() {
+        &shifted
+    } else {
+        source_key
+    };
+    if shift.is_some() {
+        for &e in &live {
+            if let Some(&r) = env.records.get(&source_key(e).key) {
+                env.records.insert(shifted(e).key, r);
+            }
+        }
+    }
+    let lent_keys: std::collections::BTreeSet<ObjectKey> =
+        own_listed.iter().map(|&e| named(e).key).collect();
+    // an object of `other` sharing a lent list's key would pass that list to its copy
+    p2::distinct_listed_keys(other, named, &|key| lent_keys.contains(&key), OP)?;
+    let before: Vec<(ObjectKey, usize)> = lent_keys
+        .iter()
+        .map(|&key| (key, env.attributes.attributes(key).len()))
+        .collect();
+    p2::seed_brep_attributes(env.attributes, other.attribute_store().clone(), named)?;
+    // the handles the lend added, taken back exactly after the merge
+    let lent: Vec<(ObjectKey, Vec<AttributeHandle>)> = before
+        .into_iter()
+        .map(|(key, n)| {
+            (
+                key,
+                env.attributes.attributes(key).into_iter().skip(n).collect(),
+            )
+        })
+        .collect();
+    let existing: std::collections::BTreeSet<EntityRef> =
+        p2::live_entities(b).into_iter().collect();
+    let merged = merge_brep_in(
+        k,
+        env,
+        b,
+        other,
+        CopySource {
+            key_of: named,
+            context: source.context,
+        },
+        copy_map,
+        reverse_map,
+        add_analytics,
+    );
+    for (key, handles) in lent {
+        for h in handles {
+            env.attributes.remove_attribute(key, h, false)?;
+        }
+    }
+    if shift.is_some() {
+        for &e in &live {
+            env.records.remove(&shifted(e).key);
+        }
+    }
+    merged?;
+    // the merged-in objects' lists, from the merge's store into `b`'s own
+    let new: std::collections::BTreeMap<ObjectKey, EntityRef> = p2::live_entities(b)
+        .into_iter()
+        .filter(|e| !existing.contains(e))
+        .map(|e| ((env.key_of)(e).key, e))
+        .collect();
+    if new.is_empty() || env.attributes.attributed_objects().is_empty() {
+        return Ok(());
+    }
+    let mut store = env.attributes.clone();
+    store.retain_rekeyed(&|key| {
+        new.get(&key)
+            .map(|&e| crate::topology::loopuse::notify_ref(e).key)
+    })?;
+    store.retain_listed();
+    let mut own = b.take_attributes();
+    let absorbed = own.absorb(store, &Ok::<ObjectKey, SolidError>);
+    b.set_attributes(own);
+    absorbed
 }
 
 /// [`merge_brep`] once the identities are checked and seeded.

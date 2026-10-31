@@ -45,6 +45,7 @@ enum P3Op : int32_t
     P3_API_COPY_NULL = 11,
     P3_TURN_NURBS_OFFSET = 12,
     P3_ATTRIBUTED_COPY = 13,
+    P3_ATTRIBUTED_MERGE = 14,
 };
 
 struct BrepPeek : SmBrep
@@ -679,6 +680,29 @@ void run(int32_t op, Rd& rd, const char* path, std::vector<double>& o)
         put_attribute_rows(o, c);
         put_attribute_rows(o, brep);
         delete c;
+        break;
+    }
+    case P3_ATTRIBUTED_MERGE:
+    {
+        // the B-rep's faces and edges tagged (tag_brep), then MergeBrep of it into a second
+        // build of it: `status counts`, then the second build's and the source's attribute rows
+        SmBoolean analytics = rd.bflag();
+        SmAttributeBehaviorType behavior = (SmAttributeBehaviorType)rd.idx();
+        tag_brep(brep, behavior);
+        Rd rd2{rd.in, 0};
+        SmStatus bst2;
+        Built b2;
+        Graph g2;
+        b2.brep = prepare(rd2, path, g2, bst2);
+        if (b2.brep == nullptr)
+        {
+            o.push_back(st(bst2));
+            break;
+        }
+        o.push_back(st(b2.brep->MergeBrep(*brep, NULL, NULL, analytics)));
+        put_counts(o, b2.brep);
+        put_attribute_rows(o, b2.brep);
+        put_attribute_rows(o, brep);
         break;
     }
     case P3_MERGE:

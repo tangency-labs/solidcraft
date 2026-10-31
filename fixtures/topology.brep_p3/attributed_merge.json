@@ -1,0 +1,544 @@
+{
+ "cases": [
+  {
+   "name": "attributed_b0_merge_Mouse_an1",
+   "note": "MergeBrep of Mouse.smb (every face and edge tagged, behavior 0) into a second build of it: does the merge carry the merged B-rep's attributes (the WR-615 afresh step, every merge_brep caller)?",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Mouse.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "attributed_merge",
+    "analytics": true,
+    "behavior": 0
+   }
+  },
+  {
+   "name": "attributed_b1_merge_Mouse_an1",
+   "note": "MergeBrep of Mouse.smb (every face and edge tagged, behavior 1) into a second build of it: does the merge carry the merged B-rep's attributes (the WR-615 afresh step, every merge_brep caller)?",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Mouse.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "attributed_merge",
+    "analytics": true,
+    "behavior": 1
+   }
+  },
+  {
+   "name": "attributed_b2_merge_Mouse_an1",
+   "note": "MergeBrep of Mouse.smb (every face and edge tagged, behavior 2) into a second build of it: does the merge carry the merged B-rep's attributes (the WR-615 afresh step, every merge_brep caller)?",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Mouse.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "attributed_merge",
+    "analytics": true,
+    "behavior": 2
+   }
+  },
+  {
+   "name": "attributed_b3_merge_Mouse_an1",
+   "note": "MergeBrep of Mouse.smb (every face and edge tagged, behavior 3) into a second build of it: does the merge carry the merged B-rep's attributes (the WR-615 afresh step, every merge_brep caller)?",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Mouse.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "attributed_merge",
+    "analytics": true,
+    "behavior": 3
+   }
+  },
+  {
+   "name": "attributed_b4_merge_Mouse_an1",
+   "note": "MergeBrep of Mouse.smb (every face and edge tagged, behavior 4) into a second build of it: does the merge carry the merged B-rep's attributes (the WR-615 afresh step, every merge_brep caller)?",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Mouse.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "attributed_merge",
+    "analytics": true,
+    "behavior": 4
+   }
+  },
+  {
+   "name": "attributed_b0_merge_Mouse_an0",
+   "note": "as attributed_b0_merge_Mouse_an1 without analytics",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Mouse.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "attributed_merge",
+    "analytics": false,
+    "behavior": 0
+   }
+  },
+  {
+   "name": "attributed_b0_merge_box_with_large_fillet_an1",
+   "note": "MergeBrep of box_with_large_fillet.smb (every face and edge tagged, behavior 0) into a second build of it: does the merge carry the merged B-rep's attributes (the WR-615 afresh step, every merge_brep caller)?",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "attributed_merge",
+    "analytics": true,
+    "behavior": 0
+   }
+  },
+  {
+   "name": "attributed_b1_merge_box_with_large_fillet_an1",
+   "note": "MergeBrep of box_with_large_fillet.smb (every face and edge tagged, behavior 1) into a second build of it: does the merge carry the merged B-rep's attributes (the WR-615 afresh step, every merge_brep caller)?",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "attributed_merge",
+    "analytics": true,
+    "behavior": 1
+   }
+  },
+  {
+   "name": "attributed_b2_merge_box_with_large_fillet_an1",
+   "note": "MergeBrep of box_with_large_fillet.smb (every face and edge tagged, behavior 2) into a second build of it: does the merge carry the merged B-rep's attributes (the WR-615 afresh step, every merge_brep caller)?",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "attributed_merge",
+    "analytics": true,
+    "behavior": 2
+   }
+  },
+  {
+   "name": "attributed_b3_merge_box_with_large_fillet_an1",
+   "note": "MergeBrep of box_with_large_fillet.smb (every face and edge tagged, behavior 3) into a second build of it: does the merge carry the merged B-rep's attributes (the WR-615 afresh step, every merge_brep caller)?",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "attributed_merge",
+    "analytics": true,
+    "behavior": 3
+   }
+  },
+  {
+   "name": "attributed_b4_merge_box_with_large_fillet_an1",
+   "note": "MergeBrep of box_with_large_fillet.smb (every face and edge tagged, behavior 4) into a second build of it: does the merge carry the merged B-rep's attributes (the WR-615 afresh step, every merge_brep caller)?",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "attributed_merge",
+    "analytics": true,
+    "behavior": 4
+   }
+  },
+  {
+   "name": "attributed_b0_merge_box_with_large_fillet_an0",
+   "note": "as attributed_b0_merge_box_with_large_fillet_an1 without analytics",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "attributed_merge",
+    "analytics": false,
+    "behavior": 0
+   }
+  },
+  {
+   "name": "attributed_b0_merge_plane_square_an1",
+   "note": "MergeBrep of plane_square.smb (every face and edge tagged, behavior 0) into a second build of it: does the merge carry the merged B-rep's attributes (the WR-615 afresh step, every merge_brep caller)?",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "attributed_merge",
+    "analytics": true,
+    "behavior": 0
+   }
+  },
+  {
+   "name": "attributed_b1_merge_plane_square_an1",
+   "note": "MergeBrep of plane_square.smb (every face and edge tagged, behavior 1) into a second build of it: does the merge carry the merged B-rep's attributes (the WR-615 afresh step, every merge_brep caller)?",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "attributed_merge",
+    "analytics": true,
+    "behavior": 1
+   }
+  },
+  {
+   "name": "attributed_b2_merge_plane_square_an1",
+   "note": "MergeBrep of plane_square.smb (every face and edge tagged, behavior 2) into a second build of it: does the merge carry the merged B-rep's attributes (the WR-615 afresh step, every merge_brep caller)?",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "attributed_merge",
+    "analytics": true,
+    "behavior": 2
+   }
+  },
+  {
+   "name": "attributed_b3_merge_plane_square_an1",
+   "note": "MergeBrep of plane_square.smb (every face and edge tagged, behavior 3) into a second build of it: does the merge carry the merged B-rep's attributes (the WR-615 afresh step, every merge_brep caller)?",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "attributed_merge",
+    "analytics": true,
+    "behavior": 3
+   }
+  },
+  {
+   "name": "attributed_b4_merge_plane_square_an1",
+   "note": "MergeBrep of plane_square.smb (every face and edge tagged, behavior 4) into a second build of it: does the merge carry the merged B-rep's attributes (the WR-615 afresh step, every merge_brep caller)?",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "attributed_merge",
+    "analytics": true,
+    "behavior": 4
+   }
+  },
+  {
+   "name": "attributed_b0_merge_plane_square_an0",
+   "note": "as attributed_b0_merge_plane_square_an1 without analytics",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "attributed_merge",
+    "analytics": false,
+    "behavior": 0
+   }
+  },
+  {
+   "name": "attributed_b0_merge_cone_an1",
+   "note": "MergeBrep of cone.smb (every face and edge tagged, behavior 0) into a second build of it: does the merge carry the merged B-rep's attributes (the WR-615 afresh step, every merge_brep caller)?",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "cone.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "attributed_merge",
+    "analytics": true,
+    "behavior": 0
+   }
+  },
+  {
+   "name": "attributed_b1_merge_cone_an1",
+   "note": "MergeBrep of cone.smb (every face and edge tagged, behavior 1) into a second build of it: does the merge carry the merged B-rep's attributes (the WR-615 afresh step, every merge_brep caller)?",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "cone.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "attributed_merge",
+    "analytics": true,
+    "behavior": 1
+   }
+  },
+  {
+   "name": "attributed_b2_merge_cone_an1",
+   "note": "MergeBrep of cone.smb (every face and edge tagged, behavior 2) into a second build of it: does the merge carry the merged B-rep's attributes (the WR-615 afresh step, every merge_brep caller)?",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "cone.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "attributed_merge",
+    "analytics": true,
+    "behavior": 2
+   }
+  },
+  {
+   "name": "attributed_b3_merge_cone_an1",
+   "note": "MergeBrep of cone.smb (every face and edge tagged, behavior 3) into a second build of it: does the merge carry the merged B-rep's attributes (the WR-615 afresh step, every merge_brep caller)?",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "cone.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "attributed_merge",
+    "analytics": true,
+    "behavior": 3
+   }
+  },
+  {
+   "name": "attributed_b4_merge_cone_an1",
+   "note": "MergeBrep of cone.smb (every face and edge tagged, behavior 4) into a second build of it: does the merge carry the merged B-rep's attributes (the WR-615 afresh step, every merge_brep caller)?",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "cone.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "attributed_merge",
+    "analytics": true,
+    "behavior": 4
+   }
+  },
+  {
+   "name": "attributed_b0_merge_cone_an0",
+   "note": "as attributed_b0_merge_cone_an1 without analytics",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "cone.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "attributed_merge",
+    "analytics": false,
+    "behavior": 0
+   }
+  },
+  {
+   "name": "attributed_b0_merge_torus_an1",
+   "note": "MergeBrep of torus.smb (every face and edge tagged, behavior 0) into a second build of it: does the merge carry the merged B-rep's attributes (the WR-615 afresh step, every merge_brep caller)?",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "torus.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "attributed_merge",
+    "analytics": true,
+    "behavior": 0
+   }
+  },
+  {
+   "name": "attributed_b1_merge_torus_an1",
+   "note": "MergeBrep of torus.smb (every face and edge tagged, behavior 1) into a second build of it: does the merge carry the merged B-rep's attributes (the WR-615 afresh step, every merge_brep caller)?",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "torus.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "attributed_merge",
+    "analytics": true,
+    "behavior": 1
+   }
+  },
+  {
+   "name": "attributed_b2_merge_torus_an1",
+   "note": "MergeBrep of torus.smb (every face and edge tagged, behavior 2) into a second build of it: does the merge carry the merged B-rep's attributes (the WR-615 afresh step, every merge_brep caller)?",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "torus.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "attributed_merge",
+    "analytics": true,
+    "behavior": 2
+   }
+  },
+  {
+   "name": "attributed_b3_merge_torus_an1",
+   "note": "MergeBrep of torus.smb (every face and edge tagged, behavior 3) into a second build of it: does the merge carry the merged B-rep's attributes (the WR-615 afresh step, every merge_brep caller)?",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "torus.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "attributed_merge",
+    "analytics": true,
+    "behavior": 3
+   }
+  },
+  {
+   "name": "attributed_b4_merge_torus_an1",
+   "note": "MergeBrep of torus.smb (every face and edge tagged, behavior 4) into a second build of it: does the merge carry the merged B-rep's attributes (the WR-615 afresh step, every merge_brep caller)?",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "torus.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "attributed_merge",
+    "analytics": true,
+    "behavior": 4
+   }
+  },
+  {
+   "name": "attributed_b0_merge_torus_an0",
+   "note": "as attributed_b0_merge_torus_an1 without analytics",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "torus.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "attributed_merge",
+    "analytics": false,
+    "behavior": 0
+   }
+  },
+  {
+   "name": "attributed_b0_merge_Endcap_an1",
+   "note": "MergeBrep of Endcap.smb (every face and edge tagged, behavior 0) into a second build of it: does the merge carry the merged B-rep's attributes (the WR-615 afresh step, every merge_brep caller)?",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Endcap.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "attributed_merge",
+    "analytics": true,
+    "behavior": 0
+   }
+  },
+  {
+   "name": "attributed_b1_merge_Endcap_an1",
+   "note": "MergeBrep of Endcap.smb (every face and edge tagged, behavior 1) into a second build of it: does the merge carry the merged B-rep's attributes (the WR-615 afresh step, every merge_brep caller)?",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Endcap.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "attributed_merge",
+    "analytics": true,
+    "behavior": 1
+   }
+  },
+  {
+   "name": "attributed_b2_merge_Endcap_an1",
+   "note": "MergeBrep of Endcap.smb (every face and edge tagged, behavior 2) into a second build of it: does the merge carry the merged B-rep's attributes (the WR-615 afresh step, every merge_brep caller)?",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Endcap.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "attributed_merge",
+    "analytics": true,
+    "behavior": 2
+   }
+  },
+  {
+   "name": "attributed_b3_merge_Endcap_an1",
+   "note": "MergeBrep of Endcap.smb (every face and edge tagged, behavior 3) into a second build of it: does the merge carry the merged B-rep's attributes (the WR-615 afresh step, every merge_brep caller)?",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Endcap.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "attributed_merge",
+    "analytics": true,
+    "behavior": 3
+   }
+  },
+  {
+   "name": "attributed_b4_merge_Endcap_an1",
+   "note": "MergeBrep of Endcap.smb (every face and edge tagged, behavior 4) into a second build of it: does the merge carry the merged B-rep's attributes (the WR-615 afresh step, every merge_brep caller)?",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Endcap.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "attributed_merge",
+    "analytics": true,
+    "behavior": 4
+   }
+  },
+  {
+   "name": "attributed_b0_merge_Endcap_an0",
+   "note": "as attributed_b0_merge_Endcap_an1 without analytics",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Endcap.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "attributed_merge",
+    "analytics": false,
+    "behavior": 0
+   }
+  }
+ ]
+}

@@ -1812,4 +1812,63 @@ mod tests {
         assert!(boolean_trees(&mut k, &mut input, &[0, -1, 100], None, &mut driver).is_err());
         assert!(driver.pairs.is_empty());
     }
+
+    /// `combine_brep` (`MergeBrep` into the list's copy of its first B-rep) seeds the
+    /// source's own attributes itself, so `topology::brep::p3::merge_brep` lends nothing
+    /// more: each face and edge of a two-box list ends with exactly its own one list.
+    #[test]
+    fn list_operand_carries_each_breps_attributes_once() {
+        use crate::geom::attribute::{Attribute, Behavior};
+        let mut k = Kernel::default();
+        let mut breps = Vec::new();
+        for (value, x) in [(0_i64, 0.0), (1, 20.0)] {
+            let mut b = crate::primitive::api_primitives::create_box(
+                &mut k,
+                crate::math::Point3::new(x, 0.0, 0.0),
+                10.0,
+                10.0,
+                10.0,
+            )
+            .unwrap();
+            let entities: Vec<EntityRef> = bp::faces(&b, None)
+                .unwrap()
+                .into_iter()
+                .map(EntityRef::Face)
+                .chain(
+                    bp::edges(&b, None)
+                        .unwrap()
+                        .into_iter()
+                        .map(EntityRef::Edge),
+                )
+                .collect();
+            for e in entities {
+                b.add_attribute(e, Attribute::long(7, value, Behavior::Copy))
+                    .unwrap();
+            }
+            breps.push(b);
+        }
+        let (result, planar) = list_operand(&mut k, &breps, &[]).unwrap();
+        assert!(!planar);
+        let faces = bp::faces(&result, None).unwrap();
+        let edges = bp::edges(&result, None).unwrap();
+        assert_eq!((faces.len(), edges.len()), (12, 24));
+        let mut values = Vec::new();
+        for e in faces
+            .into_iter()
+            .map(EntityRef::Face)
+            .chain(edges.into_iter().map(EntityRef::Edge))
+        {
+            let list = result.entity_attributes(e);
+            assert_eq!(list.len(), 1, "{e:?}");
+            values.push(list[0].1.long_value().unwrap());
+        }
+        values.sort_unstable();
+        assert_eq!(values, [vec![0; 18], vec![1; 18]].concat());
+        // the operands keep their own, once each
+        for b in &breps {
+            for f in bp::faces(b, None).unwrap() {
+                assert_eq!(b.entity_attributes(EntityRef::Face(f)).len(), 1);
+            }
+        }
+    }
 }

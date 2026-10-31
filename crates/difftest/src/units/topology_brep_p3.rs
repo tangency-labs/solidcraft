@@ -156,6 +156,19 @@ enum OpIn {
         #[serde(default)]
         shared_naming: bool,
     },
+    /// Every face and edge tagged as for `AttributedCopy`, then `MergeBrep` of the B-rep into
+    /// a second build of it; compares the second build's and the source's attributes (does
+    /// the merge carry the merged B-rep's attributes?).
+    AttributedMerge {
+        #[serde(default = "yes")]
+        analytics: bool,
+        #[serde(default)]
+        behavior: u8,
+    },
+}
+
+fn yes() -> bool {
+    true
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -230,6 +243,13 @@ fn op_args(op: &OpIn, c: &[usize; 10]) -> Result<Option<(Op, Vec<f64>)>, Harness
         OpIn::TurnNurbsOffset { offset } => (Op::TurnNurbsOffset, vec![*offset]),
         OpIn::Copy { analytics, api } => (Op::Copy, vec![flag(*analytics), flag(*api)]),
         OpIn::Merge { analytics } => (Op::Merge, vec![flag(*analytics)]),
+        OpIn::AttributedMerge {
+            analytics,
+            behavior,
+        } => (
+            Op::AttributedMerge,
+            vec![flag(*analytics), f64::from(*behavior)],
+        ),
         OpIn::AttributedCopy { behavior, .. } => {
             (Op::AttributedCopy, vec![f64::from(*behavior)])
         }
@@ -1456,6 +1476,29 @@ fn run_rust_op_in(
             put_attribute_rows(&mut out, &c)?;
             put_attribute_rows(&mut out, src)?;
         }
+        OpIn::AttributedMerge {
+            analytics,
+            behavior,
+        } => {
+            let dst = second.ok_or_else(|| Fail::Harness(harness("no second B-rep")))?;
+            let behavior = Behavior::from_code(i32::from(*behavior))
+                .map_err(|e| Fail::Harness(harness(format!("behavior: {e}"))))?;
+            tag_brep(b, behavior)?;
+            let (s, _) = status(bp3::merge_brep(
+                k,
+                &mut env,
+                dst,
+                b,
+                &source_key_of,
+                None,
+                None,
+                *analytics,
+            ))?;
+            out.push(s);
+            put_counts(&mut out, dst)?;
+            put_attribute_rows(&mut out, dst)?;
+            put_attribute_rows(&mut out, b)?;
+        }
         OpIn::Merge { analytics } => {
             let dst = second.ok_or_else(|| Fail::Harness(harness("no second B-rep")))?;
             let (s, _) = status(bp3::merge_brep(
@@ -1674,9 +1717,11 @@ fn run_rust(i: &Inputs) -> Result<Output, HarnessError> {
     )
     .map_err(|e| ffi_err(&e))?;
     let mut second = match i.op {
-        OpIn::Merge { .. } | OpIn::CopyVertices { .. } => Some(own_brep(&mut k, i)?.map_err(
-            |_| harness("the second build of the B-rep failed where the first did not"),
-        )?.0),
+        OpIn::Merge { .. } | OpIn::AttributedMerge { .. } | OpIn::CopyVertices { .. } => {
+            Some(own_brep(&mut k, i)?.map_err(
+                |_| harness("the second build of the B-rep failed where the first did not"),
+            )?.0)
+        }
         _ => None,
     };
     match run_rust_op(&mut k, &mut b, second.as_mut(), &i.op, &args) {
