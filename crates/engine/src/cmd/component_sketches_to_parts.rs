@@ -31,7 +31,7 @@ pub(super) fn reauthor(s: &mut Session, id: u64, to: u64, cmd: &str) -> Result<(
     let Some(feature) = s.doc.feature(id) else { return Ok(()) };
     let from = feature.component;
     let FeatureKind::Sketch { plane, .. } = &feature.kind else { return Ok(()) };
-    let Some(anchor) = solidcraft_doc::plane_face_anchor(plane) else { return Ok(()) };
+    let Some(anchor) = solidcraft_doc::face_anchor::plane_face_anchor(plane) else { return Ok(()) };
     if from == to {
         return Ok(());
     }
