@@ -423,6 +423,7 @@ impl PrimitiveCreation {
                     || a.kernel(context_of)?
                         .fixes
                         .planar_path_profile_placement_statuses,
+                paths,
             )?;
 
             // sweep the profiles along this path segment creating new brep

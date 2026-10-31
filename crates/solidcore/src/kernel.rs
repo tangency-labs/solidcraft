@@ -323,6 +323,15 @@ pub struct UpstreamFixes {
     /// `SetCanonical` on the profile-normal frame (always successful upstream) is
     /// elided. Off by default for pinned C++ parity.
     pub planar_path_profile_placement_statuses: bool,
+    /// `PositionProfileCurves` places profiles in the planar path's own XY frame (one
+    /// frame for all its pieces), then maps them back, instead of using global X and Z
+    /// to orient them (WR-660). This keeps the profile's roll and first-point anchor
+    /// under rigid motions, including vertical planes and reversed plane normals.
+    /// Paths in or parallel to XY with either normal retain upstream arithmetic;
+    /// straight paths retain upstream placement. A path of several pieces also needs
+    /// `sweep_frame_on_planar_path_normal`: without it the sweep's own pose dependence can
+    /// still cut an arc-then-line path to volume 0. Off by default for C++ parity.
+    pub planar_path_profile_in_path_frame: bool,
     /// A rotational sweep (whole or partial turn) makes each line and circular arc of its profile its cylinder, cone, sphere or torus, not only a one-curve profile's (WR-448, #545; SolidCraft change, tangency-labs/smlib 0b143f7).
     pub revolve_analytic_profile_faces: bool,
     /// With `revolve_analytic_profile_faces`, a revolved arc whose centre is within the B-rep tolerance of the axis is the sphere centred on the axis through the arc's ends, and an end within it of the axis is its pole, not a sphere (or torus) built on the arc's own off-axis circle with a pole row of radius about sqrt(2 tol R) (WR-471, #1123; tangency-labs/smlib, "a revolved arc centred within tolerance of the axis is a sphere through its ends").
