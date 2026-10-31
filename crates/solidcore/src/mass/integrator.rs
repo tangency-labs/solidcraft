@@ -16,7 +16,10 @@
 //! selection is ignored upstream. Disabled Romberg/Simpson and Bulirsch–Stoer paths
 //! are not exposed. No recursion; dimensions are bounded at 4096, steps at 1,000,000,
 //! and rejected step retries at 1024 to bound malformed caller input. Infinite error
-//! scales/accuracy and unused initial values retain their upstream behavior.
+//! scales/accuracy and unused initial values retain their upstream behavior. The step
+//! arrays (`ytemp`, `ak2`..`ak6`, `yerr`) are kept across the steps of one integration
+//! instead of allocated per step; they are zeroed or overwritten as the fresh ones
+//! were, so the values are the same.
 
 use crate::geom::tol::are_same;
 use crate::math::{EFF_ZERO, EFF_ZERO_SQ};
@@ -147,6 +150,8 @@ impl OdeIntegrator {
             -options.initial_step.abs()
         };
         let mut counts = StepCounts::default();
+        // the step arrays, kept across the steps (sized by the first step)
+        let mut scratch = CashKarpScratch::default();
         for _ in 0..self.max_steps {
             evaluate(x, &y, &mut dydx)?;
             finite(&dydx)?;
@@ -159,16 +164,25 @@ impl OdeIntegrator {
             if (x + h - x2) * (x + h - x1) > 0.0 {
                 h = x2 - x;
             }
-            let step = self
-                .step(&y, &dydx, x, h, options.accuracy, &mut scale, &mut evaluate)
-                .map_err(SolidError::nl_ser(OP))?;
+            let step = Self::step_in(
+                &y,
+                &dydx,
+                x,
+                h,
+                options.accuracy,
+                &mut scale,
+                &mut evaluate,
+                &mut scratch,
+            )
+            .map_err(SolidError::nl_ser(OP))?;
             if step.taken == h {
                 counts.good += 1;
             } else {
                 counts.reduced += 1;
             }
             x = step.x;
-            y = step.values;
+            // the step's values (`scratch.temp`, which the next step overwrites)
+            core::mem::swap(&mut y, &mut scratch.temp);
             if (x - x2) * (x2 - x1) >= 0.0 {
                 initial.copy_from_slice(&y);
                 return Ok(counts);
@@ -195,6 +209,41 @@ impl OdeIntegrator {
     where
         F: FnMut(f64, &[f64], &mut [f64]) -> Result<()>,
     {
+        let mut scratch = CashKarpScratch::default();
+        let step = Self::step_in(
+            y,
+            dydx,
+            x,
+            htry,
+            accuracy,
+            scale,
+            &mut evaluate,
+            &mut scratch,
+        )?;
+        Ok(OdeStep {
+            values: core::mem::take(&mut scratch.temp),
+            x: step.x,
+            taken: step.taken,
+            next: step.next,
+        })
+    }
+
+    /// [`OdeIntegrator::step`] into `scratch`: the new values are left in
+    /// `scratch.temp`, so the steps of one integration allocate nothing.
+    #[allow(clippy::too_many_arguments)] // `step`'s arguments plus the scratch arrays
+    fn step_in<F>(
+        y: &[f64],
+        dydx: &[f64],
+        x: f64,
+        htry: f64,
+        accuracy: f64,
+        scale: &mut [f64],
+        evaluate: &mut F,
+        scratch: &mut CashKarpScratch,
+    ) -> Result<StepEnd>
+    where
+        F: FnMut(f64, &[f64], &mut [f64]) -> Result<()>,
+    {
         validate(y)?;
         validate(dydx)?;
         validate_scale(scale)?;
@@ -208,11 +257,13 @@ impl OdeIntegrator {
                 "invalid step controls or dimensions",
             ));
         }
+        // (`y.len()` is bounded by `validate` above)
+        scratch.resize(y.len());
         let mut h = htry;
         for _ in 0..MAX_RETRIES {
-            let (values, errors) = cash_karp(y, dydx, x, h, &mut evaluate)?;
+            cash_karp(y, dydx, x, h, evaluate, scratch)?;
             let mut errmax: f64 = 0.0;
-            for (error, s) in errors.iter().zip(scale.iter_mut()) {
+            for (error, s) in scratch.errors.iter().zip(scale.iter_mut()) {
                 if s.abs() < EFF_ZERO {
                     *s = EFF_ZERO;
                 }
@@ -228,8 +279,7 @@ impl OdeIntegrator {
                 } else {
                     5.0 * h
                 };
-                return Ok(OdeStep {
-                    values,
+                return Ok(StepEnd {
                     x: x + h,
                     taken: h,
                     next,
@@ -276,75 +326,124 @@ fn validate(values: &[f64]) -> Result<()> {
     finite(values)
 }
 
+/// The accepted step of [`OdeIntegrator::step_in`] (its values are in the scratch).
+struct StepEnd {
+    x: f64,
+    taken: f64,
+    next: f64,
+}
+
+/// The arrays of one Cash–Karp step (`RungeKuttaCashKarpAdvance`'s `ytemp`, `ak2` to
+/// `ak6` and `yerr`), kept across the steps of one integration. Each step overwrites
+/// `temp` and `errors` entirely and zeroes `ak2` to `ak6` before their evaluation, as
+/// the fresh zeroed arrays it used to allocate per step.
+#[derive(Default)]
+struct CashKarpScratch {
+    temp: Vec<f64>,
+    ak2: Vec<f64>,
+    ak3: Vec<f64>,
+    ak4: Vec<f64>,
+    ak5: Vec<f64>,
+    ak6: Vec<f64>,
+    errors: Vec<f64>,
+}
+
+impl CashKarpScratch {
+    /// Sizes every array to `n` components (the caller bounds `n`).
+    fn resize(&mut self, n: usize) {
+        for v in [
+            &mut self.temp,
+            &mut self.ak2,
+            &mut self.ak3,
+            &mut self.ak4,
+            &mut self.ak5,
+            &mut self.ak6,
+            &mut self.errors,
+        ] {
+            v.resize(n, 0.0);
+        }
+    }
+}
+
+/// One Cash–Karp step into `s`: the fifth-order values in `s.temp`, the error
+/// estimates in `s.errors`. `s` is sized to `y.len()`.
 fn cash_karp<F>(
     y: &[f64],
     dydx: &[f64],
     x: f64,
     h: f64,
     evaluate: &mut F,
-) -> Result<(Vec<f64>, Vec<f64>)>
+    s: &mut CashKarpScratch,
+) -> Result<()>
 where
     F: FnMut(f64, &[f64], &mut [f64]) -> Result<()>,
 {
-    let mut temp = vec![0.0; y.len()];
-    let mut ak2 = temp.clone();
-    let mut ak3 = temp.clone();
-    let mut ak4 = temp.clone();
-    let mut ak5 = temp.clone();
-    let mut ak6 = temp.clone();
+    let CashKarpScratch {
+        temp,
+        ak2,
+        ak3,
+        ak4,
+        ak5,
+        ak6,
+        errors,
+    } = s;
+    // (zeroed for each evaluation, as the fresh arrays upstream's step allocates; an
+    // evaluator may leave components unwritten)
+    for ak in [&mut *ak2, &mut *ak3, &mut *ak4, &mut *ak5, &mut *ak6] {
+        ak.fill(0.0);
+    }
     for (i, t) in temp.iter_mut().enumerate() {
         *t = at(y, i)? + 0.2 * h * at(dydx, i)?;
     }
-    evaluate(x + 0.2 * h, &temp, &mut ak2)?;
-    finite(&ak2)?;
+    evaluate(x + 0.2 * h, temp, ak2)?;
+    finite(ak2)?;
     for (i, t) in temp.iter_mut().enumerate() {
-        *t = at(y, i)? + h * ((3.0 / 40.0) * at(dydx, i)? + (9.0 / 40.0) * at(&ak2, i)?);
+        *t = at(y, i)? + h * ((3.0 / 40.0) * at(dydx, i)? + (9.0 / 40.0) * at(ak2, i)?);
     }
-    evaluate(x + 0.3 * h, &temp, &mut ak3)?;
-    finite(&ak3)?;
+    evaluate(x + 0.3 * h, temp, ak3)?;
+    finite(ak3)?;
     for (i, t) in temp.iter_mut().enumerate() {
-        *t = at(y, i)? + h * (0.3 * at(dydx, i)? - 0.9 * at(&ak2, i)? + 1.2 * at(&ak3, i)?);
+        *t = at(y, i)? + h * (0.3 * at(dydx, i)? - 0.9 * at(ak2, i)? + 1.2 * at(ak3, i)?);
     }
-    evaluate(x + 0.6 * h, &temp, &mut ak4)?;
-    finite(&ak4)?;
+    evaluate(x + 0.6 * h, temp, ak4)?;
+    finite(ak4)?;
     for (i, t) in temp.iter_mut().enumerate() {
         *t = at(y, i)?
             + h * ((-11.0 / 54.0) * at(dydx, i)?
-                + 2.5 * at(&ak2, i)?
-                + (-70.0 / 27.0) * at(&ak3, i)?
-                + (35.0 / 27.0) * at(&ak4, i)?);
+                + 2.5 * at(ak2, i)?
+                + (-70.0 / 27.0) * at(ak3, i)?
+                + (35.0 / 27.0) * at(ak4, i)?);
     }
-    evaluate(x + 1.0 * h, &temp, &mut ak5)?;
-    finite(&ak5)?;
+    evaluate(x + 1.0 * h, temp, ak5)?;
+    finite(ak5)?;
     for (i, t) in temp.iter_mut().enumerate() {
         *t = at(y, i)?
             + h * ((1631.0 / 55296.0) * at(dydx, i)?
-                + (175.0 / 512.0) * at(&ak2, i)?
-                + (575.0 / 13824.0) * at(&ak3, i)?
-                + (44275.0 / 110592.0) * at(&ak4, i)?
-                + (253.0 / 4096.0) * at(&ak5, i)?);
+                + (175.0 / 512.0) * at(ak2, i)?
+                + (575.0 / 13824.0) * at(ak3, i)?
+                + (44275.0 / 110592.0) * at(ak4, i)?
+                + (253.0 / 4096.0) * at(ak5, i)?);
     }
-    evaluate(x + 0.875 * h, &temp, &mut ak6)?;
-    finite(&ak6)?;
+    evaluate(x + 0.875 * h, temp, ak6)?;
+    finite(ak6)?;
     for (i, t) in temp.iter_mut().enumerate() {
         *t = at(y, i)?
             + h * ((37.0 / 378.0) * at(dydx, i)?
-                + (250.0 / 621.0) * at(&ak3, i)?
-                + (125.0 / 594.0) * at(&ak4, i)?
-                + (512.0 / 1771.0) * at(&ak6, i)?);
+                + (250.0 / 621.0) * at(ak3, i)?
+                + (125.0 / 594.0) * at(ak4, i)?
+                + (512.0 / 1771.0) * at(ak6, i)?);
     }
-    let mut errors = vec![0.0; y.len()];
     for (i, e) in errors.iter_mut().enumerate() {
         *e = h
             * (((37.0 / 378.0) - (2825.0 / 27648.0)) * at(dydx, i)?
-                + ((250.0 / 621.0) - (18575.0 / 48384.0)) * at(&ak3, i)?
-                + ((125.0 / 594.0) - (13525.0 / 55296.0)) * at(&ak4, i)?
-                + (-277.0 / 14336.0) * at(&ak5, i)?
-                + ((512.0 / 1771.0) - 0.25) * at(&ak6, i)?);
+                + ((250.0 / 621.0) - (18575.0 / 48384.0)) * at(ak3, i)?
+                + ((125.0 / 594.0) - (13525.0 / 55296.0)) * at(ak4, i)?
+                + (-277.0 / 14336.0) * at(ak5, i)?
+                + ((512.0 / 1771.0) - 0.25) * at(ak6, i)?);
     }
-    finite(&temp)?;
-    finite(&errors)?;
-    Ok((temp, errors))
+    finite(temp)?;
+    finite(errors)?;
+    Ok(())
 }
 
 /// `SmIntegrator::IntegrateIt`. Numerical/evaluator failure yields `Ok(0.0)` as

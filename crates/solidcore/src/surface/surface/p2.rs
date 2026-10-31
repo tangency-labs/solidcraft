@@ -667,6 +667,42 @@ pub(crate) enum NestedGeometry<'a> {
     Volume(&'a crate::surface::volume::Volume),
 }
 
+/// The entries [`PendingGeometry`] holds without a heap allocation.
+const PENDING_INLINE: usize = 8;
+
+/// The work stack of [`check_geometry_nesting`]: the first [`PENDING_INLINE`]
+/// entries on the stack, the rest on the heap, so the walk of a shallow geometry (an
+/// analytic surface and its generating curve, checked on every evaluation)
+/// allocates nothing. One last-in, first-out stack: an entry goes inline only while
+/// none is on the heap, and the heap ones are taken first.
+#[derive(Default)]
+struct PendingGeometry<'a> {
+    inline: [Option<(NestedGeometry<'a>, usize)>; PENDING_INLINE],
+    inline_len: usize,
+    spill: Vec<(NestedGeometry<'a>, usize)>,
+}
+
+impl<'a> PendingGeometry<'a> {
+    fn push(&mut self, entry: (NestedGeometry<'a>, usize)) {
+        if self.spill.is_empty() {
+            if let Some(slot) = self.inline.get_mut(self.inline_len) {
+                *slot = Some(entry);
+                self.inline_len += 1;
+                return;
+            }
+        }
+        self.spill.push(entry);
+    }
+
+    fn pop(&mut self) -> Option<(NestedGeometry<'a>, usize)> {
+        if let Some(entry) = self.spill.pop() {
+            return Some(entry);
+        }
+        self.inline_len = self.inline_len.checked_sub(1)?;
+        self.inline.get_mut(self.inline_len)?.take()
+    }
+}
+
 /// Walk `root` without recursion and fail when any owned geometry lies deeper than
 /// [`MAX_GEOMETRY_NESTING`], counting `root` itself at `initial_depth`. A wrapper
 /// constructor passes its new inner geometry at depth 1.
@@ -681,7 +717,8 @@ pub(crate) fn check_geometry_nesting(
 ) -> Result<()> {
     use crate::curve::curve::CurveKind;
     type Geometry<'a> = NestedGeometry<'a>;
-    let mut pending = vec![(root, initial_depth)];
+    let mut pending = PendingGeometry::default();
+    pending.push((root, initial_depth));
     while let Some((geometry, depth)) = pending.pop() {
         if depth > MAX_GEOMETRY_NESTING {
             return Err(SolidError::invalid_input(
@@ -7075,6 +7112,40 @@ mod tests {
         let mut unowned = in_volume(2);
         assert!(run(&mut unowned).is_err());
         assert!(unowned.notify_key().is_none());
+    }
+
+    #[test]
+    fn pending_geometry_is_one_lifo_stack_past_its_inline_entries() {
+        let plane = Surface::from(Plane::from_normal(Vec3::ZERO, Vec3::Z));
+        let mut pending = PendingGeometry::default();
+        let mut popped = Vec::new();
+        // interleaved pushes and pops across the inline/heap boundary
+        for round in 0..3 {
+            for depth in 0..(PENDING_INLINE + 5) {
+                pending.push((NestedGeometry::Surface(&plane), 100 * round + depth));
+            }
+            for _ in 0..4 {
+                popped.push(pending.pop().map(|(_, d)| d));
+            }
+        }
+        while let Some((_, d)) = pending.pop() {
+            popped.push(Some(d));
+        }
+        let mut model = Vec::new();
+        let mut expect = Vec::new();
+        for round in 0..3 {
+            for depth in 0..(PENDING_INLINE + 5) {
+                model.push(100 * round + depth);
+            }
+            for _ in 0..4 {
+                expect.push(model.pop());
+            }
+        }
+        while let Some(d) = model.pop() {
+            expect.push(Some(d));
+        }
+        assert_eq!(popped, expect);
+        assert!(pending.pop().is_none());
     }
 
     #[test]
