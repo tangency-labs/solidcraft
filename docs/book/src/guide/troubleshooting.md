@@ -165,6 +165,16 @@ depend on the graphics driver. Updating the graphics driver from the GPU maker u
 resets. Laptops that lose the device on waking from sleep (often with an NVIDIA GPU that doesn't
 drive the screen) can keep SolidCraft on the integrated GPU instead: Preferences › Graphics.
 
+## SolidCraft closed while the GPU path tracer was being set up
+
+Choosing **GPU path tracing** in the Render workspace first has the graphics driver compile the
+path tracer, which can take minutes. A few drivers crash while compiling it, and the crash takes
+SolidCraft with it; nothing inside SolidCraft can catch a crash inside the driver. SolidCraft
+remembers that setup (`gpu-path-setup.json` in the settings folder) and doesn't run it again by
+itself on that graphics adapter and driver: the Render workspace says what happened and offers
+**Try again**. CPU ray tracing still works. A driver update also tries the setup again, and so
+does deleting that file.
+
 ## A design saved by 0.10 won't open in an older version
 
 Designs saved by a newer SolidCraft use a newer file format. Older versions refuse them with
