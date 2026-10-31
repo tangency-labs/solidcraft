@@ -969,6 +969,7 @@ fn extrude(s: &mut Session, p: &Value) -> Result<Value> {
             return Ok(reply);
         }
         let (id, points, body) = super::face::sketch_of_faces(s, &points, cmd, str_(p, "face_body"), fixed)?;
+        s.active_sketch = None;
         Some((id, Some(ProfileSel::Points { points }), Some(body)))
     } else {
         None
@@ -985,6 +986,7 @@ fn extrude_from(s: &mut Session, p: &Value, grouped: Option<FaceProfile>) -> Res
         match p.get("face").and_then(vec3) {
             Some(fp) => {
                 let (id, inside, body) = super::face::sketch_of_face(s, fp, cmd, str_(p, "face_body"), fixed_param(p, cmd)?)?;
+                s.active_sketch = None;
                 (id, Some(ProfileSel::Points { points: vec![inside] }), Some(body))
             }
             None => (feature_sketch(s, p, cmd)?, None, None),
