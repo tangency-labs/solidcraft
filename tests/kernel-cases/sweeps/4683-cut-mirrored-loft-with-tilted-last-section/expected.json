@@ -3,7 +3,19 @@
   "tangency-labs/solidcraft#4683"
  ],
  "what": "a box cut from a 6-section loft (spline crown and a flat bottom at z = -1) whose last section lies on a plane tilted 2 deg off its neighbours', mirrored into one body; the box crosses the tilted end and reaches below the bottom face: truck's result shell was missing a face ('no result')",
- "source": "invariants",
- "method": "the mirrored loft is one solid symmetric about YZ, x -149..149; the box (x 91..240, y 90..210, z -2..118) cuts through its tilted end and out of its flat bottom, so the cut leaves one valid closed body. The loft's free-form volume is not closed-form. Synthetic sections of the report's shape (a crowned spline over a flat base, narrowing along x), not its numbers",
- "body_count": 1
+ "source": "analytic",
+ "method": "the mirrored loft is one solid symmetric about YZ; the box (x 91..240, y 90..210, z -2..118) cuts through its tilted end and out of its flat bottom, so the cut leaves one valid closed body. The loft's free-form volume is not closed-form, but its sections pin its box: x to the tilted last section's bottom corners, 149 + 0.034899 = 149.034899 (mirrored, -149.034899), y +-303 and z -1 at the first section's bottom corners (x = 0), z 92 at its crown; the sections' corners (y = 303 - 0.6 x) and crowns (z = 92 - 0.35 x) fall linearly with x through all of them, so the loft between them reaches no further, and the box (x >= 91, y 90..210) takes none of these points. Synthetic sections of the report's shape (a crowned spline over a flat base, narrowing along x), not its numbers",
+ "body_count": 1,
+ "bbox": {
+  "min": [
+   -149.034899,
+   -303,
+   -1
+  ],
+  "max": [
+   149.034899,
+   303,
+   92
+  ]
+ }
 }

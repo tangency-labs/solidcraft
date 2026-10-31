@@ -3,8 +3,12 @@
   "tangency-labs/solidcraft#5146"
  ],
  "what": "a O23 shaft with a modelled M23x1 thread joined onto the O26 cylinder it stands on: SolidCraft ended without a clean exit during the combine",
- "source": "invariants",
- "method": "the shaft's end face lies on the base's top face, so the join is one solid: one valid closed body, within the case's timeout (modelled threads are slow: 600 s)",
+ "source": "analytic",
+ "method": "ISO 68-1 basic profile: H = P sqrt3/2, basic depth 5H/8. External groove (the space between teeth): a trapezoid P/4 wide at the root radius d/2 - 5H/8, widening by 2 tan30 per unit of radius to 7P/8 at d/2. Pappus: volume per turn = 2 pi A rc (A the trapezoid area, rc its centroid radius from the axis); a helical sweep of L/P turns removes exactly (L/P) x that, where each end of the thread is a free end or lies inside material. Base R = 13, h = 10; shaft R = 11.5, z 10..30, M23x1 (P = 1) over its whole length, both ends free (the bottom one then lies on the base's top face, which closes it): the shaft's end face lies on the base's top face, so the join is one solid, V = pi 13^2 10 + pi 11.5^2 20 - 20 x 21.577558 = 13187.2530 mm3, within the case's timeout (modelled threads are slow: 600 s). Tolerance 1%: a modelled thread is a faceted helical solid (radial chord error up to 1% of the pitch on every wall, i.e. a volume deficit of about 4/3 x sag/R).",
  "body_count": 1,
+ "volume_mm3": 13187.253,
+ "tolerance": {
+  "rel": 0.01
+ },
  "timeout_s": 600
 }
