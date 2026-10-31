@@ -9,7 +9,10 @@
 //!
 //! Deviations: not upstream. Rail positions are sampled, and the distance to the other
 //! round's edge is a 3D distance (exact on planar faces, a lower bound on curved ones
-//! where the face between the edges bends).
+//! where the face between the edges bends). A closest-point query on an edge with no
+//! solution (`SmEdge::ClosestPoint` finding none, #2050) measures nothing: a rail point
+//! without one is not inside the other round's strip, and gives its own round no width;
+//! a rail with no width at all takes no strip it can be tested against.
 // ponytail: sampled 3D distances, no face-interior test; a C-shaped face whose two
 // edges face each other across its notch would be refused though they fit. Upgrade to
 // the surface distance within the face if that shows up.
@@ -18,7 +21,7 @@ use super::{FilletBody, FilletObject, FilletSession};
 use crate::error::{EntityRef, Result, SolidError};
 use crate::kernel::Kernel;
 use crate::math::Point3;
-use crate::query::api_queries::edge_closest_point;
+use crate::query::edge::closest_point;
 use crate::topology::edge;
 use crate::topology::edgeuse::p1 as eu1;
 use crate::topology::{EdgeId, FaceId};
@@ -51,9 +54,11 @@ impl FilletSession<'_> {
                     continue;
                 }
                 for &p in &a.points {
-                    if edge_closest_point(k, target, b.edge, p)?.closest.distance + tolerance
-                        < b.width
-                    {
+                    // No closest point on the other round's edge: no crossing found here.
+                    let Some(closest) = closest_point(k, target, b.edge, p)? else {
+                        continue;
+                    };
+                    if closest.distance + tolerance < b.width {
                         self.executive.error.code = 4; // SM_FILERR_EDGE_PROBLEM
                         self.executive.error.status = 2; // SM_FIL_FAILURE
                         self.executive.error.edge = Some(FilletObject::Topology(
@@ -111,8 +116,15 @@ impl FilletSession<'_> {
                     for i in 0..SAMPLES {
                         let t = lo + (hi - lo) * (i as f64 + 0.5) / SAMPLES as f64;
                         let p = curve.evaluate_point(k, t)?;
-                        width = width.min(edge_closest_point(k, target, edge, p)?.closest.distance);
+                        if let Some(closest) = closest_point(k, target, edge, p)? {
+                            width = width.min(closest.distance);
+                        }
                         points.push(p);
+                    }
+                    if !width.is_finite() {
+                        // No rail point found its edge: the rail's strip is unknown, and
+                        // an infinite width would refuse every point tested against it.
+                        continue;
                     }
                     rails.push(Rail {
                         edge,
