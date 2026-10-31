@@ -418,6 +418,22 @@ impl OffsetExecutive {
                 tolerance,
                 notifications,
             )?;
+            // Opt-in (WR-344 addendum, tangency-labs/solidcore#1818): with the mated pairs
+            // of an extended offset left out of its merge, an offset the merge would have
+            // refused can reach the difference, which then hands back no solid (a ruled
+            // square-to-circle loft shelled inward: ten faces, not manifold, volume 0).
+            // The fork's `SmOffsetExecutive::ShellBrep` returns it too; its C API refuses
+            // any operation on a solid whose result is no closed manifold solid
+            // (`finish`, `SMLIB_ERR_NOT_SOLID`). As WR-454's and WR-578's opt-ins do for
+            // the offset, the flag must not turn upstream's refusal into a success on a
+            // broken body.
+            if kernel.fixes.offset_extended_edges_mated
+                && options.offset.extend_convex_edges
+                && input_is_manifold
+                && !brep_is_manifold_solid(&shell)?
+            {
+                return Err(SolidError::sm_err(OP_SHELL));
+            }
             make_shell_edges_exact(kernel, &mut shell, notifications)?;
             Ok(shell)
         })();

@@ -214,7 +214,7 @@ pub struct UpstreamFixes {
     pub offset_clip_right_side_out: bool,
     /// `SmSurfOfRevolution::CreateOffsetSurface` cuts the offset generator at the axis on either side of the frame origin (WR-343, #973).
     pub revolution_offset_axis_both_sides: bool,
-    /// With extended convex edges, `piecewise_merge` relates the mated offsets of a manifold edge instead of intersecting them again (WR-344, #469).
+    /// With extended convex edges, `piecewise_merge` relates the mated offsets of a manifold edge instead of intersecting them again (WR-344, #469; the fork's tangency-labs/smlib@85bbfaf), except an edge whose mate failed in `EdgeuseOffset` (#1795). A shell of a solid whose result is then no closed manifold solid is refused (`SM_ERR`) instead of returned: the merge no longer refuses some broken offsets, and the difference hands back a wall that bounds nothing (#1818; the fork's `ShellBrep` returns it, its C API refuses it as `SMLIB_ERR_NOT_SOLID`). Needs no other flag.
     pub offset_extended_edges_mated: bool,
     /// The extended offset (`SmOffsetExecutive::GetCreateExtendedSurface`) extends a cone or cylinder as itself, along its rulings and around its axis with `SM_CT_CINFINITY` (around by no more than half the turn it leaves open on each side), where upstream extends every surface by a tangent extension (`SM_CT_G1R`) that leaves a cylinder at once; a face that reaches a hair into that extension is later fitted back into a cylinder off its radius (WR-532; the fork's tangency-labs/smlib@b283ea2).
     pub offset_extends_cones_as_themselves: bool,
