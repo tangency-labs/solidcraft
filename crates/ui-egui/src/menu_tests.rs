@@ -1025,6 +1025,50 @@ fn an_uncaptured_move_asks_before_the_next_command() {
     assert!(crate::browser::answer_capture(&mut app, "capture").is_err(), "nothing waits now");
 }
 
+/// #9736: a move not captured yet is a change to save. Closing the tab asks "save changes?";
+/// Save asks the Capture Position question before it writes, and the close waits for it.
+/// Cancel keeps the tab and the move; Capture saves the move and the tab closes. Save As asks
+/// the same question first.
+#[test]
+fn closing_with_an_uncaptured_move_asks_to_save_and_to_capture() {
+    let dir = std::env::temp_dir().join(format!("solidcraft-close-pending-move-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("two.sc");
+    let mut app = sample_app();
+    let b = body(&app);
+    app.run("component.from_bodies", json!({"bodies": [b]})).unwrap();
+    let occ = app.session.doc.occurrences[0].id;
+    app.run("occurrence.ground", json!({"occurrence": occ, "grounded": false})).unwrap();
+    app.run("file.save_as", json!({"path": path.to_string_lossy()})).unwrap();
+    assert!(!crate::documents::any_dirty(&app));
+    app.run("occurrence.move", json!({"occurrence": occ, "translate": [10, 0, 0], "capture": false})).unwrap();
+    assert!(crate::documents::any_dirty(&app), "the move is a change to save");
+
+    crate::toolbar::save_as(&mut app);
+    assert!(app.tree.capture_prompt.as_deref().is_some_and(|q| q.starts_with("__save_as:")), "{:?}", app.tree.capture_prompt);
+    assert!(!app.file_picker_busy(), "no file is picked before the answer");
+    crate::browser::answer_capture(&mut app, "cancel").unwrap();
+
+    crate::documents::close(&mut app, 0, false);
+    assert_eq!(app.docs.closing, Some(0), "asks to save");
+    crate::documents::answer_prompt(&mut app, crate::documents::Answer::Save);
+    assert_eq!(app.tree.capture_prompt.as_deref(), Some(crate::browser::SAVE));
+    assert_eq!(app.docs.closing, Some(0), "the close waits for the answer");
+    crate::documents::answer_prompt(&mut app, crate::documents::Answer::DontSave);
+    assert_eq!(app.docs.closing, Some(0), "the Capture Position question is the one to answer now");
+    crate::browser::answer_capture(&mut app, "cancel").unwrap();
+    assert!(app.docs.closing.is_none() && !app.session.pending_moves.is_empty(), "still open, with the move");
+
+    crate::documents::close(&mut app, 0, false);
+    crate::documents::answer_prompt(&mut app, crate::documents::Answer::Save);
+    crate::browser::answer_capture(&mut app, "capture").unwrap();
+    crate::save_job::tick(&mut app, true);
+    assert!(app.docs.closing.is_none() && app.session.path.is_none(), "saved and closed: a blank design is left");
+    let saved = solidcraft_engine::io::read_design(&std::fs::read(&path).unwrap()).unwrap();
+    assert_eq!(saved.occurrences[0].transform[3][0], 10.0, "the file holds the move");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 #[test]
 fn f2_renames_the_selected_item() {
     let mut app = sample_app();

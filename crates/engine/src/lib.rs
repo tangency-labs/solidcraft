@@ -750,10 +750,18 @@ impl Session {
         self.replacements = replacements;
     }
 
-    /// The design has changes not in its file: in the document, or in what is hidden.
+    /// The design has changes not in its file: in the document, in what is hidden, or a
+    /// component moved and not captured yet (#9736).
     pub fn is_dirty(&self) -> bool {
-        (!Arc::ptr_eq(&self.doc, &self.saved) && *self.doc != *self.saved) || self.visibility != self.saved_visibility
+        (!Arc::ptr_eq(&self.doc, &self.saved) && *self.doc != *self.saved) || self.visibility != self.saved_visibility || self.moved_uncaptured()
     }
+
+    /// A component was moved and its position not captured yet (#9736). The placements of an
+    /// exploded view shown are not such a move: they last only while it is shown.
+    pub fn moved_uncaptured(&self) -> bool {
+        !self.pending_moves.is_empty() && !cmd::motion::shows_exploded_view(self)
+    }
+
     pub fn mark_saved(&mut self) {
         self.saved = self.doc.clone();
         self.saved_visibility = self.visibility.clone();

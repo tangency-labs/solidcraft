@@ -463,6 +463,8 @@ fn relink_repairs_a_moved_source_for_every_instance_in_one_undo_step() {
     assert!((volume(&mut s) - 12000.0).abs() < 1e-5);
     run(&mut s, "edit.redo", json!({}));
     assert_eq!(serde_json::to_value(&*s.doc).unwrap(), after);
+    // A move not captured stops a save (#9736).
+    run(&mut s, "component.capture_position", json!({}));
     run(&mut s, "file.save", json!({}));
     let mut reopened = Session::default();
     run(&mut reopened, "doc.open", json!({"path": assembly}));

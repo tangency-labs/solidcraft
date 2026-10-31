@@ -3304,6 +3304,18 @@ pub(crate) fn panel_pos(app: &SolveApp) -> Pos2 {
 /// The Capture Position question stands for saving.
 pub const SAVE: &str = "__save";
 
+/// It stands for Save As (`__save_as:<extension>:<name>`), which needs the question as Save
+/// does: a file can't hold a move not captured yet (#9736).
+const SAVE_AS: &str = "__save_as:";
+
+/// It stands for the browser build's Download design.
+pub const DOWNLOAD: &str = "__download";
+
+/// The question standing for Save As under `name` with `extension`.
+pub fn save_as_question(name: &str, extension: &str) -> String {
+    format!("{SAVE_AS}{extension}:{name}")
+}
+
 /// Does starting `what` (a command id or [`SAVE`]) need the Capture Position question first?
 /// Yes while components were moved without capturing their positions, except for the commands
 /// that capture, revert or keep moving.
@@ -3331,6 +3343,8 @@ pub fn answer_capture(app: &mut SolveApp, action: &str) -> Result<(), String> {
         "revert" => drop(app.run("component.revert_position", json!({}))),
         "cancel" => {
             app.tree.capture_prompt = None;
+            // A tab waiting to close after the save stays open (#9736).
+            crate::documents::saved_for_close(app);
             return Ok(());
         }
         other => return Err(format!("unknown answer `{other}` (capture, revert, cancel)")),
@@ -3339,8 +3353,17 @@ pub fn answer_capture(app: &mut SolveApp, action: &str) -> Result<(), String> {
     app.tree.occurrence_move = None;
     if what == SAVE {
         crate::toolbar::save(app);
+    } else if let Some((extension, name)) = what.strip_prefix(SAVE_AS).and_then(|rest| rest.split_once(':')) {
+        crate::toolbar::save_as_named(app, name, extension);
+    } else if what == DOWNLOAD {
+        crate::toolbar::download_design(app);
     } else {
         app.start(&what);
+    }
+    // A save that finished here (no thread, or nothing to write) answers a tab waiting to close,
+    // as the "save changes?" answer does; one under way answers when it ends.
+    if app.saving.is_none() && !app.file_picker_busy() {
+        crate::documents::saved_for_close(app);
     }
     Ok(())
 }
