@@ -309,8 +309,15 @@ fn fill_pocket_by_wall(body: &Body, faces: &[usize]) -> Result<Option<Body>> {
     let mut gap = Vec3::ZERO;
     let mut n = 0.0;
     let mut points = Vec::new();
+    let (mut lo, mut hi) =
+        (Vec3::new(f64::INFINITY, f64::INFINITY, f64::INFINITY), Vec3::new(f64::NEG_INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY));
     for &fi in faces {
         let Some(p) = point_of(fi) else { return Ok(None) };
+        for v in all.get(fi).into_iter().flat_map(|f| f.vertex_iter()) {
+            let q = from_p3(v.point());
+            lo = Vec3::new(lo.x.min(q.x), lo.y.min(q.y), lo.z.min(q.z));
+            hi = Vec3::new(hi.x.max(q.x), hi.y.max(q.y), hi.z.max(q.z));
+        }
         gap += p;
         n += 1.0;
         points.push(p);
@@ -340,6 +347,13 @@ fn fill_pocket_by_wall(body: &Body, faces: &[usize]) -> Result<Option<Body>> {
     }
     let Some(wall) = wall else { return Ok(None) };
     let size = body.size().max(1.0);
+    let tol = size * 1e-6 + 1e-9;
+    // What a fill may add: the pocket, not a sweep that ran off the body. A face replaced with
+    // the wall can be swept the long way round (a side wall's normal runs across the boss), and
+    // the result still holds the deleted faces' places: the box and the volume say no.
+    let before = crate::measure(body)?.volume;
+    let body_box = body.outline_bounds();
+    let pocket = (hi - lo).x * (hi - lo).y * (hi - lo).z;
     FILLING.with(|f| f.set(true));
     let mut out = None;
     for (fi, point) in faces.iter().copied().zip(&points) {
@@ -348,6 +362,18 @@ fn fill_pocket_by_wall(body: &Body, faces: &[usize]) -> Result<Option<Body>> {
         }
         let tool = crate::SplitTool::Face { body, face: wall };
         let Ok(candidate) = crate::replace_faces(body, &[*point], &tool) else { continue };
+        let Ok(measure) = crate::measure(&candidate) else { continue };
+        let box_ = candidate.outline_bounds();
+        let inside = box_.min.x >= body_box.min.x - tol
+            && box_.min.y >= body_box.min.y - tol
+            && box_.min.z >= body_box.min.z - tol
+            && box_.max.x <= body_box.max.x + tol
+            && box_.max.y <= body_box.max.y + tol
+            && box_.max.z <= body_box.max.z + tol;
+        let added = measure.volume - before;
+        if !inside || added <= 1e-9 || added > pocket.max(1e-9) * 2.0 {
+            continue;
+        }
         let filled = points.iter().all(|p| {
             let inward = *p - gap;
             let dir = if inward.len() > 1e-9 { inward.normalized().unwrap_or(Vec3::ZERO) } else { Vec3::ZERO };
