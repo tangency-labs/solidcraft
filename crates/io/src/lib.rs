@@ -381,13 +381,16 @@ impl Format {
 
 /// How closely an exported mesh follows curved faces: its chord tolerance as a share of each
 /// body's size. Standard is what every mesh export used; Fine and Finest give the small round
-/// features of a large part more sides (#4747).
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+/// features of a large part more sides (#4747). `Deviation` is an absolute chord tolerance in
+/// millimetres, as the Save As Mesh dialog's numeric field asks for (#2846).
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub enum MeshQuality {
     #[default]
     Standard,
     Fine,
     Finest,
+    /// An absolute chord tolerance in millimetres, overriding the preset shares.
+    Deviation(f64),
 }
 
 impl MeshQuality {
@@ -407,6 +410,8 @@ impl MeshQuality {
             Self::Standard => 2e-4,
             Self::Fine => 5e-5,
             Self::Finest => 1e-5,
+            // A Deviation carries its own tolerance and never reaches here.
+            Self::Deviation(_) => 0.0,
         }
     }
 }
@@ -416,9 +421,14 @@ pub fn export_mesh(b: &solidcraft_kernel::Body) -> Result<Mesh> {
     export_mesh_at(b, MeshQuality::Standard)
 }
 
-/// [`export_mesh`] at `quality` (never finer than 1 µm).
+/// [`export_mesh`] at `quality` (never finer than 1 µm). A [`MeshQuality::Deviation`] is taken
+/// as an absolute chord tolerance in millimetres rather than a share of the body's size.
 pub fn export_mesh_at(b: &solidcraft_kernel::Body, quality: MeshQuality) -> Result<Mesh> {
-    Ok(b.tessellate((b.size() * quality.share()).max(1e-3))?)
+    let tol = match quality {
+        MeshQuality::Deviation(mm) => mm,
+        preset => b.size() * preset.share(),
+    };
+    Ok(b.tessellate(tol.max(1e-3))?)
 }
 
 /// Distance within which an exported mesh's vertices are welded (STL and 3MF alike).

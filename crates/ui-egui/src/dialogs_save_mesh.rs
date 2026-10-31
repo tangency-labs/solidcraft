@@ -14,7 +14,7 @@
 //! over a program the user added removes it.
 
 use crate::selection::SelectionExt as _;
-use crate::ui_kit::choice_row;
+use crate::ui_kit::{choice_row, field};
 use std::collections::HashMap;
 
 use egui::{Color32, Sense, vec2};
@@ -47,6 +47,9 @@ pub struct SaveMesh {
     open: bool,
     /// Index into [`QUALITIES`] (Save As Mesh; Send to Slicer has no quality row).
     quality: usize,
+    /// Surface deviation in millimetres, typed as text (#2846). Empty uses the [`QUALITIES`]
+    /// preset; a number overrides it with an absolute chord tolerance.
+    deviation: String,
     /// The chosen slicer: an installed one's id, or the path of one the user added.
     slicer: String,
     /// The slicer list has not been read for this opening yet.
@@ -135,7 +138,7 @@ pub fn start(app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
         _ => String::new(),
     };
     let quality = QUALITIES.iter().position(|q| q.1 == p.save_mesh_quality).unwrap_or(0);
-    let kind = Kind::SaveMesh(SaveMesh { format, quality, open, slicer, stale: true, shown: None });
+    let kind = Kind::SaveMesh(SaveMesh { format, quality, deviation: String::new(), open, slicer, stale: true, shown: None });
     let mut inputs = vec![SelInput::new("Bodies", BODIES, true)];
     if open {
         inputs.push(SelInput::new("Print face", PLANAR_FACES, false));
@@ -372,7 +375,10 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut SaveMesh, inputs: &mu
     if !k.open {
         choice_row(ui, "Format", "sm_format", &mut k.format, &FORMATS.map(|f| f.0));
         choice_row(ui, "Quality", "sm_quality", &mut k.quality, &QUALITIES.map(|q| q.0));
-        return false;
+        // A number here overrides the Quality preset with an absolute chord tolerance (#2846).
+        let mut enter = false;
+        form_row(ui, "Deviation (mm)", |ui| enter = field(ui, &mut k.deviation));
+        return enter;
     }
     if k.stale {
         // Look at the machine once per opening, then settle on a slicer that exists.
@@ -536,8 +542,15 @@ fn add_custom(app: &mut SolveApp, path: &str) -> Result<(), String> {
 pub fn commands(k: &SaveMesh, inputs: &[SelInput]) -> Result<Vec<(String, Value)>, String> {
     let format = FORMATS.get(k.format).map_or("stl", |f| f.1);
     let mut p = json!({ "format": format });
-    // Standard is the command's own default, so it is left out. Sending has no quality row.
-    if let Some((_, quality)) = QUALITIES.get(k.quality).filter(|_| k.quality > 0 && !k.open) {
+    // A typed deviation overrides the Quality preset; Standard is the command's own default, so
+    // it is left out. Sending has no quality row.
+    let deviation = k.deviation.trim();
+    if !deviation.is_empty() && !k.open {
+        match deviation.parse::<f64>().ok().filter(|d| d.is_finite() && *d > 0.0) {
+            Some(mm) => p["deviation"] = json!(mm),
+            None => return Err(crate::i18n::format("ui.save_mesh_bad_deviation", &[("value", deviation)])),
+        }
+    } else if let Some((_, quality)) = QUALITIES.get(k.quality).filter(|_| k.quality > 0 && !k.open) {
         p["quality"] = json!(quality);
     }
     let names = crate::selection::items(inputs, 0).body_names();
@@ -926,7 +939,7 @@ mod tests {
 
     #[test]
     fn send_to_slicer_asks_for_bodies_and_a_slicer_but_not_a_format() {
-        let k = SaveMesh { format: 0, quality: 0, open: true, slicer: "prusa".into(), stale: false, shown: None };
+        let k = SaveMesh { format: 0, quality: 0, deviation: String::new(), open: true, slicer: "prusa".into(), stale: false, shown: None };
         let mut input = SelInput::new("Bodies", BODIES, true);
         assert!(commands(&k, std::slice::from_ref(&input)).is_err());
         input.items = vec![Sel::Body { name: "Part".into() }];
@@ -945,10 +958,27 @@ mod tests {
     fn a_remembered_quality_goes_to_save_but_not_to_send() {
         let mut input = SelInput::new("Bodies", BODIES, true);
         input.items = vec![Sel::Body { name: "Part".into() }];
-        let k = SaveMesh { format: 0, quality: 2, open: true, slicer: "prusa".into(), stale: false, shown: None };
+        let k = SaveMesh { format: 0, quality: 2, deviation: String::new(), open: true, slicer: "prusa".into(), stale: false, shown: None };
         let (_, sent) = commands(&k, std::slice::from_ref(&input)).unwrap().remove(0);
         assert_eq!(sent.get("quality"), None, "sending has no quality row: the default applies");
         let (_, saved) = commands(&SaveMesh { open: false, ..k }, &[input]).unwrap().remove(0);
         assert_eq!(saved["quality"], "finest");
+    }
+
+    #[test]
+    fn a_typed_deviation_replaces_the_quality_preset_and_a_bad_one_is_refused() {
+        let mut input = SelInput::new("Bodies", BODIES, true);
+        input.items = vec![Sel::Body { name: "Part".into() }];
+        let k = SaveMesh { format: 0, quality: 2, deviation: " 0.02 ".into(), open: false, slicer: String::new(), stale: false, shown: None };
+        let (id, saved) = commands(&k, std::slice::from_ref(&input)).unwrap().remove(0);
+        assert_eq!(id, "file.save_mesh");
+        assert_eq!((saved["deviation"].as_f64(), saved.get("quality")), (Some(0.02), None), "the deviation replaces the preset");
+        // Not a positive number: refused, not silently dropped.
+        for bad in ["wide", "0", "-1"] {
+            assert!(commands(&SaveMesh { deviation: bad.into(), ..k.clone() }, std::slice::from_ref(&input)).is_err(), "{bad}");
+        }
+        // Blank: the Quality preset applies as before.
+        let (_, preset) = commands(&SaveMesh { deviation: "  ".into(), ..k }, &[input]).unwrap().remove(0);
+        assert_eq!((preset.get("deviation"), preset["quality"].as_str()), (None, Some("finest")));
     }
 }

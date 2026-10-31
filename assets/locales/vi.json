@@ -4871,6 +4871,8 @@
   "ui.right": "Phải (Hình chiếu cạnh)",
   "ui.save": "Lưu",
   "ui.save_as": "Lưu thành tệp mới",
+  "ui.save_mesh_bad_deviation": "\"{value}\" không phải là số milimét dương",
+  "ui.save_mesh_deviation": "Độ lệch (mm)",
   "ui.save_mesh_no_slicer_open": "Không tìm thấy phần mềm cắt lớp: chọn Tùy chỉnh… và chỉ định chương trình cắt lớp của bạn",
   "ui.save_mesh_pick_bodies": "Chọn các thân khối cần lưu",
   "ui.saved_to": "Đã lưu {path}",
