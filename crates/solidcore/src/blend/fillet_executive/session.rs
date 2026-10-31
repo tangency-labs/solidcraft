@@ -3646,7 +3646,14 @@ impl SolverGeometryAccess<FilletObject> for SessionObjects<'_> {
         use crate::topology::edgeuse::p1 as eu;
         // each solver's rails (the face each rolls on and its curve), its filleted edge
         // (with its ends and curve), and the largest solver tolerance
-        let mut rails: Vec<Vec<(FaceId, crate::curve::curve::Curve)>> = Vec::new();
+        // (and, with the band between the rail's end vertices, its kept interval)
+        let mut rails: Vec<
+            Vec<(
+                FaceId,
+                crate::curve::curve::Curve,
+                crate::geom::extent1d::Extent1d,
+            )>,
+        > = Vec::new();
         let mut edges = Vec::new();
         let mut tol = 0.0;
         for &solver in solvers {
@@ -3670,9 +3677,54 @@ impl SolverGeometryAccess<FilletObject> for SessionObjects<'_> {
                     let curve = crate::topology::edge::curve(self.pseudo.brep(), rail)?
                         .ok_or_else(|| invalid("rail without curve"))?
                         .clone();
-                    if let Some(face) = self.pseudo.fillet_edge(rail)?.original_face() {
-                        own.push((face, curve));
+                    let Some(face) = self.pseudo.fillet_edge(rail)?.original_face() else {
+                        continue;
+                    };
+                    // The rail runs on past its ends (the surfaces are not trimmed yet),
+                    // as far as a mitre at a corner needs and beyond: the band is the
+                    // rail's part between the vertices that end it, where the corners have
+                    // placed them (an end no corner has placed is the rail's own; a rail
+                    // whose ends are one vertex is closed and whole). The fork's
+                    // tangency-labs/smlib@d548305 (WR-649).
+                    let ivl = curve.natural_interval();
+                    let pseudo = self.pseudo.brep();
+                    let prim = eu::primary_edgeuse(pseudo, rail)?
+                        .ok_or_else(|| invalid("rail without primary edgeuse"))?;
+                    let mate = eu::mate(pseudo, prim)?
+                        .ok_or_else(|| invalid("rail edgeuse without mate"))?;
+                    let mut ends = [None; 2];
+                    for (slot, use_) in ends.iter_mut().zip([prim, mate]) {
+                        let vu = eu::vertexuse(pseudo, use_)?
+                            .ok_or_else(|| invalid("rail edgeuse without vertexuse"))?;
+                        *slot = crate::topology::vertexuse::vertex(pseudo, vu)?;
                     }
+                    let [Some(end0), Some(end1)] = ends else {
+                        return Err(invalid("rail end without vertex"));
+                    };
+                    let mut t_ends = [ivl.min(), ivl.max()];
+                    if end0 != end1 {
+                        for (t_end, end) in t_ends.iter_mut().zip([end0, end1]) {
+                            if !self.pseudo.fillet_vertex(end)?.is_processed() {
+                                continue;
+                            }
+                            let at = crate::topology::vertex::point(pseudo, end)?;
+                            let dropped = curve.drop_point(
+                                k,
+                                &ivl,
+                                at,
+                                None,
+                                crate::math::BIG_DOUBLE,
+                                None,
+                                SolverOperation::Minimize,
+                            )?;
+                            if dropped.success {
+                                *t_end = dropped.parameter;
+                            }
+                        }
+                    }
+                    let [t0, t1] = t_ends;
+                    let kept = crate::geom::extent1d::Extent1d::from_min_max(t0, t1);
+                    own.push((face, curve, kept));
                 }
             }
             rails.push(own);
@@ -3706,12 +3758,12 @@ impl SolverGeometryAccess<FilletObject> for SessionObjects<'_> {
                 let (Some(rails_a), Some(rails_b)) = (rails.get(a), rails.get(b)) else {
                     continue;
                 };
-                for (face_a, curve_a) in rails_a {
-                    for (face_b, curve_b) in rails_b {
+                for (face_a, curve_a, kept_a) in rails_a {
+                    for (face_b, curve_b, _) in rails_b {
                         if face_a != face_b {
                             continue;
                         }
-                        let ivl_a = curve_a.natural_interval();
+                        let ivl_a = *kept_a;
                         let ivl_b = curve_b.natural_interval();
                         for s in 1..16_u32 {
                             let p =
