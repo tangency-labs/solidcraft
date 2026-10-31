@@ -474,6 +474,9 @@ fn services(cc: &eframe::CreationContext<'_>, folder: &DialogFolder) -> Services
     let file_parent = parent.clone();
     let (open_folder, file_folder, save_folder) = (folder.clone(), folder.clone(), folder.clone());
     Services {
+        // Server-folder saves are the self-hosted web app's (#6675); the desktop writes files itself.
+        persist_save: None,
+        save_conflict_answer: None,
         pick_open: Some(Box::new(move |first: &[&str]| {
             // The file type the command reads comes first, so the picker opens on it (#1801).
             let mut dialog = open_folder.start(open_parent.clone());
