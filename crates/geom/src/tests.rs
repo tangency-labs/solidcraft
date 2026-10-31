@@ -294,6 +294,57 @@ fn surface_patches_cross_only_hidden_seams() {
     assert_eq!(m.surface_patch(0), vec![0]);
 }
 
+/// The face index answers as the scans it replaces: each face's triangles in mesh order, its
+/// edges ([`Mesh::face_edges`]) and its surface patch ([`Mesh::surface_patch`]), on random meshes
+/// of many faces joined by seams (some sharp), with faces listed twice on an edge, tables of
+/// unequal lengths and face numbers far beyond the mesh.
+#[test]
+fn face_index_matches_the_scans_it_replaces() {
+    let mut state = 0x9e37_79b9_7f4a_7c15u64;
+    let mut next = move |n: u64| {
+        state ^= state << 13;
+        state ^= state >> 7;
+        state ^= state << 17;
+        state % n.max(1)
+    };
+    for case in 0..200 {
+        let faces = 1 + next(300) as u32;
+        let tris = next(2_000) as usize;
+        let edges = next(900) as usize;
+        let face = |next: &mut dyn FnMut(u64) -> u64| if next(50) == 0 { u32::MAX - next(3) as u32 } else { next(u64::from(faces)) as u32 };
+        let mut m = Mesh {
+            triangles: (0..tris).map(|i| [i as u32, i as u32 + 1, i as u32 + 2]).collect(),
+            tri_face: (0..tris + next(3) as usize).map(|_| face(&mut next)).collect(),
+            edge_faces: (0..edges).map(|_| (0..1 + next(3)).map(|_| face(&mut next)).collect()).collect(),
+            seams: (0..edges.saturating_sub(next(5) as usize)).map(|_| next(4) != 0).collect(),
+            sharp_edges: (0..edges).map(|_| next(10) == 0).collect(),
+            ..Mesh::default()
+        };
+        if case % 7 == 0 {
+            m.tri_face.truncate(tris / 2);
+        }
+        let index = m.face_index();
+        let probes = (0..faces as usize + 2).chain([u32::MAX as usize, u32::MAX as usize - 1, usize::MAX]);
+        for f in probes {
+            let scan: Vec<u32> =
+                m.triangles.iter().zip(&m.tri_face).enumerate().filter(|(_, (_, tf))| **tf as usize == f).map(|(t, _)| t as u32).collect();
+            assert_eq!(index.triangles(&m, f).as_ref(), scan.as_slice(), "case {case}, face {f}: triangles");
+            let edges_scan: Vec<u32> =
+                if let Ok(fu) = u32::try_from(f) { m.face_edges(fu).into_iter().map(|e| e as u32).collect() } else { Vec::new() };
+            assert_eq!(index.edges(&m, f).as_ref(), edges_scan.as_slice(), "case {case}, face {f}: edges");
+            let patch = m.surface_patch(f);
+            assert_eq!(index.surface_patch(&m, f), patch, "case {case}, face {f}: patch");
+            let around: Vec<usize> =
+                m.edge_faces.iter().enumerate().filter(|(_, fs)| fs.iter().any(|x| patch.contains(&(*x as usize)))).map(|(e, _)| e).collect();
+            assert_eq!(index.edges_of(&m, &patch), around, "case {case}, face {f}: edges of the patch");
+        }
+    }
+    // A long chain of seams: one surface of thousands of pieces is one patch.
+    let n = 5_000u32;
+    let m = Mesh { edge_faces: (0..n - 1).map(|i| vec![i, i + 1]).collect(), seams: vec![true; n as usize - 1], ..Mesh::default() };
+    assert_eq!(m.face_index().surface_patch(&m, 1234), (0..n as usize).collect::<Vec<_>>());
+}
+
 #[test]
 fn cubic_and_conic_segments_measure_exactly() {
     use crate::{Loop2, Seg2, Vec2};

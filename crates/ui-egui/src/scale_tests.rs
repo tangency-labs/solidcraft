@@ -575,3 +575,130 @@ fn zoomed_view_frame_cost() {
         "ZOOMED whole_ms={whole:.2} whole_triangles={whole_tris} zoomed_ms={zoomed:.2} zoomed_triangles={zoomed_tris} zoomed_orbit_ms={orbit:.2}"
     );
 }
+
+/// A cylinder whose round wall is `pieces` faces of one surface (its circle drawn as `pieces`
+/// arcs about one centre), as an imported surface split into many faces: hovering one face
+/// lights the whole wall. Or such a design saved (`out/testdaten/split_cylinder.py`): the sketch
+/// of many arcs takes long to build again. The wall's faces, ascending.
+fn split_cylinder(pieces: usize, saved: Option<&str>) -> (Harness, Vec<usize>) {
+    let mut h = Harness::new();
+    if let Some(path) = saved {
+        h.app.run("doc.open", json!({"path": path})).unwrap();
+    } else {
+        h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+        let at = |i: usize| {
+            let a = std::f64::consts::TAU * (i % pieces) as f64 / pieces as f64;
+            [20.0 * a.cos(), 20.0 * a.sin()]
+        };
+        for i in 0..pieces {
+            h.app.run("sketch.arc.center_point", json!({"center": [0, 0], "start": at(i), "end": at(i + 1)})).unwrap();
+        }
+        h.app.run("sketch.finish", json!({})).unwrap();
+        h.app.run("solid.extrude", json!({"sketch": 1, "distance": 40})).unwrap();
+    }
+    h.app.set_origin_shown(false);
+    h.frames(2);
+    let st = h.app.session.world_state();
+    let m = st.bodies[0].mesh();
+    let wall = m.edge_faces.iter().zip(&m.seams).find(|(_, s)| **s).map(|(fs, _)| fs[0] as usize).unwrap();
+    let patch = m.surface_patch(wall);
+    drop(st);
+    (h, patch)
+}
+
+fn median_ms(mut t: Vec<f64>) -> f64 {
+    t.sort_by(f64::total_cmp);
+    t[t.len() / 2]
+}
+
+/// Hovering faces of one smooth surface of many pieces (`split_cylinder`; 32 pieces built here, the
+/// saved designs `SOLIDCRAFT_SPLIT_CYLINDERS=<a.solidcraft>:<b.solidcraft>`): the highlight built at
+/// each hover change, from one piece of the wall to another and to a cap, at display qualities
+/// Normal and Fine, with nothing and with the whole wall selected; and the per-frame highlight
+/// key. With `SOLIDCRAFT_ROVER=<design>`, also the rover's per-frame key and a face hover there.
+/// Run with `--ignored --nocapture` (not a pass/fail check).
+#[test]
+#[ignore = "manual hover measurement"]
+fn smooth_surface_face_hover_cost() {
+    use solidcraft_engine::doc::display_quality::{DisplayQuality, set_current};
+    use solidcraft_engine::geom::Vec3;
+    let saved = solidcraft_engine::geom::env::var("SPLIT_CYLINDERS").unwrap_or_default();
+    let designs: Vec<Option<&str>> = if saved.is_empty() { vec![None] } else { saved.split(':').map(Some).collect() };
+    for design in designs {
+        let (mut h, wall) = split_cylinder(32, design);
+        let pieces = wall.len();
+        let body = h.app.session.world_state().bodies[0].clone();
+        let cap = (0..body.body.face_count()).find(|f| !wall.contains(f)).unwrap();
+        for quality in [DisplayQuality::Normal, DisplayQuality::Fine] {
+            set_current(quality);
+            let tris = h.app.session.world_state().bodies[0].plan_mesh().map_or(0, |m| m.triangles.len());
+            for selected in [false, true] {
+                h.app.session.selection = if selected {
+                    wall.iter().map(|&index| solidcraft_engine::Sel::Face { body: body.name.clone(), index, point: Vec3::ZERO }).collect()
+                } else {
+                    Vec::new()
+                };
+                let targets = [wall[0], wall[wall.len() / 2], cap];
+                let hover = |h: &mut Harness, i: usize| {
+                    h.app.viewport.hover = Some(crate::viewport::Hit::Face { body: body.name.clone(), index: targets[i % 3], point: Vec3::ZERO })
+                };
+                hover(&mut h, 0);
+                let _ = crate::viewport::build_highlight(&h.app);
+                let changes: Vec<f64> = (1..31)
+                    .map(|i| {
+                        hover(&mut h, i);
+                        ms(|| drop(crate::viewport::build_highlight(&h.app)))
+                    })
+                    .collect();
+                let key: Vec<f64> = (0..31)
+                    .map(|_| {
+                        ms(|| {
+                            std::hint::black_box(crate::viewport::highlight_key(&h.app));
+                        })
+                    })
+                    .collect();
+                println!(
+                    "HOVER pieces={pieces} quality={quality:?} plan_triangles={tris} wall_selected={selected} hover_change_median_ms={:.3} hover_change_max_ms={:.3} highlight_key_median_ms={:.4}",
+                    median_ms(changes.clone()),
+                    changes.iter().copied().fold(0.0, f64::max),
+                    median_ms(key)
+                );
+            }
+        }
+        set_current(DisplayQuality::Normal);
+    }
+    let Some(path) = solidcraft_engine::geom::env::var("ROVER") else { return };
+    let mut h = Harness::new();
+    let t = std::time::Instant::now();
+    h.app.run("doc.open", json!({"path": path})).unwrap();
+    h.frames(3);
+    let st = h.app.session.world_state();
+    println!("ROVER bodies={} open_s={:.1}", st.bodies.len(), t.elapsed().as_secs_f64());
+    let names: Vec<String> = st.bodies.iter().map(|b| b.name.clone()).collect();
+    // The body with the most faces, hovered face by face.
+    let big = st.bodies.iter().max_by_key(|b| b.body.face_count()).unwrap().clone();
+    drop(st);
+    for selected in [false, true] {
+        h.app.session.selection =
+            if selected { names.iter().map(|name| solidcraft_engine::Sel::Body { name: name.clone() }).collect() } else { Vec::new() };
+        let key: Vec<f64> = (0..31)
+            .map(|_| {
+                ms(|| {
+                    std::hint::black_box(crate::viewport::highlight_key(&h.app));
+                })
+            })
+            .collect();
+        let faces = big.body.face_count();
+        let changes: Vec<f64> = (0..31)
+            .map(|i| {
+                h.app.viewport.hover = Some(crate::viewport::Hit::Face { body: big.name.clone(), index: (i * 7) % faces, point: Vec3::ZERO });
+                ms(|| drop(crate::viewport::build_highlight(&h.app)))
+            })
+            .collect();
+        println!(
+            "ROVER all_selected={selected} biggest_body_faces={faces} highlight_key_median_ms={:.4} hover_change_median_ms={:.3}",
+            median_ms(key),
+            median_ms(changes)
+        );
+    }
+}
