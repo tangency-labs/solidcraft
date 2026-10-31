@@ -2,6 +2,14 @@ use serde::{Deserialize, Serialize};
 
 use crate::Vec3;
 
+#[cfg(test)]
+thread_local! {
+    /// The edges [`Mesh::tangent_chain`] looked at to extend a chain, on this thread: the work a
+    /// scan of every edge for every edge made quadratic (#3745), counted for the test that checks
+    /// it stays linear, whatever else the machine is doing (#9901).
+    pub(crate) static CHAIN_CANDIDATES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 /// Axis-aligned bounding box.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Aabb3 {
@@ -548,6 +556,8 @@ impl Mesh {
             near.sort_unstable();
             near.dedup();
             for i in near {
+                #[cfg(test)]
+                CHAIN_CANDIDATES.with(|n| n.set(n.get() + 1));
                 if in_chain.contains(&i) || !self.edge_pickable(i) || self.smooth_seam(i, cos) {
                     continue;
                 }
