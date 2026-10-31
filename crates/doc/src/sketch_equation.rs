@@ -231,14 +231,38 @@ pub fn sample(vals: &BTreeMap<String, Value>, eq: &EquationCurve, count: usize, 
 }
 
 /// The points of an equation curve, as few as keep the spline within its tolerance of the
-/// formulas. Refused when even the most points a spline takes are not close enough.
+/// formulas: the count grows until the spline is close enough, then is searched back down to the
+/// fewest that still are (#9410). Refused when even the most points a spline takes are not close
+/// enough.
 pub fn fit(vals: &BTreeMap<String, Value>, eq: &EquationCurve) -> Result<EquationFit> {
+    let (failed, mut best) = first_close_enough(vals, eq)?;
+    // Between a count that strays (or none: below 2) and one that is close enough. A count whose
+    // samples are refused counts as straying.
+    let (mut lo, mut hi) = (failed.unwrap_or(1), best.points.len());
+    while hi - lo > 1 {
+        let mid = lo + (hi - lo) / 2;
+        match sample(vals, eq, mid, None) {
+            Ok(fit) if fit.deviation <= eq.tolerance => {
+                hi = mid;
+                best = fit;
+            }
+            _ => lo = mid,
+        }
+    }
+    Ok(best)
+}
+
+/// The first point count, growing from [`FIRST_COUNT`], whose spline is within the tolerance, and
+/// the last count before it that was not.
+fn first_close_enough(vals: &BTreeMap<String, Value>, eq: &EquationCurve) -> Result<(Option<usize>, EquationFit)> {
     let mut count = FIRST_COUNT;
+    let mut failed = None;
     for _ in 0..MAX_ROUNDS {
         let fit = sample(vals, eq, count, None)?;
         if fit.deviation <= eq.tolerance {
-            return Ok(fit);
+            return Ok((failed, fit));
         }
+        failed = Some(count);
         if count >= MAX_SPLINE_POINTS {
             return Err(DocError::Invalid(format!(
                 "even {MAX_SPLINE_POINTS} points stray {} mm from the formulas, more than the tolerance of {} mm: raise the tolerance or narrow the range",
@@ -321,6 +345,34 @@ mod tests {
         let fit = fit(&vals, &eq(Some("t"), "2", "0", "1")).unwrap();
         let last = *fit.points.last().unwrap();
         assert!((last - Vec2::new(25.4, 50.8)).len() < 1e-9, "{last:?}");
+    }
+
+    /// The fewest evenly spaced points within the tolerance (#9410): one fewer strays, and never
+    /// more than the growing count reaches; for curves where that overshoots, fewer.
+    #[test]
+    fn a_fit_takes_the_fewest_points_within_its_tolerance() {
+        let vals = BTreeMap::new();
+        // Salmon's hypex horn wall on spherical wavefronts, and a wave, a parabola and a circle.
+        let h = "(2 * pi * 1437.2 * (t - 10) / 343100)";
+        let z = format!("(100 * ((1.4028 * exp({h}) + 0.5972 * exp(-{h})) / 2) ^ 2 / (4 * t))");
+        let curves = [
+            (eq(Some(&format!("sqrt(t ^ 2 - {z} ^ 2)")), &z, "10", "130.617"), true),
+            (eq(None, "8 * sin(x / 5)", "0", "20 * pi"), true),
+            (eq(None, "x * x / 20", "-30", "30"), false),
+            (eq(Some("20 * cos(t)"), "20 * sin(t)", "0", "1.5 * pi"), false),
+        ];
+        for (mut e, overshoots) in curves {
+            e.tolerance = 0.05;
+            let fit = fit(&vals, &e).unwrap();
+            let n = fit.points.len();
+            assert!(fit.deviation <= e.tolerance, "{}: {}", e.y, fit.deviation);
+            assert!(sample(&vals, &e, n - 1, None).is_ok_and(|f| f.deviation > e.tolerance), "{}: {} points, one fewer is close enough", e.y, n);
+            let (_, grown) = first_close_enough(&vals, &e).unwrap();
+            assert!(n <= grown.points.len(), "{}: {n} > {}", e.y, grown.points.len());
+            if overshoots {
+                assert!(n < grown.points.len(), "{}: {n} vs {}", e.y, grown.points.len());
+            }
+        }
     }
 
     #[test]
