@@ -1203,6 +1203,9 @@ preference_settings! {
     /// How the offer is made for a file whose header names no program known to save Y up: a note
     /// over the view (the default), the dialog, or nothing (#7717).
     stand_up_unknown: StandUpUnknown = StandUpUnknown::default(), PAGE_DESIGN;
+    /// Dragging Extrude's distance arrow stops at flat faces parallel to the profile over it and
+    /// outlines them (`extrude_face_snap`, #2398). Off: the drag moves in round steps only.
+    extrude_arrow_face_stops: bool = true, PAGE_DESIGN => check_id("prefs.extrude_arrow_face_stops");
     /// Extrude: with a profile picked, a face, vertex or parallel plane picked off its plane
     /// switches the extent to To Object (off: picks only add profiles, as before).
     extrude_auto_to_object: bool = false, PAGE_DESIGN => check("Extrude to a picked target", "In Extrude, with a profile picked, picking a face, vertex or parallel plane off its plane switches the extent to To Object");

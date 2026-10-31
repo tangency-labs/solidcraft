@@ -83,6 +83,8 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             },
         );
         setting::extrude_auto_to_object(app, ui);
+        setting::extrude_arrow_face_stops(app, ui);
+        ui_kit::text(ui, app.tr("prefs.extrude_arrow_face_stops_note"), ui_kit::Text::Hint("extrude_arrow_face_stops"));
         let auto = setting::auto_operation(app, ui);
         crate::scenario::publish_handle("prefs:auto_operation", auto.rect.center());
         ui_kit::text(ui, app.tr("prefs.auto_operation_note"), ui_kit::Text::Hint("auto_operation"));

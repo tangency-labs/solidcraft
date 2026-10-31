@@ -165,6 +165,7 @@ mod expression_complete;
 mod extrude_auto_to_object_tests;
 #[cfg(test)]
 mod extrude_edit_tests;
+mod extrude_face_snap;
 mod extrude_preview;
 mod file_load;
 mod file_picker;

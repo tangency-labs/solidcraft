@@ -573,3 +573,106 @@ fn failed_face_extrusion_edit_keeps_context_until_escape_and_preserves_visibilit
     assert!(!h.app.body_visible("Source"));
     assert_eq!(h.app.session.visibility, visibility);
 }
+
+/// A block 12.345678 mm thick under XY (so no round step lands on its underside), a 10 mm
+/// square sketched on its top and cut 5 mm into it, a second block beside it whose underside is
+/// at -7.777 mm, and the cut open in its editor.
+fn cut_into_block() -> Harness {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    h.app.run("solid.box", json!({"length":30,"width":30,"height":12.345678,"corner":[-10,-10,-12.345678],"body_name":"Block"})).unwrap();
+    h.app
+        .run("solid.box", json!({"length":10,"width":10,"height":7.777,"corner":[40,0,-7.777],"body_name":"Beside","operation":"new_body"}))
+        .unwrap();
+    h.app.run("sketch.create", json!({"plane":"XY","name":"Pocket"})).unwrap();
+    h.app.run("sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[10,10]})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    let cut = json!({"sketch":"Pocket","direction":"negative","distance":"5 mm","operation":"cut","targets":["Block"],"name":"Depth"});
+    h.app.run("solid.extrude", cut).unwrap();
+    h.call("ui.view", json!({"view":"fit"}));
+    h.frames(4);
+    open(&mut h);
+    h
+}
+
+/// Presses the arrow's tip and holds it at the world point `to`, frame by frame, without letting
+/// go; returns the face the arrow stopped at then.
+fn hold_arrow_at(h: &mut Harness, to: Value) -> Option<crate::extrude_face_snap::Stop> {
+    let from = h.at(&json!({"handle":"arrow"})).unwrap();
+    let from = egui::pos2(from[0] as f32, from[1] as f32);
+    let to = h.at(&to).unwrap();
+    let to = egui::pos2(to[0] as f32, to[1] as f32);
+    h.app.synthetic.push(egui::Event::PointerMoved(from));
+    h.frame();
+    h.app.synthetic.push(egui::Event::PointerButton {
+        pos: from,
+        button: egui::PointerButton::Primary,
+        pressed: true,
+        modifiers: h.app.synthetic_mods,
+    });
+    h.frame();
+    for k in 1..=4 {
+        h.app.synthetic.push(egui::Event::PointerMoved(from + (to - from) * (k as f32 / 4.0)));
+        h.frame();
+    }
+    crate::extrude_face_snap::current()
+}
+
+fn let_go(h: &mut Harness) {
+    let at = h.ctx.input(|i| i.pointer.hover_pos()).unwrap_or_default();
+    h.app.synthetic.push(egui::Event::PointerButton {
+        pos: at,
+        button: egui::PointerButton::Primary,
+        pressed: false,
+        modifiers: h.app.synthetic_mods,
+    });
+    h.frames(2);
+}
+
+/// Extrude Cut depth stops at the far face (#2398): dragged near the block's underside, the
+/// cut's arrow takes its exact depth (not a round step) and outlines that face; OK cuts through.
+#[test]
+fn the_extrude_arrow_stops_at_a_parallel_face_and_outlines_it() {
+    let mut h = cut_into_block();
+    let stop = hold_arrow_at(&mut h, json!({"world":[5,5,-12.2]}));
+    let stop = stop.expect("the arrow stops at the block's underside");
+    assert_eq!((stop.body.as_str(), (stop.distance - 12.345678).abs() < 1e-9), ("Block", true), "{stop:?}");
+    assert!((dialog_distance(&h) - 12.345678).abs() < 1e-9, "{}", dialog_distance(&h));
+    let_go(&mut h);
+    assert!(crate::extrude_face_snap::current().is_none(), "no outline once the arrow is let go");
+    assert!((dialog_distance(&h) - 12.345678).abs() < 1e-9, "{}", dialog_distance(&h));
+    h.step(&json!({"widget":"OK"})).unwrap();
+    assert!(h.app.dialog.is_none(), "{:?}", h.app.session.log);
+    let expected = 30.0 * 30.0 * 12.345678 - 10.0 * 10.0 * 12.345678;
+    assert!((volume(&h, "Block") - expected).abs() < 1e-6, "{} for {expected}", volume(&h, "Block"));
+}
+
+/// The free drag (Ctrl held) passes the face by, and a face beside the profile never catches the
+/// arrow: the distance stays the pointer's or a round step.
+#[test]
+fn the_extrude_arrow_passes_faces_beside_the_profile_and_in_a_free_drag() {
+    let mut h = cut_into_block();
+    // The other block's underside at -7.777 is not under the square.
+    assert_eq!(hold_arrow_at(&mut h, json!({"world":[5,5,-7.75]})), None);
+    assert!((dialog_distance(&h) - 7.777).abs() > 1e-6, "{}", dialog_distance(&h));
+    let_go(&mut h);
+    h.app.synthetic_mods.ctrl = true;
+    assert_eq!(hold_arrow_at(&mut h, json!({"world":[5,5,-12.2]})), None);
+    assert!((dialog_distance(&h) - 12.345678).abs() > 1e-3, "{}", dialog_distance(&h));
+    let_go(&mut h);
+}
+
+/// With Preferences › Design › "Extrude arrow stops at faces" off, the arrow keeps the old
+/// behaviour (#2398): dragged near the block's underside it takes a round step, not the face's
+/// distance, and nothing is outlined.
+#[test]
+fn without_face_stops_the_extrude_arrow_moves_in_round_steps() {
+    let mut h = cut_into_block();
+    h.app.preferences.extrude_arrow_face_stops = false;
+    assert_eq!(hold_arrow_at(&mut h, json!({"world":[5,5,-12.2]})), None);
+    let d = dialog_distance(&h);
+    assert!((d - 12.345678).abs() > 1e-3, "{d}");
+    let step = crate::canvas::snap_step(h.app.cam.half_height());
+    assert!(((d / step).round() * step - d).abs() < 1e-9, "{d} is not a multiple of the {step} mm step");
+    let_go(&mut h);
+}

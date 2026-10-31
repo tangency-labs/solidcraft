@@ -48,6 +48,14 @@ start or end offsets or a From Object input, the target also sets the stored dis
 one-sided direction, so returning to **Distance** keeps that reach. Thin Extrude keeps its
 existing picks. With the setting off, picks only add profiles, as before.
 
+Dragging Extrude's distance arrow stops at flat faces parallel to the profile that lie over it,
+such as the far side of the block a cut goes into: once the arrow's tip comes within a few
+screen points of such a face, the distance becomes exactly that face's and the face is
+outlined. Elsewhere the distance moves in round steps. Hold Alt or Ctrl for a free drag, which
+stops at neither. **Extrude arrow stops at faces** (Preferences › Design, on by default) turns
+the face stops off; the arrow then moves in round steps only, as before. The distance stays a number; to follow the face when the model changes, use
+**To Object** or **Through All**.
+
 A positive extrude taper slopes the side walls outward, so the profile grows along the
 extrusion direction and the far end is larger; a negative taper slopes them inward, making
 the far end smaller. For example, a 10 × 10 mm square extruded 10 mm with `taper: "5 deg"`

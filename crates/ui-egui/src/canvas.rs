@@ -291,6 +291,7 @@ pub(crate) fn owns_pointer(app: &SolveApp, proj: &Proj, p: Pos2) -> bool {
 
 /// Draw the manipulator and the value box (called by the viewport after the model is drawn).
 pub fn show(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj) {
+    crate::extrude_face_snap::set(None);
     // While OK computes, the inputs hold what it computes: no arrow to drag, no box to type in.
     if app.applying.is_some() {
         return;
@@ -700,6 +701,12 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
     }
     // A placement marker at the base: the arrow stands above it and the base dot is the marker's.
     let clear = crate::place_gizmo::arrow_clearance(app, d);
+    // While an extrude's arrow is dragged, the flat faces it can stop at (#2398).
+    let arrow_id = egui::Id::new("sc_manipulator");
+    let stops = match dir {
+        Some(n) if ui.ctx().is_being_dragged(arrow_id) => crate::extrude_face_snap::stops(app, d, base, n * sign),
+        _ => Vec::new(),
+    };
     let Some((label, kind, value)) = d.primary() else { return };
     let len = all_span.or_else(|| {
         if to_span.is_some() && value.trim().is_empty() {
@@ -720,21 +727,22 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
         let mut shown_value = format_len(&app.session.doc, half + baseline);
         let original_shown = shown_value.clone();
         let dragged = if to_span.is_some() || symmetric_scale != 1.0 { &mut shown_value } else { &mut *value };
-        if let Some(ts) = drag_arrow(
+        let drawn = drag_arrow_to(
             &app.session.doc,
             ui,
             painter,
             proj,
-            base,
-            bs,
-            n,
-            half + baseline,
-            signed,
-            egui::Id::new("sc_manipulator"),
+            ArrowLine { base, bs, n, l: half + baseline, signed, clear_px: clear },
+            arrow_id,
             half_height,
-            clear,
+            &stops,
             dragged,
-        ) {
+        );
+        if let Some((_, Some(stop))) = &drawn {
+            crate::extrude_face_snap::outline(app, painter, proj, stop);
+        }
+        crate::extrude_face_snap::set(drawn.as_ref().and_then(|(_, stop)| stop.clone()));
+        if let Some((ts, _)) = drawn {
             if (to_span.is_some() || symmetric_scale != 1.0)
                 && shown_value != original_shown
                 && let Ok(v) = crate::length_input::eval(&app.session.doc, &shown_value, ValueKind::Length)
@@ -1027,6 +1035,39 @@ fn drag_arrow(
     clear_px: f32,
     value: &mut String,
 ) -> Option<Pos2> {
+    let line = ArrowLine { base, bs, n, l, signed, clear_px };
+    drag_arrow_to(doc, ui, painter, proj, line, id, half_height, &[], value).map(|(ts, _)| ts)
+}
+
+/// Where a drag arrow stands: from `base` (on screen `bs`) along `n`, showing `l`; `signed` lets
+/// it go below zero, `clear_px` keeps that much of the base free (see [`drag_arrow`]).
+#[derive(Clone, Copy, Debug)]
+struct ArrowLine {
+    base: Vec3,
+    bs: Pos2,
+    n: Vec3,
+    l: f64,
+    signed: bool,
+    clear_px: f32,
+}
+
+/// [`drag_arrow`] that also stops at `stops` (#2398): a drag whose tip comes near a stop's
+/// plane takes its distance exactly instead of a round step. Returns the tip's screen position
+/// and the stop it took this frame.
+#[allow(clippy::too_many_arguments)]
+fn drag_arrow_to(
+    doc: &solidcraft_engine::doc::Document,
+    ui: &mut egui::Ui,
+    painter: &egui::Painter,
+    proj: &Proj,
+    line: ArrowLine,
+    id: egui::Id,
+    half_height: f64,
+    stops: &[crate::extrude_face_snap::Stop],
+    value: &mut String,
+) -> Option<(Pos2, Option<crate::extrude_face_snap::Stop>)> {
+    let ArrowLine { base, bs, n, l, signed, clear_px } = line;
+    let mut stopped = None;
     let t = Tokens::get();
     let min = f64::from(40.0 + clear_px) * 2.0 * half_height / f64::from(proj.rect.height().max(1.0));
     let tip = |length: f64| {
@@ -1068,7 +1109,12 @@ fn drag_arrow(
         let v = v - ui.data(|d| d.get_temp::<f64>(grab)).unwrap_or(0.0);
         let free = crate::tool_modifiers::manipulator_free();
         let step = snap_step(half_height);
-        let mut v = if free { v } else { (v / step).round() * step };
+        stopped = if free { None } else { crate::extrude_face_snap::nearest(proj, base, n, v, stops).cloned() };
+        let mut v = match &stopped {
+            Some(stop) => stop.distance,
+            None if free => v,
+            None => (v / step).round() * step,
+        };
         if !signed {
             v = v.max(if free { 1e-3 } else { step });
         }
@@ -1085,7 +1131,7 @@ fn drag_arrow(
         painter.circle_stroke(ts, 8.0, Stroke::new(1.5, col));
         ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
     }
-    Some(ts)
+    Some((ts, stopped))
 }
 
 /// A fillet's radius spline on each of its edges (a spline fillet, or the splines a taper gave
