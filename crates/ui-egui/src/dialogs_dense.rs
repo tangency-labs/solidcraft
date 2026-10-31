@@ -115,8 +115,18 @@ const MAX_PATTERN_INSTANCES: i64 = 1000;
 /// A solid pattern's quantity row, with step arrows from 1 to `MAX_PATTERN_INSTANCES`. The
 /// count goes to the command as typed, so it is evaluated as the document evaluates it.
 fn quantity_row(ui: &mut egui::Ui, doc: &solidcraft_engine::doc::Document, label: &str, value: &mut String) -> bool {
+    count_row_to(ui, doc, label, value, MAX_PATTERN_INSTANCES)
+}
+
+/// The most revolutions a coil makes (the helix's own limit).
+const MAX_COIL_REVOLUTIONS: i64 = 200;
+
+/// A count row with step arrows by whole numbers from 1 to `max`, evaluated as the document
+/// evaluates it. A fraction still types in (a coil's revolutions); an arrow steps it to the next
+/// whole number.
+fn count_row_to(ui: &mut egui::Ui, doc: &solidcraft_engine::doc::Document, label: &str, value: &mut String, max: i64) -> bool {
     let eval = |text: &str| doc.eval(text.trim(), solidcraft_engine::doc::expr::Kind::Unitless).ok();
-    ui_kit::count_row(ui, label, value, &ui_kit::Count { min: 1, max: MAX_PATTERN_INSTANCES, eval: &eval })
+    ui_kit::count_row(ui, label, value, &ui_kit::Count { min: 1, max, eval: &eval })
 }
 
 fn fillet_type(extra: &serde_json::Map<String, Value>) -> usize {
@@ -856,7 +866,12 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
                 if from_sketch && (*k == "diameter" || *k == "section_size") {
                     continue;
                 }
-                enter |= expr_row(ui, primitive_label(k), v);
+                // Revolutions steps by whole turns like the other counts (#7481).
+                enter |= if *k == "revolutions" {
+                    count_row_to(ui, &app.session.doc, primitive_label(k), v, MAX_COIL_REVOLUTIONS)
+                } else {
+                    expr_row(ui, primitive_label(k), v)
+                };
             }
             if *cmd == "solid.coil" {
                 enter |= coil_rows(ui, &mut d.extra);

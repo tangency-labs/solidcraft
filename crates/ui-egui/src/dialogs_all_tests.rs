@@ -963,6 +963,51 @@ fn coil_from_a_profile_hides_the_primitive_section() {
     assert!(p.get("operation").is_some(), "{p}");
 }
 
+/// The Revolutions field steps by whole turns like the other counts (#7481).
+#[test]
+fn coil_revolutions_arrows_step_whole_turns() {
+    let mut h = fixture();
+    h.app.run("parameters.add", json!({"name":"turns","expression":"3","unit":""})).unwrap();
+    h.app.dialog = Some(Dialog::for_command(&h.app, "solid.coil").unwrap());
+    h.settle();
+    let sent = |h: &Harness| {
+        let cmds = crate::dialogs::preview_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
+        cmds.iter().find(|(id, _)| id == "solid.coil").map(|(_, p)| p["revolutions"].clone()).unwrap_or_else(|| panic!("{cmds:?}"))
+    };
+    let set = |h: &mut Harness, text: &str| {
+        if let Some(Kind::Primitive { fields, .. }) = h.app.dialog.as_mut().map(|d| &mut d.kind)
+            && let Some((_, value)) = fields.iter_mut().find(|(k, _)| *k == "revolutions")
+        {
+            *value = text.into();
+        }
+        h.frames(2);
+    };
+    let click = |h: &mut Harness, arrow: &str| h.step(&json!({"click":{"handle":format!("dialog:ui.revolutions {arrow}")}})).unwrap();
+    assert_eq!(sent(&h), json!("4"));
+    click(&mut h, "up");
+    assert_eq!(sent(&h), json!("5"));
+    click(&mut h, "down");
+    click(&mut h, "down");
+    assert_eq!(sent(&h), json!("3"));
+    // A fraction steps to the next whole turn either way.
+    set(&mut h, "2.5");
+    click(&mut h, "up");
+    assert_eq!(sent(&h), json!("3"));
+    set(&mut h, "2.5");
+    click(&mut h, "down");
+    assert_eq!(sent(&h), json!("2"));
+    // From 1 to the helix's 200 turns.
+    set(&mut h, "1");
+    click(&mut h, "down");
+    assert_eq!(sent(&h), json!("1"));
+    set(&mut h, "200");
+    click(&mut h, "up");
+    assert_eq!(sent(&h), json!("200"));
+    set(&mut h, "turns");
+    click(&mut h, "up");
+    assert_eq!(sent(&h), json!("turns + 1"));
+}
+
 fn extrude_focus_fixture() -> Harness {
     let mut h = Harness::new();
     h.app.home.open = false;
