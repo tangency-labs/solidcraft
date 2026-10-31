@@ -11,7 +11,9 @@ texture, render or prepare the part for a game in the other program.
 
 ## Connecting Blender
 
-A separate SolidCraft add-on for Blender (4.2 or later) receives the meshes.
+A separate add-on for Blender (4.2 or later), [SolidCraft Live Link](https://github.com/Scavanger/solidcraft-live-link),
+receives the meshes. Download its zip from the add-on's releases and install it in Blender with
+**Edit → Preferences → Get Extensions → Install from Disk…**.
 
 1. Start SolidCraft and open your design. The connection uses the control channel, which is on
    unless you turned off **Preferences → Assistant → Let AI agents connect**.
