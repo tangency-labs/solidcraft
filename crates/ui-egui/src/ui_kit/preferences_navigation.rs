@@ -6,18 +6,36 @@ use egui::{FontId, Rect, Sense, Stroke, Ui, pos2, vec2};
 /// One mouse silhouette beside the actual mapping selector and binding legend.
 /// The figure is descriptive content, not an icon asset or an application viewport.
 pub(crate) fn settings_mouse_mapping(ui: &mut Ui, bindings: &[(Vec<String>, String)], mapping: impl FnOnce(&mut Ui)) {
+    let t = Tokens::get();
+    let mut galleys = Vec::with_capacity(bindings.iter().take(10).map(|(keys, _)| keys.len()).sum());
+    let mut key_width = t.form_label_width * 2.0 + t.space_24 + t.space_6;
+    for (keys, _) in bindings.iter().take(10) {
+        let mut row_width = 0.0;
+        for (index, key) in keys.iter().enumerate() {
+            if index > 0 {
+                row_width += t.space_12;
+            }
+            let galley = ui.painter().layout_no_wrap(key.to_owned(), FontId::proportional(t.font_small), t.form_ink);
+            row_width += galley.size().x + t.space_12 + t.space_4;
+            galleys.push(galley);
+        }
+        key_width = key_width.max(row_width);
+    }
     if crate::prefs_search::suppress_chrome(ui) {
         mapping(ui);
+        let mut galleys = galleys.into_iter();
         for (keys, action) in bindings.iter().take(10) {
+            let row = galleys.by_ref().take(keys.len());
             let chord = keys.join(" ");
             if crate::prefs_search::texts_hit(ui, &[action, &chord]) {
                 crate::prefs_search::reveal(ui);
-                settings_gesture(ui, keys, action);
+                settings_gesture(ui, keys, action, key_width, row);
+            } else {
+                row.for_each(drop);
             }
         }
         return;
     }
-    let t = Tokens::get();
     ui.horizontal_top(|ui| {
         ui.spacing_mut().item_spacing.x = t.space_24 - t.space_2;
         let figure_size = vec2(t.form_label_width + t.space_24 + t.space_16, t.space_24 * 6.0 + t.space_16);
@@ -26,8 +44,9 @@ pub(crate) fn settings_mouse_mapping(ui: &mut Ui, bindings: &[(Vec<String>, Stri
         let content = ui.allocate_ui_with_layout(vec2(width, 0.0), egui::Layout::top_down(egui::Align::Min), |ui| {
             mapping(ui);
             ui.add_space(t.space_6);
+            let mut galleys = galleys.into_iter();
             for (keys, action) in bindings.iter().take(10) {
-                settings_gesture(ui, keys, action);
+                settings_gesture(ui, keys, action, key_width, galleys.by_ref().take(keys.len()));
             }
         });
         let height = figure.height().max(content.response.rect.height());
@@ -48,23 +67,21 @@ pub(crate) fn settings_mouse_mapping(ui: &mut Ui, bindings: &[(Vec<String>, Stri
 }
 
 /// Keyboard and pointer gestures use the same quiet keycap treatment as shortcuts.
-fn settings_gesture(ui: &mut Ui, keys: &[String], action: &str) {
+fn settings_gesture(ui: &mut Ui, keys: &[String], action: &str, key_width: f32, galleys: impl Iterator<Item = std::sync::Arc<egui::Galley>>) {
     let t = Tokens::get();
-    let width = dimension(ui.available_width());
+    let width = dimension(ui.available_width()).max(key_width + t.space_8);
     let (rect, response) = ui.allocate_exact_size(vec2(width, t.control_height + t.space_2), Sense::hover());
     response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), format!("{}: {action}", keys.join(" + "))));
     t.secondary_hline(ui.painter(), rect.x_range(), rect.bottom(), t.dialog_rule);
-    let key_width = (t.form_label_width * 2.0 + t.space_24 + t.space_6).min(width * 0.57);
     let key_rect = Rect::from_min_size(rect.min, vec2(key_width, rect.height()));
     let p = ui.painter().with_clip_rect(key_rect);
     let mut x = key_rect.left();
-    for (index, key) in keys.iter().enumerate() {
+    for (index, galley) in galleys.enumerate() {
         if index > 0 {
             let join = Rect::from_min_size(pos2(x, rect.top()), vec2(t.space_12, rect.height()));
             paint_text(ui, join, "+", FontId::proportional(t.font_small), t.form_dim, true);
             x += t.space_12;
         }
-        let galley = p.layout_no_wrap(key.to_owned(), FontId::proportional(t.font_small), t.form_ink);
         let cap = Rect::from_center_size(
             pos2(x + (galley.size().x + t.space_12) / 2.0, rect.center().y),
             vec2(galley.size().x + t.space_12, t.space_24 - t.space_2),

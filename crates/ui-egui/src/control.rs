@@ -1031,12 +1031,29 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, method: &str, p: &Value) ->
         }
         "ui.scroll" => {
             let (Some(x), Some(y)) = (f("x"), f("y")) else { return err("missing x/y") };
+            let phase = match s("phase") {
+                None | Some("move") => egui::TouchPhase::Move,
+                Some("start") => egui::TouchPhase::Start,
+                Some("end") => egui::TouchPhase::End,
+                Some("cancel") => egui::TouchPhase::Cancel,
+                _ => return err("phase must be start, move, end or cancel"),
+            };
+            let delta = egui::vec2(f("delta_x").unwrap_or(0.0) as f32, f("delta").unwrap_or(-100.0) as f32);
+            if !delta.is_finite() || delta.x.abs() > 1e6 || delta.y.abs() > 1e6 || x.abs() > 1e6 || y.abs() > 1e6 {
+                return err("scroll delta and x/y must be within ±1000000 screen points");
+            }
+            let modifiers = egui::Modifiers {
+                shift: b("shift"),
+                alt: b("alt"),
+                ctrl: b("ctrl"),
+                command: b("cmd") || (b("ctrl") && !cfg!(target_os = "macos")),
+                mac_cmd: b("cmd"),
+            };
             // Mouse-wheel semantics (lines): zooms regardless of the trackpad pan
             // preference, so scripts and agents keep working. Trackpads report points.
             // `ctrl: true` replays a Ctrl+wheel pinch in points (#8480). An explicit `unit`
             // overrides that choice; without ctrl the default remains a line wheel.
             let speed = ctx.options(|o| o.input_options.line_scroll_speed).max(1.0);
-            let points = f("delta").unwrap_or(-100.0);
             let ctrl = b("ctrl");
             let unit = match p.get("unit") {
                 Some(Value::String(unit)) if unit == "point" => egui::MouseWheelUnit::Point,
@@ -1045,24 +1062,11 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, method: &str, p: &Value) ->
                 None if ctrl => egui::MouseWheelUnit::Point,
                 None => egui::MouseWheelUnit::Line,
             };
-            let delta = match unit {
-                // A point wheel reaches the app as points; a line wheel is scaled up by the
-                // line scroll speed, so divide it out and both land on the same points.
-                egui::MouseWheelUnit::Line => points / f64::from(speed),
-                _ => points,
-            };
-            let (x, y, delta) = (x as f32, y as f32, delta as f32);
-            if !x.is_finite() || !y.is_finite() || !delta.is_finite() {
-                return err("x, y and delta must fit finite screen coordinates");
-            }
-            let modifiers = if ctrl { egui::Modifiers::CTRL } else { Default::default() };
-            let explicit = p.get("ctrl").is_some();
-            app.synthetic.push(egui::Event::PointerMoved(egui::pos2(x, y)));
-            if explicit {
-                app.synthetic.push(egui::Event::ModifiersChanged(modifiers));
-            }
-            app.synthetic.push(egui::Event::MouseWheel { unit, delta: egui::vec2(0.0, delta), modifiers, phase: egui::TouchPhase::Move });
-            if explicit {
+            let delta = if matches!(unit, egui::MouseWheelUnit::Line) { delta / speed } else { delta };
+            app.synthetic.push(egui::Event::ModifiersChanged(modifiers));
+            app.synthetic.push(egui::Event::PointerMoved(egui::pos2(x as f32, y as f32)));
+            app.synthetic.push(egui::Event::MouseWheel { unit, delta, modifiers, phase });
+            if ["shift", "ctrl", "cmd", "alt"].iter().any(|key| p.get(key).is_some()) {
                 app.synthetic.push(egui::Event::ModifiersChanged(egui::Modifiers::NONE));
             }
             ok(Value::Null)

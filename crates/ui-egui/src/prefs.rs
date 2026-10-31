@@ -38,12 +38,15 @@ use crate::viewport::NavMode;
 pub const UNITS: &[&str] = &["mm", "cm", "m", "in", "ft"];
 pub const OPENSCAD_NAV: &str = "openscad";
 pub const TOUCHPAD_NAV: &str = "touchpad";
-/// A mouse button that can drag the camera.
+/// A button, button chord or two-finger movement that can move the camera.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum NavButton {
     Left,
     Middle,
     Right,
+    MiddleLeft,
+    MiddleRight,
+    Trackpad,
 }
 
 /// Modifier keys a binding needs held (others may be held too).
@@ -58,16 +61,17 @@ impl NavKeys {
     const NONE: NavKeys = NavKeys { shift: false, ctrl: false, alt: false };
     const SHIFT: NavKeys = NavKeys { shift: true, ctrl: false, alt: false };
     const CTRL: NavKeys = NavKeys { shift: false, ctrl: true, alt: false };
+    const CTRL_SHIFT: NavKeys = NavKeys { shift: true, ctrl: true, alt: false };
     const ALT: NavKeys = NavKeys { shift: false, ctrl: false, alt: true };
     const SHIFT_ALT: NavKeys = NavKeys { shift: true, ctrl: false, alt: true };
 
-    /// All of these keys are held (Ctrl is Cmd on macOS).
+    /// All of these keys are held (Ctrl bindings also accept Command).
     fn held(self, m: Modifiers) -> bool {
         (!self.shift || m.shift) && (!self.ctrl || m.ctrl || m.command) && (!self.alt || m.alt)
     }
 }
 
-/// One camera binding: dragging `button` with `keys` held does `mode`.
+/// One camera binding: moving `button` with `keys` held does `mode`.
 #[derive(Clone, Copy, Debug)]
 pub struct NavBinding {
     pub button: NavButton,
@@ -79,7 +83,7 @@ const fn bind(button: NavButton, keys: NavKeys, mode: NavMode) -> NavBinding {
     NavBinding { button, keys, mode }
 }
 
-/// A mouse mapping: its bindings, most specific first (the first one whose button is dragged
+/// A navigation mapping: its bindings, most specific first (the first matching input
 /// with all its keys held wins).
 pub struct NavPreset {
     pub id: &'static str,
@@ -98,28 +102,41 @@ pub struct NavPreset {
 impl NavPreset {
     /// What dragging `button` with `mods` held does, if anything.
     pub fn mode(&self, button: NavButton, mods: Modifiers) -> Option<NavMode> {
-        self.bindings.iter().find(|b| b.button == button && b.keys.held(mods)).map(|b| b.mode)
+        self.bindings.iter().find(|b| b.button == button && b.keys.held(mods)).map(|b| b.mode).or_else(|| match button {
+            NavButton::MiddleLeft | NavButton::MiddleRight => self.mode(NavButton::Middle, mods),
+            _ => None,
+        })
     }
 }
 
-use NavButton::{Left, Middle, Right};
+use NavButton::{Left, Middle, MiddleLeft, MiddleRight, Right, Trackpad};
 use NavMode::{Orbit, Pan, Zoom};
 
-/// The mouse mappings. The first is the default.
+/// The navigation mappings. The first is the default.
 pub const NAV_PRESETS: &[NavPreset] = &[
+    // Mouse: https://www.autodesk.com/products/fusion-360/blog/quick-tip-pan-zoom-orbit-preferences/
+    // Trackpad: https://files.upskill-dev.autodesk.com/public/introduction-to-cad-learn-fusion-360-in-90-minutes/211004_SBS_M4-01_Navigation-and-display-settings.pdf
     NavPreset {
         id: "fusion",
         label: "Fusion",
-        help: "Middle drag pans, Shift+middle orbits, right drag orbits",
+        help: "Middle drag pans, Shift+middle orbits, Ctrl+Shift+middle zooms",
         reverse_zoom: false,
         middle_double_click: None,
         right_drag_orbits: None,
-        bindings: &[bind(Middle, NavKeys::SHIFT, Orbit), bind(Middle, NavKeys::NONE, Pan), bind(Right, NavKeys::NONE, Orbit)],
+        bindings: &[
+            bind(Middle, NavKeys::CTRL_SHIFT, Zoom),
+            bind(Middle, NavKeys::SHIFT, Orbit),
+            bind(Middle, NavKeys::NONE, Pan),
+            bind(Trackpad, NavKeys::CTRL, Zoom),
+            bind(Trackpad, NavKeys::SHIFT, Orbit),
+            bind(Trackpad, NavKeys::NONE, Pan),
+        ],
     },
+    // https://help.solidworks.com/2024/english/SolidWorks/sldworks/r_Middle_Mouse_Button.htm
     NavPreset {
         id: "solidworks",
         label: "SolidWorks",
-        help: "Middle drag orbits, Ctrl+middle pans, Shift+middle zooms, right drag orbits",
+        help: "Pan: Ctrl/Cmd+middle-button drag. Orbit: middle-button drag. Zoom: wheel or Shift+middle-button drag.",
         reverse_zoom: true,
         // Picked here, the right button is left to the context menu and mouse gestures (#6492).
         middle_double_click: Some("fit"),
@@ -131,47 +148,41 @@ pub const NAV_PRESETS: &[NavPreset] = &[
             bind(Right, NavKeys::NONE, Orbit),
         ],
     },
+    // https://www.plm.automation.siemens.com/media/global/zh/NX12%20For%20Engineering%20Design_tcm60-79256.pdf (2.3.1.4)
     NavPreset {
         id: "nx",
         label: "NX",
-        // NX's CAD1 scheme drags middle to rotate, middle + left to zoom and middle + right to
-        // pan; the bindings here hold one button at a time, so the two-button drags are the
-        // middle drag with Ctrl (zoom) and Shift (pan).
-        help: "Middle drag orbits, Shift+middle pans (NX's middle + right), Ctrl+middle zooms (NX's middle + left); right drag leaves the camera",
+        help: "Pan: Shift+middle-button drag or middle+right-button drag. Orbit: middle-button drag. Zoom: wheel, middle+left-button drag or Ctrl/Cmd+middle-button drag.",
         reverse_zoom: false,
         middle_double_click: Some("fit"),
         right_drag_orbits: Some(false),
-        bindings: &[bind(Middle, NavKeys::SHIFT, Pan), bind(Middle, NavKeys::CTRL, Zoom), bind(Middle, NavKeys::NONE, Orbit)],
+        bindings: &[
+            bind(MiddleLeft, NavKeys::NONE, Zoom),
+            bind(MiddleRight, NavKeys::NONE, Pan),
+            bind(Middle, NavKeys::CTRL, Zoom),
+            bind(Middle, NavKeys::SHIFT, Pan),
+            bind(Middle, NavKeys::NONE, Orbit),
+        ],
     },
+    // https://help.autodesk.com/cloudhelp/2026/ENU/Inventor-Help/files/GUID-5D371AC3-EBC4-4B8D-9A9B-4B9B2B290D8B.htm
     NavPreset {
         id: "inventor",
         label: "Inventor",
-        help: "Middle drag pans, Shift+middle orbits, Ctrl+middle zooms, right drag orbits",
+        help: "Middle drag pans, Shift+middle orbits, the wheel zooms",
         reverse_zoom: false,
         middle_double_click: None,
         right_drag_orbits: None,
-        bindings: &[
-            bind(Middle, NavKeys::SHIFT, Orbit),
-            bind(Middle, NavKeys::CTRL, Zoom),
-            bind(Middle, NavKeys::NONE, Pan),
-            bind(Right, NavKeys::NONE, Orbit),
-        ],
+        bindings: &[bind(Middle, NavKeys::SHIFT, Orbit), bind(Middle, NavKeys::NONE, Pan)],
     },
+    // https://help.autodesk.com/cloudhelp/2026/ENU/Alias-Interface-and-General-Tasks/files/GUID-50C3D2D9-16E0-4F88-999C-7D626BF90640.html
     NavPreset {
         id: "alias",
         label: "Alias",
-        help: "Shift+Alt+left drag orbits, Shift+Alt+middle pans, Shift+Alt+right zooms; middle drag also pans and right drag orbits",
+        help: "Shift+Alt+left drag orbits, Shift+Alt+middle pans, Shift+Alt+right zooms",
         reverse_zoom: false,
         middle_double_click: None,
         right_drag_orbits: None,
-        bindings: &[
-            bind(Left, NavKeys::SHIFT_ALT, Orbit),
-            bind(Middle, NavKeys::SHIFT_ALT, Pan),
-            bind(Right, NavKeys::SHIFT_ALT, Zoom),
-            bind(Middle, NavKeys::CTRL, Zoom),
-            bind(Middle, NavKeys::NONE, Pan),
-            bind(Right, NavKeys::NONE, Orbit),
-        ],
+        bindings: &[bind(Left, NavKeys::SHIFT_ALT, Orbit), bind(Middle, NavKeys::SHIFT_ALT, Pan), bind(Right, NavKeys::SHIFT_ALT, Zoom)],
     },
     NavPreset {
         id: "maya",
@@ -187,6 +198,8 @@ pub const NAV_PRESETS: &[NavPreset] = &[
             bind(Middle, NavKeys::NONE, Pan),
         ],
     },
+    // https://docs.blender.org/manual/en/latest/editors/3dview/navigate/navigation.html
+    // https://docs.blender.org/manual/en/4.2/getting_started/configuration/hardware.html
     NavPreset {
         id: "blender",
         label: "Blender",
@@ -194,8 +207,16 @@ pub const NAV_PRESETS: &[NavPreset] = &[
         reverse_zoom: false,
         middle_double_click: None,
         right_drag_orbits: None,
-        bindings: &[bind(Middle, NavKeys::SHIFT, Pan), bind(Middle, NavKeys::CTRL, Zoom), bind(Middle, NavKeys::NONE, Orbit)],
+        bindings: &[
+            bind(Middle, NavKeys::SHIFT, Pan),
+            bind(Middle, NavKeys::CTRL, Zoom),
+            bind(Middle, NavKeys::NONE, Orbit),
+            bind(Trackpad, NavKeys::CTRL, Zoom),
+            bind(Trackpad, NavKeys::SHIFT, Pan),
+            bind(Trackpad, NavKeys::NONE, Orbit),
+        ],
     },
+    // https://images.tinkercad.com/jl5ii4oqrdmc/4nMtGEJi53o3n7V2KJKG7a/0b1818fdecff4868bebc74ebeaf925cf/Tinkercad_Getting_Started_Guide_printable.pdf
     NavPreset {
         id: "tinkercad",
         label: "Tinkercad",
@@ -205,6 +226,7 @@ pub const NAV_PRESETS: &[NavPreset] = &[
         right_drag_orbits: None,
         bindings: &[bind(Right, NavKeys::SHIFT, Pan), bind(Right, NavKeys::NONE, Orbit), bind(Middle, NavKeys::NONE, Pan)],
     },
+    // https://en.wikibooks.org/wiki/OpenSCAD_User_Manual/The_OpenSCAD_User_Interface#Navigation
     NavPreset {
         id: OPENSCAD_NAV,
         label: "OpenSCAD",
@@ -231,6 +253,7 @@ pub const NAV_PRESETS: &[NavPreset] = &[
         // also take a Ctrl+click on geometry, which adds to the selection.
         bindings: &[bind(Left, NavKeys::SHIFT_ALT, Zoom), bind(Left, NavKeys::ALT, Pan)],
     },
+    // SolidCraft's button-free mapping: docs/book/src/guide/ui-tour.md (Navigation).
     NavPreset {
         id: TOUCHPAD_NAV,
         label: "Touchpad",
@@ -239,6 +262,62 @@ pub const NAV_PRESETS: &[NavPreset] = &[
         middle_double_click: None,
         right_drag_orbits: None,
         bindings: &[bind(Middle, NavKeys::NONE, Pan), bind(Right, NavKeys::NONE, Orbit)],
+    },
+    // https://cad.onshape.com/help/Content/View/view_navigation_and_the_view_cube.htm
+    NavPreset {
+        id: "onshape",
+        label: "Onshape",
+        help: "Pan: middle-button drag or Ctrl+right-button drag. Orbit: right-button drag. Zoom: wheel.",
+        reverse_zoom: false,
+        middle_double_click: None,
+        right_drag_orbits: None,
+        bindings: &[bind(Right, NavKeys::CTRL, Pan), bind(Middle, NavKeys::NONE, Pan), bind(Right, NavKeys::NONE, Orbit)],
+    },
+    // Mouse: https://docs.mcneel.com/rhino/8/help/en-us/commands/pan.htm
+    // Trackpad: https://docs.mcneel.com/rhino/8mac/help/en-us/macpreferencesandsettings/trackpad.htm
+    NavPreset {
+        id: "rhino",
+        label: "Rhino",
+        help: "Pan: Shift+right-button drag. Orbit: right-button drag. Zoom: wheel or Ctrl/Cmd/Alt/Option+right-button vertical drag.",
+        reverse_zoom: false,
+        middle_double_click: None,
+        right_drag_orbits: None,
+        bindings: &[
+            bind(Right, NavKeys::CTRL, Zoom),
+            bind(Right, NavKeys::ALT, Zoom),
+            bind(Right, NavKeys::SHIFT, Pan),
+            bind(Right, NavKeys::NONE, Orbit),
+            bind(Trackpad, NavKeys::CTRL, Zoom),
+            bind(Trackpad, NavKeys::SHIFT, Pan),
+            bind(Trackpad, NavKeys::NONE, Orbit),
+        ],
+    },
+    // https://help.sketchup.com/en/sketchup/viewing-model
+    // https://help.sketchup.com/en/trackpad-controls
+    NavPreset {
+        id: "sketchup",
+        label: "SketchUp",
+        help: "Pan: Shift+middle-button drag. Orbit: middle-button drag. Zoom: wheel.",
+        reverse_zoom: false,
+        middle_double_click: None,
+        right_drag_orbits: None,
+        bindings: &[
+            bind(Middle, NavKeys::SHIFT, Pan),
+            bind(Middle, NavKeys::NONE, Orbit),
+            bind(Trackpad, NavKeys::CTRL, Zoom),
+            bind(Trackpad, NavKeys::SHIFT, Pan),
+            bind(Trackpad, NavKeys::NONE, Orbit),
+        ],
+    },
+    // https://3dswym.3dexperience.3ds.com/wiki/3dexperience-platform-user-s-community/3dexperience-platform-collaborative-business-innovator-collaborative-industry-innovator_i1aX0eBgSdGo0-fPaB6rww
+    NavPreset {
+        id: "catia",
+        label: "CATIA",
+        help: "Pan: middle-button drag. Orbit: middle+left-button drag or middle+right-button drag. Zoom: wheel.",
+        reverse_zoom: false,
+        middle_double_click: None,
+        right_drag_orbits: None,
+        bindings: &[bind(MiddleLeft, NavKeys::NONE, Orbit), bind(MiddleRight, NavKeys::NONE, Orbit), bind(Middle, NavKeys::NONE, Pan)],
     },
 ];
 
@@ -261,9 +340,12 @@ impl NavPreset {
 }
 
 impl Prefs {
-    /// Touchpad scroll zooms without overwriting the user's preference for other presets.
-    pub fn trackpad_pans(&self) -> bool {
-        self.nav != TOUCHPAD_NAV && self.trackpad_pan
+    /// Interpret two-finger movement without pretending that a mouse button is held.
+    pub(crate) fn trackpad_mode(&self, mods: Modifiers) -> NavMode {
+        if !self.trackpad_pan || self.nav == TOUCHPAD_NAV {
+            return Zoom;
+        }
+        nav_preset(&self.nav).mode(Trackpad, mods).unwrap_or(Zoom)
     }
 }
 
@@ -1206,7 +1288,7 @@ preference_settings! {
     zoom_stop_at_model: bool = false, PAGE_NAVIGATION => check_id("prefs.zoom_stop_at_model");
     /// Spread discrete wheel input across frames (off: apply each event immediately).
     smooth_wheel_zoom: bool = true, PAGE_NAVIGATION => check("Smooth wheel zoom", "Turn off to apply each wheel event immediately, without a smoothing tail");
-    /// Two-finger trackpad scroll pans (off: it zooms like the wheel); pinch always zooms.
+    /// Two-finger movement uses the preset (off: it zooms like the wheel); pinch always zooms.
     trackpad_pan: bool = true, PAGE_NAVIGATION;
     /// Hold this modifier alone to zoom with vertical wheel or two-finger scroll.
     trackpad_zoom_modifier: TrackpadZoomModifier = TrackpadZoomModifier::default(), PAGE_NAVIGATION;
@@ -8241,9 +8323,9 @@ mod tests {
         assert!(matches!(nav_mode(&app, NavButton::Middle, none), Some(NavMode::Orbit)));
         assert!(matches!(nav_mode(&app, NavButton::Middle, ctrl), Some(NavMode::Pan)));
         set(&mut app, &json!({"nav": "inventor", "zoom_reverse": true})).unwrap();
-        assert!(matches!(nav_mode(&app, NavButton::Middle, ctrl), Some(NavMode::Zoom)));
+        assert!(matches!(nav_mode(&app, NavButton::Middle, ctrl), Some(NavMode::Pan)));
         assert_eq!(zoom_sign(&app), -1.0);
-        assert!(matches!(nav_mode(&app, NavButton::Right, none), Some(NavMode::Orbit)), "right drag orbits everywhere");
+        assert_eq!(nav_mode(&app, NavButton::Right, none), None, "Inventor leaves right drag to its menu");
         assert_eq!(nav_mode(&app, NavButton::Left, none), None, "left drag selects");
         let shift_alt = Modifiers { shift: true, alt: true, ..Default::default() };
         assert_eq!(nav_mode(&app, NavButton::Left, shift_alt), None, "only Alias navigates with the left button");
@@ -8253,7 +8335,7 @@ mod tests {
         assert_eq!(nav_mode(&app, NavButton::Right, shift_alt), Some(NavMode::Zoom));
         assert_eq!(nav_mode(&app, NavButton::Left, none), None, "a plain left drag still selects");
         assert_eq!(nav_mode(&app, NavButton::Left, shift), None);
-        assert_eq!(nav_mode(&app, NavButton::Right, none), Some(NavMode::Orbit));
+        assert_eq!(nav_mode(&app, NavButton::Right, none), None);
         assert!(set(&mut app, &json!({"nav": "no-such-preset"})).is_err());
         assert!(set(&mut app, &json!({"default_units": "furlong"})).is_err());
         assert!(set(&mut app, &json!({"nope": 1})).is_err());

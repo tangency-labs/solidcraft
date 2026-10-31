@@ -7,13 +7,16 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
         let mut gestures: Vec<_> = nav_preset(&app.preferences.nav)
             .bindings
             .iter()
-            .filter(|binding| !(crate::mouse_gesture::active(app) && binding.button == NavButton::Right))
+            .filter(|binding| binding.button != NavButton::Trackpad && !(crate::mouse_gesture::active(app) && binding.button == NavButton::Right))
             .filter(|binding| app.preferences.right_drag_orbits || !(binding.button == NavButton::Right && binding.mode == NavMode::Orbit))
             .map(|binding| {
-                let button = match binding.button {
-                    NavButton::Left => "prefs.button_left",
-                    NavButton::Middle => "prefs.button_middle",
-                    NavButton::Right => "prefs.button_right",
+                let buttons: &[&str] = match binding.button {
+                    NavButton::Left => &["prefs.button_left"],
+                    NavButton::Middle => &["prefs.button_middle"],
+                    NavButton::Right => &["prefs.button_right"],
+                    NavButton::MiddleLeft => &["prefs.button_middle", "prefs.button_left"],
+                    NavButton::MiddleRight => &["prefs.button_middle", "prefs.button_right"],
+                    NavButton::Trackpad => &[],
                 };
                 let mut keys = Vec::new();
                 if binding.keys.shift {
@@ -25,7 +28,7 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
                 if binding.keys.alt {
                     keys.push("Alt/Option");
                 }
-                keys.push(crate::i18n::tr(button));
+                keys.extend(buttons.iter().map(|button| crate::i18n::tr(button)));
                 let action = match binding.mode {
                     NavMode::Orbit => "prefs.gesture_orbit",
                     NavMode::Pan => "prefs.gesture_pan",
@@ -90,6 +93,14 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
             app.tr("prefs.extra_navigation").to_owned()
         };
         ui_kit::text(ui, &help, ui_kit::Text::Hint("navigation"));
+        ui_kit::row(ui, crate::i18n::tr_label("Trackpad"), |ui| {
+            let help = match app.preferences.trackpad_mode(Modifiers::NONE) {
+                Pan => "Two-finger movement pans; Shift+two-finger movement orbits. Pinch or Ctrl/Cmd+vertical movement zooms. No click is needed.",
+                Orbit => "Two-finger movement orbits; Shift+two-finger movement pans. Pinch or Ctrl/Cmd+vertical movement zooms. No click is needed.",
+                Zoom => "Vertical two-finger movement and pinch zoom.",
+            };
+            ui_kit::text(ui, crate::i18n::tr_label(help), ui_kit::Text::Hint("trackpad"));
+        });
         let stop = setting::zoom_stop_at_model(app, ui).on_hover_text(crate::i18n::tr("prefs.zoom_stop_at_model_tip"));
         crate::scenario::publish_target("prefs:zoom_stop_at_model", stop.rect);
     });
@@ -133,8 +144,13 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
                 setting::smooth_wheel_zoom(app, ui);
                 let touchpad = app.preferences.nav == TOUCHPAD_NAV;
                 ui.add_enabled_ui(!touchpad, |ui| {
-                    ui_kit::checkbox(ui, crate::i18n::tr_label("Two-finger scroll pans"), &mut app.preferences.trackpad_pan)
-                        .on_hover_text(if touchpad { crate::i18n::tr("nav.touchpad.scroll") } else { crate::i18n::tr("ui.trackpad_pan_tip") });
+                    ui_kit::checkbox(ui, crate::i18n::tr_label("Use preset trackpad gestures"), &mut app.preferences.trackpad_pan).on_hover_text(
+                        if touchpad {
+                            crate::i18n::tr("nav.touchpad.scroll")
+                        } else {
+                            crate::i18n::tr_label("Two-finger movement uses the selected preset (off: vertical movement zooms); pinch always zooms")
+                        },
+                    );
                 });
                 setting::radial_context_menu(app, ui);
                 setting::direct_interaction(app, ui);
