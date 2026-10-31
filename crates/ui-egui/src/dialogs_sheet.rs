@@ -44,7 +44,7 @@ pub(crate) const RULE_FIELDS: [(&str, &str); 9] = [
     ("unfold_value", "sheet.unfold_method.deduction_90"),
 ];
 /// What sets a rule's K-factor (the rule's `unfold_method`), and the labels the manager offers:
-/// Bend Deduction before Bend Allowance, as press brake charts mostly give it.
+/// the deduction before the allowance, as press brake charts mostly give it.
 pub(crate) const UNFOLD_METHODS: [&str; 3] = ["k_factor", "deduction", "allowance"];
 const UNFOLD_METHOD_LABELS: [&str; 3] = ["K Factor", "sheet.unfold_method.deduction", "sheet.unfold_method.allowance"];
 /// The label of the 90° value each unfold method reads (none for the K-factor).
@@ -494,7 +494,7 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Sm, inputs: &mut [Sel
                                     }
                                     let typed = at.and_then(|at| values.get(at)).is_some_and(|v| !v.trim().is_empty());
                                     let unfolds = manager_rule_values(&app.session.doc, values, *method);
-                                    let k = unfolds.as_ref().map_or_else(|_| "—".to_string(), |v| format!("{:.10}", v.k_factor));
+                                    let k = unfolds.as_ref().map_or_else(|_| "—".to_string(), |v| plain_number(v.k_factor));
                                     read_only_row(ui, label, &k);
                                     note = match &unfolds {
                                         Ok(v) if v.k_factor > 1.0 => {
