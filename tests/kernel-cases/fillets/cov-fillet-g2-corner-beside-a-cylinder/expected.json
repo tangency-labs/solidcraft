@@ -1,0 +1,9 @@
+{
+ "what": "the corner of a half cylinder's top (the top's arc, its straight edge and the upright seam where the flat face meets the cylinder) filleted 2 as a curvature-continuous (G2) fillet",
+ "source": "invariants",
+ "method": "a half disc R10 (the arc from (10, 0) round to (-10, 0) and its diameter) extruded 10; the three edges at (10, 0, 10); the fillet type curvature (G2 sections and G2 corner patches): every seam of a round and of the corner patch with its neighbours G2, one valid body",
+ "body_count": 1,
+ "continuity": {
+  "order": "g2"
+ }
+}
