@@ -117,7 +117,7 @@ use crate::curve::curve::p1::GlobalPointSolveOptions;
 use crate::curve::curve::p2::Curve;
 use crate::curve::curve::p2::BSPLINE_CURVE_TYPE;
 use crate::error::EntityRef;
-use crate::error::{Result, SolidError, SM_ERR_NULL_POINTER};
+use crate::error::{passed_on, Result, SolidError, SM_ERR_NULL_POINTER};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
 use crate::geom::global_solver::{SolutionRequested, SolverOperation};
@@ -500,7 +500,8 @@ fn edge_curve_of<O: Copy>(brep: &impl ProtoBrep<O>, edge: O) -> Result<O> {
         .ok_or(dangling("edge has no curve"))
 }
 
-/// `SmCurve::Trim(rDomain)` with its status ignored (`domain` may be snapped).
+/// `SmCurve::Trim(rDomain)` with its status ignored (`domain` may be snapped), or
+/// passed on with `ssi_proto_topology_statuses_pass_on`.
 fn trim_ignored<O: Copy>(
     k: &Kernel,
     brep: &mut impl ProtoBrep<O>,
@@ -511,7 +512,13 @@ fn trim_ignored<O: Copy>(
         let crv = brep
             .curve_mut(c)
             .ok_or(dangling("curve handle is unknown"))?;
-        ignore_soft(crv.trim(k, domain, TrimMode::Notify))?;
+        // fork bcc6f01 (`UpdateEdges`, `SER(..->Trim(sDomain))`): passed on with
+        // `ssi_proto_topology_statuses_pass_on`.
+        let trimmed = crv.trim(k, domain, TrimMode::Notify);
+        ignore_soft(passed_on(
+            trimmed,
+            k.fixes.ssi_proto_topology_statuses_pass_on,
+        )?)?;
     }
     Ok(())
 }
@@ -1394,6 +1401,8 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         if other == pe {
             return Ok(());
         }
+        // fork bcc6f01 (`CombineProtoEdge` returns the status of its edits)
+        let pass = k.fixes.ssi_proto_topology_statuses_pass_on;
         let pe = self.pe_live(Some(pe))?;
         let other = self.pe_live(Some(other))?;
         let o = self
@@ -1413,10 +1422,11 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
                 .ok_or(dangling("proto edge is deleted"))?
                 .set_start_proto_vertex(this_start);
             let os = self.pv_live(other_start)?;
-            let _ = self
+            let removed = self
                 .proto_vertex_mut(os)
                 .ok_or(dangling("proto vertex is deleted"))?
                 .remove_proto_edge(other);
+            let _ = passed_on(removed, pass)?;
             let ts = self.pv_live(this_start)?;
             self.proto_vertex_mut(ts)
                 .ok_or(dangling("proto vertex is deleted"))?
@@ -1433,10 +1443,11 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
                 .ok_or(dangling("proto edge is deleted"))?
                 .set_end_proto_vertex(this_end);
             let oe = self.pv_live(other_end)?;
-            let _ = self
+            let removed = self
                 .proto_vertex_mut(oe)
                 .ok_or(dangling("proto vertex is deleted"))?
                 .remove_proto_edge(other);
+            let _ = passed_on(removed, pass)?;
             let te = self.pv_live(this_end)?;
             self.proto_vertex_mut(te)
                 .ok_or(dangling("proto vertex is deleted"))?
@@ -1452,7 +1463,7 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
             .edge_definitions()
             .to_vec();
         for ed in other_eds {
-            ignore_soft(self.add_edge_definition(k, brep, pe, ed))?;
+            ignore_soft(passed_on(self.add_edge_definition(k, brep, pe, ed), pass)?)?;
             let _ = self
                 .proto_edge_mut(other)
                 .ok_or(dangling("proto edge is deleted"))?
@@ -2940,6 +2951,41 @@ mod tests {
         let e = Brep::new();
         ProtoTopologyManager::new(&Kernel::default(), (b, &e), (b, &e), b, 1e-5, 1e-3, -1.0)
             .unwrap()
+    }
+
+    /// fork bcc6f01 (`SmProtoEdge::CombineProtoEdge` returns `SmStatus`,
+    /// `SER(pOtherStartPV->RemoveProtoEdge(pOtherPE))`): the other proto edge's start
+    /// vertex does not list it. Upstream drops the failed removal and goes on; with
+    /// `ssi_proto_topology_statuses_pass_on` its error is returned.
+    #[test]
+    fn combine_proto_edge_passes_on_a_failed_removal() {
+        for pass_on in [false, true] {
+            let mut k = Kernel::default();
+            k.fixes.ssi_proto_topology_statuses_pass_on = pass_on;
+            let mut geo = Geo {
+                curves: vec![line([0.0, 0.0, 0.0], [1.0, 0.0, 0.0])],
+                ..Geo::default()
+            };
+            let mut m = manager();
+            let ivl = geo.curves[0].natural_interval();
+            let v0 = m
+                .new_proto_vertex(Point3::new(0.0, 0.0, 0.0), 1e-5)
+                .unwrap();
+            let v1 = m
+                .new_proto_vertex(Point3::new(1.0, 0.0, 0.0), 1e-5)
+                .unwrap();
+            let v2 = m
+                .new_proto_vertex(Point3::new(0.0, 1.0, 0.0), 1e-5)
+                .unwrap();
+            let v3 = m
+                .new_proto_vertex(Point3::new(1.0, 1.0, 0.0), 1e-5)
+                .unwrap();
+            let pe = m.new_proto_edge(&k, Some(v0), Some(v1), ivl).unwrap();
+            // `other` is not listed at v2 or v3: its removal there fails
+            let other = m.new_proto_edge(&k, Some(v2), Some(v3), ivl).unwrap();
+            let r = m.combine_proto_edge(&k, &mut geo, pe, other);
+            assert_eq!(r.is_err(), pass_on, "{r:?}");
+        }
     }
 
     fn region_pc(o: H) -> PointClassification<H> {

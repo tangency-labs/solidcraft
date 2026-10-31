@@ -890,7 +890,9 @@ pub fn non_manifold_sweep(
         .unitize()
         .map_err(|_| SolidError::invalid_input(OP_NON_MANIFOLD, "zero sweep direction"))?
         * sweep_dist;
-    let geometry = SweepGeometry::Translation(TranslationalSweepGeometry::new(sweep_vec));
+    let mut translation = TranslationalSweepGeometry::new(sweep_vec);
+    translation.base.statuses_pass_on = k.fixes.sweep_statuses_pass_on;
+    let geometry = SweepGeometry::Translation(translation);
     non_manifold_sweep_with(k, brep, &geometry, do_stitching, do_merge, selection)
 }
 
@@ -923,12 +925,9 @@ pub fn non_manifold_rotational_sweep(
             "selection entry not live topology of the B-rep",
         ));
     }
-    let geometry = SweepGeometry::Rotation(RotationalSweepGeometry::new(
-        base_pt,
-        axis,
-        angle_deg,
-        ZONE_TOL_3D,
-    ));
+    let mut rotation = RotationalSweepGeometry::new(base_pt, axis, angle_deg, ZONE_TOL_3D);
+    rotation.base.statuses_pass_on = k.fixes.sweep_statuses_pass_on;
+    let geometry = SweepGeometry::Rotation(rotation);
     non_manifold_sweep_with(k, brep, &geometry, do_stitching, do_merge, selection)
 }
 

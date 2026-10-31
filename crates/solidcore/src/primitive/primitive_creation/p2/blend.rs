@@ -10,7 +10,7 @@
 //! overload's status is ignored, as upstream; only `Unported` passes. No recursion.
 
 use super::PrimitiveCreationAccess;
-use crate::error::{ignore_status, Result, SolidError};
+use crate::error::{ignore_status, passed_on, Result, SolidError};
 use crate::primitive::primitive_creation::{p1::PrimitiveCreation, p3::BlendPrimitiveOptions};
 use crate::surface::surface::p2::{BlendEndType, CurvatureType, DerivSurfDefinition};
 use crate::topology::{BrepId, EdgeId, FaceId};
@@ -27,7 +27,8 @@ impl PrimitiveCreation {
     ///
     /// `SM_ERR_INVALID_INPUT` when either edge has no edge use on its face. The
     /// blend itself never fails this call (upstream ignores its status), except
-    /// for `Unported`.
+    /// for `Unported`; with `Kernel::fixes.sweep_statuses_pass_on` its error is
+    /// returned (fork c8f6a31, WR-662).
     pub fn create_blend_primitive_between_faces(
         &mut self,
         a: &mut impl PrimitiveCreationAccess,
@@ -57,8 +58,9 @@ impl PrimitiveCreation {
         let end_tangent_length = options.map_or(1.0, |o| o.end_tan_scale * start_tangent_length);
         let curves_direction = if same_direction_curves { 1 } else { 2 };
 
-        // Pass call along
-        ignore_status(self.create_blend_primitive(
+        // Pass call along; fork c8f6a31 (WR-662): SER(CreateBlendPrimitive(..)).
+        let p = a.kernel(brep)?.fixes.sweep_statuses_pass_on;
+        let blend = self.create_blend_primitive(
             a,
             brep,
             first_edgeuse,
@@ -71,7 +73,8 @@ impl PrimitiveCreation {
                 start_tangent_length,
                 end_tangent_length,
             },
-        ))?;
+        );
+        ignore_status(passed_on(blend, p)?)?;
         Ok(())
     }
 }

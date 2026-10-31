@@ -33,13 +33,16 @@
 //! curve where it meets the axis inside itself ([`split_curves_on_axis`], the fork's
 //! `sm_SplitCurvesOnAxis`), which `CheckCurveSweep` otherwise refuses
 //! (`SM_SC_ROT_ON_CURVE`); a closed curve's last piece is joined back onto its first.
+//! **Statuses pass on** (opt-in `Kernel::fixes.sweep_statuses_pass_on`, WR-662;
+//! SolidCraft change, tangency-labs/smlib c8f6a31): the statuses upstream drops here
+//! are returned instead (`SER`).
 
 use super::{construct::target, geometry::bspline, PrimitiveAccess};
 use crate::curve::curve::Curve;
 use crate::curve::curve::CurveKind;
 use crate::curve::ellipse::Ellipse;
 use crate::curve::line::Line;
-use crate::error::{ignore_status, ignored, EntityRef, Result, SolidError};
+use crate::error::{ignore_status, ignored, passed_on, EntityRef, Result, SolidError};
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::geom_utility::{
     p1::{line_closest_point, line_point_distance},
@@ -88,9 +91,13 @@ fn split(a: &impl PrimitiveAccess, b: BrepId, curves: &mut Vec<Option<Curve>>) -
         let curve = slot.as_ref().ok_or_else(|| SolidError::null_pointer(OP))?;
         let curve = bspline(curve)
             .ok_or_else(|| SolidError::invalid_input(OP, "non B-spline continuity input"))?;
-        let pieces =
-            ignored(curve.subdivide_at_discontinuity(a.kernel(b)?, ContinuityType::C1, 0.5))?
-                .unwrap_or_default();
+        // fork c8f6a31 (WR-662): SER(SubdivideAtDiscontinuity(..)).
+        let k = a.kernel(b)?;
+        let pieces = ignored(passed_on(
+            curve.subdivide_at_discontinuity(k, ContinuityType::C1, 0.5),
+            k.fixes.sweep_statuses_pass_on,
+        )?)?
+        .unwrap_or_default();
         if pieces.len() > 1 {
             let count = pieces.len();
             curves.splice(
@@ -374,7 +381,10 @@ impl PrimitiveCreation {
                 for curve in &profile {
                     let mut end_curve = curve.copy(a.kernel(brep)?)?;
                     for _ in 0..options.repetitions {
-                        ignore_status(end_curve.transform(a.kernel(brep)?, &step, None))?;
+                        // fork c8f6a31 (WR-662): SER_DELETE(pEndCurve->Transform(sStep)).
+                        let k = a.kernel(brep)?;
+                        let p = k.fixes.sweep_statuses_pass_on;
+                        ignore_status(passed_on(end_curve.transform(k, &step, None), p)?)?;
                     }
                     end_curves.push(Some(end_curve));
                 }
@@ -391,8 +401,10 @@ impl PrimitiveCreation {
                 a.orient(brep, true, false)?;
             } else {
                 // unrelated clean up - we didn't use the tmp faces (if any - delete them)
+                // fork c8f6a31 (WR-662): SER(pBrep->DeleteFace(..)).
+                let p = a.kernel(brep)?.fixes.sweep_statuses_pass_on;
                 for face in faces {
-                    ignore_status(a.delete_primitive_face((brep, face)))?;
+                    ignore_status(passed_on(a.delete_primitive_face((brep, face)), p)?)?;
                 }
             }
             copy_maps(self, brep, &mut sweep)?;
@@ -435,8 +447,14 @@ impl PrimitiveCreation {
         }
         for slot in curves.iter_mut() {
             let curve = slot.as_ref().ok_or_else(|| SolidError::null_pointer(OP))?;
-            let length = ignored(curve.length(a.kernel(brep)?, &curve.natural_interval(), 0.001))?
-                .unwrap_or(0.0);
+            // fork c8f6a31 (WR-662): SER(Length(..)), SER(SetCanonical(..)).
+            let k = a.kernel(brep)?;
+            let p = k.fixes.sweep_statuses_pass_on;
+            let length = ignored(passed_on(
+                curve.length(k, &curve.natural_interval(), 0.001),
+                p,
+            )?)?
+            .unwrap_or(0.0);
             if length < EFF_ZERO {
                 return Err(SolidError::invalid_input(OP, "degenerate revolved curve"));
             }
@@ -457,7 +475,10 @@ impl PrimitiveCreation {
                         tangent *= -1.0;
                     }
                     let mut frame = Axis2Placement::IDENTITY;
-                    ignore_status(frame.set_canonical(origin, tangent, axis.cross(tangent)))?;
+                    ignore_status(passed_on(
+                        frame.set_canonical(origin, tangent, axis.cross(tangent)),
+                        p,
+                    )?)?;
                     let mut circles = Vec::new();
                     if start_dist > zero {
                         circles.push(Curve::from(Ellipse::create_canonical_circle(
@@ -527,7 +548,9 @@ impl PrimitiveCreation {
                 }
             }
         }
-        ignore_status(a.stitch_and_orient(brep))?;
+        // fork c8f6a31 (WR-662): SER(pBrep->StitchAndOrient()).
+        let p = a.kernel(brep)?.fixes.sweep_statuses_pass_on;
+        ignore_status(passed_on(a.stitch_and_orient(brep), p)?)?;
         // not upstream (WR-442, #478, opt-in): a closed shell inside another is its cavity
         if a.kernel(brep)?.fixes.revolve_nested_shells_as_cavities {
             a.with_brep_mut(brep, |k, b, _, env| {
@@ -625,7 +648,9 @@ impl PrimitiveCreation {
             } else {
                 sweep.do_stitching = false;
                 sweep.do_sweep(a, &geometry, Some(brep), Some(region), &mut selected)?;
-                ignore_status(a.delete_primitive_faces(brep, &faces))?;
+                // fork c8f6a31 (WR-662): SER(sTI.DeleteFaces(aFaces)).
+                let p = a.kernel(brep)?.fixes.sweep_statuses_pass_on;
+                ignore_status(passed_on(a.delete_primitive_faces(brep, &faces), p)?)?;
                 a.stitch(brep, &mut sweep, tolerance, false)?;
             }
             copy_maps(self, brep, &mut sweep)?;

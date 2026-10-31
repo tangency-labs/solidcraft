@@ -27,7 +27,7 @@
 use crate::curve::curve::p7::{PropertyAnalysis, PropertyAnalysisOptions};
 use crate::curve::curve::{Curve, CurvePropertyType};
 use crate::curve::line::Line;
-use crate::error::{ignore_status, Result, SolidError};
+use crate::error::{ignore_status, passed_on, Result, SolidError};
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::extent1d::Extent1d;
 use crate::geom::solution_array::SolutionArray;
@@ -101,8 +101,11 @@ impl TranslationalSweepGeometry {
         let y = v.cross(x).unitize()?;
         x = y.cross(v).unitize()?;
         let mut frame = Axis2Placement::IDENTITY;
-        // SetCanonical's status is ignored upstream.
-        let _ = frame.set_canonical(point, x, y);
+        // SetCanonical's status is ignored upstream; the fork passes it on (c8f6a31).
+        let status = frame.set_canonical(point, x, y);
+        if self.base.statuses_pass_on {
+            status?;
+        }
         Ok(frame)
     }
 
@@ -162,7 +165,9 @@ impl TranslationalSweepGeometry {
         }
         let mut curve = original.copy(k)?;
         let mut ivl = edge::interval(b, e)?;
-        ignore_status(curve.trim(k, &mut ivl, TrimMode::Notify))?;
+        // fork c8f6a31 (WR-662): SER(pNewEdgeCurve->Trim(sIvl)).
+        let p = k.fixes.sweep_statuses_pass_on;
+        ignore_status(passed_on(curve.trim(k, &mut ivl, TrimMode::Notify), p)?)?;
         curve.transform(k, &self.sweep_transform(), None)?;
         Ok((curve, tol))
     }
@@ -205,14 +210,16 @@ impl TranslationalSweepGeometry {
             comb_points: Vec::new(),
             comb_vecs: Vec::new(),
         };
-        ignore_status(curve.global_property_analysis_into(
+        // fork c8f6a31 (WR-662): SER(crCurve.GlobalPropertyAnalysis(..)).
+        let analysis_status = curve.global_property_analysis_into(
             k,
             interval,
             CurvePropertyType::ParallelToVector,
             dist_tol,
             &options,
             &mut analysis,
-        ))?;
+        );
+        ignore_status(passed_on(analysis_status, k.fixes.sweep_statuses_pass_on)?)?;
         Ok(if analysis.solutions.is_empty() {
             SweepCheckType::Okay
         } else {

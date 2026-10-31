@@ -15,12 +15,13 @@
 //! path's box uses the B-spline override, as the typed path is a B-spline; for a
 //! line path that override evaluates the interval's end points, as
 //! `SmLine::CalculateBoundingBox` does (`SmLine.cpp:605-657`), so the box is the
-//! same. No recursion.
+//! same. With `Kernel::fixes.sweep_statuses_pass_on` (fork c8f6a31, WR-662) the
+//! trim, circle and box statuses are returned instead. No recursion.
 
 use super::PrimitiveCreationAccess;
 use crate::curve::curve::Curve;
 use crate::curve::ellipse::Ellipse;
-use crate::error::{ignore_status, ignored, Result, SolidError};
+use crate::error::{ignore_status, ignored, passed_on, Result, SolidError};
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent3d::Extent3d;
@@ -47,7 +48,9 @@ fn trimmed_edge_curve(
         .ok_or_else(|| SolidError::null_pointer(OP))?;
     let mut copy = curve.copy(k)?;
     let mut interval = crate::topology::edge::interval(source, edge.1)?;
-    ignore_status(copy.trim(k, &mut interval, TrimMode::Silent))?;
+    // fork c8f6a31 (WR-662): SER(pCrv->Trim(sInterval, FALSE)).
+    let p = k.fixes.sweep_statuses_pass_on;
+    ignore_status(passed_on(copy.trim(k, &mut interval, TrimMode::Silent), p)?)?;
     Ok(copy)
 }
 
@@ -184,23 +187,26 @@ impl PrimitiveCreation {
         // Get the Shape from the first pipe (its status is ignored upstream)
         let place = Axis2Placement::IDENTITY;
         let domain = Extent1d::from_min_max(0.0, 360.0);
-        let circle = ignored(Ellipse::create_canonical_circle(
-            a.kernel(brep)?,
-            &place,
-            radius,
-            Some(&domain),
-            None,
-        ))?;
+        // fork c8f6a31 (WR-662): SER(SmCircle::CreateCanonical(..)) and
+        // SER(pPathCurve->CalculateBoundingBox(..)).
+        let p = a.kernel(brep)?.fixes.sweep_statuses_pass_on;
+        let circle = ignored(passed_on(
+            Ellipse::create_canonical_circle(a.kernel(brep)?, &place, radius, Some(&domain), None),
+            p,
+        )?)?;
         let shape = vec![circle.map(Curve::from)];
 
         let mut bounds = Extent3d::new();
-        if let Some(boxes) = ignored(path.calculate_bounding_box(
-            &path.natural_interval(),
-            BoundingBoxRequest {
-                normal: true,
-                ..BoundingBoxRequest::default()
-            },
-        ))? {
+        if let Some(boxes) = ignored(passed_on(
+            path.calculate_bounding_box(
+                &path.natural_interval(),
+                BoundingBoxRequest {
+                    normal: true,
+                    ..BoundingBoxRequest::default()
+                },
+            ),
+            p,
+        )?)? {
             if let Some(normal) = boxes.normal {
                 bounds = normal;
             }

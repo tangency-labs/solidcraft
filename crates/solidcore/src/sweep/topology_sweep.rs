@@ -73,6 +73,9 @@ pub struct SweepGeometryCreation {
     pub make_analytics: bool,
     /// `m_dEps`: the tolerance of the base class.
     pub eps: f64,
+    /// `Kernel::fixes.sweep_statuses_pass_on` captured when the sweep is set up: the
+    /// creators' `SetCanonical` statuses are passed on (fork c8f6a31, WR-662).
+    pub statuses_pass_on: bool,
 }
 
 impl Default for SweepGeometryCreation {
@@ -89,6 +92,7 @@ impl SweepGeometryCreation {
         Self {
             make_analytics: true,
             eps,
+            statuses_pass_on: false,
         }
     }
 

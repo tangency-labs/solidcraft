@@ -501,6 +501,75 @@ mod tests {
         assert_eq!(m.tolerance(&k), zone_tol3d(&k, 0.0005));
     }
 
+    /// A curve that cannot be evaluated (an offset curve without base).
+    fn unevaluable() -> Curve {
+        Curve::from(crate::curve::offset_curve::OffsetCurve::empty())
+    }
+
+    fn kernel_pass_on(pass_on: bool) -> Kernel {
+        let mut k = Kernel::default();
+        k.fixes.ssi_proto_topology_statuses_pass_on = pass_on;
+        k
+    }
+
+    /// fork bcc6f01 (`sm_WhichPVToCombine`, `if (pOrigPE->Evaluate(..) != SM_SUCCESS)
+    /// return NULL`): the split point cannot be evaluated. Upstream compares the unset
+    /// point with the end proto vertices (here one at the unset position, which then
+    /// matches); the fork answers no proto vertex.
+    #[test]
+    fn which_pv_to_combine_without_a_split_point_is_none() {
+        for pass_on in [false, true] {
+            let k = kernel_pass_on(pass_on);
+            let geo = Geo(vec![unevaluable()]);
+            let mut m = manager();
+            let ivl = Extent1d::from_min_max(0.0, 1.0);
+            let v0 = m.new_proto_vertex(Vec3::UNDEF, 1e-5).unwrap();
+            let v1 = m
+                .new_proto_vertex(Point3::new(1.0, 0.0, 0.0), 1e-5)
+                .unwrap();
+            let pe = m.new_proto_edge(&k, Some(v0), Some(v1), ivl).unwrap();
+            let ed = m
+                .insert_edge_definition(EdgeDefinition::new(
+                    Some(C0),
+                    ivl,
+                    R0,
+                    L0,
+                    1e-5,
+                    None,
+                    None,
+                    Some(pe),
+                ))
+                .unwrap();
+            m.proto_edge_mut(pe)
+                .unwrap()
+                .edge_definitions_mut()
+                .push(ed);
+            let pv = m.which_pv_to_combine(&k, &geo, pe, 0.5, None).unwrap();
+            assert_eq!(pv, if pass_on { None } else { Some(v0) });
+        }
+    }
+
+    /// fork bcc6f01 (`sm_IsInterior`, `sm_AreSameCurve`: "no value, no evidence"): the
+    /// first curve cannot be evaluated, so the fork shows neither an interior point nor
+    /// the same curve. Upstream compares unset points: `sm_IsInterior` also answers
+    /// `false` (coverage only), but the unset midpoint's drop onto the line succeeds
+    /// within tolerance and `sm_AreSameCurve` answers `true`.
+    #[test]
+    fn unevaluable_curve_is_not_interior_or_same() {
+        for pass_on in [false, true] {
+            let k = kernel_pass_on(pass_on);
+            let geo = Geo(vec![unevaluable(), line([0.0, 0.0, 0.0], [1.0, 0.0, 0.0])]);
+            let ivl = Extent1d::from_min_max(0.0, 1.0);
+            let c1 = H(1, ClassObjectKind::Curve);
+            assert!(!proto::is_interior(&k, &geo, Some(C0), &ivl, 0.5, 1e-5).unwrap());
+            // upstream drops the unset point onto the line and takes the curves for the
+            // same; the fork answers no
+            let same =
+                proto::are_same_curve(&k, &geo, Some(C0), &ivl, Some(c1), &ivl, 1e-5).unwrap();
+            assert_eq!(same, !pass_on);
+        }
+    }
+
     #[test]
     fn proto_edge_definitions_evaluate_and_combine() {
         let k = Kernel::default();

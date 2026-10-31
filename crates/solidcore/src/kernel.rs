@@ -482,7 +482,9 @@ pub struct UpstreamFixes {
     /// before consuming their outputs (#483). Off by default for pinned compatibility.
     pub primitive_path_curve_statuses: bool,
     /// Planar path sweeps propagate mandatory operation failures and delete their
-    /// owned temporary B-reps on failure (#483). Off by default for pinned compatibility.
+    /// owned temporary B-reps on failure (#483); the mitre's `BrepIntersect` and
+    /// `GlobalCurveSolve` searches are returned too, as the fork does (tangency-labs/smlib
+    /// c8f6a31; changed by #2009 group C, WR-662). Off by default for pinned compatibility.
     pub planar_path_sweep_statuses: bool,
     /// Fillet corners fail softly where a status upstream ignores would leave an unset
     /// value, as the fork does (tangency-labs/smlib 66b02de; #483, changed by #2009):
@@ -512,6 +514,29 @@ pub struct UpstreamFixes {
     /// instead of the operation carrying on and reporting success (WR-658, #2009 group A;
     /// tangency-labs/smlib 60a8a51, 4803d6d, e7ebc8d). Off by default for pinned parity.
     pub brep_edit_statuses_pass_on: bool,
+    /// Extrusions, revolutions, sweeps, lofts and the station sweeps (`SmPrimitiveCreation`,
+    /// `SmTopologySweep`, the translational and rotational sweep geometry and `SM_API`'s
+    /// primitive wrappers) pass on the statuses SMLib drops: a failed evaluation, copy,
+    /// transform, trim, reparameterization, knot or degree edit, face or edge construction,
+    /// stitch or orientation returns its error instead of the sweep carrying on with an
+    /// unset value and reporting success (WR-662, #2009 group C; tangency-labs/smlib
+    /// c8f6a31). Complements `primitive_path_curve_statuses`, `planar_path_sweep_statuses`
+    /// and `planar_path_profile_placement_statuses`. Off by default for pinned parity.
+    pub sweep_statuses_pass_on: bool,
+    /// Surface/surface intersection and proto-topology pass on the statuses SMLib drops;
+    /// where a helper answers a question it answers "no" when a point it compares cannot
+    /// be evaluated, instead of comparing unset values (`IsPointOnCurve`, `AddStartPoint`'s
+    /// tangent test, `sm_ComputeCurveType`, `sm_AreSameCurve`, `IsInteriorPoint`,
+    /// `sm_IsInterior`, `sm_AreOverlapping`, `sm_WhichPVToCombine`) (WR-662, #2009 group
+    /// C; tangency-labs/smlib bcc6f01). Off by default for pinned parity.
+    pub ssi_proto_topology_statuses_pass_on: bool,
+    /// Analytic `STEPInversion` (sphere, surface of revolution, so cone and cylinder) tells
+    /// its answers (off the surface, outside the sweep) apart from real failures, and the
+    /// cone and sphere intersection callers that read the location after a failed
+    /// inversion pass the failure on instead of reading "exterior" and dropping a point
+    /// or curve (WR-662, #2009 group C; tangency-labs/smlib dfc7cb6). Off by default for
+    /// pinned parity.
+    pub analytic_inversion_answers_apart: bool,
     /// The fillet executive, solvers, corners and geometry pass on the statuses SMLib
     /// drops: a failed solver load, orientation, list edit, copy, trim, interval edit,
     /// evaluation, knot edit or split-face update returns its error instead of the fillet

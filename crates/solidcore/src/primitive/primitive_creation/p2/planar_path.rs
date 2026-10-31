@@ -16,9 +16,10 @@
 //! With `planar_path_sweep_statuses` (#483), mandatory statuses propagate and every
 //! owned temporary B-rep is released on failure. Successful prefix edits are kept;
 //! the caller's context body and a transferred result are never released. The path
-//! plane normal is computed only at a mitre (a straight path needs none). Failed
-//! optional intersection searches can still fall back to the independently built
-//! cutting line. Off by default, failed B-reps stay with the access, as upstream.
+//! plane normal is computed only at a mitre (a straight path needs none). A failed
+//! mitre intersection search (`BrepIntersect`, `GlobalCurveSolve`) is returned too,
+//! as the SolidCraft fork does (tangency-labs/smlib c8f6a31, #2009; earlier the
+//! search fell back to the independently built cutting line). Off by default, failed B-reps stay with the access, as upstream.
 //! Not upstream
 //! (WR-400, tangency-labs/solidcore#837, opt-in `Kernel::fixes.planar_path_uncapped_open_profiles`):
 //! `SweepProfilesAlongPath` asks for caps only for a profile that closes. No recursion.
@@ -26,7 +27,7 @@
 use super::{as_bspline, PrimitiveCreationAccess};
 use crate::curve::curve::p9::CurveSolveOptions;
 use crate::curve::curve::Curve;
-use crate::error::{checked_or_ignored, ignored, native_failure, Result, SolidError};
+use crate::error::{checked_or_ignored, ignored, Result, SolidError};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent3d::Extent3d;
 use crate::geom::geom_utility::p2::ContinuityType;
@@ -500,8 +501,9 @@ impl PrimitiveCreation {
                                 k, before, after, tol, 2.0, false,
                             )
                         });
+                    // fork c8f6a31: SER(pBrepBefore->BrepIntersect(..)).
                     let intersections = if checked {
-                        native_failure(intersection_search)?
+                        Some(intersection_search?)
                     } else {
                         ignored(intersection_search)?
                     }
@@ -535,8 +537,9 @@ impl PrimitiveCreation {
                                 &options,
                                 SolutionRequested::Single,
                             );
+                            // fork c8f6a31: SER(pTempCuttingCrv->GlobalCurveSolve(..)).
                             let solutions = if checked {
-                                native_failure(search)?
+                                Some(search?)
                             } else {
                                 ignored(search)?
                             };

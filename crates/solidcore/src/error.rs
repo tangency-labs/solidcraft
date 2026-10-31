@@ -97,6 +97,18 @@ pub(crate) fn passed_on<T>(r: Result<T>, pass_on: bool) -> Result<Result<T>> {
     }
 }
 
+/// [`ignore_status`] of a call whose status SMLib drops and the fork passes on: with
+/// `pass_on` its error is returned, without it the status is ignored as upstream.
+pub(crate) fn ignore_or_pass_on<T>(r: Result<T>, pass_on: bool) -> Result<()> {
+    ignore_status(passed_on(r, pass_on)?)
+}
+
+/// [`ignored`] of a call whose status SMLib drops and the fork passes on: with
+/// `pass_on` its error is returned, without it the value is `None` as upstream.
+pub(crate) fn ignored_or_pass_on<T>(r: Result<T>, pass_on: bool) -> Result<Option<T>> {
+    ignored(passed_on(r, pass_on)?)
+}
+
 /// A status a port helper hands back in its value (`None` for `SM_SUCCESS`) where SMLib
 /// drops it and the fork passes it on (`SER(...)`): returned as the error with
 /// `pass_on`, dropped without.

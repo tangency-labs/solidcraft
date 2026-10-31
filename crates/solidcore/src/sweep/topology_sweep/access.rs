@@ -489,7 +489,12 @@ pub trait SweepAccess {
             )
         })?;
         hcr.set_hcr_for_silhouettes(silhouettes);
-        crate::error::ignore_status(hcr.compute_global_visibility(self.kernel_mut(brep)?))?;
+        let k = self.kernel_mut(brep)?;
+        let p = k.fixes.sweep_statuses_pass_on; // fork c8f6a31 (WR-662)
+        crate::error::ignore_status(crate::error::passed_on(
+            hcr.compute_global_visibility(k),
+            p,
+        )?)?;
         Ok(SweepScene {
             brep: self.retain_hcr(brep, hcr)?,
         })

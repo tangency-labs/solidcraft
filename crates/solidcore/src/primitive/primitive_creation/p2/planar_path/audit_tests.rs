@@ -210,6 +210,10 @@ impl PrimitiveAccess for FaultAccess<'_> {
     fn axis_inside_face(&mut self, arg1: FaceRef, arg2: &Curve) -> Result<bool> {
         self.inner.axis_inside_face(arg1, arg2)
     }
+    fn stitch_and_orient(&mut self, b: BrepId) -> Result<()> {
+        self.check("stitch_and_orient")?;
+        self.inner.stitch_and_orient(b)
+    }
 }
 impl PrimitiveCreationAccess for FaultAccess<'_> {
     fn copy_faces_into(&mut self, arg1: BrepId, arg2: &[FaceId], arg3: BrepId) -> Result<()> {
@@ -434,7 +438,7 @@ fn audit_483_union_failure_releases_every_owned_piece() {
 }
 
 #[test]
-fn audit_483_optional_mitre_search_uses_independent_cutting_line() {
+fn audit_483_failed_mitre_search_is_returned() {
     let profile = BSplineCurve::create_circle_segment(
         3,
         &Axis2Placement::IDENTITY,
@@ -473,11 +477,102 @@ fn audit_483_optional_mitre_search_uses_independent_cutting_line() {
         true,
     );
     assert_eq!(result.unwrap_err(), injected(), "{:?}", a.calls);
-    // The failed optional intersection search is discarded. A valid independently
-    // built cutting curve reaches trimming, whose injected failure ends the sweep.
-    assert!(a.calls.contains(&"with_breps_mut"));
-    assert_eq!(a.calls.last(), Some(&"project_and_trim"));
+    // fork c8f6a31 (`CreateSweepAlongPlanarPath`, `SER(pBrepBefore->BrepIntersect(..))`,
+    // #2009): the failed mitre intersection search is returned, before any trim.
+    assert_eq!(a.calls.last(), Some(&"with_breps_mut"));
+    assert!(!a.calls.contains(&"project_and_trim"));
     for &id in &a.allocated {
         assert!(a.brep(id).is_err());
     }
+}
+
+/// A closed unit square of lines in the XY plane (the taper profile).
+fn square() -> Vec<Curve> {
+    let c = [Vec3::ZERO, Vec3::X, Vec3::X + Vec3::Y, Vec3::Y, Vec3::ZERO];
+    c.windows(2)
+        .map(|w| {
+            BSplineCurve::create_line_segment(3, w[0], w[1])
+                .unwrap()
+                .into()
+        })
+        .collect()
+}
+
+fn taper_with(pass_on: bool, fail: (&'static str, usize)) -> (Result<()>, Vec<&'static str>) {
+    let mut k = Kernel::default();
+    k.fixes.sweep_statuses_pass_on = pass_on;
+    let mut a = FaultAccess::new(&mut k, fail);
+    let region = a.infinite_region(PrimitiveModel::MAIN).unwrap();
+    a.calls.clear();
+    let mut primitive = PrimitiveCreation::new(Some(region), 0, false);
+    let mut normal = Vec3::Z;
+    let r = primitive.create_taper_extrude(
+        &mut a,
+        PrimitiveModel::MAIN,
+        square(),
+        1.0,
+        5.0,
+        3,
+        &mut normal,
+        crate::curve::composite_curve::OffsetCornerType::LinearExtension,
+    );
+    (r, a.calls)
+}
+
+/// fork c8f6a31 (`CreateTaperExtrude`, `SER(pBrep->StitchFaces(dBrepTol, ..))`, #2009):
+/// the scratch B-rep's failed stitch is returned with `sweep_statuses_pass_on`;
+/// upstream goes on with the unstitched faces.
+#[test]
+fn issue_2009_taper_passes_on_a_failed_scratch_stitch() {
+    let (off, calls) = taper_with(false, ("stitch_faces", 1));
+    assert!(calls.contains(&"stitch_faces"), "{calls:?}");
+    assert_ne!(off.err(), Some(injected()));
+    let (on, _) = taper_with(true, ("stitch_faces", 1));
+    assert_eq!(on.unwrap_err(), injected());
+}
+
+/// fork c8f6a31 (`CreateTaperExtrude`, `SER(pBrep->StitchAndOrient())`, #2009): the
+/// final stitch-and-orient's failure is returned with `sweep_statuses_pass_on`;
+/// upstream reports success.
+#[test]
+fn issue_2009_taper_passes_on_a_failed_stitch_and_orient() {
+    let (off, calls) = taper_with(false, ("stitch_and_orient", 1));
+    assert!(calls.contains(&"stitch_and_orient"), "{calls:?}");
+    assert!(off.is_ok(), "{off:?}");
+    let (on, _) = taper_with(true, ("stitch_and_orient", 1));
+    assert_eq!(on.unwrap_err(), injected());
+}
+
+/// fork c8f6a31 (`CreatePipeSweep`, `SER(SmCircle::CreateCanonical(..))`, #2009): a pipe
+/// radius the circle refuses (zero) is that circle's error with
+/// `sweep_statuses_pass_on`; upstream sweeps the null profile it leaves.
+#[test]
+fn issue_2009_pipe_sweep_passes_on_a_failed_circle() {
+    let path = BSplineCurve::create_line_segment(3, Vec3::ZERO, Vec3::Z * 5.0).unwrap();
+    let circle_error = |pass_on: bool| {
+        let mut k = Kernel::default();
+        k.fixes.sweep_statuses_pass_on = pass_on;
+        let mut a = FaultAccess::new(&mut k, ("", 0));
+        let region = a.infinite_region(PrimitiveModel::MAIN).unwrap();
+        let mut primitive = PrimitiveCreation::new(Some(region), 0, false);
+        let (mut s, mut d, mut e) = (Vec::new(), Vec::new(), Vec::new());
+        let r = primitive.create_pipe_sweep(
+            &mut a,
+            PrimitiveModel::MAIN,
+            0.0,
+            &path,
+            0.0,
+            true,
+            false,
+            &mut s,
+            &mut d,
+            &mut e,
+        );
+        matches!(
+            r,
+            Err(SolidError::Upstream { operation, .. }) if operation.contains("ellipse")
+        )
+    };
+    assert!(!circle_error(false));
+    assert!(circle_error(true));
 }

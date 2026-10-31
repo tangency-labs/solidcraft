@@ -242,6 +242,7 @@ fn rust(i: &Input) -> Result<Vec<f64>> {
         base: SweepGeometryCreation {
             eps: i.epsilon,
             make_analytics: i.analytics,
+            statuses_pass_on: false,
         },
     };
     let mut o = vec![0.];

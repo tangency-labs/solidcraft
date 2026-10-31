@@ -7,7 +7,7 @@
 //! (#374), including the two entries of a closed edge. Upstream removes only one.
 
 use crate::curve::curve::p2::Curve;
-use crate::error::{ignore_status, ignored, EntityRef, Result, SolidError};
+use crate::error::{ignore_status, ignored, passed_on, EntityRef, Result, SolidError};
 use crate::geom::attribute::ObjectKey;
 use crate::geom::extent1d::Extent1d;
 use crate::geom::global_solver::{SolutionRequested, SolverOperation};
@@ -319,6 +319,17 @@ fn eval_point(k: &Kernel, curve: &Curve, t: f64) -> Result<Point3> {
     Ok(ignored(curve.evaluate_point(k, t))?.unwrap_or(Vec3::UNDEF))
 }
 
+/// [`eval_point`] under `ssi_proto_topology_statuses_pass_on` (fork bcc6f01): `None` for a
+/// point that cannot be evaluated, where the answer is then "no" ("no value, no
+/// evidence"); without the flag the unset point as upstream.
+fn eval_point_or_no(k: &Kernel, curve: &Curve, t: f64) -> Result<Option<Point3>> {
+    match ignored(curve.evaluate_point(k, t))? {
+        Some(p) => Ok(Some(p)),
+        None if k.fixes.ssi_proto_topology_statuses_pass_on => Ok(None),
+        None => Ok(Some(Vec3::UNDEF)),
+    }
+}
+
 // ---- static helpers ------------------------------------------------------------------
 
 /// Whether a classification of type `t` can be imprinted (`sm_CanImprint`): regions,
@@ -476,7 +487,9 @@ pub fn are_same_curve<O: Copy + PartialEq>(
     let guess = ivl2.mid();
 
     // Crv1 mid point
-    let mid_pt1 = eval_point(k, curve_of(geometry, crv1)?, param1)?;
+    let Some(mid_pt1) = eval_point_or_no(k, curve_of(geometry, crv1)?, param1)? else {
+        return Ok(false);
+    };
 
     // Drop Crv1 mid point to Crv2 - get drop distance
     let dropped = ignored(curve_of(geometry, crv2)?.drop_point(
@@ -612,9 +625,13 @@ pub fn is_interior<O: Copy>(
     // next: Check 3d Pts. if this param's Pt3d is within ZoneTol3d dist of a crv
     // endpoint it on the boundary not the interior
     let c = curve_of(geometry, curve)?;
-    let crv_pt = eval_point(k, c, param)?;
-    let start_pt = eval_point(k, c, domain.min())?;
-    let end_pt = eval_point(k, c, domain.max())?;
+    let (Some(crv_pt), Some(start_pt), Some(end_pt)) = (
+        eval_point_or_no(k, c, param)?,
+        eval_point_or_no(k, c, domain.min())?,
+        eval_point_or_no(k, c, domain.max())?,
+    ) else {
+        return Ok(false);
+    };
 
     if crv_pt.closer_than(zone_tol_3d, start_pt) {
         return Ok(false);
@@ -683,7 +700,10 @@ pub fn are_overlapping<O: ClassObject>(
 
     // Drop ED->Curve Start and End Pts to CI->CurveClassification->Curve
     {
-        let start_pt = eval_point(k, curve_of(geometry, ed_curve)?, ed_domain.min())?;
+        let Some(start_pt) = eval_point_or_no(k, curve_of(geometry, ed_curve)?, ed_domain.min())?
+        else {
+            return Ok(false);
+        };
         if drop_is_interior(
             k,
             geometry,
@@ -696,7 +716,10 @@ pub fn are_overlapping<O: ClassObject>(
             return Ok(true);
         }
 
-        let end_pt = eval_point(k, curve_of(geometry, ed_curve)?, ed_domain.max())?;
+        let Some(end_pt) = eval_point_or_no(k, curve_of(geometry, ed_curve)?, ed_domain.max())?
+        else {
+            return Ok(false);
+        };
         if drop_is_interior(
             k,
             geometry,
@@ -712,7 +735,10 @@ pub fn are_overlapping<O: ClassObject>(
 
     // Drop CI->Curve->EndPts to ED->Curve
     {
-        let start_pt = eval_point(k, curve_of(geometry, ci_curve)?, ci_domain.min())?;
+        let Some(start_pt) = eval_point_or_no(k, curve_of(geometry, ci_curve)?, ci_domain.min())?
+        else {
+            return Ok(false);
+        };
         if drop_is_interior(
             k,
             geometry,
@@ -725,7 +751,10 @@ pub fn are_overlapping<O: ClassObject>(
             return Ok(true);
         }
 
-        let end_pt = eval_point(k, curve_of(geometry, ci_curve)?, ci_domain.max())?;
+        let Some(end_pt) = eval_point_or_no(k, curve_of(geometry, ci_curve)?, ci_domain.max())?
+        else {
+            return Ok(false);
+        };
         if drop_is_interior(
             k,
             geometry,
@@ -1502,11 +1531,13 @@ impl<O: ClassObject> EdgeDefinition<O> {
         min: f64,
         max: f64,
     ) -> Result<()> {
+        // fork bcc6f01: returns the reversal's and the interval's statuses
+        let pass = k.fixes.ssi_proto_topology_statuses_pass_on;
         if min <= max {
-            ignore_status(self.xsect_interval.set_min_max(min, max))?;
+            ignore_status(passed_on(self.xsect_interval.set_min_max(min, max), pass)?)?;
         } else {
-            ignore_soft(self.reverse_orientation(k, geometry))?;
-            ignore_status(self.xsect_interval.set_min_max(max, min))?;
+            ignore_soft(passed_on(self.reverse_orientation(k, geometry), pass)?)?;
+            ignore_status(passed_on(self.xsect_interval.set_min_max(max, min), pass)?)?;
         }
         Ok(())
     }
@@ -1580,7 +1611,20 @@ impl<O: ClassObject> EdgeDefinition<O> {
         };
         let mut param = guess;
 
-        let end_pos = self.end_position(k, geometry, at_start)?;
+        let end_pos = if k.fixes.ssi_proto_topology_statuses_pass_on {
+            // fork bcc6f01: no end position, no evidence
+            let param = if at_start {
+                self.xsect_interval.min()
+            } else {
+                self.xsect_interval.max()
+            };
+            match eval_point_or_no(k, curve_of(geometry, self.xsect_curve_3d)?, param)? {
+                Some(p) => p,
+                None => return Ok((false, guess)),
+            }
+        } else {
+            self.end_position(k, geometry, at_start)?
+        };
         let dist = position.distance(end_pos);
         if dist < tol {
             return Ok((false, param));
@@ -1624,6 +1668,8 @@ impl<O: ClassObject> EdgeDefinition<O> {
         let edge_pt = match self.evaluate(k, geometry, param, true, false) {
             Ok((Some(p), _)) => p,
             Err(e) if e.is_unported() => return Err(e),
+            // fork bcc6f01: no value, no evidence
+            Err(_) if k.fixes.ssi_proto_topology_statuses_pass_on => return Ok((false, param)),
             _ => Vec3::UNDEF,
         };
         let dist = edge_pt.distance(end_pos);
@@ -3536,7 +3582,11 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
 
         // When the ProtoVertex is Edgeless and XSects a ProtoEdge - remove it
         if p.proto_edges.is_empty() {
-            let _ = self.remove_proto_vertex(pv);
+            let removed = self.remove_proto_vertex(pv);
+            // fork bcc6f01: a vertex it could not remove was not removed
+            if removed.is_err() && k.fixes.ssi_proto_topology_statuses_pass_on {
+                return Ok(false);
+            }
             return Ok(true);
         }
         Ok(false)
@@ -3578,6 +3628,8 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
                     | SolidError::InvalidInput { .. }
                     | SolidError::PortInvariant { .. }),
                 ) => return Err(e),
+                // fork bcc6f01: no value, no evidence
+                Err(_) if k.fixes.ssi_proto_topology_statuses_pass_on => return Ok(None),
                 _ => Vec3::UNDEF,
             };
 

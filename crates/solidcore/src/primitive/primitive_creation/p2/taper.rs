@@ -18,7 +18,8 @@
 //! map attributes travel with their curves through the chain and gap steps by
 //! their input indices, and sit in the access's attribute store on faces. An
 //! analytic offset continues as its B-spline after its ruled surface is built.
-//! Ignored statuses keep their outputs. No recursion. SolidCraft changes
+//! Ignored statuses keep their outputs; with `Kernel::fixes.sweep_statuses_pass_on`
+//! (fork c8f6a31, WR-662) the ones the fork wraps in `SER` are returned. No recursion. SolidCraft changes
 //! (tangency-labs/smlib 54148db, e8f23e0, in `taper_walls`):
 //! [`OffsetCornerType::CurveExtension`] and, under opt-in
 //! `fixes.taper_tangent_corner_planes` (WR-521), linear-extension corners of a profile
@@ -36,7 +37,7 @@ use crate::curve::curve::p3::{compute_crvs_normal, crvs_fix_gaps};
 use crate::curve::curve::p4::fix_chain_curves_list;
 use crate::curve::curve::p5::crvs_cleanup;
 use crate::curve::curve::Curve;
-use crate::error::{ignore_status, ignored, Result, SolidError};
+use crate::error::{ignore_status, ignored, passed_on, Result, SolidError};
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::extent1d::Extent1d;
 use crate::geom::geom_utility::p2::ContinuityType;
@@ -258,6 +259,8 @@ fn taper(
     let approx_tol = 0.001 * a.brep(brep)?.tolerance();
     let same_point_tol = 10.0 * approx_tol;
     a.set_brep_tolerance(scratch, brep_tol)?;
+    // fork c8f6a31 (WR-662): the SER sites of CreateTaperExtrude.
+    let p = a.kernel(brep)?.fixes.sweep_statuses_pass_on;
 
     // Enforce head-tail order for input curves
     let mut input = fix_chain_curves_list(
@@ -270,7 +273,8 @@ fn taper(
 
     if normal.length_squared() < 0.00001 {
         // compute the normal from curve sample points (zeroed before it can fail)
-        *normal = ignored(compute_crvs_normal(a.kernel(brep)?, &input))?.unwrap_or(Vec3::ZERO);
+        *normal = ignored(passed_on(compute_crvs_normal(a.kernel(brep)?, &input), p)?)?
+            .unwrap_or(Vec3::ZERO);
         // snap curves to Z axis when close
         if normal.z > 0.98 {
             normal.x = 0.0;
@@ -284,13 +288,15 @@ fn taper(
         }
     } else {
         // check that the curves order conforms to the specified input normal
-        let computed = ignored(compute_crvs_normal(a.kernel(brep)?, &input))?.unwrap_or(Vec3::ZERO);
-        let angle = ignored(computed.angle_between(*normal))?.unwrap_or(0.0);
+        let computed = ignored(passed_on(compute_crvs_normal(a.kernel(brep)?, &input), p)?)?
+            .unwrap_or(Vec3::ZERO);
+        let angle = ignored(passed_on(computed.angle_between(*normal), p)?)?.unwrap_or(0.0);
         if (angle - PI).abs() < 0.0001 {
             // reverse all the curves, then rechain them
             for curve in &mut input {
                 let interval = curve.natural_interval();
-                ignore_status(curve.reverse_parameterization(a.kernel(brep)?, &interval))?;
+                let reversed = curve.reverse_parameterization(a.kernel(brep)?, &interval);
+                ignore_status(passed_on(reversed, p)?)?;
             }
             input = fix_chain_curves_list(
                 a.kernel(brep)?,
@@ -326,22 +332,28 @@ fn taper(
         let bspline = as_bspline(curve)
             .ok_or_else(|| SolidError::invalid_input(OP, "taper curve is not a B-spline"))?;
         split.extend(
-            ignored(bspline.subdivide_at_discontinuity(
-                a.kernel(brep)?,
-                ContinuityType::G1,
-                ANG_TOL_DEG,
-            ))?
+            ignored(passed_on(
+                bspline.subdivide_at_discontinuity(
+                    a.kernel(brep)?,
+                    ContinuityType::G1,
+                    ANG_TOL_DEG,
+                ),
+                p,
+            )?)?
             .unwrap_or_default(),
         );
     }
 
     // connect the split curves into composite curves
-    let built = ignored(CompositeCurve::build_composites_from_curves(
-        a.kernel(brep)?,
-        split.iter().map(|c| Curve::from(c.clone())).collect(),
-        same_point_tol,
-        0.0,
-    ))?
+    let built = ignored(passed_on(
+        CompositeCurve::build_composites_from_curves(
+            a.kernel(brep)?,
+            split.iter().map(|c| Curve::from(c.clone())).collect(),
+            same_point_tol,
+            0.0,
+        ),
+        p,
+    )?)?
     .ok_or_else(|| SolidError::sm_err(OP))?;
     // expect one composite curve
     let mut composite = built
@@ -428,9 +440,11 @@ fn taper(
             offset_distance: offset,
             match_parameterization: false,
         };
-        let trimmed =
-            ignored(composite.create_trimmed_offsets(a.kernel(brep)?, direction, &params))?
-                .unwrap_or_default();
+        let trimmed = ignored(passed_on(
+            composite.create_trimmed_offsets(a.kernel(brep)?, direction, &params),
+            p,
+        )?)?
+        .unwrap_or_default();
 
         let rule_options = |surface_intersection| OffsetRuleOptions {
             tolerance: zone_tol,
@@ -488,7 +502,8 @@ fn taper(
                         // (a B-spline surface just made: never lazy)
                         let domain = surface.natural_uv_domain_if_built();
                         let mut face = None;
-                        ignore_status(a.surface_face(scratch, surface, domain, &mut face))?;
+                        let made = a.surface_face(scratch, surface, domain, &mut face);
+                        ignore_status(passed_on(made, p)?)?;
                     }
                 }
             }
@@ -499,7 +514,7 @@ fn taper(
             }
 
             // Stitch the potential result to get the topology
-            ignore_status(a.stitch_faces(scratch, brep_tol))?;
+            ignore_status(passed_on(a.stitch_faces(scratch, brep_tol), p)?)?;
 
             // Each face should be lamina along input curve and offset curve, manifold otherwise
             for face in a.faces(scratch)? {
@@ -530,7 +545,7 @@ fn taper(
             result?;
         } else {
             let faces = a.faces(scratch)?;
-            ignore_status(a.copy_faces_into(scratch, &faces, brep))?;
+            ignore_status(passed_on(a.copy_faces_into(scratch, &faces, brep), p)?)?;
         }
     } // end the offset method
 
@@ -569,8 +584,8 @@ fn taper(
     }
 
     // clean up the Brep
-    ignore_status(a.shrink_geometry(brep))?;
-    ignore_status(a.stitch_and_orient(brep))?;
+    ignore_status(passed_on(a.shrink_geometry(brep), p)?)?;
+    ignore_status(passed_on(a.stitch_and_orient(brep), p)?)?;
     Ok(None)
 }
 
@@ -596,15 +611,20 @@ fn surface_intersection_method(
     a.set_brep_tolerance(intersections, brep_tol)?;
 
     // offset the composite curve without trimming
+    // fork c8f6a31 (WR-662): the SER sites of CreateTaperExtrude's fallback.
+    let p = a.kernel(brep)?.fixes.sweep_statuses_pass_on;
     sync_generators(composite, &state.generators);
-    let untrimmed = ignored(composite.create_trimmed_offsets(
-        a.kernel(brep)?,
-        direction,
-        &OffsetParams {
-            trim_results: false,
-            ..params
-        },
-    ))?
+    let untrimmed = ignored(passed_on(
+        composite.create_trimmed_offsets(
+            a.kernel(brep)?,
+            direction,
+            &OffsetParams {
+                trim_results: false,
+                ..params
+            },
+        ),
+        p,
+    )?)?
     .unwrap_or_default();
     if untrimmed.is_empty() {
         return Err(SolidError::sm_err(OP));
@@ -629,7 +649,8 @@ fn surface_intersection_method(
                 // (a B-spline surface just made: never lazy)
                 let domain = surface.natural_uv_domain_if_built();
                 let mut face = None;
-                ignore_status(a.surface_face(surfaces, surface, domain, &mut face))?;
+                let made = a.surface_face(surfaces, surface, domain, &mut face);
+                ignore_status(passed_on(made, p)?)?;
                 // the ruled surface carries its offset map
                 if let (Some(face), Some(map)) = (face, map) {
                     a.attach_offset_map((surfaces, face), map)?;
@@ -680,13 +701,14 @@ fn surface_intersection_method(
         if !(corner_offset && (connect_start || connect_end))
             && !(!corner_offset && (connect_start && connect_end))
         {
-            ignore_status(a.delete_face_and_free_topology((intersections, face)))?;
+            let deleted = a.delete_face_and_free_topology((intersections, face));
+            ignore_status(passed_on(deleted, p)?)?;
         }
     }
 
     // Boolean new extruded face to the original Brep
     a.with_merge(brep, brep, intersections, brep_tol, 0.0, |a, merge| {
-        ignore_status(a.union(merge))
+        ignore_status(passed_on(a.union(merge), p)?)
     })
 }
 

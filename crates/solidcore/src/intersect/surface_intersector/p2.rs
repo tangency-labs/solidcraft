@@ -59,7 +59,7 @@ use core::cmp::Ordering;
 use crate::blend::fillet_standard_solver::p1::FilletLaw;
 use crate::curve::curve::p8::CurveIntersectOptions;
 use crate::curve::curve::Curve;
-use crate::error::{Result, SolidError};
+use crate::error::{passed_on, Result, SolidError};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
 use crate::geom::extent3d::Extent3d;
@@ -420,20 +420,14 @@ impl SurfaceIntersector<'_> {
                             // get endPoint SurfaceValues (statuses ignored)
                             let mut start_pnt = TsectPnt::new();
                             let mut end_pnt = TsectPnt::new();
-                            ignored(self.compute_point_values(
-                                k,
-                                [s0, s1],
-                                &mut start_pnt,
-                                None,
-                                None,
-                            ))?;
-                            ignored(self.compute_point_values(
-                                k,
-                                [e0, e1],
-                                &mut end_pnt,
-                                None,
-                                None,
-                            ))?;
+                            ignored(passed_on(
+                                self.compute_point_values(k, [s0, s1], &mut start_pnt, None, None),
+                                k.fixes.ssi_proto_topology_statuses_pass_on,
+                            )?)?;
+                            ignored(passed_on(
+                                self.compute_point_values(k, [e0, e1], &mut end_pnt, None, None),
+                                k.fixes.ssi_proto_topology_statuses_pass_on,
+                            )?)?;
 
                             // classify IntersectionCurve from its endPoint classifications
                             let ty = if start_pnt.point_type == IntersectionPointType::Coincidence
