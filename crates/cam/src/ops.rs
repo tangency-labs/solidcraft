@@ -71,7 +71,7 @@ pub struct Cut {
 }
 
 impl Cut {
-    fn validate(&self) -> Result<()> {
+    pub(crate) fn validate(&self) -> Result<()> {
         self.heights.validate()?;
         self.feeds.validate()?;
         if !(self.stepdown > 0.0) || !self.stepdown.is_finite() {
@@ -81,7 +81,7 @@ impl Cut {
     }
 
     /// Depth passes from the top down to the bottom, evenly spaced and at most a stepdown apart.
-    fn levels(&self) -> Result<Vec<f64>> {
+    pub(crate) fn levels(&self) -> Result<Vec<f64>> {
         let (top, bottom) = (self.heights.top, self.heights.bottom);
         let n = ((top - bottom) / self.stepdown - 1e-9).ceil().max(1.0);
         if !(n <= MAX_LEVELS as f64) {

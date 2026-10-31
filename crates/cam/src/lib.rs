@@ -13,6 +13,7 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 #![forbid(unsafe_code)]
 
+mod adaptive;
 mod check;
 mod gcode;
 mod offset;
@@ -23,6 +24,7 @@ mod post;
 mod readback;
 mod tool;
 
+pub use adaptive::{AdaptiveParams, adaptive};
 pub use check::verify;
 pub use gcode::{Operation, Program, emit, parse, work_offset_code};
 pub use offset::offset_regions;
