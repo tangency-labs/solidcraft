@@ -7,7 +7,10 @@
 //! filleted on every edge (`SmApiCircularFillet` / `circular_fillet`). The round trip
 //! (upstream `TestSmImportExport`) writes each side's own box to a file of its own
 //! (`SmApiWriteBrepToFile` / `BrepData::from_brep` and `write_to_file_with_nurbs`) and
-//! reads it back, ASCII or binary. No C++-built geometry reaches the Rust side. Compared:
+//! reads it back, ASCII or binary. Foreign-naming fixtures use `write_brep_to_file`
+//! with caller keys independent of the box's geometry owners (PR #1832). C++ owns
+//! geometry by object address and needs no alternate naming. No C++-built geometry
+//! reaches the Rust side. Compared:
 //! the status (`status`) and the record (`record`, layout in
 //! `solidcore_ffi::units::topology_api_files`). The native side runs in a fresh child
 //! process. Inputs the native build or the FFI guard refuse are `rejected`.
@@ -149,6 +152,9 @@ enum Op {
         size: [f64; 3],
         ascii: bool,
         rebuild: bool,
+        /// Name topology independently of its geometry owners (PR #1832).
+        #[serde(default)]
+        foreign_naming: bool,
     },
     /// `SmApiWriteBrepToFile(brep, file, ascii)`, the file compared byte for byte.
     WriteBytes { brep: WriteSrc, ascii: bool },
@@ -253,6 +259,7 @@ fn native_args(op: &Op, case: &str) -> Result<(u8, String, [f64; NARGS]), Harnes
             size,
             ascii,
             rebuild,
+            ..
         } => {
             a[1] = flag(*ascii);
             a[2] = flag(*rebuild);
@@ -556,12 +563,21 @@ fn part_record(k: &mut Kernel, data: Option<Vec<u8>>, prefill: u8) -> SolidResul
 
 /// The contents of `b` written by `SmBrep::WriteToFile(name, type, TRUE, FALSE)`:
 /// `BrepData::from_brep`, then `write_to_file_with_nurbs` (as `corpus.parity` writes).
-fn write_bytes(k: &Kernel, b: &Brep, file_type: FileType) -> SolidResult<Vec<u8>> {
+fn write_bytes(
+    k: &Kernel,
+    b: &Brep,
+    file_type: FileType,
+    foreign_naming: bool,
+) -> SolidResult<Vec<u8>> {
     let attributes = AttributeStore::default();
     let records = NotifyRecords::new();
+    // Foreign caller keys deliberately bypass the geometry-owner substitution below.
     // `FromBrep` keeps the surfaces and curves their faces and edges own: a face's (an
     // edge's) identity is the owner its geometry records under the box's own naming
     let key_of = |e: EntityRef| -> ObjectRef {
+        if foreign_naming {
+            return write_file_key(e);
+        }
         let owner = match e {
             EntityRef::Face(f) => b.face(f).ok().and_then(|x| x.surface.as_ref()?.owner()),
             EntityRef::Edge(x) => b.edge(x).ok().and_then(|y| y.curve.as_ref()?.owner()),
@@ -577,6 +593,9 @@ fn write_bytes(k: &Kernel, b: &Brep, file_type: FileType) -> SolidResult<Vec<u8>
         uv_curve_key: &|_: EdgeuseId| ObjectKey(0),
         surface_key: &|_: FaceId| ObjectKey(0),
     };
+    if foreign_naming {
+        return api_files::write_brep_to_file(k, Some(b), &env, file_type == FileType::Ascii);
+    }
     let mut all = Vec::new();
     let mut data = BrepData::from_brep(b, &env, &mut all)?;
     data.write_to_file_with_nurbs(k, file_type)
@@ -649,6 +668,7 @@ fn rust(op: &Op) -> Result<Output, HarnessError> {
             size,
             ascii,
             rebuild,
+            foreign_naming,
         } => {
             let file_type = if *ascii {
                 FileType::Ascii
@@ -656,7 +676,7 @@ fn rust(op: &Op) -> Result<Output, HarnessError> {
                 FileType::Binary
             };
             let bytes = match build_box(&mut k, *size, 0.0)
-                .and_then(|b| write_bytes(&k, &b, file_type))
+                .and_then(|b| write_bytes(&k, &b, file_type, *foreign_naming))
             {
                 Ok(bytes) => bytes,
                 Err(e) => {
@@ -1145,6 +1165,7 @@ impl UnitDiff for Runner {
                 size,
                 ascii: rng.chance(0.5),
                 rebuild: rng.chance(0.3),
+                foreign_naming: false,
             },
         };
         serde_json::to_value(op).ok()
