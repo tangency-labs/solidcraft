@@ -100,7 +100,7 @@ fn extend_to_cylinder(body: &Body, chosen: &BTreeSet<usize>, origin: Vec3, axis:
 
 /// `result`'s history over `[body, tool]` as one over `[body]`: the body's faces keep their
 /// origins, faces the sweep and boolean made come from nothing (they are named geometrically).
-fn keep_body_origins(result: Body, body: &Body) -> Body {
+pub(crate) fn keep_body_origins(result: Body, body: &Body) -> Body {
     let counts = crate::record::counts(&[body]);
     let Some(h) = result.history() else { return result.without_history() };
     let faces: Vec<FaceProv> = h
@@ -128,7 +128,7 @@ fn keep_body_origins(result: Body, body: &Body) -> Body {
         .iter()
         .map(|e| EdgeProv {
             faces: e.faces.clone(),
-            origins: e.origins.iter().cloned().filter(|o| matches!(o, EdgeOrigin::Edge { operand: 0, .. })).collect(),
+            origins: e.origins.iter().filter(|o| matches!(o, EdgeOrigin::Edge { operand: 0, .. })).cloned().collect(),
         })
         .collect();
     result.with_checked_history(Some(History { operands: 1, faces, edges }), &counts)
@@ -304,14 +304,22 @@ pub fn replace_faces(body: &Body, at: &[Vec3], tool: &SplitTool) -> Result<Body>
             });
         }
     };
-    match attempt(&grown, true)? {
+    // A grown body may now run into the target where the body already has a face on it (the
+    // swept cap reaching a taller part): that split cannot run, but the sweep can still meet
+    // the target without splitting.
+    let split_failure = match attempt(&grown, true) {
+        Ok(Some(result)) => return Ok(result),
+        Ok(None) => None,
+        Err(e) => Some(e),
+    };
+    match sweep(tool)? {
         Some(result) => Ok(result),
-        None => match sweep(tool)? {
-            Some(result) => Ok(result),
-            None => Err(match merge_failure {
-                Some(m) => fail(format!("the faces around the selection cannot close onto the target ({m})")),
+        None => Err(match merge_failure {
+            Some(m) => fail(format!("the faces around the selection cannot close onto the target ({m})")),
+            None => match split_failure {
+                Some(e) => fail(format!("the target cannot replace only the selected faces ({e})")),
                 None => fail("the target cannot replace only the selected faces while retaining their neighbours"),
-            }),
-        },
+            },
+        }),
     }
 }
