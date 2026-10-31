@@ -765,7 +765,14 @@ fn role_name(f: &Feature, before: &ModelState, ps: &[Vec3], ns: &[Vec3], fi: usi
         }
         FeatureKind::Revolve { sketch, axis, .. } => {
             let Some(ss) = before.sketch(sketch.0) else { return format!("F{fid}:face:{fi}") };
-            let Ok((o2, d2)) = crate::eval::revolve_axis(ss, axis, before, &|name| crate::eval::construction_axis_in(None, before, name, 0)) else {
+            let Ok((o2, d2)) =
+                crate::eval::revolve_axis(ss, axis, before, &|name| crate::eval::construction_axis_in(None, before, name, 0), &|owner, curve| {
+                    before
+                        .sketch(owner)
+                        .ok_or_else(|| crate::DocError::Unknown(format!("sketch {owner}")))
+                        .and_then(|os| crate::eval::sketch_line_world(os, curve))
+                })
+            else {
                 return format!("F{fid}:face:{fi}");
             };
             let (o, d) = (ss.plane.to_world(o2), (ss.plane.to_world(o2 + d2) - ss.plane.to_world(o2)).normalized().unwrap_or(Vec3::Z));
