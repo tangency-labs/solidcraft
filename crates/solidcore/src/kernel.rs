@@ -37,8 +37,6 @@ use core::cell::Cell;
 
 use crate::geom::context::Context;
 
-pub mod solidcraft;
-
 /// Geometric tolerances in model units (upstream defaults from `SmMath.h`).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Tolerances {
