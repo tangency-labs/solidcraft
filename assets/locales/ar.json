@@ -2142,7 +2142,7 @@
   "prefs.edges": "الحواف والتظليل",
   "prefs.extend": "توسيع",
   "prefs.extra_navigation": "Ctrl مع السحب بالزر الأيسر في مساحة فارغة يدوّر العرض، واضغط مطولًا على Space للإزاحة.",
-  "prefs.extrude_view_isometric": "تدوير العرض إلى المتساوي القياس عند فتح البثق",
+  "prefs.extrude_view_isometric": "التحويل إلى العرض المتساوي القياس عند فتح البثق",
   "prefs.extrude_view_return": "العودة إلى العرض السابق عند إغلاق البثق",
   "prefs.follows_os": "يتبع النظام",
   "prefs.font": "الخط",
