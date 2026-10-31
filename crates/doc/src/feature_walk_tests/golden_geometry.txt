@@ -109,6 +109,8 @@ pipe
 frame_member
 frame_member_sketch
   profiles: 2 all
+frame_trim
+  moves: to[1].plane.axis_dir[0], to[1].plane.axis_dir[1], to[1].plane.axis_origin[0], to[1].plane.axis_origin[1], to[1].plane.axis_origin[2]
 emboss
   face points: [5, 5.5, 5.25]
   profiles: 1 all

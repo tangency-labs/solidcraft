@@ -1,16 +1,19 @@
 //! Frame Member (`frame.member`): structural members along the lines of a frame sketch. The lines
 //! are picked in the view; the section is a built-in profile with its dimensions, or the profiles
 //! picked in another sketch. Anchor, angle and mirror place the section on each line.
+//!
+//! Trim/Extend (`frame.trim`): members picked in the view trimmed or extended to other members
+//! (butt joints), planar faces or planes, with the end that moves and a weld gap.
 
 use serde_json::{Map, Value, json};
 use solidcraft_engine::Sel;
 use solidcraft_engine::doc::expr::Kind as ValueKind;
-use solidcraft_engine::doc::frame::{self, MemberProfile};
-use solidcraft_engine::doc::{FeatureKind, ProfileSel};
+use solidcraft_engine::doc::frame::{self, MemberProfile, MemberRef, TrimEnd, TrimTarget};
+use solidcraft_engine::doc::{FeatureKind, PlaneRef, ProfileSel};
 
 use crate::SolveApp;
 use crate::dialogs::{Kind, check, curves_sketch, form_row, profile_indices, put, shown_expr};
-use crate::selection::{PROFILES, SKETCH_LINES, SelInput, SelectionExt as _};
+use crate::selection::{BODIES, PLANAR_FACES, PLANES, PROFILES, SKETCH_LINES, SelInput, SelectionExt as _};
 use crate::ui_kit::{choice_row, expr_row, hint_row, text_row};
 
 /// The anchors as `frame.member` names them, and their labels.
@@ -63,10 +66,18 @@ impl Member {
     }
 }
 
-/// The dialog for Frame Member.
+/// The dialog for Frame Member or Trim/Extend.
 pub fn start(_app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
-    (id == "frame.member")
-        .then(|| (Kind::Frame(Member::new()), vec![SelInput::new("Lines", SKETCH_LINES, true), SelInput::new("Section (optional)", PROFILES, true)]))
+    match id {
+        "frame.member" => {
+            Some((Kind::Frame(Member::new()), vec![SelInput::new("Lines", SKETCH_LINES, true), SelInput::new("Section (optional)", PROFILES, true)]))
+        }
+        "frame.trim" => Some((
+            Kind::FrameTrim(Trim::default()),
+            vec![SelInput::new("ui.frame_trim.members", BODIES | PLANAR_FACES, true), SelInput::new("To", BODIES | PLANAR_FACES | PLANES, true)],
+        )),
+        _ => None,
+    }
 }
 
 fn tr(text: &str) -> &str {
@@ -208,6 +219,142 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind) -> Option<(Kind, Vec<SelI
     m.mirror = *mirror;
     m.name = body_name.clone().unwrap_or_default();
     Some((Kind::Frame(m), inputs, Map::new()))
+}
+
+/// Which end of each member moves, as `frame.trim` names it, and its label.
+const ENDS: [(&str, &str); 3] = [("auto", "ui.frame_trim.nearer_end"), ("start", "ui.frame_trim.start"), ("end", "ui.frame_trim.end")];
+
+/// The Trim/Extend dialog's values (the members and targets are its selection inputs).
+#[derive(Clone, Debug, Default)]
+pub struct Trim {
+    /// An index into [`ENDS`].
+    pub end: usize,
+    pub gap: String,
+    /// Targets of the feature being edited that a pick can't show (a member's chosen side, a
+    /// face or plane kept as the design saved it), passed back as they are while kept.
+    pub kept: Vec<Value>,
+    pub keep: bool,
+}
+
+/// The Trim/Extend rows (after the selection inputs); true when Enter was pressed in a value.
+pub fn trim_rows(ui: &mut egui::Ui, t: &mut Trim) -> bool {
+    let ends: Vec<&str> = ENDS.iter().map(|e| e.1).collect();
+    choice_row(ui, "ui.frame_trim.end", "frame_trim_end", &mut t.end, &ends);
+    let enter = hint_row(ui, "Gap", &mut t.gap, "0 mm");
+    if !t.kept.is_empty() {
+        let label = crate::i18n::format("ui.frame_trim.more_targets", &[("count", &t.kept.len().to_string())]);
+        form_row(ui, "ui.frame_trim.keep", |ui| crate::ui_kit::checkbox(ui, &label, &mut t.keep));
+    }
+    enter
+}
+
+/// The body a pick names, when it is a member's.
+fn member_body(app: &SolveApp, pick: &Sel) -> Option<String> {
+    let body = match pick {
+        Sel::Body { name } => name,
+        Sel::Face { body, .. } => body,
+        _ => return None,
+    };
+    app.session.model.state().frame_member(body).is_some().then(|| body.clone())
+}
+
+/// The command Trim/Extend's OK runs (`extra`: parameters kept from the feature being edited).
+pub fn trim_commands(app: &SolveApp, t: &Trim, inputs: &[SelInput], extra: &Map<String, Value>) -> Result<Vec<(String, Value)>, String> {
+    let mut members: Vec<String> = Vec::new();
+    for pick in crate::selection::items(inputs, 0) {
+        let body = member_body(app, pick).ok_or_else(|| crate::i18n::tr("ui.frame_trim.pick_members").to_string())?;
+        if !members.contains(&body) {
+            members.push(body);
+        }
+    }
+    if members.is_empty() {
+        return Err(crate::i18n::tr("ui.frame_trim.pick_members_first").to_string());
+    }
+    let mut to: Vec<Value> = Vec::new();
+    for pick in crate::selection::items(inputs, 1) {
+        let member = member_body(app, pick).filter(|name| {
+            // A face picked on a changed member follows that actual face, rather than using
+            // a stale sketch/profile side. Picking the whole body still gives the refusal.
+            if !matches!(pick, Sel::Face { .. }) {
+                return true;
+            }
+            let st = app.session.model.state();
+            st.frame_member(name).zip(st.body(name)).is_some_and(|(r, b)| !b.transferred && r.is_unchanged(&b.body))
+        });
+        let target = match (member, pick) {
+            // A member, or a face of one: a butt joint against it.
+            (Some(body), _) => json!(body),
+            // The exact face (its body, index and path), as Start Sketch picks one.
+            (None, face @ Sel::Face { point, .. }) => json!({
+                "plane": crate::sketch_attachment_ui::face_plane(app, face).unwrap_or_else(|| json!({"face": [point.x, point.y, point.z]}))
+            }),
+            (None, Sel::Plane { name }) => json!({"plane": name}),
+            _ => return Err(crate::i18n::tr("ui.frame_trim.target_kinds").to_string()),
+        };
+        if !to.contains(&target) {
+            to.push(target);
+        }
+    }
+    if t.keep {
+        to.extend(t.kept.iter().cloned());
+    }
+    if to.is_empty() {
+        return Err(crate::i18n::tr("ui.frame_trim.pick_targets").to_string());
+    }
+    let mut p = json!({"members": members, "to": to});
+    if let Some((end, _)) = ENDS.get(t.end).filter(|_| t.end != 0) {
+        p["end"] = json!(end);
+    }
+    put(&mut p, &[("gap", &t.gap)]);
+    if let Value::Object(o) = &mut p {
+        for (key, v) in extra {
+            o.entry(key.clone()).or_insert_with(|| v.clone());
+        }
+    }
+    Ok(vec![("frame.trim".to_string(), p)])
+}
+
+/// The body of a member in the current model, by its feature and line.
+fn body_of(app: &SolveApp, r: &MemberRef) -> Option<String> {
+    let id = app.session.doc.find_feature(&r.feature)?.id;
+    let st = app.session.model.state();
+    let record = st.frame_members.iter().find(|m| m.feature == id && m.line == r.line)?;
+    st.body(&record.body).filter(|b| b.feature == id).map(|b| b.name.clone())
+}
+
+/// The Trim/Extend dialog editing a trim feature, filled from it.
+pub fn trim_for_feature(app: &SolveApp, kind: &FeatureKind) -> Option<(Kind, Vec<SelInput>, Map<String, Value>)> {
+    let FeatureKind::FrameTrim { members, to, end, gap } = kind else { return None };
+    let (_, mut inputs) = start(app, "frame.trim")?;
+    let mut t = Trim::default();
+    if let Some(i) = inputs.get_mut(0) {
+        i.items = members.iter().filter_map(|m| body_of(app, m)).map(|name| Sel::Body { name }).collect();
+    }
+    let mut picks = Vec::new();
+    for target in to {
+        match target {
+            TrimTarget::Member { member, side: None } if let Some(name) = body_of(app, member) => picks.push(Sel::Body { name }),
+            TrimTarget::Plane { plane: PlaneRef::Origin { name } } => picks.push(Sel::Plane { name: name.clone() }),
+            TrimTarget::Plane { plane: PlaneRef::Construction { feature } } if let Some(f) = app.session.doc.feature(feature.0) => {
+                picks.push(Sel::Plane { name: f.name.clone() })
+            }
+            TrimTarget::Member { member, side } => {
+                t.kept.push(json!({"member": {"feature": member.feature.to_string(), "line": member.line}, "side": side}))
+            }
+            TrimTarget::Plane { plane } => t.kept.push(json!({"plane_ref": plane})),
+        }
+    }
+    if let Some(i) = inputs.get_mut(1) {
+        i.items = picks;
+    }
+    t.keep = !t.kept.is_empty();
+    t.end = match end {
+        TrimEnd::Auto => 0,
+        TrimEnd::Start => 1,
+        TrimEnd::End => 2,
+    };
+    t.gap = gap.as_deref().map(|g| shown_expr(g, ValueKind::Length)).unwrap_or_default();
+    Some((Kind::FrameTrim(t), inputs, Map::new()))
 }
 
 #[cfg(test)]

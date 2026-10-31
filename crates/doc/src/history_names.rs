@@ -137,7 +137,7 @@ impl<'a> OperandNames<'a> {
                 let body = o.before.body(name)?;
                 Some(OperandNames { operand, names: crate::naming::names(body), body: Some(body.clone()), edges: OnceLock::new() })
             }
-            Operand::Made(_) | Operand::CopiedTool { .. } => {
+            Operand::Made(_) | Operand::CopiedTool { .. } | Operand::Rebuilt { .. } => {
                 Some(OperandNames { operand, body: None, names: Arc::default(), edges: OnceLock::new() })
             }
             Operand::Stage(stage) => {
@@ -177,15 +177,9 @@ impl<'a> OperandNames<'a> {
                 verified: n.verified,
                 origins: None,
             }),
-            Operand::Made(roles) => {
-                let (first, rest) = roles.get(face)?.split_first()?;
-                Some(Named {
-                    name: format!("F{fid}:{first}"),
-                    aliases: rest.iter().map(|r| format!("F{fid}:{r}")).collect(),
-                    verified: true,
-                    origins: None,
-                })
-            }
+            Operand::Made(roles) => made_face(roles, face, fid),
+            // A body built again keeps the names of the feature that built it first.
+            Operand::Rebuilt { roles, feature } => made_face(roles, face, *feature),
             Operand::CopiedTool { roles, feature, instance } => {
                 let named = |role: &String| format!("F{feature}:{role}@F{fid}.{instance}");
                 let (first, rest) = roles.get(face)?.split_first()?;
@@ -204,9 +198,15 @@ impl<'a> OperandNames<'a> {
                 let verified = faces.iter().all(|f| self.names.verified(*f as usize));
                 Some((names.get(edge)?.clone(), verified))
             }
-            Operand::Copy { .. } | Operand::Inner(_) | Operand::Made(_) | Operand::CopiedTool { .. } => None,
+            Operand::Copy { .. } | Operand::Inner(_) | Operand::Made(_) | Operand::CopiedTool { .. } | Operand::Rebuilt { .. } => None,
         }
     }
+}
+
+/// The name of face `face` of a body feature `fid` built, from its roles.
+fn made_face(roles: &[Vec<String>], face: usize, fid: u64) -> Option<Named> {
+    let (first, rest) = roles.get(face)?.split_first()?;
+    Some(Named { name: format!("F{fid}:{first}"), aliases: rest.iter().map(|r| format!("F{fid}:{r}")).collect(), verified: true, origins: None })
 }
 
 /// A face's name from what it came from; `None` when an origin cannot be named exactly.

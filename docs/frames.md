@@ -2,7 +2,8 @@
 
 Frames and weldments (#4003) are structural members (tube, angle, channel, beam, an aluminium
 extrusion of your own) laid along the lines of a frame sketch. This page covers what has landed:
-members and their profiles. Corners, trims, end caps, gussets, welds and the cut list follow.
+members, their profiles, and trims (butt joints, and trimming or extending to planes and faces).
+Mitre corners, copes, end caps, gussets, welds and the cut list follow.
 
 ## The workflow
 
@@ -15,6 +16,8 @@ members and their profiles. Corners, trims, end caps, gussets, welds and the cut
 3. **Add members**: **Frame Member** (WELDMENTS › CREATE, `frame.member`) makes one body per line,
    square to it, from its start to its end. Repeat with another profile for the next group of
    lines.
+4. **Trim them**: **Trim/Extend** (WELDMENTS › MODIFY, `frame.trim`) butts members against the
+   members they meet, or trims or extends them to a plane or face (below).
 
 ```json
 {"command": "frame.member", "params": {"sketch": "Frame", "profile": {"kind": "rect_tube", "width": 40, "height": 40, "wall": 3}}}
@@ -22,10 +25,10 @@ members and their profiles. Corners, trims, end caps, gussets, welds and the cut
 ```
 
 Members are ordinary bodies: mirror, pattern, move, drill and combine them with the usual
-commands. Where members meet they overlap until corner treatments land.
+commands. Where members meet they overlap until they are trimmed; mitre corners come later.
 
-The **Weldments** ribbon tab gathers the frame commands: New Sketch, Frame Member and
-Parameters. Like Sheet Metal it is always there, and it selects itself when a frame member is
+The **Weldments** ribbon tab gathers the frame commands: New Sketch, Frame Member, Trim/Extend
+and Parameters. Like Sheet Metal it is always there, and it selects itself when a frame member is
 the selected body (or the last body of the active component).
 
 ## The Frame Member dialog
@@ -73,6 +76,62 @@ Every built-in profile is SolidCraft's own parametric definition, built in code
 (`solidcraft_doc::frame`). SolidCraft ships no vendor's or standard's size table: you give the
 dimensions of the stock you buy. Any other section, a vendor's aluminium extrusion for example, comes
 from a sketch: draw it or insert the vendor's DXF.
+
+## Trim/Extend
+
+**Trim/Extend** (WELDMENTS › MODIFY, `frame.trim`) moves the ends of members to what they meet:
+
+- **Another member** (a butt joint): the end stops flat against that member's side. The side is
+  worked out from the other member's line and profile, not from a face of its body, so the joint
+  follows sketch and parameter edits: widen the frame and the rails between the posts grow with it.
+- **A plane or a planar face**: an origin or construction plane, or a flat face of any body. A
+  face that slants across the member cuts its end at that slant. A face is attached as a sketch on
+  it is, so the trim follows the face: make the plate under a post thicker and the post stands on
+  its new top.
+
+A member trims or extends alike: an end short of its target grows to it. Each member keeps its
+body and its name, and later trims see it as it now is (trim the cross members to rails that were
+themselves trimmed to the posts).
+
+```json
+{"command": "frame.trim", "params": {"members": ["Rail", "Rail (2)", "Rail (3)", "Rail (4)"], "to": ["Post", "Post (2)", "Post (3)", "Post (4)"]}}
+{"command": "frame.trim", "params": {"members": ["Brace"], "to": {"plane": {"face": [0, 200, 500]}}, "gap": "1.5 mm"}}
+```
+
+- `members`: the members to trim, each a member's body name or `{feature, line}` (its Frame Member
+  feature and its line's id). A trim keeps them by feature and line, so renaming a member or its
+  feature keeps the trim.
+- `to`: what to trim them to, one or a list: a member (its body name, or `{member, side}` with
+  `side` one of `right`, `left`, `top`, `bottom` of its profile; by default the side the trimmed
+  member meets), or `{plane}` as `sketch.create` takes it (`XY`, a construction plane,
+  `{origin, normal}`, or `{face: [x, y, z]}` for a planar face, with `body`, `index` and `path` for
+  the exact face picked).
+- `end`: `auto` (the default: for each target, the end of the member nearer it), `start` or `end`.
+- `gap`: the weld gap between each end and its target, a length expression (default 0, at most
+  1 m).
+
+A member meets a member target when the line through the middle of its profile passes through the
+target's profile and along the target's length; a plane it crosses. With several targets, each
+moves the end it meets, so one trim can butt every rail of a frame against its posts. It is refused,
+with the reason, when a member meets none of the targets, when two targets would move the same end
+(trim them in separate features), when a chosen side faces away from the member, and when the
+member's body was changed after it was made (a hole drilled in it, say): a trim rebuilds the member
+from its line and profile, and would lose that change, so trim it before the features that change
+it. A changed member is also refused as a member target, because its sketch line and profile
+may no longer describe its actual side. Use a planar face target to follow the modified body.
+This includes symmetric rotations whose outline stays the same and bodies transferred into
+another component after the member was made. Members of another component
+are not supported yet.
+
+### The Trim/Extend dialog
+
+- **Members**: pick the members to trim (their bodies or faces of them).
+- **To**: pick members, planar faces or planes. A face of an unmodified member selects that
+  member; a face on a modified member is kept as a planar-face target.
+- **End** (Nearer End, Start, End) and **Gap** as above.
+- **Edit Feature** reopens the dialog with the trim's picks and values. Targets a pick can't show
+  (a member's chosen side, a face, a plane given by its origin and normal) are listed as **Keep:
+  n more targets**, kept while ticked; untick it to drop them all and pick again.
 
 ## Built-in profiles
 
