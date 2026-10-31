@@ -40,12 +40,15 @@
 //! holes and slots are cut-outs of the sheet where they lie in its panel. Its pockets (an
 //! engraved label: an inner loop whose walls end on flat floors, at most half the sheet deep)
 //! are pockets of the sheet from that skin, round their islands; on a shell the faces of the
-//! other skin are read for theirs.
+//! other skin are read for theirs. A slit or a hole through a bend's round (a slit along it for a
+//! fold by hand, a relief slot at its end) is a cut-out of its bend zone: along the bend where it
+//! lies along the cylinder's axis, across it as far as it lies round the bend. One whose walls
+//! stop inside the sheet is a pocket in a bend, which is refused.
 //!
-//! Not supported yet: curved faces other than bends (rolled sheet), holes and pockets that reach
-//! into a bend, pockets deeper than half the sheet or with a step or a hole in their floor, round
-//! edges that end at a bend or a cut edge, loops of bends, two faces that meet along more than
-//! one edge, a wall on part of an edge of a face other than the fixed one.
+//! Not supported yet: curved faces other than bends (rolled sheet), cut-outs that run from a bend
+//! into a panel, pockets in a bend, pockets deeper than half the sheet or with a step or a hole in
+//! their floor, round edges that end at a bend or a cut edge, loops of bends, two faces that meet
+//! along more than one edge, a wall on part of an edge of a face other than the fixed one.
 
 use std::collections::BTreeMap;
 use std::f64::consts::{FRAC_PI_2, PI, TAU};
@@ -191,14 +194,9 @@ fn joined_lines(segs: impl IntoIterator<Item = Seg2>, tol: f64) -> Vec<Seg2> {
     out
 }
 
-/// Face `f` of the body as a panel outline. Only a planar face can be one. Its loops are read
-/// exactly, as a plate's are (an arc where one runs along a round wall standing square on the
-/// face): the outer one is the outline, the others are its holes.
-fn outline(b: &Body, mesh: &Mesh, f: usize, tol: f64) -> Result<Face> {
-    let Some(FaceSurface::Plane { normal: n, point }) = face_surface(b, f) else {
-        return err("not supported yet: curved faces in a converted sheet (only planar faces convert)");
-    };
-    let plane = Plane::from_normal(point, n).ok_or_else(|| DocError::Invalid("a face of the body has no plane".into()))?;
+/// The loops of face `f`'s edges, chained head to tail (its outline and its holes): each point
+/// with the face the loop runs along from it to the next point.
+fn face_loops(mesh: &Mesh, f: usize, tol: f64) -> Result<Vec<Vec<(Vec3, Option<usize>)>>> {
     // Its edges, each with the face on its other side.
     let mut edges: Vec<(&[Vec3], Option<usize>)> = mesh
         .edges
@@ -207,8 +205,6 @@ fn outline(b: &Body, mesh: &Mesh, f: usize, tol: f64) -> Result<Face> {
         .filter(|(line, faces)| line.len() >= 2 && faces.iter().any(|g| *g as usize == f))
         .map(|(line, faces)| (line.as_slice(), faces.iter().map(|g| *g as usize).find(|g| *g != f)))
         .collect();
-    // Chained head to tail, they close the outline and its holes: each point with the face the
-    // loop runs along from it to the next point.
     let mut loops: Vec<Vec<(Vec3, Option<usize>)>> = Vec::new();
     while let Some((line, across)) = edges.pop() {
         let (Some(&start), Some(&last)) = (line.first(), line.last()) else { continue };
@@ -226,6 +222,26 @@ fn outline(b: &Body, mesh: &Mesh, f: usize, tol: f64) -> Result<Face> {
         }
         loops.push(lp);
     }
+    Ok(loops)
+}
+
+/// The faces a loop of [`face_loops`] runs along (the walls of a hole), sorted, each once.
+fn loop_walls(lp: &[(Vec3, Option<usize>)]) -> Vec<usize> {
+    let mut walls: Vec<usize> = lp.iter().filter_map(|(_, g)| *g).collect();
+    walls.sort_unstable();
+    walls.dedup();
+    walls
+}
+
+/// Face `f` of the body as a panel outline. Only a planar face can be one. Its loops are read
+/// exactly, as a plate's are (an arc where one runs along a round wall standing square on the
+/// face): the outer one is the outline, the others are its holes.
+fn outline(b: &Body, mesh: &Mesh, f: usize, tol: f64) -> Result<Face> {
+    let Some(FaceSurface::Plane { normal: n, point }) = face_surface(b, f) else {
+        return err("not supported yet: curved faces in a converted sheet (only planar faces convert)");
+    };
+    let plane = Plane::from_normal(point, n).ok_or_else(|| DocError::Invalid("a face of the body has no plane".into()))?;
+    let loops = face_loops(mesh, f, tol)?;
     let mut walls = std::collections::HashMap::new();
     let mut wall = |g: u32| *walls.entry(g).or_insert_with(|| round_wall(b, &plane, *n, g));
     // Each loop with the faces of its walls.
@@ -233,10 +249,7 @@ fn outline(b: &Body, mesh: &Mesh, f: usize, tol: f64) -> Result<Face> {
         .iter()
         .map(|lp| {
             let pts: Vec<(Vec2, Option<u32>)> = lp.iter().map(|(p, g)| (plane.to_local(*p), g.and_then(|g| u32::try_from(g).ok()))).collect();
-            let mut walls: Vec<usize> = lp.iter().filter_map(|(_, g)| *g).collect();
-            walls.sort_unstable();
-            walls.dedup();
-            (outline_segs(&pts, &mut wall, tol * 10.0), walls)
+            (outline_segs(&pts, &mut wall, tol * 10.0), loop_walls(lp))
         })
         .collect();
     let area = |segs: &[(Seg2, Option<u32>)]| segs.iter().map(|(seg, _)| seg.area_term()).sum::<f64>().abs();
@@ -678,6 +691,73 @@ fn drawn(trimmed: &[Vec2], from: &[Option<usize>], pts: &[Vec2], round: &[Option
     Ok(Some(Loop2 { segs }))
 }
 
+/// The loops through bend cylinder `c` other than its outline (a slit along the bend for a fold
+/// by hand, a hole drilled through its round), laid on the bend zone of flange `i`, whose parent
+/// is the panel `from` (flange `parent`): along the bend as they lie along its axis, across it as
+/// far as they are round the bend, so the bend's material unrolls with them. Each with a point of
+/// it, and its flat region when its walls go through to the bend's other skin (none for a pocket).
+#[allow(clippy::too_many_arguments)]
+fn bend_cutouts(
+    b: &Body,
+    mesh: &Mesh,
+    c: &Chamfer,
+    from: usize,
+    sh: &SheetBody,
+    parent: Option<usize>,
+    i: usize,
+    tol: f64,
+) -> Result<Vec<(Vec3, Option<Region2>)>> {
+    let Some(FaceSurface::Cylinder { origin, axis, .. }) = face_surface(b, c.strip) else { return Ok(Vec::new()) };
+    let to = if from == c.a { c.b } else { c.a };
+    let cuts: Vec<Vec<(Vec3, Option<usize>)>> =
+        face_loops(mesh, c.strip, tol)?.into_iter().filter(|lp| !lp.iter().any(|(_, g)| *g == Some(c.a) || *g == Some(c.b))).collect();
+    if cuts.is_empty() {
+        return Ok(Vec::new());
+    }
+    let radial = |p: Vec3| {
+        let v = p - origin;
+        (v - axis * v.dot(axis)).normalized()
+    };
+    // Where the cylinder meets a face: a point of the edge between them.
+    let meets = |g: usize| {
+        let both = |faces: &&Vec<u32>| faces.contains(&(c.strip as u32)) && faces.contains(&(g as u32));
+        mesh.edges.iter().zip(&mesh.edge_faces).find(|(_, faces)| both(faces)).and_then(|(line, _)| line.first().copied())
+    };
+    let (Some(start), Some(end)) = (meets(from).and_then(radial), meets(to).and_then(radial)) else {
+        return err("a bend cylinder does not meet the faces either side of it");
+    };
+    // How far round the bend a direction from its axis is, from the parent's side.
+    let turn = |r: Vec3| start.cross(r).dot(axis).atan2(start.dot(r));
+    let theta = turn(end);
+    if !(theta.abs() > 1e-9) {
+        return err("a bend cylinder turns no angle between the faces either side of it");
+    }
+    let other = other_skin(b, mesh, c, tol);
+    let touches = |g: usize, h: usize| mesh.edge_faces.iter().any(|faces| faces.contains(&(g as u32)) && faces.contains(&(h as u32)));
+    let Some(f) = sh.flanges.get(i) else { return err("a bend of the sheet has no flange") };
+    let ba = sh.allowance(f);
+    let inv = mat_inverse(&sh.world(parent)).ok_or_else(|| DocError::Invalid("sheet panel frame".into()))?;
+    let mut out = Vec::with_capacity(cuts.len());
+    for lp in cuts {
+        let first = lp.first().map(|(p, _)| *p).unwrap_or(origin);
+        let through = other.is_some_and(|o| loop_walls(&lp).iter().all(|g| touches(*g, o.strip)));
+        if !through {
+            out.push((first, None));
+            continue;
+        }
+        let mut pts = Vec::with_capacity(lp.len());
+        for (p, _) in &lp {
+            let Some(r) = radial(*p) else { return err("a point of a cut-out in a bend lies on the bend's axis") };
+            let round = (turn(r) / theta).clamp(0.0, 1.0);
+            let q = apply_point(&inv, *p);
+            let along = (Vec2::new(q.x, q.y) - f.p).dot(f.d);
+            pts.push(f.p + f.d * along + f.n * (round * ba));
+        }
+        out.push((first, Some(Region2 { outer: Loop2::polygon(&pts).ccw(), holes: Vec::new() })));
+    }
+    Ok(out)
+}
+
 /// Names of the edges of `body` at the bend points, to find them again after the body changes.
 /// A point on no edge gets none: the conversion then says so, instead of bending the edge that
 /// happens to be nearest. A point on a chamfer or a bend cylinder gets none either: it stays that
@@ -1015,6 +1095,27 @@ pub fn convert_body(
                 tear: (false, false),
             });
             queue.push((g, Some(sh.flanges.len() - 1)));
+        }
+    }
+    // Cut-outs through a bend modelled with its radius (a slit along it for a fold by hand, a hole
+    // drilled through its round): cut-outs of its bend zone, where they lie round the bend.
+    let flange_of: BTreeMap<usize, Option<usize>> = queue.iter().copied().collect();
+    for c in &chamfers {
+        let (Some(pa), Some(pb)) = (panels.get(&c.a), panels.get(&c.b)) else { continue };
+        let from = if pb.parent == Some(c.a) {
+            c.a
+        } else if pa.parent == Some(c.b) {
+            c.b
+        } else {
+            continue;
+        };
+        let to = if from == c.a { c.b } else { c.a };
+        let (Some(&parent), Some(&Some(i))) = (flange_of.get(&from), flange_of.get(&to)) else { continue };
+        for (p, cut) in bend_cutouts(b, &mesh, c, from, &sh, parent, i, tol)? {
+            match cut {
+                Some(region) => sh.holes.push(region),
+                None => return err(format!("not supported yet: the pocket at {} in a bend (cut it after converting)", at(p))),
+            }
         }
     }
     // The bends on the fixed face finished as an edge flange feature finishes its own
