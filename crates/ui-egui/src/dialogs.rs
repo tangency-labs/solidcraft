@@ -943,7 +943,11 @@ impl Dialog {
                         | selection::POINTS
                         | PROFILES
                         | selection::SKETCH_LINES
-                        | selection::EXTERNAL_POINTS,
+                        | selection::EXTERNAL_POINTS
+                        | PLANES
+                        | AXES
+                        | selection::CONSTRUCTION_POINTS
+                        | selection::ORIGIN,
                     true,
                 )],
             ),
