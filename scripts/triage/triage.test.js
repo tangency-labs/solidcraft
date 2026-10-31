@@ -5,9 +5,11 @@ const triage = require('./triage.js');
 
 const repo = { owner: 'tangency-labs', repo: 'solidcraft' };
 
-// A fake github-script client that records writes. `world` describes the repo.
+// A fake github-script client that records writes (and list queries, in `reads`). `world`
+// describes the repo.
 function fake(world = {}) {
   const calls = [];
+  const reads = [];
   const rec = (name) => async (args) => {
     calls.push([name, args]);
     return { data: {} };
@@ -31,7 +33,11 @@ function fake(world = {}) {
         addLabels: rec('addLabels'),
         removeLabel: rec('removeLabel'),
         createComment: rec('comment'),
-        listForRepo: async () => ({ data: world.items || [] }),
+        listForRepo: async (args) => {
+          reads.push(['listForRepo', args]);
+          return { data: world.items || [] };
+        },
+        listEvents: async ({ issue_number }) => ({ data: (world.events || {})[issue_number] || [] }),
         listLabelsForRepo: async () => ({
           data: (world.labels || ['bug', 'enhancement', 'area:kernel', 'priority:P1', 'priority:P2', 'needs-triage']).map(
             (name) => ({ name }),
@@ -40,7 +46,7 @@ function fake(world = {}) {
       },
     },
   };
-  return { github, calls };
+  return { github, calls, reads };
 }
 
 const find = (calls, n) => calls.find((c) => c[0] === n);
@@ -186,4 +192,90 @@ test('backfill only touches unlabelled items, and the dry run writes nothing', a
   w = fake({ items, files: ['crates/io/src/step.rs'] });
   await triage.backfill({ github: w.github, context: { repo }, dryRun: false });
   assert.deepEqual(all(w.calls, 'addLabels').map((c) => c[1].issue_number), [1, 3]);
+});
+
+// Times relative to a daily run well after the bot started.
+const NOW = new Date('2026-10-23T06:00:00Z');
+const hoursAgo = (h) => new Date(NOW.getTime() - h * 60 * 60 * 1000).toISOString();
+const failed = (number, extra = {}) => ({ number, title: 'EXTRUDE: operation failed', body: '', labels: [], created_at: hoursAgo(24), ...extra });
+const ev = (event, name) => ({ event, label: { name } });
+
+test('the daily run triages what its own run missed and leaves alone what someone triaged', async () => {
+  const items = [
+    failed(10),
+    failed(11, { title: 'x', pull_request: {} }),
+    // From the issue form (`bug`), or claimed (`in progress`): still never triaged.
+    failed(12, { labels: labels(['bug']) }),
+    failed(13, { labels: labels(['in progress']) }),
+    // Triaged, then a person removed the labels: left alone.
+    failed(14),
+    // Triaged now, locked, too new (its own run may still be queued) or too old: left alone.
+    failed(15, { labels: labels(['area:kernel']) }),
+    failed(16, { locked: true }),
+    failed(17, { created_at: hoursAgo(2) }),
+    failed(18, { created_at: hoursAgo(5 * 24) }),
+    // A person removed `bug`, which the form had set: everything but `bug`.
+    failed(19),
+  ];
+  const events = {
+    12: [ev('labeled', 'bug')],
+    13: [ev('labeled', 'in progress')],
+    14: [ev('labeled', 'area:kernel'), ev('labeled', 'needs-triage'), ev('unlabeled', 'area:kernel'), ev('unlabeled', 'needs-triage')],
+    19: [ev('labeled', 'bug'), ev('unlabeled', 'bug')],
+  };
+  const { github, calls, reads } = fake({ items, events, files: ['crates/io/src/step.rs'] });
+  const { healed, failed: errors, waiting } = await triage.heal({ github, context: { repo }, now: NOW });
+  assert.deepEqual(healed, [
+    { number: 10, labels: ['bug', 'area:kernel', 'needs-triage'] },
+    { number: 11, labels: ['area:io'] },
+    { number: 12, labels: ['area:kernel', 'needs-triage'] },
+    { number: 13, labels: ['bug', 'area:kernel', 'needs-triage'] },
+    { number: 19, labels: ['area:kernel', 'needs-triage'] },
+  ]);
+  assert.deepEqual(errors, []);
+  assert.equal(waiting, 0);
+  assert.deepEqual(all(calls, 'addLabels').map((c) => c[1].issue_number), [10, 11, 12, 13, 19]);
+  const listed = find(reads, 'listForRepo')[1];
+  assert.deepEqual([listed.state, listed.since, listed.sort, listed.direction], ['open', hoursAgo(4 * 24), 'created', 'desc']);
+});
+
+test('the daily run leaves items from before the bot existed to the manual backfill', async () => {
+  const now = new Date('2026-10-19T06:00:00Z');
+  const items = [
+    failed(30, { created_at: '2026-10-18T15:00:00Z' }),
+    failed(31, { created_at: '2026-10-18T08:00:00Z' }),
+  ];
+  const { github, reads } = fake({ items });
+  const { healed } = await triage.heal({ github, context: { repo }, now });
+  assert.deepEqual(healed.map((h) => h.number), [30]);
+  assert.equal(find(reads, 'listForRepo')[1].since, '2026-10-18T09:17:21.000Z');
+});
+
+test('the daily run skips an item the rules give nothing, and writes nothing then', async () => {
+  const { github, calls } = fake({ items: [failed(20, { title: 'x', pull_request: {} })], files: [] });
+  assert.deepEqual(await triage.heal({ github, context: { repo }, now: NOW }), { healed: [], failed: [], waiting: 0 });
+  assert.equal(all(calls, 'addLabels').length, 0);
+});
+
+test('the daily run looks at `max` items at most, in the order listed (newest first)', async () => {
+  const items = [40, 41, 42, 43].map((n) => failed(n));
+  // 40 was triaged before: it still counts as looked at.
+  const { github, calls } = fake({ items, events: { 40: [ev('labeled', 'needs-triage')] } });
+  const { healed, waiting } = await triage.heal({ github, context: { repo }, now: NOW, max: 2 });
+  assert.deepEqual(healed.map((h) => h.number), [41]);
+  assert.equal(waiting, 2);
+  assert.deepEqual(all(calls, 'addLabels').map((c) => c[1].issue_number), [41]);
+});
+
+test('an API error on one item is reported and the others are still triaged', async () => {
+  const { github, calls } = fake({ items: [failed(50), failed(51), failed(52)] });
+  const listEvents = github.rest.issues.listEvents;
+  github.rest.issues.listEvents = async (args) => {
+    if (args.issue_number === 51) throw Object.assign(new Error('Server Error'), { status: 502 });
+    return listEvents(args);
+  };
+  const { healed, failed: errors } = await triage.heal({ github, context: { repo }, now: NOW });
+  assert.deepEqual(healed.map((h) => h.number), [50, 52]);
+  assert.deepEqual(errors, [{ number: 51, error: 'Server Error' }]);
+  assert.deepEqual(all(calls, 'addLabels').map((c) => c[1].issue_number), [50, 52]);
 });

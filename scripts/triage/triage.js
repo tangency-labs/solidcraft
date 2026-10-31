@@ -10,6 +10,14 @@ const NEEDS_TRIAGE_COLOR = 'ededed';
 const NEEDS_TRIAGE_DESCRIPTION = 'no priority yet; a maintainer sorts it with /triage';
 const MAX_TOKENS = 10;
 const MAX_TEXT = 20000;
+// The daily run looks for issues and PRs their own run never triaged: opened in the last
+// HEAL_DAYS, but at least HEAL_GRACE_HOURS ago (a queued run gets the chance to do it first), and
+// not before the bot existed (those are the manual backfill's). It looks at HEAL_MAX of them at
+// most, each up to four API calls.
+const HEAL_DAYS = 4;
+const HEAL_GRACE_HOURS = 12;
+const HEAL_MAX = 50;
+const BOT_START = Date.parse('2026-10-18T09:17:21Z');
 
 // Changed paths of a PR → area. First match wins per file.
 const PATH_AREAS = [
@@ -290,6 +298,60 @@ async function backfill({ github, context, dryRun = true }) {
   return plan;
 }
 
+// Labels only triage sets (the rules or a maintainer's /triage). `bug` and `enhancement` also come
+// from the issue forms, `in progress` from the claim bot and `approved-for-ci` from reviewers, so
+// they don't show that an item was triaged.
+function triaged(name) {
+  return name === NEEDS_TRIAGE || name.startsWith('area:') || name.startsWith('priority:');
+}
+
+// The daily run: the rules over the open issues and PRs (see HEAL_DAYS) whose own run never
+// triaged them, because it failed, was cancelled or never got a runner. An item that ever had a
+// triage label is left alone, and a label a person removed is never put back, so a correction is
+// still never undone. Newest first, `max` items at most; `waiting` counts the ones not reached and
+// `failed` the ones an API error stopped (the others go on).
+async function heal({ github, context, now = new Date(), days = HEAL_DAYS, grace = HEAL_GRACE_HOURS, max = HEAL_MAX }) {
+  const hour = 60 * 60 * 1000;
+  const from = Math.max(now.getTime() - days * 24 * hour, BOT_START);
+  const until = now.getTime() - grace * hour;
+  if (!(from <= until)) return { healed: [], failed: [], waiting: 0 };
+  // `since` filters on the last update, which is never before creation: no item is missed.
+  const items = await github.paginate(github.rest.issues.listForRepo, {
+    ...repoArgs(context),
+    state: 'open',
+    since: new Date(from).toISOString(),
+    sort: 'created',
+    direction: 'desc',
+    per_page: 100,
+  });
+  const candidates = items.filter((i) => {
+    const opened = Date.parse(i.created_at);
+    return !i.locked && opened >= from && opened <= until && !labelNames(i).some(triaged);
+  });
+  const reached = candidates.slice(0, Math.max(0, max));
+  const healed = [];
+  const failed = [];
+  for (const item of reached) {
+    try {
+      const events = await github.paginate(github.rest.issues.listEvents, {
+        ...repoArgs(context),
+        issue_number: item.number,
+        per_page: 100,
+      });
+      const name = (e) => (e.label && e.label.name) || '';
+      if (events.some((e) => e.event === 'labeled' && triaged(name(e)))) continue;
+      const removed = new Set(events.filter((e) => e.event === 'unlabeled').map(name));
+      const labels = (await proposal(github, context, item)).filter((l) => !removed.has(l));
+      if (!labels.length) continue;
+      await apply(github, context, item.number, labels);
+      healed.push({ number: item.number, labels });
+    } catch (e) {
+      failed.push({ number: item.number, error: String((e && e.message) || e) });
+    }
+  }
+  return { healed, failed, waiting: candidates.length - reached.length };
+}
+
 module.exports = {
   NEEDS_TRIAGE,
   classifyIssue,
@@ -303,4 +365,5 @@ module.exports = {
   handleLabeled,
   handleComment,
   backfill,
+  heal,
 };
