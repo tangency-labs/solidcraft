@@ -36,7 +36,7 @@ eframe remains a registry dependency; egui and egui-wgpu are locally patched.
 | Stage | Actual path |
 | --- | --- |
 | Build UI | Native `eframe::App::ui` calls `SolveApp::ui` (`crates/ui-egui/src/lib.rs`). `blur::State::begin` installs a stack-scoped thread-local host policy. `cad_ui` draws the workspace under floating cards, or in the remaining central rectangle for docked layout. |
-| View background | `viewport.rs::show` emits an egui gradient mesh before the viewport callback. `render_workspace.rs::show` emits its explicit draft background. Neither is contained in the GPU renderer's scene texture. |
+| View background | `viewport.rs::show` emits an egui gradient mesh before the viewport callback. `render_workspace.rs::show` emits its effective preview background, shared with the blur source. Neither is contained in the GPU renderer's scene texture. |
 | Prepare scene | `gpu.rs::ViewportCallback::prepare` calls `solidcraft_gpu::view::Renderer::prepare`. Native `set_wgpu_split` already draws scene depth/MSAA/OIT offscreen. The UI target has one sample and no depth. The resolved scene is transparent outside geometry. |
 | Acquire/order | `vendor/egui-wgpu/src/winit.rs::Painter::paint_and_update_textures` acquires/probes the drawable before preparing callbacks. `Renderer::update_buffers` uploads meshes, runs all callback `prepare`s, then all `finish_prepare`s. The enabled frame hook supplies actual physical target extent and the effective scale, including surface clamping. |
 | Build source/blur | The enabled `blur_native.rs::Source` replaces the viewport callback. Its `prepare` delegates unchanged to the original callback. Its `finish_prepare` draws the independent background/prepared viewport into S, then the blur chain, all on the same encoder. A cache hit encodes neither source nor blur passes. |
@@ -72,7 +72,8 @@ the model rectangle sees the deterministic source background, not invented
 geometry behind a dock. Extending the projection under docks is a separate change.
 
 Render preview uses its original product `Frame`, lighting, resolution reduction
-and explicit draft background. It does not call a model snapshot renderer or
+and effective preview background, including authored-scene precedence and the
+animated tab gradient. It does not call a model snapshot renderer or
 replace the Render scene settings. Home/result-image contexts are unavailable;
 a missing source callback in a painted frame drops target storage and reports
 unavailable instead of sampling a previous workspace's pixels.
@@ -287,8 +288,9 @@ if ($mainDecoded -cne $branchDecoded) { throw 'Decoded RGBA/dimensions differ' }
 
 Report timing medians/ranges, machine, adapter/backend/driver, size/DPI and power
 settings from alternating warmed baseline/branch runs. Use PIX/RenderDoc or an
-allocator profiler for complete GPU/CPU allocation/pass accounting. The supplied
-main baseline ca005237a captures require identical restored UI/model settings;
+allocator profiler for complete GPU/CPU allocation/pass accounting. The manager
+measured the exact prerequisite base `f1c2fc880`; comparisons require identical
+restored UI/model settings. Current validation records belong in the PR body;
 the new fixture is not a substitute for that comparison. Later manager gates are
 wasm, layers, licences, lists, containers/clippy, then full CI before commit/merge.
 Worker execution counts: tests/builds/checks/cargo/xtask/UI runs/screenshots = 0.
