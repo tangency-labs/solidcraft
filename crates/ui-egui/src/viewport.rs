@@ -1934,6 +1934,31 @@ pub fn origin_planes(app: &SolveApp) -> Vec<(&'static str, Vec3, [Vec3; 4])> {
         .collect()
 }
 
+/// The fill colour of an origin plane: the colour of the axis normal to it (XY blue, YZ red,
+/// XZ green) so the three are instantly recognisable, keeping the theme's plane transparency
+/// (#3722). Any other plane keeps the neutral origin-plane token.
+pub(crate) fn origin_plane_fill(t: &Tokens, name: &str) -> Color32 {
+    let axis = match name {
+        "XY" => t.axis_z,
+        "YZ" => t.axis_x,
+        "XZ" => t.axis_y,
+        _ => return t.origin_plane,
+    };
+    Color32::from_rgba_unmultiplied(axis.r(), axis.g(), axis.b(), t.origin_plane.a())
+}
+
+/// The edge colour of an origin plane: the same axis tint as [`origin_plane_fill`], at the
+/// theme's plane-edge transparency.
+pub(crate) fn origin_plane_edge(t: &Tokens, name: &str) -> Color32 {
+    let axis = match name {
+        "XY" => t.axis_z,
+        "YZ" => t.axis_x,
+        "XZ" => t.axis_y,
+        _ => return t.origin_plane_edge,
+    };
+    Color32::from_rgba_unmultiplied(axis.r(), axis.g(), axis.b(), t.origin_plane_edge.a())
+}
+
 /// The plane Create Sketch would put the sketch on, while it waits for one (#6975): the origin
 /// or construction plane under the pointer, in the view or in the browser. The grid is drawn on
 /// it, so the sketch's plane shows before the click.
@@ -3649,11 +3674,11 @@ pub(crate) fn build_highlight(app: &SolveApp) -> GpuScene {
             let hovered = matches!(hover, Some(Hit::Plane { name: n, .. }) if n == name) || app.viewport.hover_plane.as_deref() == Some(name);
             (selected, hovered)
         };
-        let mut planes: Vec<(String, [Vec3; 4], Color32)> =
-            origin_planes(app).into_iter().map(|(n, _, q)| (n.to_string(), q, t.origin_plane)).collect();
-        planes.extend(construction_quads(app).into_iter().map(|(n, _, q)| (n, q, t.construction_plane)));
+        let mut planes: Vec<(String, [Vec3; 4], Color32, Color32)> =
+            origin_planes(app).into_iter().map(|(n, _, q)| (n.to_string(), q, origin_plane_fill(&t, n), origin_plane_edge(&t, n))).collect();
+        planes.extend(construction_quads(app).into_iter().map(|(n, _, q)| (n, q, t.construction_plane, t.origin_plane_edge)));
         let through = app.picking_plane() || app.preferences.reference_geometry_through_bodies;
-        for (name, q, base) in &planes {
+        for (name, q, base, edge) in &planes {
             let (selected, hovered) = plane_state(name);
             let fill = if hovered {
                 t.origin_plane_hover
@@ -3662,7 +3687,7 @@ pub(crate) fn build_highlight(app: &SolveApp) -> GpuScene {
             } else {
                 *base
             };
-            quad(&mut sc, q, fill, if selected { t.sel_edge } else { t.origin_plane_edge }, through);
+            quad(&mut sc, q, fill, if selected { t.sel_edge } else { *edge }, through);
         }
         // Origin axes: solid near the origin, dashed beyond.
         for (name, dir) in origin_axes(app) {
@@ -6510,6 +6535,35 @@ pub fn look_at_selection(app: &mut SolveApp) {
 mod tests {
     use super::*;
     use crate::navigation::*;
+
+    /// The origin planes wear the colour of the axis normal to them, transparently (#3722):
+    /// XY blue (Z), YZ red (X), XZ green (Y), at the theme's plane transparency. Compared
+    /// straight (unpremultiplied), the bytes the GPU actually receives.
+    #[test]
+    fn origin_planes_wear_the_colour_of_their_normal_axis() {
+        use crate::theme::ColorVision;
+        for dark in [false, true] {
+            let t = Tokens::themed(dark, ColorVision::Off);
+            for (plane, axis) in [("XY", t.axis_z), ("YZ", t.axis_x), ("XZ", t.axis_y)] {
+                let fill = origin_plane_fill(&t, plane).to_srgba_unmultiplied();
+                let want = [axis.r(), axis.g(), axis.b(), t.origin_plane.a()];
+                for (i, (got, want)) in fill.iter().zip(want).enumerate() {
+                    assert!(
+                        (*got as i16 - want as i16).abs() <= 1,
+                        "dark {dark}: {plane} wears its axis colour, transparently: {fill:?} vs {want:?} byte {i}"
+                    );
+                }
+                let edge = origin_plane_edge(&t, plane).to_srgba_unmultiplied();
+                let want = [axis.r(), axis.g(), axis.b(), t.origin_plane_edge.a()];
+                for (i, (got, want)) in edge.iter().zip(want).enumerate() {
+                    assert!((*got as i16 - want as i16).abs() <= 1, "dark {dark}: {plane}'s edge matches: {edge:?} vs {want:?} byte {i}");
+                }
+            }
+            let fills: std::collections::BTreeSet<[u8; 4]> =
+                ["XY", "YZ", "XZ"].map(|n| origin_plane_fill(&t, n).to_srgba_unmultiplied()).into_iter().collect();
+            assert_eq!(fills.len(), 3, "dark {dark}: the three planes are told apart by colour");
+        }
+    }
 
     #[test]
     fn ground_shadow_does_not_enter_see_through_geometry() -> Result<(), Box<dyn std::error::Error>> {
@@ -11908,15 +11962,21 @@ mod grid_plane_tests {
     fn create_sketch_lights_the_plane_under_the_pointer_or_its_browser_row() {
         let mut app = SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
         app.start("sketch.create");
-        let plain = build_highlight(&app).xray;
+        // The xray bytes hold palette indices: compare the palette too, so a lit plane counts
+        // even when its hover colour lands in another plane's index slot (#3722).
+        let shot = |app: &SolveApp| {
+            let sc = build_highlight(app);
+            (sc.palette.texels(), sc.xray)
+        };
+        let plain = shot(&app);
         app.viewport.hover = Some(Hit::Plane { name: "XZ".into(), point: Vec3::ZERO });
-        let lit = build_highlight(&app).xray;
+        let lit = shot(&app);
         assert_ne!(lit, plain, "the plane under the pointer is lit");
         app.viewport.hover = None;
         let key = highlight_key(&app);
         app.viewport.hover_plane = Some("XZ".into());
         assert_ne!(highlight_key(&app), key, "the highlight is built again");
-        assert_eq!(build_highlight(&app).xray, lit, "its browser row lights it the same way");
+        assert_eq!(shot(&app), lit, "its browser row lights it the same way");
     }
 
     /// #6975: New Sketch shows the origin planes; the plane under the pointer, in the view or as
