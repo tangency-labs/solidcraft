@@ -13,7 +13,9 @@
 //! DPI (the same logical size, as winit computes it), so the rect Windows suggests while the
 //! title bar is dragged onto a monitor with another scale is the rect winit then applies: the
 //! window rescales once at the crossing and stays under the pointer, instead of the OS's move
-//! loop and winit disagreeing about a frame the window doesn't have.
+//! loop and winit disagreeing about a frame the window doesn't have. A snapped window leaves the
+//! answer to Windows: it derives the size to restore to from this one, so the snapped size would
+//! replace the size from before the snap (#9336).
 //!
 //! Replacing a window procedure and setting a window class's icon have no safe API, hence the
 //! `unsafe_code` allowance on this module (the app crate denies it; see `native_crash.rs` and
@@ -34,9 +36,10 @@ use windows_sys::Win32::Graphics::Gdi::{GetMonitorInfoW, MONITOR_DEFAULTTONEARES
 use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows_sys::Win32::UI::HiDpi::{GetDpiForWindow, GetSystemMetricsForDpi};
 use windows_sys::Win32::UI::WindowsAndMessaging::{
-    CallWindowProcW, GCLP_HICON, GCLP_HICONSM, GWL_STYLE, GWLP_WNDPROC, GetClientRect, GetWindowLongPtrW, GetWindowRect, HTBOTTOM, HTBOTTOMLEFT,
-    HTBOTTOMRIGHT, HTLEFT, HTRIGHT, HTTOP, HTTOPLEFT, HTTOPRIGHT, IMAGE_ICON, IsIconic, IsZoomed, LR_DEFAULTCOLOR, LoadImageW, SM_CXICON,
-    SM_CXPADDEDBORDER, SM_CXSIZEFRAME, SM_CXSMICON, SetWindowLongPtrW, WM_GETDPISCALEDSIZE, WM_NCDESTROY, WM_NCHITTEST, WNDPROC, WS_THICKFRAME,
+    CallWindowProcW, GCLP_HICON, GCLP_HICONSM, GWL_STYLE, GWLP_WNDPROC, GetClientRect, GetWindowLongPtrW, GetWindowPlacement, GetWindowRect,
+    HTBOTTOM, HTBOTTOMLEFT, HTBOTTOMRIGHT, HTLEFT, HTRIGHT, HTTOP, HTTOPLEFT, HTTOPRIGHT, IMAGE_ICON, IsIconic, IsZoomed, LR_DEFAULTCOLOR,
+    LoadImageW, SM_CXICON, SM_CXPADDEDBORDER, SM_CXSIZEFRAME, SM_CXSMICON, SetWindowLongPtrW, WINDOWPLACEMENT, WM_GETDPISCALEDSIZE, WM_NCDESTROY,
+    WM_NCHITTEST, WNDPROC, WS_THICKFRAME,
 };
 // windows-sys has SetClassLongPtrW only on 64-bit targets; on 32-bit Windows it is SetClassLongW.
 #[cfg(target_pointer_width = "64")]
@@ -153,7 +156,7 @@ unsafe extern "system" fn frame_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lpara
         WM_GETDPISCALEDSIZE => {
             let new_dpi = wparam as u32;
             // SAFETY: for this message lParam points to a SIZE the system reads back.
-            match (resizable(hwnd), client_size(hwnd), unsafe { (lparam as *mut SIZE).as_mut() }) {
+            match (resizable(hwnd) && !snapped(hwnd), client_size(hwnd), unsafe { (lparam as *mut SIZE).as_mut() }) {
                 (true, Some(size), Some(out)) => {
                     // SAFETY: a window handle the system passed in.
                     let old_dpi = unsafe { GetDpiForWindow(hwnd) };
@@ -188,6 +191,28 @@ fn resizable(hwnd: HWND) -> bool {
         let style = GetWindowLongPtrW(hwnd, GWL_STYLE) as u32;
         style & WS_THICKFRAME != 0 && IsZoomed(hwnd) == 0 && IsIconic(hwnd) == 0
     }
+}
+
+/// The window is snapped (Aero Snap, Win+arrows): it is not the size it will restore to.
+fn snapped(hwnd: HWND) -> bool {
+    let empty = RECT { left: 0, top: 0, right: 0, bottom: 0 };
+    let mut window = empty;
+    // SAFETY: both structs are valid to fill, and WINDOWPLACEMENT has its length set, as
+    // GetWindowPlacement requires.
+    let normal = unsafe {
+        let mut placement: WINDOWPLACEMENT = std::mem::zeroed();
+        placement.length = std::mem::size_of::<WINDOWPLACEMENT>() as u32;
+        if GetWindowPlacement(hwnd, &mut placement) == 0 || GetWindowRect(hwnd, &mut window) == 0 {
+            return false;
+        }
+        placement.rcNormalPosition
+    };
+    differs_in_size(window, normal)
+}
+
+/// Sizes only: the restored rect is in work-area coordinates, the window's in screen coordinates.
+fn differs_in_size(a: RECT, b: RECT) -> bool {
+    (a.right - a.left, a.bottom - a.top) != (b.right - b.left, b.bottom - b.top)
 }
 
 /// The client area's size in pixels (the whole window: winit gives it no frame).
@@ -246,5 +271,14 @@ mod tests {
         use egui::ResizeDirection::*;
         let codes: Vec<u32> = [North, South, West, East, NorthWest, NorthEast, SouthWest, SouthEast].into_iter().map(hit_code).collect();
         assert_eq!(codes, vec![HTTOP, HTBOTTOM, HTLEFT, HTRIGHT, HTTOPLEFT, HTTOPRIGHT, HTBOTTOMLEFT, HTBOTTOMRIGHT]);
+    }
+
+    #[test]
+    fn only_a_different_size_counts_as_snapped() {
+        let rect = |left, top, w, h| RECT { left, top, right: left + w, bottom: top + h };
+        // The restored rect is in work-area coordinates, so its position may differ when restored.
+        assert!(!differs_in_size(rect(2187, 133, 1500, 1000), rect(267, 133, 1500, 1000)));
+        assert!(differs_in_size(rect(1920, 0, 1280, 1380), rect(267, 133, 1500, 1000)));
+        assert!(differs_in_size(rect(0, 0, 1500, 1380), rect(0, 0, 1500, 1000)));
     }
 }
