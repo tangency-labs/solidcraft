@@ -430,8 +430,9 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let mut design = Vec::new();
     let mut mode = None;
     // Closed, the field is part of the ribbon and belongs under the system windows the rest of
-    // the ribbon goes under (Preferences, say); open, its sheet floats over everything.
-    let floating = open || progress > 0.0;
+    // the ribbon goes under (Preferences, say); open, its sheet floats over everything. The
+    // folded ribbon's panels, open over the view (#10112), keep it on top of them too.
+    let floating = open || progress > 0.0 || app.ui.ribbon_open;
     let response = Container::new(ctx, Surface::Popup)
         .area(egui::Id::new("sc_sbox"))
         .fixed_pos(pos)

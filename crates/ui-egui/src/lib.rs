@@ -1555,6 +1555,11 @@ impl SolveApp {
         self.tree.clear_folder_pick();
         // A command started from the folded ribbon's open panels closes them (#10112).
         self.ui.ribbon_open = false;
+        // Folding the ribbon, or showing it whole, keeps the tab it shows (no switch to VIEW).
+        if id == "view.ribbon_tabs_only" {
+            let _ = self.run(id, json!({}));
+            return;
+        }
         if id == "timeline.play" {
             if let Err(why) = self.run(id, json!({})) {
                 self.set_status(why, true);
@@ -1679,7 +1684,6 @@ impl SolveApp {
                 | "view.navigation_bar"
                 | "view.next_tab"
                 | "view.previous_tab"
-                | "view.ribbon_tabs_only"
         ) {
             let _ = self.run(id, json!({}));
             return;

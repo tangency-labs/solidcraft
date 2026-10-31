@@ -4797,9 +4797,11 @@ mod dropdown_toggle_tests {
             assert!(!h.app.ui.ribbon_open, "{layout}: a command closes the panels");
 
             // The command again keeps the whole ribbon shown.
+            h.app.ui.tab = "SURFACE".into();
             h.app.start("view.ribbon_tabs_only");
             h.frames(3);
             assert!(!h.app.preferences.ribbon_tabs_only);
+            assert_eq!(h.app.ui.tab, "SURFACE", "{layout}: the ribbon keeps its tab");
             assert!(rect_of("ribbon:folded").is_none());
             assert_eq!(rect_of("toolbar").unwrap().height(), whole.height(), "{layout}");
             assert!(h.app.run("view.ribbon_tabs_only", json!({"on": true})).is_ok());

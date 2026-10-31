@@ -301,8 +301,13 @@ fn navigation_bar(_s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 fn ribbon_tabs_only(_s: &mut Session, p: &Value) -> Result<Value> {
-    let request: RibbonTabsOnlyParams =
-        serde_json::from_value(if p.is_null() { json!({}) } else { p.clone() }).map_err(|e| bad("view.ribbon_tabs_only", e.to_string()))?;
+    let cmd = "view.ribbon_tabs_only";
+    let p = match p {
+        Value::Null => json!({}),
+        Value::Object(_) => p.clone(),
+        _ => return Err(bad(cmd, "parameters must be an object")),
+    };
+    let request: RibbonTabsOnlyParams = serde_json::from_value(p).map_err(|e| bad(cmd, e.to_string()))?;
     serde_json::to_value(RibbonTabsOnly { on: request.on, param_warnings: Vec::new() }).map_err(|e| crate::EngineError::Other(e.to_string()))
 }
 
