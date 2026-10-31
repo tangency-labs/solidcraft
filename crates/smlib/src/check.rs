@@ -100,6 +100,22 @@ mod tests {
         }
     }
 
+    /// A box whose corner is moved off its three edges: SMLib finds each edge bad at every level,
+    /// and the report says so rather than calling the body valid.
+    #[test]
+    fn a_corner_off_its_edges_fails_the_check() {
+        let mut record = Brep::make_box([0.0; 3], [10.0, 20.0, 30.0]).unwrap().to_native().unwrap();
+        record.vertices[0].point[0] += 0.5;
+        let moved = Brep::from_record(&record, true).unwrap();
+        for level in [CheckLevel::Basic, CheckLevel::Geometry, CheckLevel::All] {
+            let r = moved.check(level).unwrap();
+            assert!(!r.is_valid(), "{level:?}: {r}");
+            assert_eq!(r.failures, 3, "{level:?}: {r}");
+            assert_eq!(r.text.matches("Bad Edge").count(), 3, "{level:?}: {r}");
+            assert!(r.to_string().starts_with("3 failed tests:\n"), "{r}");
+        }
+    }
+
     #[test]
     fn a_copy_and_a_native_file_round_trip_stay_valid() {
         let b = Brep::make_box([0.0; 3], [2.0, 3.0, 4.0]).unwrap();

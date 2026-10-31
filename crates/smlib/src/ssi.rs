@@ -87,8 +87,10 @@ impl Surface {
 
     /// A schema 4 record surface over the parameter box `domain` (`[[u0, u1], [v0, v1]]`, the
     /// record's own parameters: radians for angles), with the record's parameterisation and
-    /// normal. A spline is taken over its whole knot domain. A cone only as a whole turn, widening
-    /// along its axis; a revolution not at all ([`Error::Unsupported`]).
+    /// normal; a torus is SMLib's rational form of it, the same surface over the same angles
+    /// with its own parameter on [0, 1] each way. A spline is taken over its whole knot domain. A
+    /// cone only as a whole turn, widening along its axis, its angle from the frame's x axis
+    /// whatever the domain's start; a revolution not at all ([`Error::Unsupported`]).
     pub fn from_record(surface: &solidcraft_geom::brep::Surface, domain: [[f64; 2]; 2]) -> Result<Surface> {
         use solidcraft_geom::brep::Surface as S;
         let [u, v] = domain;
@@ -326,6 +328,98 @@ mod tests {
                 let p = eval.point(t0 + (t1 - t0) * f64::from(k) / 100.0).expect("evaluates");
                 assert!((p.x.hypot(p.y) - 1.0).abs() < 1e-5 && p.z.abs() < 1e-5, "{p:?}");
             }
+        }
+    }
+
+    /// Each kind of record surface goes to SMLib with the record's parameterisation: over the
+    /// record's domain, SMLib's point at the same fraction of its own domain is the record's. A
+    /// torus is SMLib's rational form, on the same surface with the same corners. Frames off the
+    /// axes, non-unit plane axes, a tube that starts off the outer equator and a cone whose apex
+    /// is behind the frame's origin, so a swapped axis, scale or offset shows.
+    #[test]
+    fn record_surfaces_keep_their_parameterisation() {
+        use b::{Frame, Surface as S};
+        use std::f64::consts::{FRAC_1_SQRT_2, TAU};
+        let s = FRAC_1_SQRT_2;
+        // Unit, square axes with no zero component, so every term of their cross product counts.
+        let frame = Frame { origin: [1.0, -2.0, 3.0], x_axis: [2.0 / 3.0, 2.0 / 3.0, 1.0 / 3.0], y_axis: [1.0 / 3.0, -2.0 / 3.0, 2.0 / 3.0] };
+        let cases: Vec<(&str, S, [[f64; 2]; 2])> = vec![
+            ("plane", S::Plane { origin: [1.0, 2.0, 3.0], u_axis: [1.2, 1.6, 0.0], v_axis: [0.0, 0.0, 3.0] }, [[-1.0, 2.0], [0.5, 1.5]]),
+            (
+                "plane through",
+                S::PlaneThrough { origin: [1.0, 2.0, 3.0], u_point: [1.0, 4.0, 3.0], v_point: [0.0, 2.0, 3.0] },
+                [[0.0, 1.5], [-0.5, 2.0]],
+            ),
+            ("cylinder", S::Cylinder { frame: frame.clone(), radius: 4.0 }, [[0.3, 2.5], [-1.0, 6.0]]),
+            ("cone", S::Cone { frame: frame.clone(), radius_at_origin: 2.0, half_angle: 0.3 }, [[0.0, TAU], [1.0, 5.0]]),
+            ("sphere", S::Sphere { frame: frame.clone(), radius: 5.0 }, [[0.2, 3.0], [-1.0, 1.2]]),
+            ("torus", S::Torus { frame, major_radius: 10.0, minor_radius: 3.0, tube_start: 0.7 }, [[0.1, 2.0], [0.3, 4.0]]),
+            (
+                "spline",
+                S::Spline {
+                    u_knots: vec![0.0, 0.0, 1.0, 2.0, 2.0],
+                    v_knots: vec![0.0, 0.0, 0.0, 3.0, 3.0, 3.0],
+                    points: vec![
+                        vec![[0.0, 0.0, 0.0], [0.0, 1.0, 1.0], [0.0, 2.0, 0.0]],
+                        vec![[1.0, 0.0, 0.5], [1.0, 1.0, 2.0], [1.0, 2.0, 0.5]],
+                        vec![[3.0, 0.0, 0.0], [3.0, 1.0, 1.0], [3.0, 2.0, 0.0]],
+                    ],
+                },
+                [[0.0, 2.0], [0.0, 3.0]],
+            ),
+            (
+                "rational spline",
+                S::RationalSpline {
+                    u_knots: vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+                    v_knots: vec![0.0, 0.0, 4.0, 4.0],
+                    homogeneous: vec![
+                        vec![[3.0, 0.0, 0.0, 1.0], [3.0, 0.0, 4.0, 1.0]],
+                        vec![[3.0 * s, 3.0 * s, 0.0, s], [3.0 * s, 3.0 * s, 4.0 * s, s]],
+                        vec![[0.0, 3.0, 0.0, 1.0], [0.0, 3.0, 4.0, 1.0]],
+                    ],
+                },
+                [[0.0, 1.0], [0.0, 4.0]],
+            ),
+        ];
+        for (name, record, domain) in &cases {
+            let ours = b::eval::SurfaceEval::new(record).unwrap();
+            let theirs = match Surface::from_record(record, *domain) {
+                Err(Error::NotBuilt) => return,
+                r => r.unwrap_or_else(|e| panic!("{name}: {e:?}")),
+            };
+            let [a0, a1, b0, b1] = theirs.domain().unwrap();
+            let [[u0, u1], [v0, v1]] = *domain;
+            for j in 0..=4 {
+                for k in 0..=4 {
+                    let (fu, fv) = (f64::from(j) / 4.0, f64::from(k) / 4.0);
+                    let want = ours.point([u0 + (u1 - u0) * fu, v0 + (v1 - v0) * fv]).unwrap();
+                    let got = theirs.evaluate(a0 + (a1 - a0) * fu, b0 + (b1 - b0) * fv).unwrap();
+                    let got = solidcraft_geom::Vec3::from(got);
+                    let corner = j % 4 == 0 && k % 4 == 0;
+                    let gap = if *name == "torus" && !corner {
+                        ours.project(got, None, 1e-3).and_then(|uv| ours.point(uv)).map_or(f64::INFINITY, |q| q.dist(got))
+                    } else {
+                        want.dist(got)
+                    };
+                    assert!(gap < 1e-9, "{name} at ({fu}, {fv}): SMLib {got:?}, the record {want:?}");
+                }
+            }
+        }
+    }
+
+    /// A cone goes only as a whole turn, widening along its axis: part of a turn, a narrowing
+    /// cone and a cone of no angle are unsupported.
+    #[test]
+    fn cones_smlib_cannot_take_are_unsupported() {
+        use std::f64::consts::{PI, TAU};
+        let frame = b::Frame { origin: [0.0; 3], x_axis: [1.0, 0.0, 0.0], y_axis: [0.0, 1.0, 0.0] };
+        let cone = |half_angle: f64| b::Surface::Cone { frame: frame.clone(), radius_at_origin: 2.0, half_angle };
+        match Surface::from_record(&cone(0.3), [[-1.0, TAU - 1.0], [0.0, 5.0]]) {
+            Err(Error::NotBuilt) => return,
+            r => assert!(r.is_ok(), "{r:?}"),
+        }
+        for (what, half, u) in [("half a turn", 0.3, [1.0, 1.0 + PI]), ("narrowing", -0.3, [-1.0, TAU - 1.0]), ("no angle", 0.0, [0.0, TAU])] {
+            assert_eq!(Surface::from_record(&cone(half), [u, [0.0, 5.0]]).err(), Some(Error::Unsupported), "{what}");
         }
     }
 
