@@ -16,6 +16,12 @@
 cov-chamfer-concave-edge-through-up-down-joined-squares SMLib status 1001 on the concave chamfer's tangent chain
 cov-chamfer-outer-corner-edge-of-a-shelled-box-with-a-lip SMLib's chamfer result is not a closed solid where it ends on the lip
 cov-fillet-arc-edge-on-an-oblique-cut-of-a-bar SMLib's check refuses the round: internal coincident control points in a B-spline curve
+cov-fillet-g2-default-corner-beside-a-cylinder the default fillet is the circular (G1) round, not yet the curvature-continuous one: its seams with the faces jump in curvature by 1/r (0.5 / mm)
+cov-fillet-g2-default-five-edge-apex-corner the default fillet is the circular (G1) round, not yet the curvature-continuous one: and the apex patch meets two rounds at 8.45 degrees (G0) near (0.708, 1.556, 26.824)
+cov-fillet-g2-default-four-edge-apex-corner the default fillet is the circular (G1) round, not yet the curvature-continuous one: the apex patch meets the rounds G1 only (curvature jump 6.6 / mm)
+cov-fillet-g2-default-mixed-corner the default fillet is the circular (G1) round, not yet the curvature-continuous one: its seams with the faces jump in curvature by 1/r (0.5 / mm)
+cov-fillet-g2-default-oblique-three-edge-corner the default fillet is the circular (G1) round, not yet the curvature-continuous one: its seams jump in curvature by 1/r (0.5 / mm)
+cov-fillet-g2-default-pocket-corner the default fillet is the circular (G1) round, not yet the curvature-continuous one: its seams jump in curvature by 1/r (0.5 / mm)
 every-block-cylinder-crease-top-edge-after-arc-round-r1 the r1 round's contact seam with the block's side face reads 60 degrees (the cylinder wall's normal) at its end on the crease (8.660, 5, 15.284): G0 where the round is built tangent
 every-hole-top-rim-r12-past-plate-bottom SMLib status 1001: a convex round past its face on the tangent side is not yet built by subtraction
 report-drafted-peg-front-and-concave-rounds-together-r2 not supported yet: SMLib refuses the corner where the drafted front top edge runs tangent into the concave arc (on the cone) as of no kind its blend corners take

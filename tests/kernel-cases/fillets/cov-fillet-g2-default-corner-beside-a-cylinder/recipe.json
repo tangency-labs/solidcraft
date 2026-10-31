@@ -1,0 +1,77 @@
+{
+ "commands": [
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": "XY",
+    "name": "Half"
+   }
+  },
+  {
+   "command": "sketch.arc.center_point",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "start": [
+     10,
+     0
+    ],
+    "end": [
+     -10,
+     0
+    ]
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      -10,
+      0
+     ],
+     [
+      10,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.extrude",
+   "params": {
+    "sketch": "Half",
+    "distance": 10
+   }
+  },
+  {
+   "command": "solid.fillet",
+   "params": {
+    "edges": [
+     [
+      7.0710678118654755,
+      7.0710678118654755,
+      10
+     ],
+     [
+      0,
+      0,
+      10
+     ],
+     [
+      10,
+      0,
+      5
+     ]
+    ],
+    "radius": 2
+   }
+  }
+ ]
+}

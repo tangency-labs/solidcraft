@@ -1,0 +1,106 @@
+{
+ "commands": [
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": "XY",
+    "name": "Base"
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      0,
+      0
+     ],
+     [
+      30,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      30,
+      0
+     ],
+     [
+      30,
+      20
+     ]
+    ]
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      30,
+      20
+     ],
+     [
+      0,
+      20
+     ]
+    ]
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      0,
+      20
+     ],
+     [
+      0,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.extrude",
+   "params": {
+    "sketch": "Base",
+    "distance": 10,
+    "taper": "-15 deg"
+   }
+  },
+  {
+   "command": "solid.fillet",
+   "params": {
+    "edges": [
+     [
+      15,
+      2.679491924311227,
+      10
+     ],
+     [
+      2.679491924311227,
+      10,
+      10
+     ],
+     [
+      1.3397459621556136,
+      1.3397459621556136,
+      5
+     ]
+    ],
+    "radius": 2
+   }
+  }
+ ]
+}
