@@ -1592,6 +1592,7 @@
   "prefs.interface_note": "SolidCraft의 모양과 각 부분의 위치입니다.",
   "prefs.interval_minutes": "{n}분",
   "prefs.labels": "레이블",
+  "prefs.language_system": "시스템",
   "prefs.layout": "레이아웃",
   "prefs.layout_note": "컴팩트는 패널을 창 가장자리에 고정합니다. 브라우저 반투명은 플로팅에서 사용할 수 있습니다. 어시스턴트 위치는 어시스턴트 페이지에서 바꿀 수 있습니다.",
   "prefs.left": "왼쪽",

@@ -2185,6 +2185,7 @@
   "prefs.keep_work_on_tab_switch": "Keep dialogs and tools open when switching designs",
   "prefs.keep_work_on_tab_switch_note": "Each design tab keeps its open dialog or tool, with what you picked and typed in it, and its toolbar tab. They are there again when you come back to the design. Off: switching designs cancels them and shows the Model tab.",
   "prefs.labels": "Labels",
+  "prefs.language_system": "System",
   "prefs.layout": "Layout",
   "prefs.layout_note": "Compact docks panels to the window edges. Browser translucency is available in Floating. Change the Assistant side on the Assistant page.",
   "prefs.left": "Left",

@@ -2185,6 +2185,7 @@
   "prefs.keep_work_on_tab_switch": "切换设计时保持对话框和工具打开",
   "prefs.keep_work_on_tab_switch_note": "每个设计标签页保留其打开的对话框或工具（包括其中已选择和输入的内容）以及工具栏选项卡。回到该设计时它们仍在原处。关闭时：切换设计会取消它们并显示“模型”选项卡。",
   "prefs.labels": "标签",
+  "prefs.language_system": "系统",
   "prefs.layout": "布局",
   "prefs.layout_note": "紧凑模式将面板停靠在窗口边缘。浏览器半透明仅适用于浮动模式。助手面板的位置在助手页面中设置。",
   "prefs.left": "左侧",

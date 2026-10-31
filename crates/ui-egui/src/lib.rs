@@ -2778,7 +2778,11 @@ impl SolveApp {
             self.applied_fonts_language.clone_from(&self.preferences.language);
             self.applied_ui_font.clone_from(&self.preferences.ui_font);
             self.applied_system_fonts = system_fonts;
-            crate::fonts::setup_fonts_without_waiting(ui.ctx(), &self.preferences.language, &self.preferences.ui_font);
+            crate::fonts::setup_fonts_without_waiting(
+                ui.ctx(),
+                crate::i18n::effective_language(&self.preferences.language),
+                &self.preferences.ui_font,
+            );
         }
         let _language = crate::i18n::scope(&self.preferences.language);
         let mut report_input = None;

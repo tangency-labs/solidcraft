@@ -130,12 +130,50 @@ pub fn is_supported(id: &str) -> bool {
     LOCALES.iter().any(|catalog| catalog.id == id)
 }
 
+/// The `language` preference value that follows the system (#10138). Not a catalog id: it
+/// resolves through [`system_language`] wherever a catalog is needed.
+pub const SYSTEM: &str = "system";
+
+/// Match the system's preferred locale tags against the catalogs: the exact tag first
+/// (`zh-TW`, `pt-BR`, `en-GB`), then the tag's base language (`zh-CN` → `zh`, `de-AT` → `de`),
+/// then English. Tags come in the system's order of preference; the first one that matches wins.
+pub fn match_system_tags(tags: &[String]) -> &'static str {
+    for tag in tags {
+        let tag = tag.replace('_', "-");
+        if let Some(catalog) = LOCALES.iter().find(|catalog| catalog.id.eq_ignore_ascii_case(&tag)) {
+            return catalog.id;
+        }
+        let base = tag.split('-').next().unwrap_or(&tag);
+        if let Some(catalog) = LOCALES.iter().find(|catalog| catalog.id.eq_ignore_ascii_case(base)) {
+            return catalog.id;
+        }
+    }
+    ENGLISH.id
+}
+
+/// The catalog id the system asks for, read once per process: the OS locale on desktop
+/// (Windows, macOS, Linux/BSD) and `navigator.languages` in the browser.
+pub fn system_language() -> &'static str {
+    static CACHED: OnceLock<&'static str> = OnceLock::new();
+    *CACHED.get_or_init(|| match_system_tags(&sys_locale::get_locales().collect::<Vec<_>>()))
+}
+
+/// The catalog id a `language` preference resolves to: the saved choice, or the system's for
+/// [`SYSTEM`]. For callers that need the id as text (font fallbacks), not a [`Locale`].
+pub fn effective_language(preference: &str) -> &'static str {
+    Locale::for_language(preference).0.id
+}
+
 /// Immutable locale reference. Catalogs parse once; lookups are logarithmic.
 #[derive(Clone, Copy)]
 pub struct Locale(&'static Catalog);
 
 impl Locale {
     pub fn for_language(id: &str) -> Self {
+        if id == SYSTEM {
+            let system = system_language();
+            return Self(LOCALES.iter().copied().find(|catalog| catalog.id == system).unwrap_or(&ENGLISH));
+        }
         Self(LOCALES.iter().copied().find(|catalog| catalog.id == id).unwrap_or(&ENGLISH))
     }
 
@@ -351,6 +389,41 @@ pub fn tr_diagnostic(text: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    /// The system's locale tags pick a catalog: exact tag, then base language, then English (#10138).
+    #[test]
+    fn system_tags_match_the_catalog_exact_then_base_then_english() {
+        let tags = |list: &[&str]| list.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        assert_eq!(super::match_system_tags(&tags(&["zh-TW"])), "zh-TW", "exact tag");
+        assert_eq!(super::match_system_tags(&tags(&["pt-BR"])), "pt-BR");
+        assert_eq!(super::match_system_tags(&tags(&["en-GB"])), "en-GB");
+        assert_eq!(super::match_system_tags(&tags(&["zh-CN"])), "zh", "base language of zh-CN");
+        assert_eq!(super::match_system_tags(&tags(&["de-AT"])), "de");
+        assert_eq!(super::match_system_tags(&tags(&["zh_CN"])), "zh", "underscores normalize");
+        assert_eq!(super::match_system_tags(&tags(&["FR"])), "fr", "case-insensitive");
+        assert_eq!(super::match_system_tags(&tags(&["nl"])), "nl", "bare base tag");
+        assert_eq!(super::match_system_tags(&tags(&["pt-PT"])), "en", "pt has no catalog: English");
+        assert_eq!(super::match_system_tags(&tags(&["xx-YY"])), "en", "unknown: English");
+        assert_eq!(super::match_system_tags(&tags(&[])), "en", "nothing: English");
+        assert_eq!(super::match_system_tags(&tags(&["xx-YY", "de-DE"])), "de", "the first tag that matches wins");
+    }
+
+    /// A saved language is never overridden: only `system` resolves through the OS (#10138).
+    #[test]
+    fn a_saved_language_choice_is_never_overridden() {
+        assert_eq!(super::Locale::for_language("de").name(), "Deutsch");
+        assert_eq!(super::Locale::for_language("zh-TW").name(), "繁體中文");
+        assert_eq!(super::effective_language("de"), "de");
+        assert_eq!(super::effective_language("ja"), "ja");
+        // A first start has no saved language: the default follows the system.
+        assert_eq!(crate::prefs::Prefs::default().language, super::SYSTEM);
+        // A saved choice in the settings file wins over the default.
+        let saved: crate::prefs::Prefs = serde_json::from_str(r#"{"language":"ja"}"#).unwrap();
+        assert_eq!(saved.language, "ja");
+        // `system` is a preference value, not a catalog: it never enters the language list.
+        assert!(!super::is_supported(super::SYSTEM));
+        assert!(super::is_supported(super::effective_language(super::SYSTEM)), "system resolves to a catalog");
+    }
+
     #[test]
     fn theme_options_resolved_labels_are_verbatim_and_restore_catalog_adapters() {
         let _language = super::scope("de");

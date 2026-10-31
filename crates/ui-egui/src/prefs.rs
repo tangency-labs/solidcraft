@@ -1076,8 +1076,9 @@ preference_settings! {
     theme_follow: String = String::new(), PAGE_INTERFACE;
     /// Per-theme overrides. Raw JSON retains entries from newer or hand-edited settings.
     theme_options: BTreeMap<String, BTreeMap<String, serde_json::Value>> = BTreeMap::new(), PAGE_INTERFACE;
-    /// Interface language (a registered locale ID).
-    language: String = "en".into(), 0;
+    /// Interface language: a registered locale ID, or `system` to follow the system's language
+    /// on every start (#10138). A saved language keeps winning, so existing users don't change.
+    language: String = "system".into(), 0;
     /// Shared workspace composition; system windows and popups retain their purpose.
     layout: crate::shell::LayoutMode = Default::default(), PAGE_INTERFACE;
     /// Ordered view controls and their appearance.
@@ -3561,7 +3562,7 @@ fn theme_option_rows<'a>(
 
 fn theme_options_row(app: &mut SolveApp, ui: &mut egui::Ui) {
     let Some(file) = active_theme_file(app) else { return };
-    let rows = theme_option_rows(file, &app.preferences.language, crate::theme_options::PROVIDERS);
+    let rows = theme_option_rows(file, crate::i18n::effective_language(&app.preferences.language), crate::theme_options::PROVIDERS);
     if rows.is_empty() {
         return;
     }
@@ -3634,7 +3635,12 @@ fn theme_options_reply(app: &SolveApp) -> solidcraft_engine::schema::ui_prefs::T
     use solidcraft_engine::schema::ui_prefs::{ThemeChoice, ThemeOptionDef, ThemeOptionKind, ThemeOptionValue, ThemeOptionsReply};
     let Some(file) = active_theme_file(app) else { return ThemeOptionsReply::default() };
     let text = |texts: &crate::theme_files::OptionText, fallback: &str| {
-        texts.get(&app.preferences.language).or_else(|| texts.get("en")).map(String::as_str).unwrap_or(fallback).to_string()
+        texts
+            .get(crate::i18n::effective_language(&app.preferences.language))
+            .or_else(|| texts.get("en"))
+            .map(String::as_str)
+            .unwrap_or(fallback)
+            .to_string()
     };
     let (values, notices) = effective_theme_options(&app.preferences, file);
     ThemeOptionsReply {
@@ -3888,8 +3894,12 @@ fn prepare_preferences(
         }
         crate::theme_files::follow_path(&new.theme_follow)?;
     }
-    if !crate::i18n::is_supported(&new.language) {
-        return Err(format!("`language` must be one of: {}", crate::i18n::LOCALES.iter().map(|locale| locale.id).collect::<Vec<_>>().join(", ")));
+    if new.language != crate::i18n::SYSTEM && !crate::i18n::is_supported(&new.language) {
+        return Err(format!(
+            "`language` must be `{}` or one of: {}",
+            crate::i18n::SYSTEM,
+            crate::i18n::LOCALES.iter().map(|locale| locale.id).collect::<Vec<_>>().join(", ")
+        ));
     }
     if new.ui_font != app.preferences.ui_font && !new.ui_font.trim().is_empty() && crate::fonts::ui_font(&new.ui_font).is_none() {
         return Err(format!("`ui_font`: `{}` is not an installed font family or a readable font file", new.ui_font.trim()));
@@ -8369,7 +8379,9 @@ mod tests {
     #[test]
     fn language_preference_switches_and_persists() {
         let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
-        assert_eq!(app.preferences.language, "en");
+        // A first start follows the system (#10138); pin English so the words below are fixed.
+        assert_eq!(app.preferences.language, crate::i18n::SYSTEM);
+        app.preferences.language = "en".into();
         assert_eq!(app.tr("ui.preferences"), "Preferences");
         assert_eq!(app.tr("ui.extrude"), "Extrude");
 

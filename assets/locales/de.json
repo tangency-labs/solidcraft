@@ -2185,6 +2185,7 @@
   "prefs.keep_work_on_tab_switch": "Dialoge und Werkzeuge beim Wechsel zwischen Konstruktionen offen lassen",
   "prefs.keep_work_on_tab_switch_note": "Jeder Konstruktions-Tab behält seinen offenen Dialog oder sein Werkzeug mit allem, was darin ausgewählt und eingegeben wurde, sowie seinen Werkzeugleisten-Tab. Beim Zurückkehren zur Konstruktion ist alles wieder da. Aus: Ein Wechsel bricht sie ab und zeigt den Tab Modell.",
   "prefs.labels": "Beschriftungen",
+  "prefs.language_system": "System",
   "prefs.layout": "Layout",
   "prefs.layout_note": "Im Layout „Kompakt“ werden Bereiche an den Fensterrändern angedockt. Transparenz für den Browser ist nur im Layout „Schwebend“ verfügbar. Die Position des Assistenten ändern Sie auf der Seite „Assistent“.",
   "prefs.left": "Links",

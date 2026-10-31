@@ -2185,6 +2185,7 @@
   "prefs.keep_work_on_tab_switch": "Giữ hộp thoại và công cụ mở khi chuyển giữa các thiết kế",
   "prefs.keep_work_on_tab_switch_note": "Mỗi thẻ thiết kế giữ hộp thoại hoặc công cụ đang mở, cùng những gì bạn đã chọn và nhập trong đó, và thẻ thanh công cụ của nó. Chúng vẫn còn đó khi bạn quay lại thiết kế. Tắt: chuyển thiết kế sẽ hủy chúng và hiển thị thẻ Mô hình.",
   "prefs.labels": "Nhãn chữ",
+  "prefs.language_system": "Hệ thống",
   "prefs.layout": "Bố cục",
   "prefs.layout_note": "Chế độ Gọn (Compact) gắn các bảng vào mép cửa sổ. Độ trong suốt của Cây thư mục chỉ khả dụng ở chế độ Nổi (Floating). Thay đổi vị trí của Trợ lý trong trang Trợ lý.",
   "prefs.left": "Bên trái",

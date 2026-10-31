@@ -5,6 +5,13 @@ Japanese, Korean, Malay, Norwegian Bokmål, Dutch, Polish, Brazilian Portuguese,
 embedded catalog and one registration there; the preferences selector and validation use the same
 registry.
 
+The `language` preference is a registered locale ID, or `system` (the default on a first start):
+the app then matches the system's preferred locales — the OS locale on desktop,
+`navigator.languages` in the browser, read with the `sys-locale` crate — against the registry:
+exact tag, then base language, then English (`match_system_tags` in
+`crates/ui-egui/src/i18n.rs`). A saved specific language always wins, so existing users keep
+their choice.
+
 ## Messages
 
 `assets/locales/en.json` defines stable message IDs and English fallback text.
