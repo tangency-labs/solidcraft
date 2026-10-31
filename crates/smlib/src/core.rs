@@ -268,6 +268,9 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.offset_splits_corner_vertices = true;
     f.offset_keep_cavity_regions = true;
     f.offset_four_face_vertex_split = true;
+    f.gap_samples_non_bspline_v_stride = true;
+    f.gap_array_append_updates_longest = true;
+    f.imprint_skips_collapsed_definition = true;
     f.precise_properties_trim_base_v = true;
     f.fillet_blend_curve_revolved_on_arc = true;
     f.temporary_radius_setup_errors = true;
