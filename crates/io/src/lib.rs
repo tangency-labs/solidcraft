@@ -36,6 +36,7 @@ pub use glb::{DEFAULT_COLOR as GLB_DEFAULT_COLOR, MAX_GLB_BYTES, export_glb};
 mod legacy_dir;
 pub mod library_files;
 pub mod limits;
+pub mod live_mesh;
 #[cfg(test)]
 mod mutate;
 mod native_cad;
