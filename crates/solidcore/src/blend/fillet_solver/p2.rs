@@ -68,7 +68,10 @@
 //!   base surface past both ends (`run_side_edge_on_along_its_line`, the fork's
 //!   tangency-labs/smlib@6e77631). With `fixes.fillet_run_on_past_far_end_only` too, past
 //!   the end away from the filleted edge's vertex only (WR-643, the fork's
-//!   tangency-labs/smlib@7224896).
+//!   tangency-labs/smlib@7224896). With `fixes.fillet_run_on_bspline_trims` too, a widened
+//!   side edge's B-spline UV trim (its local copy) evaluates out of bounds, so it runs on
+//!   along its line as a line trim does instead of clamping to its ends
+//!   (`continue_bspline_trim_past_its_ends`, WR-654, #1981).
 
 use crate::blend::fillet_custom_solver::OffsetSurface;
 use crate::blend::fillet_executive::p3::ErrorInfo;
@@ -518,7 +521,7 @@ fn bspline_part(curve: &Curve) -> Result<&BSplineCurve> {
 /// side edge use's parameter interval (`intervals[0]`) past both ends when the side
 /// edge is a line, its UV trim curve is linear and the rail's base surface is planar:
 /// by the trace's reach or the extension factor times the edge's length, whichever is
-/// larger, in the UV trim curve's parameters.
+/// larger, in the UV trim curve's parameters. Returns whether it widened the interval.
 fn run_side_edge_on_along_its_line(
     k: &Kernel,
     b: &Brep,
@@ -527,15 +530,15 @@ fn run_side_edge_on_along_its_line(
     base: &Surface,
     solver: &FilletSolver,
     intervals: &mut ExtentNd,
-) -> Result<()> {
+) -> Result<bool> {
     let Some(side_3d) = edge::curve(b, side_edge)?.cloned() else {
-        return Ok(());
+        return Ok(false);
     };
     if !(side_3d.is_linear(k, EFF_ZERO, false)?.linear
         && uv_trim.is_linear(k, EFF_ZERO, false)?.linear
         && base.is_planar(k, EFF_ZERO)?.is_planar)
     {
-        return Ok(());
+        return Ok(false);
     }
     let edge_ivl = intervals
         .get(0)
@@ -561,7 +564,7 @@ fn run_side_edge_on_along_its_line(
                 0,
                 Extent1d::from_min_max(edge_ivl.min() - past, edge_ivl.max() + past),
             );
-            return Ok(());
+            return Ok(true);
         }
         // Opt-in (`fixes.fillet_run_on_past_far_end_only`, WR-643; the fork's
         // tangency-labs/smlib@7224896): only past the end away from the corner. The side
@@ -597,8 +600,25 @@ fn run_side_edge_on_along_its_line(
             0,
             Extent1d::from_min_max(edge_ivl.min() - before, edge_ivl.max() + after),
         );
+        return Ok(true);
     }
-    Ok(())
+    Ok(false)
+}
+
+/// Opt-in (`fixes.fillet_run_on_bspline_trims`, WR-654, #1981), not upstream: turns
+/// on out-of-bounds evaluation of a side edge's B-spline UV trim that
+/// [`run_side_edge_on_along_its_line`] widened, so the solve finds a point of its line
+/// past its ends, as on a line trim (whose evaluation is never clamped). An
+/// `SmBSplineCurve` clamps the parameter to its natural interval otherwise
+/// (`SmBSplineCurve::Evaluate`), and the exact degree-1 B-spline trims `SwapUV` mirrors
+/// onto a face kept the widened interval from reaching past the edge's ends. Other
+/// kinds are left as they are (a line trim runs on already). The caller passes its own
+/// copy of the trim; the edge use's stored trim is not touched.
+fn continue_bspline_trim_past_its_ends(uv_trim: &mut Curve) {
+    use crate::curve::curve::CurveKind;
+    if let CurveKind::BSpline(c) = uv_trim.kind_mut() {
+        c.set_out_of_bounds_enabled(true);
+    }
 }
 
 fn check_uv_bspline_kind(c: &Curve) -> Result<()> {
@@ -1746,7 +1766,7 @@ impl FilletSolver {
 
         // let edgeuse->Surface UV guess = edgeuse->UVTrimCurve(GuessEdgeParameter)
         get_or_create_uv_trim_curve(k, b, side_eu, false, false, true)?.status?;
-        let uv_trim = eu::uv_trim_curve(b, side_eu)?
+        let mut uv_trim = eu::uv_trim_curve(b, side_eu)?
             .0
             .cloned()
             .ok_or_else(|| invalid("no UV trim curve"))?;
@@ -1779,7 +1799,7 @@ impl FilletSolver {
         // from a first guess already on it.
         if k.fixes.fillet_trace_reaches_rails {
             if let Some(side_edge) = side_edge {
-                run_side_edge_on_along_its_line(
+                let widened = run_side_edge_on_along_its_line(
                     k,
                     b,
                     side_edge,
@@ -1788,6 +1808,13 @@ impl FilletSolver {
                     ops.solver(),
                     &mut intervals,
                 )?;
+                // Opt-in (`fixes.fillet_run_on_bspline_trims`, WR-654, #1981): a B-spline
+                // trim clamps to its ends, so the widened interval reached no point of
+                // its line past them; a line trim on the other wall did, and the two
+                // rails' ends at the side vertex fell apart.
+                if widened && k.fixes.fillet_run_on_bspline_trims {
+                    continue_bspline_trim_past_its_ends(&mut uv_trim);
+                }
             }
         }
         set_interval(
@@ -3083,6 +3110,50 @@ mod tests {
         let ((lo, hi), (a, z), none) = run_on_interval(true, false);
         assert_eq!(none, None);
         assert_eq!((lo, hi), (a - past, z + past));
+    }
+
+    /// WR-654 (#1981): a side edge's degree-1 B-spline UV trim clamps the parameter to
+    /// its natural interval, so past its start it gives the start point, where a line
+    /// trim runs on; `continue_bspline_trim_past_its_ends` (what `RailEdgeuseIntersect`
+    /// applies to its copy of a widened trim with `fillet_run_on_bspline_trims`) makes it
+    /// run on along its line past both ends, and leaves its points inside and a line
+    /// trim as they were.
+    #[test]
+    fn wr654_widened_bspline_trim_runs_on_along_its_line() {
+        let k = Kernel::default();
+        let (b, side_eu) = edgeuse_with_uv_trim();
+        let stored = eu::uv_trim_curve(&b, side_eu).unwrap().0.unwrap().clone();
+        assert!(matches!(
+            stored.kind(),
+            crate::curve::curve::CurveKind::BSpline(_)
+        ));
+        let at = |c: &Curve, t: f64| c.evaluate_point(&k, t).unwrap();
+        // as stored (and without the flag): clamped to the trim's ends
+        assert_eq!(at(&stored, -0.5), Point3::new(0.0, 0.0, 0.0));
+        assert_eq!(at(&stored, 1.5), Point3::new(1.0, 0.0, 0.0));
+        let mut on = stored.clone();
+        continue_bspline_trim_past_its_ends(&mut on);
+        assert_eq!(at(&on, -0.5), Point3::new(-0.5, 0.0, 0.0));
+        assert_eq!(at(&on, 1.5), Point3::new(1.5, 0.0, 0.0));
+        for t in [0.0, 0.25, 1.0] {
+            assert_eq!(at(&on, t), at(&stored, t));
+        }
+        // the edge use's own trim is untouched
+        assert_eq!(
+            at(eu::uv_trim_curve(&b, side_eu).unwrap().0.unwrap(), -0.5),
+            Point3::new(0.0, 0.0, 0.0)
+        );
+        // a line trim runs on already and is left as it is
+        let ivl = Extent1d::from_min_max(0.0, 1.0);
+        let line = Curve::from(
+            line_segment(Point3::new(0.0, 0.0, 0.0), Point3::new(1.0, 0.0, 0.0), &ivl).unwrap(),
+        );
+        let mut line_on = line.clone();
+        continue_bspline_trim_past_its_ends(&mut line_on);
+        for t in [-0.5, 0.5, 1.5] {
+            assert_eq!(at(&line_on, t), at(&line, t));
+        }
+        assert_eq!(at(&line, -0.5), Point3::new(-0.5, 0.0, 0.0));
     }
 
     fn edgeuse_with_uv_trim() -> (Brep, EdgeuseId) {
