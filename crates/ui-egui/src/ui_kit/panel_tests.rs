@@ -5,6 +5,69 @@ use crate::{scenario, theme::Tokens};
 use egui::Ui;
 
 #[test]
+fn blur_outer_window_decoration_precedes_rounded_fill() {
+    struct TestMarker;
+    fn decorate(_: &egui::Painter, frame: egui::Frame, content: egui::Rect, shape: egui::Shape) -> egui::Shape {
+        egui::Shape::Vec(vec![
+            egui::Shape::Callback(egui::PaintCallback { rect: frame.widget_rect(content), callback: std::sync::Arc::new(TestMarker) }),
+            shape,
+        ])
+    }
+    let ctx = crate::fonts::test_context();
+    let corners = egui::CornerRadius { nw: 3, ne: 7, sw: 11, se: 15 };
+    let mut output = egui::FullOutput::default();
+    for _ in 0..3 {
+        output = crate::test_support::frame(&ctx, egui::RawInput::default(), |ui| {
+            let frame = Container::new(ui.ctx(), Surface::Feature)
+                .frame(ui.ctx(), Tokens::get().dialog_body, crate::frame::Side::Right)
+                .corner_radius(corners);
+            Container::new(ui.ctx(), Surface::Feature)
+                .window("Frame hook fixture")
+                .title_bar(false)
+                .fixed_pos(egui::pos2(30.0, 35.0))
+                .frame(frame)
+                .background_painter(decorate)
+                .show(ui.ctx(), |ui| {
+                    ui.label("Content stays above its frame");
+                });
+        });
+    }
+    let mut marker = None;
+    let mut matched = false;
+    for clipped in &output.shapes {
+        crate::test_support::each_shape(&clipped.shape, &mut |shape| match shape {
+            egui::Shape::Callback(cb) if cb.callback.is::<TestMarker>() => {
+                marker = Some(cb.rect);
+            }
+            egui::Shape::Rect(rect) if marker == Some(rect.rect) => {
+                assert_eq!(rect.corner_radius, corners);
+                assert!(clipped.clip_rect.intersects(rect.rect));
+                matched = true;
+            }
+            _ => {}
+        });
+    }
+    assert!(matched, "marker must precede the matching frame fill on its own layer");
+}
+
+#[test]
+fn blur_zero_has_no_marker_or_tint_override() {
+    let mut state = crate::blur::State::default();
+    state.set_radius(0.0).unwrap();
+    let ctx = crate::fonts::test_context();
+    let _scope = state.begin(&ctx, true);
+    assert!(!crate::blur::enabled());
+    let fill = egui::Color32::from_rgba_unmultiplied(40, 80, 100, 180);
+    assert_eq!(crate::blur::panel_fill(fill), fill);
+    let original = egui::Shape::rect_filled(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(80.0, 40.0)), 9, fill);
+    let painter = ctx.layer_painter(egui::LayerId::background());
+    let unchanged = crate::blur::decorate(&painter, egui::Frame::NONE.fill(fill), egui::Rect::NOTHING, original.clone());
+    assert_eq!(format!("{original:?}"), format!("{unchanged:?}"));
+    assert_eq!(state.counters().markers_emitted, 0);
+    assert_eq!(state.counters().textures_created, 0);
+}
+
+#[test]
 fn checkbox_grid_and_close_header_are_clickable() {
     let ctx = crate::fonts::test_context();
     let (mut first, mut second, mut closed) = (false, true, false);

@@ -2124,7 +2124,8 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 [f32::from(c.r()) / 255.0, f32::from(c.g()) / 255.0, f32::from(c.b()) / 255.0]
             },
         });
-        ui.painter().add(egui_wgpu::Callback::new_paint_callback(rect, callback));
+        let color = Color32::from_rgb(bg[0], bg[1], bg[2]);
+        crate::blur::viewport(ui.painter(), rect, callback, viewport, [color, color]);
         Ok(())
     })();
     if let Err(error) = result {

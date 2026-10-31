@@ -1371,7 +1371,7 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
                 let fill =
                     if crate::render_workspace::active(app) && card == ws { crate::theme::TabAccent::current(ui.ctx()).soft } else { t.toolbar };
                 let frame = host.frame(ui.ctx(), fill, crate::frame::Side::Left);
-                ui.painter().add(frame.paint(card));
+                host.paint_background(ui.painter(), frame, card);
                 // Blank card space owns clicks as well as its buttons.
                 ui.interact(card, ui.id().with(("shell_card", card.left().to_bits())), Sense::click_and_drag());
             }

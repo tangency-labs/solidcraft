@@ -3290,7 +3290,7 @@ fn can_reuse(ss_ready: bool, cached: Option<u64>, key: u64) -> bool {
 /// section, images, analysis, accessibility map, ambient occlusion and the theme's hover and
 /// selection tints. The same key draws the same picture (pipelines and shaders are fixed for the
 /// renderer).
-fn frame_key(cb: &Frame) -> u64 {
+pub fn frame_key(cb: &Frame) -> u64 {
     use std::hash::Hash as _;
     let mut h = std::collections::hash_map::DefaultHasher::new();
     cb.product.hash(&mut h);

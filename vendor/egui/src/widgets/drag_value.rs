@@ -1,0 +1,866 @@
+use crate::{
+    Atom, AtomExt as _, AtomKind, Atoms, Button, CursorIcon, Id, IntoAtoms, Key, MINUS_CHAR_STR,
+    Modifiers, NumExt as _, Response, RichText, Sense, TextEdit, TextWrapMode, Ui, Widget,
+    WidgetInfo, emath, text,
+};
+use core::{cmp::Ordering, ops::RangeInclusive};
+use emath::Vec2;
+
+// ----------------------------------------------------------------------------
+
+type NumFormatter<'a> = Box<dyn 'a + Fn(f64, RangeInclusive<usize>) -> String>;
+type NumParser<'a> = Box<dyn 'a + Fn(&str) -> Option<f64>>;
+
+// ----------------------------------------------------------------------------
+
+/// Combined into one function (rather than two) to make it easier
+/// for the borrow checker.
+type GetSetValue<'a> = Box<dyn 'a + FnMut(Option<f64>) -> f64>;
+
+fn get(get_set_value: &mut GetSetValue<'_>) -> f64 {
+    (get_set_value)(None)
+}
+
+fn set(get_set_value: &mut GetSetValue<'_>, value: f64) {
+    (get_set_value)(Some(value));
+}
+
+// ----------------------------------------------------------------------------
+
+/// What the user has typed into a [`DragValue`] that is being edited as text.
+///
+/// Stored in [`crate::Memory::data`] between frames, because the text can be
+/// something that doesn't (yet) parse to a number, e.g. `"1."` or `"-"`.
+#[derive(Clone, Default)]
+struct EditState {
+    /// The text the user is editing.
+    text: String,
+
+    /// The value of the [`DragValue`] the last time we stored `text`.
+    ///
+    /// If the value has changed since then it was changed by something other than
+    /// this widget, and `text` is stale and must not be written back to the value.
+    value: f64,
+}
+
+/// A numeric value that you can change by dragging the number. More compact than a [`crate::Slider`].
+///
+/// ```
+/// # egui::__run_test_ui(|ui| {
+/// # let mut my_f32: f32 = 0.0;
+/// ui.add(egui::DragValue::new(&mut my_f32).speed(0.1));
+/// # });
+/// ```
+#[must_use = "You should put this widget in a ui with `ui.add(widget);`"]
+pub struct DragValue<'a> {
+    get_set_value: GetSetValue<'a>,
+    speed: f64,
+    atoms: Atoms<'a>,
+    range: RangeInclusive<f64>,
+    clamp_existing_to_range: bool,
+    min_decimals: usize,
+    max_decimals: Option<usize>,
+    custom_formatter: Option<NumFormatter<'a>>,
+    custom_parser: Option<NumParser<'a>>,
+    update_while_editing: bool,
+}
+
+impl<'a> DragValue<'a> {
+    const ATOM_ID: &'static str = "drag_item";
+
+    pub fn new<Num: emath::Numeric>(value: &'a mut Num) -> Self {
+        let slf = Self::from_get_set(move |v: Option<f64>| {
+            if let Some(v) = v {
+                *value = Num::from_f64(v);
+            }
+            value.to_f64()
+        });
+
+        if Num::INTEGRAL {
+            slf.max_decimals(0).range(Num::MIN..=Num::MAX).speed(0.25)
+        } else {
+            slf
+        }
+    }
+
+    pub fn from_get_set(get_set_value: impl 'a + FnMut(Option<f64>) -> f64) -> Self {
+        let atoms = Atoms::new(Atom::custom(Id::new(Self::ATOM_ID), Vec2::ZERO).atom_grow(true));
+
+        Self {
+            get_set_value: Box::new(get_set_value),
+            speed: 1.0,
+            atoms,
+            range: f64::NEG_INFINITY..=f64::INFINITY,
+            clamp_existing_to_range: true,
+            min_decimals: 0,
+            max_decimals: None,
+            custom_formatter: None,
+            custom_parser: None,
+            update_while_editing: true,
+        }
+    }
+
+    /// How much the value changes when dragged one point (logical pixel).
+    ///
+    /// Should be finite and greater than zero.
+    #[inline]
+    pub fn speed(mut self, speed: impl Into<f64>) -> Self {
+        self.speed = speed.into();
+        self
+    }
+
+    /// Sets valid range for dragging the value.
+    ///
+    /// By default all values are clamped to this range, even when not interacted with.
+    /// You can change this behavior by passing `false` to [`Self::clamp_existing_to_range`].
+    #[inline]
+    pub fn range<Num: emath::Numeric>(mut self, range: RangeInclusive<Num>) -> Self {
+        self.range = range.start().to_f64()..=range.end().to_f64();
+        self
+    }
+
+    /// If set to `true`, existing values will be clamped to [`Self::range`].
+    ///
+    /// If `false`, only values entered by the user (via dragging or text editing)
+    /// will be clamped to the range.
+    ///
+    /// ### Without calling `range`
+    /// ```
+    /// # egui::__run_test_ui(|ui| {
+    /// let mut my_value: f32 = 1337.0;
+    /// ui.add(egui::DragValue::new(&mut my_value));
+    /// assert_eq!(my_value, 1337.0, "No range, no clamp");
+    /// # });
+    /// ```
+    ///
+    /// ### With `.clamp_existing_to_range(true)` (default)
+    /// ```
+    /// # egui::__run_test_ui(|ui| {
+    /// let mut my_value: f32 = 1337.0;
+    /// ui.add(egui::DragValue::new(&mut my_value).range(0.0..=1.0));
+    /// assert!(0.0 <= my_value && my_value <= 1.0, "Existing values should be clamped");
+    /// # });
+    /// ```
+    ///
+    /// ### With `.clamp_existing_to_range(false)`
+    /// ```
+    /// # egui::__run_test_ui(|ui| {
+    /// let mut my_value: f32 = 1337.0;
+    /// let response = ui.add(
+    ///     egui::DragValue::new(&mut my_value).range(0.0..=1.0)
+    ///         .clamp_existing_to_range(false)
+    /// );
+    /// if response.dragged() {
+    ///     // The user edited the value, so it should be clamped to the range
+    ///     assert!(0.0 <= my_value && my_value <= 1.0);
+    /// } else {
+    ///     // The user didn't edit, so our original value should still be here:
+    ///     assert_eq!(my_value, 1337.0);
+    /// }
+    /// # });
+    /// ```
+    #[inline]
+    pub fn clamp_existing_to_range(mut self, clamp_existing_to_range: bool) -> Self {
+        self.clamp_existing_to_range = clamp_existing_to_range;
+        self
+    }
+
+    /// Show a prefix before the number, e.g. "x: "
+    #[inline]
+    pub fn prefix(mut self, prefix: impl IntoAtoms<'a>) -> Self {
+        self.atoms.extend_left(prefix.into_atoms());
+        self
+    }
+
+    /// Add a suffix to the number, this can be e.g. a unit ("°" or " m")
+    #[inline]
+    pub fn suffix(mut self, suffix: impl IntoAtoms<'a>) -> Self {
+        self.atoms.extend_right(suffix.into_atoms());
+        self
+    }
+
+    // TODO(emilk): we should also have a "min precision".
+    /// Set a minimum number of decimals to display.
+    /// Normally you don't need to pick a precision, as the slider will intelligently pick a precision for you.
+    /// Regardless of precision the slider will use "smart aim" to help the user select nice, round values.
+    #[inline]
+    pub fn min_decimals(mut self, min_decimals: usize) -> Self {
+        self.min_decimals = min_decimals;
+        self
+    }
+
+    // TODO(emilk): we should also have a "max precision".
+    /// Set a maximum number of decimals to display.
+    /// Values will also be rounded to this number of decimals.
+    /// Normally you don't need to pick a precision, as the slider will intelligently pick a precision for you.
+    /// Regardless of precision the slider will use "smart aim" to help the user select nice, round values.
+    #[inline]
+    pub fn max_decimals(mut self, max_decimals: usize) -> Self {
+        self.max_decimals = Some(max_decimals);
+        self
+    }
+
+    #[inline]
+    pub fn max_decimals_opt(mut self, max_decimals: Option<usize>) -> Self {
+        self.max_decimals = max_decimals;
+        self
+    }
+
+    /// Set an exact number of decimals to display.
+    /// Values will also be rounded to this number of decimals.
+    /// Normally you don't need to pick a precision, as the slider will intelligently pick a precision for you.
+    /// Regardless of precision the slider will use "smart aim" to help the user select nice, round values.
+    #[inline]
+    pub fn fixed_decimals(mut self, num_decimals: usize) -> Self {
+        self.min_decimals = num_decimals;
+        self.max_decimals = Some(num_decimals);
+        self
+    }
+
+    /// Set custom formatter defining how numbers are converted into text.
+    ///
+    /// A custom formatter takes a `f64` for the numeric value and a `RangeInclusive<usize>` representing
+    /// the decimal range i.e. minimum and maximum number of decimal places shown.
+    ///
+    /// The default formatter is [`crate::Style::number_formatter`].
+    ///
+    /// See also: [`DragValue::custom_parser`]
+    ///
+    /// ```
+    /// # egui::__run_test_ui(|ui| {
+    /// # let mut my_i32: i32 = 0;
+    /// ui.add(egui::DragValue::new(&mut my_i32)
+    ///     .range(0..=((60 * 60 * 24) - 1))
+    ///     .custom_formatter(|n, _| {
+    ///         let n = n as i32;
+    ///         let hours = n / (60 * 60);
+    ///         let mins = (n / 60) % 60;
+    ///         let secs = n % 60;
+    ///         format!("{hours:02}:{mins:02}:{secs:02}")
+    ///     })
+    ///     .custom_parser(|s| {
+    ///         let parts: Vec<&str> = s.split(':').collect();
+    ///         if parts.len() == 3 {
+    ///             parts[0].parse::<i32>().and_then(|h| {
+    ///                 parts[1].parse::<i32>().and_then(|m| {
+    ///                     parts[2].parse::<i32>().map(|s| {
+    ///                         ((h * 60 * 60) + (m * 60) + s) as f64
+    ///                     })
+    ///                 })
+    ///             })
+    ///             .ok()
+    ///         } else {
+    ///             None
+    ///         }
+    ///     }));
+    /// # });
+    /// ```
+    pub fn custom_formatter(
+        mut self,
+        formatter: impl 'a + Fn(f64, RangeInclusive<usize>) -> String,
+    ) -> Self {
+        self.custom_formatter = Some(Box::new(formatter));
+        self
+    }
+
+    /// Set custom parser defining how the text input is parsed into a number.
+    ///
+    /// A custom parser takes an `&str` to parse into a number and returns a `f64` if it was successfully parsed
+    /// or `None` otherwise.
+    ///
+    /// See also: [`DragValue::custom_formatter`]
+    ///
+    /// ```
+    /// # egui::__run_test_ui(|ui| {
+    /// # let mut my_i32: i32 = 0;
+    /// ui.add(egui::DragValue::new(&mut my_i32)
+    ///     .range(0..=((60 * 60 * 24) - 1))
+    ///     .custom_formatter(|n, _| {
+    ///         let n = n as i32;
+    ///         let hours = n / (60 * 60);
+    ///         let mins = (n / 60) % 60;
+    ///         let secs = n % 60;
+    ///         format!("{hours:02}:{mins:02}:{secs:02}")
+    ///     })
+    ///     .custom_parser(|s| {
+    ///         let parts: Vec<&str> = s.split(':').collect();
+    ///         if parts.len() == 3 {
+    ///             parts[0].parse::<i32>().and_then(|h| {
+    ///                 parts[1].parse::<i32>().and_then(|m| {
+    ///                     parts[2].parse::<i32>().map(|s| {
+    ///                         ((h * 60 * 60) + (m * 60) + s) as f64
+    ///                     })
+    ///                 })
+    ///             })
+    ///             .ok()
+    ///         } else {
+    ///             None
+    ///         }
+    ///     }));
+    /// # });
+    /// ```
+    #[inline]
+    pub fn custom_parser(mut self, parser: impl 'a + Fn(&str) -> Option<f64>) -> Self {
+        self.custom_parser = Some(Box::new(parser));
+        self
+    }
+
+    /// Set `custom_formatter` and `custom_parser` to display and parse numbers as binary integers. Floating point
+    /// numbers are *not* supported.
+    ///
+    /// `min_width` specifies the minimum number of displayed digits; if the number is shorter than this, it will be
+    /// prefixed with additional 0s to match `min_width`.
+    ///
+    /// If `twos_complement` is true, negative values will be displayed as the 2's complement representation. Otherwise
+    /// they will be prefixed with a '-' sign.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `min_width` is 0.
+    ///
+    /// ```
+    /// # egui::__run_test_ui(|ui| {
+    /// # let mut my_i32: i32 = 0;
+    /// ui.add(egui::DragValue::new(&mut my_i32).binary(64, false));
+    /// # });
+    /// ```
+    pub fn binary(self, min_width: usize, twos_complement: bool) -> Self {
+        assert!(
+            min_width > 0,
+            "DragValue::binary: `min_width` must be greater than 0"
+        );
+        if twos_complement {
+            self.custom_formatter(move |n, _| format!("{:0>min_width$b}", n as i64))
+        } else {
+            self.custom_formatter(move |n, _| {
+                let sign = if n < 0.0 { MINUS_CHAR_STR } else { "" };
+                format!("{sign}{:0>min_width$b}", n.abs() as i64)
+            })
+        }
+        .custom_parser(|s| i64::from_str_radix(s, 2).map(|n| n as f64).ok())
+    }
+
+    /// Set `custom_formatter` and `custom_parser` to display and parse numbers as octal integers. Floating point
+    /// numbers are *not* supported.
+    ///
+    /// `min_width` specifies the minimum number of displayed digits; if the number is shorter than this, it will be
+    /// prefixed with additional 0s to match `min_width`.
+    ///
+    /// If `twos_complement` is true, negative values will be displayed as the 2's complement representation. Otherwise
+    /// they will be prefixed with a '-' sign.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `min_width` is 0.
+    ///
+    /// ```
+    /// # egui::__run_test_ui(|ui| {
+    /// # let mut my_i32: i32 = 0;
+    /// ui.add(egui::DragValue::new(&mut my_i32).octal(22, false));
+    /// # });
+    /// ```
+    pub fn octal(self, min_width: usize, twos_complement: bool) -> Self {
+        assert!(
+            min_width > 0,
+            "DragValue::octal: `min_width` must be greater than 0"
+        );
+        if twos_complement {
+            self.custom_formatter(move |n, _| format!("{:0>min_width$o}", n as i64))
+        } else {
+            self.custom_formatter(move |n, _| {
+                let sign = if n < 0.0 { MINUS_CHAR_STR } else { "" };
+                format!("{sign}{:0>min_width$o}", n.abs() as i64)
+            })
+        }
+        .custom_parser(|s| i64::from_str_radix(s, 8).map(|n| n as f64).ok())
+    }
+
+    /// Set `custom_formatter` and `custom_parser` to display and parse numbers as hexadecimal integers. Floating point
+    /// numbers are *not* supported.
+    ///
+    /// `min_width` specifies the minimum number of displayed digits; if the number is shorter than this, it will be
+    /// prefixed with additional 0s to match `min_width`.
+    ///
+    /// If `twos_complement` is true, negative values will be displayed as the 2's complement representation. Otherwise
+    /// they will be prefixed with a '-' sign.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `min_width` is 0.
+    ///
+    /// ```
+    /// # egui::__run_test_ui(|ui| {
+    /// # let mut my_i32: i32 = 0;
+    /// ui.add(egui::DragValue::new(&mut my_i32).hexadecimal(16, false, true));
+    /// # });
+    /// ```
+    pub fn hexadecimal(self, min_width: usize, twos_complement: bool, upper: bool) -> Self {
+        assert!(
+            min_width > 0,
+            "DragValue::hexadecimal: `min_width` must be greater than 0"
+        );
+        match (twos_complement, upper) {
+            (true, true) => {
+                self.custom_formatter(move |n, _| format!("{:0>min_width$X}", n as i64))
+            }
+            (true, false) => {
+                self.custom_formatter(move |n, _| format!("{:0>min_width$x}", n as i64))
+            }
+            (false, true) => self.custom_formatter(move |n, _| {
+                let sign = if n < 0.0 { MINUS_CHAR_STR } else { "" };
+                format!("{sign}{:0>min_width$X}", n.abs() as i64)
+            }),
+            (false, false) => self.custom_formatter(move |n, _| {
+                let sign = if n < 0.0 { MINUS_CHAR_STR } else { "" };
+                format!("{sign}{:0>min_width$x}", n.abs() as i64)
+            }),
+        }
+        .custom_parser(|s| i64::from_str_radix(s, 16).map(|n| n as f64).ok())
+    }
+
+    /// Update the value on each key press when text-editing the value.
+    ///
+    /// Default: `true`.
+    /// If `false`, the value will only be updated when user presses enter or deselects the value.
+    #[inline]
+    pub fn update_while_editing(mut self, update: bool) -> Self {
+        self.update_while_editing = update;
+        self
+    }
+
+    /// Output the [`DragValue`]'s [`Atoms`].
+    ///
+    /// This includes any images you have on the [`DragValue`].
+    pub fn atoms(&self) -> &Atoms<'a> {
+        &self.atoms
+    }
+}
+
+impl Widget for DragValue<'_> {
+    fn ui(self, ui: &mut Ui) -> Response {
+        let Self {
+            mut get_set_value,
+            speed,
+            range,
+            clamp_existing_to_range,
+            mut atoms,
+            min_decimals,
+            max_decimals,
+            custom_formatter,
+            custom_parser,
+            update_while_editing,
+        } = self;
+
+        let mut prefix_text = String::new();
+        let mut suffix_text = String::new();
+        let mut past_value = false;
+        let atom_id = Id::new(Self::ATOM_ID);
+        for atom in atoms.iter() {
+            if atom.id == Some(atom_id) {
+                past_value = true;
+            }
+            if let AtomKind::Text(text) = &atom.kind {
+                if past_value {
+                    suffix_text.push_str(text.text());
+                } else {
+                    prefix_text.push_str(text.text());
+                }
+            }
+        }
+
+        let shift = ui.input(|i| i.modifiers.shift_only());
+        // The widget has the same ID whether it's in edit or button mode.
+        let id = ui.next_auto_id();
+        let is_slow_speed = shift && ui.ctx().is_being_dragged(id);
+
+        // The following ensures that when a `DragValue` receives focus,
+        // it is immediately rendered in edit mode, rather than being rendered
+        // in button mode for just one frame. This is important for
+        // screen readers.
+        let is_kb_editing = ui.is_enabled()
+            && ui.memory_mut(|mem| {
+                mem.interested_in_focus(id, ui.layer_id());
+                mem.has_focus(id)
+            });
+
+        if ui.memory_mut(|mem| mem.gained_focus(id)) {
+            ui.data_mut(|data| data.remove::<EditState>(id));
+        }
+
+        let old_value = get(&mut get_set_value);
+        let mut value = old_value;
+        let aim_rad = ui.input(|i| i.aim_radius() as f64);
+
+        let auto_decimals = (aim_rad / speed.abs()).log10().ceil().clamp(0.0, 15.0) as usize;
+        let auto_decimals = auto_decimals + is_slow_speed as usize;
+        let max_decimals = max_decimals
+            .unwrap_or(auto_decimals + 2)
+            .at_least(min_decimals);
+        let auto_decimals = auto_decimals.clamp(min_decimals, max_decimals);
+
+        let change = ui.input_mut(|input| {
+            let mut change = 0.0;
+
+            if is_kb_editing {
+                // This deliberately doesn't listen for left and right arrow keys,
+                // because when editing, these are used to move the caret.
+                // This behavior is consistent with other editable spinner/stepper
+                // implementations, such as Chromium's (for HTML5 number input).
+                // It is also normal for such controls to go directly into edit mode
+                // when they receive keyboard focus, and some screen readers
+                // assume this behavior, so having a separate mode for incrementing
+                // and decrementing, that supports all arrow keys, would be
+                // problematic.
+                change += input.count_and_consume_key(Modifiers::NONE, Key::ArrowUp) as f64
+                    - input.count_and_consume_key(Modifiers::NONE, Key::ArrowDown) as f64;
+            }
+
+            use accesskit::Action;
+            change += input.num_accesskit_action_requests(id, Action::Increment) as f64
+                - input.num_accesskit_action_requests(id, Action::Decrement) as f64;
+
+            change
+        });
+
+        ui.input(|input| {
+            use accesskit::{Action, ActionData};
+            for request in input.accesskit_action_requests(id, Action::SetValue) {
+                if let Some(ActionData::NumericValue(new_value)) = request.data {
+                    value = new_value;
+                }
+            }
+        });
+
+        if clamp_existing_to_range {
+            value = clamp_value_to_range(value, range.clone());
+        }
+
+        if change != 0.0 {
+            value += speed * change;
+            value = emath::round_to_decimals(value, auto_decimals);
+        }
+
+        if old_value != value {
+            set(&mut get_set_value, value);
+            ui.data_mut(|data| data.remove::<EditState>(id));
+        }
+
+        let value_text = match custom_formatter {
+            Some(custom_formatter) => custom_formatter(value, auto_decimals..=max_decimals),
+            None => ui
+                .style()
+                .number_formatter
+                .format(value, auto_decimals..=max_decimals),
+        };
+
+        let text_style = ui.style().drag_value_text_style.clone();
+
+        if ui.memory(|mem| mem.lost_focus(id)) && !ui.input(|i| i.key_pressed(Key::Escape)) {
+            let edit_state = ui.data_mut(|data| data.remove_temp::<EditState>(id));
+            // Ignore the text if the value was changed by something else while we were editing it,
+            // or we would revert that change.
+            if let Some(value_text) = edit_state
+                .filter(|edit_state| edit_state.value == old_value)
+                .map(|edit_state| edit_state.text)
+            {
+                // We were editing the value as text last frame, but lost focus.
+                // Make sure we applied the last text value:
+                let parsed_value = parse(custom_parser.as_ref(), &value_text);
+                if let Some(mut parsed_value) = parsed_value {
+                    // User edits always clamps:
+                    parsed_value = clamp_value_to_range(parsed_value, range.clone());
+                    set(&mut get_set_value, parsed_value);
+                }
+            }
+        }
+
+        let mut response = if is_kb_editing {
+            // Keep editing the text from last frame, unless the value was changed by
+            // something else in the meantime, in which case the text is stale.
+            let mut value_text = ui
+                .data_mut(|data| data.remove_temp::<EditState>(id))
+                .filter(|edit_state| edit_state.value == old_value)
+                .map_or_else(|| value_text.clone(), |edit_state| edit_state.text);
+            let response = ui.add(
+                TextEdit::singleline(&mut value_text)
+                    .clip_text(false)
+                    .horizontal_align(ui.layout().horizontal_align())
+                    .vertical_align(ui.layout().vertical_align())
+                    .margin(ui.spacing().button_padding)
+                    .min_size(ui.spacing().interact_size)
+                    .id(id)
+                    .desired_width(
+                        ui.spacing().interact_size.x - 2.0 * ui.spacing().button_padding.x,
+                    )
+                    .font(text_style),
+            );
+
+            // Select all text when the edit gains focus.
+            if ui.memory_mut(|mem| mem.gained_focus(id)) {
+                select_all_text(ui, id, response.id, &value_text);
+            }
+
+            let update = if update_while_editing {
+                // Update when the edit content has changed.
+                response.changed()
+            } else {
+                // Update only when the edit has lost focus.
+                response.lost_focus() && !ui.input(|i| i.key_pressed(Key::Escape))
+            };
+            if update {
+                let parsed_value = parse(custom_parser.as_ref(), &value_text);
+                if let Some(mut parsed_value) = parsed_value {
+                    // User edits always clamps:
+                    parsed_value = clamp_value_to_range(parsed_value, range.clone());
+                    set(&mut get_set_value, parsed_value);
+                }
+            }
+            // Remember the value the text belongs to, so that next frame we can tell
+            // whether the value was changed by us or by something else.
+            let edit_state = EditState {
+                text: value_text,
+                value: get(&mut get_set_value),
+            };
+            ui.data_mut(|data| data.insert_temp(id, edit_state));
+            response
+        } else {
+            atoms.map_atoms(|atom| {
+                if atom.id == Some(atom_id) {
+                    RichText::new(value_text.clone())
+                        .text_style(text_style.clone())
+                        .into()
+                } else {
+                    atom
+                }
+            });
+            let button = Button::new(atoms)
+                .wrap_mode(TextWrapMode::Extend)
+                .sense(Sense::click_and_drag())
+                .gap(0.0)
+                .min_size(ui.spacing().interact_size); // TODO(emilk): find some more generic solution to `min_size`
+
+            let cursor_icon = if value <= *range.start() {
+                CursorIcon::ResizeEast
+            } else if value < *range.end() {
+                CursorIcon::ResizeHorizontal
+            } else {
+                CursorIcon::ResizeWest
+            };
+
+            let response = ui.add(button);
+            let mut response = response.on_hover_cursor(cursor_icon);
+
+            if ui.style().explanation_tooltips {
+                response = response.on_hover_text(format!(
+                    "{}\nDrag to edit or click to enter a value.\nPress 'Shift' while dragging for better control.",
+                    value as f32, // Show full precision value on-hover. TODO(emilk): figure out f64 vs f32
+                ));
+            }
+
+            if ui.input(|i| i.pointer.any_pressed() || i.pointer.any_released()) {
+                // Reset memory of preciely dagged value.
+                ui.data_mut(|data| data.remove::<f64>(id));
+            }
+
+            if response.clicked() {
+                ui.data_mut(|data| data.remove::<EditState>(id));
+                ui.memory_mut(|mem| mem.request_focus(id));
+                select_all_text(ui, id, response.id, &value_text);
+            } else if response.dragged() {
+                ui.set_cursor_icon(cursor_icon);
+
+                let mdelta = response.drag_delta();
+                let delta_points = mdelta.x - mdelta.y; // Increase to the right and up
+
+                let speed = if is_slow_speed { speed / 10.0 } else { speed };
+
+                let delta_value = delta_points as f64 * speed;
+
+                if delta_value != 0.0 {
+                    // Since we round the value being dragged, we need to store the full precision value in memory:
+                    let precise_value = ui.data_mut(|data| data.get_temp::<f64>(id));
+                    let precise_value = precise_value.unwrap_or(value);
+                    let precise_value = precise_value + delta_value;
+
+                    let aim_delta = aim_rad * speed;
+                    let rounded_new_value = emath::smart_aim::best_in_range_f64(
+                        precise_value - aim_delta,
+                        precise_value + aim_delta,
+                    );
+                    let rounded_new_value =
+                        emath::round_to_decimals(rounded_new_value, auto_decimals);
+                    // Dragging will always clamp the value to the range.
+                    let rounded_new_value = clamp_value_to_range(rounded_new_value, range.clone());
+                    set(&mut get_set_value, rounded_new_value);
+
+                    ui.data_mut(|data| data.insert_temp::<f64>(id, precise_value));
+                }
+            }
+
+            response
+        };
+
+        if get(&mut get_set_value) != old_value {
+            response.mark_changed();
+        }
+
+        response.widget_info(|| WidgetInfo::drag_value(ui.is_enabled(), value));
+
+        ui.ctx().accesskit_node_builder(response.id, |builder| {
+            use accesskit::Action;
+            // If either end of the range is unbounded, it's better
+            // to leave the corresponding AccessKit field set to None,
+            // to allow for platform-specific default behavior.
+            if range.start().is_finite() {
+                builder.set_min_numeric_value(*range.start());
+            }
+            if range.end().is_finite() {
+                builder.set_max_numeric_value(*range.end());
+            }
+            builder.set_numeric_value_step(speed);
+            builder.add_action(Action::SetValue);
+            if value < *range.end() {
+                builder.add_action(Action::Increment);
+            }
+            if value > *range.start() {
+                builder.add_action(Action::Decrement);
+            }
+            // The name field is set to the current value by the button,
+            // but we don't want it set that way on this widget type.
+            builder.clear_label();
+            // Always expose the value as a string. This makes the widget
+            // more stable to accessibility users as it switches
+            // between edit and button modes. This is particularly important
+            // for VoiceOver on macOS; if the value is not exposed as a string
+            // when the widget is in button mode, then VoiceOver speaks
+            // the value (or a percentage if the widget has a clamp range)
+            // when the widget loses focus, overriding the announcement
+            // of the newly focused widget. This is certainly a VoiceOver bug,
+            // but it's good to make our software work as well as possible
+            // with existing assistive technology. However, if the widget
+            // has a prefix and/or suffix, expose those when in button mode,
+            // just as they're exposed on the screen. This triggers the
+            // VoiceOver bug just described, but exposing all information
+            // is more important, and at least we can avoid the bug
+            // for instances of the widget with no prefix or suffix.
+            //
+            // The value is exposed as a string by the text edit widget
+            // when in edit mode.
+            if !is_kb_editing {
+                let value_text = format!("{prefix_text}{value_text}{suffix_text}");
+                builder.set_value(value_text);
+            }
+        });
+
+        response
+    }
+}
+
+fn parse(custom_parser: Option<&NumParser<'_>>, value_text: &str) -> Option<f64> {
+    match custom_parser {
+        Some(parser) => parser(value_text),
+        None => default_parser(value_text),
+    }
+}
+
+/// The default egui parser of numbers.
+///
+/// It ignored whitespaces anywhere in the input, and treats the special minus character (U+2212) as a normal minus.
+fn default_parser(text: &str) -> Option<f64> {
+    let text: String = text
+        .chars()
+        // Ignore whitespace (trailing, leading, and thousands separators):
+        .filter(|c| !c.is_whitespace())
+        // Replace special minus character with normal minus (hyphen):
+        .map(|c| if c == '−' { '-' } else { c })
+        .collect();
+
+    text.parse().ok()
+}
+
+/// Clamp the given value with careful handling of negative zero, and other corner cases.
+pub(crate) fn clamp_value_to_range(x: f64, range: RangeInclusive<f64>) -> f64 {
+    let (mut min, mut max) = (*range.start(), *range.end());
+
+    if min.total_cmp(&max) == Ordering::Greater {
+        (min, max) = (max, min);
+    }
+
+    match x.total_cmp(&min) {
+        Ordering::Less | Ordering::Equal => min,
+        Ordering::Greater => match x.total_cmp(&max) {
+            Ordering::Greater | Ordering::Equal => max,
+            Ordering::Less => x,
+        },
+    }
+}
+
+/// Select all text in the `DragValue` text edit widget.
+fn select_all_text(ui: &Ui, widget_id: Id, response_id: Id, value_text: &str) {
+    let mut state = TextEdit::load_state(ui.ctx(), widget_id).unwrap_or_default();
+    state.cursor.set_char_range(Some(text::CCursorRange::two(
+        text::CCursor::default(),
+        text::CCursor::new(value_text.chars().count()),
+    )));
+    state.store(ui.ctx(), response_id);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::clamp_value_to_range;
+
+    macro_rules! total_assert_eq {
+        ($a:expr, $b:expr) => {
+            assert!(
+                matches!($a.total_cmp(&$b), core::cmp::Ordering::Equal),
+                "{} != {}",
+                $a,
+                $b
+            );
+        };
+    }
+
+    #[test]
+    fn test_total_cmp_clamp_value_to_range() {
+        total_assert_eq!(0.0_f64, clamp_value_to_range(-0.0, 0.0..=f64::MAX));
+        total_assert_eq!(-0.0_f64, clamp_value_to_range(0.0, -1.0..=-0.0));
+        total_assert_eq!(-1.0_f64, clamp_value_to_range(-25.0, -1.0..=1.0));
+        total_assert_eq!(5.0_f64, clamp_value_to_range(5.0, -1.0..=10.0));
+        total_assert_eq!(15.0_f64, clamp_value_to_range(25.0, -1.0..=15.0));
+        total_assert_eq!(1.0_f64, clamp_value_to_range(1.0, 1.0..=10.0));
+        total_assert_eq!(10.0_f64, clamp_value_to_range(10.0, 1.0..=10.0));
+        total_assert_eq!(5.0_f64, clamp_value_to_range(5.0, 10.0..=1.0));
+        total_assert_eq!(5.0_f64, clamp_value_to_range(15.0, 5.0..=1.0));
+        total_assert_eq!(1.0_f64, clamp_value_to_range(-5.0, 5.0..=1.0));
+    }
+
+    #[test]
+    fn test_default_parser() {
+        assert_eq!(super::default_parser("123"), Some(123.0));
+
+        assert_eq!(super::default_parser("1.23"), Some(1.230));
+
+        assert_eq!(
+            super::default_parser(" 1.23 "),
+            Some(1.230),
+            "We should handle leading and trailing spaces"
+        );
+
+        assert_eq!(
+            super::default_parser("1 234 567"),
+            Some(1_234_567.0),
+            "We should handle thousands separators using half-space"
+        );
+
+        assert_eq!(
+            super::default_parser("-1.23"),
+            Some(-1.23),
+            "Should handle normal hyphen as minus character"
+        );
+        assert_eq!(
+            super::default_parser("−1.23"),
+            Some(-1.23),
+            "Should handle special minus character (https://www.compart.com/en/unicode/U+2212)"
+        );
+    }
+}

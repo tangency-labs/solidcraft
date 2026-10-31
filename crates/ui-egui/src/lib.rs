@@ -14,6 +14,7 @@ pub mod agent_chat;
 pub mod agent_cursor;
 pub mod ai_connect;
 pub mod bidi;
+pub mod blur;
 pub mod bom_panel;
 pub mod browser;
 pub mod browser_canvas;
@@ -497,6 +498,7 @@ pub(crate) enum EscapeOwner {
 }
 
 pub struct SolveApp {
+    pub blur: blur::State,
     pub(crate) viewport_status: ui_kit::StatusPresentation,
     pub(crate) viewport_status_fixture: viewport_status_fixture::Fixture,
     /// Compact browser embed: retain model panels and joint controls without application chrome.
@@ -768,6 +770,7 @@ impl SolveApp {
         solidcraft_engine::slicer_files::clean_old();
         let mut app = SolveApp {
             viewport_status: Default::default(),
+            blur: Default::default(),
             viewport_status_fixture: Default::default(),
             session,
             ui: UiState::default(),
@@ -942,6 +945,7 @@ impl SolveApp {
     }
 
     fn set_wgpu_targets(&mut self, rs: &egui_wgpu::RenderState, scene: crate::gpu::GpuTarget, window: crate::gpu::GpuTarget) {
+        self.blur.install(rs, scene.depth.is_some() && window.depth.is_none() && window.samples == 1);
         #[allow(unused_mut)] // Only native hosts can wait for the startup readback.
         let (mut installed, stats, tess_ready) = gpu::install(rs, scene, window, !self.cpu_meshing);
         #[cfg(not(target_arch = "wasm32"))]
@@ -2841,6 +2845,8 @@ impl SolveApp {
 
     /// Lay out the whole window.
     pub fn ui(&mut self, ui: &mut egui::Ui) {
+        let blur_source = !self.home.open && !render_workspace::result_active(self);
+        let _blur_scope = self.blur.begin(ui.ctx(), blur_source);
         value_step::set_enabled(ui.ctx(), self.preferences.step_values);
         canvas::set_boxes_shown(ui.ctx(), self.preferences.value_boxes_in_view);
         recent_colors::share(ui.ctx(), &mut self.ui.recent_colors);

@@ -4,6 +4,16 @@ Copies of third-party crates that SolidCraft builds with local fixes, wired in w
 `[patch.crates-io]` in the workspace `Cargo.toml`. They keep their own licence; changed lines
 are marked `SolidCraft:` in the source.
 
+## egui 0.36.2 (MIT OR Apache-2.0, egui contributors)
+
+Copied from the exact published crate already used by the lockfile, with both
+upstream licences retained. `containers/frame.rs` exposes opt-in reserved-slot
+background decoration; `containers/window.rs` and `containers/panel.rs` thread
+an optional function pointer to the outer frame. Plain hosts retain the original
+Frame::show/end path. These hooks do not identify SolidCraft surfaces or add a
+new shape primitive. `docs/blur-behind.md` records the app-side policy and the
+separate pass-owner hooks in egui-wgpu.
+
 ## truck-shapeops 0.4.0 (Apache-2.0, © RICOS Co. Ltd., https://github.com/ricosjp/truck)
 
 Changes:

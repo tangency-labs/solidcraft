@@ -187,6 +187,7 @@ impl Container {
 
     /// Tokenised outer chrome. Callers may supply content padding, not another card surface.
     pub fn frame(self, ctx: &Context, fill: Color32, side: crate::frame::Side) -> Frame {
+        let fill = if self.adaptive() { crate::blur::panel_fill(fill) } else { fill };
         let t = Tokens::get();
         let flat = Frame::NONE.fill(fill);
         match self.surface {
@@ -220,6 +221,7 @@ impl Container {
     /// Surface of an allocated dock or internal pinned band. Floating card decoration is
     /// supplied by `frame`; edge-hosted panes must not acquire outer shadows or card gaps.
     pub fn edge_frame(self, fill: Color32) -> Frame {
+        let fill = if self.adaptive() { crate::blur::panel_fill(fill) } else { fill };
         if self.adaptive() && !self.floating() {
             Self::compact_frame(fill, Tokens::get().primary_border(Tokens::get().border), self.joined.unwrap_or(DockEdges::ALL))
         } else {
@@ -273,7 +275,8 @@ impl Container {
             prepared.frame.corner_radius = Self::compact_rounding(edges);
         }
         let frame = prepared.frame;
-        let response = prepared.end(ui);
+        let response =
+            if self.adaptive() && crate::blur::enabled() { prepared.end_with_background(ui, crate::blur::decorate) } else { prepared.end(ui) };
         Self::paint_inset(ui.painter(), response.rect - frame.outer_margin, frame);
         egui::InnerResponse { inner, response }
     }
@@ -315,6 +318,17 @@ impl Container {
         Self::paint_inset(painter, frame.widget_rect(content), frame);
     }
 
+    /// Semantic manually painted workspace surface; HUDs keep `paint_frame`.
+    pub(crate) fn paint_background(self, painter: &egui::Painter, frame: Frame, content: egui::Rect) {
+        let shape = frame.paint(content);
+        painter.add(if self.adaptive() && crate::blur::enabled() { crate::blur::decorate(painter, frame, content, shape) } else { shape });
+    }
+
+    pub(crate) fn paint_panel_frame(painter: &egui::Painter, frame: Frame, content: egui::Rect) {
+        Self::floating_card(Surface::Panel).paint_background(painter, frame, content);
+        Self::paint_inset(painter, frame.widget_rect(content), frame);
+    }
+
     /// Decorate the content-hugging frame of a popup or feature sheet after its contents.
     pub(crate) fn finish_content(ui: &egui::Ui, frame: Frame) {
         Self::paint_inset(ui.painter(), frame.widget_rect(ui.min_rect()), frame);
@@ -337,11 +351,13 @@ impl Container {
             Edge::Top => egui::Panel::top(id),
             Edge::Bottom => egui::Panel::bottom(id),
         };
+        let panel = if self.adaptive() && crate::blur::enabled() { panel.background_painter(crate::blur::decorate) } else { panel };
         if self.adaptive() && !self.floating() { panel.show_separator_line(false) } else { panel }
     }
 
     pub(super) fn window<'a>(self, title: impl Into<WidgetText>) -> egui::Window<'a> {
-        egui::Window::new(title).enabled(self.input_enabled())
+        let window = egui::Window::new(title).enabled(self.input_enabled());
+        if self.adaptive() && crate::blur::enabled() { window.background_painter(crate::blur::decorate) } else { window }
     }
 
     /// Anchored editors inherit their containing widget's local style. Their host stays a
