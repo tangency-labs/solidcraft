@@ -161,3 +161,47 @@ fn hostile_sweep_options_are_refused() {
         assert_eq!(s.doc.features.len(), before, "{bad}");
     }
 }
+
+/// A G2 round-over swept along a projected body edge and cut from the body.
+///
+/// The sweep tool itself is a G2 corner-removal profile swept along one chain of the
+/// projected bottom-face loop (a G2 spline plus the line after it). The cut of the
+/// tool from the box used to fail with `boolean Cut: the operation failed: no result`,
+/// side-dependent: the same chain on the front-left side works. See solidcraft#3604.
+#[test]
+fn g2_swept_round_over_cut_along_a_projected_edge() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"corner": [0, 0, 0], "length": 40, "width": 20, "height": 10, "operation": "new", "body_name": "B"}));
+    run(
+        &mut s,
+        "solid.fillet",
+        json!({
+            "body": "B",
+            "edges": [[0, 0, 5], [40, 0, 5], [40, 20, 5], [0, 20, 5]],
+            "radius": 5,
+            "type": "g2"
+        }),
+    );
+    run(&mut s, "sketch.create", json!({"plane": {"face": [20, 10, 0]}, "project_edges": true, "name": "Bottom"}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "sketch.create", json!({"plane": {"origin": [0, 15, 0], "x_dir": [1, 0, 0], "y_dir": [0, 0, 1]}, "name": "RB"}));
+    run(&mut s, "sketch.line", json!({"points": [[-0.2, -0.2], [0.8, -0.2]], "ids": ["o1"]}));
+    run(&mut s, "sketch.line", json!({"points": [[0.8, -0.2], [0.8, 0]], "ids": ["o2"]}));
+    run(&mut s, "sketch.line", json!({"points": [[0, 0.8], [-0.2, 0.8]], "ids": ["o3"]}));
+    run(&mut s, "sketch.line", json!({"points": [[-0.2, 0.8], [-0.2, -0.2]], "ids": ["o4"]}));
+    run(&mut s, "sketch.blend_curve", json!({"a": "o2.end", "b": "o3.start", "continuity": "g2"}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(
+        &mut s,
+        "solid.sweep",
+        json!({
+            "sketch": "RB",
+            "path_sketch": "Bottom",
+            "path": ["s2", "l3"],
+            "orientation": "perpendicular",
+            "operation": "new",
+            "body_name": "Tool"
+        }),
+    );
+    run(&mut s, "solid.combine", json!({"target": "B", "tools": ["Tool"], "operation": "cut"}));
+}
