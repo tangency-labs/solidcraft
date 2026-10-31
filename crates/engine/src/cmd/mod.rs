@@ -62,6 +62,7 @@ mod features;
 mod features_more;
 mod join_pieces;
 pub(crate) use bom::{SAME_AS_COMPONENT, occurrence_bom_type, record_item_numbers};
+pub(crate) use browser::{find_kinds, find_text};
 pub(crate) use component::follow_expressed_moves;
 pub(crate) use component::{path_ids, refuse_filled_virtual};
 pub(crate) use config::put_row;

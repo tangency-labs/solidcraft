@@ -701,3 +701,21 @@ no geometry, such as grease, paint, a label or packaging: it is listed in every 
 quantity and weighs nothing. It holds nothing: it can't be the active component, and any command
 that would put a body, a sketch or a component into it is refused. An empty component can be
 made virtual with `component.metadata.set {component, virtual: true}`.
+
+## Finding things in the browser
+
+A field above the browser's tree (Ctrl+F with the pointer over the browser gives it the keyboard)
+finds components, bodies, sketches, construction planes and joints by name. It finds the text anywhere in a name,
+ignoring case. With `*` (any text) or `?` (any one character) in it, the whole name must match:
+`*:1` finds every first instance. Each placement of a component is found on its own, so a bolt
+placed six times is listed six times, each under the components that hold it.
+
+Only the matches and their parents stay in the tree, opened for the search; closing a row there
+leaves the tree's own folds as they were. The list under the field narrows the search to one kind,
+or with nothing typed lists everything of that kind. **Select all** selects what was found, and
+**Hide others** hides every body it didn't find. Esc or **×** ends the search. Scripts and agents
+search the same way with `browser.find`.
+
+To keep the tree without the bar, set **Browser search** to **From the magnifier** in Preferences ›
+Layout: the magnifier on the browser's title, or Ctrl+F, then opens it, and ending the search
+closes it.

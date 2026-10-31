@@ -223,7 +223,8 @@ impl Product {
             ],
             Self::RenderInspector => vec![("remove", "render.inspector_remove", "delete")],
             Self::DrawingSheets => vec![("add-sheet", "ui.drawing_sheets.add", "plus")],
-            Self::Browser | Self::RenderShots | Self::SketchOptions | Self::Bom | Self::DrawingInspector => Vec::new(),
+            Self::Browser => vec![("magnifier", "ui.browser_search_hint", "zoom")],
+            Self::RenderShots | Self::SketchOptions | Self::Bom | Self::DrawingInspector => Vec::new(),
         };
         entries.into_iter().map(|(id, key, icon)| HeaderActionSpec { id: ControlId(id.into()), label_key: key.into(), icon: icon.into() }).collect()
     }
@@ -330,7 +331,18 @@ impl Product {
                     })
                     .collect()
             }
-            Self::Browser | Self::RenderShots | Self::SketchOptions | Self::Bom | Self::DrawingInspector => Vec::new(),
+            // The magnifier only in its preference; the bar that is always there needs none.
+            Self::Browser => (app.preferences.browser_search_bar == crate::prefs::BrowserSearchBar::Magnifier)
+                .then(|| RuntimeAction {
+                    id: ControlId("magnifier".into()),
+                    label: solidcraft_ui_text::tr("ui.browser_search_hint").into(),
+                    enabled: true,
+                    disabled_reason: None,
+                    pressed: Some(crate::browser_search::bar_shown(app)),
+                })
+                .into_iter()
+                .collect(),
+            Self::RenderShots | Self::SketchOptions | Self::Bom | Self::DrawingInspector => Vec::new(),
         };
         presentation
     }
@@ -596,7 +608,8 @@ pub(crate) fn drain_production_actions(app: &mut crate::SolveApp) -> PanelResult
                     crate::drawing_workspace::start(app, "drawing.sheet.add");
                 }
             }
-            Product::Browser | Product::RenderShots | Product::SketchOptions | Product::Bom | Product::DrawingInspector => {}
+            Product::Browser => crate::browser::magnifier(app),
+            Product::RenderShots | Product::SketchOptions | Product::Bom | Product::DrawingInspector => {}
         }
     }
     Ok(())
