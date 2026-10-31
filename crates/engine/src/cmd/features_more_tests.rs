@@ -1277,6 +1277,40 @@ fn blind_bore_into_a_joined_boss_meshes() {
     assert_eq!(m["bodies"].as_array().map(Vec::len), Some(1), "{m}");
 }
 
+/// #3741: a cylinder with a square pocket through it, cut across by a circle split into its two
+/// halves by a line (both picked: one round tool, whose end face touches the round side where
+/// the halves meet), then a Ø10 hole through all of it. The cross cut left an empty second shell
+/// in the body, and the hole failed on it with "lumps: cannot mesh a complete shell boundary".
+#[test]
+fn a_hole_through_a_cylinder_cut_across_by_a_split_circle() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY"}));
+    run(&mut s, "sketch.circle.center", json!({"center": [0, 0], "radius": 25}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"distance": 50}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "offset": 50}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [-12.5, -12.5], "p1": [12.5, 12.5]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"distance": -50, "operation": "cut"}));
+    run(&mut s, "sketch.create", json!({"plane": {"origin": [25, 0, 0], "x_dir": [0, 1, 0], "y_dir": [0, 0, 1]}, "name": "Across"}));
+    run(&mut s, "sketch.circle.center", json!({"center": [0, 25], "radius": 20}));
+    run(&mut s, "sketch.line", json!({"points": [[0, 0], [0, 50]], "closed": false}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "Across", "distance": -58, "operation": "cut", "profiles": [0, 1]}));
+    let shells = |s: &Session| s.model.state().bodies.iter().map(|b| b.body.shell_count()).collect::<Vec<_>>();
+    assert_eq!(shells(&s), [1]);
+    let before = volume(&mut s);
+    run(&mut s, "sketch.create", json!({"plane": {"origin": [0, 0, 0], "x_dir": [1, 0, 0], "y_dir": [0, 0, 1]}, "name": "Hole"}));
+    run(&mut s, "sketch.circle.center", json!({"center": [0, 25], "radius": 5}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "Hole", "distance": 10, "operation": "cut", "through_all": true, "direction": "negative"}));
+    assert_eq!(shells(&s), [1]);
+    let after = volume(&mut s);
+    // Through all on its one side (+Y), the hole takes what lies in it of the side wall there:
+    // over its section, from the cross cut's round wall out to the cylinder's (395.2 mm³).
+    assert!((before - after - 395.2).abs() < 4.0, "{before} -> {after}");
+}
+
 #[test]
 fn cutting_a_text_removes_each_letter_whether_its_letters_stand_apart_or_touch() {
     // Letters apart (cut at once by all of them), and two touching blocks (cut one after the other).

@@ -3163,3 +3163,49 @@ fn transform_refuses_a_matrix_that_is_not_an_affine_placement() {
     let removed = measure(&lifted).unwrap().volume - measure(&cut).unwrap().volume;
     assert!((removed - 6.0 * 6.0 * 3.0).abs() < 1.0, "{removed}");
 }
+
+/// #3741: a Ø50 x 50 cylinder with a 25 mm square pocket through it, cut across by a Ø40
+/// cylinder along X whose end face (x = 25) touches the round side along the line y = 0, where
+/// its profile's two half arcs meet. A shifted retry came back with the right material and a
+/// second shell of three faces of no area on that line; the cut through the result failed with
+/// "lumps: cannot mesh a complete shell boundary". The operands are built as the Extrude feature
+/// builds them (each in its sketch frame, the pocket run past both ends).
+#[test]
+fn a_cut_whose_end_face_touches_a_round_side_leaves_no_empty_shell() {
+    let arc = |center: Vec2, radius: f64, start: f64| Seg2::Arc { center, radius, start, sweep: PI };
+    let region = |segs: Vec<Seg2>| Region2 { outer: Loop2 { segs }, holes: vec![] };
+    let disc = region(vec![arc(Vec2::ZERO, 25.0, 0.0), arc(Vec2::ZERO, 25.0, PI)]);
+    let base = extrude_whole_sides(&Plane::XY, &[disc], 0.0, 50.0).unwrap().remove(0);
+    let pocket = Region2 {
+        outer: Loop2::polygon(&[Vec2::new(-12.5, -12.5), Vec2::new(12.5, -12.5), Vec2::new(12.5, 12.5), Vec2::new(-12.5, 12.5)]),
+        holes: vec![],
+    };
+    let run_on = std::f64::consts::FRAC_1_SQRT_2;
+    let pocket = extrude_whole_sides(&Plane::XY, &[pocket], -50.0 - run_on, run_on).unwrap().remove(0);
+    let pocket = transform_matrix(&pocket, [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 50.0, 1.0]]).unwrap();
+    let target = boolean(&base, &pocket, BoolOp::Cut).unwrap().unwrap();
+    // The sketch plane x = 25 (its x along Y, its y along Z), the tool run 58 back from it.
+    let c = Vec2::new(0.0, 25.0);
+    let tool = extrude_whole_sides(&Plane::XY, &[region(vec![arc(c, 20.0, PI / 2.0), arc(c, 20.0, 1.5 * PI)])], -58.0, 0.0).unwrap().remove(0);
+    let tool = transform_matrix(&tool, [[0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [1.0, 0.0, 0.0, 0.0], [25.0, 0.0, 0.0, 1.0]]).unwrap();
+    let cut = boolean(&target, &tool, BoolOp::Cut).unwrap().unwrap();
+    assert_eq!(cut.shell_count(), 1);
+    assert!(cut.validity().is_empty(), "{:?}", cut.validity());
+    // What the tool takes: at each y across it, its height 2 sqrt(400 - y²) times the length of
+    // material along X there (the round side, less the pocket where it runs through).
+    let n = 4000;
+    let taken: f64 = (0..n)
+        .map(|i| {
+            let y = -20.0 + 40.0 * (i as f64 + 0.5) / n as f64;
+            let length = 2.0 * (625.0 - y * y).sqrt() - if y.abs() < 12.5 { 25.0 } else { 0.0 };
+            2.0 * (400.0 - y * y).sqrt() * length * 40.0 / n as f64
+        })
+        .sum();
+    let want = PI * 625.0 * 50.0 - 25.0 * 25.0 * 50.0 - taken;
+    let got = measure(&cut).unwrap().volume;
+    assert!(rel(got, want) < 1e-3, "{got} vs {want}");
+    // And the hole through what is left that the issue's next step drills (Ø10 along Y at z = 25).
+    let hole = cylinder(Vec3::new(0.0, -30.0, 25.0), Vec3::Y, 5.0, 60.0).unwrap();
+    let drilled = boolean(&cut, &hole, BoolOp::Cut).unwrap().unwrap();
+    assert!(drilled.validity().is_empty(), "{:?}", drilled.validity());
+}

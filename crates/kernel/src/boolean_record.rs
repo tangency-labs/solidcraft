@@ -157,10 +157,43 @@ pub(crate) fn heal_build(
     record::build(healed, counts, faces, edges.as_ref())
 }
 
-/// The body truck's result `s` makes, healed (see [`heal_build`]), with its history `h`.
+/// The body truck's result `s` makes, healed (see [`heal_build`]), with its history `h`, less
+/// the flat shells truck can leave beside it ([`without_flat_shells`]).
 pub(crate) fn truck_result(s: Solid, h: Option<Shapeops>, size: f64, keep: &[Vec<Vec3>], counts: &[(usize, usize)]) -> Result<Body> {
     let (faces, edges) = h.unzip();
-    heal_build(s, size, keep, faces, edges, counts)
+    Ok(without_flat_shells(heal_build(s, size, keep, faces, edges, counts)?, counts))
+}
+
+/// `body` without its shells, beside others, whose every face is bounded along one line: faces of
+/// no area, which truck can leave where the operands only touch along that line (a tool's end
+/// face against a round side, #3741). They hold no material, so the volume and membership checks
+/// pass them, but they are no solid: whatever takes the body apart into its pieces (the next
+/// cut) fails on them. Its history follows the shells kept.
+fn without_flat_shells(body: Body, counts: &[(usize, usize)]) -> Body {
+    let shells = body.solid.boundaries();
+    if shells.len() < 2 {
+        return body;
+    }
+    let tol = (body.size() * 1e-6).max(1e-9);
+    let (kept, flat): (Vec<&mt::Shell>, Vec<&mt::Shell>) = shells.iter().partition(|sh| !flat_shell(sh, tol));
+    if flat.is_empty() || kept.is_empty() {
+        return body;
+    }
+    let Ok(piece) = crate::guard("flat shells", || Body::new(Solid::new_unchecked(kept.into_iter().cloned().collect()))) else { return body };
+    let history = parts_of(std::slice::from_ref(&piece), &body).pop().flatten().zip(body.history()).and_then(|(h, whole)| composed(h.over(&[whole])));
+    piece.with_checked_history(history, counts)
+}
+
+/// Whether every face of `shell` is bounded along one line (to `tol`).
+fn flat_shell(shell: &mt::Shell, tol: f64) -> bool {
+    shell.face_iter().all(|face| {
+        let points: Vec<Vec3> = face.boundaries().iter().flat_map(|w| w.edge_iter()).flat_map(crate::heal::edge_points).collect();
+        // The ends of the line: the point farthest from the first, and the one farthest from it.
+        let farthest = |from: Vec3| points.iter().copied().max_by(|p, q| p.dist(from).total_cmp(&q.dist(from)));
+        let Some(b) = points.first().copied().and_then(farthest) else { return true };
+        let Some(a) = farthest(b) else { return true };
+        points.iter().all(|p| p.dist_to_segment(a, b) <= tol)
+    })
 }
 
 /// `body` healed (see [`heal_build`]), its history carried through: `solid` is `body`'s solid
