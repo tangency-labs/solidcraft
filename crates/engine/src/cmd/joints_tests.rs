@@ -2698,3 +2698,46 @@ fn driving_an_angle_reports_the_number_a_person_would_read() {
     let j = s.doc.assembly.joints.iter().find(|j| j.name == "Turn").unwrap();
     assert_ne!(j.values[0].to_degrees(), 30.0, "the stored angle keeps its bits");
 }
+
+#[test]
+fn new_joints_generate_type_prefixed_names_or_keep_custom_name() {
+    let mut s = two_cubes();
+    let (a, b) = (occ(&s, "A"), occ(&s, "B"));
+
+    // 1. Without name: revolute joint defaults to "Revolute Joint1"
+    let r1 = run(
+        &mut s,
+        "joint.create",
+        json!({
+            "type": "revolute",
+            "a": {"occurrence": a, "face": [5, 5, 10]},
+            "b": {"occurrence": b, "face": [25, 5, 0]}
+        }),
+    );
+    assert_eq!(r1["name"], "Revolute Joint1");
+
+    // 2. Without name: slider joint defaults to "Slider Joint1"
+    let r2 = run(
+        &mut s,
+        "joint.as_built",
+        json!({
+            "type": "slider",
+            "a": "A",
+            "b": "B"
+        }),
+    );
+    assert_eq!(r2["name"], "Slider Joint1");
+
+    // 3. With custom name: preserves custom name exactly
+    let r3 = run(
+        &mut s,
+        "joint.create",
+        json!({
+            "type": "rigid",
+            "name": "CustomRigid",
+            "a": {"occurrence": a, "face": [5, 5, 10]},
+            "b": {"occurrence": b, "face": [25, 5, 0]}
+        }),
+    );
+    assert_eq!(r3["name"], "CustomRigid");
+}
