@@ -4513,33 +4513,31 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
         }
         Kind::Loft { operation, rail_fit } => {
             need(0, "profiles of two or more sketches")?;
-            // One section per sketch, in the order the sketches were first picked; a sketch point
-            // is a section of its own, an apex the loft closes to (#4830).
-            let mut sections: Vec<(u64, Vec<usize>, Option<&str>)> = Vec::new();
+            // Each picked profile is a section, in pick order, two of them from one sketch
+            // included (#8221); a sketch point is a section of its own, an apex the loft closes
+            // to (#4830).
+            let mut sections: Vec<Value> = Vec::new();
+            let (mut profile_sketches, mut apexes) = (Vec::new(), 0);
             for x in sels(d, 0) {
                 match x {
-                    Sel::Profile { sketch, index } => match sections.iter_mut().find(|(sk, _, apex)| sk == sketch && apex.is_none()) {
-                        Some((_, v, _)) => v.push(*index),
-                        None => sections.push((*sketch, vec![*index], None)),
-                    },
+                    Sel::Profile { sketch, index } => {
+                        sections.push(json!({"sketch": sketch, "profiles": [index]}));
+                        profile_sketches.push(*sketch);
+                    }
                     Sel::SketchPoint { id } => {
                         if let Some((sk, point)) = id.split_once(':').and_then(|(sk, point)| Some((sk.parse::<u64>().ok()?, point))) {
-                            sections.push((sk, Vec::new(), Some(point)));
+                            sections.push(json!({"sketch": sk, "point": point}));
+                            apexes += 1;
                         }
                     }
                     _ => {}
                 }
             }
-            if sections.len() < 2 {
+            profile_sketches.sort_unstable();
+            profile_sketches.dedup();
+            if profile_sketches.len() + apexes < 2 {
                 return Err("pick profiles in two or more sketches, or a profile and a sketch point".into());
             }
-            let sections: Vec<Value> = sections
-                .into_iter()
-                .map(|(sk, v, apex)| match apex {
-                    Some(point) => json!({"sketch": sk, "point": point}),
-                    None => json!({"sketch": sk, "profiles": v}),
-                })
-                .collect();
             let mut p = json!({"sections": sections, "operation": OPS.get(*operation).copied().unwrap_or("new")});
             crate::dialogs_sweep::rail_params(app, *rail_fit, [sels(d, 1), sels(d, 2)], &mut p)?;
             ("solid.loft", p)
