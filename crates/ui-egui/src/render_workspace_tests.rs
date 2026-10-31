@@ -824,6 +824,19 @@ fn render_lights_list_inspects_unsaved_ui_draft_without_applying_or_opening_anyt
     assert!(h.app.dialog.is_none() && h.app.tool.is_none());
 }
 
+/// The vertices of a product scene's `class` triangles: their runs in its blocks.
+fn class_vertices(gpu: &GpuScene, class: crate::gpu::TriClass) -> Vec<u8> {
+    let mut out = Vec::new();
+    for b in &gpu.blocks {
+        for r in b.bytes.runs(class).iter() {
+            out.extend_from_slice(
+                b.bytes.vertices.get(r.start as usize * crate::gpu::TRI_SIZE..r.end as usize * crate::gpu::TRI_SIZE).unwrap_or_default(),
+            );
+        }
+    }
+    out
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 mod async_path_host {
     use super::*;
@@ -1142,7 +1155,7 @@ fn opaque_pbr_product_gpu_and_cpu_share_color_and_material_semantics() {
         .unwrap();
         let scene = solidcraft_engine::product_scene::extract(&s).unwrap();
         let (key, gpu) = gpu_scene(&scene).unwrap();
-        assert!(!gpu.pbr.is_empty() && gpu.tris.is_empty());
+        assert!(!gpu.pbr.is_empty() && class_vertices(&gpu, crate::gpu::TriClass::Opaque).is_empty());
         assert_ne!(previous, Some(key));
         previous = Some(key);
         let mut camera = Camera { fov: 0.0, ..Default::default() };
@@ -1518,13 +1531,19 @@ fn product_gpu_buffers_preserve_opacity_and_never_contain_overlays() {
     s.execute("appearance.assign", &json!({"bodies":["Glass"],"color":"#336699","opacity":0.4})).unwrap();
     let scene = solidcraft_engine::product_scene::extract(&s).unwrap();
     let (key, gpu) = gpu_scene(&scene).unwrap();
-    assert!(gpu.tris.is_empty());
-    assert!(!gpu.glass.is_empty());
+    assert!(class_vertices(&gpu, crate::gpu::TriClass::Opaque).is_empty());
+    assert!(!class_vertices(&gpu, crate::gpu::TriClass::Glass).is_empty());
     let color = |v: &[u8]| {
         let i = v.get(crate::gpu::TRI_SIZE - 4..).and_then(|b| b.try_into().ok()).map(u32::from_le_bytes)?;
         gpu.palette.get(crate::gpu::PaletteIndex(i))
     };
-    assert!(gpu.glass.as_chunks::<{ crate::gpu::TRI_SIZE }>().0.iter().all(|v| color(v) == Some([51, 102, 153, 102])));
+    assert!(
+        class_vertices(&gpu, crate::gpu::TriClass::Glass)
+            .as_chunks::<{ crate::gpu::TRI_SIZE }>()
+            .0
+            .iter()
+            .all(|v| color(v) == Some([51, 102, 153, 102]))
+    );
     assert!(gpu.lines.is_empty() && gpu.overlay.is_empty() && gpu.under.is_empty() && gpu.hidden.is_empty() && gpu.ghost.is_empty());
     s.selection = vec![solidcraft_engine::Sel::Body { name: "Glass".into() }];
     s.section = Some((solidcraft_engine::geom::Vec3::ZERO, solidcraft_engine::geom::Vec3::X));
@@ -1534,7 +1553,39 @@ fn product_gpu_buffers_preserve_opacity_and_never_contain_overlays() {
     let invisible = solidcraft_engine::product_scene::extract(&s).unwrap();
     assert_eq!(invisible.meshes[0].opacity, 0.0);
     let (_, empty) = gpu_scene(&invisible).unwrap();
-    assert!(empty.tris.is_empty() && empty.glass.is_empty());
+    assert!(class_vertices(&empty, crate::gpu::TriClass::Opaque).is_empty() && class_vertices(&empty, crate::gpu::TriClass::Glass).is_empty());
+}
+
+/// The live preview keeps its blocks across scenes: a colour edit rewrites palette entries and
+/// keeps every vertex, an opacity class change keeps the vertices and moves the triangles to the
+/// see-through runs, and a geometry edit builds the block again.
+#[test]
+fn product_appearance_edits_keep_the_blocks_vertices() {
+    let mut s = Session::default();
+    s.execute("solid.box", &json!({"length":10,"width":10,"height":10,"body_name":"Part"})).unwrap();
+    let mut cache = ProductCache::default();
+    let mut build =
+        |s: &Session| gpu_scene_cached(&solidcraft_engine::product_scene::extract(s).unwrap(), MAX_GEOMETRY_BYTES as u64, &mut cache).unwrap();
+    let (plain_key, plain) = build(&s);
+    let vertices = plain.blocks[0].bytes.vertices.clone();
+    let first_colour = |gpu: &GpuScene, class| {
+        let v = class_vertices(gpu, class);
+        let i = v.get(crate::gpu::TRI_SIZE - 4..crate::gpu::TRI_SIZE).and_then(|b| b.try_into().ok()).map(u32::from_le_bytes)?;
+        gpu.palette.get(crate::gpu::PaletteIndex(i))
+    };
+    s.execute("appearance.assign", &json!({"bodies":["Part"],"color":"#336699"})).unwrap();
+    let (colour_key, colour) = build(&s);
+    assert_ne!(colour_key, plain_key, "the scene is taken again");
+    assert!(Arc::ptr_eq(&vertices, &colour.blocks[0].bytes.vertices), "a colour edit keeps every vertex");
+    assert_eq!(first_colour(&colour, crate::gpu::TriClass::Opaque), Some([51, 102, 153, 255]), "the palette carries the colour");
+    s.execute("appearance.assign", &json!({"bodies":["Part"],"color":"#336699","opacity":0.5})).unwrap();
+    let (_, glass) = build(&s);
+    assert!(Arc::ptr_eq(&vertices, &glass.blocks[0].bytes.vertices), "an opacity class change keeps every vertex");
+    assert!(class_vertices(&glass, crate::gpu::TriClass::Opaque).is_empty(), "no triangle is left opaque");
+    assert_eq!(first_colour(&glass, crate::gpu::TriClass::Glass), Some([51, 102, 153, 128]));
+    s.execute("solid.box", &json!({"length":5,"width":5,"height":5,"corner":[3,3,10],"operation":"cut"})).unwrap();
+    let (_, cut) = build(&s);
+    assert!(!Arc::ptr_eq(&vertices, &cut.blocks[0].bytes.vertices), "a geometry edit builds the block again");
 }
 
 #[test]
@@ -1552,11 +1603,11 @@ fn transmission_uses_legacy_preview_buffers_and_invalidates_the_opaque_cache() {
     let (glass_key, glass) = gpu_scene(&scene).unwrap();
     assert_ne!(opaque_key, glass_key);
     assert!(glass.pbr.is_empty());
-    assert!(!glass.tris.is_empty());
+    assert!(!class_vertices(&glass, crate::gpu::TriClass::Opaque).is_empty());
     scene.meshes[0].opacity = 0.4;
     let (_, transparent) = gpu_scene(&scene).unwrap();
     assert!(transparent.pbr.is_empty());
-    assert!(!transparent.glass.is_empty());
+    assert!(!class_vertices(&transparent, crate::gpu::TriClass::Glass).is_empty());
 }
 
 #[test]
@@ -3520,7 +3571,10 @@ fn product_preview_exact_payload_preserves_mixed_surfaces_and_refuses_overflow()
     let scene = solidcraft_engine::product_scene::extract(&session).unwrap();
     let plan = preview_upload_plan(&scene, MAX_GEOMETRY_BYTES).unwrap();
     let (_, gpu) = gpu_scene(&scene).unwrap();
-    assert_eq!((plan.pbr, plan.tris, plan.glass), (gpu.pbr.len(), gpu.tris.len(), gpu.glass.len()));
+    assert_eq!(
+        (plan.pbr, plan.tris, plan.glass),
+        (gpu.pbr.len(), class_vertices(&gpu, crate::gpu::TriClass::Opaque).len(), class_vertices(&gpu, crate::gpu::TriClass::Glass).len())
+    );
     assert!(plan.pbr > 0 && plan.tris > 0 && plan.glass > 0);
     assert_eq!(plan.source_triangles, scene.meshes.iter().map(|b| b.mesh.triangles.len()).sum::<usize>());
     assert!(preview_upload_plan(&scene, plan.bytes().unwrap() - 1).is_err());
@@ -6427,7 +6481,7 @@ fn geometry_refusal_reports_scene_size_limit_and_recovery() {
         }],
         bounds: Aabb3::EMPTY,
     };
-    let error = gpu_scene_with_budget(&scene, WEB_GEOMETRY_BYTES).err().unwrap();
+    let error = gpu_scene_cached(&scene, WEB_GEOMETRY_BYTES, &mut ProductCache::default()).err().unwrap();
     assert!(error.contains("144.0 MiB"), "{error}");
     assert!(error.contains("128.0 MiB"), "{error}");
     assert!(error.contains("Hide bodies in Design"), "{error}");
