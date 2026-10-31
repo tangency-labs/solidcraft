@@ -1,5 +1,4 @@
 accessibility	false
-activate	false
 agent_chat	false
 align	false
 ambient_occlusion	false
@@ -240,7 +239,6 @@ sheet	false
 sheet_rules	false
 shell	false
 shield	false
-silhouette	false
 sketch	false
 sketch_break	false
 sketch_cancel	false
@@ -260,7 +258,6 @@ sketch_text	false
 slot	false
 slot_center	false
 slot_overall	false
-snap	false
 snap_fit	false
 sphere	false
 spin	false
@@ -302,7 +299,6 @@ surface_unstitch	false
 surface_untrim	false
 svg	false
 sweep	false
-text	false
 thread	false
 timeline_play	false
 timeline_stop	false
