@@ -279,7 +279,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.face_points_span_domain = true;
     f.drop_curve_v_domain_degeneracy = true;
     f.mirror_curve_keeps_euclidean_control_points = true;
-    f.geometric_g2_continuity = true;
     f.fillet_corner_variable_radius_rail_on_opposite_fillet = true;
     f.sphere_from_arcs_common_centre = true;
     f.dupin_bottom_hyperbola_axis = true;
@@ -312,6 +311,9 @@ const HELD_BACK: &[&str] = &[
     // sheet-metal/3078-flange-on-the-side-edge-of-a-flange: with it on the body's check fails with
     // "SmBSplineCurve::Test #15 Bad Repeated CPts" (volume unchanged, 31362.04580633055); off it passes.
     "bspline_trim_keeps_rational_end_spans",
+    // With the flag above off, crashes/2992-join-disk-and-36-twisted-loft-blades doesn't end (no result
+    // after 180 s, 19.6 s with this one off, 14.7 s on C++); so does threads/3368-two-faceted-prisms-cut-then-joined.
+    "geometric_g2_continuity",
 ];
 
 fn fresh() -> Kernel {
