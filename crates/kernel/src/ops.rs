@@ -872,6 +872,8 @@ thread_local! {
     /// Set while a boolean runs on bodies whose coincident faces were pushed apart (no
     /// second round of pushing).
     static APART: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    /// An optional cheap nudge probe; all recovery strategies remain in the full pass.
+    static QUICK_NUDGE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
     /// Set while a union runs with a bore narrowed off a common cylinder (no second round).
     static BORES: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
     /// The intersections left to the booleans running under [`with_attempt_budget`], if any.
@@ -896,6 +898,17 @@ pub fn with_attempt_budget<T>(attempts: usize, f: impl FnOnce() -> T) -> T {
     ATTEMPTS.with(|c| c.set(Some(mine)));
     let _restore = Restore(outer, mine);
     f()
+}
+
+fn quick_nudge<T>(f: impl FnOnce() -> T) -> T {
+    struct Restore(bool);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            QUICK_NUDGE.with(|c| c.set(self.0));
+        }
+    }
+    let _restore = Restore(QUICK_NUDGE.with(|c| c.replace(true)));
+    with_attempt_budget(1, f)
 }
 
 /// Takes one of the attempts left under [`with_attempt_budget`]; false when none is left.
@@ -1307,6 +1320,7 @@ fn boolean_whole_with<F>(a: &Body, b: &Body, op: BoolOp, refine: bool, intersect
 where
     F: Fn(&Body, &Body, BoolOp, Option<mt::Vector3>, f64) -> Result<(Solid, Option<recorded::Shapeops>)>,
 {
+    let mut trace = crate::profile::BooleanTrace::new("whole", a, b, op);
     if let Some(body) = swept_prism(a, b, op) {
         return Ok(Some(body));
     }
@@ -1344,6 +1358,7 @@ where
             return Ok(Some(body.clone()));
         }
     }
+    trace.mark("early_prism");
     let mut meshes = (a.tessellate_with(tol_m, true).ok(), b.tessellate_with(tol_m, true).ok());
     // The vertex boxes above miss a curved operand's reach (a cylinder has only seam vertices),
     // so a thin meeting region of curved bodies kept the coarse step: a sliver 0.5 mm thick was
@@ -1368,6 +1383,7 @@ where
             meshes = again;
         }
     }
+    trace.mark("operand_meshes");
     let (va, vb) = match &meshes {
         (Some(ma), Some(mb)) => (ma.measure().volume, mb.measure().volume),
         _ => (volume(a), volume(b)),
@@ -1393,11 +1409,13 @@ where
             && crate::coplanar::faces_touch(a, b)
     };
     let check = |r: &Body| -> (bool, f64) {
+        let mut trace = crate::profile::BooleanTrace::new("check", a, b, op);
         if let Some(reason) = reach.as_ref().and_then(|reach| reach.runaway(r)) {
             reject(reason);
             return (false, f64::NAN);
         }
         let Ok(mr) = r.tessellate_with(tol_m, true) else { return (false, f64::NAN) };
+        trace.mark("result_mesh");
         let v = mr.measure().volume;
         let bounds = plausible(v, op, va, vb, slack);
         if !bounds {
@@ -1406,10 +1424,12 @@ where
         if unfused(r) || crate::coplanar::has_skin(r, &mr) {
             return (false, v);
         }
+        trace.mark("topology");
         let consistent = match &meshes {
             (Some(ma), Some(mb)) => mismatch(ma, mb, &mr, op).is_none_or(|f| f < 0.004),
             _ => true,
         };
+        trace.mark("membership");
         (consistent, v)
     };
     if refine {
@@ -1439,10 +1459,12 @@ where
         && let Some((r, sure)) = trivial(a, b, op, ma, mb, &counts, 3.0 * tol_m)
     {
         if sure {
+            trace.mark("containment_kept");
             return Ok(r);
         }
         doubted = Some(r);
     }
+    trace.mark("containment");
     let mut last = String::new();
     // Coincident faces make the intersection fail after many retries; push them apart first.
     // Prisms along one direction (plates with holes): exact, in 2D (so only the volume bounds
@@ -1467,6 +1489,7 @@ where
             Err(_) => {}
         }
     }
+    trace.mark("prism");
     // Bodies touching along one whole face (a part joined with its mirror image).
     if op == BoolOp::Union && a.solid.boundaries().len() == 1 {
         let glued = if b.solid.boundaries().len() == 1 { crate::coplanar::glue(a, b) } else { crate::coplanar::glue_all_caps(a, b) };
@@ -1489,6 +1512,7 @@ where
             return Ok(Some(body));
         }
     }
+    trace.mark("glue_and_bores");
     // Coincident planar faces: push them apart (exactly). Tried once, before the general
     // boolean; why it failed is reported if everything else fails too.
     let mut apart_failed = String::new();
@@ -1530,6 +1554,7 @@ where
             }
         }
     }
+    trace.mark("coplanar");
     // A face standing wholly inside a coincident face of the other body, back to back, and no
     // other contact (#396): exact, by topology alone.
     if op == BoolOp::Union
@@ -1542,19 +1567,25 @@ where
     {
         return Ok(Some(body));
     }
+    trace.mark("inset");
     // Faces back to back over part of their area: imprinted on each other and glued (exact; held
     // to the retry guard's checks all the same).
-    if op == BoolOp::Union && crate::coplanar::faces_touch(a, b) {
+    // The cheap nudge probe asks the numerical intersection directly. If all probes
+    // fail, the full pass below still includes this exact recovery strategy.
+    if op == BoolOp::Union && !QUICK_NUDGE.with(|c| c.get()) && crate::coplanar::faces_touch(a, b) {
         let accept = |body: &Body| check(body).0 && !unfused(body) && crate::boolean_guard::check_retry(a, b, op, Some(body)).is_ok();
         // Imprinted along the contact's own outline (faces there bounded by lines and arcs), then
         // along the sides' surfaces.
         if let Some(body) = crate::outline::outline_union(a, b, &accept) {
             return Ok(Some(body));
         }
+        trace.mark("outline");
         if let Some(body) = crate::coplanar::imprint_union(a, b, &accept) {
             return Ok(Some(body));
         }
+        trace.mark("imprint");
     }
+    trace.mark("face_glue");
     let mut empty_votes = 0;
     let mut empty_diagnostics = crate::BooleanDiagnostics::default();
     let keep: Vec<Vec<Vec3>> = a.split_keep().iter().chain(b.split_keep()).cloned().collect();
@@ -1769,89 +1800,101 @@ where
     // Last resort: nudge the tool by a micron-scale screw motion (turned 2e-6 rad about a
     // skew axis and moved 2e-6 of the size), which breaks tangencies and seams lying exactly on
     // the other body. The result moves by no more than that.
-    if !APART.with(|c| c.get()) {
-        APART.with(|c| c.set(true));
-        let c = b.solid.vertex_iter().fold(Vec3::ZERO, |acc, v| acc + from_p3(v.point())) * (1.0 / b.solid.vertex_iter().count().max(1) as f64);
-        let translation = |screw: usize| SCREWS.get(screw).map_or(Vec3::ZERO, |s| Vec3::new(s.0[0], s.0[1], s.0[2]) * (size * 2e-6));
-        let nudge = |screw: usize, sign: f64| {
-            let axis = SCREWS.get(screw).map_or(Vec3::Z, |s| Vec3::new(s.1[0], s.1[1], s.1[2]));
-            capture_boolean_diagnostics(|| {
-                transform(b, translation(screw) * sign, c, axis, 2e-6 * sign).and_then(|nb| Ok(boolean(a, &nb, op)?.map(|r| nudged(r, &nb, &counts))))
-            })
-        };
-        let mut used = 0;
-        let (mut r, mut diagnostics) = nudge(used, 1.0);
-        // A nudge that pushes a face into a curved face it only touched (a cut whose end lies
-        // tangent to a round side) leaves a sliver of that face behind, a fraction of a
-        // millimetre wide, which later features (a shell, a fillet) can't work with. The
-        // opposite nudge parts them instead. It is tried when this one failed or left more
-        // slivers than the operands brought (a thin wall or a small round is no reason to run
-        // another boolean), and taken when it works with fewer; an empty result stays as it is.
-        let slivers = match &r {
-            Ok(Some(body)) if check(body).0 => Some(sliver_faces(body, size)),
-            _ => None,
-        };
-        let made = slivers.is_none_or(|n| n > 0 && n > sliver_faces(a, size).saturating_add(sliver_faces(b, size)));
-        if !matches!(r, Ok(None)) && made {
-            let (r2, diagnostics2) = nudge(used, -1.0);
-            if let Ok(Some(body)) = &r2
-                && slivers.is_none_or(|n| sliver_faces(body, size) < n)
-                && check(body).0
-            {
-                (r, diagnostics) = (r2, diagnostics2);
+    // Try each tiny screw with one unshifted numerical intersection first.
+    // A bad screw can otherwise spend minutes on larger shifted retries before the
+    // next screw succeeds immediately. If none checks, repeat the original full
+    // search. Callers with an explicit attempt budget retain their original ordering.
+    let nudge_passes = if op == BoolOp::Union && ATTEMPTS.with(|c| c.get().is_none()) { 2 } else { 1 };
+    for pass in 0..nudge_passes {
+        if !APART.with(|c| c.get()) {
+            trace.mark(if nudge_passes == 2 && pass == 0 { "nudge_probe" } else { "nudge_full" });
+            APART.with(|c| c.set(true));
+            let c = b.solid.vertex_iter().fold(Vec3::ZERO, |acc, v| acc + from_p3(v.point())) * (1.0 / b.solid.vertex_iter().count().max(1) as f64);
+            let translation = |screw: usize| SCREWS.get(screw).map_or(Vec3::ZERO, |s| Vec3::new(s.0[0], s.0[1], s.0[2]) * (size * 2e-6));
+            let nudge = |screw: usize, sign: f64| {
+                let axis = SCREWS.get(screw).map_or(Vec3::Z, |s| Vec3::new(s.1[0], s.1[1], s.1[2]));
+                capture_boolean_diagnostics(|| {
+                    let run = || {
+                        transform(b, translation(screw) * sign, c, axis, 2e-6 * sign)
+                            .and_then(|nb| Ok(boolean(a, &nb, op)?.map(|r| nudged(r, &nb, &counts))))
+                    };
+                    if nudge_passes == 2 && pass == 0 { quick_nudge(run) } else { run() }
+                })
+            };
+            let mut used = 0;
+            let (mut r, mut diagnostics) = nudge(used, 1.0);
+            // A nudge that pushes a face into a curved face it only touched (a cut whose end lies
+            // tangent to a round side) leaves a sliver of that face behind, a fraction of a
+            // millimetre wide, which later features (a shell, a fillet) can't work with. The
+            // opposite nudge parts them instead. It is tried when this one failed or left more
+            // slivers than the operands brought (a thin wall or a small round is no reason to run
+            // another boolean), and taken when it works with fewer; an empty result stays as it is.
+            let slivers = match &r {
+                Ok(Some(body)) if check(body).0 => Some(sliver_faces(body, size)),
+                _ => None,
+            };
+            let made = slivers.is_none_or(|n| n > 0 && n > sliver_faces(a, size).saturating_add(sliver_faces(b, size)));
+            if !matches!(r, Ok(None)) && made {
+                let (r2, diagnostics2) = nudge(used, -1.0);
+                if let Ok(Some(body)) = &r2
+                    && slivers.is_none_or(|n| sliver_faces(body, size) < n)
+                    && check(body).0
+                {
+                    (r, diagnostics) = (r2, diagnostics2);
+                }
             }
-        }
-        // Neither way worked: the screw can turn the tool along a seam it lies in (a loft
-        // standing in the rim of a shelled case with its ends in the wall's inner face, #1490).
-        // The other screws are tried in turn, and the first result that checks is taken.
-        let works = |r: &Result<Option<Body>>| match r {
-            Ok(None) => true,
-            Ok(Some(body)) => check(body).0,
-            Err(_) => false,
-        };
-        if !works(&r) {
-            'screws: for screw in 1..SCREWS.len() {
-                for sign in [1.0, -1.0] {
-                    let (r2, diagnostics2) = nudge(screw, sign);
-                    if matches!(&r2, Ok(Some(body)) if check(body).0) {
-                        (r, diagnostics, used) = (r2, diagnostics2, screw);
-                        break 'screws;
+            // Neither way worked: the screw can turn the tool along a seam it lies in (a loft
+            // standing in the rim of a shelled case with its ends in the wall's inner face, #1490).
+            // The other screws are tried in turn, and the first result that checks is taken.
+            let works = |r: &Result<Option<Body>>| match r {
+                Ok(None) => true,
+                Ok(Some(body)) => check(body).0,
+                Err(_) => false,
+            };
+            if !works(&r) {
+                'screws: for screw in 1..SCREWS.len() {
+                    for sign in [1.0, -1.0] {
+                        let (r2, diagnostics2) = nudge(screw, sign);
+                        if matches!(&r2, Ok(Some(body)) if check(body).0) {
+                            (r, diagnostics, used) = (r2, diagnostics2, screw);
+                            break 'screws;
+                        }
                     }
                 }
             }
-        }
-        let translation = translation(used);
-        APART.with(|c| c.set(false));
-        match r {
-            Ok(Some(body)) => {
-                let (ok, v) = check(&body);
-                // Measured finely too: a face the boolean left a hair wide, its loops a hair
-                // apart, can mesh as its whole plane at a fine step though it meshed as a sliver
-                // at the check's (#1360: an annulus cut flush with a hole's wall came out 21000
-                // mm³ larger than the part it was cut from, a square plane across it).
-                let fine_ok = ok && crate::measure(&body).is_ok_and(|m| plausible(m.volume, op, va, vb, slack));
-                if ok && !fine_ok {
-                    last = format!("{last}; the nudged tool gave a solid whose faces mesh inconsistently");
-                } else if ok {
+            let translation = translation(used);
+            APART.with(|c| c.set(false));
+            match r {
+                Ok(Some(body)) => {
+                    let (ok, v) = check(&body);
+                    // Measured finely too: a face the boolean left a hair wide, its loops a hair
+                    // apart, can mesh as its whole plane at a fine step though it meshed as a sliver
+                    // at the check's (#1360: an annulus cut flush with a hole's wall came out 21000
+                    // mm³ larger than the part it was cut from, a square plane across it).
+                    let fine_ok = ok && crate::measure(&body).is_ok_and(|m| plausible(m.volume, op, va, vb, slack));
+                    if ok && !fine_ok {
+                        last = format!("{last}; the nudged tool gave a solid whose faces mesh inconsistently");
+                    } else if ok {
+                        merge(diagnostics);
+                        let mut event = BooleanFallback::new(BooleanStrategy::ToolNudge);
+                        event.translation_mm = translation.len();
+                        event.rotation_rad = 2e-6;
+                        record(event);
+                        return Ok(Some(body));
+                    } else {
+                        last = format!("{last}; the nudged tool gave an implausible volume {v:.4}");
+                    }
+                }
+                Ok(None) => {
                     merge(diagnostics);
                     let mut event = BooleanFallback::new(BooleanStrategy::ToolNudge);
                     event.translation_mm = translation.len();
                     event.rotation_rad = 2e-6;
                     record(event);
-                    return Ok(Some(body));
-                } else {
-                    last = format!("{last}; the nudged tool gave an implausible volume {v:.4}");
+                    return Ok(None);
                 }
+                Err(e) => last = format!("{last}; nudged: {e}"),
             }
-            Ok(None) => {
-                merge(diagnostics);
-                let mut event = BooleanFallback::new(BooleanStrategy::ToolNudge);
-                event.translation_mm = translation.len();
-                event.rotation_rad = 2e-6;
-                record(event);
-                return Ok(None);
-            }
-            Err(e) => last = format!("{last}; nudged: {e}"),
         }
     }
     // A join whose coincident planar faces cannot be pushed apart because the neighbours of one of them curve (a flange
@@ -1992,6 +2035,7 @@ pub(crate) fn truck_boolean(a: &Body, b: &Body, op: BoolOp, shift: Option<mt::Ve
     if !take_attempt() {
         return Err(KernelError::Failed("no result in the tries it was given".into()));
     }
+    let mut trace = crate::profile::BooleanTrace::new("truck", a, b, op);
     guard("boolean", || {
         let (mut sa, mut sb) = (a.deep_copy(), b.deep_copy());
         if let Some(shift) = shift {
@@ -2000,6 +2044,7 @@ pub(crate) fn truck_boolean(a: &Body, b: &Body, op: BoolOp, shift: Option<mt::Ve
         }
         let tool_edges = (op == BoolOp::Cut).then(|| record::edge_origins(&sb, 1));
         // A body that keeps its meshes is meshed once for all its booleans at this tolerance.
+        trace.mark("copies_and_history");
         let meshed = shift.is_none().then(|| a.boolean_meshes(tol)).flatten();
         let and = |sa: &Solid, sb: &Solid| match &meshed {
             Some(m) => truck_shapeops::and_with_history_meshed(sa, m, sb, tol),
@@ -2013,6 +2058,7 @@ pub(crate) fn truck_boolean(a: &Body, b: &Body, op: BoolOp, shift: Option<mt::Ve
             }
             BoolOp::Intersect => and(&sa, &sb),
         };
+        trace.mark("intersection");
         let (s, h) = res.ok_or_else(|| KernelError::Failed("no result".into()))?;
         let h = h.and_then(|h| recorded::shapeops(&h, &sb, tool_edges.as_ref()));
         Ok((if let Some(shift) = shift { mt::builder::translated(&s, -shift) } else { s }, h))
@@ -2367,9 +2413,11 @@ pub fn transform(body: &Body, translate: Vec3, origin: Vec3, axis: Vec3, angle: 
 /// Split a body with a plane: the parts on the positive and the negative side of the plane
 /// (only the non-empty ones).
 pub fn split_by_plane(body: &Body, plane: &solidcraft_geom::Plane) -> Result<Vec<Body>> {
+    // Both halves read the same solid, including retries and validation meshes.
+    let body = body.keeping_meshes();
     let mut out = Vec::new();
     for positive in [true, false] {
-        out.extend(half_space(body, plane, positive)?.0);
+        out.extend(half_space(&body, plane, positive)?.0);
     }
     Ok(out)
 }

@@ -989,6 +989,33 @@ fn multi_target_join_keeps_nearby_bodies_and_original_absorption_order() {
     }
 }
 
+#[test]
+fn single_target_combine_join_keeps_contact_identity_and_tool_retention() {
+    for (x, expected_volume, shells) in [(5, 1500., 1), (10, 2000., 1), (20, 2000., 2)] {
+        for keep_tools in [false, true] {
+            let mut s = Session::default();
+            for (name, x) in [("Stock", 0), ("Tool", x), ("Other", 50)] {
+                s.execute("solid.box", &json!({"length":10,"width":10,"height":10,"corner":[x,0,0],"body_name":name})).unwrap();
+            }
+            let before = s.doc.clone();
+            s.execute("solid.combine", &json!({"target":"Stock","tools":["Tool"],"keep_tools":keep_tools})).unwrap();
+            let state = s.model.state();
+            let result = &state.body("Stock").unwrap().body;
+            assert!(result.validity().is_empty());
+            assert_eq!(result.shell_count(), shells);
+            assert!((volume(&s, "Stock") - expected_volume).abs() < 1e-6);
+            assert_eq!(state.body("Tool").is_some(), keep_tools);
+            assert_eq!(volume(&s, "Other"), 1000.);
+            assert_eq!(state.bodies.len(), if keep_tools { 3 } else { 2 });
+            s.execute("edit.undo", &json!({})).unwrap();
+            assert_eq!(s.doc, before);
+            s.execute("edit.redo", &json!({})).unwrap();
+            assert!((volume(&s, "Stock") - expected_volume).abs() < 1e-6);
+            assert_eq!(s.model.state().body("Tool").is_some(), keep_tools);
+        }
+    }
+}
+
 /// Two posts joined into one body while apart, trimmed by a cut that splits neither, then joined
 /// to a case they stand on. The cut split the joined posts into "Posts" and "Posts (1)" without
 /// saying so (`created_bodies` was empty), and the join then took only "Posts", leaving the other

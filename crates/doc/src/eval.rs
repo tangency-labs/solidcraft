@@ -3138,7 +3138,10 @@ fn apply_traced_with(
             };
             for tool in &tools {
                 let mut met: Vec<String> = Vec::new();
-                for name in &live {
+                // Combine has one explicit target: touching and disjoint tools both join it.
+                // Only multiple targets need contact tests to decide which bodies to absorb.
+                let contacts = live.len() > 1 || !matches!(f.kind, FeatureKind::Combine { .. });
+                for name in live.iter().filter(|_| contacts) {
                     let Some(mb) = state.body(name) else { continue };
                     let sheet = state.sheets.iter().any(|s| &s.body == name);
                     if mb.body.is_mesh() || (!met.is_empty() && sheet) {
@@ -8937,9 +8940,12 @@ mod coplanar_growth_tests {
 /// Each part's cut face is named `section` after the half-space box that cut it, so it takes an
 /// attachment that follows the plane (#565); the box's other faces never reach the part.
 fn split_by_plane_traced(input: &Traced, plane: &Plane) -> Result<Vec<Traced>> {
+    // Keep operand meshes across the two half-space intersections. The solid and lineage
+    // are unchanged; the memo is bounded and lives only as long as this operation needs it.
+    let body = input.body.keeping_meshes();
     let mut parts = Vec::new();
     for positive in [true, false] {
-        let (part, tool) = kernel::half_space(&input.body, plane, positive)?;
+        let (part, tool) = kernel::half_space(&body, plane, positive)?;
         let Some(part) = part else { continue };
         // The box's cap in the plane: its start cap on the positive side, its end cap on the other.
         let section = Some("section".to_string());

@@ -22,6 +22,58 @@ pub(crate) enum Kind {
     Tessellate,
 }
 
+/// Opt-in stage timings for difficult booleans. No clocks or topology walks when disabled;
+/// stderr failures are ignored so a detached diagnostic pipe cannot interrupt modelling.
+pub(crate) struct BooleanTrace {
+    started: Option<web_time::Instant>,
+    last_ms: f64,
+    id: usize,
+    kind: &'static str,
+    op: crate::BoolOp,
+    faces: (usize, usize),
+}
+
+impl BooleanTrace {
+    pub(crate) fn new(kind: &'static str, a: &crate::Body, b: &crate::Body, op: crate::BoolOp) -> Self {
+        static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+        static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(1);
+        let enabled = *ENABLED.get_or_init(|| solidcraft_geom::env::var("BOOLEAN_TRACE").is_some_and(|v| v == "1"));
+        let mut trace = Self {
+            started: enabled.then(web_time::Instant::now),
+            last_ms: 0.,
+            id: if enabled { NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed) } else { 0 },
+            kind,
+            op,
+            faces: if enabled { (a.face_count(), b.face_count()) } else { (0, 0) },
+        };
+        trace.mark("start");
+        trace
+    }
+
+    pub(crate) fn mark(&mut self, stage: &'static str) {
+        use std::io::Write;
+        let Some(started) = &self.started else { return };
+        let ms = started.elapsed().as_secs_f64() * 1000.;
+        let _ = writeln!(
+            std::io::stderr().lock(),
+            "boolean-trace id={} kind={} op={:?} faces={},{} stage={stage} ms={:.3} total_ms={ms:.3}",
+            self.id,
+            self.kind,
+            self.op,
+            self.faces.0,
+            self.faces.1,
+            ms - self.last_ms
+        );
+        self.last_ms = ms;
+    }
+}
+
+impl Drop for BooleanTrace {
+    fn drop(&mut self) {
+        self.mark("done");
+    }
+}
+
 #[derive(Clone, Copy, Default)]
 struct State {
     /// A capture is running on this thread.
