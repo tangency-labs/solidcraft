@@ -128,6 +128,26 @@ impl<T> Drop for PendingTopology<'_, T> {
 
 const OP: &str = "topology::brep::p5";
 
+/// The operation of the null-pointer error `MakeEdgeInFace` returns when
+/// `SmFace::FindVertexSector` finds no sector for its start or end vertex
+/// (`NER(pStartVU)` / `NER(pEndVU)`, `source/SMLib/src/SmBrep.cpp:13861`, `:13873`).
+/// Both checks precede `MakeEdgeInFaceWithVU`, and `FindVertexSector` is const, so
+/// this failure leaves the B-rep unedited ([`is_no_vertex_sector`]).
+pub const NO_VERTEX_SECTOR_OP: &str = "topology::brep::p5::make_edge_in_face";
+
+/// Whether `error` is `MakeEdgeInFace`'s no-sector `NER` ([`NO_VERTEX_SECTOR_OP`]):
+/// a failure that edited nothing.
+#[must_use]
+pub fn is_no_vertex_sector(error: &SolidError) -> bool {
+    matches!(
+        error,
+        SolidError::Upstream {
+            operation: NO_VERTEX_SECTOR_OP,
+            ..
+        }
+    )
+}
+
 /// Runs `f` with the caller's notification environment, or, for a plain entry point
 /// (`notifications` is `None`: the caller keeps no notification state of its own),
 /// with an [`brep_p2::ArenaNotifyState`] of `b` (holding `b`'s own attributes for the
@@ -1813,7 +1833,7 @@ pub(crate) fn make_edge_with_backend<B: FaceEdgeBackend>(
             b.tolerance()?,
             false,
         )?
-        .ok_or_else(|| SolidError::null_pointer(OP))?;
+        .ok_or_else(|| SolidError::null_pointer(NO_VERTEX_SECTOR_OP))?;
     let last = b
         .sector(
             f,
@@ -1826,7 +1846,7 @@ pub(crate) fn make_edge_with_backend<B: FaceEdgeBackend>(
             b.tolerance()?,
             false,
         )?
-        .ok_or_else(|| SolidError::null_pointer(OP))?;
+        .ok_or_else(|| SolidError::null_pointer(NO_VERTEX_SECTOR_OP))?;
     b.insert(
         f,
         first,

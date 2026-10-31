@@ -827,9 +827,12 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
     }
 
     /// [`ProtoTopologyManager::imprint_edge_definition`], also answering whether the
-    /// imprint reached a B-rep edit (`MakeEdgeInFace`). A failure without one (no final
-    /// vertex, or a check before the first `MakeEdgeInFace`) leaves both B-reps as
-    /// they were.
+    /// failure may have left a B-rep half edited (UB-242). A failure without an edit (no
+    /// final vertex, or a check before the first `MakeEdgeInFace`) leaves both B-reps as
+    /// they were. So does a `MakeEdgeInFace` that stops at its `FindVertexSector` checks
+    /// ([`crate::topology::brep::p5::is_no_vertex_sector`]): they precede every edit of
+    /// its B-rep, and an edge the first `MakeEdgeInFace` already made in Brep1 is whole,
+    /// so upstream's continuation is defined and the port goes on with it.
     pub fn imprint_edge_definition_reporting_edits(
         &mut self,
         k: &Kernel,
@@ -925,6 +928,10 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
                     new_f1 = f;
                 }
                 Err(e) => {
+                    if crate::topology::brep::p5::is_no_vertex_sector(&e) {
+                        // MakeEdgeInFace stopped before its first edit
+                        *edited = false;
+                    }
                     if !e.is_unported() {
                         // Get rid of our curves, which were not consumed.
                         let _ = self.ed_mut(ed)?.destruct();
@@ -1008,6 +1015,11 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
             let (new_e2, new_f2) = match made {
                 Ok((e, _l, f)) => (e, f),
                 Err(e) => {
+                    if crate::topology::brep::p5::is_no_vertex_sector(&e) {
+                        // MakeEdgeInFace stopped before its first edit of Brep2, and
+                        // Brep1's new edge is whole
+                        *edited = false;
+                    }
                     if !e.is_unported() {
                         // Brep1 keeps the curves it consumed; the copy is dropped.
                         let d = self.ed_mut(ed)?;

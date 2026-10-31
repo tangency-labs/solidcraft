@@ -1458,7 +1458,7 @@ mod tests {
             // FindVertexSector (topology.face_p4) finds no sector of a face without
             // face uses, so MakeEdgeInFace's NER(pStartVU) reports a null pointer
             Err(SolidError::Upstream {
-                operation: "topology::brep::p5",
+                operation: solidcore::topology::brep::p5::NO_VERTEX_SECTOR_OP,
                 code: 1006,
                 ..
             })

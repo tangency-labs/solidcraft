@@ -227,8 +227,9 @@ bool set_rels_maps_ok(SmProtoTopologyManager* mgr, int64_t ctor_kind)
 // plus one addition: `edited` answers whether a failing imprint may have edited a B-rep,
 // as the port's ImprintOutcome::failure_edited does. A vertex definition's imprint and the
 // glue edit first; an edge definition's imprint edits nothing when it stops before its
-// first MakeEdgeInFace (a NULL final vertex or source face, SmProtoTopology.cpp:1375-1445),
-// which the addition tests with the same const lookups beforehand.
+// first MakeEdgeInFace (a NULL final vertex or source face, SmProtoTopology.cpp:1375-1445)
+// or when a MakeEdgeInFace stops at its const FindVertexSector checks, which the addition
+// tests with the same const calls beforehand (ed_fails_unedited).
 bool ed_stops_before_edit(SmEdgeDefinition* pED)
 {
   SmProtoVertex *pStartPV = pED->GetStartProtoVertex();
@@ -243,6 +244,62 @@ bool ed_stops_before_edit(SmEdgeDefinition* pED)
   if ( eType2 == SM_PC_FACE )
     { return SM_CAST_PTR( SmFace, pED->GetSrcTopo( 2 ) ) == NULL; }
   return true;
+}
+
+// The addition's member access: SmEdgeDefinition's intersection UV curves and interval.
+struct EdUv1 { typedef SmCurve* SmEdgeDefinition::*type; friend type ti_get(EdUv1); };
+struct EdUv2 { typedef SmCurve* SmEdgeDefinition::*type; friend type ti_get(EdUv2); };
+struct EdIvl { typedef SmExtent1d SmEdgeDefinition::*type; friend type ti_get(EdIvl); };
+template struct TiRob<EdUv1, &SmEdgeDefinition::m_pXSectUVCurve1>;
+template struct TiRob<EdUv2, &SmEdgeDefinition::m_pXSectUVCurve2>;
+template struct TiRob<EdIvl, &SmEdgeDefinition::m_pXSectInterval>;
+
+// Whether SmBrep::MakeEdgeInFace (SmBrep.cpp:13770) stops at one of its two const
+// FindVertexSector checks (status or NER(pStartVU) / NER(pEndVU), :13845-13873), before
+// MakeEdgeInFaceWithVU edits the B-rep: the same calls with the same arguments.
+bool mefi_stops_at_sector(SmBrep* pBrep, SmFace* pFace, SmVertex* pStartVertex, SmVertex* pEndVertex,
+                          const SmCurve* p3DCurve, SmCurve* pUV, const SmExtent1d& crInterval)
+{
+  if ( pFace == NULL || p3DCurve == NULL ) { return false; }
+  SmBSplineCurve *pUVCurve = SM_CAST_PTR( SmBSplineCurve, pUV ) ;
+  SmVertexuse *pStartVU = NULL, *pEndVU = NULL;
+  SmBoolean bPossibleProblem = FALSE;
+  SmClassifyProblem eProblem = SM_CP_NONE;
+  double dTStart = crInterval.GetMin(), dTEnd = crInterval.GetMax();
+  if ( pFace->FindVertexSector( pStartVertex, *p3DCurve, pUVCurve, dTStart, dTEnd, SM_OT_SAME,
+         pBrep->GetTolerance(), FALSE, pStartVU, bPossibleProblem, eProblem ) != SM_SUCCESS
+    || pStartVU == NULL )
+    { return true; }
+  if ( pFace->FindVertexSector( pEndVertex, *p3DCurve, pUVCurve, dTEnd, dTStart, SM_OT_OPPOSITE,
+         pBrep->GetTolerance(), FALSE, pEndVU, bPossibleProblem, eProblem ) != SM_SUCCESS
+    || pEndVU == NULL )
+    { return true; }
+  return false;
+}
+
+// Whether an edge definition's imprint that fails stops without leaving a B-rep half edited:
+// before its first MakeEdgeInFace (ed_stops_before_edit), or at a MakeEdgeInFace's
+// FindVertexSector checks (SmProtoTopology.cpp:1462 for Brep1, :1538 for Brep2). Brep2's
+// checks read only Brep2, which Brep1's MakeEdgeInFace does not touch, and an edge made in
+// Brep1 is whole, so both are decided beforehand.
+bool ed_fails_unedited(SmEdgeDefinition* pED)
+{
+  if ( ed_stops_before_edit( pED ) ) { return true; }
+  SmProtoVertex *pStartPV = pED->GetStartProtoVertex();
+  SmProtoVertex *pEndPV   = pED->GetEndProtoVertex();
+  SmProtoTopologyManager *pMgr = pED->GetProtoTopologyManager();
+  const SmExtent1d& rIvl = pED->*ti_get(EdIvl());
+  if ( pED->GetSrcTopo_TYPE( 1 ) == SM_PC_FACE
+    && mefi_stops_at_sector( pMgr->GetWhichBrep( 1 ), SM_CAST_PTR( SmFace, pED->GetSrcTopo( 1 ) ),
+         pStartPV->GetFinalVertex( 1, pED, TRUE ), pEndPV->GetFinalVertex( 1, pED, FALSE ),
+         pED->GetXSectCurve3d(), pED->*ti_get(EdUv1()), rIvl ) )
+    { return true; }
+  if ( pED->GetSrcTopo_TYPE( 2 ) == SM_PC_FACE
+    && mefi_stops_at_sector( pMgr->GetWhichBrep( 2 ), SM_CAST_PTR( SmFace, pED->GetSrcTopo( 2 ) ),
+         pStartPV->GetFinalVertex( 2, pED, TRUE ), pEndPV->GetFinalVertex( 2, pED, FALSE ),
+         pED->GetXSectCurve3d(), pED->*ti_get(EdUv2()), rIvl ) )
+    { return true; }
+  return false;
 }
 
 SmStatus ii_verbatim(SmTopologyIntersector* ti, bool& edited)
@@ -287,7 +344,7 @@ SmStatus ii_verbatim(SmTopologyIntersector* ti, bool& edited)
       for(jj=0;jj<rEDs.GetSize();jj++)
         {
           SmEdgeDefinition *pED = rEDs[jj];
-          bool bStopsBeforeEdit = ed_stops_before_edit( pED ); // (addition)
+          bool bStopsBeforeEdit = ed_fails_unedited( pED ); // (addition)
           eStat = pED->Imprint();
 
           if(eStat != SM_SUCCESS)

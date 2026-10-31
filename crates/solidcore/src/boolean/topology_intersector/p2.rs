@@ -1229,8 +1229,8 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
         // consistent: stop here, so that no caller goes on to relate, classify or
         // measure them (SolidCraft change, tangency-labs/smlib af8db37; upstream only
         // warns and overwrites the status). A failure that edited nothing (an edge
-        // definition without a final vertex) leaves the Breps consistent, and upstream
-        // goes on.
+        // definition without a final vertex, or a MakeEdgeInFace that finds no vertex
+        // sector before its first edit) leaves the Breps consistent, and upstream goes on.
         let outcome = self
             .imprint_intersections_reporting_edits(k, brep)
             .and_then(|o| {
