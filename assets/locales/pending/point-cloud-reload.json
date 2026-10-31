@@ -1,0 +1,34 @@
+{
+  "en": {
+    "cmd.pointcloud_reload": "Reload Point Cloud",
+    "ui.point_cloud_reload": "Reload from file"
+  },
+  "fr": {
+    "cmd.pointcloud_reload": "Recharger le nuage de points",
+    "ui.point_cloud_reload": "Recharger le fichier"
+  },
+  "de": {
+    "cmd.pointcloud_reload": "Punktwolke neu laden",
+    "ui.point_cloud_reload": "Aus Datei neu laden"
+  },
+  "ja": {
+    "cmd.pointcloud_reload": "点群を再読み込み",
+    "ui.point_cloud_reload": "ファイルから再読み込み"
+  },
+  "zh": {
+    "cmd.pointcloud_reload": "重新加载点云",
+    "ui.point_cloud_reload": "从文件重新加载"
+  },
+  "ar": {
+    "cmd.pointcloud_reload": "إعادة تحميل سحابة النقاط",
+    "ui.point_cloud_reload": "إعادة التحميل من الملف"
+  },
+  "he": {
+    "cmd.pointcloud_reload": "טעינה מחדש של ענן נקודות",
+    "ui.point_cloud_reload": "טעינה מחדש מהקובץ"
+  },
+  "vi": {
+    "cmd.pointcloud_reload": "Tải lại đám mây điểm",
+    "ui.point_cloud_reload": "Tải lại từ tệp"
+  }
+}
