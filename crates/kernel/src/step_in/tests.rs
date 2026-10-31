@@ -656,6 +656,69 @@ fn two_instance_assembly() -> String {
     t
 }
 
+// A centimetre tetrahedron replaces the second block occurrence (rotated and moved 100 mm).
+fn tessellated_assembly(item: &str) -> String {
+    two_instance_assembly()
+        .replace("AUTOMOTIVE_DESIGN { 1 0 10303 214 1 1 1 1 }", "AP242_MANAGED_MODEL_BASED_3D_ENGINEERING_MIM_LF")
+        .replace("'Block:1','',#70,#50", "'Block:1','',#70,#750")
+        .replace("RELATIONSHIP('','',#60,#80)REPRESENTATION_RELATIONSHIP_WITH_TRANSFORMATION(#612)",
+                 "RELATIONSHIP('','',#760,#80)REPRESENTATION_RELATIONSHIP_WITH_TRANSFORMATION(#612)")
+        .replace(TAIL, &format!(
+            "{}#760=TESSELLATED_SHAPE_REPRESENTATION('',(#770),#20);\n#761=SHAPE_DEFINITION_REPRESENTATION(#754,#760);\n#771=COORDINATES_LIST('',4,((0.,0.,0.),(1.,0.,0.),(0.,1.,0.),(0.,0.,1.)));\n#770={item};\n{TAIL}",
+            product(750, "Tetrahedron")))
+}
+
+const TETRAHEDRON: &str = "TRIANGULATED_SURFACE_SET('',#771,4,(),(),((1,3,2),(1,2,4),(2,3,4),(3,1,4)))";
+
+#[test]
+fn ap242_tessellated_part_keeps_assembly_placement() {
+    let imp = step_import(&tessellated_assembly(TETRAHEDRON)).unwrap();
+    assert_eq!(imp.bodies.len(), 2, "{:?}", imp.warnings);
+    assert!(imp.warnings.is_empty(), "{:?}", imp.warnings);
+    assert!(!imp.bodies[0].body.is_mesh());
+    assert_eq!(imp.bodies[0].body.boundary_tol, Some(1e-3));
+    let mesh = &imp.bodies[1];
+    assert_eq!(mesh.name, "Tetrahedron");
+    assert!(mesh.body.is_mesh() && mesh.closed);
+    let display = mesh.body.tessellate(0.01).unwrap();
+    assert_eq!(display.triangles.len(), 4);
+    assert_eq!(display.bounds().min, Vec3::new(90., 0., 0.));
+    assert_eq!(display.bounds().max, Vec3::new(100., 10., 10.));
+    assert_eq!(imp.tree[0].children[1].bodies, vec![1]);
+}
+
+#[test]
+fn ap242_tessellated_part_maps_coordinate_indices() {
+    let item = TETRAHEDRON.replace("4,(),()", "4,(),(2,3,4,5)");
+    let text = tessellated_assembly(&item).replace("COORDINATES_LIST('',4,(", "COORDINATES_LIST('',5,((50.,50.,50.),");
+    let imp = step_import(&text).unwrap();
+    assert_eq!(imp.bodies.len(), 2, "{:?}", imp.warnings);
+    let mesh = &imp.bodies[1].body;
+    assert!(mesh.is_mesh());
+    assert_eq!(mesh.tessellate(0.01).unwrap().triangles.len(), 4);
+    assert!(rel(measure(mesh).unwrap().volume, 1000. / 6.) < 1e-8);
+    assert_eq!(mesh.tessellate(0.01).unwrap().bounds().min, Vec3::new(90., 0., 0.));
+    assert_eq!(mesh.tessellate(0.01).unwrap().bounds().max, Vec3::new(100., 10., 10.));
+}
+
+#[test]
+fn ap242_unreadable_tessellation_warns_with_product_name() {
+    let text = tessellated_assembly(TETRAHEDRON);
+    for text in [
+        text.replace("(1,3,2)", "(0,3,2)"),
+        text.replace("(1,3,2)", "(999999999999,3,2)"),
+        text.replace("4,(),()", "1000001,(),()"),
+        text.replace("4,(),()", "4,(),(1,2,3,9)"),
+        text.replace("TRIANGULATED_SURFACE_SET", "COMPLEX_TRIANGULATED_SURFACE_SET"),
+        text.replace("COORDINATES_LIST('',4", "COORDINATES_LIST('',1000001"),
+        text.replace("(0.,0.,1.)));", "(0.,0.,1.E100)));"),
+    ] {
+        let imp = step_import(&text).unwrap();
+        assert_eq!(imp.bodies.len(), 1);
+        assert!(imp.warnings.iter().any(|w| w.contains("Tetrahedron") && w.contains("tessellat")), "{:?}", imp.warnings);
+    }
+}
+
 #[test]
 fn hand_written_assembly() {
     let t = two_instance_assembly();
