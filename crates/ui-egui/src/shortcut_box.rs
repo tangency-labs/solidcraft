@@ -190,15 +190,103 @@ fn keyword_score(q: &str, keywords: &str) -> u32 {
 /// (tab, panel; `None` off the toolbar), in the current language.
 pub type Row = (&'static str, &'static str, &'static str, Option<(&'static str, &'static str)>);
 
+/// Whether a command's one-line params text names a required key (#9734 review). Keys are
+/// written `name:` (required) or `name?:` (optional) at the head of the text or of a `;`- or
+/// `|`-separated segment, sometimes as a list ("a, b, c:", "name, expression, unit?:"), and a
+/// text may open with a bare comma-separated list with no colon at all ("name, new_name").
+/// Parenthesised prose ("(default: tight)") and nested objects ("{target: ...}") are dropped
+/// first, and a head only counts as a key list when every word in it is a lower-case
+/// identifier — prose heads ("Display only:") carry other characters.
+fn params_name_required_key(params: &str) -> bool {
+    let mut text = String::with_capacity(params.len());
+    let mut depth = 0u32;
+    for ch in params.chars() {
+        match ch {
+            '(' | '{' | '[' => depth += 1,
+            ')' | '}' | ']' => depth = depth.saturating_sub(1),
+            _ if depth == 0 => text.push(ch),
+            _ => {}
+        }
+    }
+    let key_word = |w: &str| {
+        let w = w.trim_end_matches('?');
+        w == "or"
+            || (w.len() <= 24
+                && w.chars().next().is_some_and(|c| c.is_ascii_lowercase())
+                && w.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_'))
+    };
+    let names_required =
+        |words: &[&str]| !words.is_empty() && words.iter().all(|w| key_word(w)) && words.iter().any(|w| !w.ends_with('?') && *w != "or");
+    let mut segments = text.split([';', '|']);
+    // A text that opens with a bare comma-separated key list ("name, new_name") or a bare
+    // key ("name (refused while something uses it)") names a required key even without a colon.
+    if let Some(first) = segments.next() {
+        let colon = first.find(':').unwrap_or(first.len());
+        let arrow = first.find('→').unwrap_or(first.len());
+        if arrow < colon {
+            // "name → users and the features it drives": the word before the arrow is a key.
+            let head = first[..arrow].trim();
+            if !head.ends_with('?') && key_word(head) {
+                return true;
+            }
+        }
+        if colon == first.len() {
+            let words: Vec<&str> = first.split(',').map(str::trim).filter(|w| !w.is_empty()).collect();
+            if !words.is_empty() && names_required(&words) {
+                return true;
+            }
+        }
+    }
+    // Text after the first result arrow describes the reply, not the input: its "key:"
+    // descriptions are result fields (inspect.clearance's "near:", document.metadata's
+    // "properties:"), not parameters. An arrow before any key means the whole text is a
+    // result description ("→ metadata: …").
+    let input = match (text.find(':'), text.find('→')) {
+        (_, Some(a)) if !text[..a].contains(':') => &text[..0],
+        (Some(_), Some(a)) => &text[..a],
+        _ => &text[..],
+    };
+    input.split([';', '|']).any(|segment| {
+        let Some(colon) = segment.find(':') else { return false };
+        let head = segment[..colon].trim();
+        let words: Vec<&str> = head.split([',', '/', ' ']).filter(|w| !w.is_empty()).collect();
+        names_required(&words)
+    })
+}
+
+/// Commands whose params text names only optional keys (or none at all) but that still fail
+/// when run bare — one of the "optional" keys, or a selection, is required in practice. They
+/// stay out of the list until their contracts land, which will settle it for good (#9734
+/// review; appearance.copy has Ctrl+Alt+C but still needs a selected object).
+const PARAMS_TEXT_UNDERSTATES: [&str; 6] = [
+    "appearance.copy",        // needs a selected object
+    "browser.group",          // needs `folder`
+    "config.column",          // needs exactly one target
+    "config.rule",            // needs rule, rules or id
+    "timeline.move_many",     // needs at least one item
+    "timeline.move_to_group", // needs at least one item
+];
+
 /// Whether a command can be run from the search box (#9734): it has a place on the ribbon,
-/// opens a dialog or a tool, or runs with no parameters. Commands that take their input as
-/// parameters (the script and agent commands) are left out: picking one would run it with no
-/// parameters and end in a "`name` is required" error. They stay reachable by typing the id
-/// with a JSON object, as the hint under the field describes.
+/// opens a dialog or a tool, has a keyboard shortcut, or runs with no parameters. Commands
+/// that take their input as required parameters (the script and agent commands) are left
+/// out: picking one would run it with no parameters and end in a "`name` is required" error.
+/// They stay reachable by typing the id with a JSON object, as the hint under the field
+/// describes.
 fn runnable_from_search(app: &SolveApp, c: &CommandSpec) -> bool {
+    if PARAMS_TEXT_UNDERSTATES.contains(&c.id) {
+        return false;
+    }
     crate::workspace::destination(c).is_some()
-        // Needs no parameters: its contract accepts `{}`, or it documents none of its own.
-        || c.contract.map_or(c.params.is_empty(), |k| k.check(&json!({})).is_empty())
+        // A keyboard shortcut (Ctrl+1 … Ctrl+7 for the standard views) means the command
+        // runs on its own, with no parameters — unless a contract says otherwise (#9734
+        // review: body.print_face has Ctrl+B but still needs `body`).
+        || (c.shortcut.is_some() && c.contract.is_none())
+        // Needs no parameters: its contract accepts `{}`, or its params text names no
+        // required key — optional keys (`camera?`, `name?`) still run fine with `{}`.
+        || c
+            .contract
+            .map_or(!params_name_required_key(c.params), |k| k.check(&json!({})).is_empty())
         || app.interactive(c.id)
 }
 
@@ -924,6 +1012,57 @@ mod tests {
         }
         for id in ["solid.extrude", "parameters.change", "timeline.play", "edit.repeat", "view.list"] {
             assert!(listed(id), "{id} can be run from the search box");
+        }
+    }
+
+    /// Commands with no contract whose params text names only optional keys (`camera?`,
+    /// `name?`) run fine with `{}` and stay listed; a command with a keyboard shortcut
+    /// runs on its own and is listed even when its params text names a required key
+    /// (#9734 review).
+    #[test]
+    fn contract_less_commands_with_only_optional_params_stay_listed() {
+        let app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+        let listed = |id: &str| search(&app, "").iter().any(|r| r.0 == id);
+        for id in ["view.front", "view.isometric", "file.new", "browser.expand_all", "component.list", "parameters.list", "joint.list"] {
+            assert!(listed(id), "{id} has no contract and only optional params — it runs with {{}}");
+        }
+        // A contract-less command whose params text names a required key still stays out.
+        let needs_a_name = CommandSpec::new("test.needs_a_name", "Needs A Name", |_s, _p| Ok(json!({}))).params("name: the name of the thing");
+        assert!(!runnable_from_search(&app, &needs_a_name), "a required key means Enter would fail");
+        // Commands whose text claims everything is optional but that fail bare stay out.
+        assert!(!listed("timeline.move_many"), "its params text understates what it needs");
+        // A keyboard shortcut means the command runs on its own, whatever its params text says.
+        let shortcut_runs_bare =
+            CommandSpec::new("test.shortcut", "Shortcut", |_s, _p| Ok(json!({}))).params("name: the name of the thing").key("Ctrl+9");
+        assert!(runnable_from_search(&app, &shortcut_runs_bare), "Ctrl+9 runs it with no parameters");
+    }
+
+    /// The params-text reading behind the rule above: optional keys and prose colons are
+    /// not required keys; `name:` heads and key lists are (#9734 review).
+    #[test]
+    fn params_text_required_key_reading() {
+        for text in [
+            "",
+            "name?",
+            "camera?: Camera (default: current session camera) → camera; turns to that view",
+            "compact?: bool (counts instead of names; default false); bodies?: bool (with compact: body names)",
+            "path?: [occurrence ids]; component?: id; omit both for the whole tree. Display only: rows are not saved",
+            "→ metadata: the design's metadata object as saved; properties: each of SolidCraft's design properties",
+            "bodies?: [names]; tolerance?: mm (default 1) → overlaps: [{a, b}]; near: [{a, b, distance_mm}]",
+        ] {
+            assert!(!params_name_required_key(text), "{text:?} names no required key");
+        }
+        for text in [
+            "body: name",
+            "name: the new name; body: its name",
+            "a, b, c: plane or planar face refs; name?",
+            "bodies?: [names] (default all); from: [x,y,z] | to: [x,y,z]",
+            "name, expression, unit?: as parameters.change, comment?, favorite?: bool",
+            "name, new_name (expressions and dimensions that use it follow)",
+            "name → users (parameters, feature inputs, dimensions) and the features it drives",
+            "name → deleted",
+        ] {
+            assert!(params_name_required_key(text), "{text:?} names a required key");
         }
     }
 
