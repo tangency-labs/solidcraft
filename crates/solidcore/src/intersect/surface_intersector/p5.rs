@@ -56,6 +56,11 @@
 //!   cluster with either of its ends (`SurfaceIntersector::remove_end_tangent_clusters`);
 //!   the SolidCraft fork's tangency-labs/smlib@0ce09f2. Off by default (upstream
 //!   behaviour).
+//! - **Opt-in fix (WR-77, #393, #2110).** With
+//!   [`UpstreamFixes::ssi_split_curves_at_singular_points`](crate::kernel::UpstreamFixes::ssi_split_curves_at_singular_points)
+//!   the curves are split at the singular points they pass through after the tangent
+//!   nodes are added (`super::singular_splits`); the SolidCraft fork's
+//!   tangency-labs/smlib@3c9d1d3. Off by default (upstream behaviour).
 //! - **Not ported here.** The `SM_DEBUG_CODE` blocks (graphics, dumps, the start
 //!   point reordering experiment), `SmCacheCheckOutIn` (the caches are owned by the
 //!   caller), the unused context argument and the `SM_ASSERT`s.
@@ -850,6 +855,22 @@ impl<'t, O: SolutionObject + Copy + PartialEq + 't> AdvSurfaceIntersector<'_, 't
                 k,
                 &self.base,
                 &tangent_nodes,
+                &mut curves_3d,
+                &mut surface1_uv_curves,
+                &mut surface2_uv_curves,
+                &mut curve_types,
+                &mut deviations,
+            )?;
+        }
+
+        // not upstream (WR-77, opt-in; the fork's sm_SplitCurvesAtSingularPoints): split
+        // crossing curves at singular points (parallel normals) they pass through
+        if k.fixes.ssi_split_curves_at_singular_points && !self.base.doing_self_intersection {
+            super::singular_splits::split_curves_at_singular_points(
+                k,
+                self.base.surface(SrfIndex::First),
+                self.base.surface(SrfIndex::Second),
+                self.base.this_approx_tol_3d,
                 &mut curves_3d,
                 &mut surface1_uv_curves,
                 &mut surface2_uv_curves,
