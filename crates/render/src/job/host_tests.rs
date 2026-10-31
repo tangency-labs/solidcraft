@@ -1,6 +1,258 @@
 use super::*;
 use solidcraft_geom::{Aabb3, Mesh};
 
+mod interactive {
+    use super::*;
+    use crate::job::{RaytraceOptions, interactive::*};
+    use std::time::Duration;
+
+    fn cpu() -> ImageRequest {
+        ImageRequest { integrator: Integrator::Raytrace, raytrace: Some(RaytraceOptions::default()), ..request() }
+    }
+    fn revision(visual_revision: u64) -> VisualRevision {
+        VisualRevision { scene_generation: 19, visual_revision }
+    }
+    fn ms(value: u64) -> Duration {
+        Duration::from_millis(value)
+    }
+
+    #[test]
+    fn preview_fits_landscape_portrait_square_and_small_outputs_without_mutating_final_intent() {
+        for (width, height, expected) in
+            [(3840, 2160, (1024, 576)), (2160, 3840, (576, 1024)), (4096, 4096, (1024, 1024)), (81, 53, (81, 53)), (u32::MAX, 1, (1024, 1))]
+        {
+            let mut source = cpu();
+            source.width = width;
+            source.height = height;
+            source.camera.roll = 0.37;
+            source.background = [19, 31, 97];
+            source.studio_weights = Some([0.1, 0.2, 0.9]);
+            source.raytrace = Some(RaytraceOptions { primary_samples: 16, exposure_ev: -2.0, shadows: false, ..Default::default() });
+            let before = serde_json::to_value(&source).unwrap();
+            let preview = cpu_request(&source).unwrap();
+            assert_eq!((preview.width, preview.height), expected);
+            assert_eq!(preview.camera, source.camera);
+            assert_eq!(preview.background, source.background);
+            assert_eq!(preview.studio_weights, source.studio_weights);
+            let options = preview.raytrace.unwrap();
+            assert_eq!(options.progressive, Some(crate::job::CpuProgressiveOptions { samples_per_pixel: 16, seed: 0 }));
+            assert_eq!(options.primary_samples, 1);
+            assert_eq!(options.exposure_ev, -2.0);
+            assert!(!options.shadows);
+            assert_eq!(serde_json::to_value(source).unwrap(), before);
+        }
+    }
+
+    #[test]
+    fn preview_refuses_incompatible_transport_and_invalid_input_without_erasing_it() {
+        let mut source = cpu();
+        source.raytrace.as_mut().unwrap().area_lights = Some(vec![crate::job::RectangleLightOptions {
+            center_mm: [0.0, 0.0, 10.0],
+            edge_u_mm: [2.0, 0.0, 0.0],
+            edge_v_mm: [0.0, 2.0, 0.0],
+            color: [1.0; 3],
+            intensity: 2.0,
+        }]);
+        let before = serde_json::to_value(&source).unwrap();
+        assert!(cpu_request(&source).is_err());
+        assert_eq!(serde_json::to_value(&source).unwrap(), before);
+        for source in [
+            ImageRequest { transparent_background: true, ..cpu() },
+            ImageRequest { width: 0, ..cpu() },
+            request(),
+            ImageRequest { raytrace: Some(RaytraceOptions { primary_samples: 3, ..Default::default() }), ..cpu() },
+        ] {
+            assert!(cpu_request(&source).is_err());
+        }
+    }
+
+    #[test]
+    fn explicit_enable_settles_edits_and_keeps_only_one_capture_even_without_cad_revision_changes() {
+        let mut interactive = Interactive::new(9001);
+        interactive.edit(revision(1), ms(0)).unwrap();
+        assert_eq!(interactive.state().unwrap(), State::Off);
+        assert!(interactive.capture(ms(1000)).unwrap().is_none());
+        interactive.enable(revision(1), ms(1000)).unwrap();
+        assert!(interactive.capture(ms(1199)).unwrap().is_none());
+        interactive.edit(revision(2), ms(1199)).unwrap();
+        assert!(interactive.capture(ms(1398)).unwrap().is_none());
+        let b = interactive.capture(ms(1399)).unwrap().unwrap();
+        assert_eq!(b.revision(), revision(2));
+        assert!(interactive.capture(ms(9999)).unwrap().is_none());
+        interactive.edit(revision(3), ms(1400)).unwrap();
+        // Delayed failure of B cannot poison C.
+        interactive.capture_failed(b, JobError::new(ErrorCode::InvalidScene, "old capture"));
+        assert_eq!(interactive.state().unwrap(), State::Updating);
+        let c = interactive.capture(ms(1600)).unwrap().unwrap();
+        interactive.capture_failed(c, JobError::new(ErrorCode::InvalidScene, "current capture"));
+        assert_eq!(interactive.state().unwrap(), State::Error);
+        assert_eq!(interactive.error().unwrap().message, "current capture");
+        assert!(interactive.capture(ms(9999)).unwrap().is_none(), "no automatic failure retry loop");
+        interactive.resume(ms(2000)).unwrap();
+        assert!(interactive.capture(ms(2200)).unwrap().is_some());
+    }
+
+    #[test]
+    fn pause_edits_final_priority_workspace_departure_and_clock_regression_do_not_start_jobs() {
+        let mut interactive = Interactive::new(9002);
+        interactive.enable(revision(1), ms(1000)).unwrap();
+        assert!(interactive.capture(ms(999)).unwrap().is_none());
+        interactive.pause().unwrap();
+        interactive.edit(revision(2), ms(2000)).unwrap();
+        assert_eq!(interactive.state().unwrap(), State::Paused);
+        assert!(interactive.capture(ms(3000)).unwrap().is_none());
+        interactive.set_final_active(true, ms(3000)).unwrap();
+        interactive.resume(ms(3000)).unwrap();
+        assert!(interactive.capture(ms(4000)).unwrap().is_none());
+        interactive.set_final_active(false, ms(4000)).unwrap();
+        assert!(interactive.capture(ms(4199)).unwrap().is_none());
+        assert_eq!(interactive.capture(ms(4200)).unwrap().unwrap().revision(), revision(2));
+        interactive.disable().unwrap();
+        assert_eq!(interactive.state().unwrap(), State::Off);
+        assert!(interactive.capture(ms(9999)).unwrap().is_none());
+    }
+
+    #[cfg(all(feature = "raytrace-cpu", not(target_arch = "wasm32")))]
+    fn host() -> CpuHost {
+        // Real native admission/worker steps, explicitly pumped like the existing
+        // checkpoint tests. No test clock sleeps, mock renderer or OS race.
+        ImageHost(Arc::new(Owner {
+            executor: None,
+            shared: CpuHost::shared(MEMORY_LIMIT),
+            kind: HostKind::NativeWorker,
+            running: Mutex::new(None),
+            _worker: None,
+        }))
+    }
+
+    #[cfg(all(feature = "raytrace-cpu", not(target_arch = "wasm32")))]
+    #[test]
+    fn superseded_jobs_are_cancelled_and_foreign_jobs_remain_untouched() {
+        let host = host();
+        let mut interactive = Interactive::new(9003);
+        interactive.enable(revision(1), ms(0)).unwrap();
+        let a = interactive.capture(ms(200)).unwrap().unwrap();
+        let first = host.submit(id(9003, 1), 19, empty(), cpu_request(&cpu()).unwrap()).unwrap();
+        assert!(interactive.attach(a, first.clone()).unwrap());
+        interactive.edit(revision(2), ms(201)).unwrap();
+        assert_eq!(first.status().unwrap().progress.phase, Phase::Cancelled);
+        assert!(interactive.current().is_none());
+        let b = interactive.capture(ms(401)).unwrap().unwrap();
+        let late = host.submit(id(9003, 2), 19, empty(), cpu_request(&cpu()).unwrap()).unwrap();
+        assert!(!interactive.attach(a, late.clone()).unwrap());
+        assert_eq!(late.status().unwrap().progress.phase, Phase::Cancelled);
+        // Drain cancelled queue entries before admitting another real job.
+        while let Some(work) = host.0.shared.queue.lock().unwrap().pop_front() {
+            drop(work);
+        }
+        let foreign = host.submit(id(9999, 1), 19, empty(), cpu_request(&cpu()).unwrap()).unwrap();
+        assert!(!interactive.attach(b, foreign.clone()).unwrap());
+        assert_eq!(foreign.status().unwrap().progress.phase, Phase::Queued);
+        assert_eq!(interactive.state().unwrap(), State::Error);
+        interactive.disable().unwrap();
+        drop(interactive);
+        let work = host.0.shared.queue.lock().unwrap().pop_front().unwrap();
+        let mut running = Running::begin(work).unwrap();
+        for _ in 0..100_000 {
+            if !running.advance(16).unwrap() {
+                break;
+            }
+        }
+        assert_eq!(foreign.status().unwrap().progress.phase, Phase::Completed, "the foreign job can still finish after our controller is closed");
+        assert!(foreign.frame().unwrap().is_some());
+    }
+
+    #[cfg(all(feature = "raytrace-cpu", not(target_arch = "wasm32")))]
+    #[test]
+    fn progressive_checkpoints_reach_target_and_final_suspension_releases_owned_work() {
+        let host = host();
+        let mut interactive = Interactive::new(9004);
+        interactive.enable(revision(1), ms(0)).unwrap();
+        let ticket = interactive.capture(ms(200)).unwrap().unwrap();
+        let job = host.submit(id(9004, 1), 19, empty(), cpu_request(&cpu()).unwrap()).unwrap();
+        assert!(interactive.attach(ticket, job.clone()).unwrap());
+        let work = host.0.shared.queue.lock().unwrap().pop_front().unwrap();
+        let mut running = Running::begin(work).unwrap();
+        let mut seen = Vec::new();
+        for _ in 0..100_000 {
+            let more = running.advance(16).unwrap();
+            if let Some(preview) = interactive.current().unwrap().preview().unwrap() {
+                let spp = preview.info.samples_per_pixel;
+                if seen.last() != Some(&spp) {
+                    seen.push(spp);
+                }
+            }
+            if !more {
+                break;
+            }
+        }
+        assert_eq!(seen, [1, 2, 4, 8]);
+        assert_eq!(interactive.state().unwrap(), State::TargetReached);
+        assert!(job.frame().unwrap().is_some());
+        assert!(!interactive.attach(ticket, job.clone()).unwrap(), "duplicate acknowledgement cannot restart or cancel the accepted job");
+        interactive.set_final_active(true, ms(300)).unwrap();
+        assert_eq!(interactive.state().unwrap(), State::Paused);
+        assert!(interactive.current().is_none());
+        assert!(interactive.capture(ms(9999)).unwrap().is_none());
+        drop(running);
+        drop(job);
+        assert_eq!(host.admitted_bytes(), 0);
+    }
+
+    #[cfg(all(feature = "raytrace-cpu", not(target_arch = "wasm32")))]
+    #[test]
+    fn same_scene_stale_serial_generation_and_delayed_success_after_failure_are_rejected() {
+        for mismatch in 0..3 {
+            let host = host();
+            let mut interactive = Interactive::new(9005);
+            interactive.enable(revision(1), ms(0)).unwrap();
+            let ticket = interactive.capture(ms(200)).unwrap().unwrap();
+            let mut job_id = ticket.job_id();
+            let mut scene_generation = ticket.revision().scene_generation;
+            match mismatch {
+                0 => job_id.serial += 1,
+                1 => job_id.generation += 1,
+                _ => scene_generation += 1,
+            }
+            let job = host.submit(job_id, scene_generation, empty(), cpu_request(&cpu()).unwrap()).unwrap();
+            assert!(!interactive.attach(ticket, job.clone()).unwrap());
+            assert_eq!(job.status().unwrap().progress.phase, Phase::Cancelled);
+            assert_eq!(interactive.state().unwrap(), State::Error);
+        }
+        let host = host();
+        let mut interactive = Interactive::new(9006);
+        interactive.enable(revision(1), ms(0)).unwrap();
+        let ticket = interactive.capture(ms(200)).unwrap().unwrap();
+        interactive.capture_failed(ticket, JobError::new(ErrorCode::InvalidScene, "capture failed"));
+        let late = host.submit(ticket.job_id(), 19, empty(), cpu_request(&cpu()).unwrap()).unwrap();
+        assert!(!interactive.attach(ticket, late.clone()).unwrap());
+        assert_eq!(late.status().unwrap().progress.phase, Phase::Cancelled);
+        assert!(interactive.current().is_none());
+    }
+
+    #[cfg(all(feature = "raytrace-cpu", not(target_arch = "wasm32")))]
+    #[test]
+    fn delayed_ticket_cannot_cancel_the_current_handle_but_still_cancels_its_obsolete_job() {
+        let host = host();
+        let mut interactive = Interactive::new(9007);
+        interactive.enable(revision(1), ms(0)).unwrap();
+        let old = interactive.capture(ms(200)).unwrap().unwrap();
+        interactive.edit(revision(2), ms(201)).unwrap();
+        let current = interactive.capture(ms(401)).unwrap().unwrap();
+        let job = host.submit(current.job_id(), 19, empty(), cpu_request(&cpu()).unwrap()).unwrap();
+        assert!(interactive.attach(current, job.clone()).unwrap());
+        assert!(!interactive.attach(old, job.clone()).unwrap());
+        assert_eq!(job.status().unwrap().progress.phase, Phase::Queued);
+        let obsolete = host.submit(old.job_id(), 19, empty(), cpu_request(&cpu()).unwrap()).unwrap();
+        assert!(!interactive.attach(old, obsolete.clone()).unwrap());
+        assert_eq!(obsolete.status().unwrap().progress.phase, Phase::Cancelled);
+        assert_eq!(job.status().unwrap().progress.phase, Phase::Queued);
+        assert_eq!(interactive.current().unwrap().id(), current.job_id());
+        drop(interactive);
+        assert_eq!(job.status().unwrap().progress.phase, Phase::Cancelled);
+    }
+}
+
 #[cfg(all(feature = "raytrace-cpu", not(target_arch = "wasm32")))]
 mod progressive_checkpoints {
     use super::*;
