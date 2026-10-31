@@ -1191,6 +1191,9 @@ impl Dialog {
         d.sync_thread(s);
         d.sync_material(s);
         d.advance();
+        // Preselected items are already the dialog's inputs: the control reply and the first
+        // viewport paint must see the same measurement, without waiting for the panel to draw.
+        update_measure(app, &mut d);
         Some(d)
     }
 

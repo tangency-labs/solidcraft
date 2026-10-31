@@ -11,6 +11,88 @@ fn result(h: &Harness) -> &Value {
     }
 }
 
+/// Opening the tool must populate its readout before another paint, including when started
+/// through the same control request as a toolbar or shortcut command.
+#[test]
+fn measure_starts_with_selected_vertices_edges_and_faces() {
+    for kind in ["vertex", "edge", "face"] {
+        for count in 1..=2 {
+            let mut h = Harness::new();
+            h.app.home.open = false;
+            h.app.run("solid.box", json!({"length": 30, "width": 40, "height": 12, "body_name": "Box"})).unwrap();
+            let points = match kind {
+                "edge" => [[15., 0., 0.], [15., 40., 0.]],
+                "face" => [[15., 20., 0.], [15., 20., 12.]],
+                _ => [[0., 0., 0.], [30., 40., 12.]],
+            };
+            let items: Vec<Value> = points
+                .into_iter()
+                .take(count)
+                .map(|point| match kind {
+                    "vertex" => json!({"type":kind,"body":"Box","point":point}),
+                    _ => {
+                        let st = h.app.session.world_state();
+                        let mesh = st.body("Box").unwrap().mesh();
+                        let point = solidcraft_engine::geom::Vec3::from(point);
+                        let index = if kind == "edge" {
+                            mesh.edges.iter().position(|e| e.windows(2).any(|w| point.dist_to_segment(w[0], w[1]) < 1e-6)).unwrap()
+                        } else {
+                            mesh.triangles
+                                .iter()
+                                .zip(&mesh.tri_face)
+                                .find_map(|(tri, face)| {
+                                    let t = mesh.tri(tri)?;
+                                    t.iter().all(|p| (p.z - point.z).abs() < 1e-6).then_some(*face as usize)
+                                })
+                                .unwrap()
+                        };
+                        json!({"type":kind,"body":"Box","index":index,"point":point})
+                    }
+                })
+                .collect();
+            h.app.run("select.set", json!({"items":items})).unwrap();
+            let expected = h.app.session.measure_items(&h.app.session.selection);
+            assert!(expected.get("error").is_none(), "{expected}");
+            let (req, _rx) = crate::control::ControlRequest::new("ui.start", json!({"command":"inspect.measure"}));
+            crate::control::handle(&mut h.app, &h.ctx, &req);
+            let d = h.app.dialog.as_ref().unwrap();
+            assert_eq!(d.inputs[0].items.len(), count, "{kind}");
+            assert!(h.app.session.selection.is_empty(), "selection belongs to the dialog");
+            assert_eq!(*result(&h), expected, "{kind}: result is ready before painting");
+            h.call("ui.view", json!({"view":"fit"}));
+            if count == 2 {
+                assert!(crate::scenario::handle_at("measure:label").is_some(), "{kind}: distance is visible without repicking");
+            }
+            if kind == "vertex"
+                && count == 2
+                && let Ok(dir) = std::env::var("SOLIDCRAFT_MEASURE_EVIDENCE")
+            {
+                h.ctx = egui::Context::default();
+                crate::fonts::setup_bundled_fonts(&h.ctx);
+                let mut textures = std::collections::HashMap::new();
+                for frame in 0..6 {
+                    let mut output = h.ctx.run_ui(
+                        egui::RawInput {
+                            screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1600., 1000.))),
+                            time: Some(frame as f64 / 60.),
+                            ..Default::default()
+                        },
+                        |ui| h.app.ui(ui),
+                    );
+                    crate::ui_kit::test_textures_update(&mut textures, &output.textures_delta);
+                    output.textures_delta.clear();
+                    if frame == 5 {
+                        let bounds = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1600., 1000.));
+                        let image = crate::ui_kit::test_raster(&h.ctx, output.shapes, output.pixels_per_point, bounds, &textures);
+                        std::fs::create_dir_all(&dir).unwrap();
+                        image.save(std::path::Path::new(&dir).join("measure-preselection.png")).unwrap();
+                    }
+                }
+            }
+        }
+    }
+}
+
 fn vertex_measurement(a: [f64; 3], b: [f64; 3]) -> Harness {
     let mut h = Harness::new();
     h.app.home.open = false;
