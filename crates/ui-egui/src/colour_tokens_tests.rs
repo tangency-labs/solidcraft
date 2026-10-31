@@ -158,6 +158,7 @@ const ALLOWED_LITERALS: &[(&str, usize, &str)] = &[
     ("theme_files.rs", 1, "a colour read from a theme file, which sets tokens"),
     ("titlebar.rs", 2, "the window close button's red hover (the system's convention) and white ink"),
     ("toolbar.rs", 1, "the version text"),
+    ("locale_labels.rs", 3, "on-demand vector labels for CJK locales on web, rendered untinted with neutral text colours"),
 ];
 
 const COLOUR_LITERALS: &[&str] = &[
