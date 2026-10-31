@@ -42,6 +42,7 @@ pub(crate) use face::{FaceRefForm, face_ref_form};
 pub(crate) use features::profiles as feature_profiles;
 pub(crate) use features::{EdgeRefForm, PLANE_FORMS, axis_dir_form, axis_line_object, edge_ref_form, explicit_plane, plane_name_problem, sketch_key};
 pub use features::{auto_operation, extrude_reach, shown_scope};
+pub use file::open_steps::OpenSteps;
 pub use join_pieces::{Addition, addition};
 pub use sketch::dimension_roles;
 pub(crate) use sketch::face::face_pick_form;
