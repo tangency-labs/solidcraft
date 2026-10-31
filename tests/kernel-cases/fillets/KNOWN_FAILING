@@ -2,16 +2,8 @@
 # rig gate (.github/workflows/fillet-rig.yml) fails on a case that fails and is not listed here,
 # and on a listed case that passes: a fix removes its line in the same pull request.
 # Baseline: develop 242bbc89f with the SMLib fixes of 2026-10-29 (integration-overnight + b78bd4a), aarch64 Linux.
-1080-chamfer-equal-slope-basin-1-mm-rim-loop-2 SMLib refuses the chamfers' cliff overflow as too large (SM_FILERR_NO_ROOM, CloseRemovalRegion): the blended loop's boundary closes on one face, where it should build cut by the front face
-1080-chamfer-sloped-basin-0-5-mm-rim-4-past-the-rim SMLib refuses the chamfer past the rim as too large (SM_FILERR_NO_ROOM, CloseRemovalRegion): its sheet's boundary along the end wall's top edge line, past the rim, lies on the surfaces of two faces, where it should build cut by the front face
-1080-chamfer-sloped-basin-1-mm-rim-2-past-the-rim SMLib refuses the chamfer past the rim as too large (SM_FILERR_NO_ROOM, CloseRemovalRegion): its sheet's boundary along the end wall's top edge line, past the rim, lies on the surfaces of two faces, where it should build cut by the front face
-1080-chamfer-sloped-basin-1-mm-rim-3-past-the-rim SMLib refuses the chamfer past the rim as too large (SM_FILERR_NO_ROOM, CloseRemovalRegion): its sheet's boundary along the end wall's top edge line, past the rim, lies on the surfaces of two faces, where it should build cut by the front face
-1080-fillet-equal-slope-basin-1-mm-rim-loop-0-5 SMLib's check refuses the round: SmSurfOfRevolution Test #7, polar curve intervals do not match the surface's domain
 1080-fillet-equal-slope-basin-1-mm-rim-loop-4 not supported yet: a convex round past its face is not yet built by subtraction
-1080-fillet-sloped-basin-0-5-mm-rim-r4 not supported yet: a convex round past its face is not yet built by subtraction (largest that fits named 1.185 mm)
 1080-fillet-sloped-basin-0-5-mm-rim-r4-4-edges not supported yet: a convex round past its face is not yet built by subtraction
-1080-fillet-sloped-basin-1-mm-rim-r0-5-4-edges SMLib's check refuses the round: SmSurfOfRevolution Test #7, polar curve intervals do not match the surface's domain
-1080-fillet-sloped-basin-1-mm-rim-r4 not supported yet: a convex round past its face is not yet built by subtraction (largest that fits named 2.329 mm)
 1080-fillet-sloped-basin-1-mm-rim-r4-2-edges not supported yet: a convex round past its face is not yet built by subtraction
 1080-fillet-sloped-basin-1-mm-rim-r4-4-edges not supported yet: a convex round past its face is not yet built by subtraction
 1207-fillet-bar-top-edge-after-boss-arc-round-r0-5 SMLib's check refuses the round: internal coincident control points in a B-spline curve (an internal pole)
@@ -23,10 +15,6 @@
 2893-chamfer-two-distances-past-the-bottom SMLib status 1001: SmFilletNx1ClosedCorner cannot compute the closed rim's corner geometry, where the chamfer past the bottom rim should build the frustum
 4782-fillet-bar-edge-wider-than-both-faces SMLib status 1001: a convex round past both its faces is not yet built by subtraction
 5158-fillet-round-just-past-a-10mm-face SMLib status 1001: a convex round 0.01 past its face is not yet built by subtraction (10.0001-10.04 open)
-5835-chamfer-sloped-basin-1-mm-rim-0-5-4-edges SMLib status 1001 on the chamfers meeting at the rim's re-entrant corners
-5835-chamfer-sloped-basin-1-mm-rim-2-two-edges SMLib status 1001: SmFilletNx2Corner, CalcFilletIntSideFace cannot intersect a chamfer with the side face at the rim's corner, where the front chamfer past the rim should build cut by the front face
-5835-chamfer-sloped-basin-4-mm-rim-2-2-edges SMLib status 1001 on the chamfers meeting at the rim's re-entrant corner
-5835-chamfer-sloped-basin-4-mm-rim-2-4-edges SMLib status 1001 on the chamfers meeting at the rim's re-entrant corners
 9-fillet-corner-curvature-with-reduce-fit not supported yet: solid.fillet builds corner g2 with the exact fit only
 9-fillet-corner-curvature-with-taper-fit not supported yet: solid.fillet builds corner g2 with the exact fit only
 926-chamfer-top-edge-ending-on-boss-wall-above-it not supported yet: the chamfer is refused as larger than its faces where it ends on the boss's wall
@@ -34,8 +22,4 @@ cov-chamfer-concave-edge-through-up-down-joined-squares SMLib status 1001 on the
 cov-chamfer-outer-corner-edge-of-a-shelled-box-with-a-lip SMLib's chamfer result is not a closed solid where it ends on the lip
 cov-fillet-arc-edge-on-an-oblique-cut-of-a-bar SMLib's check refuses the round: internal coincident control points in a B-spline curve
 every-block-cylinder-crease-top-edge-after-arc-round-r1 the r1 round's contact seam with the block's side face reads 60 degrees (the cylinder wall's normal) at its end on the crease (8.660, 5, 15.284): G0 where the round is built tangent
-every-chamfer-pocket-rim-5-5-past-the-floor SMLib refuses the chamfers' cliff overflow as too large (SM_FILERR_NO_ROOM, CloseRemovalRegion): the blended loop's boundary closes on one face, where it should build with a groove round the floor
 every-hole-top-rim-r12-past-plate-bottom SMLib status 1001: a convex round past its face on the tangent side is not yet built by subtraction
-every-pocket-floor-and-rim-edges-r2 a corner patch where two rim rounds meet at each concave pocket corner (23 faces, not 19) instead of the mitre the rounds make running into each other
-every-pocket-rim-edges-r2 a corner patch where two rim rounds meet at each concave pocket corner (19 faces, not 15) instead of the mitre the rounds make running into each other
-every-pocket-rim-edges-r5-as-deep-as-pocket a corner patch where two rim rounds meet at each concave pocket corner (15 faces, not 11) instead of the mitre the rounds make running into each other

@@ -15,7 +15,7 @@ The long form is `docs/book/src/dev/testing.md`.
 - Crash fixes: a regression test from the report's `design.solidcraft` and `replay.json` (`skills/solidcraft-crash-safety/SKILL.md`).
 
 ## Unit test or rig case
-- Unit tests assert the code's logic: which edges a chain picks, name resolution, history labels, refusal wording, hostile input, parsing and saving (`a_corner_round_wider_than_its_faces_overflows_and_takes_the_corners_other_edges`: per-edge radii, which no command takes, so no rig case can).
+- Unit tests assert the code's logic: which edges a chain picks, name resolution, history labels, refusal wording, hostile input, parsing and saving (`a_corner_round_wider_than_its_faces_overflows_and_takes_the_corners_other_edges`: per-edge radii, which no command takes).
 - The rig (`tests/kernel-cases/`) asserts geometry: exact volumes, shapes, seam continuity, geometric refusals, through commands with a hand-derived answer, so it survives a kernel swap (`fillets/190-fillet-disc-rim-past-its-2mm-wall`). A test doing both keeps only its logic.
 
 ## A failing test needs its fix

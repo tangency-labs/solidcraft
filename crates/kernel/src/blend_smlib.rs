@@ -231,7 +231,11 @@ mod imp {
         let out = match crate::blend_corner::later_corners(body, &picked.edges, sizes)? {
             Some((later, new)) => reblend(body, what, &later).map(|(b, dropped_new)| {
                 // A picked seam has no round of its own: only the new edges can be removed.
-                let dropped = picked.edges.iter().map(|e| new.iter().position(|(n, _)| n == e).is_some_and(|j| dropped_new.get(j).copied().unwrap_or(false))).collect();
+                let dropped = picked
+                    .edges
+                    .iter()
+                    .map(|e| new.iter().position(|(n, _)| n == e).is_some_and(|j| dropped_new.get(j).copied().unwrap_or(false)))
+                    .collect();
                 (b.with_rounds(body, new), dropped)
             }),
             None => run_with(body, what, &picked.edges, &[], |b| b.blend_dropping(Blend::Round, &picked.points, sizes, tol))
