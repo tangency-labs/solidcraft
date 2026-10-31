@@ -45,7 +45,9 @@
 //! its own long attribute before `SmApiBoolean`, each side on its own operands (the C++
 //! shim with `SmLongAttribute`s, the Rust side with `Brep::add_attribute`), and also
 //! compares `attributes`: per result face (edge) its area (length) and the attributes it
-//! carries, sorted by attributes, so attribute propagation through the merge shows.
+//! carries, sorted by attributes, so attribute propagation through the merge shows. A
+//! `boolean_2d` call with `attributed` tags both operands the same way before
+//! `SmApiBoolean2d` and compares an assigned result's `attributes` likewise.
 //!
 //! A `checked` call (fixtures only) runs `SmApiBoolean`, then the capi check sequence
 //! (`SmBrep::ValidatePointers`, then `SmBrep::AssertValid`; Rust
@@ -339,6 +341,11 @@ enum Inputs {
         a: BrepIn,
         b: BrepIn,
         operation: i32,
+        /// Both operands' faces and edges tagged first (operands 0 and 1, this
+        /// `SmAttributeBehaviorType`), as [`Inputs::Attributed`] tags them; an assigned
+        /// result's record adds the attributes its faces and edges carry.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        attributed: Option<u8>,
     },
     /// `SmApiNonManifoldBoolean`.
     NonManifold {
@@ -601,10 +608,16 @@ fn to_call(i: &Inputs) -> Call {
             b: spec(b),
             operation: *operation,
         },
-        Inputs::Boolean2d { a, b, operation } => Call::Boolean2d {
+        Inputs::Boolean2d {
+            a,
+            b,
+            operation,
+            attributed,
+        } => Call::Boolean2d {
             a: spec(a),
             b: spec(b),
             operation: *operation,
+            attributed: *attributed,
         },
         Inputs::NonManifold { a, b, operation } => Call::NonManifold {
             a: spec(a),
@@ -744,6 +757,14 @@ fn cpp(i: &Inputs) -> Result<Output, HarnessError> {
                 Ok(to_output(head)?.values("attributes", rows.to_vec()))
             }
             Inputs::Checked { .. } => checked_output(&o),
+            Inputs::Boolean2d {
+                attributed: Some(_),
+                ..
+            } if o.first() == Some(&0.0) && o.get(1) == Some(&1.0) => {
+                let (head, rows) = ffi::split_measures(&o)
+                    .ok_or_else(|| harness("cpp: attributed 2D record too short"))?;
+                Ok(areas_output(head, true)?.values("attributes", rows.to_vec()))
+            }
             Inputs::Boolean2d { .. } => {
                 areas_output(&o, o.first() == Some(&0.0) && o.get(1) == Some(&1.0))
             }
@@ -1713,15 +1734,32 @@ fn rust_call_with(k: &mut Kernel, i: &Inputs, seen: &dyn Fn(&SolidError)) -> Res
                 keeps_other(*operation, false),
             )
         }
-        Inputs::Boolean2d { a, b, operation } => {
+        Inputs::Boolean2d {
+            a,
+            b,
+            operation,
+            attributed,
+        } => {
             let operation = op_2d(*operation)?;
-            let (a, b) = (build(k, a)?, build(k, b)?);
+            let (mut a, mut b) = (build(k, a)?, build(k, b)?);
+            if let Some(behavior) = attributed {
+                let behavior = Behavior::from_code(i32::from(*behavior))
+                    .map_err(|e| Stop::Harness(harness(format!("behavior: {e}"))))?;
+                tag_operand(&mut a, 0, behavior)?;
+                tag_operand(&mut b, 1, behavior)?;
+            }
             match api::boolean_2d(k, a, b, operation) {
                 Ok(api::Boolean2dOutcome::Result(mut res)) => {
                     let mut o = vec![1];
                     put_brep(&mut o, &res)?;
                     let a = areas(k, &mut res)?;
-                    Ok(record(0, o).values("areas", a))
+                    let out = record(0, o).values("areas", a);
+                    if attributed.is_none() {
+                        return Ok(out);
+                    }
+                    let mut rows = Vec::new();
+                    put_attributes(k, &mut rows, &mut res)?;
+                    Ok(out.values("attributes", rows))
                 }
                 Ok(api::Boolean2dOutcome::Unassigned { brep1, brep2 }) => {
                     let mut o = vec![0];
@@ -2164,6 +2202,7 @@ fn gen_more(rng: &mut Rng) -> Inputs {
                 a,
                 b,
                 operation: rng.below(5) as i32,
+                attributed: None,
             }
         }
         9 | 10 => {

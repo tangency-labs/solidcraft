@@ -332,11 +332,6 @@ fn drop_uv_curves(
     output.extend(dropped.uv_curves);
     Ok(())
 }
-/// `SmBrep::StitchFaces(tol, ...)` with the header defaults (`pOptFaces = NULL`,
-/// `bAllowSpineEdges = FALSE`); the counts and gaps are unused.
-pub(super) fn stitch_faces(k: &mut Kernel, b: &mut Brep, tolerance: f64) -> Result<()> {
-    crate::topology::brep::p4::stitch_faces(k, b, tolerance, None, false).map(drop)
-}
 
 enum AnalyticSurface {
     Cone(Cone),
@@ -767,6 +762,26 @@ impl PrimitiveCreation {
         ),
         notifications: &mut NotifyEnv<'_>,
     ) -> Result<()> {
+        Self::boolean_2d_keyed(k, a, b, operation, output, marks, notifications, None)
+    }
+
+    /// [`Self::boolean_2d`] with `b`'s objects notified under `other_key_of` (disjoint
+    /// from `notifications.key_of`'s identities of `a`'s) when given, else under
+    /// `notifications.key_of` as well.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn boolean_2d_keyed(
+        k: &mut Kernel,
+        a: &mut Brep,
+        b: &mut Brep,
+        operation: Boolean2d,
+        output: &mut Option<Brep>,
+        marks: (
+            &mut crate::topology::topology_traverser::Marks,
+            &mut crate::topology::topology_traverser::Marks,
+        ),
+        notifications: &mut NotifyEnv<'_>,
+        other_key_of: Option<&dyn Fn(crate::error::EntityRef) -> crate::geom::object::ObjectRef>,
+    ) -> Result<()> {
         let previous = k.context.doing_boolean();
         let edit_a = a.editing_enabled();
         let edit_b = b.editing_enabled();
@@ -888,7 +903,17 @@ impl PrimitiveCreation {
                     }
                 }
             }
-            super::boolean::finish(k, a, b, first, operation, output, marks, notifications)?;
+            super::boolean::finish(
+                k,
+                a,
+                b,
+                first,
+                operation,
+                output,
+                marks,
+                notifications,
+                other_key_of,
+            )?;
             selected_result = true;
             Ok(())
         })();

@@ -822,6 +822,15 @@ impl ArenaNotifyState {
         state
     }
 
+    /// A default record for every object of `b` (and the B-rep itself) under its
+    /// [`copy_source_ref`] identity, disjoint from the arena identities [`Self::seed`]
+    /// gives: for a second B-rep notified in the same state.
+    pub(crate) fn seed_tagged(&mut self, b: &Brep) {
+        for e in brep_entities(b) {
+            self.records.or_default(copy_source_ref(e).key);
+        }
+    }
+
     /// Gives `b` the attributes this state's notifications left on its live objects
     /// (pair of [`Self::with_attributes_of`]); the lists of objects the edit deleted
     /// are cleared, as upstream's destructors do.

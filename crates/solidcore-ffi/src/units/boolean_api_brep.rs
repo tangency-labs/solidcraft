@@ -47,6 +47,7 @@
 //! | `Checked`       | 20 | brep brep `operation` `level`          | two-B-rep record, then the result's check       |
 //! | `Sweep` (attributed) | 21 | `behavior`, then op 15's args     | op 15's record, then the attribute rows         |
 //! | `RotationalSweep` (attributed) | 22 | `behavior`, then op 16's args | op 16's record, then the attribute rows |
+//! | `Boolean2d` (attributed) | 23 | `behavior`, then op 12's args | op 12's record, then (an assigned result) the attribute rows |
 //!
 //! The two-B-rep record is `has [is_first kept brep [brep]]` (the second B-rep when
 //! upstream keeps it); a B-rep is `faces edges vertices regions manifold_solid`, then per
@@ -489,6 +490,10 @@ pub enum Call {
         b: BrepSpec,
         /// `Sm2DBooleanOperationType` value (0 to 4).
         operation: i32,
+        /// Both operands' faces and edges tagged first with this `SmAttributeBehaviorType`
+        /// (op `23`, as an attributed sweep's); an assigned result's record then ends with
+        /// its attribute rows.
+        attributed: Option<u8>,
     },
     /// `SmApiNonManifoldBoolean`.
     NonManifold {
@@ -980,11 +985,20 @@ fn encode(call: &Call) -> Result<Vec<f64>, FfiError> {
             push_spec(&mut o, b)?;
             o.push(f64::from(*operation));
         }
-        Call::Boolean2d { a, b, operation } => {
+        Call::Boolean2d {
+            a,
+            b,
+            operation,
+            attributed,
+        } => {
             if !(0..=4).contains(operation) {
                 return Err(bad("operation is not an Sm2DBooleanOperationType value"));
             }
-            o.push(12.0);
+            match attributed {
+                None => o.push(12.0),
+                Some(behavior) if *behavior <= 4 => o.extend([23.0, f64::from(*behavior)]),
+                Some(_) => return Err(bad("behavior is not an SmAttributeBehaviorType value")),
+            }
             push_spec(&mut o, a)?;
             push_spec(&mut o, b)?;
             o.push(f64::from(*operation));

@@ -1142,6 +1142,57 @@ fn body_attributes(
     Ok(store)
 }
 
+/// (not upstream) Whether `a` is an application attribute (`SM_AI_USER_1` and up), not
+/// one of the kernel's own ids, which the session's executive keeps and finds by handle.
+fn is_application_attribute(a: &Attribute) -> bool {
+    a.attribute_id() >= ids::USER_1
+}
+
+/// (not upstream) [`body_attributes`] of `body`'s application attributes alone
+/// ([`is_application_attribute`]): what an operation that consumes and rebuilds `body`
+/// (the cliff overflow's Boolean) carries on its objects, as upstream's live on them.
+fn body_application_attributes(
+    attributes: &AttributeStore,
+    body: &Brep,
+    serial: u64,
+) -> Result<AttributeStore> {
+    let mut store = body_attributes(attributes, body, serial)?;
+    for key in store.attributed_objects() {
+        for h in store.attributes(key) {
+            if store.get(h).is_some_and(|a| !is_application_attribute(a)) {
+                store.remove_attribute(key, h, true)?;
+            }
+        }
+    }
+    store.retain_listed();
+    Ok(store)
+}
+
+/// (not upstream) Replaces, in the session store, the application attributes of the
+/// objects issued `serial` by those `body`'s own store holds (pair of
+/// [`body_application_attributes`], once the operation that carried them succeeded):
+/// the old lists' application entries are dropped (their attributes left without those
+/// users), then `body`'s are seeded and taken from it.
+fn replace_application_attributes(
+    attributes: &mut AttributeStore,
+    body: &mut Brep,
+    serial: u64,
+) -> Result<()> {
+    for key in attributes.attributed_objects() {
+        if crate::topology::brep::p3::topology_entity(serial, key).is_none() {
+            continue;
+        }
+        for h in attributes.attributes(key) {
+            if attributes.get(h).is_some_and(is_application_attribute) {
+                attributes.remove_attribute(key, h, true)?;
+            }
+        }
+    }
+    seed_body_attributes(attributes, body, serial)?;
+    body.take_attributes();
+    Ok(())
+}
+
 /// `~SmFilletExecutive`: `m_pAttributeE` leaves each of its users and is deleted.
 /// (not upstream) Then the bodies get their attributes back from the session store.
 impl Drop for FilletSession<'_> {

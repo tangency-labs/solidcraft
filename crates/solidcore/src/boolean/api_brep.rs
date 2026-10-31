@@ -490,7 +490,8 @@ pub fn piecewise_merge(
 /// (`SmApiBoolean2d`, `SmPrimitiveCreation::Boolean2D`): union, intersection, A minus
 /// B, exclusive or or merge of their regions. On success with faces on both sides the
 /// first operand is modified into the result and the second consumed; an operand
-/// without faces leaves both unchanged ([`Boolean2dOutcome::Unassigned`]).
+/// without faces leaves both unchanged ([`Boolean2dOutcome::Unassigned`]). The first
+/// operand's attributes ([`Brep::add_attribute`]) carry through to the result.
 ///
 /// # Errors
 ///
@@ -505,14 +506,17 @@ pub fn boolean_2d(
     use crate::topology::topology_traverser::Marks;
     let mut primary = brep1;
     let mut other = brep2;
-    let mut primitive = PrimitiveCreation::new(None, 0, false);
     let mut primary_marks = Marks::default();
     let mut other_marks = Marks::default();
     let mut result = None;
     {
-        let mut state = ArenaNotifyState::new(&primary);
-        state.seed(&other);
-        primitive.boolean_2d(
+        // (not upstream) with the primary operand's own attributes, given back to the
+        // result afterwards, as upstream's live on the objects Boolean2D splits, glues
+        // and keeps; the other operand is notified under identities disjoint from the
+        // primary's, so that its edits never reach the primary's attributes
+        let mut state = ArenaNotifyState::with_attributes_of(&mut primary);
+        state.seed_tagged(&other);
+        let r = PrimitiveCreation::boolean_2d_keyed(
             k,
             &mut primary,
             &mut other,
@@ -520,7 +524,11 @@ pub fn boolean_2d(
             &mut result,
             (&mut primary_marks, &mut other_marks),
             &mut state.env(None),
-        )?;
+            Some(&crate::topology::brep::p2::copy_source_ref),
+        );
+        let restored = state.restore_attributes(result.as_mut().unwrap_or(&mut primary));
+        r?;
+        restored?;
     }
     Ok(match result {
         Some(mut result) => {

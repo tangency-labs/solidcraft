@@ -93,6 +93,7 @@ enum : int32_t
     OP_CHECKED = 20,
     OP_ATTRIBUTED_NM_SWEEP = 21,            // `behavior` then OP_NM_SWEEP's program
     OP_ATTRIBUTED_NM_ROTATIONAL_SWEEP = 22, // `behavior` then OP_NM_ROTATIONAL_SWEEP's
+    OP_ATTRIBUTED_BOOLEAN_2D = 23,          // `behavior` then OP_BOOLEAN_2D's program
 };
 
 // Most entries of one non-manifold sweep selection array (MAX_SELECTION in the Rust module).
@@ -1010,8 +1011,11 @@ double edge_index(const SmBrep* b, const SmEdge* e)
 // OP_BOOLEAN_2D (`brep brep 2d_operation`: `assigned`, then the result and its areas
 // (put_areas), or both operands when an empty operand leaves rpResult unassigned) and OP_PIECEWISE
 // (`brep brep create_new`: `has is_first`, the result, then the second operand, which
-// upstream imprints but keeps).
-void run_more_two(Rd& rd, int32_t api, std::vector<double>& o)
+// upstream imprints but keeps). With `behavior` (>= 0, OP_BOOLEAN_2D only, from
+// OP_ATTRIBUTED_BOOLEAN_2D) both operands are tagged first (tag_operand, operand 0 and 1)
+// and an assigned result's record ends, after its areas, with the result's attribute rows
+// (put_attributes) and the number of those values.
+void run_more_two(Rd& rd, int32_t api, std::vector<double>& o, int64_t behavior = -1)
 {
     BrepSpec a = read_spec(rd);
     BrepSpec b = read_spec(rd);
@@ -1033,6 +1037,11 @@ void run_more_two(Rd& rd, int32_t api, std::vector<double>& o)
     std::vector<SmBrep*> bs = build_all(specs);
     SmBrep* b1 = bs[0];
     SmBrep* b2 = bs[1];
+    if (behavior >= 0)
+    {
+        tag_operand(b1, 0, (SmAttributeBehaviorType)behavior);
+        tag_operand(b2, 1, (SmAttributeBehaviorType)behavior);
+    }
     SmBrep* res = NULL;
     SmTArray<SmEdge*> edges;
     SmApiStatus stat = SM_ERR;
@@ -1076,6 +1085,12 @@ void run_more_two(Rd& rd, int32_t api, std::vector<double>& o)
         }
         put_brep(o, res);
         put_areas(o, res);
+        if (behavior >= 0)
+        {
+            size_t start = o.size();
+            put_attributes(o, res);
+            o.push_back((double)(o.size() - start));
+        }
         delete res;
         return;
     }
@@ -1271,7 +1286,7 @@ void run_tessellate_boundaries(Rd& rd, std::vector<double>& o)
 
 void run(Rd& rd, std::vector<double>& o)
 {
-    int32_t api = (int32_t)rd.idx(1, 22);
+    int32_t api = (int32_t)rd.idx(1, 23);
     switch (api)
     {
     case OP_BOOLEAN:
@@ -1299,6 +1314,12 @@ void run(Rd& rd, std::vector<double>& o)
     {
         int64_t behavior = rd.idx(0, 4);
         run_sweep(rd, api - 6, o, behavior);
+        break;
+    }
+    case OP_ATTRIBUTED_BOOLEAN_2D:
+    {
+        int64_t behavior = rd.idx(0, 4);
+        run_more_two(rd, OP_BOOLEAN_2D, o, behavior);
         break;
     }
     default: throw Bad();

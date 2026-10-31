@@ -20,6 +20,11 @@
 //! - **A failed subtraction keeps the target.** The Boolean consumes its operands, so the
 //!   target is copied before it and the copy put back when it fails (the fork's in-place
 //!   merge leaves whatever it reached).
+//! - **The target's application attributes go through the Boolean.** The session keeps
+//!   the bodies' attributes in its own store, so the target's application attributes
+//!   (`SM_AI_USER_1` and up) are handed to it for the Boolean and taken back from the
+//!   result, as the fork's ride on the objects it splits and merges (#1980); the
+//!   kernel's own ids stay in the session store, found by handle.
 
 use std::collections::BTreeMap;
 
@@ -390,7 +395,13 @@ impl FilletSession<'_> {
         // place; the region is deleted after)
         let kept = (*self.objects.target).clone();
         let target_solid = crate::topology::brep::p2::is_manifold_solid(&kept)?;
-        let taken: Brep = std::mem::take(&mut *self.objects.target);
+        let serial = self.objects.target_serial;
+        // (not upstream) the target's application attributes ride on its objects through
+        // the Boolean, as the fork's live on them, so a split, merged or copied edge keeps
+        // them (#1980); the session store takes the result's back once it succeeds
+        let carried = super::body_application_attributes(&self.objects.attributes, &kept, serial)?;
+        let mut taken: Brep = std::mem::take(&mut *self.objects.target);
+        taken.set_attributes(carried);
         match boolean(k, taken, region, BooleanOperation::Difference) {
             Ok(outcome) => {
                 // Not the fork's (WR-631 addendum): the subtraction from a manifold solid
@@ -410,7 +421,13 @@ impl FilletSession<'_> {
                     });
                     return Err(SolidError::sm_err(OP));
                 }
-                *self.objects.target = outcome.result;
+                let mut result = outcome.result;
+                super::replace_application_attributes(
+                    &mut self.objects.attributes,
+                    &mut result,
+                    serial,
+                )?;
+                *self.objects.target = result;
                 Ok(())
             }
             Err(e) => {

@@ -1,0 +1,265 @@
+{
+ "cases": [
+  {
+   "name": "attributed_boolean2d_squares_union_copy",
+   "note": "#1462 (SolidCraft's a_boolean2d_has_the_cpp_history): square sheets A 10x10 and B 10x10 offset by (5,5), Sm2DBooleanOperationType 0; every operand face and edge has its own long attribute (behaviour 0). Split edges' pieces, glued edges and the kept face carry them as SmAObject::Notify does.",
+   "inputs": {
+    "api": "boolean2d",
+    "a": {
+     "kind": "plane",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0
+     ]
+    },
+    "b": {
+     "kind": "plane",
+     "origin": [
+      5.0,
+      5.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0
+     ]
+    },
+    "operation": 0,
+    "attributed": 0
+   }
+  },
+  {
+   "name": "attributed_boolean2d_squares_union_reference",
+   "note": "#1462 (SolidCraft's a_boolean2d_has_the_cpp_history): square sheets A 10x10 and B 10x10 offset by (5,5), Sm2DBooleanOperationType 0; every operand face and edge has its own long attribute (behaviour 1). Split edges' pieces, glued edges and the kept face carry them as SmAObject::Notify does.",
+   "inputs": {
+    "api": "boolean2d",
+    "a": {
+     "kind": "plane",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0
+     ]
+    },
+    "b": {
+     "kind": "plane",
+     "origin": [
+      5.0,
+      5.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0
+     ]
+    },
+    "operation": 0,
+    "attributed": 1
+   }
+  },
+  {
+   "name": "attributed_boolean2d_squares_intersection_copy",
+   "note": "#1462 (SolidCraft's a_boolean2d_has_the_cpp_history): square sheets A 10x10 and B 10x10 offset by (5,5), Sm2DBooleanOperationType 1; every operand face and edge has its own long attribute (behaviour 0). Split edges' pieces, glued edges and the kept face carry them as SmAObject::Notify does.",
+   "inputs": {
+    "api": "boolean2d",
+    "a": {
+     "kind": "plane",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0
+     ]
+    },
+    "b": {
+     "kind": "plane",
+     "origin": [
+      5.0,
+      5.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0
+     ]
+    },
+    "operation": 1,
+    "attributed": 0
+   }
+  },
+  {
+   "name": "attributed_boolean2d_squares_difference_copy",
+   "note": "#1462 (SolidCraft's a_boolean2d_has_the_cpp_history): square sheets A 10x10 and B 10x10 offset by (5,5), Sm2DBooleanOperationType 2; every operand face and edge has its own long attribute (behaviour 0). Split edges' pieces, glued edges and the kept face carry them as SmAObject::Notify does.",
+   "inputs": {
+    "api": "boolean2d",
+    "a": {
+     "kind": "plane",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0
+     ]
+    },
+    "b": {
+     "kind": "plane",
+     "origin": [
+      5.0,
+      5.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0
+     ]
+    },
+    "operation": 2,
+    "attributed": 0
+   }
+  },
+  {
+   "name": "attributed_boolean2d_squares_difference_reference",
+   "note": "#1462 (SolidCraft's a_boolean2d_has_the_cpp_history): square sheets A 10x10 and B 10x10 offset by (5,5), Sm2DBooleanOperationType 2; every operand face and edge has its own long attribute (behaviour 1). Split edges' pieces, glued edges and the kept face carry them as SmAObject::Notify does.",
+   "inputs": {
+    "api": "boolean2d",
+    "a": {
+     "kind": "plane",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0
+     ]
+    },
+    "b": {
+     "kind": "plane",
+     "origin": [
+      5.0,
+      5.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0
+     ]
+    },
+    "operation": 2,
+    "attributed": 1
+   }
+  },
+  {
+   "name": "attributed_boolean2d_squares_xor_copy",
+   "note": "#1462 (SolidCraft's a_boolean2d_has_the_cpp_history): square sheets A 10x10 and B 10x10 offset by (5,5), Sm2DBooleanOperationType 3; every operand face and edge has its own long attribute (behaviour 0). Split edges' pieces, glued edges and the kept face carry them as SmAObject::Notify does.",
+   "inputs": {
+    "api": "boolean2d",
+    "a": {
+     "kind": "plane",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0
+     ]
+    },
+    "b": {
+     "kind": "plane",
+     "origin": [
+      5.0,
+      5.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0
+     ]
+    },
+    "operation": 3,
+    "attributed": 0
+   }
+  },
+  {
+   "name": "attributed_boolean2d_squares_merge_copy",
+   "note": "#1462 (SolidCraft's a_boolean2d_has_the_cpp_history): square sheets A 10x10 and B 10x10 offset by (5,5), Sm2DBooleanOperationType 4; every operand face and edge has its own long attribute (behaviour 0). Split edges' pieces, glued edges and the kept face carry them as SmAObject::Notify does.",
+   "inputs": {
+    "api": "boolean2d",
+    "a": {
+     "kind": "plane",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0
+     ]
+    },
+    "b": {
+     "kind": "plane",
+     "origin": [
+      5.0,
+      5.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0
+     ]
+    },
+    "operation": 4,
+    "attributed": 0
+   }
+  },
+  {
+   "name": "attributed_boolean2d_square_disk_difference_copy",
+   "note": "#1462: square sheet minus an overlapping disk (Sm2DBooleanOperationType 2), every operand face and edge with its own SM_AB_COPY long attribute.",
+   "inputs": {
+    "api": "boolean2d",
+    "a": {
+     "kind": "plane",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0
+     ]
+    },
+    "b": {
+     "kind": "disk",
+     "origin": [
+      5.0,
+      5.0,
+      0.0
+     ],
+     "radius": 3.0
+    },
+    "operation": 2,
+    "attributed": 0
+   }
+  }
+ ]
+}

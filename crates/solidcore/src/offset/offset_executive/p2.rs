@@ -63,7 +63,7 @@ use crate::geom::attribute::AttributeStore;
 use crate::geom::context::{with_mark_lock, MarkType, ALL_MARKS};
 use crate::geom::extent2d::Extent2d;
 use crate::geom::object::{FaceKey, NotifyOperation, ObjectRef};
-use crate::heal::stitch::p1::{DefaultStitchCallback, Stitch};
+use crate::heal::stitch::p1::{BorrowedStitchEdits, DefaultStitchCallback, Stitch};
 use crate::heal::stitch::p2 as stitch;
 use crate::heal::stitch::p2::MinGapRequest;
 use crate::kernel::Kernel;
@@ -73,8 +73,9 @@ use crate::query::api_queries::{brep_is_manifold_solid, BrepRef};
 
 use crate::topology::brep::p1 as bp1;
 use crate::topology::brep::p3 as bp3;
-use crate::topology::brep::p4::{shrink_geometry, stitch_faces};
+use crate::topology::brep::p4::{shrink_geometry, stitch_faces_with_context};
 use crate::topology::brep::p7::{make_face_with_curves_with_kernel_context, FaceCurvesInput};
+use crate::topology::brep::p9::CurveIdentity;
 use crate::topology::proto_topology::p1::CopyBrepMap;
 
 #[cfg(test)]
@@ -397,8 +398,38 @@ impl OffsetExecutive {
                 let mut stitch_tol_3d = tolerance / 10.0;
                 let mut ii = 0;
                 while ii < 4 && lamina > 0 {
-                    lamina =
-                        stitch_faces(kernel, &mut shell, stitch_tol_3d, None, false)?.lamina_edges;
+                    // pBrepShell->StitchFaces(dStitchTol3d): the glues notify the shell's
+                    // own objects, whose attributes the MergeBrep above left in the
+                    // caller's stores, so the stitch runs on those (#1973)
+                    let key_of = notifications.result_key_of;
+                    let curve_ref = notifications.result_curve_ref;
+                    let (records, attributes) =
+                        (&mut *notifications.records, &mut *notifications.attributes);
+                    lamina = crate::geom::context::Context::with_notification_context(
+                        kernel,
+                        |kernel, context| {
+                            let mut env = crate::topology::edge::NotifyEnv {
+                                records,
+                                attributes,
+                                context: Some(context),
+                                key_of,
+                            };
+                            let mut edits = BorrowedStitchEdits {
+                                env: &mut env,
+                                curve_identity: CurveIdentity::Legacy(curve_ref),
+                            };
+                            stitch_faces_with_context(
+                                kernel,
+                                &mut shell,
+                                stitch_tol_3d,
+                                None,
+                                false,
+                                None,
+                                Some(&mut edits),
+                            )
+                        },
+                    )??
+                    .lamina_edges;
                     stitch_tol_3d *= 10.0;
                     if stitch_tol_3d > options.offset.distance.abs() / 2.0 {
                         break;
@@ -4655,7 +4686,7 @@ mod tests {
             key_of: &result_key,
         };
         bp3::merge_brep(k, &mut env, &mut sheet, &other, &copy_key, None, None, true).unwrap();
-        stitch_faces(k, &mut sheet, 1.0e-5, None, false).unwrap();
+        crate::topology::brep::p4::stitch_faces(k, &mut sheet, 1.0e-5, None, false).unwrap();
         sheet.set_key(original_key(EntityRef::Brep(BrepId::from_index(0))).key);
         sheet
     }
