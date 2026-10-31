@@ -450,7 +450,7 @@ cases!(
     offset_sheet_quarter_cylinder,
     offset_sheet_a_solid,
     offset_sheet_a_sphere,
-    offset_sheet_a_sphere_to_its_centre: ignore = "with offset_splits_corner_vertices solidcore fails it with 1001, not an empty result",
+    offset_sheet_a_sphere_to_its_centre,
     offset_faces_top_out,
     offset_faces_through,
     draft_box_sides,
