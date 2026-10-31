@@ -407,7 +407,8 @@ pub fn import_filters(native: bool) -> Vec<(&'static str, Vec<&'static str>)> {
             ImportTarget::Design => add("SolidCraft design (container or JSON)", f.extensions),
             ImportTarget::Brep if import.native_only => add("FreeCAD and Rhino", f.extensions),
             ImportTarget::Brep => add(f.label, f.extensions),
-            ImportTarget::Mesh => add("Mesh (3MF, STL, OBJ, OSD, glTF)", f.extensions),
+            ImportTarget::Mesh if f.id == "osd" => add("OSD", f.extensions),
+            ImportTarget::Mesh => add("Mesh (3MF, STL, OBJ, glTF)", f.extensions),
             ImportTarget::PointCloud => add("Point cloud (PLY, XYZ, PTS)", f.extensions),
             ImportTarget::Sketch => add("Sketch drawings (DXF, SVG)", f.extensions),
         }
@@ -519,7 +520,9 @@ mod tests {
         assert_eq!(find("STEP"), vec!["step", "stp"]);
         assert_eq!(find("IGES"), vec!["igs", "iges"]);
         assert_eq!(find("FreeCAD and Rhino"), vec!["fcstd", "3dm"]);
-        assert_eq!(find("Mesh (3MF, STL, OBJ, OSD, glTF)"), vec!["stl", "3mf", "obj", "osd", "glb", "gltf"]);
+        assert_eq!(find("Mesh (3MF, STL, OBJ, glTF)"), vec!["stl", "3mf", "obj", "glb", "gltf"]);
+        assert_eq!(find("OSD"), vec!["osd"]);
+        assert!(import_filters(false).iter().any(|(label, extensions)| *label == "OSD" && extensions == &["osd"]));
         assert_eq!(find("Point cloud (PLY, XYZ, PTS)"), vec!["ply", "xyz", "pts"]);
         assert_eq!(find("Sketch drawings (DXF, SVG)"), vec!["dxf", "svg"]);
         assert!(import_filters(false).iter().all(|(l, _)| *l != "FreeCAD and Rhino"));

@@ -4,6 +4,10 @@ use super::*;
 pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     let t = Tokens::get();
     ui_kit::settings_heading(ui, app.tr("prefs.design"), app.tr("prefs.design_note"));
+    ui_kit::settings_section(ui, "osd_import", "OSD", |ui| {
+        setting::osd_import_solids(app, ui);
+        ui_kit::text(ui, app.tr("osd.import_solids_hint"), ui_kit::Text::Hint("osd_import"));
+    });
     ui_kit::settings_section(ui, "units", app.tr("prefs.units_precision"), |ui| {
         ui_kit::settings_form(ui, t.space_24 * 7.0 + t.space_2, |ui| {
             ui_kit::row(ui, app.tr("ui.units_of_new_designs"), |ui| {

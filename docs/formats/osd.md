@@ -1,6 +1,7 @@
 # OSD v2 mesh exchange (experimental)
 
-Open or import `.osd` through **File → Import**, or use `doc.open` /
+Open or import `.osd` through **File → Import**, choosing the separate **OSD**
+filter, or use `doc.open` /
 `file.insert_mesh`. Export selected bodies with **File → Export → OSD** or
 `file.export` with `format: "osd"`. This is an independent Rust implementation;
 it does not load a SprutCAM library, launch SprutCAM, or require its installation.
@@ -11,14 +12,37 @@ It uses the existing mesh import, component placement and export pipeline.
 - Triangle lists, strips and fans, including strip winding.
 - The stream's affine placement, including reflections. Matrices replace the
   current placement; they are not accumulated.
-- Flat RGB colours, represented as separate mesh bodies per colour.
+- Flat RGB colour groups (see the solid reconstruction colour limitations below).
 - Coordinates interpreted as millimetres. The stream has no supported unit tag.
 
-The result is a mesh, not a parametric CAD model. Save the editable SolidCraft
-document as `.sc`; export meshes as OSD, STL, OBJ or 3MF. Solid modelling and STEP
-export require a successful **Convert Mesh** operation first. That operation has
-its own limitations: importing an OSD file does not reconstruct analytic surfaces,
-feature history, machining operations or assembly semantics.
+By default, closed geometry is reconstructed as an **editable solid**, using the
+existing prism converter where possible (0.001 mm tolerance), otherwise sewing
+the triangles into planar B-rep faces. Solid operations and STEP export then work
+without a separate Convert Mesh operation. This does not recreate original
+sketches, dimensions, feature history, machining operations or assembly semantics;
+curved regions can remain faceted, and operations such as fillets depend on that
+topology and the kernel's capabilities. Save new editing history as `.sc`.
+
+Reconstruction is bounded to 20,000 triangles per file. If geometry is open,
+non-manifold, too detailed or cannot pass the reconstruction checks, **Auto keeps
+the mesh and reports why**, rather than inventing missing faces. The `osd_mode`
+parameter of `doc.open`, MCP `open` and `file.insert_mesh` selects `auto` (default),
+`mesh` (the original import path) or `solid` (fail instead of falling back).
+Mesh bodies can still be exported as OSD, STL, OBJ or 3MF.
+
+In **Preferences → Design → OSD**, turn off **Import OSD as editable solids**
+to restore mesh import for files opened or inserted through the UI. The control
+channel names this preference `osd_import_solids`. An explicit `osd_mode` takes
+precedence over the UI preference.
+
+Disjoint, independently closed colour groups keep their body colours. When colour
+groups split a shell or have overlapping bounds (including a differently coloured
+cavity), they are joined for solid reconstruction so that voids remain empty;
+individual face colours are then lost with a warning. Use `osd_mode: "mesh"` to
+retain those colour groups. Sewing uses the kernel's existing 0.000001 mm weld;
+the faceted result must remain closed and preserve enclosed volume within
+max(0.000001 mm³, 0.00001%). These checks do not certify arbitrary self-intersecting
+input as suitable for every CAD operation.
 
 Display points/lines, wire passes and reference/snap records are omitted with
 warnings. Zero-area triangles are skipped with a warning. Varying vertex colours
@@ -30,7 +54,9 @@ or projective matrices fail the import instead of returning a partial model.
 
 The writer emits a canonical version 2 triangle stream with an identity placement,
 world-space bounds and flat colours. Coordinates are float32; triangles that
-collapse at that precision cause an error. Names, alpha, CAD topology, display
+collapse at that precision cause an error. Boolean edits can create such tiny
+triangles even when the original OSD imported successfully; save the edited solid
+as STEP or `.sc` in that case. Names, alpha, CAD topology, display
 wires, reference records and the original byte representation are not preserved.
 Body boundaries are lost: bodies sharing a colour merge into one mesh on reimport.
 The 16 opaque bounding-box metadata bytes are written as zeros.
@@ -86,4 +112,7 @@ before this experimental contribution is eligible for upstream integration.
 
 Tests cover analytic square areas and winding, reflected/scaled placement,
 colours, omitted reference/display data, truncations, malformed values, mutations,
-float32 export failures and the native mesh feature/export path.
+float32 export failures and the native mesh feature/export path. An analytic
+non-prismatic pyramid tests direct solid import, cold document reopen, a Boolean
+cut and STEP export/reimport; open and non-manifold inputs, colour seams and the
+solid reconstruction budget are checked separately.
