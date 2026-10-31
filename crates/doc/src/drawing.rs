@@ -59,6 +59,7 @@ use crate::{DocError, Metadata, Result, expr};
 
 pub mod balloon;
 pub mod dimension;
+pub mod hole_callout;
 pub mod view;
 
 use balloon::Balloon;

@@ -894,6 +894,7 @@
   "cmd.document_metadata_set": "Konstruktionseigenschaften ändern",
   "cmd.document_revision": "Konstruktionsrevision",
   "cmd.document_units": "Einheiten der Konstruktion ändern",
+  "cmd.drawing_hole_callout": "Bohrungsangabe",
   "cmd.edit_checkpoint": "Prüfpunkt",
   "cmd.edit_repeat": "Letzten Befehl wiederholen",
   "cmd.edit_restore_checkpoint": "Prüfpunkt wiederherstellen",

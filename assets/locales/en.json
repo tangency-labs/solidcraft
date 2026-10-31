@@ -921,6 +921,7 @@
   "cmd.drawing_dimension_edit": "Edit Drawing Dimension",
   "cmd.drawing_dimension_inspect": "Inspect Drawing Dimension",
   "cmd.drawing_export": "Export Sheet",
+  "cmd.drawing_hole_callout": "Hole Callout",
   "cmd.drawing_inspect": "Inspect Drawing",
   "cmd.drawing_list": "List Drawings",
   "cmd.drawing_open": "Open Drawing",
