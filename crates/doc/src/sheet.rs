@@ -20,7 +20,7 @@ use crate::{DocError, Document, IDENTITY, Mat, Result, apply_point, apply_vector
 mod convert;
 #[path = "sheet_face_names.rs"]
 mod face_names;
-pub use convert::{bend_edge_names, convert_body};
+pub use convert::{FoundBends, bend_edge_names, convert_body, detect_bends};
 pub(crate) use convert::{outline_loop, round_wall};
 pub use face_names::body_sheet_face_names;
 

@@ -829,15 +829,40 @@ pub(super) fn sheet_eval(
                 face_outline(&mesh, &plane, face.0, n, recesses.level, tol).iter().map(|l| sheet::outline_loop(l, &mut wall, tol * 1e-2)).collect();
             loops.sort_by(|a, b| b.signed_area().abs().total_cmp(&a.signed_area().abs()));
             let mut it = loops.into_iter();
-            let outer = it.next().ok_or_else(|| DocError::Invalid("no outline on that face".into()))?.ccw();
-            let region = Region2 { outer, holes: it.map(|l| l.ccw().reversed()).collect() };
-            let area = region.area().abs();
+            let outline = it.next().map(|outer| Region2 { outer: outer.ccw(), holes: it.map(|l| l.ccw().reversed()).collect() });
             let vol = kernel::measure(&mb.body)?.volume + recesses.volume;
-            if (area * t - vol).abs() > 1e-3 * vol.max(1.0) {
-                return Err(DocError::Invalid(
-                    "not supported yet: converting bodies that are not a plate of even thickness without bend edges (`bends`)".into(),
-                ));
-            }
+            // A plate's outline times its thickness holds its volume. A bent sheet picked on its
+            // outer skin may have no outline at all (the base under a flange bent at 45 degrees).
+            let Some(region) = outline.filter(|r| (r.area().abs() * t - vol).abs() <= 1e-3 * vol.max(1.0)) else {
+                // No plate: a sheet with bends, found by themselves (#1325), bent with the radius and
+                // thickness it is modelled with and the rule's K-factor, so that it keeps its shape.
+                let Some(found) = sheet::detect_bends(&mb) else {
+                    return Err(DocError::Invalid(
+                        "not supported yet: converting bodies that are not a plate of even thickness without bend edges (`bends`): it shows no bend cylinders between flat faces to find them by".into(),
+                    ));
+                };
+                let r = doc.sheet_rule(rule.as_deref());
+                let mut rv = doc.rule_values(vals, &r)?;
+                (rv.thickness, rv.bend_radius) = (found.thickness, found.radius);
+                let placement = doc.component_transform(doc.model_body_component(&mb));
+                let body_to_world = doc.model_body_offset(&mb).map(|offset| crate::mat_mul(&placement, offset)).unwrap_or(placement);
+                let (mut sh, notes) = sheet::convert_body(&mb, &r.name, &rv, face.0, &found.points, &body_to_world)?;
+                let found_by = if found.points.len() == 1 { "bend found by itself" } else { "bends found by themselves" };
+                append_warning(
+                    warning,
+                    format!(
+                        "{} {found_by}: {:.3} thick, inside radius {:.3} as modelled, the rule's K-factor",
+                        found.points.len(),
+                        found.thickness,
+                        found.radius
+                    ),
+                );
+                for note in notes {
+                    append_warning(warning, note);
+                }
+                tag_flanges(&mut sh, 0, f.id);
+                return put_sheet(st, sh);
+            };
             let r = doc.sheet_rule(rule.as_deref());
             let mut rv = doc.rule_values(vals, &r)?;
             rv.thickness = t;
