@@ -2010,6 +2010,35 @@ impl Model {
         self.results.iter().find(|r| r.id == id)
     }
 
+    /// The bodies each evaluated feature made or changed, by name: those its result holds that
+    /// the state before it does not hold as they are now ([`kernel::Body::same`]). A fillet or a
+    /// shell names no body, only the points it picked; this is how they are known to work on
+    /// one. Skipped and failed features change none.
+    pub fn bodies_changed(&self) -> BTreeMap<u64, Vec<String>> {
+        let mut out = BTreeMap::new();
+        let mut before: &ModelState = &self.empty;
+        for r in self.results.iter().filter(|r| !r.skipped) {
+            if !std::ptr::eq(before, &*r.state) {
+                // Bodies mostly keep their places from one state to the next.
+                let was =
+                    |i: usize, b: &ModelBody| before.bodies.get(i).filter(|x| x.name == b.name).or_else(|| before.body(&b.name)).map(|x| &x.body);
+                let changed: Vec<String> = r
+                    .state
+                    .bodies
+                    .iter()
+                    .enumerate()
+                    .filter(|(i, b)| was(*i, b).is_none_or(|x| !x.same(&b.body)))
+                    .map(|(_, b)| b.name.clone())
+                    .collect();
+                if !changed.is_empty() {
+                    out.insert(r.id, changed);
+                }
+            }
+            before = &r.state;
+        }
+        out
+    }
+
     /// Show a sketch's new solution before the model is evaluated again (the frames of an
     /// interactive drag): `sketch`, already solved with `report`, on the plane it was last
     /// evaluated on. The sketch's own result and the final state show it, and the sketch and

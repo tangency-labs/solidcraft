@@ -1352,6 +1352,54 @@ fn renaming_a_plane_keeps_its_projections_canvases_and_hidden_state() {
     assert_eq!(plane_link(&s), "Ledge");
 }
 
+/// #5854: the features that affect an active component are its own, what they are built from
+/// (a construction plane in the root its sketch lies on) and a later cut from the root on its
+/// body; not the other components' features. With the root active, all of them do.
+#[test]
+fn features_affecting_a_component_are_its_own_their_inputs_and_what_works_on_its_bodies() {
+    let mut s = Session::default();
+    let id_of = |s: &Session, name: &str| s.doc.find_feature(name).map(|f| f.id).unwrap();
+    run(&mut s, "construct.plane.offset", json!({"base": "XY", "offset": 2, "name": "Lift"}));
+    for (name, x) in [("Base", 0), ("Bracket", 20), ("Pin", 40)] {
+        run(&mut s, "component.activate", json!({"component": "root"}));
+        run(&mut s, "component.create", json!({"name": name}));
+        if name == "Bracket" {
+            run(&mut s, "sketch.create", json!({"plane": "Lift", "name": "BracketSketch"}));
+            run(&mut s, "sketch.rectangle.two_point", json!({"p0": [20, 0], "p1": [30, 10]}));
+            run(&mut s, "sketch.finish", json!({}));
+            run(&mut s, "solid.extrude", json!({"sketch": "BracketSketch", "distance": 10, "name": "BracketBlock"}));
+        } else {
+            run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [x, 0, 0], "name": format!("{name}Block")}));
+        }
+    }
+    let bracket = s.doc.components.iter().find(|c| c.name == "Bracket").map(|c| c.id).unwrap();
+    let st = s.model.state();
+    let body = st.bodies.iter().find(|b| s.doc.model_body_component(b) == bracket).map(|b| b.name.clone()).unwrap();
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    run(&mut s, "solid.cylinder", json!({"base": [25, 5, 0], "radius": 2, "height": 20, "operation": "cut", "targets": [body], "name": "Drill"}));
+    let got = s.doc.features_affecting(&s.model, bracket).unwrap();
+    let want: std::collections::BTreeSet<u64> = ["Lift", "BracketSketch", "BracketBlock", "Drill"].iter().map(|n| id_of(&s, n)).collect();
+    assert_eq!(got, want, "{:?}", got.iter().filter_map(|i| s.doc.feature(*i)).map(|f| &f.name).collect::<Vec<_>>());
+    assert!(s.doc.features_affecting(&s.model, 0).is_none(), "the root: every feature");
+}
+
+/// #5854: a fillet made from the root on a component's body names no body, only the edge it
+/// picked; it affects the component all the same, found from the body it changed.
+#[test]
+fn a_fillet_from_the_root_on_a_components_body_affects_it() {
+    let mut s = Session::default();
+    run(&mut s, "component.create", json!({"name": "Part"}));
+    run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 20, "body_name": "Block", "name": "Block"}));
+    run(&mut s, "solid.fillet", json!({"edges": [[20, 0, 20]], "radius": 4, "name": "OwnFillet"}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    run(&mut s, "solid.fillet", json!({"edges": [[20, 30, 20]], "radius": 4, "name": "FilletFromRoot"}));
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [60, 0, 0], "name": "Elsewhere"}));
+    let part = s.doc.components.iter().find(|c| c.name == "Part").map(|c| c.id).unwrap();
+    let got = s.doc.features_affecting(&s.model, part).unwrap();
+    let names: Vec<&str> = s.doc.features.iter().filter(|f| got.contains(&f.id)).map(|f| f.name.as_str()).collect();
+    assert_eq!(names, ["Block", "OwnFillet", "FilletFromRoot"]);
+}
+
 /// #6186: a reorder evaluates the design once. The model the move was checked on is the one the
 /// session keeps, so setting the reordered design finds every result ready: nothing is
 /// recomputed or taken from the cache again. The same for `timeline.reorder_many`, whose check

@@ -1,0 +1,34 @@
+{
+  "en": {
+    "prefs.history_dim_unrelated": "Dim unrelated features",
+    "prefs.history_dim_unrelated_note": "With a component active, History shows the features that don't change it fainter, so its own work stands out. Off: every feature looks the same."
+  },
+  "ar": {
+    "prefs.history_dim_unrelated": "تعتيم الميزات غير المرتبطة",
+    "prefs.history_dim_unrelated_note": "عند تنشيط مكوّن، يعرض السجل الميزات التي لا تغيّره بلون أخفت، فيبرز عمله هو. عند الإيقاف: تبدو كل الميزات متماثلة."
+  },
+  "de": {
+    "prefs.history_dim_unrelated": "Nicht betroffene Funktionen abblenden",
+    "prefs.history_dim_unrelated_note": "Ist eine Komponente aktiv, zeigt der Verlauf die Funktionen blasser, die sie nicht verändern, damit ihre eigene Arbeit hervortritt. Aus: Alle Funktionen sehen gleich aus."
+  },
+  "he": {
+    "prefs.history_dim_unrelated": "עמעום פיצ'רים לא קשורים",
+    "prefs.history_dim_unrelated_note": "כשרכיב פעיל, ההיסטוריה מציגה בגוון חלש יותר את הפיצ'רים שאינם משנים אותו, כדי שהעבודה שלו תבלוט. כבוי: כל הפיצ'רים נראים אותו דבר."
+  },
+  "ja": {
+    "prefs.history_dim_unrelated": "関係のないフィーチャーを淡色表示",
+    "prefs.history_dim_unrelated_note": "コンポーネントがアクティブなとき、履歴ではそのコンポーネントを変更しないフィーチャーを淡く表示し、そのコンポーネント自身の作業を目立たせます。オフ: すべてのフィーチャーを同じように表示します。"
+  },
+  "ko": {
+    "prefs.history_dim_unrelated": "관련 없는 피처 흐리게 표시",
+    "prefs.history_dim_unrelated_note": "컴포넌트가 활성화되어 있으면 기록에서 그 컴포넌트를 바꾸지 않는 피처를 흐리게 표시해 컴포넌트 자체의 작업이 돋보이게 합니다. 끄기: 모든 피처가 똑같이 보입니다."
+  },
+  "vi": {
+    "prefs.history_dim_unrelated": "Làm mờ các tính năng không liên quan",
+    "prefs.history_dim_unrelated_note": "Khi một cụm chi tiết đang kích hoạt, Lịch sử hiển thị mờ hơn các tính năng không thay đổi nó, để công việc của chính nó nổi bật. Tắt: mọi tính năng trông như nhau."
+  },
+  "zh": {
+    "prefs.history_dim_unrelated": "淡化无关特征",
+    "prefs.history_dim_unrelated_note": "组件处于活动状态时，历史中不改变该组件的特征显示得更淡，使其自身的操作更突出。关闭：所有特征显示相同。"
+  }
+}

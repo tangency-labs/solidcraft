@@ -1147,6 +1147,9 @@ preference_settings! {
     /// A Play History button in the History controls, between Previous and Next (#3688). Off
     /// gives the four controls History had before; right-clicking the controls toggles it too.
     history_play_button: bool = true, PAGE_INTERFACE => check_id("prefs.history_play_button");
+    /// With a component active, History dims the features that don't affect it (#5854). Off by
+    /// default: every feature looks as it did.
+    history_dim_unrelated: bool = false, PAGE_INTERFACE => check_id("prefs.history_dim_unrelated");
     /// The vertical history (left, or under the browser) starts with the active component's Bodies
     /// folder and the Origin, as the browser shows them (#6490). The bottom strip is unchanged.
     timeline_origin_bodies: bool = false, PAGE_INTERFACE;

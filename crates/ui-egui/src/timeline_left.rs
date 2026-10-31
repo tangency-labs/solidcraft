@@ -1237,6 +1237,8 @@ struct Rows<'a> {
     edit: Option<u64>,
     /// Each sketch's solve state, read once for the column (#7245).
     sketch_states: crate::sketch_state::SketchStates,
+    /// With a component active, the features that affect it; the others are dimmed (#5854).
+    affecting: Option<std::sync::Arc<std::collections::BTreeSet<u64>>>,
 }
 
 fn vertical_features(app: &mut SolveApp, ui: &mut egui::Ui, names: bool) {
@@ -1286,6 +1288,7 @@ fn vertical_features(app: &mut SolveApp, ui: &mut egui::Ui, names: bool) {
         drag: ui.data(|data| data.get_temp(drag_id)),
         hovered: None,
         edit: None,
+        affecting: crate::timeline::affecting(app),
     };
     let pointer = ui.input(|input| input.pointer.hover_pos());
     let mut slots = Vec::new();
@@ -1594,7 +1597,8 @@ fn feature_row_body(
         kind: ty,
         selected,
         hovered: response.hovered() || rows.from_view.contains(&Some(id)) || rows.linked_hover == Some(id),
-        dim: rolled,
+        // A selected feature stays full strength, so its highlight shows.
+        dim: rolled || (!selected && rows.affecting.as_ref().is_some_and(|a| !a.contains(&id))),
         suppressed: *suppressed,
         error: error.is_some(),
         warning: warning.is_some(),
