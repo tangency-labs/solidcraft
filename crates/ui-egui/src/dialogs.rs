@@ -5887,8 +5887,11 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
                 }
                 Some(sp) => {
                     d.inputs = vec![SelInput::new("Points", selection::POINTS, true)];
+                    // Points gone from the sketch are left out (#8087), so OK drops them.
+                    let st = s.world_state();
+                    let kept = |id: &&String| st.sketch(sp.sketch.0).is_none_or(|ss| ss.sketch.points.iter().any(|p| &p.id == *id));
                     if let Some(inp) = d.inputs.first_mut() {
-                        inp.items = sp.ids.iter().map(|id| Sel::SketchPoint { id: format!("{}:{id}", sp.sketch) }).collect();
+                        inp.items = sp.ids.iter().filter(kept).map(|id| Sel::SketchPoint { id: format!("{}:{id}", sp.sketch) }).collect();
                     }
                     if sp.flip {
                         d.extra.insert("flip".into(), json!(true));
@@ -6674,6 +6677,35 @@ mod refused_ok_tests {
                 }
             }
         }
+    }
+
+    /// #8087: a Hole whose sketch lost one of its points opens for editing without that point,
+    /// and OK saves the Hole with the points that are left, clearing its warning.
+    #[test]
+    fn editing_a_hole_drops_points_gone_from_its_sketch() {
+        let mut h = Harness::new();
+        h.app.run("solid.box", json!({"corner": [0, 0, 0], "length": 60, "width": 20, "height": 10})).unwrap();
+        h.app.run("sketch.create", json!({"plane": {"origin": [0, 0, 10], "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]}, "name": "Pts"})).unwrap();
+        h.app.run("sketch.point", json!({"point": [15, 10], "id": "a"})).unwrap();
+        h.app.run("sketch.point", json!({"point": [45, 10], "id": "b"})).unwrap();
+        h.app.run("sketch.finish", json!({})).unwrap();
+        h.app.run("solid.hole", json!({"sketch": "Pts", "points": ["a", "b"], "diameter": 8, "name": "Holes"})).unwrap();
+        h.app.run("sketch.edit", json!({"sketch": "Pts"})).unwrap();
+        h.app.run("sketch.delete", json!({"entities": ["b"]})).unwrap();
+        h.app.run("sketch.finish", json!({})).unwrap();
+        let warning = |h: &Harness| h.app.session.model.results.iter().find(|r| r.name == "Holes").and_then(|r| r.warning.clone());
+        assert!(warning(&h).is_some_and(|w| w.contains("`b`")), "{:?}", warning(&h));
+
+        let feature = h.app.session.doc.find_feature("Holes").unwrap().id;
+        h.app.edit_feature(feature);
+        h.frames(1);
+        let items = h.app.dialog.as_ref().and_then(|d| d.inputs.first()).map(|i| i.items.clone()).unwrap_or_default();
+        assert!(matches!(items.as_slice(), [Sel::SketchPoint { id }] if id.ends_with(":a")), "{items:?}");
+        steps(&mut h, &[json!({"key": "Enter"})]);
+        h.frames(1);
+        let f = h.app.session.doc.find_feature("Holes").unwrap();
+        assert!(matches!(&f.kind, FeatureKind::Hole { points: Some(sp), .. } if sp.ids == ["a"]), "{:?}", f.kind);
+        assert_eq!(warning(&h), None);
     }
 
     fn set_depth(h: &mut Harness, depth: &str) {

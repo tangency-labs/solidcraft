@@ -4456,18 +4456,32 @@ fn in_hole_scope(scope: &[String], b: &ModelBody) -> bool {
     scope.is_empty() || scope.contains(&b.name)
 }
 
+/// The sketch points of a hole drilled at several points that its sketch no longer has (#8087):
+/// the hole is not drilled there, and drilled at the points that are left.
+fn hole_points_gone<'a>(st: &ModelState, f: &'a Feature) -> Vec<&'a str> {
+    let FeatureKind::Hole { points: Some(sp), .. } = &f.kind else { return Vec::new() };
+    let Some(ss) = st.sketch(sp.sketch.0).filter(|_| !sp.single) else { return Vec::new() };
+    sp.ids.iter().filter(|id| !ss.sketch.points.iter().any(|p| &p.id == *id)).map(String::as_str).collect()
+}
+
+/// Ids in backticks, comma-separated.
+fn backticked<S: AsRef<str>>(ids: &[S]) -> String {
+    ids.iter().map(|id| format!("`{}`", id.as_ref())).collect::<Vec<_>>().join(", ")
+}
+
 /// Where a hole feature drills (each on the surface) and in which direction: at its sketch
-/// points perpendicular to the sketch (into the material), else at its position.
+/// points perpendicular to the sketch (into the material), else at its position. A point gone
+/// from the sketch drops only its own hole ([`hole_points_gone`]); with none left it fails.
 fn hole_spots(vals: &BTreeMap<String, Value>, st: &ModelState, f: &Feature) -> Result<(Vec<Vec3>, Vec3)> {
     let FeatureKind::Hole { position, at, direction, points, .. } = &f.kind else { return Err(DocError::Invalid("not a hole".into())) };
     let (spots, dir) = match points {
         Some(sp) if !sp.single => {
             let ss =
                 st.sketch(sp.sketch.0).ok_or_else(|| DocError::Unknown(format!("sketch {} (it must come earlier in the timeline)", sp.sketch)))?;
-            let mut v = Vec::new();
-            for id in &sp.ids {
-                let p = ss.sketch.points.iter().find(|p| &p.id == id).ok_or_else(|| DocError::Unknown(format!("sketch point `{id}`")))?;
-                v.push(ss.plane.to_world(p.pos));
+            let v: Vec<Vec3> =
+                sp.ids.iter().filter_map(|id| ss.sketch.points.iter().find(|p| &p.id == id)).map(|p| ss.plane.to_world(p.pos)).collect();
+            if v.is_empty() && !sp.ids.is_empty() {
+                return Err(DocError::Unknown(format!("sketch point(s) {} (none of the hole's points is left in its sketch)", backticked(&sp.ids))));
             }
             let dir = sketch_hole_dir(st, &v, ss.plane.normal(), hole_scope(f));
             let dir = if sp.flip { -dir } else { dir };
@@ -7305,6 +7319,13 @@ fn eval_feature(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st:
                 return Err(DocError::Invalid("thread depth must be finite and positive".into()));
             }
             let (spots, dir) = hole_spots(vals, st, f)?;
+            let gone = hole_points_gone(st, f);
+            if !gone.is_empty() {
+                append_warning(
+                    warning,
+                    format!("sketch point(s) {} no longer in the sketch: not drilled there (edit the Hole to drop them)", backticked(&gone)),
+                );
+            }
             let tools = hole_feature_tools(vals, st, f)?;
             let handled = sheet_hole_cut(st, f, &tools, warning)?;
             let tools: Vec<Traced> = tools.into_iter().map(|(tool, _)| tool).collect();
