@@ -74,6 +74,16 @@ fn app_ron_reads(text: &str, prefs_keys: &[&str]) -> bool {
     prefs_keys.iter().filter_map(|k| kv.get(*k)).all(|p| serde_json::from_str::<serde_json::Value>(p).is_ok_and(|v| v.is_object()))
 }
 
+/// "Let AI agents connect" as stored in `dir`'s `app.ron` (preferences under the first of
+/// `prefs_keys` there), for safe mode, which reads no other setting (#10217). `None` when there is
+/// no file, no such setting or a file that doesn't read: the default applies, as on any launch.
+pub fn stored_agent_control(dir: &Path, prefs_keys: &[&str]) -> Option<bool> {
+    let text = std::fs::read_to_string(dir.join("app.ron")).ok()?;
+    let kv = ron::from_str::<std::collections::HashMap<String, String>>(&text).ok()?;
+    let prefs = prefs_keys.iter().find_map(|k| kv.get(*k))?;
+    serde_json::from_str::<serde_json::Value>(prefs).ok()?.get("preferences")?.get("agent_control")?.as_bool()
+}
+
 /// Check the settings files in `dir` before anything reads them: one that doesn't read is moved
 /// aside (the app then starts with defaults for it). Returns a line per file moved.
 pub fn check_settings(dir: &Path, prefs_keys: &[&str]) -> Vec<String> {
@@ -549,6 +559,28 @@ mod tests {
             let kept: Vec<_> =
                 std::fs::read_dir(&d).unwrap().flatten().filter(|e| e.file_name().to_string_lossy().starts_with(&format!("{name}.bad-"))).collect();
             assert!(kept.iter().any(|e| std::fs::read(e.path()).unwrap() == text), "{name}: the bad file is kept");
+        }
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    /// #10217: safe mode reads "Let AI agents connect" alone from the user's settings, so a stored
+    /// off keeps the control channel closed there; no file, no setting or a file that doesn't read
+    /// leaves the default.
+    #[test]
+    fn safe_mode_reads_the_stored_agent_connection_switch() {
+        let keys = ["solidcraft.prefs", "solvecraft.prefs"];
+        let d = scratch("agent-control");
+        assert_eq!(stored_agent_control(&d, &keys), None, "no file");
+        for (text, expected) in [
+            (r#"{"solidcraft.prefs": "{\"preferences\":{\"agent_control\":false,\"grid\":true}}"}"#, Some(false)),
+            (r#"{"solidcraft.prefs": "{\"preferences\":{\"agent_control\":true}}"}"#, Some(true)),
+            (r#"{"solvecraft.prefs": "{\"preferences\":{\"agent_control\":false}}"}"#, Some(false)),
+            (r#"{"solidcraft.prefs": "{\"preferences\":{\"grid\":true}}"}"#, None),
+            (r#"{"solidcraft.prefs": "not json"}"#, None),
+            (r#"{"solidcraft.prefs": "{\"preferences"#, None),
+        ] {
+            std::fs::write(d.join("app.ron"), text).unwrap();
+            assert_eq!(stored_agent_control(&d, &keys), expected, "{text}");
         }
         let _ = std::fs::remove_dir_all(&d);
     }

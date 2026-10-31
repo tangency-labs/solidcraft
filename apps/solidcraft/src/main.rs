@@ -1009,6 +1009,15 @@ fn main() -> eframe::Result {
         safe_mode = true;
         notes.push(format!("The last {failed_starts} launches stopped before the window opened, so this one is in safe mode."));
     }
+    // Safe mode reads no settings, but a stored "Let AI agents connect" off holds there too:
+    // otherwise the switch's default, on, opened the control channel the user had closed (#10217).
+    let safe_mode_agent_control = if safe_mode {
+        settings.as_deref().and_then(|dir| {
+            startup::stored_agent_control(dir, &[solidcraft_ui_egui::prefs::STORAGE_KEY, solidcraft_ui_egui::prefs::LEGACY_STORAGE_KEY])
+        })
+    } else {
+        None
+    };
     let cpu_renderer = safe_mode || startup::cpu_renderer_env(std::env::var(startup::RENDERER_ENV).ok().as_deref());
     // The launch before this one closed because its graphics device was lost (`App::watch_device`).
     let after_loss = device_lost::recent(std::env::var(device_lost::LOST_ENV).ok().as_deref(), device_lost::now_secs());
@@ -1152,6 +1161,9 @@ fn main() -> eframe::Result {
             app.graphics_fallback = fallback_note.clone();
             let stored_ui = cc.storage.and_then(|s| solidcraft_ui_egui::prefs::stored(|k| s.get_string(k)));
             restore_preferences(&mut app, stored_ui.as_deref(), graphics().as_ref(), safe_mode);
+            if let Some(on) = safe_mode_agent_control {
+                app.preferences.agent_control = on;
+            }
             if let Some(path) = &theme_file
                 && let Err(e) = solidcraft_ui_egui::prefs::follow_theme_file_for_run(&mut app, path)
             {
