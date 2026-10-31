@@ -84,8 +84,8 @@ use crate::math::{
     UNDEF_DOUBLE,
 };
 
-/// Upstream status `SM_ERR`.
-const SM_ERR: i32 = 1001;
+// Upstream status `SM_ERR`.
+use crate::error::SM_ERR;
 
 /// Classification of a value against an interval (`SmExtentPointType`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

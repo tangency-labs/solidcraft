@@ -194,8 +194,8 @@ use crate::topology::{
 
 const OP: &str = "topology::face::p1";
 
-/// Upstream `SM_ERR_ASSERT_FAILURE` (`SmMessages.h`).
-const SM_ERR_ASSERT_FAILURE: i32 = 1005;
+// Upstream `SM_ERR_ASSERT_FAILURE` (`SmMessages.h`).
+use crate::error::SM_ERR_ASSERT_FAILURE;
 
 /// The deepest [`split_at_seam`] recursion accepted (upstream recurses once, from a U
 /// merge into the V merges of the faces it made).

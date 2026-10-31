@@ -78,8 +78,8 @@ const OP_TRIM: &str = "surface::surf_of_revolution::p2::SurfOfRevolution::trim_w
 /// `ANALYTIC_TOL_SCALE` (`SmConfig.h`).
 const ANALYTIC_TOL_SCALE: f64 = 100.0;
 
-/// `SM_ERR_OUTSIDE_OF_DOMAIN` (`SmMessages.h`).
-const SM_ERR_OUTSIDE_OF_DOMAIN: i32 = 1020;
+// `SM_ERR_OUTSIDE_OF_DOMAIN` (`SmMessages.h`).
+use crate::error::SM_ERR_OUTSIDE_OF_DOMAIN;
 
 /// The solution object of solves whose solutions name no object.
 #[derive(Debug, Clone, Copy, PartialEq)]

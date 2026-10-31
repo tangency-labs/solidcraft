@@ -19,7 +19,7 @@ mod offset_fixture;
 
 use offset_fixture::{planar_faces_at, report, Notifications};
 use solidcore::boolean::api_brep::boolean_difference;
-use solidcore::error::SolidError;
+use solidcore::error::{SolidError, SM_ERR_OFFSET_EDGE_VANISHES};
 use solidcore::math::Point3;
 use solidcore::nurbs::knots::Side;
 use solidcore::primitive::api_primitives::create_box;
@@ -125,7 +125,10 @@ fn wr_566_high_top_down_onto_the_low_top_closes_the_wall() {
 fn wr_566_without_the_opt_in_the_closed_wall_is_refused() {
     for (z, to) in [(10.0, 20.0), (20.0, 10.0)] {
         match move_top(false, z, to).1 {
-            Err(SolidError::Upstream { code, .. }) => assert_eq!(code, 1043, "z = {z}"),
+            Err(e @ SolidError::Upstream { code, .. }) => {
+                assert_eq!(code, SM_ERR_OFFSET_EDGE_VANISHES, "z = {z}");
+                assert!(e.is_offset_edge_vanishes(), "z = {z}");
+            }
             other => panic!("z = {z}: {other:?}"),
         }
     }

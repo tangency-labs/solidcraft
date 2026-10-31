@@ -30,8 +30,7 @@ use crate::{Case, HarnessError, Output, Rng, UnitDiff};
 /// Generated cases per run, whatever `--seeds` says (it can only raise this).
 pub const MIN_GENERATED: usize = 6000;
 
-/// Upstream `SM_ERR_INVALID_INPUT`.
-const SM_ERR_INVALID_INPUT: i32 = 1007;
+use solidcore::error::SM_ERR_INVALID_INPUT;
 /// Upstream `SM_ERR`.
 const SM_ERR: f64 = 1001.0;
 

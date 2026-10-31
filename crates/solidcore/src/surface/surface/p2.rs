@@ -5525,10 +5525,10 @@ impl DerivSurfDefinition<'_> {
 // ---- SmDropCurveFail ----------------------------------------------------------------------
 
 /// `UNSURE` (`SmTypes.h`): the third value of an `SmBoolean`.
-pub const UNSURE: i32 = 2;
+pub use crate::error::SM_UNSURE as UNSURE;
 
 /// `SM_ERR_UNKNOWN` (`SmMessages.h`): the status of an unused failure record.
-pub const SM_ERR_UNKNOWN: i32 = 1003;
+pub use crate::error::SM_ERR_UNKNOWN;
 
 /// `SM_SS_NONE` (`SmTypes.h`): no singular sides.
 pub const SS_NONE: u64 = 0;

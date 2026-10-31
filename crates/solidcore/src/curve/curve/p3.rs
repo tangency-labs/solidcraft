@@ -128,8 +128,8 @@ const OP_LINE_FIT: &str = "curve::curve::p3::BestLineFitEnfo::evaluate";
 /// component is below about `1e154`, and then needs at most 152 more divisions.
 pub const MAX_PC_SCALE_STEPS: u64 = 400;
 
-/// `SM_ERR_NOT_CONVERGING`.
-const SM_ERR_NOT_CONVERGING: i32 = 1022;
+// `SM_ERR_NOT_CONVERGING`.
+use crate::error::SM_ERR_NOT_CONVERGING;
 
 /// `EvaluatePoint` whose status upstream ignores: the previous value of the output
 /// on failure; [`SolidError::Unported`] is propagated.

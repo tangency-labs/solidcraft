@@ -59,8 +59,8 @@ use crate::geom::tol;
 use crate::geom::vector3d::{acos as sm_acos, asin as sm_asin, sqrt as sm_sqrt};
 use crate::math::{Vec3, EFF_ZERO, EFF_ZERO_SQ, PI, UNDEF_DOUBLE};
 
-/// Upstream `SM_ERR` (generic error status).
-const SM_ERR: i32 = 1001;
+// Upstream `SM_ERR` (generic error status).
+use crate::error::SM_ERR;
 
 /// A 2D vector (`SmVector2d`), typically a surface parameter `(u, v)`.
 #[derive(Debug, Clone, Copy, PartialEq, Default)]

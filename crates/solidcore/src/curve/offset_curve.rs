@@ -95,8 +95,8 @@ const OP_BASE: &str = "curve::offset_curve::OffsetCurve";
 /// Derivatives [`OffsetCurve::evaluate`] computes (`clMaxDerivs`).
 const MAX_DERIVS: usize = 3;
 
-/// `UNSURE` (`SmTypes.h`), the initial `SmBoolean` members of the empty constructor.
-const UNSURE: i32 = 2;
+// `UNSURE` (`SmTypes.h`), the initial `SmBoolean` members of the empty constructor.
+use crate::error::SM_UNSURE as UNSURE;
 
 /// An implicit offset of a base curve (`SmOffsetCurve`):
 ///

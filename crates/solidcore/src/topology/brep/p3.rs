@@ -154,8 +154,8 @@ use crate::topology::{
 
 const OP: &str = "topology::brep::p3";
 
-/// Upstream `SM_ERR_ASSERT_FAILURE` (`SmMessages.h`).
-const SM_ERR_ASSERT_FAILURE: i32 = 1005;
+// Upstream `SM_ERR_ASSERT_FAILURE` (`SmMessages.h`).
+use crate::error::SM_ERR_ASSERT_FAILURE;
 
 /// Upstream dereferences null here (no `NER`): the FFI guard rejects the input.
 const fn null_deref(reason: &'static str) -> SolidError {
@@ -255,8 +255,8 @@ impl Brep {
 
 // ---- shells and regions (topology.shell) ----------------------------------------------------
 
-/// `SmBoolean` `TRUE`.
-const TRUE: i32 = 1;
+// `SmBoolean` `TRUE`.
+use crate::error::SM_TRUE as TRUE;
 
 /// `SmRegion::SetIsVoid`.
 fn region_set_is_void(b: &mut Brep, r: RegionId, is_void: i32) -> Result<()> {

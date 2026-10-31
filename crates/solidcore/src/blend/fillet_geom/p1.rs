@@ -264,7 +264,7 @@ const OP_OFFSET: &str = "blend::fillet_geom::p1::FilletGeom::offset_surface";
 const OP_SET_OFFSET: &str = "blend::fillet_geom::p1::FilletGeom::set_offset_surface";
 
 /// `SM_ERR_BAD_INTERSECTIONS`.
-pub const SM_ERR_BAD_INTERSECTIONS: i32 = 1027;
+pub use crate::error::SM_ERR_BAD_INTERSECTIONS;
 fn upstream(operation: &'static str, code: i32) -> SolidError {
     SolidError::Upstream {
         operation,

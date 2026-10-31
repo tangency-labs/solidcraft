@@ -259,8 +259,8 @@ pub mod region_type {
 /// `SM_UNDEF_ULONG`: the id a destroyed attribute is left with.
 pub const UNDEF_ULONG: u64 = 123_456_789;
 
-/// `SM_ERR`.
-const SM_ERR: i32 = 1001;
+// `SM_ERR`.
+use crate::error::SM_ERR;
 
 /// Largest attribute count or index [`AttributeStore::read_indexed_attributes_from_db`]
 /// accepts (a guard against corrupt input; upstream allocates whatever it reads).

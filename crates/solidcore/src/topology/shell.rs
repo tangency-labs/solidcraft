@@ -1354,12 +1354,12 @@ pub trait RegionLookup {
 
 // ---- SmShell::IsInnerShellOf ------------------------------------------------------------
 
-/// `TRUE` of an `SmBoolean`.
-pub const SM_TRUE: i32 = 1;
 /// `FALSE` of an `SmBoolean`.
-pub const SM_FALSE: i32 = 0;
+pub use crate::error::SM_FALSE;
+/// `TRUE` of an `SmBoolean`.
+pub use crate::error::SM_TRUE;
 /// `UNSURE` (`2`) of an `SmBoolean`.
-pub const SM_UNSURE: i32 = 2;
+pub use crate::error::SM_UNSURE;
 
 /// The geometry behind the handles of [`is_inner_shell_of`]'s ray classification: the
 /// ray line (`CacheObject::Other`) and the B-rep's edges, faces and vertices.

@@ -190,7 +190,7 @@ fn prepared_trim(
     Ok(b.edgeuse(eu)?
         .drop_curve_fail
         .as_deref()
-        .is_none_or(|f| f.fail_status == crate::intersect::surface_drop_lib::p1::SM_SUCCESS))
+        .is_none_or(|f| f.fail_status == crate::error::SM_SUCCESS))
 }
 
 /// `SmLoopuse_TYPE` (`TOPO_BASE_TYPE + 4`).

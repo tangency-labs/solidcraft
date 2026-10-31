@@ -108,14 +108,14 @@ use super::p2::{
 };
 
 /// `SM_ERR_NOT_CONVERGING` (`SmMessages.h`).
-pub const SM_ERR_NOT_CONVERGING: i32 = 1022;
+pub use crate::error::SM_ERR_NOT_CONVERGING;
 
 /// `SM_ERR_DEGENERATE_SURFACE` (`SmMessages.h`): the drop domain is degenerate.
-pub const SM_ERR_DEGENERATE_SURFACE: i32 = 1034;
+pub use crate::error::SM_ERR_DEGENERATE_SURFACE;
 
 /// `SM_ERR_BAD_FIND_DEGEN_PARAM` (`SmMessages.h`): `FindDegenParamForDirection` failed
 /// for a start point on a pole (recorded only).
-pub const SM_ERR_BAD_FIND_DEGEN_PARAM: i32 = 1036;
+pub use crate::error::SM_ERR_BAD_FIND_DEGEN_PARAM;
 
 /// Most drop points the span subdivision stack of [`Surface::drop_curve_base`] holds
 /// (upstream: unbounded).

@@ -115,8 +115,8 @@ use crate::topology::vertexuse as topo_vertexuse;
 use crate::topology::{Brep, EdgeId, EdgeuseId, FaceId, VertexuseId};
 
 const OP_CROSS: &str = "intersect::curve_class::p4::CurveClassification::get_loop_crossings";
-/// `SM_ERR_ASSERT_FAILURE` (`SmMessages.h`).
-const SM_ERR_ASSERT_FAILURE: i32 = 1005;
+// `SM_ERR_ASSERT_FAILURE` (`SmMessages.h`).
+use crate::error::SM_ERR_ASSERT_FAILURE;
 const OP_BOUND: &str = "intersect::curve_class::p4::CurveClassification::ivl_bound_edgeuse_obj";
 const OP_SQUEEZE: &str = "intersect::curve_class::p4::squeeze_out_smallest_interval";
 

@@ -11,6 +11,9 @@
 //! | [`SolidError::PortInvariant`] | none: a port-side invariant or adapter failure  |
 //! | [`SolidError::sm_status`]   | the `SmStatus` an error stands for, when exact    |
 //! | [`SM_ERR`], [`SM_ERR_WARNING`], [`SolidError::sm_err`] | `SM_ERR`, `SM_ERR_WARNING`, `SE(SM_ERR)` |
+//! | [`SM_SUCCESS`] .. [`SM_ERR_TESS_FAIL_FACE`] | every `SmStatus` number in `SmMessages.h` (the one definition; other modules re-export these) |
+//! | [`SM_ERR_OFFSET_WALLS_TOUCH`], [`SM_ERR_OFFSET_EDGE_VANISHES`], [`SolidError::is_offset_edge_vanishes`] | the fork's `SmMessages.h` statuses 1042, 1043 |
+//! | [`SM_TRUE`], [`SM_FALSE`], [`SM_UNSURE`] | `TRUE`, `FALSE`, `UNSURE` of an `SmBoolean` (`SmTypes.h`) |
 //! | [`SM_ERR_NULL_POINTER`], [`SolidError::null_pointer`] | `SM_ERR_NULL_POINTER`, `NER(...)` on `NULL` |
 //! | [`SolidError::Nlib`], [`SolidError::nlib`] | NLib error flag + `NL_ERROR.eno` (`N_ErrSet`) |
 //! | [`SolidError::Unported`], [`SolidError::unported`], [`SolidError::is_unported`] | (none: call into a unit not ported yet) |
@@ -301,26 +304,88 @@ impl NlibCode {
     }
 }
 
-/// Upstream `SmStatus` value `SM_ERR` (generic failure), as carried by
-/// [`SolidError::Upstream`].
+// ---- SmStatus codes -------------------------------------------------------------------
+//
+// The one definition of every `SmStatus` number; other modules re-export or `use` these.
+// The values are pinned against `SmMessages.h` by `tests::status_codes_match_upstream`.
+
+/// Upstream `SmStatus` value `SM_SUCCESS` (`1000L`, `SmMessages.h`): success: the status every `SE`/`SER` macro tests against. No [`SolidError`] carries it; it is the value of status fields such as `BrepCheck::pointers_status` on success.
+pub const SM_SUCCESS: i32 = 1000;
+
+/// Upstream `SmStatus` value `SM_ERR` (`1001L`, `SmMessages.h`): generic failure.
 pub const SM_ERR: i32 = 1001;
 
-/// Upstream `SmStatus` value `SM_ERR_NULL_POINTER`, as carried by
-/// [`SolidError::Upstream`].
+/// Upstream `SmStatus` value `SM_ERR_OUT_OF_MEMORY` (`1002L`, `SmMessages.h`): an allocation failed (where an `SM_API` wrapper returns it for an output array that cannot grow).
+pub const SM_ERR_OUT_OF_MEMORY: i32 = 1002;
+
+/// Upstream `SmStatus` value `SM_ERR_UNKNOWN` (`1003L`, `SmMessages.h`): unknown error (`ERR_MSG`).
+pub const SM_ERR_UNKNOWN: i32 = 1003;
+
+/// Upstream `SmStatus` value `SM_ERR_FATAL` (`1004L`, `SmMessages.h`): fatal error.
+pub const SM_ERR_FATAL: i32 = 1004;
+
+/// Upstream `SmStatus` value `SM_ERR_ASSERT_FAILURE` (`1005L`, `SmMessages.h`): an assertion failed (`AE`/`AER`/`AERN`).
+pub const SM_ERR_ASSERT_FAILURE: i32 = 1005;
+
+/// Upstream `SmStatus` value `SM_ERR_NULL_POINTER` (`1006L`, `SmMessages.h`): a `NULL` pointer (`NER`).
 pub const SM_ERR_NULL_POINTER: i32 = 1006;
 
-/// Upstream `SmStatus` value `SM_ERR_WARNING`, as carried by [`SolidError::Upstream`].
-pub const SM_ERR_WARNING: i32 = 1023;
-
-/// Upstream `SmStatus` value `SM_ERR_INVALID_INPUT` (`SmMessages.h`), as carried by
-/// [`SolidError::Upstream`] where a function returns it as a status that callers
-/// ignore (its usual mapping is [`SolidError::InvalidInput`]).
+/// Upstream `SmStatus` value `SM_ERR_INVALID_INPUT` (`1007L`, `SmMessages.h`): invalid input. Its usual mapping is [`SolidError::InvalidInput`]; it is carried by [`SolidError::Upstream`] where a function returns it as a status that callers ignore.
 pub const SM_ERR_INVALID_INPUT: i32 = 1007;
 
-/// Upstream `SmStatus` value `SM_ERR_OUT_OF_MEMORY` (`SmMessages.h`), as carried by
-/// [`SolidError::Upstream`] where an `SM_API` wrapper returns it for an output array
-/// that cannot grow.
-pub const SM_ERR_OUT_OF_MEMORY: i32 = 1002;
+/// Upstream `SmStatus` value `SM_ERR_NON_NULL_OUTPUT_POINTER` (`1008L`, `SmMessages.h`): an output pointer that should be `NULL` is not.
+pub const SM_ERR_NON_NULL_OUTPUT_POINTER: i32 = 1008;
+
+/// Upstream `SmStatus` value `SM_ERR_ASSERTVALID_FAILURE` (`1010L`, `SmMessages.h`): an `AssertValid` check failed.
+pub const SM_ERR_ASSERTVALID_FAILURE: i32 = 1010;
+
+/// Upstream `SmStatus` value `SM_ERR_OUTSIDE_OF_DOMAIN` (`1020L`, `SmMessages.h`): a parameter outside the domain.
+pub const SM_ERR_OUTSIDE_OF_DOMAIN: i32 = 1020;
+
+/// Upstream `SmStatus` value `SM_ERR_NOT_WITHIN_TOLERANCE` (`1021L`, `SmMessages.h`): a result not within tolerance.
+pub const SM_ERR_NOT_WITHIN_TOLERANCE: i32 = 1021;
+
+/// Upstream `SmStatus` value `SM_ERR_NOT_CONVERGING` (`1022L`, `SmMessages.h`): an iteration did not converge.
+pub const SM_ERR_NOT_CONVERGING: i32 = 1022;
+
+/// Upstream `SmStatus` value `SM_ERR_WARNING` (`1023L`, `SmMessages.h`): a warning (`WARN`).
+pub const SM_ERR_WARNING: i32 = 1023;
+
+/// Upstream `SmStatus` value `SM_ERR_MESSAGE` (`1024L`, `SmMessages.h`): a message (`MSG`).
+pub const SM_ERR_MESSAGE: i32 = 1024;
+
+/// Upstream `SmStatus` value `SM_ERR_AXIS_INSIDE_FACE` (`1025L`, `SmMessages.h`): a revolution axis inside the face.
+pub const SM_ERR_AXIS_INSIDE_FACE: i32 = 1025;
+
+/// Upstream `SmStatus` value `SM_ERR_LICENSE_EXPIRED` (`1026L`, `SmMessages.h`): the licence expired.
+pub const SM_ERR_LICENSE_EXPIRED: i32 = 1026;
+
+/// Upstream `SmStatus` value `SM_ERR_BAD_INTERSECTIONS` (`1027L`, `SmMessages.h`): bad intersections.
+pub const SM_ERR_BAD_INTERSECTIONS: i32 = 1027;
+
+/// Upstream `SmStatus` value `SM_ERR_BAD_COINCIDENT_VERTICES` (`1028L`, `SmMessages.h`): bad coincident vertices.
+pub const SM_ERR_BAD_COINCIDENT_VERTICES: i32 = 1028;
+
+/// Upstream `SmStatus` value `SM_ERR_BAD_SURFACE_POINT` (`1030L`, `SmMessages.h`): a bad surface point.
+pub const SM_ERR_BAD_SURFACE_POINT: i32 = 1030;
+
+/// Upstream `SmStatus` value `SM_ERR_BAD_TANGENT_DROP` (`1032L`, `SmMessages.h`): a bad tangent drop.
+pub const SM_ERR_BAD_TANGENT_DROP: i32 = 1032;
+
+/// Upstream `SmStatus` value `SM_ERR_DEGENERATE_SURFACE` (`1034L`, `SmMessages.h`): a degenerate surface.
+pub const SM_ERR_DEGENERATE_SURFACE: i32 = 1034;
+
+/// Upstream `SmStatus` value `SM_ERR_BAD_FIND_DEGEN_PARAM` (`1036L`, `SmMessages.h`): a degenerate parameter could not be found.
+pub const SM_ERR_BAD_FIND_DEGEN_PARAM: i32 = 1036;
+
+/// Upstream `SmStatus` value `SM_ERR_METHOD_FAILURE_QUITING` (`1038L`, `SmMessages.h`): a method failed; quitting.
+pub const SM_ERR_METHOD_FAILURE_QUITING: i32 = 1038;
+
+/// Upstream `SmStatus` value `SM_ERR_NOTYET_HEAL_FACE` (`1040L`, `SmMessages.h`): a face not healed yet.
+pub const SM_ERR_NOTYET_HEAL_FACE: i32 = 1040;
+
+/// Upstream `SmStatus` value `SM_ERR_TESS_FAIL_FACE` (`1041L`, `SmMessages.h`): face tessellation failed.
+pub const SM_ERR_TESS_FAIL_FACE: i32 = 1041;
 
 /// SMLib fork status `SM_ERR_OFFSET_WALLS_TOUCH` (tangency-labs/smlib a759622,
 /// `SmMessages.h`; not in the pinned upstream), as carried by [`SolidError::Upstream`]:
@@ -328,6 +393,24 @@ pub const SM_ERR_OUT_OF_MEMORY: i32 = 1002;
 /// face touch without crossing. Returned only with the opt-in
 /// `Kernel::fixes.offset_walls_touch_refused`.
 pub const SM_ERR_OFFSET_WALLS_TOUCH: i32 = 1042;
+
+/// SMLib fork status `SM_ERR_OFFSET_EDGE_VANISHES` (tangency-labs/smlib 34318f4,
+/// `SmMessages.h`; not in the pinned upstream), as carried by [`SolidError::Upstream`]:
+/// an offset moves a vertex along an edge to or past the edge's other end, a change of
+/// topology it does not make, so the operation is refused. Test for it with
+/// [`SolidError::is_offset_edge_vanishes`].
+pub const SM_ERR_OFFSET_EDGE_VANISHES: i32 = 1043;
+
+// ---- SmBoolean values (`SmTypes.h`) ---------------------------------------------------
+
+/// `TRUE` (`1`, `SmTypes.h`) of an `SmBoolean`, such as `SmShell::IsInnerShellOf` returns.
+pub const SM_TRUE: i32 = 1;
+
+/// `FALSE` (`0`, `SmTypes.h`) of an `SmBoolean`. Not a valid `SmStatus`.
+pub const SM_FALSE: i32 = 0;
+
+/// `UNSURE` (`2`, `SmTypes.h`) of an `SmBoolean`: undecided.
+pub const SM_UNSURE: i32 = 2;
 
 fn fmt_entity(entity: Option<EntityRef>) -> String {
     entity.map_or_else(String::new, |e| format!(" at {e}"))
@@ -420,6 +503,20 @@ impl SolidError {
     #[must_use]
     pub const fn is_unported(&self) -> bool {
         matches!(self, Self::Unported { .. })
+    }
+
+    /// True for the refusal [`SolidError::Upstream`] with code
+    /// [`SM_ERR_OFFSET_EDGE_VANISHES`]: an offset that would move a vertex past the
+    /// other end of its edge.
+    #[must_use]
+    pub const fn is_offset_edge_vanishes(&self) -> bool {
+        matches!(
+            self,
+            Self::Upstream {
+                code: SM_ERR_OFFSET_EDGE_VANISHES,
+                ..
+            }
+        )
     }
 
     /// [`SolidError::Nlib`] with the upstream error number `code` (NLib's

@@ -102,7 +102,7 @@ pub const NO_OBJECT: u64 = 9_999_999;
 pub const UNDEF_ULONG: u64 = 123_456_789;
 
 /// `UNSURE`: the "not set" value of an `SmBoolean`.
-pub const UNSURE: i32 = 2;
+pub use crate::error::SM_UNSURE as UNSURE;
 
 /// `SM_ZONE_TOL_3D`.
 const ZONE_TOL_3D: f64 = 1.0e-5;

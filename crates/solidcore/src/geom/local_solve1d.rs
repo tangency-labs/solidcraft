@@ -60,8 +60,8 @@ use crate::geom::tol::{in_tol, scaled_zero};
 use crate::limits::try_filled;
 use crate::math::{BIG_DOUBLE, EFF_ZERO, EFF_ZERO_SQ, UNDEF_DOUBLE};
 
-/// Upstream status `SM_ERR`.
-const SM_ERR: i32 = 1001;
+// Upstream status `SM_ERR`.
+use crate::error::SM_ERR;
 
 /// Upstream `SM_UNDEF_ULONG`.
 pub const UNDEF_ULONG: u64 = 123456789;

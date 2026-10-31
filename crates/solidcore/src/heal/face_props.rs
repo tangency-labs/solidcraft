@@ -111,7 +111,7 @@ pub const UNDEF_ULONG: u64 = 123_456_789;
 
 /// `SM_ERR_NOTYET_HEAL_FACE` (`SmMessages.h`): a face with a problem the healer does
 /// not support yet.
-pub const SM_ERR_NOTYET_HEAL_FACE: i32 = 1040;
+pub use crate::error::SM_ERR_NOTYET_HEAL_FACE;
 
 /// The deepest child nesting [`Looptree::find_item`] follows.
 pub const MAX_LOOPTREE_DEPTH: usize = 1_000;

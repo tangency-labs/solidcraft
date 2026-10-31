@@ -92,8 +92,8 @@ use crate::math::{
     INFINITE_PARAMETER, PI, UNDEF_DOUBLE,
 };
 
-/// Upstream status `SM_ERR`.
-const SM_ERR: i32 = 1001;
+// Upstream status `SM_ERR`.
+use crate::error::SM_ERR;
 
 /// Classification of one interval of an extent (`SmBoundaryType`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

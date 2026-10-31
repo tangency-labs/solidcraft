@@ -72,8 +72,8 @@ use crate::geom::tol::{in_tol, is_zero, tol3d, ZONE_TOL_3D};
 use crate::geom::vector3d::{sqrt, Point3, Vec3};
 use crate::math::{max2, max3, rad_to_deg, EFF_ZERO, EFF_ZERO_SQ, EFF_ZERO_SQRT, PI};
 
-/// Upstream `SM_ERR` (generic error status).
-const SM_ERR: i32 = 1001;
+// Upstream `SM_ERR` (generic error status).
+use crate::error::SM_ERR;
 
 /// `SM_ERR` from `operation`.
 fn sm_err(operation: &'static str) -> SolidError {

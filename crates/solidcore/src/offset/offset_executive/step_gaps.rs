@@ -47,7 +47,7 @@ const OP: &str = "offset::offset_executive::step_gaps";
 
 /// `SM_ERR_OFFSET_EDGE_VANISHES` (the fork's `SmMessages.h`): an offset moves a vertex
 /// along an edge past the edge's other end, a change of topology it does not make.
-pub(crate) const SM_ERR_OFFSET_EDGE_VANISHES: i32 = 1043;
+pub use crate::error::SM_ERR_OFFSET_EDGE_VANISHES;
 
 /// The gap search's passes per face (the fork's `lGuard`).
 const MAX_GAP_PASSES: usize = 64;

@@ -71,7 +71,7 @@ use crate::nurbs::crv_fit::p1::ParamMethod;
 
 /// Upstream `SmStatus` value `SM_ERR_NOT_WITHIN_TOLERANCE`, as carried by
 /// [`SolidError::Upstream`].
-pub const SM_ERR_NOT_WITHIN_TOLERANCE: i32 = 1021;
+pub use crate::error::SM_ERR_NOT_WITHIN_TOLERANCE;
 
 const OP_LINE: &str = "primitive::api_curves::create_line";
 const OP_CIRCLE: &str = "primitive::api_curves::create_circle";

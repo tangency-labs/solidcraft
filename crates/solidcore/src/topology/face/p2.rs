@@ -186,7 +186,7 @@ pub const CLASS_STRING: &str = "SmFace";
 
 /// `UNSURE`: the "not yet known" value of an `SmBoolean` such as
 /// [`crate::topology::Face::rectangular_trim`].
-pub const UNSURE: i32 = crate::topology::brep_data::UNSURE;
+pub use crate::error::SM_UNSURE as UNSURE;
 
 /// `RAND_MAX` of the reference build's C library (glibc).
 const RAND_MAX: f64 = 2_147_483_647.0;

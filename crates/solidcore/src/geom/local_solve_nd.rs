@@ -66,8 +66,8 @@ use crate::geom::extent1d::{Extent1d, ExtentNd};
 use crate::geom::matrix::Matrix;
 use crate::math::{BIG_DOUBLE, EFF_ZERO, EFF_ZERO_SQ, EFF_ZERO_SQRT};
 
-/// Upstream status `SM_ERR`.
-const SM_ERR: i32 = 1001;
+// Upstream status `SM_ERR`.
+use crate::error::SM_ERR;
 
 fn sm_err(operation: &'static str) -> SolidError {
     SolidError::Upstream {

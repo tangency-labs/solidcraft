@@ -37,11 +37,11 @@ const OP_END: &str = "topology::proto_topology::p1::ProtoTopologyManager::end_po
 const OP_COMBINE: &str =
     "topology::proto_topology::p1::ProtoTopologyManager::can_combine_edge_definitions";
 
-/// Upstream `SmStatus` value `SM_ERR_INVALID_INPUT`.
-const SM_ERR_INVALID_INPUT: i32 = 1007;
+// Upstream `SmStatus` value `SM_ERR_INVALID_INPUT`.
+use crate::error::SM_ERR_INVALID_INPUT;
 
-/// Upstream `SmStatus` value `SM_ERR_ASSERT_FAILURE`.
-const SM_ERR_ASSERT_FAILURE: i32 = 1005;
+// Upstream `SmStatus` value `SM_ERR_ASSERT_FAILURE`.
+use crate::error::SM_ERR_ASSERT_FAILURE;
 
 /// `SmProtoTopologyManager_TYPE` (`TOPO_BASE_TYPE + 680`).
 pub const MANAGER_TYPE: i64 = 16680;

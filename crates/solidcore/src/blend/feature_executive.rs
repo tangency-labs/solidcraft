@@ -107,8 +107,8 @@ use crate::topology::{edge, vertex, Brep, EdgeId, FaceId, LoopId, VertexId};
 
 const OP: &str = "blend::feature_executive";
 
-/// `SM_ERR_ASSERT_FAILURE`.
-const SM_ERR_ASSERT_FAILURE: i32 = 1005;
+// `SM_ERR_ASSERT_FAILURE`.
+use crate::error::SM_ERR_ASSERT_FAILURE;
 
 /// `SM_ERR_ASSERT_FAILURE` (`AERN`).
 fn assert_failure(reason: &'static str) -> SolidError {

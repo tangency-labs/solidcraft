@@ -28,8 +28,7 @@ use crate::{Case, HarnessError, Output, Rng, UnitDiff};
 /// Generated cases per run, whatever `--seeds` says (it can only raise this).
 pub const MIN_GENERATED: usize = 4000;
 
-/// Upstream `SM_ERR_WARNING`.
-const SM_ERR_WARNING: i32 = 1023;
+use solidcore::error::SM_ERR_WARNING;
 
 /// `geom.matrix` runner.
 pub struct Runner;

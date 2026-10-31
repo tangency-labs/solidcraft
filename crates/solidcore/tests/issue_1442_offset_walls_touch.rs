@@ -23,16 +23,13 @@ mod offset_fixture;
 
 use offset_fixture::{planar_faces_at, volume, Notifications};
 use solidcore::boolean::api_brep::boolean_difference;
-use solidcore::error::{SolidError, SM_ERR_OFFSET_WALLS_TOUCH};
+use solidcore::error::{SolidError, SM_ERR_BAD_INTERSECTIONS, SM_ERR_OFFSET_WALLS_TOUCH};
 use solidcore::math::Point3;
 use solidcore::offset::offset_executive::p1::OffsetExecutive;
 use solidcore::offset::offset_executive::p2::{OffsetOptions, ShellOptions};
 use solidcore::primitive::api_primitives::{create_box, create_cylinder};
 use solidcore::query::api_queries::brep_is_manifold_solid;
 use solidcore::{Brep, Kernel};
-
-/// `SM_ERR_BAD_INTERSECTIONS`.
-const SM_ERR_BAD_INTERSECTIONS: i32 = 1027;
 
 fn part(k: &mut Kernel) -> Brep {
     let block = create_box(k, Point3::new(0.0, 0.0, 0.0), 60.0, 40.0, 10.0).unwrap();

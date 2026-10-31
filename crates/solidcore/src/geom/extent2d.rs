@@ -90,8 +90,8 @@ use crate::geom::vector2d::{Point2, Vec2};
 use crate::geom::vector3d::sqrt;
 use crate::math::{is_infinite_param, max2, min2, BIG_DOUBLE, EFF_ZERO, EFF_ZERO_SQRT};
 
-/// Upstream status `SM_ERR`.
-const SM_ERR: i32 = 1001;
+// Upstream status `SM_ERR`.
+use crate::error::SM_ERR;
 
 /// `SM_SS_NONE`: the point is on no boundary ([`Extent2d::point_boundaries`]).
 pub const SS_NONE: u32 = 0;

@@ -146,8 +146,8 @@ const OP_EVAL_STEP: &str = "surface::cone::p1::Cone::evaluate_step";
 const OP_GEN: &str = "surface::cone::p1::Cone::gen_curve";
 const OP_TRANSFORM: &str = "surface::cone::p1::Cone::transform";
 
-/// Upstream `SmStatus` value `SM_ERR_INVALID_INPUT`.
-const SM_ERR_INVALID_INPUT: i32 = 1007;
+// Upstream `SmStatus` value `SM_ERR_INVALID_INPUT`.
+use crate::error::SM_ERR_INVALID_INPUT;
 
 /// `SM_DEG2RAD(a)` = `a * (SM_PI / 180.0)`.
 fn deg2rad(a: f64) -> f64 {

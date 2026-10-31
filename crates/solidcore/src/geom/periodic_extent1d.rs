@@ -48,8 +48,8 @@ use crate::error::{Result, SolidError};
 use crate::geom::tol::{self, ScaledZero};
 use crate::math::BIG_DOUBLE;
 
-/// Upstream `SM_ERR` (generic error status).
-const SM_ERR: i32 = 1001;
+// Upstream `SM_ERR` (generic error status).
+use crate::error::SM_ERR;
 
 /// An interval on the periodic domain `[0, period]` (`SmPeriodicExtent1d`).
 ///

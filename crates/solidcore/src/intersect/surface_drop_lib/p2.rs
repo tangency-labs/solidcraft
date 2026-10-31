@@ -81,18 +81,18 @@ use crate::topology::ObjectHandle;
 use super::p1::{fix_boundary_curves, DropPt, SM_ERR_OUTSIDE_OF_DOMAIN, SM_SUCCESS};
 
 /// `SM_ERR_INVALID_INPUT` (`SmMessages.h`).
-pub const SM_ERR_INVALID_INPUT: i32 = 1007;
+pub use crate::error::SM_ERR_INVALID_INPUT;
 
 /// `SM_ERR_NOT_WITHIN_TOLERANCE` (`SmMessages.h`): the curve point is not on the
 /// surface normal line at its drop point.
-pub const SM_ERR_NOT_WITHIN_TOLERANCE: i32 = 1021;
+pub use crate::error::SM_ERR_NOT_WITHIN_TOLERANCE;
 
 /// `SM_ERR_BAD_SURFACE_POINT` (`SmMessages.h`): the span start is outside the domain.
-pub const SM_ERR_BAD_SURFACE_POINT: i32 = 1030;
+pub use crate::error::SM_ERR_BAD_SURFACE_POINT;
 
 /// `SM_ERR_BAD_TANGENT_DROP` (`SmMessages.h`): the curve tangent dropped to a surface
 /// tangent that is not parallel to it.
-pub const SM_ERR_BAD_TANGENT_DROP: i32 = 1032;
+pub use crate::error::SM_ERR_BAD_TANGENT_DROP;
 
 /// `SM_SS_NONE`: the surface has no singularities.
 pub const SS_NONE: u32 = 0;

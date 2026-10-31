@@ -77,8 +77,8 @@ use crate::geom::tol::is_zero;
 use crate::geom::vector3d::{sqrt, Vec3};
 use crate::math::EFF_ZERO;
 
-/// Upstream status `SM_ERR`.
-const SM_ERR: i32 = 1001;
+// Upstream status `SM_ERR`.
+use crate::error::SM_ERR;
 
 /// `MAX_MATRIX_SIZE`: the largest system [`Matrix::solve_linear_system`] accepts.
 pub const MAX_MATRIX_SIZE: usize = 1000;

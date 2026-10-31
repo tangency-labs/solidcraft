@@ -203,8 +203,8 @@ pub const ANG_TOL_DEG: f64 = 0.5;
 /// `SM_ANG_TOL_RAD` = `SM_ANG_TOL_DEG * SM_PI / 180.0`.
 pub const ANG_TOL_RAD: f64 = ANG_TOL_DEG * PI / 180.0;
 
-/// Upstream status `SM_ERR`.
-const SM_ERR: i32 = 1001;
+// Upstream status `SM_ERR`.
+use crate::error::SM_ERR;
 
 // ---- tolerance values ------------------------------------------------------------
 

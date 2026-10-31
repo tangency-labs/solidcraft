@@ -145,8 +145,8 @@ const FACE_TYPE: i64 = 16002;
 /// `SmLoop_TYPE` (`TOPO_BASE_TYPE + 3`), the owner type of a loop report.
 const LOOP_TYPE: i64 = 16003;
 
-/// Upstream `SM_ERR_INVALID_INPUT`.
-const SM_ERR_INVALID_INPUT: i32 = 1007;
+// Upstream `SM_ERR_INVALID_INPUT`.
+use crate::error::SM_ERR_INVALID_INPUT;
 
 /// `SM_LIST_2`: the `CheckFace` label table.
 const LIST_CHECK_FACE: u64 = 2;

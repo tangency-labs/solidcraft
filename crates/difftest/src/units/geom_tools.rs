@@ -293,8 +293,7 @@ fn file_brep(k: &mut solidcore::kernel::Kernel, file: &str) -> Result<Brep, Harn
     crate::own_reader::read_file_or_fail(k, file)
 }
 
-/// Upstream `SM_ERR`.
-const SM_ERR: i32 = 1001;
+use solidcore::error::SM_ERR;
 
 // ---- generation ---------------------------------------------------------------
 

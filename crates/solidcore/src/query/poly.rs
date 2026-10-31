@@ -186,8 +186,8 @@ pub mod copy;
 /// `SM_UNDEF_ULONG` on LP64 (`0xFFFFFFFFFFFFFFFE`... upstream's `ULONG_MAX - 1`).
 pub const UNDEF_ULONG: u64 = u64::MAX - 1;
 
-/// `SM_ERR_INVALID_INPUT`.
-const SM_ERR_INVALID_INPUT: i32 = 1007;
+// `SM_ERR_INVALID_INPUT`.
+use crate::error::SM_ERR_INVALID_INPUT;
 
 macro_rules! poly_id {
     ($(#[$doc:meta])* $name:ident) => {

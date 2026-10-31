@@ -79,8 +79,8 @@ use crate::topology::{Brep, EdgeId, EdgeuseId, FaceId, VertexId, VertexuseId};
 const OP: &str = "heal::gap";
 const OP_GF: &str = "heal::gap::GapFunction";
 
-/// `SM_ERR_ASSERT_FAILURE`.
-const SM_ERR_ASSERT_FAILURE: i32 = 1005;
+// `SM_ERR_ASSERT_FAILURE`.
+use crate::error::SM_ERR_ASSERT_FAILURE;
 
 /// `SM_XSECT_TOL_3D` (`2 * SM_ZONE_TOL_3D`): the default gap tolerance.
 pub const XSECT_TOL_3D: f64 = 2.0 * 1.0e-5;

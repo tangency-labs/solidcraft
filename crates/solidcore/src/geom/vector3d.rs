@@ -90,8 +90,8 @@ use crate::geom::vector2d::{Point2, Vec2};
 use crate::math::{BIG_DOUBLE, EFF_ZERO, EFF_ZERO_SQ, PI, UNDEF_DOUBLE};
 use crate::nurbs::math::{NOW, NOZ};
 
-/// Upstream `SM_ERR` (generic error status).
-const SM_ERR: i32 = 1001;
+// Upstream `SM_ERR` (generic error status).
+use crate::error::SM_ERR;
 
 // ---- SmMath.cpp ----------------------------------------------------------------------
 

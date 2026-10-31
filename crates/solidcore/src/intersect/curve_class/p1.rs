@@ -299,8 +299,8 @@ pub fn get_connected_touches<O: PartialEq + Copy>(
         .collect()
 }
 
-/// `SM_ERR_ASSERT_FAILURE` (`SmMessages.h`).
-const SM_ERR_ASSERT_FAILURE: i32 = 1005;
+// `SM_ERR_ASSERT_FAILURE` (`SmMessages.h`).
+use crate::error::SM_ERR_ASSERT_FAILURE;
 
 /// Filters a consumer's working touch list to transverse crossings
 /// (`SmTouchData::RemoveNonCrossings`): the end directions are normalised (a pole or

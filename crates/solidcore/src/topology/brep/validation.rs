@@ -38,8 +38,8 @@ use crate::topology::{Brep, BrepId, EdgeuseId, FaceId};
 
 const OP: &str = "topology::brep::validation";
 const BREP_TYPE: i64 = 16011;
-const SUCCESS: i32 = 1000;
-const ERROR: i32 = 1001;
+use crate::error::SM_ERR as ERROR;
+use crate::error::SM_SUCCESS as SUCCESS;
 
 fn invalid(reason: &'static str) -> SolidError {
     SolidError::invalid_input(OP, reason)

@@ -141,8 +141,8 @@ const OP_BISECTOR: &str = "query::face::p3::find_and_classify_loop_bisector";
 const OP_SECTOR: &str = "query::face::p3::sector_classify_curve_on";
 const OP_OBJECTS: &str = "query::face::p3::LoopObjectCurves";
 
-/// `SM_ERR_INVALID_INPUT`.
-const SM_ERR_INVALID_INPUT: i32 = 1007;
+// `SM_ERR_INVALID_INPUT`.
+use crate::error::SM_ERR_INVALID_INPUT;
 
 /// The most step-off rounds of the sector classification (`lCount < 20`).
 const MAX_STEP_OFF_ROUNDS: u32 = 20;

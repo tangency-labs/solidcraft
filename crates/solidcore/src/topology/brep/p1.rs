@@ -159,9 +159,9 @@ use crate::topology::{
     Brep, EdgeId, EdgeuseId, FaceId, LoopId, RegionId, ShellId, VertexId, VertexuseId,
 };
 
-/// `SmBoolean` `TRUE` / `FALSE`.
-const TRUE: i32 = 1;
-const FALSE: i32 = 0;
+// `SmBoolean` `TRUE` / `FALSE`.
+use crate::error::SM_FALSE as FALSE;
+use crate::error::SM_TRUE as TRUE;
 
 const OP: &str = "topology::brep::p1";
 
@@ -172,8 +172,8 @@ pub const TYPE_STRING: &str = "SmBrep_TYPE";
 /// `SmBrep::GetClassString`.
 pub const CLASS_STRING: &str = "SmBrep";
 
-/// `SM_ERR_INVALID_INPUT`.
-const SM_ERR_INVALID_INPUT: i32 = 1007;
+// `SM_ERR_INVALID_INPUT`.
+use crate::error::SM_ERR_INVALID_INPUT;
 
 /// Deepest loop nesting `sm_MarkLoopsToDelete` follows before failing (upstream
 /// recurses without bound).

@@ -54,8 +54,7 @@ pub const MIN_GENERATED: usize = 2000;
 /// Upstream `SM_SUCCESS`.
 const SM_SUCCESS: f64 = 1000.0;
 
-/// Upstream `SM_ERR_INVALID_INPUT`.
-const SM_ERR_INVALID_INPUT: i32 = 1007;
+use solidcore::error::SM_ERR_INVALID_INPUT;
 
 /// `curve.hermite_curve` runner.
 pub struct Runner;

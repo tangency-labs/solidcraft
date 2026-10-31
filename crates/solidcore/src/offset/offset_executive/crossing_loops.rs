@@ -63,11 +63,11 @@ use crate::topology::{loopuse, vertexuse, Brep, EdgeId, EdgeuseId, FaceId, LoopI
 
 const OP: &str = "offset::offset_executive::crossing_loops::resolve_crossing_loops";
 
-/// `SM_ERR_BAD_INTERSECTIONS`.
-const SM_ERR_BAD_INTERSECTIONS: i32 = 1027;
+// `SM_ERR_BAD_INTERSECTIONS`.
+use crate::error::SM_ERR_BAD_INTERSECTIONS;
 use crate::error::SM_ERR_OFFSET_WALLS_TOUCH;
-/// `SM_ERR_ASSERT_FAILURE`.
-const SM_ERR_ASSERT_FAILURE: i32 = 1005;
+// `SM_ERR_ASSERT_FAILURE`.
+use crate::error::SM_ERR_ASSERT_FAILURE;
 
 /// A stretch of a loop of an offset face between two of its crossings with other loops
 /// or the ends of its edge use, in the loop's direction (`sm_LoopStretch`).
