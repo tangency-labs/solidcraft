@@ -90,10 +90,13 @@ If that window cannot show the settings dialog, edit only the `msaa` field to `1
 ## Wayland, XWayland and niri
 
 On Linux the app runs through XWayland whenever an X display is available, because
-winit only supports dragging files from a file manager into the window on X11. On
-niri (detected from `XDG_CURRENT_DESKTOP` with a Wayland socket present) it stays on
-native Wayland instead, since window management such as maximize/restore misbehaves
-under niri's XWayland. The trade-off: **on native Wayland, dropping files onto the
+winit only supports dragging files from a file manager into the window on X11. Two
+exceptions stay on native Wayland: niri (detected from `XDG_CURRENT_DESKTOP` with a
+Wayland socket present), since window management such as maximize/restore misbehaves
+under niri's XWayland; and the proprietary NVIDIA driver under a Wayland session
+(detected from `/proc/driver/nvidia/version`), where XWayland rendering is
+catastrophically slow — around 10 fps with tearing against full speed on native
+Wayland. The trade-off: **on native Wayland, dropping files onto the
 window does not work**; use File > Open or pass the file on the command line.
 This applies to every build, not only the Nix package.
 

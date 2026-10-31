@@ -97,8 +97,10 @@ D300/D500/D700 (Mac Pro 2013). On another GPU that does this, start SolidCraft w
 ## The interface looks blurry on Linux with display scaling
 
 On Linux, SolidCraft runs through XWayland whenever an X display is available, because file
-drag and drop from a file manager only works there (niri is the exception and stays on native
-Wayland). A compositor that doesn't let X11 apps scale themselves draws an XWayland window at
+drag and drop from a file manager only works there (niri is an exception and stays on native
+Wayland, and so does the proprietary NVIDIA driver under a Wayland session, where XWayland
+rendering is unusably slow). A compositor that doesn't let X11 apps scale themselves draws an
+XWayland window at
 100 % and stretches it to the monitor's scale, so text and icons look soft. That happens with
 fractional scaling (125 %, 140 %), and on GNOME 47 (RHEL and Rocky Linux 10) at any scale,
 200 % included. The diagnostics in a bug report show it as about 1 physical pixel per point at
