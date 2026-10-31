@@ -36,6 +36,7 @@
 //! - `ui.prefs {...}`: the preferences (default_units, nav, zoom_reverse, orbit_around, msaa,
 //!   length_decimals, angle_decimals); returns them all
 //! - `ui.capture {action?: capture|revert|cancel}`: the Capture Position question
+//! - `ui.recover {action?: recover|discard|later, id?}`: the "Recover unsaved design?" prompt
 //! - `ui.agent_cursor {show?, speed?: 1–5 (times) | "instant", follow_camera?}`: the agent cursor
 //!   (#35); while it is shown, `engine.execute` first glides to the command's button and picks
 //!   and replies once the command has run (`"animate": false` skips that one call)
@@ -612,7 +613,8 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, method: &str, p: &Value) ->
             "viewport": app.viewport.rect.map(|r| json!([r.left(), r.top(), r.width(), r.height()])),
             "camera": app.cam,
             "tool": app.tool.as_ref().map(|t| t.cmd),
-            "dialog": app.dialog.as_ref().map(|d| format!("{d:?}")),
+            // A feature dialog, else the "Recover unsaved design?" prompt (answer it with ui.recover).
+            "dialog": app.dialog.as_ref().map(|d| json!(format!("{d:?}"))).or_else(|| crate::recovery_ui::describe(app)),
             "status": app.status.as_ref().map(|(text, _, error)| json!({"text": text, "error": error})),
             "hover": app.viewport.hover.as_ref().map(|h| format!("{h:?}")),
             "renderer": if app.viewport.gpu.is_some() { "gpu" } else { "cpu" },
@@ -1128,6 +1130,13 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, method: &str, p: &Value) ->
             },
             None => ok(json!({"question": app.tree.capture_prompt, "pending_moves": app.session.pending_moves.len()})),
         },
+        "ui.recover" => match s("action") {
+            Some(a) => match crate::recovery_ui::answer(app, a, s("id")) {
+                Ok(()) => ok(json!({"dialog": crate::recovery_ui::describe(app), "file_busy": app.file_load.busy()})),
+                Err(e) => err(e),
+            },
+            None => ok(json!({"dialog": crate::recovery_ui::describe(app)})),
+        },
         "ui.prefs" => wrap(crate::prefs::control(app, p)),
         "ui.agent_chat" => wrap(crate::agent_chat::control(app, ctx, p)),
         "ui.help" => match s("item") {
@@ -1621,6 +1630,35 @@ mod tests {
         assert!(now().is_some_and(|(other, _)| other != id), "{:?}", now());
         drop(counted);
         assert!(!WATCH.subscribed());
+    }
+
+    /// #3750: the "Recover unsaved design?" prompt is `ui.inspect`'s `dialog`, and `ui.recover`
+    /// answers it without clicking: Discard deletes the autosave and closes the prompt.
+    #[test]
+    fn inspect_reports_the_recovery_prompt_and_ui_recover_discards() {
+        use solidcraft_engine::recovery::{Autosaver, orphans};
+        let dir = std::env::temp_dir().join(format!("solidcraft-recover-prompt-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        // An app that crashed with an unsaved box: its autosave is left unlocked.
+        let mut crashed = Session::default();
+        crashed.execute("solid.box", &json!({"length": 10, "width": 10, "height": 10})).unwrap();
+        let mut a = Autosaver::new(&dir, std::time::Duration::from_secs(3600)).unwrap();
+        assert!(a.save(&crashed).unwrap());
+        drop(a);
+        let mut h = crate::scenario::Harness::new();
+        crate::recovery_ui::start(&mut h.app, &dir, std::time::Duration::from_secs(3600));
+        h.frames(2);
+        let d = &h.call("ui.inspect", json!({}))["result"]["dialog"];
+        assert_eq!(d["kind"], "recover_unsaved", "{d}");
+        assert_eq!(d["actions"], json!(["recover", "discard", "later"]));
+        assert_eq!(d["designs"][0]["features"], 1, "{d}");
+        let id = d["designs"][0]["id"].as_str().unwrap().to_string();
+        let r = h.call("ui.recover", json!({"action": "discard", "id": id}));
+        assert_eq!(r["ok"], true, "{r}");
+        assert!(h.call("ui.inspect", json!({}))["result"]["dialog"].is_null());
+        assert!(orphans(&dir).iter().all(|e| e.id != id), "the autosave is deleted");
+        drop(h);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     fn render(app: &mut SolveApp, path: &std::path::Path) -> Vec<u8> {
