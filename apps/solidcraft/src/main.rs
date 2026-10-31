@@ -81,9 +81,12 @@ fn mark(step: &str) {
 
 struct App {
     solve: SolveApp,
-    /// The settings folder whose start marker the first frame clears (`startup::started`).
+    /// The settings folder whose start marker a settled startup clears.
     starting: Option<std::path::PathBuf>,
-    /// Frames begun; the second one means the first was drawn (startup is over).
+    startup_complete: bool,
+    first_presented: Option<std::time::Instant>,
+    recovery: startup::Recovery,
+    /// Frames begun, for the first two: fitting the window, then asking for the foreground.
     frames: u32,
     /// Started over the control channel: the window doesn't ask for the foreground.
     take_focus_unwanted: bool,
@@ -202,6 +205,32 @@ impl eframe::App for App {
                 if !self.take_focus_unwanted {
                     ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
                 }
+            }
+        }
+        if !self.startup_complete {
+            let interacted = ctx.input(|i| {
+                i.events.iter().any(|event| {
+                    matches!(
+                        event,
+                        egui::Event::PointerButton { .. }
+                            | egui::Event::Key { .. }
+                            | egui::Event::Text(_)
+                            | egui::Event::Paste(_)
+                            | egui::Event::Touch { .. }
+                            | egui::Event::MouseWheel { .. }
+                    )
+                })
+            });
+            self.recovery.observe(self.first_presented.map(|at| at.elapsed()), interacted || solidcraft_ui_egui::documents::any_dirty(&self.solve));
+            if eframe::egui_wgpu::winit::has_presented_frame() {
+                self.first_presented.get_or_insert_with(std::time::Instant::now);
+            }
+            if !self.recovery.eligible() {
+                self.startup_complete = true;
+                // Deliberately keep the failed-start marker and crash phase through the
+                // settling interval: the affected driver reports failure after presenting.
+                // A clean quit clears the marker below; killing an unsettled launch counts
+                // as a failed start. Control clients can already connect during this time.
                 solidcraft_engine::crash::phase(solidcraft_engine::crash::RUNNING);
                 // A DMG install has no installer step: put solidcraft-cli on PATH, quietly.
                 #[cfg(target_os = "macos")]
@@ -214,6 +243,8 @@ impl eframe::App for App {
                 if let Some(dir) = self.starting.take() {
                     startup::started(&dir);
                 }
+            } else {
+                ctx.request_repaint_after(std::time::Duration::from_millis(100));
             }
         }
         self.watch_device();
@@ -310,6 +341,9 @@ impl Drop for App {
     /// `on_exit`, it read `app.ron` while the old process was still writing it, found it
     /// unreadable and moved it aside, resetting every setting (#9044).
     fn drop(&mut self) {
+        // Painting and control commands can change a design after logic ran. Check on
+        // unwind too: a replacement process must never discard an unsaved document.
+        self.recovery.observe(None, solidcraft_ui_egui::documents::any_dirty(&self.solve));
         if let Some(gpu) = &self.gpu
             && let Some(lost_at) = gpu.lost_at
         {
@@ -1040,19 +1074,18 @@ fn main() -> eframe::Result {
     // Files opened from Finder and the Dock arrive as events, not arguments.
     #[cfg(target_os = "macos")]
     open_documents::install();
-    let created = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
-    let created_in_app = created.clone();
     let starting = settings.clone();
     // A panic on the window's thread ends the app without `on_exit`; this disconnects from the
     // 3D mouse driver then too.
     #[cfg(target_os = "macos")]
     let _driver_client = DriverClient;
     mark("run_native");
-    let result = eframe::run_native(
+    let recovery = startup::Recovery::new();
+    let app_recovery = recovery.clone();
+    let result = startup::run_native(
         "SolidCraft",
         options,
         Box::new(move |cc| {
-            created_in_app.store(true, std::sync::atomic::Ordering::SeqCst);
             solidcraft_engine::crash::phase("app setup");
             mark("window and device ready");
             solidcraft_ui_egui::fonts::setup_bundled_fonts(&cc.egui_ctx);
@@ -1216,6 +1249,9 @@ fn main() -> eframe::Result {
                 prefs_writer: PrefsWriter::read(app.prefs()),
                 solve: app,
                 starting,
+                startup_complete: false,
+                first_presented: None,
+                recovery: app_recovery,
                 frames: 0,
                 take_focus_unwanted: control_port.is_some(),
                 come_forward: come_forward::ComeForward::default(),
@@ -1229,9 +1265,18 @@ fn main() -> eframe::Result {
             }))
         }),
     );
-    control_server::remove_token_file();
+    // Release listeners and connected clients before launching the software child,
+    // which must bind the same --control port and own its token file.
+    control_server::shutdown();
     match result {
-        Err(e) if !created.load(std::sync::atomic::Ordering::SeqCst) => no_window(e, cpu_renderer, started, settings.as_deref()),
+        Err(e) if recovery.eligible() => no_window(e, cpu_renderer, started, settings.as_deref()),
+        Ok(()) => {
+            // A normal quit within the settling interval is not a failed launch.
+            if let Some(dir) = settings.as_deref() {
+                startup::started(dir);
+            }
+            Ok(())
+        }
         r => r,
     }
 }
@@ -1297,17 +1342,20 @@ fn no_window(error: eframe::Error, tried_cpu: bool, failed: eframe::wgpu::Backen
         let note = startup::fallback_note(&previous, failed, next, &error.to_string());
         log::warn!("{note}");
         eprintln!("SolidCraft: {note}");
-        let mut command = std::process::Command::new(exe);
-        command.args(std::env::args_os().skip(1)).env(startup::FALLBACK_NOTE_ENV, note);
-        if next == "cpu" {
-            command.env(startup::RENDERER_ENV, "cpu").env_remove(startup::RETRY_BACKEND_ENV);
+        // The software renderer starts in safe mode (`startup::software_retry`).
+        let mut command = if next == "cpu" {
+            let mut command = startup::software_retry(&exe, std::env::args_os().skip(1));
+            command.env_remove(startup::RETRY_BACKEND_ENV);
+            command
         } else {
-            command.env(startup::RETRY_BACKEND_ENV, next);
-        }
-        match command.status() {
-            Ok(status) if status.success() => return Ok(()),
-            // The final try showed its own message.
-            Ok(_) => return Err(error),
+            let mut command = std::process::Command::new(&exe);
+            command.args(std::env::args_os().skip(1)).env(startup::RETRY_BACKEND_ENV, next);
+            command
+        };
+        command.env(startup::FALLBACK_NOTE_ENV, note);
+        // The new start shows its own message if it fails too.
+        match startup::hand_off(command) {
+            Ok(()) => return Ok(()),
             Err(e) => log::error!("could not start again on {next}: {e}"),
         }
     }

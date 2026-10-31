@@ -98,7 +98,7 @@ pub fn log_uncaptured_errors(device: &wgpu::Device) {
 #[cfg(not(target_arch = "wasm32"))]
 pub fn install_picture_renderer(rs: &egui_wgpu::RenderState) {
     match solidcraft_gpu::capture::Capturer::new(&rs.adapter, rs.device.clone(), rs.queue.clone()) {
-        Ok(capturer) => install_capturer(capturer.watching(rs.device_lost.flag())),
+        Ok(capturer) => install_capturer(capturer.watching(rs.device_lost.flag()).with_queue_access(rs.queue_access.clone())),
         Err(e) => {
             log::warn!("pictures of the model are drawn by the CPU rasterizer: the GPU cannot draw them: {e}");
             install_cpu_picture_renderer();

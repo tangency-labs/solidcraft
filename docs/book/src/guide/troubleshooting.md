@@ -21,6 +21,22 @@ Setting `SOLIDCRAFT_SAFE_MODE=1` does the same. From 0.10.2, if two launches in 
 before the window opens, the next one starts in safe mode by itself. `SOLIDCRAFT_RENDERER=cpu`
 uses only the software renderer and keeps your settings.
 
+If graphics setup fails, or graphics fail within ten seconds of the first presentation,
+SolidCraft starts again in a fresh process, on the next API (see "No graphics adapter" below)
+and finally in safe mode on the software renderer. Interacting with the app or having unsaved
+designs disables this retry. The safe-mode retry ignores saved graphics preferences so it can
+use the software renderer. If that also fails, it shows the error; it does not keep
+restarting. The original panic is still saved in the crash folder.
+The control channel is available during app setup, including this settling period.
+Before retrying, SolidCraft closes its control listeners and connections so the new process
+can use the same port. Once the replacement starts, the failed process exits instead of waiting
+for it to close. This removes the failed window on Windows, where destruction messages may
+remain queued after a graphics panic stops the event loop. The replacement keeps running
+independently, and the original crash report and session log remain available.
+Without interaction, the failed-start marker and startup crash phase
+remain active through the settling period: force-killing two launches during it can make
+the next launch use safe mode. Quitting normally clears the marker, even during that period.
+
 ## A design won't open or hangs while opening
 
 - **Open the previous save.** Every save keeps the version it replaced next to it as
