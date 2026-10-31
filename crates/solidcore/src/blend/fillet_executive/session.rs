@@ -1530,6 +1530,7 @@ impl<'target> FilletSession<'target> {
                 xsect_tol: -1.0,
                 continuity,
                 thumbweight,
+                second_radii: None,
             },
         )
     }
@@ -1555,6 +1556,39 @@ impl<'target> FilletSession<'target> {
             k,
             edges,
             radii,
+            xsect_types,
+            FilletSolverType::ConstRadius,
+            continuity,
+            thumbweight,
+        )
+    }
+
+    /// [`FilletSession::prepare_per_edge_constant_radius`] with the fork's
+    /// `pOptSecondRadii` (tangency-labs/smlib `f653ac9`): `second_radii` holds one entry
+    /// per edge, the offset of the second edge use's surface (`radii` gives the first's).
+    /// With a linear cross-section that is a chamfer with setbacks `radii[i]` and
+    /// `second_radii[i]`. It runs the same `SetFilletParameters`, so the fork's vertex-fan
+    /// split (`fixes.fillet_corner_per_vertex_fan`) applies to it.
+    ///
+    /// # Errors
+    /// Those of [`FilletSession::prepare_per_edge_constant_radius`]; native invalid input
+    /// when `second_radii` does not hold one entry per edge.
+    #[allow(clippy::too_many_arguments)] // the native overload's parameters
+    pub fn prepare_per_edge_constant_radius_with_second(
+        &mut self,
+        k: &mut Kernel,
+        edges: &[EdgeId],
+        radii: &[f64],
+        second_radii: &[f64],
+        xsect_types: &[FilletSurfaceGeneratorType],
+        continuity: u32,
+        thumbweight: f64,
+    ) -> Result<()> {
+        self.prepare_per_edge_with_second(
+            k,
+            edges,
+            radii,
+            Some(second_radii),
             xsect_types,
             FilletSolverType::ConstRadius,
             continuity,
@@ -1634,6 +1668,7 @@ impl<'target> FilletSession<'target> {
                 xsect_tol: -1.0,
                 continuity,
                 thumbweight,
+                second_radii: None,
             },
         )
     }
@@ -1644,6 +1679,30 @@ impl<'target> FilletSession<'target> {
         k: &mut Kernel,
         edges: &[EdgeId],
         radii: &[f64],
+        xsect_types: &[FilletSurfaceGeneratorType],
+        radius_type: FilletSolverType,
+        continuity: u32,
+        thumbweight: f64,
+    ) -> Result<()> {
+        self.prepare_per_edge_with_second(
+            k,
+            edges,
+            radii,
+            None,
+            xsect_types,
+            radius_type,
+            continuity,
+            thumbweight,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)] // the native overload's parameters
+    fn prepare_per_edge_with_second(
+        &mut self,
+        k: &mut Kernel,
+        edges: &[EdgeId],
+        radii: &[f64],
+        second_radii: Option<&[f64]>,
         xsect_types: &[FilletSurfaceGeneratorType],
         radius_type: FilletSolverType,
         continuity: u32,
@@ -1678,6 +1737,7 @@ impl<'target> FilletSession<'target> {
                 xsect_tol: -1.0,
                 continuity,
                 thumbweight,
+                second_radii,
             },
         )
     }
@@ -1736,6 +1796,7 @@ impl<'target> FilletSession<'target> {
                 xsect_tol: -1.0,
                 continuity,
                 thumbweight: 1.0,
+                second_radii: None,
             },
         )
     }
@@ -4289,6 +4350,7 @@ impl FilletParametersAccess<FilletObject> for SessionObjects<'_> {
                 tan_tol_rad,
                 radius,
                 edgeuse,
+                second_radius,
             } => self.allocate_constant_radius_solver(
                 k,
                 target_edgeuse(edgeuse)?,
@@ -4296,7 +4358,7 @@ impl FilletParametersAccess<FilletObject> for SessionObjects<'_> {
                 approx_tol,
                 ang_tol_rad,
                 tan_tol_rad,
-                None,
+                second_radius,
             ),
             SolverSpec::ConstantDistance {
                 approx_tol,
