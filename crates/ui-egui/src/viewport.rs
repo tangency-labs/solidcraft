@@ -520,12 +520,33 @@ pub fn view_bounds(app: &SolveApp) -> solidcraft_engine::geom::Aabb3 {
 /// view is far from other geometry (a part far from the origin and a sketch at it, #2616), and
 /// the part then swings out of view. `None` when no body is in view.
 pub(crate) fn in_view_centre(app: &SolveApp, proj: &Proj) -> Option<Vec3> {
+    in_view_bounds(app, proj).map(|b| b.center())
+}
+
+/// The box around the visible bodies in view.
+fn in_view_bounds(app: &SolveApp, proj: &Proj) -> Option<solidcraft_engine::geom::Aabb3> {
     let st = crate::open_meshing::shown_world(app);
     let b = body_bounds(app, &st)
         .iter()
         .filter(|(name, b)| !b.is_empty() && app.session.body_visible(name) && in_view(proj, b))
         .fold(solidcraft_engine::geom::Aabb3::EMPTY, |a, (_, b)| a.union(b));
-    (!b.is_empty()).then(|| b.center())
+    (!b.is_empty()).then_some(b)
+}
+
+/// Where box `b` is on screen (the corners in front of the eye).
+fn screen_rect(proj: &Proj, b: &solidcraft_engine::geom::Aabb3) -> Rect {
+    let mut r = Rect::NOTHING;
+    for i in 0..8 {
+        let corner = Vec3::new(
+            if i & 1 == 0 { b.min.x } else { b.max.x },
+            if i & 2 == 0 { b.min.y } else { b.max.y },
+            if i & 4 == 0 { b.min.z } else { b.max.z },
+        );
+        if let Some(p) = proj.to_screen(corner) {
+            r.extend_with(p);
+        }
+    }
+    r
 }
 
 /// Does the view show part of box `b`? A box partly behind the eye counts.
@@ -4185,6 +4206,11 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         app.preview.rolled_back = preview_should_roll_back(app, held, manipulator_dragging);
     }
     let proj = projection(app, rect);
+    // Where the model is on screen, for the command's value box to keep clear of (canvas.rs).
+    if app.dialog.is_some() {
+        let outline = in_view_bounds(app, &proj).map(|b| screen_rect(&proj, &b)).filter(|r| r.is_positive());
+        ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new(crate::canvas::MODEL_OUTLINE), outline));
+    }
     if let Ok(mut cache) = app.viewport.display.lock() {
         cache.prepare(crate::open_meshing::shown_world(app), &proj, app.viewport.pixels_per_point());
     }

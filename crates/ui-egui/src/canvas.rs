@@ -831,13 +831,56 @@ fn value_box(ui: &mut egui::Ui, label: &str, value: &mut String, at: Pos2, selec
 /// through its values with it).
 fn value_box_with(ui: &mut egui::Ui, label: &str, value: &mut String, at: Pos2, select_all: bool, keep_tab: bool, place: BoxPlace) {
     let ids = (egui::Id::new("sc_canvas_area"), egui::Id::new("sc_canvas_value"));
-    value_box_in(ui, ids, label, value, (at, egui::Align2::LEFT_TOP), select_all, keep_tab, place);
+    value_box_in(ui, ids, label, value, placed(ui, at), select_all, keep_tab, place);
 }
 
 /// [`value_box`] with a note after the field (a pull's step size).
 fn value_box_noted(ui: &mut egui::Ui, label: &str, value: &mut String, at: Pos2, select_all: bool, note: Option<&str>, place: BoxPlace) {
     let ids = (egui::Id::new("sc_canvas_area"), egui::Id::new("sc_canvas_value"));
-    value_box_full(ui, ids, label, value, (at, egui::Align2::LEFT_TOP), (select_all, false), note, place);
+    value_box_full(ui, ids, label, value, placed(ui, at), (select_all, false), note, place);
+}
+
+/// Where the main value box goes this frame (see [`clear_of_model`]). With wheel stepping on, it
+/// stays put while the pointer is over it, so the wheel keeps stepping its value; off, it follows
+/// its handle as before.
+fn placed(ui: &egui::Ui, at: Pos2) -> (Pos2, egui::Align2) {
+    let last = egui::Id::new("sc_canvas_box_at");
+    let over = crate::value_step::enabled(ui.ctx())
+        && ui.ctx().memory(|m| m.area_rect(egui::Id::new("sc_canvas_area"))).zip(ui.ctx().pointer_hover_pos()).is_some_and(|(r, p)| r.contains(p));
+    if over && let Some(kept) = ui.ctx().data(|d| d.get_temp::<(Pos2, egui::Align2)>(last)) {
+        return kept;
+    }
+    let model = ui.ctx().data(|d| d.get_temp::<Option<egui::Rect>>(egui::Id::new(MODEL_OUTLINE))).flatten();
+    let at = clear_of_model(model, ui.clip_rect(), at);
+    ui.ctx().data_mut(|d| d.insert_temp(last, at));
+    at
+}
+
+/// The egui memory key under which the viewport leaves the model's box on screen this frame.
+pub(crate) const MODEL_OUTLINE: &str = "sc_model_outline";
+
+/// How far the value box keeps from the model's outline (points).
+const BOX_GAP: f32 = 24.0;
+/// Room the box needs beside the model before it goes there (points).
+const BOX_ROOM: f32 = 150.0;
+
+/// Where the value box goes for a box the caller would put with its top-left at `at` (just right
+/// of and above the handle it belongs to): just outside the model's outline on screen (`model`),
+/// level with the handle, on the handle's side, so it never covers the edge or face being edited.
+/// Where the model fills the view on that side, it stays beside the handle.
+fn clear_of_model(model: Option<egui::Rect>, view: egui::Rect, at: Pos2) -> (Pos2, egui::Align2) {
+    let beside = (at, egui::Align2::LEFT_TOP);
+    let Some(m) = model else { return beside };
+    let handle = at + vec2(-16.0, 30.0);
+    let right = handle.x >= m.center().x;
+    let y = handle.y.clamp(view.top() + 12.0, view.bottom() - 12.0);
+    if right && view.right() - m.right() >= BOX_ROOM + BOX_GAP {
+        (egui::pos2(m.right() + BOX_GAP, y), egui::Align2::LEFT_CENTER)
+    } else if !right && m.left() - view.left() >= BOX_ROOM + BOX_GAP {
+        (egui::pos2(m.left() - BOX_GAP, y), egui::Align2::RIGHT_CENTER)
+    } else {
+        beside
+    }
 }
 
 /// [`value_box_with`] under its own ids (its area's and its field's), for a value beside the main
