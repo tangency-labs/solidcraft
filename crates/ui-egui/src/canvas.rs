@@ -202,10 +202,8 @@ pub(crate) fn profile_plane(app: &SolveApp, sketch: u64) -> Option<solidcraft_en
 }
 
 fn reference_height(app: &SolveApp, d: &Dialog, label: &str, plane: &solidcraft_engine::geom::Plane, centre: Vec3) -> Option<f64> {
-    let point = crate::dialogs::object_point(&d.inputs, label)?;
-    let p = point.as_array()?;
-    let p = Vec3::new(p.first()?.as_f64()?, p.get(1)?.as_f64()?, p.get(2)?.as_f64()?);
-    Some(solidcraft_engine::doc::object_height(&app.session.world_state(), plane, centre, p))
+    let object = crate::dialogs::object_value(app, &d.inputs, label).ok()??;
+    solidcraft_engine::object_end_height(&app.session, &object, plane, centre)
 }
 
 /// The two faces at an edge, near `p`: for each, the normal and centroid of its triangle nearest

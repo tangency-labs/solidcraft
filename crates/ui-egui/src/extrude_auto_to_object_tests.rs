@@ -141,11 +141,12 @@ fn parallel_construction_plane_is_a_target_and_a_crossing_one_is_not() {
     assert!(to_object(dialog(&h)).is_none());
     assert!(click(&mut h, |_| Hit::Plane { name: "Lid".into(), point: Vec3::new(5.0, 5.0, 25.0) }));
     let d = dialog(&h);
-    assert!(matches!(to_object(d), Some(Sel::Vertex { body, .. }) if body.is_empty()));
+    // The plane itself, so the extrude follows it (#7494).
+    assert_eq!(to_object(d), Some(&Sel::Plane { name: "Lid".into() }));
     assert_eq!(distance(d), "25 mm");
     // The profile plane itself is nowhere to go: the target stays.
     assert!(!click(&mut h, |_| Hit::Plane { name: "XY".into(), point: Vec3::new(5.0, 5.0, 0.0) }));
-    assert!(matches!(to_object(dialog(&h)), Some(Sel::Vertex { point, .. }) if (point.z - 25.0).abs() < 1e-9));
+    assert_eq!(to_object(dialog(&h)), Some(&Sel::Plane { name: "Lid".into() }));
 }
 
 #[test]
@@ -174,7 +175,7 @@ fn target_below_keeps_its_side_and_exact_length() {
     // As the browser picks a plane: no place on it.
     assert!(click(&mut h, |_| Hit::Plane { name: "Under".into(), point: Vec3::ZERO }));
     let d = dialog(&h);
-    assert!(matches!(to_object(d), Some(Sel::Vertex { point, .. }) if (point.z + 12.345678).abs() < 1e-9));
+    assert_eq!(to_object(d), Some(&Sel::Plane { name: "Under".into() }));
     assert_eq!(distance(d), "12.345678 mm");
     assert!(matches!(d.kind, Kind::Extrude { direction: 1, .. }), "the target is below the profile");
 }
@@ -206,6 +207,6 @@ fn manual_to_object_accepts_a_parallel_plane_with_automatic_switching_off() {
     assert!(to_object(dialog(&h)).is_none());
     assert!(click(&mut h, |_| Hit::Plane { name: "Lid".into(), point: Vec3::new(5.0, 5.0, 25.0) }));
     let commands = apply_commands(&h.app, dialog(&h)).unwrap();
-    assert_eq!(commands[0].1["to"], json!([0.0, 0.0, 25.0]));
+    assert_eq!(commands[0].1["to"], json!({"plane": "Lid"}));
     assert!((solidcraft_engine::extrude_reach(&h.app.session, &commands[0].1).unwrap() - 25.0).abs() < 1e-9);
 }

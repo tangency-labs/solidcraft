@@ -1511,7 +1511,21 @@ impl Dialog {
         let sel = inp.accepts(h, s.active_sketch, |body, face| {
             snap.and_then(|f| f.planar(body, face)).unwrap_or_else(|| planar_face(s, body, face).is_some())
         })?;
-        (inp.accept != AXIS_PICKS || takes_as_axis(s, &sel)).then_some(sel)
+        (inp.accept != AXIS_PICKS || takes_as_axis(s, &sel)).then_some(sel).filter(|sel| inp.accept != OBJECT_PICKS || self.object_pick_ends(s, sel))
+    }
+
+    /// Does a plane picked as a To / From Object give the profiles an end? Not their own plane,
+    /// nor one running along their normal; any other plane does (a slanted one cuts the end).
+    fn object_pick_ends(&self, s: &Session, sel: &Sel) -> bool {
+        const TOLERANCE: f64 = 1e-6;
+        let Sel::Plane { name } = sel else { return true };
+        let (Some(plane), Some(reference)) =
+            (plane_by_name(s, name), self.inputs.first().and_then(|i| i.items.first()).and_then(|first| profile_plane(s, first)))
+        else {
+            return true;
+        };
+        let along = plane.normal().dot(reference.normal()).abs();
+        along > TOLERANCE && !(along > 1.0 - 1e-9 && reference.height(plane.origin).abs() <= TOLERANCE)
     }
 
     /// A round edge where a 3D point is wanted stands for its centre: a construction point's
@@ -1548,15 +1562,16 @@ impl Dialog {
         }
         let reference = profile_plane(s, self.inputs.first()?.items.first()?)?;
         let sel = match h {
-            // A place on the plane: its origin (a browser pick carries no point).
+            // The plane itself, so the extrude follows it when it moves (#7494). The active To
+            // Object input takes any plane; picked for a profile, only a parallel one is a target.
+            _ if to_active => return None,
             Hit::Plane { name, .. } => {
                 let plane = plane_by_name(s, name)?;
                 if plane.normal().dot(reference.normal()).abs() < 1.0 - 1e-9 {
                     return None;
                 }
-                Sel::Vertex { body: String::new(), point: plane.origin }
+                Sel::Plane { name: name.clone() }
             }
-            _ if to_active => return None,
             Hit::Face { body, index, point } => Sel::Face { body: body.clone(), index: *index, point: *point },
             Hit::Vertex { body, point } => Sel::Vertex { body: body.clone(), point: *point },
             _ => return None,
@@ -1576,7 +1591,7 @@ impl Dialog {
         if !object_target(s, &reference, sel) {
             return false;
         }
-        set_to_object(&mut self.inputs, &mut self.active, true);
+        set_object_input(&mut self.inputs, &mut self.active, TO_OBJECT, true);
         let Some(at) = self.inputs.iter().position(|i| i.label == TO_OBJECT) else { return false };
         if let Some(input) = self.inputs.get_mut(at) {
             input.items = vec![sel.clone()];
@@ -2616,7 +2631,21 @@ pub(crate) fn selection_label(s: &Session, names: crate::prefs::OriginPlaneNames
 /// Selection input rows: label, "N selected" (or a hint) and a clear button; clicking a row
 /// makes it the active input.
 fn input_rows(d: &mut Dialog, ui: &mut egui::Ui, s: &Session, names: crate::prefs::OriginPlaneNames) {
-    input_rows_range(d, ui, s, names, 0..d.inputs.len());
+    if !d.inputs.iter().any(|i| i.under_choice) {
+        return input_rows_range(d, ui, s, names, 0..d.inputs.len());
+    }
+    // The inputs a form draws under the choices that add them are left out here.
+    let listed: Vec<usize> = d.inputs.iter().enumerate().filter(|(_, i)| !i.under_choice).map(|(n, _)| n).collect();
+    for i in listed {
+        input_rows_range(d, ui, s, names, i..i + 1);
+    }
+}
+
+/// The row of the selection input labelled `label`, when the dialog has one.
+fn input_row(d: &mut Dialog, ui: &mut egui::Ui, s: &Session, names: crate::prefs::OriginPlaneNames, label: &str) {
+    if let Some(i) = d.inputs.iter().position(|x| x.label == label) {
+        input_rows_range(d, ui, s, names, i..i + 1);
+    }
 }
 
 /// Saved vectors/axes are real inputs even when they have no origin-axis selection chip.
@@ -2974,10 +3003,23 @@ fn sync_reach(app: &SolveApp, d: &mut Dialog) {
     }
     // A start offset, a To offset or a From Object move the ends: the distance stays as it is.
     let plain = d.editing.is_none() && start.trim().is_empty() && to_offset.trim().is_empty() && !object_on(&d.inputs, FROM_OBJECT);
-    // Picks and the profiles' plane are both in world space.
+    // Picks and the profiles' plane are both in world space. A face running along the normal is
+    // reached where it begins, not at the pick on it.
     let reach = match &target {
         Some(Sel::Face { point, .. } | Sel::Vertex { point, .. }) if plain => {
-            d.inputs.first().and_then(|i| i.items.first()).and_then(|first| profile_plane(&app.session, first)).map(|plane| plane.height(*point))
+            d.inputs.first().and_then(|i| i.items.first()).and_then(|first| profile_plane(&app.session, first)).map(|plane| {
+                let under = *point - plane.normal() * plane.height(*point);
+                solidcraft_engine::doc::object_height(&app.session.world_state(), &plane, under, *point)
+            })
+        }
+        // A reference (a sketch point, a construction plane…): where it ends the profiles.
+        Some(_) if plain => {
+            let plane = d.inputs.first().and_then(|i| i.items.first()).and_then(|first| profile_plane(&app.session, first));
+            let object = object_value(app, &d.inputs, TO_OBJECT).ok().flatten();
+            let centre = d.inputs.first().and_then(|i| i.items.first()).and_then(|first| profile_centre(&app.session, first));
+            plane
+                .zip(object)
+                .and_then(|(plane, object)| solidcraft_engine::object_end_height(&app.session, &object, &plane, centre.unwrap_or(plane.origin)))
         }
         _ => None,
     };
@@ -3623,8 +3665,33 @@ pub(crate) fn preset_to_object(d: &mut Dialog, on: bool) {
 }
 
 fn set_object(inputs: &mut Vec<SelInput>, active: &mut usize, label: &'static str, on: bool) {
+    add_object(inputs, active, SelInput::new(label, FACES | selection::VERTICES, false), on);
+}
+
+/// What a To / From Object input that takes references takes (an extrude's, a pattern's): a face
+/// or vertex, or a reference that is found again when it moves (#8527): an edge, a sketch point
+/// or curve, an origin or construction plane, axis or point.
+pub(crate) const OBJECT_PICKS: selection::Accept = FACES
+    | selection::VERTICES
+    | EDGES
+    | selection::PLANES
+    | selection::AXES
+    | selection::POINTS
+    | selection::CURVES
+    | selection::CONSTRUCTION_POINTS
+    | selection::ORIGIN;
+
+/// [`set_object`] for an input the form draws itself, under the choice that adds it
+/// ([`SelInput::under_choice`]): an extrude's To Object under Extent Type, its From Object under
+/// Start. It takes references too (see [`OBJECT_PICKS`]).
+pub(crate) fn set_object_input(inputs: &mut Vec<SelInput>, active: &mut usize, label: &'static str, on: bool) {
+    add_object(inputs, active, SelInput::new(label, OBJECT_PICKS, false).under_choice(), on);
+}
+
+fn add_object(inputs: &mut Vec<SelInput>, active: &mut usize, input: SelInput, on: bool) {
+    let label = input.label;
     if on && !object_on(inputs, label) {
-        inputs.push(SelInput::new(label, FACES | selection::VERTICES, false));
+        inputs.push(input);
         *active = inputs.len() - 1;
     } else if !on && object_on(inputs, label) {
         inputs.retain(|i| i.label != label);
@@ -3642,6 +3709,16 @@ fn profile_plane(s: &Session, first: &Sel) -> Option<solidcraft_engine::geom::Pl
     }
 }
 
+/// The middle of a picked profile, where To Object measures a slanted target from.
+fn profile_centre(s: &Session, first: &Sel) -> Option<Vec3> {
+    let Sel::Profile { sketch, index } = first else { return None };
+    let st = s.world_state();
+    let ss = st.sketch(*sketch)?;
+    let pts = ss.profiles.get(*index)?.region.outer.polyline(1e-2);
+    let c = pts.iter().fold(solidcraft_engine::geom::Vec2::default(), |a, p| a + *p) * (1.0 / pts.len().max(1) as f64);
+    Some(ss.plane.to_world(c))
+}
+
 /// Is a pick an object to extrude to from profiles in `reference` (not one more profile)? A face
 /// is unless it is planar and in that plane; a vertex or a place is unless it lies in it.
 fn object_target(s: &Session, reference: &solidcraft_engine::geom::Plane, sel: &Sel) -> bool {
@@ -3655,6 +3732,7 @@ fn object_target(s: &Session, reference: &solidcraft_engine::geom::Plane, sel: &
                 .is_none_or(|face| reference.normal().dot(face.normal()).abs() < 1.0 - 1e-9 || reference.height(face.origin).abs() > TOLERANCE)
         }
         Sel::Vertex { point, .. } => reference.height(*point).abs() > TOLERANCE,
+        Sel::Plane { name } => plane_by_name(s, name).is_some_and(|plane| reference.height(plane.origin).abs() > TOLERANCE),
         _ => false,
     }
 }
@@ -3669,6 +3747,31 @@ pub(crate) fn object_point(inputs: &[SelInput], label: &str) -> Option<Value> {
         Sel::Face { point, .. } | Sel::Vertex { point, .. } | Sel::Edge { point, .. } => Some(pt(*point)),
         _ => None,
     })
+}
+
+/// The pick of the To / From Object input labelled `label` as `solid.extrude`'s `to` takes it:
+/// the place on a face or vertex, else the reference picked (see [`OBJECT_PICKS`]).
+pub(crate) fn object_value(app: &SolveApp, inputs: &[SelInput], label: &str) -> Result<Option<Value>, String> {
+    let Some(sel) = inputs.iter().find(|i| i.label == label).and_then(|i| i.items.first()) else { return Ok(None) };
+    Ok(Some(match sel {
+        Sel::Face { point, .. } | Sel::Vertex { point, .. } => pt(*point),
+        Sel::Edge { point, .. } => json!({"edge": pt(*point), "at": pt(*point)}),
+        other => construct_ref(app, other)?,
+    }))
+}
+
+/// A stored To / From Object reference back into a dialog pick.
+pub(crate) fn extent_ref_sel(s: &Session, g: &solidcraft_engine::doc::construct::GeoRef) -> Option<Sel> {
+    use solidcraft_engine::doc::construct::GeoRef;
+    match g {
+        GeoRef::Plane { plane } => plane_sel(s, plane),
+        GeoRef::World { axis } => Some(Sel::Axis { name: axis.clone() }),
+        GeoRef::Axis { name } => Some(Sel::Axis { name: name.to_string() }),
+        GeoRef::ConstructPoint { name } => Some(Sel::ConstructionPoint { name: name.to_string() }),
+        GeoRef::SketchCurve { sketch, curve } => Some(Sel::SketchCurve { id: curve.clone(), sketch: Some(*sketch) }),
+        GeoRef::Edge { .. } => model_axis_sel(s, g),
+        _ => point_sel(s, g),
+    }
 }
 
 /// A To Object input filled from a stored place (editing).
@@ -4238,11 +4341,11 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
                 common["through_all"] = json!(true);
             }
             if to_object_on(&d.inputs) {
-                common["to"] = to_object_point(&d.inputs).ok_or("select the object to extrude to")?;
+                common["to"] = object_value(app, &d.inputs, TO_OBJECT)?.ok_or("select the object to extrude to")?;
                 put(&mut common, &[("to_offset", to_offset)]);
             }
             if object_on(&d.inputs, FROM_OBJECT) {
-                common["from"] = object_point(&d.inputs, FROM_OBJECT).ok_or("select the object to extrude from")?;
+                common["from"] = object_value(app, &d.inputs, FROM_OBJECT)?.ok_or("select the object to extrude from")?;
             }
             let with = |extra: Value| -> Value {
                 let mut p = common.clone();
@@ -5336,13 +5439,21 @@ pub(crate) fn edge_sel(s: &Session, p0: Vec3) -> Option<Sel> {
 
 /// The body face containing a point (nearest triangle).
 pub(crate) fn face_sel(s: &Session, p0: Vec3) -> Option<Sel> {
+    face_sel_in(s, p0, stored_frames(s))
+}
+
+/// [`face_sel`] of a point already where the model is shown (not on a body's stored frame).
+fn shown_face_sel(s: &Session, p0: Vec3) -> Option<Sel> {
+    face_sel_in(s, p0, None)
+}
+
+fn face_sel_in(s: &Session, p0: Vec3, frames: Option<Vec<(String, solidcraft_engine::doc::Mat)>>) -> Option<Sel> {
     use solidcraft_engine::kernel::{self, FaceSurface};
 
     if !p0.is_finite() {
         return None;
     }
     let st = s.world_state();
-    let frames = stored_frames(s);
     let mut best: Option<(f64, &solidcraft_engine::doc::ModelBody, usize, Vec3)> = None;
     for b in &st.bodies {
         let p = stored_on(&frames, &b.name, p0);
@@ -5624,11 +5735,21 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             // Extent references belong to the extrude's authoring frame, including free
             // points. They are not body-local picks (a reference may be on another body).
             let frame = feature_frame(s, f.component);
-            for (label, point) in [(TO_OBJECT, extent.to), (FROM_OBJECT, extent.from)] {
+            for (label, point, reference) in [(TO_OBJECT, extent.to, &extent.to_ref), (FROM_OBJECT, extent.from, &extent.from_ref)] {
                 if let Some(point) = point {
-                    set_object(&mut d.inputs, &mut d.active, label, true);
+                    set_object_input(&mut d.inputs, &mut d.active, label, true);
+                    // A reference reopens as what was picked: the sketch point, the plane…
+                    if let Some(sel) = reference.as_ref().and_then(|g| extent_ref_sel(s, g))
+                        && let Some(input) = d.inputs.iter_mut().find(|i| i.label == label)
+                    {
+                        input.items = vec![sel];
+                        continue;
+                    }
+                    // The face the point is on, as it was picked: a bare point's chip reads
+                    // as sketch coordinates, (0.00, 0.00) mm with no sketch open.
+                    let point = solidcraft_engine::doc::apply_point(&frame, point.0);
                     if let Some(input) = d.inputs.iter_mut().find(|i| i.label == label) {
-                        input.items = vec![Sel::Vertex { body: String::new(), point: solidcraft_engine::doc::apply_point(&frame, point.0) }];
+                        input.items = vec![shown_face_sel(s, point).unwrap_or(Sel::Vertex { body: String::new(), point })];
                     }
                 }
             }
@@ -5670,8 +5791,9 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             }
             if let Some(point) = to {
                 set_to_object(&mut d.inputs, &mut d.active, true);
+                let point = solidcraft_engine::doc::apply_point(&frame, point.0);
                 if let Some(input) = d.inputs.iter_mut().find(|i| i.label == TO_OBJECT) {
-                    input.items = vec![Sel::Vertex { body: String::new(), point: solidcraft_engine::doc::apply_point(&frame, point.0) }];
+                    input.items = vec![shown_face_sel(s, point).unwrap_or(Sel::Vertex { body: String::new(), point })];
                 }
             }
             let items = st.sketch(sketch.0).map(|ss| profile_indices(ss, profiles)).unwrap_or_default();

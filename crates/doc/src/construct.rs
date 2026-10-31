@@ -415,6 +415,69 @@ pub(crate) fn plane(ctx: &Ctx, g: &GeoRef) -> Result<Plane> {
     }
 }
 
+/// What a To / From Object reference is, for an extrusion to end at.
+#[derive(Clone, Debug, PartialEq)]
+pub enum ExtentTarget {
+    /// A vertex, sketch point, construction point or the origin.
+    Point(Vec3),
+    /// An origin or construction plane, or a planar face.
+    Plane(Plane),
+    /// An axis, which has no ends: origin and unit direction.
+    Line(Vec3, Vec3),
+    /// An edge or sketch curve, as points along it.
+    Path(Vec<Vec3>),
+}
+
+/// A To / From Object reference as it is now.
+pub(crate) fn extent_target(ctx: &Ctx, g: &GeoRef) -> Result<ExtentTarget> {
+    // A construction plane later in the timeline would be read as it is defined, once: moving it
+    // would not recompute this feature. As with a later sketch, axis or point, it is refused.
+    if let GeoRef::Plane { plane } = g
+        && let Some(later) = later_plane(ctx, plane, 0)
+    {
+        let name = ctx.doc.feature(later).map_or_else(|| later.to_string(), |f| f.name.clone());
+        return Err(DocError::Invalid(format!("the plane `{name}` must come earlier in the timeline")));
+    }
+    Ok(match g {
+        GeoRef::Plane { .. } | GeoRef::Face { .. } => ExtentTarget::Plane(plane(ctx, g)?),
+        GeoRef::World { .. } | GeoRef::Axis { .. } => {
+            let (o, d) = line(ctx, g)?;
+            ExtentTarget::Line(o, d)
+        }
+        GeoRef::Edge { at, name } => ExtentTarget::Path(edge_points(ctx.st, *at, name)?),
+        GeoRef::SketchCurve { sketch, curve } => ExtentTarget::Path(sketch_curve_points(ctx, *sketch, curve)?),
+        GeoRef::Point { .. } | GeoRef::Origin | GeoRef::Vertex { .. } | GeoRef::ConstructPoint { .. } | GeoRef::SketchPoint { .. } => {
+            ExtentTarget::Point(point(ctx, g)?)
+        }
+    })
+}
+
+/// A construction plane `p` is or is built on that the model `ctx.st` has not evaluated yet.
+fn later_plane(ctx: &Ctx, p: &PlaneRef, depth: usize) -> Option<u64> {
+    if depth > 64 {
+        return None;
+    }
+    match p {
+        PlaneRef::Construction { feature } => (!ctx.st.construct.iter().any(|c| c.feature == feature.0)).then_some(feature.0),
+        PlaneRef::Offset { base, .. } | PlaneRef::Flipped { base, .. } | PlaneRef::ThroughPoint { base, .. } | PlaneRef::AtAngle { base, .. } => {
+            later_plane(ctx, base, depth + 1)
+        }
+        _ => None,
+    }
+}
+
+impl ExtentTarget {
+    /// A point on the target: the point, the plane's or axis's origin, a curve's middle point.
+    pub fn anchor(&self) -> Option<Vec3> {
+        match self {
+            ExtentTarget::Point(p) => Some(*p),
+            ExtentTarget::Plane(p) => Some(p.origin),
+            ExtentTarget::Line(o, _) => Some(*o),
+            ExtentTarget::Path(pts) => pts.get(pts.len() / 2).copied(),
+        }
+    }
+}
+
 /// The centre of a round edge, sketch circle, sphere or torus.
 fn centre(ctx: &Ctx, g: &GeoRef) -> Result<Vec3> {
     match g {
