@@ -591,45 +591,24 @@ mod web {
             if offered.is_empty() || !self.files.ready.get() {
                 return;
             }
-            let _language = solidcraft_ui_egui::i18n::scope(&self.app.preferences.language);
-            let now = js_sys::Date::now();
-            let when = |e: &keep::Entry| solidcraft_ui_egui::recovery_ui::ago_between((now / 1000.0) as u64, (e.changed_at / 1000.0) as u64);
-            let title = match offered.as_slice() {
-                [one] => solidcraft_ui_egui::i18n::format(
-                    "recovery.restore_title_one",
-                    &[("name", &solidcraft_ui_egui::i18n::tr_name(&one.name)), ("when", &when(one))],
-                ),
-                _ => solidcraft_ui_egui::i18n::tr("recovery.restore_title").to_string(),
+            let now = (js_sys::Date::now() / 1000.0) as u64;
+            let rows: Vec<_> = offered
+                .iter()
+                .map(|e| solidcraft_ui_egui::recovery_ui::BrowserCopy {
+                    name: &e.name,
+                    when: solidcraft_ui_egui::recovery_ui::ago_between(now, (e.changed_at / 1000.0) as u64),
+                    open_saved: keep::answers(e, self.saved_exists(e)).contains(&keep::Answer::OpenSaved),
+                })
+                .collect();
+            let act = solidcraft_ui_egui::recovery_ui::browser_copies_window(ctx, &self.app.preferences.language, &rows);
+            let Some((index, answer)) = act else { return };
+            let Some(entry) = offered.get(index) else { return };
+            let answer = match answer {
+                solidcraft_ui_egui::recovery_ui::CopyAnswer::Restore => keep::Answer::Restore,
+                solidcraft_ui_egui::recovery_ui::CopyAnswer::OpenSaved => keep::Answer::OpenSaved,
+                solidcraft_ui_egui::recovery_ui::CopyAnswer::Discard => keep::Answer::Discard,
             };
-            let mut act: Option<(keep::Entry, keep::Answer)> = None;
-            let _ = ui_kit::Window::new(egui::Id::new("sc_browser_keep_restore"), "restore", &title).required().show_body(ctx, |ui| {
-                ui_kit::text(ui, solidcraft_ui_egui::i18n::tr("recovery.restore_intro"), ui_kit::Text::Report("intro", false));
-                for (index, e) in offered.iter().enumerate() {
-                    if offered.len() > 1 {
-                        ui_kit::divider(ui, &format!("entry:{index}"));
-                        let row = solidcraft_ui_egui::i18n::format(
-                            "recovery.restore_row",
-                            &[("name", &solidcraft_ui_egui::i18n::tr_name(&e.name)), ("when", &when(e))],
-                        );
-                        ui_kit::text(ui, &row, ui_kit::Text::Report(&format!("row:{index}"), false));
-                    }
-                    ui.horizontal(|ui| {
-                        for answer in keep::answers(e, self.saved_exists(e)) {
-                            let label = match answer {
-                                keep::Answer::Restore => solidcraft_ui_egui::i18n::tr("recovery.restore"),
-                                keep::Answer::OpenSaved => solidcraft_ui_egui::i18n::tr("recovery.open_saved"),
-                                keep::Answer::Discard => solidcraft_ui_egui::i18n::tr_label("Discard"),
-                            };
-                            if ui_kit::button(ui, label, ui_kit::Button::Normal).clicked() {
-                                act = Some((e.clone(), answer));
-                            }
-                        }
-                    });
-                }
-            });
-            if let Some((entry, answer)) = act {
-                self.keep_answer(&entry, answer);
-            }
+            self.keep_answer(entry, answer);
         }
 
         /// Whether a kept copy's design file can still be opened: in the browser's storage, or a
@@ -1259,7 +1238,10 @@ mod web {
                     }),
                 )
                 .await;
-            if result.is_ok() && crate::Launch::parse(&query()).persists() {
+            if result.is_ok()
+                && crate::Launch::parse(&query()).persists()
+                && let Some(window) = web_sys::window()
+            {
                 keep_when_hidden(&window, &runner);
             }
             if let Some(el) = document.get_element_by_id(LOADING_ID) {

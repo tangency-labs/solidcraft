@@ -187,6 +187,61 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     }
 }
 
+/// A design copy the web app kept in the browser (#10220), as its "Restore unsaved design?"
+/// window lists it.
+pub struct BrowserCopy<'a> {
+    pub name: &'a str,
+    /// When it last changed, as "5 min ago" ([`ago_between`]).
+    pub when: String,
+    /// Its file can be opened as last saved (Open saved version).
+    pub open_saved: bool,
+}
+
+/// An answer in that window.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CopyAnswer {
+    Restore,
+    OpenSaved,
+    Discard,
+}
+
+/// The web app's "Restore unsaved design: <name>, changed <time>?" window (#10220): one window
+/// for every copy, each with Restore, Open saved version (when it has a file) and Discard, in the
+/// same words as the desktop's recovery window. Answers which copy and what was chosen.
+pub fn browser_copies_window(ctx: &egui::Context, language: &str, copies: &[BrowserCopy]) -> Option<(usize, CopyAnswer)> {
+    let _language = crate::i18n::scope(language);
+    copies.first()?;
+    let title = match copies {
+        [one] => crate::i18n::format("recovery.restore_title_one", &[("name", &crate::i18n::tr_name(one.name)), ("when", &one.when)]),
+        _ => crate::i18n::tr("recovery.restore_title").to_string(),
+    };
+    let mut act = None;
+    let _ = ui_kit::Window::new(egui::Id::new("sc_browser_keep_restore"), "restore", &title).required().show_body(ctx, |ui| {
+        ui_kit::text(ui, crate::i18n::tr("recovery.restore_intro"), ui_kit::Text::Report("intro", false));
+        for (index, c) in copies.iter().enumerate() {
+            let label = if copies.len() > 1 {
+                ui_kit::divider(ui, &format!("entry:{index}"));
+                crate::i18n::format("recovery.restore_row", &[("name", &crate::i18n::tr_name(c.name)), ("when", &c.when)])
+            } else {
+                String::new()
+            };
+            ui_kit::label_actions(ui, &label, |ui| {
+                let mut answers = vec![(CopyAnswer::Restore, crate::i18n::tr("recovery.restore"))];
+                if c.open_saved {
+                    answers.push((CopyAnswer::OpenSaved, crate::i18n::tr("recovery.open_saved")));
+                }
+                answers.push((CopyAnswer::Discard, crate::i18n::tr_label("Discard")));
+                for (answer, text) in answers {
+                    if ui_kit::button(ui, text, ui_kit::Button::Normal).clicked() {
+                        act = Some((index, answer));
+                    }
+                }
+            });
+        }
+    });
+    act
+}
+
 /// Discard all asks first; Cancel (or the close button) goes back to the list unchanged.
 fn confirm_discard_all(app: &mut SolveApp, ctx: &egui::Context) {
     let count = app.recoverable.len();
