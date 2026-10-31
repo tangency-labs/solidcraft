@@ -645,6 +645,16 @@ pub struct UpstreamFixes {
     /// are not sampled (31 points fill 16 of 30 columns), and with more than one point the
     /// V dither still comes from `kernel.rng`. Off by default (pinned behaviour).
     pub face_points_span_domain: bool,
+    /// `DoIntersection`'s start-point loop fails with [`crate::SolidError::InvalidInput`]
+    /// once its traces have taken [`MAX_START_LOOP_TRACE_STEPS`] `ComputeNextPoint` calls
+    /// together. Upstream's loop ignores a failed trace and goes on to the next start point,
+    /// so a trace creeping toward a surface boundary repeats until every start point has run
+    /// out of its 5000 points: defeaturing a fillet face of an ordinary box takes about 16
+    /// minutes in release here and 11 in C++ (HANG-52). It does finish, so this is a time
+    /// limit and not a hang fix. Off by default (pinned behaviour).
+    ///
+    /// [`MAX_START_LOOP_TRACE_STEPS`]: crate::intersect::surface_intersector::p4::MAX_START_LOOP_TRACE_STEPS
+    pub ssi_start_loop_trace_budget: bool,
 }
 
 /// Options for [`Kernel::new`].

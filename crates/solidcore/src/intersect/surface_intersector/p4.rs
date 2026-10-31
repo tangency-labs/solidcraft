@@ -47,7 +47,10 @@
 //!   upstream); a NaN step (from NaN tolerances) would loop forever upstream. Here
 //!   each step loop stops after [`MAX_STEP_TRIES`] tries and the trace after
 //!   [`MAX_TRACE_ITERATIONS`] steps (also counting the snapped points upstream does
-//!   not count) with [`SolidError::InvalidInput`]. `DoLawIntersection`'s span
+//!   not count) with [`SolidError::InvalidInput`]; and, with
+//!   `fixes.ssi_start_loop_trace_budget`, the traces of one start-point loop of
+//!   `DoIntersection` together after [`MAX_START_LOOP_TRACE_STEPS`] steps (HANG-52),
+//!   the same way. `DoLawIntersection`'s span
 //!   subdivision stops at [`MAX_LAW_POINTS`] points the same way.
 //! - **Recursion.** `DoPointIntersection` retries once from a singular end point
 //!   through itself, guarded by the function-static `bInsideMe` (set for the nested
@@ -123,6 +126,22 @@ pub const MAX_STEP_TRIES: usize = 4096;
 /// The steps of one [`SurfaceIntersector::trace_curve`] call (upstream fails on the
 /// 5000th counted point).
 pub const MAX_TRACE_ITERATIONS: usize = 100_000;
+
+/// The `ComputeNextPoint` calls of all the traces of one start-point loop of
+/// `DoIntersection` together, with `fixes.ssi_start_loop_trace_budget` (HANG-52).
+/// Upstream bounds one trace by 5000 points only, and a trace that creeps toward a
+/// surface boundary in ever smaller steps reaches that after about 15,000 calls, after
+/// which the loop goes on with the next start point: a filleted 30x20x10 box's face 14
+/// (`ExtendSurface` defeature) has 40+ start points of such traces, about 600,000 calls.
+///
+/// Measured calls: at most 185 per trace and 515 per loop over faces 0-13 of that probe; at most 498
+/// per trace and 525 per loop over the 119 SSI corpus cases. A trace upstream
+/// completes (under 5000 points) needs about 3 calls a point, so up to about 15,000
+/// on its own; the bound is 50,000: 95 times the largest loop measured, three such
+/// long traces, and 12 times below that face. When it runs out the intersection
+/// fails with [`SolidError::InvalidInput`] (the same error as the other loop bounds),
+/// also from the reverse trace, rather than returning the curves found so far.
+pub const MAX_START_LOOP_TRACE_STEPS: u64 = 50_000;
 
 /// The points of a [`SurfaceIntersector::do_law_intersection`] subdivision.
 pub const MAX_LAW_POINTS: usize = 100_000;
@@ -409,6 +428,26 @@ fn too_many(op: &'static str) -> SolidError {
 
 impl SurfaceIntersector<'_> {
     // ---- tracing -----------------------------------------------------------------------
+
+    /// Not upstream: starts the [`MAX_START_LOOP_TRACE_STEPS`] bound (the
+    /// `start_loop_trace_steps` field) of a start-point loop (`bounded`) or lifts it.
+    pub(super) fn set_trace_budget(&mut self, bounded: bool) {
+        self.trace_steps_left = if bounded {
+            self.start_loop_trace_steps
+        } else {
+            u64::MAX
+        };
+        self.trace_budget_refused = false;
+    }
+
+    /// Not upstream: fails when a trace step was refused for the start-point loop's
+    /// bound, which a caller that ignores the failed trace's status must not pass over.
+    pub(super) fn check_trace_budget(&self) -> Result<()> {
+        if self.trace_budget_refused {
+            return Err(too_many(OP_TRACE));
+        }
+        Ok(())
+    }
 
     /// `SER(SM_ERR)` unless the UV points of `next` are in both domains (enlarged by
     /// `uv_tol`).
@@ -977,6 +1016,13 @@ fn trace_step<'s, V: IntersectorVirtuals<'s> + ?Sized>(
     next: TsectId,
     step: &mut Step,
 ) -> Result<bool> {
+    // (not upstream: the start-point loop's bound, HANG-52)
+    let base = v.intersector_mut();
+    if base.trace_steps_left == 0 {
+        base.trace_budget_refused = true;
+        return Err(too_many(OP_TRACE));
+    }
+    base.trace_steps_left -= 1;
     match v.compute_next_point(k, prev, step_size, next) {
         Ok(n) => {
             step.found_good_point = n.found_good_point;
@@ -1761,6 +1807,48 @@ mod tests {
         si.trace_curve(&Kernel::default(), id, &[]).unwrap();
         assert_eq!(si.curve_points(), &[id]);
         assert!(!si.curve_is_closed);
+    }
+
+    /// HANG-52: a bounded start-point loop refuses the trace step after its last one
+    /// and records it, which `check_trace_budget` reports as the loop's too-many error
+    /// (the loop ignores a failed trace's status); lifting the bound lifts the refusal.
+    #[test]
+    fn trace_steps_are_bounded_by_the_start_point_loop_budget() {
+        let k = &Kernel::default();
+        let a = plane([0.0; 3], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]);
+        let b = plane([0.0, 0.5, -0.5], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]);
+        let mut si = SurfaceIntersector::new(k, &a, &unit(), &b, &unit(), false).unwrap();
+        let prev = si.alloc_point(TsectPnt::zeroed());
+        let next = si.alloc_point(TsectPnt::zeroed());
+        let mut st = Step {
+            found_good_point: false,
+            deviation: 0.0,
+            angle_found: 0.0,
+            clipped: false,
+            hit_boundary: false,
+        };
+        assert_eq!(si.trace_steps_left, u64::MAX);
+        si.check_trace_budget().unwrap();
+
+        si.set_trace_budget(true);
+        assert_eq!(si.trace_steps_left, MAX_START_LOOP_TRACE_STEPS);
+        si.trace_steps_left = 2;
+        for _ in 0..2 {
+            assert!(trace_step(&mut si, k, prev, 0.1, next, &mut st).is_ok());
+        }
+        si.check_trace_budget().unwrap();
+        assert!(matches!(
+            trace_step(&mut si, k, prev, 0.1, next, &mut st),
+            Err(SolidError::InvalidInput { .. })
+        ));
+        assert!(matches!(
+            si.check_trace_budget(),
+            Err(SolidError::InvalidInput { .. })
+        ));
+
+        si.set_trace_budget(false);
+        si.check_trace_budget().unwrap();
+        assert!(trace_step(&mut si, k, prev, 0.1, next, &mut st).is_ok());
     }
 
     #[test]
