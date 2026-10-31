@@ -918,6 +918,12 @@ impl Narrow {
 /// `command` means the step is an engine command already.
 fn batch_step(step: &Value) -> Result<(String, Value, Option<Narrow>), String> {
     let command = step.get("command").or_else(|| step.get("id")).and_then(Value::as_str).ok_or("missing `command`")?;
+    // Any other key would be dropped and the command run without its parameters, failing (if at
+    // all) with an error about a parameter that seems to be there: `args` for `params`.
+    if let Some(k) = step.as_object().into_iter().flat_map(Map::keys).find(|k| !matches!(k.as_str(), "command" | "id" | "params")) {
+        let k: String = k.chars().take(64).collect();
+        return Err(format!("unknown key `{k}` in a step: a step is {{command, params}}, its parameters go in `params`"));
+    }
     let empty = Map::new();
     let params = step.get("params").cloned().filter(|p| !p.is_null()).unwrap_or(json!({}));
     let a = params.as_object().unwrap_or(&empty);

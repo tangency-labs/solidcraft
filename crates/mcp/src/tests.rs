@@ -828,6 +828,23 @@ fn batch_refuses_an_unknown_command_before_the_first_step() {
     assert_eq!(tool(&mut s, "inspect_design", json!({"measure": false}))["undo"], 0);
 }
 
+/// A step with its parameters under another key (`args`) refuses the batch before its first
+/// step, naming the key, instead of running the command without them.
+#[test]
+fn batch_refuses_a_step_with_an_unknown_key() {
+    let mut s = server();
+    let steps = json!([
+        {"command": "solid.box", "params": {"length": 10, "width": 10, "height": 10}},
+        {"command": "sketch.create", "args": {"plane": "XY"}},
+    ]);
+    let r = raw_tool(&mut s, "batch", json!({"commands": steps}));
+    assert_eq!(r["result"]["isError"], true, "{r}");
+    let body: Value = serde_json::from_str(r["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+    assert_eq!((body["completed"].clone(), body["failed"]["index"].clone()), (json!(0), json!(1)), "{body}");
+    assert!(body["failed"]["error"].as_str().is_some_and(|e| e.contains("unknown key `args`") && e.contains("`params`")), "{body}");
+    assert_eq!(tool(&mut s, "measure", json!({}))["body_count"], 0, "no step ran");
+}
+
 /// #5822: with `coalesce_parameters` a batch of parameter edits, one per step, rebuilds the
 /// design once for the run, and every step still has its own result. A run with an edit
 /// `changes` can't make (a new parameter) goes step by step, and a refused edit is still named
