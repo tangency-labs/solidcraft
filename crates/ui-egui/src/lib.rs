@@ -562,6 +562,9 @@ pub struct SolveApp {
     file_picker: Option<file_picker::Pending>,
     /// A slicer started alone and waited for before the file is sent (Send to Slicer).
     pub(crate) slicer_wait: Option<dialogs_save_mesh::SlicerWait>,
+    /// The ribbon tab Send to Slicer was opened from and the one it moved to, to go back to on
+    /// closing it (`print_face_ui::tick_return_tab`).
+    pub(crate) slicer_return_tab: Option<(String, String)>,
     /// Open with EasyPrint: the upload in flight and the question before the first one.
     pub(crate) easyprint: easyprint_ui::State,
     /// A Save or Save As being written on a worker (see [`save_job`]).
@@ -847,6 +850,7 @@ impl SolveApp {
             services,
             file_picker: None,
             slicer_wait: None,
+            slicer_return_tab: None,
             easyprint: Default::default(),
             saving: None,
             viewport: viewport::ViewportState::default(),
@@ -1760,9 +1764,10 @@ impl SolveApp {
             }
             return;
         }
-        // Print Face (Ctrl+B) acts on the selected face at once: it has no dialog.
+        // Print Face (Ctrl+B) opens Send to Slicer to pick it, or with the old preference acts on
+        // the selected face at once.
         if id == "body.print_face" {
-            print_face_ui::toggle(self);
+            print_face_ui::start(self);
             return;
         }
         if id == "view.normal_to" {
@@ -1854,7 +1859,11 @@ impl SolveApp {
         // a refusal is answered on the tab the user started from, as a disabled command above
         // already is (#10540).
         self.command_tab_before_start = Some(self.ui.tab.clone());
+        let tab_before = self.ui.tab.clone();
         workspace::select_command_tab(self, id);
+        if matches!(id, "file.send_to_slicer" | "file.open_in_easyprint") {
+            print_face_ui::remember_tab(self, tab_before, self.ui.tab.clone());
+        }
         if id == "occurrence.move" {
             joint_handles::start(self);
             return;
@@ -3105,6 +3114,7 @@ impl SolveApp {
         gpu::tick_tessellation(self);
         file_picker::tick(self, ctx);
         dialogs_save_mesh::tick_wait(self, ctx);
+        print_face_ui::tick_return_tab(self);
         easyprint_ui::tick(self, ctx);
         render_workspace::sync_backend(self);
         render_workspace::tick(self, ctx);
