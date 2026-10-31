@@ -83,6 +83,40 @@ fn screenshot(app: &mut SolveApp, draft: &mut Draft, ui: &mut Ui) -> bool {
     retake
 }
 
+/// The design saved as one `.json` file to attach to the report (#6878): maintainers otherwise ask
+/// for it in a comment. A copy: the open design keeps its own file.
+fn design(app: &mut SolveApp, draft: &mut Draft, ui: &mut Ui) {
+    ui_kit::text(ui, tr_label("Design (optional)"), ui_kit::Text::Heading("Design (optional)"));
+    ui_kit::text(
+        ui,
+        tr_label("Reports are public: attach the design only if it can be shared. Drag the saved file into the GitHub draft."),
+        ui_kit::Text::Note("design"),
+    );
+    if ui_kit::button(ui, tr_label("Save design…"), ui_kit::Button::Enabled(app.services.pick_save.is_some())).clicked() {
+        draft.design_note.clear();
+        app.pick_save(&format!("{}.json", design_file_stem(&app.session.doc.name)), &["json"], |app, path| {
+            let Some(path) = path else { return };
+            let result = app.run("file.export", serde_json::json!({"path": path, "format": "json"}));
+            if let Some(draft) = app.issue_report.draft.as_mut() {
+                draft.design_note = match result {
+                    Ok(_) => "Design saved. Drag the .json file into the GitHub draft to attach it.".into(),
+                    Err(e) => format!("Could not save the design: {e}"),
+                };
+            }
+        });
+    }
+    if !draft.design_note.is_empty() {
+        ui_kit::text(ui, tr_label(&draft.design_note), ui_kit::Text::Note("design_note"));
+    }
+}
+
+/// A file name for the design: its name with characters file systems refuse replaced.
+pub(super) fn design_file_stem(name: &str) -> String {
+    let stem: String = name.trim().chars().map(|c| if c.is_control() || r#"/\:*?"<>|"#.contains(c) { '_' } else { c }).take(80).collect();
+    let stem = stem.trim_matches(['.', ' ']);
+    if stem.is_empty() { "solidcraft-design".into() } else { stem.into() }
+}
+
 /// Returns whether to retake the screenshot and whether the user closed the form.
 pub(super) fn show(app: &mut SolveApp, draft: &mut Draft, ctx: &egui::Context) -> (bool, bool) {
     let mut retake = false;
@@ -218,6 +252,7 @@ pub(super) fn show(app: &mut SolveApp, draft: &mut Draft, ctx: &egui::Context) -
                             draft.opened_github = false;
                         }
                         retake = screenshot(app, draft, ui);
+                        design(app, draft, ui);
                         ui_kit::text(
                             ui,
                             tr_label("App/system information and command settings are included. Review private details before sharing."),
