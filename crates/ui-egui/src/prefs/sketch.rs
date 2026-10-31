@@ -25,6 +25,8 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             .on_hover_text(crate::i18n::tr_label(
                 "Before the first point, pressing a sketch tool's shortcut again steps through its creation modes. Off: it starts the tool again.",
             ));
+        let ends_tool = setting::ribbon_click_ends_tool(app, ui).on_hover_text(app.tr("prefs.ribbon_click_ends_tool_note"));
+        crate::scenario::publish_target("prefs:ribbon_click_ends_tool", ends_tool.rect);
         // Sketch icons in the colour of their solve state (#7245).
         let check = setting::sketch_state_icons(app, ui).on_hover_text(app.tr("prefs.sketch_state_icons_note"));
         crate::scenario::publish_target("prefs:sketch_state_icons", check.rect);

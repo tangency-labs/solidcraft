@@ -1,0 +1,34 @@
+{
+  "en": {
+    "prefs.ribbon_click_ends_tool": "Clicking the running tool's button ends it",
+    "prefs.ribbon_click_ends_tool_note": "A click on the lit ribbon button of the sketch tool in use ends the tool, so clicks in the view select again. Off: the click starts the tool again."
+  },
+  "ar": {
+    "prefs.ribbon_click_ends_tool": "النقر على زر الأداة قيد التشغيل ينهيها",
+    "prefs.ribbon_click_ends_tool_note": "النقر على زر الشريط المضيء لأداة الرسم المستخدمة ينهي الأداة، فيعود النقر في العرض إلى التحديد. عند الإيقاف: يبدأ النقر الأداة من جديد."
+  },
+  "de": {
+    "prefs.ribbon_click_ends_tool": "Klick auf die Schaltfläche des laufenden Werkzeugs beendet es",
+    "prefs.ribbon_click_ends_tool_note": "Ein Klick auf die hervorgehobene Schaltfläche des aktiven Skizzenwerkzeugs beendet das Werkzeug, sodass Klicks in die Ansicht wieder auswählen. Aus: Der Klick startet das Werkzeug neu."
+  },
+  "he": {
+    "prefs.ribbon_click_ends_tool": "לחיצה על הלחצן של הכלי הפעיל מסיימת אותו",
+    "prefs.ribbon_click_ends_tool_note": "לחיצה על לחצן הסרט המודגש של כלי השרטוט שבשימוש מסיימת את הכלי, כך שלחיצות בתצוגה בוחרות שוב. כבוי: הלחיצה מפעילה את הכלי מחדש."
+  },
+  "ja": {
+    "prefs.ribbon_click_ends_tool": "実行中のツールのボタンをクリックすると終了する",
+    "prefs.ribbon_click_ends_tool_note": "使用中のスケッチツールの点灯したリボンボタンをクリックするとツールが終了し、ビューのクリックで再び選択できます。オフ: クリックするとツールが最初から開始されます。"
+  },
+  "ko": {
+    "prefs.ribbon_click_ends_tool": "실행 중인 도구의 버튼을 클릭하면 도구 종료",
+    "prefs.ribbon_click_ends_tool_note": "사용 중인 스케치 도구의 강조된 리본 버튼을 클릭하면 도구가 종료되어 뷰에서 클릭하면 다시 선택됩니다. 끄기: 클릭하면 도구가 다시 시작됩니다."
+  },
+  "vi": {
+    "prefs.ribbon_click_ends_tool": "Nhấp vào nút của công cụ đang chạy sẽ kết thúc nó",
+    "prefs.ribbon_click_ends_tool_note": "Nhấp vào nút ruy-băng đang sáng của công cụ phác thảo đang dùng sẽ kết thúc công cụ, để các cú nhấp trong khung nhìn lại chọn đối tượng. Tắt: cú nhấp khởi động lại công cụ."
+  },
+  "zh": {
+    "prefs.ribbon_click_ends_tool": "单击正在运行的工具的按钮将结束该工具",
+    "prefs.ribbon_click_ends_tool_note": "单击正在使用的草图工具的高亮功能区按钮会结束该工具，在视图中单击即可再次选择。关闭：单击会重新启动该工具。"
+  }
+}
