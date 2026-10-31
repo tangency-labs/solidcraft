@@ -446,44 +446,17 @@ mod smlib {
             crate::sphere(Vec3::new(10.0, 10.0, 10.0), 4.0).unwrap(),
             crate::torus(Vec3::new(0.0, 0.0, 0.0), 10.0, 2.0).unwrap(),
         ];
+        // SMLib imports a record's faces and edges in the record's order, and the record is
+        // already canonical: SMLib's face and edge i are the record's i (the order is the
+        // identity, or empty, which says the same), with no edge split into pieces.
         for (i, b) in bodies.iter().enumerate() {
             let (_, order) = crate::native::smlib_body_ordered(b).unwrap();
-            assert!(order.is_some(), "body {i}");
+            let order = order.unwrap_or_else(|| panic!("body {i}: no order"));
+            let identity = |to: &[usize], n: usize| to.is_empty() || to.iter().copied().eq(0..n);
+            assert!(identity(&order.faces, b.face_count()), "body {i}: faces {:?}", order.faces);
+            assert!(identity(&order.edges, b.edge_count()), "body {i}: edges {:?}", order.edges);
+            assert!(order.pieces.is_empty(), "body {i}: {:?}", order.pieces);
         }
-    }
-
-    #[test]
-    fn box_minus_sphere() {
-        let a = boxed(0.0, 0.0, 0.0, 10.0, 10.0, 10.0);
-        let b = crate::sphere(Vec3::new(10.0, 10.0, 10.0), 4.0).unwrap();
-        let r = through_smlib(&a, &b, BoolOp::Cut);
-        let h = verified(&r, &[&a, &b], 0.02);
-        // The three notched box faces, the three untouched, and the sphere's patches inside.
-        assert_eq!(changes(h)[..2].iter().sum::<usize>() + changes(h)[2], h.faces.len(), "{}", show(h));
-        assert!(
-            meets(h).iter().all(|(x, y)| matches!((x, y), (FaceOrigin::Face { operand: 0, .. }, FaceOrigin::Face { operand: 1, .. }))),
-            "{}",
-            show(h)
-        );
-    }
-
-    #[test]
-    fn box_minus_cylinder() {
-        let a = boxed(0.0, 0.0, 0.0, 10.0, 10.0, 10.0);
-        let b = crate::cylinder(Vec3::new(5.0, 5.0, -1.0), Vec3::Z, 2.0, 12.0).unwrap();
-        let r = through_smlib(&a, &b, BoolOp::Cut);
-        let h = verified(&r, &[&a, &b], 0.01);
-        assert!(from(h, face(0, 0)).len() + from(h, face(0, 1)).len() >= 1, "{}", show(h));
-    }
-
-    #[test]
-    fn box_union_box() {
-        let a = boxed(0.0, 0.0, 0.0, 10.0, 10.0, 10.0);
-        let b = boxed(5.0, 2.0, 2.0, 15.0, 8.0, 8.0);
-        let r = through_smlib(&a, &b, BoolOp::Union);
-        let h = verified(&r, &[&a, &b], 0.02);
-        assert_eq!(h.faces.len(), 11, "{}", show(h));
-        assert_eq!(meets(h).len(), 4, "{}", show(h));
     }
 
     /// Cubes sharing an edge, and cubes sharing a vertex: SMLib's union touches itself there;

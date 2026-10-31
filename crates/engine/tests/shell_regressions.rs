@@ -46,6 +46,13 @@ fn shell_box_on_box_overhanging_saddle_corner() {
     let mut s = box_on_box(2.5);
     run(&mut s, "solid.shell", json!({"faces": [[7.5, 17.5, 38.75]], "thickness": 1.5}));
     sound(&s);
+    // The bottom closed and the top box's left face x = 7.5 open, so the cavity in the top box
+    // runs out to it: [1.5, 23.5] × [1.5, 16] × [1.5, 33.5] in the lower box,
+    // [7.5, 21] × [1.5, 16] × [33.5, 41] over it and [7.5, 21] × [16, 18.5] × [36.5, 41] in the
+    // overhang, out of the solid's 25 × 17.5 × 35 + 15 × 20 × 7.5.
+    let want = 25.0 * 17.5 * 35.0 + 15.0 * 20.0 * 7.5 - 22.0 * 14.5 * 32.0 - 13.5 * 14.5 * 7.5 - 13.5 * 2.5 * 4.5;
+    let got = volume(&s);
+    assert!((got - want).abs() < 1e-6 * want, "shell volume {got}, want {want}");
 }
 
 /// The same saddle corner with the bottom open: every face round the corner moves, and the
