@@ -4194,7 +4194,8 @@ fn blend_edges_on(mb: &ModelBody, f: &Feature, edges: &[crate::Position], idx: &
             Some((_, Err(_))) | None => {
                 let mut w = None;
                 let refs: Vec<EdgeRef> = f.edge_refs.get(i).cloned().into_iter().collect();
-                let skipped = format!("edge `{}` no longer exists and was skipped", stored.map(String::as_str).unwrap_or("?"));
+                let skipped =
+                    format!("edge `{}` no longer exists and was skipped", stored.map_or_else(|| "?".into(), |n| crate::name_lookup::quoted(n)));
                 // The name is gone. A pick on the axis of a round must not fall through to the
                 // tangency seam (#775). A sharp edge that moved still resolves from the point,
                 // which an edit relies on.
@@ -4203,7 +4204,7 @@ fn blend_edges_on(mb: &ModelBody, f: &Feature, edges: &[crate::Position], idx: &
                 } else if let Ok(q) = resolve_edges(&mb.body, &[p], &refs, &mut w) {
                     out.extend(q);
                     notes.push(match stored {
-                        Some(n) => format!("edge `{n}` no longer exists; using the edge at the picked point"),
+                        Some(n) => format!("edge `{}` no longer exists; using the edge at the picked point", crate::name_lookup::quoted(n)),
                         None => "an edge reference without a name was found by its point".into(),
                     });
                 } else {
@@ -7099,10 +7100,10 @@ fn face_plane(st: &ModelState, picked: &Plane, at: Vec3, name: Option<&str>) -> 
                         let note = if crate::naming::legacy_name(name).is_some() {
                             None
                         } else if !crate::naming::face_has_name(b, f.index, name) {
-                            Some(format!("face `{name}` was split; using the piece nearest the picked point"))
+                            Some(format!("face `{}` was split; using the piece nearest the picked point", crate::name_lookup::quoted(name)))
                         } else if !crate::naming::face_name_exact(b, f.index) && (f.centroid - at).dot(n).abs() > tol {
                             // Named from geometry and moved off the picked plane: geometry alone decided.
-                            Some(format!("face `{name}` was found by geometry, not exact history; check it"))
+                            Some(format!("face `{}` was found by geometry, not exact history; check it", crate::name_lookup::quoted(name)))
                         } else {
                             None
                         };

@@ -159,6 +159,21 @@ fn results_kept_ahead_outlive_the_cache() {
     assert!(rel(measure(&m.state().bodies[0].body).unwrap().volume, 30000.0) < 1e-9);
 }
 
+/// A warning quotes a long generated name by its start and end (#8541: fourteen split edges'
+/// full names made one chamfer warning 122,701 characters long); a short name stays whole.
+#[test]
+fn warnings_quote_long_names_by_their_ends() {
+    let face = |i: usize| format!("Extrude{i}.side(Sketch{i}.l{i})·Fillet{i}.blend(Chamfer{i}.cap)");
+    let long = (0..40).map(face).collect::<Vec<_>>().join("|");
+    let q = crate::name_lookup::quoted(&long);
+    assert!(q.chars().count() <= 80, "{q}");
+    assert!(q.starts_with("Extrude0.side") && q.ends_with(&long[long.len() - 10..]) && q.contains('…'), "{q}");
+    assert_eq!(crate::name_lookup::quoted("Extrude1.side|Box1.top"), "Extrude1.side|Box1.top");
+    // Characters, not bytes: a name of non-ASCII characters is cut between characters.
+    let wide = "Ü".repeat(200);
+    assert_eq!(crate::name_lookup::quoted(&wide).chars().count(), 73);
+}
+
 /// A saved model whose feature warning is longer than 65,536 characters is still taken on open
 /// (#8541): Save writes it, so Open reads it.
 #[test]

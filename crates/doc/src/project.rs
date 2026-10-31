@@ -669,7 +669,7 @@ fn refresh_links_in(
                 *at = p;
                 named_face = Some((body.clone(), index, p));
                 if split {
-                    warn.push(format!("projected face `{name}` was split; using the nearest piece"));
+                    warn.push(format!("projected face `{}` was split; using the nearest piece", crate::name_lookup::quoted(name)));
                 }
             } else {
                 sk.set_link_lost(&l.id, true);

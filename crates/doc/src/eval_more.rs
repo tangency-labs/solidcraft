@@ -780,7 +780,10 @@ pub(super) fn sheet_eval(
                         hit.point
                     }
                     Some((n, Err(_))) => {
-                        append_warning(warning, format!("edge `{n}` no longer exists; using the edge at the picked point"));
+                        append_warning(
+                            warning,
+                            format!("edge `{}` no longer exists; using the edge at the picked point", crate::name_lookup::quoted(n)),
+                        );
                         p.0
                     }
                     None => p.0,
