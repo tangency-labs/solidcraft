@@ -36,8 +36,10 @@
 //! generated.
 //!
 //! Status `-2` marks an upstream path that is undefined (UB-170, null topology): the
-//! shim does not run it and the port returns `InvalidInput`. The Rust scene holds its
-//! geometry natively, so no case is skipped as inexact.
+//! shim does not run it. An empty record with that sentinel is reported as a native
+//! rejection, never as a successful comparison. Rust-only regressions exercise the
+//! safe UB-170 continuation independently. The Rust scene holds its geometry natively,
+//! so no case is skipped as inexact.
 //!
 //! The renumbered scene's geometry is owned under the kernel's arena identities (and the
 //! B-rep records that naming), so `SmBrep::GetSurfaces` (`IsPointVisible`) finds each face
@@ -523,6 +525,17 @@ fn output(status: f64, record: Vec<f64>) -> Output {
     Output::new().values("status", vec![status]).values("record", record)
 }
 
+// The shim emits an empty -2 record only when its existing UB/null-topology
+// guards refuse the call. An operation that actually ran emits its record even
+// on failure; do not turn a real status -2 with a record into a rejection.
+fn native_output(status: f64, record: Vec<f64>) -> Output {
+    if status == -2.0 && record.is_empty() {
+        Output::rejected("blend.hcr native UB-170/null-topology guard refused undefined input")
+    } else {
+        output(status, record)
+    }
+}
+
 impl UnitDiff for Runner {
     fn id(&self) -> &'static str {
         "blend.hcr"
@@ -539,7 +552,7 @@ impl UnitDiff for Runner {
             Err(e) => return Ok(Output::err(format!("rejected: {e}"))),
         };
         let o = ffi::split(&v).ok_or_else(|| harness("short output"))?;
-        Ok(output(o.status, o.record.to_vec()))
+        Ok(native_output(o.status, o.record.to_vec()))
     }
 
     fn run_rust(&self, case: &Case) -> Result<Output, HarnessError> {
@@ -1005,4 +1018,65 @@ fn gen_case(rng: &mut Rng) -> Value {
     }
     merge(&mut v, &gen_op(rng, edge, false));
     v
+}
+
+#[cfg(test)]
+mod ub170_tests {
+    use super::*;
+
+    #[test]
+    fn native_guard_is_rejected_without_hiding_operation_results() {
+        assert!(native_output(-2.0, vec![]).rejected.is_some());
+        for (status, record) in [(0.0, vec![]), (-2.0, vec![1.0]), (3.0, vec![])] {
+            let o = native_output(status, record.clone());
+            assert!(o.rejected.is_none());
+            assert_eq!(o.values.get("status"), Some(&vec![status]));
+            assert_eq!(o.values.get("record"), Some(&record));
+        }
+    }
+
+    #[test]
+    fn guarded_ub170_cases_complete_independently_in_rust() {
+        // These unchanged generated cases formerly returned UB-170 InvalidInput.
+        // Native rejection is checked separately; no native output is supplied
+        // to the Rust scene builder or operation, and these are not parity passes.
+        let expected = [
+            (14, 35),
+            (62, 24),
+            (114, 18),
+            (128, 18),
+            (163, 18),
+            (175, 18),
+            (183, 18),
+            (197, 24),
+            (237, 24),
+            (251, 18),
+            (256, 18),
+            (279, 18),
+            (289, 24),
+            (294, 18),
+            (306, 18),
+            (318, 24),
+            (367, 18),
+        ];
+        for (index, record_len) in expected {
+            let seed = CaseContext::seed_for("blend.hcr", index);
+            let mut rng = Rng::new(seed);
+            let case = Case {
+                unit: "blend.hcr".into(),
+                name: format!("gen{index:04}"),
+                source: crate::case::CaseSource::Generated { seed },
+                inputs: Runner.generate(&mut rng).unwrap(),
+            };
+            let cpp = Runner.run_cpp(&case).unwrap();
+            assert!(cpp.rejected.is_some(), "{}: {cpp:?}", case.name);
+            let rust = Runner.run_rust(&case).unwrap();
+            assert!(rust.error.is_none(), "{}: {rust:?}", case.name);
+            assert!(rust.deferred.is_none(), "{}: {rust:?}", case.name);
+            assert_eq!(rust.values.get("status"), Some(&vec![0.0]), "{}", case.name);
+            let record = rust.values.get("record").unwrap();
+            assert_eq!(record.len(), record_len, "{}", case.name);
+            assert!(record.iter().all(|v| v.is_finite()), "{}", case.name);
+        }
+    }
 }
