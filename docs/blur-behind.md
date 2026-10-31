@@ -231,8 +231,15 @@ cargo build --locked --profile ci -p solidcraft
 
 Cargo.lock was updated as text for the local egui 0.36.2 patch: only that package's
 registry source/checksum were removed; dependency versions are unchanged. No
-cargo execution was used. Set `SOLIDCRAFT_REQUIRE_GPU=1` for the
-hardware gate (otherwise no-adapter/software positive cases are reported as skipped).
+cargo execution was used. Set `SOLIDCRAFT_REQUIRE_GPU=1` to require an adapter
+(hardware or software); a missing adapter/device fails every blur fixture consumer.
+The explicit `cfg(test)` rendering fixture runs all positive compositor, cache,
+pixel and suspension assertions on CI software adapters independently of production
+software policy, retaining real adapter identity and format/device requirements.
+A separate production-policy test asserts that actual software adapters report
+`Unavailable("software adapter (gpu-software)")`, allocate no blur resources and
+emit no markers. Production software blur remains unavailable.
+
 To export fixed-scene 8/18/40 and zero light/dark images, counters, and warmed
 UI/encode/GPU-completion benchmark samples:
 

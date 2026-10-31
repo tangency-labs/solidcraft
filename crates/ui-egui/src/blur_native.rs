@@ -12,10 +12,15 @@ const MAX_MARKERS: usize = 256;
 type Params = [f32; 24];
 
 fn capability(adapter: &wgpu::Adapter, format: wgpu::TextureFormat, split: bool, msaa: u32) -> Capability {
-    let allowed = wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_SRC;
     if solidcraft_gpu::select::tier_of(adapter.get_info().device_type) == solidcraft_gpu::select::Tier::Software {
-        Capability::Unavailable("software adapter (gpu-software)")
-    } else if !split || msaa != 1 {
+        return Capability::Unavailable("software adapter (gpu-software)");
+    }
+    rendering_capability(adapter, format, split, msaa)
+}
+
+fn rendering_capability(adapter: &wgpu::Adapter, format: wgpu::TextureFormat, split: bool, msaa: u32) -> Capability {
+    let allowed = wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_SRC;
+    if !split || msaa != 1 {
         Capability::Unavailable("requires a native split scene and 1x UI without depth")
     } else if !matches!(
         format,
@@ -229,6 +234,14 @@ impl State {
     }
 }
 
+/// Select production policy or bypass only its software rejection for rendering fixtures.
+#[cfg(test)]
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum FixturePolicy {
+    Production,
+    Rendering,
+}
+
 #[cfg(test)]
 pub(crate) fn fixture_state(
     adapter: &wgpu::Adapter,
@@ -236,6 +249,7 @@ pub(crate) fn fixture_state(
     queue: &wgpu::Queue,
     renderer: &Arc<egui::epaint::mutex::RwLock<egui_wgpu::Renderer>>,
     format: wgpu::TextureFormat,
+    policy: FixturePolicy,
 ) -> State {
     State {
         radius: 0.0,
@@ -246,7 +260,10 @@ pub(crate) fn fixture_state(
             renderer: Arc::downgrade(renderer),
             lost: egui_wgpu::DeviceLost::watch(device),
             format,
-            capability: std::sync::OnceLock::new(),
+            capability: match policy {
+                FixturePolicy::Production => std::sync::OnceLock::new(),
+                FixturePolicy::Rendering => std::sync::OnceLock::from(rendering_capability(adapter, format, true, 1)),
+            },
             split: true,
             msaa: 1,
         }),

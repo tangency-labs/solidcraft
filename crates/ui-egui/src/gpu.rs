@@ -682,6 +682,7 @@ mod tests {
         app: crate::SolveApp,
         ctx: egui::Context,
         renderer: std::sync::Arc<egui::epaint::mutex::RwLock<egui_wgpu::Renderer>>,
+        adapter: egui_wgpu::wgpu::Adapter,
         device: egui_wgpu::wgpu::Device,
         queue: egui_wgpu::wgpu::Queue,
         output: egui_wgpu::wgpu::Texture,
@@ -693,9 +694,13 @@ mod tests {
 
     #[cfg(not(target_arch = "wasm32"))]
     impl BlurFixture {
-        fn new(srgb: bool) -> Option<Self> {
+        fn new(srgb: bool, policy: crate::blur::FixturePolicy) -> Option<Self> {
             use super::*;
-            let (adapter, device, queue) = offscreen_device()?;
+            let Some((adapter, device, queue)) = offscreen_device() else {
+                assert!(std::env::var_os("SOLIDCRAFT_REQUIRE_GPU").is_none(), "GPU adapter required for blur fixture");
+                eprintln!("skipped blur fixture: no admitted adapter/device");
+                return None;
+            };
             let format = if srgb { wgpu::TextureFormat::Rgba8UnormSrgb } else { wgpu::TextureFormat::Rgba8Unorm };
             let renderer = Arc::new(egui::epaint::mutex::RwLock::new(egui_wgpu::Renderer::new(&device, format, Default::default())));
             let mut app = crate::test_support::app_with_script(serde_json::json!({"commands":[
@@ -712,7 +717,10 @@ mod tests {
             app.viewport.gpu = Some(view.target());
             app.viewport.draw_stats = Some(view.stats());
             renderer.write().callback_resources.insert(view);
-            app.blur = crate::blur::fixture_state(&adapter, &device, &queue, &renderer, format);
+            app.blur = crate::blur::fixture_state(&adapter, &device, &queue, &renderer, format, policy);
+            if policy == crate::blur::FixturePolicy::Rendering {
+                assert_eq!(app.blur.capability(), crate::blur::Capability::Available, "blur fixture requires real rendering capabilities");
+            }
             let size = [800, 600];
             let output = device.create_texture(&wgpu::TextureDescriptor {
                 label: Some("full egui fixture"),
@@ -729,6 +737,7 @@ mod tests {
                 app,
                 ctx,
                 renderer,
+                adapter,
                 device,
                 queue,
                 output,
@@ -861,25 +870,37 @@ mod tests {
 
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
+    fn blur_production_policy_rejects_software_adapter() {
+        use crate::blur::{Capability, FixturePolicy};
+        let Some(mut f) = BlurFixture::new(false, FixturePolicy::Production) else { return };
+        if solidcraft_gpu::select::tier_of(f.adapter.get_info().device_type) != solidcraft_gpu::select::Tier::Software {
+            eprintln!("skipped software policy assertion: selected adapter is not software");
+            return;
+        }
+        let unavailable = Capability::Unavailable("software adapter (gpu-software)");
+        assert_eq!(f.app.blur.capability(), unavailable);
+        f.app.blur.set_radius(18.0).unwrap();
+        for _ in 0..6 {
+            f.frame();
+        }
+        assert_eq!(f.app.blur.capability(), unavailable);
+        let counts = f.app.blur.counters();
+        assert_eq!((counts.textures_created, counts.buffers_created, counts.bind_groups_created, counts.pipelines_created), (0, 0, 0, 0));
+        assert_eq!((counts.markers_emitted, counts.markers_drawn), (0, 0));
+        assert_eq!(counts.live_bytes, 0);
+        assert!(f.app.blur.source_texture().is_none());
+        assert!(f.renderer.read().frame_compositor.is_none());
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
     fn blur_full_egui_composition() {
         for srgb in [false, true] {
-            let Some(mut f) = BlurFixture::new(srgb) else {
-                assert!(std::env::var_os("SOLIDCRAFT_REQUIRE_GPU").is_none(), "hardware GPU required");
-                eprintln!("skipped blur fixture: no admitted adapter");
-                return;
-            };
+            let Some(mut f) = BlurFixture::new(srgb, crate::blur::FixturePolicy::Rendering) else { return };
             for _ in 0..6 {
                 f.frame();
             }
-            if f.app.blur.capability() != crate::blur::Capability::Available {
-                f.app.blur.set_radius(18.0).unwrap();
-                f.frame();
-                assert_eq!(f.app.blur.counters().textures_created, 0);
-                assert_eq!(f.app.blur.counters().markers_emitted, 0);
-                assert!(std::env::var_os("SOLIDCRAFT_REQUIRE_GPU").is_none(), "blur unavailable: {:?}", f.app.blur.capability());
-                eprintln!("skipped positive blur: {:?}", f.app.blur.capability());
-                continue;
-            }
+            assert_eq!(f.app.blur.capability(), crate::blur::Capability::Available);
             let plain = f.pixels(false);
             let plain_jobs = f.jobs;
             let original_camera = f.app.cam;
@@ -988,11 +1009,7 @@ mod tests {
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn blur_steady_frame_benchmark() {
-        let Some(mut f) = BlurFixture::new(false) else { return };
-        if f.app.blur.capability() != crate::blur::Capability::Available {
-            assert!(std::env::var_os("SOLIDCRAFT_REQUIRE_GPU").is_none(), "blur unavailable");
-            return;
-        }
+        let Some(mut f) = BlurFixture::new(false, crate::blur::FixturePolicy::Rendering) else { return };
         f.app.blur.set_surface_alpha(Some(180));
         let mut rows = Vec::new();
         for radius in [0.0, 18.0, 0.0] {
@@ -1019,10 +1036,7 @@ mod tests {
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn blur_suspend_releases_targets() {
-        let Some(mut f) = BlurFixture::new(false) else { return };
-        if f.app.blur.capability() != crate::blur::Capability::Available {
-            return;
-        }
+        let Some(mut f) = BlurFixture::new(false, crate::blur::FixturePolicy::Rendering) else { return };
         f.app.blur.set_surface_alpha(Some(180));
         f.app.blur.set_radius(18.0).unwrap();
         for _ in 0..3 {
@@ -1043,11 +1057,7 @@ mod tests {
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn blur_late_layer_transform_moves_source_and_invalidates_cache() {
-        let Some(mut f) = BlurFixture::new(false) else { return };
-        if f.app.blur.capability() != crate::blur::Capability::Available {
-            assert!(std::env::var_os("SOLIDCRAFT_REQUIRE_GPU").is_none(), "blur unavailable");
-            return;
-        }
+        let Some(mut f) = BlurFixture::new(false, crate::blur::FixturePolicy::Rendering) else { return };
         f.app.blur.set_radius(18.0).unwrap();
         f.app.blur.set_surface_alpha(Some(180));
         for _ in 0..6 {
