@@ -109,7 +109,8 @@ pub(crate) fn ribbon_height(labels: bool) -> f32 {
 }
 const BUTTON_GAP: f32 = 3.0;
 const BUTTON_MIN_WIDTH: f32 = 54.0;
-const BUTTON_MAX_WIDTH: f32 = 76.0;
+/// Enough for "Rectangle" and "Interference" on one line without an ellipsis (#9083).
+const BUTTON_MAX_WIDTH: f32 = 100.0;
 const BUTTON_LABEL_PADDING: f32 = 10.0;
 /// Where a button's label starts below the button's top edge, under its icon.
 const BUTTON_LABEL_TOP: f32 = 32.0;
@@ -4825,10 +4826,10 @@ mod ribbon_label_tests {
                     }
                 }
             }
-            for label in ["Rectangular", "Dimension", "Coincident", "Chamfer", "Revolve"] {
+            for label in ["Rectangular", "Rectangle", "Interference", "Dimension", "Coincident", "Chamfer", "Revolve"] {
                 let width = ribbon_button_width(&painter, label);
-                assert_eq!(ribbon_button_lines(&painter, label, width - BUTTON_LABEL_PADDING), vec![label]);
-                assert!((BUTTON_MIN_WIDTH..=BUTTON_MAX_WIDTH).contains(&width));
+                assert_eq!(ribbon_button_lines(&painter, label, width - BUTTON_LABEL_PADDING), vec![label], "{label}");
+                assert!((BUTTON_MIN_WIDTH..=BUTTON_MAX_WIDTH).contains(&width), "{label}: {width}");
             }
             let finish = solidcraft_engine::find_command("sketch.finish").unwrap();
             let label = crate::workspace::ribbon_button_label(finish);

@@ -663,13 +663,19 @@ pub fn page(app: &mut SolveApp, ui: &mut egui::Ui) {
                 .chain(app.keymap.recorder.preview().filter(|_| app.keymap.capturing.is_some()).map(|text| ui_kit::ContentWidth::button(ui, &text)))
                 .fold(ui_kit::ContentWidth::button(ui, app.tr_label("press a key…")), f32::max)
                 .max(ui_kit::ContentWidth::label(ui, app.tr_label("Keyboard Shortcuts")) + t.space_8);
+            // Wide enough for "Draw Dimensioned Sketch Geometry" on one line (#9083).
+            let command_width = commands
+                .iter()
+                .map(|(_, _, label)| ui_kit::ContentWidth::label(ui, label))
+                .fold(ui_kit::ContentWidth::label(ui, app.tr_label("Command")), f32::max)
+                .max(t.form_label_width);
             let action_width = if app.keymap.read_only {
                 t.control_height
             } else {
                 ui_kit::ContentWidth::button(ui, app.tr_label("Clear")) + ui_kit::ContentWidth::button(ui, app.tr_label("Reset")) + t.space_4
             };
             let columns = [
-                ui_kit::Column::new("Command", 1.5).flex().min_content_width(t.form_label_width),
+                ui_kit::Column::new("Command", 1.5).flex().min_content_width(command_width),
                 ui_kit::Column::new(crate::i18n::tr("keymap.command_id"), 1.8).flex().min_content_width(t.form_label_width),
                 ui_kit::Column::new("Keyboard Shortcuts", 1.0).flex().min_content_width(key_width),
                 ui_kit::Column::new("", 0.0).icon_only().min_content_width(action_width),
