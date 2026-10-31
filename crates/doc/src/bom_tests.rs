@@ -348,6 +348,9 @@ fn what_a_folded_part_holds_is_listed_as_parts_only_lists_it() {
         row("1.1.2", "Pin", Normal, 1, 1),
     ];
     assert_eq!(rows(&all), nested);
+    let assemblies: Vec<(String, bool)> = all.rows_deep().into_iter().map(|(_, r)| (r.names.join("; "), r.assembly)).collect();
+    let expected = [("Machine", true), ("Gearbox", true), ("Shaft", false), ("Pin", false)].map(|(name, assembly)| (name.to_string(), assembly));
+    assert_eq!(assemblies, expected, "a row that places others is an assembly");
 }
 
 /// Bolt (purchased) holding a nut; Frame (inseparable) holding a plate, a purchased clip and a

@@ -41,8 +41,10 @@ pub const MAX_TEXT_BYTES: usize = 1 << 20;
 use crate::cell::MISSING;
 /// The distance between baselines, in cap heights: ISO 3098-0's line spacing.
 pub const LINE_PITCH: f64 = 10.0 / 7.0;
-/// The longest row key, row field key or field.
+/// The longest row field key or field.
 const MAX_KEY_BYTES: usize = 256;
+/// The longest row key: room for a parts list's deepest row, which names 65 members.
+const MAX_ROW_KEY_BYTES: usize = 2048;
 const MAX_ROW_HEIGHT_MM: f64 = 1000.0;
 /// The row field that says how many balloons point at a parts list's row: for its editor alone, so
 /// no printed column reads it.
@@ -283,7 +285,7 @@ impl Table {
         }
         let mut cells = HashSet::new();
         for o in &self.overrides {
-            require(o.row.len() <= MAX_KEY_BYTES, "a row's key is at most 256 bytes")?;
+            require(o.row.len() <= MAX_ROW_KEY_BYTES, "a row's key is at most 2048 bytes")?;
             require(column(&o.column), "an override names a column")?;
             require(cells.insert((&o.row, &o.column)), "no two overrides are for one cell")?;
             check_text([o.text.as_str()]).map_err(cell_rule)?;
@@ -303,7 +305,7 @@ impl Table {
         require(on_paper(corner), "a table lies within the paper's coordinates")?;
         let mut keys = HashSet::new();
         for row in rows {
-            require(row.key.len() <= MAX_KEY_BYTES, "a row's key is at most 256 bytes")?;
+            require(row.key.len() <= MAX_ROW_KEY_BYTES, "a row's key is at most 2048 bytes")?;
             require(keys.insert(row.key.as_str()), "no two rows have the same key")?;
             budget.add(&row.key)?;
             for (key, value) in &row.fields {

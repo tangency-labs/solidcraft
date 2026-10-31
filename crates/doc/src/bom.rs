@@ -139,6 +139,15 @@ pub(crate) struct RowKey {
     pub(crate) member: Member,
 }
 
+impl RowKey {
+    /// The key as text, for what names a row by a word (a table's overrides): each member, outermost
+    /// first.
+    pub(crate) fn text(&self) -> String {
+        let word = |member: &Member| format!("{}:{}", crate::ids::encode(member.component), member.bom_type.as_str());
+        self.parents.iter().chain(std::iter::once(&self.member)).map(word).collect::<Vec<_>>().join("/")
+    }
+}
+
 /// What one of a row's parts stands for when it is weighed, so that the rows of any list add up
 /// to the assembly once.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -203,6 +212,8 @@ pub struct Row {
     /// Another row listed with it has the same item number.
     pub duplicate: bool,
     pub bom_type: BomType,
+    /// Its first definition places others.
+    pub assembly: bool,
     /// What one of its parts stands for when weighed.
     pub(crate) stands_for: Holds,
     /// The definitions it gathers, by id (ascending), and their names, each once.
@@ -525,6 +536,7 @@ impl<'a> Tree<'a> {
             locked: false,
             duplicate: false,
             bom_type: member.bom_type,
+            assembly: self.children.get(&member.component).is_some_and(|placed| !placed.is_empty()),
             stands_for: first.holds,
             // Filled in by `name_materials`, which reads each definition once.
             materials: Vec::new(),
