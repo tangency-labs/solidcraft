@@ -1,11 +1,6 @@
 # The shell cases that fail today on solidcore, one a line: `<case> <why it fails today>`. Sorted.
 # The kernel rig gate fails on a case that fails and is not listed, and on a listed case that passes.
-# Baseline: solidcore pin 9dde25e97, tests/kernel-cases run by `cargo xtask kernel-cases`, x86_64 Linux.
+# Baseline: solidcore pin de85a3e00, tests/kernel-cases run by `cargo xtask kernel-cases`, x86_64 Linux.
 316-shell-open-beside-a-bottom-round-r2-4-as-large-as-the-wall-refused [fail] succeeded where the case expects a refusal
 316-shell-open-beside-a-bottom-round-r2-as-large-as-the-wall-refused [fail] succeeded where the case expects a refusal
-545-shell-ring-cut-frame-open-at-an-outer-wall [fail] step 14 (solid.shell): SMLib shell: operation: SMLib failed (status 1001)
-616-shell-open-a-rib-side-face-of-a-lid [fail] step 11 (solid.shell): SMLib shell: operation: SMLib failed (status 1001)
 cov-shell-again-open-at-an-inner-wall-of-a-shelled-box [fail] step 9 (solid.shell): SMLib shell: operation: SMLib failed (status 1001)
-cov-shell-pocket-whose-floor-falls-to-a-drain [fail] step 14 (solid.shell): SMLib shell: operation: SMLib failed (status 1001)
-cov-shell-trough-whose-floor-falls-to-a-drain [fail] step 13 (solid.shell): SMLib shell: operation: SMLib failed (status 1001)
-cov-shell-up-down-joined-squares-open-at-a-side-wall [fail] step 9 (solid.shell): SMLib shell: operation: SMLib failed (status 1001)
