@@ -7,6 +7,17 @@
 //! capi test `corner_ball_after_a_round_is_exactly_singular`: a bar's front top edge
 //! rounded r 2, then its vertical front left edge, its left top edge and the first
 //! round's end arc rounded r 2 together.
+//!
+//! The fork's test asserts the result passes `smlib_brep_check` (level 2). This bar is
+//! rebuilt here (the fork reads its own, `tests/data/corner-after-round.txt`, with other
+//! residues and nine faces), and on it the pinned SMLib with the fork's hunk gives what
+//! the port gives, bit for bit: the fix clears the loop gap the off-axis rail leaves, but
+//! the corner's surface of revolution still fails `SmSurfOfRevolution` #7 by roundoff
+//! (its polar circle starts 1.19e-10 degrees past the sweep's 0; the check allows
+//! 9.1e-11). On the fork's own input the same build passes, so the fork's pass depends on
+//! its input, not on another fix:
+//! `plan/findings/blend.fillet_solver_p2--wr592-revolution-polar-start-angle.md`. The
+//! checks below are those expectations.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -22,6 +33,7 @@ use solidcore::math::{Point2, Point3, Vec3, PI};
 use solidcore::primitive::api_curves::create_line_segment;
 use solidcore::surface::surface::SurfaceKind;
 use solidcore::sweep::api_brep::create_linear_sweep;
+use solidcore::topology::brep::validation::{check_brep, CheckLevel};
 use solidcore::topology::face::p2 as face;
 use solidcore::topology::{edge, EdgeId};
 use solidcore::{Brep, Kernel};
@@ -35,13 +47,19 @@ const PROFILE: [[f64; 2]; 4] = [
     [0.4893 + 2e-10, 16.0579 - 2e-10],
 ];
 
+/// The volume at the accuracy the fork's test asks (`smlib_brep_volume(.., 1e-12, ..)`).
 fn volume(k: &Kernel, b: &mut Brep) -> f64 {
     let store = AttributeStore::default();
     let attrs = PropertyAttributes {
         store: &store,
         key_of: &|_| ObjectKey(0),
     };
-    brep_volume(k, b, 1e-8, &attrs).unwrap()
+    brep_volume(k, b, 1e-12, &attrs).unwrap()
+}
+
+/// The capi `smlib_brep_check(brep, 2)` report, one line per failed test.
+fn check(k: &mut Kernel, b: &mut Brep) -> Vec<String> {
+    check_brep(k, b, CheckLevel::Level2).unwrap().lines()
 }
 
 fn midpoint(k: &Kernel, b: &Brep, e: EdgeId) -> Point3 {
@@ -114,13 +132,15 @@ fn collapsed_rail_extent(k: &Kernel, b: &Brep) -> f64 {
     least
 }
 
-/// The corner round's collapsed rail extent and the volume it removes.
-fn corner_round(fix: bool) -> (f64, f64) {
+/// The corner round's collapsed rail extent, the volume it removes and its check report.
+fn corner_round(fix: bool) -> (f64, f64, Vec<String>) {
     let mut k = Kernel::default();
     k.fixes.fillet_torus_rail_on_axis = fix;
     let mut b = bar(&mut k);
     let front_top = nearest_edge(&k, &b, Point3::new(20.0, 0.0579, 10.0));
     fillet_edges(&mut k, &mut b, &[front_top], 2.0, 1, 1, 1.0).unwrap();
+    // the first round, the corner round's input, is sound
+    assert_eq!(check(&mut k, &mut b), Vec::<String>::new());
     let before = volume(&k, &mut b);
     let corner: Vec<EdgeId> = [
         Point3::new(0.4893, 0.0579, 4.0),
@@ -131,7 +151,17 @@ fn corner_round(fix: bool) -> (f64, f64) {
     .map(|&p| nearest_edge(&k, &b, p))
     .collect();
     fillet_edges(&mut k, &mut b, &corner, 2.0, 1, 1, 1.0).unwrap();
-    (collapsed_rail_extent(&k, &b), before - volume(&k, &mut b))
+    let removed = before - volume(&k, &mut b);
+    (
+        collapsed_rail_extent(&k, &b),
+        removed,
+        check(&mut k, &mut b),
+    )
+}
+
+/// The fork's `near(v0 - v1, want, 1e-8)`: within `1e-8` of the value, relative.
+fn near_removed(removed_volume: f64) -> bool {
+    (removed_volume - removed()).abs() <= 1e-8 * removed()
 }
 
 /// The spandrel r^2 (1 - pi/4) along the vertical edge's 8 and the top edge's 14, and in
@@ -143,26 +173,43 @@ fn removed() -> f64 {
 
 #[test]
 fn corner_round_rail_is_on_the_axis_with_the_fix() {
-    let (extent, removed_volume) = corner_round(true);
+    let (extent, removed_volume, report) = corner_round(true);
     assert!(extent < 1e-13, "collapsed rail extent {extent:e}");
+    // 20.979356723289 (pinned SMLib with the fork's hunk: the same)
     assert!(
-        (removed_volume - removed()).abs() < 1e-6 * removed(),
+        near_removed(removed_volume),
         "{removed_volume} {}",
         removed()
+    );
+    // the loop gap is gone; #7 is left, as the pinned SMLib with the fix leaves it on
+    // this bar (the fork's own input passes)
+    assert_eq!(
+        report,
+        ["SmSurfOfRevolution::Test #7 Parameterization: Bad PolarCurve Anal and NURB intervals does not match appropriate Surface Domain Intervals (tolerance= 1e-12) [owner SmSurfOfRevolution]"]
     );
 }
 
 #[test]
 fn corner_round_rail_stays_off_the_axis_without_the_fix() {
     // upstream: the rail point keeps the residues, a circle about 1e-10 across
-    let (extent, removed_volume) = corner_round(false);
+    let (extent, removed_volume, report) = corner_round(false);
     assert!(
         extent > 1e-11 && extent < 1e-9,
         "collapsed rail extent {extent:e}"
     );
+    // 20.979356723547 (the pinned SMLib: the same)
     assert!(
-        (removed_volume - removed()).abs() < 1e-6 * removed(),
+        near_removed(removed_volume),
         "{removed_volume} {}",
         removed()
+    );
+    // upstream: the nearly collapsed rail is a loop gap not on a singularity, which
+    // stops the check before AssertValid (whose SmSurface #5 is the fork's "before")
+    assert_eq!(
+        report,
+        [
+            "SmTrimmingTools::Test #2 UVEdge/UVEdge Gap: too large V Dir gap between loop Edge endPoints that are not on a singularity (offset=     1, tolerance=   0.1) [owner SmLoop]",
+            "AssertValid skipped: ValidatePointers failed",
+        ]
     );
 }
