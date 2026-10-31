@@ -278,6 +278,96 @@ fn key(p: Vec3, q: f64) -> Key {
 /// Delete faces (indices in the body's face order, as in its mesh's `tri_face`) and heal the
 /// gap by extending the neighbouring planes. The result's history is over `[body]`.
 pub fn delete_faces(body: &Body, faces: &[usize]) -> Result<Body> {
+    match delete_faces_by_healing(body, faces) {
+        Ok(result) => Ok(result),
+        Err(error) => match fill_pocket_by_wall(body, faces) {
+            Ok(Some(result)) => Ok(result),
+            _ => Err(error),
+        },
+    }
+}
+
+/// A pocket cut into a cylindrical wall (a keyway): the region its own faces and the wall bound
+/// is what fills it; NX extends the wall across the gap. Meet the wall by replacing one of the
+/// pocket's faces with it, which the Replace Face sweep already does, and accept only a closed
+/// result that leaves every deleted face's place solid.
+fn fill_pocket_by_wall(body: &Body, faces: &[usize]) -> Result<Option<Body>> {
+    use std::collections::HashMap;
+    if faces.is_empty() || FILLING.with(|f| f.get()) {
+        return Ok(None);
+    }
+    let all: Vec<mt::Face> = body.solid.face_iter().cloned().collect();
+    let point_of = |fi: usize| -> Option<Vec3> {
+        let mut sum = Vec3::ZERO;
+        let mut count = 0.0;
+        for v in all.get(fi).into_iter().flat_map(|f| f.vertex_iter()) {
+            sum += from_p3(v.point());
+            count += 1.0;
+        }
+        if count > 0.0 { Some(sum / count) } else { None }
+    };
+    let mut gap = Vec3::ZERO;
+    let mut n = 0.0;
+    let mut points = Vec::new();
+    for &fi in faces {
+        let Some(p) = point_of(fi) else { return Ok(None) };
+        gap += p;
+        n += 1.0;
+        points.push(p);
+    }
+    let gap = gap / n;
+    // The wall around the pocket: a cylindrical face sharing an edge with one of its faces.
+    let mut efaces: HashMap<mt::EdgeID, Vec<usize>> = HashMap::new();
+    for (i, f) in all.iter().enumerate() {
+        for e in f.edge_iter() {
+            let v = efaces.entry(e.id()).or_default();
+            if !v.contains(&i) {
+                v.push(i);
+            }
+        }
+    }
+    let del: std::collections::BTreeSet<usize> = faces.iter().copied().collect();
+    let mut wall = None;
+    for fs in efaces.values() {
+        if !fs.iter().any(|f| del.contains(f)) {
+            continue;
+        }
+        for &fi in fs {
+            if !del.contains(&fi) && matches!(crate::face_surface(body, fi), Some(crate::FaceSurface::Cylinder { .. })) {
+                wall = Some(fi);
+            }
+        }
+    }
+    let Some(wall) = wall else { return Ok(None) };
+    let size = body.size().max(1.0);
+    FILLING.with(|f| f.set(true));
+    let mut out = None;
+    for (fi, point) in faces.iter().copied().zip(&points) {
+        if !matches!(crate::face_surface(body, fi), Some(crate::FaceSurface::Plane { .. })) {
+            continue;
+        }
+        let tool = crate::SplitTool::Face { body, face: wall };
+        let Ok(candidate) = crate::replace_faces(body, &[*point], &tool) else { continue };
+        let filled = points.iter().all(|p| {
+            let inward = *p - gap;
+            let dir = if inward.len() > 1e-9 { inward.normalized().unwrap_or(Vec3::ZERO) } else { Vec3::ZERO };
+            candidate.contains(*p - dir * (size * 1e-4)) || candidate.contains(*p + dir * (size * 1e-4))
+        });
+        if filled {
+            out = Some(candidate);
+            break;
+        }
+    }
+    FILLING.with(|f| f.set(false));
+    Ok(out)
+}
+
+thread_local! {
+    /// `fill_pocket_by_wall` asks Replace Face, which can ask Delete Face: one level only.
+    static FILLING: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+fn delete_faces_by_healing(body: &Body, faces: &[usize]) -> Result<Body> {
     body.require_brep("Delete Face")?;
     let all: Vec<mt::Face> = body.solid.face_iter().cloned().collect();
     let n = all.len();
@@ -663,6 +753,24 @@ mod tests {
     /// Remove a vertical round and its toroidal cap while retaining the two top
     /// edge rounds. The reference is constructed independently by omitting that
     /// corner before rounding the top; deletion must produce that same solid.
+    /// A keyway cut into a boss: deleting its faces fills it back, the boss wall extending
+    /// across the gap as NX's Delete Face does, though no planar heal closes it.
+    #[test]
+    fn delete_a_keyway_onto_its_boss_wall() {
+        let boss = cylinder(Vec3::new(0.0, 0.0, 8.0), Vec3::Z, 12.0, 14.0).unwrap();
+        let cutter = box_solid(Vec3::new(-1.75, -20.0, 12.0), Vec3::new(1.75, -5.0, 22.0)).unwrap();
+        let body = boolean(&boss, &cutter, BoolOp::Cut).unwrap().unwrap();
+        let selected = faces_where(&body, |p| p.x >= -1.76 && p.x <= 1.76 && p.y <= -4.99 && p.z >= 11.99);
+        assert_eq!(selected.len(), 4, "{selected:?}");
+        let filled = delete_faces(&body, &selected).unwrap();
+        assert_eq!(filled.unmeshed_faces(), 0);
+        let volume = filled.tessellate(1e-4).unwrap().measure().volume;
+        let want = std::f64::consts::PI * 144.0 * 14.0;
+        assert!((volume - want).abs() < 1.0, "{volume} vs {want}");
+        assert!(filled.contains(Vec3::new(0.0, -11.0, 17.0)));
+        assert!(!filled.contains(Vec3::new(0.0, -14.0, 17.0)));
+    }
+
     #[test]
     fn delete_corner_round_under_two_cylindrical_neighbours() {
         let b = box_solid(Vec3::ZERO, Vec3::new(80.0, 50.0, 8.0)).unwrap();
