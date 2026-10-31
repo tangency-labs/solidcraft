@@ -1704,6 +1704,7 @@ pub(crate) fn held_overlay(app: &SolveApp) -> Option<serde_json::Map<String, ser
         ("dark", serde_json::json!(s.dark)),
         ("grid", serde_json::json!(s.grid)),
         ("navigation_bar", serde_json::json!(s.navigation_bar)),
+        ("tool_cursor", serde_json::json!(s.tool_cursor)),
         ("perspective", serde_json::json!(s.perspective)),
         ("pick_bodies", serde_json::json!(s.pick_bodies)),
         ("auto_project", serde_json::json!(s.auto_project)),
