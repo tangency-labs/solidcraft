@@ -247,7 +247,9 @@ fn link_polyline(g: &solidcraft_sketch::LinkGeom) -> Vec<Vec2> {
         LinkGeom::Ellipse { c, major, minor } => {
             (0..=96).map(|i| solidcraft_sketch::ellipse_point(c, major, minor, i as f64 / 96.0 * std::f64::consts::TAU)).collect()
         }
-        LinkGeom::Spline { ref pts, control, degree, periodic } => solidcraft_sketch::spline_polyline_mode(pts, control, degree, periodic),
+        LinkGeom::Spline { ref pts, control, degree, periodic, ref nurbs } => {
+            solidcraft_sketch::spline_polyline_mode(pts, control, degree, periodic, nurbs.as_ref())
+        }
         LinkGeom::Point(_) => Vec::new(),
     }
 }

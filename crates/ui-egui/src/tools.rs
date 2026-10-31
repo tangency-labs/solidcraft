@@ -976,6 +976,7 @@ pub(crate) fn preview_curve(
                     control: t.cmd != "sketch.spline.fit_point",
                     degree: if t.cmd == "sketch.spline.control_point_5" { 5 } else { 3 },
                     periodic,
+                    nurbs: None,
                 },
                 None,
             )
