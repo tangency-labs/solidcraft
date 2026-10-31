@@ -183,7 +183,9 @@ fn layout(sk: &Sketch, hold: &Hold) -> Layout {
         .iter()
         .enumerate()
         .map(|(i, c)| match c.kind {
-            CurveKind::Circle { .. } | CurveKind::Ellipse { .. } if c.link.is_none() && !c.fixed && !hold.radii.contains(&i) => {
+            CurveKind::Circle { .. } | CurveKind::Ellipse { .. }
+                if c.link.is_none() && !c.fixed && !hold.radii.contains(&i) && !sk.offset_circle_follows_source(i) =>
+            {
                 n += 1;
                 Some(n - 1)
             }

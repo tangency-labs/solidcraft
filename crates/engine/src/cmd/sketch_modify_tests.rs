@@ -2210,6 +2210,24 @@ fn offset_both_sides_of_a_circle_are_concentric() {
 }
 
 #[test]
+fn an_offset_circle_takes_its_radius_from_the_source() {
+    // #9264: the offset rebuilds a circle's radius from its source after the solve, but the
+    // solve still counted that radius as an unknown: a dimensioned circle and its offset
+    // reported 1 degree of freedom.
+    let mut s = new_sketch();
+    let c = ids(&run(&mut s, "sketch.circle.center", json!({"center": "origin", "radius": 25}))["curves"])[0].clone();
+    let d = run(&mut s, "sketch.dimension", json!({"entities": [c], "type": "diameter", "value": "d = 50"}));
+    assert_eq!(d["sketch"]["dof"], 0, "{d}");
+    let o = run(&mut s, "sketch.offset", json!({"curves": [c], "distance": 5, "side": [40, 0]}));
+    assert_eq!(o["sketch"]["dof"], 0, "the offset circle's radius follows its source: {o}");
+    let out = ids(&o["curves"])[0].clone();
+    run(&mut s, "parameters.change", json!({"name": "d", "expression": "60"}));
+    let sk = sketch(&s);
+    let CurveKind::Circle { r, .. } = sk.curves[sk.curve_index(&out).unwrap()].kind else { panic!("{out} is not a circle") };
+    assert!(close(r, 35.0), "30 mm source plus 5 mm: {r}");
+}
+
+#[test]
 fn offset_refuses_the_combinations_that_would_be_guesswork() {
     let mut s = new_sketch();
     let r = run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [40, 30]}));
