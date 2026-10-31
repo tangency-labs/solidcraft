@@ -5,7 +5,7 @@
 # line in the same pull request. The tests stay un-ignored, so every run shows whether they still fail.
 # `KNOWN_FAILING_TESTS.smlib` is the same list for the C++ kernel (SOLIDCRAFT_KERNEL=smlib, graded with
 # --list). Refresh as that list's header says.
-solidcraft-cli::action_matrix::action_matrix_sample 12 baseline actions fail on solidcore (status 1001 on 6 fillets/shells and 2 up-down-join; Bad Loop Orient on issue-616-lid-ribs; not closed on modern-plastic; SmSurfOfRevolution parameterization on oblique_cut_of_cylinder), of which 7 fail on C++ too
+solidcraft-cli::action_matrix::action_matrix_sample 12 baseline actions fail on solidcore: status 1001 on 9 fillets, shells and chamfers; Bad Loop Orient on issue-616-lid-ribs; not closed on modern-plastic; a bad cone parameterization on oblique_cut_of_cylinder. 7 of them fail on C++ too
 solidcraft-cli::naming_corpus::corpus_designs_name_alike_every_build_and_fail_where_a_reference_is_gone oracle/28, 30 and 36 do not load on solidcore (fillet status 1001), and oracle/83 does not on either kernel (thicken status 1001)
 solidcraft-engine::cmd::edit::tests::inserting_variable_fillet_control_preserves_parameters_at_existing_positions solidcore refuses a variable fillet whose law has a corner
 solidcraft-engine::pleat_regressions::mirrored_pleat_joins_into_a_thick_case_wall FilletRearOuter fails on solidcore with status 1001
