@@ -40,6 +40,7 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             .on_hover_text(crate::i18n::tr_label(
                 "A center point arc runs clockwise or counter-clockwise the way the cursor goes round its center. Off: always counter-clockwise from the start.",
             ));
+        dimension_values(app, ui, t.space_24 * 8.0 + t.space_8);
         let line_drag = setting::line_drag_draws_one(app, ui).on_hover_text(app.tr("prefs.line_drag_draws_one_note"));
         crate::scenario::publish_target("prefs:line_drag_draws_one", line_drag.rect);
         ui_kit::settings_block_hint(ui, app.tr("prefs.hold_stop_snapping"), app.tr("prefs.snap_drawing_note"), t.space_24 * 8.0 + t.space_8, |ui| {
@@ -102,5 +103,37 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         ui_kit::checkbox(ui, app.tr("prefs.shift_add_ctrl_toggle"), &mut app.preferences.selection_shift_add_only)
             .on_hover_text(crate::i18n::tr_label("On: Shift adds items, Ctrl/Cmd toggles. Off (default): Shift and Ctrl/Cmd both toggle."));
         ui_kit::text(ui, app.tr("prefs.shift_add_note"), ui_kit::Text::Hint("selection_modifiers"));
+    });
+}
+
+/// Where a dimension's value is typed, and what the window's arrows step lengths and angles by
+/// (#7246). The steps only matter in the window, so they wait for it.
+fn dimension_values(app: &mut SolveApp, ui: &mut egui::Ui, label_width: f32) {
+    let label = app.tr("prefs.dimension_values").to_string();
+    ui_kit::settings_block_hint(ui, &label, app.tr("prefs.dimension_values_note"), label_width, |ui| {
+        let options = [app.tr("prefs.dimension_values_view"), app.tr("prefs.dimension_values_window")];
+        let mut selected = usize::from(app.preferences.dimension_input == DimensionInput::Window);
+        if ui_kit::settings_segments(ui, &label, &mut selected, &options) {
+            app.preferences.dimension_input = if selected == 1 { DimensionInput::Window } else { DimensionInput::View };
+        }
+    });
+    let window = app.preferences.dimension_input == DimensionInput::Window;
+    let units = app.session.doc.units.clone();
+    let decimals = app.preferences.length_decimals;
+    ui_kit::settings_block(ui, app.tr("prefs.dimension_steps"), label_width, |ui| {
+        ui.add_enabled_ui(window, |ui| {
+            ui.horizontal(|ui| {
+                let t = Tokens::get();
+                ui_kit::settings_control_width(ui, t.form_label_width, |ui| {
+                    let p = &mut app.preferences;
+                    ui_kit::bounded_length_field(ui, &mut p.dimension_step_mm, &units, decimals, DIMENSION_STEP_MM, 0.1)
+                        .on_hover_text(crate::i18n::tr("prefs.dimension_step_length"));
+                });
+                ui_kit::settings_control_width(ui, t.form_label_width, |ui| {
+                    ui_kit::number_field(ui, &mut app.preferences.dimension_step_deg, DIMENSION_STEP_DEG, 0.1, "°")
+                        .on_hover_text(crate::i18n::tr("prefs.dimension_step_angle"));
+                });
+            });
+        });
     });
 }

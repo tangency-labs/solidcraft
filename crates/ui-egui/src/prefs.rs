@@ -544,6 +544,21 @@ impl OriginPlaneNames {
     }
 }
 
+/// Where a sketch dimension's value is typed (Preferences › Sketch, "Dimension values", #7246).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DimensionInput {
+    /// In a box on the dimension (also what a value this version doesn't know reads as).
+    #[default]
+    View,
+    /// In a small window at the dimension, with arrows that step the value (`dim_view::window`).
+    Window,
+}
+
+/// The lengths (millimetres) and angles (degrees) the dimension window's arrows may step by.
+pub const DIMENSION_STEP_MM: std::ops::RangeInclusive<f64> = 0.001..=1000.0;
+pub const DIMENSION_STEP_DEG: std::ops::RangeInclusive<f64> = 0.001..=180.0;
+
 /// What an orbit turns around (Preferences: "Orbit around").
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -1375,6 +1390,13 @@ preference_settings! {
     line_drag_draws_one: bool = false, PAGE_SKETCH => check_id("prefs.line_drag_draws_one");
     /// Include hidden geometry and a small pointer neighbourhood in Select Other.
     select_other_hidden: bool = true, PAGE_SKETCH => check_id("prefs.select_other_hidden");
+    /// Where a dimension's value is typed: in a box on the dimension (the default), or in a small
+    /// window at it whose arrows step the value (#7246, `dim_view::window`).
+    dimension_input: DimensionInput = DimensionInput::View, PAGE_SKETCH;
+    /// What the dimension window's arrows, Up/Down and the wheel add to a length (millimetres,
+    /// converted to the unit the value is written in) and to an angle (degrees).
+    dimension_step_mm: f64 = 1.0, PAGE_SKETCH, accept(DIMENSION_STEP_MM);
+    dimension_step_deg: f64 = 1.0, PAGE_SKETCH, accept(DIMENSION_STEP_DEG);
     /// When true: Shift+click adds without removing; Primary toggles.
     /// When false (default): Shift and Primary both toggle.
     selection_shift_add_only: bool = false, PAGE_SKETCH;
@@ -3819,6 +3841,11 @@ fn prepare_preferences(
     {
         return Err("`stand_up_unknown` must be ask, note or off".into());
     }
+    if let Some(v) = p.get("dimension_input")
+        && !matches!(v.as_str(), Some("view" | "window"))
+    {
+        return Err("`dimension_input` must be view or window".into());
+    }
     let mut new: Prefs = serde_json::from_value(cur).map_err(|e| e.to_string())?;
     if let Some(update) = p.get("theme_options") {
         merge_theme_options(&mut new, followed, update)?;
@@ -3900,6 +3927,9 @@ fn prepare_preferences(
     }
     if !accepted::perspective_fov(&new) {
         return Err("`perspective_fov` must be 15°…90° in radians (0.2618…1.5708)".into());
+    }
+    if !accepted::dimension_step_mm(&new) || !accepted::dimension_step_deg(&new) {
+        return Err("`dimension_step_mm` must be 0.001…1000 and `dimension_step_deg` 0.001…180".into());
     }
     if solidcraft_engine::doc::display_quality::DisplayQuality::parse(&new.display_quality).is_none() {
         return Err("`display_quality` must be coarse, normal, fine or ultra".into());

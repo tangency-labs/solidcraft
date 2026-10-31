@@ -80,7 +80,7 @@ fn tenths_for(m: Modifiers) -> Option<i64> {
 }
 
 /// This frame's Up/Down presses, key repeats included, in signed tenths.
-fn key_tenths(i: &egui::InputState) -> i64 {
+pub(crate) fn key_tenths(i: &egui::InputState) -> i64 {
     i.events
         .iter()
         .filter_map(|e| match e {
@@ -94,7 +94,7 @@ fn key_tenths(i: &egui::InputState) -> i64 {
 /// This frame's wheel notches over the field in signed tenths. Scrolling up steps up. A mouse
 /// wheel reports lines (a notch each); a trackpad reports points, which add up across frames in
 /// `key` until they make a notch (a line's worth, `line_scroll_speed`).
-fn wheel_tenths(ui: &egui::Ui, key: egui::Id) -> i64 {
+pub(crate) fn wheel_tenths(ui: &egui::Ui, key: egui::Id) -> i64 {
     let speed = ui.ctx().options(|o| o.input_options.line_scroll_speed).max(1.0);
     let mut pending = ui.data(|d| d.get_temp::<f32>(key)).unwrap_or(0.0);
     let mut out = 0i64;
@@ -167,7 +167,22 @@ fn plain(text: &str) -> Option<Plain> {
 fn stepped(text: &str, tenths: i64) -> Option<String> {
     let p = plain(text)?;
     let places = if tenths % 10 == 0 { p.places } else { p.places.max(1) };
-    let v = p.value + tenths as f64 / 10.0;
+    rewritten(text, &p, p.value + tenths as f64 / 10.0, places)
+}
+
+/// `text` with its plain number moved by what `by` answers for the unit it is written in (the
+/// text after the number, empty for none): an amount and the decimal places it needs, written
+/// with at least the places the number had (`dim_view::window` steps by a length or an angle
+/// this way). `None` when `text` is not a plain number or `by` has no answer.
+pub(crate) fn shifted(text: &str, by: impl FnOnce(&str) -> Option<(f64, usize)>) -> Option<String> {
+    let p = plain(text)?;
+    let (amount, places) = by(text.get(p.end..)?.trim())?;
+    rewritten(text, &p, p.value + amount, places.max(p.places))
+}
+
+/// `text` with its plain number `p` replaced by `v` written with `places` decimals, in the decimal
+/// mark it had.
+fn rewritten(text: &str, p: &Plain, v: f64, places: usize) -> Option<String> {
     if !v.is_finite() {
         return None;
     }

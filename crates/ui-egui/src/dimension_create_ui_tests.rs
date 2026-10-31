@@ -191,6 +191,215 @@ fn dimension_tool_click_respects_the_selection_filter() {
     crate::dim_view::cancel();
 }
 
+/// A line from the origin to `end` with Preferences › Sketch › Dimension values set to In a
+/// window (#7246).
+fn windowed(end: [f64; 2]) -> Harness {
+    let mut h = line(end);
+    h.call("ui.prefs", json!({"dimension_input": "window"}));
+    h
+}
+
+/// The value the open new dimension's window holds.
+fn draft_value() -> String {
+    crate::dim_view::draft_preview().map(|(expr, _, _)| expr).unwrap_or_default()
+}
+
+/// In a window, the Dimension tool places the text first and the window opens on it. Its arrows,
+/// Up/Down and the wheel over the field step the value while the sketch previews it, nothing
+/// reaches the design before the check, the check adds the dimension in one undo step, and the
+/// tool stays on for the next dimension.
+#[test]
+fn a_new_dimension_in_the_window_steps_previews_and_applies_once() {
+    let mut h = windowed([20., 0.]);
+    let original = h.app.session.doc.to_json();
+    let undo = h.app.session.undo.len();
+    h.step(&json!({"start":"sketch.dimension"})).unwrap();
+    h.step(&json!({"click":{"world":[10,0,0]}})).unwrap();
+    assert_eq!(crate::dim_view::live(), None, "no value follows the pointer before the text is placed");
+    assert!(!crate::dim_view::editing());
+    h.step(&json!({"click":{"world":[10,6,0]}})).unwrap();
+    h.frames(3);
+    assert!(crate::dim_view::editing(), "placing the text opens the window");
+    assert_eq!(h.ctx.memory(|m| m.focused()), Some(egui::Id::new("sc_dim_edit")), "its field takes the keyboard");
+    let window = crate::scenario::rect_of("dimwin").expect("the window is shown");
+    let drawable = h.app.viewport.layout.as_ref().unwrap().drawable;
+    assert!(drawable.contains_rect(window), "the window {window:?} stays in the view {drawable:?}");
+    assert_eq!(draft_value(), "20 mm");
+    let arrow = crate::scenario::handle_at("dimwin:up");
+    for _ in 0..3 {
+        h.step(&json!({"click":{"handle":"dimwin:up"}})).unwrap();
+    }
+    h.frames(2);
+    assert_eq!(crate::scenario::handle_at("dimwin:up"), arrow, "the window stays put while the value moves the text");
+    let (value, dimension, _) = crate::dim_view::draft_preview().unwrap();
+    assert_eq!(value, "23 mm");
+    assert!((dimension.kind.value().unwrap() - 23.).abs() < 1e-6, "the sketch previews the stepped value");
+    assert!(crate::scenario::count_of("dimwin:preview_curves").unwrap_or(0.0) > 0.0, "what the value moves is drawn");
+    assert_eq!(h.app.session.doc.to_json(), original, "nothing reaches the design before OK");
+    assert_eq!(h.app.session.undo.len(), undo);
+    assert_eq!(h.ctx.memory(|m| m.focused()), Some(egui::Id::new("sc_dim_edit")), "the arrows leave the keyboard with the field");
+    // The wheel over the field steps it instead of zooming the view.
+    let cam = h.app.cam;
+    let field = crate::scenario::rect_of("dimwin:value").unwrap();
+    h.call("ui.scroll", json!({"x": field.center().x, "y": field.center().y, "delta": -40.0}));
+    h.frames(2);
+    assert_eq!(draft_value(), "22 mm");
+    assert_eq!(h.app.cam, cam, "the view did not zoom");
+    h.step(&json!({"key":"ArrowUp"})).unwrap();
+    h.frames(2);
+    assert_eq!(draft_value(), "23 mm");
+    h.step(&json!({"click":{"handle":"dimwin:ok"}})).unwrap();
+    h.frames(2);
+    assert!(!crate::dim_view::editing(), "{}", h.call("ui.inspect", json!({})));
+    assert_eq!(h.app.session.undo.len(), undo + 1, "one undo step");
+    let state = h.app.session.world_state();
+    let sk = &state.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
+    let dimension = sk.constraints.iter().find(|c| c.param.is_some()).expect("the dimension was added");
+    assert!((dimension.kind.value().unwrap() - 23.).abs() < 1e-6);
+    assert_eq!(h.app.tool.as_ref().map(|t| (t.cmd, t.picks.len())), Some(("sketch.dimension", 0)), "the tool stays on for the next one");
+    crate::dim_view::cancel();
+}
+
+/// The cross and Esc drop only the dimension in the window: nothing is added and the Dimension
+/// tool stays on. Esc with no window open then puts the tool down, as before.
+#[test]
+fn the_window_cross_and_escape_drop_only_this_dimension() {
+    let mut h = windowed([20., 0.]);
+    let original = h.app.session.doc.to_json();
+    let undo = h.app.session.undo.len();
+    place(&mut h, &[[10., 0.]], [10., 6.]);
+    h.step(&json!({"click":{"handle":"dimwin:up"}})).unwrap();
+    h.step(&json!({"click":{"handle":"dimwin:cancel"}})).unwrap();
+    h.frames(2);
+    assert!(!crate::dim_view::editing());
+    assert_eq!(h.app.session.doc.to_json(), original);
+    assert_eq!(h.app.session.undo.len(), undo);
+    assert_eq!(h.app.tool.as_ref().map(|t| (t.cmd, t.picks.len())), Some(("sketch.dimension", 0)));
+    place(&mut h, &[[10., 0.]], [10., 6.]);
+    h.step(&json!({"key":"Escape"})).unwrap();
+    assert!(!crate::dim_view::editing());
+    assert_eq!(h.app.session.doc.to_json(), original);
+    assert_eq!(h.app.tool.as_ref().map(|t| t.cmd), Some("sketch.dimension"), "Esc in the window leaves the tool on");
+    h.frames(40);
+    h.step(&json!({"key":"Escape"})).unwrap();
+    assert!(h.app.tool.is_none(), "Esc with no window open ends the tool");
+    crate::dim_view::cancel();
+}
+
+/// Double-clicking an existing dimension opens the window too. Typing and stepping preview the
+/// sketch without touching the design, a value OK would refuse says why under the field, an
+/// expression is left as typed by the arrows, and Enter applies the value in one undo step.
+#[test]
+fn double_clicking_a_dimension_opens_the_window_with_a_live_preview() {
+    let mut h = windowed([20., 0.]);
+    h.app.run("parameters.add", json!({"name":"width","expression":"30 mm"})).unwrap();
+    h.app.run("sketch.dimension", json!({"entities":["l1"],"value":20,"text_at":[10,8]})).unwrap();
+    h.settle();
+    let before = h.app.session.doc.to_json();
+    let undo = h.app.session.undo.len();
+    h.frames(40);
+    h.step(&json!({"click":{"dimension":"d1"},"double":true})).unwrap();
+    h.frames(3);
+    assert!(crate::dim_view::editing() && crate::scenario::rect_of("dimwin").is_some(), "the window opens on the dimension");
+    type_value(&mut h, "26");
+    h.frames(2);
+    assert!(crate::scenario::count_of("dimwin:preview_curves").unwrap_or(0.0) > 0.0, "the sketch previews 26");
+    h.step(&json!({"key":"ArrowUp"})).unwrap();
+    h.frames(2);
+    assert!(h.widget("27").is_some(), "Up stepped the value: {}", h.call("ui.inspect", json!({})));
+    assert_eq!(h.app.session.doc.to_json(), before, "nothing reaches the design before OK");
+    type_value(&mut h, "no_such_name");
+    h.frames(2);
+    assert!(crate::scenario::rect_of("dialog:report:dimension_error").is_some(), "the refusal shows under the field");
+    assert_eq!(crate::scenario::count_of("dimwin:preview_curves"), Some(0.0), "a refused value previews nothing");
+    type_value(&mut h, "width - 4");
+    h.step(&json!({"click":{"handle":"dimwin:up"}})).unwrap();
+    h.frames(2);
+    assert!(h.widget("width - 4").is_some(), "an expression is left as typed");
+    type_value(&mut h, "27");
+    h.step(&json!({"key":"Enter"})).unwrap();
+    h.frames(2);
+    assert!(!crate::dim_view::editing());
+    assert!((h.app.session.doc.eval("d1", solidcraft_engine::doc::expr::Kind::Length).unwrap() - 27.).abs() < 1e-6);
+    assert_eq!(h.app.session.undo.len(), undo + 1, "one undo step");
+    crate::dim_view::cancel();
+}
+
+/// The arrows keep the unit and decimal mark a value is written in: a length steps by the length
+/// step converted to that unit (a bare number is in the design's unit), an angle by the angle
+/// step, and anything but a plain number is left alone.
+#[test]
+fn window_steps_keep_the_written_unit_and_decimal_mark() {
+    use crate::dim_view::window::stepped;
+    use solidcraft_engine::doc::expr::Kind::{Angle, Length};
+    assert_eq!(stepped("20 mm", 1.0, Length, "mm", 1.0, 1.0).as_deref(), Some("21 mm"));
+    assert_eq!(stepped("20", -1.0, Length, "mm", 0.5, 1.0).as_deref(), Some("19.5"));
+    assert_eq!(stepped("1 in", 1.0, Length, "mm", 2.54, 1.0).as_deref(), Some("1.1 in"));
+    assert_eq!(stepped("1", 1.0, Length, "in", 2.54, 1.0).as_deref(), Some("1.1"), "a bare length is in the design's unit");
+    assert_eq!(stepped("3\"", 10.0, Length, "mm", 2.54, 1.0).as_deref(), Some("4\""));
+    assert_eq!(stepped("2,5 cm", 1.0, Length, "mm", 1.0, 1.0).as_deref(), Some("2,6 cm"));
+    assert_eq!(stepped("45 deg", -1.0, Angle, "mm", 1.0, 5.0).as_deref(), Some("40 deg"));
+    assert_eq!(stepped("45", 0.1, Angle, "in", 1.0, 1.0).as_deref(), Some("45.1"), "a bare angle is in degrees");
+    assert_eq!(stepped("width / 2", 1.0, Length, "mm", 1.0, 1.0), None);
+    assert_eq!(stepped("20 deg", 1.0, Length, "mm", 1.0, 1.0), None, "a length does not step an angle");
+}
+
+/// Dimension values default to In the view with steps of 1 mm and 1°; the choice and the steps
+/// save, out-of-range steps and unknown choices are refused, and the Sketch page's Restore
+/// Defaults and Cancel treat them as the page's own.
+#[test]
+fn the_dimension_window_preferences_default_save_and_reset() {
+    use crate::prefs::{DimensionInput, Prefs, control};
+    let d = Prefs::default();
+    assert_eq!((d.dimension_input, d.dimension_step_mm, d.dimension_step_deg), (DimensionInput::View, 1.0, 1.0));
+    let old: Prefs = serde_json::from_value(json!({})).unwrap();
+    assert_eq!(old.dimension_input, DimensionInput::View, "saved preferences without it keep the box");
+    let read = crate::prefs::lenient(&json!({"dimension_input": "sideways", "dimension_step_mm": 2.0}));
+    assert_eq!((read.dimension_input, read.dimension_step_mm), (DimensionInput::View, 2.0), "an unknown choice costs only itself");
+    let mut app = crate::SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+    for refused in [
+        json!({"dimension_input": "sideways"}),
+        json!({"dimension_step_mm": 0.0}),
+        json!({"dimension_step_mm": 5000.0}),
+        json!({"dimension_step_deg": 0.0}),
+        json!({"dimension_step_deg": 200.0}),
+    ] {
+        assert!(control(&mut app, &refused).is_err(), "{refused}");
+    }
+    assert_eq!(app.preferences, Prefs::default(), "a refusal changes nothing");
+    control(&mut app, &json!({"open": "Sketch", "dimension_input": "window", "dimension_step_mm": 0.5, "dimension_step_deg": 15.0})).unwrap();
+    control(&mut app, &json!({"button": "apply"})).unwrap();
+    let mut other = crate::SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+    other.load_prefs(&app.prefs());
+    assert_eq!(
+        (other.preferences.dimension_input, other.preferences.dimension_step_mm, other.preferences.dimension_step_deg),
+        (DimensionInput::Window, 0.5, 15.0)
+    );
+    control(&mut app, &json!({"button": "defaults"})).unwrap();
+    assert_eq!(
+        (app.preferences.dimension_input, app.preferences.dimension_step_mm, app.preferences.dimension_step_deg),
+        (DimensionInput::View, 1.0, 1.0)
+    );
+    control(&mut app, &json!({"button": "cancel"})).unwrap();
+    assert_eq!(
+        (app.preferences.dimension_input, app.preferences.dimension_step_mm, app.preferences.dimension_step_deg),
+        (DimensionInput::Window, 0.5, 15.0)
+    );
+}
+
+/// The Sketch page's Dimension values switch is a real control.
+#[test]
+fn the_sketch_page_switches_dimension_values_to_a_window() {
+    let mut h = Harness::new();
+    h.call("ui.prefs", json!({"open": "Sketch"}));
+    h.frames(4);
+    let handle = format!("dialog:{}:{}", crate::i18n::tr("prefs.dimension_values"), crate::i18n::tr("prefs.dimension_values_window"));
+    crate::prefs::reveal_preference(&mut h, &handle);
+    h.step(&json!({"click":{"handle": handle}})).unwrap();
+    h.frames(2);
+    assert_eq!(h.app.preferences.dimension_input, crate::prefs::DimensionInput::Window);
+}
+
 #[test]
 fn dimension_parameters_use_typing_and_ctrl_space_completion() {
     for (prefix, expected) in [("wid", "width"), ("", "width"), ("d", "d1")] {
