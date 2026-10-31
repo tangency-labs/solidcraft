@@ -943,9 +943,10 @@ impl<'b, 'a> Builder<'b, 'a> {
     fn finish(mut self, item: u64, name: String, shells: Vec<Vec<(u32, bool)>>, kind: Kind) -> R<Solid> {
         let _span = solidcraft_profile::span("import", "step.solid_record");
         let mut notes = Vec::new();
-        // A whole sphere bounded by one seam has its frame on that seam, before anything is
-        // measured on the frame.
-        self.seat_spheres_on_seams()?;
+        // A face bounded by a slit alone is the whole of its closed surface, closed by its seams
+        // (a sphere's frame put on the slit), before anything is measured on the frame or split
+        // at its poles.
+        self.complete_slits()?;
         let at_poles = self.split_at_poles()?;
         if at_poles > 0 {
             notes.push(format!("{at_poles} edges split where they pass through a face's pole"));
@@ -1433,16 +1434,24 @@ impl<'b, 'a> Builder<'b, 'a> {
             surface,
             BSurface::Plane { .. } | BSurface::Cylinder { .. } | BSurface::Cone { .. } | BSurface::Spline { .. } | BSurface::RationalSpline { .. }
         );
-        let flip = can_turn && shapes.get(outer).copied().flatten().is_some_and(|a| a < 0.0);
-        if flip {
+        let clockwise = shapes.get(outer).copied().flatten().is_some_and(|a| a < 0.0);
+        // A face bounded by seam uses alone (a whole torus within its two seams) has loops that
+        // run each edge both ways: run backwards they are the same uses, so they say nothing of
+        // the face's side. One running clockwise is run the other way; the face keeps its side.
+        let seams_only = edge_loops.iter().all(|l| seam_only(l));
+        let flip = can_turn && clockwise && !seams_only;
+        let rerun = flip || (clockwise && seams_only);
+        if rerun {
             for l in &mut face.loops {
                 if let LoopB::Edges(es) = l {
                     reverse(es);
                 }
             }
+        }
+        if flip {
             face.forward = !face.forward;
         }
-        let pcs: Vec<Vec<Curve2>> = if flip { pcs.into_iter().map(|l| l.into_iter().rev().collect()).collect() } else { pcs };
+        let pcs: Vec<Vec<Curve2>> = if rerun { pcs.into_iter().map(|l| l.into_iter().rev().collect()).collect() } else { pcs };
         let domain = face_domain(&surface, &pcs)?;
         Ok((pcs, domain, flip, form))
     }
@@ -1528,6 +1537,17 @@ fn natural_box(s: &BSurface) -> Option<[[f64; 2]; 2]> {
         [Natural::Range(a, b), Natural::Range(c, d)] if [a, b, c, d].iter().all(|x| x.is_finite()) => Some([[a, b], [c, d]]),
         _ => None,
     }
+}
+
+/// Every edge of the loop is used in it exactly twice, once each way: a loop of seam uses alone.
+fn seam_only(uses: &[(u32, bool)]) -> bool {
+    let mut ways: HashMap<u32, [u32; 2]> = HashMap::with_capacity(uses.len() / 2);
+    for &(e, forward) in uses {
+        if let Some(n) = ways.entry(e).or_default().get_mut(usize::from(forward)) {
+            *n += 1;
+        }
+    }
+    !uses.is_empty() && ways.values().all(|n| *n == [1, 1])
 }
 
 /// The loop run the other way.
