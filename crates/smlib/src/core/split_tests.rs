@@ -278,7 +278,7 @@ fn lid(side: bool) -> Body {
     use solidcore::topology::brep::p7::copy_faces;
     let slab = make_box([-20.0; 3], [25.0, 40.0, 25.0]).unwrap();
     super::run("sheet", |k| {
-        let mut whole = super::boolean::copy_of(k, &slab.0.lock().unwrap(), 1)?;
+        let mut whole = solidcore::topology::brep::p3::brep_copy(k, &slab.0.lock().unwrap())?;
         let mut picked = Vec::new();
         for f in faces(&whole, None)? {
             let p = face_internal_point(k, &mut whole, f)?;

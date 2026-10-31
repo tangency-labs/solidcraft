@@ -6,7 +6,7 @@
 //! [`check`] fails with "not supported yet" while a test it reaches is unported in solidcore.
 
 use solidcore::error::EntityRef;
-use solidcore::geom::assert_array::{AssertArray, AssertReport, labels, obj_type_string};
+use solidcore::geom::assert_array::{AssertArray, AssertReport, obj_type_string};
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::geom::tol::{SmallTopoType, brep_zone_tol_3d, context_xsect_tol_3d};
 use solidcore::heal::gap::GapFunction;
@@ -261,18 +261,11 @@ fn report_line(r: &AssertReport) -> String {
     s
 }
 
-/// The capi's `advisory()`: `SmBrep` test 21, "Suspicious Shell Count" (a body of several faces
-/// with one shell each), is a warning. `SmBrep::AssertValid` reports it without failing, and
-/// faces that meet nowhere (a sheet's faces offset apart across a sharp edge) rightly make such a
-/// body.
-fn advisory(r: &AssertReport) -> bool {
-    r.reporting_type == labels::BREP_TYPE && r.list_index == 0 && r.test_index == 21
-}
-
 /// The capi's `collect()`: appends the failed reports of `list`, one line each, and counts them;
-/// SMLib's warnings ([`advisory`]) are neither.
+/// SMLib's warnings ([`AssertReport::is_warning`]: `SmBrep` test 21, "Suspicious Shell Count", a
+/// body of several faces with one shell each, is one) are neither.
 fn collect(list: &AssertArray, out: &mut String, failures: &mut usize) {
-    for r in list.reports().iter().filter(|r| !r.ok && !advisory(r)) {
+    for r in list.reports().iter().filter(|r| !r.ok && !r.is_warning()) {
         *failures += 1;
         out.push_str(&report_line(r));
         out.push('\n');

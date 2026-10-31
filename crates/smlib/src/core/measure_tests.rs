@@ -410,7 +410,7 @@ fn a_sealed_void_measures_its_volume() {
 /// Two 10 mm squares apart in z = 0, one body of two faces with a shell each (as the top and
 /// front of a box offset apart across their edge make, kernel case
 /// `surfaces/cov-offset-two-faces-across-a-sharp-edge-come-apart`): `SmBrep` test 21,
-/// "Suspicious Shell Count", warns of it, and the capi's check (`advisory`) counts no warning.
+/// "Suspicious Shell Count", warns of it, and the capi's check counts no warning.
 #[test]
 fn faces_apart_with_a_shell_each_check_valid() {
     use solidcore::geom::axis2_placement::Axis2Placement;

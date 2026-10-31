@@ -4,7 +4,20 @@
     "tangency-labs/solidcraft#1985"
   ],
   "what": "a flanged enclosure with two standoffs and no screw hole whose STEP export also never finished",
-  "source": "invariants",
-  "method": "one connected part: the export finishes and the part is one valid closed solid",
-  "body_count": 1
+  "source": "analytic",
+  "method": "one connected part: the export finishes and the part is one valid closed solid. Body sketch: the rounded rectangle 0..80 x 0..79, corners r 3, area 80*79 - (4 - pi)*9 = 6312.274, extruded 32.5. Flange: the rounded rectangle -10..90 x 0..79, corners r 3, area 7892.274, 2.5 thick, holding the body's footprint (its own corners lie outside the body's), so the two give 7892.274*2.5 + 6312.274*30. Cavity box (3,3,2.5) 74 x 73, open at the top: - 74*73*30 = 162060. Gusset (69,68,2.5) 8 x 8 x 30: + 1920. Two standoffs r 2.5, 3 high at (31.11, 70.04) and (59.05, 70.04): + 2 * 58.905. V = 49076.73. Box: the flange's -10..90 x 0..79, z 0..32.5",
+  "body_count": 1,
+  "volume_mm3": 49076.73,
+  "bbox": {
+    "min": [
+      -10.0,
+      0.0,
+      0.0
+    ],
+    "max": [
+      90.0,
+      79.0,
+      32.5
+    ]
+  }
 }

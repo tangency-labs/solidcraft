@@ -926,8 +926,13 @@ fn circular_pattern_of_a_hole_and_its_chamfers_copies_all_of_them() {
     assert!(rel(v0, v1) < 1e-9);
     run(&mut s, "solid.pattern.circular", json!({"features": ["Bore", "TopChamfer", "BottomChamfer"], "axis": "Z", "count": 6, "angle": 360}));
     let v = volume(&mut s);
-    println!("{v1} -> {v}");
-    assert!(v < v1 - 5.0 * 0.9 * (std::f64::consts::PI * 9.0 * 10.0), "pattern had no effect: {v1} -> {v}");
+    // One chamfered hole takes its bore, π·3²·10, and two rings of the chamfer's triangle,
+    // 0.5 × 0.5 / 2, about the bore's axis at its centroid's radius 3 + 0.5/3 (Pappus). The
+    // copies, 20 apart on the radius 20, do not meet: the pattern takes five more.
+    let pi = std::f64::consts::PI;
+    let hole = pi * 9.0 * 10.0 + 2.0 * 2.0 * pi * (3.0 + 0.5 / 3.0) * 0.125;
+    assert!((v1 - (pi * 900.0 * 10.0 - hole)).abs() < 4e-7 * v1, "{v1}");
+    assert!((v - (v1 - 5.0 * hole)).abs() < 4e-7 * v1, "{v1} -> {v}, expected {}", v1 - 5.0 * hole);
 }
 
 /// The features are copied in timeline order, not in the order they were picked in: a chamfer

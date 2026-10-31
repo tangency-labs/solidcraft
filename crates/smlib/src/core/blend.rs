@@ -49,9 +49,9 @@ use solidcore::topology::face::p4 as face_p4;
 use solidcore::topology::topology_traverser::Marks;
 use solidcore::topology::{Brep, EdgeId, EdgeuseId, FaceId, FaceuseId, VertexId, edge, vertex};
 
-use super::boolean::copy_of;
 use super::{Body, answer, run};
 use crate::{Blend, ChamferSecond, Error, Hole, HoleEdge, MAX_POINTS, Result};
+use solidcore::topology::brep::p3::brep_copy;
 
 /// The capi's statuses as SolidCraft errors: an operation's own result.
 type Out<T> = std::result::Result<T, Error>;
@@ -285,10 +285,13 @@ fn blend_failure(s: &FilletSession<'_>, e: SolidError, corner: bool) -> Error {
 /// `round_edges`' `overflow_first` argument: with it the session stops, nothing built, when blends
 /// of several edges overflow their faces across cliffs (`SetOverflowFirst`) or (`classify_only`)
 /// always (`SetClassifyOnly`), and `stopped` gets the edges whose blends overflow
-/// (`GetOverflowEdges`; the capi's status `OVERFLOW_FIRST`, the call's failure then meaning only that).
+/// (`GetOverflowEdges`; the capi's status `OVERFLOW_FIRST`, the call's failure then meaning only that)
+/// and `mitred` the edges of each two rounds mitred at a face's concave corner, two by two
+/// (`GetMitredEdges`), when the caller asks.
 struct OverflowFirst<'a> {
     classify_only: bool,
     stopped: &'a mut Option<Vec<EdgeId>>,
+    mitred: Option<&'a mut Vec<EdgeId>>,
 }
 
 /// `round_edges` and `chamfer_offsets` (with equal offsets): `edges` of `b` blended in place,
@@ -365,6 +368,9 @@ fn blend_edges_stopping(
                         && s.error_info().code == FilletErrorType::OverflowFirst as i32
                     {
                         *o.stopped = Some(s.overflow_edges());
+                        if let Some(m) = o.mitred {
+                            *m = s.mitred_edges();
+                        }
                     }
                     Ok(Err(Err(blend_failure(&s, e, corner))))
                 }
@@ -501,7 +507,7 @@ pub(super) fn finish(b: Brep, solid_in: bool) -> solidcore::Result<Out<Brep>> {
     Ok(Ok(b))
 }
 
-/// Runs `f` on a copy of `body` (`copy_of`) under the kernel's lock.
+/// Runs `f` on a copy of `body` (`brep_copy`) under the kernel's lock.
 pub(super) fn on_copy(call: &'static str, body: &Body, f: impl FnOnce(&mut Kernel, Brep) -> solidcore::Result<Out<Brep>>) -> Result<Body> {
     if body.0.is_poisoned() {
         return Err(Error::Internal(format!("{call}: the body was left unfinished by an earlier panic")));
@@ -509,7 +515,7 @@ pub(super) fn on_copy(call: &'static str, body: &Body, f: impl FnOnce(&mut Kerne
     run(call, |k| {
         let g = body.0.lock().unwrap_or_else(PoisonError::into_inner);
         super::dump::input(k, "brep", &g);
-        let c = copy_of(k, &g, 1)?;
+        let c = brep_copy(k, &g)?;
         drop(g);
         f(k, c)
     })?
@@ -554,8 +560,11 @@ const OVERFLOW_GOES_FIRST: bool = true;
 /// nothing was built in) go first: on a fresh copy of `body`, the picked edges tagged with their
 /// places ([`Picked`]), those are rounded, and each other picked edge is then what is left of it,
 /// the edges carrying its tag, rounded at its size. A picked edge with nothing left is gone: its
-/// points are flagged in `dropped`. Where none overflows on its own, or all do, the edges are
-/// rounded together as before. The result is the new body. Unlike the capi, the tags come off it
+/// points are flagged in `dropped`. Two rounds mitred at a face's concave corner (`mitred`, the edges
+/// of each such pair two by two, as the stopped call found them in `w`) meet in their mitre, each run
+/// on past the corner: one goes first with the other, so a round mitred to one that overflows goes
+/// first too (fork 9ba2b12). Where none overflows on its own, or all go first, the edges are rounded
+/// together as before. The result is the new body. Unlike the capi, the tags come off it
 /// (nothing reads them after the call, and a later call's copy would carry them on).
 #[allow(clippy::too_many_arguments)] // the capi's overflow_first
 fn overflow_first(
@@ -565,6 +574,7 @@ fn overflow_first(
     tolerance: f64,
     section: Section<'_>,
     picked: &[EdgeId],
+    mitred: &[EdgeId],
     each: &[f64],
     w: &mut Brep,
     dropped: &mut [bool],
@@ -575,17 +585,17 @@ fn overflow_first(
     }
     let mut fresh = {
         let g = body.0.lock().unwrap_or_else(PoisonError::into_inner);
-        copy_of(k, &g, 2)?
+        brep_copy(k, &g)?
     };
     let again = match pick_edges(k, &fresh, points, tolerance)? {
         Ok((again, _)) if again.len() == picked.len() => again,
         Ok(_) => return Ok(Err(Error::NoMatch { point: 0 })),
         Err(m) => return Ok(Err(edge_miss(m))),
     };
-    let (mut lead, mut lead_sizes, mut rest) = (Vec::new(), Vec::new(), Vec::new());
+    let mut goes_first = vec![false; picked.len()];
     for (i, ((&e, &to), &size)) in picked.iter().zip(&again).zip(each).enumerate() {
         let mut stopped = None;
-        let alone = OverflowFirst { classify_only: true, stopped: &mut stopped };
+        let alone = OverflowFirst { classify_only: true, stopped: &mut stopped, mitred: None };
         match blend_edges_stopping(k, w, &[e], &[size], section, None, &[], None, Some(alone))? {
             Err(Err(why)) if stopped.is_none() => return Ok(Err(why)),
             Err(Ok(_)) => return Ok(Err(Error::Unsupported)),
@@ -593,7 +603,30 @@ fn overflow_first(
             Err(Err(_)) => {}
         }
         fresh.add_attribute(EntityRef::Edge(to), Attribute::application(PICKED_ID, Behavior::Copy, Picked(i)))?;
-        if stopped.is_some_and(|over| !over.is_empty()) {
+        if let Some(flag) = goes_first.get_mut(i) {
+            *flag = stopped.is_some_and(|over| !over.is_empty());
+        }
+    }
+    // A round mitred to one that goes first goes with it, through every mitre.
+    let place = |e: &EdgeId| picked.iter().position(|p| p == e);
+    let pairs: Vec<(usize, usize)> = mitred.as_chunks::<2>().0.iter().filter_map(|[a, b]| Some((place(a)?, place(b)?))).collect();
+    let mut grew = true;
+    while grew {
+        grew = false;
+        for &(a, b) in &pairs {
+            if goes_first.get(a) != goes_first.get(b) {
+                for i in [a, b] {
+                    if let Some(flag) = goes_first.get_mut(i) {
+                        *flag = true;
+                    }
+                }
+                grew = true;
+            }
+        }
+    }
+    let (mut lead, mut lead_sizes, mut rest) = (Vec::new(), Vec::new(), Vec::new());
+    for (i, ((&to, &size), &first)) in again.iter().zip(each).zip(&goes_first).enumerate() {
+        if first {
             lead.push(to);
             lead_sizes.push(size);
         } else {
@@ -767,11 +800,11 @@ fn blend_call(
         // first, on a fresh copy, and the others then round what is left of their edges. An edge
         // the overflow removes whole is gone (`dropped`); one it cuts keeps the rest.
         let may_go_first = OVERFLOW_GOES_FIRST && back.is_empty() && open == Corners::Filled && picked.len() > 1;
-        let mut stopped = None;
-        let first = may_go_first.then_some(OverflowFirst { classify_only: false, stopped: &mut stopped });
+        let (mut stopped, mut mitred) = (None, Vec::new());
+        let first = may_go_first.then_some(OverflowFirst { classify_only: false, stopped: &mut stopped, mitred: Some(&mut mitred) });
         let done = blend_edges_stopping(k, &mut w, &picked, &each, section, None, &back, (open == Corners::Open).then_some(&mut patches), first)?;
         if stopped.is_some() {
-            return Ok(match overflow_first(k, body, points, tolerance, section, &picked, &each, &mut w, dropped)? {
+            return Ok(match overflow_first(k, body, points, tolerance, section, &picked, &mitred, &each, &mut w, dropped)? {
                 Ok(fresh) => finish(fresh, solid_in)?,
                 Err(e) => Err(e),
             });

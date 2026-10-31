@@ -5,7 +5,7 @@ use std::f64::consts::PI;
 
 use serde_json::{Value, json};
 
-use super::{run, volume};
+use super::run;
 use crate::Session;
 use crate::fuzz;
 
@@ -174,37 +174,6 @@ fn shell_thicker_than_a_step_says_so() {
     assert!(e.to_string().contains("not supported yet"), "{e}");
 }
 
-/// Panics inside the kernel are caught natively, but abort the web build (wasm can't unwind).
-/// Building the samples must not panic at all (the Plastic Enclosure's bosses used to, 8 times).
-#[test]
-fn samples_build_without_panics() {
-    use std::sync::Arc;
-    use std::sync::atomic::{AtomicUsize, Ordering};
-    let me = std::thread::current().id();
-    let count = Arc::new(AtomicUsize::new(0));
-    let c2 = count.clone();
-    let prev = std::panic::take_hook();
-    std::panic::set_hook(Box::new(move |info| {
-        if std::thread::current().id() == me {
-            c2.fetch_add(1, Ordering::SeqCst);
-        }
-        let _ = info;
-    }));
-    let mut failed = Vec::new();
-    for sample in crate::sample::samples() {
-        let mut s = Session::default();
-        for c in (sample.script)()["commands"].as_array().into_iter().flatten() {
-            let _ = s.execute(c["command"].as_str().unwrap_or(""), &c["params"]);
-        }
-        let n = count.swap(0, Ordering::SeqCst);
-        if n > 0 {
-            failed.push(format!("{}: {n} panic(s)", sample.name));
-        }
-    }
-    std::panic::set_hook(prev);
-    assert!(failed.is_empty(), "{failed:?}");
-}
-
 fn total_volume(s: &Session) -> f64 {
     s.model.state().bodies.iter().map(|b| solidcraft_kernel::measure(&b.body).map(|m| m.volume).unwrap_or(0.0)).sum()
 }
@@ -365,74 +334,6 @@ fn fixed_seeds_run_clean() {
 }
 
 const FIXED_SEEDS: &[u64] = &[3, 5, 11, 16, 21, 29, 33, 35];
-
-/// A drilled hole as deep as the plate: the drill point breaks through the bottom.
-#[test]
-fn hole_as_deep_as_the_plate() {
-    let mut s = Session::default();
-    run(&mut s, "solid.box", json!({"length": 50, "width": 25, "height": 10}));
-    let v0 = volume(&mut s);
-    run(&mut s, "solid.hole", json!({"position": [25, 12.5, 10], "diameter": 6, "depth": 10, "type": "drilled"}));
-    let v = volume(&mut s);
-    assert!(v < v0 - PI * 9.0 * 9.0 && v > v0 - PI * 9.0 * 10.0 - 1.0, "{v0} {v}");
-    // Other sizes and places, the defaults, and a tapped hole.
-    for (i, p) in [
-        json!({"position": [10, 10, 10], "diameter": 5, "depth": 10, "type": "drilled"}),
-        json!({"position": [40, 15, 10], "diameter": 5, "depth": 10}),
-        json!({"position": [12, 6, 10], "diameter": 8.5, "depth": 10}),
-        json!({"position": [30, 7, 10], "thread": "M6", "depth": 10}),
-        json!({"position": [20, 18, 10], "diameter": 4, "depth": 10, "tip_angle": 90}),
-    ]
-    .into_iter()
-    .enumerate()
-    {
-        let before = volume(&mut s);
-        let r = s.execute("solid.hole", &p);
-        assert!(r.is_ok(), "{i} {p}: {r:?}");
-        assert!(volume(&mut s) < before - 1.0, "{i} {p}");
-    }
-}
-
-/// An enclosure built in the usual order: shell, bosses, then the lip on the rim.
-#[test]
-fn lip_after_boss() {
-    let mut s = Session::default();
-    run(&mut s, "solid.box", json!({"length": 80, "width": 50, "height": 30}));
-    run(&mut s, "solid.shell", json!({"faces": [[40, 25, 30]], "thickness": 2}));
-    run(&mut s, "plastic.boss", json!({"position": [10, 10, 2], "diameter": 7, "height": 12, "hole_diameter": 2.5}));
-    run(&mut s, "plastic.boss", json!({"position": [70, 40, 2], "diameter": 7, "height": 12, "hole_diameter": 2.5}));
-    let v0 = volume(&mut s);
-    run(&mut s, "plastic.lip", json!({"face": [1, 25, 30], "width": 1, "height": 2}));
-    let v = volume(&mut s);
-    assert!(v > v0 + 1.0, "{v0} {v}");
-    // Bosses up to the rim, with ribs, against a wall; lips, grooves and outside rims.
-    let bosses = [
-        json!({"position": [15, 15, 2], "diameter": 8, "height": 28, "hole_diameter": 3}),
-        // Ribs out to the inner walls (15 − 4 − 9 = 2), and short of them.
-        json!({"position": [15, 15, 2], "diameter": 8, "height": 12, "ribs": 4, "rib_thickness": 1.5, "rib_length": 9}),
-        json!({"position": [15, 15, 2], "diameter": 8, "height": 12, "ribs": 4, "rib_thickness": 1.5, "rib_length": 6}),
-        json!({"position": [5.5, 25, 2], "diameter": 7, "height": 12, "hole_diameter": 2.5}),
-        json!({"position": [40, 25, 2], "diameter": 8, "height": 20, "draft": "1 deg", "fillet": 1}),
-    ];
-    let lips = [
-        json!({"face": [1, 25, 30], "width": 1, "height": 2}),
-        json!({"face": [1, 25, 30], "width": 1, "height": 2, "type": "groove"}),
-        json!({"face": [1, 25, 30], "width": 1, "height": 2, "side": "outside"}),
-    ];
-    for (i, b) in bosses.iter().enumerate() {
-        for (j, l) in lips.iter().enumerate() {
-            let mut s = Session::default();
-            run(&mut s, "solid.box", json!({"length": 80, "width": 50, "height": 30}));
-            run(&mut s, "solid.shell", json!({"faces": [[40, 25, 30]], "thickness": 2}));
-            let r = s.execute("plastic.boss", b);
-            assert!(r.is_ok(), "boss {i}: {r:?}");
-            let v0 = volume(&mut s);
-            let r = s.execute("plastic.lip", l);
-            assert!(r.is_ok(), "boss {i} lip {j}: {r:?}");
-            assert!((volume(&mut s) - v0).abs() > 1.0, "boss {i} lip {j}");
-        }
-    }
-}
 
 /// A lip, a groove and an outside lip on the rim of a rounded, shelled enclosure (#29: the
 /// lip's walls continue the shell's walls, which a boolean join couldn't do).

@@ -25,8 +25,8 @@ use solidcore::topology::{Brep, FaceId, RegionId, edge};
 
 use super::Body;
 use super::blend::{edge_miss, finish, on_copy, pick_edges, points_ok, status, tolerance_ok};
-use super::boolean::copy_of;
 use crate::{Error, Result};
+use solidcore::topology::brep::p3::brep_copy;
 
 type Out<T> = std::result::Result<T, Error>;
 
@@ -127,7 +127,7 @@ fn remove_faces_inside(k: &mut Kernel, b: &mut Brep) -> solidcore::Result<Out<()
 /// glued elsewhere it joins the solid's inside to the outside) is refused, as the capi's
 /// `SMLIB_ERR_UNSUPPORTED`.
 fn close_onto_shared_edges(k: &mut Kernel, b: Brep, tolerance: f64, lamina: &mut u32) -> solidcore::Result<Out<Brep>> {
-    let mut c = copy_of(k, &b, 2)?;
+    let mut c = brep_copy(k, &b)?;
     let material = material_regions(&c)?;
     let outcome = match stitch_faces(k, &mut c, tolerance, None, true) {
         Ok(o) => o,

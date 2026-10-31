@@ -64,9 +64,9 @@ impl Body {
 }
 
 /// The fixes this backend runs with: every one of solidcore's opt-in fixes of upstream SMLib
-/// defects (`UpstreamFixes`, each naming its record and issue). They are all fixes; the C++ fork
-/// carries most of them in its own sources. A test checks none is left off but those in
-/// `HELD_BACK`, so moving the solidcore pin to a rev with a new flag fails until it is added here.
+/// defects (`UpstreamFixes`, each naming its record and issue), whether or not the C++ fork has it,
+/// unless it appears broken. A test checks none is left off but those in `HELD_BACK`, so moving the
+/// solidcore pin to a rev with a new flag fails until it is added here.
 pub(crate) fn fixes() -> UpstreamFixes {
     let mut f = UpstreamFixes::default();
     f.fillet_retry_radius_as_first = true;
@@ -259,109 +259,67 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.fillet_run_on_bspline_trims = true;
     f.offset_tangent_gap_statuses = true;
     f.ssi_alignment_statuses = true;
+    f.fillet_corner_statuses = true;
+    f.fillet_edge_curve_domain_statuses = true;
+    f.query_statuses_pass_on = true;
+    f.sweep_statuses_pass_on = true;
+    f.ssi_proto_topology_statuses_pass_on = true;
+    f.analytic_inversion_answers_apart = true;
+    f.fillet_statuses_pass_on = true;
+    f.fillet_corner_per_vertex_fan = true;
+    f.fillet_rail_trim_at_near_knot = true;
+    f.offset_splits_corner_vertices = true;
+    f.offset_keep_cavity_regions = true;
+    f.offset_four_face_vertex_split = true;
+    f.gap_samples_non_bspline_v_stride = true;
+    f.gap_array_append_updates_longest = true;
+    f.imprint_skips_collapsed_definition = true;
+    f.precise_properties_trim_base_v = true;
+    f.fillet_blend_curve_revolved_on_arc = true;
+    f.temporary_radius_setup_errors = true;
+    f.ellipse_step_interval_checks = true;
+    f.corner_patch_face_side_twist = true;
+    f.boolean_union_refuses_solid_leak = true;
+    f.curve_loop_start_after_previous_end = true;
+    f.loop_use_reports_open_gaps = true;
+    f.face_points_span_domain = true;
+    f.drop_curve_v_domain_degeneracy = true;
+    f.mirror_curve_keeps_euclidean_control_points = true;
+    f.fillet_corner_variable_radius_rail_on_opposite_fillet = true;
+    f.sphere_from_arcs_common_centre = true;
+    f.dupin_bottom_hyperbola_axis = true;
+    f.extent3d_contains_both_segment_endpoints = true;
+    f.translation_sweep_regularize = true;
+    f.gap_samples_use_trimmed_spans = true;
+    f.twist_simple_duw_sign = true;
+    f.offset_swap_uv_extended_distance = true;
+    f.circumscribe_axis_map_by_basis = true;
+    f.planar_path_profile_in_path_frame = true;
+    f.validation_does_not_make_uv_trims = true;
+    f.iso_curve_uv_line_both_params = true;
+    f.extrusion_step_uses_clamped_uv = true;
+    f.analytic_corner_failure_is_false = true;
+    f.defeature_refuses_open_base = true;
+    f.ssi_start_loop_trace_budget = true;
+    f.fillet_refuse_crossing_rails = true;
+    f.proto_edge_split_upper_keeps_the_old_max = true;
+    f.point_on_start_point_squared_tolerance = true;
     f
 }
 
-/// Opt-in fixes left off because the C++ fork (`SMLIB_REV`) does not behave as they do, so turning
-/// them on would part this backend from the C++ one. Each was read in the fork's source at 2fc375f.
-///
-/// Upstream's defect is still there: `precise_properties_trim_base_v` (WR-563: `SmODEAreaIFEO` starts
-/// at the domain's lowest v), `fillet_blend_curve_revolved_on_arc` (WR-581: `CalcTorusFilletGeom` takes
-/// circular and linear sections only), `ellipse_step_interval_checks` (WR-211: `AdjustSTEPInterval`
-/// tests no inverted or collapsed interval), `boolean_union_refuses_solid_leak` (WR-619: STEP 6 deletes
-/// without testing regions), `curve_loop_start_after_previous_end` (WR-96), `loop_use_reports_open_gaps`
-/// (WR-93), `face_points_span_domain` (WR-86), `drop_curve_v_domain_degeneracy` (WR-100),
-/// `mirror_curve_keeps_euclidean_control_points` (WR-98), `geometric_g2_continuity` (WR-380: a normal
-/// compared with itself), `fillet_corner_variable_radius_rail_on_opposite_fillet` (WR-645: no test of
-/// the rail against the opposite fillet), `sphere_from_arcs_common_centre` (WR-103: `rOrigin` refers to
-/// the origin it is compared with), `dupin_bottom_hyperbola_axis` (WR-69: k2 for both axes),
-/// `extent3d_contains_both_segment_endpoints` (WR-3: `ContainsLineSeg3d` ors its two points),
-/// `gap_samples_use_trimmed_spans` (WR-89: `BuildSampleSet` spans from the first knot),
-/// `twist_simple_duw_sign` (WR-46: `EvaluateSimple`'s Duw y is -per cos) and
-/// `translation_sweep_regularize` (solidcore#1937: nothing regularizes after the sweep).
-///
-/// The fork deals with it another way: `bspline_trim_keeps_rational_end_spans` (WR-575: the fork keeps
-/// a short span of a UV curve, and still removes a 3D conic's) and `corner_patch_face_side_twist`
-/// (WR-613: the fork refines the patch, `corner_blend_coons_patch_tangent_to_sides`).
-///
-/// The fork carries on softly where these refuse: `temporary_radius_setup_errors` (#458: a scope guard
-/// cannot report), `fillet_corner_statuses` (`sm_TestG1Continuity`: no tangent is no tangency),
-/// and `fillet_edge_curve_domain_statuses` (`sm_CheckEdgeCurveDomains`: a failed trim keeps the
-/// edge's curve).
-///
-/// Upstream's defect is still in the fork's source at `SMLIB_REV` 2fc375f:
-/// `offset_swap_uv_extended_distance` (WR-164: `SmOffsetSurface::SwapUV` negates twice),
-/// `circumscribe_axis_map_by_basis` (WR-5: `SmExtent3d::Circumscribe` reads the map by axis),
-/// `planar_path_profile_in_path_frame` (WR-660: `PositionProfileCurves` orients by global axes),
-/// `validation_does_not_make_uv_trims` (WR-446: `sm_CheckEdgeuseGeometry` evaluates with TRUE),
-/// `iso_curve_uv_line_both_params` (WR-30: `CreateUVIsoLine` tests `SM_SP_U` twice),
-/// `extrusion_step_uses_clamped_uv` (WR-61: `EvaluateSTEP*` evaluate `crUV`) and
-/// `analytic_corner_failure_is_false` (WR-254: `MakeAnalyticCornerSurface`'s `SER` reads as TRUE).
-///
-/// The fork has no such code: `offset_splits_corner_vertices` (WR-657: `CloseLoopGaps` splits no
-/// corner and an offset's result is not refused for being open), `defeature_refuses_open_base`
-/// (WR-656: `DoDefeature` drops `BuildPatches`' outcome) and `ssi_start_loop_trace_budget` (HANG-52:
-/// `DoIntersection`'s start-point loop has no budget). `fillet_refuse_crossing_rails` (WR-460: "not
-/// upstream"; the fork stops such rounds with the overlapping bands' check, SmFilletExecutive.cpp:3654,
-/// and refuses a result that is no closed solid) also fails sound rounds, with the closest-point
-/// query's 1001 (a box's top loop, R4 on R8 corners).
-///
-/// On since `SMLIB_REV` eaa998a: `fillet_trim_inside_by_best_dot` (fork de4dae6),
-/// `fillet_half_degree_crease` (2e8758b), `fillet_split_edge_keeps_near_half` (ceb3272) and
-/// `curve_loop_normal_from_area` (be45e8d).
-///
-/// `geometric_g2_continuity`: no fork commit; the C++ still has the defect at SmGeomUtility.cpp:5822
-/// (crashes/2992: 183 faces against 831).
-///
-/// Upstream's defect is still in the fork's source at `SMLIB_REV` 2fc375f:
-/// `fillet_corner_variable_radius_rail_on_opposite_fillet` (WR-645: `MakeVariableRadiusFillet` has
-/// only the concave corner's rail-rail test before resetting the edges, no test of the rail against
-/// the opposite fillet), `sphere_from_arcs_common_centre` (WR-103: `CreateSphereFromArcs` compares
-/// `sRefFrame`'s origin with `rOrigin`, a reference to it), `dupin_bottom_hyperbola_axis` (WR-69:
-/// `MakeDupin`'s bottom hyperbola takes k2 for both axes) and
-/// `extent3d_contains_both_segment_endpoints` (WR-3: `ContainsLineSeg3d` ors its two points).
-///
-/// The fork handles a failed status softly where these flags refuse (solidcore#1775, #483), so the
-/// flags would fail where the C++ kernel carries on: `fillet_corner_statuses` (`sm_TestG1Continuity`:
-/// no tangent is no tangency) and `fillet_edge_curve_domain_statuses` (`sm_CheckEdgeCurveDomains`: a
-/// failed trim keeps the edge's curve). `translation_sweep_regularize` (solidcore#1937) has no fork commit, and the fork keeps
-/// upstream's `gap_samples_use_trimmed_spans` (WR-89: `BuildSampleSet` spans from the first knot) and
-/// `twist_simple_duw_sign` (WR-46: `EvaluateSimple`'s Duw y is -per cos).
+/// The fixes held off, each with the case and the numbers that show it broken: a volume or topology
+/// wrong against the analytic value, a check failure, a crash, sound geometry refused that builds
+/// without the flag, or a large slowdown. Differing from the C++ kernel is no such evidence: a fix
+/// the fork doesn't have stays on, and where solidcore builds what SMLib refuses, a result right
+/// against its closed form is a win.
 #[cfg(test)]
 const HELD_BACK: &[&str] = &[
-    "precise_properties_trim_base_v",
+    // sheet-metal/3078-flange-on-the-side-edge-of-a-flange: with it on the body's check fails with
+    // "SmBSplineCurve::Test #15 Bad Repeated CPts" (volume unchanged, 31362.04580633055); off it passes.
     "bspline_trim_keeps_rational_end_spans",
-    "fillet_blend_curve_revolved_on_arc",
-    "temporary_radius_setup_errors",
-    "ellipse_step_interval_checks",
-    "corner_patch_face_side_twist",
-    "boolean_union_refuses_solid_leak",
-    "curve_loop_start_after_previous_end",
-    "loop_use_reports_open_gaps",
-    "face_points_span_domain",
-    "drop_curve_v_domain_degeneracy",
-    "mirror_curve_keeps_euclidean_control_points",
+    // crashes/2992-join-disk-and-36-twisted-loft-blades takes 121 s with it on, 31 s off, run alone on one
+    // machine (the C++ kernel: 26 s), and times out in a loaded rig. The result is the same.
     "geometric_g2_continuity",
-    "fillet_corner_variable_radius_rail_on_opposite_fillet",
-    "sphere_from_arcs_common_centre",
-    "dupin_bottom_hyperbola_axis",
-    "extent3d_contains_both_segment_endpoints",
-    "fillet_corner_statuses",
-    "fillet_edge_curve_domain_statuses",
-    "translation_sweep_regularize",
-    "gap_samples_use_trimmed_spans",
-    "twist_simple_duw_sign",
-    "offset_swap_uv_extended_distance",
-    "circumscribe_axis_map_by_basis",
-    "planar_path_profile_in_path_frame",
-    "validation_does_not_make_uv_trims",
-    "offset_splits_corner_vertices",
-    "iso_curve_uv_line_both_params",
-    "extrusion_step_uses_clamped_uv",
-    "analytic_corner_failure_is_false",
-    "defeature_refuses_open_base",
-    "ssi_start_loop_trace_budget",
-    "fillet_refuse_crossing_rails",
 ];
 
 fn fresh() -> Kernel {
@@ -513,13 +471,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn every_upstream_fix_is_on() {
-        let f = format!("{:?}", fixes());
-        let off: Vec<&str> =
-            f.split([',', '{', '}']).filter_map(|kv| kv.trim().strip_suffix(": false")).filter(|name| !HELD_BACK.contains(name)).collect();
+    fn every_upstream_fix_is_on_unless_shown_broken() {
+        let f = fixes();
+        let flags: Vec<(&str, bool)> = f.flags().collect();
+        let off: Vec<&str> = flags.iter().filter(|(name, on)| !on && !HELD_BACK.contains(name)).map(|(name, _)| *name).collect();
         assert!(off.is_empty(), "UpstreamFixes flags are off: {off:?}");
         for name in HELD_BACK {
-            assert!(f.contains(&format!("{name}: false")), "{name} is on or gone: drop it from HELD_BACK");
+            assert!(flags.contains(&(*name, false)), "{name} is on or gone: drop it from HELD_BACK");
         }
     }
 

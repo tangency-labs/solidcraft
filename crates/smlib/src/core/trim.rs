@@ -56,11 +56,11 @@ use solidcore::topology::topology_traverser::Marks;
 use solidcore::topology::{Brep, BrepId, EdgeId, FaceId, LoopId, edge};
 
 use super::blend::{p3, status};
-use super::boolean::copy_of;
 use super::sweep::build_faces;
 use super::{Body, answer, run};
 use crate::trim::Continuation;
 use crate::{Error, Result};
+use solidcore::topology::brep::p3::brep_copy;
 
 /// `MAX_HOLE_POINTS`.
 const MAX_HOLE_POINTS: usize = 10_000;
@@ -299,7 +299,7 @@ pub(crate) fn untrim_face(body: &Body, point: [f64; 3], tol: f64, holes: Option<
         let mut whole = {
             let g = body.0.lock().unwrap_or_else(PoisonError::into_inner);
             super::dump::input(k, "brep", &g);
-            copy_of(k, &g, 1)?
+            brep_copy(k, &g)?
         };
         // The face to untrim, in a body of its own (its hole edges lamina there) or in the copy
         // of the whole body.
@@ -753,7 +753,7 @@ pub(crate) fn extend_sheet(sheet: &Body, point: [f64; 3], tol: f64, distance: f6
         let b = {
             let g = sheet.0.lock().unwrap_or_else(PoisonError::into_inner);
             super::dump::input(k, "sheet", &g);
-            copy_of(k, &g, 1)?
+            brep_copy(k, &g)?
         };
         let faces = brep_p1::faces(&b, None)?;
         let [f] = faces.as_slice() else { return Ok(Err(Error::Unsupported)) };

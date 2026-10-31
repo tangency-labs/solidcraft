@@ -251,7 +251,13 @@ mod tests {
             vec![
                 line(0., 1.),
                 line(1., 2.),
-                LinkGeom::Spline { pts: vec![Vec2::new(1., 0.), Vec2::new(2., 1.), Vec2::new(3., 1.)], control: false, degree: 2, periodic: false },
+                LinkGeom::Spline {
+                    pts: vec![Vec2::new(1., 0.), Vec2::new(2., 1.), Vec2::new(3., 1.)],
+                    control: false,
+                    degree: 2,
+                    periodic: false,
+                    nurbs: None,
+                },
             ],
             vec![line(0., 1.), LinkGeom::Arc { c: Vec2::new(1., 1.), a: Vec2::new(1., 0.), b: Vec2::new(2., 1.) }],
             vec![line(0., 1.), line(1.00001, 2.)],

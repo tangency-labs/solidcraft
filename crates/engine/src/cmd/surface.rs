@@ -1976,15 +1976,16 @@ mod tests {
         let before: Vec<solidcraft_geom::Vec3> = st.body("Shell").unwrap().body.edges(0.1).unwrap().iter().flat_map(|e| e.points.clone()).collect();
         assert!(!before.is_empty());
         let area_before = area(&s, "Shell");
-        // The fairing reports both energies, the second no larger than the first.
+        // The fairing reports both energies. The fit is not the fairest surface on its own rim, so
+        // the energy falls strictly and the face moves: its area changes.
         let reply = run(&mut s, "surface.fair", json!({"body": "Shell", "tolerance": 1.0, "iterations": 3}));
         let (energy_before, energy_after) = energies(&reply);
         let area_after = area(&s, "Shell");
-        eprintln!("surface.fair: {reply}\nenergies {energy_before:e} → {energy_after:e}, area {area_before} → {area_after}");
-        assert!(energy_before > 0.0 && energy_after <= energy_before, "{energy_before:e} → {energy_after:e}");
-        // The face moved (the fit is not the flattest surface on its own rim), but not its edges:
-        // every boundary point of the body is where it was, bit for bit.
-        assert!((area_after - area_before).abs() > 0.0 || energy_after < energy_before);
+        assert!(energy_before > 0.0 && energy_after < energy_before, "{energy_before:e} → {energy_after:e}");
+        assert_ne!(area_after, area_before, "the fairing did not move the face");
+        // The edges do not move: every boundary point of the faired body is where it was, bit for
+        // bit, and the sheet is still the one face.
+        let st = s.world_state().unwrap();
         let after: Vec<solidcraft_geom::Vec3> = st.body("Shell").unwrap().body.edges(0.1).unwrap().iter().flat_map(|e| e.points.clone()).collect();
         assert_eq!(after, before, "fairing must not move the face's edges");
         assert_eq!(st.body("Shell").unwrap().body.face_count(), 1);

@@ -1,0 +1,55 @@
+{
+ "commands": [
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     0,
+     0,
+     0
+    ],
+    "length": 60,
+    "width": 40,
+    "height": 10
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     15,
+     10,
+     5
+    ],
+    "length": 30,
+    "width": 20,
+    "height": 6,
+    "operation": "cut"
+   }
+  },
+  {
+   "command": "solid.fillet",
+   "params": {
+    "edges": [
+     [
+      30,
+      10,
+      5
+     ],
+     [
+      15,
+      20,
+      5
+     ],
+     [
+      15,
+      10,
+      7.5
+     ]
+    ],
+    "radius": 2,
+    "type": "curvature"
+   }
+  }
+ ]
+}

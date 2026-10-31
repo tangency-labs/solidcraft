@@ -1,0 +1,176 @@
+{
+ "commands": [
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": "XY",
+    "name": "Peg"
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      0.4892940775280783,
+      0.05792545052986289
+     ],
+     [
+      41.64971183161969,
+      0.05792545083296555
+     ]
+    ]
+   }
+  },
+  {
+   "command": "sketch.arc.center_point",
+   "params": {
+    "center": [
+     41.64971183108453,
+     8.057925450890195
+    ],
+    "start": [
+     41.64971183161969,
+     0.05792545083296555
+    ],
+    "end": [
+     41.649711830726524,
+     16.05792545083297
+    ]
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      41.649711830726524,
+      16.05792545083297
+     ],
+     [
+      0.4892940775280783,
+      16.057925450606035
+     ]
+    ]
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      0.4892940775280783,
+      16.057925450606035
+     ],
+     [
+      0.4892940775280783,
+      0.05792545052986289
+     ]
+    ]
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.extrude",
+   "params": {
+    "sketch": "Peg",
+    "distance": 10,
+    "body_name": "Peg"
+   }
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      0,
+      0,
+      10
+     ],
+     "x_dir": [
+      1,
+      0,
+      0
+     ],
+     "y_dir": [
+      0,
+      1,
+      0
+     ]
+    },
+    "name": "Top"
+   }
+  },
+  {
+   "command": "sketch.project",
+   "params": {
+    "refs": [
+     {
+      "face": [
+       2.4892940775280783,
+       8.057925450890195,
+       10
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     41.64971183108453,
+     8.057925450832967
+    ],
+    "radius": 8.000000000006473
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.extrude",
+   "params": {
+    "sketch": "Top",
+    "distance": 10,
+    "operation": "join",
+    "targets": [
+     "Peg"
+    ],
+    "profiles": [
+     {
+      "point": [
+       41.64971183108453,
+       8.057925450832967
+      ]
+     }
+    ],
+    "exact_regions": true
+   }
+  },
+  {
+   "command": "solid.fillet",
+   "params": {
+    "edges": [
+     [
+      33.65,
+      8.058,
+      10
+     ],
+     [
+      21.07,
+      0.0579,
+      10
+     ]
+    ],
+    "radius": 7,
+    "type": "constant",
+    "tangent_chain": true
+   }
+  }
+ ]
+}

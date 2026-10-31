@@ -28,8 +28,7 @@
 use std::f64::consts::TAU;
 
 use solidcraft_geom::Vec3;
-use solidcraft_geom::brep::eval::CurveEval;
-use solidcraft_geom::brep::{self, Curve as BCurve, Frame, Surface as BSurface};
+use solidcraft_geom::brep::{self, Curve as BCurve};
 
 use super::{Builder, LoopB, R};
 
@@ -255,52 +254,5 @@ impl Builder<'_, '_> {
             }
         }
         Ok(turned)
-    }
-}
-
-impl Builder<'_, '_> {
-    /// Put the frame of each whole sphere bounded by one seam alone (a meridian from pole to
-    /// pole, used both ways) on that seam: its axis through the seam's ends, its x axis through
-    /// the seam's middle. A sphere's frame is the writer's choice (any right-handed frame about
-    /// the centre is the same surface, its natural normal outward); one whose poles are not the
-    /// seam's leaves the seam a slit across the form, not the form's own seam, and no kernel
-    /// takes that as the whole ball. Returns how many frames were moved.
-    pub(super) fn seat_spheres_on_seams(&mut self) -> R<usize> {
-        let mut seated = 0;
-        for fi in 0..self.faces.len() {
-            let Some(face) = self.faces.get(fi) else { continue };
-            let BSurface::Sphere { frame, radius } = &face.surface else { continue };
-            let (frame, radius) = (frame.clone(), *radius);
-            let [LoopB::Edges(uses)] = face.loops.as_slice() else { continue };
-            let [(e, a), (f, b)] = uses.as_slice() else { continue };
-            if e != f || a == b {
-                continue;
-            }
-            let edge = self.edges.get(*e as usize).ok_or("edge reference")?;
-            let point = |v: u32| self.vertices.get(v as usize).map(|x| (Vec3::from(x.point), x.tolerance));
-            let (Some((start, t0)), Some((end, t1))) = (point(edge.vertices[0]), point(edge.vertices[1])) else { continue };
-            let centre = Vec3::from(frame.origin);
-            let reach = self.tol.max(edge.tolerance).max(t0).max(t1);
-            // The seam runs between antipodes: its ends on the sphere, opposite each other.
-            if (start.dist(centre) - radius.abs()).abs() > reach || (start - centre).dist(centre - end) > 2.0 * reach {
-                continue;
-            }
-            let Some(z) = (start - end).normalized() else { continue };
-            let axis = Vec3::from(frame.x_axis).cross(Vec3::from(frame.y_axis));
-            // Already the frame's poles.
-            if axis.cross(z).len() * radius.abs() <= reach {
-                continue;
-            }
-            let c = CurveEval::new(&edge.curve).map_err(|m| m.to_string())?;
-            let middle = c.point(0.5 * (edge.interval[0] + edge.interval[1])).ok_or("edge point")?;
-            let off = middle - centre;
-            let Some(x) = (off - z * off.dot(z)).normalized() else { continue };
-            let y = z.cross(x);
-            let Some(face) = self.faces.get_mut(fi) else { continue };
-            face.surface = BSurface::Sphere { frame: Frame { origin: frame.origin, x_axis: [x.x, x.y, x.z], y_axis: [y.x, y.y, y.z] }, radius };
-            face.extent = None;
-            seated += 1;
-        }
-        Ok(seated)
     }
 }

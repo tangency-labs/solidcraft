@@ -10,6 +10,10 @@
 //! column (u at the start of its knots), the loops split there where they have no vertex on it;
 //! the period is the width of its knots. A torus face winding without a seam, and a spline
 //! closed in v or both ways, are refused for now.
+//!
+//! A face bounded by a slit alone (a loop out along edges and straight back, of no (u, v) area)
+//! on a closed surface is all of that surface less a cut of none: its slit is made its seams
+//! ([`Builder::complete_slits`]), so the loop bounds the surface's whole (u, v) domain.
 
 use std::f64::consts::{PI, TAU};
 
@@ -35,6 +39,21 @@ fn wrap(x: f64) -> f64 {
 /// `x` wrapped into (−period/2, period/2].
 fn wrap_by(x: f64, period: f64) -> f64 {
     x - (x / period).round() * period
+}
+
+/// The path a slit runs out along: a loop that runs out along a chain of edges and straight back
+/// along it, each edge used once each way, started at one of its two turns; `None` for any
+/// other loop.
+pub(super) fn slit_path(es: &[(u32, bool)]) -> Option<Vec<(u32, bool)>> {
+    let n = es.len();
+    if n < 2 || !n.is_multiple_of(2) || !super::seam_only(es) {
+        return None;
+    }
+    // A turn: a use followed by its edge the other way.
+    let k = (0..n).find(|&k| matches!((es.get((k + n - 1) % n), es.get(k)), (Some(a), Some(b)) if a.0 == b.0))?;
+    let ring: Vec<(u32, bool)> = es.iter().skip(k).chain(es.iter().take(k)).copied().collect();
+    let (out, back) = ring.split_at(n / 2);
+    back.iter().rev().zip(out).all(|(b, o)| b.0 == o.0 && b.1 != o.1).then(|| out.to_vec())
 }
 
 /// The axis frame of a surface of revolution: origin, unit axis, and the pole points at the
@@ -457,14 +476,23 @@ impl Builder<'_, '_> {
         let (curve, interval, along) = match &ax.kind {
             Kind::Ruled => (BCurve::Line { start: arr(pa), end: arr(pb) }, [0.0, 1.0], true),
             Kind::Sphere(r) => {
-                let x = (pa - ax.origin).normalized().ok_or("a seam from the sphere's centre")?;
-                let to = pb - ax.origin;
-                let y = (to - x * to.dot(x)).normalized().ok_or("a seam between opposite points")?;
-                let theta = to.dot(y).atan2(to.dot(x));
-                if !(theta > 0.0 && theta <= PI) {
-                    return Err("a degenerate seam".into());
+                // The sphere's own meridian through the end further from the axis: angle 0 on the
+                // equator, π/2 at the upper pole, so its angle is the surface's latitude and its
+                // quarters the surface's.
+                let (da, db) = (pa - ax.origin, pb - ax.origin);
+                let (ra, rb) = (da - ax.z * da.dot(ax.z), db - ax.z * db.dot(ax.z));
+                let x = if ra.len() >= rb.len() { ra } else { rb }.normalized().ok_or("a seam along the sphere's axis")?;
+                let latitude = |d: Vec3| d.dot(ax.z).atan2(d.dot(x));
+                let (ta, tb) = (latitude(da), latitude(db));
+                if !(ta.abs() <= 0.5 * PI + 1e-9 && tb.abs() <= 0.5 * PI + 1e-9) {
+                    return Err(unsupported("a seam between loops at opposite angles"));
                 }
-                (BCurve::Circle { frame: Frame { origin: arr(ax.origin), x_axis: arr(x), y_axis: arr(y) }, radius: *r }, [0.0, theta], true)
+                let along = ta < tb;
+                (
+                    BCurve::Circle { frame: Frame { origin: arr(ax.origin), x_axis: arr(x), y_axis: arr(ax.z) }, radius: *r },
+                    if along { [ta, tb] } else { [tb, ta] },
+                    along,
+                )
             }
             Kind::Iso { column, .. } => {
                 // Each vertex's v on the surface (a pole's from its end of the v range).
@@ -507,7 +535,14 @@ impl Builder<'_, '_> {
                 return Err(unsupported("a seam off its surface: loops with no vertices at one angle"));
             }
         }
-        let vertices = if along { [a, b] } else { [b, a] };
+        let i = self.new_edge(curve, interval, if along { [a, b] } else { [b, a] })?;
+        Ok((i, along))
+    }
+
+    /// A new edge on `curve` over `interval` between `vertices`, each vertex's tolerance raised to
+    /// cover its gap to the curve's end.
+    fn new_edge(&mut self, curve: BCurve, interval: [f64; 2], vertices: [u32; 2]) -> R<u32> {
+        let c = CurveEval::new(&curve).map_err(|m| m.to_string())?;
         for (t, v) in interval.into_iter().zip(vertices) {
             let gap = c.point(t).ok_or("seam point")?.dist(self.vpoint(v)?);
             if let Some(x) = self.vertices.get_mut(v as usize) {
@@ -516,7 +551,242 @@ impl Builder<'_, '_> {
         }
         let i = index(self.edges.len())?;
         self.edges.push(EdgeB { curve, interval, vertices, tolerance: self.tol, form: None });
-        Ok((i, along))
+        Ok(i)
+    }
+
+    /// Complete every face bounded by a slit alone into the whole of its surface. A slit is a
+    /// loop that runs out along a chain of edges and straight back ([`slit_path`]): it encloses
+    /// no (u, v) area, yet on a closed surface it bounds all of it less a cut of none (a ball
+    /// whose one face is bounded by part of a meridian, out and back). Schema 4 keeps that face
+    /// as the surface's whole (u, v) domain, closed by its seams, so the slit is made one: on a
+    /// surface of revolution closed at both poles (a sphere, a revolution whose profile ends on
+    /// its axis, a spline closed round u that collapses at both v ends), the meridian the slit
+    /// lies along is run on from its ends to the poles, out and back; on a torus, the circle the
+    /// slit lies along (round the tube or round the axis) is closed and the other circle through
+    /// its start is the second seam. Returns how many faces were completed.
+    pub(super) fn complete_slits(&mut self) -> R<usize> {
+        let mut completed = 0;
+        for fi in 0..self.faces.len() {
+            let Some(face) = self.faces.get(fi) else { continue };
+            let [LoopB::Edges(es)] = face.loops.as_slice() else { continue };
+            let Some(path) = slit_path(es) else { continue };
+            let (step, surface) = (face.step, face.surface.clone());
+            let (merged, seated) = match &surface {
+                BSurface::Torus { frame, major_radius, .. } => (self.torus_slit(&path, frame, *major_radius)?, None),
+                _ => match self.closed_at_poles(&path, &surface)? {
+                    // An open surface: the slit bounds nothing, and is refused for that later.
+                    None => continue,
+                    Some(Some(m)) => (Some(m), None),
+                    // A sphere's frame is the writer's choice (any right-handed frame about its
+                    // centre is the same surface, its natural normal outward): one whose
+                    // meridians miss the slit has its pole put at the slit's start instead, its x
+                    // axis through the slit's middle.
+                    Some(None) => match &surface {
+                        BSurface::Sphere { frame, radius } => match self.seated(&path, frame, *radius)? {
+                            Some(s) => (self.closed_at_poles(&path, &s)?.flatten(), Some(s)),
+                            None => (None, None),
+                        },
+                        _ => (None, None),
+                    },
+                },
+            };
+            let merged = merged.ok_or_else(|| format!("face #{step}: {}", unsupported("a face bounded by a slit off its surface's seam lines")))?;
+            let Some(face) = self.faces.get_mut(fi) else { continue };
+            if let Some(s) = seated {
+                face.surface = s;
+                face.extent = None;
+            }
+            if let Some(LoopB::Edges(es)) = face.loops.first_mut() {
+                *es = merged;
+            }
+            completed += 1;
+        }
+        Ok(completed)
+    }
+
+    /// The slit made the meridian seam of `surface` when it is a surface of revolution closed
+    /// at both poles ([`Builder::meridian_slit`]); `None` for any other surface.
+    fn closed_at_poles(&mut self, path: &[(u32, bool)], surface: &BSurface) -> R<Option<Option<Vec<(u32, bool)>>>> {
+        let eval = SurfaceEval::new(surface).map_err(|e| e.to_string())?;
+        match axis(surface).or_else(|| spline_axis(surface, &eval)) {
+            Some(ax) if ax.poles.iter().all(Option::is_some) => Ok(Some(self.meridian_slit(path, &ax, &eval)?)),
+            _ => Ok(None),
+        }
+    }
+
+    /// The sphere about `frame`'s centre with its upper pole at the slit's start and its x axis
+    /// through the middle of the slit's middle edge; `None` where those coincide.
+    fn seated(&self, path: &[(u32, bool)], frame: &Frame, radius: f64) -> R<Option<BSurface>> {
+        let centre = Vec3::from(frame.origin);
+        let first = *path.first().ok_or("empty slit")?;
+        let Some(z) = (self.vpoint(self.start(first)?)? - centre).normalized() else { return Ok(None) };
+        let &(e, _) = path.get(path.len() / 2).ok_or("empty slit")?;
+        let edge = self.edges.get(e as usize).ok_or("edge reference")?;
+        let middle =
+            CurveEval::new(&edge.curve).map_err(|m| m.to_string())?.point(0.5 * (edge.interval[0] + edge.interval[1])).ok_or("edge point")?;
+        let off = middle - centre;
+        let Some(x) = (off - z * off.dot(z)).normalized() else { return Ok(None) };
+        Ok(Some(BSurface::Sphere { frame: Frame { origin: frame.origin, x_axis: arr(x), y_axis: arr(z.cross(x)) }, radius }))
+    }
+
+    /// The vertex use `u` ends at.
+    fn end(&self, (e, forward): (u32, bool)) -> R<u32> {
+        self.start((e, !forward))
+    }
+
+    /// Vertex `v` is at `p`, within its tolerance.
+    fn at(&self, v: u32, p: Vec3) -> R<bool> {
+        let x = self.vertices.get(v as usize).ok_or("vertex reference")?;
+        Ok(Vec3::from(x.point).dist(p) <= self.tol.max(x.tolerance))
+    }
+
+    /// Every point of the path's edges lies on one meridian of the surface (the spline's
+    /// boundary column for [`Kind::Iso`]), the poles apart.
+    fn on_meridian(&self, path: &[(u32, bool)], ax: &Axis, eval: &SurfaceEval) -> R<bool> {
+        let mut u_ref = match ax.kind {
+            Kind::Iso { u0, .. } => Some(u0),
+            _ => None,
+        };
+        for &(e, _) in path {
+            let edge = self.edges.get(e as usize).ok_or("edge reference")?;
+            let c = CurveEval::new(&edge.curve).map_err(|m| m.to_string())?;
+            let ([lo, hi], reach) = (edge.interval, self.tol.max(edge.tolerance));
+            for k in 0..=SAMPLES {
+                let p = c.point(lo + (hi - lo) * k as f64 / SAMPLES as f64).ok_or("edge point")?;
+                if ax.poles.iter().flatten().any(|q| q.dist(p) <= reach) {
+                    continue;
+                }
+                let Some(q) = eval.project(p, None, f64::INFINITY) else { return Ok(false) };
+                let u = *u_ref.get_or_insert(q[0]);
+                if !eval.point([u, q[1]]).is_some_and(|m| m.dist(p) <= reach) {
+                    return Ok(false);
+                }
+            }
+        }
+        Ok(u_ref.is_some())
+    }
+
+    /// A slit along a meridian of a surface closed at both poles, run on to them: the meridian
+    /// from the lower pole to the upper (the slit's path, with a seam edge from each end of it
+    /// that is not at its pole), then back. `None` when the slit is off every meridian.
+    fn meridian_slit(&mut self, path: &[(u32, bool)], ax: &Axis, eval: &SurfaceEval) -> R<Option<Vec<(u32, bool)>>> {
+        let (Some(south), Some(north)) = (ax.poles[0], ax.poles[1]) else { return Ok(None) };
+        if !self.on_meridian(path, ax, eval)? {
+            return Ok(None);
+        }
+        // How far up the meridian a vertex is: a pole's from its end, else its v.
+        let height = |s: &Self, v: u32| -> R<f64> {
+            Ok(if s.at(v, south)? {
+                f64::NEG_INFINITY
+            } else if s.at(v, north)? {
+                f64::INFINITY
+            } else {
+                eval.project(s.vpoint(v)?, None, f64::INFINITY).ok_or("a slit vertex off its surface")?[1]
+            })
+        };
+        let (first, last) = (*path.first().ok_or("empty slit")?, *path.last().ok_or("empty slit")?);
+        let (ha, hb) = (height(self, self.start(first)?)?, height(self, self.end(last)?)?);
+        if !(ha != hb) {
+            return Ok(None);
+        }
+        // Up the meridian.
+        let mut up = path.to_vec();
+        if ha > hb {
+            super::reverse(&mut up);
+        }
+        let (a, b) = (self.start(*up.first().ok_or("empty slit")?)?, self.end(*up.last().ok_or("empty slit")?)?);
+        let pole_vertex = |s: &mut Self, p: Vec3| -> R<u32> {
+            let v = index(s.vertices.len())?;
+            s.vertices.push(Vertex { point: arr(p), tolerance: s.tol });
+            Ok(v)
+        };
+        let mut merged = Vec::with_capacity(2 * up.len() + 4);
+        if !self.at(a, south)? {
+            let s = pole_vertex(self, south)?;
+            let (seam, along) = self.seam_edge(a, s, ax, eval, true)?;
+            merged.push((seam, !along));
+        }
+        merged.extend(up);
+        if !self.at(b, north)? {
+            let n = pole_vertex(self, north)?;
+            merged.push(self.seam_edge(b, n, ax, eval, true)?);
+        }
+        let mut back = merged.clone();
+        super::reverse(&mut back);
+        merged.extend(back);
+        Ok(Some(merged))
+    }
+
+    /// A slit along a circle of a torus (round its tube, or round its axis) made the torus's two
+    /// seams: that circle closed from the slit's end round to its start, the way the slit runs,
+    /// and the other circle through the start; the loop runs round the first, the second, the
+    /// first back and the second back. `None` when the slit is off both circles.
+    fn torus_slit(&mut self, path: &[(u32, bool)], frame: &Frame, major: f64) -> R<Option<Vec<(u32, bool)>>> {
+        let (o, z) = (Vec3::from(frame.origin), Vec3::from(frame.x_axis).cross(Vec3::from(frame.y_axis)));
+        let (first, last) = (*path.first().ok_or("empty slit")?, *path.last().ok_or("empty slit")?);
+        let (a, b) = (self.start(first)?, self.end(last)?);
+        let (pa, pb) = (self.vpoint(a)?, self.vpoint(b)?);
+        let off = pa - o;
+        let h = off.dot(z);
+        let Some(radial) = (off - z * h).normalized() else { return Ok(None) };
+        // The circles through the slit's start, as centre and unit normal: round the tube in the
+        // plane through the axis, and round the axis at the start's height.
+        let tube = (o + radial * major, radial.cross(z));
+        let ring = (o + z * h, z);
+        let along = |s: &Self, (c, n): (Vec3, Vec3)| -> R<bool> {
+            let r = (pa - c).len();
+            for &(e, _) in path {
+                let edge = s.edges.get(e as usize).ok_or("edge reference")?;
+                let curve = CurveEval::new(&edge.curve).map_err(|m| m.to_string())?;
+                let ([lo, hi], reach) = (edge.interval, s.tol.max(edge.tolerance));
+                for k in 0..=SAMPLES {
+                    let d = curve.point(lo + (hi - lo) * k as f64 / SAMPLES as f64).ok_or("edge point")? - c;
+                    if !(d.dot(n).abs() <= reach && (d.len() - r).abs() <= reach) {
+                        return Ok(false);
+                    }
+                }
+            }
+            Ok(true)
+        };
+        let (circle, other) = if along(self, tube)? {
+            (tube, ring)
+        } else if along(self, ring)? {
+            (ring, tube)
+        } else {
+            return Ok(None);
+        };
+        let mut round = path.to_vec();
+        if a != b {
+            // On from the slit's end the way it arrives there, from a point of its last edge
+            // just before.
+            let (c, n) = circle;
+            let edge = self.edges.get(last.0 as usize).ok_or("edge reference")?;
+            let [lo, hi] = edge.interval;
+            let t = if last.1 { hi - (hi - lo) / SAMPLES as f64 } else { lo + (hi - lo) / SAMPLES as f64 };
+            let before = CurveEval::new(&edge.curve).map_err(|m| m.to_string())?.point(t).ok_or("edge point")?;
+            let Some(x) = (pb - c).normalized() else { return Ok(None) };
+            let y = n.cross(x);
+            let y = if (pb - before).dot(y) >= 0.0 { y } else { -y };
+            let d = pa - c;
+            let theta = d.dot(y).atan2(d.dot(x)).rem_euclid(TAU);
+            let radius = (pb - c).len();
+            if !(theta * radius > self.tol) {
+                return Ok(None);
+            }
+            let rest = BCurve::Circle { frame: Frame { origin: arr(c), x_axis: arr(x), y_axis: arr(y) }, radius };
+            round.push((self.new_edge(rest, [0.0, theta], [b, a])?, true));
+        }
+        let (c, n) = other;
+        let Some(x) = (pa - c).normalized() else { return Ok(None) };
+        let full = BCurve::Circle { frame: Frame { origin: arr(c), x_axis: arr(x), y_axis: arr(n.cross(x)) }, radius: (pa - c).len() };
+        let second = self.new_edge(full, [0.0, TAU], [a, a])?;
+        let mut back = round.clone();
+        super::reverse(&mut back);
+        let mut merged = round;
+        merged.push((second, true));
+        merged.extend(back);
+        merged.push((second, false));
+        Ok(Some(merged))
     }
 
     /// Join loop `li` of face `fi` to the pole the face covers: seam out and back.
