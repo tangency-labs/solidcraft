@@ -1123,6 +1123,11 @@ pub enum Answer {
 pub fn prompt(app: &mut SolveApp, ctx: &egui::Context) {
     let _language = crate::i18n::scope(&app.preferences.language);
     quit_step(app);
+    // Saved, it asks the Capture Position question first (#9736): that question is the one to
+    // answer meanwhile, not this one again.
+    if app.tree.capture_prompt.is_some() {
+        return;
+    }
     let Some(i) = app.docs.closing else { return };
     let name = tabs_info(app).get(i).map(|x| x.0.clone()).unwrap_or_default();
     let name_display = crate::i18n::tr_name(&name);
@@ -1181,7 +1186,7 @@ pub fn prompt(app: &mut SolveApp, ctx: &egui::Context) {
 
 /// Act on the "save changes?" answer (also the control channel's `ui.documents {answer}`).
 pub fn answer_prompt(app: &mut SolveApp, answer: Answer) {
-    if app.file_picker_busy() {
+    if app.file_picker_busy() || app.tree.capture_prompt.is_some() {
         return;
     }
     let Some(i) = app.docs.closing else { return };

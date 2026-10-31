@@ -1074,6 +1074,8 @@ fn closing_with_an_uncaptured_move_asks_to_save_and_to_capture() {
     crate::documents::answer_prompt(&mut app, crate::documents::Answer::Save);
     assert_eq!(app.tree.capture_prompt.as_deref(), Some(crate::browser::SAVE));
     assert_eq!(app.docs.closing, Some(0), "the close waits for the answer");
+    crate::documents::answer_prompt(&mut app, crate::documents::Answer::DontSave);
+    assert_eq!(app.docs.closing, Some(0), "the Capture Position question is the one to answer now");
     crate::browser::answer_capture(&mut app, "cancel").unwrap();
     assert!(app.docs.closing.is_none() && !app.session.pending_moves.is_empty(), "still open, with the move");
 
