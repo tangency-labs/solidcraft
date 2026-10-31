@@ -2,8 +2,9 @@
  "sources": [],
  "what": "a slab 140 x 90 x 50 with a 30 mm pocket whose floor falls 1 deg from its edges to a central drain (four faces meet at each of the pocket floor's concave corners), shelled 3 mm open at the top",
  "source": "analytic",
- "method": "The floor below z = 0 is a pyramid, apex at the centre h = 30 tan 1 deg = 0.523652 below: two triangular prisms (a triangle on XZ swept along y, one on YZ swept along x) intersected. Slab 140 x 90 x 50 less the pocket x 20..120, y 15..75 down to z = 20 and the pyramid below it: V0 = 630000 - (100 60 30 + 100 60 h/3). Shell 3 open at the top, offset faces extended to meet: the cavity is x 3..137, y 3..87 from z = 3 up to the top, except over the pocket's walls moved 3 out (x 17..123, y 12..78), where it rises only to the pocket's floor facets moved 3 down (their max, exactly over the cells where each is highest): cavity 297136.906075. V = 151815.790029",
+ "method": "The floor below z = 0 is a pyramid, apex at the centre h = 30 tan 1 deg = 0.523652 below: two triangular prisms (a triangle on XZ swept along y, one on YZ swept along x) intersected. Slab 140 x 90 x 50 less the pocket x 20..120, y 15..75 down to z = 20 and the pyramid below it: V0 = 630000 - (100 60 30 + 100 60 h/3). Shell 3 open at the top, offset faces extended to meet: the cavity is x 3..137, y 3..87 from z = 3 up to the top, except over the pocket's walls moved 3 out (x 17..123, y 12..78), where it rises only to the pocket's floor facets moved 3 down (their max, exactly over the cells where each is highest): cavity 297136.906075. The pocket's lining (its walls and floor, 3 thick, hanging from the top's rim round the pocket) stands apart from the slab's outer walls, the cavity rising between them to the open top: two lumps in the one body. V = 151815.790029",
  "body_count": 1,
+ "shells": 2,
  "volume_mm3": 151815.7900294403,
  "tolerance": {
   "rel": 1e-05
