@@ -1,0 +1,28 @@
+{
+ "sources": [],
+ "what": "a box's top back edge rounded curvature-continuous size 3: the order-2 section meets each face with its curvature (0), and not its third derivative",
+ "source": "analytic",
+ "method": "box 40x30x20, the top back edge (y = 30, z = 20, 40 long) between the planar end faces x = 0 and 40, set back s = 3 along both faces (square to each other). In a plane x = const the faces' feet of the point at distance d from both are (30 - d, 20) and (30, 20 - d), so the order-2 section is S(t) = f(t) (e + (1 - p1(t)) (rho1 - e)) + (1 - f(t)) (e + p2(t) (rho2 - e)), f = (1-t)^3 / ((1-t)^3 + t^3), p1 = t / (1 - w + w t), p2 = t (1 - w) / (1 - w t), e the edge and rho_i the contacts, at the default thumbweight w = 0.0342934022666073, which is defined by this section cutting 113/756 s^2 off the corner (Green's theorem on S): 1.345238. V = 24000 - 40 * 1.345238 = 23946.1905. Faces 7; both seams G2, not G3.",
+ "body_count": 1,
+ "volume_mm3": 23946.190476190477,
+ "faces": 7,
+ "bbox": {
+  "min": [
+   0,
+   0,
+   0
+  ],
+  "max": [
+   40,
+   30,
+   20
+  ]
+ },
+ "continuity": {
+  "order": "g2",
+  "exact": true
+ },
+ "tolerance": {
+  "rel": 1e-07
+ }
+}

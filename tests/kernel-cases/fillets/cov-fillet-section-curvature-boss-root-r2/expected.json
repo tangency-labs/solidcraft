@@ -1,0 +1,16 @@
+{
+ "sources": [],
+ "what": "the root circle of a boss R8 on a plate rounded curvature-continuous size 2: the order-2 section revolved",
+ "source": "analytic",
+ "method": "plate 60x40x10 with a boss R8 x 10 at (30, 20): V0 = 24000 + 640 pi = 26010.6193. In each meridian plane (rho, z) the plate's top and the boss's wall are the lines z = 10 and rho = 8, the feet of the point at distance d from both (8 + d, 10) and (8, 10 + d): the order-2 section at the default thumbweight is that of a square corner (cov-fillet-section-curvature-box-edge-r3), area 113/756 s^2 = 0.597884 (s = 2), first moment about the wall 0.222979 (Green's theorem on the section), revolved (Pappus): 2 pi (8 A + M) = 31.454. V = 26042.0732. Faces 9; both seams G2, not G3.",
+ "body_count": 1,
+ "volume_mm3": 26042.0732245589,
+ "faces": 9,
+ "continuity": {
+  "order": "g2",
+  "exact": true
+ },
+ "tolerance": {
+  "rel": 1e-07
+ }
+}
