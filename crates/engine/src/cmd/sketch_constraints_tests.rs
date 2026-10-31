@@ -456,6 +456,27 @@ fn drawing_at_a_curve_crossing_keeps_the_point_on_both() {
 }
 
 #[test]
+fn drawing_at_an_infinite_line_crossing_keeps_the_point_on_both() {
+    let mut s = new_sketch();
+    let a = ids(&run(&mut s, "sketch.construction_line.vertical", json!({"at": [20, 40]}))["curves"])[0].clone();
+    let b = ids(&run(&mut s, "sketch.construction_line.horizontal", json!({"at": [40, 15]}))["curves"])[0].clone();
+    let r = run(&mut s, "sketch.line", json!({"points": [format!("x:{a}+{b}:20.4,15.4"), [30, 25]], "infer": false, "connect": false}));
+    let line = ids(&r["curves"])[0].clone();
+    let sk = sketch(&s);
+    let start = sk.resolve_point(&format!("{line}.start")).unwrap();
+    assert!(sk.point(start).unwrap().dist(Vec2::new(20.0, 15.0)) < 1e-9);
+    for name in [a, b] {
+        let curve = sk.curve_index(&name).unwrap();
+        assert!(sk.constraints.iter().any(|k| matches!(k.kind, crate::sketch::ConstraintKind::PointOnCurve { p, c } if p == start && c == curve)));
+    }
+    let before_undo = s.doc.to_json();
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(sketch(&s).curves.len(), 2);
+    run(&mut s, "edit.redo", json!({}));
+    assert_eq!(s.doc.to_json(), before_undo);
+}
+
+#[test]
 fn drawing_at_a_curve_crossing_refuses_hostile_arguments() {
     let mut s = new_sketch();
     let a = ids(&run(&mut s, "sketch.line", json!({"points": [[0, 0], [10, 0]], "infer": false}))["curves"])[0].clone();
