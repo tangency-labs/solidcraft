@@ -22,6 +22,7 @@
   {"expect":{"prefs":{"theme_option_values":{"contrast":"soft"}},"theme_colors":{"panel":"#32302f"}}},
   {"call":"ui.prefs","params":{"theme_options":{"gruvbox-dark":{"contrast":null}}}},
   {"expect":{"prefs":{"theme_option_values":{"contrast":"standard"}},"theme_colors":{"panel":"#282828"}}},
+  {"call":"ui.prefs","params":{"theme_options":{"gruvbox-light":{}}}},
   {"call":"ui.prefs","params":{"button":"ok"}},
   {"note": "Okibi (dark) and Akari (light) are built in by id."},
   {"call": "ui.prefs", "params": {"theme": "akari"}},
