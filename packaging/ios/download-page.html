@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>SolidCraft &amp; wgpu · iOS builds</title>
+  <style>
+    :root { color-scheme: dark; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #071716; color: #e9f5f2; }
+    * { box-sizing: border-box; }
+    body { margin: 0; min-height: 100vh; padding: 56px 22px; background: radial-gradient(ellipse at 85% 0%, #123e38 0, transparent 55%); }
+    main { margin: auto; width: 100%; max-width: 800px; }
+    .eyebrow { color: #86d9c3; font-size: .75rem; font-weight: 700; letter-spacing: .16em; text-transform: uppercase; }
+    h1 { font-size: clamp(2.7rem, 8vw, 4.5rem); letter-spacing: -.06em; line-height: 1.06; margin: 22px 0; }
+    .intro { color: #b3cbc4; font-size: 1.12rem; line-height: 1.7; max-width: 650px; }
+    .card { margin-top: 28px; padding: 28px; border: 1px solid #285047; border-radius: 20px; background: #0c2420; }
+    .card h2 { margin: 0 0 10px; font-size: 1.55rem; letter-spacing: -.025em; }
+    .specs, .note, li { color: #b3cbc4; line-height: 1.7; }
+    .specs { margin: 0 0 20px; }
+    a { color: #9cebd4; text-underline-offset: 4px; }
+    a:hover { color: #d1ffef; }
+    a:focus-visible { outline: 3px solid #b0ffe8; outline-offset: 5px; }
+    .download { display: inline-block; padding: 14px 22px; border-radius: 10px; background: #9cebd4; color: #07251c; text-decoration: none; font-weight: 750; }
+    .download:hover { background: #c1ffe9; color: #07251c; }
+    .secondary { display: inline-block; margin: 16px 0 0 16px; font-size: .9rem; }
+    .note { font-size: .9rem; margin: 20px 0 0; }
+    .status { padding-left: 14px; border-left: 2px solid #70bda7; color: #d4e9e2; }
+    .features { display: flex; flex-wrap: wrap; gap: 8px; list-style: none; padding: 0; margin: 22px 0; }
+    .features li { border: 1px solid #285047; padding: 5px 11px; border-radius: 999px; font-size: .8rem; }
+    .about { font-size: .88rem; line-height: 1.8; color: #91ada4; }
+    footer { margin-top: 34px; color: #75958b; font-size: .78rem; }
+    footer a { color: inherit; }
+    @media (max-width: 480px) { .card { padding: 22px; } .download { display: block; text-align: center; } .secondary { margin-left: 0; margin-right: 12px; } }
+  </style>
+</head>
+<body>
+  <main>
+    <div class="eyebrow">Rust × Metal × iOS</div>
+    <h1>Desktop CAD.<br>Now on iOS.</h1>
+    <p class="intro">A native test port of SolidCraft, sharing the macOS app's Rust CAD engine and egui interface. Built on Linux with xtool, ready for your sideloader.</p>
+    <section class="card" aria-labelledby="solidcraft-title">
+      <h2 id="solidcraft-title">SolidCraft 0.24.0</h2>
+      <p class="specs">arm64 · iPhone &amp; iPad · iOS 16.4+ · Native Metal rendering</p>
+      <a class="download" href="/downloads/solidcraft-ios16.4-unsigned.ipa" download>Download unsigned IPA ↓</a>
+      <a class="secondary" href="/downloads/SHA256SUMS">SHA256 checksums</a>
+      <a class="secondary" href="/downloads/SOLIDCRAFT-BUILD-NOTES.txt">Build notes</a>
+      <ul class="features"><li>Parametric CAD</li><li>Sketches &amp; timeline</li><li>Native Files import</li><li>Pinch &amp; pan</li></ul>
+      <p class="note">Re-sign with your sideloading app before installing. This is a test port, not an official upstream iOS release. The desktop layout works best on iPad or in landscape.</p>
+      <p class="note">Open files with the native Files picker. Save and export to <strong>Files → On My iPhone/iPad → SolidCraft</strong>. Pinch to zoom, two-finger drag to pan; use the navigation toolbar for orbit.</p>
+      <p class="note">Desktop-only integrations, external slicers and local agent subprocesses are not supported on iOS.</p>
+      <p class="note status">Package and unsigned status checked. SolidCraft has not yet been tested on a physical device.</p>
+      <p class="about">Source: <a href="https://github.com/tangency-labs/solidcraft">tangency-labs/solidcraft</a> · Native eframe/winit host, not a WebView</p>
+    </section>
+    <section class="card" aria-labelledby="wgpu-title">
+      <h2 id="wgpu-title">wgpu-in-app</h2>
+      <p class="specs">arm64 · iPhone &amp; iPad · iOS 16.4+ · Five Metal demos</p>
+      <a class="download" href="/downloads/wgpu-in-app-ios16.4-unsigned.ipa" download>Download unsigned IPA ↓</a>
+      <p class="note status">Confirmed working on a physical device by the VM owner.</p>
+      <p class="about">Source: <a href="https://github.com/jinleili/wgpu-in-app">jinleili/wgpu-in-app</a> · Boids, Lines, Cube, Water and Shadows</p>
+    </section>
+    <footer>Built with <a href="https://github.com/xtool-org/xtool">xtool</a> · hosted with love on <a href="https://exe.dev">exe.dev</a></footer>
+  </main>
+</body>
+</html>

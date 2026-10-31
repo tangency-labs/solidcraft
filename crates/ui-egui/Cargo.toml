@@ -52,8 +52,8 @@ syn = { workspace = true, features = ["visit"] }
 proc-macro2 = { workspace = true }
 
 # Pictures pasted into the agent chat; already in the tree, with the same features, through
-# egui-winit's clipboard.
-[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+# egui-winit's clipboard. arboard has no iOS backend; text paste stays with the host.
+[target.'cfg(all(not(target_arch = "wasm32"), not(target_os = "ios")))'.dependencies]
 arboard = { version = "3.6", default-features = false, features = ["image-data"] }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]

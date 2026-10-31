@@ -1,0 +1,13 @@
+version: 1
+bundleID: labs.tangency.solidcraft.ios
+product: SolidCraft
+infoPath: Info.plist
+skipLSP: true
+resources:
+  - ../../LICENSE-MIT
+  - ../../LICENSE-APACHE
+  - ../../THIRD-PARTY-LICENSES.txt
+  - ../../target/ios-icons/AppIcon60x60@2x.png
+  - ../../target/ios-icons/AppIcon60x60@3x.png
+  - ../../target/ios-icons/AppIcon76x76@2x.png
+  - ../../target/ios-icons/AppIcon83.5x83.5@2x.png
