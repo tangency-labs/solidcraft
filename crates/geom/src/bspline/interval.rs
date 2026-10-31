@@ -50,6 +50,10 @@ impl Interval {
     pub(crate) fn is_finite(self) -> bool {
         self.lo.is_finite() && self.hi.is_finite()
     }
+    /// The largest absolute value held.
+    pub(crate) fn mag(self) -> f64 {
+        self.lo.abs().max(self.hi.abs())
+    }
     /// A number held: the midpoint, correctly rounded, so between the bounds even in the
     /// subnormal range.
     pub(crate) fn mid(self) -> f64 {

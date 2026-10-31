@@ -7,7 +7,8 @@
 
 use std::collections::HashMap;
 
-use solidcraft_geom::{MAX_BEZIER_DEGREE, Vec2};
+use solidcraft_geom::bspline::{HPoint, MAX_CURVE_DEGREE, NurbsCurve};
+use solidcraft_geom::{MAX_BEZIER_DEGREE, Vec2, Vec3};
 
 use crate::sketch2d::{Geom2, MAX_DRAWING_BYTES, MAX_ENTITIES, bulge_arc};
 use crate::{IoError, Result};
@@ -169,7 +170,7 @@ fn convert(ents: &[Ent], k: f64, blocks: &HashMap<String, (Vec2, Vec<Ent>)>, dep
                         let off = Vec2::from_angle(rot) * (dc * c as f64) + Vec2::from_angle(rot).perp() * (dr * r as f64);
                         let t = Affine::insert(ins + off, *base, sx, sy, rot);
                         for g in &inner {
-                            t.apply(g, out);
+                            t.apply(g, out)?;
                         }
                     }
                 }
@@ -272,14 +273,21 @@ fn convert(ents: &[Ent], k: f64, blocks: &HashMap<String, (Vec2, Vec<Ent>)>, dep
                 }
             }
             "SPLINE" => {
-                // The degrees a sketch spline takes (a G4 blend's Bézier is degree 9).
-                let degree = e.get(71).unwrap_or(3.0).clamp(1.0, MAX_BEZIER_DEGREE as f64) as u8;
                 let (fx, fy) = (e.all(11), e.all(21));
                 let (cx, cy) = (e.all(10), e.all(20));
                 if fx.len() >= 2 && fx.len() == fy.len() {
                     out.push(Geom2::Spline { pts: fx.iter().zip(&fy).map(|(x, y)| pt(*x, *y)).collect(), control: false, degree: 3 });
                 } else if cx.len() >= 2 && cx.len() == cy.len() {
-                    out.push(Geom2::Spline { pts: cx.iter().zip(&cy).map(|(x, y)| pt(*x, *y)).collect(), control: true, degree });
+                    let ctrl: Vec<Vec2> = cx.iter().zip(&cy).map(|(x, y)| pt(*x, *y)).collect();
+                    let (knots, weights) = (e.all(40), e.all(41));
+                    if knots.is_empty() && weights.is_empty() {
+                        // The sketch's spline over the points, at the degrees a sketch spline takes
+                        // (a G4 blend's Bézier is degree 9).
+                        let degree = e.get(71).unwrap_or(3.0).clamp(1.0, MAX_BEZIER_DEGREE as f64) as u8;
+                        out.push(Geom2::Spline { pts: ctrl, control: true, degree });
+                    } else {
+                        out.push(spline(e.get(71).unwrap_or(3.0), &ctrl, knots, &weights)?);
+                    }
                 }
             }
             "TEXT" | "MTEXT" => {
@@ -324,7 +332,7 @@ impl Affine {
         let (a, b) = (self.v(Vec2::new(1.0, 0.0)), self.v(Vec2::new(0.0, 1.0)));
         ((a.len() - b.len()).abs() <= 1e-9 * a.len().max(b.len()) && a.dot(b).abs() <= 1e-9 * a.len() * b.len()).then_some(a.len())
     }
-    fn apply(&self, g: &Geom2, out: &mut Vec<Geom2>) {
+    fn apply(&self, g: &Geom2, out: &mut Vec<Geom2>) -> Result<()> {
         let flip = self.det() < 0.0;
         let sampled = |f: &dyn Fn(f64) -> Vec2, closed: bool| {
             let n = 32;
@@ -373,13 +381,46 @@ impl Affine {
                 Geom2::Spline { pts: pts.iter().map(|p| self.p(*p)).collect(), control: *control, degree: *degree }
             }
             Geom2::Conic { a, apex, b, rho } => Geom2::Conic { a: self.p(*a), apex: self.p(*apex), b: self.p(*b), rho: *rho },
+            // An affine map moves a B-spline, rational or not, by its control points.
+            Geom2::Nurbs(curve) => {
+                let ctrl: Vec<HPoint> = curve
+                    .ctrl()
+                    .map(|h| {
+                        let q = self.p(Vec2::new(h.x / h.w, h.y / h.w));
+                        HPoint::weighted(Vec3::new(q.x, q.y, 0.0), h.w)
+                    })
+                    .collect();
+                let placed = NurbsCurve::from_homogeneous(curve.degree(), curve.knots().to_vec(), &ctrl);
+                Geom2::Nurbs(placed.map_err(|e| IoError::Invalid(format!("a SPLINE in a block can't be placed: {e}")))?)
+            }
             Geom2::Text { text, at, height, angle } => {
                 let dir = self.v(Vec2::from_angle(*angle));
                 let up = self.v(Vec2::from_angle(*angle).perp());
                 Geom2::Text { text: text.clone(), at: self.p(*at), height: height * up.len(), angle: dir.angle() }
             }
         });
+        Ok(())
     }
+}
+
+/// A SPLINE with its own knots (40) and, when rational, a weight per control point (41), its
+/// points in millimetres: the curve they describe, checked ([`NurbsCurve`]). Refused, with the
+/// reason, when they don't describe one; weights need knots.
+fn spline(degree: f64, ctrl: &[Vec2], knots: Vec<f64>, weights: &[f64]) -> Result<Geom2> {
+    let refuse = |why: String| IoError::Invalid(format!("a SPLINE can't be read: {why}"));
+    let p = Some(degree)
+        .filter(|d| d.fract() == 0.0 && (1.0..=MAX_CURVE_DEGREE as f64).contains(d))
+        .map(|d| d as usize)
+        .ok_or_else(|| refuse(format!("its degree {degree} is not one of 1 to {MAX_CURVE_DEGREE}")))?;
+    if knots.is_empty() {
+        return Err(refuse("it has weights but no knots".into()));
+    }
+    if !weights.is_empty() && weights.len() != ctrl.len() {
+        return Err(refuse(format!("{} weights for {} control points", weights.len(), ctrl.len())));
+    }
+    let h: Vec<HPoint> =
+        ctrl.iter().enumerate().map(|(i, q)| HPoint::weighted(Vec3::new(q.x, q.y, 0.0), weights.get(i).copied().unwrap_or(1.0))).collect();
+    NurbsCurve::from_homogeneous(p, knots, &h).map(Geom2::Nurbs).map_err(|e| refuse(e.to_string()))
 }
 
 fn polyline(verts: &[(Vec2, f64)], closed: bool, out: &mut Vec<Geom2>) {
@@ -452,7 +493,7 @@ pub fn write_dxf(geom: &[Geom2]) -> String {
                 w(1, &text.replace('\n', " "));
             }
             // Free-form curves are written by the caller as polylines (lines).
-            Geom2::Ellipse { .. } | Geom2::Spline { .. } | Geom2::Conic { .. } => {}
+            Geom2::Ellipse { .. } | Geom2::Spline { .. } | Geom2::Nurbs(_) | Geom2::Conic { .. } => {}
         }
     }
     w(0, "ENDSEC");
@@ -572,6 +613,70 @@ mod tests {
         {
             let back = read_dxf(&spline(given)).unwrap();
             assert!(matches!(&back[..], [Geom2::Spline { pts, control: true, degree }] if *degree == read && pts.len() == 10), "{given:?}: {back:?}");
+        }
+    }
+
+    /// A SPLINE keeps its own knots (40) and weights (41) (solidcraft#9355): the curve as written
+    /// (its points in millimetres), whatever its knots, placed by a block like any other entity.
+    /// Without knots or weights it is the sketch's spline over its points, as before. Knots or
+    /// weights that don't describe a curve refuse the drawing, saying why.
+    #[test]
+    fn a_spline_keeps_its_own_knots_and_weights() {
+        let entities = |body: &str| {
+            read_dxf(&format!("0\nSECTION\n2\nHEADER\n9\n$INSUNITS\n70\n1\n0\nENDSEC\n0\nSECTION\n2\nENTITIES\n{body}0\nENDSEC\n0\nEOF\n"))
+        };
+        let spline = |degree: u32, points: &[(f64, f64)], knots: &[f64], weights: &[f64]| {
+            let mut body = format!("0\nSPLINE\n71\n{degree}\n");
+            body.extend(knots.iter().map(|k| format!("40\n{k}\n")));
+            body.extend(weights.iter().map(|w| format!("41\n{w}\n")));
+            body.extend(points.iter().map(|(x, y)| format!("10\n{x}\n20\n{y}\n")));
+            body
+        };
+        let five = [(0.0, 0.0), (1.0, 2.0), (3.0, 2.0), (4.0, 0.0), (6.0, 1.0)];
+        let inches: Vec<Vec2> = five.iter().map(|(x, y)| Vec2::new(x * 25.4, y * 25.4)).collect();
+        let ctrl = |c: &NurbsCurve| c.ctrl().map(|h| Vec2::new(h.x / h.w, h.y / h.w)).collect::<Vec<_>>();
+        // Clamped and even, uneven, not clamped, degree 12, unweighted or weighted alike: the knots
+        // and points as written.
+        let twelve: Vec<(f64, f64)> = (0..14).map(|i| (f64::from(i), f64::from(i % 3))).collect();
+        for (degree, points, knots, weights) in [
+            (3, &five[..], vec![0.0, 0.0, 0.0, 0.0, 0.5, 1.0, 1.0, 1.0, 1.0], &[][..]),
+            (3, &five, vec![0.0, 0.0, 0.0, 0.0, 0.5, 1.0, 1.0, 1.0, 1.0], &[2.0; 5]),
+            (3, &five, vec![0.0, 0.0, 0.0, 0.0, 0.2, 1.0, 1.0, 1.0, 1.0], &[]),
+            (3, &five, (0..9).map(f64::from).collect(), &[]),
+            (12, &twelve, [0.0; 13].into_iter().chain([0.5]).chain([1.0; 13]).collect(), &[]),
+        ] {
+            let back = entities(&spline(degree, points, &knots, weights)).unwrap();
+            let [Geom2::Nurbs(c)] = &back[..] else { panic!("{back:?}") };
+            assert!(c.knots() == knots && c.degree() == degree as usize, "{c:?}");
+            if degree == 3 {
+                assert!(ctrl(c).iter().zip(&inches).all(|(a, b)| a.dist(*b) < 1e-12), "{:?}", ctrl(c));
+            }
+        }
+        // A quarter circle as a weighted quadratic: its weights.
+        let w = std::f64::consts::FRAC_1_SQRT_2;
+        let back = entities(&spline(2, &[(1.0, 0.0), (1.0, 1.0), (0.0, 1.0)], &[0.0, 0.0, 0.0, 1.0, 1.0, 1.0], &[1.0, w, 1.0])).unwrap();
+        assert!(matches!(&back[..], [Geom2::Nurbs(c)] if c.ctrl().map(|h| h.w).collect::<Vec<_>>() == [1.0, w, 1.0]), "{back:?}");
+        // In a block placed at (10, 0) mm and turned a quarter: its control points move with it.
+        let block = format!(
+            "0\nSECTION\n2\nBLOCKS\n0\nBLOCK\n2\nB\n10\n0\n20\n0\n{}0\nENDBLK\n0\nENDSEC\n0\nSECTION\n2\nENTITIES\n0\nINSERT\n2\nB\n10\n10\n20\n0\n50\n90\n0\nENDSEC\n0\nEOF\n",
+            spline(3, &five, &[0.0, 0.0, 0.0, 0.0, 0.2, 1.0, 1.0, 1.0, 1.0], &[])
+        );
+        let back = read_dxf(&block).unwrap();
+        let [Geom2::Nurbs(c)] = &back[..] else { panic!("{back:?}") };
+        let want: Vec<Vec2> = five.iter().map(|(x, y)| Vec2::new(10.0 - y, *x)).collect();
+        assert!(ctrl(c).iter().zip(&want).all(|(a, b)| a.dist(*b) < 1e-12), "{:?}", ctrl(c));
+        // Knots one short or decreasing, weights one short or not positive, weights without knots,
+        // a degree past 16: refused.
+        for (degree, knots, weights) in [
+            (3, &[0.0, 0.0, 0.0, 0.0, 0.2, 1.0, 1.0, 1.0][..], &[][..]),
+            (3, &[0.0, 0.0, 0.0, 0.0, 0.7, 0.2, 1.0, 1.0, 1.0], &[]),
+            (3, &[0.0, 0.0, 0.0, 0.0, 0.2, 1.0, 1.0, 1.0, 1.0], &[1.0; 4]),
+            (3, &[0.0, 0.0, 0.0, 0.0, 0.2, 1.0, 1.0, 1.0, 1.0], &[1.0, 1.0, -1.0, 1.0, 1.0]),
+            (3, &[], &[1.0, 2.0, 1.0, 1.0, 1.0]),
+            (17, &[], &[1.0; 5]),
+        ] {
+            let err = entities(&spline(degree, &five, knots, weights)).unwrap_err().to_string();
+            assert!(err.contains("a SPLINE can't be read"), "{knots:?} {weights:?}: {err}");
         }
     }
 

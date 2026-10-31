@@ -27,7 +27,7 @@ pub fn ellipse_polyline(c: Vec2, m: Vec2, r: f64) -> Vec<Vec2> {
 /// Rational quadratic Bézier from `a` to `b` with control `apex` and shape `rho` in (0, 1)
 /// (0.5 = parabola, below = ellipse, above = hyperbola).
 pub fn conic_point(a: Vec2, apex: Vec2, b: Vec2, rho: f64, t: f64) -> Vec2 {
-    let w = rho / (1.0 - rho).max(1e-9);
+    let w = rho / (1.0 - rho).max(solidcraft_geom::bspline::MIN_CONIC_RHO_GAP);
     let (b0, b1, b2) = ((1.0 - t) * (1.0 - t), 2.0 * t * (1.0 - t) * w, t * t);
     let den = b0 + b1 + b2;
     (a * b0 + apex * b1 + b * b2) / den.max(1e-12)

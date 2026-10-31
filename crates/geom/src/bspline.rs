@@ -18,7 +18,7 @@ use crate::Vec3;
 mod curve;
 mod interval;
 
-pub use curve::{CurvePiece, MAX_CURVE_DEGREE, NurbsCurve};
+pub use curve::{Certified, CurvePiece, Fit, MAX_CURVE_DEGREE, MIN_CONIC_RHO_GAP, NurbsCurve, follow};
 
 /// Highest polynomial degree accepted in either direction.
 pub const MAX_SPLINE_DEGREE: usize = 7;
@@ -98,9 +98,9 @@ impl AddAssign for HPoint {
     }
 }
 
-/// A homogeneous control point as knot insertion combines it: in floating point ([`HPoint`]), or
-/// enclosed in intervals that hold the exact result ([`interval::HInterval`]). One implementation
-/// of insertion and clamping serves both.
+/// A homogeneous control point as knot insertion and de Casteljau combine it: in floating point
+/// ([`HPoint`]), or enclosed in intervals that hold the exact result ([`interval::HInterval`]).
+/// One implementation of each of those steps serves both.
 pub(crate) trait Blend: Copy {
     /// What a point is weighted by: a number, or an interval holding one.
     type Factor: Copy;
@@ -441,7 +441,7 @@ pub(crate) fn clamp_row<P: Blend>(p: usize, knots: &[f64], row: &[P]) -> SplineR
 
 /// A Bézier curve's point at `x ∈ [0, 1]` (de Casteljau, NURBS Book §1.4).
 pub fn bezier_point(ctrl: &[HPoint], x: f64) -> HPoint {
-    subdivide(ctrl, x).0.last().copied().unwrap_or(HPoint::ZERO)
+    subdivide(ctrl, x, 1.0 - x).0.last().copied().unwrap_or(HPoint::ZERO)
 }
 
 /// The control points of the piece of a Bézier curve over `[a, b] ⊂ [0, 1]` (two de Casteljau
@@ -451,19 +451,21 @@ pub fn bezier_segment(ctrl: &[HPoint], a: f64, b: f64) -> SplineResult<Vec<HPoin
         return invalid("a Bézier segment must satisfy 0 ≤ a < b ≤ 1");
     }
     // Left part [0, b], then its right part from a/b.
-    let left = subdivide(ctrl, b).0;
-    Ok(subdivide(&left, a / b).1)
+    let left = subdivide(ctrl, b, 1.0 - b).0;
+    let t = a / b;
+    Ok(subdivide(&left, t, 1.0 - t).1)
 }
 
-/// Split a Bézier curve at `x` (de Casteljau): control points of `[0, x]` and `[x, 1]`.
-fn subdivide(ctrl: &[HPoint], x: f64) -> (Vec<HPoint>, Vec<HPoint>) {
+/// Split a Bézier curve where its parameter is `t` (and `1 − t` is `s`), by de Casteljau: control
+/// points of `[0, t]` and `[t, 1]`.
+pub(crate) fn subdivide<P: Blend>(ctrl: &[P], t: P::Factor, s: P::Factor) -> (Vec<P>, Vec<P>) {
     let mut left = Vec::with_capacity(ctrl.len());
     let mut right = Vec::with_capacity(ctrl.len());
     let mut pts = ctrl.to_vec();
     while let (Some(&f), Some(&l)) = (pts.first(), pts.last()) {
         left.push(f);
         right.push(l);
-        pts = pts.windows(2).map(|w| if let [a, b] = w { *a * (1.0 - x) + *b * x } else { HPoint::ZERO }).collect();
+        pts = pts.windows(2).map(|w| if let [a, b] = w { a.blend(s, *b, t) } else { P::ZERO }).collect();
     }
     right.reverse();
     (left, right)

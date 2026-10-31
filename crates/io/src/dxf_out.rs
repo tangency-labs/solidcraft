@@ -871,9 +871,11 @@ mod tests {
         let Geom2::Conic { a, apex, b, rho } = &back[4] else { panic!("{:?}", back[4]) };
         assert!(a.dist(Vec2::new(75.0, 40.0)) < 1e-9 && apex.dist(Vec2::new(75.0, 52.0)) < 1e-9 && b.dist(Vec2::new(50.0, 52.0)) < 1e-9);
         assert!((rho - FRAC_1_SQRT_2 / (1.0 + FRAC_1_SQRT_2)).abs() < 1e-12, "{rho}");
-        // The cubic: degree and control points.
-        let Geom2::Spline { pts, control: true, degree: 3 } = &back[5] else { panic!("{:?}", back[5]) };
-        assert!(pts.iter().zip(&cubic).all(|(a, b)| a.dist(*b) < 1e-9) && pts.len() == 4);
+        // The cubic: degree, knots and control points, as the B-spline written.
+        let points = |c: &solidcraft_geom::bspline::NurbsCurve| c.ctrl().map(|h| Vec2::new(h.x / h.w, h.y / h.w)).collect::<Vec<_>>();
+        let Geom2::Nurbs(c) = &back[5] else { panic!("{:?}", back[5]) };
+        assert_eq!((c.degree(), c.knots()), (3, &[0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0][..]));
+        assert!(points(c).iter().zip(&cubic).all(|(a, b)| a.dist(*b) < 1e-9) && points(c).len() == 4);
         // A degree-9 Bézier (a G4 blend) comes back at its own degree over all ten points.
         let mut q = [Vec2::ZERO; solidcraft_geom::MAX_BEZIER_CTRL];
         for (i, s) in q.iter_mut().enumerate() {
@@ -882,7 +884,7 @@ mod tests {
         let nine = write_dxf_drawing(&[], &[DxfEntity { layer: "0".into(), shape: seg_shape(&Seg2::Bezier { n: 9, p: q }) }]).unwrap();
         let back_nine = read_dxf(&nine).unwrap();
         assert!(
-            matches!(&back_nine[..], [Geom2::Spline { pts, control: true, degree: 9 }] if pts.len() == 10 && pts.iter().zip(&q).all(|(a, b)| a.dist(*b) < 1e-9)),
+            matches!(&back_nine[..], [Geom2::Nurbs(c)] if c.degree() == 9 && points(c).len() == 10 && points(c).iter().zip(&q).all(|(a, b)| a.dist(*b) < 1e-9)),
             "{back_nine:?}"
         );
 

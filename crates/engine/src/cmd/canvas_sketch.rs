@@ -78,7 +78,7 @@ fn to_sketch(s: &mut Session, p: &Value) -> Result<Value> {
     let id = r.get("sketch").and_then(Value::as_u64);
     let tol = (sc * 0.01).max(1e-6);
     let made = super::sketch::edit(s, &json!({}), cmd, false, |sk, _| {
-        let (cs, _) = super::sketch_import::add_geometry(sk, &geom, &|q| q, 1.0, tol)?;
+        let (cs, _, _) = super::sketch_import::add_geometry(sk, &geom, &|q| q, 1.0, tol)?;
         Ok(cs.len())
     });
     let finish = super::find_command("sketch.finish").ok_or_else(|| bad(cmd, "sketch.finish"))?.run;
