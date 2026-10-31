@@ -1167,6 +1167,7 @@ impl Curve {
                 EFF_ZERO_SQ, // currently not used
             );
             let mut ls = LocalSolveNd::new(&mut eval, Some(&intervals), Some(&periodicities));
+            ls.set_skips_failed_evaluations(k.fixes.oscillating_skips_failed_guesses);
 
             let guess_t = [guess, 0.1, 0.1, 0.1];
             let r = match ls.solve_it(&guess_t, EFF_ZERO) {
@@ -1280,6 +1281,7 @@ where
         opt_vectors,
     );
     let mut ls = LocalSolveNd::new(&mut eval, Some(&intervals), Some(&periodicities));
+    ls.set_skips_failed_evaluations(k.fixes.oscillating_skips_failed_guesses);
 
     ls.set_boundary_handler(BoundaryHandler::TotalBoundaryHits, 8);
 
@@ -1684,6 +1686,7 @@ where
     // create a newton raphson solver object containing a curve/curve evaluator.
     let mut eval = CcIntersectEnfo::new(k, this, other, EFF_ZERO * EFF_ZERO / 10000.0);
     let mut ls = LocalSolveNd::new(&mut eval, Some(&intervals), Some(&periodicities));
+    ls.set_skips_failed_evaluations(k.fixes.oscillating_skips_failed_guesses);
 
     // Pick up close solutions and then test them
     ls.set_desired_accuracy(EFF_ZERO / 10.0);
@@ -1735,6 +1738,7 @@ where
             // create a second NewtonRaphson Solver
             let mut eval2 = CcIntersectEnfo::new(k, this, other, EFF_ZERO * EFF_ZERO / 10000.0);
             let mut ls2 = LocalSolveNd::new(&mut eval2, Some(&intervals), Some(&periodicities));
+            ls2.set_skips_failed_evaluations(k.fixes.oscillating_skips_failed_guesses);
 
             // Pick up close solutions and then test them
             ls2.set_desired_accuracy(EFF_ZERO / 10.0);
@@ -1812,6 +1816,7 @@ where
         let guess_t2 = sol;
 
         let mut ls2 = LocalSolveNd::new(&mut eval2, Some(&intervals), Some(&periodicities2));
+        ls2.set_skips_failed_evaluations(k.fixes.oscillating_skips_failed_guesses);
 
         // Pick up close solutions and then test them
         ls2.set_desired_accuracy(EFF_ZERO_SQ); // very tight

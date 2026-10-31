@@ -452,6 +452,7 @@ pub fn evaluate_binormal_step_off_into(
 
     let mut eval_fun = FindStepOff::new(k, step_off_distance, surf_point, plane_normal, surface);
     let mut ls = LocalSolveNd::new(&mut eval_fun, Some(&intervals), Some(&periodicities));
+    ls.set_skips_failed_evaluations(k.fixes.oscillating_skips_failed_guesses);
     ls.set_boundary_handler(BoundaryHandler::TotalBoundaryHits, 3);
 
     // intersect: plane, surface and sphere

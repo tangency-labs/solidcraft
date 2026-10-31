@@ -3072,6 +3072,7 @@ fn cs_normalize_local_solve(
         EFF_ZERO_SQ,
     );
     let mut solver = LocalSolveNd::new(&mut equations, Some(&bounds), Some(&periodicities));
+    solver.set_skips_failed_evaluations(k.fixes.oscillating_skips_failed_guesses);
     solver.set_boundary_handler(BoundaryHandler::TotalBoundaryHits, 5);
     let solution = solver.solve_it(guess, EFF_ZERO_SQRT)?;
     // No: see note in upstream [B234]: not found is not found, whatever the reason.

@@ -944,13 +944,15 @@ impl EvalNFunctions for GuessSphereEnfo<'_> {
 
 /// `SmLocalSolveNd(sEvalFun, &sIntervals, &sPeriodicities)` set up as both plane
 /// solves do: desired accuracy `SM_EFF_ZERO_SQ`, at most 8 total boundary hits, 30
-/// iterations.
+/// iterations; `k`'s `fixes.oscillating_skips_failed_guesses` is passed on.
 fn plane_local_solver<'a, E: EvalNFunctions + ?Sized>(
+    k: &Kernel,
     eval: &'a mut E,
     intervals: &'a ExtentNd,
     periodicities: &'a [bool],
 ) -> LocalSolveNd<'a, E> {
     let mut ls = LocalSolveNd::new(eval, Some(intervals), Some(periodicities));
+    ls.set_skips_failed_evaluations(k.fixes.oscillating_skips_failed_guesses);
     ls.set_desired_accuracy(EFF_ZERO_SQ);
     ls.set_boundary_handler(BoundaryHandler::TotalBoundaryHits, 8);
     ls.set_maximum_iterations(30);
@@ -1046,7 +1048,7 @@ impl ConstantRadiusAssistedFs {
         let plane_d = -plane_orig.dot(plane_normal);
         let approx_tol_3d = self.solver.approx_tol_3d;
         let mut eval = GuessSphereEnfo::new(k, plane_normal, plane_d, self);
-        let mut ls = plane_local_solver(&mut eval, &intervals, &periodicities);
+        let mut ls = plane_local_solver(k, &mut eval, &intervals, &periodicities);
 
         // Solve it
         let mut sol = ls.solve_it(&guess_t, approx_tol_3d)?;
@@ -1234,7 +1236,7 @@ fn fillet_sphere_solve(
     let approx_tol_3d = solver.solver().approx_tol_3d;
     // (the constructor's "sphere centre and radius" are the plane normal and D)
     let mut eval = SphereEquations(k, FilletSphereSolveEnfo::new(plane_normal, plane_d, solver));
-    let mut ls = plane_local_solver(&mut eval, intervals, periodicities);
+    let mut ls = plane_local_solver(k, &mut eval, intervals, periodicities);
 
     // Solve equations with NewtonRaphson iteration
     let mut sol = ls.solve_it(guess_t, approx_tol_3d)?;

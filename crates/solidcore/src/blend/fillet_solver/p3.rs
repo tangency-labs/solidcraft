@@ -663,6 +663,7 @@ impl FilletSolver {
 
         // NewtonRaphson solver
         let mut ls = LocalSolveNd::new(&mut eval_fun, Some(&intervals), Some(&periodicities));
+        ls.set_skips_failed_evaluations(k.fixes.oscillating_skips_failed_guesses);
         ls.set_desired_accuracy(EFF_ZERO_SQ);
         ls.set_boundary_handler(BoundaryHandler::TotalBoundaryHits, 8);
         ls.set_maximum_iterations(30);
