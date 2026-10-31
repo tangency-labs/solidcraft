@@ -1269,6 +1269,23 @@ mod tests {
         s.model.state().bodies.iter().map(|b| b.name.clone()).collect()
     }
 
+    /// #10017: a pasted placement's body is listed by its placed name (`KB (K:2)`), and Rename
+    /// sends that name. It renames the body that placement shows, so both placements show the new
+    /// name; a name that is neither a body's nor a placed copy's is still refused.
+    #[test]
+    fn a_placed_copys_body_renames_by_its_placed_name() {
+        let mut s = Session::default();
+        run(&mut s, "component.create", json!({"name": "K"}));
+        run(&mut s, "solid.box", json!({"body_name": "KB", "length": 10, "width": 10, "height": 10}));
+        run(&mut s, "occurrence.copy", json!({"component": "K", "translate": [30, 0, 0]}));
+        let r = run(&mut s, "body.rename", json!({"body": "KB (K:2)", "name": "Lid"}));
+        assert_eq!((r["body"].as_str(), r["name"].as_str()), (Some("KB"), Some("Lid")), "{r}");
+        let world: Vec<String> = s.world_state().bodies.iter().map(|b| b.name.clone()).collect();
+        assert!(world.iter().any(|n| n == "Lid") && world.iter().any(|n| n == "Lid (K:2)"), "{world:?}");
+        assert!(!world.iter().any(|n| n.starts_with("KB")), "{world:?}");
+        assert!(s.execute("body.rename", &json!({"body": "Lid (K:9)", "name": "Other"})).is_err());
+    }
+
     #[test]
     fn body_rename_preserves_plastic_rules_and_current_visibility_through_history() {
         let mut s = Session::default();
