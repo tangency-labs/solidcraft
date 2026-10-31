@@ -927,9 +927,12 @@ impl Session {
         }
     }
 
-    /// The design has changes not in its file: in the document, or in what is hidden.
+    /// The design has changes not in its file: in the document, in what is hidden, or a
+    /// component moved and not captured yet (#9736).
     pub fn is_dirty(&self) -> bool {
-        self.document_differs() || self.visibility != self.saved_visibility
+        self.document_differs()
+            || self.visibility != self.saved_visibility
+            || !self.pending_moves.is_empty()
     }
 
     /// The document is not the one its file holds: compared once per pair of documents and

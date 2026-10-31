@@ -1217,6 +1217,11 @@ pub fn answer_prompt(app: &mut SolveApp, answer: Answer) {
 
 /// Resume Close/Quit only after Save As has answered and the write succeeded.
 pub(crate) fn saved_for_close(app: &mut SolveApp) {
+    // Save asks the Capture Position question first while a move isn't captured (#9736): the
+    // close waits for its answer.
+    if app.tree.capture_prompt.is_some() {
+        return;
+    }
     if !std::mem::take(&mut app.docs.saving) || app.docs.closing.is_none() {
         return;
     }
