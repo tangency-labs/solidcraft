@@ -74,6 +74,16 @@
 //!   upstream's `const SmBSplineCurve&`; a curve outside the `SmBSplineCurve` classes
 //!   (B-spline, line, ellipse, hyperbola, parabola), which upstream's type rules out,
 //!   is `SM_ERR_INVALID_INPUT` before the sweep.
+//! - **Projection approximation tolerance (HANG-32).** The public
+//!   `CreateParallelProjectionCurves` refuses a supplied approximation tolerance that
+//!   is not finite, positive and normal before preparing the cache or geometry. The
+//!   C++ reference is reported to run for more than 15 minutes on the smallest
+//!   subnormal (the looping routine was not located), and the FFI already refuses such
+//!   inputs. `None` and every finite positive normal value are accepted, with no upper
+//!   cap. This is a deterministic early public-API contract, not a claim that the Rust
+//!   solver would otherwise fail to terminate: its global solves are bounded
+//!   ([`crate::geom::global_solver::MAX_SOLVE_DEPTH`] /
+//!   [`crate::geom::global_solver::MAX_SOLVE_BRANCHES`]).
 //! - **`GlobalPointSolve_0`** takes the kernel and the surface's handle `surface: O`
 //!   (the cache's owner object and the solutions' object), as `GlobalLineIntersect`
 //!   does; it and `SmSPGlobalSolver::BranchMayContainAnswers` (which reads the cache
@@ -1711,10 +1721,12 @@ impl Surface {
     ///
     /// # Errors
     ///
-    /// `SM_ERR_INVALID_INPUT` for a zero projection vector or a curve of another class;
-    /// `SM_ERR_NULL_POINTER` without a surface cache; those of the continuities, the
-    /// boxes, the sweep, its move and the intersection; [`SolidError::Unported`] from
-    /// unported callees of the surface cache and the intersector.
+    /// `SM_ERR_INVALID_INPUT` for a zero projection vector, a supplied approximation
+    /// tolerance that is not finite, positive and normal (HANG-32), or a curve of
+    /// another class; `SM_ERR_NULL_POINTER` without a surface cache; those of the
+    /// continuities, the boxes, the sweep, its move and the intersection;
+    /// [`SolidError::Unported`] from unported callees of the surface cache and the
+    /// intersector.
     pub fn create_parallel_projection_curves(
         &self,
         k: &Kernel,
@@ -1790,6 +1802,16 @@ impl Surface {
             .is_none_or(core::cmp::Ordering::is_lt)
         {
             return Err(SolidError::invalid_input(OP_PROJ, "zero projection vector"));
+        }
+
+        // check input - a supplied approximation tolerance must be finite, positive and
+        // normal (HANG-32): a subnormal one spins the C++ projector, and the FFI already
+        // refuses it. Done before any cache or geometry preparation; `None` is unchanged.
+        if opt_approx_tol_3d.is_some_and(|t| !(t.is_finite() && t >= f64::MIN_POSITIVE)) {
+            return Err(SolidError::invalid_input(
+                OP_PROJ,
+                "approximation tolerance must be finite, positive and normal (HANG-32)",
+            ));
         }
 
         // check state - internal surface continuities are better than C0 (NER; the
@@ -3046,6 +3068,7 @@ fn cs_normalize_local_solve(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::curve::hermite_curve::HermiteCurve;
     use crate::surface::plane::Plane;
 
     /// tangency-labs/solidcore#525 (WR-384): with the corner points wanted, upstream's
@@ -3207,6 +3230,83 @@ mod tests {
         k.fixes.good_drop_result_distances_in_order = true;
         assert!(good(&k, nearer_guess));
         assert!(!good(&k, foot_guess));
+    }
+
+    /// HANG-32: the public projection entry rejects a supplied approximation
+    /// tolerance that is not finite, positive and normal before it prepares any cache
+    /// or geometry; the FFI already refuses the same inputs. The unsupported Hermite
+    /// curve keeps the accepted cases on the cheap path to the existing
+    /// `not an SmBSplineCurve` refusal (no intersector), so this is a contract test,
+    /// not a successful projection.
+    #[test]
+    fn hang_32_projection_rejects_non_normal_approximation_tolerance() {
+        let k = Kernel::default();
+        let s = plane();
+        let domain = Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0);
+        let unsupported = Curve::from(HermiteCurve::new(
+            Point3::new(0.0, 0.0, 0.0),
+            Vec3::X,
+            Point3::new(1.0, 0.0, 0.0),
+            Vec3::X,
+            3,
+        ));
+        let call = |approx: Option<f64>, vector: Vec3| {
+            s.create_parallel_projection_curves(
+                &k,
+                &domain,
+                &unsupported,
+                vector,
+                Some(1.0),
+                approx,
+                None,
+            )
+        };
+
+        let rejected = |approx: f64| match call(Some(approx), Vec3::Z) {
+            Err(SolidError::InvalidInput { operation, reason }) => {
+                assert_eq!(operation, OP_PROJ);
+                assert_eq!(
+                    reason,
+                    "approximation tolerance must be finite, positive and normal (HANG-32)"
+                );
+            }
+            other => panic!("approximation tolerance {approx:e} was not rejected: {other:?}"),
+        };
+        for approx in [
+            f64::from_bits(1),
+            f64::from_bits(0x000F_FFFF_FFFF_FFFF),
+            0.0,
+            -0.0,
+            -1.0,
+            f64::NAN,
+            f64::INFINITY,
+            f64::NEG_INFINITY,
+        ] {
+            rejected(approx);
+        }
+
+        // The precondition accepts `None` and every finite positive normal value, with
+        // no upper cap: each reaches the later unsupported-kind refusal.
+        for approx in [None, Some(f64::MIN_POSITIVE), Some(1e-6), Some(f64::MAX)] {
+            match call(approx, Vec3::Z) {
+                Err(SolidError::InvalidInput { operation, reason }) => {
+                    assert_eq!(operation, OP_PROJ);
+                    assert_eq!(reason, "not an SmBSplineCurve");
+                }
+                other => {
+                    panic!("approximation tolerance {approx:?} was rejected too early: {other:?}")
+                }
+            }
+        }
+
+        // The zero projection vector keeps its precedence over the new check.
+        match call(Some(f64::from_bits(1)), Vec3::ZERO) {
+            Err(SolidError::InvalidInput { operation, reason }) => {
+                assert_eq!(operation, OP_PROJ);
+                assert_eq!(reason, "zero projection vector");
+            }
+            other => panic!("zero vector did not take precedence: {other:?}"),
+        }
     }
 
     #[test]
