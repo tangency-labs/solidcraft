@@ -754,3 +754,18 @@ fn the_extrude_arrow_passes_faces_beside_the_profile_and_in_a_free_drag() {
     assert!((dialog_distance(&h) - 12.345678).abs() > 1e-3, "{}", dialog_distance(&h));
     let_go(&mut h);
 }
+
+/// With Preferences › Design › "Extrude arrow stops at faces" off, the arrow keeps the old
+/// behaviour (#2398): dragged near the block's underside it takes a round step, not the face's
+/// distance, and nothing is outlined.
+#[test]
+fn without_face_stops_the_extrude_arrow_moves_in_round_steps() {
+    let mut h = cut_into_block();
+    h.app.preferences.extrude_arrow_face_stops = false;
+    assert_eq!(hold_arrow_at(&mut h, json!({"world":[5,5,-12.2]})), None);
+    let d = dialog_distance(&h);
+    assert!((d - 12.345678).abs() > 1e-3, "{d}");
+    let step = crate::canvas::snap_step(h.app.cam.half_height());
+    assert!(((d / step).round() * step - d).abs() < 1e-9, "{d} is not a multiple of the {step} mm step");
+    let_go(&mut h);
+}

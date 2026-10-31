@@ -4,7 +4,8 @@
 //! cut dragged through a block so stops at the block's far side, and the outline shows it got
 //! there. Only faces over the profile's footprint count (seen along the arrow), so faces off to
 //! the side of the profile don't catch the arrow. Holding Alt or Ctrl (the free drag) turns
-//! this off with the round steps.
+//! this off with the round steps. Preferences › Tools › `extrude_arrow_face_stops` (on by
+//! default) turns it off for good: the arrow then moves in round steps only, as before.
 //!
 //! The distance stays a distance: the face is not stored with the extrude (To Object does that).
 
@@ -153,7 +154,7 @@ fn footprint(app: &SolveApp, d: &Dialog, faces: &[FlatFace]) -> Vec<Vec3> {
 /// The faces the open extrude's arrow (from `base` along `n`) can stop at: flat faces of shown
 /// bodies, parallel to the arrow, off the base's own plane, over the footprint.
 pub(crate) fn stops(app: &SolveApp, d: &Dialog, base: Vec3, n: Vec3) -> Vec<Stop> {
-    if !matches!(d.kind, Kind::Extrude { .. }) {
+    if !app.preferences.extrude_arrow_face_stops || !matches!(d.kind, Kind::Extrude { .. }) {
         return Vec::new();
     }
     let Some(plane) = Plane::from_normal(base, n) else { return Vec::new() };

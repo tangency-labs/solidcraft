@@ -35,6 +35,7 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                             "extrude_auto_to_object",
                         ),
                         (setting::auto_operation, "prefs.auto_operation_note", "auto_operation"),
+                        (setting::extrude_arrow_face_stops, "prefs.extrude_arrow_face_stops_note", "extrude_arrow_face_stops"),
                     ] {
                         ui.horizontal_wrapped(|ui| {
                             let response = setting(app, ui).backing_on_hover_text(app.tr(help));

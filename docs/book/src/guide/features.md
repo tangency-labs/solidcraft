@@ -93,7 +93,8 @@ Dragging Extrude's distance arrow stops at flat faces parallel to the profile th
 such as the far side of the block a cut goes into: once the arrow's tip comes within a few
 screen points of such a face, the distance becomes exactly that face's and the face is
 outlined. Elsewhere the distance moves in round steps. Hold Alt or Ctrl for a free drag, which
-stops at neither. The distance stays a number; to follow the face when the model changes, use
+stops at neither. **Extrude arrow stops at faces** (Preferences › Tools, on by default) turns
+the face stops off; the arrow then moves in round steps only, as before. The distance stays a number; to follow the face when the model changes, use
 **To Object** or **Through All**.
 
 A positive extrude taper slopes the side walls outward, so the profile grows along the
