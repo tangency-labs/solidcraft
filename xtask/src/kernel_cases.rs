@@ -87,8 +87,8 @@ impl Options {
 
 /// The operation families `--route` may name: `Op::ALL` in crates/smlib/src/route.rs, as
 /// `Op::id` spells them (a test keeps the two together).
-const ROUTE_OPS: [&str; 14] =
-    ["convert", "primitive", "transform", "measure", "check", "boolean", "blend", "offset", "split", "sweep", "history", "ssi", "flat", "file"];
+const ROUTE_OPS: [&str; 12] =
+    ["convert", "primitive", "transform", "measure", "check", "boolean", "blend", "offset", "split", "sweep", "ssi", "file"];
 
 /// `--route boolean=solidcore,measure=solidcore`: the families, in table order, each once.
 fn parse_routes(text: &str) -> Result<Vec<String>, String> {
@@ -130,9 +130,9 @@ pub(crate) fn options(rest: &[&str], out: &str) -> Result<Options, String> {
         let p = PathBuf::from(p);
         if p.is_absolute() { p } else { root().join(p) }
     });
-    // The gate grades the SMLib side; a run with no SMLib side has nothing to grade.
-    if known_failing.is_some() && !kernels.contains(&BACKENDS[0]) {
-        return Err("--known-failing: grades the SMLib results, so needs --kernel smlib or both".into());
+    // A list is one kernel's: the gate grades the run's one kernel against it.
+    if known_failing.is_some() && kernels.len() != 1 {
+        return Err("--known-failing: a list is one kernel's, so not with --kernel both".into());
     }
     let validation = arg("--validation");
     if let Some(v) = validation.as_deref().filter(|v| !["each_step", "each_feature", "off"].contains(v)) {
@@ -586,13 +586,13 @@ pub fn run(rest: &[&str]) -> Result<(), String> {
         save_json(&o.out_of(kernel), "results.json", results)?;
     }
     if let Some(file) = &o.known_failing {
-        // A gate run grades the SMLib side (the first backend) against its baseline, and writes
-        // no report; every backend's results.json is still saved above.
+        // A gate run grades the run's one kernel against its baseline, and writes no report; its
+        // results.json is still saved above.
         let text = std::fs::read_to_string(file).map_err(|e| format!("{}: {e}", file.display()))?;
         let base = file.parent().unwrap_or(&dir);
         let paths: Vec<String> = list.iter().map(|c| c.strip_prefix(base).unwrap_or(c).to_string_lossy().replace('\\', "/")).collect();
-        let smlib = o.kernels.iter().position(|k| *k == BACKENDS[0]).and_then(|i| runs.get(i)).ok_or("--known-failing: no SMLib run to grade")?;
-        let statuses: Vec<&str> = smlib.iter().map(|r| r["status"].as_str().unwrap_or("?")).collect();
+        let graded = runs.first().ok_or("--known-failing: no run to grade")?;
+        let statuses: Vec<&str> = graded.iter().map(|r| r["status"].as_str().unwrap_or("?")).collect();
         println!("{}", gate(&text, &paths, &statuses).map_err(|e| format!("{}: {e}", file.display()))?);
         return Ok(());
     }
@@ -877,14 +877,15 @@ mod tests {
         let plain = options(&["--kernel", "both", "--out", "/r"], "x").unwrap();
         assert_eq!((plain.label("solidcore"), plain.out_of("solidcore")), ("solidcore".into(), PathBuf::from("/r/solidcore")));
         assert_eq!(plain.env("solidcore"), [("SOLIDCRAFT_KERNEL", "solidcore".to_string())]);
+        // The default run is on solidcore, so it takes `--route` as `both` and `solidcore` do.
+        assert_eq!(options(&["--route", "file=solidcore"], "x").unwrap().routes, ["file"]);
         for bad in [
             &["--kernel", "both", "--route", "truck=solidcore"][..],
-            &["--kernel", "both", "--route", "file=solidcore"],
             &["--kernel", "both", "--route", "boolean=smlib"],
             &["--kernel", "both", "--route", "boolean"],
             &["--kernel", "both", "--route", ""],
             &["--kernel", "both", "--route"],
-            &["--route", "boolean=solidcore"],
+            &["--kernel", "smlib", "--route", "boolean=solidcore"],
         ] {
             assert!(options(bad, "x").is_err(), "{bad:?}");
         }
@@ -898,15 +899,18 @@ mod tests {
         assert_eq!(ids, ROUTE_OPS, "{ids:?}");
     }
 
-    /// `--known-failing` grades the SMLib side, so a run with no SMLib side is refused: the
-    /// default, solidcore, needs `--kernel smlib` or `both` said.
+    /// `--known-failing` follows the kernel given, solidcore by default: a list is one kernel's.
     #[test]
-    fn the_gate_needs_an_smlib_side() {
-        for ok in [&["--kernel", "smlib", "--known-failing", "/k"][..], &["--kernel", "both", "--known-failing", "/k"]] {
-            assert_eq!(options(ok, "x").map(|o| o.known_failing), Ok(Some(PathBuf::from("/k"))), "{ok:?}");
+    fn the_gate_grades_the_kernel_given() {
+        for (args, kernel) in [
+            (&["--known-failing", "/k"][..], "solidcore"),
+            (&["--kernel", "solidcore", "--known-failing", "/k"], "solidcore"),
+            (&["--kernel", "smlib", "--known-failing", "/k"], "smlib"),
+        ] {
+            let o = options(args, "x").unwrap();
+            assert_eq!((o.known_failing, o.kernels), (Some(PathBuf::from("/k")), vec![kernel]), "{args:?}");
         }
-        assert!(options(&["--kernel", "solidcore", "--known-failing", "/k"], "x").is_err());
-        assert!(options(&["--known-failing", "/k"], "x").is_err());
+        assert!(options(&["--kernel", "both", "--known-failing", "/k"], "x").is_err());
     }
 
     /// With no `--kernel`, a run is on solidcore; the C++ kernel is asked for.

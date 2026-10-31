@@ -201,8 +201,7 @@ jobs:
           if [ "$SHARD" = ladder ]; then
             set -- --ladder --gate
           else
-            # The known-failing lists are the C++ kernel's: this gate opts in to it.
-            set -- --kernel smlib --area "$SHARD" --known-failing "tests/kernel-cases/$SHARD/KNOWN_FAILING"
+            set -- --area "$SHARD" --known-failing "tests/kernel-cases/$SHARD/KNOWN_FAILING.solidcore"
           fi
           target/debug/xtask kernel-cases "$@" --cli target/release/solidcraft-cli --out "$RUNNER_TEMP/kernel-rig"
       - name: Keep the results

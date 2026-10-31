@@ -154,13 +154,13 @@ selected shard does (and when none was selected). Pushes to main and develop, me
 release gate (`release-gate.yml`) and a run by hand run every area. Each area's shard runs:
 
 ```sh
-cargo xtask kernel-cases --kernel smlib --area <area> --cli target/release/solidcraft-cli \
-  --known-failing tests/kernel-cases/<area>/KNOWN_FAILING
+cargo xtask kernel-cases --area <area> --cli target/release/solidcraft-cli \
+  --known-failing tests/kernel-cases/<area>/KNOWN_FAILING.solidcore
 ```
 
-The lists are the C++ kernel's, so the gate opts in to it with `--kernel smlib` (or `both`): on its
-own, a run is on solidcore, and `--known-failing` refuses it. `<area>/KNOWN_FAILING` lists the
-cases of that area that fail today, sorted, one a line with its
+The gate grades the kernel the run is on, so a list is one kernel's: `<area>/KNOWN_FAILING.solidcore`
+for the default, `<area>/KNOWN_FAILING` with `--kernel smlib` (`--kernel both` is refused). Each lists
+the cases of that area that fail today on it, sorted, one a line with its
 cause (`<case> <why it fails today>`; `#` starts a comment; the header names the baseline: the
 develop commit and SMLib revision it was taken from). The gate fails on a **regression**, a
 case that fails (or crashes, hangs, or is not supported yet) and is not listed, and on a

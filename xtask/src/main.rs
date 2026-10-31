@@ -65,8 +65,8 @@ commands:
                   --known-failing FILE: a regression gate instead of the report: fails on a case
                   that fails and FILE does not list, and on a listed case that passes
                   (tests/kernel-cases/<area>/KNOWN_FAILING, CI's Kernel rig workflow); it grades
-                  the SMLib side, so it needs --kernel smlib or both, said (with both, every side's
-                  results.json is saved, and no report or side by side is written)
+                  the run's kernel, so a list is one kernel's (KNOWN_FAILING.solidcore,
+                  KNOWN_FAILING for --kernel smlib) and --kernel both is refused
                   --validation MODE: when SMLib's full check runs on the cases' features:
                   each_step, each_feature (the default) or off (solidcraft-cli kernel-cases
                   --validation=MODE); with --ladder too
