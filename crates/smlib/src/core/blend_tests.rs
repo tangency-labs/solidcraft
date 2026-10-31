@@ -515,7 +515,6 @@ fn rounds_at_a_concave_face_corner_are_mitred() {
 /// The back and left top edges are each trimmed 8 by those rounds: (0, 30)-(32, 30) and (0, 8)-(0, 30)
 /// at z = 10, and each piece keeps its edge's attribute (`Behavior::Copy`), as on the fork.
 #[test]
-#[ignore = "solidcore#1980 (PR #1977): SubtractRemovalRegion loses the attributes of target edges it replaces"]
 fn an_edge_tag_crosses_a_cliff_overflow() {
     use solidcore::blend::fillet_executive::session::FilletSession;
     use solidcore::boolean::api_brep::boolean_difference;
@@ -560,9 +559,9 @@ fn an_edge_tag_crosses_a_cliff_overflow() {
 /// Solidcore alone: the pocket rim chamfered 5.5, as `fillet_mitre_concave_face_corners`' own test
 /// does it, with `keep_operand_uv_trims` on too, on the body the boolean gives:
 /// 21000 - (50 d² + 4/3 d³) = 19265.666666667 (the fork, and the same body through the flat
-/// arrays). Refused: error 3, Corner Edge Computation Failure.
+/// arrays). Without `fillet_run_on_bspline_trims` it is refused: error 3, Corner Edge Computation
+/// Failure (solidcore#1981).
 #[test]
-#[ignore = "solidcore#1981 (PR #1996)"]
 fn pocket_chamfer_on_a_boolean_body() {
     use solidcore::blend::fillet_executive::session::FilletSession;
     use solidcore::boolean::api_brep::boolean_difference;
@@ -577,6 +576,7 @@ fn pocket_chamfer_on_a_boolean_body() {
     k.fixes.fillet_cliff_overflow = true;
     k.fixes.fillet_mitre_concave_face_corners = true;
     k.fixes.keep_operand_uv_trims = true;
+    k.fixes.fillet_run_on_bspline_trims = true;
     let plate = create_box(&mut k, Point3::ZERO, 60.0, 40.0, 10.0).unwrap();
     let cut = create_box(&mut k, p(15.0, 10.0, 5.0), 30.0, 20.0, 6.0).unwrap();
     let mut b = boolean_difference(&mut k, plate, cut).unwrap();

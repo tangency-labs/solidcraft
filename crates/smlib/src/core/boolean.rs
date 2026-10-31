@@ -9,15 +9,14 @@
 use std::sync::PoisonError;
 
 use solidcore::SolidError;
-use solidcore::boolean::api_brep as sm;
+use solidcore::boolean::api_brep::{self as sm, Boolean2dOutcome};
 use solidcore::boolean::merge::MergeOptions;
 use solidcore::geom::a_object::BooleanOperation;
 use solidcore::geom::attribute::ObjectKey;
 use solidcore::geom::object::ObjectRef;
 use solidcore::kernel::Kernel;
-use solidcore::primitive::primitive_creation::p1::{Boolean2d, PrimitiveCreation};
+use solidcore::primitive::primitive_creation::p1::Boolean2d;
 use solidcore::topology::brep::{p1, p2, p3};
-use solidcore::topology::topology_traverser::Marks;
 use solidcore::topology::{Brep, edge};
 use solidcore::{EntityRef, Result as SolidResult};
 
@@ -140,7 +139,7 @@ fn operation(op: BooleanOp) -> BooleanOperation {
 
 /// Whether every body is a manifold solid (`IsManifoldSolid` of each copy).
 fn all_solid(bodies: &[Brep]) -> SolidResult<bool> {
-    for b in bodies {
+    for (n, b) in bodies.iter().enumerate() {
         if !p2::is_manifold_solid(b)? {
             return Ok(false);
         }
@@ -210,7 +209,7 @@ pub(crate) fn boolean2d(a: &Body, b: &Body, op: BooleanOp) -> Result<Option<Body
     usable("SmApiBoolean2d", &[a, b])?;
     let d = run("SmApiBoolean2d", |k| {
         let mut c = copies(k, &[a, b])?.into_iter();
-        let (Some(mut ca), Some(mut cb)) = (c.next(), c.next()) else {
+        let (Some(ca), Some(cb)) = (c.next(), c.next()) else {
             return Err(SolidError::invalid_input("smlib_boolean2d", "no operand"));
         };
         if num_faces(&ca) == 0 || num_faces(&cb) == 0 {
@@ -221,17 +220,9 @@ pub(crate) fn boolean2d(a: &Body, b: &Body, op: BooleanOp) -> Result<Option<Body
             BooleanOp::Subtract => Boolean2d::Difference,
             BooleanOp::Intersect => Boolean2d::Intersection,
         };
-        // SmApiBoolean2d calls the static SmPrimitiveCreation::Boolean2D; its notifications are
-        // the operands' arena records, as solidcore's own merge calls it without a caller's.
-        let mut primitive = PrimitiveCreation::new(None, 0, false);
-        let (mut marks_a, mut marks_b) = (Marks::default(), Marks::default());
-        let mut state = p2::ArenaNotifyState::new(&ca);
-        state.seed(&cb);
-        let mut out = None;
-        primitive.boolean_2d(k, &mut ca, &mut cb, kind, &mut out, (&mut marks_a, &mut marks_b), &mut state.env(None))?;
-        match out {
-            Some(r) => finish(r, false, false),
-            None => Ok(Done::Empty),
+        match sm::boolean_2d(k, ca, cb, kind)? {
+            Boolean2dOutcome::Result(r) => finish(r, false, false),
+            Boolean2dOutcome::Unassigned { .. } => Ok(Done::Empty),
         }
     })?;
     result(d, Ok(None))
