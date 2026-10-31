@@ -1092,13 +1092,17 @@ fn each_corner_row_flips_and_turns_off_on_its_own() {
         assert_eq!(kept.len(), 4, "a row turned off stays in the list");
         assert!(!kept[2].enabled);
         let k = crate::sketch_modify_ui::Mod::Corner { chamfer: true, ctype: 1, size: "2".into(), distance2: "1".into(), angle: "45 deg".into() };
+        // One command cuts them all, so OK is one undo step: each corner keeps its own legs.
         let cmds = crate::sketch_modify_ui::commands(&h.app, &k, &inputs, &extra).unwrap();
-        assert_eq!(cmds.len(), 3, "the corner turned off is not cut");
-        assert_eq!(cmds[0].1["a"], json!(rows[0].lines[0]));
-        assert_eq!(cmds[0].1["b"], json!(rows[0].lines[1]));
-        assert_eq!(cmds[1].1["a"], json!(rows[1].lines[1]), "only the second row is flipped");
-        assert_eq!(cmds[1].1["b"], json!(rows[1].lines[0]));
-        assert_eq!(cmds[2].1["a"], json!(rows[3].lines[0]), "the fourth row follows the third");
+        assert_eq!(cmds.len(), 1, "{cmds:?}");
+        assert_eq!(cmds[0].0, "sketch.chamfer.two_distance");
+        let points = cmds[0].1["points"].as_array().expect("the corners are a list").clone();
+        assert_eq!(points.len(), 3, "the corner turned off is not cut: {points:?}");
+        assert_eq!(points[0]["a"], json!(rows[0].lines[0]));
+        assert_eq!(points[0]["b"], json!(rows[0].lines[1]));
+        assert_eq!(points[1]["a"], json!(rows[1].lines[1]), "only the second row is flipped");
+        assert_eq!(points[1]["b"], json!(rows[1].lines[0]));
+        assert_eq!(points[2]["a"], json!(rows[3].lines[0]), "the fourth row follows the third");
     }
 }
 
@@ -1198,7 +1202,9 @@ fn a_corner_rows_x_turns_its_own_cut_off_and_the_buttons_line_up() {
     assert!(!now[0].enabled, "the clicked row is off");
     assert!(now[1..].iter().all(|row| row.enabled), "the other rows keep their cuts");
     let d = h.app.dialog.as_ref().unwrap().clone();
-    assert_eq!(crate::dialogs::preview_commands(&h.app, &d).unwrap().len(), 3, "the corner turned off is not cut");
+    let cmds = crate::dialogs::preview_commands(&h.app, &d).unwrap();
+    assert_eq!(cmds.len(), 1, "one command cuts every corner: {cmds:?}");
+    assert_eq!(cmds[0].1["points"].as_array().map(Vec::len), Some(3), "the corner turned off is not cut: {cmds:?}");
     assert!(crate::scenario::handle_at("dialog:list:corner:0:remove").is_some(), "the row keeps its Show button");
     h.step(&json!({"click":{"handle":"dialog:list:corner:0:remove"}})).unwrap();
     h.frames(2);

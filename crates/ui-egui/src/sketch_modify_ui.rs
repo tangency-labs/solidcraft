@@ -1029,36 +1029,33 @@ pub fn commands(app: &SolveApp, k: &Mod, inputs: &[SelInput], extra: &Map<String
             let state = app.session.world_state();
             let Some(ss) = state.sketch(sid) else { return Err("the sketch no longer exists".into()) };
             let rows = crate::sketch_corner_rows::rows(&ss.sketch, items(inputs, 0), extra);
-            if !rows.iter().any(|row| row.enabled) {
+            let mut points = Vec::new();
+            for row in rows.iter().filter(|row| row.enabled) {
+                // `a` and `b` in the row's order, or the other way round when that row is
+                // flipped: one command cuts them all, and each corner keeps its own legs.
+                let corner = crate::sketch_corner_rows::params(&ss.sketch, row);
+                if corner.as_object().is_some_and(|params| params.is_empty()) {
+                    return Err(format!("line `{}` needs a second line to make a corner", row.label()));
+                }
+                points.push(corner);
+            }
+            if points.is_empty() {
                 return Err("select the corner to cut first".into());
             }
-            let distance = corner_size(app, size_label(true, *ctype), size, ValueKind::Length)?;
-            let distance2 = if *ctype == 1 { Some(corner_size(app, "Distance 2", distance2, ValueKind::Length)?) } else { None };
-            // The command takes degrees; an evaluated angle is in radians.
-            let angle = if *ctype == 2 { Some(corner_size(app, "Angle", angle, ValueKind::Angle)?.to_degrees()) } else { None };
+            let mut p = json!({"points": points, "distance": corner_size(app, size_label(true, *ctype), size, ValueKind::Length)?});
+            if *ctype == 1 {
+                p["distance2"] = json!(corner_size(app, "Distance 2", distance2, ValueKind::Length)?);
+            }
+            if *ctype == 2 {
+                // The command takes degrees; an evaluated angle is in radians.
+                p["angle"] = json!(corner_size(app, "Angle", angle, ValueKind::Angle)?.to_degrees());
+            }
             let cmd = match *ctype {
                 1 => "sketch.chamfer.two_distance",
                 2 => "sketch.chamfer.distance_angle",
                 _ => "sketch.chamfer.equal_distance",
             };
-            // Each corner is its own command, with its own flip: the legs of one corner move
-            // without touching the others.
-            let mut commands = Vec::new();
-            for row in rows.iter().filter(|row| row.enabled) {
-                let mut p = crate::sketch_corner_rows::params(&ss.sketch, row);
-                if p.as_object().is_some_and(|params| params.is_empty()) {
-                    return Err(format!("line `{}` needs a second line to make a corner", row.label()));
-                }
-                p["distance"] = json!(distance);
-                if let Some(distance2) = distance2 {
-                    p["distance2"] = json!(distance2);
-                }
-                if let Some(angle) = angle {
-                    p["angle"] = json!(angle);
-                }
-                commands.push((cmd.to_string(), p));
-            }
-            return Ok(commands);
+            return Ok(vec![(cmd.to_string(), p)]);
         }
         Mod::Equation { form, x, y, start, end, tolerance, range_unit } => {
             let filled = |label: &str, text: &str| -> Result<String, String> {
