@@ -823,12 +823,8 @@ fn take_focus(ctx: &egui::Context, d: &mut Dialog) -> bool {
 /// the pointer is over it: the wheel steps its value (`value_step`), which moves the arrow tip
 /// the box follows, and a box sliding out from under the pointer would hand the next notch to
 /// the camera.
-fn value_box(ui: &mut egui::Ui, label: &str, value: &mut String, at: Pos2, select_all: bool, place: BoxPlace) {
-    value_box_with(ui, label, value, at, select_all, false, place);
-}
-
-/// [`value_box`]; with `keep_tab` Tab stays in the box for the caller (the Move box steps
-/// through its values with it).
+/// The canvas value box, with `keep_tab` keeping Tab in the box for the caller (the Move box
+/// steps through its values with it).
 fn value_box_with(ui: &mut egui::Ui, label: &str, value: &mut String, at: Pos2, select_all: bool, keep_tab: bool, place: BoxPlace) {
     let ids = (egui::Id::new("sc_canvas_area"), egui::Id::new("sc_canvas_value"));
     value_box_in(ui, ids, label, value, (at, egui::Align2::LEFT_TOP), select_all, keep_tab, place);

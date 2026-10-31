@@ -1006,6 +1006,20 @@ impl<'a> Window<'a> {
         self
     }
 
+    /// The height the card wants; a display too short for it makes the card take the display.
+    pub(crate) fn height(mut self, height: f32) -> Self {
+        if height.is_finite() && height > 0.0 {
+            self.height = height;
+        }
+        self
+    }
+
+    /// Let a card that cannot hold its size take the whole display (a phone).
+    pub(crate) fn fills_display(mut self) -> Self {
+        self.fills_display = true;
+        self
+    }
+
     /// Maximum page-body height in control rows, still bounded by the viewport.
     pub(crate) fn page_rows(mut self, rows: f32) -> Self {
         if rows.is_finite() {

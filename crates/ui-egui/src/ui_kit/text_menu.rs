@@ -169,11 +169,15 @@ fn clipboard_text() -> Option<String> {
     {
         TEST_CLIPBOARD.with(|c| c.borrow().clone())
     }
-    #[cfg(all(not(test), not(target_arch = "wasm32")))]
+    #[cfg(all(not(test), not(target_arch = "wasm32"), not(target_os = "android")))]
     {
         arboard::Clipboard::new().and_then(|mut c| c.get_text()).ok().filter(|t| !t.is_empty())
     }
     #[cfg(all(not(test), target_arch = "wasm32"))]
+    {
+        None
+    }
+    #[cfg(all(not(test), target_os = "android"))]
     {
         None
     }

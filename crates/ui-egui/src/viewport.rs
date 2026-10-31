@@ -4173,7 +4173,6 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         secondary_down,
         primary_down,
         primary_pressed,
-        delta,
         inside,
         axes,
         pinch,

@@ -1838,7 +1838,7 @@ fn theme_row(app: &mut SolveApp, ui: &mut egui::Ui) {
             let text = solidcraft_engine::io::vfs::read_to_string(&path, crate::theme_files::MAX_BYTES).map_err(|e| e.to_string());
             import_theme_text(app, text);
         }),
-        #[cfg(not(target_arch = "wasm32"))]
+        #[cfg(not(any(target_arch = "wasm32", target_os = "android")))]
         Some("paste") => {
             let text = arboard::Clipboard::new().and_then(|mut c| c.get_text()).unwrap_or_default();
             if looks_like_theme(&text) {
@@ -2422,6 +2422,8 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let pending = apply_pending(app);
     let window = ui_kit::Window::new(egui::Id::new("sc_prefs"), "settings", app.tr("ui.preferences"))
         .cards(10.0 / 3.0)
+        .height(prefs_height())
+        .fills_display()
         .page_rows(24.0)
         .page_padding(egui::Margin {
             left: (Tokens::get().space_16 + Tokens::get().space_4) as i8,

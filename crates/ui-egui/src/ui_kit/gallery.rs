@@ -865,7 +865,6 @@ const ELEMENTS: &[Element] = &[
     element!("window_pages", "dialog:pages", Some("gallery:page"), |ui, s| {
         panel::page_list(
             ui,
-            ui.id().with("gallery_pages"),
             &mut s.selected,
             &[WindowPage {
                 group: Some("prefs.input"),

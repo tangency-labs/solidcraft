@@ -604,6 +604,7 @@ fn a_window_that_does_not_fit_the_display_takes_it_edge_to_edge() {
         WindowPage {
             icon: "settings",
             label: "ui.general",
+            group: None,
             handle: "test:page:general",
             scroll: true,
             draw: |ui, state| {
@@ -614,6 +615,7 @@ fn a_window_that_does_not_fit_the_display_takes_it_edge_to_edge() {
         WindowPage {
             icon: "orbit",
             label: "ui.navigation",
+            group: None,
             handle: "test:page:navigation",
             scroll: true,
             draw: |ui, state| {

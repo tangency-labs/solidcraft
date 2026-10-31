@@ -553,7 +553,6 @@ pub(crate) struct CameraInput {
     pub secondary_down: bool,
     pub primary_down: bool,
     pub primary_pressed: bool,
-    pub delta: egui::Vec2,
     /// The pointer is over this view (not a window, menu or the axis view above it).
     pub inside: bool,
     /// The axis view or navigation cube's rectangle.
@@ -602,7 +601,7 @@ pub(crate) fn handle(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &e
             i.pointer.delta(),
         )
     });
-    let hover = hover.filter(|p| !crate::shell::covered(app, *p));
+    let hover = hover.filter(|p| !crate::frame::dock_dragging(ui.ctx()) && !crate::shell::covered(app, *p));
     // Two fingers on the glass are the camera's (below). When their gesture ends with a finger
     // still down, that finger's pointer is the pan's leftover, not the beginning of a press: in
     // the moment between one finger lifting and the other, it would otherwise look like a drag
@@ -734,8 +733,9 @@ pub(crate) fn handle(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &e
             crate::context_menu::request_open(app, gesture.center, crate::context_menu::Target::Viewport);
         }
     }
-    let mut pan =
-        if trackpad_pan { raw.pan + if trackpad_orbit { egui::Vec2::ZERO } else { raw.shift_pan } } else { egui::Vec2::ZERO } + raw.mouse_pan + touch_pan;
+    let mut pan = if trackpad_pan { raw.pan + if trackpad_orbit { egui::Vec2::ZERO } else { raw.shift_pan } } else { egui::Vec2::ZERO }
+        + raw.mouse_pan
+        + touch_pan;
     pan.x *= crate::prefs::pan_sign_x(app);
     pan.y *= crate::prefs::pan_sign_y(app);
     let scroll = if app.viewport.wheel_zoom_raw_until_idle || (trackpad_pan && app.viewport.trackpad_until_idle) {
@@ -989,7 +989,22 @@ pub(crate) fn handle(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &e
         app.cam = Camera::default();
         app.fit_view();
     }
-    CameraInput { hover, scroll, mods, middle, secondary_down, primary_down, primary_pressed, delta, inside, axes, pinch, pan, primary_nav, mode, touch_leftover }
+    CameraInput {
+        hover,
+        scroll,
+        mods,
+        middle,
+        secondary_down,
+        primary_down,
+        primary_pressed,
+        inside,
+        axes,
+        pinch,
+        pan,
+        primary_nav,
+        mode,
+        touch_leftover,
+    }
 }
 
 /// The 3D mouse's motion this frame (#1336), on a page `rect` whose camera may do `caps`: the cap

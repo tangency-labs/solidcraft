@@ -127,6 +127,7 @@ data = [
   { scheme = "content" },
   { host = "*" },
   { mime_type = "*/*" },
+  { path_pattern = ".*\\.sc" },
   { path_pattern = ".*\\.solidcraft" },
   { path_pattern = ".*\\.step" },
   { path_pattern = ".*\\.stp" },

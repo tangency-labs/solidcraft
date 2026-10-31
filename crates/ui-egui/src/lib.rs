@@ -1477,8 +1477,7 @@ impl SolveApp {
                 if solidcraft_engine::io::is_design_path(&path) {
                     // Picked in the file dialog: its server is the user's choice.
                     let hosts: Vec<String> = solidcraft_engine::io::vfs::network_host(&path).into_iter().collect();
-                    let inserted =
-                        solidcraft_engine::io::vfs::allowing_hosts(&hosts, || app.run("component.insert_design", json!({ "path": path })));
+                    let inserted = solidcraft_engine::io::vfs::allowing_hosts(&hosts, || app.run("component.insert_design", json!({ "path": path })));
                     if inserted.is_ok() {
                         app.fit_view();
                     }

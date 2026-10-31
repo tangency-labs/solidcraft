@@ -41,7 +41,7 @@ pub(crate) const ANY_TYPE: &str = "*/*";
 /// names them all (the manifest test checks that), and the type tells the engine which
 /// format a document without an extension in its name is.
 pub(crate) const MIME_EXTS: [(&str, &str); 13] = [
-    ("application/x-solidcraft", "solidcraft"),
+    ("application/x-solidcraft", "sc"),
     ("model/step", "step"),
     ("application/step", "step"),
     ("application/x-step", "step"),
@@ -66,7 +66,7 @@ pub(crate) const GENERIC_TYPE: &str = "application/octet-stream";
 /// is SolidCraft's own format), then the CAD formats. The manifest matches each by the
 /// document's name, which the manifest test checks.
 #[cfg(test)]
-pub(crate) const READABLE_EXTS: [&str; 12] = ["solidcraft", "step", "stp", "igs", "iges", "fcstd", "3dm", "3mf", "stl", "obj", "gltf", "glb"];
+pub(crate) const READABLE_EXTS: [&str; 13] = ["sc", "solidcraft", "step", "stp", "igs", "iges", "fcstd", "3dm", "3mf", "stl", "obj", "gltf", "glb"];
 
 /// The static field the Activity shim leaves a VIEW request in (`java/`): the document a file
 /// browser asked us to open. The name must stay in step with the shim, which the manifest
@@ -1119,7 +1119,7 @@ mod tests {
     fn a_browsers_type_names_the_format_of_a_document_without_an_extension() {
         // A provider that reports a bare name (a number) leaves the type as the only hint.
         assert_eq!(mime_ext("model/step"), Some("step"));
-        assert_eq!(mime_ext("application/x-solidcraft"), Some("solidcraft"));
+        assert_eq!(mime_ext("application/x-solidcraft"), Some("sc"));
         assert_eq!(mime_ext("MODEL/STL"), Some("stl"));
         // The generic type says nothing: the name has to.
         assert_eq!(mime_ext(GENERIC_TYPE), None);

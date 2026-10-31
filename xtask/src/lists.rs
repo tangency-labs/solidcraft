@@ -75,6 +75,7 @@ const FIXED_ARRAYS: &[(&str, &str)] = &[
     ("crates/ui-egui/src/dialogs_assembly.rs", "TYPE_LABELS"), // Labels for TYPES, index for index.
     ("crates/ui-egui/src/space_mouse_calibration.rs", "STEP_PROMPTS"), // Labels for the twelve fixed calibration motions.
     ("crates/ui-egui/src/space_mouse_calibration.rs", "TRACKBALL_PROMPTS"), // Trackball labels indexed by the same twelve motions.
+    ("apps/solidcraft-android/src/saf.rs", "MIME_EXTS"), // MIME types the Android file browser can open, with the extension SolidCraft maps them to.
 ];
 
 fn test_only(attrs: &[syn::Attribute]) -> bool {
