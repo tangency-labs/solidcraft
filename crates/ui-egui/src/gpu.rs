@@ -883,6 +883,7 @@ mod tests {
             let plain = f.pixels(false);
             let plain_jobs = f.jobs;
             let original_camera = f.app.cam;
+            let original_background = f.app.preferences.viewport_background;
             let original_theme = f.app.preferences.theme.clone();
             let original_dark = f.app.ui.dark;
             assert_eq!(f.app.blur.counters().textures_created, 0);
@@ -890,7 +891,20 @@ mod tests {
                 f.app.preferences.theme = if dark { "dark" } else { "light" }.into();
                 f.app.ui.dark = dark;
                 f.app.blur.set_surface_alpha(Some(180));
+                f.app.cam = original_camera;
+                f.app.preferences.viewport_background = original_background;
+                f.app.blur.set_radius(0.0).unwrap();
+                for _ in 0..3 {
+                    f.frame();
+                }
+                // The zero reference uses the same camera, view settings and panel alpha.
+                let zero_reference = f.pixels(false);
+                f.frame();
+                assert_eq!(zero_reference, f.pixels(false), "stable zero reference");
+                f.evidence(&format!("blur-{}-0-{}", if dark { "dark" } else { "light" }, if srgb { "srgb" } else { "unorm" }));
                 for radius in [8.0, 18.0, 40.0] {
+                    f.app.cam = original_camera;
+                    f.app.preferences.viewport_background = original_background;
                     f.app.blur.set_radius(radius).unwrap();
                     for _ in 0..3 {
                         f.frame();
@@ -911,6 +925,13 @@ mod tests {
                     assert_eq!(f.app.blur.counters().source_passes, after.source_passes);
                     f.app.blur.set_surface_alpha(Some(180));
                     f.frame();
+                    let positive = f.pixels(false);
+                    let changed_pixels = zero_reference
+                        .chunks_exact(4)
+                        .zip(positive.chunks_exact(4))
+                        .filter(|(zero, blurred)| (0..3).any(|channel| zero[channel].abs_diff(blurred[channel]) > 1))
+                        .count();
+                    assert!(changed_pixels > 0, "radius {radius} must change RGB pixels with the same camera, alpha and theme");
                     let name = format!("blur-{}-{}-{}", if dark { "dark" } else { "light" }, radius as u32, if srgb { "srgb" } else { "unorm" });
                     f.evidence(&name);
                     let before = f.app.blur.counters();
@@ -919,21 +940,22 @@ mod tests {
                     let after = f.app.blur.counters();
                     assert_eq!(after.source_passes, before.source_passes + 1);
                     assert_eq!(after.blur_passes - before.blur_passes, 2 * crate::blur::schedule(radius).unwrap().0 as u64);
-                    let background = f.app.preferences.viewport_background;
+                    f.app.cam = original_camera;
+                    f.frame();
                     f.app.preferences.viewport_background = Some([3, 37, 93]);
                     let before = f.app.blur.counters();
                     f.frame();
                     let after = f.app.blur.counters();
                     assert_eq!(after.source_passes, before.source_passes + 1, "background invalidation");
                     assert_eq!(after.textures_created, before.textures_created, "background changes reuse storage");
-                    f.app.preferences.viewport_background = background;
+                    f.app.preferences.viewport_background = original_background;
                     f.frame();
                 }
                 f.app.blur.set_radius(0.0).unwrap();
                 for _ in 0..2 {
                     f.frame();
                 }
-                f.evidence(&format!("blur-{}-0-{}", if dark { "dark" } else { "light" }, if srgb { "srgb" } else { "unorm" }));
+                assert_eq!(zero_reference, f.pixels(false), "on -> off preserves the fixed scene and tint");
             }
             f.app.blur.set_surface_alpha(None);
             f.app.cam = original_camera;
