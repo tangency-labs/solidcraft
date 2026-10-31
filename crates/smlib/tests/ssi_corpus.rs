@@ -483,10 +483,8 @@ const GSI_1E6_PASS: &[&str] = &[
 ];
 
 /// The corpus runner's samples per curve.
-#[cfg(feature = "native")]
 const RUNNER_SAMPLES: usize = 4001;
 
-#[cfg(feature = "native")]
 fn surface(s: &Value) -> Result<solidcraft_smlib::ssi::Surface, String> {
     use solidcraft_smlib::ssi::Surface;
     let f = |k: &str| s.get(k).map(ssi_score::geom::num).ok_or(format!("{k}: missing"));
@@ -535,7 +533,6 @@ fn surface(s: &Value) -> Result<solidcraft_smlib::ssi::Surface, String> {
 /// interval, each UV curve over its own, the surfaces at the UV samples), samples that cannot be
 /// evaluated dropped, empty UV arrays for a UV curve the method did not return, the runner's type
 /// names, and no isolated points (the runner only reports those in face mode).
-#[cfg(feature = "native")]
 fn runner_output(
     r: solidcraft_smlib::Result<solidcraft_smlib::ssi::SsiResult>,
     a: &solidcraft_smlib::ssi::Surface,
@@ -581,27 +578,33 @@ fn runner_output(
     Outcome::Ran(EngineResult { status: ssi_score::SM_SUCCESS, status_name: None, time_ms: ms, curves, points: Vec::new() })
 }
 
-/// Every case through SMLib's GlobalSurfaceIntersect at approximation tolerance 1e-6, scored as
-/// score.py scores the corpus runner's `gsi 1e-6` run: exactly [`GSI_1E6_PASS`] pass.
-#[cfg(feature = "native")]
-#[test]
-fn smlib_global_intersect_at_1e_6() {
+/// One kernel at a time: the choice of kernel is process-wide.
+static KERNEL_TESTS: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// Every case through `backend`'s GlobalSurfaceIntersect at approximation tolerance 1e-6, scored as
+/// score.py scores the corpus runner's `gsi 1e-6` run. Prints each case that does not pass.
+fn global_intersect_scores(backend: solidcraft_smlib::route::Backend) -> Vec<Score> {
+    use solidcraft_smlib::route::{Choice, set_choice};
     use solidcraft_smlib::ssi::{Method, intersect};
-    // This scores the C++ kernel's intersector: it opts in (this binary builds no other bodies).
-    solidcraft_smlib::route::set_choice(solidcraft_smlib::route::Choice::Only(solidcraft_smlib::route::Backend::Smlib));
     let t0 = std::time::Instant::now();
     let cases = all_cases();
-    // SMLib serialises its calls, so the cases run one after another; only the scoring is parallel.
-    let outcomes: Vec<Outcome> = cases
-        .iter()
-        .map(|case| {
-            let a = surface(&case.surfaces[0]).unwrap_or_else(|e| panic!("{} surface 1: {e}", case.id));
-            let b = surface(&case.surfaces[1]).unwrap_or_else(|e| panic!("{} surface 2: {e}", case.id));
-            let t = std::time::Instant::now();
-            let r = intersect(&a, &b, Method::Global, 1e-6);
-            runner_output(r, &a, &b, t.elapsed().as_secs_f64() * 1e3)
-        })
-        .collect();
+    let outcomes: Vec<Outcome> = {
+        let _kernel = KERNEL_TESTS.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        set_choice(Choice::Only(backend));
+        // The kernels serialise their calls, so the cases run one after another; only the scoring is parallel.
+        let outcomes = cases
+            .iter()
+            .map(|case| {
+                let a = surface(&case.surfaces[0]).unwrap_or_else(|e| panic!("{} surface 1: {e}", case.id));
+                let b = surface(&case.surfaces[1]).unwrap_or_else(|e| panic!("{} surface 2: {e}", case.id));
+                let t = std::time::Instant::now();
+                let r = intersect(&a, &b, Method::Global, 1e-6);
+                runner_output(r, &a, &b, t.elapsed().as_secs_f64() * 1e3)
+            })
+            .collect();
+        set_choice(Choice::Routed);
+        outcomes
+    };
     let ran = t0.elapsed();
     // Status names for the flags, from the SMLib sources the build used, as score.py has them.
     let manifest = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
@@ -628,7 +631,7 @@ fn smlib_global_intersect_at_1e_6() {
         by_verdict.entry(s.verdict).or_default().push(&s.id);
     }
     println!(
-        "SMLib GlobalSurfaceIntersect, approx tol 1e-6 ({} cases, SMLib {:.1} s, total {:.1} s)",
+        "{backend:?} GlobalSurfaceIntersect, approx tol 1e-6 ({} cases, kernel {:.1} s, total {:.1} s)",
         scores.len(),
         ran.as_secs_f64(),
         t0.elapsed().as_secs_f64()
@@ -639,7 +642,14 @@ fn smlib_global_intersect_at_1e_6() {
     for s in scores.iter().filter(|s| s.verdict != Verdict::Pass) {
         println!("  {:<40} {:<15} {}", s.id, s.verdict.as_str(), s.flags.join("; "));
     }
+    scores
+}
 
+/// Exactly [`GSI_1E6_PASS`] pass on the C++ kernel.
+#[cfg(feature = "native")]
+#[test]
+fn smlib_global_intersect_at_1e_6() {
+    let scores = global_intersect_scores(solidcraft_smlib::route::Backend::Smlib);
     let passed: std::collections::BTreeSet<&str> = scores.iter().filter(|s| s.verdict == Verdict::Pass).map(|s| s.id.as_str()).collect();
     let listed: std::collections::BTreeSet<&str> = GSI_1E6_PASS.iter().copied().collect();
     assert_eq!(listed.len(), GSI_1E6_PASS.len(), "GSI_1E6_PASS lists a case twice");
@@ -647,4 +657,27 @@ fn smlib_global_intersect_at_1e_6() {
     let lost: Vec<_> = listed.difference(&passed).collect();
     assert!(newly.is_empty() && lost.is_empty(), "now pass (add to GSI_1E6_PASS): {newly:?}; no longer pass: {lost:?}");
     assert_eq!(passed.len(), 111);
+}
+
+/// The cases solidcore does not pass that the C++ kernel does (default-solidcore/bugs/
+/// ssi-self-crossing-curve-not-split.md). Listed so the difference is seen and only shrinks.
+const SOLIDCORE_GSI_1E6_MISSES: [&str; 6] = [
+    "c4_viviani_figure8",
+    "c4n_viviani_nurbs",
+    "y23_fig1a_two_loops_cross",
+    "y23_t2_ex5_two_loops",
+    "y23_t3_ex4_torus_ellipsoid",
+    "y23_t6_ex3_two_crossing_curves",
+];
+
+/// solidcore passes what the C++ kernel passes, but for [`SOLIDCORE_GSI_1E6_MISSES`].
+#[cfg(feature = "native")]
+#[test]
+fn solidcore_global_intersect_at_1e_6() {
+    let scores = global_intersect_scores(solidcraft_smlib::route::Backend::Solidcore);
+    let passed: std::collections::BTreeSet<&str> = scores.iter().filter(|s| s.verdict == Verdict::Pass).map(|s| s.id.as_str()).collect();
+    let listed: std::collections::BTreeSet<&str> = GSI_1E6_PASS.iter().copied().collect();
+    let lost: Vec<&str> = listed.difference(&passed).copied().collect();
+    let extra: Vec<_> = passed.difference(&listed).collect();
+    assert_eq!(lost, SOLIDCORE_GSI_1E6_MISSES, "solidcore's misses against the C++ kernel; extra passes: {extra:?}");
 }

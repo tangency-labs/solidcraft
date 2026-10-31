@@ -437,6 +437,8 @@ fn a_cliff_overflow_the_fork_refuses_has_no_room() {
 #[test]
 #[ignore = "core::blend::OVERFLOW_GOES_FIRST is held back: solidcore's cliff overflow loses edge attributes (an_edge_tag_crosses_a_cliff_overflow). Passes with it on: 6107.529369565"]
 fn overflow_goes_first() {
+    #[cfg(feature = "native")]
+    let _cpp = crate::route::on_cpp();
     let f = |u: f64| 0.5 * (u * (441.0 - u * u).sqrt() + 441.0 * (u / 21.0).asin());
     let w = 440f64.sqrt();
     let alone = 20.0 * (f(w) - f(1.0) - (w - 1.0));
@@ -613,6 +615,8 @@ fn pocket_chamfer_on_a_boolean_body() {
 /// of the sheet. With SMLib built, the C++ kernel gives the same counts and the same hole.
 #[test]
 fn a_setback_corner_left_open_returns_its_hole() {
+    #[cfg(feature = "native")]
+    let _cpp = crate::route::on_cpp();
     let edges = [[30.0, 40.0, 20.0], [60.0, 20.0, 20.0], [60.0, 40.0, 10.0]];
     let (open, holes) = timed("setback_open", move || {
         let b = Shape::Box([0.0; 3], [60.0, 40.0, 20.0]).core();

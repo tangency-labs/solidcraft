@@ -36,6 +36,12 @@ enum Done {
     NoCut,
 }
 
+impl super::dump::Answer for Done {
+    fn refusal(&self) -> Option<String> {
+        matches!(self, Done::NotSolid).then(|| Error::NotSolid.to_string())
+    }
+}
+
 /// The start of key domain `n`: past every [`named`] key of the domain before it.
 pub(super) const fn domain(n: u64) -> u64 {
     n << 36
@@ -107,6 +113,9 @@ fn finish(r: Brep, solid_in: bool, nonmanifold: bool) -> SolidResult<Done> {
     Ok(Done::Body(Box::new(r)))
 }
 
+/// What a failing call's dump calls its first operands.
+const OPERANDS: [&str; 4] = ["a", "b", "c", "d"];
+
 /// Copies of `bodies`, in order (a body given twice is copied twice, as the capi copies each
 /// operand), all made under the kernel's lock.
 fn copies(k: &mut Kernel, bodies: &[&Body]) -> SolidResult<Vec<Brep>> {
@@ -114,6 +123,7 @@ fn copies(k: &mut Kernel, bodies: &[&Body]) -> SolidResult<Vec<Brep>> {
     let mut out = Vec::with_capacity(bodies.len());
     for (n, b) in bodies.iter().enumerate() {
         let g = b.0.lock().unwrap_or_else(PoisonError::into_inner);
+        super::dump::input(k, OPERANDS.get(n).copied().unwrap_or("operand"), &g);
         let c = copy_of(k, &g, n as u64 + 1)?;
         drop(g);
         out.push(c);

@@ -25,6 +25,7 @@ mod boolean_tests;
 mod convert;
 #[cfg(test)]
 mod convert_tests;
+pub(crate) mod dump;
 pub(crate) mod file;
 pub(crate) mod history;
 mod measure;
@@ -39,6 +40,7 @@ mod offset_tests;
 pub(crate) mod split;
 #[cfg(test)]
 mod split_tests;
+pub(crate) mod ssi;
 pub(crate) mod sweep;
 #[cfg(test)]
 mod sweep_tests;
@@ -309,16 +311,20 @@ fn fresh() -> Kernel {
     k
 }
 
-static KERNEL: Mutex<Option<Kernel>> = Mutex::new(None);
+pub(crate) static KERNEL: Mutex<Option<Kernel>> = Mutex::new(None);
 
 /// Runs `f` on the process's kernel. A panic in solidcore is caught: the kernel, which it may have
 /// left half-updated, is replaced by a fresh one and the call fails with [`Error::Internal`].
-pub(crate) fn run<T>(call: &'static str, f: impl FnOnce(&mut Kernel) -> std::result::Result<T, solidcore::SolidError>) -> Result<T> {
+pub(crate) fn run<T: dump::Answer>(call: &'static str, f: impl FnOnce(&mut Kernel) -> std::result::Result<T, solidcore::SolidError>) -> Result<T> {
     let mut guard = KERNEL.lock().unwrap_or_else(PoisonError::into_inner);
     let k = guard.get_or_insert_with(fresh);
     // A profiler span per call, as the C API's calls are: where the kernel's time goes.
     let _span = solidcraft_profile::span("solidcore", call);
-    match catch_unwind(AssertUnwindSafe(|| f(k))) {
+    #[cfg(test)]
+    crate::route::reached_core();
+    dump::begin();
+    dump::set_current(Some(call));
+    let r = match catch_unwind(AssertUnwindSafe(|| f(k))) {
         Ok(Ok(v)) => Ok(v),
         Ok(Err(e)) => Err(Error::Solidcore(format!("{call}: {e}"))),
         Err(p) => {
@@ -327,7 +333,17 @@ pub(crate) fn run<T>(call: &'static str, f: impl FnOnce(&mut Kernel) -> std::res
             log::warn!(target: "smlib", "solidcore panicked in {call}: {why}");
             Err(Error::Internal(format!("{call}: {why}")))
         }
+    };
+    dump::set_current(None);
+    match &r {
+        Ok(v) => {
+            if let Some(why) = v.refusal() {
+                dump::failed(call, &why);
+            }
+        }
+        Err(e) => dump::failed(call, &e.to_string()),
     }
+    r
 }
 
 /// A call the capi checks for `SM_SUCCESS`, treating any other status as no answer: an error
@@ -344,7 +360,7 @@ pub(crate) fn answer<T>(r: std::result::Result<T, solidcore::SolidError>) -> std
 }
 
 /// Runs `f` on the kernel and `body`, locking the kernel first.
-pub(crate) fn with_body<T>(
+pub(crate) fn with_body<T: dump::Answer>(
     call: &'static str,
     body: &Body,
     f: impl FnOnce(&mut Kernel, &mut solidcore::topology::Brep) -> std::result::Result<T, solidcore::SolidError>,
@@ -355,6 +371,7 @@ pub(crate) fn with_body<T>(
     }
     run(call, |k| {
         let mut b = body.0.lock().unwrap_or_else(PoisonError::into_inner);
+        dump::input(k, "brep", &b);
         f(k, &mut b)
     })
 }

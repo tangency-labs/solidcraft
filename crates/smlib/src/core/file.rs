@@ -5,11 +5,12 @@
 use std::path::Path;
 
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
+use solidcore::kernel::Kernel;
 use solidcore::topology::api_files::{read_brep_from_file, write_brep_to_file};
 use solidcore::topology::brep::p10::TopologyEnv;
 use solidcore::topology::brep_data_write::FromBrepEnv;
 use solidcore::topology::topology::NotifyRecords;
-use solidcore::topology::{EdgeId, EdgeuseId, FaceId};
+use solidcore::topology::{Brep, EdgeId, EdgeuseId, FaceId};
 
 use super::convert::key_of;
 use super::{Body, run, with_body};
@@ -37,20 +38,23 @@ pub(crate) fn read(path: &Path, ascii: bool) -> Result<Body> {
     Ok(Body::new(b))
 }
 
+/// `b` as the contents of a `.smb` file, ASCII or binary.
+pub(super) fn bytes(k: &Kernel, b: &Brep, ascii: bool) -> solidcore::Result<Vec<u8>> {
+    let store = AttributeStore::default();
+    let records = NotifyRecords::new();
+    let env = FromBrepEnv {
+        attributes: &store,
+        key_of: &key_of,
+        records: &records,
+        curve_key: &|_: EdgeId| ObjectKey(0),
+        uv_curve_key: &|_: EdgeuseId| ObjectKey(0),
+        surface_key: &|_: FaceId| ObjectKey(0),
+    };
+    write_brep_to_file(k, Some(b), &env, ascii)
+}
+
 /// `body` written to the file at `path`, ASCII or binary.
 pub(crate) fn write(body: &Body, path: &Path, ascii: bool) -> Result<()> {
-    let bytes = with_body("smlib_brep_write", body, |k, b| {
-        let store = AttributeStore::default();
-        let records = NotifyRecords::new();
-        let env = FromBrepEnv {
-            attributes: &store,
-            key_of: &key_of,
-            records: &records,
-            curve_key: &|_: EdgeId| ObjectKey(0),
-            uv_curve_key: &|_: EdgeuseId| ObjectKey(0),
-            surface_key: &|_: FaceId| ObjectKey(0),
-        };
-        write_brep_to_file(k, Some(&*b), &env, ascii)
-    })?;
+    let bytes = with_body("smlib_brep_write", body, |k, b| bytes(k, b, ascii))?;
     std::fs::write(path, bytes).map_err(|e| io("writing", path, &e))
 }

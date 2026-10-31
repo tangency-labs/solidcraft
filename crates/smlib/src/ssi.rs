@@ -16,6 +16,8 @@ use crate::{Error, Result, error, ffi, init, route};
 /// own ([`crate::core::split`]), and the C side's, made when the C++ kernel needs it.
 pub struct Surface {
     handle: OnceLock<Result<ffi::ssi::SurfaceHandle>>,
+    /// solidcore's, made when it is first needed.
+    core: OnceLock<Result<crate::core::split::Tool>>,
     spec: Spec,
 }
 
@@ -161,6 +163,11 @@ impl Surface {
         self.handle.get_or_init(|| self.spec.on_cpp()).as_ref().map_err(Clone::clone)
     }
 
+    /// solidcore's surface, made the first time it is needed.
+    fn core(&self) -> Result<&crate::core::split::Tool> {
+        self.core.get_or_init(|| crate::core::ssi::surface(&self.spec)).as_ref().map_err(Clone::clone)
+    }
+
     pub(crate) fn spec(&self) -> &Spec {
         &self.spec
     }
@@ -169,7 +176,7 @@ impl Surface {
     /// kernel, its side is made now, so that what it refuses is refused here.
     fn made(spec: Spec) -> Result<Surface> {
         spec.check()?;
-        let s = Surface { handle: OnceLock::new(), spec };
+        let s = Surface { handle: OnceLock::new(), core: OnceLock::new(), spec };
         if ssi_on_cpp() || route::Op::Split.backend() == route::Backend::Smlib {
             s.handle()?;
         }
@@ -291,7 +298,7 @@ impl Surface {
     /// The UV domain the intersection runs within, as `[u0, u1, v0, v1]`.
     pub fn domain(&self) -> Result<[f64; 4]> {
         if !ssi_on_cpp() {
-            return Err(Error::NotOnSolidcore("a surface's SSI domain"));
+            return self.core().map(crate::core::ssi::domain);
         }
         ffi::ssi::domain(self.handle()?).map_err(error)
     }
@@ -299,7 +306,7 @@ impl Surface {
     /// The surface's point at (u, v).
     pub fn evaluate(&self, u: f64, v: f64) -> Result<[f64; 3]> {
         if !ssi_on_cpp() {
-            return Err(Error::NotOnSolidcore("evaluating an SSI surface"));
+            return crate::core::ssi::evaluate(self.core()?, u, v);
         }
         ffi::ssi::evaluate(self.handle()?, u, v).map_err(error)
     }
@@ -398,7 +405,7 @@ pub struct SsiResult {
 }
 
 /// The 3D B-spline: polynomial where every weight is 1.
-fn curve3(c: ffi::ssi::Nurbs) -> b::Curve {
+pub(crate) fn curve3(c: ffi::ssi::Nurbs) -> b::Curve {
     let points = c.points.as_chunks::<3>().0;
     if c.weights.iter().all(|w| *w == 1.0) {
         b::Curve::Spline { knots: c.knots, points: points.to_vec() }
@@ -411,7 +418,7 @@ fn curve3(c: ffi::ssi::Nurbs) -> b::Curve {
 }
 
 /// A UV B-spline, as [`curve3`].
-fn curve2(c: ffi::ssi::Nurbs) -> b::Curve2 {
+pub(crate) fn curve2(c: ffi::ssi::Nurbs) -> b::Curve2 {
     let points = c.points.as_chunks::<2>().0;
     if c.weights.iter().all(|w| *w == 1.0) {
         b::Curve2::Spline { knots: c.knots, points: points.to_vec() }
@@ -434,7 +441,7 @@ fn uv(r: &ffi::ssi::ResultHandle, i: i32, which: i32) -> Result<Option<b::Curve2
 /// SMLib's status; a curve SMLib does not hold as a B-spline is [`Error::Unsupported`].
 pub fn intersect(a: &Surface, b: &Surface, method: Method, approx_tol: f64) -> Result<SsiResult> {
     if !ssi_on_cpp() {
-        return Err(Error::NotOnSolidcore("surface/surface intersection through the kernel API"));
+        return crate::core::ssi::intersect(a.core()?, b.core()?, method, approx_tol);
     }
     let r = ffi::ssi::ssi(a.handle()?, b.handle()?, method.code(), approx_tol).map_err(error)?;
     let n = ffi::ssi::curve_count(&r).map_err(error)?;
@@ -466,6 +473,7 @@ mod tests {
     /// A plane through a sphere's centre: one great circle.
     #[test]
     fn plane_through_sphere_is_a_circle() {
+        #[cfg(feature = "native")]
         let _cpp = route::on_cpp();
         let z = [0.0, 0.0, 1.0];
         let (x, y) = ([1.0, 0.0, 0.0], [0.0, 1.0, 0.0]);
@@ -510,17 +518,31 @@ mod tests {
         }
     }
 
-    /// On solidcore a surface needs no C++ kernel, and the operations only the C API has say they
-    /// are not supported; none falls back.
+    /// On solidcore a surface needs no C++ kernel, and answers by itself. The basic intersector is
+    /// the one method solidcore has no public entry for, and it says so; nothing falls back.
     #[test]
-    fn intersecting_on_solidcore_says_it_is_not_supported() {
+    fn surfaces_on_solidcore_answer_without_the_cpp_kernel() {
         if ssi_on_cpp() {
             return;
         }
-        let (x, y) = ([1.0, 0.0, 0.0], [0.0, 1.0, 0.0]);
-        let s = Surface::plane([0.0; 3], x, y, [0.0, 1.0], [0.0, 1.0]).unwrap();
-        assert!(matches!(intersect(&s, &s, Method::Global, 1e-6), Err(Error::NotOnSolidcore(_))));
-        assert!(matches!(s.domain(), Err(Error::NotOnSolidcore(_))));
-        assert!(matches!(s.evaluate(0.5, 0.5), Err(Error::NotOnSolidcore(_))));
+        let (x, y, z) = ([1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]);
+        let plane = Surface::plane([0.0; 3], x, y, [-2.0, 2.0], [-3.0, 3.0]).unwrap();
+        assert_eq!(plane.domain().unwrap(), [-2.0, 2.0, -3.0, 3.0]);
+        assert_eq!(plane.evaluate(1.0, -2.0).unwrap(), [1.0, -2.0, 0.0]);
+        assert_eq!(plane.evaluate(f64::NAN, 0.0).unwrap_err(), Error::Argument);
+        let sphere = Surface::sphere([0.0; 3], x, z, 1.0, [0.0, 360.0], [-90.0, 90.0]).unwrap();
+        for method in [Method::Global, Method::Advanced] {
+            let r = intersect(&plane, &sphere, method, 1e-6).unwrap();
+            assert!(!r.curves.is_empty(), "{method:?}");
+            for c in &r.curves {
+                let eval = b::eval::CurveEval::new(&c.curve).unwrap();
+                let [t0, t1] = c.interval;
+                for k in 0..=100 {
+                    let p = eval.point(t0 + (t1 - t0) * f64::from(k) / 100.0).unwrap();
+                    assert!((p.x.hypot(p.y) - 1.0).abs() < 1e-5 && p.z.abs() < 1e-5, "{method:?}: {p:?}");
+                }
+            }
+        }
+        assert!(matches!(intersect(&plane, &sphere, Method::Basic, 1e-6), Err(Error::NotOnSolidcore(_))));
     }
 }

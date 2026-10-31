@@ -298,6 +298,7 @@ pub(crate) fn untrim_face(body: &Body, point: [f64; 3], tol: f64, holes: Option<
     run("smlib_untrim_face", |k| {
         let mut whole = {
             let g = body.0.lock().unwrap_or_else(PoisonError::into_inner);
+            super::dump::input(k, "brep", &g);
             copy_of(k, &g, 1)?
         };
         // The face to untrim, in a body of its own (its hole edges lamina there) or in the copy
@@ -750,6 +751,7 @@ pub(crate) fn extend_sheet(sheet: &Body, point: [f64; 3], tol: f64, distance: f6
     run("smlib_extend_sheet", |k| {
         let b = {
             let g = sheet.0.lock().unwrap_or_else(PoisonError::into_inner);
+            super::dump::input(k, "sheet", &g);
             copy_of(k, &g, 1)?
         };
         let faces = brep_p1::faces(&b, None)?;

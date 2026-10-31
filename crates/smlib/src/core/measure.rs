@@ -288,6 +288,12 @@ enum Refusal {
     Naming(NamingScheme),
 }
 
+impl<T> super::dump::Answer for std::result::Result<T, Refusal> {
+    fn refusal(&self) -> Option<String> {
+        self.is_err().then(|| "the check could not run".to_string())
+    }
+}
+
 /// `smlib_brep_check` (`smlib_check.cpp`): `SmBrep::ValidatePointers` at `level`, then, when it
 /// failed nothing, `SmBrep::AssertValid` at `level` over the whole topology graph, with every
 /// failed test as one line of the report and the capi's own lines for a failed status without a

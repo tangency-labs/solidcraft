@@ -306,6 +306,8 @@ fn tests_of(text: &str) -> Vec<&str> {
 /// solidcore and on the C++ kernel.
 #[test]
 fn a_valid_box_passes_level_2() {
+    #[cfg(feature = "native")]
+    let _cpp = crate::route::on_cpp();
     let (b, _) = case("box");
     let r = check(&b, CheckLevel::All).unwrap();
     assert_eq!((r.failures, r.text.as_str()), (0, ""), "{r}");
@@ -320,6 +322,8 @@ fn a_valid_box_passes_level_2() {
 /// and the C++ kernel fails the same tests on the same arrays.
 #[test]
 fn a_vertex_off_its_edges_fails_the_check() {
+    #[cfg(feature = "native")]
+    let _cpp = crate::route::on_cpp();
     use crate::flat::VERTEX_POSITION;
     let (b, _) = case("box");
     let mut a = super::to_arrays(&b).unwrap();
@@ -378,6 +382,8 @@ fn sealed_voids() -> [(&'static str, Body); 2] {
 /// in either shell order; with SMLib built, the C++ kernel's own.
 #[test]
 fn a_sealed_void_measures_its_volume() {
+    #[cfg(feature = "native")]
+    let _cpp = crate::route::on_cpp();
     let want = 8000.0 - 1000.0;
     // Ixx of a cube of side s about its centre: s⁵ / 6.
     let moment = (20.0f64.powi(5) - 10.0f64.powi(5)) / 6.0;
@@ -434,6 +440,8 @@ fn faces_apart_with_a_shell_each_check_valid() {
 /// C++ kernel's own primitives classify the same.
 #[test]
 fn points_classify_as_the_capi() {
+    #[cfg(feature = "native")]
+    let _cpp = crate::route::on_cpp();
     use super::classify_point;
     use crate::measure::PointClass::{Inside, OnBoundary, Outside};
 
@@ -480,6 +488,8 @@ fn points_classify_as_the_capi() {
 /// 100, not the cube's boundary alone; its volume the cube's. The same on the C++ kernel.
 #[test]
 fn a_sheet_hung_on_a_solid_counts_in_the_area() {
+    #[cfg(feature = "native")]
+    let _cpp = crate::route::on_cpp();
     use solidcore::boolean::api_brep::boolean_merge;
     use solidcore::geom::vector3d::Vec3;
     use solidcore::primitive::api_primitives::{create_box, create_plane};

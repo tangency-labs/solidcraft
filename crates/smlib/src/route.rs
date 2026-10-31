@@ -64,19 +64,15 @@ pub enum Op {
     Split,
     /// Extrusions, revolutions, sweeps and lofts.
     Sweep,
-    /// Face and edge history of an operation.
-    History,
-    /// Surface-surface intersection.
+    /// Surface/surface intersection, and the surfaces it takes.
     Ssi,
-    /// Sheet metal: flanges and flat patterns.
-    Flat,
     /// Native `.smb` files, which both kernels read and write.
     File,
 }
 
 impl Op {
     /// Every family, in table order.
-    pub const ALL: [Op; 14] = [
+    pub const ALL: [Op; 12] = [
         Op::Convert,
         Op::Primitive,
         Op::Transform,
@@ -87,9 +83,7 @@ impl Op {
         Op::Offset,
         Op::Split,
         Op::Sweep,
-        Op::History,
         Op::Ssi,
-        Op::Flat,
         Op::File,
     ];
 
@@ -106,9 +100,7 @@ impl Op {
             Op::Offset => "offset",
             Op::Split => "split",
             Op::Sweep => "sweep",
-            Op::History => "history",
             Op::Ssi => "ssi",
-            Op::Flat => "flat",
             Op::File => "file",
         }
     }
@@ -137,9 +129,7 @@ impl Op {
             | Op::Offset
             | Op::Split
             | Op::Sweep
-            | Op::History
             | Op::Ssi
-            | Op::Flat
             | Op::File => Backend::Solidcore,
         }
     }
@@ -177,19 +167,41 @@ impl Op {
 thread_local! {
     /// Tests: this thread's operations run on the C++ kernel whatever the routing.
     static ON_CPP: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    /// Tests: how many times this thread has touched a C++ body, and called solidcore.
+    static REACHED: std::cell::Cell<(u64, u64)> = const { std::cell::Cell::new((0, 0)) };
+}
+
+/// Tests: this thread has touched a C++ body.
+#[cfg(test)]
+pub(crate) fn reached_cpp() {
+    REACHED.with(|r| r.set((r.get().0 + 1, r.get().1)));
+}
+
+/// Tests: this thread has called solidcore.
+#[cfg(test)]
+pub(crate) fn reached_core() {
+    REACHED.with(|r| r.set((r.get().0, r.get().1 + 1)));
 }
 
 /// Tests that exercise the C++ kernel opt in: until the guard drops, this thread's operations run
-/// on it. Thread by thread, so that the other tests in the binary stay on the table's kernel.
+/// on it. Thread by thread, so that the other tests in the binary stay on the table's kernel. The
+/// guard fails a test that never touched a C++ body, so a parity test can't quietly compare
+/// solidcore with itself.
 #[cfg(test)]
 pub(crate) fn on_cpp() -> impl Drop {
     struct Guard;
     impl Drop for Guard {
         fn drop(&mut self) {
             ON_CPP.with(|c| c.set(false));
+            let (cpp, core) = REACHED.with(std::cell::Cell::get);
+            if std::env::var_os("SOLIDCRAFT_TEST_REACHED").is_some() {
+                eprintln!("REACHED {} cpp={cpp} core={core}", std::thread::current().name().unwrap_or("?"));
+            }
+            assert!(cpp > 0 || std::thread::panicking(), "this test opted in to the C++ kernel and never reached it");
         }
     }
     ON_CPP.with(|c| c.set(true));
+    REACHED.with(|r| r.set((0, 0)));
     Guard
 }
 

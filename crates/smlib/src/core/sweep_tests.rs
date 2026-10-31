@@ -464,6 +464,8 @@ cases!(
 /// 4 vertices) and the area πr² + πrh + 2rh. On solidcore, and with SMLib built on the C++ kernel.
 #[test]
 fn arcs_on_one_circle_sweep_one_wall() {
+    #[cfg(feature = "native")]
+    let _cpp = crate::route::on_cpp();
     let cases = [
         ("extrude_circle_in_two_halves", [3, 3, 2], 50.0 * PI + 100.0 * PI, true),
         ("extrude_circle_in_two_frames", [3, 3, 2], 50.0 * PI + 100.0 * PI, true),

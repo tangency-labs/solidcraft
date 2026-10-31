@@ -508,6 +508,7 @@ pub(super) fn on_copy(call: &'static str, body: &Body, f: impl FnOnce(&mut Kerne
     }
     run(call, |k| {
         let g = body.0.lock().unwrap_or_else(PoisonError::into_inner);
+        super::dump::input(k, "brep", &g);
         let c = copy_of(k, &g, 1)?;
         drop(g);
         f(k, c)

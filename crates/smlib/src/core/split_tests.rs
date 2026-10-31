@@ -308,6 +308,8 @@ fn lid(side: bool) -> Body {
 /// the sides are read from; on C++ too.
 #[test]
 fn split_body_by_an_l_sheet() {
+    #[cfg(feature = "native")]
+    let _cpp = crate::route::on_cpp();
     let (c, sheet) = (cube(), lid(true));
     for face in 0..2 {
         let (b, f) = split_body_by_sheet(&c, &sheet, face).unwrap().expect("the sheet divides the cube");

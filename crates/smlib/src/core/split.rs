@@ -70,9 +70,9 @@ type Out<T> = std::result::Result<T, Error>;
 
 /// A tool surface as solidcore holds it: the surface over its natural UV domain (`smlib_surface`'s
 /// `s` and `domain`), and for a plane its point and unit normal (`IsPlanar`).
-struct Tool {
-    surface: Surface,
-    domain: Extent2d,
+pub(crate) struct Tool {
+    pub(super) surface: Surface,
+    pub(super) domain: Extent2d,
     plane: Option<(Point3, Vec3)>,
 }
 
@@ -112,7 +112,7 @@ fn clamped(k: &[f64], p: usize) -> bool {
 
 /// The tool's surface as `smlib_ssi.cpp`'s constructors make it, then its natural UV domain
 /// (`construct`: finite and not empty, else `SM_ERR_INVALID_INPUT`).
-fn tool(k: &Kernel, spec: &Spec) -> solidcore::Result<Out<Tool>> {
+pub(super) fn tool(k: &Kernel, spec: &Spec) -> solidcore::Result<Out<Tool>> {
     let mut plane = None;
     let surface = match spec {
         Spec::Plane { origin, xaxis, yaxis, u, v } => {
@@ -321,6 +321,7 @@ pub(crate) fn split_faces(body: &Body, faces: &[usize], tools: &[&Spec]) -> Resu
     let r = run("smlib_split_faces", |k| {
         let mut a = {
             let g = body.0.lock().unwrap_or_else(PoisonError::into_inner);
+            super::dump::input(k, "brep", &g);
             let count = brep_p1::faces(&g, None)?.len();
             let mut seen = std::collections::HashSet::new();
             if faces.iter().any(|&f| f >= count || !seen.insert(f)) {
@@ -461,7 +462,10 @@ pub(crate) fn split_body(body: &Body, spec: &Spec) -> Result<Option<(Body, Body)
     if body.0.is_poisoned() {
         return Err(Error::Internal("smlib_split_body: the body was left unfinished by an earlier panic".to_owned()));
     }
-    let r = run("smlib_split_body", |k| both_sides(k, body, false, |k, flip| side(k, body, spec, flip)))??;
+    let r = run("smlib_split_body", |k| {
+        super::dump::input(k, "brep", &body.0.lock().unwrap_or_else(PoisonError::into_inner));
+        both_sides(k, body, false, |k, flip| side(k, body, spec, flip))
+    })??;
     Ok(r.map(|(b, f)| (Body::new(b), Body::new(f))))
 }
 
@@ -478,8 +482,10 @@ pub(crate) fn split_body_by_sheet(body: &Body, sheet: &Body, face: usize) -> Res
         return Err(Error::Internal("smlib_split_body_by_sheet: a body was left unfinished by an earlier panic".to_owned()));
     }
     let r = run("smlib_split_body_by_sheet", |k| {
+        super::dump::input(k, "brep", &body.0.lock().unwrap_or_else(PoisonError::into_inner));
         {
             let g = sheet.0.lock().unwrap_or_else(PoisonError::into_inner);
+            super::dump::input(k, "sheet", &g);
             if !is_sheet(k, &g)? || face >= g.face_list().len() {
                 return Ok(Err(Error::Argument));
             }

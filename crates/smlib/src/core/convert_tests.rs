@@ -310,6 +310,8 @@ fn a_cpp_box_comes_into_solidcore() {
 /// whole body's tolerance fourfold per blend (fillets/2341).
 #[test]
 fn tolerances_cross_the_arrays_per_entity() {
+    #[cfg(feature = "native")]
+    let _cpp = crate::route::on_cpp();
     use crate::flat::{EDGE_TOLERANCE, TOLERANCE, VERTEX_TOLERANCE};
     let mut a = to_arrays(&case("box").body).unwrap();
     let base = a.reals[&TOLERANCE][0];
