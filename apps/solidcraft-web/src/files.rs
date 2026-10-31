@@ -75,6 +75,8 @@ pub struct Files {
     pub panel: Cell<bool>,
     /// An autosave left by an earlier session: its design's name and file.
     pub recovery: RefCell<Option<(String, Option<String>)>>,
+    /// When this page last wrote the autosave of its unsaved work (`None`: it keeps none).
+    pub autosave_stamp: Cell<Option<f64>>,
     /// The app's context, to wake it when a browser call finishes.
     pub ctx: RefCell<Option<egui::Context>>,
 }
@@ -285,6 +287,8 @@ pub fn start(files: &Rc<Files>) {
                     files.say("This page can't use the browser's file storage (it needs https or localhost): designs are kept in local storage, a few MB at most.", false);
                 }
                 let mut entries = Vec::new();
+                // When the autosave was written: it names the page that left it (#9621).
+                let mut recovery_stamp = None;
                 let has_recovery = all.iter().any(|(n, _, _)| n == RECOVERY);
                 let legacy = (!has_recovery).then(|| LEGACY_RECOVERY.into_iter().find(|l| all.iter().any(|(n, _, _)| n == l))).flatten();
                 for (name, bytes, modified) in all {
@@ -297,6 +301,7 @@ pub fn start(files: &Rc<Files>) {
                     if name == RECOVERY_META {
                         let meta: serde_json::Value = serde_json::from_slice(&bytes).unwrap_or_default();
                         let n = meta["name"].as_str().unwrap_or("Untitled").to_string();
+                        recovery_stamp = meta["saved_at"].as_f64();
                         *files.recovery.borrow_mut() = Some((n, meta["path"].as_str().map(str::to_string)));
                         continue;
                     }
@@ -310,6 +315,12 @@ pub fn start(files: &Rc<Files>) {
                 // An autosave without its design file is nothing to recover.
                 if !vfs::exists(&format!("{OPFS}{RECOVERY}")) {
                     *files.recovery.borrow_mut() = None;
+                }
+                // The page that left it was closed with the browser's "Leave": its changes were
+                // given up, so they are not offered again (#9621).
+                if crate::autosave_given_up(recovery_stamp, take_left_stamp(), reloaded()) {
+                    *files.recovery.borrow_mut() = None;
+                    autosave(&files, None);
                 }
             }
             Err(e) => files.say(format!("browser storage: {e}"), true),
@@ -416,7 +427,9 @@ pub fn autosave(files: &Rc<Files>, doc: Option<(&solidcraft_engine::doc::Documen
                     return;
                 }
             };
-            let meta = serde_json::json!({"name": d.name, "path": path, "saved_at": js_sys::Date::now()}).to_string();
+            let stamp = js_sys::Date::now();
+            files.autosave_stamp.set(Some(stamp));
+            let meta = serde_json::json!({"name": d.name, "path": path, "saved_at": stamp}).to_string();
             spawn_local(async move {
                 let r = async {
                     write_file(RECOVERY, &bytes).await?;
@@ -427,14 +440,47 @@ pub fn autosave(files: &Rc<Files>, doc: Option<(&solidcraft_engine::doc::Documen
                 }
             });
         }
-        None => spawn_local(async move {
-            let _ = remove_file(RECOVERY).await;
-            for legacy in LEGACY_RECOVERY {
-                let _ = remove_file(legacy).await;
-            }
-            let _ = remove_file(RECOVERY_META).await;
-        }),
+        None => {
+            files.autosave_stamp.set(None);
+            spawn_local(async move {
+                let _ = remove_file(RECOVERY).await;
+                for legacy in LEGACY_RECOVERY {
+                    let _ = remove_file(legacy).await;
+                }
+                let _ = remove_file(RECOVERY_META).await;
+            });
+        }
     }
+}
+
+/// Local storage key: the stamp of the autosave a page left when it was closed with the
+/// browser's "Leave" (#9621). Local storage is written at once, so it survives the page going
+/// away; the browser's file storage is written later, which a closing page can't wait for.
+const LEFT_KEY: &str = "solidcraft.recovery.left";
+
+/// The page is going away for good (not into the browser's back/forward cache): the user
+/// answered the browser's "leave site?" with Leave, or there was nothing unsaved to ask about.
+/// The autosave this page wrote is marked as given up; the next visit drops it.
+pub fn leaving(files: &Files) {
+    let Some(stamp) = files.autosave_stamp.get() else { return };
+    if let Ok(storage) = local() {
+        let _ = storage.set_item(LEFT_KEY, &stamp.to_string());
+    }
+}
+
+/// The stamp a closed page left (taken: it counts once).
+fn take_left_stamp() -> Option<f64> {
+    let storage = local().ok()?;
+    let left = storage.get_item(LEFT_KEY).ok().flatten();
+    let _ = storage.remove_item(LEFT_KEY);
+    crate::parse_left_stamp(left.as_deref()?)
+}
+
+/// This page was loaded by reloading the last one (the browser's navigation timing says so).
+fn reloaded() -> bool {
+    let Some(performance) = web_sys::window().and_then(|w| w.performance()) else { return false };
+    let entry = performance.get_entries_by_type("navigation").get(0);
+    Reflect::get(&entry, &"type".into()).ok().and_then(|t| t.as_string()).is_some_and(|t| t == "reload")
 }
 
 /// A stored path for `name` that no stored file has: `name`, else `name (2)`, `name (3)`…
