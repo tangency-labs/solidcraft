@@ -35,15 +35,16 @@ pub(crate) fn set(app: &mut SolveApp, body: &str, face: Option<&Sel>) -> bool {
     app.run("body.print_face", params).is_ok()
 }
 
-/// Print Face (Ctrl+B, the command palette): Send to Slicer with its Print face input taking
-/// picks; with `print_face_everywhere`, [`toggle`].
+/// Print Face (Ctrl+B, the command palette): Send to Slicer, with its Print face input taking
+/// picks when the selection gave it bodies, else Bodies; with `print_face_everywhere`, [`toggle`].
 pub(crate) fn start(app: &mut SolveApp) {
     if app.preferences.print_face_everywhere {
         return toggle(app);
     }
     app.start("file.send_to_slicer");
     if let Some(d) = app.dialog.as_mut().filter(|d| sending(&d.kind)) {
-        d.active = 1.min(d.inputs.len().saturating_sub(1));
+        let bodies = d.inputs.first().is_some_and(|i| !i.items.is_empty());
+        d.active = if bodies { 1.min(d.inputs.len().saturating_sub(1)) } else { 0 };
     }
 }
 
@@ -236,8 +237,20 @@ mod tests {
         assert_eq!(d.inputs[d.active].label, "Print face");
         assert!(app.session.doc.print_faces.is_empty(), "nothing is marked until a face is picked");
         crate::dialogs::cancel(&mut app);
+        // Nothing selected: the bodies come first.
+        app.session.selection.clear();
+        app.start("body.print_face");
+        let d = app.dialog.as_ref().expect("Send to Slicer opens");
+        assert_eq!(d.inputs[d.active].label, "Bodies");
+        crate::dialogs::cancel(&mut app);
+        // Faces of two bodies selected: the face menu's Send to Slicer sends both.
+        app.session.selection = vec![side.clone(), face(&app, "Lid", [45.0, 5.0, 5.0])];
+        let send = crate::context_menu::items(&app, &crate::context_menu::Target::Viewport).into_iter().find(|i| i.id == "ui.sendToSlicer");
+        crate::context_menu::run_item(&mut app, &send.expect("Send to Slicer in the face menu"), egui::Pos2::ZERO);
+        assert_eq!(crate::selection::items(inputs(&app), 0).body_names(), ["Block", "Lid"]);
+        crate::dialogs::cancel(&mut app);
+        app.session.selection = vec![side.clone()];
         app.preferences.print_face_everywhere = true;
-        app.session.selection = vec![side];
         assert!(menu(&app).iter().any(|id| id == "body.print_face"));
         app.start("body.print_face");
         assert!(app.dialog.is_none());
