@@ -990,14 +990,18 @@ pub enum FeatureKind {
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         targets: Vec<BodyName>,
     },
-    /// Structural members (#4003): one body per straight line of a frame sketch (2D sketch lines
-    /// and 3D sketch lines), its cross-section the profile, square to the line from end to end.
+    /// Structural members (#4003): separate selected lines/arcs, or one continuous tangent
+    /// path, including exact 3D sketch arcs. The all-lines default selects straight lines.
     FrameMember {
         path_sketch: SketchId,
         /// The lines, by curve id; none: every straight line drawn in the sketch (not
         /// construction, not projected or otherwise linked, not of no length).
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         lines: Vec<String>,
+        /// The explicitly selected curves form one open, tangent line/arc chain, in selection
+        /// order. Otherwise each selected curve makes a separate member.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        continuous: bool,
         profile: crate::frame::MemberProfile,
         /// The profile point that sits on the line.
         #[serde(default, skip_serializing_if = "crate::frame::Anchor::is_origin")]

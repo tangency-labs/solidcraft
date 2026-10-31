@@ -1,0 +1,21 @@
+{
+  "id": "98-frame-continuous-bend",
+  "name": "One continuous round chassis tube",
+  "description": "A 20x2 mm round tube follows a 200 mm line, a tangent R100 quarter bend and a 300 mm line as one physical member.",
+  "exercises": ["frame.member", "continuous", "circular_arc"],
+  "units": {"length": "mm", "angle": "deg", "area": "mm2", "volume": "mm3"},
+  "features": [
+    {
+      "op": "sketch",
+      "name": "Chassis",
+      "plane": {"ref": "XY", "origin": [0, 0, 0], "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]},
+      "entities": [
+        {"type": "line", "id": "l1", "start": {"at": [100, -200]}, "end": {"at": [100, 0]}},
+        {"type": "arc", "id": "a1", "center": {"at": [0, 0]}, "start": {"at": [100, 0]}, "end": {"at": [0, 100]}},
+        {"type": "line", "id": "l2", "start": {"at": [0, 100]}, "end": {"at": [-300, 100]}}
+      ]
+    },
+    {"op": "frame_member", "name": "Bent chassis tube", "sketch": "Chassis", "lines": ["l1", "a1", "l2"], "continuous": true,
+      "profile": {"kind": "round_tube", "diameter": 20, "wall": 2}, "body_name": "Main hoop"}
+  ]
+}

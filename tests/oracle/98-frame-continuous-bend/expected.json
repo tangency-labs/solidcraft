@@ -1,0 +1,24 @@
+{
+  "source": "analytic",
+  "method": "r_o=10, r_i=8, R=100; A=pi*(r_o^2-r_i^2)=36pi; L=200+R*pi/2+300; V=A*L; surface=2pi*(r_o+r_i)*L+2A. First moments of each straight plus quarter-torus: I/A=(r_o^2+r_i^2)/4=41; centroid=[(-15000+41)/L,(20000+41)/L,0].",
+  "body_count": 1,
+  "volume_mm3": 74313.95568657713,
+  "area_mm2": 74540.15035763559,
+  "center_of_mass": [
+    -22.765885984015426,
+    30.500108363236393,
+    0
+  ],
+  "bbox": {
+    "min": [
+      -300,
+      -200,
+      -10
+    ],
+    "max": [
+      110,
+      110,
+      10
+    ]
+  }
+}

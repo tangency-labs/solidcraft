@@ -58,6 +58,7 @@ pub mod component;
 pub mod construct;
 pub mod edit;
 pub mod features;
+pub mod frame;
 pub mod inspect;
 pub mod print_face;
 pub mod render;

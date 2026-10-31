@@ -91,7 +91,6 @@ file.save
 file.save_as
 file.save_mesh
 file.slicers
-frame.member
 frame.profile.insert
 frame.profile.list
 frame.profile.properties
