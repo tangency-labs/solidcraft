@@ -114,10 +114,10 @@ mod tests {
     }
 
     #[test]
-    fn navigation_preference_keeps_applied_tool_badge_after_restart() {
+    fn tools_preference_keeps_applied_tool_badge_after_restart() {
         let mut h = Harness::new();
         h.app.home.open = false;
-        h.call("ui.prefs", json!({"open":"Navigation"}));
+        h.call("ui.prefs", json!({"open":"Tools"}));
         h.frames(4);
         crate::prefs::reveal_preference(&mut h, "view:tool_cursor");
         h.step(&json!({"click":{"handle":"view:tool_cursor"}})).unwrap();
@@ -129,7 +129,7 @@ mod tests {
         assert!(restarted.ui.tool_cursor, "an explicitly enabled tool badge survives a restart");
 
         // Turning it off must replace a previously saved true value too.
-        h.call("ui.prefs", json!({"open":"Navigation"}));
+        h.call("ui.prefs", json!({"open":"Tools"}));
         h.frames(4);
         crate::prefs::reveal_preference(&mut h, "view:tool_cursor");
         h.step(&json!({"click":{"handle":"view:tool_cursor"}})).unwrap();
@@ -140,11 +140,11 @@ mod tests {
     }
 
     #[test]
-    fn navigation_preference_does_not_save_unapplied_tool_badge_changes() {
+    fn tools_preference_does_not_save_unapplied_tool_badge_changes() {
         let mut h = Harness::new();
         h.app.home.open = false;
         let saved = |h: &Harness| serde_json::from_str::<serde_json::Value>(&h.app.prefs()).unwrap()["tool_cursor"].clone();
-        h.call("ui.prefs", json!({"open":"Navigation"}));
+        h.call("ui.prefs", json!({"open":"Tools"}));
         h.frames(4);
         crate::prefs::reveal_preference(&mut h, "view:tool_cursor");
         h.step(&json!({"click":{"handle":"view:tool_cursor"}})).unwrap();
