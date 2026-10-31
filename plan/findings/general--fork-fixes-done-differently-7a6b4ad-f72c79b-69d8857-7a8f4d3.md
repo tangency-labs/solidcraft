@@ -1,0 +1,16 @@
+# general: four SolidCraft fork fixes our flags make differently (7a6b4ad, f72c79b, 69d8857, 7a8f4d3) (2026-10-31)
+
+- **What.** A bit-for-bit check of the fork commits that solidcore covers without citing their sha found four tangency-labs/smlib commits whose defect an existing solidcore opt-in also fixes, but by a rule of its own: "fixed differently", not "covered". On a flag SolidCraft ships, the 2026-10-29 memo wants the fork's behaviour, so these are open questions for SolidCraft rather than port bugs. No case is known where SolidCraft's result differs; none has been probed.
+- **7a6b4ad** (CheckLoop: a seam edge use with no UV trim is not read as a seam jump) vs `check_loop_projected_seam_ends` (WR-440, #530), `topology/trimming_tools.rs`:
+  - Fork: before the `> 1e-10` UV test, whenever either edge use lacks a trim on a closed direction, `current_start` is shifted by whole periods toward `previous_end` (`floor(Δ / p + 0.5)`). The shifted point is what the 3D evaluation and the later tests use.
+  - Ours: the lift is for the UV gap test only, past a 10% gap. It moves whichever end lacks its trim, uses `round()`, and evaluates 3D at the original parameters.
+- **f72c79b** (CheckLoop: each edge end against the vertex the edges meet at) vs `check_loop_vertex_tolerance` (WR-381, #476), `topology/trimming_tools.rs`:
+  - Fork: each lifted end is tested against the vertex point within `GetXSectTol3d(edge, vertex)`, with two reports and `bClosed3d`, and a new label and message. The edge/edge tolerance remains only for the UV subpatch test.
+  - Ours: the edge/edge end gap stays, its limit enlarged to `max(edge/edge, zone_tol3d(vertex tolerance))` at a shared vertex.
+- **69d8857** (a draft extrusion's corner pivots round its own joint) vs `taper_pivot_nearest_corner` (WR-402, #479), `primitive/primitive_creation/p3/ruled.rs`:
+  - Fork (`sm_FindPivotPoint` with the corner curve): of every coincident end pair, in i-then-j order, the end nearest the corner offset curve's **midpoint**; else curve 2's end.
+  - Ours: of the joints, the one with the least distance to the corner curve's start plus its end. It iterates in a different order, and falls back to upstream's pick unless there are at least 2 joints.
+- **7a8f4d3** (a full-turn revolution nests the shells it leaves inside one another) vs `revolve_nested_shells_as_cavities` (WR-442, #478), `topology/brep/p6.rs`:
+  - Fork (`sm_NestRevolvedShells`): for every pair of the infinite region's closed shells, a ray `(1.23456, 2.34567, 3.45678)` from a vertex of one at the other's mate. It nests to any depth (parent = the containing shell one level up), swaps UV on odd depths, then calls `SetRegionIsVoidFlagsForNestedSolids`.
+  - Ours: a ray `(1, 1, 1)` from an offset shell point. It nests one level only (a candidate inside exactly one other that is inside none); deeper nesting is left as built. It sets the void flag and swaps the faces itself.
+- **Status.** All four flags are in SolidCraft's preset (#8526 core.rs 0b627d63). They are kept as they are, pending SolidCraft's answer to the question asked on SolidCraft #8526 (comment 6548297899, 2026-10-31). A "yes" for any of them means reworking that flag's body to the fork's rule, keeping its name, with a WR addendum citing the sha.
