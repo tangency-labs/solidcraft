@@ -199,8 +199,7 @@ fn too_large_or_unsupported_is_refused() {
     // Across the whole top: the cone would end in a point.
     assert!(chamfer_sides(&c, &[RIM], 10.0, ChamferSide::Distance(3.0), false).is_err());
     assert!(chamfer_sides(&c, &[RIM], 12.0, ChamferSide::Distance(3.0), false).is_err());
-    // Down past the bottom.
-    assert!(chamfer_sides(&c, &[RIM], 2.0, ChamferSide::Distance(25.0), false).is_err());
+    // (Down past the bottom is cut through it: `chamfer_through_tests`.)
     // An angle that runs past the wall.
     assert!(chamfer_sides(&c, &[RIM], 2.0, ChamferSide::Angle(PI / 2.0 + 0.01), false).is_err());
     // A cylinder's seam is smooth: nothing to chamfer.

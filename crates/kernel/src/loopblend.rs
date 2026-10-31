@@ -230,6 +230,329 @@ fn face_normal(f: &mt::Face, p: Vec3) -> Option<Vec3> {
     Vec3::new(n.x, n.y, n.z).normalized()
 }
 
+/// Whether an unequal chamfer's first side is the planar face (outward normal `n`) rather than
+/// its walls. As for a straight edge, that is the side facing up most (a curved wall by its mean
+/// normal along each edge, `pairs` being each loop edge with its wall), the other with `flip`;
+/// it must be the same all round the loop.
+fn face_is_first(n: Vec3, pairs: &[(&mt::Edge, &mt::Face)], flip: bool) -> Result<bool> {
+    use mt::{BoundedCurve, ParametricCurve};
+    let up = Vec3::new(1e-6, 1e-3, 1.0);
+    let face_up = n.dot(up);
+    let mut first: Option<bool> = None;
+    for (e, g) in pairs {
+        let c = e.curve();
+        let (t0, t1) = c.range_tuple();
+        let ups: Vec<f64> =
+            (0..=8).filter_map(|j| face_normal(g, from_p3(c.subs(t0 + (t1 - t0) * f64::from(j) / 8.0))).map(|gn| gn.dot(up))).collect();
+        if ups.is_empty() {
+            return Err(unsupported("wall normal"));
+        }
+        let wall_up = ups.iter().sum::<f64>() / ups.len() as f64;
+        let mine = (face_up >= wall_up) != flip;
+        if first.is_some_and(|x| x != mine) {
+            return Err(unsupported(
+                "an unequal chamfer round a loop whose first face changes along it (the face faces up more than some walls and less than others)",
+            ));
+        }
+        first = Some(mine);
+    }
+    Ok(first.unwrap_or(true))
+}
+
+/// The setbacks on the face and up the wall where they meet at `phi`: a round's of radius `r`
+/// (`round`), an equal chamfer's `r`, or an unequal chamfer's `r` on its first side (the face when
+/// `face_first`) and the second by `side`. `None` where an angle runs past the other face.
+fn setbacks(r: f64, phi: f64, round: bool, side: Option<ChamferSide>, face_first: bool) -> Option<(f64, f64)> {
+    let Some(cs) = side else {
+        let sb = if round { r / (phi / 2.0).tan() } else { r };
+        return Some((sb, sb));
+    };
+    let d2 = match cs {
+        ChamferSide::Distance(d) => d,
+        // The triangle edge–A–B: angle φ at the edge, `a` at A (on the first side).
+        ChamferSide::Angle(a) => {
+            let den = (phi + a).sin();
+            if den <= 1e-9 {
+                return None;
+            }
+            r * a.sin() / den
+        }
+    };
+    Some(if face_first { (r, d2) } else { (d2, r) })
+}
+
+/// A point a fraction `u` of the way along a loop piece.
+fn along(s: &Seg, u: f64) -> Vec3 {
+    match *s {
+        Seg::Line { a, b } => a + (b - a) * u,
+        Seg::Arc { a, c, axis, angle, .. } => turn(a, c, axis, angle * u),
+    }
+}
+
+/// The pieces of a loop of the face with outward normal `n` as one whole circle about that
+/// normal: its centre and radius.
+fn full_circle(segs: &[Seg], n: Vec3, tol: f64) -> Option<(Vec3, f64)> {
+    let Some(Seg::Arc { a: a0, c, .. }) = segs.first().copied() else { return None };
+    let radius = a0.dist(c);
+    let mut turned = 0.0;
+    for s in segs {
+        let Seg::Arc { a, c: ci, axis, angle, .. } = *s else { return None };
+        if ci.dist(c) > tol * 10.0 || (a.dist(ci) - radius).abs() > tol * 10.0 || axis.dot(n).abs() < 1.0 - 1e-9 {
+            return None;
+        }
+        turned += angle;
+    }
+    ((turned - std::f64::consts::TAU).abs() <= 1e-6 && radius > tol).then_some((c, radius))
+}
+
+/// Round a whole circle (`c`, `radius`) bounding the face `f` (its loop `rim`, edges `rim_ids`)
+/// with walls turning about the face's normal `n`, from the point `p` of it with the directions
+/// into the face and along the wall `into` and `up`: how far the face and the walls reach from
+/// the rim before other boundaries ([`crate::chamfer_through::face_clearance`], `wall_clearance`).
+#[allow(clippy::too_many_arguments)]
+fn circle_clearances(
+    f: &mt::Face,
+    rim: usize,
+    rim_ids: &[mt::EdgeID],
+    walls: &[&mt::Face],
+    (c, radius): (Vec3, f64),
+    n: Vec3,
+    (p, into, up): (Vec3, Vec3, Vec3),
+    tol: f64,
+) -> Option<(Option<crate::chamfer_through::Exit>, Option<crate::chamfer_through::Exit>)> {
+    use crate::chamfer_through::{face_clearance, wall_clearance};
+    let outward = into.dot(p - c) > 0.0;
+    Some((face_clearance(f, rim, c, radius, outward, tol)?, wall_clearance(walls, rim_ids, c, n, p, up, tol)?))
+}
+
+/// [`build`]'s check that a chamfer's setbacks lie on the face `f` and on the walls (`wall_of`
+/// each piece) all along the loop `rim` of `f` (edges `rim_ids`): the setback into the face and
+/// up its wall (`frame`) must not leave the face or the wall. A whole circle with walls turning
+/// about its axis is checked exactly, from how far the face and walls reach from it; other loops
+/// at points along each piece. A setback that ends exactly on the far boundary (a chamfer using
+/// up the walls) fits.
+#[allow(clippy::too_many_arguments)]
+fn setbacks_fit<'a>(
+    f: &mt::Face,
+    rim: usize,
+    rim_ids: &[mt::EdgeID],
+    n: Vec3,
+    segs: &[Seg],
+    wall_of: &dyn Fn(usize) -> Option<&'a mt::Face>,
+    frame: &dyn Fn(usize, Vec3) -> Option<(Vec3, Vec3, f64, f64, f64)>,
+    size: f64,
+) -> Result<()> {
+    use crate::chamfer_through::{face_exit, wall_exit};
+    let tol = (size * 1e-7).max(4e-6);
+    // Shortened a little: ending on a far boundary is not leaving the face.
+    let short = (size * 2e-5).max(tol * 10.0);
+    // The loop's own edges near a point on it: within the fit of its pieces ([`seg_of`]).
+    let near = (size * 1e-4).max(tol * 10.0);
+    let past_face = || too_large("the chamfer runs past the face beside the edge");
+    let past_walls = || too_large("the blend is taller than the walls");
+    if let Some(circle) = full_circle(segs, n, tol) {
+        // The frame in (radial, axial) parts at points all round; the same everywhere when the
+        // walls turn about the axis.
+        let mut parts = Vec::new();
+        for (i, s) in segs.iter().enumerate() {
+            for j in 0..4 {
+                let p = along(s, (f64::from(j) + 0.5) / 4.0);
+                let (Some((m, t, sf, sw, _)), Some(e)) = (frame(i, p), (p - circle.0).normalized()) else { continue };
+                parts.push((p, m, t, sf, sw, [m.dot(e), m.dot(n), t.dot(e), t.dot(n), sf, sw]));
+            }
+        }
+        let turning = parts.windows(2).all(|w| match w {
+            [a, b] => a.5.iter().zip(&b.5).all(|(x, y)| (x - y).abs() <= 1e-6 * (1.0 + x.abs())),
+            _ => true,
+        });
+        let mut walls: Vec<&mt::Face> = Vec::new();
+        for i in 0..segs.len() {
+            if let Some(g) = wall_of(i)
+                && !walls.iter().any(|x| std::ptr::eq(*x, g))
+            {
+                walls.push(g);
+            }
+        }
+        if turning && let Some(&(p, m, t, sf, sw, _)) = parts.first() {
+            let Some((face, wall)) = circle_clearances(f, rim, rim_ids, &walls, circle, n, (p, m, t), tol) else { return Ok(()) };
+            if face.is_some_and(|x| sf - short >= x.at) {
+                return Err(past_face());
+            }
+            if wall.is_some_and(|x| sw - short >= x.at) {
+                return Err(past_walls());
+            }
+            return Ok(());
+        }
+    }
+    for (i, s) in segs.iter().enumerate() {
+        let wall = wall_of(i).ok_or_else(|| KernelError::Failed("wall".into()))?;
+        for j in 0..16 {
+            let p = along(s, (f64::from(j) + 0.5) / 16.0);
+            let Some((m, t, sf, sw, _)) = frame(i, p) else { continue };
+            if sf > short && face_exit(f, p, p + m * (sf - short), tol, near).is_some_and(|x| x.is_some()) {
+                return Err(past_face());
+            }
+            let up = match *s {
+                _ if plane_normal(wall).is_some() => face_exit(wall, p, p + t * (sw - short), tol, near),
+                Seg::Arc { c, axis, .. } => wall_exit(wall, c, axis, p, t, sw - short, tol, near),
+                // A curved wall along a line: as before, the seams at the joints tell.
+                Seg::Line { .. } => Some(None),
+            };
+            if sw > short && up.is_some_and(|x| x.is_some()) {
+                return Err(past_walls());
+            }
+        }
+    }
+    Ok(())
+}
+
+/// A whole circular loop of a planar face chamfered: what a cut through the faces the chamfer
+/// reaches needs ([`crate::chamfer_through`]). In the half-plane through the axis, points are
+/// (distance from the axis, height along it).
+pub(crate) struct Rim {
+    /// The circle's centre and the face's outward normal (the axis).
+    pub(crate) centre: Vec3,
+    pub(crate) axis: Vec3,
+    pub(crate) radius: f64,
+    /// Into the face and up (or down) the wall from the rim, unit, as (radial, axial) parts.
+    pub(crate) m: (f64, f64),
+    pub(crate) t: (f64, f64),
+    /// The setbacks into the face and along the wall.
+    pub(crate) sf: f64,
+    pub(crate) sw: f64,
+    /// The chamfer takes material away (a hole's rim, a cylinder's).
+    pub(crate) convex: bool,
+    /// Where the setbacks end.
+    pub(crate) reach: crate::chamfer_through::Reach,
+    /// One of the loop's edges, for the history.
+    pub(crate) edge: mt::EdgeID,
+    /// The walls (indices in the solid's face order).
+    pub(crate) walls: Vec<usize>,
+    /// The chamfer runs exactly to the walls' far end, all round (where it meets a planar face).
+    pub(crate) used_up: bool,
+}
+
+/// [`Rim`] for a chamfer of `d1` (and the second side by `side`, the first face chosen as for
+/// [`loop_chamfer_sides`]) of `edge_ids`, when they are a whole circle bounding a planar face whose
+/// walls turn about its axis (a cylinder or cone). `None` for other edges.
+pub(crate) fn rim(solid: &Solid, edge_ids: &[mt::EdgeID], size: f64, d1: f64, side: Option<(ChamferSide, bool)>) -> Option<Result<Rim>> {
+    let found = crate::guard("rim chamfer", || {
+        let all: Vec<&mt::Face> = solid.face_iter().collect();
+        let index_of = |g: &mt::Face| all.iter().position(|x| std::ptr::eq(*x, g));
+        for shell in solid.boundaries() {
+            let faces: Vec<&mt::Face> = shell.face_iter().collect();
+            for f in &faces {
+                let Some(n) = plane_normal(f) else { continue };
+                for (wi, w) in f.boundaries().iter().enumerate() {
+                    let ids: Vec<mt::EdgeID> = w.edge_iter().map(|e| e.id()).collect();
+                    if ids.len() == edge_ids.len() && edge_ids.iter().all(|e| ids.contains(e)) {
+                        return Ok(rim_of(&faces, &index_of, f, (wi, w), n, size, d1, side));
+                    }
+                }
+            }
+        }
+        Ok(None)
+    });
+    match found {
+        Ok(x) => x,
+        Err(e) => Some(Err(e)),
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn rim_of(
+    faces: &[&mt::Face],
+    index_of: &dyn Fn(&mt::Face) -> Option<usize>,
+    f: &mt::Face,
+    (wi, w): (usize, &mt::Wire),
+    n: Vec3,
+    size: f64,
+    d1: f64,
+    side: Option<(ChamferSide, bool)>,
+) -> Option<Result<Rim>> {
+    use crate::chamfer_through::{Reach, coaxial_circle, outer_loop};
+    let edges: Vec<mt::Edge> = w.edge_iter().cloned().collect();
+    let segs: Vec<Seg> = edges.iter().map(|e| seg_of(e, (size * 1e-5).max(1e-6))).collect::<Option<_>>()?;
+    // One circle: arcs about one centre and axis (the face's normal), of one radius, all round.
+    let (c, radius) = full_circle(&segs, n, (size * 1e-6).max(1e-7))?;
+    // Each edge's wall, and the frame round the circle: into the face, along the wall.
+    let mut pairs: Vec<(&mt::Edge, &mt::Face)> = Vec::new();
+    for e in &edges {
+        let g = faces.iter().find(|g| !std::ptr::eq(**g, f) && g.edge_iter().any(|x| x.id() == e.id()))?;
+        pairs.push((e, *g));
+    }
+    let face_first = match side {
+        None => true,
+        Some((_, flip)) => match face_is_first(n, &pairs, flip) {
+            Ok(x) => x,
+            Err(e) => return Some(Err(e)),
+        },
+    };
+    // At points round the circle: (radial, axial) parts of into-the-face and along-the-wall, and
+    // whether the chamfer takes material away; the same everywhere for walls turning about the axis.
+    let mut frames = Vec::new();
+    for (s, (_, g)) in segs.iter().zip(&pairs) {
+        for j in 0..4 {
+            let p = along(s, (f64::from(j) + 0.5) / 4.0);
+            let tangent = s.tangent(p)?;
+            let e = (p - c).normalized()?;
+            let m = n.cross(tangent);
+            let gn = face_normal(g, p)?;
+            let convex = gn.dot(m) < 0.0;
+            let mut t = tangent.cross(gn).normalized()?;
+            // Away from the face: down a convex wall, up a concave one.
+            if t.dot(n) * if convex { -1.0 } else { 1.0 } < 0.0 {
+                t = -t;
+            }
+            frames.push((p, (m.dot(e), m.dot(n)), (t.dot(e), t.dot(n)), convex));
+        }
+    }
+    let &(p, m, t, convex) = frames.first()?;
+    let same = |a: (f64, f64), b: (f64, f64)| (a.0 - b.0).abs() < 1e-6 && (a.1 - b.1).abs() < 1e-6;
+    if !frames.iter().all(|x| same(x.1, m) && same(x.2, t) && x.3 == convex) {
+        return None;
+    }
+    let phi = (m.0 * t.0 + m.1 * t.1).clamp(-1.0, 1.0).acos();
+    if !(phi > 1e-3 && phi < std::f64::consts::PI - 1e-3) {
+        return None;
+    }
+    let Some((sf, sw)) = setbacks(d1, phi, false, side.map(|x| x.0), face_first) else {
+        return Some(Err(KernelError::Invalid("that chamfer angle runs past the other face".into())));
+    };
+    // Where the setbacks end: within the face and the walls; past the face's outer boundary (or
+    // a coaxial circle in it: a tube's bore) or the walls' far end where they meet a planar face
+    // (the plate's other side); or into other geometry.
+    let tol = (size * 1e-7).max(4e-6);
+    let e = (p - c).normalized()?;
+    let (into, up) = (e * m.0 + n * m.1, e * t.0 + n * t.1);
+    let rim_ids: Vec<mt::EdgeID> = edges.iter().map(|x| x.id()).collect();
+    let mut walls: Vec<&mt::Face> = Vec::new();
+    for (_, g) in &pairs {
+        if !walls.iter().any(|x| std::ptr::eq(*x, *g)) {
+            walls.push(g);
+        }
+    }
+    let (on_face, on_wall) = circle_clearances(f, wi, &rim_ids, &walls, (c, radius), n, (p, into, up), tol)?;
+    let mut reach = Reach::Within;
+    // As the exact chamfer takes a blend using up its walls.
+    let close = (size * 1e-6).max(1e-7) * 10.0;
+    let mut used_up = false;
+    if let Some(x) = on_face.filter(|x| sf + tol >= x.at) {
+        let open = Some(x.wire) == outer_loop(f) || coaxial_circle(f, x.wire, c, n, tol * 10.0);
+        reach = reach.max(if open { Reach::Past } else { Reach::Blocked });
+    }
+    if let Some(x) = on_wall.filter(|x| sw + tol >= x.at) {
+        let across = faces.iter().find(|h| !walls.iter().any(|g| std::ptr::eq(**h, *g)) && h.edge_iter().any(|y| y.id() == x.edge));
+        let planar = across.and_then(|h| plane_normal(h));
+        reach = reach.max(if planar.is_some() { Reach::Past } else { Reach::Blocked });
+        // Square to the axis, all at one distance, and the chamfer ends there.
+        used_up = planar.is_some_and(|q| q.dot(n).abs() > 1.0 - 1e-9) && (x.far - x.at) <= close && (sw - x.at).abs() <= close;
+    }
+    let edge = edges.first()?.id();
+    let walls = walls.iter().map(|g| index_of(g)).collect::<Option<Vec<usize>>>()?;
+    Some(Ok(Rim { centre: c, axis: n, radius, m, t, sf, sw, convex, reach, edge, walls, used_up }))
+}
+
 /// Blend `edges` (by id) if they form a boundary loop or neighbouring run of a planar face with
 /// perpendicular walls, with what it built from `solid` (each blend face in place of its loop
 /// edge). `None` when the edges are not such a loop.
@@ -419,16 +742,11 @@ fn build(
         let t = s.tangent(p)?.cross(gn).normalized()?;
         Some(if t.dot(n * side) < 0.0 { -t } else { t })
     };
-    // An unequal chamfer: whether its first side is the planar face (else the walls). As for a
-    // straight edge, that is the one facing up most (a curved wall by its mean normal along each
-    // edge), the other with `flip`; it must be the same all round the loop.
+    // An unequal chamfer: whether its first side is the planar face (else the walls).
     let face_first = match sides {
         None => true,
         Some((_, flip)) => {
-            use mt::{BoundedCurve, ParametricCurve};
-            let up = Vec3::new(1e-6, 1e-3, 1.0);
-            let face_up = n.dot(up);
-            let mut first: Option<bool> = None;
+            let mut pairs: Vec<(&mt::Edge, &mt::Face)> = Vec::new();
             for (pi, oi) in owner.iter().enumerate() {
                 if pi > 0 && owner.get(pi - 1) == Some(oi) {
                     continue;
@@ -436,23 +754,9 @@ fn build(
                 let (Some(e), Some(g)) = (edges.get(*oi), walls.get(pi).and_then(|w| faces.get(*w))) else {
                     return Err(KernelError::Failed("loop edge".into()));
                 };
-                let c = e.curve();
-                let (t0, t1) = c.range_tuple();
-                let ups: Vec<f64> =
-                    (0..=8).filter_map(|j| face_normal(g, from_p3(c.subs(t0 + (t1 - t0) * f64::from(j) / 8.0))).map(|gn| gn.dot(up))).collect();
-                if ups.is_empty() {
-                    return Err(unsupported("wall normal"));
-                }
-                let wall_up = ups.iter().sum::<f64>() / ups.len() as f64;
-                let mine = (face_up >= wall_up) != flip;
-                if first.is_some_and(|x| x != mine) {
-                    return Err(unsupported(
-                        "an unequal chamfer round a loop whose first face changes along it (the face faces up more than some walls and less than others)",
-                    ));
-                }
-                first = Some(mine);
+                pairs.push((e, *g));
             }
-            first.unwrap_or(true)
+            face_is_first(n, &pairs, flip)?
         }
     };
     // Into the face (m), up the wall (t), the setbacks along each and the distance from the edge
@@ -464,26 +768,7 @@ fn build(
         if !(phi > 1e-3 && phi < std::f64::consts::PI - 1e-3) {
             return None;
         }
-        let (sf, sw) = match sides {
-            None => {
-                let sb = if round { r / (phi / 2.0).tan() } else { r };
-                (sb, sb)
-            }
-            Some((cs, _)) => {
-                let d2 = match cs {
-                    ChamferSide::Distance(d) => d,
-                    // The triangle edge–A–B: angle φ at the edge, `a` at A (on the first side).
-                    ChamferSide::Angle(a) => {
-                        let den = (phi + a).sin();
-                        if den <= 1e-9 {
-                            return None;
-                        }
-                        r * a.sin() / den
-                    }
-                };
-                if face_first { (r, d2) } else { (d2, r) }
-            }
-        };
+        let (sf, sw) = setbacks(r, phi, round, sides.map(|x| x.0), face_first)?;
         Some((m, t, sf, sw, r / (phi / 2.0).sin()))
     };
     if let Some((ChamferSide::Angle(a), _)) = sides {
@@ -495,6 +780,15 @@ fn build(
                 return Err(KernelError::Invalid("that chamfer angle runs past the other face".into()));
             }
         }
+    }
+    // A chamfer's setbacks must stay on the face and on the walls all along the loop. Past the
+    // face's other boundaries (a hole's chamfer wider than the plate round it) or the walls' far
+    // ends, the faces built here would stick out of the body: too large. A convex chamfer is then
+    // cut through the faces it reaches instead ([`crate::chamfer_through`]).
+    if !round {
+        let wall_of = |i: usize| walls.get(i).and_then(|w| faces.get(*w)).copied();
+        let rim_ids: Vec<mt::EdgeID> = edges.iter().map(|e| e.id()).collect();
+        setbacks_fit(f, wi, &rim_ids, n, &segs, &wall_of, &frame, size)?;
     }
     // The straight seam between the walls at a sharp joint (direction away from the face).
     let seam_dir = |i: usize, p: Vec3| -> Option<Vec3> {
