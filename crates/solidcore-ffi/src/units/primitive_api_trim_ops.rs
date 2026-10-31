@@ -32,6 +32,10 @@
 //! parallel call carries a second `curve direction(3) reference(3) trim_type` and records
 //! the first call's status, then on success the record of the second call, which trims
 //! the first call's result.
+//!
+//! [`run`] refuses a trim-with-3D-curves surface with a coordinate above
+//! [`MAX_TRIM_SURFACE_COORD`] (HANG-29: building the trimmed face's UV trim curves never
+//! returns upstream; nightly fuzz00254).
 
 use crate::validate::bad;
 use crate::{call_with_buffer, FfiError};
@@ -54,6 +58,29 @@ pub const MAX_POINTS: usize = 4096;
 pub const MAX_COUNT: u64 = 1 << 40;
 /// Most curve specs or loops of one call.
 pub const MAX_ITEMS: usize = 64;
+/// Largest coordinate magnitude of the surface `SmApiTrimSurfaceWith3dCurves` trims.
+///
+/// HANG-29: `SmTrimmingTools::CreateUVTrimCurves` -> `SmEdgeuse::CreateUVTrimCurve` ->
+/// `SmSurfaceDropCurve::FindBoundaryStartPoints` -> `SmCurve::GlobalCoincidenceChecker`
+/// splits the face boundary forever once squared distances overflow. On the nightly
+/// fuzz00254 net (4 x 4, one control point lifted to `z = -10`), a control point of
+/// `y = 1e154` returns in 6 s and `1e155`, `1e200`, `1e300` give no result in 15 s; the
+/// same `1e300` on the flat net returns at once, and `1e150` takes 0.1 s. The bound is
+/// that of the other HANG-29 guards (`topology_edgeuse_p2::MAX_BLOCK_MAGNITUDE`).
+pub const MAX_TRIM_SURFACE_COORD: f64 = 1.0e150;
+
+/// Refuses a trimmed surface with a coordinate above [`MAX_TRIM_SURFACE_COORD`].
+fn check_trim_surface(s: &InSurface) -> Result<(), FfiError> {
+    let huge = |p: &[f64; 3]| p.iter().any(|v| v.abs() > MAX_TRIM_SURFACE_COORD);
+    let any_huge = match s {
+        InSurface::Net { points, .. } => points.iter().any(huge),
+        InSurface::Corners { corners } => corners.iter().any(huge),
+    };
+    if any_huge {
+        return Err(bad("trimmed surface coordinate above 1e150 (HANG-29)"));
+    }
+    Ok(())
+}
 
 /// One input surface, made by an `SM_API` constructor.
 #[derive(Debug, Clone, PartialEq)]
@@ -329,6 +356,7 @@ fn encode(call: &Call) -> Result<Vec<f64>, FfiError> {
             if loops.iter().sum::<u64>() > made {
                 return Err(bad("unsupported loop-count input"));
             }
+            check_trim_surface(surface)?;
             o.push(1.0);
             put_surface(&mut o, surface)?;
             o.push(loops.len() as f64);
@@ -392,6 +420,16 @@ fn encode(call: &Call) -> Result<Vec<f64>, FfiError> {
     Ok(o)
 }
 
+/// The input checks of [`run`] alone, without a native call (the difftest runner's
+/// Rust side refuses what the C++ side refuses).
+///
+/// # Errors
+///
+/// [`FfiError::InvalidArgument`] for input [`run`] refuses.
+pub fn validate(call: &Call) -> Result<(), FfiError> {
+    encode(call).map(|_| ())
+}
+
 /// Runs one API call; returns the record described in the module docs.
 ///
 /// # Errors
@@ -438,6 +476,39 @@ mod tests {
         assert!(encode(&call(vec![4])).is_ok());
         assert!(encode(&call(vec![3])).is_ok());
         assert!(encode(&call(vec![4, 1])).is_err());
+    }
+
+    /// HANG-29 (nightly fuzz00254): a trimmed surface coordinate above 1e150 is
+    /// refused; the same net at the bound, and a huge trimming curve, are not.
+    #[test]
+    fn huge_trimmed_surface_is_refused() {
+        let net = |y: f64| InSurface::Net {
+            rows: 2,
+            columns: 2,
+            points: vec![[0.0, 0.0, 0.0], [0.0, 1.0, -10.0], [1.0, y, 0.0], [1.0, 1.0, 0.0]],
+        };
+        let circle = |radius: f64| InCurve::Circle {
+            center: [0.5, 0.5, 0.0],
+            radius,
+        };
+        let call = |surface: InSurface, radius: f64| Call::Trim3d {
+            surface,
+            loops: vec![1],
+            curves: vec![circle(radius)],
+        };
+        for y in [1e155, -1e300, f64::MAX] {
+            let e = encode(&call(net(y), 0.25)).unwrap_err();
+            assert_eq!(
+                e.to_string(),
+                "invalid argument: trimmed surface coordinate above 1e150 (HANG-29)"
+            );
+        }
+        let corners = InSurface::Corners {
+            corners: [[0.0; 3], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [1.0, 1.0, -1e300]],
+        };
+        assert!(encode(&call(corners, 0.25)).is_err());
+        assert!(encode(&call(net(1e150), 0.25)).is_ok());
+        assert!(encode(&call(net(0.0), 1e300)).is_ok());
     }
 
     #[test]

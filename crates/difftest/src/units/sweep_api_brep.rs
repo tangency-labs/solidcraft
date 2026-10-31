@@ -601,6 +601,16 @@ fn success(s: &Swept) -> Output {
 }
 
 fn rust(i: &Inputs) -> Result<Output, HarnessError> {
+    // an input the FFI refuses is a harness error on both sides: the curve sweeps'
+    // path polygonization does not return upstream for a huge curved path (HANG-5 /
+    // HANG-43, nightly fuzz00293), so the Rust port does not run it either
+    if let Inputs::CurveSweep { sweep, .. }
+    | Inputs::FromFaces { sweep, .. }
+    | Inputs::FromEdges { sweep, .. }
+    | Inputs::FromBoxFace { sweep, .. } = i
+    {
+        ffi::check_path_extent(&spec(&sweep.path)).map_err(|e| harness(e.to_string()))?;
+    }
     let mut k = Kernel::default();
     let v = |p: &P3| Vec3::new(p[0], p[1], p[2]);
     // A successful call is compared by its status, presence and counts; a path that
@@ -1472,6 +1482,49 @@ impl UnitDiff for Runner {
 mod tests {
     use super::*;
     use std::collections::BTreeMap;
+
+    /// The nightly fuzz00293 input (run 41040730716, HANG-43): a disc swept along a
+    /// four-point path whose third point is at `z`.
+    fn from_faces(z: f64) -> Inputs {
+        serde_json::from_value(serde_json::json!({
+            "op": "from_faces",
+            "circles": [[[0.0, 0.0, 0.0], 2.388303630595588]],
+            "sweep": {
+                "options": null,
+                "path": {"kind": "curve", "points": [
+                    [0.0, 0.0, 0.0],
+                    [2.8458631679264377, 0.0, 5.636683100796663],
+                    [3.0752528636317265, 0.0, z],
+                    [0.4772692587692055, 0.0, 16.91004930238999]
+                ]},
+                "scale_curve": {"kind": "line", "start": [2.4410083596487024, 0.0, 0.0],
+                                "end": [4.882016719297405, 0.0, 12.205041798243512]},
+                "scale_reference": {"kind": "curve", "points": [
+                    [0.0, 0.0, 0.0], [0.0, 0.0, 4.140555904167603],
+                    [0.0, 0.0, 8.281111808335206], [0.0, 0.0, 12.42166771250281]
+                ]}
+            }
+        }))
+        .unwrap()
+    }
+
+    /// HANG-5 / HANG-43: the C++ path polygonization never returns for a path point of
+    /// `1e300`; both sides refuse it with the same message. The path at `1e7` (inside
+    /// the bound) still runs on both sides and agrees.
+    #[test]
+    fn huge_curve_sweep_path_is_refused_on_both_sides() {
+        let i = from_faces(1e300);
+        let c = cpp(&i).unwrap_err().to_string();
+        let r = rust(&i).unwrap_err().to_string();
+        assert!(c.contains("HANG-5"), "{c}");
+        assert_eq!(c, r);
+
+        let i = from_faces(1e7);
+        let (c, r) = (cpp(&i).unwrap(), rust(&i).unwrap());
+        assert!(r.deferred.is_none(), "{:?}", r.deferred);
+        let d = crate::compare(&c, &r, Runner.abs_floors());
+        assert!(d.mismatches.is_empty(), "{:?}", d.mismatches);
+    }
 
     /// Golden stream executed against the pre-observer runner at 11595407bedc.
     /// Includes each next RNG draw, not only serialized case identities.

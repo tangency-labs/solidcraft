@@ -77,6 +77,12 @@
 //! - `CurveSweep` whose profile holds no B-spline curve (only `Null` / `Hermite`
 //!   entries, which `CreateCurveSweep` skips) crashes on `sNurbs[0]` unless the options
 //!   move the profile center to the path.
+//!
+//! One hang is fenced off as well (HANG-5): the curve sweeps (`CurveSweep`,
+//! `FromFaces`, `FromEdges`, `FromBoxFace` and the attributed ops) polygonize the path
+//! in `N_CreateSweepScale` to the fixed `SM_ZONE_TOL_3D / 2`, which does not return
+//! for a path much larger than that tolerance, so a curved path (any kind but
+//! `LineSegment`) whose extent exceeds [`MAX_PATH_EXTENT`] is rejected.
 
 use crate::validate::bad;
 use crate::{call_with_buffer, FfiError};
@@ -94,6 +100,21 @@ pub const MAX_DISCS: usize = 16;
 pub const MAX_REPETITIONS: u64 = 1 << 20;
 /// Smallest profile curve extent accepted by `Draft` / `Taper` (`2 * SM_ZONE_TOL_3D`).
 pub const MIN_TAPER_EXTENT: f64 = 2.0e-5;
+/// Largest extent of a curved curve-sweep path (see [`extent`]; a `LineSegment` path,
+/// degree 1, is not polygonized and takes any size).
+///
+/// HANG-5: `SmPrimitiveCreation::CreateCurveSweep` -> `SmBSplineSurface::CreateSweepSurface`
+/// -> `N_CreateSweepScale` approximates the path by a polyline within `SM_ZONE_TOL_3D / 2`
+/// (`N_ApproxCrvWithPolyline`, growing its arrays by 150 points per reallocation), and
+/// only relaxes the tolerance after a pass returns. A path whose size dwarfs that
+/// tolerance keeps the first pass going: on the nightly fuzz00293 input (`FromFaces`,
+/// a four-point path with one point at `z = 1e300`) it gives no result in 30 s, as with
+/// that point at `1e40`, `1e50`, `1e80`, `1e140`..`1e300` (`1e11`..`1e30` and `1e120`
+/// return in 0.02-5 s; the spike's chord deviation is lost below the coordinates'
+/// rounding). A quarter-arc path of radius `1e5` returns in 0.2 s, `1e6` in 3 s,
+/// `1e7` in 14 s, and `1e8`..`5e11` give no result in 25-30 s. The bound keeps every
+/// fixture and generated path (at most about `1e7`).
+pub const MAX_PATH_EXTENT: f64 = 1.0e8;
 
 mod sys {
     extern "C" {
@@ -452,6 +473,7 @@ fn push_sweep_args(o: &mut Vec<f64>, a: &SweepArgs) -> Result<(), FfiError> {
     for c in [&a.path, &a.scale_reference, &a.scale_curve] {
         check_curve(c, true, true)?;
     }
+    check_path_extent(&a.path)?;
     for c in [&a.path, &a.scale_reference, &a.scale_curve] {
         push_curve(o, c);
     }
@@ -503,6 +525,25 @@ fn extent(c: &CurveSpec) -> Option<f64> {
         | CurveSpec::AnalyticCircle { radius, .. } => Some(2.0 * radius),
         CurveSpec::LineSegment { start, end } => Some(dist3(start, end)),
     }
+}
+
+/// Rejects a curved curve-sweep path larger than [`MAX_PATH_EXTENT`] (HANG-5), as
+/// [`run`] does for every curve sweep; the difftest runner's Rust side applies it too.
+///
+/// # Errors
+///
+/// [`FfiError::InvalidArgument`] for such a path.
+pub fn check_path_extent(path: &CurveSpec) -> Result<(), FfiError> {
+    if matches!(path, CurveSpec::LineSegment { .. }) {
+        return Ok(());
+    }
+    // an infinite extent (overflowing squares) is refused as well
+    if extent(path).is_some_and(|e| e.is_nan() || e > MAX_PATH_EXTENT) {
+        return Err(bad(
+            "curve sweep: path extent above 1e8 for the fixed tolerance (HANG-5)",
+        ));
+    }
+    Ok(())
 }
 
 /// Whether `SmApiCopyCurvesForConsumingSweep` copies every curve, so the call reaches
@@ -766,6 +807,48 @@ pub fn observe_linear(call: &Call) -> Result<Vec<f64>, FfiError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// HANG-5 (nightly fuzz00293): a curved curve-sweep path above the extent bound is
+    /// refused before the kernel; a line path of any size and a path at the bound are
+    /// not. Only `encode` runs: no native call.
+    #[test]
+    fn huge_curved_path_is_refused() {
+        let call = |path: CurveSpec| Call::FromFaces {
+            circles: vec![([0.0; 3], 2.0)],
+            args: SweepArgs {
+                path,
+                scale_reference: CurveSpec::Null,
+                scale_curve: CurveSpec::Null,
+                options: None,
+            },
+            attributed: None,
+        };
+        let spike = |z: f64| CurveSpec::ApiCurve {
+            points: vec![
+                [0.0; 3],
+                [2.8, 0.0, 5.6],
+                [3.1, 0.0, z],
+                [0.5, 0.0, 16.9],
+            ],
+        };
+        let arc = |radius: f64| CurveSpec::ApiArc {
+            center: [0.0; 3],
+            radius,
+            start_deg: 0.0,
+            end_deg: 90.0,
+        };
+        let msg = "invalid argument: curve sweep: path extent above 1e8 for the fixed tolerance (HANG-5)";
+        for path in [spike(1e300), spike(-1e50), spike(1e9), arc(1e8), arc(2147483648.0)] {
+            assert_eq!(encode(&call(path)).unwrap_err().to_string(), msg);
+        }
+        assert!(encode(&call(spike(1e7))).is_ok());
+        assert!(encode(&call(arc(5e7))).is_ok());
+        let line = CurveSpec::LineSegment {
+            start: [0.0; 3],
+            end: [0.0, 0.0, 1e300],
+        };
+        assert!(encode(&call(line)).is_ok());
+    }
 
     #[test]
     fn observe_linear_preserves_validation_and_empty_body_record() {

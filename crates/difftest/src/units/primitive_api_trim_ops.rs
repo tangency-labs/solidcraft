@@ -470,6 +470,11 @@ macro_rules! input {
 }
 
 fn rust(i: &In) -> Result<Output, HarnessError> {
+    // an input the ffi guard refuses is refused on both sides (HANG-29: trimming a
+    // surface with a coordinate above 1e150 does not return upstream, nightly fuzz00254)
+    if let Err(e @ FfiError::InvalidArgument(_)) = ffi::validate(&to_call(i)) {
+        return Ok(Output::rejected(format!("ffi guard: {e}")));
+    }
     let mut k = Kernel::default();
     match i {
         In::Trim3d {
@@ -821,5 +826,48 @@ impl UnitDiff for Runner {
 
     fn run_rust(&self, case: &Case) -> Result<Output, HarnessError> {
         rust(&case.parse()?)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The nightly fuzz00254 net (run 41040730716): point 1 lifted to `z = -2^63`, point
+    /// 8 moved to `y`.
+    fn trim3d(y: f64) -> In {
+        let mut points = Vec::new();
+        for i in 0..4 {
+            for j in 0..4 {
+                points.push([f64::from(i) * 10.0 / 3.0, f64::from(j) * 10.0 / 3.0, 0.0]);
+            }
+        }
+        points[1][2] = -9_223_372_036_854_775_808.0;
+        points[8][1] = y;
+        serde_json::from_value(serde_json::json!({
+            "op": "trim3d",
+            "surface": {"kind": "net", "rows": 4, "columns": 4, "points": points},
+            "loops": [1],
+            "curves": [{"kind": "circle", "center": [5, 5, 0], "radius": 3}]
+        }))
+        .unwrap()
+    }
+
+    /// HANG-29: the C++ never returns for a trimmed surface coordinate of `1e300` (here
+    /// with a lifted point); both sides refuse it with the same message. The same net at
+    /// the bound still runs on both sides and agrees.
+    #[test]
+    fn huge_trimmed_surface_is_refused_on_both_sides() {
+        let i = trim3d(1e300);
+        let (c, r) = (cpp(&i).unwrap(), rust(&i).unwrap());
+        let msg = c.rejected.clone().unwrap();
+        assert!(msg.contains("HANG-29"), "{msg}");
+        assert_eq!(r.rejected, Some(msg));
+
+        let i = trim3d(1e150);
+        let (c, r) = (cpp(&i).unwrap(), rust(&i).unwrap());
+        assert!(c.rejected.is_none() && r.rejected.is_none());
+        let d = crate::compare(&c, &r, Runner.abs_floors());
+        assert!(d.mismatches.is_empty(), "{:?}", d.mismatches);
     }
 }

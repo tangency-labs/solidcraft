@@ -1,0 +1,6 @@
+{
+  "unit": "primitive.api_trim_ops",
+  "cases": [
+    {"name": "fuzz00254_trim3d_surface_1e300", "origin": "nightly fuzz run 41040730716 (2026-10-30): primitive.api_trim_ops/fuzz00254 (timeout: cpp: no result after 20 s; base trim3d_net_surface, mutations /surface/points/1/2 = -9223372036854775808; /surface/points/8/1 = 1e+300)", "issue": "HANG-29", "cpp": "rejected: ffi guard: invalid argument: trimmed surface coordinate above 1e150 (HANG-29)", "rust": "rejected: ffi guard: invalid argument: trimmed surface coordinate above 1e150 (HANG-29)", "inputs": {"curves": [{"center": [5, 5, 0], "kind": "circle", "radius": 3}], "loops": [1], "op": "trim3d", "surface": {"columns": 4, "kind": "net", "points": [[0.0, 0.0, 0], [0.0, 3.3333333333333335, -9223372036854775808], [0.0, 6.666666666666667, 0], [0.0, 10.0, 0], [3.3333333333333335, 0.0, 0], [3.3333333333333335, 3.3333333333333335, 0], [3.3333333333333335, 6.666666666666667, 0], [3.3333333333333335, 10.0, 0], [6.666666666666667, 1e+300, 0], [6.666666666666667, 3.3333333333333335, 0], [6.666666666666667, 6.666666666666667, 0], [6.666666666666667, 10.0, 0], [10.0, 0.0, 0], [10.0, 3.3333333333333335, 0], [10.0, 6.666666666666667, 0], [10.0, 10.0, 0]], "rows": 4}}}
+  ]
+}

@@ -116,6 +116,11 @@ fn setup(i: &Inputs) -> Result<Result<Setup, Output>, HarnessError> {
     use crate::own_builder::{build_any, counts, failed_output, Built, Conventions};
     let path = path_of(Some(&i.brep))?;
     let block = brep_block_of(Some(&i.brep), i.validate_only, i.init_gaps)?;
+    // an input the FFI refuses is a harness error on both sides: building a face on a
+    // surface with a coordinate above 1e150 does not return upstream (HANG-29, nightly
+    // fuzz00246/00273/00280), so the Rust port does not build it either
+    solidcore_ffi::units::topology_edgeuse_p2::check_block_magnitudes(&block)
+        .map_err(|e| harness(e.to_string()))?;
     let mut k = Kernel::default();
     let conv = &Conventions::EDGEUSE_GRAPH;
     match build_any(&mut k, &i.brep, i.validate_only, i.init_gaps, conv)? {
@@ -602,6 +607,58 @@ impl UnitDiff for Runner {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The nightly fuzz00280 input (run 41040730716): a rational (1, 3) B-spline face
+    /// with control point `net[0][2]` at `x`.
+    fn huge_net_case(x: f64) -> Inputs {
+        serde_json::from_value(serde_json::json!({
+            "brep": {"dom": [0, 0, 1, 1], "kind": "face", "surface": {"bspline": {
+                "form": 0, "oob": false, "p": 1, "q": 3,
+                "u": [0.0, 0.0, 0.8693225776989657, 1.0, 1.0],
+                "v": [0.0, 0.0, 0.0, 0.0, 0.29222737641445795, 0.600129878732467,
+                      1.0, 1.0, 1.0, 1.0],
+                "net": [
+                    [[0.0, 0.0, 0.0, 1.15802262329658],
+                     [0.0, 1.448038656600481, 0.0, 1.448038656600481],
+                     [x, 3.654507783800295, 0.0, 1.8272538919001475],
+                     [0.0, 5.041307020367649, 0.0, 1.680435673455883],
+                     [0.0, 5.259335348338292, 0.0, 1.314833837084573],
+                     [0.0, 3.002311396931019, 0.0, 0.6004622793862038]],
+                    [[1.2849359576056014, 0.0, 0.0, 1.2849359576056014],
+                     [1.8273788729132732, 1.8273788729132732, 0.0, 1.8273788729132732],
+                     [1.1369004371370925, 2.273800874274185, 0.0, 1.1369004371370925],
+                     [1.5820720091867744, 4.746216027560323, 0.0, 1.5820720091867744],
+                     [0.9747038056324492, 3.8988152225297967, 0.0, 0.9747038056324492],
+                     [1.6722890689630536, 8.361445344815268, 0.0, 1.6722890689630536]],
+                    [[2.348070033894509, 0.0, 0.0, 1.1740350169472544],
+                     [2.3158116045693644, 1.1579058022846822, 0.0, 1.1579058022846822],
+                     [3.494634291770884, 3.494634291770884, 0.0, 1.747317145885442],
+                     [1.905747997332817, 2.8586219959992256, 0.0, 0.9528739986664085],
+                     [2.5798407769013396, 5.159681553802679, 0.0, 1.2899203884506698],
+                     [3.2939501250621444, 8.234875312655362, 0.0, 1.6469750625310722]]
+                ]}}},
+            "eu": 4, "has_fail": true, "init_gaps": true, "op": "create",
+            "validate_only": true, "want_dev": true
+        }))
+        .unwrap()
+    }
+
+    /// HANG-29: building the UV trim curve never returns upstream for a control point
+    /// of `-1e300`; both sides refuse the block with the same message. The same face
+    /// at the bound (`-1e150`) still runs on both sides and agrees.
+    #[test]
+    fn huge_block_value_is_refused_on_both_sides() {
+        let i = huge_net_case(-1e300);
+        let c = run_cpp(&i).unwrap_err().to_string();
+        let r = run_rust(&i).unwrap_err().to_string();
+        assert!(c.contains("B-rep value above 1e150 (HANG-29)"), "{c}");
+        assert!(r.contains("B-rep value above 1e150 (HANG-29)"), "{r}");
+
+        let i = huge_net_case(-1e150);
+        let (c, r) = (run_cpp(&i).unwrap(), run_rust(&i).unwrap());
+        let d = crate::compare(&c, &r, Runner.abs_floors());
+        assert!(d.mismatches.is_empty(), "{:?}", d.mismatches);
+    }
 
     #[test]
     fn cached_distance_is_observed_instead_of_masked() {
