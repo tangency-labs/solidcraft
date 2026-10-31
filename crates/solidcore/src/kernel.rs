@@ -523,6 +523,21 @@ pub struct UpstreamFixes {
     pub fillet_removal_takes_ring_fillets: bool,
     /// `SmMerge::ManifoldBoolean` refuses a union (`SM_ERR`, the face in the error) when a face its STEP 6 would delete has the infinite region on one side and a solid region on the other: deleting it would merge that solid into the outside. Upstream deletes it: where two operands' faces stay within tolerance of each other across a strip without being coincident (two 4 mm cubes, one turned 5.7 deg about z, within 5e-6 across a 1e-4 strip), the union deletes two such faces of the first operand, both of its solid regions merge into the infinite region, and the union comes back with no solid region and volume 0 (WR-619, #1794; own design, not in the fork).
     pub boolean_union_refuses_solid_leak: bool,
+    /// `SmFace::GetPointsInFace` samples a rectangularly trimmed face from its UV domain's
+    /// minimum: each column starts at the domain's minimum u plus the column increment and
+    /// each row at the domain's minimum v plus the row increment, and the column increment
+    /// is the domain's u length over the number of columns plus one. Upstream samples
+    /// `(k * dUInc, j * dVInc + dither)` as fractions of the domain's lengths from zero, so
+    /// a face whose domain does not start at the origin gets points outside it, and its
+    /// `dUInc` kept the divisor of the `min(2 * count, 30) + 1` search count after the
+    /// rectangular branch reset the column count to `min(count, 30)`, so the columns did
+    /// not span the domain (WR-86, #1909). This corrects the origin and the column spacing,
+    /// not uniform coverage of the domain for every count: counts above 30 still plan only
+    /// `min(count, 30)` columns and stop at the requested count, so when those rows do not
+    /// divide the requested count the last sampled column is truncated and later columns
+    /// are not sampled (31 points fill 16 of 30 columns), and with more than one point the
+    /// V dither still comes from `kernel.rng`. Off by default (pinned behaviour).
+    pub face_points_span_domain: bool,
 }
 
 /// Options for [`Kernel::new`].

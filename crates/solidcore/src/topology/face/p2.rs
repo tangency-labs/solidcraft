@@ -102,11 +102,21 @@
 //!   against upstream (`plan/findings.md`). Point counts above
 //!   [`MAX_POINTS_IN_FACE`] are [`SolidError::InvalidInput`] (upstream allocates
 //!   them). The rectangular branch samples from `dUInc` / `dVInc`, not from the
-//!   domain minimum, as upstream does (`plan/upstream-issues.md`). It takes the
-//!   B-rep mutably: its UV-domain and iso-line classifications run on it (the
-//!   classification's snapshot hands back the UV trim curves, the tolerance growth
-//!   that fits them and the gap caches), so what upstream's `const` queries leave on
-//!   the B-rep stays there.
+//!   domain minimum, as upstream does by default
+//!   (`plan/upstream-issues/WR-86--smface-getpointsinface-samples-a-rectangular-face-from-0-not.md`).
+//!   With [`UpstreamFixes::face_points_span_domain`](crate::kernel::UpstreamFixes::face_points_span_domain)
+//!   it starts each column and row at the domain's minimum and sizes the columns by
+//!   the domain's u length over the column count plus one (WR-86 addendum,
+//!   `2026-10-31-domain-relative-grid`). That corrects the origin and the column
+//!   spacing, not uniform coverage for every count: counts above 30 still plan only
+//!   `min(count, 30)` columns and stop once the requested count is reached, so when
+//!   those rows do not divide the requested count the last sampled column is truncated
+//!   and later columns are not sampled (31 points fill 16 of 30 columns), and the V
+//!   dither is still drawn once per point from
+//!   `kernel.rng` in both modes. It takes the B-rep mutably: its UV-domain and
+//!   iso-line classifications run on it (the classification's snapshot hands back the
+//!   UV trim curves, the tolerance growth that fits them and the gap caches), so what
+//!   upstream's `const` queries leave on the B-rep stays there.
 //! - **`CreateCurvesByTrimming`** drops its unused `bForceUVClassify` argument; the
 //!   output arrays are asked for with `want_3d` / `want_uv`.
 //! - **`CalculateAnInternalPoint` / `CreateCurvesByTrimming`** take the B-rep mutably:
@@ -1496,6 +1506,15 @@ fn rand_dither(k: &mut Kernel) -> f64 {
 /// constant-U UV lines. With more than one point the V values are dithered by a
 /// random draw (`kernel.rng`).
 ///
+/// The default keeps the pinned C++ grid: fractions of the UV domain's lengths from
+/// zero. With [`UpstreamFixes::face_points_span_domain`](crate::kernel::UpstreamFixes::face_points_span_domain)
+/// the rectangular branch starts at the domain's minimum and sizes its columns by the
+/// domain's u length over the column count plus one (WR-86 addendum,
+/// `2026-10-31-domain-relative-grid`). Counts above 30 still plan only
+/// `min(count, 30)` columns and stop at the requested count, so when those rows do not
+/// divide the requested count the last sampled column is truncated and later columns
+/// are not sampled; this is not uniform coverage of the domain for every count.
+///
 /// # Errors
 ///
 /// [`SolidError::NotFound`] for a dangling id; `SM_ERR` for a UV domain not longer than
@@ -1539,6 +1558,13 @@ pub fn points_in_face(
     if rectangular_trim == 1 {
         // when faced is rectangularly trimmed
         trim_curve_cnt = point_count.min(30);
+        // WR-86 opt-in: the columns start at the domain's minimum u, with an
+        // increment of the domain's u length over the column count plus one
+        let span_domain = k.fixes.face_points_span_domain;
+        if span_domain {
+            u_inc = u_interval.length() / (trim_curve_cnt + 1) as f64;
+            u = u_interval.min() + u_inc;
+        }
         let j_cnt = if (point_count / trim_curve_cnt) * trim_curve_cnt < point_count {
             (point_count / trim_curve_cnt) + 1
         } else {
@@ -1549,6 +1575,9 @@ pub fn points_in_face(
         // generate an array of sample points
         for _ in 0..trim_curve_cnt {
             let mut v = v_inc;
+            if span_domain {
+                v = v_interval.min() + v_inc;
+            }
             for _ in 0..j_cnt {
                 if out.uv.len() == count {
                     break;
@@ -3287,6 +3316,7 @@ mod tests {
     use super::*;
     use crate::geom::attribute::ObjectKey;
     use crate::geom::object::ObjectRef;
+    use crate::kernel::KernelOptions;
     use crate::surface::plane::Plane;
     use crate::topology::{Face, Faceuse, Loopuse, ShellId};
 
@@ -3497,6 +3527,121 @@ mod tests {
         assert!(points_in_face(&mut k, &mut b, f, 0).unwrap().uv.is_empty());
         set_uv_domain(&mut b, f, &Extent2d::from_bounds(0.0, 0.0, 0.0, 1.0)).unwrap();
         assert!(points_in_face(&mut k, &mut b, f, 1).is_err());
+    }
+
+    fn rectangular_face(bounds: (f64, f64, f64, f64)) -> (Brep, FaceId) {
+        let mut b = Brep::new();
+        let _ = b.add_shell().unwrap();
+        let f = b
+            .add_face_record(Face {
+                surface: Some(plane()),
+                uv_domain: Extent2d::from_bounds(bounds.0, bounds.1, bounds.2, bounds.3),
+                rectangular_trim: 1,
+                ..Face::new(ShellId::from_index(0))
+            })
+            .unwrap();
+        (b, f)
+    }
+
+    fn assert_inside(bounds: (f64, f64, f64, f64), uv: Point2) {
+        assert!(
+            uv.x >= bounds.0 && uv.x <= bounds.2 && uv.y >= bounds.1 && uv.y <= bounds.3,
+            "{uv:?} outside {bounds:?}"
+        );
+    }
+
+    #[test]
+    fn points_in_face_span_domain_samples_from_the_domain() {
+        let bounds = (3.0, -7.0, 4.0, -6.5);
+        let (mut b, f) = rectangular_face(bounds);
+
+        // the default stays pinned: fractions of the domain's lengths from zero
+        let mut k = Kernel::default();
+        let r = points_in_face(&mut k, &mut b, f, 1).unwrap();
+        assert_eq!(r.uv, vec![Point2::new(1.0 / 3.0, 0.25)]);
+
+        // opt-in: count 1 is the centre of the domain, in u and v
+        let mut k = Kernel::default();
+        k.fixes.face_points_span_domain = true;
+        let r = points_in_face(&mut k, &mut b, f, 1).unwrap();
+        assert_eq!(r.uv, vec![Point2::new(3.5, -6.75)]);
+        // The plane's frame gives the world point (-v, u, 0).
+        assert_eq!(r.pv, vec![Point3::new(6.75, 3.5, 0.0), Vec3::Z]);
+
+        // a negative-u, positive-v domain samples its centre too
+        let (mut b, f) = rectangular_face((-4.0, 3.0, -3.0, 4.0));
+        let mut k = Kernel::default();
+        k.fixes.face_points_span_domain = true;
+        let r = points_in_face(&mut k, &mut b, f, 1).unwrap();
+        assert_eq!(r.uv, vec![Point2::new(-3.5, 3.5)]);
+        assert_eq!(r.pv, vec![Point3::new(-3.5, -3.5, 0.0), Vec3::Z]);
+
+        // zero origin: the centre of [0, 1] x [0, 2]
+        let (mut b, f) = rectangular_face((0.0, 0.0, 1.0, 2.0));
+        let mut k = Kernel::default();
+        k.fixes.face_points_span_domain = true;
+        let r = points_in_face(&mut k, &mut b, f, 1).unwrap();
+        assert_eq!(r.uv, vec![Point2::new(0.5, 1.0)]);
+        assert_eq!(r.pv, vec![Point3::new(-1.0, 0.5, 0.0), Vec3::Z]);
+
+        // seven points: seven columns at min u + (i + 1) * u length / 8, each
+        // row at min v + v length / 2 plus its dither
+        let (mut b, f) = rectangular_face(bounds);
+        let mut k = Kernel::default();
+        k.fixes.face_points_span_domain = true;
+        let r = points_in_face(&mut k, &mut b, f, 7).unwrap();
+        assert_eq!(r.uv.len(), 7);
+        for (i, uv) in r.uv.iter().enumerate() {
+            assert_eq!(uv.x, 3.0 + (i + 1) as f64 / 8.0);
+            assert_inside(bounds, *uv);
+            assert_eq!(r.pv[2 * i], Point3::new(-uv.y, uv.x, 0.0));
+            assert_eq!(r.pv[2 * i + 1], Vec3::Z);
+        }
+
+        // the flag changes the grid, not the number or order of the RNG draws
+        let opts = KernelOptions {
+            seed: 12_345,
+            ..KernelOptions::default()
+        };
+        let mut off = Kernel::new(&opts);
+        let mut on = Kernel::new(&opts);
+        on.fixes.face_points_span_domain = true;
+        let r_off = points_in_face(&mut off, &mut b, f, 7).unwrap();
+        let r_on = points_in_face(&mut on, &mut b, f, 7).unwrap();
+        assert_eq!(r_off.uv.len(), 7);
+        assert_eq!(r_on.uv.len(), 7);
+        assert_eq!(off.rng.next_f64(), on.rng.next_f64());
+    }
+
+    #[test]
+    fn points_in_face_span_domain_boundary_counts() {
+        let bounds = (3.0, -7.0, 4.0, -6.5);
+        let (mut b, f) = rectangular_face(bounds);
+        let opts = KernelOptions {
+            seed: 7,
+            ..KernelOptions::default()
+        };
+        for count in [30, 31] {
+            let mut off = Kernel::new(&opts);
+            let mut on = Kernel::new(&opts);
+            on.fixes.face_points_span_domain = true;
+            let r_off = points_in_face(&mut off, &mut b, f, count).unwrap();
+            let r_on = points_in_face(&mut on, &mut b, f, count).unwrap();
+            assert_eq!(r_off.uv.len(), count as usize);
+            assert_eq!(r_on.uv.len(), count as usize);
+            for uv in &r_on.uv {
+                assert_inside(bounds, *uv);
+            }
+            assert_eq!(off.rng.next_f64(), on.rng.next_f64());
+        }
+
+        // 31 points still fill only 16 of the 30 columns: the row planner is unchanged
+        let mut k = Kernel::default();
+        k.fixes.face_points_span_domain = true;
+        let r = points_in_face(&mut k, &mut b, f, 31).unwrap();
+        let xs: Vec<f64> = r.uv.iter().map(|p| p.x).collect();
+        let columns = 1 + xs.windows(2).filter(|w| w[0] != w[1]).count();
+        assert_eq!(columns, 16);
     }
 
     #[test]
