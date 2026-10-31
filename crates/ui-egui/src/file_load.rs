@@ -38,7 +38,7 @@ pub enum Kind {
     /// Export a snapshot of the current design without adopting the worker's session.
     ExportDxf,
     /// Read the active design's linked designs again (`component.update_links`, with the
-    /// request's options: `component` reads only that link).
+    /// request's options: `component` or `components` reads only those links).
     UpdateLinks,
 }
 
@@ -906,11 +906,16 @@ pub fn tick(app: &mut SolveApp, ctx: &egui::Context) {
                 let (id, _) = request.command();
                 app.session.accept_computed(made.session);
                 app.big_operation = true;
-                crate::linked_source::read_again(app, request.options.get("component").and_then(Value::as_u64));
+                crate::linked_source::read_again(app, &request.options, &made.result);
                 let r = Ok(made.result);
                 app.finish_command(id, &r);
                 let language = crate::i18n::Locale::for_language(&app.preferences.language);
                 app.set_status(language.format("ui.command_done", &[("command", language.label(crate::command_label(id)))]), false);
+                // A design it could not read is said as when that was all it was asked.
+                if let Some(f) = r.as_ref().ok().and_then(|v| v["failed"].as_array()).and_then(|f| f.first()) {
+                    let (name, why) = (f["name"].as_str().unwrap_or_default(), f["error"].as_str().unwrap_or_default());
+                    app.set_status(format!("{name}: {why}"), true);
+                }
                 request.answer(r);
             }
             Ok(_) if reuse_open(app, request) => {}

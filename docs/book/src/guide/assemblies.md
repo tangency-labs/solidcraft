@@ -387,7 +387,8 @@ part file. The link is stored relative to the assembly's folder once the assembl
 After the part file changes, **Update Links** (`component.update_links`) reads it again.
 An assembly that opens, or whose tab comes back to the front, does that by itself for the parts whose files
 changed since it last read them, whether the part was saved in another tab, another window or by
-a checkout. A part that cannot be read is tried again the next time, and holds up no other.
+a checkout. The parts it reads come in as one step, so one **Undo** takes them all back. A part
+that cannot be read keeps its bodies, is tried again the next time, and holds up no other.
 **Update changed linked designs when a tab comes back** (Preferences, Design,
 `update_changed_links`) turns this off.
 To edit the source, right-click a linked component or occurrence in the Browser and choose
