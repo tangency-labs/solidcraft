@@ -4844,11 +4844,17 @@ fn sheet_hole_cut(
             _ => done,
         };
         if done.is_empty() {
+            // A sheet whose box lies clear of the tool's cannot meet it (#10226).
+            let reach = more::body_box(tool);
             let mut meets = false;
             for sheet in &st.sheets {
-                if let Some(mb) = st.body(&sheet.body)
-                    && kernel::boolean(&mb.body, tool, BoolOp::Intersect)?.is_some()
-                {
+                let Some(mb) = st.body(&sheet.body) else { continue };
+                if more::boxes_apart(&more::mesh_box(mb), &reach) {
+                    continue;
+                }
+                #[cfg(test)]
+                cost_tests::count(|c| c.cut += 1);
+                if kernel::boolean(&mb.body, tool, BoolOp::Intersect)?.is_some() {
                     meets = true;
                     break;
                 }
