@@ -1600,7 +1600,7 @@ mod tests {
         assert!(!h.app.home.open);
         let state = h.app.session.world_state();
         assert_eq!(state.bodies.len(), 1);
-        assert!(state.bodies[0].body.is_mesh());
+        assert!(!state.bodies[0].body.is_mesh(), "closed OSD imports directly as an editable solid");
         let volume = h.app.run("inspect.measure", serde_json::json!({})).unwrap()["bodies"][0]["volume_mm3"].as_f64().unwrap();
         assert!((volume - 1000.).abs() < 1e-8, "{volume}");
         let destination = h.dir.join("Exported.osd");
@@ -1615,8 +1615,19 @@ mod tests {
         click_file(&mut h, "home:export");
         click_file(&mut h, "home:export:osd");
         h.settle();
-        let (objects, _) = solidcraft_engine::io::read_osd(&std::fs::read(destination).unwrap(), "Exported").unwrap();
+        let (objects, _) = solidcraft_engine::io::read_osd(&std::fs::read(&destination).unwrap(), "Exported").unwrap();
         assert_eq!(objects.iter().map(|o| o.triangles.len()).sum::<usize>(), 12);
+        h.app.preferences.osd_import_solids = false;
+        h.app.open_path_async(&destination.to_string_lossy());
+        h.settle();
+        assert!(h.app.session.world_state().bodies[0].body.is_mesh(), "preference retains the original mesh import");
+        let forced = h.dir.join("Forced.osd");
+        std::fs::copy(&destination, &forced).unwrap();
+        let mut request = crate::file_load::Request::new(&forced.to_string_lossy(), crate::file_load::Kind::Open);
+        request.options.insert("osd_mode".into(), serde_json::json!("solid"));
+        crate::file_load::begin_request(&mut h.app, request).unwrap();
+        h.settle();
+        assert!(!h.app.session.world_state().bodies[0].body.is_mesh(), "an explicit mode overrides the UI preference");
     }
 
     #[test]

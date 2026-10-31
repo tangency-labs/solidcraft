@@ -16,6 +16,118 @@ const MAX_TRIANGLES: usize = MAX_VERTICES / 3;
 const MAX_COLOURS: usize = 256;
 const IDENTITY: [f64; 16] = [1., 0., 0., 0., 0., 1., 0., 0., 0., 0., 1., 0., 0., 0., 0., 1.];
 
+/// How OSD triangles enter a design. Mesh is the original, unconverted path.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum OsdImportMode {
+    #[default]
+    Auto,
+    Mesh,
+    Solid,
+}
+
+// Sewing creates persistent CAD faces and STEP text, substantially larger than a
+// display mesh. Refuse before allocating those descriptions, including in Auto.
+const MAX_SOLID_TRIANGLES: usize = 20_000;
+
+pub(crate) fn solid_feature(objects: &[MeshObject], file: &str) -> Result<crate::MeshFeature> {
+    use solidcraft_kernel::{ExportBody, StepHeader};
+    let count = objects.iter().try_fold(0usize, |n, o| n.checked_add(o.triangles.len())).ok_or_else(|| invalid("triangle count overflow"))?;
+    if count > MAX_SOLID_TRIANGLES {
+        return Err(invalid(format!("solid reconstruction is limited to {MAX_SOLID_TRIANGLES} triangles; this file has {count}")));
+    }
+    let mut bodies = Vec::new();
+    let mut warnings = Vec::new();
+    // A cavity can have a different colour from its outside. Never convert
+    // nested/overlapping groups separately: mesh_body normalises their winding
+    // and would turn an inward cavity shell into a second positive solid.
+    let bounds: Vec<_> = objects.iter().map(|o| o.positions.iter().copied().collect::<solidcraft_geom::Aabb3>()).collect();
+    let disjoint = bounds.iter().enumerate().all(|(i, a)| {
+        bounds
+            .iter()
+            .skip(i + 1)
+            .all(|b| a.max.x < b.min.x || b.max.x < a.min.x || a.max.y < b.min.y || b.max.y < a.min.y || a.max.z < b.min.z || b.max.z < a.min.z)
+    });
+    let separate = if disjoint { objects.iter().map(solid_object).collect::<Result<Vec<_>>>() } else { Err(invalid("overlapping colour groups")) };
+    match separate {
+        Ok(parts) => {
+            for (object, body) in objects.iter().zip(parts) {
+                bodies.push((object.name.clone(), body.with_color(object.color)));
+            }
+        }
+        Err(e) if objects.len() <= 1 => return Err(e),
+        Err(_) => {
+            let mut merged = MeshObject::default();
+            for o in objects {
+                let offset = u32::try_from(merged.positions.len()).map_err(|_| invalid("too many vertices"))?;
+                merged.positions.extend_from_slice(&o.positions);
+                for t in &o.triangles {
+                    let mut triangle = [0; 3];
+                    for (out, index) in triangle.iter_mut().zip(t) {
+                        if *index as usize >= o.positions.len() {
+                            return Err(invalid("triangle index out of range"));
+                        }
+                        *out = offset.checked_add(*index).ok_or_else(|| invalid("vertex index overflow"))?;
+                    }
+                    merged.triangles.push(triangle);
+                }
+            }
+            let name = std::path::Path::new(file).file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_else(|| "OSD".into());
+            bodies.push((name, solid_object(&merged)?));
+            warnings.push("OSD colour groups were joined to close the solid; individual face colours were not retained. Import with osd_mode=mesh to retain them.".into());
+        }
+    }
+    let exports: Vec<_> = bodies.iter().map(|(name, body)| ExportBody { name: name.clone(), body, color: body.color() }).collect();
+    let stem = std::path::Path::new(file).file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_else(|| "OSD".into());
+    let text = solidcraft_kernel::step_export_bodies(&exports, &StepHeader { file_name: format!("{stem}.step"), ..Default::default() })?;
+    let mut feature = crate::step_import_feature_named(text.as_bytes(), file, crate::StepNames::Solid)?;
+    // This path places the entire import in one owner component, like MeshImport.
+    // No invented assembly hierarchy or new document schema is needed.
+    if let solidcraft_doc::FeatureKind::Import { components, .. } = &mut feature.kind {
+        components.clear();
+    }
+    warnings.append(&mut feature.warnings);
+    warnings.push(
+        "OSD reconstructed as editable solid geometry; curved surfaces may remain faceted. Original sketches and feature history are not available."
+            .into(),
+    );
+    Ok(crate::MeshFeature { name: feature.name, kind: feature.kind, body_names: feature.body_names, warnings })
+}
+
+fn solid_object(object: &MeshObject) -> Result<solidcraft_kernel::Body> {
+    use solidcraft_kernel::{EdgeSpec, FaceSpec, SurfSpec};
+    let mesh = solidcraft_kernel::mesh_body(&object.positions, &object.triangles)?;
+    if !mesh.is_closed_mesh() {
+        return Err(invalid("the triangles do not form a closed manifold shell"));
+    }
+    // Prefer the existing certified prism reconstruction: it removes internal
+    // triangulation edges and can recover analytic cylindrical walls.
+    if let Ok(body) = solidcraft_kernel::convert_prismatic_mesh(&mesh, 0.001) {
+        return Ok(body);
+    }
+    let (positions, triangles) = mesh.triangle_mesh().ok_or_else(|| invalid("missing triangle geometry"))?;
+    let mut faces = Vec::with_capacity(triangles.len());
+    for t in triangles {
+        let [a, b, c] = t.map(|i| positions.get(i as usize).copied());
+        let (Some(a), Some(b), Some(c)) = (a, b, c) else { return Err(invalid("triangle index out of range")) };
+        faces.push(FaceSpec {
+            loops: vec![vec![EdgeSpec::Line { a, b }, EdgeSpec::Line { a: b, b: c }, EdgeSpec::Line { a: c, b: a }]],
+            surface: SurfSpec::Plane,
+            probe: None,
+        });
+    }
+    let body = solidcraft_kernel::sew(&faces)?;
+    let issues = body.validity();
+    if !issues.is_empty() {
+        return Err(invalid(format!("invalid reconstructed solid: {}", issues.join("; "))));
+    }
+    let before = solidcraft_kernel::measure(&mesh)?.volume;
+    let after = solidcraft_kernel::measure(&body)?.volume;
+    if !before.is_finite() || before <= 0. || (after - before).abs() > (before.abs() * 1e-7).max(1e-6) {
+        return Err(invalid("sewing changed the enclosed volume"));
+    }
+    Ok(body)
+}
+
 fn invalid(message: impl std::fmt::Display) -> IoError {
     IoError::Invalid(format!("OSD: {message}"))
 }
@@ -580,5 +692,107 @@ mod tests {
         }
         let bytes = crate::export(&state, &[], crate::Format::Osd, "Square").unwrap();
         assert_eq!(area(&read_osd(&bytes, "Again").unwrap().0), 4.);
+    }
+
+    fn pyramid() -> MeshObject {
+        MeshObject {
+            name: "Pyramid".into(),
+            positions: vec![Vec3::ZERO, Vec3::new(10., 0., 0.), Vec3::new(10., 10., 0.), Vec3::new(0., 10., 0.), Vec3::new(5., 5., 10.)],
+            triangles: vec![[0, 2, 1], [0, 3, 2], [0, 1, 4], [1, 2, 4], [2, 3, 4], [3, 0, 4]],
+            color: Some([0.2, 0.5, 0.8]),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn non_prismatic_osd_opens_as_editable_solid_and_survives_cold_reopen() {
+        use solidcraft_kernel::{BoolOp, boolean, box_solid, measure};
+        let source = pyramid();
+        let mesh = solidcraft_kernel::mesh_body(&source.positions, &source.triangles).unwrap();
+        assert!(solidcraft_kernel::convert_prismatic_mesh(&mesh, 0.001).is_err(), "exercise the general faceted path");
+        let bytes = write_osd(&[source]).unwrap();
+        let f = crate::mesh_import_feature(&bytes, "Pyramid.OSD").unwrap();
+        assert_eq!(f.name, "Pyramid");
+        assert_eq!(f.body_names, ["Pyramid"]);
+        assert!(matches!(f.kind, solidcraft_doc::FeatureKind::Import { .. }));
+        let mut d = solidcraft_doc::Document::new("Pyramid");
+        d.add_feature(f.kind, Some(&f.name)).unwrap();
+        let cold = solidcraft_doc::Document::from_json(&d.to_json()).unwrap();
+        let mut model = solidcraft_doc::Model::new();
+        model.evaluate(&cold);
+        let state = model.state();
+        let body = &state.bodies[0].body;
+        assert!(!body.is_mesh());
+        assert!(body.validity().is_empty());
+        assert!((measure(body).unwrap().volume - 1000. / 3.).abs() < 1e-6);
+        // Remove the top half-height pyramid (base 5×5, height 5).
+        let tool = box_solid(Vec3::new(-1., -1., 5.), Vec3::new(11., 11., 11.)).unwrap();
+        let edited = boolean(body, &tool, BoolOp::Cut).unwrap().unwrap();
+        assert!((measure(&edited).unwrap().volume - 875. / 3.).abs() < 1e-5);
+        let step = crate::export(&state, &[], crate::Format::Step, "Pyramid").unwrap();
+        let reopened = crate::step_import_feature(&step, "Pyramid.step").unwrap();
+        assert_eq!(reopened.import.bodies.len(), 1);
+        assert!((measure(&reopened.import.bodies[0].body).unwrap().volume - 1000. / 3.).abs() < 1e-6);
+    }
+
+    #[test]
+    fn osd_mesh_mode_and_open_shell_fallback_are_explicit() {
+        let bytes = write_osd(&[pyramid()]).unwrap();
+        let f = crate::mesh_import_feature_with_osd_mode(&bytes, "Pyramid.osd", OsdImportMode::Mesh).unwrap();
+        assert!(matches!(f.kind, solidcraft_doc::FeatureKind::MeshImport { .. }));
+        let open = square(6);
+        let f = crate::mesh_import_feature(&open, "Open.osd").unwrap();
+        assert!(matches!(f.kind, solidcraft_doc::FeatureKind::MeshImport { .. }));
+        assert!(f.warnings.iter().any(|w| w.contains("not an editable solid")));
+        assert!(crate::mesh_import_feature_with_osd_mode(&open, "Open.osd", OsdImportMode::Solid).is_err());
+        let mut broken = pyramid();
+        broken.triangles.push(broken.triangles[0]);
+        assert!(solid_feature(&[broken], "Nonmanifold.osd").is_err());
+        let mut large = pyramid();
+        large.triangles = vec![large.triangles[0]; MAX_SOLID_TRIANGLES + 1];
+        assert!(solid_feature(&[large], "Large.osd").err().unwrap().to_string().contains("limited"));
+    }
+
+    #[test]
+    fn colour_seams_do_not_leave_a_closed_osd_as_open_meshes() {
+        let mut first = pyramid();
+        let mut second = first.clone();
+        first.triangles.truncate(2);
+        second.triangles.drain(..2);
+        second.color = Some([1., 0., 0.]);
+        let bytes = write_osd(&[first, second]).unwrap();
+        let f = crate::mesh_import_feature_with_osd_mode(&bytes, "Colours.osd", OsdImportMode::Solid).unwrap();
+        assert!(matches!(f.kind, solidcraft_doc::FeatureKind::Import { .. }));
+        assert!(f.warnings.iter().any(|w| w.contains("face colours were not retained")));
+    }
+
+    #[test]
+    fn differently_coloured_cavity_keeps_its_empty_volume() {
+        let box_mesh = |low, high, color| {
+            let body = solidcraft_kernel::box_solid(low, high).unwrap();
+            let mesh = body.tessellate(0.001).unwrap();
+            MeshObject { name: "Box".into(), positions: mesh.positions, triangles: mesh.triangles, color: Some(color), ..Default::default() }
+        };
+        let outer = box_mesh(Vec3::ZERO, Vec3::new(10., 10., 10.), [0., 1., 0.]);
+        for colour in [[0., 1., 0.], [1., 0., 0.]] {
+            let mut inner = box_mesh(Vec3::new(2., 2., 2.), Vec3::new(8., 8., 8.), colour);
+            for t in &mut inner.triangles {
+                t.swap(1, 2);
+            }
+            let bytes = write_osd(&[outer.clone(), inner]).unwrap();
+            let feature = crate::mesh_import_feature_with_osd_mode(&bytes, "Hollow.osd", OsdImportMode::Solid).unwrap();
+            let mut doc = solidcraft_doc::Document::new("Hollow");
+            doc.add_feature(feature.kind, Some(&feature.name)).unwrap();
+            let mut model = solidcraft_doc::Model::new();
+            model.evaluate(&doc);
+            let state = model.state();
+            let volume: f64 = state.bodies.iter().map(|b| solidcraft_kernel::measure(&b.body).unwrap().volume).sum();
+            assert!(state.bodies.iter().all(|b| !b.body.is_mesh()));
+            assert!((volume - 784.).abs() < 1e-6, "outer minus cavity, not outer plus cavity: {volume}");
+        }
+        let other = box_mesh(Vec3::new(20., 0., 0.), Vec3::new(30., 10., 10.), [1., 0., 0.]);
+        let bytes = write_osd(&[outer, other]).unwrap();
+        let feature = crate::mesh_import_feature_with_osd_mode(&bytes, "Two.osd", OsdImportMode::Solid).unwrap();
+        assert_eq!(feature.body_names.len(), 2, "separate colour groups remain separate bodies");
     }
 }

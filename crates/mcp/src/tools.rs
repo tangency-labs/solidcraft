@@ -378,13 +378,15 @@ pub fn tool_definitions() -> Vec<Value> {
             "Open a .sc design file (or a .solidcraft one from an earlier release), a STEP file (.step/.stp: a new design whose bodies come from the file, as an \
              Import base feature in a component named after the file; an assembly's parts become nested components) or a \
              mesh (.3mf/.stl/.obj/.osd/.glb/.gltf: mesh bodies in such a component; a glTF file's nodes become nested components and its \
-             materials appearances); the result reports the component (id, component_name). Replaces the current design; insert into it \
+             materials appearances). OSD auto mode reconstructs closed triangles as editable solids, keeping unsupported geometry as a mesh with warnings; \
+             osd_mode mesh retains the original mesh and solid refuses fallback. The result reports the component (id, component_name). Replaces the current design; insert into it \
              instead with the file.insert_step (STEP) or file.insert_mesh (mesh) commands. A STEP file from a system \
              that has Y up opens lying on its back: `up: \"y\"` turns its component a quarter turn about X (Y becomes Z). glTF is Y up, \
              so it is turned by default (`up: \"z\"` keeps its axes). `names` picks what the bodies are named after when the solids' own names say nothing useful.",
             obj(
                 json!({
                     "path": string("Path to a .sc (or .solidcraft), .step/.stp, .3mf, .stl, .obj, .osd, .glb or .gltf file"),
+                    "osd_mode": {"type": "string", "enum": ["auto", "mesh", "solid"], "description": "OSD only: auto reconstructs editable solids with mesh fallback and warnings (default); mesh retains triangles; solid refuses fallback."},
                     "up": {"type": "string", "enum": ["z", "y"], "description": "STEP and glTF only. z keeps the file's axes; y: the file has Y up, so its bodies are turned to stand Z up. Default: z for STEP, y for glTF"},
                     "names": {"type": "string", "enum": ["auto", "solid", "product", "instance"], "description": "STEP, IGES, FreeCAD and Rhino. auto (default): keep meaningful solid names, replace placeholders with the nearest named product, else instance; solid: the solid's own name; product: the part's name; instance: the occurrence's name, else the product's"},
                 }),
@@ -855,7 +857,7 @@ fn dispatch(b: &mut dyn Backend, name: &str, a: &Map<String, Value>) -> Result<V
         "undo" => exec(b, "edit.undo", json!({})),
         "redo" => exec(b, "edit.redo", json!({})),
         "new_design" => exec(b, "file.new", pick(a, &["name"])),
-        "open" => exec(b, "doc.open", pick(a, &["path", "up", "names"])),
+        "open" => exec(b, "doc.open", pick(a, &["path", "up", "names", "osd_mode"])),
         "save" => exec(b, "file.save", pick(a, &["path", "format"])),
         other => Err(format!("unknown tool `{other}`")),
     }
@@ -950,7 +952,7 @@ fn batch_step(step: &Value) -> Result<(String, Value, Option<Narrow>), String> {
         "redo" => mapped("edit.redo", json!({})),
         "export" => mapped("file.export", pick(a, &["path", "format", "bodies", "mesh_prefix", "effort", "velocity"])),
         "save" => mapped("file.save", pick(a, &["path", "format"])),
-        "open" => mapped("doc.open", pick(a, &["path", "up", "names"])),
+        "open" => mapped("doc.open", pick(a, &["path", "up", "names", "osd_mode"])),
         "new_design" => mapped("file.new", pick(a, &["name"])),
         "crash_reports" => match a.get("id") {
             Some(_) => mapped("diagnostics.crash_report", pick(a, &["id"])),

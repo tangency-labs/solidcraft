@@ -464,6 +464,23 @@ fn open_stands_a_y_up_step_file_up() {
 }
 
 #[test]
+fn open_osd_mode_reaches_direct_and_batch_imports() {
+    let mut s = server();
+    tool(&mut s, "execute", json!({"command":"solid.box","params":{"length":10,"width":10,"height":10}}));
+    let path = std::env::temp_dir().join(format!("solidcraft-mcp-osd-{}.osd", std::process::id()));
+    tool(&mut s, "export", json!({"path":path}));
+    let is_mesh = |s: &mut Server| tool(s, "measure", json!({}))["bodies"][0]["face_types"].get("mesh").is_some();
+    for (mode, mesh) in [("mesh", true), ("solid", false), ("auto", false)] {
+        tool(&mut s, "open", json!({"path":path,"osd_mode":mode}));
+        assert_eq!(is_mesh(&mut s), mesh, "direct {mode}");
+        tool(&mut s, "batch", json!({"commands":[{"command":"open","params":{"path":path,"osd_mode":mode}}]}));
+        assert_eq!(is_mesh(&mut s), mesh, "batch {mode}");
+    }
+    assert_eq!(raw_tool(&mut s, "open", json!({"path":path,"osd_mode":"invalid"}))["error"]["code"], -32602);
+    std::fs::remove_file(path).unwrap();
+}
+
+#[test]
 fn save_selects_container_or_json_and_reopens_by_contents() {
     let mut s = server();
     tool(&mut s, "execute", json!({"command": "solid.box", "params": {"length": 10, "width": 20, "height": 30}}));

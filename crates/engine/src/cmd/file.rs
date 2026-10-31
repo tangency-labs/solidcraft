@@ -28,7 +28,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("open")
         .key("Ctrl+O")
         .noundo()
-        .params("path: .sc design (or a .solidcraft design from an earlier release), .dxf/.svg drawing (opens as a new, unsaved design with an XY sketch, using sketch.insert_dxf/sketch.insert_svg units and defaults), or a .step/.stp/.igs/.fcstd/.3dm/.3mf/.stl/.obj/.osd/.glb/.gltf file (STEP, IGES, FreeCAD, Rhino, 3MF, STL, OBJ, OSD or glTF; opens as a new design holding the file as a component named after it, as file.insert_step and file.insert_mesh make), or a .ply/.xyz/.pts point cloud (opens as a new design holding it, as pointcloud.insert makes; its `units` and `max_points` as there); up?: z|y for a STEP, IGES, FreeCAD, Rhino or glTF file (see file.insert_step and file.insert_mesh); names?: auto|solid|product|instance for a STEP, IGES, FreeCAD or Rhino file (see file.insert_step); read_only?: bool (a design: saving to its own file is refused, file.save_as keeps the changes elsewhere) → open_elsewhere: {host, user, app, opened} when another SolidCraft has the design open (its lock file is fresh)"),
+        .params("osd_mode?: auto|mesh|solid (OSD only: auto reconstructs editable solids with mesh fallback and warnings, the default; mesh retains triangles; solid refuses fallback); path: .sc design (or a .solidcraft design from an earlier release), .dxf/.svg drawing (opens as a new, unsaved design with an XY sketch, using sketch.insert_dxf/sketch.insert_svg units and defaults), or a .step/.stp/.igs/.fcstd/.3dm/.3mf/.stl/.obj/.osd/.glb/.gltf file (STEP, IGES, FreeCAD, Rhino, 3MF, STL, OBJ, OSD or glTF; opens as a new design holding the file as a component named after it, as file.insert_step and file.insert_mesh make), or a .ply/.xyz/.pts point cloud (opens as a new design holding it, as pointcloud.insert makes; its `units` and `max_points` as there); up?: z|y for a STEP, IGES, FreeCAD, Rhino or glTF file (see file.insert_step and file.insert_mesh); names?: auto|solid|product|instance for a STEP, IGES, FreeCAD or Rhino file (see file.insert_step); read_only?: bool (a design: saving to its own file is refused, file.save_as keeps the changes elsewhere) → open_elsewhere: {host, user, app, opened} when another SolidCraft has the design open (its lock file is fresh)"),
     CommandSpec::new("file.insert_step", "Insert STEP", insert_step)
         .at("SOLID", "INSERT")
         .icon("import")
@@ -36,7 +36,7 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("file.insert_mesh", "Insert Mesh", insert_mesh)
         .at("SOLID", "INSERT")
         .icon("import")
-        .params("path: .3mf, .stl, .obj, .osd, .ply (with faces), .glb or .gltf file (its meshes join the design as mesh bodies in a new component named after the file → component, component_name, occurrence; a glTF file's node tree becomes nested components held as one rigid group until component.unlock, a mesh placed again another occurrence, its materials the bodies' appearances, and its metres millimetres); name?; up?: z|y for a glTF file (default y: glTF has Y up, so the import's component is turned a quarter turn about X, Y becoming Z → stand_up: its occurrence; z: the file's axes are kept)"),
+        .params("osd_mode?: auto|mesh|solid (OSD only: auto reconstructs editable solids with mesh fallback and warnings, the default; mesh retains triangles; solid refuses fallback); path: .3mf, .stl, .obj, .osd, .ply (with faces), .glb or .gltf file (its meshes join the design as mesh bodies in a new component named after the file → component, component_name, occurrence; a glTF file's node tree becomes nested components held as one rigid group until component.unlock, a mesh placed again another occurrence, its materials the bodies' appearances, and its metres millimetres); name?; up?: z|y for a glTF file (default y: glTF has Y up, so the import's component is turned a quarter turn about X, Y becoming Z → stand_up: its occurrence; z: the file's axes are kept)"),
     CommandSpec::new("file.save", "Save", save)
         .icon("save")
         .key("Ctrl+S")
@@ -174,7 +174,7 @@ fn created_bodies(s: &Session, feature: u64) -> Vec<String> {
 /// Add a MeshImport feature for a 3MF, STL, OBJ, OSD or glTF file, in a new component named after the
 /// file. A glTF file's nodes become components in it, and its materials the bodies' looks; it is
 /// in metres with Y up, so unless `y_up` is false its component is turned to Z up (#1505).
-fn add_mesh(s: &mut Session, path: &str, name: Option<&str>, y_up: Option<bool>) -> Result<Value> {
+fn add_mesh(s: &mut Session, path: &str, name: Option<&str>, y_up: Option<bool>, osd_mode: solidcraft_io::OsdImportMode) -> Result<Value> {
     let err = |e: solidcraft_io::IoError| EngineError::Other(format!("{path}: {e}"));
     let bytes = solidcraft_io::vfs::read(path, solidcraft_io::MAX_3MF_BYTES).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
     let gltf = solidcraft_io::is_gltf_path(path);
@@ -188,7 +188,7 @@ fn add_mesh(s: &mut Session, path: &str, name: Option<&str>, y_up: Option<bool>)
         }
         (g.feature, Some(g.plan), g.looks)
     } else {
-        (solidcraft_io::mesh_import_feature(&bytes, path).map_err(err)?, None, Vec::new())
+        (solidcraft_io::mesh_import_feature_with_osd_mode(&bytes, path, osd_mode).map_err(err)?, None, Vec::new())
     };
     let fname = name.filter(|n| !n.trim().is_empty()).unwrap_or(&mf.name).to_string();
     let cname = import::component_name(path, name);
@@ -247,7 +247,21 @@ fn insert_mesh(s: &mut Session, p: &Value) -> Result<Value> {
         return Err(bad(cmd, "only 3MF, STL, OBJ, OSD, PLY and glTF files (.3mf, .stl, .obj, .osd, .ply, .glb, .gltf) can be inserted as meshes"));
     }
     let up = mesh_up(p, path, cmd)?;
-    add_mesh(s, path, str_(p, "name"), up)
+    add_mesh(s, path, str_(p, "name"), up, osd_import_mode(p, cmd)?)
+}
+
+fn osd_import_mode(p: &Value, cmd: &str) -> Result<solidcraft_io::OsdImportMode> {
+    use solidcraft_io::OsdImportMode;
+    match p.get("osd_mode") {
+        None | Some(Value::Null) => Ok(OsdImportMode::Auto),
+        Some(Value::String(mode)) => match mode.as_str() {
+            "auto" => Ok(OsdImportMode::Auto),
+            "mesh" => Ok(OsdImportMode::Mesh),
+            "solid" => Ok(OsdImportMode::Solid),
+            _ => Err(bad(cmd, "osd_mode must be auto, mesh or solid")),
+        },
+        _ => Err(bad(cmd, "osd_mode must be auto, mesh or solid")),
+    }
 }
 
 fn insert_step(s: &mut Session, p: &Value) -> Result<Value> {
@@ -318,7 +332,7 @@ fn open(s: &mut Session, p: &Value) -> Result<Value> {
         let r = if solidcraft_io::is_step_path(path) {
             add_step(&mut fresh, path, None, &step_options(p, "doc.open")?)?
         } else {
-            add_mesh(&mut fresh, path, None, mesh_up(p, path, "doc.open")?)?
+            add_mesh(&mut fresh, path, None, mesh_up(p, path, "doc.open")?, osd_import_mode(p, "doc.open")?)?
         };
         // The design is the file: its component is the one being worked in.
         if let Some(c) = r["component"].as_u64() {

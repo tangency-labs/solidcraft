@@ -247,7 +247,10 @@ pub fn begin(app: &mut SolveApp, path: &str, insert: bool) {
 }
 
 /// Queue a file operation; on the web (no threads) it runs now.
-pub fn begin_request(app: &mut SolveApp, request: Request) -> Result<(), String> {
+pub fn begin_request(app: &mut SolveApp, mut request: Request) -> Result<(), String> {
+    if request.kind == Kind::Open || request.insert() {
+        apply_osd_preference(&app.preferences, &request.path, &mut request.options);
+    }
     if crate::control::chat_turn_cancelled(request.chat_turn.as_deref()) {
         request.answer(Err("the agent chat turn ended".into()));
         return Ok(());
@@ -302,6 +305,13 @@ pub fn begin_request(app: &mut SolveApp, request: Request) -> Result<(), String>
         // A design open in another SolidCraft asks first (#5467).
         let Some(request) = crate::open_elsewhere::check_open(app, request) else { return Ok(()) };
         queue(app, request)
+    }
+}
+
+/// Keep explicit agent/import choices; the preference supplies only the UI default.
+pub(crate) fn apply_osd_preference(prefs: &crate::prefs::Prefs, path: &str, options: &mut serde_json::Map<String, Value>) {
+    if !prefs.osd_import_solids && std::path::Path::new(path).extension().and_then(|s| s.to_str()).is_some_and(|s| s.eq_ignore_ascii_case("osd")) {
+        options.entry("osd_mode").or_insert_with(|| json!("mesh"));
     }
 }
 
