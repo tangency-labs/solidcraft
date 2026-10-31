@@ -44,6 +44,9 @@
 //! - **Null pointers.** Where upstream dereferences `NULL` (an edge use missing where it
 //!   sets a UV trim curve, a vertex without its vertex uses), the port returns
 //!   [`SolidError::InvalidInput`].
+//! - **Curve owners.** A curve the removal installs is owned under its edge's
+//!   [`Brep::owner_identity`], the identity the B-rep check compares (`SetOwner(pEdge)`),
+//!   and `ValidateGeometry` checks it under the same identities.
 //! - No recursion.
 
 use crate::curve::curve::{Curve, CurveKind};
@@ -840,6 +843,7 @@ impl FilletRemoval {
             with_kernel_callbacks(k, b, |_k, b, env| {
                 edge::replace_3d_curve(b, end_edge, Some(new_crv), env)
             })?;
+            own_edge_curve(b, end_edge)?;
             // Set Edgeuse->UVTrimCurve for the edge uses into the end and tangent faces
             // (no validation: they are in an inconsistent state)
             let deviation = self.new_edge_deviation;
@@ -1152,7 +1156,7 @@ impl FilletRemoval {
 
         // TRUE = delete the edge's curve (and its UV trim curves)
         with_kernel_callbacks(k, b, |_k, b, env| {
-            let owner = (env.key_of)(EntityRef::Edge(survive_edge));
+            let owner = b.owner_identity(EntityRef::Edge(survive_edge));
             let _ = new_curve.set_owner(Some(owner), Some(brep_p2::brep_ref(b)));
             let options = SetCurveOptions {
                 delete_old_curve: true,
@@ -1441,6 +1445,27 @@ fn relink(
     Ok(())
 }
 
+/// The identities the B-rep names its geometry owners by ([`Brep::owner_identity`]),
+/// without borrowing it: what [`crate::topology::brep::validation::check_brep`] checks
+/// owners against.
+fn owner_keys(b: &Brep) -> impl Fn(EntityRef) -> crate::geom::object::ObjectRef {
+    let naming = b.naming();
+    let recorded = b.geometry_owner_keys().clone();
+    move |e| crate::topology::owner_identity_of(naming, recorded.get(&e).copied(), e)
+}
+
+/// `pCurve->SetOwner(pEdge)` for `e`'s curve: owned under the edge's
+/// [`Brep::owner_identity`] (`replace_3d_curve` names it by the edit's notification
+/// identity).
+fn own_edge_curve(b: &mut Brep, e: EdgeId) -> Result<()> {
+    let owner = b.owner_identity(EntityRef::Edge(e));
+    let brep_ref = brep_p2::brep_ref(b);
+    if let Some(c) = b.edge_mut(e)?.curve.as_mut() {
+        let _ = c.set_owner(Some(owner), Some(brep_ref));
+    }
+    Ok(())
+}
+
 /// `SmEdge::SetTrimCurve(pFace, pUVTrimCurve, dMaxDistanceToSurface, bDoValidation)`
 /// (CO-PORTED, `SmEdge.cpp`): the edge's first edge use on `face` oriented
 /// [`OrientType::Same`] takes `uv_curve` (`SetUVTrimCurve`, the old curve deleted); with
@@ -1470,8 +1495,9 @@ pub fn set_trim_curve(
             eu1::set_uv_trim_curve(b, eu, arg, max_distance_to_surface, true, None)?;
             if validate {
                 // Check the Geometry: side effects change tolerance and interval values
-                with_kernel_callbacks(k, b, |k, b, env| {
-                    crate::topology::brep::validation::validate_geometry(k, b, e, true, env.key_of)
+                with_kernel_callbacks(k, b, |k, b, _env| {
+                    let keys = owner_keys(b);
+                    crate::topology::brep::validation::validate_geometry(k, b, e, true, &keys)
                 })?;
             }
             return Ok(());
