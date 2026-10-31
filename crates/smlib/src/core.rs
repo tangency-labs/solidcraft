@@ -71,7 +71,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.fillet_refuse_rails_leaving_faces = true;
     f.fillet_refuse_face_consuming_blends = true;
     f.fillet_refuse_non_manifold_result = true;
-    f.fillet_refuse_crossing_rails = true;
     f.fillet_vertex_error_diagnostics = true;
     f.fillet_corner_ball_patch = true;
     f.fillet_chamfer_cone_on_arc = true;
@@ -299,7 +298,10 @@ pub(crate) fn fixes() -> UpstreamFixes {
 /// The fork has no such code: `offset_splits_corner_vertices` (WR-657: `CloseLoopGaps` splits no
 /// corner and an offset's result is not refused for being open), `defeature_refuses_open_base`
 /// (WR-656: `DoDefeature` drops `BuildPatches`' outcome) and `ssi_start_loop_trace_budget` (HANG-52:
-/// `DoIntersection`'s start-point loop has no budget).
+/// `DoIntersection`'s start-point loop has no budget). `fillet_refuse_crossing_rails` (WR-460: "not
+/// upstream"; the fork stops such rounds with the overlapping bands' check, SmFilletExecutive.cpp:3654,
+/// and refuses a result that is no closed solid) also fails sound rounds, with the closest-point
+/// query's 1001 (a box's top loop, R4 on R8 corners).
 ///
 /// On since `SMLIB_REV` eaa998a: `fillet_trim_inside_by_best_dot` (fork de4dae6),
 /// `fillet_half_degree_crease` (2e8758b), `fillet_split_edge_keeps_near_half` (ceb3272) and
@@ -356,6 +358,7 @@ const HELD_BACK: &[&str] = &[
     "analytic_corner_failure_is_false",
     "defeature_refuses_open_base",
     "ssi_start_loop_trace_budget",
+    "fillet_refuse_crossing_rails",
 ];
 
 fn fresh() -> Kernel {
