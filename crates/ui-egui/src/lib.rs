@@ -351,6 +351,11 @@ pub struct UiState {
     /// Perspective while orbiting, orthographic when the camera faces a standard axis view
     /// (#2682). Off by default; when on it decides the projection instead of `perspective`.
     pub auto_ortho_faces: bool,
+    /// View angles card locks (#4581): a locked angle stays put while orbiting, turning with the
+    /// arrow keys or using a 3D mouse, and its field and zero button in the card go inert.
+    pub view_angles_lock_yaw: bool,
+    pub view_angles_lock_pitch: bool,
+    pub view_angles_lock_roll: bool,
     pub palette_open: bool,
     /// Dark theme (the default); a preference kept between runs.
     pub dark: bool,
@@ -403,6 +408,9 @@ impl Default for UiState {
             show_navigation_bar: true,
             perspective: false,
             auto_ortho_faces: false,
+            view_angles_lock_yaw: false,
+            view_angles_lock_pitch: false,
+            view_angles_lock_roll: false,
             palette_open: false,
             dark: true,
             pick_off: Vec::new(),
@@ -1371,6 +1379,8 @@ impl SolveApp {
             }
             if id == "view.navigate" {
                 let to: Camera = serde_json::from_value(v.get("camera").cloned().unwrap_or_default()).map_err(|e| e.to_string())?;
+                // A locked view angle (#4581) never moves with the mouse or the arrow keys.
+                let to = crate::view_angles::keep_locked(self, self.cam, to);
                 if v.get("continuous").and_then(Value::as_bool).unwrap_or(false) {
                     self.cancel_view_animation();
                     self.cam = to;
