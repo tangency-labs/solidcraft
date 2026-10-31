@@ -1,8 +1,9 @@
 //! Settings profiles (#6237): the input and interface settings kept together under a name, such
 //! as "Laptop" and "Large monitor", and switched at once. A profile holds the original Interface,
-//! Navigation and Sketch preference keys and the language, keyboard shortcuts, toolbar,
-//! S box favourites, and imported theme it uses. Page moves preserve that stored key set;
-//! device-specific 3D mouse keys, graphics, recent files and Assistant settings stay out.
+//! Navigation and Sketch preference keys and the language, keyboard shortcuts, toolbar (with its
+//! quick-access bar), S box favourites, and imported theme it uses. Page moves preserve that
+//! stored key set; device-specific 3D mouse keys, graphics, recent files and Assistant settings
+//! stay out.
 //!
 //! A profile is kept, exported and imported as one `solidcraft-profile/1` document. Every
 //! document is checked by [`sanitize`] first: unknown keys are dropped, sizes are capped, and a

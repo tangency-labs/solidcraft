@@ -1629,9 +1629,14 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
             let _ = app.run("browser.visibility", json!({"visible": true, "paths": [p["path"]], "isolate": true}));
         }
         "ui.canvasVisible" => drop(app.run("canvas.edit", p)),
-        "ui.toolbarPin" | "ui.toolbarRemove" | "ui.toolbarReset" | "ui.toolbarCustomize" | "ui.toolbarTab" | "ui.shortcutPin" => {
-            crate::toolbar_custom::run(app, &item.id, &p)
-        }
+        "ui.toolbarPin"
+        | "ui.toolbarRemove"
+        | "ui.toolbarReset"
+        | "ui.toolbarCustomize"
+        | "ui.toolbarTab"
+        | "ui.shortcutPin"
+        | "ui.quickAccessAdd"
+        | "ui.quickAccessRemove" => crate::toolbar_custom::run(app, &item.id, &p),
         "ui.navPreset" => {
             // Picked here, a preset sets what Preferences › Navigation sets for it.
             if let Some(preset) = crate::prefs::NAV_PRESETS.iter().find(|preset| p.get("preset").and_then(Value::as_str) == Some(preset.id)) {

@@ -1,0 +1,32 @@
+{
+  "en": {
+    "ui.addToQuickAccess": "Add to Quick Access",
+    "ui.quick_access_full": "The quick-access bar holds {count} commands; remove one to add another",
+    "ui.removeFromQuickAccess": "Remove from Quick Access"
+  },
+  "ar": {
+    "ui.addToQuickAccess": "إضافة إلى الوصول السريع",
+    "ui.quick_access_full": "يتسع شريط الوصول السريع لـ {count} أمرًا؛ أزل أحدها لإضافة آخر",
+    "ui.removeFromQuickAccess": "إزالة من الوصول السريع"
+  },
+  "he": {
+    "ui.addToQuickAccess": "הוספה לגישה מהירה",
+    "ui.quick_access_full": "סרגל הגישה המהירה מכיל {count} פקודות; יש להסיר אחת כדי להוסיף אחרת",
+    "ui.removeFromQuickAccess": "הסרה מהגישה המהירה"
+  },
+  "ja": {
+    "ui.addToQuickAccess": "クイックアクセスに追加",
+    "ui.quick_access_full": "クイックアクセスバーに置けるコマンドは {count} 個までです。追加するには 1 つ削除してください",
+    "ui.removeFromQuickAccess": "クイックアクセスから削除"
+  },
+  "vi": {
+    "ui.addToQuickAccess": "Thêm vào Truy cập nhanh",
+    "ui.quick_access_full": "Thanh truy cập nhanh chứa tối đa {count} lệnh; hãy gỡ một lệnh để thêm lệnh khác",
+    "ui.removeFromQuickAccess": "Gỡ khỏi Truy cập nhanh"
+  },
+  "zh": {
+    "ui.addToQuickAccess": "添加到快速访问",
+    "ui.quick_access_full": "快速访问栏最多容纳 {count} 个命令；请先移除一个再添加",
+    "ui.removeFromQuickAccess": "从快速访问中移除"
+  }
+}
