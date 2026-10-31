@@ -3372,6 +3372,79 @@ mod tests {
         assert_eq!(m.proto_edge(new_pe).unwrap().num_edge_definitions(), 1);
     }
 
+    /// WR-101: the upper split child's interval. Pinned (default) it is `[dT, dT]`;
+    /// with `Kernel::fixes.proto_edge_split_upper_keeps_the_old_max` it is
+    /// `[dT, old_max]`. The lower child is `[old_min, dT]` either way, and a split at or
+    /// within the tolerance of an end is still refused.
+    #[test]
+    fn proto_edge_split_upper_interval_keeps_the_old_max() {
+        for fixed in [false, true] {
+            let mut k = Kernel::default();
+            assert!(!k.fixes.proto_edge_split_upper_keeps_the_old_max);
+            k.fixes.proto_edge_split_upper_keeps_the_old_max = fixed;
+            let mut geo = Geo::default();
+            geo.curves.push(line([0.0, 0.0, 0.0], [2.0, 0.0, 0.0]));
+            let c0 = H(0, ClassObjectKind::Curve);
+            let mut m = manager();
+            let v0 = m
+                .new_proto_vertex(Point3::new(0.0, 0.0, 0.0), 1e-5)
+                .unwrap();
+            let v1 = m
+                .new_proto_vertex(Point3::new(2.0, 0.0, 0.0), 1e-5)
+                .unwrap();
+            m.add_proto_vertex(v0);
+            m.add_proto_vertex(v1);
+
+            let mut cc = CurveClassification::new(&k);
+            cc.set_curve(Some(c0), false);
+            let ivl = geo.curves[0].natural_interval();
+            let (old_min, old_max) = (ivl.min(), ivl.max());
+            let mut ci1 = CurveInterval::with_interval(&k, &ivl, Some(&cc));
+            ci1.mid = region_pc(R0);
+            let mut ci2 = CurveInterval::with_interval(&k, &ivl, Some(&cc));
+            ci2.mid = region_pc(R1);
+
+            let pe = m
+                .create_proto_edge(&k, &mut geo, Some(v0), Some(v1), &cc, &ci1, &cc, &ci2)
+                .unwrap();
+            let tol = m.proto_edge(pe).unwrap().raw_tolerance();
+
+            // the two refusal guards: at the ends and within the tolerance of them
+            for at in [old_min, old_min + tol / 4.0, old_max - tol / 4.0, old_max] {
+                assert!(matches!(
+                    m.proto_edge_split(&k, &mut geo, pe, at),
+                    Ok((None, None))
+                ));
+            }
+
+            // Split near the end: the proto edge splits, but its edge definition is within
+            // 10*tol of its end and refuses to split (upstream's `cbiFudge`), so nothing
+            // overwrites the interval `proto_edge_split` assigned to the upper child.
+            let dt = old_max - 2.0 * tol;
+            let (new_pv, new_pe) = m.proto_edge_split(&k, &mut geo, pe, dt).unwrap();
+            let new_pe = new_pe.expect("proto edge was split");
+            assert!(new_pv.is_some());
+            assert_eq!(m.proto_edge(new_pe).unwrap().num_edge_definitions(), 0);
+            // premise: the store-edge-definition branch that would overwrite the interval
+            // was refused by `cbiFudge`, so the upper child's interval is the one the split
+            // assigned, not one later overwritten by an edge definition.
+            assert!(
+                (old_max - dt).abs() < 10.0 * tol,
+                "the split must be within the proto edge's tolerance of its end"
+            );
+
+            let lower = m.proto_edge(pe).unwrap().xsect_interval();
+            assert_eq!((lower.min(), lower.max()), (old_min, dt));
+            let upper = m.proto_edge(new_pe).unwrap().xsect_interval();
+            if fixed {
+                assert_eq!((upper.min(), upper.max()), (dt, old_max));
+            } else {
+                // pinned C++ parity: the documented wrong interval
+                assert_eq!((upper.min(), upper.max()), (dt, dt));
+            }
+        }
+    }
+
     /// WR-533 (the fork's tangency-labs/smlib@f11d0ac): an edge definition along the
     /// whole of an edge that is split in its middle is split there too with the opt-in,
     /// each part on its own piece; without it the whole definition stays on the old
