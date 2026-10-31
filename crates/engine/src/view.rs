@@ -828,7 +828,7 @@ pub fn sketch_shown(s: &Session, id: u64) -> bool {
     if s.active_sketch == Some(id) || s.feature_edit_sketch == Some(id) {
         return true;
     }
-    if !sketch_component_visible(s, id) || s.feature_folder_hidden(id, "sketches") {
+    if !s.feature_placement_visible(id) || s.feature_folder_hidden(id, "sketches") {
         return false;
     }
     if s.doc
@@ -843,23 +843,6 @@ pub fn sketch_shown(s: &Session, id: u64) -> bool {
         return false;
     }
     v.shown_sketches.contains(&id) || !sketch_consumed(s, id)
-}
-
-/// Is the placement a sketch is drawn at shown (the active one while its component is being
-/// edited, else the component's first)?
-fn sketch_component_visible(s: &Session, id: u64) -> bool {
-    if s.visibility.hidden_occurrences.is_empty() {
-        return true;
-    }
-    let component = s.doc.feature(id).map_or(0, |f| f.component);
-    if component == 0 {
-        return true;
-    }
-    let path = match &s.active_occurrence_path {
-        Some(p) if s.active_component == component => p.clone(),
-        _ => s.doc.first_path(component),
-    };
-    s.occurrence_visible(&path)
 }
 
 /// Is a sketch used by a later feature? A sheet metal base or contour flange uses its sketch as

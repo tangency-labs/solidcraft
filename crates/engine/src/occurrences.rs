@@ -590,29 +590,43 @@ impl Session {
             })
     }
 
+    /// The placement a sketch or construction feature is drawn at: the active one while its
+    /// component is being edited, else the component's first (empty for the design's own).
+    fn feature_path(&self, component: u64) -> Vec<u64> {
+        match &self.active_occurrence_path {
+            _ if component == 0 => Vec::new(),
+            Some(p) if self.active_component == component => p.clone(),
+            _ => self.doc.first_path(component),
+        }
+    }
+
+    /// Is the placement a sketch or construction feature is drawn at shown?
+    pub fn feature_placement_visible(&self, id: u64) -> bool {
+        if self.visibility.hidden_occurrences.is_empty() {
+            return true;
+        }
+        let component = self.doc.feature(id).map_or(0, |f| f.component);
+        component == 0 || self.occurrence_visible(&self.feature_path(component))
+    }
+
     /// Is a sketch or construction feature hidden by its folder or group, at the placement it
-    /// is drawn at (the active one while its component is being edited, else the first)?
+    /// is drawn at?
     pub fn feature_folder_hidden(&self, id: u64, folder: &str) -> bool {
         if self.visibility.hidden_folders.is_empty() {
             return false;
         }
         let component = self.doc.feature(id).map_or(0, |f| f.component);
-        let path = match &self.active_occurrence_path {
-            _ if component == 0 => Vec::new(),
-            Some(p) if self.active_component == component => p.clone(),
-            _ => self.doc.first_path(component),
-        };
-        self.item_folder_hidden(&Self::folder_scope(&path), component, folder, &id.to_string())
+        self.item_folder_hidden(&Self::folder_scope(&self.feature_path(component)), component, folder, &id.to_string())
     }
 
     /// Is construction geometry or an origin item (by name) shown: not hidden itself, nor by
-    /// its folder or a group it is in?
+    /// its folder or a group it is in, nor by a hidden placement of its component?
     pub fn construction_visible(&self, name: &str) -> bool {
         if self.visibility.hidden_origin.iter().any(|h| h == name) {
             return false;
         }
         match self.doc.features.iter().find(|f| f.name == name) {
-            Some(f) => !self.feature_folder_hidden(f.id, "construction"),
+            Some(f) => self.feature_placement_visible(f.id) && !self.feature_folder_hidden(f.id, "construction"),
             None => true,
         }
     }
