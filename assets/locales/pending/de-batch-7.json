@@ -115,7 +115,7 @@
   "render.result_provisional": "Vorläufiges CPU-Bild",
   "render.result_provisional_help": "Dieser Zwischenstand ist nicht exportierbar. Der Export behält das letzte fertige Ergebnis; ein Abbruch kehrt zu diesem Ergebnis zurück.",
   "render.result_retained": "Das zuletzt fertiggestellte Bild wird angezeigt; ein neueres Rendering hat es noch nicht ersetzt.",
-  "render.result_sequence": "Zwischenstand",
+  "render.result_sequence": "Prüfpunkt",
   "render.result_title": "Render-Ergebnis",
   "render.review_stale": "Diese Prüfung ist veraltet. Lösen Sie sie auf oder prüfen Sie erneut, bevor Sie sie anwenden.",
   "render.ribbon_aging": "Alterung",
