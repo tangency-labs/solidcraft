@@ -4,7 +4,7 @@
 
 use std::sync::Arc;
 
-use solidcraft_geom::{Aabb3, Plane, Vec3};
+use solidcraft_geom::{Aabb3, Plane, Vec2, Vec3};
 use solidcraft_render::{AnalysisColors, Camera, Rgb, Scene, SceneAnalysis, SceneLine, SceneMesh};
 use solidcraft_sketch::Sketch;
 
@@ -423,7 +423,37 @@ pub fn sketch_grid_crossing(p: Vec2, minor: f64) -> Option<Vec2> {
 
 /// The point of the finer lattice between the crossings nearest `p`.
 pub fn sketch_grid_lattice(p: Vec2, fine: f64) -> Vec2 {
-    Vec2::new((p.x / fine).round() * fine, (p.y / fine).round() * fine)
+    Vec2::new(sketch_grid_lattice_axis(p.x, fine), sketch_grid_lattice_axis(p.y, fine))
+}
+
+/// The point of the finer lattice between the crossings nearest `v`.
+pub fn sketch_grid_lattice_axis(v: f64, fine: f64) -> f64 {
+    (v / fine).round() * fine
+}
+
+/// The point of the grid a sketch's point lands on: the crossing of the drawn grid's lines when
+/// the pointer is near one, and the finer lattice between the crossings otherwise (#7114).
+pub fn sketch_grid_point(p: Vec2, minor: f64, fine: f64) -> Vec2 {
+    match sketch_grid_crossing(p, minor) {
+        Some(crossing) => crossing,
+        None => sketch_grid_lattice(p, fine),
+    }
+}
+
+/// The free coordinate of a sketch's point that lines up with another point: the crossing of the
+/// drawn grid's lines when the point can be on one, and on the finer lattice between the
+/// crossings otherwise.
+///
+/// `free` is the coordinate the pointer gives and `fixed` the one the point lines up with, on the
+/// other axis. The crossing has to run through `fixed`: a point that lines up with something off
+/// the drawn grid is on no crossing of it, so there the finer lattice holds the point.
+pub fn sketch_grid_free(free: f64, fixed: f64, minor: f64, fine: f64) -> f64 {
+    let on_line = (fixed / minor).round() * minor;
+    if (on_line - fixed).abs() > minor * 1e-6 {
+        return sketch_grid_lattice_axis(free, fine);
+    }
+    let crossing = (free / minor).round() * minor;
+    if (crossing - free).abs() <= minor / 4.0 { crossing } else { sketch_grid_lattice_axis(free, fine) }
 }
 
 /// How the grid fades out with the distance from the middle of the view (#4214).
