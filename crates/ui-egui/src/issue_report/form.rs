@@ -83,6 +83,21 @@ fn screenshot(app: &mut SolveApp, draft: &mut Draft, ui: &mut Ui) -> bool {
     retake
 }
 
+/// Offers back what was typed into the last draft closed with answers, until it is taken or
+/// this draft gets answers of its own (#7189).
+fn restore(app: &mut SolveApp, draft: &mut Draft, ui: &mut Ui) {
+    let Some(earlier) = app.issue_report.earlier.as_ref() else { return };
+    if draft.typed() {
+        app.issue_report.earlier = None;
+    } else if draft.restorable(earlier)
+        && ui_kit::button(ui, tr_label("Restore what you typed before"), ui_kit::Button::Normal).clicked()
+        && let Some(earlier) = app.issue_report.earlier.take()
+    {
+        draft.restore(earlier);
+        draft.opened_github = false;
+    }
+}
+
 /// Returns whether to retake the screenshot and whether the user closed the form.
 pub(super) fn show(app: &mut SolveApp, draft: &mut Draft, ctx: &egui::Context) -> (bool, bool) {
     let mut retake = false;
@@ -188,6 +203,7 @@ pub(super) fn show(app: &mut SolveApp, draft: &mut Draft, ctx: &egui::Context) -
                             draft.opened_github = false;
                         }
                         super::truncate(&mut draft.title, 160);
+                        restore(app, draft, ui);
                         let response = answer(ui, "What happened?", "Describe the problem you saw", &mut draft.description, "issue_report_body", 3);
                         if response.changed() {
                             draft.opened_github = false;

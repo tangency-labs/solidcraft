@@ -111,6 +111,9 @@ pub struct ReportState {
     /// The report's field that had focus when a capture hid it.
     refocus: Option<egui::Id>,
     cad_focus: Option<egui::Id>,
+    /// What was typed into the last draft closed with answers, offered to the next draft until
+    /// it is taken back or that draft gets answers of its own (#7189).
+    earlier: Option<Answers>,
 }
 
 /// How long a screenshot waits for a preview being computed before it shows it unfinished.
@@ -148,10 +151,17 @@ pub struct Draft {
     focus_requested: bool,
     missing_description: bool,
     opened_github: bool,
+    /// The answers as the draft opened: a crash or a failed command fills some in.
+    opened_with: Answers,
 }
+
+/// A draft's summary and its three answers, in that order: what someone types.
+#[derive(Default)]
+struct Answers([String; 4]);
 
 impl Draft {
     fn new(title: String, body: String, source_signature: u64) -> Self {
+        let opened_with = Answers([title.clone(), String::new(), String::new(), String::new()]);
         Self {
             title,
             title_prefix: String::new(),
@@ -169,6 +179,44 @@ impl Draft {
             focus_requested: false,
             missing_description: false,
             opened_github: false,
+            opened_with,
+        }
+    }
+
+    fn answers(&self) -> [&String; 4] {
+        [&self.title, &self.description, &self.steps, &self.expected]
+    }
+
+    /// Whether anything was typed: an answer differs from what the draft opened with.
+    fn typed(&self) -> bool {
+        self.answers().into_iter().zip(&self.opened_with.0).any(|(now, opened)| now != opened)
+    }
+
+    /// The answers typed, to keep when the draft closes (the others left empty); `None` when
+    /// nothing was.
+    fn typed_answers(&self) -> Option<Answers> {
+        let mut typed = Answers::default();
+        for ((kept, now), opened) in typed.0.iter_mut().zip(self.answers()).zip(&self.opened_with.0) {
+            if now != opened {
+                kept.clone_from(now);
+            }
+        }
+        typed.0.iter().any(|kept| !kept.is_empty()).then_some(typed)
+    }
+
+    /// Whether `earlier` has an answer for a field still empty here. Only a draft that opened
+    /// empty offers it: a crash or a failed command is a problem of its own.
+    fn restorable(&self, earlier: &Answers) -> bool {
+        self.opened_with.0.iter().all(String::is_empty)
+            && self.answers().into_iter().zip(&earlier.0).any(|(now, kept)| now.is_empty() && !kept.is_empty())
+    }
+
+    /// Puts `earlier` back into the fields still empty.
+    fn restore(&mut self, earlier: Answers) {
+        for (now, kept) in [&mut self.title, &mut self.description, &mut self.steps, &mut self.expected].into_iter().zip(earlier.0) {
+            if now.is_empty() {
+                *now = kept;
+            }
         }
     }
 
@@ -572,11 +620,28 @@ pub fn crash_draft(report: &serde_json::Value) -> Draft {
     draft.origin = Origin::Crash;
     draft.description =
         limited(&format!("{what}{}.", command.map(|c| format!(" while running `{}`", limited(c, 160))).unwrap_or_default()), MAX_ANSWER);
+    draft.opened_with = Answers(draft.answers().map(String::clone));
     draft
+}
+
+/// A draft with typed answers is never replaced: opening the report again shows it, with its
+/// description focused (#7189). An untouched draft, or one already handed to GitHub, gives way to
+/// the new context. When the new report has context of its own (a crash, a failed command), the
+/// kept draft says how to report it.
+fn keep_typed(app: &mut SolveApp, new_context: bool) -> bool {
+    let Some(draft) = app.issue_report.draft.as_mut().filter(|draft| draft.typed() && !draft.opened_github) else { return false };
+    draft.focus_requested = false;
+    if new_context {
+        draft.note = "Close this draft to report the new problem.".into();
+    }
+    true
 }
 
 /// Open a reviewed draft for a crash report (no screenshot: the view shows nothing of it).
 pub fn begin_crash(app: &mut SolveApp, ctx: &egui::Context, report: &serde_json::Value) {
+    if keep_typed(app, true) {
+        return;
+    }
     if app.issue_report.draft.is_none() {
         app.issue_report.cad_focus = ctx.memory(|m| m.focused());
     }
@@ -613,6 +678,9 @@ pub fn draft_url(title: &str, body: &str) -> (String, bool) {
 }
 
 pub fn begin(app: &mut SolveApp, ctx: &egui::Context, dialog: Option<&dialogs::Dialog>, error: Option<&str>) {
+    if keep_typed(app, dialog.is_some() || error.is_some()) {
+        return;
+    }
     if app.issue_report.draft.is_none() {
         app.issue_report.cad_focus = ctx.memory(|m| m.focused());
     }
@@ -928,6 +996,13 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         crate::drag_snap::clear();
         crate::gizmo::cancel(ctx, egui::Id::new("sc_move_triad"));
         crate::gizmo::cancel(ctx, egui::Id::new("sc_occ_triad"));
+        // What was typed outlives the draft: the next one offers it back. Not once it went to
+        // GitHub: the issue has it, and offering it again invites a second one.
+        if !draft.opened_github
+            && let Some(typed) = draft.typed_answers()
+        {
+            app.issue_report.earlier = Some(typed);
+        }
         if let Some(focus) = app.issue_report.cad_focus.take() {
             ctx.memory_mut(|m| m.request_focus(focus));
         }
@@ -1411,6 +1486,116 @@ mod tests {
         assert!(draft.body.contains("combine") && draft.body.contains("keep_tools") && draft.body.contains("Cutter"));
         assert!(pending(&app), "Help must request real evidence, not just copy generic text");
         assert_eq!(before, (app.session.doc.to_json(), app.session.undo.len(), app.session.redo.len(), app.cam));
+    }
+
+    /// Report an Issue… (the macOS Help menu, `ui.help report`) or a crash's Report… while a
+    /// draft has answers shows that draft, not an empty one (#7189).
+    #[test]
+    fn issue_report_opened_again_keeps_the_typed_draft() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.call("ui.help", json!({"item":"report"}));
+        let token = h.app.issue_report.pending.as_ref().unwrap().token;
+        receive(&mut h.app, token, Arc::new(ColorImage::new([2, 2], vec![egui::Color32::GREEN; 4])));
+        h.frames(4);
+        h.step(&json!({"text":"The fillet preview vanished"})).unwrap();
+        for reopen in ["help", "crash"] {
+            h.ctx.memory_mut(|m| m.request_focus(egui::Id::new("issue_report_steps")));
+            h.frames(1);
+            if reopen == "help" {
+                h.call("ui.help", json!({"item":"report"}));
+            } else {
+                begin_crash(&mut h.app, &h.ctx, &json!({"kind":"command_panic","message":"boom"}));
+            }
+            h.frames(2);
+            let draft = h.app.issue_report.draft.as_ref().unwrap();
+            assert_eq!(draft.description, "The fillet preview vanished", "{reopen}");
+            assert!(draft.image.is_some() && !pending(&h.app), "{reopen}: the draft stays as it was, screenshot included");
+            assert_eq!(h.ctx.memory(|m| m.focused()), Some(egui::Id::new("issue_report_body")), "{reopen}: and is brought into view");
+        }
+    }
+
+    /// Close draft and the header ✕ keep what was typed: the next draft offers it back, until it
+    /// is taken or that draft gets answers of its own (#7189).
+    #[test]
+    fn issue_report_closed_answers_are_offered_to_the_next_draft() {
+        let open = |h: &mut crate::scenario::Harness| {
+            h.call("ui.help", json!({"item":"report"}));
+            let token = h.app.issue_report.pending.as_ref().unwrap().token;
+            receive(&mut h.app, token, Arc::new(ColorImage::new([2, 2], vec![egui::Color32::GREEN; 4])));
+            h.frames(4);
+        };
+        for close in [json!({"widget":"Close draft"}), json!({"click":{"handle":"dialog:close"}})] {
+            let mut h = crate::scenario::Harness::new();
+            h.app.home.open = false;
+            open(&mut h);
+            assert!(h.widget("Restore what you typed before").is_none(), "nothing to restore yet");
+            h.step(&json!({"text":"The fillet preview vanished"})).unwrap();
+            h.ctx.memory_mut(|m| m.request_focus(egui::Id::new("issue_report_steps")));
+            h.frames(1);
+            h.step(&json!({"text":"Fillet the top edge"})).unwrap();
+            h.step(&close).unwrap();
+            assert!(h.app.issue_report.draft.is_none(), "{close}");
+            open(&mut h);
+            let draft = h.app.issue_report.draft.as_ref().unwrap();
+            assert!(draft.description.is_empty() && draft.steps.is_empty(), "a new draft starts empty");
+            h.step(&json!({"widget":"Restore what you typed before"})).unwrap();
+            let draft = h.app.issue_report.draft.as_ref().unwrap();
+            assert_eq!([draft.description.as_str(), draft.steps.as_str()], ["The fillet preview vanished", "Fillet the top edge"], "{close}");
+            assert!(h.widget("Restore what you typed before").is_none(), "the offer is gone once used");
+            // Restored answers are typed answers: closing keeps them again, until the next draft
+            // gets answers of its own.
+            h.step(&close).unwrap();
+            open(&mut h);
+            assert!(h.widget("Restore what you typed before").is_some());
+            h.step(&json!({"text":"Another problem"})).unwrap();
+            h.frames(1);
+            assert!(h.widget("Restore what you typed before").is_none(), "typing in the new draft drops the offer");
+            h.step(&close).unwrap();
+            open(&mut h);
+            h.step(&json!({"widget":"Restore what you typed before"})).unwrap();
+            let draft = h.app.issue_report.draft.as_ref().unwrap();
+            assert_eq!([draft.description.as_str(), draft.steps.as_str()], ["Another problem", ""]);
+        }
+    }
+
+    /// A kept draft says how to report the new problem a crash brings. Once it went to GitHub it
+    /// is neither kept nor offered back: the issue has its text (#7189).
+    #[test]
+    fn issue_report_draft_handed_to_github_gives_way() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.call("ui.help", json!({"item":"report"}));
+        let token = h.app.issue_report.pending.as_ref().unwrap().token;
+        receive(&mut h.app, token, Arc::new(ColorImage::new([2, 2], vec![egui::Color32::GREEN; 4])));
+        h.frames(4);
+        h.step(&json!({"text":"The fillet preview vanished"})).unwrap();
+        let crash = json!({"kind":"command_panic","message":"boom"});
+        begin_crash(&mut h.app, &h.ctx, &crash);
+        h.frames(2);
+        let draft = h.app.issue_report.draft.as_ref().unwrap();
+        assert_eq!(draft.description, "The fillet preview vanished");
+        assert_eq!(draft.note, "Close this draft to report the new problem.");
+        assert!(h.widget("Close this draft to report the new problem.").is_some());
+        click_commands(&mut h, "Continue on GitHub");
+        assert!(h.app.issue_report.draft.as_ref().unwrap().opened_github);
+        begin_crash(&mut h.app, &h.ctx, &crash);
+        h.frames(2);
+        assert_ne!(h.app.issue_report.draft.as_ref().unwrap().description, "The fillet preview vanished", "the crash gets its own draft");
+        // Closed after GitHub has it, nothing is offered to the next draft.
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.call("ui.help", json!({"item":"report"}));
+        let token = h.app.issue_report.pending.as_ref().unwrap().token;
+        receive(&mut h.app, token, Arc::new(ColorImage::new([2, 2], vec![egui::Color32::GREEN; 4])));
+        h.frames(4);
+        h.step(&json!({"text":"The fillet preview vanished"})).unwrap();
+        click_commands(&mut h, "Continue on GitHub");
+        h.step(&json!({"widget":"Close draft"})).unwrap();
+        assert!(h.app.issue_report.draft.is_none() && h.app.issue_report.earlier.is_none());
+        h.call("ui.help", json!({"item":"report"}));
+        h.frames(4);
+        assert!(h.widget("Restore what you typed before").is_none());
     }
 
     #[test]
