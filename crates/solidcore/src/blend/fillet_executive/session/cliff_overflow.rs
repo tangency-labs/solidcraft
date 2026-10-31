@@ -322,7 +322,16 @@ impl FilletSession<'_> {
             }
             self.noted(note.take(), cut)?;
         }
-        let blended = Blended::of_edges(self.objects.target, &blended_edges)?;
+        let mut blended = Blended::of_edges(self.objects.target, &blended_edges)?;
+        // the filleted edge of each fillet face of the sheet (WR-636, `bba9914`), read
+        // after the cuts, which can replace a geometry's face
+        for (&solver, &edge) in solvers.iter().zip(&blended_edges) {
+            for &(_, f) in faces_of.get(&solver).map_or(&[][..], Vec::as_slice) {
+                if let Some(f) = f {
+                    blended.edge_of_fillet.insert(f, edge);
+                }
+            }
+        }
         let closed = close_removal_region(
             k,
             &mut region,

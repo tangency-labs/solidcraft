@@ -3,8 +3,9 @@
 //! faces went on past the cliffs, and the material it removes is subtracted from the body.
 //!
 //! Not upstream: the SolidCraft fork's `source/SMLib/src/SmFilletCliffOverflow.cpp`
-//! (tangency-labs/smlib `8ba4667` and `ae2a6de`, rev `68fb9162`), behind
-//! `fixes.fillet_cliff_overflow` (WR-631, WR-638). The executive computes the fillet on the
+//! (tangency-labs/smlib `8ba4667` and `ae2a6de`, rev `68fb9162`; `eddf0ed` and `bba9914`,
+//! branch `replay/1.0.1`), behind `fixes.fillet_cliff_overflow` (WR-631, WR-638, WR-635,
+//! WR-636). The executive computes the fillet on the
 //! support faces' surfaces (`m_bCliffOverflow`): its fillet B-rep is the sheet of fillet and
 //! corner faces, its boundary on the surfaces of the faces the blends roll on and end on.
 //! The session's `SubtractRemovalRegion`
@@ -17,7 +18,8 @@
 //!      when they must be) that join the two;
 //!   3. subtracts that region from the target with the manifold Boolean.
 //!
-//! Exactness: a plane continues exactly (the same plane, a larger domain); any other
+//! Exactness: a planar surface continues exactly (its plane over a larger domain: a plane,
+//! or a B-spline SMLib finds planar, a loft's wall; WR-635, `eddf0ed`); any other
 //! surface is used within its own domain, and a needed continuation of one is refused
 //! (`FilletErrorType::NotExact`). A side edge continues past its end only when it is a
 //! straight line. An end the fillet runs past is cut only by a planar end face.
@@ -38,6 +40,11 @@
 //! | [`lamina_hosts`]             | its host test                          |
 //! | [`lamina_chains`]            | its chain walk                         |
 //! | [`closing_face`]             | its closing face of one chain          |
+//! | [`plane_of`]                 | `sm_PlaneOf` (`eddf0ed`)               |
+//! | [`lies_on_surface`]          | `sm_LiesOnSurface` (`eddf0ed`)         |
+//! | `loop_area` (private)        | `sm_LoopArea` (`bba9914`)              |
+//! | `reverse_loop` (private)     | `sm_Reverse` (`bba9914`)               |
+//! | [`close_round_loop`]         | `sm_CloseRoundLoop` (`bba9914`)        |
 //!
 //! Deviations:
 //! - **Errors.** `GetFilletErrorInfo()->NoteError(code, comment)` followed by `SM_ERR`
@@ -64,7 +71,7 @@ use crate::geom::extent2d::Extent2d;
 use crate::geom::global_solver::SolverOperation;
 use crate::intersect::point_class::{PointClassType, PointClassification};
 use crate::kernel::Kernel;
-use crate::math::{Point2, Point3, Vec2, BIG_DOUBLE, EFF_ZERO};
+use crate::math::{Point2, Point3, Vec2, Vec3, BIG_DOUBLE, EFF_ZERO};
 use crate::nurbs::b_spline_curve_n_lib::TrimMode;
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use crate::query::face::p1::{point_3d_classify, Point3dClassifyOptions};
@@ -189,17 +196,76 @@ fn edge_curve(k: &Kernel, b: &Brep, e: EdgeId) -> Result<Curve> {
     Ok(copy)
 }
 
+/// The plane a planar surface lies on, by an origin and orthonormal axes `(x, y, z)`.
+#[derive(Debug, Clone, Copy)]
+pub struct PlaneFrame {
+    /// The origin.
+    pub origin: Point3,
+    /// The first axis in the plane.
+    pub x: Vec3,
+    /// The second axis in the plane.
+    pub y: Vec3,
+    /// The unit normal.
+    pub z: Vec3,
+}
+
+/// `sm_PlaneOf` (WR-635, the fork's `eddf0ed`): the plane a planar surface lies on: a
+/// plane's own frame, or for any other surface SMLib finds planar (`IsPlanar(SM_EFF_ZERO)`:
+/// a ruled B-spline wall between parallel lines, a loft's planar side) its plane through
+/// the point `IsPlanar` gives, its first axis the normal crossed with the coordinate axis
+/// it leans on least. `None` when the surface is not planar.
+///
+/// # Errors
+/// `SM_ERR` for a zero normal or axis; those of `IsPlanar`.
+pub fn plane_of(k: &Kernel, surface: &Surface) -> Result<Option<PlaneFrame>> {
+    if let SurfaceKind::Plane(plane) = surface.kind() {
+        let frame = plane.position();
+        return Ok(Some(PlaneFrame {
+            origin: frame.origin(),
+            x: frame.x_axis(),
+            y: frame.y_axis(),
+            z: frame.z_axis(),
+        }));
+    }
+    let planar = surface.is_planar(k, EFF_ZERO)?;
+    if !planar.is_planar {
+        return Ok(None);
+    }
+    let normal = planar
+        .normal
+        .unitize()
+        .map_err(|_| SolidError::sm_err(OP))?;
+    // an axis in the plane: the normal crossed with the coordinate axis it leans on least
+    let mut axis = Vec3::new(1.0, 0.0, 0.0);
+    if normal.y.abs() < normal.x.abs() && normal.y.abs() <= normal.z.abs() {
+        axis = Vec3::new(0.0, 1.0, 0.0);
+    } else if normal.z.abs() < normal.x.abs() {
+        axis = Vec3::new(0.0, 0.0, 1.0);
+    }
+    let x = normal
+        .cross(axis)
+        .unitize()
+        .map_err(|_| SolidError::sm_err(OP))?;
+    let y = normal.cross(x);
+    Ok(Some(PlaneFrame {
+        origin: planar.point,
+        x,
+        y,
+        z: normal,
+    }))
+}
+
 /// `sm_DistanceToSurface`: the distance from `point` to the surface of `f` continued, as far
 /// as it continues exactly: a plane's to the whole plane, any other surface's to its own
-/// domain (`BIG_DOUBLE` when the drop fails).
+/// domain (`BIG_DOUBLE` when the drop fails). A planar surface of any kind ([`plane_of`];
+/// WR-635, `eddf0ed`) continues as its plane.
 ///
 /// # Errors
 /// `SM_ERR_NULL_POINTER` for a face without surface; those of the drop.
 pub fn distance_to_surface(k: &Kernel, b: &Brep, f: FaceId, point: Point3) -> Result<f64> {
     let surface = face::p2::surface(b, f)?.ok_or_else(|| SolidError::null_pointer(OP))?;
-    if let SurfaceKind::Plane(plane) = surface.kind() {
-        let frame = plane.position();
-        return Ok((point - frame.origin()).dot(frame.z_axis()).abs());
+    if let Some(frame) = plane_of(k, surface)? {
+        return Ok((point - frame.origin).dot(frame.z).abs());
     }
     let surface = surface.clone_for_evaluation()?;
     let domain = surface.natural_uv_domain_with_nurb(k)?;
@@ -238,12 +304,10 @@ pub fn covering_surface(
     tol: f64,
 ) -> Result<Option<Surface>> {
     let surface = face::p2::surface(b, f)?.ok_or_else(|| SolidError::null_pointer(OP))?;
-    if let SurfaceKind::Plane(plane) = surface.kind() {
-        // the plane through the same origin along the same axes, at unit scale: the same
-        // points
-        let frame = plane.position();
-        let origin = frame.origin();
-        let (x, y) = (frame.x_axis(), frame.y_axis());
+    if let Some(frame) = plane_of(k, surface)? {
+        // the plane through that origin along those axes, at unit scale: the same points
+        let origin = frame.origin;
+        let (x, y) = (frame.x, frame.y);
         let mut bbox: Option<Extent2d> = None;
         for &p in points {
             let d = p - origin;
@@ -278,6 +342,46 @@ pub fn covering_surface(
         }
     }
     Ok(Some(surface.copy(k)?))
+}
+
+/// `sm_LiesOnSurface` (WR-635, `eddf0ed`): whether the sheet face `sheet_face` of `region`
+/// lies on the surface of the target face `f` continued: its surface, over a 5 x 5 grid
+/// across the face's UV box, within `tol` of it ([`distance_to_surface`]). An end face of an
+/// Nx1 corner of mixed convexity lies on the end face's surface extended.
+///
+/// # Errors
+/// `SM_ERR_NULL_POINTER` for a face without surface; those of the evaluations and
+/// distances.
+pub fn lies_on_surface(
+    k: &Kernel,
+    region: &Brep,
+    sheet_face: FaceId,
+    target: &Brep,
+    f: FaceId,
+    tol: f64,
+) -> Result<bool> {
+    let surface =
+        face::p2::surface(region, sheet_face)?.ok_or_else(|| SolidError::null_pointer(OP))?;
+    let bbox = face::p2::uv_domain(region, sheet_face)?;
+    let size = bbox.size();
+    let mut on = true;
+    for i in 0..=4u32 {
+        if !on {
+            break;
+        }
+        for j in 0..=4u32 {
+            if !on {
+                break;
+            }
+            let uv = Point2::new(
+                bbox.min().x + size.x * f64::from(i) / 4.0,
+                bbox.min().y + size.y * f64::from(j) / 4.0,
+            );
+            let pnt = surface.evaluate_point(k, uv)?;
+            on = distance_to_surface(k, target, f, pnt)? <= tol;
+        }
+    }
+    Ok(on)
 }
 
 /// `sm_Same`: whether two points coincide to `tol`.
@@ -479,6 +583,10 @@ pub struct Blended {
     pub vertices: BTreeSet<VertexId>,
     /// `vHosts`: the faces round those vertices, in first-seen order.
     pub hosts: Vec<FaceId>,
+    /// `sEdgeOfFillet` (WR-636, `bba9914`): the filleted edge of each fillet face of the
+    /// sheet (the face each solver's fillet geometries' surfaces are on, in solver then
+    /// geometry order, a later entry replacing an earlier one).
+    pub edge_of_fillet: BTreeMap<FaceId, EdgeId>,
 }
 
 impl Blended {
@@ -555,8 +663,20 @@ pub fn lamina_hosts(
         let curve = edge_curve(k, region, e)?;
         let mut points = Vec::new();
         samples(k, &curve, 4, &mut points)?;
+        // the sheet's face along the edge (a lamina edge has one)
+        let sheet_faces = edge::faces(region, e, None)?;
+        let [sheet_face] = sheet_faces.as_slice() else {
+            return Err(SolidError::sm_err(OP));
+        };
         let mut host = None;
         for &f in hosts {
+            // A sheet face on the face's own surface (an Nx1 corner's end face of mixed
+            // convexity, on the end face's surface extended, `CreateCornerPatch`) stands in
+            // for that face there: its lamina edge along a side edge lies on both faces'
+            // surfaces, and the sheet's boundary passes along it onto the other face.
+            if lies_on_surface(k, region, *sheet_face, target, f, on_tol)? {
+                continue;
+            }
             let mut on = true;
             for &p in &points {
                 if !on {
@@ -605,14 +725,17 @@ pub struct Chain {
     pub host: FaceId,
     /// `m_vEdges`.
     pub edges: Vec<EdgeId>,
-    /// `m_vVerts`: one more than the edges.
+    /// `m_vVerts`: one more than the edges, the first again when closed.
     pub vertices: Vec<VertexId>,
+    /// `m_bClosed` (WR-636, `bba9914`): the chain closes on its host.
+    pub closed: bool,
 }
 
 /// The chain walk of `CloseRemovalRegion`: the lamina edges in chains of consecutive edges
 /// on one host, each from the first edge not yet in a chain, forward from its end vertex,
 /// then backward from its start vertex. Refused (`NoRoom`) where the boundary branches on a
-/// face or closes on one.
+/// face. A chain that comes back to its first edge is closed (WR-636, `bba9914`; it was
+/// refused before).
 ///
 /// # Errors
 /// The refusals as `SM_ERR`; `SM_ERR` past the walk's bound (the lamina edge count);
@@ -652,6 +775,7 @@ pub fn lamina_chains(
             host,
             edges: vec![first],
             vertices: vec![start, end],
+            closed: false,
         };
         done.insert(first);
         // forward from the first edge's end vertex
@@ -682,13 +806,10 @@ pub fn lamina_chains(
             done.insert(found);
         }
         if closed {
-            return refuse(
-                note,
-                Refusal::no_room(
-                    NoRoomReason::CliffBoundaryClosed,
-                    "Fillet Error: a cliff overflow's fillet boundary closes on one face",
-                ),
-            );
+            // round a loop of the host whose every edge is blended ([`close_round_loop`])
+            chain.closed = true;
+            chains.push(chain);
+            continue;
         }
         // backward from the first edge's start vertex
         let mut at = start;
@@ -756,6 +877,22 @@ fn side_end(
     let p = vertex::point(region, end_vertex)?;
     let mut inexact = false;
     let mut found: Option<SideEnd> = None;
+    // A chain can end at a filleted edges' vertex itself (WR-635, `eddf0ed`): an Nx1
+    // corner of mixed convexity extends its end face's surface past the vertex, along the
+    // side edge of the filleted edge's convexity continued back (a pocket's rim edge, the
+    // pocket's corner edge concave), and its end face, in the sheet, reaches the vertex.
+    // The chain closes there: no side edge leads back to it.
+    for v in face::p4::vertices(target, host, None, false, None)? {
+        if found.is_some() {
+            break;
+        }
+        if blended.vertices.contains(&v) && same(vertex::point(target, v)?, p, on_tol) {
+            found = Some(SideEnd {
+                vertex: v,
+                connector: None,
+            });
+        }
+    }
     for side in face::p4::edges(target, host, None, false, None)? {
         if found.is_some() {
             break;
@@ -1097,7 +1234,254 @@ pub fn close_removal_region(
     let hosts = lamina_hosts(k, region, target, &blended.hosts, on_tol, note)?;
     let chains = lamina_chains(region, &hosts, note)?;
     for chain in &chains {
+        if chain.closed {
+            close_round_loop(k, region, target, blended, chain, on_tol, note)?;
+            continue;
+        }
         closing_face(k, region, target, blended, &hosts, chain, on_tol, note)?;
     }
     Ok(())
+}
+
+/// `sm_LoopArea` (WR-636, `bba9914`): the signed area of a loop of curves in a plane's
+/// parameters (its frame's axes), from 16 samples a curve.
+fn loop_area(k: &Kernel, lp: &[LoopCurve], frame: &PlaneFrame) -> Result<f64> {
+    let mut uvs: Vec<Point2> = Vec::new();
+    for c in lp {
+        let mut along = Vec::new();
+        samples(k, &c.curve, 16, &mut along)?;
+        if c.orient == OrientType::Opposite {
+            along.reverse();
+        }
+        let count = along.len().saturating_sub(1);
+        for &p in along.iter().take(count) {
+            let d = p - frame.origin;
+            uvs.push(Point2::new(d.dot(frame.x), d.dot(frame.y)));
+        }
+    }
+    let mut area = 0.0;
+    for (i, a) in uvs.iter().enumerate() {
+        let Some(b) = uvs.get((i + 1) % uvs.len()) else {
+            return Err(SolidError::null_pointer(OP));
+        };
+        area += 0.5 * (a.x * b.y - b.x * a.y);
+    }
+    Ok(area)
+}
+
+/// `sm_Reverse`: reverses a loop of curves.
+fn reverse_loop(lp: &mut [LoopCurve]) {
+    lp.reverse();
+    for c in lp {
+        c.orient = if c.orient == OrientType::Same {
+            OrientType::Opposite
+        } else {
+            OrientType::Same
+        };
+    }
+}
+
+/// `sm_CloseRoundLoop` (WR-636, the fork's `bba9914`): the closing face, on the host's
+/// plane, of a chain of the sheet's boundary that closes on that one face: the blends of
+/// every edge of one of its loops run all round it (a pocket's rim), and the face between
+/// the chain and that loop is the region's there, the one loop inside the other. The loop
+/// is the one whose every edge is blended and some of whose edges the chain's fillet faces
+/// blend ([`Blended::edge_of_fillet`]). The larger loop (by its area on the host's plane)
+/// runs anticlockwise and the other clockwise; the face is made in the sheet's infinite
+/// region. Refused (`NoRoom`) when no such loop, or more than one, is found, or the host is
+/// not planar.
+///
+/// # Errors
+/// The refusals as `SM_ERR`; `SM_ERR` for a chain without one more vertex than edges or a
+/// loop whose edges do not run end to end; those of the curves, the covering surface and
+/// the face construction.
+#[allow(clippy::too_many_lines)] // one fork routine
+pub fn close_round_loop(
+    k: &mut Kernel,
+    region: &mut Brep,
+    target: &Brep,
+    blended: &Blended,
+    chain: &Chain,
+    on_tol: f64,
+    note: &mut Option<Refusal>,
+) -> Result<FaceId> {
+    let host = chain.host;
+    if chain.vertices.len() != chain.edges.len() + 1 {
+        return Err(SolidError::sm_err(OP));
+    }
+
+    // the filleted edges whose fillet faces the chain bounds
+    let mut along: BTreeSet<EdgeId> = BTreeSet::new();
+    for &e in &chain.edges {
+        for f in edge::faces(region, e, None)? {
+            if let Some(&filleted) = blended.edge_of_fillet.get(&f) {
+                along.insert(filleted);
+            }
+        }
+    }
+    // the host's loop of filleted edges they belong to
+    let mut round = None;
+    for lp in face::p2::loops(target, host, false, None)? {
+        let edges = crate::topology::loopuse::loop_edges(target, lp)?;
+        let mut all_blended = !edges.is_empty();
+        let mut ours = false;
+        for e in &edges {
+            if !e.is_some_and(|e| blended.edges.contains(&e)) {
+                all_blended = false;
+            }
+            if e.is_some_and(|e| along.contains(&e)) {
+                ours = true;
+            }
+        }
+        if !all_blended || !ours {
+            continue;
+        }
+        if round.is_some() {
+            return refuse(
+                note,
+                Refusal::no_room(
+                    NoRoomReason::CliffBoundaryClosed,
+                    "Fillet Error: a cliff overflow's fillet boundary closes on one face round two of its loops",
+                ),
+            );
+        }
+        round = Some(lp);
+    }
+    let Some(round) = round else {
+        return refuse(
+            note,
+            Refusal::no_room(
+                NoRoomReason::CliffBoundaryClosed,
+                "Fillet Error: a cliff overflow's fillet boundary closes on one face round no loop of filleted edges",
+            ),
+        );
+    };
+    let host_surface =
+        face::p2::surface(target, host)?.ok_or_else(|| SolidError::null_pointer(OP))?;
+    let Some(frame) = plane_of(k, host_surface)? else {
+        return refuse(
+            note,
+            Refusal::no_room(
+                NoRoomReason::CliffBoundaryClosed,
+                "Fillet Error: a cliff overflow's fillet boundary closes on one face that is not planar",
+            ),
+        );
+    };
+
+    // the chain, and the loop of filleted edges, each run end to end
+    let mut loops: [Vec<LoopCurve>; 2] = [Vec::new(), Vec::new()];
+    for (e, pair) in chain.edges.iter().zip(chain.vertices.windows(2)) {
+        let [from, to] = pair else {
+            return Err(SolidError::null_pointer(OP));
+        };
+        let curve = edge_curve(k, region, *e)?;
+        add_curve(
+            k,
+            &mut loops[0],
+            curve,
+            vertex::point(region, *from)?,
+            vertex::point(region, *to)?,
+        )?;
+    }
+    let mut left: Vec<EdgeId> = Vec::new();
+    for e in crate::topology::loopuse::loop_edges(target, round)? {
+        left.push(e.ok_or_else(|| SolidError::null_pointer(OP))?);
+    }
+    let Some(&first) = left.first() else {
+        return Err(SolidError::sm_err(OP));
+    };
+    let mut at = edge::start_end_vertices(target, first)?
+        .0
+        .ok_or_else(|| SolidError::null_pointer(OP))?;
+    while !left.is_empty() {
+        let mut found = None;
+        for (i, &e) in left.iter().enumerate() {
+            let (s, t) = edge::start_end_vertices(target, e)?;
+            if s == Some(at) || t == Some(at) {
+                found = Some(i);
+                break;
+            }
+        }
+        let Some(i) = found else {
+            return Err(SolidError::sm_err(OP));
+        };
+        let e = left.remove(i);
+        let other =
+            edge::other_vertex(target, e, Some(at))?.ok_or_else(|| SolidError::null_pointer(OP))?;
+        let curve = edge_curve(k, target, e)?;
+        add_curve(
+            k,
+            &mut loops[1],
+            curve,
+            vertex::point(target, at)?,
+            vertex::point(target, other)?,
+        )?;
+        at = other;
+    }
+
+    // the host's plane over both, the outer loop anticlockwise on it and the inner clockwise
+    let mut points = Vec::new();
+    for lp in &loops {
+        for c in lp {
+            samples(k, &c.curve, 8, &mut points)?;
+        }
+    }
+    let surface = covering_surface(k, target, host, &points, on_tol)?
+        .ok_or_else(|| SolidError::null_pointer(OP))?;
+    let areas = [
+        loop_area(k, &loops[0], &frame)?,
+        loop_area(k, &loops[1], &frame)?,
+    ];
+    let outer = usize::from(areas[0].abs() < areas[1].abs());
+    let inner = 1 - outer;
+    if areas.get(outer).is_some_and(|&a| a < 0.0) {
+        if let Some(lp) = loops.get_mut(outer) {
+            reverse_loop(lp);
+        }
+    }
+    if areas.get(inner).is_some_and(|&a| a > 0.0) {
+        if let Some(lp) = loops.get_mut(inner) {
+            reverse_loop(lp);
+        }
+    }
+    // the plane built on the host's frame: its parameters are (x, y), as measured
+    let mut counts = Vec::new();
+    let mut curves = Vec::new();
+    let mut orientations = Vec::new();
+    for index in [outer, inner] {
+        let lp = loops
+            .get(index)
+            .ok_or_else(|| SolidError::null_pointer(OP))?;
+        counts.push(lp.len());
+        for c in lp {
+            curves.push(Some(c.curve.clone()));
+            orientations.push(c.orient);
+        }
+    }
+    let domain = surface.natural_uv_domain_with_nurb(k)?;
+    let input = FaceCurvesInput {
+        loops: counts,
+        curves_3d: Some(curves),
+        uv_curves: None,
+        orientations,
+        loop_points: Vec::new(),
+    };
+    let made = with_kernel_callbacks(k, region, |k, b, env| {
+        let region_id = b.infinite_region();
+        let key_of = env.key_of;
+        let face_ref = |f: FaceId| key_of(EntityRef::Face(f));
+        make_face_with_curves(
+            k,
+            b,
+            region_id,
+            input,
+            surface,
+            &domain,
+            OrientType::Same,
+            None,
+            &face_ref,
+            env,
+        )
+    })?;
+    made.face.ok_or_else(|| SolidError::null_pointer(OP))
 }
