@@ -439,10 +439,11 @@ fn case_variants(exts: &[&str]) -> Vec<String> {
 /// egui's root Ui spans the whole viewport, including native safe areas. Lay out the app
 /// inside the unobscured rectangle so its application bar can receive native pointer input.
 fn content_ui(app: &mut SolveApp, ui: &mut egui::Ui) {
-    let content = ui.ctx().content_rect();
-    let above = egui::Rect::from_min_max(ui.max_rect().min, egui::pos2(ui.max_rect().right(), content.top()));
-    ui.painter().rect_filled(above, 0.0, solidcraft_ui_egui::theme::Tokens::get().app_bar);
-    ui.scope_builder(egui::UiBuilder::new().max_rect(content), |ui| app.ui(ui));
+    // Lay out in the full viewport. A macOS fullscreen safe-area inset used to leave an empty
+    // strip above the application bar (#8245); the bar now absorbs that inset itself while
+    // keeping its controls below the native click-steal zone (#3643).
+    let full = ui.max_rect();
+    ui.scope_builder(egui::UiBuilder::new().max_rect(full), |ui| app.ui(ui));
 }
 
 /// A transparent macOS title bar still intercepts clicks at the top in fullscreen (#3643).
@@ -1655,7 +1656,8 @@ mod viewport_tests {
                 viewport.fullscreen = Some(fullscreen);
                 viewport.native_pixels_per_point = Some(retina);
                 super::fullscreen_content_insets(&mut raw, 32.0, zoom);
-                let _ = ctx.run_ui(raw, |ui| super::content_ui(app, ui));
+                let mut out = ctx.run_ui(raw, |ui| super::content_ui(app, ui));
+                out.textures_delta.clear();
             };
             // Enter, leave, and enter again: no stale inset when returning to a normal window.
             for fullscreen in [false, true, false, true] {
@@ -1664,6 +1666,7 @@ mod viewport_tests {
                 let top = if fullscreen { 32.0 / zoom } else { 0.0 };
                 for name in ["appbar:file", "appbar:undo", "appbar:redo", "appbar:help"] {
                     let at = handle_at(name).unwrap();
+                    // Controls stay just below the fullscreen inset (now inside the taller bar).
                     assert!((at.y - top - 17.0).abs() < 0.1, "{name}: {at:?}, fullscreen={fullscreen}, zoom={zoom}");
                 }
                 for (handle, bodies) in [("appbar:undo", 0), ("appbar:redo", 1)] {
