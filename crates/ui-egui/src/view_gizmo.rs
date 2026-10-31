@@ -416,6 +416,40 @@ pub(crate) fn command(app: &mut SolveApp, v: &Value) -> Result<Value, String> {
     }))
 }
 
+/// The custom navigator's texture, arrows and Home, as a settings profile keeps them.
+pub(crate) fn profile_settings(app: &SolveApp) -> Value {
+    let p = &app.preferences;
+    json!({"texture": p.navigator_texture, "arrows": p.navigator_arrows, "home": p.navigator_home})
+}
+
+/// A profile's navigator settings cut down to the ones this version reads.
+pub(crate) fn checked_profile_settings(v: &Value) -> Value {
+    let mut out = serde_json::Map::new();
+    if let Some(t) = v.get("texture").filter(|t| serde_json::from_value::<NavigatorTexture>((*t).clone()).is_ok()) {
+        out.insert("texture".into(), t.clone());
+    }
+    for key in ["arrows", "home"] {
+        if let Some(on) = v.get(key).and_then(Value::as_bool) {
+            out.insert(key.into(), json!(on));
+        }
+    }
+    Value::Object(out)
+}
+
+/// Apply a profile's (checked) navigator settings; a missing one keeps its current value.
+pub(crate) fn apply_profile_settings(app: &mut SolveApp, v: &Value) {
+    let p = &mut app.preferences;
+    if let Some(t) = v.get("texture").and_then(|t| serde_json::from_value(t.clone()).ok()) {
+        p.navigator_texture = t;
+    }
+    if let Some(on) = v.get("arrows").and_then(Value::as_bool) {
+        p.navigator_arrows = on;
+    }
+    if let Some(on) = v.get("home").and_then(Value::as_bool) {
+        p.navigator_home = on;
+    }
+}
+
 /// The Custom View Navigator panel's settings; its body is the panel's selection input.
 #[derive(Clone, Debug)]
 pub struct Form {
