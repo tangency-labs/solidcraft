@@ -366,6 +366,7 @@ fn zoom_point(app: &mut SolveApp, rect: Rect, point: Option<Pos2>, surface: bool
 }
 
 /// Modifier-only navigation never borrows pointer movement from another widget or gesture.
+/// Tool fields keep keyboard focus without blocking motion over the exposed viewport.
 pub(crate) fn modifier_motion(
     app: &mut SolveApp,
     ui: &egui::Ui,
@@ -376,7 +377,6 @@ pub(crate) fn modifier_motion(
 ) -> Option<(NavMode, egui::Vec2)> {
     let owns = inside
         && ui.input(|i| i.focused && !i.pointer.any_down() && !i.pointer.any_released() && !i.pointer.any_pressed())
-        && !ui.ctx().egui_wants_keyboard_input()
         && !egui::Popup::is_any_open(ui.ctx())
         && !crate::dim_view::editing()
         && app.viewport.context_menu.is_none()
