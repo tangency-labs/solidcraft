@@ -25,6 +25,9 @@
 //! | [`NoSurfaceHandle`]                                      | (none: the handle type of an intersector without caches) |
 //!
 //! Deviations:
+//! - **Dupin bottom axis (WR-69).** `Kernel::fixes.dupin_bottom_hyperbola_axis`
+//!   uses `1/sqrt(abs(k1))` for the bottom hyperbola's second axis, matching its
+//!   conjugate top branch. Off by default for pinned C++ parity.
 //! - **Bases.** The `SmSurfaceIntersector` base is the field
 //!   [`AdvSurfaceIntersector::base`] and the `SmGlobalSolver` base the field
 //!   [`AdvSurfaceIntersector::solver`], initialised as the `SmSurfaceIntersector`
@@ -513,8 +516,12 @@ impl<'s, 't, O: SolutionObject + 't> AdvSurfaceIntersector<'s, 't, O> {
         point: &mut TsectPnt,
         prev_crv_deriv: Option<Vec3>,
     ) -> Result<()> {
-        self.base
-            .adv_compute_singularity_point(uv_values, point, prev_crv_deriv)
+        self.base.adv_compute_singularity_point(
+            uv_values,
+            point,
+            prev_crv_deriv,
+            self.kernel.fixes.dupin_bottom_hyperbola_axis,
+        )
     }
 
     /// `MakeDupin`: the Dupin indicatrix curves of the surface point evaluated in
@@ -523,7 +530,8 @@ impl<'s, 't, O: SolutionObject + 't> AdvSurfaceIntersector<'s, 't, O> {
     /// by `reference_normal`. A planar point has no curves; a parabolic point two
     /// half lines at `1/sqrt|k|` from the origin; an elliptic point one ellipse; a
     /// hyperbolic point four hyperbolas (upstream's bottom hyperbola uses `k2` for
-    /// both axes). Curves go above for positive curvatures, below for negative.
+    /// both axes unless `Kernel::fixes.dupin_bottom_hyperbola_axis` is enabled).
+    /// Curves go above for positive curvatures, below for negative.
     ///
     /// # Errors
     ///
@@ -533,7 +541,11 @@ impl<'s, 't, O: SolutionObject + 't> AdvSurfaceIntersector<'s, 't, O> {
         surface_eval: &mut [[Vec3; 3]; 3],
         reference_normal: Vec3,
     ) -> Result<Dupin> {
-        make_dupin(surface_eval, reference_normal)
+        make_dupin(
+            surface_eval,
+            reference_normal,
+            self.kernel.fixes.dupin_bottom_hyperbola_axis,
+        )
     }
 
     // ---- interior curves -------------------------------------------------------------------
@@ -1099,8 +1111,12 @@ fn flush_curve(
     r
 }
 
-/// `MakeDupin` (see [`AdvSurfaceIntersector::make_dupin`]; it reads no member).
-fn make_dupin(surface_eval: &mut [[Vec3; 3]; 3], reference_normal: Vec3) -> Result<Dupin> {
+/// `MakeDupin` (see [`AdvSurfaceIntersector::make_dupin`]).
+fn make_dupin(
+    surface_eval: &mut [[Vec3; 3]; 3],
+    reference_normal: Vec3,
+    fix_bottom_axis: bool,
+) -> Result<Dupin> {
     let geom = evaluate_geometric(surface_eval)?;
     let mut out = Dupin {
         above: Vec::new(),
@@ -1206,11 +1222,11 @@ fn make_dupin(surface_eval: &mut [[Vec3; 3]; 3], reference_normal: Vec3) -> Resu
         hyp.transform_2d(PI / 2.0, Point2::new(0.0, 0.0));
         push(hyp, k2);
 
-        // Now do bottom hyperbola
+        // Now do bottom hyperbola (WR-69: upstream uses k2 for both axes).
         let mut hyp = Conic::new(
             ConicType::Hyperbola,
             1.0 / sqrt(k2.abs()),
-            1.0 / sqrt(k2.abs()),
+            1.0 / sqrt(if fix_bottom_axis { k1.abs() } else { k2.abs() }),
         );
         hyp.transform_2d(PI + PI / 2.0, Point2::new(0.0, 0.0));
         push(hyp, k2);
@@ -1234,6 +1250,7 @@ impl SurfaceIntersector<'_> {
         _uv_values: [Point2; 2],
         point: &mut TsectPnt,
         prev_crv_deriv: Option<Vec3>,
+        fix_dupin_bottom_axis: bool,
     ) -> Result<()> {
         let curve_trace_direction = self.curve_trace_direction;
         let ang_tol_rad = self.this_ang_tol_rad;
@@ -1373,13 +1390,21 @@ impl SurfaceIntersector<'_> {
 
             // Dupin indicatrex curves for 1st surface
             let normal0 = point.srf_norm(SrfIndex::First);
-            let d1 = make_dupin(point.srf_eval_matrix_mut(SrfIndex::First), normal0)?;
+            let d1 = make_dupin(
+                point.srf_eval_matrix_mut(SrfIndex::First),
+                normal0,
+                fix_dupin_bottom_axis,
+            )?;
             let (prin_k1, prin_k2, prin_kv1, prin_kv2) =
                 (d1.prin_k1, d1.prin_k2, d1.prin_k1_vec, d1.prin_k2_vec);
 
             // Compute values of second surface based upon the normal of the first
             let normal0 = point.srf_norm(SrfIndex::First);
-            let mut d2 = make_dupin(point.srf_eval_matrix_mut(SrfIndex::Second), normal0)?;
+            let mut d2 = make_dupin(
+                point.srf_eval_matrix_mut(SrfIndex::Second),
+                normal0,
+                fix_dupin_bottom_axis,
+            )?;
             let (prin_k1_2, prin_k2_2, prin_kv1_2, prin_kv2_2) =
                 (d2.prin_k1, d2.prin_k2, d2.prin_k1_vec, d2.prin_k2_vec);
 

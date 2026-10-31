@@ -630,6 +630,7 @@ impl SurfaceIntersector<'_> {
                             uv_values,
                             point,
                             previous.map(TsectPnt::crv_deriv),
+                            k.fixes.dupin_bottom_hyperbola_axis,
                         ) {
                             Ok(()) => {}
                             Err(e) if e.is_unported() => return Err(e),
