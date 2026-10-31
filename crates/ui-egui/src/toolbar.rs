@@ -703,32 +703,36 @@ fn file_menu(app: &mut SolveApp, ctx: &egui::Context) {
                     close = true;
                 }
                 ui.separator();
-                if item_if(ui, "Export STL…", "", "mesh_export", shown) {
-                    FileAction::ExportMesh("stl").run(app);
+                // Each format's item runs its own command, so it shows that command's key.
+                let key = |id: &str| crate::keymap::effective(app, id).unwrap_or_default();
+                let (stl_key, mf_key, step_key, obj_key, urdf_key) =
+                    (key("file.export_stl"), key("file.export_3mf"), key("file.export_step"), key("file.export_obj"), key("file.export_urdf"));
+                if item_if(ui, "Export STL…", &stl_key, "mesh_export", shown) {
+                    FileAction::Command("file.export_stl").run(app);
                     close = true;
                 }
-                if item_if(ui, "Export 3MF…", "", "mesh_export", shown) {
-                    FileAction::ExportMesh("3mf").run(app);
+                if item_if(ui, "Export 3MF…", &mf_key, "mesh_export", shown) {
+                    FileAction::Command("file.export_3mf").run(app);
                     close = true;
                 }
                 if item_if(ui, "Send to Slicer", "", "mesh_export", shown && crate::dialogs_save_mesh::available(app)) {
                     app.start("file.send_to_slicer");
                     close = true;
                 }
-                if item_if(ui, "Export STEP…", "", "export", shown) {
-                    FileAction::Export("step").run(app);
+                if item_if(ui, "Export STEP…", &step_key, "export", shown) {
+                    FileAction::Command("file.export_step").run(app);
                     close = true;
                 }
                 if item_if(ui, app.tr_label("Export Current View as DXF…"), "", "export", shown) {
                     FileAction::Command("file.export_view_dxf").run(app);
                     close = true;
                 }
-                if item_if(ui, "Export OBJ…", "", "export", shown) {
-                    FileAction::Export("obj").run(app);
+                if item_if(ui, "Export OBJ…", &obj_key, "export", shown) {
+                    FileAction::Command("file.export_obj").run(app);
                     close = true;
                 }
-                if item_if(ui, "Export URDF…", "", "export", shown) {
-                    FileAction::Export("urdf").run(app);
+                if item_if(ui, "Export URDF…", &urdf_key, "export", shown) {
+                    FileAction::Command("file.export_urdf").run(app);
                     close = true;
                 }
                 if item(ui, "Export Design as JSON…", "", "export") {
@@ -836,6 +840,30 @@ fn download_design(app: &mut SolveApp) {
 
 pub(crate) fn export(app: &mut SolveApp, ext: &str) {
     export_as(app, ext, None);
+}
+
+/// Each format's own export command, started from its key, command search or the File menu,
+/// does what that File › Export item does: STEP, OBJ and URDF ask where to save, STL and 3MF
+/// open the mesh dialog with the format chosen. `false`: `id` is no such command.
+pub(crate) fn start_export(app: &mut SolveApp, id: &str) -> bool {
+    let (extension, mesh) = match id {
+        "file.export_step" => ("step", false),
+        "file.export_obj" => ("obj", false),
+        "file.export_urdf" => ("urdf", false),
+        "file.export_stl" => ("stl", true),
+        "file.export_3mf" => ("3mf", true),
+        _ => return false,
+    };
+    // As the File menu's items: not while a file is being picked or loaded, or behind a bug report.
+    if !FileAction::Export(extension).enabled(app) {
+        return true;
+    }
+    if mesh {
+        crate::dialogs_save_mesh::start_with_format(app, extension);
+    } else {
+        export(app, extension);
+    }
+    true
 }
 
 /// Export to a file with extension `ext`, in `format` when the extension alone doesn't name it.
@@ -3312,6 +3340,36 @@ mod header_report_tests {
         h.app.home.open = false;
         assert!(FileAction::Save.enabled(&h.app));
         assert!(FileAction::Export("step").enabled(&h.app));
+    }
+
+    /// File › Export STEP…, STL…, 3MF…, OBJ… and URDF… each run a command of their own, so each
+    /// can be given a key in Keyboard Shortcuts: the key asks where to save the file as the menu
+    /// item does (STL and 3MF open Save As Mesh).
+    #[test]
+    fn each_export_format_has_a_key_that_starts_it() {
+        let mut h = crate::scenario::Harness::new();
+        let offered = std::rc::Rc::new(std::cell::RefCell::new(Vec::<(String, Vec<String>)>::new()));
+        let (seen, dir) = (offered.clone(), h.dir.clone());
+        h.app.services.pick_save = Some(Box::new(move |name, extensions| {
+            seen.borrow_mut().push((name.to_string(), extensions.iter().map(|e| e.to_string()).collect()));
+            Box::pin(std::future::ready(Some(dir.join(name).to_string_lossy().into_owned())))
+        }));
+        h.app.run("solid.box", json!({"length":2,"width":3,"height":4})).unwrap();
+        h.app.session.doc_mut().name = "Bracket".into();
+        for (id, key) in [("file.export_step", "Alt+Shift+F7"), ("file.export_stl", "Alt+Shift+F8")] {
+            crate::keymap::bind(&mut h.app, id, key, false).unwrap();
+            assert_eq!(crate::keymap::effective(&h.app, id).as_deref(), Some(key), "the File menu shows it");
+        }
+        crate::keymap::press(&mut h.app, "Alt+Shift+F7", false);
+        h.frames(3);
+        h.settle();
+        assert_eq!(offered.borrow().last().cloned(), Some(("Bracket.step".to_string(), vec!["step".to_string()])));
+        let step = std::fs::read(h.dir.join("Bracket.step")).unwrap();
+        assert!(step.starts_with(b"ISO-10303-21;"), "a STEP file is written");
+
+        crate::keymap::press(&mut h.app, "Alt+Shift+F8", false);
+        assert_eq!(h.app.dialog.as_ref().and_then(|d| d.command()), Some("file.save_mesh"), "STL opens Save As Mesh");
+        crate::dialogs::cancel(&mut h.app);
     }
 
     /// New designs are saved as `.sc`. A design opened from a `.solidcraft` file is saved back to

@@ -1,0 +1,51 @@
+{
+  "en": {
+    "cmd.file.export_step": "Export STEP",
+    "cmd.file.export_stl": "Export STL",
+    "cmd.file.export_3mf": "Export 3MF",
+    "cmd.file.export_obj": "Export OBJ",
+    "cmd.file.export_urdf": "Export URDF"
+  },
+  "de": {
+    "cmd.file.export_step": "Als STEP exportieren",
+    "cmd.file.export_stl": "Als STL exportieren",
+    "cmd.file.export_3mf": "Als 3MF exportieren",
+    "cmd.file.export_obj": "Als OBJ exportieren",
+    "cmd.file.export_urdf": "Als URDF exportieren"
+  },
+  "ar": {
+    "cmd.file.export_step": "تصدير STEP",
+    "cmd.file.export_stl": "تصدير STL",
+    "cmd.file.export_3mf": "تصدير 3MF",
+    "cmd.file.export_obj": "تصدير OBJ",
+    "cmd.file.export_urdf": "تصدير URDF"
+  },
+  "he": {
+    "cmd.file.export_step": "ייצוא STEP",
+    "cmd.file.export_stl": "ייצוא STL",
+    "cmd.file.export_3mf": "ייצוא 3MF",
+    "cmd.file.export_obj": "ייצוא OBJ",
+    "cmd.file.export_urdf": "ייצוא URDF"
+  },
+  "ja": {
+    "cmd.file.export_step": "STEP をエクスポート",
+    "cmd.file.export_stl": "STL をエクスポート",
+    "cmd.file.export_3mf": "3MF をエクスポート",
+    "cmd.file.export_obj": "OBJ をエクスポート",
+    "cmd.file.export_urdf": "URDF をエクスポート"
+  },
+  "vi": {
+    "cmd.file.export_step": "Xuất tệp STEP",
+    "cmd.file.export_stl": "Xuất tệp STL",
+    "cmd.file.export_3mf": "Xuất tệp 3MF",
+    "cmd.file.export_obj": "Xuất tệp OBJ",
+    "cmd.file.export_urdf": "Xuất tệp URDF"
+  },
+  "zh": {
+    "cmd.file.export_step": "导出 STEP",
+    "cmd.file.export_stl": "导出 STL",
+    "cmd.file.export_3mf": "导出 3MF",
+    "cmd.file.export_obj": "导出 OBJ",
+    "cmd.file.export_urdf": "导出 URDF"
+  }
+}
