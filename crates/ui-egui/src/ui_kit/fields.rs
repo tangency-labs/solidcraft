@@ -389,8 +389,7 @@ fn indexed_dropdown(ui: &mut Ui, id: &str, selected: &mut usize, options: &[&str
             });
         }
         for (index, option) in options.iter().enumerate() {
-            let option = crate::i18n::tr_label(option);
-            let response = ui.selectable_label(index == cursor, option);
+            let response = ui.selectable_label(index == cursor, crate::i18n::tr_label(option));
             scenario::publish_target(&format!("dialog:{row}:{option}"), response.rect);
             if response.clicked() {
                 *selected = index;
