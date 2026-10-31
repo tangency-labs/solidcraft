@@ -144,6 +144,9 @@ impl CommandSearch {
         let response = ui
             .scope_builder(egui::UiBuilder::new().max_rect(editor), |ui| {
                 ui.set_clip_rect(ui.clip_rect().intersect(editor));
+                // egui 0.37 floors a text edit's height at the theme's interact height, which centred
+                // the text below the field's middle.
+                ui.spacing_mut().interact_size.y = height;
                 ui.add_sized(
                     editor.size(),
                     super::fields::text_input(egui::TextEdit::singleline(value))
