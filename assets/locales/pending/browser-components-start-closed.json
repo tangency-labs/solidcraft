@@ -1,0 +1,62 @@
+{
+  "en": {
+    "prefs.browser_components_open": "Components start open",
+    "prefs.browser_components_open_note": "Every component in the browser starts open, as before, instead of closed until you open it."
+  },
+  "ar": {
+    "prefs.browser_components_open": "المكوّنات مفتوحة من البداية",
+    "prefs.browser_components_open_note": "يبدأ كل مكوّن في المستعرض مفتوحًا كما كان من قبل، بدلاً من أن يبقى مغلقًا حتى تفتحه."
+  },
+  "de": {
+    "prefs.browser_components_open": "Komponenten zu Beginn aufgeklappt",
+    "prefs.browser_components_open_note": "Jede Komponente im Browser ist wie bisher von Anfang an aufgeklappt, statt zugeklappt zu bleiben, bis du sie aufklappst."
+  },
+  "es": {
+    "prefs.browser_components_open": "Componentes abiertos al inicio",
+    "prefs.browser_components_open_note": "Cada componente del explorador empieza abierto, como antes, en lugar de cerrado hasta que lo abras."
+  },
+  "fr": {
+    "prefs.browser_components_open": "Composants dépliés au départ",
+    "prefs.browser_components_open_note": "Chaque composant du navigateur commence déplié, comme avant, au lieu de rester replié jusqu'à ce que vous le dépliiez."
+  },
+  "he": {
+    "prefs.browser_components_open": "רכיבים פתוחים מההתחלה",
+    "prefs.browser_components_open_note": "כל רכיב בעץ התכן מתחיל פתוח, כמו קודם, במקום סגור עד שתפתח אותו."
+  },
+  "it": {
+    "prefs.browser_components_open": "Componenti aperti all'inizio",
+    "prefs.browser_components_open_note": "Ogni componente nel browser inizia aperto, come prima, invece che chiuso finché non lo apri."
+  },
+  "ja": {
+    "prefs.browser_components_open": "コンポーネントを最初から展開",
+    "prefs.browser_components_open_note": "ブラウザーのすべてのコンポーネントを以前と同じく最初から展開して表示します。オフの場合は展開するまで折りたたまれています。"
+  },
+  "ko": {
+    "prefs.browser_components_open": "구성요소를 펼친 상태로 시작",
+    "prefs.browser_components_open_note": "브라우저의 모든 구성요소가 이전처럼 펼쳐진 상태로 시작합니다. 끄면 직접 펼칠 때까지 접혀 있습니다."
+  },
+  "pt-BR": {
+    "prefs.browser_components_open": "Componentes começam abertos",
+    "prefs.browser_components_open_note": "Cada componente no navegador começa aberto, como antes, em vez de fechado até que você o abra."
+  },
+  "ru": {
+    "prefs.browser_components_open": "Компоненты развёрнуты с начала",
+    "prefs.browser_components_open_note": "Каждый компонент в браузере сразу развёрнут, как раньше, а не свёрнут, пока вы его не развернёте."
+  },
+  "uk": {
+    "prefs.browser_components_open": "Компоненти розгорнуті з початку",
+    "prefs.browser_components_open_note": "Кожен компонент у браузері одразу розгорнутий, як раніше, а не згорнутий, доки ви його не розгорнете."
+  },
+  "vi": {
+    "prefs.browser_components_open": "Thành phần mở sẵn",
+    "prefs.browser_components_open_note": "Mọi thành phần trong trình duyệt đều mở sẵn như trước, thay vì đóng cho đến khi bạn mở."
+  },
+  "zh": {
+    "prefs.browser_components_open": "组件初始展开",
+    "prefs.browser_components_open_note": "浏览器中的每个组件都像以前一样初始展开，而不是在您展开前保持折叠。"
+  },
+  "zh-TW": {
+    "prefs.browser_components_open": "元件初始展開",
+    "prefs.browser_components_open_note": "瀏覽器中的每個元件都像以前一樣初始展開，而不是在您展開前保持摺疊。"
+  }
+}

@@ -11,6 +11,8 @@
   {"expect":{"shown":"(55.00, 5.00, 5.00) mm","query":{"command":"occurrence.properties","params":{"occurrence":4,"path":[4]},"path":["total","center_of_mass",0],"value":55}}},
   {"shot":"second_occurrence_properties"},
   {"click":{"handle":"eye:occurrence:4"}},
+  {"note":"Placements start closed (#9274): the fold arrow opens the row, then folds it again."},
+  {"click":{"handle":"fold:occurrence:4"}},
   {"click":{"handle":"fold:occurrence:4"}},
   {"shot":"second_occurrence_hidden_folded"},
   {"click":{"handle":"eye:occurrence:4"}},

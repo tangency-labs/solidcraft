@@ -1181,6 +1181,9 @@ preference_settings! {
     /// Each tree row's eye between its fold arrow and its radio, as before #8718, instead of in a
     /// column at the rows' right end. Off by default.
     browser_eye_left: bool = false, PAGE_INTERFACE => check_id("prefs.browser_eye_left");
+    /// Every component placement in the browser starts open, as before #9274, instead of closed
+    /// until the user opens it. Off by default.
+    browser_components_open: bool = false, PAGE_INTERFACE => check_id("prefs.browser_components_open");
     /// The wheel zooms toward the point under the cursor (else toward the view's centre).
     zoom_to_cursor: bool = true, PAGE_NAVIGATION => check("Zoom to the cursor", "The wheel zooms toward the point under the cursor (off: toward the view's center)");
     /// Speed multiplier for wheel zoom, independent of the 3D mouse.
@@ -5498,6 +5501,7 @@ mod tests {
             ("view_confirm_corner", json!(true), PAGE_INTERFACE),
             ("status_bar", json!(true), PAGE_INTERFACE),
             ("browser_eye_left", json!(true), PAGE_INTERFACE),
+            ("browser_components_open", json!(true), PAGE_INTERFACE),
             ("quick_measure", json!(true), PAGE_INTERFACE),
             ("nav", json!("blender"), PAGE_NAVIGATION),
             ("look_at_anim", json!(false), PAGE_NAVIGATION),

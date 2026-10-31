@@ -35,10 +35,10 @@ pub(crate) fn reveal(app: &mut SolveApp, id: u64, body: &str) {
     app.tree.reveal = None;
     app.tree.collapsed.remove("c0");
     for depth in 1..=path.len() {
-        app.tree.collapsed.remove(&occurrence_key(&path[..depth]));
+        app.tree.open_row(&occurrence_key(&path[..depth]));
     }
     let scope = if path.is_empty() { format!("c{component}") } else { occurrence_key(&path) };
-    app.tree.collapsed.remove(&scope);
+    app.tree.open_row(&scope);
     app.tree.expanded.insert(format!("{scope}/features"));
     app.tree.reveal_feature = Some(Reveal { id, path });
 }

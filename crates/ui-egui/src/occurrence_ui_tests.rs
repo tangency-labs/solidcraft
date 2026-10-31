@@ -6,6 +6,8 @@ use solidcraft_engine::Sel;
 #[test]
 fn replaced_body_name_uses_evaluated_owner_in_browser_and_component_actions() {
     let mut h = Harness::new();
+    // These rows are read with every placement open, as placements started before #9274.
+    h.app.preferences.browser_components_open = true;
     h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"body_name":"Block"})).unwrap();
     let transferred = h.app.run("component.from_bodies", json!({"bodies":["Block"]})).unwrap();
     let owner = transferred["components"][0]["component"].as_u64().unwrap();
@@ -30,6 +32,8 @@ fn replaced_body_name_uses_evaluated_owner_in_browser_and_component_actions() {
 fn fixture() -> (Harness, u64, u64, u64) {
     let (mut h, component, first) = crate::test_support::component_box();
     let second = h.app.run("occurrence.copy", json!({"occurrence":first,"translate":[50,0,0]})).unwrap()["occurrence"].as_u64().unwrap();
+    // These rows are read with every placement open, as placements started before #9274.
+    h.app.preferences.browser_components_open = true;
     h.frames(3);
     (h, component, first, second)
 }
@@ -273,6 +277,8 @@ fn occurrence_body_appearance_editor_inherits_definition_precision() {
 #[test]
 fn occurrence_nested_shared_child_has_distinct_rows_and_scope() {
     let mut h = Harness::new();
+    // These rows are read with every placement open, as placements started before #9274.
+    h.app.preferences.browser_components_open = true;
     let parent = h.app.run("component.create", json!({"name":"Assembly"})).unwrap();
     let parent_component = parent["component"].as_u64().unwrap();
     let parent_occurrence = parent["occurrence"].as_u64().unwrap();
@@ -330,6 +336,8 @@ fn occurrence_distance_editor_reads_inches_and_keeps_four_digits_in_model_space(
 #[test]
 fn a_body_dropped_on_a_bodies_folder_moves_into_that_component() {
     let mut h = Harness::new();
+    // These rows are read with every placement open, as placements started before #9274.
+    h.app.preferences.browser_components_open = true;
     h.app.home.open = false;
     h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"body_name":"Plate"})).unwrap();
     h.app.run("solid.box", json!({"corner":[20,0,0],"length":5,"width":5,"height":5,"body_name":"Lid"})).unwrap();
@@ -427,6 +435,8 @@ fn bodies_folders_fold_by_the_preference_but_never_the_designs_or_a_hidden_one()
 fn a_folded_body_sits_one_level_under_its_nested_placement() {
     use crate::prefs::BodiesFolders;
     let mut h = Harness::new();
+    // These rows are read with every placement open, as placements started before #9274.
+    h.app.preferences.browser_components_open = true;
     let parent = h.app.run("component.create", json!({"name":"Assembly"})).unwrap()["occurrence"].as_u64().unwrap();
     let child = h.app.run("component.create", json!({"name":"Child"})).unwrap()["occurrence"].as_u64().unwrap();
     h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"body_name":"Pin"})).unwrap();
@@ -504,6 +514,8 @@ fn a_folded_folders_menu_items_move_to_the_placements_menu() {
 #[test]
 fn dragging_an_occurrence_row_onto_another_moves_it_into_that_component() {
     let mut h = Harness::new();
+    // These rows are read with every placement open, as placements started before #9274.
+    h.app.preferences.browser_components_open = true;
     // Component A with a body, at the design root.
     let a = h.app.run("component.create", json!({"name":"A"})).unwrap();
     let (_a_comp, a_occ) = (a["component"].as_u64().unwrap(), a["occurrence"].as_u64().unwrap());

@@ -491,3 +491,58 @@ fn a_design_saved_before_nested_groups_keeps_its_browser_order() {
         assert_eq!(drawn(&rows), expected, "groups {groups:?}, saved order {saved:?}");
     }
 }
+
+/// #9274: placements start closed, so a large assembly opens as a short list. Opening one shows
+/// its own placements still closed, and closing and reopening it leaves them as they were.
+/// Expand All opens them, and the "Components start open" preference opens every one as before.
+#[test]
+fn placements_start_closed_and_the_preference_opens_them_as_before() {
+    fn drawn(h: &mut crate::scenario::Harness) -> Vec<(Vec<u64>, bool)> {
+        h.frames(2);
+        super::drawn_occurrences().into_iter().map(|(path, _, _, open)| (path, open)).collect()
+    }
+    let mut h = crate::scenario::Harness::new();
+    h.app.ui.show_browser = true;
+    let sub = h.app.run("component.create", json!({"name":"Sub"})).unwrap();
+    let outer = vec![sub["occurrence"].as_u64().unwrap()];
+    let leaf = h.app.run("component.create", json!({"name":"Leaf"})).unwrap()["occurrence"].as_u64().unwrap();
+    h.app.run("solid.box", json!({"length":10,"width":10,"height":10})).unwrap();
+    h.app.run("component.activate", json!({"component":0})).unwrap();
+    let inner = vec![outer[0], leaf];
+    let fold = format!("fold:occurrence:{}", outer[0]);
+
+    assert_eq!(drawn(&mut h), [(outer.clone(), false)], "only the top placement is listed, closed");
+    click(&mut h, &fold);
+    assert_eq!(drawn(&mut h), [(outer.clone(), true), (inner.clone(), false)], "the placement inside stays closed");
+    click(&mut h, &fold);
+    assert_eq!(drawn(&mut h), [(outer.clone(), false)]);
+    click(&mut h, &fold);
+    assert_eq!(drawn(&mut h), [(outer.clone(), true), (inner.clone(), false)], "reopening shows it as it was");
+
+    h.app.run("browser.expand_all", json!({})).unwrap();
+    assert_eq!(drawn(&mut h), [(outer.clone(), true), (inner.clone(), true)], "Expand All opens every placement");
+    h.app.run("browser.collapse_all", json!({})).unwrap();
+    assert_eq!(drawn(&mut h), [(outer.clone(), false)], "Collapse All closes them again");
+
+    h.app.tree.collapsed.clear();
+    h.app.tree.expanded.clear();
+    h.call("ui.prefs", json!({"browser_components_open": true}));
+    assert!(h.app.preferences.browser_components_open);
+    assert_eq!(drawn(&mut h), [(outer.clone(), true), (inner, true)], "the preference opens every placement, as before #9274");
+    click(&mut h, &fold);
+    assert_eq!(drawn(&mut h), [(outer, false)], "and its arrow still closes one");
+}
+
+/// #9274: Find in Browser opens the placements, closed from the start, down to the body's row.
+#[test]
+fn find_in_browser_opens_placements_that_start_closed() {
+    let (mut h, _, occurrence) = fixture();
+    h.app.ui.show_browser = true;
+    let body = super::model_placement(&mut h.app, &[occurrence]).unwrap().bodies[0].world.clone();
+    h.frames(2);
+    assert!(!super::is_open(&h.app, &super::occurrence_key(&[occurrence]), true), "the placement starts closed");
+    super::reveal_body(&mut h.app, &body);
+    h.frames(3);
+    assert!(super::is_open(&h.app, &super::occurrence_key(&[occurrence]), true));
+    assert!(h.app.tree.order.contains(&format!("b:{body}")), "the body's row is drawn");
+}

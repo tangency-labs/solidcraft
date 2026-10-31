@@ -1,4 +1,5 @@
 [
+  {"call": "ui.prefs", "params": {"browser_components_open": true}},
  {
   "note": "Browser chevrons expand and collapse every kind of node (folders, components, groups, the origin, named views, document settings). Model: two components with a body each, a joint, a sketch, an offset plane, a named view."
  },
