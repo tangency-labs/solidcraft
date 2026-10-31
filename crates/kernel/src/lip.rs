@@ -283,6 +283,7 @@ pub fn raise_band(body: &Body, at: Vec3, width: f64, height: f64, outside: bool)
             }
             // The top closes both walls: its loops run against theirs.
             let tops: Vec<mt::Wire> = tops.iter().map(|w| w.inverse()).collect();
+            crate::build::refuse_intersection_curves(&tops, "the lip's top")?;
             let Ok(top) = builder::try_attach_plane(&tops) else { continue };
             let top = if flip & 4 == 4 { top.inverse() } else { top };
             let mut all: Vec<mt::Face> = faces.iter().enumerate().filter(|(i, _)| *i != fi).map(|(_, x)| x.clone()).collect();
