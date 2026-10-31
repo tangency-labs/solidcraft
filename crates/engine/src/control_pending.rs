@@ -56,6 +56,7 @@ pub fn command_reads_only(id: &str) -> bool {
         || id.starts_with("model.")
         || id.ends_with(".inspect")
         || id.ends_with(".list")
+        || id.starts_with("live.")
         || id == "document.revision"
         || id == "view.status_items"
         || matches!(id, "document.inspect" | "engine.commands" | "render.status" | "render.backends" | "render.settings.get" | "file.slicers")
