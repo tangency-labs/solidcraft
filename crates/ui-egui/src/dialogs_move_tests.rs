@@ -646,3 +646,38 @@ fn editing_a_move_about_a_world_axis_keeps_the_angle_expression() {
     let Kind::Move { rx, ry, rz, .. } = &d.kind else { panic!("not a move") };
     assert_eq!((rx.as_str(), ry.as_str(), rz.as_str()), ("0 deg", "0 deg", "45 deg"));
 }
+
+#[test]
+fn dialog_tab_preference_restores_floating_move_axis_cycle() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.preferences.dialog_tab_navigation = false;
+    h.app.run("solid.box", json!({"length":20,"width":20,"height":20})).unwrap();
+    h.settle();
+    h.app.run("select.set", json!({"items":[Sel::Body { name:"Body1".into() }]})).unwrap();
+    h.app.start("solid.move");
+    h.frames(3);
+    for (shift, expected) in [
+        (false, "Y"),
+        (false, "Z"),
+        (false, "X Angle"),
+        (false, "Y Angle"),
+        (false, "Z Angle"),
+        (false, "X"),
+        (true, "Z Angle"),
+        (true, "Y Angle"),
+        (true, "X Angle"),
+        (true, "Z"),
+        (true, "Y"),
+        (true, "X"),
+    ] {
+        h.step(&json!({"key":"Tab","shift":shift})).unwrap();
+        h.frames(2);
+        assert_eq!(h.app.dialog.as_mut().and_then(|d| d.primary()).map(|p| p.0), Some(expected));
+        assert_eq!(h.ctx.memory(|m| m.focused()), Some(egui::Id::new("sc_canvas_value")));
+    }
+    h.app.preferences.dialog_tab_navigation = true;
+    h.step(&json!({"key":"Tab"})).unwrap();
+    h.frames(2);
+    let focused = h.ctx.memory(|m| m.focused()).unwrap();
+    assert!(h.app.viewport.dialog_rect.unwrap().contains(h.ctx.read_response(focused).unwrap().rect.center()));
+}

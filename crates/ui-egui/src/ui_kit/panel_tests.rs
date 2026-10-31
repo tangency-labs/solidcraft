@@ -1345,7 +1345,7 @@ fn dialog_tab_window_wraps_in_both_directions_and_excludes_background_fields() {
 #[test]
 fn dialog_tab_dropdown_closes_and_leaves_in_both_directions() {
     for backwards in [false, true] {
-        for variant in 0..4 {
+        for variant in 0..5 {
             let ctx = crate::fonts::test_context();
             let selected = std::cell::Cell::new(1);
             let owner = std::cell::Cell::new(egui::Id::NULL);
@@ -1370,6 +1370,11 @@ fn dialog_tab_dropdown_closes_and_leaves_in_both_directions() {
                             2 => {
                                 dropdown_menu(ui, "mode", "Second", |ui| {
                                     option.set(Some(ui.selectable_value(&mut value, 0, "First").id));
+                                });
+                            }
+                            4 => {
+                                dropdown_previews(ui, "mode", &mut value, &["First", "Second", "Third"], |ui, _| {
+                                    ui.label("Preview");
                                 });
                             }
                             _ => {
@@ -1401,6 +1406,9 @@ fn dialog_tab_dropdown_closes_and_leaves_in_both_directions() {
             if let Some(option) = option.get() {
                 ctx.memory_mut(|m| m.request_focus(option));
             }
+            if variant == 4 {
+                frame(&ctx, key(egui::Key::ArrowDown), &mut draw);
+            }
             let events = key(egui::Key::Tab)
                 .into_iter()
                 .map(|event| match event {
@@ -1429,7 +1437,7 @@ fn dialog_tab_dropdown_closes_and_leaves_in_both_directions() {
 
 #[test]
 fn dropdown_open_menu_starts_at_current_wraps_and_space_confirms() {
-    for picked_variant in [false, true] {
+    for variant in 0..3 {
         let ctx = crate::fonts::test_context();
         let selected = std::cell::Cell::new(1);
         let owner = std::cell::Cell::new(egui::Id::NULL);
@@ -1440,8 +1448,12 @@ fn dropdown_open_menu_starts_at_current_wraps_and_space_confirms() {
                 row(ui, "Mode", |ui| {
                     owner.set(ui.make_persistent_id(egui::IdSalt::new("mode")));
                     let mut value = selected.get();
-                    if picked_variant {
+                    if variant == 1 {
                         dropdown_picked(ui, "mode", &mut value, &["First", "Second", "Third"]);
+                    } else if variant == 2 {
+                        dropdown_previews(ui, "mode", &mut value, &["First", "Second", "Third"], |ui, _| {
+                            ui.label("Preview");
+                        });
                     } else {
                         dropdown(ui, "mode", &mut value, &["First", "Second", "Third"]);
                     }
@@ -1567,7 +1579,7 @@ fn dialog_tab_dropdown_and_actions_paint_a_focus_outline() {
 
 #[test]
 fn dialog_keyboard_closed_dropdown_enter_applies_and_space_opens_all_variants() {
-    for variant in 0..4 {
+    for variant in 0..5 {
         let ctx = crate::fonts::test_context();
         let selected = std::cell::Cell::new(0);
         let id = std::cell::Cell::new(egui::Id::NULL);
@@ -1590,6 +1602,11 @@ fn dialog_keyboard_closed_dropdown_enter_applies_and_space_opens_all_variants() 
                             dropdown_menu(ui, "mode", "First", |ui| {
                                 ui.selectable_value(&mut value, 0, "First");
                                 ui.selectable_value(&mut value, 1, "Second");
+                            });
+                        }
+                        4 => {
+                            dropdown_previews(ui, "mode", &mut value, &["First", "Second"], |ui, _| {
+                                ui.label("Preview");
                             });
                         }
                         _ => {

@@ -507,23 +507,46 @@ fn dialog_tab_patterns_follow_display_order_in_both_directions() {
 
 #[test]
 fn dialog_tab_does_not_intercept_modified_tabs_or_collapsed_dialogs() {
-    let mut h = fixture();
-    step(&mut h, json!({"start":"sketch.mirror"}));
-    pick(&mut h, [-22.5, 10.0], false);
-    for modifiers in [egui::Modifiers::CTRL, egui::Modifiers::ALT, egui::Modifiers::COMMAND] {
-        for pressed in [true, false] {
-            h.app.synthetic.push(egui::Event::Key { key: egui::Key::Tab, physical_key: None, pressed, repeat: false, modifiers });
+    for placement in [crate::ui_kit::DialogButtons::Bottom, crate::ui_kit::DialogButtons::Top] {
+        let mut h = fixture();
+        h.app.preferences.dialog_buttons = placement;
+        step(&mut h, json!({"start":"sketch.mirror"}));
+        pick(&mut h, [-22.5, 10.0], false);
+        for modifiers in [egui::Modifiers::CTRL, egui::Modifiers::ALT, egui::Modifiers::COMMAND] {
+            for pressed in [true, false] {
+                h.app.synthetic.push(egui::Event::Key { key: egui::Key::Tab, physical_key: None, pressed, repeat: false, modifiers });
+            }
+            h.frames(3);
+            assert_eq!(h.app.dialog.as_ref().unwrap().active, 0);
         }
+        step(&mut h, json!({"key":"Tab"}));
+        let inside = h.ctx.memory(|m| m.focused()).unwrap();
+        assert!(h.app.viewport.dialog_rect.unwrap().contains(h.ctx.read_response(inside).unwrap().rect.center()));
+        let active = h.app.dialog.as_ref().unwrap().active;
+        h.app.dialog.as_mut().unwrap().collapsed = true;
         h.frames(3);
-        assert_eq!(h.app.dialog.as_ref().unwrap().active, 0);
+        for shift in [false, true] {
+            let mut left_feature = false;
+            for _ in 0..12 {
+                step(&mut h, json!({"key":"Tab", "shift":shift}));
+                assert_eq!(h.app.dialog.as_ref().unwrap().active, active);
+                if let Some(id) = h.ctx.memory(|m| m.focused()) {
+                    let response = h.ctx.read_response(id).expect("collapsed traversal must not focus an invisible boundary");
+                    assert!(response.rect.is_positive());
+                    left_feature |= !h.app.viewport.dialog_rect.unwrap().contains(response.rect.center());
+                }
+            }
+            // The visible OK/Cancel actions still participate in native traversal.
+            assert!(left_feature, "a folded feature must not trap Tab among its actions");
+        }
+        h.app.dialog.as_mut().unwrap().collapsed = false;
+        h.frames(3);
+        step(&mut h, json!({"key":"Tab"}));
+        let focused = h.ctx.memory(|m| m.focused()).unwrap();
+        assert!(h.app.viewport.dialog_rect.unwrap().contains(h.ctx.read_response(focused).unwrap().rect.center()));
+        step(&mut h, json!({"key":"Escape"}));
+        assert!(h.app.dialog.is_none());
     }
-    h.app.dialog.as_mut().unwrap().collapsed = true;
-    h.frames(3);
-    step(&mut h, json!({"key":"Tab"}));
-    assert_eq!(h.app.dialog.as_ref().unwrap().active, 0);
-    h.app.dialog.as_mut().unwrap().collapsed = false;
-    step(&mut h, json!({"key":"Escape"}));
-    assert!(h.app.dialog.is_none());
 }
 
 #[test]

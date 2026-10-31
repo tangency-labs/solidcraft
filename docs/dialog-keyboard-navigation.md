@@ -7,6 +7,13 @@ result. Focus assertions live in the existing Rust test files because JSON
 scenarios do not expose focused-widget assertions. Existing JSON workflows,
 including `s30_pattern_a_hole`, remain complementary end-to-end coverage.
 
+The Design preferences option **Keep Tab inside dialogs** is on by default.
+Turning it off restores native Tab traversal and Tab/Shift+Tab cycling the
+floating Move editor through its axes. Other activation keys are unchanged.
+Collapsed feature dialogs have no form Tab loop; their visible actions remain
+in native Tab order, and expanding restores the loop.
+A separate foreground window still owns its own Tab loop above a collapsed feature.
+
 ## Expected behavior
 
 | Context | Key | Expected result |
@@ -63,6 +70,7 @@ selection, and stored input picks before and after navigation.
 | SK-M | Sketch Mirror: pick entities, Tab to Mirror line, pick a line, reverse to Entities, Ctrl-click changes only the entity set. Space does not apply; Enter on the completed reference creates mirrored curves. | [sketch_guidance_ui_tests.rs](../crates/ui-egui/src/sketch_guidance_ui_tests.rs): `dialog_tab_mirror_advances_from_canvas_and_reverses_without_changing_picks`, `dialog_tab_enter_on_mirror_selection_applies_the_dialog` |
 | SK-R | Sketch rectangular pattern: directions, quantities and spacings remain reachable in displayed order; headings and step arrows are skipped. Enter applies the typed 3-by-2 count, producing five new curves from one seed. | Same file: `dialog_tab_patterns_follow_display_order_in_both_directions`, `dialog_keyboard_sketch_patterns_enter_applies_the_typed_quantities` |
 | SK-C | Sketch circular pattern: Entities → Center → quantity/angle. Enter from the center reference applies three instances, producing two new curves. | Same pattern tests |
+| SK-F | Collapse after focusing a reference: forward/reverse Tab can leave the visible actions, never focuses invisible boundaries, and does not change the active pick. Expand: focus returns to the form loop. Covers both button layouts. | [sketch_guidance_ui_tests.rs](../crates/ui-egui/src/sketch_guidance_ui_tests.rs): `dialog_tab_does_not_intercept_modified_tabs_or_collapsed_dialogs` |
 | SK-W | All three sketch dialogs: complete forward/reverse cycles in both button layouts, then Escape. Document and undo history must be unchanged, including a freely picked circular center. | Same file: `dialog_keyboard_sketch_mirror_and_patterns_cycle_without_committing_and_cancel` |
 | SK-I | All three sketch dialogs: Enter with no entities refuses to apply. Missing Mirror line or zero pattern quantity also refuses. Escape preserves the original sketch and undo history. | Same file: `dialog_keyboard_sketch_empty_selection_and_invalid_inputs_do_not_apply` |
 | BO-M | Body Mirror: both preselected and canvas-picked seeds; Tab reaches the plane, reverse returns to bodies, full cycles preserve picks, and Enter creates two bodies. Enter on focused Join must preserve the selected New Body operation. | [dialogs_all_tests.rs](../crates/ui-egui/src/dialogs_all_tests.rs): `dialog_keyboard_body_mirror_and_patterns_traverse_and_apply` |
@@ -78,6 +86,8 @@ selection, and stored input picks before and after navigation.
 | EX-D | Extrude: Enter on highlighted Direction, Extent Type, Operation, and Start closes the dialog without opening a popup or changing the feature's extent. | Same file: `dialog_keyboard_enter_on_closed_extrude_dropdowns_applies_without_changing_values` |
 | EX-P | Extrude: use Space/Down/Space to select Two Sides, then cycle Extent Type through To Object, All and back to Distance. Confirming closes each popup. Tab dismisses a pending To Object choice and reaches Distance; Shift+Tab returns to Extent Type. Cancelling preserves the document and undo history. | Same file: `dropdown_extrude_menu_confirm_wrap_and_tab_exit_preserve_form_focus` |
 | MV-T | Move: Tab leaves the floating axis editor for the dialog instead of cycling floating axes; reverse traversal and applying a typed Y distance still work. | [dialogs_move_tests.rs](../crates/ui-egui/src/dialogs_move_tests.rs): `dialog_tab_move_enters_the_dialog_instead_of_cycling_canvas_axes` |
+| HL-D | Hole Type preview dropdown: arrows browse without committing; Space confirms and closes; Tab discards a pending choice and reaches Hole Tap Type; cancelling adds no feature. | [hole_place_ui_tests.rs](../crates/ui-egui/src/hole_place_ui_tests.rs): `preview_dropdown_hole_type_uses_pending_arrows_space_and_tab_exit` |
+| MV-P | Disable Keep Tab inside dialogs: floating Move cycles X/Y/Z forwards and backwards. Re-enable it: Tab enters the dialog. The preference persists and resets on the Design page. | [dialogs_move_tests.rs](../crates/ui-egui/src/dialogs_move_tests.rs): `dialog_tab_preference_restores_floating_move_axis_cycle`; Preferences reset coverage |
 | PM-T | Parameters manager: repeated forward/reverse Tab remains inside the manager. | [params_dialog.rs](../crates/ui-egui/src/params_dialog.rs): `dialog_tab_parameters_stays_inside_its_manager` |
 
 ## Automated shared-control scenarios
@@ -85,7 +95,7 @@ selection, and stored input picks before and after navigation.
 | ID | Coverage | Test location |
 | --- | --- | --- |
 | UI-F | Dialog-only wrap, exact enabled-control set, disabled fields skipped, visible accent focus on dropdowns and normal/primary/text buttons. | [panel_tests.rs](../crates/ui-egui/src/ui_kit/panel_tests.rs): `dialog_tab_window_wraps_in_both_directions_and_excludes_background_fields`, `dialog_tab_dropdown_and_actions_paint_a_focus_outline` |
-| UI-D | Enter-to-OK and Space-to-open for indexed dropdowns, picked-value dropdowns, custom menus, and searchable dropdowns. Closed arrows still work; indexed menus start at the current choice, wrap with Up/Down, ignore Left/Right, confirm/close with Space or Enter, and cancel with Escape. Tab/Shift+Tab dismiss all four menu variants and reach the next/previous form control. | Same file: `dialog_keyboard_closed_dropdown_enter_applies_and_space_opens_all_variants`, `dialog_tab_dropdown_arrows_change_the_focused_choice`, `dialog_tab_dropdown_closes_and_leaves_in_both_directions`, `dropdown_open_menu_starts_at_current_wraps_and_space_confirms` |
+| UI-D | Enter-to-OK and Space-to-open for indexed dropdowns, picked-value dropdowns, custom menus, preview dropdowns, and searchable dropdowns. Closed arrows still work; indexed menus start at the current choice, wrap with Up/Down, ignore Left/Right, confirm/close with Space or Enter, and cancel with Escape. Tab/Shift+Tab dismiss all five menu variants (including preview dropdowns) and reach the next/previous form control. | Same file: `dialog_keyboard_closed_dropdown_enter_applies_and_space_opens_all_variants`, `dialog_tab_dropdown_arrows_change_the_focused_choice`, `dialog_tab_dropdown_closes_and_leaves_in_both_directions`, `dropdown_open_menu_starts_at_current_wraps_and_space_confirms` |
 | UI-B | Plain/mixed, grid and full-row checkboxes: Space toggles, Enter preserves the value and applies; disabled and mouse behavior remain correct. | [checks_tests.rs](../crates/ui-egui/src/ui_kit/checks_tests.rs): `checkbox_keyboard_pointer_disabled_and_mixed`, `checkbox_variants_use_space_to_toggle_and_enter_to_apply_the_dialog` |
 | UI-S | Text and icon segments: Enter preserves selection/applies, Space selects, all four arrows select. Disabled choices are skipped; boundary arrows retain focus in the group. | [choice_tests.rs](../crates/ui-egui/src/ui_kit/choice_tests.rs): `segmented_space_and_arrows_choose_while_enter_applies_the_dialog`, `segmented_arrows_skip_disabled_options_and_stay_in_the_group` |
 | UI-N | Numeric selection preserves mm/cm/degree/inch units, negative/decimal/comma-decimal values and leading Unicode whitespace; expressions select as a whole. Quantity arrows are skipped by Tab but still work with the mouse. | [fields_tests.rs](../crates/ui-egui/src/ui_kit/fields_tests.rs): `tab_selects_the_number_and_typing_preserves_units`, `tab_skips_count_arrows_in_both_directions_and_pointer_still_steps` |
@@ -94,6 +104,8 @@ selection, and stored input picks before and after navigation.
 ## Manual acceptance checklist
 
 These are additional visual/platform checks, not claims of automated coverage.
+Also verify a foreground Preferences or manager window retains its own Tab loop
+while an underlying feature dialog is collapsed.
 Run the high-risk cases on each of the six Mirror/Pattern dialogs, Fillet,
 Chamfer, and Extrude. Use the remaining combinations when their controls exist.
 

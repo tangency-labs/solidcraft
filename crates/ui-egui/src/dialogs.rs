@@ -2444,6 +2444,11 @@ fn selection_tab_order(k: &Kind) -> bool {
 
 /// Called before layout so egui traverses from the active canvas input, not the toolbar.
 pub(crate) fn prepare_tab(app: &SolveApp, ctx: &egui::Context) {
+    crate::dialog_focus::configure(
+        ctx,
+        app.preferences.dialog_tab_navigation,
+        app.dialog.as_ref().filter(|d| d.collapsed).map(|d| egui::Id::new(("sc_dialog", title(&d.kind)))),
+    );
     if app.issue_report.draft.is_some() || app.file_picker.is_some() || app.applying.is_some() || app.home.open {
         return;
     }

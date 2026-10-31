@@ -360,3 +360,31 @@ fn hole_design_preferences_keep_both_controls_and_cancel_after_page_split() {
     h.call("ui.prefs", json!({"button":"cancel"}));
     assert!(!h.app.preferences.hole_snaps && !h.app.preferences.hole_moves);
 }
+
+#[test]
+fn preview_dropdown_hole_type_uses_pending_arrows_space_and_tab_exit() {
+    let mut h = block_as_installed();
+    let features = h.app.session.doc.features.len();
+    h.step(&json!({"start":"solid.hole"})).unwrap();
+    h.frames(3);
+    h.step(&json!({"click":{"handle":"dialog:Hole Type"}})).unwrap();
+    h.step(&json!({"key":"Escape"})).unwrap();
+    h.step(&json!({"key":"Space"})).unwrap();
+    assert!(egui::Popup::is_any_open(&h.ctx));
+    h.step(&json!({"key":"ArrowDown"})).unwrap();
+    assert!(matches!(&h.app.dialog.as_ref().unwrap().kind, Kind::Hole { kind: 0, .. }));
+    h.step(&json!({"key":"Space"})).unwrap();
+    assert!(!egui::Popup::is_any_open(&h.ctx));
+    assert!(matches!(&h.app.dialog.as_ref().unwrap().kind, Kind::Hole { kind: 1, .. }));
+    h.step(&json!({"key":"Space"})).unwrap();
+    h.step(&json!({"key":"ArrowDown"})).unwrap();
+    h.step(&json!({"key":"Tab"})).unwrap();
+    h.frames(2);
+    assert!(!egui::Popup::is_any_open(&h.ctx));
+    assert!(matches!(&h.app.dialog.as_ref().unwrap().kind, Kind::Hole { kind: 1, .. }));
+    let response = h.ctx.read_response(h.ctx.memory(|m| m.focused()).unwrap()).unwrap();
+    assert!(response.rect.contains(handle_at("dialog:Hole Tap Type").unwrap()));
+    h.step(&json!({"key":"Escape"})).unwrap();
+    assert!(h.app.dialog.is_none());
+    assert_eq!(h.app.session.doc.features.len(), features);
+}

@@ -1,5 +1,15 @@
 //! Bridge canvas selection into egui's ordinary Tab order.
 
+/// Per-frame policy: a folded feature has no form to traverse; other windows still do.
+pub(crate) fn configure(ctx: &egui::Context, enabled: bool, folded: Option<egui::Id>) {
+    ctx.data_mut(|d| d.insert_temp(egui::Id::new("dialog_tab_policy"), (enabled, folded)));
+}
+
+fn enabled(ctx: &egui::Context, id: egui::Id) -> bool {
+    ctx.data(|d| d.get_temp::<(bool, Option<egui::Id>)>(egui::Id::new("dialog_tab_policy")))
+        .is_none_or(|(enabled, folded)| enabled && folded != Some(id))
+}
+
 /// egui's `shift_only` also accepts physical Ctrl+Shift on macOS; dialog traversal must not.
 fn tab_direction(modifiers: &egui::Modifiers) -> Option<egui::FocusDirection> {
     if modifiers.ctrl || modifiers.alt || modifiers.command || modifiers.mac_cmd {
@@ -168,6 +178,9 @@ pub(crate) fn prepare_active(ctx: &egui::Context) {
 }
 
 fn prepare(ctx: &egui::Context, scope: Scope) {
+    if !enabled(ctx, scope.id) {
+        return;
+    }
     // Let a popup finish opening before its own scope takes over.
     if egui::Popup::is_any_open(ctx) && scope.layer.order != egui::Order::Foreground {
         return;
@@ -205,7 +218,7 @@ fn prepare(ctx: &egui::Context, scope: Scope) {
 /// Invisible boundaries keep egui's native field/action order, skipping disabled controls.
 /// They do not allocate space, block canvas picking, or require a second list of widgets.
 pub(crate) fn scope<R>(ui: &mut egui::Ui, id: egui::Id, add: impl FnOnce(&mut egui::Ui) -> R) -> R {
-    if !ui.is_enabled() || !ui.is_visible() {
+    if !ui.is_enabled() || !ui.is_visible() || !enabled(ui.ctx(), id) {
         return add(ui);
     }
     let ctx = ui.ctx().clone();
