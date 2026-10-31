@@ -339,8 +339,9 @@ pub struct LocalSolve1d {
     /// Why the last solve stopped.
     pub termination_reason: TerminationReason,
     /// Not upstream (WR-253, tangency-labs/solidcore#481): `SolveOscillating` takes a
-    /// sign change only from an interior guess that evaluated (`false`, the default:
-    /// upstream also reads a failed guess's leftover `F`).
+    /// sign change only from an interior guess that evaluated, and `SolveIt` without an
+    /// interval returns a failed first evaluation's status instead of iterating from it
+    /// (`false`, the default: upstream reads the failed evaluation's leftover `F` in both).
     failed_guess_no_sign_change: bool,
 }
 
@@ -432,7 +433,9 @@ impl LocalSolve1d {
     /// Not upstream (WR-253, tangency-labs/solidcore#481): whether `SolveOscillating`
     /// ignores an interior guess whose evaluation failed when it looks for a sign change
     /// (`true`), instead of reading the `F` the failed evaluation left behind (`false`,
-    /// upstream and the default).
+    /// upstream and the default). With `true`, `SolveIt` without an interval also returns
+    /// the evaluator's error when the first evaluation fails, where upstream iterates
+    /// from the failed guess (the fork's tangency-labs/smlib@d2757e1).
     pub fn set_failed_guess_no_sign_change(&mut self, on: bool) {
         self.failed_guess_no_sign_change = on;
     }
@@ -920,6 +923,11 @@ impl LocalSolve1d {
                 }
                 Self::eval_into(eval, &mut self.curr, &mut found_answer, true)
                     .map_err(|err| eval_failed(err, OP))?;
+            } else if self.failed_guess_no_sign_change {
+                // No other start point: the failed evaluation left `curr` with no
+                // function value to iterate from, so its status is returned. Upstream
+                // iterates from it (WR-253; the fork's tangency-labs/smlib@d2757e1).
+                return Err(e);
             }
         }
 
@@ -1197,6 +1205,56 @@ mod tests {
             }
             Cycle.evaluate(t, out, s)
         }
+    }
+
+    /// `Sq`, except that the evaluation at 1 fails after zeroing its outputs, as
+    /// `SmCurvePropertyEFO::Evaluate` does.
+    struct SqFailingAtOne;
+    impl EvalFunction for SqFailingAtOne {
+        fn evaluate(&mut self, t: f64, out: &mut FunctionValue, s: bool) -> Result<()> {
+            if t.to_bits() == 1f64.to_bits() {
+                *out = FunctionValue::default();
+                return Err(sm_err("test: no value here"));
+            }
+            Sq.evaluate(t, out, s)
+        }
+    }
+
+    /// WR-253 (the fork's tangency-labs/smlib@d2757e1): without an interval, upstream
+    /// iterates from a failed first evaluation. Its zeroed `F` reads as converged, so
+    /// upstream reports `t = 1` as a root of `t^2 - 2`; the port does the same.
+    #[test]
+    fn failed_first_evaluation_without_interval_is_a_root_as_upstream() {
+        let mut s = LocalSolve1d::new();
+        let r = s.solve_it(&mut SqFailingAtOne, 1.0, 1e-9).unwrap();
+        assert!(r.found);
+        assert_eq!(r.t, 1.0);
+    }
+
+    /// WR-253 (the fork's tangency-labs/smlib@d2757e1): with the opt-in, a failed first
+    /// evaluation without an interval returns the evaluator's status, as the interval
+    /// case does when its tweaked start fails too. A good start is unaffected.
+    #[test]
+    fn d2757e1_failed_first_evaluation_without_interval_fails_with_the_flag() {
+        let mut s = LocalSolve1d::new();
+        s.set_failed_guess_no_sign_change(true);
+        let e = s.solve_it(&mut SqFailingAtOne, 1.0, 1e-9).unwrap_err();
+        assert!(
+            matches!(
+                e,
+                SolidError::Upstream {
+                    code: SM_ERR,
+                    operation: "test: no value here",
+                    ..
+                }
+            ),
+            "{e:?}"
+        );
+
+        // A start whose evaluation succeeds solves as without the flag.
+        let r = s.solve_it(&mut SqFailingAtOne, 1.5, 1e-9).unwrap();
+        let plain = LocalSolve1d::new().solve_it(&mut Sq, 1.5, 1e-9).unwrap();
+        assert_eq!((r.found, r.t.to_bits()), (plain.found, plain.t.to_bits()));
     }
 
     struct Unp;
