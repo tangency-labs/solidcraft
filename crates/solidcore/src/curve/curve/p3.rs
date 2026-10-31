@@ -517,14 +517,25 @@ impl Curve {
     /// `InvalidInput` for a start parameter more than `SM_EFF_ZERO` (relative) outside
     /// the knots, or below the first knot when stepping backwards (an out of bounds
     /// read upstream), or a curve without knots; those of the lengths and
-    /// evaluations of the Newton iteration.
+    /// evaluations of the Newton iteration ([`Curve::length`]: an edge's curve borrowed
+    /// from its record is [`SolidError::Unported`], use
+    /// [`crate::topology::edge::evaluation_curve`]).
+    ///
+    /// The length caches are built at the tolerance of the curve's edge when one is
+    /// recorded on the curve ([`Curve::owner_zone_tol_3d`]), as upstream reads it
+    /// through the owner.
     pub fn find_parameter_at_arc_length(
         &self,
         k: &Kernel,
         start_param: f64,
         arc_length: f64,
     ) -> Result<ArcLengthParameter> {
-        self.find_parameter_at_arc_length_with_zone_tol(k, start_param, arc_length, None)
+        self.find_parameter_at_arc_length_with_zone_tol(
+            k,
+            start_param,
+            arc_length,
+            self.owner_zone_tol_3d(),
+        )
     }
 
     /// Finds an arc-length parameter using the owning edge's resolved zone

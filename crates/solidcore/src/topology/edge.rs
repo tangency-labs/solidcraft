@@ -12,6 +12,7 @@
 //! | [`crate::topology::Edge`] (`Drop`)      | `SmEdge::~SmEdge`                                 |
 //! | [`edgeuse_count`], [`primary_edgeuse`]  | `SmEdge::GetEdgeuseCount`, `GetPrimaryEdgeuse`    |
 //! | [`interval`], [`set_interval`], [`curve`], [`tolerance`] | `SmEdge::GetInterval`, `SetInterval`, `GetCurve`, `GetTolerance` (`SM_USE_OLDTOL`) |
+//! | [`evaluation_curve`]                    | `GetCurve()` as `SmTol::GetZoneTol3d(const SmObject*)` reads it (the curve's `GetEdge()->GetTolerance()`) |
 //! | [`OdeEdgeLength`]                       | `SmODEEdgeLengthIFEO` (constructor, `Evaluate`)   |
 //! | [`end_tangent`]                         | `SmEdge::GetEndTangent`                           |
 //! | [`uv_trim_curve_of_surface`]            | `SmEdge::GetUVTrimCurveOfSurface`                 |
@@ -402,6 +403,37 @@ pub fn curve(b: &Brep, e: EdgeId) -> Result<Option<&Curve>> {
 /// `GetTolerance` (`SM_USE_OLDTOL`): `m_sZoneTol3d`.
 pub fn tolerance(b: &Brep, e: EdgeId) -> Result<f64> {
     Ok(b.edge(e)?.tolerance)
+}
+
+/// The edge's 3D curve as upstream's `GetCurve()` evaluates: an evaluation copy (the
+/// curve exactly, owner included) carrying, when the curve has an owner, the edge's
+/// tolerance ([`Curve::set_owner_zone_tol_3d`]): the value
+/// `SmTol::GetZoneTol3d(const SmObject*)` reads through the curve's edge
+/// (`GetEdge()->GetTolerance()`; a curve without owner has no edge there and gets the
+/// system tolerance, as `SmApiEdgeComputeLength` does). Not upstream: a port
+/// curve cannot reach its edge, so a curve borrowed from the edge record ([`curve`])
+/// builds no cache over its owner's tolerance (its length, arc-length parameter and
+/// solves return [`SolidError::Unported`] for `SmTol::GetZoneTol3d`); this copy builds
+/// them as upstream does. `None` for an edge without curve.
+///
+/// # Errors
+///
+/// [`SolidError::NotFound`] for a dead edge; those of the curve copy (geometry nested
+/// deeper than the shared bound).
+pub fn evaluation_curve(b: &Brep, e: EdgeId) -> Result<Option<Curve>> {
+    const OP_EVALUATION_CURVE: &str = "topology::edge::evaluation_curve";
+    let edge = b.edge(e).map_err(|_| SolidError::NotFound {
+        operation: OP_EVALUATION_CURVE,
+        entity: EntityRef::Edge(e),
+    })?;
+    let Some(curve) = edge.curve.as_ref() else {
+        return Ok(None);
+    };
+    let mut copy = curve.clone_for_evaluation()?;
+    if copy.owner().is_some() {
+        copy.set_owner_zone_tol_3d(Some(edge.tolerance));
+    }
+    Ok(Some(copy))
 }
 
 fn curve_deref<'b>(b: &'b Brep, e: EdgeId, what: &'static str) -> Result<&'b Curve> {

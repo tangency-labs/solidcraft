@@ -1651,7 +1651,7 @@ impl Curve {
     ///
     /// Those of [`Curve::length_base`].
     pub fn length(&self, k: &Kernel, interval: &Extent1d, desired_accuracy: f64) -> Result<f64> {
-        self.length_with_zone_tol(k, interval, desired_accuracy, None)
+        self.length_with_zone_tol(k, interval, desired_accuracy, self.owner_zone_tol_3d())
     }
 
     /// Arc length with the owning edge's resolved zone tolerance, independent of
@@ -1678,14 +1678,20 @@ impl Curve {
     /// # Errors
     ///
     /// Those of the length estimate and of the degree query;
-    /// [`SolidError::Unported`] from the tessellation or curve evaluator.
+    /// [`SolidError::Unported`] from the tessellation or curve evaluator, and for an
+    /// edge's curve borrowed from its record (`SmTol::GetZoneTol3d`: the cache's
+    /// tolerance is the edge's, which the curve cannot reach; use
+    /// [`crate::topology::edge::evaluation_curve`]).
+    ///
+    /// The cache is built at the tolerance of the curve's edge when one is recorded on
+    /// the curve ([`Curve::owner_zone_tol_3d`]), as upstream reads it through the owner.
     pub fn length_base(
         &self,
         k: &Kernel,
         interval: &Extent1d,
         desired_accuracy: f64,
     ) -> Result<f64> {
-        self.length_base_with_zone_tol(k, interval, desired_accuracy, None)
+        self.length_base_with_zone_tol(k, interval, desired_accuracy, self.owner_zone_tol_3d())
     }
 
     fn length_base_with_zone_tol(

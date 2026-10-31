@@ -762,14 +762,21 @@ pub fn map_to_1d_on_curve(k: &Kernel, tol: f64, param: f64, curve: &Curve) -> Re
 }
 
 /// The `SmCurve` branch of `SmTol::GetZoneTol3d(const SmObject*)`: the tolerance of the
-/// curve's edge, else the system zone tolerance.
+/// curve's edge, else the system zone tolerance. The edge's tolerance is the one
+/// recorded on the curve ([`Curve::owner_zone_tol_3d`]; an edge's curve from
+/// [`crate::topology::edge::evaluation_curve`] carries it).
 ///
 /// # Errors
 ///
 /// [`SolidError::Unported`]: `SmEdge::GetTolerance` (`topology.edge`) for a curve that
-/// defines an edge's shape, and the owner chain of a generated curve or UV trim curve
-/// (whose owners are not reachable from a bare curve).
+/// defines an edge's shape and carries no recorded tolerance (borrowed from its edge
+/// record), and the owner chain of a generated curve or UV trim curve (whose owners are
+/// not reachable from a bare curve).
 pub fn zone_tol_3d_of_curve(k: &Kernel, curve: &Curve) -> Result<f64> {
+    // the edge's tolerance, recorded on the curve by a caller holding the edge
+    if let Some(zone_tol_3d) = curve.owner_zone_tol_3d() {
+        return Ok(zone_tol_3d);
+    }
     let mut chain = false;
     let edge = curve.edge(|_| {
         chain = true;
@@ -777,6 +784,8 @@ pub fn zone_tol_3d_of_curve(k: &Kernel, curve: &Curve) -> Result<f64> {
     })?;
     if edge.is_some() {
         // UNPORTED(topology.edge): SmEdge::GetTolerance; justified: findings.md intersect.surface_drop_lib_p3
+        // (the curve holds no recorded tolerance: a caller with the B-rep passes
+        // topology::edge::evaluation_curve's copy, which carries the edge's)
         // Proof (unreachable): callers are geom::tol::is_degenerate_curve (tests only) and
         // offset_geometry_creation (an unowned arc copy, the system branch); 0 hits in the
         // green difftest sweep.
