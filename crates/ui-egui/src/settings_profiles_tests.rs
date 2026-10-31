@@ -35,6 +35,7 @@ fn a_profile_holds_input_and_interface_settings_but_not_the_machine() {
         "space_mouse_calibrations",
         "space_mouse_driver",
         "space_mouse_speed",
+        "dark_parts_shading",
         "msaa",
         "window_system",
         "default_units",
@@ -321,9 +322,11 @@ fn profile_keys_preserve_the_literal_pre_split_baseline() {
         "history_in_browser",
         "history_play_button",
         "history_sketches",
+        "keep_work_on_tab_switch",
         "language",
         "layout",
         "line_drag_draws_one",
+        "line_hover_tangent_arc",
         "logo_accent",
         "look_at_anim",
         "look_at_speed",
@@ -396,21 +399,33 @@ fn profile_keys_preserve_the_literal_pre_split_baseline() {
     ];
     let mut actual: Vec<_> = keys().collect();
     actual.sort_unstable();
+    assert_eq!(expected.len(), 93);
     assert_eq!(actual, expected);
 }
 
 #[test]
 fn moved_profile_settings_survive_saved_roundtrip_and_apply() {
     let mut h = Harness::new();
+    let defaults = crate::prefs::Prefs::default();
+    assert!(!defaults.keep_work_on_tab_switch && !defaults.line_hover_tangent_arc);
+    for (key, page) in [("keep_work_on_tab_switch", crate::prefs::PAGE_LAYOUT), ("line_hover_tangent_arc", crate::prefs::PAGE_SKETCH)] {
+        let homes: Vec<_> = crate::prefs::FIELD_PAGES.iter().filter_map(|(field, page)| (*field == key).then_some(*page)).collect();
+        assert_eq!(homes, [Some(page)], "{key} keeps its new page home");
+    }
     h.app.preferences.nav_bridge_enabled = true;
     h.app.preferences.nav_bridge_port = 9876;
     h.app.preferences.origin_plane_names = crate::prefs::OriginPlaneNames::TopFrontRight;
     h.app.preferences.direct_interaction = true;
     h.app.preferences.quick_measure = true;
     h.app.preferences.viewport_analysis_status = false;
+    h.app.preferences.keep_work_on_tab_switch = true;
+    h.app.preferences.line_hover_tangent_arc = true;
     run(&mut h, "settings.profile.save", json!({"name":"Moved"}));
     let saved = h.app.settings_profiles.prefs();
     let doc = h.app.settings_profiles.list[0].clone();
+    assert_eq!(doc["preferences"]["keep_work_on_tab_switch"], true);
+    assert_eq!(doc["preferences"]["line_hover_tangent_arc"], true);
+    assert!(doc["preferences"].get("dark_parts_shading").is_none());
     assert_eq!(sanitize(&doc).unwrap(), doc);
     h.app.settings_profiles.load(&serde_json::from_str::<Value>(&serde_json::to_string(&saved).unwrap()).unwrap());
     assert_eq!(h.app.settings_profiles.list[0], doc);
@@ -420,8 +435,11 @@ fn moved_profile_settings_survive_saved_roundtrip_and_apply() {
     h.app.preferences.direct_interaction = false;
     h.app.preferences.quick_measure = false;
     h.app.preferences.viewport_analysis_status = true;
+    h.app.preferences.keep_work_on_tab_switch = false;
+    h.app.preferences.line_hover_tangent_arc = false;
     let out = run(&mut h, "settings.profile.apply", json!({"name":"Moved"}));
     assert_eq!(out["skipped"], json!([]));
+    assert!(h.app.preferences.keep_work_on_tab_switch && h.app.preferences.line_hover_tangent_arc);
     assert_eq!(capture(&h.app, "Moved"), doc);
 }
 

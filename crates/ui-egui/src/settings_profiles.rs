@@ -34,7 +34,7 @@ const MAX_THEMES: usize = 4;
 /// Most characters in a command id or a key name.
 const MAX_ID: usize = 200;
 
-/// Stable stored keys from the pre-split Interface, Navigation and Sketch pages, plus
+/// The 93 stored keys from the pre-split Interface, Navigation and Sketch pages, plus
 /// language, excluding space_mouse_* and orbit_cursor. Page moves and title tags must never
 /// change profile contents (including the bridge, origin names and direct interaction).
 const PROFILE_KEYS: &[&str] = &[
@@ -57,9 +57,11 @@ const PROFILE_KEYS: &[&str] = &[
     "history_in_browser",
     "history_play_button",
     "history_sketches",
+    "keep_work_on_tab_switch",
     "language",
     "layout",
     "line_drag_draws_one",
+    "line_hover_tangent_arc",
     "logo_accent",
     "look_at_anim",
     "look_at_speed",
