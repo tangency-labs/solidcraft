@@ -143,6 +143,11 @@ fn analysis_colours_reach_the_shader_in_its_order() {
 const ALLOWED_LITERALS: &[(&str, usize, &str)] = &[
     ("navigation.rs", 1, "the navigation cube's face shading, made from a token"),
     ("canvas.rs", 3, "white rings around manipulator handles"),
+    (
+        "body_gizmo.rs",
+        3,
+        "the custom view navigator's raster: the design's appearance and tokens, shaded, as pixels, drawn with the white image tint",
+    ),
     ("context_menu.rs", 1, "the radial menu's shadow"),
     ("dialogs_appearance.rs", 1, "a design appearance: the colour is the fact"),
     ("dialogs_save_mesh.rs", 1, "an installed slicer's own icon, drawn untinted"),

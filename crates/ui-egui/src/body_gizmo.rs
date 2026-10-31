@@ -146,11 +146,21 @@ fn raster(mesh: &Mesh, cam: &Camera, side: usize) -> Raster {
     out
 }
 
-/// The pieces of the body's edges nothing nearer covers, stepping one sample at a time.
+/// The pieces of the body's edges nothing nearer covers, stepping one sample at a time. A piece
+/// is kept only when the stretch of the edge seen with it (across the edge's segments) is at least
+/// two samples long: shorter is a sliver where a hidden edge meets the silhouette.
 fn visible_edges(mesh: &Mesh, view: &View, r: &Raster) -> Vec<(usize, [f64; 2], [f64; 2])> {
     let bias = view.radius * 0.02;
     let mut out = Vec::new();
     for (e, line) in mesh.edges.iter().enumerate() {
+        // The stretch seen so far: its pieces and their length.
+        let mut stretch: (Vec<(usize, [f64; 2], [f64; 2])>, f64) = (Vec::new(), 0.0);
+        let mut end_stretch = |stretch: &mut (Vec<(usize, [f64; 2], [f64; 2])>, f64)| {
+            let (pieces, length) = std::mem::take(stretch);
+            if length >= 2.0 {
+                out.extend(pieces);
+            }
+        };
         for w in line.windows(2) {
             let (p, q) = (view.project(w[0]), view.project(w[1]));
             let steps = (q.0 - p.0).abs().max((q.1 - p.1).abs()).ceil();
@@ -163,22 +173,31 @@ fn visible_edges(mesh: &Mesh, view: &View, r: &Raster) -> Vec<(usize, [f64; 2], 
                 (p.0 + (q.0 - p.0) * f, p.1 + (q.1 - p.1) * f, p.2 + (q.2 - p.2) * f)
             };
             let mut run: Option<[f64; 2]> = None;
+            let piece = |stretch: &mut (Vec<(usize, [f64; 2], [f64; 2])>, f64), start: [f64; 2], end: [f64; 2]| {
+                stretch.1 += (end[0] - start[0]).hypot(end[1] - start[1]);
+                stretch.0.push((e, start, end));
+            };
             for s in 0..steps {
                 // A step is seen when its middle is.
                 let (a, b) = (at(s), at(s + 1));
                 let mid = ((a.0 + b.0) * 0.5, (a.1 + b.1) * 0.5, (a.2 + b.2) * 0.5);
                 if r.clear(mid.0, mid.1, mid.2, bias) {
                     run.get_or_insert([a.0, a.1]);
+                    // A stretch may go on into the next segment.
                     if s + 1 == steps
                         && let Some(start) = run.take()
                     {
-                        out.push((e, start, [b.0, b.1]));
+                        piece(&mut stretch, start, [b.0, b.1]);
                     }
-                } else if let Some(start) = run.take() {
-                    out.push((e, start, [a.0, a.1]));
+                } else {
+                    if let Some(start) = run.take() {
+                        piece(&mut stretch, start, [a.0, a.1]);
+                    }
+                    end_stretch(&mut stretch);
                 }
             }
         }
+        end_stretch(&mut stretch);
     }
     out
 }
@@ -204,6 +223,11 @@ fn hover_outline(texture: NavigatorTexture, cube: &Tokens, view: &Tokens) -> Col
     }
 }
 
+/// A colour of the body's raster: the design's own appearance, or a token, shaded or lit.
+fn rgb(r: u8, g: u8, b: u8) -> Color32 {
+    Color32::from_rgb(r, g, b)
+}
+
 /// The colour face `face` is painted before shading.
 fn face_colour(shape: &Shape, face: Option<u32>, look: &Look) -> Color32 {
     let [cube_face, hover, body, background] = look.colours;
@@ -213,11 +237,11 @@ fn face_colour(shape: &Shape, face: Option<u32>, look: &Look) -> Color32 {
         NavigatorTexture::Themed if hovered => hover,
         NavigatorTexture::Themed => cube_face,
         NavigatorTexture::Modeled => {
-            let own = shape.colour_of(face).map_or(body, |[r, g, b]| Color32::from_rgb(r, g, b));
+            let own = shape.colour_of(face).map_or(body, |[r, g, b]| rgb(r, g, b));
             if hovered {
                 // As the view shows a face under the pointer: its own colour, a little lighter.
                 let k = look.lift;
-                return Color32::from_rgb(own.r().saturating_add(k), own.g().saturating_add(k), own.b().saturating_add(k));
+                return rgb(own.r().saturating_add(k), own.g().saturating_add(k), own.b().saturating_add(k));
             }
             // Idle, it fades into the view as the cube does.
             if look.active { own } else { own.lerp_to_gamma(background, 0.55) }
@@ -230,7 +254,7 @@ fn face_colour(shape: &Shape, face: Option<u32>, look: &Look) -> Color32 {
 fn compose(r: &Raster, shape: &Shape, look: &Look) -> egui::ColorImage {
     let mesh = &shape.mesh;
     let px = r.side / SS;
-    let dim = |c: Color32, s: f32| Color32::from_rgb((f32::from(c.r()) * s) as u8, (f32::from(c.g()) * s) as u8, (f32::from(c.b()) * s) as u8);
+    let dim = |c: Color32, s: f32| rgb((f32::from(c.r()) * s) as u8, (f32::from(c.g()) * s) as u8, (f32::from(c.b()) * s) as u8);
     let mut colours: std::collections::HashMap<Option<u32>, Color32> = std::collections::HashMap::new();
     let mut pixels = Vec::with_capacity(px * px);
     for y in 0..px {

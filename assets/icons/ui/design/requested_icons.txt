@@ -161,6 +161,7 @@ min_radius	false
 mirror	false
 motion_link	false
 move	false
+nav_settings	false
 new	false
 normal	false
 offset	false
