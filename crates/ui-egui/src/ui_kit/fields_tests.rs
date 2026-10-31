@@ -677,3 +677,71 @@ fn a_track_number_adds_up_and_a_sign_adds_to_the_value_now() {
     assert_eq!(typed("1e-3+1", 0.0), Some(1.001));
     assert_eq!(typed("abc", 1.0), None);
 }
+
+#[test]
+fn a_label_drag_reads_only_literal_values_and_moves_them_on_the_step_grid() {
+    let literal = |text: &str| super::literal(text).map(|l| (l.number, l.unit, l.comma));
+    assert_eq!(literal("20 mm"), Some((20.0, " mm".into(), false)));
+    assert_eq!(literal(" 1,5in "), Some((1.5, "in".into(), true)));
+    assert_eq!(literal("-3"), Some((-3.0, String::new(), false)));
+    for not_a_value in ["width", "width + 2 mm", "2 * 3 mm", "", "1e3", "1e400 mm", "20 bananas"] {
+        assert_eq!(literal(not_a_value), None, "{not_a_value:?} is left alone");
+    }
+    assert_eq!(super::scrub_step(20.0), 0.1);
+    assert_eq!(super::scrub_step(250.0), 1.0);
+    assert_eq!(super::scrub_step(0.0), 0.01);
+    assert_eq!(super::scrub_step(-45.0), 0.1);
+    assert!((super::scrubbed(20.0, 30.0, 0.1) - 23.0).abs() < 1e-9);
+    assert!((super::scrubbed(20.37, 1.0, 0.1) - 20.5).abs() < 1e-9, "the value lands on the step's grid");
+    assert_eq!(super::scrubbed(2.0, -500.0, 0.1), 0.0, "a size stops at zero");
+    assert!((super::scrubbed(-2.0, -10.0, 0.1) + 3.0).abs() < 1e-9, "a negative offset keeps moving");
+    assert_eq!(super::scrubbed(1.0, f32::MAX, 1e8), 1.0, "an overflowing drag keeps the value");
+    let text = |n, step, typed: &str| super::scrub_text(n, step, &super::literal(typed).unwrap());
+    assert_eq!(text(23.0, 0.1, "20 mm"), "23.0 mm");
+    assert_eq!(text(1.75, 0.01, "1,5 in"), "1,75 in");
+    assert_eq!(text(-0.0001, 0.01, "-1"), "0.00");
+    assert_eq!(text(300.0, 1.0, "250 mm"), "300 mm");
+}
+
+#[test]
+fn dragging_a_value_rows_label_changes_its_literal_and_leaves_expressions_alone() {
+    fn frame(ctx: &egui::Context, events: Vec<egui::Event>, modifiers: egui::Modifiers, values: &mut [String; 2]) {
+        scenario::clear_handles();
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(320.0, 400.0))),
+            events: std::iter::once(egui::Event::ModifiersChanged(modifiers)).chain(events).collect(),
+            focused: true,
+            ..Default::default()
+        };
+        crate::test_support::frame(ctx, input, |ui| {
+            ui.set_width(280.0);
+            scope(ui, |ui| {
+                let [distance, offset] = &mut *values;
+                expr_row(ui, "Distance", distance);
+                expr_row(ui, "Offset", offset);
+            });
+        });
+    }
+    fn drag(ctx: &egui::Context, row: &str, dx: f32, modifiers: egui::Modifiers, values: &mut [String; 2]) {
+        let start = scenario::rect_of(&format!("dialog:label:{row}")).unwrap().center();
+        let end = start + egui::vec2(dx, 0.0);
+        let button = |pos, pressed| egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers };
+        frame(ctx, vec![egui::Event::PointerMoved(start), button(start, true)], modifiers, values);
+        for step in 1..=4 {
+            frame(ctx, vec![egui::Event::PointerMoved(start + egui::vec2(dx * step as f32 / 4.0, 0.0))], modifiers, values);
+        }
+        frame(ctx, vec![button(end, false)], modifiers, values);
+        frame(ctx, vec![], modifiers, values);
+    }
+    let ctx = crate::fonts::test_context();
+    let mut values = ["20 mm".to_owned(), "depth + 2 mm".to_owned()];
+    frame(&ctx, vec![], Default::default(), &mut values);
+    drag(&ctx, "Distance", 40.0, Default::default(), &mut values);
+    assert_eq!(values[0], "24.0 mm", "40 points at 0.1 mm a point");
+    drag(&ctx, "Distance", 40.0, egui::Modifiers::SHIFT, &mut values);
+    assert_eq!(values[0], "24.40 mm", "Shift is ten times finer");
+    drag(&ctx, "Distance", -20.0, egui::Modifiers::COMMAND, &mut values);
+    assert_eq!(values[0], "4 mm", "Ctrl is ten times coarser");
+    drag(&ctx, "Offset", 60.0, Default::default(), &mut values);
+    assert_eq!(values[1], "depth + 2 mm", "an expression keeps its parameter");
+}
