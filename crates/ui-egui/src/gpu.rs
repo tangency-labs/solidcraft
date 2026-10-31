@@ -755,7 +755,7 @@ mod tests {
             let app = &mut self.app;
             let transform = self.root_transform;
             let mut root_layer = None;
-            let out = self.ctx.run_ui(raw, |ui| {
+            let mut out = self.ctx.run_ui(raw, |ui| {
                 root_layer = Some(ui.layer_id());
                 app.logic(ui.ctx());
                 app.ui(ui);
@@ -767,7 +767,7 @@ mod tests {
             let screen = egui_wgpu::ScreenDescriptor { size_in_pixels: self.size, pixels_per_point: out.pixels_per_point };
             let mut encoder = self.device.create_command_encoder(&Default::default());
             let mut renderer = self.renderer.write();
-            for (id, deltas) in out.textures_delta.set {
+            for (id, deltas) in out.textures_delta.set.drain() {
                 for delta in deltas {
                     renderer.update_texture(&self.device, &self.queue, id, &delta);
                 }
@@ -803,7 +803,7 @@ mod tests {
             if let Some(effect) = &renderer.frame_compositor {
                 effect.submitted();
             }
-            for id in out.textures_delta.free {
+            for id in out.textures_delta.free.drain() {
                 renderer.free_texture(&id);
             }
             drop(renderer);
