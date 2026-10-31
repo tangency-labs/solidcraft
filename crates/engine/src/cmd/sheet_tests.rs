@@ -5399,14 +5399,14 @@ fn a_mirror_or_a_join_into_a_sheet_refuses_its_flat_pattern_naming_the_feature()
     }
 }
 
-/// A fillet on a sheet's corner is refused in the flat pattern until a sheet metal feature
-/// rebuilds the body from its sheet features; that feature says the round is not kept, and the
-/// flat pattern describes the body again.
+/// A fillet along a sheet's face (an edge of its top face) is refused in the flat pattern until a
+/// sheet metal feature rebuilds the body from its sheet features; that feature says the round is
+/// not kept, and the flat pattern describes the body again.
 #[test]
-fn a_fillet_on_a_sheet_corner_is_refused_until_a_sheet_feature_rebuilds_the_body() {
+fn a_fillet_along_a_sheet_face_is_refused_until_a_sheet_feature_rebuilds_the_body() {
     let mut s = Session::default();
     base(&mut s, 100.0, 60.0);
-    let out = run(&mut s, "solid.fillet", json!({"edges": [[100, 60, 1.25]], "radius": 10}));
+    let out = run(&mut s, "solid.fillet", json!({"edges": [[50, 60, 2.5]], "radius": 1}));
     assert!(out["warning"].as_str().is_some_and(|w| w.contains("is sheet metal")), "{out}");
     let error = s.execute("sheet.export_dxf", &json!({})).unwrap_err().to_string();
     assert!(error.contains("can't include Fillet1"), "{error}");
@@ -5414,6 +5414,129 @@ fn a_fillet_on_a_sheet_corner_is_refused_until_a_sheet_feature_rebuilds_the_body
     assert!(out["warning"].as_str().is_some_and(|w| w.contains("what Fillet1 changed is not kept")), "{out}");
     assert!(flat_exports(&mut s).into_iter().all(|r| r.is_ok()));
     assert_eq!(s.model.state().sheets[0].altered_by, None);
+}
+
+/// The arcs of a sheet's flat outline, as (centre, radius).
+fn outline_arcs(s: &Session) -> Vec<(solidcraft_geom::Vec2, f64)> {
+    let regions = s.model.state().sheets[0].flat_regions().unwrap();
+    regions
+        .iter()
+        .flat_map(|r| r.loops().flat_map(|l| l.segs.clone()).collect::<Vec<_>>())
+        .filter_map(|seg| match seg {
+            solidcraft_geom::Seg2::Arc { center, radius, .. } => Some((center, radius)),
+            _ => None,
+        })
+        .collect()
+}
+
+/// A round on a corner edge through a sheet's thickness is a cut-out of its flat pattern
+/// (#9340): no warning, the flat pattern, DXF and bend table have it, and a cut and a flange made
+/// after it keep it. A 100 x 60 plate 2.5 thick, its corner at (100, 60) rounded to 10: the flat
+/// pattern loses the material between the corner and the round, 10² − π·10²/4.
+#[test]
+fn a_round_on_a_sheet_corner_is_a_cut_out_of_its_flat_pattern() {
+    let mut s = Session::default();
+    base(&mut s, 100.0, 60.0);
+    run(&mut s, "solid.fillet", json!({"edges": [[100, 60, 1.25]], "radius": 10}));
+    assert_eq!(last_warning(&s), "");
+    let rounded = 6000.0 - (100.0 - 25.0 * PI);
+    assert!((flat_pieces(&s).iter().sum::<f64>() - rounded).abs() < 1e-6, "{:?}", flat_pieces(&s));
+    assert!(rel(volume(&mut s), rounded * 2.5) < 1e-4, "{}", volume(&mut s));
+    let arcs = outline_arcs(&s);
+    assert!(arcs.iter().any(|(c, r)| (r - 10.0).abs() < 1e-9 && c.dist(solidcraft_geom::Vec2::new(90.0, 50.0)) < 1e-9), "{arcs:?}");
+    assert!(flat_exports(&mut s).into_iter().all(|r| r.is_ok()));
+    let dxf = run(&mut s, "sheet.export_dxf", json!({}))["dxf"].as_str().unwrap_or_default().to_string();
+    assert!(dxf.contains("ARC"), "the round is an arc in the DXF");
+
+    // A hole cut after it, and a flange: each rebuilds the body from its sheet features.
+    circle_sketch(&mut s, "Hole", json!("XY"), [30.0, 30.0], 10.0);
+    run(&mut s, "solid.extrude", json!({"sketch": "Hole", "through_all": true, "direction": "symmetric", "operation": "cut"}));
+    run(&mut s, "sheet.flange", json!({"edges": [[50, 0, 2.5]], "height": 20}));
+    let kept = |w: &str| !w.contains("is not kept") && !w.contains("flat pattern, DXF and bend table");
+    assert!(s.model.results.iter().all(|r| r.error.is_none() && r.warning.as_deref().is_none_or(kept)), "{:?}", s.model.results);
+    assert_eq!(s.model.state().sheets[0].altered_by, None);
+    assert_eq!(outline_arcs(&s).iter().filter(|(_, r)| (r - 10.0).abs() < 1e-9).count(), 1, "{:?}", outline_arcs(&s));
+    assert!(flat_exports(&mut s).into_iter().all(|r| r.is_ok()));
+}
+
+/// An equal chamfer on a sheet's corner edge is the same kind of cut-out: the corner's 8 x 8
+/// triangle leaves the flat pattern, whose outline then runs straight across the corner.
+#[test]
+fn a_chamfer_on_a_sheet_corner_is_a_cut_out_of_its_flat_pattern() {
+    let mut s = Session::default();
+    base(&mut s, 100.0, 60.0);
+    run(&mut s, "solid.chamfer", json!({"edges": [[0, 0, 1.25]], "distance": 8}));
+    assert_eq!(last_warning(&s), "");
+    assert!((flat_pieces(&s).iter().sum::<f64>() - (6000.0 - 32.0)).abs() < 1e-6, "{:?}", flat_pieces(&s));
+    assert!(rel(volume(&mut s), (6000.0 - 32.0) * 2.5) < 1e-4, "{}", volume(&mut s));
+    assert!(flat_exports(&mut s).into_iter().all(|r| r.is_ok()));
+}
+
+/// A round larger than the sides of its corner allow is refused with the largest it can take:
+/// the 60 mm side of a square corner takes a round of at most 60.
+#[test]
+fn a_round_too_large_for_a_sheet_corner_is_refused_with_the_largest_that_fits() {
+    let mut s = Session::default();
+    base(&mut s, 100.0, 60.0);
+    let error = s.execute("solid.fillet", &json!({"edges": [[100, 60, 1.25]], "radius": 70})).unwrap_err().to_string();
+    assert!(error.contains("too large for the corner at (100.000, 60.000)") && error.contains("at most 60.000 mm"), "{error}");
+}
+
+/// #9340: the far end of a Z bracket's last flange rounded off, both corners at once, then a hole
+/// drilled in that flange. The hole rebuilds the body from its sheet features and keeps the
+/// rounds (they used to be dropped, with a warning on the fillet and on the hole).
+#[test]
+fn a_z_brackets_rounded_end_stays_round_when_a_hole_is_cut_after_it() {
+    let mut s = Session::default();
+    base(&mut s, 100.0, 40.0);
+    run(&mut s, "sheet.flange", json!({"edges": [[50, 40, 2.5]], "height": 30, "then": [{"angle": "90 deg", "height": 60, "flip": true}]}));
+    let body = s.model.state().sheets[0].body.clone();
+    // The two edges through the thickness at the far end of the last flange.
+    let edges = run(&mut s, "model.edges", json!({"body": body}))["edges"].as_array().cloned().unwrap();
+    let point = |v: &Value| [v[0].as_f64().unwrap(), v[1].as_f64().unwrap(), v[2].as_f64().unwrap()];
+    let through: Vec<([f64; 3], [f64; 3], [f64; 3])> = edges
+        .iter()
+        .filter(|e| (e["length"].as_f64().unwrap() - 2.5).abs() < 1e-6)
+        .map(|e| (point(&e["mid"]), point(&e["start"]), point(&e["end"])))
+        .collect();
+    let far = through.iter().map(|(m, _, _)| m[1]).fold(f64::MIN, f64::max);
+    let ends: Vec<_> = through.iter().filter(|(m, _, _)| (m[1] - far).abs() < 1e-6).collect();
+    assert_eq!(ends.len(), 2, "{through:?}");
+    let picks: Vec<[f64; 3]> = ends.iter().map(|(m, _, _)| *m).collect();
+    run(&mut s, "solid.fillet", json!({"edges": picks, "radius": 15}));
+    assert_eq!(last_warning(&s), "");
+    assert_eq!(outline_arcs(&s).iter().filter(|(_, r)| (r - 15.0).abs() < 1e-9).count(), 2, "{:?}", outline_arcs(&s));
+    // A hole in the middle of the last flange, from its upper face.
+    let top = ends.iter().flat_map(|(_, a, b)| [a[2], b[2]]).fold(f64::MIN, f64::max);
+    let area = flat_pieces(&s).iter().sum::<f64>();
+    run(&mut s, "solid.hole", json!({"position": [50, far - 25.0, top], "diameter": 10}));
+    let kept = |w: &str| !w.contains("is not kept") && !w.contains("flat pattern, DXF and bend table");
+    assert!(s.model.results.iter().all(|r| r.error.is_none() && r.warning.as_deref().is_none_or(kept)), "{:?}", s.model.results);
+    assert_eq!(outline_arcs(&s).iter().filter(|(_, r)| (r - 15.0).abs() < 1e-9).count(), 2, "{:?}", outline_arcs(&s));
+    assert!((flat_pieces(&s).iter().sum::<f64>() - (area - 25.0 * PI)).abs() < 1e-6, "the hole is a cut-out of the flat pattern");
+    assert!(flat_exports(&mut s).into_iter().all(|r| r.is_ok()));
+}
+
+/// A round can take the whole end of a flange: two corners rounded to half its width make a
+/// half circle, and a fillet on an inside corner of the outline is still the solid's round.
+#[test]
+fn a_full_round_end_and_an_inside_corner_round() {
+    let mut s = Session::default();
+    base(&mut s, 100.0, 60.0);
+    run(&mut s, "solid.fillet", json!({"edges": [[100, 0, 1.25], [100, 60, 1.25]], "radius": 30}));
+    assert_eq!(last_warning(&s), "");
+    let half_round = 6000.0 - 2.0 * (900.0 - 225.0 * PI);
+    assert!((flat_pieces(&s).iter().sum::<f64>() - half_round).abs() < 1e-6, "{:?}", flat_pieces(&s));
+    assert!(flat_exports(&mut s).into_iter().all(|r| r.is_ok()));
+
+    // An L-shaped plate's inside corner at (50, 30) adds material when rounded: not a cut-out.
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "L"}));
+    run(&mut s, "sketch.line", json!({"points": [[0, 0], [100, 0], [100, 30], [50, 30], [50, 60], [0, 60]], "closed": true}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "sheet.flange", json!({"sketch": "L"}));
+    run(&mut s, "solid.fillet", json!({"edges": [[50, 30, 1.25]], "radius": 5}));
+    assert!(last_warning(&s).contains("is sheet metal"), "{}", last_warning(&s));
 }
 
 /// A cosmetic thread in a sheet's hole leaves its flat pattern as it is; a modelled thread cuts

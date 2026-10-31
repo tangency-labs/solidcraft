@@ -430,9 +430,21 @@ but a pocket crossing a bend zone cannot yet be refolded. Machining folded bend 
 tapered sheet cuts and other unsupported 3D sheet Cut/Intersect operations report an error before changing
 the design; they cannot silently restore removed material during a later sheet rebuild.
 
+A **Fillet** (constant radius) or an equal-distance **Chamfer** on edges through the sheet's
+thickness, where two straight sides of a panel's outline meet at an outside corner, rounds or
+cuts that corner of the sheet itself: it is a cut-out of the flat pattern, so the corner is
+rounded in the folded part, the flat pattern and the DXF (an arc there, or a line across the
+corner), and later sheet metal features and cuts keep it. A round or chamfer larger than the
+corner's sides on its panel allow is refused with the largest that fits; two rounds on the
+corners of one end, each half its width, make a half circle.
+
+```json
+{"command":"solid.fillet","params":{"edges":[[100,60,1.25],[100,0,1.25]],"radius":10}}
+```
+
 Other features that change a sheet body's material without the sheet knowing it (a fillet or
-chamfer on a corner, an extrude joined onto it, a Mirror or Combine joined into it) are not in
-the flat pattern yet. Such a feature warns, and while the body carries its change the flat
+chamfer along a face, at an inside corner or beside an arc of the outline, an extrude joined
+onto it, a Mirror or Combine joined into it) are not in the flat pattern yet. Such a feature warns, and while the body carries its change the flat
 pattern, the DXF and the bend table are refused with an error that names it, rather than writing
 a part that does not match the body. A later sheet metal feature rebuilds the body from its sheet
 features and says that the change is not kept. Moving the body, splitting its faces and cosmetic

@@ -4334,6 +4334,149 @@ impl SheetBody {
             })
             .collect())
     }
+
+    /// The cut-outs, in flat coordinates, that round or chamfer the outline corners `picks` lie
+    /// on: a fillet or chamfer on edges through the sheet's thickness, each where two straight
+    /// sides of one panel's outline meet at an outside corner. Kept as cut-outs, the corners stay
+    /// rounded through later sheet metal features, unfolding and the flat pattern's DXF (#9340).
+    /// `None` when a pick is on any other edge (along a face, on a bend, at an inside corner or
+    /// beside an arc): the blend is then the solid's, as before. Refused when a round or chamfer
+    /// is larger than the sides of its corner on the panel allow.
+    pub(crate) fn corner_cuts(&self, picks: &[Vec3], cut: CornerCut) -> Result<Option<Vec<Region2>>> {
+        let (CornerCut::Round(size) | CornerCut::Chamfer(size)) = cut;
+        if !size.is_finite() || size <= 0.0 || picks.is_empty() || picks.len() > MAX_FLAT_PIECES {
+            return Ok(None);
+        }
+        let mut work = FlatWork::new();
+        let cells = self.material_panels(None, &mut work)?;
+        let zones = self.bend_zones();
+        let mut cuts = Vec::with_capacity(picks.len());
+        for &p in picks {
+            let Some(corner) = self.corner_at(p, &cells, &zones) else {
+                return Ok(None);
+            };
+            cuts.push(corner.cut(cut)?);
+        }
+        Ok(Some(cuts))
+    }
+
+    /// The outside corner of a panel's outline that the world point `p` lies over, inside the
+    /// sheet's thickness (see [`SheetBody::corner_cuts`]); `cells` are the panels' material.
+    fn corner_at(&self, p: Vec3, cells: &[(Option<usize>, Region2)], zones: &[Region2]) -> Option<OutlineCorner> {
+        const TOL: f64 = 1e-5;
+        for (pi, cell) in cells {
+            let Some(inv) = mat_inverse(&self.world(*pi)) else { continue };
+            let q = apply_point(&inv, p);
+            // On an edge through the thickness, not on the top or bottom face's outline.
+            if !(q.z > TOL && q.z < self.t - TOL) {
+                continue;
+            }
+            let at = Vec2::new(q.x, q.y);
+            for lp in cell.loops() {
+                let n = lp.segs.len();
+                for (j, out) in lp.segs.iter().enumerate() {
+                    if out.start().dist(at) > TOL {
+                        continue;
+                    }
+                    let inn = lp.segs.get((j + n - 1) % n)?;
+                    return OutlineCorner::between(inn, out, zones, TOL);
+                }
+            }
+        }
+        None
+    }
+}
+
+/// How a fillet or chamfer on an edge through a sheet's thickness finishes the outline corner it
+/// is on ([`SheetBody::corner_cuts`]).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) enum CornerCut {
+    /// Rounded to this radius.
+    Round(f64),
+    /// Cut straight across, this far back along both sides.
+    Chamfer(f64),
+}
+
+/// An outside corner of a panel's outline, in flat coordinates: where two straight sides meet,
+/// turning toward the material.
+struct OutlineCorner {
+    at: Vec2,
+    /// From the corner along each side: its unit direction and how long it runs on the panel.
+    sides: [(Vec2, f64); 2],
+}
+
+impl OutlineCorner {
+    /// The corner between `inn` (ending on it) and `out` (starting from it), when both are
+    /// straight sides of the outline, neither on a bend line, and the outline turns toward the
+    /// material there (material lies to the left of a sheet's loops).
+    fn between(inn: &Seg2, out: &Seg2, zones: &[Region2], tol: f64) -> Option<OutlineCorner> {
+        let (Seg2::Line { a: a0, b: b0 }, Seg2::Line { a: a1, b: b1 }) = (inn, out) else {
+            return None;
+        };
+        // A side on a bend line is where the panel meets its bend, not an edge of the outline.
+        if [inn, out].into_iter().any(|s| zones.iter().any(|z| on_boundary(z, s.mid(), tol))) {
+            return None;
+        }
+        let (d0, d1) = ((*b0 - *a0).normalized()?, (*b1 - *a1).normalized()?);
+        if d0.cross(d1) <= 1e-9 {
+            return None;
+        }
+        Some(OutlineCorner { at: *a1, sides: [(-d0, a0.dist(*b0)), (d1, a1.dist(*b1))] })
+    }
+
+    /// The cut-out that finishes the corner as `cut` says: the material between the corner and
+    /// the round (or the chamfer's line). It reaches a hair outside the outline, so that none of
+    /// its own sides runs along the outline's.
+    fn cut(&self, cut: CornerCut) -> Result<Region2> {
+        let [(a, la), (b, lb)] = self.sides;
+        let half = a.dot(b).clamp(-1.0, 1.0).acos() / 2.0;
+        let (reach, what, size) = match cut {
+            CornerCut::Round(r) => (r / half.tan(), "round", r),
+            CornerCut::Chamfer(d) => (d, "chamfer", d),
+        };
+        let room = la.min(lb);
+        if !reach.is_finite() || reach > room + 1e-9 {
+            let most = match cut {
+                CornerCut::Round(_) => room * half.tan(),
+                CornerCut::Chamfer(_) => room,
+            };
+            return Err(DocError::Invalid(format!(
+                "a {what} of {size} mm is too large for the corner at ({:.3}, {:.3}) of the flat pattern: its sides on the panel are {la:.3} and \
+                 {lb:.3} mm long, which take a {what} of at most {most:.3} mm",
+                self.at.x, self.at.y
+            )));
+        }
+        let reach = reach.min(room);
+        let (t0, t1) = (self.at + a * reach, self.at + b * reach);
+        // Outside the outline: to the right of each side as the outline runs.
+        let (n0, n1) = (Vec2::new(-a.y, a.x), Vec2::new(b.y, -b.x));
+        let m = (0.25 * reach).min(0.01);
+        let (p0, p1, outside) = (t0 + n0 * m, t1 + n1 * m, self.at + (n0 + n1) * m);
+        let across = match cut {
+            CornerCut::Round(r) => {
+                let bisector = (a + b).normalized().ok_or_else(|| DocError::Invalid("a corner with no angle to round".into()))?;
+                let center = self.at + bisector * (r / half.sin());
+                let (u0, u1) = (t0 - center, t1 - center);
+                Seg2::Arc { center, radius: r, start: u0.y.atan2(u0.x), sweep: u0.cross(u1).atan2(u0.dot(u1)) }
+            }
+            CornerCut::Chamfer(_) => Seg2::Line { a: t0, b: t1 },
+        };
+        let outer = Loop2 {
+            segs: vec![
+                across,
+                Seg2::Line { a: t1, b: p1 },
+                Seg2::Line { a: p1, b: outside },
+                Seg2::Line { a: outside, b: p0 },
+                Seg2::Line { a: p0, b: t0 },
+            ],
+        };
+        Ok(Region2 { outer: outer.ccw(), holes: Vec::new() })
+    }
+}
+
+/// Whether `p` lies within `tol` of `r`'s outline.
+fn on_boundary(r: &Region2, p: Vec2, tol: f64) -> bool {
+    r.loops().any(|lp| lp.segs.iter().any(|s| s.point_at(s.closest_param(p)).dist(p) <= tol))
 }
 
 /// The boundary of a union of counter-clockwise polygons that meet edge to edge: edges are
