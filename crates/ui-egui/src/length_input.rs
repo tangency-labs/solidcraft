@@ -95,6 +95,7 @@ pub(crate) fn fields<'a>(doc: &Document, kind: &'a mut crate::dialogs::Kind) -> 
         D::OffsetFaces { distance } => vec![distance],
         D::MeshConvert { tolerance } => vec![tolerance],
         D::Thread { length, .. } | D::Emboss { depth: length, .. } => vec![length],
+        D::Lighten { thickness, tool_radius, depth, .. } => vec![thickness, tool_radius, depth],
         D::Rib { thickness, depth, .. } => vec![thickness, depth],
         D::PathPattern { spacing, .. } => vec![spacing],
         D::Pipe { diameter, wall, .. } => vec![diameter, wall],

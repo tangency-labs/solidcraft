@@ -12,8 +12,8 @@ use solidcraft_geom::Vec3;
 use super::{CommandSpec, not_in_sketch};
 use crate::params::{UNKNOWN_COMMAND, bad, bool_, expr, expr_problem, req_expr, str_, string_list, string_list_or_default, vec2, vec3};
 use crate::schema::features::{
-    BoundingSolidParams, BoxParams, ConeParams, CylinderParams, ExtrudeParams, FeatureResult, OffsetPlaneParams, PipeParams, PlaneAtAngleParams,
-    ScaleParams, SphereParams, TorusParams,
+    BoundingSolidParams, BoxParams, ConeParams, CylinderParams, ExtrudeParams, FeatureResult, LightenParams, OffsetPlaneParams, PipeParams,
+    PlaneAtAngleParams, ScaleParams, SphereParams, TorusParams,
 };
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Session};
@@ -29,6 +29,7 @@ const BOUNDING_SOLID_CONTRACT: TypedContract<BoundingSolidParams> = TypedContrac
 const SCALE_CONTRACT: TypedContract<ScaleParams> = TypedContract::new();
 const OFFSET_PLANE_CONTRACT: TypedContract<OffsetPlaneParams> = TypedContract::new();
 const PLANE_AT_ANGLE_CONTRACT: TypedContract<PlaneAtAngleParams> = TypedContract::new();
+const LIGHTEN_CONTRACT: TypedContract<LightenParams> = TypedContract::new();
 
 pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("solid.extrude", "Extrude", crate::checked!("solid.extrude", extrude))
@@ -136,6 +137,12 @@ pub static COMMANDS: &[CommandSpec] = &[
         .at("SOLID", "MODIFY")
         .icon("shell")
         .params("faces: [[x,y,z] points on the faces to remove, or face names from model.faces]; thickness: expr; direction?: inside|outside|both; tangent_chain?: bool (also open faces joined smoothly to the picked ones); body?"),
+    CommandSpec::new("solid.lighten", "Lighten", crate::checked!("solid.lighten", lighten))
+        .at("SOLID", "MODIFY")
+        .icon("lighten")
+        .contract(&LIGHTEN_CONTRACT)
+        .output(output_schema_for::<FeatureResult>)
+        .params("sketch?: id|name (default: active or last sketch); profiles?: all | [index] | [{curves}] | [{point:[x,y]}] (default: every drawn profile; profiles that share an edge are not merged); thickness: expr (wall between touching profiles, and inside the part outline when trim is on); tool_radius?: expr (default 0: round only corners a round cutter cannot reach); depth: expr | through_all: true | to: [x,y,z] on the face or body the pocket stops at (to wins); trim?: bool (default true); targets?: [body]"),
     CommandSpec::new("solid.draft", "Draft", draft)
         .at("SOLID", "MODIFY")
         .icon("draft")
@@ -750,7 +757,12 @@ fn add_feature_in(s: &mut Session, p: &Value, kind: FeatureKind, world: bool) ->
     let participants = if participants.is_empty()
         && !primitive
         && (matches!(str_(p, "operation").and_then(Operation::parse), Some(Operation::Cut | Operation::Intersect))
-            || matches!(&kind, FeatureKind::Extrude { operation: Operation::Cut | Operation::Intersect, .. } | FeatureKind::Hole { .. }))
+            || matches!(
+                &kind,
+                FeatureKind::Extrude { operation: Operation::Cut | Operation::Intersect, .. }
+                    | FeatureKind::Hole { .. }
+                    | FeatureKind::Lighten { .. }
+            ))
         && s.cut_takes_every_body(&s.model.state())
     {
         vec!["*".to_string()]
@@ -2733,6 +2745,51 @@ fn face_points(s: &Session, p: &Value, cmd: &str) -> Result<Vec<Vec3>> {
         return Err(bad(cmd, "select 1…1000 faces"));
     }
     a.iter().map(|v| super::face::face_ref(s, v, str_(p, "body"), cmd)).collect()
+}
+
+fn lighten(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "solid.lighten";
+    let sketch = feature_sketch(s, p, cmd)?;
+    let profiles = profiles(p, cmd)?;
+    let thickness = req_expr(cmd, p, "thickness")?;
+    check_expr(s, &thickness, Kind::Length, cmd, "thickness")?;
+    let tool_radius = if p.get("tool_radius").is_some() {
+        let tool_radius = req_expr(cmd, p, "tool_radius")?;
+        check_expr(s, &tool_radius, Kind::Length, cmd, "tool radius")?;
+        tool_radius
+    } else {
+        "0".into()
+    };
+    let through_all = bool_(p, "through_all").unwrap_or(false);
+    let to = match p.get("to") {
+        None | Some(Value::Null) => None,
+        Some(value) => Some(FacePick(vec3(value).ok_or_else(|| bad(cmd, "`to` must be a point [x, y, z]"))?)),
+    };
+    let depth = if p.get("depth").is_some() {
+        let depth = req_expr(cmd, p, "depth")?;
+        check_expr(s, &depth, Kind::Length, cmd, "depth")?;
+        depth
+    } else if through_all || to.is_some() {
+        "0".into()
+    } else {
+        return Err(bad(cmd, "`depth` must be a number or an expression"));
+    };
+    let trim = bool_(p, "trim").unwrap_or(true);
+    add_feature(
+        s,
+        p,
+        FeatureKind::Lighten {
+            sketch: SketchId(sketch),
+            profiles,
+            thickness,
+            tool_radius,
+            depth,
+            through_all,
+            to,
+            trim,
+            targets: string_list(cmd, p, "targets")?.into_iter().map(BodyName).collect(),
+        },
+    )
 }
 
 fn shell(s: &mut Session, p: &Value) -> Result<Value> {

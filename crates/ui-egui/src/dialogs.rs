@@ -145,6 +145,14 @@ crate::dialog_descriptor::dialog_descriptors! {
             depth: String = "1 mm".into() => depth.to_string(),
             deboss: bool = false => *deboss,
         } => json!({"depth": depth, "mode": if *deboss { "deboss" } else { "emboss" }});
+        Lighten("solid.lighten", "LIGHTEN", [("Profiles", PROFILES, true), ("Up to face", FACES, false)],
+            FeatureKind::Lighten { thickness, tool_radius, depth, trim, through_all, .. }) {
+            thickness: String = "2 mm".into() => thickness.to_string(),
+            tool_radius: String = "0 mm".into() => tool_radius.to_string(),
+            depth: String = "5 mm".into() => depth.to_string(),
+            trim: bool = true => *trim,
+            through_all: bool = false => *through_all,
+        } => json!({"thickness": thickness, "tool_radius": tool_radius, "depth": depth, "trim": trim, "through_all": through_all});
         ; custom {
             /// Pick a plane or planar face; the sketch starts on it at once.
             Sketch,
@@ -1282,6 +1290,7 @@ impl Dialog {
                 | Kind::Split
                 | Kind::Rib { .. }
                 | Kind::Emboss { .. }
+                | Kind::Lighten { .. }
                 | Kind::ReplaceFace
                 | Kind::DeleteFaces
                 | Kind::Align { .. }
@@ -1356,6 +1365,7 @@ impl Dialog {
             Kind::PathPlane { t, .. } => ("Position (0 to 1)", ValueKind::Unitless, t),
             Kind::Rib { thickness, .. } => ("Thickness", ValueKind::Length, thickness),
             Kind::Emboss { depth, .. } => ("Depth", ValueKind::Length, depth),
+            Kind::Lighten { thickness, .. } => ("Wall thickness", ValueKind::Length, thickness),
             Kind::PathPattern { spacing, .. } => {
                 (if self.extra.contains_key("distance") { "Distance" } else { "Spacing" }, ValueKind::Length, spacing)
             }
@@ -1640,7 +1650,7 @@ impl Dialog {
             *sketch = None;
             self.extra.remove("path");
         }
-        if self.active == 0 && matches!(self.kind, Kind::Extrude { .. } | Kind::Revolve { .. } | Kind::Emboss { .. }) {
+        if self.active == 0 && matches!(self.kind, Kind::Extrude { .. } | Kind::Revolve { .. } | Kind::Emboss { .. } | Kind::Lighten { .. }) {
             self.profile_selection_changed = true;
         }
         let measure = matches!(self.kind, Kind::Measure { .. });
@@ -1710,7 +1720,7 @@ impl Dialog {
             *sketch = None;
             self.extra.remove("path");
         }
-        if self.active == 0 && matches!(self.kind, Kind::Extrude { .. } | Kind::Revolve { .. } | Kind::Emboss { .. }) {
+        if self.active == 0 && matches!(self.kind, Kind::Extrude { .. } | Kind::Revolve { .. } | Kind::Emboss { .. } | Kind::Lighten { .. }) {
             self.profile_selection_changed = true;
         }
         let measure = matches!(self.kind, Kind::Measure { .. });
@@ -4114,7 +4124,8 @@ pub fn apply_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>
             let original_all = match &feature.kind {
                 FeatureKind::Extrude { sketch, profiles: ProfileSel::All, thin: None, .. }
                 | FeatureKind::Revolve { sketch, profiles: ProfileSel::All, .. }
-                | FeatureKind::Emboss { sketch, profiles: ProfileSel::All, .. } => Some(*sketch),
+                | FeatureKind::Emboss { sketch, profiles: ProfileSel::All, .. }
+                | FeatureKind::Lighten { sketch, profiles: ProfileSel::All, .. } => Some(*sketch),
                 _ => None,
             };
             if let Some(sketch) = original_all
@@ -4630,6 +4641,15 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
                 p["targets"] = json!([body]);
             }
             ("solid.emboss", p)
+        }
+        Kind::Lighten { .. } => {
+            need(0, "profiles")?;
+            let (sketch, idx) = profiles();
+            let mut p = json!({"sketch": sketch, "profiles": idx});
+            if let Some(Sel::Face { point, .. }) = sels(d, 1).first() {
+                p["to"] = pt(*point);
+            }
+            ("solid.lighten", p)
         }
         Kind::ReplaceFace => {
             need(0, "faces to move")?;
@@ -6394,6 +6414,23 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             d.kind = Kind::simple_restore(&f.kind)?;
             if let Some(inp) = d.inputs.first_mut() {
                 inp.items = path.iter().map(|id| crate::selection::curve_pick(id, path_sketch.0, s.active_sketch)).collect();
+            }
+            if !targets.is_empty() {
+                d.extra.insert("targets".into(), json!(targets));
+            }
+            d
+        }
+        FeatureKind::Lighten { sketch, profiles, targets, to, .. } => {
+            let mut d = start("solid.lighten")?;
+            d.kind = Kind::simple_restore(&f.kind)?;
+            let items = st.sketch(sketch.0).map(|ss| profile_indices(ss, profiles)).unwrap_or_default();
+            if let Some(inp) = d.inputs.first_mut() {
+                inp.items = items.into_iter().map(|index| Sel::Profile { sketch: sketch.0, index }).collect();
+            }
+            if let Some(to) = to
+                && let Some(input) = d.inputs.get_mut(1)
+            {
+                input.items = face_sel(s, to.0).into_iter().collect();
             }
             if !targets.is_empty() {
                 d.extra.insert("targets".into(), json!(targets));

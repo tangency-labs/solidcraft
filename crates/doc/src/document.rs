@@ -1032,6 +1032,32 @@ pub enum FeatureKind {
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         targets: Vec<BodyName>,
     },
+    /// Cut pockets from sketch profiles. Touching profiles leave `thickness` between them. With
+    /// trim on, the pockets also stay that far inside the part's outline on the same plane.
+    /// `tool_radius` rounds only the corners a round cutter cannot reach.
+    Lighten {
+        sketch: SketchId,
+        #[walk(profiles_of = sketch)]
+        profiles: ProfileSel,
+        #[walk(length = "Wall thickness")]
+        thickness: Expr,
+        #[serde(default = "zero_expr")]
+        #[walk(length = "Tool radius")]
+        tool_radius: Expr,
+        #[serde(default = "zero_expr")]
+        #[walk(length = "Depth")]
+        depth: Expr,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        through_all: bool,
+        /// A point on the face or body the pocket stops at. It wins over `through_all` and `depth`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        to: Option<FacePick>,
+        /// Keep the pockets inside the part outline. Older features without the field trim.
+        #[serde(default = "yes", skip_serializing_if = "is_yes")]
+        trim: bool,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        targets: Vec<BodyName>,
+    },
     /// A thin wall from open sketch curves: `thickness` across the sketch plane, filling from
     /// the curves toward the body (to the next face, or `depth`), or with `normal` along the
     /// sketch normal. A web makes one per curve.
@@ -2363,6 +2389,7 @@ impl FeatureKind {
             FeatureKind::Pipe { .. } => "PipeFeature",
             FeatureKind::FrameMember { .. } => "FrameMemberFeature",
             FeatureKind::Emboss { .. } => "EmbossFeature",
+            FeatureKind::Lighten { .. } => "LightenFeature",
             FeatureKind::Boss { .. } => "BossFeature",
             FeatureKind::Lip { groove: false, .. } => "LipFeature",
             FeatureKind::Lip { .. } => "GrooveFeature",
@@ -2446,6 +2473,7 @@ impl FeatureKind {
             FeatureKind::Pipe { .. } => "Pipe",
             FeatureKind::FrameMember { .. } => "Member",
             FeatureKind::Emboss { .. } => "Emboss",
+            FeatureKind::Lighten { .. } => "Lighten",
             FeatureKind::Boss { .. } => "Boss",
             FeatureKind::Lip { groove: false, .. } => "Lip",
             FeatureKind::Lip { .. } => "Groove",
