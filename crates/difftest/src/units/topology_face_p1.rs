@@ -1526,6 +1526,10 @@ impl UnitDiff for Runner {
                 0,
                 vec![vec![0], vec![1], vec![3]],
             ),
+            // A solid with a through hole: each cap's inner loop shares its edge
+            // with the hole wall (face 8), so DeleteInnerLoop must refuse it.
+            ("Fillet/ext_w_hole.smb".to_string(), 0, vec![vec![1]]),
+            ("Fillet/ext_w_hole.smb".to_string(), 1, vec![vec![3]]),
         ];
         delete_cases.push(("Mouse.smb".to_string(), 1, vec![vec![0], vec![2]]));
         for (file, face, sequences) in delete_cases {
