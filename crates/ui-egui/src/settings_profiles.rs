@@ -1,8 +1,8 @@
 //! Settings profiles (#6237): the input and interface settings kept together under a name, such
 //! as "Laptop" and "Large monitor", and switched at once. A profile holds the original Interface,
 //! Navigation and Sketch preference keys and the language, keyboard shortcuts, toolbar,
-//! S box favourites, imported theme it uses, and the custom view navigator's body (when one is
-//! chosen; a profile without one leaves the current body alone). Page moves preserve that stored
+//! S box favourites, imported theme it uses, and the custom view navigator's texture, arrows and
+//! Home, and its body (when one is chosen; a profile without one leaves the current body alone). Page moves preserve that stored
 //! key set; device-specific 3D mouse keys, graphics, recent files and Assistant settings stay out.
 //!
 //! A profile is kept, exported and imported as one `solidcraft-profile/1` document. Every
@@ -234,6 +234,11 @@ pub fn capture(app: &SolveApp, name: &str) -> Value {
         "toolbar": app.toolbar_custom.prefs(),
         "themes": themes,
     });
+    // The custom view navigator's own settings ride in their own entry: they are newer than the
+    // profile key set above, which never changes.
+    if let Some(o) = doc.as_object_mut() {
+        o.insert("view_navigator".into(), crate::view_gizmo::profile_settings(app));
+    }
     let gizmo = app.view_gizmo.stored();
     if let Some(o) = doc.as_object_mut().filter(|_| gizmo.is_object()) {
         o.insert("view_gizmo".into(), gizmo);
@@ -321,6 +326,11 @@ pub fn sanitize(v: &Value) -> Result<Value, String> {
         "toolbar": toolbar.prefs(),
         "themes": themes,
     });
+    if let Some(settings) = o.get("view_navigator").map(crate::view_gizmo::checked_profile_settings)
+        && let Some(d) = doc.as_object_mut()
+    {
+        d.insert("view_navigator".into(), settings);
+    }
     if let Some(v) = o.get("view_gizmo") {
         match crate::view_gizmo::Shape::from_json(v) {
             Some(shape) => {
@@ -415,6 +425,9 @@ fn apply(app: &mut SolveApp, doc: &Value) -> Vec<String> {
     }
     if let Some(t) = doc.get("toolbar") {
         app.toolbar_custom.load(t);
+    }
+    if let Some(v) = doc.get("view_navigator") {
+        crate::view_gizmo::apply_profile_settings(app, v);
     }
     if let Some(v) = doc.get("view_gizmo") {
         app.view_gizmo.load(Some(v));

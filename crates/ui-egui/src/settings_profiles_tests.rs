@@ -524,13 +524,15 @@ fn profile_sidebar_switches_saves_and_marks_edits_with_existing_commands() {
     h.step(&json!({"widget":profiles_label})).unwrap();
     h.frames(3);
     assert_eq!(h.app.prefs_window.section, crate::prefs::PAGE_GENERAL);
+}
 
 #[test]
 fn a_profile_carries_the_view_navigators_body_and_one_without_leaves_it_alone() {
     let mut h = Harness::new();
     h.app.run("solid.box", json!({"length": 40, "width": 20, "height": 10})).unwrap();
     let body = h.app.session.world_state().bodies[0].name.clone();
-    run(&mut h, "view.navigator", json!({"style": "custom", "body": body, "texture": "modeled", "arrows": true, "home": true}));
+    // Not the defaults, so the profile has something to carry.
+    run(&mut h, "view.navigator", json!({"style": "custom", "body": body, "texture": "modeled", "arrows": false, "home": false}));
     run(&mut h, "settings.profile.save", json!({"name": "Gizmo"}));
     let exported = capture(&h.app, "Gizmo");
     assert!(exported["view_gizmo"]["v"].is_string(), "the body is packed into the profile: {}", exported["view_gizmo"]);
@@ -540,14 +542,14 @@ fn a_profile_carries_the_view_navigators_body_and_one_without_leaves_it_alone() 
     let mut other = Harness::new();
     run(&mut other, "settings.profile.save", json!({"name": "Plain"}));
     assert_eq!(run(&mut other, "settings.profile.import", json!({"profile": exported})), json!({"name": "Gizmo"}));
+    assert!(other.app.preferences.navigator_arrows && other.app.preferences.navigator_home, "before the profile: the defaults");
     run(&mut other, "settings.profile.apply", json!({"name": "Gizmo"}));
     let shape = other.app.view_gizmo.shape.as_ref().expect("the profile brings the body along");
+    assert!(!other.app.preferences.navigator_arrows && !other.app.preferences.navigator_home, "and the arrows and Home");
     assert_eq!(shape.name, body);
     assert_eq!(shape.mesh.triangles.len(), h.app.view_gizmo.shape.as_ref().unwrap().mesh.triangles.len());
     assert_eq!(other.app.preferences.navigator_style, crate::prefs::NavigatorStyle::Custom);
     assert_eq!(other.app.preferences.navigator_texture, crate::prefs::NavigatorTexture::Modeled);
-    assert!(other.app.preferences.navigator_arrows);
-    assert!(other.app.preferences.navigator_home);
 
     // A profile saved before a body was chosen keeps the current body.
     run(&mut other, "settings.profile.apply", json!({"name": "Plain"}));
@@ -558,5 +560,7 @@ fn a_profile_carries_the_view_navigators_body_and_one_without_leaves_it_alone() 
     broken["view_gizmo"] = json!({"name": "x", "v": "not base64!"});
     let checked = sanitize(&broken).unwrap();
     assert!(checked.get("view_gizmo").is_none());
+    broken["view_navigator"] = json!({"texture": "glossy", "arrows": "yes", "home": true, "extra": 1});
+    assert_eq!(sanitize(&broken).unwrap()["view_navigator"], json!({"home": true}), "only what this version reads");
     assert_eq!(checked["preferences"]["navigator_style"], "custom");
 }
