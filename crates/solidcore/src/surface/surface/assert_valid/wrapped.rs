@@ -24,7 +24,10 @@
 //! - **Self-intersection** (`SmOffsetSurface` 2): upstream ignores the status of
 //!   `GlobalSurfaceIntersect` and counts the curve types it left in the array; the port
 //!   counts those of [`Surface::global_surface_intersect_with_partial`] the same way and
-//!   propagates only [`SolidError::Unported`].
+//!   propagates only [`SolidError::Unported`]. For a face's surface it runs through
+//!   the caller's face-aware cache context
+//!   ([`Surface::assert_valid_with_face_context`]), as upstream's cache reaches the
+//!   face through the surface.
 //! - **Recursion.** Before a surface in a volume checks its base surface, its whole
 //!   owned geometry is checked to nest at most `MAX_GEOMETRY_NESTING` deep
 //!   ([`check_geometry_nesting`]), which bounds the surface recursion.
@@ -81,15 +84,30 @@ pub(super) fn offset_surface_assert_valid(
     /*  2 */
     // Self-intersecting surface interior (status ignored: the curve types left count)
     let uv_domain = s.natural_uv_domain_with_nurb(k)?;
-    let (xsect, status) = s.global_surface_intersect_with_partial(
-        k,
-        &uv_domain,
-        s,
-        &uv_domain,
-        [false, false],
-        None,
-        None,
-    );
+    // (a face's surface solves through its face-aware cache context: upstream's
+    // smsurf_GetSurfaceCache reaches the face through the surface)
+    let (xsect, status) = match r.face.as_mut() {
+        Some((context, handle)) => s.global_surface_intersect_with_partial_context(
+            k,
+            [Some(*handle), Some(*handle)],
+            &mut **context,
+            &uv_domain,
+            s,
+            &uv_domain,
+            [false, false],
+            None,
+            None,
+        ),
+        None => s.global_surface_intersect_with_partial(
+            k,
+            &uv_domain,
+            s,
+            &uv_domain,
+            [false, false],
+            None,
+            None,
+        ),
+    };
     if let Err(e) = status {
         if e.is_unported() {
             return Err(e);

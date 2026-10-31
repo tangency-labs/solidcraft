@@ -34,6 +34,8 @@ use crate::error::{Result, SolidError};
 use crate::geom::assert_array::{AssertArray, ObjectKey};
 use crate::geom::extent2d::Extent2d;
 use crate::kernel::Kernel;
+use crate::query::brep::BrepFaceServices;
+use crate::topology::brep_cache::CacheObject;
 use crate::topology::{Brep, EdgeId, EdgeuseId, FaceId, LoopuseId, ShellId, VertexId};
 
 // ---- level-0 helpers (WP2, wired: #1472) ------------------------------------------------------------
@@ -104,10 +106,27 @@ pub(super) fn surface_assert_valid(
     level: u8,
     key: ObjectKey,
 ) -> Result<bool> {
-    let surface = b.face(f)?.surface.as_ref().ok_or(SolidError::null_pointer(
-        "topology::brep::validation::assert_valid",
-    ))?;
-    surface.assert_valid(k, list, level, key)
+    // an evaluation copy (keeping its owner), so the solves can hold the B-rep
+    // mutably through the face services: upstream's solves on the face's surface reach
+    // the face through it (smsurf_GetSurfaceCache, GetFace())
+    let surface = b
+        .face(f)?
+        .surface
+        .as_ref()
+        .ok_or(SolidError::null_pointer(
+            "topology::brep::validation::assert_valid",
+        ))?
+        .clone_for_evaluation()?;
+    let mut services = BrepFaceServices::new(&mut *b);
+    surface.assert_valid_with_face_context(
+        k,
+        list,
+        level,
+        key,
+        &mut |ordinal| Ok(ObjectKey(key.0.wrapping_add(ordinal))),
+        &mut services,
+        CacheObject::Surface(f),
+    )
 }
 
 // ---- level-2 tests (WP4) --------------------------------------------------------------

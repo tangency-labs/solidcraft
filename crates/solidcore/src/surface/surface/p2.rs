@@ -3512,6 +3512,40 @@ impl Surface {
         (out, status)
     }
 
+    /// [`Surface::global_surface_intersect_with_partial`] through the caller's
+    /// face-aware cache context, as [`Surface::global_surface_intersect_with_context`]
+    /// runs it (`handles` name this surface and `other` in their caches).
+    #[allow(clippy::too_many_arguments)]
+    pub fn global_surface_intersect_with_partial_context<O: SolutionObject + Copy + PartialEq>(
+        &self,
+        k: &Kernel,
+        handles: [Option<O>; 2],
+        context: &mut dyn SurfaceSolveContext<O>,
+        uv_domain: &Extent2d,
+        other: &Self,
+        other_uv_domain: &Extent2d,
+        use_surface_edges: [bool; 2],
+        approx_tol_3d: Option<f64>,
+        ang_tol_rad: Option<f64>,
+    ) -> (SurfaceIntersection, Result<()>) {
+        let mut out = SurfaceIntersection::default();
+        let status = self.global_surface_intersect_into(
+            k,
+            uv_domain,
+            other,
+            other_uv_domain,
+            use_surface_edges,
+            approx_tol_3d,
+            ang_tol_rad,
+            Some(SurfaceIntersectContext {
+                solver: context,
+                handles,
+            }),
+            &mut out,
+        );
+        (out, status)
+    }
+
     /// [`Surface::global_surface_intersect_in`] into `out` (upstream's output arrays):
     /// the kind's override fills it; on an error `out` keeps what the failing
     /// special-case intersection appended before it.

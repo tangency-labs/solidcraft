@@ -14,6 +14,7 @@
 //! | Rust                                  | Upstream                                              |
 //! |---------------------------------------|-------------------------------------------------------|
 //! | [`Surface::assert_valid`]             | `SmSurface::AssertValid` (virtual)                    |
+//! | [`Surface::assert_valid_with_face_context`] | `SmSurface::AssertValid` of a face's surface (`GetFace()` reached by its solves) |
 //! | `surface_assert_valid` (private)      | `SmSurface::AssertValid`                              |
 //! | `assert_test_surface1` .. `6` (private) | `sm_AssertTestSurface1`, `4`, `5`, `6`              |
 //! | `b_spline_surface_assert_valid` (private) | `SmBSplineSurface::AssertValid`                   |
@@ -94,6 +95,12 @@
 //!   `InvalidInput`; `LEVEL_GIVEN` skips that base call and is defined.
 //! - **Wrapping surfaces.** `SmOffsetSurface` and `SmSrfInVolume` are in the `wrapped`
 //!   submodule (its own deviations); the latter calls `Volume::assert_valid`.
+//! - **Face context.** Upstream's solves reach a face-owned surface's face through the
+//!   surface (`smsurf_GetSurfaceCache` and `GetFace()`). The port's surfaces cannot,
+//!   so a check of a face's surface takes the caller's face-aware cache context
+//!   ([`Surface::assert_valid_with_face_context`]) and the solves of this surface
+//!   (`SmOffsetSurface` test 2) run through it; contained surfaces (bases, a basis)
+//!   are not face-owned and run without it.
 //! - **Recursion.** A surface in a volume also recurses (into its base surface), after
 //!   checking its owned geometry nests at most `MAX_GEOMETRY_NESTING` (32) deep.
 
@@ -144,6 +151,9 @@ use crate::surface::surf_of_extrusion::{CurveOrientType, SurfOfExtrusion};
 use crate::surface::surf_of_revolution::SurfOfRevolution;
 use crate::surface::torus::Torus;
 
+use crate::topology::brep_cache::CacheObject;
+
+use super::p1::SurfaceSolveContext;
 use super::p2::{CURVE_BOUNDED_SURFACE_TYPE, MAX_GEOMETRY_NESTING};
 use super::{Surface, SurfaceKind};
 
@@ -168,7 +178,17 @@ struct Reporter<'a> {
     key: ObjectKey,
     level: u8,
     class_string: &'static str,
+    /// The face-aware cache context of a face's surface and the handle naming the
+    /// surface in it (see the module docs, **Face context**); `None` for a surface
+    /// without face.
+    face: Option<FaceSolve<'a>>,
 }
+
+/// The caller's face-aware cache context and the handle of the checked surface in it.
+type FaceSolve<'a> = (
+    &'a mut (dyn SurfaceSolveContext<CacheObject> + 'a),
+    CacheObject,
+);
 
 impl Reporter<'_> {
     /// Whether the base-class call runs (`eTestLevel != SM_LEVEL_GIVEN`).
@@ -346,16 +366,46 @@ impl Surface {
             ordinal: 0,
             depth: 0,
         };
-        self.assert_valid_with_walk(k, list, level, key, &mut walk)
+        self.assert_valid_with_walk(k, list, level, key, &mut walk, None)
     }
 
-    fn assert_valid_with_walk(
+    /// [`Surface::assert_valid_with_keys`] of a face's surface: the solves of the
+    /// checks (`SmOffsetSurface` test 2's self-intersection) build their caches
+    /// through `context`, in which `handle` names this surface, so they reach the
+    /// face that owns it (upstream's `GetFace()`).
+    ///
+    /// # Errors
+    ///
+    /// Those of [`Surface::assert_valid_with_keys`] and of the context's cache
+    /// preparation.
+    pub fn assert_valid_with_face_context(
         &self,
         k: &Kernel,
         list: Option<&mut AssertArray>,
         level: u8,
         key: ObjectKey,
+        contained_key: &mut dyn FnMut(u64) -> Result<ObjectKey>,
+        context: &mut dyn SurfaceSolveContext<CacheObject>,
+        handle: CacheObject,
+    ) -> Result<bool> {
+        let mut walk = ContainedChecks {
+            allocate: contained_key,
+            root: key,
+            assigned: BTreeSet::new(),
+            ordinal: 0,
+            depth: 0,
+        };
+        self.assert_valid_with_walk(k, list, level, key, &mut walk, Some((context, handle)))
+    }
+
+    fn assert_valid_with_walk<'a>(
+        &self,
+        k: &Kernel,
+        list: Option<&'a mut AssertArray>,
+        level: u8,
+        key: ObjectKey,
         walk: &mut ContainedChecks<'_>,
+        face: Option<FaceSolve<'a>>,
     ) -> Result<bool> {
         if walk.depth > MAX_GEOMETRY_NESTING {
             return Err(invalid("contained surface validity nesting exceeds 32"));
@@ -365,6 +415,7 @@ impl Surface {
             key,
             level,
             class_string: self.class_string(),
+            face,
         };
         match self.kind() {
             SurfaceKind::BSpline(_) => b_spline_surface_assert_valid(k, self, &mut r),
@@ -408,10 +459,14 @@ fn curve_bounded_surface_assert_valid(
     let basis_key = walk.key()?;
     let depth = walk.depth;
     walk.depth = depth + 1;
-    let basis_result =
-        bounded
-            .basis()
-            .assert_valid_with_walk(k, r.list.as_deref_mut(), r.level, basis_key, walk);
+    let basis_result = bounded.basis().assert_valid_with_walk(
+        k,
+        r.list.as_deref_mut(),
+        r.level,
+        basis_key,
+        walk,
+        None,
+    );
     walk.depth = depth;
     let basis_ok = basis_result?;
     rtn &= r.report(CURVE_BOUNDED_SURFACE_TYPE, 0, 0, basis_ok, UNDEF, UNDEF)?;
@@ -1266,6 +1321,7 @@ pub fn axis2_placement_assert_valid(
         key,
         level: 0,
         class_string: "SmAxis2Placement",
+        face: None,
     };
     placement_assert_valid(p, &mut r)
 }
@@ -2949,7 +3005,7 @@ mod curve_bounded_tests {
             depth: MAX_GEOMETRY_NESTING + 1,
         };
         assert!(surface
-            .assert_valid_with_walk(&k, None, 0, ObjectKey(1), &mut walk)
+            .assert_valid_with_walk(&k, None, 0, ObjectKey(1), &mut walk, None)
             .is_err());
     }
 }
