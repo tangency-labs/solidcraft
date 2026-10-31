@@ -1,0 +1,68 @@
+{
+  "en": {
+    "No selection filter": "No selection filter",
+    "Sketch": "Sketch",
+    "Machining feature": "Machining feature",
+    "Datum coordinate system": "Datum coordinate system",
+    "Datum": "Datum",
+    "Solid body": "Solid body",
+    "Curve": "Curve",
+    "Curve feature": "Curve feature",
+    "Point": "Point",
+    "Sheet body": "Sheet body",
+    "View": "View"
+  },
+  "zh": {
+    "No selection filter": "无选择过滤器",
+    "No filter": "无过滤器",
+    "Sketch": "草图",
+    "Machining feature": "加工特征",
+    "Datum coordinate system": "坐标系",
+    "Datum": "基准",
+    "Solid body": "实体",
+    "Curve": "曲线",
+    "Curve feature": "曲线特征",
+    "Point": "点",
+    "Sheet body": "片体",
+    "View": "视图"
+  },
+  "ja": {
+    "No selection filter": "選択フィルターなし",
+    "Sketch": "スケッチ",
+    "Machining feature": "加工フィーチャ",
+    "Datum coordinate system": "座標系",
+    "Datum": "データム",
+    "Solid body": "ソリッド",
+    "Curve": "曲線",
+    "Curve feature": "曲線フィーチャ",
+    "Point": "点",
+    "Sheet body": "シートボディ",
+    "View": "ビュー"
+  },
+  "de": {
+    "No selection filter": "Kein Auswahlfilter",
+    "Sketch": "Skizze",
+    "Machining feature": "Bearbeitungsmerkmal",
+    "Datum coordinate system": "Koordinatensystem",
+    "Datum": "Bezug",
+    "Solid body": "Volumenkörper",
+    "Curve": "Kurve",
+    "Curve feature": "Kurvenmerkmal",
+    "Point": "Punkt",
+    "Sheet body": "Flächenkörper",
+    "View": "Ansicht"
+  },
+  "ko": {
+    "No selection filter": "선택 필터 없음",
+    "Sketch": "스케치",
+    "Machining feature": "가공 피처",
+    "Datum coordinate system": "좌표계",
+    "Datum": "데이텀",
+    "Solid body": "솔리드",
+    "Curve": "곡선",
+    "Curve feature": "곡선 피처",
+    "Point": "점",
+    "Sheet body": "시트 바디",
+    "View": "뷰"
+  }
+}

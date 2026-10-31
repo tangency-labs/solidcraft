@@ -327,6 +327,39 @@ pub use control::{ControlRequest, ControlResponse};
 /// and Shift-snapped orbits land inside it, free orbiting does not linger in it.
 pub const ORTHO_FACE_TOLERANCE: f64 = 1.0_f64.to_radians();
 
+/// What a click and a box in the view take (NX's Selection Filter): one kind at a time.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum PickFilter {
+    /// Everything the view offers (the default); a box takes faces.
+    #[default]
+    Any,
+    /// NX's machining features: nothing in a design model answers to it.
+    Machining,
+    /// Datum coordinate systems: none are drawn yet.
+    DatumCsys,
+    /// Datum planes and axes (origin and construction).
+    Datum,
+    /// Whole bodies: a click on a face picks its body.
+    Bodies,
+    /// Curves: the sketch curves of the view.
+    Curves,
+    /// Curve features: nothing in a design model answers to it.
+    CurveFeature,
+    /// Points: the model's vertices.
+    Points,
+    /// Sheet bodies: none are drawn yet.
+    Sheets,
+    /// Features (the timeline): not picked in the view.
+    Features,
+    /// Sketch geometry.
+    Sketch,
+    /// Views: not picked in the view.
+    View,
+    Edges,
+    Faces,
+}
+
 /// UI state that automation can read and set (`ui.set`).
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
@@ -355,6 +388,8 @@ pub struct UiState {
     pub dark: bool,
     /// Selection filter: kinds a click doesn't pick (`vertices`, `edges`, `faces`, `sketch`).
     pub pick_off: Vec<String>,
+    /// The type filter (NX's Selection Filter): the one kind a click and a box take.
+    pub pick_filter: PickFilter,
     /// A click on a face picks its whole body.
     pub pick_bodies: bool,
     /// A face picks its exact component occurrence in Design and Render.
@@ -400,6 +435,7 @@ impl Default for UiState {
             palette_open: false,
             dark: true,
             pick_off: Vec::new(),
+            pick_filter: PickFilter::Any,
             pick_bodies: false,
             pick_components: false,
             visual_style: 0,
@@ -1116,6 +1152,63 @@ impl SolveApp {
     }
 
     /// Run a command programmatically (JSON parameters, no dialogs).
+    /// Set the type filter and what it means for picking: one kind at a time, as NX's
+    /// Selection Filter has it. `pick_off` stays the record a click is judged by.
+    pub(crate) fn set_pick_filter(&mut self, filter: PickFilter) {
+        self.ui.pick_filter = filter;
+        self.ui.pick_components = false;
+        self.ui.pick_bodies = filter == PickFilter::Bodies;
+        const KINDS: [&str; 11] = [
+            "faces", "edges", "vertices", "sketch", "sketch_curves", "sketch_points", "dimensions", "constraints", "planes", "axes",
+            "construction_points",
+        ];
+        self.ui.pick_off.retain(|kind| !KINDS.contains(&kind.as_str()));
+        let mut off = |names: &[&str]| self.ui.pick_off.extend(names.iter().map(|s| (*s).to_string()));
+        let model = ["planes", "axes", "construction_points"];
+        let sketch = ["sketch", "sketch_curves", "sketch_points", "dimensions", "constraints"];
+        match filter {
+            PickFilter::Any => {}
+            PickFilter::Faces => {
+                off(&["edges", "vertices"]);
+                off(&sketch);
+                off(&model);
+            }
+            PickFilter::Edges => {
+                off(&["faces", "vertices"]);
+                off(&sketch);
+                off(&model);
+            }
+            PickFilter::Points => {
+                off(&["faces", "edges"]);
+                off(&sketch);
+                off(&model);
+            }
+            PickFilter::Bodies => {
+                off(&sketch);
+                off(&model);
+            }
+            PickFilter::Sketch => {
+                off(&["faces", "edges", "vertices"]);
+                off(&model);
+            }
+            PickFilter::Datum => {
+                off(&["faces", "edges", "vertices"]);
+                off(&sketch);
+                off(&["construction_points"]);
+            }
+            PickFilter::Curves => {
+                off(&["faces", "edges", "vertices"]);
+                off(&model);
+            }
+            PickFilter::Machining
+            | PickFilter::DatumCsys
+            | PickFilter::CurveFeature
+            | PickFilter::Sheets
+            | PickFilter::Features
+            | PickFilter::View => off(&KINDS),
+        }
+    }
+
     pub fn run(&mut self, id: &str, params: Value) -> Result<Value, String> {
         if self.file_load.busy() || self.file_picker.is_some() || self.saving.is_some() {
             return Err("a file operation is in progress".into());
@@ -1295,10 +1388,19 @@ impl SolveApp {
                 render_workspace::select_stage(self, stage);
             }
             if id == "select.filter" {
-                let mode = v.get("mode").and_then(Value::as_str);
-                self.ui.pick_bodies = mode == Some("body");
-                self.ui.pick_components = mode == Some("component");
-                self.ui.pick_off.retain(|kind| kind != "faces");
+                match v.get("mode").and_then(Value::as_str) {
+                    Some("body") => self.set_pick_filter(PickFilter::Bodies),
+                    Some("face") => self.set_pick_filter(PickFilter::Faces),
+                    Some("edge") => self.set_pick_filter(PickFilter::Edges),
+                    Some("vertex") | Some("point") => self.set_pick_filter(PickFilter::Points),
+                    Some("sketch") => self.set_pick_filter(PickFilter::Sketch),
+                    Some("datum") => self.set_pick_filter(PickFilter::Datum),
+                    Some("component") => {
+                        self.set_pick_filter(PickFilter::Any);
+                        self.ui.pick_components = true;
+                    }
+                    _ => self.set_pick_filter(PickFilter::Any),
+                }
             }
             if id == "view.render_dock"
                 && let (Some(panel), Some(side)) = (v.get("panel").and_then(Value::as_str), v.get("side").and_then(Value::as_str))

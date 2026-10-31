@@ -4598,7 +4598,7 @@ fn render_workspace_pick_stage_tools_filter_sample_clicks_with_shots_shown_and_h
         assert!(tools.contains_rect(crate::scenario::rect_of("render:pick").unwrap()));
         assert!(tools.contains_rect(crate::scenario::rect_of("render:preview_note").unwrap()));
         assert!(crate::scenario::rect_of("render:hud").is_none());
-        for mode in ["body", "face", "component"] {
+        for mode in ["any", "body", "face", "edge", "vertex", "sketch", "component"] {
             assert!(crate::scenario::handle_at(&format!("render:pick:{mode}")).is_some(), "Pick must be enabled");
             h.step(&json!({"click":{"handle":format!("render:pick:{mode}")}})).unwrap();
             h.frames(2);
@@ -4732,7 +4732,7 @@ fn render_workspace_pick_filter_rejects_invalid_requests_atomically() {
         assert_eq!(h.app.ui.pick_bodies, mode == "body");
         assert_eq!(h.app.ui.pick_components, mode == "component");
     }
-    for request in [json!({}), json!({"mode":"edge"}), json!({"mode":"body","extra":true})] {
+    for request in [json!({}), json!({"mode":"banana"}), json!({"mode":"body","extra":true})] {
         assert!(h.app.run("select.filter", request).is_err());
         assert!(!h.app.ui.pick_bodies && h.app.ui.pick_components);
     }

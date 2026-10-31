@@ -3070,7 +3070,9 @@ fn pick_allowed(app: &SolveApp, h: &Hit) -> bool {
         Hit::Vertex { .. } => !off("vertices") && !app.ui.pick_bodies && !app.ui.pick_components,
         Hit::Edge { .. } => !off("edges") && !app.ui.pick_bodies && !app.ui.pick_components,
         Hit::Face { .. } => !off("faces") || app.ui.pick_bodies || app.ui.pick_components,
-        Hit::Plane { .. } | Hit::Axis { .. } | Hit::ConstructionPoint { .. } => true,
+        Hit::Plane { .. } => !off("planes"),
+        Hit::Axis { .. } => !off("axes"),
+        Hit::ConstructionPoint { .. } => !off("construction_points"),
     }
 }
 
@@ -5852,11 +5854,34 @@ fn box_select(app: &mut SolveApp, proj: &Proj, bx: BoxSel, add: bool) {
         // to select (#7058). A design that has a body keeps the old behaviour: the bodies alone.
         let dialog_accept = app.dialog.as_ref().and_then(|d| d.active_input()).map(|i| i.accept);
         let has_body = st.bodies.iter().any(|b| app.session.body_visible(&b.name));
-        let accept = dialog_accept.unwrap_or(if has_body { BODIES } else { BODIES | PROFILES });
+        // Without a dialog, the SELECT panel's type filter says what a box picks.
+        let accept = dialog_accept.unwrap_or_else(|| {
+            if app.ui.pick_components {
+                return BODIES;
+            }
+            match app.ui.pick_filter {
+                crate::PickFilter::Any | crate::PickFilter::Faces => {
+                    if has_body {
+                        FACES
+                    } else {
+                        FACES | PROFILES
+                    }
+                }
+                crate::PickFilter::Edges => EDGES,
+                crate::PickFilter::Points => crate::selection::VERTICES,
+                crate::PickFilter::Bodies => BODIES,
+                _ => {
+                    if has_body {
+                        0
+                    } else {
+                        PROFILES
+                    }
+                }
+            }
+        });
         // Bulk body selection follows the active component, just like its unfaded bodies.
         // Keep other dialogs and Move's reference inputs free to pick across components.
-        let scoped_bodies =
-            dialog_accept.unwrap_or(BODIES) == BODIES && app.dialog.as_ref().is_none_or(|d| matches!(d.kind, crate::dialogs::Kind::Move { .. }));
+        let scoped_bodies = accept == BODIES && app.dialog.as_ref().is_none_or(|d| matches!(d.kind, crate::dialogs::Kind::Move { .. }));
         let active_bodies =
             app.session.active_occurrence_path.as_ref().filter(|_| scoped_bodies).and_then(|p| app.session.occurrence_bodies(p, true).ok());
         for b in &st.bodies {
@@ -5864,7 +5889,13 @@ fn box_select(app: &mut SolveApp, proj: &Proj, bx: BoxSel, add: bool) {
                 continue;
             }
             let m = b.mesh();
-            if accept & EDGES != 0 {
+            if accept & crate::selection::VERTICES != 0 && accept & (EDGES | FACES) == 0 {
+                for v in vertex_markers(&m) {
+                    if bx.takes(&to2(&[v])) {
+                        out.push(Sel::Vertex { body: b.name.clone(), point: v });
+                    }
+                }
+            } else if accept & EDGES != 0 {
                 for (ei, e) in m.edges.iter().enumerate() {
                     let rim = m.circular_rim(ei);
                     let takes = if bx.crossing { bx.takes(&to2(e)) } else { rim.iter().all(|&i| m.edges.get(i).is_some_and(|p| bx.takes(&to2(p)))) };
@@ -7515,6 +7546,26 @@ mod tests {
     }
 
     /// The view's picture follows a theme change: its background is the window's.
+    /// The SELECT panel's type filter (NX's Selection Filter) says what a box in the view
+    /// picks: faces by default, whole bodies when it asks for them.
+    #[test]
+    fn the_type_filter_lets_a_box_pick_faces_and_bodies() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.run("solid.box", json!({"length": 40, "width": 30, "height": 20})).unwrap();
+        h.app.cam = solidcraft_engine::view::home_camera(&h.app.session);
+        h.frames(2);
+        let rect = h.app.viewport.rect.expect("a laid-out view");
+        let proj = projection(&h.app, rect);
+        let bx = BoxSel::from_drag(rect.min + vec2(2.0, 2.0), rect.max - vec2(2.0, 2.0));
+        h.app.run("select.filter", json!({"mode": "face"})).unwrap();
+        box_select(&mut h.app, &proj, bx, false);
+        let faces = h.app.session.selection.iter().filter(|s| matches!(s, solidcraft_engine::Sel::Face { .. })).count();
+        assert!(faces > 0, "a box with the face filter picks faces: {:?}", h.app.session.selection);
+        h.app.run("select.filter", json!({"mode": "body"})).unwrap();
+        box_select(&mut h.app, &proj, bx, false);
+        assert!(matches!(h.app.session.selection.as_slice(), [solidcraft_engine::Sel::Body { .. }]), "{:?}", h.app.session.selection);
+    }
+
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn the_view_picture_follows_the_theme() {
