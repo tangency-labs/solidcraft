@@ -27,6 +27,10 @@
 //! | [`FilletExecutiveData`]                            | the `SmFilletExecutive` members the corner code reads and writes (`m_vEdgeuseSolverMap`, `GetFilletSolverOfEdgeuse`; `m_vExtendedSurfacesMap` for unit `blend.fillet_corner_p1`; CO-PORTED from `blend.fillet_executive_p1`) |
 //!
 //! Deviations:
+//! - **The fork's mitre gap patch** (WR-644, tangency-labs/smlib@2223108, opt-in
+//!   `Kernel::fixes.fillet_mitre_gap_patch`): `adjust_topology_nx2` builds the concave
+//!   corner's topology for a mitre whose rails meet the side edge apart
+//!   ([`FilletCorner::bevel_gap_patch`]), and the Nx2 corner patch then fills only the gap.
 //! - **Object model.** The class hierarchy is one [`FilletCorner`] record with a
 //!   [`FilletCornerKind`]; the virtual methods dispatch on the kind. The pseudo-B-rep
 //!   members (`m_vVertices`, `m_vEdges`) are ids of the executive's [`FilletBrep`];
@@ -645,6 +649,12 @@ pub struct FilletCorner {
     pub calc_as_const_rad: bool,
     /// `m_bTopologyAdjusted`.
     pub topology_adjusted: bool,
+    /// `m_bBevelGapPatch` (the fork's, WR-644, tangency-labs/smlib@2223108; `FALSE` from
+    /// the constructor): a bevel (mitre) whose rails meet the side edge at two places, the
+    /// gap between them on the side face's continuation filled by a patch
+    /// (`SmFilletNx2Corner::AdjustTopology`). Set only with
+    /// `fixes.fillet_mitre_gap_patch`.
+    pub bevel_gap_patch: bool,
     /// `m_bExtendedSurfacePatch`.
     pub extended_surface_patch: bool,
     /// `m_dSetBackDist`.
@@ -969,6 +979,7 @@ impl FilletCorner {
             degenerate: kind == FilletCornerKind::Degenerate,
             calc_as_const_rad: false,
             topology_adjusted: false,
+            bevel_gap_patch: false,
             extended_surface_patch: true,
             set_back_dist: 0.0,
             ease_dist: 0.0,
@@ -1265,7 +1276,9 @@ impl FilletCorner {
         let fillet_edges = self.solver_eus.as_ref().map_or(0, Vec::len);
 
         // no work - Bevel corner or degenerate corner
-        if (self.bevel && fillet_edges > 1) || total_edges < 3 {
+        // (the fork's, WR-644: a bevel with a gap to fill on a side face's continuation,
+        // `m_bBevelGapPatch`, builds the gap's patch)
+        if (self.bevel && fillet_edges > 1 && !self.bevel_gap_patch) || total_edges < 3 {
             return Ok(());
         }
 
@@ -1790,6 +1803,22 @@ impl FilletCorner {
     pub fn create_corner_patch_nx2(&mut self, env: &mut CornerEnv<'_>) -> Result<()> {
         let total_edges = self.edges.len();
 
+        // The fork's (WR-644, tangency-labs/smlib@2223108): a mitre whose rails meet the
+        // side edge at two places (`AdjustTopology`, `AdjustConcaveCornerTopology`): the
+        // mitre's curve, then the three edges round the gap on the side face's
+        // continuation, filled by a patch on that face's extended surface. The mitre needs
+        // no patch of its own.
+        if self.bevel_gap_patch {
+            if total_edges != 4 {
+                return Err(SolidError::sm_err(OP_NX2_PATCH));
+            }
+            let all = self.edges.clone();
+            self.edges.remove(0);
+            let gap = self.create_end_patch(env);
+            self.edges = all;
+            return gap;
+        }
+
         let mut first_three_edges: Vec<EdgeId> = Vec::new();
         let mut last_three_edges: Vec<EdgeId> = Vec::new();
         let mut last_two_verts: Vec<VertexId> = Vec::new();
@@ -1854,6 +1883,27 @@ impl FilletCorner {
         note_end_face_error: &mut dyn FnMut(&FilletCorner),
     ) -> Result<()> {
         let total_edges = self.edges.len();
+
+        // The fork's (WR-644): the gap's patch only, as in
+        // [`FilletCorner::create_corner_patch_nx2`].
+        if self.bevel_gap_patch {
+            if total_edges != 4 {
+                return Err(SolidError::sm_err(OP_NX2_PATCH));
+            }
+            let all = self.edges.clone();
+            self.edges.remove(0);
+            let mut end_env = CornerPatchEnv {
+                k: &mut *env.k,
+                target: env.target,
+                pseudo: &mut *env.pseudo,
+                solvers: env.solvers,
+                fillet: env.fillet.as_deref_mut(),
+                note_face_error: note_end_face_error,
+            };
+            let gap = self.create_end_patch_with(&mut end_env, extended_surface);
+            self.edges = all;
+            return gap;
+        }
 
         let mut first_three_edges: Vec<EdgeId> = Vec::new();
         let mut last_three_edges: Vec<EdgeId> = Vec::new();
@@ -2058,6 +2108,37 @@ impl FilletCorner {
             if dist < self.approx_tol_3d {
                 ii += 1;
                 continue;
+            }
+
+            // The fork's (WR-644, tangency-labs/smlib@2223108, opt-in
+            // `fixes.fillet_mitre_gap_patch`): two rounds mitred at the common face's
+            // concave corner whose rails meet the side edge at two places. The larger
+            // round cut by the side face, and the smaller round's rail, run on past the
+            // side edge onto the side face's continuation, where they meet the mitre's
+            // curve: the gap is filled by a patch on the side face's extended surface, as
+            // at a corner of mixed convexity whose rounds are swept, the mitre's curve
+            // taking the place of the swept face (`CreateCornerPatch`).
+            if k.fixes.fillet_mitre_gap_patch
+                && self.all_eus.as_ref().map_or(0, Vec::len) == 3
+                && p1::check_face_complimentary_corner_concavity(
+                    k,
+                    target,
+                    self.vertex
+                        .ok_or_else(|| invalid(OP_TOPO, "m_cpVertex is NULL"))?,
+                    self.solver_eus
+                        .as_ref()
+                        .and_then(|eus| eus.first().copied())
+                        .ok_or_else(|| invalid(OP_TOPO, "m_pSolverEUs[0] is NULL"))?,
+                    self.solver_eus
+                        .as_ref()
+                        .and_then(|eus| eus.get(1).copied())
+                        .ok_or_else(|| invalid(OP_TOPO, "m_pSolverEUs[1] is NULL"))?,
+                    None,
+                )?
+            {
+                env.adjust_concave_corner_topology(self)?;
+                self.bevel_gap_patch = true;
+                return Ok(());
             }
 
             self.topology_adjusted = true;
