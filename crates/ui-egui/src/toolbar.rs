@@ -2907,6 +2907,33 @@ pub(crate) fn selection_filter(app: &mut SolveApp, ui: &mut egui::Ui) {
 /// Two Esc presses within this many seconds finish the open sketch.
 pub const ESCAPE_TWICE_S: f64 = 0.4;
 
+/// Whether `cancel_unfinished` has something to cancel.
+pub(crate) fn unfinished(app: &SolveApp) -> bool {
+    app.tool.is_some()
+        || crate::select_other::is_open(app)
+        || app.menu.joint_move_warning.is_some()
+        || app.viewport.joint_handles.is_some()
+        || app.viewport.text_drag.is_some()
+        || crate::occurrence_drag::active(app)
+}
+
+/// Cancels what one Esc cancels before it reaches the dialog, the selection or the sketch:
+/// a drag, the Select Other list, or the active tool's points and then the tool. The view's
+/// corner Cancel (#6709) takes this step first too. Returns whether anything was cancelled.
+pub(crate) fn cancel_unfinished(app: &mut SolveApp) -> bool {
+    if crate::joint_handles::cancel(app) || crate::sketch_text_move::cancel_drag(app) || crate::occurrence_drag::cancel(app) {
+        return true;
+    }
+    if crate::select_other::is_open(app) {
+        crate::select_other::close(app);
+    } else if app.tool.is_some() {
+        crate::tools::finish(app);
+    } else {
+        return false;
+    }
+    true
+}
+
 /// Global keyboard shortcuts (when no text field has focus).
 pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
     crate::browser::update_folder_pick(app, ctx);
@@ -3085,14 +3112,10 @@ pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
                     }
                     continue;
                 }
-                if crate::joint_handles::cancel(app) || crate::sketch_text_move::cancel_drag(app) || crate::occurrence_drag::cancel(app) {
+                if cancel_unfinished(app) {
                     continue;
                 }
-                if crate::select_other::is_open(app) {
-                    crate::select_other::close(app);
-                } else if app.tool.is_some() {
-                    crate::tools::finish(app);
-                } else if app.dialog.is_some() || app.pending_feature_edit.is_some() {
+                if app.dialog.is_some() || app.pending_feature_edit.is_some() {
                     crate::dialogs::cancel(app);
                 } else if crate::viewport_status::enabled(app) && crate::viewport_status::escape(app, repeat) {
                     app.last_escape = None;

@@ -199,6 +199,32 @@ mod view_corner {
         assert!(h.app.session.doc.features.is_empty(), "a new sketch goes with what was drawn in it");
     }
 
+    /// With a line half drawn, the cross takes the same steps as Esc: the placed point, then the
+    /// tool, and only then the sketch, which keeps what was drawn until that last click.
+    #[test]
+    fn the_cross_cancels_an_unfinished_tool_before_the_sketch() {
+        let mut h = sketching();
+        h.step(&json!({"start": "sketch.line"})).unwrap();
+        assert!(h.app.tool.is_some(), "the line tool is out");
+        h.step(&json!({"click": {"sketch": [10, 20]}})).unwrap();
+        assert_eq!(h.app.tool.as_ref().map(|tool| tool.pts.len()), Some(1), "the line's first point is down");
+        let cross = |h: &mut Harness| {
+            h.step(&json!({"click": {"handle": "view:confirm:cancel"}})).unwrap();
+            h.settle();
+        };
+
+        cross(&mut h);
+        assert_eq!(h.app.tool.as_ref().map(|tool| tool.pts.len()), Some(0), "the first click takes the point back");
+        assert!(h.app.session.active_sketch.is_some());
+        cross(&mut h);
+        assert!(h.app.tool.is_none(), "the second puts the tool down");
+        assert!(h.app.session.active_sketch.is_some(), "and keeps the sketch open");
+        assert_eq!(scenario::count_of("view:confirm:ok:enabled"), Some(1.0));
+        cross(&mut h);
+        assert_eq!(h.app.session.active_sketch, None, "with nothing unfinished it cancels the sketch");
+        assert!(h.app.session.doc.features.is_empty());
+    }
+
     #[test]
     fn a_refused_cancel_shows_its_error_and_keeps_the_sketch() {
         let mut h = Harness::new();
