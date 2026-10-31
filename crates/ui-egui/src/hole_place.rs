@@ -266,7 +266,6 @@ pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painte
     if !matches!(&d.kind, Kind::Hole { opts, .. } if !opts.multiple) || app.applying.is_some() {
         return;
     }
-    let t = Tokens::get();
     marks(app, painter, proj);
     if !app.preferences.hole_moves {
         return;
@@ -300,7 +299,7 @@ pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painte
         if hot {
             ui.ctx().set_cursor_icon(if r.dragged() { egui::CursorIcon::Grabbing } else { egui::CursorIcon::Grab });
         }
-        crate::icons::markers::hole_handle(painter, c, if hot { t.accent } else { t.manipulator }, hot);
+        crate::place_gizmo::marker(ui, painter, id, c, r.hovered(), r.dragged());
         crate::scenario::publish_handle(&format!("hole:{n}"), c);
         if !r.dragged() {
             r.on_hover_text(crate::i18n::tr_label("Drag to move the hole; click to remove it"));
