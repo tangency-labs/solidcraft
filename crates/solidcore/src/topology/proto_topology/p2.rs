@@ -3927,4 +3927,88 @@ mod tests {
             }
         }
     }
+
+    /// WR-95 (fixed in v1.0.1 `3fd5b95`): `SmProtoEdge::CombineProtoEdge` walks a copy
+    /// of the other proto edge's definitions list so all definitions (including odd-indexed
+    /// ones) move into `pe1` and none remain on `pe2`.
+    #[test]
+    fn wr95_combine_proto_edge_moves_all_definitions() {
+        let k = Kernel::default();
+        let mut geo = Geo {
+            curves: vec![
+                line([0.0, 0.0, 0.0], [1.0, 0.0, 0.0]),
+                line([0.0, 0.0, 0.0], [1.0, 0.0, 0.0]),
+                line([0.0, 0.0, 0.0], [1.0, 0.0, 0.0]),
+            ],
+            ..Geo::default()
+        };
+        let mut m = manager();
+        let ivl = geo.curves[0].natural_interval();
+        let v0 = m
+            .new_proto_vertex(Point3::new(0.0, 0.0, 0.0), 1e-5)
+            .unwrap();
+        let v1 = m
+            .new_proto_vertex(Point3::new(1.0, 0.0, 0.0), 1e-5)
+            .unwrap();
+        let pe1 = m.new_proto_edge(&k, Some(v0), Some(v1), ivl).unwrap();
+        let pe2 = m.new_proto_edge(&k, Some(v0), Some(v1), ivl).unwrap();
+
+        let ed0 = m
+            .insert_edge_definition(EdgeDefinition::new(
+                Some(H(0, ClassObjectKind::Curve)),
+                ivl,
+                R0,
+                R1,
+                1e-5,
+                None,
+                None,
+                Some(pe2),
+            ))
+            .unwrap();
+        let ed1 = m
+            .insert_edge_definition(EdgeDefinition::new(
+                Some(H(1, ClassObjectKind::Curve)),
+                ivl,
+                R0,
+                R1,
+                1e-5,
+                None,
+                None,
+                Some(pe2),
+            ))
+            .unwrap();
+        let ed2 = m
+            .insert_edge_definition(EdgeDefinition::new(
+                Some(H(2, ClassObjectKind::Curve)),
+                ivl,
+                R0,
+                R1,
+                1e-5,
+                None,
+                None,
+                Some(pe2),
+            ))
+            .unwrap();
+
+        m.proto_edge_mut(pe2)
+            .unwrap()
+            .edge_definitions_mut()
+            .push(ed0);
+        m.proto_edge_mut(pe2)
+            .unwrap()
+            .edge_definitions_mut()
+            .push(ed1);
+        m.proto_edge_mut(pe2)
+            .unwrap()
+            .edge_definitions_mut()
+            .push(ed2);
+
+        m.combine_proto_edge(&k, &mut geo, pe1, pe2).unwrap();
+
+        assert_eq!(
+            m.proto_edge(pe1).unwrap().edge_definitions(),
+            &[ed0, ed1, ed2]
+        );
+        assert_eq!(m.proto_edge(pe2).unwrap().edge_definitions(), &[]);
+    }
 }
