@@ -18,8 +18,12 @@
 //! `m_sClosedEdgeAcross` (ccbf77a), filled by `CloseLoopGap` and read once at the end of
 //! the same `CloseLoopGaps`, are one local list of pairs. Bounds: each face's gap search stops with `SM_ERR`
 //! after 64 passes (the fork's guard); the other loops run over finite lists.
+//!
+//! Not in the fork: `split_corner_vertices` (private, opt-in
+//! `Kernel::fixes.offset_splits_corner_vertices`, WR-657), run by `close_loop_gaps`
+//! before it closes any gap.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use super::p1::{forget_seconds, OffsetExecutive};
 use super::p2::OffsetNotifications;
@@ -29,11 +33,12 @@ use crate::error::{EntityRef, Result, SolidError};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::global_solver::{SolutionRequested, SolverOperation};
 use crate::kernel::Kernel;
-use crate::math::{max2, Point3, EFF_ZERO};
+use crate::math::{max2, Point3, Vec3, EFF_ZERO, EFF_ZERO_SQRT};
 use crate::nurbs::b_spline_curve::BSplineCurve;
 use crate::nurbs::b_spline_curve_n_lib::TrimMode;
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use crate::query::edge::closest_point;
+use crate::surface::surface::p2::SurfaceKind;
 use crate::surface::surface::p4::{global_point_solve_starts, NoObject};
 use crate::topology::brep::p1 as bp1;
 use crate::topology::brep::p3::{delete_face_with_body_identity, squeeze_edge, DeleteFaceOptions};
@@ -139,6 +144,10 @@ impl OffsetExecutive {
         notifications: &mut OffsetNotifications<'_>,
     ) -> Result<()> {
         let approx_tol = self.approximation_tol_3d();
+        // (WR-657, opt-in) the corners whose offset planes no longer meet in one point
+        if kernel.fixes.offset_splits_corner_vertices {
+            self.split_corner_vertices(kernel, original, b, approx_tol, notifications)?;
+        }
         // (fork ccbf77a) each edge that closed to a point: its offset face and the original
         // face across it
         let mut closed_edges: Vec<(FaceId, Option<FaceId>)> = Vec::new();
@@ -592,6 +601,388 @@ impl OffsetExecutive {
             }
         }
         Ok(())
+    }
+}
+
+/// The point where three planes `(point, normal)` meet; `None` where two are parallel.
+fn three_planes(planes: [(Point3, Vec3); 3]) -> Option<Point3> {
+    let [(p1, n1), (p2, n2), (p3, n3)] = planes;
+    let det = n1.dot(n2.cross(n3));
+    if det.abs() < EFF_ZERO {
+        return None;
+    }
+    let sum = n2.cross(n3) * n1.dot(p1) + n3.cross(n1) * n2.dot(p2) + n1.cross(n2) * n3.dot(p3);
+    Some(sum * (1.0 / det))
+}
+
+/// How a corner of the original splits in the offset (see
+/// [`OffsetExecutive::split_corner_vertices`]): the edges on face `b` end where `a`,
+/// `b` and `c` meet (`t_b`), the others where `c`, `d` and `a` meet (`t_d`).
+struct CornerSplit {
+    b: FaceId,
+    t_b: Point3,
+    t_d: Point3,
+}
+
+/// The split of the original's vertex `v0` (see
+/// [`OffsetExecutive::split_corner_vertices`]), `None` where `v0` is no convex corner
+/// of four plane faces or its four offset planes still meet in one point (to `tol`).
+fn corner_split(
+    original: &Brep,
+    b: &Brep,
+    v0: VertexId,
+    sheet_of: &BTreeMap<FaceId, FaceId>,
+    tol: f64,
+) -> Result<Option<CornerSplit>> {
+    let mut edges = crate::topology::vertex::edges(original, v0, None)?;
+    edges.sort_unstable();
+    edges.dedup();
+    if edges.len() != 4 {
+        return Ok(None);
+    }
+    let p0 = original.vertex(v0)?.point;
+    let mut faces: Vec<FaceId> = Vec::new();
+    let mut dirs: Vec<Vec3> = Vec::new();
+    let mut pairs: Vec<[FaceId; 2]> = Vec::new();
+    for &e in &edges {
+        let Some(other) = edge::other_vertex(original, e, Some(v0))? else {
+            return Ok(None);
+        };
+        let Ok(dir) = (original.vertex(other)?.point - p0).unitize() else {
+            return Ok(None);
+        };
+        let [f1, f2] = edge::faces(original, e, None)?[..] else {
+            return Ok(None);
+        };
+        if f1 == f2 {
+            return Ok(None);
+        }
+        for f in [f1, f2] {
+            if !faces.contains(&f) {
+                faces.push(f);
+            }
+        }
+        dirs.push(dir);
+        pairs.push([f1, f2]);
+    }
+    if faces.len() != 4 {
+        return Ok(None);
+    }
+    // the offset planes, each normal turned out of the corner (the edges run into it)
+    let inward = dirs
+        .iter()
+        .fold(Vec3::new(0.0, 0.0, 0.0), |sum, &d| sum + d);
+    let mut planes: Vec<(Point3, Vec3)> = Vec::new();
+    for f in &faces {
+        let Some(sheet) = sheet_of.get(f) else {
+            return Ok(None);
+        };
+        let Some(surface) = b.face(*sheet)?.surface.as_ref() else {
+            return Ok(None);
+        };
+        let SurfaceKind::Plane(plane) = surface.kind() else {
+            return Ok(None);
+        };
+        let (point, normal, _) = plane.is_planar();
+        let side = normal.dot(inward);
+        if side.abs() < EFF_ZERO {
+            return Ok(None);
+        }
+        planes.push((point, if side > 0.0 { normal * -1.0 } else { normal }));
+    }
+    // a convex corner: every edge runs inside every face's plane
+    if dirs
+        .iter()
+        .any(|&d| planes.iter().any(|&(_, n)| n.dot(d) > EFF_ZERO_SQRT))
+    {
+        return Ok(None);
+    }
+    // `a` and `c` across the corner (no edge between them), both ends inside the fourth
+    // face
+    let inside = |p: Point3, (at, n): (Point3, Vec3)| n.dot(p - at) < -tol;
+    for (a, c, bb, d) in [
+        (0, 1, 2, 3),
+        (0, 2, 1, 3),
+        (0, 3, 1, 2),
+        (1, 2, 0, 3),
+        (1, 3, 0, 2),
+        (2, 3, 0, 1),
+    ] {
+        let (Some(&fa), Some(&fb), Some(&fc)) = (faces.get(a), faces.get(bb), faces.get(c)) else {
+            return Ok(None);
+        };
+        let (Some(&pa), Some(&pb), Some(&pc), Some(&pd)) =
+            (planes.get(a), planes.get(bb), planes.get(c), planes.get(d))
+        else {
+            return Ok(None);
+        };
+        if pairs.iter().any(|p| p.contains(&fa) && p.contains(&fc)) {
+            continue;
+        }
+        let (Some(t_b), Some(t_d)) = (three_planes([pa, pb, pc]), three_planes([pc, pd, pa]))
+        else {
+            continue;
+        };
+        if inside(t_b, pd) && inside(t_d, pb) {
+            return Ok(Some(CornerSplit { b: fb, t_b, t_d }));
+        }
+    }
+    Ok(None)
+}
+
+/// The vertex the original's edges `e1` and `e2` share (one only).
+fn common_vertex(original: &Brep, e1: EdgeId, e2: EdgeId) -> Result<Option<VertexId>> {
+    let ends = |e| -> Result<[Option<VertexId>; 2]> {
+        Ok([
+            edge::start_vertex(original, e)?,
+            edge::end_vertex(original, e)?,
+        ])
+    };
+    let (a, c) = (ends(e1)?, ends(e2)?);
+    let shared: Vec<VertexId> = a
+        .iter()
+        .flatten()
+        .copied()
+        .filter(|v| c.contains(&Some(*v)))
+        .collect();
+    Ok(match shared[..] {
+        [v] => Some(v),
+        _ => None,
+    })
+}
+
+/// The ends of the straight edge `e` (its start and end), `None` where it is not
+/// straight or closed.
+fn straight_edge_ends(
+    kernel: &mut Kernel,
+    b: &mut Brep,
+    e: EdgeId,
+    tol: f64,
+) -> Result<Option<(Point3, Point3)>> {
+    if edge::start_vertex(b, e)? == edge::end_vertex(b, e)? {
+        return Ok(None);
+    }
+    let Some(trimmed) = edge::create_trimmed_nurbs_curve(kernel, b, e)? else {
+        return Ok(None);
+    };
+    let CurveKind::BSpline(curve) = trimmed.kind() else {
+        return Ok(None);
+    };
+    if curve.is_line(5, tol)?.is_none() {
+        return Ok(None);
+    }
+    let ivl = curve.natural_interval();
+    Ok(Some((
+        curve.evaluate_point(ivl.min())?,
+        curve.evaluate_point(ivl.max())?,
+    )))
+}
+
+/// One corner's planned edits (see [`OffsetExecutive::split_corner_vertices`]): the
+/// offset edges' ends it moves (edge, its start or end, the new point) and the offset
+/// vertices it moves.
+#[derive(Default)]
+struct CornerEdits {
+    ends: Vec<(EdgeId, bool, Point3)>,
+    vertices: Vec<(VertexId, Point3)>,
+    /// One of its edges is not straight: the corner is left as it is.
+    unusable: bool,
+}
+
+impl OffsetExecutive {
+    /// Not in the fork (opt-in `Kernel::fixes.offset_splits_corner_vertices`, with
+    /// `offset_closes_loop_gaps`, before the gaps are closed): a convex corner of the
+    /// original where four plane faces meet, whose four offset planes no longer meet in
+    /// one point, becomes an edge between the two faces across the corner from each
+    /// other (`a` and `c`; the other two are `b` and `d`). Its ends are where `a`, `b`
+    /// and `c` meet and where `c`, `d` and `a` meet, for whichever pair leaves both
+    /// points inside the fourth face. The edge offsets end the four edges at the same
+    /// pair of those points whichever way the corner splits: right for an outset of two
+    /// chamfers meeting at a corner, outside the offset solid for the inset or a shell
+    /// open at one of the four faces. Here each offset face's two edges at the corner
+    /// are moved to their own ends of the split (along their lines) and the vertex
+    /// between them to the nearer; `close_loop_gaps` then closes `a`'s and `c`'s
+    /// loops with the straight edge between the two ends.
+    ///
+    /// The moves of every corner are planned first: an edge between two split corners
+    /// moves at both ends. A corner one of whose edges would vanish (its ends meet or
+    /// pass one another: more changes there than the one new edge, as where a small
+    /// face is offset clear of the body) is left as it is, and the others planned again
+    /// without it.
+    ///
+    /// # Errors
+    ///
+    /// Those of the topology queries and the curve evaluations and edits;
+    /// [`SolidError::InvalidInput`] for missing topology.
+    #[allow(clippy::too_many_lines)] // one pass over the offset faces, then the edits
+    fn split_corner_vertices(
+        &mut self,
+        kernel: &mut Kernel,
+        original: &Brep,
+        b: &mut Brep,
+        approx_tol: f64,
+        notifications: &mut OffsetNotifications<'_>,
+    ) -> Result<()> {
+        // the offset face of each original face
+        let mut sheet_of: BTreeMap<FaceId, FaceId> = BTreeMap::new();
+        for f in bp1::faces(b, None)? {
+            for fu in self.faceuse_to_faces.firsts(f) {
+                if let Some(of) = eu::faceuse_face(original, fu)? {
+                    sheet_of.insert(of, f);
+                }
+            }
+        }
+        let tol = 10.0 * max2(original.tolerance(), approx_tol);
+        let mut corners: BTreeMap<VertexId, CornerSplit> = BTreeMap::new();
+        for v0 in bp1::vertices(original, None)? {
+            if let Some(split) = corner_split(original, b, v0, &sheet_of, tol)? {
+                corners.insert(v0, split);
+            }
+        }
+        if corners.is_empty() {
+            return Ok(());
+        }
+        let mut plans: BTreeMap<VertexId, CornerEdits> = BTreeMap::new();
+        let mut ends_of: BTreeMap<EdgeId, (Point3, Point3)> = BTreeMap::new();
+        for f in bp1::faces(b, None)? {
+            let Some(fu) = face2::upward_faceuse(b, f)? else {
+                continue;
+            };
+            for lu in b.faceuse(fu)?.loopuses.clone() {
+                let eus = eu::loopuse_edgeuses(b, lu)?;
+                let num = eus.len();
+                for (kk, &this) in eus.iter().enumerate() {
+                    let next = *eus
+                        .get((kk + 1) % num)
+                        .ok_or_else(|| null("loop without edge uses"))?;
+                    if this == next {
+                        continue;
+                    }
+                    let v = edgeuse_vertex(b, next)?;
+                    let mate = eu::mate(b, this)?.ok_or_else(|| null("edge use without mate"))?;
+                    if edgeuse_vertex(b, mate)? != v {
+                        continue;
+                    }
+                    let (Some(o_this), Some(o_next)) = (
+                        self.original_edge(original, b, this)?,
+                        self.original_edge(original, b, next)?,
+                    ) else {
+                        continue;
+                    };
+                    let Some(v0) = common_vertex(original, o_this, o_next)? else {
+                        continue;
+                    };
+                    let Some(split) = corners.get(&v0) else {
+                        continue;
+                    };
+                    let end_of = |e: EdgeId| -> Result<Point3> {
+                        Ok(if edge::faces(original, e, None)?.contains(&split.b) {
+                            split.t_b
+                        } else {
+                            split.t_d
+                        })
+                    };
+                    let (t_this, t_next) = (end_of(o_this)?, end_of(o_next)?);
+                    let plan = plans.entry(v0).or_default();
+                    for (u, target) in [(this, t_this), (next, t_next)] {
+                        let e = eu::edge(b, u)?.ok_or_else(|| null("edge use without edge"))?;
+                        let Some(ends) = straight_edge_ends(kernel, b, e, tol)? else {
+                            plan.unusable = true;
+                            continue;
+                        };
+                        ends_of.insert(e, ends);
+                        plan.ends
+                            .push((e, edge::start_vertex(b, e)? == Some(v), target));
+                    }
+                    let here = b.vertex(v)?.point;
+                    let anchor = if here.distance(t_this) <= here.distance(t_next) {
+                        t_this
+                    } else {
+                        t_next
+                    };
+                    plan.vertices.push((v, anchor));
+                }
+            }
+        }
+        plans.retain(|_, plan| !plan.unusable);
+        // drop the corners whose edges would vanish until none is left
+        let lines = loop {
+            let mut lines = ends_of.clone();
+            for plan in plans.values() {
+                for &(e, at_start, target) in &plan.ends {
+                    if let Some(line) = lines.get_mut(&e) {
+                        if at_start {
+                            line.0 = target;
+                        } else {
+                            line.1 = target;
+                        }
+                    }
+                }
+            }
+            let vanishing: BTreeSet<EdgeId> = lines
+                .iter()
+                .filter(|(e, (s, t))| {
+                    ends_of.get(e).is_some_and(|&(s0, t0)| {
+                        s.distance(*t) <= tol || (*t - *s).dot(t0 - s0) <= 0.0
+                    })
+                })
+                .map(|(&e, _)| e)
+                .collect();
+            let before = plans.len();
+            plans.retain(|_, plan| !plan.ends.iter().any(|(e, ..)| vanishing.contains(e)));
+            if plans.len() == before {
+                break lines;
+            }
+        };
+        let mut moved: BTreeSet<EdgeId> = BTreeSet::new();
+        for plan in plans.values() {
+            for &(e, ..) in &plan.ends {
+                if !moved.insert(e) {
+                    continue;
+                }
+                let (Some(&(s, t)), Some(&(s0, t0))) = (lines.get(&e), ends_of.get(&e)) else {
+                    continue;
+                };
+                if s.distance(s0) <= tol && t.distance(t0) <= tol {
+                    continue;
+                }
+                let line = BSplineCurve::create_line_segment(3, s, t)?;
+                let ivl = line.natural_interval();
+                set_edge_curve(kernel, b, e, line, notifications)?;
+                edge::set_interval(b, e, &ivl)?;
+            }
+            for &(v, point) in &plan.vertices {
+                if b.vertex(v)?.point.distance(point) <= tol {
+                    continue;
+                }
+                let key_of = notifications.result_key_of;
+                crate::topology::vertex::set_point(
+                    b,
+                    v,
+                    point,
+                    &mut *notifications.records,
+                    &mut *notifications.attributes,
+                    None,
+                    key_of(EntityRef::Vertex(v)),
+                    &|vu| key_of(EntityRef::Vertexuse(vu)),
+                )?;
+            }
+        }
+        Ok(())
+    }
+
+    /// The original edge offset edge use `u` (or its mate) was made from, where it maps
+    /// to one.
+    fn original_edge(&self, original: &Brep, b: &Brep, u: EdgeuseId) -> Result<Option<EdgeId>> {
+        let mut orig = self.edgeuse_to_edgeuses.firsts(u);
+        if orig.is_empty() {
+            let mate = eu::mate(b, u)?.ok_or_else(|| null("edge use without mate"))?;
+            orig = self.edgeuse_to_edgeuses.firsts(mate);
+        }
+        match orig.as_slice() {
+            [ou] => eu::edge(original, *ou),
+            _ => Ok(None),
+        }
     }
 }
 

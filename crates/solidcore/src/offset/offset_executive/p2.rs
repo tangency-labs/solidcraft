@@ -244,6 +244,12 @@ pub fn offset_brep(
         notifications.attributes,
     )?;
     let original_key = original.key();
+    // Opt-in (WR-657): as the shell does with WR-578's opt-in, an offset of a solid that
+    // is no closed manifold solid is refused rather than returned (upstream hands back,
+    // e.g., the loop gaps of a box with three chamfers meeting at a corner, volume 0)
+    let refuse_broken = kernel.fixes.offset_closes_loop_gaps
+        && kernel.fixes.offset_splits_corner_vertices
+        && brep_is_manifold_solid(original)?;
     let mut executive = configured_executive(original, options);
     let mut result = collapse_offset_status(executive.do_solid_offset(
         kernel,
@@ -251,6 +257,9 @@ pub fn offset_brep(
         SolidOffsetOptions::default(),
         notifications,
     ))?;
+    if refuse_broken && !brep_is_manifold_solid(&result)? {
+        return Err(SolidError::sm_err(OP_OFFSET));
+    }
     // (not upstream) the attributes the notifications left on the result's objects
     attributes::finish_attributes(&mut result, original_key, notifications)?;
     Ok(result)
@@ -429,6 +438,16 @@ impl OffsetExecutive {
             // broken body.
             if kernel.fixes.offset_extended_edges_mated
                 && options.offset.extend_convex_edges
+                && input_is_manifold
+                && !brep_is_manifold_solid(&shell)?
+            {
+                return Err(SolidError::sm_err(OP_SHELL));
+            }
+            // Opt-in (WR-657): likewise with the corners split, a shell of a solid that is
+            // no closed manifold solid is refused (a box's chamfer left open by an inset of
+            // its two sides' width, which the cavity meets along a line only)
+            if kernel.fixes.offset_closes_loop_gaps
+                && kernel.fixes.offset_splits_corner_vertices
                 && input_is_manifold
                 && !brep_is_manifold_solid(&shell)?
             {
