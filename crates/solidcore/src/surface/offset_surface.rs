@@ -87,7 +87,8 @@
 //!   `Buvv x Buv` (the derivative of `Cuu` / `Cvv` gives `1` and `-1`); the outputs
 //!   `Duvv` and `Dvvv` add `Buuv` instead of `Buvv` / `Bvvv`; `SplitAt` with an extended
 //!   surface splits the base surface a second time for the extended halves; `SwapUV`
-//!   with an extended surface negates the offset distance twice; `STEPInversion`
+//!   with an extended surface negates the offset distance twice (kept unless
+//!   `fixes.offset_swap_uv_extended_distance`, WR-164); `STEPInversion`
 //!   retries on the extended surface with the tolerance not widened by the offset.
 //! - **Recursion.** The pole step-off of `EvaluatePlainOrSimple` evaluates itself at
 //!   the step-off points; its depth is bounded by [`MAX_STEPOFF_DEPTH`] (upstream
@@ -1843,7 +1844,10 @@ impl OffsetSurface {
     }
 
     /// Swaps `u` and `v` of the extended and the owned base surface, negating the
-    /// distance for each (`SwapUV`).
+    /// distance for each (`SwapUV`). With
+    /// [`UpstreamFixes::offset_swap_uv_extended_distance`](crate::kernel::UpstreamFixes::offset_swap_uv_extended_distance)
+    /// set and an extension present, the base's swap keeps the extension's one
+    /// negation instead of negating again (WR-164).
     ///
     /// # Errors
     ///
@@ -1866,13 +1870,19 @@ impl OffsetSurface {
         notify: &mut crate::surface::surface::p2::SurfaceEditNotify<'_>,
     ) -> Result<()> {
         self.fold_pending_extension();
+        let mut swapped_extension = false;
         if let Some(e) = self.extended_surface.as_deref_mut() {
             e.swap_uv_notifying(k, notify)?;
             self.offset_distance.set(-self.offset_distance.get());
+            swapped_extension = true;
         }
         if self.owns_surface {
             self.surface.swap_uv_notifying(k, notify)?;
-            self.offset_distance.set(-self.offset_distance.get());
+            // WR-164: the extension's swap already negated the distance (the normal
+            // flipped); negating again for the base leaves it on the wrong side.
+            if !(swapped_extension && k.fixes.offset_swap_uv_extended_distance) {
+                self.offset_distance.set(-self.offset_distance.get());
+            }
         } else {
             // Can not swap UV if I do not own the surface
             return Err(SolidError::sm_err(OP_EDIT));
@@ -3505,6 +3515,242 @@ mod tests {
         assert!(upstream > 1e-6, "upstream copies agree: {upstream}");
         let fixed = offset_extension_gap(true);
         assert!(fixed < 1e-9, "fixed copies disagree by {fixed}");
+    }
+
+    /// The B-spline base of the `extension_sequence` fixture (WR-164): degree 3 x 3,
+    /// a 5 x 5 net of non-rational (`NOW`) control points and knots
+    /// `[0,0,0,0,.5,1,1,1,1]`, built through the public `from_data`.
+    fn wr_164_base() -> Surface {
+        use crate::nurbs::math::{CPoint, NOW};
+        let net = vec![
+            vec![
+                CPoint::new(0.0, 0.0, 0.11682550269259515, NOW),
+                CPoint::new(0.0, 0.375, 0.10643255794977993, NOW),
+                CPoint::new(0.0, 0.75, 0.0771028627866534, NOW),
+                CPoint::new(0.0, 1.125, 0.034054830890782935, NOW),
+                CPoint::new(0.0, 1.5, -0.015052322815247873, NOW),
+            ],
+            vec![
+                CPoint::new(0.5, 0.0, 0.23958622895964427, NOW),
+                CPoint::new(0.5, 0.375, 0.21827233446462932, NOW),
+                CPoint::new(0.5, 0.75, 0.15812287309950565, NOW),
+                CPoint::new(0.5, 1.125, 0.06983978945462085, NOW),
+                CPoint::new(0.5, 1.5, -0.030869366510477145, NOW),
+            ],
+            vec![
+                CPoint::new(1.0, 0.0, 0.29781389731127655, NOW),
+                CPoint::new(1.0, 0.375, 0.2713199956625681, NOW),
+                CPoint::new(1.0, 0.75, 0.19655215283576333, NOW),
+                CPoint::new(1.0, 1.125, 0.08681325289519475, NOW),
+                CPoint::new(1.0, 1.5, -0.03837168099325073, NOW),
+            ],
+            vec![
+                CPoint::new(1.5, 0.0, 0.2758247620233231, NOW),
+                CPoint::new(1.5, 0.375, 0.2512870417110762, NOW),
+                CPoint::new(1.5, 0.75, 0.18203969415312937, NOW),
+                CPoint::new(1.5, 1.125, 0.08040338290613742, NOW),
+                CPoint::new(1.5, 1.5, -0.035538501977078495, NOW),
+            ],
+            vec![
+                CPoint::new(2.0, 0.0, 0.17954164323118696, NOW),
+                CPoint::new(2.0, 0.375, 0.16356939116182573, NOW),
+                CPoint::new(2.0, 0.75, 0.11849445851707789, NOW),
+                CPoint::new(2.0, 1.125, 0.05233669153712017, NOW),
+                CPoint::new(2.0, 1.5, -0.023132952227109788, NOW),
+            ],
+        ];
+        let knots = [0.0, 0.0, 0.0, 0.0, 0.5, 1.0, 1.0, 1.0, 1.0];
+        Surface::from(BSplineSurface::from_data(4, 4, 3, 3, 8, 8, &net, &knots, &knots).unwrap())
+    }
+
+    fn wr_164_offset(k: &Kernel, d: f64) -> OffsetSurface {
+        let mut o =
+            OffsetSurface::new(k, d, wr_164_base(), true, crate::geom::extent2d::SS_NONE).unwrap();
+        o.set_allow_extension(true);
+        o
+    }
+
+    /// The fixture's public out-of-domain point evaluations; they make the B-spline
+    /// extension upstream stores in `m_pExtendedSurface` (no private injection).
+    fn wr_164_extend(o: &OffsetSurface, k: &Kernel) {
+        for uv in [
+            Point2::new(1.4, 0.5),
+            Point2::new(2.6, 0.5),
+            Point2::new(1.2, 0.3),
+        ] {
+            o.evaluate_point(k, uv).unwrap();
+        }
+        assert!(
+            o.with_extended_base_surface(|e| e.is_some()),
+            "the public evaluations made an extension"
+        );
+    }
+
+    /// Pure relative 1e-9 agreement (no absolute floor; two exact zeros agree).
+    fn same_point(a: Point3, b: Point3) -> bool {
+        [(a.x, b.x), (a.y, b.y), (a.z, b.z)]
+            .iter()
+            .all(|(x, y)| (x - y).abs() <= 1e-9 * x.abs().max(y.abs()))
+    }
+
+    fn assert_same_point(a: Point3, b: Point3, ctx: &str) {
+        assert!(same_point(a, b), "{ctx}: {a:?} vs {b:?}");
+    }
+
+    /// WR-164: with a stored extension, `SwapUV` negates the distance for the extension
+    /// and again for the base. The pinned behaviour leaves the distance and puts the
+    /// offset on the other side; with the fix the base's swap keeps the extension's one
+    /// negation, so `Offset(uv)` after the swap is the pre-swap `Offset(vu)`, and a
+    /// second swap restores the distance and the evaluations. Measured here: the
+    /// distance, the stored extension's presence and public point evaluations at
+    /// asymmetric inside-domain parameters, for both signs of the distance.
+    #[test]
+    fn wr_164_swap_uv_with_an_extension_negates_once() {
+        const POINTS: [Point2; 3] = [
+            Point2::new(0.2, 0.7),
+            Point2::new(0.8, 0.15),
+            Point2::new(0.35, 0.55),
+        ];
+        let before_and_swapped = |off: &OffsetSurface, k: &Kernel| {
+            let before: Vec<Point3> = POINTS
+                .iter()
+                .map(|&uv| off.evaluate_point(k, uv).unwrap())
+                .collect();
+            let swapped: Vec<Point3> = POINTS
+                .iter()
+                .map(|&uv| off.evaluate_point(k, Point2::new(uv.y, uv.x)).unwrap())
+                .collect();
+            (before, swapped)
+        };
+
+        for d in [0.4, -0.3] {
+            // Pinned C++: the extension and the base each negate, so the distance comes
+            // back and the swapped offset does not evaluate as `Offset(vu)`.
+            let k = Kernel::default();
+            let mut off = wr_164_offset(&k, d);
+            wr_164_extend(&off, &k);
+            let (_, before_swapped) = before_and_swapped(&off, &k);
+            off.swap_uv(&k).unwrap();
+            assert_eq!(off.offset_distance(), d, "pinned d {d} comes back");
+            assert!(off.extended_base_surface().is_some());
+            let differs = POINTS.iter().enumerate().any(|(i, &uv)| {
+                !same_point(off.evaluate_point(&k, uv).unwrap(), before_swapped[i])
+            });
+            assert!(differs, "pinned swap maps uv to vu for d {d}");
+
+            // WR-164 fix: one negation, the swapped offset is the pre-swap one with
+            // its parameters exchanged, and a second swap restores both.
+            let mut k = Kernel::default();
+            k.fixes.offset_swap_uv_extended_distance = true;
+            let mut off = wr_164_offset(&k, d);
+            wr_164_extend(&off, &k);
+            let (before, before_swapped) = before_and_swapped(&off, &k);
+            off.swap_uv(&k).unwrap();
+            assert_eq!(off.offset_distance(), -d, "fixed d {d} is negated once");
+            assert!(off.extended_base_surface().is_some());
+            for (i, &uv) in POINTS.iter().enumerate() {
+                assert_same_point(
+                    off.evaluate_point(&k, uv).unwrap(),
+                    before_swapped[i],
+                    "fixed swap maps uv to vu",
+                );
+            }
+            off.swap_uv(&k).unwrap();
+            assert_eq!(off.offset_distance(), d, "double swap restores d {d}");
+            for (i, &uv) in POINTS.iter().enumerate() {
+                assert_same_point(
+                    off.evaluate_point(&k, uv).unwrap(),
+                    before[i],
+                    "double swap restores the evaluations",
+                );
+            }
+        }
+    }
+
+    /// WR-164 control: an owned offset with no extension negates once with the fix on
+    /// or off, as upstream (the second negation is not gated on the flag alone).
+    #[test]
+    fn wr_164_swap_uv_without_an_extension_negates_once_either_way() {
+        for fixed in [false, true] {
+            let mut k = Kernel::default();
+            k.fixes.offset_swap_uv_extended_distance = fixed;
+            let mut off = wr_164_offset(&k, 0.4);
+            assert!(off.extended_base_surface().is_none());
+            off.swap_uv(&k).unwrap();
+            assert_eq!(off.offset_distance(), -0.4, "fixed {fixed}");
+            assert!(off.extended_base_surface().is_none());
+        }
+    }
+
+    /// WR-164 partial state: a non-owned offset still swaps (and negates for) its
+    /// extension before refusing the base with `SM_ERR`; the fix does not hide that
+    /// error or the one negation already made. Measured: the error's operation, the
+    /// distance and the stored extension, not the whole edit.
+    #[test]
+    fn wr_164_swap_uv_non_owned_keeps_the_extension_negation_and_error() {
+        for fixed in [false, true] {
+            let mut k = Kernel::default();
+            k.fixes.offset_swap_uv_extended_distance = fixed;
+            let mut off = OffsetSurface::new(&k, 0.4, wr_164_base(), false, SS_UNKNOWN).unwrap();
+            off.set_allow_extension(true);
+            wr_164_extend(&off, &k);
+            let err = off.swap_uv(&k).unwrap_err();
+            assert_eq!(err.operation(), OP_EDIT);
+            assert_eq!(err, SolidError::sm_err(OP_EDIT), "fixed {fixed}");
+            assert_eq!(off.offset_distance(), -0.4, "fixed {fixed}");
+            assert!(off.extended_base_surface().is_some(), "fixed {fixed}");
+        }
+    }
+
+    /// WR-164 failure precedence: the extension is swapped and negated, then the base's
+    /// edit notification fails before the base is swapped, so the second negation does
+    /// not run. Measured: the notification order, the propagated error operation, the
+    /// distance, the stored extension and an unchanged base point.
+    #[test]
+    fn wr_164_swap_uv_failed_base_edit_keeps_the_extension_negation() {
+        use crate::geom::object::NotifyOperation;
+        for fixed in [false, true] {
+            let mut k = Kernel::default();
+            k.fixes.offset_swap_uv_extended_distance = fixed;
+            let mut off = wr_164_offset(&k, 0.4);
+            wr_164_extend(&off, &k);
+            let base_point = off
+                .base_surface()
+                .evaluate_point(&k, Point2::new(0.3, 0.7))
+                .unwrap();
+            let mut events = Vec::new();
+            let err = off
+                .swap_uv_notifying(&k, &mut |_, _, op| {
+                    events.push(op);
+                    if events.len() == 3 {
+                        return Err(SolidError::sm_err("test::wr164::notify"));
+                    }
+                    Ok(())
+                })
+                .unwrap_err();
+            assert_eq!(err.operation(), "test::wr164::notify");
+            assert_eq!(
+                err,
+                SolidError::sm_err("test::wr164::notify"),
+                "fixed {fixed}"
+            );
+            assert_eq!(
+                events,
+                [
+                    NotifyOperation::PreEdit,
+                    NotifyOperation::PostEdit,
+                    NotifyOperation::PreEdit
+                ],
+                "fixed {fixed}"
+            );
+            assert_eq!(off.offset_distance(), -0.4, "fixed {fixed}");
+            assert!(off.extended_base_surface().is_some(), "fixed {fixed}");
+            let base_after = off
+                .base_surface()
+                .evaluate_point(&k, Point2::new(0.3, 0.7))
+                .unwrap();
+            assert_same_point(base_after, base_point, "the base was not swapped");
+        }
     }
 
     /// The farthest an offset (4) of a half cylinder (r 5, its axis the z axis) evaluated
