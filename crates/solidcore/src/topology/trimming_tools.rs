@@ -79,7 +79,9 @@
 //! - **`IsIsoCurve(curve, side, low, tol)`** returns `SER(GetCanonical)`'s nonzero
 //!   status as an `SmBoolean`: a curve without NURB counts as an iso curve, as upstream
 //!   (`plan/upstream-issues.md` WR-97). `MirrorCurve` divides rational control points by
-//!   their weights twice, as upstream (WR-98).
+//!   their weights twice, as upstream (WR-98); with
+//!   `Kernel::fixes.mirror_curve_keeps_euclidean_control_points` (off by default) it
+//!   keeps the Euclidean points `GetCanonical` returns.
 //! - **`FindOuterLoops`** with a loop of zero area reads past its arrays upstream
 //!   (UB-119): [`SolidError::InvalidInput`]. A null curve of `OrderCurvesIntoLoops`
 //!   (UB-120) cannot be passed.
@@ -2626,6 +2628,10 @@ pub fn surface_continuity_check(k: &Kernel, surface: &Surface) -> Result<bool> {
 /// divides each control point by its weight again (as upstream does with the Euclidean
 /// points `GetCanonical` returns) and makes the curve 2D. `tolerance` is unused.
 ///
+/// With `Kernel::fixes.mirror_curve_keeps_euclidean_control_points` the second division
+/// is skipped, so a rational curve is reflected instead of moved and distorted (WR-98).
+/// Off by default: the pinned C++ divides twice.
+///
 /// # Errors
 ///
 /// [`SolidError::InvalidInput`] for a curve that is not an `SmBSplineCurve`; those of
@@ -2650,8 +2656,12 @@ pub fn mirror_curve(
             *c = high - (v - low);
         }
         if let Some(&w) = canon.weights.get(ii) {
-            // operator/(v, d): plain division (`/=` guards tiny divisors)
-            *p = Vec3::new(p.x / w, p.y / w, p.z / w);
+            // Upstream divides the Euclidean points `GetCanonical` returns by their
+            // weights again (WR-98); the opt-in fix keeps them as they are.
+            if !k.fixes.mirror_curve_keeps_euclidean_control_points {
+                // operator/(v, d): plain division (`/=` guards tiny divisors)
+                *p = Vec3::new(p.x / w, p.y / w, p.z / w);
+            }
         }
     }
     let data = CanonicalData {
@@ -3028,6 +3038,152 @@ mod tests {
         ];
         let nl = NlCurve::new(pw, 1, vec![0.0, 0.0, 1.0, 1.0]).unwrap();
         Curve::from(BSplineCurve::from_nurb(nl, 3, false))
+    }
+
+    /// The exact homogeneous control points of the native fixture
+    /// `mirror_rational_divides_twice`: a 2D rational quadratic whose middle control
+    /// point is `(0.5, 0.5, NOZ, w)`, i.e. the Euclidean point `(0.5/w, 0.5/w)`.
+    fn mirror_rational_fixture_curve() -> Curve {
+        let w = std::f64::consts::FRAC_1_SQRT_2;
+        let pw = vec![
+            CPoint::new(0.0, 0.0, NOZ, 1.0),
+            CPoint::new(0.5, 0.5, NOZ, w),
+            CPoint::new(1.0, 0.0, NOZ, 1.0),
+        ];
+        let nl = NlCurve::new(pw, 2, vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0]).unwrap();
+        Curve::from(BSplineCurve::from_nurb(nl, 2, false))
+    }
+
+    /// A rational quadratic built from known Euclidean control points and weights
+    /// (`CPoint` is homogeneous, so each point is stored as `(w*x, w*y, NOZ, w)`).
+    fn mirror_rational_euclidean_curve() -> (Curve, [[f64; 2]; 3], [f64; 3]) {
+        let points = [[0.0, 0.0], [0.5, 0.5], [1.0, 0.0]];
+        let weights = [1.0, std::f64::consts::FRAC_1_SQRT_2, 1.0];
+        let pw = points
+            .iter()
+            .zip(weights)
+            .map(|(p, w)| CPoint::new(w * p[0], w * p[1], NOZ, w))
+            .collect();
+        let nl = NlCurve::new(pw, 2, vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0]).unwrap();
+        (
+            Curve::from(BSplineCurve::from_nurb(nl, 2, false)),
+            points,
+            weights,
+        )
+    }
+
+    /// The rational quadratic Bernstein value of known Euclidean control points.
+    fn rational_quadratic(points: &[[f64; 2]; 3], weights: &[f64; 3], t: f64) -> [f64; 2] {
+        let mt = 1.0 - t;
+        let b = [mt * mt, 2.0 * mt * t, t * t];
+        let den = b[0] * weights[0] + b[1] * weights[1] + b[2] * weights[2];
+        let mut out = [0.0; 2];
+        for (i, slot) in out.iter_mut().enumerate() {
+            *slot = (b[0] * weights[0] * points[0][i]
+                + b[1] * weights[1] * points[1][i]
+                + b[2] * weights[2] * points[2][i])
+                / den;
+        }
+        out
+    }
+
+    fn assert_close(got: f64, want: f64, what: &str) {
+        if want == 0.0 {
+            assert_eq!(got, 0.0, "{what}: got {got:?}, want exactly 0");
+            return;
+        }
+        let tol = 1e-10 * got.abs().max(want.abs());
+        assert!(
+            (got - want).abs() <= tol,
+            "{what}: got {got:?}, want {want:?}"
+        );
+    }
+
+    /// `mirror_curve` with the WR-98 fix must reflect the rational curve: canonical
+    /// Euclidean control points reflect in `side` and keep every other component, the
+    /// weights, knots and degree; evaluation follows the same reflection.
+    fn assert_mirror_rational(
+        k: &Kernel,
+        curve: &mut Curve,
+        side: SurfParamType,
+        low: f64,
+        high: f64,
+    ) {
+        let coord = usize::from(side != SurfParamType::U);
+        let before = bspline_of(curve).unwrap().canonical().unwrap();
+        assert_eq!(before.control_points.len(), 3);
+        assert_eq!(before.weights.len(), 3);
+        let ts = [0.0, 0.25, 0.5, 0.75, 1.0];
+        let original: Vec<Point3> = ts
+            .iter()
+            .map(|&t| curve.evaluate_point(k, t).unwrap())
+            .collect();
+
+        mirror_curve(k, curve, side, low, high, 0.0).unwrap();
+
+        let after = bspline_of(curve).unwrap().canonical().unwrap();
+        assert_eq!(after.dim, 2);
+        assert_eq!(after.degree, before.degree);
+        assert_eq!(after.knots, before.knots);
+        assert_eq!(after.knot_multiplicities, before.knot_multiplicities);
+        assert_eq!(after.weights, before.weights, "weights must be preserved");
+        for (index, (old, new)) in before
+            .control_points
+            .iter()
+            .zip(&after.control_points)
+            .enumerate()
+        {
+            for i in 0..3 {
+                let want = if i == coord {
+                    high - (old.component(i) - low)
+                } else {
+                    old.component(i)
+                };
+                assert_close(
+                    new.component(i),
+                    want,
+                    &format!("control point {index} component {i}"),
+                );
+            }
+        }
+
+        for (&t, old) in ts.iter().zip(&original) {
+            let mut want = *old;
+            let c = want.component(coord);
+            *want.component_mut(coord).unwrap() = high - (c - low);
+            let got = curve.evaluate_point(k, t).unwrap();
+            for i in 0..3 {
+                assert_close(
+                    got.component(i),
+                    want.component(i),
+                    &format!("t={t} component {i}"),
+                );
+            }
+        }
+    }
+
+    /// The same invariant on a curve whose Euclidean control points and weights are
+    /// known independently, checked against a rational Bernstein oracle.
+    fn assert_mirror_rational_analytic(k: &Kernel, side: SurfParamType, low: f64, high: f64) {
+        let coord = usize::from(side != SurfParamType::U);
+        let (mut curve, points, weights) = mirror_rational_euclidean_curve();
+        let ts = [0.0, 0.25, 0.5, 0.75, 1.0];
+        for &t in &ts {
+            let want = rational_quadratic(&points, &weights, t);
+            let got = curve.evaluate_point(k, t).unwrap();
+            assert_close(got.x, want[0], &format!("before t={t} x"));
+            assert_close(got.y, want[1], &format!("before t={t} y"));
+        }
+
+        mirror_curve(k, &mut curve, side, low, high, 0.0).unwrap();
+
+        for &t in &ts {
+            let mut want = rational_quadratic(&points, &weights, t);
+            want[coord] = high - (want[coord] - low);
+            let got = curve.evaluate_point(k, t).unwrap();
+            assert_close(got.x, want[0], &format!("after t={t} x"));
+            assert_close(got.y, want[1], &format!("after t={t} y"));
+        }
     }
 
     // A closed topological edge with a small geometric trim gap at its vertex.
@@ -3411,6 +3567,129 @@ mod tests {
         let e = c.ends(&k).unwrap();
         assert!((e.start.x - 1.0).abs() < 1e-15);
         assert!((e.end.y - 0.9).abs() < 1e-15);
+    }
+
+    #[test]
+    fn mirror_rational_keeps_euclidean_control_points() {
+        let mut k = Kernel::default();
+        k.fixes.mirror_curve_keeps_euclidean_control_points = true;
+        for side in [SurfParamType::U, SurfParamType::V] {
+            for (low, high) in [(0.0, 2.0), (-1.5, 0.75)] {
+                let mut fixture = mirror_rational_fixture_curve();
+                assert_mirror_rational(&k, &mut fixture, side, low, high);
+                assert_mirror_rational_analytic(&k, side, low, high);
+            }
+        }
+    }
+
+    #[test]
+    fn mirror_rational_default_divides_by_weight_twice() {
+        // The pinned C++ (fix off) divides the reflected Euclidean control points by
+        // their weights again: the old wrong result is pinned by that rule, and the
+        // fixture's middle point is checked numerically.
+        let k = Kernel::default();
+        let mut c = mirror_rational_fixture_curve();
+        let before = bspline_of(&c).unwrap().canonical().unwrap();
+        mirror_curve(&k, &mut c, SurfParamType::U, 0.0, 2.0, 0.0).unwrap();
+        let after = bspline_of(&c).unwrap().canonical().unwrap();
+        for (index, ((old, &w), new)) in before
+            .control_points
+            .iter()
+            .zip(&before.weights)
+            .zip(&after.control_points)
+            .enumerate()
+        {
+            for i in 0..3 {
+                let reflected = if i == 0 {
+                    2.0 - old.component(i)
+                } else {
+                    old.component(i)
+                };
+                assert_close(
+                    new.component(i),
+                    reflected / w,
+                    &format!("control point {index} component {i}"),
+                );
+            }
+        }
+        // Canonical middle x is 0.5/w, so the double division gives
+        // (2 - 0.5/w)/w = 2/w - 0.5/w^2, and y gives 0.5/w^2 = 1.
+        assert_close(
+            after.control_points[1].x,
+            1.828_427_124_746_190_3,
+            "middle x",
+        );
+        assert_close(after.control_points[1].y, 1.0, "middle y");
+        assert!((after.control_points[1].x - 1.292_893_218_813_452_5).abs() > 0.5);
+    }
+
+    #[test]
+    fn mirror_rational_twice_is_the_identity() {
+        let mut k = Kernel::default();
+        k.fixes.mirror_curve_keeps_euclidean_control_points = true;
+        let mut c = mirror_rational_fixture_curve();
+        let ts = [0.0, 0.25, 0.5, 0.75, 1.0];
+        let original: Vec<Point3> = ts
+            .iter()
+            .map(|&t| c.evaluate_point(&k, t).unwrap())
+            .collect();
+        for _ in 0..2 {
+            mirror_curve(&k, &mut c, SurfParamType::U, -1.5, 0.75, 0.0).unwrap();
+        }
+        for (&t, want) in ts.iter().zip(&original) {
+            let got = c.evaluate_point(&k, t).unwrap();
+            for i in 0..3 {
+                assert_close(
+                    got.component(i),
+                    want.component(i),
+                    &format!("t={t} component {i}"),
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn mirror_non_rational_geometry_unchanged_by_fix() {
+        let off = Kernel::default();
+        let mut on = Kernel::default();
+        on.fixes.mirror_curve_keeps_euclidean_control_points = true;
+        let mut a = uv_line([0.1, 0.2], [0.9, 0.8]);
+        let mut b = uv_line([0.1, 0.2], [0.9, 0.8]);
+        mirror_curve(&off, &mut a, SurfParamType::V, -0.5, 1.5, 0.0).unwrap();
+        mirror_curve(&on, &mut b, SurfParamType::V, -0.5, 1.5, 0.0).unwrap();
+        let ca = bspline_of(&a).unwrap().canonical().unwrap();
+        let cb = bspline_of(&b).unwrap().canonical().unwrap();
+        assert!(ca.weights.is_empty());
+        assert_eq!(ca.control_points, cb.control_points);
+        assert_eq!(ca.weights, cb.weights);
+        assert_eq!(ca.knots, cb.knots);
+        let ea = a.ends(&off).unwrap();
+        let eb = b.ends(&on).unwrap();
+        for i in 0..3 {
+            assert_close(ea.start.component(i), eb.start.component(i), "start");
+            assert_close(ea.end.component(i), eb.end.component(i), "end");
+        }
+
+        // A rational curve whose weights are all 1 also takes the division unchanged.
+        let unit_weight = || {
+            let pw = vec![
+                CPoint::new(0.1, 0.2, NOZ, 1.0),
+                CPoint::new(0.9, 0.8, NOZ, 1.0),
+            ];
+            let nl = NlCurve::new(pw, 1, vec![0.0, 0.0, 1.0, 1.0]).unwrap();
+            Curve::from(BSplineCurve::from_nurb(nl, 2, false))
+        };
+        let mut c = unit_weight();
+        let mut d = unit_weight();
+        mirror_curve(&off, &mut c, SurfParamType::U, 0.0, 2.0, 0.0).unwrap();
+        mirror_curve(&on, &mut d, SurfParamType::U, 0.0, 2.0, 0.0).unwrap();
+        let cc = bspline_of(&c).unwrap().canonical().unwrap();
+        let cd = bspline_of(&d).unwrap().canonical().unwrap();
+        // `N_Iges126Crv` makes a curve non-rational when every weight is equal, so the
+        // all-ones curve comes back non-rational from both settings.
+        assert!(cc.weights.is_empty());
+        assert_eq!(cc.control_points, cd.control_points);
+        assert_eq!(cc.weights, cd.weights);
     }
 
     #[test]
