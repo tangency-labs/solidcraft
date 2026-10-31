@@ -433,48 +433,6 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind) -> Option<(Kind, Vec<SelI
     Some((Kind::Plastic(pl), inputs, extra))
 }
 
-/// The placement handles' frame for a feature placed through its first input (a face place): the
-/// picked point and the direction the feature grows, the picked face's normal, else the stored
-/// `direction`.
-pub(crate) fn handle_frame(app: &SolveApp, d: &crate::dialogs::Dialog) -> Option<(Vec3, Vec3)> {
-    let Sel::Face { body, index, point } = d.inputs.first()?.items.first()? else { return None };
-    let n = crate::dialogs::planar_face(&app.session, body, *index)
-        .map(|(_, n)| n)
-        .or_else(|| d.extra.get("direction").and_then(crate::dialogs::vec3_of))
-        .and_then(|n| n.normalized())?;
-    Some((*point, n))
-}
-
-/// The placement handles' move for a feature placed through its first input: re-place it where a
-/// click at `pos` would (snapped to a sketch point as a click is when the input takes points), with
-/// the stored `direction` and in-face `along` carried onto the new face. False when nothing there
-/// can take it.
-pub(crate) fn handle_move(app: &SolveApp, d: &mut crate::dialogs::Dialog, proj: &crate::viewport::Proj, pos: egui::Pos2) -> bool {
-    use crate::place_gizmo::{angle_of, dir_at};
-    let s = &app.session;
-    let turned = handle_frame(app, d).and_then(|(_, n)| d.extra.get("along").and_then(crate::dialogs::vec3_of).map(|a| angle_of(a, n)));
-    let hits = crate::viewport::pick(app, proj, pos);
-    let snap = d.face_snap(s, &hits);
-    let Some(to) = hits.iter().find_map(|h| d.candidate_on(s, h, snap.as_ref()).filter(|c| matches!(c, Sel::Face { .. }))) else {
-        return false;
-    };
-    if let Sel::Face { body, index, .. } = &to
-        && let Some((_, nn)) = crate::dialogs::planar_face(s, body, *index)
-    {
-        if d.extra.contains_key("direction") {
-            d.extra.insert("direction".into(), pt(nn));
-        }
-        if let Some(a) = turned {
-            d.extra.insert("along".into(), pt(dir_at(nn, a)));
-        }
-    }
-    if let Some(inp) = d.inputs.first_mut() {
-        inp.items = vec![to];
-    }
-    d.error = None;
-    true
-}
-
 #[cfg(test)]
 #[path = "dialogs_plastic_tests.rs"]
 mod tests;

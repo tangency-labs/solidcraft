@@ -3,19 +3,21 @@
 
 use solidcraft_engine::geom::Vec3;
 
-use super::{Spec, circle, len};
+use super::{PlaceSource, Spec, circle, len};
 use crate::SolveApp;
 use crate::dialogs::{Dialog, Kind};
 use crate::dialogs_plastic::Pl;
 
 pub(super) static SPEC: Spec = Spec {
     name: "boss",
-    serves: |d| matches!(d.kind, Kind::Plastic(Pl::Boss { .. })),
+    serves: |app, d| super::on(app) && matches!(d.kind, Kind::Plastic(Pl::Boss { .. })),
     snap_commands: &["plastic.boss"],
     move_tip: "Drag to move the boss across the model. It snaps to sketch points on the face.",
-    frame: crate::dialogs_plastic::handle_frame,
-    move_to: crate::dialogs_plastic::handle_move,
+    many: false,
+    place: PlaceSource::Input(0),
+    click: None,
     footprint,
+    freedom: super::anywhere,
     turn: None,
 };
 

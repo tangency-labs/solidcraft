@@ -4,19 +4,21 @@
 
 use solidcraft_engine::geom::Vec3;
 
-use super::{Spec, Turn, angle_of, len, rect};
+use super::{PlaceSource, Spec, Turn, angle_of, len, rect};
 use crate::SolveApp;
 use crate::dialogs::{Dialog, Kind};
 use crate::dialogs_plastic::{Pl, hook_dirs};
 
 pub(super) static SPEC: Spec = Spec {
     name: "snap_fit",
-    serves: |d| matches!(d.kind, Kind::Plastic(Pl::SnapFit { .. })),
+    serves: |app, d| super::on(app) && matches!(d.kind, Kind::Plastic(Pl::SnapFit { .. })),
     snap_commands: &["plastic.snap_fit"],
     move_tip: "Drag to move the snap fit across the model. It snaps to sketch points on the face.",
-    frame: crate::dialogs_plastic::handle_frame,
-    move_to: crate::dialogs_plastic::handle_move,
+    many: false,
+    place: PlaceSource::Input(0),
+    click: None,
     footprint,
+    freedom: super::anywhere,
     turn: Some(Turn { tip: "Drag to point the catch in another direction.", reach, angle, set }),
 };
 
