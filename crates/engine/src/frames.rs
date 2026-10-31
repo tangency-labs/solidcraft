@@ -339,6 +339,9 @@ thread_local! {
     static DEPTH: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
     /// The outermost command's coordinates were mapped here (its table lists them).
     static MAPPED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    /// The outermost command is `solid.move`, whose parameters stay in the world when its bodies
+    /// lie in differently turned frames (`split_move`).
+    static OUTER_MOVE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
     /// The picks of the running command: the point it sees and the bodies whose faces meet
     /// there (the first is the body under it; more than one means the pick is ambiguous).
     static PICKS: std::cell::RefCell<Vec<(Vec3, Vec<String>)>> = const { std::cell::RefCell::new(Vec::new()) };
@@ -405,6 +408,7 @@ impl Nested {
         if outer {
             let inner = if id == "timeline.redefine" { None } else { Some(id) };
             MAPPED.with(|m| m.set(inner.is_none_or(|i| !table(i).is_empty())));
+            OUTER_MOVE.with(|m| m.set(id == "solid.move"));
         }
         (Nested, outer)
     }
@@ -418,11 +422,72 @@ impl Drop for Nested {
 
 /// `params` with world picks mapped into component frames (`None`: nothing to change).
 pub fn to_local(s: &Session, id: &str, params: &Value) -> Option<Value> {
+    // A move of bodies in differently turned frames keeps its world vectors: `solid.move` splits
+    // it by frame and maps each part itself (`split_move`).
+    if id == "solid.move" && split_move(s, params).is_some() {
+        return None;
+    }
+    map_params(s, id, params)
+}
+
+/// A `solid.move` of bodies placed in different frames, as one move per frame (#9660). A Move
+/// feature moves each of its bodies in the body's own frame, by one vector and one turn: given
+/// in the world, they can be mapped into one frame only, so bodies in a frame turned otherwise
+/// (a screw inserted lying down, moved with a block of the root) moved along their own axes.
+/// Bodies whose frames turn alike share a move (and for a turn, frames that are also in the
+/// same place, as its pivot is a point). `None`: the bodies share one frame, or are moved as
+/// placements (`placements_moved`), or the move is not the outermost command (run by another,
+/// such as Edit Feature, its parameters are already in component frames). `to_local` leaves the
+/// parameters of a split move in the world, and `solid.move` asks for the parts.
+pub(crate) fn split_move(s: &Session, params: &Value) -> Option<Vec<Value>> {
+    let outermost_move = DEPTH.with(std::cell::Cell::get) == 1 && OUTER_MOVE.with(std::cell::Cell::get);
+    if !outermost_move || !placed(s) || placements_moved(s, params).is_some() {
+        return None;
+    }
+    let names = params.get("bodies")?.as_array()?;
+    let turns = params.get("axis").is_some() || params.get("angle").is_some();
+    let alike = |a: &Mat, b: &Mat| {
+        let columns = if turns { 4 } else { 3 };
+        a.iter().zip(b).take(columns).all(|(x, y)| x.iter().zip(y).take(3).all(|(u, v)| (u - v).abs() <= 1e-9 * (1.0 + u.abs().max(v.abs()))))
+    };
+    let frames = s.body_frames();
+    let mut groups: Vec<(Mat, Vec<Value>)> = Vec::new();
+    for name in names {
+        // An unknown body is the command's to refuse.
+        let b = name.as_str()?;
+        let m = frames.iter().find(|(world, own, _)| world == b || own == b).map(|(.., m)| *m)?;
+        match groups.iter_mut().find(|(g, _)| alike(g, &m)) {
+            Some((_, bodies)) => bodies.push(name.clone()),
+            None => groups.push((m, vec![name.clone()])),
+        }
+    }
+    if groups.len() < 2 {
+        return None;
+    }
+    let given = params.get("name").and_then(Value::as_str).map(str::trim).filter(|n| !n.is_empty());
+    let moves = groups
+        .into_iter()
+        .enumerate()
+        .map(|(k, (_, bodies))| {
+            let mut p = params.clone();
+            p["bodies"] = Value::Array(bodies);
+            // Each move is its own feature: a name given is numbered after the first.
+            if let Some(name) = given.filter(|_| k > 0) {
+                p["name"] = Value::String(format!("{name} ({})", k + 1));
+            }
+            map_params(s, "solid.move", &p).unwrap_or(p)
+        })
+        .collect();
+    Some(moves)
+}
+
+/// [`to_local`] for one command.
+fn map_params(s: &Session, id: &str, params: &Value) -> Option<Value> {
     if id == "library.apply" {
         // Library targets are the same world selections as appearance.assign,
         // nested one level down. Convert at the outer boundary exactly once;
         // run_nested subsequently receives the component-local picks and names.
-        let targets = to_local(s, "appearance.assign", params.get("targets")?)?;
+        let targets = map_params(s, "appearance.assign", params.get("targets")?)?;
         let mut out = params.clone();
         out["targets"] = targets;
         return Some(out);
@@ -443,7 +508,7 @@ pub fn to_local(s: &Session, id: &str, params: &Value) -> Option<Value> {
         if let solidcraft_doc::FeatureKind::Emboss { face: Some(face), .. } = &feature.kind {
             context.active_occurrence_path = (!face.author_path.is_empty()).then(|| face.author_path.clone());
         }
-        let mut inner = to_local(&context, cmd, params.get("params")?)?;
+        let mut inner = map_params(&context, cmd, params.get("params")?)?;
         // An untouched explicit axis is displayed in world coordinates by Edit
         // Feature. Keep its exact saved values instead of an affine round trip.
         if cmd == "solid.revolve"
