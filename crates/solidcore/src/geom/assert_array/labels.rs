@@ -7,7 +7,8 @@
 //! `SmTypes.h`, `SmCurveTypes.h`, `SmSurfaceTypes.h`, `SmTopoTypes.h` and friends.
 //!
 //! Generated mechanically from upstream (entry order, categories and strings verbatim;
-//! upstream lists no fourth initializer, so every `message_for_file` is `None`).
+//! upstream lists no fourth initializer, so every `message_for_file` is `None`), except
+//! [`WARNINGS`], the checks `AssertValid` reports without failing, kept by hand.
 
 use super::{AssertReportLabel, AssertType};
 
@@ -3137,3 +3138,24 @@ pub const LABELLED: &[(i64, u64)] = &[
     (TWIST_VOLUME_TYPE, 0),
     (UNBEND_VOLUME_TYPE, 0),
 ];
+
+/// The checks that are warnings, as `(type code, list index, test index)` of their
+/// label: the `AssertValid` method running one adds its report (`m_bOK` false) but does
+/// not fold it into its return value.
+///
+/// Only `SmBrep` test 21 ("Suspicious Shell Count") is one: `SmBrep::AssertValid`
+/// (`source/SMLib/src/SmBrep.cpp`) reports it without `bRtn &=`, under "this is a
+/// warning, so don't change the bRtn value". Labels whose text merely says "Warning"
+/// (`SmBSplineCurve` tests 5-8 and 11-14, `SmEdgeuse` test 9) are failures: their
+/// methods fold them into the return value.
+///
+/// Not upstream (it has no severity field): kept by hand, not generated with the
+/// tables above.
+pub const WARNINGS: &[(i64, u64, u64)] = &[(BREP_TYPE, 0, 21)];
+
+/// Whether check `test_index` of label table `list_index` of `type_code` is a warning
+/// ([`WARNINGS`]).
+#[must_use]
+pub fn is_warning(type_code: i64, list_index: u64, test_index: u64) -> bool {
+    WARNINGS.contains(&(type_code, list_index, test_index))
+}

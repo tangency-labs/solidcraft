@@ -38,7 +38,11 @@
 //! through `seams` and return [`SolidError::Unported`]. Warning text (`WARN`,
 //! `SE_MSG`, `smos_WriteBuffer`) and debug drawing are omitted. `CalculateBoundingBox`
 //! in the validate-only tolerance pass is not called (its size is used only when
-//! fixing). Statuses upstream ignores are ignored here too.
+//! fixing). Statuses upstream ignores are ignored here too. [`BrepCheck`]'s summary
+//! (failures, lines, count, validity) leaves out the warnings `AssertValid` reports
+//! without failing ([`AssertReport::is_warning`], `SmBrep` test 21), as the capi does,
+//! and omits the owner tag of a report without owner type; the report lists keep
+//! them. [`check_brep`] refuses a B-rep of [`NamingScheme::Unknown`] (#2013).
 
 mod base;
 mod brep;
@@ -53,14 +57,14 @@ mod vertex;
 use std::borrow::Cow;
 
 use super::{object_info, validate_pointers, Object, SUCCESS};
-use crate::error::{EntityRef, Result};
+use crate::error::{EntityRef, Result, SolidError};
 use crate::geom::assert_array::{
     obj_type_string, AssertArray, AssertReport, ObjectKey, ReportSpec,
 };
 use crate::geom::object::ObjectRef;
 use crate::kernel::Kernel;
 use crate::math::UNDEF_DOUBLE;
-use crate::topology::{Brep, BrepId};
+use crate::topology::{Brep, BrepId, NamingScheme};
 
 /// The existing virtual curve check for owned geometry outside an edge or UV trim.
 /// A curve-bounded surface uses it for its contained 3D and UV boundary curves.
@@ -100,6 +104,12 @@ impl CheckLevel {
 
 /// The result of [`check_brep`]: the pointer check, then (when it found nothing) the
 /// whole-body `AssertValid`, as the capi `smlib_brep_check` runs them.
+///
+/// The report lists are upstream's, warnings included; the summary
+/// ([`BrepCheck::failures`], [`BrepCheck::lines`], [`BrepCheck::failure_count`],
+/// [`BrepCheck::is_valid`]) leaves the warnings out ([`AssertReport::is_warning`]:
+/// `SmBrep` test 21, which `AssertValid` reports without failing), as the capi does;
+/// [`BrepCheck::warnings`] lists them.
 #[derive(Debug, Clone)]
 pub struct BrepCheck {
     /// `ValidatePointers`' native status (1000 success, 1001 a required pointer
@@ -115,33 +125,47 @@ pub struct BrepCheck {
 }
 
 impl BrepCheck {
-    /// The failed reports (`!m_bOK`): pointer reports first, then `AssertValid`'s.
+    /// The failed reports (`!m_bOK`) that are not warnings
+    /// ([`AssertReport::is_warning`]): pointer reports first, then `AssertValid`'s.
     pub fn failures(&self) -> impl Iterator<Item = &AssertReport> {
         self.pointer_reports
             .reports()
             .iter()
             .chain(self.reports.reports())
-            .filter(|r| !r.ok)
+            .filter(|r| is_failure(r))
+    }
+
+    /// The warnings ([`AssertReport::is_warning`]: reported, `!m_bOK`, without failing
+    /// the check), in the order of [`BrepCheck::failures`].
+    pub fn warnings(&self) -> impl Iterator<Item = &AssertReport> {
+        self.pointer_reports
+            .reports()
+            .iter()
+            .chain(self.reports.reports())
+            .filter(|r| !r.ok && r.is_warning())
     }
 
     /// The number of report lines ([`BrepCheck::lines`]), including the synthetic
-    /// lines for a failed status without a report.
+    /// lines for a failed status without a report; warnings do not count.
     #[must_use]
     pub fn failure_count(&self) -> usize {
         self.lines().len()
     }
 
-    /// `true` when the check produced no failure line.
+    /// `true` when the check produced no failure line: a body whose only reports are
+    /// warnings ([`BrepCheck::warnings`]) is valid.
     #[must_use]
     pub fn is_valid(&self) -> bool {
         self.failure_count() == 0
     }
 
-    /// One line per failure, exactly as the capi formats them:
-    /// `<reporting type>::Test #<n> <name>: <message> [owner <owner type>]`, plus
+    /// One line per failure (warnings left out), as the capi formats them:
+    /// `<reporting type>::Test #<n> <name>: <message> [owner <owner type>]` (without the
+    /// owner tag when the report names no owner type), plus
     /// `SmBrep::ValidatePointers failed with status N` when the pointer check failed
     /// without a report, `AssertValid skipped: ValidatePointers failed` when it was
-    /// skipped, and `SmBrep::AssertValid failed without a report`.
+    /// skipped, and `SmBrep::AssertValid failed without a report` when `AssertValid`
+    /// returned `false` without reporting a failure.
     #[must_use]
     pub fn lines(&self) -> Vec<String> {
         let mut out = Vec::new();
@@ -156,37 +180,45 @@ impl BrepCheck {
             self.pointer_reports
                 .reports()
                 .iter()
-                .filter(|r| !r.ok)
+                .filter(|r| is_failure(r))
                 .map(report_line),
         );
         if pointer_failures {
             out.push("AssertValid skipped: ValidatePointers failed".to_string());
             return out;
         }
-        if self.assert_valid == Some(false) && self.reports.is_empty() {
+        if self.assert_valid == Some(false) && !self.reports.reports().iter().any(is_failure) {
             out.push("SmBrep::AssertValid failed without a report".to_string());
         }
         out.extend(
             self.reports
                 .reports()
                 .iter()
-                .filter(|r| !r.ok)
+                .filter(|r| is_failure(r))
                 .map(report_line),
         );
         out
     }
 }
 
-/// The capi line of one report.
+/// A report the summary counts: failed (`!m_bOK`) and not a warning.
+fn is_failure(r: &AssertReport) -> bool {
+    !r.ok && !r.is_warning()
+}
+
+/// The capi line of one report; the owner tag only when the report names an owner type.
 fn report_line(r: &AssertReport) -> String {
-    format!(
-        "{}::Test #{} {}: {} [owner {}]",
+    let head = format!(
+        "{}::Test #{} {}: {}",
         obj_type_string(r.reporting_type),
         r.test_index,
         r.name,
         r.format_log_message(),
-        r.owner_type_string.unwrap_or("NULL"),
-    )
+    );
+    match r.owner_type_string {
+        Some(owner) => format!("{head} [owner {owner}]"),
+        None => head,
+    }
 }
 
 /// [`check_brep_with_keys`] with the geometry-owner identities of `b`'s naming scheme
@@ -198,11 +230,28 @@ fn report_line(r: &AssertReport) -> String {
 /// arena identities ([`crate::topology::brep_cache::arena_identity`]), which the
 /// binders name an entity with no recorded key by too.
 ///
+/// A B-rep of [`NamingScheme::Unknown`] (a bare [`Brep::new`] or
+/// [`Brep::new_with_infinite_region`] built on without recording a scheme) is refused:
+/// its builders left geometry unowned or named it by the caller's own identities, not
+/// by the arena identities a check would fall back to, so the check reported false
+/// failures with no sign of the cause (every edge's curve owner,
+/// `SmBrep::ValidatePointers` test 61).
+///
 /// # Errors
 ///
-/// Those of [`check_brep_with_keys`].
+/// [`SolidError::InvalidInput`] for a [`NamingScheme::Unknown`] B-rep (record its
+/// scheme with [`Brep::set_naming`] or [`Brep::use_arena_naming`], or pass the
+/// builder's identities to [`check_brep_with_keys`]); those of
+/// [`check_brep_with_keys`].
 pub fn check_brep(k: &mut Kernel, b: &mut Brep, level: CheckLevel) -> Result<BrepCheck> {
     let naming = b.naming();
+    if naming == NamingScheme::Unknown {
+        return Err(SolidError::invalid_input(
+            "topology::brep::validation::check_brep",
+            "the B-rep records no naming scheme, so its geometry owners cannot be checked; \
+             set one (Brep::set_naming, Brep::use_arena_naming) or use check_brep_with_keys",
+        ));
+    }
     let recorded = b.geometry_owner_keys().clone();
     let keys =
         |e: EntityRef| crate::topology::owner_identity_of(naming, recorded.get(&e).copied(), e);
@@ -477,4 +526,65 @@ mod class {
         OWNING_TOPOLOGY_TYPE as OWNING_TOPOLOGY, SHELL_TYPE as SHELL, TOPOLOGY_TYPE as TOPOLOGY,
         VERTEXUSE_TYPE as VERTEXUSE, VERTEX_TYPE as VERTEX,
     };
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::geom::assert_array::labels::BREP_TYPE;
+
+    /// A `SmBrep::AssertValid` check (`assert_valid`) whose list holds the failed report
+    /// of `SmBrep` test `index` (list 0) with owner type `owner`.
+    fn check(assert_valid: bool, index: u64, owner: Option<&'static str>) -> BrepCheck {
+        let mut reports = AssertArray::new();
+        reports.add_unique_delete_duplicate(
+            AssertReport::new(ReportSpec {
+                test_index: index,
+                test_class: BREP_TYPE,
+                owner_type_string: owner,
+                ..ReportSpec::default()
+            })
+            .unwrap(),
+        );
+        BrepCheck {
+            pointers_status: SUCCESS,
+            pointer_reports: AssertArray::new(),
+            assert_valid: Some(assert_valid),
+            reports,
+        }
+    }
+
+    /// A report naming no owner type has no owner tag (#2013).
+    #[test]
+    fn line_omits_an_absent_owner_type() {
+        let line = "SmBrep::Test #19 Region Connectivity: Regions found by topology \
+                    traversal should be the same as the Brep's region list";
+        assert_eq!(check(false, 19, None).lines(), [line]);
+        let tagged = format!("{line} [owner SmBrep]");
+        assert_eq!(check(false, 19, Some("SmBrep")).lines(), [tagged]);
+    }
+
+    /// The warning (test 21) stays listed and reachable but is not a failure line.
+    #[test]
+    fn warning_is_not_a_failure() {
+        let c = check(true, 21, Some("SmBrep"));
+        assert!(c.is_valid());
+        assert_eq!(c.failure_count(), 0);
+        assert_eq!(c.failures().count(), 0);
+        let warnings: Vec<u64> = c.warnings().map(|r| r.test_index).collect();
+        assert_eq!(warnings, [21]);
+        assert_eq!(c.reports.len(), 1);
+    }
+
+    /// `AssertValid` returning `false` with only a warning listed still gives a line, so
+    /// `is_valid` never contradicts it; a failure gives its own line instead.
+    #[test]
+    fn failed_assert_valid_with_only_a_warning_is_invalid() {
+        let c = check(false, 21, Some("SmBrep"));
+        assert_eq!(c.lines(), ["SmBrep::AssertValid failed without a report"]);
+        assert!(!c.is_valid());
+        let lines = check(false, 22, Some("SmBrep")).lines();
+        assert_eq!(lines.len(), 1);
+        assert!(lines[0].starts_with("SmBrep::Test #22 "), "{lines:?}");
+    }
 }

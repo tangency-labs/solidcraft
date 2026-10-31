@@ -10,7 +10,7 @@ use super::topology_edgeuse_p1::{brep_block_of, path_of, BrepIn};
 use crate::{Case, HarnessError, Output, Rng, UnitDiff};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use solidcore::geom::assert_array::{obj_type_string, AssertArray, ObjectKey as ReportKey};
+use solidcore::geom::assert_array::{labels, obj_type_string, AssertArray, ObjectKey as ReportKey};
 use solidcore::geom::attribute::ObjectKey;
 use solidcore::geom::object::ObjectRef;
 use solidcore::topology::brep::validation;
@@ -404,18 +404,26 @@ fn read_reports(rd: &mut Reader<'_>) -> Result<(Vec<Rec>, i64), HarnessError> {
     let last_add = rd.num()? as i64;
     Ok((out, last_add))
 }
-/// The capi line of a decoded report.
+/// The capi line of a decoded report, as `BrepCheck::lines`: the owner tag only when the
+/// report names an owner type (the shim writes a `NULL` one as empty).
 fn line(r: &Rec) -> String {
     let test = r.ints.get(2).copied().unwrap_or(-1);
     let text = |i: usize| r.texts.get(i).map_or("", String::as_str);
-    format!(
-        "{}::Test #{} {}: {} [owner {}]",
-        text(6),
-        test,
-        text(0),
-        text(5),
-        text(3)
-    )
+    let head = format!("{}::Test #{} {}: {}", text(6), test, text(0), text(5));
+    match text(3) {
+        "" => head,
+        owner => format!("{head} [owner {owner}]"),
+    }
+}
+/// A decoded report the capi lines count, as `BrepCheck::lines`: failed (`!m_bOK`) and
+/// not a warning (`labels::is_warning` of its reporting type, list and test).
+fn failed(r: &Rec) -> bool {
+    let index = |i: usize| r.ints.get(i).and_then(|&x| u64::try_from(x).ok());
+    let warning = match (r.ints.first(), index(1), index(2)) {
+        (Some(&t), Some(list), Some(test)) => labels::is_warning(t, list, test),
+        _ => false,
+    };
+    r.ints.get(4) == Some(&0) && !warning
 }
 fn put(o: Output, prefix: &str, reports: &[Rec], last_add: i64) -> Output {
     let mut ints = vec![reports.len() as i64];
@@ -456,14 +464,14 @@ fn output(protocol: &[f64], capi: bool) -> Result<Output, HarnessError> {
         if status != 1000 && pointers.is_empty() {
             lines.push(format!("SmBrep::ValidatePointers failed with status {status}"));
         }
-        lines.extend(pointers.iter().filter(|r| r.ints.get(4) == Some(&0)).map(line));
+        lines.extend(pointers.iter().filter(|r| failed(r)).map(line));
         if pointer_failures {
             lines.push("AssertValid skipped: ValidatePointers failed".to_string());
         } else {
-            if assert == 0 && asserts.is_empty() {
+            if assert == 0 && !asserts.iter().any(failed) {
                 lines.push("SmBrep::AssertValid failed without a report".to_string());
             }
-            lines.extend(asserts.iter().filter(|r| r.ints.get(4) == Some(&0)).map(line));
+            lines.extend(asserts.iter().filter(|r| failed(r)).map(line));
         }
         let o = Output::new()
             .int("pointers_status", status)

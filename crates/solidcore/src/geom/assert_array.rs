@@ -49,6 +49,8 @@
 //! - Report membership uses a call-owned ordered index over exactly the fields
 //!   compared by `operator==`; the report vector retains insertion order. This
 //!   avoids quadratic duplicate searches when validating a large invalid B-rep.
+//! - [`AssertReport::is_warning`] (not upstream) tells a check `AssertValid` reports
+//!   without failing ([`labels::WARNINGS`]) from a failure.
 
 pub mod labels;
 
@@ -317,6 +319,14 @@ impl AssertReport {
             other_param,
             dist3d: UNDEF_DOUBLE,
         })
+    }
+
+    /// Whether this report's check is a warning (not upstream): its label is one of
+    /// [`labels::WARNINGS`], a check `AssertValid` reports without failing. `ok` stays
+    /// `m_bOK` (`false` for every listed report, warnings included).
+    #[must_use]
+    pub fn is_warning(&self) -> bool {
+        labels::is_warning(self.reporting_type, self.list_index, self.test_index)
     }
 
     /// `SmAssertReport::SetValue`.
@@ -649,6 +659,32 @@ mod tests {
         assert_eq!(labels::DEFAULT.len(), 1);
         for &(t, i) in labels::LABELLED {
             assert!(!assert_label_list(t, i).is_empty());
+        }
+    }
+
+    /// Only `SmBrep` test 21 of list 0 is a warning (#2013): the labels whose text says
+    /// "Warning" are failures, and another list's test 21 is not the warning.
+    #[test]
+    fn warnings_are_classified_by_label_not_text() {
+        let warning = |t, list, i| {
+            let mut s = spec(t, i, 1);
+            s.list_index = list;
+            AssertReport::new(s).unwrap().is_warning()
+        };
+        assert!(warning(labels::BREP_TYPE, 0, 21));
+        assert!(!warning(labels::BREP_TYPE, 0, 20));
+        assert!(!warning(labels::BREP_TYPE, 0, 22));
+        assert!(!warning(labels::BREP_TYPE, 1, 21));
+        for i in [5, 6, 7, 8, 11, 12, 13, 14] {
+            assert!(
+                !warning(labels::B_SPLINE_CURVE_TYPE, 0, i),
+                "SmBSplineCurve test {i}"
+            );
+        }
+        assert!(!warning(labels::EDGEUSE_TYPE, 0, 9));
+        for &(t, list, i) in labels::WARNINGS {
+            let label = assert_label_list(t, list).get(i as usize).unwrap();
+            assert_eq!(label.name, "Suspicious Shell Count");
         }
     }
 
