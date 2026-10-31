@@ -86,6 +86,27 @@ pub(crate) fn checked_or_ignored<T>(r: Result<T>, checked: bool) -> Result<Optio
     }
 }
 
+/// One call whose status SMLib drops and the fork passes on (`SER(...)`): with `pass_on`
+/// its error is returned to the caller (through the outer `?`); without it the result
+/// is handed back unchanged for the site's own ignore policy, so
+/// `ignore_status(passed_on(r, false)?)` is `ignore_status(r)`.
+pub(crate) fn passed_on<T>(r: Result<T>, pass_on: bool) -> Result<Result<T>> {
+    match r {
+        Err(e) if pass_on => Err(e),
+        r => Ok(r),
+    }
+}
+
+/// A status a port helper hands back in its value (`None` for `SM_SUCCESS`) where SMLib
+/// drops it and the fork passes it on (`SER(...)`): returned as the error with
+/// `pass_on`, dropped without.
+pub(crate) fn status_passed_on(status: Option<SolidError>, pass_on: bool) -> Result<()> {
+    match status {
+        Some(e) if pass_on => Err(e),
+        _ => Ok(()),
+    }
+}
+
 /// A reference to one topological entity, used as error context.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum EntityRef {

@@ -408,14 +408,17 @@ pub fn select_topology_to_keep<C: StitchCallback + ?Sized>(
                 let surface2 =
                     fp2::surface(b, face2)?.ok_or_else(|| deref("face without surface"))?;
                 // 0 samples: do a precise measurement; no max distance (status ignored)
-                if let Some(g) = ignored(curve1.surface_max_distance_between(
-                    k,
-                    &edge::interval(b, edge1)?,
-                    surface2,
-                    &fp2::uv_domain(b, face2)?,
-                    0,
-                    None,
-                ))? {
+                if let Some(g) = ignored(crate::error::passed_on(
+                    curve1.surface_max_distance_between(
+                        k,
+                        &edge::interval(b, edge1)?,
+                        surface2,
+                        &fp2::uv_domain(b, face2)?,
+                        0,
+                        None,
+                    ),
+                    k.fixes.brep_edit_statuses_pass_on,
+                )?)? {
                     max_to_surface = Some(g.max_distance);
                 }
                 let d = max_to_surface.ok_or_else(sm_err)?;
@@ -435,14 +438,17 @@ pub fn select_topology_to_keep<C: StitchCallback + ?Sized>(
                 };
                 let surface1 =
                     fp2::surface(b, face1)?.ok_or_else(|| deref("face without surface"))?;
-                if let Some(g) = ignored(curve2.surface_max_distance_between(
-                    k,
-                    &edge::interval(b, edge2)?,
-                    surface1,
-                    &fp2::uv_domain(b, face1)?,
-                    0,
-                    Some(e1_to_e2_faces),
-                ))? {
+                if let Some(g) = ignored(crate::error::passed_on(
+                    curve2.surface_max_distance_between(
+                        k,
+                        &edge::interval(b, edge2)?,
+                        surface1,
+                        &fp2::uv_domain(b, face1)?,
+                        0,
+                        Some(e1_to_e2_faces),
+                    ),
+                    k.fixes.brep_edit_statuses_pass_on,
+                )?)? {
                     max_to_surface = Some(g.max_distance);
                 }
                 let d = max_to_surface.ok_or_else(sm_err)?;
@@ -479,8 +485,16 @@ pub fn select_topology_to_keep<C: StitchCallback + ?Sized>(
         }
 
         // knot counts (statuses ignored: a failing call leaves its list empty)
-        let knots1 = ignored(curve_of(b, edge1)?.knots(k, None))?.map_or(0, |(k1, _)| k1.len());
-        let knots2 = ignored(curve_of(b, edge2)?.knots(k, None))?.map_or(0, |(k2, _)| k2.len());
+        let knots1 = ignored(crate::error::passed_on(
+            curve_of(b, edge1)?.knots(k, None),
+            k.fixes.brep_edit_statuses_pass_on,
+        )?)?
+        .map_or(0, |(k1, _)| k1.len());
+        let knots2 = ignored(crate::error::passed_on(
+            curve_of(b, edge2)?.knots(k, None),
+            k.fixes.brep_edit_statuses_pass_on,
+        )?)?
+        .map_or(0, |(k2, _)| k2.len());
 
         // when knot counts vary - keep the smallest count
         if knots2 != knots1 {
@@ -630,8 +644,11 @@ fn test_and_split_edge_with(
     }
 
     // Check on the interior (status ignored: a failure reports not interior).
-    let interior =
-        ignored(check_interior_edge(k, b, e, dropped.parameter, this_tol))?.unwrap_or(false);
+    let interior = ignored(crate::error::passed_on(
+        check_interior_edge(k, b, e, dropped.parameter, this_tol),
+        k.fixes.brep_edit_statuses_pass_on,
+    )?)?
+    .unwrap_or(false);
     if !interior {
         out.reason = SplitReason::CloseToBoundary;
         return Ok(out);
@@ -1354,7 +1371,10 @@ impl<'c> Stitch<'c> {
 
         // the vertex and edge pairs have been found and they are in tolerance so delete
         // FacesToDelete (increments unlocked mark value; status ignored)
-        ignore_status(self.edit_remove_faces(k, b, faces_to_delete))?;
+        ignore_status(crate::error::passed_on(
+            self.edit_remove_faces(k, b, faces_to_delete),
+            k.fixes.brep_edit_statuses_pass_on,
+        )?)?;
 
         // now follow the procedure that is used in DoStitching for stitching vertex
         // and edge pairs
@@ -1571,11 +1591,10 @@ impl<'c> Stitch<'c> {
 
             // CalculateBoundingBox(sBrepBBox) with the header defaults; status ignored
             // upstream (a failure leaves the default-initialised box)
-            let brep_bbox = ignored(qbrep::calculate_bounding_box(
-                k,
-                &mut *b,
-                BoundingBoxOptions::default(),
-            ))?
+            let brep_bbox = ignored(crate::error::passed_on(
+                qbrep::calculate_bounding_box(k, &mut *b, BoundingBoxOptions::default()),
+                k.fixes.brep_edit_statuses_pass_on,
+            )?)?
             .unwrap_or_default();
 
             let edges = bp1::edges(b, None)?;
@@ -1631,11 +1650,13 @@ impl<'c> Stitch<'c> {
                         // first derivative, default bOKToMakeUVTrimCurve. The status is
                         // ignored upstream; a failure leaves sPnt / sDir at SmVector3d's
                         // default SM_UNDEF_DOUBLE, here UNDEF.
-                        let (pnt, dir) =
-                            ignored(normalized_evaluate(k, b, eu, param, false, true, true))?
-                                .map_or((Point3::UNDEF, Vec3::UNDEF), |(p, d)| {
-                                    (p, d.unwrap_or(Vec3::UNDEF))
-                                });
+                        let (pnt, dir) = ignored(crate::error::passed_on(
+                            normalized_evaluate(k, b, eu, param, false, true, true),
+                            k.fixes.brep_edit_statuses_pass_on,
+                        )?)?
+                        .map_or((Point3::UNDEF, Vec3::UNDEF), |(p, d)| {
+                            (p, d.unwrap_or(Vec3::UNDEF))
+                        });
                         let mut vbox = Extent3d::from_point(pnt);
                         vbox.expand_absolute(stitch_tol_3d);
                         let objects = edge_tree.objects_in_box(&vbox)?;
@@ -1665,10 +1686,14 @@ impl<'c> Stitch<'c> {
                             if !dropped.success {
                                 continue;
                             }
-                            let norm_param = ivl
-                                .inversion(dropped.parameter)
-                                .parameter
-                                .unwrap_or(UNDEF_PARAM);
+                            let norm_param = match ivl.inversion(dropped.parameter).parameter {
+                                Some(t) => t,
+                                // (fork e7ebc8d passes the failed inversion on: `SER`)
+                                None if k.fixes.brep_edit_statuses_pass_on => {
+                                    return Err(SolidError::sm_err(OP));
+                                }
+                                None => UNDEF_PARAM,
+                            };
                             if norm_param < 0.02 || norm_param > 0.98 {
                                 continue;
                             }
@@ -1680,8 +1705,11 @@ impl<'c> Stitch<'c> {
                                 true,
                             )?;
                             // status ignored: a failure leaves the angle 0
-                            let angle_rad =
-                                ignored(tangent(&pv)?.angle_between(dir))?.unwrap_or(0.0);
+                            let angle_rad = ignored(crate::error::passed_on(
+                                tangent(&pv)?.angle_between(dir),
+                                k.fixes.brep_edit_statuses_pass_on,
+                            )?)?
+                            .unwrap_or(0.0);
                             let angle_deg = angle_rad * 180.0 / PI;
                             // Make sure we are going in either same or opposite direction
                             if angle_deg > 5.0 && angle_deg < 175.0 {
@@ -2025,14 +2053,17 @@ impl<'c> Stitch<'c> {
             }
 
             // status ignored
-            ignore_status(update_object_tolerance(
-                k,
-                b,
-                EntityRef::Vertex(vtx1),
-                min_dist,
-                old_tol,
-                check_gaps,
-            ))?;
+            ignore_status(crate::error::passed_on(
+                update_object_tolerance(
+                    k,
+                    b,
+                    EntityRef::Vertex(vtx1),
+                    min_dist,
+                    old_tol,
+                    check_gaps,
+                ),
+                k.fixes.brep_edit_statuses_pass_on,
+            )?)?;
             out.max_vertex_gap = smos_max(out.max_vertex_gap, min_dist);
 
             // Remove from our vertex list, and add to Processed list.
@@ -2238,14 +2269,17 @@ impl<'c> Stitch<'c> {
                         Ok(()) => {
                             out.glued.push(e);
                             out.deleted.push(test_e);
-                            ignore_status(update_object_tolerance(
-                                k,
-                                b,
-                                EntityRef::Edge(e),
-                                dist_to_curve,
-                                old_tol,
-                                false,
-                            ))?;
+                            ignore_status(crate::error::passed_on(
+                                update_object_tolerance(
+                                    k,
+                                    b,
+                                    EntityRef::Edge(e),
+                                    dist_to_curve,
+                                    old_tol,
+                                    false,
+                                ),
+                                k.fixes.brep_edit_statuses_pass_on,
+                            )?)?;
                             set_none(&mut v_edges, kk)?; // per notes above
                             if !self.making_manifold_solid {
                                 // spine edges are allowed: just go on to the next [kk]
@@ -2605,7 +2639,10 @@ fn evaluate_binormal(
 pub fn api_stitch(k: &mut Kernel, b: Option<&mut Brep>) -> Result<()> {
     let b = b.ok_or_else(|| SolidError::invalid_input(API_OP, "SmApiStitch: null B-rep"))?;
     // StitchAndOrient() with its header defaults
-    ignore_status(stitch_and_orient(k, b, -0.1, false, None, None))?;
+    ignore_status(crate::error::passed_on(
+        stitch_and_orient(k, b, -0.1, false, None, None),
+        k.fixes.brep_edit_statuses_pass_on,
+    )?)?;
     // Check manifold?
     Ok(())
 }

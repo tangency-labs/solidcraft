@@ -1311,7 +1311,10 @@ fn assign_uv_curves(
             // set pUVCurve->ParameterRange = assoc Edgeuse->Edge->ParamRange
             let edge = deref(brep.edgeuse(e)?.edge)?;
             let interval = crate::topology::edge::interval(brep, edge)?;
-            ignore_status(curve.edit_parameterization(&interval))?;
+            ignore_status(crate::error::passed_on(
+                curve.edit_parameterization(&interval),
+                k.fixes.brep_edit_statuses_pass_on,
+            )?)?;
 
             ignore_status(
                 crate::topology::edgeuse::p2::check_and_set_uv_trim_curve(

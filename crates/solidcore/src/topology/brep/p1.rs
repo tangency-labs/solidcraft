@@ -830,12 +830,16 @@ pub fn is_degenerate(k: &Kernel, b: &Brep, tol_3d: f64) -> Result<bool> {
     // status is ignored: a failure leaves the default box)
     // CalculateBoundingBox(sBBox): header defaults bApprox = FALSE, bTight = FALSE,
     // bExpandByZoneTol3d = TRUE
-    let bbox = ignored(qbrep::calculate_bounding_box(
+    let bbox = match ignored(qbrep::calculate_bounding_box(
         k,
         b,
         BoundingBoxOptions::default(),
-    ))?
-    .unwrap_or_default();
+    ))? {
+        Some(bbox) => bbox,
+        // fork 60a8a51: without a box there is no evidence the B-rep is a point
+        None if k.fixes.brep_edit_statuses_pass_on => return Ok(false),
+        None => crate::geom::extent3d::Extent3d::default(),
+    };
     Ok(bbox.is_point_sized(tol_3d))
 }
 
@@ -895,7 +899,10 @@ pub fn reset_infinite_region(
                 Err(e @ (SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. })) => {
                     return Err(e)
                 }
-                r => ignore_status(r)?,
+                r => ignore_status(crate::error::passed_on(
+                    r,
+                    k.fixes.brep_edit_statuses_pass_on,
+                )?)?,
             }
         }
         SetRegionVoidType::InfiniteRegionOnly => {
@@ -963,7 +970,12 @@ pub fn set_region_is_void_flags_for_nested_solids(k: &mut Kernel, b: &mut Brep) 
 
         // the shells mated to this one (increments an unused mark value)
         // (status ignored upstream: a failed call is read as no mated shells)
-        for mated in ignored(shell_mated_shells(k, b, shell))?.unwrap_or_default() {
+        for mated in ignored(crate::error::passed_on(
+            shell_mated_shells(k, b, shell),
+            k.fixes.brep_edit_statuses_pass_on,
+        )?)?
+        .unwrap_or_default()
+        {
             let nested = shell_region(b, mated)?.ok_or_else(|| {
                 null("SetRegionIsVoidFlagsForNestedSolids: mated shell without region")
             })?;
@@ -1450,8 +1462,11 @@ pub fn check_uv_trim_curve(k: &Kernel, b: &Brep, eu: EdgeuseId) -> Result<()> {
         .curve
         .as_ref()
         .ok_or_else(|| null("sm_CheckUVTrimCurve: edge without curve"))?;
-    let edge_3d_start =
-        ignored(curve.evaluate_point(k, edge_ivl.evaluate(0.0)))?.unwrap_or(Point3::UNDEF);
+    let edge_3d_start = ignored(crate::error::passed_on(
+        curve.evaluate_point(k, edge_ivl.evaluate(0.0)),
+        k.fixes.brep_edit_statuses_pass_on,
+    )?)?
+    .unwrap_or(Point3::UNDEF);
 
     let mate_vertex = |b: &Brep| -> Result<VertexId> {
         start_vertex(
@@ -1470,8 +1485,11 @@ pub fn check_uv_trim_curve(k: &Kernel, b: &Brep, eu: EdgeuseId) -> Result<()> {
         eu1::face(b, eu)?.ok_or_else(|| null("sm_CheckUVTrimCurve: edge use without face"))?;
     let surf = face2::surface(b, face)?
         .ok_or_else(|| null("sm_CheckUVTrimCurve: face without surface"))?;
-    let face_3d_start = ignored(surf.evaluate_point(k, Point2::new(start_uv.x, start_uv.y)))?
-        .unwrap_or(Point3::UNDEF);
+    let face_3d_start = ignored(crate::error::passed_on(
+        surf.evaluate_point(k, Point2::new(start_uv.x, start_uv.y)),
+        k.fixes.brep_edit_statuses_pass_on,
+    )?)?
+    .unwrap_or(Point3::UNDEF);
 
     let face_tol = face2::tolerance(b, face)?;
     let edge_tol = edge::tolerance(b, e)?;
@@ -1487,16 +1505,22 @@ pub fn check_uv_trim_curve(k: &Kernel, b: &Brep, eu: EdgeuseId) -> Result<()> {
     }
 
     // Now the other end:
-    let edge_3d_end =
-        ignored(curve.evaluate_point(k, edge_ivl.evaluate(1.0)))?.unwrap_or(Point3::UNDEF);
+    let edge_3d_end = ignored(crate::error::passed_on(
+        curve.evaluate_point(k, edge_ivl.evaluate(1.0)),
+        k.fixes.brep_edit_statuses_pass_on,
+    )?)?
+    .unwrap_or(Point3::UNDEF);
     let end_vtx = if reverse {
         start_vertex(b, eu)?
     } else {
         mate_vertex(b)?
     };
     let vrtx_3d_end = vertex::point(b, end_vtx)?;
-    let face_3d_end =
-        ignored(surf.evaluate_point(k, Point2::new(end_uv.x, end_uv.y)))?.unwrap_or(Point3::UNDEF);
+    let face_3d_end = ignored(crate::error::passed_on(
+        surf.evaluate_point(k, Point2::new(end_uv.x, end_uv.y)),
+        k.fixes.brep_edit_statuses_pass_on,
+    )?)?
+    .unwrap_or(Point3::UNDEF);
     vrtx_tol = vertex::tolerance(b, end_vtx)?; // have to update this to End vtx.
 
     let dist_face_vrtx_end = face_3d_end.distance(vrtx_3d_end);
@@ -1670,6 +1694,10 @@ fn evaluate_binormal_status_ignored(
         face_normal: Vec3::UNDEF,
         uv: Point2::UNDEF,
     };
+    // fork 60a8a51 passes the status on (`SER`)
+    if k.fixes.brep_edit_statuses_pass_on {
+        return evaluate_binormal(k, b, eu, parameter, true);
+    }
     if !eu1::is_loop_edgeuse(b, eu)? {
         return Ok(undefined); // SER(SM_ERR_INVALID_INPUT) before the outputs are set
     }
@@ -2026,8 +2054,9 @@ pub fn update_vertex_edge_intervals(
                         true,
                         None,
                     ))?;
-                    let _ignored_status =
-                        get_or_create_uv_trim_curve(k, b, eu, false, false, true)?;
+                    // (fork 60a8a51 passes this status on: `SER`)
+                    let status = get_or_create_uv_trim_curve(k, b, eu, false, false, true)?;
+                    crate::error::status_passed_on(status, k.fixes.brep_edit_statuses_pass_on)?;
                 }
             }
         }
@@ -2065,6 +2094,12 @@ pub fn redistribute_seam_uv_trim_curves(
         return Ok(false);
     }
     let eus = b.edge(new_edge)?.edgeuses.clone();
+    // fork 60a8a51: without its four edge uses, their trim curves and their end points
+    // there is nothing to compare, so nothing is swapped.
+    let soft = k.fixes.brep_edit_statuses_pass_on;
+    if soft && eus.len() != 4 {
+        return Ok(false);
+    }
     // SM_ASSERT upstream; this algorithm handles exactly two mated pairs (#520).
     if eus.len() != 4 {
         return Err(null(
@@ -2093,7 +2128,11 @@ pub fn redistribute_seam_uv_trim_curves(
     // Both the outer Result and the retained projection status must succeed.
     // Upstream checks these statuses and curves only with SM_ASSERT (#520).
     for eu in [prev_this, prev_other] {
-        eu3::get_or_create_uv_trim_curve(k, b, eu, false, false, true)?.status?;
+        let fetched = eu3::get_or_create_uv_trim_curve(k, b, eu, false, false, true)?;
+        if soft && (fetched.status.is_err() || eu1::uv_trim_curve(b, eu)?.0.is_none()) {
+            return Ok(false);
+        }
+        fetched.status?;
         if eu1::uv_trim_curve(b, eu)?.0.is_none() {
             return Err(null(
                 "sm_RedistributeSeamUVTrimCurves: neighbor without UV trim curve",
@@ -2104,11 +2143,26 @@ pub fn redistribute_seam_uv_trim_curves(
     // A failed evaluation must not feed unset points into seam-side classification.
     // First derivatives are requested but unused, as upstream.
     // NewE Start UV values from UVTrimCurves
-    let this_point_uv = normalized_evaluate(k, b, this_eu, 0.0, true, true)?;
-    let other_point_uv = normalized_evaluate(k, b, other_eu, 0.0, true, true)?;
-    // Prev Start UV values from PrevUVtrimCurves
-    let prev_this_point_uv = normalized_evaluate(k, b, prev_this, 1.0, true, true)?;
-    let prev_other_point_uv = normalized_evaluate(k, b, prev_other, 1.0, true, true)?;
+    // (fork 60a8a51: a failed evaluation swaps nothing; the four are tried in order)
+    let mut end_uvs = [Point3::UNDEF; 4];
+    for (slot, (eu, t)) in end_uvs.iter_mut().zip([
+        (this_eu, 0.0),
+        (other_eu, 0.0),
+        // Prev Start UV values from PrevUVtrimCurves
+        (prev_this, 1.0),
+        (prev_other, 1.0),
+    ]) {
+        let r = normalized_evaluate(k, b, eu, t, true, true);
+        *slot = if soft {
+            match ignored(r)? {
+                Some(p) => p,
+                None => return Ok(false),
+            }
+        } else {
+            r?
+        };
+    }
+    let [this_point_uv, other_point_uv, prev_this_point_uv, prev_other_point_uv] = end_uvs;
 
     // make sure sThisPointUV == sPrevThisPointUV, sOtherPointUV == sPrevOtherPointUV are
     // the same to tol by switching the UVTrimCurves if needed. Expect all 4 PointUVs to
@@ -2622,9 +2676,15 @@ pub fn make_vertex_split_uv_trim_curve(
     //    sIvl13D, sIvl23D = 3DCurve     [start,SplitParam],   [SplitParam,   end]
     let mut ivl2 = ivl1;
     // (the SetMinMax statuses are not checked upstream)
-    ignored(ivl1.set_min_max(ivl1.min(), edge_split_parameter_uv))?;
+    ignored(crate::error::passed_on(
+        ivl1.set_min_max(ivl1.min(), edge_split_parameter_uv),
+        k.fixes.brep_edit_statuses_pass_on,
+    )?)?;
     let ivl1_3d = Extent1d::from_min_max(ivl1.min(), edge_split_parameter);
-    ignored(ivl2.set_min_max(edge_split_parameter_uv, ivl2.max()))?;
+    ignored(crate::error::passed_on(
+        ivl2.set_min_max(edge_split_parameter_uv, ivl2.max()),
+        k.fixes.brep_edit_statuses_pass_on,
+    )?)?;
     let ivl2_3d = Extent1d::from_min_max(edge_split_parameter, ivl2.max());
 
     // trim and bind UVTrimCurves to Edgeuses (the attached curve is edited in place)
@@ -3210,10 +3270,18 @@ pub fn create_edge_edge_blend(
                 // sample unset; undefined coordinates here)
                 let t = ii as f64 / (num_loc - 1) as f64;
                 rail1_pos.push(
-                    ignored(rail1.evaluate_point(ivl1.evaluate(t)))?.unwrap_or(Point3::UNDEF),
+                    ignored(crate::error::passed_on(
+                        rail1.evaluate_point(ivl1.evaluate(t)),
+                        k.fixes.brep_edit_statuses_pass_on,
+                    )?)?
+                    .unwrap_or(Point3::UNDEF),
                 );
                 rail2_pos.push(
-                    ignored(rail2.evaluate_point(ivl2.evaluate(t)))?.unwrap_or(Point3::UNDEF),
+                    ignored(crate::error::passed_on(
+                        rail2.evaluate_point(ivl2.evaluate(t)),
+                        k.fixes.brep_edit_statuses_pass_on,
+                    )?)?
+                    .unwrap_or(Point3::UNDEF),
                 );
             }
 
@@ -3282,7 +3350,11 @@ pub fn create_edge_edge_blend(
     // make sure two curve intervals run in the same direction and share a common parameterization
     if !same_dir_curves {
         // (status not checked upstream; the interval is left as is on failure)
-        ivl2 = ignored(rail2.reverse_parameterization(&ivl2))?.unwrap_or(ivl2);
+        ivl2 = ignored(crate::error::passed_on(
+            rail2.reverse_parameterization(&ivl2),
+            k.fixes.brep_edit_statuses_pass_on,
+        )?)?
+        .unwrap_or(ivl2);
         in_from_the_left = !in_from_the_left;
     }
 
@@ -3296,8 +3368,14 @@ pub fn create_edge_edge_blend(
             let nat = rail2.natural_interval();
             let mut new_ivl = nat;
             // (neither status is checked upstream)
-            ignored(new_ivl.set_min_max(nat.min() * scale + offset, nat.max() * scale + offset))?;
-            ignored(rail2.edit_parameterization(&new_ivl))?;
+            ignored(crate::error::passed_on(
+                new_ivl.set_min_max(nat.min() * scale + offset, nat.max() * scale + offset),
+                k.fixes.brep_edit_statuses_pass_on,
+            )?)?;
+            ignored(crate::error::passed_on(
+                rail2.edit_parameterization(&new_ivl),
+                k.fixes.brep_edit_statuses_pass_on,
+            )?)?;
             *ivl2 = ivl1;
         }
         Ok(())
@@ -3320,7 +3398,11 @@ pub fn create_edge_edge_blend(
     // make sure two curve intervals run in the same direction and share a common
     // parameterization (upstream repeats both steps here)
     if !same_dir_curves {
-        ivl2 = ignored(rail2.reverse_parameterization(&ivl2))?.unwrap_or(ivl2);
+        ivl2 = ignored(crate::error::passed_on(
+            rail2.reverse_parameterization(&ivl2),
+            k.fixes.brep_edit_statuses_pass_on,
+        )?)?
+        .unwrap_or(ivl2);
     }
     rescale(&mut rail2, &mut ivl2)?;
 
@@ -3589,17 +3671,20 @@ pub fn heal_brep(
 ) -> Result<()> {
     let mut heal_data = HealData::<HealLoopHandle>::default();
     // pass the call along (status ignored upstream)
-    ignored(heal_data.heal_brep(
-        k,
-        Some(b),
-        healer_op,
-        HealBrepTargets {
-            vertices: opt_vertices,
-            edges: opt_edges,
-            faces: opt_faces,
-        },
-        make_uv_trim_curves,
-    ))?;
+    ignored(crate::error::passed_on(
+        heal_data.heal_brep(
+            k,
+            Some(b),
+            healer_op,
+            HealBrepTargets {
+                vertices: opt_vertices,
+                edges: opt_edges,
+                faces: opt_faces,
+            },
+            make_uv_trim_curves,
+        ),
+        k.fixes.brep_edit_statuses_pass_on,
+    )?)?;
     Ok(())
 }
 

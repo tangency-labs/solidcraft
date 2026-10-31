@@ -644,6 +644,9 @@ pub struct SurfaceIntersector<'s> {
     pub(crate) singular_start_inside_direction: bool,
     /// Status policy captured from the constructing kernel (#483).
     pub(crate) alignment_statuses: bool,
+    /// `Kernel::fixes.brep_edit_statuses_pass_on` captured from the constructing kernel
+    /// (WR-658; fork e7ebc8d's `SmAdvSurfaceIntersector` statuses).
+    pub(crate) edit_statuses: bool,
     /// The object is an `SmAdvSurfaceIntersector`: the virtual
     /// `ComputeSingularityPoint` that `ComputePointValues` calls is that class's
     /// override, not the basic `SM_ERR` one.
@@ -755,6 +758,7 @@ impl<'s> SurfaceIntersector<'s> {
             through_points: Vec::new(),
             singular_start_inside_direction: k.fixes.ssi_singular_start_inside_direction,
             alignment_statuses: k.fixes.ssi_alignment_statuses,
+            edit_statuses: k.fixes.brep_edit_statuses_pass_on,
             advanced: false,
         })
     }

@@ -47,7 +47,8 @@
 //!   initialised (empty) box: every `CalculateBoundingBox` override (`SmCurve`,
 //!   `SmBSplineCurve`, `SmLine`, `SmHermiteCurve`, `SmCrvOnSurf`, `SmCompositeCurve`)
 //!   fails only before it writes the caller's box. [`SolidError::Unported`] still
-//!   propagates.
+//!   propagates. With `UpstreamFixes::brep_edit_statuses_pass_on` (fork 60a8a51) the
+//!   four statuses are passed on.
 //! - **Point classification.** [`BrepQuery::point_3d_classify`] returns the
 //!   classification instead of filling the caller's (every upstream caller constructs a
 //!   fresh one just before and drops it on failure), with [`EntityRef`] objects. Its
@@ -266,14 +267,20 @@ pub fn calculate_tight_bounding_box<'a>(
     // Union all of the Tight Edge bounding boxes.
     for e in bp1::edges(b, None)? {
         // (CalculateBoundingBox initialises the box first)
-        let mut edge_bbox = ignored(qe::calculate_bounding_box(k, b, e, NORMAL_BOX, false))?
-            .and_then(|boxes| boxes.normal)
-            .unwrap_or_default();
+        let mut edge_bbox = ignored(crate::error::passed_on(
+            qe::calculate_bounding_box(k, b, e, NORMAL_BOX, false),
+            k.fixes.brep_edit_statuses_pass_on,
+        )?)?
+        .and_then(|boxes| boxes.normal)
+        .unwrap_or_default();
         if edge_bbox.is_contained_by(&brep_bbox, 0.0) {
             continue;
         }
         // (an edge without curve, or a failure, leaves the loose box)
-        if let Some(Some(tight)) = ignored(qe::calculate_tight_bounding_box(k, b, e))? {
+        if let Some(Some(tight)) = ignored(crate::error::passed_on(
+            qe::calculate_tight_bounding_box(k, b, e),
+            k.fixes.brep_edit_statuses_pass_on,
+        )?)? {
             edge_bbox = tight;
         }
         brep_bbox = brep_bbox.union(&edge_bbox);
@@ -283,18 +290,19 @@ pub fn calculate_tight_bounding_box<'a>(
     // face).
     let mut face_bbox = Extent3d::new();
     for f in bp1::faces(b, None)? {
-        if let Some(loose) = ignored(qf1::calculate_bounding_box(k, lb.get(), f, false))? {
+        if let Some(loose) = ignored(crate::error::passed_on(
+            qf1::calculate_bounding_box(k, lb.get(), f, false),
+            k.fixes.brep_edit_statuses_pass_on,
+        )?)? {
             face_bbox = loose;
         }
         if face_bbox.is_contained_by(&brep_bbox, 0.0) {
             continue;
         }
-        ignore_status(qf3::calculate_tight_bounding_box_into(
-            k,
-            &mut lb,
-            f,
-            &mut face_bbox,
-        ))?;
+        ignore_status(crate::error::passed_on(
+            qf3::calculate_tight_bounding_box_into(k, &mut lb, f, &mut face_bbox),
+            k.fixes.brep_edit_statuses_pass_on,
+        )?)?;
         brep_bbox = brep_bbox.union(&face_bbox);
     }
 

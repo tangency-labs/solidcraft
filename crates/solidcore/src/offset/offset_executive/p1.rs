@@ -781,7 +781,10 @@ impl OffsetExecutive {
     ) -> Result<()> {
         // remove curve and surface portions not used by edges and faces (status
         // ignored upstream)
-        ignore_status(shrink_geometry(kernel, brep))?;
+        ignore_status(crate::error::passed_on(
+            shrink_geometry(kernel, brep),
+            kernel.fixes.brep_edit_statuses_pass_on,
+        )?)?;
 
         // for every face
         let mut fix = Vec::new();
@@ -883,12 +886,10 @@ impl OffsetExecutive {
         let editing_enabled = result.editing_enabled();
         // cpp:2099–2102 ignores ordinary RemoveFaces failures but still executes
         // its editing guard and traversal-mark effects. Missing work must defer.
-        ignore_status(crate::topology::brep::p5::remove_faces(
-            kernel,
-            result,
-            editing_enabled,
-            &delete_faces,
-        ))?;
+        ignore_status(crate::error::passed_on(
+            crate::topology::brep::p5::remove_faces(kernel, result, editing_enabled, &delete_faces),
+            kernel.fixes.brep_edit_statuses_pass_on,
+        )?)?;
 
         // Forget the deleted faces and edgeuses, so later lookups in the relations
         // (lamina side walls, PiecewiseMerge) cannot return them. For m_vEUToEU also
@@ -932,9 +933,10 @@ impl OffsetExecutive {
             let primary = required(eu::primary_edgeuse(result, id)?)?;
             // NormalizedEvaluate(0.5, FALSE, sPnt): 3d. Upstream ignores the evaluation
             // status and keeps the initialized point.
-            let point = ignored(eu3::normalized_evaluate(
-                kernel, result, primary, 0.5, false, false, true,
-            ))?
+            let point = ignored(crate::error::passed_on(
+                eu3::normalized_evaluate(kernel, result, primary, 0.5, false, false, true),
+                kernel.fixes.brep_edit_statuses_pass_on,
+            )?)?
             .map_or(Vec3::UNDEF, |eval| eval.point);
             // cpp:2069–2072: the solve runs with the original's editing disabled and
             // leaves it enabled afterwards (still disabled when the solve fails)
@@ -1718,15 +1720,15 @@ impl OffsetExecutive {
                     // Tol: StitchIntoShell() adds in the tols of the topology objects,
                     // so the Brep's tolerance should be plenty.
                     let stitch_tol_3d = result.tolerance();
-                    ignore_status(stitch::stitch_into_shell_with(
-                        kernel,
-                        result,
-                        true,
-                        stitch_tol_3d,
-                        edits,
-                    ))
+                    ignore_status(crate::error::passed_on(
+                        stitch::stitch_into_shell_with(kernel, result, true, stitch_tol_3d, edits),
+                        kernel.fixes.brep_edit_statuses_pass_on,
+                    )?)
                 } else {
-                    ignore_status(stitch::stitch_into_solid_with(kernel, result, edits))
+                    ignore_status(crate::error::passed_on(
+                        stitch::stitch_into_solid_with(kernel, result, edits),
+                        kernel.fixes.brep_edit_statuses_pass_on,
+                    )?)
                 }
             };
             match notifications {
@@ -2085,7 +2087,10 @@ impl OffsetExecutive {
                         Vec3::new(start.x, start.y, 0.0),
                         Vec3::new(end.x, end.y, 0.0),
                     )?;
-                    ignore_status(line.edit_parameterization(&ivl))?;
+                    ignore_status(crate::error::passed_on(
+                        line.edit_parameterization(&ivl),
+                        kernel.fixes.brep_edit_statuses_pass_on,
+                    )?)?;
                     box_curves.push(Curve::from(line));
                 }
 
@@ -2141,7 +2146,10 @@ impl OffsetExecutive {
                 ] {
                     copy_domain.add_point(plane.project_point_to_uv_domain(corner));
                 }
-                ignore_status(plane.adjust_step_uv_domain(&copy_domain))?;
+                ignore_status(crate::error::passed_on(
+                    plane.adjust_step_uv_domain(&copy_domain),
+                    kernel.fixes.brep_edit_statuses_pass_on,
+                )?)?;
                 let copy_plane_domain = copy_plane.natural_uv_domain_with_nurb(kernel)?;
 
                 // make a planar face using the offset UV trim curves (as 3D curves)
@@ -2229,7 +2237,10 @@ impl OffsetExecutive {
             let mut uv_curves = made.curves_3d.unwrap_or_default();
             // Convert face 3dCurves into 2D curves (all their Z components are zero).
             for curve in &mut uv_curves {
-                ignore_status(curve.convert_to_2d(kernel))?;
+                ignore_status(crate::error::passed_on(
+                    curve.convert_to_2d(kernel),
+                    kernel.fixes.brep_edit_statuses_pass_on,
+                )?)?;
             }
             let mut loops = Vec::new();
             for &count in &made.curve_loops {
@@ -2439,16 +2450,19 @@ impl OffsetExecutive {
             // (upstream: the one context); without returning them the deletion
             // failed as a nested edit and, its status ignored, kept the face.
             let lent = notifications.context.as_deref_mut();
-            ignore_status(Context::with_lease_returned(kernel, lent, |kernel| {
-                KernelManifoldIntersector::delete_faces_in(
-                    kernel,
-                    brep,
-                    &delete_faces,
-                    &mut *notifications.records,
-                    &mut *notifications.attributes,
-                    DELETE_FACES_NAMESPACE,
-                )
-            }))?;
+            ignore_status(crate::error::passed_on(
+                Context::with_lease_returned(kernel, lent, |kernel| {
+                    KernelManifoldIntersector::delete_faces_in(
+                        kernel,
+                        brep,
+                        &delete_faces,
+                        &mut *notifications.records,
+                        &mut *notifications.attributes,
+                        DELETE_FACES_NAMESPACE,
+                    )
+                }),
+                kernel.fixes.brep_edit_statuses_pass_on,
+            )?)?;
             new_faces.retain(|face| !delete_faces.contains(face));
         }
         Ok(new_faces)
@@ -2518,23 +2532,32 @@ impl OffsetExecutive {
         let brep = self.required_offset_brep()?;
         let offset_face = brep.face(offset_face)?;
         // Intersect's status is ignored; upstream initializes its output on failure.
-        let domain = ignored(original_face.uv_domain.intersect(&offset_face.uv_domain))?
-            .unwrap_or_else(Extent2d::new);
+        let domain = ignored(crate::error::passed_on(
+            original_face.uv_domain.intersect(&offset_face.uv_domain),
+            kernel.kernel().fixes.brep_edit_statuses_pass_on,
+        )?)?
+        .unwrap_or_else(Extent2d::new);
         let mid_uv = domain.evaluate(0.5, 0.5);
         // (`EvaluateNormal(sMidUV, TRUE, TRUE, ..)`: from the left)
-        let normal = ignored(required(original_face.surface.as_ref())?.evaluate_normal(
-            kernel.kernel(),
-            mid_uv,
-            Side::Left,
-            Side::Left,
-        ))?
+        let normal = ignored(crate::error::passed_on(
+            required(original_face.surface.as_ref())?.evaluate_normal(
+                kernel.kernel(),
+                mid_uv,
+                Side::Left,
+                Side::Left,
+            ),
+            kernel.kernel().fixes.brep_edit_statuses_pass_on,
+        )?)?
         .unwrap_or(Vec3::UNDEF);
-        let offset_normal = ignored(required(offset_face.surface.as_ref())?.evaluate_normal(
-            kernel.kernel(),
-            mid_uv,
-            Side::Left,
-            Side::Left,
-        ))?
+        let offset_normal = ignored(crate::error::passed_on(
+            required(offset_face.surface.as_ref())?.evaluate_normal(
+                kernel.kernel(),
+                mid_uv,
+                Side::Left,
+                Side::Left,
+            ),
+            kernel.kernel().fixes.brep_edit_statuses_pass_on,
+        )?)?
         .unwrap_or(Vec3::UNDEF);
         let same_normals = normal.dot(offset_normal) > 0.0;
         let mut original_uses: Vec<Option<EdgeuseId>> =
@@ -2687,8 +2710,14 @@ fn relate_surface_pair(
 fn uv_curve_bounding_box(kernel: &Kernel, curve: &mut Curve) -> Result<Extent3d> {
     // CreateCurvesFromFace supplied B-spline slicing copies or lines.
     match curve.kind_mut() {
-        CurveKind::BSpline(curve) => ignore_status(curve.convert_to_3d())?,
-        CurveKind::Line(curve) => ignore_status(curve.convert_to_3d())?,
+        CurveKind::BSpline(curve) => ignore_status(crate::error::passed_on(
+            curve.convert_to_3d(),
+            kernel.fixes.brep_edit_statuses_pass_on,
+        )?)?,
+        CurveKind::Line(curve) => ignore_status(crate::error::passed_on(
+            curve.convert_to_3d(),
+            kernel.fixes.brep_edit_statuses_pass_on,
+        )?)?,
         // UV curves from CreateCurvesFromFace are slicing copies, never analytic
         // non-line kinds. Reject malformed values rather than silently changing them.
         _ => {
@@ -2700,16 +2729,19 @@ fn uv_curve_bounding_box(kernel: &Kernel, curve: &mut Curve) -> Result<Extent3d>
     }
     // cpp:3777–3780 ignores both statuses. An ordinary bounding-box failure leaves
     // the initialized extent, while a genuinely missing dependency must still defer.
-    Ok(ignored(curve.calculate_bounding_box(
-        kernel,
-        &curve.natural_interval(),
-        crate::nurbs::b_spline_curve::BoundingBoxRequest {
-            normal: true,
-            pseudo: false,
-            polar: false,
-        },
-        true,
-    ))?
+    Ok(ignored(crate::error::passed_on(
+        curve.calculate_bounding_box(
+            kernel,
+            &curve.natural_interval(),
+            crate::nurbs::b_spline_curve::BoundingBoxRequest {
+                normal: true,
+                pseudo: false,
+                polar: false,
+            },
+            true,
+        ),
+        kernel.fixes.brep_edit_statuses_pass_on,
+    )?)?
     .and_then(|boxes| boxes.normal)
     .unwrap_or_else(Extent3d::new))
 }

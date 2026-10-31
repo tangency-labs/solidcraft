@@ -2725,12 +2725,21 @@ fn delete_face_in(
         if surviving == del_region {
             return Err(ser()); // Should not happen
         }
-        ignore_soft(shell::region_remove_shell(b, del_region, os))?;
+        ignore_soft(crate::error::passed_on(
+            shell::region_remove_shell(b, del_region, os),
+            k.fixes.brep_edit_statuses_pass_on,
+        )?)?;
         shell::destroy(k, b, os, env)?;
         other_shell = None;
         for s in region_shells(b, del_region)? {
-            ignore_soft(shell::region_remove_shell(b, del_region, s))?;
-            ignore_soft(shell::region_post_insert_shell(b, surviving, s))?;
+            ignore_soft(crate::error::passed_on(
+                shell::region_remove_shell(b, del_region, s),
+                k.fixes.brep_edit_statuses_pass_on,
+            )?)?;
+            ignore_soft(crate::error::passed_on(
+                shell::region_post_insert_shell(b, surviving, s),
+                k.fixes.brep_edit_statuses_pass_on,
+            )?)?;
         }
         if Some(del_region) == b.infinite_region() {
             b.set_infinite_region(Some(surviving));
@@ -2751,7 +2760,10 @@ fn delete_face_in(
         ))?;
 
         // Remove and Delete the DelRegion
-        ignore_soft(b.remove_region_from_list(del_region))?;
+        ignore_soft(crate::error::passed_on(
+            b.remove_region_from_list(del_region),
+            k.fixes.brep_edit_statuses_pass_on,
+        )?)?;
         b.remove_region_record(del_region)?;
     }
 
@@ -2869,9 +2881,15 @@ fn delete_face_in(
     }
 
     // Take care of face and faceuses - remove from lists
-    ignore_soft(shell::shell_remove_faceuse(b, shell, fu))?;
+    ignore_soft(crate::error::passed_on(
+        shell::shell_remove_faceuse(b, shell, fu),
+        k.fixes.brep_edit_statuses_pass_on,
+    )?)?;
     if let Some(os) = other_shell {
-        ignore_soft(shell::shell_remove_faceuse(b, os, other_fu))?;
+        ignore_soft(crate::error::passed_on(
+            shell::shell_remove_faceuse(b, os, other_fu),
+            k.fixes.brep_edit_statuses_pass_on,
+        )?)?;
     }
 
     // Don't allow stale pointers to remain in the Faces.
@@ -2913,33 +2931,39 @@ fn delete_face_in(
         // delete every edge converted into a wire
         for e in new_wire_edges {
             deleted.push(EntityRef::Edge(e));
-            ignore_soft(match body {
-                Some(body) => super::p4::delete_edge_with_body_identity(
-                    k,
-                    b,
-                    &mut super::p4::DeleteEnv::from_notify(env),
-                    e,
-                    None,
-                    body,
-                ),
-                None => delete_edge(k, b, env, e, None),
-            })?;
+            ignore_soft(crate::error::passed_on(
+                match body {
+                    Some(body) => super::p4::delete_edge_with_body_identity(
+                        k,
+                        b,
+                        &mut super::p4::DeleteEnv::from_notify(env),
+                        e,
+                        None,
+                        body,
+                    ),
+                    None => delete_edge(k, b, env, e, None),
+                },
+                k.fixes.brep_edit_statuses_pass_on,
+            )?)?;
         }
 
         // remove vertices that have become shell vertices
         for v in orig_vertices {
             if vertex::is_shell_vertex(b, v)? {
                 deleted.push(EntityRef::Vertex(v));
-                ignore_soft(match body {
-                    Some(body) => super::p4::delete_vertex_with_body_identity(
-                        k,
-                        b,
-                        &mut super::p4::DeleteEnv::from_notify(env),
-                        v,
-                        body,
-                    ),
-                    None => delete_vertex(k, b, env, v),
-                })?;
+                ignore_soft(crate::error::passed_on(
+                    match body {
+                        Some(body) => super::p4::delete_vertex_with_body_identity(
+                            k,
+                            b,
+                            &mut super::p4::DeleteEnv::from_notify(env),
+                            v,
+                            body,
+                        ),
+                        None => delete_vertex(k, b, env, v),
+                    },
+                    k.fixes.brep_edit_statuses_pass_on,
+                )?)?;
             }
         }
     }
@@ -2967,7 +2991,10 @@ fn delete_face_nesting(
     let mut vertices_needing_new_shell = 0usize;
     if any_edgeuse.is_none() && remaining(*vertex_count) == 0 {
         let r = eu1::shell_region(b, shell)?.ok_or(null_deref("shell without region"))?;
-        ignore_soft(shell::region_remove_shell(b, r, shell))?;
+        ignore_soft(crate::error::passed_on(
+            shell::region_remove_shell(b, r, shell),
+            k.fixes.brep_edit_statuses_pass_on,
+        )?)?;
         // delete pShell
         shell::destroy(k, b, shell, env)?;
     } else {
@@ -3107,7 +3134,10 @@ fn delete_face_nesting(
 
         // Transfer faceuses from the old shell to the new shell
         for &x in &faceuses {
-            ignore_soft(shell::shell_remove_faceuse(b, shell, x))?;
+            ignore_soft(crate::error::passed_on(
+                shell::shell_remove_faceuse(b, shell, x),
+                k.fixes.brep_edit_statuses_pass_on,
+            )?)?;
             shell::shell_post_insert_faceuse(b, new_shell, x)?;
         }
     }
@@ -3130,8 +3160,14 @@ fn delete_face_nesting(
     // pLastNewShell
     let last = last_new_shell.ok_or(null_deref("no new shell"))?;
     let r = eu1::shell_region(b, shell)?.ok_or(null_deref("shell without region"))?;
-    ignore_soft(shell::transfer_children(k, b, last, shell, None))?;
-    ignore_soft(shell::region_remove_shell(b, r, last))?;
+    ignore_soft(crate::error::passed_on(
+        shell::transfer_children(k, b, last, shell, None),
+        k.fixes.brep_edit_statuses_pass_on,
+    )?)?;
+    ignore_soft(crate::error::passed_on(
+        shell::region_remove_shell(b, r, last),
+        k.fixes.brep_edit_statuses_pass_on,
+    )?)?;
     shell::destroy(k, b, last, env)
 }
 
@@ -4051,6 +4087,8 @@ fn turn_to_nurbs_in(
                 match new_surface.calculate_bounding_box(k, &domain, [true, false, false], true) {
                     Ok(boxes) => boxes.normal_box.unwrap_or_else(Extent3d::new),
                     Err(e) if e.is_unported() => return Err(e),
+                    // (fork 60a8a51 passes this status on: `SER`)
+                    Err(e) if k.fixes.brep_edit_statuses_pass_on => return Err(e),
                     Err(_) => Extent3d::new(),
                 };
             let mut size = srf_bbox.size().length();
@@ -4308,8 +4346,11 @@ fn orient_body(
 
         // If this face needs swapping, do it. Aids in bookkeeping later.
         if in_swap(face) {
-            // (no SER upstream)
-            ignore_soft(face1::swap_uv_with_notifications(k, b, face, env))?;
+            // (no SER upstream; fork 60a8a51 passes the status on)
+            ignore_soft(crate::error::passed_on(
+                face1::swap_uv_with_notifications(k, b, face, env),
+                k.fixes.brep_edit_statuses_pass_on,
+            )?)?;
         }
 
         let (reverse_votes, same_votes) = if just_unify_normals {

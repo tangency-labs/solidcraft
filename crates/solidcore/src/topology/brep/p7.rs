@@ -743,10 +743,16 @@ pub fn read_from_file(
 
     // check the UV trim curves unless they are rebuilt (statuses ignored)
     if !rebuild_uv_trim_curves_flag {
-        ignore_status(check_and_fix_uv_trim_curves(k, b))?;
+        ignore_status(crate::error::passed_on(
+            check_and_fix_uv_trim_curves(k, b),
+            k.fixes.brep_edit_statuses_pass_on,
+        )?)?;
     }
     if rebuild_uv_trim_curves_flag {
-        ignore_status(rebuild_uv_trim_curves(k, b))?;
+        ignore_status(crate::error::passed_on(
+            rebuild_uv_trim_curves(k, b),
+            k.fixes.brep_edit_statuses_pass_on,
+        )?)?;
     }
     Ok(())
 }
@@ -1372,7 +1378,10 @@ fn make_face_with_curves_transfer_impl(
                     let entry = uv
                         .get_mut(index + jj)
                         .ok_or_else(|| null("loop counts exceed the curves"))?;
-                    ignore_status(entry.convert_to_2d(k))?;
+                    ignore_status(crate::error::passed_on(
+                        entry.convert_to_2d(k),
+                        k.fixes.brep_edit_statuses_pass_on,
+                    )?)?;
                     let uv_curve = entry.clone_for_evaluation()?;
                     let new3d = if crv_on_surf {
                         let c = CrvOnSurf::new(
@@ -1391,14 +1400,17 @@ fn make_face_with_curves_transfer_impl(
                         }
                     } else {
                         let ivl = uv_curve.natural_interval();
-                        ignored(surface.lift_curve(
-                            k,
-                            uv_domain,
-                            &uv_curve,
-                            &ivl,
-                            zone_tol / 4.0,
-                            false,
-                        ))?
+                        ignored(crate::error::passed_on(
+                            surface.lift_curve(
+                                k,
+                                uv_domain,
+                                &uv_curve,
+                                &ivl,
+                                zone_tol / 4.0,
+                                false,
+                            ),
+                            k.fixes.brep_edit_statuses_pass_on,
+                        )?)?
                         .map(|l| l.curve)
                     };
                     if new3d.is_some() {
@@ -1451,17 +1463,20 @@ fn make_face_with_curves_transfer_impl(
                     let Some(Some(curve)) = s3d.get_mut(ci) else {
                         return Err(null("missing curve"));
                     };
-                    let deformed = ignored(curve.deform_to_end_point_targets_on_surface(
-                        k,
-                        new_start,
-                        new_end,
-                        true,
-                        None,
-                        InValueType::Unconstrained,
-                        None,
-                        InValueType::Unconstrained,
-                        Some((surface, None)),
-                    ))?
+                    let deformed = ignored(crate::error::passed_on(
+                        curve.deform_to_end_point_targets_on_surface(
+                            k,
+                            new_start,
+                            new_end,
+                            true,
+                            None,
+                            InValueType::Unconstrained,
+                            None,
+                            InValueType::Unconstrained,
+                            Some((surface, None)),
+                        ),
+                        k.fixes.brep_edit_statuses_pass_on,
+                    )?)?
                     .flatten();
                     if let Some(d) = deformed {
                         if let Some(slot) = s3d.get_mut(ci) {
@@ -1755,7 +1770,10 @@ pub fn glue_edges_general(
     // a wire edge is just deleted
     if ed::is_wire(b, del)? {
         // status ignored upstream
-        ignore_status(delete_edge(k, b, del, env))?;
+        ignore_status(crate::error::passed_on(
+            delete_edge(k, b, del, env),
+            k.fixes.brep_edit_statuses_pass_on,
+        )?)?;
         return Ok(());
     }
 
@@ -2036,10 +2054,17 @@ pub fn glue_edges_general(
         for fu in test_split {
             // status ignored; each call first resets rpNewRegion to NULL
             let attempt = p6::test_closure_split_region_attempt(k, b, &mut marks, env, true, fu)?;
+            // (fork 60a8a51 passes the status on: `SER`)
+            if k.fixes.brep_edit_statuses_pass_on {
+                attempt.status?;
+            }
             new_region = attempt.region;
         }
         if ed::is_spine(b, surv)? && new_region.is_none() {
-            ignore_status(test_closure_split_region_edge(k, b, env, surv))?;
+            ignore_status(crate::error::passed_on(
+                test_closure_split_region_edge(k, b, env, surv),
+                k.fixes.brep_edit_statuses_pass_on,
+            )?)?;
         }
     }
     Ok(())
@@ -2252,8 +2277,11 @@ fn copy_faces_named(
         };
         let s1 = fp2::surface(src, f)?.ok_or_else(|| null("face without surface"))?;
         // (status ignored upstream, which then dereferences the null copy)
-        let s2 = ignored(s1.copy_and_add_analytics(k))?
-            .ok_or_else(|| null("CopyAndAddAnalytics failed (upstream dereferences null)"))?;
+        let s2 = ignored(crate::error::passed_on(
+            s1.copy_and_add_analytics(k),
+            k.fixes.brep_edit_statuses_pass_on,
+        )?)?
+        .ok_or_else(|| null("CopyAndAddAnalytics failed (upstream dereferences null)"))?;
         let dom = s2.natural_uv_domain_with_nurb(k)?;
         let input = FaceCurvesInput {
             loops: curves

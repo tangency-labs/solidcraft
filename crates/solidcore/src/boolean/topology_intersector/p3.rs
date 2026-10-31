@@ -660,7 +660,10 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
 
             // when old pNewE<->pOtherNewE mapping exists remove it (status unchecked)
             if new_e.is_some() && other_new_e.is_some() {
-                ignore_soft(self.remove_relationship(new_e, other_new_e))?;
+                ignore_soft(crate::error::passed_on(
+                    self.remove_relationship(new_e, other_new_e),
+                    k.fixes.brep_edit_statuses_pass_on,
+                )?)?;
             }
         }
 
@@ -969,7 +972,10 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
                     if brep.edge_is_manifold(e1o)? && faces_share_surface(brep, e1o)? {
                         // remove the unneeded edge
                         fixed = true;
-                        ignore_soft(self.remove_relationship(Some(e1o), Some(e2)))?;
+                        ignore_soft(crate::error::passed_on(
+                            self.remove_relationship(Some(e1o), Some(e2)),
+                            k.fixes.brep_edit_statuses_pass_on,
+                        )?)?;
                         squeezed.deleted_edges.push(e1o);
                         brep.brep_delete_edge(k, brep_h, e1o)?;
                         out.topology_was_deleted = true;
@@ -1002,7 +1008,10 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
                 if let Some(e2o) = e2_other {
                     if brep.edge_is_manifold(e2o)? && faces_share_surface(brep, e2o)? {
                         fixed = true;
-                        ignore_soft(self.remove_relationship(Some(e1), Some(e2o)))?;
+                        ignore_soft(crate::error::passed_on(
+                            self.remove_relationship(Some(e1), Some(e2o)),
+                            k.fixes.brep_edit_statuses_pass_on,
+                        )?)?;
                         squeezed.deleted_edges.push(e2o);
                         brep.brep_delete_edge(k, brep_h, e2o)?;
                         out.topology_was_deleted = true;

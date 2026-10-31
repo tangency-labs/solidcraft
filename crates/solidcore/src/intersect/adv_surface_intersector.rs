@@ -66,8 +66,11 @@
 //! - **Statuses.** Statuses upstream ignores are ignored, except
 //!   [`SolidError::Unported`], which always propagates (also where
 //!   `FindInteriorCurves` skips a node pair whose `ComputePointValues` fails).
-//!   With `ssi_alignment_statuses` (#483), a failed alignment angle propagates;
-//!   the intersector captures the policy on construction. Public point computation
+//!   With `ssi_alignment_statuses` (#483; the fork's choice since #2009, fork
+//!   e7ebc8d), a failed alignment angle aligns nothing; with
+//!   `brep_edit_statuses_pass_on` the node boxes' intersection and `tp_Newton`'s
+//!   grown patches pass their statuses on. The intersector captures both policies on
+//!   construction. Public point computation
 //!   retains its documented `SM_ERR` normalization of singularity failures.
 //! - **Base virtuals.** `FindInteriorCurves` calls the base `ComputePointValues` and
 //!   `TraceCurve` ([`SurfaceIntersector`] parts 2 and 4); the only virtual they reach
@@ -267,25 +270,19 @@ fn angle(prev: Vec3, dir: Vec3) -> Result<f64> {
 
 /// The `ALIGN_DIR_WITH_PREVIOUS_POINT` macro: flips the curve direction when it is
 /// within `min(PI/30, 5 * ang_tol)` of opposite to the previous one.
-fn align_with_previous(
-    point: &mut TsectPnt,
-    prev: Option<Vec3>,
-    ang_tol_rad: f64,
-    checked: bool,
-) -> Result<()> {
+fn align_with_previous(point: &mut TsectPnt, prev: Option<Vec3>, ang_tol_rad: f64, checked: bool) {
     if let Some(p) = prev {
-        // status ignored: a zero vector reads as angle 0
-        let angle = point.crv_deriv().angle_between(p);
-        let angle_radians = if checked {
-            angle?
-        } else {
-            angle.unwrap_or(0.0)
+        // status ignored: a zero vector reads as angle 0. With `checked` (the fork's
+        // choice, e7ebc8d) there is nothing to align without an angle.
+        let angle_radians = match point.crv_deriv().angle_between(p) {
+            Ok(a) => a,
+            Err(_) if checked => return,
+            Err(_) => 0.0,
         };
         if (angle_radians - PI).abs() < min2(PI / 30.0, 5.0 * ang_tol_rad) {
             *point.crv_deriv_mut() = -point.crv_deriv();
         }
     }
-    Ok(())
 }
 
 /// `sm_FindLargestNonLeaf`: the tree to subdivide (`1` when the first node is a
@@ -1124,9 +1121,12 @@ impl<'t, O: SolutionObject + 't> GlobalSolve<'t, O> for AdvSurfaceIntersector<'_
                 // Update the bounding box information in the solution.
                 let mut bbox = surface_node1.bbox;
                 bbox.expand_absolute(self.solver.tolerance_3d);
-                let mut result = bbox
-                    .intersect(&surface_node2.bbox)
-                    .unwrap_or_else(|_| Extent3d::new());
+                let mut result = match bbox.intersect(&surface_node2.bbox) {
+                    Ok(r) => r,
+                    // (fork e7ebc8d passes this status on: `SER`)
+                    Err(e) if self.base.edit_statuses => return Err(e),
+                    Err(_) => Extent3d::new(),
+                };
 
                 let solutions = &mut self.solver.solutions;
                 if solutions.is_empty() {
@@ -1497,13 +1497,13 @@ impl SurfaceIntersector<'_> {
                 // principal curvature direction
                 point.point_type = IntersectionPointType::TangentCurve;
                 *point.crv_deriv_mut() = prin_kv1 * curve_trace_direction;
-                align_with_previous(point, prev, ang_tol_rad, self.alignment_statuses)?;
+                align_with_previous(point, prev, ang_tol_rad, self.alignment_statuses);
                 return Ok(());
             } else if prin_k2.abs() < EFF_ZERO_SQRT && prin_k1.abs() > EFF_ZERO_SQRT {
                 // ... in 2nd principal curvature direction
                 point.point_type = IntersectionPointType::TangentCurve;
                 *point.crv_deriv_mut() = prin_kv2 * curve_trace_direction;
-                align_with_previous(point, prev, ang_tol_rad, self.alignment_statuses)?;
+                align_with_previous(point, prev, ang_tol_rad, self.alignment_statuses);
                 return Ok(());
             } else if prin_k1 * prin_k2 < 0.0 {
                 // planar surfacePoint is intersecting a saddle surfacePoint
@@ -1580,7 +1580,7 @@ impl SurfaceIntersector<'_> {
                     // only tangent in k1 direction
                     point.point_type = IntersectionPointType::TangentCurve;
                     *point.crv_deriv_mut() = prin_kv1_2 * curve_trace_direction;
-                    align_with_previous(point, prev, ang_tol_rad, self.alignment_statuses)?;
+                    align_with_previous(point, prev, ang_tol_rad, self.alignment_statuses);
                     return Ok(());
                 }
 
@@ -1589,7 +1589,7 @@ impl SurfaceIntersector<'_> {
                     // only tangent in k2 direction
                     point.point_type = IntersectionPointType::TangentCurve;
                     *point.crv_deriv_mut() = prin_kv2_2 * curve_trace_direction;
-                    align_with_previous(point, prev, ang_tol_rad, self.alignment_statuses)?;
+                    align_with_previous(point, prev, ang_tol_rad, self.alignment_statuses);
                     return Ok(());
                 }
             }
@@ -1604,7 +1604,7 @@ impl SurfaceIntersector<'_> {
                     }
                     point.point_type = IntersectionPointType::TangentCurve;
                     *point.crv_deriv_mut() = prin_kv1 * curve_trace_direction;
-                    align_with_previous(point, prev, ang_tol_rad, self.alignment_statuses)?;
+                    align_with_previous(point, prev, ang_tol_rad, self.alignment_statuses);
                     return Ok(());
                 }
 
@@ -1612,7 +1612,7 @@ impl SurfaceIntersector<'_> {
                 if (prin_k2 - prin_k2_2).abs() < EFF_ZERO_SQRT {
                     point.point_type = IntersectionPointType::TangentCurve;
                     *point.crv_deriv_mut() = prin_kv2 * curve_trace_direction;
-                    align_with_previous(point, prev, ang_tol_rad, self.alignment_statuses)?;
+                    align_with_previous(point, prev, ang_tol_rad, self.alignment_statuses);
                     return Ok(());
                 }
             }
@@ -1634,7 +1634,7 @@ impl SurfaceIntersector<'_> {
                     }
                     point.point_type = IntersectionPointType::TangentCurve;
                     *point.crv_deriv_mut() = prin_kv1 * curve_trace_direction;
-                    align_with_previous(point, prev, ang_tol_rad, self.alignment_statuses)?;
+                    align_with_previous(point, prev, ang_tol_rad, self.alignment_statuses);
                     return Ok(());
                 }
 
@@ -1642,7 +1642,7 @@ impl SurfaceIntersector<'_> {
                 if (prin_k2 - prin_k2_2).abs() < EFF_ZERO_SQRT {
                     point.point_type = IntersectionPointType::TangentCurve;
                     *point.crv_deriv_mut() = prin_kv2 * curve_trace_direction;
-                    align_with_previous(point, prev, ang_tol_rad, self.alignment_statuses)?;
+                    align_with_previous(point, prev, ang_tol_rad, self.alignment_statuses);
                     return Ok(());
                 }
             }
@@ -1664,7 +1664,7 @@ impl SurfaceIntersector<'_> {
                     }
                     point.point_type = IntersectionPointType::TangentCurve;
                     *point.crv_deriv_mut() = prin_kv1 * curve_trace_direction;
-                    align_with_previous(point, prev, ang_tol_rad, self.alignment_statuses)?;
+                    align_with_previous(point, prev, ang_tol_rad, self.alignment_statuses);
                     return Ok(());
                 }
 
@@ -1672,7 +1672,7 @@ impl SurfaceIntersector<'_> {
                 if (prin_k2 - prin_k1_2).abs() < EFF_ZERO_SQRT {
                     point.point_type = IntersectionPointType::TangentCurve;
                     *point.crv_deriv_mut() = prin_kv2 * curve_trace_direction;
-                    align_with_previous(point, prev, ang_tol_rad, self.alignment_statuses)?;
+                    align_with_previous(point, prev, ang_tol_rad, self.alignment_statuses);
                     return Ok(());
                 }
             }
@@ -1738,7 +1738,7 @@ impl SurfaceIntersector<'_> {
                 }
             }
 
-            align_with_previous(point, prev, ang_tol_rad, self.alignment_statuses)?;
+            align_with_previous(point, prev, ang_tol_rad, self.alignment_statuses);
             return Ok(());
         }
 
@@ -1904,20 +1904,18 @@ mod tests {
                 Some(Vec3::ZERO),
                 k.fixes.dupin_bottom_hyperbola_axis,
             );
-            if checked {
-                assert_eq!(
-                    result.unwrap_err(),
-                    point.crv_deriv().angle_between(Vec3::ZERO).unwrap_err()
-                );
-            } else {
-                result.unwrap();
-                assert_eq!(point.point_type, IntersectionPointType::TangentCurve);
-            }
+            // fork e7ebc8d (`ALIGN_DIR_WITH_PREVIOUS_POINT`): without an angle nothing is
+            // aligned, with the policy as without it
+            result.unwrap();
+            assert_eq!(point.point_type, IntersectionPointType::TangentCurve);
         }
     }
 
     #[test]
-    fn audit_483_alignment_propagates_failed_angles_without_flipping() {
+    /// fork e7ebc8d (`ALIGN_DIR_WITH_PREVIOUS_POINT`): a direction without an angle to
+    /// the previous one is left as it is, and the trace goes on (it errored with
+    /// `ssi_alignment_statuses` before #2009).
+    fn audit_483_alignment_skips_failed_angles_without_flipping() {
         for (current, previous) in [
             (Vec3::ZERO, Vec3::X),
             (Vec3::X, Vec3::ZERO),
@@ -1925,23 +1923,21 @@ mod tests {
         ] {
             let mut point = TsectPnt::new();
             *point.crv_deriv_mut() = current;
-            let expected = current.angle_between(previous).unwrap_err();
-            assert!(align_with_previous(&mut point, Some(previous), 0.01, false).is_ok());
-            assert_eq!(
-                align_with_previous(&mut point, Some(previous), 0.01, true).unwrap_err(),
-                expected
-            );
+            assert!(current.angle_between(previous).is_err());
+            align_with_previous(&mut point, Some(previous), 0.01, false);
+            assert_eq!(point.crv_deriv(), current);
+            align_with_previous(&mut point, Some(previous), 0.01, true);
             assert_eq!(point.crv_deriv(), current);
         }
         for checked in [false, true] {
             let mut point = TsectPnt::new();
             *point.crv_deriv_mut() = Vec3::X;
-            align_with_previous(&mut point, Some(-Vec3::X), 0.01, checked).unwrap();
+            align_with_previous(&mut point, Some(-Vec3::X), 0.01, checked);
             assert_eq!(point.crv_deriv(), -Vec3::X);
             *point.crv_deriv_mut() = Vec3::ZERO;
-            align_with_previous(&mut point, None, 0.01, checked).unwrap();
+            align_with_previous(&mut point, None, 0.01, checked);
             *point.crv_deriv_mut() = Vec3::X * 1e300;
-            align_with_previous(&mut point, Some(Vec3::X), 0.01, checked).unwrap();
+            align_with_previous(&mut point, Some(Vec3::X), 0.01, checked);
             assert_eq!(point.crv_deriv(), Vec3::X * 1e300);
         }
     }

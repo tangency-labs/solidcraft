@@ -996,7 +996,10 @@ fn list_operand(k: &mut Kernel, breps: &[Brep], surfaces: &[Surface]) -> Result<
         let mut result = copy_brep(k, first, None, None, true, true)?;
         for source in rest {
             // MergeBrep's ordinary status is ignored upstream.
-            ignored(combine_brep(k, &mut result, source, None, None, true))?;
+            ignored(crate::error::passed_on(
+                combine_brep(k, &mut result, source, None, None, true),
+                k.fixes.brep_edit_statuses_pass_on,
+            )?)?;
         }
         (result, false)
     } else {
@@ -1266,17 +1269,16 @@ pub fn boolean_lists_with_notifications(
                             // reference attribute) and the result keeps its own.
                             copy_component(k, &mut result, &connected, &mut component, &face_ref)?;
                         }
-                        ignored(stitch_and_orient(
-                            k,
-                            &mut component,
-                            -0.1,
-                            false,
-                            None,
-                            None,
-                        ))?;
+                        ignored(crate::error::passed_on(
+                            stitch_and_orient(k, &mut component, -0.1, false, None, None),
+                            k.fixes.brep_edit_statuses_pass_on,
+                        )?)?;
                         output.breps.push(component);
                         result.set_editing_enabled(true);
-                        ignored(remove_faces(k, &mut result, &connected))?;
+                        ignored(crate::error::passed_on(
+                            remove_faces(k, &mut result, &connected),
+                            k.fixes.brep_edit_statuses_pass_on,
+                        )?)?;
                         let next = bp::faces(&result, None)?;
                         if next.len() >= faces.len() {
                             return Err(SolidError::invalid_input(

@@ -1018,10 +1018,13 @@ impl OffsetSurface {
             p.assign(&base_polar);
         }
 
-        // set the pseudo box basis (status ignored upstream)
+        // set the pseudo box basis (status ignored upstream; fork 4803d6d passes it on)
         if let Some(p) = pseudo_box.as_mut() {
             let [b0, b1, b2] = *base_pseudo.basis();
-            let _ = p.set_basis(b0, b1, b2);
+            let set = p.set_basis(b0, b1, b2);
+            if k.fixes.brep_edit_statuses_pass_on {
+                set?;
+            }
         }
 
         match base_polar.state() {

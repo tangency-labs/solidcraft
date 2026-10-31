@@ -1045,6 +1045,7 @@ fn remember_split(
     original: RegionId,
     new_face: FaceId,
     other_face: FaceId,
+    pass_on: bool,
 ) -> Result<()> {
     let (r1, r2) = region_pair(primary, required(face::upward_faceuse(primary, new_face)?)?)?;
     let (o1, o2) = region_pair(other, required(face::upward_faceuse(other, other_face)?)?)?;
@@ -1075,7 +1076,11 @@ fn remember_split(
                     .and_then(Attribute::merge_region_data_mut),
             )?;
             let first = required(data.this_region(0))?;
-            ignored(data.set_regions(0, first, this_type, other_key, other_type))?;
+            // (fork e7ebc8d passes this status on: `SER`)
+            ignored(crate::error::passed_on(
+                data.set_regions(0, first, this_type, other_key, other_type),
+                pass_on,
+            )?)?;
         } else {
             let h = attributes.insert(Attribute::merge_region(
                 key(original),
@@ -1148,6 +1153,7 @@ fn make_other_faces(
                     required(made.old_region)?,
                     new_face,
                     f,
+                    kernels.primary.fixes.brep_edit_statuses_pass_on,
                 )?;
             }
         }
@@ -1316,7 +1322,10 @@ fn editing_stages(
     for _ in 0..10 {
         for &f in faces.keep.iter().chain(&faces.delete) {
             if let Some(of) = intersector.face_mate(f) {
-                ignored(intersector.remove_relationship(f, of))?;
+                ignored(crate::error::passed_on(
+                    intersector.remove_relationship(f, of),
+                    kernels.primary.fixes.brep_edit_statuses_pass_on,
+                )?)?;
             }
         }
         faces.keep.clear();
@@ -1463,16 +1472,22 @@ fn editing_stages(
         }
     }
     if !infinite_current || void(primary, required(primary.infinite_region())?)? == 0 {
-        ignored(find_and_set_infinite(
-            kernels,
-            primary,
-            None,
-            bp::SetRegionVoidType::InfiniteRegionSwap,
-            None,
-        ))?;
+        ignored(crate::error::passed_on(
+            find_and_set_infinite(
+                kernels,
+                primary,
+                None,
+                bp::SetRegionVoidType::InfiniteRegionSwap,
+                None,
+            ),
+            kernels.primary.fixes.brep_edit_statuses_pass_on,
+        )?)?;
     }
     put_outer_shells_first(kernels, primary, operation)?;
-    ignored(intersector.propagate_regions(kernels, primary, other, attributes, operation))?;
+    ignored(crate::error::passed_on(
+        intersector.propagate_regions(kernels, primary, other, attributes, operation),
+        kernels.primary.fixes.brep_edit_statuses_pass_on,
+    )?)?;
     if options.boolean_post_process
         && matches!(
             operation,
@@ -1600,7 +1615,10 @@ fn manifold_boolean_translated(
         }
         if !is_oriented_sheet(kernels, b)? {
             let first = required(bp::faces(b, None)?.first().copied())?;
-            ignored(orient_sheet_surfaces(kernels, b, first, true))?;
+            ignored(crate::error::passed_on(
+                orient_sheet_surfaces(kernels, b, first, true),
+                kernels.primary.fixes.brep_edit_statuses_pass_on,
+            )?)?;
         }
     }
     kernels.doing_boolean(true);
@@ -1704,14 +1722,17 @@ fn manifold_boolean_translated(
                     None,
                 )?;
                 // Native defaults: new_faces=NULL, use_merge=TRUE, merge_object=NULL.
-                ignored(intersector.copy_component_faces(
-                    kernels,
-                    source,
-                    reverse,
-                    set,
-                    &mut component,
-                    attributes,
-                ))?;
+                ignored(crate::error::passed_on(
+                    intersector.copy_component_faces(
+                        kernels,
+                        source,
+                        reverse,
+                        set,
+                        &mut component,
+                        attributes,
+                    ),
+                    kernels.primary.fixes.brep_edit_statuses_pass_on,
+                )?)?;
                 components.push(component);
             }
         }
@@ -1776,7 +1797,10 @@ fn finish_boolean(
         *other = None;
     }
     if let Some(a) = primary.as_mut() {
-        ignored(delete_caches(a))?;
+        ignored(crate::error::passed_on(
+            delete_caches(a),
+            kernels.primary.fixes.brep_edit_statuses_pass_on,
+        )?)?;
     }
     kernels.doing_boolean(false);
     Ok(operation != BooleanOperation::ExtractSeparate)

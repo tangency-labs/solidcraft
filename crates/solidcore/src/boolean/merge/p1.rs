@@ -783,11 +783,16 @@ pub(crate) fn boolean_post_process_with_notifications(
                     .region
                     .ok_or_else(|| SolidError::null_pointer(OP))?;
                 // `pWShell->TransferChildrenTo(pFShell, NULL)` and
-                // `pWR->Remove(pWShell)`: both statuses are ignored upstream.
-                ignore_failure(shell::transfer_children(
-                    k, brep, wire_shell, face_shell, None,
-                ))?;
-                ignore_failure(shell::region_remove_shell(brep, wire_region, wire_shell))?;
+                // `pWR->Remove(pWShell)`: both statuses are ignored upstream (fork e7ebc8d
+                // passes them on: `SER`).
+                ignore_failure(crate::error::passed_on(
+                    shell::transfer_children(k, brep, wire_shell, face_shell, None),
+                    k.fixes.brep_edit_statuses_pass_on,
+                )?)?;
+                ignore_failure(crate::error::passed_on(
+                    shell::region_remove_shell(brep, wire_region, wire_shell),
+                    k.fixes.brep_edit_statuses_pass_on,
+                )?)?;
             }
         }
     }
