@@ -206,6 +206,7 @@ pub fn tool_definitions() -> Vec<Value> {
             obj(
                 json!({
                     "body": string("Body name (default: all bodies)"),
+                    "names_only": {"type": "boolean", "description": "Only each body's name (assembly occurrences included) and its definition's, without measuring (default false)"},
                     "items": {"type": "array", "items": {"type": "object"}, "description": "One or two selections to measure instead of bodies, e.g. {\"type\": \"face\", \"body\": \"Body1\", \"index\": 3, \"point\": [x,y,z]}"},
                     "summary": {"type": "boolean", "description": "Per body only name, volume_mm3, bbox {min, max}, faces and closed, and total.volume_mm3 (default false: the full reply)"},
                 }),
@@ -784,6 +785,21 @@ fn str_arg<'a>(a: &'a Map<String, Value>, k: &str) -> Option<&'a str> {
     a.get(k).and_then(Value::as_str)
 }
 
+/// `measure`'s arguments (without `items`) as `inspect.measure` takes them.
+fn measure_params(a: &Map<String, Value>) -> Value {
+    let mut p = pick(a, &["names_only"]);
+    if let Some(body) = str_arg(a, "body") {
+        p["bodies"] = json!([body]);
+    }
+    p
+}
+
+/// `summary` narrows measured bodies; a `names_only` list has nothing to narrow.
+fn measure_summary_wanted(a: &Map<String, Value>) -> bool {
+    let flag = |k: &str| a.get(k).and_then(Value::as_bool).unwrap_or(false);
+    flag("summary") && !flag("names_only")
+}
+
 fn dispatch(b: &mut dyn Backend, name: &str, a: &Map<String, Value>) -> Result<Value, String> {
     match name {
         "list_commands" => {
@@ -824,12 +840,8 @@ fn dispatch(b: &mut dyn Backend, name: &str, a: &Map<String, Value>) -> Result<V
             if let Some(items) = a.get("items") {
                 return exec(b, "inspect.measure", json!({ "items": items }));
             }
-            let p = match str_arg(a, "body") {
-                Some(body) => json!({"bodies": [body]}),
-                None => json!({}),
-            };
-            let m = exec(b, "inspect.measure", p)?;
-            Ok(if a.get("summary").and_then(Value::as_bool).unwrap_or(false) { measure_summary(m) } else { m })
+            let m = exec(b, "inspect.measure", measure_params(a))?;
+            Ok(if measure_summary_wanted(a) { measure_summary(m) } else { m })
         }
         "body_topology" => {
             let p = pick(a, &["body"]);
@@ -948,11 +960,7 @@ fn batch_step(step: &Value) -> Result<(String, Value, Option<Narrow>), String> {
         }
         "measure" => match a.get("items") {
             Some(items) => mapped("inspect.measure", json!({"items": items})),
-            None => {
-                let p = str_arg(a, "body").map_or(json!({}), |body| json!({"bodies": [body]}));
-                let summary = a.get("summary").and_then(Value::as_bool).unwrap_or(false);
-                Ok(("inspect.measure".into(), p, summary.then_some(Narrow::MeasureSummary)))
-            }
+            None => Ok(("inspect.measure".into(), measure_params(a), measure_summary_wanted(a).then_some(Narrow::MeasureSummary))),
         },
         "inspect_design" => mapped("document.inspect", json!({"measure": a.get("measure").and_then(Value::as_bool).unwrap_or(true)})),
         "undo" => mapped("edit.undo", json!({})),

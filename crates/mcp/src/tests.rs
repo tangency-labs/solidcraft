@@ -809,6 +809,13 @@ fn batch_stops_at_first_error_and_rolls_back() {
     assert_eq!(r["result"]["isError"], true);
     assert!(r["result"]["content"][0]["text"].as_str().unwrap().contains("solid.extrude"));
     assert_eq!(tool(&mut s, "measure", json!({}))["body_count"], 2);
+    // `names_only` passes through, directly and as a batch step.
+    let n = tool(&mut s, "measure", json!({"names_only": true}));
+    assert_eq!(n["body_count"], 2, "{n}");
+    assert!(n["bodies"][0]["name"].is_string() && n["bodies"][0].get("volume_mm3").is_none(), "{n}");
+    assert_eq!(tool(&mut s, "measure", json!({"names_only": true, "summary": true})), n, "summary has nothing to narrow in a names list");
+    let r = tool(&mut s, "batch", json!({"commands": [{"command": "measure", "params": {"names_only": true, "summary": true}}]}));
+    assert!(r.to_string().contains("\"definition\""), "{r}");
 }
 
 /// #5853: a misspelled command, however late in the batch, refuses the batch before its first
