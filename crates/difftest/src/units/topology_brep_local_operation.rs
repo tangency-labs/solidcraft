@@ -339,6 +339,8 @@ impl UnitDiff for Runner {
 /// A generated case on one of `solids`: one to three faces replaced by planes offset
 /// along and tilted from their surface normals.
 fn generate_on(rng: &mut Rng, solids: &[&&str]) -> Option<Value> {
+    /// Redraws of a generated case whose replacements cannot be built.
+    const REDRAWS: usize = 16;
     let file = solids.get(rng.below(solids.len() as u64) as usize)?;
     let faces = match **file {
         // (cone.smb and Solids/nurb_fillet.smb: their files' "Faces In Brep" counts)
@@ -348,6 +350,21 @@ fn generate_on(rng: &mut Rng, solids: &[&&str]) -> Option<Value> {
         "Solids/nurb_fillet.smb" => 20,
         _ => 5,
     };
+    // Setup must succeed on both sides: replacements the Rust side's `planes` (the shim's
+    // construction) refuses on the Rust reader's B-rep are drawn again, up to `REDRAWS`
+    // times; the first draw is kept whenever it builds.
+    let mut inputs = draw_on(rng, file, faces);
+    for _ in 0..REDRAWS {
+        if replacements_buildable(&inputs) {
+            break;
+        }
+        inputs = draw_on(rng, file, faces);
+    }
+    serde_json::to_value(inputs).ok()
+}
+
+/// One draw of [`generate_on`]'s replacements on `file` (of `faces` faces).
+fn draw_on(rng: &mut Rng, file: &str, faces: u64) -> Inputs {
     let count = 1 + rng.below(3) as usize;
     let mut replaced = Vec::new();
     for _ in 0..count {
@@ -368,13 +385,26 @@ fn generate_on(rng: &mut Rng, solids: &[&&str]) -> Option<Value> {
         };
         replaced.push(Rep { face, offset, tilt });
     }
-    serde_json::to_value(Inputs {
-        file: (**file).into(),
+    Inputs {
+        file: file.into(),
         rebuild: false,
         replaced,
         attributed: false,
-    })
-    .ok()
+    }
+}
+
+/// Whether the Rust side builds `i`'s replacement planes ([`planes`] on the Rust reader's
+/// B-rep). A file the Rust reader does not read counts as buildable: that is no
+/// replacement's doing, and the case keeps its draw.
+fn replacements_buildable(i: &Inputs) -> bool {
+    let mut k = Kernel::default();
+    let Ok(file) = path(i) else {
+        return true;
+    };
+    let Ok(Ok(b)) = crate::own_reader::read_file_rebuild(&mut k, &file, i.rebuild) else {
+        return true;
+    };
+    !matches!(planes(&k, &b, i), Ok(None))
 }
 
 /// The shim's op 3 tags: every face (`GetFaces` order) and edge (`GetEdges` order) its

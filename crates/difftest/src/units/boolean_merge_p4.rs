@@ -429,6 +429,8 @@ impl UnitDiff for Runner {
         }
     }
     fn generate(&self, rng: &mut Rng) -> Option<Value> {
+        /// Redraws of a generated case whose operand cannot be built.
+        const REDRAWS: usize = 16;
         let scale = match rng.below(5) {
             0 => 1e-9,
             1 => 1e-3,
@@ -449,8 +451,18 @@ impl UnitDiff for Runner {
                 rng.uniform(0.5, 2.0) * scale,
             ]
         };
-        let a = operand();
-        let b = operand();
+        // Setup must succeed on both sides: a draw whose operand the Rust port of the shim's
+        // constructors refuses (a plane face over a domain too large at scale 1e6) is drawn
+        // again, up to REDRAWS times; the first draw is kept whenever it builds.
+        let mut a = operand();
+        let mut b = operand();
+        for _ in 0..REDRAWS {
+            if import(&a).is_ok() && import(&b).is_ok() {
+                break;
+            }
+            a = operand();
+            b = operand();
+        }
         Some(json!({"primary":a,"other":b,"operation":rng.below(11),
             "flags":[rng.chance(0.2),rng.chance(0.2),rng.chance(0.5),rng.chance(0.2),rng.chance(0.5)],
             "manifold":rng.chance(0.8),"distinct_contexts":rng.chance(0.5),"caller_lock":rng.chance(0.5)}))
