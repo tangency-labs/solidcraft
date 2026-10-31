@@ -1604,6 +1604,24 @@ mod tests {
     }
 
     #[test]
+    fn replace_face_sweeps_a_move_past_the_rim_of_its_neighbour() {
+        // A boss on a plate: moving the boss's side to the plate's end plane is farther than the
+        // boss is wide. The offset path refuses that (a loop in the plate's top would cross its
+        // edge); sweeping the face there and joining lets that loop open into a notch.
+        let plate = box_solid(Vec3::ZERO, Vec3::new(80.0, 50.0, 8.0)).unwrap();
+        let boss = box_solid(Vec3::new(15.0, 4.0, 8.0), Vec3::new(24.5, 12.5, 48.0)).unwrap();
+        let body = crate::boolean(&plate, &boss, crate::BoolOp::Union).unwrap().unwrap();
+        let plane = Plane::from_normal(Vec3::new(80.0, 0.0, 0.0), Vec3::X).unwrap();
+        let result = crate::replace_faces(&body, &[Vec3::new(24.5, 8.25, 30.0)], &SplitTool::Plane(plane)).unwrap();
+        assert_eq!(result.unmeshed_faces(), 0);
+        assert_eq!(result.crossed_face_loops().unwrap(), 0);
+        let volume = result.tessellate(1e-5).unwrap().measure().volume;
+        assert!((volume - 54_100.0).abs() < 1.0, "{volume}");
+        assert!(result.contains(Vec3::new(60.0, 8.25, 30.0)));
+        assert!(!result.contains(Vec3::new(60.0, 8.25, 50.0)));
+    }
+
+    #[test]
     fn replace_face_with_bspline_target() {
         // A parabolic cylinder z=9+x²/20, represented as a B-spline surface,
         // wider than the source cap so its trim does not supply the new boundary.
