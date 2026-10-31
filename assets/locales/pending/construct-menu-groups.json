@@ -1,0 +1,27 @@
+{
+  "en": {
+    "ui.construct_planes": "Planes",
+    "ui.construct_axes": "Axes",
+    "ui.construct_points": "Points"
+  },
+  "ja": {
+    "ui.construct_planes": "平面",
+    "ui.construct_axes": "軸",
+    "ui.construct_points": "点"
+  },
+  "zh": {
+    "ui.construct_planes": "平面",
+    "ui.construct_axes": "轴",
+    "ui.construct_points": "点"
+  },
+  "de": {
+    "ui.construct_planes": "Ebenen",
+    "ui.construct_axes": "Achsen",
+    "ui.construct_points": "Punkte"
+  },
+  "ko": {
+    "ui.construct_planes": "평면",
+    "ui.construct_axes": "축",
+    "ui.construct_points": "점"
+  }
+}
