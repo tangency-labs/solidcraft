@@ -1353,7 +1353,14 @@ pub(super) fn newly_broken_in_history(
         model.evaluate(&doc);
         model
     };
-    newly_broken(&whole(before_doc, before), &whole(after_doc, after))
+    // Only a feature that fails after the change can be newly broken: when none does, the
+    // history before it needn't be built again (#9917: each build ran every boolean after the
+    // marker, half a minute on a large design).
+    let after = whole(after_doc, after);
+    if after.results.iter().all(|r| r.error.is_none()) {
+        return Vec::new();
+    }
+    newly_broken(&whole(before_doc, before), &after)
 }
 
 /// Whether `after_doc` differs from `before_doc` only in sketch constraints and dimensions (and
