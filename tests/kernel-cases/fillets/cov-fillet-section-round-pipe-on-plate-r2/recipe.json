@@ -1,0 +1,47 @@
+{
+ "commands": [
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 60,
+    "width": 40,
+    "height": 10,
+    "body_name": "Plate"
+   }
+  },
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "radius": 10,
+    "height": 60,
+    "base": [
+     0,
+     20,
+     16
+    ],
+    "axis": [
+     1,
+     0,
+     0
+    ],
+    "operation": "join",
+    "targets": [
+     "Plate"
+    ]
+   }
+  },
+  {
+   "command": "solid.fillet",
+   "params": {
+    "radius": 2,
+    "edges": [
+     [
+      30,
+      28,
+      10
+     ]
+    ]
+   }
+  }
+ ]
+}
