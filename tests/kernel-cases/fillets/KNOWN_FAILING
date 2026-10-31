@@ -33,5 +33,4 @@ report-peg-front-and-concave-chamfers-together-d2 SMLib status 1001: SmFilletNx1
 report-peg-front-and-concave-rounds-together-r2 the corner patch where the convex and concave rounds meet stands 0.0374 out of the front face (box y min -0.0374), and the two rounds meet at (32, 2, 10), where their contact lines on the top cross, with normals 180 degrees apart
 report-peg-front-and-concave-rounds-together-r5 the corner patch where the convex and concave rounds meet stands 0.128 out of the front face (box y min -0.1278), and the two rounds meet at (27.351, 5, 10), where their contact lines on the top cross, with normals 180 degrees apart
 report-peg-front-chamfer-d1-then-concave-chamfer-d2 SMLib status 1001 on the first chamfer (as report-peg-front-chamfer-d2)
-report-peg-front-chamfer-d2 SMLib status 1001: SmFilletNx1Corner, Corner Edge Computation Failure, at the chamfer's end on the cylinder, which leaves its contact line on the front face tangentially
 report-peg-step-front-and-concave-rounds-together-r2 SMLib status 1001: Fillet Surface Computation Failure on the peg read back from STEP (the native peg builds, with its corner patch out of the front face)
