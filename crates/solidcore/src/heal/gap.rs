@@ -50,6 +50,9 @@
 //! - Sample counts: a count of zero (upstream indexes before the array) and more than
 //!   [`MAX_SAMPLES`] samples (upstream allocates whatever the counts say) return
 //!   [`SolidError::InvalidInput`] from [`GapFunction::build_sample_set`]. No recursion.
+//! - With `Kernel::fixes.gap_samples_use_trimmed_spans` (off by default), B-spline
+//!   samples cover the requested interval's knot spans and exact endpoints, rather
+//!   than remapping the first spans from the whole knot range (WR-89).
 
 use crate::curve::curve::p2::BSPLINE_CURVE_TYPE;
 use crate::curve::curve::p6::DroppedPoint;
@@ -1701,6 +1704,40 @@ fn samples_per_interval(count: usize, intervals: usize) -> Result<usize> {
     Ok(per)
 }
 
+/// Samples the selected knot spans in the requested interval's normalized coordinates.
+fn trimmed_span_values(
+    knots: &[f64],
+    interval: &Extent1d,
+    per: usize,
+    values: &mut [f64],
+) -> Result<()> {
+    let mut index = 1;
+    for (i, span) in knots.windows(2).enumerate() {
+        // The ordered-index lookup coalesces near-equal knots. Use the caller's
+        // actual ends even when that lookup returned a nearby existing knot.
+        let start = if i == 0 { interval.min() } else { at(span, 0)? };
+        let end = if i + 2 == knots.len() {
+            interval.max()
+        } else {
+            at(span, 1)?
+        };
+        let inc = (end - start) / per as f64;
+        let mut val = start + inc;
+        for _ in 0..per {
+            set_at(values, index, (val - interval.min()) / interval.length())?;
+            index += 1;
+            val += inc;
+        }
+    }
+    // Preserve exact ends rather than the last increment's accumulated rounding.
+    set_at(values, 0, 0.0)?;
+    let last = values
+        .last_mut()
+        .ok_or_else(|| SolidError::invalid_input(OP_GF, "no span samples"))?;
+    *last = 1.0;
+    Ok(())
+}
+
 fn too_many() -> SolidError {
     SolidError::invalid_input(OP_GF, "too many gap samples")
 }
@@ -2250,6 +2287,23 @@ impl<'a> GapFunction<'a> {
         let (cu, cv) = (self.sample_cnt_u, self.sample_cnt_v);
         let mut vals = vec![0.0; cnt(cu, cv)?];
 
+        if k.fixes.gap_samples_use_trimmed_spans {
+            let spans_u = knots_u
+                .get(start_u..=end_u)
+                .ok_or_else(|| SolidError::invalid_input(OP_GF, "bad U knot span range"))?;
+            let (values_u, values_v) = vals
+                .split_at_mut_checked(cu)
+                .ok_or_else(|| SolidError::invalid_input(OP_GF, "bad U sample count"))?;
+            trimmed_span_values(spans_u, &self.sample_ivl_u, per_u, values_u)?;
+            if this_surface.is_some() {
+                let spans_v = knots_v
+                    .get(start_v..=end_v)
+                    .ok_or_else(|| SolidError::invalid_input(OP_GF, "bad V knot span range"))?;
+                trimmed_span_values(spans_v, &self.sample_ivl_v, per_v, values_v)?;
+            }
+            return Ok(vals);
+        }
+
         // ParamLength of U and V domains
         let ku0 = at(&knots_u, 0)?;
         let len_u = knots_u.last().copied().unwrap_or(0.0) - ku0;
@@ -2640,6 +2694,188 @@ impl<'a> GapFunction<'a> {
 mod tests {
     use super::*;
     use crate::curve::line::Line;
+    use crate::nurbs::b_spline_curve::BSplineCurve;
+    use crate::nurbs::b_spline_surface::BSplineSurface;
+    use crate::nurbs::math::CPoint;
+
+    // A piecewise linear gap with a peak of 10 at t=15, on [10,16].
+    fn wr89_curve() -> Curve {
+        let points: Vec<_> = [0.0, 0.0, 0.0, 0.0, 0.0, 10.0, 0.0]
+            .into_iter()
+            .map(|z| CPoint::from_point(Vec3::new(0.0, 0.0, z)))
+            .collect();
+        Curve::from(
+            BSplineCurve::from_data(
+                3,
+                6,
+                8,
+                1,
+                &points,
+                &[10.0, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0, 16.0, 16.0],
+            )
+            .unwrap(),
+        )
+    }
+
+    fn assert_wr89_params(f: &GapFunction<'_>, us: &[f64], vs: &[f64]) {
+        assert_eq!((f.sample_cnt_u(), f.sample_cnt_v()), (us.len(), vs.len()));
+        let expected = vs.iter().flat_map(|&v| us.iter().map(move |&u| (u, v)));
+        assert_eq!(f.samples().len(), us.len() * vs.len());
+        for (sample, (u, v)) in f.samples().iter().zip(expected) {
+            assert!((sample.this_param.x - u).abs() < 1e-12, "{sample:?} u={u}");
+            assert!((sample.this_param.y - v).abs() < 1e-12, "{sample:?} v={v}");
+        }
+    }
+
+    #[test]
+    fn wr89_trimmed_curve_finds_the_missed_gap_peak() {
+        let curve = wr89_curve();
+        let interval = Extent1d::from_raw(14.0, 16.0);
+        let mut k = Kernel::default();
+        assert!(!k.fixes.gap_samples_use_trimmed_spans);
+        let mut original = GapFunction::crv_pt(1.0, &curve, &interval, Vec3::ZERO, 3);
+        let old_max = *original.max_gap_sample(&k, false).unwrap();
+        assert!((old_max.length() - 20.0 / 3.0).abs() < 1e-12);
+
+        k.fixes.gap_samples_use_trimmed_spans = true;
+        let mut fixed = GapFunction::crv_pt(1.0, &curve, &interval, Vec3::ZERO, 3);
+        let max = *fixed.max_gap_sample(&k, false).unwrap();
+        assert_eq!(max.this_param.x, 15.0);
+        assert_eq!(max.length(), 10.0);
+        assert_wr89_params(&fixed, &[14.0, 14.5, 15.0, 15.5, 16.0], &[0.0]);
+        let lengths: Vec<_> = fixed.samples().iter().map(GapSample::length).collect();
+        assert_eq!(lengths, [0.0, 5.0, 10.0, 5.0, 0.0]);
+        assert_eq!(fixed.samples_state(), SamplesState::Set);
+        assert_eq!(fixed.all_normal_gaps(), Some(true));
+
+        let mut stop = GapFunction::crv_pt(1.0, &curve, &interval, Vec3::ZERO, 3);
+        let first_big = *stop.max_gap_sample(&k, true).unwrap();
+        assert_eq!(first_big.this_param.x, 14.5);
+        assert_eq!(first_big.length(), 5.0);
+        assert_eq!(stop.samples_state(), SamplesState::UntilBigGap);
+    }
+
+    #[test]
+    fn wr89_curve_surface_gap_finds_the_peak_with_the_edge_face_sample_count() {
+        let curve = wr89_curve();
+        let plane = Surface::from(crate::surface::plane::Plane::from_normal(
+            Vec3::ZERO,
+            Vec3::new(0.0, 0.0, 1.0),
+        ));
+        let interval = Extent1d::from_raw(14.0, 16.0);
+        let mut k = Kernel::default();
+        // CalcMaxEdgeFaceGap uses this gap function with 20 requested samples.
+        for enabled in [false, true] {
+            k.fixes.gap_samples_use_trimmed_spans = enabled;
+            let mut f = GapFunction::crv_srf(1.0, &curve, &interval, &plane, 20);
+            let max = *f.max_gap_sample(&k, false).unwrap();
+            let expected = if enabled { 10.0 } else { 20.0 / 3.0 };
+            assert!((max.length() - expected).abs() < 1e-12);
+            assert_eq!(max.drop_type(), GapDropType::Normal);
+            if enabled {
+                assert!((max.this_param.x - 15.0).abs() < 1e-12);
+                assert_eq!(max.other_pos, Vec3::ZERO);
+            }
+        }
+    }
+
+    #[test]
+    fn wr89_curve_samples_include_trim_ends_and_span_centers() {
+        let curve = wr89_curve();
+        let mut k = Kernel::default();
+        k.fixes.gap_samples_use_trimmed_spans = true;
+        for (interval, count, expected) in [
+            ((14.25, 15.75), 3, vec![14.25, 14.625, 15.0, 15.375, 15.75]),
+            ((14.0, 15.0), 1, vec![14.0, 14.5, 15.0]),
+            (
+                (14.0, 16.0),
+                8,
+                vec![14.0, 14.25, 14.5, 14.75, 15.0, 15.25, 15.5, 15.75, 16.0],
+            ),
+            ((10.0, 12.0), 3, vec![10.0, 10.5, 11.0, 11.5, 12.0]),
+            (
+                (14.0 + 1e-10, 16.0 - 1e-10),
+                3,
+                vec![14.0 + 1e-10, 14.5 + 5e-11, 15.0, 15.5 - 5e-11, 16.0 - 1e-10],
+            ),
+        ] {
+            let interval = Extent1d::from_raw(interval.0, interval.1);
+            let mut f = GapFunction::crv_pt(1.0, &curve, &interval, Vec3::ZERO, count);
+            f.build_sample_set(&k, false).unwrap();
+            assert_wr89_params(&f, &expected, &[0.0]);
+            assert_eq!(f.samples().first().unwrap().this_param.x, interval.min());
+            assert_eq!(f.samples().last().unwrap().this_param.x, interval.max());
+        }
+    }
+
+    #[test]
+    fn wr89_surface_grid_uses_both_trimmed_knot_ranges() {
+        let points: Vec<Vec<_>> = [10.0, 11.0, 13.0, 16.0]
+            .into_iter()
+            .map(|u| {
+                [-4.0, -2.0, 1.0, 2.0]
+                    .into_iter()
+                    .map(|v| CPoint::from_point(Vec3::new(u, v, 2.0)))
+                    .collect()
+            })
+            .collect();
+        let surface = Surface::from(
+            BSplineSurface::from_data(
+                3,
+                3,
+                1,
+                1,
+                5,
+                5,
+                &points,
+                &[10.0, 10.0, 11.0, 13.0, 16.0, 16.0],
+                &[-4.0, -4.0, -2.0, 1.0, 2.0, 2.0],
+            )
+            .unwrap(),
+        );
+        let domain = Extent2d::from_bounds(11.5, -3.0, 15.0, 1.5);
+        let mut k = Kernel::default();
+        k.fixes.gap_samples_use_trimmed_spans = true;
+        let mut f = GapFunction::srf_pt(1.0, &surface, &domain, Vec3::ZERO, 3);
+        f.set_sample_cnt(3, 3);
+        f.build_sample_set(&k, false).unwrap();
+        assert_wr89_params(
+            &f,
+            &[11.5, 12.25, 13.0, 14.0, 15.0],
+            &[-3.0, -2.5, -2.0, -0.5, 1.0, 1.25, 1.5],
+        );
+        for sample in f.samples() {
+            let expected = (sample.this_param.x * sample.this_param.x
+                + sample.this_param.y * sample.this_param.y
+                + 4.0)
+                .sqrt();
+            assert!((sample.length() - expected).abs() < 1e-12);
+        }
+    }
+
+    #[test]
+    fn wr89_preserves_full_domain_sampling_and_unsupported_input_errors() {
+        let curve = wr89_curve();
+        let mut k = Kernel::default();
+        let interval = curve.natural_interval();
+        let mut before = GapFunction::crv_pt(1.0, &curve, &interval, Vec3::ZERO, 3);
+        before.build_sample_set(&k, false).unwrap();
+        k.fixes.gap_samples_use_trimmed_spans = true;
+        let mut after = GapFunction::crv_pt(1.0, &curve, &interval, Vec3::ZERO, 3);
+        after.build_sample_set(&k, false).unwrap();
+        assert_eq!(before.samples(), after.samples());
+        for enabled in [false, true] {
+            k.fixes.gap_samples_use_trimmed_spans = enabled;
+            for (interval, count) in [
+                (Extent1d::from_raw(14.0, 14.0), 3),
+                (interval, 0),
+                (interval, usize::MAX),
+            ] {
+                let mut f = GapFunction::crv_pt(1.0, &curve, &interval, Vec3::ZERO, count);
+                assert!(f.build_sample_set(&k, false).is_err());
+            }
+        }
+    }
 
     #[test]
     fn reset_states() {

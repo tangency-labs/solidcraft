@@ -145,6 +145,12 @@ impl Caches {
 #[allow(clippy::struct_excessive_bools)]
 #[non_exhaustive]
 pub struct UpstreamFixes {
+    /// `SmGapFunction::BuildSampleSet` samples the B-spline spans inside the requested
+    /// curve interval or surface domain, normalizing against that interval and keeping
+    /// its exact endpoints. Upstream starts at the first knot and normalizes against
+    /// the whole knot range before mapping into the sample interval, so trimmed
+    /// geometry can miss a gap peak (WR-89). Off by default for pinned C++ parity.
+    pub gap_samples_use_trimmed_spans: bool,
     /// `SmCurveLoops::GetLoopStartEnd` starts a later loop after the previous loop
     /// ends, keeping adjacency within that loop (WR-96). Off by default for C++ parity.
     pub curve_loop_start_after_previous_end: bool,
