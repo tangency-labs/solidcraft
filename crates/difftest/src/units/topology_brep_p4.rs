@@ -55,7 +55,7 @@ use solidcore::topology::{
     ArenaId, Brep, EdgeId, EdgeuseOwner, FaceId, LoopuseStart, ShellId, VertexId, VertexuseOwner,
 };
 use solidcore_ffi::units::topology_brep_p4::{self as ffi, Damage, Op, Request, NULL_DEREFERENCE};
-use solidcore_ffi::units::topology_vertexuse::counts;
+use solidcore_ffi::units::topology_vertexuse::{counts, validate_block};
 use std::collections::BTreeMap;
 
 /// Differential runner for `topology.brep_p4`.
@@ -720,6 +720,16 @@ impl UnitDiff for Runner {
 
     fn run_rust(&self, case: &Case) -> Result<Output, HarnessError> {
         let i: Inputs = case.parse()?;
+        // an input the FFI refuses is a harness error on both sides (PR #502's
+        // convention): the shim never builds it, so the Rust side must not either. Fuzz
+        // case fuzz00285 (`--fuzz 300 --seeds 5` and `24`) gave one control point of a
+        // rational net a weight of `1e-300` among `-f64::MAX` ones: the fixture export
+        // refuses the net (mixed rationality) for the C++ side, while this side built the
+        // face and spun in `GlobalCoincidenceChecker` for over 30 s. `validate_block` is
+        // the export's own block checks (pure Rust, no shim call), on the block `run_cpp`
+        // sends.
+        let (path, blk) = block(&i.brep)?;
+        validate_block(&path, &blk).map_err(|e| err(&e))?;
         let mut k = Kernel::default();
         // the B-rep built (or read) by the Rust kernel; a read keeps the face surfaces'
         // cache states the Rust read left (the renumbered copy keeps their slots)

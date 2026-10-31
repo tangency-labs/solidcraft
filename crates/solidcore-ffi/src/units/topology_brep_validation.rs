@@ -23,6 +23,38 @@ mod sys {
 /// Mutations 8 through 10 remove required pointers and are pointer-check only;
 /// they are restored by the native fixture before destruction.
 pub fn eval(op: u8, path: &str, block: &[f64], args: [f64; 7]) -> Result<Vec<f64>, FfiError> {
+    validate(op, path, block, args)?;
+    let bad = || FfiError::InvalidArgument("invalid B-rep validation arguments".into());
+    let path = CString::new(path).map_err(|_| bad())?;
+    call_with_buffer(4096, |out, len| {
+        // SAFETY: validated block and fixed-length arguments remain live throughout
+        // the call; output and length pointers are supplied by call_with_buffer.
+        unsafe {
+            sys::sc_topology_brep_validation_eval(
+                i32::from(op),
+                path.as_ptr(),
+                block.as_ptr(),
+                block.len() as i64,
+                args.as_ptr(),
+                7,
+                out.as_mut_ptr(),
+                out.len() as i64,
+                &raw mut *len,
+            )
+        }
+    })
+}
+
+/// The argument and fixture-block checks [`eval`] applies before calling the shim: the
+/// inputs it refuses are those that are undefined in or crash the C++. The difftest
+/// runner applies the same checks to its Rust side (PR #502's convention), so an input
+/// the shim never runs (e.g. a sheet grid of more than 512 faces) is never built in Rust
+/// either.
+///
+/// # Errors
+///
+/// [`FfiError::InvalidArgument`] for a refused input.
+pub fn validate(op: u8, path: &str, block: &[f64], args: [f64; 7]) -> Result<(), FfiError> {
     let bad = || FfiError::InvalidArgument("invalid B-rep validation arguments".into());
     if op > 2
         || !args.iter().all(|x| x.is_finite())
@@ -62,22 +94,6 @@ pub fn eval(op: u8, path: &str, block: &[f64], args: [f64; 7]) -> Result<Vec<f64
         brep_block(&mut rd, path)?;
         rd.done()?;
     }
-    let path = CString::new(path).map_err(|_| bad())?;
-    call_with_buffer(4096, |out, len| {
-        // SAFETY: validated block and fixed-length arguments remain live throughout
-        // the call; output and length pointers are supplied by call_with_buffer.
-        unsafe {
-            sys::sc_topology_brep_validation_eval(
-                i32::from(op),
-                path.as_ptr(),
-                block.as_ptr(),
-                block.len() as i64,
-                args.as_ptr(),
-                7,
-                out.as_mut_ptr(),
-                out.len() as i64,
-                &raw mut *len,
-            )
-        }
-    })
+    CString::new(path).map_err(|_| bad())?;
+    Ok(())
 }

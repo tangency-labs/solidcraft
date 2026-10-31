@@ -1064,6 +1064,17 @@ fn analytic_face(
 
 #[allow(clippy::too_many_lines)] // one arm per op
 fn run_rust_case(i: &Inputs) -> Result<Output, HarnessError> {
+    // an input the FFI refuses is a harness error on both sides (PR #502's convention):
+    // the shim never builds it, so the Rust side must not either. Fuzz case fuzz00127
+    // (`--fuzz 300 --seeds 24`) mutated a control point to `1e300`: the export refuses a
+    // block value above `1e150` (HANG-29) for the C++ side, while this side built the
+    // face for over 40 s. `validate_block` is the export's own block checks (pure Rust,
+    // no shim call), on the path and block `build` sends.
+    let path = match &i.brep {
+        CaseBrep::Shared(b) => shared::path_of(b)?,
+        CaseBrep::Faces(_) | CaseBrep::EdgeLoop(_) => String::new(),
+    };
+    fixture::validate_block(&path, &block(i)?).map_err(|e| harness(format!("export: {e}")))?;
     let (mut b, counts) = match own_brep(i)? {
         Ok(x) => x,
         Err(out) => return Ok(out),

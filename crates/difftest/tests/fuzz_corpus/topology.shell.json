@@ -1,0 +1,6 @@
+{
+  "unit": "topology.shell",
+  "cases": [
+    {"name": "fuzz00180_networks_2_32", "origin": "local sweep --fuzz 300 --seeds 5: topology.shell/fuzz00180 (timeout: rust: no result after 20 s; base mixed_n2_0to2_subset, mutation /brep/networks = 4294967296)", "issue": "runner: the Rust side wired 2^32 networks where every FFI entry point refuses more than 3 at the export; fixed by applying the export's block checks on the Rust side (topology_edgeuse_p1::validate_export)", "cpp": "harness: invalid argument: bad index/count 4294967296 (max 3)", "rust": "harness: invalid argument: bad index/count 4294967296 (max 3)", "inputs": {"brep": {"kind": "mixed", "networks": 4294967296}, "transfer": {"candidates": [0, 2, 2, 1], "extra_empty": 1, "recipient": 2, "source": 0}}}
+  ]
+}

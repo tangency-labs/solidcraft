@@ -951,6 +951,14 @@ impl UnitDiff for Runner {
             return inner::run_rust(case);
         }
         let inputs: Inputs = case.parse()?;
+        // an input the FFI refuses is a harness error on both sides (PR #502's
+        // convention): the shim never builds it, so the Rust side must not either. Fuzz
+        // case fuzz00180 (`--fuzz 300 --seeds 5`) mutated a mixed fixture's `networks` to
+        // 2^32: every FFI entry point exports the block first and refuses more than 3
+        // networks, while this side's builder wired networks for minutes. The check sees
+        // the same block as `run_cpp`.
+        let (path, block) = fixture_input(inputs.brep.clone())?;
+        graph::validate_export(&path, &block).map_err(failure)?;
         let mut brep = match own_brep(&inputs.brep)? {
             Ok(b) => b,
             Err(o) => return Ok(o),
@@ -1440,4 +1448,39 @@ fn rust_region_filter(
         list(&mut out, shells.into_iter().map(ShellId::index));
     }
     Ok(Output::new().ints("records", out))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn wires_case(networks: u64) -> Case {
+        Case {
+            unit: "topology.shell".into(),
+            name: "t".into(),
+            source: crate::CaseSource::Inline,
+            inputs: json!({"brep": {"kind": "mixed", "networks": networks}, "wires": true}),
+        }
+    }
+
+    /// Fuzz case `topology.shell/fuzz00180` (`--fuzz 300 --seeds 5`): a mixed fixture of
+    /// 2^32 wire networks. The FFI refuses more than 3 for the C++ side, and the Rust side
+    /// must be refused the same way instead of wiring networks for minutes.
+    #[test]
+    fn huge_network_count_is_refused_on_both_sides() {
+        let case = wires_case(4_294_967_296);
+        let cpp = Runner.run_cpp(&case).unwrap_err().to_string();
+        let rust = Runner.run_rust(&case).unwrap_err().to_string();
+        assert_eq!(cpp, "invalid argument: bad index/count 4294967296 (max 3)");
+        assert_eq!(rust, cpp);
+    }
+
+    /// The largest network count the FFI accepts still runs on both sides.
+    #[test]
+    fn max_network_count_runs_on_both_sides() {
+        let case = wires_case(3);
+        let cpp = Runner.run_cpp(&case).unwrap();
+        let rust = Runner.run_rust(&case).unwrap();
+        assert!(crate::compare(&cpp, &rust, &[]).mismatches.is_empty());
+    }
 }

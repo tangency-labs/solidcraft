@@ -1388,6 +1388,14 @@ fn rust_brep(
 }
 
 fn run_rust(i: &Inputs) -> Result<Output, HarnessError> {
+    // an input the FFI refuses is a harness error on both sides (PR #502's convention):
+    // the shim never builds it, so the Rust side must not either. Fuzz case fuzz00086
+    // (`--fuzz 300 --seeds 24`) mutated a control point to `1e300`: the export refuses a
+    // block value above `1e150` (HANG-29) for the C++ side, while this side built the
+    // face and spun in `GlobalCoincidenceChecker` for over 20 s. `validate_block` is the
+    // export's own block checks (pure Rust, no shim call), on the block `export` sends.
+    ffi::validate_block(&path_of(&i.brep)?, &brep_block(i)?)
+        .map_err(|e| harness(format!("export: {e}")))?;
     let (mut b, c) = match rust_brep(i)? {
         Ok(x) => x,
         Err(o) => return Ok(o),

@@ -180,21 +180,31 @@ fn args(i: &Inputs) -> [f64; 7] {
         i.value,
     ]
 }
-fn exported(i: &Inputs) -> Result<(String, Vec<f64>, Vec<f64>), HarnessError> {
+/// The fixture path and block the shim builds the B-rep from: a sheet grid
+/// (`shared_boundaries`, then `grid_faces`, as the shim's dispatch reads them) or a file.
+fn native_input(i: &Inputs) -> Result<(String, Vec<f64>), HarnessError> {
     if let Some(mode) = i.shared_boundaries {
-        let block = vec![101.0, f64::from(mode)];
-        let export = ffi::eval(0, "", &block, args(i)).map_err(|e| herr(e.to_string()))?;
-        return Ok((String::new(), block, export));
+        return Ok((String::new(), vec![101.0, f64::from(mode)]));
     }
     if let Some(count) = i.grid_faces {
-        let block = vec![100.0, count as f64];
-        let export = ffi::eval(0, "", &block, args(i)).map_err(|e| herr(e.to_string()))?;
-        return Ok((String::new(), block, export));
+        return Ok((String::new(), vec![100.0, count as f64]));
     }
     let path = path_of(Some(&i.brep))?;
     let block = brep_block_of(Some(&i.brep), false, false)?;
+    Ok((path, block))
+}
+fn exported(i: &Inputs) -> Result<(String, Vec<f64>, Vec<f64>), HarnessError> {
+    let (path, block) = native_input(i)?;
     let export = ffi::eval(0, &path, &block, args(i)).map_err(|e| herr(e.to_string()))?;
     Ok((path, block, export))
+}
+/// The C++ side's operation: pointer validation (1) or the coincidence search (2).
+fn op(i: &Inputs) -> u8 {
+    if i.coincidence {
+        2
+    } else {
+        1
+    }
 }
 fn imported(export: &[f64]) -> Result<Brep, HarnessError> {
     let mut rd = Reader {
@@ -549,13 +559,18 @@ impl UnitDiff for Runner {
     fn run_cpp(&self, case: &Case) -> Result<Output, HarnessError> {
         let i: Inputs = case.parse()?;
         let (path, block, _) = exported(&i)?;
-        output(
-            &ffi::eval(if i.coincidence { 2 } else { 1 }, &path, &block, args(&i))
-                .map_err(|e| herr(e.to_string()))?,
-        )
+        output(&ffi::eval(op(&i), &path, &block, args(&i)).map_err(|e| herr(e.to_string()))?)
     }
     fn run_rust(&self, case: &Case) -> Result<Output, HarnessError> {
         let i: Inputs = case.parse()?;
+        // an input the FFI refuses is a harness error on both sides (PR #502's
+        // convention): the shim never runs it, so the Rust side must not either. Fuzz
+        // case fuzz00074 (`--seeds 24`) mutated `grid_faces` to 2^32: the FFI refuses a
+        // sheet grid of more than 512 faces for the C++ side, while this side's
+        // `sheet_grid` built faces until the 4 GiB fuzz address-space limit aborted the
+        // process. The checks see the same operation, block and arguments as `run_cpp`.
+        let (path, block) = native_input(&i)?;
+        ffi::validate(op(&i), &path, &block, args(&i)).map_err(|e| herr(e.to_string()))?;
         let mut b = match own_brep(&i)? {
             Some(Ok(b)) => b,
             Some(Err(o)) => return Ok(o),
@@ -1131,6 +1146,39 @@ fn sheet_grid(k: &mut Kernel, b: &mut Brep, count: usize, shared: u8) -> Result<
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn grid_case(grid_faces: u64, coincidence: bool) -> Case {
+        Case {
+            unit: "topology.brep_validation".into(),
+            name: "t".into(),
+            source: crate::CaseSource::Inline,
+            inputs: serde_json::json!({"grid_faces": grid_faces, "coincidence": coincidence}),
+        }
+    }
+
+    /// Fuzz case `topology.brep_validation/fuzz00074` (`--fuzz 300 --seeds 24`): a sheet
+    /// grid of 2^32 faces. The FFI refuses more than 512 faces for the C++ side, and the
+    /// Rust side must be refused the same way instead of building faces until the
+    /// allocator aborts.
+    #[test]
+    fn huge_sheet_grid_is_refused_on_both_sides() {
+        for coincidence in [false, true] {
+            let case = grid_case(4_294_967_296, coincidence);
+            let cpp = Runner.run_cpp(&case).unwrap_err().to_string();
+            let rust = Runner.run_rust(&case).unwrap_err().to_string();
+            assert_eq!(cpp, "invalid argument: invalid B-rep validation arguments");
+            assert_eq!(rust, cpp);
+        }
+    }
+
+    /// The largest sheet grid the FFI accepts still runs on both sides.
+    #[test]
+    fn max_sheet_grid_runs_on_both_sides() {
+        let case = grid_case(512, false);
+        let cpp = Runner.run_cpp(&case).unwrap();
+        let rust = Runner.run_rust(&case).unwrap();
+        assert!(crate::compare(&cpp, &rust, &[]).mismatches.is_empty());
+    }
 
     #[test]
     fn shared_boundaries_reach_positive_edge_and_face_comparisons() {

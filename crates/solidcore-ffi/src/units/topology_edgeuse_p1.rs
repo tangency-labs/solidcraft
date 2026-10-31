@@ -697,6 +697,20 @@ fn raw(op: Op, path: &str, input: &[f64]) -> Result<Vec<f64>, FfiError> {
     })
 }
 
+/// The block checks [`eval`] applies to an [`Op::Export`] before the shim builds
+/// anything: those of a B-rep block (plane domains through `1e6`) and no trailing
+/// values. A difftest runner applies them to its Rust side (PR #502's convention), so a
+/// block the shim never builds (e.g. `2^32` wire networks) is not built in Rust either.
+///
+/// # Errors
+///
+/// [`FfiError::InvalidArgument`] for a malformed block, as [`eval`] gives it.
+pub fn validate_export(path: &str, input: &[f64]) -> Result<(), FfiError> {
+    let mut rd = Reader { input, at: 0 };
+    brep_block_with_plane_limit(&mut rd, path, 1e6)?;
+    rd.done()
+}
+
 /// Runs `op` on `input` (see the module docs); `path` is the `.smb` file of a file
 /// B-rep block (ignored otherwise).
 ///
