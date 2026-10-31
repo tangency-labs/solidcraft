@@ -1,5 +1,6 @@
 //! Reviewable sketch-plane rebinding. Saved lost planes are repair guides, never model geometry.
 
+use crate::ui_kit::BackingTooltipExt as _;
 use egui::RichText;
 use serde_json::{Value, json};
 use solidcraft_engine::Sel;
@@ -258,7 +259,7 @@ pub fn panel(app: &mut SolveApp, ctx: &egui::Context) {
                     let text = if draft.candidate.is_some() { draft.label.as_str() } else { crate::i18n::tr("dialog.select") };
                     let response = ui_kit::selection_field(ui, text, ui_kit::Selection { active: true, filled: draft.candidate.is_some() });
                     if response
-                        .on_hover_text(crate::i18n::tr_label(
+                        .backing_on_hover_text(crate::i18n::tr_label(
                             "Choose a new plane. Sketch geometry and dimensions stay unchanged in its two-dimensional coordinates.",
                         ))
                         .clicked()

@@ -1,4 +1,5 @@
 //! Shared history chips, dense name rows, drop bars and rollback markers.
+use crate::ui_kit::BackingTooltipExt as _;
 use crate::{
     icons,
     theme::{TabAccent, Tokens},
@@ -246,7 +247,7 @@ impl HistoryTransport {
         icons::glyphs::transport_glyph(ui.painter(), rect.center(), glyph, t.icon);
         let label = self.label(playing);
         response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), label));
-        response.on_hover_cursor(egui::CursorIcon::PointingHand).on_hover_text(label)
+        response.on_hover_cursor(egui::CursorIcon::PointingHand).backing_on_hover_text(label)
     }
 }
 
@@ -392,7 +393,7 @@ pub(crate) fn history_seam(ui: &mut egui::Ui, card: Rect, names: bool) -> Histor
         let mut tip = egui::Tooltip::for_widget(&response);
         let frame = super::Container::new(ui.ctx(), super::Surface::Toast).tooltip_frame(ui.ctx());
         tip.popup = tip.popup.anchor(seam.pill).align(egui::RectAlign::RIGHT_START).frame(frame);
-        tip.show(|ui| {
+        crate::ui_kit::Container::show_tooltip(response.id, tip, |ui| {
             let t = Tokens::get();
             ui.label(egui::RichText::new(label).font(crate::fonts::semibold(t.font_body)).color(t.text));
             ui.label(egui::RichText::new(crate::i18n::tr("ui.history_edge_hint")).size(t.font_small).color(t.text_dim));

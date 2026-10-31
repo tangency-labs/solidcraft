@@ -166,22 +166,22 @@ pub(super) fn layout(app: &mut SolveApp, ui: &mut egui::Ui) {
                         }
                     });
                     ui_kit::row(ui, "", |ui| {
-                        let check = setting::persistent_ribbon_pressed(app, ui).on_hover_text(app.tr("prefs.persistent_ribbon_pressed_help"));
+                        let check = setting::persistent_ribbon_pressed(app, ui).backing_on_hover_text(app.tr("prefs.persistent_ribbon_pressed_help"));
                         crate::scenario::publish_target("prefs:persistent_ribbon_pressed", check.rect);
                     });
                     // The SKETCH tab outside a sketch too (#7904).
                     ui_kit::row(ui, "", |ui| {
-                        let check = setting::sketch_tab_always(app, ui).on_hover_text(app.tr("prefs.sketch_tab_always_note"));
+                        let check = setting::sketch_tab_always(app, ui).backing_on_hover_text(app.tr("prefs.sketch_tab_always_note"));
                         crate::scenario::publish_target("prefs:sketch_tab_always", check.rect);
                     });
                     // Each design tab keeps its dialog, tool and toolbar tab across a switch (#9360).
                     ui_kit::row(ui, "", |ui| {
-                        let check = setting::keep_work_on_tab_switch(app, ui).on_hover_text(app.tr("prefs.keep_work_on_tab_switch_note"));
+                        let check = setting::keep_work_on_tab_switch(app, ui).backing_on_hover_text(app.tr("prefs.keep_work_on_tab_switch_note"));
                         crate::scenario::publish_target("prefs:keep_work_on_tab_switch", check.rect);
                     });
                     // Search results point out their place in the ribbon (#7287).
                     ui_kit::row(ui, "", |ui| {
-                        let check = setting::ribbon_reveal(app, ui).on_hover_text(app.tr("prefs.ribbon_reveal_note"));
+                        let check = setting::ribbon_reveal(app, ui).backing_on_hover_text(app.tr("prefs.ribbon_reveal_note"));
                         crate::scenario::publish_target("prefs:ribbon_reveal", check.rect);
                     });
                     // Where every feature dialog puts its OK and Cancel (#6708).
@@ -283,14 +283,14 @@ pub(super) fn layout(app: &mut SolveApp, ui: &mut egui::Ui) {
                     ui_kit::row(ui, "", |ui| {
                         ui.add_enabled_ui(app.preferences.timeline_left, |ui| {
                             let check = ui_kit::checkbox(ui, app.tr("prefs.history_origin_bodies"), &mut app.preferences.timeline_origin_bodies)
-                                .on_hover_text(app.tr("prefs.history_origin_bodies_note"))
-                                .on_disabled_hover_text(app.tr("prefs.history_origin_bodies_note"));
+                                .backing_on_hover_text(app.tr("prefs.history_origin_bodies_note"))
+                                .backing_on_disabled_hover_text(app.tr("prefs.history_origin_bodies_note"));
                             crate::scenario::publish_target("prefs:history_origin_bodies", check.rect);
                         });
                     });
                     // Play History between Previous and Next, for people who want it there (#3688).
                     ui_kit::row(ui, "", |ui| {
-                        let check = setting::history_play_button(app, ui).on_hover_text(app.tr("prefs.history_play_button_note"));
+                        let check = setting::history_play_button(app, ui).backing_on_hover_text(app.tr("prefs.history_play_button_note"));
                         crate::scenario::publish_target("prefs:history_play_button", check.rect);
                     });
                     ui_kit::row(ui, app.tr("prefs.browser"), |ui| {
@@ -309,7 +309,7 @@ pub(super) fn layout(app: &mut SolveApp, ui: &mut egui::Ui) {
                             let mut selected = usize::from(app.preferences.browser_show == BrowserShow::Hover);
                             let options = [app.tr("prefs.browser_shown"), app.tr("prefs.browser_reveal_on_hover")];
                             let segments = ui.scope(|ui| ui_kit::segmented(ui, &mut selected, &options, Default::default()));
-                            segments.response.on_hover_text(app.tr("prefs.browser_show_note"));
+                            segments.response.backing_on_hover_text(app.tr("prefs.browser_show_note"));
                             if segments.inner {
                                 app.preferences.browser_show = if selected == 1 { BrowserShow::Hover } else { BrowserShow::Shown };
                             }
@@ -321,14 +321,14 @@ pub(super) fn layout(app: &mut SolveApp, ui: &mut egui::Ui) {
                         let mut selected = usize::from(app.preferences.dialog_place == DialogPlace::LeftColumn);
                         let options = [app.tr("prefs.dialogs_edge"), app.tr("prefs.dialogs_left_column")];
                         let segments = ui.scope(|ui| ui_kit::segmented(ui, &mut selected, &options, Default::default()));
-                        segments.response.on_hover_text(app.tr("prefs.dialogs_note"));
+                        segments.response.backing_on_hover_text(app.tr("prefs.dialogs_note"));
                         if segments.inner {
                             app.preferences.dialog_place = if selected == 1 { DialogPlace::LeftColumn } else { DialogPlace::Edge };
                         }
                     });
                     // Where a dialog's and a sketch's OK and Cancel also sit (#6709).
                     ui_kit::row(ui, "", |ui| {
-                        let check = setting::view_confirm_corner(app, ui).on_hover_text(app.tr("prefs.view_confirm_corner_note"));
+                        let check = setting::view_confirm_corner(app, ui).backing_on_hover_text(app.tr("prefs.view_confirm_corner_note"));
                         crate::scenario::publish_target("prefs:view_confirm_corner", check.rect);
                     });
                     ui_kit::row(ui, app.tr("prefs.bodies_folders"), |ui| {
@@ -343,12 +343,12 @@ pub(super) fn layout(app: &mut SolveApp, ui: &mut egui::Ui) {
                     });
                     // The eye beside the fold arrow, where it was before #8718.
                     ui_kit::row(ui, "", |ui| {
-                        let check = setting::browser_eye_left(app, ui).on_hover_text(app.tr("prefs.browser_eye_left_note"));
+                        let check = setting::browser_eye_left(app, ui).backing_on_hover_text(app.tr("prefs.browser_eye_left_note"));
                         crate::scenario::publish_target("prefs:browser_eye_left", check.rect);
                     });
                     // What is being edited, the sketch's state and the units, along the bottom (#7243).
                     ui_kit::row(ui, "", |ui| {
-                        let check = setting::status_bar(app, ui).on_hover_text(app.tr("prefs.status_bar_note"));
+                        let check = setting::status_bar(app, ui).backing_on_hover_text(app.tr("prefs.status_bar_note"));
                         crate::scenario::publish_target("prefs:status_bar", check.rect);
                     });
                     ui_kit::text(ui, app.tr("prefs.layout_note"), ui_kit::Text::Hint("layout"));

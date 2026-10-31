@@ -382,10 +382,14 @@ struct Marker {
     corners: egui::CornerRadius,
     opacity: f32,
     snap: bool,
+    // Identity only: the paint job owns this callback for the entire frame. Keeping
+    // its Arc here would create a Shared -> callback -> Shared ownership cycle.
+    callback_id: usize,
 }
 
 pub fn decorate(painter: &Painter, frame: Frame, content: Rect, ordinary: Shape) -> Shape {
-    if frame.fill.a() == 255 || frame.fill.a() == 0 || !painter.is_visible() {
+    let opacity = painter.opacity();
+    if frame.fill.a() == 0 || (frame.fill.a() == 255 && opacity >= 1.0) || !opacity.is_finite() || opacity <= 0.0 || !painter.is_visible() {
         return ordinary;
     }
     CURRENT.with(|c| {
@@ -398,7 +402,7 @@ pub fn decorate(painter: &Painter, frame: Frame, content: Rect, ordinary: Shape)
         if !rect.is_finite() || !rect.is_positive() {
             return ordinary;
         }
-        let index = if let Ok(mut inner) = shared.inner.lock() {
+        let callback = if let Ok(mut inner) = shared.inner.lock() {
             if inner.markers.len() >= MAX_MARKERS {
                 inner.failure = Some("blur panel limit exceeded");
                 inner.gpu = None;
@@ -406,18 +410,19 @@ pub fn decorate(painter: &Painter, frame: Frame, content: Rect, ordinary: Shape)
                 return ordinary;
             }
             let index = inner.markers.len();
+            let callback = egui_wgpu::Callback::new_paint_callback(rect, PanelMarker { shared: shared.clone(), index });
             inner.markers.push(Marker {
                 rect,
                 corners: frame.corner_radius,
-                opacity: painter.opacity(),
+                opacity,
                 snap: painter.ctx().tessellation_options(|o| o.round_rects_to_pixels),
+                callback_id: Arc::as_ptr(&callback.callback) as *const () as usize,
             });
             inner.counts.markers_emitted += 1;
-            index
+            callback
         } else {
             return ordinary;
         };
-        let callback = egui_wgpu::Callback::new_paint_callback(rect, PanelMarker { shared: shared.clone(), index });
         Shape::Vec(vec![Shape::Callback(callback), ordinary])
     })
 }
@@ -581,13 +586,9 @@ impl CallbackTrait for Source {
             }
         }
         counts.source_passes += 1;
-        for step in &gpu.chain {
-            let mut pass = pass(encoder, "blur_kawase", &step.target.view, wgpu::Color::TRANSPARENT);
-            pass.set_pipeline(if step.down { &gpu.down } else { &gpu.up });
-            pass.set_bind_group(0, &step.binding.group, &[]);
-            pass.draw(0..3, 0..1);
-            counts.blur_passes += 1;
-        }
+        // The backdrop pyramid is built at paint-order boundaries in render(),
+        // after the underlying UI has actually been drawn, rather than from this
+        // scene-only texture during preparation.
         gpu.pending = Some(key);
         Vec::new()
     }
@@ -715,7 +716,7 @@ impl FrameCompositor for Shared {
         if !self.painting_owner.load(std::sync::atomic::Ordering::Relaxed) {
             return false;
         }
-        let (composition, pipeline, binding) = {
+        let (composition, pipeline, binding, marker_ids) = {
             let Ok(mut inner) = self.inner.lock() else { return false };
             if !inner.source_seen {
                 inner.missing_source = true;
@@ -731,14 +732,56 @@ impl FrameCompositor for Shared {
             if gpu.ready_serial != inner.serial || gpu.size != screen.size_in_pixels {
                 return false;
             }
-            let data = (gpu.composition.view.clone(), gpu.present.clone(), gpu.presentation.group.clone());
+            let mut marker_ids: Vec<_> = inner.markers.iter().map(|marker| marker.callback_id).collect();
+            marker_ids.sort_unstable();
+            let data = (
+                gpu.composition.view.clone(),
+                gpu.present.clone(),
+                gpu.presentation.group.clone(),
+                marker_ids,
+            );
             inner.counts.composition_passes += 1;
             data
         };
         {
             let color = wgpu::Color { r: clear[0] as f64, g: clear[1] as f64, b: clear[2] as f64, a: clear[3] as f64 };
-            let mut ui = pass(encoder, "blur_ui_composition", &composition, color);
-            renderer.render(&mut ui, jobs, screen);
+            let _clear = pass(encoder, "blur_ui_composition", &composition, color);
+        }
+        let mut start = 0;
+        let mut mesh_offset = 0;
+        let mut segment_passes = 0;
+        for end in 0..=jobs.len() {
+            let callback_id = jobs.get(end).and_then(|job| {
+                let egui::epaint::Primitive::Callback(callback) = &job.primitive else { return None };
+                Some(Arc::as_ptr(&callback.callback) as *const () as usize)
+            });
+            let marker = callback_id.is_some_and(|identity| marker_ids.binary_search(&identity).is_ok());
+            if !marker && end != jobs.len() {
+                continue;
+            }
+            if start < end {
+                let mut ui = load_pass(encoder, "blur_ui_segment", &composition);
+                renderer.render_with_mesh_offset(&mut ui, &jobs[start..end], screen, mesh_offset);
+                mesh_offset += jobs[start..end].iter().filter(|job| matches!(&job.primitive, egui::epaint::Primitive::Mesh(_))).count();
+                segment_passes += 1;
+            }
+            if marker {
+                // The preceding segment is complete before sampling its color target.
+                // Reuse the pyramid, but include previously painted UI in the backdrop.
+                if let Ok(mut inner) = self.inner.lock() {
+                    let Inner { gpu, counts, .. } = &mut *inner;
+                    if let Some(gpu) = gpu {
+                        for step in &gpu.chain {
+                            let mut blur = pass(encoder, "blur_backdrop", &step.target.view, wgpu::Color::TRANSPARENT);
+                            blur.set_pipeline(if step.down { &gpu.down } else { &gpu.up });
+                            blur.set_bind_group(0, &step.binding.group, &[]);
+                            blur.draw(0..3, 0..1);
+                            counts.blur_passes += 1;
+                        }
+                    }
+                }
+            }
+            start = end;
         }
         {
             let mut present = pass(encoder, "blur_present", target, wgpu::Color::TRANSPARENT);
@@ -747,6 +790,7 @@ impl FrameCompositor for Shared {
             present.draw(0..3, 0..1);
         }
         if let Ok(mut inner) = self.inner.lock() {
+            inner.counts.composition_passes += segment_passes;
             inner.counts.present_passes += 1;
             inner.rendered = true;
         }
@@ -868,6 +912,14 @@ fn background_params(rect: Rect, clip: Rect, colors: [Color32; 2], outside: Colo
 }
 
 fn pass(encoder: &mut wgpu::CommandEncoder, label: &'static str, view: &wgpu::TextureView, clear: wgpu::Color) -> wgpu::RenderPass<'static> {
+    attachment_pass(encoder, label, view, wgpu::LoadOp::Clear(clear))
+}
+
+fn load_pass(encoder: &mut wgpu::CommandEncoder, label: &'static str, view: &wgpu::TextureView) -> wgpu::RenderPass<'static> {
+    attachment_pass(encoder, label, view, wgpu::LoadOp::Load)
+}
+
+fn attachment_pass(encoder: &mut wgpu::CommandEncoder, label: &'static str, view: &wgpu::TextureView, load: wgpu::LoadOp<wgpu::Color>) -> wgpu::RenderPass<'static> {
     encoder
         .begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some(label),
@@ -875,7 +927,7 @@ fn pass(encoder: &mut wgpu::CommandEncoder, label: &'static str, view: &wgpu::Te
                 view,
                 resolve_target: None,
                 depth_slice: None,
-                ops: wgpu::Operations { load: wgpu::LoadOp::Clear(clear), store: wgpu::StoreOp::Store },
+                ops: wgpu::Operations { load, store: wgpu::StoreOp::Store },
             })],
             depth_stencil_attachment: None,
             timestamp_writes: None,
@@ -988,7 +1040,7 @@ impl Gpu {
             dimensions.push(last.map(|d| d.div_ceil(2)));
         }
         for (index, dims) in dimensions.iter().skip(1).enumerate() {
-            let input = chain.last().map_or(&source.view, |s| &s.target.view);
+            let input = chain.last().map_or(&composition.view, |s| &s.target.view);
             let mut p = [0.0; 24];
             p[0] = offset;
             p[1] = u8::from(index == 0 && !format.is_srgb()) as f32;
@@ -997,7 +1049,7 @@ impl Gpu {
             chain.push(Step { target, binding, down: true });
         }
         for dims in dimensions.iter().take(steps).rev() {
-            let input = chain.last().map_or(&source.view, |s| &s.target.view);
+            let input = chain.last().map_or(&composition.view, |s| &s.target.view);
             let mut p = [0.0; 24];
             p[0] = offset;
             let binding = Binding::new(device, &layout, &sampler, input, p, counts);

@@ -598,7 +598,8 @@ pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painte
             let at = (p + vec2(20.0, 22.0)).clamp(proj.rect.min, proj.rect.max - vec2(260.0, 82.0).min(proj.rect.size()));
             let host = Container::new(ui.ctx(), Surface::Canvas);
             host.area(egui::Id::new("joint_move_readout")).interactable(false).fixed_pos(at).order(egui::Order::Foreground).show(ui.ctx(), |ui| {
-                host.frame(ui.ctx(), tk.overlay, crate::frame::Side::Right).inner_margin(tk.space_8).show(ui, |ui| {
+                let frame = host.frame(ui.ctx(), tk.overlay, crate::frame::Side::Right).inner_margin(tk.space_8);
+                Container::show_backing(ui, frame, |ui| {
                     let value = if d.axis.angular {
                         format!(
                             "{}{:.precision$}°",
@@ -631,7 +632,8 @@ pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painte
     let host = Container::new(ui.ctx(), Surface::Canvas);
     let mut done = false;
     host.area(egui::Id::new("joint_move_help")).fixed_pos(proj.rect.left_bottom() + vec2(16.0, -148.0)).show(ui.ctx(), |ui| {
-        host.frame(ui.ctx(), tk.overlay, crate::frame::Side::Right).inner_margin(tk.space_8).show(ui, |ui| {
+        let frame = host.frame(ui.ctx(), tk.overlay, crate::frame::Side::Right).inner_margin(tk.space_8);
+        Container::show_backing(ui, frame, |ui| {
             ui.label(app.tr("joint_move.help"));
             if mode.axes.iter().any(|a| a.angular) {
                 ui.label(app.tr("joint_move.precision"));

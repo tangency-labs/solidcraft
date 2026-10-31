@@ -2,6 +2,7 @@
 use crate::navigation::NavCaps;
 use crate::navigation_bar::{self, Edge, Idle, Kind, Labels, MenuDisplay, NavigationBar, Position, Slot};
 use crate::theme::Tokens;
+use crate::ui_kit::BackingTooltipExt as _;
 use crate::ui_kit::{self, Container, Surface};
 use crate::{SolveApp, viewport::NavMode};
 use egui::{Align2, Rect, pos2, vec2};
@@ -526,7 +527,7 @@ fn display_menu(app: &mut SolveApp, ui: &mut egui::Ui) {
         item.selected = app.ui.perspective == perspective;
         item.enabled = !projection_locked(app);
         let response = item.show(ui);
-        let response = if projection_locked(app) { response.on_hover_text(app.tr("nav.perspective.sketch")) } else { response };
+        let response = if projection_locked(app) { response.backing_on_hover_text(app.tr("nav.perspective.sketch")) } else { response };
         crate::scenario::publish_target(if perspective { "view:projection" } else { "view:orthographic" }, response.rect);
         if response.clicked() && app.ui.perspective != perspective {
             toggle_projection(app);
@@ -551,7 +552,7 @@ fn display_menu(app: &mut SolveApp, ui: &mut egui::Ui) {
     // The View angles readout under the orientation gizmo (#6032).
     let mut angles = NavigationMenuRow::new("view_angles", app.tr("ui.view_angles"), "select");
     angles.selected = app.preferences.show_view_angles;
-    let response = angles.show(ui).on_hover_text(app.tr("ui.view_angles_help"));
+    let response = angles.show(ui).backing_on_hover_text(app.tr("ui.view_angles_help"));
     crate::scenario::publish_target("view:view_angles", response.rect);
     if response.clicked() {
         let _ = app.run("view.angle_readout", json!({"enabled": !app.preferences.show_view_angles}));

@@ -50,7 +50,7 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     ui_kit::settings_section(ui, "measure_pointer", app.tr("prefs.structure.measure_pointer"), |ui| {
         let response = setting::measure_axis_distances(app, ui);
         crate::scenario::publish_rect("prefs:measure_axis_distances", response.rect);
-        response.on_hover_text(app.tr("settings.measure_axis_distances_help"));
+        response.backing_on_hover_text(app.tr("settings.measure_axis_distances_help"));
         let cursor = ui_kit::checkbox(ui, crate::i18n::tr_label("Show tool at cursor"), &mut app.ui.tool_cursor);
         crate::scenario::publish_target("view:tool_cursor", cursor.rect);
         setting::direct_interaction(app, ui);

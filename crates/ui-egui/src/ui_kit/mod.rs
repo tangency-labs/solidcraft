@@ -58,7 +58,7 @@ pub(crate) use checks::*;
 pub(crate) use choice::*;
 pub(crate) use color::*;
 pub(crate) use confirm::{Confirm, Tone};
-pub use container::{Container, DockEdges, Edge, Surface};
+pub use container::{BackingTooltipExt, Container, DockEdges, Edge, Surface};
 pub(crate) use details::*;
 pub(crate) use disclosure::*;
 pub(crate) use drag::*;

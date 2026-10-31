@@ -14,6 +14,7 @@
 //! over a program the user added removes it.
 
 use crate::selection::SelectionExt as _;
+use crate::ui_kit::BackingTooltipExt as _;
 use crate::ui_kit::choice_row;
 use std::collections::HashMap;
 
@@ -442,12 +443,12 @@ fn slicer_combo(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut SaveMesh) {
             crate::scenario::publish_handle(&format!("dialog:Slicer:{}", e.slicer.name), rect.center());
             if e.user {
                 let hint = crate::i18n::format("ui.slicer_delete_tip", &[("program", e.slicer.command.first().map_or("", String::as_str))]);
-                resp.clone().on_hover_text(if elided { format!("{}\n{hint}", e.slicer.name) } else { hint });
+                resp.clone().backing_on_hover_text(if elided { format!("{}\n{hint}", e.slicer.name) } else { hint });
                 if resp.hovered() && ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Delete)) {
                     delete = Some(e.key.clone());
                 }
             } else if elided {
-                resp.clone().on_hover_text(&e.slicer.name);
+                resp.clone().backing_on_hover_text(&e.slicer.name);
             }
             if resp.clicked() {
                 chosen = Some(e.key.clone());
@@ -487,14 +488,14 @@ fn slicer_combo(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut SaveMesh) {
             Tokens::get().text,
         );
         crate::scenario::publish_handle("dialog:Slicer:Custom", rect.center());
-        if resp.on_hover_text(crate::i18n::tr("ui.custom_program_tip")).clicked() {
+        if resp.backing_on_hover_text(crate::i18n::tr("ui.custom_program_tip")).clicked() {
             pick_custom = true;
             ui.close();
         }
     });
     ui.style_mut().wrap_mode = wrap;
     if let Some(name) = name {
-        r.clone().on_hover_text(name);
+        r.clone().backing_on_hover_text(name);
     }
     if let Some(e) = current {
         let tex = icon(&mut app.slicer_menu, &ctx, e);

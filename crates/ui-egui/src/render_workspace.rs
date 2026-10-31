@@ -1,5 +1,6 @@
 //! Integrated product preview. Shares the installed device/pipelines, not Design's scene policy.
 
+use crate::ui_kit::BackingTooltipExt as _;
 use std::hash::{Hash, Hasher};
 use std::sync::{Arc, Mutex};
 
@@ -941,7 +942,7 @@ fn method_dropdown(app: &mut SolveApp, ui: &mut egui::Ui) -> egui::Response {
                 ui.close();
             }
             if let Err(reason) = capability {
-                response.on_hover_text(reason);
+                response.backing_on_hover_text(reason);
             }
         }
     });
@@ -1012,7 +1013,7 @@ fn image_method_controls(app: &mut SolveApp, ui: &mut egui::Ui) {
     cpu_lighting_controls(app, ui);
     ui.label(app.tr("render.image_exposure"));
     let exposure_help = app.tr("render.cpu_exposure_help").to_string();
-    crate::ui_kit::number_field(ui, &mut app.render_workspace.view.draft.exposure_ev, -32.0..=32.0, 0.1, " EV").on_hover_text(exposure_help);
+    crate::ui_kit::number_field(ui, &mut app.render_workspace.view.draft.exposure_ev, -32.0..=32.0, 0.1, " EV").backing_on_hover_text(exposure_help);
     cpu::controls(app, ui);
 }
 
@@ -1031,7 +1032,7 @@ fn image_edit_controls(app: &mut SolveApp, ui: &mut egui::Ui) {
                 let _ = app.run("render.result.view", json!({"view":"fit"}));
             }
             if crate::ui_kit::button(ui, crate::i18n::tr("render.result_actual_size"), crate::ui_kit::Button::Enabled(!reduced_display(app)))
-                .on_hover_text(app.tr("render.result_actual_help"))
+                .backing_on_hover_text(app.tr("render.result_actual_help"))
                 .clicked()
             {
                 let _ = app.run("render.result.view", json!({"view":"actual"}));
@@ -1193,7 +1194,7 @@ fn job_controls(app: &mut SolveApp, ui: &mut egui::Ui, compact: bool) {
     let response = ui.add_sized([ui.available_width(), ui.text_style_height(&egui::TextStyle::Body)], egui::Label::new(message).truncate());
     crate::scenario::publish_target("render:job-summary", response.rect);
     if let Err(error) = &params {
-        response.on_hover_text(error);
+        response.backing_on_hover_text(error);
     }
     if let Some(status) = &state {
         if !compact {
@@ -1252,7 +1253,7 @@ fn completed_image(app: &mut SolveApp, ui: &mut egui::Ui) {
             Ok(texture) => {
                 if ui
                     .add(egui::Image::new(texture).max_size(egui::vec2(ui.available_width(), 240.0)).shrink_to_fit().sense(Sense::click()))
-                    .on_hover_text(app.tr("render.result_open"))
+                    .backing_on_hover_text(app.tr("render.result_open"))
                     .clicked()
                 {
                     let _ = app.run("render.result.view", json!({"view":"image"}));

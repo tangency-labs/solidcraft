@@ -1,6 +1,7 @@
 //! Shared preference compositions and explanatory figures. Figures are cheap painter content,
 //! never additional application viewports; every colour and control metric comes from tokens.
 use super::{metrics::dimension, text::paint_text};
+use crate::ui_kit::BackingTooltipExt as _;
 use crate::{
     scenario,
     theme::{ColorVision, Tokens},
@@ -34,7 +35,7 @@ fn blur_cost_meter(ui: &mut Ui, radius: f32) {
         }
     }
     scenario::publish_rect("prefs:blur_cost", rect);
-    response.on_hover_text(crate::i18n::tr("prefs.blur_cost"));
+    response.backing_on_hover_text(crate::i18n::tr("prefs.blur_cost"));
 }
 
 /// All theme problems share the same compact, inline composition within the existing host.
@@ -363,7 +364,7 @@ fn theme_option_control(
         .inner
         .response
     });
-    let response = response.inner.on_hover_text(&option.help);
+    let response = response.inner.backing_on_hover_text(&option.help);
     scenario::publish_target(&format!("prefs:theme_option:{}", def.id), response.rect);
     if let Some(reason) = &option.reason {
         let note = ui.horizontal(|ui| super::settings_inline_note(ui, reason));
@@ -650,7 +651,7 @@ pub(super) fn theme_rail_arrow(ui: &mut Ui, rect: Rect, direction: f32, label: &
     }
     response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), crate::i18n::tr_label(label)));
     scenario::publish_target(&format!("prefs:theme_rail:{label}"), rect);
-    response.on_hover_cursor(egui::CursorIcon::PointingHand).on_hover_text(crate::i18n::tr_label(label))
+    response.on_hover_cursor(egui::CursorIcon::PointingHand).backing_on_hover_text(crate::i18n::tr_label(label))
 }
 
 /// Dashed import tile matches the swatch tiles, while remaining permanently visible.
@@ -803,7 +804,7 @@ pub(crate) fn option_card(ui: &mut Ui, label: &str, note: Option<&str>, selected
     }
     response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::RadioButton, enabled, selected, label));
     scenario::publish_target(&format!("prefs:option:{label}"), rect);
-    let response = response.on_hover_text(label);
+    let response = response.backing_on_hover_text(label);
     if enabled { response.on_hover_cursor(egui::CursorIcon::PointingHand) } else { response }
 }
 
