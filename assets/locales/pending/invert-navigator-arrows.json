@@ -1,0 +1,26 @@
+{
+  "en": {
+    "prefs.invert_navigator_arrows": "Invert the view cube rotation arrows",
+    "prefs.invert_navigator_arrows_note": "The arrows around the cube orbit the camera the way they point, as in Fusion and Inventor: the arrow on the left points right and swings the camera right. Off: an arrow rotates the cube toward the side it sits on, so the left arrow swings the camera left. The curved roll arrows are not affected."
+  },
+  "ja": {
+    "prefs.invert_navigator_arrows": "ビューキューブの回転矢印を反転",
+    "prefs.invert_navigator_arrows_note": "キューブの周りの矢印が、矢印の指す方向にカメラを回します（Fusion や Inventor と同じ動き）：左の矢印は右を指し、カメラを右に振ります。オフ: 矢印は、そのある面の方へキューブを回すため、左の矢印はカメラを左に振ります。カーブしたロール矢印は影響を受けません。"
+  },
+  "zh": {
+    "prefs.invert_navigator_arrows": "反转视图立方体的旋转箭头",
+    "prefs.invert_navigator_arrows_note": "立方体周围的箭头按箭头所指的方向转动相机，与 Fusion 和 Inventor 相同：左侧箭头指向右，相机向右转动。关闭：箭头把立方体转向它所在的那一面，因此左侧箭头使相机向左转动。弯曲的翻滚箭头不受影响。"
+  },
+  "ar": {
+    "prefs.invert_navigator_arrows": "عكس أسهم تدوير مكعب العرض",
+    "prefs.invert_navigator_arrows_note": "تدور الأسهم حول المكعب بالكاميرا حسب اتجاه السهم، كما في Fusion وInventor: السهم على اليسار يشير يميناً ويحرّك الكاميرا يميناً. عند الإيقاف: يدور السهم بالمكعب نحو الجهة التي يقع عليها، فيحرّك سهم اليسار الكاميرا يساراً. لا يتأثر سهما التدوير المنحنيان."
+  },
+  "he": {
+    "prefs.invert_navigator_arrows": "היפוך חצי סיבוב קוביית התצוגה",
+    "prefs.invert_navigator_arrows_note": "החצים סביב הקובייה מחוויים את המצלמה לכיוון שהחץ מצביע, כמו ב-Fusion ו-Inventor: החץ שמשמאל מצביע ימימה ומניע את המצלמה ימימה. כבוי: החץ מסובב את הקובייה אל הצד שבו הוא יושב, כך שחץ שמאל מניע את המצלמה שמאלה. חצי הגלילה המעוגלים אינם מושפעים."
+  },
+  "vi": {
+    "prefs.invert_navigator_arrows": "Đảo ngược mũi tên xoay của khối điều hướng",
+    "prefs.invert_navigator_arrows_note": "Các mũi tên quanh khối xoay camera theo hướng mũi tên chỉ, như trong Fusion và Inventor: mũi tên bên trái chỉ sang phải và đưa camera sang phải. Khi tắt: mũi tên xoay khối về phía cạnh chứa nó, nên mũi tên bên trái đưa camera sang trái. Hai mũi tên cuộn cong không bị ảnh hưởng."
+  }
+}

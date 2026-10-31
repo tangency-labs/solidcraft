@@ -1265,6 +1265,10 @@ preference_settings! {
     /// whole model, as Home does (#10091). Off by default: the view turns in place, keeping its
     /// target and zoom.
     navigator_fit: bool = false, PAGE_NAVIGATION;
+    /// The view cube's directional arrows orbit the camera the way the arrow points, as in
+    /// Fusion and Inventor (`invert_navigator_arrows`, #10254). Off by default: an arrow rotates
+    /// the cube toward the side it sits on, so the arrow on the left swings the camera left.
+    invert_navigator_arrows: bool = false, PAGE_NAVIGATION;
     /// How much of the view the model fills when Home, Fit, an opened design or a navigator
     /// view change frames it (0.1 to 1; #10091): 1, the default, fills the room between the
     /// panels, the compass and the navigation bar, as before.
@@ -4039,6 +4043,22 @@ pub(crate) fn reveal_preference(h: &mut crate::scenario::Harness, handle: &str) 
 
 #[cfg(test)]
 mod tests {
+    /// #10254: the invert toggle is off by default, persists, and the Navigation page's
+    /// Defaults resets it.
+    #[test]
+    fn invert_navigator_arrows_defaults_off_persists_and_resets() {
+        assert!(!Prefs::default().invert_navigator_arrows);
+        let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+        assert!(!app.preferences.invert_navigator_arrows);
+        app.preferences.invert_navigator_arrows = true;
+        assert_eq!(serde_json::to_value(&app.preferences).unwrap()["invert_navigator_arrows"], true);
+        let mut restored = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+        restored.load_prefs(&app.prefs());
+        assert!(restored.preferences.invert_navigator_arrows);
+        super::reset_preferences(&mut app.preferences, super::PAGE_NAVIGATION);
+        assert!(!app.preferences.invert_navigator_arrows);
+    }
+
     #[test]
     fn trackpad_zoom_modifier_roundtrips_and_validates_control_values() {
         assert_eq!(Prefs::default().trackpad_zoom_modifier, TrackpadZoomModifier::Off);
