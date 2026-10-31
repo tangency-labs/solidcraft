@@ -13,6 +13,7 @@
 //! | [`OffsetSurface::create_extended_surface`], [`OffsetSurface::create_extended_surface_dir`] | `CreateExtendedSurface` (both) |
 //! | [`OffsetSurface::calculate_bounding_box`]             | `CalculateBoundingBox`                           |
 //! | `extend_surface` (private)                            | `sm_ExtendSurface` (static)                      |
+//! | `extend_as_itself` (private)                          | the fork's `sm_ExtendAsItself` (static; WR-633)  |
 //! | [`OffsetSurface::knots`]                              | `GetKnots`                                       |
 //! | [`OffsetSurface::evaluate_normal`], [`OffsetSurface::evaluate_normal_extending`] | `EvaluateNormal` |
 //! | [`OffsetSurface::evaluate_point`], [`OffsetSurface::evaluate_point_extending`] | `EvaluatePoint`    |
@@ -2179,6 +2180,163 @@ fn extend_toward(k: &Kernel, surface: &Surface, uv: Point2) -> Result<Surface> {
     Ok(Surface::from(BSplineSurface::from_gw_nurb(&ext.surface)))
 }
 
+/// `smos_Max`: `a > b ? a : b`.
+fn smos_max(a: f64, b: f64) -> f64 {
+    if a > b {
+        a
+    } else {
+        b
+    }
+}
+
+/// `smos_Min`: `a < b ? a : b`.
+fn smos_min(a: f64, b: f64) -> f64 {
+    if a < b {
+        a
+    } else {
+        b
+    }
+}
+
+/// The most pieces [`extend_as_itself`] tries for one side (the fork's `lTries` bound).
+const AS_ITSELF_MAX_TRIES: u32 = 4096;
+
+/// The fork's `sm_ExtendAsItself` (`fixes.offset_extension_as_itself`, WR-633,
+/// tangency-labs/smlib@de0a6b8): the NURB of a cylinder, cone, sphere or torus extended as
+/// itself until its domain reaches `lo` and `hi`. Each end span's rational polynomial is
+/// carried on (NLib's C-infinity extension) piece by piece: a piece's parameter length is
+/// at first the end span's, doubled after each piece and halved where NLib refuses it (a
+/// weight out of its range); the old end is then made a knot of multiplicity equal to the
+/// degree (exact), and the piece's control weights are scaled by `c^i` counted from the
+/// old end so that its far weight is the old end's (a rational Bezier piece
+/// reparameterized: the same points). A side not reached after
+/// [`AS_ITSELF_MAX_TRIES`] pieces is left where it is, as the fork's loop does.
+///
+/// # Errors
+///
+/// `SM_ERR` for an end span of no length or a failed knot insertion; the errors of
+/// [`nurb_of`].
+fn extend_as_itself(k: &Kernel, surface: &Surface, lo: Point2, hi: Point2) -> Result<Surface> {
+    // `!(a < b)` and `!(a > b)` as upstream writes them (false for a NaN operand too)
+    use crate::nurbs::crv_adv::p1::CurveEnd;
+    use crate::nurbs::srf_adv::p3::extend_by_param_dist;
+    use crate::nurbs::srf_basic::Direction;
+    use crate::nurbs::srf_tool::p1::insert_knot;
+    use core::cmp::Ordering::{Greater, Less};
+    let mut cur = nurb_of(k, surface)?;
+    for d in 0..2_usize {
+        for e in 0..2_usize {
+            let goal = match (e, d) {
+                (0, 0) => lo.x,
+                (0, _) => lo.y,
+                (_, 0) => hi.x,
+                _ => hi.y,
+            };
+            let (dir, end) = (
+                if d == 0 { Direction::U } else { Direction::V },
+                if e == 0 {
+                    CurveEnd::Start
+                } else {
+                    CurveEnd::End
+                },
+            );
+            let mut step = 0.0_f64;
+            for _ in 0..AS_ITSELF_MAX_TRIES {
+                let b = cur.parameter_bounds();
+                let (us, ue, vs, ve) = (b.ul, b.ur, b.vb, b.vt);
+                let bound = match (e, d) {
+                    (0, 0) => us,
+                    (0, _) => vs,
+                    (_, 0) => ue,
+                    _ => ve,
+                };
+                let range = if d == 0 { ue - us } else { ve - vs };
+                // reached (to the parameters' rounding: a piece of no length is no extension)
+                let same = EFF_ZERO * (1.0 + bound.abs() + range);
+                if if e == 0 {
+                    goal.partial_cmp(&(bound - same)) != Some(Less)
+                } else {
+                    goal.partial_cmp(&(bound + same)) != Some(Greater)
+                } {
+                    break;
+                }
+                let idx = cur.indices();
+                let knots = if d == 0 { cur.u_knots() } else { cur.v_knots() };
+                let top = if d == 0 { idx.r } else { idx.s };
+                let deg = if d == 0 { idx.p } else { idx.q };
+                if step.partial_cmp(&0.0) != Some(Greater) {
+                    // the end span's parameter length
+                    let at = |i: usize| knots.get(i).copied().unwrap_or(f64::NAN);
+                    let end_knot = at(if e == 0 { 0 } else { top });
+                    let mut i = if e == 0 { 1 } else { top.saturating_sub(1) };
+                    while i > 0 && i < top && at(i) == end_knot {
+                        i = if e == 0 { i + 1 } else { i - 1 };
+                    }
+                    step = (at(i) - end_knot).abs();
+                }
+                if step.partial_cmp(&(EFF_ZERO * (1.0 + range))) != Some(Greater) {
+                    return Err(SolidError::sm_err(OP_EXTEND));
+                }
+                let par = if e == 0 {
+                    smos_max(goal, bound - step)
+                } else {
+                    smos_min(goal, bound + step)
+                };
+                let Ok(next) = extend_by_param_dist(&cur, par, dir, end, ExtendContinuity::Cmax)
+                else {
+                    // a weight under NL_WMIN: a shorter piece
+                    step *= 0.5;
+                    continue;
+                };
+                // the old end a knot of full multiplicity: the next piece carries on this
+                // one's polynomial
+                cur = if deg > 0 {
+                    insert_knot(&next, bound, deg, dir)
+                        .map_err(|_| SolidError::sm_err(OP_EXTEND))?
+                } else {
+                    next
+                };
+                // The new piece's weights brought back to the old end's (a rational Bezier
+                // piece reparameterized: its i-th control weights times c^i counted from
+                // the old end, the same points of the surface): the polynomial's weights
+                // grow with the square of the parameter, and NLib refuses a weight over
+                // NL_WMAX.
+                if deg > 0 {
+                    let idx = cur.indices();
+                    let last = if d == 0 { idx.n } else { idx.m };
+                    let old = if e == 0 { deg } else { last - deg.min(last) };
+                    let far = if e == 0 { 0 } else { last };
+                    let weight =
+                        |i: usize| if d == 0 { cur.cpt(i, 0) } else { cur.cpt(0, i) }.map(|p| p.w);
+                    let (old_w, far_w) = (weight(old)?, weight(far)?);
+                    if old_w > 0.0 && far_w > 0.0 {
+                        let c = (old_w / far_w).powf(1.0 / deg as f64);
+                        let other = if d == 0 { idx.m } else { idx.n };
+                        for i in 0..=deg {
+                            let at = if e == 0 {
+                                deg - i
+                            } else {
+                                last - deg.min(last) + i
+                            };
+                            let scale = c.powf(i as f64);
+                            for o in 0..=other {
+                                let p = if d == 0 {
+                                    cur.cpt_mut(at, o)?
+                                } else {
+                                    cur.cpt_mut(o, at)?
+                                };
+                                *p = p.scale(scale);
+                            }
+                        }
+                    }
+                }
+                step *= 2.0;
+            }
+        }
+    }
+    Ok(Surface::from(BSplineSurface::from_gw_nurb(&cur)))
+}
+
 /// The extension of `fixes.offset_extension_from_base` (WR-458, #419; the fork's
 /// tangency-labs/smlib@2d7c7ed): `base` is extended on every side that can grow at once,
 /// each by the base domain's size times the least power of two that reaches `uv`, and
@@ -2219,6 +2377,18 @@ fn extend_from_base(
     }
     if !periodic[1] && (singularities & SS_VMAX) == 0 {
         hi.y = hi.y.max(reach(dmax.y, size.y, uv.y, 1.0));
+    }
+    // Opt-in (`fixes.offset_extension_as_itself`, WR-633; the fork's
+    // tangency-labs/smlib@de0a6b8): a cylinder, cone, sphere or torus continues as itself
+    // (`sm_ExtendAsItself`): its NURB spans are rational arcs and straight lines, whose
+    // polynomials carried on stay on the surface. A tangent extension (G1R) leaves it at once.
+    if k.fixes.offset_extension_as_itself
+        && matches!(
+            base.kind(),
+            SurfaceKind::Cone(_) | SurfaceKind::Sphere(_) | SurfaceKind::Torus(_)
+        )
+    {
+        return Ok(Some(extend_as_itself(k, base, lo, hi)?));
     }
     // toward the low corner from the base, then the result toward the high corner (a side
     // that does not grow keeps its middle coordinate)
@@ -2902,5 +3072,59 @@ mod tests {
         assert!(upstream > 1e-6, "upstream copies agree: {upstream}");
         let fixed = offset_extension_gap(true);
         assert!(fixed < 1e-9, "fixed copies disagree by {fixed}");
+    }
+
+    /// The farthest an offset (4) of a half cylinder (r 5, its axis the z axis) evaluated
+    /// from 0.07 to 3 domains of turn past both ends of its arc lies from 9 off its axis
+    /// (WR-633, the fork's tangency-labs/smlib@de0a6b8).
+    fn as_itself_off_circle(as_itself: bool) -> f64 {
+        use crate::surface::cone::Cone;
+        let mut k = Kernel::default();
+        k.fixes.offset_extension_from_base = true;
+        k.fixes.offset_extension_as_itself = as_itself;
+        let mut half = Cone::new_cylinder_bounded(
+            Vec3::ZERO,
+            Vec3::X,
+            Vec3::Y,
+            5.0,
+            0.0,
+            180.0,
+            10.0,
+            false,
+            false,
+            false,
+        );
+        half.make_nurb(&k).unwrap();
+        let half = Surface::from(half);
+        let d = half.natural_uv_domain_with_nurb(&k).unwrap();
+        let len = d.max().x - d.min().x;
+        let v = 0.5 * (d.min().y + d.max().y);
+        let mut worst: f64 = 0.0;
+        for f in [0.07, 0.25, 0.5, 1.0, 2.0, 3.0] {
+            let mut o =
+                OffsetSurface::new(&k, 4.0, half.clone(), true, crate::geom::extent2d::SS_NONE)
+                    .unwrap();
+            o.set_allow_extension(true);
+            for u in [d.max().x + f * len, d.min().x - f * len] {
+                let p = o.evaluate_point_extending(&k, Point2::new(u, v)).unwrap();
+                let r = (p.x * p.x + p.y * p.y).sqrt();
+                worst = worst.max((r - 9.0).abs());
+            }
+        }
+        worst
+    }
+
+    #[test]
+    fn wr633_offset_of_a_cylinder_continues_as_itself_past_its_domain() {
+        let upstream = as_itself_off_circle(false);
+        assert!(
+            upstream > 1e-3,
+            "the tangent extension stays on the circle: {upstream}"
+        );
+        let fixed = as_itself_off_circle(true);
+        assert!(
+            fixed < 1e-9,
+            "the continuation leaves the circle by {fixed}"
+        );
     }
 }

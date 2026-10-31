@@ -1468,6 +1468,7 @@ fn enable_fix(k: &mut Kernel, name: &str) -> Result<(), String> {
         "fillet_trace_reaches_rails" => &mut k.fixes.fillet_trace_reaches_rails,
         "fillet_rail_end_on_continued_surface" => &mut k.fixes.fillet_rail_end_on_continued_surface,
         "fillet_cliff_overflow" => &mut k.fixes.fillet_cliff_overflow,
+        "offset_extension_as_itself" => &mut k.fixes.offset_extension_as_itself,
         _ => return Err(format!("unknown `fixes` entry `{name}`")),
     };
     *field = true;
