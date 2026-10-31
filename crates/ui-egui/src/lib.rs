@@ -39,6 +39,7 @@ pub mod dialogs_appearance;
 pub mod dialogs_assembly;
 pub mod dialogs_coupling;
 pub mod dialogs_frame;
+pub mod dialogs_gears;
 mod dialogs_hole;
 pub mod dialogs_insert_drawing;
 pub mod dialogs_library;

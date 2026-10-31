@@ -386,6 +386,8 @@ crate::dialog_descriptor::dialog_descriptors! {
             /// Insert Part from the standard parts library (`dialogs_parts`).
             Part(crate::dialogs_parts::Pt),
             PartSize(crate::dialogs_part_size::Resize),
+            /// Insert or edit the dimensions of a parametric spur gear.
+            Gear(crate::dialogs_gears::Form),
             /// Edit Text: a sketch text's content and placement (`sketch_text`).
             Text(Box<crate::sketch_text::Tx>),
             TextMove(crate::sketch_text_move::TextMove),
@@ -1060,6 +1062,7 @@ impl Dialog {
                     .or_else(|| crate::dialogs_motion::start(app, id))
                     .or_else(|| crate::dialogs_parts::start(app, id))
                     .or_else(|| crate::dialogs_part_size::start(app, id))
+                    .or_else(|| crate::dialogs_gears::start(app, id))
                     .or_else(|| crate::sketch_text::start(app, id))
                     .or_else(|| crate::sketch_text_move::start(app, id))
                     .or_else(|| crate::sketch_modify_ui::start(app, id))?;
@@ -1266,7 +1269,7 @@ impl Dialog {
             Kind::SketchModify(k) => return k.previews(),
             Kind::Plastic(k) => return k.previews(),
             Kind::Frame(_) => return true,
-            Kind::Part(_) | Kind::PartSize(_) | Kind::InsertDrawing(_) => return true,
+            Kind::Part(_) | Kind::Gear(_) | Kind::PartSize(_) | Kind::InsertDrawing(_) => return true,
             // Web previews run synchronously; a modelled thread can take seconds.
             Kind::Thread { .. } => return !cfg!(target_arch = "wasm32") && self.extra.get("modeled").and_then(Value::as_bool).unwrap_or(false),
             _ => {}
@@ -2309,6 +2312,8 @@ fn title(k: &Kind) -> &'static str {
         Kind::Motion(k) => k.title(),
         Kind::Part(_) => "INSERT PART",
         Kind::PartSize(_) => "Change Part Size",
+        Kind::Gear(form) if form.component.is_some() => "Edit Gear Parameters",
+        Kind::Gear(_) => "INSERT SPUR GEAR",
         Kind::Text(_) => "EDIT TEXT",
         Kind::TextMove(_) => "MOVE/COPY TEXT",
         Kind::SketchModify(k) => k.title(),
@@ -5004,6 +5009,7 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
         Kind::Motion(k) => return crate::dialogs_motion::commands(app, k, &d.inputs),
         Kind::Part(k) => return crate::dialogs_parts::commands(app, k, &d.inputs),
         Kind::PartSize(k) => return crate::dialogs_part_size::commands(app, k),
+        Kind::Gear(k) => return crate::dialogs_gears::commands(app, k),
         Kind::Text(k) => return crate::sketch_text::commands(app, k),
         Kind::TextMove(k) => return crate::sketch_text_move::commands(app, k),
     };
