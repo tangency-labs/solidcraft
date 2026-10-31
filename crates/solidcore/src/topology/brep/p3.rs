@@ -1308,13 +1308,100 @@ pub(crate) fn kernel_named_edit<R>(
         };
         edit(k, b, &mut env)
     });
+    // (not upstream: upstream's owners are pointers) the geometry the edit bound under
+    // its kernel identities is owned by the B-rep's own once it ends, whatever the
+    // result, so a B-rep whose scheme names its entities (`Notify`, `Arena`) keeps its
+    // owners where `Brep::owner_identity` and the B-rep check look
+    // (tangency-labs/solidcore#2115). A `Caller` B-rep keeps the keys its producer
+    // recorded, and an `Unknown` one leaves naming to its caller.
+    let naming = b.naming();
+    let rebound = if matches!(
+        naming,
+        crate::topology::NamingScheme::Notify | crate::topology::NamingScheme::Arena
+    ) {
+        rebind_geometry_owners(b, key_of, |e| {
+            crate::topology::scheme_owner_identity(naming, e)
+        })
+    } else {
+        Ok(())
+    };
     b.set_key(label);
     k.notify_records = records;
     let restored =
         p2::restore_decoded_attributes(b, attributes, &|key| topology_entity(serial, key));
     let r = r?;
     restored?;
+    rebound?;
     Ok(r)
+}
+
+/// Rebinds the geometry `b`'s edges (their curves), edge uses (their UV trim curves) and
+/// faces (their surfaces) own under one identity of the same entity (`from`) to another
+/// (`to`), recording the new key (not upstream: upstream's owners are pointers, so an
+/// owner has one identity). Geometry owned under any other identity is untouched.
+///
+/// # Errors
+///
+/// None in practice: the ids walked are `b`'s own.
+pub(crate) fn rebind_geometry_owners(
+    b: &mut Brep,
+    session: impl Fn(EntityRef) -> ObjectRef,
+    to: impl Fn(EntityRef) -> ObjectRef,
+) -> Result<()> {
+    let edges: Vec<EdgeId> = b.edges().ids().collect();
+    for edge in edges {
+        let e = EntityRef::Edge(edge);
+        let from = session(e);
+        let new_owner = to(e);
+        let rebound = b.edge_mut(edge)?.curve.as_mut().is_some_and(|curve| {
+            let matched = curve.owner() == Some(from);
+            if matched {
+                curve.set_owner(Some(new_owner), None);
+            }
+            matched
+        });
+        if rebound {
+            b.set_geometry_owner_key(e, Some(new_owner));
+        }
+    }
+    let edgeuses: Vec<EdgeuseId> = b.edgeuses().ids().collect();
+    for eu in edgeuses {
+        let e = EntityRef::Edgeuse(eu);
+        let from = session(e);
+        let new_owner = to(e);
+        let rebound = b
+            .edgeuse_mut(eu)?
+            .uv_trim_curve
+            .as_mut()
+            .is_some_and(|curve| {
+                let matched = curve.owner() == Some(from);
+                if matched {
+                    curve.set_owner(Some(new_owner), None);
+                }
+                matched
+            });
+        if rebound {
+            b.set_geometry_owner_key(e, Some(new_owner));
+        }
+    }
+    let faces: Vec<FaceId> = b.faces().ids().collect();
+    for face in faces {
+        let e = EntityRef::Face(face);
+        let from = session(e);
+        let new_owner = to(e);
+        let rebound = b.face_mut(face)?.surface.as_mut().is_some_and(|surface| {
+            let matched = surface.owner() == Some(from);
+            if matched {
+                surface.set_owner(Some(new_owner));
+            }
+            matched
+        });
+        if rebound {
+            b.set_geometry_owner_key(e, Some(new_owner));
+            b.sync_face_surface_tolerance(face)?;
+        }
+    }
+    Ok(())
 }
 
 /// Runs `edit` for a caller that keeps no notification state of its own (upstream's

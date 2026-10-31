@@ -183,60 +183,7 @@ pub(super) fn normalize_session_owners(
     session: impl Fn(EntityRef) -> ObjectRef,
     to: impl Fn(EntityRef) -> ObjectRef,
 ) -> Result<()> {
-    let edges: Vec<EdgeId> = b.edges().ids().collect();
-    for edge in edges {
-        let e = EntityRef::Edge(edge);
-        let from = session(e);
-        let new_owner = to(e);
-        let rebound = b.edge_mut(edge)?.curve.as_mut().is_some_and(|curve| {
-            let matched = curve.owner() == Some(from);
-            if matched {
-                curve.set_owner(Some(new_owner), None);
-            }
-            matched
-        });
-        if rebound {
-            b.set_geometry_owner_key(e, Some(new_owner));
-        }
-    }
-    let edgeuses: Vec<crate::topology::EdgeuseId> = b.edgeuses().ids().collect();
-    for eu in edgeuses {
-        let e = EntityRef::Edgeuse(eu);
-        let from = session(e);
-        let new_owner = to(e);
-        let rebound = b
-            .edgeuse_mut(eu)?
-            .uv_trim_curve
-            .as_mut()
-            .is_some_and(|curve| {
-                let matched = curve.owner() == Some(from);
-                if matched {
-                    curve.set_owner(Some(new_owner), None);
-                }
-                matched
-            });
-        if rebound {
-            b.set_geometry_owner_key(e, Some(new_owner));
-        }
-    }
-    let faces: Vec<FaceId> = b.faces().ids().collect();
-    for face in faces {
-        let e = EntityRef::Face(face);
-        let from = session(e);
-        let new_owner = to(e);
-        let rebound = b.face_mut(face)?.surface.as_mut().is_some_and(|surface| {
-            let matched = surface.owner() == Some(from);
-            if matched {
-                surface.set_owner(Some(new_owner));
-            }
-            matched
-        });
-        if rebound {
-            b.set_geometry_owner_key(e, Some(new_owner));
-            b.sync_face_surface_tolerance(face)?;
-        }
-    }
-    Ok(())
+    crate::topology::brep::p3::rebind_geometry_owners(b, session, to)
 }
 
 /// The identity a B-rep of naming `naming` that records `recorded` for `e` owns `e`'s
