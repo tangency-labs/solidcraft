@@ -2120,7 +2120,7 @@ mod tests {
                     let mut out = ctx.run_ui(raw, |ui| {
                         let rect = ui.max_rect();
                         app.viewport.rect = Some(rect);
-                        let resp = ui.interact(rect, ui.id().with("spin"), egui::Sense::click_and_drag());
+                        let resp = ui.interact(rect, ui.scope_id().with("spin"), egui::Sense::click_and_drag());
                         super::handle(app, ui, rect, &resp, super::NavCaps::MODEL);
                     });
                     out.textures_delta.clear();

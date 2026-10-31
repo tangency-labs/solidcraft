@@ -604,15 +604,15 @@ fn without_value_boxes_in_the_view_the_distance_is_typed_in_the_window() {
     let mut h = make(json!({"distance":"4 mm"}));
     h.app.preferences.value_boxes_in_view = false;
     open(&mut h);
-    assert!(h.ctx.memory(|m| m.area_rect(egui::Id::new("sc_canvas_area"))).is_none(), "a value box in the view");
+    assert!(h.ctx.memory(|m| m.area_rect(egui::Id::unique("sc_canvas_area"))).is_none(), "a value box in the view");
     let focused = h.ctx.memory(|m| m.focused());
-    assert!(focused.is_some() && focused != Some(egui::Id::new("sc_canvas_value")), "{focused:?}");
+    assert!(focused.is_some() && focused != Some(egui::Id::unique("sc_canvas_value")), "{focused:?}");
     h.step(&json!({"text":"25 mm"})).unwrap();
     h.frames(2);
     assert!((dialog_distance(&h) - 25.0).abs() < 1e-9, "{}", dialog_distance(&h));
     h.step(&json!({"drag":[{"handle":"arrow"},on_arrow(&h, 30.0)]})).unwrap();
     assert!((dialog_distance(&h) - 30.0).abs() < 0.5, "{}", dialog_distance(&h));
-    assert!(h.ctx.memory(|m| m.area_rect(egui::Id::new("sc_canvas_area"))).is_none(), "a value box in the view");
+    assert!(h.ctx.memory(|m| m.area_rect(egui::Id::unique("sc_canvas_area"))).is_none(), "a value box in the view");
 }
 
 #[test]

@@ -1217,7 +1217,7 @@ pub fn wide_cell_editor(ui: &mut Ui, id: egui::Id, value: &mut String, hint: &st
                     response.surrender_focus();
                 }
                 super::text_menu::menu(ui, &mut response, value, super::text_menu::Field::LINE);
-                publish(ui, &response, egui::WidgetType::TextEdit);
+                publish(ui, &response, egui::Role::TextInput);
                 crate::theme::TabAccent::number_focus(ui, &response);
                 t.input_bevel(ui, &response);
                 let (text, error) = note;
@@ -1235,7 +1235,7 @@ pub fn wide_cell_editor(ui: &mut Ui, id: egui::Id, value: &mut String, hint: &st
     });
     let response = shown.inner;
     response.widget_info(|| {
-        let mut info = egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, enabled, crate::i18n::tr_label(hint));
+        let mut info = egui::WidgetInfo::labeled(egui::Role::TextInput, enabled, crate::i18n::tr_label(hint));
         info.current_text_value = Some(value.clone());
         info
     });

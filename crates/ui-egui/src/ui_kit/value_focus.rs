@@ -12,7 +12,7 @@ pub(crate) fn value_fields(ctx: &egui::Context, draw: impl FnOnce() -> bool) -> 
 
 /// The expression editor the form drew last so far, in [`value_fields`].
 pub(crate) fn last_value_field(ctx: &egui::Context) -> Option<egui::Id> {
-    ctx.data(|data| data.get_temp::<Vec<(egui::Id, usize)>>(egui::Id::new("sc_value_fields"))).and_then(|fields| fields.last().map(|(id, _)| *id))
+    ctx.data(|data| data.get_temp::<Vec<(egui::Id, usize)>>(egui::Id::unique("sc_value_fields"))).and_then(|fields| fields.last().map(|(id, _)| *id))
 }
 
 /// True while a text editor drawn by the kit holds the keyboard. A dialog uses this to keep at

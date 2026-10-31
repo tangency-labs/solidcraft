@@ -401,7 +401,7 @@ fn theme_option_switch(ui: &mut Ui, label: &str, on: &mut bool) {
     if response.has_focus() {
         ui.painter().rect_stroke(rect, t.control_radius, Stroke::new(t.space_2, t.form_primary), egui::StrokeKind::Inside);
     }
-    response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Checkbox, ui.is_enabled(), *on, label));
+    response.widget_info(|| egui::WidgetInfo::selected(egui::Role::CheckBox, ui.is_enabled(), *on, label));
     scenario::publish_target(&format!("prefs:theme_option_switch:{label}"), response.rect);
 }
 

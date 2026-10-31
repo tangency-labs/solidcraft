@@ -333,7 +333,7 @@ pub(crate) fn viewport_status_summary(
     let container = Container::new(ctx, Surface::ViewportStatus);
     let was_open = state.summary_popup.is_some_and(|id| egui::Popup::is_id_open(ctx, id));
     let row = container
-        .area(Id::new("viewport_status_summary"))
+        .area(Id::unique("viewport_status_summary"))
         .movable(false)
         .pivot(egui::Align2::CENTER_TOP)
         .fixed_pos(egui::pos2(free.center().x, free.top() + t.space_8))
@@ -396,7 +396,7 @@ pub(crate) fn viewport_status_summary(
                             "ui.viewport_status_summary_label",
                             &[("name", &latest.name), ("count", &items.len().saturating_sub(1).to_string())],
                         );
-                        response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), label.as_str()));
+                        response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled(), label.as_str()));
                         scenario::publish_target("viewport_status:summary", rect);
                         scenario::publish_target(&target(latest, "summary"), rect);
                         response
@@ -512,7 +512,7 @@ fn show_card(
     let t = Tokens::get();
     let card = Container::new(ctx, Surface::Popup);
     let result =
-        card.area(Id::new("viewport_status_key")).order(egui::Order::Background).movable(false).fixed_pos(anchor + vec2(0.0, t.space_6)).show(
+        card.area(Id::unique("viewport_status_key")).order(egui::Order::Background).movable(false).fixed_pos(anchor + vec2(0.0, t.space_6)).show(
             ctx,
             |ui| {
                 let frame = card.frame(ctx, t.overlay, crate::frame::Side::Left).inner_margin(t.space_12);

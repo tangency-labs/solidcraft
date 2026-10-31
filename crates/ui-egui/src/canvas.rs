@@ -841,7 +841,7 @@ pub(crate) fn box_place(app: &SolveApp, proj: &Proj) -> BoxPlace {
 }
 
 fn boxes_shown_id() -> egui::Id {
-    egui::Id::new("sc_canvas_value_boxes")
+    egui::Id::unique("sc_canvas_value_boxes")
 }
 
 /// Show commands' values in boxes in the view or not, from the preference (the app calls this
@@ -1390,7 +1390,7 @@ fn drag_label(ui: &mut egui::Ui, labels: &mut MeasureLabels, i: usize, rect: egu
     if let Some(drawn) = labels.drawn.get_mut(i) {
         *drawn = Some(rect);
     }
-    let r = ui.interact(rect, egui::Id::new(("sc_measure_label", i)), egui::Sense::click_and_drag());
+    let r = ui.interact(rect, egui::Id::unique(("sc_measure_label", i)), egui::Sense::click_and_drag());
     if r.dragged() {
         ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
     } else if r.hovered() {

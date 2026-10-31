@@ -244,7 +244,7 @@ pub(crate) fn prepare_tabs(
     values: impl FnOnce() -> BTreeMap<String, crate::theme_files::OptionValue>,
 ) -> Option<Custom> {
     ctx.data_mut(|data| {
-        let state = data.get_temp_mut_or_default::<TabThemeState>(egui::Id::new(TAB_STATE));
+        let state = data.get_temp_mut_or_default::<TabThemeState>(egui::Id::unique(TAB_STATE));
         let same = match (&state.prepared, file) {
             (Some(old), Some(file)) => old.file == *file && old.raw.as_ref() == raw,
             (None, None) => true,
@@ -686,7 +686,7 @@ impl TabAccent {
     pub fn publish(app: &crate::SolveApp, ctx: &egui::Context) {
         let now = ctx.input(|i| i.time);
         let (published, accent, fading, style_surfaces) = ctx.data_mut(|data| {
-            let state = data.get_temp_mut_or_default::<TabThemeState>(egui::Id::new(TAB_STATE));
+            let state = data.get_temp_mut_or_default::<TabThemeState>(egui::Id::unique(TAB_STATE));
             let (published, accent, fading) = state.publish(&app.ui.tab, now);
             let style_surfaces = published.tab_surfaces || state.styled_surfaces;
             state.styled_surfaces = published.tab_surfaces;
@@ -1816,7 +1816,7 @@ mod tests {
             set_dark(file.base.is_dark());
             set_custom(custom);
         };
-        let publish = || ctx.data_mut(|d| d.get_temp_mut_or_default::<TabThemeState>(egui::Id::new(TAB_STATE)).publish("SKETCH", 1.0));
+        let publish = || ctx.data_mut(|d| d.get_temp_mut_or_default::<TabThemeState>(egui::Id::unique(TAB_STATE)).publish("SKETCH", 1.0));
         set_vision(ColorVision::Off);
         set_viewport_dark(None);
         set_viewport_background(None);
@@ -1851,7 +1851,7 @@ mod tests {
         let ctx = crate::fonts::test_context();
         let mut state = tabs_state("dark", BTreeMap::new());
         state.publish("MODEL", 0.0);
-        ctx.data_mut(|d| d.insert_temp(egui::Id::new(TAB_STATE), state));
+        ctx.data_mut(|d| d.insert_temp(egui::Id::unique(TAB_STATE), state));
         app.ui.tab = "SKETCH".into();
         let frame = |time| {
             let mut out = ctx.run_ui(egui::RawInput { time: Some(time), ..Default::default() }, |ui| {
@@ -1878,7 +1878,7 @@ mod tests {
             frame(time);
         }
         assert_eq!(frame(2.0), std::time::Duration::MAX);
-        let (end, _, _) = ctx.data_mut(|d| d.get_temp_mut_or_default::<TabThemeState>(egui::Id::new(TAB_STATE)).publish("SKETCH", 2.0));
+        let (end, _, _) = ctx.data_mut(|d| d.get_temp_mut_or_default::<TabThemeState>(egui::Id::unique(TAB_STATE)).publish("SKETCH", 2.0));
         assert_eq!(Tokens::get(), end.tokens);
         let mut instant = tabs_state("dark", BTreeMap::from([("tab_fade_ms".into(), OptionValue::Num(0.0))]));
         instant.publish("MODEL", 0.0);

@@ -394,7 +394,7 @@ pub(crate) fn sort_header(ui: &mut Ui, label: &str, sort: &mut Sort) -> Response
         Sort::Ascending => "Sort Z to A",
         Sort::Descending => "Back to the original order",
     };
-    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), text));
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled(), text));
     response.on_hover_cursor(egui::CursorIcon::PointingHand).backing_on_hover_text(crate::i18n::tr_label(tip))
 }
 

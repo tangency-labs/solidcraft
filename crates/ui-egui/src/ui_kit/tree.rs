@@ -127,7 +127,7 @@ pub(crate) struct RowResp {
 /// The state a drag over the eyes sets them to: the first eye's new state, while the button is
 /// down (egui temporary data). Absent when no eye drag is under way.
 pub(crate) fn eye_drag_id() -> egui::Id {
-    egui::Id::new("sc_tree_eye_drag")
+    egui::Id::unique("sc_tree_eye_drag")
 }
 
 /// Geometry used by Browser culling and the shared row painter.

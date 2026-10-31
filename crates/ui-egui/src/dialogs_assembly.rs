@@ -2050,7 +2050,7 @@ pub fn component_joints(app: &mut SolveApp, ui: &mut egui::Ui, path: &[u64], key
     }
     let key = format!("{key}/joints");
     let open = is_open(app, &key, false);
-    let r = draw_row(ui, ui.id().with(&key), &Row { depth, fold: Some(open), icon: "folder", label: "Joints", ..Default::default() });
+    let r = draw_row(ui, ui.scope_id().with(&key), &Row { depth, fold: Some(open), icon: "folder", label: "Joints", ..Default::default() });
     if r.fold || r.clicked {
         toggle(app, &key, false);
     }
@@ -2066,7 +2066,7 @@ pub fn component_joints(app: &mut SolveApp, ui: &mut egui::Ui, path: &[u64], key
         let selected = app.tree.picked_joints.contains(&id);
         let r = draw_row(
             ui,
-            ui.id().with((&key, "joint", id)),
+            ui.scope_id().with((&key, "joint", id)),
             &Row {
                 depth: depth + 1,
                 eye: Some(visible),
