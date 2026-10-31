@@ -39,6 +39,11 @@
 //! (`topology.brep_p9`) notify through that environment, so [`make_manifold`] and
 //! [`stitch_and_orient`] take the kernel. Curves have no identity in the port: `SetCurve`'s new/old curve
 //! data are null and a curve's own `SM_NO_CHANGE_OWNER` is not delivered.
+//! `SetOwner(pEdge)` on a joined or mirrored edge's curve owns it under the edge's
+//! [`Brep::owner_identity`] (the identity the B-rep check compares) when `b` names its
+//! geometry by a fixed scheme (`Notify`, `Arena`): a plain entry point's kernel keys
+//! would otherwise leave the curve owned by no edge `ValidateGeometry` knows. Under a
+//! caller's naming (`Caller`, `Unknown`) the environment's key owns it, recorded on `b`.
 //! Not upstream: with `Kernel::fixes.glue_vertices_joins_every_region` (WR-607; SolidCraft
 //! change, tangency-labs/smlib 661f79c) [`glue_vertices`] joins the pair of shells of every
 //! region both vertices are in, not only the last pair its search finds.
@@ -1177,10 +1182,12 @@ pub(super) fn set_joined_edge_curve(
         },
     )
 }
-/// `pCurveSurviveCopy->SetOwner(pSurvivingEdge)`: the owner is the edge's identity in
-/// the notification environment. The curve's own `SM_NO_CHANGE_OWNER` notification
-/// (`SmObject::Notify` on the curve) is not delivered: the curve has no identity to
-/// notify under (the module's Deviations; as `topology.brep_p2`'s `SetCurve` helpers).
+/// `pCurveSurviveCopy->SetOwner(pSurvivingEdge)`: the owner is the edge, named by `b`'s
+/// own scheme ([`Brep::owner_identity`]) when that is fixed (`Notify`, `Arena`), else by
+/// its identity in the notification environment. The curve's own `SM_NO_CHANGE_OWNER`
+/// notification (`SmObject::Notify` on the curve) is not delivered: the curve has no
+/// identity to notify under (the module's Deviations; as `topology.brep_p2`'s `SetCurve`
+/// helpers).
 pub(super) fn set_edge_curve_owner(
     b: &mut Brep,
     edge: EdgeId,
@@ -1191,7 +1198,15 @@ pub(super) fn set_edge_curve_owner(
         key: b.key(),
     };
     with_notifications(b, notifications, None, |b, env, _| {
-        let owner = (env.key_of)(crate::error::EntityRef::Edge(edge));
+        let entity = crate::error::EntityRef::Edge(edge);
+        let owner = match b.naming() {
+            crate::topology::NamingScheme::Notify | crate::topology::NamingScheme::Arena => {
+                b.owner_identity(entity)
+            }
+            crate::topology::NamingScheme::Caller | crate::topology::NamingScheme::Unknown => {
+                (env.key_of)(entity)
+            }
+        };
         let curve = b
             .edge_mut(edge)?
             .curve
