@@ -176,6 +176,115 @@ fn arc_slot_dimensions_survive_parameter_edits_and_reopening() {
     close(measure(&reopened, |k| matches!(k, ConstraintKind::Diameter { .. })), 8.0);
 }
 
+/// Where point `id` of the active sketch is.
+fn point_at(s: &Session, id: &Value) -> solidcraft_geom::Vec2 {
+    let sk = sketch(s);
+    sk.point(sk.resolve_point(id.as_str().unwrap()).unwrap()).unwrap()
+}
+
+/// The solve of the active sketch: no conflict, nothing redundant.
+fn clean_solve(s: &Session) -> solidcraft_sketch::SolveReport {
+    let mut sk = sketch(s);
+    let rep = solidcraft_sketch::solve(&mut sk);
+    assert!(rep.ok() && rep.redundant.is_empty(), "{rep:?} {:?}", sk.constraints);
+    rep
+}
+
+/// The arc slot `out`'s middle is on its centre arc (radius `r`, sweep `sweep`), halfway along it.
+fn halfway(s: &Session, out: &Value, r: f64, sweep: f64) {
+    let sk = sketch(s);
+    let centre = sk.curve_index(out["centre_arc"].as_str().unwrap()).unwrap();
+    let solidcraft_sketch::CurveKind::Arc { c, a, b } = sk.curves[centre].kind else { panic!("an arc") };
+    let (o, a, b) = (sk.point(c).unwrap(), sk.point(a).unwrap(), sk.point(b).unwrap());
+    let m = point_at(s, &out["middle"]);
+    close(o.dist(a), r);
+    close(o.dist(m), r);
+    // Equal turns from each end, the two together the whole sweep.
+    let turn = |p: solidcraft_geom::Vec2, q: solidcraft_geom::Vec2| ((q - o).angle() - (p - o).angle()).rem_euclid(std::f64::consts::TAU);
+    close(turn(a, b), sweep);
+    close(turn(a, m), sweep / 2.0);
+    close(turn(m, b), sweep / 2.0);
+}
+
+/// Every slot makes its middle point, held in the middle when the slot changes, and the
+/// middle takes no freedom away nor adds any (#7908).
+#[test]
+fn every_slot_keeps_a_middle_point_in_the_middle() {
+    use solidcraft_geom::Vec2;
+    for command in ["sketch.slot.center_to_center", "sketch.slot.overall", "sketch.slot.center_point"] {
+        let mut s = session();
+        let out = draw(
+            &mut s,
+            command,
+            json!({"p0":[2,3],"p1":[22,3],"center":[12,3],"end":[22,3],"width":4,"connect":false}),
+            json!({"length":20,"width":4}),
+        );
+        let middle = &out["middle"];
+        assert!(middle.is_string(), "{command}: {out}");
+        let sk = sketch(&s);
+        let axis = sk.curve_index(out["centre_line"].as_str().unwrap()).unwrap();
+        assert!(sk.curves[axis].construction, "{command}");
+        let solidcraft_sketch::CurveKind::Line { a, b } = sk.curves[axis].kind else { panic!("{command}: a line") };
+        assert!(sk.constraints.iter().any(|c| matches!(c.kind, ConstraintKind::Midpoint { l, .. } if l == axis)), "{command}");
+        // Length and width set: only the slot's place and turn are free.
+        assert_eq!(clean_solve(&s).dof, 3, "{command}");
+        let length = out["dimensions"]["length"]["param"].as_str().unwrap();
+        assert_eq!(run(&mut s, "parameters.change", json!({"name":length,"expression":40}))["errors"], json!([]));
+        let sk = sketch(&s);
+        let (pa, pb) = (sk.point(a).unwrap(), sk.point(b).unwrap());
+        let m = point_at(&s, middle);
+        assert!(m.dist((pa + pb) * 0.5) < 1e-6, "{command}: {m:?} between {pa:?} and {pb:?}");
+        assert!(pa.dist(pb) > 20.0, "{command}: the slot grew");
+        // Pinning the middle and the turn leaves the slot fully defined.
+        run(&mut s, "sketch.constraint.fix", json!({"entity":middle,"fixed":true}));
+        run(&mut s, "sketch.constraint.horizontal_vertical", json!({"line":out["centre_line"]}));
+        assert_eq!(clean_solve(&s).dof, 0, "{command}");
+    }
+
+    // Arc slots: the middle is halfway along the centre arc.
+    let mut s = session();
+    let out = draw(
+        &mut s,
+        "sketch.slot.arc_center",
+        json!({"center":[0,0],"start":[20,0],"end":[0,20],"width":6}),
+        json!({"radius":20,"sweep":90,"width":6}),
+    );
+    close(point_at(&s, &out["middle"]).dist(Vec2::from_angle(45f64.to_radians()) * 20.0), 0.0);
+    halfway(&s, &out, 20.0, 90f64.to_radians());
+    // The centre and the start angle are free.
+    assert_eq!(clean_solve(&s).dof, 3);
+    for (role, value) in [("radius", 25), ("sweep", 120)] {
+        let name = out["dimensions"][role]["param"].as_str().unwrap();
+        assert_eq!(run(&mut s, "parameters.change", json!({"name":name,"expression":value}))["errors"], json!([]));
+    }
+    halfway(&s, &out, 25.0, 120f64.to_radians());
+    assert_eq!(clean_solve(&s).dof, 3);
+
+    let mut s = session();
+    let out = run(&mut s, "sketch.slot.arc_three_point", json!({"start":[0,0],"through":[10,5],"end":[20,0],"width":3}));
+    let m = point_at(&s, &out["middle"]);
+    close(m.x, 10.0);
+    let sk = sketch(&s);
+    let centre = sk.curve_index(out["centre_arc"].as_str().unwrap()).unwrap();
+    assert!(m.y > sk.center(centre).unwrap().y, "on the drawn side of the arc: {m:?}");
+    let solidcraft_sketch::CurveKind::Arc { c, a, b } = sk.curves[centre].kind else { panic!("an arc") };
+    let (o, a, b) = (sk.point(c).unwrap(), sk.point(a).unwrap(), sk.point(b).unwrap());
+    halfway(&s, &out, o.dist(a), ((b - o).angle() - (a - o).angle()).rem_euclid(std::f64::consts::TAU));
+    // The centre, radius, start and sweep of the centre arc, and the width.
+    assert_eq!(clean_solve(&s).dof, 6);
+    // A radius takes one of them away whatever it is: the middle never takes another.
+    let d = run(&mut s, "sketch.dimension", json!({"entities":[out["centre_arc"]],"type":"radius","value":22}));
+    for radius in [22, 8, 12, 40] {
+        assert_eq!(run(&mut s, "parameters.change", json!({"name":d["param"],"expression":radius}))["errors"], json!([]));
+        assert_eq!(clean_solve(&s).dof, 5, "radius {radius}");
+        let sk = sketch(&s);
+        let centre = sk.curve_index(out["centre_arc"].as_str().unwrap()).unwrap();
+        let solidcraft_sketch::CurveKind::Arc { c, a, b } = sk.curves[centre].kind else { panic!("an arc") };
+        let (o, a, b) = (sk.point(c).unwrap(), sk.point(a).unwrap(), sk.point(b).unwrap());
+        halfway(&s, &out, f64::from(radius), ((b - o).angle() - (a - o).angle()).rem_euclid(std::f64::consts::TAU));
+    }
+}
+
 #[test]
 fn invalid_dimensioned_shapes_are_atomic_including_late_constraint_failure() {
     let mut s = session();
