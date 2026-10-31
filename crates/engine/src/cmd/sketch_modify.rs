@@ -1405,21 +1405,31 @@ fn weld_corner(sk: &mut Sketch, p: &Value) {
     let Some(mut q) = q else { return };
     // Each pass welds one partner; a pass removes a constraint, so this ends.
     for _ in 0..sk.constraints.len() {
-        let partner = sk.constraints.iter().enumerate().find_map(|(i, k)| {
+        let partner = sk.constraints.iter().find_map(|k| {
             let o = match k.kind {
                 ConstraintKind::Coincident { p, q: r } if p == q && r != q => r,
                 ConstraintKind::Coincident { p, q: r } if r == q && p != q => p,
                 _ => return None,
             };
-            let held_elsewhere = sk.constraints.iter().enumerate().any(|(j, k)| j != i && k.kind.refers_to_point(o));
+            // What else holds the partner (a dimension measuring to the corner, #7507) holds
+            // the corner instead: the two are one place. Not where that would name the corner
+            // twice in one constraint (other than a repeat of this coincidence).
+            let twice = sk.constraints.iter().any(|other| {
+                let points = other.kind.indices().0;
+                !matches!(other.kind, ConstraintKind::Coincident { .. }) && points.contains(&o) && points.contains(&q)
+            });
             let linked = (0..sk.curves.len()).any(|c| sk.is_linked_curve(c) && sk.curves.get(c).is_some_and(|x| x.kind.uses(o)));
-            (o != 0 && !held_elsewhere && !linked).then_some((i, o))
+            (o != 0 && !twice && !linked).then_some(o)
         });
-        let Some((i, o)) = partner else { return };
+        let Some(o) = partner else { return };
         for c in sk.curves.iter_mut() {
             c.kind.map_points(&|x| if x == o { q } else { x });
         }
-        sk.constraints.remove(i);
+        for k in sk.constraints.iter_mut() {
+            k.kind.remap(&|x| Some(if x == o { q } else { x }), &Some);
+        }
+        // The coincidence, and any repeat of it, now joins the corner to itself.
+        sk.constraints.retain(|k| !matches!(k.kind, ConstraintKind::Coincident { p, q: r } if p == r));
         sk.remove_points(&[o]);
         if o < q {
             q -= 1;

@@ -1668,6 +1668,45 @@ fn fillet_a_line_and_an_arc_drawn_to_meet_at_a_point() {
     }
 }
 
+/// #7507: a line drawn on from another line's end by coordinates meets it through a Coincident
+/// constraint, and a dimension measures to the second line's own end at that corner. The corner
+/// is still rounded, by point and by naming the two lines, and the dimension keeps measuring to
+/// the sharp corner.
+#[test]
+fn fillet_a_coincident_corner_that_a_dimension_measures_to() {
+    for how in [json!({"point": "l1.end"}), json!({"a": "l1", "b": "l2"})] {
+        let mut s = new_sketch();
+        run(&mut s, "sketch.line", json!({"points": [[0, 0], [40, 0]]}));
+        run(&mut s, "sketch.line", json!({"points": [[40, 0], [100, -30]]}));
+        run(&mut s, "sketch.dimension", json!({"entities": ["origin", "l2.start"], "type": "horizontal", "value": "40"}));
+        let mut p = how.clone();
+        p["radius"] = json!(5);
+        let f = run(&mut s, "sketch.fillet", p);
+        let made = ids(&f["curves"]);
+        assert_eq!(made.len(), 1, "{how}: {f}");
+        let sk = sketch(&s);
+        let ai = sk.curve_index(&made[0]).unwrap();
+        assert!((sk.radius(ai).unwrap() - 5.0).abs() < 1e-7, "{how}");
+        // Tangent to both lines: 5 below the first and 5 from the second's line.
+        let c = sk.center(ai).unwrap();
+        let along = Vec2::new(60.0, -30.0).normalized().unwrap();
+        assert!((c.y + 5.0).abs() < 1e-6 && ((c - Vec2::new(40.0, 0.0)).cross(along).abs() - 5.0).abs() < 1e-6, "{how}: {c:?}");
+        // The dimension still measures 40 to the sharp corner, and the sketch solves.
+        let info = run(&mut s, "sketch.inspect", json!({}));
+        assert_eq!(info["status"], "solved", "{how}: {info}");
+        let (p, q) = sk
+            .constraints
+            .iter()
+            .find_map(|k| match k.kind {
+                ConstraintKind::DistanceX { p, q, .. } => Some((p, q)),
+                _ => None,
+            })
+            .unwrap();
+        assert!((sk.point(q).unwrap().x - sk.point(p).unwrap().x - 40.0).abs() < 1e-6, "{how}");
+        assert!(sk.point(q).unwrap().dist(Vec2::new(40.0, 0.0)) < 1e-6, "{how}");
+    }
+}
+
 #[test]
 fn chamfer_two_lines_drawn_to_meet_at_a_point() {
     let mut s = new_sketch();
