@@ -2253,6 +2253,14 @@ impl Sphere {
             sphere.base.base.nurb = Some(copy_nurb_surface(nurb)).into();
             sphere.base.base.nurb_is_borrowed = false;
             ignore_status(sphere.rebuild_step_from_nurb_parameters(k))?;
+            // (not in the fork) the rebuild takes the sweep interval from one iso circle
+            // and the polar curve from another; they differ beyond the check's 1e-12 on a
+            // small sphere. The interval is the polar curve's (#2073).
+            if let Some(ivl) = sphere.base.polar_curve().map(Ellipse::step_interval) {
+                let d = sphere.base.anal_uv_domain;
+                sphere.base.anal_uv_domain =
+                    Extent2d::from_bounds(ivl.min(), d.min().y, ivl.max(), d.max().y);
+            }
         }
 
         // (Notify(SM_NO_COPY) copies the test surface's attributes: not modelled)
