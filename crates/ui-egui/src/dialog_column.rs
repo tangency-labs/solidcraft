@@ -51,7 +51,7 @@ pub(crate) fn rect(app: &SolveApp, available: Rect, width: f32) -> Rect {
     let t = Tokens::get();
     let panel = Container::for_layout(app.ui.layout, Surface::Panel);
     let gap = panel.gap();
-    let left = (available.left() + crate::agent_chat::left_inset(app, available) + gap).min(available.right());
+    let left = (available.left() + crate::agent_chat::left_inset(app, available) + crate::library::left_inset(app) + gap).min(available.right());
     let history = left_history(app);
     let stacked = history && app.preferences.timeline_under_browser;
     let browser_width = crate::browser::browser_width(app.preferences.browser_width);
