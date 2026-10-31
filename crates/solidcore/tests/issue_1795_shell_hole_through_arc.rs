@@ -476,3 +476,68 @@ fn issue_1795_y20_read_back() {
         }
     }
 }
+
+/// WR-617: the shell's offset faces before the merge (`merge_results` off, the executive's
+/// offset B-rep as `ShellBrep` returns it unmerged), open at y = 20 and, for comparison, at
+/// the top. Prints each face's surface kind and the point at the middle of its domain, then
+/// every edge with an end near the plane x = 0 (the arc's tangent junction with y = 20,
+/// where the merge's vertex relation fails: vertices at (0, 18, 2), (0, 18.5, 2) and
+/// (0, 19.5, 2)), with its end points and faces. Run with `--ignored --nocapture`.
+#[test]
+#[ignore = "probe: WR-617, the unmerged offset faces at the tangent junction"]
+fn issue_1795_unmerged_near_x0() {
+    let kind = |d: String| d.split(['(', ' ', '{']).next().unwrap_or("").to_string();
+    for (open, cos) in [(Open::Y20, false), (Open::Y20, true), (Open::Z27, true)] {
+        let mut k = Kernel::default();
+        let mut b = drilled(&mut k);
+        let faces = open.faces(&k, &b);
+        let mut unmerged = options(cos);
+        unmerged.offset.merge_results = false;
+        let shelled = api_shell(&mut k, &mut b, unmerged, &faces);
+        let Ok(r) = shelled
+            .inspect_err(|e| eprintln!("PROBE 1795 unmerged open={open:?} cos={cos}: Err({e:?})"))
+        else {
+            continue;
+        };
+        eprintln!(
+            "PROBE 1795 unmerged open={open:?} cos={cos}: {} faces, {} edges",
+            r.face_list().len(),
+            r.edge_list().len()
+        );
+        for &f in r.face_list() {
+            let face = r.face(f).unwrap();
+            let s = face.surface.as_ref();
+            let mid = s.map(|s| s.evaluate_point(&k, face.uv_domain.mid()).unwrap());
+            eprintln!(
+                "PROBE 1795 unmerged open={open:?} cos={cos} face {}: {:?} mid {mid:?}",
+                f.index(),
+                s.map(|s| kind(format!("{:?}", s.kind())))
+            );
+        }
+        for &e in r.edge_list() {
+            let points: Vec<Point3> = solidcore::topology::edge::vertices(&r, e, None)
+                .unwrap()
+                .into_iter()
+                .flatten()
+                .map(|v| r.vertex(v).unwrap().point)
+                .collect();
+            if !points.iter().any(|p| p.x.abs() < 0.05) {
+                continue;
+            }
+            let on: Vec<u32> = solidcore::topology::edge::faces(&r, e, None)
+                .unwrap()
+                .into_iter()
+                .map(FaceId::index)
+                .collect();
+            eprintln!(
+                "PROBE 1795 unmerged open={open:?} cos={cos} edge {}: curve {:?} vertices {points:?} faces {on:?}",
+                e.index(),
+                r.edge(e)
+                    .unwrap()
+                    .curve
+                    .as_ref()
+                    .map(|c| kind(format!("{:?}", c.kind())))
+            );
+        }
+    }
+}
