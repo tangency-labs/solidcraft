@@ -86,6 +86,29 @@ fn gap(t: &Tokens) -> f32 {
     (t.space_4 + t.space_6) * 0.5
 }
 
+/// A bounded settings row/card using the same selection treatment as picture cards.
+pub(crate) fn settings_row_card<R>(ui: &mut Ui, selected: bool, height: f32, add: impl FnOnce(&mut Ui) -> R) -> egui::InnerResponse<R> {
+    let t = Tokens::get();
+    let (rect, response) = ui.allocate_exact_size(vec2(dimension(ui.available_width()), height), Sense::hover());
+    let look = card_look(selected, ui.is_enabled(), false, false);
+    ui.painter().rect(
+        rect,
+        t.radius_lg,
+        if selected { t.selected_bg } else { t.control_fill },
+        Stroke::new(look.border, if selected { t.form_primary } else { t.dialog_border }),
+        StrokeKind::Inside,
+    );
+    let inner = rect.shrink2(vec2(t.space_10, 0.0));
+    let result = ui
+        .scope_builder(egui::UiBuilder::new().max_rect(inner).layout(egui::Layout::left_to_right(egui::Align::Center)), |ui| {
+            ui.set_clip_rect(ui.clip_rect().intersect(inner));
+            ui.set_min_size(inner.size());
+            add(ui)
+        })
+        .inner;
+    egui::InnerResponse { inner: result, response }
+}
+
 fn paint_card(ui: &mut Ui, card: &Card, width: f32, tile: bool) -> Response {
     let t = Tokens::get();
     let width = dimension(width);
@@ -214,7 +237,7 @@ pub(crate) fn preset_card(
     icon(p, Rect::from_center_size(box_rect.center(), box_rect.size() * 0.55), dim(box_ink));
     let text_left = box_rect.right() + t.space_12;
     let text_width = (rect.right() - t.space_14 - t.space_24 - text_left).max(0.0);
-    let name_font = crate::fonts::semibold(t.font_heading.min(15.0));
+    let name_font = crate::fonts::semibold(t.font_heading);
     let name_ink = if selected { t.figure_accent } else { t.form_ink };
     let name_rect = Rect::from_min_size(pos2(text_left, rect.center().y - t.space_16), vec2(text_width, t.space_16));
     super::text::paint_text(ui, name_rect, name, name_font, dim(name_ink), false);

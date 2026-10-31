@@ -964,6 +964,8 @@ pub struct Tokens {
     pub font_subtitle: f32,
     /// Introductory text on the home page.
     pub font_intro: f32,
+    /// Preferences page title, independent of dialog and article headings.
+    pub font_page_heading: f32,
     /// Top-level headings in assistant Markdown.
     pub font_article_heading: f32,
     /// Application title in the About dialog.
@@ -1191,6 +1193,10 @@ pub struct Tokens {
     pub figure_ground: Color32,
     /// Outlines and reference lines of Preferences figures.
     pub figure_line: Color32,
+    /// Neutral light reflected by a model in a Preferences figure, independent of theme polarity.
+    pub figure_highlight: Color32,
+    /// Neutral shadow cast by a model in a Preferences figure, independent of theme polarity.
+    pub figure_shadow: Color32,
     /// Top face of the Preferences figure cube.
     pub figure_face_top: Color32,
     /// Left face of the Preferences figure cube.
@@ -1211,8 +1217,10 @@ pub struct Tokens {
     pub figure_axis_z: Color32,
     /// Done or fully constrained mark in a Preferences figure.
     pub figure_ok: Color32,
-    /// Warning mark in a Preferences figure.
+    /// Under-constrained sketch mark in a Preferences figure.
     pub figure_warn: Color32,
+    /// Conflicting sketch geometry or state glyph in a Preferences figure.
+    pub figure_conflict: Color32,
     /// Segmented control well and tint behind figures in Preferences.
     pub pref_well: Color32,
     /// Warning badge text and stroke in Preferences.
@@ -1440,11 +1448,20 @@ impl Tokens {
     /// These tokens with a colour vision mode's values on top (the tables in `palettes.rs`); Off
     /// gives them back unchanged.
     pub fn with_vision(self, dark: bool, mode: ColorVision) -> Tokens {
-        match mode {
-            ColorVision::Off => self,
+        let mut t = match mode {
+            ColorVision::Off => return self,
             ColorVision::Protan | ColorVision::Deutan => self.red_green(dark),
             ColorVision::Tritan => self.blue_yellow(dark),
-        }
+        };
+        // Figure axes carry the same X/Y/Z meanings as the viewport and its navigation triad.
+        t.figure_axis_x = t.axis_x;
+        t.figure_axis_y = t.axis_y;
+        t.figure_axis_z = t.axis_z;
+        // Match SketchState::ink: fully constrained, under constrained, and conflicting.
+        t.figure_ok = t.sketch_fixed;
+        t.figure_warn = t.sketch;
+        t.figure_conflict = t.error;
+        t
     }
 
     /// Fade idle cube colours into the viewport while retaining opaque facets.
@@ -1786,6 +1803,27 @@ mod tests {
         assert!(ctx.has_requested_repaint(), "a theme change must leave a repaint pending");
         let theme = if dark { egui::Theme::Dark } else { egui::Theme::Light };
         assert_eq!(ctx.style_of(theme).visuals, expected, "the new theme's visuals must be in place");
+    }
+
+    #[test]
+    fn preferences_foreground_pairs_hold_small_text_contrast() {
+        for dark in [false, true] {
+            for vision in ColorVision::ALL {
+                let t = Tokens::themed(dark, vision);
+                for (ink_name, ink, surface_name, surface) in [
+                    ("pref_note", t.pref_note, "pref_note_fill", t.pref_note_fill),
+                    ("pref_ok", t.pref_ok, "pref_ok_fill", t.pref_ok_fill),
+                    ("pref_on_accent", t.pref_on_accent, "figure_accent", t.figure_accent),
+                    ("figure_accent", t.figure_accent, "figure_card", t.figure_card),
+                    ("figure_accent", t.figure_accent, "selected_bg", t.selected_bg),
+                ] {
+                    let contrast = contrast_ratio(ink, surface);
+                    assert!(contrast >= 4.5, "dark={dark} {vision:?}: {ink_name} on {surface_name}: {contrast:.2}");
+                }
+                assert_eq!(t.figure_highlight, Color32::WHITE, "a model highlight stays light in either theme");
+                assert_eq!(t.figure_shadow, Color32::BLACK, "a model shadow stays dark in either theme");
+            }
+        }
     }
 
     #[test]

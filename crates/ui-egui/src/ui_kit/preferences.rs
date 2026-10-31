@@ -363,23 +363,40 @@ pub(crate) fn settings_heading_with_tag(ui: &mut Ui, title: &str, description: &
         return;
     }
     let t = Tokens::get();
-    ui.scope(|ui| {
+    let page = super::settings_page_active(ui);
+    let heading = ui.scope(|ui| {
         ui.spacing_mut().item_spacing.y = t.space_3;
-        let (rect, response) = ui.allocate_exact_size(vec2(dimension(ui.available_width()), t.space_16 + t.space_3), Sense::hover());
+        let (rect, response) =
+            ui.allocate_exact_size(vec2(dimension(ui.available_width()), if page { t.space_24 } else { t.space_16 + t.space_3 }), Sense::hover());
         response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), title));
-        paint_text(ui, rect, title, crate::fonts::semibold(t.font_intro), t.form_ink, false);
+        paint_text(ui, rect, title, crate::fonts::semibold(if page { t.font_page_heading } else { t.font_intro }), t.form_ink, false);
         if let Some(tag) = tag {
-            let width = ui.painter().layout_no_wrap(title.to_owned(), crate::fonts::semibold(t.font_intro), t.form_ink).size().x;
+            let width = ui
+                .painter()
+                .layout_no_wrap(title.to_owned(), crate::fonts::semibold(if page { t.font_page_heading } else { t.font_intro }), t.form_ink)
+                .size()
+                .x;
             let start = (rect.left() + width + t.space_8).min(rect.right());
             let tag_rect = Rect::from_min_max(egui::pos2(start, rect.top()), rect.max);
-            ui.scope_builder(egui::UiBuilder::new().max_rect(tag_rect), tag);
+            ui.scope_builder(
+                egui::UiBuilder::new().max_rect(tag_rect).layout(if page { egui::Layout::right_to_left(egui::Align::Center) } else { *ui.layout() }),
+                tag,
+            );
         }
         super::text(ui, description, super::Text::Hint("settings_heading"));
     });
+    if page {
+        scenario::publish_rect("prefs:page_heading", heading.response.rect);
+    }
 }
 
 /// Settings reuse the same disclosure, uppercase typography and rule as the design system.
-pub(crate) fn settings_section<R>(ui: &mut Ui, key: &str, title: &str, mut add: impl FnMut(&mut Ui) -> R) -> Option<R> {
+pub(crate) fn settings_section<R>(ui: &mut Ui, key: &str, title: &str, add: impl FnMut(&mut Ui) -> R) -> Option<R> {
+    settings_section_count(ui, key, title, None, add)
+}
+
+/// A settings disclosure with a real item count, using the shared section badge.
+pub(crate) fn settings_section_count<R>(ui: &mut Ui, key: &str, title: &str, count: Option<&str>, mut add: impl FnMut(&mut Ui) -> R) -> Option<R> {
     if crate::prefs_search::querying(ui) {
         crate::prefs_search::begin_section(ui, title);
         if !ui.is_visible() {
@@ -408,14 +425,31 @@ pub(crate) fn settings_section<R>(ui: &mut Ui, key: &str, title: &str, mut add: 
         return Some(result);
     }
     let t = Tokens::get();
-    ui.add_space(t.space_8);
-    super::section(ui, key, title, true, |ui| {
+    let page = super::settings_page_active(ui);
+    if page {
+        // The page's 10 pt item gap plus the shared disclosure's 2 pt inset complete 38 pt.
+        ui.add_space(t.space_24 + t.space_14 - t.space_10 - t.space_2);
+    } else {
+        ui.add_space(t.space_8);
+    }
+    let gap = ui.spacing().item_spacing.y;
+    if page {
+        ui.spacing_mut().item_spacing.y = t.space_10;
+    }
+    let result = super::section_count(ui, key, title, true, count, |ui| {
         if let Some(rect) = scenario::rect_of(&format!("dialog:section:{title}")) {
             scenario::publish_rect(&format!("prefs:section:{key}"), rect);
         }
-        ui.spacing_mut().item_spacing.y = t.space_8;
-        add(ui)
-    })
+        ui.spacing_mut().item_spacing.y = if page { t.space_14 } else { t.space_8 };
+        let start = ui.next_widget_position();
+        let result = add(ui);
+        if page {
+            scenario::publish_rect(&format!("prefs:section:{key}:body"), Rect::from_min_max(start, ui.min_rect().max));
+        }
+        result
+    });
+    ui.spacing_mut().item_spacing.y = gap;
+    result
 }
 
 /// Full-width settings detail group. Container owns its surface; content cannot shrink the card.
@@ -619,6 +653,10 @@ pub(crate) fn settings_badge(ui: &mut Ui, text: &str, warning: bool) {
         return;
     }
     let t = Tokens::get();
+    if super::settings_page_active(ui) {
+        super::settings_state_badge(ui, text, if warning { super::SettingsBadgeTone::Warning } else { super::SettingsBadgeTone::Success });
+        return;
+    }
     let ink =
         if warning { if crate::theme::contrast_ratio(t.warning, t.dialog_body) >= 4.5 { t.warning } else { t.form_ink } } else { t.form_success };
     let fill = if warning { t.warning.gamma_multiply(0.1) } else { t.form_success_fill };
@@ -989,7 +1027,11 @@ pub(crate) fn settings_inline_note(ui: &mut Ui, text: &str) {
         return;
     }
     let t = Tokens::get();
-    let galley = ui.painter().layout_no_wrap(text.to_owned(), FontId::proportional(t.font_body), t.form_dim);
+    let galley = if super::settings_page_active(ui) && ui.layout().main_wrap() {
+        ui.painter().layout(text.to_owned(), FontId::proportional(t.font_body), t.form_dim, dimension(ui.max_rect().width()))
+    } else {
+        ui.painter().layout_no_wrap(text.to_owned(), FontId::proportional(t.font_body), t.form_dim)
+    };
     let (r, response) = ui.allocate_exact_size(galley.size(), Sense::hover());
     response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), text));
     ui.painter().galley(r.min, galley, t.form_dim);

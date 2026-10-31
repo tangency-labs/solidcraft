@@ -27,10 +27,15 @@ pub(super) enum Ink {
     Border,
     ControlBorder,
     Control,
+    /// Legacy SVG role for conflicting sketch geometry and the conflict-state glyph.
     Note,
     NoteFill,
+    /// Legacy SVG ink: lettering uses accent foreground; strokes use model highlights.
     White,
+    /// Legacy SVG ink: hatch strokes use figure lines; filled silhouettes use model shadows.
     Black,
+    Highlight,
+    Shadow,
     /// Colour vision sample colours: Z axis blue, projected, X axis, bend up and bend down.
     Cv0,
     Cv1,
@@ -181,10 +186,12 @@ impl Ctx<'_> {
             Ink::Border => t.dialog_border,
             Ink::ControlBorder => t.control_border,
             Ink::Control => t.control_fill,
-            Ink::Note => t.pref_note,
+            Ink::Note => t.figure_conflict,
             Ink::NoteFill => t.pref_note_fill,
-            Ink::White => Color32::WHITE,
-            Ink::Black => Color32::BLACK,
+            Ink::White => t.pref_on_accent,
+            Ink::Black => t.figure_line,
+            Ink::Highlight => t.figure_highlight,
+            Ink::Shadow => t.figure_shadow,
             Ink::Cv0 => t.axis_z,
             Ink::Cv1 => t.sketch_projected,
             Ink::Cv2 => t.axis_x,
@@ -200,7 +207,11 @@ impl Ctx<'_> {
     }
 
     fn stroke(&self, line: &L) -> Stroke {
-        Stroke::new((line.w * self.scale).clamp(0.0, 64.0), self.ink(line.ink, line.a))
+        let ink = match line.ink {
+            Ink::White => Ink::Highlight,
+            ink => ink,
+        };
+        Stroke::new((line.w * self.scale).clamp(0.0, 64.0), self.ink(ink, line.a))
     }
 }
 
@@ -278,7 +289,7 @@ fn draw(p: &Painter, ctx: &Ctx, op: &Op, clip: Option<&[Pos2]>) {
         Op::Glow { c, a } => {
             let centre = ctx.at([c[0], c[1]]);
             let radius = vec2(c[2] * ctx.scale, c[3] * ctx.scale);
-            glow(p, centre, radius, ctx.ink(Ink::Black, *a));
+            glow(p, centre, radius, ctx.ink(Ink::Shadow, *a));
         }
         Op::Text { at, size, anchor, ink, a, s, .. } => {
             if clip.is_some() {
@@ -326,7 +337,11 @@ fn poly(p: &Painter, ctx: &Ctx, pts: &[Pos2], closed: bool, fill: &Option<P>, gr
             let span = (y1 - y0).max(1e-3);
             fill_polygon(p, shape, |q| top.lerp_to_gamma(bottom, ((q.y - y0) / span).clamp(0.0, 1.0)));
         } else if let Some(f) = fill {
-            let c = ctx.ink(f.ink, f.a);
+            let ink = match f.ink {
+                Ink::Black => Ink::Shadow,
+                ink => ink,
+            };
+            let c = ctx.ink(ink, f.a);
             fill_polygon(p, shape, |_| c);
         }
     }

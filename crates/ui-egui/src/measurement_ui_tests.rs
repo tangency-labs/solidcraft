@@ -142,6 +142,7 @@ fn measure_dialog_shows_the_obtuse_corner_of_selected_lines() {
 #[test]
 fn measurement_axis_distances_follow_the_upstream_centre_min_and_max_choices() {
     let mut h = Harness::new();
+    h.app.preferences.language = "en".into();
     h.app.home.open = false;
     h.app.set_origin_shown(false);
     h.app.ui.show_browser = false;
