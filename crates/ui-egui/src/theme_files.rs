@@ -2276,9 +2276,15 @@ mod tests {
     fn gruvbox_contrast_choices_keep_six_appearances() {
         let families: Vec<_> = builtin().iter().filter(|f| f.id.starts_with("gruvbox-")).map(|f| f.id.as_str()).collect();
         assert_eq!(families, ["gruvbox-dark", "gruvbox-light"]);
-        for (id, panels, views, inks) in [
-            ("gruvbox-dark", ["#32302f", "#282828", "#1d2021"], ["#373432", "#32302f", "#2c2c2c"], ["#1d2021", "#1d2021", "#141617"]),
-            ("gruvbox-light", ["#f2e5bc", "#fbf1c7", "#f9f5d7"], ["#f6edd0", "#fcf5d8", "#fbf8e3"], ["#3c3836"; 3]),
+        for (id, panels, tops, bottoms, inks) in [
+            (
+                "gruvbox-dark",
+                ["#32302f", "#282828", "#1d2021"],
+                ["#373432", "#32302f", "#2c2c2c"],
+                ["#373432", "#32302f", "#2c2c2c"],
+                ["#1d2021", "#1d2021", "#141617"],
+            ),
+            ("gruvbox-light", ["#f2e5bc", "#fbf1c7", "#f9f5d7"], ["#f6edd0", "#fcf5d8", "#fbf8e3"], ["#ebdbb2"; 3], ["#3c3836"; 3]),
         ] {
             let file = find(id, &[]).unwrap();
             assert_eq!(file.options.len(), 1);
@@ -2291,8 +2297,8 @@ mod tests {
                 let options = BTreeMap::from([("contrast".into(), OptionValue::Choice(contrast.into()))]);
                 let tokens = resolve_with(file, &options);
                 assert_eq!(tokens.panel, parse_color(panels[index]).unwrap(), "{id}: {contrast}");
-                assert_eq!(tokens.viewport_top, parse_color(views[index]).unwrap(), "{id}: {contrast}");
-                assert_eq!(tokens.viewport_bottom, tokens.viewport_top);
+                assert_eq!(tokens.viewport_top, parse_color(tops[index]).unwrap(), "{id}: {contrast}");
+                assert_eq!(tokens.viewport_bottom, parse_color(bottoms[index]).unwrap(), "{id}: {contrast}");
                 assert_eq!(export_icon_palette(tokens.icon_palette)["ink"], inks[index], "{id}: {contrast}");
                 assert_eq!(tokens.borders, crate::theme::Borders::LEGACY);
                 assert_eq!(resolve_with(&from_value(&export_file(file)).unwrap(), &options), tokens);
