@@ -1199,7 +1199,7 @@ mod tests {
         app.session.path = Some("existing.solidcraft".into());
         app.session.execute("solid.box", &json!({"length": 2, "width": 3, "height": 4})).unwrap();
         let dirty = app.session.doc.clone();
-        let undo = app.session.undo.len();
+        let undo = app.session.history.len();
         let camera = app.cam;
         crate::documents::new_tab(&mut app);
         let mut loaded = Session::default();
@@ -1213,7 +1213,7 @@ mod tests {
         assert_eq!(app.docs.count(), 2);
         assert_eq!(app.docs.active, 0);
         assert!(Arc::ptr_eq(&dirty, &app.session.doc));
-        assert_eq!(app.session.undo.len(), undo);
+        assert_eq!(app.session.history.len(), undo);
         assert_eq!(app.cam, camera);
         assert!(app.session.is_dirty());
 
@@ -1306,7 +1306,7 @@ mod tests {
         h.app.run("solid.box", json!({"length":10,"width":10,"height":10})).unwrap();
         h.frames(3);
         let base = h.app.session.doc.clone();
-        let undo = h.app.session.undo.len();
+        let undo = h.app.session.history.len();
         let cam = h.app.cam;
         let progress = Arc::new(Progress::default());
         solidcraft_engine::doc::progress::watch(progress.clone(), || {
@@ -1339,7 +1339,7 @@ mod tests {
         h.frames(2);
         assert!(h.app.file_load.idle());
         assert!(Arc::ptr_eq(&base, &h.app.session.doc));
-        assert_eq!(h.app.session.undo.len(), undo);
+        assert_eq!(h.app.session.history.len(), undo);
         assert_eq!(h.app.cam, cam);
 
         // The success path is equally read-only, even if the worker has another session.
@@ -1367,7 +1367,7 @@ mod tests {
         h.frames(2);
         assert_eq!(reply_rx.try_recv().unwrap()["result"]["visible"], 12);
         assert!(Arc::ptr_eq(&base, &h.app.session.doc));
-        assert_eq!(h.app.session.undo.len(), undo);
+        assert_eq!(h.app.session.history.len(), undo);
         assert_eq!(h.app.cam, cam);
     }
 

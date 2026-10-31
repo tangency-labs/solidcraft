@@ -192,11 +192,11 @@ fn exact_nested_source_and_cross_owner_pending_paths_capture_only_involved_posit
     assert!(reopened.model.result(id).unwrap().error.is_none());
     run(&mut reopened, "component.activate", json!({"component":0}));
     let original = reopened.doc.to_json();
-    let undo = reopened.undo.len();
+    let undo = reopened.history.len();
     let dirty = reopened.is_dirty();
     run(&mut reopened, "sketch.edit", json!({"sketch":id}));
     assert_eq!(reopened.doc.to_json(), original);
-    assert_eq!(reopened.undo.len(), undo);
+    assert_eq!(reopened.history.len(), undo);
     assert_eq!(reopened.is_dirty(), dirty);
     assert_eq!(reopened.active_component, author["component"].as_u64().unwrap());
     assert_eq!(reopened.active_occurrence_path, Some(vec![author["occurrence"].as_u64().unwrap()]));

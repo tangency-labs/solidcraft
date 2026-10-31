@@ -334,7 +334,7 @@ mod tests {
         assert_eq!(crate::scenario::count_of("axis_view_highlights"), Some(0.0));
         assert_eq!(h.app.cam, camera);
         assert_eq!(h.app.session.doc.to_json(), design);
-        assert!(h.app.session.undo.is_empty());
+        assert!(h.app.session.history.is_empty());
     }
 
     #[test]
@@ -628,6 +628,6 @@ mod tests {
         h.call("ui.click", json!({"x":p.x,"y":p.y}));
         assert!(h.app.cam.back().dist(Camera::default().back()) < 1e-6);
         assert_eq!(h.app.session.doc.to_json(), before);
-        assert!(h.app.session.undo.is_empty());
+        assert!(h.app.session.history.is_empty());
     }
 }

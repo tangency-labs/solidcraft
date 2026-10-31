@@ -938,7 +938,7 @@ fn edit_sketch(s: &mut Session, p: &Value) -> Result<Value> {
 
 /// The design and undo history as they are now, where a sketch is entered (its id set after).
 fn entry_point(s: &Session) -> SketchEntry {
-    SketchEntry { sketch: 0, doc: s.doc.clone(), undo_len: s.undo.len(), undo_top: s.undo.last().map(|snap| snap.doc.clone()) }
+    SketchEntry { sketch: 0, doc: s.doc.clone(), undo_len: s.history.len(), undo_top: s.history.last().map(|snap| snap.doc.clone()) }
 }
 
 /// Cancel Sketch (#3838): the design as it was when the open sketch was entered. The entry is
@@ -950,15 +950,15 @@ fn cancel_sketch(s: &mut Session, _p: &Value) -> Result<Value> {
     let id = sketch_store::active(s).ok_or_else(|| bad(cmd, "no sketch is being edited"))?;
     let entry = s.sketch_entry.clone().filter(|entry| entry.sketch == id);
     let current = entry.filter(|entry| {
-        let top = entry.undo_len.checked_sub(1).and_then(|i| s.undo.get(i)).map(|snap| &snap.doc);
-        let same_before = s.undo.len() >= entry.undo_len
+        let top = entry.undo_len.checked_sub(1).and_then(|i| s.history.steps().get(i)).map(|snap| &snap.doc);
+        let same_before = s.history.len() >= entry.undo_len
             && match (top, &entry.undo_top) {
                 (Some(a), Some(b)) => std::sync::Arc::ptr_eq(a, b),
                 (None, None) => true,
                 _ => false,
             };
         // The step that created the sketch was taken before it was open: its state is the entry's.
-        let since = s.undo.get(entry.undo_len..).unwrap_or_default();
+        let since = s.history.steps().get(entry.undo_len..).unwrap_or_default();
         same_before
             && since.iter().enumerate().all(|(i, snap)| snap.active_sketch == Some(id) || (i == 0 && std::sync::Arc::ptr_eq(&snap.doc, &entry.doc)))
     });
@@ -1265,7 +1265,7 @@ fn rect_rounded(s: &mut Session, p: &Value) -> Result<Value> {
     }
     let rounded = scratch.execute("sketch.fillet", &fillet)?;
     // Session::execute records the wrapper's before snapshot. Nested history must not leak.
-    scratch.undo.clear();
+    scratch.history.clear();
     s.accept_computed(scratch);
     let arcs = rounded.get("curves").cloned().unwrap_or_else(|| json!([]));
     if let Some(o) = out.as_object_mut() {

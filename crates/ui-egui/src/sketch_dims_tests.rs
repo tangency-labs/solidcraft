@@ -268,7 +268,7 @@ fn rounded_rectangle_takes_typed_width_height_and_radius() {
     tab(&mut h, false);
     assert_focus(&h, 2);
     type_value(&mut h, "4");
-    let undo = h.app.session.undo.len();
+    let undo = h.app.session.history.len();
     h.step(&json!({"key": "Enter"})).unwrap();
     let state = h.app.session.world_state();
     let sketch = state.sketch(h.app.session.active_sketch.unwrap()).unwrap();
@@ -278,7 +278,7 @@ fn rounded_rectangle_takes_typed_width_height_and_radius() {
     assert_eq!(sketch.profiles.len(), 1);
     let want = 30.0 * 16.0 - (4.0 - std::f64::consts::PI) * 16.0;
     assert!((sketch.profiles[0].area - want).abs() < 1e-6, "area {} want {want}", sketch.profiles[0].area);
-    assert_eq!(h.app.session.undo.len(), undo + 1, "one undo step");
+    assert_eq!(h.app.session.history.len(), undo + 1, "one undo step");
 }
 
 /// Without a typed radius the corners get a fifth of the shorter side.

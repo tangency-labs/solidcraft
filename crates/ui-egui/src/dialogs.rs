@@ -3600,12 +3600,10 @@ pub(crate) fn restore_editing(app: &mut SolveApp, marker: Option<usize>) {
 /// Temporary rollback used by an editor is view state. Preserve both history stacks,
 /// including redo and a history already at the undo limit.
 pub(crate) fn roll_marker(app: &mut SolveApp, marker: Option<usize>) -> Result<(), String> {
-    let undo = std::mem::take(&mut app.session.undo);
-    let redo = std::mem::take(&mut app.session.redo);
+    let history = std::mem::take(&mut app.session.history);
     let selection = std::mem::take(&mut app.session.selection);
     let result = app.run("timeline.roll_to", marker.map(|m| json!({"position":m})).unwrap_or_else(|| json!({})));
-    app.session.undo = undo;
-    app.session.redo = redo;
+    app.session.history = history;
     app.session.selection = selection;
     result.map(|_| ())
 }

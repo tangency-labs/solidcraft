@@ -613,15 +613,15 @@ mod tests {
         h.app.run("solid.box", json!({"length":10,"width":10,"height":10})).unwrap();
         h.app.session.selection = vec![Sel::Body { name: "Body1".into() }];
         let mass = h.app.session.execute("component.properties", &json!({})).unwrap();
-        let before = h.app.session.undo.len();
+        let before = h.app.session.history.len();
         h.app.start("appearance.assign");
         h.frames(3);
         h.step(&json!({"click":{"handle":"appearance:pbr"}})).unwrap();
         h.step(&json!({"widget":"Apply to selection"})).unwrap();
         assert!(h.app.session.doc.appearances.bodies["Body1"].pbr.is_some());
-        assert_eq!(h.app.session.undo.len(), before + 1);
+        assert_eq!(h.app.session.history.len(), before + 1);
         h.step(&json!({"widget":"OK"})).unwrap();
-        assert_eq!(h.app.session.undo.len(), before + 1);
+        assert_eq!(h.app.session.history.len(), before + 1);
         assert_eq!(h.app.session.execute("component.properties", &json!({})).unwrap(), mass);
         h.app.session.selection = vec![Sel::Body { name: "Body1".into() }];
         h.app.start("appearance.assign");
@@ -953,7 +953,7 @@ mod tests {
         let mut app = app();
         app.start("appearance.assign");
         let doc = app.session.doc.clone();
-        let history = (app.session.undo.len(), app.session.redo.len(), app.session.is_dirty());
+        let history = (app.session.history.len(), app.session.history.redo_steps().len(), app.session.is_dirty());
         let Kind::Appearance(k) = &mut app.dialog.as_mut().unwrap().kind else { panic!("appearance editor") };
         let before = format!("{k:?}");
         let mut value = pack_entry(false);
@@ -966,7 +966,7 @@ mod tests {
         assert!(!matches_library_filter(&look, None, "", true));
         assert!(matches_library_filter(&look, None, "", false));
         assert!(std::sync::Arc::ptr_eq(&doc, &app.session.doc));
-        assert_eq!(history, (app.session.undo.len(), app.session.redo.len(), app.session.is_dirty()));
+        assert_eq!(history, (app.session.history.len(), app.session.history.redo_steps().len(), app.session.is_dirty()));
         let mut invalid = pack_entry(true);
         invalid.as_object_mut().unwrap().remove("available");
         assert!(library_look(&invalid).is_none(), "pack metadata cannot silently become a legacy look");
@@ -983,7 +983,7 @@ mod tests {
             .expect("opaque pack entry");
         app.session.selection = vec![Sel::Body { name: "Body1".into() }];
         let physical = app.session.execute("component.properties", &json!({})).unwrap();
-        let before = app.session.undo.len();
+        let before = app.session.history.len();
         app.start("appearance.assign");
         let mut dialog = app.dialog.clone().unwrap();
         let Kind::Appearance(k) = &mut dialog.kind else { panic!("appearance editor") };
@@ -993,7 +993,7 @@ mod tests {
         app.run("appearance.assign", params.clone()).unwrap();
         k.applied = Some(params);
         assert!(commands(k, &dialog.inputs).is_empty(), "OK must not duplicate immediate Apply");
-        assert_eq!(app.session.undo.len(), before + 1);
+        assert_eq!(app.session.history.len(), before + 1);
         assert_eq!(app.session.execute("component.properties", &json!({})).unwrap(), physical);
         app.run("edit.undo", json!({})).unwrap();
         assert!(!app.session.doc.appearances.bodies.contains_key("Body1"));
@@ -1092,13 +1092,13 @@ mod tests {
                 let params = selected_params(k, &dialog.inputs[0].items).unwrap();
                 assert_eq!(params["name"], name);
                 assert!(params.get("color").is_some());
-                let undo = app.session.undo.len();
+                let undo = app.session.history.len();
                 app.run("appearance.assign", params).unwrap();
                 let result = app.session.doc.appearances.bodies.get("Body1").unwrap();
                 assert_eq!(result.name, name);
                 assert!(result.pbr.is_none());
                 assert_eq!(result.opacity, 0.5);
-                assert_eq!(app.session.undo.len(), undo + 1);
+                assert_eq!(app.session.history.len(), undo + 1);
                 assert_eq!(app.session.execute("component.properties", &json!({})).unwrap(), physical);
             }
         }
@@ -1110,7 +1110,7 @@ mod tests {
         h.app.run("solid.box", json!({"length":10,"width":10,"height":10})).unwrap();
         h.app.session.selection = vec![Sel::Body { name: "Body1".into() }];
         let mass = h.app.session.execute("component.properties", &json!({})).unwrap();
-        let before = h.app.session.undo.len();
+        let before = h.app.session.history.len();
         h.app.start("appearance.assign");
         let Kind::Appearance(k) = &mut h.app.dialog.as_mut().unwrap().kind else { panic!("appearance editor") };
         k.search = "starter.metal.gold-warm".into();
@@ -1119,7 +1119,7 @@ mod tests {
         h.step(&json!({"widget":"Apply to selection"})).unwrap();
         assert_eq!(h.app.session.doc.appearances.bodies["Body1"].name, "Metal - Warm Reflective Gold");
         assert_eq!(h.app.session.doc.appearances.bodies["Body1"].pbr.unwrap().metallic(), 1.0);
-        assert_eq!(h.app.session.undo.len(), before + 1);
+        assert_eq!(h.app.session.history.len(), before + 1);
         let Kind::Appearance(k) = &mut h.app.dialog.as_mut().unwrap().kind else { panic!("appearance editor") };
         k.search = "starter.glass.clear-soda-lime".into();
         let selected = (k.preset_id.clone(), k.color, k.opacity, k.pbr);
@@ -1128,7 +1128,7 @@ mod tests {
         let Kind::Appearance(k) = &h.app.dialog.as_ref().unwrap().kind else { panic!("appearance editor") };
         assert_eq!((k.preset_id.clone(), k.color, k.opacity, k.pbr), selected);
         h.step(&json!({"widget":"OK"})).unwrap();
-        assert_eq!(h.app.session.undo.len(), before + 1);
+        assert_eq!(h.app.session.history.len(), before + 1);
         assert_eq!(h.app.session.execute("component.properties", &json!({})).unwrap(), mass);
     }
 
@@ -1185,10 +1185,10 @@ mod tests {
             assert!(params.get("pbr").is_some(), "the complete owned response is explicit");
             assert_eq!(params["pbr"], json!(response));
             let original = a.session.doc.clone();
-            let undo = a.session.undo.len();
+            let undo = a.session.history.len();
             a.run("appearance.assign", params.clone()).unwrap();
             state.applied = Some(params);
-            assert_eq!(a.session.undo.len(), undo + 1);
+            assert_eq!(a.session.history.len(), undo + 1);
             assert!(commands(state, &dialog.inputs).is_empty(), "OK after a drop is not another edit");
             a.run("edit.undo", json!({})).unwrap();
             assert_eq!(a.session.doc, original);

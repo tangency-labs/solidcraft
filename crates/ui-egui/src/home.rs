@@ -337,7 +337,7 @@ fn make_unless(key: &str, stopped: &dyn Fn() -> bool) -> Made {
         Some(i) => solidcraft_engine::sample::samples().get(i).is_some_and(|smp| {
             let ok = s.run_script(&(smp.script)()).is_ok();
             s.doc_mut().name = smp.name.to_string();
-            s.undo.clear();
+            s.history.clear();
             s.mark_saved();
             ok
         }),
@@ -1480,7 +1480,7 @@ mod tests {
         assert_eq!(img.size, THUMB);
         let s = session.unwrap();
         assert_eq!(s.doc.name, "Sample Plate");
-        assert!(!s.is_dirty() && s.undo.is_empty());
+        assert!(!s.is_dirty() && s.history.is_empty());
         let mut app = SolveApp::new(Session::default(), crate::Services::default());
         app.home.samples.insert(0, s);
         app.home.show(app.session.revision);
@@ -1545,12 +1545,12 @@ mod tests {
             let mut h = crate::scenario::Harness::new();
             h.app.run("solid.box", serde_json::json!({"length":10,"width":12,"height":14})).unwrap();
             let original = h.app.session.doc.to_json();
-            let undo = h.app.session.undo.len();
+            let undo = h.app.session.history.len();
             h.app.home.show(0);
             click_file(&mut h, id);
             assert!(h.app.home.open, "cancel keeps the File view open");
             assert_eq!(h.app.session.doc.to_json(), original);
-            assert_eq!(h.app.session.undo.len(), undo);
+            assert_eq!(h.app.session.history.len(), undo);
             assert_eq!(h.app.docs.count(), 1);
         }
     }

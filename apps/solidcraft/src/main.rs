@@ -1165,7 +1165,7 @@ fn main() -> eframe::Result {
                 }
                 app.session.doc_mut().name = "Sample Plate".into();
                 app.session.mark_saved();
-                app.session.undo.clear();
+                app.session.history.clear();
                 // Built straight into the session, so nothing asked for a fit: frame it at the
                 // home view as any opened design is (#9195). The fit waits for the first layout.
                 app.cam.set_view(solidcraft_engine::render::StandardView::Iso);

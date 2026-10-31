@@ -377,7 +377,7 @@ fn inspect(s: &mut Session, p: &Value) -> Result<Value> {
         "name": s.doc.name, "units": s.doc.units, "metadata": s.doc.metadata, "path": s.path, "dirty": s.is_dirty(), "revision": s.revision,
         "active_sketch": s.active_sketch, "marker": marker,
         "params": params, "timeline": timeline, "bodies": bodies, "sketches": sketches,
-        "selection": s.selection, "undo": s.undo.len(), "redo": s.redo.len(), "hidden_origin": s.visibility.hidden_origin,
+        "selection": s.selection, "undo": s.history.len(), "redo": s.history.redo_steps().len(), "hidden_origin": s.visibility.hidden_origin,
     }))
 }
 

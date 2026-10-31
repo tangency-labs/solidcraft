@@ -370,7 +370,7 @@ fn overlapping_midpoints_can_be_selected_individually_without_creating_points() 
     let (mut h, _) = two_lines();
     let at = h.call("ui.at", json!({"sketch":[10,10]}))["result"].clone();
     let before = h.app.session.doc.to_json();
-    let undo = h.app.session.undo.len();
+    let undo = h.app.session.history.len();
     h.step(&json!({"hold":at})).unwrap();
     assert!(labels(&h).starts_with(&["MID · Line 1".into(), "MID · Line 2".into(), "Line 1".into(), "Line 2".into()]));
     h.step(&json!({"click":{"handle":"select_other:1"}})).unwrap();
@@ -379,7 +379,7 @@ fn overlapping_midpoints_can_be_selected_individually_without_creating_points() 
     h.step(&json!({"click":{"handle":"select_other:0"},"shift":true})).unwrap();
     assert_eq!(h.app.session.selection, vec![Sel::SketchMidpoint { id: "l2".into() }, Sel::SketchMidpoint { id: "l1".into() }]);
     assert_eq!(h.app.session.doc.to_json(), before);
-    assert_eq!(h.app.session.undo.len(), undo);
+    assert_eq!(h.app.session.history.len(), undo);
 }
 
 #[test]

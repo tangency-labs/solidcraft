@@ -29,7 +29,7 @@ fn ladder() -> (Harness, String) {
 fn dragging_across_pieces_trims_them_all_in_one_undo_step() {
     let (mut h, v) = ladder();
     let before = h.app.session.doc.to_json();
-    let undo = h.app.session.undo.len();
+    let undo = h.app.session.history.len();
     // A zigzag across the vertical line's middle piece, three times, then down across the
     // lower line's right half.
     let a = screen(&mut h, 5.0, 8.0);
@@ -46,14 +46,14 @@ fn dragging_across_pieces_trims_them_all_in_one_undo_step() {
     // piece once).
     assert!(h.app.viewport.trim_drag);
     assert_eq!(h.app.session.doc.to_json(), before, "a drag changes nothing before it is let go");
-    assert_eq!(h.app.session.undo.len(), undo);
+    assert_eq!(h.app.session.history.len(), undo);
     let lit = super::TRIM_REMOVED.with(|r| r.borrow().clone());
     assert_eq!(lit.len(), 2, "{lit:?}");
 
     release(&mut h, d);
     assert!(!h.app.viewport.trim_drag);
     assert!(super::TRIM_REMOVED.with(|r| r.borrow().is_empty()));
-    assert_eq!(h.app.session.undo.len(), undo + 1, "one undo step");
+    assert_eq!(h.app.session.history.len(), undo + 1, "one undo step");
     // The vertical line keeps its ends; the lower line its left half.
     let sk = sketch(&h);
     let rest: Vec<Shape> = (0..sk.curves.len()).filter_map(|ci| sk.shape(ci)).collect();
@@ -71,7 +71,7 @@ fn dragging_across_pieces_trims_them_all_in_one_undo_step() {
 #[test]
 fn a_click_still_trims_one_piece_and_an_empty_drag_nothing() {
     let (mut h, v) = ladder();
-    let undo = h.app.session.undo.len();
+    let undo = h.app.session.history.len();
     // A drag that crosses nothing leaves the design alone.
     let a = screen(&mut h, 1.0, 3.0);
     let b = screen(&mut h, 8.0, 7.0);
@@ -79,11 +79,11 @@ fn a_click_still_trims_one_piece_and_an_empty_drag_nothing() {
     path.extend(steps(a, b, 6));
     press_and_move(&mut h, &path);
     release(&mut h, b);
-    assert_eq!(h.app.session.undo.len(), undo);
+    assert_eq!(h.app.session.history.len(), undo);
 
     // A click on the vertical line's middle piece trims just that piece.
     h.step(&json!({"click": {"sketch": [10, 5]}})).unwrap();
-    assert_eq!(h.app.session.undo.len(), undo + 1);
+    assert_eq!(h.app.session.history.len(), undo + 1);
     let sk = sketch(&h);
     assert_eq!(sk.curves.len(), 4);
     assert!((0..sk.curves.len()).all(|ci| sk.shape(ci).is_some_and(|s| s.dist(Vec2::new(10.0, 5.0)) > 1e-3)));
@@ -95,14 +95,14 @@ fn a_click_that_moves_along_a_piece_still_trims_it() {
     // A press that moves on the way (#2448) beside the vertical line's middle piece, crossing
     // nothing: the release is the click, and trims the piece under it.
     let (mut h, _) = ladder();
-    let undo = h.app.session.undo.len();
+    let undo = h.app.session.history.len();
     let a = screen(&mut h, 10.0, 3.0) + egui::vec2(3.0, 0.0);
     let b = screen(&mut h, 10.0, 7.0) + egui::vec2(3.0, 0.0);
     let mut path = vec![a];
     path.extend(steps(a, b, 6));
     press_and_move(&mut h, &path);
     release(&mut h, b);
-    assert_eq!(h.app.session.undo.len(), undo + 1, "one trim");
+    assert_eq!(h.app.session.history.len(), undo + 1, "one trim");
     let sk = sketch(&h);
     assert_eq!(sk.curves.len(), 4);
     assert!((0..sk.curves.len()).all(|ci| sk.shape(ci).is_some_and(|s| s.dist(Vec2::new(10.0, 5.0)) > 1e-3)));

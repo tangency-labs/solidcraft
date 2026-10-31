@@ -29,14 +29,14 @@ fn card_edits_preserve_mass_optics_and_geometry_and_survive_undo_reopen() {
     let mut s = fixture();
     let scene = product_scene::extract(&s).unwrap();
     let mass = s.execute("component.properties", &json!({})).unwrap();
-    let before_undo = s.undo.len();
+    let before_undo = s.history.len();
     let out = s.execute("material.edit", &json!({"material":"Synthetic","physical_card":card()})).unwrap();
     assert_eq!(out["physical_validation"]["isotropic_moduli"]["shear_pa"], 4.9e9);
     assert_eq!(out["density_comparison"]["assigned_density_kg_m3"], 800.0);
     assert_eq!(out["density_comparison"]["matches_within_relative_tolerance"], false);
     assert_eq!(out["physical_validation"]["source_review_required"], json!(["fixture"]));
     assert_eq!(out["physical_validation"]["analysis_solver_available"], false);
-    assert_eq!(s.undo.len(), before_undo + 1);
+    assert_eq!(s.history.len(), before_undo + 1);
     assert_eq!(s.execute("component.properties", &json!({})).unwrap(), mass);
     let after = product_scene::extract(&s).unwrap();
     assert!(Arc::ptr_eq(&scene.meshes[0].mesh, &after.meshes[0].mesh));
@@ -52,12 +52,12 @@ fn card_edits_preserve_mass_optics_and_geometry_and_survive_undo_reopen() {
     let modulus = reopened.doc.user_materials[0].physical_card.as_ref().unwrap().card().directional_modulus([1., 2., 3.]).unwrap();
     assert_eq!(modulus.young_modulus_pa, 12.25e9);
     let doc = reopened.doc.clone();
-    let before = (reopened.revision, reopened.undo.len(), reopened.camera, reopened.selection.clone());
+    let before = (reopened.revision, reopened.history.len(), reopened.camera, reopened.selection.clone());
     let list = reopened.execute("material.list", &json!({})).unwrap();
     let material = list["materials"].as_array().unwrap().iter().find(|m| m["name"] == "Synthetic").unwrap();
     assert_eq!(material["physical_card"], out["physical_card"]);
     assert!(Arc::ptr_eq(&doc, &reopened.doc));
-    assert_eq!(before, (reopened.revision, reopened.undo.len(), reopened.camera, reopened.selection.clone()));
+    assert_eq!(before, (reopened.revision, reopened.history.len(), reopened.camera, reopened.selection.clone()));
 }
 
 #[test]
@@ -95,12 +95,12 @@ fn hostile_cards_refuse_atomically_and_saved_card_admission_is_not_bypassed() {
     let mut missing = card();
     missing["properties"][0]["source_id"] = json!("missing");
     let doc = s.doc.clone();
-    let before = (s.undo.len(), s.redo.len(), s.revision, s.camera, s.selection.clone());
+    let before = (s.history.len(), s.history.redo_steps().len(), s.revision, s.camera, s.selection.clone());
     for candidate in [bad, oversized, unknown, missing, json!(true)] {
         assert!(s.execute("material.edit", &json!({"material":"Synthetic","physical_card":candidate})).is_err());
         assert!(s.execute("material.create", &json!({"name":"Refused","density_g_cm3":1,"physical_card":candidate})).is_err());
         assert!(Arc::ptr_eq(&doc, &s.doc));
-        assert_eq!(before, (s.undo.len(), s.redo.len(), s.revision, s.camera, s.selection.clone()));
+        assert_eq!(before, (s.history.len(), s.history.redo_steps().len(), s.revision, s.camera, s.selection.clone()));
         let mut saved = serde_json::to_value(&*s.doc).unwrap();
         saved["user_materials"][0]["physical_card"] = candidate;
         assert!(Document::from_json(&saved.to_string()).is_err());
@@ -162,7 +162,7 @@ fn scalar_catalog_refuses_card_export_without_creating_or_replacing_files_or_his
     s.execute("material.create", &json!({"name":"Card only","density_g_cm3":0.8,"physical_card":card()})).unwrap();
     s.mark_saved();
     let doc = s.doc.clone();
-    let history = (s.undo.len(), s.redo.len(), s.revision);
+    let history = (s.history.len(), s.history.redo_steps().len(), s.revision);
     for existing in [false, true] {
         if existing {
             std::fs::write(&file.0, b"keep existing catalog").unwrap();
@@ -180,7 +180,7 @@ fn scalar_catalog_refuses_card_export_without_creating_or_replacing_files_or_his
                 assert!(!file.0.exists());
             }
             assert!(Arc::ptr_eq(&doc, &s.doc));
-            assert_eq!((s.undo.len(), s.redo.len(), s.revision), history);
+            assert_eq!((s.history.len(), s.history.redo_steps().len(), s.revision), history);
             assert!(!s.is_dirty());
         }
     }

@@ -111,14 +111,14 @@ mod tests {
         let mut s = Session::default();
         run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10}));
         s.mark_saved();
-        let undo = s.undo.len();
+        let undo = s.history.len();
         let r = run(
             &mut s,
             "document.metadata.set",
             json!({"values": {"author": "Jane Doe", "part_number": "ACME-1042", "com.acme.shop": {"shop_id": 88123}}}),
         );
         assert_eq!(r["changed"], json!(["author", "com.acme.shop", "part_number"]));
-        assert_eq!(s.undo.len(), undo + 1, "several keys, one undo step");
+        assert_eq!(s.history.len(), undo + 1, "several keys, one undo step");
         assert!(s.is_dirty());
         let r = run(&mut s, "document.metadata", json!({}));
         assert_eq!(r["properties"]["author"], "Jane Doe");
@@ -128,7 +128,7 @@ mod tests {
         // Setting what is already there changes nothing: no undo step.
         let r = run(&mut s, "document.metadata.set", json!({"key": "author", "value": "Jane Doe"}));
         assert_eq!(r["changed"], json!([]));
-        assert_eq!(s.undo.len(), undo + 1);
+        assert_eq!(s.history.len(), undo + 1);
 
         let r = run(&mut s, "document.metadata.remove", json!({"keys": ["author", "author", "not.there"]}));
         assert_eq!(r["removed"], json!(["author"]));
@@ -146,7 +146,7 @@ mod tests {
     fn a_refused_change_leaves_the_design_as_it_was() {
         let mut s = Session::default();
         run(&mut s, "document.metadata.set", json!({"key": "author", "value": "Jane"}));
-        let undo = s.undo.len();
+        let undo = s.history.len();
         for p in [
             json!({"values": {"project": "P", "author": 42}}),
             json!({"values": {"project": "P", "colour": "red"}}),
@@ -162,7 +162,7 @@ mod tests {
         for p in [json!({}), json!({"keys": "author"}), json!({"keys": [1]}), json!({"key": ["author"]})] {
             assert!(s.execute("document.metadata.remove", &p).is_err(), "{p}");
         }
-        assert_eq!(s.undo.len(), undo);
+        assert_eq!(s.history.len(), undo);
         assert_eq!(s.doc.metadata.project(), None, "all or nothing");
         assert_eq!(s.doc.metadata.author(), Some("Jane"));
     }

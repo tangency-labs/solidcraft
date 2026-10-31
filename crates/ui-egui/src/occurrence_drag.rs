@@ -33,6 +33,8 @@ pub struct Drag {
     /// The drag's undo step is on top of the history (it went in with the first frame that
     /// moved); the design it holds tells it from a step that replaced it.
     step: Option<Arc<Document>>,
+    /// The undo history's mark when the drag began: its frames fold into one step.
+    mark: solidcraft_engine::Mark,
 }
 
 /// The placement a drag on `body` moves: the one on its path just inside the active placement.
@@ -75,7 +77,8 @@ pub fn start(app: &mut SolveApp, proj: &Proj, p: Pos2) -> bool {
         return false;
     };
     let checkpoint = app.session.execute("edit.checkpoint", &json!({})).ok().and_then(|r| r["checkpoint"].as_u64());
-    app.viewport.occurrence_drag = Some(Drag { path, local, origin: at, normal: proj.ray(p).1, checkpoint, step: None });
+    let mark = app.session.history.mark();
+    app.viewport.occurrence_drag = Some(Drag { path, local, origin: at, normal: proj.ray(p).1, checkpoint, step: None, mark });
     true
 }
 
@@ -88,7 +91,7 @@ pub fn to(app: &mut SolveApp, proj: &Proj, p: Pos2) {
     let Some(d) = app.viewport.occurrence_drag.clone() else { return };
     // Something else took the drag's undo step (undo pressed mid-drag): the drag ends there.
     if let Some(doc) = &d.step
-        && !app.session.undo.last().is_some_and(|step| Arc::ptr_eq(&step.doc, doc))
+        && !app.session.history.last().is_some_and(|step| Arc::ptr_eq(&step.doc, doc))
     {
         end(app);
         return;
@@ -108,24 +111,14 @@ pub fn to(app: &mut SolveApp, proj: &Proj, p: Pos2) {
         return;
     }
     let params = json!({"path": d.path, "at": [at.x, at.y, at.z], "point": [target.x, target.y, target.z], "continuous": true});
-    // One undo step for the whole drag: the first frame's, kept on top while the others run.
-    let own = if d.step.is_some() { app.session.undo.pop() } else { None };
+    // One undo step for the whole drag (a full history loses one old step for it, not one a frame).
     let before = app.session.doc.clone();
-    let pushed = app.run("occurrence.drag", params).is_ok() && !Arc::ptr_eq(&before, &app.session.doc);
-    match own {
-        Some(step) => {
-            if pushed {
-                app.session.undo.pop();
-            }
-            app.session.undo.push(step);
+    if app.run("occurrence.drag", params).is_ok() && !Arc::ptr_eq(&before, &app.session.doc) {
+        app.session.history.fold_since(d.mark);
+        let step = app.session.history.last().map(|step| step.doc.clone());
+        if let Some(d) = app.viewport.occurrence_drag.as_mut() {
+            d.step = step;
         }
-        None if pushed => {
-            let step = app.session.undo.last().map(|step| step.doc.clone());
-            if let Some(d) = app.viewport.occurrence_drag.as_mut() {
-                d.step = step;
-            }
-        }
-        None => {}
     }
 }
 

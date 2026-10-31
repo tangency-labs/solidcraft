@@ -133,7 +133,7 @@ fn render_workspace_scene_overview_selection_order_links_and_readiness_are_read_
     setups::save(&mut h.app).unwrap();
     h.app.run("view.render_select", json!({"kind":"nothing"})).unwrap();
     let before = h.app.session.doc.to_json();
-    let undo = h.app.session.undo.len();
+    let undo = h.app.session.history.len();
     h.frames(3);
     assert_eq!(h.app.render_workspace.view.inspector.page, Page::Scene);
     ordered_sections(&["render.scene_stages", "render.scene_ready", "render.scene_reminders"], &h.app);
@@ -161,7 +161,7 @@ fn render_workspace_scene_overview_selection_order_links_and_readiness_are_read_
     assert_eq!(h.app.render_workspace.view.selection, super::super::RenderSelection::Check);
     assert!(crate::scenario::rect_of("render:check").is_some());
     assert_eq!(h.app.session.doc.to_json(), before);
-    assert_eq!(h.app.session.undo.len(), undo);
+    assert_eq!(h.app.session.history.len(), undo);
     assert!(h.app.render_workspace.view.job.is_none());
 }
 
@@ -234,7 +234,7 @@ fn render_workspace_shot_lens_saves_only_lens_and_orthographic_keeps_faded_contr
     h.app.follow_view_request(false);
     h.app.run("view.render_select", json!({"kind":"shot","id":name})).unwrap();
     let before = h.app.session.doc.render.setups[name].clone();
-    let undo = h.app.session.undo.len();
+    let undo = h.app.session.history.len();
     h.frames(3);
     h.step(&json!({"widget":h.app.tr("render.shot_dof")})).unwrap();
     let mut expected = before.clone();
@@ -242,7 +242,7 @@ fn render_workspace_shot_lens_saves_only_lens_and_orthographic_keeps_faded_contr
         options.lens = Some(h.app.render_workspace.view.studio.lens);
     }
     assert_eq!(h.app.session.doc.render.setups[name], expected);
-    assert_eq!(h.app.session.undo.len(), undo + 1);
+    assert_eq!(h.app.session.history.len(), undo + 1);
     h.app.run("edit.undo", json!({})).unwrap();
     assert_eq!(h.app.session.doc.render.setups[name], before);
     h.app.cam.fov = 0.0;
@@ -263,14 +263,14 @@ fn native_inspector_keeps_stage_actions_on_screen_and_output_has_no_pinned_foote
             assert_eq!(h.app.render_workspace.view.inspector.page, Page::Output);
             let before = h.app.session.doc.to_json();
             let revision = h.app.session.revision;
-            let history = (h.app.session.undo.len(), h.app.session.redo.len());
+            let history = (h.app.session.history.len(), h.app.session.history.redo_steps().len());
             for page in Page::ALL {
                 h.app.render_workspace.view.inspector.page = page;
                 h.frames(3);
                 let inspector = crate::scenario::rect_of("render:inspector").unwrap();
                 assert_eq!(h.app.session.doc.to_json(), before);
                 assert_eq!(h.app.session.revision, revision);
-                assert_eq!((h.app.session.undo.len(), h.app.session.redo.len()), history);
+                assert_eq!((h.app.session.history.len(), h.app.session.history.redo_steps().len()), history);
                 assert!(h.app.render_workspace.view.job.is_none());
                 assert!(h.app.render_workspace.view.completed.is_none());
                 if page == Page::Appearance {
@@ -447,7 +447,7 @@ fn stage_catalogs_fill_a_290_by_530_panel_and_keep_two_line_labels_inside_tiles(
             library::open_category(&mut h.app, kind);
             crate::theme::TabAccent::publish(&h.app, &h.ctx);
             let document = h.app.session.doc.to_json();
-            let history = (h.app.session.undo.len(), h.app.session.redo.len());
+            let history = (h.app.session.history.len(), h.app.session.history.redo_steps().len());
             // Panel::workspace reserves an 8 pt bottom gap in these bounds.
             let bounds = Rect::from_min_size(Pos2::ZERO, vec2(1200.0, 538.0));
             let mut textures = std::collections::HashMap::new();
@@ -503,7 +503,7 @@ fn stage_catalogs_fill_a_290_by_530_panel_and_keep_two_line_labels_inside_tiles(
                 assert_eq!(note.galley.rows.len(), 1, "catalog notes must stay on one line");
             }
             assert_eq!(h.app.session.doc.to_json(), document);
-            assert_eq!((h.app.session.undo.len(), h.app.session.redo.len()), history);
+            assert_eq!((h.app.session.history.len(), h.app.session.history.redo_steps().len()), history);
             if let Some(dir) = std::env::var_os("SOLIDCRAFT_STAGE_LAYOUT_EVIDENCE") {
                 std::fs::create_dir_all(&dir).unwrap();
                 let frame = output.unwrap();
@@ -773,7 +773,7 @@ fn actual_output_ratio_is_local_and_orientation_saves_once_preserving_other_capt
     h.app.render_workspace.view.inspector.page = Page::Output;
     setups::save(&mut h.app).unwrap();
     let saved = h.app.session.doc.clone();
-    let undo = h.app.session.undo.len();
+    let undo = h.app.session.history.len();
     let camera = h.app.cam;
     reveal(&mut h.app, "render_output_advanced");
     h.frames(24);
@@ -781,7 +781,7 @@ fn actual_output_ratio_is_local_and_orientation_saves_once_preserving_other_capt
     assert!(h.app.render_workspace.view.inspector.resolution.locked);
     assert!(!h.app.render_workspace.view.dirty, "coupling editor coordinates is not a saved numerical edit");
     assert!(Arc::ptr_eq(&saved, &h.app.session.doc));
-    assert_eq!(undo, h.app.session.undo.len());
+    assert_eq!(undo, h.app.session.history.len());
     h.step(&json!({"click":{"handle":"render:swap-size"}})).unwrap();
     assert_eq!((h.app.render_workspace.view.draft.width, h.app.render_workspace.view.draft.height), (1080, 1920));
     assert_eq!(h.app.render_workspace.view.samples, 37);
@@ -790,7 +790,7 @@ fn actual_output_ratio_is_local_and_orientation_saves_once_preserving_other_capt
     expected.width = 1080;
     expected.height = 1920;
     assert_eq!(h.app.session.doc.render.setups[&h.app.render_workspace.view.name], expected);
-    assert_eq!(h.app.session.undo.len(), undo + 1);
+    assert_eq!(h.app.session.history.len(), undo + 1);
     assert!(h.app.render_workspace.view.dirty);
     setups::load(&mut h.app);
     h.frames(3);
@@ -870,7 +870,7 @@ fn native_composition_review_actions_are_visible_before_auxiliary_resource_detai
         library::open_category(&mut h.app, "native_scenes");
         h.frames(3);
         let before = h.app.session.doc.to_json();
-        let history = (h.app.session.revision, h.app.session.undo.len(), h.app.session.redo.len());
+        let history = (h.app.session.revision, h.app.session.history.len(), h.app.session.history.redo_steps().len());
         h.step(&json!({"click":{"handle":"render:light:NATIVE-STUDIO-002"}})).unwrap();
         let library = h.app.shell.workspace_panels.get("render:appearances").unwrap().0;
         let review = crate::scenario::rect_of("render:light:review").unwrap();
@@ -895,7 +895,7 @@ fn native_composition_review_actions_are_visible_before_auxiliary_resource_detai
         }
         assert!(!h.app.render_workspace.view.library.review.as_ref().unwrap().acknowledged);
         assert_eq!(h.app.session.doc.to_json(), before);
-        assert_eq!((h.app.session.revision, h.app.session.undo.len(), h.app.session.redo.len()), history);
+        assert_eq!((h.app.session.revision, h.app.session.history.len(), h.app.session.history.redo_steps().len()), history);
         assert!(h.app.render_workspace.view.job.is_none());
         assert!(h.app.render_workspace.view.completed.is_none());
     }
@@ -907,7 +907,7 @@ fn ribbon_navigation_reuses_inspector_and_preserves_exact_unsaved_intent() {
     h.app.render_workspace.view.samples = 37;
     h.app.render_workspace.view.draft.width = 777;
     let doc = h.app.session.doc.to_json();
-    let history = (h.app.session.revision, h.app.session.undo.len(), h.app.session.redo.len());
+    let history = (h.app.session.revision, h.app.session.history.len(), h.app.session.history.redo_steps().len());
     for (id, page) in [
         ("render.preset.resolve", Page::Scene),
         ("render.settings.get", Page::Scene),
@@ -945,7 +945,7 @@ fn ribbon_navigation_reuses_inspector_and_preserves_exact_unsaved_intent() {
         assert_eq!(h.app.render_workspace.view.samples, 37);
         assert_eq!(h.app.render_workspace.view.draft.width, 777);
         assert_eq!(h.app.session.doc.to_json(), doc, "navigation may not execute a parameterless apply");
-        assert_eq!((h.app.session.revision, h.app.session.undo.len(), h.app.session.redo.len()), history);
+        assert_eq!((h.app.session.revision, h.app.session.history.len(), h.app.session.history.redo_steps().len()), history);
         assert!(h.app.render_workspace.view.job.is_none());
         assert!(h.app.render_workspace.view.completed.is_none());
         assert!(!crate::icon_svg::resolve(solidcraft_engine::find_command(id).unwrap().icon).placeholder);
@@ -1039,11 +1039,11 @@ fn ribbon_frame_preserves_explicit_roll_world_up_and_saved_view_authority() {
     h.app.cam.up = solidcraft_engine::render::UpAxis::Y;
     let orientation = (h.app.cam.roll, h.app.cam.yaw, h.app.cam.pitch, h.app.cam.up);
     let document = h.app.session.doc.to_json();
-    let undo = h.app.session.undo.len();
+    let undo = h.app.session.history.len();
     h.app.start("render.camera.fit");
     assert_eq!((h.app.cam.roll, h.app.cam.yaw, h.app.cam.pitch, h.app.cam.up), orientation);
     assert_eq!(h.app.session.doc.to_json(), document);
-    assert_eq!(h.app.session.undo.len(), undo);
+    assert_eq!(h.app.session.history.len(), undo);
     assert!(h.app.session.camera.is_none(), "the explicit view request was consumed by the viewport");
     assert_eq!(h.app.ui.up_axis, h.app.cam.up);
 }
@@ -1120,7 +1120,7 @@ fn master_regrade_requires_a_retained_master_instead_of_reconstructing_a_png() {
 fn public_render_inspection_exposes_exact_identities_without_execution_or_document_mutation() {
     let mut h = fixture();
     let doc = h.app.session.doc.to_json();
-    let undo = h.app.session.undo.len();
+    let undo = h.app.session.history.len();
     let camera = h.app.cam;
     let inspected = h.call("ui.inspect", json!({}));
     assert_eq!(inspected["result"]["render"]["active"], true);
@@ -1133,7 +1133,7 @@ fn public_render_inspection_exposes_exact_identities_without_execution_or_docume
     let inspected = h.call("ui.inspect", json!({}));
     assert_eq!(inspected["result"]["render"]["job"], json!(identity));
     assert_eq!(h.app.session.doc.to_json(), doc);
-    assert_eq!(h.app.session.undo.len(), undo);
+    assert_eq!(h.app.session.history.len(), undo);
     assert_eq!(h.app.cam, camera);
     h.app.session.execute("render.cancel", &json!({"job":identity})).unwrap();
 }
@@ -1224,11 +1224,11 @@ fn wear_selection_precedes_output_page_and_appearance_selection_chrome() {
         h.app.ui.layout = layout;
         h.app.session.selection = vec![solidcraft_engine::Sel::Body { name: "Subject".into() }];
         let before = h.app.session.doc.to_json();
-        let history = (h.app.session.revision, h.app.session.undo.len(), h.app.session.redo.len());
+        let history = (h.app.session.revision, h.app.session.history.len(), h.app.session.history.redo_steps().len());
         h.app.run("view.render_select", json!({"kind":"wear"})).unwrap();
         assert!(h.app.session.selection.is_empty(), "Render focus clears object picks");
         let wear_history = (history.0 + 1, history.1, history.2);
-        assert_eq!((h.app.session.revision, h.app.session.undo.len(), h.app.session.redo.len()), wear_history);
+        assert_eq!((h.app.session.revision, h.app.session.history.len(), h.app.session.history.redo_steps().len()), wear_history);
         // Exercise stale object picks alongside Wear; normal focus commands clear them.
         h.app.session.selection = vec![solidcraft_engine::Sel::Body { name: "Subject".into() }];
         for page in [Page::Output, Page::Appearance] {
@@ -1246,12 +1246,12 @@ fn wear_selection_precedes_output_page_and_appearance_selection_chrome() {
                 assert!(footer.contains_rect(crate::scenario::rect_of(name).unwrap()), "{name} outside Wear footer");
             }
             assert_eq!(h.app.session.doc.to_json(), before);
-            assert_eq!((h.app.session.revision, h.app.session.undo.len(), h.app.session.redo.len()), wear_history);
+            assert_eq!((h.app.session.revision, h.app.session.history.len(), h.app.session.history.redo_steps().len()), wear_history);
         }
         h.app.run("view.render_select", json!({"kind":"output"})).unwrap();
         assert!(h.app.session.selection.is_empty());
         let output_history = (history.0 + 2, history.1, history.2);
-        assert_eq!((h.app.session.revision, h.app.session.undo.len(), h.app.session.redo.len()), output_history);
+        assert_eq!((h.app.session.revision, h.app.session.history.len(), h.app.session.history.redo_steps().len()), output_history);
         h.app.render_workspace.view.inspector.page = Page::Appearance;
         h.frames(3);
         assert_header(&h, h.app.tr("render.page_output"));
@@ -1270,7 +1270,7 @@ fn wear_selection_precedes_output_page_and_appearance_selection_chrome() {
         assert!(header.contains_rect(crate::scenario::rect_of("render:appearance:close").unwrap()));
         assert!(inspector.contains_rect(crate::scenario::rect_of("dialog:editor_footer").unwrap()));
         assert_eq!(h.app.session.doc.to_json(), before);
-        assert_eq!((h.app.session.revision, h.app.session.undo.len(), h.app.session.redo.len()), output_history);
+        assert_eq!((h.app.session.revision, h.app.session.history.len(), h.app.session.history.redo_steps().len()), output_history);
     }
 }
 
@@ -1364,7 +1364,7 @@ fn output_effects_retains_ordered_looks_and_photographic_intent_across_save_and_
     h.frames(24);
     assert_eq!(h.app.render_workspace.view.inspector.page, Page::Effects);
     assert_eq!(h.app.session.doc.to_json(), before, "opening Effects is read-only");
-    let undo = h.app.session.undo.len();
+    let undo = h.app.session.history.len();
 
     for code in [3, 6] {
         h.step(&json!({"click":{"handle":"render:look-add"}})).unwrap();
@@ -1377,7 +1377,7 @@ fn output_effects_retains_ordered_looks_and_photographic_intent_across_save_and_
     h.step(&json!({"click":{"handle":"render:look-up"}})).unwrap();
     h.frames(2);
     assert_eq!(h.app.render_workspace.view.studio.finishing.looks.get(0).unwrap().kind, LookKind::Faded);
-    assert_eq!(h.app.session.undo.len(), undo + 3);
+    assert_eq!(h.app.session.history.len(), undo + 3);
     assert_eq!(setups::snapshot(&h.app).unwrap().job, h.app.session.doc.render.setups[&h.app.render_workspace.view.name].job);
     h.app.render_workspace.view.studio.finishing.photographic.chromatic_pixels = 1.5;
     h.app.render_workspace.view.studio.finishing.photographic.flare.strength = 0.4;
@@ -1476,7 +1476,7 @@ fn render_camera_labels_do_not_shadow_mechanical_pitch_and_axes_remain_explicit(
 fn camera_draft_uses_render_command_and_keeps_saved_design_unchanged() {
     let mut h = fixture();
     let document = h.app.session.doc.to_json();
-    let undo = h.app.session.undo.len();
+    let undo = h.app.session.history.len();
     for up in [solidcraft_engine::render::UpAxis::Z, solidcraft_engine::render::UpAxis::Y] {
         let mut camera = h.app.cam;
         camera.up = up;
@@ -1492,7 +1492,7 @@ fn camera_draft_uses_render_command_and_keeps_saved_design_unchanged() {
         fit_subject(&mut h.app).unwrap();
         assert_eq!((h.app.cam.up, h.app.cam.roll, h.app.cam.pitch), (up, camera.roll, camera.pitch));
         assert_eq!(h.app.session.doc.to_json(), document);
-        assert_eq!(h.app.session.undo.len(), undo);
+        assert_eq!(h.app.session.history.len(), undo);
     }
 }
 
@@ -1522,11 +1522,11 @@ fn output_sections_bloom_tone_and_grading_save_one_command_per_edit_without_star
     h.call("ui.resize", json!({"width":1440,"height":3000}));
     super::super::select_image_method(&mut h.app, ImageMethod::GpuRaytrace);
     let document = h.app.session.doc.clone();
-    let undo = h.app.session.undo.len();
+    let undo = h.app.session.history.len();
     h.app.start("render.effects.describe");
     h.frames(24);
     assert!(Arc::ptr_eq(&document, &h.app.session.doc));
-    assert_eq!(undo, h.app.session.undo.len());
+    assert_eq!(undo, h.app.session.history.len());
     let tone = crate::scenario::rect_of(&format!("dialog:section:{}", h.app.tr("render.children.tone"))).unwrap();
     let grading = crate::scenario::rect_of(&format!("dialog:section:{}", h.app.tr("render.children.finishing"))).unwrap();
     let bloom = crate::scenario::rect_of("render:bloom-enable").unwrap();
@@ -1535,7 +1535,7 @@ fn output_sections_bloom_tone_and_grading_save_one_command_per_edit_without_star
     assert!(grading.bottom() <= bloom.top() && bloom.bottom() <= reset.top(), "Bloom belongs to the Finishing section");
     reveal_inspector_target(&mut h, "render:bloom-enable");
     h.step(&json!({"click":{"handle":"render:bloom-enable"}})).unwrap();
-    assert_eq!(undo + 1, h.app.session.undo.len());
+    assert_eq!(undo + 1, h.app.session.history.len());
     assert!(h.app.render_workspace.view.studio.finishing.bloom.is_some());
     let (next, expected) = if h.app.render_workspace.view.studio.tone_map == ToneMap::Reinhard {
         ("render:tone:aces", ToneMap::AcesFitted)
@@ -1545,14 +1545,14 @@ fn output_sections_bloom_tone_and_grading_save_one_command_per_edit_without_star
     reveal_inspector_target(&mut h, next);
     h.step(&json!({"click":{"handle":next}})).unwrap();
     assert_eq!(h.app.render_workspace.view.studio.tone_map, expected);
-    assert_eq!(undo + 2, h.app.session.undo.len());
+    assert_eq!(undo + 2, h.app.session.history.len());
     let contrast = reveal_inspector_target(&mut h, "render.post_contrast");
     h.step(&json!({"click":[contrast.right()-10.0,contrast.center().y],"double":true})).unwrap();
     h.step(&json!({"key":"A","cmd":true})).unwrap();
     h.step(&json!({"text":"1.4"})).unwrap();
     h.step(&json!({"key":"Enter"})).unwrap();
     assert_eq!(h.app.render_workspace.view.studio.finishing.contrast, 1.4);
-    assert_eq!(undo + 3, h.app.session.undo.len());
+    assert_eq!(undo + 3, h.app.session.history.len());
     assert_eq!(setups::snapshot(&h.app).unwrap().job, h.app.session.doc.render.setups[&h.app.render_workspace.view.name].job);
     assert!(h.app.render_workspace.view.job.is_none());
     assert_eq!(h.app.session.doc.features, document.features);
@@ -1563,7 +1563,7 @@ fn output_sections_check_report_copies_success_staleness_and_errors_through_plat
     let mut h = fixture();
     h.app.session.set_render_job_host(Some(solidcraft_engine::render::job::CpuHost::cooperative())).unwrap();
     let doc = h.app.session.doc.clone();
-    let state = (h.app.session.revision, h.app.session.undo.len(), h.app.session.redo.len(), h.app.session.is_dirty());
+    let state = (h.app.session.revision, h.app.session.history.len(), h.app.session.history.redo_steps().len(), h.app.session.is_dirty());
     super::super::ribbon::perform_job(&mut h.app, "render.preflight").unwrap();
     let report = check_report(&h.app).unwrap();
     assert!(report.contains(h.app.tr("render.output_ready")));
@@ -1576,7 +1576,7 @@ fn output_sections_check_report_copies_success_staleness_and_errors_through_plat
     assert!(h.app.render_workspace.view.job.is_none());
     assert_eq!(h.app.session.render_job_host().unwrap().admitted_bytes(), 0);
     assert!(Arc::ptr_eq(&doc, &h.app.session.doc));
-    assert_eq!(state, (h.app.session.revision, h.app.session.undo.len(), h.app.session.redo.len(), h.app.session.is_dirty()));
+    assert_eq!(state, (h.app.session.revision, h.app.session.history.len(), h.app.session.history.redo_steps().len(), h.app.session.is_dirty()));
     h.app.render_workspace.view.draft.width = 32;
     let lines = check_lines(&h.app);
     assert_eq!(lines[0].key, "stale");
@@ -1597,7 +1597,7 @@ fn output_sections_check_report_copies_success_staleness_and_errors_through_plat
     h.app.run("render.preflight.copy", json!({"text":report})).unwrap();
     assert_eq!(h.app.render_workspace.clipboard_text.as_deref(), Some(report.as_str()));
     assert!(Arc::ptr_eq(&doc, &h.app.session.doc));
-    assert_eq!(state, (h.app.session.revision, h.app.session.undo.len(), h.app.session.redo.len(), h.app.session.is_dirty()));
+    assert_eq!(state, (h.app.session.revision, h.app.session.history.len(), h.app.session.history.redo_steps().len(), h.app.session.is_dirty()));
 }
 
 #[test]
@@ -1605,12 +1605,12 @@ fn output_sections_sizes_refuse_hostile_input_and_4k_follows_the_selected_budget
     let mut h = fixture();
     let before = h.app.render_workspace.view.draft.clone();
     let doc = h.app.session.doc.clone();
-    let undo = h.app.session.undo.len();
+    let undo = h.app.session.history.len();
     for (width, height) in [(0, 1), (1, 0), (u32::MAX, 1), (4096, 4096), (3840, 2160)] {
         assert!(apply_size(&mut h.app, width, height, false).is_err());
         assert_eq!(h.app.render_workspace.view.draft, before);
         assert!(Arc::ptr_eq(&doc, &h.app.session.doc));
-        assert_eq!(h.app.session.undo.len(), undo);
+        assert_eq!(h.app.session.history.len(), undo);
     }
     let reason = size_limit_reason(&h.app, 3840, 2160);
     assert!(reason.contains("4194304"));
@@ -1620,7 +1620,7 @@ fn output_sections_sizes_refuse_hostile_input_and_4k_follows_the_selected_budget
     h.frames(3);
     h.step(&json!({"click":{"handle":"render:preset:4k"}})).unwrap();
     assert_eq!((h.app.render_workspace.view.draft.width, h.app.render_workspace.view.draft.height), (3840, 2160));
-    assert_eq!(h.app.session.undo.len(), undo + 1);
+    assert_eq!(h.app.session.history.len(), undo + 1);
     assert!(h.app.render_workspace.view.job.is_none());
 }
 
@@ -1632,7 +1632,7 @@ fn cpu_raster_refusing_a_size_names_the_method_and_profile_that_render_it() {
     let mut h = fixture();
     assert_eq!(h.app.render_workspace.view.method, ImageMethod::Raster, "the default method is unchanged");
     let doc = h.app.session.doc.clone();
-    let undo = h.app.session.undo.len();
+    let undo = h.app.session.history.len();
     h.step(&json!({"click":{"handle":"render:shots:size"}})).unwrap();
     h.step(&json!({"widget":"Full HD · 1920 × 1080"})).unwrap();
     assert_eq!((h.app.render_workspace.view.draft.width, h.app.render_workspace.view.draft.height), (1920, 1080));
@@ -1647,7 +1647,7 @@ fn cpu_raster_refusing_a_size_names_the_method_and_profile_that_render_it() {
     assert_eq!(h.app.render_workspace.view.method, ImageMethod::Raster);
     assert_eq!(h.app.render_workspace.view.raytrace.budget, CpuBudget::Compact);
     assert!(Arc::ptr_eq(&doc, &h.app.session.doc));
-    assert_eq!(h.app.session.undo.len(), undo);
+    assert_eq!(h.app.session.history.len(), undo);
     assert!(!size_limit_reason(&h.app, 16384, 16384).contains("CPU resource profile"), "past Workstation no profile is named");
     assert_eq!(size_mark(&h.app, "fits", Some((2048, 2048))), None);
     h.app.preferences.language = "de".into();
@@ -1834,9 +1834,9 @@ fn appearance_inspector_all_users_replaces_exact_look_once_without_changing_mass
     let mut to = from.clone();
     to.color = [12, 34, 56];
     let mass = h.app.run("component.properties", json!({})).unwrap();
-    let undo = h.app.session.undo.len();
+    let undo = h.app.session.history.len();
     assign(&mut h.app, &target, &from, &to, true).unwrap();
-    assert_eq!(h.app.session.undo.len(), undo + 1);
+    assert_eq!(h.app.session.history.len(), undo + 1);
     for name in ["Subject", "Other"] {
         assert_eq!(h.app.session.doc.appearances.bodies.get(name), Some(&to));
     }
@@ -1847,7 +1847,7 @@ fn appearance_inspector_all_users_replaces_exact_look_once_without_changing_mass
     h.frames(2);
     h.step(&json!({"click":{"handle":"render:stage:look"}})).unwrap();
     assert_eq!(h.app.render_workspace.view.inspector.page, Page::Appearance);
-    let undo = h.app.session.undo.len();
+    let undo = h.app.session.history.len();
     h.step(&json!({"click":{"handle":format!("dialog:{}:{}", h.app.tr("render.inspector_applies_to"), crate::i18n::format("render.inspector_all_users", &[("count", "2")]))}}))
         .unwrap();
     h.step(&json!({"click":{"handle":"render:appearance:preview:replace"}})).unwrap();
@@ -1855,13 +1855,13 @@ fn appearance_inspector_all_users_replaces_exact_look_once_without_changing_mass
     h.step(&json!({"text":"ABS - Blue"})).unwrap();
     let blue = crate::dialogs_appearance::replacement_library(&mut h.app).iter().position(|look| look.name == "ABS - Blue").unwrap();
     h.step(&json!({"click":{"handle":format!("render:appearance:replace:{blue}")}})).unwrap();
-    assert_eq!(h.app.session.undo.len(), undo + 1);
+    assert_eq!(h.app.session.history.len(), undo + 1);
     for name in ["Subject", "Other"] {
         assert_eq!(h.app.session.doc.appearances.bodies[name].name, "ABS - Blue");
     }
-    let undo = h.app.session.undo.len();
+    let undo = h.app.session.history.len();
     h.step(&json!({"click":{"handle":format!("dialog:{}:{}",h.app.tr("render.inspector_finish"),h.app.tr("render.inspector_matte"))}})).unwrap();
-    assert_eq!(h.app.session.undo.len(), undo + 1, "an all-users field edit is one replacement command");
+    assert_eq!(h.app.session.history.len(), undo + 1, "an all-users field edit is one replacement command");
     for name in ["Subject", "Other"] {
         assert_eq!(h.app.session.doc.appearances.bodies[name].pbr.unwrap().roughness(), 0.85);
     }
@@ -1894,9 +1894,9 @@ fn appearance_inspector_finish_presets_mixed_set_all_and_clear_use_existing_assi
         let pbr = to.pbr.unwrap();
         assert_eq!((pbr.metallic(), pbr.roughness(), to.opacity), (metallic, roughness, 1.0));
     }
-    let undo = h.app.session.undo.len();
+    let undo = h.app.session.history.len();
     assign(&mut h.app, &target, &looks[0], &to, false).unwrap();
-    assert_eq!(h.app.session.undo.len(), undo + 1);
+    assert_eq!(h.app.session.history.len(), undo + 1);
     assert_eq!(h.app.session.doc.appearances.bodies.get("Subject"), h.app.session.doc.appearances.bodies.get("Other"));
     clear(&mut h.app, &target, &to).unwrap();
     assert!(h.app.session.doc.appearances.bodies.is_empty());
@@ -1927,26 +1927,26 @@ fn appearance_inspector_real_controls_switch_targets_inspect_chain_and_edit_fini
     assert_eq!(h.app.session.doc.to_json(), before);
     appearance_inspector_capture(&mut h, "face");
     h.frames(3);
-    let undo = h.app.session.undo.len();
+    let undo = h.app.session.history.len();
     h.step(&json!({"click":{"handle":format!("dialog:{}:{}",h.app.tr("render.inspector_finish"),h.app.tr("render.inspector_metal"))}})).unwrap();
-    assert_eq!(h.app.session.undo.len(), undo + 1);
+    assert_eq!(h.app.session.history.len(), undo + 1);
     assert_eq!(h.app.session.doc.appearances.bodies["Subject"].pbr.unwrap().metallic(), 1.0);
     let roughness = crate::scenario::rect_of(&format!("dialog:scalar:{}", h.app.tr("appearance.roughness"))).unwrap().center();
-    let drag_undo = h.app.session.undo.len();
+    let drag_undo = h.app.session.history.len();
     h.step(&json!({"drag":[[roughness.x,roughness.y],[roughness.x+20.0,roughness.y]],"steps":12})).unwrap();
-    assert_eq!(h.app.session.undo.len(), drag_undo + 1, "a multi-frame field edit is one undo step");
+    assert_eq!(h.app.session.history.len(), drag_undo + 1, "a multi-frame field edit is one undo step");
     assert_ne!(h.app.session.doc.appearances.bodies["Subject"].pbr.unwrap().roughness(), 0.32);
-    let edited_undo = h.app.session.undo.len();
+    let edited_undo = h.app.session.history.len();
     h.step(&json!({"click":{"handle":format!("dialog::{}",h.app.tr("render.pick_body"))}})).unwrap();
     assert!(h.app.ui.pick_bodies);
-    assert_eq!(h.app.session.undo.len(), edited_undo);
+    assert_eq!(h.app.session.history.len(), edited_undo);
     h.step(&json!({"click":{"handle":format!("dialog::{}",h.app.tr("render.pick_component"))}})).unwrap();
     assert!(h.app.ui.pick_components);
     assert!(h.widget(h.app.tr("render.inspector_pick_target")).is_some(), "root bodies have no component override target");
     h.step(&json!({"click":{"handle":format!("dialog::{}",h.app.tr("render.pick_face"))}})).unwrap();
     assert!(!h.app.ui.pick_components && !h.app.ui.pick_bodies);
     h.step(&json!({"click":{"handle":format!("dialog::{}",h.app.tr("render.pick_body"))}})).unwrap();
-    assert_eq!(h.app.session.undo.len(), edited_undo);
+    assert_eq!(h.app.session.history.len(), edited_undo);
     appearance_inspector_capture(&mut h, "body");
     h.app.session.selection.clear();
     h.frames(3);
@@ -1967,22 +1967,22 @@ fn appearance_inspector_mixed_fields_are_inert_until_edited_and_accept_the_first
     h.step(&json!({"click":{"handle":"render:stage:look"}})).unwrap();
     assert_eq!(h.app.render_workspace.view.inspector.page, Page::Appearance);
     let before = h.app.session.doc.to_json();
-    let undo = h.app.session.undo.len();
+    let undo = h.app.session.history.len();
     let field = format!("dialog:scalar:{}", h.app.tr("render.inspector_opacity"));
     h.step(&json!({"click":{"handle":field}})).unwrap();
     h.step(&json!({"key":"Tab"})).unwrap();
     assert_eq!(h.app.session.doc.to_json(), before, "leaving Mixed without editing must be inert");
-    assert_eq!(h.app.session.undo.len(), undo);
+    assert_eq!(h.app.session.history.len(), undo);
     h.step(&json!({"click":{"handle":field}})).unwrap();
     h.step(&json!({"text":"NaN"})).unwrap();
     h.step(&json!({"key":"Enter"})).unwrap();
     assert_eq!(h.app.session.doc.to_json(), before, "invalid input must not set mixed targets");
-    assert_eq!(h.app.session.undo.len(), undo);
+    assert_eq!(h.app.session.history.len(), undo);
     h.step(&json!({"click":{"handle":field}})).unwrap();
     h.step(&json!({"text":"0.25"})).unwrap();
-    assert_eq!(h.app.session.undo.len(), undo, "typing keeps a local draft until commit");
+    assert_eq!(h.app.session.history.len(), undo, "typing keeps a local draft until commit");
     h.step(&json!({"key":"Enter"})).unwrap();
-    assert_eq!(h.app.session.undo.len(), undo + 1);
+    assert_eq!(h.app.session.history.len(), undo + 1);
     for name in ["Subject", "Other"] {
         assert_eq!(h.app.session.doc.appearances.bodies[name].opacity, 0.25);
     }
@@ -2007,12 +2007,12 @@ fn appearance_inspector_optical_colour_and_opacity_edits_commit_once_with_shared
     assert_eq!(h.app.render_workspace.view.inspector.page, Page::Appearance);
     let mass = h.app.run("component.properties", json!({})).unwrap();
     for (key, text) in [("appearance.metallic", "2"), ("appearance.roughness", "0"), ("render.inspector_opacity", "0.25")] {
-        let undo = h.app.session.undo.len();
+        let undo = h.app.session.history.len();
         h.step(&json!({"click":{"handle":format!("dialog:scalar:{}",h.app.tr(key))}})).unwrap();
         h.step(&json!({"text":text})).unwrap();
-        assert_eq!(h.app.session.undo.len(), undo);
+        assert_eq!(h.app.session.history.len(), undo);
         h.step(&json!({"key":"Enter"})).unwrap();
-        assert_eq!(h.app.session.undo.len(), undo + 1, "{key}");
+        assert_eq!(h.app.session.history.len(), undo + 1, "{key}");
         let look = &h.app.session.doc.appearances.bodies["Subject"];
         match key {
             "appearance.metallic" => assert_eq!(look.pbr.unwrap().metallic(), 1.0),
@@ -2020,20 +2020,20 @@ fn appearance_inspector_optical_colour_and_opacity_edits_commit_once_with_shared
             _ => assert_eq!((look.opacity, look.pbr), (0.25, None)),
         }
     }
-    let undo = h.app.session.undo.len();
+    let undo = h.app.session.history.len();
     h.step(&json!({"click":{"handle":format!("dialog:scalar:{}",h.app.tr("render.appearance_editor.ior"))}})).unwrap();
     h.step(&json!({"text":"3.5"})).unwrap();
     h.step(&json!({"key":"Enter"})).unwrap();
-    assert_eq!(h.app.session.undo.len(), undo + 1);
+    assert_eq!(h.app.session.history.len(), undo + 1);
     let look = &h.app.session.doc.appearances.bodies["Subject"];
     assert_eq!((look.pbr.unwrap().dielectric_ior(), look.opacity), (3.0, 1.0));
     h.step(&json!({"click":{"handle":format!("dialog:color:{}",h.app.tr("render.inspector_colour"))}})).unwrap();
-    let undo = h.app.session.undo.len();
+    let undo = h.app.session.history.len();
     h.step(&json!({"click":{"handle":"color:channel:R"}})).unwrap();
     h.step(&json!({"text":"200"})).unwrap();
-    assert_eq!(h.app.session.undo.len(), undo);
+    assert_eq!(h.app.session.history.len(), undo);
     h.step(&json!({"key":"Enter"})).unwrap();
-    assert_eq!(h.app.session.undo.len(), undo + 1);
+    assert_eq!(h.app.session.history.len(), undo + 1);
     assert_eq!(h.app.session.doc.appearances.bodies["Subject"].color[0], 200);
     assert_eq!(h.app.run("component.properties", json!({})).unwrap(), mass);
 }
@@ -2047,7 +2047,7 @@ fn appearance_inspector_hex_edits_validate_and_commit_once() {
     h.app.run("view.render_stage", json!({"stage":"look"})).unwrap();
     h.frames(3);
     let before = h.app.session.doc.to_json();
-    let undo = h.app.session.undo.len();
+    let undo = h.app.session.history.len();
     appearance_picker_open(&mut h);
     let hex = "color:hex";
     h.step(&json!({"click":{"handle":hex}})).unwrap();
@@ -2058,10 +2058,10 @@ fn appearance_inspector_hex_edits_validate_and_commit_once() {
     h.step(&json!({"click":{"handle":hex}})).unwrap();
     h.step(&json!({"key":"A","cmd":true,"ctrl":true})).unwrap();
     h.step(&json!({"text":"#123456"})).unwrap();
-    assert_eq!(h.app.session.undo.len(), undo);
+    assert_eq!(h.app.session.history.len(), undo);
     h.step(&json!({"key":"Enter"})).unwrap();
     assert_eq!(h.app.session.doc.appearances.bodies["Subject"].color, [0x12, 0x34, 0x56]);
-    assert_eq!(h.app.session.undo.len(), undo + 1);
+    assert_eq!(h.app.session.history.len(), undo + 1);
     h.app.run("solid.box", json!({"body_name":"Other","length":5,"width":5,"height":5,"corner":[30,0,0]})).unwrap();
     h.app.run("appearance.assign", json!({"bodies":["Other"],"color":"#ABCDEF"})).unwrap();
     h.app.session.selection.push(Sel::Body { name: "Other".into() });
@@ -2103,7 +2103,7 @@ fn appearance_inspector_shared_picker_preserves_exact_opacity_and_commits_alpha(
     let mass = h.app.run("component.properties", json!({})).unwrap();
     appearance_picker_open(&mut h);
     let before = h.app.session.doc.to_json();
-    let undo = h.app.session.undo.len();
+    let undo = h.app.session.history.len();
     for mode in ["F", "U8", "Hex"] {
         h.step(&json!({"click":{"handle":format!("color:format:{mode}")}})).unwrap();
         let draft = h.app.render_workspace.view.inspector.selection_appearance.draft().unwrap();
@@ -2116,7 +2116,7 @@ fn appearance_inspector_shared_picker_preserves_exact_opacity_and_commits_alpha(
         assert_eq!((draft.color, draft.opacity), ([171, 205, 239], 0.123456));
         assert!(h.widget(text).is_some(), "invalid text remains editable inside the picker");
         assert_eq!(h.app.session.doc.to_json(), before);
-        assert_eq!(h.app.session.undo.len(), undo);
+        assert_eq!(h.app.session.history.len(), undo);
     }
     for (text, color, opacity) in [
         ("#0102fe", [1, 2, 254], 0.123456),
@@ -2125,17 +2125,17 @@ fn appearance_inspector_shared_picker_preserves_exact_opacity_and_commits_alpha(
         ("#22334400", [34, 51, 68], 0.0),
     ] {
         let before = h.app.session.doc.to_json();
-        let undo = h.app.session.undo.len();
+        let undo = h.app.session.history.len();
         appearance_picker_paste(&mut h, text);
         let draft = h.app.render_workspace.view.inspector.selection_appearance.draft().unwrap();
         assert_eq!((draft.color, draft.opacity, draft.pbr), (color, opacity, None), "{text} updates the exact draft immediately");
         assert_eq!(h.app.session.doc.to_json(), before, "typing does not commit the model");
-        assert_eq!(h.app.session.undo.len(), undo);
+        assert_eq!(h.app.session.history.len(), undo);
         h.step(&json!({"key":"Enter"})).unwrap();
         h.frames(2);
         let look = &h.app.session.doc.appearances.bodies["Subject"];
         assert_eq!((look.color, look.opacity, look.pbr), (color, opacity, None));
-        assert_eq!(h.app.session.undo.len(), undo + 1, "one committed edit for {text}");
+        assert_eq!(h.app.session.history.len(), undo + 1, "one committed edit for {text}");
     }
     assert_eq!(h.app.run("component.properties", json!({})).unwrap(), mass);
 }
@@ -2151,7 +2151,7 @@ fn appearance_inspector_shared_picker_pbr_rejects_nonopaque_alpha() {
     h.app.run("view.render_stage", json!({"stage":"look"})).unwrap();
     h.frames(3);
     let before = h.app.session.doc.to_json();
-    let undo = h.app.session.undo.len();
+    let undo = h.app.session.history.len();
     let pbr = h.app.session.doc.appearances.bodies["Subject"].pbr;
     appearance_picker_open(&mut h);
     for text in ["#abcdef80", "#abcdef00"] {
@@ -2161,13 +2161,13 @@ fn appearance_inspector_shared_picker_pbr_rejects_nonopaque_alpha() {
         assert!(h.widget(text).is_some());
         h.step(&json!({"key":"Enter"})).unwrap();
         assert_eq!(h.app.session.doc.to_json(), before);
-        assert_eq!(h.app.session.undo.len(), undo);
+        assert_eq!(h.app.session.history.len(), undo);
     }
     appearance_picker_paste(&mut h, "#abcdefFF");
     h.step(&json!({"key":"Enter"})).unwrap();
     let look = &h.app.session.doc.appearances.bodies["Subject"];
     assert_eq!((look.color, look.opacity, look.pbr), ([171, 205, 239], 1.0, pbr));
-    assert_eq!(h.app.session.undo.len(), undo + 1);
+    assert_eq!(h.app.session.history.len(), undo + 1);
 }
 
 #[test]
@@ -2185,21 +2185,21 @@ fn appearance_inspector_shared_picker_has_no_outer_hex_editor_and_keeps_mixed_va
     assert!(crate::scenario::handle_at(&outer).is_none(), "Hex editing belongs only inside the shared picker");
     assert!(crate::scenario::rect_of("dialog:note:color:mixed").is_some(), "mixed colour remains visibly labelled beside the swatch");
     let before = h.app.session.doc.to_json();
-    let undo = h.app.session.undo.len();
+    let undo = h.app.session.history.len();
     appearance_picker_open(&mut h);
     assert!(crate::scenario::handle_at(&outer).is_none());
     assert!(crate::scenario::handle_at("color:hex").is_some());
     h.step(&json!({"click":{"handle":"color:hex"}})).unwrap();
     h.step(&json!({"key":"Tab"})).unwrap();
     assert_eq!(h.app.session.doc.to_json(), before, "opening and leaving mixed input is inert");
-    assert_eq!(h.app.session.undo.len(), undo);
+    assert_eq!(h.app.session.history.len(), undo);
     appearance_picker_paste(&mut h, "#123456");
     h.step(&json!({"key":"Enter"})).unwrap();
     for body in ["Subject", "Other"] {
         let look = &h.app.session.doc.appearances.bodies[body];
         assert_eq!((look.color, look.opacity, look.pbr), ([18, 52, 86], 0.123456, None));
     }
-    assert_eq!(h.app.session.undo.len(), undo + 1, "accepting the first colour still sets mixed targets once");
+    assert_eq!(h.app.session.history.len(), undo + 1, "accepting the first colour still sets mixed targets once");
 }
 
 #[test]
@@ -2242,10 +2242,10 @@ fn appearance_inspector_component_and_face_overrides_remove_to_material_from_rea
             "component" => "render.pick_component", "body" => "render.pick_body", _ => "render.pick_face",
         }))}}))
         .unwrap();
-        let undo = h.app.session.undo.len();
+        let undo = h.app.session.history.len();
         h.step(&json!({"widget":"…"})).unwrap();
         h.step(&json!({"widget":h.app.tr("render.inspector_remove")})).unwrap();
-        assert_eq!(h.app.session.undo.len(), undo + 1, "clearing {step}: {:?}", h.app.render_workspace.view.inspector.selection_appearance);
+        assert_eq!(h.app.session.history.len(), undo + 1, "clearing {step}: {:?}", h.app.render_workspace.view.inspector.selection_appearance);
     }
     assert!(h.app.session.doc.appearances.is_empty());
     assert!(h.widget("Steel").is_some());
@@ -2303,7 +2303,7 @@ fn appearance_inspector_approved_layout_is_305_wide_and_preserves_stage_bounds()
     h.app.run("view.render_stage", json!({"stage":"look"})).unwrap();
     h.frames(3);
     let before = h.app.session.doc.to_json();
-    let undo = h.app.session.undo.len();
+    let undo = h.app.session.history.len();
     appearance_inspector_capture(&mut h, "approved");
     h.frames(3);
     let inspector = crate::scenario::rect_of("render:inspector").unwrap();
@@ -2315,7 +2315,7 @@ fn appearance_inspector_approved_layout_is_305_wide_and_preserves_stage_bounds()
     assert!(h.widget(&crate::i18n::format("render.inspector_all_users", &[("count", "2")])).is_some());
     assert!(h.widget(h.app.tr("render.inspector_save_library")).is_some());
     assert_eq!(h.app.session.doc.to_json(), before);
-    assert_eq!(h.app.session.undo.len(), undo);
+    assert_eq!(h.app.session.history.len(), undo);
     h.step(&json!({"click":{"handle":"render:appearance:close"}})).unwrap();
     assert!(h.app.render_workspace.view.inspector.hidden);
     h.app.run("view.render_stage", json!({"stage":"look"})).unwrap();
@@ -2325,7 +2325,7 @@ fn appearance_inspector_approved_layout_is_305_wide_and_preserves_stage_bounds()
     h.step(&json!({"click":{"handle":format!("dialog:action:{}", h.app.tr("render.inspector_reset"))}})).unwrap();
     assert_eq!(h.app.session.doc.appearances.bodies.get("Boss"), h.app.session.doc.appearances.bodies.get("Subject"));
     assert!(h.app.session.doc.appearances.bodies.contains_key("Subject"));
-    assert_eq!(h.app.session.undo.len(), undo + 2);
+    assert_eq!(h.app.session.history.len(), undo + 2);
 }
 
 #[test]
@@ -2420,7 +2420,7 @@ fn output_children_select_their_editor_with_all_sections_in_design_order() {
         h.call("ui.resize", json!({"width":1440,"height":3000}));
         super::super::select_image_method(&mut h.app, method);
         let doc = h.app.session.doc.clone();
-        let history = (h.app.session.revision, h.app.session.undo.len(), h.app.session.redo.len());
+        let history = (h.app.session.revision, h.app.session.history.len(), h.app.session.history.redo_steps().len());
         for (kind, selection, page, sections) in [
             (
                 "sampling",
@@ -2480,7 +2480,7 @@ fn output_children_select_their_editor_with_all_sections_in_design_order() {
             assert!(crate::scenario::rect_of("render:page:output").is_none());
             assert_eq!(h.app.render_workspace.view.method, method);
             assert!(Arc::ptr_eq(&doc, &h.app.session.doc));
-            assert_eq!(history, (h.app.session.revision, h.app.session.undo.len(), h.app.session.redo.len()));
+            assert_eq!(history, (h.app.session.revision, h.app.session.history.len(), h.app.session.history.redo_steps().len()));
         }
         h.step(&json!({"click":{"handle":"render:output:check"}})).unwrap();
         assert_eq!(h.app.render_workspace.view.selection, RenderSelection::Check);
@@ -2576,14 +2576,14 @@ fn appearance_editor_save_optics_keeps_other_temporary_bindings() {
     h.step(&json!({"click":{"handle":"render:glass:starter.glass.amber-tint"}})).unwrap();
     h.step(&json!({"click":{"handle":format!("dialog:section:{}",h.app.tr("render.appearance_editor.saved"))}})).unwrap();
     let geometry = h.app.run("component.properties", json!({})).unwrap();
-    let undo = h.app.session.undo.len();
+    let undo = h.app.session.history.len();
     h.step(&json!({"click":{"handle":"render:optics-save"}})).unwrap();
     let view = &h.app.render_workspace.view;
     assert_eq!(h.app.session.doc.render.setups[&view.name].optics.len(), 1);
     assert_eq!(view.materials.bindings.len(), 1);
     assert_eq!(view.materials.bindings[0].target.name, "Other");
     assert!(view.materials.bindings[0].coat_enabled);
-    assert_eq!(h.app.session.undo.len(), undo + 1);
+    assert_eq!(h.app.session.history.len(), undo + 1);
     assert_eq!(h.app.run("component.properties", json!({})).unwrap(), geometry);
 }
 

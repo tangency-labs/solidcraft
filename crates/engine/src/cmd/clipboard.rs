@@ -281,7 +281,7 @@ mod tests {
         run(&mut source, "parameters.change", json!({"name": "base", "expression": "30 mm"}));
         drop(source);
         let before = target.doc.to_json();
-        let undo = target.undo.len();
+        let undo = target.history.len();
         let result = run(&mut target, "timeline.paste", json!({"from_design": true}));
         let id = result["pasted"][0]["id"].as_u64().unwrap();
         assert_eq!(result["pasted"][0]["name"], "S (2)");
@@ -289,7 +289,7 @@ mod tests {
         assert_eq!(target.doc.param("base").unwrap().expr, "7 mm");
         assert_eq!(target.doc.param("base_2").unwrap().expr, "5 mm");
         assert_eq!(target.doc.param("width_2").unwrap().expr, "base_2 * 4");
-        assert_eq!(target.undo.len(), undo + 1);
+        assert_eq!(target.history.len(), undo + 1);
         let after = target.doc.to_json();
         run(&mut target, "edit.undo", json!({}));
         assert_eq!(target.doc.to_json(), before);
@@ -372,11 +372,11 @@ mod tests {
         run(&mut source, "timeline.copy", json!({"features": ["S"]}));
         target.foreign_copy = source.foreign_copy.clone();
         let before = target.doc.to_json();
-        let undo = target.undo.len();
+        let undo = target.history.len();
         let error = target.execute("timeline.paste", &json!({"from_design": true})).unwrap_err().to_string();
         assert!(error.contains("fixed plane"), "{error}");
         assert_eq!(target.doc.to_json(), before);
-        assert_eq!(target.undo.len(), undo);
+        assert_eq!(target.history.len(), undo);
         for params in
             [json!({"from_design":"yes"}), json!({"from_design":true,"translate":"bad"}), json!({"from_design":true,"component_path":["bad"]})]
         {

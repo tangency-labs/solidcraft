@@ -53,7 +53,7 @@ fn summary(r: &Value) -> Vec<(String, String, u64)> {
 #[test]
 fn flat_counts_parts_through_subassemblies_and_top_counts_children() {
     let mut s = assembly();
-    let undo = s.undo.len();
+    let undo = s.history.len();
     let flat = run(&mut s, "assembly.bom", json!({}));
     assert_eq!(summary(&flat), [("PL-100".into(), "Plate".into(), 3), ("PN-040".into(), "Pin".into(), 2)], "{flat}");
     assert_eq!(flat["total_occurrences"], 5);
@@ -69,7 +69,7 @@ fn flat_counts_parts_through_subassemblies_and_top_counts_children() {
     // One subassembly's own bill of materials.
     let hinge = run(&mut s, "assembly.bom", json!({"component": "Hinge"}));
     assert_eq!(summary(&hinge), [("PN-040".into(), "Pin".into(), 1)]);
-    assert_eq!(s.undo.len(), undo, "the bill of materials only reads");
+    assert_eq!(s.history.len(), undo, "the bill of materials only reads");
 }
 
 #[test]
@@ -98,14 +98,14 @@ fn equal_part_numbers_share_a_row_unless_grouped_by_definition() {
 fn part_properties_survive_save_and_open_and_undo_in_one_step() {
     let dir = scratch("roundtrip");
     let mut s = assembly();
-    let undo = s.undo.len();
+    let undo = s.history.len();
     let r = run(&mut s, "component.metadata.set", json!({"component": "Pin", "revision": "C", "properties": {"finish": null, "material": "1.4301"}}));
     assert_eq!(r["changed"], json!(["revision", "properties.finish", "properties.material"]));
-    assert_eq!(s.undo.len(), undo + 1, "one undo step");
+    assert_eq!(s.history.len(), undo + 1, "one undo step");
     // Setting the same values again changes nothing.
     let r = run(&mut s, "component.metadata.set", json!({"component": "Pin", "revision": "C"}));
     assert_eq!(r["changed"], json!([]));
-    assert_eq!(s.undo.len(), undo + 1);
+    assert_eq!(s.history.len(), undo + 1);
     for (file, format) in [("bom.json", "json"), ("bom.solidcraft", "container")] {
         let path = dir.join(file);
         run(&mut s, "file.save_as", json!({"path": path, "format": format}));
@@ -139,7 +139,7 @@ fn inserted_design_carries_its_part_properties_into_the_bom() {
         let mut s = Session::default();
         run(&mut s, "document.metadata.set", json!({"values": {"part_number": "ASM-1", "description": "Assembly"}}));
         let own_metadata = s.doc.metadata.clone();
-        let undo = s.undo.len();
+        let undo = s.history.len();
         let inserted = run(&mut s, "component.insert_design", json!({"path": source, "name": "Plate", "reuse": reuse}));
         let component = inserted["component"].as_u64().unwrap();
         assert_eq!(run(&mut s, "component.metadata", json!({"component": component}))["metadata"], metadata);
@@ -149,7 +149,7 @@ fn inserted_design_carries_its_part_properties_into_the_bom() {
         assert_eq!(bom["rows"][0]["description"], "Mounting plate");
         assert_eq!(bom["rows"][0]["revision"], "B");
         assert_eq!(bom["rows"][0]["count"], 1);
-        assert_eq!(s.undo.len(), undo + 1, "insertion including properties is one undo step");
+        assert_eq!(s.history.len(), undo + 1, "insertion including properties is one undo step");
         run(&mut s, "edit.undo", json!({}));
         assert!(s.doc.components.is_empty());
         assert!(s.doc.links.is_empty());
@@ -232,7 +232,7 @@ fn standard_parts_carry_a_part_number_that_follows_a_resize() {
 #[test]
 fn hostile_part_properties_are_refused_without_a_change() {
     let mut s = assembly();
-    let undo = s.undo.len();
+    let undo = s.history.len();
     for p in [
         json!({"component": "Pin"}),
         json!({"component": 0, "part_number": "X"}),
@@ -247,7 +247,7 @@ fn hostile_part_properties_are_refused_without_a_change() {
     ] {
         assert!(s.execute("component.metadata.set", &p).is_err(), "{p}");
     }
-    assert_eq!(s.undo.len(), undo);
+    assert_eq!(s.history.len(), undo);
     let pin = run(&mut s, "component.metadata", json!({"component": "Pin"}));
     assert_eq!(pin["part_number"], "PN-040", "all or nothing");
     for p in [json!({"levels": "deep"}), json!({"group_by": ["colour"]}), json!({"group_by": 3}), json!({"component": "Nope"})] {
@@ -261,7 +261,7 @@ fn hostile_part_properties_are_refused_without_a_change() {
 #[test]
 fn a_components_refusals_speak_of_part_properties() {
     let mut s = assembly();
-    let undo = s.undo.len();
+    let undo = s.history.len();
     let refusal = |s: &mut Session, p: Value| s.execute("component.metadata.set", &p).unwrap_err().to_string();
     let bogus = refusal(&mut s, json!({"component": "Pin", "values": {"bogus": "x"}}));
     assert!(
@@ -284,7 +284,7 @@ fn a_components_refusals_speak_of_part_properties() {
     assert!(long.ends_with("property `finish` is longer than 4096 bytes"), "{long}");
     let bell = refusal(&mut s, json!({"component": "Pin", "properties": {"finish": "a\u{7}"}}));
     assert!(bell.ends_with("property `finish` has a control character"), "{bell}");
-    assert_eq!(s.undo.len(), undo, "nothing changed");
+    assert_eq!(s.history.len(), undo, "nothing changed");
     // The design keeps its own words.
     let design = s.execute("document.metadata.set", &json!({"key": "bogus", "value": "x"})).unwrap_err().to_string();
     assert!(design.contains("`bogus` is not a design property"), "{design}");
@@ -657,11 +657,11 @@ fn a_purchased_part_keeps_what_is_placed_inside_it_out_of_the_list() {
 fn a_bom_type_is_one_undo_step_survives_save_and_open_and_evaluates_nothing() {
     let dir = scratch("bom-type");
     let mut s = machine();
-    let undo = s.undo.len();
+    let undo = s.history.len();
     s.evaluations = 0;
     let r = run(&mut s, "component.metadata.set", json!({"component": "Gearbox", "bom_type": "inseparable"}));
     assert_eq!(r["changed"], json!(["bom_type"]));
-    assert_eq!(s.undo.len(), undo + 1);
+    assert_eq!(s.history.len(), undo + 1);
     assert_eq!(s.evaluations, 0, "a part property changes no geometry");
     for (file, format) in [("machine.json", "json"), ("machine.solidcraft", "container")] {
         let path = dir.join(file);
@@ -683,7 +683,7 @@ fn a_bom_type_is_one_undo_step_survives_save_and_open_and_evaluates_nothing() {
 #[test]
 fn hostile_bom_types_are_refused_without_a_change() {
     let mut s = machine();
-    let undo = s.undo.len();
+    let undo = s.history.len();
     for p in [
         json!({"component": "Gearbox", "bom_type": "virtual"}),
         json!({"component": "Gearbox", "bom_type": "Phantom"}),
@@ -698,7 +698,7 @@ fn hostile_bom_types_are_refused_without_a_change() {
     }
     assert!(s.execute("document.metadata.set", &json!({"key": "bom_type", "value": "phantom"})).is_err(), "not a design property");
     assert!(s.execute("document.metadata.set", &json!({"values": {"bom_type": "purchased"}})).is_err());
-    assert_eq!(s.undo.len(), undo, "nothing changed");
+    assert_eq!(s.history.len(), undo, "nothing changed");
     let gb = run(&mut s, "component.metadata", json!({"component": "Gearbox"}));
     assert_eq!((gb["part_number"].as_str(), gb["bom_type"].as_str()), (Some("GB-1"), Some("normal")), "all or nothing");
     // A word another build wrote is kept and reads as normal.

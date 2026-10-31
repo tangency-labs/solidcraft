@@ -848,10 +848,10 @@ fn coplanar_body_faces_extrude_together_and_replay_their_links() {
     }
     s.execute("sketch.finish", &json!({})).unwrap();
     s.execute("solid.extrude", &json!({"distance":6,"operation":"join"})).unwrap();
-    let (features, undo) = (s.doc.features.len(), s.undo.len());
+    let (features, undo) = (s.doc.features.len(), s.history.len());
     s.execute("solid.extrude", &json!({"faces":faces,"distance":-7,"operation":"cut"})).unwrap();
     assert_eq!(s.doc.features.len(), features + 2, "one linked sketch and one extrusion");
-    assert_eq!(s.undo.len(), undo + 1);
+    assert_eq!(s.history.len(), undo + 1);
     let actual = volume(&s, "Plate");
     let state = s.model.state();
     let sketch = state.sketch(4).unwrap();
@@ -872,7 +872,7 @@ fn unsupported_face_groups_are_atomic() {
     let mut s = Session::default();
     s.execute("solid.box", &json!({"length":10,"width":10,"height":10})).unwrap();
     let before = serde_json::to_value(s.doc.as_ref()).unwrap();
-    let (revision, undo) = (s.revision, s.undo.len());
+    let (revision, undo) = (s.revision, s.history.len());
     for faces in [
         json!([]),
         json!([[5, 5, 10], [5, 5, 0]]),
@@ -882,7 +882,7 @@ fn unsupported_face_groups_are_atomic() {
     ] {
         assert!(s.execute("solid.extrude", &json!({"faces":faces,"distance":5,"operation":"join"})).is_err());
         assert_eq!(serde_json::to_value(s.doc.as_ref()).unwrap(), before);
-        assert_eq!((s.revision, s.undo.len()), (revision, undo));
+        assert_eq!((s.revision, s.history.len()), (revision, undo));
     }
 }
 

@@ -61,13 +61,13 @@ fn middle_button_press_and_hold_do_not_paste() {
     let (mut h, _) = rectangle();
     assert!(super::copy(&mut h.app));
     let before = curves(&h);
-    let undo = h.app.session.undo.len();
+    let undo = h.app.session.history.len();
     let ctx = egui::Context::default();
     clipboard_frame(&mut h, &ctx, vec![middle_button(true), egui::Event::Paste("primary selection".into())]);
     assert_eq!(curves(&h), before, "middle-button press must only navigate");
     clipboard_frame(&mut h, &ctx, vec![egui::Event::Paste("primary selection".into())]);
     assert_eq!(curves(&h), before, "holding the middle button must only navigate");
-    assert_eq!(h.app.session.undo.len(), undo);
+    assert_eq!(h.app.session.history.len(), undo);
 }
 
 #[test]
@@ -76,7 +76,7 @@ fn middle_button_release_and_single_frame_click_do_not_paste() {
         let (mut h, _) = rectangle();
         assert!(super::copy(&mut h.app));
         let before = curves(&h);
-        let undo = h.app.session.undo.len();
+        let undo = h.app.session.history.len();
         let ctx = egui::Context::default();
         let mut events = vec![middle_button(true)];
         if !single_frame {
@@ -85,7 +85,7 @@ fn middle_button_release_and_single_frame_click_do_not_paste() {
         events.extend([middle_button(false), egui::Event::Paste("primary selection".into())]);
         clipboard_frame(&mut h, &ctx, events);
         assert_eq!(curves(&h), before, "middle-button release must not paste (single frame: {single_frame})");
-        assert_eq!(h.app.session.undo.len(), undo);
+        assert_eq!(h.app.session.history.len(), undo);
     }
 }
 
@@ -112,7 +112,7 @@ fn keyboard_paste_still_works_with_and_without_middle_button() {
 fn ctrl_c_ctrl_v_pastes_the_sketch_selection_at_the_cursor_selected_in_one_undo_step() {
     let (mut h, rect) = rectangle();
     let before = curves(&h);
-    let undo = h.app.session.undo.len();
+    let undo = h.app.session.history.len();
     clipboard_event(&mut h, egui::Event::Copy, Some([10.0, 5.0]));
     assert!(h.app.session.sketch_clipboard.is_some(), "{:?}", h.app.status);
     // The window system only sends Paste while its clipboard holds text: a copy leaves some.
@@ -131,7 +131,7 @@ fn ctrl_c_ctrl_v_pastes_the_sketch_selection_at_the_cursor_selected_in_one_undo_
         h.app.session.selection.iter().filter_map(|s| if let Sel::SketchCurve { id, .. } = s { Some(id.clone()) } else { None }).collect();
     assert_eq!(selected, pasted);
     // One undo step.
-    assert_eq!(h.app.session.undo.len(), undo + 1);
+    assert_eq!(h.app.session.history.len(), undo + 1);
     h.step(&json!({"key": "Z", "cmd": true})).unwrap();
     assert_eq!(curves(&h), before);
 }
@@ -238,7 +238,7 @@ fn sketch_geometry_copies_into_a_sketch_of_another_design() {
     assert!(super::can_paste(&h.app));
     let menu = crate::context_menu::items(&h.app, &crate::context_menu::Target::Viewport);
     assert!(menu.iter().any(|i| i.id == "ui.paste" && i.enabled), "the sketch menu's Paste is on");
-    let undo = h.app.session.undo.len();
+    let undo = h.app.session.history.len();
     clipboard_event(&mut h, egui::Event::Paste("SolidCraft sketch geometry".into()), Some([60.0, 40.0]));
     let pasted = curves(&h);
     assert_eq!(pasted.len(), 4, "{:?}", h.app.status);
@@ -246,7 +246,7 @@ fn sketch_geometry_copies_into_a_sketch_of_another_design() {
     assert!(corner.dist(Vec2::new(50.0, 35.0)) < 1.0, "{corner:?}");
     let sk = h.app.session.doc.sketch(h.app.session.active_sketch.unwrap()).unwrap();
     assert_eq!(sk.constraints.iter().filter(|c| c.param.is_some()).count(), 2, "both dimensions came along");
-    assert_eq!(h.app.session.undo.len(), undo + 1);
+    assert_eq!(h.app.session.history.len(), undo + 1);
     // A copy in this design is now the last: the first design pastes it.
     let items: Vec<Value> = pasted.iter().take(1).map(|id| json!({"type": "sketch_curve", "id": id})).collect();
     h.app.run("select.set", json!({ "items": items })).unwrap();
@@ -332,7 +332,7 @@ fn contribution_linked_design_clipboard_crosses_tabs_reuses_links_and_undoes_onc
         assert_eq!(app.session.doc.links.len(), 1);
         assert_eq!(app.session.doc.features.len(), 1);
         assert_eq!(app.session.doc.occurrences.len(), n);
-        assert_eq!(app.session.undo.len(), n);
+        assert_eq!(app.session.history.len(), n);
         assert!(app.session.doc.occurrences.iter().all(|o| !o.grounded));
         assert!(app.tree.occurrence_move.is_some());
     }
@@ -380,13 +380,13 @@ fn contribution_linked_paste_uses_the_pointer_and_pending_numeric_move() {
     let projection = crate::viewport::projection(&h.app, h.app.viewport.rect.unwrap());
     let pointed = Vec3::new(40., 25., 8.);
     let at = projection.to_screen(pointed).unwrap();
-    let undo = h.app.session.undo.len();
+    let undo = h.app.session.history.len();
     assert!(super::paste(&mut h.app, Some(at)));
     h.frames(3);
     let path = h.app.tree.occurrence_move.as_ref().unwrap().path.clone();
     let initial = solidcraft_engine::doc::apply_point(&h.app.session.occurrence_placement(&path).unwrap().world, Vec3::ZERO);
     assert!((initial - pointed).len() < 1e-5, "{initial:?}");
-    assert_eq!(h.app.session.undo.len(), undo + 1);
+    assert_eq!(h.app.session.history.len(), undo + 1);
     let camera = h.app.cam;
     let field = h.call("ui.at", json!({"handle":"occurrence-move:distance:0"}));
     h.call("ui.click", json!({"x":field["result"][0],"y":field["result"][1],"double":true}));
@@ -400,7 +400,7 @@ fn contribution_linked_paste_uses_the_pointer_and_pending_numeric_move() {
     assert_eq!(h.app.cam, camera, "numeric editing does not move the camera");
     let movement = h.app.tree.occurrence_move.as_ref().unwrap();
     assert!((movement.translate[0] - (moved.x - initial.x)).abs() < 1e-5);
-    assert_eq!(h.app.session.undo.len(), undo + 1, "pending movement does not split the initial paste undo");
+    assert_eq!(h.app.session.history.len(), undo + 1, "pending movement does not split the initial paste undo");
     h.app.run("edit.undo", json!({})).unwrap();
     h.frames(3);
     assert!(h.app.session.doc.links.is_empty());
@@ -452,7 +452,7 @@ fn contribution_linked_clipboard_refuses_unsaved_dirty_self_and_missing_sources(
     std::fs::remove_file(&file.0).unwrap();
     assert!(!super::paste(&mut app, None));
     assert!(app.session.doc.features.is_empty());
-    assert!(app.session.undo.is_empty());
+    assert!(app.session.history.is_empty());
 }
 
 #[test]
@@ -478,7 +478,7 @@ fn contribution_native_copy_paste_events_insert_the_saved_design_in_another_tab(
     crate::documents::open_tab(&mut h.app, solidcraft_engine::Session::default()).unwrap();
     clipboard_event(&mut h, egui::Event::Paste("SolidCraft linked design".into()), None);
     assert_eq!(h.app.session.doc.links.len(), 1, "{:?}", h.app.status);
-    assert_eq!(h.app.session.undo.len(), 1);
+    assert_eq!(h.app.session.history.len(), 1);
 }
 
 /// A copy that fails (here, with nothing selected) leaves the clipboard empty: Paste is off, and
@@ -573,10 +573,10 @@ fn cut_features_and_their_body_move_in_one_step() {
     assert!(app.cut.bodies.is_empty(), "the body moves with the features that made it, not on its own");
     assert!(!super::body_is_cut(&app, "Block"), "and is not marked as cut");
     app.run("component.activate", json!({"component": part})).unwrap();
-    let steps = app.session.undo.len();
+    let steps = app.session.history.len();
     assert!(super::paste(&mut app, None));
     assert!(ids.iter().all(|id| app.session.doc.feature(*id).is_some_and(|f| f.component == part)));
-    assert_eq!(app.session.undo.len(), steps + 1);
+    assert_eq!(app.session.history.len(), steps + 1);
     assert!(app.cut.is_empty() && !super::can_paste(&app));
 }
 

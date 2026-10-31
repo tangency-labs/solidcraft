@@ -345,8 +345,8 @@ fn placement_preview(app: &SolveApp) -> Option<(String, DimensionDraft)> {
 
 thread_local! {
     static DRAWN: RefCell<Vec<Drawn>> = const { RefCell::new(Vec::new()) };
-    /// A text being dragged: dimension id, undo depth at the start, grab offset (sketch).
-    static DRAG: RefCell<Option<(String, usize, Vec2)>> = const { RefCell::new(None) };
+    /// A text being dragged: dimension id, the undo history's mark at the start, grab offset (sketch).
+    static DRAG: RefCell<Option<(String, solidcraft_engine::Mark, Vec2)>> = const { RefCell::new(None) };
     static EDIT: RefCell<Option<Edit>> = const { RefCell::new(None) };
     static PLACEMENT: RefCell<Option<Placement>> = const { RefCell::new(None) };
     /// Value texts of finished sketches' shown dimensions (Show Dimensions), as the model view
@@ -508,7 +508,7 @@ pub fn drag_start(app: &SolveApp, press: Pos2, press_sketch: Vec2, on_geometry: 
     }) else {
         return false;
     };
-    DRAG.with(|g| *g.borrow_mut() = Some((d.id, app.session.undo.len(), d.at - press_sketch)));
+    DRAG.with(|g| *g.borrow_mut() = Some((d.id, app.session.history.mark(), d.at - press_sketch)));
     true
 }
 
@@ -520,10 +520,10 @@ pub fn dragging() -> bool {
 /// Move the dragged text so it follows the pointer (at `to`, sketch coordinates); one undo
 /// step for the whole drag.
 pub fn drag_to(app: &mut SolveApp, to: Vec2) {
-    let Some((id, depth, off)) = DRAG.with(|g| g.borrow().clone()) else { return };
+    let Some((id, mark, off)) = DRAG.with(|g| g.borrow().clone()) else { return };
     let at = to + off;
     if app.session.execute("sketch.dimension_text", &json!({"dimension": id, "at": [at.x, at.y]})).is_ok() {
-        app.session.undo.truncate(depth + 1);
+        app.session.history.fold_since(mark);
     }
 }
 
@@ -1163,7 +1163,7 @@ mod tests {
         h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
         h.app.run("sketch.line", json!({"points":[[10,10],[40,10]],"infer":false})).unwrap();
         h.call("ui.view", json!({"view":"top"}));
-        let undo = h.app.session.undo.len();
+        let undo = h.app.session.history.len();
         h.step(&json!({"start":"sketch.dimension"})).unwrap();
         h.step(&json!({"click":{"sketch":[25,10]}})).unwrap();
         assert!(editing());
@@ -1175,11 +1175,11 @@ mod tests {
         let sk = h.app.session.doc.sketch(h.app.session.active_sketch.unwrap()).unwrap();
         let dim = sk.constraints.iter().find_map(|c| c.param.as_deref()).expect("the dimension was added");
         assert_eq!(h.app.session.doc.param(dim).map(|p| p.expr.as_str()), Some("w"));
-        assert_eq!(h.app.session.undo.len(), undo + 1, "one undo step");
+        assert_eq!(h.app.session.history.len(), undo + 1, "one undo step");
         assert!(h.app.status.as_ref().is_some_and(|s| !s.2 && s.0.contains("`w`")), "{:?}", h.app.status);
         // The same name again is refused; the editor keeps the text.
         h.app.run("sketch.line", json!({"points":[[10,30],[40,30]],"infer":false})).unwrap();
-        let undo = h.app.session.undo.len();
+        let undo = h.app.session.history.len();
         h.step(&json!({"start":"sketch.dimension"})).unwrap();
         h.step(&json!({"click":{"sketch":[25,30]}})).unwrap();
         h.step(&json!({"text":"w = 25"})).unwrap();
@@ -1190,7 +1190,7 @@ mod tests {
         assert_eq!(h.app.status.as_ref().map(|s| (s.0.as_str(), s.2)), Some((taken, true)));
         assert_eq!(box_error(), Some(taken.to_string()));
         assert_eq!(EDIT.with(|e| e.borrow().as_ref().map(|e| e.expr.clone())), Some("w = 25".to_string()));
-        assert_eq!(h.app.session.undo.len(), undo, "a refused definition changed nothing");
+        assert_eq!(h.app.session.history.len(), undo, "a refused definition changed nothing");
         h.step(&json!({"key":"Escape"})).unwrap();
         h.step(&json!({"key":"Escape"})).unwrap();
         // A reserved name says what kind of word it is. The line goes below the first one: the
@@ -1251,7 +1251,7 @@ mod tests {
         h.app.run("sketch.line", json!({"points":[[10,10],[30,10]],"infer":false})).unwrap();
         h.call("ui.view", json!({"view":"top"}));
         let baseline = h.app.session.doc.to_json();
-        let undo = h.app.session.undo.len();
+        let undo = h.app.session.history.len();
         h.step(&json!({"start":"sketch.dimension"})).unwrap();
         h.step(&json!({"click":{"sketch":[20,10]}})).unwrap();
         assert_eq!(live(), Some(false));
@@ -1268,7 +1268,7 @@ mod tests {
             assert!(!editing());
             assert!(drawn().is_empty(), "preview must not become a selectable committed dimension");
             assert_eq!(h.app.session.doc.to_json(), baseline);
-            assert_eq!(h.app.session.undo.len(), undo);
+            assert_eq!(h.app.session.history.len(), undo);
         }
         h.step(&json!({"click":{"sketch":[20,-5]}})).unwrap();
         assert!(editing());
@@ -1277,7 +1277,7 @@ mod tests {
         h.step(&json!({"key":"Escape"})).unwrap();
         assert!(placement_preview(&h.app).is_none());
         assert_eq!(h.app.session.doc.to_json(), baseline);
-        assert_eq!(h.app.session.undo.len(), undo);
+        assert_eq!(h.app.session.history.len(), undo);
         cancel();
     }
 

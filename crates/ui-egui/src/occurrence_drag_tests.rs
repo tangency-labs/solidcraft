@@ -63,7 +63,7 @@ fn release(h: &mut Harness, b: egui::Pos2) {
 fn dragging_a_free_part_moves_it_in_one_undo_step() {
     let (mut h, base, free) = two_parts();
     assert!(h.app.session.doc.occurrences.iter().any(|o| o.id == base && o.grounded), "the first part is grounded");
-    let undo = h.app.session.undo.len();
+    let undo = h.app.session.history.len();
     let (a, b) = (screen(&mut h, Vec3::new(25.0, 5.0, 10.0)), screen(&mut h, Vec3::new(25.0, 35.0, 10.0)));
     press_and_move(&mut h, a, b, Default::default());
     assert!(h.app.viewport.occurrence_drag.is_some() && h.app.viewport.boxsel.is_none(), "the drag moves the part, not a selection box");
@@ -71,8 +71,8 @@ fn dragging_a_free_part_moves_it_in_one_undo_step() {
     assert!(h.app.viewport.occurrence_drag.is_none());
     assert!(origin(&h, &[free]).dist(Vec3::new(0.0, 30.0, 0.0)) < 0.5, "{:?}", origin(&h, &[free]));
     assert!(origin(&h, &[base]).dist(Vec3::ZERO) < 1e-9, "the grounded part stays");
-    assert_eq!(h.app.session.undo.len(), undo + 1, "one undo step for the drag");
-    assert_eq!(h.app.session.undo.last().map(|s| s.label.as_str()), Some("Drag Occurrence"));
+    assert_eq!(h.app.session.history.len(), undo + 1, "one undo step for the drag");
+    assert_eq!(h.app.session.history.last().map(|s| s.label.as_str()), Some("Drag Occurrence"));
     assert!(h.app.session.pending_moves.is_empty(), "the position is captured");
     assert!(!h.app.session.log.iter().any(|l| l.contains("Drag Occurrence")), "frames are not echoed: {:?}", h.app.session.log);
     run(&mut h, "edit.undo", json!({}));
@@ -93,14 +93,14 @@ fn grounded_parts_empty_space_and_modifier_drags_draw_a_selection_box() {
         (Vec3::new(25.0, 5.0, 10.0), egui::Modifiers::ALT),
     ];
     for (at, modifiers) in cases {
-        let undo = h.app.session.undo.len();
+        let undo = h.app.session.history.len();
         let a = screen(&mut h, at);
         let b = a + egui::vec2(60.0, 40.0);
         press_and_move(&mut h, a, b, modifiers);
         assert!(h.app.viewport.occurrence_drag.is_none() && h.app.viewport.boxsel.is_some(), "{at:?} {modifiers:?}: a selection box");
         release(&mut h, b);
         assert!(origin(&h, &[base]).dist(Vec3::ZERO) < 1e-9 && origin(&h, &[free]).dist(Vec3::ZERO) < 1e-9, "{at:?} {modifiers:?}");
-        assert_eq!(h.app.session.undo.len(), undo, "{at:?} {modifiers:?}");
+        assert_eq!(h.app.session.history.len(), undo, "{at:?} {modifiers:?}");
     }
 }
 
@@ -108,7 +108,7 @@ fn grounded_parts_empty_space_and_modifier_drags_draw_a_selection_box() {
 #[test]
 fn escape_cancels_a_drag() {
     let (mut h, _, free) = two_parts();
-    let undo = h.app.session.undo.len();
+    let undo = h.app.session.history.len();
     let (a, b) = (screen(&mut h, Vec3::new(25.0, 5.0, 10.0)), screen(&mut h, Vec3::new(25.0, 35.0, 10.0)));
     press_and_move(&mut h, a, b, Default::default());
     assert!(origin(&h, &[free]).dist(Vec3::ZERO) > 1.0, "it moved while dragged");
@@ -120,7 +120,7 @@ fn escape_cancels_a_drag() {
     assert!(origin(&h, &[free]).dist(Vec3::ZERO) < 1e-9, "{:?}", origin(&h, &[free]));
     release(&mut h, b);
     assert!(origin(&h, &[free]).dist(Vec3::ZERO) < 1e-9, "the release after Escape moves nothing");
-    assert_eq!(h.app.session.undo.len(), undo);
+    assert_eq!(h.app.session.history.len(), undo);
 }
 
 /// With the design active, a drag on a part inside an assembly moves that assembly's placement;
@@ -160,7 +160,7 @@ fn either_member_of_a_floating_hinge_drags_the_whole_chain() {
         h.step(&json!({"shot": "floating-chain-before"})).unwrap();
         let before = h.app.session.doc.to_json();
         let values = h.app.session.doc.assembly.joints[0].values.clone();
-        let undo = h.app.session.undo.len();
+        let undo = h.app.session.history.len();
         let (a, b) = (screen(&mut h, grab), screen(&mut h, grab + Vec3::new(0.0, 30.0, 0.0)));
         press_and_move(&mut h, a, b, Default::default());
         assert!(
@@ -179,7 +179,7 @@ fn either_member_of_a_floating_hinge_drags_the_whole_chain() {
             assert!(origin(&h, &[o]).dist(Vec3::new(0.0, 30.0, 0.0)) < 0.5);
         }
         assert_eq!(h.app.session.doc.assembly.joints[0].values, values);
-        assert_eq!(h.app.session.undo.len(), undo + 1);
+        assert_eq!(h.app.session.history.len(), undo + 1);
         run(&mut h, "edit.undo", json!({}));
         assert_eq!(h.app.session.doc.to_json(), before);
     }

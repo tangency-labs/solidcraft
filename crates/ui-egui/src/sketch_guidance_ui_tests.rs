@@ -36,7 +36,7 @@ fn sketch_dialog_mirror_toggles_clears_references_previews_and_cancels() {
     // Keep the source curves and reference between the floating dialog and Sketch Palette.
     step(&mut h, json!({"call":"ui.camera","params":{"target":[-40,0,0],"distance":150}}));
     let original = h.app.session.doc.to_json();
-    let undo = h.app.session.undo.len();
+    let undo = h.app.session.history.len();
     let revision = h.app.session.revision;
     step(&mut h, json!({"start":"sketch.mirror"}));
     assert!(h.app.tool.is_none());
@@ -49,7 +49,7 @@ fn sketch_dialog_mirror_toggles_clears_references_previews_and_cancels() {
     pick(&mut h, [0.0, 20.0], false);
     preview(&mut h, 2);
     assert_eq!(h.app.session.doc.to_json(), original);
-    assert_eq!(h.app.session.undo.len(), undo);
+    assert_eq!(h.app.session.history.len(), undo);
     assert_eq!(h.app.session.revision, revision);
     step(&mut h, json!({"click":{"handle":"dialog:clear:Mirror line"}}));
     assert!(h.app.dialog.as_ref().unwrap().inputs[1].items.is_empty());
@@ -61,7 +61,7 @@ fn sketch_dialog_mirror_toggles_clears_references_previews_and_cancels() {
     assert!(h.app.dialog.is_none());
     assert!(!h.app.preview.active);
     assert_eq!(h.app.session.doc.to_json(), original);
-    assert_eq!(h.app.session.undo.len(), undo);
+    assert_eq!(h.app.session.history.len(), undo);
 }
 
 #[test]
@@ -287,7 +287,7 @@ fn centre_and_midpoint_tracking_is_visual_in_idle_and_drawing_modes() {
     use solidcraft_engine::geom::Vec2;
     let mut h = tracking_fixture();
     let before = h.app.session.doc.to_json();
-    let undo = h.app.session.undo.len();
+    let undo = h.app.session.history.len();
     for tool in [None, Some("sketch.line"), Some("sketch.circle.center")] {
         if let Some(tool) = tool {
             h.app.start(tool);
@@ -304,7 +304,7 @@ fn centre_and_midpoint_tracking_is_visual_in_idle_and_drawing_modes() {
         step(&mut h, json!({"key":"Escape"}));
     }
     assert_eq!(h.app.session.doc.to_json(), before, "guides add no geometry or constraints");
-    assert_eq!(h.app.session.undo.len(), undo);
+    assert_eq!(h.app.session.history.len(), undo);
 }
 
 /// #9105: while a drawing tool waits for a point, a rectangle corner starts a guide as a
@@ -500,7 +500,7 @@ fn a_rectangle_corner_lines_up_with_two_points_at_once_and_keeps_both() {
             ("sketch.point", json!({"point":[50.37,-30.21]})),
         ]);
         h.app.preferences.sketch_align_points = aligning;
-        let undo = h.app.session.undo.len();
+        let undo = h.app.session.history.len();
         let below = point_and_alignments(&h, [50.37, -30.21]).unwrap().0;
         step(&mut h, json!({"start":"sketch.rectangle.two_point"}));
         step(&mut h, json!({"click":{"sketch":[30,0.3]}}));
@@ -519,7 +519,7 @@ fn a_rectangle_corner_lines_up_with_two_points_at_once_and_keeps_both() {
         assert!(tied.iter().any(|(kind, _)| *kind == "Horizontal"), "{tied:?}");
         let (_, start) = point_and_alignments(&h, [30.0, 0.0]).expect("the first corner lines up with the bottom");
         assert!(start.iter().any(|(kind, _)| *kind == "Horizontal"), "{start:?}");
-        assert_eq!(h.app.session.undo.len(), undo + 1, "the alignments are in the rectangle's undo step");
+        assert_eq!(h.app.session.history.len(), undo + 1, "the alignments are in the rectangle's undo step");
     }
 }
 

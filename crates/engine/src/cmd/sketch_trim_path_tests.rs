@@ -56,14 +56,14 @@ fn a_path_trims_what_clicking_each_crossed_piece_would() {
     // One drag from outside the right side, across the corner, out through the top.
     let (mut dragged, ..) = square_with_step();
     let before = sketch(&dragged);
-    let undo_before = dragged.undo.len();
+    let undo_before = dragged.history.len();
     let out = run(&mut dragged, "sketch.trim.path", json!({"points": [[45, 30], [30, 30], [30, 45]]}));
     assert_eq!(out["trimmed"].as_array().map(Vec::len), Some(2), "{out}");
     assert_eq!(out["removed"].as_array().map(Vec::len), Some(2), "{out}");
     assert_eq!(sketch(&dragged), sketch(&clicked), "the drag and the two clicks leave the same sketch");
 
     // One undo step brings everything back.
-    assert_eq!(dragged.undo.len(), undo_before + 1);
+    assert_eq!(dragged.history.len(), undo_before + 1);
     run(&mut dragged, "edit.undo", json!({}));
     assert_eq!(sketch(&dragged), before);
 }
@@ -140,12 +140,12 @@ fn circles_arcs_and_splines_trim_along_a_path() {
 fn a_dry_run_reports_the_pieces_without_changing_the_design() {
     let (mut s, ..) = square_with_step();
     let before = sketch(&s);
-    let (undo, revision) = (s.undo.len(), s.revision);
+    let (undo, revision) = (s.history.len(), s.revision);
     let path = json!([[45, 30], [30, 30], [30, 45]]);
     let dry = run(&mut s, "sketch.trim.path", json!({"points": path, "dry_run": true}));
     assert_eq!(dry["dry_run"], true);
     assert_eq!(sketch(&s), before);
-    assert_eq!((s.undo.len(), s.revision), (undo, revision), "a dry run is no step");
+    assert_eq!((s.history.len(), s.revision), (undo, revision), "a dry run is no step");
     let real = run(&mut s, "sketch.trim.path", json!({"points": path}));
     assert_eq!(dry["removed"], real["removed"]);
     assert_eq!(dry["trimmed"], real["trimmed"]);

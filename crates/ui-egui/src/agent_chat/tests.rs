@@ -226,18 +226,18 @@ fn boxed(x: f64) -> Value {
 fn a_messages_changes_undo_as_one_step() {
     let (mut app, tx) = app_in_a_turn();
     let before = app.session.doc.clone();
-    let depth = app.session.undo.len();
+    let depth = app.session.history.len();
     let replies: Vec<_> = [0.0, 20.0, 40.0].into_iter().map(|x| ask(&tx, "engine.execute", boxed(x))).collect();
     frame(&mut app);
     for r in replies {
         assert_eq!(r.recv_timeout(std::time::Duration::from_secs(30)).unwrap()["ok"], true);
     }
-    assert_eq!(app.session.undo.len(), depth + 3);
+    assert_eq!(app.session.history.len(), depth + 3);
     assert_eq!(app.agent_chat.turn.as_ref().map(|t| t.changes), Some(3));
     app.agent_chat.on_event(Event::TurnEnded { reason: String::new() });
     end_turn(&mut app);
-    assert_eq!(app.session.undo.len(), depth + 1, "one step");
-    assert!(app.session.undo.last().is_some_and(|s| s.label.contains("two boxes")));
+    assert_eq!(app.session.history.len(), depth + 1, "one step");
+    assert!(app.session.history.last().is_some_and(|s| s.label.contains("two boxes")));
     let n = app.agent_chat.items.iter().rposition(|i| matches!(i, Item::Changes { steps: 3, .. })).expect("the changes are listed");
     undo_changes(&mut app, n);
     assert!(Arc::ptr_eq(&app.session.doc, &before), "back to the design before the message");
@@ -297,29 +297,6 @@ fn the_gate_refuses_and_limits() {
     let late = ask(&tx, "engine.execute", boxed(100.0));
     frame(&mut app);
     assert!(get(late)["error"].as_str().is_some_and(|e| e.contains("no message in progress")));
-}
-
-#[test]
-fn merging_finds_the_turns_start_when_the_history_was_trimmed() {
-    // Distinct designs: what counts is which `Arc` a snapshot holds.
-    let doc = |_: usize| Arc::new(solidcraft_engine::doc::Document::default());
-    let snap = |d: &Arc<solidcraft_engine::doc::Document>| solidcraft_engine::Snapshot {
-        label: String::new(),
-        doc: d.clone(),
-        active_sketch: None,
-        pending_moves: Default::default(),
-        visibility: Default::default(),
-    };
-    let docs: Vec<_> = (0..6).map(doc).collect();
-    // The turn began at depth 3 with docs[3]; the history then lost its oldest step.
-    let mut undo: Vec<_> = docs[1..6].iter().map(snap).collect();
-    assert_eq!(merge_undo(&mut undo, &docs[3], 3, "Agent"), 3);
-    assert_eq!(undo.len(), 3);
-    assert!(Arc::ptr_eq(&undo[2].doc, &docs[3]) && undo[2].label == "Agent");
-    // A start that is no longer in the history: nothing is merged.
-    let mut undo: Vec<_> = docs[1..6].iter().map(snap).collect();
-    assert_eq!(merge_undo(&mut undo, &doc(9), 3, "Agent"), 0);
-    assert_eq!(undo.len(), 5);
 }
 
 /// People who don't want AI never see it: with "Show AI features" off there is no button, the
@@ -725,7 +702,7 @@ fn programmatic_replacement_clears_the_conversation_and_invalidates_its_requests
         app.drain_control(&ctx);
         assert_eq!(queued.try_recv().unwrap()["ok"], false);
         assert!(app.agent_chat.items.is_empty() && app.agent_chat.backend.is_none());
-        assert!(app.session.doc.features.is_empty() && app.session.undo.is_empty());
+        assert!(app.session.doc.features.is_empty() && app.session.history.is_empty());
         assert!(script.calls().iter().any(|c| c == "cancel"));
     }
 }
@@ -775,9 +752,9 @@ fn leaving_a_tab_refuses_computation_and_export_replies() {
         assert!(app.control_job.is_none() && app.control_answering.is_empty());
         assert!(Arc::ptr_eq(&app.session.doc, &incoming));
         assert_eq!(app.session.log, log);
-        assert!(app.session.undo.is_empty());
+        assert!(app.session.history.is_empty());
         crate::documents::switch(&mut app, 0);
-        assert!(app.session.doc.features.is_empty() && app.session.undo.is_empty());
+        assert!(app.session.doc.features.is_empty() && app.session.history.is_empty());
     }
 }
 
@@ -811,10 +788,10 @@ fn leaving_a_tab_refuses_admitted_commands_animations_and_screenshots() {
             assert!(response["error"].as_str().is_some_and(|e| e.contains("document tab was left")));
         }
         assert!(Arc::ptr_eq(&app.session.doc, &other));
-        assert!(app.session.undo.is_empty() && app.pending_shots.is_empty());
+        assert!(app.session.history.is_empty() && app.pending_shots.is_empty());
         assert!(app.queued_shots.is_empty(), "a cancelled screenshot must not capture the incoming tab");
         crate::documents::switch(&mut app, 0);
-        assert!(app.session.doc.features.is_empty() && app.session.undo.is_empty());
+        assert!(app.session.doc.features.is_empty() && app.session.history.is_empty());
         // Adopting into a blank tab replaces the document and clears its old conversation.
         app.agent_chat.input = "discarded draft".into();
         crate::documents::adopt(&mut app, solidcraft_engine::Session::default());
@@ -833,7 +810,7 @@ fn late_events_approvals_and_undo_stay_with_the_originating_document() {
         frame(&mut app);
         assert_eq!(reply.try_recv().unwrap()["ok"], true);
     }
-    assert_eq!(app.session.undo.len(), 2);
+    assert_eq!(app.session.history.len(), 2);
     app.preferences.ai_permissions = agents::Mode::Ask;
     let held = ask(&tx, "engine.execute", boxed(40.0));
     pump_tools(&mut app);
@@ -846,14 +823,14 @@ fn late_events_approvals_and_undo_stay_with_the_originating_document() {
     let late = ask(&tx, "engine.execute", boxed(60.0));
     frame(&mut app);
     assert!(app.agent_chat.items.is_empty());
-    assert!(app.session.doc.features.is_empty() && app.session.undo.is_empty());
+    assert!(app.session.doc.features.is_empty() && app.session.history.is_empty());
     assert!(matches!(late.try_recv(), Err(std::sync::mpsc::TryRecvError::Empty)));
 
     crate::documents::switch(&mut app, 0);
     frame(&mut app);
     assert_eq!(late.try_recv().unwrap()["ok"], false);
     assert_eq!(app.session.doc.features.len(), 2);
-    assert_eq!(app.session.undo.len(), 1, "the outgoing turn merged only its own undo");
+    assert_eq!(app.session.history.len(), 1, "the outgoing turn merged only its own undo");
     let changes = app.agent_chat.items.iter().position(|i| matches!(i, Item::Changes { steps: 2, .. })).unwrap();
     assert!(app.agent_chat.items.iter().any(|i| matches!(i, Item::Agent { text, .. } if text == "Stopped in the first design")));
     undo_changes(&mut app, changes);
@@ -973,7 +950,7 @@ fn an_interrupted_turns_changes_undo_as_one_step() {
     let (tx, rx) = channel();
     app.agent_chat.tools_rx = Some(rx);
     let before = app.session.doc.clone();
-    let depth = app.session.undo.len();
+    let depth = app.session.history.len();
     send(&mut app, &ctx, "two boxes".into());
     let replies: Vec<_> = [0.0, 20.0].into_iter().map(|x| ask(&tx, "engine.execute", boxed(x))).collect();
     frame(&mut app);
@@ -984,7 +961,7 @@ fn an_interrupted_turns_changes_undo_as_one_step() {
     send_now(&mut app, &ctx);
     ended(&script, "cancelled");
     poll(&mut app, &ctx);
-    assert_eq!(app.session.undo.len(), depth + 1, "the interrupted message is one step");
+    assert_eq!(app.session.history.len(), depth + 1, "the interrupted message is one step");
     let n = app.agent_chat.items.iter().rposition(|i| matches!(i, Item::Changes { steps: 2, .. })).expect("its changes are listed");
     // The steered message is on its own turn.
     assert!(app.agent_chat.turn.as_ref().is_some_and(|t| t.label.contains("stop, make it one") && t.changes == 0));
@@ -1073,7 +1050,7 @@ fn new_chat_clears_everything_and_keeps_the_agent_and_mode() {
     app.agent_chat.modes = vec![("plan".into(), "Plan".into()), ("code".into(), "Code".into())];
     app.agent_chat.mode = "plan".into();
     app.agent_chat.agent_id = Some("claude".into());
-    let depth = app.session.undo.len();
+    let depth = app.session.history.len();
     assert!(!new_chat_needs_confirm(&app));
     send(&mut app, &ctx, "first".into());
     send(&mut app, &ctx, "queued".into());
@@ -1091,7 +1068,7 @@ fn new_chat_clears_everything_and_keeps_the_agent_and_mode() {
     assert_eq!(app.agent_chat.state(), State::Ready);
     assert!(app.agent_chat.items.is_empty(), "no notice about the old message");
     assert_eq!(app.agent_chat.mode, "plan", "the mode is kept");
-    assert_eq!(app.session.undo.len(), depth);
+    assert_eq!(app.session.history.len(), depth);
     assert!(!new_chat_needs_confirm(&app));
 }
 
@@ -3082,7 +3059,7 @@ fn no_tool_turn_reports_empty_reply_and_unperformed_edit() {
         let expected = tr("ui.agent_chat_no_tool_call");
         assert!(app.agent_chat.items.iter().any(|i| matches!(i, Item::Notice { text, error: false } if text == expected)), "{prompt}");
         assert_eq!(status(&app)["turnWarning"], expected);
-        assert!(app.session.undo.is_empty());
+        assert!(app.session.history.is_empty());
         start_turn(&mut app, "What is a fillet?".into(), false, None, vec![]);
         assert!(status(&app)["turnWarning"].is_null());
         assert!(app.agent_chat.items.iter().any(|i| matches!(i, Item::Notice { text, .. } if text == expected)));

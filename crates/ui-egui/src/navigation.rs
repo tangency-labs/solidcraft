@@ -1440,7 +1440,7 @@ mod tests {
                     assert!(app.viewport.orbit_free.is_none());
                     assert!(!ctx.input(|i| i.pointer.any_down()));
                     assert_eq!(app.session.doc.to_json(), design);
-                    assert!(app.session.undo.is_empty() && app.session.selection.is_empty());
+                    assert!(app.session.history.is_empty() && app.session.selection.is_empty());
                 }
             }
         }
@@ -1507,7 +1507,7 @@ mod tests {
         assert_eq!(app.cam, stopped);
         assert_eq!(app.session.doc.to_json(), design);
         assert_eq!(app.session.log.len(), log);
-        assert!(app.session.undo.is_empty() && app.session.selection.is_empty());
+        assert!(app.session.history.is_empty() && app.session.selection.is_empty());
     }
 
     #[test]
@@ -1609,7 +1609,7 @@ mod tests {
                     assert!(app.viewport.orbit_free.is_none());
                     assert_eq!(app.session.doc.to_json(), design);
                     assert_eq!(app.session.log.len(), log);
-                    assert!(app.session.undo.is_empty());
+                    assert!(app.session.history.is_empty());
                 }
             }
         }

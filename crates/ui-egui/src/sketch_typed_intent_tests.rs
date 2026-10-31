@@ -98,9 +98,9 @@ fn arc_slots_offer_typed_dimensions_and_keep_them_after_creation() {
         h.step(&json!({"move":{"world":[40,5,0]}})).unwrap();
         assert_eq!(h.app.tool.as_ref().unwrap().dims[0].label, "Width");
         type_value(&mut h, "6 mm");
-        let undo = h.app.session.undo.len();
+        let undo = h.app.session.history.len();
         enter(&mut h);
-        assert_eq!(h.app.session.undo.len(), undo + 1, "one undo step for {command}");
+        assert_eq!(h.app.session.history.len(), undo + 1, "one undo step for {command}");
         let kinds = constraints(&h);
         assert!(kinds.iter().any(|k| matches!(k, ConstraintKind::Diameter { value, .. } if (*value - 6.0).abs() < 1e-7)));
         if command == "sketch.slot.arc_center" {
@@ -123,15 +123,15 @@ fn arc_slot_invalid_width_keeps_inputs_and_click_uses_corrected_value() {
     enter(&mut h);
     h.step(&json!({"move":{"world":[0,15,0]}})).unwrap();
     type_value(&mut h, "25 mm");
-    let undo = h.app.session.undo.len();
+    let undo = h.app.session.history.len();
     enter(&mut h);
-    assert_eq!(h.app.session.undo.len(), undo);
+    assert_eq!(h.app.session.history.len(), undo);
     assert_eq!(h.app.tool.as_ref().unwrap().pts.len(), 3);
     assert_eq!(h.app.tool.as_ref().unwrap().dims[0].value, "25 mm");
     assert!(constraints(&h).is_empty());
     type_value(&mut h, "4 mm");
     h.step(&json!({"click":{"world":[30,10,0]}})).unwrap();
-    assert_eq!(h.app.session.undo.len(), undo + 1);
+    assert_eq!(h.app.session.history.len(), undo + 1);
     assert!(h.app.tool.as_ref().unwrap().pts.is_empty());
     assert!(constraints(&h).iter().any(|k| matches!(k, ConstraintKind::Diameter { value, .. } if (*value - 4.0).abs() < 1e-7)));
 }
@@ -189,12 +189,12 @@ fn polygon_radius_is_persistent_and_fractional_sides_are_rejected() {
 #[test]
 fn line_angle_survives_drag_and_one_undo_removes_geometry_and_dimensions() {
     let mut h = start("sketch.line");
-    let undo = h.app.session.undo.len();
+    let undo = h.app.session.history.len();
     type_value(&mut h, "10");
     h.step(&json!({"key":"Tab"})).unwrap();
     type_value(&mut h, "30 deg");
     enter(&mut h);
-    assert_eq!(h.app.session.undo.len(), undo + 1);
+    assert_eq!(h.app.session.history.len(), undo + 1);
     assert!(h.app.tool.as_ref().unwrap().dims.iter().all(|d| !d.locked), "next chained segment starts without stale locks");
     h.step(&json!({"key":"Escape"})).unwrap();
     h.step(&json!({"key":"Escape"})).unwrap();
@@ -206,7 +206,7 @@ fn line_angle_survives_drag_and_one_undo_removes_geometry_and_dimensions() {
     assert!((vector.len() - 10.0).abs() < 1e-6);
     assert!((vector.angle() - 30f64.to_radians()).abs() < 1e-6);
     // A drag may itself add an undo entry. Undo that before the original atomic draw.
-    while h.app.session.undo.len() > undo + 1 {
+    while h.app.session.history.len() > undo + 1 {
         h.app.run("edit.undo", json!({})).unwrap();
     }
     h.app.run("edit.undo", json!({})).unwrap();
@@ -219,13 +219,15 @@ fn typed_drawing_preserves_construction_and_centerline_modes_at_undo_limit() {
     for mode in [1, 2] {
         let mut h = start("sketch.line");
         crate::sketch_palette::set_mode(&mut h.app, mode);
-        let snapshot = h.app.session.undo.last().unwrap().clone();
-        h.app.session.undo.resize(200, snapshot);
+        let snapshot = h.app.session.history.last().unwrap().clone();
+        while h.app.session.history.len() < 200 {
+            h.app.session.history.push(snapshot.clone());
+        }
         type_value(&mut h, "10");
         h.step(&json!({"key":"Tab"})).unwrap();
         type_value(&mut h, "30 deg");
         enter(&mut h);
-        assert_eq!(h.app.session.undo.len(), 200);
+        assert_eq!(h.app.session.history.len(), 200);
         let state = h.app.session.world_state();
         let sketch = &state.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
         assert_eq!(sketch.curves[0].construction, mode == 1);

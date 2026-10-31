@@ -152,7 +152,7 @@ fn material_selector_clicking_the_suggested_material_preserves_that_choice_for_n
     h.app.run("material.assign", json!({"bodies":["Other"],"material":"Steel"})).unwrap();
     h.app.session.selection = vec![Sel::Body { name: "Body1".into() }];
     let doc = h.app.session.doc.clone();
-    let history = (h.app.session.undo.len(), h.app.session.redo.len());
+    let history = (h.app.session.history.len(), h.app.session.history.redo_steps().len());
     h.app.start("material.assign");
     h.frames(3);
     assert!(h.widget("Density: 2.7 g/cm³").is_some());
@@ -167,7 +167,7 @@ fn material_selector_clicking_the_suggested_material_preserves_that_choice_for_n
     assert_eq!(commands[0].1["bodies"], json!(["Other"]));
     h.step(&json!({"click":{"handle":"dialog:cancel"}})).unwrap();
     assert!(std::sync::Arc::ptr_eq(&doc, &h.app.session.doc));
-    assert_eq!(history, (h.app.session.undo.len(), h.app.session.redo.len()));
+    assert_eq!(history, (h.app.session.history.len(), h.app.session.history.redo_steps().len()));
 }
 
 #[test]
@@ -188,11 +188,11 @@ fn material_selector_mixed_targets_show_a_placeholder_and_cannot_confirm_until_c
     h.frames(2);
     assert_eq!(scenario::count_of("dialog:ok:enabled"), Some(1.0));
     assert!(std::sync::Arc::ptr_eq(&before, &h.app.session.doc));
-    let undo = h.app.session.undo.len();
+    let undo = h.app.session.history.len();
     h.step(&json!({"click":{"handle":"dialog:ok"}})).unwrap();
     assert_eq!(h.app.session.doc.body_material("Body1"), "Copper");
     assert_eq!(h.app.session.doc.body_material("Other"), "Copper");
-    assert_eq!(h.app.session.undo.len(), undo + 1);
+    assert_eq!(h.app.session.history.len(), undo + 1);
     h.app.run("edit.undo", json!({})).unwrap();
     assert_eq!(h.app.session.doc.materials, before.materials);
 }
@@ -208,7 +208,7 @@ fn physical_material_panel_reviews_saved_si_card_without_changing_the_design() {
     h.app.run("material.assign", json!({"bodies":["Body1"],"material":"Saved candidate"})).unwrap();
     let mass = h.app.run("component.properties", json!({})).unwrap();
     let doc = h.app.session.doc.clone();
-    let before = (h.app.session.undo.len(), h.app.session.redo.len());
+    let before = (h.app.session.history.len(), h.app.session.history.redo_steps().len());
     h.app.start("material.assign");
     let selected = h.app.session.doc.material_names().iter().position(|name| name == "Saved candidate").unwrap();
     let dialogs::Kind::Material { index, .. } = &mut h.app.dialog.as_mut().unwrap().kind else { panic!("physical-material panel missing") };
@@ -227,7 +227,7 @@ fn physical_material_panel_reviews_saved_si_card_without_changing_the_design() {
     assert!(h.app.material_card_review.is_none(), "saved properties share the existing physical-material panel");
     h.step(&json!({"click":{"handle":"dialog:cancel"}})).unwrap();
     assert!(std::sync::Arc::ptr_eq(&doc, &h.app.session.doc));
-    assert_eq!(before, (h.app.session.undo.len(), h.app.session.redo.len()));
+    assert_eq!(before, (h.app.session.history.len(), h.app.session.history.redo_steps().len()));
     assert_eq!(revision, h.app.session.revision);
     assert_eq!(h.app.run("component.properties", json!({})).unwrap(), mass);
 }
@@ -342,7 +342,7 @@ fn parameters_are_dense_and_keep_inline_edits_order_and_undo() {
 #[test]
 fn material_review_is_dense_and_cancel_keeps_history() {
     let mut h = fixture();
-    let before = (h.app.session.doc.clone(), h.app.session.undo.len());
+    let before = (h.app.session.doc.clone(), h.app.session.history.len());
     h.app.start("material.properties.validate");
     h.frames(3);
     chrome(&h);
@@ -350,7 +350,7 @@ fn material_review_is_dense_and_cancel_keeps_history() {
     h.step(&json!({"click":{"handle":"dialog:cancel"}})).unwrap();
     assert!(h.app.material_card_review.is_none());
     assert!(std::sync::Arc::ptr_eq(&before.0, &h.app.session.doc));
-    assert_eq!(before.1, h.app.session.undo.len());
+    assert_eq!(before.1, h.app.session.history.len());
 }
 
 #[test]
@@ -723,7 +723,7 @@ fn physical_material_clicked_save_then_cancel_persists_without_assigning_or_chan
     h.app.run("material.assign", json!({"bodies":["Body1"],"material":"Steel"})).unwrap();
     let assignments = h.app.session.doc.materials.clone();
     let mass = h.app.run("component.properties", json!({})).unwrap();
-    let history = h.app.session.undo.len();
+    let history = h.app.session.history.len();
     h.app.start("material.assign");
     h.frames(3);
     h.step(&json!({"click":{"handle":"material:new"}})).unwrap();
@@ -734,7 +734,7 @@ fn physical_material_clicked_save_then_cancel_persists_without_assigning_or_chan
     physical_type(&mut h, "density", "0.8123456789012345");
     h.step(&json!({"click":{"handle":"material:save"}})).unwrap();
     assert!(!physical_editor(&mut h).editing());
-    assert_eq!(h.app.session.undo.len(), history + 1);
+    assert_eq!(h.app.session.history.len(), history + 1);
     assert_eq!(h.app.session.doc.user_material("Unassigned authored material").unwrap().density, 0.8123456789012345);
     assert!(h.app.session.doc.user_material("Unassigned authored material").unwrap().physical_card.is_none());
     h.step(&json!({"click":{"handle":"dialog:cancel"}})).unwrap();
@@ -754,7 +754,7 @@ fn physical_material_clicked_save_then_cancel_persists_without_assigning_or_chan
 fn physical_material_discard_and_invalid_save_leave_document_and_history_unchanged() {
     let mut h = fixture();
     let doc = h.app.session.doc.clone();
-    let history = (h.app.session.undo.len(), h.app.session.redo.len());
+    let history = (h.app.session.history.len(), h.app.session.history.redo_steps().len());
     h.app.start("material.assign");
     h.frames(3);
     let revision = h.app.session.revision;
@@ -764,13 +764,13 @@ fn physical_material_discard_and_invalid_save_leave_document_and_history_unchang
     h.step(&json!({"click":{"handle":"material:save"}})).unwrap();
     assert!(physical_editor(&mut h).editing());
     assert!(std::sync::Arc::ptr_eq(&doc, &h.app.session.doc));
-    assert_eq!(history, (h.app.session.undo.len(), h.app.session.redo.len()));
+    assert_eq!(history, (h.app.session.history.len(), h.app.session.history.redo_steps().len()));
     assert_eq!(revision, h.app.session.revision);
     h.step(&json!({"click":{"handle":"material:discard"}})).unwrap();
     assert!(!physical_editor(&mut h).editing());
     h.step(&json!({"click":{"handle":"dialog:cancel"}})).unwrap();
     assert!(std::sync::Arc::ptr_eq(&doc, &h.app.session.doc));
-    assert_eq!(history, (h.app.session.undo.len(), h.app.session.redo.len()));
+    assert_eq!(history, (h.app.session.history.len(), h.app.session.history.redo_steps().len()));
     assert_eq!(revision, h.app.session.revision);
 }
 
@@ -832,9 +832,9 @@ fn physical_material_editor_preserves_all_sources_conditions_anisotropy_and_pbr_
     // The full form scrolls; command preparation is the same Save operation tested by clicking above.
     let mut dialog = h.app.dialog.take().unwrap();
     let dialogs::Kind::Material { index, editor } = &mut dialog.kind else { panic!("physical material") };
-    let history = h.app.session.undo.len();
+    let history = h.app.session.history.len();
     editor.save(&mut h.app, index).unwrap();
-    assert_eq!(h.app.session.undo.len(), history + 1);
+    assert_eq!(h.app.session.history.len(), history + 1);
     h.app.dialog = Some(dialog);
     dialogs::cancel(&mut h.app);
     let saved = h.app.session.doc.user_material("Renamed complete substrate").unwrap();
@@ -895,8 +895,8 @@ fn physical_material_draft_rejects_invalid_constants_and_stale_edits_atomically(
     assert!(invalid.command(&h.app.session.doc).is_err(), "missing values must not become invented zeroes");
     h.app.run("material.edit", json!({"material":"Shared substrate","density_g_cm3":0.9})).unwrap();
     let before = h.app.session.doc.clone();
-    let history = (h.app.session.undo.len(), h.app.session.redo.len(), h.app.session.revision);
+    let history = (h.app.session.history.len(), h.app.session.history.redo_steps().len(), h.app.session.revision);
     assert!(editor.save(&mut h.app, &mut 0).is_err());
     assert!(std::sync::Arc::ptr_eq(&before, &h.app.session.doc));
-    assert_eq!(history, (h.app.session.undo.len(), h.app.session.redo.len(), h.app.session.revision));
+    assert_eq!(history, (h.app.session.history.len(), h.app.session.history.redo_steps().len(), h.app.session.revision));
 }

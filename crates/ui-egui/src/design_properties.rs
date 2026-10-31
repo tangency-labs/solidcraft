@@ -460,7 +460,7 @@ mod tests {
         h.app.run("document.metadata.set", json!({"values": {"author": "Jane", "com.acme.tool": {"id": 7}}})).unwrap();
         // A well-known key another tool saved as a number.
         h.app.session.doc_mut().metadata.0.insert("revision".into(), json!(3));
-        let undo = h.app.session.undo.len();
+        let undo = h.app.session.history.len();
         h.step(&json!({"start": "document.metadata.set"})).unwrap();
         assert!(h.app.design_properties.is_some(), "ui.start opens the window, it doesn't run the command");
         assert!(h.widget("Jane").is_some(), "the author's field");
@@ -477,7 +477,7 @@ mod tests {
         assert_eq!(m.author(), None, "an emptied field removes the key");
         assert_eq!(m.get("revision"), Some(&json!(3)), "an untouched field keeps what another tool saved");
         assert_eq!(m.get("com.acme.tool"), Some(&json!({"id": 7})));
-        assert_eq!(h.app.session.undo.len(), undo + 1, "one undo step");
+        assert_eq!(h.app.session.history.len(), undo + 1, "one undo step");
 
         // Cancel changes nothing; a refused value keeps the window open with the reason.
         h.step(&json!({"start": "document.metadata"})).unwrap();
@@ -492,7 +492,7 @@ mod tests {
         h.step(&json!({"widget": "OK"})).unwrap();
         let d = h.app.design_properties.as_ref().expect("still open");
         assert!(d.error.as_deref().is_some_and(|e| e.contains("control character")), "{:?}", d.error);
-        assert_eq!(h.app.session.undo.len(), undo + 1);
+        assert_eq!(h.app.session.history.len(), undo + 1);
     }
 
     #[test]

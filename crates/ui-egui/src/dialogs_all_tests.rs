@@ -997,7 +997,7 @@ fn viewport_profile_click_returns_extrude_value_focus() {
 #[test]
 fn a_dialog_field_typed_as_a_definition_defines_the_parameter() {
     let mut h = extrude_focus_fixture();
-    let undo = h.app.session.undo.len();
+    let undo = h.app.session.history.len();
     // As above: the first click returns focus to the distance, the second picks the profile.
     h.step(&json!({"click":{"world":[15,10,0]}})).unwrap();
     h.step(&json!({"text":"30"})).unwrap();
@@ -1014,7 +1014,7 @@ fn a_dialog_field_typed_as_a_definition_defines_the_parameter() {
     assert!(!depth.model && depth.expr == "30" && depth.unit == "mm", "{depth:?}");
     let extrude = doc.features.iter().rev().find(|f| f.name.starts_with("Extrude")).unwrap();
     assert!(extrude.kind.inputs().iter().any(|(label, e, _)| *label == "Distance" && e == "depth"), "{:?}", extrude.kind.inputs());
-    assert_eq!(h.app.session.undo.len(), undo + 1, "one undo step");
+    assert_eq!(h.app.session.history.len(), undo + 1, "one undo step");
     let bounds = h.app.session.world_state().bodies.first().unwrap().mesh().bounds();
     assert!((bounds.max.z - bounds.min.z - 30.0).abs() < 1e-7);
 }

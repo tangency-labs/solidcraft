@@ -20,7 +20,7 @@ fn extrude(distance: i32) -> Vec<(String, Value)> {
 
 fn check_drag(s: &Session, commands: impl Fn(i32) -> Vec<(String, Value)>, base_z: f64) {
     let original = serde_json::to_value(&*s.doc).unwrap();
-    let undo = s.undo.len();
+    let undo = s.history.len();
     let mut pv = PreviewState::default();
     for (finished, wanted) in [(10, 20), (20, 30), (30, 30)] {
         let old = commands(finished);
@@ -41,7 +41,7 @@ fn check_drag(s: &Session, commands: impl Fn(i32) -> Vec<(String, Value)>, base_
         assert!(pv.running.is_none());
     }
     assert_eq!(serde_json::to_value(&*s.doc).unwrap(), original);
-    assert_eq!(s.undo.len(), undo);
+    assert_eq!(s.history.len(), undo);
 }
 
 #[test]

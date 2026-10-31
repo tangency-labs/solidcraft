@@ -2304,12 +2304,12 @@ fn placements_of_one_part_moved_together_each_go_the_way_asked() {
     let mut s = Session::default();
     let (a, b) = twice_placed_blade(&mut s);
     let (a0, b0) = (placed_bounds(&s, &a), placed_bounds(&s, &b));
-    let undo = s.undo.len();
+    let undo = s.history.len();
     let r = run(&mut s, "solid.move", json!({"bodies": [a.clone(), b.clone()], "translate": ["240 mm", "-100 mm", "0 mm"]}));
     assert_eq!(r["placements"].as_array().map(Vec::len), Some(2), "{r}");
     assert!(shifted(a0, placed_bounds(&s, &a), [240.0, -100.0, 0.0]), "{a}: {:?}", placed_bounds(&s, &a));
     assert!(shifted(b0, placed_bounds(&s, &b), [240.0, -100.0, 0.0]), "{b}: {:?}", placed_bounds(&s, &b));
-    assert_eq!(s.undo.len(), undo + 1, "one undo step");
+    assert_eq!(s.history.len(), undo + 1, "one undo step");
     run(&mut s, "edit.undo", json!({}));
     assert!(shifted(a0, placed_bounds(&s, &a), [0.0; 3]) && shifted(b0, placed_bounds(&s, &b), [0.0; 3]), "undone");
     // A quarter turn about Z moves each placement about the world origin, as Move turns a body.

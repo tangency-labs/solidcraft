@@ -29,9 +29,9 @@ fn measure(s: &Session, kind: fn(&ConstraintKind) -> bool) -> f64 {
 fn typed_line_angle_survives_quadrants_move_reopen_and_one_undo() {
     let mut s = session();
     run(&mut s, "parameters.add", json!({"name":"heading","expression":"-45 deg","unit":"deg"}));
-    let undo = s.undo.len();
+    let undo = s.history.len();
     let out = draw(&mut s, "sketch.line", json!({"points":[[0,0],[10,0]],"infer":true}), json!({"length":"10 mm","angle":"heading"}));
-    assert_eq!(s.undo.len(), undo + 1);
+    assert_eq!(s.history.len(), undo + 1);
     assert!(!sketch(&s).constraints.iter().any(|c| matches!(c.kind, ConstraintKind::Horizontal { .. } | ConstraintKind::Vertical { .. })));
     close(measure(&s, |k| matches!(k, ConstraintKind::LineAngle { .. })), -45f64.to_radians());
     for degrees in [135.0_f64, 270.0, -135.0, 0.0, 90.0] {
@@ -180,7 +180,7 @@ fn arc_slot_dimensions_survive_parameter_edits_and_reopening() {
 fn invalid_dimensioned_shapes_are_atomic_including_late_constraint_failure() {
     let mut s = session();
     let before = serde_json::to_value(&*s.doc).unwrap();
-    let history = s.undo.len();
+    let history = s.history.len();
     for params in [
         json!({"command":"edit.undo","params":{},"dimensions":{}}),
         json!({"command":"sketch.line","params":{"points":[[0,0],[10,0]]},"dimensions":{"length":"missing+1"}}),
@@ -196,25 +196,25 @@ fn invalid_dimensioned_shapes_are_atomic_including_late_constraint_failure() {
             run(&mut s, "sketch.constraint.fix", json!({"entity":"p1","fixed":true}));
         }
         let snapshot = serde_json::to_value(&*s.doc).unwrap();
-        let undo = s.undo.len();
+        let undo = s.history.len();
         // Preserve a live redo branch, which scratch-only dimension failure must not consume.
         run(&mut s, "sketch.point", json!({"point":[100,100]}));
         run(&mut s, "edit.undo", json!({}));
         s.selection = vec![crate::Sel::SketchPoint { id: "origin".into() }];
-        let redo = s.redo.len();
+        let redo = s.history.redo_steps().len();
         let selection = s.selection.clone();
         let pending = s.pending_moves.clone();
         let active = (s.active_sketch, s.active_component, s.active_occurrence_path.clone());
         assert!(s.execute("sketch.draw.dimensioned", &params).is_err(), "{params}");
         assert_eq!(serde_json::to_value(&*s.doc).unwrap(), snapshot);
-        assert_eq!(s.undo.len(), undo);
-        assert_eq!(s.redo.len(), redo);
+        assert_eq!(s.history.len(), undo);
+        assert_eq!(s.history.redo_steps().len(), redo);
         assert_eq!(s.selection, selection);
         assert_eq!(s.pending_moves, pending);
         assert_eq!((s.active_sketch, s.active_component, s.active_occurrence_path.clone()), active);
     }
     assert_eq!(before["features"].as_array().unwrap().len(), 1);
-    assert!(s.undo.len() >= history);
+    assert!(s.history.len() >= history);
 }
 
 #[test]
@@ -276,9 +276,9 @@ fn driving(s: &Session, kind: fn(&ConstraintKind) -> bool) -> String {
 fn a_typed_definition_defines_the_parameter_that_drives_the_dimension() {
     let is_diameter = |k: &ConstraintKind| matches!(k, ConstraintKind::Diameter { .. });
     let mut s = session();
-    let undo = s.undo.len();
+    let undo = s.history.len();
     let out = draw(&mut s, "sketch.circle.center", json!({"center":[0,0],"radius":3}), json!({"diameter":"width = 20"}));
-    assert_eq!(s.undo.len(), undo + 1);
+    assert_eq!(s.history.len(), undo + 1);
     assert_eq!(out["defined"], json!(["width"]), "{out}");
     close(measure(&s, is_diameter), 20.0);
     let width = s.doc.param("width").unwrap();
@@ -333,11 +333,11 @@ fn a_refused_typed_definition_changes_nothing() {
         (rect("w = 30", "h = w / 2"), ""),
     ] {
         let snapshot = serde_json::to_value(&*s.doc).unwrap();
-        let undo = s.undo.len();
+        let undo = s.history.len();
         let error = s.execute("sketch.draw.dimensioned", &params).expect_err(&params.to_string()).to_string();
         assert!(error.contains(says), "{params}: {error}");
         assert_eq!(serde_json::to_value(&*s.doc).unwrap(), snapshot, "{params}");
-        assert_eq!(s.undo.len(), undo);
+        assert_eq!(s.history.len(), undo);
     }
 }
 
@@ -380,9 +380,9 @@ fn as_drawn_dimensions_every_size_of_every_creator_where_it_was_drawn() {
         let mut plain = session();
         run(&mut plain, creator, params.clone());
         let mut s = session();
-        let undo = s.undo.len();
+        let undo = s.history.len();
         let out = run(&mut s, "sketch.draw.dimensioned", json!({"command":creator,"params":params,"as_drawn":true}));
-        assert_eq!(s.undo.len(), undo + 1, "{creator}: one undo step");
+        assert_eq!(s.history.len(), undo + 1, "{creator}: one undo step");
         let placed = out["dimensions"].as_object().unwrap();
         for role in super::dimension_roles(creator).unwrap() {
             let alternative = super::ALTERNATIVES.iter().find(|pair| pair.contains(role)).and_then(|pair| pair.iter().find(|r| r != &role));
@@ -478,10 +478,10 @@ fn locate_fully_constrains_every_creator_where_it_was_drawn() {
             let mut plain = session();
             run(&mut plain, creator, params.clone());
             let mut s = session();
-            let undo = s.undo.len();
+            let undo = s.history.len();
             let out = run(&mut s, "sketch.draw.dimensioned", json!({"command":creator,"params":params,"as_drawn":true,"locate":true}));
             assert_eq!(dof(&mut s), 0, "{creator} {params}: not fully constrained; located {}", out["located"]);
-            assert_eq!(s.undo.len(), undo + 1, "{creator}: one undo step");
+            assert_eq!(s.history.len(), undo + 1, "{creator}: one undo step");
             for ((x, y), (px, py)) in points(&s).into_iter().zip(points(&plain)) {
                 assert!((x - px).abs() < 1e-5 && (y - py).abs() < 1e-5, "{creator} {params}: moved from ({px}, {py}) to ({x}, {y})");
             }

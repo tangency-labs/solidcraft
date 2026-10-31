@@ -590,7 +590,7 @@ fn compact_layout_is_saved_and_survives_cancel_apply_defaults_and_bad_input() {
     h.app.start("solid.extrude");
     h.settle();
     let design = h.app.session.doc.to_json();
-    let undo = h.app.session.undo.len();
+    let undo = h.app.session.history.len();
     let camera = h.app.cam;
     h.call("ui.prefs", json!({"open":"Interface"}));
     crate::prefs::reveal_preference(&mut h, "dialog:Workspace:Compact");
@@ -604,7 +604,7 @@ fn compact_layout_is_saved_and_survives_cancel_apply_defaults_and_bad_input() {
     h.call("engine.execute", json!({"command":"view.layout", "params":{"mode":"compact"}}));
     assert_eq!(h.app.cam, camera, "programmatic layout changes never auto-fit");
     assert_eq!(h.app.session.doc.to_json(), design);
-    assert_eq!(h.app.session.undo.len(), undo);
+    assert_eq!(h.app.session.history.len(), undo);
     let mut restored = crate::SolveApp::new(Default::default(), Default::default());
     restored.load_prefs(&h.app.prefs());
     assert_eq!(restored.ui.layout, LayoutMode::Docked);
@@ -1093,7 +1093,7 @@ fn status_bar_units_open_the_units_menu_above_the_bar_and_change_units_in_one_un
     h.call("ui.prefs", json!({"status_bar": true}));
     h.app.run("solid.box", json!({"length":40,"width":30,"height":20})).unwrap();
     h.settle();
-    let undo = h.app.session.undo.len();
+    let undo = h.app.session.history.len();
     let button = rect_of("status:units").unwrap();
     assert!(rect_of("status:bar").unwrap().contains_rect(button));
     h.step(&json!({"click":{"handle":"status:units"}})).unwrap();
@@ -1107,11 +1107,11 @@ fn status_bar_units_open_the_units_menu_above_the_bar_and_change_units_in_one_un
     // The list opens above the bar, inside the window.
     let list = h.ctx.memory(|m| m.area_rect(egui::Id::new("sc_context_menu"))).unwrap();
     assert!(list.bottom() <= button.top() + 0.5 && list.top() >= 0.0, "{list:?} {button:?}");
-    assert_eq!(h.app.session.undo.len(), undo, "opening the menu changes nothing");
+    assert_eq!(h.app.session.history.len(), undo, "opening the menu changes nothing");
     h.call("ui.menuPick", json!({"item":"in"}));
     h.settle();
     assert_eq!(h.app.session.doc.units, "in");
-    assert_eq!(h.app.session.undo.len(), undo + 1);
+    assert_eq!(h.app.session.history.len(), undo + 1);
     assert!(h.app.viewport.context_menu.is_none());
     assert_eq!(crate::status_bar::contents(&h.app).units, "in");
     h.app.run("edit.undo", json!({})).unwrap();
@@ -1135,7 +1135,7 @@ fn status_bar_mouse_mapping_opens_the_mappings_and_picks_one_as_the_preferences_
     h.app.run("solid.box", json!({"length":40,"width":30,"height":20})).unwrap();
     h.settle();
     let doc = h.app.session.doc.to_json();
-    let undo = h.app.session.undo.len();
+    let undo = h.app.session.history.len();
     let button = rect_of("status:navigation").unwrap();
     assert!(rect_of("status:bar").unwrap().contains_rect(button));
     assert!(button.right() < rect_of("status:units").unwrap().left(), "the mapping sits left of the units");
@@ -1166,7 +1166,7 @@ fn status_bar_mouse_mapping_opens_the_mappings_and_picks_one_as_the_preferences_
         assert_eq!(crate::status_bar::contents(&h.app).navigation, preset.translated_label());
     }
     assert_eq!(h.app.session.doc.to_json(), doc, "a preference, not a design edit");
-    assert_eq!(h.app.session.undo.len(), undo);
+    assert_eq!(h.app.session.history.len(), undo);
     // An unknown mapping changes nothing.
     let before = serde_json::to_value(&h.app.preferences).unwrap();
     let hostile = crate::context_menu::Item::action("ui.navPreset", "Nope", "").with(json!({"preset": "nope"}));

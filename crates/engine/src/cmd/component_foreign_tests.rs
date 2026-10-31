@@ -44,9 +44,9 @@ fn a_component_from_another_design_pastes_with_its_history() {
     created(&mut s, "Assembly");
     run(&mut s, "component.activate", json!({"component": 0}));
     s.foreign_copy = copied(&source, vec![at]);
-    let undo = s.undo.len();
+    let undo = s.history.len();
     let out = run(&mut s, "component.paste_from_design", json!({}));
-    assert_eq!(s.undo.len(), undo + 1);
+    assert_eq!(s.history.len(), undo + 1);
     let new = s.doc.components.iter().find(|c| c.name == "Assembly (2)").expect("named (2)").id;
     assert_eq!(out["paths"], json!([[s.doc.occurrence_of(new).unwrap().id]]));
     let kids: Vec<_> = s.doc.occurrences.iter().filter(|o| o.parent == new).collect();

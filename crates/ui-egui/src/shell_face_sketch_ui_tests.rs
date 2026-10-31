@@ -54,11 +54,11 @@ fn assert_one_physical_wall(h: &mut Harness) -> usize {
 fn selected_shell_wall_patch_still_creates_a_certified_sketch() {
     let mut h = shell();
     assert_one_physical_wall(&mut h);
-    let undo = h.app.session.undo.len();
+    let undo = h.app.session.history.len();
     h.step(&json!({"start":"sketch.create"})).unwrap();
     h.settle();
     assert_attached(&h);
-    assert_eq!(h.app.session.undo.len(), undo + 1);
+    assert_eq!(h.app.session.history.len(), undo + 1);
 }
 
 #[test]
@@ -67,13 +67,13 @@ fn pending_create_sketch_accepts_an_actual_shell_wall_patch_click() {
     assert_one_physical_wall(&mut h);
     h.call("ui.click", json!({"x":300,"y":200}));
     assert!(h.app.session.selection.is_empty());
-    let undo = h.app.session.undo.len();
+    let undo = h.app.session.history.len();
     h.step(&json!({"start":"sketch.create"})).unwrap();
     assert!(h.app.session.active_sketch.is_none());
     h.step(&json!({"click":{"world":[20,0,1]}})).unwrap();
     h.settle();
     assert_attached(&h);
-    assert_eq!(h.app.session.undo.len(), undo + 1);
+    assert_eq!(h.app.session.history.len(), undo + 1);
 }
 
 #[test]
@@ -89,8 +89,8 @@ fn rounded_shell_corner_is_one_physical_face_above_and_below_the_floor() {
     let state = h.app.session.world_state();
     assert_eq!(state.body("Case").unwrap().body.face_count(), 19, "no artificial lower corner faces remain in the BRep");
     let document = h.app.session.doc.to_json();
-    let undo = h.app.session.undo.len();
-    let redo = h.app.session.redo.len();
+    let undo = h.app.session.history.len();
+    let redo = h.app.session.history.redo_steps().len();
     h.step(&json!({"click":{"world":[38.242640687,-28.242640687,1]}})).unwrap();
     let lower = selected_wall(&h);
     h.call("ui.click", json!({"x":300,"y":200}));
@@ -98,6 +98,6 @@ fn rounded_shell_corner_is_one_physical_face_above_and_below_the_floor() {
     h.step(&json!({"click":{"world":[38.242640687,-28.242640687,15]}})).unwrap();
     assert_eq!(selected_wall(&h), lower, "lower and upper corner clicks hit the same actual face, not two grouped pieces");
     assert_eq!(h.app.session.doc.to_json(), document);
-    assert_eq!(h.app.session.undo.len(), undo);
-    assert_eq!(h.app.session.redo.len(), redo);
+    assert_eq!(h.app.session.history.len(), undo);
+    assert_eq!(h.app.session.history.redo_steps().len(), redo);
 }

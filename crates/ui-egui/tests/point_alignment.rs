@@ -30,19 +30,19 @@ fn horizontal_vertical_uses_preselected_line_and_preserves_rejection() {
         assert_eq!(h.app.session.selection.len(), 1);
         let selection = h.app.session.selection.clone();
         let before = serde_json::to_value(&h.app.session.doc).unwrap();
-        let undo = h.app.session.undo.len();
+        let undo = h.app.session.history.len();
         h.run(&json!([{"start":"sketch.constraint.horizontal_vertical"}])).unwrap();
         assert_eq!(h.app.status.as_ref().is_some_and(|(_, _, error)| *error), fixed);
         if fixed {
             assert_eq!(serde_json::to_value(&h.app.session.doc).unwrap(), before);
             assert_eq!(h.app.session.selection, selection);
-            assert_eq!(h.app.session.undo.len(), undo);
+            assert_eq!(h.app.session.history.len(), undo);
         } else {
             let sk = &h.app.session.model.state().sketches[0].sketch;
             let a = sk.point(sk.resolve_point("l1.start").unwrap()).unwrap();
             let b = sk.point(sk.resolve_point("l1.end").unwrap()).unwrap();
             assert!((a.y - b.y).abs() < 1e-6);
-            assert_eq!(h.app.session.undo.len(), undo + 1);
+            assert_eq!(h.app.session.history.len(), undo + 1);
             assert!(h.app.session.selection.is_empty());
         }
         assert!(h.app.tool.is_none());
@@ -65,10 +65,10 @@ fn horizontal_vertical_leaves_ambiguous_preselection_to_pick_tool() {
         h.app.session.execute("sketch.create", &json!({"plane":"XY"})).unwrap();
         h.app.session.execute("sketch.circle.center", &json!({"center":[20,3],"radius":5})).unwrap();
         h.app.session.selection = selection.clone();
-        let undo = h.app.session.undo.len();
+        let undo = h.app.session.history.len();
         h.run(&json!([{"start":"sketch.constraint.horizontal_vertical"}])).unwrap();
         assert!(h.app.tool.as_ref().unwrap().point_picks.is_empty());
-        assert_eq!(h.app.session.undo.len(), undo);
+        assert_eq!(h.app.session.history.len(), undo);
         assert_eq!(h.app.session.selection, selection);
         assert!(!h.app.status.as_ref().is_some_and(|(_, _, error)| *error));
     }
@@ -90,7 +90,7 @@ fn horizontal_vertical_uses_preselected_points() {
             .unwrap();
             assert_eq!(h.app.session.selection.len(), 2);
             let before = serde_json::to_value(&h.app.session.doc).unwrap();
-            let undo = h.app.session.undo.len();
+            let undo = h.app.session.history.len();
             h.run(&json!([{"start":"sketch.constraint.horizontal_vertical"}])).unwrap();
             assert!(!h.app.status.as_ref().is_some_and(|(_, _, error)| *error));
             let sk = &h.app.session.model.state().sketches[0].sketch;
@@ -98,7 +98,7 @@ fn horizontal_vertical_uses_preselected_points() {
             assert!((if center[0] > center[1] { p.y } else { p.x }).abs() < 1e-6);
             assert!(h.app.tool.is_none());
             assert!(h.app.session.selection.is_empty());
-            assert_eq!(h.app.session.undo.len(), undo + 1);
+            assert_eq!(h.app.session.history.len(), undo + 1);
             let after = serde_json::to_value(&h.app.session.doc).unwrap();
             h.app.session.execute("edit.undo", &json!({})).unwrap();
             assert_eq!(serde_json::to_value(&h.app.session.doc).unwrap(), before);
@@ -121,11 +121,11 @@ fn horizontal_vertical_aligns_origin_and_circle_center() {
             ]))
             .unwrap();
             let (first, second) = if origin_first { ([0.0, 0.0], center) } else { (center, [0.0, 0.0]) };
-            let undo = h.app.session.undo.len();
+            let undo = h.app.session.history.len();
             h.run(&json!([{"click":{"sketch":first}}, {"expect":{"errors":0}}])).unwrap();
             assert_eq!(h.app.tool.as_ref().unwrap().point_picks.len(), 1);
             assert!(!h.app.status.as_ref().is_some_and(|(_, _, error)| *error));
-            assert_eq!(h.app.session.undo.len(), undo);
+            assert_eq!(h.app.session.history.len(), undo);
             // Repeating the first point must not complete a self-constraint.
             h.run(&json!([{"click":{"sketch":first}}, {"click":{"sketch":second}}, {"expect":{"errors":0}}])).unwrap();
             let aligned = |h: &Harness| {
@@ -140,7 +140,7 @@ fn horizontal_vertical_aligns_origin_and_circle_center() {
             } else {
                 matches!(c.kind, ConstraintKind::VerticalPoints { .. })
             }));
-            assert_eq!(h.app.session.undo.len(), undo + 1);
+            assert_eq!(h.app.session.history.len(), undo + 1);
             assert!(h.app.tool.as_ref().unwrap().point_picks.is_empty());
             h.run(&json!([{"call":"engine.execute","params":{"command":"edit.undo","params":{}}}])).unwrap();
             assert!((aligned(&h) - 3.0).abs() < 1e-6);
@@ -182,12 +182,12 @@ fn horizontal_vertical_ignores_curves_and_cancels_a_pending_point() {
     .unwrap();
     assert!(h.app.tool.as_ref().unwrap().point_picks.is_empty());
     assert!(!h.app.status.as_ref().is_some_and(|(_, _, error)| *error));
-    let undo = h.app.session.undo.len();
+    let undo = h.app.session.history.len();
     h.run(&json!([{"click":{"sketch":[0,0]}}, {"click":{"sketch":[25,3]}}])).unwrap();
     assert_eq!(h.app.tool.as_ref().unwrap().point_picks.len(), 1);
     h.run(&json!([{"key":"Escape"}])).unwrap();
     assert!(h.app.tool.is_none());
-    assert_eq!(h.app.session.undo.len(), undo);
+    assert_eq!(h.app.session.history.len(), undo);
     let sk = &h.app.session.model.state().sketches[0].sketch;
     let p = sk.point(sk.resolve_point("c1.center").unwrap()).unwrap();
     assert!((p.y - 3.0).abs() < 1e-6);
@@ -207,7 +207,7 @@ fn shift_picks_midpoint_in_either_order_and_persists_ordinary_constraints() {
             h.frames(3);
             h.step(&json!({"start":"sketch.constraint.horizontal_vertical"})).unwrap();
             let before = h.app.session.doc.to_json();
-            let undo = h.app.session.undo.len();
+            let undo = h.app.session.history.len();
             h.step(&json!({"move":{"sketch":[20,15]},"shift":true})).unwrap();
             assert_eq!(h.app.tool.as_ref().unwrap().hover.as_ref().unwrap().1.as_deref(), Some("Midpoint"));
             let midpoint = json!({"click":{"sketch":[20,15]},"shift":true});
@@ -216,11 +216,11 @@ fn shift_picks_midpoint_in_either_order_and_persists_ordinary_constraints() {
             h.step(first).unwrap();
             h.step(first).unwrap();
             assert_eq!(h.app.tool.as_ref().unwrap().point_picks.len(), 1);
-            assert_eq!(h.app.session.undo.len(), undo);
+            assert_eq!(h.app.session.history.len(), undo);
             h.step(second).unwrap();
             assert!(!h.app.status.as_ref().is_some_and(|(_, _, error)| *error), "{:?}", h.app.status);
             assert!(h.app.tool.as_ref().unwrap().point_picks.is_empty());
-            assert_eq!(h.app.session.undo.len(), undo + 1);
+            assert_eq!(h.app.session.history.len(), undo + 1);
             let sk = &h.app.session.model.state().sketches[0].sketch;
             assert_eq!(sk.points.len(), 5);
             assert_eq!(sk.curves.len(), 2);
@@ -342,12 +342,12 @@ fn conflicting_midpoint_pick_keeps_pending_preview_without_creating_geometry() {
     h.frames(3);
     h.step(&json!({"start":"sketch.constraint.horizontal_vertical"})).unwrap();
     let before = h.app.session.doc.to_json();
-    let undo = h.app.session.undo.len();
+    let undo = h.app.session.history.len();
     h.step(&json!({"click":{"sketch":[20,15]},"shift":true})).unwrap();
     h.step(&json!({"click":{"sketch":[24,50]}})).unwrap();
     assert!(h.app.status.as_ref().is_some_and(|(_, _, error)| *error));
     assert_eq!(h.app.session.doc.to_json(), before);
-    assert_eq!(h.app.session.undo.len(), undo);
+    assert_eq!(h.app.session.history.len(), undo);
     assert_eq!(h.app.tool.as_ref().unwrap().point_picks, vec![json!({"midpoint":"l1"})]);
     h.step(&json!({"key":"Escape"})).unwrap();
     assert!(h.app.tool.is_none());
@@ -373,7 +373,7 @@ fn context_menu_explicitly_aligns_two_points_and_removes_one_freedom() {
                 let pair = if reverse { [second, first] } else { [first, second] };
                 h.app.session.selection = pair.into_iter().map(|id| Sel::SketchPoint { id: id.into() }).collect();
                 let before = h.app.session.doc.to_json();
-                let undo = h.app.session.undo.len();
+                let undo = h.app.session.history.len();
                 let dof = h.app.session.model.state().sketches[0].report.dof;
                 let items = context_menu::items(&h.app, &Target::Viewport);
                 let horizontal_item = items.iter().find(|i| i.id == "ui.horizontalConstraint").unwrap();
@@ -391,7 +391,7 @@ fn context_menu_explicitly_aligns_two_points_and_removes_one_freedom() {
                 let b = ss.sketch.point(ss.sketch.resolve_point(second).unwrap()).unwrap();
                 assert!((if horizontal { a.y - b.y } else { a.x - b.x }).abs() < 1e-6);
                 assert_eq!(ss.report.dof, dof - 1);
-                assert_eq!(h.app.session.undo.len(), undo + 1);
+                assert_eq!(h.app.session.history.len(), undo + 1);
                 let constraint = ss
                     .sketch
                     .constraints
@@ -414,11 +414,11 @@ fn context_menu_explicitly_aligns_two_points_and_removes_one_freedom() {
                 h.app.run("edit.redo", json!({})).unwrap();
                 assert_eq!(h.app.session.doc.to_json(), after);
                 // Repeating the same relationship must not stack a redundant constraint.
-                let undo = h.app.session.undo.len();
+                let undo = h.app.session.history.len();
                 context_menu::run_item(&mut h.app, item, egui::Pos2::ZERO);
                 assert!(h.app.status.as_ref().is_some_and(|(_, _, error)| *error));
                 assert_eq!(h.app.session.doc.to_json(), after);
-                assert_eq!(h.app.session.undo.len(), undo);
+                assert_eq!(h.app.session.history.len(), undo);
             }
         }
     }
@@ -446,13 +446,13 @@ fn context_menu_alignment_requires_exactly_two_points_and_preserves_conflicts() 
     h.app.session.selection = vec![origin, center];
     for id in ["ui.horizontalConstraint", "ui.verticalConstraint"] {
         let before = h.app.session.doc.to_json();
-        let undo = h.app.session.undo.len();
+        let undo = h.app.session.history.len();
         let selection = h.app.session.selection.clone();
         let item = context_menu::items(&h.app, &Target::Viewport).into_iter().find(|i| i.id == id).unwrap();
         context_menu::run_item(&mut h.app, &item, egui::Pos2::ZERO);
         assert!(h.app.status.as_ref().is_some_and(|(_, _, error)| *error));
         assert_eq!(h.app.session.doc.to_json(), before);
-        assert_eq!(h.app.session.undo.len(), undo);
+        assert_eq!(h.app.session.history.len(), undo);
         assert_eq!(h.app.session.selection, selection);
     }
 }
@@ -556,7 +556,7 @@ fn idle_midpoints_are_selectable_without_modifying_the_sketch() {
         h.app.fit_view();
         h.frames(3);
         let before = h.app.session.doc.to_json();
-        let undo = h.app.session.undo.len();
+        let undo = h.app.session.history.len();
         h.step(&json!({"move":{"sketch":[30,15]}})).unwrap();
         assert!(matches!(h.app.viewport.hover, Some(Hit::SketchMidpoint { ref id, .. }) if id == "l1"));
         h.step(&json!({"click":{"sketch":[30,15]}})).unwrap();
@@ -572,7 +572,7 @@ fn idle_midpoints_are_selectable_without_modifying_the_sketch() {
         h.step(&json!({"click":{"sketch":[30,45]},"shift":true})).unwrap();
         assert_eq!(h.app.session.selection, vec![Sel::SketchMidpoint { id: "l1".into() }]);
         assert_eq!(h.app.session.doc.to_json(), before);
-        assert_eq!(h.app.session.undo.len(), undo);
+        assert_eq!(h.app.session.history.len(), undo);
         // Ordinary edge and endpoint picks still work away from MID.
         h.step(&json!({"click":{"sketch":[20,12.5]}})).unwrap();
         assert_eq!(h.app.session.selection, vec![Sel::SketchCurve { id: "l1".into(), sketch: None }]);
@@ -605,7 +605,7 @@ fn selected_midpoints_can_take_both_axes_and_reuse_the_same_helpers() {
             assert_eq!(selected.len(), 2);
             assert!(selected.iter().all(|s| matches!(s, Sel::SketchMidpoint { .. })));
             let before = h.app.session.doc.to_json();
-            let undo = h.app.session.undo.len();
+            let undo = h.app.session.history.len();
             let dof = h.app.session.model.state().sketches[0].report.dof;
             let mut after_first = String::new();
             for (i, horizontal) in [horizontal_first, !horizontal_first].into_iter().enumerate() {
@@ -620,7 +620,7 @@ fn selected_midpoints_can_take_both_axes_and_reuse_the_same_helpers() {
                 assert_eq!(ss.report.dof, dof - i - 1);
                 assert_eq!(ss.sketch.points.len(), 7, "two helper points are reused on the second axis");
                 assert_eq!(ss.sketch.constraints.iter().filter(|c| matches!(c.kind, ConstraintKind::Midpoint { .. })).count(), 2);
-                assert_eq!(h.app.session.undo.len(), undo + i + 1);
+                assert_eq!(h.app.session.history.len(), undo + i + 1);
                 if i == 0 {
                     after_first = h.app.session.doc.to_json();
                 }
@@ -644,13 +644,13 @@ fn selected_midpoints_can_take_both_axes_and_reuse_the_same_helpers() {
             reopened.execute("sketch.move_point", &json!({"point":"l2.end","to":[60,25]})).unwrap();
             let sk = &reopened.model.state().sketches[0].sketch;
             assert!(line_midpoint(sk, "l1").dist(line_midpoint(sk, "l2")) < 1e-6);
-            let undo = h.app.session.undo.len();
+            let undo = h.app.session.history.len();
             h.app.run("select.set", json!({"items": selected})).unwrap();
             let item = context_menu::items(&h.app, &Target::Viewport).into_iter().find(|i| i.id == "ui.horizontalConstraint").unwrap();
             context_menu::run_item(&mut h.app, &item, egui::Pos2::ZERO);
             assert!(h.app.status.as_ref().is_some_and(|(_, _, error)| *error));
             assert_eq!(h.app.session.doc.to_json(), after);
-            assert_eq!(h.app.session.undo.len(), undo);
+            assert_eq!(h.app.session.history.len(), undo);
             assert_eq!(h.app.session.selection, selected);
         }
     }
@@ -677,7 +677,7 @@ fn midpoint_menu_aligns_rectangle_sides_and_refuses_conflicts_atomically() {
             h.step(&json!({"click":{"sketch":b},"shift":true})).unwrap();
             assert_eq!(h.app.session.selection.len(), 2);
             let before = h.app.session.doc.to_json();
-            let undo = h.app.session.undo.len();
+            let undo = h.app.session.history.len();
             let selected = h.app.session.selection.clone();
             let lines: Vec<_> = selected
                 .iter()
@@ -689,7 +689,7 @@ fn midpoint_menu_aligns_rectangle_sides_and_refuses_conflicts_atomically() {
             if fixed {
                 assert!(h.app.status.as_ref().is_some_and(|(_, _, error)| *error));
                 assert_eq!(h.app.session.doc.to_json(), before);
-                assert_eq!(h.app.session.undo.len(), undo);
+                assert_eq!(h.app.session.history.len(), undo);
             } else {
                 assert!(!h.app.status.as_ref().is_some_and(|(_, _, error)| *error), "{:?}", h.app.status);
                 let ss = &h.app.session.model.state().sketches[0];

@@ -340,7 +340,7 @@ mod tests {
     fn mixed_selection_is_one_undo_step() {
         let (mut s, _) = part();
         let body = s.model.state().bodies[1].name.clone();
-        let depth = s.undo.len();
+        let depth = s.history.len();
         let n = s.doc.features.len();
         let r = run(
             &mut s,
@@ -350,7 +350,7 @@ mod tests {
         assert_eq!(bodies(&s), 1, "{r}");
         assert!(s.doc.find_feature("Plane1").is_none());
         assert_eq!(r["skipped"][0], "the origin planes can't be deleted");
-        assert_eq!(s.undo.len(), depth + 1);
+        assert_eq!(s.history.len(), depth + 1);
         run(&mut s, "edit.undo", json!({}));
         assert_eq!((bodies(&s), s.doc.features.len()), (2, n));
     }
@@ -360,17 +360,17 @@ mod tests {
         let mut s = Session::default();
         run(&mut s, "construct.axis.two_points", json!({"a": {"point": [0, 0, 0]}, "b": {"point": [1, 2, 3]}, "name": "CustomAxis"}));
         let axis = s.doc.find_feature("CustomAxis").unwrap().id;
-        let depth = s.undo.len();
+        let depth = s.history.len();
         let items = json!([{"type": "axis", "name": "CustomAxis"}, {"type": "axis", "name": "X"}]);
         let dry = run(&mut s, "selection.delete", json!({"items": items, "dry_run": true}));
         assert_eq!(dry["deleted"], json!(["CustomAxis"]));
         assert_eq!(dry["skipped"], json!(["the origin axes can't be deleted"]));
         assert!(s.doc.feature(axis).is_some());
-        assert_eq!(s.undo.len(), depth);
+        assert_eq!(s.history.len(), depth);
         let deleted = run(&mut s, "selection.delete", json!({"items": items}));
         assert_eq!(deleted, dry);
         assert!(s.doc.feature(axis).is_none());
-        assert_eq!(s.undo.len(), depth + 1);
+        assert_eq!(s.history.len(), depth + 1);
         run(&mut s, "edit.undo", json!({}));
         assert!(s.doc.feature(axis).is_some());
         for name in ["X", "Y", "Z"] {

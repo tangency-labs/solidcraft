@@ -323,17 +323,17 @@ mod tests {
     fn relink_picker_cancel_bad_file_and_changed_document_keep_the_link() {
         let (mut app, component, _, folder, moved) = fixture("cancel");
         let before = serde_json::to_value(&*app.session.doc).unwrap();
-        let undo = app.session.undo.len();
+        let undo = app.session.history.len();
         answer(&mut app, None);
         start(&mut app, component);
         crate::file_picker::tick(&mut app, &egui::Context::default());
         assert_eq!(serde_json::to_value(&*app.session.doc).unwrap(), before);
-        assert_eq!(app.session.undo.len(), undo);
+        assert_eq!(app.session.history.len(), undo);
         answer(&mut app, Some(folder.join("missing.solidcraft").to_string_lossy().into_owned()));
         start(&mut app, component);
         crate::file_picker::tick(&mut app, &egui::Context::default());
         assert_eq!(serde_json::to_value(&*app.session.doc).unwrap(), before);
-        assert_eq!(app.session.undo.len(), undo);
+        assert_eq!(app.session.history.len(), undo);
         assert!(app.status.as_ref().is_some_and(|(_, _, error)| *error));
         answer(&mut app, Some(moved.to_string_lossy().into_owned()));
         start(&mut app, component);

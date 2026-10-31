@@ -16,7 +16,7 @@ fn text_move_updates_the_source_once_preserves_ids_and_roundtrips() {
     let (mut s, link, curve) = setup();
     let before = s.doc.to_json();
     let ids: Vec<_> = s.doc.sketch(1).unwrap().curves.iter().map(|c| c.id.clone()).collect();
-    let undo = s.undo.len();
+    let undo = s.history.len();
     run(&mut s, "sketch.move", json!({"entities":[curve,ids[1]],"translate":[10,-2],"center":[3,4],"angle":30}));
     let sk = s.doc.sketch(1).unwrap();
     assert_eq!(sk.curves.iter().map(|c| c.id.clone()).collect::<Vec<_>>(), ids);
@@ -24,7 +24,7 @@ fn text_move_updates_the_source_once_preserves_ids_and_roundtrips() {
     assert!(at.dist(Vec2::new(13.0, 2.0)) < 1e-9);
     assert!((*angle - 45_f64.to_radians()).abs() < 1e-12);
     assert_eq!((text.as_str(), *height, font), ("II", 10.0, &None));
-    assert_eq!(s.undo.len(), undo + 1);
+    assert_eq!(s.history.len(), undo + 1);
     let moved = s.doc.to_json();
     let reopened = solidcraft_doc::Document::from_json(&moved).unwrap();
     assert_eq!(reopened.to_json(), moved);
@@ -99,7 +99,7 @@ fn live_text_resize_follows_each_frame_and_rebuilds_downstream_on_release() {
 fn live_text_edit_rejects_bad_values_and_leaves_the_design_as_it_was() {
     let (mut s, link, _) = setup();
     let before = s.doc.to_json();
-    let undo = s.undo.len();
+    let undo = s.history.len();
     for params in [
         json!({"link":link,"height":0,"live":true}),
         json!({"link":link,"height":-3,"live":true}),
@@ -109,7 +109,7 @@ fn live_text_edit_rejects_bad_values_and_leaves_the_design_as_it_was() {
     ] {
         assert!(s.execute("sketch.edit_text", &params).is_err(), "{params}");
         assert_eq!(s.doc.to_json(), before);
-        assert_eq!(s.undo.len(), undo);
+        assert_eq!(s.history.len(), undo);
     }
 }
 
@@ -138,7 +138,7 @@ fn text_move_in_a_rotated_component_preserves_font_and_local_coordinates() {
 fn text_move_rejects_malformed_values_without_changing_history() {
     let (mut s, _, curve) = setup();
     let before = s.doc.to_json();
-    let undo = s.undo.len();
+    let undo = s.history.len();
     for params in [
         json!({"entities":[curve],"translate":[1]}),
         json!({"entities":[curve],"angle":"invalid"}),
@@ -147,7 +147,7 @@ fn text_move_rejects_malformed_values_without_changing_history() {
         let cmd = if params.get("entity").is_some() { "sketch.drag" } else { "sketch.move" };
         assert!(s.execute(cmd, &params).is_err());
         assert_eq!(s.doc.to_json(), before);
-        assert_eq!(s.undo.len(), undo);
+        assert_eq!(s.history.len(), undo);
     }
 }
 
@@ -291,7 +291,7 @@ fn not_understood() -> Vec<(Value, &'static str)> {
 fn sketch_text_refuses_inputs_it_does_not_understand() {
     let (mut s, _, _) = setup();
     let before = s.doc.to_json();
-    let undo = s.undo.len();
+    let undo = s.history.len();
     let base = json!({"text":"I","at":[0,0],"height":10});
     let mut cases = not_understood();
     // `at` is required: left out or null is refused too (null no longer means the origin).
@@ -301,7 +301,7 @@ fn sketch_text_refuses_inputs_it_does_not_understand() {
         let e = s.execute("sketch.text", &params).unwrap_err().to_string();
         assert!(e.contains(error), "{params}: {e}");
         assert_eq!(s.doc.to_json(), before, "{params}");
-        assert_eq!(s.undo.len(), undo, "{params}");
+        assert_eq!(s.history.len(), undo, "{params}");
     }
     let e = s.execute("sketch.text", &json!({"text":"I","height":10})).unwrap_err().to_string();
     assert!(e.contains(AT), "{e}");
@@ -315,7 +315,7 @@ fn sketch_text_refuses_inputs_it_does_not_understand() {
 fn sketch_edit_text_refuses_inputs_it_does_not_understand() {
     let (mut s, link, _) = setup();
     let before = s.doc.to_json();
-    let undo = s.undo.len();
+    let undo = s.history.len();
     for (extra, error) in not_understood() {
         let params = with(json!({"link":link}), &extra);
         for live in [false, true] {
@@ -323,7 +323,7 @@ fn sketch_edit_text_refuses_inputs_it_does_not_understand() {
             let e = s.execute("sketch.edit_text", &params).unwrap_err().to_string();
             assert!(e.contains(error), "{params}: {e}");
             assert_eq!(s.doc.to_json(), before, "{params}");
-            assert_eq!(s.undo.len(), undo, "{params}");
+            assert_eq!(s.history.len(), undo, "{params}");
         }
     }
 }

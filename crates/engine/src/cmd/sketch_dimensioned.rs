@@ -201,7 +201,7 @@ pub(super) fn draw(s: &mut Session, p: &Value) -> Result<Value> {
         Vec::new()
     };
     // Session::execute records the wrapper's before snapshot. Nested history must not leak.
-    scratch.undo.clear();
+    scratch.history.clear();
     s.accept_computed(scratch);
     out["dimensions"] = Value::Object(added);
     if !defined.is_empty() {

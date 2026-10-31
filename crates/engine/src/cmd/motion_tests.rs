@@ -928,7 +928,7 @@ fn an_exploded_view_animates_apart_and_back_without_moving_the_design() {
     run(&mut s, "explode.create", json!({"name": "Up", "moves": [{"occurrence": "B", "translate": [0, 0, 50]}]}));
     run(&mut s, "explode.show", json!({"view": "Up"}));
     s.mark_saved();
-    let (doc, pending, undo) = (s.doc.clone(), s.pending_moves.clone(), s.undo.len());
+    let (doc, pending, undo) = (s.doc.clone(), s.pending_moves.clone(), s.history.len());
     // Each frame: the lowest x and z of each body drawn, rounded to a micrometre.
     let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
     let record = {
@@ -974,7 +974,7 @@ fn an_exploded_view_animates_apart_and_back_without_moving_the_design() {
     assert_eq!(long[40].0, [[0, 0], [20_000, 50_000]], "B up at the middle");
     assert_eq!((long[0].0.clone(), long[80].0.clone()), (vec![[0, 0], [20_000, 0]], vec![[0, 0], [20_000, 0]]));
     // The design keeps its placements, the view shown, its history and its saved state.
-    assert_eq!((&*s.doc, &s.pending_moves, s.undo.len()), (&*doc, &pending, undo));
+    assert_eq!((&*s.doc, &s.pending_moves, s.history.len()), (&*doc, &pending, undo));
     // Through the registry too.
     crate::capture::install_test_renderer();
     let r = run(
@@ -983,7 +983,7 @@ fn an_exploded_view_animates_apart_and_back_without_moving_the_design() {
         json!({"view": "Apart", "back": true, "path": gif.to_string_lossy(), "samples": 3, "width": 16, "height": 16}),
     );
     assert_eq!(r["frames"], 3, "{r}");
-    assert_eq!((&*s.doc, &s.pending_moves, s.undo.len(), s.is_dirty()), (&*doc, &pending, undo, false));
+    assert_eq!((&*s.doc, &s.pending_moves, s.history.len(), s.is_dirty()), (&*doc, &pending, undo, false));
     let _ = std::fs::remove_dir_all(&dir);
 }
 
