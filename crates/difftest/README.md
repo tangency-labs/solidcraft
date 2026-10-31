@@ -787,7 +787,11 @@ nice -n 10 cargo run -p difftest -- --solidcraft-cases '3526-*'        # ids (<f
   between planes (`distance * cot(α/2)` for an interior angle `α`, varying along curved
   faces); one distance for all edges; `SmApiChamferFillet` is not used, it chamfers every
   edge of a body), `offset_faces`
-  (faces by a point on each), `sheet_corner` (the deferred sheet-flange recipe below). Each
+  (faces by a point on each), `sweep_face` (the prism of a body's face: the face through
+  the point `face`, the one whose surface holds it and which classifies it inside, has its
+  loops' edge curves, trimmed to the edges, swept `distance` along `direction` with
+  `SmApiCreateLinearSweep` and capped; for a cut by a face's own boundary, #968),
+  `sheet_corner` (the deferred sheet-flange recipe below). Each
   writes the body `id`; the last writes `result`.
 * **Fixes** (`fixes`, optional): `Kernel::fixes` (`UpstreamFixes`) fields the case turns
   on, by name, for a case that needs an opt-in fix of an upstream defect (for example
@@ -799,8 +803,10 @@ nice -n 10 cargo run -p difftest -- --solidcraft-cases '3526-*'        # ids (<f
   an `ERROR`, and the deferral keeps the full error text (for example
   `324-*/round_4_over_hole`, tangency-labs/solidcore#422).
   An empty or whitespace-only `error` never matches: the step failure stays an `ERROR`.
-* **Expectations** (`expect`): `lumps` (bounded regions; `0` = nothing left), `volume`
-  (`value`, absolute `tol`, the `formula` it came from), `cylinder_faces_max`,
+* **Expectations** (`expect`): `lumps` (bounded regions; `0` = nothing left; a sealed
+  void is a region of its own), `volume` (`value`, absolute `tol`, the `formula` it came
+  from), `removed` (the same with the earlier body `from`: its volume minus `result`'s,
+  for a result without a closed-form volume of its own), `cylinder_faces_max`,
   `sheet_corner` (signed end distances and flat-pattern invariants).
 * **Verdicts**: `PASS`, `FAIL`, `UNCHECKED` (no expectations were supplied, or no check
   failed but one cannot be measured

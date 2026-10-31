@@ -73,7 +73,7 @@ type P3 = [f64; 3];
 pub struct CaseFile {
     /// The SolidCraft issue.
     pub issue: String,
-    /// The SolidCraft PR that fixed it.
+    /// The SolidCraft PR that fixed it (or, with no PR, the commit).
     pub pr: String,
     /// That PR's test the cases come from.
     pub test: String,
@@ -324,6 +324,23 @@ pub enum Step {
         /// Rolling-ball radius: the leg on each face for a right-angle edge between planes.
         distance: f64,
     },
+    /// `SmApiCreateLinearSweep` of the loops of `body`'s face through the point `face`
+    /// (their edges' curves, trimmed to the edges), swept `distance` along `direction`
+    /// and capped at both ends: the prism of that face, for a cut by a face's own
+    /// boundary (tangency-labs/solidcore#968). The face is the one whose surface holds
+    /// the point (within `1e-6 (1 + |point|)`) and which classifies it inside.
+    SweepFace {
+        /// Body written.
+        id: String,
+        /// Body whose face is swept (left as it is).
+        body: String,
+        /// A point inside the face.
+        face: P3,
+        /// Sweep direction (need not be unit length).
+        direction: P3,
+        /// Sweep length.
+        distance: f64,
+    },
     /// Offset selected faces along their outward normals, the rest of the body
     /// following (SolidCraft's Offset Face).
     OffsetFaces {
@@ -470,6 +487,11 @@ pub struct Expect {
     /// At most this many faces on cylinders.
     #[serde(default)]
     pub cylinder_faces_max: Option<usize>,
+    /// The volume removed from an earlier body: its volume minus `result`'s, for an
+    /// operation whose result has no closed-form volume of its own
+    /// (tangency-labs/solidcore#968).
+    #[serde(default)]
+    pub removed: Option<RemovedExpect>,
     /// Sheet-corner geometry and flat-pattern invariants from SolidCraft #3170.
     #[serde(default)]
     pub sheet_corner: Option<SheetCornerExpect>,
@@ -489,6 +511,20 @@ pub struct SheetCornerExpect {
     pub flat_regions: usize,
     /// Relative tolerance of volume against flat area times thickness.
     pub volume_relative_tol: f64,
+}
+
+/// An analytic volume removed from the body `from`.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RemovedExpect {
+    /// The body before the removal, written by an earlier step.
+    pub from: String,
+    /// mm^3.
+    pub value: f64,
+    /// Absolute tolerance, mm^3.
+    pub tol: f64,
+    /// How `value` was derived.
+    pub formula: String,
 }
 
 /// An analytic volume.
@@ -595,6 +631,7 @@ impl Step {
             | Self::Fillet { id, .. }
             | Self::Chamfer { id, .. }
             | Self::OffsetFaces { id, .. }
+            | Self::SweepFace { id, .. }
             | Self::SheetCorner { id, .. } => id,
         }
     }
@@ -617,6 +654,7 @@ impl Step {
             Self::Fillet { body, .. }
             | Self::Chamfer { body, .. }
             | Self::OffsetFaces { body, .. }
+            | Self::SweepFace { body, .. }
             | Self::Rotate { body, .. }
             | Self::Mirror { body, .. } => vec![body],
         }
@@ -749,6 +787,17 @@ pub fn validate(case: &Case) -> Result<(), String> {
             Step::OffsetFaces {
                 faces, distance, ..
             } => faces.iter().flatten().all(|x| x.is_finite()) && distance.is_finite(),
+            Step::SweepFace {
+                face,
+                direction,
+                distance,
+                ..
+            } => {
+                face.iter().chain(direction).all(|x| x.is_finite())
+                    && direction.iter().any(|x| *x != 0.0)
+                    && distance.is_finite()
+                    && *distance > 0.0
+            }
             Step::SheetCorner {
                 base_size,
                 thickness,
@@ -804,6 +853,17 @@ pub fn validate(case: &Case) -> Result<(), String> {
             return Err("volume value and tol must be finite, tol positive".into());
         }
     }
+    if let Some(r) = &case.expect.removed {
+        if !(r.value.is_finite() && r.tol.is_finite() && r.tol > 0.0) {
+            return Err("removed value and tol must be finite, tol positive".into());
+        }
+        if r.from == RESULT || !defined.contains(r.from.as_str()) {
+            return Err(format!(
+                "removed reads `{}`, which no step before the last writes",
+                r.from
+            ));
+        }
+    }
     if let Some(e) = &case.expect.sheet_corner {
         if !e.end_face_distances.iter().all(|x| x.is_finite())
             || !e.distance_tol.is_finite()
@@ -840,6 +900,8 @@ pub struct Measured {
     pub topology: [usize; 3],
     /// Faces on a cylinder (`SmCone::IsCylinder`).
     pub cylinder_faces: usize,
+    /// The volume of the case's `removed.from` body minus `volume`, when it asks for it.
+    pub removed: Option<f64>,
 }
 
 /// How a case's run ended.
@@ -986,6 +1048,77 @@ fn fillet_edge_at_point(
         }
     }
     selected.ok_or_else(|| Run::Error("fillet edge point matches no eligible edge".into()))
+}
+
+/// The curves of the loops of `body`'s face through `point`, each its edge's curve
+/// trimmed to the edge (a copy), in loop order. The face is the one whose surface holds
+/// the point within `1e-6 (1 + |point|)` and which classifies its parameter point
+/// inside (`SmFace::PointClassify`); exactly one must.
+fn face_boundary_curves(k: &Kernel, body: &mut Brep, point: Point3) -> Result<Vec<Curve>, Run> {
+    use solidcore::intersect::point_class::{PointClassType, PointClassification};
+    use solidcore::nurbs::b_spline_curve_n_lib::TrimMode;
+    use solidcore::query::face::p2::{point_classify, PointClassifyOptions};
+    use solidcore::surface::surface::p4::NoObject;
+    use solidcore::surface::surface::p5::DropPointOptions;
+    use solidcore::topology::{edge, edgeuse, face, loopuse};
+
+    if !point.x.is_finite() || !point.y.is_finite() || !point.z.is_finite() {
+        return Err(Run::Error("face point is not finite".into()));
+    }
+    let tolerance = 1.0e-6 * (1.0 + point.length());
+    let mut selected = None;
+    for f in body.face_list().to_vec() {
+        let Some(surface) = body.face(f).map_err(|e| solid(&e))?.surface.clone() else {
+            continue;
+        };
+        let domain = surface
+            .natural_uv_domain_with_nurb(k)
+            .map_err(|e| solid(&e))?;
+        let dropped = surface
+            .drop_point::<NoObject>(k, point, &domain, &DropPointOptions::default())
+            .map_err(|e| solid(&e))?;
+        // (a NaN gap is no match)
+        if !dropped.success || dropped.gap.is_nan() || dropped.gap > tolerance {
+            continue;
+        }
+        let mut pc = PointClassification::new(tolerance);
+        point_classify(
+            k,
+            body,
+            f,
+            dropped.result_uv,
+            &mut pc,
+            PointClassifyOptions::default(),
+        )
+        .map_err(|e| solid(&e))?;
+        if pc.point_class() != PointClassType::Face {
+            continue;
+        }
+        if selected.replace(f).is_some() {
+            return Err(Run::Error("face point matches multiple faces".into()));
+        }
+    }
+    let f = selected.ok_or_else(|| Run::Error("face point matches no face".into()))?;
+    let mut out = Vec::new();
+    for l in face::p2::loops(body, f, false, None).map_err(|e| solid(&e))? {
+        for eu in loopuse::loop_edgeuses(body, l).map_err(|e| solid(&e))? {
+            let e = edgeuse::p1::edge(body, eu)
+                .map_err(|e| solid(&e))?
+                .ok_or_else(|| Run::Error("edge use without edge".into()))?;
+            let mut curve = edge::curve(body, e)
+                .map_err(|e| solid(&e))?
+                .ok_or_else(|| Run::Error("edge without curve".into()))?
+                .clone();
+            let mut interval = edge::interval(body, e).map_err(|e| solid(&e))?;
+            if interval != curve.natural_interval() {
+                curve
+                    .trim(k, &mut interval, TrimMode::Notify)
+                    .map_err(|e| solid(&e))?;
+            }
+            out.push(curve);
+        }
+    }
+    Ok(out)
 }
 
 /// A cylinder along Z turned onto `axis` about `origin`.
@@ -1328,6 +1461,20 @@ fn step_rust(k: &mut Kernel, bodies: &mut BTreeMap<String, Brep>, step: &Step) -
         } => fillet_picked_edges(k, bodies, body, edges, *distance, FILLET_LINEAR)?,
         // SM_API offsets or shells whole bodies only (SmApiOffsetBrepFull,
         // SmApiShellBrepFull); nothing offsets selected faces.
+        Step::SweepFace {
+            body,
+            face,
+            direction,
+            distance,
+            ..
+        } => {
+            let mut source = take(bodies, body)?;
+            let cs = face_boundary_curves(k, &mut source, p3(*face))?;
+            let refs: Vec<Option<&Curve>> = cs.iter().map(Some).collect();
+            let dir = p3(*direction);
+            let dir = dir / dir.length();
+            sweeps::create_linear_sweep(k, &refs, dir, *distance, true).map_err(|e| solid(&e))?
+        }
         Step::OffsetFaces { .. } => {
             return Err(Run::Deferred(Deferral {
                 blocked_by: "no SM_API entry point".into(),
@@ -1416,6 +1563,7 @@ fn measure(k: &Kernel, b: &mut Brep) -> Result<Measured, SolidError> {
             b.vertex_list().len(),
         ],
         cylinder_faces,
+        removed: None,
     })
 }
 
@@ -1513,10 +1661,23 @@ pub fn run_rust_on(mut k: Kernel, case: &Case) -> Run {
             Err(stop) => return stop,
         }
     }
-    match bodies.get_mut(RESULT) {
-        Some(b) => measure(&k, b).map_or_else(|e| solid(&e), Run::Done),
-        None => Run::Error(format!("no body `{RESULT}`")),
+    let mut m = match bodies.get_mut(RESULT) {
+        Some(b) => match measure(&k, b) {
+            Ok(m) => m,
+            Err(e) => return solid(&e),
+        },
+        None => return Run::Error(format!("no body `{RESULT}`")),
+    };
+    if let Some(r) = &case.expect.removed {
+        let Some(b) = bodies.get_mut(&r.from) else {
+            return Run::Error(format!("no body `{}`", r.from));
+        };
+        match measure(&k, b) {
+            Ok(before) => m.removed = Some(before.volume - m.volume),
+            Err(e) => return solid(&e),
+        }
     }
+    Run::Done(m)
 }
 
 // ---- scoring --------------------------------------------------------------------------
@@ -1524,7 +1685,7 @@ pub fn run_rust_on(mut k: Kernel, case: &Case) -> Run {
 /// One expectation checked.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Check {
-    /// `lumps`, `volume`, `cylinder_faces_max`, `sheet_corner`.
+    /// `lumps`, `volume`, `removed`, `cylinder_faces_max`, `sheet_corner`.
     pub name: &'static str,
     /// `pass`, `fail` or `unchecked`.
     pub status: &'static str,
@@ -1553,6 +1714,27 @@ pub fn checks(e: &Expect, m: &Measured) -> Vec<Check> {
                 "expected {} +- {}, got {} (off by {err})",
                 v.value, v.tol, m.volume
             ),
+        });
+    }
+    if let Some(r) = &e.removed {
+        // A run that did not measure it (no `removed.from`) is unchecked, a NaN fails.
+        out.push(match m.removed {
+            Some(got) => {
+                let err = (got - r.value).abs();
+                Check {
+                    name: "removed",
+                    status: pass(err <= r.tol),
+                    detail: format!(
+                        "expected {} +- {} removed from `{}`, got {got} (off by {err})",
+                        r.value, r.tol, r.from
+                    ),
+                }
+            }
+            None => Check {
+                name: "removed",
+                status: "unchecked",
+                detail: format!("the volume of `{}` was not measured", r.from),
+            },
         });
     }
     if let Some(n) = e.cylinder_faces_max {
@@ -1626,6 +1808,7 @@ fn run_entry(run: &Run, verdict: &str, checks: &[Check]) -> Value {
                     "edges": m.topology[1],
                     "vertices": m.topology[2],
                     "cylinder_faces": m.cylinder_faces,
+                    "removed": m.removed.map(crate::json::num),
                 }),
             );
             e.insert(
@@ -1848,13 +2031,17 @@ mod tests {
             assert!(
                 l.id.starts_with("a52-")
                     || l.id.starts_with("catics-")
-                    || (l.file.issue.contains("/issues/") && l.file.pr.contains("/pull/")),
+                    || (l.file.issue.contains("/issues/")
+                        && (l.file.pr.contains("/pull/") || l.file.pr.contains("/commit/"))),
                 "{}",
                 l.id
             );
             let e = &l.case.expect;
             assert!(
-                e.lumps.is_some() || e.volume.is_some() || e.sheet_corner.is_some(),
+                e.lumps.is_some()
+                    || e.volume.is_some()
+                    || e.removed.is_some()
+                    || e.sheet_corner.is_some(),
                 "{}: nothing to check",
                 l.id
             );
@@ -2094,12 +2281,14 @@ mod tests {
             }),
             cylinder_faces_max: None,
             sheet_corner: None,
+            removed: None,
         };
         let ok = Measured {
             volume: 268.02,
             lumps: 2,
             topology: [4, 4, 4],
             cylinder_faces: 0,
+            removed: None,
         };
         assert_eq!(verdict(&e, &Run::Done(ok)).0, "PASS");
         // The bug: the whole intersect came out empty.
@@ -2108,6 +2297,7 @@ mod tests {
             lumps: 0,
             topology: [0, 0, 0],
             cylinder_faces: 0,
+            removed: None,
         };
         let (v, c) = verdict(&e, &Run::Done(empty));
         assert_eq!(v, "FAIL");
@@ -2145,6 +2335,7 @@ mod tests {
             lumps: 1,
             topology: [6, 12, 8],
             cylinder_faces: 0,
+            removed: None,
         });
         let (v, c) = verdict(&e, &run);
         assert!(c.is_empty());
@@ -2225,6 +2416,7 @@ mod tests {
                         lumps: 1,
                         topology: [1, 0, 0],
                         cylinder_faces: 0,
+                        removed: None,
                     })
                 )
                 .0,
@@ -2275,6 +2467,96 @@ mod tests {
         let mut changed = original.clone();
         changed["steps"][0]["coverng"] = json!(0);
         assert!(serde_json::from_value::<Case>(changed).is_err());
+    }
+
+    #[test]
+    fn sweep_face_cuts_a_box_by_its_own_top_face() {
+        let json = |steps: Value, removed: Value| -> Case {
+            serde_json::from_value(json!({
+                "name": "c",
+                "steps": steps,
+                "expect": {"lumps": 1, "removed": removed},
+            }))
+            .unwrap()
+        };
+        // the box's top face swept 2 down and cut away: 10 x 10 x 2 removed
+        let case = json(
+            json!([
+                {"op": "box", "id": "block", "origin": [0, 0, 0], "size": [10, 10, 10]},
+                {"op": "sweep_face", "id": "prism", "body": "block", "face": [5, 5, 10],
+                 "direction": [0, 0, -2], "distance": 2},
+                {"op": "difference", "id": "result", "a": "block", "b": "prism"}
+            ]),
+            json!({"from": "block", "value": 200.0, "tol": 1e-6, "formula": "10 x 10 x 2"}),
+        );
+        validate(&case).unwrap();
+        let run = run_rust(&case);
+        let (v, c) = verdict(&case.expect, &run);
+        assert_eq!(v, "PASS", "{run:?} {c:?}");
+
+        // a point on no face, and one on the box's corner (three faces' boundary)
+        for point in [[5.0, 5.0, 11.0], [10.0, 10.0, 10.0]] {
+            let mut off = case.clone();
+            if let Step::SweepFace { face, .. } = &mut off.steps[1] {
+                *face = point;
+            }
+            assert!(
+                matches!(run_rust(&off), Run::Error(ref m) if m.contains("face point matches no face")),
+                "{point:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn removed_and_sweep_face_are_validated() {
+        let case = |steps: Value, removed: Value| -> Case {
+            serde_json::from_value(
+                json!({"name": "c", "steps": steps, "expect": {"removed": removed}}),
+            )
+            .unwrap()
+        };
+        let steps = |direction: Value, distance: f64| {
+            json!([
+                {"op": "box", "id": "block", "origin": [0, 0, 0], "size": [1, 1, 1]},
+                {"op": "sweep_face", "id": "result", "body": "block", "face": [0.5, 0.5, 1],
+                 "direction": direction, "distance": distance}
+            ])
+        };
+        let removed = |from: &str| json!({"from": from, "value": 1.0, "tol": 0.1, "formula": "f"});
+        assert!(validate(&case(steps(json!([0, 0, -1]), 1.0), removed("block"))).is_ok());
+        // `from` must be an earlier body, not `result` nor one no step writes
+        assert!(validate(&case(steps(json!([0, 0, -1]), 1.0), removed("result"))).is_err());
+        assert!(validate(&case(steps(json!([0, 0, -1]), 1.0), removed("nope"))).is_err());
+        // a sweep needs a direction and a positive distance
+        assert!(validate(&case(steps(json!([0, 0, 0]), 1.0), removed("block"))).is_err());
+        assert!(validate(&case(steps(json!([0, 0, -1]), 0.0), removed("block"))).is_err());
+        let bad_tol = json!({"from": "block", "value": 1.0, "tol": 0.0, "formula": "f"});
+        assert!(validate(&case(steps(json!([0, 0, -1]), 1.0), bad_tol)).is_err());
+    }
+
+    #[test]
+    fn removed_is_scored_against_its_body() {
+        let e: Expect = serde_json::from_value(json!({
+            "removed": {"from": "b", "value": 10.0, "tol": 1.0, "formula": "f"}
+        }))
+        .unwrap();
+        let m = |removed: Option<f64>| Measured {
+            volume: 1.0,
+            lumps: 1,
+            topology: [6, 12, 8],
+            cylinder_faces: 0,
+            removed,
+        };
+        assert_eq!(verdict(&e, &Run::Done(m(Some(10.5)))).0, "PASS");
+        assert_eq!(verdict(&e, &Run::Done(m(Some(12.0)))).0, "FAIL");
+        assert_eq!(verdict(&e, &Run::Done(m(Some(f64::NAN)))).0, "FAIL");
+        assert_eq!(verdict(&e, &Run::Done(m(None))).0, "UNCHECKED");
+        let report = run_entry(
+            &Run::Done(m(Some(10.5))),
+            "PASS",
+            &checks(&e, &m(Some(10.5))),
+        );
+        assert_eq!(report["measured"]["removed"], 10.5);
     }
 
     #[test]
