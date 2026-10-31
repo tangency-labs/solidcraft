@@ -669,3 +669,79 @@ fn many_selected_bodies_hover_cost() {
         }
     }
 }
+
+/// An imported drawing of `k` × `k` closed blobs, four cubic Béziers each, as SVG text.
+fn blob_logo(k: usize) -> String {
+    let mut d = String::new();
+    for i in 0..k {
+        for j in 0..k {
+            let (x, y) = (i as f64 * 3.0, j as f64 * 3.0);
+            d.push_str(&format!(
+                "<path d=\"M{x0},{y} C{x1},{y1} {x2},{y1} {x3},{y} C{x4},{y2} {x4},{y3} {x3},{y4} C{x2},{y5} {x1},{y5} {x0},{y4} C{x5},{y3} {x5},{y2} {x0},{y} Z\"/>",
+                x0 = x,
+                x1 = x + 0.6,
+                x2 = x + 1.4,
+                x3 = x + 2.0,
+                x4 = x + 2.6,
+                x5 = x - 0.6,
+                y1 = y - 0.5,
+                y2 = y + 0.6,
+                y3 = y + 1.4,
+                y4 = y + 2.0,
+                y5 = y + 2.5,
+            ));
+        }
+    }
+    format!("<svg width=\"{w}mm\" height=\"{w}mm\" viewBox=\"-1 -1 {w} {w}\">{d}</svg>", w = k * 3 + 2)
+}
+
+/// Times the sketch scene while the camera orbits and zooms over a large open sketch (an
+/// imported drawing): the scene alone on each new view, again on the same view (its sampled
+/// curves cached), and a whole headless frame after it. Run with `--ignored --nocapture`.
+#[test]
+#[ignore = "manual sketch scene measurement"]
+fn sketch_scene_cost_while_the_camera_moves() {
+    let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1600.0, 1000.0));
+    for k in [10, 20, 32] {
+        let mut h = Harness::new();
+        h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+        h.app.run("sketch.insert_svg", json!({"text": blob_logo(k)})).unwrap();
+        h.frames(3);
+        let st = h.app.session.world_state();
+        let sid = h.app.session.active_sketch.expect("the sketch is open");
+        let (curves, profiles) = st.sketch(sid).map_or((0, 0), |ss| (ss.sketch.curves.len(), ss.profiles.len()));
+        drop(st);
+        h.app.fit_view();
+        h.frames(3);
+        let median = |mut t: Vec<f64>| {
+            t.sort_by(f64::total_cmp);
+            (t[t.len() / 2], t[0], t[t.len() - 1])
+        };
+        for (label, step) in [("orbit", 0usize), ("zoom", 1), ("orbit-no-fill", 0)] {
+            if label == "orbit-no-fill" {
+                h.app.session.visibility.hidden_profiles.push(sid);
+            }
+            let (mut fresh, mut again, mut frame, mut lines) = (Vec::new(), Vec::new(), Vec::new(), 0);
+            for i in 0..30 {
+                if step == 0 {
+                    h.app.cam.yaw += 0.02;
+                    h.app.cam.pitch = 0.9 + 0.01 * f64::from(i % 5);
+                } else {
+                    h.app.cam.distance *= if i < 15 { 0.97 } else { 1.0 / 0.97 };
+                }
+                let proj = crate::viewport::projection(&h.app, rect);
+                let mut scene = None;
+                fresh.push(ms(|| scene = Some(crate::viewport::build_sketch_scene(&h.app, &proj))));
+                lines = scene.map_or(0, |s| s.merged().lines.len());
+                again.push(ms(|| drop(crate::viewport::build_sketch_scene(&h.app, &proj))));
+                frame.push(ms(|| h.frame()));
+            }
+            let (f, fmin, fmax) = median(fresh);
+            let (a, amin, amax) = median(again);
+            let (fr, frmin, frmax) = median(frame);
+            println!(
+                "SKETCHSCENE k={k} curves={curves} profiles={profiles} move={label} scene_new_view_ms={f:.2} ({fmin:.2}-{fmax:.2}) scene_same_view_ms={a:.2} ({amin:.2}-{amax:.2}) frame_ms={fr:.2} ({frmin:.2}-{frmax:.2}) line_bytes={lines}"
+            );
+        }
+    }
+}

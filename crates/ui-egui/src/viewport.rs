@@ -1684,7 +1684,7 @@ fn continuity_color(t: &Tokens, verdict: solidcraft_engine::kernel::SeamVerdict)
 }
 
 /// A soft dark ellipse on the ground under the shown bodies (darkest in the middle).
-fn build_sketch_scene(app: &SolveApp, proj: &Proj) -> GpuScene {
+pub(crate) fn build_sketch_scene(app: &SolveApp, proj: &Proj) -> GpuScene {
     let tk = Tokens::get();
     let mut sc = GpuScene::default();
     let s = &app.session;
