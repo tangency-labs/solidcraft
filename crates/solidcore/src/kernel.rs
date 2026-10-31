@@ -485,6 +485,17 @@ pub struct UpstreamFixes {
     pub internal_pole_row_through_knot: bool,
     /// `SmSurfOfExtrusion::AssertValid` test 8 point-solves the origin on the generating curve with an unscaled `SM_EFF_ZERO`, so an origin evaluated on the curve at coordinates of about 10 (a text outline's quadratic Bezier) resolves to a few 1e-12 and is reported missing; with this fix that solve uses the issue's coordinate-aware zero `SM_EFF_ZERO * (1.0 + origin.max_dimension())`, its own factor rather than the factor 100 of the neighbouring point tests (WR-511, #1508; tangency-labs/smlib#31).
     pub extrusion_origin_scaled_zero: bool,
+    /// `SmSurfOfExtrusion::EvaluateSTEP` and `EvaluateSTEPPoint` evaluate the clamped
+    /// copy of the STEP parameters ("clamp input point to surface domain"), not the
+    /// caller's unclamped `crUV`: with out-of-bounds evaluation off, a parameter
+    /// outside `m_vAnalUVDomain` no longer extrapolates along the extrusion or past
+    /// the generator's own domain (WR-61; see
+    /// `plan/upstream-issues/WR-61--addendum-2026-10-31-step-evaluators-use-clamped-uv.md`).
+    /// Off by default for pinned C++ parity. The guard is `ContainsPoint2d` with its
+    /// default `tol = 0`, so a NaN coordinate (never "outside" by that comparison)
+    /// stays unclamped, and both bodies clamp in the analytic domain, as upstream does
+    /// (neither reads `SwapUV`).
+    pub extrusion_step_uses_clamped_uv: bool,
     /// A sheet sweep's open-profile wires are glued where the curves meet (WR-409, #1113).
     pub sheet_sweep_joins_profile_wires: bool,
     /// `FindPolygonGuess` keeps a suspicious control-net triangle guess as a candidate against the nearest control point's, and returns the nearer one on the surface, so a rational surface whose control points are farther apart than its neighbouring parts does not lose a good guess (WR-444, #1164).
