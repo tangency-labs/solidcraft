@@ -780,11 +780,7 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
             if *components {
                 ui_kit::options(ui, "feature_options", &mut [("Flip", flip)]);
             } else {
-                ui_kit::options(
-                    ui,
-                    "feature_options",
-                    &mut [("Flip", flip), ("X", ax), ("Y", ay), ("Z", az)],
-                );
+                ui_kit::options(ui, "feature_options", &mut [("Flip", flip), ("X", ax), ("Y", ay), ("Z", az)]);
             }
             // A part inside a subassembly placed more than once sits where that shared
             // definition says: aligning it moves it in every placement.

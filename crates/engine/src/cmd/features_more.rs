@@ -402,10 +402,7 @@ fn replace_face(s: &mut Session, p: &Value) -> Result<Value> {
 /// `None` when the call does not restrict the move.
 fn axes_param(p: &Value, cmd: &str) -> Result<Option<[bool; 3]>> {
     let Some(v) = p.get("axes").filter(|v| !v.is_null()) else { return Ok(None) };
-    let a = v
-        .as_array()
-        .filter(|a| a.len() == 3)
-        .ok_or_else(|| bad(cmd, "`axes` must be [x, y, z] booleans"))?;
+    let a = v.as_array().filter(|a| a.len() == 3).ok_or_else(|| bad(cmd, "`axes` must be [x, y, z] booleans"))?;
     let mut mask = [false; 3];
     for (slot, v) in mask.iter_mut().zip(a) {
         *slot = v.as_bool().ok_or_else(|| bad(cmd, "`axes` must be [x, y, z] booleans"))?;
@@ -490,18 +487,13 @@ fn align(s: &mut Session, p: &Value) -> Result<Value> {
     };
     let axes = axes_param(p, cmd)?;
     if axes.is_some() && (from_plane.is_some() || to_plane.is_some() || from_normal.is_some() || to_normal.is_some()) {
-        return Err(bad(
-            cmd,
-            "`axes` applies to point-to-point alignment: leave out `from_face`, `to_face`, `from_plane` and `to_plane`",
-        ));
+        return Err(bad(cmd, "`axes` applies to point-to-point alignment: leave out `from_face`, `to_face`, `from_plane` and `to_plane`"));
     }
     // The directions are stored in the same frame as `from`/`to` (the first moved body's frame).
     let axes = axes.map(|mask| {
         mask.into_iter()
             .zip([Vec3::X, Vec3::Y, Vec3::Z])
-            .filter_map(|(on, world)| {
-                on.then(|| Dir(solidcraft_doc::apply_vector(&inverse, world).normalized().unwrap_or(world)))
-            })
+            .filter_map(|(on, world)| on.then(|| Dir(solidcraft_doc::apply_vector(&inverse, world).normalized().unwrap_or(world))))
             .collect::<Vec<_>>()
     });
     let flip = bool_(p, "flip").unwrap_or(false);
