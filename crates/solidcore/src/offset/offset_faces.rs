@@ -1,7 +1,7 @@
 //! Not upstream: moving faces of a solid along their normals, the tangent blends on them
 //! following (the SolidCraft fork's `SmOffsetFacesExecutive`, WR-615).
 //!
-//! Fork: tangency-labs/smlib a96ce9f, 607d617 and 758829c, `source/SMLib/src/SmOffsetFaces.cpp`,
+//! Fork: tangency-labs/smlib a96ce9f, 607d617, 758829c and 9504880 (opt-in), `source/SMLib/src/SmOffsetFaces.cpp`,
 //! `source/SMLib/inc/SmOffsetFaces.h` and `SM_AI_FOLLOWED_BLEND` (`SmAttribute.h`). Pinned
 //! SMLib has none of it; the pinned face move (`FaceuseOffset` and `SmBrep::LocalOperation`)
 //! is unchanged.
@@ -54,6 +54,10 @@
 //!   pointers freed by a scope guard.
 //! - **Refusals** return [`SolidError::Upstream`] `SM_ERR` with the refusal and its reason
 //!   on the executive, as the fork's `Refuse` returns `SM_ERR`.
+//! - **Closed walls (opt-in).** 9504880's removal of the edges between a moved face and
+//!   one that stayed on one surface runs only with
+//!   `Kernel::fixes.local_operation_closes_walls_to_nothing` (WR-566 addendum); a face is
+//!   on a new surface there when it is a moved face ([`MARK_MOVED`]) lying on one.
 //! - No recursion.
 
 use crate::blend::fillet_executive::p1::is_radius_supported;
@@ -887,6 +891,10 @@ impl OffsetFacesExecutive {
         // The local operation takes the surfaces over, also when it fails.
         local_operation_simple(k, b, &faces, surfaces)?;
 
+        if k.fixes.local_operation_closes_walls_to_nothing {
+            return self.join_across_closed_walls(k, b, &targets, tol);
+        }
+
         // Some face must lie on one of the surfaces, or the operation moved none.
         let mut moved_any = false;
         for f in crate::topology::brep::p1::faces(b, None)? {
@@ -903,6 +911,82 @@ impl OffsetFacesExecutive {
             ));
         }
         Ok(())
+    }
+
+    /// The end of step 4 with `Kernel::fixes.local_operation_closes_walls_to_nothing`
+    /// (fork 9504880, WR-566 addendum): the faces on the new surfaces collected, and the
+    /// edges between such a face and one that stayed, which `SmEdge::IsTopological`
+    /// finds removable, removed (`RemoveTopologicalEdgesAndVertices`), with the vertices
+    /// at their ends where those join two edges on one curve. A face the move closed to
+    /// nothing (a step wall) leaves the faces either side meeting on one surface; every
+    /// other edge and vertex is kept. A face is on a new surface when it is a moved face
+    /// ([`MARK_MOVED`]) lying on one ([`on_target`]): the fork's surface mark is on the
+    /// moved faces' surfaces only, and a face that stayed may lie on the same plane. The
+    /// "moved no face" refusal is unchanged (any face on a new surface).
+    fn join_across_closed_walls(
+        &mut self,
+        k: &mut Kernel,
+        b: &mut Brep,
+        targets: &[Surface],
+        tol: f64,
+    ) -> Result<()> {
+        let mut moved_any = false;
+        let mut is_target = Vec::new();
+        for f in crate::topology::brep::p1::faces(b, None)? {
+            if on_target(k, b, f, targets, tol)? {
+                moved_any = true;
+                if FollowedBlendMark::has(b, Some(EntityRef::Face(f)), MARK_MOVED) {
+                    is_target.push(f);
+                }
+            }
+        }
+        let mut joins: Vec<EdgeId> = Vec::new();
+        for &f in &is_target {
+            for e in face_edges(b, f)? {
+                let beside = edge::faces(b, e, None)?;
+                let to_stayed = beside.iter().any(|&g| g != f && !is_target.contains(&g));
+                if to_stayed
+                    && edge::is_topological(k, b, e, 1.0)?.is_topological
+                    && !joins.contains(&e)
+                {
+                    joins.push(e);
+                }
+            }
+        }
+        if !moved_any {
+            return Err(self.refuse(
+                OffsetFacesRefusal::NoEffect,
+                "the local operation reported success but moved no face onto its new surface",
+                None,
+            ));
+        }
+        if joins.is_empty() {
+            return Ok(());
+        }
+        let mut keep_edges = crate::topology::brep::p1::edges(b, None)?;
+        let all_vertices = crate::topology::brep::p1::vertices(b, None)?;
+        let mut join_ends = Vec::new();
+        for &e in &joins {
+            if let Some(at) = keep_edges.iter().position(|&x| x == e) {
+                keep_edges.remove(at);
+            }
+            let (s, t) = edge::start_end_vertices(b, e)?;
+            for v in [s, t] {
+                if !join_ends.contains(&v) {
+                    join_ends.push(v);
+                }
+            }
+        }
+        let keep_vertices: Vec<_> = all_vertices
+            .into_iter()
+            .filter(|&v| !join_ends.contains(&Some(v)))
+            .collect();
+        crate::topology::brep::p5::remove_topological_edges_and_vertices(
+            k,
+            b,
+            Some(&keep_edges),
+            Some(&keep_vertices),
+        )
     }
 
     /// `OffsetFaces` step 5: the sharp edges each followed blend became ([`MARK_SHARP`]),
