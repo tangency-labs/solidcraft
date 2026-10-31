@@ -1144,28 +1144,36 @@ fn switcher(app: &mut SolveApp, ui: &mut egui::Ui) {
                 || if providers.is_empty() { app.agent_chat.model.clone() } else { tr("ui.agent_chat_choose_model").to_string() },
                 |(_, name)| name.clone(),
             );
-            let mut pick: Option<String> = None;
             let width = if providers.is_empty() { t.form_label_width } else { picker_width(ui, &cur) };
-            let r = ui
+            let choices: Vec<ui_kit::SearchChoice<'_>> =
+                list.iter().map(|(m, name)| ui_kit::SearchChoice { value: &m.id, label: name, tip: &m.description, group: None }).collect();
+            let custom = custom_models_accepted(app);
+            let picker = ui
                 .allocate_ui(vec2(width, t.control_height), |ui| {
                     ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Truncate);
-                    ui_kit::dropdown_menu(ui, "sc_agent_model", &cur, |ui| {
-                        for (m, name) in &list {
-                            let row = ui_kit::list_picker(ui, &m.id, name, m.id == app.agent_chat.model);
-                            let row = if m.description.is_empty() { row } else { row.on_hover_text(&m.description) };
-                            crate::scenario::publish_handle(&format!("agent_chat:model:{}", m.id), row.rect.center());
-                            if row.clicked() {
-                                pick = Some(m.id.clone());
-                            }
-                        }
-                    })
+                    ui_kit::search_picker(
+                        ui,
+                        ui_kit::SearchPicker {
+                            id: "sc_agent_model",
+                            handles: "agent_chat:model",
+                            current: &cur,
+                            current_value: &app.agent_chat.model,
+                            hint: tr("ui.agent_chat_model_search"),
+                            choices: &choices,
+                            custom,
+                            note: app.agent_chat.models_note.as_deref(),
+                            enabled: true,
+                        },
+                    )
                 })
                 .inner;
-            crate::scenario::publish_rect("agent_chat:model", r.rect);
-            crate::scenario::publish_handle("agent_chat:model", r.rect.center());
-            r.on_hover_text(tr("ui.agent_chat_model_tip"));
-            if let Some(m) = pick {
-                set_model(app, &m);
+            picker.response.on_hover_text(tr("ui.agent_chat_model_tip"));
+            match picker.inner {
+                Some(ui_kit::Picked::Listed(m)) => set_model(app, &m),
+                Some(ui_kit::Picked::Custom(m)) => {
+                    set_custom_model(app, &m);
+                }
+                None => {}
             }
         }
     });
@@ -1290,52 +1298,94 @@ fn config_select(app: &mut SolveApp, ui: &mut egui::Ui, option: &acp::ConfigOpti
         .collect::<Vec<_>>()
         .join("\n");
     let mut picked = None;
-    let response = ui
-        .add_enabled_ui(!pending && !option.options.is_empty(), |ui| {
-            ui.allocate_ui(vec2(width, t.control_height), |ui| {
-                ui_kit::dropdown_menu(ui, ("sc_agent_config", &option.id), &displayed, |ui| {
-                    let mut previous_group: Option<&str> = None;
-                    for choice in &option.options {
-                        let group = choice.group.as_deref().filter(|g| !g.is_empty());
-                        if let Some(group) = group
-                            && previous_group != Some(group)
-                        {
-                            ui.label(RichText::new(compact_text(group, 32)).color(t.text_dim).size(t.font_small)).on_hover_text(group);
-                        }
-                        previous_group = group;
-                        let row = ui_kit::list_picker(ui, &choice.value, &compact_text(&choice.name, 32), choice.value == option.current_value);
-                        let row = row.on_hover_text(
-                            [choice.name.as_str(), choice.description.as_str()]
-                                .into_iter()
-                                .filter(|part| !part.is_empty())
-                                .collect::<Vec<_>>()
-                                .join("\n"),
-                        );
-                        crate::scenario::publish_handle(&format!("agent_chat:config:{}:{}", option.id, choice.value), row.rect.center());
-                        if option.category == "model" {
-                            crate::scenario::publish_handle(&format!("agent_chat:model:{}", choice.value), row.rect.center());
-                        }
-                        if row.clicked() {
-                            picked = Some(choice.value.clone());
-                        }
-                    }
-                })
+    let enabled = !pending && !option.options.is_empty();
+    let handles = format!("agent_chat:config:{}", option.id);
+    let response = if option.category == "model" {
+        let choices: Vec<ui_kit::SearchChoice<'_>> = option
+            .options
+            .iter()
+            .map(|choice| ui_kit::SearchChoice {
+                value: &choice.value,
+                label: &choice.name,
+                tip: &choice.description,
+                group: choice.group.as_deref(),
             })
-            .inner
-        })
-        .inner;
-    crate::scenario::publish_handle(&format!("agent_chat:config:{}", option.id), response.rect.center());
-    crate::scenario::publish_rect(&format!("agent_chat:config:{}", option.id), response.rect);
-    if option.category == "model" {
-        crate::scenario::publish_handle("agent_chat:model", response.rect.center());
-    } else if option.category == "mode" {
-        crate::scenario::publish_handle("agent_chat:mode", response.rect.center());
-    }
-    response
-        .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::ComboBox, !pending && !option.options.is_empty(), format!("{name}: {selected}")));
+            .collect();
+        let id = format!("sc_agent_config:{}", option.id);
+        let picker = ui
+            .allocate_ui(vec2(width, t.control_height), |ui| {
+                ui_kit::search_picker(
+                    ui,
+                    ui_kit::SearchPicker {
+                        id: &id,
+                        handles: &handles,
+                        current: &displayed,
+                        current_value: &option.current_value,
+                        hint: tr("ui.agent_chat_model_search"),
+                        choices: &choices,
+                        custom: true,
+                        note: None,
+                        enabled,
+                    },
+                )
+            })
+            .inner;
+        picked = picker.inner;
+        // Under the names every kind of agent's model picker goes by.
+        let rows = format!("{handles}:");
+        for (name, at) in crate::scenario::handles(&rows) {
+            if let Some(row) = name.strip_prefix(&rows) {
+                crate::scenario::publish_handle(&format!("agent_chat:model:{row}"), at);
+            }
+        }
+        crate::scenario::publish_target("agent_chat:model", picker.response.rect);
+        picker.response
+    } else {
+        let response = ui
+            .add_enabled_ui(enabled, |ui| {
+                ui.allocate_ui(vec2(width, t.control_height), |ui| {
+                    ui_kit::dropdown_menu(ui, ("sc_agent_config", &option.id), &displayed, |ui| {
+                        let mut previous_group: Option<&str> = None;
+                        for choice in &option.options {
+                            let group = choice.group.as_deref().filter(|g| !g.is_empty());
+                            if let Some(group) = group
+                                && previous_group != Some(group)
+                            {
+                                ui.label(RichText::new(compact_text(group, 32)).color(t.text_dim).size(t.font_small)).on_hover_text(group);
+                            }
+                            previous_group = group;
+                            let row = ui_kit::list_picker(ui, &choice.value, &compact_text(&choice.name, 32), choice.value == option.current_value);
+                            let row = row.on_hover_text(
+                                [choice.name.as_str(), choice.description.as_str()]
+                                    .into_iter()
+                                    .filter(|part| !part.is_empty())
+                                    .collect::<Vec<_>>()
+                                    .join("\n"),
+                            );
+                            crate::scenario::publish_handle(&format!("{handles}:{}", choice.value), row.rect.center());
+                            if row.clicked() {
+                                picked = Some(ui_kit::Picked::Listed(choice.value.clone()));
+                            }
+                        }
+                    })
+                })
+                .inner
+            })
+            .inner;
+        crate::scenario::publish_target(&handles, response.rect);
+        if option.category == "mode" {
+            crate::scenario::publish_handle("agent_chat:mode", response.rect.center());
+        }
+        response
+    };
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::ComboBox, enabled, format!("{name}: {selected}")));
     response.on_hover_text(tip);
-    if let Some(value) = picked {
-        super::set_config_option(app, &option.id, &value);
+    match picked {
+        Some(ui_kit::Picked::Listed(value)) => super::set_config_option(app, &option.id, &value),
+        Some(ui_kit::Picked::Custom(value)) => {
+            super::set_custom_model(app, &value);
+        }
+        None => {}
     }
 }
 

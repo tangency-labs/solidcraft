@@ -254,10 +254,14 @@ const SEARCH_TEXT_CAP: usize = 256;
 /// Characters of a label shown on a `search_picker` row, and of a tip or note shown with it.
 const SEARCH_LABEL_CAP: usize = 64;
 const SEARCH_NOTE_CAP: usize = 1024;
+/// Characters of a `search_picker` note shown under its list; the rest shows on hover.
+const SEARCH_NOTE_SHOWN: usize = 200;
+/// Rows a `search_picker` makes room for when it opens with none.
+const SEARCH_ROWS_AWAITED: usize = 6;
 
 /// One row of a `search_picker`. The value, label and tip are searched; `tip` also shows on hover,
 /// and a change of `group` between rows draws a heading.
-#[allow(dead_code)] // Until the agent chat's model pickers use it.
+#[cfg_attr(target_arch = "wasm32", allow(dead_code))] // Until the Add agent dialog uses it.
 pub(crate) struct SearchChoice<'a> {
     pub value: &'a str,
     pub label: &'a str,
@@ -266,7 +270,7 @@ pub(crate) struct SearchChoice<'a> {
 }
 
 /// What a `search_picker` shows.
-#[allow(dead_code)] // Until the agent chat's model pickers use it.
+#[cfg_attr(target_arch = "wasm32", allow(dead_code))] // Until the Add agent dialog uses it.
 pub(crate) struct SearchPicker<'a> {
     /// ComboBox id salt; it also keys the search text, so one per picker in the window.
     pub id: &'a str,
@@ -298,7 +302,7 @@ pub(crate) enum Picked {
 /// the exact or first match, else the typed text. Only the rows in view are laid out, so a long
 /// list stays cheap. Returns the pick and the control's response.
 /// Tokens: dropdown tokens, field tokens, `space_24`, `font_small`, `text_dim`, `form_card_width`.
-#[allow(dead_code)] // Until the agent chat's model pickers use it.
+#[cfg_attr(target_arch = "wasm32", allow(dead_code))] // Until the Add agent dialog uses it.
 pub(crate) fn search_picker(ui: &mut Ui, p: SearchPicker<'_>) -> egui::InnerResponse<Option<Picked>> {
     crate::prefs_search::note_current(ui, p.current);
     // As in `dropdown_menu_with_close_behavior`: only a search probe skips the real control.
@@ -313,7 +317,7 @@ pub(crate) fn search_picker(ui: &mut Ui, p: SearchPicker<'_>) -> egui::InnerResp
         .add_enabled_ui(p.enabled, |ui| {
             let response = egui::ComboBox::from_id_salt(p.id)
                 .width(dimension(ui.available_width()))
-                .height(Tokens::get().space_24 * 16.0)
+                .height(Tokens::get().space_24 * 20.0)
                 .selected_text(p.current)
                 .icon(dropdown_arrow)
                 .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
@@ -324,6 +328,7 @@ pub(crate) fn search_picker(ui: &mut Ui, p: SearchPicker<'_>) -> egui::InnerResp
                 ui.data_mut(|data| {
                     data.remove::<String>(state.with("filter"));
                     data.remove::<bool>(state.with("focused"));
+                    data.remove::<f32>(state.with("height"));
                 });
             }
             response
@@ -366,9 +371,18 @@ fn search_picker_popup(ui: &mut Ui, p: &SearchPicker<'_>, state: egui::Id) -> Op
         ui.data_mut(|data| data.insert_temp(filter_id, filter.clone()));
     }
     let typed = filter.trim();
-    let query = typed.to_lowercase();
-    let hit = |text: &str| text.chars().take(SEARCH_TEXT_CAP).collect::<String>().to_lowercase().contains(&query);
-    let visible: Vec<&SearchChoice<'_>> = p.choices.iter().filter(|c| query.is_empty() || hit(c.value) || hit(c.label) || hit(c.tip)).collect();
+    let query: String = typed.chars().flat_map(char::to_lowercase).collect();
+    // One buffer for every row: this runs each frame the popup is open, over a list of thousands.
+    let mut searched = String::new();
+    let mut hit = |choice: &SearchChoice<'_>| {
+        searched.clear();
+        for text in [choice.value, choice.label, choice.tip] {
+            searched.extend(text.chars().take(SEARCH_TEXT_CAP).flat_map(char::to_lowercase));
+            searched.push('\n');
+        }
+        searched.contains(&query)
+    };
+    let visible: Vec<&SearchChoice<'_>> = p.choices.iter().filter(|choice| query.is_empty() || hit(choice)).collect();
     let custom = (p.custom && !typed.is_empty() && !p.choices.iter().any(|c| c.value == typed)).then_some(typed);
     let mut picked = None;
     if search.lost_focus() && ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Enter)) {
@@ -387,49 +401,75 @@ fn search_picker_popup(ui: &mut Ui, p: &SearchPicker<'_>, state: egui::Id) -> Op
             }
         };
     }
-    if let Some(model) = custom {
-        search_heading(ui, crate::i18n::tr("ui.agent_chat_custom_heading"), t.space_16);
-        let text = crate::i18n::format("ui.agent_chat_model_custom", &[("model", &compact(model, SEARCH_LABEL_CAP))]);
-        let row = super::list_picker(ui, "custom", &text, false);
-        scenario::publish_target(&format!("{}:custom", p.handles), row.rect);
-        if row.clicked() {
-            picked = Some(Picked::Custom(model.to_owned()));
+    let width = ui.available_width();
+    let note = p.note.map(|note| {
+        let shown = compact(note, SEARCH_NOTE_SHOWN);
+        ui.painter().layout(shown, egui::FontId::proportional(t.font_small), t.text_dim, width)
+    });
+    let gap = ui.spacing().item_spacing.y;
+    let note_height = note.as_ref().map_or(0.0, |note| note.size().y + gap);
+    let row_height = row_height();
+    let most = ui.ctx().content_rect().height() - t.space_24 * 4.0;
+    // A popup's Ui stays within its size of the last frame, so it can't grow once it is open. All
+    // that can change below the box shares a height fixed when it opens, the list taking the rest.
+    let height = ui.data_mut(|data| {
+        *data.get_temp_mut_or_insert_with(state.with("height"), || {
+            let mut group = None;
+            let rows = p.choices.len() + p.choices.iter().filter(|choice| search_heading_of(&mut group, choice).is_some()).count();
+            // No rows yet: they may still be on their way, and this can't grow to take them.
+            let rows = if rows == 0 { SEARCH_ROWS_AWAITED } else { rows };
+            let heading = t.space_16 + gap;
+            let custom = if p.custom { heading + row_height + gap } else { 0.0 };
+            let list = (rows as f32 * (row_height + gap)).clamp(custom + row_height + gap, t.space_24 * 10.0);
+            (heading + list + note_height).min(most).max(heading + custom + row_height + gap)
+        })
+    });
+    ui.allocate_ui(vec2(dimension(width), height), |ui| {
+        ui.set_min_height(height);
+        if let Some(model) = custom {
+            search_heading(ui, crate::i18n::tr("ui.agent_chat_custom_heading"), t.space_16);
+            let text = crate::i18n::format("ui.agent_chat_model_custom", &[("model", &compact(model, SEARCH_LABEL_CAP))]);
+            let row = super::list_picker(ui, "custom", &text, false);
+            scenario::publish_target(&format!("{}:custom", p.handles), row.rect);
+            if row.clicked() {
+                picked = Some(Picked::Custom(model.to_owned()));
+            }
         }
-    }
-    if !visible.is_empty() {
-        search_heading(ui, crate::i18n::tr("ui.agent_chat_models_heading"), t.space_16);
-        // Rows of one height, group headings too: only those in view are laid out. The list's
-        // height follows the whole list, so the popup does not jump about while filtering.
-        let row_height = row_height();
-        let rows = search_rows(&visible);
-        let all = search_rows(&p.choices.iter().collect::<Vec<_>>()).len();
-        let height = (all as f32 * (row_height + ui.spacing().item_spacing.y)).clamp(row_height, t.space_24 * 10.0);
-        egui::ScrollArea::vertical()
-            .id_salt(state.with("list"))
-            .max_height(height)
-            .min_scrolled_height(height)
-            .auto_shrink([false, false])
-            .show_rows(ui, row_height, rows.len(), |ui, range| {
-                for row in rows.get(range).unwrap_or_default() {
-                    match row {
-                        SearchRow::Heading(group) => search_heading(ui, group, row_height),
-                        SearchRow::Choice(choice) => {
-                            let response =
-                                super::list_picker(ui, choice.value, &compact(choice.label, SEARCH_LABEL_CAP), choice.value == p.current_value);
-                            scenario::publish_handle(&format!("{}:{}", p.handles, choice.value), response.rect.center());
-                            let response =
-                                if choice.tip.is_empty() { response } else { response.on_hover_text(compact(choice.tip, SEARCH_NOTE_CAP)) };
-                            if response.clicked() {
-                                picked = Some(Picked::Listed(choice.value.to_owned()));
+        if !visible.is_empty() {
+            search_heading(ui, crate::i18n::tr("ui.agent_chat_models_heading"), t.space_16);
+            // Rows of one height, group headings too: only those in view are laid out.
+            let list = (ui.available_height() - note_height).max(row_height);
+            let rows = search_rows(&visible);
+            egui::ScrollArea::vertical()
+                .id_salt(state.with("list"))
+                .max_height(list)
+                .min_scrolled_height(list)
+                .auto_shrink([false, false])
+                .show_rows(ui, row_height, rows.len(), |ui, range| {
+                    for row in rows.get(range).unwrap_or_default() {
+                        match row {
+                            SearchRow::Heading(group) => search_heading(ui, group, row_height),
+                            SearchRow::Choice(choice) => {
+                                let response =
+                                    super::list_picker(ui, choice.value, &compact(choice.label, SEARCH_LABEL_CAP), choice.value == p.current_value);
+                                scenario::publish_handle(&format!("{}:{}", p.handles, choice.value), response.rect.center());
+                                let response =
+                                    if choice.tip.is_empty() { response } else { response.on_hover_text(compact(choice.tip, SEARCH_NOTE_CAP)) };
+                                if response.clicked() {
+                                    picked = Some(Picked::Listed(choice.value.to_owned()));
+                                }
                             }
                         }
                     }
-                }
-            });
-    }
-    if let Some(note) = p.note {
-        ui.add(egui::Label::new(RichText::new(compact(note, SEARCH_NOTE_CAP)).size(t.font_small).color(t.text_dim)).wrap());
-    }
+                });
+        }
+        if let Some(note) = note {
+            let response = ui.add(egui::Label::new(note));
+            if let Some(whole) = p.note.filter(|whole| whole.chars().count() > SEARCH_NOTE_SHOWN) {
+                response.on_hover_text(compact(whole, SEARCH_NOTE_CAP));
+            }
+        }
+    });
     if picked.is_some() {
         ui.close();
     }
@@ -446,16 +486,20 @@ fn search_rows<'a>(choices: &[&'a SearchChoice<'a>]) -> Vec<SearchRow<'a>> {
     let mut rows = Vec::with_capacity(choices.len());
     let mut group = None;
     for choice in choices {
-        let next = choice.group.filter(|g| !g.is_empty());
-        if let Some(heading) = next
-            && next != group
-        {
+        if let Some(heading) = search_heading_of(&mut group, choice) {
             rows.push(SearchRow::Heading(heading));
         }
-        group = next;
         rows.push(SearchRow::Choice(choice));
     }
     rows
+}
+
+/// The heading `choice` opens after a row of `group`, if any; `group` becomes its group.
+fn search_heading_of<'a>(group: &mut Option<&'a str>, choice: &SearchChoice<'a>) -> Option<&'a str> {
+    let next = choice.group.filter(|g| !g.is_empty());
+    let heading = next.filter(|_| next != *group);
+    *group = next;
+    heading
 }
 
 /// A dim one-line heading in a `search_picker`'s popup.

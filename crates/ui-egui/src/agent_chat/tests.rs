@@ -1600,6 +1600,113 @@ fn the_control_channel_sends_an_unlisted_model_where_it_can_go() {
     assert!(script.calls().is_empty());
 }
 
+/// The header's picker on an agent that lists models: it searches, a row chooses, and what was typed
+/// can be chosen too. The control and the popup stay in a narrow chat's window.
+#[test]
+fn the_header_model_picker_searches_and_takes_a_typed_model() {
+    use crate::scenario::{handle_at, rect_of};
+    let mut h = narrow_chat();
+    let script = Script::default();
+    h.app.agent_chat.backend = Some(Box::new(script.clone()));
+    h.app.agent_chat.state = Some(State::Ready);
+    h.app.agent_chat.running_id = "claude".into();
+    script.report(models_reply("fast"));
+    h.frames(4);
+    let panel = rect_of("agent_chat:panel").expect("the panel");
+    let control = rect_of("agent_chat:model").expect("the picker");
+    assert!(control.left() >= panel.left() && control.right() <= panel.right(), "{control:?} in {panel:?}");
+    assert!(handle_at("agent_chat:model:search").is_none(), "closed");
+
+    h.step(&json!({"click": {"handle": "agent_chat:model"}})).unwrap();
+    h.frames(3);
+    for name in ["search", "fast", "smart"] {
+        assert!(handle_at(&format!("agent_chat:model:{name}")).is_some(), "{name}");
+    }
+    assert!(handle_at("agent_chat:model:custom").is_none(), "nothing typed");
+    let search = rect_of("agent_chat:model:search").expect("the search box");
+    assert!(search.left() >= 0.0 && search.right() <= 1600.0, "inside the harness's window: {search:?}");
+
+    h.step(&json!({"text": "SMA"})).unwrap();
+    h.frames(3);
+    assert!(handle_at("agent_chat:model:fast").is_none() && handle_at("agent_chat:model:smart").is_some());
+    assert!(handle_at("agent_chat:model:custom").is_some(), "the typed text is not a listed model");
+    h.step(&json!({"click": {"handle": "agent_chat:model:smart"}})).unwrap();
+    h.frames(3);
+    assert_eq!(script.calls(), ["set_model: smart"]);
+    assert_eq!(h.app.agent_chat.model, "smart");
+    assert!(handle_at("agent_chat:model:search").is_none(), "a choice closes it");
+
+    h.step(&json!({"click": {"handle": "agent_chat:model"}})).unwrap();
+    h.frames(3);
+    h.step(&json!({"text": "zzz"})).unwrap();
+    h.frames(3);
+    h.step(&json!({"click": {"handle": "agent_chat:model:custom"}})).unwrap();
+    h.frames(3);
+    assert_eq!(script.calls(), ["set_model: smart", "set_model: zzz"]);
+    assert_eq!(h.app.agent_chat.model, "zzz");
+    disconnect(&mut h.app);
+}
+
+/// The picker on an agent with a model option goes by the same names. A row and a typed model both
+/// go through the option, and other options stay plain dropdowns.
+#[test]
+fn the_header_model_option_searches_and_takes_a_typed_model() {
+    use crate::scenario::handle_at;
+    let mut h = narrow_chat();
+    let script = Script::default();
+    h.app.agent_chat.backend = Some(Box::new(script.clone()));
+    h.app.agent_chat.state = Some(State::Ready);
+    script.report(Event::ConfigOptions(modern_options("fast")));
+    h.frames(4);
+    assert_eq!(handle_at("agent_chat:model"), handle_at("agent_chat:config:some.provider.model"));
+
+    h.step(&json!({"click": {"handle": "agent_chat:model"}})).unwrap();
+    h.frames(3);
+    for name in ["search", "fast", "smart"] {
+        assert!(handle_at(&format!("agent_chat:model:{name}")).is_some(), "{name}");
+        assert_eq!(handle_at(&format!("agent_chat:model:{name}")), handle_at(&format!("agent_chat:config:some.provider.model:{name}")));
+    }
+    h.step(&json!({"click": {"handle": "agent_chat:model:smart"}})).unwrap();
+    h.frames(3);
+    assert_eq!(script.calls(), ["set_config_option: some.provider.model=smart"]);
+    script.report(Event::ConfigOptionFinished { id: "some.provider.model".into(), result: Ok(modern_options("smart")) });
+    h.frames(3);
+    assert_eq!(h.app.agent_chat.model, "smart");
+
+    h.step(&json!({"click": {"handle": "agent_chat:model"}})).unwrap();
+    h.frames(3);
+    h.step(&json!({"text": "zzz"})).unwrap();
+    h.frames(3);
+    assert!(handle_at("agent_chat:model:custom").is_some());
+    h.step(&json!({"click": {"handle": "agent_chat:model:custom"}})).unwrap();
+    h.frames(3);
+    assert_eq!(script.calls().last().map(String::as_str), Some("set_config_option: some.provider.model=zzz"));
+    assert_eq!(h.app.agent_chat.model, "smart", "not until the agent says so");
+    assert!(h.app.agent_chat.config_pending);
+    disconnect(&mut h.app);
+}
+
+/// Nothing typed can be chosen where it could not be sent, and the reason a listing failed shows
+/// in the popup.
+#[test]
+fn the_header_model_picker_offers_no_typed_model_it_cannot_send_and_shows_why_listing_failed() {
+    use crate::scenario::handle_at;
+    let mut h = narrow_chat();
+    h.app.agent_chat.state = Some(State::Ready);
+    h.app.agent_chat.models = vec![acp::ModelInfo { id: "fast".into(), name: "fast".into(), description: String::new() }];
+    h.app.agent_chat.model = "fast".into();
+    h.app.agent_chat.models_note = Some("Couldn't list models: offline".into());
+    h.frames(4);
+    assert!(!custom_models_accepted(&h.app));
+    h.step(&json!({"click": {"handle": "agent_chat:model"}})).unwrap();
+    h.frames(3);
+    assert!(h.widget("Couldn't list models: offline").is_some());
+    h.step(&json!({"text": "zzz"})).unwrap();
+    h.frames(3);
+    assert!(handle_at("agent_chat:model:search").is_some());
+    assert!(handle_at("agent_chat:model:custom").is_none());
+}
+
 /// A listing that fails says why and leaves last time's list, with the configured model in it; the
 /// next connection starts without the note.
 #[cfg(not(target_arch = "wasm32"))]

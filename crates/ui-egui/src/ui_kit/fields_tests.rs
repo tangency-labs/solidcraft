@@ -252,6 +252,117 @@ fn search_picker_filters_focuses_picks_and_takes_custom_values() {
 
 /// A long list costs only the rows in view, and a long label neither widens the popup past the
 /// window nor reaches past its edge.
+/// A popup can't grow once it is open, so what appears in it later must fit in the room it opened
+/// with: a custom row above a short list, a list that was empty, a note, and a list again after a
+/// search that matched nothing.
+#[test]
+fn search_picker_keeps_every_row_reachable_as_its_contents_change() {
+    use std::cell::{Cell, RefCell};
+    let ctx = crate::fonts::test_context();
+    let values = RefCell::new(vec!["a/one", "b/two"]);
+    let note: Cell<Option<&str>> = Cell::new(None);
+    let picked = RefCell::new(Vec::new());
+    let frame = |events: Vec<egui::Event>| {
+        scenario::clear_handles();
+        let raw =
+            egui::RawInput { events, screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(900.0, 700.0))), ..Default::default() };
+        let _ = ctx.run_ui(raw, |ui| {
+            ui.allocate_ui(egui::vec2(160.0, 40.0), |ui| {
+                crate::ui_kit::scope(ui, |ui| {
+                    let values = values.borrow();
+                    let choices: Vec<SearchChoice<'_>> =
+                        values.iter().map(|value| SearchChoice { value, label: value, tip: "", group: None }).collect();
+                    let result = search_picker(
+                        ui,
+                        SearchPicker {
+                            id: "search_picker_room",
+                            handles: "room",
+                            current: "b/two",
+                            current_value: "b/two",
+                            hint: "Search",
+                            choices: &choices,
+                            custom: true,
+                            note: note.get(),
+                            enabled: true,
+                        },
+                    );
+                    if let Some(pick) = result.inner {
+                        picked.borrow_mut().push(pick);
+                    }
+                });
+            });
+        });
+    };
+    let pointer = |at: egui::Pos2, pressed: bool| {
+        vec![
+            egui::Event::PointerMoved(at),
+            egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE },
+        ]
+    };
+    let click = |name: &str| {
+        let at = scenario::handle_at(name).unwrap_or_else(|| panic!("no {name}"));
+        frame(pointer(at, true));
+        frame(pointer(at, false));
+        frame(vec![]);
+        frame(vec![]);
+    };
+    let typing = |text: &str| {
+        frame(vec![egui::Event::Text(text.into())]);
+        frame(vec![]);
+        frame(vec![]);
+    };
+    let erase = |times: usize| {
+        for _ in 0..times {
+            frame(vec![egui::Event::Key {
+                key: egui::Key::Backspace,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: egui::Modifiers::NONE,
+            }]);
+            frame(vec![]);
+        }
+        frame(vec![]);
+    };
+    frame(vec![]);
+    frame(vec![]);
+
+    // The custom row appears above the two rows: the row under it can still be clicked.
+    click("room");
+    typing("two");
+    assert!(scenario::handle_at("room:custom").is_some());
+    click("room:b/two");
+    assert_eq!(picked.take(), [Picked::Listed("b/two".into())]);
+
+    // A search that matches nothing leaves no list; taking it back brings the rows, in reach.
+    click("room");
+    typing("zzz");
+    assert!(scenario::handle_at("room:a/one").is_none());
+    frame(vec![]);
+    frame(vec![]);
+    erase(3);
+    click("room:b/two");
+    assert_eq!(picked.take(), [Picked::Listed("b/two".into())]);
+
+    // A list that arrives while it is open, with a long note, stays in reach; the custom row too.
+    values.borrow_mut().clear();
+    note.set(Some("Listing models…"));
+    frame(vec![]);
+    click("room");
+    frame(vec![]);
+    values.borrow_mut().extend(["a/one", "b/two", "c/three", "d/four"]);
+    note.set(Some("A long reason, repeated until it wraps over a few lines of the popup, repeated until it wraps over a few lines of the popup."));
+    frame(vec![]);
+    frame(vec![]);
+    typing("four");
+    click("room:d/four");
+    assert_eq!(picked.take(), [Picked::Listed("d/four".into())]);
+    click("room");
+    typing("nothing");
+    click("room:custom");
+    assert_eq!(picked.take(), [Picked::Custom("nothing".into())]);
+}
+
 #[test]
 fn search_picker_lays_out_the_rows_in_view_inside_a_narrow_window() {
     let ctx = crate::fonts::test_context();
