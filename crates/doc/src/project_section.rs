@@ -87,9 +87,9 @@ impl SectionSeg {
                 if last.dist(first) <= span * 1e-6 {
                     pts.pop();
                 }
+                // Room for the repeated first point, so the closed spline stays within the cap.
+                let mut pts = capped_to(pts, MAX_SPLINE_POINTS - 1);
                 pts.push(first);
-                // The repeated first point can take it past the cap.
-                let pts = capped(pts);
                 SectionSeg::Spline { periodic: pts.len() >= 4, pts, beziers: Vec::new() }
             }
             other => other,
@@ -190,21 +190,18 @@ struct Piece {
 /// At most `MAX_SPLINE_POINTS` spline points, thinned evenly, keeping both ends (so a periodic
 /// spline's last point still repeats its first).
 fn capped(pts: Vec<Vec2>) -> Vec<Vec2> {
-    let n = pts.len();
-    if n <= MAX_SPLINE_POINTS {
+    capped_to(pts, MAX_SPLINE_POINTS)
+}
+
+/// At most `max` (but never fewer than two) of `pts`, picked evenly by index and keeping both
+/// ends: thinned to the cap itself, not to the coarser step that fits under it.
+fn capped_to(pts: Vec<Vec2>, max: usize) -> Vec<Vec2> {
+    let (n, max) = (pts.len(), max.max(2));
+    if n <= max {
         return pts;
     }
-    let step = (n - 1).div_ceil(MAX_SPLINE_POINTS - 1);
-    let last = pts.last().copied();
-    let mut out: Vec<Vec2> = pts.into_iter().step_by(step).collect();
-    if out.last() != last.as_ref() {
-        // Drop the kept point nearest the end rather than go past the cap.
-        if out.len() >= MAX_SPLINE_POINTS {
-            out.pop();
-        }
-        out.extend(last);
-    }
-    out
+    // Index i of the max kept: i * (n - 1) / (max - 1), rounded down; 0 and n - 1 at the ends.
+    (0..max).filter_map(|i| pts.get(i.saturating_mul(n - 1) / (max - 1)).copied()).collect()
 }
 
 /// The loops where `plane` cuts the mesh, in the plane's frame. An error when a spline of the
@@ -529,5 +526,30 @@ mod tests {
         assert_eq!(section_loops_within(&plane, &mesh, 4).map(|l| l.len()).ok(), Some(1));
         let e = section_loops_within(&plane, &mesh, 3).map(|l| l.len()).unwrap_err().to_string();
         assert!(e.contains("more than 3 face curves"), "{e}");
+    }
+
+    /// A closed loop whose spline needs the whole point budget keeps it. Closing the loop repeats
+    /// its first point; that 501st point once halved the spline (thinned every second point) or,
+    /// uncapped, took it past the limit the fit accepts.
+    #[test]
+    fn a_closed_spline_at_the_point_budget_keeps_its_points_and_area() {
+        let r = 30.0;
+        let round = |n: usize| -> Vec<Vec2> { (0..n).map(|i| Vec2::from_angle(TAU * i as f64 / n as f64) * r).collect() };
+        // The budget's worth of points, the last short of the first; a loop that repeats its first
+        // point already; and twice the budget.
+        let mut repeated = round(MAX_SPLINE_POINTS);
+        repeated.extend(repeated.first().copied());
+        for (pts, kept) in
+            [(round(MAX_SPLINE_POINTS), MAX_SPLINE_POINTS), (repeated, MAX_SPLINE_POINTS), (round(2 * MAX_SPLINE_POINTS), MAX_SPLINE_POINTS)]
+        {
+            let given = pts.len();
+            let mut seg = SectionSeg::spline(pts).closed(true);
+            seg.fit().unwrap();
+            let SectionSeg::Spline { pts, periodic, beziers } = &seg else { panic!("a spline stays a spline") };
+            assert_eq!(pts.len(), kept, "{given} points closed");
+            assert!(*periodic && pts.first() == pts.last() && !beziers.is_empty(), "{given} points closed");
+            let area = seg.area2() / 2.0;
+            assert!((area - std::f64::consts::PI * r * r).abs() < 1e-6 * r * r, "{given} points closed: area {area}");
+        }
     }
 }
