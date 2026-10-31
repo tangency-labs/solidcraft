@@ -64,7 +64,9 @@ pub fn start(listen_on: control_auth::Listen, ctx: egui::Context) -> Receiver<Co
                 Ok(l) => {
                     if let Some(port) = listen_on_listener(l, token.clone(), tx, ctx, false) {
                         if matches!(listen_on, control_auth::Listen::Default) {
-                            eprintln!("solidcraft: control channel on the default port 127.0.0.1:{port} (Preferences > Assistant turns it off)");
+                            solidcraft_engine::note!(
+                                "solidcraft: control channel on the default port 127.0.0.1:{port} (Preferences > Assistant turns it off)"
+                            );
                         }
                         // The discovery file: where `solidcraft-cli mcp` finds this app with no arguments.
                         match control_auth::write_current_port(port) {
@@ -73,14 +75,14 @@ pub fn start(listen_on: control_auth::Listen, ctx: egui::Context) -> Receiver<Co
                                     *p = Some((port, token));
                                 }
                             }
-                            Err(e) => eprintln!("solidcraft: could not write the control discovery file ({e})"),
+                            Err(e) => solidcraft_engine::note!("solidcraft: could not write the control discovery file ({e})"),
                         }
                     }
                 }
-                Err(e) => eprintln!("solidcraft: control server failed to bind 127.0.0.1: {e}"),
+                Err(e) => solidcraft_engine::note!("solidcraft: control server failed to bind 127.0.0.1: {e}"),
             }
         }
-        None => eprintln!("solidcraft: control server not started: no random token available"),
+        None => solidcraft_engine::note!("solidcraft: control server not started: no random token available"),
     }
     rx
 }
@@ -91,13 +93,13 @@ pub fn start(listen_on: control_auth::Listen, ctx: egui::Context) -> Receiver<Co
 /// requests go to `tx`, where the chat's gate reads them; one may wait long for the user's Allow.
 pub fn listen_agent(tx: Sender<ControlRequest>, ctx: egui::Context) -> Option<u16> {
     let Some(token) = new_token() else {
-        eprintln!("solidcraft: agent chat endpoint not started: no random token available");
+        solidcraft_engine::note!("solidcraft: agent chat endpoint not started: no random token available");
         return None;
     };
     let listener = match TcpListener::bind(("127.0.0.1", 0)) {
         Ok(l) => l,
         Err(e) => {
-            eprintln!("solidcraft: control server failed to bind 127.0.0.1: {e}");
+            solidcraft_engine::note!("solidcraft: control server failed to bind 127.0.0.1: {e}");
             return None;
         }
     };
@@ -111,19 +113,21 @@ fn listen_on_listener(listener: TcpListener, token: String, tx: Sender<ControlRe
     match control_auth::token_path(port) {
         Some(path) => match control_auth::write_token_file(&path, &token) {
             Ok(()) => {
-                eprintln!("solidcraft: control server listening on 127.0.0.1:{port} (token in {})", path.display());
+                solidcraft_engine::note!("solidcraft: control server listening on 127.0.0.1:{port} (token in {})", path.display());
                 if let Ok(mut files) = TOKEN_FILES.lock() {
                     files.push((path, token.clone()));
                 }
             }
-            Err(e) => eprintln!(
+            Err(e) => solidcraft_engine::note!(
                 "solidcraft: control server listening on 127.0.0.1:{port}, but its token file {} could not be written ({e}); \
                  clients need SOLIDCRAFT_CONTROL_TOKEN",
                 path.display()
             ),
         },
         None => {
-            eprintln!("solidcraft: control server listening on 127.0.0.1:{port}; no data folder for its token, clients need SOLIDCRAFT_CONTROL_TOKEN")
+            solidcraft_engine::note!(
+                "solidcraft: control server listening on 127.0.0.1:{port}; no data folder for its token, clients need SOLIDCRAFT_CONTROL_TOKEN"
+            )
         }
     }
     let token = std::sync::Arc::new(token);

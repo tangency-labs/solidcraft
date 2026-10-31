@@ -134,7 +134,7 @@ fn main() -> ExitCode {
     let mut args: Vec<String> = std::env::args().skip(1).collect();
     logger::init(&mut args);
     if let Err(e) = max_file_size(&mut args) {
-        eprintln!("error: {e}");
+        solidcraft_engine::note!("error: {e}");
         return ExitCode::FAILURE;
     }
     let r = match args.first().map(String::as_str) {
@@ -205,7 +205,7 @@ fn main() -> ExitCode {
     match r {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
-            eprintln!("error: {e}");
+            solidcraft_engine::note!("error: {e}");
             ExitCode::FAILURE
         }
     }
@@ -314,7 +314,7 @@ fn run_script_warning(s: &mut Session, path: &str, script: &Value) -> Result<Vec
 /// Step `step`'s `param_warnings` on stderr, one per line, named after the script at `path`.
 fn print_param_warnings(path: &str, step: usize, r: &Value) {
     for w in r.get("param_warnings").and_then(Value::as_array).into_iter().flatten() {
-        eprintln!("{path}: step {}: {}", step + 1, w.as_str().unwrap_or_default());
+        solidcraft_engine::note!("{path}: step {}: {}", step + 1, w.as_str().unwrap_or_default());
     }
 }
 
@@ -524,10 +524,10 @@ fn cmd_script(args: &[String]) -> Result<(), String> {
     let out = flag(args, "--out");
     let r = s.execute("timeline.export_script", &json!({"path": out})).map_err(|e| e.to_string())?;
     for what in r["omitted"].as_array().into_iter().flatten().filter_map(Value::as_str) {
-        eprintln!("note: the script leaves out {what}");
+        solidcraft_engine::note!("note: the script leaves out {what}");
     }
     match out {
-        Some(out) => eprintln!("{out}: {} steps", r["steps"]),
+        Some(out) => solidcraft_engine::note!("{out}: {} steps", r["steps"]),
         None => println!("{}", pretty(&r["script"])),
     }
     Ok(())
@@ -558,7 +558,7 @@ fn cmd_gpu(args: &[String]) -> Result<(), String> {
     );
     match s.lands_on {
         Some(solidcraft_gpu::select::Landing::Cpu) => {
-            eprintln!("warning: {}", solidcraft_engine::capture::CPU_WARNING);
+            solidcraft_engine::note!("warning: {}", solidcraft_engine::capture::CPU_WARNING);
             Ok(())
         }
         Some(_) => Ok(()),
@@ -622,7 +622,7 @@ fn cmd_snapshot(args: &[String]) -> Result<(), String> {
     std::fs::write(out, &png.bytes).map_err(|e| format!("{out}: {e}"))?;
     let mut reply = json!({"path": out, "width": w, "height": h, "bytes": png.bytes.len(), "renderer": png.renderer});
     if let Some(w) = solidcraft_engine::capture::warning(png.renderer) {
-        eprintln!("warning: {w}");
+        solidcraft_engine::note!("warning: {w}");
         reply["warning"] = json!(w);
     }
     println!("{}", pretty(&reply));
@@ -709,7 +709,7 @@ fn cmd_mcp(args: &[String]) -> Result<(), String> {
         .then(|| solidcraft_mcp::agent_scope(flags(args, "--allow-path").into_iter().map(std::path::PathBuf::from)));
     if let Some(s) = &scope {
         let roots: Vec<String> = s.roots().iter().map(|r| r.display().to_string()).collect();
-        eprintln!(
+        solidcraft_engine::note!(
             "solidcraft mcp: files limited to {} and the folders of designs opened or saved here (--allow-path DIR adds one, --allow-any-path lifts the limit)",
             roots.join(", ")
         );
@@ -717,7 +717,7 @@ fn cmd_mcp(args: &[String]) -> Result<(), String> {
             .and_then(|p| std::path::Path::new(p).parent())
             .map(|d| if d.as_os_str().is_empty() { std::path::Path::new(".") } else { d });
         if let Some(why) = design_dir.and_then(solidcraft_engine::io::vfs::design_folder_refusal) {
-            eprintln!("solidcraft mcp: the design's folder is left out because {why}; add it with --allow-path if you mean it");
+            solidcraft_engine::note!("solidcraft mcp: the design's folder is left out because {why}; add it with --allow-path if you mean it");
         }
     }
     // How calls that break a command's parameter contract are treated, headless or bridged.
@@ -731,7 +731,7 @@ fn cmd_mcp(args: &[String]) -> Result<(), String> {
             // Serve without the app too: the tools connect once it runs, and say it isn't until then.
             let mut remote = solidcraft_mcp::Remote::new(addr, flag(args, "--token")).with_param_check(param_check);
             if let Err(e) = remote.try_connect() {
-                eprintln!(
+                solidcraft_engine::note!(
                     "solidcraft mcp: no SolidCraft app at {addr} yet ({e}); start it with `solidcraft --control {port}` \
                      (or SOLIDCRAFT_CONTROL_PORT={port}), tool calls connect once it runs"
                 );
@@ -748,7 +748,7 @@ fn cmd_mcp(args: &[String]) -> Result<(), String> {
         (None, None) => {
             let auto = !args.iter().any(|a| a == "--headless");
             if auto && let Some(port) = discover_app() {
-                eprintln!("solidcraft mcp: bridged to the running app at 127.0.0.1:{port} (--headless starts a session of its own)");
+                solidcraft_engine::note!("solidcraft mcp: bridged to the running app at 127.0.0.1:{port} (--headless starts a session of its own)");
                 let remote = solidcraft_mcp::Remote::new(&format!("127.0.0.1:{port}"), flag(args, "--token")).with_param_check(param_check);
                 return serve_mcp(Box::new(remote), scope);
             }

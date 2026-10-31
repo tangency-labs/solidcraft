@@ -352,7 +352,7 @@ pub fn relaunch_with_version_compat() -> Result<bool, String> {
         return Ok(false);
     }
     log::info!("startup: OCLP detected; re-launching with {}=1", SYSTEM_VERSION_COMPAT_ENV);
-    eprintln!("SolidCraft: OCLP detected; re-launching with {}=1", SYSTEM_VERSION_COMPAT_ENV);
+    solidcraft_engine::note!("SolidCraft: OCLP detected; re-launching with {}=1", SYSTEM_VERSION_COMPAT_ENV);
     let exe = std::env::current_exe().map_err(|e| format!("could not find own executable: {e}"))?;
     let status = std::process::Command::new(&exe)
         .args(std::env::args_os().skip(1))

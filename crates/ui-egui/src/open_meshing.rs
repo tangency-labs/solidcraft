@@ -216,7 +216,7 @@ pub(crate) fn tick(app: &mut SolveApp, ctx: &egui::Context) {
         }
         if profiling() {
             let ms = began.map_or(0.0, |t| (ctx.input(|i| i.time) - t) * 1000.0);
-            eprintln!("SolidCraft open meshing: all {} bodies shown after {ms:.0} ms", world.bodies.len());
+            solidcraft_engine::note!("SolidCraft open meshing: all {} bodies shown after {ms:.0} ms", world.bodies.len());
         }
         // Framed from outlines and not moved since: frame the meshes.
         if framed == Some(app.cam) {
@@ -265,7 +265,7 @@ pub(crate) fn refresh(app: &mut SolveApp, now: f64) {
     if !m.first_shown && !st.bodies.is_empty() {
         m.first_shown = true;
         if profiling() {
-            eprintln!("SolidCraft open meshing: first {} bodies shown after {:.0} ms", st.bodies.len(), (now - began) * 1000.0);
+            solidcraft_engine::note!("SolidCraft open meshing: first {} bodies shown after {:.0} ms", st.bodies.len(), (now - began) * 1000.0);
         }
     }
     m.shown = Some((done, Arc::new(st)));

@@ -357,7 +357,7 @@ impl Remote {
             }
             if told.elapsed() >= PROGRESS_EVERY {
                 let secs = self.outstanding.as_ref().map_or(0, Outstanding::secs);
-                eprintln!("solidcraft-mcp: {what} is still running in the app ({secs} s); waiting for it");
+                solidcraft_engine::note!("solidcraft-mcp: {what} is still running in the app ({secs} s); waiting for it");
                 told = Instant::now();
             }
             std::thread::sleep(self.waits.poll.min(limit.saturating_sub(waited)));
@@ -451,7 +451,7 @@ impl Remote {
         // Timed out in the app, still running (#1618): wait for its result on this connection.
         if v.get("running").and_then(Value::as_bool) == Some(true) {
             self.outstanding = Some(Outstanding { what: what.clone(), effect: Some(effect), since: sent });
-            eprintln!(
+            solidcraft_engine::note!(
                 "solidcraft-mcp: {what} is still running in the app after {} s; waiting up to {} s more for it",
                 sent.elapsed().as_secs(),
                 self.waits.pending.as_secs()
@@ -771,7 +771,7 @@ impl Auto {
             return;
         }
         if let Some(port) = (self.discover)() {
-            eprintln!("solidcraft mcp: the SolidCraft app is running now; bridged to 127.0.0.1:{port}");
+            solidcraft_engine::note!("solidcraft mcp: the SolidCraft app is running now; bridged to 127.0.0.1:{port}");
             let level = self.param_check();
             self.remote = Some(Remote::new(&format!("127.0.0.1:{port}"), self.token.as_deref()).with_param_check(level));
             self.headless = None;
