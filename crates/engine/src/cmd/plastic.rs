@@ -593,6 +593,26 @@ mod tests {
         assert!(s.execute("plastic.assign_rule", &json!({"bodies": ["Nope"], "rule": "Thick ABS"})).is_err());
     }
 
+    /// #9623: `Thickness` in a rule's expressions is the rule's thickness, also when the design
+    /// has a parameter of that name; the rule's own `thickness` may still use that parameter.
+    #[test]
+    fn thickness_in_a_plastic_rule_is_the_rules_even_beside_a_parameter_of_that_name() {
+        let values = |param: Option<&str>, thickness: &str| -> Value {
+            let mut s = Session::default();
+            if let Some(e) = param {
+                run(&mut s, "parameters.add", json!({"name": "Thickness", "expression": e}));
+            }
+            run(&mut s, "plastic.manage_rules", json!({"name": "Thick ABS", "thickness": thickness, "clearance": "Thickness / 10"}))["rule"]["values"]
+                .clone()
+        };
+        let want = values(None, "3 mm");
+        assert_eq!((want["thickness"].as_f64(), want["nominal_radius"].as_f64()), (Some(3.0), Some(1.5)), "{want}");
+        assert!(want["clearance"].as_f64().is_some_and(|c| (c - 0.3).abs() < 1e-12), "{want}");
+        assert!(want["thickness_variation"].as_f64().is_some_and(|v| (v - 0.45).abs() < 1e-12), "{want}");
+        assert_eq!(values(Some("10 mm"), "3 mm"), want);
+        assert_eq!(values(Some("3 mm"), "Thickness"), want);
+    }
+
     #[test]
     fn groove_takes_the_rule_clearance() {
         let mut g = Session::default();

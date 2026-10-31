@@ -282,6 +282,16 @@ impl SheetRule {
     }
 }
 
+/// The design parameters a rule's `field` expression `e` reads: outside the rule's own
+/// `thickness`, `Thickness` is the rule's thickness (sheet metal and plastic rules alike).
+pub fn rule_references(field: &str, e: &str) -> Vec<String> {
+    let mut names = expr::references(e);
+    if field != "thickness" {
+        names.retain(|n| n != "Thickness");
+    }
+    names
+}
+
 fn rule_gap() -> String {
     "Thickness".into()
 }
@@ -459,7 +469,8 @@ impl Document {
             .unwrap_or_else(SheetRule::steel)
     }
 
-    /// Evaluate a rule: `Thickness` in its expressions is the rule's thickness.
+    /// Evaluate a rule: `Thickness` in its expressions is the rule's thickness, even where the
+    /// design has a parameter of that name (#9623); only the rule's `thickness` itself reads it.
     pub fn rule_values(&self, vals: &std::collections::BTreeMap<String, Value>, r: &SheetRule) -> Result<RuleValues> {
         let look = |n: &str| vals.get(n).copied().ok_or_else(|| DocError::Expr(format!("unknown parameter `{n}`")));
         let t = expr::eval_with(&r.thickness, &look)?.to_kind(Kind::Length)?;
@@ -467,7 +478,7 @@ impl Document {
             return Err(DocError::Invalid("the sheet thickness must be positive".into()));
         }
         let with_t = |e: &str, k: Kind| -> Result<f64> {
-            let f = |n: &str| if n == "Thickness" && !vals.contains_key("Thickness") { Ok(Value::length(t)) } else { look(n) };
+            let f = |n: &str| if n == "Thickness" { Ok(Value::length(t)) } else { look(n) };
             expr::eval_with(e, &f)?.to_kind(k)
         };
         let v = RuleValues {
