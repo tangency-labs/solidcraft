@@ -1887,10 +1887,10 @@ impl Surface {
             Some((context, handle)) => context
                 .build_surface_cache(k, self, *handle)
                 .map_err(ner)?
-                .surface_continuity(uv_domain)?,
+                .surface_continuity_with_kernel(k, uv_domain)?,
             None => super::p2::surface_cache::<()>(k, self, None)
                 .map_err(ner)?
-                .surface_continuity(uv_domain)?,
+                .surface_continuity_with_kernel(k, uv_domain)?,
         };
 
         // check state - internal curve continuities are better than C0 (only reported)

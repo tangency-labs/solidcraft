@@ -2085,7 +2085,8 @@ where
     // Check to make sure internal surface continuities are better then C0
     // (upstream only signals SM_ERR_INVALID_INPUT)
     let domain = t.tracer().uv_domain;
-    let _below_g1 = cache.surface_continuity(&domain)? as i32 <= ContinuityType::C0 as i32;
+    let _below_g1 =
+        cache.surface_continuity_with_kernel(k, &domain)? as i32 <= ContinuityType::C0 as i32;
 
     // Turn off point testing and turn on boundary curve processing.
     let saved_point_test = cache.point_test_enabled;

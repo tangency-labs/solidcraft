@@ -2718,7 +2718,8 @@ impl Surface {
 
         // Check to make sure internal surface continuities are better then C0 (the
         // check only signals upstream)
-        let _ = (cache.surface_continuity(uv_domain)? as i32) <= (ContinuityType::C0 as i32);
+        let _ = (cache.surface_continuity_with_kernel(k, uv_domain)? as i32)
+            <= (ContinuityType::C0 as i32);
 
         let mut silhouette =
             SurfaceSilhouette::new(k, self, uv_domain, perspective, eye_point_or_view_vector)?;
