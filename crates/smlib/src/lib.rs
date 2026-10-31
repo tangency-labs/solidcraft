@@ -190,6 +190,8 @@ static INIT_RESULT: AtomicI32 = AtomicI32::new(0);
 /// Checks the C API's version, creates SMLib's context and routes its log to the `log` crate.
 /// Every other call runs it first; calling it at start-up keeps the cost out of the first operation.
 pub fn init() -> Result<()> {
+    #[cfg(test)]
+    route::reached_cpp();
     INIT.call_once(|| {
         let v = ffi::abi_version();
         let result = if v == ffi::NOT_BUILT {
@@ -209,16 +211,30 @@ pub fn init() -> Result<()> {
     }
 }
 
-/// Where failing calls leave their inputs for replay (see the C API's `smlib_set_dump_dir`);
-/// `None` turns that off.
+/// Where failing calls leave their inputs for replay, on either kernel (see the C API's
+/// `smlib_set_dump_dir`); `None` turns that off. A build without the C++ kernel has only solidcore's.
 pub fn set_dump_dir(dir: Option<&Path>) -> Result<()> {
-    init()?;
     let c = dir.map(c_path).transpose()?;
-    check(ffi::set_dump_dir(c.as_deref()))
+    core::dump::set_dir(dir.map(Path::to_path_buf));
+    // A build or a run on solidcore alone never starts the C++ kernel to tell it.
+    if !route::any_on_cpp() {
+        return Ok(());
+    }
+    match init() {
+        Ok(()) => check(ffi::set_dump_dir(c.as_deref())),
+        Err(Error::NotBuilt) => Ok(()),
+        Err(e) => Err(e),
+    }
 }
 
-/// The SMLib call running right now, if any: for crash reports. Takes no lock.
+/// The kernel call running right now, on either kernel, if any: for crash reports. Takes no lock.
 pub fn current_call() -> Option<String> {
+    if let Some(call) = core::dump::current() {
+        return Some(call);
+    }
+    if !route::any_on_cpp() {
+        return None;
+    }
     let mut buf = [0u8; 512];
     let n = ffi::current_call(&mut buf);
     let s = buf.get(..n).map(|b| String::from_utf8_lossy(b).into_owned()).unwrap_or_default();
@@ -247,6 +263,8 @@ impl std::fmt::Debug for Brep {
 impl Brep {
     /// A body the C++ kernel made.
     fn made(h: ffi::Handle) -> Brep {
+        #[cfg(test)]
+        route::reached_cpp();
         Brep { cpp: OnceLock::from(Ok(h)), core: OnceLock::new(), maker: route::Backend::Smlib, operand: None }
     }
 
@@ -258,6 +276,8 @@ impl Brep {
     /// The C++ kernel's body: converted from solidcore's the first time it is asked for (and
     /// tagged as solidcore's is, for a [`Brep::tagged`] body).
     fn cpp(&self) -> Result<&ffi::Handle> {
+        #[cfg(test)]
+        route::reached_cpp();
         let made = self.cpp.get_or_init(|| {
             let core = self.core.get().ok_or(Error::Empty)?.as_ref().map_err(Clone::clone)?;
             let a = core::to_arrays(core)?;
@@ -295,12 +315,20 @@ impl Brep {
 
     /// Reads a native SMLib `.smb` file.
     pub fn read(path: &Path, ascii: bool) -> Result<Brep> {
+        if route::Op::File.backend() == route::Backend::Solidcore {
+            c_path(path)?;
+            return core::file::read(path, ascii).map(Brep::made_core);
+        }
         init()?;
         ffi::read(&c_path(path)?, ascii).map(Brep::made).map_err(error)
     }
 
     /// Writes this body to a native SMLib `.smb` file.
     pub fn write(&self, path: &Path, ascii: bool) -> Result<()> {
+        if route::Op::File.backend() == route::Backend::Solidcore {
+            c_path(path)?;
+            return core::file::write(self.core()?, path, ascii);
+        }
         check(ffi::write(self.cpp()?, &c_path(path)?, ascii))
     }
 

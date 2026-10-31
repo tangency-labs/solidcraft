@@ -159,7 +159,7 @@ fn cpp_case(name: &str) -> Got {
     let got = match &op {
         Op::Faces(faces, tools) => {
             let made: Vec<crate::ssi::Surface> = tools.iter().map(surface).collect();
-            let handles: Vec<&ffi::ssi::SurfaceHandle> = made.iter().map(|s| s.handle()).collect();
+            let handles: Vec<&ffi::ssi::SurfaceHandle> = made.iter().map(|s| s.handle().unwrap()).collect();
             let faces: Vec<i64> = faces.iter().map(|&f| f as i64).collect();
             match ffi::split::split_faces(body.cpp().unwrap(), &faces, &handles) {
                 Ok((h, made)) => {
@@ -170,7 +170,7 @@ fn cpp_case(name: &str) -> Got {
                 Err(s) => Err(error(s)),
             }
         }
-        Op::Body(tool) => match ffi::split::split_body(body.cpp().unwrap(), surface(tool).handle()) {
+        Op::Body(tool) => match ffi::split::split_body(body.cpp().unwrap(), surface(tool).handle().unwrap()) {
             Ok((b, f)) => {
                 let (vb, nb) = measure(&b);
                 let (vf, nf) = measure(&f);
@@ -211,11 +211,13 @@ macro_rules! cases {
             #[test]
             $(#[$ign])?
             fn solidcore_matches_the_cpp_kernel() {
+                let _cpp = crate::route::on_cpp();
                 super::parity(stringify!($m));
             }
             #[cfg(feature = "native")]
             #[test]
             fn the_cpp_kernel_matches_the_closed_form() {
+                let _cpp = crate::route::on_cpp();
                 let _ = super::cpp_case(stringify!($m));
             }
         }
@@ -306,6 +308,8 @@ fn lid(side: bool) -> Body {
 /// the sides are read from; on C++ too.
 #[test]
 fn split_body_by_an_l_sheet() {
+    #[cfg(feature = "native")]
+    let _cpp = crate::route::on_cpp();
     let (c, sheet) = (cube(), lid(true));
     for face in 0..2 {
         let (b, f) = split_body_by_sheet(&c, &sheet, face).unwrap().expect("the sheet divides the cube");
@@ -352,12 +356,13 @@ mod history {
 
     #[test]
     fn tags_cross_a_face_split() {
+        let _cpp = crate::route::on_cpp();
         crate::init().unwrap();
         let a = Brep::made_core(super::cube()).tagged(0).unwrap();
         let p = super::plane_x(5.0);
         let s = super::surface(&p);
         let faces = [0i64, 1, 2, 3, 4, 5];
-        let cpp = Brep::made(ffi::split::split_faces(a.cpp().unwrap(), &faces, &[s.handle()]).unwrap().0).history().unwrap();
+        let cpp = Brep::made(ffi::split::split_faces(a.cpp().unwrap(), &faces, &[s.handle().unwrap()]).unwrap().0).history().unwrap();
         let core = super::split_faces(a.core().unwrap(), &[0, 1, 2, 3, 4, 5], &[&p]).unwrap().unwrap().0;
         let core = Brep::made_core(core).history().unwrap();
         assert_eq!(core.canonical(), cpp.canonical());

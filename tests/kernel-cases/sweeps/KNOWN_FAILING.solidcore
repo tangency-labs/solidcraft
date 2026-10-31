@@ -1,0 +1,4 @@
+# The sweeps cases that fail today on solidcore, one a line: `<case> <why it fails today>`. Sorted.
+# The kernel rig gate fails on a case that fails and is not listed, and on a listed case that passes.
+# Baseline: solidcore pin 9dde25e97, tests/kernel-cases run by `cargo xtask kernel-cases`, x86_64 Linux.
+4305-sweep-cut-groove-round-rounded-pocket-wall [fail] step 19 (solid.sweep): body `Box`: the operation failed: SMLib boolean: SMLib's check refuses the result: 8 failed tests: SmBrep::Test #3 Bad Gap: Vertex/Face gap across Edgeuse end larger than tol (offset=5.1386526e-06, to

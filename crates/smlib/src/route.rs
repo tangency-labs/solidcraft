@@ -1,17 +1,18 @@
-//! Which kernel answers each operation: the C++ SMLib fork, or solidcore, its Rust port.
+//! Which kernel answers each operation: solidcore, the Rust port of SMLib, unless the C++ SMLib
+//! fork is asked for.
 //!
-//! [`Op::route`] is the routing table. An operation moves to solidcore only once solidcore
-//! matches the C++ kernel on the kernel-case rig (`cargo xtask kernel-cases --kernel both`), and
-//! the commit that moves it records the scores. A call that fails on solidcore fails: there is no
-//! fallback to C++ at run time, which would hide solidcore's bugs.
+//! [`Op::route`] is the routing table, and every family on it runs on solidcore. The C++ kernel is
+//! an opt-in: for a test, a rig or a user who wants the old behaviour. A call that fails on solidcore
+//! fails, and a path solidcore has no answer for says it is not supported: there is no fallback to
+//! C++ at run time, which would hide solidcore's bugs.
 //!
 //! `SOLIDCRAFT_KERNEL=smlib|solidcore` sends every operation to one kernel for the whole process
 //! (the rig, the test matrix); otherwise the preference ([`set_choice`]) does, and its default
 //! follows the table.
 //!
-//! `SOLIDCRAFT_KERNEL_ROUTES=<op>=<backend>[,…]` (for example `boolean=solidcore,measure=solidcore`)
-//! then moves single families on top of that choice, so the rig can score one family at a time
-//! ([`Overrides`]). `.smb` files stay on SMLib whatever either says.
+//! `SOLIDCRAFT_KERNEL_ROUTES=<op>=<backend>[,…]` (for example `boolean=smlib,measure=smlib`) then
+//! moves single families on top of that choice, so the rig can score one family at a time
+//! ([`Overrides`]).
 
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicU8, Ordering};
@@ -40,7 +41,7 @@ impl Backend {
     }
 }
 
-/// The operation families the table routes, in the order they move to solidcore.
+/// The operation families the table routes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Op {
     /// A schema 4 record into a kernel body, and back (`from_record`, `to_native`).
@@ -63,19 +64,15 @@ pub enum Op {
     Split,
     /// Extrusions, revolutions, sweeps and lofts.
     Sweep,
-    /// Face and edge history of an operation.
-    History,
-    /// Surface-surface intersection.
+    /// Surface/surface intersection, and the surfaces it takes.
     Ssi,
-    /// Sheet metal: flanges and flat patterns.
-    Flat,
-    /// Native `.smb` files (C++ only: solidcore reads no SMLib file).
+    /// Native `.smb` files, which both kernels read and write.
     File,
 }
 
 impl Op {
     /// Every family, in table order.
-    pub const ALL: [Op; 14] = [
+    pub const ALL: [Op; 12] = [
         Op::Convert,
         Op::Primitive,
         Op::Transform,
@@ -86,9 +83,7 @@ impl Op {
         Op::Offset,
         Op::Split,
         Op::Sweep,
-        Op::History,
         Op::Ssi,
-        Op::Flat,
         Op::File,
     ];
 
@@ -105,9 +100,7 @@ impl Op {
             Op::Offset => "offset",
             Op::Split => "split",
             Op::Sweep => "sweep",
-            Op::History => "history",
             Op::Ssi => "ssi",
-            Op::Flat => "flat",
             Op::File => "file",
         }
     }
@@ -122,18 +115,13 @@ impl Op {
         Op::ALL.iter().position(|op| *op == self).unwrap_or(0)
     }
 
-    /// The routing table: the kernel each family runs on when nothing overrides it. A family
-    /// stays on SMLib until the rig shows solidcore's parity for it.
+    /// The routing table: the kernel each family runs on when nothing overrides it. Every family
+    /// is on solidcore; the C++ kernel is asked for ([`Choice`], [`Overrides`]), never defaulted to.
     pub fn route(self) -> Backend {
         match self {
-            // At parity on the rig, routed alone: 469 of 469 cases agree (solidcore 3546c9bc); as
-            // the default, 449 of 479 pass against SMLib-only 445, none worse.
-            Op::Primitive => Backend::Solidcore,
-            // On the rig, routed alone: 450 of 479 pass against SMLib's 449; 478 agree, and the
-            // other (fillets/1557) fails on SMLib and passes on solidcore. As the default with
-            // primitives (solidcore 3c17ddb1): 450 of 479 against SMLib-only 449, none worse.
-            Op::Convert => Backend::Solidcore,
-            Op::Transform
+            Op::Convert
+            | Op::Primitive
+            | Op::Transform
             | Op::Measure
             | Op::Check
             | Op::Boolean
@@ -141,17 +129,18 @@ impl Op {
             | Op::Offset
             | Op::Split
             | Op::Sweep
-            | Op::History
             | Op::Ssi
-            | Op::Flat
-            | Op::File => Backend::Smlib,
+            | Op::File => Backend::Solidcore,
         }
     }
 
     /// The kernel this family runs on now: `SOLIDCRAFT_KERNEL_ROUTES` for it, else
-    /// `SOLIDCRAFT_KERNEL`, else the preference, else [`Op::route`]. `.smb` files stay on SMLib
-    /// whatever is chosen.
+    /// `SOLIDCRAFT_KERNEL`, else the preference, else [`Op::route`].
     pub fn backend(self) -> Backend {
+        #[cfg(test)]
+        if ON_CPP.with(std::cell::Cell::get) {
+            return Backend::Smlib;
+        }
         self.backend_under(choice())
     }
 
@@ -162,11 +151,8 @@ impl Op {
     }
 
     /// The kernel this family runs on under `c` with the overrides `o`, read from neither the
-    /// environment nor the preference. `.smb` files stay on SMLib whatever is chosen.
+    /// environment nor the preference.
     pub fn backend_with(self, c: Choice, o: &Overrides) -> Backend {
-        if self == Op::File {
-            return Backend::Smlib;
-        }
         if let Some(b) = o.get(self) {
             return b;
         }
@@ -175,6 +161,61 @@ impl Op {
             Choice::Only(b) => b,
         }
     }
+}
+
+#[cfg(test)]
+thread_local! {
+    /// Tests: this thread's operations run on the C++ kernel whatever the routing.
+    static ON_CPP: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    /// Tests: how many times this thread has touched a C++ body, and called solidcore.
+    static REACHED: std::cell::Cell<(u64, u64)> = const { std::cell::Cell::new((0, 0)) };
+}
+
+/// Tests: this thread has touched a C++ body.
+#[cfg(test)]
+pub(crate) fn reached_cpp() {
+    REACHED.with(|r| r.set((r.get().0 + 1, r.get().1)));
+}
+
+/// Tests: this thread has called solidcore.
+#[cfg(test)]
+pub(crate) fn reached_core() {
+    REACHED.with(|r| r.set((r.get().0, r.get().1 + 1)));
+}
+
+/// Tests: how many times this thread has touched a C++ body and called solidcore since the last
+/// time this was asked.
+#[cfg(test)]
+pub(crate) fn take_reached() -> (u64, u64) {
+    REACHED.with(|r| r.replace((0, 0)))
+}
+
+/// Tests that exercise the C++ kernel opt in: until the guard drops, this thread's operations run
+/// on it. Thread by thread, so that the other tests in the binary stay on the table's kernel. The
+/// guard fails a test that never touched a C++ body, so a parity test can't quietly compare
+/// solidcore with itself.
+#[cfg(test)]
+#[cfg_attr(not(feature = "native"), allow(dead_code))]
+pub(crate) fn on_cpp() -> impl Drop {
+    struct Guard;
+    impl Drop for Guard {
+        fn drop(&mut self) {
+            ON_CPP.with(|c| c.set(false));
+            let (cpp, core) = REACHED.with(std::cell::Cell::get);
+            if std::env::var_os("SOLIDCRAFT_TEST_REACHED").is_some() {
+                eprintln!("REACHED {} cpp={cpp} core={core}", std::thread::current().name().unwrap_or("?"));
+            }
+            assert!(cpp > 0 || std::thread::panicking(), "this test opted in to the C++ kernel and never reached it");
+        }
+    }
+    ON_CPP.with(|c| c.set(true));
+    REACHED.with(|r| r.set((0, 0)));
+    Guard
+}
+
+/// Whether any family runs on the C++ kernel now: nothing need start it otherwise.
+pub fn any_on_cpp() -> bool {
+    Op::ALL.into_iter().any(|op| op.backend() == Backend::Smlib)
 }
 
 /// What answers the operations: the routing table, or one kernel for all of them.
@@ -248,7 +289,7 @@ impl Overrides {
     /// A `SOLIDCRAFT_KERNEL_ROUTES` value: comma-separated `<op>=<smlib|solidcore>`, spaces
     /// around each part allowed, a later item for the same family winning. Returns the overrides
     /// and a warning for each item ignored: an unknown family or kernel, an empty or overlong
-    /// item, `file` (always SMLib), items past [`Overrides::MAX_ITEMS`], or a whole value longer
+    /// item, items past [`Overrides::MAX_ITEMS`], or a whole value longer
     /// than [`Overrides::MAX_LEN`].
     pub fn parse(text: &str) -> (Overrides, Vec<String>) {
         let mut o = Overrides::NONE;
@@ -281,10 +322,6 @@ impl Overrides {
                 warnings.push(format!("`{shown}`: `{}` is not smlib or solidcore; ignored", backend.trim()));
                 continue;
             };
-            if op == Op::File {
-                warnings.push(format!("`{shown}`: .smb files stay on smlib; ignored"));
-                continue;
-            }
             if let Some(slot) = o.0.get_mut(op.index()) {
                 *slot = Some(backend);
             }
@@ -348,9 +385,10 @@ mod tests {
         assert_eq!(Choice::from_id("truck"), None);
     }
 
+    /// Every family, native files too, is on solidcore unless the C++ kernel is asked for.
     #[test]
-    fn files_stay_on_smlib() {
-        assert_eq!(Op::File.backend(), Backend::Smlib);
+    fn the_table_puts_every_family_on_solidcore() {
+        assert!(Op::ALL.iter().all(|op| op.route() == Backend::Solidcore));
     }
 
     /// Each choice sends the families where it says, read without setting the process-wide
@@ -359,11 +397,10 @@ mod tests {
     #[test]
     fn each_choice_routes_every_family_without_touching_the_preference() {
         for op in Op::ALL {
-            let want = |b: Backend| if op == Op::File { Backend::Smlib } else { b };
             let none = &Overrides::NONE;
             assert_eq!(op.backend_with(Choice::Routed, none), op.route(), "{op:?}");
-            assert_eq!(op.backend_with(Choice::Only(Backend::Smlib), none), want(Backend::Smlib), "{op:?}");
-            assert_eq!(op.backend_with(Choice::Only(Backend::Solidcore), none), want(Backend::Solidcore), "{op:?}");
+            assert_eq!(op.backend_with(Choice::Only(Backend::Smlib), none), Backend::Smlib, "{op:?}");
+            assert_eq!(op.backend_with(Choice::Only(Backend::Solidcore), none), Backend::Solidcore, "{op:?}");
             assert_eq!(op.backend_under(Choice::Routed), op.backend_with(Choice::Routed, overrides()), "{op:?}");
         }
     }
@@ -387,12 +424,14 @@ mod tests {
         assert_eq!(o.iter().collect::<Vec<_>>(), [(Op::Measure, Backend::Solidcore), (Op::Boolean, Backend::Solidcore)]);
         for op in Op::ALL {
             let moved = matches!(op, Op::Boolean | Op::Measure);
-            let want = if moved { Backend::Solidcore } else { op.route() };
-            assert_eq!(op.backend_with(Choice::Routed, &o), want, "{op:?}");
+            assert_eq!(op.backend_with(Choice::Routed, &o), Backend::Solidcore, "{op:?}");
             let want = if moved { Backend::Solidcore } else { Backend::Smlib };
             assert_eq!(op.backend_with(Choice::Only(Backend::Smlib), &o), want, "{op:?}");
         }
-        // Back to SMLib under an all-solidcore choice; the later item wins.
+        // Back to SMLib under the table; the later item wins.
+        let (o, _) = Overrides::parse("file=smlib");
+        assert_eq!(Op::File.backend_with(Choice::Routed, &o), Backend::Smlib);
+        assert_eq!(Op::Sweep.backend_with(Choice::Routed, &o), Backend::Solidcore);
         let (o, _) = Overrides::parse("check=solidcore,check=smlib");
         assert_eq!(Op::Check.backend_with(Choice::Only(Backend::Solidcore), &o), Backend::Smlib);
         assert_eq!(Op::Sweep.backend_with(Choice::Only(Backend::Solidcore), &o), Backend::Solidcore);
@@ -403,10 +442,9 @@ mod tests {
     /// nothing panics or reads past the caps.
     #[test]
     fn overrides_ignore_bad_items_with_a_warning() {
-        let (o, w) = Overrides::parse("file=solidcore,truck=solidcore,boolean=truck,,=,boolean,BOOLEAN=solidcore,blend=solidcore=x,sweep=solidcore");
+        let (o, w) = Overrides::parse("truck=solidcore,boolean=truck,,=,boolean,BOOLEAN=solidcore,blend=solidcore=x,sweep=solidcore");
         assert_eq!(o.iter().collect::<Vec<_>>(), [(Op::Sweep, Backend::Solidcore)]);
-        assert_eq!(w.len(), 8, "{w:?}");
-        assert_eq!(Op::File.backend_with(Choice::Routed, &o), Backend::Smlib);
+        assert_eq!(w.len(), 7, "{w:?}");
         let (o, w) = Overrides::parse(&"x".repeat(Overrides::MAX_LEN + 1));
         assert!(o.is_empty() && w.len() == 1, "{w:?}");
         let (o, w) = Overrides::parse(&format!("{}=solidcore,blend=solidcore", "a".repeat(200)));

@@ -253,11 +253,13 @@ macro_rules! cases {
             #[test]
             $(#[$ign])?
             fn solidcore_matches_the_cpp_kernel() {
+                let _cpp = crate::route::on_cpp();
                 super::parity(stringify!($m));
             }
             #[cfg(feature = "native")]
             #[test]
             fn the_cpp_kernel_matches_the_closed_form() {
+                let _cpp = crate::route::on_cpp();
                 let _ = super::cpp_case(stringify!($m));
             }
         }
@@ -400,6 +402,7 @@ fn a_flap_on_a_cube_edge_stays_beside_it() {
 #[cfg(feature = "native")]
 #[test]
 fn sheets_on_a_cube_stitch_the_same_on_cpp() {
+    let _cpp = crate::route::on_cpp();
     use crate::{Brep, error, ffi};
     crate::init().unwrap();
     let sew = |b: Body| ffi::sheets::stitch(Brep::made_core(b).cpp().unwrap(), 1e-6).map_err(error);
@@ -434,6 +437,7 @@ mod history {
 
     #[test]
     fn tags_cross_a_stitch() {
+        let _cpp = crate::route::on_cpp();
         crate::init().unwrap();
         let a = Brep::made_core(super::loose_faces(super::ALL, 0.0)).tagged(0).unwrap();
         let cpp = Brep::made(ffi::sheets::stitch(a.cpp().unwrap(), super::TOL).unwrap().0).history().unwrap();
@@ -443,6 +447,7 @@ mod history {
 
     #[test]
     fn tags_cross_a_merge() {
+        let _cpp = crate::route::on_cpp();
         crate::init().unwrap();
         let a = Brep::made_core(super::split_cube()).tagged(0).unwrap();
         let cpp = Brep::made(ffi::ops::merge_faces(a.cpp().unwrap(), &[], super::TOL).unwrap()).history().unwrap();

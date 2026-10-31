@@ -371,11 +371,13 @@ macro_rules! cases {
             #[test]
             $(#[$ign])?
             fn solidcore_matches_the_cpp_kernel() {
+                let _cpp = crate::route::on_cpp();
                 super::parity(stringify!($m));
             }
             #[cfg(feature = "native")]
             #[test]
             fn the_cpp_kernel_matches_the_closed_form() {
+                let _cpp = crate::route::on_cpp();
                 let _ = super::cpp_case(stringify!($m));
             }
         }
@@ -434,6 +436,8 @@ fn a_cliff_overflow_the_fork_refuses_has_no_room() {
 /// over it too (Simpson on 4000 spans, against a bound of its quartic end edge's tolerance).
 #[test]
 fn overflow_goes_first() {
+    #[cfg(feature = "native")]
+    let _cpp = crate::route::on_cpp();
     let f = |u: f64| 0.5 * (u * (441.0 - u * u).sqrt() + 441.0 * (u / 21.0).asin());
     let w = 440f64.sqrt();
     let alone = 20.0 * (f(w) - f(1.0) - (w - 1.0));
@@ -610,6 +614,8 @@ fn pocket_chamfer_on_a_boolean_body() {
 /// of the sheet. With SMLib built, the C++ kernel gives the same counts and the same hole.
 #[test]
 fn a_setback_corner_left_open_returns_its_hole() {
+    #[cfg(feature = "native")]
+    let _cpp = crate::route::on_cpp();
     let edges = [[30.0, 40.0, 20.0], [60.0, 20.0, 20.0], [60.0, 40.0, 10.0]];
     let (open, holes) = timed("setback_open", move || {
         let b = Shape::Box([0.0; 3], [60.0, 40.0, 20.0]).core();
@@ -767,12 +773,14 @@ mod history {
     /// new.
     #[test]
     fn tags_cross_a_fillet() {
+        let _cpp = crate::route::on_cpp();
         check(Blend::Round, 2.0);
     }
 
     /// A 2 mm chamfer on the same edge: the same faces kept, trimmed and made as the round.
     #[test]
     fn tags_cross_a_chamfer() {
+        let _cpp = crate::route::on_cpp();
         check(Blend::Chamfer, 2.0);
     }
 }
@@ -860,6 +868,8 @@ fn edges_871() -> Vec<[f64; 3]> {
 /// overlap, which is refused. With SMLib built, the C++ kernel gives the same.
 #[test]
 fn rounds_on_the_871_part() {
+    #[cfg(feature = "native")]
+    let _cpp = crate::route::on_cpp();
     let p = part_871();
     let e = edges_871();
     let sizes = |r: f64| vec![r; e.len()];
@@ -902,6 +912,8 @@ fn rounds_on_the_871_part() {
 /// by Green's theorem). With SMLib built, the C++ kernel gives the same.
 #[test]
 fn tabbed_plate_rounds_mitred_on_the_arcs_continuation() {
+    #[cfg(feature = "native")]
+    let _cpp = crate::route::on_cpp();
     use super::sweep::extrude;
     use crate::sweeps::{Curve, DraftCorner};
     const Z: [f64; 3] = [0.0, 0.0, 1.0];

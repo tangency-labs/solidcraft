@@ -66,6 +66,9 @@ impl Brep {
     /// A point inside each face, in SMLib's face order: on the face's surface, inside its trims
     /// (`SmFace::CalculateAnInternalPoint`).
     pub fn face_points(&self) -> Result<Vec<[f64; 3]>> {
+        if route::Op::Split.backend() == route::Backend::Solidcore {
+            return core::trim::face_points(self.core()?);
+        }
         init()?;
         let [faces, _, _] = self.counts()?;
         ffi::trim::face_points(self.cpp()?, faces).map_err(error)

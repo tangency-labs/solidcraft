@@ -152,11 +152,13 @@ macro_rules! primitive {
             #[cfg(feature = "native")]
             #[test]
             fn its_record_measures_in_the_cpp_kernel() {
+                let _cpp = crate::route::on_cpp();
                 super::record_measures_in_cpp($name);
             }
             #[cfg(feature = "native")]
             #[test]
             fn arrays_match_the_cpp_kernel() {
+                let _cpp = crate::route::on_cpp();
                 super::matches_cpp($name);
             }
         }
@@ -222,6 +224,7 @@ fn a_parabola_gives_its_nurb_or_says_it_cannot() {
 #[cfg(feature = "native")]
 #[test]
 fn validate_refuses_what_the_cpp_kernel_refuses() {
+    let _cpp = crate::route::on_cpp();
     /// `SM_ERR_INVALID_INPUT`.
     const INVALID_INPUT: i32 = 1007;
     use crate::flat::Flat;
@@ -291,6 +294,7 @@ fn validate_refuses_what_the_cpp_kernel_refuses() {
 #[cfg(feature = "native")]
 #[test]
 fn a_cpp_box_comes_into_solidcore() {
+    let _cpp = crate::route::on_cpp();
     crate::init().unwrap();
     let cpp = crate::ffi::make_box(&[1.0, -2.0, 3.0], &[10.0, 20.0, 30.0]).map(crate::Brep::made).unwrap();
     let body = from_arrays(&cpp.cpp_arrays().unwrap()).unwrap();
@@ -306,6 +310,8 @@ fn a_cpp_box_comes_into_solidcore() {
 /// whole body's tolerance fourfold per blend (fillets/2341).
 #[test]
 fn tolerances_cross_the_arrays_per_entity() {
+    #[cfg(feature = "native")]
+    let _cpp = crate::route::on_cpp();
     use crate::flat::{EDGE_TOLERANCE, TOLERANCE, VERTEX_TOLERANCE};
     let mut a = to_arrays(&case("box").body).unwrap();
     let base = a.reals[&TOLERANCE][0];
@@ -431,6 +437,7 @@ fn shells_listed_inner_first_import_outer_first() {
 #[cfg(feature = "native")]
 #[test]
 fn a_sealed_void_matches_the_cpp_kernel() {
+    let _cpp = crate::route::on_cpp();
     use crate::{Brep, ffi};
     crate::init().unwrap();
     let make = |o: f64, s: f64| ffi::make_box(&[o; 3], &[s; 3]).map(Brep::made).unwrap();
@@ -597,6 +604,7 @@ mod cpp_round_trip {
     /// on an operation's tolerances.
     #[test]
     fn a_filleted_box() {
+        let _cpp = crate::route::on_cpp();
         let a = cpp_box([0.0; 3], [20.0; 3]);
         let edges = [[10.0, 0.0, 0.0], [0.0, 10.0, 0.0], [0.0, 0.0, 10.0]];
         let f = Brep::made(ffi::ops::pick_op(ffi::ops::Pick::Fillet, a.cpp().unwrap(), &edges, PICK_TOL, 2.0).unwrap());
@@ -607,6 +615,7 @@ mod cpp_round_trip {
     /// A plate with a round hole: inner loops, and a cylinder face looking at its axis.
     #[test]
     fn a_holed_plate() {
+        let _cpp = crate::route::on_cpp();
         let p = cut(&cpp_box([0.0; 3], [40.0, 30.0, 5.0]), &cpp_cylinder([20.0, 15.0, -1.0], 6.0, 7.0));
         let rec = crosses_with_volume("holed plate", &p);
         assert!(has_face(&rec, |f| f.loops.len() > 1), "no inner loop");
@@ -615,6 +624,7 @@ mod cpp_round_trip {
     /// A square swept along a cubic B-spline path: B-spline walls that are nothing analytic.
     #[test]
     fn a_swept_nurbs_face() {
+        let _cpp = crate::route::on_cpp();
         let c = [[-2.0, -2.0, 0.0], [2.0, -2.0, 0.0], [2.0, 2.0, 0.0], [-2.0, 2.0, 0.0]];
         let square: Vec<Curve> = (0..4).map(|i| Curve::Line { start: c[i], end: c[(i + 1) % 4] }).collect();
         let points = [[0.0, 0.0, 0.0, 1.0], [0.0, 10.0, 20.0, 1.0], [10.0, -10.0, 40.0, 1.0], [10.0, 0.0, 60.0, 1.0]];
@@ -627,6 +637,7 @@ mod cpp_round_trip {
     /// A cylinder sliced by a plane leaning 45 degrees: the cut's edge an ellipse.
     #[test]
     fn an_ellipse_edge() {
+        let _cpp = crate::route::on_cpp();
         let cyl = cpp_cylinder([0.0, 0.0, -30.0], 5.0, 60.0);
         let (s, c) = std::f64::consts::FRAC_PI_4.sin_cos();
         // About y through the origin; the box's underside is the plane z = 0 turned.
@@ -639,6 +650,7 @@ mod cpp_round_trip {
     /// A 20 mm box with a 10 mm void sealed inside: two shells in the solid's region.
     #[test]
     fn a_sealed_void() {
+        let _cpp = crate::route::on_cpp();
         let v = cut(&cpp_box([-10.0; 3], [20.0; 3]), &cpp_box([-5.0; 3], [10.0; 3]));
         let rec = crosses_with_volume("sealed void", &v);
         assert!(rec.regions.iter().any(|r| r.shells.len() == 2), "{:?}", rec.regions);
@@ -648,6 +660,7 @@ mod cpp_round_trip {
     /// One planar face, and an open extrusion: a sheet's shells, no solid.
     #[test]
     fn sheets() {
+        let _cpp = crate::route::on_cpp();
         let c = [[0.0, 0.0, 0.0], [10.0, 0.0, 0.0], [10.0, 6.0, 0.0], [0.0, 6.0, 0.0]];
         let rect: Vec<Curve> = (0..4).map(|i| Curve::Line { start: c[i], end: c[(i + 1) % 4] }).collect();
         let rec = crosses("planar sheet", &on_cpp(|| Brep::planar_faces(&rect)));
@@ -709,6 +722,7 @@ mod cpp_round_trip {
     /// arrays only.
     #[test]
     fn wire_edges_and_a_point_shell() {
+        let _cpp = crate::route::on_cpp();
         let theirs = Flat::from_arrays(&box_with_wires_and_a_point()).unwrap().import().unwrap().cpp_arrays().unwrap();
         assert_eq!(theirs.ints[&flat::WIRE_EDGE_CURVE_TYPE].len(), 4);
         assert_eq!(theirs.reals[&flat::SHELL_POINT_POSITION], [1.0, 2.0, 3.0]);
@@ -718,6 +732,7 @@ mod cpp_round_trip {
     /// Two boxes apart, united: two lumps.
     #[test]
     fn a_multi_lump_body() {
+        let _cpp = crate::route::on_cpp();
         let (a, b) = (cpp_box([0.0; 3], [10.0; 3]), cpp_box([30.0, 0.0, 0.0], [5.0; 3]));
         let u = Brep::made(ffi::ops::boolean(a.cpp().unwrap(), b.cpp().unwrap(), ffi::ops::BOOLEAN_UNION).unwrap());
         let rec = crosses_with_volume("two lumps", &u);
@@ -728,6 +743,7 @@ mod cpp_round_trip {
     /// A rounded box shelled: faces on the offsets of its rounds, on the operation's tolerances.
     #[test]
     fn a_shelled_rounded_box() {
+        let _cpp = crate::route::on_cpp();
         let a = cpp_box([0.0; 3], [20.0; 3]);
         let r = ffi::ops::pick_op(ffi::ops::Pick::Fillet, a.cpp().unwrap(), &[[10.0, 0.0, 0.0]], PICK_TOL, 2.0).unwrap();
         let s = Brep::made(ffi::ops::pick_op(ffi::ops::Pick::Shell, &r, &[[10.0, 10.0, 20.0]], PICK_TOL, -1.0).unwrap());

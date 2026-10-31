@@ -50,14 +50,14 @@ commands:
                   already built, instead of cargo run --release)
   kernel-cases [--area AREA] [--cli BIN] [--timeout S] [--jobs N] [--out DIR] [--kernel K] [--route R] [--known-failing FILE] [--validation MODE] [--coverage]
                   the kernel regression rig: run every case in tests/kernel-cases/<area>/<id>/ on
-                  SMLib (one process each, killed after --timeout, default 180 s), grade it against
-                  the case's own answer and write docs/kernel-cases.md; DIR (default
-                  target/kernel-cases) gets results.json and dumps/<area>-<case>/, the inputs of
-                  each failing SMLib call (--cli: a solidcraft-cli built with --features smlib);
-                  --kernel smlib|solidcore|both (default smlib) sets SOLIDCRAFT_KERNEL per case:
-                  solidcore keeps results.json, dumps/ and report.md in DIR/solidcore/ (not
-                  docs/kernel-cases.md); both runs each case on each, and also writes the side by
-                  side to docs/kernel-cases-backends.md and DIR/backends.json
+                  solidcore (one process each, killed after --timeout, default 180 s), grade it against
+                  the case's own answer; DIR (default target/kernel-cases) gets results.json and
+                  dumps/<area>-<case>/, the inputs of each failing SMLib call (--cli: a
+                  solidcraft-cli already built);
+                  --kernel solidcore|smlib|both (default solidcore) sets SOLIDCRAFT_KERNEL per case:
+                  solidcore keeps results.json, dumps/ and report.md in DIR/solidcore/; smlib
+                  writes docs/kernel-cases.md; both runs each case on each, and also writes the
+                  side by side to docs/kernel-cases-backends.md and DIR/backends.json
                   --route OP=solidcore[,...] (with --kernel solidcore|both): the solidcore side is
                   SMLib with only those families on solidcore (SOLIDCRAFT_KERNEL=smlib plus
                   SOLIDCRAFT_KERNEL_ROUTES), labelled solidcore[OP,...], into
@@ -65,14 +65,14 @@ commands:
                   --known-failing FILE: a regression gate instead of the report: fails on a case
                   that fails and FILE does not list, and on a listed case that passes
                   (tests/kernel-cases/<area>/KNOWN_FAILING, CI's Kernel rig workflow); it grades
-                  the SMLib side, so it needs --kernel smlib or both (with both, every side's
-                  results.json is saved, and no report or side by side is written)
+                  the run's kernel, so a list is one kernel's (KNOWN_FAILING.solidcore,
+                  KNOWN_FAILING for --kernel smlib) and --kernel both is refused
                   --validation MODE: when SMLib's full check runs on the cases' features:
                   each_step, each_feature (the default) or off (solidcraft-cli kernel-cases
                   --validation=MODE); with --ladder too
                   --ladder [--record REASON | --gate]: the complexity ladder instead
                   (tests/kernel-cases/ladder/ladder.json, tiers in order), graded and compared
-                  with its timing golden (one case at a time unless --jobs), into
+                  with its timing golden (one case at a time unless --jobs), on --kernel's one backend, into
                   docs/kernel-ladder.md (DIR default target/kernel-ladder); --record re-measures
                   the golden and re-sorts each tier by time; --gate fails on any case whose status
                   or counts differ from the golden, instead of the report
@@ -81,7 +81,8 @@ commands:
                   uses and tests/kernel-cases/EXEMPT does not list, and on a stale EXEMPT line
   known-failing --junit PATH... [--list FILE]
                   grade a nextest run's junit report (a file, or every .xml under a directory)
-                  against the tests known to fail today, tests/KNOWN_FAILING_TESTS (FILE): fails
+                  against the tests known to fail today on the default kernel,
+                  tests/KNOWN_FAILING_TESTS (FILE: .smlib is the C++ kernel's): fails
                   on a test that failed and is not listed, and on a listed test that passed
                   (fixed: take its line off); a listed test that did not run is neither. CI's
                   test jobs run it after nextest

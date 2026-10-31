@@ -33,15 +33,15 @@ pub static COMMANDS: &[CommandSpec] = &[
              trace?: path (write the recorded spans as a Chrome trace-event file, for chrome://tracing or Perfetto). Returns what \
              was recorded before enabled and reset apply: {compiled, enabled, wall_ms, spans, dropped, by_category: [{category, \
              self_ms, share}], rows: [{category, name, count, total_ms, self_ms, max_ms}], rows_total, trace?}, the rows the most \
-             self time first. Categories: smlib (SMLib's C API calls, timed by the C API), kernel, feature (one per feature \
+             self time first. Categories: solidcore (the kernel's calls), smlib (SMLib's C API calls, timed by the C API, when it is asked for), kernel, feature (one per feature \
              computed, by its type), doc, command, import (STEP/IGES stages), io. Self time is a span's time less the spans \
              inside it; total counts its outermost run only. Recording also starts with SOLIDCRAFT_PROFILE=1, the CLI's \
              --profile and the app's preference; off, it costs nothing measurable. Read-only",
         ),
     CommandSpec::new("diagnostics.kernel", "Geometry Kernel", kernel).icon("bug_report").noundo().params(
-        "choice?: routed | smlib | solidcore (sets which kernel answers: routed = each operation on the kernel the routing \
-         table gives it, smlib = the C++ SMLib kernel for all, solidcore = its Rust port for all; bodies already computed \
-         keep their results). SOLIDCRAFT_KERNEL, when set, wins over it, and SOLIDCRAFT_KERNEL_ROUTES (op=backend,...) \
+        "choice?: routed | smlib | solidcore (sets which kernel answers: routed, the default = each operation on the kernel \
+         the routing table gives it, solidcore for every one; smlib = the C++ SMLib kernel for all; solidcore = the Rust port \
+         for all; bodies already computed keep their results). SOLIDCRAFT_KERNEL, when set, wins over it, and SOLIDCRAFT_KERNEL_ROUTES (op=backend,...) \
          moves single operations on top of both. Returns {choice, environment, overrides: {op: backend}, routes: [{op, \
          route, backend}]}: route is the table's kernel for the operation, backend the one it runs on now",
     ),

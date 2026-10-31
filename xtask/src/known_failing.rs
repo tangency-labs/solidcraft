@@ -1,6 +1,7 @@
 //! `cargo xtask known-failing --junit PATH... [--list FILE]`: grades a nextest run (its junit
-//! report) against the tests known to fail today, `tests/KNOWN_FAILING_TESTS`. CI's test jobs
-//! run it after nextest, in place of failing on any failed test. It fails on a test that failed
+//! report) against the tests known to fail today on the default kernel,
+//! `tests/KNOWN_FAILING_TESTS` (the C++ kernel's are `tests/KNOWN_FAILING_TESTS.smlib`, for a run
+//! with `SOLIDCRAFT_KERNEL=smlib` and `--list`). CI's test jobs run it after nextest, in place of failing on any failed test. It fails on a test that failed
 //! and is not listed, and on a listed test that passed (fixed: its line comes off in the same
 //! pull request); a listed test that did not run (a pull request tests only the packages it
 //! touches) is neither. The list has the kernel rig's format (`kernel_cases::known_failing`):
@@ -15,6 +16,8 @@ use quick_xml::Reader;
 use quick_xml::events::{BytesStart, Event};
 
 pub const LIST: &str = "tests/KNOWN_FAILING_TESTS";
+/// The same for the C++ kernel (`SOLIDCRAFT_KERNEL=smlib`), graded with `--list`.
+pub const SMLIB_LIST: &str = "tests/KNOWN_FAILING_TESTS.smlib";
 
 pub fn run(root: &Path, rest: &[&str]) -> Result<(), String> {
     let mut reports = Vec::new();
@@ -60,9 +63,12 @@ fn add(all: &mut BTreeMap<String, bool>, xml: &str) -> Result<(), String> {
 
 /// `cargo xtask lists`: the list is sorted, each test once, with a cause each.
 pub fn check_list(root: &Path) -> Result<(), String> {
-    let file = root.join(LIST);
-    let text = std::fs::read_to_string(&file).map_err(|e| format!("{}: {e}", file.display()))?;
-    crate::kernel_cases::known_failing(&text).map(|_| ()).map_err(|e| format!("{LIST}: {e}"))
+    for list in [LIST, SMLIB_LIST] {
+        let file = root.join(list);
+        let text = std::fs::read_to_string(&file).map_err(|e| format!("{}: {e}", file.display()))?;
+        crate::kernel_cases::known_failing(&text).map_err(|e| format!("{list}: {e}"))?;
+    }
+    Ok(())
 }
 
 /// `path` itself, or every `.xml` file under it (sorted), into `out`.

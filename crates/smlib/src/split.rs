@@ -20,7 +20,7 @@ impl Brep {
         }
         init()?;
         let faces: Vec<i64> = faces.iter().map(|f| i64::try_from(*f).map_err(|_| Error::Argument)).collect::<Result<_>>()?;
-        let handles: Vec<&ffi::ssi::SurfaceHandle> = tools.iter().map(|t| t.handle()).collect();
+        let handles: Vec<&ffi::ssi::SurfaceHandle> = tools.iter().map(|t| t.handle()).collect::<Result<_>>()?;
         match ffi::split::split_faces(self.cpp()?, &faces, &handles) {
             Ok((h, made)) => Ok(Some((Brep::made(h), made.into_iter().map(|m| usize::try_from(m).unwrap_or(0)).collect()))),
             Err(ffi::ops::ERR_NO_CUT) => Ok(None),
@@ -38,7 +38,7 @@ impl Brep {
             return core::split::split_body(self.core()?, tool.spec()).map(|r| r.map(|(b, f)| (Brep::made_core(b), Brep::made_core(f))));
         }
         init()?;
-        match ffi::split::split_body(self.cpp()?, tool.handle()) {
+        match ffi::split::split_body(self.cpp()?, tool.handle()?) {
             Ok((b, f)) => Ok(Some((Brep::made(b), Brep::made(f)))),
             Err(ffi::ops::ERR_NO_CUT) => Ok(None),
             Err(s) => Err(error(s)),

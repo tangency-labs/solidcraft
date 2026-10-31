@@ -178,11 +178,13 @@ macro_rules! cases {
             #[test]
             $(#[$ign])?
             fn solidcore_matches_the_cpp_kernel() {
+                let _cpp = crate::route::on_cpp();
                 super::parity(stringify!($m));
             }
             #[cfg(feature = "native")]
             #[test]
             fn the_cpp_kernel_matches_the_closed_form() {
+                let _cpp = crate::route::on_cpp();
                 let _ = super::cpp_case(stringify!($m));
             }
         }
@@ -235,6 +237,7 @@ mod history {
 
     #[test]
     fn tags_cross_an_untrim() {
+        let _cpp = crate::route::on_cpp();
         crate::init().unwrap();
         let a = Brep::made_core(super::holed_sheet()).tagged(0).unwrap();
         for (holes, outer) in [(None, false), (Some(&[][..]), true)] {
@@ -384,11 +387,13 @@ macro_rules! extend_cases {
             #[test]
             $(#[$ign])?
             fn solidcore_matches_the_cpp_kernel() {
+                let _cpp = crate::route::on_cpp();
                 super::extend_parity(stringify!($m));
             }
             #[cfg(feature = "native")]
             #[test]
             fn the_cpp_kernel_matches_the_closed_form() {
+                let _cpp = crate::route::on_cpp();
                 let _ = super::extend_cpp(stringify!($m));
             }
         }

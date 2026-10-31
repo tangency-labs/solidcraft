@@ -105,6 +105,7 @@ mod tests {
 
     #[test]
     fn a_copy_and_a_native_file_round_trip_stay_valid() {
+        let _cpp = crate::route::on_cpp();
         let b = Brep::make_box([0.0; 3], [2.0, 3.0, 4.0]).unwrap();
         assert!(b.try_clone().unwrap().check(CheckLevel::All).unwrap().is_valid());
         let dir = std::env::temp_dir().join(format!("solidcraft-smlib-check-{}", std::process::id()));

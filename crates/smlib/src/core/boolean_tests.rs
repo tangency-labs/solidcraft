@@ -260,6 +260,7 @@ macro_rules! cases {
             #[test]
             $(#[$ign])?
             fn solidcore_matches_the_cpp_kernel() {
+                let _cpp = crate::route::on_cpp();
                 super::parity(stringify!($m));
             }
         }
@@ -415,6 +416,7 @@ mod history {
 
     #[test]
     fn tags_cross_a_cpp_boolean() {
+        let _cpp = crate::route::on_cpp();
         let (a, b) = (tagged_box([0.0; 3], [10.0; 3], 0), tagged_box([5.0; 3], [10.0; 3], 1));
         let r = Brep::made(ffi::ops::boolean(a.cpp().unwrap(), b.cpp().unwrap(), ffi::ops::BOOLEAN_UNION).unwrap());
         check(&r.history().unwrap());
@@ -422,6 +424,7 @@ mod history {
 
     #[test]
     fn tags_cross_a_solidcore_boolean() {
+        let _cpp = crate::route::on_cpp();
         let (a, b) = (tagged_box([0.0; 3], [10.0; 3], 0), tagged_box([5.0; 3], [10.0; 3], 1));
         let r = super::boolean(a.core().unwrap(), b.core().unwrap(), BooleanOp::Union).unwrap().unwrap();
         check(&Brep::made_core(r).history().unwrap());
@@ -441,6 +444,7 @@ mod history {
 
     #[test]
     fn an_overlapping_union_has_the_cpp_history() {
+        let _cpp = crate::route::on_cpp();
         parity(&tagged_box([0.0; 3], [10.0; 3], 0), &tagged_box([5.0; 3], [10.0; 3], 1), BooleanOp::Union);
     }
 
@@ -448,6 +452,7 @@ mod history {
     /// come from the tool.
     #[test]
     fn a_slot_has_the_cpp_history() {
+        let _cpp = crate::route::on_cpp();
         let (a, b) = (tagged_box([0.0; 3], [20.0; 3], 0), tagged_box([5.0, -1.0, 10.0], [10.0, 22.0, 15.0], 1));
         parity(&a, &b, BooleanOp::Subtract);
     }
@@ -456,6 +461,7 @@ mod history {
     /// found lying on each other's (SMLib's coincidences and merges) stand for both.
     #[test]
     fn boxes_side_by_side_have_the_cpp_history() {
+        let _cpp = crate::route::on_cpp();
         let (a, b) = (tagged_box([0.0; 3], [10.0; 3], 0), tagged_box([10.0, 0.0, 0.0], [10.0; 3], 1));
         parity(&a, &b, BooleanOp::Union);
     }
@@ -463,6 +469,7 @@ mod history {
     /// A box sharing one corner region with another: the intersection keeps three faces of each.
     #[test]
     fn an_intersection_has_the_cpp_history() {
+        let _cpp = crate::route::on_cpp();
         parity(&tagged_box([0.0; 3], [10.0; 3], 0), &tagged_box([5.0; 3], [10.0; 3], 1), BooleanOp::Intersect);
     }
 
@@ -470,6 +477,7 @@ mod history {
     /// copy's history is the operand's own, every face Kept, as on C++.
     #[test]
     fn tags_cross_a_copy() {
+        let _cpp = crate::route::on_cpp();
         let a = tagged_box([0.0; 3], [10.0, 20.0, 30.0], 0);
         // Converted (and tagged) before the kernel's lock is taken: the conversion takes it too.
         let body = a.core().unwrap();
@@ -488,6 +496,7 @@ mod history {
     /// post's foot, the other faces are as they were.
     #[test]
     fn an_imprint_has_the_cpp_history() {
+        let _cpp = crate::route::on_cpp();
         let (a, b) = (tagged_box([0.0; 3], [20.0; 3], 0), tagged_box([5.0, 5.0, 10.0], [10.0, 10.0, 20.0], 1));
         let cpp = Brep::made(ffi::ops::imprint(a.cpp().unwrap(), b.cpp().unwrap()).unwrap()).history().unwrap();
         let core = Brep::made_core(super::imprint(a.core().unwrap(), b.core().unwrap()).unwrap().unwrap()).history().unwrap();
@@ -501,6 +510,7 @@ mod history {
     /// x = 0, x = 40 and the bottom (the fork's 1c7accd; before, y = 0 and y = 30 were Modified).
     #[test]
     fn a_face_whose_edge_is_only_cut_by_a_vertex_is_kept() {
+        let _cpp = crate::route::on_cpp();
         use solidcraft_geom::brep::history::Change;
         let (a, b) = (tagged_box([0.0; 3], [40.0, 30.0, 20.0], 0), tagged_box([10.0, -5.0, 20.0], [10.0, 40.0, 10.0], 1));
         let cpp = Brep::made(ffi::ops::imprint(a.cpp().unwrap(), b.cpp().unwrap()).unwrap()).history().unwrap();
@@ -519,6 +529,7 @@ mod history {
     /// child the split edge's `at`), so the side x = 0 is still all of itself and Kept.
     #[test]
     fn an_imprint_split_edge_lies_where_the_edge_lay() {
+        let _cpp = crate::route::on_cpp();
         use solidcraft_geom::brep::history::Change;
         let (a, b) = (tagged_box([0.0; 3], [20.0; 3], 0), tagged_box([0.0, 5.0, 20.0], [10.0; 3], 1));
         let cpp = Brep::made(ffi::ops::imprint(a.cpp().unwrap(), b.cpp().unwrap()).unwrap()).history().unwrap();
@@ -540,6 +551,7 @@ mod history {
     /// leaves a target that already has a tag alone, so the top stands for the cube's top only.
     #[test]
     fn a_copy_onto_a_tagged_face_keeps_its_own_tag() {
+        let _cpp = crate::route::on_cpp();
         use solidcraft_geom::brep::history::Change;
         let (a, b) = (tagged_box([0.0; 3], [20.0; 3], 0), tagged_box([5.0, 5.0, 20.0], [10.0; 3], 1));
         parity(&a, &b, BooleanOp::Subtract);
@@ -553,6 +565,7 @@ mod history {
     /// own tag (SMLib's Copy), as on C++.
     #[test]
     fn a_copy_onto_a_tagged_edge_has_the_cpp_history() {
+        let _cpp = crate::route::on_cpp();
         parity(&tagged_box([0.0; 3], [10.0; 3], 0), &tagged_box([10.0, 0.0, 0.0], [10.0; 3], 1), BooleanOp::Subtract);
     }
 
@@ -578,6 +591,7 @@ mod history {
     /// A hole through a block: the tool's and the block's faces meet along whole circles.
     #[test]
     fn a_round_hole_has_the_cpp_history() {
+        let _cpp = crate::route::on_cpp();
         parity(&tagged_box([0.0; 3], [40.0, 40.0, 10.0], 0), &tagged_cylinder([20.0, 20.0, -5.0], 5.0, 20.0, 1), BooleanOp::Subtract);
     }
 
@@ -585,6 +599,7 @@ mod history {
     /// edge still where it lay (`moved`'s `open.is_empty()`), so it is Kept on both kernels.
     #[test]
     fn a_face_bounded_by_closed_edges_is_kept() {
+        let _cpp = crate::route::on_cpp();
         use solidcraft_geom::brep::history::Change;
         let (a, b) = (holed_plate(0), tagged_box([35.0, 35.0, -5.0], [10.0, 10.0, 20.0], 1));
         let cpp = Brep::made(ffi::ops::boolean(a.cpp().unwrap(), b.cpp().unwrap(), ffi::ops::BOOLEAN_SUBTRACT).unwrap()).history().unwrap();
@@ -598,6 +613,7 @@ mod history {
     /// and cut that closed edge by vertices; the top is split, the wall's rim stays where it lay.
     #[test]
     fn an_imprint_cutting_a_closed_edge_has_the_cpp_history() {
+        let _cpp = crate::route::on_cpp();
         let (a, b) = (holed_plate(0), tagged_box([-5.0, 18.0, 10.0], [50.0, 4.0, 5.0], 1));
         let cpp = Brep::made(ffi::ops::imprint(a.cpp().unwrap(), b.cpp().unwrap()).unwrap()).history().unwrap();
         let core = Brep::made_core(super::imprint(a.core().unwrap(), b.core().unwrap()).unwrap().unwrap()).history().unwrap();
@@ -608,6 +624,7 @@ mod history {
     /// each curved face is split in two across its seam.
     #[test]
     fn a_curved_face_split_across_its_seam_has_the_cpp_history() {
+        let _cpp = crate::route::on_cpp();
         use solidcraft_geom::brep::history::Change;
         let slab = || tagged_box([-20.0, -1.0, -20.0], [40.0, 2.0, 40.0], 1);
         let sphere = Brep::made(ffi::make_sphere(&[0.0, 0.0, 0.0], 7.0).unwrap()).tagged(0).unwrap();
@@ -621,6 +638,7 @@ mod history {
     /// A chain of three overlapping boxes in one `union_all`.
     #[test]
     fn a_union_of_three_has_the_cpp_history() {
+        let _cpp = crate::route::on_cpp();
         let (a, b, c) = (tagged_box([0.0; 3], [10.0; 3], 0), tagged_box([5.0; 3], [10.0; 3], 1), tagged_box([10.0; 3], [10.0; 3], 2));
         let cpp = Brep::made(ffi::ops::boolean_union_all(&[a.cpp().unwrap(), b.cpp().unwrap(), c.cpp().unwrap()]).unwrap()).history().unwrap();
         let core = Brep::made_core(super::union_all(&[a.core().unwrap(), b.core().unwrap(), c.core().unwrap()]).unwrap()).history().unwrap();
@@ -633,6 +651,7 @@ mod history {
     /// stands for all four, both sources carrying several origins.
     #[test]
     fn a_merge_of_several_origins_on_each_side_has_the_cpp_history() {
+        let _cpp = crate::route::on_cpp();
         let boxes: Vec<Brep> = (0..4u32).map(|i| tagged_box([f64::from(i) * 10.0, 0.0, 0.0], [10.0; 3], i as usize)).collect();
         let c = |x: usize, y: usize| ffi::ops::boolean(boxes[x].cpp().unwrap(), boxes[y].cpp().unwrap(), ffi::ops::BOOLEAN_UNION).unwrap();
         let (ab, cd) = (c(0, 1), c(2, 3));
@@ -647,6 +666,7 @@ mod history {
     /// Two overlapping squares combined as regions of one plane.
     #[test]
     fn a_boolean2d_has_the_cpp_history() {
+        let _cpp = crate::route::on_cpp();
         use crate::sweeps::Curve;
         let square = |x: f64, y: f64, s: f64, operand: usize| {
             crate::init().unwrap();

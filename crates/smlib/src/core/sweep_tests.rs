@@ -416,11 +416,13 @@ macro_rules! cases {
             $(#[$ign])?
             $(#[$pign])?
             fn solidcore_matches_the_cpp_kernel() {
+                let _cpp = crate::route::on_cpp();
                 super::parity(stringify!($m));
             }
             #[cfg(feature = "native")]
             #[test]
             fn the_cpp_kernel_matches_the_closed_form() {
+                let _cpp = crate::route::on_cpp();
                 let _ = super::cpp_case(stringify!($m));
             }
         }
@@ -462,6 +464,8 @@ cases!(
 /// 4 vertices) and the area πr² + πrh + 2rh. On solidcore, and with SMLib built on the C++ kernel.
 #[test]
 fn arcs_on_one_circle_sweep_one_wall() {
+    #[cfg(feature = "native")]
+    let _cpp = crate::route::on_cpp();
     let cases = [
         ("extrude_circle_in_two_halves", [3, 3, 2], 50.0 * PI + 100.0 * PI, true),
         ("extrude_circle_in_two_frames", [3, 3, 2], 50.0 * PI + 100.0 * PI, true),
@@ -553,6 +557,7 @@ fn sweep_placed_reports_the_motions() {
 #[cfg(feature = "native")]
 #[test]
 fn the_cpp_kernel_places_the_profile_alike() {
+    let _cpp = crate::route::on_cpp();
     crate::sweeps::ON_CPP.with(|c| c.set(true));
     let (p, up) = straight_up();
     let (q, arc) = round_z();
@@ -671,6 +676,7 @@ fn a_box_top_section_is_the_line_across_it() {
 #[cfg(feature = "native")]
 #[test]
 fn the_cpp_kernel_sections_a_face_alike() {
+    let _cpp = crate::route::on_cpp();
     use crate::{Brep, ffi};
     type Case = (&'static str, Box<dyn Fn() -> Body>, Brep, [[f64; 3]; 3]);
     let cases: [Case; 3] = [

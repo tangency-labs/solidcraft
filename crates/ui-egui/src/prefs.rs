@@ -2478,9 +2478,10 @@ mod tests {
     }
 
     /// The Geometry kernel preference reaches the kernel through diagnostics.kernel, at startup
-    /// and when it changes, and only a choice the command knows is accepted. (The kernel choice
-    /// is process-wide and other tests start harnesses meanwhile, so this reads what was applied,
-    /// and only `smlib`, which runs every family where Routed does today.)
+    /// and when it changes, and only a choice the command knows is accepted. `smlib` keeps the C++
+    /// kernel reachable for every family, the behaviour from before solidcore was the default.
+    /// (The kernel choice is process-wide and other tests start harnesses meanwhile, so this
+    /// reads what `smlib` would route and only sets `solidcore`, where Routed runs everything.)
     #[test]
     fn the_geometry_kernel_preference_applies_through_its_command() {
         use serde_json::json;
@@ -2492,9 +2493,14 @@ mod tests {
         assert_eq!(h.app.prefs_window.kernel_environment, environment);
         assert!(h.call("ui.prefs", json!({"geometry_kernel": "truck"}))["error"].as_str().is_some_and(|e| e.contains("geometry_kernel")));
         assert_eq!(h.app.preferences.geometry_kernel, "routed");
-        h.call("ui.prefs", json!({"geometry_kernel": "smlib"}));
+        use solidcraft_engine::kernel::kernel_route::{Backend, Choice, Op, Overrides};
+        for op in Op::ALL {
+            assert_eq!(Choice::from_id("smlib").map(|c| op.backend_with(c, &Overrides::NONE)), Some(Backend::Smlib), "{op:?}");
+            assert_eq!(op.backend_with(Choice::Routed, &Overrides::NONE), Backend::Solidcore, "{op:?}");
+        }
+        h.call("ui.prefs", json!({"geometry_kernel": "solidcore"}));
         h.frames(2);
-        assert_eq!(h.app.prefs_window.applied_kernel.as_deref(), Some("smlib"));
+        assert_eq!(h.app.prefs_window.applied_kernel.as_deref(), Some("solidcore"));
         h.call("ui.prefs", json!({"geometry_kernel": "routed"}));
         h.frames(2);
         assert_eq!(h.app.prefs_window.applied_kernel.as_deref(), Some("routed"));

@@ -651,7 +651,7 @@ mod tests;
 
 impl crate::Brep {
     /// A body of the kernel [`crate::route::Op::Convert`] routes to, from flat arrays.
-    fn from_arrays(a: &Arrays) -> crate::Result<crate::Brep> {
+    pub(crate) fn from_arrays(a: &Arrays) -> crate::Result<crate::Brep> {
         match crate::route::Op::Convert.backend() {
             crate::route::Backend::Smlib => crate::flat::Flat::from_arrays(a)?.import(),
             crate::route::Backend::Solidcore => crate::core::from_arrays(a).map(crate::Brep::made_core),

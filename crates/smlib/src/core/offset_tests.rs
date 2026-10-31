@@ -422,11 +422,13 @@ macro_rules! cases {
             #[test]
             $(#[$ign])?
             fn solidcore_matches_the_cpp_kernel() {
+                let _cpp = crate::route::on_cpp();
                 super::parity(stringify!($m));
             }
             #[cfg(feature = "native")]
             #[test]
             fn the_cpp_kernel_matches_the_closed_form() {
+                let _cpp = crate::route::on_cpp();
                 let _ = super::cpp_case(stringify!($m));
             }
         }
@@ -618,6 +620,7 @@ fn a_draft_leaves_no_mark() {
 #[cfg(feature = "native")]
 #[test]
 fn a_draft_moves_a_face_as_on_cpp() {
+    let _cpp = crate::route::on_cpp();
     use crate::sweeps::{Curve, DraftCorner};
     use crate::{Brep, ffi};
     crate::init().unwrap();
@@ -661,6 +664,7 @@ fn a_draft_moves_a_face_as_on_cpp() {
 #[cfg(feature = "native")]
 #[test]
 fn a_draft_past_the_neighbours_meeting_is_unsupported_as_on_cpp() {
+    let _cpp = crate::route::on_cpp();
     use crate::sweeps::{Curve, DraftCorner};
     use crate::{Brep, ffi};
     crate::init().unwrap();
@@ -680,6 +684,7 @@ fn a_draft_past_the_neighbours_meeting_is_unsupported_as_on_cpp() {
 #[cfg(feature = "native")]
 #[test]
 fn an_l_sheet_thickens_as_on_cpp() {
+    let _cpp = crate::route::on_cpp();
     use crate::sweeps::{Curve, DraftCorner};
     use crate::{Brep, ffi};
     crate::init().unwrap();
@@ -709,6 +714,7 @@ mod history {
     /// faces they offset.
     #[test]
     fn tags_cross_a_shell() {
+        let _cpp = crate::route::on_cpp();
         let a = tagged_box();
         let top = [[10.0, 15.0, 10.0]];
         let cpp = Brep::made(ffi::ops::pick_op(ffi::ops::Pick::Shell, a.cpp().unwrap(), &top, super::TOL, -2.0).unwrap()).history().unwrap();
@@ -719,6 +725,7 @@ mod history {
     /// The top moved down 2 mm: it stands for itself, its four neighbours are trimmed to meet it.
     #[test]
     fn tags_cross_a_face_offset() {
+        let _cpp = crate::route::on_cpp();
         let a = tagged_box();
         let top = [[10.0, 15.0, 10.0]];
         let cpp = Brep::made(ffi::ops::pick_op(ffi::ops::Pick::OffsetFaces, a.cpp().unwrap(), &top, super::TOL, -2.0).unwrap()).history().unwrap();
@@ -758,17 +765,20 @@ mod history {
 
     #[test]
     fn tags_cross_a_thicken_of_a_curved_sheet() {
+        let _cpp = crate::route::on_cpp();
         thicken_parity(true);
     }
 
     #[test]
     fn tags_cross_a_thicken_of_a_flat_sheet() {
+        let _cpp = crate::route::on_cpp();
         thicken_parity(false);
     }
 
     /// A sheet moved along its normal, flat and curved: each face stands for itself.
     #[test]
     fn tags_cross_a_sheet_offset() {
+        let _cpp = crate::route::on_cpp();
         for curved in [false, true] {
             let a = tagged_sheet(curved);
             let cpp = Brep::made(ffi::sheets::offset_sheet(a.cpp().unwrap(), 1.5).unwrap()).history().unwrap();
@@ -780,6 +790,7 @@ mod history {
     /// A cylinder hollowed, its top open: the walls round closed edges, on a curved face.
     #[test]
     fn tags_cross_a_shell_of_a_cylinder() {
+        let _cpp = crate::route::on_cpp();
         crate::init().unwrap();
         let a = Brep::made(ffi::make_cylinder(&[0.0; 3], 10.0, 20.0).unwrap()).tagged(0).unwrap();
         let top = [[0.0, 0.0, 20.0]];
@@ -792,6 +803,7 @@ mod history {
     /// edges move with it.
     #[test]
     fn tags_cross_a_draft() {
+        let _cpp = crate::route::on_cpp();
         let a = tagged_box();
         let front = [[10.0, 0.0, 5.0]];
         let (origin, normal, pull, angle) = ([0.0; 3], [0.0, 0.0, 1.0], [0.0, 0.0, 1.0], 5f64.to_radians());
@@ -830,6 +842,8 @@ fn offset_faces_close_a_step_wall() {
 /// built, the C++ kernel gives the same at every other move.
 #[test]
 fn mitred_rounds_follow_a_moved_top() {
+    #[cfg(feature = "native")]
+    let _cpp = crate::route::on_cpp();
     use super::blend::{Corners, blend};
     use crate::Blend;
     let edges = [[20.0, 0.0, 10.0], [20.0, 30.0, 10.0], [0.0, 15.0, 10.0], [40.0, 15.0, 10.0]];

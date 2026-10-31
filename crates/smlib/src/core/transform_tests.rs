@@ -226,11 +226,13 @@ macro_rules! cases {
             #[test]
             $(#[$ign])?
             fn solidcore_matches_the_cpp_kernel() {
+                let _cpp = crate::route::on_cpp();
                 super::parity(stringify!($m));
             }
             #[cfg(feature = "native")]
             #[test]
             fn the_cpp_kernel_matches_the_closed_form() {
+                let _cpp = crate::route::on_cpp();
                 let _ = super::cpp_case(stringify!($m));
             }
         }
@@ -304,6 +306,7 @@ mod history {
 
     #[test]
     fn tags_cross_a_copy() {
+        let _cpp = crate::route::on_cpp();
         let a = tagged_box();
         let cpp = Brep::made(ffi::copy(a.cpp().unwrap()).unwrap()).history().unwrap();
         let core = Brep::made_core(super::copy(a.core().unwrap()).unwrap()).history().unwrap();
@@ -312,6 +315,7 @@ mod history {
 
     #[test]
     fn tags_cross_a_mirror_and_a_shear() {
+        let _cpp = crate::route::on_cpp();
         let a = tagged_box();
         let mirror = [[-1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0; 4]];
         let shear = [[1.0, 0.5, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [2.0, 3.0, 4.0, 1.0]];

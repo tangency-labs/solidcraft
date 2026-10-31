@@ -859,8 +859,7 @@ mod tests {
     use super::*;
 
     /// While the profiler records, a STEP import's reply carries its own profile: the import's
-    /// stages and SMLib's calls, as diagnostics.profile reports them.
-    #[cfg(feature = "smlib")]
+    /// stages and the kernel's calls, as diagnostics.profile reports them.
     #[test]
     fn a_step_import_reports_its_profile_while_the_profiler_records() {
         let _serial = crate::schema::diagnostics::PROFILE_TESTS.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -879,7 +878,7 @@ mod tests {
         let p = &out["profile"];
         let rows = p["rows"].as_array().unwrap();
         let has = |cat: &str| rows.iter().any(|r| r["category"] == cat);
-        assert!(has("import") && has("smlib"), "{p}");
+        assert!(has("import") && (has("solidcore") || has("smlib")), "{p}");
         assert!(p["by_category"].as_array().is_some_and(|c| !c.is_empty()) && p["wall_ms"].as_f64().is_some_and(|w| w > 0.0), "{p}");
         let _ = std::fs::remove_dir_all(&dir);
     }

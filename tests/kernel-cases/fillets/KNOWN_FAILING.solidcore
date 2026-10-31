@@ -1,0 +1,17 @@
+# The fillets cases that fail today on solidcore, one a line: `<case> <why it fails today>`. Sorted.
+# The kernel rig gate fails on a case that fails and is not listed, and on a listed case that passes.
+# Baseline: solidcore pin 9dde25e97, tests/kernel-cases run by `cargo xtask kernel-cases`, x86_64 Linux.
+1207-fillet-bar-top-edge-after-boss-arc-round-r0-5 [fail] step 4 (solid.fillet): body `Arm`: the operation failed: SMLib fillet: SMLib's check refuses the result: 5 failed tests: SmBSplineCurve::Test #15 Bad Repeated CPts: BSplineCurve has Internal Coincident ControlPoints (causes
+190-fillet-disc-rim-past-its-2mm-wall [fail] step 2 (solid.fillet): SMLib fillet: operation: SMLib failed (status 1001)
+2893-chamfer-distance-and-angle-past-the-wall-refused [fail] refused, but not because "angle": step 2 (solid.chamfer): SMLib chamfer: operation: SMLib rejected the input (SM_ERR_INVALID_INPUT)
+2893-chamfer-two-distances-elliptical-rim [fail] refused, but not because "not supported yet": step 3 (solid.chamfer): SMLib chamfer: operation: SMLib failed (status 1001) (tangent propagation blended the picked edges' tangent chain with them; with it off, tangent_chain: 
+2893-chamfer-two-distances-past-the-bottom [fail] step 2 (solid.chamfer): SMLib chamfer: operation: SMLib failed (status 1001)
+4782-fillet-bar-edge-wider-than-both-faces [fail] continuity_order: got Box: no null seams want >= g1 at every blend seam
+5158-fillet-round-just-past-a-10mm-face [unsupported] step 2 (solid.fillet): not supported yet: the fillet is larger than the faces beside its edges allow; the largest radius that fits is 10 mm
+9-fillet-corner-curvature-with-reduce-fit [unsupported] solid.fillet builds `corner: g2` with `fit: exact` only
+9-fillet-corner-curvature-with-taper-fit [unsupported] solid.fillet builds `corner: g2` with `fit: exact` only
+cov-chamfer-concave-edge-through-up-down-joined-squares [fail] step 9 (solid.chamfer): SMLib chamfer: operation: SMLib failed (status 1001) (tangent propagation blended the picked edges' tangent chain with them; with it off, tangent_chain: false, only the picked edges are blended)
+cov-chamfer-outer-corner-edge-of-a-shelled-box-with-a-lip [fail] step 5 (solid.chamfer): SMLib chamfer: operation: SMLib's result is not a closed solid
+cov-fillet-arc-edge-on-an-oblique-cut-of-a-bar [fail] step 11 (solid.fillet): body `Tool`: the operation failed: SMLib fillet: SMLib's check refuses the result: 4 failed tests: SmBSplineCurve::Test #15 Bad Repeated CPts: BSplineCurve has Internal Coincident ControlPoints (caus
+every-block-cylinder-crease-top-edge-after-arc-round-r1 [fail] step 4 (solid.fillet): SMLib fillet: operation: SMLib failed (status 1001) (tangent propagation blended the picked edges' tangent chain with them; with it off, tangent_chain: false, only the picked edges are blended)
+every-hole-top-rim-r12-past-plate-bottom [fail] step 3 (solid.fillet): SMLib fillet: operation: SMLib failed (status 1001)

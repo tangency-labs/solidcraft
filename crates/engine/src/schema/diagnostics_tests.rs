@@ -108,10 +108,8 @@ fn diagnostics_kernel_reports_and_sets_the_choice() {
     assert_eq!(r["overrides"], serde_json::Value::Object(moved), "{r}");
     for choice in ["solidcore", "smlib", "routed"] {
         let c = route::Choice::from_id(choice).unwrap();
-        // `.smb` files stay on SMLib whatever is chosen.
         for op in route::Op::ALL {
             let want = match choice {
-                _ if op == route::Op::File => "smlib",
                 "routed" => op.route().id(),
                 other => other,
             };
