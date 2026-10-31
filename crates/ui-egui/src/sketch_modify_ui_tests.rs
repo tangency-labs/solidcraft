@@ -443,6 +443,47 @@ fn the_x_distance_gets_a_drag_arrow_along_the_sketch_x_axis() {
     assert!((dir - x).len() < 1e-9, "{dir:?} is not the sketch x axis {x:?}");
 }
 
+/// #2031: Y gets its own drag arrow along the sketch y axis, the mate of X's arrow along x,
+/// so a move drags in both in-plane directions instead of typing Y in the window.
+#[test]
+fn the_y_distance_gets_a_drag_arrow_along_the_sketch_y_axis() {
+    let mut h = rectangle();
+    h.step(&json!({"start": "sketch.move"})).unwrap();
+    let sid = h.app.session.active_sketch.unwrap();
+    let y = h.app.session.world_state().sketch(sid).unwrap().plane.y;
+    let dir = crate::canvas::sketch_move_y_dir(&h.app).expect("a sketch move's Y Distance has a direction to drag along");
+    assert!((dir - y).len() < 1e-9, "{dir:?} is not the sketch y axis {y:?}");
+}
+
+/// #2031: the Move window previews live, like the other sketch modify windows: the moved
+/// entities come back as preview geometry as the values change, before OK.
+#[test]
+fn the_move_window_previews_the_moved_entities() {
+    let mut h = Harness::new();
+    h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+    h.app.run("sketch.circle.center", json!({"center": [-50, 0], "radius": 5, "id": "c1"})).unwrap();
+    h.settle();
+    h.step(&json!({"start": "sketch.move"})).unwrap();
+    {
+        let d = h.app.dialog.as_mut().unwrap();
+        d.inputs[0].items = vec![Sel::SketchCurve { id: "c1".into(), sketch: None }];
+        if let Kind::SketchModify(Mod::Move { y, .. }) = &mut d.kind {
+            *y = "7".into();
+        } else {
+            panic!("not the move window");
+        }
+    }
+    let d = h.app.dialog.as_ref().unwrap();
+    assert!(d.previews(), "the Move window previews like Offset and Mirror");
+    let cmds = crate::dialogs::preview_commands(&h.app, d).expect("the picked curve and Y form a command");
+    assert_eq!(cmds[0].0, "sketch.move");
+    assert_eq!(cmds[0].1["translate"], json!([0.0, 7.0]));
+    let colors = crate::preview::Colors { body: [1; 4], added: [2; 4], new_body: [3; 4], removed: [4; 4], edge: [5; 4], ghost: true };
+    let built = crate::preview::compute(&h.app.session, &cmds, colors).expect("the move previews");
+    assert_eq!(built.sketches.len(), 1, "the moved curve previews");
+    assert!(!built.sketches[0].curves.is_empty(), "the preview carries the moved curve");
+}
+
 /// A sketch holding one circle, with the window for `cmd` open on it.
 fn open(cmd: &str) -> (crate::scenario::Harness, String) {
     let mut h = crate::scenario::Harness::new();
