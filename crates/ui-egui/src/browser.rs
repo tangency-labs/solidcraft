@@ -765,10 +765,11 @@ impl Lit {
         // which does not rewrite the browser selection.
         let dialog_picks = app.dialog.as_ref().map(|d| d.items()).unwrap_or_default();
         for s in app.session.selection.iter().chain(&dialog_picks) {
-            selected.insert(match s {
-                Sel::Body { name } | Sel::Face { body: name, .. } | Sel::Edge { body: name, .. } | Sel::Vertex { body: name, .. } => {
-                    Thing::Body(name.clone())
-                }
+            let thing = match s {
+                Sel::Body { name } => Thing::Body(name.clone()),
+                // A picked face, edge or vertex lights the feature it belongs to (see
+                // `browser::features`), not the whole body as if the body were selected.
+                Sel::Face { .. } | Sel::Edge { .. } | Sel::Vertex { .. } => continue,
                 Sel::Feature { id } => Thing::Sketch(*id),
                 Sel::Profile { sketch, .. } | Sel::ExternalSketchCurve { sketch, .. } | Sel::ExternalSketchPoint { sketch, .. } => {
                     Thing::Sketch(*sketch)
@@ -783,7 +784,8 @@ impl Lit {
                 Sel::Axis { name } => Thing::Axis(name.clone()),
                 Sel::ConstructionPoint { name } => Thing::Point(name.clone()),
                 Sel::Occurrence { .. } => continue,
-            });
+            };
+            selected.insert(thing);
         }
         let hovered = match &app.viewport.hover {
             Some(Hit::Face { body, .. } | Hit::Edge { body, .. } | Hit::Vertex { body, .. }) => Some(Thing::Body(body.clone())),

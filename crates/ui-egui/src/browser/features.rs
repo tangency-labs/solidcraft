@@ -250,7 +250,11 @@ fn feature_row(
     let sketch = crate::timeline::TimelineKind::of(&feature.kind).profile_sketch();
     // Behind the history marker or suppressed: not built, drawn faint as in the timeline.
     let dim = feature.suppressed || app.session.doc.marker.is_some_and(|marker| index >= marker);
-    let selected = app.session.selection.contains(&Sel::Feature { id });
+    // A feature picked by its geometry (a face or edge of it chosen in the view) shows as
+    // selected in the tree, as NX marks the feature of a picked face; the session's selection
+    // stays the face or edge.
+    let by_geometry = !app.session.selection.contains(&Sel::Feature { id }) && crate::timeline::picked_feature(app) == Some(id);
+    let selected = app.session.selection.contains(&Sel::Feature { id }) || by_geometry;
     app.tree.remember(&format!("f:{id}"));
     let action = sketch.map(|_| ("sketch", "Edit Profile Sketch"));
     // A sketch row has the eye its Sketches folder row has. A feature's eye shows and hides the
