@@ -5,8 +5,10 @@
 //! bends to the left (its inside is the side it curls toward, as a U's inside), and a straight
 //! one runs the way its first listed curve was drawn.
 //!
-//! The wall is the union of a band along every segment (squared off at its ends) and, where
-//! segments meet at a corner, a mitred piece that closes the outer side of the corner. The
+//! The wall is the union of a band along every segment and, where segments meet at a corner, a
+//! mitred piece that closes the outer side of the corner. A band is squared off at its ends,
+//! except where it meets one other segment at an angle: there it ends on the line from the
+//! vertex to where the two walls' inner sides cross, so the inner side is mitred too. The
 //! bands' outlines (offsets and end lines) and the mitres are laid out as sketch curves, the
 //! sketch's profile detection splits them where they cross, and the faces inside the wall are
 //! merged into regions. Walls that cross or meet (a honeycomb, a ring and a cross) come out as
@@ -18,6 +20,7 @@ use solidcraft_geom::{Loop2, Region2, Seg2, Vec2};
 
 use crate::model::{CurveKind, Result, Sketch, SketchError};
 use crate::profiles::{find_profiles, merge_regions};
+use crate::shape::{Shape, intersections};
 
 /// Most curve segments one wall is built along.
 pub const MAX_THIN_SEGMENTS: usize = 2_000;
@@ -25,6 +28,8 @@ pub const MAX_THIN_SEGMENTS: usize = 2_000;
 const MERGE_TOL: f64 = 1e-6;
 /// A mitre longer than this many wall thicknesses is cut off square (a bevel).
 const MITRE_LIMIT: f64 = 4.0;
+/// The line a band ends on at a corner is drawn at most this many wall thicknesses long.
+const MAX_CORNER_CUT: f64 = 64.0;
 /// Free-form offsets are approximated by cubics within this distance (mm).
 const FIT_TOL: f64 = 1e-4;
 /// Most cubic pieces the offset of one free-form segment is approximated with.
@@ -68,8 +73,8 @@ pub fn thin_wall_regions(curves: &[Vec<Seg2>], inside: f64, outside: f64) -> Res
     let chains = chains(&segs)?;
     let (mut bands, mut boundary) = (Vec::new(), Vec::new());
     // Each vertex's segment ends: (vertex, end point, direction away from it, thickness to the
-    // left of that direction, to its right).
-    let mut ends: Vec<(usize, Vec2, Vec2, f64, f64)> = Vec::new();
+    // left of that direction, to its right, the band's index, whether it is the band's start).
+    let mut ends: Vec<(usize, Vec2, Vec2, f64, f64, usize, bool)> = Vec::new();
     for chain in &chains {
         for (k, s) in chain.segs.iter().enumerate() {
             let (start_v, end_v) = chain.vertices.get(k).copied().ok_or_else(|| bad("wall chain"))?;
@@ -79,10 +84,58 @@ pub fn thin_wall_regions(curves: &[Vec<Seg2>], inside: f64, outside: f64) -> Res
             for (p, n) in [(s.start(), s.start_tangent().perp()), (s.end(), s.end_tangent().perp())] {
                 boundary.push(Seg2::Line { a: p + n * inside, b: p - n * outside });
             }
-            ends.push((start_v, s.start(), s.start_tangent(), inside, outside));
-            ends.push((end_v, s.end(), -s.end_tangent(), outside, inside));
-            bands.push((*s, inside, outside));
+            ends.push((start_v, s.start(), s.start_tangent(), inside, outside, bands.len(), true));
+            ends.push((end_v, s.end(), -s.end_tangent(), outside, inside, bands.len(), false));
+            bands.push(Band { seg: *s, left: inside, right: outside, cuts: Vec::new() });
         }
+    }
+    // Where exactly two segments meet at an angle, their bands overlap on the inner side of the
+    // corner, and at a corner sharper than a right angle a band's square end reaches past the
+    // other segment, out of the wall. Each band there ends instead on the line from the vertex
+    // to where the two walls' inner sides cross (the corner's bisector between lines), so the
+    // two meet in a mitre.
+    ends.sort_by(|a, b| a.0.cmp(&b.0).then(a.2.angle().total_cmp(&b.2.angle())));
+    for group in ends.chunk_by(|a, b| a.0 == b.0) {
+        let [a, b] = group else { continue };
+        let (Some(ea), Some(eb)) = (a.2.normalized(), b.2.normalized()) else { continue };
+        let gap = (eb.angle() - ea.angle()).rem_euclid(TAU);
+        if (gap - PI).abs() <= 1e-7 {
+            continue;
+        }
+        // The inner side is the narrower angle between the two directions; `first` turns
+        // counter-clockwise into it, `second` clockwise.
+        let (first, second, efirst, esecond) = if gap < PI { (a, b, ea, eb) } else { (b, a, eb, ea) };
+        let thickness = first.3;
+        if thickness <= 1e-12 {
+            continue;
+        }
+        let (Some(fb), Some(sb)) = (bands.get(first.5), bands.get(second.5)) else { continue };
+        let vertex = first.1;
+        let Some(bisector) = (efirst + esecond).normalized() else { continue };
+        let half = 0.5 * (if gap < PI { gap } else { TAU - gap });
+        let along_bisector = vertex + bisector * (thickness / half.sin().max(1e-9));
+        // The walls' inner sides: left of `first`'s direction, right of `second`'s.
+        let inner = |band: &Band, at_start: bool, left_of_direction: bool| -> Option<Shape> {
+            let to_left_of_seg = at_start == left_of_direction;
+            let d = if to_left_of_seg { thickness } else { -thickness };
+            offset_shape(&band.seg, d)
+        };
+        let crossing = match (inner(fb, first.6, true), inner(sb, second.6, false)) {
+            (Some(x), Some(y)) => intersections(&x, &y)
+                .into_iter()
+                .filter(|p| (*p - vertex).dot(bisector) > 0.0 && p.dist(vertex) <= 2.0 * along_bisector.dist(vertex) + thickness)
+                .min_by(|p, q| p.dist(vertex).total_cmp(&q.dist(vertex))),
+            _ => None,
+        };
+        let corner = crossing.unwrap_or(along_bisector);
+        let Some(dir) = (corner - vertex).normalized() else { continue };
+        let corner = vertex + dir * corner.dist(vertex).min(MAX_CORNER_CUT * thickness);
+        for (end, e) in [(first, efirst), (second, esecond)] {
+            if let Some(band) = bands.get_mut(end.5) {
+                band.cuts.push((vertex, dir, dir.cross(e).signum(), corner.dist(vertex)));
+            }
+        }
+        boundary.push(Seg2::Line { a: vertex, b: corner });
     }
     // Close the outer side of every corner with a mitre (or a bevel where the mitre would run
     // far out): between two neighbouring segment ends around a vertex whose walls leave a gap
@@ -129,7 +182,7 @@ pub fn thin_wall_regions(curves: &[Vec<Seg2>], inside: f64, outside: f64) -> Res
             fills.push(fill);
         }
     }
-    let inside_wall = |q: Vec2| bands.iter().any(|(s, l, r)| band_contains(s, *l, *r, q)) || fills.iter().any(|f| f.contains(q));
+    let inside_wall = |q: Vec2| bands.iter().any(|b| b.contains(q)) || fills.iter().any(|f| f.contains(q));
     // Lay the outlines out as a sketch, read its regions, and keep the ones in the wall.
     let sketch = outline_sketch(&boundary)?;
     let kept: Vec<Region2> = find_profiles(&sketch).into_iter().map(|p| p.region).filter(|r| inside_wall(r.interior_point())).collect();
@@ -253,6 +306,44 @@ fn chains(segs: &[(usize, Seg2)]) -> Result<Vec<Chain>> {
         out.push(Chain { segs: oriented(&run), vertices });
     }
     Ok(out)
+}
+
+/// The wall along one segment: `left` thick to its left, `right` to its right.
+struct Band {
+    seg: Seg2,
+    left: f64,
+    right: f64,
+    /// Where the band ends at a corner on a line other than its square end: (the vertex, the
+    /// direction of that line on the corner's inner side, the side of it the band keeps as the
+    /// sign of a cross product, how far from the vertex the line reaches). Only the band's part
+    /// within that reach of the vertex is cut, as a curved band can come round to the line's
+    /// other side further along.
+    cuts: Vec<(Vec2, Vec2, f64, f64)>,
+}
+
+impl Band {
+    fn contains(&self, q: Vec2) -> bool {
+        band_contains(&self.seg, self.left, self.right, q)
+            && self.cuts.iter().all(|&(v, dir, keep, reach)| {
+                let rel = q - v;
+                rel.dot(dir) <= 1e-12 || rel.len() > reach + 1e-9 || dir.cross(rel) * keep >= -1e-12
+            })
+    }
+}
+
+/// `s` moved `d` to its left as an unbounded line or circle, for finding where walls cross.
+fn offset_shape(s: &Seg2, d: f64) -> Option<Shape> {
+    match *s {
+        Seg2::Line { a, b } => {
+            let n = (b - a).normalized()?.perp();
+            Some(Shape::Line { a: a + n * d, b: b + n * d })
+        }
+        Seg2::Arc { center, radius, start, sweep } => {
+            let r = if sweep > 0.0 { radius - d } else { radius + d };
+            (r > 1e-9).then_some(Shape::Round { c: center, r, start, sweep: sweep.abs() })
+        }
+        _ => None,
+    }
 }
 
 /// Whether `q` lies in the band `left` thick to the left of `s` and `right` thick to its right,
