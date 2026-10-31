@@ -2517,11 +2517,11 @@ impl PanelHost for WorkspaceContentHost<'_> {
                         }
                         _ => {}
                     });
+                    // Each panel's header actions as `<panel>:<action>` (`history:play`, `browser:magnifier`).
                     if let HostPointerTarget::HeaderAction { instance, action } = target
-                        && instance.0 == "history"
                         && response.interact_rect.is_positive()
                     {
-                        crate::scenario::publish_target(&format!("history:{}", action.0), response.interact_rect);
+                        crate::scenario::publish_target(&format!("{}:{}", instance.0, action.0), response.interact_rect);
                     }
                     let clicked = response.clicked();
                     let secondary = response.secondary_clicked();

@@ -406,6 +406,7 @@ table. Panel/Window/Confirm compositions also have dedicated geometry and intera
 | `settings_plugin_card`, `checkbox_at` | Installed plugin card with 36 pt content, 12 pt padding, 36 pt tile, 13 pt semibold title, 11 pt version, 12 pt description and 2 pt text gap. The unframed 24 pt folder action and 16 pt checkbox are centred; actions wrap on narrow cards. | `control_fill`, `dialog_border`, `radius_lg`, `space_12/16/24` |
 | `mirrored_icon_button_at` | Directional counterpart of an existing icon master, sharing icon-button presentation and accessible label | Shared icon-button tokens |
 | `icon_button_at` | Icon action inside a supplied rectangle | `form_icon_inset`, `text/dim`, icon palette |
+| `quiet_icon_toggle_at` | Quiet icon action with an on state, for a control that shows or hides something; reports the state to assistive technology | `selected_bg`, `form_primary`, `control_radius`, `space_12` |
 | `button_pair`, `PairButton` | Equal secondary actions, optional icons and selected state | `form_button_height`, control/selection/icon tokens |
 | `footer`, `Footer`, `Action`, `HeaderActions` | OK/Cancel with optional Apply, compute status or selected action; `HeaderActions` puts the same buttons in a header row | `form_footer/button_height`, `dialog_footer/rule`, `control_*`, `accent`, spacing |
 | `keyboard` | Esc cancels, unowned Enter submits when valid | none |

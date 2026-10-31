@@ -2511,9 +2511,14 @@ pub(crate) fn timeline_joint_rows(app: &mut SolveApp, ui: &mut egui::Ui, ids: Op
 /// edits, drives, suppresses or deletes). Returns the joint whose row is under the pointer.
 pub fn browser_joints(app: &mut SolveApp, rows: &mut crate::ui_kit::browser::Rows<'_>, depth: usize) -> Option<u64> {
     use crate::browser::{Row, Spec, is_open, node_row, toggle};
-    let joints: Vec<(u64, String, JointKind, bool)> =
+    let mut joints: Vec<(u64, String, JointKind, bool)> =
         app.session.doc.assembly.joints.iter().map(|j| (j.id, j.name.clone(), j.kind, j.suppressed)).collect();
     app.tree.picked_joints.retain(|p| joints.iter().any(|j| j.0 == *p));
+    // A search keeps the joints that match (the folder's eye stays the folder's own).
+    let searching = app.tree.search.on();
+    if let Some(hits) = app.tree.search.hits() {
+        joints.retain(|j| hits.joint(j.0));
+    }
     if joints.is_empty() {
         return None;
     }
@@ -2527,7 +2532,15 @@ pub fn browser_joints(app: &mut SolveApp, rows: &mut crate::ui_kit::browser::Row
     let r = node_row(
         rows,
         Spec { key, ..Default::default() },
-        Row { depth, fold: Some(open), eye: Some(folder_shown), icon: "folder", label: "Joints", dim: !folder_shown, ..Default::default() },
+        Row {
+            depth,
+            fold: Some(open),
+            eye: Some(folder_shown),
+            icon: "folder",
+            label: "Joints",
+            dim: !folder_shown || searching,
+            ..Default::default()
+        },
     );
     if r.eye {
         crate::browser::toggle_folder(app, key);
@@ -2621,6 +2634,10 @@ pub fn pick_joint(app: &mut SolveApp, id: u64, add: bool) {
 /// Returns the joint whose row is under the pointer.
 pub fn component_joints(app: &mut SolveApp, rows: &mut crate::ui_kit::browser::Rows<'_>, path: &[u64], key: &str, depth: usize) -> Option<u64> {
     use crate::browser::{Row, Spec, is_open, node_row, toggle};
+    // A search lists the joints it finds in the root folder.
+    if app.tree.search.on() {
+        return None;
+    }
     let joints = placement_joints(&app.session.doc, path);
     if joints.is_empty() {
         return None;
