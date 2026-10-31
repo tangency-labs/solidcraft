@@ -256,24 +256,52 @@ fn apply(app: &mut SolveApp, doc: &Value) -> Vec<String> {
             theme_ids.insert(wanted, id);
         }
     }
+    // Resolve imported identities before migrating retired built-in cards. Migrate the
+    // theme and its option maps together: applying `theme` first and then replacing the
+    // saved maps would otherwise discard the old card's selected contrast.
+    let mut preferences = doc.get("preferences").and_then(Value::as_object).cloned().unwrap_or_default();
+    if let Some(id) = preferences.get("theme").and_then(Value::as_str).and_then(|id| theme_ids.get(id)).cloned() {
+        preferences.insert("theme".into(), json!(id));
+    }
+    if let Some(options) = preferences.get("theme_options").and_then(Value::as_object) {
+        let remapped: Map<String, Value> = options.iter().map(|(id, values)| (theme_ids.get(id).unwrap_or(id).clone(), values.clone())).collect();
+        preferences.insert("theme_options".into(), Value::Object(remapped));
+    }
+    let options = preferences
+        .get("theme_options")
+        .map(|value| serde_json::from_value::<std::collections::BTreeMap<String, std::collections::BTreeMap<String, Value>>>(value.clone()))
+        .transpose();
+    // Leave malformed raw fields intact for the existing per-key skipped reporting.
+    // In particular, a bad option map must not become an empty map that clears saved values.
+    if let Ok(options) = options {
+        let theme = preferences.get("theme").and_then(Value::as_str).map(str::to_owned);
+        let legacy = theme.as_deref().and_then(theme_files::legacy_gruvbox).is_some();
+        let mut migrated = prefs::Prefs {
+            theme: theme.clone().unwrap_or_else(|| "dark".into()),
+            theme_options: options.unwrap_or_else(|| app.preferences.theme_options.clone()),
+            ..Default::default()
+        };
+        prefs::migrate_gruvbox(&mut migrated);
+        if theme.is_some() {
+            preferences.insert("theme".into(), json!(migrated.theme));
+        }
+        if preferences.contains_key("theme_options") || legacy {
+            preferences.insert("theme_options".into(), json!(migrated.theme_options));
+        }
+    }
     let mut skipped = Vec::new();
-    for (key, value) in doc.get("preferences").and_then(Value::as_object).into_iter().flatten() {
+    for (key, value) in &preferences {
         if key == "theme_options" {
             // Restoring saved state keeps stale entries just like loading preferences. The
             // control channel's strict merge is for new edits, not profile restoration.
             match serde_json::from_value::<std::collections::BTreeMap<String, std::collections::BTreeMap<String, Value>>>(value.clone()) {
                 Ok(options) => {
-                    app.preferences.theme_options =
-                        options.into_iter().map(|(id, values)| (theme_ids.get(&id).cloned().unwrap_or(id), values)).collect();
+                    app.preferences.theme_options = options;
                 }
                 Err(_) => skipped.push(key.clone()),
             }
             continue;
         }
-        let value = match value.as_str().and_then(|id| theme_ids.get(id)) {
-            Some(id) if key == "theme" => json!(id),
-            _ => value.clone(),
-        };
         if let Err(e) = prefs::set(app, &json!({ key: value })) {
             log::warn!("settings profile: `{key}` keeps its current value: {e}");
             skipped.push(key.clone());

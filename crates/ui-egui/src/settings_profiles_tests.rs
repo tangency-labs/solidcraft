@@ -110,6 +110,54 @@ fn profiles_and_the_active_one_are_kept_between_runs() {
 }
 
 #[test]
+fn gruvbox_legacy_profiles_keep_their_selected_contrast_with_empty_option_maps() {
+    let mut h = Harness::new();
+    for (old, family, contrast) in crate::theme_files::GRUVBOX_ALIASES {
+        let profile = json!({"format":FORMAT,"name":old,"preferences":{"theme":old,"theme_options":{}}});
+        run(&mut h, "settings.profile.import", json!({"profile":profile}));
+        let out = run(&mut h, "settings.profile.apply", json!({"name":old}));
+        assert_eq!(out["skipped"], json!([]));
+        assert_eq!(h.app.preferences.theme, family);
+        assert_eq!(h.app.preferences.theme_options[family]["contrast"], contrast);
+    }
+    h.app.preferences.theme_options.insert("unrelated".into(), [("future".into(), json!({"keep":true}))].into());
+    let profile = json!({"format":FORMAT,"name":"Legacy without options","preferences":{"theme":"gruvbox-light-soft"}});
+    run(&mut h, "settings.profile.import", json!({"profile":profile}));
+    let out = run(&mut h, "settings.profile.apply", json!({"name":"Legacy without options"}));
+    assert_eq!(out["skipped"], json!([]));
+    assert_eq!(h.app.preferences.theme_options["gruvbox-light"]["contrast"], "soft");
+    assert_eq!(h.app.preferences.theme_options["unrelated"]["future"], json!({"keep":true}));
+    // A profile's own theme with a retired name is imported under a custom id,
+    // rather than being mistaken for a built-in contrast selection.
+    let profile = json!({"format":FORMAT,"name":"Named theme","preferences":{"theme":"gruvbox-dark-hard",
+        "theme_options":{"gruvbox-dark-hard":{"contrast":"personal"}}},
+        "themes":[{"id":"gruvbox-dark-hard","format":"solidcraft-theme/1","name":"Gruvbox Dark Hard","base":"light",
+            "options":[{"id":"contrast","type":"choice","default":"personal","values":[{"id":"personal","label":{"en":"Personal"}},{"id":"other","label":{"en":"Other"}}]}]}]});
+    run(&mut h, "settings.profile.import", json!({"profile":profile}));
+    let out = run(&mut h, "settings.profile.apply", json!({"name":"Named theme"}));
+    assert_eq!(out["skipped"], json!([]));
+    assert_eq!(h.app.preferences.theme, "custom-gruvbox-dark-hard");
+    assert_eq!(h.app.preferences.theme_options["custom-gruvbox-dark-hard"]["contrast"], "personal");
+}
+
+#[test]
+fn gruvbox_profile_migration_keeps_malformed_theme_fields_for_skipped_reporting() {
+    let mut h = Harness::new();
+    h.call("ui.prefs", json!({"theme":"gruvbox-light","theme_options":{"gruvbox-light":{"contrast":"soft"}}}));
+    for bad in [json!({"theme":42,"theme_options":"bad"}), json!({"theme":false,"theme_options":{"gruvbox-dark":"bad"}})] {
+        let before_theme = h.app.preferences.theme.clone();
+        let before_options = h.app.preferences.theme_options.clone();
+        let profile = json!({"format":FORMAT,"name":"Malformed","preferences":bad});
+        // Keep the per-key apply guard effective even for malformed in-memory documents.
+        h.app.settings_profiles.list = vec![profile];
+        let out = run(&mut h, "settings.profile.apply", json!({"name":"Malformed"}));
+        assert_eq!(out["skipped"], json!(["theme", "theme_options"]));
+        assert_eq!(h.app.preferences.theme, before_theme);
+        assert_eq!(h.app.preferences.theme_options, before_options);
+    }
+}
+
+#[test]
 fn theme_options_profiles_restore_replace_and_preserve_stale_values() {
     let mut h = Harness::new();
     let file = json!({

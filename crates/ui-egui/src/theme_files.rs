@@ -1338,11 +1338,24 @@ pub fn find<'a>(id: &str, custom: &'a [ThemeFile]) -> Option<&'a ThemeFile> {
     builtin().iter().find(|t| t.id == id).or_else(|| custom.iter().find(|t| t.id == id))
 }
 
+/// Retired built-in cards now select a contrast value on their light/dark family.
+/// Keep these ids reserved so importing a theme cannot take a saved built-in identity.
+pub(crate) const GRUVBOX_ALIASES: [(&str, &str, &str); 4] = [
+    ("gruvbox-dark-hard", "gruvbox-dark", "hard"),
+    ("gruvbox-dark-soft", "gruvbox-dark", "soft"),
+    ("gruvbox-light-hard", "gruvbox-light", "hard"),
+    ("gruvbox-light-soft", "gruvbox-light", "soft"),
+];
+
+pub(crate) fn legacy_gruvbox(id: &str) -> Option<(&'static str, &'static str)> {
+    GRUVBOX_ALIASES.iter().find(|(old, _, _)| *old == id).map(|(_, family, contrast)| (*family, *contrast))
+}
+
 /// Add an imported theme to `custom`, replacing one with the same id (importing a file again
 /// updates it). Its id never takes a built-in one's or the modes' (dark, light, system).
 /// Returns the id it is kept under.
 pub fn add(custom: &mut Vec<ThemeFile>, mut theme: ThemeFile) -> Result<String, String> {
-    if ["dark", "light", "system"].contains(&theme.id.as_str()) || builtin().iter().any(|t| t.id == theme.id) {
+    if ["dark", "light", "system"].contains(&theme.id.as_str()) || builtin().iter().any(|t| t.id == theme.id) || legacy_gruvbox(&theme.id).is_some() {
         theme.id = format!("custom-{}", theme.id);
     }
     let id = theme.id.clone();
@@ -1976,12 +1989,16 @@ mod tests {
     fn all_shipped_themes_keep_the_original_resolver_output_and_serialization() {
         assert_eq!(builtin().len(), BUILTIN.len());
         for theme in builtin() {
-            assert!(theme.options.is_empty() && theme.overlays.is_empty() && !theme.needs_newer());
+            let gruvbox = matches!(theme.id.as_str(), "gruvbox-dark" | "gruvbox-light");
+            assert!(!theme.needs_newer());
+            assert_eq!(!theme.options.is_empty(), gruvbox);
+            assert_eq!(!theme.overlays.is_empty(), gruvbox);
             assert_eq!(resolve(theme), resolve_base(theme), "{}", theme.id);
             assert_eq!(resolve_with(theme, &BTreeMap::from([("opacity".into(), OptionValue::Num(40.0))])), resolve_base(theme), "{}", theme.id);
             let stored = serde_json::to_value(theme).unwrap();
-            for key in ["options", "overlays", "requires"] {
-                assert!(stored.get(key).is_none(), "{}: {key}", theme.id);
+            assert!(stored.get("requires").is_none(), "{}", theme.id);
+            for key in ["options", "overlays"] {
+                assert_eq!(stored.get(key).is_some(), gruvbox, "{}: {key}", theme.id);
             }
         }
     }
@@ -2091,7 +2108,7 @@ mod tests {
         assert_eq!(resolve(&file).borders, crate::theme::Borders::LEGACY);
         assert!(parse_borders(&BTreeMap::from([("primary".into(), json!({"width":null,"color":"#ffffff"}))])).is_err());
         assert_eq!(resolve(find("blueprint", &[]).unwrap()).borders.primary.unwrap().color, Color32::WHITE);
-        for id in ["gruvbox-dark", "gruvbox-light", "gruvbox-dark-soft", "gruvbox-light-soft"] {
+        for id in ["gruvbox-dark", "gruvbox-light"] {
             assert_eq!(resolve(find(id, &[]).unwrap()).borders, crate::theme::Borders::LEGACY);
         }
     }
@@ -2155,17 +2172,22 @@ mod tests {
         use crate::theme::{TabAccent, contrast_ratio};
         assert_eq!(builtin().len(), BUILTIN.len(), "all shipped themes must be valid");
         for file in builtin() {
-            let t = resolve(file);
-            assert!(t.icon_palette.is_some(), "{} has no icon palette", file.id);
-            // A two-colour theme (1-bit, 1-bit Dark) can't give each workspace its own fill; it
-            // still has to keep every tab readable, below.
-            let two_colour = is_two_colour(&file.id);
-            let mut fills = std::collections::HashSet::new();
-            for tab in ["MODEL", "SURFACE", "MESH", "FORM", "SHEET METAL", "RENDER", "SKETCH"] {
-                let accent = TabAccent::for_tab(&t, tab);
-                assert!(fills.insert(accent.color) || two_colour, "{} repeats {tab}", file.id);
-                assert!(contrast_ratio(accent.ink, accent.soft) >= 4.5, "{} {tab} soft text", file.id);
-                assert!(contrast_ratio(accent.on_fill(&t), accent.color) >= 4.5, "{} {tab} pill text", file.id);
+            let gruvbox = matches!(file.id.as_str(), "gruvbox-dark" | "gruvbox-light");
+            let contrasts: &[&str] = if gruvbox { &["soft", "standard", "hard"] } else { &["standard"] };
+            for contrast in contrasts {
+                let options = if gruvbox { BTreeMap::from([("contrast".into(), OptionValue::Choice((*contrast).into()))]) } else { BTreeMap::new() };
+                let t = resolve_with(file, &options);
+                assert!(t.icon_palette.is_some(), "{} {contrast} has no icon palette", file.id);
+                // A two-colour theme (1-bit, 1-bit Dark) can't give each workspace its own fill; it
+                // still has to keep every tab readable, below.
+                let two_colour = is_two_colour(&file.id);
+                let mut fills = std::collections::HashSet::new();
+                for tab in ["MODEL", "SURFACE", "MESH", "FORM", "SHEET METAL", "RENDER", "SKETCH"] {
+                    let accent = TabAccent::for_tab(&t, tab);
+                    assert!(fills.insert(accent.color) || two_colour, "{} {contrast} repeats {tab}", file.id);
+                    assert!(contrast_ratio(accent.ink, accent.soft) >= 4.5, "{} {contrast} {tab} soft text", file.id);
+                    assert!(contrast_ratio(accent.on_fill(&t), accent.color) >= 4.5, "{} {contrast} {tab} pill text", file.id);
+                }
             }
         }
     }
@@ -2251,14 +2273,49 @@ mod tests {
     }
 
     #[test]
+    fn gruvbox_contrast_choices_keep_six_appearances() {
+        let families: Vec<_> = builtin().iter().filter(|f| f.id.starts_with("gruvbox-")).map(|f| f.id.as_str()).collect();
+        assert_eq!(families, ["gruvbox-dark", "gruvbox-light"]);
+        for (id, panels, views, inks) in [
+            ("gruvbox-dark", ["#32302f", "#282828", "#1d2021"], ["#373432", "#32302f", "#2c2c2c"], ["#1d2021", "#1d2021", "#141617"]),
+            ("gruvbox-light", ["#f2e5bc", "#fbf1c7", "#f9f5d7"], ["#f6edd0", "#fcf5d8", "#fbf8e3"], ["#3c3836"; 3]),
+        ] {
+            let file = find(id, &[]).unwrap();
+            assert_eq!(file.options.len(), 1);
+            let option = &file.options[0];
+            assert_eq!(option.id, "contrast");
+            let OptionKind::Choice { default, values } = &option.kind else { panic!("contrast must be a choice") };
+            assert_eq!(default, "standard");
+            assert_eq!(values.iter().map(|v| v.id.as_str()).collect::<Vec<_>>(), ["soft", "standard", "hard"]);
+            for (index, contrast) in ["soft", "standard", "hard"].into_iter().enumerate() {
+                let options = BTreeMap::from([("contrast".into(), OptionValue::Choice(contrast.into()))]);
+                let tokens = resolve_with(file, &options);
+                assert_eq!(tokens.panel, parse_color(panels[index]).unwrap(), "{id}: {contrast}");
+                assert_eq!(tokens.viewport_top, parse_color(views[index]).unwrap(), "{id}: {contrast}");
+                assert_eq!(tokens.viewport_bottom, tokens.viewport_top);
+                assert_eq!(export_icon_palette(tokens.icon_palette)["ink"], inks[index], "{id}: {contrast}");
+                assert_eq!(tokens.borders, crate::theme::Borders::LEGACY);
+                assert_eq!(resolve_with(&from_value(&export_file(file)).unwrap(), &options), tokens);
+            }
+            assert_eq!(resolve(file), resolve_base(file), "the Standard default keeps the old family palette");
+        }
+    }
+
+    #[test]
+    fn gruvbox_retired_ids_stay_reserved_for_imported_names() {
+        let mut custom = Vec::new();
+        for (old, _, _) in GRUVBOX_ALIASES {
+            let file = from_value(&json!({"format":FORMAT,"name":old,"base":"dark"})).unwrap();
+            assert_eq!(add(&mut custom, file).unwrap(), format!("custom-{old}"));
+            assert!(find(old, &custom).is_none(), "retired ids are not duplicate theme cards");
+        }
+    }
+
+    #[test]
     fn builtin_order_preserves_the_existing_picker_sequence() {
         let original: &[&str] = &[
             "gruvbox-dark",
-            "gruvbox-dark-hard",
-            "gruvbox-dark-soft",
             "gruvbox-light",
-            "gruvbox-light-hard",
-            "gruvbox-light-soft",
             "solidcraft-95",
             "1-bit",
             "1-bit-dark",
@@ -2591,9 +2648,11 @@ mod tests {
         }
         let defaults = radius_values(Tokens::dark());
         assert_eq!(defaults, radius_values(Tokens::light()));
-        for suffix in ["", "-hard", "-soft"] {
-            assert_eq!(values(&format!("gruvbox-dark{suffix}")), defaults);
-            assert_eq!(values(&format!("gruvbox-light{suffix}")), defaults);
+        for id in ["gruvbox-dark", "gruvbox-light"] {
+            for contrast in ["soft", "standard", "hard"] {
+                let options = BTreeMap::from([("contrast".into(), OptionValue::Choice(contrast.into()))]);
+                assert_eq!(radius_values(resolve_with(find(id, &[]).unwrap(), &options)), defaults);
+            }
         }
         for file in builtin().iter().filter(|file| file.radii.is_empty()) {
             assert_eq!(radius_values(resolve(file)), defaults, "{}", file.id);

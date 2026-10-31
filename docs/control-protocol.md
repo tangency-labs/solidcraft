@@ -511,6 +511,16 @@ One setting per line, sorted by name. A change that adds a setting adds its own 
 - `zoom_stop_at_model` (default false: the 3D mouse and navigation bridge stop zoom at the surface in the middle of the view; drag-zoom holds its press point; independent of `zoom_to_cursor`)
 - `zoom_to_cursor`
 
+The built-in `gruvbox-dark` and `gruvbox-light` themes each expose the `contrast`
+choice (`soft`, `standard` default, `hard`). For example:
+`{"theme":"gruvbox-dark","theme_options":{"gruvbox-dark":{"contrast":"soft"}}}`.
+The former `gruvbox-dark-soft`, `gruvbox-dark-hard`, `gruvbox-light-soft` and
+`gruvbox-light-hard` ids remain accepted for compatibility and select the matching
+family and contrast; replies and `theme_ids` expose only the two canonical families.
+An explicit canonical option change or reset in the same call wins over the legacy
+selection. Legacy option-map keys are also accepted; canonical keys take precedence
+when both occur in a call. Imported themes cannot claim the retired built-in ids.
+
 Theme option values persist per theme, including a followed file's own id, through the same
 preference store in the browser and on desktop. Switching themes restores their saved values;
 Interface's Restore Defaults clears them. Preference exports and settings profiles carry values;

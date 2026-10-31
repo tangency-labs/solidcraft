@@ -3605,10 +3605,14 @@ fn theme_options_row(app: &mut SolveApp, ui: &mut egui::Ui) {
 fn merge_theme_options(prefs: &mut Prefs, followed: Option<&crate::theme_files::ThemeFile>, update: &serde_json::Value) -> Result<(), String> {
     use crate::theme_files::{OptionKind, OptionValue};
     let themes = update.as_object().ok_or("`theme_options` must be a map of theme ids to option maps")?;
-    for (theme_id, update) in themes {
+    // Apply legacy keys first so a canonical entry in the same request always wins.
+    let aliases = themes.iter().filter(|(id, _)| crate::theme_files::legacy_gruvbox(id).is_some());
+    let canonical = themes.iter().filter(|(id, _)| crate::theme_files::legacy_gruvbox(id).is_none());
+    for (requested_id, update) in aliases.chain(canonical) {
+        let theme_id = crate::theme_files::legacy_gruvbox(requested_id).map_or(requested_id.as_str(), |(family, _)| family);
         let key = format!("theme_options.{theme_id}");
-        let file = followed.filter(|f| &f.id == theme_id).or_else(|| crate::theme_files::find(theme_id, &prefs.custom_themes));
-        let mode = THEMES.iter().any(|(id, _)| *id == theme_id.as_str());
+        let file = followed.filter(|f| f.id == theme_id).or_else(|| crate::theme_files::find(theme_id, &prefs.custom_themes));
+        let mode = THEMES.iter().any(|(id, _)| *id == theme_id);
         if file.is_none() && !mode {
             return Err(format!("`{key}`: unknown theme"));
         }
@@ -3641,7 +3645,7 @@ fn merge_theme_options(prefs: &mut Prefs, followed: Option<&crate::theme_files::
             if !valid {
                 return Err(format!("`{key}`: wrong type, unknown choice or out of range"));
             }
-            prefs.theme_options.entry(theme_id.clone()).or_default().insert(id.clone(), value.clone());
+            prefs.theme_options.entry(theme_id.to_owned()).or_default().insert(id.clone(), value.clone());
         }
         if prefs.theme_options.get(theme_id).is_some_and(BTreeMap::is_empty) {
             prefs.theme_options.remove(theme_id);
@@ -3729,6 +3733,7 @@ fn theme_file(app: &SolveApp, id: &str, system_dark: bool) -> serde_json::Value 
 /// calibration that can't be used as it is (a hand edit) is dropped, so the device is read as it
 /// reports rather than spinning the view.
 pub fn migrate(mut p: Prefs) -> Prefs {
+    migrate_gruvbox(&mut p);
     // Every saved file carries the old default limit; it reads as no limit.
     if p.agent_chat_turn_limit == crate::agent_chat::gate::OLD_DEFAULT_TURN_LIMIT {
         p.agent_chat_turn_limit = 0;
@@ -3764,6 +3769,25 @@ pub fn migrate(mut p: Prefs) -> Prefs {
         usable
     });
     p
+}
+
+/// Fold old contrast cards into their family without replacing unrelated saved options.
+/// An active old card still names the selected appearance; explicit control updates run after
+/// this migration, so their contrast choice (including a reset) takes precedence.
+pub(crate) fn migrate_gruvbox(p: &mut Prefs) {
+    let selected = crate::theme_files::legacy_gruvbox(&p.theme);
+    for (old, family, _) in crate::theme_files::GRUVBOX_ALIASES {
+        if let Some(options) = p.theme_options.remove(old) {
+            let canonical = p.theme_options.entry(family.into()).or_default();
+            for (id, value) in options {
+                canonical.entry(id).or_insert(value);
+            }
+        }
+    }
+    if let Some((family, contrast)) = selected {
+        p.theme = family.into();
+        p.theme_options.entry(family.into()).or_default().insert("contrast".into(), json!(contrast));
+    }
 }
 
 /// Drop plugin ids this page would not show, and keep at most [`crate::plugins::MAX_DISABLED`],
@@ -3877,6 +3901,7 @@ fn prepare_preferences(
         return Err("`stand_up_unknown` must be ask, note or off".into());
     }
     let mut new: Prefs = serde_json::from_value(cur).map_err(|e| e.to_string())?;
+    migrate_gruvbox(&mut new);
     if let Some(update) = p.get("theme_options") {
         merge_theme_options(&mut new, followed, update)?;
     }
@@ -5917,7 +5942,7 @@ mod tests {
         let out = h.call("ui.prefs", json!({"theme": "gruvbox-dark-hard", "viewport_theme": "light"}));
         assert_eq!((out["result"]["dark"].as_bool(), out["result"]["viewport_dark"].as_bool()), (Some(true), Some(false)), "{out}");
         h.frames(2);
-        let hard = crate::theme_files::find("gruvbox-dark-hard", &[]).map(crate::theme_files::resolve).unwrap();
+        let hard = resolved_theme(&h.app.preferences, active_theme_file(&h.app).unwrap());
         assert_eq!((Tokens::get().panel, Tokens::get().viewport_top), (hard.panel, Tokens::light().viewport_top));
 
         // Asked for, an unknown value is refused; read from saved preferences, it is the default.
@@ -6791,15 +6816,69 @@ mod tests {
     }
 
     #[test]
+    fn gruvbox_legacy_selection_migrates_on_load_and_preserves_saved_values() {
+        for (old, family, contrast) in crate::theme_files::GRUVBOX_ALIASES {
+            let saved = json!({"theme":old,"theme_options":{
+                family:{"contrast":"standard","unrelated":{"keep":true}},
+                old:{"contrast":"standard","future":42}
+            }});
+            let migrated = lenient(&saved);
+            assert_eq!(migrated.theme, family);
+            assert_eq!(migrated.theme_options[family]["contrast"], contrast);
+            assert_eq!(migrated.theme_options[family]["unrelated"], json!({"keep":true}));
+            assert_eq!(migrated.theme_options[family]["future"], 42);
+            assert!(!migrated.theme_options.contains_key(old));
+            assert_eq!(serde_json::to_value(migrate(migrated.clone())).unwrap(), serde_json::to_value(&migrated).unwrap());
+            let mut h = crate::scenario::Harness::new();
+            h.app.load_prefs(&json!({"preferences":saved}).to_string());
+            assert_eq!(h.app.preferences.theme, family);
+            assert_eq!(h.app.preferences.theme_options[family]["contrast"], contrast);
+            let output: serde_json::Value = serde_json::from_str(&h.app.prefs()).unwrap();
+            assert_eq!(output["preferences"]["theme"], family);
+            assert_eq!(output["preferences"]["theme_options"][family]["contrast"], contrast);
+        }
+        // An unselected legacy map must not replace an existing canonical contrast.
+        let migrated = lenient(&json!({"theme":"dark","theme_options":{
+            "gruvbox-dark":{"contrast":"soft"},"gruvbox-dark-hard":{"contrast":"hard"}
+        }}));
+        assert_eq!(migrated.theme_options["gruvbox-dark"]["contrast"], "soft");
+    }
+
+    #[test]
+    fn gruvbox_control_legacy_ids_allow_explicit_choices_resets_and_atomic_errors() {
+        let mut h = crate::scenario::Harness::new();
+        for (old, family, contrast) in crate::theme_files::GRUVBOX_ALIASES {
+            let out = control(&mut h.app, &json!({"theme":old})).unwrap();
+            assert_eq!(out["theme"], family);
+            assert_eq!(out["theme_option_values"]["contrast"], contrast);
+            let ids = out["theme_ids"].as_array().unwrap();
+            assert_eq!(ids.iter().filter(|id| id.as_str().is_some_and(|id| id.starts_with("gruvbox-"))).count(), 2);
+            let out = control(&mut h.app, &json!({"theme":old,"theme_options":{family:{"contrast":"standard"}}})).unwrap();
+            assert_eq!(out["theme_option_values"]["contrast"], "standard");
+            let out = control(&mut h.app, &json!({"theme":old,"theme_options":{family:{"contrast":null}}})).unwrap();
+            assert_eq!(out["theme_option_values"]["contrast"], "standard");
+            let out = control(&mut h.app, &json!({"theme":old,"theme_options":{family:{}}})).unwrap();
+            assert_eq!(out["theme_option_values"]["contrast"], "standard");
+            let out = control(&mut h.app, &json!({"theme":old,"theme_options":{old:{"contrast":"hard"},family:{"contrast":"soft"}}})).unwrap();
+            assert_eq!(out["theme_option_values"]["contrast"], "soft", "canonical explicit values win over alias entries");
+            let before = h.app.prefs();
+            assert!(control(&mut h.app, &json!({"theme":old,"open":"Interface","theme_options":{family:{"contrast":"invalid"}}})).is_err());
+            assert_eq!(h.app.prefs(), before, "failed changes do not migrate or open the dialog");
+            assert!(!h.app.prefs_window.open);
+        }
+    }
+
+    #[test]
     fn theme_files_import_apply_export_save_and_remove() {
         use crate::theme::{ColorVision, Tokens};
         use serde_json::json;
         let mut h = crate::scenario::Harness::new();
         let out = h.call("ui.prefs", json!({"theme": "gruvbox-dark-hard"}));
-        assert_eq!(out["result"]["theme"], "gruvbox-dark-hard", "{out}");
+        assert_eq!(out["result"]["theme"], "gruvbox-dark", "{out}");
+        assert_eq!(out["result"]["theme_option_values"]["contrast"], "hard");
         assert!(out["result"]["theme_ids"].as_array().is_some_and(|ids| ids.len() == 3 + crate::theme_files::builtin().len()), "{out}");
         h.frames(2);
-        let hard = crate::theme_files::find("gruvbox-dark-hard", &[]).map(crate::theme_files::resolve).unwrap();
+        let hard = resolved_theme(&h.app.preferences, active_theme_file(&h.app).unwrap());
         assert!(h.app.ui.dark);
         assert_eq!(Tokens::get().panel, hard.panel);
         assert_eq!(
