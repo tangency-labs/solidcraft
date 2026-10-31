@@ -30,6 +30,10 @@ pub(super) fn fixtures() -> Vec<(&'static str, Value)> {
         |h: Value| json!({"type": "hole", "position": o, "direction": [0, 0, 1], "diameter": "hole.diameter", "depth": "hole.depth", "hole": h});
     vec![
         (
+            "frame_gusset",
+            json!({"type":"frame_gusset","supports":[{"plane":plane("gusset1"),"member":{"feature":7,"line":"l1"}},{"plane":plane("gusset2"),"member":null}],"leg1":"gusset.leg1","leg2":"gusset.leg2","thickness":"gusset.thickness","relief":"gusset.relief","clip":"gusset.clip","offset":"gusset.offset","placement":"center"}),
+        ),
+        (
             "body_transfer",
             json!({"type": "body_transfer", "bodies": ["B"], "from": 0, "to": 1, "transform": [[1,0,0,0],[0,1,0,0],[0,0,1,0],[0,0,0,1]]}),
         ),

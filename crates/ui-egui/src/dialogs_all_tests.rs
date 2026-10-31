@@ -158,7 +158,7 @@ fn check_form(command: &str, labels: &[&str]) {
     for input in &d.inputs {
         assert!(scenario::rect_of(&format!("dialog:field:{}", input.label)).is_some(), "{command}: selection field {}", input.label);
         assert!(
-            nodes.iter().any(|(_, n)| n.role() == egui::accesskit::Role::Button && n.label() == Some(input.label)),
+            nodes.iter().any(|(_, n)| n.role() == egui::accesskit::Role::Button && n.label() == Some(tr(input.label))),
             "{command}: picker {} is a button",
             input.label
         );
@@ -239,6 +239,8 @@ fn control_role(command: &str, label: &str) -> Option<egui::accesskit::Role> {
         "Operation" | "Type" | "Orientation" | "Move Type" | "Object Type" | "Rule" | "Rim Edge" | "Catch Direction" | "Shape" | "Holes" | "Size"
         | "Bend Line Position" | "From Snap" | "To Snap" | "Joint" | "Joint 1" | "Joint 2" | "Gear 1" | "Gear 2" | "Pinion" | "Rack" | "Screw"
         | "Nut" | "Cam" | "Follower" | "Anchor" => Role::ComboBox,
+        "Thickness Placement" if command == "frame.gusset" => return None, // icon buttons, checked by the gusset interaction test
+        "Outline" => Role::ComboBox,
         "Radius" if command == "joint.rack_pinion" => Role::Label,
         "Pitch" if command == "solid.thread" => Role::ComboBox,
         "Automatic size" | "Reverse" | "Other side" | "All Lines" | "Mirror" => Role::CheckBox,
@@ -257,6 +259,7 @@ form_case!(revolve, "solid.revolve", ["Angle", "Direction", "Type"]);
 form_case!(shell, "solid.shell", ["Thickness", "Direction"]);
 form_case!(draft, "solid.draft", ["Angle"]);
 form_case!(mirror, "solid.mirror", ["Operation"]);
+form_case!(gusset, "frame.gusset", ["Outline", "First Leg", "Second Leg", "Thickness", "Corner Relief", "Joint Offset", "Thickness Placement"]);
 
 /// The Motion Study's and Motion Trace's hints read in the user's language: the dialogs drew them
 /// as they got them, in English.

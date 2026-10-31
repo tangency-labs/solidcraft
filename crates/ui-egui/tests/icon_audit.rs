@@ -539,7 +539,17 @@ fn audit_is_opt_in_drains_and_records_resolved_aliases() {
 #[test]
 fn offset_mode_artwork_review() {
     use solidcraft_ui_egui::theme::{ColorVision, Tokens};
-    let names = ["offset", "offset_two_sides", "offset_symmetric", "sketch_chamfer", "sketch_chamfer_two_distances", "split_body"];
+    let names = [
+        "offset",
+        "offset_two_sides",
+        "offset_symmetric",
+        "sketch_chamfer",
+        "sketch_chamfer_two_distances",
+        "split_body",
+        "gusset_side_negative",
+        "gusset_side_center",
+        "gusset_side_positive",
+    ];
     let mut sheet = tiny_skia::Pixmap::new(400, names.len() as u32 * 88).unwrap();
     for (row, name) in names.iter().enumerate() {
         let resolved = icon_svg::resolve(name);

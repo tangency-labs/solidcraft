@@ -130,6 +130,10 @@ graph	false
 grid	false
 ground	false
 ground_shadow	false
+gusset	false
+gusset_side_center	false
+gusset_side_negative	false
+gusset_side_positive	false
 help	false
 hem	false
 hole	false

@@ -1,3 +1,16 @@
+frame_gusset
+  inputs:
+    Angle = gusset1.angle (Angle)
+    Offset = gusset1.offset (Length)
+    Angle = gusset2.angle (Angle)
+    Offset = gusset2.offset (Length)
+    First Leg = gusset.leg1 (Length)
+    Second Leg = gusset.leg2 (Length)
+    Thickness = gusset.thickness (Length)
+    Corner Relief = gusset.relief (Length)
+    Outer Tip Clip = gusset.clip (Length)
+    Joint Offset = gusset.offset (Length)
+  expressions: gusset1.angle, gusset1.offset, gusset2.angle, gusset2.offset, gusset.leg1, gusset.leg2, gusset.thickness, gusset.relief, gusset.clip, gusset.offset
 body_transfer
 sketch
   inputs:
