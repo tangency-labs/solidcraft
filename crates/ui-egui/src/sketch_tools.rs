@@ -574,9 +574,18 @@ pub fn refine_snap(
             }
         }
     }
-    // The free coordinate still follows the grid.
-    let step = solidcraft_engine::view::grid_step(app.cam.half_height()).0 / 10.0;
-    let g = |v: f64| (v / step).round() * step;
+    // The free coordinate still follows the grid: on a crossing of the drawn grid's lines when
+    // the point can be on one, and on the finer lattice between the crossings otherwise (#7114).
+    let (minor, fine) = solidcraft_engine::view::sketch_grid_step(app.cam.half_height());
+    // `fixed` is the coordinate the point lines up with, on the other axis: the crossing has to
+    // run through it. With Snap off (Sketch Palette) the grid holds the point as before.
+    let g = |free: f64, fixed: f64| {
+        if sk.view.no_snap {
+            solidcraft_engine::view::sketch_grid_lattice_axis(free, fine)
+        } else {
+            solidcraft_engine::view::sketch_grid_free(free, fixed, minor, fine)
+        }
+    };
     // Points to line up with as well (#7828): with `sketch_align_points` off, none, so only the
     // previous point, one axis at a time, as before.
     let targets = if app.preferences.sketch_align_points { align_targets(proj, sk, plane, &own) } else { Vec::new() };
@@ -589,10 +598,12 @@ pub fn refine_snap(
         // Level with (or plumb with) the previous point, and lined up across with another.
         let (level, plumb) = line_up(&targets, lp, tol);
         if dy < tol && dx > tol {
-            best = Some((dy, if plumb.is_some() { "H+V" } else { "H" }, Vec2::new(plumb.as_ref().map_or(g(lp.x), |p| p.at.x), prev.y)));
+            best =
+                Some((dy, if plumb.is_some() { "H+V" } else { "H" }, Vec2::new(plumb.as_ref().map_or_else(|| g(lp.x, prev.y), |p| p.at.x), prev.y)));
             lined.extend(plumb);
         } else if dx < tol && dy > tol {
-            best = Some((dx, if level.is_some() { "H+V" } else { "V" }, Vec2::new(prev.x, level.as_ref().map_or(g(lp.y), |l| l.at.y))));
+            best =
+                Some((dx, if level.is_some() { "H+V" } else { "V" }, Vec2::new(prev.x, level.as_ref().map_or_else(|| g(lp.y, prev.x), |l| l.at.y))));
             lined.extend(level);
         }
     }
@@ -608,7 +619,6 @@ pub fn refine_snap(
     // Lined up with other points, on one axis or on both at once (#7828).
     if !mid_only && best.is_none() {
         let (level, plumb) = line_up(&targets, lp, tol);
-        let at = Vec2::new(plumb.as_ref().map_or(g(lp.x), |p| p.at.x), level.as_ref().map_or(g(lp.y), |l| l.at.y));
         let off = |l: &Lined| if l.horizontal { (lp.y - l.at.y).abs() } else { (lp.x - l.at.x).abs() };
         let label = match (&level, &plumb) {
             (Some(_), Some(_)) => Some("H+V"),
@@ -617,6 +627,12 @@ pub fn refine_snap(
             (None, None) => None,
         };
         if let Some(label) = label {
+            // The coordinate that lines up with another point keeps that point's coordinate; the
+            // free one follows the grid.
+            let at = Vec2::new(
+                plumb.as_ref().map_or_else(|| g(lp.x, level.as_ref().map_or(lp.y, |l| l.at.y)), |p| p.at.x),
+                level.as_ref().map_or_else(|| g(lp.y, plumb.as_ref().map_or(lp.x, |p| p.at.x)), |l| l.at.y),
+            );
             best = Some((level.iter().chain(&plumb).map(off).fold(f64::INFINITY, f64::min), label, at));
             lined.extend(level);
             lined.extend(plumb);
