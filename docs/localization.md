@@ -172,6 +172,9 @@ its lines read bottom to top. Names people type in Hebrew are shown as stored. T
 appends a system Hebrew font (Arial Hebrew or SF Hebrew on macOS, Segoe UI or Arial on Windows,
 Noto Sans Hebrew or DejaVu Sans on Linux); the web build has no Hebrew font yet, so a Hebrew
 interface shows empty boxes there.
+Georgian is the same: the desktop host appends a system Georgian font (SF Georgian on macOS,
+Sylfaen or Segoe UI on Windows, Noto Sans Georgian or DejaVu Sans on Linux), and the web build has
+no Georgian font yet, so Georgian text shows empty boxes there.
 
 The current messages support named substitution, not locale-specific plural selection,
 number/date formatting, right-to-left layout mirroring, or shaping for joining scripts such as Arabic. Add those capabilities when
