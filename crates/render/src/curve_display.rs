@@ -272,19 +272,31 @@ fn sample(segment: &Seg2, plane: &Plane, view: &PixelCurveView, budget: &mut Sam
                 // Keep floating-point roundoff inside the advertised bound.
                 // Absolute summands also cover cancellation in VP multiplication.
                 // Subdivision propagates roundoff from the original homogeneous hull.
-                let projection_error = q
-                    .iter()
-                    .map(|p| {
-                        let safe_w = p[3] - e[3];
-                        if safe_w <= 0.0 {
-                            return f64::INFINITY;
-                        }
-                        let x = (e[0] + (p[0] / p[3]).abs() * e[3]) / safe_w * view.width_px * 0.5;
-                        let y = (e[1] + (p[1] / p[3]).abs() * e[3]) / safe_w * view.height_px * 0.5;
-                        x.hypot(y)
-                    })
-                    .fold(0.0, f64::max);
-                let allowance = projection_error + magnitude * f64::EPSILON * 128.0;
+                let mut roundoff = [(0.0, 0.0); MAX_CONTROLS];
+                for (r, p) in roundoff.iter_mut().zip(q) {
+                    let safe_w = p[3] - e[3];
+                    if safe_w <= 0.0 {
+                        // An infinite allowance: never flat.
+                        return false;
+                    }
+                    let x = (e[0] + (p[0] / p[3]).abs() * e[3]) / safe_w * view.width_px * 0.5;
+                    let y = (e[1] + (p[1] / p[3]).abs() * e[3]) / safe_w * view.height_px * 0.5;
+                    *r = (x, y);
+                }
+                let roundoff = &roundoff[..n];
+                let margin = magnitude * f64::EPSILON * 128.0;
+                // |x| + |y| is never less than hypot(x, y), and twice it leaves far more room
+                // than the rounding of either. Rounding keeps sums in order, so when the test
+                // passes with this larger allowance it passes with the exact one too: the
+                // costly `hypot`s are only needed for nodes near the bound.
+                if roundoff.iter().all(|(x, y)| x.is_finite() && y.is_finite()) {
+                    let upper = roundoff.iter().map(|(x, y)| (x.abs() + y.abs()) * 2.0).fold(0.0, f64::max) + margin;
+                    if upper.is_finite() && upper < PIXEL_ERROR && off_chord.iter().all(|d| d + upper <= PIXEL_ERROR) {
+                        return true;
+                    }
+                }
+                let projection_error = roundoff.iter().map(|(x, y)| x.hypot(*y)).fold(0.0, f64::max);
+                let allowance = projection_error + margin;
                 allowance < PIXEL_ERROR && off_chord.iter().all(|d| d + allowance <= PIXEL_ERROR)
             });
         if !flat || !depth_safe {
