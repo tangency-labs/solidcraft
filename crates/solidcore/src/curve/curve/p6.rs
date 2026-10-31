@@ -72,13 +72,18 @@
 //!   `curve.curve_p5`) is told whether the solution's first object is its `this`
 //!   curve: the split solutions name `[this, other]`, so it is when the coincidence
 //!   check split the other curve, or `this` and the other are the same curve.
+//! - **Crossing, not a range (opt-in).** With
+//!   `Kernel::fixes.simple_coincidence_crossing_is_point`,
+//!   [`Curve::simple_coincidence_checker`] returns a range whose separation changes
+//!   sides between its ends as the crossing inside it (WR-647; the fork's
+//!   tangency-labs/smlib@c2e3d9d). Off, it is upstream's.
 
 use crate::curve::curve::knots_ignoring_status;
 use crate::curve::curve::p1::{ApproximateCurveOptions, GlobalPointSolveOptions};
 use crate::curve::curve::p2::{
     at, snap_sol_to_specified_endpoint, Curve, CurveKind, CurvePropertyType,
 };
-use crate::curve::curve::p3::PointSolveOptions;
+use crate::curve::curve::p3::{local_curve_intersect, PointSolveOptions};
 use crate::curve::curve::p5::{
     is_point_solution_across_closed_seam_boundary, local_property_analysis,
 };
@@ -1450,6 +1455,51 @@ impl Curve {
                 pair_solution(objects, first, None),
                 pair_solution(objects, last, None),
             ]);
+        }
+
+        // The curves stay within tolerance over the interval; they coincide there only
+        // if the separation between them keeps one side. Where it changes sides between
+        // the interval's ends the curves cross inside it: the answer is that crossing,
+        // as a curve/curve intersection finds it, not a range. A separation that
+        // vanishes to numeric zero has no side (WR-647, fork c2e3d9d).
+        if k.fixes.simple_coincidence_crossing_is_point {
+            let this_a = self.evaluate_point(k, first.0)?;
+            let this_b = self.evaluate_point(k, last.0)?;
+            let other_a = other.evaluate_point(k, first.1)?;
+            let other_b = other.evaluate_point(k, last.1)?;
+            let separation_a = other_a - this_a;
+            let separation_b = other_b - this_b;
+            let scaled_zero =
+                EFF_ZERO * (1.0 + max2(this_a.max_dimension(), this_b.max_dimension()));
+            if separation_a.length() > scaled_zero
+                && separation_b.length() > scaled_zero
+                && separation_a.dot(separation_b) < 0.0
+            {
+                // start where the separation, taken as linear between the ends, vanishes
+                let (da, db) = (separation_a.length(), separation_b.length());
+                let w = da / (da + db);
+                let found = local_curve_intersect(
+                    k,
+                    self,
+                    &ivl_t1,
+                    other,
+                    &ivl_t2,
+                    tol,
+                    first.0 + w * (last.0 - first.0),
+                    first.1 + w * (last.1 - first.1),
+                )?;
+                let Some(cross) = found else {
+                    // curves change sides but no crossing found
+                    return Err(SolidError::sm_err(
+                        "curve::simple_coincidence_checker (crossing)",
+                    ));
+                };
+                return Ok(vec![pair_solution(
+                    objects,
+                    (cross.my_param, cross.other_param, cross.deviation),
+                    None,
+                )]);
+            }
         }
 
         // add 1 coincident intersection to solution array

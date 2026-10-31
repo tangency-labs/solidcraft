@@ -599,6 +599,16 @@ pub struct UpstreamFixes {
     pub fillet_removal_takes_ring_fillets: bool,
     /// `SmMerge::ManifoldBoolean` refuses a union (`SM_ERR`, the face in the error) when a face its STEP 6 would delete has the infinite region on one side and a solid region on the other: deleting it would merge that solid into the outside. Upstream deletes it: where two operands' faces stay within tolerance of each other across a strip without being coincident (two 4 mm cubes, one turned 5.7 deg about z, within 5e-6 across a 1e-4 strip), the union deletes two such faces of the first operand, both of its solid regions merge into the infinite region, and the union comes back with no solid region and volume 0 (WR-619, #1794; own design, not in the fork).
     pub boolean_union_refuses_solid_leak: bool,
+    /// `SmCurve::SimpleCoincidenceChecker` returns a candidate coincidence range whose curves'
+    /// separation points to opposite sides at its two ends (both separations longer than
+    /// `SM_EFF_ZERO` scaled by the ends' size) as the one crossing `LocalCurveIntersect`
+    /// finds inside it, started where the separation taken as linear between the ends
+    /// vanishes (`SM_ERR` when none is found). Upstream returns the range: two equal circles
+    /// a little apart graze within tolerance over a stretch set by the subdivision, and the
+    /// range becomes a tiny edge, so a ring unioned with a half-annulus prism whose r 5 walls
+    /// are 1e-4 apart is non-manifold and at 1e-3 not a solid (WR-647, #1979; the fork's
+    /// tangency-labs/smlib@c2e3d9d).
+    pub simple_coincidence_crossing_is_point: bool,
     /// `SmFace::GetPointsInFace` samples a rectangularly trimmed face from its UV domain's
     /// minimum: each column starts at the domain's minimum u plus the column increment and
     /// each row at the domain's minimum v plus the row increment, and the column increment
