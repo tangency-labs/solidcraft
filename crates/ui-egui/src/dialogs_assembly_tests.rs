@@ -1184,7 +1184,9 @@ fn find_limits_searches_the_joint_as_edited_and_leaves_a_free_side() {
     let mut d = edit_joint(&app, id).unwrap();
     let Kind::Assembly(Asm::Joint(f)) = &mut d.kind else { panic!("no edit") };
     let untouched = f.limits[0].clone();
-    find_limits(&app, f, id);
+    // With the sides as the dialog opened on them (Edit Joint's side picks).
+    assert_eq!(d.inputs.len(), 2);
+    find_limits(&app, f, id, &d.inputs);
     // B slides into A one way (they touch face to face already: it can't go further) and away
     // from it the other, where nothing is in its way.
     assert_eq!(f.limits[0].0, untouched.0, "one side found: the row stays as it was: {:?}", f.found);
@@ -1193,12 +1195,12 @@ fn find_limits_searches_the_joint_as_edited_and_leaves_a_free_side() {
     assert!(f.found_note.is_none(), "{:?}", f.found_note);
     // Edited after the search, the joint is no longer the one searched (its notes then go).
     let searched = f.searched.clone().expect("what was searched");
-    assert!(searched.current(&app, f));
+    assert!(searched.current(&app, f, &d.inputs));
     f.flip = !f.flip;
-    assert!(!searched.current(&app, f), "a flipped joint is not the one searched");
+    assert!(!searched.current(&app, f, &d.inputs), "a flipped joint is not the one searched");
     f.flip = !f.flip;
     // A form that can't be applied says why instead.
     f.offset[2] = "nonsense".into();
-    find_limits(&app, f, id);
+    find_limits(&app, f, id, &d.inputs);
     assert!(f.found_note.is_some() && f.found.is_empty(), "{:?}", f.found_note);
 }

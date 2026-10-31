@@ -145,14 +145,14 @@ pub struct Searched {
 }
 
 impl Searched {
-    fn now(app: &SolveApp, f: &JointForm) -> Result<Searched, String> {
-        Ok(Searched { design: std::sync::Arc::downgrade(&app.session.doc), joint: edit_commands(app, f)? })
+    fn now(app: &SolveApp, f: &JointForm, inputs: &[SelInput]) -> Result<Searched, String> {
+        Ok(Searched { design: std::sync::Arc::downgrade(&app.session.doc), joint: edit_commands(app, f, inputs)? })
     }
 
     /// Whether the design and the dialog's joint are still the ones searched.
-    fn current(&self, app: &SolveApp, f: &JointForm) -> bool {
+    fn current(&self, app: &SolveApp, f: &JointForm, inputs: &[SelInput]) -> bool {
         self.design.upgrade().is_some_and(|d| std::sync::Arc::ptr_eq(&d, &app.session.doc))
-            && edit_commands(app, f).is_ok_and(|now| now == self.joint)
+            && edit_commands(app, f, inputs).is_ok_and(|now| now == self.joint)
     }
 }
 
@@ -773,7 +773,7 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Asm, inputs: &mut [Se
                         }
                     }
                     if let Some(id) = f.editing {
-                        find_limits_row(app, ui, f, id);
+                        find_limits_row(app, ui, f, id, inputs);
                     }
                 });
             } else {
@@ -964,7 +964,7 @@ fn capital(s: &str) -> String {
 
 /// The Limits section's Find Limits row: the button, or the search under way with Cancel; and
 /// what the last search said about all the values.
-fn find_limits_row(app: &mut SolveApp, ui: &mut egui::Ui, f: &mut JointForm, id: u64) {
+fn find_limits_row(app: &mut SolveApp, ui: &mut egui::Ui, f: &mut JointForm, id: u64, inputs: &[SelInput]) {
     let t = Tokens::get();
     if let Some(search) = &f.search {
         // A poisoned lock: the search's thread panicked.
@@ -972,10 +972,10 @@ fn find_limits_row(app: &mut SolveApp, ui: &mut egui::Ui, f: &mut JointForm, id:
         match reply {
             Some(reply) => {
                 // Found for a design changed since (by a script, the control channel, undo), or
-                // a joint the dialog has changed since (its flip, angle or offset): dropped.
+                // a joint the dialog has changed since (its sides, flip, angle or offset): dropped.
                 let searched = search.searched.clone();
                 f.search = None;
-                if searched.current(app, f) {
+                if searched.current(app, f, inputs) {
                     f.searched = Some(searched);
                     fill_limits(&app.session.doc, f, reply);
                 } else {
@@ -991,7 +991,7 @@ fn find_limits_row(app: &mut SolveApp, ui: &mut egui::Ui, f: &mut JointForm, id:
     // dialog says so (the values filled in stay, to keep or edit).
     if f.search.is_none()
         && let Some(searched) = &f.searched
-        && !searched.current(app, f)
+        && !searched.current(app, f, inputs)
     {
         f.searched = None;
         f.found.clear();
@@ -1011,7 +1011,7 @@ fn find_limits_row(app: &mut SolveApp, ui: &mut egui::Ui, f: &mut JointForm, id:
             .on_hover_text(crate::i18n::tr("joint.find_limits_hint"))
             .clicked()
         {
-            find_limits(app, f, id);
+            find_limits(app, f, id, inputs);
         }
     });
     if let Some(note) = &f.found_note {
@@ -1021,20 +1021,20 @@ fn find_limits_row(app: &mut SolveApp, ui: &mut egui::Ui, f: &mut JointForm, id:
     }
 }
 
-/// The commands OK would run for the joint as the dialog has it, but its limits (what Find
-/// Limits fills in).
-fn edit_commands(app: &SolveApp, f: &JointForm) -> Result<Vec<(String, Value)>, String> {
-    let edit = Dialog::new(Kind::Assembly(Asm::Joint(Box::new(f.clone()))), Vec::new());
+/// The commands OK would run for the joint as the dialog has it (its sides as picked in
+/// `inputs`), but its limits (what Find Limits fills in).
+fn edit_commands(app: &SolveApp, f: &JointForm, inputs: &[SelInput]) -> Result<Vec<(String, Value)>, String> {
+    let edit = Dialog::new(Kind::Assembly(Asm::Joint(Box::new(f.clone()))), inputs.to_vec());
     Ok(crate::dialogs::apply_commands(app, &edit)?.into_iter().filter(|(id, _)| id != "joint.limits").collect())
 }
 
 /// Find Limits: on a copy of the design, the joint as the dialog has it now (its type and
 /// alignment, as OK would leave them), then `joint.find_limits` on it. Off the window thread
 /// when the app runs commands there, else at once.
-fn find_limits(app: &SolveApp, f: &mut JointForm, id: u64) {
+fn find_limits(app: &SolveApp, f: &mut JointForm, id: u64, inputs: &[SelInput]) {
     (f.found_note, f.search, f.searched) = (None, None, None);
     f.found.clear();
-    let searched = match Searched::now(app, f) {
+    let searched = match Searched::now(app, f, inputs) {
         Ok(s) => s,
         Err(e) => {
             f.found_note = Some(e);
