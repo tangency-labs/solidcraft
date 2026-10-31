@@ -97,7 +97,7 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
             }
             Ok(())
         }
-        FeatureKind::Align { bodies, from, to, from_normal, to_normal, flip, from_plane, to_plane } => {
+        FeatureKind::Align { bodies, from, to, from_normal, to_normal, flip, from_plane, to_plane, axes } => {
             // A plane on either side is worked out now, so the bodies follow it when it moves.
             let (mut from, mut from_normal) = (from.0, from_normal.and_then(|n| n.normalized()));
             if let Some(p) = from_plane {
@@ -125,6 +125,28 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
             let d = match (&target, to_normal) {
                 (Some(_), Some(n)) => n * (to - from).dot(n),
                 _ => to - from,
+            };
+            // Point-to-point alignment can keep only the chosen world X/Y/Z directions,
+            // stored in the bodies' frame. A missing list means all three (the full offset).
+            let d = match axes {
+                None => d,
+                Some(dirs) if dirs.is_empty() => {
+                    return Err(DocError::Invalid("the align axes enable none of X, Y and Z".into()));
+                }
+                Some(dirs) => {
+                    let mut kept = Vec3::ZERO;
+                    let mut used = false;
+                    for a in dirs {
+                        if let Some(a) = a.0.normalized() {
+                            kept += a * d.dot(a);
+                            used = true;
+                        }
+                    }
+                    if !used {
+                        return Err(DocError::Invalid("the align axes have no direction".into()));
+                    }
+                    kept
+                }
             };
             m[3][0] += d.x;
             m[3][1] += d.y;

@@ -1911,7 +1911,7 @@ fn align_components_input_picks_occurrence_from_viewport_body_and_skips_root_bod
     let second = app.run("occurrence.copy", json!({"component": comp, "translate": [30, 0, 0]})).unwrap()["occurrence"].as_u64().unwrap();
 
     let mut d = start(&mut app, vec![], "solid.align");
-    d.kind = Kind::Align { flip: false, components: true };
+    d.kind = Kind::Align { flip: false, components: true, axes: [true; 3] };
     d.inputs[0].label = "Components";
     d.active = 0;
 
