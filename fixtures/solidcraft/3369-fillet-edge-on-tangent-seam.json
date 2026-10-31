@@ -6,7 +6,7 @@
  "cases": [
   {
    "name": "edge_ends_on_seam",
-   "note": "the issue's case",
+   "note": "the issue's case. Pinned SMLib refuses it with status 1001 (WR-457, tangency-labs/solidcore#418), so the case turns on the opt-in fix `fillet_nx1_tangent_side_edge`; without it the port refuses as upstream does, and does not reach the expected values below.",
    "steps": [
     {
      "op": "box",
@@ -107,7 +107,10 @@
      "tol": 0.0051504440784612415,
      "formula": "14*(25*19 + pi*9.5^2) - 6*pi*9.5^2/2 - 6*(4 - pi)"
     }
-   }
+   },
+   "fixes": [
+    "fillet_nx1_tangent_side_edge"
+   ]
   },
   {
    "name": "control_edge_off_seam",
