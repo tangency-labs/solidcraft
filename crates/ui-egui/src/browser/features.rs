@@ -826,6 +826,58 @@ mod tests {
         assert!(labels.contains(&block_name), "a rolled-back feature stays listed: {labels:?}");
     }
 
+    /// #10079: three extrusions of one visible sketch, the first renamed. A click just past the end
+    /// of a feature's name, or a press on the name that slips a few points before its release,
+    /// selects the feature; only the sketch button itself opens the sketch.
+    #[test]
+    fn clicking_just_past_a_feature_name_selects_it_without_opening_its_sketch() {
+        let mut h = Harness::new();
+        let sketch = h.app.run("sketch.create", json!({"plane":"XY","name":"Sketch1"})).unwrap()["sketch"].as_u64().unwrap();
+        for (p0, p1) in [([0, 0], [10, 10]), ([20, 0], [30, 10]), ([40, 0], [50, 10])] {
+            h.app.run("sketch.rectangle.two_point", json!({"p0":p0,"p1":p1})).unwrap();
+        }
+        h.app.run("sketch.finish", json!({})).unwrap();
+        let mut ids = Vec::new();
+        for profile in 0..3 {
+            let made = h.app.run("solid.extrude", json!({"sketch":sketch,"profiles":[profile],"distance":5})).unwrap();
+            ids.push(made["feature"].as_u64().unwrap());
+            if profile == 0 {
+                h.app.run("timeline.rename", json!({"feature":ids[0],"name":"Lid"})).unwrap();
+            }
+        }
+        // The sketch stays shown, as in the report.
+        crate::browser::set_sketch_visible(&mut h.app, sketch, true);
+        h.app.tree.expanded.insert("c0/features".into());
+        h.settle();
+        assert!(crate::browser::sketch_visible(&h.app, sketch));
+        let press = |h: &mut Harness, at: Pos2, pressed: bool| {
+            h.frame_with(vec![egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed, modifiers: Default::default() }]);
+        };
+        // A press at `from` released at `to`, then long enough that the next click is not a double.
+        let click = |h: &mut Harness, from: Pos2, to: Pos2| {
+            h.frame_with(vec![egui::Event::PointerMoved(from)]);
+            press(h, from, true);
+            h.frame_with(vec![egui::Event::PointerMoved(to)]);
+            press(h, to, false);
+            h.frames(30);
+        };
+        for (round, id) in ids.iter().chain(&ids).enumerate() {
+            let name = h.app.session.doc.feature(*id).unwrap().name.clone();
+            for (from, to) in [(1.0, 1.0), (5.0, 5.0), (-2.0, 4.0)] {
+                // Selected rows draw their name in semibold, wider: measure it each time.
+                let label = crate::scenario::rect_of(&format!("row_label:{name}")).unwrap();
+                let at = |dx: f32| pos2(label.right() + dx, label.center().y);
+                click(&mut h, at(from), at(to));
+                assert_eq!(h.app.session.active_sketch, None, "round {round}: {name} clicked {from}..{to} points past its name opened the sketch");
+                assert!(h.app.dialog.is_none(), "round {round}: {name} opened a dialog");
+                assert_eq!(h.app.session.selection, [Sel::Feature { id: *id }], "round {round}: {name} {from}..{to}");
+            }
+        }
+        h.step(&json!({"click": {"handle": "action:Extrude1"}})).unwrap();
+        h.frames(2);
+        assert_eq!(h.app.session.active_sketch, Some(sketch), "the sketch button still opens the sketch");
+    }
+
     fn settle_heavy(h: &mut Harness) {
         for _ in 0..500 {
             if h.app.deferred.is_none() && h.app.deferred_queue.is_empty() {
