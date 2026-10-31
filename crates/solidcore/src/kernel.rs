@@ -709,6 +709,12 @@ pub struct UpstreamFixes {
     pub ssi_no_reverse_of_empty_trace: bool,
     /// `SmAdvSurfaceIntersector::ComputeSingularityPoint` starts a curve at a singularity from the first singular direction that points into both domains, whose angle is the search's `dAngleMin`, before the later inside directions are searched for the one closest to the previous direction. Upstream leaves the output at `aSingDirections[0]`, so where the first inside direction is the nearest (or the only one) the curve starts along a direction that need not point into either domain (WR-512, #1522; the fork's tangency-labs/smlib#52).
     pub ssi_singular_start_inside_direction: bool,
+    /// `SmSurfaceIntersector::IsPointOnStartPoint` compares the squared distance of each
+    /// surface point with the squared tolerance instead of with the tolerance itself
+    /// (WR-51). Upstream compares `distance_squared < tol`, whose effective radius is
+    /// `sqrt(tol)`, so a small tolerance accepts points far farther apart than intended.
+    /// Off by default for pinned C++ parity.
+    pub point_on_start_point_squared_tolerance: bool,
     /// `SmSurfaceIntersector::StepBackFromSingularity` leaves each point its own curve tangent: the tangent at a surface pole comes from the pole's limit normal and is exact, and copying the previous point's over it bent the Hermite span into the pole (a line projected through a sphere's pole, r 20, came out 2.02e-4 off the sphere). Only the surface derivatives come from the stepped-back point (WR-550; the fork's tangency-labs/smlib@8d95600).
     pub ssi_pole_point_keeps_its_tangent: bool,
     /// `DoIntersection` traces the tangential intersection curves the marcher cannot follow (the surfaces touch along them, `n1 x n2 = 0`), and the crossing branches through the contact points where crossing curves meet, which it reports as touching points (WR-75; tangency-labs/smlib ef4ab25, e9fde8f, d8c61db, 1693c9d). `FindInteriorCurves` keeps the node pairs it skips for parallel normals as seeds.

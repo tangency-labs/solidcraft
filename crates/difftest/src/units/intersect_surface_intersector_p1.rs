@@ -805,7 +805,7 @@ fn run_op(
                 1 => si.through_points().to_vec(),
                 _ => si.curve_points().to_vec(),
             };
-            if let Some(f) = st(o, si.is_point_on_start_point(&p, &l, *skip))? {
+            if let Some(f) = st(o, si.is_point_on_start_point(k, &p, &l, *skip))? {
                 o.push(b(f));
             }
         }

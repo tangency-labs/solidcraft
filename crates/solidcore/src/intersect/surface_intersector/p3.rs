@@ -615,7 +615,7 @@ impl SurfaceIntersector<'_> {
             // skip points that are on a curve or a start point already
             let starts = self.start_points().to_vec();
             if self.is_point_on_curve(k, degenerate_point, &out.curves_3d, None)?
-                || self.is_point_on_start_point(tsp, &starts, None)?
+                || self.is_point_on_start_point(k, tsp, &starts, None)?
             {
                 continue;
             }
