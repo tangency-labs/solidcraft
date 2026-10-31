@@ -14,6 +14,8 @@
 //! | `loop_directions_at` (private)               | `sm_LoopDirectionsAt` (a759622)                |
 //! | `loop_touches_at` (private)                  | `sm_LoopTouchesAt` (a759622)                   |
 //! | `LoopContact` (private)                      | `sm_LoopContact` (a759622)                     |
+//! | `floor_is_cavity` (private)                  | `sm_FloorIsCavity` (1b016ca)                   |
+//! | `outward_of_body` (private)                  | `sm_OutwardOfBody` (1b016ca)                   |
 //!
 //! Deviations: opt-in (`Kernel::fixes.offset_resolve_crossing_loops`, read by
 //! `do_extended_offset`). The reason a crossing is not resolved is the error's
@@ -29,6 +31,9 @@
 //! `offset_resolve_crossing_loops`, which runs this routine at all. With it off the
 //! routine is 6169ea1's (contacts checked as they are found, a touch reported as
 //! whichever crossing check fails first, `SM_ERR_BAD_INTERSECTIONS`).
+//! The fork's 1b016ca (regions the loops wind round the other way under an opening are
+//! kept, reversed, where they are the cavity's floor) is part of the same opt-in (WR-345
+//! addendum): it adds the original body to the routine's inputs for its point tests.
 
 use super::p1::OffsetExecutive;
 use super::p2::OffsetNotifications;
@@ -42,12 +47,15 @@ use crate::geom::object::NotifyOperation;
 use crate::geom::point_set::PointContainment;
 use crate::geom::solution_array::SolutionType;
 use crate::geom::tol::ANG_TOL_DEG;
+use crate::geom::tol::{brep_zone_tol_3d, SmallTopoType};
 use crate::geom::vector2d::Point2;
+use crate::intersect::point_class::{live_owned_surface_global_point_solve, PointClassType};
 use crate::kernel::Kernel;
 use crate::math::{Point3, Vec3};
 use crate::nurbs::b_spline_curve_n_lib::TrimMode;
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use crate::nurbs::knots::Side;
+use crate::query::brep::BrepQuery;
 use crate::query::r#loop::contains_uv_point;
 use crate::surface::surface::p1::{map_to_2d, zone_tol_3d};
 use crate::surface::surface::p4::NoObject;
@@ -88,6 +96,8 @@ struct LoopStretch {
     end: i64,
     /// `bKeep`: it bounds the face.
     keep: bool,
+    /// `bFloor` (fork 1b016ca): it bounds a region the loops wind round the other way.
+    floor: bool,
     /// `sMid`: its middle point.
     mid: Point3,
 }
@@ -400,12 +410,13 @@ impl OffsetExecutive {
     pub(super) fn resolve_crossing_loops(
         &mut self,
         kernel: &mut Kernel,
+        original: &mut Brep,
         notifications: &mut OffsetNotifications<'_>,
     ) -> Result<()> {
         let mut offset = required(self.take_offset_brep())?;
         let status = bp1::faces(&offset, None).and_then(|faces| {
             faces.into_iter().try_for_each(|f| {
-                self.resolve_crossing_loops_of_face(kernel, &mut offset, f, notifications)
+                self.resolve_crossing_loops_of_face(kernel, original, &mut offset, f, notifications)
             })
         });
         self.set_offset_brep(offset);
@@ -430,6 +441,7 @@ impl OffsetExecutive {
     fn resolve_crossing_loops_of_face(
         &mut self,
         kernel: &mut Kernel,
+        original: &mut Brep,
         b: &mut Brep,
         f: FaceId,
         notifications: &mut OffsetNotifications<'_>,
@@ -608,6 +620,7 @@ impl OffsetExecutive {
                     start: from_node,
                     end: to_node,
                     keep: false,
+                    floor: false,
                     mid,
                 });
                 from = to;
@@ -625,6 +638,8 @@ impl OffsetExecutive {
             let uv = Point2::new(uv3.x, uv3.y);
             let own_loop = stretch.loop_index;
             let mut keep = true;
+            let mut in_outer = own_loop == 0;
+            let mut in_inner = 0_usize;
             for (ll, &l) in loops.iter().enumerate() {
                 if ll == own_loop {
                     continue;
@@ -643,8 +658,79 @@ impl OffsetExecutive {
                 if found != wanted {
                     keep = false;
                 }
+                if ll == 0 {
+                    in_outer = found == PointContainment::Inside;
+                } else if found == PointContainment::Inside {
+                    in_inner += 1;
+                }
             }
-            at_mut(&mut stretches, ss)?.keep = keep;
+            let stretch = at_mut(&mut stretches, ss)?;
+            stretch.keep = keep;
+            // Fork 1b016ca: the stretches round a region the loops wind round once the
+            // other way: a hole's stretch outside the outer loop and every other hole,
+            // and the outer loop's stretch inside one hole (the region of a hole that ran
+            // out past the moved outer loop).
+            stretch.floor = if own_loop != 0 {
+                !in_outer && in_inner == 0
+            } else {
+                in_inner == 1
+            };
+        }
+
+        // Fork 1b016ca: a region the loops wind round the other way is the offset face
+        // turned inside out there, cavity on its other side (a lid shelled open at a
+        // rib's outer side standing just in from the skirt's outer wall: the skirt top's
+        // offset has the rib's foot as a hole, whose side along the open face stays while
+        // the outer loop's side along the wall moves past it; between them, under the
+        // opening, lies the cavity's floor). Dropped, the cavity was left open there.
+        // Such a region is kept, as a reversed face, exactly when the cavity lies on its
+        // other side (`floor_is_cavity`); otherwise it bounds nothing and is dropped as
+        // before. Chain the floor stretches into loops.
+        let mut next_floor: Vec<Option<usize>> = vec![None; stretches.len()];
+        for ss in 0..stretches.len() {
+            if !at(&stretches, ss)?.floor {
+                continue;
+            }
+            let end = at(&stretches, ss)?.end;
+            for (tt, other) in stretches.iter().enumerate() {
+                if other.floor && other.start == end {
+                    *at_mut(&mut next_floor, ss)? = Some(tt);
+                }
+            }
+            if at(&next_floor, ss)?.is_none() {
+                at_mut(&mut stretches, ss)?.floor = false;
+            }
+        }
+        let mut floor_loops: Vec<Vec<usize>> = Vec::new();
+        {
+            let mut seen: Vec<bool> = vec![false; stretches.len()];
+            for ss in 0..stretches.len() {
+                if !at(&stretches, ss)?.floor || *at(&seen, ss)? {
+                    continue;
+                }
+                let mut chain = Vec::new();
+                let mut closed = false;
+                let mut tt = Some(ss);
+                while let Some(t) = tt {
+                    if !at(&stretches, t)?.floor {
+                        break;
+                    }
+                    if *at(&seen, t)? {
+                        closed = t == ss;
+                        break;
+                    }
+                    *at_mut(&mut seen, t)? = true;
+                    chain.push(t);
+                    tt = *at(&next_floor, t)?;
+                }
+                if closed {
+                    floor_loops.push(chain);
+                } else {
+                    for &t in &chain {
+                        at_mut(&mut stretches, t)?.floor = false;
+                    }
+                }
+            }
         }
 
         // Close the kept stretches into loops: each goes on to the one kept stretch that
@@ -778,6 +864,62 @@ impl OffsetExecutive {
                 &mut stores,
             )?;
             new_faces.push(required(made.face)?);
+        }
+
+        // Fork 1b016ca: the regions the loops wind round the other way that are cavity,
+        // each a face on the surface turned over (the loop runs round the region the
+        // other way).
+        for chain in &floor_loops {
+            let mut input = FaceCurvesInput::default();
+            input.loops.push(chain.len());
+            let mut curves_3d = Vec::new();
+            let mut uv_curves = Vec::new();
+            for &ss in chain {
+                let stretch = at(&stretches, ss)?;
+                let e = edge_of(b, stretch.edgeuse)?;
+                let mut curve_3d = edge_curve(b, e)?.copy(kernel)?;
+                let mut ivl_3d = Extent1d::from_min_max(stretch.lo, stretch.hi);
+                curve_3d.trim(kernel, &mut ivl_3d, TrimMode::Notify)?;
+                curves_3d.push(Some(curve_3d));
+                let mut uv_curve = at(&uvs, stretch.uv)?.copy(kernel)?;
+                let mut ivl_uv = Extent1d::from_min_max(stretch.lo, stretch.hi);
+                uv_curve.trim(kernel, &mut ivl_uv, TrimMode::Notify)?;
+                uv_curves.push(uv_curve);
+                input
+                    .orientations
+                    .push(eu::orientation(b, stretch.edgeuse)?);
+            }
+            // a point inside the region, just off it on the side the cavity would lie on
+            if !self.floor_is_cavity(kernel, original, b, f, &stretches, chain)? {
+                continue;
+            }
+            input.curves_3d = Some(curves_3d);
+            input.uv_curves = Some(uv_curves);
+            let new_surface = required(b.face(f)?.surface.as_ref())?.copy(kernel)?;
+            let region = b.infinite_region();
+            let key_of = notifications.result_key_of;
+            let mut stores = NotificationStores {
+                records: &mut *notifications.records,
+                attributes: &mut *notifications.attributes,
+                key_of,
+            };
+            let made = make_face_with_curves_with_kernel_context(
+                kernel,
+                b,
+                region,
+                input,
+                new_surface,
+                &uv_domain,
+                OrientType::Opposite,
+                None,
+                &|face| key_of(EntityRef::Face(face)),
+                &mut stores,
+            )?;
+            new_faces.push(required(made.face)?);
+            // its edges come from them
+            for &ss in chain {
+                at_mut(&mut stretches, ss)?.keep = true;
+            }
         }
 
         // The new faces, edges and vertices take the attributes of the face, edges and
@@ -937,5 +1079,208 @@ impl OffsetExecutive {
             )
         })?;
         Ok(())
+    }
+
+    /// `sm_OutwardOfBody` (fork 1b016ca): the sign (`+1` or `-1`) that turns
+    /// `surface_normal`, the normal of offset face `offset_face` at `at`, to the body's
+    /// outward normal at the face it was offset or copied from (the normal of that face's
+    /// face use the offset was built from, which points into the region it bounds: out
+    /// of the body where that is void); `None` (unknown) for a face with no face of the
+    /// body behind it (caps, walls built along edges), or where the body's face is not
+    /// found within twice the wall or has no normal.
+    fn outward_of_body(
+        &self,
+        kernel: &Kernel,
+        original: &mut Brep,
+        offset_face: FaceId,
+        at: Point3,
+        surface_normal: Vec3,
+        wall: f64,
+    ) -> Result<Option<f64>> {
+        let Some(&fu) = self.faceuse_to_faces.firsts(offset_face).first() else {
+            return Ok(None);
+        };
+        let orig = required(original.faceuse(fu)?.face)?;
+        let Some(shell) = original.faceuse(fu)?.shell else {
+            return Ok(None);
+        };
+        let Some(region) = original.shell(shell)?.region else {
+            return Ok(None);
+        };
+        let surface = required(face::surface(original, orig)?)?.clone_for_evaluation()?;
+        let domain = surface.natural_uv_domain_with_nurb(kernel)?;
+        let solutions = live_owned_surface_global_point_solve(
+            kernel,
+            &surface,
+            original,
+            orig,
+            &domain,
+            SolverOperation::Minimize,
+            at,
+            2.0 * wall,
+            SolutionRequested::Single,
+        )?;
+        let Some(first) = solutions.first() else {
+            return Ok(None);
+        };
+        let uv = Point2::new(first.param(0)?, first.param(1)?);
+        let Ok(mut normal) = surface
+            .evaluate_normal(kernel, uv, Side::Left, Side::Left)?
+            .unitize()
+        else {
+            return Ok(None);
+        };
+        // the face use's normal points into the region it bounds: out of the body where
+        // that is void
+        if eu::faceuse_orientation(original, fu)? != OrientType::Same {
+            normal *= -1.0;
+        }
+        if original.region(region)?.is_void() == 0 {
+            normal *= -1.0;
+        }
+        Ok(Some(if normal.dot(surface_normal) >= 0.0 {
+            1.0
+        } else {
+            -1.0
+        }))
+    }
+
+    /// `sm_FloorIsCavity` (fork 1b016ca): whether the region of offset face `f` that the
+    /// stretches `chain` wind round the other way is the cavity's face, reversed. The
+    /// cavity would lie on the side of the region the face's own cavity side is not, so
+    /// the point just beyond the region on that side must be cavity by the offset's own
+    /// rule: inside the body, and on the cavity side of every other offset face whose
+    /// wall it lies within (its foot on that face is inside the face, less than the wall
+    /// from it). A face's cavity side is opposite the body's outward normal at the face
+    /// it was offset from ([`Self::outward_of_body`]).
+    fn floor_is_cavity(
+        &self,
+        kernel: &Kernel,
+        original: &mut Brep,
+        b: &mut Brep,
+        f: FaceId,
+        stretches: &[LoopStretch],
+        chain: &[usize],
+    ) -> Result<bool> {
+        let wall = self.offset_distance();
+        let surface = required(face::surface(b, f)?)?.clone_for_evaluation()?;
+        // a point of the region: the middle of its stretches' middles, on the surface
+        let mut mid = Point3::new(0.0, 0.0, 0.0);
+        for &ss in chain {
+            mid += at(stretches, ss)?.mid - Point3::new(0.0, 0.0, 0.0);
+        }
+        #[allow(clippy::cast_precision_loss)] // a loop's stretch count
+        let count = chain.len() as f64;
+        mid = Point3::new(0.0, 0.0, 0.0) + (mid - Point3::new(0.0, 0.0, 0.0)) * (1.0 / count);
+        let domain = surface.natural_uv_domain_with_nurb(kernel)?;
+        let solutions = live_owned_surface_global_point_solve(
+            kernel,
+            &surface,
+            b,
+            f,
+            &domain,
+            SolverOperation::Minimize,
+            mid,
+            wall,
+            SolutionRequested::Single,
+        )?;
+        let Some(first) = solutions.first() else {
+            return Ok(false);
+        };
+        let uv = Point2::new(first.param(0)?, first.param(1)?);
+        let p = surface.evaluate_point(kernel, uv)?;
+        let Ok(n) = surface
+            .evaluate_normal(kernel, uv, Side::Left, Side::Left)?
+            .unitize()
+        else {
+            return Ok(false);
+        };
+        let Some(sign) = self.outward_of_body(kernel, original, f, p, n, wall)? else {
+            return Ok(false);
+        };
+        // the face's cavity side is against the body's outward normal; the region's the
+        // other one
+        let step = 1.0e-3 * wall;
+        let q = p + n * (sign * step);
+        let zone = brep_zone_tol_3d(kernel, original, SmallTopoType::NormalSize);
+        let classified =
+            BrepQuery::of_brep(original).point_3d_classify(kernel, original, q, zone, true)?;
+        let in_body = classified.point_class() == PointClassType::Region
+            && match classified.object() {
+                Some(EntityRef::Region(r)) => original.region(r)?.is_void() == 0,
+                _ => false,
+            };
+        if !in_body {
+            return Ok(false);
+        }
+        for other in bp1::faces(b, None)? {
+            if other == f {
+                continue;
+            }
+            let (other_surface, other_domain) = {
+                let record = b.face(other)?;
+                let Some(os) = record.surface.as_ref() else {
+                    continue;
+                };
+                (os.clone_for_evaluation()?, record.uv_domain)
+            };
+            let solutions = live_owned_surface_global_point_solve(
+                kernel,
+                &other_surface,
+                b,
+                other,
+                &other_domain,
+                SolverOperation::Minimize,
+                q,
+                wall,
+                SolutionRequested::Single,
+            )?;
+            let Some(first) = solutions.first() else {
+                continue;
+            };
+            if first.solution_value.partial_cmp(&wall) != Some(core::cmp::Ordering::Less) {
+                continue;
+            }
+            let other_uv = Point2::new(first.param(0)?, first.param(1)?);
+            // its foot inside the face
+            let loops = face::loops(b, other, false, None)?;
+            let mut inside = !loops.is_empty();
+            let other_zone = zone_tol_3d(kernel, &other_surface)?;
+            for (ll, &l) in loops.iter().enumerate() {
+                if !inside {
+                    break;
+                }
+                let found =
+                    contains_uv_point(kernel, b, l, None, other_uv, other_zone)?.containment;
+                let wanted = if ll == 0 {
+                    PointContainment::Inside
+                } else {
+                    PointContainment::Outside
+                };
+                if found != wanted {
+                    inside = false;
+                }
+            }
+            if !inside {
+                continue;
+            }
+            let on = other_surface.evaluate_point(kernel, other_uv)?;
+            let Ok(other_normal) = other_surface
+                .evaluate_normal(kernel, other_uv, Side::Left, Side::Left)?
+                .unitize()
+            else {
+                continue;
+            };
+            let Some(other_sign) =
+                self.outward_of_body(kernel, original, other, on, other_normal, wall)?
+            else {
+                continue;
+            };
+            // the cavity side is against the outward normal
+            if (q - on).dot(other_normal * other_sign) >= 0.0 {
+                return Ok(false);
+            }
+        }
+        Ok(true)
     }
 }

@@ -2970,7 +2970,7 @@ fn extract_gaps(
 /// geometry is owned under (upstream compares pointers, so geometry belongs to the
 /// record that holds it), and by [`arena_identity`] when it has no owner; every other
 /// object by [`arena_identity`].
-struct OriginalKeys {
+pub(super) struct OriginalKeys {
     edges: BTreeMap<EdgeId, ObjectRef>,
     faces: BTreeMap<FaceId, ObjectRef>,
 }
@@ -3022,7 +3022,10 @@ impl OriginalKeys {
     }
 }
 
-fn make_original_brep_cache(kernel: &Kernel, original: &Brep) -> Result<(BrepCache, OriginalKeys)> {
+pub(super) fn make_original_brep_cache(
+    kernel: &Kernel,
+    original: &Brep,
+) -> Result<(BrepCache, OriginalKeys)> {
     let keys = OriginalKeys::new(original)?;
     let cache = make_brep_cache(kernel, CacheSource::Brep(original), &|object| {
         keys.key(object)
@@ -3034,7 +3037,7 @@ fn make_original_brep_cache(kernel: &Kernel, original: &Brep) -> Result<(BrepCac
 /// (`smsurf_GetSurfaceCache`, which may create UV trim curves on `original`): the
 /// read-only solve requests each missing cache or trim, which is prepared on
 /// `original` before the solve runs again from its start.
-fn solve_original_brep_point(
+pub(super) fn solve_original_brep_point(
     kernel: &Kernel,
     original: &mut Brep,
     cache: &BrepCache,
