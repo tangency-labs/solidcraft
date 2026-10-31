@@ -251,6 +251,74 @@ fn assembly_tree_hover_highlight_cost() {
     }
 }
 
+/// `each` bolts in a row, `each` rows in a frame and `each` frames in the design, so `each` cubed
+/// bolts from a few commands. Settled.
+fn nested_bolts(each: usize) -> Harness {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    h.app.run("component.create", json!({"name": "Frame"})).unwrap();
+    h.app.run("component.create", json!({"name": "Row", "parent": "Frame"})).unwrap();
+    h.app.run("component.create", json!({"name": "Bolt", "parent": "Row"})).unwrap();
+    h.app.run("solid.cylinder", json!({"radius": 2, "height": 20, "base": [0, 0, 0], "axis": "Z", "body_name": "Shank"})).unwrap();
+    h.app.run("component.activate", json!({"component": "root"})).unwrap();
+    for (component, parent, step) in [("Bolt", "Row", [10, 0, 0]), ("Row", "Frame", [0, 10, 0]), ("Frame", "root", [0, 0, 30])] {
+        for i in 1..each {
+            let translate: Vec<usize> = step.iter().map(|s| s * i).collect();
+            h.app.run("occurrence.copy", json!({"component": component, "parent": parent, "translate": translate})).unwrap();
+        }
+    }
+    h.frames(3);
+    h
+}
+
+/// The browser's search on an assembly: one keystroke's search, and a whole frame with the tree
+/// unfiltered, listing a few rows and listing many. Run with `--ignored --nocapture`.
+#[test]
+#[ignore = "manual search measurement"]
+fn browser_search_cost() {
+    use solidcraft_engine::browser_find::{Pattern, find};
+    for each in [5, 10, 15] {
+        let mut h = nested_bolts(each);
+        let placements = each + each * each + each * each * each;
+        let mut line = format!("SEARCH placements={placements} bodies={}", each * each * each);
+        for text in ["shank", "bolt", "bolt:7", "*:1", "nothing like it"] {
+            let pattern = Pattern::new(text);
+            let mut times: Vec<f64> = (0..9).map(|_| ms(|| drop(find(&h.app.session, pattern.as_ref(), &[])))).collect();
+            times.sort_by(f64::total_cmp);
+            line.push_str(&format!(" find[{text}]_ms={:.2}", times[times.len() / 2]));
+        }
+        // What the bar costs with nobody searching, against the same frame without it.
+        h.app.preferences.browser_search_bar = crate::prefs::BrowserSearchBar::Magnifier;
+        h.frames(2);
+        let mut times: Vec<f64> = (0..21).map(|_| ms(|| h.frames(1))).collect();
+        times.sort_by(f64::total_cmp);
+        line.push_str(&format!(" no_bar_frame_ms={:.2}", times[times.len() / 2]));
+        h.app.preferences.browser_search_bar = crate::prefs::BrowserSearchBar::Always;
+        for (name, text) in [("no_search", ""), ("few_rows", "bolt:7"), ("many_rows", "bolt")] {
+            if text.is_empty() {
+                h.app.tree.search.clear();
+            } else {
+                h.app.tree.search.show();
+                h.app.tree.search.text = text.to_string();
+            }
+            h.frames(2);
+            let mut times: Vec<f64> = (0..21).map(|_| ms(|| h.frames(1))).collect();
+            times.sort_by(f64::total_cmp);
+            line.push_str(&format!(" {name}_frame_ms={:.2}", times[times.len() / 2]));
+        }
+        // A keystroke: the frame that searches again, its rows all listed.
+        let mut times: Vec<f64> = (0..21)
+            .map(|i| {
+                h.app.tree.search.text = if i % 2 == 0 { "bol" } else { "bolt" }.to_string();
+                ms(|| h.frames(1))
+            })
+            .collect();
+        times.sort_by(f64::total_cmp);
+        line.push_str(&format!(" keystroke_frame_ms={:.2}", times[times.len() / 2]));
+        println!("{line}");
+    }
+}
+
 /// A frame of the viewport for `app`'s camera, drawing the given model and highlight scenes.
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn view_frame(

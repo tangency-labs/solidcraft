@@ -341,6 +341,16 @@ pub(super) fn layout(app: &mut SolveApp, ui: &mut egui::Ui) {
                             app.preferences.browser_bodies_folders = *mode;
                         }
                     });
+                    ui_kit::row(ui, app.tr("prefs.browser_search_bar"), |ui| {
+                        let modes = BrowserSearchBar::ALL;
+                        let labels: Vec<_> = modes.iter().map(|m| app.tr(m.label_id())).collect();
+                        let mut selected = modes.iter().position(|m| *m == app.preferences.browser_search_bar).unwrap_or(0);
+                        if ui_kit::segmented(ui, &mut selected, &labels, ui_kit::Segments { proportional: true, compact: true, ..Default::default() })
+                            && let Some(mode) = modes.get(selected)
+                        {
+                            app.preferences.browser_search_bar = *mode;
+                        }
+                    });
                     // The eye beside the fold arrow, where it was before #8718.
                     ui_kit::row(ui, "", |ui| {
                         let check = setting::browser_eye_left(app, ui).on_hover_text(app.tr("prefs.browser_eye_left_note"));

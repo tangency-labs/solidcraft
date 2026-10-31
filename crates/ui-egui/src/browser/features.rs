@@ -66,6 +66,10 @@ fn shown_features(app: &SolveApp, compact: bool) -> usize {
 }
 
 pub(super) fn rows(app: &mut SolveApp, ui: &mut egui::Ui, component: u64, path: &[u64], depth: usize, acts: &mut Actions) {
+    // A search lists only what it finds, and it doesn't look for features.
+    if app.tree.search.on() {
+        return;
+    }
     // Compact history: every feature of the component, sketches too, in history order with the
     // marker, in place of the timeline.
     let compact = app.preferences.history_in_browser;

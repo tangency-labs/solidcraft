@@ -40,6 +40,7 @@ mod face;
 mod features;
 mod features_more;
 mod join_pieces;
+pub(crate) use browser::{find_kinds, find_text};
 pub(crate) use construct::{GeoForm, GeoFormError, REF as GEO_REF_FORMS, SKETCH_PART, geo_form, is_model_axis, plane_axis_point_kind};
 pub(crate) use face::{FaceRefForm, face_ref_form};
 pub(crate) use features::profiles as feature_profiles;

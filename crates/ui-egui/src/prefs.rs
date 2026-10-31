@@ -929,6 +929,29 @@ impl BodiesFolders {
     }
 }
 
+/// Whether the browser's search bar stays above the tree or waits to be asked for (#1413).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum BrowserSearchBar {
+    /// Also what a value this version doesn't know reads as (`lenient`).
+    #[default]
+    Always,
+    /// The magnifier on the browser's title, or Ctrl+F, opens the bar; ending the search closes it.
+    Magnifier,
+}
+
+impl BrowserSearchBar {
+    pub const ALL: [Self; 2] = [Self::Always, Self::Magnifier];
+
+    /// Its name in the Preferences (a message id).
+    pub fn label_id(self) -> &'static str {
+        match self {
+            Self::Always => "prefs.browser_search_bar_always",
+            Self::Magnifier => "prefs.browser_search_bar_magnifier",
+        }
+    }
+}
+
 // The stored fields, their defaults, page resets and simple form controls share this table.
 // Omitted pages keep fields such as grid_follows_view and added agents when restoring defaults.
 // Accepted control-channel ranges may differ from slider ranges (look_at_speed).
@@ -1302,6 +1325,8 @@ preference_settings! {
     origin_plane_names: OriginPlaneNames = OriginPlaneNames::default(), PAGE_DESIGN;
     /// When components' bodies sit in a Bodies folder in the browser (#4217).
     browser_bodies_folders: BodiesFolders = BodiesFolders::Several, PAGE_LAYOUT;
+    /// Whether the browser's search bar stays above the tree or opens from the magnifier (#1413).
+    browser_search_bar: BrowserSearchBar = BrowserSearchBar::Always, PAGE_LAYOUT;
     /// Each tree row's eye between its fold arrow and its radio, as before #8718, instead of in a
     /// column at the rows' right end. Off by default.
     browser_eye_left: bool = false, PAGE_LAYOUT => check_id("prefs.browser_eye_left");
@@ -5786,6 +5811,7 @@ mod tests {
             ("nav_bridge_enabled", json!(true), PAGE_MOUSE3D),
             ("nav_bridge_port", json!(9876), PAGE_MOUSE3D),
             ("space_mouse_speed", json!(2.0), PAGE_MOUSE3D),
+            ("browser_search_bar", json!("magnifier"), PAGE_LAYOUT),
             ("nav", json!("blender"), PAGE_NAVIGATION),
             ("look_at_anim", json!(false), PAGE_NAVIGATION),
             ("selection_shift_add_only", json!(true), PAGE_SKETCH),
@@ -6157,6 +6183,40 @@ mod tests {
         assert_eq!(h.app.preferences.browser_bodies_folders, BodiesFolders::Never, "Cancel puts it back");
         defaults(&mut h.app, PAGE_LAYOUT);
         assert_eq!(h.app.preferences.browser_bodies_folders, BodiesFolders::Several, "Interface's Restore Defaults");
+    }
+
+    /// The browser's search bar (#1413): always there by default, also in preferences saved before
+    /// the row existed. Each value is saved and read back; `ui.prefs` refuses anything else and saved
+    /// preferences read such a value as the default. The Layout page's segments set it, Cancel puts
+    /// it back, the page's Restore Defaults resets it, and the Preferences' search finds the row.
+    #[test]
+    fn browser_search_bar_is_saved_restored_and_refuses_unknown_values() {
+        use super::*;
+        let mut h = crate::scenario::Harness::new();
+        assert_eq!(h.app.preferences.browser_search_bar, BrowserSearchBar::Always);
+        assert_eq!(lenient(&json!({"theme": "light"})).browser_search_bar, BrowserSearchBar::Always, "saved before it existed");
+        for (mode, id) in [(BrowserSearchBar::Magnifier, "magnifier"), (BrowserSearchBar::Always, "always")] {
+            assert_eq!(control(&mut h.app, &json!({"browser_search_bar": id})).unwrap()["browser_search_bar"], id);
+            let mut restored = SolveApp::new(Default::default(), Default::default());
+            restored.load_prefs(&h.app.prefs());
+            assert_eq!(restored.preferences.browser_search_bar, mode, "{id}");
+        }
+        for bad in [json!("sometimes"), json!("Magnifier"), json!(""), json!(1), json!(null), json!(["always"])] {
+            let before = h.app.preferences.clone();
+            assert!(set(&mut h.app, &json!({"browser_search_bar": bad})).is_err(), "{bad}");
+            assert_eq!(h.app.preferences, before, "{bad}: a refused value changes nothing");
+            let saved = lenient(&json!({"browser_search_bar": bad, "theme": "light"}));
+            assert_eq!((saved.browser_search_bar, saved.theme.as_str()), (BrowserSearchBar::Always, "light"), "{bad}");
+        }
+        h.call("ui.prefs", json!({"open": "Layout"}));
+        reveal_preference(&mut h, "dialog:Browser search:From the magnifier");
+        h.step(&json!({"click": {"handle": "dialog:Browser search:From the magnifier"}})).unwrap();
+        assert_eq!(h.app.preferences.browser_search_bar, BrowserSearchBar::Magnifier);
+        h.call("ui.prefs", json!({"button": "cancel"}));
+        assert_eq!(h.app.preferences.browser_search_bar, BrowserSearchBar::Always, "Cancel puts it back");
+        h.app.preferences.browser_search_bar = BrowserSearchBar::Magnifier;
+        defaults(&mut h.app, PAGE_LAYOUT);
+        assert_eq!(h.app.preferences.browser_search_bar, BrowserSearchBar::Always, "Layout's Restore Defaults");
     }
 
     /// Theme: System on a Linux desktop (#7944): the freedesktop preference wins, GNOME's
