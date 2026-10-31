@@ -43,8 +43,8 @@
 //! rectangle or a circle (a detail view's), once, before any writer ([`clip`]'s rules), and checks
 //! what that made again, so every writer draws the same clip-free groups. A clip is checked there:
 //! one an object, from its lower-left to its upper-right corner or with a radius above 0, every
-//! number finite and at most 1e5 mm in size, and its object's items strokes of lines and arcs
-//! (fills and other curves aren't clipped yet).
+//! number finite and at most 1e5 mm in size. A fill is kept or dropped whole: one crossing its
+//! clip's edge isn't supported yet.
 
 use serde::{Deserialize, Serialize};
 

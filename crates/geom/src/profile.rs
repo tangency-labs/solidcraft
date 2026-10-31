@@ -442,10 +442,12 @@ impl Seg2 {
             Seg2::Cubic { .. } | Seg2::Conic { .. } | Seg2::Bezier { .. } => self.integrate(|s, t| s.derivative(t).len()),
         }
     }
-    /// The segment split at parameter `t` in (0, 1) (same kind, exact; conic halves are
-    /// re-normalised so their end weights stay 1).
+    /// The nearest to either end, in parameter, that [`Seg2::split_at`] splits a segment.
+    pub const MIN_SPLIT: f64 = 1e-9;
+    /// The segment split at parameter `t` in (0, 1), at least [`Seg2::MIN_SPLIT`] from either end
+    /// (same kind, exact; conic halves are re-normalised so their end weights stay 1).
     pub fn split_at(&self, t: f64) -> (Seg2, Seg2) {
-        let t = t.clamp(1e-9, 1.0 - 1e-9);
+        let t = t.clamp(Self::MIN_SPLIT, 1.0 - Self::MIN_SPLIT);
         match *self {
             Seg2::Line { a, b } => {
                 let m = a.lerp(b, t);
@@ -481,6 +483,26 @@ impl Seg2 {
                 (mk(&l), mk(&r))
             }
         }
+    }
+    /// The part of the segment from parameter `t0` to `t1` (0 <= t0 < t1 <= 1), the same kind: it
+    /// starts at `point_at(t0)` and ends at `point_at(t1)`, exactly as [`Seg2::split_at`] there puts
+    /// them. A conic's tail after the first split is re-normalised, which moves its parameter: `t1`
+    /// is carried into it (its end weights scaled to 1 by the factor `c`, a point at `u` of the
+    /// tail is at `u / (u + c (1 - u))`).
+    pub fn part(&self, t0: f64, t1: f64) -> Seg2 {
+        let tail = if t0 > 0.0 { self.split_at(t0).1 } else { *self };
+        if t1 >= 1.0 {
+            return tail;
+        }
+        let u = (t1 - t0) / (1.0 - t0);
+        let s = match *self {
+            Seg2::Conic { w, .. } if t0 > 0.0 => {
+                let c = ((1.0 - t0) * (1.0 - t0) + 2.0 * w * t0 * (1.0 - t0) + t0 * t0).sqrt();
+                u / (u + c * (1.0 - u))
+            }
+            _ => u,
+        };
+        tail.split_at(s).0
     }
     /// Parameter of the closest point: exact projection for lines,
     /// sampling followed by Newton for the remaining curves.

@@ -368,6 +368,17 @@ fn split_at_and_closest_param() {
     let (l, r) = c.split_at(0.37);
     assert!(l.end().dist(q) < 1e-12 && r.start().dist(q) < 1e-12);
     assert!((quarter.closest_param(Vec2::new(20.0, 20.0)) - 0.5).abs() < 1e-9);
+    // A part between two parameters ends where the whole is there, for every kind; a conic's too,
+    // though its tail after the first cut is re-normalised.
+    let skew = Seg2::Conic { a: Vec2::new(0.0, 0.0), apex: Vec2::new(-4.0, -2.0), b: Vec2::new(1.0, 2.0), w: 1.19 };
+    let arc = Seg2::Arc { center: Vec2::ZERO, radius: 3.0, start: 0.5, sweep: -2.0 };
+    for seg in [quarter, skew, c, arc, Seg2::Line { a: Vec2::ZERO, b: Vec2::new(3.0, 1.0) }] {
+        for (t0, t1) in [(0.0, 0.4), (0.3, 0.7), (0.6, 1.0), (0.1, 0.1 + 1e-6)] {
+            let piece = seg.part(t0, t1);
+            assert!(piece.start().dist(seg.point_at(t0)) < 1e-12 && piece.end().dist(seg.point_at(t1)) < 1e-12, "{seg:?} {t0} {t1}");
+            assert_eq!(std::mem::discriminant(&piece), std::mem::discriminant(&seg));
+        }
+    }
 }
 
 /// An axis-aligned box as a closed mesh, with `n` x `n` quads on each side.
