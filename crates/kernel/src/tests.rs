@@ -726,9 +726,11 @@ fn loft_and_sweep() {
     let sq = Loop2::polygon(&[Vec2::new(-20.0, -20.0), Vec2::new(20.0, -20.0), Vec2::new(20.0, 20.0), Vec2::new(-20.0, 20.0)]);
     let top = Plane::XY.offset(40.0);
     let l = loft(&[(Plane::XY, sq), (top, Loop2::circle(Vec2::ZERO, 10.0))]).unwrap();
-    let m = measure(&l).unwrap();
-    println!("loft volume {} faces {:?}", m.volume, m.merged);
-    assert!(m.volume > 314.0 * 40.0 && m.volume < 1600.0 * 40.0);
+    // Ruled, each side on the rational quarter of the circle between its corners' directions: the
+    // section at t has area (1 − t)² A_S + t² A_C + t(1 − t) M, M = ½∮(S × C' + C × S'), so
+    // V = h (A_S/3 + A_C/3 + M/6) = 35080.725 (M = 1433.790 by quadrature; tests/oracle/17-loft).
+    let v = measure(&l).unwrap().volume;
+    assert!(rel(v, 35080.725116) < 1e-6, "{v}");
     // A tube: up 30, quarter bend of radius 20, across 30.
     let disc = Region2 { outer: Loop2::circle(Vec2::ZERO, 3.0), holes: vec![] };
     let path = [
@@ -742,9 +744,6 @@ fn loft_and_sweep() {
         PathSeg::Line { a: Vec3::new(20.0, 0.0, 50.0), b: Vec3::new(50.0, 0.0, 50.0) },
     ];
     let t = sweep(&Plane::XY, &disc, &path).unwrap();
-    for tol in [0.1, 0.01, 0.003, 0.001] {
-        println!("tube tess {tol}: {}", t.mesh(&crate::MeshTolerance::chord(tol)).unwrap().measure().volume);
-    }
     let area = PI * 9.0;
     let expect = area * (30.0 + 30.0 + 20.0 * std::f64::consts::FRAC_PI_2);
     assert!(rel(measure(&t).unwrap().volume, expect) < 1e-3, "{} vs {expect}", measure(&t).unwrap().volume);
@@ -1381,18 +1380,23 @@ fn pocket_floor_loop_fillet() {
     cur = fillet(&cur, &[Vec3::new(65.0, 15.0, 16.0), Vec3::new(15.0, 15.0, 16.0), Vec3::new(65.0, 45.0, 16.0), Vec3::new(15.0, 45.0, 16.0)], 5.0)
         .unwrap();
     let v1 = measure(&cur).unwrap().volume;
+    // The 50 x 30 x 8 pocket, less the four concave R5 rounds of its corners filling r²(1 − π/4)
+    // of section along their 8.
+    let want1 = 80.0 * 60.0 * 20.0 - 50.0 * 30.0 * 8.0 + 4.0 * 25.0 * (1.0 - PI / 4.0) * 8.0;
+    assert!(rel(v1, want1) < 1e-6, "{v1} vs {want1}");
     let floor: Vec<Vec3> = [(40.0, 15.0), (65.0, 30.0), (40.0, 45.0), (15.0, 30.0)].iter().map(|(x, y)| Vec3::new(*x, *y, 12.0)).collect();
     let mut pts = floor.clone();
     let d = 5.0 - 5.0 / 2f64.sqrt();
     pts.extend([(15.0 + d, 15.0 + d), (65.0 - d, 15.0 + d), (65.0 - d, 45.0 - d), (15.0 + d, 45.0 - d)].iter().map(|(x, y)| Vec3::new(*x, *y, 12.0)));
     let f = fillet(&cur, &pts, 2.0).unwrap();
     let m = measure(&f).unwrap();
-    // Added: the fillet profile (r²(1 − π/4)) swept along the floor outline (Pappus for the
-    // corners: the profile's centroid sits 2 − 4·2/(3(4 − π))·… inward; check loosely).
-    let straight = 2.0 * (40.0 + 20.0);
-    let added_lines = (4.0 - PI) * straight;
-    assert!(m.volume > v1 + added_lines && m.volume < v1 + added_lines + 4.0 * 2.0 * PI * 5.0, "{} {}", m.volume, v1);
-    println!("pocket: {:?} vol {}", m.merged, m.volume);
+    // Added: the R2 round's section, a = r²(1 − π/4), along the floor outline's straight 2(40 + 20),
+    // and round its four R5 corners by Pappus: a quarter turn each at the radius of the section's
+    // centroid, which sits r(10 − 3π)/(3(4 − π)) in from the wall, at 5 from the corner's axis.
+    let a = 4.0 * (1.0 - PI / 4.0);
+    let centroid = 5.0 - 2.0 * (10.0 - 3.0 * PI) / (3.0 * (4.0 - PI));
+    let want = v1 + a * 2.0 * (40.0 + 20.0) + 4.0 * a * (PI / 2.0) * centroid;
+    assert!(rel(m.volume, want) < 1e-6, "{} vs {want}", m.volume);
 }
 
 #[test]

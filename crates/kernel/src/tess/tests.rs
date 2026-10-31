@@ -862,7 +862,18 @@ fn a_face_bounded_by_two_short_arcs_keeps_an_area_to_mesh() {
     let made = ok(assemble(parts, false));
     let (plan, _) = ok(plan(&made.brep, 0.5, None));
     let lens = made.faces.first().and_then(|&f| plan.faces.get(f)).expect("the lens's plan");
-    assert!(!lens.triangles.is_empty(), "the lens has triangles");
+    // One round of halving puts a node at each arc's middle, (0, ±(r − c)) (the plane's (u, v)
+    // is its (x, y)): the triangles fill the rhombus with diagonals 2·half and 2(r − c).
+    let area: f64 = lens
+        .triangles
+        .iter()
+        .map(|t| {
+            let [a, b, c] = t.map(|i| lens.uv[i as usize]);
+            0.5 * ((b[0] - a[0]) * (c[1] - a[1]) - (c[0] - a[0]) * (b[1] - a[1]))
+        })
+        .sum();
+    let rhombus = 2.0 * half * (r - c);
+    assert!((area - rhombus).abs() < 1e-9 * rhombus, "{area} vs {rhombus}");
 }
 
 /// Half of a square pyramid's sides as one spline face: degree 1, closed round the square
