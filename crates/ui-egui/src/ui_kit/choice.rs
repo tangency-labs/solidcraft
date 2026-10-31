@@ -343,14 +343,24 @@ pub(crate) fn checkbox_row(ui: &mut egui::Ui, key: &str, label: &str, on: bool) 
 
 /// Compact bold/italic toggles for text. Tokens: scope font/control tokens.
 /// The glyphs keep the familiar B/I treatment; accessible names use translated style names.
-pub(crate) fn text_emphasis(ui: &mut Ui, bold: &mut bool, italic: &mut bool) {
+pub(crate) fn text_emphasis(ui: &mut Ui, bold: &mut bool, italic: &mut bool, bold_enabled: bool) {
     use crate::fonts::RichTextExt as _;
-    for (key, text, value, id) in [
-        ("Bold", egui::RichText::new("B").semibold(), bold, "sketch_text.bold"),
-        ("Italic", egui::RichText::new("I").italics(), italic, "sketch_text.italic"),
+    for (key, text, value, id, enabled) in [
+        ("Bold", egui::RichText::new("B").semibold(), bold, "sketch_text.bold", bold_enabled),
+        ("Italic", egui::RichText::new("I").italics(), italic, "sketch_text.italic", true),
     ] {
-        let response = ui.toggle_value(value, text).on_hover_text(crate::i18n::tr(id));
-        response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, ui.is_enabled(), *value, crate::i18n::tr(id)));
+        if !enabled {
+            *value = false;
+        }
+        let mut response = ui
+            .add_enabled_ui(enabled, |ui| {
+                ui.toggle_value(value, text).on_hover_text(crate::i18n::tr(id))
+            })
+            .inner;
+        if !enabled {
+            response = response.on_disabled_hover_text(crate::i18n::tr("sketch_text.no_bold"));
+        }
+        response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, ui.is_enabled() && enabled, *value, crate::i18n::tr(id)));
         scenario::publish_target_as(&format!("dialog:{key}"), &format!("dialog:emphasis:{key}"), response.rect);
     }
 }

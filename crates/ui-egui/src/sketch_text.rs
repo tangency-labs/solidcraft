@@ -493,6 +493,13 @@ pub(crate) fn refresh(app: &SolveApp, k: &mut Tx) -> bool {
     true
 }
 
+/// Whether the font (or built-in font when empty) has a bold face.
+fn font_has_bold_face(name: &str) -> bool {
+    let trimmed = name.trim();
+    let font = if trimmed.is_empty() { None } else { Some(trimmed) };
+    solidcraft_engine::sketch::font_data_styled(font, true, false).is_ok()
+}
+
 /// The dialog's rows; true when Enter was pressed in a value field or in the text (Shift+Enter
 /// starts a new line there). `inputs` and `active`: the dialog's Path input.
 pub(crate) fn rows(ui: &mut egui::Ui, k: &mut Tx, inputs: &mut [SelInput], active: &mut usize) -> bool {
@@ -511,8 +518,12 @@ pub(crate) fn rows(ui: &mut egui::Ui, k: &mut Tx, inputs: &mut [SelInput], activ
         state.store(ui.ctx(), id);
         k.focus = false;
     }
+    let font_has_bold = font_has_bold_face(&k.font);
+    if !font_has_bold && k.style.bold {
+        k.style.bold = false;
+    }
     ui_kit::row(ui, "Font", |ui| font_row(ui, k));
-    ui_kit::row(ui, "Style", |ui| ui_kit::text_emphasis(ui, &mut k.style.bold, &mut k.style.italic));
+    ui_kit::row(ui, "Style", |ui| ui_kit::text_emphasis(ui, &mut k.style.bold, &mut k.style.italic, font_has_bold));
     ui_kit::row(ui, "Alignment", |ui| {
         let mut selected = match k.style.align {
             TextAlign::Left => 0,
@@ -692,9 +703,10 @@ fn edit_params(app: &SolveApp, k: &Tx) -> Result<Value, String> {
         TextAlign::Center => "center",
         TextAlign::Right => "right",
     };
+    let bold = k.style.bold && font_has_bold_face(&k.font);
     let mut params = json!({
         "link": k.link, "at": [sent_x, sent_y], "height": sent_height,
-        "bold": k.style.bold, "italic": k.style.italic, "align": align,
+        "bold": bold, "italic": k.style.italic, "align": align,
         "letter_spacing": letter_spacing, "line_spacing": line_spacing,
         "path": k.style.path.clone().unwrap_or_default(), "reverse": k.style.reverse,
     });
@@ -1590,5 +1602,26 @@ mod tests {
         assert_eq!(style_of(&h, &link).path, None);
         h.step(&json!({"widget":"Cancel"})).unwrap();
         assert_eq!(style_of(&h, &link), TextStyle::default());
+    }
+
+    /// #9940: built-in font has no bold face; ensuring bold is disabled so alignment,
+    /// position, spacing and editing succeed without errors.
+    #[test]
+    fn built_in_font_disables_bold_and_options_work_without_error() {
+        let (mut h, _link, _) = setup();
+        h.app.start("sketch.edit_text");
+        h.frames(3);
+        assert!(!font_has_bold_face(&tx(&h.app).font));
+        assert!(!tx(&h.app).style.bold);
+        // Changing alignment succeeds without error
+        h.step(&json!({"widget": "dialog:Align center"})).unwrap();
+        h.frames(3);
+        assert_eq!(tx(&h.app).style.align, TextAlign::Center);
+        h.step(&json!({"widget": "dialog:Align right"})).unwrap();
+        h.frames(3);
+        assert_eq!(tx(&h.app).style.align, TextAlign::Right);
+        h.step(&json!({"widget": "OK"})).unwrap();
+        h.frames(3);
+        assert!(h.app.dialog.is_none());
     }
 }

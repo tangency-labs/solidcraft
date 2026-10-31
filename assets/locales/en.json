@@ -3813,6 +3813,7 @@
   "sketch_text.formula": "Start with = to build the words from parameters: ='W' + number(Width)",
   "sketch_text.italic": "Italic",
   "sketch_text.loading_fonts": "Looking for installed fonts…",
+  "sketch_text.no_bold": "The built-in font has no bold face: choose an installed font",
   "sketch_text.on_path": "The text follows its path: the curve places it",
   "sketch_text.path_clear": "Take the text off its curve",
   "sketch_text.path_hint": "A curve of the sketch the text follows: click here, then the curve",
