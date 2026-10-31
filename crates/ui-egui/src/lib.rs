@@ -3041,7 +3041,7 @@ impl SolveApp {
 
     /// A pointer button after typing in the same frame (a slow frame) waits for the next frame,
     /// with the events after it. egui 0.37 drops a field's focus on a click elsewhere before the
-    /// field reads the frame's typing, which lost what was typed.
+    /// field reads the frame's typing, which lost what was typed. Drop once emilk/egui#8763 is fixed.
     fn hold_click_after_typing(&mut self, raw: &mut egui::RawInput) {
         if !self.held_click.is_empty() {
             let mut events = std::mem::take(&mut self.held_click);

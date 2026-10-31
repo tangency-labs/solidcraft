@@ -208,6 +208,7 @@ fn keep_selection(ui: &Ui, response: &Response, len: usize) -> Option<CCursorRan
         }
         // The click on a menu row took the focus before the field drew, and egui 0.37 drops an
         // unfocused field's selection: the row acts on the selection of the last focused frame.
+        // Drop once emilk/egui#8763 is fixed.
         None if !focused => last.or(now),
         None => now,
     };
