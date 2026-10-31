@@ -1471,3 +1471,63 @@ fn a_held_solve_that_cannot_succeed_stops_once_it_stalls() {
     // A solve whose report names the violated constraints still iterates to the end.
     assert!(solve(Analysis::Full) >= 500);
 }
+
+/// A fillet whose corner the solve leaves where it is stays that corner's arc, even when the
+/// reference it is judged against (the positions before a move, here the corner mirrored) shows
+/// it the other way round: ending its sweep where it started is no turn of the corner, and
+/// swapping its ends would make the fillet its long complement. A corner of 135° (lines turning
+/// by 45°), all its points fixed.
+#[test]
+fn a_fillet_the_solve_leaves_in_place_keeps_its_short_arc_against_a_mirrored_reference() {
+    let mut sk = Sketch::new();
+    let s = std::f64::consts::FRAC_1_SQRT_2;
+    let l1 = sk.add_line(v(10.0, 10.0), v(35.0, 10.0), None, None, None).unwrap();
+    let CurveKind::Line { b: ta, .. } = sk.curves[l1].kind else { panic!() };
+    let end = v(35.0 + 5.0 * s, 15.0 - 5.0 * s);
+    let arc = sk.add_arc(v(35.0, 15.0), v(35.0, 10.0), end, [None, Some(ta), None], None).unwrap();
+    let CurveKind::Arc { b: tb, .. } = sk.curves[arc].kind else { panic!() };
+    let l2 = sk.add_line(end, end + v(10.0, 10.0), Some(tb), None, None).unwrap();
+    sk.add_constraint(ConstraintKind::Radius { c: arc, value: 5.0 }, None).unwrap();
+    sk.add_constraint(ConstraintKind::Tangent { a: l1, b: arc }, None).unwrap();
+    sk.add_constraint(ConstraintKind::Tangent { a: l2, b: arc }, None).unwrap();
+    for p in &mut sk.points {
+        p.fixed = true;
+    }
+    assert!(solve(&mut sk).ok());
+    assert!((sweep_deg(&sk, arc) - 45.0).abs() < 1e-6, "sweep {}", sweep_deg(&sk, arc));
+    let mirrored: Vec<Vec2> = sk.points.iter().map(|p| v(80.0 - p.pos.x, p.pos.y)).collect();
+    let rep = solve_with(&mut sk, &Hold::default(), Some(&mirrored), Analysis::Full, None);
+    assert!(rep.ok(), "{rep:?}");
+    assert!((sweep_deg(&sk, arc) - 45.0).abs() < 1e-6, "sweep {}", sweep_deg(&sk, arc));
+    assert!(lines_leave_the_arc(&sk, arc, [l1, l2]));
+}
+
+/// A fillet over three quarters of a turn (the round end of a drop shape) whose corner really
+/// mirrored, its arc's ends as they were, stays the long arc its lines leave: judged against the
+/// corner before the mirror its sweep jumps, but its lines already leave it, so no swap makes it
+/// the short complement with both lines cutting back through it.
+#[test]
+fn a_mirrored_fillet_over_three_quarters_of_a_turn_stays_the_arc_its_lines_leave() {
+    let mut sk = Sketch::new();
+    let (fa, fb) = (-FRAC_PI_2, -FRAC_PI_2 + 300f64.to_radians());
+    let (pa, pb) = (Vec2::from_angle(fa) * 5.0, Vec2::from_angle(fb) * 5.0);
+    let (da, db) = (v(-fa.sin(), fa.cos()), v(-fb.sin(), fb.cos()));
+    let l1 = sk.add_line(pa - da * 10.0, pa, None, None, None).unwrap();
+    let CurveKind::Line { b: ta, .. } = sk.curves[l1].kind else { panic!() };
+    let arc = sk.add_arc(v(0.0, 0.0), pa, pb, [None, Some(ta), None], None).unwrap();
+    let CurveKind::Arc { b: tb, .. } = sk.curves[arc].kind else { panic!() };
+    let l2 = sk.add_line(pb, pb + db * 10.0, Some(tb), None, None).unwrap();
+    sk.add_constraint(ConstraintKind::Radius { c: arc, value: 5.0 }, None).unwrap();
+    sk.add_constraint(ConstraintKind::Tangent { a: l1, b: arc }, None).unwrap();
+    sk.add_constraint(ConstraintKind::Tangent { a: l2, b: arc }, None).unwrap();
+    assert!(lines_leave_the_arc(&sk, arc, [l1, l2]));
+    let before: Vec<Vec2> = sk.points.iter().map(|p| p.pos).collect();
+    for p in &mut sk.points {
+        p.pos = v(-p.pos.x, p.pos.y);
+        p.fixed = true;
+    }
+    let rep = solve_with(&mut sk, &Hold::default(), Some(&before), Analysis::Full, None);
+    assert!(rep.ok(), "{rep:?}");
+    assert!((sweep_deg(&sk, arc) - 300.0).abs() < 1e-6, "sweep {}", sweep_deg(&sk, arc));
+    assert!(lines_leave_the_arc(&sk, arc, [l1, l2]));
+}
