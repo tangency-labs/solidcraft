@@ -385,6 +385,132 @@ fn seam_nodes(s: &EvalSurface, swap: bool, x: f64, y0: f64, y1: f64, rules: &Rul
     Some(inner.iter().map(|&y| (y, s.eval(uv(y)[0], uv(y)[1]).0)).collect())
 }
 
+/// How a closed surface closes along one parameter direction.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Closure {
+    /// The parameter repeats with this period (a revolved surface's turn, a closed spline).
+    Periodic(f64),
+    /// The range's two ends are one line on the surface (a torus's tube profile, a full circle).
+    Seam,
+    /// Each end of the range is a single point (a sphere's profile, from pole to pole).
+    Poles,
+}
+
+/// Samples across a direction when deciding how it closes.
+const CLOSURE_SAMPLES: usize = 8;
+
+fn closure(s: &EvalSurface, dom: &super::uv::Domain, d: usize, eps: f64) -> Option<Closure> {
+    if let Some(per) = dom.period.get(d).copied().flatten() {
+        return (per > 0.0 && per.is_finite()).then_some(Closure::Periodic(per));
+    }
+    let (a, b) = dom.range.get(d).copied().flatten()?;
+    let (c0, c1) = dom.range.get(1 - d).copied().flatten()?;
+    let at = |x: f64, y: f64| if d == 0 { [x, y] } else { [y, x] };
+    let ys: Vec<f64> = (0..=CLOSURE_SAMPLES).map(|k| c0 + (c1 - c0) * k as f64 / CLOSURE_SAMPLES as f64).collect();
+    if ys.iter().all(|&y| super::uv::degenerate(s, at(a, y), 1 - d) && super::uv::degenerate(s, at(b, y), 1 - d)) {
+        return Some(Closure::Poles);
+    }
+    let same = |y: f64| {
+        let (p, q) = (at(a, y), at(b, y));
+        s.derivs(p[0], p[1]).zip(s.derivs(q[0], q[1])).is_some_and(|((p, _, _), (q, _, _))| p.dist(q) <= eps)
+    };
+    ys.iter().all(|&y| same(y)).then_some(Closure::Seam)
+}
+
+/// The outer boundary of a face that lies outside all of its loops, on a surface closed in both
+/// directions (a sphere less a cap, a torus less a patch, as STEP files write a body whose faces
+/// were merged across their shared edges). Every loop of such a face runs clockwise in (u, v):
+/// the face is the rest of the surface around them, and filled from its loops alone it would be
+/// drawn as the holes instead. The surface's whole parameter box is the missing outer loop: its
+/// sides are seams (one curve on the surface, so both copies share their nodes) or poles (every
+/// node one point). Periodic loops are moved into the box. `None` (and the loops unchanged) when
+/// the face is inside its loops, the surface is open, or a loop does not fit inside the box.
+pub(crate) fn enclosing(s: &EvalSurface, dom: &super::uv::Domain, loops: &mut [Loop], rules: &Rules, h: f64) -> Option<Loop> {
+    // Signed area in (u, v): the face lies left of its loops, so it is negative only when every
+    // loop turns the face's outside towards it.
+    let area: f64 = loops
+        .iter()
+        .map(|l| {
+            let n = l.uv.len();
+            (0..n).filter_map(|i| Some((l.uv.get(i)?, l.uv.get((i + 1) % n)?))).map(|(a, b)| a[0] * b[1] - b[0] * a[1]).sum::<f64>()
+        })
+        .sum();
+    if !area.is_finite() || area >= 0.0 || loops.is_empty() {
+        return None;
+    }
+    let eps = (rules.tol * 1e-3).max(rules.extent * 1e-9).max(1e-12);
+    let kinds = [closure(s, dom, 0, eps)?, closure(s, dom, 1, eps)?];
+    // The box: a periodic direction starts in the middle of the widest gap between the loops'
+    // nodes, so the loops fit inside one period; any other direction is its range.
+    let mut box_ = [(0.0, 0.0); 2];
+    let mut shifts: Vec<[f64; 2]> = vec![[0.0; 2]; loops.len()];
+    for d in 0..2 {
+        match kinds[d] {
+            Closure::Periodic(per) => {
+                let local: Vec<Loop> = loops
+                    .iter()
+                    .map(|l| Loop { uv: l.uv.iter().map(|q| if d == 0 { *q } else { [q[1], q[0]] }).collect(), pts: Vec::new() })
+                    .collect();
+                let lo = cut_position(&local, per)?;
+                box_[d] = (lo, lo + per);
+                for (l, sh) in loops.iter().zip(shifts.iter_mut()) {
+                    let min = l.uv.iter().filter_map(|q| q.get(d)).fold(f64::MAX, |m, x| m.min(*x));
+                    sh[d] = ((lo - min) / per).ceil() * per;
+                }
+            }
+            Closure::Seam | Closure::Poles => {
+                let (a, b) = dom.range.get(d).copied().flatten()?;
+                box_[d] = (a.min(b), a.max(b));
+            }
+        }
+    }
+    // Every loop strictly inside the box, once moved.
+    let inside = loops
+        .iter()
+        .zip(&shifts)
+        .all(|(l, sh)| l.uv.iter().all(|q| (0..2).all(|d| q.get(d).is_some_and(|x| *x + sh[d] > box_[d].0 && *x + sh[d] < box_[d].1))));
+    if !inside {
+        return None;
+    }
+    let lines = |d: usize| super::uv::divide(s, d, box_[d], box_[1 - d], rules, h, super::MAX_LINES);
+    let (l0, l1) = (lines(0), lines(1));
+    if l0.len() < 2 || l1.len() < 2 {
+        return None;
+    }
+    // One 3D point for every place on the box's sides that is one point of the surface: the far
+    // end of a seam is its near end, and a pole side is its first corner.
+    let point = |q: [f64; 2]| -> Vec3 {
+        let mut c = q;
+        for d in 0..2 {
+            if matches!(kinds[d], Closure::Periodic(_) | Closure::Seam) && c[d] == box_[d].1 {
+                c[d] = box_[d].0;
+            }
+        }
+        for d in 0..2 {
+            if kinds[d] == Closure::Poles && (c[d] == box_[d].0 || c[d] == box_[d].1) {
+                c[1 - d] = box_[1 - d].0;
+            }
+        }
+        s.eval(c[0], c[1]).0
+    };
+    // Counter-clockwise: along u at the bottom, up v on the right, back along u at the top and
+    // down v on the left; each side's last node is the next side's first.
+    let ((u0, u1), (v0, v1)) = (box_[0], box_[1]);
+    let mut uv: Vec<[f64; 2]> = Vec::with_capacity(2 * (l0.len() + l1.len()));
+    uv.extend(l0.iter().take(l0.len() - 1).map(|&x| [x, v0]));
+    uv.extend(l1.iter().take(l1.len() - 1).map(|&y| [u1, y]));
+    uv.extend(l0.iter().rev().take(l0.len() - 1).map(|&x| [x, v1]));
+    uv.extend(l1.iter().rev().take(l1.len() - 1).map(|&y| [u0, y]));
+    let pts: Vec<Vec3> = uv.iter().map(|q| point(*q)).collect();
+    for (l, sh) in loops.iter_mut().zip(&shifts) {
+        for q in l.uv.iter_mut() {
+            q[0] += sh[0];
+            q[1] += sh[1];
+        }
+    }
+    Some(Loop { uv, pts })
+}
+
 /// Whether a face of `solid` lies on a B-spline surface that joins itself (a lofted tube).
 /// Truck meshes a face in its surface's parameters and treats only a revolved surface's
 /// rotation as periodic, so a face that runs across such a join comes out folded over itself or
