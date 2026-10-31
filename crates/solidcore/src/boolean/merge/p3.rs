@@ -756,7 +756,7 @@ fn source_ref(e: EntityRef) -> crate::geom::object::ObjectRef {
 /// no context), as the arena entry's component copies do. (not upstream) The store holds
 /// the source's own attributes under [`source_ref`], so the copy's `SM_NO_COPY`
 /// notifications give the copy's objects theirs; the copy keeps them.
-fn copy_brep(
+pub(crate) fn copy_brep(
     k: &mut Kernel,
     source: &Brep,
     copy_map: Option<&mut CopyBrepMap<EntityRef>>,
@@ -787,7 +787,7 @@ fn copy_brep(
 
 /// `SmBrep::MergeBrep(source, pOptCopyBrepMap, pOptReverseMap, bAddAnalytics)`
 /// (`topology::brep::p3::merge_brep`), notifying as [`copy_brep`].
-fn combine_brep(
+pub(crate) fn combine_brep(
     k: &mut Kernel,
     target: &mut Brep,
     source: &Brep,

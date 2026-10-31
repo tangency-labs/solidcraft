@@ -32,10 +32,9 @@
 //! - **Mitred groups.** Blends that meet each other at their ends come off together
 //!   through [`FeatureExecutive`] (`SM_RB_EXTEND_SURFACE`), as in the fork. The fork's
 //!   `DoDefeature` always succeeds and hands back the base B-rep itself, so only
-//!   `GetBaseWasApplied` is tested. The fork then takes the B-rep in afresh: it copies it
-//!   (`SmBrep` copy constructor), runs `RemoveAllTopology` and merges the copy back. The
-//!   port does not, because an arena B-rep has no stale state to drop; it refreshes its
-//!   cached topology fields and keeps its ids, so its marks stay on their objects.
+//!   `GetBaseWasApplied` is tested. The fork's taking the B-rep in afresh (its copy
+//!   constructor, `RemoveAllTopology`, `MergeBrep`) goes through the boolean merge's
+//!   arena-store wrappers, which carry the marks with the copy as `SM_AB_COPY` does.
 //! - **Cached topology.** After each removal and before [`OffsetFacesExecutive::offset_faces`]
 //!   returns, the port's cached topology fields are refreshed (upstream has none).
 //! - **"Moved no face".** The fork marks the new surfaces and, after the local operation,
@@ -56,7 +55,10 @@
 //! - **Kept attributes** are owned copies ([`Attribute::make_copy`]) instead of heap
 //!   pointers freed by a scope guard.
 //! - **Refusals** return [`SolidError::Upstream`] `SM_ERR` with the refusal and its reason
-//!   on the executive, as the fork's `Refuse` returns `SM_ERR`.
+//!   on the executive, as the fork's `Refuse` returns `SM_ERR`. A put-back the fillet
+//!   executive fails for a reason other than room also records
+//!   [`OffsetFacesRefusal::NotPutBack`] (the fork returns the status untyped), keeping
+//!   the fillet's status.
 //! - **Closed walls (opt-in).** 9504880's removal of the edges between a moved face and
 //!   one that stayed on one surface runs only with
 //!   `Kernel::fixes.local_operation_closes_walls_to_nothing` (WR-566 addendum); a face is
@@ -145,6 +147,12 @@ pub enum OffsetFacesRefusal {
     NotExact,
     /// `SM_OFR_NO_EFFECT`: the local operation reported success but moved no face.
     NoEffect,
+    /// Not in the fork (its `SER(eStat)` passes the fillet's status on untyped): the
+    /// blends were taken off and the faces moved, but putting the blends back failed in
+    /// the fillet executive for a reason other than room (a corner or a rollover it
+    /// cannot build, #2020). The reason carries the fillet's error comment; the status is
+    /// the fillet's.
+    NotPutBack,
 }
 
 // ---- SmFollowedBlendMark ---------------------------------------------------------------
@@ -1066,9 +1074,13 @@ impl OffsetFacesExecutive {
             }
             // (the fork's SM_FILERR_NOT_EXACT has no counterpart here: see the module
             // deviations)
-            if !comment.is_empty() {
-                self.reason = format!("putting back a blend that follows a moved face: {comment}");
-            }
+            // (not in the fork: a typed refusal, the fillet's status kept)
+            self.refusal = OffsetFacesRefusal::NotPutBack;
+            self.reason = if comment.is_empty() {
+                "putting back a blend that follows a moved face failed".to_string()
+            } else {
+                format!("putting back a blend that follows a moved face: {comment}")
+            };
             return Err(e);
         }
         stitch_and_orient(k, b, &StitchAndOrientOptions::default())
@@ -1294,6 +1306,15 @@ impl OffsetFacesExecutive {
                     "mitred blends on a moved face came off leaving no valid solid",
                     None,
                 ));
+            }
+            {
+                // (SmBrep copy constructor, RemoveAllTopology, MergeBrep: the marks go with
+                // the copy, SM_AB_COPY)
+                let work = crate::boolean::merge::p3::copy_brep(k, b, None, None, true, true)?;
+                crate::topology::brep::p10::remove_all_topology(k, b)?;
+                b.refresh_cached_topology();
+                crate::boolean::merge::p3::combine_brep(k, b, &work, None, None, true)?;
+                b.refresh_cached_topology();
             }
             // each blend's sharp edge: where its two faces meet now
             let now = crate::topology::brep::p1::edges(b, None)?;

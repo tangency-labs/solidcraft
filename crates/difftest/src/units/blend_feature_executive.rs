@@ -105,7 +105,8 @@ enum OpSpec {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 struct Inputs {
-    /// An upstream test file, relative to `upstream/TestFiles/pt_TestFiles`.
+    /// An upstream test file, relative to `upstream/TestFiles/pt_TestFiles`, or a crafted
+    /// one under the repository's `fixtures/` (a path starting with `fixtures/`).
     file: String,
     /// Rebuild the B-rep's topology on reading (`ReadFromFile`'s flag).
     rebuild: bool,
@@ -190,6 +191,10 @@ fn block(i: &Inputs) -> Vec<f64> {
 }
 
 fn path(i: &Inputs) -> Result<String, HarnessError> {
+    if i.file.starts_with("fixtures/") {
+        let p = crate::fixtures::repo_fixture_file(&crate::case::repo_root(), &i.file)?;
+        return Ok(p.to_string_lossy().into_owned());
+    }
     path_of(&BrepIn::File {
         file: i.file.clone(),
         rebuild: i.rebuild,

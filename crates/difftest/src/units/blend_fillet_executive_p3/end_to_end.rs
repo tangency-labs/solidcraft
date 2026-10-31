@@ -437,6 +437,18 @@ impl RealSolid {
         }
         match (&self.source, self.dimensions) {
             (None, Some(_)) if !self.all_edges => Ok(()),
+            // a file's body at a checkpoint (the shim's `real_prefix_file`): selected edges
+            // and the box form's options only
+            (Some(Source::File { .. }), None)
+                if self.checkpoint != Checkpoint::Full
+                    && !self.all_edges
+                    && !self.edges.is_empty()
+                    && self.radius_end.is_none()
+                    && self.select.is_none()
+                    && self.shell.is_none() =>
+            {
+                Ok(())
+            }
             (Some(_), None)
                 if self.checkpoint == Checkpoint::Full
                     && self.all_edges == self.edges.is_empty() =>
@@ -618,6 +630,11 @@ pub(super) fn cpp(input: &RealSolid) -> Result<Output, HarnessError> {
         return source_output(super::fresh_cpp(|| {
             ffi::real_variable_source(&input.source_wire(source), source.path(), end)
         }));
+    }
+    if let (Some(Source::File { path }), true) =
+        (&input.source, input.checkpoint != Checkpoint::Full)
+    {
+        return prefix::cpp_file(input, path);
     }
     if let Some(source) = &input.source {
         let run = if input.piecewise_merge {

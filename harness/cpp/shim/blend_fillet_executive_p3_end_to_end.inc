@@ -780,7 +780,10 @@ std::pair<std::vector<double>,std::vector<double>> rail_metadata(SmFilletExecuti
 #include "blend_fillet_executive_p3_original_merge.inc"
 #include "blend_fillet_executive_p3_insertion.inc"
 
-SC_EXPORT int32_t sc_blend_fillet_executive_p3_real_prefix(
+// The checkpoints on `path`'s body (an ASCII .smb read by SmBrep::ReadFromFile, as
+// `build_source` kind 1) instead of the box when `path` is not null; the box dimensions
+// on the wire are then unused (but still validated).
+static int32_t real_prefix_body(const char* path,
     const double* input,int64_t n,int32_t checkpoint,double* out,int64_t cap,int64_t* out_len) {
     if(checkpoint<1 || checkpoint>19 || !input || n<9) return SC_ERR_ARG;
     for(int64_t i=0;i<n;++i) if(!std::isfinite(input[i])) return SC_ERR_ARG;
@@ -790,7 +793,8 @@ SC_EXPORT int32_t sc_blend_fillet_executive_p3_real_prefix(
     if(input[7]<1 || std::floor(input[7])!=input[7] || input[7]!=double(n-8))return SC_ERR_ARG;
     SC_TRY
     SmBrep* raw=nullptr;
-    if(SmApiCreateBox(SmVector3d(0,0,0),input[0],input[1],input[2],raw)!=SM_SUCCESS || !raw)return SC_ERR_ARG;
+    if(path){raw=fillet_real_solid::build_source(1,path,nullptr);if(!raw)return SC_ERR_ARG;}
+    else if(SmApiCreateBox(SmVector3d(0,0,0),input[0],input[1],input[2],raw)!=SM_SUCCESS || !raw)return SC_ERR_ARG;
     std::unique_ptr<SmBrep> body(raw);
     SmTArray<SmVertex*> vertices;body->GetVertices(vertices);
     SmTArray<SmEdge*> edges,selected;body->GetEdges(edges);
@@ -1087,6 +1091,17 @@ SC_EXPORT int32_t sc_blend_fillet_executive_p3_real_prefix(
     if(checkpoint==13){fillet_real_solid::section(values,shrink_before.first);fillet_real_solid::section(values,shrink_before.second);fillet_real_solid::section(values,shrink_after.first);fillet_real_solid::section(values,shrink_after.second);}
     return sc_copy_out(values.data(),int64_t(values.size()),out,cap,out_len);
     SC_CATCH
+}
+
+SC_EXPORT int32_t sc_blend_fillet_executive_p3_real_prefix(
+    const double* input,int64_t n,int32_t checkpoint,double* out,int64_t cap,int64_t* out_len) {
+    return real_prefix_body(nullptr,input,n,checkpoint,out,cap,out_len);
+}
+
+SC_EXPORT int32_t sc_blend_fillet_executive_p3_real_prefix_file(const char* path,
+    const double* input,int64_t n,int32_t checkpoint,double* out,int64_t cap,int64_t* out_len) {
+    if(!path) return SC_ERR_ARG;
+    return real_prefix_body(path,input,n,checkpoint,out,cap,out_len);
 }
 
 // SmApiFilletPreview on a source body. Wire: source kind (0 = SmApiCreateBox at the origin

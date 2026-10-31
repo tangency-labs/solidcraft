@@ -926,6 +926,18 @@ pub(super) fn cpp(input: &RealSolid) -> Result<Output, HarnessError> {
     Ok(super::super::with_point_step(output(&values, input.checkpoint)?, step))
 }
 
+/// [`cpp`] on a file's body (`real_prefix_file`): the box dimensions of the wire are
+/// placeholders the shim validates and does not use.
+pub(super) fn cpp_file(input: &RealSolid, path: &str) -> Result<Output, HarnessError> {
+    let mut wire = vec![1.0, 1.0, 1.0];
+    wire.extend(input.fillet_wire());
+    let (values, step) = super::super::fresh_cpp(|| {
+        ffi::real_prefix_file(&wire, input.checkpoint.code(), path)
+    })
+    .map_err(|e| HarnessError::new(e.to_string()))?;
+    Ok(super::super::with_point_step(output(&values, input.checkpoint)?, step))
+}
+
 fn insertion_output(mut values: &[f64], checkpoint: Checkpoint) -> Result<Output, HarnessError> {
     let mut out = Output::new();
     out.values.insert(
