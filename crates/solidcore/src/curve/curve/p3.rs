@@ -24,7 +24,10 @@
 //! - **Loop normal.** Opt-in `Kernel::fixes.curve_loop_normal_from_area` (WR-587,
 //!   #1776) sums the sampled polygon's area vector instead of weighted turns, so
 //!   reflex corners cannot reverse a planar loop's normal. An open chain closes
-//!   by its chord. Default sampling and weighted turns retain upstream parity.
+//!   by its chord. As the fork's change (tangency-labs/smlib be45e8d, unchanged to
+//!   eaa998a), a failed point evaluation returns its status and a zero area is
+//!   `SM_ERR_INVALID_INPUT` (`SER(Unitize)`). Default sampling and weighted turns retain
+//!   upstream parity.
 //! - **Curve kinds.** `ComputeCrvsNormal` and `CrvsFixGaps` cast every curve to
 //!   `SmBSplineCurve`. `ComputeCrvsNormal` only calls virtual members and the
 //!   non-virtual `SmCurve::IsLinear`, so it takes any [`Curve`]. `CrvsFixGaps` calls
@@ -253,12 +256,14 @@ impl<C1: CurveEvaluate + ?Sized, C2: CurveEvaluate + ?Sized> EvalNFunctions
 ///
 /// With [`Kernel::fixes`]'s `curve_loop_normal_from_area` enabled, the normal is
 /// the sampled polygon's area vector: it follows a concave planar loop's winding,
-/// and an open chain is closed by its chord (WR-587, #1776).
+/// and an open chain is closed by its chord (WR-587, #1776; the fork's be45e8d).
 ///
 /// # Errors
 ///
 /// `SM_ERR` for a single linear curve; those of the control point counts;
-/// [`SolidError::Unported`] from the evaluations.
+/// [`SolidError::Unported`] from the evaluations. With the opt-in, also those of
+/// the point evaluations and `InvalidInput` (`SM_ERR_INVALID_INPUT`) for a zero area,
+/// as the fork's `SER`s return them.
 pub fn compute_crvs_normal(k: &Kernel, curves: &[Curve]) -> Result<Vec3> {
     if k.fixes.curve_loop_normal_from_area {
         return compute_crvs_area_normal(k, curves);
@@ -331,12 +336,13 @@ pub fn compute_crvs_normal(k: &Kernel, curves: &[Curve]) -> Result<Vec3> {
 }
 
 /// Twice the sampled polygon's oriented area, summed as a fan from its first
-/// point (the closing chord contributes zero to that fan), then unitized.
+/// point (the closing chord contributes zero to that fan), then unitized (the fork's
+/// be45e8d: `SER(EvaluatePoint)` and `SER(Unitize)`, so a failed evaluation or a zero
+/// area is the call's status).
 fn compute_crvs_area_normal(k: &Kernel, curves: &[Curve]) -> Result<Vec3> {
     let mut normal = Vec3::ZERO;
     let mut first: Option<Point3> = None;
     let mut previous = Vec3::ZERO;
-    let mut point = Vec3::ZERO;
     for curve in curves {
         let domain = curve.natural_interval();
         if curve.is_linear(k, EFF_ZERO, false)?.linear && curves.len() == 1 {
@@ -348,12 +354,8 @@ fn compute_crvs_area_normal(k: &Kernel, curves: &[Curve]) -> Result<Vec3> {
             5_u32
         };
         for j in 0..=count {
-            point = point_keep(
-                k,
-                curve,
-                domain.evaluate(f64::from(j) / f64::from(count)),
-                point,
-            )?;
+            let point =
+                curve.evaluate_point(k, domain.evaluate(f64::from(j) / f64::from(count)))?;
             if let Some(origin) = first {
                 normal += (previous - origin).cross(point - origin);
             } else {
@@ -362,7 +364,10 @@ fn compute_crvs_area_normal(k: &Kernel, curves: &[Curve]) -> Result<Vec3> {
             previous = point;
         }
     }
-    Ok(normal.unitize_or_z())
+    // SER(crCrvsNormal.Unitize()): SM_ERR_INVALID_INPUT for a zero area
+    normal
+        .unitize()
+        .map_err(|_| SolidError::invalid_input(OP_NORMAL, "zero area loop normal"))
 }
 
 // ---- CrvsFixGaps ------------------------------------------------------------------------
@@ -2170,6 +2175,7 @@ mod tests {
     use super::*;
     use crate::curve::hermite_curve::HermiteCurve;
     use crate::curve::line::{BoundedLineOptions, Line};
+    use crate::error::SM_ERR;
 
     fn hermite(p1: [f64; 3], d1: [f64; 3], p2: [f64; 3], d2: [f64; 3]) -> Curve {
         Curve::from(HermiteCurve::new(
@@ -2327,15 +2333,53 @@ mod tests {
         }
     }
 
+    /// The fork's be45e8d (unchanged to eaa998a) unitizes with `SER`: a zero area (no
+    /// curves, or collinear ones) is `SM_ERR_INVALID_INPUT`, where the default path keeps
+    /// upstream's `(0, 0, 1)`; a single line is `SM_ERR` on both.
     #[test]
-    fn area_normal_retains_degenerate_defaults_and_single_line_error() {
+    fn area_normal_reports_a_zero_area_and_keeps_the_single_line_error() {
         let mut k = Kernel::default();
-        k.fixes.curve_loop_normal_from_area = true;
-        assert_eq!(compute_crvs_normal(&k, &[]).unwrap(), Vec3::Z);
         let a = line([0.0, 0.0, 0.0], [1.0, 0.0, 0.0], 0.0, 1.0);
         let b = line([1.0, 0.0, 0.0], [1.0, 0.0, 0.0], 0.0, 1.0);
-        assert_eq!(compute_crvs_normal(&k, &[a.clone(), b]).unwrap(), Vec3::Z);
-        assert!(compute_crvs_normal(&k, &[a]).is_err());
+        let collinear = [a.clone(), b];
+        assert_eq!(compute_crvs_normal(&k, &[]).unwrap(), Vec3::Z);
+        assert_eq!(compute_crvs_normal(&k, &collinear).unwrap(), Vec3::Z);
+        k.fixes.curve_loop_normal_from_area = true;
+        let zero_area = |r: Result<Vec3>| matches!(r, Err(SolidError::InvalidInput { .. }));
+        assert!(zero_area(compute_crvs_normal(&k, &[])));
+        assert!(zero_area(compute_crvs_normal(&k, &collinear)));
+        assert!(matches!(
+            compute_crvs_normal(&k, &[a]),
+            Err(SolidError::Upstream { code: SM_ERR, .. })
+        ));
+    }
+
+    /// The fork's be45e8d evaluates its samples with `SER(EvaluatePoint)`: a curve whose
+    /// point evaluation fails (a composite curve: `SmCurve::EvaluatePoint`, `SM_ERR`) makes
+    /// the call fail with that status, where the default path keeps the previous point
+    /// (upstream ignores the status there).
+    #[test]
+    fn area_normal_returns_a_failed_point_evaluation() {
+        let mut k = Kernel::default();
+        let segment = line([0.0, 0.0, 0.0], [1.0, 0.0, 0.0], 0.0, 1.0);
+        let composite = Curve::from(
+            crate::curve::composite_curve::CompositeCurve::with_curves(
+                3,
+                vec![segment],
+                false,
+                None,
+                None,
+            )
+            .unwrap(),
+        );
+        let side = line([1.0, 0.0, 0.0], [0.0, 1.0, 0.0], 0.0, 1.0);
+        let curves = [side, composite];
+        assert!(compute_crvs_normal(&k, &curves).is_ok());
+        k.fixes.curve_loop_normal_from_area = true;
+        assert!(matches!(
+            compute_crvs_normal(&k, &curves),
+            Err(SolidError::Upstream { code: SM_ERR, .. })
+        ));
     }
 
     #[test]
