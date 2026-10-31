@@ -3,8 +3,21 @@
     "tangency-labs/solidcraft#2357"
   ],
   "what": "one join of a ring of 90 straight cylinder segments, each overlapping its neighbour at a 4 degree joint: a caught truck panic, then a refusal after 21 minutes",
-  "source": "invariants",
-  "method": "the segments (diameter 5, 7.6 long, centred on radius 100, every 4 degrees) overlap their neighbours (the 4 degree chord at radius 100 is 6.98 < 7.6), so they join into one closed ring: one body with one shell, valid. The joint overlaps have no simple closed form, so no volume is graded. The rig's timeout bounds the time (the issue expects time to grow about linearly with the segment count)",
+  "source": "analytic",
+  "method": "the segments (diameter 5, 7.6 long, centred on radius 100, every 4 degrees) overlap their neighbours (the 4 degree chord at radius 100 is 6.98 < 7.6), so they join into one closed ring: one body with one shell, valid. Segments two apart (13.95 between centres, each within 4.55 of its centre) never meet, so V = 90 (pi 2.5^2 7.6 - W) with W the overlap of two neighbours: their axes cross 3.492 from each midpoint at 4 degrees, and W = int over the plane z = 0 of 2 min(sqrt(6.25 - dA^2), sqrt(6.25 - dB^2)) where both points lie within the segments' lengths (dA, dB the distances to the axes): 12.0915 (grid 800^2 and 1600^2 agree to 1e-4). V = 90 (149.2257 - 12.0915) = 12342.07 (the plain sum, 13430.3, is outside the tolerance). Box: each segment reaches c.e + 3.8 |a.e| + 2.5 sqrt(1 - (a.e)^2) along e; the furthest are those at 2 degrees off the x axis (x +-102.570) and 4 degrees off the y axis (y +-102.515); z +-2.5",
   "body_count": 1,
-  "shells": 1
+  "shells": 1,
+  "volume_mm3": 12342.07,
+  "bbox": {
+    "min": [
+      -102.57,
+      -102.515,
+      -2.5
+    ],
+    "max": [
+      102.57,
+      102.515,
+      2.5
+    ]
+  }
 }

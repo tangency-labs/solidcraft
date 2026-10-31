@@ -3,7 +3,23 @@
   "tangency-labs/solidcraft#831"
  ],
  "what": "tapered extrude of a text glyph (Bezier outline): refused with a misleading 'mixing lines and arcs' error",
- "source": "invariants",
- "method": "the letter S, 1 mm tall with -10 deg draft, is one valid closed solid (the glyph is one connected region); no number is derived because the glyph outline is the font's. Its volume is positive and below the plain extrusion's",
- "body_count": 1
+ "source": "analytic",
+ "method": "the letter S, 1 mm tall with -10 deg draft, is one valid closed solid (the glyph is one connected region). Its outline is the embedded font's (Liberation Sans 'S', one contour of 46 points, quadratic segments), scaled by the capital height: 10 / 1409 font units. From the outline (Green on the exact quadratic segments): area A = 32.1459, perimeter P = 55.7935, four convex corners of 91.6, 87.2, 96.1 and 84.5 deg at the stroke ends. A -10 deg taper moves the outline in by d = t tan 10 deg at height t, so A(d) = A - P d + C d^2 with C = 1/2 (smooth turning) + sum tan(corner/2) = 4.0065 (mitred corners), and V = A - P tan10/2 + C tan10^2/3 = 27.268. The moved outline is documented within 10 um of the true offset, so V lies within 0.01 * P = 0.56 of that: [26.71, 27.83] (the untapered 32.15 and an outward taper, 37.1, fall outside). Box: the glyph's own extents at z 0, x 0.6600..9.0277, y -0.1419..10.1490, z 0..1",
+ "body_count": 1,
+ "volume_mm3": [
+  26.71,
+  27.83
+ ],
+ "bbox": {
+  "min": [
+   0.66,
+   -0.1419,
+   0.0
+  ],
+  "max": [
+   9.0277,
+   10.149,
+   1.0
+  ]
+ }
 }
