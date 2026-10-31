@@ -118,6 +118,8 @@ mod prism_measure;
 pub mod profile;
 pub mod provenance;
 mod record;
+#[cfg(test)]
+mod rim_contact_tests;
 mod seam_faces;
 mod sew;
 mod smooth_edges;

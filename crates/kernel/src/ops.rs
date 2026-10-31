@@ -211,10 +211,15 @@ fn halton(mut i: usize, b: usize) -> f64 {
 
 /// Fraction of sample points where `result` disagrees with `op` applied to `a` and `b`
 /// (membership by ray parity). Samples cover the overlap box densely and the union box lightly.
-fn mismatch(a: &solidcraft_geom::Mesh, b: &solidcraft_geom::Mesh, result: &solidcraft_geom::Mesh, op: BoolOp) -> Option<f64> {
+/// Points within `band` of any of the three meshes (when it is positive) are not counted: each
+/// mesh lies within its chord of its faces, so there two facetings of one face can disagree
+/// about a point although the faces agree (see [`thin_meeting`]).
+fn mismatch(a: &solidcraft_geom::Mesh, b: &solidcraft_geom::Mesh, result: &solidcraft_geom::Mesh, op: BoolOp, band: f64) -> Option<f64> {
     if a.triangles.len() + b.triangles.len() + result.triangles.len() > 60_000 {
         return None;
     }
+    let near = if band > 0.0 { [a, b, result].map(|m| crate::boolean_guard::Near::new(m, band)) } else { [None, None, None] };
+    let uncertain = |p: Vec3| near.iter().any(|n| n.as_ref().is_some_and(|n| n.close(p)));
     let (ba, bb) = (a.bounds(), b.bounds());
     let lo = ba.min.max(bb.min);
     let hi = ba.max.min(bb.max);
@@ -232,6 +237,9 @@ fn mismatch(a: &solidcraft_geom::Mesh, b: &solidcraft_geom::Mesh, result: &solid
         let s = bx.size();
         for i in 1..=count {
             let p = bx.min + Vec3::new(s.x * halton(i, 2), s.y * halton(i, 3), s.z * halton(i, 5));
+            if uncertain(p) {
+                continue;
+            }
             let (ia, ib) = (ia_idx.contains(p), ib_idx.contains(p));
             let want = match op {
                 BoolOp::Union => ia || ib,
@@ -245,6 +253,17 @@ fn mismatch(a: &solidcraft_geom::Mesh, b: &solidcraft_geom::Mesh, result: &solid
         }
     }
     Some(bad as f64 / n.max(1) as f64)
+}
+
+/// Whether two meshes' boxes overlap by no more than a few times `band` (or not at all): bodies
+/// that only just meet. The membership samples in so thin an overlap would read the facetings
+/// rather than the result (an arm reaching 0.1 mm into a round rim meshed at 0.03 mm), so the
+/// check leaves out those within `band` of a surface ([`mismatch`]), and refuses instead a
+/// result with a face that does not mesh, whose hole the samples no longer see.
+fn thin_meeting(a: &solidcraft_geom::Mesh, b: &solidcraft_geom::Mesh, band: f64) -> bool {
+    let (ba, bb) = (a.bounds(), b.bounds());
+    let s = solidcraft_geom::Aabb3 { min: ba.min.max(bb.min), max: ba.max.min(bb.max) }.size();
+    s.x.min(s.y).min(s.z) < 4.0 * band
 }
 
 /// How one body sits relative to another, from sample points: (fraction of `b`'s samples
@@ -505,6 +524,7 @@ fn shared_cylinders(a: &Body, b: &Body, ma: &solidcraft_geom::Mesh, mb: &solidcr
 ///
 /// The second value is false when the facetings contradict the samples ([`contradicted`]):
 /// the answer is then only what to fall back on if the bodies can't be intersected.
+#[allow(clippy::too_many_arguments)]
 fn trivial(
     a: &Body,
     b: &Body,
@@ -513,6 +533,7 @@ fn trivial(
     mb: &solidcraft_geom::Mesh,
     counts: &[(usize, usize)],
     tol: f64,
+    crossing: bool,
 ) -> Option<(Option<Body>, bool)> {
     if ma.triangles.len() + mb.triangles.len() > 80_000 {
         return None;
@@ -523,23 +544,16 @@ fn trivial(
     let disjoint = b_in_a < NONE && a_in_b < NONE;
     // The samples only say that nearly all of one body is clear of, or inside, the other. A
     // small part can still be on the wrong side (a peg overlapping a rib, a chamfer taken off
-    // one edge), and then the bodies have to be intersected.
+    // one edge), and then the bodies have to be intersected. Faces seen crossing each other
+    // (see [`crate::distance::contact`]) are such a part, however shallow: an arm whose end
+    // reaches a hundredth of a millimetre into a round rim.
     // The same surface as the kernel takes it elsewhere (see `coaxial_overlap`).
     let same = (a.size().max(b.size()) * 1e-7).max(1e-9) * 10.0;
     let shared = || shared_cylinders(a, b, ma, mb, same);
-    let sure = !contradicted((ma, &ia), (mb, &ib), (disjoint, b_in_a > ALL, a_in_b > ALL), tol, &shared);
+    let sure = (!disjoint || !crossing) && !contradicted((ma, &ia), (mb, &ib), (disjoint, b_in_a > ALL, a_in_b > ALL), tol, &shared);
     let answer = match op {
-        // Sampling only selects this candidate. Validate every shell boundary and the
-        // complete material/void nesting before preserving a disconnected union.
-        BoolOp::Union if disjoint => {
-            let pieces = vec![(a.clone(), recorded::kept(a, 0, 2)), (b.clone(), recorded::kept(b, 1, 2))];
-            let joined = recorded::join(pieces, counts).ok().flatten()?;
-            joined.separated_lumps().ok()?;
-            Some(Some(joined))
-        }
-        BoolOp::Cut if disjoint => Some(Some(recorded::operand(a, 0, counts))),
+        _ if disjoint => separate(a, b, op, counts),
         BoolOp::Cut if a_in_b > ALL => Some(None),
-        BoolOp::Intersect if disjoint => Some(None),
         BoolOp::Intersect if b_in_a > ALL => Some(Some(recorded::operand(b, 1, counts))),
         BoolOp::Intersect if a_in_b > ALL => Some(Some(recorded::operand(a, 0, counts))),
         BoolOp::Union if b_in_a > ALL => Some(Some(recorded::operand(a, 0, counts))),
@@ -553,6 +567,58 @@ fn trivial(
         _ => None,
     };
     answer.map(|r| (r, sure))
+}
+
+/// `op` of bodies that share no volume: both side by side for a union (when they are separate
+/// lumps), the target for a cut, nothing for an intersection.
+fn separate(a: &Body, b: &Body, op: BoolOp, counts: &[(usize, usize)]) -> Option<Option<Body>> {
+    match op {
+        // Sampling only selects this candidate. Validate every shell boundary and the
+        // complete material/void nesting before preserving a disconnected union.
+        BoolOp::Union => {
+            let pieces = vec![(a.clone(), recorded::kept(a, 0, 2)), (b.clone(), recorded::kept(b, 1, 2))];
+            let joined = recorded::join(pieces, counts).ok().flatten()?;
+            joined.separated_lumps().ok()?;
+            Some(Some(joined))
+        }
+        BoolOp::Cut => Some(Some(recorded::operand(a, 0, counts))),
+        BoolOp::Intersect => Some(None),
+    }
+}
+
+/// The union of bodies whose faces are certified apart ([`crate::distance::Contact::Apart`]) but
+/// closer than [`Body::separated_lumps`] can tell from its meshes (a hundredth of a millimetre):
+/// both side by side, when neither mesh holds a point of the other.
+fn apart_union(
+    a: &Body,
+    b: &Body,
+    op: BoolOp,
+    ma: &solidcraft_geom::Mesh,
+    mb: &solidcraft_geom::Mesh,
+    counts: &[(usize, usize)],
+) -> Option<Option<Body>> {
+    if op != BoolOp::Union || mb.positions.first().is_none_or(|p| ma.contains(*p)) || ma.positions.first().is_none_or(|p| mb.contains(*p)) {
+        return None;
+    }
+    let pieces = vec![(a.clone(), recorded::kept(a, 0, 2)), (b.clone(), recorded::kept(b, 1, 2))];
+    let joined = recorded::join(pieces, counts).ok().flatten()?;
+    joined.validity().is_empty().then_some(Some(joined))
+}
+
+/// How the bodies meet ([`crate::distance::contact`]) when their samples show no shared volume
+/// (`None` otherwise, or when that can't be worked out): `chord` is how far the meshes lie from
+/// the faces.
+fn sampled_contact(a: &Body, b: &Body, ma: &solidcraft_geom::Mesh, mb: &solidcraft_geom::Mesh, chord: f64) -> Option<crate::distance::Contact> {
+    if ma.triangles.len() + mb.triangles.len() > 80_000 || a.is_mesh() || b.is_mesh() {
+        return None;
+    }
+    let (b_in_a, a_in_b) = overlap(ma, mb, &ma.inside_index(), &mb.inside_index())?;
+    if !(b_in_a < NONE && a_in_b < NONE) {
+        return None;
+    }
+    let (sa, sb) = (crate::distance::DistanceShape::new(a, ma, chord), crate::distance::DistanceShape::new(b, mb, chord));
+    let eps = (a.size().max(b.size()) * 1e-7).max(1e-9);
+    crate::distance::contact(&sa, &sb, eps).ok()
 }
 
 #[cfg(test)]
@@ -672,13 +738,13 @@ mod shortcut_tests {
             let other = crate::sphere(direction * distance, 10.0).unwrap();
             let other_mesh = other.tessellate(0.03).unwrap();
             let counts = record::counts(&[&outer, &other]);
-            assert!(trivial(&outer, &other, BoolOp::Union, &mesh, &other_mesh, &counts, 0.09).is_none());
-            assert!(trivial(&other, &outer, BoolOp::Union, &other_mesh, &mesh, &counts, 0.09).is_none());
+            assert!(trivial(&outer, &other, BoolOp::Union, &mesh, &other_mesh, &counts, 0.09, false).is_none());
+            assert!(trivial(&other, &outer, BoolOp::Union, &other_mesh, &mesh, &counts, 0.09, false).is_none());
         }
         let protruding = crate::sphere(direction * 9.001, 1.0).unwrap();
         let protruding_mesh = protruding.tessellate(0.03).unwrap();
         let counts = record::counts(&[&outer, &protruding]);
-        assert!(trivial(&outer, &protruding, BoolOp::Cut, &mesh, &protruding_mesh, &counts, 0.09).is_none());
+        assert!(trivial(&outer, &protruding, BoolOp::Cut, &mesh, &protruding_mesh, &counts, 0.09, false).is_none());
     }
 
     /// A pin turned from a profile (its wall in three faces) in the bore of a tube (its wall in
@@ -719,7 +785,7 @@ mod shortcut_tests {
         let (ma, mb) = (pin(Vec3::new(0.01, 0.0, 0.0), -2.35, 9.65), tube.clone());
         let counts = record::counts(&[&ma, &mb]);
         let (sa, sb) = (ma.tessellate_with(0.009, true).unwrap(), mb.tessellate_with(0.009, true).unwrap());
-        assert!(trivial(&ma, &mb, BoolOp::Intersect, &sa, &sb, &counts, 0.027).is_none_or(|(_, sure)| !sure));
+        assert!(trivial(&ma, &mb, BoolOp::Intersect, &sa, &sb, &counts, 0.027, false).is_none_or(|(_, sure)| !sure));
     }
 
     /// A pin turned from a profile (its wall in three faces) and a plate with a bore of the pin's
@@ -796,7 +862,7 @@ mod shortcut_tests {
         let counts = record::counts(&[&pin, &tube]);
         let (ma, mb) = (pin.tessellate_with(0.009, true).unwrap(), tube.tessellate_with(0.009, true).unwrap());
         for op in [BoolOp::Intersect, BoolOp::Cut] {
-            assert!(trivial(&pin, &tube, op, &ma, &mb, &counts, 0.027).is_none_or(|(_, sure)| !sure), "{op:?}");
+            assert!(trivial(&pin, &tube, op, &ma, &mb, &counts, 0.027, false).is_none_or(|(_, sure)| !sure), "{op:?}");
         }
     }
 
@@ -817,7 +883,7 @@ mod shortcut_tests {
         let counts = record::counts(&[&pin, &tube]);
         let (ma, mb) = (pin.tessellate_with(0.005, true).unwrap(), tube.tessellate_with(0.005, true).unwrap());
         for op in [BoolOp::Intersect, BoolOp::Cut] {
-            assert!(trivial(&pin, &tube, op, &ma, &mb, &counts, 0.015).is_none_or(|(_, sure)| !sure), "{op:?}");
+            assert!(trivial(&pin, &tube, op, &ma, &mb, &counts, 0.015, false).is_none_or(|(_, sure)| !sure), "{op:?}");
         }
         // Nor does the boolean pass them as clear without saying so: the shortcut it falls back
         // on is reported unverified (the bodies can't be intersected along the shared walls),
@@ -837,7 +903,7 @@ mod shortcut_tests {
             let (ma, mb) = (a.tessellate(0.001).unwrap(), b.tessellate(0.001).unwrap());
             let counts = record::counts(&[&a, &b]);
             for op in [BoolOp::Intersect, BoolOp::Cut, BoolOp::Union] {
-                assert!(trivial(&a, &b, op, &ma, &mb, &counts, 0.003).is_none_or(|(_, sure)| !sure), "{op:?} {want}");
+                assert!(trivial(&a, &b, op, &ma, &mb, &counts, 0.003, false).is_none_or(|(_, sure)| !sure), "{op:?} {want}");
             }
             let shared = boolean(&a, &b, BoolOp::Intersect).unwrap().unwrap();
             assert!((crate::measure(&shared).unwrap().volume - want).abs() < 1e-9, "{want}");
@@ -849,7 +915,7 @@ mod shortcut_tests {
         let ma = a.tessellate(0.001).unwrap();
         for (b, op) in [(&touching, BoolOp::Intersect), (&inner, BoolOp::Intersect), (&inner, BoolOp::Union)] {
             let counts = record::counts(&[&a, b]);
-            assert!(trivial(&a, b, op, &ma, &b.tessellate(0.001).unwrap(), &counts, 0.003).is_some_and(|(_, sure)| sure), "{op:?}");
+            assert!(trivial(&a, b, op, &ma, &b.tessellate(0.001).unwrap(), &counts, 0.003, false).is_some_and(|(_, sure)| sure), "{op:?}");
         }
     }
 }
@@ -908,6 +974,20 @@ fn take_attempt() -> bool {
             true
         }
     })
+}
+
+/// The most attempts at the intersection one boolean of two bodies makes, its retries (shifted,
+/// refined, nudged, and the booleans those make in turn) included. Near a tangency each attempt
+/// can take seconds, and every nudge ran the whole round of retries again: a join that could
+/// not succeed took minutes before it said so. Once they are spent, what is left is skipped and
+/// the boolean fails with what went wrong (or keeps its fallback answer). A count, not a clock,
+/// so that a design rebuilds the same way on any machine. It runs as a budget
+/// ([`with_attempt_budget`]), so a caller's smaller budget still wins.
+const MAX_ATTEMPTS: usize = 64;
+
+/// Whether the attempts of the boolean running on this thread are spent.
+fn spent() -> bool {
+    ATTEMPTS.with(|c| c.get()) == Some(0)
 }
 
 /// Boolean of two bodies. The result may be empty (`Ok(None)`) for a cut that removes
@@ -1297,8 +1377,10 @@ fn boolean_whole(a: &Body, b: &Body, op: BoolOp) -> Result<Option<Body>> {
     boolean_whole_with_refinement(a, b, op, false)
 }
 
+/// [`boolean_whole_with`] with the attempts it and the booleans its retries make counted
+/// together ([`MAX_ATTEMPTS`]); a caller's smaller budget ([`with_attempt_budget`]) still wins.
 fn boolean_whole_with_refinement(a: &Body, b: &Body, op: BoolOp, refine: bool) -> Result<Option<Body>> {
-    boolean_whole_with(a, b, op, refine, &truck_boolean)
+    with_attempt_budget(MAX_ATTEMPTS, || boolean_whole_with(a, b, op, refine, &truck_boolean))
 }
 
 /// The whole-body strategies with the numerical intersection supplied separately, so tests
@@ -1345,6 +1427,23 @@ where
         }
     }
     let mut meshes = (a.tessellate_with(tol_m, true).ok(), b.tessellate_with(tol_m, true).ok());
+    // Bodies the samples find clear of each other are told apart on their exact faces. Clear by
+    // more than round-off, they share nothing whatever their facetings say (a rim and an arm a
+    // hundredth of a millimetre off it pass through each other as meshed): the answer needs no
+    // intersection, which near such a tangency fails or comes out empty after many tries. Faces
+    // crossing each other show volume the samples were too coarse to see.
+    let contact = match &meshes {
+        (Some(ma), Some(mb)) => sampled_contact(a, b, ma, mb, tol_m),
+        _ => None,
+    };
+    if let (Some(crate::distance::Contact::Apart(_)), (Some(ma), Some(mb))) = (contact, &meshes)
+        && let Some(r) = separate(a, b, op, &counts).or_else(|| apart_union(a, b, op, ma, mb, &counts))
+    {
+        return Ok(r);
+    }
+    // Bodies in several pieces are taken a piece at a time when the whole comes out empty or
+    // fails (see [`boolean_via`]), where each pair of pieces has its own look.
+    let crossing = contact == Some(crate::distance::Contact::Crossing) && a.solid.boundaries().len() == 1 && b.solid.boundaries().len() == 1;
     // The vertex boxes above miss a curved operand's reach (a cylinder has only seam vertices),
     // so a thin meeting region of curved bodies kept the coarse step: a sliver 0.5 mm thick was
     // faceted at 0.017 mm and a correct result failed the membership test. The meshes just made
@@ -1384,13 +1483,17 @@ where
     // (bodies tangent along a line stay two lumps), and operands already like that, saved
     // before this was caught, stay joinable. Nor can they see a skin of no thickness left over
     // a hole by a tool ending in a face of the target ([`crate::coplanar::has_skin`]).
+    // Faces seen crossing each other (`crossing`) share volume, so a union of them has fewer
+    // shells than the operands together: one that kept them all missed where they cross (an
+    // intersection traced too coarsely for an overlap a hundredth of a millimetre deep).
     let unfused = |r: &Body| {
         op == BoolOp::Union
-            && r.shell_count() > 1
-            && r.union_lumps().is_err()
-            && a.union_lumps().is_ok()
-            && b.union_lumps().is_ok()
-            && crate::coplanar::faces_touch(a, b)
+            && ((r.shell_count() > 1
+                && r.union_lumps().is_err()
+                && a.union_lumps().is_ok()
+                && b.union_lumps().is_ok()
+                && crate::coplanar::faces_touch(a, b))
+                || (crossing && r.shell_count() >= a.shell_count() + b.shell_count()))
     };
     let check = |r: &Body| -> (bool, f64) {
         if let Some(reason) = reach.as_ref().and_then(|reach| reach.runaway(r)) {
@@ -1407,7 +1510,10 @@ where
             return (false, v);
         }
         let consistent = match &meshes {
-            (Some(ma), Some(mb)) => mismatch(ma, mb, &mr, op).is_none_or(|f| f < 0.004),
+            (Some(ma), Some(mb)) if thin_meeting(ma, mb, 2.0 * tol_m) => {
+                r.unmeshed_faces() == 0 && mismatch(ma, mb, &mr, op, 2.0 * tol_m).is_none_or(|f| f < 0.004)
+            }
+            (Some(ma), Some(mb)) => mismatch(ma, mb, &mr, op, 0.0).is_none_or(|f| f < 0.004),
             _ => true,
         };
         (consistent, v)
@@ -1416,6 +1522,9 @@ where
         let keep: Vec<Vec<Vec3>> = a.split_keep().iter().chain(b.split_keep()).cloned().collect();
         // Bounded to two finer meshes; no tool displacement or relaxed acceptance tests.
         for k in [1e-5, 1e-6] {
+            if spent() {
+                break;
+            }
             let tol = (size * k).max(1e-6);
             if let Ok((solid, history)) = intersect(a, b, op, None, tol)
                 && !solid.boundaries().is_empty()
@@ -1436,7 +1545,7 @@ where
     // faces can pass through each other slightly, and often can't be intersected.
     let mut doubted = None;
     if let (Some(ma), Some(mb)) = &meshes
-        && let Some((r, sure)) = trivial(a, b, op, ma, mb, &counts, 3.0 * tol_m)
+        && let Some((r, sure)) = trivial(a, b, op, ma, mb, &counts, 3.0 * tol_m, crossing)
     {
         if sure {
             return Ok(r);
@@ -1587,6 +1696,9 @@ where
         for (attempt, j) in JITTER.iter().enumerate().take(2) {
             let shift = mt::Vector3::new(j[0], j[1], j[2]) * (feature * 0.01);
             for &tol in &fine_tols {
+                if spent() {
+                    return None;
+                }
                 match intersect(a, b, op, if attempt > 0 { Some(shift) } else { None }, tol) {
                     Ok((s, _)) if s.boundaries().is_empty() || s.face_iter().next().is_none() => *last = "empty result".into(),
                     Ok((s, h)) => match guard("boolean result", || recorded::truck_result(s, h, size, &keep, &counts)) {
@@ -1664,6 +1776,32 @@ where
                 return Ok(result);
             }
         }
+        // Faces crossing at a shallow angle, a little way into each other (an arm's round end
+        // reaching a hundredth of a millimetre into a rim): traced at the tolerances above, a
+        // step coarser than the overlap is deep, the crossing is lost. Finer steps find it,
+        // before the shifted tries.
+        // Not again inside a nudge (which leaves how deep they overlap as it was).
+        if attempt == 1 && crossing && !APART.with(|c| c.get()) {
+            // How deep they overlap is not known: from an eighth of the finer step above, each
+            // try four times finer than the last.
+            for k in [6e-5, 1.5e-5, 4e-6] {
+                let tol = size * k;
+                if spent() {
+                    break;
+                }
+                let Ok((s, h)) = intersect(a, b, op, None, tol) else { continue };
+                if s.boundaries().is_empty() || s.face_iter().next().is_none() {
+                    continue;
+                }
+                let Ok(body) = guard("boolean result", || recorded::truck_result(s, h, size, &keep, &counts)) else { continue };
+                if check(&body).0 {
+                    let mut event = BooleanFallback::new(BooleanStrategy::RefinedTolerance);
+                    event.tolerance_mm = tol;
+                    record(event);
+                    return Ok(Some(body));
+                }
+            }
+        }
         // A whole turn of a cylinder or cone bounded by one wire along its seam (as STEP files
         // write them) can't be divided by a loop lying inside it, and the tries below end in a
         // nudged tool, or fail: the same boolean with such faces in two halves, which is exact.
@@ -1685,9 +1823,16 @@ where
         }
         let shift = mt::Vector3::new(j[0], j[1], j[2]) * (size * 0.01);
         for k in [2e-3, 5e-4] {
+            if spent() {
+                break;
+            }
             let tol = (size * k).max(1e-5);
             let r = intersect(a, b, op, if attempt > 0 { Some(shift) } else { None }, tol);
             match r {
+                // Faces that cross share volume: an empty result missed it.
+                Ok((s, _)) if (s.boundaries().is_empty() || s.face_iter().next().is_none()) && crossing => {
+                    last = "empty result, though faces of the bodies cross".into();
+                }
                 Ok((s, _)) if s.boundaries().is_empty() || s.face_iter().next().is_none() => {
                     empty_votes += 1;
                     if attempt > 0 || k != 2e-3 {
@@ -1769,7 +1914,7 @@ where
     // Last resort: nudge the tool by a micron-scale screw motion (turned 2e-6 rad about a
     // skew axis and moved 2e-6 of the size), which breaks tangencies and seams lying exactly on
     // the other body. The result moves by no more than that.
-    if !APART.with(|c| c.get()) {
+    if !APART.with(|c| c.get()) && !spent() {
         APART.with(|c| c.set(true));
         let c = b.solid.vertex_iter().fold(Vec3::ZERO, |acc, v| acc + from_p3(v.point())) * (1.0 / b.solid.vertex_iter().count().max(1) as f64);
         let translation = |screw: usize| SCREWS.get(screw).map_or(Vec3::ZERO, |s| Vec3::new(s.0[0], s.0[1], s.0[2]) * (size * 2e-6));
@@ -1792,7 +1937,7 @@ where
             _ => None,
         };
         let made = slivers.is_none_or(|n| n > 0 && n > sliver_faces(a, size).saturating_add(sliver_faces(b, size)));
-        if !matches!(r, Ok(None)) && made {
+        if !matches!(r, Ok(None)) && made && !spent() {
             let (r2, diagnostics2) = nudge(used, -1.0);
             if let Ok(Some(body)) = &r2
                 && slivers.is_none_or(|n| sliver_faces(body, size) < n)
@@ -1812,6 +1957,9 @@ where
         if !works(&r) {
             'screws: for screw in 1..SCREWS.len() {
                 for sign in [1.0, -1.0] {
+                    if spent() {
+                        break 'screws;
+                    }
                     let (r2, diagnostics2) = nudge(screw, sign);
                     if matches!(&r2, Ok(Some(body)) if check(body).0) {
                         (r, diagnostics, used) = (r2, diagnostics2, screw);
@@ -1830,7 +1978,13 @@ where
                 // at the check's (#1360: an annulus cut flush with a hole's wall came out 21000
                 // mm³ larger than the part it was cut from, a square plane across it).
                 let fine_ok = ok && crate::measure(&body).is_ok_and(|m| plausible(m.volume, op, va, vb, slack));
-                if ok && !fine_ok {
+                // Faces back to back on one cylinder (an arm's concave end hugging a ring) touch
+                // over an area: a nudge that only moved them apart left them unjoined.
+                let parted =
+                    op == BoolOp::Union && body.shell_count() >= a.shell_count() + b.shell_count() && crate::coplanar::has_coincident_cylinders(a, b);
+                if parted {
+                    last = format!("{last}; the nudged tool only moved apart from faces it lay against");
+                } else if ok && !fine_ok {
                     last = format!("{last}; the nudged tool gave a solid whose faces mesh inconsistently");
                 } else if ok {
                     merge(diagnostics);
@@ -1879,8 +2033,10 @@ where
         }
     }
     // The tries at the meeting region's scale come last, after every strategy that answered
-    // before them, so a result any of those gave is kept as it was.
-    if let Some(body) = fine(&mut last) {
+    // before them, so a result any of those gave is kept as it was. Faces crossing each other
+    // had tries of their own, down to a fraction of how far they can overlap; these, finer
+    // still, take tens of seconds each on the round faces such contacts have.
+    if !crossing && let Some(body) = fine(&mut last) {
         return Ok(Some(body));
     }
     // An intersection keeps what lies in both bodies: when the sampled answer keeps one of them
@@ -1899,13 +2055,25 @@ where
         )));
     }
     match doubted {
-        Some(r) => {
+        // Faces crossing each other share volume: taking the bodies for apart is wrong there,
+        // not merely unverified. Failing lets a body in pieces be cut a piece at a time.
+        Some(r) if !crossing => {
             let mut event = BooleanFallback::new(BooleanStrategy::UnverifiedShortcut);
             event.tolerance_mm = 3.0 * tol_m;
             record(event);
             Ok(r)
         }
-        None => Err(KernelError::Failed(format!("boolean {op:?}: {last}"))),
+        _ => {
+            if spent() {
+                last.push_str(&format!("; gave up after {MAX_ATTEMPTS} attempts at the intersection"));
+            }
+            // Say what stood in the way where it is known: faces lying on one cylinder (an arm's
+            // concave end hugging a ring), which none of the routes above could take.
+            if op == BoolOp::Union && !BORES.with(|c| c.get()) && crate::coplanar::has_coincident_cylinders(a, b) {
+                last.push_str("; faces of the bodies lie on one cylinder, back to back, which this join cannot take there: overlap them slightly, or leave a gap");
+            }
+            Err(KernelError::Failed(format!("boolean {op:?}: {last}")))
+        }
     }
 }
 
