@@ -1549,6 +1549,7 @@ fn meet_lines(sk: &mut Sketch, p: &Value, cmd: &str) -> Result<()> {
 /// A corner of two lines: the lines, the end each has at the corner, and each one's far end. The
 /// two corner ends are one point, or two points at one place (two profiles drawn apart and meeting
 /// there, each with a corner point of its own).
+#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 struct Corner {
     la: usize,
     lb: usize,
@@ -2005,8 +2006,8 @@ fn chamfer(s: &mut Session, p: &Value, cmd: &str, dists: impl Fn(f64) -> Result<
         let mut seen = std::collections::BTreeSet::new();
         for q in &corners {
             prepare_corner(sk, q, cmd)?;
-            if let Ok((la, lb, c, _, _)) = corner(sk, q, cmd)
-                && !seen.insert((c, la.min(lb), la.max(lb)))
+            if let Ok(c) = corner(sk, q, cmd)
+                && !seen.insert((c.clone(), c.la.min(c.lb), c.la.max(c.lb)))
             {
                 return Err(bad(cmd, "a corner is listed twice"));
             }
@@ -2027,8 +2028,8 @@ fn chamfer(s: &mut Session, p: &Value, cmd: &str, dists: impl Fn(f64) -> Result<
 /// far back along each line from the corner's angle: the new line and what became of the corner.
 fn chamfer_corner(sk: &mut Sketch, p: &Value, cmd: &str, dists: &impl Fn(f64) -> Result<(f64, f64)>) -> Result<(usize, CornerKept)> {
     prepare_corner(sk, p, cmd)?;
-    let (la, lb, c, fa, fb) = corner(sk, p, cmd)?;
-    let (pc, pa, pb) = (sk.point(c).unwrap_or_default(), sk.point(fa).unwrap_or_default(), sk.point(fb).unwrap_or_default());
+    let c = corner(sk, p, cmd)?;
+    let (pc, pa, pb) = (c.at(sk), sk.point(c.fa).unwrap_or_default(), sk.point(c.fb).unwrap_or_default());
     let (u, v) = ((pa - pc).normalized().unwrap_or(Vec2::X), (pb - pc).normalized().unwrap_or(Vec2::Y));
     let corner_angle = u.cross(v).atan2(u.dot(v)).abs();
     // Lines in line with each other, or lying on each other, have no corner to cut, as a
@@ -2038,7 +2039,7 @@ fn chamfer_corner(sk: &mut Sketch, p: &Value, cmd: &str, dists: &impl Fn(f64) ->
         return Err(bad(cmd, "the lines are parallel"));
     }
     let (da, db) = dists(corner_angle)?;
-    let (ta, tb, _, kept) = cut_corner(sk, la, lb, c, fa, fb, da, db, cmd)?;
+    let (ta, tb, _, kept) = cut_corner(sk, &c, da, db, cmd)?;
     Ok((sk.add_line_pts(ta, tb, None)?, kept))
 }
 
