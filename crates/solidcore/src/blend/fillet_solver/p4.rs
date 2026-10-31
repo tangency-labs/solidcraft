@@ -4563,6 +4563,11 @@ impl crate::blend::fillet_intersector::FilletSolverOps for IntersectorSolver<'_>
         self.synced(r)
     }
 
+    /// The solver's virtual `OffsetRadiiCanChange`.
+    fn offset_radii_can_change(&self) -> Result<bool> {
+        self.ops.offset_radii_can_change()
+    }
+
     /// `GetSurface(rail)->Evaluate1stDerivatives(uv, TRUE, TRUE, ..)` on the solver's
     /// own offset surface (a base extension the evaluation makes is kept, as
     /// upstream's `const` evaluators store it), as `ComputeSurfaceValues` evaluates it.

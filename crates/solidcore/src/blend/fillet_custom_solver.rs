@@ -1919,6 +1919,10 @@ macro_rules! fillet_intersector_ops {
                 IntersectorOps::reload_surface_offsets(&mut self.base)
             }
 
+            fn offset_radii_can_change(&self) -> Result<bool> {
+                IntersectorOps::offset_radii_can_change(&self.base)
+            }
+
             fn rail_surface_evaluate_1st_derivatives(
                 &mut self,
                 k: &Kernel,

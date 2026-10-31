@@ -136,6 +136,7 @@ impl IntersectorOps for Observed {
         fn last_fillet_geom() -> KernelResult<FilletGeomId>;
         fn self_intersection_handler() -> KernelResult<Option<HandlingAlgorithmType>>;
         fn has_surface_generator() -> KernelResult<bool>;
+        fn offset_radii_can_change() -> KernelResult<bool>;
     }
     delegate_mut! { IntersectorOps;
         fn compute_surface_values(k: &Kernel, uv: [Vec2; 2], point: &mut TsectPnt) -> KernelResult<()>;
