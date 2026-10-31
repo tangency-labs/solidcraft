@@ -3,7 +3,9 @@
 //! Rust reader ([`crate::own_reader::file_in_order`]), both renumbered into the shim's
 //! walk order: no C++ export reaches the Rust side.
 //! Closure passes compare actual statuses, output reset, shell ownership, context
-//! mark advancement/locks, and every face-use mark. Copy compares only empty inputs.
+//! mark advancement/locks, and every face-use mark. Copy compares the same fixed
+//! state plus the whole destination B-rep graph (its copied edges' intervals,
+//! tolerances and sampled curves, and their vertices), including empty-input controls.
 //! Op 3 runs `MakeFaceTopology` one or more times (each on the B-rep the previous
 //! call left) with real loops of edge uses, loop vertices, surfaces and UV curves,
 //! then compares every call's status and outputs, the context marks and the whole
@@ -204,6 +206,31 @@ fn path_of(i: &Inputs) -> Result<String, HarnessError> {
     shared::path_of(brep)
 }
 
+/// Split the tagged post-operation graph tail that follows the fixed `header` prefix:
+/// integer items keep their `[0, value]` pair in `state`, doubles go to `geom` with a
+/// `1` marker in `state` (the shim's `post::Out` encoding).
+fn tagged_tail(output: &[f64], header: usize) -> Result<(Vec<i64>, Vec<f64>), HarnessError> {
+    let mut ints: Vec<i64> = output
+        .get(..header)
+        .ok_or_else(|| harness("short output"))?
+        .iter()
+        .map(|v| *v as i64)
+        .collect();
+    let mut values = Vec::new();
+    for pair in output.get(header..).unwrap_or(&[]).chunks(2) {
+        let [tag, v] = pair else {
+            return Err(harness("odd tagged output"));
+        };
+        if *tag == 0.0 {
+            ints.extend([0, *v as i64]);
+        } else {
+            ints.push(1);
+            values.push(*v);
+        }
+    }
+    Ok((ints, values))
+}
+
 fn request(i: &Inputs, c: [usize; 10]) -> Request {
     Request {
         op: i.op,
@@ -246,33 +273,22 @@ impl UnitDiff for Runner {
                 "native fixture constructor: {output:?}"
             )));
         }
-        if request.op != 0 {
+        if request.op == 2 {
             return Ok(Output::new().ints(
                 "state",
                 output.into_iter().map(|v| v as i64).collect::<Vec<_>>(),
             ));
         }
-        // op 0: the fixed state (status, outputs, marks of each face use, face-use
-        // shells, counts), then the tagged post-split graph
-        let header = 3 + MARKS.len() * (2 + c[2]) + c[2] + 7;
-        let mut ints: Vec<i64> = output
-            .get(..header)
-            .ok_or_else(|| harness("short output"))?
-            .iter()
-            .map(|v| *v as i64)
-            .collect();
-        let mut values = Vec::new();
-        for pair in output.get(header..).unwrap_or(&[]).chunks(2) {
-            let [tag, v] = pair else {
-                return Err(harness("odd tagged output"));
-            };
-            if *tag == 0.0 {
-                ints.extend([0, *v as i64]);
-            } else {
-                ints.push(1);
-                values.push(*v);
-            }
-        }
+        // op 0/1: the fixed state (status, outputs, marks of each face use, face-use
+        // shells, counts), then the tagged post-operation graph (the split B-rep for
+        // op 0, the copy destination for op 1)
+        let prefix = match request.op {
+            0 => 3,
+            1 => 1 + usize::from(i.flags & 2 != 0),
+            _ => return Err(harness("invalid operation")),
+        };
+        let header = prefix + MARKS.len() * (2 + c[2]) + c[2] + 7;
+        let (ints, values) = tagged_tail(&output, header)?;
         Ok(Output::new().ints("state", ints).values("geom", values))
     }
 
@@ -436,13 +452,15 @@ impl UnitDiff for Runner {
             lock.release(std::slice::from_mut(&mut k.context))
                 .map_err(harness)?;
         }
-        if request.op != 0 {
+        if request.op == 2 {
             return Ok(Output::new().ints("state", output));
         }
-        // op 0: the whole post-split graph
-        let g = Graph::walk(&b).map_err(harness)?;
+        // op 0/1: the whole post-operation graph of the B-rep the operation changed
+        // (the split B-rep, or the copy destination)
+        let graph_brep = if request.op == 0 { &b } else { &destination };
+        let g = Graph::walk(graph_brep).map_err(harness)?;
         let mut w = W::default();
-        export_graph(&b, &g, &mut w).map_err(harness)?;
+        export_graph(graph_brep, &g, &mut w).map_err(harness)?;
         output.extend(w.ints);
         Ok(Output::new().ints("state", output).values("geom", w.values))
     }
@@ -1362,5 +1380,86 @@ fn gen_faces(rng: &mut Rng) -> Inputs {
         repeat: 1,
         lock_mask: 0,
         flags: 0,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::compare::compare;
+
+    /// The fixed op-1 prefix length (status, optional copied count, marks, face-use
+    /// shells, counts) before the tagged destination graph, from the fixture's counts.
+    fn copy_prefix_len(i: &Inputs) -> usize {
+        let path = path_of(i).unwrap();
+        let input = block(i).unwrap();
+        let fixture = ffi::export(&path, &input).unwrap();
+        let c = counts(&fixture.graph).unwrap();
+        1 + usize::from(i.flags & 2 != 0) + MARKS.len() * (2 + c[2]) + c[2] + 7
+    }
+
+    fn case(i: &Inputs) -> Case {
+        Case {
+            unit: "topology.brep_p6".into(),
+            name: "copy_geometry_sensitivity".into(),
+            source: crate::CaseSource::Inline,
+            inputs: serde_json::to_value(i).unwrap(),
+        }
+    }
+
+    /// The tagged decoder keeps the old integer prefix and partitions the appended
+    /// graph, and a truncated/odd record is a harness error, not a silent pass.
+    #[test]
+    fn tagged_tail_partitions_old_prefix_and_graph() {
+        let output = [1.0, 2.0, 0.0, 3.0, 1.0, 4.5, 0.0, 5.0, 1.0, 6.5];
+        let (ints, values) = tagged_tail(&output, 2).unwrap();
+        assert_eq!(ints, [1, 2, 0, 3, 1, 0, 5, 1]);
+        assert_eq!(values, [4.5, 6.5]);
+        assert!(tagged_tail(&output, 11).is_err());
+        assert!(tagged_tail(&[1.0, 2.0, 0.0], 2).is_err());
+    }
+
+    /// The old copy comparison only saw counts, marks and statuses. This case copies
+    /// one network edge; the destination graph now also compares its copied curve's
+    /// natural interval, its evaluations (which move with its control points) and its
+    /// end vertex.
+    #[test]
+    fn copy_destination_geometry_is_compared_not_just_counts_and_marks() {
+        let i: Inputs = serde_json::from_value(serde_json::json!({
+            "brep": { "kind": "network" },
+            "op": 1, "edges": [0], "flags": 2
+        }))
+        .unwrap();
+        let case = case(&i);
+        let cpp = Runner.run_cpp(&case).unwrap();
+        let rust = Runner.run_rust(&case).unwrap();
+        let diff = compare(&cpp, &rust, &[]);
+        assert!(diff.pass(), "{diff:?}");
+
+        // Destination graph doubles: [0] B-rep tolerance, [1..4] edge tolerance and
+        // interval, [4..6] copied curve interval, [6..21] five evaluations,
+        // [21..25] start vertex point/tolerance, [25..29] end vertex point/tolerance.
+        let geom = rust.values.get("geom").expect("destination geometry");
+        assert_eq!(geom.len(), 29);
+
+        let n = copy_prefix_len(&i);
+        let old_cpp = Output::new().ints("state", cpp.ints["state"][..n].to_vec());
+        let old_rust = Output::new().ints("state", rust.ints["state"][..n].to_vec());
+        assert!(compare(&old_cpp, &old_rust, &[]).pass());
+
+        for (what, index) in [
+            ("copied curve natural interval", 4usize),
+            ("copied curve evaluation", 6),
+            ("copied edge end vertex", geom.len() - 3),
+        ] {
+            let mut changed = rust.clone();
+            changed.values.get_mut("geom").unwrap()[index] += 1.0;
+            assert!(
+                !compare(&cpp, &changed, &[]).pass(),
+                "{what} at geom[{index}] must be compared"
+            );
+            // the old prefix is untouched, so the former comparison would still pass
+            assert!(compare(&old_cpp, &old_rust, &[]).pass());
+        }
     }
 }

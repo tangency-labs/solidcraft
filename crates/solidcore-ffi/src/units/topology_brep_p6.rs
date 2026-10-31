@@ -1,7 +1,8 @@
 //! Checked native `SmBrep::{CopyEdges, MakeFaceTopology, TestClosureSplitRegion}`.
 //! Uses the topology.vertexuse fixture block and the traverser's raw input export;
 //! [`make_faces`] appends its `MakeFaceTopology` calls to the block and returns the
-//! post-operation graph.
+//! post-operation graph. [`eval`] appends the same tagged graph record after ops 0
+//! and 1 (the split source B-rep, or the copy destination B-rep).
 
 use super::topology_topology_traverser::{self as graph, Fixture};
 use super::topology_vertexuse::counts;
@@ -58,6 +59,23 @@ pub fn export(path: &str, input: &[f64]) -> Result<Fixture, FfiError> {
 /// Closure outputs and face-use shell links use -1 for null, -3 for a non-null
 /// object outside the original graph, and nonnegative original-graph indices.
 /// These new-object paths are currently deferred in the differential runner.
+///
+/// # Record contract
+///
+/// Op 2 returns only its fixed prefix (status, outputs, mark deltas and locks, the
+/// face-use shells and the source/destination counts). Ops 0 and 1 return their fixed
+/// fields followed by the whole post-operation graph as `tag value` pairs (`0` an
+/// integer, `1` a double), in `topology.brep_p10`'s traversal order:
+///
+/// - op 0 exports the source B-rep after `TestClosureSplitRegion`;
+/// - op 1 exports the destination B-rep after `CopyEdges`: its infinite region and
+///   wire shells, each copied edge's interval, tolerance, edge uses and copied curve
+///   (type, dimension, natural interval, five evaluations), and each vertex's point,
+///   tolerance and uses.
+///
+/// The graph is serialized by the shim only for the C++ side of a comparison; the
+/// Rust runner walks its own independently built destination, so no native output or
+/// process state reaches the Rust side.
 pub fn eval(path: &str, input: &[f64], request: &Request) -> Result<Vec<f64>, FfiError> {
     let invalid = || FfiError::InvalidArgument("brep_p6 request".into());
     if !(0..=2).contains(&request.op)
@@ -376,14 +394,22 @@ mod tests {
                 lock_mask,
                 flags: 2,
             };
-            let result = eval("", &[3.0, 0.0, 0.0], &request).unwrap();
+            let input = [3.0, 0.0, 0.0];
+            let c = counts(&export("", &input).unwrap().graph).unwrap();
+            // op-1 fixed prefix: status, copied count, five mark pairs, face-use
+            // shells, then seven counts (the last three are destination regions,
+            // infinite index and void). The tagged destination graph follows it.
+            let prefix = 1 + 1 + 5 * (2 + c[2]) + c[2] + 7;
+            let result = eval("", &input, &request).unwrap();
             assert_eq!(result.first(), Some(&0.0));
             assert_eq!(result.get(1), Some(&65.0));
             assert_eq!(result.get(3), Some(&f64::from(lock_mask != 0)));
             assert_eq!(
-                result.get(result.len() - 3..),
+                result.get(prefix - 3..prefix),
                 Some([1.0, 0.0, 1.0].as_slice())
             );
+            assert!(result.len() > prefix, "destination graph follows the prefix");
+            assert_eq!(result.get(prefix), Some(&1.0)); // the graph starts with a double
         }
     }
 

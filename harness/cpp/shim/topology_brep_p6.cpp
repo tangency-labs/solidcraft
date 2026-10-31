@@ -605,12 +605,15 @@ SC_EXPORT int32_t sc_topology_brep_p6_eval(
     result.push_back(dest_regions.GetSize());
     result.push_back(infinite_index);
     result.push_back(infinite ? infinite->IsVoid() : -1);
-    if (op == 0) {
-        // the whole post-split graph: regions (infinite, void, shells), shells, ...
+    if (op == 0 || op == 1) {
+        // the whole post-operation graph, in the same traversal/export order for both
+        // ops: the split B-rep for op 0, the destination B-rep (its infinite region,
+        // wire shells, edges and vertices) for op 1.
+        SmBrep* graph_brep = op == 0 ? brep : destination.brep;
         post::G pg;
-        post::walk(brep, pg);
+        post::walk(graph_brep, pg);
         post::Out o{result};
-        post::export_graph(brep, pg, o);
+        post::export_graph(graph_brep, pg, o);
     }
     return sc_copy_out(result.data(), result.size(), out, cap, len);
     SC_CATCH
