@@ -7,6 +7,9 @@
 //! - outside the tool's box nothing changes: there, the result's surface is the target's and
 //!   the target's surface is the result's. A join or a cut can only change the target where the
 //!   tool is, so geometry anywhere else (a slit through a wall, a face moved) is wrong.
+//! - an intersection is no larger than either body and lies within both bodies' boxes: what it
+//!   keeps beyond one of them (material past the tool's face, #423) is wrong. An empty one
+//!   stays as it is: bodies that are apart intersect in nothing.
 //!
 //! A result that fails is refused with an error: a wrong result that looks right is worse.
 
@@ -135,10 +138,13 @@ fn bad(op: BoolOp, what: String) -> KernelError {
 /// Check the result of a Boolean that needed a retry (see the module docs). `result` is `None`
 /// for an empty result.
 pub(crate) fn check_retry(a: &Body, b: &Body, op: BoolOp, result: Option<&Body>) -> Result<()> {
-    if op == BoolOp::Intersect || a.is_mesh() || b.is_mesh() {
+    if a.is_mesh() || b.is_mesh() {
         return Ok(());
     }
     let Some(r) = result else {
+        if op == BoolOp::Intersect {
+            return Ok(());
+        }
         // Nothing left: only a cut whose tool covers the whole target (to within the meshes'
         // chords: a tool touching a round side of the target).
         let chord = a.size().max(b.size()) * 1e-3;
@@ -180,7 +186,7 @@ pub(crate) fn check_retry(a: &Body, b: &Body, op: BoolOp, result: Option<&Body>)
             && match op {
                 BoolOp::Union => vr >= va.max(vb) - slack && vr <= va + vb + slack,
                 BoolOp::Cut => vr <= va + slack && vr >= va - vb - slack,
-                BoolOp::Intersect => true,
+                BoolOp::Intersect => vr >= -slack && vr <= va.min(vb) + slack,
             };
         Ok((ok, va, vb, vr))
     };
@@ -194,13 +200,26 @@ pub(crate) fn check_retry(a: &Body, b: &Body, op: BoolOp, result: Option<&Body>)
     if !volume_ok {
         let what = match op {
             BoolOp::Union => format!("the joined body's volume would be {vr:.4} mm³ (the target is {va:.4} mm³, the tool {vb:.4} mm³)"),
-            _ => format!("the cut body's volume would be {vr:.4} mm³ (the target is {va:.4} mm³, the tool {vb:.4} mm³)"),
+            BoolOp::Cut => format!("the cut body's volume would be {vr:.4} mm³ (the target is {va:.4} mm³, the tool {vb:.4} mm³)"),
+            BoolOp::Intersect => format!("the intersection's volume would be {vr:.4} mm³ (the target is {va:.4} mm³, the tool {vb:.4} mm³)"),
         };
         return Err(bad(op, what));
     }
+    let reach = 3.0 * t + size * 1e-5;
+    if op == BoolOp::Intersect {
+        // Within both bodies' boxes (with room for the meshes' chords and a nudge).
+        let (ba, bb, br) = (ma.bounds(), mb.bounds(), mr.bounds());
+        let room = Vec3::new(reach, reach, reach) * 2.0;
+        let (lo, hi) = (ba.min.max(bb.min) - room, ba.max.min(bb.max) + room);
+        let out = [br.min.x < lo.x, br.min.y < lo.y, br.min.z < lo.z, br.max.x > hi.x, br.max.y > hi.y, br.max.z > hi.z];
+        if out.iter().any(|o| *o) {
+            let at = |p: Vec3| format!("({:.3}, {:.3}, {:.3})", p.x, p.y, p.z);
+            return Err(bad(op, format!("it would keep material outside the bodies' common box, out to {} – {}", at(br.min), at(br.max))));
+        }
+        return Ok(());
+    }
     // Outside the tool's box (with room for the meshes' chords and a nudge) the result's
     // surface and the target's must be the same.
-    let reach = 3.0 * t + size * 1e-5;
     let mut region = mb.bounds();
     region.min -= Vec3::new(reach, reach, reach) * 2.0;
     region.max += Vec3::new(reach, reach, reach) * 2.0;
