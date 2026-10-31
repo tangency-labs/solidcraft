@@ -61,7 +61,7 @@
 //!   caller), the unused context argument and the `SM_ASSERT`s.
 
 use crate::curve::curve::Curve;
-use crate::error::{ignored, Result, SolidError};
+use crate::error::{ignored, passed_on, Result, SolidError};
 use crate::geom::extent1d::ExtentPointType;
 use crate::geom::extent2d::Extent2d;
 use crate::geom::extent3d::Extent3d;
@@ -566,8 +566,10 @@ impl<'t, O: SolutionObject + Copy + PartialEq + 't> AdvSurfaceIntersector<'_, 't
         }
 
         // get bounding box intersection - the region containing a possible
-        // intersection (status ignored)
-        if let Ok(b) = bbox.intersect(&root2) {
+        // intersection (status ignored; passed on with
+        // `ssi_proto_topology_statuses_pass_on`, fork bcc6f01)
+        let pass = k.fixes.ssi_proto_topology_statuses_pass_on;
+        if let Ok(b) = passed_on(bbox.intersect(&root2), pass)? {
             bbox = b;
         }
         bbox.expand_absolute(tol);
@@ -590,8 +592,12 @@ impl<'t, O: SolutionObject + Copy + PartialEq + 't> AdvSurfaceIntersector<'_, 't
         let s = sol.start.parameters;
         let e = sol.end.parameters;
 
-        // refine the intersection box from the leaf box intersections (status ignored)
-        let _ = bbox.set_min_max(Vec3::new(s[0], s[1], s[2]), Vec3::new(s[3], s[4], s[5]));
+        // refine the intersection box from the leaf box intersections (status ignored,
+        // passed on with the flag)
+        let _ = passed_on(
+            bbox.set_min_max(Vec3::new(s[0], s[1], s[2]), Vec3::new(s[3], s[4], s[5])),
+            pass,
+        )?;
 
         // a single leafNode box intersection - may be a point
         if s[6] < 2.0 {
@@ -805,8 +811,13 @@ impl<'t, O: SolutionObject + Copy + PartialEq + 't> AdvSurfaceIntersector<'_, 't
         let mut ii = 0;
         while let Some(curve) = curves_3d.get(ii) {
             if curve.is_degenerate(k, EFF_ZERO, None)? {
-                // status ignored: an unset point
-                let point = ignored(curve.evaluate_point(k, 0.0))?.unwrap_or(Vec3::UNDEF);
+                // status ignored: an unset point (passed on with
+                // `ssi_proto_topology_statuses_pass_on`, fork bcc6f01)
+                let point = ignored(passed_on(
+                    curve.evaluate_point(k, 0.0),
+                    k.fixes.ssi_proto_topology_statuses_pass_on,
+                )?)?
+                .unwrap_or(Vec3::UNDEF);
                 if self
                     .base
                     .is_point_on_curve(k, point, &curves_3d, Some(ii))?
@@ -1001,6 +1012,52 @@ mod tests {
         )
         .unwrap();
         ssi.do_intersection_with_caches(k, &mut caches, None, None)
+    }
+
+    /// `ssi_proto_topology_statuses_pass_on` (WR-662 addendum, fork bcc6f01): with no
+    /// failing status the passed-on sites (the boundary intervals and trims, the box
+    /// intersection, the start and through points, the degenerate-curve point) change
+    /// nothing. Coverage only: a sphere cut inside the plane's domain and two planes
+    /// crossing at their domains' boundaries give the same curves either way.
+    #[test]
+    fn intersections_are_the_same_with_statuses_passed_on() {
+        let sphere_k = Kernel::default();
+        let sphere = Surface::from(
+            Sphere::create_canonical(&sphere_k, &Axis2Placement::default(), 1.0).unwrap(),
+        );
+        let cut = Surface::from(
+            BSplineSurface::create_bilinear_surface(
+                Vec3::new(-1.0, -1.0, 0.5),
+                Vec3::new(1.0, -1.0, 0.5),
+                Vec3::new(-1.0, 1.0, 0.5),
+                Vec3::new(1.0, 1.0, 0.5),
+            )
+            .unwrap(),
+        );
+        let a = plane([0.0; 3], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]);
+        let b = plane([0.0, 0.5, -0.5], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]);
+        let run = |pass_on: bool, s1: &Surface, s2: &Surface| {
+            let mut k = Kernel::default();
+            k.fixes.ssi_proto_topology_statuses_pass_on = pass_on;
+            let d1 = s1.natural_uv_domain_with_nurb(&k).unwrap();
+            let d2 = s2.natural_uv_domain_with_nurb(&k).unwrap();
+            let r = do_intersection(&k, s1, &d1, s2, &d2, [true, true], None, None).unwrap();
+            r.curves_3d
+                .iter()
+                .map(|c| {
+                    let ivl = c.natural_interval();
+                    (
+                        c.evaluate_point(&k, ivl.min()).unwrap(),
+                        c.evaluate_point(&k, ivl.max()).unwrap(),
+                    )
+                })
+                .collect::<Vec<_>>()
+        };
+        for (s1, s2) in [(&sphere, &cut), (&a, &b)] {
+            let off = run(false, s1, s2);
+            assert!(!off.is_empty());
+            assert_eq!(run(true, s1, s2), off);
+        }
     }
 
     /// HANG-52 through `DoIntersection`: the start-point loop's traces are bounded only

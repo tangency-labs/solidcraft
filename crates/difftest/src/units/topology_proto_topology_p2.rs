@@ -546,7 +546,7 @@ pub(super) fn run_op(
                 *skip = true;
                 return Ok(());
             };
-            let _ = res(r.mgr.remove_edge_definition(d, flag), st, skip)?;
+            let _ = res(r.mgr.remove_edge_definition(&r.k, d, flag), st, skip)?;
         }
         q::MGR_UPDATE_EDGES => {
             let w = rd.idx();

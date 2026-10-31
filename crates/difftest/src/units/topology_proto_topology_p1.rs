@@ -3448,7 +3448,7 @@ fn run_proto(
                             }
                         }
                         if !skip {
-                            status = st0(r.mgr.remove_vertex_definition(d, flag))?;
+                            status = st0(r.mgr.remove_vertex_definition(&r.k, d, flag))?;
                         }
                     }
                     _ => skip = true,
@@ -3459,7 +3459,7 @@ fn run_proto(
                 _ => skip = true,
             },
             p::MGR_REMOVE_PE => match r.pe(rd.idx()) {
-                Some(e) if !skip => status = st0(r.mgr.remove_proto_edge(e))?,
+                Some(e) if !skip => status = st0(r.mgr.remove_proto_edge(&r.k, e))?,
                 _ => skip = true,
             },
             p::MGR_SET_TOL => {

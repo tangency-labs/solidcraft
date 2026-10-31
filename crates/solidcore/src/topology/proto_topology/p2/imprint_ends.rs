@@ -186,6 +186,10 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         } else {
             trimmed.set_min(param)
         };
+        if moved.is_err() && k.fixes.ssi_proto_topology_statuses_pass_on {
+            // fork bcc6f01: `SER( sTrimmed.SetMin/SetMax(dParam) )`
+            return moved;
+        }
         if moved.is_err() || !(trimmed.length() > EFF_ZERO * (1.0 + param.abs())) {
             return Ok(());
         }
