@@ -107,3 +107,67 @@ fn inset_past_corner_radius_creates_a_real_boundary_and_saved_profile_identity()
         assert_eq!(session.redo.len(), redo);
     }
 }
+
+/// #7798: a bone-shaped outline, two r10 arcs meeting in a notch at each end and joined by two
+/// lines. Its inward offset is the set of points `d` from the outline, so every point of every
+/// offset curve lies exactly `d` from it. At a notch that takes a round of radius `d` about the
+/// notch point: the shrunken arcs alone meet farther in (1.88 mm from the outline at 1 mm), and
+/// past 2 mm they no longer meet at all.
+#[test]
+fn inset_of_a_notched_outline_stays_its_distance_from_the_outline() {
+    use solidcraft_geom::{Seg2, Vec2};
+    fn distance(p: Vec2, seg: &Seg2) -> f64 {
+        match *seg {
+            Seg2::Line { a, b } => {
+                let t = ((p - a).dot(b - a) / (b - a).dot(b - a)).clamp(0.0, 1.0);
+                p.dist(a + (b - a) * t)
+            }
+            Seg2::Arc { center, radius, start, sweep } => {
+                let phi = (p.y - center.y).atan2(p.x - center.x);
+                let into =
+                    if sweep >= 0.0 { (phi - start).rem_euclid(std::f64::consts::TAU) } else { (start - phi).rem_euclid(std::f64::consts::TAU) };
+                if into <= sweep.abs() { (p.dist(center) - radius).abs() } else { p.dist(seg.start()).min(p.dist(seg.end())) }
+            }
+            _ => panic!("the outline is lines and arcs"),
+        }
+    }
+    let sources = ["l1", "a1", "a2", "l2", "a3", "a4"];
+    for d in [1.0, 1.9, 3.0, 5.0] {
+        let mut session = Session::default();
+        run(&mut session, "sketch.create", json!({"plane":"XY","name":"Bone"}));
+        let id = session.active_sketch.unwrap();
+        {
+            let sk = session.doc_mut().sketch_mut(id).unwrap();
+            let v = Vec2::new;
+            let p: Vec<usize> = [v(30., 18.), v(-30., 18.), v(-36., 0.), v(-30., -18.), v(30., -18.), v(36., 0.)]
+                .iter()
+                .map(|q| sk.add_point(*q, None).unwrap())
+                .collect();
+            sk.add_line_pts(p[0], p[1], Some("l1")).unwrap();
+            sk.add_arc(v(-30., 8.), v(-30., 18.), v(-36., 0.), [None, Some(p[1]), Some(p[2])], Some("a1")).unwrap();
+            sk.add_arc(v(-30., -8.), v(-36., 0.), v(-30., -18.), [None, Some(p[2]), Some(p[3])], Some("a2")).unwrap();
+            sk.add_line_pts(p[3], p[4], Some("l2")).unwrap();
+            sk.add_arc(v(30., -8.), v(30., -18.), v(36., 0.), [None, Some(p[4]), Some(p[5])], Some("a3")).unwrap();
+            sk.add_arc(v(30., 8.), v(36., 0.), v(30., 18.), [None, Some(p[5]), Some(p[0])], Some("a4")).unwrap();
+        }
+        let offset = session
+            .execute("sketch.offset", &json!({"curves":sources,"distance":d,"side":[0,0]}))
+            .unwrap_or_else(|error| panic!("an inset of {d} mm: {error}"));
+        let state = session.model.state();
+        let sk = &state.sketch(id).unwrap().sketch;
+        let segs = |id: &str| {
+            let i = sk.curve_index(id).unwrap();
+            sk.exact_segs(i).unwrap_or_else(|| sk.segs(i))
+        };
+        let outline: Vec<Seg2> = sources.iter().flat_map(|s| segs(s)).collect();
+        for curve in offset["curves"].as_array().unwrap() {
+            for seg in segs(curve.as_str().unwrap()) {
+                for k in 0..=20 {
+                    let p = seg.point_at(f64::from(k) / 20.0);
+                    let off = outline.iter().map(|s| distance(p, s)).fold(f64::INFINITY, f64::min);
+                    assert!((off - d).abs() < 1e-6, "an inset of {d} mm: {curve} passes {p:?} at {off} mm from the outline");
+                }
+            }
+        }
+    }
+}
