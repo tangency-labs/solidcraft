@@ -42,6 +42,7 @@ pub mod network;
 pub mod paper;
 pub mod pixel_grid;
 mod plane;
+pub mod poly_mesh;
 mod profile;
 pub mod revision;
 pub mod section;
