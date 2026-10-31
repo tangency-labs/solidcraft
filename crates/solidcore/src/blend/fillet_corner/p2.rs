@@ -47,8 +47,10 @@
 //!   it returns `Ok(false)` instead (`plan/upstream-issues/WR-254--smfilletcorner-makeanalyticcornersurface-reports-its-ser-ner--dup2.md`). Its fits that fail softly upstream
 //!   (`if (SM_SUCCESS != fit(..)) return FALSE;`) are `false`; only
 //!   [`SolidError::Unported`] and [`SolidError::InvalidInput`] propagate from them.
-//!   The fillet solvers are the base [`FilletSolver`]s of [`CornerEnv::solvers`]: a
-//!   solver's `GetSolverType` is its [`FilletSolverOps::solver_type`].
+//!   The fillet solvers are the base [`FilletSolver`]s of [`CornerEnv::solvers`]; a
+//!   solver's `GetSolverType` (virtual upstream) is the store's
+//!   [`CornerSolverStore::solver_type`](crate::blend::fillet_corner::p3::CornerSolverStore::solver_type), the concrete solver's in a live session (a
+//!   variable-radius solver's `SM_FS_VARIABLE_RADIUS` makes the corner not analytic).
 //! - **`MakeVariableRadiusFillet`** builds its temporary `SmVariableRadiusFS`
 //!   ([`VariableRadiusFs::from_surfaces`]) with the identity one past
 //!   [`CornerEnv::solvers`]; the original surface is identified by its face, the
@@ -103,7 +105,7 @@ use crate::blend::fillet_geom::p1::{
 use crate::blend::fillet_geom::p2::{srf_srf_intersection, SrfSrfOptions};
 use crate::blend::fillet_geom::p4::set_edge_curve;
 use crate::blend::fillet_solver::p1::{
-    FilletExecutiveRef, FilletSolver, FilletSolverOps, FilletSolverType, FilletSurfaceGenerator,
+    FilletExecutiveRef, FilletSolver, FilletSolverType, FilletSurfaceGenerator,
     FilletSurfaceGeneratorType,
 };
 use crate::blend::fillet_standard_solver::p1::{FilletLaw, VariableRadiusFs};
@@ -1404,8 +1406,13 @@ impl FilletCorner {
                 // quit if any FilletEdge is a VariableRadius Fillet
                 let prim_eu = primary_eu(env.pseudo, fillet_edge, OP)?;
                 if let Some(fillet_geom) = edgeuse_or_mate_geom(env.pseudo, prim_eu, OP)? {
-                    let fs = solver_ref(env, fillet_geom, OP)?;
-                    if fs.solver_type()? == FilletSolverType::VariableRadius {
+                    // fs->GetSolverType() is virtual: the concrete solver's type
+                    let i = solver_of_geom(env, fillet_geom, OP)?;
+                    let solver_type = env
+                        .solvers
+                        .solver_type(i)
+                        .ok_or_else(|| invalid(OP, "fillet solver id not in the solver table"))??;
+                    if solver_type == FilletSolverType::VariableRadius {
                         return Ok(false);
                     }
                 }

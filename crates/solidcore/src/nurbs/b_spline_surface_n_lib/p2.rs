@@ -73,6 +73,8 @@
 //!   `make_coons_patch_tangent_to_sides` (`sm_MakeCoonsPatchTangentToSides` and its
 //!   helpers `sm_CoonsSideNormal`, `sm_CoonsSideAngle`, `sm_RefineToSpans` and
 //!   `sm_ProjectCoonsSideRows`, all private). Its refinement is bounded (8 to 64 spans).
+//!   `sm_CoonsSideAngle` makes the patch normal unit by its own length, not `Unitize`
+//!   (tangency-labs/smlib@701da4b, same option).
 
 use crate::curve::curve::p1::{SpanAccuracy, MAX_APPROX_SPANS};
 use crate::curve::curve::p2::Curve as SmCurve;
@@ -2150,12 +2152,17 @@ fn coons_side_angle(
                 side(uv.x < su.max()),
                 side(uv.y < sv.max()),
             )?;
-            let normal = du.cross(dv);
+            let mut normal = du.cross(dv);
             let scale = du.length() * dv.length();
-            if scale < EFF_ZERO_SQ || normal.length() <= EFF_ZERO_SQRT * scale {
+            // No normal where the derivatives are (near) parallel, measured against their
+            // own size; where there is one it is made unit by its own length (the fork's
+            // tangency-labs/smlib@701da4b): `unitize`'s absolute floor, 1e-12, refused the
+            // normal of a station near a collapsing side of a patch 0.01 across.
+            let normal_length = normal.length();
+            if scale < EFF_ZERO_SQ || normal_length <= EFF_ZERO_SQRT * scale {
                 continue;
             }
-            let normal = normal.unitize()?;
+            normal /= normal_length;
             let side_normal = coons_side_normal(k, uv_curve, surface, along, s)?;
             let cos = normal.dot(side_normal).abs();
             let angle = acos(if cos < 1.0 { cos } else { 1.0 });

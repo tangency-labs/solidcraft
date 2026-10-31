@@ -61,7 +61,10 @@
 //!   `Kernel::fixes.cover_wraps_across_closed_seam`, WR-599; the fork's
 //!   tangency-labs/smlib@16bf1cb). A boundary step across this surface's seam in a
 //!   direction it is closed in over its natural domain is no failure, and the domain
-//!   keeps its period there; an open direction or a pole still refuses.
+//!   keeps its period there; an open direction or a pole still refuses. The fork's
+//!   `bAcrossWrappedSeams` (default `TRUE`, tangency-labs/smlib@b518bbe) is the
+//!   `across_wrapped_seams` argument of the context variant: `false` keeps the cover
+//!   within one period.
 
 use crate::error::{ignored, Result, SolidError};
 use crate::geom::assert_array::labels;
@@ -884,8 +887,14 @@ impl Surface {
         if saved.is_some() {
             set_out_of_bounds_enabled(self, true);
         }
-        let result =
-            self.cover_coincident_surface_inner::<NoObject>(k, other, tol, other_domain, None);
+        let result = self.cover_coincident_surface_inner::<NoObject>(
+            k,
+            other,
+            tol,
+            other_domain,
+            None,
+            true,
+        );
         if let Some(saved) = saved {
             set_out_of_bounds_enabled(self, saved);
         }
@@ -900,6 +909,12 @@ impl Surface {
     ///
     /// # Errors
     ///
+    /// `across_wrapped_seams` is the fork's `bAcrossWrappedSeams` (upstream default
+    /// `TRUE`; tangency-labs/smlib@b518bbe): `false` asks for the cover within one period
+    /// of this surface even with `Kernel::fixes.cover_wraps_across_closed_seam`.
+    ///
+    /// # Errors
+    ///
     /// As [`Surface::cover_coincident_surface_deferring_trims`], with those of the
     /// context.
     pub fn cover_coincident_surface_deferring_trims_with_context<O: SolutionObject>(
@@ -909,14 +924,21 @@ impl Surface {
         tol: f64,
         other_domain: Option<&Extent2d>,
         context: (&mut dyn SurfaceSolveContext<O>, Option<O>),
+        across_wrapped_seams: bool,
     ) -> Result<CoverCoincident> {
         // Expand our domain, for the scope of this routine.
         let saved = out_of_bounds_enabled(self);
         if saved.is_some() {
             set_out_of_bounds_enabled(self, true);
         }
-        let result =
-            self.cover_coincident_surface_inner(k, other, tol, other_domain, Some(context));
+        let result = self.cover_coincident_surface_inner(
+            k,
+            other,
+            tol,
+            other_domain,
+            Some(context),
+            across_wrapped_seams,
+        );
         if let Some(saved) = saved {
             set_out_of_bounds_enabled(self, saved);
         }
@@ -932,6 +954,7 @@ impl Surface {
         tol: f64,
         other_domain: Option<&Extent2d>,
         mut context: Option<(&mut dyn SurfaceSolveContext<O>, Option<O>)>,
+        across_wrapped_seams: bool,
     ) -> Result<CoverCoincident> {
         // init outputs
         let failure = CoverCoincident {
@@ -1184,7 +1207,9 @@ impl Surface {
         // already spans. In any other direction, or across a pole, a crossing still means
         // the other face does not fit inside this one. Opt-in
         // (`Kernel::fixes.cover_wraps_across_closed_seam`); upstream refuses every crossing.
-        let wraps_across_seam = k.fixes.cover_wraps_across_closed_seam;
+        // `bAcrossWrappedSeams` FALSE asks for the cover only within one period, as
+        // without the fork (tangency-labs/smlib@b518bbe).
+        let wraps_across_seam = k.fixes.cover_wraps_across_closed_seam && across_wrapped_seams;
         let (wraps_u, wraps_v) = if wraps_across_seam {
             let this_domain = self.natural_uv_domain_with_nurb(k)?;
             (

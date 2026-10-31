@@ -973,6 +973,7 @@ fn cover_face_surface(
             &mut BrepFaceServices::new(&mut *brep),
             Some(CacheObject::Surface(face)),
         ),
+        true,
     );
     brep.face_mut(face)?.surface = Some(surface);
     brep.sync_face_surface_tolerance(face)?;

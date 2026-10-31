@@ -103,6 +103,10 @@
 //!   port returns the error. [`SolidError::Unported`] always propagates.
 //! - **Recursion.** `sm_CoverOtherCoincidentFace` recurses once (its second call has
 //!   `bRefineDomains` set); no other recursion.
+//! - **Not upstream: a stored-domain cover stays within one period** (the fork's
+//!   tangency-labs/smlib@b518bbe, under `Kernel::fixes.cover_wraps_across_closed_seam`):
+//!   `sm_CoverOtherCoincidentFace` passes `bRefineDomains` as the cover's
+//!   `bAcrossWrappedSeams`, so only its trim-derived attempt crosses a wrapped seam.
 //! - **Unported callees** return [`SolidError::Unported`]: `SmBrep::GetInfiniteRegion`
 //!   (`topology.brep_p1`) and `SmFace::CalculateUVDomainFromUVTrimCurves`
 //!   (`topology.face_p1`). `SmSurface::CoverOtherCoincidentSurface` is wired to
@@ -263,7 +267,7 @@ struct Cover {
 }
 
 /// `pSurf0->CoverOtherCoincidentSurface(pSurf1, dTol, rdMaxDist, rpCoveringSurf,
-/// &sDomain0, &sDomain1, &rMergedDomain)` (unit `surface.surface_p5`) on the surfaces
+/// &sDomain0, &sDomain1, &rMergedDomain, bAcrossWrappedSeams)` (unit `surface.surface_p5`) on the surfaces
 /// of `face0` and `face1` (two different faces). The covering surface may be expanded
 /// in place, as upstream. A merged domain that was not written stays the caller's
 /// default-constructed `sMergedDomain`.
@@ -285,6 +289,7 @@ fn cover_other_coincident_surface(
     tol: f64,
     domain0: &Extent2d,
     domain1: &Extent2d,
+    across_wrapped_seams: bool,
 ) -> Result<Cover> {
     use crate::query::brep::BrepFaceServices;
     use crate::surface::surface::p5::CoverSolveContext;
@@ -324,6 +329,7 @@ fn cover_other_coincident_surface(
                 Some(CacheObject::Surface(face1)),
             ],
         },
+        across_wrapped_seams,
     );
     b.face_mut(face0)?.surface = Some(this);
     b.face_mut(face1)?.surface = Some(other);
@@ -1780,7 +1786,23 @@ fn cover_other_coincident_face(
         }
     }
 
-    let cover = cover_other_coincident_surface(k, b, face0, face1, tol, &domain0, &domain1)?;
+    // SolidCraft fork (tangency-labs/smlib@b518bbe), under
+    // `Kernel::fixes.cover_wraps_across_closed_seam`: across a seam the covering surface
+    // wraps only on the trim-derived bounds. The stored domains are conservative and may
+    // be the faces' whole surfaces: across the seam they cover too, and the merged face
+    // took them as its domain (360 x 208 for half-turn faces whose trims span 180 x 3).
+    // Within one period they cover as before; a cover that must cross the seam takes the
+    // faces' trims.
+    let cover = cover_other_coincident_surface(
+        k,
+        b,
+        face0,
+        face1,
+        tol,
+        &domain0,
+        &domain1,
+        refine_domains,
+    )?;
     let covering = cover.covering.map(|c| match c {
         Covering::This => face0,
         Covering::Other => face1,

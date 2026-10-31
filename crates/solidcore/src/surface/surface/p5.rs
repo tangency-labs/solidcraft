@@ -1504,6 +1504,7 @@ fn cover_coincident_surface<O: SolutionObject>(
     want_step_domain: bool,
     trims: &mut Vec<ObjectRef>,
     context: Option<(&mut dyn SurfaceSolveContext<O>, Option<O>)>,
+    across_wrapped_seams: bool,
 ) -> Result<CoverCoincident> {
     let r = match context {
         Some(context) => cover.cover_coincident_surface_deferring_trims_with_context(
@@ -1512,7 +1513,9 @@ fn cover_coincident_surface<O: SolutionObject>(
             tol,
             Some(covered_domain),
             context,
+            across_wrapped_seams,
         )?,
+        // (every caller passing `bAcrossWrappedSeams` FALSE has a context)
         None => {
             cover.cover_coincident_surface_deferring_trims(k, covered, tol, Some(covered_domain))?
         }
@@ -1541,6 +1544,8 @@ struct CoverState {
     merged: Option<Extent2d>,
     /// The faces whose UV trim curves the caller deletes.
     trims: Vec<ObjectRef>,
+    /// `bAcrossWrappedSeams` (the fork's tangency-labs/smlib@b518bbe).
+    across_wrapped_seams: bool,
 }
 
 /// The face solve context of
@@ -1614,6 +1619,7 @@ fn try_cover<O: SolutionObject>(
             false,
             &mut st.trims,
             cover_context(context, cover_handle),
+            st.across_wrapped_seams,
         ) {
             Ok(r) => {
                 st.max_dist = r.max_dist;
@@ -1644,6 +1650,7 @@ fn try_cover<O: SolutionObject>(
         true,
         &mut st.trims,
         cover_context(context, cover_handle),
+        st.across_wrapped_seams,
     ) {
         Ok(r) => r,
         Err(e) if e.is_unported() => return Err(e),
@@ -1706,6 +1713,7 @@ impl Surface {
             other_domain,
             want_merged,
             None,
+            true,
         )
     }
 
@@ -1718,6 +1726,9 @@ impl Surface {
     ///
     /// As [`Surface::cover_other_coincident_surface_deferring_trims`], with those of
     /// the context.
+    ///
+    /// `across_wrapped_seams` is the fork's `bAcrossWrappedSeams` (upstream default
+    /// `TRUE`; tangency-labs/smlib@b518bbe), passed to each `CoverCoincidentSurface`.
     #[allow(clippy::too_many_arguments)] // upstream's arguments plus the context
     pub fn cover_other_coincident_surface_deferring_trims_with_context<O: SolutionObject>(
         &mut self,
@@ -1728,6 +1739,7 @@ impl Surface {
         other_domain: Option<&Extent2d>,
         want_merged: bool,
         context: CoverSolveContext<'_, O>,
+        across_wrapped_seams: bool,
     ) -> Result<CoverOtherCoincident> {
         self.cover_other_coincident_surface_in(
             k,
@@ -1737,6 +1749,7 @@ impl Surface {
             other_domain,
             want_merged,
             Some(context),
+            across_wrapped_seams,
         )
     }
 
@@ -1750,6 +1763,7 @@ impl Surface {
         other_domain: Option<&Extent2d>,
         want_merged: bool,
         mut context: Option<CoverSolveContext<'_, O>>,
+        across_wrapped_seams: bool,
     ) -> Result<CoverOtherCoincident> {
         let mut st = CoverState {
             domain0: match this_domain {
@@ -1763,6 +1777,7 @@ impl Surface {
             max_dist: BIG_DOUBLE,
             merged: None,
             trims: Vec::new(),
+            across_wrapped_seams,
         };
         let done = |st: &mut CoverState, covering_is_other: bool| CoverOtherCoincident {
             covering_is_other: Some(covering_is_other),
@@ -2712,6 +2727,7 @@ mod tests {
                         context: &mut caches,
                         handles: [None, None],
                     },
+                    true,
                 );
                 match (plain, with) {
                     (Ok(p), Ok(w)) => {

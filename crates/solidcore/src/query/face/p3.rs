@@ -635,8 +635,8 @@ struct CellDirectedMax {
 }
 
 /// `sm_CellDirectedMax`: `GlobalPointSolve(SM_SO_3D_SIGNED_DIRECTED_MAXIMIZE)` over `cell`
-/// (the solver's solutions within its tolerance of the greatest, each classified on the
-/// face). Status handling as the tight box above: a failed solve gives no solutions and a
+/// (the solver's solutions within its tolerance of the greatest, each classified; only
+/// points inside the face, `SM_PC_FACE`, count, as the fork's tangency-labs/smlib@95bf434). Status handling as the tight box above: a failed solve gives no solutions and a
 /// failed classification keeps the point as classified.
 fn cell_directed_max(
     k: &Kernel,
@@ -686,7 +686,12 @@ fn cell_directed_max(
                 ..PointClassifyOptions::default()
             },
         ))?;
-        if pt_class.point_class() != PointClassType::Unknown {
+        // Inside the face only (`SM_PC_FACE`, tangency-labs/smlib@95bf434). A point on an
+        // edge or a vertex lies within the face's zone tolerance of its boundary, inside or
+        // out: where the surface runs on past the boundary it is up to that tolerance
+        // outside the face (a box's rounded corner octant boxed to 1.0000243 where it ends
+        // at 1). The boundary's own extremes come from the edges' tight boxes.
+        if pt_class.point_class() == PointClassType::Face {
             in_face_top = in_face_top.max(value);
         }
     }

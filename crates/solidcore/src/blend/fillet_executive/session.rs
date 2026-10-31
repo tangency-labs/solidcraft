@@ -242,6 +242,19 @@ impl SolverObject {
         }
     }
 
+    /// `GetSolverType` of this actual concrete solver (the derived class's override).
+    ///
+    /// # Errors
+    /// Those of the concrete solver's [`FilletSolverOps::solver_type`].
+    pub fn solver_type(&self) -> Result<FilletSolverType> {
+        match self {
+            Self::ConstantRadius(solver) => FilletSolverOps::solver_type(solver.as_ref()),
+            Self::ConstantDistance(solver) => FilletSolverOps::solver_type(solver.as_ref()),
+            Self::VariableRadius(solver) => FilletSolverOps::solver_type(solver.as_ref()),
+            Self::SurfaceSurface(solver) => FilletSolverOps::solver_type(solver.as_ref()),
+        }
+    }
+
     /// Borrow the same base for a native member write.
     pub fn base_mut(&mut self) -> &mut FilletSolver {
         match self {
@@ -472,6 +485,12 @@ impl CornerSolverStore for SessionSolvers<'_> {
     }
     fn len(&self) -> usize {
         self.0.len()
+    }
+    fn solver_type(&self, index: usize) -> Option<Result<FilletSolverType>> {
+        self.0
+            .get(index)
+            .and_then(Option::as_ref)
+            .map(SolverObject::solver_type)
     }
 }
 

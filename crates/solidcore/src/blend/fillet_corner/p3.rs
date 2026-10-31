@@ -706,6 +706,18 @@ pub trait CornerSolverStore {
     fn get(&self, index: usize) -> Option<&FilletSolver>;
     /// The number of solver slots (the identity a temporary solver takes).
     fn len(&self) -> usize;
+    /// `GetSolverType` (virtual upstream) of the solver at `index`, or `None` when it is
+    /// not in the store. A plain table has only the bases; a live session answers for its
+    /// concrete solvers.
+    ///
+    /// # Errors
+    /// Those of [`FilletSolverOps::solver_type`].
+    fn solver_type(
+        &self,
+        index: usize,
+    ) -> Option<Result<crate::blend::fillet_solver::p1::FilletSolverType>> {
+        self.get(index).map(FilletSolverOps::solver_type)
+    }
     /// Whether the store has no slots.
     fn is_empty(&self) -> bool {
         self.len() == 0
