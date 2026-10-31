@@ -988,6 +988,8 @@ preference_settings! {
     graphics_adapter: String = String::new(), PAGE_GRAPHICS;
     /// Soft contact shading in the GPU viewport; optional and applied immediately.
     ambient_occlusion: bool = false, PAGE_GRAPHICS;
+    /// Restore the shadow plane at the lowest visible body, including above the origin (#9838).
+    ground_shadow_follows_model: bool = false, PAGE_GRAPHICS => check_id("prefs.ground_shadow_follows_model");
     /// Shade the viewport in linear light with a sky fill, so dark parts keep their shape
     /// (#7974). Off by default: the viewport shades as it always has.
     dark_parts_shading: bool = false, PAGE_GRAPHICS => check_id("prefs.dark_parts_shading");
@@ -8035,6 +8037,43 @@ mod tests {
         h.call("ui.prefs", json!({"cosmetic_threads":false}));
         restored.load_prefs(&h.app.prefs());
         assert!(!restored.preferences.cosmetic_threads, "an explicitly disabled value also survives reload");
+        assert_eq!(h.app.session.doc.to_json(), design);
+        assert!(h.app.session.undo.is_empty());
+    }
+
+    #[test]
+    fn ground_shadow_placement_follows_preferences_transactions() {
+        assert!(!Prefs::default().ground_shadow_follows_model);
+        let old: Prefs = serde_json::from_value(json!({"msaa":4})).unwrap();
+        assert!(!old.ground_shadow_follows_model);
+        assert!(!lenient(&json!({"ground_shadow_follows_model":"yes"})).ground_shadow_follows_model);
+        let mut h = crate::scenario::Harness::new();
+        h.app.ui.ground_shadow = true;
+        let camera = h.app.cam;
+        let design = h.app.session.doc.to_json();
+        h.call("ui.prefs", json!({"open":"Graphics"}));
+        super::reveal_preference(&mut h, "prefs:ground_shadow_follows_model");
+        let checkbox = crate::scenario::handle_at("prefs:ground_shadow_follows_model").unwrap();
+        h.call("ui.click", json!({"x":checkbox.x,"y":checkbox.y}));
+        assert!(h.app.preferences.ground_shadow_follows_model);
+        let mut restored = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+        restored.load_prefs(&h.app.prefs());
+        assert!(!restored.preferences.ground_shadow_follows_model, "an unapplied change is not saved");
+        h.call("ui.prefs", json!({"button":"cancel"}));
+        assert!(!h.app.preferences.ground_shadow_follows_model);
+        h.call("ui.prefs", json!({"ground_shadow_follows_model":true}));
+        assert!(!h.app.prefs_window.open, "programmatic changes do not open Preferences");
+        restored.load_prefs(&h.app.prefs());
+        assert!(restored.preferences.ground_shadow_follows_model);
+        h.call("ui.prefs", json!({"open":"Graphics", "button":"defaults"}));
+        assert!(!h.app.preferences.ground_shadow_follows_model);
+        h.call("ui.prefs", json!({"button":"cancel"}));
+        assert!(h.app.preferences.ground_shadow_follows_model, "Cancel restores the saved choice");
+        h.call("ui.prefs", json!({"open":"Graphics", "button":"defaults"}));
+        h.call("ui.prefs", json!({"button":"apply"}));
+        restored.load_prefs(&h.app.prefs());
+        assert!(!restored.preferences.ground_shadow_follows_model, "Graphics defaults can be saved");
+        assert_eq!(h.app.cam, camera);
         assert_eq!(h.app.session.doc.to_json(), design);
         assert!(h.app.session.undo.is_empty());
     }
