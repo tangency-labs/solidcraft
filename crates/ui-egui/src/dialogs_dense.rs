@@ -191,6 +191,7 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
         enter |= crate::hole_refs::input_rows(d, ui, &app.session, app.preferences.origin_plane_names);
     } else {
         input_rows(d, ui, &app.session, app.preferences.origin_plane_names);
+        crate::command_sketch::offer_row(app, d, ui);
     }
     d.sync_material(&app.session);
     // The Hole dialog's dropdowns preview each choice on a copy of the form as it stands.

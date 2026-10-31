@@ -1495,6 +1495,23 @@ impl Session {
         v
     }
 
+    /// Merge the undo steps made since the design was `start_doc` (with `start_undo` steps in the
+    /// history) into one, labelled `label`; how many steps it took in (0: none were made, or the
+    /// history no longer reaches that far). The first step made then saved `start_doc`; when the
+    /// history is full its oldest steps go, so it is looked for at or below where it was put.
+    pub fn merge_undo_since(&mut self, start_doc: &Arc<Document>, start_undo: usize, label: &str) -> usize {
+        let Some(first) = (0..self.undo.len().min(start_undo + 1)).rev().find(|&i| self.undo.get(i).is_some_and(|s| Arc::ptr_eq(&s.doc, start_doc)))
+        else {
+            return 0;
+        };
+        let steps = self.undo.len() - first;
+        self.undo.truncate(first + 1);
+        if let Some(s) = self.undo.get_mut(first) {
+            s.label = label.to_string();
+        }
+        steps
+    }
+
     /// Remember the design, active sketch, pending positions and undo history; returns the checkpoint's id.
     pub fn checkpoint(&mut self) -> u64 {
         let id = self.next_checkpoint;
