@@ -41,7 +41,7 @@
 //!
 //! [`eval`] accepts only what upstream handles without undefined behaviour: well-formed
 //! clamped B-splines, lines with a non-zero vector, ellipses with non-zero radii and
-//! independent axes, planes with a non-zero normal, finite values, indices inside the
+//! independent axes whose squared lengths do not overflow (UB-46, WR-159), planes with a non-zero normal, finite values, indices inside the
 //! B-rep's export and the curve store, and curve loops whose counts add up to their
 //! curves (every script op keeps that).
 
@@ -322,6 +322,12 @@ fn curve(rd: &mut Reader<'_>) -> Result<(), FfiError> {
             ];
             let nx: f64 = x.iter().map(|c| c * c).sum();
             let ny: f64 = y.iter().map(|c| c * c).sum();
+            // an axis whose squared length overflows unitizes to a zero vector (WR-159):
+            // SmEllipse then builds no NURB, which SmBSplineCurve::EvaluatePoint
+            // dereferences (UB-46; SIGSEGV)
+            if !nx.is_finite() || !ny.is_finite() {
+                return Err(bad("ellipse: axis length overflows"));
+            }
             let nc: f64 = cross.iter().map(|c| c * c).sum();
             if nc < 1e-6 * nx * ny || d0 >= d1 || d1 - d0 > 720.0 || rx <= 1e-9 || ry <= 1e-9 {
                 return Err(bad("ellipse: bad axes, domain or radii"));
