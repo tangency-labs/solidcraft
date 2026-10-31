@@ -1159,7 +1159,15 @@ impl Ellipse {
         let my_radius = self.radius_x;
         let my_z_axis = self.position.z_axis();
         let offset_rad = if offset_plane_normal.is_parallel_to(my_z_axis, EFF_ZERO_DEG) {
-            my_radius + offset_distance
+            if k.fixes.circle_offset_antiparallel_normal {
+                if offset_plane_normal.dot(my_z_axis) >= 0.0 {
+                    my_radius + offset_distance
+                } else {
+                    my_radius - offset_distance
+                }
+            } else {
+                my_radius + offset_distance
+            }
         } else if offset_plane_normal.is_parallel_to(-my_z_axis, EFF_ZERO_DEG) {
             my_radius - offset_distance
         } else {
@@ -2643,5 +2651,137 @@ mod tests {
         .unwrap();
         assert_eq!(e.position().origin().z, 0.0);
         assert_eq!(e.base().dim, 2);
+    }
+
+    #[test]
+    fn wr32_circle_offset_antiparallel_default_preserves_expansion() {
+        let k = kernel();
+        assert!(!k.fixes.circle_offset_antiparallel_normal);
+        let c = circle(&k, 0.0, 90.0, 1.0);
+        let normal_neg_z = Vec3::new(0.0, 0.0, -1.0);
+        let (o, gap) = c
+            .create_simple_offset(&k, 1e-6, normal_neg_z, 0.4, false)
+            .unwrap();
+        assert_eq!(gap, 0.0);
+        match o.kind() {
+            CurveKind::Ellipse(e) => {
+                assert!((e.radius() - 1.4).abs() < 1e-12);
+            }
+            _ => panic!("expected circle"),
+        }
+    }
+
+    #[test]
+    fn wr32_circle_offset_antiparallel_opt_in_shrinks_positive_radius() {
+        let mut k = kernel();
+        k.fixes.circle_offset_antiparallel_normal = true;
+        let c = circle(&k, 0.0, 90.0, 1.0);
+        let normal_neg_z = Vec3::new(0.0, 0.0, -1.0);
+
+        // Positive offset distance with antiparallel normal shrinks radius
+        let (o, gap) = c
+            .create_simple_offset(&k, 1e-6, normal_neg_z, 0.4, false)
+            .unwrap();
+        assert_eq!(gap, 0.0);
+        match o.kind() {
+            CurveKind::Ellipse(e) => {
+                assert!((e.radius() - 0.6).abs() < 1e-12);
+            }
+            _ => panic!("expected circle"),
+        }
+
+        // Negative offset distance with antiparallel normal expands radius
+        let (o_neg, gap_neg) = c
+            .create_simple_offset(&k, 1e-6, normal_neg_z, -0.4, false)
+            .unwrap();
+        assert_eq!(gap_neg, 0.0);
+        match o_neg.kind() {
+            CurveKind::Ellipse(e) => {
+                assert!((e.radius() - 1.4).abs() < 1e-12);
+            }
+            _ => panic!("expected circle"),
+        }
+    }
+
+    #[test]
+    fn wr32_circle_offset_antiparallel_opt_in_degenerate_radius() {
+        let mut k = kernel();
+        k.fixes.circle_offset_antiparallel_normal = true;
+        let c = circle(&k, 0.0, 90.0, 1.0);
+        let normal_neg_z = Vec3::new(0.0, 0.0, -1.0);
+        let tol = 1e-4;
+
+        // Exact zero radius (1.0 - 1.0 = 0.0 < tol and >= -tol) -> degenerate curve
+        let (o, gap) = c
+            .create_simple_offset(&k, tol, normal_neg_z, 1.0, false)
+            .unwrap();
+        assert_eq!(gap, 0.0);
+        match o.kind() {
+            CurveKind::BSpline(b) => {
+                assert!(b.is_degenerate(&k, tol, None).unwrap());
+            }
+            _ => panic!("expected degenerate BSplineCurve"),
+        }
+
+        // Slightly negative radius within approx_tol_3d (1.0 - 1.00005 = -5e-5 >= -1e-4) -> degenerate curve
+        let (o2, gap2) = c
+            .create_simple_offset(&k, tol, normal_neg_z, 1.0 + 5e-5, false)
+            .unwrap();
+        assert_eq!(gap2, 0.0);
+        match o2.kind() {
+            CurveKind::BSpline(b) => {
+                assert!(b.is_degenerate(&k, tol, None).unwrap());
+            }
+            _ => panic!("expected degenerate BSplineCurve"),
+        }
+    }
+
+    #[test]
+    fn wr32_circle_offset_antiparallel_opt_in_negative_radius_error() {
+        let mut k = kernel();
+        k.fixes.circle_offset_antiparallel_normal = true;
+        let c = circle(&k, 0.0, 90.0, 1.0);
+        let normal_neg_z = Vec3::new(0.0, 0.0, -1.0);
+        let tol = 1e-4;
+
+        // Radius exceeds tolerance in negative direction (1.0 - 1.5 = -0.5 < -tol) -> error
+        let res = c.create_simple_offset(&k, tol, normal_neg_z, 1.5, false);
+        assert!(res.is_err());
+        match res {
+            Err(SolidError::Upstream {
+                code, operation, ..
+            }) => {
+                assert_eq!(code, 1001);
+                assert_eq!(
+                    operation,
+                    "curve::ellipse::p1::Ellipse::create_simple_offset"
+                );
+            }
+            _ => panic!("expected Upstream error"),
+        }
+    }
+
+    #[test]
+    fn wr32_circle_offset_parallel_normal_invariance() {
+        let k_def = kernel();
+        let mut k_fix = kernel();
+        k_fix.fixes.circle_offset_antiparallel_normal = true;
+        let c = circle(&k_def, 0.0, 90.0, 1.0);
+        let normal_pos_z = Vec3::new(0.0, 0.0, 1.0);
+
+        let (o_def, _) = c
+            .create_simple_offset(&k_def, 1e-6, normal_pos_z, 0.4, false)
+            .unwrap();
+        let (o_fix, _) = c
+            .create_simple_offset(&k_fix, 1e-6, normal_pos_z, 0.4, false)
+            .unwrap();
+
+        match (o_def.kind(), o_fix.kind()) {
+            (CurveKind::Ellipse(e_def), CurveKind::Ellipse(e_fix)) => {
+                assert_eq!(e_def.radius(), e_fix.radius());
+                assert!((e_fix.radius() - 1.4).abs() < 1e-12);
+            }
+            _ => panic!("expected circles"),
+        }
     }
 }
