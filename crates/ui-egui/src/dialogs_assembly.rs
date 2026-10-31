@@ -1832,31 +1832,140 @@ pub fn drawn_joints(app: &SolveApp) -> Vec<(u64, bool)> {
         .collect()
 }
 
-/// Joint glyphs in the viewport: a ring where the joint sits, its motion axis, and its limits
-/// (ticks on the ring for a turn, along the axis for a slide). Glyphs are only drawn; they are
-/// never picked in the viewport.
-pub fn joint_glyphs(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
+thread_local! {
+    /// The size (box diagonal) of each occurrence's bodies, for the design revision it was found in.
+    static OCCURRENCE_SIZES: std::cell::RefCell<Option<(u64, std::collections::HashMap<u64, f64>)>> = const { std::cell::RefCell::new(None) };
+}
+
+/// The size (box diagonal, mm) of each occurrence's bodies, including those of the occurrences
+/// inside it; occurrence 0 is the root's own bodies. Found once per design revision, in one
+/// pass over the bodies, as [`occurrence_bounds`] would find it for each occurrence.
+fn occurrence_sizes(s: &Session) -> std::collections::HashMap<u64, f64> {
+    let rev = s.revision;
+    if let Some(v) = OCCURRENCE_SIZES.with(|o| o.borrow().as_ref().filter(|(k, _)| *k == rev).map(|(_, v)| v.clone())) {
+        return v;
+    }
+    let model = s.model.state();
+    let world = s.world_state();
+    let mut boxes: std::collections::HashMap<u64, Aabb3> = std::collections::HashMap::new();
+    for (name, _, path, _) in s.doc.body_frames(&model) {
+        let Some(b) = world.body(&name) else { continue };
+        let bb = b.mesh().bounds();
+        let owners: Vec<u64> = if path.is_empty() { vec![0] } else { path.clone() };
+        for o in owners {
+            let e = boxes.entry(o).or_default();
+            *e = e.union(&bb);
+        }
+    }
+    let v: std::collections::HashMap<u64, f64> = boxes.into_iter().filter(|(_, b)| !b.is_empty()).map(|(o, b)| (o, b.diagonal())).collect();
+    OCCURRENCE_SIZES.with(|o| *o.borrow_mut() = Some((rev, v.clone())));
+    v
+}
+
+/// A joint glyph's axis half-length is at most this share of the view height ...
+const GLYPH_VIEW_SHARE: f64 = 0.05;
+/// ... and at most this share of the smaller joined part's size, so zoomed out the glyphs
+/// shrink with the parts they join instead of covering them (#6404).
+const GLYPH_PART_SHARE: f64 = 0.25;
+/// The half size (screen points) of a rigid joint's square mark.
+const RIGID_MARK: f32 = 3.5;
+
+/// How one joint's glyph is drawn.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct JointGlyph {
+    pub id: u64,
+    pub picked: bool,
+    /// A rigid joint has no motion: a small square, no axis or ring.
+    pub rigid: bool,
+    /// Half the motion axis (world mm); the ring's radius is half of it.
+    pub len: f64,
+    /// Lies on a glyph drawn before it (zoomed out, joints piled up): drawn faint.
+    pub faded: bool,
+    pub centre: Pos2,
+}
+
+/// The glyphs to draw, in drawing order: picked joints first, then moving joints, then rigid
+/// ones. Each is sized to the view and to the parts it joins; one whose centre falls inside a
+/// glyph planned before it is faded, unless it is picked.
+pub(crate) fn joint_glyph_plan(app: &SolveApp, proj: &Proj) -> Vec<JointGlyph> {
     let drawn = drawn_joints(app);
     if drawn.is_empty() {
+        return Vec::new();
+    }
+    let frames = joint_frames_world(&app.session);
+    let sizes = occurrence_sizes(&app.session);
+    let view_len = app.cam.half_height() * 2.0 * GLYPH_VIEW_SHARE;
+    let at = |m: &solidcraft_engine::doc::Mat, x: f64, y: f64, z: f64| solidcraft_engine::doc::apply_point(m, Vec3::new(x, y, z));
+    let mut plan = Vec::new();
+    for (id, picked) in drawn {
+        let Some(j) = app.session.doc.assembly.joints.iter().find(|j| j.id == id) else { continue };
+        let Some((_, m)) = frames.iter().find(|(f, _)| *f == id) else { continue };
+        let Some(centre) = proj.to_screen(at(m, 0.0, 0.0, 0.0)) else { continue };
+        let part = [j.a.occurrence, j.b.occurrence]
+            .iter()
+            .filter_map(|o| sizes.get(o).copied())
+            .filter(|d| d.is_finite() && *d > 0.0)
+            .fold(f64::INFINITY, f64::min);
+        let len = view_len.min(part * GLYPH_PART_SHARE);
+        plan.push((JointGlyph { id, picked, rigid: j.kind == JointKind::Rigid, len, faded: false, centre }, *m));
+    }
+    plan.sort_by_key(|(g, _)| (!g.picked, g.rigid));
+    // Screen reach of each glyph: its ring (or a rigid mark), for the overlap test.
+    let reach = |g: &JointGlyph, m: &solidcraft_engine::doc::Mat| -> f32 {
+        if g.rigid {
+            return RIGID_MARK;
+        }
+        let r = g.len * 0.5;
+        [(r, 0.0, 0.0), (0.0, r, 0.0)]
+            .iter()
+            .filter_map(|p| proj.to_screen(at(m, p.0, p.1, p.2)))
+            .map(|q| q.distance(g.centre))
+            .fold(RIGID_MARK, f32::max)
+    };
+    let mut placed: Vec<(Pos2, f32)> = Vec::new();
+    for (g, m) in &mut plan {
+        let r = reach(g, m);
+        g.faded = !g.picked && placed.iter().any(|(c, rc)| c.distance(g.centre) < rc.max(r));
+        if !g.faded {
+            placed.push((g.centre, r));
+        }
+    }
+    plan.into_iter().map(|(g, _)| g).collect()
+}
+
+/// Joint glyphs in the viewport: a ring where a moving joint sits, its motion axis and its
+/// limits (ticks on the ring for a turn, along the axis for a slide); a small square for a rigid
+/// joint. Glyphs are only drawn; they are never picked in the viewport.
+pub fn joint_glyphs(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
+    let plan = joint_glyph_plan(app, proj);
+    if plan.is_empty() {
         return;
     }
     let t = Tokens::get();
     let frames = joint_frames_world(&app.session);
-    let len = app.cam.half_height() * 2.0 * 0.05;
     let at = |m: &solidcraft_engine::doc::Mat, x: f64, y: f64, z: f64| solidcraft_engine::doc::apply_point(m, Vec3::new(x, y, z));
-    for (id, picked) in drawn {
-        let Some(j) = app.session.doc.assembly.joints.iter().find(|j| j.id == id) else { continue };
-        let Some((_, m)) = frames.iter().find(|(f, _)| *f == id) else { continue };
-        let col = if picked {
+    // Back to front, so the glyphs drawn first in the plan end up on top.
+    for g in plan.iter().rev() {
+        let Some(j) = app.session.doc.assembly.joints.iter().find(|j| j.id == g.id) else { continue };
+        let Some((_, m)) = frames.iter().find(|(f, _)| *f == g.id) else { continue };
+        let col = if g.picked {
             t.sel_edge
         } else if j.suppressed {
             t.text_dim
         } else {
             t.accent
         };
-        let width = if picked { 2.5 } else { 1.5 };
+        let col = if g.faded { col.gamma_multiply(0.3) } else { col };
+        let width = if g.picked { 2.5 } else { 1.5 };
         let stroke = Stroke::new(width, col);
-        let Some(c) = proj.to_screen(at(m, 0.0, 0.0, 0.0)) else { continue };
+        let c = g.centre;
+        if g.rigid {
+            let half = if g.picked { RIGID_MARK + 1.0 } else { RIGID_MARK };
+            let fill = if g.faded { t.panel.gamma_multiply(0.3) } else { t.panel };
+            painter.rect(egui::Rect::from_center_size(c, vec2(half * 2.0, half * 2.0)), 0.0, fill, stroke, egui::StrokeKind::Middle);
+            continue;
+        }
+        let len = g.len;
         // The motion axis (z), both ways.
         if let (Some(a), Some(b)) = (proj.to_screen(at(m, 0.0, 0.0, -len)), proj.to_screen(at(m, 0.0, 0.0, len))) {
             painter.line_segment([a, b], stroke);
@@ -1873,6 +1982,7 @@ pub fn joint_glyphs(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
             painter.add(egui::Shape::line(ring, stroke));
         }
         // Limits: ticks across the ring for a turn, across the axis (or slot) for a slide.
+        let warning = if g.faded { t.warning.gamma_multiply(0.3) } else { t.warning };
         for (i, lim) in j.limits.iter().enumerate() {
             let Some((lo, hi)) = lim else { continue };
             let name = j.kind.dofs().get(i).copied().unwrap_or("");
@@ -1887,13 +1997,18 @@ pub fn joint_glyphs(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
                     _ => continue,
                 };
                 if let (Some(p), Some(q)) = (proj.to_screen(at(m, p.0, p.1, p.2)), proj.to_screen(at(m, q.0, q.1, q.2))) {
-                    painter.line_segment([p, q], Stroke::new(width, t.warning));
+                    painter.line_segment([p, q], Stroke::new(width, warning));
                 }
             }
         }
-        painter.circle(c, if picked { 4.5 } else { 3.5 }, t.panel, stroke);
+        let fill = if g.faded { t.panel.gamma_multiply(0.3) } else { t.panel };
+        painter.circle(c, if g.picked { 4.5 } else { 3.5 }, fill, stroke);
     }
 }
+
+#[cfg(test)]
+#[path = "joint_glyph_tests.rs"]
+mod joint_glyph_tests;
 
 #[cfg(test)]
 #[path = "joint_browser_tests.rs"]
