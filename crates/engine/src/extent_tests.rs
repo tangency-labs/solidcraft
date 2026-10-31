@@ -73,6 +73,40 @@ fn extrude_to_a_planar_face_boundary_follows_it_after_reload() {
     }
 }
 
+/// A post from the side of one block, To Object a face of a second block that runs along the
+/// extrusion (its top or its side, the block only partly in front of the profile): the post ends
+/// where that face begins, at the block's near side, and the To offset moves the end. It used to
+/// run on past the whole block, trimmed only where the block was, and the offset did nothing.
+#[test]
+fn extrude_to_a_face_along_the_direction_ends_where_the_face_begins() {
+    for (to, offset, end) in [([35, 18, 7], 0.0, 25.0), ([35, 18, 7], 2.0, 27.0), ([38, 8, 0], 0.0, 25.0), ([38, 8, 0], -1.5, 23.5)] {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length": 20, "width": 20, "height": 20, "body_name": "A"}));
+        run(&mut s, "solid.box", json!({"corner": [25, 8, -13], "length": 20, "width": 20, "height": 20, "operation": "new", "body_name": "B"}));
+        run(&mut s, "sketch.create", json!({"plane": {"face": [20, 10, 10]}}));
+        run(&mut s, "sketch.rectangle.two_point", json!({"p0": [2, 2], "p1": [18, 18]}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "solid.extrude", json!({"to": to, "to_offset": offset, "operation": "new", "body_name": "Post"}));
+        let b = body(&mut s, "Post");
+        let reach = b["bbox"]["max"][0].as_f64().unwrap();
+        assert!((reach - end).abs() < 1e-6, "To {to:?} offset {offset}: x max {reach}");
+        assert!((b["volume_mm3"].as_f64().unwrap() - 256.0 * (end - 20.0)).abs() < 1e-3, "To {to:?} offset {offset}: {b}");
+    }
+}
+
+/// A column To Object the side wall of the step it stands beside, a wall that starts at the
+/// profile's plane: it goes the wall's height, to the step's top.
+#[test]
+fn extrude_to_a_wall_rising_from_the_profile_goes_its_height() {
+    let mut s = stepped_block();
+    run(&mut s, "sketch.create", json!({"plane": {"origin": [0, 0, 10], "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]}}));
+    run(&mut s, "sketch.circle.center", json!({"center": [8, 0], "radius": 1.5}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"to": [5, 0, 14], "operation": "new", "body_name": "Post"}));
+    let b = body(&mut s, "Post");
+    assert!((b["bbox"]["max"][2].as_f64().unwrap() - 20.0).abs() < 1e-6, "{b}");
+}
+
 /// A square post extruded up to a horizontal cylinder (axis along x, r 10, centre z 30): its
 /// top takes the cylinder's shape, so the post is shortest in the middle.
 #[test]

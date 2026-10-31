@@ -573,3 +573,27 @@ fn failed_face_extrusion_edit_keeps_context_until_escape_and_preserves_visibilit
     assert!(!h.app.body_visible("Source"));
     assert_eq!(h.app.session.visibility, visibility);
 }
+
+/// Reopened, a To Object on a face shows that face, as the pick did, not the stored point read
+/// as sketch coordinates ("(0.00, 0.00) mm" with no sketch open). Its row is under Extent Type,
+/// the choice that adds it, and From Object's under Start.
+#[test]
+fn reopened_to_object_shows_its_face_under_the_extent_type() {
+    let mut h = Harness::new();
+    h.app.run("solid.box", json!({"corner":[0,0,15],"length":10,"width":10,"height":5,"body_name":"Lid"})).unwrap();
+    let mut h = make_in(h, json!({"to":[5,5,15],"to_offset":"1 mm","from":[0,0,2]}));
+    open(&mut h);
+    let d = h.app.dialog.as_ref().unwrap();
+    let to = d.inputs.iter().find(|i| i.label == "To Object").and_then(|i| i.items.first()).cloned();
+    assert!(matches!(&to, Some(solidcraft_engine::Sel::Face { body, .. }) if body == "Lid"), "{to:?}");
+    assert!(h.widget("(0.00, 0.00) mm").is_none());
+    let y = |name: &str| h.widget(name).unwrap_or_else(|| panic!("{name}"))[1];
+    let to_row = crate::scenario::handle_at("dialog:clear:To Object").unwrap().y as f64;
+    assert!(y("Extent Type") < to_row && to_row < y("To Offset"), "To Object's row is between Extent Type and To Offset");
+    assert!(y("Profiles") < y("Direction"), "Profiles stay first");
+    let from_row = crate::scenario::handle_at("dialog:clear:From Object").unwrap().y as f64;
+    assert!(y("Start") < from_row, "From Object's row is under Start");
+    h.step(&json!({"widget":"OK"})).unwrap();
+    assert!(h.app.dialog.is_none(), "{:?}", h.app.session.log);
+    assert_eq!(extent(&h).to.map(|p| p.0), Some(solidcraft_engine::geom::Vec3::new(5.0, 5.0, 15.0)));
+}
