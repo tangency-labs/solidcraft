@@ -1418,6 +1418,11 @@ fn midpoint_pair_orientation_uses_the_text_box_and_respects_explicit_types() {
         ("auto", [25., 33.], 'x'),
         ("auto", [43., 20.], 'y'),
         ("auto", [25., 20.], 'd'),
+        // The box's outer corners keep the distance between them, as before #7355.
+        ("auto", [50., 45.], 'd'),
+        ("auto", [55., 35.], 'd'),
+        ("auto", [0., 0.], 'd'),
+        ("auto", [-5., 5.], 'd'),
         ("distance", [25., 33.], 'd'),
         ("horizontal", [43., 20.], 'x'),
         ("vertical", [25., 33.], 'y'),
