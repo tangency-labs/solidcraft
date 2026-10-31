@@ -4355,6 +4355,7 @@ dependencies = [
  "solidcraft-doc",
  "solidcraft-geom",
  "solidcraft-kernel",
+ "solidcraft-testkit",
  "thiserror 2.0.21",
  "zip",
 ]
@@ -4421,6 +4422,10 @@ version = "0.28.0"
 dependencies = [
  "serde",
 ]
+
+[[package]]
+name = "solidcraft-testkit"
+version = "0.27.1"
 
 [[package]]
 name = "solidcraft-ui-egui"
