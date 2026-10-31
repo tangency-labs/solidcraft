@@ -311,8 +311,8 @@ const HELD_BACK: &[&str] = &[
     // sheet-metal/3078-flange-on-the-side-edge-of-a-flange: with it on the body's check fails with
     // "SmBSplineCurve::Test #15 Bad Repeated CPts" (volume unchanged, 31362.04580633055); off it passes.
     "bspline_trim_keeps_rational_end_spans",
-    // With the flag above off, crashes/2992-join-disk-and-36-twisted-loft-blades gets no result in 180 s;
-    // 19.6 s with this one off too, 14.7 s on C++.
+    // crashes/2992-join-disk-and-36-twisted-loft-blades takes 121 s with it on, 31 s off, run alone on one
+    // machine (the C++ kernel: 26 s), and times out in a loaded rig. The result is the same.
     "geometric_g2_continuity",
 ];
 
