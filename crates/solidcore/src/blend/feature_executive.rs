@@ -76,6 +76,10 @@
 //!   rejects a patch (WR-640); the port keeps that: it runs the
 //!   face intersections (their status and edits count) and the classifications, and
 //!   accepts.
+//! - **Open base (opt-in).** Upstream's `DoDefeature` returns success when a feature's
+//!   base patch could not be built, with the feature's faces cut out of the base and the
+//!   hole open (WR-656). With `Kernel::fixes.defeature_refuses_open_base` (own design)
+//!   [`FeatureExecutive::do_defeature`] refuses it with `SM_ERR` and puts the base back.
 //! - **Notifications.** B-rep edits run on arena-only notification records
 //!   ([`crate::topology::brep::p2::ArenaNotifyState`]; a copy's records cover both
 //!   B-reps), as upstream's objects notify their context. `PartitionFeature`'s and
@@ -89,7 +93,7 @@
 
 use crate::boolean::merge::p3::BooleanDriver;
 use crate::curve::curve::Curve;
-use crate::error::{ignore_status, EntityRef, Result, SolidError};
+use crate::error::{ignore_status, EntityRef, Result, SolidError, SM_ERR};
 use crate::geom::a_object::BooleanOperation;
 use crate::geom::context::{with_mark_lock, MarkType, ALL_MARKS};
 use crate::geom::extent1d::Extent1d;
@@ -595,16 +599,41 @@ impl<'a> FeatureExecutive<'a> {
     /// `DoDefeature`: partitions each feature, builds its patches and applies them
     /// (their statuses ignored); the base B-rep is edited in place.
     ///
+    /// Not upstream unless opted in (`fixes.defeature_refuses_open_base`, WR-656): a
+    /// feature whose base patch could not be built is refused before its patches are
+    /// applied, the base B-rep is put back as it was before the call (a
+    /// [`Brep::clone_for_rollback`] taken first) and the executive drops its features.
+    ///
     /// # Errors
     ///
-    /// [`SolidError::Unported`] from a callee; dangling ids.
+    /// [`SolidError::Unported`] from a callee; dangling ids; with the fix, `SM_ERR` at a
+    /// loop edge of the base for a feature whose hole in the base stays open.
     pub fn do_defeature(&mut self, k: &mut Kernel) -> Result<()> {
+        let mut saved = if k.fixes.defeature_refuses_open_base {
+            Some(self.base.clone_for_rollback()?)
+        } else {
+            None
+        };
         for i in 0..self.features.len() {
             let Some(feature) = self.features.get_mut(i) else {
                 continue;
             };
             keep_unported(partition_feature(k, self.base, feature))?;
             keep_unported(build_patches(k, self.base, feature, &mut self.patches))?;
+            if !feature.base_rebuilt {
+                if let Some(saved) = saved.take() {
+                    let edge = open_loop_edge(feature);
+                    self.base.restore_from(saved);
+                    self.features.clear();
+                    self.patches.clear();
+                    self.marks = Marks::default();
+                    return Err(SolidError::Upstream {
+                        code: SM_ERR,
+                        operation: OP,
+                        entity: edge.map(EntityRef::Edge),
+                    });
+                }
+            }
             keep_unported(apply_patches(k, self.base, feature, &mut self.patches))?;
         }
         Ok(())
@@ -688,6 +717,30 @@ fn keep_unported(r: Result<()>) -> Result<()> {
         Err(e) if e.is_unported() => Err(e),
         _ => Ok(()),
     }
+}
+
+/// Not upstream (WR-656): the first base loop edge of the first loop whose base patch is
+/// not used, the place of the hole a refused feature would leave open.
+fn open_loop_edge(feature: &Feature) -> Option<EdgeId> {
+    let l = feature
+        .loops
+        .iter()
+        .find(|l| !l.use_b_patch)
+        .or_else(|| feature.loops.first())?;
+    l.base_edges.first().copied()
+}
+
+/// Whether `error` is the refusal of `fixes.defeature_refuses_open_base` (not upstream,
+/// WR-656) from [`FeatureExecutive::do_defeature`].
+pub(crate) fn is_open_base_refusal(error: &SolidError) -> bool {
+    matches!(
+        error,
+        SolidError::Upstream {
+            operation: OP,
+            code: SM_ERR,
+            entity: Some(EntityRef::Edge(_)),
+        }
+    )
 }
 
 // ---- SmFeature -----------------------------------------------------------------------
@@ -1463,7 +1516,7 @@ fn planar_cap_rebuild(k: &mut Kernel, patch: &mut Brep, loop_curves: &[LoopCurve
                 // SER_MSG(.., "Couldn't make a planar cap. Loop edges non-planar?")
                 let code = match e {
                     SolidError::Upstream { code, .. } => code,
-                    _ => crate::error::SM_ERR,
+                    _ => SM_ERR,
                 };
                 SolidError::Upstream {
                     code,

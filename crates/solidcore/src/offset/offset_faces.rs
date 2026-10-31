@@ -63,7 +63,7 @@
 //!   on a new surface there when it is a moved face ([`MARK_MOVED`]) lying on one.
 //! - No recursion.
 
-use crate::blend::feature_executive::{FeatureExecutive, RebuildBrepType};
+use crate::blend::feature_executive::{is_open_base_refusal, FeatureExecutive, RebuildBrepType};
 use crate::blend::fillet_executive::p1::is_radius_supported;
 use crate::blend::fillet_executive::session::FilletSession;
 use crate::blend::fillet_geom::p1::FilletErrorType;
@@ -1247,12 +1247,19 @@ impl OffsetFacesExecutive {
                 else {
                     continue;
                 };
-                // (DoDefeature always succeeds and hands back the base B-rep itself)
-                defeature.do_defeature(k)?;
-                defeature
-                    .features()
-                    .get(feature)
-                    .is_some_and(|f| f.base_was_applied)
+                // (DoDefeature always succeeds and hands back the base B-rep itself; with
+                // `fixes.defeature_refuses_open_base`, not upstream, it refuses a base it
+                // could not patch, put back, which is the refusal below)
+                match defeature.do_defeature(k) {
+                    Err(e) if is_open_base_refusal(&e) => false,
+                    r => {
+                        r?;
+                        defeature
+                            .features()
+                            .get(feature)
+                            .is_some_and(|f| f.base_was_applied)
+                    }
+                }
             };
             // (not upstream: the port's cached topology fields)
             b.refresh_cached_topology();
