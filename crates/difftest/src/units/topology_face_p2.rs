@@ -2014,7 +2014,9 @@ fn run_rust_geom(op: &OpIn) -> Result<Vec<f64>, Fail> {
         } => {
             let mut a = Point2::new(uv1[0], uv1[1]);
             let mut s = Vec2::new(shift[0], shift[1]);
+            let k = Kernel::default();
             let r = fp2::check_seam_crossing(
+                &k,
                 &mut a,
                 Point2::new(uv2[0], uv2[1]),
                 &Extent2d::from_bounds(dom[0], dom[1], dom[2], dom[3]),

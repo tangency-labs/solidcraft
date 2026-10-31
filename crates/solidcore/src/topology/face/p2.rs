@@ -46,8 +46,9 @@
 //!   [`SolidError::Upstream`] (`SM_ERR`) or the callee's error.
 //! - **`sm_CheckSeamCrossing`** returns `SM_SUCCESS` (`1000`, true as an
 //!   `SmBoolean`) for a surface closed in neither direction; [`check_seam_crossing`]
-//!   returns `true` there (`plan/upstream-issues.md`). The unused surface argument is
-//!   dropped.
+//!   returns `true` there by default (`plan/upstream-issues.md`), and `false` with
+//!   the opt-in fix [`UpstreamFixes::check_seam_crossing_unclosed`](crate::kernel::UpstreamFixes::check_seam_crossing_unclosed).
+//!   The unused surface argument is dropped.
 //! - **`SmPrecisePropertyLayout`** indices are `usize`; `0` still means "not selected".
 //!   The evaluators take the derivative array as a slice and return
 //!   [`SolidError::InvalidInput`] for an index outside it (upstream writes out of
@@ -1057,9 +1058,12 @@ fn runge_kutta_ode_integrate(
 /// `sm_CheckSeamCrossing`: when the step from `uv1` to `uv2` jumps more than 90% of a
 /// closed direction's period of `domain`, moves `uv1` into `uv2`'s period and adds the
 /// period (with the sign of the jump's opposite) to `param_shift`. Returns whether a
-/// seam was crossed; `true` for a surface closed in neither direction (upstream
-/// returns `SM_SUCCESS` there).
+/// seam was crossed; `true` for a surface closed in neither direction by default
+/// (upstream returns `SM_SUCCESS` there; WR-87). With the opt-in fix
+/// [`UpstreamFixes::check_seam_crossing_unclosed`](crate::kernel::UpstreamFixes::check_seam_crossing_unclosed),
+/// returns `false` when closed in neither direction.
 pub fn check_seam_crossing(
+    k: &Kernel,
     uv1: &mut Point2,
     uv2: Point2,
     domain: &Extent2d,
@@ -1070,8 +1074,9 @@ pub fn check_seam_crossing(
     let mut ret = false;
 
     if !closed_u && !closed_v {
-        // SM_SUCCESS as an SmBoolean
-        return true;
+        // SM_SUCCESS as an SmBoolean upstream (WR-87).
+        // With the opt-in fix `k.fixes.check_seam_crossing_unclosed`, returns `false`.
+        return !k.fixes.check_seam_crossing_unclosed;
     }
 
     if closed_u {
@@ -3449,10 +3454,12 @@ mod tests {
 
     #[test]
     fn seam_crossing() {
+        let k = Kernel::default();
         let dom = Extent2d::from_bounds(0.0, 0.0, 2.0, 4.0);
         let mut uv1 = Point2::new(1.95, 1.0);
         let mut shift = Vec2::new(0.0, 0.0);
         assert!(check_seam_crossing(
+            &k,
             &mut uv1,
             Point2::new(0.05, 1.0),
             &dom,
@@ -3464,6 +3471,7 @@ mod tests {
         assert!((uv1.x - -0.05).abs() < 1e-15);
         let mut uv1 = Point2::new(1.0, 0.1);
         assert!(check_seam_crossing(
+            &k,
             &mut uv1,
             Point2::new(1.0, 3.9),
             &dom,
@@ -3473,6 +3481,7 @@ mod tests {
         ));
         assert_eq!(shift, Vec2::new(2.0, -4.0));
         assert!(!check_seam_crossing(
+            &k,
             &mut uv1,
             Point2::new(1.0, 4.0),
             &dom,
@@ -3480,8 +3489,9 @@ mod tests {
             true,
             &mut shift
         ));
-        // closed in neither direction: SM_SUCCESS (true)
+        // closed in neither direction: default returns SM_SUCCESS (true) for C++ parity
         assert!(check_seam_crossing(
+            &k,
             &mut uv1,
             Point2::new(9.0, 9.0),
             &dom,
@@ -3489,6 +3499,43 @@ mod tests {
             false,
             &mut shift
         ));
+    }
+
+    #[test]
+    fn seam_crossing_opt_in_unclosed_returns_false() {
+        let mut k = Kernel::default();
+        k.fixes.check_seam_crossing_unclosed = true;
+        let dom = Extent2d::from_bounds(0.0, 0.0, 2.0, 4.0);
+        let mut uv1 = Point2::new(1.0, 1.0);
+        let mut shift = Vec2::new(0.0, 0.0);
+
+        // When closed in neither direction, returns false and applies no shift
+        assert!(!check_seam_crossing(
+            &k,
+            &mut uv1,
+            Point2::new(9.0, 9.0),
+            &dom,
+            false,
+            false,
+            &mut shift
+        ));
+        assert_eq!(shift, Vec2::new(0.0, 0.0));
+        assert_eq!(uv1, Point2::new(1.0, 1.0));
+
+        // When closed in U, seam crossing detection is unaffected by the flag
+        let mut uv1_u = Point2::new(1.95, 1.0);
+        let mut shift_u = Vec2::new(0.0, 0.0);
+        assert!(check_seam_crossing(
+            &k,
+            &mut uv1_u,
+            Point2::new(0.05, 1.0),
+            &dom,
+            true,
+            false,
+            &mut shift_u
+        ));
+        assert_eq!(shift_u, Vec2::new(2.0, 0.0));
+        assert!((uv1_u.x - -0.05).abs() < 1e-15);
     }
 
     #[test]

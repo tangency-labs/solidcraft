@@ -842,6 +842,12 @@ pub struct UpstreamFixes {
     /// are not sampled (31 points fill 16 of 30 columns), and with more than one point the
     /// V dither still comes from `kernel.rng`. Off by default (pinned behaviour).
     pub face_points_span_domain: bool,
+    /// `sm_CheckSeamCrossing` returns `false` (no seam crossed) for a surface closed
+    /// in neither direction (`!closed_u && !closed_v`). Upstream returns `SM_SUCCESS`
+    /// (1000), which reads as `true` from a function documented to return whether a
+    /// shift happened (WR-87; `plan/upstream-issues/WR-87--sm-checkseamcrossing-returns-sm-success-as-its-smboolean.md`
+    /// and its 2026-10-31 addendum). Off by default for pinned C++ parity.
+    pub check_seam_crossing_unclosed: bool,
     /// `DoIntersection`'s start-point loop fails with [`crate::SolidError::InvalidInput`]
     /// once its traces have taken [`MAX_START_LOOP_TRACE_STEPS`] `ComputeNextPoint` calls
     /// together. Upstream's loop ignores a failed trace and goes on to the next start point,
