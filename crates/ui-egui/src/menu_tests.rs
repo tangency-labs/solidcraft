@@ -278,6 +278,33 @@ fn body_menu_isolates_renames_locks_and_deletes() {
     assert_eq!(app.session.model.state().bodies.len(), n - 1);
 }
 
+/// #8120: Isolate on a body or component menu toggles to Unisolate and restores the rest.
+#[test]
+fn isolate_on_body_and_component_menus_toggles_unisolate() {
+    let mut app = sample_app();
+    app.run("solid.box", json!({"length": 5, "width": 5, "height": 5, "corner": [200, 0, 0]})).unwrap();
+    let kept = body(&app);
+    let t = Target::Body { name: kept.clone() };
+    assert!(context_menu::items(&app, &t).iter().any(|i| i.label == "Isolate"));
+    act(&mut app, &t, "Isolate");
+    assert!(!app.session.visibility.hidden_bodies.is_empty());
+    let after = context_menu::items(&app, &t);
+    assert!(after.iter().any(|i| i.label == "Unisolate"), "same menu offers Unisolate");
+    assert!(!after.iter().any(|i| i.label == "Isolate"));
+    act(&mut app, &t, "Unisolate");
+    assert!(app.session.visibility.hidden_bodies.is_empty(), "Unisolate restores every body");
+
+    let made = app.run("component.from_bodies", json!({"bodies": [kept.clone()]})).unwrap();
+    let component = made["components"][0]["component"].as_u64().unwrap();
+    let other = app.session.world_state().bodies.iter().map(|b| b.name.clone()).find(|n| n != &kept).expect("root still has the second body");
+    let ct = Target::Component { id: component };
+    act(&mut app, &ct, "Isolate");
+    assert!(app.session.visibility.hidden_bodies.contains(&other));
+    assert!(context_menu::items(&app, &ct).iter().any(|i| i.label == "Unisolate"));
+    act(&mut app, &ct, "Unisolate");
+    assert!(app.session.visibility.hidden_bodies.is_empty());
+}
+
 #[test]
 fn properties_measure_the_body() {
     let mut app = sample_app();

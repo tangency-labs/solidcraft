@@ -344,6 +344,40 @@ pub fn component_bodies(app: &SolveApp, id: u64) -> Vec<String> {
     app.session.model.state().bodies.iter().filter(|b| doc.component_within(doc.model_body_component(b), id)).map(|b| b.name.clone()).collect()
 }
 
+/// True when `bodies` are shown and every other body is hidden — the result of Isolating that set.
+fn bodies_isolated(app: &SolveApp, bodies: &[String]) -> bool {
+    if bodies.is_empty() {
+        return false;
+    }
+    let all: Vec<String> = app.session.world_state().bodies.iter().map(|b| b.name.clone()).collect();
+    if all.len() <= bodies.len() {
+        return false;
+    }
+    let hidden = &app.session.visibility.hidden_bodies;
+    bodies.iter().all(|b| all.contains(b) && !hidden.contains(b)) && all.iter().filter(|b| !bodies.contains(b)).all(|b| hidden.contains(b))
+}
+
+/// True when this placement is visible and Isolate has left other occurrences or root bodies hidden.
+fn occurrence_isolated(app: &SolveApp, path: &[u64]) -> bool {
+    if path.is_empty() || app.session.occurrence_hidden(path) {
+        return false;
+    }
+    let vis = &app.session.visibility;
+    if vis.hidden_occurrences.is_empty() && vis.hidden_bodies.is_empty() {
+        return false;
+    }
+    !vis.hidden_occurrences.iter().any(|hidden| path.starts_with(hidden) || hidden.starts_with(path))
+}
+
+/// Isolate, or Unisolate when that set is already the only one shown (#8120).
+pub(crate) fn isolate_bodies_item(app: &SolveApp, bodies: &[String]) -> Item {
+    if bodies_isolated(app, bodies) {
+        act("ui.showAll", "Unisolate", "eye")
+    } else {
+        act("ui.isolate", "Isolate", "body").with(json!({ "bodies": bodies })).on(!bodies.is_empty())
+    }
+}
+
 /// The eight radial commands, clockwise from the top.
 pub fn radial_items(app: &SolveApp) -> Vec<Item> {
     let key = crate::keymap::display_for(app, "edit.repeat").unwrap_or_default();
@@ -384,7 +418,7 @@ pub fn items(app: &SolveApp, target: &Target) -> Vec<Item> {
             cmd(app, "select.set", "Select").with(json!({"items":[Sel::Body {name:name.clone()}]})),
             cmd(app, "select.same_look", "Select Same Look").with(json!({"body":name})),
             Item::sep(),
-            act("ui.isolate", "Isolate", "body").with(json!({"bodies":[name]})),
+            isolate_bodies_item(app, std::slice::from_ref(name)),
             act(if app.session.visibility.hidden_bodies.contains(name) { "ui.show" } else { "ui.hide" }, "Show/Hide", "eye")
                 .with(json!({"bodies":[name]})),
         ],
@@ -792,7 +826,7 @@ fn body_items(app: &SolveApp, bodies: &[String], browser: bool) -> Vec<Item> {
         Item::sep(),
         act(if all_hidden { "ui.show" } else { "ui.hide" }, "Show/Hide", "eye").key("V").with(json!({ "bodies": names })),
         act("ui.lock", if locked { "Unlock" } else { "Lock" }, "ground").with(json!({ "bodies": names })),
-        act("ui.isolate", "Isolate", "body").with(json!({ "bodies": names })),
+        isolate_bodies_item(app, bodies),
     ];
     if one {
         let b = bodies.first().cloned().unwrap_or_default();
@@ -947,8 +981,16 @@ fn occurrence_items(app: &SolveApp, path: &[u64]) -> Vec<Item> {
                 item.enabled = true;
             }
             "ui.isolate" => {
-                item.id = "ui.isolateOccurrence".into();
-                item.params = Some(json!({"path": path}));
+                if occurrence_isolated(app, path) {
+                    item.id = "ui.showAll".into();
+                    item.label = "Unisolate".into();
+                    item.icon = "eye".into();
+                    item.params = None;
+                    item.enabled = true;
+                } else {
+                    item.id = "ui.isolateOccurrence".into();
+                    item.params = Some(json!({"path": path}));
+                }
             }
             "ui.export" | "ui.saveMesh" | "ui.sendToSlicer" => item.params = Some(json!({"bodies": bodies})),
             "browser.expand_all" | "browser.collapse_all" => item.params = Some(json!({"path": path})),
@@ -1067,8 +1109,16 @@ fn component_items(app: &SolveApp, id: u64) -> Vec<Item> {
     v.push(act("ui.rename", "Rename", "rename").with(json!({ "component": id })));
     v.push(Item::sep());
     v.push(act(if hidden { "ui.show" } else { "ui.hide" }, "Show/Hide", "eye").key("V").with(json!({ "bodies": names })).on(!bodies.is_empty()));
-    v.push(act("ui.showAll", "Show All Bodies", "eye"));
-    v.push(act("ui.isolate", "Isolate", "body").with(json!({ "bodies": names })).on(!bodies.is_empty() && id != 0));
+    v.push(act("ui.showAll", "Show All Bodies", "eye").on({
+        let anything_hidden = !app.session.visibility.hidden_bodies.is_empty()
+            || !app.session.visibility.hidden_occurrences.is_empty()
+            || !app.session.visibility.hidden_sketches.is_empty()
+            || !app.session.visibility.hidden_folders.is_empty();
+        anything_hidden
+    }));
+    if id != 0 {
+        v.push(isolate_bodies_item(app, &bodies));
+    }
     v.push(act("ui.newGroup", "New Group", "folder").with(json!({ "component": id })));
     v.push(Item::sep());
     v.push(cmd(app, "browser.expand_all", "Expand All").with(json!({ "component": id })));
@@ -1433,13 +1483,18 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
             let _ = app.run("browser.visibility", json!({ "folder": "all", "visible": true }));
         }
         "ui.isolate" => {
-            // The picked bodies stay (shown first if they were hidden), everything else goes.
-            let others: Vec<String> = app.session.world_state().bodies.iter().map(|b| b.name.clone()).filter(|b| !bodies.contains(b)).collect();
-            if !bodies.is_empty() {
-                let _ = app.run("browser.visibility", json!({ "items": bodies, "visible": true }));
-            }
-            if !others.is_empty() {
-                let _ = app.run("browser.visibility", json!({ "items": others, "visible": false }));
+            // Already isolated to this set: Unisolate restores everything (#8120).
+            if bodies_isolated(app, &bodies) {
+                let _ = app.run("browser.visibility", json!({ "folder": "all", "visible": true }));
+            } else {
+                // The picked bodies stay (shown first if they were hidden), everything else goes.
+                let others: Vec<String> = app.session.world_state().bodies.iter().map(|b| b.name.clone()).filter(|b| !bodies.contains(b)).collect();
+                if !bodies.is_empty() {
+                    let _ = app.run("browser.visibility", json!({ "items": bodies, "visible": true }));
+                }
+                if !others.is_empty() {
+                    let _ = app.run("browser.visibility", json!({ "items": others, "visible": false }));
+                }
             }
         }
         "ui.lock" => {
@@ -1626,7 +1681,12 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
             }
         }
         "ui.isolateOccurrence" => {
-            let _ = app.run("browser.visibility", json!({"visible": true, "paths": [p["path"]], "isolate": true}));
+            let path: Vec<u64> = p.get("path").and_then(Value::as_array).map(|a| a.iter().filter_map(Value::as_u64).collect()).unwrap_or_default();
+            if occurrence_isolated(app, &path) {
+                let _ = app.run("browser.visibility", json!({ "folder": "all", "visible": true }));
+            } else {
+                let _ = app.run("browser.visibility", json!({"visible": true, "paths": [p["path"]], "isolate": true}));
+            }
         }
         "ui.canvasVisible" => drop(app.run("canvas.edit", p)),
         "ui.toolbarPin" | "ui.toolbarRemove" | "ui.toolbarReset" | "ui.toolbarCustomize" | "ui.toolbarTab" | "ui.shortcutPin" => {
