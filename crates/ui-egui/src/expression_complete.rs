@@ -38,7 +38,7 @@ struct Popup {
 }
 
 fn popup_id() -> egui::Id {
-    egui::Id::new("expression_completion_keyboard")
+    egui::Id::unique("expression_completion_keyboard")
 }
 
 /// Run before any TextEdit or viewport shortcuts. Only the focused, recently drawn popup
@@ -310,7 +310,7 @@ mod tests {
                 app.run("parameters.add", json!({"name":name,"expression":format!("{value} mm")})).unwrap();
             }
             params_dialog::publish(&mut app, &ctx);
-            let id = egui::Id::new("completion_test_editor");
+            let id = egui::Id::unique("completion_test_editor");
             ctx.memory_mut(|m| m.request_focus(id));
             let mut editor = Self { ctx, app, text: text.into(), id, accepted: false, leaked: Vec::new() };
             editor.frame(Vec::new());
@@ -387,7 +387,7 @@ mod tests {
         let long = "Driver_MountHole_to_Cover_Shared_Base_Layout_Angle";
         app.run("parameters.add", json!({"name": long, "expression": "8 deg"})).unwrap();
         params_dialog::publish(&mut app, &ctx);
-        let id = egui::Id::new("long_name_completion");
+        let id = egui::Id::unique("long_name_completion");
         ctx.memory_mut(|m| m.request_focus(id));
         let mut text = "Driver".to_string();
         let mut output = ctx.run_ui(

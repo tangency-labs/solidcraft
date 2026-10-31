@@ -1002,7 +1002,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         State::Offer if managed.is_some() => ("", crate::i18n::tr("update.later"), Some(crate::i18n::tr("update.skip"))),
         State::Offer => (primary, crate::i18n::tr("update.later"), Some(crate::i18n::tr("update.skip"))),
     };
-    let id = egui::Id::new("sc_update");
+    let id = egui::Id::unique("sc_update");
     let mut also_download = false;
     let (closed, answer) =
         ui_kit::Window::new(id, "update", crate::i18n::tr("update.title")).cards(1.7).actions(ok, cancel, apply).show(ctx, true, |ui| {
@@ -1129,7 +1129,7 @@ fn show_check_status(app: &mut SolveApp, ctx: &egui::Context) {
             Status::Idle => (crate::i18n::tr("update.check_unavailable").to_string(), false),
         }
     };
-    let id = egui::Id::new("sc_update");
+    let id = egui::Id::unique("sc_update");
     let (closed, action) = ui_kit::Window::new(id, "update", crate::i18n::tr("update.check_for_updates"))
         .cards(1.7)
         .actions("", crate::i18n::tr("ui.close"), None)

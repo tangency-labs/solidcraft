@@ -191,7 +191,7 @@ pub(crate) fn paint(app: &mut SolveApp, ui: &egui::Ui, painter: &egui::Painter, 
     {
         r = r.translate(vec2(0.0, nav.top() - 6.0 - r.bottom()));
     }
-    let id = egui::Id::new("sc_frame_rate");
+    let id = egui::Id::unique("sc_frame_rate");
     let clicked = ui.interact(r, id, Sense::click()).on_hover_text(tr("perf.click_for_details")).clicked();
     if clicked {
         app.preferences.frame_rate_details = !app.preferences.frame_rate_details;

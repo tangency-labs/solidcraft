@@ -371,15 +371,15 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let open = app.ui.palette_open;
     // Respect egui's instant/reduced animation policy, with a 120 ms upper bound.
     let progress = ctx.animate_bool_with_time_and_easing(
-        egui::Id::new("sc_search_expansion"),
+        egui::Id::unique("sc_search_expansion"),
         open,
         ctx.global_style().animation_time.clamp(0.0, 0.12),
         egui::emath::easing::cubic_out,
     );
-    let ribbon = ctx.data(|d| d.get_temp::<Rect>(egui::Id::new("sc_ribbon_search")));
+    let ribbon = ctx.data(|d| d.get_temp::<Rect>(egui::Id::unique("sc_ribbon_search")));
     if !open {
         app.sbox.focus = false;
-        ctx.memory_mut(|m| m.surrender_focus(egui::Id::new("sc_sbox_text")));
+        ctx.memory_mut(|m| m.surrender_focus(egui::Id::unique("sc_sbox_text")));
         if progress == 0.0 {
             app.sbox.at = None;
         }
@@ -433,7 +433,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     // the ribbon goes under (Preferences, say); open, its sheet floats over everything.
     let floating = open || progress > 0.0;
     let response = Container::new(ctx, Surface::Popup)
-        .area(egui::Id::new("sc_sbox"))
+        .area(egui::Id::unique("sc_sbox"))
         .fixed_pos(pos)
         .order(if floating { egui::Order::Foreground } else { egui::Order::Background })
         .fade_in(false)
@@ -462,7 +462,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                     );
                     if !open && progress == 0.0 {
                         if field.clicked()
-                            || ui.interact(Rect::from_min_size(pos, field_size), ui.id().with("search_open"), egui::Sense::click()).clicked()
+                            || ui.interact(Rect::from_min_size(pos, field_size), ui.scope_id().with("search_open"), egui::Sense::click()).clicked()
                         {
                             app.start("ui.palette");
                             ctx.request_repaint();
@@ -725,7 +725,7 @@ mod tests {
     fn the_search_field_asks_for_focus_once_per_opening() {
         let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
         let ctx = crate::fonts::test_context();
-        let field = egui::Id::new("sc_sbox_text");
+        let field = egui::Id::unique("sc_sbox_text");
         open(&mut app, None);
         frame(&mut app, &ctx);
         frame(&mut app, &ctx);
@@ -814,7 +814,7 @@ mod tests {
         let row = rect_of("ribbon:reveal").expect("the revealed row");
         assert!(rect_of("toolbar_dropdown").unwrap().contains_rect(row), "{row:?}");
         assert!(rect_of("ribbon:reveal_tooltip").is_some_and(|tip| tip.left() >= row.right()), "the row's tooltip beside it");
-        assert_eq!(h.ctx.data(|d| d.get_temp::<egui::Id>(egui::Id::new("sc_panel_open"))), None, "the preview doesn't open it for good");
+        assert_eq!(h.ctx.data(|d| d.get_temp::<egui::Id>(egui::Id::unique("sc_panel_open"))), None, "the preview doesn't open it for good");
 
         // Starting it from the box: the section label pulses, then stays marked while it runs.
         h.call("ui.key", json!({"key": "Enter"}));
@@ -988,7 +988,7 @@ mod tests {
         assert_eq!(h.app.session.doc.features.len(), 1, "{:?}", h.app.status);
         assert!(h.app.ui.palette_open);
         assert_eq!(h.app.sbox.text, query);
-        assert!(h.ctx.memory(|m| m.has_focus(egui::Id::new("sc_sbox_text"))));
+        assert!(h.ctx.memory(|m| m.has_focus(egui::Id::unique("sc_sbox_text"))));
         h.step(&json!({"key":"Enter"})).unwrap();
         h.frames(2);
         assert_eq!(h.app.session.doc.features.len(), 2);
@@ -1058,17 +1058,17 @@ mod tests {
         h.app.home.open = false;
         h.frames(3);
         let order = |h: &crate::scenario::Harness| {
-            h.ctx.memory(|m| m.areas().visible_layer_ids().into_iter().find(|l| l.id == egui::Id::new("sc_sbox")).map(|l| l.order))
+            h.ctx.memory(|m| m.areas().visible_layer_ids().into_iter().find(|l| l.id == egui::Id::unique("sc_sbox")).map(|l| l.order))
         };
         // Closed, the field is ribbon chrome: Preferences and the other system windows cover it.
         assert_eq!(order(&h), Some(egui::Order::Background), "the closed field belongs to the ribbon");
         h.call("ui.prefs", json!({"open": "General"}));
         h.frames(3);
-        let window = h.ctx.memory(|m| m.area_rect(egui::Id::new("sc_prefs"))).unwrap();
+        let window = h.ctx.memory(|m| m.area_rect(egui::Id::unique("sc_prefs"))).unwrap();
         let field = crate::scenario::rect_of("ribbon:search").unwrap();
         assert!(order(&h) < Some(egui::Order::Middle), "a system window draws over the closed field");
         assert!(
-            !window.contains(field.center()) || h.ctx.memory(|m| m.layer_id_at(field.center())).is_some_and(|l| l.id == egui::Id::new("sc_prefs"))
+            !window.contains(field.center()) || h.ctx.memory(|m| m.layer_id_at(field.center())).is_some_and(|l| l.id == egui::Id::unique("sc_prefs"))
         );
         h.call("ui.prefs", json!({"button": "cancel"}));
         // Open, the sheet is a popup again and floats over every window.
@@ -1116,7 +1116,7 @@ mod tests {
         assert_eq!(footer, Rect::from_min_max(pos2(sheet.left(), footer.top()), sheet.right_bottom()));
         // Inspect native accessibility widgets, not just aliases or painted labels.
         let nodes = &h.output.accesskit_update.as_ref().unwrap().nodes;
-        let search_edit = h.ctx.read_response(egui::Id::new("sc_sbox_text")).unwrap().rect;
+        let search_edit = h.ctx.read_response(egui::Id::unique("sc_sbox_text")).unwrap().rect;
         let fields: Vec<_> = nodes
             .iter()
             .filter(|(_, n)| n.role() == egui::accesskit::Role::TextInput)

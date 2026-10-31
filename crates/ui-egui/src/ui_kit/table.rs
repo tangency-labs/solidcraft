@@ -206,7 +206,10 @@ impl Table<'_> {
         let (rect, response) = ui.allocate_exact_size(vec2(self.width(), row_height() - t.space_4), egui::Sense::click());
         let stroke = t.control_border_stroke(t.control_border);
         let mut outline = Vec::new();
-        egui::epaint::tessellator::path::rounded_rectangle(&mut outline, rect.shrink(stroke.width * 0.5), f32::from(t.control_radius).into());
+        egui::epaint::tessellator::path::rounded_rectangle(
+            &mut outline,
+            egui::epaint::RoundedRect::new(rect.shrink(stroke.width * 0.5), f32::from(t.control_radius)),
+        );
         if let Some(first) = outline.first().copied() {
             outline.push(first);
         }
@@ -221,7 +224,7 @@ impl Table<'_> {
             t.form_dim,
             false,
         );
-        response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), crate::i18n::tr_label(label)));
+        response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled(), crate::i18n::tr_label(label)));
         scenario::publish_handle(&format!("dialog:table:{}:add", self.id), rect.center());
         scenario::publish_rect(&format!("dialog:table:{}:add", self.id), rect);
         response.on_hover_cursor(egui::CursorIcon::PointingHand).on_hover_text(crate::i18n::tr_label(tooltip))
@@ -236,7 +239,7 @@ impl Table<'_> {
         if selected || (ui.is_enabled() && ui.rect_contains_pointer(rect)) {
             ui.painter().rect_filled(rect, t.control_radius, if selected { t.selected_bg } else { t.hover });
         }
-        response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::SelectableLabel, ui.is_enabled(), selected, key));
+        response.widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, ui.is_enabled(), selected, key));
         scenario::publish_rect(&format!("dialog:table:{}:{key}", self.id), rect);
         let ppp = ui.ctx().pixels_per_point().max(0.5);
         let left = (rect.left() * ppp).round() / ppp + t.space_8;
@@ -399,7 +402,7 @@ pub(crate) fn sort_header(ui: &mut Ui, label: &str, sort: &mut Sort) -> Response
         Sort::Ascending => "Sort Z to A",
         Sort::Descending => "Back to the original order",
     };
-    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), text));
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled(), text));
     response.on_hover_cursor(egui::CursorIcon::PointingHand).on_hover_text(crate::i18n::tr_label(tip))
 }
 
@@ -471,7 +474,7 @@ pub(crate) fn active_pill(ui: &mut Ui) {
     let (rect, response) = ui.allocate_exact_size(vec2(width, t.font_small + t.space_6), egui::Sense::hover());
     ui.painter().rect(rect, t.radius_xl, t.control_fill, t.control_border_stroke(t.control_border), egui::StrokeKind::Inside);
     super::text::paint_text(ui, rect.shrink2(vec2(t.space_8, 0.0)), label, crate::fonts::semibold(t.font_small), t.form_primary, false);
-    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), label));
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, ui.is_enabled(), label));
     scenario::publish_handle(&format!("dialog:inline:{label}"), rect.center());
     scenario::publish_rect(&format!("dialog:inline:{label}"), rect);
 }

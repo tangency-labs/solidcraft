@@ -259,7 +259,7 @@ pub fn start_with_format(app: &mut SolveApp, format: &str) {
 /// A popup with the slicer list is open (Delete belongs to it, not to the design's selection).
 pub fn popup_open(ctx: &egui::Context) -> bool {
     let frame = ctx.cumulative_frame_nr();
-    let at = ctx.data(|d| d.get_temp::<u64>(egui::Id::new("sc_slicer_popup")));
+    let at = ctx.data(|d| d.get_temp::<u64>(egui::Id::unique("sc_slicer_popup")));
     at.is_some_and(|n| n + 1 >= frame)
 }
 
@@ -426,7 +426,7 @@ fn slicer_combo(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut SaveMesh) {
     ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Truncate);
     let r = crate::ui_kit::dropdown_menu(ui, "sm_slicer", &text, |ui| {
         let frame = ctx.cumulative_frame_nr();
-        ctx.data_mut(|d| d.insert_temp(egui::Id::new("sc_slicer_popup"), frame));
+        ctx.data_mut(|d| d.insert_temp(egui::Id::unique("sc_slicer_popup"), frame));
         for e in &entries {
             let tex = icon(&mut app.slicer_menu, &ctx, e);
             let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 22.0), Sense::click());

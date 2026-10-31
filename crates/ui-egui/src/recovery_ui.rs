@@ -134,7 +134,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     }
     let mut act: Option<(Entry, bool)> = None;
     let mut discard_all = false;
-    let (closed, action) = ui_kit::Window::new(egui::Id::new("sc_recover_prompt"), "restore", crate::i18n::tr_label("Recover unsaved design?"))
+    let (closed, action) = ui_kit::Window::new(egui::Id::unique("sc_recover_prompt"), "restore", crate::i18n::tr_label("Recover unsaved design?"))
         .actions("", crate::i18n::tr_label("Later"), None)
         .show_with_left(
             ctx,
@@ -189,7 +189,7 @@ fn confirm_discard_all(app: &mut SolveApp, ctx: &egui::Context) {
     } else {
         crate::i18n::format("recovery.discard_all_title", &[("count", &count.to_string())])
     };
-    let (closed, action) = ui_kit::Confirm::new(egui::Id::new("sc_recover_discard_all"), "delete", &title)
+    let (closed, action) = ui_kit::Confirm::new(egui::Id::unique("sc_recover_discard_all"), "delete", &title)
         .tone(ui_kit::Tone::Danger)
         .actions(crate::i18n::tr("recovery.discard_all"), crate::i18n::tr("ui.cancel"), None)
         .show(ctx, true, |ui| {

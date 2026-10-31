@@ -109,7 +109,7 @@ pub(crate) fn radial_menu(ui: &mut Ui, center: Pos2, items: &[Item], hot: Option
         let a = -FRAC_PI_2 + k as f32 * FRAC_PI_4;
         let at = center + unit(a) * 104.0;
         let target = Rect::from_center_size(at, vec2(t.space_24 * 2.0 + t.space_12, t.space_24 + t.space_16 + t.space_2));
-        let response = ui.interact(target, ui.id().with(("radial", k)), Sense::hover());
+        let response = ui.interact(target, ui.scope_id().with(("radial", k)), Sense::hover());
         crate::scenario::publish_target(&format!("radial:{}", item.id), target);
         let ink = if lit { accent.ink } else { t.form_ink };
         crate::icons::paint_accented(
@@ -125,7 +125,7 @@ pub(crate) fn radial_menu(ui: &mut Ui, center: Pos2, items: &[Item], hot: Option
         job.wrap.max_rows = 1;
         let galley = painter.layout_job(job);
         painter.galley(at + vec2(-galley.size().x / 2.0, t.space_10), galley, ink);
-        response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, enabled, label));
+        response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, enabled, label));
         if lit && ui.input(|i| i.pointer.primary_clicked() && i.pointer.interact_pos().is_some_and(|p| contains(k, p - center))) {
             picked = Some(item.clone());
         }

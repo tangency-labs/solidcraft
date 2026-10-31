@@ -383,7 +383,7 @@ fn header(app: &mut SolveApp, ui: &mut egui::Ui) {
     if let Some(name) = chosen {
         switch_shot(app, name);
     }
-    let field = ui_kit::bounded_cell_editor(ui, ui.id().with("render_setup_name"), &mut app.render_workspace.view.name, "", false, 128);
+    let field = ui_kit::bounded_cell_editor(ui, ui.scope_id().with("render_setup_name"), &mut app.render_workspace.view.name, "", false, 128);
     crate::scenario::publish_target("render:setup-name", field.rect);
     if field.changed() {
         app.render_workspace.view.dirty = true;
@@ -472,7 +472,7 @@ fn confirmation(app: &mut SolveApp, ctx: &egui::Context) {
     let primary = app.tr(if removing { "render.stage_panels.remove_shot" } else { "render.save_continue" }).to_string();
     let discard = app.tr("render.discard_continue").to_string();
     let message = app.tr(if removing { "render.shot_remove_help" } else { "render.draft_confirm_help" }).to_string();
-    let (closed, answer) = ui_kit::Confirm::new(egui::Id::new("render_pending_shot"), if removing { "delete" } else { "save" }, &title)
+    let (closed, answer) = ui_kit::Confirm::new(egui::Id::unique("render_pending_shot"), if removing { "delete" } else { "save" }, &title)
         .tone(if removing { ui_kit::Tone::Danger } else { ui_kit::Tone::Warning })
         .actions(&primary, &keep, (!removing).then_some(discard.as_str()))
         .selected(ui_kit::Action::Cancel)
@@ -531,7 +531,7 @@ fn scene_controls(app: &mut SolveApp, ui: &mut egui::Ui) {
         ] {
             let response = ui_kit::tree_row(
                 ui,
-                ui.id().with(("scene_stage", stage.key())),
+                ui.scope_id().with(("scene_stage", stage.key())),
                 &ui_kit::Row { compact: true, label: app.tr(stage.label()), secondary: &summary, icon, ..Default::default() },
             );
             if let Some(rect) = response.rect {
@@ -617,7 +617,14 @@ fn shot_controls(app: &mut SolveApp, ui: &mut egui::Ui) {
     ui_kit::section(ui, "render_shot_manager", &title, false, |ui| {
         ui_kit::text(ui, app.tr("render.shot_saved_only"), ui_kit::Text::Note("render.shot_saved_only"));
         let label = app.tr("render.shot_new_name").to_string();
-        ui_kit::bounded_cell_editor(ui, ui.id().with("render_shot_new_name"), &mut app.render_workspace.view.inspector.shot_name, &label, false, 128);
+        ui_kit::bounded_cell_editor(
+            ui,
+            ui.scope_id().with("render_shot_new_name"),
+            &mut app.render_workspace.view.inspector.shot_name,
+            &label,
+            false,
+            128,
+        );
         for (command, key) in [("render.shot.duplicate", "render.shot_duplicate"), ("render.shot.rename", "render.shot_rename")] {
             let enabled = !app.render_workspace.view.dirty
                 && app.session.doc.render.setups.contains_key(&app.render_workspace.view.name)
@@ -1581,7 +1588,14 @@ fn base_appearance(app: &mut SolveApp, ui: &mut egui::Ui) {
     let title = app.tr("render.base_appearance").to_string();
     ui_kit::section(ui, "render_base_appearance", &title, false, |ui| {
         let mut view = std::mem::take(&mut app.render_workspace.view.inspector.appearance);
-        ui_kit::bounded_cell_editor(ui, ui.id().with("render_base_target_search"), &mut view.query, app.tr("render.material_filter"), false, 128);
+        ui_kit::bounded_cell_editor(
+            ui,
+            ui.scope_id().with("render_base_target_search"),
+            &mut view.query,
+            app.tr("render.material_filter"),
+            false,
+            128,
+        );
         if ui_kit::button(ui, app.tr("render.material_refresh"), ui_kit::Button::Normal).clicked() {
             match app.run("render.library.targets", json!({"query":view.query,"limit":128})) {
                 Ok(reply) => {

@@ -318,7 +318,7 @@ fn inspector_header(app: &mut SolveApp, ui: &mut egui::Ui, state: &mut State, in
             })
             .inner
             .on_hover_text(label);
-        response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, enabled && ui.is_enabled(), label));
+        response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, enabled && ui.is_enabled(), label));
         scenario::publish_target(&format!("prefs:navbar:{key}"), response.rect);
         if response.clicked() {
             edit(app, state, index, key);

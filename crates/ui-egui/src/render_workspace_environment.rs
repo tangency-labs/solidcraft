@@ -204,7 +204,7 @@ pub(super) fn ring_overlay(app: &mut SolveApp, ui: &mut egui::Ui, viewport: egui
     crate::scenario::publish_target("render:environment:ring-handle", egui::Rect::from_center_size(handle, egui::Vec2::splat(t.space_16)));
     let chip = ui_kit::Container::navigation_card(
         ui.ctx(),
-        egui::Id::new("render_environment_rotation"),
+        egui::Id::unique("render_environment_rotation"),
         ring.center + egui::vec2(0.0, ring.radius - t.control_height - t.space_8),
         egui::Align2::CENTER_BOTTOM,
         |ui| ui_kit::text(ui, &format!("{angle:.0}°"), ui_kit::Text::Inline).on_hover_text(app.tr("render.env_ring_help")),
@@ -463,7 +463,7 @@ fn source_name(app: &mut SolveApp, ctx: &egui::Context) -> String {
     };
     if let Some(source) = source {
         type Names = std::sync::Arc<std::collections::BTreeMap<String, String>>;
-        let cache = egui::Id::new("render_environment_catalog_names");
+        let cache = egui::Id::unique("render_environment_catalog_names");
         let names = ctx.data_mut(|data| data.get_temp::<Names>(cache)).unwrap_or_else(|| {
             let mut names = std::collections::BTreeMap::new();
             if let Ok(reply) = app.run("render.library.list", json!({"kind":"hdr","limit":128})) {
@@ -544,8 +544,13 @@ fn edit<T: Clone + PartialEq + Send + Sync + 'static>(
     current: T,
     draw: impl FnOnce(&mut egui::Ui, &mut T) -> egui::Response,
 ) -> Option<T> {
-    let id =
-        ui.id().with(("render-environment", key, &app.render_workspace.view.name, std::sync::Arc::as_ptr(&app.session.doc), app.session.revision));
+    let id = ui.scope_id().with((
+        "render-environment",
+        key,
+        &app.render_workspace.view.name,
+        std::sync::Arc::as_ptr(&app.session.doc),
+        app.session.revision,
+    ));
     let (_, mut value, mut pending) = ui
         .data_mut(|data| data.get_temp::<(T, T, bool)>(id))
         .filter(|(original, _, _)| original == &current)
@@ -752,7 +757,7 @@ pub(super) fn request_stage_removal(app: &SolveApp, ctx: &egui::Context) {
     if let Ok(set) = setups::snapshot(app) {
         ctx.data_mut(|data| {
             data.insert_temp(
-                egui::Id::new("render_remove_stage"),
+                egui::Id::unique("render_remove_stage"),
                 StageRemoval {
                     document: Arc::downgrade(&app.session.doc),
                     revision: app.session.revision,
@@ -765,7 +770,7 @@ pub(super) fn request_stage_removal(app: &SolveApp, ctx: &egui::Context) {
 }
 
 pub(super) fn stage_confirmation(app: &mut SolveApp, ctx: &egui::Context) {
-    let id = egui::Id::new("render_remove_stage");
+    let id = egui::Id::unique("render_remove_stage");
     let Some(pending) = ctx.data_mut(|data| data.get_temp::<StageRemoval>(id)) else { return };
     if pending.revision != app.session.revision
         || pending.name != app.render_workspace.view.name
@@ -799,7 +804,7 @@ fn ground(app: &mut SolveApp, ui: &mut egui::Ui) {
     let title = app.tr("render.environment.ground").to_string();
     ui_kit::section(ui, "render_environment_ground", &title, true, |ui| {
         let snapshot = setups::snapshot(app);
-        let id = ui.id().with(("ground-form", Arc::as_ptr(&app.session.doc), app.session.revision, &app.render_workspace.view.name));
+        let id = ui.scope_id().with(("ground-form", Arc::as_ptr(&app.session.doc), app.session.revision, &app.render_workspace.view.name));
         let mut form = ui.data_mut(|data| data.get_temp::<GroundForm>(id)).unwrap_or_else(|| GroundForm {
             value: snapshot.as_ref().map(|set| ground_values(app, set)).unwrap_or(Ground { margin: 1.0, gap: 0.1, color: [0.18; 3] }),
             replace: false,

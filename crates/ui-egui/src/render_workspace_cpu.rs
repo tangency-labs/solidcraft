@@ -413,7 +413,7 @@ pub(super) fn reflection_controls(app: &mut SolveApp, ui: &mut egui::Ui) {
         crate::scenario::publish_handle(&format!("render:cpu-reflection-mode:{}", entry.body), mode_control.rect.center());
     }
     let hint = app.tr("render.cpu_body_filter").to_string();
-    ui_kit::bounded_cell_editor(ui, ui.id().with("cpu_body_filter"), &mut app.render_workspace.view.cpu.body_filter, &hint, false, 128);
+    ui_kit::bounded_cell_editor(ui, ui.scope_id().with("cpu_body_filter"), &mut app.render_workspace.view.cpu.body_filter, &hint, false, 128);
     let selected = app.render_workspace.view.cpu.selected_body.clone();
     let label = selected.clone().unwrap_or_else(|| app.tr("render.cpu_body_choose").to_string());
     let world = app.session.world_state();

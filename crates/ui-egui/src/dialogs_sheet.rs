@@ -1045,7 +1045,7 @@ pub fn overlay(app: &mut SolveApp, painter: &egui::Painter, rect: Rect, d: &Dial
     // to its width limit, so its actual edge, rather than a fixed reserve, bounds the view.
     let panel_left = painter
         .ctx()
-        .memory(|m| m.area_rect(egui::Id::new(("sc_dialog", "FLAT PATTERN"))))
+        .memory(|m| m.area_rect(egui::Id::unique(("sc_dialog", "FLAT PATTERN"))))
         .map(|panel| panel.left())
         .unwrap_or(rect.right() - crate::frame::DIALOG_MAX_W);
     let content = crate::shell::content_rect(app, rect);

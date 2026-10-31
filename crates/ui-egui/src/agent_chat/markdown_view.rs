@@ -22,7 +22,7 @@ fn blocks(ctx: &egui::Context, slot: usize, src: &str) -> Arc<Vec<Block>> {
     let mut h = std::collections::hash_map::DefaultHasher::new();
     src.hash(&mut h);
     let key = h.finish();
-    let id = egui::Id::new(("agent_chat_markdown", slot));
+    let id = egui::Id::unique(("agent_chat_markdown", slot));
     if let Some((k, b)) = ctx.data(|d| d.get_temp::<(u64, Arc<Vec<Block>>)>(id))
         && k == key
     {

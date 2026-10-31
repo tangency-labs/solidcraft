@@ -358,7 +358,7 @@ fn plot_rows(
     if what != Plotted::Nothing {
         choice_row(ui, "motion.plot_quantity", "ms_quantity", &mut a.quantity, &QUANTITIES);
         form_row(ui, "Duration", |ui| {
-            let r = crate::ui_kit::cell_editor(ui, ui.id().with("duration"), &mut a.duration, "motion.duration_hint", false);
+            let r = crate::ui_kit::cell_editor(ui, ui.scope_id().with("duration"), &mut a.duration, "motion.duration_hint", false);
             crate::scenario::publish_handle("dialog:Duration", r.rect.center());
         });
         let params = study.clone().and_then(|st| plot_params(s, what, &st, &a.duration, inputs).map(|p| (st, p)));

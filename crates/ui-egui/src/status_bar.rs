@@ -174,7 +174,7 @@ fn paint(app: &mut SolveApp, ui: &mut egui::Ui, contents: &Contents) {
             painter.circle_filled(pos2(item.left() + t.space_4, item.center().y), t.space_3 + 0.5, dot);
         }
         painter.galley(pos2(item.left() + dot_width, item.center().y - galley.size().y / 2.0), galley, colour);
-        ui.interact(item, egui::Id::new(handle), Sense::hover()).widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, true, &text));
+        ui.interact(item, egui::Id::unique(handle), Sense::hover()).widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, true, &text));
         crate::scenario::publish_target(handle, item);
         right = item.left();
     }
@@ -191,7 +191,7 @@ fn menu_button(app: &mut SolveApp, ui: &mut egui::Ui, right: f32, target: Target
     let chevron = t.space_10;
     let width = t.space_6 + galley.size().x + t.space_4 + chevron + t.space_6;
     let button = Rect::from_min_max(pos2(right - width, r.top() + t.space_3), pos2(right, r.bottom() - t.space_3));
-    let response = ui.interact(button, egui::Id::new(("sc_status_menu", handle)), Sense::click());
+    let response = ui.interact(button, egui::Id::unique(("sc_status_menu", handle)), Sense::click());
     let open = app.viewport.context_menu.is_some() && app.menu.target == target;
     if response.hovered() || open {
         painter.rect_filled(button, t.control_radius, t.hover);
@@ -201,7 +201,7 @@ fn menu_button(app: &mut SolveApp, ui: &mut egui::Ui, right: f32, target: Target
     painter.galley(text_at, galley, t.text);
     let chevron_rect = Rect::from_center_size(pos2(button.right() - t.space_6 - chevron / 2.0, button.center().y), vec2(chevron, chevron));
     crate::ui_kit::dropdown_indicator(&painter, chevron_rect, t.text_dim);
-    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, label));
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, label));
     crate::scenario::publish_target(handle, button);
     if response.on_hover_text(tip).clicked() {
         crate::context_menu::toggle_for(app, button, button.right_top(), target);

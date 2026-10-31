@@ -638,7 +638,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let scroll_height = (screen.height() - overhead).max(0.0);
     let size = vec2(width, overhead + rows_height.min(scroll_height));
     let resp = Container::new(ctx, Surface::Popup)
-        .area(egui::Id::new("sc_select_other"))
+        .area(egui::Id::unique("sc_select_other"))
         .fixed_pos(crate::context_menu::place(at, gap, size, screen))
         .constrain(true)
         .order(egui::Order::Foreground)

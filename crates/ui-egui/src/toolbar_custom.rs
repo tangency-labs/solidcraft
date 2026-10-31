@@ -424,7 +424,7 @@ pub fn window(app: &mut SolveApp, ctx: &egui::Context) {
     // published positions instead of shifting them after egui measures the taller content.
     let origin =
         egui::pos2((ctx.content_rect().center().x - t.form_card_width).max(ctx.content_rect().left()), ctx.content_rect().top() + t.space_24 * 2.0);
-    let (closed, action) = ui_kit::Window::new(egui::Id::new("sc_toolbar_customize"), "settings", crate::i18n::tr_label("Customize Toolbar"))
+    let (closed, action) = ui_kit::Window::new(egui::Id::unique("sc_toolbar_customize"), "settings", crate::i18n::tr_label("Customize Toolbar"))
         .placed(egui::Align2::LEFT_TOP, origin)
         .cards(2.0)
         .actions("", "Close", None)

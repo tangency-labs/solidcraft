@@ -215,7 +215,7 @@ fn target_controls(app: &mut SolveApp, ui: &mut egui::Ui, view: &mut View) {
     ui.label(app.tr("render.library_target"));
     ui_kit::bounded_cell_editor(
         ui,
-        ui.id().with("render_library_target_search"),
+        ui.scope_id().with("render_library_target_search"),
         &mut view.target_query,
         app.tr("render.material_filter"),
         false,
@@ -622,7 +622,7 @@ fn light_panel(app: &mut SolveApp, ui: &mut egui::Ui) {
     }
     if view.light_scope == 4 {
         ui.add_enabled_ui(false, |ui| {
-            ui_kit::search_field(ui, ui.id().with("render_mine_search"), &mut view.query, app.tr("render.stage_panels.search_studios"));
+            ui_kit::search_field(ui, ui.scope_id().with("render_mine_search"), &mut view.query, app.tr("render.stage_panels.search_studios"));
             ui_kit::button(ui, app.tr("render.stage_panels.apply"), ui_kit::Button::Normal);
         });
         ui_kit::text(ui, app.tr("render.stage_panels.mine_pending"), ui_kit::Text::Note("render:mine:reason"));
@@ -681,7 +681,7 @@ fn light_panel(app: &mut SolveApp, ui: &mut egui::Ui) {
 }
 
 fn catalog_search(app: &mut SolveApp, ui: &mut egui::Ui, view: &mut View, hint: &str) {
-    let search = ui_kit::search_field(ui, ui.id().with("render_stage_catalog_search"), &mut view.query, app.tr(hint));
+    let search = ui_kit::search_field(ui, ui.scope_id().with("render_stage_catalog_search"), &mut view.query, app.tr(hint));
     crate::scenario::publish_target("render:library-search", search.rect);
     let end = view.query.char_indices().nth(128).map_or(view.query.len(), |(at, _)| at);
     view.query.truncate(end);
@@ -961,7 +961,7 @@ fn browse_contents(app: &mut SolveApp, ui: &mut egui::Ui, stage_card: bool) {
     };
     let hint = crate::i18n::format("render.search_appearances", &[("count", &count.to_string())]);
     let query = if view.collection == 0 { &mut view.query } else { &mut view.collection_query };
-    let search = ui_kit::search_field(ui, ui.id().with("render_library_search"), query, &hint);
+    let search = ui_kit::search_field(ui, ui.scope_id().with("render_library_search"), query, &hint);
     query.truncate(query.char_indices().nth(128).map_or(query.len(), |(at, _)| at));
     crate::scenario::publish_target("render:library-search", search.rect);
     if search.changed() {
@@ -1621,7 +1621,7 @@ fn physical_controls(app: &mut SolveApp, ui: &mut egui::Ui, view: &mut View, id:
         }
     }
     ui.label(app.tr("render.physical_material_name"));
-    ui_kit::bounded_cell_editor(ui, ui.id().with("physical_reference_name"), &mut view.physical_name, "", false, 128);
+    ui_kit::bounded_cell_editor(ui, ui.scope_id().with("physical_reference_name"), &mut view.physical_name, "", false, 128);
     if ui_kit::button(ui, app.tr("render.stage_panels.prepare_plan"), ui_kit::Button::Normal).clicked() {
         let result =
             app.run("render.library.physical.prepare", json!({"id":id,"name":view.physical_name,"acknowledge_reference":true})).and_then(|plan| {

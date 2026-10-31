@@ -311,7 +311,7 @@ fn legacy_legend(_app: &SolveApp, ui: &mut egui::Ui, free: egui::Rect, id: &str,
     let t = crate::theme::Tokens::get();
     let container = crate::ui_kit::Container::new(ui.ctx(), crate::ui_kit::Surface::ViewportStatus);
     let result = container
-        .area(egui::Id::new(id))
+        .area(egui::Id::unique(id))
         .order(egui::Order::Background)
         .movable(false)
         .pivot(egui::Align2::LEFT_BOTTOM)

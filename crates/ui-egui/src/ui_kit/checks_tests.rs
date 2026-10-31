@@ -434,11 +434,11 @@ fn checkbox_accessibility_preserves_label_checked_and_mixed_metadata() {
             }
         }
         let before = before.expect("checkbox gains keyboard focus");
-        assert_eq!(before.typ, egui::WidgetType::Checkbox);
+        assert_eq!(before.role, egui::Role::CheckBox);
         assert_eq!(before.label.as_deref(), Some("Enabled"));
         assert_eq!(before.selected, if mixed { None } else { Some(false) });
         let after = after.expect("activation publishes the changed checked state");
-        assert_eq!(after.typ, egui::WidgetType::Checkbox);
+        assert_eq!(after.role, egui::Role::CheckBox);
         assert_eq!(after.label.as_deref(), Some("Enabled"));
         assert_eq!(after.selected, Some(true));
     }

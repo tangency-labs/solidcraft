@@ -19,7 +19,7 @@ impl Menu {
             ui,
             |ui, nested| {
                 let button = egui::Button::new(label.into());
-                ui.add(if nested { button.right_text(egui::menu::SubMenuButton::RIGHT_ARROW) } else { button })
+                ui.add(if nested { button.right_text(egui::menu::SubMenuButton::arrow_atom(None)) } else { button })
             },
             add,
         )
@@ -107,7 +107,7 @@ impl Menu {
         // (open flyout, when the pointer left it, the pass that last showed it, the pointer has
         // moved since the parent menu opened)
         type State = (Option<egui::Id>, Option<f64>, u64, bool);
-        let key = ui.id().with("sc_flyout");
+        let key = ui.scope_id().with("sc_flyout");
         let ctx = ui.ctx();
         let pass = ctx.cumulative_pass_nr();
         let (mut open, mut leave, seen, mut moved) = ctx.data(|d| d.get_temp::<State>(key)).unwrap_or((None, None, 0, false));
@@ -337,7 +337,7 @@ impl<'a> MenuItem<'a> {
         job.wrap.max_rows = 1;
         let galley = painter.layout_job(job);
         painter.galley(pos2(left, r.center().y - galley.size().y / 2.0), galley, ink);
-        response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, enabled, label));
+        response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, enabled, label));
         crate::scenario::publish_target(&format!("menu:{}", self.id), r);
         if enabled && response.hovered() {
             ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
@@ -443,7 +443,7 @@ pub(crate) fn workspace_menu(ui: &mut egui::Ui, items: &[Item], key_row: Option<
                     let labels = crate::i18n::tr(tabs).split('·').map(|label| crate::i18n::tr_label(label.trim())).collect::<Vec<_>>().join(" · ");
                     line(labels, r.top() + 47.0);
                 }
-                resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, item.enabled, name));
+                resp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, item.enabled, name));
                 if resp.clicked() && item.enabled {
                     picked = Some(item.clone());
                 }
@@ -470,7 +470,7 @@ pub(crate) fn rename_menu(ui: &mut Ui, value: &mut String, focused: &mut bool) -
     Menu::show(ui, t.form_card_width, |ui| {
         super::scope(ui, |ui| {
             Menu::heading(ui, "Rename");
-            let id = egui::Id::new("sc_rename_text");
+            let id = egui::Id::unique("sc_rename_text");
             let response = ui.add(super::fields::text_input(egui::TextEdit::singleline(value).id(id)).desired_width(ui.available_width()));
             t.input_bevel(ui, &response);
             crate::scenario::publish_target("rename:name", response.rect);

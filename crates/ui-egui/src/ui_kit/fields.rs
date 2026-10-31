@@ -12,7 +12,7 @@ use egui::{Response, RichText, Ui, vec2};
 /// approximating font metrics with integer margins (Plex Mono and Sans differ).
 pub(super) fn text_input(edit: egui::TextEdit<'_>) -> egui::TextEdit<'_> {
     let t = Tokens::get();
-    edit.vertical_align(egui::Align::Center).margin(vec2(t.form_inset, 0.0)).min_size(vec2(0.0, t.control_height))
+    edit.align(egui::Align2::LEFT_CENTER).margin(vec2(t.form_inset, 0.0)).min_size(vec2(0.0, t.control_height))
 }
 
 /// Expression editor with the application's existing completion and number-focus behaviour.
@@ -51,7 +51,7 @@ pub(crate) fn count_field(ui: &mut Ui, value: &mut String, limits: &Count<'_>) -
     let row = label(ui).to_owned();
     for (delta, half, name) in [(1, column.split_top_bottom_at_fraction(0.5).0, "up"), (-1, column.split_top_bottom_at_fraction(0.5).1, "down")] {
         let next = step_count(value, delta, limits);
-        let arrow = ui.interact(half, ui.id().with(("sc_count_step", &row, name)), egui::Sense::click());
+        let arrow = ui.interact(half, ui.scope_id().with(("sc_count_step", &row, name)), egui::Sense::click());
         let enabled = ui.is_enabled() && next.is_some();
         if enabled && arrow.hovered() {
             painter.rect_filled(half.shrink(1.0), t.control_radius, t.selected_bg);
@@ -65,7 +65,7 @@ pub(crate) fn count_field(ui: &mut Ui, value: &mut String, limits: &Count<'_>) -
             egui::Stroke::NONE,
         ));
         let sign = if delta > 0 { "+1" } else { "−1" };
-        arrow.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, enabled, format!("{} {sign}", crate::i18n::tr_label(&row))));
+        arrow.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, enabled, format!("{} {sign}", crate::i18n::tr_label(&row))));
         scenario::publish_handle(&format!("dialog:{row} {name}"), half.center());
         if let (true, true, Some(next)) = (enabled, arrow.clicked(), next) {
             *value = next;
@@ -145,7 +145,7 @@ pub(crate) fn multiline_text_field(ui: &mut Ui, label: &str, id: egui::Id, value
                 .background_color(t.input_fill()),
         );
         super::text_menu::menu(ui, &mut response, value, super::text_menu::Field::LINES);
-        publish(ui, &response, egui::WidgetType::TextEdit);
+        publish(ui, &response, egui::Role::TextInput);
         response
     })
 }
@@ -245,7 +245,7 @@ fn searchable_dropdown_with(
                 });
         })
         .response;
-    publish(ui, &response, egui::WidgetType::ComboBox);
+    publish(ui, &response, egui::Role::ComboBox);
     chosen
 }
 
@@ -268,7 +268,7 @@ fn editor_reserving(ui: &mut Ui, value: &mut String, hint: &str, completion: boo
     super::text_menu::menu(ui, &mut response, value, super::text_menu::Field::LINE);
     if completion && ui.is_enabled() {
         ui.ctx().data_mut(|data| {
-            let id = egui::Id::new("sc_value_fields");
+            let id = egui::Id::unique("sc_value_fields");
             if data.get_temp::<Vec<(egui::Id, usize)>>(id).is_some() {
                 data.get_temp_mut_or_default::<Vec<(egui::Id, usize)>>(id).push((response.id, value.chars().count()));
             }
@@ -278,7 +278,7 @@ fn editor_reserving(ui: &mut Ui, value: &mut String, hint: &str, completion: boo
     t.input_bevel(ui, &response);
     let label = crate::i18n::tr_label(label(ui));
     response.widget_info(|| {
-        let mut info = egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, ui.is_enabled(), label);
+        let mut info = egui::WidgetInfo::labeled(egui::Role::TextInput, ui.is_enabled(), label);
         info.current_text_value = Some(value.clone());
         info
     });
@@ -392,7 +392,7 @@ fn dropdown_menu_width(
         .close_behavior(close_behavior)
         .show_ui(ui, add)
         .response;
-    publish(ui, &response, egui::WidgetType::ComboBox);
+    publish(ui, &response, egui::Role::ComboBox);
     response
 }
 
@@ -450,7 +450,7 @@ pub(crate) fn selection_field(ui: &mut Ui, text: &str, options: Selection) -> Re
         },
         false,
     );
-    publish(ui, &response, egui::WidgetType::Button);
+    publish(ui, &response, egui::Role::Button);
     scenario::publish_rect(&format!("dialog:field:{}", label(ui)), rect);
     scenario::publish_count(&format!("dialog:selection:{}:filled", label(ui)), f64::from(filled));
     response
@@ -548,12 +548,12 @@ fn cell_editor_frame(ui: &mut Ui, id: egui::Id, value: &mut String, hint: &str, 
     let mut response = ui.add_sized(vec2(dimension(ui.available_width()), row_height()), editor);
     super::text_menu::menu(ui, &mut response, value, super::text_menu::Field::LINE.limited(limit));
     if frame {
-        publish(ui, &response, egui::WidgetType::TextEdit);
+        publish(ui, &response, egui::Role::TextInput);
     } else {
         super::layout::publish_geometry(ui, &response);
     }
     response.widget_info(|| {
-        let mut info = egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, ui.is_enabled(), crate::i18n::tr_label(label(ui)));
+        let mut info = egui::WidgetInfo::labeled(egui::Role::TextInput, ui.is_enabled(), crate::i18n::tr_label(label(ui)));
         info.current_text_value = Some(value.clone());
         info
     });
@@ -623,7 +623,7 @@ pub fn wide_cell_editor(ui: &mut Ui, id: egui::Id, value: &mut String, hint: &st
                     response.surrender_focus();
                 }
                 super::text_menu::menu(ui, &mut response, value, super::text_menu::Field::LINE);
-                publish(ui, &response, egui::WidgetType::TextEdit);
+                publish(ui, &response, egui::Role::TextInput);
                 crate::theme::TabAccent::number_focus(ui, &response);
                 t.input_bevel(ui, &response);
                 let (text, error) = note;
@@ -641,7 +641,7 @@ pub fn wide_cell_editor(ui: &mut Ui, id: egui::Id, value: &mut String, hint: &st
     });
     let response = shown.inner;
     response.widget_info(|| {
-        let mut info = egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, enabled, crate::i18n::tr_label(hint));
+        let mut info = egui::WidgetInfo::labeled(egui::Role::TextInput, enabled, crate::i18n::tr_label(hint));
         info.current_text_value = Some(value.clone());
         info
     });
@@ -708,7 +708,7 @@ pub(crate) fn menu_filter(ui: &mut Ui, id: egui::Id, value: &mut String, hint: &
         })
         .inner;
     response.widget_info(|| {
-        let mut info = egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, ui.is_enabled(), hint_text);
+        let mut info = egui::WidgetInfo::labeled(egui::Role::TextInput, ui.is_enabled(), hint_text);
         info.current_text_value = Some(value.clone());
         info
     });
@@ -810,7 +810,7 @@ pub(crate) fn slider<T: egui::emath::Numeric>(ui: &mut Ui, value: &mut T, range:
         ui.painter().rect_filled(track, t.control_radius, t.dialog_rule);
         ui.painter().rect_filled(egui::Rect::from_min_max(track.min, egui::pos2(center.x, track.bottom())), t.control_radius, primary);
         ui.painter().circle(center, t.space_8, t.control_fill, egui::Stroke::new(t.space_2, primary));
-        publish(ui, &response, egui::WidgetType::Slider);
+        publish(ui, &response, egui::Role::Slider);
         response.widget_info(|| egui::WidgetInfo::slider(ui.is_enabled(), value.to_f64(), crate::i18n::tr_label(label(ui))));
         scenario::publish_rect(&format!("dialog:slider_track:{}", label(ui)), slider);
         scenario::publish_target(&format!("dialog:slider:{}", label(ui)), response.rect);
@@ -931,7 +931,7 @@ pub(crate) fn text_area(ui: &mut Ui, label: &str, id: egui::Id, value: &mut Stri
     super::text_menu::menu(ui, &mut response, value, super::text_menu::Field::LINES.limited(limit));
     t.input_bevel(ui, &response);
     response.widget_info(|| {
-        let mut info = egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, ui.is_enabled(), label);
+        let mut info = egui::WidgetInfo::labeled(egui::Role::TextInput, ui.is_enabled(), label);
         info.current_text_value = Some(value.clone());
         info
     });
@@ -952,7 +952,7 @@ pub(crate) fn password_field(ui: &mut Ui, id: egui::Id, value: &mut String, hint
             .background_color(t.input_fill()),
     );
     super::text_menu::menu(ui, &mut response, value, super::text_menu::Field { secret: true, ..super::text_menu::Field::LINE });
-    publish(ui, &response, egui::WidgetType::TextEdit);
+    publish(ui, &response, egui::Role::TextInput);
     response
 }
 
@@ -1103,7 +1103,7 @@ pub(crate) fn canvas_value_field(ui: &mut Ui, id: egui::Id, value: &mut String, 
     super::text_menu::menu(ui, &mut response, value, super::text_menu::Field::LINE);
     t.input_bevel(ui, &response);
     let field = (ui.ctx().cumulative_pass_nr(), response.id, value.chars().count());
-    ui.ctx().data_mut(|data| data.insert_temp(egui::Id::new("sc_canvas_value_focus"), field));
+    ui.ctx().data_mut(|data| data.insert_temp(egui::Id::unique("sc_canvas_value_focus"), field));
     response
 }
 
@@ -1124,6 +1124,8 @@ pub(crate) fn placement_field(ui: &mut Ui, id: egui::Id, value: &mut String, hin
     // sketch picks. Keep the former line + space_2 above/below, with shared galley alignment.
     let height = ui.fonts_mut(|fonts| fonts.row_height(&font)) + ui.spacing().extra_text_line_spacing + t.space_4;
     let width = grown_width(ui, value, &font, t.control_height * 3.0 - t.space_6);
+    // egui 0.37 floors a text edit's height at the theme's interact height: lower it for this one.
+    let interact = std::mem::replace(&mut ui.spacing_mut().interact_size.y, height);
     let mut response = ui.add(
         text_input(egui::TextEdit::singleline(value))
             .id(id)
@@ -1136,10 +1138,11 @@ pub(crate) fn placement_field(ui: &mut Ui, id: egui::Id, value: &mut String, hin
             .text_color(t.form_ink)
             .clip_text(true),
     );
+    ui.spacing_mut().interact_size.y = interact;
     super::text_menu::menu(ui, &mut response, value, super::text_menu::Field::LINE);
-    publish(ui, &response, egui::WidgetType::TextEdit);
+    publish(ui, &response, egui::Role::TextInput);
     response.widget_info(|| {
-        let mut info = egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, ui.is_enabled(), crate::i18n::tr_label(hint));
+        let mut info = egui::WidgetInfo::labeled(egui::Role::TextInput, ui.is_enabled(), crate::i18n::tr_label(hint));
         info.current_text_value = Some(value.clone());
         info
     });
@@ -1179,10 +1182,8 @@ pub(crate) fn library_cell(ui: &mut Ui, id: egui::Id, value: &mut String, hint: 
 /// Inline tree-name editor in caller-owned geometry; preserves its native focus and selection ID.
 /// Tokens: text. The caller retains commit/cancel and select-all behavior.
 pub(crate) fn inline_name(ui: &mut Ui, rect: egui::Rect, id: egui::Id, value: &mut String) -> Response {
-    let mut response = ui.put(
-        rect,
-        egui::TextEdit::singleline(value).id(id).frame(egui::Frame::NONE).text_color(Tokens::get().text).vertical_align(egui::Align::Center),
-    );
+    let mut response = ui
+        .put(rect, egui::TextEdit::singleline(value).id(id).frame(egui::Frame::NONE).text_color(Tokens::get().text).align(egui::Align2::LEFT_CENTER));
     super::text_menu::menu(ui, &mut response, value, super::text_menu::Field::LINE);
     response
 }

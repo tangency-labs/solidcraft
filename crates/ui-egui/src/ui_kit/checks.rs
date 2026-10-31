@@ -81,7 +81,7 @@ pub(crate) fn checkbox_indeterminate(ui: &mut Ui, label: &str, value: &mut bool,
     super::text::paint_text(ui, text_rect, label, font, t.form_ink, false);
     response.widget_info(|| {
         let accessible = if label.is_empty() { crate::i18n::tr_label(super::row_label(ui)) } else { label };
-        let mut info = egui::WidgetInfo::selected(egui::WidgetType::Checkbox, ui.is_enabled(), *value, accessible);
+        let mut info = egui::WidgetInfo::selected(egui::Role::CheckBox, ui.is_enabled(), *value, accessible);
         if mixed && !response.changed() {
             info.selected = None;
         }

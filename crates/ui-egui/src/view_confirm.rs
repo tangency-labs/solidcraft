@@ -91,20 +91,20 @@ pub(crate) fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let container = Container::new(ctx, Surface::Navigation);
     let frame = container.frame(ctx, t.overlay, crate::frame::Side::Right);
     let mut clicked = None;
-    container.area(egui::Id::new("sc_view_confirm")).order(egui::Order::Middle).fixed_pos(rect.min).fade_in(false).show(ctx, |ui| {
+    container.area(egui::Id::unique("sc_view_confirm")).order(egui::Order::Middle).fixed_pos(rect.min).fade_in(false).show(ctx, |ui| {
         let (outer, _) = ui.allocate_exact_size(rect.size(), Sense::hover());
         Container::paint_frame(ui.painter(), frame, outer.shrink(frame.stroke.width));
         // The check, then the cross in the very corner, where a close sits on a title bar.
         for (index, choice) in choices.iter().enumerate() {
             let at = Rect::from_min_size(outer.min + vec2(t.space_4 + index as f32 * (TARGET + t.space_4), t.space_4), vec2(TARGET, TARGET));
-            let response = ui.interact(at, ui.id().with(choice.key), if choice.enabled { Sense::click() } else { Sense::hover() });
+            let response = ui.interact(at, ui.scope_id().with(choice.key), if choice.enabled { Sense::click() } else { Sense::hover() });
             if choice.enabled && response.hovered() {
                 ui.painter().rect_filled(at, t.radius_sm, t.hover);
                 ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
             }
             crate::icons::paint_icon(ui.painter(), at.shrink(t.space_6), choice.icon, if choice.enabled { 1.0 } else { 0.35 });
             let label = crate::i18n::tr_label(choice.label);
-            response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, choice.enabled, label));
+            response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, choice.enabled, label));
             crate::scenario::publish_target(choice.key, at);
             if response.on_hover_text(label).clicked() && choice.enabled {
                 clicked = Some(choice.action);

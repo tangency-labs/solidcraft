@@ -110,7 +110,7 @@ fn paint_resolved(p: &Painter, r: Rect, resolved: icon_svg::Resolved, look: Look
     let ppp = ctx.pixels_per_point().max(0.5);
     let side = r.width().min(r.height());
     let px = (side * ppp).round().clamp(8.0, 512.0) as u32;
-    let cache = ctx.data_mut(|d| d.get_temp_mut_or_insert_with(egui::Id::new("sc_icon_cache"), Cache::default).clone());
+    let cache = ctx.data_mut(|d| d.get_temp_mut_or_insert_with(egui::Id::unique("sc_icon_cache"), Cache::default).clone());
     let Ok(mut entries) = cache.0.lock() else { return };
     let palette = crate::theme::Tokens::get().icon_palette;
     if entries.palette != palette {

@@ -241,7 +241,7 @@ fn stage_chips_reserve_the_selected_weight_for_complete_labels_in_all_five_catal
                 StageBar::row(ui, bounds, false, |ui| StageBar::header(ui, selected, &labels.iter().map(String::as_str).collect::<Vec<_>>(), &[]));
             });
             output.textures_delta.clear();
-            let search = ctx.data(|d| d.get_temp::<egui::Rect>(egui::Id::new("sc_ribbon_search"))).unwrap();
+            let search = ctx.data(|d| d.get_temp::<egui::Rect>(egui::Id::unique("sc_ribbon_search"))).unwrap();
             assert!((search.right() - (bounds.right() - crate::theme::Tokens::get().space_6)).abs() < 1.0);
             for label in &labels {
                 assert!(

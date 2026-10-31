@@ -181,7 +181,7 @@ const ELEMENTS: &[Element] = &[
         .enumerate()
         {
             let rect = tree_row_rect(ui, row);
-            assert_eq!(tree_row(ui, ui.id().with(("tree_geometry", index)), row).rect, Some(rect));
+            assert_eq!(tree_row(ui, ui.scope_id().with(("tree_geometry", index)), row).rect, Some(rect));
         }
     }),
     element!("editor_section", |ui, _| {
@@ -237,19 +237,23 @@ const ELEMENTS: &[Element] = &[
     }),
     element!("tree_row", |ui, _| {
         let actions = [TreeAction { icon: "plus", hover_only: false, label: "Add", reason: None, target: "gallery:tree:add" }];
-        tree_row(ui, ui.id().with("tree_plain"), &Row { label: "Objects", fold: Some(true), actions: &actions, ..Default::default() });
-        tree_row(ui, ui.id().with("tree_subtitle"), &Row { label: "Output", subtitle: "1920 × 1080 · PNG", selected: true, ..Default::default() });
+        tree_row(ui, ui.scope_id().with("tree_plain"), &Row { label: "Objects", fold: Some(true), actions: &actions, ..Default::default() });
+        tree_row(
+            ui,
+            ui.scope_id().with("tree_subtitle"),
+            &Row { label: "Output", subtitle: "1920 × 1080 · PNG", selected: true, ..Default::default() },
+        );
     }),
     element!("tree_header", |ui, state| {
         tree_header(ui, "Scene", &mut state.selected, &["By object", "By look"], "Search objects");
         tree_row(
             ui,
-            ui.id().with("compact_environment"),
+            ui.scope_id().with("compact_environment"),
             &Row { compact: true, label: "Environment", icon: "environment_map", subtitle: "Studio Soft 2K", ..Default::default() },
         );
         tree_row(
             ui,
-            ui.id().with("compact_object"),
+            ui.scope_id().with("compact_object"),
             &Row {
                 compact: true,
                 depth: 1,
@@ -265,7 +269,7 @@ const ELEMENTS: &[Element] = &[
     element!("tree_row_disabled_actions", |ui, _| {
         let actions =
             [TreeAction { icon: "lookat", hover_only: true, label: "Solo", reason: Some("Not available yet"), target: "gallery:tree:solo" }];
-        tree_row(ui, ui.id().with("tree_actions"), &Row { label: "Light", actions: &actions, ..Default::default() });
+        tree_row(ui, ui.scope_id().with("tree_actions"), &Row { label: "Light", actions: &actions, ..Default::default() });
     }),
     element!("selection_actions", |ui, _| {
         let actions = [
@@ -278,7 +282,7 @@ const ELEMENTS: &[Element] = &[
     }),
     element!("catalog_scope", |ui, state| {
         catalog_scope(ui, |ui| {
-            search_field(ui, ui.id().with("catalog_search"), &mut state.value, "Search appearances");
+            search_field(ui, ui.scope_id().with("catalog_search"), &mut state.value, "Search appearances");
             segmented(
                 ui,
                 &mut state.selected,
@@ -633,7 +637,7 @@ const ELEMENTS: &[Element] = &[
     element!("assistant_composer", |ui, s| {
         assistant_composer_footer(ui, |ui| {
             assistant_composer(ui, false, |ui| {
-                assistant_input(ui, ui.id().with("assistant_gallery"), &mut s.value, "Ask for a change…");
+                assistant_input(ui, ui.scope_id().with("assistant_gallery"), &mut s.value, "Ask for a change…");
             });
         });
     }),
@@ -851,7 +855,7 @@ const ELEMENTS: &[Element] = &[
         workspace_menu(ui, &crate::context_menu::items(&app, &crate::context_menu::Target::Workspace), None, 550.0);
     }),
     element!("window", "dialog:footer", Some("dialog:ok"), |ui, _| {
-        Window::new(ui.id().with("window"), "settings", "Preferences").content(
+        Window::new(ui.scope_id().with("window"), "settings", "Preferences").content(
             ui,
             true,
             |ui| {
@@ -880,7 +884,7 @@ const ELEMENTS: &[Element] = &[
         );
     }),
     element!("confirm_warning", "dialog:footer", Some("dialog:apply"), |ui, _| {
-        Confirm::new(ui.id().with("confirm"), "status_warning", "Save changes?")
+        Confirm::new(ui.scope_id().with("confirm"), "status_warning", "Save changes?")
             .tone(Tone::Warning)
             .actions("Save", "Cancel", Some("Don't Save"))
             .content(ui, true, |ui| {
@@ -888,7 +892,7 @@ const ELEMENTS: &[Element] = &[
             });
     }),
     element!("confirm_danger", "dialog:footer", Some("dialog:ok"), |ui, _| {
-        Confirm::new(ui.id().with("confirm"), "delete", "Delete")
+        Confirm::new(ui.scope_id().with("confirm"), "delete", "Delete")
             .tone(Tone::Danger)
             .detail("Fillet2 · Chamfer1")
             .actions("Delete", "Cancel", None)
@@ -897,7 +901,7 @@ const ELEMENTS: &[Element] = &[
             });
     }),
     element!("confirm_info", "dialog:footer", Some("dialog:ok"), |ui, _| {
-        Confirm::new(ui.id().with("confirm"), "help", "Replace file?").actions("Replace", "Cancel", None).content(ui, true, |ui| {
+        Confirm::new(ui.scope_id().with("confirm"), "help", "Replace file?").actions("Replace", "Cancel", None).content(ui, true, |ui| {
             text(ui, "A file with this name already exists.", Text::Report("message", false));
         });
     }),
@@ -905,7 +909,7 @@ const ELEMENTS: &[Element] = &[
         text(ui, "solid.fillet · replayable", Text::MonoNote("sample"));
     }),
     element!("color_thumbnail", |ui, _| {
-        color_thumbnail(ui, ui.id().with("thumb"), Tokens::get().accent, "Sample", ());
+        color_thumbnail(ui, ui.scope_id().with("thumb"), Tokens::get().accent, "Sample", ());
     }),
     element!("list_frame", |ui, _| {
         list_frame(ui, "sample", |ui| {
@@ -967,7 +971,7 @@ const ELEMENTS: &[Element] = &[
         active_pill(ui);
     }),
     element!("library_cell", |ui, s| {
-        library_cell(ui, ui.id().with("library"), &mut s.value, "Default material", |ui| {
+        library_cell(ui, ui.scope_id().with("library"), &mut s.value, "Default material", |ui| {
             button(ui, "Steel", Button::Normal);
         });
     }),
@@ -1025,7 +1029,7 @@ const ELEMENTS: &[Element] = &[
                         text(ui, "Width", Text::Cell);
                     });
                     row.cell(|ui| {
-                        cell_editor(ui, ui.id().with("expression"), &mut s.value, "Expression", false);
+                        cell_editor(ui, ui.scope_id().with("expression"), &mut s.value, "Expression", false);
                     });
                     row.cell(|ui| {
                         bin_button(ui, "Delete");
@@ -1068,16 +1072,16 @@ const ELEMENTS: &[Element] = &[
         slider(ui, &mut 12.0, 0.0..=100.0, Slider { show_value: false, integer: true, ..Default::default() });
     }),
     element!("canvas_value_field", |ui, s| {
-        canvas_value_field(ui, ui.id().with("canvas_value"), &mut s.value, false);
+        canvas_value_field(ui, ui.scope_id().with("canvas_value"), &mut s.value, false);
     }),
     element!("placement_field", |ui, s| {
-        placement_field(ui, ui.id().with("placement"), &mut s.value, "Distance");
+        placement_field(ui, ui.scope_id().with("placement"), &mut s.value, "Distance");
     }),
     element!("bounded_cell_editor", |ui, s| {
-        bounded_cell_editor(ui, ui.id().with("name"), &mut s.value, "Name", false, 128);
+        bounded_cell_editor(ui, ui.scope_id().with("name"), &mut s.value, "Name", false, 128);
     }),
     element!("password_field", |ui, s| {
-        password_field(ui, ui.id().with("secret"), &mut s.value, "API key");
+        password_field(ui, ui.scope_id().with("secret"), &mut s.value, "API key");
     }),
     element!("number_field", |ui, _| {
         number_field(ui, &mut 3_u32, 1..=200, 1.0, "");
@@ -1104,7 +1108,7 @@ const ELEMENTS: &[Element] = &[
         });
     }),
     element!("message_field", |ui, s| {
-        message_field(ui, ui.id().with("message"), &mut s.value, "Message");
+        message_field(ui, ui.scope_id().with("message"), &mut s.value, "Message");
     }),
     element!("text_lines", |ui, _| {
         text_lines(ui, "gallery", "Licence\nSecond line");
@@ -1122,7 +1126,7 @@ const ELEMENTS: &[Element] = &[
                     text(ui, "Width", Text::Cell);
                 });
                 row.cell(|ui| {
-                    cell_editor(ui, ui.id().with("value"), &mut s.value, "", false);
+                    cell_editor(ui, ui.scope_id().with("value"), &mut s.value, "", false);
                 });
             });
         });
@@ -1157,13 +1161,13 @@ const ELEMENTS: &[Element] = &[
         text(ui, "Validation report with retained units: 10 mm", Text::Report("gallery", false));
     }),
     element!("search_field", |ui, s| {
-        search_field(ui, ui.id().with("search"), &mut s.value, "Search");
+        search_field(ui, ui.scope_id().with("search"), &mut s.value, "Search");
     }),
     element!("menu_filter", |ui, s| {
-        menu_filter(ui, ui.id().with("menu_filter"), &mut s.value, "Filter");
+        menu_filter(ui, ui.scope_id().with("menu_filter"), &mut s.value, "Filter");
     }),
     element!("cell_editor", |ui, s| {
-        cell_editor(ui, ui.id().with("cell"), &mut s.value, "Expression", true);
+        cell_editor(ui, ui.scope_id().with("cell"), &mut s.value, "Expression", true);
     }),
     element!("color_field", |ui, _| {
         color_field(ui, &mut [120, 150, 180]);
@@ -1196,14 +1200,14 @@ const ELEMENTS: &[Element] = &[
         angle_field(ui, &mut 45.0);
     }),
     element!("text_area", |ui, s| {
-        text_area(ui, "Gallery", ui.id().with("area"), &mut s.value, 5, 1024);
+        text_area(ui, "Gallery", ui.scope_id().with("area"), &mut s.value, 5, 1024);
     }),
     element!("color_swatch", |ui, _| {
-        color_swatch(ui, ui.id().with("swatch"), Tokens::get().accent, true, "Sample", 1);
+        color_swatch(ui, ui.scope_id().with("swatch"), Tokens::get().accent, true, "Sample", 1);
     }),
     element!("swatch_grid", |ui, _| {
         swatch_grid(ui, &[1, 2, 3], |ui, n| {
-            color_swatch(ui, ui.id().with(n), Tokens::get().accent, true, "Sample", *n);
+            color_swatch(ui, ui.scope_id().with(n), Tokens::get().accent, true, "Sample", *n);
         });
     }),
     element!("action_menu", |ui, _| {
@@ -1280,7 +1284,7 @@ const ELEMENTS: &[Element] = &[
         choice_row(ui, "Gallery", "gallery", &mut s.selected, &["One", "Two"]);
     }),
     element!("multiline_text_field", "dialog:widget:Gallery", Some("dialog:Gallery"), |ui, s| {
-        multiline_text_field(ui, "Gallery", ui.id().with("text"), &mut s.value);
+        multiline_text_field(ui, "Gallery", ui.scope_id().with("text"), &mut s.value);
     }),
     element!("searchable_dropdown", "dialog:row:Gallery", Some("dialog:Gallery"), |ui, _| {
         row(ui, "Gallery", |ui| {
@@ -1297,7 +1301,7 @@ const ELEMENTS: &[Element] = &[
     }),
     element!("inline_name", |ui, s| {
         let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), row_height()), egui::Sense::hover());
-        inline_name(ui, rect, ui.id().with("inline_name"), &mut s.value);
+        inline_name(ui, rect, ui.scope_id().with("inline_name"), &mut s.value);
     }),
     element!("field", "dialog:row:Gallery", Some("dialog:Gallery"), |ui, s| {
         row(ui, "Gallery", |ui| {
@@ -1570,7 +1574,7 @@ const ELEMENTS: &[Element] = &[
         let anchor = ui.allocate_space(vec2(100.0, row_height())).1;
         popup_list(
             ui.ctx(),
-            ui.id().with("popup"),
+            ui.scope_id().with("popup"),
             anchor,
             Some(0),
             &[PopupOption { kind: "parameter", text: "Width", detail: "10 mm", color: Tokens::get().text }],
@@ -1809,7 +1813,7 @@ fn table_cells_keep_alignment_fixed_rows_editing_and_action_targets() {
                                 text(ui, name, Text::Cell);
                             });
                             row.cell(|ui| {
-                                let response = cell_editor(ui, ui.id().with("expression"), value, "Expression", false);
+                                let response = cell_editor(ui, ui.scope_id().with("expression"), value, "Expression", false);
                                 scenario::publish_handle(&format!("gallery:cell:{name}"), response.rect.center());
                                 scenario::publish_rect(&format!("gallery:cell:{name}"), response.rect);
                             });
@@ -1855,7 +1859,7 @@ fn popup_suggestions_and_selectable_lists_keep_click_selection() {
         let mut draw = |ui: &mut Ui| {
             selected = popup_list(
                 ui.ctx(),
-                egui::Id::new("suggestions"),
+                egui::Id::unique("suggestions"),
                 egui::Rect::from_min_size(egui::pos2(10.0, 10.0), vec2(220.0, 24.0)),
                 Some(0),
                 &[
@@ -1898,7 +1902,7 @@ fn many_draggable_samples_wrap_inside_the_available_width() {
         scope(ui, |ui| {
             bounds = ui.available_rect_before_wrap();
             swatch_grid(ui, &(0..20).collect::<Vec<_>>(), |ui, index| {
-                let response = color_swatch(ui, ui.id().with(index), Tokens::get().accent, false, "Sample", *index);
+                let response = color_swatch(ui, ui.scope_id().with(index), Tokens::get().accent, false, "Sample", *index);
                 rects.push(response.rect);
             });
         });
@@ -2266,7 +2270,7 @@ fn confirm_radial_and_history_rows_keep_multitone_artwork() {
                             "danger" => Tone::Danger,
                             _ => Tone::Info,
                         };
-                        Confirm::new(ui.id().with("confirm"), icon, "Confirm").tone(tone).content(ui, true, |_| {});
+                        Confirm::new(ui.scope_id().with("confirm"), icon, "Confirm").tone(tone).content(ui, true, |_| {});
                     }
                 }
             });
@@ -2528,7 +2532,7 @@ fn tree_icon_actions_keep_repeated_light_rows_independent() {
         for index in 0..3 {
             let target = format!("light:{index}:visibility");
             let actions = [TreeAction { icon: "eye", hover_only: false, label: "Hide", reason: Some("Not available yet"), target: &target }];
-            let row = tree_row(ui, ui.id().with(index), &Row { compact: true, label: "Directional", actions: &actions, ..Default::default() });
+            let row = tree_row(ui, ui.scope_id().with(index), &Row { compact: true, label: "Directional", actions: &actions, ..Default::default() });
             for action in row.actions {
                 assert!(ids.insert(action.id), "each light action must have its own widget identity");
             }

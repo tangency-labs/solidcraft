@@ -1616,7 +1616,9 @@ fn clicked_render_workspace_saves_one_setup_and_restores_design_view() {
         assert!(h.widget(&heading).is_some(), "{language}");
         h.step(&json!({"click":{"handle":"render:scene:frame"}})).unwrap();
         assert_eq!(h.app.render_workspace.view.inspector.page, inspector::Page::Camera);
-        h.step(&json!({"widget":perspective})).unwrap();
+        // The inspector's checkbox, on the right: the stage above the view has a Perspective too.
+        let at = h.widgets(&perspective).into_iter().max_by(|a, b| a[0].total_cmp(&b[0])).unwrap();
+        h.step(&json!({"click":at})).unwrap();
         assert_eq!(h.app.cam.fov, 50f64.to_radians(), "{language}: Perspective takes the Field of view preference's angle (#5364)");
         assert!(!h.app.session.is_dirty(), "preview edits are staged");
         h.step(&json!({"widget":save})).unwrap();
@@ -2064,6 +2066,7 @@ fn result_navigation_uses_shared_pan_zoom_and_leaves_product_camera_unchanged() 
         &mut time,
         Modifiers::NONE,
         vec![Event::MouseWheel {
+            source: egui::MouseWheelSource::Unknown,
             unit: egui::MouseWheelUnit::Line,
             delta: vec2(0.0, 3.0),
             modifiers: Modifiers::NONE,
@@ -2507,7 +2510,13 @@ fn render_preview_navigates_like_the_modelling_viewport_in_every_preset() {
             // Wheel over the model, then modifier-only motion (Touchpad: Shift pans, Alt orbits).
             let before = design.cam;
             both(vec![Event::PointerMoved(model)], none, &mut design, &mut render);
-            let wheel = Event::MouseWheel { unit: egui::MouseWheelUnit::Line, delta: vec2(0.0, 3.0), modifiers: none, phase: egui::TouchPhase::Move };
+            let wheel = Event::MouseWheel {
+                source: egui::MouseWheelSource::Unknown,
+                unit: egui::MouseWheelUnit::Line,
+                delta: vec2(0.0, 3.0),
+                modifiers: none,
+                phase: egui::TouchPhase::Move,
+            };
             both(vec![wheel], none, &mut design, &mut render);
             for _ in 0..30 {
                 both(vec![], none, &mut design, &mut render);

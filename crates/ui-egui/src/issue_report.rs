@@ -774,7 +774,7 @@ pub(crate) fn hold_input(app: &mut SolveApp, raw: &mut egui::RawInput) {
 }
 
 /// What [`hold_input`] keeps for the form.
-fn typing(event: &egui::Event) -> bool {
+pub(crate) fn typing(event: &egui::Event) -> bool {
     matches!(
         event,
         egui::Event::Text(_) | egui::Event::Key { .. } | egui::Event::Paste(_) | egui::Event::Copy | egui::Event::Cut | egui::Event::Ime(_)
@@ -926,8 +926,8 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         crate::dim_view::drag_end();
         crate::sketch3d::drag_end();
         crate::drag_snap::clear();
-        crate::gizmo::cancel(ctx, egui::Id::new("sc_move_triad"));
-        crate::gizmo::cancel(ctx, egui::Id::new("sc_occ_triad"));
+        crate::gizmo::cancel(ctx, egui::Id::unique("sc_move_triad"));
+        crate::gizmo::cancel(ctx, egui::Id::unique("sc_occ_triad"));
         if let Some(focus) = app.issue_report.cad_focus.take() {
             ctx.memory_mut(|m| m.request_focus(focus));
         }
@@ -1115,7 +1115,7 @@ mod tests {
             let commands = open_commands(&mut h);
             assert!(!commands.iter().any(|c| matches!(c, egui::OutputCommand::OpenUrl(_))));
             assert!(h.app.issue_report.draft.as_ref().unwrap().missing_description);
-            assert_eq!(h.ctx.memory(|m| m.focused()), Some(egui::Id::new("issue_report_body")));
+            assert_eq!(h.ctx.memory(|m| m.focused()), Some(egui::Id::unique("issue_report_body")));
             h.step(&json!({"text":"The preview disappeared"})).unwrap();
             let commands = open_commands(&mut h);
             assert!(commands.iter().any(|c| matches!(c, egui::OutputCommand::OpenUrl(url) if url.url.starts_with(ISSUE_URL))));
@@ -1132,11 +1132,11 @@ mod tests {
         h.app.home.open = false;
         h.app.issue_report.draft = Some(draft_for(&h.app, None, None));
         h.frames(16);
-        let description = Some(egui::Id::new("issue_report_body"));
+        let description = Some(egui::Id::unique("issue_report_body"));
         open_commands(&mut h);
         assert_eq!(h.ctx.memory(|m| m.focused()), description);
         // Click the Summary field (found by its id: it has no label of its own) and type.
-        let title = egui::Id::new("issue_report_title").accesskit_id();
+        let title = egui::Id::unique("issue_report_title").accesskit_id();
         let tree = h.output.accesskit_update.as_ref().unwrap();
         let b = tree.nodes.iter().find(|(id, _)| *id == title).and_then(|(_, n)| n.bounds()).unwrap();
         h.step(&json!({"click":[(b.x0 + b.x1) / 2.0, (b.y0 + b.y1) / 2.0]})).unwrap();
@@ -1170,28 +1170,20 @@ mod tests {
                     h.step(&json!({"widget":"Technical details"})).unwrap();
                     h.call("ui.scroll", json!({"x":800,"y":600,"delta":-1000}));
                 }
-                h.ctx.memory_mut(|m| m.request_focus(egui::Id::new(field)));
+                h.ctx.memory_mut(|m| m.request_focus(egui::Id::unique(field)));
                 h.frames(1);
                 let [x, y] = h.widget("Open GitHub issue form").unwrap();
                 let pos = egui::pos2(x as f32, y as f32);
                 let modifiers = egui::Modifiers { ctrl: true, command: true, ..Default::default() };
-                let raw = egui::RawInput {
-                    screen_rect: Some(h.ctx.content_rect()),
-                    focused: true,
-                    events: vec![
-                        egui::Event::Key { key: egui::Key::A, physical_key: None, pressed: true, repeat: false, modifiers },
-                        egui::Event::Paste("Latest reviewed content".into()),
-                        egui::Event::PointerMoved(pos),
-                        egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed: true, modifiers: Default::default() },
-                        egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed: false, modifiers: Default::default() },
-                    ],
-                    ..Default::default()
-                };
-                let app = &mut h.app;
-                let mut output = h.ctx.run_ui(raw, |ui| {
-                    app.logic(ui.ctx());
-                    app.ui(ui);
-                });
+                h.frame_with(vec![
+                    egui::Event::Key { key: egui::Key::A, physical_key: None, pressed: true, repeat: false, modifiers },
+                    egui::Event::Paste("Latest reviewed content".into()),
+                    egui::Event::PointerMoved(pos),
+                    egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed: true, modifiers: Default::default() },
+                    egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed: false, modifiers: Default::default() },
+                ]);
+                // The click waits one frame for the typing before it.
+                h.frame();
                 let draft = h.app.issue_report.draft.as_ref().unwrap();
                 let edited = match field {
                     "issue_report_body" => &draft.description,
@@ -1204,13 +1196,12 @@ mod tests {
                 let body = draft.report_body();
                 let (url, copy_needed) = draft_url(&draft.report_title(), &body);
                 assert!(
-                    output.platform_output.commands.iter().any(|c| matches!(c, egui::OutputCommand::OpenUrl(u) if u.url == url)),
-                    "handoff must use this frame's edits: {field}, clipboard={clipboard}"
+                    h.output.commands.iter().any(|c| matches!(c, egui::OutputCommand::OpenUrl(u) if u.url == url)),
+                    "handoff must use the click frame's edits: {field}, clipboard={clipboard}"
                 );
                 if copy_needed {
-                    assert!(output.platform_output.commands.iter().any(|c| matches!(c, egui::OutputCommand::CopyText(text) if text == &body)));
+                    assert!(h.output.commands.iter().any(|c| matches!(c, egui::OutputCommand::CopyText(text) if text == &body)));
                 }
-                output.textures_delta.clear();
                 assert!(draft.opened_github && !draft.missing_description);
             }
         }
@@ -1516,7 +1507,8 @@ mod tests {
                 draft.image = Some(Arc::new(ColorImage::new([1600, 1000], vec![egui::Color32::GREEN; 1_600_000])));
                 h.app.issue_report.draft = Some(draft);
                 h.frames(20);
-                let rect = |h: &crate::scenario::Harness| egui::containers::AreaState::load(&h.ctx, egui::Id::new("sc_issue_report")).unwrap().rect();
+                let rect =
+                    |h: &crate::scenario::Harness| egui::containers::AreaState::load(&h.ctx, egui::Id::unique("sc_issue_report")).unwrap().rect();
                 let settled = rect(&h);
                 h.frames(120);
                 let idle = rect(&h);
@@ -1572,7 +1564,7 @@ mod tests {
         h.frames(4);
         let before = (h.app.session.doc.to_json(), h.app.session.undo.len(), h.app.session.redo.len(), h.app.session.revision);
         for field in ["issue_report_title", "issue_report_body"] {
-            let id = egui::Id::new(field);
+            let id = egui::Id::unique(field);
             h.ctx.memory_mut(|m| m.request_focus(id));
             h.frames(1);
             h.step(&json!({"text":"edited-report-marker"})).unwrap();
@@ -1611,7 +1603,7 @@ mod tests {
         receive(&mut h.app, token, Arc::new(ColorImage::new([2, 2], vec![egui::Color32::GREEN; 4])));
         h.frames(3);
         for field in ["issue_report_title", "issue_report_body"] {
-            let id = egui::Id::new(field);
+            let id = egui::Id::unique(field);
             h.ctx.memory_mut(|m| m.request_focus(id));
             h.frames(2);
             assert_eq!(h.ctx.memory(|m| m.focused()), Some(id), "placed Text must not steal report focus");
@@ -1640,8 +1632,8 @@ mod tests {
     fn issue_report_boundary_preserves_opacity_widget_state_and_real_focus() {
         let mut app = app();
         let ctx = crate::fonts::test_context();
-        let focus = egui::Id::new("report-review-focus");
-        let state = egui::Id::new("cad-layout-state");
+        let focus = egui::Id::unique("report-review-focus");
+        let state = egui::Id::unique("cad-layout-state");
         begin(&mut app, &ctx, None, None);
         let raw = egui::RawInput {
             screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1400.0, 900.0))),
@@ -1655,16 +1647,16 @@ mod tests {
             ui.disable();
             assert_eq!(ui.opacity(), 1.0, "capture must retain normal drawing opacity");
             assert!(!ui.is_enabled());
-            Container::new(&ctx, Surface::Popup).area(egui::Id::new("cad-boundary-proof")).fade_in(false).show(&ctx, |ui| {
+            Container::new(&ctx, Surface::Popup).area(egui::Id::unique("cad-boundary-proof")).fade_in(false).show(&ctx, |ui| {
                 assert!(!ui.is_enabled());
                 assert_eq!(ui.opacity(), 1.0);
                 ui.ctx().data_mut(|d| d.insert_temp(state, 42_u32));
-                ui.ctx().memory_mut(|m| m.request_focus(egui::Id::new("underlying-editor")));
+                ui.ctx().memory_mut(|m| m.request_focus(egui::Id::unique("underlying-editor")));
             });
             drop(barrier);
             assert_eq!(ctx.memory(|m| m.focused()), Some(focus));
             assert_eq!(ctx.data(|d| d.get_temp::<u32>(state)), Some(42));
-            assert!(Container::new(&ctx, Surface::Popup).area(egui::Id::new("report-boundary-proof")).is_enabled());
+            assert!(Container::new(&ctx, Surface::Popup).area(egui::Id::unique("report-boundary-proof")).is_enabled());
         });
         output.textures_delta.clear();
         app.issue_report.draft = None;
@@ -1737,7 +1729,7 @@ mod tests {
         let token = h.app.issue_report.pending.as_ref().unwrap().token;
         receive(&mut h.app, token, Arc::new(ColorImage::new([2, 2], vec![egui::Color32::GREEN; 4])));
         h.frames(3);
-        h.ctx.memory_mut(|m| m.request_focus(egui::Id::new("issue_report_body")));
+        h.ctx.memory_mut(|m| m.request_focus(egui::Id::unique("issue_report_body")));
         h.step(&json!({"text":"Typing here describes the bug, not a CAD dimension."})).unwrap();
         h.step(&json!({"key":"Enter"})).unwrap();
         h.step(&json!({"key":"Escape"})).unwrap();
@@ -1746,7 +1738,7 @@ mod tests {
         assert!(h.app.issue_report.draft.as_ref().unwrap().description.contains("Typing here describes"));
         h.step(&json!({"widget":"Close draft"})).unwrap();
         h.frames(2);
-        assert_eq!(h.ctx.memory(|m| m.focused()), Some(egui::Id::new("sc_dim_edit")));
+        assert_eq!(h.ctx.memory(|m| m.focused()), Some(egui::Id::unique("sc_dim_edit")));
         h.step(&json!({"key":"Enter"})).unwrap();
         assert!(!crate::dim_view::editing());
         assert_eq!(h.app.session.undo.len(), before.1 + 1);
@@ -1774,7 +1766,7 @@ mod tests {
         let token = h.app.issue_report.pending.as_ref().unwrap().token;
         receive(&mut h.app, token, Arc::new(ColorImage::new([2, 2], vec![egui::Color32::GREEN; 4])));
         h.frames(3);
-        h.ctx.memory_mut(|m| m.request_focus(egui::Id::new("issue_report_body")));
+        h.ctx.memory_mut(|m| m.request_focus(egui::Id::unique("issue_report_body")));
         h.step(&json!({"text":"report only"})).unwrap();
         h.step(&json!({"key":"Enter"})).unwrap();
         h.step(&json!({"key":"Escape"})).unwrap();

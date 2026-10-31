@@ -89,7 +89,7 @@ pub(super) fn label_column(ui: &Ui, text: &str, row_width: f32) -> f32 {
     // for their existing controls. Both sizes derive from the same form/spacing tokens.
     let base = if row_width >= t.form_card_width + t.space_24 * 2.0 { t.form_label_width + t.space_24 + t.space_10 } else { t.form_label_width };
     let natural = label_width(ui, text);
-    let widest = match ui.stack().iter().find(|node| node.tags().contains(FORM)).map(|node| node.id) {
+    let widest = match ui.stack().iter().find(|node| node.tags().contains(FORM)).map(|node| node.unique_id) {
         Some(form) => {
             let key = form.with("label_column");
             let pass = ui.ctx().cumulative_pass_nr();

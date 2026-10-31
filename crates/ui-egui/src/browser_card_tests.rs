@@ -232,7 +232,7 @@ fn selected_row_paints_tab_soft_fill_and_accent_text_in_both_layouts() {
                 let mut row_rect = Rect::NOTHING;
                 let out = crate::test_support::frame(&ctx, egui::RawInput::default(), |ui| {
                     let row = Row { selected: true, label: "Selected body", dim: true, color: Some(Tokens::get().error), ..Default::default() };
-                    row_rect = draw_row(ui, egui::Id::new("selected-row"), &row).rect.unwrap();
+                    row_rect = draw_row(ui, egui::Id::unique("selected-row"), &row).rect.unwrap();
                 });
                 assert_eq!(row_rect.height(), 26.0);
                 assert!(out.shapes.iter().any(|s| matches!(&s.shape, egui::Shape::Rect(r) if r.rect == row_rect && r.fill == accent.soft)));

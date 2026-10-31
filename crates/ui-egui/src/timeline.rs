@@ -754,7 +754,7 @@ fn folder_tile(app: &mut SolveApp, ui: &mut egui::Ui, p: &egui::Painter, x: f32,
     let br = Rect::from_min_size(pos2(x, r.top() + 6.0), vec2(28.0, 28.0));
     let key = format!("timeline_group:{id}");
     let open = !app.tree.collapsed.contains(&key);
-    let resp = ui.interact(br, ui.id().with(("folder", id)), Sense::click());
+    let resp = ui.interact(br, ui.scope_id().with(("folder", id)), Sense::click());
     p.rect(
         br,
         t.radius_sm.saturating_sub(1),
@@ -810,7 +810,7 @@ fn timeline_contents(app: &mut SolveApp, ui: &mut egui::Ui, floating: bool) {
         drag_rect = drag_rect.union(title_rect);
         x += heading.width();
     }
-    let response = ui.interact(drag_rect, egui::Id::new("sc_history_dock_grip"), Sense::drag());
+    let response = ui.interact(drag_rect, egui::Id::unique("sc_history_dock_grip"), Sense::drag());
     crate::scenario::publish_handle("history:grip", drag_rect.center());
     crate::timeline_left::dock_drag(app, ui, &response);
     let controls = crate::ui_kit::HistoryTransport::shown(app.preferences.history_play_button);
@@ -831,7 +831,7 @@ fn timeline_contents(app: &mut SolveApp, ui: &mut egui::Ui, floating: bool) {
             let mut x = ui.max_rect().left();
             let origin = x;
             // In an assembly, only the active (or picked) component's features (#2880).
-            let show_all_id = ui.id().with("tl_show_all");
+            let show_all_id = ui.scope_id().with("tl_show_all");
             let show_all = ui.data(|d| d.get_temp::<bool>(show_all_id)).unwrap_or(false);
             let only = timeline_component(app, show_all);
             let filtering = only.is_some() || show_all;
@@ -845,7 +845,7 @@ fn timeline_contents(app: &mut SolveApp, ui: &mut egui::Ui, floating: bool) {
                 let galley = ui.painter().layout_no_wrap(label.clone(), egui::FontId::proportional(t.font_label), t.text);
                 let br = Rect::from_min_size(pos2(x, r.top() + 9.0), vec2(galley.size().x + 12.0, 22.0));
                 crate::scenario::publish_handle("timeline:components", br.center());
-                let resp = ui.interact(br, ui.id().with("tl_components"), Sense::click());
+                let resp = ui.interact(br, ui.scope_id().with("tl_components"), Sense::click());
                 p.rect(br, 3.0, if resp.hovered() { t.hover } else { t.timeline_item }, egui::Stroke::new(1.0, t.border), egui::StrokeKind::Inside);
                 p.galley(br.left_center() + vec2(6.0, -galley.size().y * 0.5), galley, t.text);
                 let tip = if show_all {
@@ -872,7 +872,7 @@ fn timeline_contents(app: &mut SolveApp, ui: &mut egui::Ui, floating: bool) {
             let reveal = app.tree.timeline_reveal.take();
             // The feature that made what is under the cursor or picked in the viewport.
             let from_view = [hovered_feature(app), picked_feature(app)];
-            let drag_id = ui.id().with("tl_drag");
+            let drag_id = ui.scope_id().with("tl_drag");
             let mut drag: Option<Drag> = ui.data(|d| d.get_temp(drag_id));
             let pointer = ui.input(|i| i.pointer.hover_pos());
             let mut xs: Vec<f32> = vec![x; feats.len()];
@@ -933,7 +933,7 @@ fn timeline_contents(app: &mut SolveApp, ui: &mut egui::Ui, floating: bool) {
                 // A chip scrolled out of the strip is neither drawn nor interactive: a long
                 // history drew every chip each frame. Its slot above still places the marker and drops.
                 // One being dragged or focused, or under an open menu, stays alive until that ends.
-                let chip_id = ui.id().with(("feat", *id));
+                let chip_id = ui.scope_id().with(("feat", *id));
                 if !ui.clip_rect().intersects(br)
                     && drag != Some(Drag::Feature(*id))
                     && !ui.memory(|m| m.has_focus(chip_id))
@@ -1061,7 +1061,7 @@ fn timeline_contents(app: &mut SolveApp, ui: &mut egui::Ui, floating: bool) {
             // The history marker: drag it to roll the model back or forward.
             if let Some(mr) = marker_rect {
                 crate::scenario::publish_rect("history:marker", mr);
-                let resp = ui.interact(mr.expand2(vec2(3.0, 0.0)), ui.id().with("tl_marker"), Sense::drag());
+                let resp = ui.interact(mr.expand2(vec2(3.0, 0.0)), ui.scope_id().with("tl_marker"), Sense::drag());
                 if resp.drag_started() {
                     drag = Some(Drag::Marker);
                 }

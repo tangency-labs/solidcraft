@@ -83,12 +83,12 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let Some(mut d) = app.design_properties.take() else { return };
     let metadata = app.session.doc.metadata.clone();
     let title = crate::i18n::tr_label("Design Properties");
-    let (closed, action) = ui_kit::Window::new(egui::Id::new("sc_design_properties"), "settings", title).fields().show(ctx, true, |ui| {
+    let (closed, action) = ui_kit::Window::new(egui::Id::unique("sc_design_properties"), "settings", title).fields().show(ctx, true, |ui| {
         for (i, k) in keys(Owner::Design).enumerate() {
             let (key, label) = (k.name, crate::i18n::tr(k.label));
             let Some(field) = d.fields.get_mut(i) else { continue };
             if key == DESCRIPTION {
-                ui_kit::multiline_text_field(ui, label, egui::Id::new(("sc_design_properties", key)), field);
+                ui_kit::multiline_text_field(ui, label, egui::Id::unique(("sc_design_properties", key)), field);
             } else {
                 ui_kit::row(ui, label, |ui| ui_kit::text_field(ui, field, ""));
             }
@@ -197,7 +197,7 @@ fn show_measuring(app: &mut SolveApp, ctx: &egui::Context) {
     }
     ctx.request_repaint_after(std::time::Duration::from_millis(100));
     let (heading, text) = (app.tr("ui.properties").to_string(), app.tr("ui.properties.measuring").to_string());
-    let (closed, action) = ui_kit::Window::new(egui::Id::new("sc_props"), "settings", &heading).actions("", "Close", None).show(ctx, true, |ui| {
+    let (closed, action) = ui_kit::Window::new(egui::Id::unique("sc_props"), "settings", &heading).actions("", "Close", None).show(ctx, true, |ui| {
         ui.horizontal(|ui| {
             ui.spinner();
             ui_kit::text(ui, &text, ui_kit::Text::Note("measuring"));
@@ -376,7 +376,7 @@ pub fn show_object(app: &mut SolveApp, ctx: &egui::Context) {
     let copy = shown_tensor(app, total).map(|t| tensor_text(&t));
     let copy_label = app.tr("ui.properties.copy_matrix").to_string();
     let heading = window_title(&title, &v);
-    let (closed, action) = ui_kit::Window::new(egui::Id::new("sc_props"), "settings", &heading).actions("", "Close", None).show(ctx, true, |ui| {
+    let (closed, action) = ui_kit::Window::new(egui::Id::unique("sc_props"), "settings", &heading).actions("", "Close", None).show(ctx, true, |ui| {
         for (label, value) in &rows {
             ui_kit::row(ui, crate::i18n::tr_label(label), |ui| ui_kit::text(ui, value, ui_kit::Text::Cell));
         }
@@ -626,7 +626,7 @@ mod tests {
         crate::context_menu::run_item(&mut h.app, item, egui::pos2(0.0, 0.0));
         assert!(h.app.design_properties.is_some());
         h.app.design_properties = None;
-        h.ctx.data_mut(|d| d.insert_temp(egui::Id::new("sc_file_menu"), true));
+        h.ctx.data_mut(|d| d.insert_temp(egui::Id::unique("sc_file_menu"), true));
         h.frames(2);
         h.step(&json!({"widget": "Design Properties…"})).unwrap();
         assert!(h.app.design_properties.is_some());

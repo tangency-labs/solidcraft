@@ -623,13 +623,13 @@ enum FileAction {
 /// File view replaces the workspace while keeping the open design and its history intact.
 pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     poll(app, ui.ctx());
-    let file_menu_open = ui.ctx().data(|data| data.get_temp::<bool>(egui::Id::new("sc_file_menu"))).unwrap_or(false);
+    let file_menu_open = ui.ctx().data(|data| data.get_temp::<bool>(egui::Id::unique("sc_file_menu"))).unwrap_or(false);
     let interactive = !app.file_picker_busy() && !app.file_load.busy() && !file_menu_open;
     // Help windows draw before Home; remember their prior visibility so one Escape closes only the window.
     let had_help_window = ui.ctx().memory(|memory| {
         ["sc_about", "sc_crash_reports"]
             .iter()
-            .any(|id| memory.areas().visible_last_frame(&egui::LayerId::new(egui::Order::Middle, egui::Id::new(id))))
+            .any(|id| memory.areas().visible_last_frame(&egui::LayerId::new(egui::Order::Middle, egui::Id::unique(id))))
     });
 
     if interactive
@@ -1502,7 +1502,7 @@ mod tests {
         h.call("ui.click", serde_json::json!({"x": gear.x, "y": gear.y}));
         assert!(h.app.prefs_window.open && h.app.home.open);
         let shown = |h: &crate::scenario::Harness| {
-            h.ctx.memory(|m| m.areas().visible_last_frame(&egui::LayerId::new(egui::Order::Middle, egui::Id::new("sc_prefs"))))
+            h.ctx.memory(|m| m.areas().visible_last_frame(&egui::LayerId::new(egui::Order::Middle, egui::Id::unique("sc_prefs"))))
         };
         assert!(shown(&h), "the Preferences window must be drawn on Home");
         h.call("ui.prefs", serde_json::json!({"button": "cancel"}));

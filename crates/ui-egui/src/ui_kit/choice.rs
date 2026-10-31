@@ -192,7 +192,7 @@ pub(crate) fn segmented(ui: &mut Ui, selected: &mut usize, options: &[&str], con
             false,
         );
         t.button_bevel_with_radius(ui, &response, on, rounding);
-        response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, segment_enabled, on, *text));
+        response.widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, segment_enabled, on, *text));
         scenario::publish_target(&format!("dialog:{}:{option}", label(ui)), segment);
         if let Some(target) = targets.get(index) {
             let visible = segment.intersect(ui.clip_rect());
@@ -272,7 +272,7 @@ pub(crate) fn segmented_icons(ui: &mut Ui, selected: &mut usize, options: &[Icon
             crate::icons::paint_icon(ui.painter(), icon_rect, option.icon, f32::from(t.icon.a()) / 255.0);
         }
         t.button_bevel_with_radius(ui, &response, on, rounding);
-        response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, ui.is_enabled(), on, option.key));
+        response.widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, ui.is_enabled(), on, option.key));
         scenario::publish_handle(&format!("dialog:{}:{}", label(ui), option.key), segment.center());
         scenario::publish_target(option.key, segment);
         let response = response.on_hover_text(&option.tip);
@@ -308,7 +308,7 @@ pub(crate) fn checkbox_grid(ui: &mut Ui, items: &mut [(&str, &mut bool)], column
                 let text = if translated == "Tangent Chain" { "Tangent chain" } else { translated };
                 let text_rect = egui::Rect::from_min_max(egui::pos2((square.right() + t.space_6).min(rect.right()), rect.top()), rect.max);
                 paint_text(ui, text_rect, text, egui::FontId::proportional(t.font_body), t.form_ink, false);
-                response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Checkbox, ui.is_enabled(), **value, translated));
+                response.widget_info(|| egui::WidgetInfo::selected(egui::Role::CheckBox, ui.is_enabled(), **value, translated));
                 scenario::publish_target_as(&format!("dialog:{label}"), &format!("dialog:checkbox:{label}"), rect);
             }
         });
@@ -336,7 +336,7 @@ pub(crate) fn checkbox_row(ui: &mut egui::Ui, key: &str, label: &str, on: bool) 
         .painter()
         .with_clip_rect(ui.clip_rect().intersect(egui::Rect::from_min_max(rect.min, egui::pos2(square.left() - t.space_6, rect.bottom()))));
     painter.text(rect.left_center(), egui::Align2::LEFT_CENTER, label, egui::FontId::proportional(t.font_label), t.form_ink);
-    response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Checkbox, ui.is_enabled(), on, label));
+    response.widget_info(|| egui::WidgetInfo::selected(egui::Role::CheckBox, ui.is_enabled(), on, label));
     crate::scenario::publish_target(&format!("sketch_palette:toggle:{key}"), rect);
     response.on_hover_text(label).clicked()
 }
@@ -350,7 +350,7 @@ pub(crate) fn text_emphasis(ui: &mut Ui, bold: &mut bool, italic: &mut bool) {
         ("Italic", egui::RichText::new("I").italics(), italic, "sketch_text.italic"),
     ] {
         let response = ui.toggle_value(value, text).on_hover_text(crate::i18n::tr(id));
-        response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, ui.is_enabled(), *value, crate::i18n::tr(id)));
+        response.widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, ui.is_enabled(), *value, crate::i18n::tr(id)));
         scenario::publish_target_as(&format!("dialog:{key}"), &format!("dialog:emphasis:{key}"), response.rect);
     }
 }
@@ -386,7 +386,7 @@ pub(crate) fn tool_choices<'a>(ui: &mut Ui, label: &str, current: &str, choices:
             crate::icons::paint_icon(ui.painter(), response.rect.shrink(t.space_6), choice.icon, f32::from(t.icon.a()) / 255.0);
             t.button_bevel(ui, &response, on);
             scenario::publish_target(&format!("sketch_palette:feature:{}", choice.key), response.rect);
-            response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, enabled, on, choice.label));
+            response.widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, enabled, on, choice.label));
             if response.on_hover_text(choice.label).clicked() && enabled {
                 start = Some(choice.key);
             }
@@ -403,7 +403,7 @@ pub(crate) fn toggle_icon(ui: &mut Ui, row: &str, label: &str, selected: &mut bo
     let response =
         ui.add(egui::Button::new("").selected(*selected).min_size(vec2(t.space_24 + t.space_4, t.control_height)).sense(egui::Sense::CLICK));
     crate::icons::paint_icon(ui.painter(), response.rect.shrink(t.space_3), icon, f32::from(t.icon.a()) / 255.0);
-    response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, true, *selected, crate::i18n::tr_label(label)));
+    response.widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, true, *selected, crate::i18n::tr_label(label)));
     t.button_bevel(ui, &response, *selected);
     crate::scenario::publish_handle(&format!("dialog:{row}:{label}"), response.rect.center());
     if response.clone().on_hover_text(crate::i18n::tr_label(label)).clicked() {
@@ -442,7 +442,7 @@ pub(crate) fn choice_chip(ui: &mut Ui, key: &str, text: &str, selected: bool) ->
             if selected { accent.ink } else { t.form_ink },
             false,
         );
-        response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, ui.is_enabled(), selected, text));
+        response.widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, ui.is_enabled(), selected, text));
         crate::scenario::publish_target(&format!("dialog:list:{key}"), rect);
         return response;
     }
@@ -523,7 +523,7 @@ pub(crate) fn thumbnail_choice(ui: &mut Ui, key: &str, text: &str, state: Thumbn
         ui.painter().add(egui::Shape::line(points, egui::Stroke::new(t.space_2, accent.ink)));
         crate::scenario::publish_rect(&format!("dialog:list:{key}:progress"), thumb);
     }
-    response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::SelectableLabel, ui.is_enabled(), state.selected, text));
+    response.widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, ui.is_enabled(), state.selected, text));
     crate::scenario::publish_target(&format!("dialog:list:{key}"), response.rect);
     response.on_hover_text(text)
 }
@@ -543,7 +543,7 @@ pub(crate) fn add_choice(ui: &mut Ui, label: &str) -> egui::Response {
     }
     ui.painter().add(egui::Shape::dashed_line(&outline, egui::Stroke::new(1.0, t.control_border), t.space_3, t.space_3));
     ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, "+", egui::FontId::proportional(t.font_subtitle), t.form_dim);
-    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), label));
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled(), label));
     response.on_hover_text(label)
 }
 
@@ -696,8 +696,7 @@ pub(crate) fn popup_list(
                                 false,
                             );
                             ui.painter().text(inner.right_center(), egui::Align2::RIGHT_CENTER, kind, kind_font.clone(), t.form_dim);
-                            response
-                                .widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::SelectableLabel, ui.is_enabled(), picked, option.text));
+                            response.widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, ui.is_enabled(), picked, option.text));
                             // Tip the full name first: long identifiers still clip inside a capped popup.
                             let tip = if option.detail.is_empty() { option.text.to_owned() } else { format!("{}\n{}", option.text, option.detail) };
                             let response = response.on_hover_text(tip);

@@ -35,7 +35,7 @@ pub(crate) fn canvas(app: &SolveApp, viewport: Rect) -> Rect {
 pub(crate) fn stage_bar(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
     use crate::render_workspace::Stage;
     crate::scenario::publish_rect("render:stage_bar", rect);
-    ui.ctx().data_mut(|d| d.remove::<Rect>(egui::Id::new("sc_ribbon_search")));
+    ui.ctx().data_mut(|d| d.remove::<Rect>(egui::Id::unique("sc_ribbon_search")));
     let labels: Vec<_> = Stage::ALL.iter().map(|stage| app.tr(stage.label()).to_string()).collect();
     let selected = Stage::ALL.iter().position(|s| *s == app.render_workspace.view.stage).unwrap_or(0);
     let ready = [crate::render_workspace::job_ready(app, "render.start"), crate::render_workspace::job_ready(app, "render.cancel")];
@@ -186,7 +186,7 @@ pub(crate) fn overlays(app: &mut SolveApp, ui: &mut egui::Ui) {
         return;
     }
     if crate::render_workspace::job_busy(app) {
-        let pill = Container::navigation_card(ui.ctx(), egui::Id::new("sc_render_progress"), free.center_top(), egui::Align2::CENTER_TOP, |ui| {
+        let pill = Container::navigation_card(ui.ctx(), egui::Id::unique("sc_render_progress"), free.center_top(), egui::Align2::CENTER_TOP, |ui| {
             crate::render_workspace::progress_pill(app, ui);
         });
         crate::shell::register_panel(app, "render:progress-pill", Some(pill.response.rect), None);
@@ -215,7 +215,7 @@ pub(crate) fn dock_chip(app: &mut SolveApp, ui: &mut egui::Ui, id: &'static str,
     let position = if left { bounds.left_top() + vec2(t.space_8, 0.0) } else { bounds.right_top() - vec2(t.space_8, 0.0) };
     let ctx = ui.ctx().clone();
     let chip =
-        Container::navigation_card(&ctx, egui::Id::new(id), position, if left { egui::Align2::LEFT_TOP } else { egui::Align2::RIGHT_TOP }, |ui| {
+        Container::navigation_card(&ctx, egui::Id::unique(id), position, if left { egui::Align2::LEFT_TOP } else { egui::Align2::RIGHT_TOP }, |ui| {
             let response = ui_kit::choice_chip(ui, id, app.tr(label), false);
             crate::scenario::publish_target(id, response.rect);
             if response.clicked() {
@@ -233,7 +233,7 @@ fn shots_pill(app: &mut SolveApp, ui: &mut egui::Ui, free: Rect) {
     let ctx = ui.ctx().clone();
     let pill = Container::navigation_card(
         &ctx,
-        egui::Id::new("sc_render_shots_pill"),
+        egui::Id::unique("sc_render_shots_pill"),
         free.left_bottom() + vec2(Tokens::get().space_8, -Tokens::get().space_8),
         egui::Align2::LEFT_BOTTOM,
         |ui| {

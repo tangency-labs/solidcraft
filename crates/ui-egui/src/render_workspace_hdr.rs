@@ -177,7 +177,7 @@ pub(super) fn controls(app: &mut SolveApp, ui: &mut egui::Ui, target: Target) {
         let mut path = input(app, target).path().to_string();
         let hint = app.tr("render.studio_hdr_required").to_string();
         let field = ui_kit::row(ui, app.tr("render.environment.file"), |ui| {
-            ui_kit::bounded_cell_editor(ui, ui.id().with("hdr_source_path"), &mut path, &hint, false, 4096)
+            ui_kit::bounded_cell_editor(ui, ui.scope_id().with("hdr_source_path"), &mut path, &hint, false, 4096)
         });
         if field.changed() {
             set_input(app, target, Input::FilePending { path });

@@ -2248,7 +2248,7 @@ fn tr(text: &str) -> &str {
 }
 
 fn publish_check(ui: &egui::Ui, response: &egui::Response, selected: bool) {
-    response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Checkbox, ui.is_enabled(), selected, tr(crate::ui_kit::row_label(ui))));
+    response.widget_info(|| egui::WidgetInfo::selected(egui::Role::CheckBox, ui.is_enabled(), selected, tr(crate::ui_kit::row_label(ui))));
 }
 
 fn title(k: &Kind) -> &'static str {
@@ -2680,7 +2680,7 @@ pub(crate) fn input_rows_range(d: &mut Dialog, ui: &mut egui::Ui, s: &Session, n
                 let chip = crate::ui_kit::selection_field(ui, prompt, crate::ui_kit::Selection { active, filled });
                 if matches!(d.kind, Kind::Shell { .. }) && i == 0 {
                     chip.widget_info(|| {
-                        let mut info = egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), tr(inp.label));
+                        let mut info = egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled(), tr(inp.label));
                         info.current_text_value = Some(prompt.to_string());
                         info
                     });
@@ -2802,7 +2802,7 @@ fn error_rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: &mut 
     if matches!(d.kind, Kind::SketchModify(crate::sketch_modify_ui::Mod::Corner { .. })) && app.preview.error.is_some() && d.error.is_none() {
         d.error = app.preview.error.clone();
     }
-    let shown_id = egui::Id::new("sc_dialog_refusal_shown");
+    let shown_id = egui::Id::unique("sc_dialog_refusal_shown");
     if d.error.is_none() && app.preview.error.is_none() {
         ui.data_mut(|m| m.remove::<String>(shown_id));
     }
@@ -3225,7 +3225,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let (ok_label, close_label) = action_labels(&d.kind);
     // What the footer's OK takes, for the check in the view's corner too (#6709).
     let ok_enabled = valid && !ok_label.is_empty() && app.applying.is_none();
-    let panel = crate::ui_kit::Panel::new(&heading, egui::Id::new(("sc_dialog", title(&d.kind))), anchor, drag_bounds, side, frame)
+    let panel = crate::ui_kit::Panel::new(&heading, egui::Id::unique(("sc_dialog", title(&d.kind))), anchor, drag_bounds, side, frame)
         .actions(ok_label, close_label);
     let panel = if let Some(column) = column {
         panel.width(column.width()).joined(crate::ui_kit::DockEdges { left: true, top: true, ..Default::default() })
@@ -3243,7 +3243,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         matches!(&d.kind, Kind::SketchModify(k) if crate::sketch_modify_ui::repeatable(k)) && d.editing.is_none() && !d.extra.contains_key("pattern");
     if let Kind::ConfirmDelete { with, fail, .. } = &d.kind {
         let detail = with.join(" · ");
-        let (closed, action) = crate::ui_kit::Confirm::new(egui::Id::new(("sc_dialog", title(&d.kind))), "delete", &heading)
+        let (closed, action) = crate::ui_kit::Confirm::new(egui::Id::unique(("sc_dialog", title(&d.kind))), "delete", &heading)
             .tone(crate::ui_kit::Tone::Danger)
             .actions("Delete", "Cancel", None)
             .detail(&detail)
@@ -3384,7 +3384,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     // Keyboard: Enter applies (from a value field, or with nothing focused), Esc cancels.
     let (enter_free, esc) = ctx.input(|i| (i.key_pressed(egui::Key::Enter), i.key_pressed(egui::Key::Escape)));
     let nothing_focused = ctx.memory(|m| m.focused().is_none());
-    let canvas_enter = enter_free && ctx.memory(|m| m.had_focus_last_frame(egui::Id::new("sc_canvas_value")));
+    let canvas_enter = enter_free && ctx.memory(|m| m.had_focus_last_frame(egui::Id::unique("sc_canvas_value")));
     // Tables (configurations, a study's keys) take Enter for their cells.
     let enter_applies = !matches!(d.kind, Kind::Sketch | Kind::Measure { .. } | Kind::ConfirmDelete { .. })
         && !matches!(&d.kind, Kind::Motion(k) if k.wide())

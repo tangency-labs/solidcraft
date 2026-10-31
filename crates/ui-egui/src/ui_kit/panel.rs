@@ -93,7 +93,7 @@ fn header_actions(
     let title_rect = egui::Rect::from_min_max(egui::pos2(left, rect.top()), egui::pos2(right.max(left), rect.bottom()));
     paint_text(ui, title_rect, title, crate::fonts::semibold(if icon.0.is_empty() { t.font_label } else { t.font_heading }), t.form_ink, false);
     let title_response = ui.interact(title_rect, ui.make_persistent_id("title_text"), egui::Sense::hover());
-    title_response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), title));
+    title_response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, ui.is_enabled(), title));
     scenario::publish_rect("dialog:header", rect);
     t.secondary_hline(ui.painter(), rect.x_range(), rect.bottom(), t.dialog_rule);
 }
@@ -113,11 +113,11 @@ pub enum DialogButtons {
 
 impl DialogButtons {
     pub(crate) fn publish(self, ctx: &egui::Context) {
-        ctx.data_mut(|data| data.insert_temp(egui::Id::new("sc_dialog_buttons"), self));
+        ctx.data_mut(|data| data.insert_temp(egui::Id::unique("sc_dialog_buttons"), self));
     }
 
     pub(crate) fn current(ctx: &egui::Context) -> Self {
-        ctx.data(|data| data.get_temp(egui::Id::new("sc_dialog_buttons"))).unwrap_or_default()
+        ctx.data(|data| data.get_temp(egui::Id::unique("sc_dialog_buttons"))).unwrap_or_default()
     }
 }
 
@@ -196,7 +196,7 @@ impl<'a> TopHeader<'a> {
         if state.busy {
             egui::Spinner::new().size(t.space_14).paint_at(ui, self.icon);
             let status = state.text.as_deref().unwrap_or_else(|| crate::i18n::tr_label("Updating the preview"));
-            ui.interact(self.icon, ui.id().with("compute_status"), egui::Sense::hover()).on_hover_text(status);
+            ui.interact(self.icon, ui.scope_id().with("compute_status"), egui::Sense::hover()).on_hover_text(status);
             ui.ctx().request_repaint_after(std::time::Duration::from_millis(100));
         } else {
             crate::icons::paint_icon(ui.painter(), self.icon, icon, 1.0);
@@ -207,7 +207,7 @@ impl<'a> TopHeader<'a> {
             None => paint_text(ui, self.title, title, heading.clone(), t.form_ink, false),
         }
         let title_response = ui.interact(self.title, ui.make_persistent_id("title_text"), egui::Sense::hover());
-        title_response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), title));
+        title_response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, ui.is_enabled(), title));
         // The buttons take the row's width first; a title that no longer fits says itself on hover.
         if ui.painter().layout_no_wrap(title.to_owned(), heading, t.form_ink).size().x > self.title.width() {
             title_response.on_hover_text(title);
@@ -261,7 +261,7 @@ pub(crate) fn inspector_header(ui: &mut Ui, icon: &str, title: &str, kind: &str)
     let name = egui::Rect::from_min_max(egui::pos2(icon_rect.right() + t.space_8, rect.top()), egui::pos2(badge.left() - t.space_8, rect.bottom()));
     paint_text(ui, name, title, crate::fonts::semibold(t.font_label), t.form_ink, false);
     ui.interact(name, ui.make_persistent_id("inspector_title"), egui::Sense::hover())
-        .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), title));
+        .widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, ui.is_enabled(), title));
     t.secondary_hline(ui.painter(), rect.x_range(), rect.bottom(), t.dialog_rule);
     scenario::publish_rect("dialog:header", rect);
     action
@@ -401,7 +401,7 @@ impl<'a> Panel<'a> {
             return None;
         }
         let ctx = ui.ctx().clone();
-        Some(container.area(egui::Id::new(id)).fixed_pos(rect.min).movable(false).show(&ctx, |ui| {
+        Some(container.area(egui::Id::unique(id)).fixed_pos(rect.min).movable(false).show(&ctx, |ui| {
             let frame = container.frame(&ctx, Tokens::get().panel, crate::frame::Side::Left).inner_margin(Tokens::get().space_4);
             container
                 .show_frame(ui, frame, rect, |ui| {
@@ -473,7 +473,7 @@ impl<'a> Panel<'a> {
         );
         let ctx = ui.ctx().clone();
         let mut move_side = None;
-        let response = container.area(egui::Id::new(options.id)).fixed_pos(rect.min).movable(false).show(&ctx, |ui| {
+        let response = container.area(egui::Id::unique(options.id)).fixed_pos(rect.min).movable(false).show(&ctx, |ui| {
             let frame = container
                 .frame(
                     &ctx,
@@ -502,8 +502,9 @@ impl<'a> Panel<'a> {
                 ui.spacing_mut().item_spacing.y = 0.0;
                 let band = egui::Rect::from_min_size(ui.cursor().min, vec2(ui.available_width(), header_height()));
                 let grip_rect = if tree { egui::Rect::from_min_size(band.min, vec2(t.space_24 * 2.0 + t.space_8, band.height())) } else { band };
-                let grip =
-                    ui.interact(grip_rect, ui.id().with("workspace_grip"), egui::Sense::click_and_drag()).on_hover_cursor(egui::CursorIcon::Grab);
+                let grip = ui
+                    .interact(grip_rect, ui.scope_id().with("workspace_grip"), egui::Sense::click_and_drag())
+                    .on_hover_cursor(egui::CursorIcon::Grab);
                 scenario::publish_target(&format!("{}:grip", options.id), grip.rect);
                 super::Menu::context(&grip, |ui| {
                     let (target, label) = if left { ("right", "Move to right side") } else { ("left", "Move to left side") };
@@ -518,7 +519,7 @@ impl<'a> Panel<'a> {
                 scenario::publish_rect(&format!("{}:header", options.id), band);
                 if grip.dragged() {
                     let frame_nr = ui.ctx().cumulative_frame_nr();
-                    ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new("sc_dock_drag_frame"), frame_nr));
+                    ui.ctx().data_mut(|d| d.insert_temp(egui::Id::unique("sc_dock_drag_frame"), frame_nr));
                     ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
                 }
                 if grip.drag_stopped()
@@ -554,7 +555,8 @@ impl<'a> Panel<'a> {
                 if left { card.right() - t.space_6..=card.right() } else { card.left()..=card.left() + t.space_6 },
                 card.y_range(),
             );
-            let resize = ui.interact(rail, ui.id().with("workspace_resize"), egui::Sense::drag()).on_hover_cursor(egui::CursorIcon::ResizeHorizontal);
+            let resize =
+                ui.interact(rail, ui.scope_id().with("workspace_resize"), egui::Sense::drag()).on_hover_cursor(egui::CursorIcon::ResizeHorizontal);
             scenario::publish_target(&format!("{}:resize", options.id), rail);
             if resize.dragged() && !options.compact {
                 let delta = ui.input(|i| i.pointer.delta().x) * if left { 1.0 } else { -1.0 };
@@ -811,7 +813,7 @@ impl<'a> Panel<'a> {
                                 .inner
                         });
                     scenario::publish_count("dialog:body:content_height", f64::from(scroll.content_size.y));
-                    scenario::publish_count("dialog:body:scroll_y", f64::from(scroll.state.offset.y));
+                    scenario::publish_count("dialog:body:scroll_y", f64::from(scroll.state.clamped_offset().y));
                     scenario::publish_rect("dialog:body:viewport", scroll.inner_rect);
                     scroll.inner
                 })
@@ -837,7 +839,7 @@ impl<'a> Panel<'a> {
                         egui::Spinner::new().size(t.space_14).paint_at(ui, rect);
                         scenario::publish_rect("dialog:footer:spinner", rect);
                         let status = state.text.as_deref().unwrap_or_else(|| crate::i18n::tr_label("Updating the preview"));
-                        ui.interact(rect, ui.id().with("compute_status"), egui::Sense::hover()).on_hover_text(status);
+                        ui.interact(rect, ui.scope_id().with("compute_status"), egui::Sense::hover()).on_hover_text(status);
                         ui.ctx().request_repaint_after(std::time::Duration::from_millis(100));
                     }
                 },
@@ -1274,7 +1276,7 @@ fn page_list_sized<S>(
                     ink,
                     false,
                 );
-                response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::SelectableLabel, ui.is_enabled(), on, label));
+                response.widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, ui.is_enabled(), on, label));
                 if response.hovered() {
                     ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
                 }

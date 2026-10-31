@@ -47,7 +47,7 @@ pub(crate) fn aspect_grid(ui: &mut Ui, tiles: &[AspectTile<'_>]) -> Option<usize
                     egui::FontId::proportional(t.font_small),
                     ink,
                 );
-                response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, ui.is_enabled(), tile.selected, tile.label));
+                response.widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, ui.is_enabled(), tile.selected, tile.label));
                 scenario::publish_target(tile.id, rect);
                 if response.clicked() {
                     clicked = Some(row * 3 + column);

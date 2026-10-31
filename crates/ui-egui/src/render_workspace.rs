@@ -820,7 +820,7 @@ pub(crate) fn browser_mode(app: &mut SolveApp, ui: &mut egui::Ui) -> bool {
     if app.render_workspace.view.search_objects {
         let mut query = app.render_workspace.view.object_query.clone();
         crate::ui_kit::scope(ui, |ui| {
-            if crate::ui_kit::search_field(ui, ui.id().with("render:tree:query"), &mut query, crate::i18n::tr("render.tree_search")).changed() {
+            if crate::ui_kit::search_field(ui, ui.scope_id().with("render:tree:query"), &mut query, crate::i18n::tr("render.tree_search")).changed() {
                 let _ = app.run("view.render_browser", json!({"query":query}));
             }
         });
@@ -1977,7 +1977,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     // Framing uses the output camera's own aspect, including navigation and picking.
     let rect = shot::preview_rect(app, viewport).unwrap_or(viewport);
     crate::viewport::refresh_layout(app, ui.ctx());
-    let response = ui.interact(rect, ui.id().with("render_preview"), Sense::click_and_drag());
+    let response = ui.interact(rect, ui.scope_id().with("render_preview"), Sense::click_and_drag());
     if !environment::ring_input(app, ui, rect, &response) {
         let input = crate::navigation::handle(app, ui, rect, &response, crate::navigation::NavCaps::RENDER);
         let navigating = input.scroll != 0.0

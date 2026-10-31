@@ -242,7 +242,7 @@ pub fn link_copies(app: &mut SolveApp, accept: bool) -> bool {
 pub fn show_copies(app: &mut SolveApp, ctx: &egui::Context) {
     let Some(c) = app.menu.link_copies.clone() else { return };
     let name = app.session.doc.components.iter().find(|x| x.id == c.linked).map(|x| x.name.clone()).unwrap_or_default();
-    let (closed, action) = crate::ui_kit::Confirm::new(egui::Id::new("sc_link_copies"), "help", crate::i18n::tr_label("Link Identical Copies"))
+    let (closed, action) = crate::ui_kit::Confirm::new(egui::Id::unique("sc_link_copies"), "help", crate::i18n::tr_label("Link Identical Copies"))
         .actions("Link", "Keep", None)
         .show(ctx, true, |ui| {
             let text = crate::i18n::format("ui.link_copies_text", &[("name", &name)]);

@@ -294,7 +294,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         return;
     }
     let title = if app.stand_up_assembly { "Stand this assembly up?" } else { "Stand this part up?" };
-    let (closed, action) = ui_kit::Window::new(egui::Id::new("sc_stand_up"), "move", crate::i18n::tr_label(title))
+    let (closed, action) = ui_kit::Window::new(egui::Id::unique("sc_stand_up"), "move", crate::i18n::tr_label(title))
         .anchor(egui::Align2::CENTER_TOP, egui::vec2(0.0, 140.0))
         .actions("Stand it up", "Leave it", Some("Don't ask again"))
         .show(ctx, true, |ui| {

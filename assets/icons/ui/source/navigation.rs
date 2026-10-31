@@ -54,8 +54,7 @@ pub(crate) fn face_text(painter: &egui::Painter, face: &Facet, ink: Color32, fon
     painter.ctx().add_plugin(LabelAtlas);
     let text = Shape::Text(egui::epaint::TextShape::new(Pos2::ZERO, galley, ink));
     let atlas = painter.ctx().fonts(|f| f.font_image_size());
-    let primitives =
-        painter.ctx().tessellate(vec![egui::epaint::ClippedShape { clip_rect: Rect::EVERYTHING, shape: text }], painter.ctx().pixels_per_point());
+    let primitives = painter.ctx().tessellate(vec![egui::epaint::ClippedShape::new(Rect::EVERYTHING, text)], painter.ctx().pixels_per_point());
     for primitive in primitives {
         if let egui::epaint::Primitive::Mesh(mut mesh) = primitive.primitive {
             mesh.texture_id = LABEL_PIXELS;

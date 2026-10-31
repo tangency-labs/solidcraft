@@ -349,9 +349,9 @@ const WINDOW_PAGES: &[ui_kit::WindowPage<SolveApp>] = &[
 fn search_header(ui: &mut egui::Ui, app: &mut SolveApp) {
     let typed = drive_search(ui, app);
     let (field, _) =
-        ui_kit::search_actions_row(ui, egui::Id::new("prefs_search"), &mut app.prefs_window.filter, crate::i18n::tr("prefs.search"), &[]);
+        ui_kit::search_actions_row(ui, egui::Id::unique("prefs_search"), &mut app.prefs_window.filter, crate::i18n::tr("prefs.search"), &[]);
     if typed {
-        place_search_cursor(ui.ctx(), egui::Id::new("prefs_search"), app.prefs_window.filter.chars().count());
+        place_search_cursor(ui.ctx(), egui::Id::unique("prefs_search"), app.prefs_window.filter.chars().count());
     }
     crate::scenario::publish_handle("prefs:search", field.rect.center());
     if field.has_focus() {
@@ -369,7 +369,7 @@ fn drive_search(ui: &mut egui::Ui, app: &mut SolveApp) -> bool {
     if crate::keymap::capturing(app) {
         return false;
     }
-    let id = egui::Id::new("prefs_search");
+    let id = egui::Id::unique("prefs_search");
     if ctx.input_mut(|input| input.consume_key(egui::Modifiers::COMMAND, egui::Key::F)) {
         ctx.memory_mut(|memory| memory.request_focus(id));
     }
@@ -2363,7 +2363,7 @@ impl SettingReset {
 /// when a font was picked, and egui keeps that in the saved window state: it then opened as its
 /// title bar alone, for good (#1800). Unfold it.
 fn unfold(ctx: &egui::Context) {
-    if let Some(mut body) = egui::collapsing_header::CollapsingState::load(ctx, egui::Id::new("sc_prefs").with("collapsing"))
+    if let Some(mut body) = egui::collapsing_header::CollapsingState::load(ctx, egui::Id::unique("sc_prefs").with("collapsing"))
         && !body.is_open()
     {
         body.set_open(true);
@@ -2407,7 +2407,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let before = app.preferences.clone();
     let capturing = crate::keymap::capturing(app);
     let pending = apply_pending(app);
-    let window = ui_kit::Window::new(egui::Id::new("sc_prefs"), "settings", app.tr("ui.preferences"))
+    let window = ui_kit::Window::new(egui::Id::unique("sc_prefs"), "settings", app.tr("ui.preferences"))
         .cards(10.0 / 3.0)
         .page_rows(24.0)
         .page_padding(egui::Margin {
@@ -2778,7 +2778,7 @@ fn space_mouse_rows(app: &mut SolveApp, ui: &mut egui::Ui) {
         let enabled = app.preferences.space_mouse_enabled;
         let raw: [i16; 6] = app.space_mouse.raw.into();
         // Frames come on input, so a reading that moved since the last one gets a frame to show it.
-        let seen = ui.id().with("space_mouse_meter_raw");
+        let seen = ui.scope_id().with("space_mouse_meter_raw");
         let before = ui.data_mut(|data| data.get_temp::<[i16; 6]>(seen));
         ui.data_mut(|data| data.insert_temp(seen, raw));
         if before.is_some_and(|before| before != raw) {
@@ -3090,7 +3090,7 @@ fn button_job_picker(
         [None, Some(ButtonJob::Settings)].into_iter().chain(views.into_iter().chain(keys).chain(commands).map(Some)).collect();
     let entries: Vec<(String, String)> = jobs.iter().map(|job| (button_job_value(job.as_ref()), button_job_label(app, job.as_ref()))).collect();
     let options: Vec<_> = entries.iter().map(|(value, label)| ui_kit::SearchOption { value, label, handle: None }).collect();
-    let filter_id = egui::Id::new(("sc_space_mouse_button_filter", number));
+    let filter_id = egui::Id::unique(("sc_space_mouse_button_filter", number));
     let mut filter: String = ui.data_mut(|data| data.get_temp(filter_id).unwrap_or_default());
     let id = format!("sc_space_mouse_button_{number}");
     let chosen = ui_kit::searchable_dropdown(ui, &id, &button_job_label(app, current), &mut filter, &options, None, None);
@@ -4588,7 +4588,7 @@ mod tests {
         assert!(h.app.space_mouse.calibrating.is_some() && h.app.prefs_window.open);
         let window = crate::scenario::rect_of("dialog:window").expect("the calibration window is the last window drawn");
         let top = h.ctx.layer_id_at(window.center());
-        assert!(top.is_some_and(|layer| layer.id == egui::Id::new("sc_space_mouse_calibration")), "top is {top:?}");
+        assert!(top.is_some_and(|layer| layer.id == egui::Id::unique("sc_space_mouse_calibration")), "top is {top:?}");
     }
 
     /// Scrolls vertically to the handle, then clicks after the wheel animation settles.
@@ -4611,6 +4611,7 @@ mod tests {
             }
             h.app.synthetic.push(egui::Event::PointerMoved(body.center()));
             h.app.synthetic.push(egui::Event::MouseWheel {
+                source: egui::MouseWheelSource::Unknown,
                 unit: egui::MouseWheelUnit::Point,
                 delta: egui::vec2(0.0, if target.is_some_and(|at| at.y < body.top()) { 60.0 } else { -60.0 }),
                 modifiers: egui::Modifiers::NONE,
@@ -4642,6 +4643,7 @@ mod tests {
             scroll_to_and_click(&mut h, "dialog:section:3D mouse");
             // Back to the top, where the rows above are on screen again.
             h.app.synthetic.push(egui::Event::MouseWheel {
+                source: egui::MouseWheelSource::Unknown,
                 unit: egui::MouseWheelUnit::Point,
                 delta: egui::vec2(0.0, 5000.0),
                 modifiers: egui::Modifiers::NONE,
@@ -5805,10 +5807,11 @@ mod tests {
                 ..Default::default()
             };
             let app = &mut h.app;
-            let out = h.ctx.run_ui(raw, |ui| {
+            let mut out = h.ctx.run_ui(raw, |ui| {
                 app.logic(ui.ctx());
                 app.ui(ui);
             });
+            out.textures_delta.clear();
             let commands = out.viewport_output.get(&egui::ViewportId::ROOT).map(|v| v.commands.clone()).unwrap_or_default();
             commands.into_iter().filter_map(|c| if let egui::ViewportCommand::SetTheme(t) = c { Some(t) } else { None }).collect::<Vec<_>>()
         };
@@ -6842,7 +6845,7 @@ mod tests {
     fn picking_a_font_keeps_the_preferences_window_unfolded() {
         use egui::collapsing_header::CollapsingState;
         use serde_json::json;
-        let body = egui::Id::new("sc_prefs").with("collapsing");
+        let body = egui::Id::unique("sc_prefs").with("collapsing");
         let folded = |h: &crate::scenario::Harness| CollapsingState::load(&h.ctx, body).is_some_and(|s| !s.is_open());
         let mut h = crate::scenario::Harness::new();
         h.call("ui.prefs", json!({"open":"Interface"}));

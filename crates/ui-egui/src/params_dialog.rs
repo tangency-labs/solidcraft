@@ -210,7 +210,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let title = crate::i18n::tr_label("Parameters");
     let panel = ui_kit::Panel::new(
         title,
-        egui::Id::new("sc_params_dialog"),
+        egui::Id::unique("sc_params_dialog"),
         anchor,
         drag_bounds,
         side,
@@ -355,7 +355,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
 
 /// Where the chosen order is kept: egui's persisted memory, like a section's open state.
 fn sort_id() -> egui::Id {
-    egui::Id::new("sc_params_sort")
+    egui::Id::unique("sc_params_sort")
 }
 
 /// The dialog's sections, each in the chosen order.
@@ -854,7 +854,7 @@ struct Cache {
 }
 
 fn cache_id() -> egui::Id {
-    egui::Id::new("sc_param_completions")
+    egui::Id::unique("sc_param_completions")
 }
 
 /// Keep the completion list (parameters, functions, constants, units) for this revision of the

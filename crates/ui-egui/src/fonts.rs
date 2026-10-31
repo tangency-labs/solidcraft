@@ -84,7 +84,7 @@ impl RichTextExt for RichText {
 // Keep pending definitions too: set_fonts takes effect on the next frame, while the web
 // fetch and preference update can both finish before that frame starts.
 fn installed_fonts_id() -> egui::Id {
-    egui::Id::new("solidcraft_interface_fonts")
+    egui::Id::unique("solidcraft_interface_fonts")
 }
 
 fn install(ctx: &egui::Context, fonts: FontDefinitions) {
@@ -1087,7 +1087,7 @@ mod tests {
         fonts.families[&egui::FontFamily::Proportional]
             .iter()
             .filter_map(|name| fonts.font_data.get(name))
-            .any(|data| ttf_parser::Face::parse(&data.font, data.index).unwrap().glyph_index(c).is_some())
+            .any(|data| ttf_parser::Face::parse(data.bytes(), data.index).unwrap().glyph_index(c).is_some())
     }
 
     /// The symbols the built-in Latin faces lack draw through the built-in Hack (#2955), which
@@ -1144,14 +1144,14 @@ mod tests {
             assert_eq!(list[0], name);
             assert_eq!(&list[1..], defaults.families[&FontFamily::Proportional]);
             let data = &fonts.font_data[name];
-            assert_eq!(data.font.as_ref(), PLEX_SANS);
+            assert_eq!(data.bytes(), PLEX_SANS);
             assert_eq!(data.tweak.coords.as_ref()[0].1, weight);
             assert!(data.variation_axes().iter().any(|a| a.tag == *b"wght"));
         }
         let mono = &fonts.families[&FontFamily::Monospace];
         assert_eq!(mono[0], "plex-mono");
         assert_eq!(&mono[1..], defaults.families[&FontFamily::Monospace]);
-        assert_eq!(fonts.font_data["plex-mono"].font.as_ref(), PLEX_MONO);
+        assert_eq!(fonts.font_data["plex-mono"].bytes(), PLEX_MONO);
     }
 
     #[test]
@@ -1237,7 +1237,7 @@ mod tests {
     fn latin_font_bytes() -> Vec<u8> {
         let defaults = base_font_definitions();
         let name = &defaults.families[&egui::FontFamily::Proportional][0];
-        defaults.font_data[name].font.to_vec()
+        defaults.font_data[name].bytes().to_vec()
     }
 
     #[test]

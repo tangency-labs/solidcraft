@@ -4,12 +4,9 @@
 #![expect(unsafe_code)]
 
 use crate::{RenderState, SurfaceConfig, SurfaceErrorAction, WgpuConfiguration, renderer};
-use crate::{
-    RendererOptions,
-    capture::{CaptureReceiver, CaptureSender, CaptureState, capture_channel},
-};
+use crate::{RendererOptions, capture::CaptureState};
 use core::num::NonZeroU32;
-use egui::{Context, Event, UserData, ViewportId, ViewportIdMap, ViewportIdSet};
+use egui::{Context, ViewportId, ViewportIdMap, ViewportIdSet};
 use std::sync::Arc;
 
 struct SurfaceState {
@@ -52,8 +49,6 @@ pub struct Painter {
     depth_texture_view: ViewportIdMap<wgpu::TextureView>,
     msaa_texture_view: ViewportIdMap<wgpu::TextureView>,
     surfaces: ViewportIdMap<SurfaceState>,
-    capture_tx: CaptureSender,
-    capture_rx: CaptureReceiver,
 }
 
 impl Painter {
@@ -75,7 +70,6 @@ impl Painter {
         support_transparent_backbuffer: bool,
         options: RendererOptions,
     ) -> Self {
-        let (capture_tx, capture_rx) = capture_channel();
         crate::startup_step(crate::STEP_INSTANCE, ""); // SolidCraft
         let instance = config.wgpu_setup.new_instance().await;
 
@@ -92,9 +86,6 @@ impl Painter {
             depth_texture_view: Default::default(),
             surfaces: Default::default(),
             msaa_texture_view: Default::default(),
-
-            capture_tx,
-            capture_rx,
         }
     }
 
@@ -103,6 +94,29 @@ impl Painter {
     /// Will return [`None`] if the render state has not been initialized yet.
     pub fn render_state(&self) -> Option<RenderState> {
         self.render_state.clone()
+    }
+
+    /// The surface configuration (present mode, frame latency) the surfaces are configured with.
+    pub fn surface_config(&self) -> SurfaceConfig {
+        self.config.surface
+    }
+
+    /// Change the surface configuration (present mode, frame latency) at runtime.
+    ///
+    /// All surfaces are reconfigured before the next paint.
+    ///
+    /// This is cheap to call every frame.
+    pub fn set_surface_config(&mut self, surface_config: SurfaceConfig) {
+        if self.config.surface == surface_config {
+            return;
+        }
+
+        self.config.surface = surface_config;
+
+        #[expect(clippy::iter_over_hash_type)]
+        for surface in self.surfaces.values_mut() {
+            surface.needs_reconfigure = true;
+        }
     }
 
     /// SolidCraft: a configuration the device refuses (D3D12: "Failed to wait for GPU to come
@@ -624,7 +638,7 @@ impl Painter {
         clear_color: [f32; 4],
         clipped_primitives: &[epaint::ClippedPrimitive],
         textures_delta: &mut epaint::textures::TexturesDelta,
-        capture_data: Vec<UserData>,
+        capture_data: Vec<egui::ScreenshotCallback>,
         window: &Arc<winit::window::Window>,
     ) -> f32 {
         profiling::function_scope!();
@@ -685,20 +699,6 @@ impl Painter {
             return vsync_sec;
         }
 
-        // Apply any runtime changes requested via `RenderState::surface_config`.
-        // We diff against the already-applied values in `self.config.surface`
-        // and, if anything differs, mark every surface as needing reconfiguration so
-        // the existing `needs_reconfigure` pathway below picks them up.
-        if let Some(render_state) = self.render_state.as_ref()
-            && render_state.surface_config != self.config.surface
-        {
-            self.config.surface = render_state.surface_config;
-            #[expect(clippy::iter_over_hash_type)]
-            for surface in self.surfaces.values_mut() {
-                surface.needs_reconfigure = true;
-            }
-        }
-
         let Some(render_state) = self.render_state.as_mut() else {
             return vsync_sec;
         };
@@ -749,11 +749,14 @@ impl Painter {
             output_frame
         };
 
+        // `None` when there is no frame to present to. A capture is rendered to its own
+        // texture and copied back to the cpu, so it is served even then — that is how a hidden
+        // window, which the compositor gives no surface texture, is screenshotted at all.
         let frame = match output_frame {
-            wgpu::CurrentSurfaceTexture::Success(frame) => frame,
+            wgpu::CurrentSurfaceTexture::Success(frame) => Some(frame),
             wgpu::CurrentSurfaceTexture::Suboptimal(frame) => {
                 surface_state.needs_reconfigure = true;
-                frame
+                Some(frame)
             }
             other => {
                 match (*self.config.on_surface_status)(&other) {
@@ -781,14 +784,19 @@ impl Painter {
                     }
                     SurfaceErrorAction::SkipFrame => {}
                 }
-                return vsync_sec;
+                if !capture {
+                    return vsync_sec;
+                }
+                None
             }
         };
         // SolidCraft: however this frame ends (presented, dropped by an early return below, or
         // dropped while a panic unwinds), the surface gets its image back, also on a lost device,
         // where wgpu's present and discard keep it and the surface's drop then panicked (#7148).
-        let texture = frame.texture.clone();
-        let output_frame = crate::AcquiredFrame::new(frame, texture);
+        let output_frame = frame.map(|frame| {
+            let texture = frame.texture.clone();
+            crate::AcquiredFrame::new(frame, texture)
+        });
 
         // SolidCraft: before the uploads, an empty submission asks the driver whether the device
         // is still there. The first queue write to meet a lost device panics inside wgpu (#4172);
@@ -849,14 +857,39 @@ impl Painter {
             let renderer = render_state.renderer.read();
 
             let target_texture = if capture {
-                let capture_state = self.screen_capture_state.get_or_insert_with(|| {
-                    CaptureState::new(&render_state.device, &output_frame.frame.texture)
-                });
-                capture_state.update(&render_state.device, &output_frame.frame.texture);
+                // The frame we would have presented decides the capture, when there is one.
+                // Without it we have only the surface we configured, which is the same thing
+                // as long as no resize is in flight.
+                let (size, format) = match &output_frame {
+                    Some(output_frame) => {
+                        (output_frame.frame.texture.size(), output_frame.frame.texture.format())
+                    }
+                    None => (
+                        wgpu::Extent3d {
+                            width: surface_state.width,
+                            height: surface_state.height,
+                            depth_or_array_layers: 1,
+                        },
+                        render_state.target_format,
+                    ),
+                };
+                if size.width == 0 || size.height == 0 {
+                    log::warn!("Cannot capture a screenshot of a zero-sized surface");
+                    return vsync_sec;
+                }
+
+                let capture_state = self
+                    .screen_capture_state
+                    .get_or_insert_with(|| CaptureState::new(&render_state.device, size, format));
+                capture_state.update(&render_state.device, size);
 
                 &capture_state.texture
-            } else {
+            } else if let Some(output_frame) = &output_frame {
                 &output_frame.frame.texture
+            } else {
+                // Unreachable: without a frame to present to, and with nothing to capture,
+                // we returned above.
+                return vsync_sec;
             };
             let target_view = target_texture.create_view(&wgpu::TextureViewDescriptor::default());
 
@@ -927,7 +960,7 @@ impl Painter {
             if capture && let Some(capture_state) = &mut self.screen_capture_state {
                 capture_buffer = Some(capture_state.copy_textures(
                     &render_state.device,
-                    &output_frame.frame,
+                    output_frame.as_ref().map(|output_frame| &output_frame.frame),
                     &mut encoder,
                 ));
             }
@@ -966,18 +999,12 @@ impl Painter {
         if let Some(capture_buffer) = capture_buffer
             && let Some(screen_capture_state) = &mut self.screen_capture_state
         {
-            screen_capture_state.read_screen_rgba(
-                self.context.clone(),
-                capture_buffer,
-                capture_data,
-                self.capture_tx.clone(),
-                viewport_id,
-            );
+            screen_capture_state.read_screen_rgba(capture_buffer, capture_data);
         }
 
-        window.pre_present_notify();
+        if let Some(output_frame) = output_frame {
+            window.pre_present_notify();
 
-        {
             profiling::scope!("present");
             // wgpu doesn't document where vsync can happen. Maybe here?
             let start = web_time::Instant::now();
@@ -986,20 +1013,6 @@ impl Painter {
         }
 
         vsync_sec
-    }
-
-    /// Call this at the beginning of each frame to receive the requested screenshots.
-    pub fn handle_screenshots(&self, events: &mut Vec<Event>) {
-        for (viewport_id, user_data, screenshot) in self.capture_rx.try_iter() {
-            let screenshot = Arc::new(screenshot);
-            for data in user_data {
-                events.push(Event::Screenshot {
-                    viewport_id,
-                    user_data: data,
-                    image: Arc::clone(&screenshot),
-                });
-            }
-        }
     }
 
     pub fn gc_viewports(&mut self, active_viewports: &ViewportIdSet) {

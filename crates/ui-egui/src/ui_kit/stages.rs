@@ -198,7 +198,7 @@ impl StageBar {
                 if on { accent.ink } else { t.text },
                 false,
             );
-            response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::SelectableLabel, true, on, *label));
+            response.widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, true, on, *label));
             result.chips.push(chip.intersect(ui.clip_rect()));
             if response.clicked() {
                 result.stage = Some(index);
@@ -222,7 +222,7 @@ impl StageBar {
         // CommandSearch owns the actual field, focus, S shortcut and registered command dispatch.
         let search = search.intersect(ui.clip_rect());
         ui.ctx().data_mut(|d| {
-            let id = egui::Id::new("sc_ribbon_search");
+            let id = egui::Id::unique("sc_ribbon_search");
             if search.is_positive() {
                 d.insert_temp(id, search);
             } else {

@@ -1917,8 +1917,8 @@ fn analysis_status_row_and_key_stay_below_preferences_and_cannot_steal_its_click
             assert!(window.contains(at), "the real Preferences window must overlap {target}");
             let layer = h.ctx.layer_id_at(at).unwrap();
             assert_eq!(layer.order, egui::Order::Middle, "Preferences stays above {target}");
-            assert_ne!(layer.id, egui::Id::new("viewport_status_row"));
-            assert_ne!(layer.id, egui::Id::new("viewport_status_key"));
+            assert_ne!(layer.id, egui::Id::unique("viewport_status_row"));
+            assert_ne!(layer.id, egui::Id::unique("viewport_status_key"));
         }
         let at = crate::scenario::handle_at(&format!("viewport_status:{}:close", item.id)).unwrap();
         h.call("ui.click", json!({"x":at.x,"y":at.y}));

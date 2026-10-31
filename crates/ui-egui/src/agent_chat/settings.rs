@@ -617,7 +617,7 @@ pub fn dialog(app: &mut SolveApp, ctx: &egui::Context) {
     // Editing keeps the agent's kind: the kind switch is for adding only.
     let editing = app.agent_chat.settings.add.as_ref().is_some_and(|s| s.editing.is_some());
     let (title, ok) = if editing { ("ui.ai_edit_agent_title", "ui.ai_save") } else { ("ui.ai_add_agent_title", "ui.ai_add") };
-    let (closed, action) = ui_kit::Window::new(egui::Id::new("sc_ai_add"), "settings", tr(title))
+    let (closed, action) = ui_kit::Window::new(egui::Id::unique("sc_ai_add"), "settings", tr(title))
         .cards(2.0)
         .fields()
         .actions(tr(ok), "Cancel", None)
@@ -730,7 +730,7 @@ pub fn dialog(app: &mut SolveApp, ctx: &egui::Context) {
                     ui_kit::row(ui, tr("ui.ai_key"), |ui| {
                         ui.add_enabled_ui(has_keychain, |ui| {
                             let hint = tr(if s.saved_key { "ui.ai_key_keep_hint" } else { "ui.ai_key_hint" });
-                            let r = ui_kit::password_field(ui, egui::Id::new("sc_ai_add_key"), &mut s.key, hint);
+                            let r = ui_kit::password_field(ui, egui::Id::unique("sc_ai_add_key"), &mut s.key, hint);
                             crate::scenario::publish_target("ai_add:key", r.rect);
                         });
                     });

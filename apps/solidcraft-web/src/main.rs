@@ -482,7 +482,7 @@ mod web {
                 return;
             }
             let mut act: Option<(&'static str, String)> = None;
-            let closed = solidcraft_ui_egui::ui_kit::Window::new(egui::Id::new("sc_browser_files"), "folder", "Files in this browser")
+            let closed = solidcraft_ui_egui::ui_kit::Window::new(egui::Id::unique("sc_browser_files"), "folder", "Files in this browser")
                 // Room for long names; the kit still caps the window at the browser's width.
                 .cards(4.0)
                 .show_body(ctx, |ui| {
@@ -646,7 +646,7 @@ mod web {
         fn recovery_prompt(&mut self, ctx: &egui::Context) {
             let Some((name, path)) = self.files.recovery.borrow().clone() else { return };
             let mut answer = None;
-            let _ = solidcraft_ui_egui::ui_kit::Window::new(egui::Id::new("sc_browser_recovery"), "restore", "Recover unsaved work?")
+            let _ = solidcraft_ui_egui::ui_kit::Window::new(egui::Id::unique("sc_browser_recovery"), "restore", "Recover unsaved work?")
                 .required()
                 .show_body(ctx, |ui| {
                     ui.label(format!("“{name}” had unsaved changes when this page last closed."));

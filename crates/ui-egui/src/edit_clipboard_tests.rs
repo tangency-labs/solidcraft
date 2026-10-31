@@ -49,7 +49,7 @@ fn start(h: &Harness, id: &str) -> Vec2 {
 }
 
 fn clipboard_frame(h: &mut Harness, ctx: &egui::Context, events: Vec<egui::Event>) {
-    let _ = ctx.run_ui(egui::RawInput { events, ..Default::default() }, |ui| super::handle(&mut h.app, ui.ctx()));
+    ctx.run_ui(egui::RawInput { events, ..Default::default() }, |ui| super::handle(&mut h.app, ui.ctx())).textures_delta.clear();
 }
 
 fn middle_button(pressed: bool) -> egui::Event {

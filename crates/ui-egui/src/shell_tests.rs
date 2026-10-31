@@ -515,7 +515,7 @@ fn tool_sheets_drag_over_browser_and_history_but_clear_protected_panels() {
             if target == browser.center() {
                 assert!(sheet.intersect(browser).is_positive(), "sheet can cover Browser");
                 let layer = h.ctx.layer_id_at(sheet.intersect(browser).center()).unwrap();
-                assert_eq!(layer.id, egui::Id::new(("sc_dialog", "CREATE SKETCH")), "sheet receives input above Browser");
+                assert_eq!(layer.id, egui::Id::unique(("sc_dialog", "CREATE SKETCH")), "sheet receives input above Browser");
             } else if target == history.center() {
                 assert!(sheet.intersect(history).is_positive(), "sheet can cover History");
             }
@@ -546,7 +546,7 @@ fn tool_sheets_stay_above_browser_and_history_after_panel_clicks() {
             assert!(!sheet.contains(exposed), "the panel click is outside the dialog");
             h.call("ui.click", json!({"x":exposed.x,"y":exposed.y}));
             let layer = h.ctx.layer_id_at(overlap.center()).unwrap();
-            assert_eq!(layer.id, egui::Id::new(("sc_dialog", "EXTRUDE")), "{dock}: clicking a panel must not cover the dialog");
+            assert_eq!(layer.id, egui::Id::unique(("sc_dialog", "EXTRUDE")), "{dock}: clicking a panel must not cover the dialog");
             let panel_layer = h.ctx.layer_id_at(exposed).unwrap();
             h.call("ui.click", json!({"x":1700,"y":500}));
             assert_eq!(h.ctx.layer_id_at(exposed), Some(panel_layer), "clicking the model view must not cover the panel");
@@ -575,7 +575,7 @@ fn tool_sheet_dropdowns_and_preferences_still_open_above_the_sheet() {
         let preferences = rect_of("dialog:window").unwrap();
         let overlap = sheet.intersect(preferences);
         assert!(overlap.is_positive(), "Preferences overlaps the feature dialog");
-        assert_eq!(h.ctx.layer_id_at(overlap.center()).unwrap().id, egui::Id::new("sc_prefs"), "Preferences receives input above the sheet");
+        assert_eq!(h.ctx.layer_id_at(overlap.center()).unwrap().id, egui::Id::unique("sc_prefs"), "Preferences receives input above the sheet");
         h.step(&json!({"widget":"Cancel"})).unwrap();
         assert!(!h.app.prefs_window.open && h.app.dialog.is_some(), "Cancel closes Preferences, leaving the feature dialog open");
         h.step(&json!({"widget":"Cancel"})).unwrap();
@@ -1105,7 +1105,7 @@ fn status_bar_units_open_the_units_menu_above_the_bar_and_change_units_in_one_un
     let labels: Vec<_> = menu["items"].as_array().unwrap().iter().map(|i| i["label"].as_str().unwrap().to_string()).collect();
     assert_eq!(labels, crate::prefs::UNITS);
     // The list opens above the bar, inside the window.
-    let list = h.ctx.memory(|m| m.area_rect(egui::Id::new("sc_context_menu"))).unwrap();
+    let list = h.ctx.memory(|m| m.area_rect(egui::Id::unique("sc_context_menu"))).unwrap();
     assert!(list.bottom() <= button.top() + 0.5 && list.top() >= 0.0, "{list:?} {button:?}");
     assert_eq!(h.app.session.undo.len(), undo, "opening the menu changes nothing");
     h.call("ui.menuPick", json!({"item":"in"}));
@@ -1149,7 +1149,7 @@ fn status_bar_mouse_mapping_opens_the_mappings_and_picks_one_as_the_preferences_
     let labels: Vec<_> = menu.iter().map(|item| item.label.as_str()).collect();
     assert_eq!(labels, crate::prefs::NAV_PRESETS.iter().map(|preset| preset.translated_label()).collect::<Vec<_>>());
     assert_eq!(menu.iter().filter(|item| item.shortcut == "current").map(|item| item.label.as_str()).collect::<Vec<_>>(), ["Fusion"]);
-    let list = h.ctx.memory(|m| m.area_rect(egui::Id::new("sc_context_menu"))).unwrap();
+    let list = h.ctx.memory(|m| m.area_rect(egui::Id::unique("sc_context_menu"))).unwrap();
     assert!(list.bottom() <= button.top() + 0.5 && list.top() >= 0.0, "{list:?} {button:?}");
     // Each mapping, picked from the menu, sets what Preferences › Navigation sets for it.
     for preset in crate::prefs::NAV_PRESETS {

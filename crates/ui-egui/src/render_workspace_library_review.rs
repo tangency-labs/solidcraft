@@ -298,7 +298,7 @@ pub(in crate::render_workspace) fn confirmation(app: &mut SolveApp, ctx: &egui::
     let title = app.tr(if stage { "render.stage_panels.remove_stage_title" } else { "render.stage_panels.remove_optics_title" }).to_string();
     let message = app.tr(if stage { "render.stage_panels.remove_stage_help" } else { "render.stage_panels.remove_optics_help" }).to_string();
     let label = app.tr(if stage { "render.stage_panels.remove_stage" } else { "render.stage_panels.remove_optics" }).to_string();
-    let (closed, answer) = ui_kit::Confirm::new(egui::Id::new("render_resource_removal"), "delete", &title)
+    let (closed, answer) = ui_kit::Confirm::new(egui::Id::unique("render_resource_removal"), "delete", &title)
         .tone(ui_kit::Tone::Danger)
         .actions(&label, app.tr("render.stage_panels.keep"), None)
         .show(ctx, true, |ui| {

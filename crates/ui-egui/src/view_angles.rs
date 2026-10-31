@@ -17,17 +17,17 @@ use crate::ui_kit::{self, Container, Surface};
 
 /// The angles typed in the card while it is open; no entry while it is closed.
 pub(crate) fn draft_id() -> egui::Id {
-    egui::Id::new("sc_view_angles_draft")
+    egui::Id::unique("sc_view_angles_draft")
 }
 
 /// Where the readout was drawn last frame over the viewport `viewport`, so a click on it never
 /// reaches the model below.
 pub(crate) fn readout_rect(ctx: &egui::Context, viewport: Rect) -> Option<Rect> {
-    ctx.data(|d| d.get_temp::<(Rect, Rect)>(egui::Id::new("sc_view_angles_readout"))).filter(|(v, _)| *v == viewport).map(|(_, r)| r)
+    ctx.data(|d| d.get_temp::<(Rect, Rect)>(egui::Id::unique("sc_view_angles_readout"))).filter(|(v, _)| *v == viewport).map(|(_, r)| r)
 }
 
 fn set_readout_rect(ui: &egui::Ui, viewport: Rect, rect: Option<Rect>) {
-    let id = egui::Id::new("sc_view_angles_readout");
+    let id = egui::Id::unique("sc_view_angles_readout");
     ui.data_mut(|d| match rect {
         Some(r) => {
             d.insert_temp(id, (viewport, r));
@@ -95,8 +95,8 @@ pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
     painter.galley(pos2(right - second.size().x, chip.bottom() - 3.0 - second.size().y), second, t.text_dim);
     crate::scenario::publish_target("view_angles:readout", chip);
     let label = format!("{angles} · {projection}");
-    let response = ui.interact(chip, ui.id().with("view_angles_readout"), Sense::click());
-    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &label));
+    let response = ui.interact(chip, ui.scope_id().with("view_angles_readout"), Sense::click());
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, &label));
     if response.hovered() {
         ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
     }
@@ -109,7 +109,7 @@ pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
         return;
     };
     let area = Container::new(ui.ctx(), Surface::Popup)
-        .area(egui::Id::new("sc_view_angles_card"))
+        .area(egui::Id::unique("sc_view_angles_card"))
         .order(egui::Order::Foreground)
         .pivot(Align2::RIGHT_TOP)
         .fixed_pos(chip.right_bottom() + vec2(0.0, 4.0));

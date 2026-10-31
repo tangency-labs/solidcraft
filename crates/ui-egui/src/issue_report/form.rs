@@ -15,7 +15,7 @@ const ALL_GUIDANCE: [&str; 4] = [
 fn answer(ui: &mut Ui, label: &str, hint: &str, text: &mut String, id: &str, rows: usize) -> egui::Response {
     ui_kit::text(ui, tr_label(label), ui_kit::Text::Heading(label));
     ui_kit::text(ui, tr_label(hint), ui_kit::Text::Note(hint));
-    let response = ui_kit::text_area(ui, tr_label(label), Id::new(id), text, rows, MAX_ANSWER);
+    let response = ui_kit::text_area(ui, tr_label(label), Id::unique(id), text, rows, MAX_ANSWER);
     crate::scenario::publish_handle(id, response.rect.center());
     super::truncate(text, MAX_ANSWER);
     response
@@ -118,7 +118,7 @@ pub(super) fn show(app: &mut SolveApp, draft: &mut Draft, ctx: &egui::Context) -
     let compact = cards * t.form_card_width < actions_width + 2.0 * t.space_12 + 2.0 * t.space_6 + t.space_8;
     let open_label = if compact { "Open GitHub" } else { "Open GitHub issue form" };
     let close_label = if compact { "" } else { "Close draft" };
-    let (closed, mut action) = ui_kit::Window::new(Id::new("sc_issue_report"), "bug_report", tr_label("Report a bug"))
+    let (closed, mut action) = ui_kit::Window::new(Id::unique("sc_issue_report"), "bug_report", tr_label("Report a bug"))
         .cards(cards)
         .anchor(egui::Align2::CENTER_TOP, vec2(0.0, t.space_16))
         .fields()
@@ -176,7 +176,7 @@ pub(super) fn show(app: &mut SolveApp, draft: &mut Draft, ctx: &egui::Context) -
                         ui_kit::text(ui, tr_label("Summary"), ui_kit::Text::Heading("Summary"));
                         let response = ui_kit::bounded_cell_editor(
                             ui,
-                            Id::new("issue_report_title"),
+                            Id::unique("issue_report_title"),
                             &mut draft.title,
                             "A short title for the problem (optional)",
                             false,
@@ -224,8 +224,14 @@ pub(super) fn show(app: &mut SolveApp, draft: &mut Draft, ctx: &egui::Context) -
                             ui_kit::Text::Note("private"),
                         );
                         ui_kit::section(ui, "issue-report-technical", "Technical details", false, |ui| {
-                            let response =
-                                ui_kit::text_area(ui, tr_label("Technical details"), Id::new("issue_report_technical"), &mut draft.body, 8, MAX_BODY);
+                            let response = ui_kit::text_area(
+                                ui,
+                                tr_label("Technical details"),
+                                Id::unique("issue_report_technical"),
+                                &mut draft.body,
+                                8,
+                                MAX_BODY,
+                            );
                             if response.changed() {
                                 draft.opened_github = false;
                             }

@@ -484,7 +484,7 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Ap, inputs: &mut [Sel
             ui_kit::swatch_grid(ui, &items, |ui, (i, (look, n))| {
                 if ui_kit::color_swatch(
                     ui,
-                    egui::Id::new(("ap_used", *i)),
+                    egui::Id::unique(("ap_used", *i)),
                     c32(look.color, look.opacity),
                     k.color == look.color && k.opacity == look.opacity && k.pbr == look.pbr,
                     &format!("{} · {n} item(s)", look.name),
@@ -532,7 +532,7 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Ap, inputs: &mut [Sel
             |p| format!("{}\n{}\n{}", l.name, p.preview_note, p.requirements.join(", ")),
         );
         ui.add_enabled_ui(available, |ui| {
-            let response = ui_kit::color_swatch(ui, egui::Id::new(("ap_lib", *i)), c32(l.color, l.opacity), picked_look, &tip, (*l).clone());
+            let response = ui_kit::color_swatch(ui, egui::Id::unique(("ap_lib", *i)), c32(l.color, l.opacity), picked_look, &tip, (*l).clone());
             if let Some(preset) = &l.preset {
                 crate::scenario::publish_handle(&format!("appearance:preset:{}", preset.id), response.rect.center());
             }

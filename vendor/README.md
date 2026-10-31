@@ -270,30 +270,9 @@ Changes:
 - `lib.rs`: compiler warnings no longer fail the build. Test targets are dropped (their sources
   are not vendored).
 
-## accesskit_macos 0.26.3 (MIT OR Apache-2.0, The AccessKit contributors, https://github.com/AccessKit/accesskit)
+## egui-wgpu 0.37.0 (MIT OR Apache-2.0, Emil Ernerfeldt and contributors)
 
-The published package (it carries no licence files; `Cargo.toml` names the licence). eframe's
-accessibility support (`accesskit_winit` 0.32) uses it on macOS. Drop this copy when eframe
-moves to accesskit_macos 0.27.2 or later, which has the fix.
-
-Changes:
-- `src/subclass.rs` is accesskit_macos 0.27.2's (AccessKit/accesskit#835). The adapter swaps
-  the window's view to a subclass of its own; key-value observing then subclasses it again when
-  AppKit's Touch Bar observes the first responder (`nextResponder`). 0.26.3 reset the view's
-  class when the adapter was dropped, which threw away KVO's subclass, so AppKit's removal of
-  its observer on quit raised `NSRangeException` and the app crashed on Macs with a Touch Bar
-  (#7535). Dropping the adapter now leaves the class alone when KVO subclassed it, and the
-  subclass's methods fall back to the view's own without the adapter. 0.27.2 also refuses
-  (panics) to subclass a view that is already observed; eframe creates the adapter right after
-  the window, before anything observes it.
-- `tests/integration/` is 0.27.2's tests of the subclassing adapter, with its `[[test]]` and
-  `libtest-mimic` dev-dependency in `Cargo.toml` (AppKit needs the main thread, where libtest
-  doesn't run tests). On a Mac: `cargo test --manifest-path vendor/accesskit_macos/Cargo.toml`
-  (it writes a `Cargo.lock` there; don't commit it).
-
-## egui-wgpu 0.36.2 (MIT OR Apache-2.0, Emil Ernerfeldt and contributors)
-
-Original package sources from https://github.com/emilk/egui/tree/0.36.2/crates/egui-wgpu,
+Original package sources from https://github.com/emilk/egui/tree/0.37.0/crates/egui-wgpu,
 with both original licence texts retained. No images or bundled documentation are copied.
 
 SolidCraft changes:
@@ -383,7 +362,7 @@ SolidCraft changes:
   rust-windowing/winit#4778 was closed unmerged). A trackpad pinch otherwise produces no
   input at all on Wayland: egui-winit already maps `PinchGesture` to `egui::Event::Zoom`, and
   `navigation::handle` already zooms the camera from that, so the Wayland backend is the only
-  missing piece. eframe 0.36 requires winit 0.30, so this cannot come from a newer winit.
+  missing piece. eframe 0.37 requires winit 0.30, so this cannot come from a newer winit.
 - `src/platform_impl/linux/wayland/seat/mod.rs`, `state.rs`, `seat/pointer/mod.rs`: the
   global bound with the connection, the gesture object of each seat's pointer, and the
   module wiring.

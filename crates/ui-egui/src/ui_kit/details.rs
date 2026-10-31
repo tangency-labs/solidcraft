@@ -6,7 +6,7 @@ const FIELD_FOCUS: &str = "details_field_focus";
 const CONTROL_FOCUS: &str = "details_control_focus";
 const OWNED_POPUPS: &str = "details_owned_popups";
 pub(crate) fn dismiss_details_popups(ctx: &egui::Context) {
-    let popups = ctx.data(|data| data.get_temp::<Vec<egui::Id>>(egui::Id::new(OWNED_POPUPS))).unwrap_or_default();
+    let popups = ctx.data(|data| data.get_temp::<Vec<egui::Id>>(egui::Id::unique(OWNED_POPUPS))).unwrap_or_default();
     for popup in popups {
         egui::Popup::close_id(ctx, popup);
     }
@@ -16,18 +16,18 @@ fn remember_control(ui: &Ui, id: egui::Id) {
         return;
     }
     ui.ctx().data_mut(|data| {
-        let key = egui::Id::new(CONTROL_FOCUS);
+        let key = egui::Id::unique(CONTROL_FOCUS);
         let mut ids = data.get_temp::<Vec<egui::Id>>(key).unwrap_or_default();
         ids.push(id);
         data.insert_temp(key, ids);
     });
 }
 pub(crate) fn details_control_owns_focus(ctx: &egui::Context) -> bool {
-    let ids = ctx.data(|data| data.get_temp::<Vec<egui::Id>>(egui::Id::new(CONTROL_FOCUS))).unwrap_or_default();
+    let ids = ctx.data(|data| data.get_temp::<Vec<egui::Id>>(egui::Id::unique(CONTROL_FOCUS))).unwrap_or_default();
     ctx.memory(|memory| memory.focused().is_some_and(|id| ids.contains(&id)))
 }
 pub(crate) fn details_field_owns_focus(ctx: &egui::Context) -> bool {
-    let fields = ctx.data(|data| data.get_temp::<Vec<(egui::Id, egui::Rect)>>(egui::Id::new(FIELD_FOCUS))).unwrap_or_default();
+    let fields = ctx.data(|data| data.get_temp::<Vec<(egui::Id, egui::Rect)>>(egui::Id::unique(FIELD_FOCUS))).unwrap_or_default();
     let focused = ctx.memory(|memory| memory.focused());
     focused.is_some_and(|id| {
         fields.iter().any(|(field, rect)| *field == id || ctx.read_response(id).is_some_and(|response| rect.contains(response.rect.center())))
@@ -37,7 +37,7 @@ pub(crate) fn details_field_owned_escape(ctx: &egui::Context) -> bool {
     if details_field_owns_focus(ctx) {
         return true;
     }
-    let fields = ctx.data(|data| data.get_temp::<Vec<(egui::Id, egui::Rect)>>(egui::Id::new(FIELD_FOCUS))).unwrap_or_default();
+    let fields = ctx.data(|data| data.get_temp::<Vec<(egui::Id, egui::Rect)>>(egui::Id::unique(FIELD_FOCUS))).unwrap_or_default();
     // egui blurs native value editors before global shortcuts see Escape. The
     // preceding visible frame still owns that press, just as a text editor does.
     ctx.memory(|memory| memory.focused().is_none() && fields.iter().any(|(id, _)| memory.had_focus_last_frame(*id)))
@@ -169,7 +169,7 @@ fn setting(ui: &mut Ui, field: &DetailSetting, focus: bool) -> Option<DetailEven
                         }
                     });
                     ui.ctx().data_mut(|data| {
-                        let key = egui::Id::new(OWNED_POPUPS);
+                        let key = egui::Id::unique(OWNED_POPUPS);
                         let mut popups = data.get_temp::<Vec<egui::Id>>(key).unwrap_or_default();
                         // ComboBox's native popup is keyed by the returned button response.
                         popups.push(response.id.with("popup"));
@@ -196,7 +196,7 @@ fn setting(ui: &mut Ui, field: &DetailSetting, focus: bool) -> Option<DetailEven
                     *id == response.id || ui.ctx().read_response(*id).is_some_and(|native| response.rect.contains(native.rect.center()))
                 });
                 ui.ctx().data_mut(|data| {
-                    let key = egui::Id::new(FIELD_FOCUS);
+                    let key = egui::Id::unique(FIELD_FOCUS);
                     let mut fields = data.get_temp::<Vec<(egui::Id, egui::Rect)>>(key).unwrap_or_default();
                     if visible {
                         fields.push((response.id, response.rect));
@@ -224,9 +224,9 @@ fn setting(ui: &mut Ui, field: &DetailSetting, focus: bool) -> Option<DetailEven
 pub(crate) fn details(ui: &mut Ui, id: &str, description: &Details, max_height: f32, focus: Option<&str>) -> Vec<DetailEvent> {
     let t = Tokens::get();
     let mut events = Vec::new();
-    ui.ctx().data_mut(|data| data.insert_temp(egui::Id::new(FIELD_FOCUS), Vec::<(egui::Id, egui::Rect)>::new()));
-    ui.ctx().data_mut(|data| data.insert_temp(egui::Id::new(CONTROL_FOCUS), Vec::<egui::Id>::new()));
-    ui.ctx().data_mut(|data| data.insert_temp(egui::Id::new(OWNED_POPUPS), Vec::<egui::Id>::new()));
+    ui.ctx().data_mut(|data| data.insert_temp(egui::Id::unique(FIELD_FOCUS), Vec::<(egui::Id, egui::Rect)>::new()));
+    ui.ctx().data_mut(|data| data.insert_temp(egui::Id::unique(CONTROL_FOCUS), Vec::<egui::Id>::new()));
+    ui.ctx().data_mut(|data| data.insert_temp(egui::Id::unique(OWNED_POPUPS), Vec::<egui::Id>::new()));
     ui.set_width((t.form_card_width + if description.findings.is_empty() { 0.0 } else { t.space_24 * 2.0 }).min(ui.available_width()));
     super::scope(ui, |ui| {
         let mut caption_height = 0.0;

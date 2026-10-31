@@ -15,7 +15,7 @@ fn window_widths(h: &Harness) -> Vec<(egui::Id, f32)> {
             // Workspace hosts are not command windows; Shots has wide expanded and small collapsed forms.
             .filter(|l| {
                 l.order == egui::Order::Middle
-                    && ![egui::Id::new("sc_browser_card"), egui::Id::new("sc_render_shots_strip"), egui::Id::new("sc_render_shots_pill")]
+                    && ![egui::Id::unique("sc_browser_card"), egui::Id::unique("sc_render_shots_strip"), egui::Id::unique("sc_render_shots_pill")]
                         .contains(&l.id)
             })
             .filter_map(|l| m.area_rect(l.id).map(|r| (l.id, r.width())))
@@ -25,17 +25,17 @@ fn window_widths(h: &Harness) -> Vec<(egui::Id, f32)> {
 
 fn kit_table_limit(id: egui::Id) -> Option<f32> {
     // The accepted Preferences board has a page list and one control/preview pair at 880 pt.
-    if id == egui::Id::new("sc_prefs") {
+    if id == egui::Id::unique("sc_prefs") {
         return Some(solidcraft_ui_egui::theme::Tokens::get().form_card_width * 10.0 / 3.0);
     }
     [
-        egui::Id::new("sc_bom"),
-        egui::Id::new("sc_gesture_editor"),
-        egui::Id::new("sc_params_dialog"),
-        egui::Id::new("sc_material_card_review"),
-        egui::Id::new(("sc_dialog", "CONFIGURATIONS")),
-        egui::Id::new(("sc_dialog", "MOTION STUDY")),
-        egui::Id::new(("sc_dialog", "EDIT MOTION STUDY")),
+        egui::Id::unique("sc_bom"),
+        egui::Id::unique("sc_gesture_editor"),
+        egui::Id::unique("sc_params_dialog"),
+        egui::Id::unique("sc_material_card_review"),
+        egui::Id::unique(("sc_dialog", "CONFIGURATIONS")),
+        egui::Id::unique(("sc_dialog", "MOTION STUDY")),
+        egui::Id::unique(("sc_dialog", "EDIT MOTION STUDY")),
     ]
     .contains(&id)
     .then(|| solidcraft_ui_egui::theme::Tokens::get().form_card_width * 3.0)
@@ -54,20 +54,20 @@ fn render_strip_is_excluded_while_real_windows_are_still_measured() {
     assert_eq!(h.call("ui.workspace", json!({"workspace":"render"}))["ok"], true);
     h.app.help.about = true;
     h.frames(6);
-    let strip = egui::Id::new("sc_render_shots_strip");
+    let strip = egui::Id::unique("sc_render_shots_strip");
     let width = h.ctx.memory(|m| m.area_rect(strip)).expect("visible Shots strip").width();
     assert!(width > DIALOG_MAX_W, "the workspace strip should span the canvas: {width}");
     let windows = window_widths(&h);
     assert!(!windows.iter().any(|(id, _)| *id == strip));
-    assert!(windows.iter().any(|(id, _)| *id == egui::Id::new("sc_about")), "real About window is still measured: {windows:?}");
+    assert!(windows.iter().any(|(id, _)| *id == egui::Id::unique("sc_about")), "real About window is still measured: {windows:?}");
     assert_eq!(h.call("engine.execute", json!({"command":"view.shots_strip","params":{"visible":false}}))["ok"], true);
     h.frames(6);
-    let pill = egui::Id::new("sc_render_shots_pill");
+    let pill = egui::Id::unique("sc_render_shots_pill");
     let width = h.ctx.memory(|m| m.area_rect(pill)).expect("visible Shots restore control").width();
     assert!(width < DIALOG_MIN_W, "the restore control is intentionally smaller than a dialog: {width}");
     let windows = window_widths(&h);
     assert!(!windows.iter().any(|(id, _)| *id == pill));
-    assert!(windows.iter().any(|(id, _)| *id == egui::Id::new("sc_about")), "real window remains measured with Shots collapsed: {windows:?}");
+    assert!(windows.iter().any(|(id, _)| *id == egui::Id::unique("sc_about")), "real window remains measured with Shots collapsed: {windows:?}");
     assert_eq!(h.call("ui.start", json!({"command":"file.export_view_dxf"}))["ok"], true);
     h.frames(6);
     let dialog = solidcraft_ui_egui::scenario::rect_of("dialog:outer").expect("DXF dialog has an outer rectangle");

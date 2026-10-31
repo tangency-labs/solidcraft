@@ -1043,7 +1043,13 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, method: &str, p: &Value) ->
             if explicit {
                 app.synthetic.push(egui::Event::ModifiersChanged(modifiers));
             }
-            app.synthetic.push(egui::Event::MouseWheel { unit, delta: egui::vec2(0.0, delta), modifiers, phase: egui::TouchPhase::Move });
+            app.synthetic.push(egui::Event::MouseWheel {
+                source: egui::MouseWheelSource::Unknown,
+                unit,
+                delta: egui::vec2(0.0, delta),
+                modifiers,
+                phase: egui::TouchPhase::Move,
+            });
             if explicit {
                 app.synthetic.push(egui::Event::ModifiersChanged(egui::Modifiers::NONE));
             }

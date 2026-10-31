@@ -139,6 +139,6 @@ pub(crate) fn settings_precision_sample(ui: &mut Ui, text: &str) {
     let t = Tokens::get();
     let galley = ui.painter().layout_no_wrap(text.to_owned(), FontId::monospace(t.font_body), t.form_dim);
     let (r, response) = ui.allocate_exact_size(galley.size(), Sense::hover());
-    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), text));
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, ui.is_enabled(), text));
     ui.painter().galley(r.min, galley, t.form_dim);
 }

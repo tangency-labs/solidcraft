@@ -100,7 +100,7 @@ impl Drop for SearchFrame {
 pub(crate) fn begin(ui: &Ui, filter: &str) -> SearchFrame {
     let query: String = filter.trim().chars().take(256).collect::<String>().to_lowercase();
     ui.ctx().data_mut(|data| {
-        let state = data.get_temp_mut_or_insert_with(Id::new(STATE), State::default);
+        let state = data.get_temp_mut_or_insert_with(Id::unique(STATE), State::default);
         let changed = state.memory_query != query;
         if changed {
             state.memory_query = query.clone();
@@ -131,7 +131,7 @@ pub(crate) fn begin(ui: &Ui, filter: &str) -> SearchFrame {
 fn finish(ctx: &Context) -> bool {
     let mut dirty = false;
     ctx.data_mut(|data| {
-        let state = data.get_temp_mut_or_default::<State>(Id::new(STATE));
+        let state = data.get_temp_mut_or_default::<State>(Id::unique(STATE));
         dirty = state.live && state.dirty;
         state.live = false;
     });
@@ -141,7 +141,7 @@ fn finish(ctx: &Context) -> bool {
 fn with<R>(ui: &Ui, f: impl FnOnce(&mut State) -> R) -> Option<R> {
     let mut out = None;
     ui.ctx().data_mut(|data| {
-        let state = data.get_temp_mut_or_default::<State>(Id::new(STATE));
+        let state = data.get_temp_mut_or_default::<State>(Id::unique(STATE));
         if state.live {
             out = Some(f(state));
         }
@@ -251,11 +251,11 @@ pub(crate) fn pop_passthrough(ui: &Ui) {
 }
 
 pub(crate) fn set_force_scroll(ctx: &Context, on: bool) {
-    ctx.data_mut(|data| data.insert_temp(Id::new(SCROLL), on));
+    ctx.data_mut(|data| data.insert_temp(Id::unique(SCROLL), on));
 }
 
 pub(crate) fn force_scroll(ctx: &Context) -> bool {
-    ctx.data(|data| data.get_temp(Id::new(SCROLL))).unwrap_or(false)
+    ctx.data(|data| data.get_temp(Id::unique(SCROLL))).unwrap_or(false)
 }
 
 pub(crate) fn begin_page(ui: &Ui, index: usize, label: &str) {
@@ -622,34 +622,34 @@ fn english_hit(query: &str, shown: &str) -> bool {
 
 /// A text field or drag value had the keyboard on the previous frame.
 pub(crate) fn shift_key_sink(ctx: &Context) -> bool {
-    let held = ctx.data(|data| data.get_temp::<bool>(Id::new(SINK_NOW))).unwrap_or(false);
-    ctx.data_mut(|data| data.insert_temp(Id::new(SINK_NOW), false));
+    let held = ctx.data(|data| data.get_temp::<bool>(Id::unique(SINK_NOW))).unwrap_or(false);
+    ctx.data_mut(|data| data.insert_temp(Id::unique(SINK_NOW), false));
     held
 }
 
 pub(crate) fn key_sink(ctx: &Context) -> bool {
-    ctx.data(|data| data.get_temp::<bool>(Id::new(SINK_PREV))).unwrap_or(false)
+    ctx.data(|data| data.get_temp::<bool>(Id::unique(SINK_PREV))).unwrap_or(false)
 }
 
 pub(crate) fn note_key_sink(ctx: &Context) {
-    ctx.data_mut(|data| data.insert_temp(Id::new(SINK_NOW), true));
+    ctx.data_mut(|data| data.insert_temp(Id::unique(SINK_NOW), true));
 }
 
 pub(crate) fn set_key_sink_prev(ctx: &Context, held: bool) {
-    ctx.data_mut(|data| data.insert_temp(Id::new(SINK_PREV), held));
+    ctx.data_mut(|data| data.insert_temp(Id::unique(SINK_PREV), held));
 }
 
 /// The matches drawn last frame, for Up/Down and Enter before this pass rebuilds them.
 pub(crate) fn nav(ctx: &Context) -> (String, usize, Vec<NavHit>) {
     ctx.data(|data| {
-        let store = data.get_temp::<NavStore>(Id::new(NAV)).unwrap_or_default();
+        let store = data.get_temp::<NavStore>(Id::unique(NAV)).unwrap_or_default();
         (store.query, store.cursor, store.hits)
     })
 }
 
 pub(crate) fn set_cursor(ctx: &Context, cursor: usize) {
     ctx.data_mut(|data| {
-        let store = data.get_temp_mut_or_default::<NavStore>(Id::new(NAV));
+        let store = data.get_temp_mut_or_default::<NavStore>(Id::unique(NAV));
         store.scroll = store.cursor != cursor;
         store.cursor = cursor;
     });
@@ -661,7 +661,7 @@ pub(crate) fn store_nav(ui: &Ui) {
         with(ui, |state| (state.query.clone(), state.nav.iter().map(|hit| NavHit { page: hit.page, label: hit.label.clone() }).collect::<Vec<_>>()))
             .unwrap_or_default();
     ui.ctx().data_mut(|data| {
-        let store = data.get_temp_mut_or_default::<NavStore>(Id::new(NAV));
+        let store = data.get_temp_mut_or_default::<NavStore>(Id::unique(NAV));
         store.query = query;
         store.hits = hits;
         if store.cursor >= store.hits.len() {
@@ -679,7 +679,7 @@ pub(crate) fn remember(ui: &mut Ui, label: &str, rect: Rect) {
         return;
     }
     let (cursor, scroll) = ui.ctx().data(|data| {
-        let store = data.get_temp::<NavStore>(Id::new(NAV)).unwrap_or_default();
+        let store = data.get_temp::<NavStore>(Id::unique(NAV)).unwrap_or_default();
         (store.cursor, store.scroll)
     });
     let selected = with(ui, |state| {
@@ -703,9 +703,9 @@ pub(crate) fn remember(ui: &mut Ui, label: &str, rect: Rect) {
 pub(crate) fn set_reveal(ctx: &Context, reveal: Option<Reveal>) {
     ctx.data_mut(|data| {
         if let Some(reveal) = reveal {
-            data.insert_temp(Id::new(REVEAL_ID), reveal);
+            data.insert_temp(Id::unique(REVEAL_ID), reveal);
         } else {
-            data.remove::<Reveal>(Id::new(REVEAL_ID));
+            data.remove::<Reveal>(Id::unique(REVEAL_ID));
         }
     });
 }
@@ -716,7 +716,7 @@ pub(crate) fn reveal_for(page: usize, label: &str) -> Reveal {
 
 /// Scroll the opened setting into view and outline it until [`Reveal::until`].
 pub(crate) fn follow(ui: &Ui, label: &str, rect: Rect) {
-    let Some(reveal) = ui.data(|data| data.get_temp::<Reveal>(Id::new(REVEAL_ID))) else { return };
+    let Some(reveal) = ui.data(|data| data.get_temp::<Reveal>(Id::unique(REVEAL_ID))) else { return };
     if crate::now_ms() > reveal.until || fold(label) != fold(&reveal.label) {
         return;
     }
@@ -770,7 +770,7 @@ mod tests {
         h.frames(2);
         h.step(&serde_json::json!({"key": "F", "cmd": true})).expect("find");
         h.frames(1);
-        assert!(h.ctx.memory(|memory| memory.has_focus(egui::Id::new("prefs_search"))), "Cmd+F focuses search");
+        assert!(h.ctx.memory(|memory| memory.has_focus(egui::Id::unique("prefs_search"))), "Cmd+F focuses search");
         h.step(&serde_json::json!({"text": "zo"})).expect("type");
         h.frames(3);
         assert!(h.widget("Reverse zoom direction").is_some(), "typed letters search from the open page");
@@ -827,6 +827,7 @@ mod tests {
         h.frames(3);
         let first = crate::scenario::handle_at("prefs:search:current").expect("first match");
         let wheel = egui::Event::MouseWheel {
+            source: egui::MouseWheelSource::Unknown,
             unit: egui::MouseWheelUnit::Point,
             delta: egui::vec2(0.0, -400.0),
             modifiers: egui::Modifiers::NONE,

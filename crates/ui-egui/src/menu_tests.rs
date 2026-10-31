@@ -1328,7 +1328,7 @@ fn menus_near_the_window_corner_open_inward() {
             assert_eq!(h.call("ui.menu", json!({}))["result"]["open"], true, "{scale} {target:?}");
             // An auto-sized menu takes a few frames to settle its size.
             h.frames(3);
-            let r = h.ctx.memory(|m| m.area_rect(egui::Id::new("sc_context_menu"))).unwrap();
+            let r = h.ctx.memory(|m| m.area_rect(egui::Id::unique("sc_context_menu"))).unwrap();
             assert!(screen.contains_rect(r), "{scale} {target:?}: {r:?} outside {screen:?}");
             // Below and right of the cursor where it fits, else ending at it.
             let x = if at.x + r.width() <= screen.right() { at.x } else { at.x - r.width() };

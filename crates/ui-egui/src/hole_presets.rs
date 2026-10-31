@@ -383,7 +383,7 @@ pub(crate) fn rows(ui: &mut egui::Ui, d: &mut Dialog, library: &mut Library, doc
     if !matches!(d.kind, Kind::Hole { .. }) {
         return;
     }
-    let id = egui::Id::new("personal_hole_presets_panel");
+    let id = egui::Id::unique("personal_hole_presets_panel");
     let mut state = if reset { PanelState::default() } else { ui.ctx().data_mut(|data| data.get_temp::<PanelState>(id)).unwrap_or_default() };
     ui_kit::section(ui, "personal_hole_presets", "hole_presets.title", false, |ui| {
         ui.label(tr("hole_presets.scope"));
@@ -415,7 +415,7 @@ pub(crate) fn rows(ui: &mut egui::Ui, d: &mut Dialog, library: &mut Library, doc
                     }
                 });
                 response.widget_info(|| {
-                    let mut info = egui::WidgetInfo::labeled(egui::WidgetType::ComboBox, ui.is_enabled(), tr("hole_presets.preset"));
+                    let mut info = egui::WidgetInfo::labeled(egui::Role::ComboBox, ui.is_enabled(), tr("hole_presets.preset"));
                     info.current_text_value = Some(display.clone());
                     info
                 });
@@ -482,7 +482,9 @@ pub(crate) fn rows(ui: &mut egui::Ui, d: &mut Dialog, library: &mut Library, doc
 /// when Escape has already blurred its text field. Stale state cannot block other tools.
 pub(crate) fn name_prompt_open(ctx: &egui::Context, dialog: Option<&Dialog>) -> bool {
     dialog.is_some_and(|d| matches!(&d.kind, Kind::Hole { .. }))
-        && ctx.data_mut(|data| data.get_temp::<PanelState>(egui::Id::new("personal_hole_presets_panel"))).is_some_and(|state| state.prompt.is_some())
+        && ctx
+            .data_mut(|data| data.get_temp::<PanelState>(egui::Id::unique("personal_hole_presets_panel")))
+            .is_some_and(|state| state.prompt.is_some())
 }
 
 /// Draw after the Hole card so the modal owns input and its footer handles. `true` also
@@ -491,11 +493,11 @@ pub(crate) fn name_prompt(ctx: &egui::Context, d: &mut Dialog, library: &mut Lib
     if !matches!(d.kind, Kind::Hole { .. }) {
         return false;
     }
-    let id = egui::Id::new("personal_hole_presets_panel");
+    let id = egui::Id::unique("personal_hole_presets_panel");
     let mut state = ctx.data_mut(|data| data.get_temp::<PanelState>(id)).unwrap_or_default();
     let Some(mut prompt) = state.prompt.take() else { return false };
     let title = tr(if prompt.renaming { "hole_presets.rename" } else { "hole_presets.save" });
-    let (closed, action) = ui_kit::Confirm::new(egui::Id::new("personal_hole_preset_name"), "save", title)
+    let (closed, action) = ui_kit::Confirm::new(egui::Id::unique("personal_hole_preset_name"), "save", title)
         .actions(if prompt.renaming { tr("hole_presets.rename") } else { crate::i18n::tr_label("Save") }, "Cancel", None)
         .show(ctx, true, |ui| {
             ui_kit::row(ui, "hole_presets.name", |ui| ui_kit::focused_text_field(ui, &mut prompt.name, tr("hole_presets.name_hint")));

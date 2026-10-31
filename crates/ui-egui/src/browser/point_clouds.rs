@@ -194,7 +194,7 @@ pub(super) fn rows(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize, acts: &m
     let shown = !app.session.folder_hidden(POINT_CLOUDS_FOLDER);
     let r = draw_row(
         ui,
-        ui.id().with(key),
+        ui.scope_id().with(key),
         &Row { depth, fold: Some(open), eye: Some(shown), icon: "folder", label: "Point Clouds", dim: !shown, ..Default::default() },
     );
     if r.fold || r.clicked {
@@ -209,7 +209,7 @@ pub(super) fn rows(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize, acts: &m
     for (id, name, visible) in clouds {
         let r = draw_row(
             ui,
-            ui.id().with(("point_cloud", id)),
+            ui.scope_id().with(("point_cloud", id)),
             &Row { depth: depth + 1, eye: Some(visible), icon: "point", label: &name, name: true, dim: !visible || !shown, ..Default::default() },
         );
         if r.eye {
@@ -268,7 +268,7 @@ pub(crate) fn panel(app: &mut SolveApp, ctx: &egui::Context) {
     };
     let changes_of = c.colored_property().filter(|n| c.complex.integer(n)).map(str::to_string);
     let at = panel_pos(app);
-    let (closed, action) = ui_kit::Window::new(egui::Id::new("sc_point_cloud_panel"), "point", &title)
+    let (closed, action) = ui_kit::Window::new(egui::Id::unique("sc_point_cloud_panel"), "point", &title)
         .placed(egui::Align2::LEFT_TOP, at)
         .fields()
         .actions("", crate::i18n::tr("ui.close"), None)

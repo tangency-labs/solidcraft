@@ -49,7 +49,7 @@ pub fn look_chain(ui: &mut Ui, id: &str, labels: [&str; 4], looks: [Option<Spher
         }
         let key = format!("{id}:{}", step.name());
         let response = ui.interact(cell, ui.make_persistent_id(&key), Sense::click());
-        response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::SelectableLabel, ui.is_enabled(), active == step, label));
+        response.widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, ui.is_enabled(), active == step, label));
         if response.clicked() {
             clicked = Some(step);
         }

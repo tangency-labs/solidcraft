@@ -72,7 +72,7 @@ fn color_field_inner(ui: &mut Ui, rgb: &mut [u8; 3], opacity: Option<&mut f64>, 
         t.control_border_stroke(t.control_border),
         egui::StrokeKind::Inside,
     );
-    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::ColorButton, ui.is_enabled(), i18n::tr("color.edit")));
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::ColorWell, ui.is_enabled(), i18n::tr("color.edit")));
     publish(&format!("dialog:color:{}", label(ui)), &response);
     let mut edited = false;
     Container::new(ui.ctx(), Surface::Popup)
@@ -107,7 +107,7 @@ pub(crate) fn color_popover(ui: &mut Ui, rgb: &mut [u8; 3]) -> bool {
 fn color_popover_with_opacity(ui: &mut Ui, rgb: &mut [u8; 3], mut opacity: Option<&mut f64>, mixed: bool) -> bool {
     let t = Tokens::get();
     ui.style_mut().drag_value_text_style = egui::TextStyle::Monospace;
-    let id = ui.id().with("color_hsv");
+    let id = ui.scope_id().with("color_hsv");
     let color = crate::theme::srgb(rgb.map(|c| f32::from(c) / 255.0));
     // Retain hue for black/grey, and sub-byte precision while dragging.
     let (saved, hsv) = ui.ctx().data(|d| d.get_temp::<([u8; 3], HsvaGamma)>(id)).unwrap_or((*rgb, color.into()));
@@ -115,10 +115,10 @@ fn color_popover_with_opacity(ui: &mut Ui, rgb: &mut [u8; 3], mut opacity: Optio
     let before = hsv;
     let before_rgb = *rgb;
     let before_opacity = opacity.as_deref().copied();
-    let hex_id = ui.id().with("color_hex");
+    let hex_id = ui.scope_id().with("color_hex");
     let mut hex = ui.ctx().data(|d| d.get_temp::<HexEdit>(hex_id)).unwrap_or_else(|| HexEdit::new(*rgb, before_opacity));
     hex.sync(*rgb, before_opacity);
-    let format_id = egui::Id::new("color_hex_format");
+    let format_id = egui::Id::unique("color_hex_format");
     let mut hexadecimal = ui.ctx().data(|d| d.get_temp::<bool>(format_id)).unwrap_or(false);
     let mut linear = ui.global_style().visuals.numeric_color_space == egui::style::NumericColorSpace::Linear;
     let mut accepted_mixed = false;
@@ -137,7 +137,7 @@ fn color_popover_with_opacity(ui: &mut Ui, rgb: &mut [u8; 3], mut opacity: Optio
                 for (index, (key, name)) in [("color.gamma", "U8"), ("color.linear", "F"), ("color.hex_help", "Hex")].iter().enumerate() {
                     let rect =
                         egui::Rect::from_min_size(rect.min + vec2(index as f32 * rect.width() / 3.0, 0.0), vec2(rect.width() / 3.0, rect.height()));
-                    ui.interact(rect, ui.id().with(("format_tip", index)), Sense::hover()).on_hover_text(i18n::tr(key));
+                    ui.interact(rect, ui.scope_id().with(("format_tip", index)), Sense::hover()).on_hover_text(i18n::tr(key));
                     scenario::publish_handle(&format!("color:format:{name}"), rect.center());
                 }
             });
@@ -244,7 +244,7 @@ fn color_popover_with_opacity(ui: &mut Ui, rgb: &mut [u8; 3], mut opacity: Optio
         }
         gradient(ui, square, |x, y| Color32::from(HsvaGamma { h: hsv.h, s: x, v: 1.0 - y, a: 1.0 }));
         marker(ui, pos2(square.left() + hsv.s * square.width(), square.bottom() - hsv.v * square.height()), t.space_6);
-        response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Other, ui.is_enabled(), i18n::tr("color.saturation_value")));
+        response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Unknown, ui.is_enabled(), i18n::tr("color.saturation_value")));
         publish("color:sv", &response);
         response.on_hover_text(i18n::tr("color.saturation_value"));
         let (hue, response) = ui.allocate_exact_size(vec2(width, t.space_14), Sense::click_and_drag());

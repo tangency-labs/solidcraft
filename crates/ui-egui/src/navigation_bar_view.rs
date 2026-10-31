@@ -205,7 +205,7 @@ pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
         return;
     }
     crate::scenario::publish_rect("nav:outer", bar.rect);
-    let menu_id = ui.id().with("navigation_bar_menu");
+    let menu_id = ui.scope_id().with("navigation_bar_menu");
     let mut open = ui.data(|d| d.get_temp::<String>(menu_id)).unwrap_or_default();
     let active = ui.rect_contains_pointer(bar.rect)
         || ui.rect_contains_pointer(crate::viewport::axis_rect(app, rect))
@@ -217,7 +217,7 @@ pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
         || app.viewport.spin
         || !open.is_empty();
     let opacity = ui_kit::navigation_opacity(app.preferences.navigation_bar.idle, active);
-    let background = ui.interact(bar.rect, ui.id().with("navigation_bar_context"), egui::Sense::click());
+    let background = ui.interact(bar.rect, ui.scope_id().with("navigation_bar_context"), egui::Sense::click());
     let opacity = if app.preferences.navigation_bar.idle == Idle::Hide {
         ui.ctx().animate_value_with_time(menu_id.with("opacity"), opacity, if active { ui_kit::NAV_FADE_SECONDS } else { 0.0 })
     } else {
@@ -349,7 +349,7 @@ pub(crate) fn paint_row(
                         ui_kit::navigation_separator(ui, *bounds);
                         ui.interact(
                             *bounds,
-                            ui.id().with("separator"),
+                            ui.scope_id().with("separator"),
                             if editing.is_some() { egui::Sense::click_and_drag() } else { egui::Sense::click() },
                         )
                     } else {
@@ -380,15 +380,14 @@ pub(crate) fn paint_row(
             .inner;
         let mut hidden = None;
         if let Some((selected, caps, render)) = editing {
-            response
-                .widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, ui.is_enabled(), selected == Some(index), app.tr(slot.label)));
+            response.widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, ui.is_enabled(), selected == Some(index), app.tr(slot.label)));
             ui_kit::navigation_edit_outline(ui, *bounds, !slot.available(caps), selected == Some(index));
             if !slot.available(caps) {
                 hidden = Some(if render { "navbar.custom.hidden_render" } else { "navbar.custom.hidden_design" });
             }
         } else {
             response.widget_info(|| {
-                egui::WidgetInfo::selected(egui::WidgetType::Button, ui.is_enabled(), selected(app, slot.id) || open == slot.id, app.tr(slot.label))
+                egui::WidgetInfo::selected(egui::Role::Button, ui.is_enabled(), selected(app, slot.id) || open == slot.id, app.tr(slot.label))
             });
         }
         // The settings' preview keeps its tips above, wherever the bar sits in the view.

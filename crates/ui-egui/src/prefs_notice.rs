@@ -10,7 +10,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     if app.settings_reset.is_empty() {
         return;
     }
-    let (closed, action) = ui_kit::Window::new(egui::Id::new("sc_settings_reset"), "settings", app.tr("settings.reset_title"))
+    let (closed, action) = ui_kit::Window::new(egui::Id::unique("sc_settings_reset"), "settings", app.tr("settings.reset_title"))
         .actions(app.tr("ui.open_preferences"), app.tr("ui.heading_ok"), None)
         .show(ctx, true, |ui| {
             ui_kit::text(ui, app.tr("settings.reset_intro"), ui_kit::Text::Report("intro", false));

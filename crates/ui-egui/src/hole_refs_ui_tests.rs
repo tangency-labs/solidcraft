@@ -175,7 +175,7 @@ fn without_value_boxes_a_number_typed_after_an_edge_pick_sets_its_distance() {
     let left = screen(&mut h, Vec3::new(0.0, 20.0, 10.0));
     h.step(&json!({"click": left})).unwrap();
     h.frames(2);
-    assert!(h.ctx.memory(|m| m.area_rect(egui::Id::new(("sc_hole_ref_area", 0usize)))).is_none(), "a distance box in the view");
+    assert!(h.ctx.memory(|m| m.area_rect(egui::Id::unique(("sc_hole_ref_area", 0usize)))).is_none(), "a distance box in the view");
     h.step(&json!({"text": "7 mm"})).unwrap();
     h.frames(2);
     assert_eq!(distances(&h)[0], "7 mm");

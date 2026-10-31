@@ -157,7 +157,7 @@ pub(crate) fn show(app: &SolveApp, ctx: &egui::Context) {
     let t = crate::theme::Tokens::get();
     let at = egui::pos2(view.left() + 12.0, view.bottom() - 12.0);
     Container::new(ctx, Surface::Toast)
-        .area(egui::Id::new("open_meshing"))
+        .area(egui::Id::unique("open_meshing"))
         .order(egui::Order::Foreground)
         .pivot(egui::Align2::LEFT_BOTTOM)
         .fixed_pos(at)

@@ -230,7 +230,7 @@ pub(crate) fn prepare_tabs(
     values: impl FnOnce() -> BTreeMap<String, crate::theme_files::OptionValue>,
 ) -> Option<Custom> {
     ctx.data_mut(|data| {
-        let state = data.get_temp_mut_or_default::<TabThemeState>(egui::Id::new(TAB_STATE));
+        let state = data.get_temp_mut_or_default::<TabThemeState>(egui::Id::unique(TAB_STATE));
         let same = match (&state.prepared, file) {
             (Some(old), Some(file)) => old.file == *file && old.raw.as_ref() == raw,
             (None, None) => true,
@@ -384,7 +384,7 @@ impl Bevel {
             let mut rounding: egui::epaint::CornerRadiusF32 = radius.into();
             rounding -= inset;
             let mut path = Vec::new();
-            egui::epaint::tessellator::path::rounded_rectangle(&mut path, edge, rounding);
+            egui::epaint::tessellator::path::rounded_rectangle(&mut path, egui::epaint::RoundedRect::new(edge, rounding));
             if let Some(first) = path.first().copied() {
                 path.push(first);
             }
@@ -657,17 +657,17 @@ impl TabAccent {
     }
 
     pub fn current(ctx: &egui::Context) -> Self {
-        ctx.data(|d| d.get_temp::<Self>(egui::Id::new("sc_tab_accent"))).unwrap_or_else(|| Self::for_tab(&Tokens::get(), "MODEL"))
+        ctx.data(|d| d.get_temp::<Self>(egui::Id::unique("sc_tab_accent"))).unwrap_or_else(|| Self::for_tab(&Tokens::get(), "MODEL"))
     }
 
     pub fn current_icon_accent(ctx: &egui::Context) -> Option<&'static str> {
-        ctx.data(|d| d.get_temp::<Option<&'static str>>(egui::Id::new("sc_tab_icon_accent"))).flatten()
+        ctx.data(|d| d.get_temp::<Option<&'static str>>(egui::Id::unique("sc_tab_icon_accent"))).flatten()
     }
 
     pub fn publish(app: &crate::SolveApp, ctx: &egui::Context) {
         let now = ctx.input(|i| i.time);
         let (published, accent, fading, style_surfaces) = ctx.data_mut(|data| {
-            let state = data.get_temp_mut_or_default::<TabThemeState>(egui::Id::new(TAB_STATE));
+            let state = data.get_temp_mut_or_default::<TabThemeState>(egui::Id::unique(TAB_STATE));
             let (published, accent, fading) = state.publish(&app.ui.tab, now);
             let style_surfaces = published.tab_surfaces || state.styled_surfaces;
             state.styled_surfaces = published.tab_surfaces;
@@ -690,18 +690,18 @@ impl TabAccent {
             ctx.request_repaint();
         }
         ctx.data_mut(|d| {
-            d.insert_temp(egui::Id::new("sc_tab_accent"), accent);
-            d.insert_temp(egui::Id::new("sc_tab_icon_accent"), icon_accent_for_tab(&app.ui.tab));
-            d.insert_temp(egui::Id::new("sc_sketch_open"), app.session.active_sketch.is_some());
-            d.insert_temp(egui::Id::new("sc_tool_accent"), app.tool.is_some() || app.dialog.is_some());
+            d.insert_temp(egui::Id::unique("sc_tab_accent"), accent);
+            d.insert_temp(egui::Id::unique("sc_tab_icon_accent"), icon_accent_for_tab(&app.ui.tab));
+            d.insert_temp(egui::Id::unique("sc_sketch_open"), app.session.active_sketch.is_some());
+            d.insert_temp(egui::Id::unique("sc_tool_accent"), app.tool.is_some() || app.dialog.is_some());
         });
     }
 
     /// Paint only the focused numeric editor, without changing sibling buttons or checkboxes.
     pub fn number_focus(ui: &egui::Ui, response: &egui::Response) {
-        let active = ui.ctx().data(|d| d.get_temp::<bool>(egui::Id::new("sc_tool_accent"))).unwrap_or(false);
+        let active = ui.ctx().data(|d| d.get_temp::<bool>(egui::Id::unique("sc_tool_accent"))).unwrap_or(false);
         let t = Tokens::get();
-        let sketch = ui.ctx().data(|d| d.get_temp::<bool>(egui::Id::new("sc_sketch_open"))).unwrap_or(false);
+        let sketch = ui.ctx().data(|d| d.get_temp::<bool>(egui::Id::unique("sc_sketch_open"))).unwrap_or(false);
         let color = if sketch { t.sketch_accent } else { Self::current(ui.ctx()).color };
         if active && response.has_focus() && color != t.accent {
             ui.painter().rect_stroke(response.rect, t.radius_sm, Stroke::new(1.0, color), egui::StrokeKind::Inside);
@@ -1602,7 +1602,7 @@ mod tests {
             set_dark(file.base.is_dark());
             set_custom(custom);
         };
-        let publish = || ctx.data_mut(|d| d.get_temp_mut_or_default::<TabThemeState>(egui::Id::new(TAB_STATE)).publish("SKETCH", 1.0));
+        let publish = || ctx.data_mut(|d| d.get_temp_mut_or_default::<TabThemeState>(egui::Id::unique(TAB_STATE)).publish("SKETCH", 1.0));
         set_vision(ColorVision::Off);
         set_viewport_dark(None);
         set_viewport_background(None);
@@ -1637,7 +1637,7 @@ mod tests {
         let ctx = crate::fonts::test_context();
         let mut state = tabs_state("dark", BTreeMap::new());
         state.publish("MODEL", 0.0);
-        ctx.data_mut(|d| d.insert_temp(egui::Id::new(TAB_STATE), state));
+        ctx.data_mut(|d| d.insert_temp(egui::Id::unique(TAB_STATE), state));
         app.ui.tab = "SKETCH".into();
         let frame = |time| {
             let mut out = ctx.run_ui(egui::RawInput { time: Some(time), ..Default::default() }, |ui| {
@@ -1664,7 +1664,7 @@ mod tests {
             frame(time);
         }
         assert_eq!(frame(2.0), std::time::Duration::MAX);
-        let (end, _, _) = ctx.data_mut(|d| d.get_temp_mut_or_default::<TabThemeState>(egui::Id::new(TAB_STATE)).publish("SKETCH", 2.0));
+        let (end, _, _) = ctx.data_mut(|d| d.get_temp_mut_or_default::<TabThemeState>(egui::Id::unique(TAB_STATE)).publish("SKETCH", 2.0));
         assert_eq!(Tokens::get(), end.tokens);
         let mut instant = tabs_state("dark", BTreeMap::from([("tab_fade_ms".into(), OptionValue::Num(0.0))]));
         instant.publish("MODEL", 0.0);
@@ -1685,14 +1685,15 @@ mod tests {
             let actual = visuals(dark);
             let original = if dark { egui::Visuals::dark() } else { egui::Visuals::light() };
             assert_eq!(actual.menu_corner_radius, original.menu_corner_radius);
+            // egui 0.37 rounds its widgets 4 points; ours keep the 2 and 3 points egui used before.
             for (a, b) in [
-                (actual.widgets.noninteractive, original.widgets.noninteractive),
-                (actual.widgets.inactive, original.widgets.inactive),
-                (actual.widgets.hovered, original.widgets.hovered),
-                (actual.widgets.active, original.widgets.active),
-                (actual.widgets.open, original.widgets.open),
+                (actual.widgets.noninteractive, 2),
+                (actual.widgets.inactive, 2),
+                (actual.widgets.hovered, 3),
+                (actual.widgets.active, 2),
+                (actual.widgets.open, 2),
             ] {
-                assert_eq!(a.corner_radius, b.corner_radius);
+                assert_eq!(a.corner_radius, egui::CornerRadius::same(b));
             }
             let tokens = Tokens { radius_sm: 0, radius_md: 0, ..Tokens::dark() };
             set_custom(Some(Custom { dark, tokens }));

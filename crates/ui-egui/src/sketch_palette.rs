@@ -368,7 +368,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let selected_types = if has_curves { selected_linetypes(app) } else { std::array::from_fn(|i| mode(app) == i as u8) };
     let panel = crate::ui_kit::Panel::new(
         app.tr_label("ui.palette_sketch_options"),
-        egui::Id::new("sc_sketch_palette"),
+        egui::Id::unique("sc_sketch_palette"),
         anchor,
         vp,
         crate::frame::Side::Right,

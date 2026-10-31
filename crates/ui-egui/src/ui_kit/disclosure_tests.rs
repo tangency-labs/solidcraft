@@ -64,7 +64,7 @@ fn section_card_and_floating_window_folds_render_down_when_open_right_when_close
                         } else {
                             Panel::new(
                                 "Fillet",
-                                egui::Id::new("window"),
+                                egui::Id::unique("window"),
                                 egui::pos2(20.0, 20.0),
                                 viewport,
                                 crate::frame::Side::Left,

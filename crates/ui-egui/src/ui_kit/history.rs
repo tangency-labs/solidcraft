@@ -31,7 +31,7 @@ impl StripHeading {
         let width = self.width() - ui.spacing().item_spacing.x;
         let (rect, response) = ui.allocate_exact_size(vec2(width.max(self.0.size().x), Tokens::get().control_height), egui::Sense::hover());
         self.paint(ui.painter(), rect);
-        response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), self.0.text()));
+        response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, ui.is_enabled(), self.0.text()));
         response
     }
 }
@@ -237,7 +237,7 @@ impl HistoryTransport {
     /// `playing` turns the Play button into Stop; the other controls ignore it.
     pub fn show(self, ui: &mut egui::Ui, rect: Rect, playing: bool) -> egui::Response {
         let t = Tokens::get();
-        let response = ui.interact(rect, ui.id().with(("history_transport", self.id())), egui::Sense::click());
+        let response = ui.interact(rect, ui.scope_id().with(("history_transport", self.id())), egui::Sense::click());
         crate::scenario::publish_target(&format!("history:{}", self.id()), rect);
         if response.hovered() {
             ui.painter().rect_filled(rect, t.radius_sm, t.hover);
@@ -245,7 +245,7 @@ impl HistoryTransport {
         let glyph = if self == Self::Play && playing { "pause" } else { self.id() };
         icons::glyphs::transport_glyph(ui.painter(), rect.center(), glyph, t.icon);
         let label = self.label(playing);
-        response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), label));
+        response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled(), label));
         response.on_hover_cursor(egui::CursorIcon::PointingHand).on_hover_text(label)
     }
 }
@@ -347,11 +347,11 @@ pub(crate) struct HistorySeamResponse {
 /// Focusable seam button and edge gesture, shared by the panel and CPU interaction tests.
 pub(crate) fn history_seam(ui: &mut egui::Ui, card: Rect, names: bool) -> HistorySeamResponse {
     let seam = HistorySeam::new(card);
-    let id = ui.id().with("history_seam");
+    let id = ui.scope_id().with("history_seam");
     let edge = ui.interact(seam.edge, id.with("edge"), egui::Sense::CLICK | egui::Sense::DRAG);
     let button = ui.interact(seam.pill, id, egui::Sense::click_and_drag());
     let label = crate::i18n::tr(if names { "ui.collapse" } else { "ui.expand" });
-    button.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), label));
+    button.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled(), label));
     if button.clicked() {
         button.request_focus();
     }

@@ -132,7 +132,7 @@ pub(super) fn confirmation(app: &mut SolveApp, ctx: &egui::Context) {
     let title = app.tr("render.shots_save").to_string();
     let cancel = app.tr("ui.cancel").to_string();
     let (closed, answer) =
-        ui_kit::Confirm::new(egui::Id::new("render_save_shot"), "save", &title).actions(&title, &cancel, None).show(ctx, valid, |ui| {
+        ui_kit::Confirm::new(egui::Id::unique("render_save_shot"), "save", &title).actions(&title, &cancel, None).show(ctx, valid, |ui| {
             ui_kit::text(ui, app.tr("render.shots_name_help"), ui_kit::Text::Note("render.shots_name_help"));
             ui_kit::row(ui, app.tr("render.shot_new_name"), |ui| {
                 ui_kit::focused_text_field(ui, &mut name, "");

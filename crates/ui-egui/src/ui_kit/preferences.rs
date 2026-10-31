@@ -309,7 +309,7 @@ fn theme_option_switch(ui: &mut Ui, label: &str, on: &mut bool) {
     if response.has_focus() {
         ui.painter().rect_stroke(rect, t.control_radius, Stroke::new(t.space_2, t.form_primary), egui::StrokeKind::Inside);
     }
-    response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Checkbox, ui.is_enabled(), *on, label));
+    response.widget_info(|| egui::WidgetInfo::selected(egui::Role::CheckBox, ui.is_enabled(), *on, label));
     scenario::publish_target(&format!("prefs:theme_option_switch:{label}"), response.rect);
 }
 
@@ -362,7 +362,7 @@ pub(crate) fn settings_heading(ui: &mut Ui, title: &str, description: &str) {
     ui.scope(|ui| {
         ui.spacing_mut().item_spacing.y = t.space_3;
         let (rect, response) = ui.allocate_exact_size(vec2(dimension(ui.available_width()), t.space_16 + t.space_3), Sense::hover());
-        response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), title));
+        response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, ui.is_enabled(), title));
         paint_text(ui, rect, title, crate::fonts::semibold(t.font_intro), t.form_ink, false);
         super::text(ui, description, super::Text::Hint("settings_heading"));
     });
@@ -483,20 +483,27 @@ pub(crate) fn theme_rail(ui: &mut Ui, tiles: impl FnOnce(&mut Ui), import: impl 
             ui.style_mut().always_scroll_the_only_direction = true;
             // This rail paints its own fully opaque, page-coloured edge cues.
             ui.spacing_mut().scroll.fade.strength = 0.0;
-            let mut rail = egui::ScrollArea::horizontal()
+            // An arrow's click moves the rail on the next frame: egui sets offsets as it builds.
+            let jump_id = egui::Id::unique("settings_theme_rail_jump");
+            let jump = ui.ctx().data_mut(|d| d.remove_temp::<f32>(jump_id));
+            let area = egui::ScrollArea::horizontal()
                 .id_salt("settings_theme_rail")
                 .max_width(rail_width)
                 .auto_shrink([false, true])
                 .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
-                .scroll_source(egui::scroll_area::ScrollSource { drag: egui::scroll_area::DragScroll::Always, ..Default::default() })
-                .show(ui, |ui| {
-                    ui.horizontal(|ui| {
-                        ui.spacing_mut().item_spacing.x = t.space_8;
-                        tiles(ui);
-                    });
+                .scroll_source(egui::scroll_area::ScrollSource { drag: egui::scroll_area::DragScroll::Always, ..Default::default() });
+            let area = match jump {
+                Some(x) => area.horizontal_scroll_offset(x),
+                None => area,
+            };
+            let rail = area.show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = t.space_8;
+                    tiles(ui);
                 });
+            });
             let max_offset = (rail.content_size.x - rail.inner_rect.width()).max(0.0);
-            let (left, right) = theme_rail_cues(rail.state.offset.x, max_offset);
+            let (left, right) = theme_rail_cues(rail.state.clamped_offset().x, max_offset);
             let arrow_size = t.control_height.min(rail.inner_rect.width() / 2.0);
             for (visible, direction, label) in [(left, -1.0, "Scroll left"), (right, 1.0, "Scroll right")] {
                 if !visible || arrow_size <= 0.0 {
@@ -512,8 +519,8 @@ pub(crate) fn theme_rail(ui: &mut Ui, tiles: impl FnOnce(&mut Ui), import: impl 
                 );
                 let rect = Rect::from_center_size(center, vec2(arrow_size, t.control_height));
                 if theme_rail_arrow(ui, rect, direction, label).clicked() {
-                    rail.state.offset.x = (rail.state.offset.x + direction * (action_width + t.space_8)).clamp(0.0, max_offset);
-                    rail.state.store(ui.ctx(), rail.id);
+                    let x = (rail.state.clamped_offset().x + direction * (action_width + t.space_8)).clamp(0.0, max_offset);
+                    ui.ctx().data_mut(|d| d.insert_temp(jump_id, x));
                     ui.ctx().request_repaint();
                 }
             }
@@ -560,7 +567,7 @@ pub(super) fn theme_rail_arrow(ui: &mut Ui, rect: Rect, direction: f32, label: &
     if response.has_focus() {
         ui.painter().rect_stroke(rect, t.control_radius, Stroke::new(t.space_2, t.form_primary), egui::StrokeKind::Inside);
     }
-    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), crate::i18n::tr_label(label)));
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled(), crate::i18n::tr_label(label)));
     scenario::publish_target(&format!("prefs:theme_rail:{label}"), rect);
     response.on_hover_cursor(egui::CursorIcon::PointingHand).on_hover_text(crate::i18n::tr_label(label))
 }
@@ -598,7 +605,7 @@ pub(crate) fn theme_import_tile(ui: &mut Ui, label: &str, note: &str) -> Respons
         FontId::proportional(t.font_small),
         t.form_dim,
     );
-    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), label));
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled(), label));
     scenario::publish_target(&format!("dialog:{label}"), r);
     response.on_hover_cursor(egui::CursorIcon::PointingHand)
 }
@@ -713,7 +720,7 @@ pub(crate) fn option_card(ui: &mut Ui, label: &str, note: Option<&str>, selected
         ui.painter().line_segment([centre + vec2(-t.space_4, 0.0), centre + vec2(-t.space_2, t.space_2)], Stroke::new(2.0, ink));
         ui.painter().line_segment([centre + vec2(-t.space_2, t.space_2), centre + vec2(t.space_4, -t.space_3)], Stroke::new(2.0, ink));
     }
-    response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::RadioButton, enabled, selected, label));
+    response.widget_info(|| egui::WidgetInfo::selected(egui::Role::RadioButton, enabled, selected, label));
     scenario::publish_target(&format!("prefs:option:{label}"), rect);
     let response = response.on_hover_text(label);
     if enabled { response.on_hover_cursor(egui::CursorIcon::PointingHand) } else { response }
@@ -981,7 +988,7 @@ pub(crate) fn settings_inline_note(ui: &mut Ui, text: &str) {
     let t = Tokens::get();
     let galley = ui.painter().layout_no_wrap(text.to_owned(), FontId::proportional(t.font_body), t.form_dim);
     let (r, response) = ui.allocate_exact_size(galley.size(), Sense::hover());
-    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), text));
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, ui.is_enabled(), text));
     ui.painter().galley(r.min, galley, t.form_dim);
 }
 

@@ -13,7 +13,7 @@ fn every_text_input_centres_its_galley_for_mono_and_proportional_fonts() {
         let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
             ui.set_width(280.0);
             scope(ui, |ui| {
-                let id = ui.id().with(case);
+                let id = ui.scope_id().with(case);
                 rect = match case {
                     "expression" | "plain" => super::editor(ui, &mut value, "", case == "expression").2.rect,
                     "cell" | "invalid" => cell_editor(ui, id, &mut value, "", case == "invalid").rect,
@@ -75,7 +75,7 @@ fn tab_visits_expression_fields_in_row_order() {
 #[test]
 fn multiline_text_retains_focus_id_and_three_line_geometry() {
     let ctx = crate::fonts::test_context();
-    let id = egui::Id::new("multiline_test");
+    let id = egui::Id::unique("multiline_test");
     let mut value = "First\nSecond".to_string();
     let mut draw = |ui: &mut Ui| {
         multiline_text_field(ui, "Text", id, &mut value);
@@ -166,7 +166,7 @@ fn preference_dropdown_keeps_disabled_choices_inert_and_closes_after_selection()
 #[test]
 fn secret_field_retains_focus_and_masks_paint_and_accessibility_events() {
     let ctx = crate::fonts::test_context();
-    let id = egui::Id::new("secret_test");
+    let id = egui::Id::unique("secret_test");
     let mut secret = String::new();
     let mut draw = |ui: &mut Ui| {
         row(ui, "API key", |ui| {
@@ -188,7 +188,7 @@ fn secret_field_retains_focus_and_masks_paint_and_accessibility_events() {
 #[test]
 fn growing_message_field_retains_its_id_and_does_not_consume_enter() {
     let ctx = crate::fonts::test_context();
-    let id = egui::Id::new("message_test");
+    let id = egui::Id::unique("message_test");
     let mut message = String::new();
     let mut enter = false;
     let mut draw = |ui: &mut Ui| {
@@ -214,9 +214,9 @@ fn canvas_value_fields_grow_with_an_expression_up_to_three_times_their_width() {
             let mut value = value.to_owned();
             let mut rect = egui::Rect::NOTHING;
             let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
-                egui::Area::new(egui::Id::new("grow")).fixed_pos(egui::pos2(10.0, 10.0)).show(ui.ctx(), |ui| {
+                egui::Area::new(egui::Id::unique("grow")).fixed_pos(egui::pos2(10.0, 10.0)).show(ui.ctx(), |ui| {
                     ui.horizontal(|ui| {
-                        let id = ui.id().with(case);
+                        let id = ui.scope_id().with(case);
                         rect = match case {
                             "canvas" => canvas_value_field(ui, id, &mut value, false).rect,
                             _ => placement_field(ui, id, &mut value, "").rect,
@@ -240,7 +240,7 @@ fn canvas_value_fields_grow_with_an_expression_up_to_three_times_their_width() {
 #[test]
 fn placement_field_keeps_focus_for_owner_validation_on_enter() {
     let ctx = crate::fonts::test_context();
-    let id = egui::Id::new("placement_enter");
+    let id = egui::Id::unique("placement_enter");
     let mut value = String::from("invalid expression");
     let mut draw = |ui: &mut Ui| {
         row(ui, "Distance", |ui| {
@@ -260,7 +260,7 @@ fn placement_field_keeps_focus_for_owner_validation_on_enter() {
 #[test]
 fn bounded_name_editor_keeps_unicode_character_cap() {
     let ctx = crate::fonts::test_context();
-    let id = egui::Id::new("bounded_name");
+    let id = egui::Id::unique("bounded_name");
     let mut value = String::new();
     let mut draw = |ui: &mut Ui| {
         row(ui, "Name", |ui| {
@@ -464,7 +464,7 @@ fn a_right_click_on_every_kind_of_text_field_opens_its_menu() {
         let value = RefCell::new("12 mm".to_owned());
         let rect = Cell::new(egui::Rect::NOTHING);
         let mut draw = |ui: &mut Ui| {
-            let id = ui.id().with(case);
+            let id = ui.scope_id().with(case);
             let value = &mut *value.borrow_mut();
             rect.set(match case {
                 "expression" | "plain" => super::editor(ui, value, "", case == "expression").2.rect,
@@ -492,7 +492,7 @@ fn a_right_click_on_every_kind_of_text_field_opens_its_menu() {
 #[test]
 fn paste_inserts_at_the_cursor_and_replaces_the_selection() {
     let ctx = crate::fonts::test_context();
-    let id = egui::Id::new("paste_dimension");
+    let id = egui::Id::unique("paste_dimension");
     let value = RefCell::new("12 mm".to_owned());
     let rect = Cell::new(egui::Rect::NOTHING);
     let changed = Cell::new(false);
@@ -535,7 +535,7 @@ fn paste_inserts_at_the_cursor_and_replaces_the_selection() {
 fn copy_and_cut_put_the_selection_on_the_clipboard() {
     set_clipboard(None);
     let ctx = crate::fonts::test_context();
-    let id = egui::Id::new("copy_cut");
+    let id = egui::Id::unique("copy_cut");
     let value = RefCell::new("width + 2 mm".to_owned());
     let rect = Cell::new(egui::Rect::NOTHING);
     let mut draw = |ui: &mut Ui| rect.set(cell_editor(ui, id, &mut value.borrow_mut(), "", false).rect);
@@ -560,7 +560,7 @@ fn copy_and_cut_put_the_selection_on_the_clipboard() {
 fn the_menu_offers_only_what_the_field_and_its_selection_allow() {
     set_clipboard(Some("5"));
     let ctx = crate::fonts::test_context();
-    let id = egui::Id::new("nothing_selected");
+    let id = egui::Id::unique("nothing_selected");
     let value = RefCell::new("12".to_owned());
     let rect = Cell::new(egui::Rect::NOTHING);
     let mut draw = |ui: &mut Ui| rect.set(cell_editor(ui, id, &mut value.borrow_mut(), "", false).rect);
@@ -612,7 +612,7 @@ fn the_menu_offers_only_what_the_field_and_its_selection_allow() {
 fn a_right_click_on_a_value_box_over_the_canvas_does_not_reach_the_canvas() {
     set_clipboard(None);
     let ctx = crate::fonts::test_context();
-    let id = egui::Id::new("canvas_box");
+    let id = egui::Id::unique("canvas_box");
     let value = RefCell::new("20".to_owned());
     let (field, canvas_menu) = (Cell::new(egui::Rect::NOTHING), Cell::new(false));
     let mut draw = |ui: &mut Ui| {
@@ -620,7 +620,7 @@ fn a_right_click_on_a_value_box_over_the_canvas_does_not_reach_the_canvas() {
         let canvas = ui.allocate_rect(ui.max_rect(), egui::Sense::click_and_drag());
         canvas_menu.set(canvas_menu.get() | canvas.secondary_clicked());
         let ctx = ui.ctx().clone();
-        let area = Container::new(&ctx, Surface::Canvas).area(egui::Id::new("canvas_box_area"));
+        let area = Container::new(&ctx, Surface::Canvas).area(egui::Id::unique("canvas_box_area"));
         area.fixed_pos(egui::pos2(60.0, 60.0)).order(egui::Order::Foreground).show(&ctx, |ui| {
             field.set(canvas_value_field(ui, id, &mut value.borrow_mut(), false).rect);
         });
@@ -641,7 +641,7 @@ fn a_right_click_on_a_value_box_over_the_canvas_does_not_reach_the_canvas() {
 fn esc_closes_the_text_menu_alone() {
     set_clipboard(None);
     let ctx = crate::fonts::test_context();
-    let id = egui::Id::new("esc_dimension");
+    let id = egui::Id::unique("esc_dimension");
     let value = RefCell::new("12".to_owned());
     let (rect, owner_saw_esc, open) = (Cell::new(egui::Rect::NOTHING), Cell::new(false), Cell::new(false));
     let mut draw = |ui: &mut Ui| {

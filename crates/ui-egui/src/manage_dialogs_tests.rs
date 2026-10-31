@@ -379,7 +379,7 @@ fn appearance_card_keeps_the_approved_width_with_no_preselection() {
     h.app.start("appearance.assign");
     h.frames(4);
     let header = scenario::rect_of("dialog:header").unwrap();
-    let card = h.ctx.memory(|m| m.area_rect(egui::Id::new(("sc_dialog", "APPEARANCE")))).unwrap();
+    let card = h.ctx.memory(|m| m.area_rect(egui::Id::unique(("sc_dialog", "APPEARANCE")))).unwrap();
     let t = Tokens::get();
     let approved = t.form_card_width + t.form_label_width + t.space_6;
     assert!((card.width() - approved).abs() <= t.space_2, "card {card:?}, header {header:?}");

@@ -535,7 +535,7 @@ pub(crate) fn selection_bar(app: &mut SolveApp, ui: &mut egui::Ui, free: egui::R
         crate::shell::within(screen.top() - crate::theme::Tokens::get().space_12, free.top(), free.bottom()),
     );
     let ctx = ui.ctx().clone();
-    let pill = ui_kit::Container::selection_card(&ctx, egui::Id::new("render_selection"), anchor, free, |ui| {
+    let pill = ui_kit::Container::selection_card(&ctx, egui::Id::unique("render_selection"), anchor, free, |ui| {
         ui_kit::selection_actions(ui, &selection_name(app, &sel), &actions)
     });
     crate::scenario::publish_rect("render:selection", pill.response.rect);
@@ -629,7 +629,7 @@ pub(crate) fn replacement_dialog(app: &mut SolveApp, ctx: &egui::Context) {
     let entries: Vec<_> = entries.into_iter().filter(|entry| entry["available"] != false).collect();
     let mut selected = app.render_workspace.view.assign.replacement_index;
     let title = app.tr("render.replace_all").to_string();
-    let (closed, action) = ui_kit::Confirm::new(egui::Id::new("render_replace_look"), "reorder", &title)
+    let (closed, action) = ui_kit::Confirm::new(egui::Id::unique("render_replace_look"), "reorder", &title)
         .actions(&title, app.tr_label("Cancel"), None)
         .show(ctx, !entries.is_empty(), |ui| {
             ui_kit::text(ui, from["name"].as_str().unwrap_or(""), ui_kit::Text::Inline);

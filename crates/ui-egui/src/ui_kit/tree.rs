@@ -126,7 +126,7 @@ pub(crate) struct RowResp {
 /// The state a drag over the eyes sets them to: the first eye's new state, while the button is
 /// down (egui temporary data). Absent when no eye drag is under way.
 pub(crate) fn eye_drag_id() -> egui::Id {
-    egui::Id::new("sc_tree_eye_drag")
+    egui::Id::unique("sc_tree_eye_drag")
 }
 
 /// Geometry used by Browser culling and the shared row painter.
@@ -186,13 +186,13 @@ pub(crate) fn tree_row(ui: &mut egui::Ui, id: egui::Id, row: &Row) -> RowResp {
                     if show {
                         super::quiet_icon_button_at(ui, rect, action.icon, action.label)
                     } else {
-                        ui.interact(rect, ui.id().with(action.target), Sense::hover())
+                        ui.interact(rect, ui.scope_id().with(action.target), Sense::hover())
                     }
                 })
                 .inner
             })
             .inner;
-        response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, response.enabled(), action.label));
+        response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, response.enabled(), action.label));
         let response = match action.reason {
             Some(reason) => response.on_disabled_hover_text(format!("{}\n{reason}", action.label)),
             None => response.on_hover_text(action.label),

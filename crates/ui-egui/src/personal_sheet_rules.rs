@@ -308,7 +308,7 @@ struct PanelState {
 }
 
 fn panel_id() -> egui::Id {
-    egui::Id::new("personal_sheet_rules_panel")
+    egui::Id::unique("personal_sheet_rules_panel")
 }
 
 fn rule_manager(d: &mut Dialog) -> Option<&mut Sm> {
@@ -357,7 +357,7 @@ pub(crate) fn rows(ui: &mut egui::Ui, d: &mut Dialog, library: &mut Library, doc
                     }
                 });
                 response.widget_info(|| {
-                    let mut info = egui::WidgetInfo::labeled(egui::WidgetType::ComboBox, ui.is_enabled(), tr("sheet.personal_rules.rule"));
+                    let mut info = egui::WidgetInfo::labeled(egui::Role::ComboBox, ui.is_enabled(), tr("sheet.personal_rules.rule"));
                     info.current_text_value = Some(display.clone());
                     info
                 });
@@ -442,7 +442,7 @@ pub(crate) fn name_prompt(ctx: &egui::Context, d: &mut Dialog, library: &mut Lib
     let mut state = ctx.data_mut(|data| data.get_temp::<PanelState>(id)).unwrap_or_default();
     let Some(mut prompt) = state.prompt.take() else { return false };
     let title = tr(if prompt.renaming { "sheet.personal_rules.rename" } else { "sheet.personal_rules.save" });
-    let (closed, action) = ui_kit::Confirm::new(egui::Id::new("personal_sheet_rule_name"), "save", title)
+    let (closed, action) = ui_kit::Confirm::new(egui::Id::unique("personal_sheet_rule_name"), "save", title)
         .actions(if prompt.renaming { tr("sheet.personal_rules.rename") } else { crate::i18n::tr_label("Save") }, "Cancel", None)
         .show(ctx, true, |ui| {
             ui_kit::row(ui, "sheet.personal_rules.name", |ui| ui_kit::focused_text_field(ui, &mut prompt.name, tr("sheet.personal_rules.name_hint")));

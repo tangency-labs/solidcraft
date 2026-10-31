@@ -4152,7 +4152,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     let rect = ui.max_rect();
     app.viewport.rect = Some(rect);
     refresh_layout(app, ui.ctx());
-    let resp = ui.interact(rect, ui.id().with("viewport"), Sense::click_and_drag());
+    let resp = ui.interact(rect, ui.scope_id().with("viewport"), Sense::click_and_drag());
     let flat = crate::dialogs_sheet::flat_active(app);
     if !flat {
         app.flat_view.fitted = false;
@@ -4995,7 +4995,7 @@ fn agent_chip(app: &mut SolveApp, ui: &egui::Ui, view: Rect, taken: &[Rect]) -> 
             .paint_at(ui, Rect::from_center_size(pos2(r.left() + 13.0, r.center().y), vec2(12.0, 12.0)));
         painter.galley(pos + vec2(26.0, 4.0), galley.clone(), t.text);
         let button = Rect::from_min_size(pos2(pos.x + galley.size().x + 34.0, r.top() + 2.0), vec2(stop.size().x + 12.0, r.height() - 4.0));
-        let clicked = ui.interact(button, egui::Id::new("sc_agent_stop"), Sense::click());
+        let clicked = ui.interact(button, egui::Id::unique("sc_agent_stop"), Sense::click());
         painter.rect_filled(button, t.radius_sm.saturating_sub(1), if clicked.hovered() { t.hover } else { t.overlay });
         painter.galley(button.min + vec2(6.0, 2.0), stop, t.text);
         crate::scenario::publish_handle("agent:stop", button.center());
@@ -5196,11 +5196,11 @@ pub enum ToastPlace {
 
 impl ToastPlace {
     pub(crate) fn publish(self, ctx: &egui::Context) {
-        ctx.data_mut(|data| data.insert_temp(egui::Id::new("sc_toast_place"), self));
+        ctx.data_mut(|data| data.insert_temp(egui::Id::unique("sc_toast_place"), self));
     }
 
     pub(crate) fn current(ctx: &egui::Context) -> Self {
-        ctx.data(|data| data.get_temp(egui::Id::new("sc_toast_place"))).unwrap_or_default()
+        ctx.data(|data| data.get_temp(egui::Id::unique("sc_toast_place"))).unwrap_or_default()
     }
 }
 
@@ -5332,7 +5332,7 @@ fn toast_action_spots_trailing(buttons: &[(f32, ToastKind)], row_width: f32, gap
 
 /// Where a toast button's drawn width is remembered: by its text and kind, which set its look.
 fn toast_button_key(label: &str, kind: ToastKind) -> egui::Id {
-    egui::Id::new(("sc_toast_button_width", label, kind))
+    egui::Id::unique(("sc_toast_button_width", label, kind))
 }
 
 /// The width a toast button with this text and kind was last drawn at, if it has been drawn.
@@ -5444,7 +5444,7 @@ fn toast_close(ui: &egui::Ui, rect: Rect, id: egui::Id, left: Option<f32>) -> eg
     let ink = if lit && ui.is_enabled() { t.text } else { t.text_dim };
     crate::icons::paint_ink(painter, Rect::from_center_size(centre, vec2(t.space_10, t.space_10)), "close", ink);
     let label = crate::i18n::tr("ui.close");
-    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), label));
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled(), label));
     if response.hovered() && ui.is_enabled() {
         ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
     }
@@ -5534,7 +5534,7 @@ fn paint_toast_ext(
     let blocked = crate::issue_report::cad_input_blocked();
     let card_clicked = extras.card_hint.is_some_and(|hint| {
         let sense = if blocked { Sense::hover() } else { Sense::click() };
-        ui.interact(r, egui::Id::new(("sc_toast_card", extras.close.unwrap_or_default())), sense).on_hover_text(hint).clicked()
+        ui.interact(r, egui::Id::unique(("sc_toast_card", extras.close.unwrap_or_default())), sense).on_hover_text(hint).clicked()
     });
     let mut clicked = None;
     let mut buttons = Vec::with_capacity(actions.len());
@@ -5547,7 +5547,7 @@ fn paint_toast_ext(
         let room = Rect::from_min_size(at.min, vec2(row_width.max(at.width()), at.height()));
         let mut button_ui = egui::Ui::new(
             ui.ctx().clone(),
-            egui::Id::new(("sc_toast_action", index)),
+            egui::Id::unique(("sc_toast_action", index)),
             egui::UiBuilder::new().layer_id(ui.layer_id()).max_rect(room).layout(egui::Layout::left_to_right(egui::Align::Center)),
         );
         button_ui.set_clip_rect(button_ui.clip_rect().intersect(r));
@@ -5584,7 +5584,7 @@ fn paint_toast_ext(
         let at = Rect::from_center_size(centre, vec2(2.0 * radius, 2.0 * radius));
         let mut close_ui = egui::Ui::new(
             ui.ctx().clone(),
-            egui::Id::new(("sc_toast_close_ui", handle)),
+            egui::Id::unique(("sc_toast_close_ui", handle)),
             egui::UiBuilder::new().layer_id(ui.layer_id()).max_rect(at),
         );
         close_ui.set_clip_rect(close_ui.clip_rect().intersect(r));
@@ -5592,7 +5592,7 @@ fn paint_toast_ext(
             close_ui.disable();
         }
         let left = extras.countdown.map(|(left, _)| left);
-        closed = toast_close(&close_ui, at, egui::Id::new(("sc_toast_close", handle)), left).clicked();
+        closed = toast_close(&close_ui, at, egui::Id::unique(("sc_toast_close", handle)), left).clicked();
         crate::scenario::publish_handle(handle, centre);
         close = Some(at);
         // A frame each time the ring's end moves about a point, not one per display refresh.
@@ -6439,7 +6439,7 @@ fn signed_axis_view(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
         && let Some((name, d, _, _)) = tips.get(i)
     {
         crate::scenario::publish_handle(&format!("axis_view_hover:{name}"), hover.unwrap_or(c));
-        ui.interact(Rect::from_center_size(hover.unwrap_or(c), vec2(2.0, 2.0)), ui.id().with("axis_view_tip"), Sense::hover()).on_hover_text(
+        ui.interact(Rect::from_center_size(hover.unwrap_or(c), vec2(2.0, 2.0)), ui.scope_id().with("axis_view_tip"), Sense::hover()).on_hover_text(
             format!(
                 "View from {}. Click again to reverse. Drag to orbit{}.",
                 name.to_uppercase(),
@@ -6459,7 +6459,7 @@ fn signed_axis_view(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
     }
     let home = Rect::from_center_size(pos2(c.x - 37.0, c.y - 37.0), vec2(18.0, 18.0));
     crate::scenario::publish_target("axis_view:home", home);
-    let hr = ui.interact(home, ui.id().with("axis_view_home"), Sense::click());
+    let hr = ui.interact(home, ui.scope_id().with("axis_view_home"), Sense::click());
     // The home button sits in its own small round chip.
     painter.circle(home.center(), 12.0, t.overlay.gamma_multiply(if hr.hovered() { 0.9 } else { 0.5 }), Stroke::new(1.0, t.border));
     icons::paint_icon(&painter, home, "home", f32::from(t.icon.a()) / 255.0);
@@ -6866,13 +6866,14 @@ mod tests {
         // will have settled (with no input to wake the window, the full count must follow).
         let at = |app: &mut SolveApp, time: f64, x: f32| {
             let mut n = 0;
-            let out = ctx.run_ui(egui::RawInput { time: Some(time), ..Default::default() }, |ui| n = ao_samples(app, ui.ctx(), view(x), size));
+            let mut out = ctx.run_ui(egui::RawInput { time: Some(time), ..Default::default() }, |ui| n = ao_samples(app, ui.ctx(), view(x), size));
+            out.textures_delta.clear();
             let delay = out.viewport_output.get(&egui::ViewportId::ROOT).map_or(std::time::Duration::MAX, |v| v.repaint_delay);
             (n, delay <= std::time::Duration::from_secs_f64(SS_SETTLE + 0.02))
         };
         // A new context asks for its own first repaints: let it settle.
         for _ in 0..3 {
-            let _ = ctx.run_ui(egui::RawInput { time: Some(0.0), ..Default::default() }, |_| {});
+            ctx.run_ui(egui::RawInput { time: Some(0.0), ..Default::default() }, |_| {}).textures_delta.clear();
         }
         app.preferences.ambient_occlusion = false;
         assert_eq!(at(&mut app, 0.0, 0.0), (AO_SAMPLES, false), "AO off");
@@ -8807,6 +8808,7 @@ mod tests {
         let before = h.app.cam;
         for phase in [egui::TouchPhase::Start, egui::TouchPhase::Move, egui::TouchPhase::End] {
             h.app.synthetic.push(egui::Event::MouseWheel {
+                source: egui::MouseWheelSource::Unknown,
                 unit: egui::MouseWheelUnit::Point,
                 delta: vec2(0.0, 120.0),
                 modifiers: egui::Modifiers::NONE,
@@ -8823,6 +8825,7 @@ mod tests {
         h.app.preferences.nav = "fusion".into();
         for phase in [egui::TouchPhase::Start, egui::TouchPhase::Move, egui::TouchPhase::End] {
             h.app.synthetic.push(egui::Event::MouseWheel {
+                source: egui::MouseWheelSource::Unknown,
                 unit: egui::MouseWheelUnit::Point,
                 delta: vec2(0.0, 120.0),
                 modifiers: egui::Modifiers::NONE,
@@ -9674,6 +9677,7 @@ mod tests {
         {
             let height = h.app.cam.half_height();
             h.app.synthetic.push(egui::Event::MouseWheel {
+                source: egui::MouseWheelSource::Unknown,
                 unit,
                 delta: vec2(0.0, amount),
                 modifiers: egui::Modifiers::NONE,
@@ -9700,6 +9704,7 @@ mod tests {
         h.app.preferences.trackpad_pan = false;
         h.call("ui.move", json!({"x":800,"y":500}));
         h.app.synthetic.push(egui::Event::MouseWheel {
+            source: egui::MouseWheelSource::Unknown,
             unit: egui::MouseWheelUnit::Point,
             delta: vec2(0.0, 120.0),
             modifiers: egui::Modifiers::NONE,
@@ -9718,6 +9723,7 @@ mod tests {
         h.app.preferences.smooth_wheel_zoom = false;
         for _ in 0..3 {
             h.app.synthetic.push(egui::Event::MouseWheel {
+                source: egui::MouseWheelSource::Unknown,
                 unit: egui::MouseWheelUnit::Point,
                 delta: vec2(0.0, 120.0),
                 modifiers: egui::Modifiers::NONE,
@@ -9755,7 +9761,13 @@ mod tests {
                             h.app.preferences.zoom_to_cursor = false;
                             h.call("ui.move", json!({"x":800,"y":500}));
                             let before = h.app.cam;
-                            let event = |phase| egui::Event::MouseWheel { unit: U::Point, delta: vec2(60.0, 120.0), modifiers: held, phase };
+                            let event = |phase| egui::Event::MouseWheel {
+                                source: egui::MouseWheelSource::Unknown,
+                                unit: U::Point,
+                                delta: vec2(60.0, 120.0),
+                                modifiers: held,
+                                phase,
+                            };
                             if bracket {
                                 h.app.synthetic.push(event(P::Start));
                                 h.frame();
@@ -9795,6 +9807,7 @@ mod tests {
             let before = h.app.cam;
             for phase in [egui::TouchPhase::Start, egui::TouchPhase::Move, egui::TouchPhase::End] {
                 h.app.synthetic.push(egui::Event::MouseWheel {
+                    source: egui::MouseWheelSource::Unknown,
                     unit: egui::MouseWheelUnit::Point,
                     delta: vec2(120.0, 0.0),
                     modifiers: chosen.modifiers().unwrap(),
@@ -9820,6 +9833,7 @@ mod tests {
                 h.call("ui.move", json!({"x":800,"y":500}));
                 let before = h.app.cam;
                 let event = |modifiers| egui::Event::MouseWheel {
+                    source: egui::MouseWheelSource::Unknown,
                     unit,
                     delta: vec2(0.0, if unit == egui::MouseWheelUnit::Point { 120.0 } else { 3.0 }),
                     modifiers,
@@ -9850,6 +9864,7 @@ mod tests {
                 let before = h.app.cam;
                 for phase in [egui::TouchPhase::Start, egui::TouchPhase::Move, egui::TouchPhase::End] {
                     h.app.synthetic.push(egui::Event::MouseWheel {
+                        source: egui::MouseWheelSource::Unknown,
                         unit: egui::MouseWheelUnit::Point,
                         delta: vec2(0.0, invalid),
                         modifiers: egui::Modifiers::COMMAND,
@@ -9870,8 +9885,13 @@ mod tests {
         assert!(h.app.preferences.trackpad_pan, "two-finger pan is the default");
         h.app.preferences.zoom_to_cursor = false;
         h.call("ui.move", json!({"x":800,"y":500}));
-        let gesture =
-            |phase| egui::Event::MouseWheel { unit: egui::MouseWheelUnit::Point, delta: vec2(60.0, -40.0), modifiers: egui::Modifiers::NONE, phase };
+        let gesture = |phase| egui::Event::MouseWheel {
+            source: egui::MouseWheelSource::Unknown,
+            unit: egui::MouseWheelUnit::Point,
+            delta: vec2(60.0, -40.0),
+            modifiers: egui::Modifiers::NONE,
+            phase,
+        };
         // A bracketed trackpad gesture pans (measured macOS Start…End bracketing).
         let before = h.app.cam;
         h.app.synthetic.push(gesture(egui::TouchPhase::Start));
@@ -9888,6 +9908,7 @@ mod tests {
         // Bare moves are a mouse: vertical zooms…
         h.app.preferences.smooth_wheel_zoom = false;
         h.app.synthetic.push(egui::Event::MouseWheel {
+            source: egui::MouseWheelSource::Unknown,
             unit: egui::MouseWheelUnit::Point,
             delta: vec2(0.0, 120.0),
             modifiers: egui::Modifiers::NONE,
@@ -9898,6 +9919,7 @@ mod tests {
         // …and horizontal pans without zooming (thumb wheel).
         let zoomed = h.app.cam;
         h.app.synthetic.push(egui::Event::MouseWheel {
+            source: egui::MouseWheelSource::Unknown,
             unit: egui::MouseWheelUnit::Point,
             delta: vec2(40.0, 0.0),
             modifiers: egui::Modifiers::NONE,
@@ -9909,6 +9931,7 @@ mod tests {
         // Opting out restores the legacy wheel behaviour for all point input.
         h.app.preferences.trackpad_pan = false;
         h.app.synthetic.push(egui::Event::MouseWheel {
+            source: egui::MouseWheelSource::Unknown,
             unit: egui::MouseWheelUnit::Point,
             delta: vec2(0.0, 120.0),
             modifiers: egui::Modifiers::NONE,
@@ -9921,6 +9944,7 @@ mod tests {
         let legacy_target = h.app.cam.target;
         for phase in [egui::TouchPhase::Start, egui::TouchPhase::Move, egui::TouchPhase::End] {
             h.app.synthetic.push(egui::Event::MouseWheel {
+                source: egui::MouseWheelSource::Unknown,
                 unit: egui::MouseWheelUnit::Point,
                 delta: vec2(0.0, 120.0),
                 modifiers: egui::Modifiers::NONE,
@@ -9933,6 +9957,7 @@ mod tests {
         // The thumb wheel pans sideways even with panning off: it is a mouse.
         let h0 = h.app.cam.half_height();
         h.app.synthetic.push(egui::Event::MouseWheel {
+            source: egui::MouseWheelSource::Unknown,
             unit: egui::MouseWheelUnit::Point,
             delta: vec2(40.0, 0.0),
             modifiers: egui::Modifiers::NONE,
@@ -9955,6 +9980,7 @@ mod tests {
         let before = h.app.cam;
         for phase in [egui::TouchPhase::Start, egui::TouchPhase::Move, egui::TouchPhase::End] {
             h.app.synthetic.push(egui::Event::MouseWheel {
+                source: egui::MouseWheelSource::Unknown,
                 unit: egui::MouseWheelUnit::Point,
                 delta: vec2(60.0, -40.0),
                 modifiers: egui::Modifiers::SHIFT,
@@ -9971,6 +9997,7 @@ mod tests {
         h.step(&json!({"shot":"fusion-trackpad-orbit"})).unwrap();
         for phase in [egui::TouchPhase::Start, egui::TouchPhase::Move, egui::TouchPhase::End] {
             h.app.synthetic.push(egui::Event::MouseWheel {
+                source: egui::MouseWheelSource::Unknown,
                 unit: egui::MouseWheelUnit::Point,
                 delta: vec2(60.0, -40.0),
                 modifiers: egui::Modifiers::NONE,
@@ -9993,7 +10020,13 @@ mod tests {
             h.app.preferences.orbit_around = crate::prefs::OrbitAround::ViewCentre;
             h.app.preferences.orbit_reverse = orbit_reverse;
             h.call("ui.move", json!({"x":800,"y":500}));
-            let gesture = |phase| egui::Event::MouseWheel { unit: egui::MouseWheelUnit::Point, delta: vec2(20.0, -10.0), modifiers, phase };
+            let gesture = |phase| egui::Event::MouseWheel {
+                source: egui::MouseWheelSource::Unknown,
+                unit: egui::MouseWheelUnit::Point,
+                delta: vec2(20.0, -10.0),
+                modifiers,
+                phase,
+            };
             h.app.synthetic.push(gesture(egui::TouchPhase::Start));
             h.frame();
             let before = h.app.cam;
@@ -10014,7 +10047,13 @@ mod tests {
         h.app.preferences.nav = "fusion".into();
         h.app.preferences.orbit_around = crate::prefs::OrbitAround::ViewCentre;
         h.call("ui.move", json!({"x":800,"y":500}));
-        let gesture = |phase, modifiers| egui::Event::MouseWheel { unit: egui::MouseWheelUnit::Point, delta: vec2(20.0, -10.0), modifiers, phase };
+        let gesture = |phase, modifiers| egui::Event::MouseWheel {
+            source: egui::MouseWheelSource::Unknown,
+            unit: egui::MouseWheelUnit::Point,
+            delta: vec2(20.0, -10.0),
+            modifiers,
+            phase,
+        };
         h.app.synthetic.push(gesture(egui::TouchPhase::Start, egui::Modifiers::NONE));
         h.frame();
         for modifiers in [egui::Modifiers::NONE, egui::Modifiers::SHIFT, egui::Modifiers::NONE, egui::Modifiers::SHIFT] {
@@ -10066,7 +10105,13 @@ mod tests {
         h.app.preferences.nav = "fusion".into();
         h.app.preferences.orbit_around = crate::prefs::OrbitAround::ViewCentre;
         h.call("ui.move", json!({"x":800,"y":500}));
-        let gesture = |phase, modifiers| egui::Event::MouseWheel { unit: egui::MouseWheelUnit::Point, delta: vec2(20.0, -10.0), modifiers, phase };
+        let gesture = |phase, modifiers| egui::Event::MouseWheel {
+            source: egui::MouseWheelSource::Unknown,
+            unit: egui::MouseWheelUnit::Point,
+            delta: vec2(20.0, -10.0),
+            modifiers,
+            phase,
+        };
         let play = |h: &mut crate::scenario::Harness, phase, modifiers| {
             h.app.synthetic.push(gesture(phase, modifiers));
             h.frame();
@@ -10130,6 +10175,7 @@ mod tests {
                 let before = h.app.cam;
                 for phase in [egui::TouchPhase::Start, egui::TouchPhase::Move, egui::TouchPhase::End] {
                     h.app.synthetic.push(egui::Event::MouseWheel {
+                        source: egui::MouseWheelSource::Unknown,
                         unit: egui::MouseWheelUnit::Point,
                         delta: vec2(20.0, -10.0),
                         modifiers: egui::Modifiers::SHIFT,
@@ -10158,7 +10204,13 @@ mod tests {
         h.app.cam.target = Vec3::new(30.0, 20.0, 10.0);
         h.call("ui.move", json!({"x":800,"y":500}));
         let before = h.app.cam;
-        let gesture = |phase, delta| egui::Event::MouseWheel { unit: egui::MouseWheelUnit::Point, delta, modifiers: egui::Modifiers::SHIFT, phase };
+        let gesture = |phase, delta| egui::Event::MouseWheel {
+            source: egui::MouseWheelSource::Unknown,
+            unit: egui::MouseWheelUnit::Point,
+            delta,
+            modifiers: egui::Modifiers::SHIFT,
+            phase,
+        };
         h.app.synthetic.push(gesture(egui::TouchPhase::Start, egui::Vec2::ZERO));
         h.frame();
         h.app.synthetic.push(gesture(egui::TouchPhase::Move, vec2(20.0, -10.0)));
@@ -10210,7 +10262,13 @@ mod tests {
         assert!(app.preferences.trackpad_pan);
         crate::help::run(&mut app, &ctx, "shortcuts");
         let mut time = 0.0;
-        let pan = |phase, modifiers| egui::Event::MouseWheel { unit: egui::MouseWheelUnit::Point, delta: vec2(40.0, -20.0), modifiers, phase };
+        let pan = |phase, modifiers| egui::Event::MouseWheel {
+            source: egui::MouseWheelSource::Unknown,
+            unit: egui::MouseWheelUnit::Point,
+            delta: vec2(40.0, -20.0),
+            modifiers,
+            phase,
+        };
         let mut frame = |app: &mut SolveApp, pointer: Option<Pos2>, events: Vec<egui::Event>| {
             time += 1.0 / 60.0;
             let mut input = events;
@@ -10234,7 +10292,7 @@ mod tests {
         for _ in 0..4 {
             frame(&mut app, None, Vec::new());
         }
-        let window = ctx.memory(|m| m.area_rect(egui::Id::new("sc_prefs"))).unwrap();
+        let window = ctx.memory(|m| m.area_rect(egui::Id::unique("sc_prefs"))).unwrap();
         let over = window.center();
         let height = app.cam.half_height();
         let target = app.cam.target;
@@ -10281,6 +10339,7 @@ mod tests {
                 }
                 if wheel != 0.0 {
                     events.push(egui::Event::MouseWheel {
+                        source: egui::MouseWheelSource::Unknown,
                         unit: egui::MouseWheelUnit::Point,
                         delta: vec2(0.0, wheel),
                         modifiers: egui::Modifiers::NONE,
@@ -10305,7 +10364,7 @@ mod tests {
             for _ in 0..4 {
                 frame(&mut app, None, 0.0);
             }
-            let window = ctx.memory(|m| m.area_rect(egui::Id::new("sc_prefs"))).unwrap();
+            let window = ctx.memory(|m| m.area_rect(egui::Id::unique("sc_prefs"))).unwrap();
             let list = window.center() + vec2(140.0, 0.0);
             let height = app.cam.half_height();
             let target = app.cam.target;
@@ -10356,7 +10415,13 @@ mod tests {
             h.app.synthetic.push(egui::Event::Zoom(1.2));
             for phase in [egui::TouchPhase::Start, egui::TouchPhase::Move, egui::TouchPhase::End] {
                 let unit = egui::MouseWheelUnit::Point;
-                h.app.synthetic.push(egui::Event::MouseWheel { unit, delta: vec2(30.0, -20.0), modifiers: egui::Modifiers::NONE, phase });
+                h.app.synthetic.push(egui::Event::MouseWheel {
+                    source: egui::MouseWheelSource::Unknown,
+                    unit,
+                    delta: vec2(30.0, -20.0),
+                    modifiers: egui::Modifiers::NONE,
+                    phase,
+                });
             }
             h.settle();
             h.frames(20);
@@ -10456,7 +10521,7 @@ mod tests {
         h.app.session.selection.clear();
 
         h.call("ui.prefs", json!({"open": "Navigation"}));
-        let window = h.ctx.memory(|m| m.area_rect(egui::Id::new("sc_prefs"))).unwrap();
+        let window = h.ctx.memory(|m| m.area_rect(egui::Id::unique("sc_prefs"))).unwrap();
         assert!(window.contains(p), "the dialog must cover the model at the test point");
         h.call("ui.move", json!({"x": p.x, "y": p.y}));
         assert!(h.app.viewport.hover.is_none(), "the dialog must block model highlights");
@@ -10481,7 +10546,7 @@ mod tests {
             h.call("ui.move", json!({"x": p.x, "y": p.y}));
             assert_eq!(crate::scenario::count_of("axis_view_highlights"), Some(1.0));
             h.call("ui.prefs", json!({"open": "Navigation"}));
-            let window = h.ctx.memory(|m| m.area_rect(egui::Id::new("sc_prefs"))).unwrap();
+            let window = h.ctx.memory(|m| m.area_rect(egui::Id::unique("sc_prefs"))).unwrap();
             assert!(window.contains(p), "the floating dialog must cover the axis target");
             let camera = serde_json::to_value(h.app.cam).unwrap();
             h.call("ui.move", json!({"x": p.x, "y": p.y}));

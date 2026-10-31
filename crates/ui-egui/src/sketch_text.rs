@@ -497,7 +497,7 @@ pub(crate) fn refresh(app: &SolveApp, k: &mut Tx) -> bool {
 /// starts a new line there). `inputs` and `active`: the dialog's Path input.
 pub(crate) fn rows(ui: &mut egui::Ui, k: &mut Tx, inputs: &mut [SelInput], active: &mut usize) -> bool {
     let mut enter = false;
-    let id = egui::Id::new("sketch_text_content");
+    let id = egui::Id::unique("sketch_text_content");
     if ui.memory(|m| m.has_focus(id)) {
         enter |= ui.input_mut(|i| !i.modifiers.shift && i.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
     }
@@ -1080,7 +1080,7 @@ mod tests {
         let token = h.app.shot_token;
         crate::issue_report::receive(&mut h.app, token, std::sync::Arc::new(egui::ColorImage::new([2, 2], vec![egui::Color32::GREEN; 4])));
         h.frames(3);
-        let focus = egui::Id::new("issue_report_title");
+        let focus = egui::Id::unique("issue_report_title");
         h.ctx.memory_mut(|memory| memory.request_focus(focus));
         h.frames(2);
         assert_eq!(h.ctx.memory(|memory| memory.focused()), Some(focus));

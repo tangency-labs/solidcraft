@@ -102,7 +102,7 @@ fn connect(app: &mut SolveApp, ctx: &egui::Context) {
     let Some(lines) = app.help.connect.clone() else {
         return;
     };
-    let (closed, action) = ui_kit::Window::new(egui::Id::new("sc_connect_assistants"), "help", crate::i18n::tr_label("Connect AI assistants"))
+    let (closed, action) = ui_kit::Window::new(egui::Id::unique("sc_connect_assistants"), "help", crate::i18n::tr_label("Connect AI assistants"))
         .cards(2.0)
         .actions("", "Close", None)
         .show(ctx, true, |ui| {
@@ -123,7 +123,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context, anchor: egui::Pos2) {
     if app.help.menu {
         let mut pick: Option<&str> = None;
         let resp = Container::new(ctx, Surface::Popup)
-            .area(egui::Id::new("sc_help_menu"))
+            .area(egui::Id::unique("sc_help_menu"))
             .fixed_pos(anchor)
             .constrain(true)
             .order(egui::Order::Foreground)
@@ -154,11 +154,11 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context, anchor: egui::Pos2) {
             run(app, ctx, p);
         } else if ctx.input(|i| i.pointer.any_pressed() || i.key_pressed(egui::Key::Escape)) && !resp.response.contains_pointer() {
             // Pressed elsewhere (the ? button toggles it itself).
-            if !ctx.data(|d| d.get_temp::<bool>(egui::Id::new("sc_help_opened")).unwrap_or(false)) {
+            if !ctx.data(|d| d.get_temp::<bool>(egui::Id::unique("sc_help_opened")).unwrap_or(false)) {
                 app.help.menu = false;
             }
         }
-        ctx.data_mut(|d| d.insert_temp(egui::Id::new("sc_help_opened"), false));
+        ctx.data_mut(|d| d.insert_temp(egui::Id::unique("sc_help_opened"), false));
     }
     about(app, ctx);
     connect(app, ctx);
@@ -170,7 +170,7 @@ fn about(app: &mut SolveApp, ctx: &egui::Context) {
     if !app.help.about {
         return;
     }
-    let (closed, action) = ui_kit::Window::new(egui::Id::new("sc_about"), "help", crate::i18n::tr_label("About SolidCraft"))
+    let (closed, action) = ui_kit::Window::new(egui::Id::unique("sc_about"), "help", crate::i18n::tr_label("About SolidCraft"))
         .cards(2.0)
         .actions("", "Close", None)
         .show(ctx, true, |ui| {

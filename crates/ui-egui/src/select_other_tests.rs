@@ -290,7 +290,7 @@ fn long_names_stay_inside_the_popup_and_remain_available_on_hover() {
             _ => None,
         })
         .expect("the body label is painted");
-    let popup = h.ctx.memory(|m| m.area_rect(egui::Id::new("sc_select_other"))).unwrap();
+    let popup = h.ctx.memory(|m| m.area_rect(egui::Id::unique("sc_select_other"))).unwrap();
     let text_rect = egui::Rect::from_min_size(text.pos, text.galley.size());
     assert!(popup.contains_rect(text_rect), "{text_rect:?} spills outside {popup:?}");
     assert!(h.ctx.content_rect().contains_rect(popup));
@@ -816,6 +816,7 @@ fn popup_uses_window_height_and_flips_above_the_pointer() {
             assert!(!rect.contains(crate::scenario::handle_at(&format!("select_other:{}", count - 1)).unwrap()), "overflow needs scrolling");
             h.app.synthetic.push(egui::Event::PointerMoved(rect.center()));
             h.app.synthetic.push(egui::Event::MouseWheel {
+                source: egui::MouseWheelSource::Unknown,
                 unit: egui::MouseWheelUnit::Point,
                 delta: egui::vec2(0.0, -2000.0),
                 phase: egui::TouchPhase::Move,

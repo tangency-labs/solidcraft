@@ -591,7 +591,7 @@ pub(super) fn confirmation(app: &mut SolveApp, ctx: &egui::Context) {
     let title = app.tr("render.lighting_review_title").to_string();
     let apply = app.tr("render.lighting_apply").to_string();
     let cancel = app.tr("render.keep_editing").to_string();
-    let (closed, action) = ui_kit::Confirm::new(egui::Id::new("render_lighting_review"), "render_scene", &title)
+    let (closed, action) = ui_kit::Confirm::new(egui::Id::unique("render_lighting_review"), "render_scene", &title)
         .actions(&apply, &cancel, None)
         .selected(ui_kit::Action::Cancel)
         .show(ctx, review.consent, |ui| {

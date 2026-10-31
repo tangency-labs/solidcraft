@@ -89,7 +89,7 @@ fn panel_keeps_actions_and_body_geometry_in_both_layouts() {
                 let side = crate::frame::Side::Right;
                 let frame = Panel::feature_frame(&ctx, layout, side);
                 let anchor = egui::pos2(vp.right() - crate::shell::SHELL_GAP, vp.top());
-                let panel = Panel::new("Fillet", egui::Id::new("gallery_feature"), anchor, vp, side, frame);
+                let panel = Panel::new("Fillet", egui::Id::unique("gallery_feature"), anchor, vp, side, frame);
                 panel.window(&ctx).show(&ctx, |ui| {
                     panel.feature(
                         ui,
@@ -146,7 +146,7 @@ fn feature_frame_with(
         let side = crate::frame::Side::Right;
         let frame = Panel::feature_frame(ctx, crate::shell::LayoutMode::Floating, side);
         let anchor = egui::pos2(vp.right() - crate::shell::SHELL_GAP, vp.top());
-        let panel = Panel::new("Fillet", egui::Id::new("top_actions"), anchor, vp, side, frame);
+        let panel = Panel::new("Fillet", egui::Id::unique("top_actions"), anchor, vp, side, frame);
         panel.window(ctx).show(ctx, |ui| {
             let heading = FeatureOptions {
                 icon: "fillet",
@@ -236,7 +236,7 @@ fn top_placement_shows_the_compute_status_in_the_title_row() {
             let anchor = egui::pos2(vp.right() - crate::shell::SHELL_GAP, vp.top());
             let panel = Panel::new(
                 "Fillet",
-                egui::Id::new("top_status"),
+                egui::Id::unique("top_status"),
                 anchor,
                 vp,
                 side,
@@ -279,7 +279,7 @@ fn bottom_placement_puts_the_busy_spinner_in_the_footer_row() {
             let anchor = egui::pos2(vp.right() - crate::shell::SHELL_GAP, vp.top());
             let panel = Panel::new(
                 "Fillet",
-                egui::Id::new("bottom_status"),
+                egui::Id::unique("bottom_status"),
                 anchor,
                 vp,
                 side,
@@ -340,7 +340,7 @@ fn palette_scrolls_short_views_and_retains_its_status_and_action_handles() {
                     let bottom = vp.bottom() - crate::shell::SHELL_GAP;
                     let panel = Panel::new(
                         "Options",
-                        egui::Id::new("gallery_palette"),
+                        egui::Id::unique("gallery_palette"),
                         egui::pos2(vp.right() - crate::shell::SHELL_GAP, 0.0),
                         vp,
                         crate::frame::Side::Right,
@@ -395,7 +395,8 @@ fn wide_tables_remain_bounded_with_pinned_actions_on_small_viewports() {
                 crate::test_support::frame(&ctx, egui::RawInput { screen_rect: Some(viewport), ..Default::default() }, |_| {
                     let side = crate::frame::Side::Right;
                     let anchor = viewport.right_top();
-                    let panel = Panel::new("Table", egui::Id::new("wide"), anchor, viewport, side, Panel::feature_frame(&ctx, layout, side)).wide();
+                    let panel =
+                        Panel::new("Table", egui::Id::unique("wide"), anchor, viewport, side, Panel::feature_frame(&ctx, layout, side)).wide();
                     panel.window(&ctx).show(&ctx, |ui| {
                         panel.feature(
                             ui,
@@ -445,7 +446,7 @@ fn window_is_one_and_a_half_cards_wide_with_its_actions_in_both_themes() {
                     ..Default::default()
                 },
                 |ui| {
-                    action = Window::new(egui::Id::new("prompt_test"), "delete", "Delete")
+                    action = Window::new(egui::Id::unique("prompt_test"), "delete", "Delete")
                         .actions("Delete", "Cancel", Some("Keep"))
                         .show(ui.ctx(), true, |ui| {
                             text(ui, "Three features go with it.", Text::Report("body", false));
@@ -485,7 +486,7 @@ fn escape_closes_a_window_unless_it_keeps_the_card_open() {
                     ..Default::default()
                 },
                 |ui| {
-                    let prompt = Window::new(egui::Id::new(("prompt_escape", keep)), "settings", "Report").actions("Open", "Close", None);
+                    let prompt = Window::new(egui::Id::unique(("prompt_escape", keep)), "settings", "Report").actions("Open", "Close", None);
                     let prompt = if keep { prompt.keep_open_on_escape() } else { prompt };
                     action = prompt
                         .show(ui.ctx(), true, |ui| {
@@ -541,7 +542,7 @@ fn window_pages_have_shared_metrics_callbacks_and_a_pinned_left_footer_action() 
                     ..Default::default()
                 },
                 |ui| {
-                    Window::new(ui.id().with("pages"), "settings", "Preferences").cards(3.0).show_pages(
+                    Window::new(ui.scope_id().with("pages"), "settings", "Preferences").cards(3.0).show_pages(
                         ui.ctx(),
                         &mut selected,
                         &pages,
@@ -577,7 +578,7 @@ fn window_pages_have_shared_metrics_callbacks_and_a_pinned_left_footer_action() 
                     ..Default::default()
                 },
                 |ui| {
-                    Window::new(ui.id().with("pages"), "settings", "Preferences").cards(3.0).show_pages(
+                    Window::new(ui.scope_id().with("pages"), "settings", "Preferences").cards(3.0).show_pages(
                         ui.ctx(),
                         &mut selected,
                         &pages,
@@ -619,7 +620,7 @@ fn page_window_is_as_opaque_as_every_other_window_in_both_themes() {
                     ..Default::default()
                 },
                 |ui| {
-                    let window = Window::new(ui.id().with("opaque"), "settings", "Preferences");
+                    let window = Window::new(ui.scope_id().with("opaque"), "settings", "Preferences");
                     if pages {
                         window.cards(3.0).show_pages(ui.ctx(), &mut selected, &list, &mut (), |_| {});
                     } else {
@@ -692,7 +693,7 @@ fn confirm_routes_enter_escape_selected_answers_and_blocks_background_clicks() {
                     let button = button(ui, "Background", Button::Normal);
                     at = button.rect.center();
                     background |= button.clicked();
-                    action = Confirm::new(ui.id().with("modal"), "status_warning", "Save changes?")
+                    action = Confirm::new(ui.scope_id().with("modal"), "status_warning", "Save changes?")
                         .tone(Tone::Warning)
                         .actions("Save", "Cancel", Some("Don't Save"))
                         .secondary_left()
@@ -801,7 +802,7 @@ fn destructive_confirm_paints_error_primary_with_readable_on_colour_in_both_them
                     ..Default::default()
                 },
                 |ui| {
-                    Confirm::new(ui.id().with("delete"), "delete", "Delete").tone(Tone::Danger).actions("Delete", "Cancel", None).show(
+                    Confirm::new(ui.scope_id().with("delete"), "delete", "Delete").tone(Tone::Danger).actions("Delete", "Cancel", None).show(
                         ui.ctx(),
                         true,
                         |ui| {
@@ -868,7 +869,7 @@ fn window_footer_is_optional_and_can_contain_only_a_left_action() {
         for _ in 0..3 {
             scenario::clear_handles();
             frame(&ctx, vec![], |ui| {
-                let window = Window::new(ui.id().with("optional_footer"), "settings", "Preferences").actions("", "", None);
+                let window = Window::new(ui.scope_id().with("optional_footer"), "settings", "Preferences").actions("", "", None);
                 if left {
                     window.show_with_left(
                         ui.ctx(),
@@ -941,7 +942,7 @@ fn required_platform_window_keeps_recovery_pending_until_an_explicit_choice() {
     for _ in 0..3 {
         scenario::clear_handles();
         frame(&ctx, vec![], |ui| {
-            assert!(!Window::new(ui.id().with("required_recovery"), "restore", "Recover unsaved work?").required().show_body(ui.ctx(), |ui| {
+            assert!(!Window::new(ui.scope_id().with("required_recovery"), "restore", "Recover unsaved work?").required().show_body(ui.ctx(), |ui| {
                 button(ui, "Recover", Button::Normal);
                 button(ui, "Discard", Button::Normal);
             }));
@@ -973,7 +974,7 @@ fn window_body_buttons_stay_visible_after_the_page_grows_from_nothing() {
                     };
                     buttons.clear();
                     crate::test_support::frame(&ctx, input, |ui| {
-                        let window = Window::new(egui::Id::new("sc_browser_recovery"), "restore", "Recover unsaved work?");
+                        let window = Window::new(egui::Id::unique("sc_browser_recovery"), "restore", "Recover unsaved work?");
                         let body = |ui: &mut Ui| {
                             ui.label("“Bracket” had unsaved changes when this page last closed.");
                             ui.horizontal(|ui| {
@@ -1224,7 +1225,7 @@ fn bevel_lighting_reverses_for_fields_and_pressed_buttons_without_changing_geome
         ui.set_width(240.0);
         scope(ui, |ui| {
             button_rect = button(ui, "Review", Button::Normal).rect;
-            field_rect = cell_editor(ui, egui::Id::new("bevel-field"), &mut text, "", false).rect;
+            field_rect = cell_editor(ui, egui::Id::unique("bevel-field"), &mut text, "", false).rect;
         });
     };
     fn top_color(output: &egui::FullOutput, rect: Rect, inset: f32) -> Color32 {
@@ -1249,7 +1250,7 @@ fn bevel_lighting_reverses_for_fields_and_pressed_buttons_without_changing_geome
         ui.set_width(240.0);
         scope(ui, |ui| {
             button_rect = button(ui, "Review", Button::Normal).rect;
-            cell_editor(ui, egui::Id::new("bevel-field"), &mut text, "", false);
+            cell_editor(ui, egui::Id::unique("bevel-field"), &mut text, "", false);
         });
     };
     let down = crate::test_support::frame(
@@ -1272,7 +1273,7 @@ fn a_left_panel_in_an_inside_out_view_keeps_an_anchor() {
     let inside_out = egui::Rect::from_min_max(egui::pos2(264.1875, 40.0), egui::pos2(159.0, 600.0));
     let panel = super::Panel::new(
         "Panel",
-        egui::Id::new("inside_out_panel"),
+        egui::Id::unique("inside_out_panel"),
         egui::pos2(200.0, 80.0),
         inside_out,
         crate::frame::Side::Left,

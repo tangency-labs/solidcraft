@@ -757,7 +757,7 @@ fn slider_drag_does_not_open_suggestions_over_the_slider() {
         .unwrap();
     h.app.start("joint.drive");
     h.frames(4);
-    let editor = egui::Id::new("sc_drive_value");
+    let editor = egui::Id::unique("sc_drive_value");
     let bounds = h
         .output
         .accesskit_update

@@ -43,7 +43,7 @@ fn badge(ui: &mut Ui, label: &str, ink: egui::Color32, fill: egui::Color32) -> R
     let (rect, response) = ui.allocate_exact_size(vec2(width, t.form_close_size - t.space_4), egui::Sense::hover());
     ui.painter().rect_filled(rect, t.radius_xl, fill);
     ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, label, font, ink);
-    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), label));
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, ui.is_enabled(), label));
     response
 }
 
@@ -314,7 +314,7 @@ pub(crate) fn assistant_send(ui: &mut Ui, enabled: bool, busy: bool, label: &str
         if response.hovered() {
             ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
         }
-        response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), label));
+        response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled(), label));
         response.on_hover_text(label)
     })
     .inner

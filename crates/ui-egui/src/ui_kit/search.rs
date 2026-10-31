@@ -88,7 +88,7 @@ impl CommandSearch {
         let SearchFieldGeometry { height, radius, progress } = geometry;
         let spacing = FieldSpacing::at(progress);
         let (r, _) = ui.allocate_exact_size(vec2(ui.available_width(), height), Sense::hover());
-        let focused = open && (focus || ui.memory(|m| m.has_focus(egui::Id::new("sc_sbox_text"))));
+        let focused = open && (focus || ui.memory(|m| m.has_focus(egui::Id::unique("sc_sbox_text"))));
         let ink = if invalid {
             t.form_error
         } else if focused {
@@ -130,12 +130,15 @@ impl CommandSearch {
         let response = ui
             .scope_builder(egui::UiBuilder::new().max_rect(editor), |ui| {
                 ui.set_clip_rect(ui.clip_rect().intersect(editor));
+                // egui 0.37 floors a text edit's height at the theme's interact height, which centred
+                // the text below the field's middle.
+                ui.spacing_mut().interact_size.y = height;
                 ui.add_sized(
                     editor.size(),
                     super::fields::text_input(egui::TextEdit::singleline(value))
                         .min_size(vec2(0.0, height))
                         .margin(vec2(spacing.editor_margin, 0.0))
-                        .id(egui::Id::new("sc_sbox_text"))
+                        .id(egui::Id::unique("sc_sbox_text"))
                         .char_limit(limit)
                         .interactive(open)
                         .frame(egui::Frame::NONE)
@@ -190,7 +193,7 @@ impl CommandSearch {
     /// remembered natural height is refreshed with a sizing pass when results change.
     pub(crate) fn sheet(ui: &mut Ui, width: f32, progress: f32, command: bool, add: impl FnOnce(&mut Ui)) -> Rect {
         let t = Tokens::get();
-        let id = ui.id().with("search_sheet_height");
+        let id = ui.scope_id().with("search_sheet_height");
         let known = ui.ctx().data(|d| d.get_temp::<f32>(id)).unwrap_or(0.0);
         let origin = ui.cursor().min;
         let clip = Rect::from_min_size(origin, vec2(width, known * progress));
@@ -339,7 +342,7 @@ impl super::MenuItem<'_> {
         } else {
             super::text::paint_text(ui, path_rect, path, FontId::proportional(t.font_small), t.form_dim, false);
         }
-        response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, self.enabled, label));
+        response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, self.enabled, label));
         crate::scenario::publish_target(&format!("menu:{}", self.id), r);
         response
     }
@@ -400,9 +403,10 @@ mod tests {
                 let radius = CommandSearch::field_radius(progress, floating);
                 let ctx = crate::fonts::test_context();
                 let mut query = String::new();
-                let output = ctx.run_ui(egui::RawInput::default(), |ui| {
+                let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
                     CommandSearch::field(ui, &mut query, false, true, true, SearchFieldGeometry { height: 40.0, radius, progress }, 4096);
                 });
+                output.textures_delta.clear();
                 for shape in output.shapes {
                     if let egui::Shape::Rect(rect) = shape.shape
                         && (rect.fill == tokens.control_fill || rect.fill == tokens.accent_soft)

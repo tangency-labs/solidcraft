@@ -301,8 +301,9 @@ fn number(value: &str, field: &str) -> Result<f64, String> {
 
 fn field(ui: &mut egui::Ui, label: &str, id: &str, value: &mut String, unit: &str) {
     let label = if unit.is_empty() { label.to_string() } else { format!("{label} ({unit})") };
-    let response =
-        ui_kit::row(ui, &label, |ui| ui_kit::cell_editor(ui, egui::Id::new(("physical_editor", id)), value, tr("ui.material_review.unknown"), false));
+    let response = ui_kit::row(ui, &label, |ui| {
+        ui_kit::cell_editor(ui, egui::Id::unique(("physical_editor", id)), value, tr("ui.material_review.unknown"), false)
+    });
     crate::scenario::publish_handle(&format!("material:field:{id}"), response.rect.center());
 }
 

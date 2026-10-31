@@ -135,7 +135,7 @@ fn navigate(app: &mut SolveApp, action: Option<&str>, dir: Option<Vec3>) {
 
 fn control(app: &mut SolveApp, ui: &mut egui::Ui, bounds: Rect, action: &str, tooltip: &str) -> bool {
     crate::scenario::publish_handle(&format!("navigation_cube:control:{action}"), bounds.center());
-    let response = ui.interact(bounds, ui.id().with(("navigation_cube", action)), Sense::click()).on_hover_text(tooltip);
+    let response = ui.interact(bounds, ui.scope_id().with(("navigation_cube", action)), Sense::click()).on_hover_text(tooltip);
     let hover = response.hovered();
     if response.clicked() {
         navigate(app, Some(action), None);
@@ -187,7 +187,7 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
     crate::scenario::publish_count("axis_view_highlights", f64::from(u8::from(hovered.is_some())));
     if let Some(face) = hovered.and_then(|i| faces.get(i)) {
         ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
-        ui.interact(Rect::from_center_size(hover.unwrap_or(face.centre), vec2(2.0, 2.0)), ui.id().with("navigation_cube_tip"), Sense::hover())
+        ui.interact(Rect::from_center_size(hover.unwrap_or(face.centre), vec2(2.0, 2.0)), ui.scope_id().with("navigation_cube_tip"), Sense::hover())
             .on_hover_text(format!("{} view. Drag to orbit{}.", face.label, if app.preferences.free_orbit { "" } else { "; hold Shift to snap" }));
         if ui.input(|i| i.pointer.primary_clicked()) {
             navigate(app, None, Some(face.direction));

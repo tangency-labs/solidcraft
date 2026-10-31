@@ -25,7 +25,7 @@ pub(crate) fn panel(app: &mut SolveApp, ctx: &egui::Context) {
     let at = panel_pos(app);
     let (calibrate, name) = (m.calibrate, c.id);
     let (ok, cancel) = if calibrate { (crate::i18n::tr_label("Calibrate"), crate::i18n::tr("ui.cancel")) } else { ("", crate::i18n::tr("ui.close")) };
-    let (closed, action) = ui_kit::Window::new(egui::Id::new("sc_canvas_panel"), "canvas", &title)
+    let (closed, action) = ui_kit::Window::new(egui::Id::unique("sc_canvas_panel"), "canvas", &title)
         .placed(egui::Align2::LEFT_TOP, at)
         .fields()
         .actions(ok, cancel, None)

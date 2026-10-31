@@ -54,7 +54,13 @@ impl WebWheelGestures {
         use egui::{Event, Modifiers, MouseWheelUnit, TouchPhase, Vec2};
         const IDLE: f64 = 0.1;
         const WHEEL_STEP_MIN: f32 = 40.0;
-        let phase_event = |phase| Event::MouseWheel { unit: MouseWheelUnit::Point, delta: Vec2::ZERO, modifiers: Modifiers::NONE, phase };
+        let phase_event = |phase| Event::MouseWheel {
+            source: egui::MouseWheelSource::Unknown,
+            unit: MouseWheelUnit::Point,
+            delta: Vec2::ZERO,
+            modifiers: Modifiers::NONE,
+            phase,
+        };
         let valid_time = now.is_finite() && now >= 0.0;
         let events = std::mem::take(&mut raw.events);
         if self.last_scroll.is_some_and(|last| !valid_time || now < last || now - last >= IDLE) {
@@ -189,7 +195,7 @@ pub(crate) fn immediate_wheel(
         mouse_pan: egui::Vec2::ZERO,
     };
     for event in &input.events {
-        let egui::Event::MouseWheel { unit, delta, modifiers, phase } = event else { continue };
+        let egui::Event::MouseWheel { unit, delta, modifiers, phase, .. } = event else { continue };
         let modifier_zoom = claims_scroll(*modifiers, zoom_modifier);
         if !modifier_zoom && modifiers.matches_any(options.zoom_modifier) {
             continue;
@@ -217,11 +223,7 @@ pub(crate) fn immediate_wheel(
             }
             egui::TouchPhase::Move => {}
         }
-        let points = match unit {
-            egui::MouseWheelUnit::Point => *delta,
-            egui::MouseWheelUnit::Line => *delta * options.line_scroll_speed,
-            egui::MouseWheelUnit::Page => *delta * page_height,
-        };
+        let points = wheel_points(*unit, *delta, options, page_height);
         if !points.is_finite() {
             continue;
         }
@@ -255,6 +257,16 @@ pub(crate) fn immediate_wheel(
     out
 }
 
+/// A wheel event's movement in points, in egui's units: lines at its line scroll speed, pages at
+/// `page_height`.
+fn wheel_points(unit: egui::MouseWheelUnit, delta: egui::Vec2, options: egui::InputOptions, page_height: f32) -> egui::Vec2 {
+    match unit {
+        egui::MouseWheelUnit::Point => delta,
+        egui::MouseWheelUnit::Line => delta * options.line_scroll_speed,
+        egui::MouseWheelUnit::Page => delta * page_height,
+    }
+}
+
 /// Whether the chosen trackpad zoom modifier (Preferences › Navigation, #8322) claims a wheel
 /// event: that key held alone. egui aliases Ctrl/Command on Windows/Linux; macOS can hold both.
 pub(crate) fn claims_scroll(modifiers: egui::Modifiers, zoom_modifier: Option<egui::Modifiers>) -> bool {
@@ -276,14 +288,10 @@ pub(crate) fn pinch_factor(input: &egui::InputState, options: egui::InputOptions
                 }
             }
             // A wheel the chosen zoom modifier already turns into zoom is not also a pinch.
-            egui::Event::MouseWheel { unit, delta, modifiers, phase: egui::TouchPhase::Move }
+            egui::Event::MouseWheel { unit, delta, modifiers, phase: egui::TouchPhase::Move, .. }
                 if modifiers.matches_any(options.zoom_modifier) && !claims_scroll(*modifiers, zoom_modifier) =>
             {
-                let points = match unit {
-                    egui::MouseWheelUnit::Point => *delta,
-                    egui::MouseWheelUnit::Line => *delta * options.line_scroll_speed,
-                    egui::MouseWheelUnit::Page => *delta * page_height,
-                };
+                let points = wheel_points(*unit, *delta, options, page_height);
                 let f = (options.scroll_zoom_speed * (points.x + points.y)).exp();
                 if f.is_finite() && f > 0.0 {
                     factor *= f;
@@ -304,15 +312,11 @@ pub(crate) fn axis_wheel(ctx: &egui::Context, page_height: f32) -> (f32, f32, f3
     let (zoom, sideways, pinch) = ctx.input(|i| {
         let (mut zoom, mut sideways) = (0.0, 0.0);
         for event in &i.events {
-            let egui::Event::MouseWheel { unit, delta, modifiers, phase } = event else { continue };
+            let egui::Event::MouseWheel { unit, delta, modifiers, phase, .. } = event else { continue };
             if *phase != egui::TouchPhase::Move || modifiers.matches_any(options.zoom_modifier) {
                 continue;
             }
-            let points = match unit {
-                egui::MouseWheelUnit::Point => *delta,
-                egui::MouseWheelUnit::Line => *delta * options.line_scroll_speed,
-                egui::MouseWheelUnit::Page => *delta * page_height,
-            };
+            let points = wheel_points(*unit, *delta, options, page_height);
             let up = route_wheel_vertical(points, *modifiers, options);
             zoom += up;
             sideways += if up == 0.0 { points.x + points.y } else { points.x };
@@ -424,7 +428,7 @@ fn view_keys_blocked(app: &SolveApp, ctx: &egui::Context) -> bool {
         || app.viewport.context_menu.is_some()
         || app.ui.palette_open
         || ctx.memory(|m| m.focused().is_some())
-        || ctx.data(|d| d.get_temp::<egui::Id>(egui::Id::new("sc_panel_open")).is_some())
+        || ctx.data(|d| d.get_temp::<egui::Id>(egui::Id::unique("sc_panel_open")).is_some())
 }
 
 /// View keys (#1541): the arrows turn the view 15° (with Shift a quarter turn, as the navigation
@@ -1202,7 +1206,7 @@ fn orbit_camera(app: &mut SolveApp, dx: f64, dy: f64) {
 #[cfg(test)]
 mod tests {
     fn web_wheel(unit: egui::MouseWheelUnit, delta: egui::Vec2, modifiers: egui::Modifiers) -> egui::Event {
-        egui::Event::MouseWheel { unit, delta, modifiers, phase: egui::TouchPhase::Move }
+        egui::Event::MouseWheel { source: egui::MouseWheelSource::Unknown, unit, delta, modifiers, phase: egui::TouchPhase::Move }
     }
 
     fn web_frame(
@@ -1249,7 +1253,13 @@ mod tests {
             ] {
                 for unit in [U::Point, U::Line, U::Page] {
                     for bracket in [false, true] {
-                        let event = |phase| egui::Event::MouseWheel { unit, delta: vec2(8.0, 12.0), modifiers: held, phase };
+                        let event = |phase| egui::Event::MouseWheel {
+                            source: egui::MouseWheelSource::Unknown,
+                            unit,
+                            delta: vec2(8.0, 12.0),
+                            modifiers: held,
+                            phase,
+                        };
                         let mut input = egui::InputState::default();
                         input.events = if bracket { vec![event(P::Start), event(P::Move), event(P::End)] } else { vec![event(P::Move)] };
                         let raw = super::immediate_wheel(&input, options, 600.0, &mut false, &mut Default::default(), true, chosen);
@@ -1404,7 +1414,7 @@ mod tests {
         let mut out = ctx.run_ui(raw, |ui| {
             let rect = ui.max_rect();
             app.viewport.rect = Some(rect);
-            let response = ui.interact(rect, ui.id().with("touchpad-setting"), egui::Sense::click_and_drag());
+            let response = ui.interact(rect, ui.scope_id().with("touchpad-setting"), egui::Sense::click_and_drag());
             super::handle(app, ui, rect, &response, caps);
         });
         out.textures_delta.clear();
@@ -1859,13 +1869,14 @@ mod tests {
                         };
                         let mut out = ctx.run_ui(raw, |ui| {
                             let rect = ui.max_rect();
-                            let resp = ui.interact(rect, ui.id().with("wheel-speed"), egui::Sense::click_and_drag());
+                            let resp = ui.interact(rect, ui.scope_id().with("wheel-speed"), egui::Sense::click_and_drag());
                             super::handle(&mut app, ui, rect, &resp, caps);
                         });
                         out.textures_delta.clear();
                     };
                     frame(vec![Event::PointerMoved(pos2(200.0, 300.0))]);
                     frame(vec![Event::MouseWheel {
+                        source: egui::MouseWheelSource::Unknown,
                         unit: MouseWheelUnit::Point,
                         delta: vec2(0.0, 40.0),
                         modifiers: Modifiers::NONE,
@@ -1942,7 +1953,7 @@ mod tests {
                     let mut out = ctx.run_ui(raw, |ui| {
                         let rect = ui.max_rect();
                         app.viewport.rect = Some(rect);
-                        let resp = ui.interact(rect, ui.id().with("spin"), egui::Sense::click_and_drag());
+                        let resp = ui.interact(rect, ui.scope_id().with("spin"), egui::Sense::click_and_drag());
                         super::handle(app, ui, rect, &resp, super::NavCaps::MODEL);
                     });
                     out.textures_delta.clear();
@@ -2012,7 +2023,7 @@ mod tests {
                 let mut out = ctx.run_ui(raw, |ui| {
                     let rect = ui.max_rect();
                     app.viewport.rect = Some(rect);
-                    let resp = ui.interact(rect, ui.id().with("flat"), egui::Sense::click_and_drag());
+                    let resp = ui.interact(rect, ui.scope_id().with("flat"), egui::Sense::click_and_drag());
                     super::handle(app, ui, rect, &resp, flat);
                 });
                 out.textures_delta.clear();
@@ -2043,7 +2054,13 @@ mod tests {
                     frame(
                         &mut app,
                         modifiers,
-                        vec![Event::MouseWheel { unit: egui::MouseWheelUnit::Point, delta: vec2(20.0, -10.0), modifiers, phase }],
+                        vec![Event::MouseWheel {
+                            source: egui::MouseWheelSource::Unknown,
+                            unit: egui::MouseWheelUnit::Point,
+                            delta: vec2(20.0, -10.0),
+                            modifiers,
+                            phase,
+                        }],
                     );
                 }
                 assert_eq!(app.cam.back(), before.back(), "{preset}: trackpad turned a flat page");
@@ -2053,6 +2070,7 @@ mod tests {
             }
             let before = app.cam;
             let wheel = Event::MouseWheel {
+                source: egui::MouseWheelSource::Unknown,
                 unit: egui::MouseWheelUnit::Line,
                 delta: vec2(0.0, 3.0),
                 modifiers: Modifiers::NONE,
@@ -2088,7 +2106,7 @@ mod tests {
             let mut out = ctx.run_ui(raw, |ui| {
                 let rect = ui.max_rect();
                 app.viewport.rect = Some(rect);
-                let resp = ui.interact(rect, ui.id().with("native-pinch"), egui::Sense::click_and_drag());
+                let resp = ui.interact(rect, ui.scope_id().with("native-pinch"), egui::Sense::click_and_drag());
                 super::handle(app, ui, rect, &resp, super::NavCaps::MODEL);
             });
             out.textures_delta.clear();
@@ -2100,7 +2118,13 @@ mod tests {
             vec![
                 Event::ModifiersChanged(Modifiers::CTRL),
                 Event::PointerMoved(at),
-                Event::MouseWheel { unit: MouseWheelUnit::Point, delta: vec2(0.0, 50.0), modifiers: Modifiers::CTRL, phase: TouchPhase::Move },
+                Event::MouseWheel {
+                    source: egui::MouseWheelSource::Unknown,
+                    unit: MouseWheelUnit::Point,
+                    delta: vec2(0.0, 50.0),
+                    modifiers: Modifiers::CTRL,
+                    phase: TouchPhase::Move,
+                },
             ],
         );
         assert!(app.cam.distance < before.distance, "a positive Ctrl+wheel pinch zooms in: {} -> {}", before.distance, app.cam.distance);
@@ -2114,7 +2138,13 @@ mod tests {
             &mut plain,
             vec![
                 Event::PointerMoved(at),
-                Event::MouseWheel { unit: MouseWheelUnit::Point, delta: vec2(0.0, 50.0), modifiers: Modifiers::NONE, phase: TouchPhase::Move },
+                Event::MouseWheel {
+                    source: egui::MouseWheelSource::Unknown,
+                    unit: MouseWheelUnit::Point,
+                    delta: vec2(0.0, 50.0),
+                    modifiers: Modifiers::NONE,
+                    phase: TouchPhase::Move,
+                },
             ],
         );
         let pinched = before.distance / app.cam.distance;
@@ -2170,6 +2200,7 @@ mod tests {
         for phase in [egui::TouchPhase::Start, egui::TouchPhase::End, egui::TouchPhase::Cancel] {
             let mut input = egui::InputState::default();
             input.events = vec![egui::Event::MouseWheel {
+                source: egui::MouseWheelSource::Unknown,
                 unit: egui::MouseWheelUnit::Point,
                 delta: egui::vec2(0.0, 40.0),
                 modifiers: egui::Modifiers::CTRL,
@@ -2190,7 +2221,8 @@ mod tests {
             input.events = events;
             super::pinch_factor(&input, options, 600.0, None)
         };
-        let wheel = |unit, delta, modifiers| Event::MouseWheel { unit, delta, modifiers, phase: TouchPhase::Move };
+        let wheel =
+            |unit, delta, modifiers| Event::MouseWheel { source: egui::MouseWheelSource::Unknown, unit, delta, modifiers, phase: TouchPhase::Move };
         let close = |a: f32, b: f32| (a - b).abs() < 1e-4;
         let point = factor(vec![wheel(MouseWheelUnit::Point, vec2(0.0, 40.0), Modifiers::CTRL)]);
         assert!(close(point, (options.scroll_zoom_speed * 40.0).exp()), "point pinch {point}");
@@ -2227,7 +2259,7 @@ mod tests {
             let mut out = ctx.run_ui(raw, |ui| {
                 let rect = ui.max_rect();
                 app.viewport.rect = Some(rect);
-                let resp = ui.interact(rect, ui.id().with("page"), egui::Sense::click_and_drag());
+                let resp = ui.interact(rect, ui.scope_id().with("page"), egui::Sense::click_and_drag());
                 super::handle(&mut app, ui, rect, &resp, caps);
             });
             out.textures_delta.clear();

@@ -362,7 +362,7 @@ pub(crate) fn canvas(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter,
         let at = box_beyond(a, b);
         let r = crate::canvas::value_box_in(
             ui,
-            (egui::Id::new(("sc_hole_ref_area", *k)), egui::Id::new(("sc_hole_ref", *k))),
+            (egui::Id::unique(("sc_hole_ref_area", *k)), egui::Id::unique(("sc_hole_ref", *k))),
             label,
             value,
             at,

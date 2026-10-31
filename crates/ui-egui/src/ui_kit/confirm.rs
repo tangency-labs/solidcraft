@@ -114,8 +114,8 @@ impl<'a> Confirm<'a> {
                             );
                             let title = egui::Rect::from_min_max(heading.min, egui::pos2(close.left(), heading.bottom()));
                             paint_text(ui, title, self.title, crate::fonts::semibold(t.font_subtitle), t.form_ink, false);
-                            ui.interact(title, ui.id().with("title"), egui::Sense::hover())
-                                .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), self.title));
+                            ui.interact(title, ui.scope_id().with("title"), egui::Sense::hover())
+                                .widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, ui.is_enabled(), self.title));
                             let response = super::icon_button_at(ui, close, "close", "Close");
                             closed = response.clicked();
                             scenario::publish_target("dialog:close", response.rect);

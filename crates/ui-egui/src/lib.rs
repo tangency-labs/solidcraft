@@ -682,6 +682,8 @@ pub struct SolveApp {
     pub synthetic: Vec<egui::Event>,
     /// The modifiers of the synthetic press in progress (a Ctrl-drag keeps Ctrl while it moves).
     pub synthetic_mods: egui::Modifiers,
+    /// A click that came in the same frame as typing before it, held for the next frame.
+    held_click: Vec<egui::Event>,
     control_rx: Option<Receiver<ControlRequest>>,
     /// Control requests that change the design, held while a file loads or an agent's design
     /// change computes.
@@ -699,6 +701,9 @@ pub struct SolveApp {
     pending_shots: Vec<(u64, Option<String>, std::sync::mpsc::Sender<Value>, f64)>,
     shot_chat_turns: std::collections::HashMap<u64, std::sync::Arc<std::sync::atomic::AtomicBool>>,
     queued_shots: Vec<(u64, f64, u32)>,
+    /// Screenshots egui hands back, by token; egui calls back, `collect_screenshots` reads them.
+    shot_tx: std::sync::mpsc::Sender<(u64, std::sync::Arc<egui::ColorImage>)>,
+    shot_rx: std::sync::mpsc::Receiver<(u64, std::sync::Arc<egui::ColorImage>)>,
     shot_token: u64,
     styled: bool,
     fitted: bool,
@@ -751,6 +756,7 @@ impl SolveApp {
         render_workspace.image_host = image_host;
         #[cfg(not(target_arch = "wasm32"))]
         solidcraft_engine::slicer_files::clean_old();
+        let (shot_tx, shot_rx) = std::sync::mpsc::channel();
         let mut app = SolveApp {
             viewport_status: Default::default(),
             viewport_status_fixture: Default::default(),
@@ -852,6 +858,7 @@ impl SolveApp {
             frame_rate: frame_rate::FrameRate::default(),
             synthetic: Vec::new(),
             synthetic_mods: egui::Modifiers::default(),
+            held_click: Vec::new(),
             control_rx: None,
             agent_chat: Default::default(),
             ai_connect: Default::default(),
@@ -862,6 +869,8 @@ impl SolveApp {
             pending_shots: Vec::new(),
             shot_chat_turns: Default::default(),
             queued_shots: Vec::new(),
+            shot_tx,
+            shot_rx,
             shot_token: 0,
             styled: false,
             fitted: false,
@@ -2588,7 +2597,7 @@ impl SolveApp {
         self.follow_view_request(true);
         agent_cursor::step(self, ctx);
         browser::eye_drag_frame(self, ctx);
-        if !self.synthetic.is_empty() {
+        if !self.synthetic.is_empty() || !self.held_click.is_empty() {
             ctx.request_repaint();
         }
         issue_report::tick(self, ctx);
@@ -2625,7 +2634,26 @@ impl SolveApp {
     /// capture hides the report waits for it (the control channel's typing too).
     pub fn raw_input_hook(&mut self, raw: &mut egui::RawInput) {
         self.synthetic_input(raw);
+        finite_input(raw);
+        self.hold_click_after_typing(raw);
         issue_report::hold_input(self, raw);
+    }
+
+    /// A pointer button after typing in the same frame (a slow frame) waits for the next frame,
+    /// with the events after it. egui 0.37 drops a field's focus on a click elsewhere before the
+    /// field reads the frame's typing, which lost what was typed. Drop once emilk/egui#8763 is fixed.
+    fn hold_click_after_typing(&mut self, raw: &mut egui::RawInput) {
+        if !self.held_click.is_empty() {
+            let mut events = std::mem::take(&mut self.held_click);
+            events.append(&mut raw.events);
+            raw.events = events;
+        }
+        let button = raw.events.iter().position(|e| matches!(e, egui::Event::PointerButton { .. }));
+        if let Some(i) = button
+            && raw.events[..i].iter().any(issue_report::typing)
+        {
+            self.held_click = raw.events.split_off(i);
+        }
     }
 
     /// Inject synthetic events (one pointer event per frame).
@@ -2994,10 +3022,15 @@ impl SolveApp {
         // A view that just moved is drawn with fewer AO samples: shoot the full-quality frame
         // that follows (#7165), or after half a second a view that keeps moving as it is.
         let settled = viewport::ao_settled(self, ctx);
+        let shot_tx = &self.shot_tx;
         self.queued_shots.retain_mut(|(token, at, frames)| {
             *frames += 1;
             if now >= *at && *frames >= 3 && (settled || now >= *at + 500.0) {
-                ctx.send_viewport_cmd(egui::ViewportCommand::Screenshot(egui::UserData::new(*token)));
+                let (token, tx, ctx2) = (*token, shot_tx.clone(), ctx.clone());
+                ctx.request_screenshot(move |image| {
+                    let _ = tx.send((token, image));
+                    ctx2.request_repaint();
+                });
                 false
             } else {
                 true
@@ -3025,20 +3058,8 @@ impl SolveApp {
         if self.pending_shots.is_empty() && !issue_report::pending(self) {
             return;
         }
-        let events: Vec<_> = ctx.input(|i| {
-            i.raw
-                .events
-                .iter()
-                .filter_map(|e| match e {
-                    egui::Event::Screenshot { user_data, image, .. } => {
-                        let token = user_data.data.as_ref().and_then(|d| d.downcast_ref::<u64>()).copied()?;
-                        Some((token, image.clone()))
-                    }
-                    _ => None,
-                })
-                .collect()
-        });
-        for (token, image) in events {
+        let shots: Vec<_> = self.shot_rx.try_iter().collect();
+        for (token, image) in shots {
             issue_report::receive(self, token, image.clone());
             if let Some(i) = self.pending_shots.iter().position(|(t, ..)| *t == token) {
                 let (_, path, reply, _) = self.pending_shots.remove(i);
@@ -3058,6 +3079,17 @@ impl SolveApp {
             false
         });
     }
+}
+
+/// Drop pointer, wheel and gesture events that carry a non-finite number: egui 0.37 asserts on them.
+fn finite_input(raw: &mut egui::RawInput) {
+    raw.events.retain(|event| match event {
+        egui::Event::PointerMoved(pos) | egui::Event::PointerButton { pos, .. } | egui::Event::MiddleClickPaste { pos, .. } => pos.is_finite(),
+        egui::Event::MouseMoved(delta) | egui::Event::MouseWheel { delta, .. } => delta.is_finite(),
+        egui::Event::Zoom(amount) | egui::Event::Rotate(amount) => amount.is_finite(),
+        egui::Event::Touch { pos, force, .. } => pos.is_finite() && force.is_none_or(f32::is_finite),
+        _ => true,
+    });
 }
 
 /// The window is minimised or fully covered, so it presents no frames (#1677). Unknown counts as

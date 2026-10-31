@@ -73,7 +73,7 @@ fn icon_button_presentation(
             t.form_dim
         }),
     );
-    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), crate::i18n::tr_label(label)));
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled(), crate::i18n::tr_label(label)));
     pointer_on_hover(ui, &response);
     response.on_hover_text(crate::i18n::tr_label(label))
 }
@@ -419,7 +419,7 @@ pub(crate) fn button_pair(ui: &mut egui::Ui, key: &str, states: [bool; 2], butto
                     );
                 }
                 painter.galley(egui::pos2(left + icon_width, rect.center().y - galley.size().y / 2.0), galley, t.form_ink);
-                response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, ui.is_enabled(), on, label));
+                response.widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, ui.is_enabled(), on, label));
                 t.button_bevel(ui, &response, on);
                 pointer_on_hover(ui, &response);
                 crate::scenario::publish_target(&format!("{key}:{}", button.key), rect);
@@ -616,7 +616,7 @@ pub(crate) fn compact_button(ui: &mut Ui, glyph: &str, tooltip: &str, enabled: b
             } else {
                 ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, glyph, egui::FontId::proportional(t.font_label), ink);
             }
-            response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), glyph));
+            response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled(), glyph));
             response
         })
         .inner;
@@ -634,7 +634,7 @@ pub(crate) fn icon_label_button(ui: &mut Ui, label: &str, icon: &str, enabled: b
 /// geometry, enabled state and optional danger ink. Tokens: icon-label action tokens.
 pub(crate) fn icon_action(ui: &mut Ui, label: &str, icon: &str, enabled: bool, danger: bool) -> Response {
     let response = icon_label_button(ui, "", icon, enabled, danger).on_hover_text(label);
-    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, enabled && ui.is_enabled(), label));
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, enabled && ui.is_enabled(), label));
     response
 }
 
@@ -672,7 +672,7 @@ pub(crate) fn selection_actions(ui: &mut Ui, name: &str, actions: &[super::Stage
         let font = crate::fonts::semibold(t.font_small);
         let width = ui.painter().layout_no_wrap(name.into(), font.clone(), accent.ink).size().x.min(t.form_label_width) + t.space_12;
         let (rect, name_response) = ui.allocate_exact_size(vec2(width, t.control_height - t.space_2), egui::Sense::click());
-        name_response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), name));
+        name_response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled(), name));
         super::text::paint_text(ui, rect.shrink2(vec2(t.space_6, 0.0)), name, font, accent.ink, false);
         scenario::publish_target("selection:name", rect);
         let mut clicked = name_response.clicked().then_some(actions.len());
@@ -748,7 +748,7 @@ fn icon_label_presentation(ui: &mut Ui, label: &str, icon: Option<&str>, enabled
                 ink,
                 false,
             );
-            response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), label));
+            response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled(), label));
             pointer_on_hover(ui, &response);
             response
         })

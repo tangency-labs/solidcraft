@@ -316,12 +316,13 @@ impl Container {
         egui::Area::new(id).enabled(self.input_enabled()).order(order)
     }
 
-    pub fn edge(self, id: impl Into<Id>, edge: Edge) -> egui::Panel {
+    /// A panel on `edge`, keyed by `salt` within the Ui it is shown in.
+    pub fn edge(self, salt: impl egui::AsIdSalt, edge: Edge) -> egui::Panel {
         let panel = match edge {
-            Edge::Left => egui::Panel::left(id),
-            Edge::Right => egui::Panel::right(id),
-            Edge::Top => egui::Panel::top(id),
-            Edge::Bottom => egui::Panel::bottom(id),
+            Edge::Left => egui::Panel::left(salt),
+            Edge::Right => egui::Panel::right(salt),
+            Edge::Top => egui::Panel::top(salt),
+            Edge::Bottom => egui::Panel::bottom(salt),
         };
         if self.adaptive() && !self.floating() { panel.show_separator_line(false) } else { panel }
     }

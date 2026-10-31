@@ -217,7 +217,13 @@ fn import_rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Ap, inputs: &[SelI
                             };
                             if let Some(look) = look {
                                 let [r, g, b] = look.color;
-                                ui_kit::color_thumbnail(ui, ui.id().with((&entry.id, "sample")), egui::Color32::from_rgb(r, g, b), &look.name, ());
+                                ui_kit::color_thumbnail(
+                                    ui,
+                                    ui.scope_id().with((&entry.id, "sample")),
+                                    egui::Color32::from_rgb(r, g, b),
+                                    &look.name,
+                                    (),
+                                );
                             }
                             let button =
                                 ui_kit::list_picker(ui, &entry.id, entry.definition.name(), k.local.selected.as_deref() == Some(entry.id.as_str()))

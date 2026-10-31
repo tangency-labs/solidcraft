@@ -22,7 +22,7 @@ fn place(h: &mut Harness, picks: &[[f64; 2]], at: [f64; 2]) {
     }
     h.step(&json!({"click":{"world":[at[0],at[1],0]}})).unwrap();
     assert!(crate::dim_view::editing(), "placement opens an editor");
-    assert_eq!(h.ctx.memory(|m| m.focused()), Some(egui::Id::new("sc_dim_edit")));
+    assert_eq!(h.ctx.memory(|m| m.focused()), Some(egui::Id::unique("sc_dim_edit")));
 }
 fn type_value(h: &mut Harness, text: &str) {
     h.step(&json!({"key":"A","cmd":true})).unwrap();
@@ -84,7 +84,7 @@ fn click_d1_and_apply(h: &mut Harness) -> String {
     h.step(&json!({"click":{"dimension":"d1"}})).unwrap();
     assert!(crate::dim_view::editing(), "a reference click keeps the editor open");
     h.frames(2);
-    assert_eq!(h.ctx.memory(|m| m.focused()), Some(egui::Id::new("sc_dim_edit")), "the value field keeps the keyboard");
+    assert_eq!(h.ctx.memory(|m| m.focused()), Some(egui::Id::unique("sc_dim_edit")), "the value field keeps the keyboard");
     h.step(&json!({"key":"Enter"})).unwrap();
     assert!(!crate::dim_view::editing(), "{}", h.call("ui.inspect", json!({})));
     let expr = h.app.session.doc.param("d2").unwrap().expr.clone();
@@ -164,7 +164,7 @@ fn dimension_tool_click_on_an_existing_dimension_edits_its_value() {
     h.step(&json!({"click":{"dimension":"d1"}})).unwrap();
     assert!(crate::dim_view::editing(), "a click on the dimension opens its value");
     h.frames(5);
-    assert_eq!(h.ctx.memory(|m| m.focused()), Some(egui::Id::new("sc_dim_edit")), "the value field takes the keyboard");
+    assert_eq!(h.ctx.memory(|m| m.focused()), Some(egui::Id::unique("sc_dim_edit")), "the value field takes the keyboard");
     type_value(&mut h, "25");
     h.step(&json!({"key":"Enter"})).unwrap();
     assert!(!crate::dim_view::editing(), "{}", h.call("ui.inspect", json!({})));
@@ -628,7 +628,7 @@ fn dimension_count(h: &Harness) -> usize {
 fn assert_live(h: &Harness) {
     assert!(crate::dim_view::editing(), "the pick opens the value at once");
     assert_eq!(crate::dim_view::live(), Some(false));
-    assert_eq!(h.ctx.memory(|m| m.focused()), Some(egui::Id::new("sc_dim_edit")));
+    assert_eq!(h.ctx.memory(|m| m.focused()), Some(egui::Id::unique("sc_dim_edit")));
 }
 
 #[test]
@@ -757,7 +757,7 @@ fn type_first_keeps_the_place_first_flow() {
     h.step(&json!({"click":{"world":[10,-7,0]}})).unwrap();
     assert!(crate::dim_view::editing());
     assert_eq!(crate::dim_view::live(), None, "the text is pinned");
-    assert_eq!(h.ctx.memory(|m| m.focused()), Some(egui::Id::new("sc_dim_edit")));
+    assert_eq!(h.ctx.memory(|m| m.focused()), Some(egui::Id::unique("sc_dim_edit")));
     h.step(&json!({"move":{"world":[0,12,0]}})).unwrap();
     keys(&mut h, "18");
     h.step(&json!({"key":"Enter"})).unwrap();
@@ -780,7 +780,7 @@ fn type_first_keeps_the_place_first_flow() {
     assert_eq!(h.app.tool.as_ref().map(|t| t.picks.len()), Some(1));
     h.step(&json!({"click":{"world":[10,6,0]}})).unwrap();
     assert!(crate::dim_view::editing());
-    assert_eq!(h.ctx.memory(|m| m.focused()), Some(egui::Id::new("sc_dim_edit")));
+    assert_eq!(h.ctx.memory(|m| m.focused()), Some(egui::Id::unique("sc_dim_edit")));
     keys(&mut h, "21");
     h.step(&json!({"key":"Enter"})).unwrap();
     let new = added(&h, dims);
@@ -1187,7 +1187,7 @@ fn double_clicking_a_shown_dimension_edits_it_without_editing_the_sketch() {
     let at = model_text(&h, "d2");
     h.step(&json!({"click":at,"double":true})).unwrap();
     assert!(crate::dim_view::editing(), "the double-click opens the value");
-    assert_eq!(h.ctx.memory(|m| m.focused()), Some(egui::Id::new("sc_dim_edit")));
+    assert_eq!(h.ctx.memory(|m| m.focused()), Some(egui::Id::unique("sc_dim_edit")));
     assert_eq!(h.app.session.active_sketch, None, "the sketch is not edited");
     type_value(&mut h, "14");
     h.step(&json!({"key":"Enter"})).unwrap();

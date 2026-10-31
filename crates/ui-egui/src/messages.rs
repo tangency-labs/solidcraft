@@ -109,8 +109,10 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     }
     let t = Tokens::get();
     let now = crate::now_ms();
-    let (closed, _) =
-        crate::ui_kit::Window::new(egui::Id::new("sc_messages"), "list", tr("messages.title")).fields().actions("", "", None).show(ctx, true, |ui| {
+    let (closed, _) = crate::ui_kit::Window::new(egui::Id::unique("sc_messages"), "list", tr("messages.title")).fields().actions("", "", None).show(
+        ctx,
+        true,
+        |ui| {
             ui.horizontal(|ui| {
                 let copy = crate::ui_kit::button(ui, tr("messages.copy_all"), crate::ui_kit::Button::Enabled(app.messages.iter().len() > 0));
                 crate::scenario::publish_handle("messages:copy", copy.rect.center());
@@ -137,7 +139,8 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                     });
                 }
             });
-        });
+        },
+    );
     if closed {
         app.messages.open = false;
     }

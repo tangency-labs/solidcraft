@@ -44,7 +44,7 @@ impl Download {
         }
         if solidcraft_ui_egui::documents::any_dirty(app) {
             let mut answer = None;
-            let closed = ui_kit::Window::new(egui::Id::new("open_link"), "status_warning", solidcraft_ui_egui::i18n::tr("web.open_link"))
+            let closed = ui_kit::Window::new(egui::Id::unique("open_link"), "status_warning", solidcraft_ui_egui::i18n::tr("web.open_link"))
                 .required()
                 .show_body(ctx, |ui| {
                     ui.label(solidcraft_ui_egui::i18n::tr("web.open_link_confirm"));

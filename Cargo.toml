@@ -96,11 +96,12 @@ tiny-skia = { version = "0.12", default-features = false, features = ["std", "si
 toml = "1"
 
 # ui
-egui = "0.36"
-eframe = { version = "0.36", default-features = false, features = ["persistence"] }
+# default_fonts: the built-in Hack is the UI's symbol fallback (#2955); 0.37 no longer turns it on.
+egui = { version = "0.37", features = ["default_fonts"] }
+eframe = { version = "0.37", default-features = false, features = ["persistence"] }
 # Instant/SystemTime that also work in the browser (std panics on wasm32-unknown-unknown).
 web-time = "1"
-egui-wgpu = "0.36"
+egui-wgpu = "0.37"
 # the wgpu egui-wgpu uses, for compute (crates/gpu); backends come from the apps' features
 wgpu = { version = "30", default-features = false, features = ["std", "wgsl"] }
 naga = { version = "30", default-features = false }
@@ -162,11 +163,8 @@ matext4cgmath = { path = "vendor/matext4cgmath" }
 egui-wgpu = { path = "vendor/egui-wgpu" }
 
 # Deliver trackpad pinch and rotation gestures on Wayland (zwp_pointer_gestures_v1), which
-# winit 0.30 never binds and eframe 0.36 still requires winit 0.30.
+# winit 0.30 never binds and eframe 0.37 still requires winit 0.30.
 winit = { path = "vendor/winit" }
-
-# macOS: dropping the accessibility adapter leaves AppKit's key-value observers intact (#7535).
-accesskit_macos = { path = "vendor/accesskit_macos" }
 
 # Mutation testing (cargo-mutants, docs/mutation-testing.md): the ci profile with incremental
 # builds, since every mutant rebuilds the crates above the one it changes.

@@ -1159,6 +1159,7 @@ mod tests {
 
     fn wheel(dy: f32) -> egui::Event {
         egui::Event::MouseWheel {
+            source: egui::MouseWheelSource::Unknown,
             unit: egui::MouseWheelUnit::Point,
             delta: egui::vec2(0.0, dy),
             modifiers: egui::Modifiers::NONE,

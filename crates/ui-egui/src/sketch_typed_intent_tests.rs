@@ -263,7 +263,7 @@ fn the_arc_end_pick_snaps_to_a_point_under_the_value_box() {
         h.step(&json!({"move":{"world":[end[0], end[1], 0]}})).unwrap();
         let cursor = h.at(&json!({"world":[end[0], end[1], 0]})).unwrap();
         let cursor = egui::pos2(cursor[0] as f32, cursor[1] as f32);
-        let blocking = h.ctx.memory(|m| m.area_rect(egui::Id::new(("sc_dim_area", 0usize)))).filter(|r| r.expand(2.0).contains(cursor));
+        let blocking = h.ctx.memory(|m| m.area_rect(egui::Id::unique(("sc_dim_area", 0usize)))).filter(|r| r.expand(2.0).contains(cursor));
         assert!(blocking.is_none(), "{command}: the value box {blocking:?} sits under the cursor {cursor:?}");
         h.step(&json!({"click":{"world":[end[0], end[1], 0]}})).unwrap();
         // A slot's third pick sets its width only; the arc's end takes the point it lands on.

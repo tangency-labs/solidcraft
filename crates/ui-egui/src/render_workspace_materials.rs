@@ -340,7 +340,7 @@ pub(super) fn controls(app: &mut SolveApp, ui: &mut egui::Ui) {
             && !app.session.model.is_stale();
         ui_kit::bounded_cell_editor(
             ui,
-            ui.id().with("render_material_search"),
+            ui.scope_id().with("render_material_search"),
             &mut view.target_search,
             app.tr("render.material_filter"),
             false,
@@ -905,7 +905,7 @@ pub(super) fn confirmation(app: &mut SolveApp, ctx: &egui::Context) {
         return;
     }
     let title = app.tr("render.appearance_editor.remove_title").to_owned();
-    let (closed, action) = ui_kit::Confirm::new(egui::Id::new("render_remove_optics"), "delete", &title)
+    let (closed, action) = ui_kit::Confirm::new(egui::Id::unique("render_remove_optics"), "delete", &title)
         .tone(ui_kit::Tone::Danger)
         .actions(app.tr("render.appearance_editor.remove"), app.tr("render.keep_editing"), None)
         .selected(ui_kit::Action::Cancel)

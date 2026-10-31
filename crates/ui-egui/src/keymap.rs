@@ -607,7 +607,7 @@ pub fn page(app: &mut SolveApp, ui: &mut egui::Ui) {
             ];
             let (filter, toolbar_action) = ui_kit::search_actions_row(
                 ui,
-                egui::Id::new("sc_keymap_filter"),
+                egui::Id::unique("sc_keymap_filter"),
                 &mut app.keymap.filter,
                 crate::i18n::tr_label("Filter commands or keys"),
                 &actions,

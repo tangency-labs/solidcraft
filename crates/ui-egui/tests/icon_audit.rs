@@ -468,7 +468,7 @@ fn requested_menu_icons_have_artwork_and_match_manifest() {
     documents.call("ui.resize", json!({"width":640,"height":1000}));
     click(&mut documents, "tab:overflow");
     documents.frames(3);
-    assert!(documents.ctx.data(|d| d.get_temp::<bool>(egui::Id::new("sc_doc_more"))).unwrap_or(false), "the document list must actually be open");
+    assert!(documents.ctx.data(|d| d.get_temp::<bool>(egui::Id::unique("sc_doc_more"))).unwrap_or(false), "the document list must actually be open");
     collect(&mut documents, "document overflow list (active icon is a selection marker)", &mut requested);
     // Diagnostic badges and Copy Error/Warning Message only appear on troubled features.
     for failing in [false, true] {

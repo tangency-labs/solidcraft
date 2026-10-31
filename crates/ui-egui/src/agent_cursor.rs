@@ -480,7 +480,7 @@ pub fn paint(app: &SolveApp, ctx: &egui::Context) {
         return;
     }
     let Some(p) = app.agent.pos else { return };
-    let painter = ctx.layer_painter(egui::LayerId::new(egui::Order::Debug, egui::Id::new("sc_agent_cursor")));
+    let painter = ctx.layer_painter(egui::LayerId::new(egui::Order::Debug, egui::Id::unique("sc_agent_cursor")));
     for (at, t0) in &app.agent.ripples {
         let k = ((app.now - t0) / 0.6).clamp(0.0, 1.0) as f32;
         painter.circle_stroke(*at, 6.0 + 22.0 * k, Stroke::new(3.0 * (1.0 - k) + 0.5, agent().gamma_multiply(1.0 - k)));
@@ -490,7 +490,7 @@ pub fn paint(app: &SolveApp, ctx: &egui::Context) {
         use crate::ui_kit::{Container, Surface};
         let t = crate::theme::Tokens::get();
         Container::new(ctx, Surface::Popup)
-            .area(egui::Id::new("sc_agent_command"))
+            .area(egui::Id::unique("sc_agent_command"))
             .order(egui::Order::Debug)
             .fixed_pos(p + vec2(15.0, 42.0))
             .constrain(true)

@@ -104,7 +104,7 @@ impl FileView {
         let t = Tokens::get();
         egui::Frame::NONE.fill(t.file_surface).stroke(t.tertiary_border(t.file_border)).corner_radius(t.radius_xl).show(ui, |ui| {
             ui.spacing_mut().item_spacing.y = 0.0;
-            let key = ui.id().with("file_recent_index");
+            let key = ui.scope_id().with("file_recent_index");
             ui.ctx().data_mut(|data| data.insert_temp(key, 0_usize));
             let result = add(ui);
             ui.ctx().data_mut(|data| data.remove::<usize>(key));
@@ -267,7 +267,7 @@ impl FileView {
             ui.painter().rect_filled(rect, t.radius_lg, t.hover);
         }
         let list = ui.stack().iter().find_map(|node| {
-            let key = node.id.with("file_recent_index");
+            let key = node.unique_id.with("file_recent_index");
             ui.ctx().data(|data| data.get_temp::<usize>(key)).map(|index| (key, index))
         });
         if let Some((key, index)) = list {
@@ -399,7 +399,7 @@ impl FileView {
 fn allocate(ui: &mut Ui, id: &str, width: f32, height: f32, label: &str) -> (Rect, Response) {
     let (rect, _) = ui.allocate_exact_size(vec2(dimension(width).min(dimension(ui.available_width())), height), Sense::hover());
     let response = ui.interact(rect, ui.make_persistent_id(id), Sense::click());
-    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), label));
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled(), label));
     if response.clicked() {
         response.request_focus();
     }

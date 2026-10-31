@@ -23,7 +23,7 @@ fn fitting_flex_tables_have_no_horizontal_scrollbar_at_card_widths_and_pixel_sca
                                     ui_kit::text(ui, "Width", ui_kit::Text::Cell);
                                 });
                                 row.cell(|ui| {
-                                    ui_kit::cell_editor(ui, ui.id().with("value"), &mut "10 mm".into(), "", false);
+                                    ui_kit::cell_editor(ui, ui.scope_id().with("value"), &mut "10 mm".into(), "", false);
                                 });
                                 row.cell(|ui| {
                                     ui_kit::text(ui, "10 mm", ui_kit::Text::MonoCell);
@@ -93,7 +93,7 @@ fn row_hover_paints_under_every_interactive_child_and_respects_clip_and_enabled(
                         ui_kit::text(ui, "Width", ui_kit::Text::Cell);
                     });
                     row.cell(|ui| {
-                        ui_kit::cell_editor(ui, ui.id().with("value"), &mut value, "", false);
+                        ui_kit::cell_editor(ui, ui.scope_id().with("value"), &mut value, "", false);
                     });
                     row.cell(|ui| {
                         ui_kit::dropdown(ui, "choice", &mut selected, &["mm", "in"]);
@@ -199,7 +199,7 @@ fn hover_remove_bin_prompt_and_plus_menu_share_one_grid() {
                     if pending {
                         table.row(ui, "draft", false, |row| {
                             row.cell(|ui| {
-                                ui_kit::cell_editor(ui, ui.id().with("name"), &mut String::new(), "Name", false);
+                                ui_kit::cell_editor(ui, ui.scope_id().with("name"), &mut String::new(), "Name", false);
                             });
                             row.cell(|ui| {
                                 deleted |= bin_button(ui, "Delete").clicked();

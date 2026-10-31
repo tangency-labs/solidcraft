@@ -463,7 +463,8 @@ mod tests {
                         (Dim::ThreadDepth, 145.0),
                     ]
                     .map(|(dim, y)| (dim, Rect::from_min_size(pos2(150.0, y), vec2(100.0, 20.0)), false));
-                    let output = ctx.run_ui(egui::RawInput::default(), |ui| paint(ui.painter(), pic, &section, &slots));
+                    let mut output = ctx.run_ui(egui::RawInput::default(), |ui| paint(ui.painter(), pic, &section, &slots));
+                    output.textures_delta.clear();
                     let mut dimensions: Vec<_> = output
                         .shapes
                         .iter()

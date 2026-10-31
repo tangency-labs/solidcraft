@@ -41,7 +41,7 @@ impl<'a> NavigationMenuRow<'a> {
     pub(crate) fn show(self, ui: &mut Ui) -> Response {
         let t = Tokens::get();
         let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width().max(0.0), NAV_MENU_ROW), Sense::hover());
-        let response = ui.interact(rect, ui.id().with(self.id), if self.enabled { Sense::click() } else { Sense::hover() });
+        let response = ui.interact(rect, ui.scope_id().with(self.id), if self.enabled { Sense::click() } else { Sense::hover() });
         let ink = if self.selected { t.form_primary } else { t.form_ink };
         let bg = if self.selected {
             Some(t.selected_bg)
@@ -87,7 +87,7 @@ impl<'a> NavigationMenuRow<'a> {
                 Rect::from_center_size(pos2(rect.right() - NAV_MENU_INSET - NAV_CHEVRON / 2.0, rect.center().y), vec2(NAV_CHEVRON, NAV_CHEVRON));
             icons::paint_ink(ui.painter(), arrow, "chevron", t.form_dim);
         }
-        response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, self.enabled && ui.is_enabled(), self.selected, self.label));
+        response.widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, self.enabled && ui.is_enabled(), self.selected, self.label));
         if cut { response.on_hover_text(self.label) } else { response }
     }
 }

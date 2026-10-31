@@ -69,10 +69,7 @@ fn save_frame(h: &mut Harness, textures: &mut HashMap<TextureId, ColorImage>, mu
     }
     out.shapes.insert(
         background,
-        egui::epaint::ClippedShape {
-            clip_rect: rect,
-            shape: egui::Shape::image(id, rect, Rect::from_min_max(Pos2::ZERO, egui::pos2(1., 1.)), egui::Color32::WHITE),
-        },
+        egui::epaint::ClippedShape::new(rect, egui::Shape::image(id, rect, Rect::from_min_max(Pos2::ZERO, egui::pos2(1., 1.)), egui::Color32::WHITE)),
     );
     raster::raster(h, textures, out).save(path).unwrap();
 }

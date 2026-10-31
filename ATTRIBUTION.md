@@ -693,7 +693,6 @@ copied into SolidCraft.
 
 | Directory | Source | Licence | Changes |
 |---|---|---|---|
-| vendor/accesskit_macos | accesskit_macos 0.26.3, https://github.com/AccessKit/accesskit (The AccessKit contributors) | MIT OR Apache-2.0 | the subclassing adapter and its tests from 0.27.2: dropping the adapter keeps AppKit's key-value observers (vendor/README.md) |
 | vendor/truck-meshalgo | truck-meshalgo 0.4.0, https://github.com/ricosjp/truck (RICOS Co. Ltd.) | Apache-2.0 | meshing: bounded parameter searches, collapsed-boundary projection, subdivision and provisional fixed-grid previews (vendor/README.md) |
 | vendor/truck-stepio | truck-stepio 0.3.0, https://github.com/ricosjp/truck (RICOS Co. Ltd.) | Apache-2.0 | STEP writer: intersection-curve surfaces written at unique ids (vendor/README.md) |
 | vendor/truck-shapeops | truck-shapeops 0.4.0, https://github.com/ricosjp/truck (RICOS Co. Ltd.) | Apache-2.0 | robust meshing and nearest-parameter fallback in booleans; degenerate intersection-curve rejection; face and edge history of booleans; trace macro; corner choice at vertices several intersection curves end on; reuse of an operand's meshes (vendor/README.md) |
@@ -702,7 +701,7 @@ copied into SolidCraft.
 
 ## Vendored renderer compatibility fix
 
-`vendor/egui-wgpu` is egui-wgpu 0.36.2 from https://github.com/emilk/egui
+`vendor/egui-wgpu` is egui-wgpu 0.37.0 from https://github.com/emilk/egui
 (MIT OR Apache-2.0; both original licence texts are included). Rust sources and
 its original `egui.wgsl` shader are retained; no images or other artwork are copied.
 SolidCraft's narrow patch selects a safe 1x MSAA path on the chosen OpenGL adapter

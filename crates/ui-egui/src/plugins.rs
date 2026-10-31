@@ -156,7 +156,12 @@ pub fn page(app: &mut SolveApp, ui: &mut egui::Ui) {
     let searching = crate::prefs_search::querying(ui);
     // The page's own box is for browsing Plugins. The dialog search is the filter while it is active.
     if !searching {
-        crate::ui_kit::search_field(ui, ui.id().with("plugins_search"), &mut app.prefs_window.plugin_query, crate::i18n::tr("ui.plugins_search"));
+        crate::ui_kit::search_field(
+            ui,
+            ui.scope_id().with("plugins_search"),
+            &mut app.prefs_window.plugin_query,
+            crate::i18n::tr("ui.plugins_search"),
+        );
         ui.add_space(8.0);
     }
     if searching {

@@ -84,7 +84,7 @@ fn every_axis_is_drawn_in_one_set_of_colours() {
 
         let mut out = ctx.run_ui(egui::RawInput { screen_rect: Some(rect), ..Default::default() }, |ui| {
             let painter = ui.painter().clone();
-            crate::gizmo::show(ui, &painter, &proj, egui::Id::new("one_set_gizmo"), &triad, 1.0);
+            crate::gizmo::show(ui, &painter, &proj, egui::Id::unique("one_set_gizmo"), &triad, 1.0);
         });
         out.textures_delta.clear();
         let mut gizmo = stroke_colours(&out.shapes);

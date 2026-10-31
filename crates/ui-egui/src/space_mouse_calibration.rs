@@ -186,83 +186,84 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let mut chosen = None;
     let done = matches!(result, Some(Ok(_)));
     let text = |ui: &mut egui::Ui, text: &str, key: &str| crate::ui_kit::text(ui, text, crate::ui_kit::Text::Report(key, false));
-    let (closed, action) = crate::ui_kit::Window::new(egui::Id::new("sc_space_mouse_calibration"), "settings", app.tr("ui.3d_mouse_calibrate_title"))
-        .actions(if done { app.tr("ui.save") } else { "" }, app.tr("ui.cancel"), None)
-        .show_with_left(
-            ctx,
-            done,
-            |ui| {
-                text(ui, app.tr(prompt), "prompt");
-                if let Some(axis) = weak {
-                    crate::ui_kit::text(ui, app.tr(axis), crate::ui_kit::Text::Heading("weak_axis"));
-                }
-                // The device doesn't behave like the kind picked: say so, and offer the other.
-                if let Some(other) = mismatch {
-                    let (hint, switch) = match other {
-                        Kind::Trackball => ("ui.3d_mouse_looks_like_trackball", "ui.3d_mouse_switch_trackball"),
-                        Kind::ReturnToCenter => ("ui.3d_mouse_looks_like_cap", "ui.3d_mouse_switch_cap"),
-                    };
-                    crate::ui_kit::text(ui, app.tr(hint), crate::ui_kit::Text::Hint("space_mouse_kind_mismatch"));
-                    if crate::ui_kit::button(ui, app.tr(switch), crate::ui_kit::Button::Normal).clicked() {
-                        chosen = Some(other);
+    let (closed, action) =
+        crate::ui_kit::Window::new(egui::Id::unique("sc_space_mouse_calibration"), "settings", app.tr("ui.3d_mouse_calibrate_title"))
+            .actions(if done { app.tr("ui.save") } else { "" }, app.tr("ui.cancel"), None)
+            .show_with_left(
+                ctx,
+                done,
+                |ui| {
+                    text(ui, app.tr(prompt), "prompt");
+                    if let Some(axis) = weak {
+                        crate::ui_kit::text(ui, app.tr(axis), crate::ui_kit::Text::Heading("weak_axis"));
                     }
-                }
-                if stage == Stage::Choose {
-                    // Side by side where they fit, one under the other where the window is narrow.
-                    ui.horizontal_wrapped(|ui| {
-                        for (kind, label) in KINDS {
-                            ui.vertical(|ui| {
-                                crate::space_mouse_model::rest(ui, kind);
-                                if crate::ui_kit::button(ui, app.tr(label), crate::ui_kit::Button::Normal).clicked() {
-                                    chosen = Some(kind);
-                                }
-                            });
+                    // The device doesn't behave like the kind picked: say so, and offer the other.
+                    if let Some(other) = mismatch {
+                        let (hint, switch) = match other {
+                            Kind::Trackball => ("ui.3d_mouse_looks_like_trackball", "ui.3d_mouse_switch_trackball"),
+                            Kind::ReturnToCenter => ("ui.3d_mouse_looks_like_cap", "ui.3d_mouse_switch_cap"),
+                        };
+                        crate::ui_kit::text(ui, app.tr(hint), crate::ui_kit::Text::Hint("space_mouse_kind_mismatch"));
+                        if crate::ui_kit::button(ui, app.tr(switch), crate::ui_kit::Button::Normal).clicked() {
+                            chosen = Some(other);
                         }
+                    }
+                    if stage == Stage::Choose {
+                        // Side by side where they fit, one under the other where the window is narrow.
+                        ui.horizontal_wrapped(|ui| {
+                            for (kind, label) in KINDS {
+                                ui.vertical(|ui| {
+                                    crate::space_mouse_model::rest(ui, kind);
+                                    if crate::ui_kit::button(ui, app.tr(label), crate::ui_kit::Button::Normal).clicked() {
+                                        chosen = Some(kind);
+                                    }
+                                });
+                            }
+                        });
+                    } else {
+                        crate::ui_kit::progress(ui, "space_mouse_calibration", progress as f32);
+                        crate::ui_kit::text(ui, &counter, crate::ui_kit::Text::Note("space_mouse_counter"));
+                        // Each step shows the motion it asks for; once calibrated, the device's picture follows it.
+                        let step = match stage {
+                            Stage::Step(index) => solidcraft_space_mouse::STEPS.get(index).copied(),
+                            _ => None,
+                        };
+                        match (step, result) {
+                            (Some(step), _) => crate::space_mouse_model::demo(ui, step, kind),
+                            (_, Some(Ok(calibration))) => {
+                                let calibration = Calibration { dead_zone_share: dead_zone, ..calibration };
+                                crate::space_mouse_model::live(ui, &calibration, raw);
+                                dead_zone_pads(ui, &calibration, raw, true, &Default::default());
+                            }
+                            _ => crate::space_mouse_model::rest(ui, kind),
+                        }
+                    }
+                    // The device's six raw axes as they come, so the jitter at rest is there to see.
+                    crate::ui_kit::text(ui, app.tr("ui.3d_mouse_reading"), crate::ui_kit::Text::Note("space_mouse_reading"));
+                    reading_grid(ui, raw);
+                    // A reassignment made in Preferences stays on top of whatever this records.
+                    if app.preferences.space_mouse_axis_source != crate::space_mouse::SAME_AXES {
+                        crate::ui_kit::text(ui, app.tr("ui.3d_mouse_axes_reassigned"), crate::ui_kit::Text::Note("space_mouse_axes_reassigned"));
+                    }
+                    crate::ui_kit::row(ui, app.tr("ui.3d_mouse_dead_zone"), |ui| {
+                        dead_zone_slider(ui, &mut dead_zone).on_hover_text(app.tr("ui.3d_mouse_dead_zone_tip"));
                     });
-                } else {
-                    crate::ui_kit::progress(ui, "space_mouse_calibration", progress as f32);
-                    crate::ui_kit::text(ui, &counter, crate::ui_kit::Text::Note("space_mouse_counter"));
-                    // Each step shows the motion it asks for; once calibrated, the device's picture follows it.
-                    let step = match stage {
-                        Stage::Step(index) => solidcraft_space_mouse::STEPS.get(index).copied(),
-                        _ => None,
-                    };
-                    match (step, result) {
-                        (Some(step), _) => crate::space_mouse_model::demo(ui, step, kind),
-                        (_, Some(Ok(calibration))) => {
-                            let calibration = Calibration { dead_zone_share: dead_zone, ..calibration };
-                            crate::space_mouse_model::live(ui, &calibration, raw);
-                            dead_zone_pads(ui, &calibration, raw, true, &Default::default());
-                        }
-                        _ => crate::space_mouse_model::rest(ui, kind),
-                    }
-                }
-                // The device's six raw axes as they come, so the jitter at rest is there to see.
-                crate::ui_kit::text(ui, app.tr("ui.3d_mouse_reading"), crate::ui_kit::Text::Note("space_mouse_reading"));
-                reading_grid(ui, raw);
-                // A reassignment made in Preferences stays on top of whatever this records.
-                if app.preferences.space_mouse_axis_source != crate::space_mouse::SAME_AXES {
-                    crate::ui_kit::text(ui, app.tr("ui.3d_mouse_axes_reassigned"), crate::ui_kit::Text::Note("space_mouse_axes_reassigned"));
-                }
-                crate::ui_kit::row(ui, app.tr("ui.3d_mouse_dead_zone"), |ui| {
-                    dead_zone_slider(ui, &mut dead_zone).on_hover_text(app.tr("ui.3d_mouse_dead_zone_tip"));
-                });
-            },
-            |ui| {
-                ui.horizontal(|ui| {
-                    back = ui
-                        .add_enabled_ui(stage != Stage::Choose, |ui| crate::ui_kit::button(ui, app.tr("ui.back"), crate::ui_kit::Button::Normal))
-                        .inner
-                        .clicked();
-                    skip = can_skip
-                        && crate::ui_kit::button(ui, app.tr("ui.3d_mouse_skip"), crate::ui_kit::Button::Normal)
-                            .on_hover_text(app.tr("ui.3d_mouse_skip_tip"))
+                },
+                |ui| {
+                    ui.horizontal(|ui| {
+                        back = ui
+                            .add_enabled_ui(stage != Stage::Choose, |ui| crate::ui_kit::button(ui, app.tr("ui.back"), crate::ui_kit::Button::Normal))
+                            .inner
                             .clicked();
-                    over =
-                        matches!(result, Some(Err(_))) && crate::ui_kit::button(ui, app.tr("ui.start_over"), crate::ui_kit::Button::Normal).clicked();
-                });
-            },
-        );
+                        skip = can_skip
+                            && crate::ui_kit::button(ui, app.tr("ui.3d_mouse_skip"), crate::ui_kit::Button::Normal)
+                                .on_hover_text(app.tr("ui.3d_mouse_skip_tip"))
+                                .clicked();
+                        over = matches!(result, Some(Err(_)))
+                            && crate::ui_kit::button(ui, app.tr("ui.start_over"), crate::ui_kit::Button::Normal).clicked();
+                    });
+                },
+            );
     let cancel = closed || action == crate::ui_kit::Action::Cancel;
     let save = action == crate::ui_kit::Action::Ok;
     if cancel {

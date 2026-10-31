@@ -782,7 +782,7 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Asm, inputs: &mut [Se
                 form_row(ui, &capital(name), |ui| {
                     if i == 0 {
                         // Typing replaces the value at once, as in the other dialogs' value boxes.
-                        let id = egui::Id::new("sc_drive_value");
+                        let id = egui::Id::unique("sc_drive_value");
                         let r = crate::ui_kit::cell_editor(ui, id, v, "", false);
                         crate::params_dialog::complete(ui, &r, v);
                         if std::mem::take(focus) {
@@ -1440,7 +1440,7 @@ pub(crate) fn timeline_joint_tiles(app: &mut SolveApp, ui: &mut egui::Ui, p: &eg
     for (id, name, kind, suppressed) in joints {
         let br = egui::Rect::from_min_size(egui::pos2(x, r.top() + 6.0), vec2(28.0, 28.0));
         crate::scenario::publish_handle(&format!("timeline-joint:{name}"), br.center());
-        let resp = ui.interact(br, ui.id().with(("joint", id)), egui::Sense::click());
+        let resp = ui.interact(br, ui.scope_id().with(("joint", id)), egui::Sense::click());
         let bg = if app.tree.picked_joints.contains(&id) {
             t.accent_soft
         } else if resp.hovered() {
@@ -1558,7 +1558,7 @@ pub fn browser_joints(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize) {
     let folder_shown = !app.session.folder_hidden(key);
     let r = draw_row(
         ui,
-        ui.id().with(key),
+        ui.scope_id().with(key),
         &Row { depth, fold: Some(open), eye: Some(folder_shown), icon: "folder", label: "Joints", dim: !folder_shown, ..Default::default() },
     );
     if r.eye {
@@ -1575,7 +1575,7 @@ pub fn browser_joints(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize) {
         let selected = app.tree.picked_joints.contains(&id);
         let r = draw_row(
             ui,
-            ui.id().with(("joint", id)),
+            ui.scope_id().with(("joint", id)),
             &Row {
                 depth: depth + 1,
                 eye: Some(visible),
@@ -1647,7 +1647,7 @@ pub fn component_joints(app: &mut SolveApp, ui: &mut egui::Ui, path: &[u64], key
     }
     let key = format!("{key}/joints");
     let open = is_open(app, &key, false);
-    let r = draw_row(ui, ui.id().with(&key), &Row { depth, fold: Some(open), icon: "folder", label: "Joints", ..Default::default() });
+    let r = draw_row(ui, ui.scope_id().with(&key), &Row { depth, fold: Some(open), icon: "folder", label: "Joints", ..Default::default() });
     if r.fold || r.clicked {
         toggle(app, &key, false);
     }
@@ -1663,7 +1663,7 @@ pub fn component_joints(app: &mut SolveApp, ui: &mut egui::Ui, path: &[u64], key
         let selected = app.tree.picked_joints.contains(&id);
         let r = draw_row(
             ui,
-            ui.id().with((&key, "joint", id)),
+            ui.scope_id().with((&key, "joint", id)),
             &Row {
                 depth: depth + 1,
                 eye: Some(visible),
