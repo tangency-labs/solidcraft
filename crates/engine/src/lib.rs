@@ -1481,8 +1481,13 @@ impl Session {
     /// Go back to checkpoint `id` as if nothing since had happened (the undo history too). It
     /// and later checkpoints are used up.
     pub fn restore_checkpoint(&mut self, id: u64) -> Result<()> {
-        let i = self.checkpoints.iter().position(|c| c.id == id).ok_or_else(|| EngineError::Other(format!("no checkpoint {id}")))?;
-        let Some(c) = self.checkpoints.drain(i..).next() else { return Err(EngineError::Other(format!("no checkpoint {id}"))) };
+        let missing = || {
+            EngineError::Other(format!(
+                "no checkpoint {id} (used up by restoring or forgetting it or an earlier one, or dropped: only the last {MAX_CHECKPOINTS} are kept)"
+            ))
+        };
+        let i = self.checkpoints.iter().position(|c| c.id == id).ok_or_else(missing)?;
+        let Some(c) = self.checkpoints.drain(i..).next() else { return Err(missing()) };
         let before = Snapshot {
             label: String::new(),
             doc: self.doc.clone(),

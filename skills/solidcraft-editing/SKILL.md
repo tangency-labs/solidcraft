@@ -34,7 +34,7 @@ Inspect one feature of each kind, not every copy.
   3. `timeline.roll_to {}` to return to the end.
 
   Everything after the insert recomputes, and a feature that worked can now fail. Seen: a corner fillet after an inserted chamfer.
-- **Risky or multi-step edits:** take `edit.checkpoint` in its own call first. `edit.restore_checkpoint {checkpoint}` goes back exactly. A `batch` rolls itself back; separate `execute` calls do not.
+- **Risky or multi-step edits:** take `edit.checkpoint` in its own call first. `edit.restore_checkpoint {checkpoint}` goes back exactly. Restoring uses the checkpoint up (and any later ones): take a new one to go back again. Only the last 16 are kept. A `batch` rolls itself back; separate `execute` calls do not.
 - **Deleting:** `timeline.dependents {feature}` first. It lists what is deleted with it and what would fail.
 - **Ambiguous wording:** "2 mm higher" on a value written as `wall + 6` can be relative (`wall + 8`) or absolute.
   - Keep the design's intent, which is the relative reading.
@@ -45,7 +45,7 @@ Inspect one feature of each kind, not every copy.
 1. **Predict, then measure once.** Send the independent changes in one batch, predict the total volume change, then run `measure` once.
    - A move does not change the volume. To confirm a moved sketch, read its points' world coordinates with `sketch.inspect`. You can also predict the COM shift, `Δcom = V_moved · Δz / V_body`, but only when nothing else in that batch changes the volume.
    - If it matches to about 0.01%, you are done.
-   - If not, restore the checkpoint, then apply the changes one at a time, measuring after each.
+   - If not, restore the checkpoint, take a new one, then apply the changes one at a time, measuring after each.
    - A cut or chamfer that leaves the volume unchanged has missed.
 2. **Timeline health:** run `inspect_design {"measure":false,"sketches":false}`. Every `error` and `warning` must be null. If something broke, restore or `undo` before you try anything else.
 3. **Interior features:** take one top-view screenshot, `{"source":"model","view":"top","width":480,"height":320}`. When the server is bridged, `view` also turns the user's camera. The iso view hides standoffs behind the walls.

@@ -26,7 +26,8 @@ pub static COMMANDS: &[CommandSpec] = &[
         "type: rigid|revolute|slider|cylindrical|pin_slot|planar|ball, or a relation: parallel|perpendicular|angle|point_on_plane|point_on_line|line_on_plane \
          (ties only some directions or points, made where the parts are; several between two parts add up); a, b: joint origins ({occurrence, face|circle|edge|point: [x,y,z] in world, or face|circle: \"<face name>\"; z? for a point, end?, x? as joint.origin} | origin name); \
          values?: [angles in deg or expressions, distances]; limits?: [[min, max] | null…]; flip?: bool (default false: the origins are mated, \
-         b's z against a's as two faces meet; true: b's z along a's, so two origins given at one point with the same z stay as they are); \
+         b's z against a's as two faces meet; true: b's z along a's, so two origins given at one point with the same z and x stay as they are; \
+         a point origin without x takes its x from z, so give x on both, or use joint.as_built, to keep a turned part where it is); \
          offset?: mm or an expression; angle?: deg or an expression (an angle relation's tilt from mated; for other joints the default \
          is none, or a half turn where that turns b less, so faces that already meet stay as they are); name?; quiet?: bool (leave \
          out dof and fixed). An expression (text) is \

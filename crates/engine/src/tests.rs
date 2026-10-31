@@ -1930,6 +1930,24 @@ fn checkpoint_restores_with_a_full_undo_history() {
     assert!(s.execute("edit.restore_checkpoint", &json!({"checkpoint": id})).is_err());
 }
 
+/// Regression (#9746): a checkpoint restored already, or one of more than the 16 kept, was
+/// refused with only "no checkpoint N", so a script that restores twice could not tell why.
+#[test]
+fn a_used_up_or_dropped_checkpoint_says_why() {
+    let mut s = Session::default();
+    let id = run(&mut s, "edit.checkpoint", json!({}))["checkpoint"].as_u64().unwrap();
+    run(&mut s, "edit.restore_checkpoint", json!({"checkpoint": id}));
+    let used = s.execute("edit.restore_checkpoint", &json!({"checkpoint": id})).unwrap_err().to_string();
+    assert!(used.contains("used up") && used.contains("16"), "{used}");
+    let first = run(&mut s, "edit.checkpoint", json!({}))["checkpoint"].as_u64().unwrap();
+    for _ in 0..MAX_CHECKPOINTS {
+        run(&mut s, "edit.checkpoint", json!({}));
+    }
+    let dropped = s.execute("edit.restore_checkpoint", &json!({"checkpoint": first})).unwrap_err().to_string();
+    assert!(dropped.contains("16"), "{dropped}");
+    run(&mut s, "edit.restore_checkpoint", json!({"checkpoint": first + 1}));
+}
+
 /// Regression (#3242): `file.new` replaced the session and its checkpoints with it, so a
 /// batch that failed after `file.new` could not go back to the design it began in.
 #[test]

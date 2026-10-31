@@ -23,11 +23,11 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("edit.checkpoint", "Checkpoint", checkpoint).icon("checkpoint")
         .noundo()
         .doc_only()
-        .params("→ {checkpoint: id}: remember the design, active sketch and undo history (restore with edit.restore_checkpoint)"),
+        .params("→ {checkpoint: id}: remember the design, active sketch and undo history (restore with edit.restore_checkpoint; the last 16 are kept, the oldest dropped first)"),
     CommandSpec::new("edit.restore_checkpoint", "Restore Checkpoint", restore_checkpoint).icon("restore")
         .noundo()
         .doc_only()
-        .params("checkpoint: id; forget?: bool (true = drop it without going back). Goes back to it, undo history included"),
+        .params("checkpoint: id; forget?: bool (true = drop it without going back). Goes back to it, undo history included. Restoring or forgetting uses it and every later checkpoint up: take a new one to go back again"),
     CommandSpec::new("timeline.compute_all", "Compute All", compute_all).at("SOLID", "MODIFY").icon("compute").noundo(),
     CommandSpec::new("timeline.play", "Play History", crate::checked!("timeline.play", play))
         .at("INSPECT", "HISTORY")
