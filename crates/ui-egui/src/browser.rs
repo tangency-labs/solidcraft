@@ -481,6 +481,14 @@ fn pick_folder(app: &mut SolveApp, key: &str) {
     app.tree.picked_folder = Some(FolderPick { key: key.into(), session: app.session.uid, doc: Arc::downgrade(&app.session.doc) });
 }
 
+/// The group whose row was clicked last (its key ends in `/g<id>`), while that pick still holds
+/// and the group exists: F2 renames it (#10005).
+pub(crate) fn picked_group(app: &SolveApp) -> Option<u64> {
+    let pick = app.tree.picked_folder.as_ref().filter(|pick| pick.current(app))?;
+    let id = pick.key.rsplit_once("/g")?.1.parse().ok()?;
+    find_group(app, id).map(|g| g.id)
+}
+
 pub(crate) fn toggle_picked_folder(app: &mut SolveApp) -> bool {
     let Some(pick) = app.tree.picked_folder.as_ref().filter(|pick| pick.current(app)) else { return false };
     let key = pick.key.clone();
