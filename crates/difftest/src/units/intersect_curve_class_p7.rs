@@ -915,6 +915,64 @@ fn edge_cases() -> Vec<(String, Value)> {
         OpIn::Fillet { t: 0, j: 3, todo: 1 },
     ];
     out.push(("edge_empty".into(), json!(Script { objects: objs, face: None, cc: [empty(), empty()], ops })));
+    out.extend(real_endpoint_cases());
+    out
+}
+
+/// Deliberately conflicting endpoint records exercise upstream's gap-based arbitration.
+/// Both ends name the bottom edge; the forward tangent points inside and the backward
+/// tangent outside. Equal gaps leave the middle unknown, unequal gaps select one end.
+fn real_endpoint_cases() -> Vec<(String, Value)> {
+    let face = FaceIn {
+        tol: 1e-5,
+        o: [0.0; 3],
+        x: [1.0, 0.0, 0.0],
+        y: [0.0, 1.0, 0.0],
+        domain: [0.0, 0.0, 1.0, 1.0],
+        surf: None,
+        loops: Some(hfp::LoopsIn::Edges { loops: vec![vec![
+            [0.0, 0.0, 0.0], [1.0, 0.0, 0.0],
+            [1.0, 1.0, 0.0], [0.0, 1.0, 0.0],
+        ]] }),
+    };
+    // Objects: curve 0, old-face stand-in 1; real face 2, loop 3, edge 4, vertex 5.
+    let objects = vec![ObjIn::Curve(CurveIn::Line(LineIn {
+        p: [0.5, 0.0, 0.0], v: [0.0, 1.0, 0.0],
+        domain: [0.0, 1.0], scale: 1.0, inside_out: false,
+    })), ObjIn::Face(None)];
+    let mut out = Vec::new();
+    for (name, start, middle, end, old) in [
+        ("max_edge", unknown(), unknown(), pc(103, Some(4), 0.5, 0.0), None),
+        ("max_vertex", unknown(), unknown(), pc(104, Some(5), 1.0, 0.0), None),
+        ("conflict_equal", pc(103, Some(4), 0.5, 0.0), unknown(), pc(103, Some(4), 0.5, 0.0), None),
+        ("conflict_prefer_min", pc(103, Some(4), 0.5, 0.0), unknown(), pc(103, Some(4), 0.5, 1e-6), None),
+        ("conflict_prefer_max", pc(103, Some(4), 0.5, 1e-6), unknown(), pc(103, Some(4), 0.5, 0.0), None),
+        ("old_face_update", pc(103, Some(4), 0.5, 0.0), pc(102, Some(1), 0.5, 0.0), unknown(), Some(1)),
+        ("old_face_mismatch", pc(103, Some(4), 0.5, 0.0), pc(102, Some(2), 0.5, 0.0), unknown(), Some(1)),
+    ] {
+        let cc = CcIn { curve: Some(0), s1: None, uv1: None, ignore: false,
+            tol: 1e-5, fillet: None,
+            ivls: vec![IvlIn { a: 0.0, b: 1.0, pcs: [start, middle, end] }] };
+        let mut objects = objects.clone();
+        if name.starts_with("max_") {
+            let (p, v) = if name == "max_vertex" {
+                ([0.5, 0.5, 0.0], [-0.5, -0.5, 0.0])
+            } else {
+                ([0.5, 0.5, 0.0], [0.0, -0.5, 0.0])
+            };
+            if let Some(slot) = objects.first_mut() {
+                *slot = ObjIn::Curve(CurveIn::Line(LineIn {
+                    p, v, domain: [0.0, 1.0],
+                    scale: if name == "max_vertex" { 0.5_f64.sqrt() } else { 0.5 },
+                    inside_out: false,
+                }));
+            }
+        }
+        let script = Script { objects, face: Some(face.clone()), cc: [cc.clone(), cc],
+            ops: vec![OpIn::ClassifyFace { t: 0, j: 0, do_point: false,
+                face: Some(2), old, uv_ok: false, real: true }] };
+        out.push((format!("real_endpoints_{name}"), json!(script)));
+    }
     out
 }
 
@@ -1091,6 +1149,34 @@ mod tests {
         assert_eq!(&out[..3], &[2.0, 0.0, 2.0]);
         let out = rust_run(&script("collapse_snapped_interval_long")).ok().unwrap();
         assert_eq!(&out[..3], &[2.0, 1001.0, 3.0]);
+    }
+
+    /// Endpoint arbitration and old-face updates compare full state against C++.
+    #[test]
+    fn real_endpoint_branches_match_cpp() {
+        for (name, inputs) in real_endpoint_cases() {
+            let script: Script = serde_json::from_value(inputs).unwrap();
+            let native = ffi::run(ffi_face(&script).as_ref(), &cpp_input(&script)).unwrap();
+            let actual = rust_run(&script).ok().unwrap();
+            assert_eq!(actual, native, "{name}");
+            assert_eq!(actual[1], 0.0, "{name}: operation must succeed");
+            // op, status, interval count, interval bounds, start PC (17 fields), mid PC.
+            let mid = 22;
+            let expected = match name.as_str() {
+                "real_endpoints_conflict_equal" | "real_endpoints_conflict_prefer_max" => 100.0,
+                _ => 102.0,
+            };
+            assert_eq!(actual[mid], expected, "{name}: middle classification");
+            if expected == 102.0 {
+                assert_eq!(actual[mid + 1], 2.0, "{name}: middle face");
+            }
+            if name == "real_endpoints_old_face_mismatch" {
+                assert_eq!(actual[mid + 17], 100.0, "mismatched old face must return before propagating to the end");
+            } else if name == "real_endpoints_old_face_update" {
+                assert_eq!(actual[mid + 17], 102.0, "updated middle must propagate to the end");
+                assert_eq!(actual[mid + 18], 2.0);
+            }
+        }
     }
 
     /// Real-face twins of every variant exist and are comparable (not deferred).
