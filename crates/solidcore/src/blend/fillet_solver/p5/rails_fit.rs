@@ -248,7 +248,7 @@ impl FilletSolver {
     /// `SmFilletSolver::RailsFitTheirFaces` (the fork's refusal, see the module doc):
     /// whether every rail of this solver's fillet, untrimmed, stays on the face it rolls
     /// on. Each rail is classified against its face. It may run off the face past the
-    /// filleted edge's ends ([`leaves_past_an_end`]) and off across a tangent side edge (a
+    /// filleted edge's ends (`leaves_past_an_end`) and off across a tangent side edge (a
     /// rollover onto the next face). A rail that is nowhere on its face, or that leaves it
     /// between its ends across an edge that is not tangent (a wall, an opening's rim)
     /// means the blend is larger than the faces: `false`. Touching or running along the

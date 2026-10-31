@@ -45,7 +45,7 @@ const NUM_SAMPLES: usize = 9;
 /// the blend passes through itself. The stretches are the eigenvalues of `M = H G^-1`
 /// (`G = [Bi.Bj]` of the base surface, `H = [Oi.Bj]` of the offset against it); both are
 /// at least zero when `det M` and `trace M` are. A stretch of zero fits (a pin's
-/// hemispherical end as wide as the round), by [`FIT_TOL`]. A section the solve does
+/// hemispherical end as wide as the round), by `FIT_TOL`. A section the solve does
 /// not find, or a pole of a surface, judges nothing: the check refuses only what it can
 /// solve for, so a refusal is never a false positive but a miss is possible. The nine
 /// sections sit at `(j + 0.5) / 9` and never test the ends of the edge.

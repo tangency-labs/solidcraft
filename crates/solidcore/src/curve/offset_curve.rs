@@ -257,7 +257,7 @@ impl OffsetCurve {
     ///
     /// # Errors
     ///
-    /// Those of [`Curve::clone_for_evaluation`] on a borrowed base curve (geometry
+    /// Those of `Curve::clone_for_evaluation` on a borrowed base curve (geometry
     /// nested too deeply).
     pub fn copy(&self) -> Result<Self> {
         let base = match &self.base {

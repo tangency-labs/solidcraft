@@ -54,7 +54,7 @@
 //! Deviations:
 //! - **Knife edges.** With `fixes.fillet_knife_edge_rounds` (WR-570, the fork's
 //!   tangency-labs/smlib `b7ec55b`, not in SMLib at the pin) the edge-use constructors
-//!   orient their offsets by [`sector_sides`] (`sm_SectorSides`), which also sides a
+//!   orient their offsets by `sector_sides` (`sm_SectorSides`), which also sides a
 //!   cusp's faces; off, they keep upstream's tangency refusal.
 //! - **Sections at thirds.** [`BlendCurveCrossSectionFsg::at_thirds`] is the fork's
 //!   `m_bAtThirds` (tangency-labs/smlib `fd3b6a7`, not in SMLib at the pin; off unless

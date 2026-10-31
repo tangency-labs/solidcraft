@@ -3282,7 +3282,7 @@ pub fn remove_slit_loops_where_solids_touch(
 /// reached through the shell from the first face use's face's first vertex stay; the
 /// rest move to a new face-use shell, in the infinite region or in a region of its
 /// own (with the old region's void flag), which is split in its turn. At most
-/// [`MAX_SHELL_SPLITS`] splits of each shell.
+/// `MAX_SHELL_SPLITS` splits of each shell.
 ///
 /// # Errors
 ///

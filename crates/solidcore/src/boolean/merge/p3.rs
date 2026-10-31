@@ -27,7 +27,7 @@
 //! goes on with half-imprinted B-reps.
 //! `BooleanLists` copies its surface operands with the base copy constructor, which slices
 //! every derived surface to a geometry-less `SmSurface` (WR-196). The `Surface` enum has no
-//! geometry-less kind, so that copy is its own type here ([`BaseSlicedSurface`]) with the
+//! geometry-less kind, so that copy is its own type here (`BaseSlicedSurface`) with the
 //! base virtual defaults the list path reaches on it: `GetNaturalUVDomain` is the zero
 //! extent and `CreateFaceFromSurface` fails at the base `Evaluate` / `EvaluatePoint` with
 //! `SM_ERR`, so a surface list fails as upstream's does and the planar 2D path is never

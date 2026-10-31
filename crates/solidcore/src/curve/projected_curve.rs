@@ -321,7 +321,7 @@ impl ProjectedCurve {
     ///
     /// When the base curve is owned, those of its [`Curve::copy`] (`SM_ERR` for a
     /// Hermite curve; upstream ignores it, see the module notes); when it is borrowed,
-    /// those of [`Curve::clone_for_evaluation`] (geometry nested too deeply).
+    /// those of `Curve::clone_for_evaluation` (geometry nested too deeply).
     pub fn copy(&self, k: &Kernel) -> Result<Self> {
         let curve = if self.owns_curve == OwnsCurve::No {
             // upstream shares the borrowed base curve: an exact copy that keeps its

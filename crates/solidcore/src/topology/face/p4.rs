@@ -2639,7 +2639,7 @@ fn loop_sample_uv_point(k: &Kernel, b: &mut Brep, l: LoopId) -> Result<Option<Po
 
 /// `sm_AssertTestFace37(pFace)` (`SmFace::AssertValid` test 37): whether every inner
 /// loop of the face lies inside its outer loop (the first loop) and outside every other
-/// inner loop, judged at one sample UV point per inner loop ([`loop_sample_uv_point`])
+/// inner loop, judged at one sample UV point per inner loop (`loop_sample_uv_point`)
 /// with `SmLoop::ContainsUVPoint` to the face tolerance mapped to UV. An inner loop
 /// outside or on the boundary of the outer loop, or inside another inner loop, fails;
 /// a face with fewer than two loops, an inner loop without a sample point and an

@@ -1230,7 +1230,7 @@ impl Curve {
     /// it through the owner, `SmTol::GetApproxTol3d(&m_crCurve)`). Not upstream: the
     /// port's curves cannot reach their edge, so a caller that holds the edge records
     /// its tolerance on its evaluation copy of the edge's curve
-    /// ([`Curve::clone_for_evaluation`] keeps it; a [`Clone`], a new curve without
+    /// (`Curve::clone_for_evaluation` keeps it; a [`Clone`], a new curve without
     /// owner as upstream's copy, does not). A later owner change
     /// ([`Curve::set_owner`]) makes the record unreadable.
     pub fn set_owner_zone_tol_3d(&mut self, tol: Option<f64>) {
@@ -1358,7 +1358,7 @@ impl Curve {
 
     /// [`Curve::evaluate`] into the caller's slice (`num_derivs = out.len() - 1`):
     /// the entries the evaluation returns are written, the others are set to
-    /// [`Vec3::UNDEF`] (what [`at`] reads for a missing entry). The B-spline kinds
+    /// [`Vec3::UNDEF`] (what `at` reads for a missing entry). The B-spline kinds
     /// evaluate without a heap allocation ([`BSplineCurve::evaluate_into`]).
     ///
     /// # Errors

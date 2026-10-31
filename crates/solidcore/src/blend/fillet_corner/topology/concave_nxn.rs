@@ -40,7 +40,7 @@ impl FilletCorner {
     ///
     /// # Errors
     /// `SM_ERR` unless exactly two concave edge uses are found;
-    /// [`SolidError::NullPointer`] when two consecutive edge uses share no face;
+    /// [`SolidError::null_pointer`] when two consecutive edge uses share no face;
     /// [`SolidError::InvalidInput`] for a different corner kind, a setback corner (the
     /// caller delegates it), a solver list that does not match the edge uses, or
     /// missing topology upstream dereferences; those of the convexity, solver and

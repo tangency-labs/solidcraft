@@ -977,7 +977,7 @@ pub fn refine_cci_to_surfaces_in<O: ClassObject, S: Copy>(
 /// curve and the edge's UV trim curves (through
 /// [`ClassGeometryMut::topology_entity_mut`]) are rewritten through it
 /// (`sm_ApplyPointSolution`), the solution's parameters moving with them; the last part
-/// then refines again while the gaps stay large (at most [`MAX_REFINE_RECURSION`]
+/// then refines again while the gaps stay large (at most `MAX_REFINE_RECURSION`
 /// levels, upstream's `lRecursionCount`).
 ///
 /// # Errors

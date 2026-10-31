@@ -286,7 +286,7 @@ impl FilletSolver {
 /// (`SetFilletGeomForSurfaces(pFG)` around a call, the previous one restored after it,
 /// also on error): every `GetSurface(rail)` / `SetSurface(rail, ..)` of the call then
 /// reads or writes the geometry's offset surface, lent to the solver for the call
-/// ([`FilletSolver::lend_geometry_surfaces`]).
+/// (`FilletSolver::lend_geometry_surfaces`).
 ///
 /// # Errors
 /// [`SolidError::NotFound`] for a geometry not in `pseudo`; those of `f`.

@@ -931,7 +931,7 @@ pub fn fill_n_sided_hole(
 /// [`fill_n_sided_hole`] with the opt-in fix of WR-461 (#1170): with `stay_inside`,
 /// the cross-boundary derivatives across the inner curves are shortened where their
 /// cubic blend from the opposite boundary would cross that boundary's tangent
-/// plane (see [`limit_inner_cross_derivs`]).
+/// plane (see `limit_inner_cross_derivs`).
 ///
 /// # Errors
 ///

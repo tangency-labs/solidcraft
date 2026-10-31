@@ -13,7 +13,7 @@
 //! Deviations: the release `SM_ASSERT_*_REPORT` macros; every volume test is
 //! `SM_LEVEL_0`, so the level only selects whether the base classes run
 //! (`SM_LEVEL_GIVEN` skips `SmAObject::AssertValid`, which has no failing test) and is
-//! passed down. Orient maps are [`Transform`](crate::surface::transform::Transform)
+//! passed down. Orient maps are [`Transform`](crate::geom::transform::Transform)
 //! values with no next or orient maps of their own, so their nested check
 //! (`SmTransform::AssertValid` of a simple map) and the simple-map tests 3..8 always
 //! pass (they still run, in native order). Upstream builds without `USE_VOLUMES`, so

@@ -1357,7 +1357,7 @@ impl Surface {
 
     /// The concrete kind: once a `const` query made a cone's, sphere's, torus's or
     /// surface of revolution's missing NURB ([`Surface::kind_with_nurb`]), the made kind
-    /// kept on this surface ([`MadeKindSlot`]), as upstream keeps the made NURB on the
+    /// kept on this surface (`MadeKindSlot`), as upstream keeps the made NURB on the
     /// object.
     #[must_use]
     pub fn kind(&self) -> &SurfaceKind {
@@ -1393,7 +1393,7 @@ impl Surface {
     /// method): this surface's kind when it is not analytic or has its NURB, else the
     /// kind with the NURB its virtual `MakeNurb` makes (status ignored, as upstream: a
     /// NURB that cannot be made stays missing), made once on an exact copy and kept on
-    /// this surface ([`MadeKindSlot`]; a plane's and an extrusion's NURB in their own
+    /// this surface (`MadeKindSlot`; a plane's and an extrusion's NURB in their own
     /// NURB slot), so that [`Surface::kind`] answers it from then on, as upstream keeps
     /// it on the object.
     ///
@@ -2860,7 +2860,7 @@ impl Surface {
     /// B-spline swap, whose virtual `ToggleSwapUVBit` flips its swap flag and whose
     /// `SetCanonical` rebuilds its analytic data, status ignored).
     ///
-    /// Notifies nobody: [`Surface::swap_uv_notifying`] sends the edit notifications.
+    /// Notifies nobody: `Surface::swap_uv_notifying` sends the edit notifications.
     ///
     /// # Errors
     ///

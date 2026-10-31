@@ -2904,8 +2904,8 @@ pub fn fix_uv_trim_curves(
 
 /// [`fix_uv_trim_curves`] whose curve edits notify through `env`: each
 /// `EditEndPoint` sends `SM_NO_PRE_EDIT` and `SM_NO_POST_EDIT` with the edited UV trim
-/// curve as caller and first data object ([`notified_end_point_edit`]), and so does each
-/// `Trim` and `EditParameterization` that does work ([`notified_curve_edit`]). Without `env`
+/// curve as caller and first data object (`notified_end_point_edit`), and so does each
+/// `Trim` and `EditParameterization` that does work (`notified_curve_edit`). Without `env`
 /// (or without its context) the edits notify nobody.
 ///
 /// # Errors

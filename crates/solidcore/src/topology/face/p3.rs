@@ -1763,7 +1763,7 @@ pub enum IntersectObject {
     /// A surface owned by no face, held by the adapter at this index: the
     /// `pOptIntersectionSurface` of `SmBrep::MergeCurvesOnSurface`
     /// ([`crate::topology::brep::p10::merge_curves_on_surface_through_surface`]).
-    /// [`IntersectObjects`] resolves none; the adapter that holds such surfaces
+    /// `IntersectObjects` resolves none; the adapter that holds such surfaces
     /// resolves them.
     FreeSurface(usize),
 }

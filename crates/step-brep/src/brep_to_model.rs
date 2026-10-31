@@ -2,7 +2,7 @@
 //!
 //! This is the export counterpart of [`crate::build`]. It maps exact `SolidCore`
 //! topology and analytic/B-spline geometry to the neutral model that
-//! [`step_export`] writes, so an engine B-rep can be exported without being
+//! `step_export` writes, so an engine B-rep can be exported without being
 //! tessellated.
 //!
 //! The initial bridge writes one `MANIFOLD_SOLID_BREP` per B-rep, with all live faces

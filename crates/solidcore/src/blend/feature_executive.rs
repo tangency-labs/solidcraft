@@ -56,7 +56,7 @@
 //!   blocks, `NSidedPatchRebuild` (upstream "does not work"; its only call is commented
 //!   out) and `RebuildBrepAll` (`#if 0`).
 //! - **Statuses.** Upstream logs and ignores many statuses (`SE`, ignored calls): those
-//!   stay ignored, through [`ignore_status`]. A status upstream returns becomes the
+//!   stay ignored, through `ignore_status`. A status upstream returns becomes the
 //!   `Err` of the Rust call; `SM_ERR_ASSERT_FAILURE` (`AERN`) is
 //!   [`SolidError::Upstream`] with that code. `AddFeature` returning `NULL` is `None`.
 //! - **Marks.** The executive locks and releases a mark in its constructor, as

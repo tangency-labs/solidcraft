@@ -1527,7 +1527,7 @@ pub trait SmoothSequenceAccess<O: ClassObject + SolutionObject + Ord> {
 /// removed by `DeleteTopologicalVertex`, merging the edges; when that fails the
 /// vertex stays, as upstream ignores the status. The faces of `b` own their surfaces
 /// (as every face here does); the edits notify through local environments
-/// ([`remove_topo_edges_with_notifications`] takes the caller's).
+/// (`remove_topo_edges_with_notifications` takes the caller's).
 ///
 /// # Errors
 ///

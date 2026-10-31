@@ -368,7 +368,7 @@ pub trait ConstantRadiusOps {
     /// `SM_FG_TANGENT_ROLLOVER`) the UV position stored in a rail vertex use's
     /// intersection point (`None`: no such point, or no such geometry). The geometry
     /// for the surfaces is the solver's, set by the scope that lent its surfaces
-    /// ([`FilletSolver::tangent_rollover_guess`]); context-free callers have none.
+    /// (`FilletSolver::tangent_rollover_guess`); context-free callers have none.
     ///
     /// # Errors
     /// `SM_ERR_NULL_POINTER` without the geometry's rail; [`SolidError::InvalidInput`]

@@ -49,7 +49,7 @@
 //!   from the domain's minimum v; the second branch repeats the `SM_SP_U` test, so
 //!   every other parameter type is `SM_ERR_INVALID_INPUT`
 //!   ([`SolidError::InvalidInput`]). With
-//!   [`Kernel::fixes.iso_curve_uv_line_both_params`] (opt-in, default off) the
+//!   [`Kernel::fixes.iso_curve_uv_line_both_params`](crate::kernel::UpstreamFixes::iso_curve_uv_line_both_params) (opt-in, default off) the
 //!   kernel-threaded entry point builds both directions over the varying coordinate's
 //!   interval from a zero varying origin: `UV(t) = (iso, t, 0)` for constant `u`,
 //!   `UV(t) = (t, iso, 0)` for constant `v` (WR-30). The kernel-free
@@ -269,7 +269,7 @@ impl IsoCurve {
 
     /// [`IsoCurve::create_uv_iso_line`] over the surface's natural domain as upstream
     /// reads it (`GetNaturalUVDomain`, which makes a lazy analytic's missing NURB).
-    /// With [`Kernel::fixes.iso_curve_uv_line_both_params`] both directions are built
+    /// With [`Kernel::fixes.iso_curve_uv_line_both_params`](crate::kernel::UpstreamFixes::iso_curve_uv_line_both_params) both directions are built
     /// over the varying coordinate's interval from a zero varying origin; without it
     /// the pinned body is used.
     ///

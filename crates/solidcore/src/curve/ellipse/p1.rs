@@ -1676,7 +1676,7 @@ impl Ellipse {
     /// chain reaches (`GetEdge()->GetTolerance()`), resolved by a caller that holds it
     /// (`Some` means that edge exists, whatever `owner` says). Then the arc's angle
     /// tolerance is a hundredth of that tolerance over the speed at the mid angle
-    /// (`EvaluateSTEP`) [B630].
+    /// (`EvaluateSTEP`) \[B630\].
     ///
     /// # Errors
     ///
@@ -1904,7 +1904,7 @@ impl Ellipse {
     /// (`AdjustSTEPInterval`); nothing when the domains agree within `SM_EFF_ZERO`.
     /// The old table clamps an end outside the current arc to the arc's ends (WR-211);
     /// with [`crate::kernel::UpstreamFixes::ellipse_adjust_step_interval_keeps_turns`]
-    /// such an end is converted by [`Self::step_to_nurbs_keeping_turns`] instead.
+    /// such an end is converted by `Self::step_to_nurbs_keeping_turns` instead.
     ///
     /// # Errors
     ///

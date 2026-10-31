@@ -547,7 +547,7 @@ pub fn create_uv_curve(
 /// (`on_face`): the point drops' fast-drop trim test classifies on the face
 /// (`pFace->PointClassify` in `GlobalPointSolve`), making the face's trimmed surface
 /// cache when it has none, as upstream's face-owned surface does
-/// ([`crate::intersect::point_class::live_face_fast_drop_test`]). With `None` the
+/// (`crate::intersect::point_class::live_face_fast_drop_test`). With `None` the
 /// drops run as [`create_uv_curve`]'s.
 ///
 /// # Errors

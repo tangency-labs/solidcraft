@@ -73,7 +73,7 @@
 //!   [`calculate_bounding_box_base`]). The base drop's actual break-cache state is
 //!   copied back even on failure; local solves do not force a cache build. The base
 //!   drop's global solve reads the curve cache the caller keeps for this curve
-//!   ([`Curve::drop_point_in`] and `GlobalCoincidenceChecker`, as for every other kind;
+//!   (`Curve::drop_point_in` and `GlobalCoincidenceChecker`, as for every other kind;
 //!   upstream keeps it on the curve), not one built per drop on the copy; a caller
 //!   without one reads the cache kept on this object (built by its first global solve
 //!   under the same kernel state, dropped by every edit; a copy starts without it), as

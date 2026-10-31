@@ -2,7 +2,7 @@
 //! SMLib (C++ via [`solidcore_ffi`]) on identical inputs.
 //!
 //! A unit is green only when, for every case, the topology is identical and
-//! every value agrees within [`REL_TOL`] relative (see [`compare`]).
+//! every value agrees within [`REL_TOL`] relative (see [`compare`](mod@compare)).
 //!
 //! Adding a runner: drop a file in `src/units/<unit_id_with_underscores>.rs`
 //! defining `pub struct Runner;` that implements [`UnitDiff`]. It is

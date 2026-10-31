@@ -695,7 +695,7 @@ pub enum NamingScheme {
     /// owner when none is recorded.
     Caller,
     /// The arena identities the crate's imported B-reps use
-    /// ([`brep_cache::arena_identity`](crate::topology::brep_cache::arena_identity):
+    /// ([`brep_cache::arena_identity`]:
     /// the entity's type code and arena index).
     Arena,
 }

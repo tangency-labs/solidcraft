@@ -73,7 +73,7 @@
 //! - **Edit notifications.** `SetCanonical`'s `SM_NO_PRE_EDIT` / `SM_NO_POST_EDIT`
 //!   (`this`, `SM_NO_GET_OWNER(this)` = null) need the wrapping [`Surface`]'s identity,
 //!   so the B-spline sends them through a caller hook
-//!   ([`BSplineSurface::set_canonical_notifying`], [`BSplineSurface::swap_uv_notifying`],
+//!   (`BSplineSurface::set_canonical_notifying`, `BSplineSurface::swap_uv_notifying`,
 //!   used by `Surface::swap_uv_notifying`); the plain entry points notify nobody.
 //! - **`SetCanonical`** passes no domain to `CreateCanonical` (as upstream), so the
 //!   [`CanonicalSurfaceData::uv_domain`] of its argument is ignored. As upstream, only

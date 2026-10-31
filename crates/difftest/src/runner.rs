@@ -317,7 +317,7 @@ pub struct HeapCheck {
     /// the input (parked cases only under `--run-parked`, where they run).
     pub checked: usize,
     /// Of those, cases whose reruns actually forked a padded child
-    /// ([`solidcore_ffi::isolate::fresh_process`]). A runner that calls C++ in-process
+    /// (`solidcore_ffi::isolate::fresh_process`). A runner that calls C++ in-process
     /// is rerun unpadded, so its cases are checked but not padded.
     pub padded: usize,
     /// `(case, note)`: a padded rerun's C++ output differs from the unpadded one. The note

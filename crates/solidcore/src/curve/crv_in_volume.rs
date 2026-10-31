@@ -34,7 +34,7 @@
 //!
 //! Deviations:
 //! - **Nesting.** `new` returns `InvalidInput` when the curve or the volume would nest
-//!   deeper than [`MAX_GEOMETRY_NESTING`](crate::surface::surface::p2::MAX_GEOMETRY_NESTING)
+//!   deeper than [`MAX_GEOMETRY_NESTING`]
 //!   (32; upstream fixtures nest at most 3), which bounds the recursive dispatch,
 //!   cloning and dropping of nested geometry (no limit upstream). A database read bounds
 //!   the same graph through `DatabaseReader::enter_nested` (32) on both nested readers.
@@ -435,7 +435,7 @@ impl CrvInVolume {
     /// # Errors
     ///
     /// `InvalidInput` when `curve` or `volume` nests deeper than
-    /// [`MAX_GEOMETRY_NESTING`](crate::surface::surface::p2::MAX_GEOMETRY_NESTING) - 1.
+    /// [`MAX_GEOMETRY_NESTING`] - 1.
     pub fn new(
         curve: Curve,
         in_param_space: bool,
@@ -473,7 +473,7 @@ impl CrvInVolume {
     ///
     /// # Errors
     ///
-    /// Those of [`Curve::clone_for_evaluation`] on a curve not owned (geometry
+    /// Those of `Curve::clone_for_evaluation` on a curve not owned (geometry
     /// nested too deeply).
     pub fn copy(&self) -> Result<Self> {
         let owns_curve = self.owns_curve();
@@ -1369,7 +1369,7 @@ impl CrvInVolume {
     ///
     /// Those of [`Volume::transform`], including `InvalidInput` if appending a
     /// volume map would nest deeper than
-    /// [`MAX_GEOMETRY_NESTING`](crate::surface::surface::p2::MAX_GEOMETRY_NESTING).
+    /// [`MAX_GEOMETRY_NESTING`].
     pub fn transform(&mut self, rotate_n_move: &Axis2Placement, scale: Option<Vec3>) -> Result<()> {
         self.transform_at_depth(rotate_n_move, scale, 0)
     }

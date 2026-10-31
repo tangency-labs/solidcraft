@@ -5,7 +5,7 @@
 //!   for `wasm32-unknown-unknown`).
 //! * With feature `cpp`, `build.rs` compiles `harness/cpp/shim/*.cpp` and links
 //!   the static libraries in `bin/cpp/lib`. Each file `src/units/<unit>.rs`
-//!   becomes the module [`units`]`::<unit>` automatically (no registry edits).
+//!   becomes the module `units::<unit>` automatically (no registry edits).
 //!
 //! This is the only crate in the workspace allowed to contain `unsafe`. Every
 //! `extern "C"` declaration must be private to its unit module and wrapped by
@@ -51,7 +51,7 @@ pub const SC_ERR_EXCEPTION: i32 = -1000;
 pub const SC_ERR_BUFFER: i32 = -1001;
 /// Shim status: the shim rejected its arguments.
 pub const SC_ERR_ARG: i32 = -1002;
-/// Status of a case whose C++ side ran in a fresh child process ([`isolate`]) that did
+/// Status of a case whose C++ side ran in a fresh child process (`isolate`) that did
 /// not finish normally (a native crash, the 600 s alarm, an abnormal exit).
 pub const SC_ERR_CHILD_CRASHED: i32 = -1100;
 /// Shim status: the isolated worker's pipes could not be made or written

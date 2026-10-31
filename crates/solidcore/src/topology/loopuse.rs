@@ -983,7 +983,7 @@ pub fn loop_edgeuses(b: &Brep, l: LoopId) -> Result<Vec<EdgeuseId>> {
     edgeuses(b, primary(b, l)?, None, None)
 }
 
-/// The identity a topology entity is notified under by [`face_notify_edit`]: its type
+/// The identity a topology entity is notified under by `face_notify_edit`: its type
 /// code and arena index (the B-rep keeps no attributes for it to select). Public so a
 /// caller that builds bodies itself (an importer) names their entities exactly as
 /// solidcore's Euler operators and primitives do (#1766).

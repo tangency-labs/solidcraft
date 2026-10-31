@@ -1236,7 +1236,7 @@ impl Surface {
     /// Reverses the surface in place in `dir` (`N_SrfReverse` with `surQ == surP`):
     /// the rows (u) or columns (v) of the net are swapped end for end and that
     /// direction's knots reversed by
-    /// [`reverse_knots`](crate::geom::a_object::reverse_knots) (`NI_ReverseKnots`).
+    /// [`reverse_knots`] (`NI_ReverseKnots`).
     ///
     /// Errors with [`NlibCode::Call`] for [`Direction::UV`] (nothing changes).
     pub fn reverse(&mut self, dir: Direction) -> Result<()> {
@@ -1283,7 +1283,7 @@ impl Surface {
 
     /// The surface reversed in `dir` (`N_SrfReverse` into a NULL `surQ`): net rows
     /// (u) or columns (v) in reverse order, that direction's knots reversed by
-    /// [`reverse_knots`](crate::geom::a_object::reverse_knots) (`NI_ReverseKnots`), the
+    /// [`reverse_knots`] (`NI_ReverseKnots`), the
     /// other's copied.
     ///
     /// Errors with [`NlibCode::Call`] for [`Direction::UV`].

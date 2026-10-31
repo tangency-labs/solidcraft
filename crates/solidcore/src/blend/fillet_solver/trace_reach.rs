@@ -22,7 +22,7 @@
 //! points at the five parameter points the extension evaluates (the four ends and
 //! the middle of the domain's middle lines); as in the fork, the last of the two that
 //! matches wins. A failed evaluation gives the factor's extension, as the fork's does,
-//! except that [`SolidError::Unported`] propagates. There is no recursion.
+//! except that [`SolidError::Unported`](crate::error::SolidError::Unported) propagates. There is no recursion.
 
 use super::p1::FilletSolver;
 use crate::error::Result;

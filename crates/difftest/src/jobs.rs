@@ -139,7 +139,7 @@ fn fixture_weight(fixtures: &Path, id: &str) -> u64 {
 /// Queue order: heaviest first, ties in the serial order. The weight is the unit's wall
 /// time in milliseconds from a previous run's [`TIMES_FILE`], else the case count of its
 /// previous report (both looked up in `dirs`, in order), else its fixture estimate
-/// under `fixtures` (see [`fixture_weight`]). A unit's time beats its case count: one
+/// under `fixtures` (see `fixture_weight`). A unit's time beats its case count: one
 /// slow case can outweigh thousands of fast ones.
 pub fn schedule(units: &[String], dirs: &[&Path], fixtures: &Path) -> Vec<usize> {
     let weights: Vec<u64> = units

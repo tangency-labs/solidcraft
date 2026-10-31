@@ -12,7 +12,7 @@
 //! | [`surface_surface_fillet`], [`SurfaceFilletOptions`] | `SmFilletExecutive::SurfaceSurfaceFillet` |
 //! | [`FilletExecutive::do_surface_filleting`] | `SmFilletExecutive::DoSurfaceFilleting` |
 //! | [`FilletExecutive::set_fillet_brep_edge_map`] | `SmFilletExecutive::SetFilletBrepEdgeMap` |
-//! | [`FilletExecutive::process_smooth_edge_sequences`], [`FilletExecutive::process_smooth_edge_sequences_with`] | `SmFilletExecutive::ProcessSmoothEdgeSequences` |
+//! | [`FilletExecutive::process_smooth_edge_sequences`], `FilletExecutive::process_smooth_edge_sequences_with` | `SmFilletExecutive::ProcessSmoothEdgeSequences` |
 //! | [`FilletExecutive::collect_tangent_edge_sequence`] | `SmFilletExecutive::CollectTangentEdgeSequence` |
 //! | [`TemporaryRadiusChange::new`], [`TemporaryRadiusChange::revert`], [`with_temporary_radius_change`] | `SmTemporaryRadiusChange` (constructor, destructor) |
 //! | [`TemporaryRadiusChange::set_up`] | `SmTemporaryRadiusChange::SetUp` |

@@ -867,7 +867,7 @@ impl FilletSolver {
 
     /// `GetSurface(lRailIndex)`: with a geometry for the surfaces, that geometry's
     /// offset surface (`SmFilletGeom::GetOffsetSurface`, lent to the solver by
-    /// [`FilletSolver::lend_geometry_surfaces`]), else the solver's own.
+    /// `FilletSolver::lend_geometry_surfaces`), else the solver's own.
     ///
     /// # Errors
     ///

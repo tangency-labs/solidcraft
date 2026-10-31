@@ -31,7 +31,7 @@
 //!
 //! # Metadata
 //!
-//! [`write`] emits a neutral product named `part` with an AP203 schema. Callers that
+//! [`write()`] emits a neutral product named `part` with an AP203 schema. Callers that
 //! need a product name, author, organization, schema, layer, colour or material use
 //! [`write_with_metadata`] (or [`write_faceted_with_metadata`]), which emits those
 //! entities directly; no post-write text rewriting is required.
@@ -1140,7 +1140,7 @@ pub fn write(model: &Model) -> Result<String, ExportError> {
 ///
 /// # Errors
 ///
-/// The same conditions as [`write`], plus a colour component outside `0..=1`.
+/// The same conditions as [`write()`], plus a colour component outside `0..=1`.
 pub fn write_with_metadata(
     model: &Model,
     metadata: &ExportMetadata,

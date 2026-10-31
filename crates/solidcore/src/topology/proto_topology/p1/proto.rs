@@ -940,7 +940,7 @@ impl<O: ClassObject> VertexDefinition<O> {
     /// objects (an edge's t, a face's uv), the gap, the position and the crossing angle
     /// only when its points lie within both objects' tolerance of each other (a farther
     /// one is another point the proto vertex took in) and its misplacement bound
-    /// ([`crossing_error`]) is smaller. Returns whether it was placed again.
+    /// (`crossing_error`) is smaller. Returns whether it was placed again.
     ///
     /// # Errors
     ///

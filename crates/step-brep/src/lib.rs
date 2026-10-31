@@ -1,7 +1,7 @@
 //! Build solidcore B-rep bodies from the neutral [`step_import::Model`], and map a
 //! B-rep back to [`step_import::Model`] for export.
 //!
-//! [`brep_to_model`] is the export counterpart: exact geometry and topology become a
+//! [`brep_to_model()`] is the export counterpart: exact geometry and topology become a
 //! neutral model that `step-export` writes as analytic/NURBS STEP.
 //!
 //! This is the production counterpart of the difftest `build_rust` recipe: each STEP

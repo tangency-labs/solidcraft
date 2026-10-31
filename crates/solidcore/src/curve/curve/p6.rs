@@ -57,8 +57,8 @@
 //!   tripled per split) keeps the two curves' caches for its whole recursion instead
 //!   (`Curve::global_point_solve_cached`), built at the first global solve as
 //!   upstream's; the build is deterministic, so the solutions are those of a fresh
-//!   cache. [`Curve::drop_point_in`] keeps the caches of a caller's curves in a
-//!   [`DropPointCaches`] (`IsPointOnCurve` in `FindInteriorCurves`). Other
+//!   cache. `Curve::drop_point_in` keeps the caches of a caller's curves in a
+//!   `DropPointCaches` (`IsPointOnCurve` in `FindInteriorCurves`). Other
 //!   `DropPoint` callers still build one per call.
 //! - **Recursion.** `GlobalCoincidenceChecker` splits closed and half closed curves
 //!   recursively; past [`MAX_COINCIDENCE_DEPTH`] nested splits it fails with
