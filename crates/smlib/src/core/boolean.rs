@@ -82,7 +82,7 @@ fn finish(r: Brep, solid_in: bool, nonmanifold: bool) -> SolidResult<Done> {
 fn copies(k: &mut Kernel, bodies: &[&Body]) -> SolidResult<Vec<Brep>> {
     // Under the kernel's lock (`run` holds it), as every body lock is: two never deadlock.
     let mut out = Vec::with_capacity(bodies.len());
-    for (n, b) in bodies.iter().enumerate() {
+    for b in bodies {
         let g = b.0.lock().unwrap_or_else(PoisonError::into_inner);
         let c = brep_copy(k, &g)?;
         drop(g);
