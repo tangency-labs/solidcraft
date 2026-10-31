@@ -1,7 +1,7 @@
 //! The paper scene: what a sheet shows, as strokes and fills in sheet millimetres, for the writers
 //! that put it in a file (DXF, SVG, PNG, PDF). Plain data with one check, [`Scene::validate`]:
-//! nothing here is saved, drawn on screen or made by a command yet. Text, clips, line patterns and
-//! styles are later additions.
+//! nothing here is saved, drawn on screen or made by a command yet. Text, clips and styles are
+//! later additions.
 //!
 //! - Coordinates are millimetres from the sheet's lower-left corner, x to the right and y up;
 //!   angles are radians, anticlockwise. A line's width is its width on paper, centred on its path.
@@ -10,6 +10,9 @@
 //! - A stroke has butt caps and miter joins with a miter limit of 4 (a join sharper than about 29°
 //!   is bevelled). A closed stroke joins at its start instead of having two caps. A fill is
 //!   painted even-odd, so a hole is a hole whichever way its loop runs.
+//! - A dashed stroke's pattern ([`Dashes`]) runs along its whole path, round a closed one, in
+//!   paper millimetres: a dashed line looks the same at any view scale. Each dash has the
+//!   stroke's caps and joins.
 //! - Each group says which object on the sheet drew it, by an id, and what kind of object that is.
 //!   The id is opaque here: it names one object within the sheet, and several groups may come from
 //!   the same object. DXF and PDF put a group on the layer its kind names ([`ObjectKind::layer`]).
@@ -23,14 +26,19 @@
 //!   within ±2e5 mm;
 //! - a stroke's pieces meeting end to start within [`EPS`], and its ends too when it is closed;
 //!   every loop of a fill closed the same way;
-//! - a line width above 0 and at most [`MAX_LINE_MM`].
+//! - a line width above 0 and at most [`MAX_LINE_MM`];
+//! - a dash pattern of 2 to 12 lengths, an even count, each above 0 and at most [`MAX_DASH_MM`],
+//!   its phase from 0 up to (not including) the pattern's length, and at most [`MAX_DASHES`]
+//!   dashes along the stroke, counted from its pieces' lengths ([`Seg2::length`]).
 //!
 //! It does not certify simple loops, holes inside their outer loop or a path that never doubles
 //! back. Validation after parsing cannot bound parsing allocations: an encoded-input boundary must
 //! also limit bytes and nesting.
 //!
 //! Writers read a [`Prepared`] scene, which only [`Scene::prepare`] makes, so none reads one that
-//! wasn't checked. Clipping will happen there too, once, before any writer (A8).
+//! wasn't checked, and format it on their number grid ([`Prepared::on_grid`], [`grid`]'s rules),
+//! so every format draws the same joints, closures and merges. Clipping will happen in
+//! `prepare` too, once, before any writer (A8).
 
 use serde::{Deserialize, Serialize};
 
@@ -39,9 +47,18 @@ use std::f64::consts::FRAC_PI_2;
 use crate::{EPS, Region2, Seg2, Vec2};
 
 pub mod annotate;
+pub mod flatten;
+pub mod grid;
+
+pub use flatten::flatten;
+pub use grid::{Grid, GridDashes, GridGroup, GridItem, GridPath, GridPoint, GridReport, OnGrid, Piece};
 
 /// The widest line a scene may draw, in millimetres.
 pub const MAX_LINE_MM: f64 = 10.0;
+/// The longest dash or gap a pattern may have, in millimetres.
+pub const MAX_DASH_MM: f64 = 1000.0;
+/// The most dashes one stroke may need: what a writer cuts it into stays bounded.
+pub const MAX_DASHES: f64 = 1e6;
 /// The longest side a sheet may have, in millimetres.
 pub const MAX_SIDE_MM: f64 = 5000.0;
 /// Groups, items, loops and curve pieces a scene may hold in all.
@@ -120,10 +137,39 @@ impl ObjectKind {
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Item {
     /// A line `width_mm` wide along `path`, each piece starting where the one before ends. A
-    /// closed stroke also ends where it starts.
-    Stroke { path: Vec<Seg2>, closed: bool, width_mm: f64 },
+    /// closed stroke also ends where it starts. With a `pattern` it is dashed; without, solid.
+    Stroke {
+        path: Vec<Seg2>,
+        closed: bool,
+        width_mm: f64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pattern: Option<Dashes>,
+    },
     /// A region painted solid.
     Fill { region: Region2 },
+}
+
+/// A dashed line's pattern: dash and gap lengths in turn, starting with a dash, and how far into
+/// the pattern the stroke starts.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Dashes {
+    pub lengths_mm: Vec<f64>,
+    pub phase_mm: f64,
+}
+
+impl Dashes {
+    /// Checks the pattern, and the dashes it needs along `path`, against the module's notes.
+    fn check(&self, path: &[Seg2]) -> Result<()> {
+        let n = self.lengths_mm.len();
+        require((2..=12).contains(&n) && n.is_multiple_of(2), "a dash pattern has an even count of 2 to 12 lengths")?;
+        require(self.lengths_mm.iter().all(|l| *l > 0.0 && *l <= MAX_DASH_MM), "each dash and gap is above 0 and at most 1000 mm")?;
+        let period: f64 = self.lengths_mm.iter().sum();
+        require(self.phase_mm >= 0.0 && self.phase_mm < period, "a dash pattern's phase is from 0 up to its length")?;
+        // Counted as writers that cut a line into its dashes count them: pairs along the length.
+        let length: f64 = path.iter().map(Seg2::length).sum();
+        require(length / period * (n / 2) as f64 <= MAX_DASHES, "a dashed line needs at most 1,000,000 dashes")
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
@@ -202,13 +248,16 @@ impl Scene {
         require([x, y].into_iter().all(|side| side > 0.0 && side <= MAX_SIDE_MM), "each side of the sheet is above 0 and at most 5000 mm")?;
         for item in self.groups.iter().flat_map(|g| &g.items) {
             match item {
-                Item::Stroke { path, closed, width_mm } => {
+                Item::Stroke { path, closed, width_mm, pattern } => {
                     require(*width_mm > 0.0 && *width_mm <= MAX_LINE_MM, "a line is above 0 and at most 10 mm wide")?;
                     require(!path.is_empty(), "a stroke has at least one piece")?;
                     pieces(path)?;
                     require(path.iter().zip(path.iter().skip(1)).all(|(a, b)| meet(a, b)), "a stroke's pieces meet end to start")?;
                     if *closed {
                         require(path.last().zip(path.first()).is_some_and(|(a, b)| meet(a, b)), "a closed stroke ends where it starts")?;
+                    }
+                    if let Some(dashes) = pattern {
+                        dashes.check(path)?;
                     }
                 }
                 Item::Fill { region } => {

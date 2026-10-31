@@ -619,7 +619,7 @@ fn drawn(group: &Group) -> Vec<(Vec<[i64; 4]>, bool, f64)> {
         .items
         .iter()
         .map(|item| match item {
-            Item::Stroke { path, closed, width_mm } => (ends(path), *closed, *width_mm),
+            Item::Stroke { path, closed, width_mm, .. } => (ends(path), *closed, *width_mm),
             Item::Fill { region } => (ends(&region.outer.segs), true, 0.0),
         })
         .collect()
