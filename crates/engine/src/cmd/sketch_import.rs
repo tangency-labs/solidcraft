@@ -9,6 +9,7 @@ use solidcraft_sketch::{CurveKind, LinkKind, LinkSource, Sketch};
 
 use super::CommandSpec;
 use super::sketch::{edit, ids_of};
+use super::sketch_store;
 use crate::params::{bad, num, str_, vec2};
 use crate::{EngineError, Result, Session};
 
@@ -42,7 +43,7 @@ pub fn drawing_import_command(path: &str) -> Option<&'static str> {
     }
 }
 
-fn source_text(p: &Value, cmd: &str) -> Result<String> {
+fn source_text(p: &Value, cmd: &str, svg: bool) -> Result<String> {
     if let Some(t) = str_(p, "text") {
         if t.len() > MAX_DRAWING_BYTES {
             return Err(bad(cmd, "the drawing is too large"));
@@ -51,7 +52,20 @@ fn source_text(p: &Value, cmd: &str) -> Result<String> {
     }
     let path = str_(p, "path").filter(|x| !x.trim().is_empty() && x.len() < 4096).ok_or_else(|| bad(cmd, "give `path` or `text`"))?;
     let bytes = solidcraft_io::vfs::read(path, MAX_DRAWING_BYTES).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
+    if svg {
+        return solidcraft_io::decode_svg(&bytes).map_err(|e| drawing_error(p, svg, e.to_string()));
+    }
     Ok(String::from_utf8_lossy(&bytes).to_string())
+}
+
+/// A problem with the drawing file's contents (not with the command's parameters), named after
+/// the file so the message says which drawing it is about (#9641).
+fn drawing_error(p: &Value, svg: bool, msg: String) -> EngineError {
+    let name = str_(p, "path")
+        .and_then(|x| std::path::Path::new(x).file_name())
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| if svg { "SVG" } else { "DXF" }.to_string());
+    EngineError::Other(format!("{name}: {msg}"))
 }
 
 /// Add imported geometry to a sketch, sharing end points that meet.
@@ -152,6 +166,12 @@ fn bounds_of(geom: &[Geom2]) -> Option<(Vec2, Vec2)> {
                 pts.extend([*c + Vec2::new(r, r), *c - Vec2::new(r, r)]);
             }
             Geom2::Spline { pts: sp, .. } => pts.extend(sp.iter().copied()),
+            // Points along the curve, not its apex, which can lie well outside it (an elliptical
+            // arc of a DXF comes in as conics, #8155).
+            Geom2::Conic { a, apex, b, rho } if *rho > 0.0 && *rho < 1.0 => {
+                let seg = solidcraft_geom::Seg2::Conic { a: *a, apex: *apex, b: *b, w: rho / (1.0 - rho) };
+                pts.extend((0..=64).map(|i| seg.point_at(f64::from(i) / 64.0)));
+            }
             Geom2::Conic { a, apex, b, .. } => pts.extend([*a, *apex, *b]),
             Geom2::Text { at, .. } => pts.push(*at),
         }
@@ -161,9 +181,16 @@ fn bounds_of(geom: &[Geom2]) -> Option<(Vec2, Vec2)> {
     (lo.x.is_finite() && lo.y.is_finite() && hi.x.is_finite() && hi.y.is_finite()).then_some((lo, hi))
 }
 
-fn read_drawing(p: &Value, cmd: &str, svg: bool) -> Result<Vec<Geom2>> {
-    let text = source_text(p, cmd)?;
-    if svg { solidcraft_io::read_svg(&text) } else { solidcraft_io::read_dxf(&text) }.map_err(|e| bad(cmd, e.to_string()))
+/// The drawing's geometry and the box around it; a drawing with none is an error that says why
+/// (#9641).
+fn read_drawing(p: &Value, cmd: &str, svg: bool) -> Result<(Vec<Geom2>, (Vec2, Vec2))> {
+    let text = source_text(p, cmd, svg)?;
+    let geom = if svg { solidcraft_io::read_svg(&text) } else { solidcraft_io::read_dxf(&text) }.map_err(|e| drawing_error(p, svg, e.to_string()))?;
+    let Some(bounds) = bounds_of(&geom) else {
+        let why = if svg { solidcraft_io::svg_nothing_to_import(&text) } else { "the DXF has no entities SolidCraft reads".to_string() };
+        return Err(drawing_error(p, svg, why));
+    };
+    Ok((geom, bounds))
 }
 
 /// How big a drawing is in its own file, to size it before it is inserted.
@@ -174,22 +201,18 @@ fn drawing_bounds(_s: &mut Session, p: &Value) -> Result<Value> {
         Some(f) => !f.eq_ignore_ascii_case("dxf"),
         None => !name_is_dxf,
     };
-    let geom = read_drawing(p, cmd, svg)?;
-    let (lo, hi) = bounds_of(&geom).ok_or_else(|| bad(cmd, "the drawing has no geometry SolidCraft reads"))?;
+    let (_, (lo, hi)) = read_drawing(p, cmd, svg)?;
     Ok(json!({"min": [lo.x, lo.y], "max": [hi.x, hi.y], "width": hi.x - lo.x, "height": hi.y - lo.y}))
 }
 
 fn insert(s: &mut Session, p: &Value, cmd: &str, svg: bool) -> Result<Value> {
-    let geom = read_drawing(p, cmd, svg)?;
-    if geom.is_empty() {
-        return Err(bad(cmd, "the drawing has no geometry SolidCraft reads"));
-    }
+    let (geom, (lo, hi)) = read_drawing(p, cmd, svg)?;
     // A size in millimetres wins over a factor; the aspect ratio is always kept.
-    let natural = bounds_of(&geom).map(|(lo, hi)| (hi.x - lo.x, hi.y - lo.y));
+    let natural = (hi.x - lo.x, hi.y - lo.y);
     let sized = |key: &str, of: fn(&(f64, f64)) -> f64| -> Result<Option<f64>> {
         let Some(v) = p.get(key) else { return Ok(None) };
         let want = v.as_f64().filter(|w| w.is_finite() && *w > 0.0).ok_or_else(|| bad(cmd, format!("`{key}` must be a positive number (mm)")))?;
-        let have = natural.as_ref().map(of).filter(|h| *h > 1e-9).ok_or_else(|| bad(cmd, format!("the drawing has no {key} to size")))?;
+        let have = Some(of(&natural)).filter(|h| *h > 1e-9).ok_or_else(|| bad(cmd, format!("the drawing has no {key} to size")))?;
         Ok(Some(want / have))
     };
     let from_size = match sized("width", |n| n.0)? {
@@ -204,7 +227,7 @@ fn insert(s: &mut Session, p: &Value, cmd: &str, svg: bool) -> Result<Value> {
     let (sin, cos) = angle.sin_cos();
     let pivot = match str_(p, "align") {
         None | Some("origin") => Vec2::ZERO,
-        Some("center") => bounds_of(&geom).map(|(lo, hi)| (lo + hi) * 0.5).unwrap_or(Vec2::ZERO),
+        Some("center") => (lo + hi) * 0.5,
         Some(_) => return Err(bad(cmd, "`align` must be \"origin\" or \"center\"")),
     };
     let off = p.get("at").and_then(vec2).unwrap_or(Vec2::ZERO);
@@ -227,12 +250,13 @@ fn insert(s: &mut Session, p: &Value, cmd: &str, svg: bool) -> Result<Value> {
         Ok((ids_of(sk, &cs), texts))
     })?;
     // Text becomes sketch text.
-    let id = s.active_sketch.ok_or_else(|| bad(cmd, "no sketch"))?;
+    let id = sketch_store::active(s).ok_or_else(|| bad(cmd, "no sketch"))?;
     let mut n_text = 0;
     for t in texts {
         if let Geom2::Text { text, at, height, angle: own } = t {
+            // Not `sketch_store::update`: a text that can't be linked is skipped, not refused.
             let mut doc = (*s.doc).clone();
-            let mut sk = doc.sketch(id)?.clone();
+            let mut sk = sketch_store::read(&doc, id)?.clone();
             if super::sketch_project::add_link(
                 s,
                 &doc,
@@ -243,7 +267,7 @@ fn insert(s: &mut Session, p: &Value, cmd: &str, svg: bool) -> Result<Value> {
             )
             .is_ok()
             {
-                *doc.sketch_mut(id)? = sk;
+                sketch_store::write(&mut doc, id, sk)?;
                 *s.doc_mut() = doc;
                 n_text += 1;
             }
@@ -262,12 +286,7 @@ fn insert_svg(s: &mut Session, p: &Value) -> Result<Value> {
 
 fn export_dxf(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.export_dxf";
-    let id = match p.get("sketch") {
-        Some(Value::Number(n)) => n.as_u64(),
-        Some(Value::String(x)) => s.doc.find_feature(x).map(|f| f.id),
-        _ => s.active_sketch,
-    }
-    .ok_or_else(|| bad(cmd, "no such sketch (and none is active)"))?;
+    let id = sketch_store::target(s, p, cmd)?;
     let st = s.model.state();
     let ss = st.sketch(id).ok_or_else(|| EngineError::Other("that sketch is not evaluated".into()))?;
     let sk = &ss.sketch;
@@ -350,6 +369,59 @@ mod tests {
             assert_eq!(r["curves"], 1, "{n} points: {r}");
             s.execute("sketch.finish", &json!({})).unwrap();
         }
+    }
+
+    /// #9641: an SVG with nothing SolidCraft can draw (here only an embedded picture) is refused
+    /// with a message naming the file and saying why, not "invalid parameters … no geometry"; a
+    /// UTF-16 SVG file inserts.
+    #[test]
+    fn an_svg_with_nothing_to_import_says_why() {
+        let dir = std::env::temp_dir().join(format!("solidcraft-9641-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let picture = dir.join("logo.svg");
+        std::fs::write(
+            &picture,
+            r#"<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64"><image width="64" height="64" href="data:image/png;base64,iVBORw0KGgo="/></svg>"#,
+        )
+        .unwrap();
+        let mut s = Session::default();
+        for cmd in ["sketch.insert_svg", "sketch.drawing_bounds"] {
+            let e = s.execute(cmd, &json!({"path": picture.to_string_lossy(), "align": "center"})).unwrap_err().to_string();
+            assert!(e.starts_with("logo.svg: ") && e.contains("embedded picture") && !e.contains("invalid parameters"), "{cmd}: {e}");
+        }
+        assert!(s.active_sketch.is_none(), "a refused insert leaves no empty sketch behind");
+        let square = r#"<svg xmlns="http://www.w3.org/2000/svg" width="10mm" height="10mm" viewBox="0 0 10 10"><rect width="10" height="10"/></svg>"#;
+        let utf16 = dir.join("square.svg");
+        std::fs::write(&utf16, [0xFF, 0xFE].into_iter().chain(square.encode_utf16().flat_map(u16::to_le_bytes)).collect::<Vec<u8>>()).unwrap();
+        let r = s.execute("sketch.insert_svg", &json!({"path": utf16.to_string_lossy()})).unwrap();
+        assert_eq!(r["curves"], 4, "{r}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// #8155: an elliptical arc of a DXF (as Fusion writes one) comes into the sketch as exact
+    /// conics, and the drawing's size is the arc's own, not the box round the conics' apexes.
+    #[test]
+    fn an_elliptical_arc_comes_in_as_conics_at_its_own_size() {
+        // Centre (0, 0), major radius 10 along X, minor 5, from -45° to 45°: one quarter turn,
+        // whose apex is at x = 10 / cos 45° = 14.1, past the arc's end at x = 10.
+        let dxf = format!(
+            "0\nSECTION\n2\nENTITIES\n0\nELLIPSE\n10\n0\n20\n0\n11\n10\n21\n0\n40\n0.5\n41\n{}\n42\n{}\n0\nENDSEC\n0\nEOF\n",
+            -std::f64::consts::FRAC_PI_4,
+            std::f64::consts::FRAC_PI_4
+        );
+        let mut s = Session::default();
+        let b = s.execute("sketch.drawing_bounds", &json!({"text": dxf, "format": "dxf"})).unwrap();
+        let (w, h) = (b["width"].as_f64().unwrap(), b["height"].as_f64().unwrap());
+        let half = std::f64::consts::FRAC_1_SQRT_2;
+        assert!((w - 10.0 * (1.0 - half)).abs() < 1e-3 && (h - 10.0 * half).abs() < 1e-3, "{b}");
+        let r = s.execute("sketch.insert_dxf", &json!({"text": dxf})).unwrap();
+        assert_eq!(r["curves"], 1, "{r}");
+        let st = s.model.state();
+        let sk = &st.sketch(r["sketch"].as_u64().unwrap()).unwrap().sketch;
+        assert!(matches!(sk.curves[0].kind, solidcraft_sketch::CurveKind::Conic { .. }), "{:?}", sk.curves[0].kind);
+        // Every point the sketch draws it with lies on the ellipse.
+        let worst = sk.polyline(0).iter().map(|p| ((p.x / 10.0).powi(2) + (p.y / 5.0).powi(2) - 1.0).abs()).fold(0.0, f64::max);
+        assert!(worst < 1e-9, "{worst}");
     }
 
     const PLATE: &str =

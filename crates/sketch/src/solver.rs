@@ -2901,6 +2901,32 @@ fn solve_inner(
         let now = State { sk, lay: &lay, x: &x };
         for (b, _) in &sub {
             let (Block::User(ci, k) | Block::TangentAt(ci, k, _)) = b else { continue };
+            // An angle requires two directions. A nearly collapsed line can satisfy its
+            // horizontal/vertical residual within tolerance while pointing anywhere, so
+            // the angle alone must not turn that degenerate pose into a solved sketch.
+            // Compare against the input length, so an already short reference still solves.
+            let angular_lines = match **k {
+                ConstraintKind::Angle { a, b, .. } => Some([a, b]),
+                ConstraintKind::LineAngle { l, .. } => Some([l, l]),
+                _ => None,
+            };
+            if angular_lines.is_some_and(|lines| {
+                lines.iter().any(|&l| {
+                    let (a, b) = now.line(l);
+                    let original = match sk.curves.get(l).map(|c| &c.kind) {
+                        Some(CurveKind::Line { a, b }) => sk.point(*a).zip(sk.point(*b)).map_or(1.0, |(a, b)| a.dist(b)),
+                        _ => 1.0,
+                    };
+                    a.dist(b) < ACCEPT * original
+                })
+            }) {
+                if let Some(c) = sk.constraints.get(*ci)
+                    && !failing.contains(&c.id)
+                {
+                    failing.push(c.id.clone());
+                }
+                degenerate = true;
+            }
             let ConstraintKind::Tangent { a: ta, b: tb } = **k else { continue };
             let Some(c) = sk.constraints.get(*ci) else { continue };
             let mut touch_free = Vec::new();

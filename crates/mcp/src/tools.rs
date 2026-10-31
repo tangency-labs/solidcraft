@@ -13,8 +13,14 @@ use crate::backend::{Backend, STILL_RUNNING};
 const MAX_BATCH: usize = 10_000;
 /// Largest image returned by `screenshot`.
 const MAX_IMAGE_BYTES: usize = 32 << 20;
+/// Relative tolerance on an expected volume (`expect.tol`) when the call gives none.
+const EXPECT_VOLUME_TOL: f64 = 0.002;
+/// Absolute tolerance on each expected bounding-box coordinate, mm.
+const EXPECT_BBOX_TOL_MM: f64 = 0.05;
 
 const VIEWS: &[&str] = &["iso", "home", "front", "back", "top", "bottom", "left", "right", "fit"];
+/// What `check_parameters` can report.
+const REPORTS: &[&str] = &["measure", "cylinders", "errors"];
 
 fn obj(props: Value, required: &[&str]) -> Value {
     let mut o = json!({"type": "object", "properties": props, "additionalProperties": false});
@@ -58,6 +64,34 @@ fn string(desc: &str) -> Value {
     json!({"type": "string", "description": desc})
 }
 
+/// The `expect` argument of `execute` and `batch`: what the design should measure once the
+/// call has gone through.
+fn expect_schema() -> Value {
+    json!({
+        "type": "object",
+        "description": "Check the design after the call against the numbers you computed: {volume_mm3?, tol? (relative, default 0.002), \
+                        bodies?, bbox?: {min: [x,y,z], max: [x,y,z]} (each coordinate within 0.05 mm)}. The reply gains `expectation`: \
+                        {ok, measured: {volume_mm3, bodies, bbox}, expected, mismatch: [\"volume: measured X, expected Y (+Z %)\", ...]}. \
+                        A mismatch is a tool error that names it first; the design is kept as built, so inspect it and fix it or carry on",
+        "properties": {
+            "volume_mm3": {"type": "number", "description": "Total volume of the closed bodies, mm³"},
+            "tol": {"type": "number", "description": "Relative tolerance on the volume (default 0.002)"},
+            "bodies": {"type": "integer", "description": "Number of bodies"},
+            "bbox": {
+                "type": "object",
+                "description": "Bounding box of all bodies together, mm, each coordinate within 0.05 mm",
+                "properties": {
+                    "min": {"type": "array", "items": {"type": "number"}, "minItems": 3, "maxItems": 3},
+                    "max": {"type": "array", "items": {"type": "number"}, "minItems": 3, "maxItems": 3},
+                },
+                "required": ["min", "max"],
+                "additionalProperties": false,
+            },
+        },
+        "additionalProperties": false,
+    })
+}
+
 /// Every tool, with its JSON schema. The same list serves the headless and the bridged backend.
 pub fn tool_definitions() -> Vec<Value> {
     vec![
@@ -93,12 +127,14 @@ pub fn tool_definitions() -> Vec<Value> {
              after a delete (undo rewinds the counters with the design), usable right away \
              in sketch.dimension, sketch.constraint.* and sketch.delete. Feature commands return the feature's id \
              and name, every body (bodies) and the bodies the feature created, changed and removed (created_bodies, changed_bodies, removed_bodies). \
-             view.pick {pixels: [[x,y]…]} answers the body, face, exact world point, normal and depth under pixels of a screenshot (read-only; docs/control-protocol.md).",
+             view.pick {pixels: [[x,y]…]} answers the body, face, exact world point, normal and depth under pixels of a screenshot (read-only; docs/control-protocol.md). \
+             `expect` {volume_mm3, tol, bodies, bbox} checks the design after the command (as `batch` does) and flags a mismatch.",
             obj(
                 json!({
                     "command": string("Command id (see list_commands)"),
                     "params": {"type": "object", "description": "The command's parameters"},
                     "verbose": {"type": "boolean", "description": "false: omit the full feature body list and sketch ids repeated outside `created`; keep created_bodies, changed_bodies and removed_bodies (default true)"},
+                    "expect": expect_schema(),
                 }),
                 &["command"],
             ),
@@ -117,7 +153,9 @@ pub fn tool_definitions() -> Vec<Value> {
              rollback: false), so the batch is all-or-nothing; the reply names the failing step (index from 0), its error, \
              every result before it, whether the design really went back (rolled_back), the steps whose changes are in the \
              design (applied) and those never sent (not_run). The usual way to build a part: sketch, draw, dimension, \
-             finish, extrude, fillet… in one call.",
+             finish, extrude, fillet… in one call. Give `expect` {volume_mm3, tol, bodies, bbox} with the numbers you computed \
+             beforehand: after the last step the design is measured and compared, so no separate measure call is needed; a \
+             mismatch is flagged as an error naming it, and the design is kept as built.",
             obj(
                 json!({
                     "commands": {
@@ -130,6 +168,7 @@ pub fn tool_definitions() -> Vec<Value> {
                     "timings": {"type": "boolean", "description": "Add `timings`: [{index, command, ms}] for every step run (the failing one included) and `total_ms` (default false)"},
                     "profile": {"type": "boolean", "description": "Like timings, and each step's `profile`: {boolean_ms, tessellate_ms, other_ms}, its time in kernel booleans, in tessellation and the rest (default false)"},
                     "verbose": {"type": "boolean", "description": "false: a compact reply. Feature steps leave out the full body list (created_bodies, changed_bodies and removed_bodies stay), sketch steps the ids they repeat outside `created` (default true)"},
+                    "expect": expect_schema(),
                 }),
                 &["commands"],
             ),
@@ -161,11 +200,14 @@ pub fn tool_definitions() -> Vec<Value> {
              bodies, with totals. With `items` (one or two selections, as `execute` takes them: faces, edges, vertices, \
              sketch curves, profiles): one item's length, area or position, a circle's, arc's or cylinder's `diameter` and \
              `radius` (with `circumference`, or an arc's `arc_length` and `angle_deg`), a slot's `slot` sizes; two items' \
-             `min` and `max` distance and, where one is round, `center_distance` (centre to centre, or from its axis).",
+             `min` and `max` distance and, where one is round, `center_distance` (centre to centre, or from its axis). \
+             `summary: true` keeps one short object per body (name, volume_mm3, bbox, faces, closed) and the total volume: \
+             enough to check a stage against the numbers you computed, at a fraction of the size.",
             obj(
                 json!({
                     "body": string("Body name (default: all bodies)"),
                     "items": {"type": "array", "items": {"type": "object"}, "description": "One or two selections to measure instead of bodies, e.g. {\"type\": \"face\", \"body\": \"Body1\", \"index\": 3, \"point\": [x,y,z]}"},
+                    "summary": {"type": "boolean", "description": "Per body only name, volume_mm3, bbox {min, max}, faces and closed, and total.volume_mm3 (default false: the full reply)"},
                 }),
                 &[],
             ),
@@ -176,8 +218,17 @@ pub fn tool_definitions() -> Vec<Value> {
             "List edges and faces",
             "The edges (index, midpoint, length, endpoints) and faces (index, name, area, centroid, plane normal, a `point` that lies \
              on the face, and for a cylindrical face its `cylinder`: origin, axis, radius) of a body. Use an edge midpoint as the \
-             [x,y,z] point that picks the edge for fillet and chamfer; a face's point or its name picks the face for the face commands.",
-            obj(json!({"body": string("Body name, e.g. \"Body1\"")}), &["body"]),
+             [x,y,z] point that picks the edge for fillet and chamfer; a face's point or its name picks the face for the face commands. \
+             `faces: \"cylinders\"` lists only the cylindrical faces, as `cylinders`, with the halves the kernel splits one cylinder \
+             into merged: {radius, origin, axis, extent, names}, `extent` the [min, max] distance along `axis` from `origin` that \
+             the cylinder spans, and no edges. That is enough to check where every hole and boss is, at a fraction of the size.",
+            obj(
+                json!({
+                    "body": string("Body name, e.g. \"Body1\""),
+                    "faces": {"type": "string", "enum": ["all", "cylinders"], "description": "\"all\" (default): every edge and face. \"cylinders\": only the cylindrical faces, merged, with their extent along the axis, and no edges"},
+                }),
+                &["body"],
+            ),
             Effect::ReadOnly,
         ),
         tool(
@@ -197,6 +248,34 @@ pub fn tool_definitions() -> Vec<Value> {
                     "comment": string("Comment shown in the parameters table"),
                 }),
                 &["name"],
+            ),
+            Effect::Edits,
+        ),
+        tool(
+            "check_parameters",
+            "Try parameter values",
+            "Try parameter values without keeping them: set every parameter in `set` with one rebuild, report what `report` \
+             asks for, and put the design back exactly as it was (undo history included). `measure`: volume, bbox, bodies and \
+             faces per body as the measure tool reports them; `errors`: the features that fail or warn and the parameters that \
+             don't evaluate; `cylinders`: every cylindrical face as {body, radius, origin, axis, faces, name}, the halves the \
+             kernel splits one cylinder into merged (origin is the axis point closest to the world origin). The reply ends with \
+             `restored: true`; if the design could not be put back the call is an error with `restored: false` and the values \
+             still applied. An unknown parameter name is an error and nothing changes. Replaces the loop set_parameter, \
+             measure, body_topology, set_parameter back.",
+            obj(
+                json!({
+                    "set": {
+                        "type": "object",
+                        "description": "Values to try, by parameter name: a number (mm) or an expression (\"140 mm\", \"wall * 2\"), as set_parameter's `value`",
+                        "additionalProperties": {"type": ["number", "string"]},
+                    },
+                    "report": {
+                        "type": "array",
+                        "items": {"type": "string", "enum": REPORTS},
+                        "description": "What to report: measure, cylinders, errors (default all three)",
+                    },
+                }),
+                &["set"],
             ),
             Effect::Edits,
         ),
@@ -296,7 +375,7 @@ pub fn tool_definitions() -> Vec<Value> {
         tool(
             "open",
             "Open a design",
-            "Open a .solidcraft design file, a STEP file (.step/.stp: a new design whose bodies come from the file, as an \
+            "Open a .sc design file (or a .solidcraft one from an earlier release), a STEP file (.step/.stp: a new design whose bodies come from the file, as an \
              Import base feature in a component named after the file; an assembly's parts become nested components) or a \
              mesh (.3mf/.stl/.obj/.glb/.gltf: mesh bodies in such a component; a glTF file's nodes become nested components and its \
              materials appearances); the result reports the component (id, component_name). Replaces the current design; insert into it \
@@ -305,7 +384,7 @@ pub fn tool_definitions() -> Vec<Value> {
              so it is turned by default (`up: \"z\"` keeps its axes). `names` picks what the bodies are named after when the solids' own names say nothing useful.",
             obj(
                 json!({
-                    "path": string("Path to a .solidcraft, .step/.stp, .3mf, .stl, .obj, .glb or .gltf file"),
+                    "path": string("Path to a .sc (or .solidcraft), .step/.stp, .3mf, .stl, .obj, .glb or .gltf file"),
                     "up": {"type": "string", "enum": ["z", "y"], "description": "STEP and glTF only. z keeps the file's axes; y: the file has Y up, so its bodies are turned to stand Z up. Default: z for STEP, y for glTF"},
                     "names": {"type": "string", "enum": ["auto", "solid", "product", "instance"], "description": "STEP, IGES, FreeCAD and Rhino. auto (default): keep meaningful solid names, replace placeholders with the nearest named product, else instance; solid: the solid's own name; product: the part's name; instance: the occurrence's name, else the product's"},
                 }),
@@ -316,9 +395,12 @@ pub fn tool_definitions() -> Vec<Value> {
         tool(
             "save",
             "Save the design",
-            "Save the design to `path` or its current file. The default is a design container; a .json path selects plain JSON. Set format to container or json to override the path.",
+            "Save the design to `path` or its current file (a design opened as .solidcraft keeps that name). New designs are .sc files. The default is a design container; a .json path selects plain JSON. Set format to container or json to override the path. \
+             By default the path must lie in one of the agent's folders: the folder of a design opened or saved in this session (not its hidden files), \
+             SolidCraft's recovery folder, or a folder this server was started with `--allow-path DIR`. For a folder outside them, ask the user \
+             to add `--allow-path` and that folder to this server's arguments in their MCP client configuration.",
             obj(
-                json!({"path": string("Path to save to (default: the current file)"), "format": {"type": "string", "enum": ["container", "json"], "description": "Design encoding (default: JSON for .json, container otherwise)"}}),
+                json!({"path": string("Path to save to, e.g. part.sc (default: the current file)"), "format": {"type": "string", "enum": ["container", "json"], "description": "Design encoding (default: JSON for .json, container otherwise)"}}),
                 &[],
             ),
             Effect::Files,
@@ -415,12 +497,221 @@ pub fn call_tool(b: &mut dyn Backend, name: &str, args: &Value) -> Value {
     let r = match name {
         "screenshot" => return screenshot(b, a),
         "batch" => return batch(b, a),
+        "check_parameters" => return check_parameters(b, a),
+        "execute" => return execute(b, a),
         _ => dispatch(b, name, a),
     };
     match r {
         Ok(v) => text_result(&v, false),
         Err(e) => text_result(&Value::String(e), true),
     }
+}
+
+/// `execute`: one command, then its `expect` checked against the design.
+fn execute(b: &mut dyn Backend, a: &Map<String, Value>) -> Value {
+    let expect = match Expect::parse(a) {
+        Ok(e) => e,
+        Err(e) => return text_result(&Value::String(e), true),
+    };
+    match dispatch(b, "execute", a) {
+        Ok(v) => with_expectation(b, v, expect),
+        Err(e) => text_result(&Value::String(e), true),
+    }
+}
+
+/// What `execute` or `batch` was told the design would measure once the call went through
+/// (`expect`): the numbers an agent computes before building, compared by the server instead
+/// of by hand after a separate `measure` call. Volume and body count hold whatever kernel
+/// builds the design.
+struct Expect {
+    volume_mm3: Option<f64>,
+    tol: f64,
+    bodies: Option<u64>,
+    bbox: Option<([f64; 3], [f64; 3])>,
+}
+
+impl Expect {
+    /// The tool's `expect` argument: `None` when it was not given. A malformed one is refused
+    /// before the call runs, so a typo never builds a design that then goes unchecked.
+    fn parse(a: &Map<String, Value>) -> Result<Option<Expect>, String> {
+        let Some(v) = a.get("expect").filter(|v| !v.is_null()) else { return Ok(None) };
+        let Some(o) = v.as_object() else { return Err("expect: must be an object {volume_mm3?, tol?, bodies?, bbox?}".into()) };
+        if let Some(k) = o.keys().find(|k| !["volume_mm3", "tol", "bodies", "bbox"].contains(&k.as_str())) {
+            let k: String = k.chars().take(64).collect();
+            return Err(format!("expect: unknown key `{k}`; its keys are: volume_mm3, tol, bodies, bbox"));
+        }
+        let number = |k: &str| -> Result<Option<f64>, String> {
+            match o.get(k) {
+                None | Some(Value::Null) => Ok(None),
+                Some(v) => v.as_f64().filter(|x| x.is_finite()).map(Some).ok_or_else(|| format!("expect: `{k}` must be a number")),
+            }
+        };
+        let volume_mm3 = number("volume_mm3")?;
+        if volume_mm3.is_some_and(|v| v < 0.0) {
+            return Err("expect: `volume_mm3` must not be negative".into());
+        }
+        let tol = number("tol")?.unwrap_or(EXPECT_VOLUME_TOL);
+        if tol < 0.0 {
+            return Err("expect: `tol` must not be negative".into());
+        }
+        let bodies = match o.get("bodies") {
+            None | Some(Value::Null) => None,
+            Some(v) => Some(v.as_u64().ok_or("expect: `bodies` must be a whole number, 0 or more")?),
+        };
+        let bbox = match o.get("bbox") {
+            None | Some(Value::Null) => None,
+            Some(v) => Some(Self::parse_bbox(v)?),
+        };
+        if volume_mm3.is_none() && bodies.is_none() && bbox.is_none() {
+            return Err("expect: nothing to check; give volume_mm3, bodies or bbox".into());
+        }
+        Ok(Some(Expect { volume_mm3, tol, bodies, bbox }))
+    }
+
+    fn parse_bbox(v: &Value) -> Result<([f64; 3], [f64; 3]), String> {
+        let Some(o) = v.as_object() else { return Err("expect: `bbox` must be {min: [x,y,z], max: [x,y,z]} in mm".into()) };
+        if let Some(k) = o.keys().find(|k| !["min", "max"].contains(&k.as_str())) {
+            let k: String = k.chars().take(64).collect();
+            return Err(format!("expect: unknown key `bbox.{k}`; its keys are: min, max"));
+        }
+        let corner = |k: &str| -> Result<[f64; 3], String> {
+            let err = || format!("expect: `bbox.{k}` must be [x, y, z] in mm");
+            let xyz = o.get(k).and_then(Value::as_array).filter(|a| a.len() == 3).ok_or_else(err)?;
+            let mut c = [0.0; 3];
+            for (slot, x) in c.iter_mut().zip(xyz) {
+                *slot = x.as_f64().filter(|x| x.is_finite()).ok_or_else(err)?;
+            }
+            Ok(c)
+        };
+        let (min, max) = (corner("min")?, corner("max")?);
+        if min.iter().zip(&max).any(|(lo, hi)| lo > hi) {
+            return Err("expect: `bbox.min` must not exceed `bbox.max`".into());
+        }
+        Ok((min, max))
+    }
+
+    /// What was expected, for the reply.
+    fn expected(&self) -> Value {
+        let mut e = Map::new();
+        if let Some(v) = self.volume_mm3 {
+            e.insert("volume_mm3".into(), json!(v));
+            e.insert("tol".into(), json!(self.tol));
+        }
+        if let Some(n) = self.bodies {
+            e.insert("bodies".into(), json!(n));
+        }
+        if let Some((min, max)) = self.bbox {
+            e.insert("bbox".into(), json!({"min": min, "max": max}));
+        }
+        Value::Object(e)
+    }
+
+    /// Measure the design (as the `measure` tool does) and compare: the reply's `expectation`
+    /// (`ok`, `measured`, `expected`, `mismatch`).
+    fn check(&self, b: &mut dyn Backend) -> Result<Value, String> {
+        let m = exec(b, "inspect.measure", json!({}))?;
+        let bodies = m["body_count"].as_u64().unwrap_or(0);
+        let volume = m["total"]["volume_mm3"].as_f64();
+        let bbox = m["bodies"].as_array().into_iter().flatten().filter_map(|body| corners(&body["bbox"])).reduce(|(lo, hi), (min, max)| {
+            ([lo[0].min(min[0]), lo[1].min(min[1]), lo[2].min(min[2])], [hi[0].max(max[0]), hi[1].max(max[1]), hi[2].max(max[2])])
+        });
+        let mut mismatch: Vec<String> = Vec::new();
+        if let Some(e) = self.volume_mm3 {
+            match volume {
+                Some(v) if (v - e).abs() <= self.tol * e.abs() => {}
+                Some(v) => {
+                    let pct = if e != 0.0 { format!(" ({:+.2} %)", (v - e) / e * 100.0) } else { String::new() };
+                    mismatch.push(format!("volume: measured {}, expected {}{pct}", num(v), num(e)));
+                }
+                None => mismatch.push(format!("volume: not measured (no closed body), expected {}", num(e))),
+            }
+        }
+        if let Some(e) = self.bodies
+            && bodies != e
+        {
+            mismatch.push(format!("bodies: measured {bodies}, expected {e}"));
+        }
+        if let Some((emin, emax)) = self.bbox {
+            let expected = format!("min {} max {}", xyz_text(emin), xyz_text(emax));
+            match bbox {
+                Some((min, max)) => {
+                    let off: Vec<String> = [("min", min, emin), ("max", max, emax)]
+                        .into_iter()
+                        .flat_map(|(side, m, e)| {
+                            ["x", "y", "z"]
+                                .into_iter()
+                                .zip(m)
+                                .zip(e)
+                                .filter(|&((_, m), e)| (m - e).abs() > EXPECT_BBOX_TOL_MM)
+                                .map(move |((axis, m), e)| format!("{side} {axis} off by {} mm", num(m - e)))
+                        })
+                        .collect();
+                    if !off.is_empty() {
+                        mismatch.push(format!(
+                            "bbox: measured min {} max {}, expected {expected} ({})",
+                            xyz_text(min),
+                            xyz_text(max),
+                            off.join(", ")
+                        ));
+                    }
+                }
+                None => mismatch.push(format!("bbox: no body to measure, expected {expected}")),
+            }
+        }
+        Ok(json!({
+            "ok": mismatch.is_empty(),
+            "measured": {"volume_mm3": volume, "bodies": bodies, "bbox": bbox.map(|(min, max)| json!({"min": min, "max": max}))},
+            "expected": self.expected(),
+            "mismatch": mismatch,
+        }))
+    }
+}
+
+/// `{min: [x,y,z], max: [x,y,z]}` as two corners.
+fn corners(v: &Value) -> Option<([f64; 3], [f64; 3])> {
+    let xyz = |k: &str| -> Option<[f64; 3]> {
+        let a = v.get(k)?.as_array()?;
+        Some([a.first()?.as_f64()?, a.get(1)?.as_f64()?, a.get(2)?.as_f64()?])
+    };
+    Some((xyz("min")?, xyz("max")?))
+}
+
+/// A number in a mismatch message: at most four decimals, no trailing zeros.
+fn num(x: f64) -> String {
+    let r = (x * 1e4).round() / 1e4;
+    // `-0` for a coordinate a hair under zero would read as a sign error.
+    format!("{}", if r == 0.0 { 0.0 } else { r })
+}
+
+fn xyz_text(c: [f64; 3]) -> String {
+    format!("[{}, {}, {}]", num(c[0]), num(c[1]), num(c[2]))
+}
+
+/// A reply that went through, with its `expectation` when `expect` was given. A mismatch is a
+/// tool error that names it first; the design stays as built (the agent decides what to do).
+fn with_expectation(b: &mut dyn Backend, mut reply: Value, expect: Option<Expect>) -> Value {
+    let Some(expect) = expect else { return text_result(&reply, false) };
+    let expectation = match expect.check(b) {
+        Ok(e) => e,
+        Err(e) => json!({"ok": false, "expected": expect.expected(), "mismatch": [format!("the design could not be measured: {e}")]}),
+    };
+    let mismatch: Vec<&str> = expectation["mismatch"].as_array().into_iter().flatten().filter_map(Value::as_str).collect();
+    let note = (expectation["ok"] != true).then(|| {
+        format!(
+            "expectation not met: {}. The design is kept as built: inspect it, then fix it (timeline.edit, undo) or carry on.",
+            mismatch.join("; ")
+        )
+    });
+    if !reply.is_object() {
+        reply = json!({"result": reply});
+    }
+    reply["expectation"] = expectation;
+    let Some(note) = note else { return text_result(&reply, false) };
+    let mut r = text_result(&reply, true);
+    if let Some(content) = r["content"].as_array_mut() {
+        content.insert(0, json!({"type": "text", "text": note}));
+    }
+    r
 }
 
 fn exec(b: &mut dyn Backend, command: &str, params: Value) -> Result<Value, String> {
@@ -537,13 +828,17 @@ fn dispatch(b: &mut dyn Backend, name: &str, a: &Map<String, Value>) -> Result<V
                 Some(body) => json!({"bodies": [body]}),
                 None => json!({}),
             };
-            exec(b, "inspect.measure", p)
+            let m = exec(b, "inspect.measure", p)?;
+            Ok(if a.get("summary").and_then(Value::as_bool).unwrap_or(false) { measure_summary(m) } else { m })
         }
         "body_topology" => {
             let p = pick(a, &["body"]);
             let edges = exec(b, "model.edges", p.clone())?;
             let faces = exec(b, "model.faces", p)?;
-            Ok(json!({"body": a.get("body"), "edges": edges["edges"], "faces": faces["faces"]}))
+            Ok(match str_arg(a, "faces") {
+                Some("cylinders") => json!({"body": a.get("body"), "cylinders": topology_cylinders(&faces["faces"], &edges["edges"])}),
+                _ => json!({"body": a.get("body"), "edges": edges["edges"], "faces": faces["faces"]}),
+            })
         }
         "set_parameter" => {
             let mut p = pick(a, &["name", "unit", "comment"]);
@@ -600,11 +895,28 @@ fn pending(b: &mut dyn Backend) -> Result<Value, String> {
     Ok(json!({"pending": what, "done": false, "running_s": p.get("running_s"), "note": "still running: call pending again to keep waiting"}))
 }
 
+/// How a tool step's result is cut down to what the tool itself would reply.
+enum Narrow {
+    /// A `list_commands` step's catalog, filtered as the tool filters it.
+    Commands(String),
+    /// A `measure {summary: true}` step's reply, as `measure_summary` shapes it.
+    MeasureSummary,
+}
+
+impl Narrow {
+    fn apply(&self, v: Value) -> Value {
+        match self {
+            Narrow::Commands(f) => filter_commands(v, Some(f)),
+            Narrow::MeasureSummary => measure_summary(v),
+        }
+    }
+}
+
 /// A `batch` step as the engine command it runs: an engine command as it is, or one of these
 /// tools' names (an agent writes the tool it knows) with that tool's arguments as its params.
-/// `Ok((command, params, filter))`: `filter` narrows a `list_commands` step's catalog; an empty
+/// `Ok((command, params, narrow))`: `narrow` cuts the step's result down as the tool would; an empty
 /// `command` means the step is an engine command already.
-fn batch_step(step: &Value) -> Result<(String, Value, Option<String>), String> {
+fn batch_step(step: &Value) -> Result<(String, Value, Option<Narrow>), String> {
     let command = step.get("command").or_else(|| step.get("id")).and_then(Value::as_str).ok_or("missing `command`")?;
     // Any other key would be dropped and the command run without its parameters, failing (if at
     // all) with an error about a parameter that seems to be there: `args` for `params`.
@@ -617,7 +929,7 @@ fn batch_step(step: &Value) -> Result<(String, Value, Option<String>), String> {
     let a = params.as_object().unwrap_or(&empty);
     let mapped = |c: &str, p: Value| Ok((c.to_string(), p, None));
     match command {
-        "list_commands" => Ok(("engine.commands".into(), json!({}), str_arg(a, "filter").map(str::to_string))),
+        "list_commands" => Ok(("engine.commands".into(), json!({}), str_arg(a, "filter").map(|f| Narrow::Commands(f.to_string())))),
         "set_parameter" => {
             let mut p = pick(a, &["name", "unit", "comment"]);
             p["expression"] = parameter_value(a)?;
@@ -633,7 +945,11 @@ fn batch_step(step: &Value) -> Result<(String, Value, Option<String>), String> {
         }
         "measure" => match a.get("items") {
             Some(items) => mapped("inspect.measure", json!({"items": items})),
-            None => mapped("inspect.measure", str_arg(a, "body").map_or(json!({}), |body| json!({"bodies": [body]}))),
+            None => {
+                let p = str_arg(a, "body").map_or(json!({}), |body| json!({"bodies": [body]}));
+                let summary = a.get("summary").and_then(Value::as_bool).unwrap_or(false);
+                Ok(("inspect.measure".into(), p, summary.then_some(Narrow::MeasureSummary)))
+            }
         },
         "inspect_design" => mapped("document.inspect", json!({"measure": a.get("measure").and_then(Value::as_bool).unwrap_or(true)})),
         "undo" => mapped("edit.undo", json!({})),
@@ -649,6 +965,7 @@ fn batch_step(step: &Value) -> Result<(String, Value, Option<String>), String> {
         "body_topology" => Err("`body_topology` is a tool, not a command: in a batch use model.edges {body} and model.faces {body}".into()),
         "screenshot" => Err("`screenshot` is a tool, not a command: call it after the batch".into()),
         "batch" => Err("batches don't nest: put the steps in this batch".into()),
+        "check_parameters" => Err("`check_parameters` is a tool, not a command: call it on its own (it puts the design back itself)".into()),
         "pending" => Err("`pending` is a tool, not a command: call it on its own".into()),
         "running" => Err("`running` is a tool, not a command: call it on its own".into()),
         "skill_reference" => Err("`skill_reference` is a tool, not a command: call it on its own".into()),
@@ -661,6 +978,7 @@ fn batch_step(step: &Value) -> Result<(String, Value, Option<String>), String> {
 const TOOL_STEPS: &[&str] = &[
     "batch",
     "body_topology",
+    "check_parameters",
     "crash_reports",
     "describe_command",
     "execute",
@@ -751,13 +1069,26 @@ impl Undo {
 }
 
 /// `batch`: run steps in order, stop at the first failure and (by default) go back to the
-/// design as it was before the batch.
+/// design as it was before the batch. A batch that went through is then checked against its
+/// `expect`.
 fn batch(b: &mut dyn Backend, a: &Map<String, Value>) -> Value {
+    let expect = match Expect::parse(a) {
+        Ok(e) => e,
+        Err(e) => return text_result(&Value::String(e), true),
+    };
+    match batch_run(b, a) {
+        (reply, true) => text_result(&reply, true),
+        (reply, false) => with_expectation(b, reply, expect),
+    }
+}
+
+/// The batch itself: its reply and whether it failed.
+fn batch_run(b: &mut dyn Backend, a: &Map<String, Value>) -> (Value, bool) {
     let Some(steps) = a.get("commands").and_then(Value::as_array) else {
-        return text_result(&json!("`commands` must be an array of {command, params}"), true);
+        return (json!("`commands` must be an array of {command, params}"), true);
     };
     if steps.len() > MAX_BATCH {
-        return text_result(&json!(format!("batch too long ({} steps, at most {MAX_BATCH})", steps.len())), true);
+        return (json!(format!("batch too long ({} steps, at most {MAX_BATCH})", steps.len())), true);
     }
     let rollback = a.get("rollback").and_then(Value::as_bool).unwrap_or(true);
     let verbose = a.get("verbose").and_then(Value::as_bool).unwrap_or(true);
@@ -766,13 +1097,24 @@ fn batch(b: &mut dyn Backend, a: &Map<String, Value>) -> Value {
     // Steps that name a tool run the engine command it stands for. One that can't be a step
     // fails the batch before anything is sent.
     let mut mapped: Vec<Value> = Vec::with_capacity(steps.len());
-    let mut filters: Vec<(usize, String)> = Vec::new();
+    let mut narrows: Vec<(usize, Narrow)> = Vec::new();
     for (i, step) in steps.iter().enumerate() {
-        match batch_step(step) {
+        // The window goes to another design's tab for these, however the step names them: the
+        // batch's later steps and its rollback would land in the wrong design.
+        let step_result = batch_step(step).and_then(|(command, params, narrow)| {
+            let id = if command.is_empty() { step.get("command").or_else(|| step.get("id")).and_then(Value::as_str).unwrap_or("") } else { &command };
+            match solidcraft_engine::find_command(id).map(|spec| spec.id) {
+                Some(c @ ("component.edit_in_place" | "component.finish_edit")) => {
+                    Err(format!("`{c}` goes to another design's tab: send it on its own, not in a batch"))
+                }
+                _ => Ok((command, params, narrow)),
+            }
+        });
+        match step_result {
             Ok((command, _, _)) if command.is_empty() => mapped.push(step.clone()),
-            Ok((command, params, filter)) => {
-                if let Some(f) = filter {
-                    filters.push((i, f));
+            Ok((command, params, narrow)) => {
+                if let Some(n) = narrow {
+                    narrows.push((i, n));
                 }
                 mapped.push(json!({"command": command, "params": params}));
             }
@@ -791,7 +1133,7 @@ fn batch(b: &mut dyn Backend, a: &Map<String, Value>) -> Value {
                     "results": [],
                     "note": "nothing was run",
                 });
-                return text_result(&reply, true);
+                return (reply, true);
             }
         }
     }
@@ -810,11 +1152,12 @@ fn batch(b: &mut dyn Backend, a: &Map<String, Value>) -> Value {
         if let (Some(command), Some(failed)) = (refusal.command.as_deref(), reply.get_mut("failed").and_then(Value::as_object_mut)) {
             failed.insert("error".into(), Value::String(command_error(command, refusal.error.clone())));
         }
-        return text_result(&reply, true);
+        return (reply, true);
     }
-    // A `list_commands` step's catalog, filtered as the tool filters it.
-    let narrow = |i: usize, v: Value| match filters.iter().find(|(j, _)| *j == i) {
-        Some((_, f)) => filter_commands(v, Some(f)),
+    // A tool step's result as the tool would reply it: a `list_commands` step's catalog filtered,
+    // a `measure {summary: true}` step's reply summarised.
+    let narrow = |i: usize, v: Value| match narrows.iter().find(|(j, _)| *j == i) {
+        Some((_, n)) => n.apply(v),
         None => v,
     };
     // An app that runs batches itself answers the whole batch in one request, so one frame
@@ -847,12 +1190,12 @@ fn batch(b: &mut dyn Backend, a: &Map<String, Value>) -> Value {
             // Never sent: no app to send it to. Or sent and still running (it was not cancelled):
             // the `pending` tool gets its result.
             Err(e) if e.starts_with(crate::backend::NOT_RUNNING) || e.starts_with(STILL_RUNNING) => {
-                return text_result(&Value::String(e), true);
+                return (Value::String(e), true);
             }
             // The app may have run it: sending the steps again would apply them twice.
             Err(e) => {
                 let msg = format!("the app did not answer engine.batch ({e}); it may have run: inspect the design before sending it again");
-                return text_result(&Value::String(msg), true);
+                return (Value::String(msg), true);
             }
         }
     }
@@ -922,14 +1265,14 @@ fn batch(b: &mut dyn Backend, a: &Map<String, Value>) -> Value {
                         "not_run": (i + 1..steps.len()).collect::<Vec<_>>(),
                         "results": results,
                     });
-                    return text_result(&with_timings(reply, timed, rows, clock.ms()), true);
+                    return (with_timings(reply, timed, rows, clock.ms()), true);
                 }
             }
         }
     }
     start.finish(b);
     let reply = json!({"ok": true, "completed": results.len(), "results": results});
-    text_result(&with_timings(reply, timed, rows, clock.ms()), false)
+    (with_timings(reply, timed, rows, clock.ms()), false)
 }
 
 /// `reply` with `timings` and `total_ms` when they were asked for.
@@ -942,7 +1285,7 @@ fn with_timings(mut reply: Value, timed: bool, rows: Vec<Value>, total_ms: f64) 
 }
 
 /// The `batch` reply from the app's `engine.batch` answer, shaped as the per-step path shapes it.
-fn batch_reply(r: &Value, len: usize, rollback: bool, verbose: bool, narrow: &dyn Fn(usize, Value) -> Value) -> Value {
+fn batch_reply(r: &Value, len: usize, rollback: bool, verbose: bool, narrow: &dyn Fn(usize, Value) -> Value) -> (Value, bool) {
     let results: Vec<Value> = r["results"]
         .as_array()
         .cloned()
@@ -986,7 +1329,151 @@ fn batch_reply(r: &Value, len: usize, rollback: bool, verbose: bool, narrow: &dy
             }
         }
     }
-    text_result(&reply, error)
+    (reply, error)
+}
+
+/// `measure {summary: true}`: an `inspect.measure` reply cut down to what checks a stage against
+/// computed numbers: per body `name`, `volume_mm3`, `bbox`, `faces` and `closed` (a body that
+/// could not be measured keeps its `error`), `body_count` and the total volume. An `items`
+/// reply is small already and goes through as it is.
+fn measure_summary(v: Value) -> Value {
+    let Some(o) = v.as_object() else { return v };
+    if !o.contains_key("bodies") {
+        return v;
+    }
+    let bodies: Vec<Value> = o
+        .get("bodies")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .map(|b| {
+            let mut s = Map::new();
+            let keys: &[&str] = if b.get("error").is_some() { &["name", "error"] } else { &["name", "volume_mm3", "bbox", "faces", "closed"] };
+            for k in keys {
+                s.insert((*k).to_string(), b.get(*k).cloned().unwrap_or(Value::Null));
+            }
+            Value::Object(s)
+        })
+        .collect();
+    json!({
+        "body_count": o.get("body_count").cloned().unwrap_or_else(|| json!(bodies.len())),
+        "bodies": bodies,
+        "total": {"volume_mm3": o.get("total").and_then(|t| t.get("volume_mm3")).cloned().unwrap_or(Value::Null)},
+    })
+}
+
+/// A `[x, y, z]` JSON array as numbers.
+fn xyz(v: &Value) -> Option<[f64; 3]> {
+    let a = v.as_array()?;
+    if a.len() != 3 {
+        return None;
+    }
+    let p = [a[0].as_f64()?, a[1].as_f64()?, a[2].as_f64()?];
+    p.iter().all(|c| c.is_finite()).then_some(p)
+}
+
+fn sub(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {
+    [a[0] - b[0], a[1] - b[1], a[2] - b[2]]
+}
+
+fn cross(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {
+    [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]
+}
+
+/// One cylinder as `body_topology {faces: "cylinders"}` reports it: the faces that lie on it,
+/// merged by equal radius and the same axis line.
+struct TopoCylinder {
+    radius: f64,
+    origin: [f64; 3],
+    /// Unit length.
+    axis: [f64; 3],
+    /// Distances along `axis` from `origin` of the points found on the cylinder so far.
+    extent: Option<(f64, f64)>,
+    names: Vec<Value>,
+}
+
+/// How far a point lies from the cylinder's axis line, and how far along it from the origin.
+fn axial(c: &TopoCylinder, p: [f64; 3]) -> (f64, f64) {
+    let d = sub(p, c.origin);
+    let along = dot(d, c.axis);
+    let off = cross(d, c.axis);
+    (dot(off, off).sqrt(), along)
+}
+
+/// Does `p` lie on the cylinder's surface, within `tol`?
+fn on_cylinder(c: &TopoCylinder, p: [f64; 3], tol: f64) -> bool {
+    (axial(c, p).0 - c.radius).abs() <= tol
+}
+
+fn widen(c: &mut TopoCylinder, p: [f64; 3]) {
+    let t = axial(c, p).1;
+    c.extent = Some(match c.extent {
+        Some((lo, hi)) => (lo.min(t), hi.max(t)),
+        None => (t, t),
+    });
+}
+
+/// Positions and axes that agree within this are one cylinder (mm).
+const CYLINDER_TOL: f64 = 1e-3;
+
+/// `body_topology {faces: "cylinders"}`: the cylindrical faces of `model.faces`, the halves the
+/// kernel splits one cylinder into merged (equal radius, the same axis line: origin on the axis,
+/// direction up to sign), each with the extent along its axis that the body's own points on the
+/// cylinder span (the faces' `point`s and the ends and midpoints of the edges lying on it). Built
+/// from what `model.faces` and `model.edges` already reply, so it needs nothing of the kernel.
+fn topology_cylinders(faces: &Value, edges: &Value) -> Value {
+    let mut found: Vec<TopoCylinder> = Vec::new();
+    for f in faces.as_array().into_iter().flatten() {
+        let c = &f["cylinder"];
+        let (Some(radius), Some(origin), Some(axis)) = (c["radius"].as_f64(), xyz(&c["origin"]), xyz(&c["axis"])) else { continue };
+        let len = dot(axis, axis).sqrt();
+        if !radius.is_finite() || radius <= 0.0 || !len.is_finite() || len < 1e-9 {
+            continue;
+        }
+        let axis = [axis[0] / len, axis[1] / len, axis[2] / len];
+        // The same cylinder: the same radius and axis direction (either way round), and this
+        // face's origin on that axis line.
+        let same = |k: &TopoCylinder| {
+            let off = cross(sub(origin, k.origin), k.axis);
+            (k.radius - radius).abs() <= CYLINDER_TOL && dot(k.axis, axis).abs() >= 1.0 - 1e-6 && dot(off, off).sqrt() <= CYLINDER_TOL
+        };
+        let name = f.get("name").cloned().unwrap_or(Value::Null);
+        let at = match found.iter().position(same) {
+            Some(i) => i,
+            None => {
+                found.push(TopoCylinder { radius, origin, axis, extent: None, names: Vec::new() });
+                found.len() - 1
+            }
+        };
+        if let Some(k) = found.get_mut(at) {
+            k.names.push(name);
+            if let Some(p) = xyz(&f["point"]) {
+                widen(k, p);
+            }
+        }
+    }
+    // The ends of the cylinder: the vertices of the edges that lie on it (a circle's ends and
+    // midpoint are on it; an edge of another face at most touches it in two points).
+    for e in edges.as_array().into_iter().flatten() {
+        let (Some(start), Some(mid), Some(end)) = (xyz(&e["start"]), xyz(&e["mid"]), xyz(&e["end"])) else { continue };
+        for c in &mut found {
+            let tol = CYLINDER_TOL.max(c.radius * 1e-4);
+            if [start, mid, end].iter().all(|p| on_cylinder(c, *p, tol)) {
+                widen(c, start);
+                widen(c, end);
+            }
+        }
+    }
+    found
+        .into_iter()
+        .map(|c| {
+            let mut v = json!({"radius": c.radius, "origin": c.origin, "axis": c.axis, "names": c.names});
+            if let (Some((lo, hi)), Some(o)) = (c.extent, v.as_object_mut()) {
+                o.insert("extent".into(), json!([lo, hi]));
+            }
+            v
+        })
+        .collect()
 }
 
 /// A command's result without what the design already had (`execute` or `batch` with `verbose: false`): a
@@ -1005,6 +1492,235 @@ fn compact(mut v: Value) -> Value {
         }
     }
     v
+}
+
+/// `check_parameters`: try parameter values and put the design back (#3380). The checkpoint is
+/// taken before anything changes; whatever happens after it, the design is restored, and a
+/// restore that fails is an error saying the values are still in. Every agent session that
+/// changed a parameter to see its effect spent three to five calls on this loop, and one saved
+/// the design with the test values still in it.
+fn check_parameters(b: &mut dyn Backend, a: &Map<String, Value>) -> Value {
+    let (changes, reports) = match check_parameters_args(a) {
+        Ok(x) => x,
+        Err(e) => return text_result(&Value::String(e), true),
+    };
+    // A name the design has no parameter of is refused before the checkpoint, so nothing
+    // changes: `parameters.change` would make one.
+    if let Err(e) = known_parameters(b, &changes) {
+        return text_result(&Value::String(e), true);
+    }
+    let Some(id) = exec(b, "edit.checkpoint", json!({})).ok().and_then(|v| v["checkpoint"].as_u64()) else {
+        let e = "check_parameters: this app has no edit.checkpoint to put the design back with; use set_parameter and measure, and set the values back yourself";
+        return text_result(&json!(e), true);
+    };
+    let outcome = try_parameters(b, &changes, &reports);
+    let restore = exec(b, "edit.restore_checkpoint", json!({"checkpoint": id}));
+    match (outcome, restore) {
+        (Ok(mut reply), Ok(_)) => {
+            reply["restored"] = json!(true);
+            text_result(&reply, false)
+        }
+        (Err(e), Ok(_)) => text_result(&json!({"error": e, "restored": true, "note": "the design is back as it was"}), true),
+        (outcome, Err(restore_error)) => {
+            let mut reply = match outcome {
+                Ok(r) => r,
+                Err(e) => json!({"error": e}),
+            };
+            reply["restored"] = json!(false);
+            reply["restore_error"] = json!(restore_error);
+            reply["note"] = json!(
+                "THE DESIGN STILL HOLDS THE TRIED VALUES: the checkpoint could not be restored. Set them back with set_parameter (or undo) before saving"
+            );
+            text_result(&reply, true)
+        }
+    }
+}
+
+/// `check_parameters`'s arguments, checked before anything is sent: the values to try (a
+/// number or an expression each, as `set_parameter` takes its `value`) and what to report.
+fn check_parameters_args(a: &Map<String, Value>) -> Result<(Map<String, Value>, Vec<&'static str>), String> {
+    let set = a.get("set").and_then(Value::as_object).ok_or("check_parameters: `set` must be an object of parameter name: value")?;
+    if set.is_empty() {
+        return Err("check_parameters: `set` is empty; give at least one parameter name: value".into());
+    }
+    let mut changes = Map::new();
+    for (name, v) in set {
+        let name = name.trim();
+        if name.is_empty() {
+            return Err("check_parameters: a parameter name in `set` is empty".into());
+        }
+        if !matches!(v, Value::Number(_) | Value::String(_)) {
+            let shown: String = name.chars().take(64).collect();
+            return Err(format!("check_parameters: `set.{shown}` must be a number (mm) or an expression, as set_parameter's `value`"));
+        }
+        changes.insert(name.to_string(), v.clone());
+    }
+    let reports = match a.get("report").filter(|r| !r.is_null()) {
+        None => REPORTS.to_vec(),
+        Some(r) => {
+            let items = r.as_array().ok_or("check_parameters: `report` must be an array of measure, cylinders, errors")?;
+            let mut out: Vec<&'static str> = Vec::new();
+            for item in items {
+                let Some(known) = item.as_str().and_then(|s| REPORTS.iter().copied().find(|r| *r == s)) else {
+                    return Err(format!("check_parameters: `report` items must be one of {}", REPORTS.join(", ")));
+                };
+                if !out.contains(&known) {
+                    out.push(known);
+                }
+            }
+            out
+        }
+    };
+    Ok((changes, reports))
+}
+
+/// Refuse a name the design has no parameter of, before anything changes. An app without
+/// `parameters.list` is not asked; the change itself then tells.
+fn known_parameters(b: &mut dyn Backend, changes: &Map<String, Value>) -> Result<(), String> {
+    let Ok(list) = exec(b, "parameters.list", json!({})) else { return Ok(()) };
+    let Some(rows) = list["parameters"].as_array() else { return Ok(()) };
+    let names: Vec<&str> = rows.iter().filter_map(|r| r["name"].as_str()).collect();
+    let shown = |n: &str| format!("`{}`", n.chars().take(64).collect::<String>());
+    let unknown: Vec<String> = changes.keys().filter(|n| !names.contains(&n.as_str())).map(|n| shown(n)).collect();
+    if unknown.is_empty() {
+        return Ok(());
+    }
+    let user: Vec<String> = rows.iter().filter(|r| r["source"] == "user").filter_map(|r| r["name"].as_str()).take(40).map(shown).collect();
+    let have = if user.is_empty() { "no user parameters".to_string() } else { format!("user parameters {}", user.join(", ")) };
+    Err(format!("check_parameters: no parameter {}; the design has {have} (parameters.list shows every parameter)", unknown.join(", ")))
+}
+
+/// Apply the values and read back what was asked for: what each parameter is now, the
+/// features rebuilt, and the reports.
+fn try_parameters(b: &mut dyn Backend, changes: &Map<String, Value>, reports: &[&str]) -> Result<Value, String> {
+    let (values, recomputed) = apply_parameters(b, changes)?;
+    let mut reply = json!({"set": changes, "values": values, "recomputed": recomputed});
+    // The bodies and each feature's state: one cheap read serves `errors` and `cylinders`.
+    let design = if reports.iter().any(|r| *r != "measure") { Some(b.call("document.inspect", json!({"measure": false}))?) } else { None };
+    for r in reports {
+        match *r {
+            "measure" => reply["measure"] = exec(b, "inspect.measure", json!({}))?,
+            "errors" => {
+                if let Some(d) = &design {
+                    let pick = |key: &str| -> Value {
+                        let rows = d["timeline"].as_array().into_iter().flatten().filter(|f| !f[key].is_null());
+                        Value::Array(rows.map(|f| json!({"feature": f["id"], "name": f["name"], key: f[key]})).collect())
+                    };
+                    reply["errors"] = pick("error");
+                    reply["warnings"] = pick("warning");
+                    let params = d["params"].as_array().into_iter().flatten().filter(|p| !p["error"].is_null());
+                    reply["parameter_errors"] = Value::Array(params.map(|p| json!({"name": p["name"], "error": p["error"]})).collect());
+                }
+            }
+            "cylinders" => {
+                if let Some(d) = &design {
+                    let bodies: Vec<String> =
+                        d["bodies"].as_array().into_iter().flatten().filter_map(|body| body["name"].as_str()).map(str::to_string).collect();
+                    reply["cylinders"] = Value::Array(cylinders(b, &bodies));
+                }
+            }
+            _ => {}
+        }
+    }
+    Ok(reply)
+}
+
+/// Set the values with one `parameters.change {changes}`, so the design rebuilds once. An app
+/// without `changes` (it asks for `name`, or refuses the key) gets one `parameters.change` per
+/// name instead; any other refusal (an expression that does not evaluate) is the error. Returns
+/// each parameter's value now and the features rebuilt.
+fn apply_parameters(b: &mut dyn Backend, changes: &Map<String, Value>) -> Result<(Map<String, Value>, Value), String> {
+    let combined = solidcraft_engine::batch_params::combined_params(changes);
+    match exec(b, "parameters.change", combined) {
+        Ok(v) => Ok((v["changed"].as_object().cloned().unwrap_or_default(), v["recomputed"].clone())),
+        Err(e) if e.contains("`name`") || e.contains("`changes`") => {
+            let mut values = Map::new();
+            let mut recomputed = 0u64;
+            for (name, expression) in changes {
+                let v = exec(b, "parameters.change", json!({"name": name, "expression": expression}))?;
+                values.insert(name.clone(), v["value"].clone());
+                recomputed += v["recomputed"].as_u64().unwrap_or(0);
+            }
+            Ok((values, json!(recomputed)))
+        }
+        Err(e) => Err(e),
+    }
+}
+
+/// Every cylindrical face of these bodies (`model.faces`), the halves one cylinder is split
+/// into merged.
+fn cylinders(b: &mut dyn Backend, bodies: &[String]) -> Vec<Value> {
+    let mut out = Vec::new();
+    for body in bodies {
+        match exec(b, "model.faces", json!({"body": body})) {
+            Ok(f) => out.extend(merge_cylinders(body, f["faces"].as_array().map(Vec::as_slice).unwrap_or(&[]))),
+            Err(e) => out.push(json!({"body": body, "error": e})),
+        }
+    }
+    out
+}
+
+/// One cylinder of a body: the faces on it (one, or the halves a kernel splits it into).
+struct Cylinder {
+    radius: f64,
+    origin: [f64; 3],
+    axis: [f64; 3],
+    faces: Vec<Value>,
+    name: Value,
+    area: f64,
+}
+
+fn vec3(v: &Value) -> Option<[f64; 3]> {
+    let a = v.as_array()?;
+    match (a.first()?.as_f64(), a.get(1)?.as_f64(), a.get(2)?.as_f64()) {
+        (Some(x), Some(y), Some(z)) if x.is_finite() && y.is_finite() && z.is_finite() => Some([x, y, z]),
+        _ => None,
+    }
+}
+
+fn dot(a: [f64; 3], b: [f64; 3]) -> f64 {
+    a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
+}
+
+/// The cylindrical faces of one body as cylinders: faces with the same radius on the same
+/// axis line are one cylinder, whatever point on the axis and whichever direction each half
+/// reports. The origin is the axis point closest to the world origin and the axis points so
+/// that its first non-zero component is positive, so the same cylinder reads the same whichever
+/// kernel built it.
+fn merge_cylinders(body: &str, faces: &[Value]) -> Vec<Value> {
+    let mut found: Vec<Cylinder> = Vec::new();
+    for f in faces {
+        let c = &f["cylinder"];
+        let (Some(radius), Some(origin), Some(axis)) = (c["radius"].as_f64(), vec3(&c["origin"]), vec3(&c["axis"])) else { continue };
+        let len = dot(axis, axis).sqrt();
+        if !(radius > 0.0) || !radius.is_finite() || !(len > 0.0) {
+            continue;
+        }
+        let mut axis = axis.map(|x| x / len);
+        if axis.iter().find(|x| x.abs() > 1e-9).is_some_and(|x| *x < 0.0) {
+            // A zero component stays 0.0, not -0.0.
+            axis = axis.map(|x| if x.abs() > 1e-9 { -x } else { 0.0 });
+        }
+        let t = dot(origin, axis);
+        let origin = [origin[0] - t * axis[0], origin[1] - t * axis[1], origin[2] - t * axis[2]];
+        let tol = 1e-4 * radius.max(1.0);
+        let area = f["area"].as_f64().unwrap_or(0.0);
+        let same = |k: &Cylinder| {
+            let d = [k.origin[0] - origin[0], k.origin[1] - origin[1], k.origin[2] - origin[2]];
+            (k.radius - radius).abs() <= tol && dot(k.axis, axis) >= 1.0 - 1e-8 && dot(d, d).sqrt() <= tol
+        };
+        match found.iter_mut().find(|k| same(k)) {
+            Some(k) => {
+                k.faces.push(f["index"].clone());
+                k.area += area;
+            }
+            None => found.push(Cylinder { radius, origin, axis, faces: vec![f["index"].clone()], name: f["name"].clone(), area }),
+        }
+    }
+    found
+        .into_iter()
+        .map(|k| json!({"body": body, "radius": k.radius, "origin": k.origin, "axis": k.axis, "faces": k.faces, "name": k.name, "area": k.area}))
+        .collect()
 }
 
 static SHOT: AtomicU64 = AtomicU64::new(0);

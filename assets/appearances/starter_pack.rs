@@ -16,7 +16,7 @@ const fn glass(transmission_linear_rgb: [f64; 3], ior: f64, reference_path_mm: f
     GlassRecipe { transmission_linear_rgb, dielectric_ior: ior, reference_path_mm, boundary }
 }
 
-pub const STARTER_PACK: [VisualPreset; 40] = [
+pub const STARTER_PACK: &[VisualPreset] = &[
     VisualPreset::opaque(
         "starter.wood.oak-honey",
         "Wood - Honey Oak Uniform Preview",

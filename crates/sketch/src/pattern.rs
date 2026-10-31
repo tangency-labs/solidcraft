@@ -531,7 +531,7 @@ fn copy_through(sk: &mut Sketch, cs: &[usize], ps: &[usize], f: &dyn Fn(Vec2) ->
         let prefix = match &kind {
             CurveKind::Ellipse { .. } => "e",
             CurveKind::Spline { .. } => "s",
-            CurveKind::Conic { .. } => "k",
+            CurveKind::Conic { .. } => "n",
             CurveKind::Line { .. } => "l",
             CurveKind::Circle { .. } => "c",
             CurveKind::Arc { .. } => "a",

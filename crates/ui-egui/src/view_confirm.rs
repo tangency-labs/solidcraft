@@ -1,7 +1,8 @@
 //! OK and Cancel in the view's corner (Preferences › Interface, #6709). While a dialog is open,
 //! a check and a cross at the top right of the view do what the dialog's own OK and Cancel do,
 //! and the check greys out whenever the dialog's OK does. While a sketch is open without a
-//! dialog, they are Finish Sketch and Cancel Sketch, as on the ribbon. The axis view moves down
+//! dialog, they are Finish Sketch and Cancel Sketch, as on the ribbon, except that while a tool
+//! is out the cross first cancels it, as one Esc does. The axis view moves down
 //! below the pair while it is shown (`viewport_layout::Layout::with_content`), and the pair is
 //! one of the shell's covered rects, so a click on it never picks or navigates.
 
@@ -80,7 +81,10 @@ pub(crate) fn show(app: &mut SolveApp, ctx: &egui::Context) {
         Answers::Sketch => {
             let command = |id: &str| solidcraft_engine::find_command(id).map(|spec| (spec.label, spec.info(&app.session).enabled));
             let (finish, finish_enabled) = command("sketch.finish").unwrap_or(("Finish Sketch", false));
-            let (cancel, cancel_enabled) = command("sketch.cancel").unwrap_or(("Cancel Sketch", false));
+            // While a tool or a drag is unfinished, the cross cancels that first, as one Esc does;
+            // the next click cancels the sketch.
+            let (cancel, cancel_enabled) =
+                if crate::toolbar::unfinished(app) { ("Cancel", true) } else { command("sketch.cancel").unwrap_or(("Cancel Sketch", false)) };
             [
                 Choice { action: Action::Ok, key: "view:confirm:ok", icon: "finish", label: finish, enabled: finish_enabled },
                 Choice { action: Action::Cancel, key: "view:confirm:cancel", icon: "sketch_cancel", label: cancel, enabled: cancel_enabled },
@@ -116,7 +120,8 @@ pub(crate) fn show(app: &mut SolveApp, ctx: &egui::Context) {
     match (answers, clicked) {
         (Answers::Dialog, Some(action)) => app.viewport.corner = Some(action),
         (Answers::Sketch, Some(Action::Ok)) => app.start_pinned("sketch.finish", None),
-        (Answers::Sketch, Some(Action::Cancel)) => app.start_pinned("sketch.cancel", None),
+        // The guard cancels an unfinished tool first; only with nothing to cancel does the sketch go.
+        (Answers::Sketch, Some(Action::Cancel)) if !crate::toolbar::cancel_unfinished(app) => app.start_pinned("sketch.cancel", None),
         _ => {}
     }
 }

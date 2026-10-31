@@ -72,10 +72,10 @@ impl Download {
         }
         let Some((name, bytes)) = self.pending.take() else { return };
         // The extension selects the design loader even when the URL has no extension.
-        let path = "/linked/design.solidcraft";
+        let path = &format!("/linked/design.{}", solidcraft_engine::io::DESIGN_EXT);
         vfs::insert(path, bytes);
         app.open_path(path);
-        if app.session.path.as_deref() == Some(path) {
+        if app.session.path.as_deref() == Some(path.as_str()) {
             app.session.path = None;
             app.session.doc_mut().name = name;
             app.session.mark_unsaved();
@@ -90,9 +90,14 @@ async fn fetch(value: &str) -> Reply {
     let window = web_sys::window().ok_or("No browser window")?;
     let page_origin = window.location().origin().map_err(|_| "Cannot read page origin")?;
     let url = design_url(value, &page_origin)?;
-    let name = url.path_segments().and_then(|mut segments| segments.next_back()).filter(|name| !name.is_empty()).unwrap_or("Design.solidcraft");
+    let name = url.path_segments().and_then(|mut segments| segments.next_back()).filter(|name| !name.is_empty()).unwrap_or("Design");
     let decoded = js_sys::decode_uri_component(name).ok().and_then(|name| name.as_string()).unwrap_or_else(|| name.to_owned());
-    let name: String = decoded.strip_suffix(".solidcraft").unwrap_or(&decoded).chars().take(255).collect();
+    // `arm.sc` (or a legacy `arm.solidcraft`) is named `arm`.
+    let stem = match decoded.rsplit_once('.') {
+        Some((stem, ext)) if !stem.is_empty() && solidcraft_engine::io::is_design_ext(ext) => stem,
+        _ => decoded.as_str(),
+    };
+    let name: String = stem.chars().take(255).collect();
     let response = JsFuture::from(window.fetch_with_str(url.as_str())).await.map_err(|_| "Network request failed or the host refused CORS access")?;
     let response: web_sys::Response = response.dyn_into().map_err(|_| "Invalid download response")?;
     design_url(&response.url(), &page_origin).map_err(|_| "Design redirected to a URL that does not use HTTPS or the page's own origin")?;

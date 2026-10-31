@@ -267,6 +267,12 @@ impl Sketch {
         WireSpace::from_legacy_link(link)
     }
 
+    /// Whether a curve is reference geometry that planar corner tools cannot modify.
+    /// Shared by command validation and the Fillet/Chamfer pick filters.
+    pub fn is_spatial_corner_curve(&self, id: &str) -> bool {
+        self.wire_index(id).is_some()
+    }
+
     pub fn wire_index(&self, id: &str) -> Option<usize> {
         self.wires.iter().position(|w| w.id == id)
     }

@@ -167,6 +167,10 @@ pub struct Entry {
     pub key: bool,
     /// API: seconds one model request may take (in range).
     pub request_timeout_s: u64,
+    /// Found installed, but its program didn't start when asked its version: why (#9034).
+    pub problem: Option<String>,
+    /// Found installed: the command that installs it again.
+    pub install: &'static str,
 }
 
 impl Entry {
@@ -183,17 +187,30 @@ impl Entry {
             model: c.model.clone(),
             key: c.key,
             request_timeout_s: c.request_timeout_s.clamp(MIN_REQUEST_TIMEOUT_S, MAX_REQUEST_TIMEOUT_S),
+            problem: None,
+            install: "",
         }
     }
-    /// A short line under the name: the version, the model, or the command.
+    /// A short line under the name: the version, the model, the command, or why it can't start.
     pub fn detail(&self) -> String {
         match self.kind {
             Kind::Api | Kind::Anthropic => format!("{} · {}", self.model, self.base_url),
-            Kind::Acp => match &self.version {
-                Some(v) => v.clone(),
-                None => super::panel::short_command(&self.argv.join(" ")),
+            Kind::Acp => match (&self.problem, &self.version) {
+                (Some(p), _) => crate::i18n::format("ui.agent_chat_cannot_start", &[("error", p)]),
+                (None, Some(v)) => v.clone(),
+                (None, None) => super::panel::short_command(&self.argv.join(" ")),
             },
         }
+    }
+    /// What to tell someone starting an agent that was found but didn't start (#9034): the reason,
+    /// and how to install it again. `None` when nothing was seen wrong.
+    pub fn problem_hint(&self) -> Option<String> {
+        let problem = self.problem.as_deref()?;
+        let program = self.argv.first().map(String::as_str).unwrap_or_default();
+        Some(crate::i18n::format(
+            "ui.agent_chat_reinstall",
+            &[("agent", &self.name), ("program", program), ("error", problem), ("install", self.install)],
+        ))
     }
 }
 
@@ -214,6 +231,8 @@ pub fn entries(app: &crate::SolveApp) -> Vec<Entry> {
             model: String::new(),
             key: false,
             request_timeout_s: DEFAULT_REQUEST_TIMEOUT_S,
+            problem: f.problem.clone(),
+            install: f.install,
         }));
     }
     out.extend(app.preferences.agents.iter().map(Entry::from_config));
@@ -269,6 +288,7 @@ pub const OPENAI_PRESETS: &[ApiPreset] = &[
     ApiPreset { name: "LM Studio", base_url: "http://localhost:1234/v1" },
     ApiPreset { name: "OpenAI", base_url: "https://api.openai.com/v1" },
     ApiPreset { name: "Mammouth AI", base_url: "https://api.mammouth.ai/v1" },
+    ApiPreset { name: "OpenCode Go", base_url: "https://opencode.ai/zen/go/v1" },
 ];
 
 /// Anthropic-compatible endpoints people use. The base URL is the one their documentation calls

@@ -229,6 +229,7 @@ fn actual_nested_second_placement_face_pick_keeps_target_and_author_paths() {
     assert_eq!(h.app.session.active_component, child_component);
     assert_eq!(h.app.session.active_occurrence_path.as_ref(), Some(&path));
     h.app.finish_sketch();
+    assert_eq!((h.app.session.active_component, h.app.session.active_occurrence_path.as_ref()), (0, None), "the design is active again (#8127)");
     assert_eq!(h.app.session.doc.feature(sketch).unwrap().kind, kind);
     let file = h.dir.join("nested-face.solidcraft");
     h.app.run("file.save", json!({"path":file})).unwrap();

@@ -40,6 +40,7 @@ fn request(mode: ReflectionMode) -> ImageRequest {
     let mut camera = crate::Camera { distance: 50.0, ..Default::default() };
     camera.set_view(crate::StandardView::Top);
     ImageRequest {
+        studio_weights: None,
         environment: None,
         textures: None,
         integrator: job::Integrator::Raytrace,
@@ -69,7 +70,7 @@ fn centre(bytes: &[u8]) -> [u8; 4] {
     ::image::load_from_memory(bytes).unwrap().to_rgba8().get_pixel(4, 4).0
 }
 fn expected(radiance: [f64; 3]) -> [u8; 4] {
-    let c = radiance.map(|v| encode(v / (1.0 + v)));
+    let c = radiance.map(|v| encode8(v / (1.0 + v)));
     [c[0], c[1], c[2], 255]
 }
 

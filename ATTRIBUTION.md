@@ -84,6 +84,8 @@ Editable drawing code, native projects and shipped exports are collected under `
 | docs/book/src/generated/tool-preview.png | SolidCraft contributors | rendered by `cargo xtask book` (`solidcraft-cli snapshot docs/book/scripts/tool-preview.json`; gitignored) | MIT OR Apache-2.0 |
 | assets/fonts/liberation-sans/LiberationSans-Regular.ttf | Red Hat, Inc. (Liberation Fonts 2.x; digitized data Google) | https://github.com/liberationfonts (Debian fonts-liberation), unmodified; licence text in assets/fonts/liberation-sans/OFL.txt; used for sketch Text outlines | SIL OFL 1.1 |
 | assets/fonts/biz-udp-gothic/BIZUDPGothic-Regular.ttf | The BIZ UDGothic Project Authors | https://github.com/googlefonts/morisawa-biz-ud-gothic (Google Fonts), unmodified; licence text in assets/fonts/biz-udp-gothic/OFL.txt; used for web UI Japanese font | SIL OFL 1.1 |
+| assets/fonts/craft-ui-sc/CraftUI-SC.otf | Adobe / Google Inc. (Noto Sans SC); SolidCraft subset | https://github.com/notofonts/noto-cjk Sans/SubsetOTF/SC Regular, glyph-subset for assets/locales/zh.json and renamed Craft UI SC (OFL reserved-name); licence text in assets/fonts/craft-ui-sc/OFL.txt; web UI Simplified Chinese | SIL OFL 1.1 |
+| assets/fonts/craft-ui-tc/CraftUI-TC.otf | Adobe / Google Inc. (Noto Sans TC); SolidCraft subset | https://github.com/notofonts/noto-cjk Sans/SubsetOTF/TC Regular, glyph-subset for assets/locales/zh-TW.json and renamed Craft UI TC (OFL reserved-name); licence text in assets/fonts/craft-ui-tc/OFL.txt; web UI Traditional Chinese | SIL OFL 1.1 |
 | tests/step-conformance/cone_point.step | step-conformance contributors | generated from formulas by https://github.com/dan335/step-conformance (corpus/generated, 96f30bb); import regression fixture | CC0-1.0 |
 | tests/step-conformance/cone_point_vertex.step | step-conformance contributors | generated from formulas by https://github.com/dan335/step-conformance (corpus/generated, 96f30bb); import regression fixture | CC0-1.0 |
 | tests/step-conformance/cylinder.step | step-conformance contributors | generated from formulas by https://github.com/dan335/step-conformance (corpus/generated, 96f30bb); import regression fixture | CC0-1.0 |
@@ -125,17 +127,19 @@ Editable drawing code, native projects and shipped exports are collected under `
 | assets/appearances/library.rs | SolidCraft contributors | Original SolidCraft resource data or drawing code, collected without redesign | MIT OR Apache-2.0 |
 | assets/appearances/opaque_finishes.rs | SolidCraft contributors | original illustrative opaque finish values; no external dataset, textures or measured engineering data | MIT OR Apache-2.0 |
 | assets/fonts/biz-udp-gothic/OFL.txt | The BIZ UDGothic Project Authors | Unmodified accompanying font licence | SIL OFL 1.1 |
+| assets/fonts/craft-ui-sc/OFL.txt | Adobe / Google Inc. (Noto CJK); SolidCraft header | Accompanying OFL for CraftUI-SC.otf | SIL OFL 1.1 |
+| assets/fonts/craft-ui-tc/OFL.txt | Adobe / Google Inc. (Noto CJK); SolidCraft header | Accompanying OFL for CraftUI-TC.otf | SIL OFL 1.1 |
 | assets/fonts/ibm-plex-mono/OFL.txt | IBM Corp. | Unmodified accompanying font licence | SIL OFL 1.1 |
 | assets/fonts/ibm-plex-sans/OFL.txt | IBM Corp. | Unmodified accompanying font licence | SIL OFL 1.1 |
 | assets/fonts/liberation-sans/OFL.txt | Red Hat, Inc.; Liberation Fonts contributors | Unmodified accompanying font licence | SIL OFL 1.1 |
-| assets/icons/app/linux/exports/hicolor/128x128/apps/ai.storyteller.solidcraft.png | SolidCraft contributors | Generated from assets/icons/app/shared/source/app_icon.rs with the original CLI/ICO encoders | MIT OR Apache-2.0 |
-| assets/icons/app/linux/exports/hicolor/16x16/apps/ai.storyteller.solidcraft.png | SolidCraft contributors | Generated from assets/icons/app/shared/source/app_icon.rs with the original CLI/ICO encoders | MIT OR Apache-2.0 |
-| assets/icons/app/linux/exports/hicolor/24x24/apps/ai.storyteller.solidcraft.png | SolidCraft contributors | Generated from assets/icons/app/shared/source/app_icon.rs with the original CLI/ICO encoders | MIT OR Apache-2.0 |
-| assets/icons/app/linux/exports/hicolor/256x256/apps/ai.storyteller.solidcraft.png | SolidCraft contributors | Generated from assets/icons/app/shared/source/app_icon.rs with the original CLI/ICO encoders | MIT OR Apache-2.0 |
-| assets/icons/app/linux/exports/hicolor/32x32/apps/ai.storyteller.solidcraft.png | SolidCraft contributors | Generated from assets/icons/app/shared/source/app_icon.rs with the original CLI/ICO encoders | MIT OR Apache-2.0 |
-| assets/icons/app/linux/exports/hicolor/48x48/apps/ai.storyteller.solidcraft.png | SolidCraft contributors | Generated from assets/icons/app/shared/source/app_icon.rs with the original CLI/ICO encoders | MIT OR Apache-2.0 |
-| assets/icons/app/linux/exports/hicolor/512x512/apps/ai.storyteller.solidcraft.png | SolidCraft contributors | Generated from assets/icons/app/shared/source/app_icon.rs with the original CLI/ICO encoders | MIT OR Apache-2.0 |
-| assets/icons/app/linux/exports/hicolor/64x64/apps/ai.storyteller.solidcraft.png | SolidCraft contributors | Generated from assets/icons/app/shared/source/app_icon.rs with the original CLI/ICO encoders | MIT OR Apache-2.0 |
+| assets/icons/app/linux/exports/hicolor/128x128/apps/io.tangencylabs.solidcraft.png | SolidCraft contributors | Generated from assets/icons/app/shared/source/app_icon.rs with the original CLI/ICO encoders | MIT OR Apache-2.0 |
+| assets/icons/app/linux/exports/hicolor/16x16/apps/io.tangencylabs.solidcraft.png | SolidCraft contributors | Generated from assets/icons/app/shared/source/app_icon.rs with the original CLI/ICO encoders | MIT OR Apache-2.0 |
+| assets/icons/app/linux/exports/hicolor/24x24/apps/io.tangencylabs.solidcraft.png | SolidCraft contributors | Generated from assets/icons/app/shared/source/app_icon.rs with the original CLI/ICO encoders | MIT OR Apache-2.0 |
+| assets/icons/app/linux/exports/hicolor/256x256/apps/io.tangencylabs.solidcraft.png | SolidCraft contributors | Generated from assets/icons/app/shared/source/app_icon.rs with the original CLI/ICO encoders | MIT OR Apache-2.0 |
+| assets/icons/app/linux/exports/hicolor/32x32/apps/io.tangencylabs.solidcraft.png | SolidCraft contributors | Generated from assets/icons/app/shared/source/app_icon.rs with the original CLI/ICO encoders | MIT OR Apache-2.0 |
+| assets/icons/app/linux/exports/hicolor/48x48/apps/io.tangencylabs.solidcraft.png | SolidCraft contributors | Generated from assets/icons/app/shared/source/app_icon.rs with the original CLI/ICO encoders | MIT OR Apache-2.0 |
+| assets/icons/app/linux/exports/hicolor/512x512/apps/io.tangencylabs.solidcraft.png | SolidCraft contributors | Generated from assets/icons/app/shared/source/app_icon.rs with the original CLI/ICO encoders | MIT OR Apache-2.0 |
+| assets/icons/app/linux/exports/hicolor/64x64/apps/io.tangencylabs.solidcraft.png | SolidCraft contributors | Generated from assets/icons/app/shared/source/app_icon.rs with the original CLI/ICO encoders | MIT OR Apache-2.0 |
 | assets/icons/app/shared/source/app_icon.rs | SolidCraft contributors | Original SolidCraft drawing code: the borderless mark, drawn from the faces and gradients of assets/icons/app/macos/source/SolidCraft.icon/Assets/03-solid-blue-cutout.svg | MIT OR Apache-2.0 |
 | assets/icons/app/shared/source/windows_ico.rs | SolidCraft contributors | Original SolidCraft resource data or drawing code, collected without redesign | MIT OR Apache-2.0 |
 | assets/icons/app/windows/exports/solidcraft-executable.ico | SolidCraft contributors | Generated from assets/icons/app/shared/source/app_icon.rs with the original CLI/ICO encoders | MIT OR Apache-2.0 |
@@ -171,9 +175,9 @@ Editable drawing code, native projects and shipped exports are collected under `
 | assets/locales/zh.json | SolidCraft contributors | Original SolidCraft resource data or drawing code, collected without redesign | MIT OR Apache-2.0 |
 | assets/locales/zh-TW.json | SolidCraft contributors | Original Traditional Chinese (Taiwan) translation of SolidCraft's English catalog; no commercial CAD text used | MIT OR Apache-2.0 |
 | assets/materials/library.rs | SolidCraft contributors | Original SolidCraft resource data or drawing code, collected without redesign | MIT OR Apache-2.0 |
-| assets/platforms/linux/ai.storyteller.solidcraft.desktop | PhotoCraft / SolidCraft contributors | PhotoCraft packaging templates (https://github.com/storytold/photocraft), adapted for SolidCraft | Apache-2.0 |
-| assets/platforms/linux/ai.storyteller.solidcraft.metainfo.xml.in | PhotoCraft / SolidCraft contributors | PhotoCraft packaging templates (https://github.com/storytold/photocraft), adapted for SolidCraft | Apache-2.0 |
-| assets/platforms/linux/ai.storyteller.solidcraft.mime.xml | PhotoCraft / SolidCraft contributors | PhotoCraft packaging templates (https://github.com/storytold/photocraft), adapted for SolidCraft | Apache-2.0 |
+| assets/platforms/linux/io.tangencylabs.solidcraft.desktop | PhotoCraft / SolidCraft contributors | PhotoCraft packaging templates (https://github.com/storytold/photocraft), adapted for SolidCraft | Apache-2.0 |
+| assets/platforms/linux/io.tangencylabs.solidcraft.metainfo.xml.in | PhotoCraft / SolidCraft contributors | PhotoCraft packaging templates (https://github.com/storytold/photocraft), adapted for SolidCraft | Apache-2.0 |
+| assets/platforms/linux/io.tangencylabs.solidcraft.mime.xml | PhotoCraft / SolidCraft contributors | PhotoCraft packaging templates (https://github.com/storytold/photocraft), adapted for SolidCraft | Apache-2.0 |
 | assets/platforms/macos/dmg/background.tiff | SolidCraft contributors | original disk image window background (blueprint sheet: grid, double border, circles, centre lines, leader arrow, title block) drawn by assets/platforms/macos/dmg/make_background.py in IBM Plex Sans/Mono; 1x and 2x representations | MIT OR Apache-2.0 |
 | assets/platforms/macos/dmg/make_background.py | SolidCraft contributors | authoring script that draws the disk image background (Pillow); not part of any build | MIT OR Apache-2.0 |
 | assets/platforms/macos/dmg/layout.json | SolidCraft contributors | disk image window size, icon size and icon positions shared by the background script and settings.py | MIT OR Apache-2.0 |
@@ -429,6 +433,20 @@ Original SolidCraft drawings, Open for owner review; no runtime assignments.
 | assets/icons/ui/design/svg/model/status_recovery.svg | SolidCraft contributors | original icon master (64 grid) | MIT OR Apache-2.0 |
 | assets/icons/ui/design/svg/model/frame_member.svg | SolidCraft contributors | original icon master (64 grid) | MIT OR Apache-2.0 |
 | assets/icons/ui/design/svg/model/render_environment.svg | SolidCraft contributors | original Studio icon master (64 grid): dome with a grey cube inside | MIT OR Apache-2.0 |
+| assets/icons/ui/design/svg/flat/style_shaded.svg | SolidCraft contributors | original icon master (64 grid) | MIT OR Apache-2.0 |
+| assets/icons/ui/design/svg/flat/style_wireframe.svg | SolidCraft contributors | original icon master (64 grid) | MIT OR Apache-2.0 |
+| assets/icons/ui/design/svg/flat/style_hidden_edges.svg | SolidCraft contributors | original icon master (64 grid) | MIT OR Apache-2.0 |
+| assets/icons/ui/design/svg/flat/style_translucent.svg | SolidCraft contributors | original icon master (64 grid) | MIT OR Apache-2.0 |
+| assets/icons/ui/design/svg/flat/select_faces_edges.svg | SolidCraft contributors | original icon master (64 grid) | MIT OR Apache-2.0 |
+| assets/icons/ui/design/svg/flat/select_bodies.svg | SolidCraft contributors | original icon master (64 grid) | MIT OR Apache-2.0 |
+| assets/icons/ui/design/svg/flat/select_features.svg | SolidCraft contributors | original icon master (64 grid) | MIT OR Apache-2.0 |
+| assets/icons/ui/design/svg/flat/select_parts.svg | SolidCraft contributors | original icon master (64 grid) | MIT OR Apache-2.0 |
+| assets/icons/ui/design/svg/flat/select_components.svg | SolidCraft contributors | original icon master (64 grid) | MIT OR Apache-2.0 |
+| assets/icons/ui/design/svg/flat/select_sketch.svg | SolidCraft contributors | original icon master (64 grid) | MIT OR Apache-2.0 |
+| assets/icons/ui/design/svg/flat/display.svg | SolidCraft contributors | original icon master (64 grid) | MIT OR Apache-2.0 |
+| assets/icons/ui/design/svg/flat/grid.svg | SolidCraft contributors | original icon master (64 grid) | MIT OR Apache-2.0 |
+| assets/icons/ui/design/svg/flat/ground_shadow.svg | SolidCraft contributors | original icon master (64 grid) | MIT OR Apache-2.0 |
+| assets/icons/ui/design/svg/flat/ambient_occlusion.svg | SolidCraft contributors | original icon master (64 grid) | MIT OR Apache-2.0 |
 | assets/icons/ui/design/svg/model/placeholder.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
 | assets/icons/ui/design/svg/model/plane.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
 | assets/icons/ui/design/svg/model/plane_angle.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
@@ -579,6 +597,43 @@ Original SolidCraft drawings, Open for owner review; no runtime assignments.
 | assets/locales/ar.json | Abdullah (A-AL-ANAZI) | Original Arabic translation of SolidCraft's English catalog; no commercial CAD text used | MIT OR Apache-2.0 |
 | assets/locales/he.json | SolidCraft contributors | Original Hebrew translation of SolidCraft's English catalog; no commercial CAD text used | MIT OR Apache-2.0 |
 | assets/styles/ui/themes/cga.json | SolidCraft contributors | original SolidCraft theme file using the 16 colours of the IBM Color Graphics Adapter (black, cyan, magenta, and white of its high-intensity palette 1 for the interface) | MIT OR Apache-2.0 |
+| assets/styles/ui/themes/1-bit.json | SolidCraft contributors | original SolidCraft theme file | MIT OR Apache-2.0 |
+| assets/styles/ui/themes/1-bit-dark.json | SolidCraft contributors | original SolidCraft theme file | MIT OR Apache-2.0 |
+| `assets/locales/pending/navbar-customisation.json` | SolidCraft contributors | Original navigation bar editor translations | MIT OR Apache-2.0 |
+| `assets/locales/pending/navbar-slots.json` | SolidCraft contributors | Original navigation slot translations | MIT OR Apache-2.0 |
+| assets/locales/bs.json | Tarik Sijercic (tsijercic1) | Original Bosnian translation of SolidCraft's English catalog; no commercial CAD text used | MIT OR Apache-2.0 |
+| assets/locales/hr.json | Tarik Sijercic (tsijercic1) | Original Croatian translation of SolidCraft's English catalog; no commercial CAD text used | MIT OR Apache-2.0 |
+| assets/locales/sr.json | Tarik Sijercic (tsijercic1) | Original Serbian (ekavian, Cyrillic) translation of SolidCraft's English catalog; no commercial CAD text used | MIT OR Apache-2.0 |
+| assets/icons/ui/design/svg/model/finish_edit.svg | SolidCraft contributors | original icon master (64 grid) | MIT OR Apache-2.0 |
+| `assets/locales/pending/sketch-tracking-guides.json` | SolidCraft contributors | Original alignment-guide preference labels and help text | MIT OR Apache-2.0 |
+| assets/locales/pending/point-clouds.json | SolidCraft contributors | Original point-cloud UI strings and translations | MIT OR Apache-2.0 |
+| assets/icons/ui/design/svg/model/feature_group.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
+| assets/icons/ui/design/svg/model/mesh_body.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
+| assets/icons/ui/design/svg/model/timeline_play.svg | SolidCraft contributors | Original history playback icon; canonical grey_cube base and original action cue | MIT OR Apache-2.0 |
+| assets/icons/ui/design/svg/model/timeline_stop.svg | SolidCraft contributors | Original history playback icon; canonical grey_cube base and original action cue | MIT OR Apache-2.0 |
+| assets/icons/ui/design/svg/flat/status_pin.svg | SolidCraft contributors | Original analytic pin icon for persistent viewport results | MIT OR Apache-2.0 |
+| assets/locales/pending/render-wear.json | SolidCraft contributors | Original UI labels and translations | MIT OR Apache-2.0 |
+| assets/icons/ui/design/svg/model/equation_curve.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
+| assets/locales/pending/sketch-recent-snap.json | SolidCraft contributors | Original preference messages for the recent centre and midpoint snap | MIT OR Apache-2.0 |
+| assets/icons/ui/design/svg/model/construction_line.svg | SolidCraft contributors | original icon master (64 grid) | MIT OR Apache-2.0 |
+| assets/icons/ui/design/svg/model/construction_line_horizontal.svg | SolidCraft contributors | original icon master (64 grid) | MIT OR Apache-2.0 |
+| assets/icons/ui/design/svg/model/construction_line_vertical.svg | SolidCraft contributors | original icon master (64 grid) | MIT OR Apache-2.0 |
+| assets/icons/ui/design/svg/model/construction_line_angle.svg | SolidCraft contributors | original icon master (64 grid) | MIT OR Apache-2.0 |
+| assets/icons/ui/design/svg/model/construction_line_parallel.svg | SolidCraft contributors | original icon master (64 grid) | MIT OR Apache-2.0 |
+| assets/icons/ui/design/svg/model/construction_line_perpendicular.svg | SolidCraft contributors | original icon master (64 grid) | MIT OR Apache-2.0 |
+| assets/icons/ui/design/svg/model/construction_line_tangent_external.svg | SolidCraft contributors | original icon master (64 grid) | MIT OR Apache-2.0 |
+| assets/icons/ui/design/svg/model/construction_line_tangent_at.svg | SolidCraft contributors | original icon master (64 grid) | MIT OR Apache-2.0 |
+| assets/icons/ui/design/svg/model/construction_line_tangent_two.svg | SolidCraft contributors | original icon master (64 grid) | MIT OR Apache-2.0 |
+| assets/icons/ui/design/svg/model/construction_line_bisector.svg | SolidCraft contributors | original icon master (64 grid) | MIT OR Apache-2.0 |
+| docs/book/src/generated/equation-circle.png | SolidCraft contributors | rendered by `cargo xtask book` (`solidcraft-cli snapshot docs/book/scripts/equation-circle.json`; gitignored) | MIT OR Apache-2.0 |
+| docs/book/src/generated/equation-flower.png | SolidCraft contributors | rendered by `cargo xtask book` (`solidcraft-cli snapshot docs/book/scripts/equation-flower.json`; gitignored) | MIT OR Apache-2.0 |
+| docs/book/src/generated/equation-involute.png | SolidCraft contributors | rendered by `cargo xtask book` (`solidcraft-cli snapshot docs/book/scripts/equation-involute.json`; gitignored) | MIT OR Apache-2.0 |
+| docs/book/src/generated/equation-line.png | SolidCraft contributors | rendered by `cargo xtask book` (`solidcraft-cli snapshot docs/book/scripts/equation-line.json`; gitignored) | MIT OR Apache-2.0 |
+| docs/book/src/generated/equation-parabola.png | SolidCraft contributors | rendered by `cargo xtask book` (`solidcraft-cli snapshot docs/book/scripts/equation-parabola.json`; gitignored) | MIT OR Apache-2.0 |
+| docs/book/src/generated/equation-spiral.png | SolidCraft contributors | rendered by `cargo xtask book` (`solidcraft-cli snapshot docs/book/scripts/equation-spiral.json`; gitignored) | MIT OR Apache-2.0 |
+| docs/book/src/generated/equation-wave.png | SolidCraft contributors | rendered by `cargo xtask book` (`solidcraft-cli snapshot docs/book/scripts/equation-wave.json`; gitignored) | MIT OR Apache-2.0 |
+| assets/icons/ui/design/svg/model/print_face.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
+| assets/locales/fi.json | SolidCraft contributors | Original Finnish translation of SolidCraft's English catalog, AI-assisted (Claude Code) clean-room from the English and not yet reviewed line by line by a native speaker; no commercial CAD text used | MIT OR Apache-2.0 |
 
 ## Code adapted from sibling projects
 
@@ -638,6 +693,7 @@ copied into SolidCraft.
 
 | Directory | Source | Licence | Changes |
 |---|---|---|---|
+| vendor/accesskit_macos | accesskit_macos 0.26.3, https://github.com/AccessKit/accesskit (The AccessKit contributors) | MIT OR Apache-2.0 | the subclassing adapter and its tests from 0.27.2: dropping the adapter keeps AppKit's key-value observers (vendor/README.md) |
 | vendor/truck-meshalgo | truck-meshalgo 0.4.0, https://github.com/ricosjp/truck (RICOS Co. Ltd.) | Apache-2.0 | meshing: bounded parameter searches, collapsed-boundary projection, subdivision and provisional fixed-grid previews (vendor/README.md) |
 | vendor/truck-stepio | truck-stepio 0.3.0, https://github.com/ricosjp/truck (RICOS Co. Ltd.) | Apache-2.0 | STEP writer: intersection-curve surfaces written at unique ids (vendor/README.md) |
 | vendor/truck-shapeops | truck-shapeops 0.4.0, https://github.com/ricosjp/truck (RICOS Co. Ltd.) | Apache-2.0 | robust meshing and nearest-parameter fallback in booleans; degenerate intersection-curve rejection; face and edge history of booleans; trace macro; corner choice at vertices several intersection curves end on; reuse of an operand's meshes (vendor/README.md) |

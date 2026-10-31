@@ -105,7 +105,7 @@ impl SelInput {
         let a = self.accept;
         match h {
             Hit::Profile { sketch, index } if a & PROFILES != 0 => Some(Sel::Profile { sketch: *sketch, index: *index }),
-            Hit::Edge { body, index, mid } if a & EDGES != 0 => Some(Sel::Edge { body: body.clone(), index: *index, point: *mid }),
+            Hit::Edge { body, index, mid, .. } if a & EDGES != 0 => Some(Sel::Edge { body: body.clone(), index: *index, point: *mid }),
             Hit::Face { body, index, point } if a & FACES != 0 || (a & PLANAR_FACES != 0 && planar(body, *index)) => {
                 Some(Sel::Face { body: body.clone(), index: *index, point: *point })
             }

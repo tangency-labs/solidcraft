@@ -1,4 +1,6 @@
 {
+  "order": 20,
+  "provenance": "Original SolidCraft mapping of Gruvbox (MIT palette)",
   "format": "solidcraft-theme/1",
   "name": "Gruvbox Dark Hard",
   "base": "dark",
@@ -55,8 +57,8 @@
     "sketch_fixed": "#ebdbb2",
     "sketch_halo": "#141617",
     "sketch_locked": "#b8bb26",
-    "dimension": "#ebdbb2",
-    "dimension_driven": "#928374",
+    "dimension": "#fabd2f",
+    "dimension_driven": "#b57614",
     "sketch_point": "#ebdbb2",
     "sketch_point_free": "#83a598",
     "dialog_bg": "#3c3836",

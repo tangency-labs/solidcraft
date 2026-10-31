@@ -1,4 +1,6 @@
 {
+  "order": 40,
+  "provenance": "Original SolidCraft mapping of Gruvbox (MIT palette)",
   "format": "solidcraft-theme/1",
   "name": "Gruvbox Light",
   "base": "light",
@@ -55,8 +57,8 @@
     "sketch_fixed": "#282828",
     "sketch_halo": "#fcf5d8",
     "sketch_locked": "#79740e",
-    "dimension": "#3c3836",
-    "dimension_driven": "#7c6f64",
+    "dimension": "#1f5c40",
+    "dimension_driven": "#4f7d64",
     "sketch_point": "#282828",
     "sketch_point_free": "#076678",
     "dialog_bg": "#fbf1c7",

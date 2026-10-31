@@ -2,6 +2,7 @@
 //! face, pick two edges (each distance is measured from the pick), type the distances (one in
 //! the dialog, one in its box on the canvas), OK. The hole sits at those distances; Edit Feature
 //! picks the edges again with their distances, and moving the hole's place measures them again.
+//! A Cylinder standing on a picked face takes reference edges the same way (#6380).
 
 use serde_json::json;
 use solidcraft_engine::Sel;
@@ -159,4 +160,114 @@ fn a_number_typed_after_an_edge_pick_sets_its_distance() {
     assert!((place(&h).x - 7.0).abs() < 1e-6, "the hole is 7 mm from the left edge: {:?}", place(&h));
     let Some(Kind::Hole { diameter, .. }) = h.app.dialog.as_ref().map(|d| &d.kind) else { panic!("the hole dialog") };
     assert_eq!(diameter, "5 mm", "the diameter is left as it was");
+}
+
+/// Without value boxes in the view (#9479), the distance's row in the command window takes the
+/// number typed after an edge pick, as its box would.
+#[test]
+fn without_value_boxes_a_number_typed_after_an_edge_pick_sets_its_distance() {
+    let mut h = plate();
+    h.app.preferences.value_boxes_in_view = false;
+    h.step(&json!({"start": "solid.hole"})).unwrap();
+    let at = screen(&mut h, Vec3::new(30.0, 25.0, 10.0));
+    h.step(&json!({"click": at})).unwrap();
+    h.step(&json!({"click": {"handle": "dialog:Reference 1"}})).unwrap();
+    let left = screen(&mut h, Vec3::new(0.0, 20.0, 10.0));
+    h.step(&json!({"click": left})).unwrap();
+    h.frames(2);
+    assert!(h.ctx.memory(|m| m.area_rect(egui::Id::new(("sc_hole_ref_area", 0usize)))).is_none(), "a distance box in the view");
+    h.step(&json!({"text": "7 mm"})).unwrap();
+    h.frames(2);
+    assert_eq!(distances(&h)[0], "7 mm");
+    assert!((place(&h).x - 7.0).abs() < 1e-6, "the hole is 7 mm from the left edge: {:?}", place(&h));
+    let Some(Kind::Hole { diameter, .. }) = h.app.dialog.as_ref().map(|d| &d.kind) else { panic!("the hole dialog") };
+    assert_eq!(diameter, "5 mm", "the diameter is left as it was");
+}
+
+/// The open Cylinder dialog's reference distances and where it stands.
+fn cylinder_dialog(h: &Harness) -> ([String; 2], Vec3) {
+    match h.app.dialog.as_ref().map(|d| &d.kind) {
+        Some(Kind::Primitive { cmd: "solid.cylinder", refs, at: Some((p, _)), .. }) => (refs.distance.clone(), *p),
+        other => panic!("the cylinder dialog is open on a face: {other:?}"),
+    }
+}
+
+/// With the mouse alone: pick the top face, start Cylinder, pick two edges (each distance
+/// measured from the pick), OK. Typing a distance moves the base; Edit Feature picks the edges
+/// again.
+#[test]
+fn a_cylinder_is_placed_by_its_distances_from_two_edges() {
+    let mut h = plate();
+    let at = screen(&mut h, Vec3::new(30.0, 25.0, 10.0));
+    h.step(&json!({"click": at})).unwrap();
+    h.step(&json!({"start": "solid.cylinder"})).unwrap();
+    h.frames(2);
+    let (_, picked) = cylinder_dialog(&h);
+    assert!(picked.dist(Vec3::new(30.0, 25.0, 10.0)) < 0.5, "it stands where the face was picked: {picked:?}");
+    // Reference 1 takes the first edge picked, Reference 2 the next.
+    let left = screen(&mut h, Vec3::new(0.0, 20.0, 10.0));
+    h.step(&json!({"click": left})).unwrap();
+    let front = screen(&mut h, Vec3::new(25.0, 0.0, 10.0));
+    h.step(&json!({"click": front})).unwrap();
+    h.frames(2);
+    assert!(picked_edge(&h, "Reference 1").is_some_and(|p| p.x.abs() < 1e-6), "{:?}", picked_edge(&h, "Reference 1"));
+    assert!(picked_edge(&h, "Reference 2").is_some_and(|p| p.y.abs() < 1e-6), "{:?}", picked_edge(&h, "Reference 2"));
+    let (measured, _) = cylinder_dialog(&h);
+    let value = |s: &str| h.app.session.doc.eval(s, solidcraft_engine::doc::expr::Kind::Length).unwrap();
+    assert!((value(&measured[0]) - picked.x).abs() < 1e-3 && (value(&measured[1]) - picked.y).abs() < 1e-3, "{measured:?} from {picked:?}");
+    assert!(h.at(&json!({"handle": "canvas:Distance 1"})).is_ok() && h.at(&json!({"handle": "canvas:Distance 2"})).is_ok());
+    h.step(&json!({"widget": "OK"})).unwrap();
+    assert!(h.app.dialog.is_none(), "OK closed the dialog: {:?}", h.app.dialog.as_ref().map(|d| &d.error));
+    let f = h.app.session.doc.features.last().unwrap().clone();
+    let FeatureKind::Cylinder { references, .. } = &f.kind else { panic!("the last feature is a cylinder: {}", f.kind.type_name()) };
+    assert_eq!(references.len(), 2);
+    assert_eq!(f.edge_names.len(), 2);
+    assert!(h.app.session.model.result(f.id).is_some_and(|r| r.error.is_none()));
+
+    // Edit Feature (with the face selected): the edges again with their distances, each input
+    // once; a typed distance moves the base.
+    let top = crate::dialogs::face_sel(&h.app.session, Vec3::new(45.0, 35.0, 10.0)).unwrap();
+    h.app.session.selection = vec![top];
+    h.step(&json!({"call": "ui.editFeature", "params": {"feature": f.id}})).unwrap();
+    h.frames(4);
+    let labels: Vec<&str> = h.app.dialog.as_ref().unwrap().inputs.iter().map(|i| i.label).collect();
+    assert_eq!(labels, ["Face", "Reference 1", "Reference 2"]);
+    assert!(picked_edge(&h, "Reference 1").is_some_and(|p| p.x.abs() < 1e-6), "{:?}", picked_edge(&h, "Reference 1"));
+    assert!(picked_edge(&h, "Reference 2").is_some_and(|p| p.y.abs() < 1e-6), "{:?}", picked_edge(&h, "Reference 2"));
+    assert_eq!(cylinder_dialog(&h).0, measured);
+    type_into(&mut h, "dialog:Distance 1", "10 mm");
+    type_into(&mut h, "canvas:Distance 2", "12 mm");
+    assert!(cylinder_dialog(&h).1.dist(Vec3::new(10.0, 12.0, 10.0)) < 1e-6, "{:?}", cylinder_dialog(&h).1);
+    h.step(&json!({"widget": "OK"})).unwrap();
+    assert!(h.app.dialog.is_none(), "{:?}", h.app.dialog.as_ref().map(|d| &d.error));
+    assert!(solid_at(&h, Vec3::new(10.0, 12.0, 12.0)) && !solid_at(&h, Vec3::new(picked.x, picked.y, 12.0)), "the edit moved it to (10, 12)");
+}
+
+/// Started with nothing selected, the Cylinder stands at the origin until a face is clicked;
+/// then its edges are picked, all with the mouse.
+#[test]
+fn a_cylinder_started_first_takes_its_face_then_its_edges() {
+    let mut h = plate();
+    h.step(&json!({"start": "solid.cylinder"})).unwrap();
+    h.frames(2);
+    let d = h.app.dialog.as_ref().unwrap();
+    let labels: Vec<&str> = d.inputs.iter().map(|i| i.label).collect();
+    assert_eq!(labels, ["Face", "Reference 1", "Reference 2"]);
+    assert!(matches!(d.kind, Kind::Primitive { at: None, .. }), "nothing picked: at the origin");
+    let at = screen(&mut h, Vec3::new(30.0, 25.0, 10.0));
+    h.step(&json!({"click": at})).unwrap();
+    h.frames(2);
+    let (_, picked) = cylinder_dialog(&h);
+    assert!(picked.dist(Vec3::new(30.0, 25.0, 10.0)) < 0.5, "it stands where the face was clicked: {picked:?}");
+    let left = screen(&mut h, Vec3::new(0.0, 20.0, 10.0));
+    h.step(&json!({"click": left})).unwrap();
+    let front = screen(&mut h, Vec3::new(25.0, 0.0, 10.0));
+    h.step(&json!({"click": front})).unwrap();
+    h.frames(2);
+    assert!(picked_edge(&h, "Reference 1").is_some() && picked_edge(&h, "Reference 2").is_some());
+    h.step(&json!({"widget": "OK"})).unwrap();
+    assert!(h.app.dialog.is_none(), "{:?}", h.app.dialog.as_ref().map(|d| &d.error));
+    let f = h.app.session.doc.features.last().unwrap();
+    let FeatureKind::Cylinder { references, .. } = &f.kind else { panic!("the last feature is a cylinder") };
+    assert_eq!(references.len(), 2);
 }

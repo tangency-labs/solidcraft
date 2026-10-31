@@ -17,7 +17,7 @@ pub(super) fn write(writer: &mut PackageWriter, png: &[u8], document: &[u8]) -> 
     }
     let key = serde_json::to_vec(&json!({"format": FORMAT, "app": env!("CARGO_PKG_VERSION"), "document": digest(document), "payload": digest(png)}))
         .map_err(invalid)?;
-    if !writer.room(2, key.len().saturating_add(png.len()), MAX_DESIGN_BYTES) {
+    if !writer.room(2, key.len().saturating_add(png.len()), max_design()) {
         return Ok(());
     }
     writer.part("cache/thumbnail.json", &key, false)?;
@@ -54,17 +54,17 @@ pub fn read_design_thumbnail_file(path: &str) -> Option<Vec<u8>> {
     let source = {
         crate::vfs::check(path).ok()?;
         let metadata = std::fs::metadata(path).ok()?;
-        if !metadata.is_file() || metadata.len() > MAX_DESIGN_BYTES as u64 {
+        if !metadata.is_file() || metadata.len() > max_design() as u64 {
             return None;
         }
         let source = std::fs::File::open(path).ok()?;
         let metadata = source.metadata().ok()?;
-        if !metadata.is_file() || metadata.len() > MAX_DESIGN_BYTES as u64 {
+        if !metadata.is_file() || metadata.len() > max_design() as u64 {
             return None;
         }
         source
     };
     #[cfg(target_arch = "wasm32")]
-    let source = Cursor::new(crate::vfs::read(path, MAX_DESIGN_BYTES).ok()?);
+    let source = Cursor::new(crate::vfs::read(path, max_design()).ok()?);
     DesignContainerReader::new(source).ok()?.thumbnail()
 }

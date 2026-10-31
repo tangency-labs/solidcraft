@@ -267,6 +267,17 @@ pub(super) fn clone_assembly(
     features: &BTreeMap<u64, u64>,
     bodies: &BTreeMap<String, String>,
 ) -> Result<Vec<String>> {
+    clone_assembly_with_joint_ids(doc, source, occurrences, features, bodies).map(|(messages, _)| messages)
+}
+
+/// The copied joint identity map is also needed when extracting saved timeline folders.
+pub(super) fn clone_assembly_with_joint_ids(
+    doc: &mut Document,
+    source: &Document,
+    occurrences: &BTreeMap<u64, u64>,
+    features: &BTreeMap<u64, u64>,
+    bodies: &BTreeMap<String, String>,
+) -> Result<(Vec<String>, BTreeMap<u64, u64>)> {
     budget(&source.assembly)?;
     budget(&doc.assembly)?;
     validate_map(occurrences)?;
@@ -419,7 +430,7 @@ pub(super) fn clone_assembly(
     budget(&a)?;
     doc.next_id = item_id.checked_add(1).ok_or_else(|| invalid("assembly identifier space is exhausted"))?;
     doc.assembly = a;
-    Ok(messages)
+    Ok((messages, joints))
 }
 
 #[cfg(test)]

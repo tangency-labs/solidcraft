@@ -1,0 +1,6 @@
+{"commands": [
+  {"command": "sketch.create", "params": {"plane": "XY", "name": "Wave"}},
+  {"command": "sketch.equation_curve", "params": {"explicit": true, "y": "8 * sin(x / 5)", "start": 0, "end": "20 * pi"}},
+  {"command": "sketch.finish", "params": {}},
+  {"command": "view.apply", "params": {"view": "top"}}
+]}

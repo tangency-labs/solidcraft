@@ -9,7 +9,7 @@ const ALL_GUIDANCE: [&str; 4] = [
     "Report text copied. Paste it into GitHub and submit your report there.",
     "Review your report on GitHub and click Submit new issue to publish it.",
     "Opens your browser and copies the report text for you to paste into GitHub.",
-    "Opens your browser. Review and submit your report on GitHub.",
+    "Opens your browser and copies the report text. Review and submit your report on GitHub.",
 ];
 
 fn answer(ui: &mut Ui, label: &str, hint: &str, text: &mut String, id: &str, rows: usize) -> egui::Response {
@@ -89,12 +89,43 @@ pub(super) fn show(app: &mut SolveApp, draft: &mut Draft, ctx: &egui::Context) -
     let t = crate::theme::Tokens::get();
     let screen = ctx.content_rect();
     let cards = ((screen.width() - 2.0 * t.space_16) / t.form_card_width).clamp(0.5, 2.6);
-    let (closed, action) = ui_kit::Window::new(Id::new("sc_issue_report"), "bug_report", tr_label("Report a bug"))
+    // Ctrl+Enter (⌘Enter on a Mac) in any field continues on GitHub. Read before the fields see
+    // it, so it adds no line break. Only the press counts: the repeats of a held key are dropped,
+    // so holding it opens GitHub once.
+    let submit = ctx.input_mut(|i| {
+        let mut pressed_now = false;
+        i.events.retain(|e| match e {
+            egui::Event::Key { key: egui::Key::Enter, pressed, repeat, modifiers, .. } if modifiers.command => {
+                pressed_now |= *pressed && !*repeat;
+                false
+            }
+            _ => true,
+        });
+        pressed_now
+    });
+    // The shared footer is a single row. Keep both export actions reachable at high zoom;
+    // the header's close button remains available when the redundant closing action is omitted.
+    let actions_width = ctx.fonts_mut(|fonts| {
+        [
+            ("Open GitHub issue form", crate::fonts::bold(t.font_label), t.space_16),
+            ("Copy report", egui::FontId::proportional(t.font_label), t.space_12),
+            ("Close draft", egui::FontId::proportional(t.font_label), t.space_12),
+        ]
+        .into_iter()
+        .map(|(label, font, padding)| fonts.layout_no_wrap(tr_label(label).to_string(), font, t.form_ink).size().x + 2.0 * padding)
+        .sum::<f32>()
+    });
+    let compact = cards * t.form_card_width < actions_width + 2.0 * t.space_12 + 2.0 * t.space_6 + t.space_8;
+    let open_label = if compact { "Open GitHub" } else { "Open GitHub issue form" };
+    let close_label = if compact { "" } else { "Close draft" };
+    let (closed, mut action) = ui_kit::Window::new(Id::new("sc_issue_report"), "bug_report", tr_label("Report a bug"))
         .cards(cards)
-        .anchor(egui::Align2::CENTER_TOP, vec2(0.0, t.space_16))
+        // Opens at the top middle, and its title band drags it off what the report is about
+        // (#9916).
+        .placed(egui::Align2::CENTER_TOP, egui::pos2(screen.center().x, screen.top() + t.space_16))
         .fields()
         .keep_open_on_escape()
-        .actions(tr_label("Continue on GitHub"), tr_label("Close draft"), Some(tr_label("Copy report")))
+        .actions(tr_label(open_label), tr_label(close_label), Some(tr_label("Copy report")))
         .show(ctx, true, |ui| {
             // The card's own header, footer and margins come on top of the scrolling body.
             let chrome = ui_kit::header_height() + t.form_footer_height + 6.0 * t.space_8;
@@ -119,7 +150,7 @@ pub(super) fn show(app: &mut SolveApp, draft: &mut Draft, ctx: &egui::Context) -
                         } else if copy_needed {
                             "Opens your browser and copies the report text for you to paste into GitHub."
                         } else {
-                            "Opens your browser. Review and submit your report on GitHub."
+                            "Opens your browser and copies the report text. Review and submit your report on GitHub."
                         };
                         // Reserve the tallest wording, so the card (and its footer) keeps its height as the
                         // guidance changes under a click.
@@ -133,6 +164,16 @@ pub(super) fn show(app: &mut SolveApp, draft: &mut Draft, ctx: &egui::Context) -
                             ui_kit::text(ui, tr_label(guidance), ui_kit::Text::Note("guidance"));
                         });
                         ui_kit::text(ui, tr_label("Reports are public. A GitHub account is required."), ui_kit::Text::Note("public"));
+                        ui_kit::text(
+                            ui,
+                            tr_label("SolidCraft cannot submit reports directly. Submit on GitHub; no token is needed in the app."),
+                            ui_kit::Text::Note("submission"),
+                        );
+                        ui_kit::text(
+                            ui,
+                            tr_label("If you are offline or GitHub does not open, use Copy report and keep the text to submit later."),
+                            ui_kit::Text::Note("offline"),
+                        );
                         ui_kit::divider(ui, "report");
                         ui_kit::text(ui, tr_label("Summary"), ui_kit::Text::Heading("Summary"));
                         let response = ui_kit::bounded_cell_editor(
@@ -164,6 +205,7 @@ pub(super) fn show(app: &mut SolveApp, draft: &mut Draft, ctx: &egui::Context) -
                                 draft.missing_description = false;
                             }
                         }
+                        ui_kit::text(ui, tr_label(shortcut_hint(ui.ctx().os())), ui_kit::Text::Note("shortcut"));
                         let steps = answer(
                             ui,
                             "Steps to reproduce (optional)",
@@ -194,6 +236,9 @@ pub(super) fn show(app: &mut SolveApp, draft: &mut Draft, ctx: &egui::Context) -
                     });
             });
         });
+    if submit && action == ui_kit::Action::None {
+        action = ui_kit::Action::Ok;
+    }
     // TextEdit applies this frame's events while it is drawn. Export only after every editor
     // has processed its input, including diagnostic redactions.
     match action {
@@ -201,10 +246,10 @@ pub(super) fn show(app: &mut SolveApp, draft: &mut Draft, ctx: &egui::Context) -
             draft.missing_description = draft.description.trim().is_empty();
             if !draft.missing_description {
                 let body = draft.report_body();
-                let (url, copy_needed) = draft_url(&draft.report_title(), &body);
-                if copy_needed {
-                    ctx.copy_text(body);
-                }
+                let (url, _) = draft_url(&draft.report_title(), &body);
+                // Keep a local fallback even for short reports: opening the browser may fail,
+                // be blocked by the web host, or lead to an offline page. No delivery is confirmed.
+                ctx.copy_text(body);
                 ctx.open_url(egui::OpenUrl::new_tab(url));
                 draft.opened_github = true;
                 ctx.request_repaint();
@@ -212,7 +257,7 @@ pub(super) fn show(app: &mut SolveApp, draft: &mut Draft, ctx: &egui::Context) -
         }
         ui_kit::Action::Apply => {
             ctx.copy_text(draft.report_body());
-            draft.note = "Report copied. Paste it into the GitHub draft if needed.".into();
+            draft.note = "Report copied. Keep this text to submit on GitHub when you are online.".into();
         }
         _ => {}
     }
@@ -222,4 +267,9 @@ pub(super) fn show(app: &mut SolveApp, draft: &mut Draft, ctx: &egui::Context) -
         draft.focus_requested = false;
     }
     (retake, closed || action == ui_kit::Action::Cancel)
+}
+
+/// The keys that continue on GitHub from any field (#7203), as this computer spells them.
+pub(super) fn shortcut_hint(os: egui::os::OperatingSystem) -> &'static str {
+    if os == egui::os::OperatingSystem::Mac { "⌘Enter continues on GitHub." } else { "Ctrl+Enter continues on GitHub." }
 }

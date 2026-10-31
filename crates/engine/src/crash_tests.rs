@@ -50,6 +50,15 @@ fn child() {
         }
         std::process::abort();
     }
+    // Up and running, then a second window's surface (the agent chat on its own), then dying.
+    if mode == "late_surface" {
+        startup_step("window surface");
+        startup_step("surface configure");
+        phase(RUNNING);
+        startup_step("window surface");
+        startup_step("surface configure");
+        std::process::abort();
+    }
     set_environment("Renderer: test");
     let mut s = Session { crash_journal: true, ..Default::default() };
     s.execute("solid.box", &json!({"length": 10, "width": 20, "height": 30})).unwrap();
@@ -232,6 +241,7 @@ fn a_command_panic_is_reported_once_with_the_design_and_the_command() {
     assert!(!bt.iter().any(|f| f.as_str().unwrap().contains("crash::hook")), "the hook's own frames are dropped: {bt:?}");
     assert_eq!(v["recent_commands"][0]["command"], "solid.box");
     // The design from before the command, and the command: together they reproduce the crash.
+    assert!(v["design_path"].as_str().unwrap().ends_with("design.sc"), "{v}");
     let design = solidcraft_io::read_design(&fs::read(v["design_path"].as_str().unwrap()).unwrap()).unwrap();
     assert_eq!(design.features.len(), 1);
     let replay: Value = serde_json::from_slice(&fs::read(v["replay_path"].as_str().unwrap()).unwrap()).unwrap();
@@ -443,6 +453,21 @@ fn a_crash_signal_is_reported_with_its_thread_and_its_walk_up_the_stack() {
 }
 
 #[test]
+fn a_window_surface_after_startup_is_not_a_startup_crash() {
+    let d = fresh_dir("late_surface");
+    let (_, ok) = run_child(&d, "late_surface");
+    assert!(!ok, "the child aborted");
+    let (_, ok) = run_child(&d, "none");
+    assert!(ok);
+    let (s, v) = only_report(&d);
+    assert_eq!(s.kind, "unclean_exit");
+    assert!(!s.message.contains("during startup"), "{}", s.message);
+    assert!(s.message.contains("between commands"), "{}", s.message);
+    assert!(v.get("startup_phase").is_none(), "{v}");
+    let _ = fs::remove_dir_all(&d);
+}
+
+#[test]
 fn startup_steps_survive_a_rebase_and_running_ends_startup() {
     let d = fresh_dir("rebase");
     fs::create_dir_all(d.join("sessions")).unwrap();
@@ -502,6 +527,17 @@ fn fake_report(dir: &Path, secs: u64, sig: u64, kind: &str) -> String {
     let t = std::time::UNIX_EPOCH + std::time::Duration::from_secs(secs);
     File::options().write(true).open(&f).unwrap().set_modified(t).unwrap();
     id
+}
+
+/// A report folder an earlier release wrote holds `design.solidcraft`: still found.
+#[test]
+fn a_report_from_an_earlier_release_still_finds_its_design() {
+    let d = fresh_dir("legacy-design");
+    let id = fake_report(&d, 1_700_000_000, 7, "command_panic");
+    fs::write(d.join(&id).join("design.solidcraft"), solidcraft_io::write_design(&solidcraft_doc::Document::default())).unwrap();
+    let v = read(&d, &id).unwrap();
+    assert!(v["design_path"].as_str().unwrap().ends_with("design.solidcraft"), "{v}");
+    let _ = fs::remove_dir_all(&d);
 }
 
 #[test]

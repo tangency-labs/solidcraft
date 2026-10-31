@@ -1,4 +1,6 @@
 {
+  "order": 140,
+  "provenance": "Original SolidCraft mapping of Tokyo Night (MIT palette)",
   "base": "dark",
   "colors": {
     "accent": "#7aa2f7",
@@ -50,8 +52,8 @@
     "dialog_footer": "#1a1b26",
     "dialog_label": "#c0caf5",
     "dialog_rule": "#414868",
-    "dimension": "#c0caf5",
-    "dimension_driven": "#9aa5ce",
+    "dimension": "#73daca",
+    "dimension_driven": "#4f9a90",
     "error": "#f7768e",
     "field": "#16161e",
     "form_accent": "#b190ec",

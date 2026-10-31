@@ -1,6 +1,9 @@
 //! Physical properties of an assembly placement, with original body material assignments.
+use std::collections::{BTreeMap, BTreeSet};
+
 use serde_json::{Value, json};
 use solidcraft_doc::{Document, Mat};
+use solidcraft_geom::inertia::{self, Tensor3};
 use solidcraft_geom::{Aabb3, Vec3};
 
 use crate::params::bad;
@@ -12,6 +15,23 @@ fn descendants(p: &Value, cmd: &str) -> Result<bool> {
         Some(Value::Bool(v)) => Ok(*v),
         Some(_) => Err(bad(cmd, "`descendants` must be a boolean")),
     }
+}
+
+/// Principal moments this close (a share of the largest) count as equal: a round body's
+/// tessellation tells its two equal moments apart by about 1e-4, which turns their axes at random.
+const EQUAL_MOMENTS: f64 = 1e-3;
+
+/// The point `about` asks for the inertia tensor about, if any.
+fn about(p: &Value, cmd: &str) -> Result<Option<Vec3>> {
+    match p.get("about") {
+        None | Some(Value::Null) => Ok(None),
+        Some(v) => crate::params::vec3(v).map(Some).ok_or_else(|| bad(cmd, "`about` must be a point [x, y, z] in mm")),
+    }
+}
+
+/// The 3 × 3 linear part of a placement, row by row: its turn, and any scale or mirror.
+fn linear(m: &Mat) -> Tensor3 {
+    [0, 1, 2].map(|i| [0, 1, 2].map(|j| m[j][i]))
 }
 
 fn placed_doc(s: &Session) -> Document {
@@ -58,7 +78,7 @@ pub(super) fn component(s: &mut Session, p: &Value) -> Result<Value> {
     } else {
         doc.components.iter().find(|c| c.id == id).map(|c| c.name.clone()).ok_or_else(|| bad(cmd, "no active component"))?
     };
-    let mut out = properties(s, &doc, &path, descendants(p, cmd)?, cmd)?;
+    let mut out = properties(s, &doc, &path, descendants(p, cmd)?, about(p, cmd)?, cmd)?;
     out["component"] = json!(id);
     out["name"] = json!(name);
     Ok(out)
@@ -79,13 +99,13 @@ pub(super) fn occurrence(s: &mut Session, p: &Value) -> Result<Value> {
             _ => return Err(bad(cmd, "occurrence has multiple placements; supply its `path`")),
         }
     };
-    let mut out = properties(s, &doc, &path, descendants(p, cmd)?, cmd)?;
+    let mut out = properties(s, &doc, &path, descendants(p, cmd)?, about(p, cmd)?, cmd)?;
     out["occurrence"] = json!(id);
     out["name"] = json!(doc.occurrences.iter().find(|o| o.id == id).map(|o| o.name.as_str()));
     Ok(out)
 }
 
-fn properties(s: &Session, doc: &Document, selected: &[u64], descendants: bool, cmd: &str) -> Result<Value> {
+fn properties(s: &Session, doc: &Document, selected: &[u64], descendants: bool, about: Option<Vec3>, cmd: &str) -> Result<Value> {
     let state = s.model.state();
     let mut bodies = Vec::new();
     let (mut volume, mut area, mut mass) = (0.0, 0.0, 0.0);
@@ -114,19 +134,40 @@ fn properties(s: &Session, doc: &Document, selected: &[u64], descendants: bool, 
         }
         out
     };
+    // How each closed body's volume spreads about its centre of mass (#8095): one tessellation
+    // however often it is placed, which each placement then turns.
+    let components: BTreeSet<u64> = selected_placements.iter().map(|(component, _, _)| *component).collect();
+    let spread_bodies: Vec<usize> = (0..state.bodies.len())
+        .filter(|&i| {
+            state.bodies.get(i).is_some_and(|b| components.contains(&doc.model_body_component(b)) && crate::cmd::inspect::encloses_volume(&b.body))
+        })
+        .collect();
+    let spreads = solidcraft_kernel::map_on_threads(&spread_bodies, 16, |&i| {
+        state.bodies.get(i).and_then(|b| solidcraft_io::mass_properties(&b.body).ok().flatten()).and_then(|m| m.gyration())
+    });
+    let spread: BTreeMap<usize, Tensor3> = spread_bodies.into_iter().zip(spreads).filter_map(|(i, g)| Some((i, g.flatten()?))).collect();
+    // Closed bodies' (mass, centre of mass, inertia about it), all in world axes.
+    let mut parts: Vec<(f64, Vec3, Option<Tensor3>)> = Vec::new();
     for (component, path, transform) in selected_placements {
         placement_count += 1;
-        for body in state.bodies.iter().filter(|b| doc.model_body_component(b) == component) {
+        for (index, body) in state.bodies.iter().enumerate().filter(|(_, b)| doc.model_body_component(b) == component) {
             let transform: Mat = doc.model_body_offset(body).map(|offset| solidcraft_doc::mat_mul(&transform, offset)).unwrap_or(transform);
             let placed = solidcraft_kernel::transform_matrix(&body.body, transform)?;
             let measured = solidcraft_kernel::measure(&placed)?;
             let density = doc.density(&body.name);
             let body_mass = measured.volume * density / 1000.0;
             let closed = crate::cmd::inspect::encloses_volume(&placed);
+            // The mesh's spread with the exact mass, so the tensor agrees with the mass shown.
+            let body_inertia = spread
+                .get(&index)
+                .filter(|_| closed)
+                .map(|g| inertia::from_gyration(&inertia::transformed(g, &linear(&transform)), body_mass))
+                .filter(|i| i.iter().flatten().all(|x| x.is_finite()));
             if closed {
                 volume += measured.volume;
                 mass += body_mass;
                 moment += measured.centroid * body_mass;
+                parts.push((body_mass, measured.centroid, body_inertia));
             } else {
                 skipped += 1;
             }
@@ -140,6 +181,7 @@ fn properties(s: &Session, doc: &Document, selected: &[u64], descendants: bool, 
                 "closed": closed, "density_g_cm3": closed.then_some(density),
                 "mass_g": closed.then_some(body_mass), "volume_mm3": closed.then_some(measured.volume),
                 "area_mm2": measured.area, "center_of_mass": closed.then_some(measured.centroid),
+                "inertia_g_mm2": body_inertia,
                 "bbox": {"min": measured.bbox.min, "max": measured.bbox.max}}));
         }
     }
@@ -150,11 +192,29 @@ fn properties(s: &Session, doc: &Document, selected: &[u64], descendants: bool, 
     if centroid.is_some_and(|point| !point.is_finite()) {
         return Err(bad(cmd, "center of mass exceeds supported numeric range"));
     }
+    // About the centre of mass: each body's own tensor, plus its mass at its distance from that
+    // centre (parallel axes). Unknown when any closed body's mesh did not close.
+    let at_centre = centroid.and_then(|c| {
+        parts.iter().try_fold([[0.0f64; 3]; 3], |sum, (m, at, i)| {
+            let i = inertia::shifted(&(*i)?, *m, *at - c);
+            Some([0, 1, 2].map(|r| [0, 1, 2].map(|k| sum[r][k] + i[r][k])))
+        })
+    });
+    let at_centre = at_centre.filter(|i| i.iter().flatten().all(|x| x.is_finite()));
+    let principal = at_centre.and_then(|i| inertia::principal(&i, EQUAL_MOMENTS));
     let bbox = if bodies.is_empty() { Value::Null } else { json!({"min": bounds.min, "max": bounds.max}) };
-    Ok(json!({"path": selected, "coordinate_frame": "world", "descendants": descendants,
+    let mut out = json!({"path": selected, "coordinate_frame": "world", "descendants": descendants,
         "placement_count": placement_count, "body_count": bodies.len(), "bodies": bodies,
         "total": {"open_bodies_skipped": skipped, "volume_mm3": volume, "area_mm2": area, "mass_g": mass,
-            "center_of_mass": centroid, "bbox": bbox, "faces": faces, "edges": edges, "vertices": vertices}}))
+            "center_of_mass": centroid, "first_moment_g_mm": moment, "inertia_g_mm2": at_centre,
+            "principal_moments_g_mm2": principal.map(|(moments, _)| moments), "principal_axes": principal.map(|(_, axes)| axes),
+            "bbox": bbox, "faces": faces, "edges": edges, "vertices": vertices}});
+    if let Some(point) = about {
+        let shifted =
+            centroid.zip(at_centre).map(|(c, i)| inertia::shifted(&i, mass, point - c)).filter(|i| i.iter().flatten().all(|x| x.is_finite()));
+        out["total"]["inertia_about"] = json!({"point": point, "inertia_g_mm2": shifted});
+    }
+    Ok(out)
 }
 
 #[cfg(test)]

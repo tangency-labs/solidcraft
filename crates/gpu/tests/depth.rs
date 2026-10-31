@@ -471,3 +471,68 @@ fn a_cut_hides_the_edges_behind_it() {
         }
     }
 }
+
+/// #9407: a shaft in a bore it fits exactly, cut along its axis. Seen through the hub's cut, the
+/// bore's wall (a back face: the hub's cap) and the shaft's side (a front face) are the same
+/// cylinder, each faceted its own way, so neither is always in front: the shaft's side showed
+/// through the hub's cap in streaks along the axis, changing as the view turned. The hub's cap is
+/// the same as without the shaft, from several directions, in orthographic and perspective.
+#[test]
+fn a_shaft_in_its_bore_leaves_the_hubs_cap_whole() {
+    let hub = [
+        ("solid.cylinder", json!({"radius": 20, "height": 40, "body_name": "Hub"})),
+        ("solid.cylinder", json!({"radius": 8, "height": 40, "operation": "cut"})),
+    ];
+    let shaft = ("solid.cylinder", json!({"radius": 8, "height": 60, "base": [0, 0, -10], "body_name": "Shaft", "operation": "new"}));
+    let cut = ("inspect.section", json!({"plane": {"origin": [0, 0, 0], "normal": [0, -1, 0]}}));
+    let alone = session(&[&hub[..], std::slice::from_ref(&cut)].concat());
+    let fitted = session(&[&hub[..], &[shaft, cut]].concat());
+    let (w, h) = (480, 400);
+    for (mode, c) in capturers() {
+        for fov in [0.0, 0.6] {
+            let mut shown = Vec::new();
+            for i in 0..6 {
+                let mut cam = view::home_camera(&fitted);
+                (cam.fov, cam.yaw, cam.pitch) = (fov, -1.1 + 0.3 * f64::from(i), 0.3);
+                let with = view::scene(&fitted, &cam);
+                let radius = with.radius;
+                // The hub alone, framed as the design with the shaft.
+                let without = Scene { radius, ..view::scene(&alone, &cam) };
+                let shot = |sc: Scene| c.rgba(&Scene { grid: Vec::new(), ..sc }, &cam, w, h).unwrap();
+                let (a, b) = (shot(without), shot(with));
+                // The hub's cut on screen: a rectangle each side of the bore, its outline left out.
+                let rects: Vec<Vec<(f64, f64)>> = [(8.0, 20.0), (-20.0, -8.0)]
+                    .iter()
+                    .map(|(x0, x1)| {
+                        [(*x0, 0.0), (*x1, 0.0), (*x1, 40.0), (*x0, 40.0)]
+                            .iter()
+                            .filter_map(|(x, z)| cam.to_screen(Vec3::new(*x, 0.0, *z), f64::from(w), f64::from(h), radius).map(|(x, y, _)| (x, y)))
+                            .collect()
+                    })
+                    .collect();
+                let inside = |x: f64, y: f64| {
+                    rects.iter().any(|q| {
+                        q.len() == 4 && {
+                            let turn = (0..4).map(|i| q[i].0 * q[(i + 1) % 4].1 - q[(i + 1) % 4].0 * q[i].1).sum::<f64>().signum();
+                            (0..4).all(|i| {
+                                let ((ax, ay), (bx, by)) = (q[i], q[(i + 1) % 4]);
+                                ((bx - ax) * (y - ay) - (by - ay) * (x - ax)) / (bx - ax).hypot(by - ay) * turn >= 2.0
+                            })
+                        }
+                    })
+                };
+                let (mut differ, mut all) = (0, 0);
+                for (i, (p, q)) in pixels(&a).zip(pixels(&b)).enumerate() {
+                    if inside((i % w as usize) as f64 + 0.5, (i / w as usize) as f64 + 0.5) {
+                        all += 1;
+                        differ += usize::from(p.iter().zip(q).any(|(u, v)| u.abs_diff(v) > 24));
+                    }
+                }
+                assert!(all > 3000, "{mode}, fov {fov}, view {i}: the hub's cap ({all} px)");
+                shown.push(differ);
+            }
+            let total: usize = shown.iter().sum();
+            assert!(total <= 12, "{mode} depth, fov {fov}: the shaft shows through the hub's cap, px per view {shown:?}");
+        }
+    }
+}

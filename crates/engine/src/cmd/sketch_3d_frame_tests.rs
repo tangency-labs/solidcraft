@@ -417,3 +417,25 @@ fn arc3d_pipes_along_the_arc() {
     let quarter = 20.0 * std::f64::consts::FRAC_PI_2;
     assert!((measure.volume - 4.0 * std::f64::consts::PI * quarter).abs() < 0.5, "{}", measure.volume);
 }
+
+#[test]
+fn line3d_spline3d_point3d_need_a_3d_sketch() {
+    // Same rule as sketch.arc3d: these buttons start interactive tools, so they are only
+    // offered while a 3D sketch is being edited.
+    let ids = ["sketch.line3d", "sketch.spline3d", "sketch.point3d"];
+    let mut s = Session::default();
+    for id in ids {
+        let info = crate::cmd::find_command(id).unwrap().info(&s);
+        assert!(!info.enabled, "{id} offered with no sketch being edited");
+    }
+    run(&mut s, "sketch.create", json!({"plane": "XY"}));
+    for id in ids {
+        let info = crate::cmd::find_command(id).unwrap().info(&s);
+        assert!(!info.enabled, "{id} offered in a plain 2D sketch: {:?}", info.disabled_reason);
+    }
+    run(&mut s, "sketch.options", json!({"sketch_3d": true}));
+    for id in ids {
+        let info = crate::cmd::find_command(id).unwrap().info(&s);
+        assert!(info.enabled, "{id} not offered inside a 3D sketch: {:?}", info.disabled_reason);
+    }
+}

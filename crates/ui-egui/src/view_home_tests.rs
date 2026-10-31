@@ -223,28 +223,33 @@ fn navigation_bar_buttons_run_registered_commands() {
     moved_block(&mut h);
     let undo = h.app.session.undo.len();
     let mut orbit_on = false;
-    for (index, id) in [
-        (0, "view.tool"),
-        (0, "view.tool"),
-        (2, "view.tool"),
-        (3, "view.tool"),
-        (4, "view.fit"),
-        (6, "view.home"),
-        (8, "view.visual_style"),
-        (1, "view.spin"),
+    h.call("ui.prefs", json!({"navigation_bar":{"slots":["orbit","pan","zoom","fit","home","visual_style","spin"]}}));
+    for (slot, id) in [
+        ("orbit", "view.tool"),
+        ("orbit", "view.tool"),
+        ("pan", "view.tool"),
+        ("zoom", "view.tool"),
+        ("fit", "view.fit"),
+        ("home", "view.home"),
+        ("spin", "view.spin"),
     ] {
-        let bar = crate::scenario::rect_of("nav:outer").unwrap();
-        let at = bar.left_top() + egui::vec2(18.0 + index as f32 * 30.0, 15.0);
+        let at = crate::scenario::handle_at(&format!("nav:slot:{slot}")).unwrap();
         let log = h.app.session.log.len();
         h.call("ui.click", json!({"x":at.x,"y":at.y}));
         let label = solidcraft_engine::find_command(id).unwrap().label;
         let echo = crate::i18n::Locale::for_language(&h.app.preferences.language).format("ui.command_done", &[("command", label)]);
         assert!(h.app.session.log.iter().skip(log).any(|line| line == &echo), "{id} was not run");
-        if index == 0 {
+        if slot == "orbit" {
             orbit_on = !orbit_on;
             assert_eq!(h.app.viewport.nav, if orbit_on { Some(crate::viewport::NavMode::Orbit) } else { None });
         }
     }
+    let log = h.app.session.log.len();
+    h.step(&json!({"click":{"handle":"nav:slot:visual_style"}})).unwrap();
+    h.step(&json!({"click":{"handle":"nav:style:shaded"}})).unwrap();
+    let label = solidcraft_engine::find_command("view.visual_style").unwrap().label;
+    let echo = crate::i18n::Locale::for_language(&h.app.preferences.language).format("ui.command_done", &[("command", label)]);
+    assert!(h.app.session.log.iter().skip(log).any(|line| line == &echo));
     assert_eq!(h.app.ui.visual_style, 1);
     assert_eq!(h.app.session.undo.len(), undo);
 }
@@ -309,4 +314,90 @@ fn navigation_bar_display_menu_runs_grid_and_shadow_commands() {
         let echo = crate::i18n::Locale::for_language(&h.app.preferences.language).format("ui.command_done", &[("command", label)]);
         assert!(h.app.session.log.iter().skip(log).any(|line| line == &echo), "{id} was not run");
     }
+}
+
+#[test]
+fn navigation_bar_toggle_slots_apply_commands_and_projection_compatibility() {
+    let mut h = Harness::new();
+    moved_block(&mut h);
+    h.call("ui.prefs", json!({"navigation_bar":{"slots":["grid","ground_shadow","ambient_occlusion","projection"]}}));
+    let design = h.app.session.doc.to_json();
+    let undo = h.app.session.undo.len();
+    for slot in ["grid", "ground_shadow", "ambient_occlusion", "projection"] {
+        let value = |app: &crate::SolveApp| match slot {
+            "grid" => app.ui.show_grid,
+            "ground_shadow" => app.ui.ground_shadow,
+            "ambient_occlusion" => app.preferences.ambient_occlusion,
+            _ => app.ui.perspective,
+        };
+        let before = value(&h.app);
+        let log = h.app.session.log.len();
+        h.step(&json!({"click":{"handle":format!("nav:slot:{slot}")}})).unwrap();
+        assert_eq!(value(&h.app), !before, "{slot}");
+        if slot != "projection" {
+            let command = solidcraft_engine::find_command(&format!("view.{slot}")).unwrap();
+            let echo = crate::i18n::Locale::for_language(&h.app.preferences.language).format("ui.command_done", &[("command", command.label)]);
+            assert!(h.app.session.log.iter().skip(log).any(|line| line == &echo), "{slot}");
+        }
+    }
+    assert!(h.app.dialog.is_none() && h.app.tool.is_none());
+    assert_eq!(h.app.session.doc.to_json(), design);
+    assert_eq!(h.app.session.undo.len(), undo);
+}
+
+#[test]
+fn navigation_bar_tool_radio_group_and_overflow_execute_in_list_order() {
+    use crate::viewport::NavMode;
+    let mut h = Harness::new();
+    moved_block(&mut h);
+    h.call("ui.prefs", json!({"navigation_bar":{"slots":["zoom","fit","pan","separator","orbit"]}}));
+    for (slot, mode) in [("pan", Some(NavMode::Pan)), ("zoom", Some(NavMode::Zoom)), ("orbit", Some(NavMode::Orbit)), ("orbit", None)] {
+        h.step(&json!({"click":{"handle":format!("nav:slot:{slot}")}})).unwrap();
+        assert_eq!(h.app.viewport.nav, mode);
+    }
+    h.call("ui.prefs", json!({"navigation_bar":{"slots":["pan","fit","home","visual_style","display","grid","ground_shadow","ambient_occlusion","projection","spin","orbit","zoom"]}}));
+    h.app.ui.show_browser = false;
+    h.app.ui.show_timeline = false;
+    h.call("ui.resize", json!({"width":300,"height":600}));
+    h.settle();
+    let bar = crate::scenario::rect_of("nav:outer").unwrap();
+    assert_eq!(bar, h.app.viewport.layout.as_ref().unwrap().navigation);
+    let metrics = crate::ui_kit::NavigationMetrics::for_size(crate::navigation_bar::Size::Regular);
+    assert_eq!(h.app.preferences.navigation_bar.size, crate::navigation_bar::Size::Regular);
+    assert_eq!(bar.height(), metrics.height());
+    let more = crate::scenario::rect_of("nav:more").unwrap();
+    assert_eq!(more.size(), egui::vec2(metrics.button, metrics.button));
+    let visible: Vec<_> = crate::scenario::handles("nav:slot:").into_iter().map(|(id, _)| id).collect();
+    assert!(!visible.is_empty() && visible.len() < h.app.preferences.navigation_bar.slots.len());
+    assert_eq!(visible, h.app.preferences.navigation_bar.slots.iter().take(visible.len()).map(|id| format!("nav:slot:{id}")).collect::<Vec<_>>());
+    for handle in &visible {
+        let slot = crate::scenario::rect_of(handle).unwrap();
+        assert_eq!(slot.center().y, more.center().y, "one row: {handle}");
+        assert_eq!(slot.height(), metrics.button);
+    }
+    assert!(!visible.iter().any(|handle| handle == "nav:slot:zoom"), "the final slot folds into More");
+    h.step(&json!({"click":{"handle":"nav:more"}})).unwrap();
+    let all: Vec<_> = crate::scenario::handles("nav:slot:").into_iter().map(|(id, _)| id).collect();
+    assert_eq!(all, h.app.preferences.navigation_bar.slots.iter().map(|id| format!("nav:slot:{id}")).collect::<Vec<_>>());
+    assert!(all.len() > visible.len());
+    h.step(&json!({"click":{"handle":"nav:slot:zoom"}})).unwrap();
+    assert_eq!(h.app.viewport.nav, Some(NavMode::Zoom));
+    assert!(crate::scenario::rect_of("nav:slot:zoom").is_none(), "choosing an action closes More");
+}
+
+#[test]
+fn navigation_bar_look_at_keeps_the_active_sketch_fallback() {
+    let mut h = Harness::new();
+    h.app.preferences.look_at_anim = false;
+    h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+    h.app.cam.set_view(StandardView::Iso);
+    h.settle();
+    let sketch = h.app.session.active_sketch;
+    let design = h.app.session.doc.to_json();
+    let undo = h.app.session.undo.len();
+    h.step(&json!({"click":{"handle":"nav:slot:look_at"}})).unwrap();
+    assert!(h.app.cam.back().dist(Vec3::Z) < 1e-6);
+    assert_eq!(h.app.session.active_sketch, sketch);
+    assert_eq!(h.app.session.doc.to_json(), design);
+    assert_eq!(h.app.session.undo.len(), undo);
 }

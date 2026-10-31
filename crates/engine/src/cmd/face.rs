@@ -181,9 +181,24 @@ type FacePick = (std::sync::Arc<Mesh>, u32, f64, String);
 
 /// The face under a point of `only` (any body when `None`). Where faces of several bodies are
 /// equally near (bodies touching flush), the pick is ambiguous: `Err` names those bodies.
+/// A pick of the running command was resolved against the placed model, so the body under it
+/// wins: a body that only shares its place in the model is not in the way (#419). A named
+/// body still wins over that.
 fn face_at_in(s: &Session, p: Vec3, only: Option<&str>) -> std::result::Result<Option<FacePick>, Vec<String>> {
     let st = s.model.state();
-    face_at_state(&st, p, only)
+    match (crate::frames::picked(p), only) {
+        (Some(names), None) if names.len() > 1 => Err(model_names(&st, &names)),
+        (Some(names), None) => {
+            let under = names.first().and_then(|n| st.bodies.iter().find(|b| b.definition_name() == n.as_str()).map(|b| b.name.clone()));
+            face_at_state(&st, p, under.as_deref())
+        }
+        (_, only) => face_at_state(&st, p, only),
+    }
+}
+
+/// The names the model gives the bodies a pick met.
+fn model_names(st: &solidcraft_doc::ModelState, names: &[String]) -> Vec<String> {
+    names.iter().map(|n| st.bodies.iter().find(|b| b.definition_name() == n.as_str()).map(|b| b.name.clone()).unwrap_or_else(|| n.clone())).collect()
 }
 
 pub(super) fn face_at_state(st: &solidcraft_doc::ModelState, p: Vec3, only: Option<&str>) -> std::result::Result<Option<FacePick>, Vec<String>> {

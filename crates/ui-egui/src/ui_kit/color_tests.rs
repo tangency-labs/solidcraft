@@ -13,16 +13,151 @@ fn click(ctx: &egui::Context, key: &str, rgb: &mut [u8; 3]) {
     frame(ctx, pointer(at, false), |ui| color_popover(ui, rgb));
 }
 
+fn paste_hex(ctx: &egui::Context, rgb: &mut [u8; 3], text: &str) -> bool {
+    click(ctx, "color:hex", rgb);
+    let modifiers = egui::Modifiers { command: true, ctrl: true, ..Default::default() };
+    let mut changed = false;
+    frame(
+        ctx,
+        vec![
+            egui::Event::Key { key: egui::Key::A, physical_key: None, pressed: true, repeat: false, modifiers },
+            egui::Event::Key { key: egui::Key::A, physical_key: None, pressed: false, repeat: false, modifiers },
+            egui::Event::Paste(text.into()),
+        ],
+        |ui| changed |= color_popover(ui, rgb),
+    );
+    changed
+}
+
+fn copy(ctx: &egui::Context, rgb: &mut [u8; 3]) -> Option<String> {
+    let at = scenario::handle_at("color:copy").unwrap();
+    frame(ctx, pointer(at, true), |ui| color_popover(ui, rgb));
+    let output = crate::test_support::frame(
+        ctx,
+        egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, vec2(320.0, 400.0))),
+            events: pointer(at, false),
+            focused: true,
+            ..Default::default()
+        },
+        |ui| {
+            ui.set_width(280.0);
+            crate::ui_kit::scope(ui, |ui| color_popover(ui, rgb));
+        },
+    );
+    output.platform_output.commands.into_iter().find_map(|command| match command {
+        egui::OutputCommand::CopyText(text) => Some(text),
+        _ => None,
+    })
+}
+
+#[test]
+fn linear_field_preserves_hdr_precision_without_edits_and_bounds_hostile_limits() {
+    let ctx = crate::fonts::test_context();
+    let original = [0.123456789, 18.0, 0.9];
+    let mut rgb = original;
+    for maximum in [1e6, f64::NAN, f64::INFINITY] {
+        frame(&ctx, vec![], |ui| linear_color_field(ui, &mut rgb, maximum));
+        assert_eq!(rgb, original);
+    }
+}
+
 #[test]
 fn format_toggle_is_global_and_does_not_change_colour() {
     let ctx = crate::fonts::test_context();
     let mut rgb = [204, 208, 214];
     frame(&ctx, vec![], |ui| color_popover(ui, &mut rgb));
+    assert_eq!(ctx.style_of(egui::Theme::Light).visuals.numeric_color_space, egui::style::NumericColorSpace::GammaByte);
+    assert!(scenario::handle_at("color:channel:R").is_some());
+    assert!(scenario::handle_at("color:hex").is_none());
     click(&ctx, "color:format:F", &mut rgb);
     assert_eq!(ctx.style_of(egui::Theme::Light).visuals.numeric_color_space, egui::style::NumericColorSpace::Linear);
     assert_eq!(rgb, [204, 208, 214]);
+    click(&ctx, "color:format:Hex", &mut rgb);
+    let mut other = [1, 2, 3];
+    frame(&ctx, vec![], |ui| ui.push_id("another_picker", |ui| color_popover(ui, &mut other)));
+    assert!(scenario::handle_at("color:hex").is_some(), "Hex selection is shared with other pickers");
+    for name in ["R", "G", "B"] {
+        assert!(scenario::handle_at(&format!("color:channel:{name}")).is_none());
+    }
+    for key in ["color:sv", "color:hue", "color:current"] {
+        assert!(scenario::rect_of(key).is_some(), "Hex retains {key}");
+    }
+    assert_eq!(other, [1, 2, 3]);
+    frame(&ctx, vec![], |ui| color_popover(ui, &mut rgb));
     click(&ctx, "color:format:U8", &mut rgb);
     assert_eq!(ctx.style_of(egui::Theme::Light).visuals.numeric_color_space, egui::style::NumericColorSpace::GammaByte);
+    assert_eq!(rgb, [204, 208, 214]);
+    assert!(scenario::handle_at("color:channel:R").is_some());
+    assert!(scenario::handle_at("color:hex").is_none());
+}
+
+#[test]
+fn hex_edits_apply_complete_byte_values_and_reject_invalid_or_nonopaque_pastes() {
+    let ctx = crate::fonts::test_context();
+    let mut rgb = [100, 120, 140];
+    frame(&ctx, vec![], |ui| color_popover(ui, &mut rgb));
+    click(&ctx, "color:format:Hex", &mut rgb);
+    for (text, expected) in [
+        ("#0102fe", [1, 2, 254]),
+        ("#fE8001", [254, 128, 1]),
+        ("#00ff01", [0, 255, 1]),
+        ("#000000", [0, 0, 0]),
+        ("#ffffff", [255, 255, 255]),
+        ("#1b2C3DfF", [27, 44, 61]),
+    ] {
+        assert!(paste_hex(&ctx, &mut rgb, text), "{text} applies without Enter");
+        assert_eq!(rgb, expected, "{text} retains exact bytes without a colour-space round trip");
+    }
+    for text in [
+        "",
+        "#",
+        "#12345",
+        "#1234567",
+        "123456",
+        "##123456",
+        "#12345g",
+        "#+102fe",
+        "#0102+e",
+        "#é1234",
+        "#123456fff",
+        "#123456 ",
+        "#112233ffignored",
+        "#fedcba80",
+        "#fedcba00",
+    ] {
+        assert!(!paste_hex(&ctx, &mut rgb, text), "{text:?} is not an accepted colour edit");
+        frame(&ctx, vec![], |ui| color_popover(ui, &mut rgb));
+        assert_eq!(rgb, [27, 44, 61], "{text:?} must not apply even its RGB part");
+    }
+    assert_eq!(copy(&ctx, &mut rgb).map(|text| text.to_ascii_lowercase()), Some("#1b2c3dff".into()));
+
+    assert!(!paste_hex(&ctx, &mut rgb, "#12"));
+    frame(&ctx, vec![], |ui| color_popover(ui, &mut rgb));
+    frame(&ctx, vec![egui::Event::Text("3456".into())], |ui| color_popover(ui, &mut rgb));
+    assert_eq!(rgb, [18, 52, 86], "an incomplete draft survives idle frames and remains editable");
+}
+
+#[test]
+fn hex_text_and_copy_follow_picker_and_external_colour_edits() {
+    let ctx = crate::fonts::test_context();
+    let mut rgb = [255, 0, 0];
+    frame(&ctx, vec![], |ui| color_popover(ui, &mut rgb));
+    click(&ctx, "color:format:Hex", &mut rgb);
+    assert!(!paste_hex(&ctx, &mut rgb, "#12"));
+    click(&ctx, "color:hue", &mut rgb);
+    assert_ne!(rgb, [255, 0, 0]);
+    let [r, g, b] = rgb;
+    assert_eq!(copy(&ctx, &mut rgb).map(|text| text.to_ascii_lowercase()), Some(format!("#{r:02x}{g:02x}{b:02x}")));
+    rgb = [240, 128, 17];
+    frame(&ctx, vec![], |ui| color_popover(ui, &mut rgb));
+    assert_eq!(copy(&ctx, &mut rgb).map(|text| text.to_ascii_lowercase()), Some("#f08011".into()));
+    assert!(!paste_hex(&ctx, &mut rgb, "#f08011ff"), "changing representation alone is not a colour edit");
+    click(&ctx, "color:format:F", &mut rgb);
+    click(&ctx, "color:format:U8", &mut rgb);
+    click(&ctx, "color:format:Hex", &mut rgb);
+    assert_eq!(copy(&ctx, &mut rgb).map(|text| text.to_ascii_lowercase()), Some("#f08011ff".into()));
+    assert_eq!(rgb, [240, 128, 17], "mode switches preserve exact RGB and the active Hex representation");
 }
 
 #[test]
@@ -100,29 +235,10 @@ fn channel_edits_use_gamma_bytes_or_linear_values_and_copy_in_the_active_format(
         );
         frame(&ctx, key(egui::Key::Enter), |ui| color_popover(ui, &mut rgb));
         assert_eq!(rgb, if linear { [188, 20, 30] } else { [128, 20, 30] });
-        let copy = scenario::handle_at("color:copy").unwrap();
-        frame(&ctx, pointer(copy, true), |ui| color_popover(ui, &mut rgb));
-        let mut output = ctx.run_ui(
-            egui::RawInput {
-                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, vec2(320.0, 400.0))),
-                events: pointer(copy, false),
-                focused: true,
-                ..Default::default()
-            },
-            |ui| {
-                ui.set_width(280.0);
-                crate::ui_kit::scope(ui, |ui| color_popover(ui, &mut rgb));
-            },
-        );
         let [r, g, b] = rgb;
         let [lr, lg, lb, _] = egui::Rgba::from(Color32::from_rgb(r, g, b)).to_array();
         let want = if linear { format!("{lr:.03}, {lg:.03}, {lb:.03}") } else { format!("{r}, {g}, {b}") };
-        assert!(
-            output.platform_output.commands.iter().any(|c| matches!(c,egui::OutputCommand::CopyText(text) if text == &want)),
-            "{:?}",
-            output.platform_output.commands
-        );
-        output.textures_delta.clear();
+        assert_eq!(copy(&ctx, &mut rgb), Some(want));
     }
 }
 
