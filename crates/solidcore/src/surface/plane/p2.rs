@@ -46,7 +46,7 @@
 //!   `SmBoolean` (`SER`): upstream's "`TRUE` without plane" is an `Err` here.
 //!   `SmMatrix::SolveLinearSystem`'s near-singular warning, which upstream returns
 //!   through `SER`, is [`SolidError::Upstream`] with `SM_ERR_WARNING`.
-//! - **Upstream fix WR-441 / #1056.** The opt-in
+//! - **Upstream fix WR-652 / #1056.** The opt-in
 //!   [`crate::kernel::UpstreamFixes::plane_recognition_origin_after_axes`] places a
 //!   recognised plane's origin using its final orthogonal axes. It is off by default
 //!   to preserve SMLib's original arithmetic.
