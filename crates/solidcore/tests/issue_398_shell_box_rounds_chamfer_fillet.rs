@@ -237,6 +237,30 @@ fn issue_398_closed_shell() {
     ));
 }
 
+/// The open-top shell with `shell_edges_on_analytics_exact` (WR-545) on as well, as the
+/// SolidCraft rig runs shell/1525: `make_edges_on_analytics_exact` intersects the result's
+/// face-owned surfaces through its face services (the fork reaches each face through
+/// `SmSurface::GetFace`); without them it failed with `Unported(topology.face_p2)`. The
+/// fork (tangency-labs/smlib 68fb9162) gives 51 faces, V = 13701.7343.
+#[test]
+fn issue_398_open_top_shell_with_edges_on_analytics_exact() {
+    let (mut k, b) = part_with(true);
+    k.fixes.shell_edges_on_analytics_exact = true;
+    let mut got = shell_of(&mut k, b, true).unwrap();
+    assert!(brep_is_manifold_solid(&got).unwrap());
+    let v = volume(&k, &mut got).unwrap();
+    eprintln!(
+        "PROBE issue_398 open top, edges exact: faces={} volume={v}",
+        got.face_list().len()
+    );
+    assert_eq!(got.face_list().len(), 51);
+    let want = closed_form(Some(30.0));
+    assert!((v - want).abs() <= 1e-6 * want, "{v} vs {want}");
+    // 2.3e-8 above the closed form; 13701.735330849975 (8.4e-8 above) with the flag off
+    let pinned = 13701.73449509504;
+    assert!((v - pinned).abs() <= 1e-9 * pinned, "{v} vs {pinned}");
+}
+
 /// Without the fix the port keeps the pinned C++ reference's result: both shells report
 /// success with the same body, which is not a manifold solid and has zero volume
 /// (`plan/findings/offset.offset_executive_p2--shell-succeeds-with-non-manifold-body.md`).

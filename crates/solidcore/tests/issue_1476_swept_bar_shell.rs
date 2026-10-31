@@ -19,6 +19,12 @@
 //! port gives 1299.48768 (defaults, 7.7e-7 relative above) and 1299.48231 (SolidCraft's
 //! fixes, 3.4e-6 below; SolidCraft measured 1299.48275 on an older main); the
 //! operand's own volume is 1.2e-2 below its closed form. Both are pinned to 1e-9.
+//!
+//! With `shell_edges_on_analytics_exact` (WR-545) on as well, as the SolidCraft rig runs
+//! it, `make_edges_on_analytics_exact` intersected the walls' face-owned surfaces without
+//! their faces and the shell failed with `Unported(topology.face_p2)`; it now goes through
+//! the result's face services. Marched edges between the straight walls become lines
+//! (four with the defaults, two with SolidCraft's fixes); the volumes stay as above.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -30,6 +36,7 @@
 mod offset_fixture;
 
 use offset_fixture::{planar_faces_at, volume, Notifications};
+use solidcore::curve::curve::p2::{Curve, CurveKind};
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::geom::object::ObjectRef;
 use solidcore::kernel::UpstreamFixes;
@@ -187,25 +194,42 @@ fn shell(fixes: UpstreamFixes) -> (Kernel, solidcore::Result<Brep>) {
     (k, result)
 }
 
-fn check(fixes: UpstreamFixes, want: f64) {
+/// Checks the shell and returns its number of line edges.
+fn check(fixes: UpstreamFixes, want: f64) -> usize {
     let (k, result) = shell(fixes);
     let mut b = result.unwrap();
     b.refresh_cached_topology();
     assert!(brep_is_manifold_solid(&b).unwrap());
     let v = volume(&k, &mut b).unwrap();
+    let kinds: Vec<&str> = b
+        .edge_list()
+        .iter()
+        .map(
+            |&e| match b.edge(e).unwrap().curve.as_ref().map(Curve::kind) {
+                Some(CurveKind::Line(_)) => "line",
+                Some(CurveKind::Ellipse(_)) => "conic",
+                Some(_) => "other",
+                None => "none",
+            },
+        )
+        .collect();
     eprintln!(
-        "issue_1476 shell: {} faces, volume {v}",
-        b.face_list().len()
+        "issue_1476 shell: {} faces, volume {v}, edges: {} lines, {} conics, {} other",
+        b.face_list().len(),
+        kinds.iter().filter(|&&k| k == "line").count(),
+        kinds.iter().filter(|&&k| k == "conic").count(),
+        kinds.iter().filter(|&&k| k == "other").count(),
     );
     let analytic =
         40.0 * (60.0 + 15.0 * std::f64::consts::PI) - 28.0 * (59.5 + 15.0 * std::f64::consts::PI);
     assert!((v - analytic).abs() <= 1e-5 * analytic, "{v} vs {analytic}");
     assert!((v - want).abs() <= 1e-9 * want, "{v} vs {want}");
+    kinds.iter().filter(|&&k| k == "line").count()
 }
 
 #[test]
 fn issue_1476_swept_bar_shells() {
-    check(UpstreamFixes::default(), 1299.4876808844865);
+    assert_eq!(check(UpstreamFixes::default(), 1299.4876808844865), 16);
 }
 
 /// About 6 s at opt-level 3 but over 4 min in a debug build (the two 38 000-sample
@@ -215,5 +239,30 @@ fn issue_1476_swept_bar_shells() {
 #[test]
 #[ignore = "slow in debug builds (two 38 000-sample curve offsets)"]
 fn issue_1476_swept_bar_shells_with_solidcraft_fixes() {
-    check(solidcraft_fixes(), 1299.482314966473);
+    assert_eq!(check(solidcraft_fixes(), 1299.482314966473), 16);
+}
+
+/// `shell_edges_on_analytics_exact` (WR-545) alone: `make_edges_on_analytics_exact`
+/// intersects the result's face-owned surfaces (the extrusion walls) with their faces'
+/// trimmed caches, as the fork's `GlobalSurfaceIntersect` reaches them through
+/// `SmSurface::GetFace`; without the face context it failed with
+/// `Unported(topology.face_p2)` (SolidCraft rig case shell/566). Four marched edges
+/// between the straight walls become lines; the volume does not change.
+#[test]
+fn issue_1476_swept_bar_shells_with_edges_on_analytics_exact() {
+    let mut fixes = UpstreamFixes::default();
+    fixes.shell_edges_on_analytics_exact = true;
+    assert_eq!(check(fixes, 1299.4876808844865), 20);
+}
+
+/// SolidCraft's configuration with `shell_edges_on_analytics_exact` on as well (the
+/// rig's run of shell/566, which failed with `Unported(topology.face_p2)`): two edges
+/// become lines. The fork (tangency-labs/smlib 68fb9162) gives V = 1299.4823. Slow in
+/// debug builds, as above.
+#[test]
+#[ignore = "slow in debug builds (two 38 000-sample curve offsets)"]
+fn issue_1476_swept_bar_shells_with_solidcraft_fixes_and_edges_on_analytics_exact() {
+    let mut fixes = solidcraft_fixes();
+    fixes.shell_edges_on_analytics_exact = true;
+    assert_eq!(check(fixes, 1299.482314966473), 18);
 }
