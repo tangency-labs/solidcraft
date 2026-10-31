@@ -582,6 +582,13 @@ impl Harness {
             } else if let Some(how) = s.get("restart").and_then(Value::as_str) {
                 // "crash": the app dies (its autosave lock goes with it, the entry stays);
                 // "close": it closes normally. Then a new app starts on the same folders.
+                // Scenarios use a zero autosave interval: finish the latest checkpoint before
+                // the simulated crash, even if an older snapshot was still being written.
+                if how == "crash"
+                    && let Some(autosave) = self.app.autosave.as_mut()
+                {
+                    autosave.save(&self.app.session).map_err(|e| format!("autosave before simulated crash: {e}"))?;
+                }
                 let mut old = std::mem::replace(&mut self.app, SolveApp::new(Session::default(), Services::default()));
                 if how == "close" {
                     crate::recovery_ui::close(&mut old);

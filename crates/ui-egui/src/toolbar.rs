@@ -330,6 +330,10 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
             );
         }
         let mut x = left + if compact_actions { 56.0 } else { 128.0 };
+        let browser_toggle = Rect::from_center_size(pos2(x, r.center().y), vec2(26.0, 26.0));
+        if crate::library::app_bar_toggle(app, ui, browser_toggle) {
+            x += 34.0;
+        }
         let home = Rect::from_center_size(pos2(x - 4.0, r.center().y), vec2(32.0, 32.0));
         let idle = !app.file_load.busy();
         let home_response = ui.interact(home, ui.id().with("appbar_home"), if idle { Sense::click() } else { Sense::hover() });

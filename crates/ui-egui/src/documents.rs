@@ -478,7 +478,7 @@ pub fn close(app: &mut SolveApp, i: usize, force: bool) {
         put_view(app, DocView::default());
         app.docs = Documents::default();
         app.edit_in_place = Default::default();
-        app.home.open = true;
+        app.home.open = app.preferences.show_home_on_startup;
         return;
     }
     if i == app.docs.active {
@@ -1159,6 +1159,26 @@ pub(crate) fn saved_for_close(app: &mut SolveApp) {
     batch_step(app);
 }
 
+/// Snapshots for file guards on a worker; the file-operation lock keeps tabs unchanged.
+pub(crate) fn file_guard_sessions(app: &SolveApp) -> Vec<Session> {
+    std::iter::once(&app.session)
+        .chain(app.docs.slots.iter().flatten().map(|slot| &slot.session))
+        .map(|session| {
+            // The guard reads only paths and links, never model geometry or undo state.
+            let mut copy = Session::default();
+            copy.doc = session.doc.clone();
+            copy.path = session.path.clone();
+            copy
+        })
+        .collect()
+}
+
+/// Files in any open tab, including linked parts, must not disappear underneath it.
+pub(crate) fn uses_file(app: &SolveApp, path: &str) -> bool {
+    solidcraft_engine::session_uses_file(&app.session, path)
+        || app.docs.slots.iter().flatten().any(|slot| solidcraft_engine::session_uses_file(&slot.session, path))
+}
+
 #[cfg(test)]
 mod tests {
     #[test]
@@ -1390,6 +1410,96 @@ mod tests {
         h.step(&json!({"click": {"handle": "tab_menu:ui.closeOtherTabs"}})).unwrap();
         h.frames(2);
         assert_eq!(h.app.docs.count(), 1);
+    }
+
+    /// Closing a batch through the tab menu must use the same final screen as closing one tab.
+    #[test]
+    fn close_all_tabs_respects_startup_choice_after_discard_and_on_repeat() {
+        for home in [true, false] {
+            let mut a = four_tabs();
+            a.preferences.show_home_on_startup = home;
+            control(&mut a, &json!({"action": "close_all"}));
+            assert_eq!(a.docs.closing, Some(2));
+            answer_prompt(&mut a, Answer::DontSave);
+            assert_eq!(a.docs.closing, Some(0));
+            answer_prompt(&mut a, Answer::DontSave);
+            assert_eq!(a.docs.count(), 1);
+            assert!(active_is_blank(&a));
+            assert_eq!(a.home.open, home);
+            assert!(a.docs.batch.is_none() && a.docs.closing.is_none());
+            control(&mut a, &json!({"action": "close_all"}));
+            assert_eq!(a.docs.count(), 1);
+            assert!(active_is_blank(&a));
+            assert_eq!(a.home.open, home);
+        }
+    }
+
+    #[test]
+    fn last_document_and_repeated_untitled_closes_follow_home_preference() {
+        for home in [true, false] {
+            let mut a = app();
+            a.preferences.show_home_on_startup = home;
+            for _ in 0..3 {
+                close(&mut a, 0, false);
+                assert!(active_is_blank(&a));
+                assert_eq!(a.home.open, home);
+                assert_eq!(a.docs.count(), 1);
+                assert!(!a.quit_requested);
+            }
+            // The explicit Home tab is still available, and quitting is still quitting.
+            a.home.open = true;
+            assert!(active_is_blank(&a));
+            request_quit(&mut a);
+            assert!(a.quit_requested);
+        }
+    }
+
+    #[test]
+    fn saving_or_discarding_last_document_returns_to_preferred_screen() {
+        for home in [true, false] {
+            for answer in [Answer::Save, Answer::DontSave] {
+                let mut h = crate::scenario::Harness::new();
+                let a = &mut h.app;
+                a.preferences.show_home_on_startup = home;
+                a.home.open = false;
+                let path = h.dir.join("Close preference.solidcraft");
+                a.run("solid.box", json!({"length":4,"width":5,"height":6})).unwrap();
+                a.run("file.save_as", json!({"path":path.to_string_lossy()})).unwrap();
+                a.run("solid.sphere", json!({"diameter":2})).unwrap();
+                close(a, 0, false);
+                assert_eq!(a.docs.closing, Some(0));
+                assert!(!a.home.open);
+                answer_prompt(a, answer);
+                crate::save_job::tick(a, true);
+                assert!(active_is_blank(a));
+                assert_eq!(a.home.open, home);
+                assert_eq!(a.docs.count(), 1);
+                let saved = solidcraft_engine::io::read_design(&std::fs::read(path).unwrap()).unwrap();
+                assert_eq!(saved.features.len(), if matches!(answer, Answer::Save) { 2 } else { 1 });
+            }
+        }
+    }
+
+    #[test]
+    fn close_cancellation_and_cancelled_save_as_preserve_last_document() {
+        for home in [true, false] {
+            let mut a = app();
+            a.preferences.show_home_on_startup = home;
+            a.home.open = false;
+            a.run("solid.box", json!({"length":4,"width":5,"height":6})).unwrap();
+            let original = a.session.doc.to_json();
+            close(&mut a, 0, false);
+            answer_prompt(&mut a, Answer::Cancel);
+            assert_eq!(a.session.doc.to_json(), original);
+            assert!(a.session.is_dirty() && !a.home.open && a.docs.closing.is_none());
+            a.services.pick_save = Some(Box::new(|_: &str, _: &[&str]| Box::pin(std::future::ready(None))));
+            close(&mut a, 0, false);
+            answer_prompt(&mut a, Answer::Save);
+            crate::file_picker::tick(&mut a, &egui::Context::default());
+            assert!(!a.file_picker_busy());
+            assert_eq!(a.session.doc.to_json(), original);
+            assert!(a.session.is_dirty() && !a.home.open && a.docs.closing.is_none());
+        }
     }
 
     /// #3187: a tab moved to another place keeps its design, and the active design stays

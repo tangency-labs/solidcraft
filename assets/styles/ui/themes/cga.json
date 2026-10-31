@@ -95,6 +95,13 @@
     "interference": "#ff5555",
     "joint_axis": "#aaaaaa",
     "joint_manipulator": "#ffff55",
+    "library_highlights": [
+      "#ff5555",
+      "#ffff55",
+      "#55ff55",
+      "#5555ff",
+      "#ff55ff"
+    ],
     "logo": [
       "#ffffff",
       "#55ffff",

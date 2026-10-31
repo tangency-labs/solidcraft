@@ -283,6 +283,22 @@ mod tests {
     }
 
     #[test]
+    fn scenario_crash_checkpoints_the_latest_zero_interval_autosave() {
+        let mut h = crate::scenario::Harness::new();
+        start(&mut h.app, &h.dir.join("recovery"), Duration::ZERO);
+        edit(&mut h.app);
+        h.app.autosave.as_mut().unwrap().save(&h.app.session).unwrap();
+        let saved = h.app.session.doc.features.len();
+        // The previous snapshot is saved, but the latest edit has not had a UI tick yet.
+        edit(&mut h.app);
+        let latest = h.app.session.doc.features.len();
+        assert!(latest > saved);
+        h.step(&json!({"restart":"crash"})).unwrap();
+        h.run(&json!([{ "widget":"Recover" }])).unwrap();
+        assert_eq!(h.app.session.doc.features.len(), latest, "the simulated crash must follow the zero-interval checkpoint");
+    }
+
+    #[test]
     fn dirty_background_tab_is_saved_and_offered_after_a_crash() {
         let (mut app, dir) = app("background", Duration::ZERO);
         name(&mut app, "Background A");
