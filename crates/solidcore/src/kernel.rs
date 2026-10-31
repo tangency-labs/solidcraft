@@ -397,6 +397,11 @@ pub struct UpstreamFixes {
     pub cylinder_rebuild_mean_radius: bool,
     /// `SmCylinder::IsNurbSurfaceCylinder` gives an inside-out NURB (its iso circles turning against the line through their centres) the frame `IsNurbSurfaceCone` gives one: Z against the NURB's linear direction, origin at its top-knot circle; upstream keeps the bottom-knot circle and the NURB's direction, so the cylinder's Z is reversed and its STEP evaluation is mirrored in height (WR-496, #1463).
     pub nurb_cylinder_inside_out_frame: bool,
+    /// `SmPlane::Reparameterize` moves the placement origin to `sOriginMax` when the UV domain
+    /// is reparameterized, maintaining consistency between analytic plane and NURB evaluations
+    /// across shifted domains; upstream computes `sOriginMax` but only references it under
+    /// `SM_DEBUG_CODE` (WR-41). Off by default for pinned C++ parity.
+    pub plane_reparameterize_moves_origin: bool,
     /// `SweepProfilesAlongPath` asks for caps only when the profile closes (WR-400, #837).
     pub planar_path_uncapped_open_profiles: bool,
     /// `PositionProfileCurves` returns the first failing status of its two

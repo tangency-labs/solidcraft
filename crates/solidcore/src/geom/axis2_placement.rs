@@ -11,7 +11,7 @@
 //! | [`Axis2Placement::new`]                       | `SmAxis2Placement(Origin, XAxis, YAxis)` (orient)     |
 //! | [`Axis2Placement::from_plane`]                | `SmAxis2Placement(const SmVector3d&, double)` (plane) |
 //! | [`Axis2Placement::from_to`]                   | `SmAxis2Placement(FromO, FromX, FromY, ToO, ToX, ToY)` (takes the two built systems) |
-//! | [`Axis2Placement::origin`]                    | `GetOrigin`, `GetOriginRef`                           |
+//! | [`Axis2Placement::origin`], [`Axis2Placement::set_origin`] | `GetOrigin`, `GetOriginRef`                           |
 //! | [`Axis2Placement::x_axis`]                    | `GetXAxis`, `GetXAxisRef`                             |
 //! | [`Axis2Placement::y_axis`]                    | `GetYAxis`, `GetYAxisRef`                             |
 //! | [`Axis2Placement::z_axis`]                    | `GetZAxis`                                            |
@@ -218,6 +218,11 @@ impl Axis2Placement {
             self.y_axis = y;
         }
         Ok(())
+    }
+
+    /// Sets the origin (`GetOriginRef() = origin`).
+    pub fn set_origin(&mut self, origin: Point3) {
+        self.origin = origin;
     }
 
     /// Set origin, Z axis and the X reference direction, STEP style: X is the unit

@@ -2846,7 +2846,7 @@ impl Surface {
             | SurfaceKind::Step(_)
             | SurfaceKind::OffsetSurface(_)
             | SurfaceKind::SrfInVolume(_) => base_edit(),
-            SurfaceKind::Plane(s) => s.reparameterize(new_domain),
+            SurfaceKind::Plane(s) => s.reparameterize_with_kernel(k, new_domain),
             // the inherited SmSurfOfRevolution::Reparameterize with the cone's iso curves
             SurfaceKind::Cone(s) => s.reparameterize(k, new_domain),
             SurfaceKind::Sphere(s) => s.reparameterize(k, new_domain),

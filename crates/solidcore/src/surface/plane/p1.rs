@@ -31,7 +31,7 @@
 //! | [`Plane::is_planar`], [`Plane::is_on_seam`], [`Plane::is_closed`] | `IsPlanar`, `IsOnSeam`, `IsClosed` (inline) |
 //! | [`Plane::make_nurb`]                          | `MakeNurb`                                        |
 //! | [`Plane::project_point_to_uv_domain`]         | `ProjectPointToUVDomain`                          |
-//! | [`Plane::reparameterize`]                     | `Reparameterize`                                  |
+//! | [`Plane::reparameterize`], [`Plane::reparameterize_opt_in`], [`Plane::reparameterize_with_kernel`] | `Reparameterize` |
 //! | [`Plane::toggle_swap_uv_bit`]                 | `ToggleSwapUVBit`                                 |
 //! | [`Plane::rebuild_step_from_nurb_parameters`]  | `RebuildSTEPFromNURBParameters`                   |
 //! | [`Plane::step_uv_domain`], [`Plane::position`], [`Plane::uv_scale`] | `GetSTEPUVDomain`, `GetPosition`, `GetUVScale` |
@@ -75,7 +75,10 @@
 //! - **`Reparameterize`** computes a new origin only in debug code: the release
 //!   build keeps the old origin while changing the scales and the domain, so the
 //!   analytic plane moves unless the new domain starts where the old one did. The
-//!   port keeps that (`plan/findings.md`). Its `Notify` calls only drop caches and
+//!   port keeps that by default (`plan/findings.md`), with an opt-in fix
+//!   [`Kernel::fixes.plane_reparameterize_moves_origin`] (WR-41) via
+//!   [`Plane::reparameterize_opt_in`] and [`Plane::reparameterize_with_kernel`] that
+//!   updates the origin to `origin_max`. Its `Notify` calls only drop caches and
 //!   inform owners and are omitted, as for B-splines.
 //! - **Co-ported callees.** `SmTol::MapTo2d(SmTol3d, SmVector2d, SmSurface)` (unit
 //!   `geom.tol`, waiting on `SmSurface::Evaluate1stDerivatives`) is ported here for a
@@ -829,6 +832,59 @@ impl Plane {
         self.make_nurb()
     }
 
+    /// Maps the domain onto `trim_domain` (`Reparameterize`), optionally updating
+    /// the placement origin to `origin_max` when `move_origin` is true (WR-41).
+    ///
+    /// # Errors
+    ///
+    /// Those of [`BSplineSurface::reparameterize`] (`SM_ERR_NULL_POINTER` when no
+    /// NURB can be made).
+    pub fn reparameterize_opt_in(
+        &mut self,
+        trim_domain: &Extent2d,
+        move_origin: bool,
+    ) -> Result<()> {
+        // Get new Analytic parameters
+        let scale_x = (self.uv_scale.x * self.anal_uv_domain.x_length()) / trim_domain.x_length();
+        let scale_y = (self.uv_scale.y * self.anal_uv_domain.y_length()) / trim_domain.y_length();
+
+        let origin_max = if move_origin {
+            let point_max = self.position.origin()
+                + self.position.x_axis() * (self.uv_scale.x * self.anal_uv_domain.u_max())
+                + self.position.y_axis() * (self.uv_scale.y * self.anal_uv_domain.v_max());
+            Some(
+                point_max
+                    - self.position.x_axis() * (scale_x * trim_domain.u_max())
+                    - self.position.y_axis() * (scale_y * trim_domain.v_max()),
+            )
+        } else {
+            None
+        };
+
+        // set NURB domain parameterization - no change in shape
+        self.ensure_nurb();
+        self.base.reparameterize(trim_domain)?;
+
+        if let Some(origin) = origin_max {
+            self.position.set_origin(origin);
+        }
+
+        // Set Analytic domain parameterization - no change in shape
+        self.anal_uv_domain = *trim_domain;
+        self.uv_scale = Vec2::new(scale_x, scale_y);
+        Ok(())
+    }
+
+    /// Maps the domain onto `trim_domain` with kernel opt-in fixes applied (`Reparameterize`).
+    ///
+    /// # Errors
+    ///
+    /// Those of [`BSplineSurface::reparameterize`] (`SM_ERR_NULL_POINTER` when no
+    /// NURB can be made).
+    pub fn reparameterize_with_kernel(&mut self, k: &Kernel, trim_domain: &Extent2d) -> Result<()> {
+        self.reparameterize_opt_in(trim_domain, k.fixes.plane_reparameterize_moves_origin)
+    }
+
     /// Maps the domain onto `trim_domain` (`Reparameterize`): the NURB is
     /// re-parameterised without changing its shape; the analytic domain becomes
     /// `trim_domain` and the scales `su * |old u| / |new u|`, `sv * |old v| / |new
@@ -839,19 +895,7 @@ impl Plane {
     /// Those of [`BSplineSurface::reparameterize`] (`SM_ERR_NULL_POINTER` when no
     /// NURB can be made).
     pub fn reparameterize(&mut self, trim_domain: &Extent2d) -> Result<()> {
-        // Get new Analytic parameters
-        let scale_x = (self.uv_scale.x * self.anal_uv_domain.x_length()) / trim_domain.x_length();
-        let scale_y = (self.uv_scale.y * self.anal_uv_domain.y_length()) / trim_domain.y_length();
-        // (sPointMax, sPointMin and sOriginMax are only used by debug code)
-
-        // set NURB domain parameterization - no change in shape
-        self.ensure_nurb();
-        self.base.reparameterize(trim_domain)?;
-
-        // Set Analytic domain parameterization - no change in shape
-        self.anal_uv_domain = *trim_domain;
-        self.uv_scale = Vec2::new(scale_x, scale_y);
-        Ok(())
+        self.reparameterize_opt_in(trim_domain, false)
     }
 
     /// Transposes the STEP definition so that `Plane(u, v) = SwapPlane(v, u)`: swaps
@@ -2651,5 +2695,143 @@ mod tests {
             .create_extended_surface_dir(SurfParamType::UMax, 0.5, ContinuityType::G1)
             .unwrap();
         assert!(e.gw_nurb().is_some());
+    }
+
+    #[test]
+    fn wr41_plane_reparam_default_keeps_origin() {
+        let mut p = Plane::new(
+            Point3::new(10.0, 20.0, 30.0),
+            Vec3::new(1.0, 0.0, 0.0),
+            Vec3::new(0.0, 1.0, 0.0),
+            Vec2::new(2.0, 3.0),
+            &Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0),
+        );
+        let orig_origin = p.position().origin();
+        assert_eq!(orig_origin, Point3::new(10.0, 20.0, 30.0));
+
+        let new_domain = Extent2d::from_bounds(2.0, 3.0, 5.0, 7.0);
+        p.reparameterize(&new_domain).unwrap();
+
+        // Default behavior (pinned C++ parity) does not move the placement origin
+        assert_eq!(p.position().origin(), orig_origin);
+
+        // Consequently, analytic plane evaluation diverges from base NURB evaluation
+        let pt_analytic = p.evaluate_point(Point2::new(2.0, 3.0));
+        let pt_nurb = p
+            .base_with_nurb()
+            .unwrap()
+            .evaluate_point(Point2::new(2.0, 3.0))
+            .unwrap();
+        assert!(pt_analytic.distance(pt_nurb) > 1.0);
+    }
+
+    #[test]
+    fn wr41_plane_reparam_opt_in_moves_origin_matches_nurb() {
+        let mut p = Plane::new(
+            Point3::new(10.0, 20.0, 30.0),
+            Vec3::new(1.0, 0.0, 0.0),
+            Vec3::new(0.0, 1.0, 0.0),
+            Vec2::new(2.0, 3.0),
+            &Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0),
+        );
+        let old_mid_pt = p.evaluate_point(Point2::new(0.5, 0.5));
+
+        let mut k = Kernel::default();
+        k.fixes.plane_reparameterize_moves_origin = true;
+
+        let new_domain = Extent2d::from_bounds(2.0, 3.0, 5.0, 7.0);
+        p.reparameterize_with_kernel(&k, &new_domain).unwrap();
+
+        // Origin moved away from initial (10, 20, 30)
+        assert_ne!(p.position().origin(), Point3::new(10.0, 20.0, 30.0));
+
+        // Midpoint of new domain [2, 5] x [3, 7] is (3.5, 5.0), which maps to the same 3D point
+        let new_mid_pt = p.evaluate_point(Point2::new(3.5, 5.0));
+        assert!(old_mid_pt.distance(new_mid_pt) < 1e-12);
+
+        // Across the entire reparameterized domain, analytic plane and base NURB evaluate identically
+        let u_steps = [2.0, 2.75, 3.5, 4.25, 5.0];
+        let v_steps = [3.0, 4.0, 5.0, 6.0, 7.0];
+        for &u in &u_steps {
+            for &v in &v_steps {
+                let uv = Point2::new(u, v);
+                let pt_analytic = p.evaluate_point(uv);
+                let pt_nurb = p.base_with_nurb().unwrap().evaluate_point(uv).unwrap();
+                assert!(
+                    pt_analytic.distance(pt_nurb) < 1e-12,
+                    "mismatch at uv=({u}, {v}): analytic={pt_analytic:?}, nurb={pt_nurb:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn wr41_plane_reparam_via_surface_dispatcher() {
+        let domain = Extent2d::from_bounds(2.0, 3.0, 6.0, 7.0);
+
+        // Without fix
+        let mut s_default = Surface::from(Plane::new(
+            Point3::new(5.0, 5.0, 5.0),
+            Vec3::new(1.0, 0.0, 0.0),
+            Vec3::new(0.0, 1.0, 0.0),
+            Vec2::new(1.0, 1.0),
+            &Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0),
+        ));
+        let k_default = Kernel::default();
+        s_default.reparameterize(&k_default, &domain).unwrap();
+        if let SurfaceKind::Plane(plane) = s_default.kind() {
+            assert_eq!(plane.position().origin(), Point3::new(5.0, 5.0, 5.0));
+        } else {
+            panic!("expected SurfaceKind::Plane");
+        }
+
+        // With fix
+        let mut s_fixed = Surface::from(Plane::new(
+            Point3::new(5.0, 5.0, 5.0),
+            Vec3::new(1.0, 0.0, 0.0),
+            Vec3::new(0.0, 1.0, 0.0),
+            Vec2::new(1.0, 1.0),
+            &Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0),
+        ));
+        let mut k_fixed = Kernel::default();
+        k_fixed.fixes.plane_reparameterize_moves_origin = true;
+        s_fixed.reparameterize(&k_fixed, &domain).unwrap();
+        if let SurfaceKind::Plane(plane) = s_fixed.kind() {
+            assert_ne!(plane.position().origin(), Point3::new(5.0, 5.0, 5.0));
+            let pt_analytic = plane.evaluate_point(Point2::new(4.0, 5.0));
+            let pt_nurb = plane
+                .base_with_nurb()
+                .unwrap()
+                .evaluate_point(Point2::new(4.0, 5.0))
+                .unwrap();
+            assert!(pt_analytic.distance(pt_nurb) < 1e-12);
+        } else {
+            panic!("expected SurfaceKind::Plane");
+        }
+    }
+
+    #[test]
+    fn wr41_plane_reparam_opt_in_arbitrary_frame_and_scale() {
+        let mut p = Plane::new(
+            Point3::new(-15.0, 4.2, 100.0),
+            Vec3::new(0.0, 1.0, 0.0),
+            Vec3::new(0.0, 0.0, 1.0),
+            Vec2::new(3.5, 7.2),
+            &Extent2d::from_bounds(-2.0, -1.0, 4.0, 5.0),
+        );
+        let new_domain = Extent2d::from_bounds(10.0, 20.0, 30.0, 60.0);
+        p.reparameterize_opt_in(&new_domain, true).unwrap();
+
+        for u in [10.0, 15.0, 20.0, 25.0, 30.0] {
+            for v in [20.0, 30.0, 40.0, 50.0, 60.0] {
+                let uv = Point2::new(u, v);
+                let pt_analytic = p.evaluate_point(uv);
+                let pt_nurb = p.base_with_nurb().unwrap().evaluate_point(uv).unwrap();
+                assert!(
+                    pt_analytic.distance(pt_nurb) < 1e-11,
+                    "mismatch at uv=({u}, {v}): analytic={pt_analytic:?}, nurb={pt_nurb:?}"
+                );
+            }
+        }
     }
 }
