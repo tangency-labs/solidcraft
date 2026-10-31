@@ -16,8 +16,8 @@ use crate::eval::{PlacementReads, body_world, hash_placement, placement_digest};
 use crate::*;
 
 /// Work counted on this thread: bodies moved, STEP texts digested, joint faces and bodies
-/// measured, bodies searched for by name, features searched for by id, and bodies a cut (or
-/// intersect) ran its booleans on.
+/// measured, bodies searched for by name, features searched for by id, bodies a cut (or
+/// intersect) ran its booleans on, and bodies searched for the cylinder a tap marking lies on.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub(super) struct Counts {
     pub moved: usize,
@@ -27,11 +27,21 @@ pub(super) struct Counts {
     pub body_searches: usize,
     pub feature_searches: usize,
     pub cut: usize,
+    pub cylinder_search: usize,
 }
 
 thread_local! {
     static COUNTS: Cell<Counts> = const {
-        Cell::new(Counts { moved: 0, digested: 0, joint_faces: 0, measures: 0, body_searches: 0, feature_searches: 0, cut: 0 })
+        Cell::new(Counts {
+            moved: 0,
+            digested: 0,
+            joint_faces: 0,
+            measures: 0,
+            body_searches: 0,
+            feature_searches: 0,
+            cut: 0,
+            cylinder_search: 0,
+        })
     };
 }
 
@@ -1195,4 +1205,123 @@ fn a_cut_still_runs_where_its_tool_touches_grazes_or_meets_a_curved_face() {
     assert_eq!(work.cut, 1);
     assert!(volume(&work.model, &dome) < whole - 1.0, "the drill cuts into the dome");
     assert!(work.kept.is_empty());
+}
+
+/// A cylinder body named `name` standing on `base` along Z.
+fn shaft(doc: &mut Document, name: &str, base: Vec3, radius: f64, height: f64) {
+    let id = doc
+        .add_feature(
+            FeatureKind::Cylinder {
+                base: point_expr(base),
+                axis: Dir(Vec3::Z),
+                radius: radius.to_string().into(),
+                height: height.to_string().into(),
+                operation: Operation::NewBody,
+                references: Vec::new(),
+            },
+            None,
+        )
+        .unwrap();
+    doc.feature_mut(id).unwrap().body_names = vec![name.into()];
+}
+
+/// The work of adding `kind` at the end of `doc`, and the tap markings the design then has.
+fn marking_work(doc: &mut Document, kind: FeatureKind) -> (Counts, Vec<ThreadInfo>) {
+    let mut model = Model::new();
+    model.evaluate(doc);
+    let id = doc.add_feature(kind, None).unwrap();
+    let work = counted(|| model.evaluate(doc));
+    assert_eq!(model.result(id).unwrap().error, None, "the feature builds");
+    (work, model.state().threads.clone())
+}
+
+/// A cosmetic tap marking at `p`.
+fn marking(p: Vec3) -> FeatureKind {
+    FeatureKind::Thread { face: FacePick(p), designation: Some("M6".into()), length: None, modeled: false, handedness: ThreadHandedness::Right }
+}
+
+/// A tap marking looks for its cylinder in the bodies near it only: each body searched was
+/// tessellated again, so many markings in a design of many bodies took quadratic time (#10227).
+#[test]
+fn a_tap_marking_searches_only_the_bodies_near_it() {
+    let mut doc = Document::new("far");
+    shaft(&mut doc, "Shaft", Vec3::ZERO, 3.0, 6.0);
+    for i in 0..5 {
+        block(&mut doc, &format!("Far{i}"), Vec3::new(200.0 * (i + 1) as f64, 0.0, 0.0), [50.0, 40.0, 30.0]);
+    }
+    let (work, threads) = marking_work(&mut doc, marking(Vec3::new(3.0, 0.0, 3.0)));
+    assert_eq!(work.cylinder_search, 1, "only the shaft is searched");
+    assert_eq!(threads.len(), 1);
+    assert_eq!(threads[0].body, "Shaft");
+    assert_eq!(threads[0].designation, "M6");
+    assert!((threads[0].radius - 3.0).abs() < 1e-6 && !threads[0].internal);
+
+    // A tapped hole in a plate among far bodies: only the plate is searched for its wall.
+    let mut doc = Document::new("tapped");
+    block(&mut doc, "Plate", Vec3::ZERO, [60.0, 60.0, 12.0]);
+    for i in 0..5 {
+        block(&mut doc, &format!("Far{i}"), Vec3::new(200.0 * (i + 1) as f64, 0.0, 0.0), [50.0, 40.0, 30.0]);
+    }
+    let hole = FeatureKind::Hole {
+        position: FacePick(Vec3::new(30.0, 30.0, 12.0)),
+        at: None,
+        direction: Dir(-Vec3::Z),
+        diameter: "5".into(),
+        depth: Some("10".into()),
+        hole: HoleKind::default(),
+        points: None,
+        thread: Some("M6".into()),
+        thread_depth: None,
+        handedness: ThreadHandedness::Right,
+        to: None,
+        references: Vec::new(),
+    };
+    let (work, threads) = marking_work(&mut doc, hole);
+    assert_eq!(work.cylinder_search, 1, "only the plate is searched");
+    assert_eq!(threads.len(), 1);
+    assert_eq!(threads[0].body, "Plate");
+    assert!(threads[0].internal && (threads[0].radius - 2.5).abs() < 1e-6);
+}
+
+/// Bodies within reach of a tap marking are still searched: the shaft it lies on, a block 3 mm
+/// off (within a twentieth of the block's size, where the cylinder search itself looks), and one
+/// 3.6 mm off (just past it, but within the margin the boxes keep); a block 4.5 mm off is not.
+/// The marking stays on the shaft.
+#[test]
+fn a_tap_marking_still_searches_the_bodies_within_its_reach() {
+    let mut doc = Document::new("near");
+    shaft(&mut doc, "Shaft", Vec3::ZERO, 3.0, 6.0);
+    // Each block is 50 x 40 x 30 (a twentieth of its size is 3.54 mm), its face x = 3 + gap.
+    for (name, gap) in [("Close", 3.0), ("Edge", 3.6), ("Clear", 4.5)] {
+        block(&mut doc, name, Vec3::new(3.0 + gap, -20.0, 0.0), [50.0, 40.0, 30.0]);
+    }
+    let (work, threads) = marking_work(&mut doc, marking(Vec3::new(3.0, 0.0, 3.0)));
+    assert_eq!(work.cylinder_search, 3, "the shaft, Close and Edge are searched");
+    assert_eq!(threads.len(), 1);
+    assert_eq!(threads[0].body, "Shaft");
+
+    // A pin in a hole a hair wider: a marking on the pin, and one on the hole's wall.
+    for (p, body, internal) in [(Vec3::new(2.0, 0.0, 5.0), "Pin", false), (Vec3::new(2.5, 0.0, 5.0), "Plate", true)] {
+        let mut doc = Document::new("pin");
+        block(&mut doc, "Plate", Vec3::new(-20.0, -20.0, 0.0), [40.0, 40.0, 10.0]);
+        let bore = FeatureKind::Cylinder {
+            base: point_expr(Vec3::new(0.0, 0.0, -1.0)),
+            axis: Dir(Vec3::Z),
+            radius: "2.5".into(),
+            height: "12".into(),
+            operation: Operation::Cut,
+            references: Vec::new(),
+        };
+        doc.add_feature(bore, None).unwrap();
+        shaft(&mut doc, "Pin", Vec3::ZERO, 2.0, 10.0);
+        let mut kind = marking(p);
+        if let FeatureKind::Thread { designation, .. } = &mut kind {
+            *designation = None;
+        }
+        let (work, threads) = marking_work(&mut doc, kind);
+        assert_eq!(work.cylinder_search, 2, "both bodies are searched for {body}");
+        assert_eq!(threads.len(), 1);
+        assert_eq!(threads[0].body, body);
+        assert_eq!(threads[0].internal, internal);
+    }
 }

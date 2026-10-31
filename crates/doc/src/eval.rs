@@ -458,7 +458,12 @@ fn thread_on_impl(
     let (body, cyl) = st
         .bodies
         .iter()
-        .filter_map(|b| kernel::cylinder_face_at(&b.body, p).map(|c| (b.name.clone(), c)))
+        .filter(|b| !more::beyond_cylinder_reach(b, p))
+        .filter_map(|b| {
+            #[cfg(test)]
+            cost_tests::count(|c| c.cylinder_search += 1);
+            kernel::cylinder_face_at(&b.body, p).map(|c| (b.name.clone(), c))
+        })
         .min_by(|a, b| {
             let dist = |c: &kernel::CylinderFace| ((p - c.axis_point - c.axis * (p - c.axis_point).dot(c.axis)).len() - c.radius).abs();
             dist(&a.1).total_cmp(&dist(&b.1))

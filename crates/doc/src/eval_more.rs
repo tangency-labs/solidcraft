@@ -1571,6 +1571,23 @@ fn padded_box(mesh: &solidcraft_geom::Mesh, tol: f64) -> Option<Aabb3> {
     (!b.is_empty() && b.min.is_finite() && b.max.is_finite()).then(|| b.inflated(2.0 * tol + 1e-6))
 }
 
+/// Whether [`kernel::cylinder_face_at`] is known to find no face of `mb` at `p`. It takes a
+/// face only when its own mesh of the body comes within a twentieth of the body's size of the
+/// point. That mesh lies in the body's box ([`mesh_box`]) give or take its own deflection, which
+/// the reach allows for, so a box farther away than that holds no face for it. Working that out from the mesh the body keeps
+/// spares a tessellation of every body in the design for each tap marking (#10227). A mesh
+/// body, and a body whose box is unknown, are searched as before.
+pub(super) fn beyond_cylinder_reach(mb: &ModelBody, p: Vec3) -> bool {
+    if mb.body.is_mesh() {
+        return false;
+    }
+    let Some(b) = mesh_box(mb) else { return false };
+    let size = mb.body.size();
+    let reach = size * 0.05 + 2.0 * (size * 1e-3).max(1e-3);
+    let off = (b.min - p).max(p - b.max).max(Vec3::ZERO);
+    off.len() > reach
+}
+
 /// Whether two boxes are known to be apart (an unknown box is never apart).
 pub(super) fn boxes_apart(a: &Option<Aabb3>, b: &Option<Aabb3>) -> bool {
     let (Some(a), Some(b)) = (a, b) else { return false };
