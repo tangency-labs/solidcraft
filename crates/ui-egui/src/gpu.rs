@@ -927,8 +927,10 @@ mod tests {
                     f.frame();
                     let positive = f.pixels(false);
                     let changed_pixels = zero_reference
-                        .chunks_exact(4)
-                        .zip(positive.chunks_exact(4))
+                        .as_chunks::<4>()
+                        .0
+                        .iter()
+                        .zip(positive.as_chunks::<4>().0.iter())
                         .filter(|(zero, blurred)| (0..3).any(|channel| zero[channel].abs_diff(blurred[channel]) > 1))
                         .count();
                     assert!(changed_pixels > 0, "radius {radius} must change RGB pixels with the same camera, alpha and theme");

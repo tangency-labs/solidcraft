@@ -700,10 +700,10 @@ impl FrameCompositor for Shared {
                 inner.gpu = None;
                 inner.counts.clear_live();
                 inner.failure = Some("device lost");
-            } else if let Some(gpu) = inner.gpu.as_mut() {
-                if let Some(key) = gpu.pending.take() {
-                    gpu.valid = Some(key);
-                }
+            } else if let Some(gpu) = inner.gpu.as_mut()
+                && let Some(key) = gpu.pending.take()
+            {
+                gpu.valid = Some(key);
             }
         }
     }
@@ -745,7 +745,7 @@ struct Gpu {
 
 fn bytes_of(params: &Params) -> [u8; 96] {
     let mut bytes = [0; 96];
-    for (out, value) in bytes.chunks_exact_mut(4).zip(params) {
+    for (out, value) in bytes.as_chunks_mut::<4>().0.iter_mut().zip(params) {
         out.copy_from_slice(&value.to_le_bytes());
     }
     bytes
@@ -787,7 +787,7 @@ fn background_params(rect: Rect, clip: Rect, colors: [Color32; 2], outside: Colo
     p[2] = u8::from(srgb) as f32;
     p[4..8].copy_from_slice(&[rect.min.x * scale, rect.min.y * scale, rect.max.x * scale, rect.max.y * scale]);
     p[8..12].copy_from_slice(&[clip.min.x * scale, clip.min.y * scale, clip.max.x * scale, clip.max.y * scale]);
-    for (out, color) in p[12..24].chunks_exact_mut(4).zip(colors.into_iter().chain([outside])) {
+    for (out, color) in p[12..24].as_chunks_mut::<4>().0.iter_mut().zip(colors.into_iter().chain([outside])) {
         out.copy_from_slice(&color.to_normalized_gamma_f32());
     }
     p
