@@ -2724,8 +2724,10 @@ fn convert_mesh_asks_for_the_body_and_converts_the_selected_one() {
 /// #3745: hovering a large body never waits for its pick index. A long modelled thread's mesh
 /// has a quarter of a million triangles and its index took a third of a second to make, on the
 /// first hover, in the frame. Now the index is made on a worker and the first hovers scan the
-/// mesh: the first hover takes a small part of what making the index takes, and still finds
-/// the face under the pointer.
+/// mesh. Checked without timing: the worker is held at a gate, so the index is certainly still
+/// being made during the hover, and the hover must still find the face under the pointer. Were
+/// the hover to build the index itself it would not be pending, and a hover that waited on the
+/// worker would never return while the gate is closed.
 #[test]
 fn hovering_a_large_body_does_not_wait_for_its_pick_index() {
     // A closed ball of 300 000 triangles, inserted as a mesh body.
@@ -2763,19 +2765,21 @@ fn hovering_a_large_body_does_not_wait_for_its_pick_index() {
     h.app.run("file.insert_mesh", json!({"path": path.to_string_lossy()})).unwrap();
     let mesh = h.app.session.world_state().bodies[0].mesh();
     assert!(mesh.triangles.len() > 250_000, "{}", mesh.triangles.len());
-    let t = std::time::Instant::now();
-    let _ = solidcraft_engine::geom::MeshIndex::new(&mesh);
-    let index_ms = t.elapsed().as_secs_f64() * 1000.0;
+    let gate = h.app.viewport.pick_index.gate();
+    gate.set_closed(true);
     h.app.fit_view();
     h.frames(3);
     let at = h.at(&json!({"world": [0.0, -20.0, 0.0]})).unwrap();
-    let t = std::time::Instant::now();
     h.step(&json!({"move": at})).unwrap();
-    let hover_ms = t.elapsed().as_secs_f64() * 1000.0;
     assert!(matches!(h.app.viewport.hover, Some(crate::viewport::Hit::Face { .. })), "{:?}", h.app.viewport.hover);
-    // Half, not a third: on a loaded runner the hover alone has taken 70 ms against a 190 ms index.
-    // Waiting for the index would cost the whole of it, so half still tells the two apart.
-    assert!(hover_ms < index_ms / 2.0, "the first hover took {hover_ms:.1} ms; making the index takes {index_ms:.1} ms");
+    assert_eq!(h.app.viewport.pick_index.pending(), 1, "the hover should have left the index to the worker");
+    // Let the worker finish so it does not outlive the test holding the mesh.
+    gate.set_closed(false);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(120);
+    while h.app.viewport.pick_index.pending() > 0 && std::time::Instant::now() < deadline {
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    assert_eq!(h.app.viewport.pick_index.pending(), 0, "the index should be made once the worker is let go");
 }
 
 /// #4452: with Combine open, bodies clicked in the Browser fill its inputs, as clicks on them
