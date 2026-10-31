@@ -80,6 +80,13 @@ pub const MODIFIERS: &[ToolModifiers] = &[
 ];
 
 pub(crate) const OPS: [&str; 4] = ["new", "join", "cut", "intersect"];
+/// Each cut button's command and the tool whose dialog it opens with Cut chosen (#7905).
+pub(crate) const CUT_TOOLS: [(&str, &str); 4] = [
+    ("solid.extrude_cut", "solid.extrude"),
+    ("solid.revolve_cut", "solid.revolve"),
+    ("solid.sweep_cut", "solid.sweep"),
+    ("solid.loft_cut", "solid.loft"),
+];
 pub(crate) const OP_LABELS: [&str; 4] = ["New Body", "Join", "Cut", "Intersect"];
 const DIRS: [&str; 5] = ["positive", "negative", "symmetric", "positive", "negative"];
 /// The "Two sides" direction (a second distance the other way).
@@ -807,6 +814,17 @@ impl Dialog {
     }
 
     pub fn for_command(app: &SolveApp, id: &str) -> Option<Dialog> {
+        // A cut button (#7905): its tool's dialog with the operation set to Cut, not guessed.
+        if let Some((_, tool)) = CUT_TOOLS.iter().find(|(cut, _)| *cut == id) {
+            let mut d = Self::for_command(app, tool)?;
+            let cut = OPS.iter().position(|op| *op == "cut").unwrap_or_default();
+            match &mut d.kind {
+                Kind::Extrude { operation, auto_op, .. } => (*operation, *auto_op) = (cut, false),
+                Kind::Revolve { operation, .. } | Kind::Sweep { operation, .. } | Kind::Loft { operation, .. } => *operation = cut,
+                _ => {}
+            }
+            return Some(d);
+        }
         let s = &app.session;
         let has_bodies = !s.world_state().bodies.is_empty();
         let mut d = match id {
