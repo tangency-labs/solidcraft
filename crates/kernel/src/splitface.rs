@@ -1621,6 +1621,28 @@ mod tests {
         assert!(!result.contains(Vec3::new(60.0, 8.25, 50.0)));
     }
 
+    /// Replacing a face with one on a part of the body standing higher: the grown cap reaches
+    /// that face, the split cannot run, and the sweep must still take over (a fix here once
+    /// aborted the whole operation with the split's error).
+    #[test]
+    fn replace_a_face_onto_a_higher_part_s_face() {
+        let plate = box_solid(Vec3::new(-30.0, -15.0, 0.0), Vec3::new(30.0, 15.0, 8.0)).unwrap();
+        let boss = cylinder(Vec3::new(0.0, 0.0, 8.0), Vec3::Z, 8.0, 10.0).unwrap();
+        let bar = box_solid(Vec3::new(16.0, -5.0, 0.0), Vec3::new(26.0, 5.0, 40.0)).unwrap();
+        let both = crate::boolean(&plate, &boss, crate::BoolOp::Union).unwrap().unwrap();
+        let body = crate::boolean(&both, &bar, crate::BoolOp::Union).unwrap().unwrap();
+        let faces = body.faces(1e-3).unwrap();
+        let top_bar = faces.iter().find(|f| (f.centroid.z - 40.0).abs() < 1e-6 && f.centroid.x > 15.0).expect("bar top");
+        let top_boss = faces.iter().find(|f| (f.centroid.z - 18.0).abs() < 1e-6 && f.centroid.x.abs() < 8.0).expect("boss top");
+        let before = body.tessellate(1e-4).unwrap().measure().volume;
+        let result = crate::replace_faces(&body, &[top_boss.centroid], &SplitTool::Face { body: &body, face: top_bar.index })
+            .expect("the boss top reaches the bar's top");
+        assert_eq!(result.unmeshed_faces(), 0);
+        let after = result.tessellate(1e-4).unwrap().measure().volume;
+        let grown = std::f64::consts::PI * 64.0 * (40.0 - 18.0);
+        assert!((after - before - grown).abs() < 1.0, "{before} -> {after}, wanted +{grown}");
+    }
+
     #[test]
     fn replace_a_keyway_floor_onto_the_boss_wall() {
         // A keyway cut into a boss: replacing its floor with the boss's outer wall fills it
