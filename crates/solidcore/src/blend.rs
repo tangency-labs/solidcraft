@@ -11,6 +11,7 @@ pub mod fillet_classification;
 pub mod fillet_cliff_overflow;
 pub mod fillet_corner;
 pub mod fillet_custom_solver;
+pub mod fillet_exact;
 pub mod fillet_executive;
 pub mod fillet_geom;
 pub mod fillet_intersector;

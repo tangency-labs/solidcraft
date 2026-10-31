@@ -10,6 +10,8 @@
 //! | [`FilletSolver::calc_cylinder_fillet_geom`], [`FilletSolver::cylinder_fillet_geom_parts`] | `SmFilletSolver::CalcCylinderFilletGeom` |
 //! | [`FilletSolver::calc_cone_fillet_geom`], [`FilletSolver::cone_fillet_geom_parts`]         | `SmFilletSolver::CalcConeFilletGeom`     |
 //! | [`FilletSolver::calc_torus_fillet_geom`], [`FilletSolver::torus_fillet_geom_parts`]       | `SmFilletSolver::CalcTorusFilletGeom`    |
+//! | [`FilletSolver::calc_line_spine_fillet_geom`]            | `SmFilletSolver::CalcLineSpineFilletGeom` (fork) |
+//! | [`FilletSolver::calc_circle_spine_fillet_geom`]          | `SmFilletSolver::CalcCircleSpineFilletGeom` (fork) |
 //! | [`FilletSolver::point_on_plane_solve`]                   | `SmFilletSolver::PointOnPlaneSolve`          |
 //! | [`FilletSolver::rail_edgeuse_intersect`]                 | `SmFilletSolver::RailEdgeuseIntersect`       |
 //! | [`FilletSolver::rail_rail_intersect`]                    | `SmFilletSolver::RailRailIntersect`          |
@@ -72,8 +74,16 @@
 //!   side edge's B-spline UV trim (its local copy) evaluates out of bounds, so it runs on
 //!   along its line as a line trim does instead of clamping to its ends
 //!   (`continue_bspline_trim_past_its_ends`, WR-654, #1981).
+//! - **Exact round classes (WR-669, #2085).** For `fixes.fillet_exact_round_classes`, the
+//!   SolidCraft fork's (tangency-labs/smlib@7ac037e) class builders: the line spine's is the
+//!   cylinder body without its generator and `IsLine` gates; the circle spine's the torus
+//!   body without its generator and `IsArc` gates, its frame from the class axis (no `IsArc`
+//!   start angle: the span from the start section) and no blend-curve section; the point
+//!   spine's is [`FilletSolver::calc_sphere_fillet_geom`] as it is (the fork's ignores the
+//!   class). The bodies' own fork-fix flags apply unchanged.
 
 use crate::blend::fillet_custom_solver::OffsetSurface;
+use crate::blend::fillet_exact::ExactBlend;
 use crate::blend::fillet_executive::p3::ErrorInfo;
 use crate::blend::fillet_geom::p1::{
     FilletBrep, FilletCornerId, FilletEdgeType, FilletErrorType, FilletGeom, FilletGeomId,
@@ -296,7 +306,12 @@ fn put_surface(s: &mut FilletSolver, rail: usize, surface: OffsetSurface) -> Res
 }
 
 /// `GetSurface(rail)->EvaluatePoint(uv)` (keeping an extension it makes).
-fn eval_offset(k: &Kernel, s: &mut FilletSolver, rail: usize, uv: Point2) -> Result<Point3> {
+pub(crate) fn eval_offset(
+    k: &Kernel,
+    s: &mut FilletSolver,
+    rail: usize,
+    uv: Point2,
+) -> Result<Point3> {
     s.surface_mut(rail)?
         .ok_or_else(|| invalid("no offset surface"))?
         .surface
@@ -711,14 +726,52 @@ impl FilletSolver {
         b: &Brep,
         tsects: &[TsectPnt],
     ) -> Result<FilletGeomParts> {
+        Self::cylinder_fillet_geom_parts_of(ops, k, b, tsects, None)
+    }
+
+    /// `CalcLineSpineFilletGeom(crBlend, rTsectPnts, pFilletGeom)` (not upstream: the
+    /// SolidCraft fork's tangency-labs/smlib@7ac037e, opt-in
+    /// `Kernel::fixes.fillet_exact_round_classes`, WR-669): the cylinder of a round whose
+    /// spine `blend` classifies as a line, built as [`FilletSolver::calc_cylinder_fillet_geom`]
+    /// without its generator and `IsLine` gates.
+    ///
+    /// # Errors
+    ///
+    /// Those of [`FilletSolver::cylinder_fillet_geom_parts`] past its gates, and of the
+    /// store.
+    pub fn calc_line_spine_fillet_geom(
+        ops: &mut dyn FilletSolverOps,
+        k: &Kernel,
+        b: &Brep,
+        pseudo: &mut FilletBrep,
+        blend: &ExactBlend,
+        tsects: &[TsectPnt],
+        fillet_geom: Option<FilletGeomId>,
+    ) -> Result<()> {
+        let parts = Self::cylinder_fillet_geom_parts_of(ops, k, b, tsects, Some(blend))?;
+        store_parts(ops.solver(), pseudo, fillet_geom, parts)
+    }
+
+    /// [`FilletSolver::cylinder_fillet_geom_parts`], or with `class` (the round's exact
+    /// class, a line) `CalcLineSpineFilletGeom`'s: the same body without the generator and
+    /// `IsLine` gates.
+    fn cylinder_fillet_geom_parts_of(
+        ops: &mut dyn FilletSolverOps,
+        k: &Kernel,
+        b: &Brep,
+        tsects: &[TsectPnt],
+        class: Option<&ExactBlend>,
+    ) -> Result<FilletGeomParts> {
         let s = ops.solver();
         let e = filleted_edge(s, b)?;
 
         // Check for Edge's curve domain being bigger than the Edge domain.
         let curve = checked_edge_curve(k, s, b, e)?;
 
-        // no work - not a circular cross-section on a straight line
-        if !is_circular_fsg(s)? || curve.is_line(k, 3, ANALYTIC_TOL)?.is_none() {
+        // no work - not a circular cross-section on a straight line (the class decides it:
+        // no gate)
+        if class.is_none() && (!is_circular_fsg(s)? || curve.is_line(k, 3, ANALYTIC_TOL)?.is_none())
+        {
             return Err(sm_err());
         }
 
@@ -1083,6 +1136,50 @@ impl FilletSolver {
         tsects: &[TsectPnt],
         fillet_geom: Option<FilletGeomId>,
     ) -> Result<FilletGeomParts> {
+        Self::torus_fillet_geom_parts_of(ops, k, b, pseudo, tsects, fillet_geom, None)
+    }
+
+    /// `CalcCircleSpineFilletGeom(crBlend, rTsectPnts, pFilletGeom)` (not upstream: the
+    /// SolidCraft fork's tangency-labs/smlib@7ac037e, opt-in
+    /// `Kernel::fixes.fillet_exact_round_classes`, WR-669): the section of a round whose
+    /// spine `blend` classifies as a circle turned about the faces' common axis (the
+    /// class's), built as [`FilletSolver::calc_torus_fillet_geom`] without its generator
+    /// and `IsArc` gates. The frame is the class axis with its origin where the axis meets
+    /// the plane through the edge's start square to it, its x axis the world x (y when the
+    /// axis is within `acos(0.9)` of x) made square to the axis; there is no `IsArc` start
+    /// angle, so the span is the turn from the start section (as with
+    /// `fillet_torus_span_from_start_section`).
+    ///
+    /// # Errors
+    ///
+    /// `SM_ERR_INVALID_INPUT` from `Unitize` of a zero axis or x axis; those of
+    /// [`FilletSolver::torus_fillet_geom_parts`] past its gates, and of the store.
+    pub fn calc_circle_spine_fillet_geom(
+        ops: &mut dyn FilletSolverOps,
+        k: &Kernel,
+        b: &Brep,
+        pseudo: &mut FilletBrep,
+        blend: &ExactBlend,
+        tsects: &[TsectPnt],
+        fillet_geom: Option<FilletGeomId>,
+    ) -> Result<()> {
+        let parts =
+            Self::torus_fillet_geom_parts_of(ops, k, b, pseudo, tsects, fillet_geom, Some(blend))?;
+        store_parts(ops.solver(), pseudo, fillet_geom, parts)
+    }
+
+    /// [`FilletSolver::torus_fillet_geom_parts`], or with `class` (the round's exact
+    /// class, a circle) `CalcCircleSpineFilletGeom`'s.
+    #[allow(clippy::too_many_arguments)]
+    fn torus_fillet_geom_parts_of(
+        ops: &mut dyn FilletSolverOps,
+        k: &Kernel,
+        b: &Brep,
+        pseudo: &FilletBrep,
+        tsects: &[TsectPnt],
+        fillet_geom: Option<FilletGeomId>,
+        class: Option<&ExactBlend>,
+    ) -> Result<FilletGeomParts> {
         let s = ops.solver();
         let e = filleted_edge(s, b)?;
 
@@ -1099,19 +1196,41 @@ impl FilletSolver {
         // blend-curve section whose centre line is a point on the arc's axis (a blend as
         // wide as the face it uses up, whose marched centre line has no length to march)
         // is revolved too; any other blend-curve section is still refused here
-        let blend_section = k.fixes.fillet_blend_curve_revolved_on_arc
+        let blend_section = class.is_none()
+            && k.fixes.fillet_blend_curve_revolved_on_arc
             && section == FilletSurfaceGeneratorType::BlendCurve;
-        if section != FilletSurfaceGeneratorType::Circular && !linear_section && !blend_section {
-            return Err(sm_err());
-        }
-        let Some((ref_frame, arc_radius, start_ang, _end_ang)) =
-            curve.is_arc(k, 11, ANALYTIC_TOL)?
-        else {
-            return Err(sm_err());
+        let (ref_frame, start_ang) = if let Some(class) = class {
+            // WR-669: the circular or linear cross-section turned about the faces' common
+            // axis (the class's); the frame's origin: the centre of the edge's circle, where
+            // the axis meets the edge's plane
+            let z = class.dir.unitize()?;
+            let (edge_pnt, _) = curve_pv(k, &curve, edge::interval(b, e)?.min())?;
+            let centre = class.point + z * (edge_pnt - class.point).dot(z);
+            let mut x = if z.x.abs() < 0.9 {
+                Vec3::new(1.0, 0.0, 0.0)
+            } else {
+                Vec3::new(0.0, 1.0, 0.0)
+            };
+            x = x - z * x.dot(z);
+            let x = x.unitize()?;
+            let mut frame = Axis2Placement::default();
+            frame.set_canonical(centre, x, z.cross(x))?;
+            (frame, 0.0)
+        } else {
+            if section != FilletSurfaceGeneratorType::Circular && !linear_section && !blend_section
+            {
+                return Err(sm_err());
+            }
+            let Some((ref_frame, arc_radius, start_ang, _end_ang)) =
+                curve.is_arc(k, 11, ANALYTIC_TOL)?
+            else {
+                return Err(sm_err());
+            };
+            if blend_section && !centre_line_on_axis(k, s, &ref_frame, arc_radius, tsects)? {
+                return Err(sm_err());
+            }
+            (ref_frame, start_ang)
         };
-        if blend_section && !centre_line_on_axis(k, s, &ref_frame, arc_radius, tsects)? {
-            return Err(sm_err());
-        }
 
         // select new fillet surface storage spot
         let fillet_geom = match fillet_geom {

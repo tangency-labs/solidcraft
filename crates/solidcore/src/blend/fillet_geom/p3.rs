@@ -54,6 +54,10 @@
 //! - **Analytic fillets.** `CalcConeFilletGeom` / `CalcTorusFilletGeom`
 //!   (`blend.fillet_solver_p2`) read copies of the sorted vertex uses' points
 //!   (`SmTArray<SmTsectPnt*>` upstream; the builders only read them).
+//!   With `fixes.fillet_exact_round_classes` (WR-669, the SolidCraft fork's
+//!   tangency-labs/smlib@b5f2867 and 7ac037e) they are `ClassifyExactBlend` and
+//!   `CalcExactFilletGeom(.., TRUE)` instead (`blend::fillet_exact`), with errors passed on,
+//!   and only when there are points.
 //! - **Unported callees.** `SmFilletEdge::CalcCrossSection` (`blend.fillet_geom_p5`)
 //!   after the intersection reads only the recalculated geometry's own solver; a
 //!   neighbour's is a port invariant (`SolidError::PortInvariant`; plan/findings
@@ -1155,7 +1159,37 @@ impl FilletBrep {
         } // end loop on both main rails, sorting SmTsectPnts
 
         let mut fillet_created = false;
-        if is_analytic_fillet && geom_type != FilletGeomType::TangentRollover {
+        let exact_classes = k.fixes.fillet_exact_round_classes;
+        if exact_classes
+            && is_analytic_fillet
+            && geom_type != FilletGeomType::TangentRollover
+            && !tsect_pnts.is_empty()
+        {
+            // Not upstream (WR-669, the SolidCraft fork's tangency-labs/smlib@b5f2867 and
+            // 7ac037e): rebuilt exactly by the round's class (`ClassifyExactBlend`,
+            // `CalcExactFilletGeom(.., this, TRUE)`); errors are passed on
+            let tsects = tsect_pnts
+                .iter()
+                .map(|&vu| Ok(self.fillet_vertexuse(vu)?.tsect_pnt().clone()))
+                .collect::<Result<Vec<TsectPnt>>>()?;
+            let first = tsects
+                .first()
+                .ok_or_else(|| invalid(OP_RECALC, "no rail-end point"))?;
+            let blend = crate::blend::fillet_exact::classify_exact_blend(solver, k, target, first)?;
+            fillet_created = crate::blend::fillet_exact::calc_exact_fillet_geom(
+                solver,
+                k,
+                target,
+                self,
+                &blend,
+                &tsects,
+                Some(g),
+                true,
+            )?;
+        } else if !exact_classes
+            && is_analytic_fillet
+            && geom_type != FilletGeomType::TangentRollover
+        {
             // Create analytics (the solver reads copies of the vertex uses' points)
             let tsects = tsect_pnts
                 .iter()

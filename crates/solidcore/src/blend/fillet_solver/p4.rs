@@ -70,6 +70,10 @@
 //! - **Iteration.** No recursion. Loops are bounded: two surfaces, two rails of two
 //!   edge uses, the G1 knots and points, ten trace passes, twenty cusp skips, three
 //!   drop tolerances.
+//! - **Exact round classes (WR-669, #2085).** With `fixes.fillet_exact_round_classes`, the
+//!   try-chain (`c3_try_analytic`) is replaced by the SolidCraft fork's classification
+//!   (tangency-labs/smlib@b5f2867, 7ac037e): `ClassifyExactBlend` and
+//!   `CalcExactFilletGeom` (`blend::fillet_exact`), whose failures are errors.
 
 use super::p1::{FilletSolver, FilletSolverOps};
 use super::p2::SolverErrorObject;
@@ -457,8 +461,13 @@ impl FilletSolver {
         // :1872-1920 no points; drop near-duplicate end points
         c2_clean_ends(ops, &mut cx, &mut st)?;
 
-        // :1955-2011 analytic fillet
-        if c3_try_analytic(ops, &mut cx, &mut st)? {
+        // :1955-2011 analytic fillet (WR-669, opt-in: the round's exact class instead)
+        let exact = if cx.k.fixes.fillet_exact_round_classes {
+            c3_exact_by_class(ops, &mut cx, &mut st)?
+        } else {
+            c3_try_analytic(ops, &mut cx, &mut st)?
+        };
+        if exact {
             return Ok(());
         }
 
@@ -1914,6 +1923,31 @@ fn c3_try_analytic(
         Err(e) if e.is_unported() => Err(e),
         Err(_) => Ok(false),
     }
+}
+
+/// Not upstream (WR-669, the SolidCraft fork's tangency-labs/smlib@b5f2867 and 7ac037e,
+/// opt-in `fixes.fillet_exact_round_classes`): in place of the try-chain, the round's exact
+/// class from its faces' kinds and placement at the first point
+/// (`ClassifyExactBlend(*sTsectPnts[0])`), and its exact surface by that class
+/// (`CalcExactFilletGeom(.., NULL, FALSE)`); a round of no exact class is traced. Every
+/// failure is an error, not a fall-through to the trace.
+fn c3_exact_by_class(
+    ops: &mut dyn FilletSolverOps,
+    cx: &mut Cx<'_>,
+    st: &mut CalcState,
+) -> Result<bool> {
+    use crate::blend::fillet_exact::{calc_exact_fillet_geom, classify_exact_blend};
+    if st.tsect_pnts.is_empty() {
+        return Ok(false);
+    }
+    let tsects = st.store.snapshot(cx.fillets, &st.tsect_pnts)?;
+    let Some(first) = tsects.first() else {
+        return Ok(false);
+    };
+    let blend = classify_exact_blend(ops, cx.k, cx.target, first)?;
+    calc_exact_fillet_geom(
+        ops, cx.k, cx.target, cx.fillets, &blend, &tsects, None, false,
+    )
 }
 
 /// :1960-1977: `SM_CAST_PTR(SmBSplineSurface, pBaseSrf)`, else (another level of
