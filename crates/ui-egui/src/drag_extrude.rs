@@ -148,11 +148,17 @@ pub fn to(app: &mut SolveApp, proj: &Proj, p: Pos2) {
     let travelled = v - g.grab;
     let travelled = if free { travelled } else { (travelled / g.step).round() * g.step };
     app.viewport.drag_extrude.last_step = Some(g.step);
+    let step = g.step;
     app.viewport.drag_extrude.gesture = Some(g);
     let Some(Kind::Extrude { distance, direction, .. }) = app.dialog.as_mut().map(|d| &mut d.kind) else { return };
     // A reversed extrude measures its distance against the normal.
     let sign = if matches!(*direction, 1 | crate::dialogs::TWO_SIDES_REVERSED) { -1.0 } else { 1.0 };
-    *distance = crate::canvas::format_len(&app.session.doc, travelled * sign);
+    let mm = travelled * sign;
+    *distance = if free {
+        crate::canvas::format_len(&app.session.doc, mm)
+    } else {
+        crate::canvas::format_len_drag(&app.session.doc, mm, step, app.preferences.length_decimals)
+    };
 }
 
 /// The button is up: the window stays open for the user to adjust and confirm.
