@@ -10,23 +10,23 @@ use solidcraft_doc::{IDENTITY, Mat, ModelBody, mat_inverse, mat_mul};
 use solidcraft_geom::{Aabb3, Mesh, Vec3};
 use solidcraft_kernel::{KernelError, map_with_local_pools};
 
-use super::{CMD, progress::Stage};
+use super::progress::Stage;
 use crate::params::bad;
 use crate::{Result, Session};
 
 #[cfg(not(target_arch = "wasm32"))]
-pub(super) const WORKERS: usize = 8;
+pub(crate) const WORKERS: usize = 8;
 #[cfg(target_arch = "wasm32")]
-pub(super) const WORKERS: usize = 1;
+pub(crate) const WORKERS: usize = 1;
 const MESH_BYTES: usize = 512 * 1024 * 1024;
 const MAX_BODIES: usize = 100_000;
 
-pub(super) struct Placement {
+pub(crate) struct Placement {
     pub mesh: usize,
     pub transform: Mat,
     pub visibility: Vec<bool>,
 }
-pub(super) struct Scene {
+pub(crate) struct Scene {
     pub meshes: Vec<Arc<Mesh>>,
     pub placements: Vec<Placement>,
     pub triangles: usize,
@@ -89,7 +89,9 @@ fn rigid(m: &Mat) -> bool {
         && (x.cross(y).dot(z) - 1.).abs() < 1e-9
 }
 
-pub(super) fn prepare(s: &Session, tolerance: f64) -> Result<Scene> {
+/// The export meshes of the bodies `shown` keeps, at the chord `tolerance`. Errors name the
+/// command `cmd`.
+pub(crate) fn prepare(s: &Session, cmd: &str, tolerance: f64, shown: impl Fn(&ModelBody) -> bool) -> Result<Scene> {
     let world = s.world_state();
     let state = s.model.state();
     let mut definitions = BTreeMap::new();
@@ -99,9 +101,9 @@ pub(super) fn prepare(s: &Session, tolerance: f64) -> Result<Scene> {
     let mut by_definition = BTreeMap::new();
     let mut groups: Vec<Group> = Vec::new();
     let mut items = Vec::new();
-    for (index, body) in world.bodies.iter().enumerate().filter(|(_, b)| s.body_visible(&b.name)) {
+    for (index, body) in world.bodies.iter().enumerate().filter(|(_, b)| shown(b)) {
         if items.len() >= MAX_BODIES {
-            return Err(bad(CMD, "too many placed bodies to export"));
+            return Err(bad(cmd, "too many placed bodies to export"));
         }
         let key = (body.component, body.definition_name(), body.feature);
         let unambiguous = definitions.get(&key) == Some(&1);
@@ -161,12 +163,12 @@ pub(super) fn prepare(s: &Session, tolerance: f64) -> Result<Scene> {
             *slot = Some(mesh);
         }
     }
-    let meshes = meshes.into_iter().map(|m| m.ok_or_else(|| bad(CMD, "missing export geometry"))).collect::<Result<Vec<_>>>()?;
+    let meshes = meshes.into_iter().map(|m| m.ok_or_else(|| bad(cmd, "missing export geometry"))).collect::<Result<Vec<_>>>()?;
     let mut placements = Vec::with_capacity(items.len());
     let mut triangles = 0usize;
     for (item, p) in items.iter().zip(prepared) {
         if meshes.get(item.group).is_none_or(|m| m.edges.len() != p.visibility.len()) {
-            return Err(bad(CMD, "placed edge identity changed"));
+            return Err(bad(cmd, "placed edge identity changed"));
         }
         triangles = triangles.saturating_add(p.triangles);
         placements.push(Placement { mesh: item.group, transform: item.transform, visibility: p.visibility });

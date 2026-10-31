@@ -6,19 +6,12 @@
 use solidcraft_geom::{Plane, Vec3};
 use solidcraft_sketch::Sketch;
 
-use super::progress::Stage;
 use crate::Session;
+use crate::mesh_lines::{Part, Stage};
 use crate::view::{sketch_curve_visible, sketch_shown};
 
 /// Sampled sketch points kept for one export, at most.
 const MAX_POINTS: usize = 4_000_000;
-
-/// One connected run of a sketch curve in world coordinates.
-pub(super) struct Part {
-    pub points: Vec<Vec3>,
-    /// Drawn over the bodies (the sketch being edited) rather than hidden behind them.
-    pub on_top: bool,
-}
 
 fn profile_curve(sk: &Sketch, i: usize) -> bool {
     sketch_curve_visible(sk, i) && sk.curves.get(i).is_some_and(|c| !c.construction && !c.centerline && (c.link.is_none() || sk.is_text_curve(i)))
