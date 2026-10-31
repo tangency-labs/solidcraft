@@ -359,16 +359,16 @@ mod tests {
             .iter()
             .filter_map(|i| match i {
                 Item::Stroke { path, closed, width_mm } => Some((path.len(), *closed, *width_mm)),
-                Item::Fill { .. } => None,
+                Item::Fill { .. } | Item::Text(_) => None,
             })
             .collect();
         assert_eq!(strokes, [(2, false, 0.5), (1, true, 0.5), (3, true, 0.5), (1, false, 0.5)]);
         let chord = group.items.last().and_then(|i| match i {
             Item::Stroke { path, .. } => path.first().copied(),
-            Item::Fill { .. } => None,
+            Item::Fill { .. } | Item::Text(_) => None,
         });
         assert!(matches!(chord, Some(Seg2::Line { .. })), "{chord:?}");
-        let scene = solidcraft_geom::paper::Scene { size_mm: Vec2::new(420.0, 297.0), groups: vec![group] };
+        let scene = solidcraft_geom::paper::Scene::new(Vec2::new(420.0, 297.0), vec![group]);
         assert!(scene.validate().is_ok());
     }
 
@@ -377,7 +377,7 @@ mod tests {
     fn a_group_past_the_scenes_records_is_refused_by_its_check() {
         let one = |i: usize| piece(Visibility::Visible, vec![Seg2::Line { a: Vec2::new(i as f64 * 1e-3, 0.0), b: Vec2::new(i as f64 * 1e-3, 1.0) }]);
         let lines = lines_of((0..MAX_RECORDS).map(one).collect());
-        let scene = solidcraft_geom::paper::Scene { size_mm: Vec2::new(420.0, 297.0), groups: vec![paper_group(&lines, 0)] };
+        let scene = solidcraft_geom::paper::Scene::new(Vec2::new(420.0, 297.0), vec![paper_group(&lines, 0)]);
         assert!(scene.validate().is_err());
     }
 

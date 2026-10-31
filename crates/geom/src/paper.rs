@@ -1,7 +1,7 @@
-//! The paper scene: what a sheet shows, as strokes and fills in sheet millimetres, for the writers
-//! that put it in a file (DXF, SVG, PNG, PDF). Plain data with one check, [`Scene::validate`]:
-//! nothing here is saved, drawn on screen or made by a command yet. Text, clips, line patterns and
-//! styles are later additions.
+//! The paper scene: what a sheet shows, as strokes, fills and text in sheet millimetres, for the
+//! writers that put it in a file (DXF, SVG, PNG, PDF). Plain data with one check,
+//! [`Scene::validate`]. Text is runs of placed glyphs with the table of the fonts they use
+//! ([`text`]). Clips, line patterns and styles are later additions.
 //!
 //! - Coordinates are millimetres from the sheet's lower-left corner, x to the right and y up;
 //!   angles are radians, anticlockwise. A line's width is its width on paper, centred on its path.
@@ -23,7 +23,8 @@
 //!   within ±2e5 mm;
 //! - a stroke's pieces meeting end to start within [`EPS`], and its ends too when it is closed;
 //!   every loop of a fill closed the same way;
-//! - a line width above 0 and at most [`MAX_LINE_MM`].
+//! - a line width above 0 and at most [`MAX_LINE_MM`];
+//! - the text and its fonts by [`text`]'s rules.
 //!
 //! It does not certify simple loops, holes inside their outer loop or a path that never doubles
 //! back. Validation after parsing cannot bound parsing allocations: an encoded-input boundary must
@@ -39,6 +40,9 @@ use std::f64::consts::FRAC_PI_2;
 use crate::{EPS, Region2, Seg2, Vec2};
 
 pub mod annotate;
+pub mod text;
+
+use text::{Font, TextRun};
 
 /// The widest line a scene may draw, in millimetres.
 pub const MAX_LINE_MM: f64 = 10.0;
@@ -56,6 +60,9 @@ pub struct Scene {
     /// The sheet's width and height.
     pub size_mm: Vec2,
     pub groups: Vec<Group>,
+    /// The fonts the text uses, by id ([`text`]): none, and not written, without text.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub fonts: Vec<Font>,
 }
 
 /// Items one object on the sheet drew, painted in order.
@@ -76,6 +83,7 @@ impl Group {
         let item = |item: &Item| match item {
             Item::Stroke { path, .. } => path.len(),
             Item::Fill { region } => region.loops().fold(0usize, |n, l| n.saturating_add(1).saturating_add(l.segs.len())),
+            Item::Text(run) => run.records(),
         };
         self.items.iter().fold(1usize, |n, i| n.saturating_add(1).saturating_add(item(i)))
     }
@@ -124,6 +132,8 @@ pub enum Item {
     Stroke { path: Vec<Seg2>, closed: bool, width_mm: f64 },
     /// A region painted solid.
     Fill { region: Region2 },
+    /// A run of text, filled with its glyphs' outlines.
+    Text(TextRun),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
@@ -169,6 +179,12 @@ impl<'a> Prepared<'a> {
     pub fn groups(&self) -> &'a [Group] {
         &self.scene.groups
     }
+
+    /// The font a run names: there, as the scene was checked.
+    pub fn font(&self, run: &TextRun) -> Option<&'a Font> {
+        let fonts = &self.scene.fonts;
+        fonts.binary_search_by_key(&run.font, |f| f.id).ok().and_then(|at| fonts.get(at))
+    }
 }
 
 /// The ends of the pieces of at most a quarter turn the arc of `sweep` radians from `start`
@@ -186,6 +202,11 @@ pub fn arc_pieces(center: Vec2, radius: f64, start: f64, sweep: f64) -> impl Ite
 }
 
 impl Scene {
+    /// A scene of `groups` on a sheet `size_mm`, with no text yet.
+    pub fn new(size_mm: Vec2, groups: Vec<Group>) -> Scene {
+        Scene { size_mm, groups, fonts: Vec::new() }
+    }
+
     /// The scene, checked ([`Scene::validate`]), for the writers.
     pub fn prepare(&self) -> Result<Prepared<'_>> {
         self.validate()?;
@@ -217,9 +238,14 @@ impl Scene {
                         require(l.is_closed(EPS), "each loop of a fill is closed")?;
                     }
                 }
+                Item::Text(_) => {}
             }
         }
-        Ok(())
+        let runs = self.groups.iter().flat_map(|g| &g.items).filter_map(|item| match item {
+            Item::Text(run) => Some(run),
+            _ => None,
+        });
+        text::check(&self.fonts, runs, &mut budget)
     }
 }
 

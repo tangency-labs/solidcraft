@@ -45,14 +45,23 @@ pub struct FontData {
 #[derive(Clone)]
 enum FontBytes {
     Builtin,
-    File(Arc<Vec<u8>>),
+    /// The file read, and its bytes.
+    File(PathBuf, Arc<Vec<u8>>),
 }
 
 impl FontData {
     pub fn bytes(&self) -> &[u8] {
         match &self.bytes {
             FontBytes::Builtin => DEFAULT_FONT,
-            FontBytes::File(b) => b.as_slice(),
+            FontBytes::File(_, b) => b.as_slice(),
+        }
+    }
+
+    /// The file the face was read from; None for the built-in font.
+    pub fn path(&self) -> Option<&Path> {
+        match &self.bytes {
+            FontBytes::Builtin => None,
+            FontBytes::File(path, _) => Some(path),
         }
     }
 }
@@ -78,7 +87,7 @@ pub fn font_data(name: Option<&str>) -> Result<FontData> {
         let index = 0;
         ttf_parser::Face::parse(&bytes, index)
             .map_err(|e| SketchError::Invalid(format!("font file `{name}` is not a TrueType/OpenType font: {e}")))?;
-        return Ok(FontData { bytes: FontBytes::File(bytes), index, weight: None });
+        return Ok(FontData { bytes: FontBytes::File(path, bytes), index, weight: None });
     }
     find_family_in(&font_dirs(), name)?
         .ok_or_else(|| SketchError::Invalid(format!("unknown font `{name}`: not an installed font family, and not a .ttf/.otf file path")))
@@ -164,7 +173,7 @@ pub fn find_style_in(dirs: &[PathBuf], name: &str, bold: bool, italic: bool) -> 
         }
         if let Some((_, path, index, face_bold, face_italic)) = best {
             let bytes = read_font(&path).map_err(|e| SketchError::Invalid(format!("font file `{}`: {e}", path.display())))?;
-            return Ok(Some((FontData { bytes: FontBytes::File(bytes), index, weight: None }, face_bold, face_italic)));
+            return Ok(Some((FontData { bytes: FontBytes::File(path, bytes), index, weight: None }, face_bold, face_italic)));
         }
     }
     Ok(None)
@@ -330,8 +339,20 @@ fn face_names(path: &Path) -> Arc<Vec<FaceNames>> {
 }
 
 /// Lower-case letters and digits only: "DejaVu_Sans", "Dejavu Sans" and "dejavu-sans" are one name.
-fn normalize(s: &str) -> String {
+pub(crate) fn normalize(s: &str) -> String {
     s.chars().filter(|c| c.is_alphanumeric()).flat_map(char::to_lowercase).collect()
+}
+
+/// `name` as a font family: empty (the built-in font) or a family's name, never a file. Drawings
+/// name fonts by family, so they travel: the same name finds the font on another computer.
+pub fn check_family(name: &str) -> Result<()> {
+    if name.len() > MAX_FONT_NAME || name.chars().any(char::is_control) {
+        return Err(SketchError::Invalid("a font family's name is at most 1024 bytes on one line".into()));
+    }
+    if is_path(name.trim()) {
+        return Err(SketchError::Invalid(format!("`{name}` is a file: drawings name fonts by family, so they travel")));
+    }
+    Ok(())
 }
 
 fn is_path(name: &str) -> bool {
