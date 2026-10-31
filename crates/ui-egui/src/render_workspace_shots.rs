@@ -45,6 +45,8 @@ pub(crate) fn contents(app: &mut SolveApp, ui: &mut egui::Ui) {
             )
         })
         .unwrap_or_else(|| app.tr("render.shots_no_result").to_string());
+    let queue = app.session.render_queue_state();
+    let queue_label = crate::i18n::format("render.batch_status", &[("running", &queue.running.to_string()), ("waiting", &queue.waiting.to_string())]);
     let (mut hide, mut start, mut save, mut chosen, mut size) = (false, false, false, None, None);
     let mut visible = Vec::new();
     ui_kit::Panel::strip_contents(
@@ -53,6 +55,8 @@ pub(crate) fn contents(app: &mut SolveApp, ui: &mut egui::Ui) {
             let response = ui_kit::strip_toggle(ui, true, crate::i18n::tr_label("Hide Shots strip"));
             crate::scenario::publish_target("render:shots:hide", response.rect);
             hide = response.clicked();
+            let response = ui_kit::completion_text(ui, &queue_label, false);
+            crate::scenario::publish_rect("render:shots:queue", response.rect);
             let response = ui_kit::icon_label_action(ui, app.tr("cmd.render_start"), Some("play"), ready.is_ok(), true);
             let response = if let Err(reason) = &ready { response.on_disabled_hover_text(reason) } else { response };
             crate::scenario::publish_target("render:shots:render", response.rect);

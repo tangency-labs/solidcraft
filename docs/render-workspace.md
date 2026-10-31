@@ -14,6 +14,35 @@ The current integrated GPU renderer shows a separate product scene. Return to De
 restores its camera, projection preference and existing viewport drawing policy.
 The live product preview remains independent of the selected image method.
 
+## Retained comparisons and all-shot rendering
+
+The result viewer retains up to eight completed images per document tab, outside
+the design and undo history. `render.compare {left, right}` accepts `"live"` or a
+zero-based retained-result index (oldest first); the sides must differ. It resolves
+indices to job identities so later index shifts cannot retarget an open comparison.
+`render.compare {off:true}` leaves comparison. The shared segments toggle the two
+sources, Swap exchanges them, and the shared divider stays within 5–95%. Both sides
+share image pan/zoom; the live product uses the captured camera and current design.
+Dragging the divider cannot navigate either camera. Copy, export and regrade use
+the compared result on the right (or the left when the right is Live). That selection
+remains stable while new results arrive; evicting a source ends its comparison.
+
+The Output footer's **All shots (n)** runs `render.batch`. The command snapshots up
+to 32 saved shot cameras and names and uses one common image setup. The UI supplies
+the current draft as `request` (the existing `render.start` parameters); a headless
+`render.batch {}` uses the first saved setup in name order. Each queued shot keeps its
+own captured camera while all other options remain the same. Each admission runs
+through `render.start`, one job at a time. No shots, an active render/queue or stale
+geometry refuses without editing the design or history.
+
+`render.status {}` advances an explicitly started queue and returns
+`{queue:{running,waiting,job,shot,error}}`; a status call with a job also includes
+that queue metadata. The UI ticks advance queues in active and background tabs.
+`render.cancel {}` cancels the active batch job and drops all waiting shots; an
+explicit job ID retains the single-job cancellation API. Opening a stage, editor
+or queue readout never starts a batch. The Shots strip reports running and waiting
+counts, and completed shots enter the same retained-result list.
+
 ## Stage bar and floating docks
 
 Render has no ribbon. A shared 88 pt two-row stage bar sits 8 pt to the right of
@@ -544,8 +573,10 @@ The stage bar's Check chip and Output's note count open Check. Check now runs th
 read-only `render.preflight` without admitting a job. Notes offer links to their
 owning editor. Copy report and diagnostic JSON use `render.preflight.copy` and the
 platform clipboard queue; headless calls only validate and echo bounded text.
-Named quality presets, EXR export and rendering all shots remain faded with their
-existing reasons. Destination selection uses the completed-image export picker.
+Named quality presets and EXR export remain faded with their existing reasons.
+Destination selection uses the completed-image export picker. The pinned Render
+Image / All shots footer starts the active setup or queues all saved shots through
+`render.batch`; opening the editor never starts a job.
 
 Render and Cancel stay in the stage bar. Active jobs also show a single-row progress
 pill with Cancel. The result viewer retains Copy, export, close, Fit/100% and shared

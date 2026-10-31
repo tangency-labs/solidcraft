@@ -68,7 +68,7 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("render.optics.unbind","Remove Optical Binding",optical_bindings::unbind).icon("appearance").doc_only()
         .params("name: saved setup; target: exact saved definition/feature/component/occurrence_path; expected_revision. Removes only that optical assignment in one undo without a device or file access."),
     CommandSpec::new("render.result.regrade", "Regrade Linear Master", jobs::regrade).icon("render_image").noundo().doc_only()
-        .params("job: exact completed JobId; presentation: {exposure_ev?,tone_map?,finishing?,backdrop?,background?,transparent_background?}. Queues cancellable nondestructive PNG presentation from that retained native FLOAT32 master, not from PNG. Captured geometry/camera/lighting and source EXR remain unchanged; no path tracing, denoising, external EXR import or automatic file writes. Returns a distinct job with source identity and original-master digest. Existing frame retention and export rules still apply."),
+        .params("job?: exact completed JobId (default selected result); presentation: {exposure_ev?,tone_map?,finishing?,backdrop?,background?,transparent_background?}. Queues cancellable nondestructive PNG presentation from that retained native FLOAT32 master, not from PNG. Captured geometry/camera/lighting and source EXR remain unchanged; no path tracing, denoising, external EXR import or automatic file writes. Returns a distinct job with source identity and original-master digest. Existing frame retention and export rules still apply."),
     CommandSpec::new("render.camera.set", "Set Render Camera", set_camera).icon("camera").noundo().doc_only()
         .params("camera: complete Render Camera snapshot (target, yaw, pitch, distance, fov; roll defaults to 0 and up to z). Validates the same finite mm/radian bounds as saved render intent, preserves explicit roll/up and changes only transient view state. No model evaluation, setup save, renderer, dirty flag or undo step. Design view.apply retains its separate up-axis policy."),
     CommandSpec::new("render.camera.get", "Inspect Render Camera", get_camera).icon("camera").noundo()
@@ -102,7 +102,7 @@ CommandSpec::new("render.library.surface.bind", "Save Surface Binding", surface_
 CommandSpec::new("render.library.surface.unbind", "Remove Surface Binding", surface_bindings::unbind).icon("appearance").doc_only()
     .params("name: setup, target: saved definition/feature/component/occurrence_path, set?: setup patch. Removes only that explicit binding in one undo; no device or current geometry required."),
     CommandSpec::new("render.result.pin", "Retain Displayed Render Result", jobs::pin).icon("inspect").noundo().doc_only()
-        .params("job: completed JobId, or null to release the displayed-result pin. Retains at most one completed result independently of a newer completion; preserves exact export bytes and original host memory accounting. No design/undo change; preview or foreign jobs refuse."),
+        .params("job?: completed JobId (default selected result), or null to clear selection. Selects within the eight retained completed results; oldest is evicted first. Preserves exact export bytes and original host memory accounting. No design/undo change; preview or foreign jobs refuse."),
 CommandSpec::new("render.library.targets", "Find Render Library Targets", library::targets).icon("list").noundo()
     .params("query?: exact-name substring; offset?:0; limit?:128 (1..128). Returns a bounded page of captured body ordinals/names, revision and scene bounds. Settles the model through ordinary command handling; never returns a large mesh payload."),
 CommandSpec::new("render.library.list", "Browse Render Library", library::list).icon("list").noundo().doc_only()
@@ -128,13 +128,13 @@ CommandSpec::new("render.preflight", "Check Render Request", jobs::preflight).ic
 CommandSpec::new("render.start", "Render Image", jobs::start).key("R").noundo().doc_only().at("RENDER", "IMAGE").icon("render_image")
     .params("Same request as render.preflight. Captures an immutable product scene and queues a bounded image job. Returns its session-scoped job identity, captured scene_generation and progress. Does not change the design. See docs/render-jobs.md"),
 CommandSpec::new("render.status", "Render Progress", jobs::status).icon("list").noundo().doc_only()
-    .params("job: {session, serial, generation}. Non-blocking progress, error, optional CPU preview metadata {frame_sequence,samples_per_pixel,frame}, and completed frame metadata, optional sampling allocation/work counts and retained-master presentation provenance; no image bytes and no rendering in this call. Preview is separate from the exportable final image."),
+    .params("job?: {session, serial, generation}. Non-blocking progress, errors and captured frame metadata with queue:{running,waiting,job,shot,error}. Without job returns queue only. Advances an explicitly started render.batch through render.start as jobs finish; never pumps render work. Preview is separate from the exportable final image."),
 CommandSpec::new("render.cancel", "Cancel Render", jobs::cancel).icon("delete").noundo().doc_only()
-    .params("job: {session, serial, generation}. Requests cooperative cancellation; completed jobs remain completed. Late cancelled frames cannot be published."),
+    .params("job?: {session, serial, generation}, default the active render.batch job. Requests cooperative cancellation and drops its waiting shots; completed jobs remain completed. Late cancelled frames cannot be published."),
 CommandSpec::new("render.result.copy", "Copy Render Image", jobs::copy).icon("copy").noundo().doc_only()
-    .params("job: completed JobId. Validates the retained PNG for app clipboard copying (max 4096 per side, 4194304 pixels); headless returns frame metadata only. Never copies a provisional image or starts a job."),
+    .params("job?: completed JobId (default selected result). Validates the retained PNG for app clipboard copying (max 4096 per side, 4194304 pixels); headless returns frame metadata only. Never copies a provisional image or starts a job."),
 CommandSpec::new("render.export", "Export Render Image", jobs::export).icon("export").noundo().doc_only()
-    .params("job: {session, serial, generation}, path: destination matching format?: png (default) or exr, overwrite?: false. EXR requires an opt-in raw linear master retained by that completed GPU job; never converts PNG pixels. Exports a retained completed image atomically; an existing destination is preserved on failure. See docs/render-jobs.md"),
+    .params("job?: {session, serial, generation} (default selected result), path: destination matching format?: png (default) or exr, overwrite?: false. EXR requires an opt-in raw linear master retained by that completed GPU job; never converts PNG pixels. Exports a retained completed image atomically; an existing destination is preserved on failure. See docs/render-jobs.md"),
 CommandSpec::new("render.backends", "Render Backends", backends).icon("list")
     .noundo()
     .doc_only()

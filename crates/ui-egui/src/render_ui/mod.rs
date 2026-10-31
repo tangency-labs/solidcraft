@@ -198,6 +198,15 @@ pub(crate) fn overlays(app: &mut SolveApp, ui: &mut egui::Ui) {
     crate::render_workspace::assign::selection_bar(app, ui, free);
     crate::render_workspace::assign::replacement_dialog(app, ui.ctx());
     crate::navigation_bar_view::show(app, ui, viewport);
+    crate::shell::register_panel(app, "render:compare-controls", None, None);
+    if !crate::render_workspace::result_active(app) && app.session.render_selected_result().is_some() {
+        let free = if crate::render_workspace::job_busy(app) { Container::below_navigation_row(free) } else { free };
+        let card =
+            Container::navigation_card(ui.ctx(), egui::Id::new("sc_render_compare_controls"), free.center_top(), egui::Align2::CENTER_TOP, |ui| {
+                crate::render_workspace::comparison_controls(app, ui)
+            });
+        crate::shell::register_panel(app, "render:compare-controls", Some(card.response.rect), None);
+    }
     if !focused(app) {
         shots_pill(app, ui, free);
     }

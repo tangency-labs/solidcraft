@@ -7,7 +7,10 @@ use solidcraft_engine::render::job::Phase;
 use solidcraft_engine::{CommandInfo, CommandSpec};
 
 fn is_job_action(id: &str) -> bool {
-    matches!(id, "render.preflight" | "render.start" | "render.cancel" | "render.export" | "render.result.regrade" | "render.result.copy")
+    matches!(
+        id,
+        "render.preflight" | "render.start" | "render.batch" | "render.cancel" | "render.export" | "render.result.regrade" | "render.result.copy"
+    )
 }
 fn handled(id: &str) -> bool {
     is_job_action(id)
@@ -47,10 +50,15 @@ fn handled(id: &str) -> bool {
                 | "render.backends"
                 | "render.result.view"
                 | "render.result.close"
+                | "render.compare"
         )
 }
 
 pub(super) fn busy(app: &SolveApp) -> bool {
+    let queue = app.session.render_queue_state();
+    if queue.running != 0 || queue.waiting != 0 {
+        return true;
+    }
     app.render_workspace
         .view
         .job
@@ -66,6 +74,19 @@ pub(super) fn action_ready(app: &SolveApp, id: &str) -> Result<(), String> {
         return Err(app.tr("render.ribbon_finish_dialog").into());
     }
     match id {
+        "render.batch" => {
+            if app.session.doc.render.setups.is_empty() {
+                return Err(app.tr("render.batch_empty").into());
+            }
+            if app.session.doc.render.setups.len() > 32 {
+                return Err(app.tr("render.batch_limit").into());
+            }
+            if busy(app) {
+                return Err(app.tr("render.ribbon_job_active").into());
+            }
+            super::image_params(app).map(|_| ())
+        }
+        "render.compare" if app.render_workspace.view.retained.is_empty() => Err(app.tr("render.ribbon_no_result").into()),
         "render.preflight" | "render.start" => {
             if id == "render.start" && busy(app) {
                 return Err(app.tr("render.ribbon_job_active").into());
@@ -128,6 +149,10 @@ pub(super) fn command_info(app: &SolveApp, command: &CommandSpec) -> CommandInfo
 pub(super) fn perform_job(app: &mut SolveApp, id: &str) -> Result<(), String> {
     action_ready(app, id)?;
     match id {
+        "render.batch" => {
+            let request = super::image_params(app)?;
+            app.run(id, json!({"request":request}))?;
+        }
         "render.preflight" => {
             let request = super::image_params(app)?;
             let reply = match app.run(id, request.clone()) {
@@ -161,7 +186,12 @@ pub(super) fn perform_job(app: &mut SolveApp, id: &str) -> Result<(), String> {
             app.render_workspace.view.job = Some(job);
         }
         "render.cancel" => {
-            let job = app.render_workspace.view.job.ok_or_else(|| app.tr("render.ribbon_no_active_job").to_string())?;
+            let job = app
+                .session
+                .render_queue_state()
+                .job
+                .or(app.render_workspace.view.job)
+                .ok_or_else(|| app.tr("render.ribbon_no_active_job").to_string())?;
             app.run(id, json!({"job":job}))?;
         }
         "render.export" => {
@@ -238,6 +268,7 @@ fn navigate(app: &mut SolveApp, id: &str) -> Result<(), String> {
             focus(app, Page::Appearance, None);
             inspector::reveal(app, "render:appearance:advanced");
         }
+        "render.compare" => super::compare::start_default(app)?,
         "render.result.close" => {
             app.run(id, json!({}))?;
         }

@@ -7,6 +7,7 @@ mod assistant_entry;
 mod checks;
 mod choice;
 mod color;
+mod compare;
 mod confirm;
 pub mod container;
 mod disclosure;
@@ -55,6 +56,7 @@ pub(crate) use checks::tests::{raster as test_raster, textures_update as test_te
 pub(crate) use checks::*;
 pub(crate) use choice::*;
 pub(crate) use color::*;
+pub(crate) use compare::*;
 pub(crate) use confirm::{Confirm, Tone};
 pub use container::{Container, DockEdges, Edge, Surface};
 pub(crate) use disclosure::*;
