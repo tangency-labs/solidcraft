@@ -568,6 +568,61 @@ fn value_boxes_stay_in_view_and_off_the_cursor() {
     assert!(tiny.contains_rect(egui::Rect::from_min_size(in_view(egui::pos2(-200.0, -200.0), Some(tiny), Some(egui::pos2(40.0, 15.0))), BOX)));
 }
 
+#[test]
+fn polygon_inputs_clear_each_other_and_the_preview() {
+    for command in ["sketch.polygon.inscribed", "sketch.polygon.circumscribed"] {
+        for (view, corner) in [("top", false), ("iso", false), ("top", true)] {
+            let mut h = Harness::new();
+            h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+            h.call("ui.view", json!({"view":view}));
+            h.step(&json!({"start":command})).unwrap();
+            if corner {
+                let view = h.app.viewport.layout.as_ref().unwrap().drawable.shrink(20.0);
+                let center = view.left_top();
+                let end = center + egui::vec2(16.0, 0.0);
+                h.step(&json!({"click":[center.x,center.y]})).unwrap();
+                h.step(&json!({"move":[end.x,end.y],"alt":true})).unwrap();
+            } else {
+                h.step(&json!({"click":{"sketch":[0,0]}})).unwrap();
+                h.step(&json!({"move":{"sketch":[2,0]},"alt":true})).unwrap();
+            }
+            h.frames(3);
+            let boxes: Vec<_> = (0..2usize)
+                .map(|i| {
+                    h.ctx
+                        .memory(|m| m.area_rect(egui::Id::new(("sc_dim_area", i))))
+                        .unwrap_or_else(|| panic!("{command}, {view}, {corner:?}: input {i} missing"))
+                })
+                .collect();
+            assert!(!boxes[0].intersects(boxes[1]), "{command}: inputs overlap: {boxes:?}");
+            let tool = h.app.tool.as_ref().unwrap();
+            let end = crate::sketch_dims::shown(&h.app, tool, tool.hover.as_ref().unwrap());
+            let outline = crate::tools::polygon_outline(tool, end, 6.0).unwrap();
+            let state = h.app.session.world_state();
+            let plane = state.sketch(h.app.session.active_sketch.unwrap()).unwrap().plane;
+            let proj = crate::viewport::projection(&h.app, h.app.viewport.rect.unwrap());
+            let points: Vec<_> = outline.iter().map(|p| proj.to_screen(plane.to_world(*p)).unwrap()).collect();
+            let bounds = egui::Rect::from_points(&points);
+            for rect in boxes {
+                assert!(!rect.intersects(bounds), "{command}: input {rect:?} covers polygon {bounds:?}");
+                assert!(h.app.viewport.layout.as_ref().unwrap().drawable.contains_rect(rect));
+            }
+            assert_focus(&h, 0);
+            type_value(&mut h, "2");
+            tab(&mut h, false);
+            assert_focus(&h, 1);
+            type_value(&mut h, "6");
+            h.step(&json!({"key":"Enter"})).unwrap();
+            let state = h.app.session.world_state();
+            let sketch = state.sketch(h.app.session.active_sketch.unwrap()).unwrap();
+            assert_eq!(sketch.sketch.curves.iter().filter(|c| !c.construction).count(), 6);
+            assert_eq!(sketch.profiles.len(), 1);
+            let expected = if command == "sketch.polygon.inscribed" { 6.0 * 3f64.sqrt() } else { 8.0 * 3f64.sqrt() };
+            assert!((sketch.profiles[0].area - expected).abs() < 1e-6, "{command}: {}", sketch.profiles[0].area);
+        }
+    }
+}
+
 /// `name = expression` in a value box, as in the Dimension tool's: the shape takes the
 /// expression's size while it is typed and when placed, and the new parameter `name` drives its
 /// dimension (#7567).
