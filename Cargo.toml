@@ -28,6 +28,9 @@ solidcraft-space-mouse = { path = "crates/space-mouse" }
 solidcraft-mcp = { path = "crates/mcp" }
 solidcraft-derive = { path = "crates/derive" }
 solidcraft-3dx-client = { path = "crates/threedx-client" }
+solidcraft-collab-wire = { path = "crates/collab-wire" }
+# test tooling: a dev-dependency only (xtask/src/layers.rs)
+solidcraft-testkit = { path = "crates/testkit" }
 
 # foundation
 thiserror = "2"
@@ -42,6 +45,9 @@ schemars = "1.2"
 serde_path_to_error = "0.1"
 log = "0.4"
 sha2 = "0.10"
+# Deflate for the co-editing mesh codec, with an output limit against decompression bombs (MIT OR
+# Zlib OR Apache-2.0, pure Rust; already in the tree through flate2).
+miniz_oxide = "0.9"
 moxcms = { version = "0.8.1", default-features = false, features = ["extended_range"] }
 semver = "1"
 

@@ -45,6 +45,8 @@ pub const TABLE: &[(&str, Class)] = &[
     ("sketch", Class::Layer(1)),
     ("kernel", Class::Layer(1)),
     ("render", Class::Layer(1)),
+    // the co-editing wire: the mesh codec (pure, no I/O, builds for wasm)
+    ("collab-wire", Class::Layer(1)),
     ("doc", Class::Layer(2)),
     ("io", Class::Layer(3)),
     ("engine", Class::Layer(4)),
