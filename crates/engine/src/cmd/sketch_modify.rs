@@ -59,12 +59,12 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("trim")
         .key("T")
         .enabled(in_sketch)
-        .params(concat!("curve: id, at: [x,y] (the piece to remove: between the nearest intersections around it)", created_doc!())),
+        .params(concat!("curve: id, at: [x,y] (the piece to remove: between the nearest intersections around it). Cutting a piece off an offset's curve first breaks its offset association, as `sketch.offset.break` does (the curves released in `offset_released`)", created_doc!())),
     CommandSpec::new("sketch.trim.path", "Trim Along Path", trim_path)
         .icon("trim")
         .enabled(in_sketch)
         .params(concat!(
-            "points: [[x,y]…] (2…2000 positions: a path drawn across the sketch). Every piece the path crosses is removed as `sketch.trim` removes the piece at that crossing, in the order the path crosses them; a piece crossed again after it is gone is not trimmed twice; projected geometry, infinite lines, offset outputs and pieces trim refuses are passed over (why in `skipped`). dry_run?: bool (report without changing the design). One undo step → trimmed: [each trim's result], removed: [[[x,y]…]] (each removed piece as a polyline)",
+            "points: [[x,y]…] (2…2000 positions: a path drawn across the sketch). Every piece the path crosses is removed as `sketch.trim` removes the piece at that crossing, in the order the path crosses them; a piece crossed again after it is gone is not trimmed twice; projected geometry, infinite lines and pieces trim refuses are passed over (why in `skipped`); an offset's curve is cut as `sketch.trim` cuts it, its association broken. dry_run?: bool (report without changing the design). One undo step → trimmed: [each trim's result], removed: [[[x,y]…]] (each removed piece as a polyline)",
             created_doc!()
         )),
     CommandSpec::new("sketch.extend", "Extend", extend)
@@ -402,13 +402,40 @@ fn refuse_offset_ends(sk: &Sketch, ci: usize, what: &str, cmd: &str) -> Result<(
 fn trim(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.trim";
     let at = req_vec2(cmd, p, "at")?;
+    let sketch = sketch_store::target(s, p, cmd)?;
     let (out, info) = edit(s, p, cmd, false, |sk, doc| {
+        let released = match str_(p, "curve") {
+            Some(id) => release_for_trim(sk, doc, sketch, id, at, cmd)?,
+            None => None,
+        };
         let ci = curve_arg(sk, p, cmd)?;
-        let (out, _) = remove_piece(sk, ci, at, cmd)?;
+        let (mut out, _) = remove_piece(sk, ci, at, cmd)?;
+        if let Some(curves) = released {
+            out["offset_released"] = json!(curves);
+        }
         doc.prune_model_params();
         Ok(out)
     })?;
     Ok(json!({"result": out, "sketch": info}))
+}
+
+/// Trim cuts an offset's curve like any other (#9033). Its ends follow its source curves, so a
+/// cut end would be pulled straight back: where the trim takes a piece off it, the offset
+/// association is broken first, as Break Offset Association does, in the same undo step. An
+/// ordinary offset curve that nothing crosses is still removed whole, its association kept for
+/// the rest. The curves released, or `None` when nothing was broken.
+fn release_for_trim(sk: &mut Sketch, doc: &mut solidcraft_doc::Document, sketch: u64, id: &str, at: Vec2, cmd: &str) -> Result<Option<Vec<String>>> {
+    let Some(ci) = sk.curve_index(id) else { return Ok(None) };
+    if sk.is_linked_curve(ci) || sk.offset_distance(id).is_none() {
+        return Ok(None);
+    }
+    let ordinary = sk.offsets.iter().any(|o| o.topology.is_none() && o.outputs.iter().any(|x| x == id));
+    let analytic = sk.curves.get(ci).is_some_and(|c| !c.infinite && !c.kind.is_freeform());
+    let whole = ordinary && analytic && sk.shape(ci).is_some_and(|sh| bracket(sk, ci, sh.param(sh.project(at))).0.is_empty());
+    if whole {
+        return Ok(None);
+    }
+    Ok(Some(release_offset(sk, doc, sketch, id, cmd)?.unwrap_or_else(|| vec![id.to_string()])))
 }
 
 /// Remove the piece of curve `ci` around `at`: between the nearest intersections on either
@@ -523,13 +550,10 @@ fn next_crossing(sk: &Sketch, path: &[Vec2], after: (usize, f64)) -> Option<(usi
     None
 }
 
-/// Whether trim may change curve `ci` (what [`curve_arg`] accepts, and not an infinite line).
+/// Whether trim may change curve `ci`: not projected geometry or an infinite line. An offset's
+/// curve is cut once its association is broken ([`release_for_trim`]).
 fn curve_ok(sk: &Sketch, ci: usize) -> bool {
-    let Some(c) = sk.curves.get(ci) else { return false };
-    !c.infinite
-        && !sk.is_linked_curve(ci)
-        && !sk.freeform_offsets.iter().any(|offset| offset.output == c.id)
-        && !sk.offsets.iter().filter_map(|offset| offset.topology.as_ref()).any(|topology| topology.roles.iter().any(|role| role.output == c.id))
+    sk.curves.get(ci).is_some_and(|c| !c.infinite) && !sk.is_linked_curve(ci)
 }
 
 /// Where segment `a`–`b` crosses segment `c`–`d`: the parameter along `a`–`b` and the point.
@@ -560,6 +584,7 @@ fn trim_path(s: &mut Session, p: &Value) -> Result<Value> {
         out["dry_run"] = json!(true);
         return Ok(out);
     }
+    let sketch = sketch_store::target(s, p, cmd)?;
     let ((trimmed, removed, skipped), info) = edit(s, p, cmd, false, |sk, doc| {
         let mut trimmed: Vec<Value> = Vec::new();
         let mut removed: Vec<Value> = Vec::new();
@@ -570,13 +595,27 @@ fn trim_path(s: &mut Session, p: &Value) -> Result<Value> {
             after = (si, t);
             // A piece trim refuses (a closed spline crossed once) stays as it was.
             let before = sk.clone();
-            match remove_piece(sk, ci, q, cmd) {
+            let id = sk.curves.get(ci).map(|c| c.id.clone()).unwrap_or_default();
+            // Breaking an offset boundary's association may also freeze profiles that use it.
+            let doc_before = sk.offset_distance(&id).is_some().then(|| doc.clone());
+            let cut = release_for_trim(sk, doc, sketch, &id, q, cmd).and_then(|released| {
+                let ci = sk.curve_index(&id).ok_or_else(|| bad(cmd, format!("unknown curve `{id}`")))?;
+                let (mut out, gone) = remove_piece(sk, ci, q, cmd)?;
+                if let Some(curves) = released {
+                    out["offset_released"] = json!(curves);
+                }
+                Ok((out, gone))
+            });
+            match cut {
                 Ok((out, gone)) => {
                     trimmed.push(out);
                     removed.push(json!(gone.iter().map(|v| [v.x, v.y]).collect::<Vec<_>>()));
                 }
                 Err(e) => {
                     *sk = before;
+                    if let Some(saved) = doc_before {
+                        *doc = saved;
+                    }
                     let why = e.to_string().replace(&format!("{cmd}: "), "");
                     if !skipped.contains(&why) {
                         skipped.push(why);
@@ -2440,77 +2479,7 @@ fn break_offset(s: &mut Session, p: &Value) -> Result<Value> {
         if record.is_none() && !topology && !analytic {
             return Err(bad(cmd, "curve is not an offset output"));
         }
-        // A parameter edit may have changed the evaluated source without
-        // rewriting the stored fit points. Break must freeze the displayed,
-        // current dimensioned geometry, rather than its stale stored predecessor.
-        let rep = solve_current(sk, doc)?;
-        if !rep.keeps_orientation() {
-            return Err(bad(cmd, rep.failure(|_| "cannot break an offset with conflicting dimensions".into())));
-        }
-        sketch_store::checked(sk)?;
-        if let Some(association) = sk
-            .offsets
-            .iter()
-            .filter_map(|record| record.topology.as_ref())
-            .find(|record| record.id == output || record.roles.iter().any(|role| role.output == output))
-            .map(|record| record.id.clone())
-        {
-            freeze_offset_profiles(doc, sketch, sk, &association)?;
-        }
-        if let Some(curves) = sk.break_offset_topology(output)? {
-            return Ok((output.to_string(), Some(curves)));
-        }
-        let ordinary = sk.offsets.iter().position(|o| o.topology.is_none() && o.outputs.iter().any(|id| id == output));
-        if let Some(index) = ordinary {
-            let record = sk.offsets.remove(index);
-            let centres = record
-                .outputs
-                .iter()
-                .filter_map(|id| sk.curve_index(id).and_then(|i| sk.curves.get(i)))
-                .filter_map(|curve| match curve.kind {
-                    CurveKind::Circle { c, .. } | CurveKind::Arc { c, .. } => Some(c),
-                    _ => None,
-                })
-                .collect::<std::collections::BTreeSet<_>>();
-            for centre in centres {
-                let position = sk.point(centre).ok_or_else(|| bad(cmd, "missing offset centre"))?;
-                let detached = sk.add_point(position, None)?;
-                for curve in &mut sk.curves {
-                    if record.outputs.contains(&curve.id) {
-                        match &mut curve.kind {
-                            CurveKind::Circle { c, .. } | CurveKind::Arc { c, .. } if *c == centre => *c = detached,
-                            _ => {}
-                        }
-                    }
-                }
-            }
-            sk.constraints.retain(|c| !matches!(&c.kind, ConstraintKind::OffsetDistance { output, .. } if record.outputs.contains(output)));
-            for id in &record.outputs {
-                if let Some(curve) = sk.curve_index(id).and_then(|i| sk.curves.get(i)) {
-                    let points = curve.kind.point_ids();
-                    for i in points {
-                        if i != 0
-                            && sk.curves.iter().all(|c| !c.kind.uses(i) || record.outputs.contains(&c.id))
-                            && let Some(p) = sk.points.get_mut(i)
-                        {
-                            p.fixed = false;
-                        }
-                    }
-                }
-            }
-            return Ok((output.to_string(), Some(record.outputs)));
-        }
-        let record = record.ok_or_else(|| bad(cmd, "offset association changed while materializing its current geometry"))?;
-        sk.constraints.retain(|c| !matches!(&c.kind, ConstraintKind::OffsetDistance { output: id, .. } if id == output));
-        let ci = sk.curve_index(output).ok_or_else(|| bad(cmd, "missing offset output"))?;
-        let indices = sk.curves[ci].kind.point_ids();
-        sk.freeform_offsets.remove(record);
-        for i in indices {
-            if let Some(point) = sk.points.get_mut(i) {
-                point.fixed = false;
-            }
-        }
-        Ok((output.to_string(), None))
+        Ok((output.to_string(), release_offset(sk, doc, sketch, output, cmd)?))
     })?;
     s.doc_mut().prune_model_params();
     let mut response = json!({"curve":out.0,"sketch":info});
@@ -2518,6 +2487,84 @@ fn break_offset(s: &mut Session, p: &Value) -> Result<Value> {
         response["curves"] = json!(curves);
     }
     Ok(response)
+}
+
+/// Break the offset association that made `output` (of sketch `sketch`): its curves keep their
+/// current geometry and become ordinary curves. The curves released, or `None` for a free-form
+/// offset's one curve.
+fn release_offset(sk: &mut Sketch, doc: &mut solidcraft_doc::Document, sketch: u64, output: &str, cmd: &str) -> Result<Option<Vec<String>>> {
+    let record = sk.freeform_offsets.iter().position(|record| record.output == output);
+    // A parameter edit may have changed the evaluated source without
+    // rewriting the stored fit points. Break must freeze the displayed,
+    // current dimensioned geometry, rather than its stale stored predecessor.
+    let rep = solve_current(sk, doc)?;
+    if !rep.keeps_orientation() {
+        return Err(bad(cmd, rep.failure(|_| "cannot break an offset with conflicting dimensions".into())));
+    }
+    sketch_store::checked(sk)?;
+    if let Some(association) = sk
+        .offsets
+        .iter()
+        .filter_map(|record| record.topology.as_ref())
+        .find(|record| record.id == output || record.roles.iter().any(|role| role.output == output))
+        .map(|record| record.id.clone())
+    {
+        freeze_offset_profiles(doc, sketch, sk, &association)?;
+    }
+    if let Some(curves) = sk.break_offset_topology(output)? {
+        return Ok(Some(curves));
+    }
+    let ordinary = sk.offsets.iter().position(|o| o.topology.is_none() && o.outputs.iter().any(|id| id == output));
+    if let Some(index) = ordinary {
+        let record = sk.offsets.remove(index);
+        let centres = record
+            .outputs
+            .iter()
+            .filter_map(|id| sk.curve_index(id).and_then(|i| sk.curves.get(i)))
+            .filter_map(|curve| match curve.kind {
+                CurveKind::Circle { c, .. } | CurveKind::Arc { c, .. } => Some(c),
+                _ => None,
+            })
+            .collect::<std::collections::BTreeSet<_>>();
+        for centre in centres {
+            let position = sk.point(centre).ok_or_else(|| bad(cmd, "missing offset centre"))?;
+            let detached = sk.add_point(position, None)?;
+            for curve in &mut sk.curves {
+                if record.outputs.contains(&curve.id) {
+                    match &mut curve.kind {
+                        CurveKind::Circle { c, .. } | CurveKind::Arc { c, .. } if *c == centre => *c = detached,
+                        _ => {}
+                    }
+                }
+            }
+        }
+        sk.constraints.retain(|c| !matches!(&c.kind, ConstraintKind::OffsetDistance { output, .. } if record.outputs.contains(output)));
+        for id in &record.outputs {
+            if let Some(curve) = sk.curve_index(id).and_then(|i| sk.curves.get(i)) {
+                let points = curve.kind.point_ids();
+                for i in points {
+                    if i != 0
+                        && sk.curves.iter().all(|c| !c.kind.uses(i) || record.outputs.contains(&c.id))
+                        && let Some(p) = sk.points.get_mut(i)
+                    {
+                        p.fixed = false;
+                    }
+                }
+            }
+        }
+        return Ok(Some(record.outputs));
+    }
+    let record = record.ok_or_else(|| bad(cmd, "offset association changed while materializing its current geometry"))?;
+    sk.constraints.retain(|c| !matches!(&c.kind, ConstraintKind::OffsetDistance { output: id, .. } if id == output));
+    let ci = sk.curve_index(output).ok_or_else(|| bad(cmd, "missing offset output"))?;
+    let indices = sk.curves.get(ci).map(|c| c.kind.point_ids()).unwrap_or_default();
+    sk.freeform_offsets.remove(record);
+    for i in indices {
+        if let Some(point) = sk.points.get_mut(i) {
+            point.fixed = false;
+        }
+    }
+    Ok(None)
 }
 
 /// A broken logical boundary becomes ordinary geometry. Keep downstream features
