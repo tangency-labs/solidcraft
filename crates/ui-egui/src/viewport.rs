@@ -4863,6 +4863,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     crate::joint_handles::show(app, ui, &painter, &proj);
     overlays(app, &painter, &proj);
     paint_device_pivot(app, &painter, &proj);
+    draw_notes(app, &painter, &proj);
     crate::dim_view::show(app, ui, &painter, &proj);
     crate::sketch_text_handles::show(app, ui, &painter, &proj, hover);
     crate::sketch3d::show(app, &painter, &proj);
@@ -6232,6 +6233,59 @@ impl Conflict {
     /// the error red it always had.
     pub(crate) fn glyph_colour(app: &SolveApp, t: &Tokens) -> Color32 {
         if app.preferences.sketch_conflict_colour { t.sketch_conflict } else { t.error }
+    }
+}
+
+/// Notes (#1631): text anchored to points in model space, drawn as small screen-facing
+/// callouts. The callout is laid out in screen space at the anchor's projection, so its text
+/// always faces the camera and stays readable at any rotation, while the anchor follows the
+/// model. Hidden notes are kept with the design but not drawn. Notes stay out of the way
+/// while a sketch is being edited.
+///
+/// A note as it is drawn this frame: the anchor on screen and the text box beside it.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct DrawnNote {
+    /// The projected anchor point (screen space).
+    pub anchor: Pos2,
+    /// The text box (screen space), offset up-right from the anchor.
+    pub text_rect: Rect,
+    /// The note's text.
+    pub text: String,
+}
+
+/// Where the visible notes are drawn this frame (screen space), for painting and hit tests.
+pub(crate) fn note_callouts(app: &SolveApp, painter: &egui::Painter, proj: &Proj) -> Vec<DrawnNote> {
+    if app.session.active_sketch.is_some() {
+        return Vec::new();
+    }
+    let t = Tokens::get();
+    app.session
+        .doc
+        .notes
+        .iter()
+        .filter(|n| !n.hidden)
+        .filter_map(|n| {
+            let anchor = proj.to_screen(n.anchor)?;
+            let galley = painter.layout(n.text.clone(), FontId::proportional(t.font_small), t.text, 240.0);
+            let text_rect = Rect::from_min_size(anchor + vec2(14.0, -14.0) - vec2(0.0, galley.size().y + 8.0), galley.size() + vec2(12.0, 8.0));
+            Some(DrawnNote { anchor, text_rect, text: n.text.clone() })
+        })
+        .collect()
+}
+
+fn draw_notes(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
+    if app.session.doc.notes.is_empty() {
+        return;
+    }
+    let t = Tokens::get();
+    for note in note_callouts(app, painter, proj) {
+        // A leader from the anchor to the text box, the dot, then the callout itself:
+        // a rounded panel with the text, always parallel to the screen.
+        painter.line_segment([note.anchor, note.text_rect.left_bottom() + vec2(6.0, -4.0)], Stroke::new(1.0, t.accent));
+        painter.circle_filled(note.anchor, 3.0, t.accent);
+        painter.rect_filled(note.text_rect, 4.0, t.panel);
+        painter.rect_stroke(note.text_rect, 4.0, Stroke::new(1.0, t.accent), egui::StrokeKind::Inside);
+        painter.text(note.text_rect.min + vec2(6.0, 4.0), Align2::LEFT_TOP, &note.text, FontId::proportional(t.font_small), t.text);
     }
 }
 
