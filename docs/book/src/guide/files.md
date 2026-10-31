@@ -47,6 +47,11 @@ panel, and in the right-click menu of a body) open the same dialog with that for
 the selected bodies as STL, 3MF or 3MF with face tags (below) to a file you name, and you can change
 the format there.
 
+The dialog's **Quality** row sets how closely the mesh follows curved faces. For exact control — a
+fillet that still looks faceted at Finest — type a **Deviation (mm)**: an absolute chord tolerance in
+millimetres that overrides the Quality preset. Scripts pass `quality` or `deviation` to
+`file.save_mesh` or `file.export`.
+
 A 3MF has one object per body, so a slicer arranges the bodies of a multi-body part apart on the
 bed. Scripts and the control channel can keep each component together: `file.export` or
 `file.save_mesh` with `objects: "component"` writes every placed component that holds two or more
