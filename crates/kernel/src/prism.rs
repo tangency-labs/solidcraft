@@ -1881,7 +1881,7 @@ fn sew_sections(
                     pieces.push((piece, lineage::Built::Extruded { layers }));
                 }
             } else {
-                let (piece, built) = sew_connected_sections(plane, d, &levels[first..=end], &slabs[first..end], tol, coalesce, history)
+                let (piece, built) = sew_connected_sections(plane, d, &levels[first..=end], &slabs[first..end], tol, coalesce, Some(history))
                     .ok_or_else(|| KernelError::Failed("stepped prism construction failed".into()))??;
                 remaining_faces =
                     remaining_faces.checked_sub(piece.face_count()).ok_or_else(|| KernelError::Failed("prism output face budget".into()))?;
@@ -1950,7 +1950,7 @@ fn sew_connected_sections(
     slabs: &[Section],
     tol: f64,
     coalesce: bool,
-    history: &lineage::Context,
+    history: Option<&lineage::Context>,
 ) -> Option<Result<(Body, lineage::Built)>> {
     use crate::sew::{EdgeSpec, FaceSpec, SurfSpec};
     // Faces at each level: up where the slab below sticks out, down where the one above does.
@@ -2204,12 +2204,77 @@ fn sew_connected_sections(
     // carried through the joining.
     Some(if coalesce {
         sewn.and_then(|(body, built)| {
+            let history = history.ok_or_else(|| KernelError::Failed("missing prism reconstruction history".into()))?;
             let body = history.attach(body.clone(), &[(&body, built)]).regularize_generated_planar_faces()?;
             Ok((body, lineage::Built::Traced))
         })
     } else {
         sewn
     })
+}
+
+/// Sew certified mesh-conversion parts along one common prism direction. Fresh
+/// geometry has no Boolean operand lineage; never invent history for the source mesh.
+pub(crate) fn sew_mesh_parts(parts: &[Body]) -> Option<Result<Body>> {
+    if !(2..=32).contains(&parts.len()) || parts.iter().map(Body::face_count).sum::<usize>() > 256 {
+        return None;
+    }
+    let (first, second) = (parts.first()?, parts.get(1)?);
+    let tolerance = (parts.iter().map(Body::size).fold(1., f64::max) * 1e-6).max(1e-8);
+    for axis in directions(first, second)? {
+        let plane = Plane::from_normal(Vec3::ZERO, axis)?;
+        let Some(stacks) =
+            parts.iter().enumerate().map(|(i, b)| stack_tagged(b, axis, &plane, tolerance, &LazyIndex::new(b, i))).collect::<Option<Vec<_>>>()
+        else {
+            continue;
+        };
+        let mut levels: Vec<_> = stacks.iter().flatten().flat_map(|p| [p.lo, p.hi]).collect();
+        levels.sort_by(f64::total_cmp);
+        levels.dedup_by(|a, b| (*a - *b).abs() <= tolerance);
+        if levels.len() < 2 || levels.len() > 33 {
+            continue;
+        }
+        let mut sections = Vec::new();
+        let mut work = 0usize;
+        let mut output = 0usize;
+        let mut failed = false;
+        for pair in levels.windows(2) {
+            let (Some(&lo), Some(&hi)) = (pair.first(), pair.get(1)) else { return None };
+            let mut regions = Vec::new();
+            for stack in &stacks {
+                let Some(p) = stack.iter().find(|p| p.lo <= lo + tolerance && p.hi >= hi - tolerance) else { continue };
+                let edges = |r: &[Region2]| r.iter().flat_map(|r| std::iter::once(&r.outer).chain(&r.holes)).map(|p| p.segs.len()).sum::<usize>();
+                let count = edges(&regions).saturating_add(edges(&p.section.regions));
+                work = work.saturating_add(count.saturating_mul(count));
+                if work > 4_000_000 {
+                    return None;
+                }
+                if regions.is_empty() {
+                    regions = p.section.regions.clone();
+                } else if let Some(joined) = boolean2d(&regions, &p.section.regions, BoolOp::Union, tolerance) {
+                    regions = joined;
+                } else {
+                    failed = true;
+                    break;
+                }
+            }
+            output += regions.iter().flat_map(|r| std::iter::once(&r.outer).chain(&r.holes)).map(|p| p.segs.len()).sum::<usize>();
+            if output > 512 {
+                return None;
+            }
+            if failed {
+                break;
+            }
+            sections.push(Section::untagged(&regions).oriented());
+        }
+        if failed {
+            continue;
+        }
+        if let Some(result) = sew_connected_sections(&plane, axis, &levels, &sections, tolerance, false, None) {
+            return Some(result.map(|(body, _)| body));
+        }
+    }
+    None
 }
 
 #[cfg(test)]

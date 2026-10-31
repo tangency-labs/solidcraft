@@ -2721,6 +2721,44 @@ fn convert_mesh_asks_for_the_body_and_converts_the_selected_one() {
     assert!(!state.body("Mesh").unwrap().body.is_mesh(), "rebuilt as faces");
 }
 
+/// Repeated OK on an unsupported closed mesh keeps the dialog and the imported design.
+#[test]
+fn failed_convert_mesh_submissions_keep_the_dialog_and_original_mesh() {
+    use solidcraft_engine::doc::{Document, FeatureKind, MeshData};
+    let mut doc = Document::default();
+    doc.add_feature(
+        FeatureKind::MeshImport {
+            file: "tetrahedron.stl".into(),
+            meshes: vec![MeshData {
+                name: "Mesh".into(),
+                positions: vec![0., 0., 0., 8., 0., 0., 0., 8., 0., 0., 0., 8.].into(),
+                triangles: vec![0, 2, 1, 0, 1, 3, 0, 3, 2, 1, 2, 3].into(),
+                color: None,
+            }],
+        },
+        Some("Imported tetrahedron"),
+    )
+    .unwrap();
+    doc.features.last_mut().unwrap().body_names = vec!["Mesh".into()];
+    let mut h = crate::scenario::Harness::new();
+    h.app.session = Session::new(doc);
+    h.app.session.selection = vec![Sel::Body { name: "Mesh".into() }];
+    let before = h.app.session.doc.to_json();
+    h.app.start("mesh.convert");
+    h.frames(1);
+    for _ in 0..3 {
+        h.step(&json!({"key":"Enter"})).unwrap();
+        h.frames(2);
+        let dialog = h.app.dialog.as_ref().expect("failed conversion stays open");
+        assert!(dialog.error.as_ref().is_some_and(|e| e.contains("mesh conversion")), "{:?}", dialog.error);
+        assert_eq!(h.app.session.doc.to_json(), before);
+        assert!(h.app.session.model.state().body("Mesh").unwrap().body.is_mesh());
+    }
+    crate::dialogs::cancel(&mut h.app);
+    h.frames(1);
+    assert!(h.app.dialog.is_none());
+}
+
 /// #3745: hovering a large body never waits for its pick index. A long modelled thread's mesh
 /// has a quarter of a million triangles and its index took a third of a second to make, on the
 /// first hover, in the frame. Now the index is made on a worker and the first hovers scan the
