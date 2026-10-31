@@ -279,7 +279,15 @@ fn convert(ents: &[Ent], k: f64, blocks: &HashMap<String, (Vec2, Vec<Ent>)>, dep
                 if fx.len() >= 2 && fx.len() == fy.len() {
                     out.push(Geom2::Spline { pts: fx.iter().zip(&fy).map(|(x, y)| pt(*x, *y)).collect(), control: false, degree: 3 });
                 } else if cx.len() >= 2 && cx.len() == cy.len() {
-                    out.push(Geom2::Spline { pts: cx.iter().zip(&cy).map(|(x, y)| pt(*x, *y)).collect(), control: true, degree });
+                    let ctrl: Vec<Vec2> = cx.iter().zip(&cy).map(|(x, y)| pt(*x, *y)).collect();
+                    // The curve the file describes: its own knots (40) and, when rational, a weight
+                    // per control point (41), at the degree it gives. Without knots that fit, the
+                    // sketch's even ones, as before.
+                    let own = e.get(71).filter(|d| d.fract() == 0.0 && (1.0..=MAX_BEZIER_DEGREE as f64).contains(d)).and_then(|d| {
+                        let weights = Some(e.all(41)).filter(|w| !w.is_empty());
+                        Geom2::bspline(d as u8, ctrl.clone(), e.all(40), weights)
+                    });
+                    out.push(own.unwrap_or(Geom2::Spline { pts: ctrl, control: true, degree }));
                 }
             }
             "TEXT" | "MTEXT" => {
@@ -372,6 +380,10 @@ impl Affine {
             Geom2::Spline { pts, control, degree } => {
                 Geom2::Spline { pts: pts.iter().map(|p| self.p(*p)).collect(), control: *control, degree: *degree }
             }
+            // An affine map moves a B-spline, rational or not, by its control points.
+            Geom2::Nurbs { degree, knots, ctrl, weights } => {
+                Geom2::Nurbs { degree: *degree, knots: knots.clone(), ctrl: ctrl.iter().map(|p| self.p(*p)).collect(), weights: weights.clone() }
+            }
             Geom2::Conic { a, apex, b, rho } => Geom2::Conic { a: self.p(*a), apex: self.p(*apex), b: self.p(*b), rho: *rho },
             Geom2::Text { text, at, height, angle } => {
                 let dir = self.v(Vec2::from_angle(*angle));
@@ -452,7 +464,7 @@ pub fn write_dxf(geom: &[Geom2]) -> String {
                 w(1, &text.replace('\n', " "));
             }
             // Free-form curves are written by the caller as polylines (lines).
-            Geom2::Ellipse { .. } | Geom2::Spline { .. } | Geom2::Conic { .. } => {}
+            Geom2::Ellipse { .. } | Geom2::Spline { .. } | Geom2::Nurbs { .. } | Geom2::Conic { .. } => {}
         }
     }
     w(0, "ENDSEC");
@@ -573,6 +585,51 @@ mod tests {
             let back = read_dxf(&spline(given)).unwrap();
             assert!(matches!(&back[..], [Geom2::Spline { pts, control: true, degree }] if *degree == read && pts.len() == 10), "{given:?}: {back:?}");
         }
+    }
+
+    /// A SPLINE keeps its own knots (40) and weights (41) (solidcraft#9355): clamped, evenly
+    /// spaced and unweighted it is the sketch's own spline, as before; otherwise the reader keeps
+    /// them as they are (its points in millimetres). Knots that don't fit the points leave the
+    /// sketch's even ones, as without any.
+    #[test]
+    fn a_spline_keeps_its_own_knots_and_weights() {
+        let spline = |degree: u32, points: &[(f64, f64)], knots: &[f64], weights: &[f64]| {
+            let mut body = format!("0\nSECTION\n2\nHEADER\n9\n$INSUNITS\n70\n1\n0\nENDSEC\n0\nSECTION\n2\nENTITIES\n0\nSPLINE\n71\n{degree}\n");
+            body.extend(knots.iter().map(|k| format!("40\n{k}\n")));
+            body.extend(weights.iter().map(|w| format!("41\n{w}\n")));
+            body.extend(points.iter().map(|(x, y)| format!("10\n{x}\n20\n{y}\n")));
+            read_dxf(&(body + "0\nENDSEC\n0\nEOF\n")).unwrap()
+        };
+        let five = [(0.0, 0.0), (1.0, 2.0), (3.0, 2.0), (4.0, 0.0), (6.0, 1.0)];
+        let inches: Vec<Vec2> = five.iter().map(|(x, y)| Vec2::new(x * 25.4, y * 25.4)).collect();
+        // Clamped and even, unweighted or all weighted alike: the sketch's spline.
+        for weights in [&[][..], &[2.0; 5]] {
+            let back = spline(3, &five, &[0.0, 0.0, 0.0, 0.0, 0.5, 1.0, 1.0, 1.0, 1.0], weights);
+            assert!(matches!(&back[..], [Geom2::Spline { pts, control: true, degree: 3 }] if *pts == inches), "{back:?}");
+        }
+        // An uneven inner knot, and a curve that isn't clamped: its knots, as written.
+        for knots in [[0.0, 0.0, 0.0, 0.0, 0.2, 1.0, 1.0, 1.0, 1.0], [0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0]] {
+            let back = spline(3, &five, &knots, &[]);
+            assert!(matches!(&back[..], [Geom2::Nurbs { degree: 3, knots: k, ctrl, weights: None }] if *k == knots && *ctrl == inches), "{back:?}");
+        }
+        // A quarter circle as a weighted quadratic: its weights.
+        let w = std::f64::consts::FRAC_1_SQRT_2;
+        let back = spline(2, &[(1.0, 0.0), (1.0, 1.0), (0.0, 1.0)], &[0.0, 0.0, 0.0, 1.0, 1.0, 1.0], &[1.0, w, 1.0]);
+        assert!(matches!(&back[..], [Geom2::Nurbs { degree: 2, weights: Some(ws), .. }] if *ws == [1.0, w, 1.0]), "{back:?}");
+        // Knots one short, decreasing, or weights one short: even knots over the points.
+        for (knots, weights) in [
+            (&[0.0, 0.0, 0.0, 0.0, 0.2, 1.0, 1.0, 1.0][..], &[][..]),
+            (&[0.0, 0.0, 0.0, 0.0, 0.7, 0.2, 1.0, 1.0, 1.0], &[]),
+            (&[0.0, 0.0, 0.0, 0.0, 0.2, 1.0, 1.0, 1.0, 1.0], &[1.0; 4]),
+        ] {
+            let back = spline(3, &five, knots, weights);
+            assert!(matches!(&back[..], [Geom2::Spline { control: true, degree: 3, .. }]), "{knots:?} {weights:?}: {back:?}");
+        }
+        // The fields of a SPLINE as the layered reader holds them (`DxfShape::Spline`, #8515)
+        // make the same curve.
+        let at = |x, y| Vec2::new(x, y);
+        let shape = Geom2::bspline(2, vec![at(0.0, 0.0), at(1.0, 1.0), at(2.0, 0.0)], vec![2.0, 2.0, 2.0, 5.0, 5.0, 5.0], Some(vec![1.0, 0.5, 1.0]));
+        assert!(matches!(shape, Some(Geom2::Nurbs { degree: 2, .. })), "{shape:?}");
     }
 
     #[test]

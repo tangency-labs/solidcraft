@@ -373,7 +373,7 @@ pub(crate) fn clamp_row(p: usize, knots: &[f64], row: &[HPoint]) -> SplineResult
         let mut guard = 0;
         while mult(&knots) < p {
             guard += 1;
-            if guard > MAX_SPLINE_DEGREE + 1 {
+            if guard > p + 1 {
                 return invalid("clamping did not converge");
             }
             (knots, row) = insert_knot(p, &knots, &row, x)?;
@@ -399,6 +399,97 @@ pub(crate) fn clamp_row(p: usize, knots: &[f64], row: &[HPoint]) -> SplineResult
         knots = nk;
     }
     Ok((knots, row))
+}
+
+/// Highest degree [`bezier_pieces`] splits a curve at: above the sketch's 9 ([`crate::MAX_BEZIER_DEGREE`])
+/// for the hidden-line views of imported curves. It bounds the work a hostile curve can ask for.
+pub const MAX_CURVE_DEGREE: usize = 16;
+
+/// One Bézier piece of a B-spline curve: its parameter span and its `degree + 1` homogeneous
+/// control points.
+#[derive(Clone, Debug, PartialEq)]
+pub struct CurvePiece {
+    pub span: [f64; 2],
+    pub ctrl: Vec<HPoint>,
+}
+
+/// The Bézier pieces of the B-spline curve of degree `p` (1 to [`MAX_CURVE_DEGREE`]) with `knots`
+/// and homogeneous control points `ctrl`: one per span of non-zero length of its domain
+/// `[knots[p], knots[n]]`, in order. Clamped or not, evenly knotted or not, rational or not; the
+/// pieces trace the curve exactly. The curve is clamped on its domain ([`clamp_row`]), then split
+/// in one pass (NURBS Book A5.6), in work linear in its length. An inner knot repeated more than
+/// `p` times (a curve broken there) is refused.
+pub fn bezier_pieces(p: usize, knots: &[f64], ctrl: &[HPoint]) -> SplineResult<Vec<CurvePiece>> {
+    let n = ctrl.len();
+    if !(1..=MAX_CURVE_DEGREE).contains(&p) {
+        return Err(SplineError::Unsupported(format!("degree {p} (1 to {MAX_CURVE_DEGREE})")));
+    }
+    if n <= p || knots.len() != n + p + 1 {
+        return invalid("knot and control point counts do not match the degree");
+    }
+    check_knots(knots)?;
+    if !ctrl.iter().all(|c| c.is_finite()) {
+        return invalid("a control point is not finite");
+    }
+    let (Some(&lo), Some(&hi)) = (knots.get(p), knots.get(n)) else { return invalid("too few knots") };
+    if hi <= lo {
+        return invalid("the curve's domain is empty");
+    }
+    let (u, pw) = clamp_row(p, knots, ctrl)?;
+    let bad = || SplineError::Invalid("Bézier decomposition".into());
+    let kn = |i: usize| u.get(i).copied().ok_or_else(bad);
+    let m = u.len().checked_sub(1).ok_or_else(bad)?;
+    let mut piece = pw.get(..=p).ok_or_else(bad)?.to_vec();
+    let mut alphas = vec![0.0; p];
+    let mut out = Vec::new();
+    // `a` is the last index of the knot that starts the piece, `b` walks to the one that ends it.
+    let (mut a, mut b) = (p, p + 1);
+    while b < m {
+        let first = b;
+        while b < m && kn(b + 1)? == kn(b)? {
+            b += 1;
+        }
+        let mult = b - first + 1;
+        let end = b >= m;
+        if !end && mult > p {
+            return invalid(format!("the inner knot {} repeats more than the degree", kn(b)?));
+        }
+        let (ua, ub) = (kn(a)?, kn(b)?);
+        let mut next = vec![HPoint::ZERO; p + 1];
+        if mult < p {
+            // Insert `ub` until it repeats `p` times; the piece's points become Bézier points, and
+            // the next piece's first ones fall out on the way.
+            for j in (mult + 1..=p).rev() {
+                *alphas.get_mut(j - mult - 1).ok_or_else(bad)? = (ub - ua) / (kn(a + j)? - ua);
+            }
+            let r = p - mult;
+            for j in 1..=r {
+                let s = mult + j;
+                for k in (s..=p).rev() {
+                    let alpha = *alphas.get(k - s).ok_or_else(bad)?;
+                    let prev = *piece.get(k - 1).ok_or_else(bad)?;
+                    let cur = piece.get_mut(k).ok_or_else(bad)?;
+                    *cur = *cur * alpha + prev * (1.0 - alpha);
+                }
+                if !end {
+                    *next.get_mut(r - j).ok_or_else(bad)? = *piece.get(p).ok_or_else(bad)?;
+                }
+            }
+        }
+        // Finite inputs can still overflow together (a huge weight on a large coordinate).
+        if !piece.iter().all(|h| h.is_finite()) {
+            return invalid("the curve's points overflow");
+        }
+        if !end {
+            for i in p - mult..=p {
+                *next.get_mut(i).ok_or_else(bad)? = *pw.get(b - p + i).ok_or_else(bad)?;
+            }
+            a = b;
+            b += 1;
+        }
+        out.push(CurvePiece { span: [ua, ub], ctrl: std::mem::replace(&mut piece, next) });
+    }
+    Ok(out)
 }
 
 /// A Bézier curve's point at `x ∈ [0, 1]` (de Casteljau, NURBS Book §1.4).
@@ -837,6 +928,116 @@ pub(crate) mod tests {
             assert!(bezier_point(&seg, x).project().unwrap().dist(want) < 1e-14);
         }
         assert!(bezier_segment(&ctrl, 0.7, 0.2).is_err());
+    }
+
+    /// The point at `u` of a (rational) B-spline: de Boor on homogeneous points, independent of
+    /// knot insertion and of the basis evaluator (and of its degree limit).
+    fn de_boor(p: usize, knots: &[f64], ctrl: &[HPoint], u: f64) -> Vec3 {
+        let n = ctrl.len();
+        let s = (p..n).rev().find(|&j| knots[j] <= u && knots[j] < knots[j + 1]).unwrap();
+        let mut d: Vec<HPoint> = (0..=p).map(|j| ctrl[j + s - p]).collect();
+        for r in 1..=p {
+            for j in (r..=p).rev() {
+                let i = j + s - p;
+                let a = (u - knots[i]) / (knots[i + p + 1 - r] - knots[i]);
+                d[j] = d[j - 1] * (1.0 - a) + d[j] * a;
+            }
+        }
+        d[p].project().unwrap()
+    }
+
+    /// Every piece of `bezier_pieces` on the curve (by de Boor) across its span, the spans those
+    /// of the domain in order (#9355).
+    fn assert_pieces_trace(p: usize, knots: &[f64], ctrl: &[HPoint], want: usize) -> Vec<CurvePiece> {
+        let pieces = bezier_pieces(p, knots, ctrl).unwrap();
+        let mut spans: Vec<[f64; 2]> = (p..ctrl.len()).map(|i| [knots[i], knots[i + 1]]).filter(|s| s[0] < s[1]).collect();
+        spans.dedup();
+        assert_eq!((pieces.len(), pieces.iter().map(|b| b.span).collect::<Vec<_>>()), (want, spans));
+        for b in &pieces {
+            assert_eq!(b.ctrl.len(), p + 1);
+            let [a, e] = b.span;
+            for t in [0.0, 0.17, 0.5, 0.83, 1.0] {
+                let u = if t == 1.0 { e - 1e-12 * (e - a) } else { a + t * (e - a) };
+                let got = bezier_point(&b.ctrl, t).project().unwrap();
+                assert!(got.dist(de_boor(p, knots, ctrl, u)) < 1e-9, "span {a}..{e} at {t}: {got:?}");
+            }
+        }
+        pieces
+    }
+
+    fn plain(xy: &[(f64, f64)]) -> Vec<HPoint> {
+        xy.iter().map(|&(x, y)| HPoint::weighted(Vec3::new(x, y, 0.0), 1.0)).collect()
+    }
+
+    #[test]
+    fn a_curve_splits_into_the_bezier_pieces_of_its_own_knots() {
+        let ctrl = plain(&[(0.0, 0.0), (10.0, 6.0), (18.0, -4.0), (30.0, 9.0), (36.0, 1.0), (48.0, 5.0), (52.0, -2.0)]);
+        // Uneven gaps, as a DXF from another program has them; a double inner knot.
+        assert_pieces_trace(3, &[0.0, 0.0, 0.0, 0.0, 0.1, 0.15, 0.6, 1.0, 1.0, 1.0, 1.0], &ctrl, 4);
+        assert_pieces_trace(3, &[0.0, 0.0, 0.0, 0.0, 0.3, 0.3, 0.7, 1.0, 1.0, 1.0, 1.0], &ctrl, 3);
+        // An inner knot repeated `degree` times: the points there are already Bézier points.
+        assert_pieces_trace(3, &[0.0, 0.0, 0.0, 0.0, 0.5, 0.5, 0.5, 1.0, 1.0, 1.0, 1.0], &ctrl, 2);
+        // Rational, in space, at random.
+        let mut rng = Lcg(9355);
+        let rational: Vec<HPoint> =
+            (0..8).map(|_| HPoint::weighted(Vec3::new(rng.unit(), rng.unit(), rng.unit()) * 10.0, 0.5 + rng.unit())).collect();
+        assert_pieces_trace(3, &KNOTS, &rational, 4);
+        // A long one: 5000 points, uneven knots, one piece per span.
+        let long = plain(&(0..5000).map(|i| (i as f64, (i as f64 / 7.0).sin())).collect::<Vec<_>>());
+        let knots: Vec<f64> = (0..5004).map(|i| ((i.clamp(3, 5000) - 3) as f64).powf(1.3)).collect();
+        assert_eq!(bezier_pieces(3, &knots, &long).unwrap().len(), 4997);
+    }
+
+    #[test]
+    fn weighted_quadratics_trace_circles_exactly() {
+        let h = std::f64::consts::FRAC_1_SQRT_2;
+        let c = [(1.0, 0.0), (1.0, 1.0), (0.0, 1.0), (-1.0, 1.0), (-1.0, 0.0), (-1.0, -1.0), (0.0, -1.0), (1.0, -1.0), (1.0, 0.0)];
+        let w = [1.0, h, 1.0, h, 1.0, h, 1.0, h, 1.0];
+        let ctrl: Vec<HPoint> = c.iter().zip(w).map(|(&(x, y), w)| HPoint::weighted(Vec3::new(10.0 * x, 10.0 * y, 0.0), w)).collect();
+        let knots = [0.0, 0.0, 0.0, 0.25, 0.25, 0.5, 0.5, 0.75, 0.75, 1.0, 1.0, 1.0];
+        for b in assert_pieces_trace(2, &knots, &ctrl, 4) {
+            for t in [0.0, 0.3, 0.6, 1.0] {
+                assert!((bezier_point(&b.ctrl, t).project().unwrap().len() - 10.0).abs() < 1e-12);
+            }
+        }
+    }
+
+    #[test]
+    fn an_unclamped_curve_is_cut_to_its_domain() {
+        // A closed (periodic) cubic as DXF writes one: unclamped even knots; it doesn't start or end
+        // on a control point, and ends where it starts.
+        let ctrl = plain(&[(0.0, 0.0), (20.0, 0.0), (20.0, 20.0), (0.0, 20.0), (0.0, 0.0), (20.0, 0.0), (20.0, 20.0)]);
+        let knots: Vec<f64> = (0..=10).map(f64::from).collect();
+        let pieces = assert_pieces_trace(3, &knots, &ctrl, 4);
+        let (first, last) = (pieces[0].ctrl[0].project().unwrap(), pieces[3].ctrl[3].project().unwrap());
+        assert!(first.dist(last) < 1e-9 && ctrl.iter().all(|q| q.xyz().dist(first) > 1.0), "{first:?} {last:?}");
+        // Degree 9 (a G4 blend's) unclamped: eight insertions at each end.
+        let mut rng = Lcg(9);
+        let nine: Vec<HPoint> = (0..12).map(|_| HPoint::weighted(Vec3::new(rng.unit(), rng.unit(), 0.0) * 10.0, 1.0)).collect();
+        let knots: Vec<f64> = (0..22).map(f64::from).collect();
+        assert_pieces_trace(9, &knots, &nine, 3);
+    }
+
+    #[test]
+    fn hostile_curves_are_not_split() {
+        let ctrl = plain(&[(0.0, 0.0), (1.0, 1.0), (2.0, 0.0)]);
+        let clamped = [0.0, 0.0, 0.0, 1.0, 1.0, 1.0];
+        for (p, knots) in [
+            (2, &[0.0, 0.0, 0.0, 1.0, 1.0][..]),
+            (2, &[0.0, 0.0, 1.0, 0.5, 1.0, 1.0]),
+            (2, &[0.0, 0.0, 0.0, f64::NAN, 1.0, 1.0]),
+            (2, &[0.0; 6]),
+            (0, &clamped[..4]),
+            (3, &[0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0]),
+            (MAX_CURVE_DEGREE + 1, &[0.0; 21]),
+        ] {
+            assert!(bezier_pieces(p, knots, &ctrl).is_err(), "{p} {knots:?}");
+        }
+        assert!(bezier_pieces(2, &clamped, &plain(&[(f64::NAN, 0.0), (1.0, 1.0), (2.0, 0.0)])).is_err());
+        // A line through three points breaks at an inner knot repeated twice (past degree 1).
+        let four = plain(&[(0.0, 0.0), (1.0, 1.0), (2.0, 0.0), (3.0, 1.0)]);
+        assert!(bezier_pieces(1, &[0.0, 0.0, 0.5, 1.0, 1.0], &four[..3]).is_ok());
+        assert!(bezier_pieces(1, &[0.0, 0.0, 0.5, 0.5, 1.0, 1.0], &four).is_err());
     }
 
     #[test]
