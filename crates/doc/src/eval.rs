@@ -261,6 +261,26 @@ impl ModelBody {
         }
     }
 
+    /// [`ModelBody::display_plan_at`] as a shared plan and the move that places it, as
+    /// [`ModelBody::mesh_in_place`] does for the reference mesh: a part placed many times gives
+    /// one plan.
+    pub fn plan_in_place_at(&self, q: crate::display_quality::DisplayQuality) -> Option<(Arc<TessPlan>, crate::Mat)> {
+        match self.mesh_placement.as_deref() {
+            Some(placed) => placed.source_plan(q, &self.name),
+            None => Some((self.display_plan_at(q)?, crate::IDENTITY)),
+        }
+    }
+
+    /// The body this one is a rigid placement of (the definition's own body) and the move that
+    /// places it; for any other body itself, unmoved. Tessellating the definition and moving
+    /// the result gives every placement the same polygons.
+    pub fn definition_in_place(&self) -> (&Body, crate::Mat) {
+        match self.mesh_placement.as_deref() {
+            Some(placed) => placed.source_body(),
+            None => (&self.body, crate::IDENTITY),
+        }
+    }
+
     /// [`ModelBody::plan_mesh`] if it is made already; otherwise it is made on a worker thread
     /// (once, however often this is asked) and `None` comes back meanwhile, so a caller drawing a
     /// frame (a face highlighted under the pointer) is not held up by a large body's plan
