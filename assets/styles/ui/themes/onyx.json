@@ -14,7 +14,7 @@
     "app_bar_hover_button": "#dededc1c",
     "app_bar_hover_strong": "#dededc28",
     "app_bar_hover_subtle": "#dededc0c",
-    "app_bar_separator": "#484c50",
+    "app_bar_separator": "#383c3f",
     "app_bar_tab_active": "#303235",
     "app_bar_text": "#dededc",
     "axis_x": "#d7938f",
@@ -23,9 +23,9 @@
     "bend_down": "#b8a7c3",
     "bend_up": "#a5b9a5",
     "body": "#93989c",
-    "body_edge": "#25282b",
+    "body_edge": "#60666b",
     "body_selected": "#3b4852",
-    "border": "#484c50",
+    "border": "#3d4145",
     "box_window": "#9eafbd",
     "chip": "#758b9b",
     "construction_geom": "#b9a78e",
@@ -36,18 +36,18 @@
       "#c7b28b",
       "#b8a7c3"
     ],
-    "control_border": "#60656a",
+    "control_border": "#4a4f54",
     "control_fill": "#303235",
-    "cube_border": "#61676c",
+    "cube_border": "#50565b",
     "cube_face": "#34373a",
     "cube_hover": "#53616c",
     "cube_text": "#dededc",
     "dialog_bg": "#2b2d2f",
     "dialog_body": "#2b2d2f",
-    "dialog_border": "#484c50",
+    "dialog_border": "#3d4145",
     "dialog_footer": "#27292b",
     "dialog_label": "#dededc",
-    "dialog_rule": "#484c50",
+    "dialog_rule": "#383c3f",
     "dimension": "#c7b28b",
     "dimension_driven": "#a59474",
     "error": "#d7938f",
@@ -67,8 +67,8 @@
     "glyph_bg": "#34373a",
     "glyph_edge": "#d7938f",
     "glyph_text": "#d7938f",
-    "grid": "#303336",
-    "grid_major": "#42464a",
+    "grid": "#2a2d30",
+    "grid_major": "#34383b",
     "hover": "#3b4852",
     "hover_edge": "#b1c1ce",
     "hover_edge_halo": "#181a1c",
@@ -97,7 +97,7 @@
     "nav_press": "#59636c",
     "nav_tip": "#2b2d2f",
     "nav_tip_ink": "#dededc",
-    "nav_tip_key_border": "#484c50",
+    "nav_tip_key_border": "#3b3e41",
     "nav_viewport": "#27292b",
     "on_accent": "#17191b",
     "origin_plane": "#b9a78e2c",
@@ -150,11 +150,11 @@
     "tab_on_fill_dark": "#17191b",
     "text": "#dededc",
     "text_dim": "#c6c8c9",
-    "timeline": "#1c1e20",
+    "timeline": "#2b2d2f",
     "timeline_item": "#303235",
     "timeline_item_error": "#493334",
     "timeline_marker": "#b5b7b8",
-    "toolbar": "#27292b",
+    "toolbar": "#2b2d2f",
     "viewport_bottom": "#1b1d1f",
     "viewport_top": "#222426",
     "warning": "#c7b28b"
@@ -392,15 +392,17 @@
         "panel_header": "#373b3e",
         "field": "#171a1c",
         "control_fill": "#383d41",
-        "border": "#62696f",
-        "dialog_border": "#62696f",
-        "dialog_rule": "#535b61",
-        "control_border": "#818b92",
+        "border": "#4e555b",
+        "dialog_border": "#4e555b",
+        "dialog_rule": "#444b51",
+        "control_border": "#626c73",
         "text": "#eeeeec",
         "text_dim": "#ced1d2",
         "form_ink": "#eeeeec",
         "form_dim": "#ced1d2",
-        "dialog_label": "#eeeeec"
+        "dialog_label": "#eeeeec",
+        "toolbar": "#25282a",
+        "timeline": "#25282a"
       }
     },
     {
@@ -412,7 +414,7 @@
         "primary_inset": {
           "width": 0.5,
           "gap": 1,
-          "color": "#dce2e71a"
+          "color": "#dce2e70e"
         }
       }
     },
@@ -424,10 +426,10 @@
       "borders": {
         "bevel": {
           "width": 0.5,
-          "highlight": "#777e8455",
-          "light": "#4a515655",
-          "shadow": "#1b1e2166",
-          "dark_shadow": "#10131566"
+          "highlight": "#70777d33",
+          "light": "#454c512b",
+          "shadow": "#1b1e2144",
+          "dark_shadow": "#1013153d"
         }
       }
     },

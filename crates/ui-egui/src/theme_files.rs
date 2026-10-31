@@ -1918,6 +1918,8 @@ mod tests {
             let mut only_fills = original;
             only_fills.panel = faded.panel;
             only_fills.panel_header = faded.panel_header;
+            only_fills.toolbar = faded.toolbar;
+            only_fills.timeline = faded.timeline;
             only_fills.dialog_bg = faded.dialog_bg;
             only_fills.dialog_body = faded.dialog_body;
             only_fills.dialog_footer = faded.dialog_footer;
@@ -1943,6 +1945,8 @@ mod tests {
             for (role, fill) in [
                 ("panel", faded.panel),
                 ("panel_header", faded.panel_header),
+                ("toolbar", faded.toolbar),
+                ("timeline", faded.timeline),
                 ("dialog_bg", faded.dialog_bg),
                 ("dialog_body", faded.dialog_body),
                 ("dialog_footer", faded.dialog_footer),
@@ -2348,6 +2352,7 @@ mod tests {
         let faded = resolve(file);
         let full = resolve_with(file, &BTreeMap::from([("opacity".into(), OptionValue::Num(100.0))]));
         assert!(faded.panel.a() < full.panel.a(), "the default exposes a little of the scene");
+        assert_eq!((faded.toolbar, faded.timeline), (faded.panel, faded.panel), "workspace surfaces share the same material");
         assert_eq!(full.panel.a(), 255);
         assert_eq!(faded.text, full.text);
         assert!(faded.borders.primary_inset.is_some());
@@ -2387,6 +2392,7 @@ mod tests {
                                 ("tab_colours".into(), OptionValue::Bool(tabs)),
                             ]);
                             let base = resolve_with(file, &values);
+                            assert_eq!((base.toolbar, base.timeline), (base.panel, base.panel));
                             let expected = match accent {
                                 "silver" => "#b7bdc2",
                                 "sage" => "#aabcae",
@@ -2417,9 +2423,16 @@ mod tests {
                                 let workspace = TabAccent::for_tab(&tokens, tab);
                                 assert!(contrast_ratio(workspace.ink, workspace.soft) >= 4.5);
                                 assert!(contrast_ratio(workspace.on_fill(&tokens), workspace.color) >= 4.5);
-                                for fill in
-                                    [tokens.panel, tokens.panel_header, tokens.dialog_bg, tokens.dialog_body, tokens.dialog_footer, tokens.overlay]
-                                {
+                                for fill in [
+                                    tokens.panel,
+                                    tokens.panel_header,
+                                    tokens.toolbar,
+                                    tokens.timeline,
+                                    tokens.dialog_bg,
+                                    tokens.dialog_body,
+                                    tokens.dialog_footer,
+                                    tokens.overlay,
+                                ] {
                                     for background in [Color32::BLACK, Color32::WHITE, tokens.viewport_top, tokens.viewport_bottom] {
                                         let ground = composite(fill, background);
                                         for ink in [tokens.text, tokens.text_dim, tokens.form_ink, tokens.form_dim, tokens.dialog_label] {

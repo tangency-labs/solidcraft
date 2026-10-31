@@ -1290,8 +1290,16 @@ impl Tokens {
         }
         let scale = percent.clamp(40.0, 100.0) / 100.0;
         let body_inks = [self.text, self.form_ink, self.dialog_label];
-        for fill in [&mut self.panel, &mut self.panel_header, &mut self.dialog_bg, &mut self.dialog_body, &mut self.dialog_footer, &mut self.overlay]
-        {
+        for fill in [
+            &mut self.panel,
+            &mut self.panel_header,
+            &mut self.toolbar,
+            &mut self.timeline,
+            &mut self.dialog_bg,
+            &mut self.dialog_body,
+            &mut self.dialog_footer,
+            &mut self.overlay,
+        ] {
             *fill = readable_fill(*fill, &body_inks, scale);
         }
         self.nav_tip = readable_fill(self.nav_tip, &[self.nav_tip_ink], scale);

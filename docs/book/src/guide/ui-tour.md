@@ -396,8 +396,8 @@ absent from the list until its behaviour is registered.
 The resolver exposes declared standard options in the order `opacity`, `blur`, `tab_colours`,
 each immediately followed by its child, then custom options in declared order.
 
-Opacity scales only these floating surface fill tokens: `panel`, `panel_header`, `dialog_bg`,
-`dialog_body`, `dialog_footer`, `overlay` and `nav_tip`. Scaling is applied after matching
+Opacity scales only these floating surface fill tokens: `panel`, `panel_header`, `toolbar`,
+`timeline`, `dialog_bg`, `dialog_body`, `dialog_footer`, `overlay` and `nav_tip`. Scaling is applied after matching
 overlays. All other tokens, including text, icons, borders, controls, viewport and document
 colours, retain their resolved values. At 100%, with the implicit 100% default, or without
 offered opacity, every token is exactly the original resolved value. The supported range is
