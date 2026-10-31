@@ -87,6 +87,8 @@ The [architecture page](docs/architecture.md) has the layer table. The short ver
 
 - `crates/geom`: vectors, planes, meshes, measures.
 - `crates/sketch`: our own constraint solver, plus profile finding.
+- `crates/dynamics`: multibody dynamics: rigid bodies, joint constraints, gravity and springs,
+  integrated in time (RFC #9719). It depends only on `geom`.
 - `crates/kernel`: the B-rep kernel boundary. It wraps [truck](https://github.com/ricosjp/truck),
   and it's the only crate allowed to touch truck. Fillets, chamfers, shell/offset, Delete Face,
   Split Face, STEP/IGES read and write, and face provenance are our own code here. Patched
