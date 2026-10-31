@@ -1009,7 +1009,11 @@ pub(crate) fn counted(f: &solidcraft_doc::Feature, i: usize) -> bool {
 
 fn rename_body(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "body.rename";
-    let old = str_(p, "body").ok_or_else(|| bad(cmd, "`body` must be a body name"))?.to_string();
+    let given = str_(p, "body").ok_or_else(|| bad(cmd, "`body` must be a body name"))?;
+    // A placed copy's name (`KB (K:2)`, the name the browser lists a pasted placement's body by)
+    // means the body it shows, as appearance.assign takes it (#9740): renaming it renames that body,
+    // in every placement of its component (#10017).
+    let old = s.own_body_name(given).ok_or_else(|| bad(cmd, format!("no body `{given}`")))?;
     let name =
         str_(p, "name").map(str::trim).filter(|n| !n.is_empty() && n.len() <= 128).ok_or_else(|| bad(cmd, "`name` must be 1…128 characters"))?;
     if name == old {
@@ -1263,6 +1267,23 @@ mod tests {
 
     fn names(s: &Session) -> Vec<String> {
         s.model.state().bodies.iter().map(|b| b.name.clone()).collect()
+    }
+
+    /// #10017: a pasted placement's body is listed by its placed name (`KB (K:2)`), and Rename
+    /// sends that name. It renames the body that placement shows, so both placements show the new
+    /// name; a name that is neither a body's nor a placed copy's is still refused.
+    #[test]
+    fn a_placed_copys_body_renames_by_its_placed_name() {
+        let mut s = Session::default();
+        run(&mut s, "component.create", json!({"name": "K"}));
+        run(&mut s, "solid.box", json!({"body_name": "KB", "length": 10, "width": 10, "height": 10}));
+        run(&mut s, "occurrence.copy", json!({"component": "K", "translate": [30, 0, 0]}));
+        let r = run(&mut s, "body.rename", json!({"body": "KB (K:2)", "name": "Lid"}));
+        assert_eq!((r["body"].as_str(), r["name"].as_str()), (Some("KB"), Some("Lid")), "{r}");
+        let world: Vec<String> = s.world_state().bodies.iter().map(|b| b.name.clone()).collect();
+        assert!(world.iter().any(|n| n == "Lid") && world.iter().any(|n| n == "Lid (K:2)"), "{world:?}");
+        assert!(!world.iter().any(|n| n.starts_with("KB")), "{world:?}");
+        assert!(s.execute("body.rename", &json!({"body": "Lid (K:9)", "name": "Other"})).is_err());
     }
 
     #[test]
