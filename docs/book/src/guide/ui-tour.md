@@ -26,8 +26,8 @@
   origin, bodies, sketches, construction planes, canvases, joints and components. The eye at the
   row's right end shows or hides an item (**Preferences › Interface › Eye next to the fold arrow**
   puts it back beside the fold arrow; press an eye and drag up or down over other eyes to show or hide them all at once, as one undo step), a component's radio button makes it the active component,
-  and right-clicking any row gives that item's menu. Right-click the design or a component and choose **Expand All** or
-  **Collapse All** to open or close every folder under that row (the design row stays visible
+  and right-clicking any row gives that item's menu. Right-click the design or a component and choose
+  **Organize → Expand All** or **Collapse All** to open or close every folder under that row (the design row stays visible
   when the whole tree is collapsed). Rows drag into groups and other components. **Preferences ›
   Interface › Bodies folders** sets when a component's bodies sit in a Bodies folder of their own:
   **Several bodies only** (the default) lists a component's body straight under it when it has

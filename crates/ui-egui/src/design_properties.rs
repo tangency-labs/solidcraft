@@ -620,7 +620,7 @@ mod tests {
     #[test]
     fn the_file_menu_browser_and_root_component_open_the_window() {
         let mut h = Harness::new();
-        let items = crate::context_menu::items(&h.app, &crate::context_menu::Target::Component { id: 0 });
+        let items = crate::context_menu::entries(&h.app, &crate::context_menu::Target::Component { id: 0 });
         let item = items.iter().find(|i| i.id == "ui.designProperties").expect("root component menu item");
         assert_eq!(item.label, "Design Properties");
         crate::context_menu::run_item(&mut h.app, item, egui::pos2(0.0, 0.0));
