@@ -26,6 +26,7 @@
 //! | [`edge_curve_identity`]         | (the `m_pCurve` object's address in the notifications) |
 //! | [`face_surface_identity`]       | (the `m_pSurface` object's address in the notifications) |
 //! | [`with_kernel_callbacks`]       | (for callers without notification state: the B-rep context's callbacks) |
+//! | [`edit_brep`], [`EditScope`]    | (not upstream: one scope for composing topology operations: editing flag, notifications, marks, cached topology) |
 //! | `Brep::remove_from_*_list` (crate) | `SmOwningTopology::Remove` on the B-rep's list heads (and `~SmTopology`) |
 //!
 //! Deviations: out-params become return values; `rpNewEdge`/`rpNewVertex` are only
@@ -1334,6 +1335,57 @@ pub fn with_kernel_callbacks<R>(
     edit: impl FnOnce(&mut Kernel, &mut Brep, &mut NotifyEnv<'_>) -> Result<R>,
 ) -> Result<R> {
     with_lent_context(k, |k, ctx| kernel_named_edit(k, ctx, b, edit))?
+}
+
+/// What [`edit_brep`] lends its edit: the notification environment and the traversal
+/// marks that the lower-level topology operations take (`delete_face`,
+/// `make_edge_in_face`, `stitch_faces`, ...). One set of marks serves the whole edit,
+/// as marks are kept across calls under one context.
+pub struct EditScope<'s, 'e> {
+    /// The notification environment ([`with_kernel_callbacks`]'): the kernel's
+    /// identities for the B-rep's objects, its context's callbacks and the B-rep's own
+    /// attributes, given back when the edit ends.
+    pub env: &'s mut NotifyEnv<'e>,
+    /// The traversal marks.
+    pub marks: Marks,
+}
+
+/// Runs `edit`, a composition of lower-level topology operations on `b`, in one scope
+/// (not upstream: upstream's objects carry what a Rust caller must otherwise set up and
+/// restore by hand):
+///
+/// - B-rep editing is enabled ([`Brep::set_editing_enabled`]) for the edit, and the
+///   previous flag is restored afterwards;
+/// - the notifications run as [`with_kernel_callbacks`] runs them, with `b`'s own
+///   attributes carried through the edit and given back;
+/// - [`EditScope::marks`] are made once for the edit;
+/// - the cached topology fields are refreshed ([`Brep::refresh_cached_topology`])
+///   before it returns, so they are true for the caller, as after a public operation.
+///
+/// All of this also happens when `edit` returns an error. Not nestable, as
+/// [`with_kernel_callbacks`]: inside `edit`, pass the scope's `env` and `marks` on.
+///
+/// # Errors
+///
+/// Those of `edit`; those of [`with_kernel_callbacks`] (a nested call is refused before
+/// anything changes).
+pub fn edit_brep<R>(
+    k: &mut Kernel,
+    b: &mut Brep,
+    edit: impl FnOnce(&mut Kernel, &mut Brep, &mut EditScope<'_, '_>) -> Result<R>,
+) -> Result<R> {
+    let editing = b.editing_enabled();
+    b.set_editing_enabled(true);
+    let r = with_kernel_callbacks(k, b, |k, b, env| {
+        let mut scope = EditScope {
+            env,
+            marks: Marks::default(),
+        };
+        edit(k, b, &mut scope)
+    });
+    b.set_editing_enabled(editing);
+    b.refresh_cached_topology();
+    r
 }
 
 /// `SmApiBrepCopy`: a copy of `brep` that preserves its surface types (the copy
