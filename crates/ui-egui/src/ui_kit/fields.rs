@@ -266,6 +266,9 @@ fn editor_reserving(ui: &mut Ui, value: &mut String, hint: &str, completion: boo
     }
     let mut response = ui.add_sized(vec2(width, row_height()), edit);
     super::text_menu::menu(ui, &mut response, value, super::text_menu::Field::LINE);
+    if response.has_focus() {
+        crate::prefs_search::note_key_sink(ui.ctx());
+    }
     if completion && ui.is_enabled() {
         ui.ctx().data_mut(|data| {
             let id = egui::Id::new("sc_value_fields");
