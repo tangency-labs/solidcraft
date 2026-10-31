@@ -9,16 +9,23 @@
 //!   a later cut through a recess takes it with the material.
 //!
 //! The panels' faces are read before and after the feature, exactly, from the bodies' B-rep
-//! records. Only cuts with walls square to the sheet are kept: a cut whose two faces' outlines
-//! differ (a countersink, a rounded or chamfered face edge, a hole at a slant) is refused, as is
-//! one that reaches a bend or a roll (not supported yet), or splits a panel in two. The sheet built
-//! again must weigh what the cut body does.
+//! records. A cut through a roll, or with walls not square to a flat panel (a hole at a slant),
+//! goes through the panel as its shadow: everything whose fiber through the thickness meets
+//! what the cut took, as a shop cuts it in the flat ([`crate::sheet_surface_shadow`]). The sheet
+//! built again must weigh what the cut body does, or, where a shadow was cut, no more, with
+//! every face the cut made lying in a panel it was read on. Refused: walls that don't run
+//! through the sheet from face to face (a countersink, a rounded or chamfered face edge), a
+//! recess in a roll, a cut that reaches a bend or a seam (not supported yet), or splits a panel
+//! in two.
 
-use solidcraft_develop::{Development, Rigid2, Rigid3, Surface, develop};
+use std::collections::BTreeSet;
+
+use solidcraft_develop::{Development, Rigid2, Rigid3, Surface, crossings, develop};
 use solidcraft_geom::brep::query::Query;
-use solidcraft_geom::{Plane, Region2};
+use solidcraft_geom::{Plane, Region2, Seg2};
 use solidcraft_kernel::{Body, BoolOp, FaceSurface, face_surface, planar_regions_boolean};
 
+use crate::sheet_surface_shadow::{Slab, around, shadow, walls as made, within};
 use crate::{DocError, Feature, FeatureKind, ModelState, Result, SurfaceSheet};
 
 fn err<T>(msg: impl Into<String>) -> Result<T> {
@@ -156,17 +163,22 @@ pub(crate) fn absorb(before: &ModelState, after: &ModelState, f: &Feature) -> Re
 /// The sheet `sk` with what was cut from its body, `was` before and `now` after, read onto its
 /// flat panels, and its body built again, which must weigh what `now` does.
 pub(crate) fn cut(sk: &SurfaceSheet, was: &Body, now: &Body) -> std::result::Result<(SurfaceSheet, Body), String> {
-    let mut out = onto_panels(sk, was, now, true)?;
+    let walls = made(was, now, tolerance(was));
+    let (mut out, read) = onto_panels(sk, was, now, Some(&walls))?;
     let built = out.build().map_err(|e| e.to_string())?;
-    // Nothing else may have been cut: a bend's or a roll's material, or anything the panels'
-    // faces don't show.
+    // Nothing else may have been cut: a bend's material, or anything the panels' faces don't
+    // show. A shadow takes more than the cut did, and all the cut made lies in panels read.
     let weigh = |b: &Body| solidcraft_kernel::measure_mass(b).map(|m| m.volume).map_err(|e| e.to_string());
     let (v, w) = (weigh(&built)?, weigh(now)?);
-    if (v - w).abs() > 1e-6 * w.abs().max(1.0) {
-        return Err(format!(
-            "can't be kept in the sheet yet: it reaches a bend, a roll or a seam ({:.4} mm³ the sheet's panels don't show)",
-            (v - w).abs()
-        ));
+    if read.shadowed {
+        if walls.iter().any(|f| !read.claimed.contains(f)) {
+            return Err("can't be kept in the sheet yet: it reaches a bend or a seam".into());
+        }
+        if v > w + 1e-6 * w.abs().max(1.0) {
+            return Err(format!("can't be kept in the sheet yet: its shadow keeps {:.4} mm³ the cut took", v - w));
+        }
+    } else if (v - w).abs() > 1e-6 * w.abs().max(1.0) {
+        return Err(format!("can't be kept in the sheet yet: it reaches a bend or a seam ({:.4} mm³ the sheet's panels don't show)", (v - w).abs()));
     }
     Ok((out, built))
 }
@@ -176,7 +188,7 @@ pub(crate) fn cut(sk: &SurfaceSheet, was: &Body, now: &Body) -> std::result::Res
 /// body's two faces of a panel end apart at its outline (as a bent part drawn with sharp
 /// corners has them), that is how it was drawn, not a cut.
 pub(crate) fn engraved(sk: &SurfaceSheet, built: &Body, body: &Body) -> Result<(SurfaceSheet, Body)> {
-    let mut out = onto_panels(sk, built, body, false).map_err(DocError::Invalid)?;
+    let (mut out, _) = onto_panels(sk, built, body, None).map_err(DocError::Invalid)?;
     if out.recesses.is_empty() && out.sheet == sk.sheet {
         return Ok((out, built.clone()));
     }
@@ -184,21 +196,81 @@ pub(crate) fn engraved(sk: &SurfaceSheet, built: &Body, body: &Body) -> Result<(
     Ok((out, solid))
 }
 
+/// How near two points of `b` are one: as near as the body's exact edges close its faces' loops.
+fn tolerance(b: &Body) -> f64 {
+    (b.size() * 1e-7).clamp(1e-7, 1e-3)
+}
+
+/// What [`onto_panels`] read besides the sheet: whether it cut a panel's shadow, and the faces
+/// the cut made that lie in the panels it read.
+#[derive(Default)]
+struct Read {
+    shadowed: bool,
+    claimed: BTreeSet<usize>,
+}
+
+/// What is left of a panel's `region` named `name` without `through`: one piece. What goes
+/// through clear of the region's outline and holes is a hole of it as it is, its curves kept.
+fn left(region: &Region2, through: &[Region2], name: &str, tol: f64) -> std::result::Result<Region2, String> {
+    let loops = || std::iter::once(&region.outer).chain(&region.holes);
+    let clear = |t: &Region2| {
+        let p = t.outer.segs.first().map(Seg2::start);
+        t.holes.is_empty()
+            && p.is_some_and(|p| region.contains(p))
+            && region.holes.iter().all(|h| h.segs.first().is_none_or(|s| !t.outer.contains(s.start())))
+            && loops().all(|l| crossings(&t.outer.segs, &l.segs).is_empty())
+    };
+    if !through.is_empty() && through.iter().all(clear) {
+        let mut out = region.clone();
+        out.holes.extend(through.iter().map(|t| t.outer.ccw().reversed()));
+        return Ok(out);
+    }
+    let left = planar_regions_boolean(std::slice::from_ref(region), through, BoolOp::Cut, tol).map_err(|e| e.to_string())?;
+    match <[Region2; 1]>::try_from(left) {
+        Ok([one]) => Ok(one),
+        Err(_) => Err(format!("cuts {name} apart: not supported yet")),
+    }
+}
+
 /// The sheet `sk` with what its body lost between `was` and `now` read onto its flat panels: what
 /// went through is out of their outlines, and their recesses are the floors `now` has in them.
-/// Where the two faces of a panel see material differently, its walls are not square; unless
-/// `strict`, only away from the panel's outline.
-fn onto_panels(sk: &SurfaceSheet, was: &Body, now: &Body, strict: bool) -> std::result::Result<SurfaceSheet, String> {
+/// Reading a cut, `walls` are the faces of `now` it made, and where a panel's walls are not
+/// square, or the panel is a roll, what went through is the shadow they cast. Reading a converted
+/// body's engravings (no `walls`), a panel's walls must be square, away from its outline.
+fn onto_panels(sk: &SurfaceSheet, was: &Body, now: &Body, walls: Option<&[usize]>) -> std::result::Result<(SurfaceSheet, Read), String> {
+    let strict = walls.is_some();
     let dev = develop(&sk.sheet, 0).map_err(|e| e.to_string())?;
     let frames = frames(sk, &dev).map_err(|e| e.to_string())?;
     let (qa, qb) = (Query::new(was.record()), Query::new(now.record()));
     let t = sk.sheet.thickness;
-    // How near two points are one: as near as the bodies' exact edges close their faces' loops.
-    let tol = (was.size() * 1e-7).clamp(1e-7, 1e-3);
+    let tol = tolerance(was);
+    let sag = (was.size() * 1e-4).max(1e-4);
     let mut out = sk.clone();
+    let mut taken = Read::default();
     let mut recesses: Vec<Recess> = sk.recesses.clone();
     for (p, (panel, frame)) in sk.sheet.panels.iter().zip(&frames).enumerate() {
-        let (Surface::Plane, Some(frame)) = (&panel.surface, frame) else { continue };
+        let Some(frame) = frame else { continue };
+        let plane = matches!(panel.surface, Surface::Plane);
+        // Unfolded, a roll lies flat: its slab is not its surface's.
+        if sk.unfolded && !plane {
+            continue;
+        }
+        let slab = Slab::new(&panel.surface, *frame, t);
+        let here = walls.map(|w| within(&qb, &slab, &panel.region, w, tol * 100.0, sag)).unwrap_or_default();
+        taken.claimed.extend(here.iter().copied());
+        if !plane {
+            // A roll: what went through it is its walls' shadow.
+            if here.is_empty() {
+                continue;
+            }
+            let through = shadow(now, &qb, &slab, &here, &panel.name, around(&panel.region), tol, sag)?;
+            taken.shadowed = true;
+            let kept = left(&panel.region, &through, &panel.name, tol)?;
+            if let Some(x) = out.sheet.panels.get_mut(p) {
+                x.region = kept;
+            }
+            continue;
+        }
         let read = |b: &Body, q: &Query| on_panel(b, q, frame, t, &panel.region, tol).map_err(|e| e.to_string());
         let (before, after) = (read(was, &qa)?, read(now, &qb)?);
         // The panel's flat material before the cut, and each face's after it (its own face, or
@@ -232,21 +304,27 @@ fn onto_panels(sk: &SurfaceSheet, was: &Body, now: &Body, strict: bool) -> std::
             Ok(kept)
         };
         let (near_floors, far_floors) = (floors(after.near_floors)?, floors(after.far_floors)?);
-        if off_outline(&near, &far)? > slack || off_outline(&far, &near)? > slack {
+        let square = off_outline(&near, &far)? <= slack && off_outline(&far, &near)? <= slack;
+        // Through: the flat material no face sees any longer, or, where the walls are not
+        // square, their shadow.
+        let through = if square {
+            planar_regions_boolean(&footprint, &near, BoolOp::Cut, tol).map_err(|e| e.to_string())?
+        } else if strict && !here.is_empty() {
+            taken.shadowed = true;
+            shadow(now, &qb, &slab, &here, &panel.name, 0.0, tol, sag)?
+        } else if strict {
+            // Its walls here run on past the panel.
+            return Err("can't be kept in the sheet yet: it reaches a bend or a seam".into());
+        } else {
             return Err(format!(
                 "leaves walls that are not square to the sheet on {}: not supported yet (a countersink, a rounded or chamfered face edge, a hole at a slant)",
                 panel.name
             ));
-        }
-        // Through: the flat material no face sees any longer.
-        let through = planar_regions_boolean(&footprint, &near, BoolOp::Cut, tol).map_err(|e| e.to_string())?;
+        };
         if area(&through) > slack {
-            let left = planar_regions_boolean(std::slice::from_ref(&panel.region), &through, BoolOp::Cut, tol).map_err(|e| e.to_string())?;
-            let [one] = left.as_slice() else {
-                return Err(format!("cuts {} apart: not supported yet", panel.name));
-            };
+            let kept = left(&panel.region, &through, &panel.name, tol)?;
             if let Some(x) = out.sheet.panels.get_mut(p) {
-                x.region = one.clone();
+                x.region = kept;
             }
         }
         // The panel's recesses are its floors as they are now.
@@ -255,5 +333,5 @@ fn onto_panels(sk: &SurfaceSheet, was: &Body, now: &Body, strict: bool) -> std::
         recesses.extend(far_floors.into_iter().map(|(depth, region)| Recess { panel: p, region, far: true, depth }));
     }
     out.recesses = recesses;
-    Ok(out)
+    Ok((out, taken))
 }
