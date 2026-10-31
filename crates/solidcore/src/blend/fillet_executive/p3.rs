@@ -129,6 +129,9 @@ pub enum NoRoomReason {
     /// A cliff overflow's closing face meets two filleted edges at a vertex, or is not
     /// bounded by filleted edges between its side edges (WR-631).
     CliffClosingFaceUnbounded,
+    /// Subtracting a cliff overflow's removal region from a manifold solid left no manifold
+    /// solid (an empty or open body; not the fork's, WR-631 addendum).
+    CliffSubtractionLeavesNoSolid,
 }
 
 /// The initialized error-info members p3 reads or writes. Corner kinds use the

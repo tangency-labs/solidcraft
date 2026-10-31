@@ -366,3 +366,49 @@ fn a_cliff_overflow_is_deterministic() {
         .collect();
     assert_eq!(runs[0].to_bits(), runs[1].to_bits());
 }
+
+#[test]
+fn an_overflow_whose_subtraction_leaves_no_solid_is_refused() {
+    // #1467's box at r10.01 and r10.02: the round's face meets the bottom face a hair (2e-5
+    // at r10.02) from its edge, and the Boolean succeeded with an empty or open body. A
+    // built blend must leave a manifold solid; this one is refused as no room instead
+    // (`CliffSubtractionLeavesNoSolid`, not the fork's: the fork checks only the Boolean's
+    // status), and the body is left as it was.
+    let (a, b) = (p(0.0, 20.0, 10.0), p(40.0, 20.0, 10.0));
+    for r in [10.01, 10.02] {
+        let mut k = kernel(true);
+        let mut body = box_40_20_10(&mut k);
+        let e = edge_between(&k, &body, a, b);
+        let mut session = FilletSession::new(&mut k, &mut body).unwrap();
+        session
+            .prepare_constant_radius_edges(&mut k, &[e], r, 1, 1, 1.0)
+            .unwrap();
+        let result = session.do_fillet(&mut k);
+        let info = session.error_info().clone();
+        drop(session);
+        if result.is_ok() {
+            assert!(
+                is_manifold_solid(&body).unwrap(),
+                "r {r}: built a body that is not a manifold solid"
+            );
+            let expected = 8000.0 - 40.0 * removed_area(r, 20.0, 10.0);
+            let v = volume(&k, &mut body);
+            assert!(
+                (v - expected).abs() <= 1e-8 * expected,
+                "r {r}: {v} against {expected}"
+            );
+            continue;
+        }
+        assert_eq!(info.code, FilletErrorType::NoRoom as i32, "r {r}: {info:?}");
+        assert_eq!(
+            info.comment,
+            "Fillet Error: subtracting a cliff overflow's removal region leaves no solid",
+            "r {r}"
+        );
+        assert!(
+            is_manifold_solid(&body).unwrap(),
+            "r {r}: the body must be left whole"
+        );
+        assert!((volume(&k, &mut body) - 8000.0).abs() < 1e-6, "r {r}");
+    }
+}
