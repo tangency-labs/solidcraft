@@ -74,6 +74,11 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 });
             },
         );
+        ui_kit::checkbox(ui, crate::i18n::tr_label("Draw ellipses with their axes"), &mut app.preferences.ellipse_axes).on_hover_text(
+            crate::i18n::tr_label(
+                "The major and minor axes as construction lines, so the half-axes and axes can be dimensioned. Off: the ellipse alone.",
+            ),
+        );
         ui_kit::checkbox(ui, app.tr("prefs.alt_frees_manipulators"), &mut app.preferences.manipulator_free_alt).on_hover_text(crate::i18n::tr_label(
             "On: Alt/Option or Ctrl/Cmd on extrude / gizmo arrows disables value snapping. Off: Ctrl/Cmd only.",
         ));

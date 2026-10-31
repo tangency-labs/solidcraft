@@ -1,0 +1,38 @@
+{
+  "en": {
+    "Draw ellipses with their axes": "Draw ellipses with their axes",
+    "The major and minor axes as construction lines, so the half-axes and axes can be dimensioned. Off: the ellipse alone.": "The major and minor axes as construction lines, so the half-axes and axes can be dimensioned. Off: the ellipse alone."
+  },
+  "ar": {
+    "Draw ellipses with their axes": "رسم القطوع الناقصة مع محاورها",
+    "The major and minor axes as construction lines, so the half-axes and axes can be dimensioned. Off: the ellipse alone.": "المحوران الأكبر والأصغر كخطوط مساعدة، لتحديد أبعاد أنصاف المحاور والمحاور. عند الإيقاف: القطع الناقص وحده."
+  },
+  "de": {
+    "Draw ellipses with their axes": "Ellipsen mit ihren Achsen zeichnen",
+    "The major and minor axes as construction lines, so the half-axes and axes can be dimensioned. Off: the ellipse alone.": "Haupt- und Nebenachse als Konstruktionslinien, damit Halbachsen und Achsen bemaßt werden können. Aus: nur die Ellipse."
+  },
+  "he": {
+    "Draw ellipses with their axes": "שרטוט אליפסות עם הצירים שלהן",
+    "The major and minor axes as construction lines, so the half-axes and axes can be dimensioned. Off: the ellipse alone.": "הציר הראשי והציר המשני כקווי עזר, כדי שאפשר יהיה לתת מידות לחצאי הצירים ולצירים. כבוי: האליפסה בלבד."
+  },
+  "ja": {
+    "Draw ellipses with their axes": "楕円を軸と一緒に描く",
+    "The major and minor axes as construction lines, so the half-axes and axes can be dimensioned. Off: the ellipse alone.": "長軸と短軸をコンストラクション線として描き、半軸と軸に寸法を付けられるようにします。オフ: 楕円のみ。"
+  },
+  "ko": {
+    "Draw ellipses with their axes": "타원을 축과 함께 그리기",
+    "The major and minor axes as construction lines, so the half-axes and axes can be dimensioned. Off: the ellipse alone.": "장축과 단축을 구성선으로 그려 반축과 축에 치수를 지정할 수 있습니다. 끄면: 타원만 그립니다."
+  },
+  "pl": {
+    "Draw ellipses with their axes": "Rysuj elipsy z osiami",
+    "The major and minor axes as construction lines, so the half-axes and axes can be dimensioned. Off: the ellipse alone.": "Oś wielka i mała jako linie konstrukcyjne, aby można było wymiarować półosie i osie. Wyłączone: sama elipsa."
+  },
+  "vi": {
+    "Draw ellipses with their axes": "Vẽ hình elip kèm các trục",
+    "The major and minor axes as construction lines, so the half-axes and axes can be dimensioned. Off: the ellipse alone.": "Trục lớn và trục nhỏ dưới dạng đường gióng dựng hình, để có thể ghi kích thước bán trục và trục. Tắt: chỉ vẽ hình elip."
+  },
+  "zh": {
+    "Draw ellipses with their axes": "绘制椭圆时带上轴线",
+    "The major and minor axes as construction lines, so the half-axes and axes can be dimensioned. Off: the ellipse alone.": "将长轴和短轴绘制为构造线，以便标注半轴和轴。关闭：仅绘制椭圆。"
+  }
+}
