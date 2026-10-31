@@ -433,7 +433,6 @@ fn a_cliff_overflow_the_fork_refuses_has_no_room() {
 /// the back upright that upright's round runs above the R21 cylinder, taking the corner's piece
 /// over it too (Simpson on 4000 spans, against a bound of its quartic end edge's tolerance).
 #[test]
-#[ignore = "core::blend::OVERFLOW_GOES_FIRST is held back: solidcore's cliff overflow loses edge attributes (an_edge_tag_crosses_a_cliff_overflow). Passes with it on: 6107.529369565"]
 fn overflow_goes_first() {
     let f = |u: f64| 0.5 * (u * (441.0 - u * u).sqrt() + 441.0 * (u / 21.0).asin());
     let w = 440f64.sqrt();
