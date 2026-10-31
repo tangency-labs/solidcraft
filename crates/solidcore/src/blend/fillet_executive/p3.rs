@@ -109,6 +109,26 @@ pub enum NoRoomReason {
     /// A rail leaves its face and the fillet ends on more than one face (the global merge,
     /// WR-631).
     OverflowWithGlobalMerge,
+    /// A variable round of a cliff overflow, traced on its faces' continuations, does not
+    /// hold its radius law (the fork's `sm_HoldsItsLaw`, WR-631).
+    CliffLawNotHeld,
+    /// A cliff overflow runs past a fillet end whose end face is not planar (WR-631).
+    CliffEndFaceNotPlanar,
+    /// The end face's plane does not cut a fillet that overflows its end in two, or does
+    /// not part it from its middle (WR-631).
+    CliffEndNotCut,
+    /// A cliff overflow's fillet boundary lies on the surfaces of two faces (WR-631).
+    CliffBoundaryOnTwoFaces,
+    /// A cliff overflow's fillet boundary branches on a face (WR-631).
+    CliffBoundaryBranches,
+    /// A cliff overflow's fillet boundary closes on one face (WR-631).
+    CliffBoundaryClosed,
+    /// A cliff overflow's fillet boundary leaves a face along no side edge of the filleted
+    /// edges (WR-631).
+    CliffBoundaryLeavesAlongNoSideEdge,
+    /// A cliff overflow's closing face meets two filleted edges at a vertex, or is not
+    /// bounded by filleted edges between its side edges (WR-631).
+    CliffClosingFaceUnbounded,
 }
 
 /// The initialized error-info members p3 reads or writes. Corner kinds use the
@@ -2456,10 +2476,8 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
     /// together with a rail rolling over a tangent edge; an overflow with the global
     /// merge on (a fillet end on more than one face).
     ///
-    /// The cliff overflow's construction (the open ends and the removal region the
-    /// later #960 changes port) is not in this port yet: an accepted overflow is
-    /// refused too, as `fillet_refuse_rails_leaving_faces` alone refuses it, after
-    /// [`FilletExecutive::cliff_overflow`] is set.
+    /// An accepted overflow is built by the session's `DoFilleting`, which subtracts the
+    /// region the blends remove (`SubtractRemovalRegion`).
     ///
     /// # Errors
     /// The refusal as `SM_ERR`, noted in the error info; those of the checks.
@@ -2518,11 +2536,6 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
                 return self.record_no_room(reason, why);
             }
             self.cliff_overflow = true;
-            // the overflow's construction is not ported yet (see the doc)
-            return self.record_no_room(
-                NoRoomReason::RailLeavesFace,
-                "Fillet Error: a rail leaves the face it rolls on (the blend is larger than the faces allow)",
-            );
         }
         Ok(())
     }
@@ -2979,6 +2992,13 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
                 return Err(failure());
             }
             self.shrink_fillet_faces(k, access)?;
+            // the fork's (WR-631): a cliff overflow is subtracted, on the live session only
+            if self.cliff_overflow {
+                return Err(SolidError::unported(
+                    "SmFilletExecutive::SubtractRemovalRegion (fork)",
+                    "blend.fillet_executive_p3",
+                ));
+            }
             let target = self.target.ok_or(invalid("missing target B-rep"))?;
             let editing = access.editing_enabled(target)?;
             access.set_editing_enabled(target, true)?;

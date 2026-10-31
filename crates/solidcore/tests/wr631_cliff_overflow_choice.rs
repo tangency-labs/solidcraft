@@ -9,8 +9,7 @@
 //! that side and the 3 wide step; the edge at (7,5) is concave, the step's foot.
 //!
 //! - r6 at (10,0): the rail on the 5 high side runs past its rim (10,5), a cliff: an
-//!   overflow, `cliff_overflow` set. Its construction is not ported yet, so it is still
-//!   refused with the generic message.
+//!   overflow, `cliff_overflow` set, and built (`wr631_cliff_overflow_construction`).
 //! - r4 at (10,5): the rail on the 3 wide step runs into the wall beyond its foot: a
 //!   round is refused ("into the body's material"); a chamfer is an overflow.
 //! - r8 at (7,5): concave, the rail on the step runs past its rim: refused ("adds
@@ -84,8 +83,8 @@ fn edge_at(k: &Kernel, b: &Brep, x: f64, y: f64) -> EdgeId {
 }
 
 /// Rounds (`chamfer` false) or chamfers the edge at `(x, y)`: whether it was taken for a
-/// cliff overflow, the fillet error code and comment.
-fn blend(cliff: bool, x: f64, y: f64, r: f64, chamfer: bool) -> (bool, i32, String) {
+/// cliff overflow, and the fillet error code and comment of a refusal (`None`: built).
+fn blend(cliff: bool, x: f64, y: f64, r: f64, chamfer: bool) -> (bool, Option<(i32, String)>) {
     let mut k = kernel(cliff);
     let mut b = stepped_bar(&mut k);
     let e = edge_at(&k, &b, x, y);
@@ -94,12 +93,11 @@ fn blend(cliff: bool, x: f64, y: f64, r: f64, chamfer: bool) -> (bool, i32, Stri
     session
         .prepare_constant_radius_edges(&mut k, &[e], r, xsect, 1, 1.0)
         .unwrap();
-    assert!(session.do_fillet(&mut k).is_err());
+    let built = session.do_fillet(&mut k).is_ok();
     let info = session.error_info();
     (
         session.executive().cliff_overflow,
-        info.code,
-        info.comment.clone(),
+        (!built).then(|| (info.code, info.comment.clone())),
     )
 }
 
@@ -107,14 +105,11 @@ const NO_ROOM: i32 = FilletErrorType::NoRoom as i32;
 
 #[test]
 fn a_convex_round_over_a_cliff_is_a_cliff_overflow() {
-    assert_eq!(
-        blend(true, 10.0, 0.0, 6.0, false),
-        (true, NO_ROOM, GENERIC.into())
-    );
+    assert_eq!(blend(true, 10.0, 0.0, 6.0, false), (true, None));
     // without the flag: refused as before, no overflow
     assert_eq!(
         blend(false, 10.0, 0.0, 6.0, false),
-        (false, NO_ROOM, GENERIC.into())
+        (false, Some((NO_ROOM, GENERIC.into())))
     );
 }
 
@@ -124,14 +119,13 @@ fn a_round_into_the_material_is_refused_and_a_chamfer_overflows() {
         blend(true, 10.0, 5.0, 4.0, false),
         (
             false,
-            NO_ROOM,
-            "Fillet Error: a round's rail leaves the face it rolls on into the body's material (beyond a wall)".into()
+            Some((
+                NO_ROOM,
+                "Fillet Error: a round's rail leaves the face it rolls on into the body's material (beyond a wall)".into()
+            ))
         )
     );
-    assert_eq!(
-        blend(true, 10.0, 5.0, 4.0, true),
-        (true, NO_ROOM, GENERIC.into())
-    );
+    assert_eq!(blend(true, 10.0, 5.0, 4.0, true), (true, None));
 }
 
 #[test]
@@ -140,16 +134,22 @@ fn a_concave_overflow_is_refused() {
         blend(true, 7.0, 5.0, 8.0, false),
         (
             false,
-            NO_ROOM,
-            "Fillet Error: a rail leaves the face it rolls on (the blend is larger than the faces allow, and adds material)".into()
+            Some((
+                NO_ROOM,
+                "Fillet Error: a rail leaves the face it rolls on (the blend is larger than the faces allow, and adds material)".into()
+            ))
         )
     );
-    assert_eq!(blend(false, 7.0, 5.0, 8.0, false).1, NO_ROOM);
+    assert_eq!(
+        blend(false, 7.0, 5.0, 8.0, false).1.map(|e| e.0),
+        Some(NO_ROOM)
+    );
 }
 
-/// The typed reason of the refusal of the edge at `(x, y)`.
-fn reason(x: f64, y: f64, r: f64, chamfer: bool) -> Option<NoRoomReason> {
-    let mut k = kernel(true);
+/// The typed reason of the refusal of the edge at `(x, y)` (`cliff`: with the cliff
+/// overflow).
+fn reason(cliff: bool, x: f64, y: f64, r: f64, chamfer: bool) -> Option<NoRoomReason> {
+    let mut k = kernel(cliff);
     let mut b = stepped_bar(&mut k);
     let e = edge_at(&k, &b, x, y);
     let mut session = FilletSession::new(&mut k, &mut b).unwrap();
@@ -163,15 +163,15 @@ fn reason(x: f64, y: f64, r: f64, chamfer: bool) -> Option<NoRoomReason> {
 #[test]
 fn each_refusal_names_its_reason() {
     assert_eq!(
-        reason(10.0, 0.0, 6.0, false),
+        reason(false, 10.0, 0.0, 6.0, false),
         Some(NoRoomReason::RailLeavesFace)
     );
     assert_eq!(
-        reason(10.0, 5.0, 4.0, false),
+        reason(true, 10.0, 5.0, 4.0, false),
         Some(NoRoomReason::RoundIntoMaterial)
     );
     assert_eq!(
-        reason(7.0, 5.0, 8.0, false),
+        reason(true, 7.0, 5.0, 8.0, false),
         Some(NoRoomReason::ConcaveOverflow)
     );
 }

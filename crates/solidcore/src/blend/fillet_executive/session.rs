@@ -59,9 +59,10 @@ use super::p2::{EdgeMapAccess, FilletParameters, FilletParametersAccess, SolverS
 use super::p3::{
     BrepCreationAccess, CornerAdjustmentAccess, CornerEdgeAccess, CornerVertexAccess, CornerView,
     ErrorInfo, FaceConstructionAccess, FaceShrinkAccess, FaceStitchAccess, FilletExecutive,
-    RailClassificationAccess, RailTrimAccess, SolverGeometryAccess, StitchAttempt, VertexEntry,
+    OpenEnd, RailClassificationAccess, RailTrimAccess, SolverGeometryAccess, StitchAttempt,
+    VertexEntry,
 };
-use crate::blend::fillet_corner::p1::LawIntervalSolvers;
+use crate::blend::fillet_corner::p1::{EndRibDrop, LawIntervalSolvers};
 use crate::blend::fillet_corner::p3::{
     CornerFilletBrep, CornerPatchEnv, CornerSolverStore, ExecutiveErrorObject, FilletCorner,
     FilletCornerKind, Nx2AdjustContext, TangentSplitEnv, TangentSplitOps,
@@ -95,6 +96,7 @@ use crate::topology::{Brep, EdgeId, EdgeuseId, FaceId, VertexId};
 
 mod big_radius;
 mod classification;
+mod cliff_overflow;
 mod concave_nxn;
 mod corner_marks;
 mod crossing_rails;
@@ -2173,6 +2175,9 @@ impl<'target> FilletSession<'target> {
     }
 }
 
+/// The operation of the fork's `SmFilletExecutive::NoteOpenEnd` (WR-631).
+const OP_NOTE_OPEN_END: &str = "blend::fillet_executive::session::note_open_end";
+
 impl CornerEdgeAccess<FilletObject> for SessionObjects<'_> {
     fn edges_adjust_tangent(
         &mut self,
@@ -2242,8 +2247,28 @@ impl CornerEdgeAccess<FilletObject> for SessionObjects<'_> {
         let corner = corners
             .get_mut(id.0 as usize)
             .ok_or_else(|| invalid("corner is not live"))?;
-        // WR-303: the Nx1 corner's end rib hands the round to the global merge.
-        if corner.drop_end_rib_for_global_merge(k, target, pseudo)? {
+        // WR-303: the Nx1 corner's end rib hands the round to the global merge; in a
+        // cliff overflow (WR-631) the end is left open, noted for the subtraction.
+        let cliff_overflow = executive.cliff_overflow;
+        let mut open_ends = Vec::new();
+        let mut note_open_end = |eu, vertex, end_face| -> Result<()> {
+            // GetFilletSolverOfEdgeuse(pFilEdgeuse), then NoteOpenEnd
+            let solver = executive
+                .fillet_solver_of_edgeuse(FilletObject::Topology(
+                    FilletBody::Target,
+                    EntityRef::Edgeuse(eu),
+                ))
+                .ok_or_else(|| SolidError::null_pointer(OP_NOTE_OPEN_END))?;
+            open_ends.push(OpenEnd {
+                solver,
+                vertex: FilletObject::Topology(FilletBody::Target, EntityRef::Vertex(vertex)),
+                end_face: FilletObject::Topology(FilletBody::Target, EntityRef::Face(end_face)),
+            });
+            Ok(())
+        };
+        let dropped = corner.drop_end_rib(k, target, pseudo, cliff_overflow, &mut note_open_end)?;
+        executive.open_ends.append(&mut open_ends);
+        if dropped == EndRibDrop::GlobalMerge {
             executive.options.global_merge = true;
         }
         let mut context = SessionCornerEdgeContext {

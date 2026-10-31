@@ -590,6 +590,17 @@ impl FilletSession<'_> {
             session.mark_corner_patches()?;
             let editing = session.objects.target.editing_enabled();
             session.objects.target.set_editing_enabled(true);
+            // The fork's (WR-631, WR-638): a cliff overflow closes the fillet faces into the
+            // region the blends remove and subtracts it from the target, instead of merging
+            // the fillet faces in; the error a failed subtraction noted stands.
+            if session.executive.cliff_overflow {
+                let result = session.subtract_removal_region(k);
+                session.objects.target.set_editing_enabled(editing);
+                if let Some(output) = error_out {
+                    output.assign(&session.executive.error);
+                }
+                return result;
+            }
             let result = session.merge_fillet(k);
             session.objects.target.set_editing_enabled(editing);
             result?;
