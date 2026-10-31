@@ -503,7 +503,7 @@ pub(crate) fn step_key_hold(app: &mut SolveApp, ctx: &egui::Context) {
     {
         app.cancel_view_animation();
         app.viewport.orbit_free = None;
-        app.cam = crate::view_angles::keep_locked(&app, app.cam, cam);
+        app.cam = crate::view_angles::keep_locked(app, app.cam, cam);
     }
 }
 
