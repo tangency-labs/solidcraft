@@ -599,3 +599,51 @@ fn a_fit_centres_the_model_in_the_view_and_is_moved_only_by_panels() {
         assert!(roomy.distance <= cam.distance + 1e-9, "{style:?}: controls must not make the model larger");
     }
 }
+
+/// #9943: dragging the orbit gizmo toward the window edge must not stall once the cursor hits
+/// that edge: the drag warps the cursor back to the window centre and keeps orbiting while the
+/// button is held.
+#[test]
+fn gizmo_orbit_keeps_tracking_after_the_cursor_hits_the_window_edge() {
+    let mut h = Harness::new();
+    h.call("ui.view", json!({"view": "front"}));
+    h.settle();
+    let outer = crate::scenario::rect_of("axis_view:outer").unwrap();
+    let c = outer.center();
+    let home = h.ctx.viewport_rect().center();
+    let edge = h.ctx.viewport_rect().max.x - 2.0;
+    assert!(c.x < edge - 20.0 && home.x < edge - 20.0, "the gizmo and the centre sit clear of the edge");
+    let press = |pressed: bool, at: egui::Pos2| egui::Event::PointerButton {
+        pos: at,
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers: egui::Modifiers::NONE,
+    };
+    h.app.synthetic.push(egui::Event::PointerMoved(c));
+    h.app.synthetic.push(press(true, c));
+    // Drag right until the cursor reaches the window's right edge.
+    for k in 1..=3 {
+        h.app.synthetic.push(egui::Event::PointerMoved(pos2((c.x + 40.0 * k as f32).min(edge), c.y)));
+    }
+    h.frames(8);
+    assert!(h.app.viewport.axis_drag.is_some(), "the drag is still held");
+    assert_eq!(h.app.viewport.axis_warp, Some(home), "the cursor was warped back to the window centre");
+    // The OS echoes the warp: the pointer reappears at the centre without moving the view.
+    let before = h.app.cam;
+    h.app.synthetic.push(egui::Event::PointerMoved(home));
+    h.frames(4);
+    assert_eq!(h.app.cam, before, "the warp echo must not jump the view");
+    assert!(h.app.viewport.axis_warp.is_none(), "the echo clears the pending warp");
+    // The user keeps dragging right from the centre: the orbit keeps tracking past the edge.
+    let yaw = h.app.cam.yaw;
+    for k in 1..=5 {
+        h.app.synthetic.push(egui::Event::PointerMoved(pos2(home.x + 30.0 * k as f32, home.y)));
+    }
+    h.frames(8);
+    assert!((h.app.cam.yaw - yaw - 150.0 * 0.008).abs() < 1e-3, "the orbit kept tracking past the edge: {:?}", h.app.cam);
+    // Releasing ends the drag cleanly.
+    h.app.synthetic.push(press(false, pos2(home.x + 150.0, home.y)));
+    h.frames(4);
+    assert!(h.app.viewport.axis_drag.is_none());
+    assert!(h.app.viewport.axis_warp.is_none());
+}
