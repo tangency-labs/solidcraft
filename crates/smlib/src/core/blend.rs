@@ -28,7 +28,7 @@ use solidcore::blend::fillet_executive::p1::{FilletLaw, FilletLawKind};
 use solidcore::blend::fillet_executive::p3::NoRoomReason;
 use solidcore::blend::fillet_executive::session::FilletSession;
 use solidcore::blend::fillet_geom::p1::{FilletCornerType, FilletErrorType};
-use solidcore::blend::fillet_solver::p1::{FilletSurfaceGenerator, FilletSurfaceGeneratorType};
+use solidcore::blend::fillet_solver::p1::FilletSurfaceGeneratorType;
 use solidcore::geom::attribute::{Attribute, AttributeHandlers, Behavior, ids as attribute_ids};
 use solidcore::geom::vector3d::{Point3, Vec3};
 use solidcore::kernel::Kernel;
@@ -426,37 +426,12 @@ fn blend_edges_stopping(
 
 /// `chamfer_offsets`' `SetFilletParameters(b, es, kinds, solvers, first, NULL, -1, -1, -1, -1,
 /// 1, 1.0, &second)` with every kind `SM_FSG_LINEAR` and every solver `SM_FS_CONST_RADIUS`, as the
-/// fork's `SetFilletParameters` runs it (its `pOptSecondRadii`, fork f653ac9) on a fresh
-/// executive, whose options are already the ones it sets: per edge its blend edge use, a
-/// constant-radius solver with the second offset (approximation tolerance 4 times the edge's,
-/// angle tolerance 20°, tangent tolerance 10°: the defaults for -1), loaded, then a linear
-/// cross-section (one for all when there is one edge, else one per edge). solidcore's
-/// `FilletParameters` carries no second offsets, so the session's own steps make the same calls.
+/// fork's `SetFilletParameters` runs it (its `pOptSecondRadii`, fork f653ac9).
 fn chamfer_parameters(k: &mut Kernel, s: &mut FilletSession<'_>, edges: &[EdgeId], first: &[f64], second: &[f64]) -> solidcore::Result<()> {
-    /// `SetFilletParameters`' status for an edge it cannot fillet or mismatched lists.
-    fn refused() -> SolidError {
-        SolidError::Upstream { operation: "SetFilletParameters", code: INVALID_INPUT, entity: None }
-    }
     if edges.is_empty() {
         return Ok(());
     }
-    if first.len() != edges.len() || second.len() != edges.len() {
-        return Err(refused());
-    }
-    let (ang_tol, tan_tol) = (20f64.to_radians(), 10f64.to_radians());
-    let one = if edges.len() == 1 { Some(s.add_surface_generator(FilletSurfaceGenerator::Linear)?) } else { None };
-    for ((&e, &r0), &r1) in edges.iter().zip(first).zip(second) {
-        let Some(eu) = s.blend_edgeuse(k, e)? else { return Err(refused()) };
-        let approx_tol = 4.0 * edge::tolerance(s.target(), e)?;
-        let fs = s.new_constant_radius_solver_with_second(k, eu, r0, r1, approx_tol, ang_tol, tan_tol)?;
-        s.load_solver(k, fs)?;
-        let g = match one {
-            Some(g) => g,
-            None => s.add_surface_generator(FilletSurfaceGenerator::Linear)?,
-        };
-        s.set_solver_generator(fs, g)?;
-    }
-    Ok(())
+    s.prepare_per_edge_constant_radius_with_second(k, edges, first, second, &[FilletSurfaceGeneratorType::Linear], 1, 1.0)
 }
 
 /// The corners' part of `round_edges` / `chamfer_offsets`: a chamfer's corners bevelled; each
