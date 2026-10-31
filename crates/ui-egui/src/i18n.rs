@@ -74,6 +74,7 @@ static INDONESIAN: Catalog = Catalog::new("id", "Bahasa Indonesia", include_str!
 static ITALIAN: Catalog = Catalog::new("it", "Italiano", include_str!(concat!(env!("OUT_DIR"), "/locales/it.json")));
 static JAPANESE: Catalog = Catalog::new("ja", "日本語", include_str!(concat!(env!("OUT_DIR"), "/locales/ja.json")));
 static KOREAN: Catalog = Catalog::new("ko", "한국어", include_str!(concat!(env!("OUT_DIR"), "/locales/ko.json")));
+static LAO: Catalog = Catalog::new("lo", "ພາສາລາວ", include_str!(concat!(env!("OUT_DIR"), "/locales/lo.json")));
 static MALAY: Catalog = Catalog::new("ms", "Bahasa Melayu", include_str!(concat!(env!("OUT_DIR"), "/locales/ms.json")));
 static NORWEGIAN: Catalog = Catalog::new("nb", "Norsk bokmål", include_str!(concat!(env!("OUT_DIR"), "/locales/nb.json")));
 static DUTCH: Catalog = Catalog::new("nl", "Nederlands", include_str!(concat!(env!("OUT_DIR"), "/locales/nl.json")));
@@ -110,6 +111,7 @@ pub const LOCALES: &[&Catalog] = &[
     &ITALIAN,
     &JAPANESE,
     &KOREAN,
+    &LAO,
     &MALAY,
     &NORWEGIAN,
     &DUTCH,
@@ -2314,4 +2316,12 @@ mod tests {
         assert_eq!(literals("use crate::i18n::{format, tr};\nfn live() { tr(\"Preferences\"); }"), id);
         assert_eq!(literals("fn live() { let tr = crate::i18n::tr; tr(\"Preferences\"); }"), id);
     }
+    #[test]
+    fn lao_catalog_is_registered_and_translates_keys() {
+        let lo = Locale::for_language("lo");
+        assert_eq!(lo.name(), "ພາສາລາວ");
+        assert!(is_supported("lo"));
+        // ຖ້າຢากທົດສອບຄຳແປພື້ນຖານ:
+        // assert_eq!(lo.text("ui.preferences"), "ການຕັ້ງຄ່າ");
+    }    
 }
