@@ -55,6 +55,8 @@ CommandSpec::new("view.ground_shadow", "Ground shadow", ground_shadow)
     .icon("style").noundo().doc_only().params("on?: bool (omitted: toggle) → on?; show the ground shadow"),
 CommandSpec::new("view.navigation_bar", "Navigation bar", navigation_bar)
     .icon("pan").noundo().doc_only().params("visible?: bool (omitted: toggle) → visible?; show the navigation bar (window setting)"),
+CommandSpec::new("view.parts_library", "Parts library", parts_library)
+    .icon("folder").noundo().doc_only().params("visible?: bool (omitted: toggle) → visible?; show the parts library card (window setting)"),
 CommandSpec::new("view.render_focus", "Render Focus View", crate::checked!("view.render_focus", render_focus))
     .icon("render_scene").noundo().doc_only()
     .contract(&FOCUS_CONTRACT).output(output_schema_for::<RenderFocus>)
@@ -273,6 +275,9 @@ fn ground_shadow(_s: &mut Session, p: &Value) -> Result<Value> {
 }
 fn navigation_bar(_s: &mut Session, p: &Value) -> Result<Value> {
     view_toggle(p, "view.navigation_bar", "visible")
+}
+fn parts_library(_s: &mut Session, p: &Value) -> Result<Value> {
+    view_toggle(p, "view.parts_library", "visible")
 }
 
 fn status_items(s: &mut Session, p: &Value) -> Result<Value> {
@@ -559,7 +564,13 @@ mod tests {
                 assert!(s.execute(id, &json!({key:value})).is_err(), "{id}: {value}");
             }
         }
-        for (id, key) in [("view.spin", "on"), ("view.grid", "on"), ("view.ground_shadow", "on"), ("view.navigation_bar", "visible")] {
+        for (id, key) in [
+            ("view.spin", "on"),
+            ("view.grid", "on"),
+            ("view.ground_shadow", "on"),
+            ("view.navigation_bar", "visible"),
+            ("view.parts_library", "visible"),
+        ] {
             assert_eq!(s.execute(id, &json!({})).unwrap(), json!({}));
             assert_eq!(s.execute(id, &Value::Null).unwrap(), json!({}));
             for on in [false, true] {
@@ -569,7 +580,17 @@ mod tests {
                 assert!(s.execute(id, &json!({key:value})).is_err(), "{id}: {value}");
             }
         }
-        for id in ["view.fit", "view.home", "view.tool", "view.spin", "view.visual_style", "view.grid", "view.ground_shadow", "view.navigation_bar"] {
+        for id in [
+            "view.fit",
+            "view.home",
+            "view.tool",
+            "view.spin",
+            "view.visual_style",
+            "view.grid",
+            "view.ground_shadow",
+            "view.navigation_bar",
+            "view.parts_library",
+        ] {
             for params in [json!(true), json!(1), json!("orbit"), json!([]), json!({"unexpected":true})] {
                 assert!(s.execute(id, &params).is_err(), "{id}: {params}");
             }

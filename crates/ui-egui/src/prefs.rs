@@ -678,6 +678,54 @@ impl StandUpUnknown {
     }
 }
 
+/// The parts library's card size; the columns follow it (three Small, two Medium, one Large
+/// across), and List shows names only. A saved value this version doesn't know (the first
+/// library's 0 to 3) reads as Medium.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LibrarySize {
+    Small,
+    #[default]
+    Medium,
+    Large,
+    List,
+}
+
+impl<'de> Deserialize<'de> for LibrarySize {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let v = serde_json::Value::deserialize(d)?;
+        Ok(v.as_str().and_then(Self::from_id).unwrap_or_default())
+    }
+}
+
+impl LibrarySize {
+    pub const ALL: [Self; 4] = [Self::Small, Self::Medium, Self::Large, Self::List];
+
+    /// The size as `ui.library` and the saved preferences spell it.
+    pub fn id(self) -> &'static str {
+        match self {
+            Self::Small => "small",
+            Self::Medium => "medium",
+            Self::Large => "large",
+            Self::List => "list",
+        }
+    }
+
+    pub fn from_id(id: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|s| s.id() == id)
+    }
+
+    /// The message id of the size's label.
+    pub fn label_id(self) -> &'static str {
+        match self {
+            Self::Small => "library.size_small",
+            Self::Medium => "library.size_medium",
+            Self::Large => "library.size_large",
+            Self::List => "library.size_list",
+        }
+    }
+}
+
 /// Which program reads the 3D mouse on Linux when both spacenavd and the device itself (hidraw)
 /// are there (Preferences: "3D mouse driver"). Read by the app's reader, not by this crate.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -1172,6 +1220,13 @@ preference_settings! {
     /// Each tree row's eye between its fold arrow and its radio, as before #8718, instead of in a
     /// column at the rows' right end. Off by default.
     browser_eye_left: bool = false, PAGE_INTERFACE => check_id("prefs.browser_eye_left");
+    /// The parts library panel (`library`): its folder (a local folder or a server share; empty:
+    /// none chosen), whether it shows, the subfolder last browsed into (relative to the folder) and
+    /// the card size.
+    library_folder: String = String::new(), PAGE_INTERFACE;
+    library_open: bool = false, PAGE_INTERFACE;
+    library_subfolder: String = String::new(), PAGE_INTERFACE;
+    library_size: LibrarySize = LibrarySize::default(), PAGE_INTERFACE;
     /// The wheel zooms toward the point under the cursor (else toward the view's centre).
     zoom_to_cursor: bool = true, PAGE_NAVIGATION => check("Zoom to the cursor", "The wheel zooms toward the point under the cursor (off: toward the view's center)");
     /// Speed multiplier for wheel zoom, independent of the 3D mouse.
@@ -3428,6 +3483,11 @@ pub fn set(app: &mut SolveApp, p: &serde_json::Value) -> Result<serde_json::Valu
         && !StandUpUnknown::ALL.iter().any(|c| v.as_str() == Some(c.id()))
     {
         return Err("`stand_up_unknown` must be ask, note or off".into());
+    }
+    if let Some(v) = p.get("library_size")
+        && v.as_str().and_then(LibrarySize::from_id).is_none()
+    {
+        return Err("`library_size` must be small, medium, large or list".into());
     }
     let new: Prefs = serde_json::from_value(cur).map_err(|e| e.to_string())?;
     if !accepted::wheel_zoom_speed(&new) {

@@ -138,7 +138,7 @@ fn column_rects(app: &SolveApp, available: Rect, browser_collapsed: bool, histor
 
 fn column_rects_at(app: &SolveApp, available: Rect, browser_fold: f32, history_fold: f32) -> (Rect, Rect) {
     let mut available = available;
-    available.min.x += crate::agent_chat::left_inset(app, available);
+    available.min.x += crate::agent_chat::left_inset(app, available) + crate::library::left_inset(app);
     let gap = Container::for_layout(app.ui.layout, Surface::Panel).gap();
     let column = crate::browser::panel_bounds(available, None, crate::browser::browser_width(app.preferences.browser_width), gap);
     if !app.ui.show_browser {
@@ -205,7 +205,10 @@ pub(crate) fn floating_rect(app: &SolveApp, available: Rect) -> Rect {
         return stacked_rects(app, available).1;
     }
     let gap = Container::for_layout(app.ui.layout, Surface::Panel).gap();
-    let min = pos2((available.left() + crate::agent_chat::left_inset(app, available) + gap).min(available.right()), available.top());
+    let min = pos2(
+        (available.left() + crate::agent_chat::left_inset(app, available) + crate::library::left_inset(app) + gap).min(available.right()),
+        available.top(),
+    );
     Rect::from_min_max(min, pos2((min.x + strip_width(app)).min((available.right() - gap).max(min.x)), (available.bottom() - gap).max(min.y)))
 }
 

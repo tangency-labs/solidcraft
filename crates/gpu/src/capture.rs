@@ -261,10 +261,13 @@ impl Capturer {
                     multiview_mask: None,
                 })
                 .forget_lifetime();
-            // The background first, as the viewport paints it before the model.
-            pass.set_pipeline(&state.background);
-            pass.set_vertex_buffer(0, background.slice(..));
-            pass.draw(0..6, 0..1);
+            // The background first, as the viewport paints it before the model (none for a
+            // transparent picture: the pass cleared to transparent black).
+            if !scene.transparent {
+                pass.set_pipeline(&state.background);
+                pass.set_vertex_buffer(0, background.slice(..));
+                pass.draw(0..6, 0..1);
+            }
             state.renderer.paint(&frame, &mut pass, [0.0, 0.0, width as f32, height as f32]);
         }
         let row = width * 4;

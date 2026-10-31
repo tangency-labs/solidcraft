@@ -381,6 +381,7 @@ fn services(cc: &eframe::CreationContext<'_>, folder: &DialogFolder) -> Services
     let parent = rfd::AsyncFileDialog::new().set_parent(cc);
     let open_parent = parent.clone();
     let program_parent = parent.clone();
+    let folder_parent = parent.clone();
     let file_parent = parent.clone();
     let (open_folder, file_folder, save_folder) = (folder.clone(), folder.clone(), folder.clone());
     Services {
@@ -423,6 +424,10 @@ fn services(cc: &eframe::CreationContext<'_>, folder: &DialogFolder) -> Services
             let dialog = program_parent.clone().set_title("Choose your slicer");
             let dialog = if cfg!(target_os = "windows") { dialog.add_filter("Programs", &["exe"]) } else { dialog };
             let future = dialog.pick_file();
+            Box::pin(async move { future.await.map(|p| p.path().to_string_lossy().into_owned()) })
+        })),
+        pick_folder: Some(Box::new(move || {
+            let future = folder_parent.clone().set_title("Choose the parts library folder").pick_folder();
             Box::pin(async move { future.await.map(|p| p.path().to_string_lossy().into_owned()) })
         })),
         pick_save: Some(Box::new(move |name: &str, exts: &[&str]| {

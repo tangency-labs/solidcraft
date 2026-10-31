@@ -1668,7 +1668,8 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
                     && (resp.is_pointer_button_down_on()
                         || (running.as_deref() == Some(selected.id) && !(persistent && app.preferences.persistent_ribbon_pressed))
                         || family_open
-                        || (selected.id == "view.shots_strip" && app.preferences.render_shots_strip))
+                        || (selected.id == "view.shots_strip" && app.preferences.render_shots_strip)
+                        || (selected.id == "view.parts_library" && app.preferences.library_open))
                 {
                     egui::Shape::Rect(egui::epaint::RectShape::new(
                         whole,
@@ -1782,7 +1783,7 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
                     );
                     let info = crate::render_workspace::interactive_command_info(app, c);
                     let resp = ui.interact(cell, ui.id().with(("cmd", c.id)), Sense::click_and_drag());
-                    let active = running.as_deref() == Some(c.id);
+                    let active = running.as_deref() == Some(c.id) || (c.id == "view.parts_library" && app.preferences.library_open);
                     let accent = crate::theme::TabAccent::for_tab(&t, &tab);
                     painter.rect(
                         cell,

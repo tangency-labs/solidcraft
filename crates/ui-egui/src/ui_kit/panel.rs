@@ -17,6 +17,21 @@ pub(crate) fn header(ui: &mut Ui, icon: &str, title: &str, on_close: impl FnOnce
     header_impl(ui, (icon, None), title, None, true, on_close);
 }
 
+/// A workspace card's title band with its icon in `ink`, the fold button when it folds
+/// (`collapsed`), up to two icon actions left of the close button (`actions` lays them out in a
+/// `control_height × 2` slot) and the close button. Tokens: the feature header's.
+pub(crate) fn card_header(
+    ui: &mut Ui,
+    icon: &str,
+    ink: egui::Color32,
+    title: &str,
+    collapsed: Option<&mut bool>,
+    on_close: impl FnOnce(),
+    actions: &mut dyn FnMut(&mut Ui),
+) {
+    header_actions(ui, (icon, Some(ink)), title, collapsed, true, on_close, Some(actions));
+}
+
 /// Optional fold action for managers which historically hide their inputs without losing edits.
 /// Tokens: header tokens and space_4; retains the dialog:collapse scenario handle.
 pub(crate) fn collapsible_header(ui: &mut Ui, icon: &str, title: &str, collapsed: &mut bool, on_close: impl FnOnce()) {
@@ -69,13 +84,27 @@ fn header_actions(
         }
     }
     let right = if let Some(actions) = actions {
-        let action_rect = egui::Rect::from_center_size(
-            egui::pos2(rect.right() - t.space_8 - t.control_height, rect.center().y),
-            vec2(t.control_height * 2.0, t.control_height),
-        );
+        // Left of the close button when there is one, so neither covers the other.
+        let end = if closeable { close_rect.left() - t.space_4 } else { rect.right() - t.space_8 };
+        let action_rect =
+            egui::Rect::from_center_size(egui::pos2(end - t.control_height, rect.center().y), vec2(t.control_height * 2.0, t.control_height));
         let mut action_ui = ui.new_child(egui::UiBuilder::new().max_rect(action_rect));
         actions(&mut action_ui);
-        action_rect.left() - t.space_8
+        match collapsed {
+            // The fold button left of the actions.
+            Some(collapsed) => {
+                let fold =
+                    egui::Rect::from_min_size(egui::pos2(action_rect.left() - t.form_close_size - t.space_4, close_rect.top()), close_rect.size());
+                let response =
+                    super::disclosure_button_at(ui, fold, !*collapsed, crate::i18n::tr_label(if *collapsed { "Expand" } else { "Collapse" }));
+                scenario::publish_handle("dialog:collapse", response.rect.center());
+                if response.clicked() {
+                    *collapsed = !*collapsed;
+                }
+                fold.left() - t.space_4
+            }
+            None => action_rect.left() - t.space_8,
+        }
     } else if let Some(collapsed) = collapsed {
         let fold = egui::Rect::from_min_size(egui::pos2(close_rect.left() - t.form_close_size - t.space_4, close_rect.top()), close_rect.size());
         let response = super::disclosure_button_at(ui, fold, !*collapsed, crate::i18n::tr_label(if *collapsed { "Expand" } else { "Collapse" }));

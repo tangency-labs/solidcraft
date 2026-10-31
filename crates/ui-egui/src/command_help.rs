@@ -348,6 +348,7 @@ mod tests {
         "view.list",
         "view.navigate",
         "view.navigation_bar",
+        "view.parts_library",
         "view.rename",
         "view.save",
         "view.spin",

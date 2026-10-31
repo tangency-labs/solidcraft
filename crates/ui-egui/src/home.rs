@@ -145,6 +145,26 @@ pub fn thumbnail(s: &Session) -> Option<egui::ColorImage> {
     Some(egui::ColorImage::from_rgba_unmultiplied(THUMB, &picture.rgba))
 }
 
+/// A picture of the part alone over transparent pixels, for the parts library's tiles: no
+/// backdrop, grid or axes.
+#[cfg(not(target_arch = "wasm32"))]
+fn cutout(s: &Session) -> Option<egui::ColorImage> {
+    let mut cam = Camera::default();
+    cam.set_view(StandardView::Iso);
+    let b = solidcraft_engine::view::bounds(s);
+    if b.is_empty() {
+        return None;
+    }
+    cam.fit(&b);
+    cam.distance *= 0.7;
+    let guides = solidcraft_engine::view::Guides { grid: false, axes: false };
+    let mut scene = solidcraft_engine::view::scene_with_guides(s, &cam, s.section, guides);
+    scene.transparent = true;
+    // Over transparent black, the edges come back premultiplied.
+    let picture = solidcraft_engine::capture::rgba(&scene, &cam, THUMB[0] as u32, THUMB[1] as u32).ok()?;
+    Some(egui::ColorImage::from_rgba_premultiplied(THUMB, &picture.rgba))
+}
+
 /// File identity, not just its path: saving or replacing a design invalidates its picture.
 #[cfg(not(target_arch = "wasm32"))]
 fn cache_path(key: &str) -> Option<std::path::PathBuf> {
@@ -288,6 +308,38 @@ pub(crate) fn install(h: &mut HomeState, ctx: &egui::Context, key: &str, img: Op
             h.failed.insert(key.to_string());
         }
     }
+}
+
+/// A file's picture for the parts library, made once by opening the file (on a worker thread);
+/// a file that can't be drawn shows its stored picture, if it has one.
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn part_picture(key: &str) -> Option<egui::ColorImage> {
+    // Kept apart from Home's pictures, which have their backdrop.
+    let path = cache_path(key).map(|p| p.with_file_name(format!("part-{}", p.file_name().unwrap_or_default().to_string_lossy())));
+    if let Some(bytes) = path.as_ref().and_then(|p| std::fs::read(p).ok())
+        && let Some(img) = decode_thumbnail(bytes)
+    {
+        return Some(img);
+    }
+    let mut s = Session::default();
+    let drawn = s.execute("doc.open", &serde_json::json!({ "path": key })).ok().and_then(|_| cutout(&s));
+    let Some(img) = drawn else {
+        return picture(key);
+    };
+    let rgba: Vec<u8> = img.pixels.iter().flat_map(|c| c.to_srgba_unmultiplied()).collect();
+    if let (Some(path), Some(bytes)) = (path, solidcraft_engine::render::png(THUMB[0], THUMB[1], rgba))
+        && let Some(dir) = path.parent()
+        && std::fs::create_dir_all(dir).is_ok()
+    {
+        let _ = solidcraft_engine::io::write_atomic(&path, &bytes, false);
+    }
+    Some(img)
+}
+
+/// Upload a picture into a texture map (the parts library's).
+pub(crate) fn install_texture(map: &mut HashMap<String, Option<egui::TextureHandle>>, ctx: &egui::Context, key: &str, img: Option<egui::ColorImage>) {
+    let tex = img.map(|i| ctx.load_texture(format!("library:{key}"), i, egui::TextureOptions::LINEAR));
+    map.insert(key.to_string(), tex);
 }
 
 /// Read a disposable picture without evaluating, importing or meshing a model.

@@ -939,7 +939,7 @@ pub fn browser(app: &mut SolveApp, ui: &mut egui::Ui) {
     let vertical = app.ui.show_timeline && app.preferences.timeline_left;
     let mut available = available;
     if !stacked {
-        available.min.x += crate::agent_chat::left_inset(app, available);
+        available.min.x += crate::agent_chat::left_inset(app, available) + crate::library::left_inset(app);
     }
     if vertical
         && !stacked
