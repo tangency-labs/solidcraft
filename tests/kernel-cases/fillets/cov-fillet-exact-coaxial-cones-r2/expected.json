@@ -1,0 +1,27 @@
+{
+ "sources": [],
+ "what": "two coaxial frusta joined, R10 to 6 over z 0..8 and R6 to 1 over z 8..9: the convex circle between their cones rounded r2",
+ "source": "analytic",
+ "method": "both cones turn about z: the ball's centre runs on a circle about z, so the round is the ball's arc turned about z: rational, of degrees (2, 2). V0 = the frusta, pi h (R^2 + R r + r^2) / 3; the round removes 2 pi times the first moment about z of its section (the ball R2 tangent to both profile lines): 5.065333649310.",
+ "body_count": 1,
+ "volume_mm3": 1681.969921328409,
+ "tolerance": {
+  "rel": 1e-06
+ },
+ "surface_types": [
+  "bspline",
+  "cone",
+  "plane"
+ ],
+ "splines": [
+  {
+   "degree": [
+    2,
+    2
+   ]
+  }
+ ],
+ "continuity": {
+  "order": "g1"
+ }
+}

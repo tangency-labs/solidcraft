@@ -1,0 +1,27 @@
+{
+ "sources": [],
+ "what": "a frustum R10 narrowing at 10 deg, cut by the plane z = 15 + 0.3 x: its elliptical top rim rounded r1.5",
+ "source": "analytic",
+ "method": "the ball's centre runs on the cone moved 1.5 in (its apex 1.5 / sin 10 deg lower) and on the plane moved 1.5 down: a plane section of a cone, an ellipse (rho = K / (1 + 0.3 tan 10 deg cos phi) about the axis), so the round is a rational B-spline of degrees (4, 2). V0 = 3565.939077141579 (the bottom disc gives no flux about the origin, the cone X.n = 10 sin 10 deg / tan 10 deg over its area, the top X.n = 15 / sqrt 1.09 over its area); the round removes 16.021667699147, (1/3) of the flux of the position through the boundary of the material the round removes: the round's surface as the ball's circles about the spine from contact to contact, the strips of the faces between the edge and the contact lines, each written out exactly and integrated by Gauss-Legendre quadrature (24 points a panel).",
+ "body_count": 1,
+ "volume_mm3": 3549.917409442432,
+ "tolerance": {
+  "rel": 1e-06
+ },
+ "surface_types": [
+  "bspline",
+  "cone",
+  "plane"
+ ],
+ "splines": [
+  {
+   "degree": [
+    4,
+    2
+   ]
+  }
+ ],
+ "continuity": {
+  "order": "g1"
+ }
+}
