@@ -203,6 +203,8 @@ impl eframe::App for App {
             log::warn!("a picture was still being drawn as the app closed");
         }
         solidcraft_ui_egui::recovery_ui::close(&mut self.solve);
+        // A GPU path tracer setup still running did not stop the app (#9236).
+        solidcraft_ui_egui::render_workspace::close(&mut self.solve);
         solidcraft_ui_egui::open_elsewhere::close(&mut self.solve);
         // Before a restart (`Drop for App`) starts the next instance, which would otherwise get
         // nothing from the 3D mouse driver (`solidcraft_3dx_client::stop`).

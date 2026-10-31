@@ -962,6 +962,9 @@ impl SolveApp {
         {
             let adapter = rs.adapter.clone();
             let key = render_workspace::adapter_key(&adapter.get_info());
+            // Next to the graphics settings: a setup that stops the app is not run again by itself.
+            let marker = self.services.graphics_path.as_deref().map(|p| std::path::Path::new(p).with_file_name(render_workspace::SETUP_MARKER));
+            self.render_workspace.watch_setup(marker);
             self.render_workspace.defer_path_host(key, move || solidcraft_gpu::path::host_on_adapter(&adapter).map_err(|e| e.to_string()));
         }
         render_workspace::sync_backend(self);

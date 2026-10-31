@@ -127,6 +127,13 @@ pub struct State {
     pub setup_seconds: std::collections::BTreeMap<String, f64>,
     /// The viewport adapter the current setup runs on.
     pub setup_key: Option<String>,
+    /// The file that says a setup is running ([`SETUP_MARKER`] in the settings folder); `None`:
+    /// nowhere to keep it (browser, tests), so a setup that crashes is simply run again.
+    #[cfg(not(target_arch = "wasm32"))]
+    setup_marker: Option<std::path::PathBuf>,
+    /// The adapter whose setup was still running when the app last stopped (#9236).
+    #[cfg(not(target_arch = "wasm32"))]
+    crashed_setup: Option<String>,
     pub geometry_budget: u64,
     /// A GPU error the preview's last geometry upload caught.
     pub upload_error: crate::gpu::UploadError,
@@ -457,6 +464,10 @@ impl Default for State {
             pending_setup: None,
             setup_seconds: Default::default(),
             setup_key: None,
+            #[cfg(not(target_arch = "wasm32"))]
+            setup_marker: None,
+            #[cfg(not(target_arch = "wasm32"))]
+            crashed_setup: None,
             geometry_budget: WEB_GEOMETRY_BYTES,
             upload_error: Arc::new(Mutex::new(None)),
             image_host: None,
@@ -490,13 +501,131 @@ impl State {
         }
     }
 
+    /// Keep the running-setup marker at `path`, and read what the last launch left there: a
+    /// marker still present means the app stopped during that setup. Once per launch.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn watch_setup(&mut self, path: Option<std::path::PathBuf>) {
+        if self.setup_marker.is_some() {
+            return;
+        }
+        self.crashed_setup = path.as_deref().and_then(marker_adapter);
+        if let Some(key) = &self.crashed_setup {
+            log::warn!("the last GPU path tracer setup on {key} did not finish: the app stopped during it");
+        }
+        self.setup_marker = path;
+    }
+
+    /// Whether the deferred setup waits for the user because it stopped the app last time.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn setup_crashed(&self) -> bool {
+        self.crashed_setup.is_some() && self.crashed_setup == self.setup_key && self.pending_setup.is_some()
+    }
+
     #[cfg(not(target_arch = "wasm32"))]
     fn start_deferred_path_host(&mut self) {
-        if matches!(self.path_host, PathHost::NotStarted)
-            && let Some(create) = self.pending_setup.take()
-        {
-            self.path_host.start(create);
+        if !matches!(self.path_host, PathHost::NotStarted) || self.pending_setup.is_none() {
+            return;
         }
+        // A driver that takes the process down while it compiles (#9236) is beyond any error
+        // scope or unwind guard; the marker is how the next launch learns of it.
+        if self.setup_crashed() {
+            self.path_host = PathHost::failed(crate::i18n::tr("render.gpu_path_crashed").into());
+            return;
+        }
+        let Some(create) = self.pending_setup.take() else { return };
+        if let (Some(path), Some(key)) = (&self.setup_marker, &self.setup_key) {
+            write_marker(path, key);
+        }
+        self.path_host.start(create);
+        if !matches!(self.path_host, PathHost::Preparing(..)) {
+            self.clear_setup_marker();
+        }
+    }
+
+    /// Run a setup that stopped the app last time again, at the user's request.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn retry_crashed_setup(&mut self) {
+        if self.setup_crashed() && matches!(self.path_host, PathHost::Failed(_)) {
+            self.crashed_setup = None;
+            self.path_host = PathHost::NotStarted;
+            self.start_deferred_path_host();
+        }
+    }
+
+    /// Take the worker's answer if it has come: either answer means the process survived it.
+    fn poll_setup(&mut self) -> Option<std::time::Duration> {
+        let preparing = matches!(self.path_host, PathHost::Preparing(..));
+        let took = self.path_host.poll();
+        if preparing && !matches!(self.path_host, PathHost::Preparing(..)) {
+            self.clear_setup_marker();
+        }
+        took
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    fn clear_setup_marker(&self) {}
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn clear_setup_marker(&self) {
+        if let Some(path) = &self.setup_marker
+            && let Err(e) = std::fs::remove_file(path)
+            && e.kind() != std::io::ErrorKind::NotFound
+        {
+            log::warn!("could not remove {}: {e}", path.display());
+        }
+    }
+}
+
+/// The marker file a running path tracer setup keeps in the settings folder.
+pub const SETUP_MARKER: &str = "gpu-path-setup.json";
+/// A marker is a few dozen bytes; anything longer is not one.
+#[cfg(not(target_arch = "wasm32"))]
+const MAX_MARKER_BYTES: u64 = 64 * 1024;
+
+/// The adapter a marker names, if `path` holds a readable one.
+#[cfg(not(target_arch = "wasm32"))]
+fn marker_adapter(path: &std::path::Path) -> Option<String> {
+    use std::io::Read;
+    let mut text = String::new();
+    std::fs::File::open(path).ok()?.take(MAX_MARKER_BYTES + 1).read_to_string(&mut text).ok()?;
+    if text.len() as u64 > MAX_MARKER_BYTES {
+        return None;
+    }
+    let value: serde_json::Value = serde_json::from_str(&text).ok()?;
+    value.get("adapter")?.as_str().filter(|key| !key.is_empty()).map(str::to_owned)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn write_marker(path: &std::path::Path, key: &str) {
+    if let Some(dir) = path.parent()
+        && let Err(e) = std::fs::create_dir_all(dir)
+    {
+        log::warn!("could not create {}: {e}", dir.display());
+    }
+    if let Err(e) = std::fs::write(path, json!({"adapter": key}).to_string()) {
+        log::warn!("could not write {}: {e}", path.display());
+    }
+}
+
+/// Under the failure message: when the setup stopped the app last time (#9236), the button
+/// that runs it again. Nothing else runs it.
+pub(crate) fn retry_crashed_setup(app: &mut SolveApp, ui: &mut egui::Ui) {
+    #[cfg(not(target_arch = "wasm32"))]
+    if app.render_workspace.setup_crashed() {
+        let response = crate::ui_kit::button(ui, app.tr("render.gpu_path_retry"), crate::ui_kit::Button::Normal);
+        crate::scenario::publish_target("render:gpu-path-retry", response.rect);
+        if response.clicked() {
+            app.render_workspace.retry_crashed_setup();
+        }
+    }
+    #[cfg(target_arch = "wasm32")]
+    let _ = (app, ui);
+}
+
+/// The app is closing normally: a setup still running did not stop it.
+pub fn close(app: &mut SolveApp) {
+    if matches!(app.render_workspace.path_host, PathHost::Preparing(..)) {
+        app.render_workspace.clear_setup_marker();
     }
 }
 
@@ -561,7 +690,7 @@ pub fn sync_backend(app: &mut SolveApp) {
     if active(app) {
         app.render_workspace.start_deferred_path_host();
     }
-    if let Some(took) = app.render_workspace.path_host.poll() {
+    if let Some(took) = app.render_workspace.poll_setup() {
         record_setup(&mut app.render_workspace, took);
     }
     if let PathHost::Ready(host) = &app.render_workspace.path_host
@@ -620,7 +749,15 @@ pub fn reset_document(app: &mut SolveApp) {
     let setup_seconds = std::mem::take(&mut app.render_workspace.setup_seconds);
     let setup_key = app.render_workspace.setup_key.take();
     let pending_setup = app.render_workspace.pending_setup.take();
+    #[cfg(not(target_arch = "wasm32"))]
+    let (setup_marker, crashed_setup) = (app.render_workspace.setup_marker.take(), app.render_workspace.crashed_setup.take());
     app.render_workspace = State { host, image_host, path_host, setup_seconds, setup_key, pending_setup, geometry_budget, ..Default::default() };
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        // The running-setup marker is the application's, like the setup itself.
+        app.render_workspace.setup_marker = setup_marker;
+        app.render_workspace.crashed_setup = crashed_setup;
+    }
     if active(app) {
         app.ui.tab = "MODEL".into();
     }
@@ -1071,6 +1208,7 @@ fn image_edit_controls(app: &mut SolveApp, ui: &mut egui::Ui) {
         PathHost::Preparing(_, started) => setup_progress(ui, app, *started),
         PathHost::Failed(error) => {
             ui.add(egui::Label::new(format!("{}: {error}", app.tr("render.gpu_path_failed"))).wrap());
+            retry_crashed_setup(app, ui);
         }
         _ => {}
     }

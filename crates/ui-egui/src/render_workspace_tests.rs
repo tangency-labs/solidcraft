@@ -1070,6 +1070,121 @@ mod async_path_host {
         assert!(h.widget(&format!("GPU path tracer unavailable: {message}")).is_some());
         assert!(image_host(&h.app, ImageMethod::GpuRaytrace).is_err());
     }
+
+    fn marker_adapter_in(path: &std::path::Path) -> Option<String> {
+        let text = std::fs::read_to_string(path).ok()?;
+        serde_json::from_str::<serde_json::Value>(&text).ok()?["adapter"].as_str().map(str::to_owned)
+    }
+
+    /// A driver that takes the process down while it compiles the path tracer (#9236) can't be
+    /// caught: the marker it leaves keeps the next launch from running that setup by itself.
+    #[test]
+    fn a_setup_that_stopped_the_app_is_not_run_again_until_asked() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let mut h = panel_fixture();
+        let marker = h.dir.join(SETUP_MARKER);
+        let key = "AMD Radeon RX 7600 (RADV NAVI33) | Vulkan | radv Mesa 25.2.8";
+        std::fs::write(&marker, json!({"adapter": key}).to_string()).unwrap();
+        h.app.render_workspace.watch_setup(Some(marker.clone()));
+        let calls = Arc::new(AtomicUsize::new(0));
+        let observed = calls.clone();
+        h.app.render_workspace.defer_path_host(key.into(), move || {
+            observed.fetch_add(1, Ordering::SeqCst);
+            job::ImageHost::with_executor(Arc::new(TestExecutor)).map_err(|e| e.to_string())
+        });
+        h.app.render_workspace.view.method = ImageMethod::GpuRaytrace;
+        sync_backend(&mut h.app);
+        h.frames(5);
+        assert_eq!(calls.load(Ordering::SeqCst), 0, "the setup that stopped the app must not run by itself");
+        let PathHost::Failed(message) = &h.app.render_workspace.path_host else { panic!("expected the crash to be reported") };
+        assert_eq!(message, h.app.tr("render.gpu_path_crashed"));
+        assert!(h.widget(&format!("GPU path tracer unavailable: {message}")).is_some());
+        assert!(image_host(&h.app, ImageMethod::GpuRaytrace).is_err());
+        // The other image methods stay available.
+        assert!(h.app.session.render_job_host().is_some());
+        assert_eq!(marker_adapter_in(&marker).as_deref(), Some(key), "the marker stays until the setup answers");
+
+        // Opening another design keeps both the crash and the offer to try again.
+        crate::documents::adopt(&mut h.app, Session::default());
+        enter(&mut h.app, true).unwrap();
+        h.app.render_workspace.view.inspector.page = inspector::Page::All;
+        h.app.render_workspace.view.method = ImageMethod::GpuRaytrace;
+        h.frames(3);
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
+        assert!(h.app.render_workspace.setup_crashed());
+        let retry = h.app.tr("render.gpu_path_retry").to_string();
+        assert!(h.widget(&retry).is_some(), "the panel offers to try again");
+        h.step(&json!({"widget": retry})).unwrap();
+        finish_setup(&mut h);
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        assert!(matches!(h.app.render_workspace.path_host, PathHost::Ready(_)));
+        assert!(!marker.exists(), "a setup that answered removes its marker");
+        assert!(!h.app.render_workspace.setup_crashed());
+    }
+
+    #[test]
+    fn a_running_setup_keeps_a_marker_until_it_answers() {
+        for answer in [true, false] {
+            let mut h = panel_fixture();
+            let marker = h.dir.join("settings").join(SETUP_MARKER);
+            h.app.render_workspace.watch_setup(Some(marker.clone()));
+            let (release, wait) = mpsc::channel::<()>();
+            h.app.render_workspace.defer_path_host("Test GPU | Vulkan | 1.0".into(), move || {
+                wait.recv_timeout(Duration::from_secs(10)).unwrap();
+                if answer { job::ImageHost::with_executor(Arc::new(TestExecutor)).map_err(|e| e.to_string()) } else { Err("refused".into()) }
+            });
+            sync_backend(&mut h.app);
+            assert!(matches!(h.app.render_workspace.path_host, PathHost::Preparing(..)));
+            assert_eq!(marker_adapter_in(&marker).as_deref(), Some("Test GPU | Vulkan | 1.0"));
+            release.send(()).unwrap();
+            finish_setup(&mut h);
+            assert_eq!(matches!(h.app.render_workspace.path_host, PathHost::Ready(_)), answer);
+            assert!(!marker.exists(), "answer {answer}: the process survived, so the marker goes");
+        }
+    }
+
+    #[test]
+    fn closing_during_setup_is_not_a_crash() {
+        let mut h = panel_fixture();
+        let marker = h.dir.join(SETUP_MARKER);
+        h.app.render_workspace.watch_setup(Some(marker.clone()));
+        let (release, wait) = mpsc::channel::<()>();
+        h.app.render_workspace.defer_path_host("Test GPU | Vulkan | 1.0".into(), move || {
+            let _ = wait.recv_timeout(Duration::from_secs(10));
+            Err("closed".into())
+        });
+        sync_backend(&mut h.app);
+        assert!(marker.exists());
+        close(&mut h.app);
+        assert!(!marker.exists());
+        release.send(()).unwrap();
+    }
+
+    #[test]
+    fn markers_for_other_adapters_or_unreadable_ones_never_block_the_setup() {
+        let other = || json!({"adapter": "Another GPU | Vulkan | 1.0"}).to_string().into_bytes();
+        let hostile: [Vec<u8>; 6] = [
+            other(),
+            b"\xff\xfe not text".to_vec(),
+            b"{\"adapter\": 42}".to_vec(),
+            b"{\"adapter\": \"\"}".to_vec(),
+            b"[\"Test GPU | Vulkan | 1.0\"]".to_vec(),
+            format!("{{\"adapter\": \"Test GPU | Vulkan | 1.0\", \"pad\": \"{}\"}}", "x".repeat(70_000)).into_bytes(),
+        ];
+        for bytes in hostile {
+            let mut h = panel_fixture();
+            let marker = h.dir.join(SETUP_MARKER);
+            std::fs::write(&marker, &bytes).unwrap();
+            h.app.render_workspace.watch_setup(Some(marker.clone()));
+            h.app.render_workspace.defer_path_host("Test GPU | Vulkan | 1.0".into(), || {
+                job::ImageHost::with_executor(Arc::new(TestExecutor)).map_err(|e| e.to_string())
+            });
+            sync_backend(&mut h.app);
+            finish_setup(&mut h);
+            assert!(matches!(h.app.render_workspace.path_host, PathHost::Ready(_)), "{:?}", String::from_utf8_lossy(&bytes[..bytes.len().min(40)]));
+            assert!(!marker.exists());
+        }
+    }
 }
 
 #[cfg(not(target_arch = "wasm32"))]
