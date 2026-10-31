@@ -66,6 +66,7 @@ pub mod drawing_sheet;
 pub mod drawing_view;
 pub mod edit;
 pub mod features;
+pub mod file_pack;
 pub mod inspect;
 pub mod render;
 pub mod render_lights;

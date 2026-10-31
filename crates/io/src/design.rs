@@ -7,8 +7,10 @@ use std::sync::Arc;
 
 mod drawing;
 mod native_cache;
+mod pack;
 mod thumbnail;
 pub use native_cache::read_design_geometry;
+pub use pack::{MAX_PACK_BYTES, MAX_PACK_DESIGNS, MAX_PACK_ENTRIES, PACK_DESIGNS, PackWriter, fits_pack, is_pack_path};
 pub use thumbnail::{THUMBNAIL_SIZE, read_design_thumbnail, read_design_thumbnail_file};
 
 use serde_json::{Map, Value, json};
