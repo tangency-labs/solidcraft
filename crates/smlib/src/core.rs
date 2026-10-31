@@ -266,6 +266,8 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.fillet_corner_per_vertex_fan = true;
     f.fillet_rail_trim_at_near_knot = true;
     f.offset_splits_corner_vertices = true;
+    f.offset_keep_cavity_regions = true;
+    f.offset_four_face_vertex_split = true;
     f.precise_properties_trim_base_v = true;
     f.fillet_blend_curve_revolved_on_arc = true;
     f.temporary_radius_setup_errors = true;
