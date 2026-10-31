@@ -134,9 +134,7 @@ use crate::nurbs::crv_common::{elliptical_arc_tol, EllipseArc};
 use crate::nurbs::index::at;
 use crate::nurbs::nurbs_crv::to_euclid;
 use crate::surface::surface::Surface;
-use crate::topology::database_io::{
-    fixed16, DatabaseReader, DatabaseWriter, FileType, InputStream,
-};
+use crate::topology::database_io::{DatabaseReader, DatabaseWriter, FileType, InputStream};
 
 use super::p2::{Ellipse, EllipseOptions, PolarConversion};
 
@@ -659,8 +657,10 @@ impl PolarConversion {
             };
             let exact = &self.exact_conversion;
             let mut flags = exact.iter().map(|&b| i32::from(b).to_string());
-            rows(db, &mut self.natural_knots.iter().map(|&x| fixed16(x)));
-            rows(db, &mut self.angles.iter().map(|&x| fixed16(x)));
+            let knots: Vec<String> = self.natural_knots.iter().map(|&x| db.f64_text(x)).collect();
+            let angles: Vec<String> = self.angles.iter().map(|&x| db.f64_text(x)).collect();
+            rows(db, &mut knots.into_iter());
+            rows(db, &mut angles.into_iter());
             rows(db, &mut flags);
         } else {
             if n_knots > 0 {

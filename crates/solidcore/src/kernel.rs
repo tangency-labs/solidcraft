@@ -847,6 +847,16 @@ pub struct UpstreamFixes {
     pub ssi_start_loop_trace_budget: bool,
     /// `SmEdgeDefinition::Imprint` makes no edge for a definition whose two ends are one proto vertex and land on one vertex in each B-rep (`GetFinalVertex`), when its curve is a speck on that vertex (9 samples, ends included, all within each B-rep's vertex tolerance and within the definition's own tolerance, which its edge would have) and another definition of the same proto edge is imprinted between two distinct vertices in each B-rep. Upstream makes a closed edge from that vertex back to itself along the speck; a coplanar face at it is then classified against a flat radial sector, and a union of two cubes within 5e-6 of each other across a 1e-4 strip deletes its bottom sliver piece and comes back with no solid region (WR-619, #1794; own design, not in the fork).
     pub imprint_skips_collapsed_definition: bool,
+    /// The ASCII database writer (`SmDatabaseIO`, `SmBrep::WriteToFile(.., SM_ASCII,
+    /// ..)`) writes each double in the shortest form that reads back as the same
+    /// double, in exponent notation (`3.0000000000000004e-1`), where upstream's stream
+    /// is `fixed` with precision 16 (`%.16f`): that keeps 16 digits after the point,
+    /// fewer than 17 significant digits below 1, so `0.3` plus 1 ULP reads back as
+    /// `0.3` and a sphere's read-back volume drifts by 1.3e-5 relative (WR-655, the
+    /// loss seen in #1485). Both kinds of file read back with every reader (`>>`
+    /// accepts the exponent); binary files are lossless either way. Off by default
+    /// (pinned behaviour: the same bytes as the C++ writer).
+    pub ascii_doubles_round_trip: bool,
 }
 }
 
