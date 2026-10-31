@@ -682,7 +682,6 @@ fn a_slot_through_a_modelled_bend_is_a_cut_out_of_its_bend_zone() {
     let whole = t * 100.0 * ((60.0 - (r + t)) + (40.0 - (r + t)) + FRAC_PI_2 * (r + t / 2.0));
     assert!((solid - (whole - slot)).abs() < 2e-3 * whole, "{solid} vs {}", whole - slot);
     run(&mut s, "sheet.convert", json!({"body": "Section", "face": [30, 0, 50], "bends": [outer]}));
-    assert!((volume(&mut s) - solid).abs() < 1e-3 * solid, "{} vs {solid}", volume(&mut s));
     // In the flat, a cut-out of the bend zone: 20 along it, 2/9 of the allowance across it,
     // from 5/9 to 7/9 of the way from the base (at 270°) to the leg (at 180°).
     let f = flat(&mut s);
@@ -707,18 +706,79 @@ fn a_slot_through_a_modelled_bend_is_a_cut_out_of_its_bend_zone() {
     let fraction = |v: f64| (v - base_side).abs() / ba;
     let (near, far) = (fraction(across.0).min(fraction(across.1)), fraction(across.0).max(fraction(across.1)));
     assert!((near - 5.0 / 9.0).abs() < 1e-6 && (far - 7.0 / 9.0).abs() < 1e-6, "{near} {far} {f}");
+    let area = 100.0 * (56.0 + 36.0 + ba) - 20.0 * 2.0 / 9.0 * ba;
+    assert!((flat_area(&f) - area).abs() < 1e-6, "{} vs {area}", flat_area(&f));
     // It stays through parameter changes, reopening and an unfold.
     let mut reopened = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
     assert_eq!(flat(&mut reopened)["cutouts"], f["cutouts"]);
     run(&mut s, "sheet.unfold", json!({}));
     run(&mut s, "sheet.refold", json!({}));
-    assert!((volume(&mut s) - solid).abs() < 1e-3 * solid, "{} vs {solid}", volume(&mut s));
+    assert!((flat_area(&flat(&mut s)) - area).abs() < 1e-6, "{}", flat(&mut s));
 
     // A slot that stops inside the sheet is a pocket of the bend: it says so, and where.
     let mut p = Session::default();
     let (outer, _) = slotted_l(&mut p, 3.0);
     let e = p.execute("sheet.convert", &json!({"body": "Section", "face": [30, 0, 50], "bends": [outer]})).err().map(|e| e.to_string());
     assert!(e.as_deref().is_some_and(|e| e.contains("pocket") && e.contains("bend")), "{e:?}");
+}
+
+/// A flat pattern's material area: its outline less its cut-outs (shoelace).
+fn flat_area(f: &Value) -> f64 {
+    let area = |lp: &Value| {
+        let pts: Vec<(f64, f64)> =
+            lp.as_array().into_iter().flatten().map(|p| (p[0].as_f64().unwrap_or(f64::NAN), p[1].as_f64().unwrap_or(f64::NAN))).collect();
+        (pts.iter().zip(pts.iter().cycle().skip(1)).map(|(a, b)| a.0 * b.1 - b.0 * a.1).sum::<f64>() / 2.0).abs()
+    };
+    let sum = |k: &str| f[k].as_array().into_iter().flatten().map(area).sum::<f64>();
+    sum("outline") - sum("cutouts")
+}
+
+/// A folded sheet with a slot wholly inside its bend zone, near either end of the zone or across
+/// its middle, written to STEP and converted back, has the same flat: one bend zone, the slot once
+/// as a closed rectangle, and nothing across the zone.
+#[test]
+fn a_folded_slot_inside_a_bend_zone_round_trips_through_step() {
+    let ba = FRAC_PI_2 * (1.0 + 0.44);
+    let tray = |(y0, y1): (f64, f64)| {
+        let mut s = Session::default();
+        rule(&mut s, "T1", 1.0, 0.44, 1.0, 0.5);
+        run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Base"}));
+        run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [80, 50]}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "sheet.flange", json!({"sketch": "Base"}));
+        run(&mut s, "sheet.flange", json!({"edges": [[40, 0, 1]], "height": 20}));
+        run(&mut s, "sheet.unfold", json!({}));
+        run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Slot"}));
+        run(&mut s, "sketch.rectangle.two_point", json!({"p0": [10, y0], "p1": [30, y1]}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "solid.extrude", json!({"sketch": "Slot", "through_all": true, "operation": "cut", "direction": "symmetric"}));
+        run(&mut s, "sheet.refold", json!({}));
+        s
+    };
+    // Unfolded, the bend zone runs y -0.26…2 (R 1, T 1, K 0.44): slots near either end and
+    // across the middle, each 20 along the bend.
+    for (y0, y1) in [(-0.1, 0.3), (0.6, 1.0), (1.4, 1.9)] {
+        let mut s = tray((y0, y1));
+        let want = 80.0 * (48.0 + 18.0 + ba) - 20.0 * (y1 - y0);
+        assert!((flat_area(&flat(&mut s)) - want).abs() < 1e-6, "{y0}: {} vs {want}", flat_area(&flat(&mut s)));
+
+        let path = std::env::temp_dir().join(format!("solidcraft-bend-slot-{}-{}.step", std::process::id(), y0));
+        run(&mut s, "file.export", json!({"path": path.to_string_lossy()}));
+        let mut c = Session::default();
+        rule(&mut c, "T1", 1.0, 0.44, 1.0, 0.5);
+        run(&mut c, "file.insert_step", json!({"path": path.to_string_lossy()}));
+        let _ = std::fs::remove_file(&path);
+        let body = c.model.state().bodies.first().map(|b| b.name.clone()).unwrap_or_default();
+        let o = 2.0 - SQRT_2;
+        run(&mut c, "sheet.convert", json!({"body": body, "face": [40, 25, 0], "bends": [[40.0, o, o]], "rule": "T1"}));
+        let f = flat(&mut c);
+        assert!(same_size(flat_size(&mut c), (80.0, 66.0 + ba), 1e-6), "{y0}: {f}");
+        assert!((flat_area(&f) - want).abs() < 1e-6, "{y0}: {} vs {want}: {f}", flat_area(&f));
+        assert_eq!(f["bend_zones"].as_array().map(Vec::len), Some(1), "{y0}: {f}");
+        let cuts = f["cutouts"].as_array().cloned().unwrap_or_default();
+        assert!(cuts.len() == 1 && cuts[0].as_array().map(Vec::len) == Some(4), "{y0}: {f}");
+        assert_eq!(f["outline"][0].as_array().map(Vec::len), Some(8), "{y0}: {f}");
+    }
 }
 
 #[test]

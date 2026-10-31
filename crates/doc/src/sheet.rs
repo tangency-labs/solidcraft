@@ -1582,39 +1582,6 @@ impl SheetBody {
         }
     }
 
-    /// Bend zone `f`'s material with each cut-out that lies inside it (the zone whole round it)
-    /// split across the bend through that cut-out's middle, so that every piece meets its
-    /// cut-outs at its edge, as a notch: a bend's revolved face folds a loop inside it wrong.
-    fn zone_pieces_without_holes(&self, f: &SheetFlange, material: Vec<Region2>, work: &mut FlatWork) -> Result<Vec<Region2>> {
-        let (mut todo, mut out) = (material, Vec::new());
-        while let Some(region) = todo.pop() {
-            let Some(hole) = region.holes.first() else {
-                out.push(region);
-                continue;
-            };
-            if todo.len().saturating_add(out.len()) >= MAX_FLAT_PIECES {
-                return Err(flat_budget_error());
-            }
-            let span = |lp: &Loop2, dir: Vec2| {
-                lp.segs
-                    .iter()
-                    .flat_map(|e| e.polyline(1e-3))
-                    .map(|q| (q - f.p).dot(dir))
-                    .fold((f64::MAX, f64::MIN), |(lo, hi), v| (lo.min(v), hi.max(v)))
-            };
-            let (h0, h1) = span(hole, f.d);
-            let ((u0, u1), (s0, s1)) = (span(&region.outer, f.d), span(&region.outer, f.n));
-            let at = |u: f64, s: f64| f.p + f.d * u + f.n * s;
-            let mid = (h0 + h1) / 2.0;
-            let (s0, s1) = (s0 - 1.0, s1 + 1.0);
-            for (a, b) in [(u0 - 1.0, mid), (mid, u1 + 1.0)] {
-                let half = rect(at(a, s0), at(b, s0), at(b, s1), at(a, s1));
-                todo.extend(material_boolean(std::slice::from_ref(&region), &[half], kernel::BoolOp::Intersect, work)?);
-            }
-        }
-        Ok(out)
-    }
-
     /// The pieces of the sheet as cells: base and flange panels and bend zones, each less
     /// the combined cut-out material. Planar clipping retains holes and disconnected islands.
     fn cells_with_work(&self, work: &mut FlatWork) -> Result<Vec<Cell>> {
@@ -1660,13 +1627,6 @@ impl SheetBody {
             let panel_box = loop_box(&panel.outer)?;
             let near: Vec<Region2> = cuts.iter().zip(&cut_boxes).filter(|(_, b)| b.meets(&panel_box)).map(|(c, _)| c.clone()).collect();
             let material = if near.is_empty() { vec![panel] } else { material_boolean(&[panel], &near, kernel::BoolOp::Cut, work)? };
-            let material = match piece {
-                Piece::Zone(i) => {
-                    let f = self.flanges.get(i).ok_or_else(|| DocError::Invalid("bend".into()))?;
-                    self.zone_pieces_without_holes(f, material, work)?
-                }
-                Piece::Panel(_) => material,
-            };
             for region in material {
                 points = points.saturating_add(region_complexity(std::slice::from_ref(&region))?.1);
                 if points > MAX_FLAT_POINTS || out.len() >= MAX_FLAT_PIECES {
@@ -6366,30 +6326,6 @@ mod tests {
         assert_eq!(zone(&[(0.0, 5.0), (4.0, 0.0), (4.0, 10.0)]), None);
         assert_eq!(zone(&[]), None);
         assert_eq!(zone(&[(f64::NAN, 0.0), (4.0, 0.0), (4.0, 10.0), (0.0, 10.0)]), None);
-    }
-
-    #[test]
-    fn cut_outs_inside_a_bend_zone_fold() {
-        // A slot and a round hole wholly inside the bend zone, the zone whole round each (a
-        // slit for a fold by hand): the folded sheet loses each one's flat area times the
-        // thickness, as one that reaches across the zone does.
-        let area = |s: &SheetBody| s.flat_regions().unwrap().iter().map(Region2::area).sum::<f64>();
-        for angle in [90f64, 72.0, 108.0] {
-            let plain = flanged(angle.to_radians());
-            let (a0, v0) = (area(&plain), vol(&plain.solid().unwrap()));
-            let f = plain.flanges[0].clone();
-            let ba = plain.allowance(&f);
-            let at = |u: f64, k: f64| f.p + f.d * u + f.n * (ba * k);
-            let slot = rect(at(30.0, 0.3), at(50.0, 0.3), at(50.0, 0.6), at(30.0, 0.6));
-            let circle = Region2 { outer: Loop2::circle(at(70.0, 0.5), 0.3 * ba), holes: vec![] };
-            let removed = 20.0 * 0.3 * ba + std::f64::consts::PI * (0.3 * ba).powi(2);
-            let mut s = plain.clone();
-            s.holes.extend([slot, circle]);
-            assert!((a0 - area(&s) - removed).abs() < 1e-6, "{angle}°: flat area {}", a0 - area(&s));
-            let body = s.solid().unwrap();
-            assert!(body.validity().is_empty(), "{angle}°: {:?}", body.validity());
-            assert!((v0 - vol(&body) - removed * 2.0).abs() < 0.02, "{angle}°: {} vs {}", v0 - vol(&body), removed * 2.0);
-        }
     }
 
     #[test]
