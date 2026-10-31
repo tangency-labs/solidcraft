@@ -10,6 +10,13 @@
 //! `blend.fillet_executive_p3`): its trace starts at a tangent point where both steps
 //! find the intersection, and the round's two rails come out with 310 control points
 //! each upstream, 286 with the fix, the volume the same to 5e-9.
+//!
+//! The flag alone turns the same file's edge 8 at r 0.5, which upstream builds, into a
+//! failure: its trace starts at a tangent point along the edge's end tangent, and the
+//! forward step alone along it misses the centre curve that the central difference
+//! found. The fork has the next fix for that, tangency-labs/smlib@68fb916 (WR-603,
+//! `fixes.fillet_trace_from_tangent_point_toward_next`): with both on, as in the fork,
+//! edge 8 builds upstream's body and edge 5's rails have 181 control points.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -67,14 +74,23 @@ fn volume(k: &Kernel, b: &mut Brep) -> f64 {
     brep_volume(k, b, 1e-8, &attrs).unwrap()
 }
 
-/// `nurb_cone.smb` with edge 5 rounded r 0.5: the largest control point count of an
-/// edge curve (the round's rails) and the volume.
-fn rounded_cone(fix: bool) -> Option<(usize, f64)> {
+/// `nurb_cone.smb` with edge `edge` rounded r 0.5 under `fixes.fillet_tangent_point_one_sided_step
+/// = fix` and `fixes.fillet_trace_from_tangent_point_toward_next = toward_next`: the largest
+/// control point count of an edge curve (the round's rails) and the volume, or `Err` when
+/// the round fails.
+fn round_cone_edge(
+    edge: usize,
+    fix: bool,
+    toward_next: bool,
+) -> Option<solidcore::Result<(usize, f64)>> {
     let mut k = Kernel::default();
     k.fixes.fillet_tangent_point_one_sided_step = fix;
+    k.fixes.fillet_trace_from_tangent_point_toward_next = toward_next;
     let mut b = read(&mut k, "Fillet/nurb_cone.smb")?;
-    let e = p1::edges(&b, None).unwrap()[5];
-    fillet_edges(&mut k, &mut b, &[e], 0.5, 1, 1, 1.0).unwrap();
+    let e = p1::edges(&b, None).unwrap()[edge];
+    if let Err(err) = fillet_edges(&mut k, &mut b, &[e], 0.5, 1, 1, 1.0) {
+        return Some(Err(err));
+    }
     let ids: Vec<_> = b.edges().ids().collect();
     let most = ids
         .into_iter()
@@ -85,7 +101,12 @@ fn rounded_cone(fix: bool) -> Option<(usize, f64)> {
         })
         .max()
         .unwrap();
-    Some((most, volume(&k, &mut b)))
+    Some(Ok((most, volume(&k, &mut b))))
+}
+
+/// Edge 5 rounded r 0.5 with only WR-595's flag set as given.
+fn rounded_cone(fix: bool) -> Option<(usize, f64)> {
+    round_cone_edge(5, fix, false).map(|r| r.unwrap())
 }
 
 #[test]
@@ -101,5 +122,32 @@ fn trace_from_a_tangent_point_takes_the_forward_step_with_the_fix() {
     assert!(
         (v_fixed - v_upstream).abs() < 1e-7 * v_upstream,
         "{v_fixed} {v_upstream}"
+    );
+}
+
+/// Edge 8 at r 0.5: upstream builds it; WR-595's flag alone fails it; with WR-603's flag
+/// as well, as the fork has both, it builds upstream's body again, and edge 5's rails have 181
+/// control points (310 upstream, 286 with WR-595's alone).
+#[test]
+fn edge_8_builds_with_the_fix_and_the_trace_toward_the_next_point() {
+    let Some(upstream) = round_cone_edge(8, false, false) else {
+        return;
+    };
+    let (_, v_upstream) = upstream.unwrap();
+    // WR-595's flag alone: the round fails (`SM_ERR` from the session's finish)
+    assert!(round_cone_edge(8, true, false).unwrap().is_err());
+    // with WR-603 too, as in the fork: upstream's body
+    let (_, v_both) = round_cone_edge(8, true, true).unwrap().unwrap();
+    assert!(
+        (v_both - v_upstream).abs() <= 1e-9 * v_upstream,
+        "{v_both} {v_upstream}"
+    );
+    // edge 5 with both: fewer rail points still (upstream 310, WR-595 alone 286)
+    let (fixed, v5) = round_cone_edge(5, true, true).unwrap().unwrap();
+    let (_, v5_upstream) = round_cone_edge(5, false, false).unwrap().unwrap();
+    assert_eq!(fixed, 181);
+    assert!(
+        (v5 - v5_upstream).abs() < 1e-7 * v5_upstream,
+        "{v5} {v5_upstream}"
     );
 }
