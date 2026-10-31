@@ -2644,6 +2644,14 @@ fn stored_revolve_axis(kind: &Kind) -> Option<&Value> {
     }
 }
 
+/// Give the keyboard back from whatever text editor holds it, so the pick field clicked into
+/// becomes the one field that looks active (#10066).
+fn surrender_keyboard_focus(ui: &egui::Ui) {
+    if let Some(id) = ui.ctx().memory(|memory| memory.focused()) {
+        ui.ctx().memory_mut(|memory| memory.surrender_focus(id));
+    }
+}
+
 pub(crate) fn input_rows_range(d: &mut Dialog, ui: &mut egui::Ui, s: &Session, names: crate::prefs::OriginPlaneNames, range: std::ops::Range<usize>) {
     // Edit Text shows its Path input among its own rows.
     if matches!(d.kind, Kind::Text(_)) {
@@ -2653,12 +2661,15 @@ pub(crate) fn input_rows_range(d: &mut Dialog, ui: &mut egui::Ui, s: &Session, n
     let mut clear: Option<usize> = None;
     let mut activate: Option<usize> = None;
     let mut remove = None;
+    // Only one field may look active at a time (#10066): while a text editor holds the keyboard,
+    // no pick field draws its accent ring, and clicking a pick field takes the keyboard back.
+    let text_focus = crate::ui_kit::editor_has_focus(ui.ctx());
     let shell_count = d.shell_faces(s).map(|faces| faces.len());
     for (i, inp) in d.inputs.iter().enumerate().skip(range.start).take(range.end.saturating_sub(range.start)) {
         let stored_reference = feature_pattern_reference_key(d, i).and_then(|key| d.extra.get(key)).filter(|_| inp.items.is_empty());
         form_row(ui, inp.label, |ui| {
             ui.horizontal(|ui| {
-                let active = i == d.active;
+                let active = i == d.active && !text_focus;
                 // A chip: "↖ Select" (outlined) while empty, "N selected" (filled) once picked.
                 let custom_axis = i == 1 && inp.items.is_empty() && stored_revolve_axis(&d.kind).is_some();
                 let filled = !inp.items.is_empty() || custom_axis || stored_reference.is_some();
@@ -2709,6 +2720,7 @@ pub(crate) fn input_rows_range(d: &mut Dialog, ui: &mut egui::Ui, s: &Session, n
                 };
                 if chip.on_hover_text(tooltip).clicked() {
                     activate = Some(i);
+                    surrender_keyboard_focus(ui);
                 }
                 if !inp.items.is_empty() || stored_reference.is_some() {
                     let rect = egui::Rect::from_center_size(
@@ -2719,6 +2731,7 @@ pub(crate) fn input_rows_range(d: &mut Dialog, ui: &mut egui::Ui, s: &Session, n
                     crate::scenario::publish_handle(&format!("dialog:clear:{}", inp.label), button.rect.center());
                     if button.clicked() {
                         clear = Some(i);
+                        surrender_keyboard_focus(ui);
                     }
                 }
             });
