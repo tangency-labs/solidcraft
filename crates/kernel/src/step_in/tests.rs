@@ -146,12 +146,15 @@ fn non_antipodal_seam_sphere_imports_as_a_whole_ball() {
 
 /// A whole ring torus (major radius 10, minor 3, about Z) written as one face bounded only by
 /// seams: its tube circle at u = 0 and its ring circle at v = 0, each run out and back, in
-/// either order round the loop. Each is the whole torus, volume 2π²Rr² and area 4π²Rr.
+/// either order round the loop; or only a slit along the tube circle, from the outer equator 2.5
+/// rad towards the top and back, the torus less a slit of no area. Each is the whole torus,
+/// volume 2π²Rr² and area 4π²Rr.
 #[test]
 fn seam_only_torus_imports_as_a_whole_ring() {
     use std::f64::consts::PI;
     let (major, minor) = (10.0_f64, 3.0_f64);
     let outer = major + minor;
+    let (end_x, end_z) = (major + minor * 2.5_f64.cos(), minor * 2.5_f64.sin());
     let tube = format!(
         "#14=CARTESIAN_POINT('',({major:.16},0.,0.));\n#15=DIRECTION('',(0.,-1.,0.));\n#16=AXIS2_PLACEMENT_3D('',#14,#15,#3);\n#17=CIRCLE('',#16,{minor:.16});\n"
     );
@@ -159,11 +162,19 @@ fn seam_only_torus_imports_as_a_whole_ring() {
     let cases = [
         ("tube then ring", format!("{tube}#20=EDGE_CURVE('',#11,#11,#17,.T.);\n{ring}#30=EDGE_LOOP('',(#21,#22,#23,#24));\n")),
         ("ring then tube", format!("{tube}#20=EDGE_CURVE('',#11,#11,#17,.T.);\n{ring}#30=EDGE_LOOP('',(#22,#21,#24,#23));\n")),
+        (
+            "a slit along the tube",
+            format!(
+                "#12=CARTESIAN_POINT('',({end_x:.16},0.,{end_z:.16}));\n#13=VERTEX_POINT('',#12);\n{tube}#20=EDGE_CURVE('',#11,#13,#17,.T.);\n#30=EDGE_LOOP('',(#21,#23));\n"
+            ),
+        ),
     ];
     for (what, edges) in cases {
         let mut t = String::from(HEAD);
         t += "#1=CARTESIAN_POINT('',(0.,0.,0.));\n#2=DIRECTION('',(0.,0.,1.));\n#3=DIRECTION('',(1.,0.,0.));\n#4=AXIS2_PLACEMENT_3D('',#1,#2,#3);\n";
-        t += &format!("#5=TOROIDAL_SURFACE('',#4,{major:.16},{minor:.16});\n#10=CARTESIAN_POINT('',({outer:.16},0.,0.));\n#11=VERTEX_POINT('',#10);\n");
+        t += &format!(
+            "#5=TOROIDAL_SURFACE('',#4,{major:.16},{minor:.16});\n#10=CARTESIAN_POINT('',({outer:.16},0.,0.));\n#11=VERTEX_POINT('',#10);\n"
+        );
         t += &edges;
         t += "#21=ORIENTED_EDGE('',*,*,#20,.T.);\n#22=ORIENTED_EDGE('',*,*,#19,.T.);\n#23=ORIENTED_EDGE('',*,*,#20,.F.);\n#24=ORIENTED_EDGE('',*,*,#19,.F.);\n";
         t += "#31=FACE_OUTER_BOUND('',#30,.T.);\n#32=ADVANCED_FACE('',(#31),#5,.T.);\n#33=CLOSED_SHELL('',(#32));\n#34=MANIFOLD_SOLID_BREP('Ring',#33);\n";
