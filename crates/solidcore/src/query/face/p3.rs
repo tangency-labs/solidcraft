@@ -11,7 +11,7 @@
 //! | Rust                                          | Upstream                                    |
 //! |-----------------------------------------------|---------------------------------------------|
 //! | [`calculate_tight_bounding_box`], [`calculate_tight_bounding_box_into`] | `SmFace::CalculateTightBoundingBox` |
-//! | `face_directed_max` (opt-in, WR-588), `cell_directed_max`, `cell_monotone` | `sm_FaceDirectedMax`, `sm_CellDirectedMax`, `sm_CellMonotone` (the fork tangency-labs/smlib@9d44c1b) |
+//! | `face_directed_max` (opt-in, WR-588), `cell_directed_max`, `cell_monotone`, `cell_division` (WR-651) | `sm_FaceDirectedMax`, `sm_CellDirectedMax`, `sm_CellMonotone` (the fork tangency-labs/smlib@9d44c1b), `sm_CellDivision` (tangency-labs/smlib@326de73) |
 //! | [`face_classify_uv_line`]                     | `sm_FaceClassifyUVLine` (file static)       |
 //! | [`face_classify_uv_line_mut`]                 | `sm_FaceClassifyUVLine` (in place)          |
 //! | [`find_and_classify_loop_bisector`], [`LoopBisector`] | `sms_FindAndClassifyLoopBisector`   |
@@ -587,9 +587,36 @@ fn eval_pos(eval: &mut SurfaceEval<'_>) -> Result<Point3> {
 /// value, so the box is never smaller than the face.
 const FACE_EXTREME_MAX_CELLS: usize = 4096;
 
-/// How deep [`face_directed_max`] halves a cell (`sm_lFaceExtremeMaxDepth`), each way. A
+/// How deep [`face_directed_max`] divides a cell (`sm_lFaceExtremeMaxDepth`), each way. A
 /// cell left undecided at this depth counts with its own greatest value.
 const FACE_EXTREME_MAX_DEPTH: u32 = 16;
+
+/// How near a cell's side a knot may lie and still divide it
+/// (`sm_dFaceExtremeKnotSnap`): `CopySubPatch` snaps a requested side onto a knot within
+/// this distance, so a part nearer than that is no cell of its own.
+const FACE_EXTREME_KNOT_SNAP: f64 = 1.0e-08;
+
+/// Where a cell of `[lo, hi]` is divided along one way (`sm_CellDivision`, WR-651,
+/// tangency-labs/smlib@326de73): at the knot strictly inside it (by more than
+/// [`FACE_EXTREME_KNOT_SNAP`]) nearest its middle, the first such in `knots` on a tie,
+/// else at its middle. Divided at knots, a cell comes to lie within one knot span that
+/// way, as [`cell_monotone`] asks of a rational patch; halved at middles alone, a cell
+/// over a knot off the dyadic points of the domain (a screw surface's at every eighth of
+/// a turn) never does.
+fn cell_division(knots: &[f64], lo: f64, hi: f64) -> f64 {
+    let mid = 0.5 * (lo + hi);
+    let (mut at, mut off) = (mid, crate::math::BIG_DOUBLE);
+    for &knot in knots {
+        if knot > lo + FACE_EXTREME_KNOT_SNAP
+            && knot < hi - FACE_EXTREME_KNOT_SNAP
+            && (knot - mid).abs() < off
+        {
+            at = knot;
+            off = (knot - mid).abs();
+        }
+    }
+    at
+}
 
 /// Whether `x` is above zero, false for NaN (the negation of `x > 0`, without the lint).
 fn is_positive(x: f64) -> bool {
@@ -849,7 +876,8 @@ fn cell_monotone(k: &Kernel, surface: &Surface, cell: &Extent2d, dir: Vec3) -> R
 ///    on the face's boundary or on the cell's own sides, which `best` and the neighbouring
 ///    cells hold;
 ///
-/// otherwise the cell is halved each way. A cell left at [`FACE_EXTREME_MAX_DEPTH`] or past
+/// otherwise the cell is divided each way ([`cell_division`]: at a knot inside it, else at
+/// its middle; WR-651). A cell left at [`FACE_EXTREME_MAX_DEPTH`] or past
 /// [`FACE_EXTREME_MAX_CELLS`] counts with its greatest value. The cells are an explicit
 /// stack (no recursion), taken last first, as the fork's.
 fn face_directed_max(
@@ -862,6 +890,15 @@ fn face_directed_max(
     dir: Vec3,
     mut best: f64,
 ) -> Result<f64> {
+    // (`IsKindOf(SmBSplineSurface_TYPE)`: `GetKnots` through `GetOrCreateGwNurbPointer`)
+    let (knots_u, knots_v) = if has_b_spline_box(surface) {
+        (
+            surface.knots_with_nurb(k, SurfParamType::U, None)?.0,
+            surface.knots_with_nurb(k, SurfParamType::V, None)?.0,
+        )
+    } else {
+        (Vec::new(), Vec::new())
+    };
     let mut cells: Vec<(Extent2d, u32)> = vec![(*uv_domain, 0)];
     let mut divided = 0usize;
     while let Some((cell, depth)) = cells.pop() {
@@ -898,13 +935,18 @@ fn face_directed_max(
             best = top.top;
             continue;
         }
-        let mid = cell.mid();
         let (u0, v0, u1, v1) = (cell.min().x, cell.min().y, cell.max().x, cell.max().y);
+        // WR-651 (tangency-labs/smlib@326de73): divided at a knot inside the cell, else at
+        // its middle (`sm_CellDivision`).
+        let at = Point2::new(
+            cell_division(&knots_u, u0, u1),
+            cell_division(&knots_v, v0, v1),
+        );
         let child_depth = depth + 1;
-        cells.push((Extent2d::from_bounds(u0, v0, mid.x, mid.y), child_depth));
-        cells.push((Extent2d::from_bounds(mid.x, v0, u1, mid.y), child_depth));
-        cells.push((Extent2d::from_bounds(u0, mid.y, mid.x, v1), child_depth));
-        cells.push((Extent2d::from_bounds(mid.x, mid.y, u1, v1), child_depth));
+        cells.push((Extent2d::from_bounds(u0, v0, at.x, at.y), child_depth));
+        cells.push((Extent2d::from_bounds(at.x, v0, u1, at.y), child_depth));
+        cells.push((Extent2d::from_bounds(u0, at.y, at.x, v1), child_depth));
+        cells.push((Extent2d::from_bounds(at.x, at.y, u1, v1), child_depth));
     }
     Ok(best)
 }
