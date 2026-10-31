@@ -5328,7 +5328,26 @@ fn feature_tools_with_constructor(
             let (mut lo, mut hi) = if a <= b { (a, b) } else { (b, a) };
             // To a curved (or slanted) face: run right through the target body, then keep what
             // lies before its surface (the tool less the body, the piece at the start).
-            let curved = curved_face(&tst, to_face, Some(n));
+            let mut curved = curved_face(&tst, to_face, Some(n));
+            // A Cut to the far side of a curved wall (a window through a duct's side): ending the
+            // tool on that face leaves it lying in the wall's face, where the boolean fails, and
+            // the tool less the body keeps only the air before the wall, which cuts nothing. Where
+            // the target's material ends at the face under the whole profile, the tool ends flat
+            // in the gap beyond it instead: it takes what lies before the face and meets no face.
+            if *operation == Operation::Cut
+                && off == 0.0
+                && let (Some(bi), Some((_, fi))) = (curved, to_face)
+                && let Some(tb) = tst.bodies.get(bi)
+                && let Some(end) = cut_end_past_face(tb, fi, &ss.plane, &regions, if hi > 0.0 { 1.0 } else { -1.0 })
+                && (if hi > 0.0 { end > lo } else { end < hi })
+            {
+                if hi > 0.0 {
+                    hi = end;
+                } else {
+                    lo = end;
+                }
+                curved = None;
+            }
             if let Some(bi) = curved
                 && let Some(tb) = tst.bodies.get(bi)
             {
@@ -6955,6 +6974,73 @@ fn trim_to_body(tools: Vec<Traced>, target: &ModelBody, dist_to_start: impl Fn(V
         return Err(DocError::Invalid("nothing lies between the profile and the To object".into()));
     }
     Ok(out)
+}
+
+/// For a Cut To the curved face `fi` of `target`: the height above `plane` (along its normal) at
+/// which a flat-ended tool over `regions`, travelling along `travel` × the normal (±1), stops in
+/// the gap beyond that face. Rays over the profiles must each cross the face once, with material
+/// just before it and none just after; the end is halfway across the narrowest gap to the next
+/// material (at most the usual run past a curved target). `None` when that does not hold.
+fn cut_end_past_face(target: &ModelBody, fi: usize, plane: &Plane, regions: &[Region2], travel: f64) -> Option<f64> {
+    let m = target.mesh();
+    let n = plane.normal();
+    let dir = n * travel;
+    let size = target.body.size();
+    let eps = (size * 1e-4).max(1e-6);
+    let margin = size * 0.05 + 1.0;
+    // Sample points: the outline of each profile and a grid over its inside.
+    let mut samples: Vec<Vec2> = Vec::new();
+    for r in regions {
+        let ring: Vec<Vec2> = r.outer.polyline(1e-2).into_iter().collect();
+        let step = (ring.len() / 64).max(1);
+        samples.extend(ring.iter().step_by(step).copied());
+        let (mut lo, mut hi) = (Vec2::new(f64::MAX, f64::MAX), Vec2::new(f64::MIN, f64::MIN));
+        for q in &ring {
+            lo = Vec2::new(lo.x.min(q.x), lo.y.min(q.y));
+            hi = Vec2::new(hi.x.max(q.x), hi.y.max(q.y));
+        }
+        for i in 0..12 {
+            for j in 0..12 {
+                let q = Vec2::new(lo.x + (hi.x - lo.x) * (i as f64 + 0.5) / 12.0, lo.y + (hi.y - lo.y) * (j as f64 + 0.5) / 12.0);
+                if r.contains(q) {
+                    samples.push(q);
+                }
+            }
+        }
+    }
+    let height = |q: Vec3| (q - plane.origin).dot(n);
+    let reach = size * 4.0 + 1.0;
+    let (mut face_end, mut gap_end) = (f64::MIN, f64::MAX);
+    for q2 in samples {
+        let q = plane.to_world(q2);
+        // Every crossing of the line through `q`, in travel order, from well before the body.
+        let back = travel * height(q) + reach + size;
+        let mut o = q - dir * back;
+        let mut hits: Vec<(f64, usize)> = Vec::new();
+        while let Some((t, tri)) = m.raycast(o, dir) {
+            let at = o + dir * t;
+            hits.push((travel * height(at), *m.tri_face.get(tri)? as usize));
+            o = at + dir * eps;
+            if hits.len() > 256 {
+                return None;
+            }
+        }
+        let on_face: Vec<usize> = (0..hits.len()).filter(|&k| hits[k].1 == fi).collect();
+        let [k] = on_face[..] else { return None };
+        let e = hits[k].0;
+        let at = |t: f64| plane.origin + n * (travel * t) + (q - plane.origin - n * height(q));
+        if !m.contains(at(e - eps * 10.0)) || m.contains(at(e + eps * 10.0)) {
+            return None;
+        }
+        face_end = face_end.max(e);
+        let next = hits.iter().map(|h| h.0).filter(|&t| t > e + eps * 10.0).fold(f64::MAX, f64::min);
+        gap_end = gap_end.min(next);
+    }
+    if face_end == f64::MIN || gap_end - face_end < eps * 100.0 {
+        return None;
+    }
+    let end = face_end + ((gap_end - face_end) * 0.5).min(margin);
+    Some(travel * end)
 }
 
 /// One point on each face of a body (a triangle centre, so it lies on the face).
