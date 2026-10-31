@@ -92,7 +92,11 @@ fn chamfers_crossing_each_other_are_refused() {
     // Below half the width both build.
     let b = crate::chamfer(&rib, &edges, 1.5).unwrap();
     assert!((b.volume_at(0.01).unwrap() - (3200.0 - 2.0 * 0.5 * 1.5 * 1.5 * 40.0)).abs() < 1e-6);
-    assert!(crate::fillet(&rib, &edges, 1.5).is_ok());
+    // Two rounds of radius 1.5 along 40: each removes (1 − π/4)·1.5² of section.
+    let b = crate::fillet(&rib, &edges, 1.5).unwrap();
+    let want = 3200.0 - 2.0 * (1.0 - std::f64::consts::FRAC_PI_4) * 2.25 * 40.0;
+    let v = crate::measure(&b).unwrap().volume;
+    assert!((v - want).abs() < 1e-6 * want, "{v} vs {want}");
 }
 
 /// Edges meeting at a corner mitre: their chamfers overlap there and are not refused for it.
@@ -100,6 +104,14 @@ fn chamfers_crossing_each_other_are_refused() {
 fn chamfers_meeting_at_a_corner_still_build() {
     let b = box_solid(Vec3::new(0.0, 0.0, 0.0), Vec3::new(20.0, 20.0, 20.0)).unwrap();
     let edges = [Vec3::new(10.0, 0.0, 20.0), Vec3::new(20.0, 10.0, 20.0), Vec3::new(10.0, 20.0, 20.0), Vec3::new(0.0, 10.0, 20.0)];
-    assert!(crate::chamfer(&b, &edges, 5.0).is_ok());
-    assert!(crate::fillet(&b, &edges, 5.0).is_ok());
+    // The chamfers leave the 20 x 20 x 15 block under a frustum from 20 x 20 to 10 x 10, 5 high:
+    // 6000 + (5/3)(400 + 100 + √(400·100)).
+    let v = crate::measure(&crate::chamfer(&b, &edges, 5.0).unwrap()).unwrap().volume;
+    let want = 6000.0 + 5.0 / 3.0 * (400.0 + 100.0 + 200.0);
+    assert!((v - want).abs() < 1e-6 * want, "{v} vs {want}");
+    // The rounds: (1 − π/4)·25 of section along each edge's 10 mm between the corners, and in each
+    // 5 mm corner cube the two cylinders' intersection is kept, ∫₀⁵ (25 − w²) dw = 250/3 of 125.
+    let v = crate::measure(&crate::fillet(&b, &edges, 5.0).unwrap()).unwrap().volume;
+    let want = 8000.0 - 4.0 * (1.0 - std::f64::consts::FRAC_PI_4) * 25.0 * 10.0 - 4.0 * (125.0 - 250.0 / 3.0);
+    assert!((v - want).abs() < 1e-6 * want, "{v} vs {want}");
 }
