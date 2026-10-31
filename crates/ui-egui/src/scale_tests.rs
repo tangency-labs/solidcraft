@@ -608,3 +608,44 @@ fn zoomed_view_frame_cost() {
         "ZOOMED whole_ms={whole:.2} whole_triangles={whole_tris} zoomed_ms={zoomed:.2} zoomed_triangles={zoomed_tris} zoomed_orbit_ms={orbit:.2}"
     );
 }
+
+/// The Render workspace's live product preview on an assembly: extracting the product scene
+/// and building its blocks cold, again with nothing changed, and after a part's colour and
+/// opacity edits, with the preview's cache kept as the live preview keeps it. Run with
+/// `--ignored --nocapture`.
+#[test]
+#[ignore = "manual product preview measurement"]
+fn product_preview_rebuild_cost() {
+    let mut h = assembly(100, 100);
+    let part = h.app.session.world_state().bodies.iter().find(|b| b.component == 0).map(|b| b.name.clone()).unwrap();
+    let mut cache = crate::render_workspace::ProductCache::default();
+    let extract = |h: &Harness| solidcraft_engine::product_scene::extract(&h.app.session).unwrap();
+    let time = |h: &Harness, cache: &mut crate::render_workspace::ProductCache| {
+        let scene = extract(h);
+        ms(|| drop(crate::render_workspace::gpu_scene_cached(&scene, u64::MAX, cache).unwrap()))
+    };
+    let cold = time(&h, &mut cache);
+    let again = time(&h, &mut cache);
+    h.app.run("appearance.assign", json!({"bodies": [&part], "color": "#336699"})).unwrap();
+    let colour = time(&h, &mut cache);
+    h.app.run("appearance.assign", json!({"bodies": [&part], "color": "#336699", "opacity": 0.5})).unwrap();
+    let opacity = time(&h, &mut cache);
+    let extract_ms = ms(|| drop(extract(&h)));
+    // Every body PBR, then one roughness change for all of them.
+    let bodies: Vec<String> = h.app.session.world_state().bodies.iter().map(|b| b.name.clone()).collect();
+    let pbr = |r: f64| json!({"bodies": &bodies, "color": "#b47846", "pbr": {"metallic": 1.0, "roughness": r, "dielectric_ior": 1.5}});
+    h.app.run("appearance.assign", pbr(0.2)).unwrap();
+    let to_pbr = time(&h, &mut cache);
+    let pbr_bytes: usize = crate::render_workspace::gpu_scene_cached(&extract(&h), u64::MAX, &mut crate::render_workspace::ProductCache::default())
+        .unwrap()
+        .1
+        .blocks
+        .iter()
+        .map(|b| b.bytes.vertices.len())
+        .sum();
+    h.app.run("appearance.assign", pbr(0.6)).unwrap();
+    let roughness = time(&h, &mut cache);
+    println!(
+        "PRODUCTCACHE bodies=200 cold_ms={cold:.1} unchanged_ms={again:.1} colour_ms={colour:.1} opacity_ms={opacity:.1} extract_ms={extract_ms:.1} to_pbr_ms={to_pbr:.1} pbr_bytes={pbr_bytes} roughness_ms={roughness:.1}"
+    );
+}
