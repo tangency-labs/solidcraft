@@ -150,6 +150,15 @@ codegen-units = 16
 # binary). See docs/crash-reports.md.
 debug = "line-tables-only"
 
+# Local performance work: release without its thin LTO, incremental. A rebuild after an edit
+# drops from 1.5-2 minutes to 3-10 seconds (the thin LTO link of the app was most of it), for
+# about 4-7% more CPU time when running. Measure with it while iterating, and take the final numbers with
+# --release. See docs/perf.md.
+[profile.profiling]
+inherits = "release"
+lto = false
+incremental = true
+
 # truck-shapeops with SolidCraft fixes (Apache-2.0, see vendor/truck-shapeops and ATTRIBUTION.md).
 [patch.crates-io]
 truck-geometry = { path = "vendor/truck-geometry" }
