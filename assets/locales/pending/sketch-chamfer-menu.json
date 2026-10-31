@@ -1,0 +1,26 @@
+{
+  "en": {
+    "prefs.sketch_chamfer_submenu": "Group sketch chamfer modes in a submenu"
+  },
+  "de": {
+    "prefs.sketch_chamfer_submenu": "Skizzenfasen in einem Untermenü gruppieren"
+  },
+  "ja": {
+    "prefs.sketch_chamfer_submenu": "スケッチの面取りをサブメニューにまとめる"
+  },
+  "ko": {
+    "prefs.sketch_chamfer_submenu": "스케치 모따기를 하위 메뉴로 묶기"
+  },
+  "zh": {
+    "prefs.sketch_chamfer_submenu": "将草图倒角模式归入子菜单"
+  },
+  "ar": {
+    "prefs.sketch_chamfer_submenu": "تجميع أوضاع شطف الرسم في قائمة فرعية"
+  },
+  "he": {
+    "prefs.sketch_chamfer_submenu": "קיבוץ מצבי שיפוע של שרטוט בתפריט משנה"
+  },
+  "vi": {
+    "prefs.sketch_chamfer_submenu": "Nhóm các chế độ vát mép phác thảo vào menu con"
+  }
+}

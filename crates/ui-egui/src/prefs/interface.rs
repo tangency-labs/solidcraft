@@ -680,6 +680,7 @@ pub(super) fn layout(app: &mut SolveApp, ui: &mut egui::Ui) {
                     });
                 }
             });
+            setting::sketch_chamfer_submenu(app, ui);
         });
         super::navbar::show(app, ui);
     });
