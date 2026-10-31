@@ -24,7 +24,9 @@
 //! error where the mixed-convexity tests read it. The convex `NxN` corner's solvers are
 //! resolved by the caller before any allocation (upstream resolves each inside its
 //! vertex loop; the lookups have no effects), and its unused `GetEdges` read is
-//! omitted. There is no recursion.
+//! omitted. With `Kernel::fixes.fillet_mitre_concave_face_corners` (WR-642, the fork's
+//! tangency-labs/smlib@4f06e72) the Nx2 corner skips its mixed-convexity 3-sided face and
+//! mitres the blends as at a corner of uniform convexity. There is no recursion.
 
 pub mod closed_nx1;
 mod concave_4x2;
@@ -769,8 +771,14 @@ impl FilletCorner {
                 .set_point_class(PointClassType::Face, common_face.map(EntityRef::Face));
             self.vertices.push(face_fv);
 
-            // mixed convexity case
-            if mixed_convexity && !self.bevel && angle()? > 5.0 {
+            // mixed convexity case (with `fillet_mitre_concave_face_corners`, WR-642, the
+            // fork's tangency-labs/smlib@4f06e72: mitred as at a corner of uniform
+            // convexity, below)
+            if !k.fixes.fillet_mitre_concave_face_corners
+                && mixed_convexity
+                && !self.bevel
+                && angle()? > 5.0
+            {
                 // Mixed-convexity 3x2 corner, will create a 3-sided corner face.
                 self.blending = true;
                 {
