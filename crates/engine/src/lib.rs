@@ -12,6 +12,7 @@ pub mod batch_params;
 pub mod batch_preflight;
 pub mod capture;
 pub mod cmd;
+pub mod collaboration;
 pub mod control_auth;
 pub mod control_pending;
 pub mod cosmetic_threads;

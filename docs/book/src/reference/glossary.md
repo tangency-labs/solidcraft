@@ -273,6 +273,20 @@ A material sets mass, centre of gravity and strength values. How the body looks 
 - **Elsewhere:** material, physical material.
 - **For translators:** not an appearance.
 
+### member
+
+A person or an agent that a design's member list names, with the role it works under.
+
+Each member is known by its public key and shown by its name and colour, and names the member who
+added it (the first adds themself). Two members don't keep the same name, whatever its case: the
+one who joined later is asked to change theirs.
+
+- **In SolidCraft:** the `collaboration/members.json` file and its `members` key; each member's
+  `key`, `name`, `colour`, `role`, `kind` (`person` or `agent`) and `added_by`.
+- **Don't use:** user, participant, account.
+- **Elsewhere:** member, team member, user.
+- **For translators:** one person or agent, not a group or a team.
+
 ### moment of inertia
 
 How a body's mass resists turning about an axis: the mass times the square of its distance from
@@ -365,6 +379,22 @@ feature follows its edges when the part changes.
 - **Elsewhere:** reference edge, edge offset, distance from edge.
 - **For translators:** an edge of a body, not a construction axis or a reference plane; the
   distance is a length, not a reference value for light or material.
+
+### role
+
+A named list of rules that says which commands and abilities a member may use.
+
+A rule allows or denies an ability or the commands a pattern names, on the whole design or only
+on some of it. A denial wins, and anything not allowed is refused. Three roles are built in:
+*Creator* may do anything; *Worker* edits the design but doesn't merge, manage people and roles,
+or present; *Viewer* sees the model only, and never edits, saves or exports it.
+
+- **In SolidCraft:** a member's `role` in `collaboration/members.json`; the built-in roles
+  `Creator`, `Worker` and `Viewer`.
+- **Don't use:** permission (for the whole role), access level, group.
+- **Elsewhere:** role, permission set, access level.
+- **For translators:** *Viewer* is the role, not a view of the model or a program that shows
+  files.
 
 ### rollback marker
 
