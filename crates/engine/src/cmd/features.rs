@@ -1058,6 +1058,12 @@ pub fn join_face_body(s: &Session, p: &Value) -> Option<String> {
     sketch_face_body(s, feature_sketch(s, p, "solid.extrude").ok()?)
 }
 
+/// The body a Join from `sketch` with no targets or participants stores, as `solid.extrude`
+/// picks it ([`face_body_reached`]); `None` when it picks none or is refused.
+pub fn join_sketch_face_body(s: &Session, sketch: u64) -> Option<String> {
+    face_body_reached(s, sketch).ok().flatten()
+}
+
 /// The bodies the active component works on when a feature names none ([`active_scope`]).
 pub fn scope_bodies(s: &Session) -> Vec<String> {
     active_scope(s, &s.model.state()).into_iter().map(|b| b.name.clone()).collect()

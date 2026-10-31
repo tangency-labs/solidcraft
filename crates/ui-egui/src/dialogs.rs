@@ -3872,11 +3872,23 @@ fn chip_info(ui: &egui::Ui, chip: &egui::Response, label: &str, text: &str) {
     });
 }
 
-/// Whether the extrude being edited is a Join, Cut or Intersect saved without targets.
+/// Whether the extrude being edited is a Join, Cut or Intersect saved without targets that its
+/// edit keeps without them: not a Join that would store its sketch's face body.
 pub(crate) fn kept_without_targets(s: &Session, editing: Option<(u64, Option<usize>)>) -> bool {
-    editing
-        .and_then(|(id, _)| s.doc.feature(id))
-        .is_some_and(|f| matches!(&f.kind, FeatureKind::Extrude { operation, targets, .. } if *operation != Operation::NewBody && targets.is_empty()))
+    editing.and_then(|(id, _)| s.doc.feature(id)).is_some_and(|f| {
+        matches!(&f.kind, FeatureKind::Extrude { operation, targets, .. } if *operation != Operation::NewBody && targets.is_empty())
+            && join_face_target(s, f).is_none()
+    })
+}
+
+/// The body an edit of a Join saved without targets or participants stores: its sketch's face body.
+fn join_face_target(s: &Session, f: &solidcraft_engine::doc::Feature) -> Option<String> {
+    match &f.kind {
+        FeatureKind::Extrude { sketch, operation: Operation::Join, targets, .. } if targets.is_empty() && f.participants.is_empty() => {
+            solidcraft_engine::join_sketch_face_body(s, sketch.0)
+        }
+        _ => None,
+    }
 }
 
 /// What an empty Targets field says: a stored `*`, no stored targets, or nothing picked yet.
@@ -6008,6 +6020,7 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             }
             if let Some(input) = d.inputs.iter_mut().find(|i| i.label == TARGETS) {
                 input.items = if every { Vec::new() } else { targets.iter().map(|t| Sel::Body { name: t.to_string() }).collect() };
+                input.items.extend(join_face_target(s, &f).map(|name| Sel::Body { name }));
             }
             // A New Body turned into a Join, Cut or Intersect lists what a new one would.
             d.targets_follow = *operation == Operation::NewBody;

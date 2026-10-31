@@ -71,8 +71,9 @@ model.
 
 Editing an extrude shows its saved targets. A Cut or Intersect saved without `targets` reads **All
 bodies of the component** and keeps changing every body of the active component it meets, hidden or
-shown. A Join saved without them reads the same; editing it saves the body its sketch lies on as its
-target, as a new Join does, and one sketched off any body keeps joining every body it meets. One
+shown. A Join saved without them whose sketch lies on a body's face lists that body, which OK saves
+as its target, as a new Join does; one sketched off any body reads **All bodies of the component**
+and keeps joining every body it meets. One
 saved with `targets: ["*"]` reads **All bodies** and changes every body in the design. A New Body
 changed to a Join, Cut or Intersect lists the bodies a new one would.
 

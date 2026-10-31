@@ -203,7 +203,7 @@ fn an_older_reversed_two_sided_extrude_keeps_its_shape() {
 mod targets {
     #![allow(clippy::unwrap_used, clippy::panic)]
 
-    use crate::{Session, auto_operation, join_face_body, scope_bodies};
+    use crate::{Session, auto_operation, join_face_body, join_sketch_face_body, scope_bodies};
     use serde_json::{Value, json};
 
     fn run(s: &mut Session, command: &str, params: Value) -> Value {
@@ -309,7 +309,8 @@ mod targets {
         }
     }
 
-    /// The body a Join defaults to: the picked face's, else the face its sketch lies on.
+    /// The body a Join defaults to: the picked face's, else the face its sketch lies on, which an
+    /// edit of a Join saved without targets stores.
     #[test]
     fn join_face_body_is_the_face_or_sketch_face_body() {
         let mut s = Session::default();
@@ -324,6 +325,9 @@ mod targets {
         assert_eq!(join_face_body(&s, &json!({"sketch": "Free"})), None);
         assert_eq!(join_face_body(&s, &json!({"face": [10, 10, 10], "face_body": "Base"})).as_deref(), Some("Base"));
         assert_eq!(join_face_body(&s, &json!({"face": [10, 10, 10]})), None);
+        let id = |name: &str| s.doc.find_feature(name).unwrap().id;
+        assert_eq!(join_sketch_face_body(&s, id("OnTop")).as_deref(), Some("Base"));
+        assert_eq!(join_sketch_face_body(&s, id("Free")), None);
     }
 
     /// The bodies the active component works on: its own, else those of the components inside

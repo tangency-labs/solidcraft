@@ -227,6 +227,8 @@ fn a_sketch_on_a_turned_sub_components_face_cuts_and_joins_it_from_the_top_level
         sketch_on_face(&mut s, top, |s, c, _| {
             run(s, "sketch.circle.center", json!({"center": [c.x, c.y], "radius": 2}));
         });
+        let sketch = s.doc.features.last().unwrap().id;
+        assert_eq!(crate::join_sketch_face_body(&s, sketch).as_deref(), Some("Stock"), "base {base}");
         for (distance, expected) in [(-3.0, "cut"), (3.0, "join")] {
             assert_eq!(crate::auto_operation(&s, &json!({"distance": distance})), Some(expected), "base {base}, {distance}");
             for operation in ["auto", expected] {

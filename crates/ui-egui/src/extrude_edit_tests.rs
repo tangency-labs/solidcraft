@@ -1018,7 +1018,7 @@ mod targets {
     }
 
     /// A Join saved without targets from a sketch on a body's face (a design saved before it
-    /// stored them): editing it saves that body as its target, as a new Join does.
+    /// stored them): editing it lists and saves that body as its target, as a new Join does.
     #[test]
     fn editing_a_join_without_targets_on_a_face_saves_the_face_body() {
         let mut h = plate_and_copy(true);
@@ -1031,7 +1031,11 @@ mod targets {
         assert_eq!(h.app.session.model.state().bodies.len(), 1, "without targets it joins every body it meets");
         h.app.edit_feature(feature);
         h.frames(2);
-        assert!(h.widget("All bodies of the component").is_some());
+        let d = h.app.dialog.as_ref().unwrap();
+        assert_eq!(d.inputs.iter().find(|i| i.label == TARGETS).unwrap().items, vec![Sel::Body { name: "Plate".into() }]);
+        assert!(h.widget("1 selected").is_some());
+        assert!(h.widget("All bodies of the component").is_none());
+        assert_eq!(params(&h)["params"]["targets"], json!(["Plate"]));
         h.step(&json!({"key":"Enter"})).unwrap();
         assert!(h.app.dialog.is_none(), "{:?}", h.app.dialog);
         let FeatureKind::Extrude { targets, .. } = &h.app.session.doc.feature(feature).unwrap().kind else { panic!("an extrude") };
