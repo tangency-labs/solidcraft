@@ -5,7 +5,8 @@
 //! and go out as downloads (exports, and "Download design"). Where the File System Access API
 //! exists a design also lives on the computer's disk, saved and opened through the browser's file
 //! dialogs (`disk.rs`). An autosave of unsaved work is kept in OPFS and offered again after a
-//! reload or a crash.
+//! reload or a crash. With "keep unsaved work in this browser" on, each open design's unsaved
+//! changes are kept there instead, one copy per design (`keep.rs`, #10220).
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -13,7 +14,7 @@ use std::rc::Rc;
 use js_sys::{Array, Function, Object, Reflect, Uint8Array};
 use solidcraft_engine::io::vfs;
 
-use crate::disk;
+use crate::{disk, keep};
 use wasm_bindgen::{JsCast as _, JsValue, closure::Closure};
 use wasm_bindgen_futures::{JsFuture, spawn_local};
 use web_sys::{FileSystemDirectoryHandle, FileSystemFileHandle, FileSystemGetFileOptions, FileSystemWritableFileStream};
@@ -77,6 +78,14 @@ pub struct Files {
     pub recovery: RefCell<Option<(String, Option<String>)>>,
     /// The app's context, to wake it when a browser call finishes.
     pub ctx: RefCell<Option<egui::Context>>,
+    /// This page's id: the copies it keeps are named after it (`keep::entry_id`).
+    pub keep_page: RefCell<String>,
+    /// Kept copies stored by this page, and the design revision each holds once its write ended.
+    pub kept: RefCell<std::collections::HashMap<String, Option<u64>>>,
+    /// Kept copies being written or removed now (one browser call at a time per copy).
+    pub keeping: RefCell<std::collections::HashSet<String>>,
+    /// Copies earlier pages left, newer than their design's last save: offered at start.
+    pub keep_offered: RefCell<Vec<keep::Entry>>,
 }
 
 impl Files {
@@ -273,6 +282,9 @@ pub fn start(files: &Rc<Files>) {
             let _ = JsFuture::from(p).await;
         });
     }
+    let page = keep::page_id(js_sys::Date::now(), js_sys::Math::random());
+    hold_page_lock(&page);
+    *files.keep_page.borrow_mut() = page;
     let files = files.clone();
     spawn_local(async move {
         match disk::known_ids().await {
@@ -285,6 +297,7 @@ pub fn start(files: &Rc<Files>) {
                     files.say("This page can't use the browser's file storage (it needs https or localhost): designs are kept in local storage, a few MB at most.", false);
                 }
                 let mut entries = Vec::new();
+                let kept = kept_copies(&all);
                 let has_recovery = all.iter().any(|(n, _, _)| n == RECOVERY);
                 let legacy = (!has_recovery).then(|| LEGACY_RECOVERY.into_iter().find(|l| all.iter().any(|(n, _, _)| n == l))).flatten();
                 for (name, bytes, modified) in all {
@@ -300,7 +313,7 @@ pub fn start(files: &Rc<Files>) {
                         *files.recovery.borrow_mut() = Some((n, meta["path"].as_str().map(str::to_string)));
                         continue;
                     }
-                    if name != RECOVERY {
+                    if name != RECOVERY && keep::parse_name(&name).is_none() {
                         entries.push(Entry { name: name.clone(), size: bytes.len() as u64, modified });
                     }
                     vfs::insert(&format!("{OPFS}{name}"), bytes);
@@ -311,6 +324,7 @@ pub fn start(files: &Rc<Files>) {
                 if !vfs::exists(&format!("{OPFS}{RECOVERY}")) {
                     *files.recovery.borrow_mut() = None;
                 }
+                sort_kept(&files, kept, &live_pages().await);
             }
             Err(e) => files.say(format!("browser storage: {e}"), true),
         }
@@ -328,7 +342,7 @@ pub fn flush(files: &Rc<Files>) {
                 {
                     let mut e = files.entries.borrow_mut();
                     e.retain(|x| x.name != name);
-                    if name != RECOVERY && name != RECOVERY_META {
+                    if name != RECOVERY && name != RECOVERY_META && keep::parse_name(&name).is_none() {
                         e.push(Entry { name: name.clone(), size: bytes.len() as u64, modified: js_sys::Date::now() });
                         e.sort_by_key(|a| a.name.to_lowercase());
                     }
@@ -458,7 +472,15 @@ pub fn recovery_path() -> String {
 /// A recovery file lives in OPFS, but its relative links belong to the original design's
 /// folder (which can be on disk). Resolve them before Open sees the temporary file location.
 pub fn prepare_recovery(original_path: Option<&str>) -> Result<String, String> {
-    let path = recovery_path();
+    prepare_copy(recovery_path(), original_path)
+}
+
+/// The same for a kept copy (#10220).
+pub fn prepare_kept(id: &str, original_path: Option<&str>) -> Result<String, String> {
+    prepare_copy(format!("{OPFS}{}", keep::design_file(id)), original_path)
+}
+
+fn prepare_copy(path: String, original_path: Option<&str>) -> Result<String, String> {
     let bytes = vfs::read(&path, solidcraft_engine::io::MAX_DESIGN_BYTES).map_err(|e| e.to_string())?;
     let mut doc = solidcraft_engine::io::read_design(&bytes).map_err(|e| e.to_string())?;
     solidcraft_engine::resolve_design_links(&mut doc, original_path);
@@ -630,4 +652,145 @@ pub fn take_drops(files: &Rc<Files>, raw: &mut egui::RawInput, theme: bool) {
             }
         });
     }
+}
+
+/// Hold this page's browser lock while it runs, so other tabs know its kept copies are in use
+/// (`keep.rs`). Browsers without the Web Locks API hold none; their copies are then offered by
+/// any later page.
+fn hold_page_lock(page: &str) {
+    let Some(locks) = web_locks() else { return };
+    let Ok(request) = Reflect::get(&locks, &"request".into()).and_then(|f| f.dyn_into::<Function>().map_err(JsValue::from)) else { return };
+    // A promise that never settles: the lock is let go only when the page goes.
+    let hold = Closure::<dyn FnMut(JsValue) -> js_sys::Promise>::new(|_lock: JsValue| js_sys::Promise::new(&mut |_, _| {}));
+    let name = format!("{}{page}", keep::LOCK_PREFIX);
+    if let Err(e) = request.call2(&locks, &name.into(), hold.as_ref().unchecked_ref()) {
+        log::info!("keep: no page lock: {}", err(e));
+    }
+    // The callback lives as long as the page.
+    hold.forget();
+}
+
+fn web_locks() -> Option<JsValue> {
+    let nav = web_sys::window()?.navigator();
+    Reflect::get(&nav, &"locks".into()).ok().filter(|l| l.is_object())
+}
+
+/// The pages still open (in this browser profile) that hold their lock.
+async fn live_pages() -> Vec<String> {
+    let query = async {
+        let locks = web_locks().ok_or("no Web Locks")?;
+        let f: Function = Reflect::get(&locks, &"query".into()).map_err(err)?.dyn_into().map_err(|_| "no query".to_string())?;
+        let p: js_sys::Promise = f.call0(&locks).map_err(err)?.dyn_into().map_err(|_| "no promise".to_string())?;
+        let state = JsFuture::from(p).await.map_err(err)?;
+        let held: Array = Reflect::get(&state, &"held".into()).map_err(err)?.dyn_into().map_err(|_| "no list".to_string())?;
+        Ok::<_, String>(
+            held.iter()
+                .take(10_000)
+                .filter_map(|l| Reflect::get(&l, &"name".into()).ok()?.as_string())
+                .filter_map(|n| n.strip_prefix(keep::LOCK_PREFIX).map(str::to_string))
+                .collect(),
+        )
+    };
+    query.await.unwrap_or_else(|e| {
+        log::info!("keep: open pages unknown ({e})");
+        Vec::new()
+    })
+}
+
+/// The kept copies among the stored files: (copy, when its design's file was last written), and
+/// the ids of designs stored without their metadata.
+struct Found {
+    copies: Vec<(keep::Entry, Option<f64>)>,
+    orphans: Vec<String>,
+}
+
+fn kept_copies(all: &[(String, Vec<u8>, f64)]) -> Found {
+    let modified = |path: &str| path.strip_prefix(OPFS).and_then(|n| all.iter().find(|(name, _, _)| name == n)).map(|(_, _, m)| *m);
+    let mut copies = Vec::new();
+    let mut designs = Vec::new();
+    for (name, bytes, _) in all {
+        match keep::parse_name(name) {
+            Some((id, keep::Part::Meta)) => {
+                if let Some(e) = keep::Entry::parse(id, bytes) {
+                    let saved = e.path.as_deref().and_then(modified);
+                    copies.push((e, saved));
+                }
+            }
+            Some((id, keep::Part::Design)) => designs.push(id.to_string()),
+            None => {}
+        }
+    }
+    // A copy is whole only with its design.
+    copies.retain(|(e, _)| designs.contains(&e.id));
+    let orphans = designs.into_iter().filter(|id| !copies.iter().any(|(e, _)| &e.id == id)).collect();
+    Found { copies, orphans }
+}
+
+/// Offer the copies earlier pages left that hold unsaved work, and remove those their design's
+/// later save made stale (and parts without the rest), leaving open pages' copies alone.
+fn sort_kept(files: &Rc<Files>, found: Found, live: &[String]) {
+    let mut offered = Vec::new();
+    let mut gone = Vec::new();
+    for (e, saved) in found.copies {
+        match keep::fate(&e, live, saved) {
+            keep::Fate::Offer => offered.push(e),
+            keep::Fate::Drop => gone.push(e.id),
+            keep::Fate::Leave => {}
+        }
+    }
+    gone.extend(found.orphans.into_iter().filter(|id| !keep::page_of(id).is_some_and(|p| live.iter().any(|l| l == p))));
+    keep::order_offered(&mut offered);
+    *files.keep_offered.borrow_mut() = offered;
+    for id in gone {
+        remove_kept(files, &id);
+    }
+}
+
+/// The path (in the engine's files) a kept copy opens from.
+pub fn kept_path(id: &str) -> String {
+    format!("{OPFS}{}", keep::design_file(id))
+}
+
+/// Write the copy of a design with unsaved changes (`bytes`, described by `entry`) that holds
+/// its revision `revision`. Its metadata goes last, so a copy is never offered half written.
+pub fn write_kept(files: &Rc<Files>, entry: &keep::Entry, bytes: Vec<u8>, revision: u64) {
+    let id = entry.id.clone();
+    if !files.keeping.borrow_mut().insert(id.clone()) {
+        return;
+    }
+    files.kept.borrow_mut().entry(id.clone()).or_insert(None);
+    let meta = entry.to_json();
+    let files = files.clone();
+    spawn_local(async move {
+        let r = async {
+            write_file(&keep::design_file(&id), &bytes).await?;
+            write_file(&keep::meta_file(&id), meta.as_bytes()).await
+        };
+        match r.await {
+            Ok(()) => {
+                files.kept.borrow_mut().insert(id.clone(), Some(revision));
+            }
+            Err(e) => files.say(format!("keeping unsaved work in this browser: {e}"), true),
+        }
+        files.keeping.borrow_mut().remove(&id);
+        files.wake();
+    });
+}
+
+/// Remove kept copy `id` (its design was saved, closed, discarded or restored).
+pub fn remove_kept(files: &Rc<Files>, id: &str) {
+    let id = id.to_string();
+    if !files.keeping.borrow_mut().insert(id.clone()) {
+        return;
+    }
+    let _ = vfs::remove(&kept_path(&id));
+    let files = files.clone();
+    spawn_local(async move {
+        // The metadata first: what's left without it is never offered.
+        let _ = remove_file(&keep::meta_file(&id)).await;
+        let _ = remove_file(&keep::design_file(&id)).await;
+        files.kept.borrow_mut().remove(&id);
+        files.keeping.borrow_mut().remove(&id);
+        files.wake();
+    });
 }

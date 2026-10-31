@@ -663,6 +663,15 @@ pub fn any_dirty(app: &SolveApp) -> bool {
     (0..app.docs.count()).any(|i| dirty(app, i))
 }
 
+/// Every open design, in tab order (the shown one in its place): what the web app keeps a copy
+/// of in the browser when "keep unsaved work in this browser" is on (#10220).
+pub fn open_sessions(app: &SolveApp) -> Vec<&Session> {
+    if app.docs.slots.is_empty() {
+        return vec![&app.session];
+    }
+    app.docs.slots.iter().map(|s| s.as_ref().map_or(&app.session, |d| &d.session)).collect()
+}
+
 fn dirty(app: &SolveApp, i: usize) -> bool {
     if i == app.docs.active || app.docs.slots.is_empty() {
         return app.session.is_dirty();
@@ -1400,6 +1409,22 @@ mod tests {
         open_tab(&mut a, Session::default()).unwrap();
         assert_eq!(a.docs.count(), 4);
         a
+    }
+
+    /// #10220: every open design in tab order, the shown one in its place.
+    #[test]
+    fn open_sessions_lists_every_tab_in_order() {
+        let mut a = app();
+        assert_eq!(open_sessions(&a).len(), 1);
+        let mut a4 = four_tabs();
+        switch(&mut a4, 1);
+        let uids: Vec<u64> = open_sessions(&a4).iter().map(|s| s.uid).collect();
+        assert_eq!(uids.len(), 4);
+        assert_eq!(uids.get(1), Some(&a4.session.uid));
+        let dirty: Vec<bool> = open_sessions(&a4).iter().map(|s| s.is_dirty()).collect();
+        assert_eq!(dirty, [true, false, true, false]);
+        a.run("solid.box", json!({"length": 1, "width": 1, "height": 1})).unwrap();
+        assert!(open_sessions(&a).iter().all(|s| s.is_dirty()));
     }
 
     /// #3055: Close Other Tabs on the first tab closes the blank fourth, asks about the third
