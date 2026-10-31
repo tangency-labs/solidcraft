@@ -3237,6 +3237,7 @@ pub fn dims_overlay(app: &SolveApp, ctx: &egui::Context) {
     let proj = crate::viewport::projection(app, rect);
     let painter = ctx.layer_painter(egui::LayerId::background()).with_clip_rect(rect);
     let st = app.session.world_state();
+    let pointer = ctx.pointer_hover_pos().filter(|p| rect.contains(*p) && !app.viewport.dialog_rect.is_some_and(|d| d.contains(*p)));
     for id in app
         .session
         .visibility
@@ -3273,6 +3274,20 @@ pub fn dims_overlay(app: &SolveApp, ctx: &egui::Context) {
             let size = galley.size() + vec2(6.0, 2.0);
             let half = Vec2::new(f64::from(size.x) * 0.5 * px, f64::from(size.y) * 0.5 * px);
             let lay = dim_layout_reaching(&frame, c.text.or_else(|| default_text(&frame, middle, px)), px, half, dim_reach(sk, &c.kind));
+            let Some(tc) = to(lay.text) else { continue };
+            let r = Rect::from_center_size(tc, size);
+            // A command window takes a driving dimension's name on a click (#9477): the one
+            // under the pointer lights up as a sketch's own do.
+            let pick = app.dialog.is_some()
+                && app.session.active_sketch.is_none()
+                && c.param.is_some()
+                && pointer.is_some_and(|p| r.expand(2.0).contains(p));
+            let (col, galley) = if pick {
+                ctx.set_cursor_icon(egui::CursorIcon::PointingHand);
+                (tk.accent, painter.layout_no_wrap(galley.text().to_owned(), FontId::proportional(tk.font_caption), tk.accent))
+            } else {
+                (col, galley)
+            };
             for line in &lay.lines {
                 painter.add(egui::Shape::line(line.iter().filter_map(|q| to(*q)).collect(), Stroke::new(1.0, col)));
             }
@@ -3281,8 +3296,6 @@ pub fn dims_overlay(app: &SolveApp, ctx: &egui::Context) {
                     crate::icons::markers::dimension_arrow(&painter, t, back, col);
                 }
             }
-            let Some(tc) = to(lay.text) else { continue };
-            let r = Rect::from_center_size(tc, size);
             painter.rect_filled(r, tk.radius_sm / 2, tk.viewport_top.gamma_multiply(0.85));
             painter.galley(r.min + vec2(3.0, 1.0), galley, col);
             if rect.contains(tc) {

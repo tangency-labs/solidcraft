@@ -792,6 +792,38 @@ fn is_plain_value(text: &str) -> bool {
     number.chars().any(|c| c.is_ascii_digit()) && unit.trim().chars().all(|c| c.is_alphabetic() || matches!(c, '°' | '"' | '\''))
 }
 
+/// `expr` with the reference `name` put in by the rule of [`insert_reference`], given the
+/// editor's cursor or selection (`range`): the new text and the cursor just after the name
+/// (character offsets).
+pub(crate) fn with_reference(expr: &str, name: &str, range: Option<egui::text::CCursorRange>) -> (String, usize) {
+    let len = expr.chars().count();
+    let (start, end) = if is_plain_value(expr) {
+        (0, len)
+    } else {
+        range
+            .map(|r| {
+                let a = r.primary.index.0.min(len);
+                let b = r.secondary.index.0.min(len);
+                (a.min(b), a.max(b))
+            })
+            .unwrap_or((len, len))
+    };
+    let before: String = expr.chars().take(start).collect();
+    let after: String = expr.chars().skip(end).collect();
+    (format!("{before}{name}{after}"), start + name.chars().count())
+}
+
+/// The driving dimension whose value text is under a screen position, for a command window
+/// that takes its name (#9477): its parameter. Only a finished sketch's shown dimension (Show
+/// Dimensions) outside sketch editing, as for a double-click: in a sketch, its own dimensions
+/// lie over the curves a sketch window picks. Driven dimensions have none.
+pub fn reference_at(app: &SolveApp, pos: Pos2) -> Option<String> {
+    if app.session.active_sketch.is_some() {
+        return None;
+    }
+    model_hit(pos)?.param
+}
+
 /// Insert a reference into the expression, using character offsets (not bytes). The rule:
 /// - the field holds a lone value (a number, optionally with a unit: `10`, `10 mm`): the name
 ///   replaces the whole text, so `10` becomes `d10`;
@@ -803,23 +835,9 @@ fn is_plain_value(text: &str) -> bool {
 fn insert_reference(ctx: &egui::Context, edit: &mut Edit, name: &str) {
     let id = egui::Id::new("sc_dim_edit");
     let mut state = egui::TextEdit::load_state(ctx, id).unwrap_or_default();
-    let len = edit.expr.chars().count();
-    let (start, end) = if is_plain_value(&edit.expr) {
-        (0, len)
-    } else {
-        edit.selection
-            .or_else(|| state.cursor.char_range())
-            .map(|r| {
-                let a = r.primary.index.0.min(len);
-                let b = r.secondary.index.0.min(len);
-                (a.min(b), a.max(b))
-            })
-            .unwrap_or((len, len))
-    };
-    let before: String = edit.expr.chars().take(start).collect();
-    let after: String = edit.expr.chars().skip(end).collect();
-    edit.expr = format!("{before}{name}{after}");
-    state.cursor.set_char_range(Some(egui::text::CCursorRange::one(egui::text::CCursor::new(start + name.chars().count()))));
+    let cursor;
+    (edit.expr, cursor) = with_reference(&edit.expr, name, edit.selection.or_else(|| state.cursor.char_range()));
+    state.cursor.set_char_range(Some(egui::text::CCursorRange::one(egui::text::CCursor::new(cursor))));
     edit.selection = state.cursor.char_range();
     state.store(ctx, id);
     ctx.memory_mut(|m| m.request_focus(id));

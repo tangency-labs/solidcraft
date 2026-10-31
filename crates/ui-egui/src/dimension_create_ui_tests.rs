@@ -1249,6 +1249,48 @@ fn a_driven_shown_dimension_is_read_only() {
     assert_eq!(h.app.session.doc.to_json(), doc);
 }
 
+/// The Extrude window's distance, as typed.
+fn extrude_distance(h: &Harness) -> String {
+    match h.app.dialog.as_ref().map(|d| &d.kind) {
+        Some(crate::dialogs::Kind::Extrude { distance, .. }) => distance.clone(),
+        other => panic!("no Extrude window: {other:?}"),
+    }
+}
+
+/// With a command window open, a click on a shown dimension puts its name in the value the
+/// keyboard is in (#9477): it replaces a lone value, goes in at the cursor of an expression
+/// being typed, and picks nothing for the window. A driven one has no name to give.
+#[test]
+fn clicking_a_shown_dimension_puts_its_name_in_the_open_windows_value() {
+    let (mut h, _) = shown_dimensions();
+    h.step(&json!({"start":"solid.extrude"})).unwrap();
+    h.frames(8);
+    let picks = |h: &Harness| h.app.dialog.as_ref().map(|d| d.inputs.iter().map(|i| i.items.len()).sum::<usize>());
+    let before = picks(&h);
+    h.step(&json!({"click":model_text(&h, "d2")})).unwrap();
+    h.frames(3);
+    assert_eq!(extrude_distance(&h), "d2", "the name replaces the lone value");
+    assert_eq!(picks(&h), before, "nothing picked for the window");
+    assert!(!crate::dim_view::editing(), "the dimension's own editor stays closed");
+    // The keyboard stays in the value, after the name: what is typed next follows it.
+    h.step(&json!({"text":" + "})).unwrap();
+    h.step(&json!({"click":model_text(&h, "d1")})).unwrap();
+    h.frames(3);
+    assert_eq!(extrude_distance(&h), "d2 + d1", "the name goes in at the cursor");
+    h.step(&json!({"text":" * 2"})).unwrap();
+    assert_eq!(extrude_distance(&h), "d2 + d1 * 2");
+    // The window's own Distance field takes it too, when it has the keyboard.
+    crate::test_support::click(&mut h, "dialog:Distance");
+    h.step(&json!({"key":"A","cmd":true})).unwrap();
+    h.step(&json!({"text":"4"})).unwrap();
+    assert_eq!(extrude_distance(&h), "4");
+    h.step(&json!({"click":model_text(&h, "d1")})).unwrap();
+    h.frames(3);
+    assert_eq!(extrude_distance(&h), "d1");
+    h.step(&json!({"key":"Escape"})).unwrap();
+    h.settle();
+}
+
 /// The value applies like any other change: the fillet it breaks reports its error on the
 /// timeline, and Undo brings back the value and the fillet.
 #[test]

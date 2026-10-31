@@ -3098,6 +3098,19 @@ pub(crate) fn component_selection(app: &SolveApp, body: &str) -> Sel {
     Sel::Body { name: body.to_string() }
 }
 
+/// A click on a driving dimension's value while a command window is open: its name goes into
+/// the value editor the keyboard returns to, as typing it there would (#9477). True when the
+/// click was on one; the second click of a double-click puts nothing in again.
+fn dialog_reference(app: &mut SolveApp, p: Pos2, double: bool) -> bool {
+    let Some(name) = crate::dim_view::reference_at(app, p) else { return false };
+    if let Some(dialog) = app.dialog.as_mut()
+        && !double
+    {
+        dialog.reference = Some(name);
+    }
+    true
+}
+
 /// A pick for the open dialog's active input (a click, or a Select Other row).
 pub(crate) fn dialog_pick(app: &mut SolveApp, hit: &Hit, sel: Sel) {
     // While OK computes, the dialog's inputs hold.
@@ -4471,8 +4484,11 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         let reference_pick = (resp.clicked() || resp.double_clicked())
             && !midpoint_geometry
             && !held
-            && app.dialog.is_none()
-            && crate::dim_view::pick_reference(ui.ctx(), p, resp.double_clicked());
+            && if app.dialog.is_none() {
+                crate::dim_view::pick_reference(ui.ctx(), p, resp.double_clicked())
+            } else {
+                app.tool.is_none() && dialog_reference(app, p, resp.double_clicked())
+            };
         // Capture the press too: text editors lose focus before the click is released. A
         // running tool keeps the keyboard for its own typed values.
         if !held

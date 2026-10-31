@@ -943,10 +943,13 @@ pub(crate) fn unit_token(ctx: &egui::Context, word: &str) -> bool {
 }
 
 /// Offer keyboard and pointer completions under a focused expression box, and step a plain
-/// number in it with Up/Down or the wheel (`value_step`, #2320).
-/// Returns true when either changed the text; callers must not submit that frame.
+/// number in it with Up/Down or the wheel (`value_step`, #2320). A dimension clicked in the
+/// view for this box puts its name in (`ui_kit::take_reference`, #9477).
+/// Returns true when any of them changed the text; callers must not submit that frame.
 pub fn complete(ui: &mut egui::Ui, resp: &egui::Response, text: &mut String) -> bool {
-    crate::expression_complete::complete(ui, resp, text) || crate::value_step::step(ui, resp, text)
+    crate::ui_kit::take_reference(ui.ctx(), resp.id, text)
+        || crate::expression_complete::complete(ui, resp, text)
+        || crate::value_step::step(ui, resp, text)
 }
 
 #[cfg(test)]
