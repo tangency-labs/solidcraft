@@ -83,6 +83,9 @@ struct Guide {
     /// radius between the samples is read off the law there, not off the spine's own length.
     law: Vec<f64>,
     lengths: Vec<f64>,
+    /// The parameter (0 at its front, 1 at its back) of the chain edge each section was solved
+    /// on; `None` for a section that is not on the edge (run on past an open chain's end).
+    params: Vec<Option<f64>>,
     /// The part of the guide that is the chain itself, as fractions of its length: the sections
     /// run on past the ends of the chain (only so that the fit can be cut back there) and the fit
     /// is checked for accuracy on the chain alone.
@@ -112,7 +115,42 @@ impl Guide {
         if !total.is_finite() || total <= 1e-12 {
             return Err(unsupported("degenerate rolling-ball spine"));
         }
-        Ok(Self { sections, law, lengths, span: (0.0, 1.0) })
+        let params = vec![None; sections.len()];
+        Ok(Self { sections, law, lengths, params, span: (0.0, 1.0) })
+    }
+
+    /// [`Guide::with_law`] with the edge parameter each section was solved at.
+    fn with_params(sections: Vec<Section>, law: Vec<f64>, params: Vec<Option<f64>>) -> Result<Self> {
+        if params.len() != sections.len() {
+            return Err(unsupported("degenerate rolling-ball spine"));
+        }
+        Ok(Self { params, ..Self::with_law(sections, law)? })
+    }
+
+    /// The pair of neighbouring sections around `along` of the spine (the index of the later
+    /// one) and the fraction of the way between them.
+    fn locate(&self, along: f64) -> Option<(usize, f64)> {
+        if self.lengths.len() < 2 || !along.is_finite() || !(0.0..=1.0).contains(&along) {
+            return None;
+        }
+        let distance = self.lengths.last()? * along;
+        let hi = self.lengths.partition_point(|length| *length < distance).clamp(1, self.lengths.len().checked_sub(1)?);
+        let (lo, hi_length) = (self.lengths.get(hi - 1)?, self.lengths.get(hi)?);
+        let span = hi_length - lo;
+        if span <= 1e-12 {
+            return None;
+        }
+        Some((hi, (distance - lo) / span))
+    }
+
+    /// Where `along` of the spine falls between two sections solved on the edge: their edge
+    /// parameters, the fraction of the centre-line length between them, and their centres.
+    /// `None` past the edge's ends, where a section has no edge parameter.
+    fn edge_station(&self, along: f64) -> Option<EdgeStation> {
+        let (hi, fraction) = self.locate(along)?;
+        let params = (self.params.get(hi - 1).copied().flatten()?, self.params.get(hi).copied().flatten()?);
+        let centres = (self.sections.get(hi - 1)?.c, self.sections.get(hi)?.c);
+        Some(EdgeStation { params, fraction, centres })
     }
 
     /// The centre and tangent at `along` of the spine.
@@ -122,20 +160,77 @@ impl Guide {
 
     /// [`Guide::anchor`] with the size law's parameter at that station.
     fn anchor_at(&self, along: f64) -> Option<(Vec3, Vec3, f64)> {
-        if self.lengths.len() < 2 || !along.is_finite() || !(0.0..=1.0).contains(&along) {
-            return None;
-        }
-        let distance = self.lengths.last()? * along;
-        let hi = self.lengths.partition_point(|length| *length < distance).clamp(1, self.lengths.len().checked_sub(1)?);
+        let (hi, fraction) = self.locate(along)?;
         let (a, b) = (self.sections.get(hi - 1)?, self.sections.get(hi)?);
-        let (lo, hi_length) = (self.lengths.get(hi - 1)?, self.lengths.get(hi)?);
-        let span = hi_length - lo;
-        if span <= 1e-12 {
-            return None;
-        }
-        let fraction = (distance - lo) / span;
         let law = self.law.get(hi - 1)? * (1.0 - fraction) + self.law.get(hi)? * fraction;
         Some((a.c + (b.c - a.c) * fraction, (b.c - a.c).normalized()?, law))
+    }
+}
+
+/// A station of the spine between two sections solved on the edge (see [`Guide::edge_station`]).
+struct EdgeStation {
+    params: (f64, f64),
+    fraction: f64,
+    centres: (Vec3, Vec3),
+}
+
+/// Times a resampled station's edge parameter is corrected so that its centre lies at its
+/// distance along the spine.
+const STATION_STEPS: usize = 16;
+
+impl EdgeStation {
+    /// The section on the edge whose centre lies in the plane square to the chord between the
+    /// two centres, at the station's fraction of it: the edge parameter found by false position
+    /// (Illinois) between the two sections' parameters, each try solved at the edge's own point
+    /// and tangent from the interpolated centre. An edge's parameter speed may jump between
+    /// sections (an intersection curve's pieces), so the parameter is not read off the length
+    /// directly. `solve_at` gives the section at an edge parameter; `tol` is how far from that
+    /// plane the centre may be. The last section solved where the corrections run out (the
+    /// fit's accuracy check measures the strip against these sections all the same).
+    fn solve(&self, tol: f64, solve_at: impl Fn(f64, Vec3) -> Option<Section>) -> Option<Section> {
+        let (ca, cb) = self.centres;
+        let length = ca.dist(cb);
+        let u = (cb - ca).normalized()?;
+        let seed = ca + (cb - ca) * self.fraction;
+        let gap = |s: &Section| (s.c - seed).dot(u);
+        let ((mut lo, mut hi), f) = (self.params, self.fraction);
+        let (mut g_lo, mut g_hi) = (-f * length, (1.0 - f) * length);
+        let mut p = lo + (hi - lo) * f;
+        let mut last = None;
+        let mut side = 0i8;
+        for _ in 0..STATION_STEPS {
+            let s = solve_at(p, seed)?;
+            let g = gap(&s);
+            if !g.is_finite() {
+                return None;
+            }
+            if g.abs() <= tol {
+                return Some(s);
+            }
+            last = Some(s);
+            if g < 0.0 {
+                (lo, g_lo) = (p, g);
+                if side < 0 {
+                    g_hi *= 0.5;
+                }
+                side = -1;
+            } else {
+                (hi, g_hi) = (p, g);
+                if side > 0 {
+                    g_lo *= 0.5;
+                }
+                side = 1;
+            }
+            let den = g_hi - g_lo;
+            if !(den.abs() > 1e-300) {
+                break;
+            }
+            p = lo - g_lo * (hi - lo) / den;
+            if !p.is_finite() {
+                break;
+            }
+        }
+        last
     }
 }
 
@@ -677,6 +772,7 @@ fn solve_chord(
     cusp: f64,
     extra: Option<Extra<'_>>,
     tol: f64,
+    start: Option<Vec3>,
 ) -> Option<(Section, f64)> {
     let normal = |fs: &[&mt::Face]| fs.iter().filter_map(|f| project(f, p, None)).min_by(|a, b| a.0.dist(p).total_cmp(&b.0.dist(p))).map(|x| x.1);
     let (n1, n2) = (normal(f1)?, normal(f2)?);
@@ -689,7 +785,7 @@ fn solve_chord(
         if !(r.is_finite() && r > 0.0 && r < 1e9) {
             return None;
         }
-        let s = solve(f1, f2, p, t, r, sigma, cusp, extra, tol)?;
+        let s = solve_from(f1, f2, p, t, r, sigma, cusp, extra, tol, start)?;
         let width = s.q1.dist(s.q2);
         if !width.is_finite() || width <= 0.0 {
             return None;
@@ -724,15 +820,32 @@ impl Sizer<'_> {
         cusp: f64,
         extra: Option<Extra<'_>>,
     ) -> Option<(Section, f64)> {
+        self.section_from(f1, f2, p, t, s, sigma, cusp, extra, None)
+    }
+
+    /// [`Sizer::section`] started from the centre `start` when given (a nearby station's).
+    #[allow(clippy::too_many_arguments)]
+    fn section_from(
+        &self,
+        f1: &[&mt::Face],
+        f2: &[&mt::Face],
+        p: Vec3,
+        t: Vec3,
+        s: f64,
+        sigma: f64,
+        cusp: f64,
+        extra: Option<Extra<'_>>,
+        start: Option<Vec3>,
+    ) -> Option<(Section, f64)> {
         match self.size {
-            Size::Constant(r) => solve(f1, f2, p, t, r, sigma, cusp, extra, self.tol).map(|x| (x, r)),
-            Size::Chord(chord) => solve_chord(f1, f2, p, t, chord, sigma, cusp, extra, self.tol),
+            Size::Constant(r) => solve_from(f1, f2, p, t, r, sigma, cusp, extra, self.tol, start).map(|x| (x, r)),
+            Size::Chord(chord) => solve_chord(f1, f2, p, t, chord, sigma, cusp, extra, self.tol, start),
             Size::Law(law) => {
                 let r = law_beyond(law, s)?;
                 if !(r.is_finite() && (0.0..1e6).contains(&r)) {
                     return None;
                 }
-                solve(f1, f2, p, t, r, sigma, cusp, extra, self.tol).map(|x| (x, r))
+                solve_from(f1, f2, p, t, r, sigma, cusp, extra, self.tol, start).map(|x| (x, r))
             }
         }
     }
@@ -1640,13 +1753,16 @@ fn curve_blend_sized(solid: &Solid, ids: &[mt::EdgeID], size: f64, size_law: Siz
             Ok(((start.c - p0).dot(t0), (end.c - p1).dot(t1)))
         })
         .collect::<Result<_>>()?;
-    let section_at = |k: usize, edge: &mt::Edge, along: f64| -> Result<(Section, f64)> {
-        let (p, t) = tangent_at(edge, along).ok_or_else(|| KernelError::Failed("tangent".into()))?;
-        let (start, end) = offsets.get(k).copied().ok_or_else(|| KernelError::Failed("section offset".into()))?;
+    // The section at `along` of edge `k`, in the plane square to the edge there (shifted by the
+    // seams' offsets), solved from the centre `seed` when given.
+    let section_from = |k: usize, edge: &mt::Edge, along: f64, seed: Option<Vec3>| -> Option<Section> {
+        let (p, t) = tangent_at(edge, along)?;
+        let (start, end) = offsets.get(k).copied()?;
         let anchor = p + t * (start * (1.0 - along) + end * along);
         let (a1, a2) = edge_sides(&[k]);
-        sizer.section(&a1, &a2, anchor, t, frac_at(k, along), sigma, cusp, None).ok_or_else(|| sizer.refusal())
+        sizer.section_from(&a1, &a2, anchor, t, frac_at(k, along), sigma, cusp, None, seed).map(|(section, _)| section)
     };
+    let section_at = |k: usize, edge: &mt::Edge, along: f64| -> Result<Section> { section_from(k, edge, along, None).ok_or_else(|| sizer.refusal()) };
     let mut samples = SAMPLES.min(max_samples);
     let (esec, fits) = loop {
         if n.checked_mul(samples).is_none_or(|count| count > MAX_CHAIN_SAMPLES) {
@@ -1661,27 +1777,31 @@ fn curve_blend_sized(solid: &Solid, ids: &[mt::EdgeID], size: f64, size_law: Siz
             }
             let mut list = vec![*vsec.get(k).ok_or_else(|| KernelError::Failed("section".into()))?];
             let mut law = vec![frac_at(k, 0.0)];
+            let mut params = vec![Some(0.0)];
             let (mut front_beyond, mut back_beyond) = (0usize, 0usize);
             for j in 1..samples - 1 {
                 let along = j as f64 / (samples - 1) as f64;
-                let (section, _) = section_at(k, e, along)?;
-                list.push(section);
+                list.push(section_at(k, e, along)?);
                 law.push(frac_at(k, along));
+                params.push(Some(along));
             }
             list.push(*vsec.get((k + 1) % nv).ok_or_else(|| KernelError::Failed("section".into()))?);
             law.push(frac_at(k, 1.0));
+            params.push(Some(1.0));
             for (kv, ext, exts) in &beyond {
                 if *kv == k && k == 0 {
                     list.splice(0..0, ext.iter().copied());
                     law.splice(0..0, exts.iter().copied());
+                    params.splice(0..0, ext.iter().map(|_| None));
                     front_beyond = ext.len();
                 } else if *kv == k + 1 && k + 1 == nv - 1 {
                     list.extend(ext.iter().copied());
                     law.extend(exts.iter().copied());
+                    params.extend(ext.iter().map(|_| None));
                     back_beyond = ext.len();
                 }
             }
-            let mut guide = Guide::with_law(list, law)?;
+            let mut guide = Guide::with_params(list, law, params)?;
             // The chain's own run: the spliced sections at either end are context for the fit
             // only (the blend is cut back where it meets the end face there).
             let last = guide.lengths.last().copied().unwrap_or(0.0);
@@ -1691,8 +1811,12 @@ fn curve_blend_sized(solid: &Solid, ids: &[mt::EdgeID], size: f64, size_law: Siz
         }
         // Intersection curves inherit their leader's piecewise parameter speed. Fitting
         // those parameters creates oscillations even on a geometrically smooth spine.
-        // Resample by distance along the rolling centres, projecting each interpolated
-        // centre back onto the exact two offset surfaces before it becomes a section.
+        // Resample by distance along the rolling centres: on the edge, the station is the
+        // section at the edge parameter whose centre lies at that distance (between the two
+        // sections around it), solved at the edge's exact point and tangent there (a spline's
+        // speed and curvature vary, so the chord between centres is no tangent of it). Only
+        // past the chain's ends, where the sections are not on the edge, is the interpolated
+        // centre and its chord the anchor.
         let uniform_section = |k: usize, along: f64| -> Result<Section> {
             let guide = guides.get(k).and_then(Option::as_ref).ok_or_else(|| KernelError::Failed("spine guide".into()))?;
             if along == 0.0 {
@@ -1700,6 +1824,12 @@ fn curve_blend_sized(solid: &Solid, ids: &[mt::EdgeID], size: f64, size_law: Siz
             }
             if along == 1.0 {
                 return guide.sections.last().copied().ok_or_else(|| KernelError::Failed("section".into()));
+            }
+            if let Some(station) = guide.edge_station(along) {
+                let e = chain.get(k).ok_or_else(|| KernelError::Failed("edge".into()))?;
+                return station
+                    .solve(sizer.tol, |param, seed| section_from(k, e, param, Some(seed)).or_else(|| section_from(k, e, param, None)))
+                    .ok_or_else(|| unsupported("the ball doesn't fit along the resampled spine"));
             }
             let (anchor, tangent, law_s) = guide.anchor_at(along).ok_or_else(|| unsupported("degenerate rolling-ball spine"))?;
             let (a1, a2) = edge_sides(&[k]);
