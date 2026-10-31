@@ -19,7 +19,8 @@ use emath::GuiRounding as _;
 
 use crate::{
     Align, Context, CursorIcon, Frame, Id, InnerResponse, LayerId, Layout, Margin, NumExt as _,
-    Order, Rangef, Rect, Response, Sense, Stroke, Ui, UiBuilder, UiKind, UiStackInfo, Vec2, lerp,
+    Order, Painter, Rangef, Rect, Response, Sense, Shape, Stroke, Ui, UiBuilder, UiKind, UiStackInfo,
+    Vec2, lerp,
 };
 
 fn animate_expansion(ctx: &Context, id: Id, is_expanded: bool) -> f32 {
