@@ -2768,6 +2768,216 @@
      }
     ]
    }
+  },
+  {
+   "name": "attributes_rebuild_fillets_defillet",
+   "upstream_ref": "source/SMLib/src/SmFeatureExecutive.cpp attributes through PartitionFeature / ApplyPatches copies (SM_NO_COPY by behaviour)",
+   "inputs": {
+    "file": "Defeature/defillet.smb",
+    "attributes": [
+     {
+      "kind": "face",
+      "index": 8,
+      "id": 20001,
+      "behavior": 0
+     },
+     {
+      "kind": "edge",
+      "index": 14,
+      "id": 20002,
+      "behavior": 0
+     },
+     {
+      "kind": "edge",
+      "index": 16,
+      "id": 20003,
+      "behavior": 1
+     },
+     {
+      "kind": "face",
+      "index": 8,
+      "id": 20004,
+      "behavior": 4
+     },
+     {
+      "kind": "face",
+      "index": 0,
+      "id": 20005,
+      "behavior": 0
+     },
+     {
+      "kind": "edge",
+      "index": 0,
+      "id": 20006,
+      "behavior": 2
+     }
+    ],
+    "features": [
+     {
+      "kind": "edges",
+      "face": 8,
+      "edges": [
+       14,
+       16
+      ]
+     }
+    ],
+    "ops": [
+     {
+      "op": "defeature"
+     }
+    ]
+   }
+  },
+  {
+   "name": "attributes_add_by_faces_extrusion",
+   "upstream_ref": "source/SMLib/src/SmFeatureExecutive.cpp attributes on feature faces, loop edges and base faces of three features",
+   "inputs": {
+    "file": "Defeature/extrusion.smb",
+    "attributes": [
+     {
+      "kind": "face",
+      "index": 10,
+      "id": 20001,
+      "behavior": 0
+     },
+     {
+      "kind": "face",
+      "index": 6,
+      "id": 20002,
+      "behavior": 1
+     },
+     {
+      "kind": "edge",
+      "index": 8,
+      "id": 20003,
+      "behavior": 0
+     },
+     {
+      "kind": "edge",
+      "index": 2,
+      "id": 20004,
+      "behavior": 3
+     },
+     {
+      "kind": "face",
+      "index": 0,
+      "id": 20005,
+      "behavior": 0
+     }
+    ],
+    "features": [
+     {
+      "kind": "faces",
+      "faces": [
+       10
+      ]
+     },
+     {
+      "kind": "faces",
+      "faces": [
+       6,
+       7,
+       8,
+       9
+      ]
+     },
+     {
+      "kind": "faces",
+      "faces": [
+       4
+      ]
+     }
+    ],
+    "ops": [
+     {
+      "op": "defeature"
+     }
+    ]
+   }
+  },
+  {
+   "name": "attributes_restore_defillet",
+   "upstream_ref": "source/SMLib/src/SmFeatureExecutive.cpp attributes through RestoreFeature's copy back",
+   "inputs": {
+    "file": "Defeature/defillet.smb",
+    "attributes": [
+     {
+      "kind": "face",
+      "index": 8,
+      "id": 20001,
+      "behavior": 0
+     },
+     {
+      "kind": "edge",
+      "index": 14,
+      "id": 20002,
+      "behavior": 0
+     }
+    ],
+    "features": [
+     {
+      "kind": "edges",
+      "face": 8,
+      "edges": [
+       14,
+       16
+      ],
+      "base_rb": 0,
+      "feat_rb": 0
+     }
+    ],
+    "ops": [
+     {
+      "op": "defeature"
+     },
+     {
+      "op": "restore"
+     }
+    ]
+   }
+  },
+  {
+   "name": "attributes_inner_loop_extrusion",
+   "upstream_ref": "source/SMLib/src/SmFeatureExecutive.cpp attributes through ExtSurfaceRebuild's inner-loop face copy",
+   "inputs": {
+    "file": "Defeature/extrusion.smb",
+    "attributes": [
+     {
+      "kind": "face",
+      "index": 9,
+      "id": 20001,
+      "behavior": 0
+     },
+     {
+      "kind": "face",
+      "index": 10,
+      "id": 20002,
+      "behavior": 0
+     },
+     {
+      "kind": "edge",
+      "index": 25,
+      "id": 20003,
+      "behavior": 0
+     }
+    ],
+    "features": [
+     {
+      "kind": "edges",
+      "face": 10,
+      "edges": [
+       8,
+       25
+      ]
+     }
+    ],
+    "ops": [
+     {
+      "op": "defeature"
+     }
+    ]
+   }
   }
  ]
 }

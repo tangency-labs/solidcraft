@@ -6,6 +6,8 @@
 //! B-rep and runs a script on it:
 //!
 //! ```text
+//! n_attributes
+//!   kind index id behavior     kind 0 face, 1 edge: SmLongAttribute(id, 7, behavior) on it
 //! n_features
 //!   kind base_rb feat_rb ...   kind 0: n_faces face*            AddFeature(faces, base_rb, feat_rb)
 //!                              kind 1: face n_edges edge*       AddFeature(face, edges, base_rb, feat_rb)
@@ -24,7 +26,8 @@
 //! graph_len graph*` (edge-curve and face-surface samples, then the raw graph export). The
 //! record is one flag per `AddFeature` (a feature was made), per op `DoDefeature`'s
 //! `status base_is_input n_feature_breps` or `RestoreFeatures`' status, then the
-//! features' states. A failed fixture build returns `-999 status`; an index past the
+//! features' states, then per attribute the numbers of faces and edges carrying its id in
+//! the base B-rep and in each feature B-rep (`-1 -1` for none). A failed fixture build returns `-999 status`; an index past the
 //! fixture's faces or edges `-998`; a `RestoreFeatures` with two or more restorable
 //! features `-997` (upstream then deletes a feature it keeps in its list); a `DoDefeature`
 //! whose features keep a loop edge an applied patch's stitch deleted `-996` (upstream
@@ -101,6 +104,20 @@ impl Script<'_> {
 /// Checks the script's shape (see the module docs); index bounds are the shim's (`-998`).
 fn validate(script: &[f64]) -> Result<(), FfiError> {
     let mut s = Script { s: script, at: 0 };
+    let n_attributes = s.count()?;
+    for _ in 0..n_attributes {
+        if s.count()? > 1 {
+            return Err(FfiError::InvalidArgument("attribute kind".into()));
+        }
+        s.count()?;
+        let id = s.num()?;
+        if !(0.0..=f64::from(u32::MAX)).contains(&id) || id.fract() != 0.0 {
+            return Err(FfiError::InvalidArgument("attribute id".into()));
+        }
+        if s.count()? > 4 {
+            return Err(FfiError::InvalidArgument("attribute behaviour".into()));
+        }
+    }
     let n_features = s.count()?;
     for _ in 0..n_features {
         let kind = s.count()?;

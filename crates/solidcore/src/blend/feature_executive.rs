@@ -78,7 +78,13 @@
 //!   accepts.
 //! - **Notifications.** B-rep edits run on arena-only notification records
 //!   ([`crate::topology::brep::p2::ArenaNotifyState`]; a copy's records cover both
-//!   B-reps), as upstream's objects notify their context; attributes are not carried.
+//!   B-reps), as upstream's objects notify their context. `PartitionFeature`'s and
+//!   `RestoreFeature`'s `CopyFaces` run on a
+//!   [`crate::topology::brep::p2::CopyNotifyState`] holding both B-reps' own attributes,
+//!   so each attribute reaches the copies as its behaviour says (`SM_NO_COPY`), as
+//!   upstream's live on the objects. The patch copies (`ExtSurfaceRebuild`,
+//!   `ApplyPatches`) do not carry attributes yet: upstream's there depend on the merges
+//!   that still differ (plan/findings/blend.feature_executive--ext-surface-patch-faces-differ.md).
 //! - No recursion.
 
 use crate::boolean::merge::p3::BooleanDriver;
@@ -776,7 +782,7 @@ fn partition_feature(k: &mut Kernel, base: &mut Brep, feature: &mut Feature) -> 
     let r = (|| -> Result<()> {
         // Copy faces from BaseBrep to FeatureBrep
         let fbrep = feature.fbrep.as_mut().ok_or_else(sm_err)?;
-        let (_, copied) = copy_faces(k, base, &feature.faces, fbrep, true)?;
+        let (_, copied) = copy_faces_carrying(k, base, &feature.faces, fbrep, true)?;
         if !copied {
             return Err(sm_err());
         }
@@ -1164,7 +1170,7 @@ fn restore_feature(k: &mut Kernel, base: &mut Brep, feature: &mut Feature) -> Re
             .take()
             .ok_or_else(|| SolidError::null_pointer(OP))?;
         let faces = bp1::faces(&fbrep, None)?;
-        keep_unported(copy_faces(k, &mut fbrep, &faces, base, true).map(drop))?;
+        keep_unported(copy_faces_carrying(k, &mut fbrep, &faces, base, true).map(drop))?;
         ignore_status(stitch_and_orient(k, base))?;
         feature.is_partitioned = false;
         feature.defeature_ready = false;
@@ -1934,6 +1940,37 @@ fn copy_faces(
     crate::topology::brep::p7::copy_faces(k, src, faces, dest, use_merge, &face_ref, &mut env)
 }
 
+/// `CopyFaces` from one B-rep into another with both B-reps' own attributes
+/// ([`crate::topology::brep::p2::CopyNotifyState`]): each attribute goes to the new
+/// objects as its behaviour says (`SM_NO_COPY`), as upstream's live on the objects.
+fn copy_faces_carrying(
+    k: &mut Kernel,
+    src: &mut Brep,
+    faces: &[FaceId],
+    dest: &mut Brep,
+    use_merge: bool,
+) -> Result<(Vec<FaceId>, bool)> {
+    use crate::topology::brep::p2::{copy_source_ref, CopyNotifyState};
+    // (arena-only notification records for both B-reps' objects, holding both B-reps'
+    // attributes: SM_NO_COPY gives each new object its source's, as upstream)
+    let mut state = CopyNotifyState::with_attributes_of(src, dest)?;
+    let face_ref = |f: FaceId| crate::topology::loopuse::notify_ref(EntityRef::Face(f));
+    let r = crate::topology::brep::p7::copy_faces_from(
+        k,
+        src,
+        faces,
+        dest,
+        use_merge,
+        &copy_source_ref,
+        &face_ref,
+        &mut state.env(None),
+    );
+    let restored = state.restore_attributes(src, dest);
+    let r = r?;
+    restored?;
+    Ok(r)
+}
+
 /// `SmBrep::RemoveFaces`.
 fn remove_faces(k: &mut Kernel, b: &mut Brep, faces: &[FaceId]) -> Result<()> {
     let editing = b.editing_enabled();
@@ -2089,6 +2126,72 @@ mod tests {
         for (i, e) in bp1::edges(&b, None).unwrap().into_iter().enumerate() {
             assert_eq!(edge_number_in_brep(&b, e).unwrap(), i);
         }
+    }
+
+    /// `PartitionFeature`'s `CopyFaces` notifies `SM_NO_COPY` on each copied face and edge
+    /// (`SmMerge::MakeFaceuse`), so copy-behaviour attributes reach the feature B-rep and
+    /// temporary ones do not; the base keeps its other objects' attributes.
+    #[test]
+    fn defeature_carries_attributes_as_their_behaviours_say() {
+        use crate::geom::attribute::{Attribute, Behavior};
+        let mut k = Kernel::default();
+        let mut b = create_box(&mut k, Point3::ZERO, 1.0, 2.0, 3.0).unwrap();
+        let faces = bp1::faces(&b, None).unwrap();
+        let f0 = faces[0];
+        let other = faces[1];
+        let e0 = face_edges(&b, f0, false).unwrap()[0];
+        b.add_attribute(EntityRef::Face(f0), Attribute::new(20001, Behavior::Copy))
+            .unwrap();
+        b.add_attribute(EntityRef::Edge(e0), Attribute::new(20002, Behavior::Copy))
+            .unwrap();
+        b.add_attribute(
+            EntityRef::Face(other),
+            Attribute::new(20003, Behavior::Copy),
+        )
+        .unwrap();
+        b.add_attribute(EntityRef::Face(f0), Attribute::new(20004, Behavior::Temp))
+            .unwrap();
+        let fbrep = {
+            let mut ex = FeatureExecutive::new(&mut k, &mut b).unwrap();
+            ex.add_feature(
+                &mut k,
+                &[f0],
+                RebuildBrepType::ExtendSurface,
+                RebuildBrepType::FromOtherBrep,
+            )
+            .unwrap()
+            .unwrap();
+            ex.do_defeature(&mut k).unwrap();
+            ex.into_feature_breps()
+                .into_iter()
+                .next()
+                .flatten()
+                .unwrap()
+        };
+        let has = |br: &Brep, id: u64, face: bool| {
+            if face {
+                bp1::faces(br, None)
+                    .unwrap()
+                    .into_iter()
+                    .any(|f| br.find_attribute(EntityRef::Face(f), id).is_some())
+            } else {
+                bp1::edges(br, None)
+                    .unwrap()
+                    .into_iter()
+                    .any(|e| br.find_attribute(EntityRef::Edge(e), id).is_some())
+            }
+        };
+        assert!(
+            has(&fbrep, 20001, true),
+            "copy face attribute on the feature"
+        );
+        assert!(
+            has(&fbrep, 20002, false),
+            "copy edge attribute on the feature"
+        );
+        assert!(!has(&fbrep, 20004, true), "temporary attribute not copied");
+        assert!(!has(&fbrep, 20003, true), "other faces stay in the base");
+        assert!(b.find_attribute(EntityRef::Face(other), 20003).is_some());
     }
 
     #[test]

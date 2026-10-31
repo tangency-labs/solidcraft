@@ -21,6 +21,8 @@
 
 use serde::{Deserialize, Serialize};
 use solidcore::blend::feature_executive::{FeatureExecutive, FeatureLoop, RebuildBrepType};
+use solidcore::error::EntityRef;
+use solidcore::geom::attribute::{Attribute, Behavior};
 use solidcore::kernel::Kernel;
 use solidcore::topology::brep::p1 as bp1;
 use solidcore::topology::{Brep, EdgeId, FaceId};
@@ -73,6 +75,21 @@ impl Default for FeatureSpec {
     }
 }
 
+/// An `SmLongAttribute(id, 7, behavior)` put on a face or edge of the fixture before the
+/// features are added.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
+struct AttrSpec {
+    /// `face` or `edge`.
+    kind: String,
+    /// The index in the fixture's `GetFaces` / `GetEdges`.
+    index: u32,
+    /// The attribute id (above 10000).
+    id: u32,
+    /// `SmAttributeBehaviorType` (0 copy .. 4 temp).
+    behavior: u8,
+}
+
 /// One op after the features.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "op", rename_all = "snake_case")]
@@ -92,6 +109,8 @@ struct Inputs {
     file: String,
     /// Rebuild the B-rep's topology on reading (`ReadFromFile`'s flag).
     rebuild: bool,
+    /// Attributes put on the fixture first.
+    attributes: Vec<AttrSpec>,
     features: Vec<FeatureSpec>,
     ops: Vec<OpSpec>,
 }
@@ -101,6 +120,7 @@ impl Default for Inputs {
         Self {
             file: "Defeature/defillet.smb".into(),
             rebuild: false,
+            attributes: Vec::new(),
             features: Vec::new(),
             ops: vec![OpSpec::Defeature],
         }
@@ -118,7 +138,16 @@ fn kind_code(kind: &str) -> Result<f64, HarnessError> {
 
 /// The shim's script (layout in `solidcore_ffi::units::blend_feature_executive`).
 fn script(i: &Inputs) -> Result<Vec<f64>, HarnessError> {
-    let mut s = vec![i.features.len() as f64];
+    let mut s = vec![i.attributes.len() as f64];
+    for a in &i.attributes {
+        let kind = match a.kind.as_str() {
+            "face" => 0.,
+            "edge" => 1.,
+            other => return Err(herr(format!("attribute kind {other}"))),
+        };
+        s.extend([kind, f64::from(a.index), f64::from(a.id), f64::from(a.behavior)]);
+    }
+    s.push(i.features.len() as f64);
     let list = |s: &mut Vec<f64>, v: &[u32]| {
         s.push(v.len() as f64);
         s.extend(v.iter().map(|&x| f64::from(x)));
@@ -313,6 +342,41 @@ enum RustRun {
     PastFixture,
 }
 
+/// The numbers of faces and edges that carry each spec's attribute id, of the base B-rep
+/// and then of each feature B-rep (`-1 -1` for none).
+fn put_attributes(
+    ex: &FeatureExecutive<'_>,
+    specs: &[AttrSpec],
+    record: &mut Vec<f64>,
+) -> SolidResult<()> {
+    let counts = |b: &Brep, id: u64, record: &mut Vec<f64>| -> SolidResult<()> {
+        let faces = bp1::faces(b, None)?;
+        let edges = bp1::edges(b, None)?;
+        let nf = faces
+            .iter()
+            .filter(|&&f| b.find_attribute(EntityRef::Face(f), id).is_some())
+            .count();
+        let ne = edges
+            .iter()
+            .filter(|&&e| b.find_attribute(EntityRef::Edge(e), id).is_some())
+            .count();
+        record.extend([nf as f64, ne as f64]);
+        Ok(())
+    };
+    let fbs = ex.feature_breps();
+    for a in specs {
+        let id = u64::from(a.id);
+        counts(ex.base_brep(), id, record)?;
+        for fb in &fbs {
+            match fb {
+                Some(fb) => counts(fb, id, record)?,
+                None => record.extend([-1., -1.]),
+            }
+        }
+    }
+    Ok(())
+}
+
 fn run_script(k: &mut Kernel, b: &mut Brep, i: &Inputs) -> SolidResult<RustRun> {
     let faces = bp1::faces(b, None)?;
     let edges = bp1::edges(b, None)?;
@@ -320,6 +384,17 @@ fn run_script(k: &mut Kernel, b: &mut Brep, i: &Inputs) -> SolidResult<RustRun> 
     let edge_list = |v: &[u32]| -> Option<Vec<EdgeId>> {
         v.iter().map(|&x| edges.get(x as usize).copied()).collect()
     };
+    for a in &i.attributes {
+        let e = match a.kind.as_str() {
+            "face" => face_at(a.index).map(EntityRef::Face),
+            _ => edges.get(a.index as usize).copied().map(EntityRef::Edge),
+        };
+        let Some(e) = e else {
+            return Ok(RustRun::PastFixture);
+        };
+        let behavior = Behavior::from_code(i32::from(a.behavior))?;
+        b.add_attribute(e, Attribute::long(u64::from(a.id), 7, behavior))?;
+    }
     let mut record = Vec::new();
     let mut ex = FeatureExecutive::new(k, b)?;
     for f in &i.features {
@@ -388,6 +463,7 @@ fn run_script(k: &mut Kernel, b: &mut Brep, i: &Inputs) -> SolidResult<RustRun> 
         }
     }
     put_features(&ex, &mut record)?;
+    put_attributes(&ex, &i.attributes, &mut record)?;
     Ok(RustRun::Record(record, ex.into_feature_breps()))
 }
 

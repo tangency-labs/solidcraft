@@ -7,6 +7,7 @@
 // crates/solidcore-ffi/src/units/blend_feature_executive.rs.
 #include "sc_topology_fixture.h"
 #include <SmFeatureExecutive.h>
+#include <SmAttribute.h>
 #include <memory>
 
 namespace {
@@ -251,6 +252,18 @@ bool stale_edges(SmFeatureExecutive& ex, SmBrep* b) {
     }
     return false;
 }
+// The numbers of faces and edges of `b` that carry an attribute of id `id`.
+void put_attribute_counts(std::vector<double>& o, SmBrep* b, ULONG id) {
+    SmTArray<SmFace*> faces;
+    SmTArray<SmEdge*> edges;
+    b->GetFaces(faces);
+    b->GetEdges(edges);
+    double nf = 0, ne = 0;
+    for (ULONG i = 0; i < faces.GetSize(); ++i) if (faces[i]->FindAttribute(id)) nf += 1;
+    for (ULONG i = 0; i < edges.GetSize(); ++i) if (edges[i]->FindAttribute(id)) ne += 1;
+    o.push_back(nf);
+    o.push_back(ne);
+}
 // Number of features whose RestoreFeature would succeed.
 int64_t restorable(SmFeatureExecutive& ex) {
     SmTArray<SmFeature*> fs;
@@ -303,6 +316,19 @@ SC_EXPORT int32_t sc_blend_feature_executive_eval(const char* path, const double
         std::vector<SmFeatureLoop*>& v;
         ~LoopsClean() { for (auto* l : v) delete l; }
     } loops_clean{made_loops};
+    // attributes: kind (0 face, 1 edge) index id behavior -> SmLongAttribute(id, 7, behavior)
+    std::vector<ULONG> attr_ids;
+    int64_t n_attrs = sc.idx();
+    for (int64_t ai = 0; ai < n_attrs; ++ai) {
+        int64_t kind = sc.idx();
+        int64_t index = sc.idx();
+        ULONG id = (ULONG)sc.idx();
+        SmAttributeBehaviorType behavior = (SmAttributeBehaviorType)sc.idx();
+        SmAObject* obj = kind == 0 ? (SmAObject*)face_at(index) : (SmAObject*)edge_at(index);
+        if (!obj) return sc_copy_out(bad.data(), 1, out, cap, out_len);
+        obj->AddAttribute(new (ctx) SmLongAttribute(id, 7, behavior));
+        attr_ids.push_back(id);
+    }
     SmFeatureExecutive ex(ctx, *b);
     int64_t n_features = sc.idx();
     for (int64_t fi = 0; fi < n_features; ++fi) {
@@ -408,6 +434,17 @@ SC_EXPORT int32_t sc_blend_feature_executive_eval(const char* path, const double
     ex.GetFeatures(fs);
     record.push_back((double)fs.GetSize());
     for (ULONG i = 0; i < fs.GetSize(); ++i) put_feature(record, fs[i]);
+    {
+        SmTArray<SmBrep*> fbs;
+        ex.GetFeatureBreps(fbs);
+        for (ULONG id : attr_ids) {
+            put_attribute_counts(record, b, id);
+            for (ULONG i = 0; i < fbs.GetSize(); ++i) {
+                if (fbs[i]) put_attribute_counts(record, fbs[i], id);
+                else { record.push_back(-1.0); record.push_back(-1.0); }
+            }
+        }
+    }
     std::vector<double> result = {(double)record.size()};
     result.insert(result.end(), record.begin(), record.end());
     put_brep(result, b);
