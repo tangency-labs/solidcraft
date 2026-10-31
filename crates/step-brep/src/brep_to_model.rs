@@ -218,6 +218,24 @@ fn edge_start_is_end(brep: &Brep, edge: solidcore::topology::EdgeId) -> bool {
     }
 }
 
+/// Which of `surface`'s STEP parameters (u, v) are angles (ISO 10303-42): a cylinder's
+/// or cone's u (its v is a length), a sphere's or torus's u and v, a surface of
+/// revolution's u and, for a conic generator, its v (the generator's parameter), and an
+/// extrusion's u for a conic generator.
+fn step_angles(surface: &solidcore::surface::surface::Surface) -> (bool, bool) {
+    use solidcore::surface::surface::p2::SurfaceKind;
+    let conic = |curve: Option<&solidcore::curve::curve::Curve>| {
+        curve.is_some_and(|curve| matches!(curve.kind(), CurveKind::Ellipse(_)))
+    };
+    match surface.kind() {
+        SurfaceKind::Cone(_) => (true, false),
+        SurfaceKind::Sphere(_) | SurfaceKind::Torus(_) => (true, true),
+        SurfaceKind::SurfOfRevolution(revolution) => (true, conic(revolution.gen_curve())),
+        SurfaceKind::SurfOfExtrusion(extrusion) => (conic(extrusion.gen_curve()), false),
+        _ => (false, false),
+    }
+}
+
 /// Maps one B-rep to the neutral STEP model.
 pub fn brep_to_model(brep: &Brep) -> Result<Model, ExportModelError> {
     let vertex_ids = brep.vertex_list().to_vec();
@@ -301,12 +319,26 @@ pub fn brep_to_model(brep: &Brep) -> Result<Model, ExportModelError> {
                     };
                     let interval = uv_curve.natural_interval();
                     let (low, high) = (interval.min(), interval.max());
+                    // The UV trim curve is in the surface's NURB parameters; a STEP pcurve
+                    // is in its STEP ones (ISO 10303-42), which SolidCore converts to and
+                    // from (the angles not linearly). A pcurve with a sample that does not
+                    // convert is left out.
                     let mut uv = Vec::with_capacity(65);
+                    let mut converted = true;
                     for step in 0..=64 {
                         let t = low + (high - low) * f64::from(step) / 64.0;
                         if let Ok(p) = uv_curve.evaluate_point(&pcurve_kernel, t) {
-                            uv.push([p.x, p.y]);
+                            match surf.convert_uv_from_nurbs_to_step(
+                                &pcurve_kernel,
+                                solidcore::geom::vector2d::Point2::new(p.x, p.y),
+                            ) {
+                                Ok(step_uv) => uv.push([step_uv.x, step_uv.y]),
+                                Err(_) => converted = false,
+                            }
                         }
+                    }
+                    if !converted {
+                        uv.clear();
                     }
                     if uv.len() >= 2 {
                         let opposite = eu::orientation(brep, edgeuse).is_ok_and(|orientation| {
@@ -343,22 +375,15 @@ pub fn brep_to_model(brep: &Brep) -> Result<Model, ExportModelError> {
                                 curves.push(other);
                             }
                         }
-                        // SolidCore stores analytic surface UV in degrees; STEP stores
-                        // angular surface parameters in radians.
-                        let angular = matches!(
-                            face.surface
-                                .as_ref()
-                                .map(solidcore::surface::surface::Surface::kind),
-                            Some(
-                                solidcore::surface::surface::p2::SurfaceKind::Cone(_)
-                                    | solidcore::surface::surface::p2::SurfaceKind::Sphere(_)
-                                    | solidcore::surface::surface::p2::SurfaceKind::Torus(_)
-                            )
-                        );
-                        if angular {
-                            for curve in &mut curves {
-                                for point in curve {
+                        // SolidCore's STEP parameters give angles in degrees; the file's
+                        // plane angle unit is the radian ([`step_angles`]).
+                        let (angular_u, angular_v) = step_angles(surf);
+                        for curve in &mut curves {
+                            for point in curve {
+                                if angular_u {
                                     point[0] = point[0].to_radians();
+                                }
+                                if angular_v {
                                     point[1] = point[1].to_radians();
                                 }
                             }
@@ -512,6 +537,289 @@ mod tests {
                         .any(|point| point[0].abs() <= std::f64::consts::TAU + 0.5),
                     "cylinder pcurve u must be radians: {curve:?}"
                 );
+            }
+        }
+        // The cylinder's v is a length: the seam's pcurves span the 4 mm height.
+        let vs = model
+            .pcurves
+            .values()
+            .flatten()
+            .flatten()
+            .map(|point| point[1]);
+        let (low, high) = vs.fold((f64::INFINITY, f64::NEG_INFINITY), |(low, high), v| {
+            (low.min(v), high.max(v))
+        });
+        assert!(
+            (high - low - 4.0).abs() < 1e-9,
+            "cylinder pcurve v must be millimetres: {low} to {high}"
+        );
+    }
+
+    fn plus(p: [f64; 3], s: f64, d: [f64; 3]) -> [f64; 3] {
+        [p[0] + s * d[0], p[1] + s * d[1], p[2] + s * d[2]]
+    }
+
+    fn cross(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {
+        [
+            a[1] * b[2] - a[2] * b[1],
+            a[2] * b[0] - a[0] * b[2],
+            a[0] * b[1] - a[1] * b[0],
+        ]
+    }
+
+    fn dot(a: [f64; 3], b: [f64; 3]) -> f64 {
+        a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
+    }
+
+    /// The point of a line or circle at its file parameter (a circle's in radians).
+    fn iso_curve_point(curve: &ModelCurve, t: f64) -> [f64; 3] {
+        match curve {
+            ModelCurve::Line {
+                origin,
+                dir,
+                magnitude,
+            } => plus(*origin, t * magnitude, *dir),
+            ModelCurve::Circle { frame, radius } => plus(
+                plus(frame.origin, radius * t.cos(), frame.x),
+                radius * t.sin(),
+                frame.y,
+            ),
+            other => panic!("generator {other:?}"),
+        }
+    }
+
+    /// The ISO 10303-42 point of an exported surface at file parameters (angles in
+    /// radians).
+    fn iso_point(surface: &ModelSurface, u: f64, v: f64) -> [f64; 3] {
+        let (su, cu) = u.sin_cos();
+        let (sv, cv) = v.sin_cos();
+        let around = |frame: &Frame, r: f64, height: f64| {
+            plus(
+                plus(plus(frame.origin, r * cu, frame.x), r * su, frame.y),
+                height,
+                frame.z,
+            )
+        };
+        match surface {
+            ModelSurface::Cylinder { frame, radius } => around(frame, *radius, v),
+            ModelSurface::Cone {
+                frame,
+                radius,
+                semi_angle_deg,
+            } => around(frame, radius + v * semi_angle_deg.to_radians().tan(), v),
+            ModelSurface::Sphere { frame, radius } => around(frame, radius * cv, radius * sv),
+            ModelSurface::Torus {
+                frame,
+                major,
+                minor,
+            } => around(frame, major + minor * cv, minor * sv),
+            ModelSurface::Revolution {
+                curve,
+                axis_origin,
+                axis_dir,
+            } => {
+                // The generator's point rotated by u about the axis.
+                let d = plus(iso_curve_point(curve, v), -1.0, *axis_origin);
+                let along = dot(d, *axis_dir);
+                let radial = plus(d, -along, *axis_dir);
+                let turned = plus(plus([0.0; 3], cu, radial), su, cross(*axis_dir, radial));
+                plus(plus(*axis_origin, along, *axis_dir), 1.0, turned)
+            }
+            ModelSurface::Extrusion {
+                curve,
+                dir,
+                magnitude,
+            } => plus(iso_curve_point(curve, u), v * magnitude, *dir),
+            other => panic!("surface {other:?}"),
+        }
+    }
+
+    /// An open band on `surface` between two circles about the z axis of radius
+    /// `radius`, at z = `bottom` and z = `top`, joined by the seam edge `seam` (its
+    /// curve and parameters from bottom to top). With its seam given, the build adds
+    /// none (an added seam is a curve on the surface, which the exporter does not
+    /// write).
+    fn band(
+        surface: ModelSurface,
+        radius: f64,
+        bottom: f64,
+        top: f64,
+        seam: (ModelCurve, f64, f64),
+    ) -> Body {
+        let circle = |index: usize, z: f64| Edge {
+            step_id: index as u64 + 1,
+            start: index,
+            end: index,
+            curve: ModelCurve::Circle {
+                frame: Frame {
+                    origin: [0.0, 0.0, z],
+                    x: [1.0, 0.0, 0.0],
+                    y: [0.0, 1.0, 0.0],
+                    z: [0.0, 0.0, 1.0],
+                },
+                radius,
+            },
+            same_sense: true,
+            t_start: 0.0,
+            t_end: 360.0,
+        };
+        let (seam_curve, seam_start, seam_end) = seam;
+        let seam = Edge {
+            step_id: 3,
+            start: 0,
+            end: 1,
+            curve: seam_curve,
+            same_sense: true,
+            t_start: seam_start,
+            t_end: seam_end,
+        };
+        let uses = [(0, true), (2, true), (1, false), (2, false)]
+            .into_iter()
+            .map(|(edge, forward)| OrientedEdge { edge, forward })
+            .collect();
+        Body {
+            step_id: 1,
+            name: None,
+            kind: BodyKind::ShellModel,
+            unit_mm: 1.0,
+            uncertainty_mm: None,
+            shells: vec![Shell {
+                step_id: 1,
+                closed: false,
+                orientation: true,
+                faces: vec![0],
+            }],
+            faces: vec![Face {
+                step_id: 1,
+                surface,
+                same_sense: true,
+                loops: vec![Loop {
+                    outer: true,
+                    orientation: true,
+                    bound: Bound::Edges(uses),
+                }],
+            }],
+            edges: vec![circle(0, bottom), circle(1, top), seam],
+            vertices: vec![
+                Vertex {
+                    step_id: 1,
+                    point: [radius, 0.0, bottom],
+                },
+                Vertex {
+                    step_id: 2,
+                    point: [radius, 0.0, top],
+                },
+            ],
+        }
+    }
+
+    /// Every exported pcurve point, lifted by the ISO 10303-42 formula of the exported
+    /// surface at the file's parameters, lies on an edge of the B-rep: the pcurves are
+    /// in STEP parameters (converted from the kernel's NURB ones), angles in radians.
+    #[test]
+    fn exported_pcurves_lie_on_their_edges() {
+        use solidcore::geom::global_solver::SolverOperation;
+        let mut kernel = Kernel::default();
+        let origin = Point3::new(0.0, 0.0, 0.0);
+        let mut breps = vec![
+            (
+                "cylinder",
+                api::create_cylinder(&mut kernel, Point3::new(0.0, 0.0, -2.0), 2.0, 4.0).unwrap(),
+            ),
+            (
+                "cone",
+                api::create_cone(&mut kernel, origin, 3.0, 1.0, 4.0).unwrap(),
+            ),
+            (
+                "sphere",
+                api::create_sphere(&mut kernel, origin, 2.0).unwrap(),
+            ),
+            (
+                "torus",
+                api::create_torus(&mut kernel, origin, 5.0, 1.5).unwrap(),
+            ),
+        ];
+        // A surface of revolution of a line and an extrusion of a circle (its u an
+        // angle). (A revolved circular arc band gets a seam inserted as a curve on the
+        // surface even with its own seam edge, which this exporter does not write yet.)
+        let z_frame = |origin: [f64; 3], y: [f64; 3], z: [f64; 3]| Frame {
+            origin,
+            x: [1.0, 0.0, 0.0],
+            y,
+            z,
+        };
+        let line = |x: f64| ModelCurve::Line {
+            origin: [x, 0.0, 0.0],
+            dir: [0.0, 0.0, 1.0],
+            magnitude: 1.0,
+        };
+        let revolved_line = ModelSurface::Revolution {
+            curve: Box::new(line(10.0)),
+            axis_origin: [0.0, 0.0, 0.0],
+            axis_dir: [0.0, 0.0, 1.0],
+        };
+        let extruded_circle = ModelSurface::Extrusion {
+            curve: Box::new(ModelCurve::Circle {
+                frame: z_frame([0.0; 3], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]),
+                radius: 10.0,
+            }),
+            dir: [0.0, 0.0, 1.0],
+            magnitude: 20.0,
+        };
+        for (name, body) in [
+            (
+                "revolved line",
+                band(revolved_line, 10.0, 0.0, 20.0, (line(10.0), 0.0, 20.0)),
+            ),
+            (
+                "extruded circle",
+                band(extruded_circle, 10.0, 0.0, 20.0, (line(10.0), 0.0, 20.0)),
+            ),
+        ] {
+            let brep = crate::build(&body).unwrap_or_else(|e| panic!("{name}: {e}"));
+            breps.push((name, brep));
+        }
+        for (name, brep) in &breps {
+            let model = brep_to_model(brep).unwrap_or_else(|e| panic!("{name}: {e}"));
+            assert!(!model.pcurves.is_empty(), "{name}: no pcurves");
+            // (a degenerate edge, e.g. at a pole, may have no curve)
+            let edges: Vec<_> = brep
+                .edge_list()
+                .iter()
+                .filter_map(|&e| {
+                    let edge = brep.edge(e).unwrap();
+                    Some((edge.curve.as_ref()?, edge.interval))
+                })
+                .collect();
+            for ((face_id, _, _), curves) in &model.pcurves {
+                let face = model.bodies[0]
+                    .faces
+                    .iter()
+                    .find(|face| face.step_id == *face_id)
+                    .unwrap();
+                for &[u, v] in curves.iter().flatten() {
+                    let [x, y, z] = iso_point(&face.surface, u, v);
+                    let p = Point3::new(x, y, z);
+                    let gap = edges
+                        .iter()
+                        .filter_map(|(curve, interval)| {
+                            curve
+                                .drop_point(
+                                    &kernel,
+                                    interval,
+                                    p,
+                                    None,
+                                    1e-9,
+                                    None,
+                                    SolverOperation::Minimize,
+                                )
+                                .ok()
+                                .filter(|dropped| dropped.success)
+                                .map(|dropped| dropped.distance)
+                        })
+                        .fold(f64::INFINITY, f64::min);
+                    assert!(gap < 1e-4, "{name}: ({u}, {v}) lifts {gap} off every edge");
+                }
             }
         }
     }
