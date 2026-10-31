@@ -2064,6 +2064,41 @@ impl FilletCorner {
             }
         }
 
+        // Not upstream (WR-645, `fixes.fillet_corner_variable_radius_rail_on_opposite_fillet`):
+        // rail 1 replaces the opposite edge, which also bounds the opposite fillet's
+        // face, so it must stay on that fillet's surface as the edge did. Refused as
+        // the crossing rail-rail curve is above: the corner gets the patch instead.
+        if env
+            .k
+            .fixes
+            .fillet_corner_variable_radius_rail_on_opposite_fillet
+        {
+            let opposite_fillet = env
+                .pseudo
+                .geom(opposite_fg)?
+                .fillet_surface(None)?
+                .cloned()
+                .ok_or_else(null)?;
+            let rail1_curve = env
+                .pseudo
+                .brep()
+                .edge(rail1)?
+                .curve
+                .clone()
+                .ok_or_else(null)?;
+            if !rail_on_surface(
+                env.k,
+                &rail1_curve,
+                &opposite_fillet,
+                &uv_domain,
+                10.0 * tol,
+            )? {
+                env.pseudo.delete_fillet_edge(rail0)?;
+                env.pseudo.delete_fillet_edge(rail1)?;
+                return Err(sm_err()); // Unable to convert
+            }
+        }
+
         // Reset all geometry of corresponding edges: retrieve 3d & uv curves from rails,
         // delete them and replace them by new ones
         let interpolate_mate_eu = eu1::mate(
@@ -2252,6 +2287,37 @@ fn solver_of_geom(
 
 fn invalid(op: &'static str, reason: &'static str) -> SolidError {
     SolidError::invalid_input(op, reason)
+}
+
+/// Not upstream (WR-645): whether `rail` lies on `surface` within `domain`, every one of
+/// 9 evenly spaced points of it dropped there within `tol`. A drop that fails counts as
+/// off the surface.
+///
+/// # Errors
+///
+/// [`SolidError::Unported`] from the evaluations and drops.
+fn rail_on_surface(
+    k: &Kernel,
+    rail: &Curve,
+    surface: &Surface,
+    domain: &crate::geom::extent2d::Extent2d,
+    tol: f64,
+) -> Result<bool> {
+    use crate::surface::surface::p4::NoObject;
+    use crate::surface::surface::p5::DropPointOptions;
+    let ivl = rail.natural_interval();
+    for i in 0..=8u8 {
+        let t = ivl.min() + f64::from(i) / 8.0 * (ivl.max() - ivl.min());
+        let gap = rail.evaluate_point(k, t).and_then(|p| {
+            surface.drop_point::<NoObject>(k, p, domain, &DropPointOptions::default())
+        });
+        match gap {
+            Ok(drop) if drop.success && drop.gap <= tol => {}
+            Err(e) if e.is_unported() => return Err(e),
+            _ => return Ok(false),
+        }
+    }
+    Ok(true)
 }
 
 /// `m_vVertices[i]`.
