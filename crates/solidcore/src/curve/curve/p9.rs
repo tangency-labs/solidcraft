@@ -74,19 +74,25 @@
 //! - `SM_ASSERT`s and the `SM_DEBUG_CODE` blocks are not ported. `GlobalCurveSolve`
 //!   recurses once at most (the signed angle minimiser asks for projected
 //!   tangencies), so it needs no depth bound.
+//! - **Statuses passed on (WR-663).** With the opt-in
+//!   `Kernel::fixes.query_statuses_pass_on` the statuses SMLib drops are passed on, as the
+//!   fork (tangency-labs/smlib 8311f8e): `SmCCGlobalSolver::LocalSolve` (end points, end
+//!   solves, cylinder guesses, `LocalCurveSolve`), `GlobalCurveSolve`'s boxes and
+//!   `SolveIt`s, the tight boxes' evaluations and `IsOnPlane`; `IsOnPositiveSideOfPlanes`
+//!   is `FALSE` when the classification fails.
 
 use crate::curve::curve::p2::{
-    proj_signed_angle, CcGlobalSolver, CciGlobalSolver, Curve, CurveKind, CurvePropertyType,
-    BSPLINE_CURVE_TYPE, LINE_TYPE,
+    ignored_or_soft, proj_signed_angle, CcGlobalSolver, CciGlobalSolver, Curve, CurveKind,
+    CurvePropertyType, Soft, BSPLINE_CURVE_TYPE, LINE_TYPE,
 };
 use crate::curve::curve::p3::local_curve_intersect;
 use crate::curve::curve::p3::PointSolveOptions;
-use crate::curve::curve::p4::{point_or_undef, proj_dist};
+use crate::curve::curve::p4::{point_or_pass_on, proj_dist};
 use crate::curve::curve::p5::{local_property_analysis, make_curve_cache};
 use crate::curve::curve::p7::PropertyAnalysisOptions;
 use crate::curve::curve::p8::{operand_handles, CurveIntersectOptions};
 use crate::curve::curve_cache::CurveCache;
-use crate::error::{ignore_status, ignored, Result, SolidError};
+use crate::error::{ignore_or_pass_on, ignored_or_pass_on, Result, SolidError};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent3d::Extent3d;
 use crate::geom::geom_utility::p1::{
@@ -141,9 +147,12 @@ const fn ord(c: ContinuityType) -> i32 {
 }
 
 /// `EvaluatePoint` whose status upstream ignores into a reused point: `pt` keeps its
-/// previous value on failure; [`SolidError::Unported`] is propagated.
+/// previous value on failure; [`SolidError::Unported`] is propagated. With the opt-in
+/// [`crate::kernel::UpstreamFixes::query_statuses_pass_on`] a failure is returned, as
+/// the fork's tight boxes (`SER`, tangency-labs/smlib 8311f8e).
 fn eval_keep(k: &Kernel, curve: &Curve, t: f64, pt: &mut Point3) -> Result<()> {
-    if let Some(p) = ignored(curve.evaluate_point(k, t))? {
+    if let Some(p) = ignored_or_pass_on(curve.evaluate_point(k, t), k.fixes.query_statuses_pass_on)?
+    {
         *pt = p;
     }
     Ok(())
@@ -244,7 +253,8 @@ impl EndSolve<'_> {
                 solution,
             ) {
                 Ok(f) => Ok(f),
-                Err(e) if e.is_unported() => Err(e),
+                // (passed on with the opt-in fix, tangency-labs/smlib 8311f8e)
+                Err(e) if e.is_unported() || k.fixes.query_statuses_pass_on => Err(e),
                 Err(_) => Ok(false),
             }
         } else {
@@ -258,7 +268,7 @@ impl EndSolve<'_> {
                     merge_point_solution(solution, f, &s, self.op);
                     Ok(f)
                 }
-                Err(e) if e.is_unported() => Err(e),
+                Err(e) if e.is_unported() || k.fixes.query_statuses_pass_on => Err(e),
                 Err(_) => Ok(false),
             }
         }
@@ -375,14 +385,15 @@ impl<'t, O: SolutionObject + 't> CcGlobalSolver<'t, O> {
             }
         }
 
-        // get node1 span endPoints and endPoint chords (statuses ignored)
-        let start1 = point_or_undef(k, curve1, ivl1.min())?;
-        let mut end1 = point_or_undef(k, curve1, ivl1.max())?;
+        // get node1 span endPoints and endPoint chords (statuses ignored; passed on
+        // with the opt-in fix, tangency-labs/smlib 8311f8e)
+        let start1 = point_or_pass_on(k, curve1, ivl1.min())?;
+        let mut end1 = point_or_pass_on(k, curve1, ivl1.max())?;
         let line_vec1 = end1 - start1;
 
         // get node2 span endPoints and endPoint chords (statuses ignored)
-        let mut start2 = point_or_undef(k, curve2, ivl2.min())?;
-        let mut end2 = point_or_undef(k, curve2, ivl2.max())?;
+        let mut start2 = point_or_pass_on(k, curve2, ivl2.min())?;
+        let mut end2 = point_or_pass_on(k, curve2, ivl2.max())?;
         let line_vec2 = end2 - start2;
 
         let turn1 = bez_span1.aux.max_turning_angle_deg;
@@ -876,13 +887,17 @@ impl<'t, O: SolutionObject + 't> CcGlobalSolver<'t, O> {
                     want_comb: false,
                     handle,
                 };
-                let sols = ignored(target_curve.global_property_analysis(
-                    k,
-                    target_ivl,
-                    CurvePropertyType::CylinderIntersection,
-                    tol,
-                    &opts,
-                ))?
+                // (status ignored; passed on with the opt-in fix)
+                let sols = ignored_or_pass_on(
+                    target_curve.global_property_analysis(
+                        k,
+                        target_ivl,
+                        CurvePropertyType::CylinderIntersection,
+                        tol,
+                        &opts,
+                    ),
+                    k.fixes.query_statuses_pass_on,
+                )?
                 .map(|r| r.solutions)
                 .unwrap_or_default();
                 for s in sols.as_slice() {
@@ -917,7 +932,8 @@ impl<'t, O: SolutionObject + 't> CcGlobalSolver<'t, O> {
                 handles,
             ) {
                 Ok((true, s)) => Some(s),
-                Err(e) if e.is_unported() => return Err(e),
+                // (passed on with the opt-in fix, tangency-labs/smlib 8311f8e)
+                Err(e) if e.is_unported() || k.fixes.query_statuses_pass_on => return Err(e),
                 Ok((false, _)) | Err(_) => None,
             };
 
@@ -1183,18 +1199,21 @@ fn cache_tree<O: SolutionObject>(cache: &CurveCache<O>) -> Result<&Tree<O>> {
 }
 
 /// The axis aligned box of `CalculateBoundingBox` of `curve` over its natural
-/// interval (status ignored: the default box on failure).
+/// interval (status ignored: the default box on failure; passed on with the opt-in
+/// [`crate::kernel::UpstreamFixes::query_statuses_pass_on`], tangency-labs/smlib
+/// 8311f8e).
 fn natural_bounding_box(k: &Kernel, curve: &Curve) -> Result<Extent3d> {
     let req = BoundingBoxRequest {
         normal: true,
         pseudo: false,
         polar: false,
     };
-    Ok(
-        ignored(curve.calculate_bounding_box(k, &curve.natural_interval(), req, true))?
-            .and_then(|b| b.normal)
-            .unwrap_or_else(Extent3d::new),
-    )
+    Ok(ignored_or_pass_on(
+        curve.calculate_bounding_box(k, &curve.natural_interval(), req, true),
+        k.fixes.query_statuses_pass_on,
+    )?
+    .and_then(|b| b.normal)
+    .unwrap_or_else(Extent3d::new))
 }
 
 impl Curve {
@@ -1377,16 +1396,20 @@ impl Curve {
                 projection_type,
             )
             .with_curves(self, other, k);
-            ignore_status(gs.solve_it(
-                &SolveRequest {
-                    operation: op,
-                    solution_requested: requested,
-                    tolerance_3d: dist_tol,
-                    best_answer_so_far_sq: BIG_DOUBLE,
-                    opt_vectors: opts.opt_vectors.unwrap_or(&[]),
-                },
-                &mut sols,
-            ))?;
+            // (status ignored; passed on with the opt-in fix, tangency-labs/smlib 8311f8e)
+            ignore_or_pass_on(
+                gs.solve_it(
+                    &SolveRequest {
+                        operation: op,
+                        solution_requested: requested,
+                        tolerance_3d: dist_tol,
+                        best_answer_so_far_sq: BIG_DOUBLE,
+                        opt_vectors: opts.opt_vectors.unwrap_or(&[]),
+                    },
+                    &mut sols,
+                ),
+                k.fixes.query_statuses_pass_on,
+            )?;
             // all done
             return Ok(sols);
         }
@@ -1447,17 +1470,20 @@ impl Curve {
             _ => {}
         }
 
-        // get global solver solutions (status ignored)
-        ignore_status(gs.solve_it(
-            &SolveRequest {
-                operation: op,
-                solution_requested: requested,
-                tolerance_3d: dist_tol,
-                best_answer_so_far_sq,
-                opt_vectors: opts.opt_vectors.unwrap_or(&[]),
-            },
-            &mut sols,
-        ))?;
+        // get global solver solutions (status ignored; passed on with the opt-in fix)
+        ignore_or_pass_on(
+            gs.solve_it(
+                &SolveRequest {
+                    operation: op,
+                    solution_requested: requested,
+                    tolerance_3d: dist_tol,
+                    best_answer_so_far_sq,
+                    opt_vectors: opts.opt_vectors.unwrap_or(&[]),
+                },
+                &mut sols,
+            ),
+            k.fixes.query_statuses_pass_on,
+        )?;
 
         Ok(sols)
     }
@@ -1727,15 +1753,22 @@ impl Curve {
                 want_comb: false,
                 handle: Some(CurveHandle(ivl)),
             };
-            let sols = ignored(self.global_property_analysis(
-                k,
-                &ivl,
-                CurvePropertyType::PlaneClassify,
-                EFF_ZERO,
-                &opts,
-            ))?
-            .map(|r| r.solutions)
-            .unwrap_or_default();
+            // (status ignored; with the opt-in fix a curve that cannot be classified is
+            // not shown on the positive side, tangency-labs/smlib 8311f8e)
+            let Soft::Kept(sols) = ignored_or_soft(
+                self.global_property_analysis(
+                    k,
+                    &ivl,
+                    CurvePropertyType::PlaneClassify,
+                    EFF_ZERO,
+                    &opts,
+                ),
+                k.fixes.query_statuses_pass_on,
+            )?
+            else {
+                return Ok(false);
+            };
+            let sols = sols.map(|r| r.solutions).unwrap_or_default();
 
             // when curve is NOT (totally on the positive side of this plane)
             let whole = sols.len() == 1
@@ -1841,8 +1874,12 @@ pub fn is_on_plane_base(
 ) -> Result<OnPlane> {
     // build an unitorthonormal basis from crPlaneNormal (status ignored: a failed
     // Unitize of the normal leaves (0, 0, 1) in the x axis, the others unwritten)
+    // (with the opt-in fix this status and the box's are passed on,
+    // tangency-labs/smlib 8311f8e)
+    let pass_on = k.fixes.query_statuses_pass_on;
     let basis = match plane_normal.make_unit_ortho_vectors(None) {
         Ok([x, y, z]) => [y, z, x],
+        Err(e) if pass_on => return Err(e),
         Err(_) => [Vec3::UNDEF, Vec3::UNDEF, plane_normal.unitize_or_z()],
     };
 
@@ -1852,7 +1889,10 @@ pub fn is_on_plane_base(
         None => curve.natural_interval(),
     };
     let mut pseudo_box = PseudoBox::new();
-    ignore_status(curve.calculate_tight_pseudo_box_into(k, &iv, basis, &mut pseudo_box))?;
+    ignore_or_pass_on(
+        curve.calculate_tight_pseudo_box_into(k, &iv, basis, &mut pseudo_box),
+        pass_on,
+    )?;
 
     // classify the PlanePoint
     let mut on_plane = pseudo_box.contains_point(plane_point, tol);

@@ -79,7 +79,7 @@
 use crate::curve::curve::p2::{Curve, CurvePropertyType};
 use crate::curve::curve::p7::PropertyAnalysisOptions;
 use crate::curve::curve::p8::CurveIntersectOptions;
-use crate::error::{ignored, Result, SolidError};
+use crate::error::{ignore_or_pass_on, ignored, Result, SolidError};
 use crate::geom::assert_array::{labels, AssertArray, AssertReport, ObjectKey, ReportSpec};
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::extent1d::Extent1d;
@@ -931,7 +931,12 @@ impl BSplineCurve {
                 // trim it to the interval between discontinuities (may be the whole
                 // curve; may snap the interval to existing knots)
                 let mut trim = Extent1d::from_min_max(start, current);
-                ignored(copy.trim(k, &mut trim, TrimMode::Notify))?;
+                // (status ignored; passed on with the opt-in `query_statuses_pass_on`,
+                // tangency-labs/smlib 8843967)
+                ignore_or_pass_on(
+                    copy.trim(k, &mut trim, TrimMode::Notify),
+                    k.fixes.query_statuses_pass_on,
+                )?;
 
                 resulting_curves.push(copy);
 

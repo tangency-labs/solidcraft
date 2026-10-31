@@ -85,7 +85,7 @@ use crate::curve::curve::p3::PointSolveOptions;
 use crate::curve::curve::p4::is_degenerate_base;
 use crate::curve::hermite_curve::HermiteCurve;
 use crate::curve::tangent_field::{CurveEnd as TangentFieldEnd, TangentDirType, TangentField};
-use crate::error::{ignored, Result, SolidError};
+use crate::error::{ignore_or_pass_on, ignored, Result, SolidError};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::{Extent2d, SS_UMAX, SS_UMIN, SS_VMIN};
 use crate::geom::extent3d::Extent3d;
@@ -433,8 +433,12 @@ fn approximate_tangent_field(
         let degenerate = BSplineCurve::create_degenerate_curve(curve.dim(), pnt)?;
         let mut c = SmCurve::from(degenerate);
         let ivl = Extent1d::from_min_max(first, last);
-        // (status ignored)
-        ignored(c.edit_parameterization(k, &ivl))?;
+        // (status ignored; passed on with the opt-in fix, as SmCurve::ApproximateCurve
+        // in tangency-labs/smlib 8311f8e)
+        ignore_or_pass_on(
+            c.edit_parameterization(k, &ivl),
+            k.fixes.query_statuses_pass_on,
+        )?;
         let CurveKind::BSpline(bs) = c.into_kind() else {
             return Err(SolidError::invalid_input(
                 OP_APPROX_FIELD,
@@ -550,9 +554,17 @@ fn approximate_tangent_field(
     }
 
     // create pBSC curve from control polygon
-    let bsc = flush_crv(approx_tol_3d, &mut ctrl_poly, &mut knots, create_analytics)?.ok_or(
-        SolidError::invalid_input(OP_APPROX_FIELD, "no approximating curve built"),
-    )?;
+    let bsc = flush_crv(
+        approx_tol_3d,
+        &mut ctrl_poly,
+        &mut knots,
+        create_analytics,
+        k.fixes.query_statuses_pass_on,
+    )?
+    .ok_or(SolidError::invalid_input(
+        OP_APPROX_FIELD,
+        "no approximating curve built",
+    ))?;
 
     // pBSCurve->Copy(crContext, rpNewBSplineCurve)
     Ok(bsc.copy())

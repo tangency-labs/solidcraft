@@ -85,6 +85,12 @@
 //!   wired. `FindParameterAtArcLength` takes the kernel for `Length` (its curve cache
 //!   reads the kernel's tolerances); `Length` of curved spans reaches `SmIntegrator`
 //!   (the ported unit `mass.integrator`).
+//! - **Statuses passed on (WR-663).** With the opt-in
+//!   `Kernel::fixes.query_statuses_pass_on` the statuses SMLib drops are passed on, as the
+//!   fork (tangency-labs/smlib 8311f8e): `ComputeCrvsNormal` (a zero normal is the status),
+//!   `FindParameterAtArcLength`, `LocalPointSolve`'s found point, the tangent-intersection
+//!   evaluators and the projected `LocalCurveSolve`'s check; `CrvsFixGaps` leaves a gap
+//!   that cannot be measured or closed open (not counted).
 
 use crate::curve::curve::knots_ignoring_status;
 use crate::curve::curve::p2::{
@@ -97,7 +103,7 @@ use crate::curve::curve::p4::{
 };
 use crate::curve::curve::p5::{find_additional_cp_guess, is_periodic, local_property_analysis};
 use crate::curve::projected_curve::{OwnsCurve, ProjectedCurve};
-use crate::error::{ignored, Result, SolidError};
+use crate::error::{ignore_or_pass_on, ignored, ignored_or_pass_on, passed_on, Result, SolidError};
 use crate::geom::extent1d::{Extent1d, ExtentNd};
 use crate::geom::geom_utility::p1::line_closest_point;
 use crate::geom::geom_utility::p2::ContinuityType;
@@ -132,14 +138,36 @@ pub const MAX_PC_SCALE_STEPS: u64 = 400;
 use crate::error::SM_ERR_NOT_CONVERGING;
 
 /// `EvaluatePoint` whose status upstream ignores: the previous value of the output
-/// on failure; [`SolidError::Unported`] is propagated.
-fn point_keep<C: CurveEvaluate + ?Sized>(
+/// on failure; [`SolidError::Unported`] is propagated. At these sites the fork passes
+/// the status on (`SER`, tangency-labs/smlib 8311f8e): with the opt-in
+/// [`crate::kernel::UpstreamFixes::query_statuses_pass_on`] a failed evaluation is
+/// returned.
+fn point_keep_or_pass_on<C: CurveEvaluate + ?Sized>(
     k: &Kernel,
     curve: &C,
     t: f64,
     prev: Point3,
 ) -> Result<Point3> {
-    Ok(ignored(curve.evaluate_point(k, t))?.unwrap_or(prev))
+    Ok(
+        ignored_or_pass_on(curve.evaluate_point(k, t), k.fixes.query_statuses_pass_on)?
+            .unwrap_or(prev),
+    )
+}
+
+/// [`point_keep_or_pass_on`] without the pass-on, or `None` when, with the opt-in
+/// [`crate::kernel::UpstreamFixes::query_statuses_pass_on`], the point cannot be
+/// evaluated (the fork's curve-list helpers then skip the gap, tangency-labs/smlib
+/// 8311f8e).
+fn point_keep_or_none<C: CurveEvaluate + ?Sized>(
+    k: &Kernel,
+    curve: &C,
+    t: f64,
+    prev: Point3,
+) -> Result<Option<Point3>> {
+    match ignored(curve.evaluate_point(k, t))? {
+        None if k.fixes.query_statuses_pass_on => Ok(None),
+        p => Ok(Some(p.unwrap_or(prev))),
+    }
 }
 
 /// `Evaluate` (from the left) into an `N`-entry array; entries not written stay
@@ -167,10 +195,12 @@ fn div(v: Vec3, d: f64) -> Vec3 {
 }
 
 /// Sets `ivl` to `[min, max]`; upstream ignores the status of `SetMinMax`, which
-/// leaves the interval unchanged for `min > max`.
-fn set_min_max(ivl: &mut Extent1d, min: f64, max: f64) {
+/// leaves the interval unchanged for `min > max`. With `pass_on` (the opt-in
+/// [`crate::kernel::UpstreamFixes::query_statuses_pass_on`]) that status is returned,
+/// as the fork (`SER`, tangency-labs/smlib 8311f8e).
+fn set_min_max(ivl: &mut Extent1d, min: f64, max: f64, pass_on: bool) -> Result<()> {
     // On failure the previous interval is kept, as upstream.
-    let _ = ivl.set_min_max(min, max);
+    ignore_or_pass_on(ivl.set_min_max(min, max), pass_on)
 }
 
 /// `m_vStart[i] = v` / `m_vEnd[i] = v`.
@@ -288,7 +318,7 @@ pub fn compute_crvs_normal(k: &Kernel, curves: &[Curve]) -> Result<Vec3> {
         }
 
         let mut t = 0.0;
-        pt3 = point_keep(k, crv, domain.evaluate(t), pt3)?;
+        pt3 = point_keep_or_pass_on(k, crv, domain.evaluate(t), pt3)?;
 
         // Keep track of start point in case loop is closed
         if ii == 0 {
@@ -306,7 +336,7 @@ pub fn compute_crvs_normal(k: &Kernel, curves: &[Curve]) -> Result<Vec3> {
             pt2 = pt3;
             vec1 = vec2;
 
-            pt3 = point_keep(k, crv, domain.evaluate(t + t_incr), pt3)?;
+            pt3 = point_keep_or_pass_on(k, crv, domain.evaluate(t + t_incr), pt3)?;
 
             total_points += 1;
             vec2 = pt3 - pt2;
@@ -331,7 +361,11 @@ pub fn compute_crvs_normal(k: &Kernel, curves: &[Curve]) -> Result<Vec3> {
         }
     }
 
-    // (status ignored: a zero normal becomes (0, 0, 1))
+    // (status ignored: a zero normal becomes (0, 0, 1); with the opt-in fix a zero
+    // normal is the call's status, tangency-labs/smlib 8311f8e)
+    if k.fixes.query_statuses_pass_on {
+        return normal.unitize();
+    }
     Ok(normal.unitize_or_z())
 }
 
@@ -383,7 +417,10 @@ pub struct FixedGaps {
 
 /// Moves the last control point of the B-spline `curve` to `point`
 /// (`SetControlPoint(SM_CP_NON_RATIONAL, n - 1, point, 1.0)`, status ignored).
-fn move_end_point(curve: &mut Curve, point: Point3) -> Result<()> {
+/// `false` when, with `skip_failed` (the opt-in
+/// [`crate::kernel::UpstreamFixes::query_statuses_pass_on`]), the point cannot be set:
+/// the fork does not count that gap as closed (tangency-labs/smlib 8311f8e).
+fn move_end_point(curve: &mut Curve, point: Point3, skip_failed: bool) -> Result<bool> {
     let n = curve.number_control_points()?;
     let CurveKind::BSpline(c) = curve.kind_mut() else {
         return Err(SolidError::invalid_input(
@@ -391,8 +428,9 @@ fn move_end_point(curve: &mut Curve, point: Point3) -> Result<()> {
             "end point of a curve that is not a B-spline",
         ));
     };
-    ignored(c.set_control_point(ControlPointForm::NonRational, n.wrapping_sub(1), point, 1.0))?;
-    Ok(())
+    let set =
+        ignored(c.set_control_point(ControlPointForm::NonRational, n.wrapping_sub(1), point, 1.0))?;
+    Ok(set.is_some() || !skip_failed)
 }
 
 /// Chains `curves` head to tail ([`fix_chain_curves_list`] with `tol`, deleting
@@ -408,6 +446,7 @@ fn move_end_point(curve: &mut Curve, point: Point3) -> Result<()> {
 /// [`SolidError::Unported`] from the evaluations.
 pub fn crvs_fix_gaps(k: &Kernel, curves: Vec<Curve>, tol: f64) -> Result<FixedGaps> {
     let mut fixed: u64 = 0;
+    let skip_failed = k.fixes.query_statuses_pass_on;
 
     // head-tail them into chains - remove duplicate curves
     let mut chained = fix_chain_curves_list(k, curves.into_iter().map(Some).collect(), tol, true)?;
@@ -431,9 +470,15 @@ pub fn crvs_fix_gaps(k: &Kernel, curves: Vec<Curve>, tol: f64) -> Result<FixedGa
             let domain0 = crv0.natural_interval();
             let domain1 = crv1.natural_interval();
 
-            // start and end point between curves within loop/chain
-            let end_pt = point_keep(k, crv0, domain0.max(), Vec3::UNDEF)?;
-            let start_pt = point_keep(k, crv1, domain1.min(), Vec3::UNDEF)?;
+            // start and end point between curves within loop/chain (with the opt-in
+            // fix a gap that cannot be measured is not closed, tangency-labs/smlib
+            // 8311f8e)
+            let Some(end_pt) = point_keep_or_none(k, crv0, domain0.max(), Vec3::UNDEF)? else {
+                continue;
+            };
+            let Some(start_pt) = point_keep_or_none(k, crv1, domain1.min(), Vec3::UNDEF)? else {
+                continue;
+            };
 
             // gap between current segments
             let gap = start_pt.distance(end_pt);
@@ -442,7 +487,9 @@ pub fn crvs_fix_gaps(k: &Kernel, curves: Vec<Curve>, tol: f64) -> Result<FixedGa
             if gap > EFF_ZERO && gap < tol {
                 // set the end point to the start of the next curve
                 let crv0 = chained.curves.get_mut(join_index).ok_or_else(missing)?;
-                move_end_point(crv0, start_pt)?;
+                if !move_end_point(crv0, start_pt, skip_failed)? {
+                    continue;
+                }
                 fixed += 1;
             }
         } // end iter every segment in the current chain
@@ -458,8 +505,12 @@ pub fn crvs_fix_gaps(k: &Kernel, curves: Vec<Curve>, tol: f64) -> Result<FixedGa
         let domain1 = crv1.natural_interval();
 
         // start and end points of 'loop' for each chain
-        let start_pt = point_keep(k, crv0, domain0.min(), Vec3::UNDEF)?;
-        let end_pt = point_keep(k, crv1, domain1.max(), Vec3::UNDEF)?;
+        let Some(start_pt) = point_keep_or_none(k, crv0, domain0.min(), Vec3::UNDEF)? else {
+            continue;
+        };
+        let Some(end_pt) = point_keep_or_none(k, crv1, domain1.max(), Vec3::UNDEF)? else {
+            continue;
+        };
 
         // end to start gap for current chain
         let gap = start_pt.distance(end_pt);
@@ -469,7 +520,9 @@ pub fn crvs_fix_gaps(k: &Kernel, curves: Vec<Curve>, tol: f64) -> Result<FixedGa
             // Chain j-1 is closed
             // just as a check, replace end point with start point
             let crv1 = chained.curves.get_mut(hi).ok_or_else(missing)?;
-            move_end_point(crv1, start_pt)?;
+            if !move_end_point(crv1, start_pt, skip_failed)? {
+                continue;
+            }
             fixed += 1;
         }
     } // end iter every distinct chain looking for closed curves
@@ -574,8 +627,12 @@ impl Curve {
             abs_len_needed = -arc_length;
         }
 
-        // First, find the span containing dStartParam.
-        let (knots, _) = knots_ignoring_status(self.knots_with_status(k, None))?;
+        // First, find the span containing dStartParam. (With the opt-in fix the
+        // statuses of the knots, intervals and span lengths are passed on,
+        // tangency-labs/smlib 8311f8e.)
+        let pass_on = k.fixes.query_statuses_pass_on;
+        let (knots, _) =
+            knots_ignoring_status(passed_on(self.knots_with_status(k, None), pass_on)?)?;
         let num_knots = knots.len() as i64;
         let knot = |i: i64| -> Result<f64> {
             usize::try_from(i)
@@ -613,12 +670,15 @@ impl Curve {
         let mut span_len = 0.0;
         let mut interval = Extent1d::new();
         if increasing {
-            set_min_max(&mut interval, start_param, knot(ik + 1)?);
+            set_min_max(&mut interval, start_param, knot(ik + 1)?, pass_on)?;
         } else {
-            set_min_max(&mut interval, knot(ik)?, start_param);
+            set_min_max(&mut interval, knot(ik)?, start_param, pass_on)?;
         }
 
-        if let Some(l) = ignored(self.length_with_zone_tol(k, &interval, tol, owner_zone_tol_3d))? {
+        if let Some(l) = ignored_or_pass_on(
+            self.length_with_zone_tol(k, &interval, tol, owner_zone_tol_3d),
+            pass_on,
+        )? {
             span_len = l;
         }
 
@@ -645,10 +705,11 @@ impl Curve {
                 return Ok(out);
             }
 
-            set_min_max(&mut interval, knot(ik)?, knot(ik + 1)?);
-            if let Some(l) =
-                ignored(self.length_with_zone_tol(k, &interval, tol, owner_zone_tol_3d))?
-            {
+            set_min_max(&mut interval, knot(ik)?, knot(ik + 1)?, pass_on)?;
+            if let Some(l) = ignored_or_pass_on(
+                self.length_with_zone_tol(k, &interval, tol, owner_zone_tol_3d),
+                pass_on,
+            )? {
                 span_len = l;
             }
 
@@ -670,9 +731,9 @@ impl Curve {
 
         // and set dCurrLen according to dCurrT
         if increasing {
-            set_min_max(&mut interval, start_param, curr_t);
+            set_min_max(&mut interval, start_param, curr_t, pass_on)?;
         } else {
-            set_min_max(&mut interval, curr_t, start_param);
+            set_min_max(&mut interval, curr_t, start_param, pass_on)?;
         }
         let mut curr_len = self.length_with_zone_tol(k, &interval, tol, owner_zone_tol_3d)?;
         if !increasing {
@@ -741,9 +802,9 @@ impl Curve {
 
             // Find the function value at current param: get arc length.
             if increasing {
-                set_min_max(&mut interval, start_param, curr_t);
+                set_min_max(&mut interval, start_param, curr_t, pass_on)?;
             } else {
-                set_min_max(&mut interval, curr_t, start_param);
+                set_min_max(&mut interval, curr_t, start_param, pass_on)?;
             }
 
             curr_len = self.length_with_zone_tol(k, &interval, tol, owner_zone_tol_3d)?;
@@ -1004,15 +1065,12 @@ impl<C1: CurveEvaluate + ?Sized, C2: CurveEvaluate + ?Sized> EvalNFunctions
         // when near a tangent curve/curve intersection
         if is_tangent {
             // switch to the TangentIntersection Solver Objective Functions
-            // (status ignored)
-            if let Some(r) = ignored(CcTangentIntEnfo::static_evaluate(
-                k,
-                self.curve1,
-                self.curve2,
-                x,
-                f,
-                jacobian,
-            ))? {
+            // (status ignored; passed on with the opt-in fix, tangency-labs/smlib
+            // 8311f8e)
+            if let Some(r) = ignored_or_pass_on(
+                CcTangentIntEnfo::static_evaluate(k, self.curve1, self.curve2, x, f, jacobian),
+                k.fixes.query_statuses_pass_on,
+            )? {
                 found = r;
             }
         } else {
@@ -1238,7 +1296,8 @@ impl Curve {
 
         // else when SolveIt did converge or found a bounded value
         //   let solutionValue = dist(TestPoint,SolutionPoint)
-        let found_pnt = point_keep(k, self, r.t, Vec3::UNDEF)?;
+        // (status ignored; passed on with the opt-in fix, tangency-labs/smlib 8311f8e)
+        let found_pnt = point_keep_or_pass_on(k, self, r.t, Vec3::UNDEF)?;
 
         solution.solution_type = SolutionType::SingleValue;
         solution.start.solution_value = found_pnt.distance(test_point);
@@ -1363,8 +1422,12 @@ where
     // Solution value in this case is not the distance.
     if op == SolverOperation::SurfaceProjectedIntersect {
         let mut obj_fcns = [0.0; 2];
-        // (status ignored; Not used by Evaluate)
-        ignored(ls.evaluator().evaluate(&r.x, &mut obj_fcns, None))?;
+        // (status ignored; Not used by Evaluate; passed on with the opt-in fix,
+        // tangency-labs/smlib 8311f8e)
+        ignore_or_pass_on(
+            ls.evaluator().evaluate(&r.x, &mut obj_fcns, None),
+            k.fixes.query_statuses_pass_on,
+        )?;
         solution.start.solution_value = obj_fcns[0].abs() + obj_fcns[1].abs();
 
         // For a legitimate crossing, this should be extremely precise.

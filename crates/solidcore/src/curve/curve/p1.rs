@@ -76,12 +76,18 @@
 //! - **Callees of unit `curve.curve_p5`** (`SmCurve::LocalPropertyAnalysis`, the
 //!   evaluators behind `LocalCurveSolve` / `LocalCurveIntersect`, `SmCurve::IsArc`)
 //!   are wired; [`SolidError::Unported`] is propagated from what they reach.
+//! - **Statuses passed on (WR-663).** With the opt-in
+//!   `Kernel::fixes.query_statuses_pass_on` the statuses SMLib drops are passed on, as the
+//!   fork (tangency-labs/smlib 8311f8e): `sm_RefineCCSolutions` (its local intersections
+//!   and `Inversion`s), the degenerate `ApproximateCurve`'s `EditParameterization`,
+//!   `ClassifyIntersectingRangeSolution`, `SmCPGlobalSolver::LocalSolve` and
+//!   `GlobalPointSolve`'s `SolveIt`.
 
 use crate::curve::curve::knots_ignoring_status;
 use crate::curve::curve::p2::{
-    add_to_curve, evaluate_continuity, find_test_params, flush_crv, output, pop_stack,
-    proj_signed_angle, push_point, stack_look, test_step, CpGlobalSolver, Curve, CurveKind,
-    CurvePropertyType, TessStepResult, BSPLINE_CURVE_TYPE, CRV_ON_SURF_TYPE,
+    add_to_curve, evaluate_continuity, find_test_params, flush_crv, inversion_passed_on, output,
+    pop_stack, proj_signed_angle, push_point, stack_look, test_step, CpGlobalSolver, Curve,
+    CurveKind, CurvePropertyType, TessStepResult, BSPLINE_CURVE_TYPE, CRV_ON_SURF_TYPE,
 };
 use crate::curve::curve::p3::{eval_n, local_curve_intersect, PointSolveOptions};
 use crate::curve::curve::p4::proj_dist;
@@ -89,7 +95,7 @@ use crate::curve::curve::p5::{local_property_analysis, make_curve_cache};
 use crate::curve::curve_cache::CurveCache;
 use crate::curve::hermite_curve::HermiteCurve;
 use crate::curve::line::TessellationRequest;
-use crate::error::{ignored, Result, SolidError};
+use crate::error::{ignore_or_pass_on, ignored, ignored_or_pass_on, passed_on, Result, SolidError};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::geom_utility::p1::segment_point_angle_deg_to_perp;
 use crate::geom::geom_utility::p2::ContinuityType;
@@ -182,6 +188,7 @@ where
 {
     let desired_precision = 1.0e-10; // for curve/curve intersection
     let shift_limit = 0.002; // Maximum relative parameter shift allowed.
+    let pass_on = k.fixes.query_statuses_pass_on;
 
     for ii in 0..solutions.len() {
         let Some(sol) = solutions.get_mut(ii) else {
@@ -222,30 +229,31 @@ where
             let guess1 = end.parameters[0];
             let guess2 = end.parameters[1];
 
-            // (status ignored)
-            let found = ignored(local_curve_intersect(
-                k,
-                crv1,
-                &natural_dom1,
-                crv2,
-                &natural_dom2,
-                desired_precision,
-                guess1,
-                guess2,
-            ))?
+            // (status ignored; passed on with the opt-in fix, tangency-labs/smlib 8311f8e)
+            let found = ignored_or_pass_on(
+                local_curve_intersect(
+                    k,
+                    crv1,
+                    &natural_dom1,
+                    crv2,
+                    &natural_dom2,
+                    desired_precision,
+                    guess1,
+                    guess2,
+                ),
+                pass_on,
+            )?
             .flatten();
 
             if let Some(x) = found {
                 if x.deviation < end.solution_value {
                     // Do not allow big shifts.  [140915b]
-                    let mut frac1 = sol_ivl1
-                        .inversion(x.my_param)
-                        .parameter
-                        .unwrap_or(UNDEF_DOUBLE);
-                    let mut frac2 = sol_ivl2
-                        .inversion(x.other_param)
-                        .parameter
-                        .unwrap_or(UNDEF_DOUBLE);
+                    let inv1 = sol_ivl1.inversion(x.my_param);
+                    inversion_passed_on(&inv1, pass_on)?;
+                    let inv2 = sol_ivl2.inversion(x.other_param);
+                    inversion_passed_on(&inv2, pass_on)?;
+                    let mut frac1 = inv1.parameter.unwrap_or(UNDEF_DOUBLE);
+                    let mut frac2 = inv2.parameter.unwrap_or(UNDEF_DOUBLE);
                     if reverse1 {
                         frac1 = 1.0 - frac1;
                     }
@@ -528,8 +536,11 @@ impl Curve {
             let degenerate = BSplineCurve::create_degenerate_curve(self.dim(), pnt)?;
             let mut curve = Curve::from(degenerate);
             let ivl = Extent1d::from_min_max(first, last);
-            // (status ignored)
-            ignored(curve.edit_parameterization(k, &ivl))?;
+            // (status ignored; passed on with the opt-in fix, tangency-labs/smlib 8311f8e)
+            ignore_or_pass_on(
+                curve.edit_parameterization(k, &ivl),
+                k.fixes.query_statuses_pass_on,
+            )?;
             return Ok(CurveApproximation {
                 curve,
                 achieved_tol: None,
@@ -651,6 +662,7 @@ impl Curve {
             &mut ctrl_poly,
             &mut knots,
             opts.create_analytics,
+            k.fixes.query_statuses_pass_on,
         )?
         .ok_or(SolidError::invalid_input(
             OP_APPROX,
@@ -743,19 +755,23 @@ impl Curve {
         this_dom.add_value(sol.end.parameters[0]);
         let mut othr_dom = Extent1d::from_value(sol.start.parameters[1]);
         othr_dom.add_value(sol.end.parameters[1]);
-        // (status ignored)
-        let solved = ignored(self.local_curve_solve::<O>(
-            k,
-            &this_dom,
-            other,
-            &othr_dom,
-            SolverOperation::Minimize,
-            1.0,
-            Some(end_dev),
-            None,
-            [this_dom.evaluate(0.5), othr_dom.evaluate(0.5)],
-            [None, None],
-        ))?;
+        // (status ignored; the fork passes these statuses on, tangency-labs/smlib 8311f8e)
+        let pass_on = k.fixes.query_statuses_pass_on;
+        let solved = ignored_or_pass_on(
+            self.local_curve_solve::<O>(
+                k,
+                &this_dom,
+                other,
+                &othr_dom,
+                SolverOperation::Minimize,
+                1.0,
+                Some(end_dev),
+                None,
+                [this_dom.evaluate(0.5), othr_dom.evaluate(0.5)],
+                [None, None],
+            ),
+            pass_on,
+        )?;
         let Some((true, min_sol)) = solved else {
             return Ok((false, None)); // Did not find a minimum.
         };
@@ -765,8 +781,10 @@ impl Curve {
         }
 
         // get Solution segment start points and gapVector
-        let pnt0 = ignored(this_curve.evaluate_point(k, start_par[0]))?.unwrap_or(Vec3::UNDEF);
-        let pnt1 = ignored(other.evaluate_point(k, start_par[1]))?.unwrap_or(Vec3::UNDEF);
+        let pnt0 = ignored_or_pass_on(this_curve.evaluate_point(k, start_par[0]), pass_on)?
+            .unwrap_or(Vec3::UNDEF);
+        let pnt1 = ignored_or_pass_on(other.evaluate_point(k, start_par[1]), pass_on)?
+            .unwrap_or(Vec3::UNDEF);
         let xsect_gap = pnt1 - pnt0;
 
         // scale zero to current intersection point location
@@ -807,24 +825,27 @@ impl Curve {
             let t2 = start_par[1] + delta * delta_par[1];
 
             // get ThisCurve sample point
-            if let Some(p) = ignored(this_curve.evaluate_point(k, t1))? {
+            if let Some(p) = ignored_or_pass_on(this_curve.evaluate_point(k, t1), pass_on)? {
                 put3(&mut curve_point, tgt, p);
             }
 
             // Find OtherCurve nearest point to sCurvePoint
-            let dropped = ignored(other.local_point_solve::<O>(
-                k,
-                &o_ivl,
-                SolverOperation::Normalize,
-                at3(&curve_point, tgt, Vec3::UNDEF),
-                &PointSolveOptions::default(),
-                t2,
-            ))?;
+            let dropped = ignored_or_pass_on(
+                other.local_point_solve::<O>(
+                    k,
+                    &o_ivl,
+                    SolverOperation::Normalize,
+                    at3(&curve_point, tgt, Vec3::UNDEF),
+                    &PointSolveOptions::default(),
+                    t2,
+                ),
+                pass_on,
+            )?;
 
             if let Some((true, s)) = dropped {
                 // evaluate the nearest OtherCurve point
                 let o_drop = s.start.parameters[0];
-                if let Some(p) = ignored(other.evaluate_point(k, o_drop))? {
+                if let Some(p) = ignored_or_pass_on(other.evaluate_point(k, o_drop), pass_on)? {
                     put3(&mut o_curve_point, tgt, p);
                 }
 
@@ -977,6 +998,8 @@ impl<'t, O: SolutionObject + 't> CpGlobalSolver<'t, O> {
     pub fn local_solve_branch(&mut self, k: &Kernel, branch: &Branch) -> Result<bool> {
         // init outputs
         let needs_more_subdivision = false;
+        // the fork passes on the statuses below (tangency-labs/smlib 8311f8e)
+        let pass_on = k.fixes.query_statuses_pass_on;
 
         // locals
         let point_node = self.base.branch_node(branch, 0)?;
@@ -1031,18 +1054,22 @@ impl<'t, O: SolutionObject + 't> CpGlobalSolver<'t, O> {
                 && is_zero(interval.max() - parent_ivl.max()))
             && curve.is_closed(k, &parent_ivl, 0.0)?
         {
-            // get pCurve1's end continuity (status ignored)
+            // get pCurve1's end continuity (status ignored; passed on with the opt-in
+            // fix, tangency-labs/smlib 8311f8e)
             let mut continuity = ContinuityType::Discontinuous;
-            if let Some(c) = ignored(evaluate_continuity(
-                k,
-                curve,
-                parent_ivl.min(),
-                false,
-                curve,
-                parent_ivl.max(),
-                true,
-                CONTINUITY_ANGLE,
-            ))? {
+            if let Some(c) = ignored_or_pass_on(
+                evaluate_continuity(
+                    k,
+                    curve,
+                    parent_ivl.min(),
+                    false,
+                    curve,
+                    parent_ivl.max(),
+                    true,
+                    CONTINUITY_ANGLE,
+                ),
+                pass_on,
+            )? {
                 continuity = c.continuity;
             }
             // set span endContinuities as appropriate
@@ -1091,10 +1118,14 @@ impl<'t, O: SolutionObject + 't> CpGlobalSolver<'t, O> {
         // get BezierCurve EndPoints and the vector between them (statuses ignored)
         let mut start_pt = [Vec3::UNDEF; 2];
         let mut end_pt = [Vec3::UNDEF; 2];
-        if let Some(v) = ignored(curve.evaluate(k, bez_ivl.min(), 1, true, true))? {
+        if let Some(v) =
+            ignored_or_pass_on(curve.evaluate(k, bez_ivl.min(), 1, true, true), pass_on)?
+        {
             start_pt = first_n(&v);
         }
-        if let Some(v) = ignored(curve.evaluate(k, bez_ivl.max(), 1, true, true))? {
+        if let Some(v) =
+            ignored_or_pass_on(curve.evaluate(k, bez_ivl.max(), 1, true, true), pass_on)?
+        {
             end_pt = first_n(&v);
         }
 
@@ -1430,14 +1461,18 @@ impl<'t, O: SolutionObject + 't> CpGlobalSolver<'t, O> {
                             | SolverOperation::Rayfire
                     ) {
                         if sol_vec.length_squared() > EFF_ZERO_SQ {
-                            // (status ignored; 0 on failure)
-                            ang_from_perp_rad = bndry_vec.angle_between(sol_vec).unwrap_or(0.0);
+                            // (status ignored, 0 on failure; passed on with the opt-in
+                            // fix, tangency-labs/smlib 8311f8e)
+                            ang_from_perp_rad =
+                                passed_on(bndry_vec.angle_between(sol_vec), pass_on)?
+                                    .unwrap_or(0.0);
                         }
                         ang_from_perp_rad = (ang_from_perp_rad - PI / 2.0).abs();
                         let dot = bndry_vec.dot(sol_vec);
                         outside_dir = dot > 0.0; // TRUE = sSolVec points outside interval
                     } else if local_op == SolverOperation::Signed3dDirectedMinimize {
-                        ang_from_perp_rad = self.opt(0)?.angle_between(sol_vec).unwrap_or(0.0);
+                        ang_from_perp_rad =
+                            passed_on(self.opt(0)?.angle_between(sol_vec), pass_on)?.unwrap_or(0.0);
                     }
 
                     // skip solutions with tolerant angles that will get better in the
@@ -1837,7 +1872,7 @@ impl Curve {
         };
 
         // execute the spatial decomposition tree leafNode/Point solutions (status
-        // ignored)
+        // ignored; passed on with the opt-in fix, tangency-labs/smlib 8311f8e)
         let request = SolveRequest {
             operation: op,
             solution_requested: requested,
@@ -1845,7 +1880,10 @@ impl Curve {
             best_answer_so_far_sq,
             opt_vectors: opts.opt_vectors.unwrap_or(&[]),
         };
-        ignored(gs.solve_it(&request, &mut solutions))?;
+        ignore_or_pass_on(
+            gs.solve_it(&request, &mut solutions),
+            k.fixes.query_statuses_pass_on,
+        )?;
 
         Ok(solutions)
     }

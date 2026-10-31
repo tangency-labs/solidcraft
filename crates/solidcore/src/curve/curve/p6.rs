@@ -77,18 +77,26 @@
 //!   [`Curve::simple_coincidence_checker`] returns a range whose separation changes
 //!   sides between its ends as the crossing inside it (WR-647; the fork's
 //!   tangency-labs/smlib@c2e3d9d). Off, it is upstream's.
+//! - **Statuses passed on (WR-663).** With the opt-in
+//!   `Kernel::fixes.query_statuses_pass_on` the statuses SMLib drops are passed on, as the
+//!   fork (tangency-labs/smlib 8311f8e): `CalculateBoundingBox`'s samples, interval and
+//!   boxes, `CurveMaxDistanceBetween`'s knots, `DeformToEndPointTargets`' drops (a target
+//!   that does not drop is `SM_ERR`) and `ConvertTo2D` (before the UV curve is replaced);
+//!   `IsPlanar` is `FALSE` without its box.
 
 use crate::curve::curve::knots_ignoring_status;
 use crate::curve::curve::p1::{ApproximateCurveOptions, GlobalPointSolveOptions};
 use crate::curve::curve::p2::{
-    at, snap_sol_to_specified_endpoint, Curve, CurveKind, CurvePropertyType,
+    at, ignored_or_soft, snap_sol_to_specified_endpoint, Curve, CurveKind, CurvePropertyType, Soft,
 };
 use crate::curve::curve::p3::{local_curve_intersect, PointSolveOptions};
 use crate::curve::curve::p5::{
     is_point_solution_across_closed_seam_boundary, local_property_analysis,
 };
 use crate::curve::curve_cache::CurveCache;
-use crate::error::{ignore_status, ignored, Result, SolidError};
+use crate::error::{
+    ignore_or_pass_on, ignore_status, ignored, ignored_or_pass_on, passed_on, Result, SolidError,
+};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent3d::Extent3d;
 use crate::geom::global_solver::{
@@ -242,9 +250,13 @@ pub fn calculate_bounding_box_base(
     let mut rel_t1 = 0.0;
     let num_derivs = usize::from(want_tangents);
     let mut pt_der = [Vec3::UNDEF, Vec3::UNDEF];
+    // (the statuses below are ignored upstream and passed on with the opt-in fix,
+    // tangency-labs/smlib 8311f8e)
+    let pass_on = k.fixes.query_statuses_pass_on;
     let sample = |t: f64, pt_der: &mut [Vec3; 2]| -> Result<()> {
         // nonZeroTangent values (status ignored)
-        if let Some(v) = ignored(curve.evaluate(k, t, num_derivs, false, true))? {
+        let r = curve.evaluate(k, t, num_derivs, false, true);
+        if let Some(v) = ignored_or_pass_on(r, pass_on)? {
             for (dst, src) in pt_der.iter_mut().zip(v) {
                 *dst = src;
             }
@@ -269,7 +281,10 @@ pub fn calculate_bounding_box_base(
         if ii >= NUM_SPANS - 1 {
             rel_t1 = 1.0;
         }
-        ignored(sub_ivl.set_min_max(interval.evaluate(rel_t0), interval.evaluate(rel_t1)))?;
+        ignore_or_pass_on(
+            sub_ivl.set_min_max(interval.evaluate(rel_t0), interval.evaluate(rel_t1)),
+            pass_on,
+        )?;
 
         let pt0 = pt1;
         sample(sub_ivl.max(), &mut pt_der)?;
@@ -375,7 +390,7 @@ pub fn calculate_bounding_box_base(
     let mut bbox = Extent3d::new();
     if req.normal {
         let p0 = point(0)?;
-        ignored(bbox.set_min_max(p0, p0))?;
+        ignore_or_pass_on(bbox.set_min_max(p0, p0), pass_on)?;
     }
 
     // init pseudobox
@@ -406,7 +421,7 @@ pub fn calculate_bounding_box_base(
             // use basis vectors based on selected sample points
             let v2 = point(l3)? - point(l2)?;
             let [b1, b2, b3] = v1.make_unit_ortho_vectors(Some(v2))?;
-            ignored(pseudo.set_basis(b1, b2, b3))?;
+            ignore_or_pass_on(pseudo.set_basis(b1, b2, b3), pass_on)?;
         }
     }
 
@@ -572,9 +587,21 @@ impl Curve {
             pseudo: true,
             polar: false,
         };
-        let pseudo = ignored(self.calculate_bounding_box(k, &self.natural_interval(), req, true))?
-            .and_then(|b| b.pseudo)
-            .unwrap_or_else(PseudoBox::new);
+        let boxes = ignored_or_soft(
+            self.calculate_bounding_box(k, &self.natural_interval(), req, true),
+            k.fixes.query_statuses_pass_on,
+        )?;
+        // with the opt-in fix a curve that cannot be boxed is not shown planar; its
+        // outputs are not written (tangency-labs/smlib 8311f8e)
+        let Soft::Kept(boxes) = boxes else {
+            return Ok(Planar {
+                is_planar: false,
+                point: Vec3::UNDEF,
+                normal: Vec3::UNDEF,
+                deviation: crate::math::UNDEF_DOUBLE,
+            });
+        };
+        let pseudo = boxes.and_then(|b| b.pseudo).unwrap_or_else(PseudoBox::new);
         Ok(pseudo.is_planar(tol))
     }
 
@@ -1018,12 +1045,17 @@ impl Curve {
         // there are a large number of knots.
         if num_samples == 0 {
             do_precise = true;
-            let knots = knots_ignoring_status(self.knots_with_status(k, None))?
-                .0
-                .len();
-            let other_knots = knots_ignoring_status(other.knots_with_status(k, None))?
-                .0
-                .len();
+            // (statuses ignored; passed on with the opt-in fix, tangency-labs/smlib
+            // 8311f8e)
+            let pass_on = k.fixes.query_statuses_pass_on;
+            let knots =
+                knots_ignoring_status(passed_on(self.knots_with_status(k, None), pass_on)?)?
+                    .0
+                    .len();
+            let other_knots =
+                knots_ignoring_status(passed_on(other.knots_with_status(k, None), pass_on)?)?
+                    .0
+                    .len();
             num_samples = 22 + knots as u64 + other_knots as u64;
         }
 
@@ -2212,10 +2244,20 @@ impl Curve {
                         guess_uv: Some(crate::math::Vec2::new(current.x, current.y)),
                         ..Default::default()
                     };
-                    let uv = ignored(surface.drop_point::<crate::surface::surface::p4::NoObject>(
-                        k, target, &domain, &options,
-                    ))?
-                    .map_or(crate::math::Vec2::UNDEF, |result| result.result_uv);
+                    // (status ignored; with the opt-in fix a failed drop is passed on
+                    // and a target that does not drop onto the surface has no UV
+                    // point, SM_ERR, tangency-labs/smlib 8311f8e)
+                    let pass_on = k.fixes.query_statuses_pass_on;
+                    let dropped = ignored_or_pass_on(
+                        surface.drop_point::<crate::surface::surface::p4::NoObject>(
+                            k, target, &domain, &options,
+                        ),
+                        pass_on,
+                    )?;
+                    if pass_on && !dropped.as_ref().is_some_and(|d| d.success) {
+                        return Err(SolidError::sm_err(OP_DEFORM));
+                    }
+                    let uv = dropped.map_or(crate::math::Vec2::UNDEF, |result| result.result_uv);
                     Ok(Some(Point3::new(uv.x, uv.y, 0.0)))
                 };
                 let start = drop_target(tgt_start, ends.start)?;
@@ -2245,7 +2287,13 @@ impl Curve {
                     InValueType::Same,
                 )?;
                 if let Some(mut replacement) = replacement {
-                    ignore_status(replacement.convert_to_2d(k))?;
+                    // (status ignored; passed on with the opt-in fix before the UV
+                    // curve is replaced, so a failure leaves it as it was,
+                    // tangency-labs/smlib 8311f8e)
+                    ignore_or_pass_on(
+                        replacement.convert_to_2d(k),
+                        k.fixes.query_statuses_pass_on,
+                    )?;
                     curve.set_uv_curve(replacement)?;
                 }
                 return Ok(None);
@@ -2385,6 +2433,20 @@ mod tests {
     /// earlier drop filled gives exactly the result of a fresh slot for that drop alone
     /// (no reuse at all), and lands where it should. Points on and just off the circle
     /// at 48 angles, so the global solve runs on the pre-filled slot.
+    #[test]
+    fn issue_2009_unboxable_curve_is_not_shown_planar() {
+        // tangency-labs/smlib 8311f8e (SmCurve::IsPlanar, CalculateBoundingBox): a
+        // curve that cannot be boxed is not shown planar; the box passes on its
+        // evaluations. Upstream reads the default box, which is planar.
+        // Discriminating.
+        let c = Curve::from(BSplineCurve::new(3));
+        let off = Kernel::default();
+        let mut on = Kernel::default();
+        on.fixes.query_statuses_pass_on = true;
+        assert!(c.is_planar(&off, EFF_ZERO).unwrap().is_planar);
+        assert!(!c.is_planar(&on, EFF_ZERO).unwrap().is_planar);
+    }
+
     #[test]
     fn drop_with_prefilled_cache_slot_matches_fresh_slot_per_drop() {
         let k = Kernel::default();
