@@ -1,6 +1,9 @@
 {
   "sources": [
-    "tangency-labs/solidcraft#258"
+    "tangency-labs/solidcraft#258",
+    "tangency-labs/solidcraft#3871",
+    "tangency-labs/solidcraft#3901",
+    "tangency-labs/solidcraft#3880"
   ],
   "what": "a STEP cone 20 mm across coming to a point 30 mm up (no vertex at the apex): the cone face was meshed flat at its base, so the measured shape was far off",
   "source": "analytic",

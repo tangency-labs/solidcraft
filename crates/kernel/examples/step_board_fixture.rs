@@ -65,7 +65,11 @@ mod run {
             .enumerate()
             .map(|(c, bodies)| ExportProduct {
                 name: format!("U{c}"),
-                bodies: bodies.iter().enumerate().map(|(k, b)| ExportBody { name: format!("U{c}_{k}"), body: b, color: Some([0.2, 0.2, 0.2]) }).collect(),
+                bodies: bodies
+                    .iter()
+                    .enumerate()
+                    .map(|(k, b)| ExportBody { name: format!("U{c}_{k}"), body: b, color: Some([0.2, 0.2, 0.2]) })
+                    .collect(),
                 children: Vec::new(),
             })
             .collect();

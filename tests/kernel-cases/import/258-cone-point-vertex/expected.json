@@ -1,6 +1,8 @@
 {
   "sources": [
-    "tangency-labs/solidcraft#258"
+    "tangency-labs/solidcraft#258",
+    "tangency-labs/solidcraft#3871",
+    "tangency-labs/solidcraft#3901"
   ],
   "what": "the same STEP cone with a VERTEX_LOOP at the apex: the mesh stopped 30 mm short of the apex",
   "source": "analytic",

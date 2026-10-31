@@ -1237,7 +1237,14 @@ fn coplanar_curved_booleans() {
     // the union adds the parts outside. A cylinder inside but for a flush cap adds nothing.
     let b = box_solid(Vec3::ZERO, Vec3::new(40.0, 30.0, 20.0)).unwrap();
     let disc = PI * 25.0;
-    for (z0, z1, inside, outside) in [(0.0, 20.0, 20.0, 0.0), (-5.0, 20.0, 20.0, 5.0), (0.0, 25.0, 20.0, 5.0), (-5.0, 25.0, 20.0, 10.0), (5.0, 20.0, 15.0, 0.0), (5.0, 25.0, 15.0, 5.0)] {
+    for (z0, z1, inside, outside) in [
+        (0.0, 20.0, 20.0, 0.0),
+        (-5.0, 20.0, 20.0, 5.0),
+        (0.0, 25.0, 20.0, 5.0),
+        (-5.0, 25.0, 20.0, 10.0),
+        (5.0, 20.0, 15.0, 0.0),
+        (5.0, 25.0, 15.0, 5.0),
+    ] {
         let c = cylinder(Vec3::new(20.0, 15.0, z0), Vec3::Z, 5.0, z1 - z0).unwrap();
         let cut = measure(&boolean(&b, &c, BoolOp::Cut).unwrap().unwrap()).unwrap().volume;
         assert!(rel(cut, 24000.0 - disc * inside) < 1e-6, "cut z {z0}..{z1}: {cut}");
