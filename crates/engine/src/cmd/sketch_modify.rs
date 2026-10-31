@@ -8,7 +8,7 @@ use solidcraft_doc::ProfileSel;
 use solidcraft_geom::Vec2;
 use solidcraft_sketch::{ConstraintKind, Curve, CurveKind, Shape, Sketch, intersections, intersections_within};
 
-use super::sketch::{add_c, edit, ids_of, line_or_axis_ref, solve_current};
+use super::sketch::{add_c, coincident_points, edit, ids_of, line_or_axis_ref, solve_current};
 use super::sketch_store;
 use super::{CommandSpec, in_sketch};
 use crate::params::{bad, bool_, expr, num, req_expr, req_vec2, str_, string_list, vec2, vec2_list};
@@ -1882,27 +1882,10 @@ fn chain(sk: &Sketch, start: usize, pool: &[usize]) -> (Vec<(usize, bool)>, bool
     // Ends joined by a coincident constraint are one joint, as well as a shared point: lines drawn
     // one by one meet at their own points, held together by constraints, and must chain the same
     // (else each is offset on its own, to the left of the way it was drawn).
-    let mut parent: Vec<usize> = (0..sk.points.len()).collect();
-    let root = |parent: &[usize], mut i: usize| {
-        for _ in 0..parent.len() {
-            match parent.get(i) {
-                Some(&up) if up != i => i = up,
-                _ => break,
-            }
-        }
-        i
-    };
-    for c in &sk.constraints {
-        if let ConstraintKind::Coincident { p, q } = c.kind {
-            let (rp, rq) = (root(&parent, p), root(&parent, q));
-            if rp != rq
-                && let Some(slot) = parent.get_mut(rp)
-            {
-                *slot = rq;
-            }
-        }
-    }
-    let ends = |c: usize| sk.curves.get(c).and_then(|c| c.kind.ends()).map(|(a, b)| (root(&parent, a), root(&parent, b)));
+    let groups = coincident_points(sk);
+    let root = |i: usize| groups.get(i).copied().unwrap_or(i);
+    let endpoints: Vec<_> = sk.curves.iter().map(|c| c.kind.ends().map(|(a, b)| (root(a), root(b)))).collect();
+    let ends = |c: usize| endpoints.get(c).copied().flatten();
     let Some((s0, s1)) = ends(start) else { return (vec![(start, true)], true) };
     let next = |from: usize, at: usize, used: &[usize]| -> Option<usize> {
         let users: Vec<usize> = pool.iter().copied().filter(|c| ends(*c).is_some_and(|(a, b)| a == at || b == at)).collect();

@@ -41,12 +41,63 @@ fn close(a: f64, b: f64) -> bool {
 }
 
 fn assert_closed_offset(sk: &solidcraft_sketch::Sketch, curves: &[String]) {
+    assert!(!curves.is_empty(), "an offset boundary must contain curves");
     let ends: Vec<_> = curves.iter().map(|id| sk.curves[sk.curve_index(id).unwrap()].kind.ends().unwrap()).collect();
-    for &(a, b) in &ends {
-        for point in [a, b] {
-            assert_eq!(ends.iter().filter(|&&(x, y)| x == point || y == point).count(), 2, "offset corner {point} must be shared by two curves");
+    let mut adjacency = std::collections::BTreeMap::<usize, Vec<usize>>::new();
+    for (edge, &(a, b)) in ends.iter().enumerate() {
+        assert_ne!(a, b, "offset edge must have distinct endpoints");
+        adjacency.entry(a).or_default().push(edge);
+        adjacency.entry(b).or_default().push(edge);
+    }
+    for (point, edges) in &adjacency {
+        assert_eq!(edges.len(), 2, "offset corner {point} must be shared by two curves");
+    }
+    let mut visited = std::collections::BTreeSet::new();
+    let mut pending = vec![0];
+    while let Some(edge) = pending.pop() {
+        if visited.insert(edge) {
+            let (a, b) = ends[edge];
+            pending.extend(&adjacency[&a]);
+            pending.extend(&adjacency[&b]);
         }
     }
+    assert_eq!(visited.len(), ends.len(), "all offset curves must belong to one connected loop");
+}
+
+#[test]
+#[should_panic(expected = "all offset curves must belong to one connected loop")]
+fn closed_offset_assertion_rejects_disconnected_loops() {
+    let mut sk = solidcraft_sketch::Sketch::new();
+    let mut curves = Vec::new();
+    for x in [0.0, 20.0] {
+        let a = sk.add_point(Vec2::new(x, 0.0), None).unwrap();
+        let b = sk.add_point(Vec2::new(x + 10.0, 0.0), None).unwrap();
+        let c = sk.add_point(Vec2::new(x, 10.0), None).unwrap();
+        for (p, q) in [(a, b), (b, c), (c, a)] {
+            let edge = sk.add_line_pts(p, q, None).unwrap();
+            curves.push(sk.curves[edge].id.clone());
+        }
+    }
+    assert_closed_offset(&sk, &curves);
+}
+
+#[test]
+fn offset_chain_resolves_transitive_coincidence_and_stops_at_branches() {
+    let mut sk = solidcraft_sketch::Sketch::new();
+    for xy in [[0., 0.], [10., 0.], [10., 0.], [20., 0.], [10., 0.], [10., 10.], [10., 0.]] {
+        sk.add_point(Vec2::new(xy[0], xy[1]), None).unwrap();
+    }
+    let a = sk.add_line_pts(0, 1, None).unwrap();
+    let b = sk.add_line_pts(2, 3, None).unwrap();
+    let c = sk.add_line_pts(4, 5, None).unwrap();
+    // Equal coordinates do not connect curves without shared points or constraints.
+    assert_eq!(super::chain(&sk, a, &[a, b]), (vec![(a, true)], false));
+    sk.add_constraint(ConstraintKind::Coincident { p: 1, q: 6 }, None).unwrap();
+    sk.add_constraint(ConstraintKind::Coincident { p: 2, q: 6 }, None).unwrap();
+    assert_eq!(super::chain(&sk, a, &[a, b]), (vec![(a, true), (b, true)], false));
+    sk.add_constraint(ConstraintKind::Coincident { p: 4, q: 6 }, None).unwrap();
+    assert_eq!(super::chain(&sk, a, &[a, b, c]), (vec![(a, true)], false));
+    assert_eq!(super::chain(&sk, a, &[a, b]), (vec![(a, true), (b, true)], false));
 }
 
 #[test]

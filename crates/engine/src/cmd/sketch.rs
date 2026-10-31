@@ -1099,18 +1099,20 @@ fn rect_constraints(sk: &mut Sketch, l: &[usize]) -> Result<Vec<String>> {
     Ok(cons)
 }
 
-/// Whether line `l` being horizontal (`horizontal`) or vertical already follows from another
-/// constraint than `own`: its ends coincide with the ends of a line constrained the same way (a
-/// side two rectangles share), or with two points constrained level (or plumb).
-fn axis_implied(sk: &Sketch, l: usize, horizontal: bool, own: &str) -> bool {
-    let Some(CurveKind::Line { a, b }) = sk.curves.get(l).map(|c| &c.kind) else { return false };
-    let (a, b) = (*a, *b);
-    // Coincident points as one (union-find over the coincident constraints).
+/// Canonical point indices for shared and transitively coincident sketch endpoints.
+/// Kept inside the engine for command connectivity and implied-axis checks.
+pub(super) fn coincident_points(sk: &Sketch) -> Vec<usize> {
     let mut parent: Vec<usize> = (0..sk.points.len()).collect();
-    let root = |parent: &[usize], mut i: usize| {
+    let root = |parent: &mut [usize], mut i: usize| {
         for _ in 0..parent.len() {
             match parent.get(i) {
-                Some(&up) if up != i => i = up,
+                Some(&up) if up != i => {
+                    let grandparent = parent.get(up).copied().unwrap_or(up);
+                    if let Some(slot) = parent.get_mut(i) {
+                        *slot = grandparent;
+                    }
+                    i = up;
+                }
                 _ => break,
             }
         }
@@ -1118,7 +1120,7 @@ fn axis_implied(sk: &Sketch, l: usize, horizontal: bool, own: &str) -> bool {
     };
     for c in &sk.constraints {
         if let ConstraintKind::Coincident { p, q } = c.kind {
-            let (rp, rq) = (root(&parent, p), root(&parent, q));
+            let (rp, rq) = (root(&mut parent, p), root(&mut parent, q));
             if rp != rq
                 && let Some(slot) = parent.get_mut(rp)
             {
@@ -1126,7 +1128,18 @@ fn axis_implied(sk: &Sketch, l: usize, horizontal: bool, own: &str) -> bool {
             }
         }
     }
-    let (ra, rb) = (root(&parent, a), root(&parent, b));
+    (0..parent.len()).map(|i| root(&mut parent, i)).collect()
+}
+
+/// Whether line `l` being horizontal (`horizontal`) or vertical already follows from another
+/// constraint than `own`: its ends coincide with the ends of a line constrained the same way (a
+/// side two rectangles share), or with two points constrained level (or plumb).
+fn axis_implied(sk: &Sketch, l: usize, horizontal: bool, own: &str) -> bool {
+    let Some(CurveKind::Line { a, b }) = sk.curves.get(l).map(|c| &c.kind) else { return false };
+    let (a, b) = (*a, *b);
+    let groups = coincident_points(sk);
+    let root = |i: usize| groups.get(i).copied().unwrap_or(i);
+    let (ra, rb) = (root(a), root(b));
     sk.constraints.iter().filter(|c| c.id != own).any(|c| {
         let ends = match (&c.kind, horizontal) {
             (ConstraintKind::Horizontal { l: m }, true) | (ConstraintKind::Vertical { l: m }, false) if *m != l => {
@@ -1139,7 +1152,7 @@ fn axis_implied(sk: &Sketch, l: usize, horizontal: bool, own: &str) -> bool {
             _ => None,
         };
         ends.is_some_and(|(p, q)| {
-            let (rp, rq) = (root(&parent, p), root(&parent, q));
+            let (rp, rq) = (root(p), root(q));
             rp != rq && ((rp, rq) == (ra, rb) || (rp, rq) == (rb, ra))
         })
     })
