@@ -254,6 +254,7 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.planar_path_profile_placement_statuses = true;
     f.fillet_trim_status = true;
     f.perspective_sphere_offsets = true;
+    f.plane_recognition_origin_after_axes = true;
     f
 }
 
