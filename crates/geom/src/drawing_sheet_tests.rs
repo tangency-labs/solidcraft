@@ -353,6 +353,10 @@ fn hostile_sizes_and_profiles_are_refused() {
         DrawingBorderProfile { grid_border_mm: -0.1, ..iso },
         DrawingBorderProfile { grid_border_mm: f64::NAN, ..iso },
         DrawingBorderProfile { grid_border_mm: 10.000_001, ..iso },
+        // ...on the drawing border or at least a field's shortest length (1 mm) outside it.
+        DrawingBorderProfile { grid_border_mm: 1e-9, ..iso },
+        DrawingBorderProfile { grid_border_mm: 1e-6, ..iso },
+        DrawingBorderProfile { grid_border_mm: 0.999_999, ..iso },
         // On every side: 5 mm is wider than a 4 mm bottom margin, or a 4 mm left one without the
         // filing margin.
         with_margins(20.0, 10.0, 10.0, 4.0),
@@ -423,6 +427,8 @@ fn hostile_sizes_and_profiles_are_refused() {
         DrawingBorderProfile { grid: GridRule::Equal { columns: 200, rows: 200 }, ..iso },
         DrawingBorderProfile { grid_border_mm: 0.0, centring_mark_mm: None, ..with_margins(0.0, 0.0, 0.0, 0.0) },
         DrawingBorderProfile { grid_border_mm: 10.0, ..iso },
+        DrawingBorderProfile { grid_border_mm: 1.0, ..iso },
+        DrawingBorderProfile { grid_border_mm: 1.000_001, ..iso },
         DrawingBorderProfile { centring_mark_mm: Some(138.5), ..iso },
         // With no grid reference border, a centring mark that reaches inside has a length, and so
         // does one from the sheet's edge.
@@ -440,6 +446,29 @@ fn hostile_sizes_and_profiles_are_refused() {
     ] {
         profile.layout(&a3).unwrap();
     }
+}
+
+/// Every grid reference border laid out lies on the drawing border or at least 1 mm outside it on
+/// every side, so no field mark is a sliver on the drawing border's line: borders from 0 through
+/// sub-micrometre values to the margin's width, on every size both ways.
+#[test]
+fn no_grid_reference_border_is_a_sliver_outside_the_drawing_border() {
+    let mut laid_out = 0;
+    for size in PaperSize::ALL {
+        for orientation in [Orientation::Landscape, Orientation::Portrait] {
+            for g in [0.0, 1e-12, 1e-9, 1e-6, 0.5, 0.999_999, 1.0, 1.000_001, 5.0, 10.0] {
+                let profile = DrawingBorderProfile { grid_border_mm: g, ..DrawingBorderProfile::iso() };
+                let Ok(layout) = profile.layout(&Sheet::standard(size, orientation)) else { continue };
+                laid_out += 1;
+                let (d, b) = (layout.drawing_border, layout.grid_border);
+                for gap in [d.min.x - b.min.x, d.min.y - b.min.y, b.max.x - d.max.x, b.max.y - d.max.y] {
+                    assert!(gap == 0.0 || gap >= MIN_FIELD_MM - EPS, "{size:?} {orientation:?}, {g} mm: a {gap} mm gap");
+                }
+            }
+        }
+    }
+    // 0, 1, 1.000001, 5 and 10 mm on all 40 sheets.
+    assert_eq!(laid_out, 200);
 }
 
 #[test]
