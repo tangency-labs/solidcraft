@@ -95,10 +95,14 @@ enum OpIn {
         mse: f64,
         lsr: f64,
     },
-    /// The copy constructor (`api`: `SmApiBrepCopy`).
+    /// The copy constructor (`api`: `SmApiBrepCopy`). With `plain` (which implies
+    /// `api`) the Rust copy is `brep_copy`, the copy without the caller's namings or
+    /// notification environment (#2010).
     Copy {
         analytics: bool,
         api: bool,
+        #[serde(default)]
+        plain: bool,
     },
     Merge {
         analytics: bool,
@@ -149,12 +153,15 @@ enum OpIn {
     /// attributes of the copy's and the source's faces and edges (issue #1462). With
     /// `shared_naming` the Rust copy names its source by the copy's own naming
     /// ([`key_of`], not [`source_key_of`]), the B-rep's own naming a caller reaches for
-    /// (the C++ side has no names).
+    /// (the C++ side has no names). With `plain` the Rust copy is `brep_copy`
+    /// (#2010), without the caller's namings or notification environment.
     AttributedCopy {
         #[serde(default)]
         behavior: u8,
         #[serde(default)]
         shared_naming: bool,
+        #[serde(default)]
+        plain: bool,
     },
     /// Every face and edge tagged as for `AttributedCopy`, then `MergeBrep` of the B-rep into
     /// a second build of it; compares the second build's and the source's attributes (does
@@ -241,7 +248,11 @@ fn op_args(op: &OpIn, c: &[usize; 10]) -> Result<Option<(Op, Vec<f64>)>, Harness
         OpIn::ApiCopyNull => (Op::ApiCopyNull, vec![0.0]),
         OpIn::TurnNurbs => (Op::TurnNurbs, vec![]),
         OpIn::TurnNurbsOffset { offset } => (Op::TurnNurbsOffset, vec![*offset]),
-        OpIn::Copy { analytics, api } => (Op::Copy, vec![flag(*analytics), flag(*api)]),
+        OpIn::Copy {
+            analytics,
+            api,
+            plain,
+        } => (Op::Copy, vec![flag(*analytics), flag(*api || *plain)]),
         OpIn::Merge { analytics } => (Op::Merge, vec![flag(*analytics)]),
         OpIn::AttributedMerge {
             analytics,
@@ -1433,9 +1444,15 @@ fn run_rust_op_in(
             let (s, _) = status(bp3::api_brep_copy(k, &mut env, None, &source_key_of))?;
             out.push(s);
         }
-        OpIn::Copy { analytics, api } => {
+        OpIn::Copy {
+            analytics,
+            api,
+            plain,
+        } => {
             let src: &Brep = b;
-            let r = if *api {
+            let r = if *plain {
+                bp3::brep_copy(k, src)
+            } else if *api {
                 bp3::api_brep_copy(k, &mut env, Some(src), &source_key_of)
             } else {
                 bp3::copy_brep(
@@ -1458,6 +1475,7 @@ fn run_rust_op_in(
         OpIn::AttributedCopy {
             behavior,
             shared_naming,
+            plain,
         } => {
             let behavior = Behavior::from_code(i32::from(*behavior))
                 .map_err(|e| Fail::Harness(harness(format!("behavior: {e}"))))?;
@@ -1468,7 +1486,11 @@ fn run_rust_op_in(
             } else {
                 &source_key_of
             };
-            let c = must(bp3::api_brep_copy(k, &mut env, Some(src), source))?;
+            let c = if *plain {
+                must(bp3::brep_copy(k, src))?
+            } else {
+                must(bp3::api_brep_copy(k, &mut env, Some(src), source))?
+            };
             out.push(0.0);
             out.push(c.tolerance());
             out.push(flag(c.editing_enabled()));
@@ -1757,6 +1779,7 @@ fn gen_op(rng: &mut Rng) -> (OpIn, i64) {
             OpIn::Copy {
                 analytics: rng.chance(0.5),
                 api: rng.chance(0.5),
+                plain: false,
             },
             editing,
         ),

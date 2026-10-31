@@ -1,0 +1,1448 @@
+{
+ "cases": [
+  {
+   "name": "plain_copy_Mouse_api1_an0",
+   "note": "brep_copy (#2010): copy_Mouse_api1_an0 with the Rust copy made without the caller's namings or notification environment; the C++ side is SmApiBrepCopy.",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Mouse.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "copy",
+    "analytics": false,
+    "api": true,
+    "plain": true
+   }
+  },
+  {
+   "name": "plain_copy_Endcap_api1_an0",
+   "note": "brep_copy (#2010): copy_Endcap_api1_an0 with the Rust copy made without the caller's namings or notification environment; the C++ side is SmApiBrepCopy.",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Endcap.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "copy",
+    "analytics": false,
+    "api": true,
+    "plain": true
+   }
+  },
+  {
+   "name": "plain_copy_box_with_large_fillet_api1_an0",
+   "note": "brep_copy (#2010): copy_box_with_large_fillet_api1_an0 with the Rust copy made without the caller's namings or notification environment; the C++ side is SmApiBrepCopy.",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "copy",
+    "analytics": false,
+    "api": true,
+    "plain": true
+   }
+  },
+  {
+   "name": "plain_copy_cone_api1_an0",
+   "note": "brep_copy (#2010): copy_cone_api1_an0 with the Rust copy made without the caller's namings or notification environment; the C++ side is SmApiBrepCopy.",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "cone.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "copy",
+    "analytics": false,
+    "api": true,
+    "plain": true
+   }
+  },
+  {
+   "name": "plain_copy_disk_api1_an0",
+   "note": "brep_copy (#2010): copy_disk_api1_an0 with the Rust copy made without the caller's namings or notification environment; the C++ side is SmApiBrepCopy.",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "disk.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "copy",
+    "analytics": false,
+    "api": true,
+    "plain": true
+   }
+  },
+  {
+   "name": "plain_copy_ellips_ts2_api1_an0",
+   "note": "brep_copy (#2010): copy_ellips_ts2_api1_an0 with the Rust copy made without the caller's namings or notification environment; the C++ side is SmApiBrepCopy.",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "ellips_ts2.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "copy",
+    "analytics": false,
+    "api": true,
+    "plain": true
+   }
+  },
+  {
+   "name": "plain_copy_plane_circ_api1_an0",
+   "note": "brep_copy (#2010): copy_plane_circ_api1_an0 with the Rust copy made without the caller's namings or notification environment; the C++ side is SmApiBrepCopy.",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_circ.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "copy",
+    "analytics": false,
+    "api": true,
+    "plain": true
+   }
+  },
+  {
+   "name": "plain_copy_plane_square_api1_an0",
+   "note": "brep_copy (#2010): copy_plane_square_api1_an0 with the Rust copy made without the caller's namings or notification environment; the C++ side is SmApiBrepCopy.",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "copy",
+    "analytics": false,
+    "api": true,
+    "plain": true
+   }
+  },
+  {
+   "name": "plain_copy_sphere_api1_an0",
+   "note": "brep_copy (#2010): copy_sphere_api1_an0 with the Rust copy made without the caller's namings or notification environment; the C++ side is SmApiBrepCopy.",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "sphere.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "copy",
+    "analytics": false,
+    "api": true,
+    "plain": true
+   }
+  },
+  {
+   "name": "plain_copy_surf_extrude_api1_an0",
+   "note": "brep_copy (#2010): copy_surf_extrude_api1_an0 with the Rust copy made without the caller's namings or notification environment; the C++ side is SmApiBrepCopy.",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_extrude.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "copy",
+    "analytics": false,
+    "api": true,
+    "plain": true
+   }
+  },
+  {
+   "name": "plain_copy_surf_rev_api1_an0",
+   "note": "brep_copy (#2010): copy_surf_rev_api1_an0 with the Rust copy made without the caller's namings or notification environment; the C++ side is SmApiBrepCopy.",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_rev.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "copy",
+    "analytics": false,
+    "api": true,
+    "plain": true
+   }
+  },
+  {
+   "name": "plain_copy_surf_sphere150_api1_an0",
+   "note": "brep_copy (#2010): copy_surf_sphere150_api1_an0 with the Rust copy made without the caller's namings or notification environment; the C++ side is SmApiBrepCopy.",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_sphere150.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "copy",
+    "analytics": false,
+    "api": true,
+    "plain": true
+   }
+  },
+  {
+   "name": "plain_copy_torus_api1_an0",
+   "note": "brep_copy (#2010): copy_torus_api1_an0 with the Rust copy made without the caller's namings or notification environment; the C++ side is SmApiBrepCopy.",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "torus.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "copy",
+    "analytics": false,
+    "api": true,
+    "plain": true
+   }
+  },
+  {
+   "name": "plain_copy_toruswvy_api1_an0",
+   "note": "brep_copy (#2010): copy_toruswvy_api1_an0 with the Rust copy made without the caller's namings or notification environment; the C++ side is SmApiBrepCopy.",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "toruswvy.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "copy",
+    "analytics": false,
+    "api": true,
+    "plain": true
+   }
+  },
+  {
+   "name": "plain_copy_vase_rev_api1_an0",
+   "note": "brep_copy (#2010): copy_vase_rev_api1_an0 with the Rust copy made without the caller's namings or notification environment; the C++ side is SmApiBrepCopy.",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "vase_rev.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "copy",
+    "analytics": false,
+    "api": true,
+    "plain": true
+   }
+  },
+  {
+   "name": "plain_copy_net_api1_an0",
+   "note": "brep_copy (#2010): copy_net_api1_an0 with the Rust copy made without the caller's namings or notification environment; the C++ side is SmApiBrepCopy.",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "editing": -1,
+    "op": "copy",
+    "analytics": false,
+    "api": true,
+    "plain": true
+   }
+  },
+  {
+   "name": "plain_attributed_b0_copy_Mouse",
+   "note": "brep_copy (#2010): attributed_b0_copy_Mouse_api1_an1 (every face and edge tagged) with the Rust copy made without the caller's namings or notification environment; compares the copy's and source's attribute sets against SmApiBrepCopy.",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Mouse.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "attributed_copy",
+    "behavior": 0,
+    "plain": true
+   }
+  },
+  {
+   "name": "plain_attributed_b1_copy_Mouse",
+   "note": "brep_copy (#2010): attributed_b1_copy_Mouse_api1_an1 (every face and edge tagged) with the Rust copy made without the caller's namings or notification environment; compares the copy's and source's attribute sets against SmApiBrepCopy.",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Mouse.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "attributed_copy",
+    "behavior": 1,
+    "plain": true
+   }
+  },
+  {
+   "name": "plain_attributed_b2_copy_Mouse",
+   "note": "brep_copy (#2010): attributed_b2_copy_Mouse_api1_an1 (every face and edge tagged) with the Rust copy made without the caller's namings or notification environment; compares the copy's and source's attribute sets against SmApiBrepCopy.",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Mouse.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "attributed_copy",
+    "behavior": 2,
+    "plain": true
+   }
+  },
+  {
+   "name": "plain_attributed_b3_copy_Mouse",
+   "note": "brep_copy (#2010): attributed_b3_copy_Mouse_api1_an1 (every face and edge tagged) with the Rust copy made without the caller's namings or notification environment; compares the copy's and source's attribute sets against SmApiBrepCopy.",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Mouse.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "attributed_copy",
+    "behavior": 3,
+    "plain": true
+   }
+  },
+  {
+   "name": "plain_attributed_b4_copy_Mouse",
+   "note": "brep_copy (#2010): attributed_b4_copy_Mouse_api1_an1 (every face and edge tagged) with the Rust copy made without the caller's namings or notification environment; compares the copy's and source's attribute sets against SmApiBrepCopy.",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Mouse.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "attributed_copy",
+    "behavior": 4,
+    "plain": true
+   }
+  },
+  {
+   "name": "plain_attributed_b0_copy_Endcap",
+   "note": "brep_copy (#2010): attributed_b0_copy_Endcap_api1_an1 (every face and edge tagged) with the Rust copy made without the caller's namings or notification environment; compares the copy's and source's attribute sets against SmApiBrepCopy.",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Endcap.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "attributed_copy",
+    "behavior": 0,
+    "plain": true
+   }
+  },
+  {
+   "name": "plain_attributed_b1_copy_Endcap",
+   "note": "brep_copy (#2010): attributed_b1_copy_Endcap_api1_an1 (every face and edge tagged) with the Rust copy made without the caller's namings or notification environment; compares the copy's and source's attribute sets against SmApiBrepCopy.",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Endcap.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "attributed_copy",
+    "behavior": 1,
+    "plain": true
+   }
+  },
+  {
+   "name": "plain_attributed_b2_copy_Endcap",
+   "note": "brep_copy (#2010): attributed_b2_copy_Endcap_api1_an1 (every face and edge tagged) with the Rust copy made without the caller's namings or notification environment; compares the copy's and source's attribute sets against SmApiBrepCopy.",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Endcap.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "attributed_copy",
+    "behavior": 2,
+    "plain": true
+   }
+  },
+  {
+   "name": "plain_attributed_b3_copy_Endcap",
+   "note": "brep_copy (#2010): attributed_b3_copy_Endcap_api1_an1 (every face and edge tagged) with the Rust copy made without the caller's namings or notification environment; compares the copy's and source's attribute sets against SmApiBrepCopy.",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Endcap.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "attributed_copy",
+    "behavior": 3,
+    "plain": true
+   }
+  },
+  {
+   "name": "plain_attributed_b4_copy_Endcap",
+   "note": "brep_copy (#2010): attributed_b4_copy_Endcap_api1_an1 (every face and edge tagged) with the Rust copy made without the caller's namings or notification environment; compares the copy's and source's attribute sets against SmApiBrepCopy.",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Endcap.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "attributed_copy",
+    "behavior": 4,
+    "plain": true
+   }
+  },
+  {
+   "name": "plain_attributed_b0_copy_box_with_large_fillet",
+   "note": "brep_copy (#2010): attributed_b0_copy_box_with_large_fillet_api1_an1 (every face and edge tagged) with the Rust copy made without the caller's namings or notification environment; compares the copy's and source's attribute sets against SmApiBrepCopy.",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "attributed_copy",
+    "behavior": 0,
+    "plain": true
+   }
+  },
+  {
+   "name": "plain_attributed_b1_copy_box_with_large_fillet",
+   "note": "brep_copy (#2010): attributed_b1_copy_box_with_large_fillet_api1_an1 (every face and edge tagged) with the Rust copy made without the caller's namings or notification environment; compares the copy's and source's attribute sets against SmApiBrepCopy.",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "attributed_copy",
+    "behavior": 1,
+    "plain": true
+   }
+  },
+  {
+   "name": "plain_attributed_b2_copy_box_with_large_fillet",
+   "note": "brep_copy (#2010): attributed_b2_copy_box_with_large_fillet_api1_an1 (every face and edge tagged) with the Rust copy made without the caller's namings or notification environment; compares the copy's and source's attribute sets against SmApiBrepCopy.",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "attributed_copy",
+    "behavior": 2,
+    "plain": true
+   }
+  },
+  {
+   "name": "plain_attributed_b3_copy_box_with_large_fillet",
+   "note": "brep_copy (#2010): attributed_b3_copy_box_with_large_fillet_api1_an1 (every face and edge tagged) with the Rust copy made without the caller's namings or notification environment; compares the copy's and source's attribute sets against SmApiBrepCopy.",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "attributed_copy",
+    "behavior": 3,
+    "plain": true
+   }
+  },
+  {
+   "name": "plain_attributed_b4_copy_box_with_large_fillet",
+   "note": "brep_copy (#2010): attributed_b4_copy_box_with_large_fillet_api1_an1 (every face and edge tagged) with the Rust copy made without the caller's namings or notification environment; compares the copy's and source's attribute sets against SmApiBrepCopy.",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "attributed_copy",
+    "behavior": 4,
+    "plain": true
+   }
+  },
+  {
+   "name": "plain_attributed_b0_copy_cone",
+   "note": "brep_copy (#2010): attributed_b0_copy_cone_api1_an1 (every face and edge tagged) with the Rust copy made without the caller's namings or notification environment; compares the copy's and source's attribute sets against SmApiBrepCopy.",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "cone.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "attributed_copy",
+    "behavior": 0,
+    "plain": true
+   }
+  },
+  {
+   "name": "plain_attributed_b1_copy_cone",
+   "note": "brep_copy (#2010): attributed_b1_copy_cone_api1_an1 (every face and edge tagged) with the Rust copy made without the caller's namings or notification environment; compares the copy's and source's attribute sets against SmApiBrepCopy.",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "cone.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "attributed_copy",
+    "behavior": 1,
+    "plain": true
+   }
+  },
+  {
+   "name": "plain_attributed_b2_copy_cone",
+   "note": "brep_copy (#2010): attributed_b2_copy_cone_api1_an1 (every face and edge tagged) with the Rust copy made without the caller's namings or notification environment; compares the copy's and source's attribute sets against SmApiBrepCopy.",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "cone.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "attributed_copy",
+    "behavior": 2,
+    "plain": true
+   }
+  },
+  {
+   "name": "plain_attributed_b3_copy_cone",
+   "note": "brep_copy (#2010): attributed_b3_copy_cone_api1_an1 (every face and edge tagged) with the Rust copy made without the caller's namings or notification environment; compares the copy's and source's attribute sets against SmApiBrepCopy.",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "cone.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "attributed_copy",
+    "behavior": 3,
+    "plain": true
+   }
+  },
+  {
+   "name": "plain_attributed_b4_copy_cone",
+   "note": "brep_copy (#2010): attributed_b4_copy_cone_api1_an1 (every face and edge tagged) with the Rust copy made without the caller's namings or notification environment; compares the copy's and source's attribute sets against SmApiBrepCopy.",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "cone.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "attributed_copy",
+    "behavior": 4,
+    "plain": true
+   }
+  },
+  {
+   "name": "plain_attributed_b0_copy_disk",
+   "note": "brep_copy (#2010): attributed_b0_copy_disk_api1_an1 (every face and edge tagged) with the Rust copy made without the caller's namings or notification environment; compares the copy's and source's attribute sets against SmApiBrepCopy.",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "disk.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "attributed_copy",
+    "behavior": 0,
+    "plain": true
+   }
+  },
+  {
+   "name": "plain_attributed_b1_copy_disk",
+   "note": "brep_copy (#2010): attributed_b1_copy_disk_api1_an1 (every face and edge tagged) with the Rust copy made without the caller's namings or notification environment; compares the copy's and source's attribute sets against SmApiBrepCopy.",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "disk.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "attributed_copy",
+    "behavior": 1,
+    "plain": true
+   }
+  },
+  {
+   "name": "plain_attributed_b2_copy_disk",
+   "note": "brep_copy (#2010): attributed_b2_copy_disk_api1_an1 (every face and edge tagged) with the Rust copy made without the caller's namings or notification environment; compares the copy's and source's attribute sets against SmApiBrepCopy.",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "disk.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "attributed_copy",
+    "behavior": 2,
+    "plain": true
+   }
+  },
+  {
+   "name": "plain_attributed_b3_copy_disk",
+   "note": "brep_copy (#2010): attributed_b3_copy_disk_api1_an1 (every face and edge tagged) with the Rust copy made without the caller's namings or notification environment; compares the copy's and source's attribute sets against SmApiBrepCopy.",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "disk.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "attributed_copy",
+    "behavior": 3,
+    "plain": true
+   }
+  },
+  {
+   "name": "plain_attributed_b4_copy_disk",
+   "note": "brep_copy (#2010): attributed_b4_copy_disk_api1_an1 (every face and edge tagged) with the Rust copy made without the caller's namings or notification environment; compares the copy's and source's attribute sets against SmApiBrepCopy.",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "disk.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "attributed_copy",
+    "behavior": 4,
+    "plain": true
+   }
+  },
+  {
+   "name": "plain_attributed_b0_copy_ellips_ts2",
+   "note": "brep_copy (#2010): attributed_b0_copy_ellips_ts2_api1_an1 (every face and edge tagged) with the Rust copy made without the caller's namings or notification environment; compares the copy's and source's attribute sets against SmApiBrepCopy.",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "ellips_ts2.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "attributed_copy",
+    "behavior": 0,
+    "plain": true
+   }
+  },
+  {
+   "name": "plain_attributed_b1_copy_ellips_ts2",
+   "note": "brep_copy (#2010): attributed_b1_copy_ellips_ts2_api1_an1 (every face and edge tagged) with the Rust copy made without the caller's namings or notification environment; compares the copy's and source's attribute sets against SmApiBrepCopy.",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "ellips_ts2.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "attributed_copy",
+    "behavior": 1,
+    "plain": true
+   }
+  },
+  {
+   "name": "plain_attributed_b2_copy_ellips_ts2",
+   "note": "brep_copy (#2010): attributed_b2_copy_ellips_ts2_api1_an1 (every face and edge tagged) with the Rust copy made without the caller's namings or notification environment; compares the copy's and source's attribute sets against SmApiBrepCopy.",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "ellips_ts2.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "attributed_copy",
+    "behavior": 2,
+    "plain": true
+   }
+  },
+  {
+   "name": "plain_attributed_b3_copy_ellips_ts2",
+   "note": "brep_copy (#2010): attributed_b3_copy_ellips_ts2_api1_an1 (every face and edge tagged) with the Rust copy made without the caller's namings or notification environment; compares the copy's and source's attribute sets against SmApiBrepCopy.",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "ellips_ts2.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "attributed_copy",
+    "behavior": 3,
+    "plain": true
+   }
+  },
+  {
+   "name": "plain_attributed_b4_copy_ellips_ts2",
+   "note": "brep_copy (#2010): attributed_b4_copy_ellips_ts2_api1_an1 (every face and edge tagged) with the Rust copy made without the caller's namings or notification environment; compares the copy's and source's attribute sets against SmApiBrepCopy.",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "ellips_ts2.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "attributed_copy",
+    "behavior": 4,
+    "plain": true
+   }
+  },
+  {
+   "name": "plain_attributed_b0_copy_plane_circ",
+   "note": "brep_copy (#2010): attributed_b0_copy_plane_circ_api1_an1 (every face and edge tagged) with the Rust copy made without the caller's namings or notification environment; compares the copy's and source's attribute sets against SmApiBrepCopy.",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_circ.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "attributed_copy",
+    "behavior": 0,
+    "plain": true
+   }
+  },
+  {
+   "name": "plain_attributed_b1_copy_plane_circ",
+   "note": "brep_copy (#2010): attributed_b1_copy_plane_circ_api1_an1 (every face and edge tagged) with the Rust copy made without the caller's namings or notification environment; compares the copy's and source's attribute sets against SmApiBrepCopy.",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_circ.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "attributed_copy",
+    "behavior": 1,
+    "plain": true
+   }
+  },
+  {
+   "name": "plain_attributed_b2_copy_plane_circ",
+   "note": "brep_copy (#2010): attributed_b2_copy_plane_circ_api1_an1 (every face and edge tagged) with the Rust copy made without the caller's namings or notification environment; compares the copy's and source's attribute sets against SmApiBrepCopy.",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_circ.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "attributed_copy",
+    "behavior": 2,
+    "plain": true
+   }
+  },
+  {
+   "name": "plain_attributed_b3_copy_plane_circ",
+   "note": "brep_copy (#2010): attributed_b3_copy_plane_circ_api1_an1 (every face and edge tagged) with the Rust copy made without the caller's namings or notification environment; compares the copy's and source's attribute sets against SmApiBrepCopy.",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_circ.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "attributed_copy",
+    "behavior": 3,
+    "plain": true
+   }
+  },
+  {
+   "name": "plain_attributed_b4_copy_plane_circ",
+   "note": "brep_copy (#2010): attributed_b4_copy_plane_circ_api1_an1 (every face and edge tagged) with the Rust copy made without the caller's namings or notification environment; compares the copy's and source's attribute sets against SmApiBrepCopy.",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_circ.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "attributed_copy",
+    "behavior": 4,
+    "plain": true
+   }
+  },
+  {
+   "name": "plain_attributed_b0_copy_plane_square",
+   "note": "brep_copy (#2010): attributed_b0_copy_plane_square_api1_an1 (every face and edge tagged) with the Rust copy made without the caller's namings or notification environment; compares the copy's and source's attribute sets against SmApiBrepCopy.",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "attributed_copy",
+    "behavior": 0,
+    "plain": true
+   }
+  },
+  {
+   "name": "plain_attributed_b1_copy_plane_square",
+   "note": "brep_copy (#2010): attributed_b1_copy_plane_square_api1_an1 (every face and edge tagged) with the Rust copy made without the caller's namings or notification environment; compares the copy's and source's attribute sets against SmApiBrepCopy.",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "attributed_copy",
+    "behavior": 1,
+    "plain": true
+   }
+  },
+  {
+   "name": "plain_attributed_b2_copy_plane_square",
+   "note": "brep_copy (#2010): attributed_b2_copy_plane_square_api1_an1 (every face and edge tagged) with the Rust copy made without the caller's namings or notification environment; compares the copy's and source's attribute sets against SmApiBrepCopy.",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "attributed_copy",
+    "behavior": 2,
+    "plain": true
+   }
+  },
+  {
+   "name": "plain_attributed_b3_copy_plane_square",
+   "note": "brep_copy (#2010): attributed_b3_copy_plane_square_api1_an1 (every face and edge tagged) with the Rust copy made without the caller's namings or notification environment; compares the copy's and source's attribute sets against SmApiBrepCopy.",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "attributed_copy",
+    "behavior": 3,
+    "plain": true
+   }
+  },
+  {
+   "name": "plain_attributed_b4_copy_plane_square",
+   "note": "brep_copy (#2010): attributed_b4_copy_plane_square_api1_an1 (every face and edge tagged) with the Rust copy made without the caller's namings or notification environment; compares the copy's and source's attribute sets against SmApiBrepCopy.",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "attributed_copy",
+    "behavior": 4,
+    "plain": true
+   }
+  },
+  {
+   "name": "plain_attributed_b0_copy_sphere",
+   "note": "brep_copy (#2010): attributed_b0_copy_sphere_api1_an1 (every face and edge tagged) with the Rust copy made without the caller's namings or notification environment; compares the copy's and source's attribute sets against SmApiBrepCopy.",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "sphere.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "attributed_copy",
+    "behavior": 0,
+    "plain": true
+   }
+  },
+  {
+   "name": "plain_attributed_b1_copy_sphere",
+   "note": "brep_copy (#2010): attributed_b1_copy_sphere_api1_an1 (every face and edge tagged) with the Rust copy made without the caller's namings or notification environment; compares the copy's and source's attribute sets against SmApiBrepCopy.",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "sphere.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "attributed_copy",
+    "behavior": 1,
+    "plain": true
+   }
+  },
+  {
+   "name": "plain_attributed_b2_copy_sphere",
+   "note": "brep_copy (#2010): attributed_b2_copy_sphere_api1_an1 (every face and edge tagged) with the Rust copy made without the caller's namings or notification environment; compares the copy's and source's attribute sets against SmApiBrepCopy.",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "sphere.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "attributed_copy",
+    "behavior": 2,
+    "plain": true
+   }
+  },
+  {
+   "name": "plain_attributed_b3_copy_sphere",
+   "note": "brep_copy (#2010): attributed_b3_copy_sphere_api1_an1 (every face and edge tagged) with the Rust copy made without the caller's namings or notification environment; compares the copy's and source's attribute sets against SmApiBrepCopy.",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "sphere.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "attributed_copy",
+    "behavior": 3,
+    "plain": true
+   }
+  },
+  {
+   "name": "plain_attributed_b4_copy_sphere",
+   "note": "brep_copy (#2010): attributed_b4_copy_sphere_api1_an1 (every face and edge tagged) with the Rust copy made without the caller's namings or notification environment; compares the copy's and source's attribute sets against SmApiBrepCopy.",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "sphere.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "attributed_copy",
+    "behavior": 4,
+    "plain": true
+   }
+  },
+  {
+   "name": "plain_attributed_b0_copy_surf_extrude",
+   "note": "brep_copy (#2010): attributed_b0_copy_surf_extrude_api1_an1 (every face and edge tagged) with the Rust copy made without the caller's namings or notification environment; compares the copy's and source's attribute sets against SmApiBrepCopy.",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_extrude.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "attributed_copy",
+    "behavior": 0,
+    "plain": true
+   }
+  },
+  {
+   "name": "plain_attributed_b1_copy_surf_extrude",
+   "note": "brep_copy (#2010): attributed_b1_copy_surf_extrude_api1_an1 (every face and edge tagged) with the Rust copy made without the caller's namings or notification environment; compares the copy's and source's attribute sets against SmApiBrepCopy.",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_extrude.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "attributed_copy",
+    "behavior": 1,
+    "plain": true
+   }
+  },
+  {
+   "name": "plain_attributed_b2_copy_surf_extrude",
+   "note": "brep_copy (#2010): attributed_b2_copy_surf_extrude_api1_an1 (every face and edge tagged) with the Rust copy made without the caller's namings or notification environment; compares the copy's and source's attribute sets against SmApiBrepCopy.",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_extrude.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "attributed_copy",
+    "behavior": 2,
+    "plain": true
+   }
+  },
+  {
+   "name": "plain_attributed_b3_copy_surf_extrude",
+   "note": "brep_copy (#2010): attributed_b3_copy_surf_extrude_api1_an1 (every face and edge tagged) with the Rust copy made without the caller's namings or notification environment; compares the copy's and source's attribute sets against SmApiBrepCopy.",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_extrude.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "attributed_copy",
+    "behavior": 3,
+    "plain": true
+   }
+  },
+  {
+   "name": "plain_attributed_b4_copy_surf_extrude",
+   "note": "brep_copy (#2010): attributed_b4_copy_surf_extrude_api1_an1 (every face and edge tagged) with the Rust copy made without the caller's namings or notification environment; compares the copy's and source's attribute sets against SmApiBrepCopy.",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_extrude.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "attributed_copy",
+    "behavior": 4,
+    "plain": true
+   }
+  },
+  {
+   "name": "plain_attributed_b0_copy_surf_rev",
+   "note": "brep_copy (#2010): attributed_b0_copy_surf_rev_api1_an1 (every face and edge tagged) with the Rust copy made without the caller's namings or notification environment; compares the copy's and source's attribute sets against SmApiBrepCopy.",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_rev.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "attributed_copy",
+    "behavior": 0,
+    "plain": true
+   }
+  },
+  {
+   "name": "plain_attributed_b1_copy_surf_rev",
+   "note": "brep_copy (#2010): attributed_b1_copy_surf_rev_api1_an1 (every face and edge tagged) with the Rust copy made without the caller's namings or notification environment; compares the copy's and source's attribute sets against SmApiBrepCopy.",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_rev.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "attributed_copy",
+    "behavior": 1,
+    "plain": true
+   }
+  },
+  {
+   "name": "plain_attributed_b2_copy_surf_rev",
+   "note": "brep_copy (#2010): attributed_b2_copy_surf_rev_api1_an1 (every face and edge tagged) with the Rust copy made without the caller's namings or notification environment; compares the copy's and source's attribute sets against SmApiBrepCopy.",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_rev.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "attributed_copy",
+    "behavior": 2,
+    "plain": true
+   }
+  },
+  {
+   "name": "plain_attributed_b3_copy_surf_rev",
+   "note": "brep_copy (#2010): attributed_b3_copy_surf_rev_api1_an1 (every face and edge tagged) with the Rust copy made without the caller's namings or notification environment; compares the copy's and source's attribute sets against SmApiBrepCopy.",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_rev.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "attributed_copy",
+    "behavior": 3,
+    "plain": true
+   }
+  },
+  {
+   "name": "plain_attributed_b4_copy_surf_rev",
+   "note": "brep_copy (#2010): attributed_b4_copy_surf_rev_api1_an1 (every face and edge tagged) with the Rust copy made without the caller's namings or notification environment; compares the copy's and source's attribute sets against SmApiBrepCopy.",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_rev.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "attributed_copy",
+    "behavior": 4,
+    "plain": true
+   }
+  },
+  {
+   "name": "plain_attributed_b0_copy_surf_sphere150",
+   "note": "brep_copy (#2010): attributed_b0_copy_surf_sphere150_api1_an1 (every face and edge tagged) with the Rust copy made without the caller's namings or notification environment; compares the copy's and source's attribute sets against SmApiBrepCopy.",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_sphere150.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "attributed_copy",
+    "behavior": 0,
+    "plain": true
+   }
+  },
+  {
+   "name": "plain_attributed_b1_copy_surf_sphere150",
+   "note": "brep_copy (#2010): attributed_b1_copy_surf_sphere150_api1_an1 (every face and edge tagged) with the Rust copy made without the caller's namings or notification environment; compares the copy's and source's attribute sets against SmApiBrepCopy.",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_sphere150.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "attributed_copy",
+    "behavior": 1,
+    "plain": true
+   }
+  },
+  {
+   "name": "plain_attributed_b2_copy_surf_sphere150",
+   "note": "brep_copy (#2010): attributed_b2_copy_surf_sphere150_api1_an1 (every face and edge tagged) with the Rust copy made without the caller's namings or notification environment; compares the copy's and source's attribute sets against SmApiBrepCopy.",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_sphere150.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "attributed_copy",
+    "behavior": 2,
+    "plain": true
+   }
+  },
+  {
+   "name": "plain_attributed_b3_copy_surf_sphere150",
+   "note": "brep_copy (#2010): attributed_b3_copy_surf_sphere150_api1_an1 (every face and edge tagged) with the Rust copy made without the caller's namings or notification environment; compares the copy's and source's attribute sets against SmApiBrepCopy.",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_sphere150.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "attributed_copy",
+    "behavior": 3,
+    "plain": true
+   }
+  },
+  {
+   "name": "plain_attributed_b4_copy_surf_sphere150",
+   "note": "brep_copy (#2010): attributed_b4_copy_surf_sphere150_api1_an1 (every face and edge tagged) with the Rust copy made without the caller's namings or notification environment; compares the copy's and source's attribute sets against SmApiBrepCopy.",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_sphere150.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "attributed_copy",
+    "behavior": 4,
+    "plain": true
+   }
+  },
+  {
+   "name": "plain_attributed_b0_copy_torus",
+   "note": "brep_copy (#2010): attributed_b0_copy_torus_api1_an1 (every face and edge tagged) with the Rust copy made without the caller's namings or notification environment; compares the copy's and source's attribute sets against SmApiBrepCopy.",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "torus.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "attributed_copy",
+    "behavior": 0,
+    "plain": true
+   }
+  },
+  {
+   "name": "plain_attributed_b1_copy_torus",
+   "note": "brep_copy (#2010): attributed_b1_copy_torus_api1_an1 (every face and edge tagged) with the Rust copy made without the caller's namings or notification environment; compares the copy's and source's attribute sets against SmApiBrepCopy.",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "torus.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "attributed_copy",
+    "behavior": 1,
+    "plain": true
+   }
+  },
+  {
+   "name": "plain_attributed_b2_copy_torus",
+   "note": "brep_copy (#2010): attributed_b2_copy_torus_api1_an1 (every face and edge tagged) with the Rust copy made without the caller's namings or notification environment; compares the copy's and source's attribute sets against SmApiBrepCopy.",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "torus.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "attributed_copy",
+    "behavior": 2,
+    "plain": true
+   }
+  },
+  {
+   "name": "plain_attributed_b3_copy_torus",
+   "note": "brep_copy (#2010): attributed_b3_copy_torus_api1_an1 (every face and edge tagged) with the Rust copy made without the caller's namings or notification environment; compares the copy's and source's attribute sets against SmApiBrepCopy.",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "torus.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "attributed_copy",
+    "behavior": 3,
+    "plain": true
+   }
+  },
+  {
+   "name": "plain_attributed_b4_copy_torus",
+   "note": "brep_copy (#2010): attributed_b4_copy_torus_api1_an1 (every face and edge tagged) with the Rust copy made without the caller's namings or notification environment; compares the copy's and source's attribute sets against SmApiBrepCopy.",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "torus.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "attributed_copy",
+    "behavior": 4,
+    "plain": true
+   }
+  },
+  {
+   "name": "plain_attributed_b0_copy_toruswvy",
+   "note": "brep_copy (#2010): attributed_b0_copy_toruswvy_api1_an1 (every face and edge tagged) with the Rust copy made without the caller's namings or notification environment; compares the copy's and source's attribute sets against SmApiBrepCopy.",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "toruswvy.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "attributed_copy",
+    "behavior": 0,
+    "plain": true
+   }
+  },
+  {
+   "name": "plain_attributed_b1_copy_toruswvy",
+   "note": "brep_copy (#2010): attributed_b1_copy_toruswvy_api1_an1 (every face and edge tagged) with the Rust copy made without the caller's namings or notification environment; compares the copy's and source's attribute sets against SmApiBrepCopy.",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "toruswvy.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "attributed_copy",
+    "behavior": 1,
+    "plain": true
+   }
+  },
+  {
+   "name": "plain_attributed_b2_copy_toruswvy",
+   "note": "brep_copy (#2010): attributed_b2_copy_toruswvy_api1_an1 (every face and edge tagged) with the Rust copy made without the caller's namings or notification environment; compares the copy's and source's attribute sets against SmApiBrepCopy.",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "toruswvy.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "attributed_copy",
+    "behavior": 2,
+    "plain": true
+   }
+  },
+  {
+   "name": "plain_attributed_b3_copy_toruswvy",
+   "note": "brep_copy (#2010): attributed_b3_copy_toruswvy_api1_an1 (every face and edge tagged) with the Rust copy made without the caller's namings or notification environment; compares the copy's and source's attribute sets against SmApiBrepCopy.",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "toruswvy.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "attributed_copy",
+    "behavior": 3,
+    "plain": true
+   }
+  },
+  {
+   "name": "plain_attributed_b4_copy_toruswvy",
+   "note": "brep_copy (#2010): attributed_b4_copy_toruswvy_api1_an1 (every face and edge tagged) with the Rust copy made without the caller's namings or notification environment; compares the copy's and source's attribute sets against SmApiBrepCopy.",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "toruswvy.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "attributed_copy",
+    "behavior": 4,
+    "plain": true
+   }
+  },
+  {
+   "name": "plain_attributed_b0_copy_vase_rev",
+   "note": "brep_copy (#2010): attributed_b0_copy_vase_rev_api1_an1 (every face and edge tagged) with the Rust copy made without the caller's namings or notification environment; compares the copy's and source's attribute sets against SmApiBrepCopy.",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "vase_rev.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "attributed_copy",
+    "behavior": 0,
+    "plain": true
+   }
+  },
+  {
+   "name": "plain_attributed_b1_copy_vase_rev",
+   "note": "brep_copy (#2010): attributed_b1_copy_vase_rev_api1_an1 (every face and edge tagged) with the Rust copy made without the caller's namings or notification environment; compares the copy's and source's attribute sets against SmApiBrepCopy.",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "vase_rev.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "attributed_copy",
+    "behavior": 1,
+    "plain": true
+   }
+  },
+  {
+   "name": "plain_attributed_b2_copy_vase_rev",
+   "note": "brep_copy (#2010): attributed_b2_copy_vase_rev_api1_an1 (every face and edge tagged) with the Rust copy made without the caller's namings or notification environment; compares the copy's and source's attribute sets against SmApiBrepCopy.",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "vase_rev.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "attributed_copy",
+    "behavior": 2,
+    "plain": true
+   }
+  },
+  {
+   "name": "plain_attributed_b3_copy_vase_rev",
+   "note": "brep_copy (#2010): attributed_b3_copy_vase_rev_api1_an1 (every face and edge tagged) with the Rust copy made without the caller's namings or notification environment; compares the copy's and source's attribute sets against SmApiBrepCopy.",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "vase_rev.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "attributed_copy",
+    "behavior": 3,
+    "plain": true
+   }
+  },
+  {
+   "name": "plain_attributed_b4_copy_vase_rev",
+   "note": "brep_copy (#2010): attributed_b4_copy_vase_rev_api1_an1 (every face and edge tagged) with the Rust copy made without the caller's namings or notification environment; compares the copy's and source's attribute sets against SmApiBrepCopy.",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "vase_rev.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "attributed_copy",
+    "behavior": 4,
+    "plain": true
+   }
+  },
+  {
+   "name": "plain_attributed_b0_copy_net",
+   "note": "brep_copy (#2010): attributed_b0_copy_net_api1_an1 (every face and edge tagged) with the Rust copy made without the caller's namings or notification environment; compares the copy's and source's attribute sets against SmApiBrepCopy.",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "editing": -1,
+    "op": "attributed_copy",
+    "behavior": 0,
+    "plain": true
+   }
+  },
+  {
+   "name": "plain_attributed_b1_copy_net",
+   "note": "brep_copy (#2010): attributed_b1_copy_net_api1_an1 (every face and edge tagged) with the Rust copy made without the caller's namings or notification environment; compares the copy's and source's attribute sets against SmApiBrepCopy.",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "editing": -1,
+    "op": "attributed_copy",
+    "behavior": 1,
+    "plain": true
+   }
+  },
+  {
+   "name": "plain_attributed_b2_copy_net",
+   "note": "brep_copy (#2010): attributed_b2_copy_net_api1_an1 (every face and edge tagged) with the Rust copy made without the caller's namings or notification environment; compares the copy's and source's attribute sets against SmApiBrepCopy.",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "editing": -1,
+    "op": "attributed_copy",
+    "behavior": 2,
+    "plain": true
+   }
+  },
+  {
+   "name": "plain_attributed_b3_copy_net",
+   "note": "brep_copy (#2010): attributed_b3_copy_net_api1_an1 (every face and edge tagged) with the Rust copy made without the caller's namings or notification environment; compares the copy's and source's attribute sets against SmApiBrepCopy.",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "editing": -1,
+    "op": "attributed_copy",
+    "behavior": 3,
+    "plain": true
+   }
+  },
+  {
+   "name": "plain_attributed_b4_copy_net",
+   "note": "brep_copy (#2010): attributed_b4_copy_net_api1_an1 (every face and edge tagged) with the Rust copy made without the caller's namings or notification environment; compares the copy's and source's attribute sets against SmApiBrepCopy.",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "editing": -1,
+    "op": "attributed_copy",
+    "behavior": 4,
+    "plain": true
+   }
+  }
+ ]
+}

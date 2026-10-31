@@ -838,9 +838,20 @@ pub struct Brep {
 ///   trees), the fillet merge (`fillet_edges` of a clone fails, #1144) and transforms of a
 ///   body's geometry.
 ///
+/// What a clone shares with this B-rep: its arena ids, its [`Brep::key`], its naming
+/// scheme and recorded owner keys (not its notification serial: a clone gets its own
+/// when first notified). It owns copies of the
+/// topology, the geometry values and the attributes ([`Brep::add_attribute`]). It is
+/// safe for reading the topology and the geometry values (counts, points, parameters,
+/// attributes) and as a value to restore, not for queries, edits or operations.
+///
 /// Use instead:
-/// - [`brep::p3::api_brep_copy`] (`SmApiBrepCopy`) for an independent body that is
-///   queried or edited later (undo, history, preview): the copy owns its geometry;
+/// - [`brep::p3::brep_copy`] (`SmApiBrepCopy`) for an independent body that is
+///   queried or edited later (undo, history, preview, an operand of every operation):
+///   the copy owns its geometry, under the B-rep's own naming, without namings or a
+///   notification environment of the caller's;
+/// - [`brep::p3::api_brep_copy`] for the same copy notified through the caller's
+///   [`NotifyEnv`](crate::topology::edge::NotifyEnv) under the caller's namings;
 /// - [`Brep::clone_standing_for_self`] for a private read-only stand-in for this B-rep
 ///   (its geometry keeps this B-rep's owners), not an independent body.
 ///
