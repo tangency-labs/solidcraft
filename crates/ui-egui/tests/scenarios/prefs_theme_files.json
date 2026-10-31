@@ -2,7 +2,7 @@
   {"note": "#2255: theme tiles offer the built-in themes; choosing one applies it immediately, and Cancel restores the previous theme."},
   {"click": {"handle": "titlebar:preferences"}},
   {"expect": {"prefs": {"dialog": "General", "theme": "dark", "dark": true}}},
-  {"widget": "Appearance"},
+  {"click": {"handle": "prefs:page:Appearance"}},
   {"click": {"handle": "prefs:theme:light"}},
   {"expect": {"prefs": {"theme": "light", "dark": false}, "shown_handles": ["prefs:theme"]}},
   {"click": {"handle": "prefs:theme:gruvbox-dark"}},

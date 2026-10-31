@@ -34,7 +34,7 @@ const MAX_THEMES: usize = 4;
 /// Most characters in a command id or a key name.
 const MAX_ID: usize = 200;
 
-/// The 93 stored keys from the pre-split Interface, Navigation and Sketch pages, plus
+/// The 98 stored keys selected dynamically before the split: Interface, Navigation and Sketch, plus
 /// language, excluding space_mouse_* and orbit_cursor. Page moves and title tags must never
 /// change profile contents (including the bridge, origin names and direct interaction).
 const PROFILE_KEYS: &[&str] = &[
@@ -57,6 +57,8 @@ const PROFILE_KEYS: &[&str] = &[
     "history_in_browser",
     "history_play_button",
     "history_sketches",
+    "home_fit_size",
+    "invert_navigator_arrows",
     "keep_work_on_tab_switch",
     "language",
     "layout",
@@ -72,6 +74,7 @@ const PROFILE_KEYS: &[&str] = &[
     "nav_bridge_enabled",
     "nav_bridge_port",
     "navigation_bar",
+    "navigator_fit",
     "navigator_style",
     "orbit_around",
     "orbit_reverse",
@@ -83,6 +86,7 @@ const PROFILE_KEYS: &[&str] = &[
     "project_options_dialog",
     "quick_measure",
     "radial_context_menu",
+    "ribbon_click_ends_tool",
     "ribbon_icon_grid",
     "ribbon_labels",
     "ribbon_menus_skip_pinned",
@@ -97,6 +101,7 @@ const PROFILE_KEYS: &[&str] = &[
     "sketch_conflict_colour",
     "sketch_construction_lines",
     "sketch_exit_view",
+    "sketch_face_activates_part",
     "sketch_open_look_at",
     "sketch_recent_snap",
     "sketch_state_icons",
@@ -145,10 +150,19 @@ pub struct Profiles {
     pub list: Vec<Value>,
     /// The profile applied or saved last, while it exists.
     pub active: Option<String>,
-    /// The name typed in Preferences.
+    /// The independent name typed in Preferences, empty until the user enters one.
     draft: String,
     /// The last action's outcome in Preferences.
     message: Option<Outcome>,
+    /// General's row-local rename editor; never changes the active profile just to rename it.
+    rename: Option<Rename>,
+}
+
+struct Rename {
+    name: String,
+    text: String,
+    focused: bool,
+    at: egui::Pos2,
 }
 
 /// What a profile action in Preferences reports. Kept untranslated: applying a profile can
@@ -508,84 +522,152 @@ fn act(app: &mut SolveApp, id: &str, params: Value, done: &'static str) {
     });
 }
 
-/// The Settings profiles section of the General page: the active profile (choosing one applies
-/// it), a name to save the current settings under, and Rename, Delete, Export… and Import….
-pub(crate) fn section(app: &mut SolveApp, ui: &mut egui::Ui, labels: f32) {
+/// General's saved profiles and row actions. All mutations still use settings.profile.*.
+pub(crate) fn section(app: &mut SolveApp, ui: &mut egui::Ui) {
     let t = crate::theme::Tokens::get();
-    if app.settings_profiles.draft.is_empty()
-        && let Some(active) = &app.settings_profiles.active
-    {
-        app.settings_profiles.draft = active.clone();
-    }
-    ui_kit::settings_section(ui, "profiles", app.tr("prefs.profiles"), |ui| {
-        ui_kit::text(ui, app.tr("prefs.profiles_note"), ui_kit::Text::Hint("profiles"));
-        ui_kit::settings_form(ui, labels, |ui| {
-            let names = app.settings_profiles.names();
-            let current = app.settings_profiles.active.clone().unwrap_or_else(|| crate::i18n::tr_label("None").to_string());
-            let mut chosen = None;
-            ui_kit::row(ui, app.tr("prefs.profile_active"), |ui| {
-                ui_kit::settings_control_width(ui, t.form_card_width - t.space_4, |ui| {
-                    ui_kit::dropdown_menu(ui, "pref_profile", &current, |ui| {
-                        for name in &names {
-                            if ui_kit::list_picker(ui, name, name, app.settings_profiles.active.as_ref() == Some(name)).clicked() {
-                                chosen = Some(name.clone());
+    let count = crate::i18n::format("prefs.reports_saved", &[("n", &app.settings_profiles.list.len().to_string())]);
+    ui_kit::settings_section_count(ui, "profiles", app.tr("ui.profiles"), Some(&count), |ui| {
+        let names = app.settings_profiles.names();
+        ui.scope(|ui| {
+            ui.spacing_mut().item_spacing.y = t.space_8;
+            for name in &names {
+                let active = app.settings_profiles.active.as_ref() == Some(name);
+                let edited = active && app.settings_profiles.get(name).is_ok_and(|doc| *doc != capture(app, name));
+                ui.push_id(name, |ui| {
+                    let card = ui_kit::settings_row_card(ui, active, t.control_height + t.space_14, |ui| {
+                        ui.spacing_mut().item_spacing.x = t.space_6;
+                        let state_width = if active {
+                            ui_kit::ContentWidth::label(ui, app.tr("prefs.general.active"))
+                                + t.space_16
+                                + if edited { ui_kit::ContentWidth::label(ui, app.tr("prefs.general.edited")) + t.space_24 } else { 0.0 }
+                        } else {
+                            ui_kit::ContentWidth::label(ui, app.tr("ui.apply")) + t.space_24
+                        };
+                        let name_width = (ui.available_width() - t.space_24 * 3.0 - t.space_6 * 4.0 - state_width).max(0.0);
+                        ui.allocate_ui_with_layout(
+                            egui::vec2(name_width, t.control_height),
+                            egui::Layout::left_to_right(egui::Align::Center),
+                            |ui| {
+                                let side = t.space_16 + t.space_2 / 2.0;
+                                let (icon, _) = ui.allocate_exact_size(egui::vec2(side, side), egui::Sense::hover());
+                                crate::icons::paint_ink(ui.painter(), icon, "settings_profile", if active { t.selected_ink } else { t.form_dim });
+                                ui_kit::text(ui, name, if active { ui_kit::Text::SelectedNameCell } else { ui_kit::Text::NameCell(false) });
+                            },
+                        );
+                        if edited {
+                            let badge = ui_kit::settings_state_badge(ui, app.tr("prefs.general.edited"), ui_kit::SettingsBadgeTone::Warning);
+                            crate::scenario::publish_rect(&format!("prefs:profile:{name}:edited"), badge.rect);
+                        }
+                        if active {
+                            let badge = ui_kit::settings_state_badge(ui, app.tr("prefs.general.active"), ui_kit::SettingsBadgeTone::Accent);
+                            crate::scenario::publish_rect(&format!("prefs:profile:{name}:active"), badge.rect);
+                        } else {
+                            let button = ui_kit::button(ui, app.tr("ui.apply"), ui_kit::Button::Small);
+                            crate::scenario::publish_target(&format!("prefs:profile:{name}:apply"), button.rect);
+                            if button.clicked() {
+                                act(app, "settings.profile.apply", json!({ "name": name }), "prefs.profile_applied");
+                            }
+                        }
+                        for (action, icon, label) in [
+                            ("export", "export_tray", app.tr("prefs.profile_export")),
+                            ("rename", "edit", app.tr("prefs.profile_rename")),
+                            ("delete", "delete", app.tr_label("Delete")),
+                        ] {
+                            let (target, _) = ui.allocate_exact_size(egui::vec2(t.space_24, t.space_24), egui::Sense::hover());
+                            let button = ui_kit::icon_button_at(ui, target, icon, label);
+                            crate::scenario::publish_target(&format!("prefs:profile:{name}:{action}"), button.rect);
+                            if button.clicked() {
+                                match action {
+                                    "export" => {
+                                        let name = name.clone();
+                                        app.pick_save(&format!("{name}.solidcraft-profile.json"), &["json"], move |app, path| {
+                                            if let Some(path) = path {
+                                                act(app, "settings.profile.export", json!({ "name": name, "path": path }), "prefs.profile_exported");
+                                            }
+                                        });
+                                    }
+                                    "rename" => {
+                                        app.settings_profiles.rename =
+                                            Some(Rename { name: name.clone(), text: name.clone(), focused: false, at: button.rect.left_bottom() });
+                                    }
+                                    "delete" => {
+                                        act(app, "settings.profile.delete", json!({ "name": name }), "prefs.profile_deleted");
+                                    }
+                                    _ => {}
+                                }
                             }
                         }
                     });
+                    crate::scenario::publish_rect(&format!("prefs:profile:{name}:card"), card.response.rect);
                 });
-            });
-            if let Some(name) = chosen {
-                app.settings_profiles.draft = name.clone();
-                act(app, "settings.profile.apply", json!({ "name": name }), "prefs.profile_applied");
             }
-            if let Some(active) = app.settings_profiles.active.clone()
-                && app.settings_profiles.get(&active).is_ok_and(|doc| *doc != capture(app, &active))
-            {
-                ui_kit::text(ui, app.tr("prefs.profile_changed"), ui_kit::Text::Note("profile_changed"));
-            }
-            ui_kit::row(ui, crate::i18n::tr_label("Name"), |ui| {
-                let mut draft = std::mem::take(&mut app.settings_profiles.draft);
-                let (enter, _) = ui_kit::text_field(ui, &mut draft, app.tr("prefs.profile_name_hint"));
-                app.settings_profiles.draft = draft;
-                if enter {
-                    let name = app.settings_profiles.draft.clone();
-                    act(app, "settings.profile.save", json!({ "name": name }), "prefs.profile_saved");
-                }
-            });
         });
-        let draft = app.settings_profiles.draft.trim().to_string();
-        let active = app.settings_profiles.active.clone();
         ui.horizontal_wrapped(|ui| {
-            if ui_kit::button(ui, app.tr("prefs.profile_save"), ui_kit::Button::Enabled(profile_name(&draft).is_some())).clicked() {
-                act(app, "settings.profile.save", json!({ "name": draft }), "prefs.profile_saved");
+            let mut draft = std::mem::take(&mut app.settings_profiles.draft);
+            let enter = ui_kit::named_control(ui, app.tr("prefs.general.profile_name"), |ui| {
+                ui_kit::settings_control_width(ui, t.space_24 * 9.0 + t.space_4, |ui| {
+                    ui_kit::text_field(ui, &mut draft, app.tr("prefs.general.name_setup")).0
+                })
+            });
+            app.settings_profiles.draft = draft;
+            let name = app.settings_profiles.draft.trim().to_string();
+            let valid = profile_name(&name).is_some();
+            let save =
+                ui_kit::icon_label_action(ui, app.tr("prefs.general.save_new"), None, valid, true).on_hover_text(app.tr("prefs.profiles_note"));
+            crate::scenario::publish_target("prefs:profile:save", save.rect);
+            if valid && (enter || save.clicked()) {
+                act(app, "settings.profile.save", json!({ "name": name }), "prefs.profile_saved");
             }
-            let renamable = active.as_ref().is_some_and(|a| *a != draft) && profile_name(&draft).is_some();
-            if ui_kit::button(ui, app.tr("prefs.profile_rename"), ui_kit::Button::Enabled(renamable)).clicked()
-                && let Some(name) = &active
-            {
-                act(app, "settings.profile.rename", json!({ "name": name, "to": draft }), "prefs.profile_renamed");
-            }
-            if ui_kit::button(ui, crate::i18n::tr_label("Delete"), ui_kit::Button::Enabled(active.is_some())).clicked()
-                && let Some(name) = &active
-            {
-                act(app, "settings.profile.delete", json!({ "name": name }), "prefs.profile_deleted");
-                app.settings_profiles.draft.clear();
-            }
-            if ui_kit::button(ui, app.tr("prefs.profile_export"), ui_kit::Button::Enabled(active.is_some())).clicked()
-                && let Some(name) = active.clone()
-            {
-                app.pick_save(&format!("{name}.solidcraft-profile.json"), &["json"], move |app, path| {
-                    if let Some(path) = path {
-                        act(app, "settings.profile.export", json!({ "name": name, "path": path }), "prefs.profile_exported");
-                    }
-                });
-            }
-            if ui_kit::button(ui, crate::i18n::tr_label("Import…"), ui_kit::Button::Normal).clicked() {
+            let import = ui_kit::icon_label_button(ui, app.tr("prefs.general.import"), "import_tray", true, false);
+            crate::scenario::publish_target("prefs:profile:import", import.rect);
+            if import.clicked() {
                 app.pick_open_for(&["json"], |app, path| {
                     if let Some(path) = path {
                         act(app, "settings.profile.import", json!({ "path": path }), "prefs.profile_imported");
                     }
                 });
+            }
+        });
+        ui.scope(|ui| {
+            ui.spacing_mut().item_spacing.y = t.space_8;
+            for (label, chips, accent) in [
+                (
+                    app.tr("prefs.general.held"),
+                    &[
+                        ("prefs.structure.appearance", "settings_palette"),
+                        ("prefs.structure.layout", "settings_monitor"),
+                        ("ui.navigation", "settings_mouse"),
+                        ("prefs.structure.sketch", "select_sketch"),
+                        ("prefs.shortcuts", "settings_keyboard"),
+                        ("ui.language", "settings"),
+                    ][..],
+                    true,
+                ),
+                (
+                    app.tr("prefs.general.this_computer"),
+                    &[("prefs.structure.mouse3d", "lock"), ("ui.graphics", "lock"), ("prefs.assistant", "lock")][..],
+                    false,
+                ),
+            ] {
+                let key = if accent { "held" } else { "computer" };
+                let row = ui.horizontal_top(|ui| {
+                    ui.spacing_mut().item_spacing.x = t.space_6;
+                    let (rect, _) = ui.allocate_exact_size(egui::vec2(t.space_24 * 3.0 + t.space_12, t.space_24), egui::Sense::hover());
+                    let mut label_ui = ui.new_child(egui::UiBuilder::new().max_rect(rect).layout(egui::Layout::left_to_right(egui::Align::Center)));
+                    let caption = ui_kit::text(&mut label_ui, label, ui_kit::Text::Inline);
+                    crate::scenario::publish_rect(&format!("prefs:profiles:{key}:label"), caption.rect);
+                    ui.horizontal_wrapped(|ui| {
+                        ui.spacing_mut().item_spacing = egui::vec2(t.space_6, t.space_6);
+                        for (index, (chip, icon)) in chips.iter().enumerate() {
+                            let response =
+                                ui_kit::settings_chip(ui, app.tr(chip), ui_kit::SettingsChip { icon: Some(icon), accent, ..Default::default() });
+                            if index == 0 {
+                                crate::scenario::publish_rect(&format!("prefs:profiles:{key}:first_chip"), response.rect);
+                            }
+                        }
+                    });
+                });
+                crate::scenario::publish_rect(&format!("prefs:profiles:{key}:row"), row.response.rect);
             }
         });
         let locale = crate::i18n::Locale::for_language(&app.preferences.language);
@@ -605,49 +687,88 @@ pub(crate) fn section(app: &mut SolveApp, ui: &mut egui::Ui, labels: f32) {
     });
 }
 
+/// Run before the Preferences window so Escape belongs to this editor, including in a scrolled
+/// page. A separate popup container keeps the shared rename menu accessible and unclipped.
+pub(crate) fn rename_popup(app: &mut SolveApp, ctx: &egui::Context) {
+    if !app.prefs_window.open || app.prefs_window.section != prefs::PAGE_GENERAL || !app.prefs_window.filter.is_empty() {
+        app.settings_profiles.rename = None;
+        return;
+    }
+    let Some(mut rename) = app.settings_profiles.rename.take() else { return };
+    crate::prefs_search::note_key_sink(ctx);
+    let mut done = None;
+    let popup = ui_kit::Container::new(ctx, ui_kit::Surface::Popup)
+        .area(egui::Id::new("sc_profile_rename"))
+        .fixed_pos(rename.at)
+        .constrain(true)
+        .order(egui::Order::Foreground)
+        .show(ctx, |ui| {
+            done = ui_kit::rename_menu(ui, &mut rename.text, &mut rename.focused);
+        });
+    crate::scenario::publish_rect("prefs:profile:rename_popup", popup.response.rect);
+    for action in ["ok", "cancel"] {
+        if let Some(rect) = crate::scenario::rect_of(&format!("dialog:{action}")) {
+            crate::scenario::publish_target(&format!("prefs:profile:rename:{action}"), rect);
+        }
+    }
+    if ctx.input(|i| i.pointer.any_pressed()) && !popup.response.contains_pointer() {
+        done = Some(false);
+    }
+    ctx.input_mut(|input| {
+        for key in [egui::Key::Escape, egui::Key::Enter, egui::Key::Tab] {
+            input.consume_key(egui::Modifiers::NONE, key);
+        }
+    });
+    match done {
+        Some(true) if profile_name(&rename.text) != Some(rename.name.as_str()) => {
+            act(app, "settings.profile.rename", json!({"name": rename.name, "to": rename.text}), "prefs.profile_renamed");
+        }
+        Some(_) => {}
+        None => app.settings_profiles.rename = Some(rename),
+    }
+}
+
 /// The pinned profile switcher on every Preferences page. Actions use the same commands as
 /// General > Profiles; saving a new name remains in that existing section.
 pub(crate) fn sidebar(ui: &mut egui::Ui, app: &mut SolveApp) {
-    ui_kit::divider(ui, "profile_sidebar");
-    ui_kit::text(ui, app.tr("prefs.structure.profile"), ui_kit::Text::Heading("profile_sidebar"));
     let active = app.settings_profiles.active.clone();
     let edited = active.as_ref().is_some_and(|name| app.settings_profiles.get(name).is_ok_and(|doc| *doc != capture(app, name)));
     let current = active.clone().unwrap_or_else(|| app.tr_label("None").to_string());
     let names = app.settings_profiles.names();
     let mut apply = None;
     let mut save = false;
-    ui.horizontal(|ui| {
-        let t = crate::theme::Tokens::get();
-        let width = ui.available_width() - if edited { t.space_16 + ui.spacing().item_spacing.x } else { 0.0 };
-        let response = ui_kit::settings_control_width(ui, width, |ui| {
-            ui_kit::dropdown_menu(ui, "profile_sidebar", &current, |ui| {
-                for name in &names {
-                    if ui_kit::list_picker(ui, name, name, active.as_ref() == Some(name)).clicked() {
-                        apply = Some(name.clone());
+    let label = app.tr("prefs.structure.profile");
+    let changed_hint = app.tr("prefs.structure.profile_edited");
+    let menu = ui
+        .push_id("profile_sidebar", |ui| {
+            ui_kit::Menu::button_with(
+                ui,
+                |ui, _| ui_kit::settings_profile_button(ui, label, &current, edited, changed_hint),
+                |ui| {
+                    for name in &names {
+                        if ui_kit::list_picker(ui, name, name, active.as_ref() == Some(name)).clicked() {
+                            apply = Some(name.clone());
+                        }
                     }
-                }
-                if let Some(name) = &active
-                    && ui_kit::button(ui, app.tr("prefs.profile_save"), ui_kit::Button::Normal).clicked()
-                {
-                    save = true;
-                    apply = None;
-                    app.settings_profiles.draft = name.clone();
-                    ui.close();
-                }
-                if ui_kit::button(ui, app.tr("prefs.profiles"), ui_kit::Button::Normal).clicked() {
-                    prefs::open_profiles(app);
-                    ui.close();
-                }
-            })
-        });
-        crate::scenario::publish_target("prefs:profile", response.rect);
-        if edited {
-            let dot = ui_kit::status_line(ui, "●", ui_kit::StatusTone::Warning).on_hover_text(app.tr("prefs.structure.profile_edited"));
-            crate::scenario::publish_target("prefs:profile:edited", dot.rect);
-        }
-    });
+                    if active.is_some() && ui_kit::button(ui, app.tr("prefs.profile_save"), ui_kit::Button::Normal).clicked() {
+                        save = true;
+                        apply = None;
+                        ui.close();
+                    }
+                    if ui_kit::button(ui, app.tr("prefs.profiles"), ui_kit::Button::Normal).clicked() {
+                        prefs::open_profiles(app);
+                        ui.close();
+                    }
+                },
+            )
+        })
+        .inner;
+    if menu.inner.is_some() && ui.ctx().input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
+        // The standard menu has handled Escape; the Preferences footer must not also cancel.
+        menu.response.request_focus();
+    }
+    crate::scenario::publish_target("prefs:profile", menu.response.rect);
     if let Some(name) = apply {
-        app.settings_profiles.draft = name.clone();
         act(app, "settings.profile.apply", json!({"name":name}), "prefs.profile_applied");
     } else if save && let Some(name) = active {
         act(app, "settings.profile.save", json!({"name":name}), "prefs.profile_saved");
@@ -656,7 +777,11 @@ pub(crate) fn sidebar(ui: &mut egui::Ui, app: &mut SolveApp) {
 
 /// Page-title tag. Membership is descriptive; the stable key list above governs storage.
 pub(crate) fn tag(ui: &mut egui::Ui) {
-    let response =
-        ui_kit::workspace_chip(ui, crate::i18n::tr("prefs.structure.in_profile")).on_hover_text(crate::i18n::tr("prefs.structure.profile_hover"));
+    let response = ui_kit::settings_chip(
+        ui,
+        crate::i18n::tr("prefs.structure.in_profile"),
+        ui_kit::SettingsChip { icon: Some("settings_profile"), compact: true, ..Default::default() },
+    )
+    .on_hover_text(crate::i18n::tr("prefs.structure.profile_hover"));
     crate::scenario::publish_target("prefs:in_profile", response.rect);
 }
