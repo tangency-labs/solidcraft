@@ -11,6 +11,10 @@
 //! - **A renderer that cannot start**: on Windows, try the remaining graphics APIs in order,
 //!   then the software renderer (`SOLIDCRAFT_RENDERER=cpu`). An explicit `WGPU_BACKEND` fails
 //!   cleanly without switching. Exhausted retries show a message box with the error.
+//! - **A GPU that hangs after the window is up** (Windows, [`HangWatch`]): frames that each wait
+//!   out their acquire while the user is there. The app closes, keeping unsaved changes for
+//!   recovery, and starts again on the next API (D3D12 → Vulkan → OpenGL → the software
+//!   renderer), kept in `graphics.json`.
 
 use std::path::{Path, PathBuf};
 
@@ -183,8 +187,14 @@ pub const WGPU_BACKEND_ENV: &str = "WGPU_BACKEND";
 /// together and prefer Vulkan, and starting Vulkan loads every installed Vulkan driver: Intel's
 /// (`igvk64.dll`) crashed SolidCraft at startup that way, inside the driver, before anything
 /// could be reported. D3D12 is Windows' own graphics API, the one its drivers are tested with.
-/// `has_hardware(backends)` says whether those backends have an adapter that isn't software
-/// (it is only asked about the backends being tried, one at a time).
+/// `hardware(backends)` lists those backends' adapters that aren't software (it is only asked
+/// about the backends being tried, one at a time).
+///
+/// One exception: when D3D12's only hardware adapters are AMD integrated GPUs and Vulkan has a
+/// hardware adapter, Vulkan. On those (Ryzen 5400U, 5600U, 5700G) D3D12 hung the driver a few
+/// seconds into the first frames and Windows reset it (a black screen, then a crash, #1789,
+/// #2806); 0.11.0, which preferred Vulkan, worked there, and `WGPU_BACKEND=vulkan` runs it
+/// smoothly (#3321).
 ///
 /// - `WGPU_BACKEND` set (`env_set`): `None`, whatever it says wins.
 /// - The software renderer (`cpu`, safe mode): D3D12 alone on Windows (WARP); `None` elsewhere.
@@ -197,7 +207,7 @@ pub fn choose_backends(
     env_set: bool,
     cpu: bool,
     preference: Option<&str>,
-    mut has_hardware: impl FnMut(eframe::wgpu::Backends) -> bool,
+    mut hardware: impl FnMut(eframe::wgpu::Backends) -> Vec<HardwareAdapter>,
 ) -> Option<eframe::wgpu::Backends> {
     use eframe::wgpu::Backends;
     if env_set {
@@ -216,7 +226,137 @@ pub fn choose_backends(
     if !windows {
         return None;
     }
-    Some(WINDOWS_ORDER.into_iter().find(|b| has_hardware(*b)).unwrap_or(Backends::DX12))
+    for b in WINDOWS_ORDER {
+        let found = hardware(b);
+        if found.is_empty() {
+            continue;
+        }
+        if b == Backends::DX12 && found.iter().all(HardwareAdapter::hangs_on_d3d12) && !hardware(Backends::VULKAN).is_empty() {
+            log::warn!("graphics: Vulkan rather than D3D12 on an AMD integrated GPU (#3321)");
+            return Some(Backends::VULKAN);
+        }
+        return Some(b);
+    }
+    Some(Backends::DX12)
+}
+
+/// A hardware (not software) adapter a backend offers, as [`choose_backends`] needs it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct HardwareAdapter {
+    /// The PCI vendor id.
+    pub vendor: u32,
+    pub device_type: eframe::wgpu::DeviceType,
+}
+
+/// AMD's PCI vendor id.
+const AMD: u32 = 0x1002;
+
+impl HardwareAdapter {
+    /// An AMD integrated GPU, whose D3D12 driver hung on SolidCraft's first frames (#3321).
+    pub fn hangs_on_d3d12(&self) -> bool {
+        self.vendor == AMD && self.device_type == eframe::wgpu::DeviceType::IntegratedGpu
+    }
+}
+
+/// Frames in a row that stalled ([`eframe::egui_wgpu::stalled_frames`]: each waited out wgpu's
+/// one-second acquire) after which the GPU is taken as hung.
+pub const STALLED_FRAMES_FOR_RESTART: u32 = 5;
+/// Seconds the window's surface may refuse its configuration ([`eframe::egui_wgpu::refused_for`])
+/// while the user is there before the GPU is taken as hung: after a reset, a surface that stays
+/// unsupported leaves a blank window. Refusals that clear up (a resize, a display waking up)
+/// take a moment, not this long.
+pub const REFUSED_S_FOR_RESTART: f64 = 10.0;
+/// Stalled frames count only this many seconds after the user's input: a hung GPU leaves a white
+/// window the user clicks at, while a switched-off display can hold frames back with nobody there.
+pub const STALL_INPUT_WINDOW_S: f64 = 10.0;
+/// Set on the launch that replaces one whose GPU hung: the hung backend, for the notice.
+pub const HUNG_ENV: &str = "SOLIDCRAFT_GPU_HUNG";
+
+/// Watches for a hung GPU after the window is up (#3321). The failed-start count misses it: frames
+/// still come, a second apart, so the start counts as good.
+#[derive(Debug, Default)]
+pub struct HangWatch {
+    last_input: Option<f64>,
+    /// When the user came back: the first input after none for [`STALL_INPUT_WINDOW_S`].
+    arrived: f64,
+    /// The stalled streak when the user came back. Those frames stalled with nobody there (a
+    /// display switched off holds them back too), and the input that wakes the display comes
+    /// before the next frame shows whether the GPU is fine, so only stalls after it count.
+    stalled_before: u32,
+    hung: bool,
+}
+
+impl HangWatch {
+    /// Per frame, at `now` seconds: whether the user gave input this frame, the frames in a row
+    /// that stalled, and the seconds the surface has refused its configuration. True once, the
+    /// frame the GPU is taken as hung.
+    pub fn hung(&mut self, now: f64, input: bool, stalled: u32, refused_s: Option<f64>) -> bool {
+        if stalled < self.stalled_before {
+            // The streak broke: every stall since came after the user was back.
+            self.stalled_before = 0;
+        }
+        if input {
+            if !self.user_there(now) {
+                self.arrived = now;
+                self.stalled_before = stalled;
+            }
+            self.last_input = Some(now);
+        }
+        if self.hung || !self.user_there(now) {
+            return false;
+        }
+        // A surface refused since before the user came back counts from then.
+        let refused = refused_s.map_or(0.0, |r| r.min(now - self.arrived));
+        self.hung = stalled.saturating_sub(self.stalled_before) >= STALLED_FRAMES_FOR_RESTART || refused >= REFUSED_S_FOR_RESTART;
+        self.hung
+    }
+
+    fn user_there(&self, now: f64) -> bool {
+        self.last_input.is_some_and(|t| (0.0..=STALL_INPUT_WINDOW_S).contains(&(now - t)))
+    }
+}
+
+/// The backend a launch whose GPU hung on `backend` starts again on, kept in `graphics.json` for
+/// later launches too (`cpu`: the software renderer, which has nothing to fall back to). Each
+/// hang moves on to the next of [`WINDOWS_ORDER`], then to the software renderer, so a GPU hangs
+/// at most once on each: a safe-mode restart would leave the backend that hung saved for the
+/// next normal start. D3D12 goes to Vulkan, which runs the GPUs whose D3D12 driver hung (#1789);
+/// it isn't probed here, as loading Vulkan's drivers into this process is what crashed once
+/// (`WINDOWS_ORDER`): the new launch finds out, and falls back to software if it has no GPU.
+pub fn after_hang(backend: eframe::wgpu::Backend, cpu: bool) -> Option<&'static str> {
+    match backend {
+        _ if cpu => None,
+        eframe::wgpu::Backend::Dx12 => Some("vulkan"),
+        eframe::wgpu::Backend::Vulkan => Some("gl"),
+        _ => Some(SOFTWARE_BACKEND),
+    }
+}
+
+/// `graphics.json`'s `backend` for the software renderer, kept after the GPU hung on every API.
+pub const SOFTWARE_BACKEND: &str = "cpu";
+
+/// The notice on the launch after the GPU hung on `hung` (a backend's name): this one is in safe
+/// mode, or on the `backend` preference.
+pub fn hang_note(hung: &str, safe_mode: bool, backend: Option<&str>) -> String {
+    let now = match backend {
+        _ if safe_mode => "in safe mode".to_string(),
+        Some(b) => format!("on {}, which it keeps using (the backend in graphics.json)", api_name(b)),
+        None => "with another renderer".to_string(),
+    };
+    let unsaved = if safe_mode { "the next normal start offers unsaved changes" } else { "unsaved changes are offered for recovery" };
+    format!("The graphics driver stopped responding on {}, so SolidCraft restarted {now}; {unsaved}.", api_name(hung))
+}
+
+/// A backend's name (`Dx12`, `vulkan`, …) as people know the graphics API.
+fn api_name(backend: &str) -> &str {
+    match backend.trim().to_ascii_lowercase().as_str() {
+        "dx12" => "Direct3D 12",
+        "vulkan" => "Vulkan",
+        "gl" => "OpenGL",
+        "metal" => "Metal",
+        "cpu" | "software" => "the software renderer",
+        _ => backend,
+    }
 }
 
 /// Internal, process-local retry choice; never written to the graphics preference.
@@ -267,8 +407,8 @@ pub fn float_depth_everywhere(options: &eframe::egui_wgpu::WgpuConfiguration) ->
 /// The order backends are tried in on Windows.
 pub const WINDOWS_ORDER: [eframe::wgpu::Backends; 3] = [eframe::wgpu::Backends::DX12, eframe::wgpu::Backends::VULKAN, eframe::wgpu::Backends::GL];
 
-/// Whether `backends` (started on their own, nothing else) have a hardware adapter.
-pub fn has_hardware_adapter(backends: eframe::wgpu::Backends) -> bool {
+/// The hardware adapters of `backends` (started on their own, nothing else).
+pub fn hardware_adapters(backends: eframe::wgpu::Backends) -> Vec<HardwareAdapter> {
     let mut desc = eframe::wgpu::InstanceDescriptor::new_without_display_handle();
     desc.backends = backends;
     desc.flags = eframe::wgpu::InstanceFlags::from_build_config().with_env();
@@ -277,7 +417,12 @@ pub fn has_hardware_adapter(backends: eframe::wgpu::Backends) -> bool {
     let adapters = pollster::block_on(instance.enumerate_adapters(backends));
     let found: Vec<String> = adapters.iter().map(|a| format!("{} ({:?})", a.get_info().name, a.get_info().device_type)).collect();
     log::info!("graphics: {backends:?} adapters: {found:?}");
-    adapters.iter().any(|a| a.get_info().device_type != eframe::wgpu::DeviceType::Cpu)
+    adapters
+        .iter()
+        .map(|a| a.get_info())
+        .filter(|i| i.device_type != eframe::wgpu::DeviceType::Cpu)
+        .map(|i| HardwareAdapter { vendor: i.vendor, device_type: i.device_type })
+        .collect()
 }
 
 /// The environment variable that switches wgpu's indirect-call validation on or off.
@@ -547,21 +692,32 @@ mod tests {
         let _ = std::fs::remove_dir_all(&d);
     }
 
+    /// A discrete NVIDIA GPU, and AMD's integrated one (#3321).
+    const NVIDIA: HardwareAdapter = HardwareAdapter { vendor: 0x10de, device_type: eframe::wgpu::DeviceType::DiscreteGpu };
+    const AMD_IGPU: HardwareAdapter = HardwareAdapter { vendor: AMD, device_type: eframe::wgpu::DeviceType::IntegratedGpu };
+
+    /// A probe where the backends `with` have `gpus`, and the others none.
+    fn probe_with(
+        with: &'static [eframe::wgpu::Backends],
+        gpus: &'static [HardwareAdapter],
+    ) -> impl FnMut(eframe::wgpu::Backends) -> Vec<HardwareAdapter> {
+        use eframe::wgpu::Backends;
+        move |b: Backends| {
+            assert!(b == Backends::DX12 || b == Backends::VULKAN || b == Backends::GL, "one backend at a time: {b:?}");
+            if with.contains(&b) { gpus.to_vec() } else { Vec::new() }
+        }
+    }
+
     #[test]
     fn windows_starts_d3d12_first_and_vulkan_only_when_d3d12_has_no_gpu() {
         use eframe::wgpu::Backends;
-        let probe = |with: &'static [Backends]| {
-            move |b: Backends| {
-                assert!(b == Backends::DX12 || b == Backends::VULKAN || b == Backends::GL, "one backend at a time: {b:?}");
-                with.contains(&b)
-            }
-        };
+        let probe = |with: &'static [Backends]| probe_with(with, &[NVIDIA]);
         // D3D12 works: Vulkan and OpenGL are never even asked about (starting Vulkan loads
         // its drivers, which is what crashed).
         let mut asked = Vec::new();
         let chosen = choose_backends(true, false, false, None, |b| {
             asked.push(b);
-            b == Backends::DX12
+            if b == Backends::DX12 { vec![NVIDIA] } else { Vec::new() }
         });
         assert_eq!(chosen, Some(Backends::DX12));
         assert_eq!(asked, [Backends::DX12]);
@@ -574,6 +730,77 @@ mod tests {
         // `auto` and blanks are the default order.
         assert_eq!(choose_backends(true, false, false, Some(" auto "), probe(&[Backends::DX12])), Some(Backends::DX12));
         assert_eq!(choose_backends(true, false, false, Some(""), probe(&[Backends::GL])), Some(Backends::GL));
+    }
+
+    /// AMD integrated GPUs hung under D3D12 at the first frames, the driver reset and the app
+    /// crashed (#1789, #2806); they run on Vulkan (#3321).
+    #[test]
+    fn an_amd_integrated_gpu_starts_vulkan_rather_than_d3d12() {
+        use eframe::wgpu::Backends;
+        let all = &[Backends::DX12, Backends::VULKAN, Backends::GL];
+        assert_eq!(choose_backends(true, false, false, None, probe_with(all, &[AMD_IGPU])), Some(Backends::VULKAN));
+        // Without a Vulkan GPU: D3D12 still, rather than OpenGL or software.
+        assert_eq!(choose_backends(true, false, false, None, probe_with(&[Backends::DX12], &[AMD_IGPU])), Some(Backends::DX12));
+        // Another GPU beside it (a laptop's discrete one): D3D12, which can pick that one.
+        assert_eq!(choose_backends(true, false, false, None, probe_with(all, &[AMD_IGPU, NVIDIA])), Some(Backends::DX12));
+        // A discrete AMD GPU keeps D3D12.
+        let discrete = &[HardwareAdapter { vendor: AMD, device_type: eframe::wgpu::DeviceType::DiscreteGpu }];
+        assert_eq!(choose_backends(true, false, false, None, probe_with(all, discrete)), Some(Backends::DX12));
+        // The preference and WGPU_BACKEND still win, and other systems are left to wgpu.
+        let never = |b: Backends| -> Vec<HardwareAdapter> { panic!("no probing expected, asked about {b:?}") };
+        assert_eq!(choose_backends(true, false, false, Some("dx12"), never), Some(Backends::DX12));
+        assert_eq!(choose_backends(true, true, false, None, never), None);
+        assert_eq!(choose_backends(false, false, false, None, never), None);
+    }
+
+    /// After the window was up, D3D12 hung the GPU: frames came a second apart and never showed,
+    /// a white window with no crash (#1789, #3321). Five such frames while the user is there
+    /// restart the app, D3D12 on Vulkan and anything else in safe mode.
+    #[test]
+    fn a_gpu_that_hangs_after_the_window_is_up_restarts_on_another_renderer() {
+        use eframe::wgpu::Backend;
+        let stalled = STALLED_FRAMES_FOR_RESTART;
+        let mut watch = HangWatch::default();
+        assert!(!watch.hung(0.0, true, 0, None));
+        assert!(!watch.hung(4.0, false, stalled - 1, None), "not yet");
+        assert!(watch.hung(5.0, false, stalled, None), "input 5 s ago");
+        assert!(!watch.hung(6.0, true, stalled + 1, None), "once");
+        // Nobody at the computer (a display switched off holds frames back too): no restart.
+        let mut away = HangWatch::default();
+        assert!(!away.hung(100.0, false, stalled, None));
+        assert!(!away.hung(200.0, false, 100, None));
+        // The input that wakes the display comes before a frame shows the GPU is fine: the
+        // stalls from before don't count, and the frames on time that follow end the streak.
+        let mut woke = HangWatch::default();
+        assert!(!woke.hung(0.0, true, 0, None));
+        assert!(!woke.hung(STALL_INPUT_WINDOW_S + 1.0, false, 30, None));
+        assert!(!woke.hung(STALL_INPUT_WINDOW_S + 2.0, true, 30, None), "back at a healthy app");
+        assert!(!woke.hung(STALL_INPUT_WINDOW_S + 3.0, true, 0, None));
+        let later: Vec<bool> = (1..=stalled).map(|n| woke.hung(STALL_INPUT_WINDOW_S + 3.0 + f64::from(n), true, n, None)).collect();
+        assert_eq!(later.last(), Some(&true), "then it hangs: {later:?}");
+        // Back at a GPU that hung while nobody was there: five more stalls.
+        let mut back = HangWatch::default();
+        assert!(!back.hung(100.0, true, 30, None));
+        assert!(!back.hung(103.0, true, 30 + stalled - 1, None));
+        assert!(back.hung(104.0, true, 30 + stalled, None));
+        // A surface refused for good after a reset never reaches the acquire: a blank window.
+        let mut refused = HangWatch::default();
+        assert!(!refused.hung(0.0, true, 0, Some(60.0)), "refused since before the user came");
+        assert!(!refused.hung(REFUSED_S_FOR_RESTART - 1.0, true, 0, Some(60.0 + REFUSED_S_FOR_RESTART - 1.0)));
+        assert!(refused.hung(REFUSED_S_FOR_RESTART, true, 0, Some(60.0 + REFUSED_S_FOR_RESTART)));
+        let mut resized = HangWatch::default();
+        assert!(!resized.hung(0.0, true, 0, Some(0.5)), "a moment's refusal");
+
+        // Each API hangs at most once: D3D12, then Vulkan, then OpenGL, then software.
+        assert_eq!(after_hang(Backend::Dx12, false), Some("vulkan"));
+        assert_eq!(after_hang(Backend::Vulkan, false), Some("gl"));
+        assert_eq!(after_hang(Backend::Gl, false), Some(SOFTWARE_BACKEND));
+        assert_eq!(after_hang(Backend::Dx12, true), None, "software: nothing to fall back to");
+        assert!(cpu_renderer_env(Some(SOFTWARE_BACKEND)), "the saved software renderer starts as such");
+        let note = hang_note("Dx12", false, Some("vulkan"));
+        assert!(note.contains("on Direct3D 12") && note.contains("on Vulkan") && note.contains("recovery"), "{note}");
+        assert!(hang_note("Vulkan", true, Some("gl")).contains("in safe mode"));
+        assert!(hang_note("Gl", false, Some("cpu")).contains("on the software renderer, which it keeps using"));
     }
 
     #[test]
@@ -602,7 +829,7 @@ mod tests {
                     assert_eq!(
                         choose_backends(windows, true, cpu, Some("vulkan"), |_| {
                             probed = true;
-                            false
+                            Vec::new()
                         }),
                         None
                     );
@@ -627,7 +854,7 @@ mod tests {
     #[test]
     fn wgpu_backend_the_preference_and_the_software_renderer_override_the_order() {
         use eframe::wgpu::Backends;
-        let never = |b: Backends| -> bool { panic!("no probing expected, asked about {b:?}") };
+        let never = |b: Backends| -> Vec<HardwareAdapter> { panic!("no probing expected, asked about {b:?}") };
         // WGPU_BACKEND: wgpu reads it itself, nothing is probed.
         assert_eq!(choose_backends(true, true, false, Some("gl"), never), None);
         assert_eq!(choose_backends(true, true, true, None, never), None);
@@ -640,7 +867,7 @@ mod tests {
         assert_eq!(choose_backends(true, false, false, Some("dx12,vulkan"), never), Some(Backends::DX12 | Backends::VULKAN));
         assert_eq!(choose_backends(false, false, false, Some("vulkan"), never), Some(Backends::VULKAN));
         // An unknown preference is the default order.
-        assert_eq!(choose_backends(true, false, false, Some("glide"), |b| b == Backends::DX12), Some(Backends::DX12));
+        assert_eq!(choose_backends(true, false, false, Some("glide"), probe_with(&[Backends::DX12], &[NVIDIA])), Some(Backends::DX12));
         // Elsewhere: wgpu's own choice.
         assert_eq!(choose_backends(false, false, false, None, never), None);
         assert_eq!(choose_backends(false, false, false, Some("auto"), never), None);
@@ -653,10 +880,10 @@ mod tests {
         // D3D12 never loads its OpenGL driver into the test process, and AMD's (`atio6axx.dll`)
         // aborted the process as it exited (#1156).
         if cfg!(target_os = "windows") {
-            let _ = choose_backends(true, false, false, None, has_hardware_adapter);
+            let _ = choose_backends(true, false, false, None, hardware_adapters);
         } else {
             for b in WINDOWS_ORDER {
-                let _ = has_hardware_adapter(b);
+                let _ = hardware_adapters(b);
             }
         }
     }

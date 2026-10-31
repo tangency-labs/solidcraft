@@ -361,6 +361,15 @@ SolidCraft changes:
   error scopes, awaiting every result before returning it. A refused UI pipeline (D3D12
   `egui_pipeline` shader compilation, #6648) returns `WgpuError::CreateRendererError` through
   eframe so startup can retry another backend instead of invoking wgpu's panic handler.
+- `src/lib.rs`, `src/winit.rs`: `stalled_frames` counts the frames in a row whose texture took
+  at least `STALLED_ACQUIRE` (950 ms) to acquire. wgpu waits at most a second for the next
+  image and D3D12 then goes on as if it had come, so a hung GPU shows only as frames that each
+  wait that second; the app restarts on another renderer after a few of them (#3321). Only the
+  main window counts. `refused_for` says how long the main window has skipped its frames on a
+  refused configure, which never reach the acquire.
+- `src/lib.rs`: configuring a surface the adapter doesn't support is an error instead of a
+  logged `Ok`, after which the next frame panicked with "Surface is not configured for
+  presentation": the frame is skipped and the configure retried as above (#3321).
 
 ## winit 0.30.13 (Apache-2.0, © The winit contributors, https://github.com/rust-windowing/winit)
 
