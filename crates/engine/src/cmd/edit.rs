@@ -1349,9 +1349,12 @@ pub(super) fn newly_broken_in_history(
     let whole = |doc: &solidcraft_doc::Document, model: &solidcraft_doc::Model| {
         let mut doc = doc.clone();
         doc.marker = None;
-        let mut model = model.clone();
-        model.evaluate(&doc);
-        model
+        // A copy keeps nothing on its own: it keeps what the model keeps, so a delete checked
+        // ahead finds this build there when it runs (#9917).
+        let mut copy = model.clone();
+        copy.keep(model.kept());
+        copy.evaluate(&doc);
+        copy
     };
     // Only a feature that fails after the change can be newly broken: when none does, the
     // history before it needn't be built again (#9917: each build ran every boolean after the
