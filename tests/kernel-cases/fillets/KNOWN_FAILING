@@ -18,4 +18,6 @@ cov-chamfer-outer-corner-edge-of-a-shelled-box-with-a-lip SMLib's chamfer result
 cov-fillet-arc-edge-on-an-oblique-cut-of-a-bar SMLib's check refuses the round: internal coincident control points in a B-spline curve
 every-block-cylinder-crease-top-edge-after-arc-round-r1 the r1 round's contact seam with the block's side face reads 60 degrees (the cylinder wall's normal) at its end on the crease (8.660, 5, 15.284): G0 where the round is built tangent
 every-hole-top-rim-r12-past-plate-bottom SMLib status 1001: a convex round past its face on the tangent side is not yet built by subtraction
+report-fillet-concave-arc-and-front-top-edge-together-r5-solver-residues the corner patch where the convex and concave rounds meet stands 0.128 out of the front face (box y min -0.0699 against 0.0579)
+report-fillet-concave-arc-and-front-top-edge-together-r7-solver-residues the corner patch where the convex and concave rounds meet stands 0.230 out of the front face (box y min -0.1723 against 0.0579)
 report-fillet-concave-arc-and-front-top-edge-together-solver-residues the corner patch where the convex and concave rounds meet stands 0.0374 out of the front face (box y min 0.0205 against 0.0579)
