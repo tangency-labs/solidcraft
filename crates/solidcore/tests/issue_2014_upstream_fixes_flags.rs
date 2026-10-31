@@ -78,3 +78,18 @@ fn one_flag_on_is_exactly_that_entry() {
     assert_eq!(turned_on(&first), ["plane_recognition_origin_after_axes"]);
     assert_eq!(listed(&first), debug_fields(&first));
 }
+
+/// `flag_mut` finds every field by its name, and only by it.
+#[test]
+fn flag_mut_sets_exactly_the_named_field() {
+    for &name in UpstreamFixes::NAMES {
+        let mut fixes = UpstreamFixes::default();
+        *fixes.flag_mut(name).expect("a field name") = true;
+        assert_eq!(turned_on(&fixes), [name]);
+        assert_eq!(fixes.flag_mut(name).copied(), Some(true));
+    }
+    let mut fixes = UpstreamFixes::default();
+    assert!(fixes.flag_mut("no_such_fix").is_none());
+    assert!(fixes.flag_mut("").is_none());
+    assert_eq!(fixes, UpstreamFixes::default());
+}

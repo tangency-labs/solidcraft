@@ -139,8 +139,9 @@ impl Caches {
 }
 
 /// Emits the [`UpstreamFixes`] definition it wraps unchanged, plus
-/// [`UpstreamFixes::NAMES`] and [`UpstreamFixes::flags`] read from that same field
-/// list, so a new field is listed by name with no second place to edit (#2014). It
+/// [`UpstreamFixes::NAMES`], [`UpstreamFixes::flags`] and [`UpstreamFixes::flag_mut`]
+/// read from that same field list, so a new field is listed by name with no second
+/// place to edit (#2014). It
 /// accepts only `pub <name>: bool` fields (each with its doc comment), so a field of
 /// another type fails to compile instead of being left out of the list.
 macro_rules! upstream_fixes {
@@ -170,6 +171,15 @@ macro_rules! upstream_fixes {
             pub fn flags(&self) -> impl Iterator<Item = (&'static str, bool)> {
                 Self::NAMES.iter().copied().zip([$(self.$field),*])
             }
+
+            /// The flag whose field name is `name` (one of [`Self::NAMES`]), to set
+            /// or read by name; `None` for any other name.
+            pub fn flag_mut(&mut self, name: &str) -> Option<&mut bool> {
+                match name {
+                    $(stringify!($field) => Some(&mut self.$field),)*
+                    _ => None,
+                }
+            }
         }
     };
 }
@@ -180,8 +190,9 @@ upstream_fixes! {
 /// field names its record (`WR-…`) and the `tangency-labs/solidcore` issue.
 ///
 /// [`UpstreamFixes::flags`] lists every field with its value and
-/// [`UpstreamFixes::NAMES`] every field name, both in declaration order. `upstream_fixes!`
-/// generates them from this definition, so a new field needs no other edit to be listed.
+/// [`UpstreamFixes::NAMES`] every field name, both in declaration order;
+/// [`UpstreamFixes::flag_mut`] finds a field by its name. `upstream_fixes!` generates
+/// them from this definition, so a new field needs no other edit to be listed.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 #[allow(clippy::struct_excessive_bools)]
 #[non_exhaustive]
