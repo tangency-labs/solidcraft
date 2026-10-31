@@ -195,6 +195,7 @@ pub(crate) fn take_reached() -> (u64, u64) {
 /// guard fails a test that never touched a C++ body, so a parity test can't quietly compare
 /// solidcore with itself.
 #[cfg(test)]
+#[cfg_attr(not(feature = "native"), allow(dead_code))]
 pub(crate) fn on_cpp() -> impl Drop {
     struct Guard;
     impl Drop for Guard {

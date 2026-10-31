@@ -367,7 +367,6 @@ fn parity_with_python_scorer() {
 
 /// The cases SMLib's GlobalSurfaceIntersect passes at approximation tolerance 1e-6, as score.py
 /// grades the corpus runner's output. A fix that makes another case pass adds it here.
-#[cfg(feature = "native")]
 const GSI_1E6_PASS: &[&str] = &[
     "c1_cone_plane_ellipse",
     "c1_cone_plane_hyperbola",
@@ -678,7 +677,6 @@ const SOLIDCORE_GSI_1E6_MISSES: [&str; 6] = [
 ];
 
 /// solidcore passes what the C++ kernel passes, but for [`SOLIDCORE_GSI_1E6_MISSES`].
-#[cfg(feature = "native")]
 #[test]
 fn solidcore_global_intersect_at_1e_6() {
     let Some(scores) = global_intersect_scores(solidcraft_smlib::route::Backend::Solidcore) else { return };
