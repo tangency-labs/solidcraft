@@ -2,7 +2,7 @@
  "sources": [],
  "what": "two pipes touching at one point (R10 about y = 0, z = -10 and R5 about x = 0, z = -5, both touching z = 0 at the origin from below), joined and cut at z = -2: the concave arc of their edge on the +y side, from (4, 6, -2) down through (0, 10, -10) to (-4, 6, -2), rounded r1",
  "source": "analytic",
- "method": "the offsets by 1 (R11 and R6) touch at (0, 0, 1) as the pipes do at the origin, so they meet in a quartic with a node there, which is rational (the lines through the node meet it once more); the round is a rational B-spline of degrees (12, 2). V0 = the two cut pipes less their overlap, integral of 4 sqrt(25 - (z+5)^2) sqrt(100 - (z+10)^2) over z in [-10, -2]: 13437.742049099792; the round adds 4.961081486747, (1/3) of the flux of the position through the boundary of the material the round adds: the round's surface as the ball's circles about the spine from contact to contact, the strips of the faces between the edge and the contact lines, and its end pieces in the plane z = -2 (bounded by the round's section there), each written out exactly and integrated by Gauss-Legendre quadrature (24 points a panel).",
+ "method": "the offsets by 1 (R11 and R6) touch at (0, 0, 1) as the pipes do at the origin, so they meet in a quartic with a node there, which is rational (the lines through the node meet it once more); the round is a rational B-spline of degrees (12, 2). V0 = the two cut pipes less their overlap, integral of 4 sqrt(25 - (z+5)^2) sqrt(100 - (z+10)^2) over z in [-10, -2]: 13437.742049099792; the round adds 4.961081486747, (1/3) of the flux of the position through the boundary of the material the round adds: the round's surface as the ball's circles about the spine from contact to contact, the strips of the faces between the edge and the contact lines, and its end pieces in the plane z = -2 (bounded by the round's section there), each written out exactly and integrated by Gauss-Legendre quadrature (24 points a panel). The round's faces, each of those degrees: four, as the body's topology splits the edge and the round.",
  "body_count": 1,
  "volume_mm3": 13442.703130586538,
  "tolerance": {
@@ -14,6 +14,24 @@
   "plane"
  ],
  "splines": [
+  {
+   "degree": [
+    12,
+    2
+   ]
+  },
+  {
+   "degree": [
+    12,
+    2
+   ]
+  },
+  {
+   "degree": [
+    12,
+    2
+   ]
+  },
   {
    "degree": [
     12,

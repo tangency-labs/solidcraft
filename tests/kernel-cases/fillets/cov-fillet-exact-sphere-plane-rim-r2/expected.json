@@ -2,7 +2,7 @@
  "sources": [],
  "what": "a ball R10 cut flat at z = 4: its rim rounded r2",
  "source": "analytic",
- "method": "the ball's centre runs on the sphere R8 and the plane z = 2: the circle of radius sqrt 60 about z, so the round is the ball's arc turned about z, a rational B-spline of degrees (2, 2). V0 = 4000 pi / 3 - 288 pi; the round removes 2 pi times the first moment about z of its section (Pappus), from contact (sqrt 60, 4) on the plane to (1.25 sqrt 60, 2.5) on the sphere: 22.492758031524.",
+ "method": "the ball's centre runs on the sphere R8 and the plane z = 2: the circle of radius sqrt 60 about z, so the round is the ball's arc turned about z, a rational B-spline of degrees (2, 2). V0 = 4000 pi / 3 - 288 pi; the round removes 2 pi times the first moment about z of its section (Pappus), from contact (sqrt 60, 4) on the plane to (1.25 sqrt 60, 2.5) on the sphere: 22.492758031524. The round's faces, each of those degrees: a closed round is two faces (split at the seam of its closed surface).",
  "body_count": 1,
  "volume_mm3": 3261.518762521006,
  "tolerance": {
@@ -14,6 +14,12 @@
   "sphere"
  ],
  "splines": [
+  {
+   "degree": [
+    2,
+    2
+   ]
+  },
   {
    "degree": [
     2,
