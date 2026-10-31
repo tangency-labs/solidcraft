@@ -652,11 +652,15 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, method: &str, p: &Value) ->
         })),
         "ui.file" => {
             let Some(path) = s("path") else { return err("path is required") };
-            if p.get("insert").and_then(Value::as_bool).unwrap_or(false) {
-                app.insert_path_async(path);
-            } else {
-                app.open_path_async(path);
+            // A control call never meets the unit dialog an STL or OBJ file asks a person: it names
+            // `units` itself, or the file is in millimetres.
+            let kind =
+                if p.get("insert").and_then(Value::as_bool).unwrap_or(false) { crate::file_load::Kind::Insert } else { crate::file_load::Kind::Open };
+            let mut request = crate::file_load::Request::new(path, kind);
+            if let Some(units) = p.get("units").filter(|u| !u.is_null()) {
+                request.options.insert("units".into(), units.clone());
             }
+            let _ = crate::file_load::begin_request(app, request);
             ok(json!({"busy": app.file_load.busy()}))
         }
         "ui.documents" => ok(crate::documents::control(app, p)),

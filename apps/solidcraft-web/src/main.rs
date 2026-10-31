@@ -585,7 +585,9 @@ mod web {
                     self.files.panel.set(false);
                 }
                 "insert" => {
-                    self.app.insert_path(&path);
+                    if !solidcraft_ui_egui::mesh_units::ask(&mut self.app, &path, true) {
+                        self.app.insert_path(&path);
+                    }
                     self.files.panel.set(false);
                 }
                 "download" => match vfs::read(&path, solidcraft_engine::io::MAX_DESIGN_BYTES) {

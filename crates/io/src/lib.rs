@@ -289,7 +289,26 @@ pub struct MeshFeature {
 /// feature. A glTF file's bodies are all built where they are (see [`read_gltf`] for its node
 /// tree), and it can't read buffers in other files.
 pub fn mesh_import_feature(bytes: &[u8], file: &str) -> Result<MeshFeature> {
+    mesh_import_feature_in(bytes, file, 1.0)
+}
+
+/// [`mesh_import_feature`] for a file whose coordinates are in a unit of `mm_per_unit`
+/// millimetres (25.4 for inches). The scaling is made once, as the file is read: the feature
+/// keeps the millimetre mesh and nothing of the unit. Only STL, OBJ and PLY files take a unit
+/// other than millimetres; a 3MF or glTF file says its own.
+pub fn mesh_import_feature_in(bytes: &[u8], file: &str, mm_per_unit: f64) -> Result<MeshFeature> {
+    if !mm_per_unit.is_finite() || mm_per_unit <= 0.0 {
+        return Err(IoError::Invalid("the unit must be a positive number of millimetres".into()));
+    }
+    let own_units = |what: &str| {
+        if mm_per_unit == 1.0 {
+            Ok(())
+        } else {
+            Err(IoError::Invalid(format!("a {what} file states its own units; a unit applies to STL, OBJ and PLY files")))
+        }
+    };
     if is_gltf_path(file) {
+        own_units("glTF")?;
         let mut no_files = |name: &str| Err(format!("`{name}` can't be read here"));
         let mut g = read_gltf(bytes, file, &mut no_files)?;
         g.flatten();
@@ -301,7 +320,7 @@ pub fn mesh_import_feature(bytes: &[u8], file: &str) -> Result<MeshFeature> {
     let path = std::path::Path::new(file);
     let stem = path.file_stem().map(|s| s.to_string_lossy().to_string()).filter(|s| !s.trim().is_empty()).unwrap_or_else(|| "Mesh".into());
     let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("").to_ascii_lowercase();
-    let (objects, warnings) = if ext == "obj" {
+    let (mut objects, warnings) = if ext == "obj" {
         obj::read_obj(bytes, &stem)?
     } else if ext == "ply" {
         ply::read_ply_mesh(bytes, &stem)?
@@ -315,8 +334,20 @@ pub fn mesh_import_feature(bytes: &[u8], file: &str) -> Result<MeshFeature> {
         let triangles = (0..n).map(|i| [i * 3, i * 3 + 1, i * 3 + 2]).collect();
         (vec![MeshObject { name: stem.clone(), positions, triangles, ..Default::default() }], Vec::new())
     } else {
+        own_units("3MF")?;
         read_3mf(bytes)?
     };
+    if mm_per_unit != 1.0 {
+        let limit = solidcraft_doc::point_cloud::MAX_COORD;
+        for o in &mut objects {
+            for p in &mut o.positions {
+                *p = *p * mm_per_unit;
+                if ![p.x, p.y, p.z].iter().all(|v| v.is_finite() && v.abs() <= limit) {
+                    return Err(IoError::Invalid(format!("mesh `{}` is out of range at this unit", o.name)));
+                }
+            }
+        }
+    }
     // Check every mesh now, so the command fails rather than the timeline.
     let mut meshes = Vec::with_capacity(objects.len());
     for o in &objects {
@@ -965,6 +996,83 @@ mod tests {
         let pos: Vec<Vec3> = m.positions.chunks(3).map(|c| Vec3::new(c[0], c[1], c[2])).collect();
         let tris: Vec<[u32; 3]> = m.triangles.chunks(3).map(|c| [c[0], c[1], c[2]]).collect();
         solidcraft_kernel::measure(&solidcraft_kernel::mesh_body(&pos, &tris).unwrap()).unwrap().volume
+    }
+
+    /// A unit scales an STL's coordinates to millimetres once, as it is read (an inch cube of 10 is
+    /// 254 mm across); the feature keeps nothing of the unit. A bad unit, a unit on a file that
+    /// states its own, and a size beyond the limits are refused.
+    #[test]
+    fn stl_unit_scales_the_mesh_as_it_is_read() {
+        let stl = cube_stl(&[], b"solid exported by something", None, [0.0; 3]);
+        let volume = |mm: f64| {
+            let f = mesh_import_feature_in(&stl, "x.stl", mm).unwrap();
+            let solidcraft_doc::FeatureKind::MeshImport { meshes, .. } = f.kind else { panic!() };
+            let m = &meshes[0];
+            let pos: Vec<Vec3> = m.positions.chunks(3).map(|c| Vec3::new(c[0], c[1], c[2])).collect();
+            let tris: Vec<[u32; 3]> = m.triangles.chunks(3).map(|c| [c[0], c[1], c[2]]).collect();
+            solidcraft_kernel::measure(&solidcraft_kernel::mesh_body(&pos, &tris).unwrap()).unwrap().volume
+        };
+        assert!((volume(1.0) - 1000.0).abs() < 1e-6);
+        assert!((volume(25.4) - 1000.0 * 25.4f64.powi(3)).abs() < 1e-3 * 25.4f64.powi(3));
+        assert!(mesh_import_feature_in(&stl, "x.stl", 0.0).is_err());
+        assert!(mesh_import_feature_in(&stl, "x.stl", f64::NAN).is_err());
+        assert!(mesh_import_feature_in(&stl, "x.stl", 1e12).is_err());
+        assert!(mesh_import_feature_in(&stl, "x.3mf", 25.4).is_err());
+        assert!(mesh_import_feature_in(&stl, "x.glb", 25.4).is_err());
+    }
+
+    /// An STL holding `triangles` as a binary file.
+    fn stl_of(triangles: &[[[f32; 3]; 3]]) -> Vec<u8> {
+        let mut bytes = vec![0u8; 80];
+        bytes.extend((triangles.len() as u32).to_le_bytes());
+        for triangle in triangles {
+            bytes.extend([0u8; 12]);
+            for vertex in triangle {
+                for coordinate in vertex {
+                    bytes.extend(coordinate.to_le_bytes());
+                }
+            }
+            bytes.extend([0u8; 2]);
+        }
+        bytes
+    }
+
+    /// Every stored coordinate is the file's `f32` value widened to `f64` and multiplied by the
+    /// unit's millimetres, exactly: no rounding through `f32`, and not scaled twice. The values
+    /// are exact in `f32`, so the expected numbers carry no rounding of their own.
+    #[test]
+    fn stl_coordinates_are_the_widened_value_times_the_unit_exactly() {
+        let (a, b, c, d) = ([0.5, -3.75, 1.25], [7.0, 0.25, -2.5], [-1.5, 4.0, 0.125], [2.0, 2.0, 9.5]);
+        let triangles = [[a, b, c], [a, c, d], [a, d, b], [b, d, c]];
+        let stl = stl_of(&triangles);
+        for (unit, mm) in solidcraft_doc::point_cloud::UNITS {
+            let feature = mesh_import_feature_in(&stl, "t.stl", mm).unwrap();
+            let solidcraft_doc::FeatureKind::MeshImport { meshes, .. } = feature.kind else { panic!() };
+            let want: Vec<f64> = triangles.iter().flatten().flatten().map(|v| f64::from(*v) * mm).collect();
+            assert_eq!(&*meshes[0].positions, want.as_slice(), "{unit}");
+        }
+    }
+
+    /// A PLY with faces, read as a mesh, takes a unit as an STL does: it states none either.
+    #[test]
+    fn ply_mesh_unit_scales_its_vertices_exactly() {
+        let corners = [[0.5f32, -3.75, 1.25], [7.0, 0.25, -2.5], [-1.5, 4.0, 0.125], [2.0, 2.0, 9.5]];
+        let mut ply = String::from("ply\nformat ascii 1.0\nelement vertex 4\nproperty float x\nproperty float y\nproperty float z\n");
+        ply.push_str("element face 4\nproperty list uchar int vertex_indices\nend_header\n");
+        for c in corners {
+            ply.push_str(&format!("{} {} {}\n", c[0], c[1], c[2]));
+        }
+        ply.push_str("3 0 1 2\n3 0 2 3\n3 0 3 1\n3 1 3 2\n");
+        let sorted = |mut v: Vec<f64>| {
+            v.sort_by(f64::total_cmp);
+            v
+        };
+        for (unit, mm) in solidcraft_doc::point_cloud::UNITS {
+            let feature = mesh_import_feature_in(ply.as_bytes(), "t.ply", mm).unwrap();
+            let solidcraft_doc::FeatureKind::MeshImport { meshes, .. } = feature.kind else { panic!() };
+            let want: Vec<f64> = corners.iter().flatten().map(|v| f64::from(*v) * mm).collect();
+            assert_eq!(sorted(meshes[0].positions.to_vec()), sorted(want), "{unit}");
+        }
     }
 
     /// STL quirks: a binary header starting with "solid", a zero triangle count, garbage
