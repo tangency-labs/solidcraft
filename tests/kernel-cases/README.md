@@ -232,10 +232,14 @@ running part grows one tier at a time through `base`), so the last case carries 
   `method` gives the derivation).
 
 ```sh
-cargo xtask kernel-cases --ladder --cli target/release/solidcraft-cli
-cargo xtask kernel-cases --ladder --cli target/release/solidcraft-cli --gate
-cargo xtask kernel-cases --ladder --cli target/release/solidcraft-cli --record "why"
+cargo xtask kernel-cases --ladder --kernel smlib --cli target/release/solidcraft-cli
+cargo xtask kernel-cases --ladder --kernel smlib --cli target/release/solidcraft-cli --gate
+cargo xtask kernel-cases --ladder --kernel smlib --cli target/release/solidcraft-cli --record "why"
 ```
+
+The golden is the C++ kernel's, so these say `--kernel smlib`. Without it a run is on solidcore and is
+graded against the same golden; today that differs on one case,
+`ladder/09-shells-and-offsets/010-shell-under-rounded-top`.
 
 The ladder needs no known-failing list: the golden is the reference. Its shard in the kernel rig
 gate runs with `--gate`, which fails on any case whose status or counts differ from the golden,

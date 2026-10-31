@@ -1,7 +1,7 @@
 # The fillet rig as a regression gate: a pull request that touches fillet code (the paths below)
-# runs every case in tests/kernel-cases/fillets/ on SMLib, through one release build of
+# runs every case in tests/kernel-cases/fillets/ on solidcore, through one release build of
 # solidcraft-cli, and fails on a regression (a case that fails and
-# tests/kernel-cases/fillets/KNOWN_FAILING does not list) or on a listed case that now passes
+# tests/kernel-cases/fillets/KNOWN_FAILING.solidcore does not list) or on a listed case that now passes
 # (it is fixed: remove its line, so the list only shrinks). See tests/kernel-cases/README.md.
 #
 # GitHub filters a workflow by whole files, so the fillet parts of crates/doc/src/eval*.rs and

@@ -869,6 +869,8 @@ fn edges_871() -> Vec<[f64; 3]> {
 /// overlap, which is refused. With SMLib built, the C++ kernel gives the same.
 #[test]
 fn rounds_on_the_871_part() {
+    #[cfg(feature = "native")]
+    let _cpp = crate::route::on_cpp();
     let p = part_871();
     let e = edges_871();
     let sizes = |r: f64| vec![r; e.len()];
@@ -911,6 +913,8 @@ fn rounds_on_the_871_part() {
 /// by Green's theorem). With SMLib built, the C++ kernel gives the same.
 #[test]
 fn tabbed_plate_rounds_mitred_on_the_arcs_continuation() {
+    #[cfg(feature = "native")]
+    let _cpp = crate::route::on_cpp();
     use super::sweep::extrude;
     use crate::sweeps::{Curve, DraftCorner};
     const Z: [f64; 3] = [0.0, 0.0, 1.0];

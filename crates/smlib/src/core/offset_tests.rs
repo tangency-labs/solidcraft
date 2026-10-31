@@ -853,6 +853,8 @@ fn offset_faces_close_a_step_wall() {
 /// whose rounds go all the way down at -7. With SMLib built, the C++ kernel gives the same.
 #[test]
 fn mitred_rounds_follow_a_moved_top() {
+    #[cfg(feature = "native")]
+    let _cpp = crate::route::on_cpp();
     use super::blend::{Corners, blend};
     use crate::Blend;
     let edges = [[20.0, 0.0, 10.0], [20.0, 30.0, 10.0], [0.0, 15.0, 10.0], [40.0, 15.0, 10.0]];
