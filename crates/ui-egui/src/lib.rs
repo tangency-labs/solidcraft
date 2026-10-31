@@ -71,6 +71,7 @@ pub mod frame_rate;
 pub mod gizmo;
 pub mod gpu;
 pub mod help;
+mod history_folds;
 pub(crate) mod history_rows;
 #[cfg(test)]
 mod hole_direction_ui_tests;
@@ -289,7 +290,10 @@ mod theme_options;
 #[cfg(test)]
 mod thin_extrude_tests;
 pub mod timeline;
+mod timeline_fold;
+mod timeline_folders;
 pub mod timeline_left;
+mod timeline_scope;
 pub mod titlebar;
 pub mod tool_cursor;
 pub mod tool_modifiers;
@@ -991,6 +995,7 @@ impl SolveApp {
             "visual_style": self.ui.visual_style,
             "browser_collapsed": self.tree.collapsed,
             "browser_expanded": self.tree.expanded,
+            "history_folds": history_folds::prefs(self),
             "recent": self.home.recent,
             "recent_opened_at": self.home.opened_at,
             "recent_forgotten": self.home.forgotten,
@@ -1062,6 +1067,7 @@ impl SolveApp {
         };
         self.tree.collapsed = keys("browser_collapsed");
         self.tree.expanded = keys("browser_expanded");
+        history_folds::load_prefs(self, &v);
         self.home.recent = v
             .get("recent")
             .and_then(Value::as_array)
@@ -1413,6 +1419,10 @@ impl SolveApp {
                     self.preview.reset();
                     self.cam = Camera::default();
                     self.fit_view();
+                    history_folds::load(self);
+                }
+                if matches!(id, "file.save" | "file.save_as") {
+                    history_folds::remember(self);
                 }
                 if matches!(id, "doc.open" | "file.save" | "file.save_as")
                     && let Some(p) = self.session.path.clone()
@@ -2225,7 +2235,7 @@ impl SolveApp {
         }
         self.home.open = false;
         documents::prepare_open(self);
-        if let Ok(r) = self.run("doc.open", json!({ "path": path })) {
+        if let Ok(r) = self.run("doc.open", self.load_params(path)) {
             // An opened design comes up at the home view, not at the angle the design before it
             // was left at: `prepare_open` keeps the camera when it reuses a blank design.
             self.cam.set_view(StandardView::Iso);
@@ -2241,11 +2251,20 @@ impl SolveApp {
         file_load::begin(self, path, true);
     }
 
+    /// The parameters of opening or inserting `path` here: the path, and for a STEP file whether
+    /// it gets a history folder (`file_load::step_folder_option`).
+    fn load_params(&self, path: &str) -> Value {
+        let mut params = serde_json::Map::new();
+        params.insert("path".into(), json!(path));
+        file_load::step_folder_option(self, path, &mut params);
+        Value::Object(params)
+    }
+
     /// Insert CAD bodies, meshes or sketch drawing geometry into the current design.
     pub fn insert_path(&mut self, path: &str) {
         let cmd = if solidcraft_engine::io::is_point_cloud_path(path) { "pointcloud.insert" } else { file_load::insert_command(path) };
         let before: Vec<String> = self.session.world_state().bodies.iter().map(|b| b.name.clone()).collect();
-        if let Ok(r) = self.run(cmd, json!({ "path": path })) {
+        if let Ok(r) = self.run(cmd, self.load_params(path)) {
             self.fit_view();
             stand_up::offer(self, path, &before, Some(&r));
             if let Some(w) = r["warnings"].as_array().filter(|w| !w.is_empty()) {

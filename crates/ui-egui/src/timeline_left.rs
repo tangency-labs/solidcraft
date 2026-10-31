@@ -606,7 +606,7 @@ pub(crate) fn drop_items(
     params["active"] = json!(active);
     let _ = app.run("timeline.move_many", params);
     if let Some(group) = group {
-        app.tree.collapsed.remove(&format!("timeline_group:{group}"));
+        crate::timeline_folders::set_open(app, group, true);
     }
 }
 
@@ -719,7 +719,7 @@ fn selection_actions(app: &mut SolveApp, ui: &mut egui::Ui, groups: &[solidcraft
             if let Ok(result) = result
                 && let Some(group) = result.get("group").and_then(serde_json::Value::as_u64)
             {
-                app.tree.collapsed.remove(&format!("timeline_group:{group}"));
+                crate::timeline_folders::set_open(app, group, true);
                 crate::context_menu::start_rename(app, crate::context_menu::RenameWhat::TimelineGroup(group), pos2(0.0, 0.0));
             }
             ui.close();
@@ -806,14 +806,16 @@ pub fn reveal_feature(app: &mut SolveApp, feature: u64) {
     }
     let groups = &app.session.doc.timeline_groups;
     let mut current = group_for(groups, feature);
-    let mut steps = 0usize;
+    let mut folders = Vec::new();
     while let Some(id) = current {
-        app.tree.collapsed.remove(&format!("timeline_group:{id}"));
-        steps += 1;
-        if steps > groups.len() {
+        folders.push(id);
+        if folders.len() > groups.len() {
             break;
         }
         current = groups.iter().find(|group| group.id == id).and_then(|group| group.parent);
+    }
+    for id in folders {
+        crate::timeline_folders::set_open(app, id, true);
     }
 }
 
@@ -881,7 +883,7 @@ fn group_is_open(app: &SolveApp, groups: &[solidcraft_engine::doc::TimelineGroup
     let mut current = Some(id);
     let mut steps = 0usize;
     while let Some(group_id) = current {
-        if app.tree.collapsed.contains(&format!("timeline_group:{group_id}")) {
+        if !crate::timeline_folders::is_open(app, group_id, true) {
             return false;
         }
         steps += 1;
@@ -897,7 +899,7 @@ fn group_ancestors_are_open(app: &SolveApp, groups: &[solidcraft_engine::doc::Ti
     let mut current = groups.iter().find(|group| group.id == id).and_then(|group| group.parent);
     let mut steps = 0usize;
     while let Some(group_id) = current {
-        if app.tree.collapsed.contains(&format!("timeline_group:{group_id}")) {
+        if !crate::timeline_folders::is_open(app, group_id, true) {
             return false;
         }
         steps += 1;
@@ -1077,8 +1079,7 @@ fn vertical_group_row(
     drop_zones: &mut Vec<(Rect, u64)>,
 ) -> bool {
     let t = Tokens::get();
-    let key = format!("timeline_group:{}", group.id);
-    let open = !app.tree.collapsed.contains(&key);
+    let open = crate::timeline_folders::is_open(app, group.id, true);
     let selected = app.tree.picked_timeline_groups.contains(&group.id);
     slots.push(VerticalSlot {
         y: ui.cursor().top(),
@@ -1138,11 +1139,7 @@ fn vertical_group_row(
     crate::scenario::publish_handle(&format!("timeline-folder-fold:{}", group.name), fold_rect.center());
     let fold = ui.interact(fold_rect, ui.id().with(("timeline_group_fold", group.id)), Sense::click());
     if fold.clicked() {
-        if open {
-            app.tree.collapsed.insert(key.clone());
-        } else {
-            app.tree.collapsed.remove(&key);
-        }
+        crate::timeline_folders::set_open(app, group.id, !open);
     } else if !renaming && response.clicked() {
         select_item(app, ui, TimelineItem::Group(group.id), order);
     }
@@ -2153,8 +2150,8 @@ mod tests {
         harness.app.run("solid.box", json!({"length": 20, "width": 15, "height": 10, "name": "Base", "body_name": "Plate"})).unwrap();
         let inner = harness.app.run("timeline.group", json!({"name": "Inner", "features": ["Base"]})).unwrap()["group"].as_u64().unwrap();
         let outer = harness.app.run("timeline.group", json!({"name": "Outer", "groups": [inner]})).unwrap()["group"].as_u64().unwrap();
-        harness.app.tree.collapsed.insert(format!("timeline_group:{inner}"));
-        harness.app.tree.collapsed.insert(format!("timeline_group:{outer}"));
+        crate::timeline_folders::set_open(&mut harness.app, inner, false);
+        crate::timeline_folders::set_open(&mut harness.app, outer, false);
         harness.frames(4);
         assert!(handle_at("timeline:Base").is_none(), "the feature starts hidden in its folders");
 
@@ -2511,7 +2508,7 @@ mod tests {
         assert!(y("timeline-folder:Nested") < y("timeline-joint:B"));
         assert!(y("timeline-joint:B") < y("timeline-folder:Second"));
         assert!(y("timeline-folder:Second") < y("timeline-joint:C"));
-        h.app.tree.collapsed.insert(format!("timeline_group:{first}"));
+        crate::timeline_folders::set_open(&mut h.app, first, false);
         h.frames(4);
         assert!(handle_at("timeline-joint:A").is_none() && handle_at("timeline-joint:B").is_none());
         assert!(handle_at("timeline-joint:C").is_some());
@@ -2631,7 +2628,7 @@ mod tests {
         let marks = || crate::scenario::handles("timeline-folder-status:").into_iter().map(|(name, _)| name).collect::<Vec<_>>();
         assert!(marks().is_empty(), "open folders show their features' own marks");
 
-        harness.app.tree.collapsed.insert(format!("timeline_group:{}", id("Outer")));
+        crate::timeline_folders::set_open(&mut harness.app, id("Outer"), false);
         harness.frames(2);
         assert_eq!(marks(), ["timeline-folder-status:warning:Outer"]);
 
