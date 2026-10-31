@@ -341,6 +341,10 @@ pub struct UiState {
     /// Not saved: it only lives while a sketch is open.
     #[serde(skip)]
     pub sketch_return_tab: Option<String>,
+    /// The folded ribbon's panels are open over the view (`ribbon_tabs_only`, #10112). Not saved:
+    /// a tab click opens them, and a command starting or the pointer leaving closes them.
+    #[serde(skip)]
+    pub ribbon_open: bool,
     /// Last contextual body/sketch, only used to select on entry.
     #[serde(skip)]
     pub ribbon_context: Option<String>,
@@ -403,6 +407,7 @@ impl Default for UiState {
             tab: "MODEL".into(),
             ribbon_context: None,
             sketch_return_tab: None,
+            ribbon_open: false,
             show_browser: true,
             show_timeline: true,
             show_grid: true,
@@ -1246,6 +1251,11 @@ impl SolveApp {
                     self.ui.show_navigation_bar = v.get("visible").and_then(Value::as_bool).unwrap_or(!self.ui.show_navigation_bar)
                 }
                 "view.next_tab" | "view.previous_tab" => documents::cycle(self, id == "view.next_tab"),
+                "view.ribbon_tabs_only" => {
+                    let on = v.get("on").and_then(Value::as_bool).unwrap_or(!self.preferences.ribbon_tabs_only);
+                    self.preferences.ribbon_tabs_only = on;
+                    self.ui.ribbon_open = false;
+                }
                 // An edit OK'd on a feature behind the history marker changes nothing in the view:
                 // say why, or the edit looks as if it had silently failed (#8100).
                 "timeline.redefine" if v.get("rolled_back").and_then(Value::as_bool) == Some(true) => {
@@ -1543,6 +1553,8 @@ impl SolveApp {
 
     fn start_with_variant_memory(&mut self, id: &str, remember_variant: bool, opener: Option<egui::Rect>, section_edit: bool) {
         self.tree.clear_folder_pick();
+        // A command started from the folded ribbon's open panels closes them (#10112).
+        self.ui.ribbon_open = false;
         if id == "timeline.play" {
             if let Err(why) = self.run(id, json!({})) {
                 self.set_status(why, true);
@@ -1667,6 +1679,7 @@ impl SolveApp {
                 | "view.navigation_bar"
                 | "view.next_tab"
                 | "view.previous_tab"
+                | "view.ribbon_tabs_only"
         ) {
             let _ = self.run(id, json!({}));
             return;

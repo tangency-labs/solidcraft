@@ -346,6 +346,11 @@ pub fn toolbar_items(app: &SolveApp) -> Vec<Item> {
             v.push(if on { item.key("current") } else { item });
         }
         // With every tab hidden there is no tab to customise.
+        v.push(Item::sep());
+        // Fold the ribbon to its tab row, or show it whole again (#10112).
+        let on = app.preferences.ribbon_tabs_only;
+        let item = crate::context_menu::cmd(app, "view.ribbon_tabs_only", "Ribbon Tabs Only").with(json!({ "on": !on }));
+        v.push(if on { item.key("current") } else { item });
         if !crate::workspace::visible_tabs(app).contains(&app.ui.tab.as_str()) {
             return v;
         }

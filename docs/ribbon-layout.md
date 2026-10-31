@@ -152,6 +152,10 @@ Sketch's Finish group reserves space at the far right even when other groups col
 
 Additional handles: `ribbon:workspace`, `ribbon:search`, and `ribbon:section:<TAB>:<SECTION>`. Existing workspace, tab, panel, collapsed, family and command handles remain available. Layout evidence also publishes rectangles for these handles, `button:<command id>`, and the open `ribbon:search_popup`.
 
+## Folded ribbon
+
+`ribbon_tabs_only` (Interface › Layout, off by default; `view.ribbon_tabs_only` switches it) keeps only the 30 px tab row, plus its 1 px line, from the view: `toolbar::reserved_height` gives the shell that height, in both layouts. The workspace column shows its name and arrow on one line. A tab's click opens the whole ribbon of that tab over the view in a Chrome area at the same place and size it has when not folded; nothing below it moves. It closes when a command starts (`SolveApp::start`), when the pointer leaves it (an open section list, a menu or a dragged button keep it open), on Escape, or when the open tab is clicked again. Render keeps its stage bar whole. Rectangles: `ribbon:folded` while folded, `ribbon:open` while open; the handles inside are the usual ones.
+
 ## Workspace and section lists
 
 The workspace popup is 470 px wide, anchored below the workspace column. Design and Render keep their existing menu actions and enablement; planned workspaces cannot be selected. Each row also publishes `workspace:menu:<design|render|animation|simulation|manufacture|drawing>`. The constraint cells publish `ribbon:constraint:<command id>` alongside their existing `button:` and `toolbar:` handles. No icon assets or command ids were added.
