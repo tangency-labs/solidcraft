@@ -609,3 +609,63 @@ fn zoomed_view_frame_cost() {
         "ZOOMED whole_ms={whole:.2} whole_triangles={whole_tris} zoomed_ms={zoomed:.2} zoomed_triangles={zoomed_tris} zoomed_orbit_ms={orbit:.2}"
     );
 }
+
+/// Every body of a design selected (`SOLIDCRAFT_SCALE_DESIGN`, or a generated grid of 1,440
+/// boxes), the pointer moving from face to face: the time of each hover
+/// change's highlight build, headless and as the app builds it on a GPU (bodies drawn from their
+/// plans, and from the model's own blocks). Run with `--ignored --nocapture`.
+#[test]
+#[ignore = "manual highlight measurement"]
+fn many_selected_bodies_hover_cost() {
+    use solidcraft_engine::geom::Vec3;
+    let mut h = match std::env::var_os("SOLIDCRAFT_SCALE_DESIGN") {
+        Some(path) => {
+            let mut h = Harness::new();
+            h.app.run("doc.open", json!({"path": path.to_string_lossy()})).unwrap();
+            h.frames(3);
+            h
+        }
+        None => grid(1440),
+    };
+    let st = h.app.session.world_state();
+    st.warm_meshes(|| true);
+    for b in &st.bodies {
+        let _ = b.display_plan();
+    }
+    let bodies: Vec<(String, usize)> = st.bodies.iter().map(|b| (b.name.clone(), b.body.face_count())).collect();
+    drop(st);
+    let big = (0..bodies.len()).max_by_key(|&i| bodies[i].1).unwrap_or(0);
+    let median = |mut v: Vec<f64>| {
+        v.sort_by(f64::total_cmp);
+        v[v.len() / 2]
+    };
+    let modes: [(&str, Option<bool>); 3] = [("headless", None), ("gpu_plans", Some(true)), ("gpu_blocks", Some(false))];
+    for (mode, tess) in modes {
+        h.app.viewport.gpu =
+            tess.map(|tess| crate::gpu::GpuTarget { format: egui_wgpu::wgpu::TextureFormat::Rgba8Unorm, depth: None, samples: 1, tess, oit: false });
+        drop(crate::viewport::build_scene(&h.app));
+        for (selected, biggest) in [(false, false), (true, false), (false, true), (true, true)] {
+            h.app.session.selection =
+                if selected { bodies.iter().map(|(name, _)| solidcraft_engine::Sel::Body { name: name.clone() }).collect() } else { Vec::new() };
+            let hover = |h: &mut Harness, i: usize| {
+                let (name, faces) = if biggest { &bodies[big] } else { &bodies[(i * 37) % bodies.len()] };
+                h.app.viewport.hover = Some(crate::viewport::Hit::Face { body: name.clone(), index: (i * 7) % (*faces).max(1), point: Vec3::ZERO });
+            };
+            hover(&mut h, 0);
+            drop(crate::viewport::build_highlight(&h.app));
+            let loops = std::env::var("SOLIDCRAFT_SCALE_LOOP").ok().and_then(|v| v.parse().ok()).unwrap_or(31);
+            let changes: Vec<f64> = (1..=loops)
+                .map(|i| {
+                    hover(&mut h, i);
+                    ms(|| drop(crate::viewport::build_highlight(&h.app)))
+                })
+                .collect();
+            println!(
+                "MANYSEL bodies={} mode={mode} all_selected={selected} hovering_biggest_body={biggest} hover_change_median_ms={:.3} hover_change_max_ms={:.3}",
+                bodies.len(),
+                median(changes.clone()),
+                changes.iter().copied().fold(0.0, f64::max)
+            );
+        }
+    }
+}
