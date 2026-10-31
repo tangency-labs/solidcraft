@@ -12,13 +12,16 @@
 use solidcore::curve::curve::Curve;
 use solidcore::geom::a_object::BREP_TYPE;
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
+use solidcore::geom::object::FaceKey;
 use solidcore::geom::object::ObjectRef;
 use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
 use solidcore::offset::offset_executive::p1::OffsetExecutive;
 use solidcore::offset::offset_executive::p2::{
-    api_offset_brep_full, OffsetNotifications, OffsetOptions, ShellOptions,
+    api_offset_brep_full, api_shell_brep_full, OffsetNotifications, OffsetOptions,
+    ShellCopyIdentities, ShellOptions,
 };
 use solidcore::query::api_queries::brep_is_manifold_solid;
+use solidcore::query::api_queries::BrepRef;
 use solidcore::surface::plane::Plane;
 use solidcore::sweep::topology_sweep::store::SweepIdentities;
 use solidcore::topology::topology::NotifyRecords;
@@ -218,8 +221,9 @@ impl Notifications {
     }
 }
 
-/// `SmApiShellBrepFull` on `part` (extended convex edges, merged results), `open`
-/// faces removed (empty: a closed shell).
+/// `SmOffsetExecutive::ShellBrep` on `part` itself (extended convex edges, merged
+/// results), `open` faces removed (empty: a closed shell). Not `SmApiShellBrepFull`,
+/// which shells a copy: see [`api_shell`].
 pub fn shell(
     k: &mut Kernel,
     mut part: Brep,
@@ -248,6 +252,54 @@ pub fn shell(
         b.refresh_cached_topology();
         b
     })
+}
+
+/// The working copy's notification identity (`api_shell_brep_full`'s copy).
+fn working_key(entity: EntityRef) -> ObjectRef {
+    fixture_key(entity, 600_000_000_000)
+}
+
+fn working_curve(edge: EdgeId, type_code: i64) -> ObjectRef {
+    ObjectRef {
+        key: ObjectKey(650_000_000_000 + u64::from(edge.index())),
+        type_code,
+    }
+}
+
+fn working_lists(region: RegionId) -> [ObjectRef; 2] {
+    [0, 1].map(|list| ObjectRef {
+        key: ObjectKey(900_000_000_000 + u64::from(region.index()) * 2 + list),
+        type_code: 0,
+    })
+}
+
+/// `SmApiShellBrepFull` as SolidCraft's `smlib_shell` and the difftest runner call it:
+/// `part` (B-rep 0) is copied with the `SmBrep` copy constructor and the copy shelled,
+/// `open` (faces of `part`) removed.
+pub fn api_shell(
+    k: &mut Kernel,
+    part: &mut Brep,
+    options: ShellOptions,
+    open: &[FaceId],
+) -> solidcore::Result<Brep> {
+    let source = BrepId::from_index(0);
+    let mut notifications = Notifications::new(part);
+    let faces: Vec<Option<FaceKey>> = open.iter().map(|&f| Some((source, f))).collect();
+    api_shell_brep_full(
+        k,
+        Some(BrepRef {
+            brep: part,
+            handle: source,
+        }),
+        options,
+        &faces,
+        &ShellCopyIdentities {
+            key_of: &working_key,
+            curve_ref: &working_curve,
+            boolean_source_lists: &working_lists,
+        },
+        &mut notifications.context(),
+    )
 }
 
 /// `SmApiOffsetBrepFull` on `part` (extended convex edges, merged results).
