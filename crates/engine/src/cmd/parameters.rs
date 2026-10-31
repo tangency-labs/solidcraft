@@ -230,7 +230,18 @@ fn keep_dimension_start(s: &mut Session, name: &str) {
         }
         let reference: Vec<_> = stored.points.iter().map(|p| p.pos).collect();
         let hold = Hold { points: vec![start], radii: Vec::new() };
-        if !solve_with(&mut trial, &hold, Some(&reference), Analysis::StatusOnly, None).keeps_orientation() {
+        let solved = if trial.offsets.is_empty() && trial.freeform_offsets.is_empty() {
+            solve_with(&mut trial, &hold, Some(&reference), Analysis::StatusOnly, None).keeps_orientation()
+        } else {
+            // A solve against stale offset points can stretch an attached cap into a different
+            // tangency branch. Keep the start through the complete solve/refresh sequence.
+            let Some(p) = trial.points.get_mut(start) else { continue };
+            p.fixed = true;
+            s.doc
+                .solve_sketch_with_analysis(&vals, &mut trial, &stored.driving_values(), Some(stored), Analysis::StatusOnly)
+                .is_ok_and(|report| report.keeps_orientation())
+        };
+        if !solved {
             continue;
         }
         if stored.points.len() == trial.points.len() {

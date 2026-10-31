@@ -2373,6 +2373,167 @@ fn an_offset_slot_still_moves_with_the_dimension_that_places_it() {
     }
 }
 
+fn capped_line_offset(fixed_cap: bool) -> Session {
+    let mut s = Session::default();
+    run(
+        &mut s,
+        "timeline.add",
+        json!({
+            "feature": {"id":1,"name":"Capped offset","type":"sketch","plane":{"type":"origin","name":"XY"},"sketch":{
+                "points":[
+                    {"id":"origin","pos":[0,0],"fixed":true},
+                    {"id":"end","pos":[0,50],"fixed":false},
+                    {"id":"oa","pos":[-2,0],"fixed":true},
+                    {"id":"ob","pos":[-2,50],"fixed":true},
+                    {"id":"center","pos":[-1,50],"fixed":false},
+                    {"id":"cap_end","pos":[-2,50],"fixed":fixed_cap}
+                ],
+                "curves":[
+                    {"id":"source","type":"line","a":0,"b":1},
+                    {"id":"offset","type":"line","a":2,"b":3},
+                    {"id":"cap","type":"arc","c":4,"a":1,"b":5}
+                ],
+                "constraints":[
+                    {"id":"vertical","type":"vertical","l":0},
+                    {"id":"length","type":"length","l":0,"value":50,"param":"height"},
+                    {"id":"source_tangent","type":"tangent","a":0,"b":2},
+                    {"id":"offset_tangent","type":"tangent","a":1,"b":2},
+                    {"id":"end_join","type":"coincident","p":3,"q":5}
+                ],
+                "offsets":[{"sources":[["source",true]],"outputs":["offset"],"distance":2,"closed":false}]
+            }},
+            "params":[{"name":"height","expression":"50","unit":"mm"}]
+        }),
+    );
+    run(&mut s, "sketch.edit", json!({"sketch":1}));
+    s
+}
+
+#[test]
+fn a_tangent_cap_follows_its_offset_when_the_source_length_changes() {
+    // #4823: the cap joins the source to the offset's held endpoint. Solving against the old
+    // endpoint first makes every length change look contradictory, before the offset can move.
+    let mut s = capped_line_offset(false);
+    let check = |s: &Session, height: f64| {
+        let world = s.world_state();
+        let solved = world.sketch(1).unwrap();
+        assert!(solved.report.keeps_orientation(), "{:?}", solved.report);
+        assert!(solved.report.fully_constrained());
+        let sk = &solved.sketch;
+        for (id, expected) in [
+            ("origin", Vec2::ZERO),
+            ("end", Vec2::new(0.0, height)),
+            ("oa", Vec2::new(-2.0, 0.0)),
+            ("ob", Vec2::new(-2.0, height)),
+            ("center", Vec2::new(-1.0, height)),
+            ("cap_end", Vec2::new(-2.0, height)),
+        ] {
+            let point = sk.points.iter().find(|p| p.id == id).unwrap();
+            assert!(point.pos.dist(expected) < 1e-6, "{id}: {:?}, expected {expected:?}", point.pos);
+        }
+        assert_eq!(sk.constraints.len(), 5);
+        assert_eq!(sk.offsets.len(), 1);
+    };
+    check(&s, 50.0);
+    let mut previous = 50.0;
+    for height in [60.0, 40.0, 70.0] {
+        run(&mut s, "parameters.change", json!({"name":"height","expression":height.to_string()}));
+        check(&s, height);
+        run(&mut s, "edit.undo", json!({}));
+        check(&s, previous);
+        run(&mut s, "edit.redo", json!({}));
+        check(&s, height);
+        previous = height;
+    }
+    let reopened = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+    check(&reopened, 70.0);
+}
+
+#[test]
+fn an_offset_cap_fixed_at_the_old_height_still_refuses_a_length_change() {
+    let mut s = capped_line_offset(true);
+    let before = s.doc.to_json();
+    let undo = s.undo.len();
+    assert!(s.execute("parameters.change", &json!({"name":"height","expression":"60"})).is_err());
+    assert_eq!(s.doc.to_json(), before);
+    assert_eq!(s.undo.len(), undo);
+}
+
+#[test]
+fn a_cap_on_an_offset_arc_keeps_its_radius_through_large_length_edits() {
+    // Two externally tangent source arcs: radii 3 and 6, centres separated by (4, -sqrt(65)).
+    // Their inward/outward offsets share those centres; a radius-1 cap closes the 2 mm gap.
+    // The preliminary keep-start solve used to stretch that cap onto another tangency branch.
+    let dy = 65.0_f64.sqrt();
+    let end_dy = 11.0_f64.sqrt();
+    for batch in [false, true] {
+        let mut s = Session::default();
+        run(
+            &mut s,
+            "timeline.add",
+            json!({
+                "feature":{"id":1,"name":"Curved cap","type":"sketch","plane":{"type":"origin","name":"XY"},"sketch":{
+                    "points":[
+                        {"id":"origin","pos":[0,0],"fixed":true},
+                        {"id":"end","pos":[0,50]},
+                        {"id":"bend_center","pos":[3,50]},
+                        {"id":"bend_join","pos":[3.0+4.0/3.0,50.0-dy/3.0]},
+                        {"id":"tip_center","pos":[7,50.0-dy]},
+                        {"id":"tip_end","pos":[2,50.0-dy-end_dy]},
+                        {"id":"oa","pos":[-2,0],"fixed":true},
+                        {"id":"ob","pos":[-2,50],"fixed":true},
+                        {"id":"offset_join","pos":[3.0+20.0/9.0,50.0-dy*5.0/9.0],"fixed":true},
+                        {"id":"offset_end","pos":[7.0-10.0/3.0,50.0-dy-end_dy*2.0/3.0],"fixed":true},
+                        {"id":"cap_center","pos":[7.0-25.0/6.0,50.0-dy-end_dy*5.0/6.0]},
+                        {"id":"cap_end","pos":[7.0-10.0/3.0,50.0-dy-end_dy*2.0/3.0]}
+                    ],
+                    "curves":[
+                        {"id":"source","type":"line","a":0,"b":1},
+                        {"id":"bend","type":"arc","c":2,"a":3,"b":1},
+                        {"id":"tip","type":"arc","c":4,"a":3,"b":5},
+                        {"id":"offset","type":"line","a":6,"b":7},
+                        {"id":"bend_offset","type":"arc","c":2,"a":8,"b":7},
+                        {"id":"tip_offset","type":"arc","c":4,"a":8,"b":9},
+                        {"id":"cap","type":"arc","c":10,"a":5,"b":11}
+                    ],
+                    "constraints":[
+                        {"id":"vertical","type":"vertical","l":0},
+                        {"id":"length","type":"length","l":0,"value":50,"param":"height"},
+                        {"id":"bend_tangent","type":"tangent","a":0,"b":1},
+                        {"id":"tip_tangent","type":"tangent","a":1,"b":2},
+                        {"id":"tip_distance","type":"line_circle_distance","l":0,"c":2,"value":1},
+                        {"id":"bend_radius","type":"radius","c":1,"value":3},
+                        {"id":"tip_radius","type":"radius","c":2,"value":6},
+                        {"id":"end_distance","type":"point_line_distance","p":5,"l":0,"value":2},
+                        {"id":"cap_tangent","type":"tangent","a":2,"b":6},
+                        {"id":"end_join","type":"coincident","p":9,"q":11}
+                    ],
+                    "offsets":[{"sources":[["source",true],["bend",false],["tip",true]],
+                        "outputs":["offset","bend_offset","tip_offset"],"distance":2,"closed":false}]
+                }},
+                "params":[{"name":"height","expression":"50","unit":"mm"}]
+            }),
+        );
+        run(&mut s, "sketch.edit", json!({"sketch":1}));
+        let initial = sketch(&s);
+        for height in [55.0, 60.0, 70.0, 40.0] {
+            let params =
+                if batch { json!({"changes":{"height":height.to_string()}}) } else { json!({"name":"height","expression":height.to_string()}) };
+            run(&mut s, "parameters.change", params);
+            let world = s.world_state();
+            let solved = world.sketch(1).unwrap();
+            assert!(solved.report.keeps_orientation() && solved.report.fully_constrained(), "{:?}", solved.report);
+            for (p, before) in solved.sketch.points.iter().zip(&initial.points) {
+                let shift = if matches!(p.id.as_str(), "origin" | "oa") { 0.0 } else { height - 50.0 };
+                let expected = before.pos + Vec2::new(0.0, shift);
+                assert!(p.pos.dist(expected) < 1e-6, "batch={batch}, height={height}, {}: {:?}, expected {expected:?}", p.id, p.pos);
+                assert_eq!(p.fixed, before.fixed, "temporary source holds must not be saved");
+            }
+            assert_eq!(solved.sketch.constraints.len(), 10);
+        }
+    }
+}
+
 #[test]
 fn offset_driver_covers_disconnected_selections_and_refuses_bad_values_atomically() {
     let mut s = new_sketch();

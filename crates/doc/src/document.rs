@@ -4193,6 +4193,14 @@ impl Document {
             } else {
                 solidcraft_sketch::solve_after_edit_with_analysis(sk, stored, was(sk).as_deref(), analysis)
             };
+            // An attachment to the old offset can prevent the source from moving at all.
+            // Retry from a source-only seed, adopting it only if every constraint still holds.
+            if !report.ok()
+                && report.oversized.is_none()
+                && let Some(retried) = sk.solve_after_offset_edit(stored, was(sk).as_deref(), analysis)
+            {
+                report = retried;
+            }
         }
         Ok(report)
     }
