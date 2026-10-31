@@ -107,20 +107,20 @@ crate::dialog_descriptor::dialog_descriptors! {
     pub enum Kind {
         Shell("solid.shell", "SHELL", [("Faces/Body", FACES, true)],
             FeatureKind::Shell { thickness, .. }) {
-            thickness: String = "2 mm".into() => thickness.to_string(),
+            thickness: String = "2 mm".into() => shown_expr(thickness, ValueKind::Length),
         } => json!({"thickness": thickness});
         Draft("solid.draft", "DRAFT", [("Faces", FACES, true), ("Neutral plane", PLANES | PLANAR_FACES, false)],
             FeatureKind::Draft { angle, .. }) {
-            angle: String = "5 deg".into() => angle.to_string(),
+            angle: String = "5 deg".into() => shown_expr(angle, ValueKind::Angle),
         } => json!({"angle": angle});
         // A point picked as well puts the plane through it instead of at the distance.
         OffsetPlane("construct.plane.offset", "OFFSET PLANE", [("Plane", PLANES | PLANAR_FACES, false), ("Through point", selection::VERTICES | selection::POINTS, false)],
             FeatureKind::ConstructionPlane { plane: PlaneRef::Offset { distance, .. } }) {
-            offset: String = "0 mm".into() => distance.to_string(),
+            offset: String = "0 mm".into() => shown_expr(distance, ValueKind::Length),
         } => json!({"offset": offset});
         AnglePlane("construct.plane.at_angle", "PLANE AT ANGLE", [("Plane", PLANES | PLANAR_FACES, false), ("Axis", AXIS_PICKS, false)],
             FeatureKind::ConstructionPlane { plane: PlaneRef::AtAngle { angle, .. } }) {
-            angle: String = "45 deg".into() => angle.to_string(),
+            angle: String = "45 deg".into() => shown_expr(angle, ValueKind::Angle),
         } => json!({"angle": angle});
         Scale("solid.scale", "SCALE", [("Bodies", BODIES, true)],
             FeatureKind::Scale { factor, .. }) {
@@ -128,21 +128,21 @@ crate::dialog_descriptor::dialog_descriptors! {
         } => json!({"factor": factor});
         OffsetFaces("solid.offset_face", "OFFSET FACE", [("Faces", FACES, true)],
             FeatureKind::OffsetFace { distance, .. }) {
-            distance: String = "2 mm".into() => distance.to_string(),
+            distance: String = "2 mm".into() => shown_expr(distance, ValueKind::Length),
         } => json!({"distance": distance});
         Stock("solid.bounding_solid", "STOCK", [("Bodies (all if none)", BODIES, true)],
             FeatureKind::BoundingSolid { margin, .. }) {
-            margin: String = "2 mm".into() => margin.to_string(),
+            margin: String = "2 mm".into() => shown_expr(margin, ValueKind::Length),
         } => json!({"margin": margin});
         Pipe("solid.pipe", "PIPE", [("Path", CURVES, true)],
             FeatureKind::Pipe { diameter, wall, operation, .. }) {
-            diameter: String = "5 mm".into() => diameter.to_string(),
-            wall: String = String::new() => wall.as_deref().map(str::to_string).unwrap_or_default(),
+            diameter: String = "5 mm".into() => shown_expr(diameter, ValueKind::Length),
+            wall: String = String::new() => wall.as_deref().map(|e| shown_expr(e, ValueKind::Length)).unwrap_or_default(),
             operation: usize = 0 => op_index(operation),
         } => json!({"diameter": diameter, "operation": OPS.get(*operation).copied().unwrap_or("new")});
         Emboss("solid.emboss", "EMBOSS", [("Profiles", PROFILES, true), ("Target Face (optional)", FACES, false)],
             FeatureKind::Emboss { depth, deboss, .. }) {
-            depth: String = "1 mm".into() => depth.to_string(),
+            depth: String = "1 mm".into() => shown_expr(depth, ValueKind::Length),
             deboss: bool = false => *deboss,
         } => json!({"depth": depth, "mode": if *deboss { "deboss" } else { "emboss" }});
         ; custom {
@@ -5660,7 +5660,7 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
                 AxisRef::Model { geo } if model_axis_sel(s, geo).is_none() => serde_json::to_value(geo).ok(),
                 _ => None,
             };
-            d.kind = Kind::Revolve { angle: angle.to_string(), operation: op_index(operation), axis: stored_axis };
+            d.kind = Kind::Revolve { angle: shown_expr(angle, ValueKind::Angle), operation: op_index(operation), axis: stored_axis };
             d.extra.insert("convention".into(), json!(convention));
             if let Some(a2) = angle2 {
                 d.extra.insert("angle2".into(), json!(a2));
@@ -5699,17 +5699,17 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
                 |i: usize, p: Vec3| f.edge_names.get(i).and_then(|name| named_refill(s, body.as_deref(), name, p, true)).or_else(|| edge_sel(s, p));
             let chamfer = matches!(f.kind, FeatureKind::Chamfer { .. });
             let mut d = start(if chamfer { "solid.chamfer" } else { "solid.fillet" })?;
-            d.kind = fillet_kind(radius, chamfer);
+            d.kind = fillet_kind(&shown_expr(radius, ValueKind::Length), chamfer);
             if let Kind::Fillet { chain, ctype, distance2, angle, flip, .. } = &mut d.kind {
                 *chain = false;
                 // An unequal chamfer: two distances, or a distance and an angle.
                 if let FeatureKind::Chamfer { distance2: d2, angle: a, flip: f, .. } = &f.kind {
                     if let Some(v) = d2 {
                         *ctype = 1;
-                        *distance2 = v.to_string();
+                        *distance2 = shown_expr(v, ValueKind::Length);
                     } else if let Some(v) = a {
                         *ctype = 2;
-                        *angle = v.to_string();
+                        *angle = shown_expr(v, ValueKind::Angle);
                     }
                     *flip = *f;
                 }
@@ -6370,7 +6370,7 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             }
             d.kind = Kind::Thread {
                 designation: designation.clone().unwrap_or_default(),
-                length: length.as_deref().map(str::to_string).unwrap_or_default(),
+                length: length.as_deref().map(|e| shown_expr(e, ValueKind::Length)).unwrap_or_default(),
                 handedness: *handedness,
                 suggested: None,
                 of: Vec::new(),
@@ -6421,8 +6421,8 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             let mut d = start(if *web { "solid.web" } else { "solid.rib" })?;
             d.kind = Kind::Rib {
                 web: *web,
-                thickness: thickness.to_string(),
-                depth: depth.as_deref().map(str::to_string).unwrap_or_default(),
+                thickness: shown_expr(thickness, ValueKind::Length),
+                depth: depth.as_deref().map(|e| shown_expr(e, ValueKind::Length)).unwrap_or_default(),
                 flip: *flip,
                 normal: *normal,
             };
