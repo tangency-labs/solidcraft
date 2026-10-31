@@ -19,7 +19,8 @@
 //!   3. subtracts that region from the target with the manifold Boolean.
 //!
 //! Exactness: a planar surface continues exactly (its plane over a larger domain: a plane,
-//! or a B-spline SMLib finds planar, a loft's wall; WR-635, `eddf0ed`); any other
+//! or a B-spline SMLib finds planar, a loft's wall; WR-635, `eddf0ed`); a cylinder, cone,
+//! sphere or torus continues as itself (`db4a655`, [`continued_surface`]); any other
 //! surface is used within its own domain, and a needed continuation of one is refused
 //! (`FilletErrorType::NotExact`). A side edge continues past its end only when it is a
 //! straight line. An end the fillet runs past is cut only by a planar end face.
@@ -45,6 +46,8 @@
 //! | `loop_area` (private)        | `sm_LoopArea` (`bba9914`)              |
 //! | `reverse_loop` (private)     | `sm_Reverse` (`bba9914`)               |
 //! | [`close_round_loop`]         | `sm_CloseRoundLoop` (`bba9914`)        |
+//! | [`continued_surface`], [`ContinuedSurface`] | `sm_ContinuedSurface` (`db4a655`) |
+//! | [`close_band`]               | `sm_CloseBand` (`db4a655`)             |
 //!
 //! Deviations:
 //! - **Errors.** `GetFilletErrorInfo()->NoteError(code, comment)` followed by `SM_ERR`
@@ -71,17 +74,20 @@ use crate::geom::extent2d::Extent2d;
 use crate::geom::global_solver::SolverOperation;
 use crate::intersect::point_class::{PointClassType, PointClassification};
 use crate::kernel::Kernel;
-use crate::math::{Point2, Point3, Vec2, Vec3, BIG_DOUBLE, EFF_ZERO};
+use crate::math::{Point2, Point3, Vec2, Vec3, BIG_DOUBLE, EFF_ZERO, EFF_ZERO_SQRT};
 use crate::nurbs::b_spline_curve_n_lib::TrimMode;
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use crate::query::face::p1::{point_3d_classify, Point3dClassifyOptions};
+use crate::surface::offset_surface::OffsetSurface;
 use crate::surface::plane::Plane;
+use crate::surface::surf_of_revolution::SurfOfRevolution;
 use crate::surface::surface::p2::SurfaceKind;
 use crate::surface::surface::p4::NoObject;
 use crate::surface::surface::p5::DropPointOptions;
 use crate::surface::surface::Surface;
 use crate::topology::brep::p3::{delete_face, with_kernel_callbacks, DeleteFaceOptions};
 use crate::topology::brep::p7::{make_face_with_curves, FaceCurvesInput};
+use crate::topology::brep::p8::{create_face_in_region_from_surface, FaceBuildEnv};
 use crate::topology::brep::planar_section::face_planar_section_curves;
 use crate::topology::topology_traverser::Marks;
 use crate::topology::{edge, face, vertex, Brep, EdgeId, FaceId, VertexId};
@@ -255,10 +261,160 @@ pub fn plane_of(k: &Kernel, surface: &Surface) -> Result<Option<PlaneFrame>> {
     }))
 }
 
+/// The fork's `sm_ContinuedSurface` (tangency-labs/smlib@db4a655): the surface of `f`
+/// continued exactly as far as it must to hold the feet of `points` (all on it, or near
+/// it), with the farthest point's distance from it (`gap`) and whether it is exact.
+#[derive(Debug, Clone)]
+pub struct ContinuedSurface {
+    /// `rpSurface`: over its own domain (a copy) where that holds the feet; a cylinder,
+    /// cone, sphere or torus continued as itself where it must be.
+    pub surface: Surface,
+    /// `rdGap`: the farthest point's distance from `surface` (`BIG_DOUBLE` for a failed
+    /// drop, or when no foot comes off the sides).
+    pub gap: f64,
+    /// `rbExact`: `false` when a point farther than the tolerance has its foot on a side of
+    /// a surface that does not continue exactly (any other kind).
+    pub exact: bool,
+}
+
+/// The kind's surface of revolution, for a surface that continues as itself
+/// ([`OffsetSurface::continues_as_itself`]).
+fn revolution(surface: &Surface) -> Option<&SurfOfRevolution> {
+    match surface.kind() {
+        SurfaceKind::Cone(c) => Some(c.rev()),
+        SurfaceKind::Sphere(s) => Some(s.base()),
+        SurfaceKind::Torus(t) => Some(t.base()),
+        _ => None,
+    }
+}
+
+/// `GetRotateParamExtent`'s direction: 0 = u, 1 = v; and whether the surface of
+/// revolution makes a full turn (`360 - SM_EFF_ZERO_SQRT` degrees or more).
+fn rotation_of(rev: &SurfOfRevolution) -> (usize, bool) {
+    let rot = usize::from(rev.swap_uv());
+    let full = rev.end_angle_deg() - rev.start_angle_deg() >= 360.0 - EFF_ZERO_SQRT;
+    (rot, full)
+}
+
+/// `sm_ContinuedSurface` (tangency-labs/smlib@db4a655): the surface of `f` continued
+/// exactly as far as it must to hold the feet of `points`: over its own domain (a copy)
+/// where that holds them; a cylinder, cone, sphere or torus continued as itself
+/// ([`OffsetSurface::continue_as_itself`]) where a point farther than `tol` from it has its
+/// foot on a side of the domain it can grow past, each such side grown by the domain's
+/// size times the least power of two that takes the feet off it (32 rounds at most). Round
+/// the axis a surface of revolution grows only where it does not close its turn already.
+/// A plane is [`plane_of`]'s, not continued here.
+///
+/// # Errors
+/// `SM_ERR_NULL_POINTER` for a face without surface; those of the copies, the
+/// continuations and the drops.
+pub fn continued_surface(
+    k: &Kernel,
+    b: &Brep,
+    f: FaceId,
+    points: &[Point3],
+    tol: f64,
+) -> Result<ContinuedSurface> {
+    let base = face::p2::surface(b, f)?.ok_or_else(|| SolidError::null_pointer(OP))?;
+    let domain = base.natural_uv_domain_with_nurb(k)?;
+    let size = domain.size();
+    let as_itself = OffsetSurface::continues_as_itself(base);
+    // the directions that can grow: both, but round the axis of a full turn
+    let mut grows = [true, true];
+    if as_itself {
+        if let Some(rev) = revolution(base) {
+            let (rot, full) = rotation_of(rev);
+            if full {
+                if let Some(g) = grows.get_mut(rot) {
+                    *g = false;
+                }
+            }
+        }
+    }
+    let (mut lo, mut hi) = (domain.min(), domain.max());
+    for round in 0..32u32 {
+        let surface = if round == 0 {
+            base.copy(k)?
+        } else {
+            OffsetSurface::continue_as_itself(k, base, lo, hi)?
+        };
+        let have = surface.natural_uv_domain_with_nurb(k)?;
+        let edge = [
+            1.0e-9 * smos_max(have.size().x, 1.0),
+            1.0e-9 * smos_max(have.size().y, 1.0),
+        ];
+        let (mut low, mut high, mut on_side) = ([false, false], [false, false], false);
+        let mut gap = 0.0;
+        for &p in points {
+            let dropped =
+                surface.drop_point::<NoObject>(k, p, &have, &DropPointOptions::default())?;
+            let dist = if dropped.success {
+                dropped.gap
+            } else {
+                BIG_DOUBLE
+            };
+            gap = smos_max(gap, dist);
+            if !dropped.success || dist <= tol {
+                continue;
+            }
+            let uv = [dropped.result_uv.x, dropped.result_uv.y];
+            let (min, max) = ([have.min().x, have.min().y], [have.max().x, have.max().y]);
+            for d in 0..2 {
+                let (Some(&u), Some(&a), Some(&z), Some(&e)) =
+                    (uv.get(d), min.get(d), max.get(d), edge.get(d))
+                else {
+                    continue;
+                };
+                if u <= a + e {
+                    if let Some(l) = low.get_mut(d) {
+                        *l = true;
+                    }
+                    on_side = true;
+                }
+                if u >= z - e {
+                    if let Some(h) = high.get_mut(d) {
+                        *h = true;
+                    }
+                    on_side = true;
+                }
+            }
+        }
+        let grow =
+            on_side && ((grows[0] && (low[0] || high[0])) || (grows[1] && (low[1] || high[1])));
+        if !grow || !as_itself {
+            return Ok(ContinuedSurface {
+                surface,
+                gap,
+                exact: !grow || as_itself,
+            });
+        }
+        let factor = f64::from(1u32 << round.min(20));
+        if grows[0] && low[0] {
+            lo.x -= factor * size.x;
+        }
+        if grows[0] && high[0] {
+            hi.x += factor * size.x;
+        }
+        if grows[1] && low[1] {
+            lo.y -= factor * size.y;
+        }
+        if grows[1] && high[1] {
+            hi.y += factor * size.y;
+        }
+    }
+    // no foot comes off the sides: the points are not on the surface's continuation
+    Ok(ContinuedSurface {
+        surface: base.copy(k)?,
+        gap: BIG_DOUBLE,
+        exact: true,
+    })
+}
+
 /// `sm_DistanceToSurface`: the distance from `point` to the surface of `f` continued, as far
-/// as it continues exactly: a plane's to the whole plane, any other surface's to its own
-/// domain (`BIG_DOUBLE` when the drop fails). A planar surface of any kind ([`plane_of`];
-/// WR-635, `eddf0ed`) continues as its plane.
+/// as it continues exactly: a plane's to the whole plane, a cylinder's, cone's, sphere's or
+/// torus's to itself continued ([`continued_surface`], tangency-labs/smlib@db4a655), any
+/// other surface's to its own domain (`BIG_DOUBLE` when the drop fails). A planar surface
+/// of any kind ([`plane_of`]; WR-635, `eddf0ed`) continues as its plane.
 ///
 /// # Errors
 /// `SM_ERR_NULL_POINTER` for a face without surface; those of the drop.
@@ -267,15 +423,7 @@ pub fn distance_to_surface(k: &Kernel, b: &Brep, f: FaceId, point: Point3) -> Re
     if let Some(frame) = plane_of(k, surface)? {
         return Ok((point - frame.origin).dot(frame.z).abs());
     }
-    let surface = surface.clone_for_evaluation()?;
-    let domain = surface.natural_uv_domain_with_nurb(k)?;
-    let dropped =
-        surface.drop_point::<NoObject>(k, point, &domain, &DropPointOptions::default())?;
-    Ok(if dropped.success {
-        dropped.gap
-    } else {
-        BIG_DOUBLE
-    })
+    Ok(continued_surface(k, b, f, &[point], 0.0)?.gap)
 }
 
 /// `sm_Samples`: `count + 1` points along a curve's natural interval, its ends among them,
@@ -290,8 +438,10 @@ fn samples(k: &Kernel, curve: &Curve, count: u32, points: &mut Vec<Point3>) -> R
 
 /// `sm_CoveringSurface`: a surface that is `f`'s surface, whose domain holds every point of
 /// `points` (all on it): a plane the same plane over a domain that covers them (a margin of
-/// 1% of the box's diagonal and `10 tol`), any other surface a copy of itself when its own
-/// domain does (`None`, not exact, when it does not).
+/// 1% of the box's diagonal and `10 tol`), a cylinder, cone, sphere or torus itself
+/// continued as far as they reach ([`continued_surface`], tangency-labs/smlib@db4a655), any
+/// other surface a copy of itself when its own domain does (`None`, not exact, when it does
+/// not).
 ///
 /// # Errors
 /// `SM_ERR` for no points on a plane; `SM_ERR_NULL_POINTER` for a face without surface;
@@ -335,13 +485,12 @@ pub fn covering_surface(
             &domain,
         ))));
     }
-    // Within its own domain, or not exactly.
-    for &p in points {
-        if distance_to_surface(k, b, f, p)? > tol {
-            return Ok(None);
-        }
+    // Continued as itself, or within its own domain, or not exactly (tangency-labs/smlib@db4a655).
+    let continued = continued_surface(k, b, f, points, tol)?;
+    if !continued.exact || continued.gap > tol {
+        return Ok(None);
     }
-    Ok(Some(surface.copy(k)?))
+    Ok(Some(continued.surface))
 }
 
 /// `sm_LiesOnSurface` (WR-635, `eddf0ed`): whether the sheet face `sheet_face` of `region`
@@ -778,10 +927,11 @@ pub fn lamina_chains(
             closed: false,
         };
         done.insert(first);
-        // forward from the first edge's end vertex
-        let mut closed = false;
+        // forward from the first edge's end vertex; a closed edge alone (a closed rim's
+        // rail, one circle) closes its chain at once (tangency-labs/smlib@db4a655)
+        let mut closed = start == end;
         let mut steps = 0;
-        loop {
+        while !closed {
             steps += 1;
             if steps > bound {
                 return Err(SolidError::sm_err(OP));
@@ -1235,7 +1385,15 @@ pub fn close_removal_region(
     let chains = lamina_chains(region, &hosts, note)?;
     for chain in &chains {
         if chain.closed {
-            close_round_loop(k, region, target, blended, chain, on_tol, note)?;
+            // on a plane, round a loop of blended edges; on a full turn of a surface of
+            // revolution, the band from its blended rim (tangency-labs/smlib@db4a655)
+            let host_surface = face::p2::surface(target, chain.host)?
+                .ok_or_else(|| SolidError::null_pointer(OP))?;
+            if plane_of(k, host_surface)?.is_some() {
+                close_round_loop(k, region, target, blended, chain, on_tol, note)?;
+            } else {
+                close_band(k, region, target, blended, chain, on_tol, note)?;
+            }
             continue;
         }
         closing_face(k, region, target, blended, &hosts, chain, on_tol, note)?;
@@ -1484,4 +1642,176 @@ pub fn close_round_loop(
         )
     })?;
     made.face.ok_or_else(|| SolidError::null_pointer(OP))
+}
+
+/// The refusal of a closing band on a face that is not a full turn of a surface of
+/// revolution.
+const BAND_NOT_A_TURN: Refusal = Refusal::no_room(
+    NoRoomReason::CliffBoundaryClosed,
+    "Fillet Error: a cliff overflow's fillet boundary closes on one face that is neither planar nor a full turn of a surface of revolution",
+);
+
+/// The fork's `sm_CloseBand` (tangency-labs/smlib@db4a655): the closing face, on the
+/// host's surface continued as itself, of a chain of the sheet's boundary that closes on
+/// that one face where it is a full turn of a cylinder, cone, sphere or torus (a closed
+/// rim's wall, the rim rounded or chamfered past the wall's far end): the band of the
+/// surface between the chain and the blended edge of the host the chain's fillet faces
+/// blend, each a full circle round the axis, a parameter line of the surface; made in the
+/// sheet's infinite region (`CreateFaceInRegionFromSurface`). Refused (`NoRoom`) when the
+/// host is no such surface, no edge or more than one is found, or the two circles are
+/// one; `NotExact` when the continued surface does not hold them or the chain or the edge
+/// is not a parameter line round the axis (the band would need curves on the surface it
+/// has no exact construction for).
+///
+/// # Errors
+/// The refusals as `SM_ERR`; `SM_ERR` for a failed drop; those of the curves, the covering
+/// surface and the face construction.
+#[allow(clippy::too_many_lines)] // one fork routine
+pub fn close_band(
+    k: &mut Kernel,
+    region: &mut Brep,
+    target: &Brep,
+    blended: &Blended,
+    chain: &Chain,
+    on_tol: f64,
+    note: &mut Option<Refusal>,
+) -> Result<FaceId> {
+    let host = chain.host;
+    let base = face::p2::surface(target, host)?.ok_or_else(|| SolidError::null_pointer(OP))?;
+    if !OffsetSurface::continues_as_itself(base) {
+        return refuse(note, BAND_NOT_A_TURN);
+    }
+    let Some(rev) = revolution(base) else {
+        return refuse(note, BAND_NOT_A_TURN);
+    };
+    let (rot, full) = rotation_of(rev);
+    if !full {
+        return refuse(note, BAND_NOT_A_TURN);
+    }
+    let gen = 1 - rot;
+
+    // the filleted edge of the host the chain's fillet faces blend
+    let mut along: BTreeSet<EdgeId> = BTreeSet::new();
+    for &e in &chain.edges {
+        for f in edge::faces(region, e, None)? {
+            if let Some(&filleted) = blended.edge_of_fillet.get(&f) {
+                along.insert(filleted);
+            }
+        }
+    }
+    let mut rim = None;
+    for e in face::p4::edges(target, host, None, false, None)? {
+        if !along.contains(&e) {
+            continue;
+        }
+        if rim.is_some_and(|r| r != e) {
+            return refuse(
+                note,
+                Refusal::no_room(
+                    NoRoomReason::CliffBoundaryClosed,
+                    "Fillet Error: a cliff overflow's fillet boundary closes on one face round two of its blended edges",
+                ),
+            );
+        }
+        rim = Some(e);
+    }
+    let rim = match rim {
+        Some(e) => {
+            let (s, t) = edge::start_end_vertices(target, e)?;
+            (s == t).then_some(e)
+        }
+        None => None,
+    };
+    let Some(rim) = rim else {
+        return refuse(
+            note,
+            Refusal::no_room(
+                NoRoomReason::CliffBoundaryClosed,
+                "Fillet Error: a cliff overflow's fillet boundary closes on one face round no closed blended edge of it",
+            ),
+        );
+    };
+
+    // the host's surface continued over the chain, and each run's parameter round the axis
+    let mut runs: [Vec<Point3>; 2] = [Vec::new(), Vec::new()]; // the rim's, the chain's
+    samples(k, &edge_curve(k, target, rim)?, 16, &mut runs[0])?;
+    for &e in &chain.edges {
+        samples(k, &edge_curve(k, region, e)?, 16, &mut runs[1])?;
+    }
+    let mut all = runs[0].clone();
+    all.extend_from_slice(&runs[1]);
+    let Some(surface) = covering_surface(k, target, host, &all, on_tol)? else {
+        return refuse(
+            note,
+            Refusal::not_exact(
+                "Fillet Error: a cliff overflow's fillet boundary closes on one face's surface continued, which does not hold it",
+            ),
+        );
+    };
+    let domain = surface.natural_uv_domain_with_nurb(k)?;
+    let gen_of = |uv: Point2| if gen == 0 { uv.x } else { uv.y };
+    let mut gens = [0.0, 0.0];
+    for (run, avg) in runs.iter().zip(gens.iter_mut()) {
+        // the parameter along the generator: the same at every point, a parameter line
+        // round the axis
+        let mut uvs = Vec::new();
+        for &p in run {
+            let dropped =
+                surface.drop_point::<NoObject>(k, p, &domain, &DropPointOptions::default())?;
+            if !dropped.success {
+                return Err(SolidError::sm_err(OP));
+            }
+            uvs.push(dropped.result_uv);
+            *avg += gen_of(dropped.result_uv);
+        }
+        *avg /= uvs.len() as f64;
+        for (uv, &p) in uvs.iter().zip(run) {
+            let mut on = *uv;
+            if gen == 0 {
+                on.x = *avg;
+            } else {
+                on.y = *avg;
+            }
+            if surface.evaluate_point(k, on)?.distance(p) > on_tol {
+                return refuse(
+                    note,
+                    Refusal::not_exact(
+                        "Fillet Error: a cliff overflow's fillet boundary closes on a surface of revolution off its circles round the axis",
+                    ),
+                );
+            }
+        }
+    }
+    if (gens[0] - gens[1]).abs() <= EFF_ZERO_SQRT {
+        return refuse(
+            note,
+            Refusal::no_room(
+                NoRoomReason::CliffBoundaryClosed,
+                "Fillet Error: a cliff overflow's fillet boundary closes on one face along its blended edge",
+            ),
+        );
+    }
+    // the band: round the whole turn, from the one circle to the other
+    let (mut lo, mut hi) = (domain.min(), domain.max());
+    if gen == 0 {
+        lo.x = smos_min(gens[0], gens[1]);
+        hi.x = smos_max(gens[0], gens[1]);
+    } else {
+        lo.y = smos_min(gens[0], gens[1]);
+        hi.y = smos_max(gens[0], gens[1]);
+    }
+    let band = Extent2d::from_points(lo, hi);
+    let made = with_kernel_callbacks(k, region, |k, b, env| {
+        let key_of = env.key_of;
+        let this_face = |f: FaceId| key_of(EntityRef::Face(f));
+        let mut marks = Marks::default();
+        let region_id = b.infinite_region();
+        let mut fenv = FaceBuildEnv {
+            env,
+            marks: &mut marks,
+            this_face: &this_face,
+        };
+        create_face_in_region_from_surface(k, b, region_id, Some(surface), &band, &mut fenv)
+    })?;
+    Ok(made.face)
 }

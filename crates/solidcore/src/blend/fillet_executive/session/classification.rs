@@ -21,6 +21,9 @@ pub(super) struct Objects<'a> {
     pub pseudo: &'a Brep,
     pub second: Option<&'a Brep>,
     pub classified: FilletBody,
+    /// The curves of [`FilletClassObject::FreeCurve`] handles: a 3D curve and its UV
+    /// curve in no body.
+    pub free: [Option<&'a Curve>; 2],
 }
 
 impl<'a> Objects<'a> {
@@ -31,6 +34,7 @@ impl<'a> Objects<'a> {
             pseudo,
             second: None,
             classified: FilletBody::Target,
+            free: [None, None],
         }
     }
 
@@ -63,6 +67,7 @@ impl ClassGeometry<FilletClassObject> for Objects<'_> {
             FilletClassObject::TrimCurve(body, eu) => {
                 self.body(body).edgeuse(eu).ok()?.uv_trim_curve.as_ref()
             }
+            FilletClassObject::FreeCurve(i) => self.free.get(usize::from(i)).copied().flatten(),
             _ => None,
         }
     }
@@ -204,6 +209,42 @@ impl crate::blend::fillet_solver::p5::RailClassificationContext for Context<'_> 
         // made before a failed classification. Use the shared query synchronization.
         cache.apply_uv_trim_updates(target)?;
         result.map(|_| ())
+    }
+    fn classify_free_curve(
+        &mut self,
+        k: &crate::kernel::Kernel,
+        target: &mut Brep,
+        pseudo: &Brep,
+        face: FaceId,
+        curve: &Curve,
+        interval: crate::geom::extent1d::Extent1d,
+        uv_curve: Option<&Curve>,
+        zone_tol_3d: f64,
+    ) -> crate::error::Result<
+        Vec<crate::intersect::curve_class::p1::CurveInterval<FilletClassObject>>,
+    > {
+        let mut cc = crate::intersect::curve_class::p1::CurveClassification::new(k);
+        cc.reset(
+            k,
+            &crate::intersect::curve_class::p2::ResetOptions {
+                curve: Some(FilletClassObject::FreeCurve(0)),
+                interval: Some(interval),
+                uv_curve: uv_curve.map(|_| FilletClassObject::FreeCurve(1)),
+                zone_tol_3d,
+                ..crate::intersect::curve_class::p2::ResetOptions::default()
+            },
+        )?;
+        let mut cache = crate::query::face::p2::CurveOnClassifyCache::default();
+        let result = {
+            let mut objects = Objects::new(target, pseudo);
+            objects.free = [Some(curve), uv_curve];
+            crate::query::face::p2::curve_on_classify_cached(
+                k, target, face, &objects, true, &mut cc, true, false, true, &mut cache,
+            )
+        };
+        cache.apply_uv_trim_updates(target)?;
+        result?;
+        Ok(cc.intervals().to_vec())
     }
     fn corner_type(
         &self,

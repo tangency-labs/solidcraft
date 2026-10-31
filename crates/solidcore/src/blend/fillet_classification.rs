@@ -35,6 +35,10 @@ pub enum FilletClassObject {
     TrimCurve(FilletBody, EdgeuseId),
     /// The retained surface of this body's face.
     Surface(FilletBody, FaceId),
+    /// A curve in no body that a classification is given: 0 = its 3D curve, 1 = its UV
+    /// curve (the fork's end section of `EndSectionsFitTheirFaces`, tangency-labs/smlib
+    /// `a307480`, an intersection curve classified against the end face).
+    FreeCurve(u8),
 }
 
 impl FilletClassObject {
@@ -68,7 +72,7 @@ impl ClassObject for FilletClassObject {
     fn class_kind(&self) -> ClassObjectKind {
         match self {
             Self::Legacy(entity) | Self::Topology(_, entity) => entity.class_kind(),
-            Self::Curve(..) | Self::TrimCurve(..) => ClassObjectKind::Curve,
+            Self::Curve(..) | Self::TrimCurve(..) | Self::FreeCurve(_) => ClassObjectKind::Curve,
             Self::Surface(..) => ClassObjectKind::Surface,
         }
     }

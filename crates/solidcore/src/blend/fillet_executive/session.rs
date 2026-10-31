@@ -3374,6 +3374,38 @@ impl crate::blend::fillet_solver::p5::RailClassificationContext for SessionRollO
     fn corner_type(&self, corner: FilletCornerId) -> Result<FilletCornerType> {
         self.classification().corner_type(corner)
     }
+    fn corner_of_vertex(&self, vertex: VertexId) -> Result<Option<FilletCornerId>> {
+        Ok(session_corner_of_vertex(self.executive, vertex))
+    }
+    #[allow(clippy::too_many_arguments)]
+    fn classify_free_curve(
+        &mut self,
+        k: &Kernel,
+        target: &mut Brep,
+        pseudo: &Brep,
+        face: FaceId,
+        curve: &crate::curve::curve::Curve,
+        interval: crate::geom::extent1d::Extent1d,
+        uv_curve: Option<&crate::curve::curve::Curve>,
+        zone_tol_3d: f64,
+    ) -> Result<
+        Vec<
+            crate::intersect::curve_class::p1::CurveInterval<
+                crate::blend::fillet_classification::FilletClassObject,
+            >,
+        >,
+    > {
+        self.classification().classify_free_curve(
+            k,
+            target,
+            pseudo,
+            face,
+            curve,
+            interval,
+            uv_curve,
+            zone_tol_3d,
+        )
+    }
     fn corners(&self) -> CornerLookup<'_> {
         CornerLookup::table(self.corners)
     }
@@ -3579,6 +3611,32 @@ impl SolverGeometryAccess<FilletObject> for SessionObjects<'_> {
             &mut self.pseudo,
             &mut context,
             true,
+        )
+    }
+    fn geometry_end_sections_fit(
+        &mut self,
+        k: &mut Kernel,
+        solver: FilletObject,
+        executive: &FilletExecutive<FilletObject>,
+    ) -> Result<bool> {
+        let FilletObject::Solver(id) = solver else {
+            return Err(invalid("object is not a solver"));
+        };
+        let solver = self
+            .solvers
+            .get_mut(id.0 as usize)
+            .and_then(Option::as_mut)
+            .ok_or_else(|| invalid("solver is not live in this session"))?;
+        let mut context = SessionRollOver {
+            corners: &mut self.corners,
+            executive,
+        };
+        FilletSolver::end_sections_fit_their_faces_with_ops(
+            live_solver_ops(solver),
+            k,
+            self.target,
+            &mut self.pseudo,
+            &mut context,
         )
     }
     fn geometry_blend_adds_material(

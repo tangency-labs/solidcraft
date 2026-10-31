@@ -534,9 +534,14 @@ fn run_side_edge_on_along_its_line(
     let Some(side_3d) = edge::curve(b, side_edge)?.cloned() else {
         return Ok(false);
     };
+    // The fork's tangency-labs/smlib@779cb9b: so does a straight side edge on a cylinder or
+    // cone, a ruling of it (its UV trim a line): the surface continues as itself past its
+    // domain (`offset_extension_as_itself`), along that line. A closed rim's seam is one: a
+    // disc's rim rounded past its 2 mm wall meets the seam's line below the wall.
     if !(side_3d.is_linear(k, EFF_ZERO, false)?.linear
         && uv_trim.is_linear(k, EFF_ZERO, false)?.linear
-        && base.is_planar(k, EFF_ZERO)?.is_planar)
+        && (base.is_planar(k, EFF_ZERO)?.is_planar
+            || matches!(base.kind(), crate::surface::surface::SurfaceKind::Cone(_))))
     {
         return Ok(false);
     }

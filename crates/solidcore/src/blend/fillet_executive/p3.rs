@@ -2154,6 +2154,24 @@ pub trait SolverGeometryAccess<O: ClassObject + SolutionObject + Ord> {
             "blend.fillet_executive_p3",
         ))
     }
+    /// The fork's `SmFilletSolver::EndSectionsFitTheirFaces` for `solver` (WR-631,
+    /// `fixes.fillet_cliff_overflow`; tangency-labs/smlib `a307480`): whether its fillet's
+    /// end section at each Nx1 end lies on its end face.
+    ///
+    /// # Errors
+    /// [`SolidError::Unported`] without live context; the classification's errors.
+    fn geometry_end_sections_fit(
+        &mut self,
+        k: &mut Kernel,
+        solver: O,
+        executive: &FilletExecutive<O>,
+    ) -> Result<bool> {
+        let _ = (k, solver, executive);
+        Err(SolidError::unported(
+            "SmFilletSolver::EndSectionsFitTheirFaces (fork)",
+            "blend.fillet_executive_p3",
+        ))
+    }
     /// The fork's `sm_BlendAddsMaterial` for `solver` (WR-631): whether its blend fills
     /// the void between its faces (its edge is concave, `SmFilletSolver::IsConcaveEdge`).
     ///
@@ -2529,7 +2547,10 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
             if judged.rolls_over {
                 rolls_over = true;
             }
-            if judged.fit {
+            // the fork's tangency-labs/smlib@a307480: an end section that runs off its end
+            // face overflows it the same way
+            let fit = judged.fit && access.geometry_end_sections_fit(k, solver, self)?;
+            if fit {
                 continue;
             }
             overflow = true;

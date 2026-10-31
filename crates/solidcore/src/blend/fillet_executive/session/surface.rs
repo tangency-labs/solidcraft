@@ -150,6 +150,7 @@ impl SurfaceSurfaceContext for SurfaceSurfaceSession<'_> {
                 pseudo,
                 second: Some(second),
                 classified: FilletBody::SecondBase,
+                free: [None, None],
             };
             crate::query::face::p2::curve_on_classify_cached(
                 k, second, face, &objects, true, cc, true, false, true, &mut cache,
@@ -175,6 +176,7 @@ impl SurfaceSurfaceContext for SurfaceSurfaceSession<'_> {
             pseudo: &snapshot,
             second: bases.second.as_deref(),
             classified: FilletBody::Target,
+            free: [None, None],
         };
         solver.split_and_trim_fillet_surface_with(
             k,
