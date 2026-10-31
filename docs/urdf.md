@@ -15,7 +15,8 @@ URDF always exports the whole assembly, so `bodies` is refused.
 
 ## Files
 
-Next to `robot.urdf` the export writes one binary STL per component, in metres:
+The export writes one binary STL per component, in metres, next to `robot.urdf` unless `mesh_prefix`
+names a folder:
 
 - `robot-<component>.stl` holds all of the component's bodies. The root component's bodies go
   in `robot-base.stl`.
@@ -30,7 +31,7 @@ way, the error names the files already written and the one that failed.
 
 | Parameter | Default | Meaning |
 |---|---|---|
-| `mesh_prefix` | none | Put before each mesh file name. Leave it empty for loaders that resolve against the URDF's folder (Isaac Sim, PyBullet, MuJoCo, yourdfpy). RViz and other ROS tools need `package://<pkg>/meshes/` or an absolute folder. |
+| `mesh_prefix` | none | Put before each mesh file name, and decides where the meshes are written (see below). Leave it empty for loaders that resolve against the URDF's folder (Isaac Sim, PyBullet, MuJoCo, yourdfpy). RViz and other ROS tools need `package://<pkg>/meshes/` or an absolute folder. |
 | `effort` | 1000 | Effort limit for joint values with none saved, in N (sliding) or N m (turning). |
 | `velocity` | 10 | Velocity limit for joint values with none saved, in m/s or rad/s. |
 | `collision` | mesh | What a body left on `auto` becomes: `mesh` or `convex_hull`. See [Collision shapes](#collision-shapes). |
@@ -39,6 +40,17 @@ way, the error names the files already written and the one that failed.
 URDF requires `effort` and `velocity` on every moving joint. A joint's own values come first, then
 these parameters, then the defaults, with a warning naming the joints that used them. A value that
 is not a positive number is refused.
+
+The meshes go where the URDF says they are, and a missing folder is created:
+
+| `mesh_prefix` | Written to |
+|---|---|
+| `meshes/` | `meshes/` next to the URDF |
+| `../meshes/` | `meshes/` beside the URDF's folder |
+| `v1_` | Next to the URDF, with names starting `v1_` |
+| `package://robot/meshes/` | `robot/meshes/` when the URDF is in `robot/` or `robot/urdf/`, otherwise `meshes/` next to the URDF |
+| `file:///opt/robot/meshes/` | That folder |
+| `https://…` | Next to the URDF, with a warning: copy them there yourself |
 
 ## Joint dynamics
 
