@@ -493,7 +493,8 @@ fn align(s: &mut Session, p: &Value) -> Result<Value> {
     let axes = axes.map(|mask| {
         mask.into_iter()
             .zip([Vec3::X, Vec3::Y, Vec3::Z])
-            .filter_map(|(on, world)| on.then(|| Dir(solidcraft_doc::apply_vector(&inverse, world).normalized().unwrap_or(world))))
+            .filter(|&(on, _)| on)
+            .map(|(_, world)| Dir(solidcraft_doc::apply_vector(&inverse, world).normalized().unwrap_or(world)))
             .collect::<Vec<_>>()
     });
     let flip = bool_(p, "flip").unwrap_or(false);
