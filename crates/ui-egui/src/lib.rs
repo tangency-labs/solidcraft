@@ -216,6 +216,7 @@ pub mod recovery_ui;
 pub mod ref_images;
 mod render_ui;
 pub mod render_workspace;
+pub mod resume_ui;
 #[cfg(test)]
 mod revolve_edit_tests;
 #[cfg(test)]
@@ -2602,6 +2603,12 @@ impl SolveApp {
 
     /// Per-frame logic before layout.
     pub fn logic(&mut self, ctx: &egui::Context) {
+        // Sleep/wake often skips frames without a device-lost signal; refresh egui GPU textures
+        // when the frame clock jumps so the chrome is not stuck blank (#8749).
+        let frame_time = ctx.input(|i| i.time);
+        if resume_ui::is_long_pause(self.now, frame_time) {
+            resume_ui::after_long_pause(ctx);
+        }
         frame_watch::begin(self);
         gpu::tick_tessellation(self);
         file_picker::tick(self, ctx);
