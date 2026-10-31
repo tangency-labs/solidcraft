@@ -66,6 +66,8 @@ Keys handled by the window itself:
 | F6 | fit the view to the model |
 | ← → ↑ ↓ | turn the view 15° (with Shift, a quarter turn) |
 | Ctrl+← → ↑ ↓ | pan the view |
+| PageUp / PageDown | zoom in / out |
+| + / − | zoom in / out |
 | Ctrl+8 | look straight at the selected face, plane or sketch |
 | Esc | cancel the running command, or clear the selection |
 
