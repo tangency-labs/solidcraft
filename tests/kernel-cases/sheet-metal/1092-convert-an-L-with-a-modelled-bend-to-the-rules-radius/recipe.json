@@ -123,6 +123,7 @@
   {
    "command": "sheet.convert",
    "params": {
+    "mode": "thicken",
     "body": "Angle",
     "face": [
      30,

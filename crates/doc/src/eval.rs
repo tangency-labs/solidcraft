@@ -555,6 +555,9 @@ pub struct ModelState {
     pub reserved_body_names: std::collections::BTreeSet<String>,
     /// Sheet metal bodies (by body name) and their flat patterns.
     pub sheets: Vec<crate::sheet::SheetBody>,
+    /// Bodies converted to sheet metal (#6748): their flat patterns. Such a
+    /// body is the folded sheet.
+    pub surface_sheets: Vec<crate::SurfaceSheet>,
     /// Construction planes, axes and points as evaluated (by feature).
     pub construct: Vec<crate::construct::Construct>,
     /// Evaluation-cache keys of the sketches (by sketch feature id).
@@ -2107,6 +2110,7 @@ impl Model {
                 track_altered_sheets(&state, &mut next, f, &mut warning);
                 note_join_apart(&state, &next, f, &mut warning);
             }
+            let r = r.and_then(|()| absorb_sheet_cuts(&state, &mut next, f).map_err(|e| kernel::KernelError::Failed(e.to_string())));
             let ms = t0.elapsed().as_secs_f64() * 1000.0;
             let error = match r {
                 Ok(()) => {
@@ -2484,6 +2488,20 @@ fn pattern_copy_name(state: &ModelState, f: &Feature, k: usize, source: &str) ->
 fn copy_body_name(state: &ModelState, f: &Feature, k: usize, source: &str) -> String {
     let base = f.body_names.get(k).filter(|name| !name.trim().is_empty()).map(String::as_str).unwrap_or(source);
     unique_body_name(state, base)
+}
+
+/// Reads what a feature cut from a sheet made from surfaces back onto its sheet, and puts the
+/// body built again from the sheet in place (#6748, see `sheet_surface_cuts`).
+fn absorb_sheet_cuts(before: &ModelState, after: &mut ModelState, f: &Feature) -> Result<()> {
+    for (i, sk, built) in crate::sheet_surface_cuts::absorb(before, after, f)? {
+        if let Some(b) = after.bodies.iter_mut().find(|b| b.name == sk.body) {
+            more::replace_sheet_body(b, built);
+        }
+        if let Some(slot) = after.surface_sheets.get_mut(i) {
+            *slot = sk;
+        }
+    }
+    Ok(())
 }
 
 /// Keeps each sheet metal body's flat pattern true to the body (see `SheetBody::altered_by`).
@@ -6394,7 +6412,8 @@ fn eval_feature(
         | FeatureKind::SheetFold { .. }
         | FeatureKind::SheetPath { .. }
         | FeatureKind::SheetUnfold { .. }
-        | FeatureKind::SheetConvert { .. } => more::sheet_eval(doc, vals, f, st, warning),
+        | FeatureKind::SheetConvert { .. }
+        | FeatureKind::SheetSurfaceConvert { .. } => more::sheet_eval(doc, vals, f, st, warning),
         FeatureKind::Boss { .. } | FeatureKind::Lip { .. } | FeatureKind::SnapFit { .. } | FeatureKind::Rest { .. } => {
             more::plastic_eval(doc, vals, f, st)
         }

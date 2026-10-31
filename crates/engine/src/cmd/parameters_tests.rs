@@ -208,7 +208,7 @@ fn rules_and_canvases_follow_a_renamed_parameter() {
     run(&mut s, "canvas.insert", json!({"data": solidcraft_doc::canvas::base64_encode(&png), "plane": "XY", "offset": "lift"}));
     run(&mut s, "sheet.manage_rules", json!({"name": "Steel", "thickness": "gauge", "active": true}));
     run(&mut s, "solid.box", json!({"length": 60, "width": 40, "height": 2, "body_name": "Tray"}));
-    run(&mut s, "sheet.convert", json!({"body": "Tray", "face": [30, 20, 2], "rule": "Steel"}));
+    run(&mut s, "sheet.convert", json!({"mode": "thicken", "body": "Tray", "face": [30, 20, 2], "rule": "Steel"}));
     run(&mut s, "plastic.manage_rules", json!({"name": "Housing", "draft": "taper", "clearance": "gauge / 10"}));
     let users = |s: &mut Session, name: &str| -> Vec<String> {
         let u = run(s, "parameters.users", json!({"name": name}));

@@ -20,8 +20,9 @@ face.  The conventions that place them are SolidCraft's documented sheet-metal s
     between the panels' inner corners is the rule gap (corner open, no corner fill).
   * A later flange on an adjacent edge trims the base under the earlier bend; that bend stops
     at the trimmed base corner and the earlier panel runs on alone (an open corner relief).
-  * Flat hem: 180 deg bend with inner radius hem_gap = 0.01 mm toward the face it starts from
-    (inside), length measured from the outer face of the hem bend, leg = L - (gap + t).
+  * Flat hem: 180 deg bend toward the face it starts from (inside), its leg hem_gap = 0.01 mm off
+    that face (inner radius gap/2), length measured from the outer face of the hem bend,
+    leg = L - (gap/2 + t).
   * Contour flange: the sketch lines are the sheet face on the side away from the material
     (material right of travel); a corner that bends toward the material has the sketch
     corner as the outer virtual sharp (setback (R+t)tan), the other as inner (setback R tan).
@@ -324,16 +325,17 @@ def c73():
     t, R, g = rv["t"], rv["R"], rv["hem_gap"]
     pieces, joints, info = edge_flange_section(60, 20, PI / 2, rv)
     L = 8.0
-    leg = L - (g + t)
-    hem_bend = Sector((t + g, 20.0), g, g + t, 0.0, PI)
-    hem_panel = Rect(t + 2 * g, 2 * t + 2 * g, 20.0 - leg, 20.0)
+    r = g / 2
+    leg = L - (r + t)
+    hem_bend = Sector((t + r, 20.0), r, r + t, 0.0, PI)
+    hem_panel = Rect(t + g, 2 * t + g, 20.0 - leg, 20.0)
     sec = Section(pieces + [hem_bend, hem_panel], joints + 2 * t)
     V, A, com, bb = extrusion([(0, 100, sec)], yz)
-    m = ("68's part (height 20) plus a flat hem on the flange top edge: 180 deg bend, inner radius = hem gap 0.01, outer 2.51, "
-         "about (y 2.51, z 20), folded toward +y (inside); hem leg 8 - (0.01 + 2.5) = 5.49: y 2.52..5.02, z 14.51..20; "
+    m = ("68's part (height 20) plus a flat hem on the flange top edge: 180 deg bend, inner radius = hem gap 0.01 / 2, outer 2.505, "
+         "about (y 2.505, z 20), folded toward +y (inside); hem leg 8 - (0.005 + 2.5) = 5.495: y 2.51..5.01, z 14.505..20; "
          "extrusion along x 100")
     return record(V, A, com, bb, m, faces=None,
-                  note="SolidCraft conventions: hem gap 0.01 mm (rule hem_gap), hem length measured to the outer face of the hem bend (top at z 22.51), hem folds over the flange's inner face.")
+                  note="SolidCraft conventions: hem gap 0.01 mm (rule hem_gap) between the hem's leg and the face it folds over, hem length measured to the outer face of the hem bend (top at z 22.505), hem folds over the flange's inner face.")
 
 
 def c74():

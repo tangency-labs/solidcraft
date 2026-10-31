@@ -68,7 +68,9 @@ impl FeatureKind {
             | FeatureKind::Boss { body, .. }
             | FeatureKind::SnapFit { body, .. }
             | FeatureKind::Rest { body, .. } => body.as_deref(),
-            FeatureKind::SheetConvert { body, .. } | FeatureKind::SurfaceRuled { body, .. } => Some(body.as_ref()),
+            FeatureKind::SheetConvert { body, .. } | FeatureKind::SheetSurfaceConvert { body, .. } | FeatureKind::SurfaceRuled { body, .. } => {
+                Some(body.as_ref())
+            }
             FeatureKind::SurfaceUntrim { face, .. } => Some(face.body.as_ref()),
             _ => None,
         }
