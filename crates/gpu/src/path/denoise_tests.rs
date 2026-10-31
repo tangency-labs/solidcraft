@@ -7,6 +7,7 @@ use solidcraft_render::{
     surface::OpaqueSurface,
 };
 use std::sync::Arc;
+use wgpu::util::DeviceExt;
 
 type Guide = [[f64; 4]; 3];
 fn dot(a: [f64; 3], b: [f64; 3]) -> f64 {

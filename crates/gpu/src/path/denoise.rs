@@ -1,6 +1,5 @@
 //! Optional output filtering; never writes the Monte Carlo accumulation buffer.
-use super::{Context, Result, SHADER, TIMEOUT, Task, checked, placeholder_bind, scopes, warm_up};
-use wgpu::util::DeviceExt;
+use super::{Context, Result, SHADER, TIMEOUT, Task, checked, gpu, placeholder_bind, scopes, warm_up};
 
 pub(super) const BYTES_PER_PIXEL: u64 = 80; // three guide vec4s and two colour vec4s
 const FILTER: &str = include_str!("denoise.wgsl");
@@ -122,11 +121,15 @@ impl Resources {
             .collect();
         let guide_bind =
             device.create_bind_group(&wgpu::BindGroupDescriptor { label: Some("denoise guides"), layout: &context.layout, entries: &entries });
-        let filter_uniform = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("denoise parameters"),
-            contents: &[0; 32],
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-        });
+        let filter_uniform =
+            match crate::buffer_init(device, "denoise parameters", &[0; 32], wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST) {
+                Ok(buffer) => buffer,
+                Err(e) => {
+                    // Drain the scopes in order before returning.
+                    let _ = checked(error_scopes);
+                    return Err(gpu(e));
+                }
+            };
         let filter_binds = [(accumulation, &output), (&output, &temporary), (&temporary, &output)]
             .into_iter()
             .map(|(source, destination)| {
