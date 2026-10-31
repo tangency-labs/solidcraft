@@ -156,9 +156,11 @@ fn scene_sampler_uses_exact_active_occurrence_plane_and_preserves_other_scene_co
     let cam = Camera::default();
     let old = scene(&s, &cam);
     let default = scene_with_sketch_sampler(&s, &cam, world_curve_parts);
-    assert_eq!(old.lines.len(), default.lines.len());
-    for (a, b) in old.lines.iter().zip(&default.lines) {
-        assert_eq!((&a.points, a.color, a.width, a.on_top), (&b.points, b.color, b.width, b.on_top));
+    for (old, default) in [(&old.lines, &default.lines), (&old.unclipped_lines, &default.unclipped_lines)] {
+        assert_eq!(old.len(), default.len());
+        for (a, b) in old.iter().zip(default) {
+            assert_eq!((&a.points, a.color, a.width, a.on_top), (&b.points, b.color, b.width, b.on_top));
+        }
     }
     let mut planes = Vec::new();
     let parts = vec![vec![Vec3::new(22., 33., 40.), Vec3::new(23., 33., 40.)], vec![Vec3::new(25., 33., 40.), Vec3::new(26., 33., 40.)]];
@@ -177,8 +179,12 @@ fn scene_sampler_uses_exact_active_occurrence_plane_and_preserves_other_scene_co
     assert!(Arc::ptr_eq(&sampled.meshes[0].mesh, &old.meshes[0].mesh));
     assert_eq!(sampled.meshes[0].color, old.meshes[0].color);
     assert_eq!(sampled.meshes[0].face_colors, old.meshes[0].face_colors);
-    let lines = &sampled.lines[sampled.lines.len() - 2..];
-    for (line, part) in lines.iter().zip(parts) {
+    assert_eq!(sampled.lines.len(), old.lines.len());
+    for (a, b) in sampled.lines.iter().zip(&old.lines) {
+        assert_eq!((&a.points, a.color, a.width, a.on_top), (&b.points, b.color, b.width, b.on_top));
+    }
+    assert_eq!(sampled.unclipped_lines.len(), parts.len());
+    for (line, part) in sampled.unclipped_lines.iter().zip(parts) {
         assert_eq!(line.points, part);
         assert!(line.on_top);
         assert_eq!(line.width, 1.6);
@@ -188,6 +194,7 @@ fn scene_sampler_uses_exact_active_occurrence_plane_and_preserves_other_scene_co
     s.visibility.hidden_sketches.push(active);
     let hidden = scene_with_sketch_sampler(&s, &cam, |_, _, _| panic!("hidden sketch sampled"));
     assert!(hidden.lines.iter().all(|line| !line.on_top));
+    assert!(hidden.unclipped_lines.is_empty());
 }
 
 #[test]

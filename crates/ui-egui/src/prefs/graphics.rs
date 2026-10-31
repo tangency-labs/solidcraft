@@ -185,6 +185,7 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 crate::scenario::publish_target("prefs:preview_tint_new_faces", tint_new.rect);
                 let cut_tint = setting::cut_preview_tint(app, left).on_hover_text(app.tr("prefs.cut_preview_tint_help"));
                 crate::scenario::publish_target("prefs:cut_preview_tint", cut_tint.rect);
+                setting::section_clips_sketches(app, left).on_hover_text(app.tr("settings.section_clips_sketches_help"));
                 setting::sketch_halo(app, left);
                 setting::vertex_markers(app, left);
             }
