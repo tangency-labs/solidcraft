@@ -2462,3 +2462,24 @@ fn align_axes_are_world_axes_on_a_placed_component() {
     assert!(near(after.min.y, before.min.y + 20.0) && near(after.max.y, before.max.y + 20.0), "y: {after:?}");
     assert!(near(after.min.z, before.min.z) && near(after.max.z, before.max.z), "z: {after:?}");
 }
+
+/// The cut buttons' commands (#7905) are their tool with the operation fixed to Cut: Extrude Cut
+/// takes a 4 x 4 x 3 pocket out of a 10 mm cube as Extrude with `operation: cut` would, and every
+/// cut command refuses another operation before doing anything.
+#[test]
+fn the_cut_commands_always_cut() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length":10,"width":10,"height":10,"body_name":"Stock"}));
+    run(&mut s, "sketch.create", json!({"plane":"XY"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0":[3,3],"p1":[7,7]}));
+    run(&mut s, "sketch.finish", json!({}));
+    let features = s.doc.features.len();
+    for id in ["solid.extrude_cut", "solid.revolve_cut", "solid.sweep_cut", "solid.loft_cut"] {
+        let error = s.execute(id, &json!({"distance":3,"operation":"join"})).expect_err(id).to_string();
+        assert!(error.contains("always cut"), "{id}: {error}");
+    }
+    assert_eq!(s.doc.features.len(), features, "nothing was added");
+    run(&mut s, "solid.extrude_cut", json!({"distance":3}));
+    assert!((volume(&mut s) - (1000.0 - 48.0)).abs() < 1e-3, "{}", volume(&mut s));
+    assert_eq!(s.world_state().bodies.len(), 1, "cut, not a new body");
+}

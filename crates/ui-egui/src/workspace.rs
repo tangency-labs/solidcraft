@@ -105,6 +105,13 @@ const CONFIGURE: &[&str] = &["parameters.change", "config.table", "config.config
 /// points are moved with the triad that appears when one is clicked, not a Move button.
 pub const AGENT_ONLY: &[&str] = &["sketch.solve", "sketch.move3d"];
 
+/// Whether the ribbon's menus, Customize Toolbar and command search offer `id`. The cut buttons'
+/// commands (#7905) show only with their preference on; they stay registered for scripts, MCP and
+/// shortcuts either way.
+pub fn offered(app: &crate::SolveApp, id: &str) -> bool {
+    app.preferences.cut_buttons || !crate::dialogs::CUT_TOOLS.iter().any(|(cut, _)| *cut == id)
+}
+
 pub const SECTIONS: &[Section] = &[
     Section {
         tab: "MODEL",

@@ -1,0 +1,110 @@
+{
+  "en": {
+    "cmd.solid_extrude_cut": "Extrude Cut",
+    "cmd.solid_revolve_cut": "Revolve Cut",
+    "cmd.solid_sweep_cut": "Sweep Cut",
+    "cmd.solid_loft_cut": "Loft Cut",
+    "prefs.cut_buttons": "Cut buttons",
+    "prefs.cut_buttons_note": "With this on, Extrude Cut, Revolve Cut, Sweep Cut and Loft Cut are in the Create menu and in command search, and Extrude Cut and Revolve Cut sit right after Extrude and Revolve on the Model tab. Each opens its tool's dialog with the operation set to Cut. Off: none of them shows.",
+    "help.solid.extrude_cut": "Pushes a sketch profile into a body along a distance and removes the material it passes through. Use it for pockets, slots and through cuts.",
+    "help.solid.revolve_cut": "Spins a sketch profile around an axis and removes the material it sweeps through. Use it for grooves, bores and turned recesses in round parts.",
+    "help.solid.sweep_cut": "Moves a sketch profile along a path and removes the material it passes through. Use it for channels and grooves that follow a curve.",
+    "help.solid.loft_cut": "Blends between two or more sketch profiles and removes the material in between. Use it for pockets and openings whose shape changes along their depth."
+  },
+  "ja": {
+    "cmd.solid_extrude_cut": "押し出しカット",
+    "cmd.solid_revolve_cut": "回転カット",
+    "cmd.solid_sweep_cut": "スイープカット",
+    "cmd.solid_loft_cut": "ロフトカット",
+    "prefs.cut_buttons": "カット ボタン",
+    "prefs.cut_buttons_note": "オンにすると、押し出しカット、回転カット、スイープカット、ロフトカットが作成メニューとコマンド検索に表示され、モデル タブでは押し出しカットと回転カットが押し出しと回転のすぐ後に置かれます。どれも操作をカットにしてツールのダイアログを開きます。オフ: どれも表示されません。",
+    "help.solid.extrude_cut": "スケッチの輪郭を指定した距離だけボディに押し込み、通過した部分の材料を取り除きます。ポケット、溝、貫通カットに使います。",
+    "help.solid.revolve_cut": "スケッチの輪郭を軸のまわりに回転させ、通過した部分の材料を取り除きます。丸い部品の溝、穴、旋削したくぼみに使います。",
+    "help.solid.sweep_cut": "スケッチの輪郭をパスに沿って動かし、通過した部分の材料を取り除きます。曲線に沿う溝や通路に使います。",
+    "help.solid.loft_cut": "2 つ以上のスケッチの輪郭の間をつなぎ、その間の材料を取り除きます。深さによって形が変わるポケットや開口部に使います。"
+  },
+  "zh": {
+    "cmd.solid_extrude_cut": "拉伸切除",
+    "cmd.solid_revolve_cut": "旋转切除",
+    "cmd.solid_sweep_cut": "扫掠切除",
+    "cmd.solid_loft_cut": "放样切除",
+    "prefs.cut_buttons": "切除按钮",
+    "prefs.cut_buttons_note": "开启后，拉伸切除、旋转切除、扫掠切除和放样切除出现在创建菜单和命令搜索中，拉伸切除和旋转切除在模型选项卡中紧随拉伸和旋转之后。每个都以“切除”操作打开其工具的对话框。关闭：都不显示。",
+    "help.solid.extrude_cut": "将草图轮廓按指定距离推入实体，去除其经过的材料。用于凹槽、槽口和贯通切除。",
+    "help.solid.revolve_cut": "将草图轮廓绕一条轴旋转，去除其扫过的材料。用于圆形零件上的沟槽、孔和车削凹陷。",
+    "help.solid.sweep_cut": "让草图轮廓沿路径移动，去除其经过的材料。用于沿曲线走向的通道和沟槽。",
+    "help.solid.loft_cut": "在两个或多个草图轮廓之间过渡，去除其间的材料。用于形状随深度变化的凹槽和开口。"
+  },
+  "ar": {
+    "cmd.solid_extrude_cut": "قطع بالبثق",
+    "cmd.solid_revolve_cut": "قطع بالدوران",
+    "cmd.solid_sweep_cut": "قطع بالكنس",
+    "cmd.solid_loft_cut": "قطع بالتشكيل الانتقالي",
+    "prefs.cut_buttons": "أزرار القطع",
+    "prefs.cut_buttons_note": "عند التشغيل، يظهر القطع بالبثق والقطع بالدوران والقطع بالكنس والقطع بالتشكيل الانتقالي في قائمة الإنشاء وفي البحث عن الأوامر، ويأتي القطع بالبثق والقطع بالدوران مباشرة بعد البثق والدوران في تبويب النموذج. يفتح كل منها حوار أداته مع ضبط العملية على القطع. عند الإيقاف: لا يظهر أي منها.",
+    "help.solid.extrude_cut": "يدفع مقطع رسم داخل جسم على مسافة محددة ويزيل المادة التي يمر بها. استخدمه للتجاويف والشقوق والقطع النافذة.",
+    "help.solid.revolve_cut": "يدير مقطع رسم حول محور ويزيل المادة التي يمر بها. استخدمه للمجاري والثقوب والتجاويف المخروطة في القطع الدائرية.",
+    "help.solid.sweep_cut": "يحرك مقطع رسم على طول مسار ويزيل المادة التي يمر بها. استخدمه للقنوات والمجاري التي تتبع منحنى.",
+    "help.solid.loft_cut": "ينتقل بين مقطعي رسم أو أكثر ويزيل المادة بينهما. استخدمه للتجاويف والفتحات التي يتغير شكلها مع العمق."
+  },
+  "he": {
+    "cmd.solid_extrude_cut": "הסרה בשליפה",
+    "cmd.solid_revolve_cut": "הסרה בסיבוב",
+    "cmd.solid_sweep_cut": "הסרה בסחיפה",
+    "cmd.solid_loft_cut": "הסרה בלופט",
+    "prefs.cut_buttons": "כפתורי הסרה",
+    "prefs.cut_buttons_note": "כשהאפשרות פעילה, הסרה בשליפה, הסרה בסיבוב, הסרה בסחיפה והסרה בלופט מופיעות בתפריט היצירה ובחיפוש הפקודות, והסרה בשליפה והסרה בסיבוב מופיעות מיד אחרי שליפה וסיבוב בלשונית מודל. כל אחת פותחת את תיבת הדו־שיח של הכלי שלה כשהפעולה מוגדרת להסרה. כבוי: אף אחת מהן לא מופיעה.",
+    "help.solid.extrude_cut": "דחיפת פרופיל של סקיצה לתוך גוף לאורך מרחק והסרת החומר שהוא עובר בו. מתאים לכיסים, לחריצים ולחיתוכים עוברים.",
+    "help.solid.revolve_cut": "סיבוב פרופיל של סקיצה סביב ציר והסרת החומר שהוא עובר בו. מתאים לחריצים, לקידוחים ולשקעים מחורטים בחלקים עגולים.",
+    "help.solid.sweep_cut": "הזזת פרופיל של סקיצה לאורך מסלול והסרת החומר שהוא עובר בו. מתאים לתעלות ולחריצים שעוקבים אחרי עקומה.",
+    "help.solid.loft_cut": "מעבר בין שני פרופילים של סקיצה או יותר והסרת החומר שביניהם. מתאים לכיסים ולפתחים שצורתם משתנה עם העומק."
+  },
+  "vi": {
+    "cmd.solid_extrude_cut": "Cắt bằng đùn khối",
+    "cmd.solid_revolve_cut": "Cắt bằng xoay tròn",
+    "cmd.solid_sweep_cut": "Cắt bằng quét",
+    "cmd.solid_loft_cut": "Cắt bằng Loft",
+    "prefs.cut_buttons": "Nút cắt",
+    "prefs.cut_buttons_note": "Khi bật, Cắt bằng đùn khối, Cắt bằng xoay tròn, Cắt bằng quét và Cắt bằng Loft có trong menu Tạo và trong tìm kiếm lệnh, còn Cắt bằng đùn khối và Cắt bằng xoay tròn nằm ngay sau Đùn khối và Xoay tròn tạo khối trên thẻ Mô hình. Mỗi lệnh mở hộp thoại của công cụ với thao tác đặt là Cắt. Tắt: không lệnh nào hiện ra.",
+    "help.solid.extrude_cut": "Đẩy biên dạng phác thảo vào khối theo khoảng cách và bớt phần vật liệu nó đi qua. Dùng cho hốc lõm, rãnh và lỗ cắt xuyên.",
+    "help.solid.revolve_cut": "Quay biên dạng phác thảo quanh một trục và bớt phần vật liệu nó quét qua. Dùng cho rãnh, lỗ khoan và hốc tiện trên chi tiết tròn.",
+    "help.solid.sweep_cut": "Di chuyển biên dạng phác thảo theo đường dẫn và bớt phần vật liệu nó đi qua. Dùng cho kênh và rãnh chạy theo đường cong.",
+    "help.solid.loft_cut": "Chuyển tiếp giữa hai hoặc nhiều biên dạng phác thảo và bớt phần vật liệu ở giữa. Dùng cho hốc và lỗ mở có hình dạng thay đổi theo độ sâu."
+  },
+  "de": {
+    "cmd.solid_extrude_cut": "Extrudieren (Schnitt)",
+    "cmd.solid_revolve_cut": "Drehen (Schnitt)",
+    "cmd.solid_sweep_cut": "Führen (Schnitt)",
+    "cmd.solid_loft_cut": "Loft (Schnitt)",
+    "prefs.cut_buttons": "Schnitt-Schaltflächen",
+    "prefs.cut_buttons_note": "Eingeschaltet stehen Extrudieren (Schnitt), Drehen (Schnitt), Führen (Schnitt) und Loft (Schnitt) im Menü Erstellen und in der Befehlssuche, und Extrudieren (Schnitt) und Drehen (Schnitt) stehen auf der Registerkarte Modell direkt nach Extrudieren und Drehen. Jeder öffnet den Dialog seines Werkzeugs mit der Operation Schnitt. Aus: keiner davon wird angezeigt.",
+    "help.solid.extrude_cut": "Schiebt ein Skizzenprofil über eine Strecke in einen Körper und entfernt das Material, das es durchläuft. Für Taschen, Nuten und Durchbrüche.",
+    "help.solid.revolve_cut": "Dreht ein Skizzenprofil um eine Achse und entfernt das Material, das es überstreicht. Für Einstiche, Bohrungen und gedrehte Aussparungen in runden Teilen.",
+    "help.solid.sweep_cut": "Führt ein Skizzenprofil entlang eines Pfads und entfernt das Material, das es durchläuft. Für Kanäle und Nuten, die einer Kurve folgen.",
+    "help.solid.loft_cut": "Geht zwischen zwei oder mehr Skizzenprofilen über und entfernt das Material dazwischen. Für Taschen und Öffnungen, deren Form sich mit der Tiefe ändert."
+  },
+  "ko": {
+    "cmd.solid_extrude_cut": "돌출 컷",
+    "cmd.solid_revolve_cut": "회전 컷",
+    "cmd.solid_sweep_cut": "스윕 컷",
+    "cmd.solid_loft_cut": "로프트 컷",
+    "prefs.cut_buttons": "컷 버튼",
+    "prefs.cut_buttons_note": "켜면 돌출 컷, 회전 컷, 스윕 컷, 로프트 컷이 만들기 메뉴와 명령 검색에 나타나고, 모델 탭에서 돌출 컷과 회전 컷이 돌출과 회전 바로 다음에 놓입니다. 각각 작업을 컷으로 설정한 채 도구의 대화 상자를 엽니다. 끄면 아무것도 표시되지 않습니다.",
+    "help.solid.extrude_cut": "스케치 프로파일을 지정한 거리만큼 바디 안으로 밀어 지나가는 재료를 제거합니다. 포켓, 슬롯, 관통 컷에 사용합니다.",
+    "help.solid.revolve_cut": "스케치 프로파일을 축을 중심으로 회전시켜 지나가는 재료를 제거합니다. 둥근 부품의 홈, 구멍, 선삭 오목부에 사용합니다.",
+    "help.solid.sweep_cut": "스케치 프로파일을 경로를 따라 이동시켜 지나가는 재료를 제거합니다. 곡선을 따라가는 채널과 홈에 사용합니다.",
+    "help.solid.loft_cut": "두 개 이상의 스케치 프로파일 사이를 이어 그 사이의 재료를 제거합니다. 깊이에 따라 모양이 바뀌는 포켓과 개구부에 사용합니다."
+  },
+  "nl": {
+    "cmd.solid_extrude_cut": "Extruderen (wegsnijden)",
+    "cmd.solid_revolve_cut": "Revolve (wegsnijden)",
+    "cmd.solid_sweep_cut": "Sweep (wegsnijden)",
+    "cmd.solid_loft_cut": "Loft (wegsnijden)",
+    "prefs.cut_buttons": "Wegsnij-knoppen",
+    "prefs.cut_buttons_note": "Aan staan Extruderen (wegsnijden), Revolve (wegsnijden), Sweep (wegsnijden) en Loft (wegsnijden) in het menu Maken en in het zoeken naar opdrachten, en staan Extruderen (wegsnijden) en Revolve (wegsnijden) op de Model-tab direct na Extruderen en Revolve. Elk opent de dialoog van zijn tool met de bewerking op wegsnijden. Uit: geen van alle is te zien.",
+    "help.solid.extrude_cut": "Duwt een schetsprofiel over een afstand een body in en verwijdert het materiaal waar het doorheen gaat. Voor kamers, sleuven en doorgaande uitsparingen.",
+    "help.solid.revolve_cut": "Draait een schetsprofiel rond een as en verwijdert het materiaal waar het doorheen gaat. Voor groeven, boringen en gedraaide uitsparingen in ronde delen.",
+    "help.solid.sweep_cut": "Beweegt een schetsprofiel langs een pad en verwijdert het materiaal waar het doorheen gaat. Voor kanalen en groeven die een curve volgen.",
+    "help.solid.loft_cut": "Gaat over tussen twee of meer schetsprofielen en verwijdert het materiaal daartussen. Voor kamers en openingen waarvan de vorm met de diepte verandert."
+  }
+}

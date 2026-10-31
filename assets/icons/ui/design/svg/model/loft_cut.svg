@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Loft Cut</title>
+  <path d="M12.08 20.5L32 32L32 55L12.08 43.5Z" fill="#b8c3cf"/>
+  <path d="M51.92 20.5L32 32L32 55L51.92 43.5Z" fill="#8e9faf"/>
+  <path d="M32 9L51.92 20.5L32 32L12.08 20.5Z" fill="#e2e8ef"/>
+  <path d="M32 9L51.92 20.5L51.92 43.5L32 55L12.08 43.5L12.08 20.5Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M12.08 20.5L32 32L51.92 20.5" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M32 32L32 55" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <defs><clipPath id="loft_cut_pocket"><path d="M32 11.88L46.94 20.5L32 29.12L17.06 20.5Z" fill="none"/></clipPath></defs>
+  <g clip-path="url(#loft_cut_pocket)">
+  <path d="M32 11.88L46.94 20.5L32 29.12L17.06 20.5Z" fill="#b9ddf8"/>
+  <path d="M32 11.88L46.94 20.5L37.28 25.29L37.26 24.99L37.18 24.7L37.05 24.41L36.88 24.12L36.66 23.85L36.39 23.6L36.08 23.36L35.73 23.14L35.35 22.93L34.93 22.76L34.49 22.6L34.02 22.47L33.53 22.37L33.03 22.3L32.52 22.26L32 22.24Z" fill="#328bd3"/>
+  <path d="M17.06 20.5L32 11.88L32 22.24L31.48 22.26L30.97 22.3L30.47 22.37L29.98 22.47L29.51 22.6L29.07 22.76L28.65 22.93L28.27 23.14L27.92 23.36L27.61 23.6L27.34 23.85L27.12 24.12L26.95 24.41L26.82 24.7L26.74 24.99L26.72 25.29Z" fill="#236ead"/>
+  <path d="M32 11.88L32 22.24" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M46.94 20.5L37.28 25.29" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M17.06 20.5L26.72 25.29" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M32 29.12L32 28.34" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M35.73 27.45L35.22 27.71L34.64 27.93L34.02 28.11L33.37 28.24L32.69 28.31L32 28.34L31.31 28.31L30.63 28.24L29.98 28.11L29.36 27.93L28.78 27.71L28.27 27.45L27.81 27.15L27.43 26.82L27.12 26.46L26.9 26.08L26.76 25.69L26.72 25.29L26.76 24.89L26.9 24.5L27.12 24.12L27.43 23.77L27.81 23.44L28.27 23.14L28.78 22.87L29.36 22.65L29.98 22.47L30.63 22.35L31.31 22.27L32 22.24L32.69 22.27L33.37 22.35L34.02 22.47L34.64 22.65L35.22 22.87L35.73 23.14L36.19 23.44L36.57 23.77L36.88 24.12L37.1 24.5L37.24 24.89L37.28 25.29L37.24 25.69L37.1 26.08L36.88 26.46L36.57 26.82L36.19 27.15L35.73 27.45Z" fill="#b9ddf8"/>
+  <path d="M35.73 27.45L35.22 27.71L34.64 27.93L34.02 28.11L33.37 28.24L32.69 28.31L32 28.34L31.31 28.31L30.63 28.24L29.98 28.11L29.36 27.93L28.78 27.71L28.27 27.45L27.81 27.15L27.43 26.82L27.12 26.46L26.9 26.08L26.76 25.69L26.72 25.29L26.76 24.89L26.9 24.5L27.12 24.12L27.43 23.77L27.81 23.44L28.27 23.14L28.78 22.87L29.36 22.65L29.98 22.47L30.63 22.35L31.31 22.27L32 22.24L32.69 22.27L33.37 22.35L34.02 22.47L34.64 22.65L35.22 22.87L35.73 23.14L36.19 23.44L36.57 23.77L36.88 24.12L37.1 24.5L37.24 24.89L37.28 25.29L37.24 25.69L37.1 26.08L36.88 26.46L36.57 26.82L36.19 27.15L35.73 27.45Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  </g>
+  <path d="M32 11.88L46.94 20.5L32 29.12L17.06 20.5Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+</svg>

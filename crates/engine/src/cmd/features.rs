@@ -132,6 +132,27 @@ pub static COMMANDS: &[CommandSpec] = &[
         .at("SOLID", "CREATE")
         .icon("thread")
         .params("face: [x,y,z] on a cylindrical face; designation?: ISO metric (\"M8\", \"M8x1\"; default: the size that fits); length?: expr (default: the whole face); handedness?: right|left (default right); modeled?: bool (default false). Cosmetic: the model is unchanged, model.threads lists it. Modeled: cuts the thread profile into the body; a shaft thicker than the thread is first turned down to its major diameter over the threaded length"),
+    // The cut buttons (#7905): a tool with its operation fixed to Cut, so removing material has a
+    // button, key and search entry of its own. Everything else is the tool's own. Listed after the
+    // other CREATE commands, so the section's menu keeps their order.
+    CommandSpec::new("solid.extrude_cut", "Extrude Cut", crate::checked!("solid.extrude_cut", extrude_cut))
+        .at("SOLID", "CREATE")
+        .icon("extrude_cut")
+        .contract(&EXTRUDE_CONTRACT)
+        .output(output_schema_for::<FeatureResult>)
+        .params("as solid.extrude; operation?: cut (always: any other operation is refused)"),
+    CommandSpec::new("solid.revolve_cut", "Revolve Cut", revolve_cut)
+        .at("SOLID", "CREATE")
+        .icon("revolve_cut")
+        .params("as solid.revolve; operation?: cut (always: any other operation is refused)"),
+    CommandSpec::new("solid.sweep_cut", "Sweep Cut", sweep_cut)
+        .at("SOLID", "CREATE")
+        .icon("sweep_cut")
+        .params("as solid.sweep; operation?: cut (always: any other operation is refused)"),
+    CommandSpec::new("solid.loft_cut", "Loft Cut", loft_cut)
+        .at("SOLID", "CREATE")
+        .icon("loft_cut")
+        .params("as solid.loft; operation?: cut (always: any other operation is refused)"),
     CommandSpec::new("solid.shell", "Shell", shell)
         .at("SOLID", "MODIFY")
         .icon("shell")
@@ -831,6 +852,36 @@ fn add_feature_in(s: &mut Session, p: &Value, kind: FeatureKind, world: bool) ->
         param_warnings: Vec::new(),
     };
     serde_json::to_value(reply).map_err(|e| EngineError::Other(e.to_string()))
+}
+
+/// `p` with its operation set to Cut, for the cut buttons (#7905). An operation given anyway must
+/// be `cut`: another one is refused, never silently replaced.
+fn as_cut(cmd: &str, p: &Value) -> Result<Value> {
+    let mut p = if p.is_null() { json!({}) } else { p.clone() };
+    let map = p.as_object_mut().ok_or_else(|| bad(cmd, "parameters must be an object"))?;
+    match map.get("operation") {
+        None => {}
+        Some(Value::String(op)) if op == "cut" => {}
+        Some(other) => return Err(bad(cmd, format!("operation is always cut, not {other}"))),
+    }
+    map.insert("operation".into(), json!("cut"));
+    Ok(p)
+}
+
+fn extrude_cut(s: &mut Session, p: &Value) -> Result<Value> {
+    extrude(s, &as_cut("solid.extrude_cut", p)?)
+}
+
+fn revolve_cut(s: &mut Session, p: &Value) -> Result<Value> {
+    revolve(s, &as_cut("solid.revolve_cut", p)?)
+}
+
+fn sweep_cut(s: &mut Session, p: &Value) -> Result<Value> {
+    sweep(s, &as_cut("solid.sweep_cut", p)?)
+}
+
+fn loft_cut(s: &mut Session, p: &Value) -> Result<Value> {
+    loft(s, &as_cut("solid.loft_cut", p)?)
 }
 
 fn extrude(s: &mut Session, p: &Value) -> Result<Value> {

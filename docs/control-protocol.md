@@ -432,6 +432,7 @@ One setting per line, sorted by name. A change that adds a setting adds its own 
 - `browser_eye_left` (default false: each browser and History tree row's eye, handle `eye:<name>`, sits in a column at the rows' right end, clear of the fold arrow and the radio; true: between them, as before #8718)
 - `check_updates` (default true; [updates](book/src/guide/updates.md))
 - `color_vision` (`off` (default), `protan`, `deutan`, `tritan`: colour vision modes, #778)
+- `cut_buttons` (default false: on, Extrude Cut, Revolve Cut, Sweep Cut and Loft Cut (`solid.extrude_cut`, `solid.revolve_cut`, `solid.sweep_cut`, `solid.loft_cut`) are in MODEL › CREATE's menu and in command search, and the first two are buttons right after Extrude and Revolve; off, none of them shows, and they stay commands for scripts and shortcuts, #7905)
 - `default_units`
 - `dialog_buttons` (`bottom` (default), `top`: a feature dialog's OK, Cancel and Apply sit in its title row instead of under its inputs, #6708; the buttons keep their handles, and `dialog:close` is then Cancel's; the Sketch panel's Finish Sketch row moves above its options, #9860)
 - `dialog_place` (`edge` (default) or `left_column`: command dialogs open in the left column in place of the browser and the History, #6707)
