@@ -1989,6 +1989,11 @@ mod tests {
     fn all_shipped_themes_keep_the_original_resolver_output_and_serialization() {
         assert_eq!(builtin().len(), BUILTIN.len());
         for theme in builtin() {
+            // Onyx is a new opt-in theme whose authored defaults include translucent
+            // surfaces and etched edges. It has no pre-option appearance to preserve.
+            if theme.id == "onyx" {
+                continue;
+            }
             let gruvbox = matches!(theme.id.as_str(), "gruvbox-dark" | "gruvbox-light");
             assert!(!theme.needs_newer());
             assert_eq!(!theme.options.is_empty(), gruvbox);
@@ -2314,6 +2319,124 @@ mod tests {
             let file = from_value(&json!({"format":FORMAT,"name":old,"base":"dark"})).unwrap();
             assert_eq!(add(&mut custom, file).unwrap(), format!("custom-{old}"));
             assert!(find(old, &custom).is_none(), "retired ids are not duplicate theme cards");
+        }
+    }
+
+    #[test]
+    fn onyx_defaults_offer_broad_subtle_blur_and_independent_material_choices() {
+        let file = find("onyx", &[]).unwrap();
+        assert_eq!(file.base, Base::Dark);
+        assert!(!file.needs_newer());
+        assert_eq!(file.options.len(), 7, "six controls plus the Fade child");
+        assert_eq!(builtin().last().map(|theme| theme.id.as_str()), Some("onyx"), "existing picker order is retained");
+        let (values, notices) = effective_values(file, &BTreeMap::new());
+        assert!(notices.is_empty());
+        assert_eq!(values["opacity"], OptionValue::Num(90.0));
+        assert_eq!(values["blur"], OptionValue::Num(40.0));
+        assert_eq!(values["tab_colours"], OptionValue::Bool(false));
+        assert_eq!(values["tab_fade_ms"], OptionValue::Num(240.0));
+        assert_eq!(values["contrast"], OptionValue::Choice("soft".into()));
+        assert_eq!(values["edge_finish"], OptionValue::Choice("etched".into()));
+        assert_eq!(values["accent"], OptionValue::Choice("slate".into()));
+        assert_eq!(
+            ordered_options(file).iter().map(|o| o.id.as_str()).collect::<Vec<_>>(),
+            ["opacity", "blur", "tab_colours", "tab_fade_ms", "contrast", "edge_finish", "accent"]
+        );
+        let opacity = file.options.iter().find(|o| o.id == "opacity").unwrap();
+        let OptionKind::Range { min, max, .. } = &opacity.kind else { panic!("opacity must be a range") };
+        assert_eq!((*min, *max), (85.0, 100.0));
+        let faded = resolve(file);
+        let full = resolve_with(file, &BTreeMap::from([("opacity".into(), OptionValue::Num(100.0))]));
+        assert!(faded.panel.a() < full.panel.a(), "the default exposes a little of the scene");
+        assert_eq!(full.panel.a(), 255);
+        assert_eq!(faded.text, full.text);
+        assert!(faded.borders.primary_inset.is_some());
+        assert!(faded.borders.bevel.is_none());
+        assert_eq!(faded.radius_md, 6);
+        assert_eq!(faded.viewport_top, resolve_base(file).viewport_top, "tab colours start off");
+        for def in file.options.iter().filter(|def| !crate::theme_options::standard(&def.id)) {
+            for language in ["en", "de", "ja", "ko", "zh"] {
+                assert!(def.label.contains_key(language) && def.help.contains_key(language));
+                if let OptionKind::Choice { values, .. } = &def.kind {
+                    assert!(values.iter().all(|value| value.label.contains_key(language)));
+                }
+            }
+        }
+        let roundtrip = from_value(&export_file(file)).unwrap();
+        assert_eq!(roundtrip.options, file.options);
+        assert_eq!(roundtrip.overlays, file.overlays);
+        assert_eq!(roundtrip.tabs, file.tabs);
+        assert_eq!(resolve(&roundtrip), faded);
+    }
+
+    #[test]
+    fn onyx_options_compose_and_keep_small_text_readable() {
+        use crate::theme::{TabAccent, composite, contrast_ratio};
+        let file = find("onyx", &[]).unwrap();
+        let ordinary = resolve(file);
+        for contrast in ["soft", "defined"] {
+            for finish in ["flat", "etched", "bevel"] {
+                for accent in ["slate", "silver", "sage"] {
+                    for opacity in [85.0, 90.0, 100.0] {
+                        for tabs in [false, true] {
+                            let values = BTreeMap::from([
+                                ("contrast".into(), OptionValue::Choice(contrast.into())),
+                                ("edge_finish".into(), OptionValue::Choice(finish.into())),
+                                ("accent".into(), OptionValue::Choice(accent.into())),
+                                ("opacity".into(), OptionValue::Num(opacity)),
+                                ("tab_colours".into(), OptionValue::Bool(tabs)),
+                            ]);
+                            let base = resolve_with(file, &values);
+                            let expected = match accent {
+                                "silver" => "#b7bdc2",
+                                "sage" => "#aabcae",
+                                _ => "#9eafbd",
+                            };
+                            assert_eq!(base.accent, parse_color(expected).unwrap());
+                            assert_eq!(base.borders.primary_inset.is_some(), finish == "etched");
+                            assert_eq!(base.borders.bevel.is_some(), finish == "bevel");
+                            assert_eq!(base.error, ordinary.error, "accent and contrast must not recolour status");
+                            assert_eq!(base.warning, ordinary.warning);
+                            assert_eq!(base.agent_busy, ordinary.agent_busy);
+                            assert_eq!(base.agent_ok, ordinary.agent_ok);
+                            assert_eq!((base.axis_x, base.axis_y, base.axis_z), (ordinary.axis_x, ordinary.axis_y, ordinary.axis_z));
+                            assert_eq!(export_icon_palette(base.icon_palette)["solid"][2], expected);
+                            if contrast == "defined" {
+                                assert_ne!(base.field, ordinary.field, "defined contrast separates recessed fields");
+                            }
+                            for tab in ["MODEL", "SURFACE", "MESH", "FORM", "SHEET METAL", "RENDER", "SKETCH"] {
+                                let tokens = resolve_for_tab(file, &values, Some(tab));
+                                assert_eq!(tokens.accent, base.accent, "tab surfaces must not replace the selected accent");
+                                assert_eq!(tokens.borders, base.borders);
+                                assert_eq!(tokens.icon_palette, base.icon_palette);
+                                if tabs {
+                                    assert_ne!(tokens.viewport_top, base.viewport_top, "{tab} has a quiet authored tint");
+                                } else {
+                                    assert_eq!(tokens, base);
+                                }
+                                let workspace = TabAccent::for_tab(&tokens, tab);
+                                assert!(contrast_ratio(workspace.ink, workspace.soft) >= 4.5);
+                                assert!(contrast_ratio(workspace.on_fill(&tokens), workspace.color) >= 4.5);
+                                for fill in
+                                    [tokens.panel, tokens.panel_header, tokens.dialog_bg, tokens.dialog_body, tokens.dialog_footer, tokens.overlay]
+                                {
+                                    for background in [Color32::BLACK, Color32::WHITE, tokens.viewport_top, tokens.viewport_bottom] {
+                                        let ground = composite(fill, background);
+                                        for ink in [tokens.text, tokens.text_dim, tokens.form_ink, tokens.form_dim, tokens.dialog_label] {
+                                            assert!(
+                                                contrast_ratio(composite(ink, ground), ground) >= 4.5,
+                                                "{contrast}/{finish}/{accent}/{opacity}/{tabs}/{tab}: {ink:?} on {fill:?} over {background:?}"
+                                            );
+                                        }
+                                    }
+                                }
+                                assert!(contrast_ratio(tokens.text_dim, tokens.field) >= 4.5);
+                                assert!(contrast_ratio(tokens.text, tokens.control_fill) >= 4.5);
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 

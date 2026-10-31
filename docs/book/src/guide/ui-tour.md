@@ -450,6 +450,15 @@ Saved selections and settings profiles using the former `-soft` and `-hard` ids
 select the corresponding family and contrast. Selecting a family again restores its
 last contrast; Reset returns it to Standard.
 
+**Onyx** is an original dark stone-grey theme with quiet surface layers, fine etched edges
+and a restrained blue-grey accent. Its defaults pair **90% Opacity** with a broad **40 px Blur**:
+Opacity sets how much of the scene shows through; Blur sets how widely its detail softens.
+It also offers **Contrast** (Soft or Defined), **Edge finish** (Flat, Etched or Soft bevel),
+**Accent** (Slate blue, Silver or Sage), and optional **Tab colours** with a Fade control.
+Tab colours gently tint the panel header and viewport while preserving the selected accent.
+Accent changes selection and Model controls; functional workspace and status colours keep
+their meaning. As with other themes, the existing blur availability and readability limits apply.
+
 Up to 32 overlays apply in file order, after the base palette and the theme's own value tables.
 Later matching entries win by key. Every overlay has one `when`: `{"opt":"id","eq":value}`
 for an exact, correctly typed comparison, or `gte`, `lte`, or both for inclusive range bounds.
