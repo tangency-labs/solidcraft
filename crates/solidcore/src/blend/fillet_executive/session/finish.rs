@@ -6,7 +6,9 @@
 //! | Rust | Upstream |
 //! |------|----------|
 //! | [`FilletSession::do_fillet`] | `SmFilletExecutive::DoFillet` |
-//! | [`FilletSession::do_filleting`] | `SmFilletExecutive::DoFilleting` |
+//! | [`FilletSession::do_filleting`] | `SmFilletExecutive::DoFilleting` (the fork's wrapper of `e418750` round `DoFilletingSteps`) |
+//! | `do_filleting_steps` (private) | the fork's `SmFilletExecutive::DoFilletingSteps` (upstream's `DoFilleting` body) |
+//! | `join_blended_vertex_fans` (private) | the fork's `SmFilletExecutive::JoinBlendedVertexFans` (`e418750`, WR-665) |
 //! | `FinishAccess` (private) | the tail after `MergeBrep` (3532-3644) on the live bodies |
 //!
 //! Deviations: the stage order, flags and the tail itself are the shared generic
@@ -552,7 +554,62 @@ impl FilletSession<'_> {
     ///
     /// # Errors
     /// The first stage error, with all earlier mutations retained.
+    ///
+    /// With `fixes.fillet_corner_per_vertex_fan` (WR-665, the fork's
+    /// tangency-labs/smlib@e418750) the vertices the fillet parameters split by fans are
+    /// joined again afterwards where the blends left more than one at a split point,
+    /// whether the blends built or not (`JoinBlendedVertexFans`); the filleting's own
+    /// error comes first.
     pub fn do_filleting(
+        &mut self,
+        k: &mut Kernel,
+        error_out: Option<&mut ErrorInfo<FilletObject>>,
+    ) -> Result<()> {
+        let status = self.do_filleting_steps(k, error_out);
+        let joined = self.join_blended_vertex_fans();
+        match status {
+            Ok(()) => joined,
+            Err(e) => Err(e),
+        }
+    }
+
+    /// `JoinBlendedVertexFans` (the fork's, tangency-labs/smlib@e418750, WR-665): the
+    /// inverse of the fan split after the blends: the target's vertices still at a split
+    /// point (within their own tolerance of it), joined into the first of them
+    /// (`SmBrep::JoinVertexFans`). Where the blends took the point away none is left.
+    fn join_blended_vertex_fans(&mut self) -> Result<()> {
+        if self.executive.fan_split_points.is_empty() {
+            return Ok(());
+        }
+        let target = &mut *self.objects.target;
+        let mut vertices: Vec<Option<_>> =
+            p1::vertices(target, None)?.into_iter().map(Some).collect();
+        let points = self.executive.fan_split_points.clone();
+        for at in points {
+            let mut first = None;
+            for slot in &mut vertices {
+                let Some(v) = *slot else {
+                    continue;
+                };
+                let record = target.vertex(v)?;
+                if record.point.distance(at) > record.tolerance {
+                    continue;
+                }
+                let Some(survivor) = first else {
+                    first = Some(v);
+                    continue;
+                };
+                crate::topology::brep::vertex_fans::join_vertex_fans(target, survivor, v)?;
+                *slot = None;
+            }
+        }
+        self.executive.fan_split_points.clear();
+        Ok(())
+    }
+
+    /// `DoFilletingSteps` (the fork's name for upstream's `DoFilleting` body): see
+    /// [`Self::do_filleting`].
+    fn do_filleting_steps(
         &mut self,
         k: &mut Kernel,
         mut error_out: Option<&mut ErrorInfo<FilletObject>>,

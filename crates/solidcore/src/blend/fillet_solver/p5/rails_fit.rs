@@ -17,6 +17,8 @@
 //! edge and whether a rail that leaves its face runs on into the body's material
 //! ([`RailsFit`], `IsConcaveEdge`, `sm_InsideMaterial`), for the executive's choice
 //! between a refusal and a cliff overflow; those judgements run only with that flag. The
+//! fork's `IsKnifeEdge` ([`is_knife_edge`], `e418750`, WR-665) is here too, used by
+//! `SmFilletCorner::Create` with `fixes.fillet_corner_per_vertex_fan`. The
 //! nearest-edge search of `sm_InsideMaterial` keeps the first of equally near edges, in
 //! the face's edge order, as the fork's strict `<` does. There is no recursion.
 
@@ -51,6 +53,46 @@ pub struct RailsFit {
     /// `rbIntoMaterial`: a rail that leaves its face runs on inside the body (judged only
     /// when asked; `false` otherwise).
     pub into_material: bool,
+}
+
+/// `SmFilletSolver::IsKnifeEdge` (the fork's, tangency-labs/smlib `e418750`, WR-665):
+/// whether `edge_id` is a knife edge, its two faces tangent along it and folded back on
+/// each other, the body's material between them of zero angle (a hole whose wall
+/// touches the bottom face along a line). The sector from the edge's primary edge use to
+/// its radial at the middle of the edge's interval (`SmEdgeuse::CalcSectorAngle`) is
+/// within `tangency_tol_rad` of none or a whole turn (a smooth edge's is a half turn).
+/// An edge without primary edge use or radial, or whose sector cannot be computed, is
+/// not one.
+///
+/// # Errors
+///
+/// [`SolidError::NotFound`] for a dangling id; [`SolidError::Unported`] from the binormal
+/// evaluation (any other failure of the sector angle reads as not a knife edge, as the
+/// fork's status test does).
+pub fn is_knife_edge(
+    k: &Kernel,
+    target: &mut Brep,
+    edge_id: EdgeId,
+    tangency_tol_rad: f64,
+) -> Result<bool> {
+    let Some(primary) = eu::primary_edgeuse(target, edge_id)? else {
+        return Ok(false);
+    };
+    if eu::radial(target, primary)?.is_none() {
+        return Ok(false);
+    }
+    // the sector between the faces, a whole turn or none (a smooth edge's is a half turn)
+    let parameter = edge::interval(target, edge_id)?.evaluate(0.5);
+    let angle = match crate::topology::edgeuse::p3::calc_sector_angle(k, target, primary, parameter)
+    {
+        Ok(angle) => angle,
+        Err(e @ SolidError::Unported { .. }) => return Err(e),
+        Err(_) => return Ok(false),
+    };
+    // smos_Min
+    let other = crate::math::TWO_PI - angle;
+    let smaller = if angle < other { angle } else { other };
+    Ok(smaller < tangency_tol_rad)
 }
 
 /// `SmFilletSolver::IsConcaveEdge` (fork, WR-631): whether the body's material wedge

@@ -609,6 +609,17 @@ pub struct FilletExecutive<O> {
     /// `m_vOverflowEdges` (the fork's, WR-634; cleared by `SetFilletParameters`): the
     /// edges of the blends that overflow, in solver order, when stopped so.
     pub overflow_edges: Vec<O>,
+    /// `m_vMitredEdges` (the fork's, WR-634, tangency-labs/smlib@9ba2b12; cleared by
+    /// `SetFilletParameters`): when stopped for overflow first, the edges of each two
+    /// blends mitred at a face's concave corner (an Nx2 corner whose
+    /// [`crate::blend::fillet_corner::p3::FilletCorner::mitre`] is set), two by two, in
+    /// corner order.
+    pub mitred_edges: Vec<O>,
+    /// `m_vFanSplitPoints` (the fork's, WR-665, tangency-labs/smlib@e418750; cleared by
+    /// `SetFilletParameters`): where a blended edge's vertex the body touches itself at
+    /// was split into one vertex per fan (`SplitBlendedVertexFans`, with
+    /// `fixes.fillet_corner_per_vertex_fan`), for `JoinBlendedVertexFans`.
+    pub fan_split_points: Vec<Point3>,
 }
 
 /// `SmFilletExecutive::SmFilletOpenEnd` (the fork's, WR-631): an end of a fillet the Nx1
@@ -2117,6 +2128,18 @@ pub trait SolverGeometryAccess<O: ClassObject + SolutionObject + Ord> {
     fn geometry_overflow_edge(&self, solver: O) -> Result<Option<O>> {
         self.geometry_edge(solver).map(Some)
     }
+    /// The fork's mitred-pair test of the overflow-first stop (WR-634,
+    /// tangency-labs/smlib@9ba2b12): for an Nx2 corner whose `IsMitre` is set, the edges
+    /// of its two filleted edge uses (`GetFilletedEdgeuses`), in order; `None` for any
+    /// other corner (and a null one). Only an accessor with live corners can tell; the
+    /// default finds none.
+    ///
+    /// # Errors
+    /// Those of `GetFilletedEdgeuses` and the edge lookups.
+    fn geometry_mitred_corner_edges(&self, corner: O) -> Result<Option<(O, O)>> {
+        let _ = corner;
+        Ok(None)
+    }
     /// The fork's `SmFilletSolver::RailsFitTheirFaces` for `solver` (not upstream; opt-in
     /// `fixes.fillet_refuse_rails_leaving_faces`, WR-302): whether every rail of its
     /// untrimmed fillet stays on the face it rolls on. Only an accessor with a live
@@ -2586,6 +2609,18 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
                 && !round_into_material)
         {
             self.overflow_edges = overflowing;
+            // The fork's (tangency-labs/smlib@9ba2b12): two blends mitred at a face's
+            // concave corner meet in their mitre, each run on past the corner: one corner
+            // of the two, built with both, whichever overflows.
+            self.mitred_edges.clear();
+            let mut index = 0;
+            while let Some(corner) = self.corners.get(index).copied() {
+                index += 1;
+                if let Some((first, second)) = access.geometry_mitred_corner_edges(corner)? {
+                    self.mitred_edges.push(first);
+                    self.mitred_edges.push(second);
+                }
+            }
             // The generic NoteError overload changes exactly these two members.
             self.error.code = FilletErrorType::OverflowFirst as i32;
             self.error.comment =

@@ -881,6 +881,8 @@ fn rust(input: &Inputs) -> Result<Output, HarnessError> {
         overflow_first: false,
         classify_only: false,
         overflow_edges: Vec::new(),
+        mitred_edges: Vec::new(),
+        fan_split_points: Vec::new(),
     };
     // The executive constructor sets this after constructing its SmMerge base.
     executive.intersector.ignore_tangency = true;

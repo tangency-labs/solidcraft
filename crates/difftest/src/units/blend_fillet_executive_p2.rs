@@ -1514,6 +1514,8 @@ fn executive(target: Option<Handle>) -> FilletExecutive<Handle> {
         overflow_first: false,
         classify_only: false,
         overflow_edges: Vec::new(),
+        mitred_edges: Vec::new(),
+        fan_split_points: Vec::new(),
     };
     executive.intersector.ignore_tangency = true;
     executive

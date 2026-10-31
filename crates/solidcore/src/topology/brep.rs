@@ -16,6 +16,7 @@
 //! | [`p7`]    | see the module                                                  |
 //! | [`planar_section`] | `CreatePlanarSectionCurves` (unit `topology.brep_planar_section`) |
 //! | [`p8`]    | making faces from surfaces and from loops of curves              |
+//! | [`vertex_fans`] | `SplitVertexByFans`, `JoinVertexFans` (the fork's, `4ecfbab`) |
 //! | [`p10`]   | `MakeTopologyFromData`, `ProjectAndTrim`, `RemoveAllTopology`, `TestClosureSplitRegion` (edge version) |
 //!
 //! Deviations: the B-rep records are the arenas of [`crate::topology::Brep`].
@@ -35,3 +36,4 @@ pub mod p8;
 pub mod p9;
 pub mod planar_section;
 pub mod validation;
+pub mod vertex_fans;

@@ -10,6 +10,7 @@
 //! | [`get_or_create_uv_trim_curve`], [`UvTrimCurveFetch`] | `SmEdgeuse::GetOrCreateUVTrimCurve` (both overloads) |
 //! | [`evaluate_binormal`], [`BinormalOptions`]        | `SmEdgeuse::EvaluateBinormal`             |
 //! | [`normalized_evaluate`], [`NormalizedEval`]       | `SmEdgeuse::NormalizedEvaluate`           |
+//! | [`calc_sector_angle`]                             | `SmEdgeuse::CalcSectorAngle` (no unit owns it; ported for the fork's `IsKnifeEdge`) |
 //!
 //! Deviations:
 //! - **Object model.** As [`super::p1`]: an edge use is a record in the [`Brep`]'s
@@ -2482,6 +2483,43 @@ fn b_spline_part(c: &Curve) -> Result<BSplineCurve> {
         CurveKind::Parabola(p) => p.base().clone(),
         _ => return Err(null("CreateUVTrimCurve: a dropped piece is not a B-spline")),
     })
+}
+
+/// `SmEdgeuse::CalcSectorAngle`: the sector angle, in radians, from `eu` to its radial
+/// edge use at the edge parameter `parameter` (in the edge's interval). The two
+/// binormals are evaluated with `bUse3DOnly = FALSE` (a missing UV trim curve is built);
+/// the angle between them is taken through the binormals' average when it lies inside
+/// the sector from `eu`'s binormal round its face normal, otherwise its complement to a
+/// whole turn. Where the average vanishes the angle between the binormals stands.
+///
+/// # Errors
+///
+/// [`SolidError::InvalidInput`] for an edge use without radial (upstream dereferences
+/// null) or zero binormals (`AngleBetween`); those of [`evaluate_binormal`].
+pub fn calc_sector_angle(k: &Kernel, b: &mut Brep, eu: EdgeuseId, parameter: f64) -> Result<f64> {
+    let eu2 = crate::topology::edgeuse::p1::radial(b, eu)?.ok_or(SolidError::InvalidInput {
+        operation: OP,
+        reason: "CalcSectorAngle: edge use without radial",
+    })?;
+
+    // sBinormalAvg will always point into the acute angle between sBinormal1 and
+    // sBinormal2. If sBinormalAvg IsInsideSector( sBinormal1, sNormal1, sBinormal2 ),
+    // then the sector angle is the angle returned by AngleBetween. Else, the sector
+    // angle is 2pi - AngleBetween.
+    let first = evaluate_binormal(k, b, eu, parameter, false, &BinormalOptions::default())?;
+    let second = evaluate_binormal(k, b, eu2, parameter, false, &BinormalOptions::default())?;
+    let (binormal1, normal1, binormal2) = (first.binormal, first.face_normal, second.binormal);
+
+    let mut angle = binormal1.angle_between(binormal2)?;
+
+    let average = (binormal1 + binormal2) / 2.0;
+    // If Unitize fails, then dAngle = pi
+    if let Ok(average) = average.unitize() {
+        if !average.is_inside_sector(binormal1, normal1, binormal2) {
+            angle = crate::math::TWO_PI - angle;
+        }
+    }
+    Ok(angle)
 }
 
 #[cfg(test)]

@@ -1612,6 +1612,7 @@ fn enable_fix(k: &mut Kernel, name: &str) -> Result<(), String> {
         "fillet_3x2_tangent_side_edge_roles" => &mut k.fixes.fillet_3x2_tangent_side_edge_roles,
         "fillet_mitre_concave_face_corners" => &mut k.fixes.fillet_mitre_concave_face_corners,
         "fillet_mitre_gap_patch" => &mut k.fixes.fillet_mitre_gap_patch,
+        "fillet_corner_per_vertex_fan" => &mut k.fixes.fillet_corner_per_vertex_fan,
         "fillet_nx1_tangent_side_edge_same_convexity" => {
             &mut k.fixes.fillet_nx1_tangent_side_edge_same_convexity
         }

@@ -10,6 +10,7 @@
 //! | [`FilletSession::set_overflow_first`] | `SmFilletExecutive::SetOverflowFirst` |
 //! | [`FilletSession::set_classify_only`] | `SmFilletExecutive::SetClassifyOnly` |
 //! | [`FilletSession::overflow_edges`] | `SmFilletExecutive::GetOverflowEdges` |
+//! | [`FilletSession::mitred_edges`] | `SmFilletExecutive::GetMitredEdges` (the fork's `9ba2b12`) |
 //! | the stop in `FilletExecutive::refuse_blends_larger_than_faces` | the `m_bClassifyOnly` / `m_bOverflowFirst` stop of `CreateFilletBrep` |
 //!
 //! Deviations: both settings are per session and off by default, so a session that does
@@ -20,7 +21,10 @@
 //! `SM_FILERR_OVERFLOW_FIRST`). The overflowing edges come back as target edge ids
 //! rather than a pointer array. The ordering itself (blend the edges that overflow on
 //! their own first, then what is left of the others) is the caller's, as in the fork,
-//! where it is in the C API. No recursion.
+//! where it is in the C API; so is the fork's later use of the mitred pairs
+//! (`9ba2b12`: a round mitred to one that goes first goes first with it), of which only
+//! the SMLib accessors are here ([`FilletSession::mitred_edges`],
+//! `FilletCorner::is_mitre`, `FilletCorner::filleted_edgeuses`). No recursion.
 
 use super::{FilletBody, FilletObject, FilletSession};
 use crate::error::EntityRef;
@@ -57,6 +61,25 @@ impl FilletSession<'_> {
     pub fn overflow_edges(&self) -> Vec<EdgeId> {
         self.executive
             .overflow_edges()
+            .iter()
+            .filter_map(|edge| match edge {
+                FilletObject::Topology(FilletBody::Target, EntityRef::Edge(edge)) => Some(*edge),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// `GetMitredEdges` (the fork's, tangency-labs/smlib `9ba2b12`, WR-634): when
+    /// `do_fillet` stopped with
+    /// [`crate::blend::fillet_geom::p1::FilletErrorType::OverflowFirst`], the target edges
+    /// of each two blends mitred at a face's concave corner (an Nx2 corner whose
+    /// `IsMitre` is set), two by two in corner order; empty otherwise (preparing the edges
+    /// clears them). Mitres at such corners come from
+    /// `fixes.fillet_mitre_concave_face_corners` (WR-642) or a corner set to bevel.
+    #[must_use]
+    pub fn mitred_edges(&self) -> Vec<EdgeId> {
+        self.executive
+            .mitred_edges()
             .iter()
             .filter_map(|edge| match edge {
                 FilletObject::Topology(FilletBody::Target, EntityRef::Edge(edge)) => Some(*edge),

@@ -14,7 +14,8 @@
 //! | [`FilletCorner::new`] with [`FilletCornerKind::Open`] | `SmFilletOpenCorner::SmFilletOpenCorner`           |
 //! | [`FilletCorner::new`] with [`FilletCornerKind::Degenerate`] | `SmFilletDegenerateCorner::SmFilletDegenerateCorner` |
 //! | [`FilletCorner::corner_type`], [`FilletCornerKind::name`] | `GetCornerType`, `GetName` (per derived class)   |
-//! | [`FilletCorner::create`] | `SmFilletCorner::Create` |
+//! | [`FilletCorner::create`] | `SmFilletCorner::Create` (with `fixes.fillet_corner_per_vertex_fan`, the fork's knife-edge refusal of a two-edge corner, `e418750`, WR-665) |
+//! | [`FilletCorner::is_mitre`], [`FilletCorner::filleted_edgeuses`] | the fork's `SmFilletNx2Corner::IsMitre`, `GetFilletedEdgeuses` (`9ba2b12`, WR-634) |
 //! | [`FilletCorner::create_with_solver_lookup`] | `Create` with borrowed executive solvers |
 //! | [`FilletCorner::calc_corner_geom`]                 | `SmFilletCorner::CalcCornerGeom`                      |
 //! | [`FilletCorner::create_corner_patch`]              | `CreateCornerPatch` (virtual: `SmFilletCorner`, `SmFillet3x2MixedConvexityCorner`, `SmFilletNx1Corner`, `SmFilletNx2Corner`) |
@@ -677,6 +678,11 @@ pub struct FilletCorner {
     pub status: FilStatus,
     /// `m_bG1Case` of `SmFilletNx1ClosedCorner` / `SmFilletNx2Corner`.
     pub g1_case: bool,
+    /// `m_bMitre` of `SmFilletNx2Corner` (the fork's, WR-634, tangency-labs/smlib@9ba2b12;
+    /// `FALSE` from the constructor): the two blends are mitred at the common face's
+    /// concave corner (`MakeCornerTopology`'s bevel at a corner of mixed convexity). Read
+    /// by [`Self::is_mitre`].
+    pub mitre: bool,
 }
 
 /// What the corner methods operate on besides the corner itself.
@@ -1004,6 +1010,35 @@ impl FilletCorner {
             status: FilStatus::Unprocessed,
             // SmFilletNx1ClosedCorner: m_bG1Case = FALSE
             g1_case: false,
+            // SmFilletNx2Corner: m_bMitre = FALSE (the fork's, 9ba2b12)
+            mitre: false,
+        }
+    }
+
+    /// `SmFilletNx2Corner::IsMitre` (the fork's, WR-634, tangency-labs/smlib@9ba2b12):
+    /// whether the two blends are mitred at the common face's concave corner.
+    #[must_use]
+    pub const fn is_mitre(&self) -> bool {
+        self.mitre
+    }
+
+    /// `SmFilletNx2Corner::GetFilletedEdgeuses` (the fork's, WR-634,
+    /// tangency-labs/smlib@9ba2b12): the corner's two filleted edge uses, outward from its
+    /// vertex.
+    ///
+    /// # Errors
+    ///
+    /// [`SolidError::null_pointer`] without solver edge uses; `SM_ERR` unless there are
+    /// exactly two.
+    pub fn filleted_edgeuses(&self) -> Result<(EdgeuseId, EdgeuseId)> {
+        const OP: &str = "blend::fillet_corner::p3::filleted_edgeuses";
+        let eus = self
+            .solver_eus
+            .as_ref()
+            .ok_or_else(|| SolidError::null_pointer(OP))?;
+        match eus.as_slice() {
+            [first, second] => Ok((*first, *second)),
+            _ => Err(SolidError::sm_err(OP)),
         }
     }
 
@@ -1217,29 +1252,60 @@ impl FilletCorner {
                 let eu1_ = *solver_eus
                     .get(1)
                     .ok_or_else(|| invalid(OP_CREATE, "second filleted edge use"))?;
-                match total_eus {
-                    // 2x2: we can handle this only if it's a tangent fillet
-                    2 => {
-                        let e0 = edge_of(b, eu0)?;
-                        let e1 = edge_of(b, eu1_)?;
-                        if test_g1_continuity(k, b, vertex, e0, e1, tan_tol_deg)? {
-                            Some(make(FilletCornerKind::TwoByTwo))
-                        } else {
-                            None // MSG: Corner Case Not Implemented
+                // The fork's (WR-665, tangency-labs/smlib@e418750, opt-in
+                // `fillet_corner_per_vertex_fan`): no two-edge corner is built where an edge
+                // not blended there is a knife edge (its faces folded back on each other,
+                // as where a hole's wall touches the bottom face along a line): the
+                // corners take its faces to meet at an angle.
+                let mut knife = false;
+                if k.fixes.fillet_corner_per_vertex_fan {
+                    let e0 = edge_of(b, eu0)?;
+                    let e1 = edge_of(b, eu1_)?;
+                    for &other in &all_eus {
+                        if knife {
+                            break;
                         }
-                    }
-                    3 | 4 => {
-                        if total_eus == 3
-                            && eu2::is_convex_radial_sector(k, b, eu0, 4, false, 0.0)?
-                                != eu2::is_convex_radial_sector(k, b, eu1_, 4, false, 0.0)?
+                        let e = edge_of(b, other)?;
+                        if e != e0
+                            && e != e1
+                            && crate::blend::fillet_solver::p5::is_knife_edge(
+                                k,
+                                b,
+                                e,
+                                tangency_tol_radians,
+                            )?
                         {
-                            Some(make(FilletCornerKind::ThreeByTwoMixed))
-                        } else {
-                            // else continue with case 4
-                            Some(make(FilletCornerKind::NByTwo))
+                            knife = true;
                         }
                     }
-                    _ => None, // MSG: Corner Case Not Implemented
+                }
+                if knife {
+                    None // MSG: Corner Case Not Implemented
+                } else {
+                    match total_eus {
+                        // 2x2: we can handle this only if it's a tangent fillet
+                        2 => {
+                            let e0 = edge_of(b, eu0)?;
+                            let e1 = edge_of(b, eu1_)?;
+                            if test_g1_continuity(k, b, vertex, e0, e1, tan_tol_deg)? {
+                                Some(make(FilletCornerKind::TwoByTwo))
+                            } else {
+                                None // MSG: Corner Case Not Implemented
+                            }
+                        }
+                        3 | 4 => {
+                            if total_eus == 3
+                                && eu2::is_convex_radial_sector(k, b, eu0, 4, false, 0.0)?
+                                    != eu2::is_convex_radial_sector(k, b, eu1_, 4, false, 0.0)?
+                            {
+                                Some(make(FilletCornerKind::ThreeByTwoMixed))
+                            } else {
+                                // else continue with case 4
+                                Some(make(FilletCornerKind::NByTwo))
+                            }
+                        }
+                        _ => None, // MSG: Corner Case Not Implemented
+                    }
                 }
             }
             _ => {

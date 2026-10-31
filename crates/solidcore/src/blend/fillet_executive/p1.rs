@@ -704,6 +704,8 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
             overflow_first: false,
             classify_only: false,
             overflow_edges: Vec::new(),
+            mitred_edges: Vec::new(),
+            fan_split_points: Vec::new(),
         }
     }
 
@@ -868,6 +870,14 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
     #[must_use]
     pub fn overflow_edges(&self) -> &[O] {
         &self.overflow_edges
+    }
+
+    /// `GetMitredEdges` (the fork's, WR-634, tangency-labs/smlib@9ba2b12): when
+    /// `CreateFilletBrep` stopped with `FilletErrorType::OverflowFirst`, the edges of each
+    /// two blends mitred at a face's concave corner, two by two; empty otherwise.
+    #[must_use]
+    pub fn mitred_edges(&self) -> &[O] {
+        &self.mitred_edges
     }
 
     /// `SetSelfIntersectionHandler`.

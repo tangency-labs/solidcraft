@@ -877,6 +877,9 @@ impl FilletCorner {
                     .fillet_vertex_mut(face_fv)?
                     .set_fillet_vertex_type(FilletVertexType::RailXRail);
                 self.bevel = true;
+                // the fork's (WR-634, tangency-labs/smlib@9ba2b12): the mitre at the
+                // face's concave corner
+                self.mitre = mixed_convexity;
             }
 
             // Setup rails of fillet
