@@ -53,7 +53,7 @@
 //! and surface blocks; conic axes whose squared length does not overflow, else the conic
 //! has no NURB to evaluate, and conic domains within [`MAX_CONIC_ANGLE`], HANG-4); the run-time state checks are the shim's.
 
-use crate::validate::{bad, NOW};
+use crate::validate::{bad, bez_segments_write_null, NOW};
 use crate::{call_with_buffer, FfiError};
 
 /// Largest conic domain end (radians) accepted (HANG-4).
@@ -494,7 +494,8 @@ impl Reader<'_> {
         self.int(0, 1).map(|_| ())
     }
     /// `n p m cpts(x y z w) knots` with `n + p + 1 == m`, positive weights, nondecreasing
-    /// knots.
+    /// knots, and not one span with an end that is not clamped (UB-286: the curve's
+    /// cache writes through a null pointer in `sm_CreateBezSegments`).
     fn nurb(&mut self) -> Result<(), FfiError> {
         let n = self.int(1, MAX_POINTS)?;
         let p = self.int(1, MAX_DEGREE)?;
@@ -509,6 +510,7 @@ impl Reader<'_> {
                 return Err(bad("weight"));
             }
         }
+        let mut knots = Vec::new();
         let mut prev = f64::NEG_INFINITY;
         for _ in 0..=m {
             let u = self.finite()?;
@@ -516,6 +518,11 @@ impl Reader<'_> {
                 return Err(bad("knots"));
             }
             prev = u;
+            knots.push(u);
+        }
+        let p = usize::try_from(p).map_err(|_| bad("nurb counts"))?;
+        if bez_segments_write_null(p, &knots) {
+            return Err(bad("knots: one span with an unclamped end (UB-286)"));
         }
         Ok(())
     }
