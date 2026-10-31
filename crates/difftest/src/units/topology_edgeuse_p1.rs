@@ -120,7 +120,9 @@ pub(crate) enum SrfIn {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub(crate) enum BrepIn {
-    /// An upstream test file, relative to `upstream/TestFiles/pt_TestFiles`.
+    /// An upstream test file, relative to `upstream/TestFiles/pt_TestFiles`, or a
+    /// repository fixture file (a path starting `fixtures/`, relative to the repository
+    /// root).
     File {
         file: String,
         #[serde(default)]
@@ -351,7 +353,12 @@ pub(crate) fn flag(b: bool) -> f64 {
 pub(crate) fn path_of(b: Option<&BrepIn>) -> Result<String, HarnessError> {
     match b {
         Some(BrepIn::File { file, .. }) => {
-            let p = crate::fixtures::upstream_test_file(&crate::case::repo_root(), file)?;
+            let root = crate::case::repo_root();
+            let p = if file.starts_with("fixtures/") {
+                crate::fixtures::repo_fixture_file(&root, file)?
+            } else {
+                crate::fixtures::upstream_test_file(&root, file)?
+            };
             Ok(p.to_string_lossy().into_owned())
         }
         _ => Ok(String::new()),

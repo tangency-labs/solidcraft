@@ -158,8 +158,8 @@ SmBrep* primitive(const double* in, int64_t n, SmStatus& status) {
 // SmApiCreateBox(v, v, v; 10, 10, 10), 2 the same with that box's SmApiBrepCopy, 3
 // SmApiFilletEdges of edge `index` (GetEdges order, modulo the count) radius v (circular,
 // G1, thumbweight 1), 4 SmApiShellBrepFull distance v (extended, merged, no offset solid)
-// with face `index` (GetFaces order, modulo the count) open. The result, or NULL with
-// `status` on failure.
+// with face `index` (GetFaces order, modulo the count) open, 5 SmApiOffsetBrepFull
+// distance v (extended, merged; #2111). The result, or NULL with `status` on failure.
 SmBrep* copy_operation(SmBrep* copy, int kind, size_t index, double v, SmStatus& status) {
     SmBrep* result = nullptr;
     if (kind == 1 || kind == 2) {
@@ -201,6 +201,17 @@ SmBrep* copy_operation(SmBrep* copy, int kind, size_t index, double v, SmStatus&
         if (status != SM_SUCCESS) { delete result; return nullptr; }
         return result;
     }
+    if (kind == 5) {
+        status = (SmStatus)SmApiOffsetBrepFull(copy, v, TRUE, TRUE, result);
+        // (the result may be the consumed copy itself)
+        if (status != SM_SUCCESS) {
+            if (result && result != copy) delete result;
+            delete copy;
+            return nullptr;
+        }
+        if (result != copy) delete copy;
+        return result;
+    }
     status = SM_ERR;
     delete copy;
     return nullptr;
@@ -219,7 +230,7 @@ SmBrep* copy_operation(SmBrep* copy, int kind, size_t index, double v, SmStatus&
 SC_EXPORT int32_t sc_topology_assert_valid_eval(int32_t op, const char* path, const double* input, int64_t n,
                                                const double* args, int64_t na, double* out, int64_t cap, int64_t* len) {
     if (op < 0 || op > 4 || !input || n < 1 || !args || na != 5) return SC_ERR_ARG;
-    if (op == 4 && (args[2] < 1 || args[2] > 4)) return SC_ERR_ARG;
+    if (op == 4 && (args[2] < 1 || args[2] > 5)) return SC_ERR_ARG;
     if (op == 3 && args[2] != 0) return SC_ERR_ARG;
     SC_TRY
     Rd rd{input, 0};
