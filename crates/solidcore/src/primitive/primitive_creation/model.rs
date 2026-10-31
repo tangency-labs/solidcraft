@@ -801,10 +801,17 @@ impl PrimitiveCreationAccess for PrimitiveModel<'_> {
         destination: BrepId,
     ) -> Result<()> {
         // `SmBrep::CopyFaces(faces, destination, NULL, FALSE)`; its result is unused.
-        self.with_breps_mut(source, destination, |k, src, dst, _, this_face, _, env| {
-            crate::topology::brep::p7::copy_faces(k, src, faces, dst, false, this_face, env)
+        // (the source under `source_ref`, where the model entered its attributes)
+        self.with_breps_mut(
+            source,
+            destination,
+            |k, src, dst, source_key, this_face, _, env| {
+                crate::topology::brep::p7::copy_faces_from(
+                    k, src, faces, dst, false, source_key, this_face, env,
+                )
                 .map(drop)
-        })
+            },
+        )
     }
     fn attach_offset_map(&mut self, face: FaceRef, map: OffsetMapAttribute) -> Result<()> {
         self.brep(face.0)?.face(face.1)?;

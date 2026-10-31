@@ -1233,14 +1233,26 @@ pub fn boolean_lists_with_notifications(
                         // Defaults: pOptNewFaces=NULL, bUseMerge=TRUE,
                         // pOptMergeObject=NULL. Returned outputs are not inspected.
                         if let Some(notify) = notifications.as_deref_mut() {
-                            bp7::copy_faces(
+                            // (not upstream: upstream's objects are their own
+                            // identities) the result under the caller's names, the
+                            // component's objects under their own (`notify_ref`, its
+                            // faces `face_ref`), as `copy_component` names them
+                            let source_key = notify.key_of;
+                            let mut component_env = crate::topology::edge::NotifyEnv {
+                                records: &mut *notify.records,
+                                attributes: &mut *notify.attributes,
+                                context: notify.context.as_deref_mut(),
+                                key_of: &crate::topology::loopuse::notify_ref,
+                            };
+                            bp7::copy_faces_from(
                                 k,
                                 &mut result,
                                 &connected,
                                 &mut component,
                                 true,
+                                source_key,
                                 &face_ref,
-                                notify,
+                                &mut component_env,
                             )?;
                         } else {
                             // the arena entry keeps no notification state: the copy

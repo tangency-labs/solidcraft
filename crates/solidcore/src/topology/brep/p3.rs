@@ -1450,7 +1450,7 @@ pub fn api_brep_copy(
 /// # Errors
 ///
 /// `InvalidInput` when no such shift exists.
-fn private_source_shift(
+pub(crate) fn private_source_shift(
     live: &[EntityRef],
     source_key: &dyn Fn(EntityRef) -> ObjectRef,
     key_of: &dyn Fn(EntityRef) -> ObjectRef,
