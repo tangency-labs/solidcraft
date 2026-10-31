@@ -155,7 +155,7 @@ fn dialog_tab_blends_from_floating_values_start_at_edges_and_wrap() {
 }
 
 #[test]
-fn segmented_enter_applies_fillet_without_changing_continuity() {
+fn enter_on_fillet_type_applies_without_changing_the_type() {
     let mut h = l_step();
     h.app.session.selection = vec![edge(&h, OUTSIDE)];
     h.app.start("solid.fillet");
@@ -163,13 +163,20 @@ fn segmented_enter_applies_fillet_without_changing_continuity() {
     let mut reached = false;
     for _ in 0..20 {
         h.step(&json!({"key":"Tab"})).unwrap();
-        let at = crate::scenario::handle_at("dialog:Continuity:G2").unwrap();
+        let at = crate::scenario::handle_at("dialog:Type").unwrap();
         if h.ctx.memory(|m| m.focused()).and_then(|id| h.ctx.read_response(id)).is_some_and(|r| r.rect.contains(at)) {
             reached = true;
             break;
         }
     }
-    assert!(reached, "G2 must be reachable with Tab");
+    assert!(reached, "Type must be reachable with Tab");
     h.step(&json!({"key":"Enter"})).unwrap();
-    assert!(h.app.dialog.is_none(), "Enter on G2 must apply the existing G1 fillet instead of changing continuity");
+    assert!(h.app.dialog.is_none(), "Enter on Type must apply without opening its dropdown");
+    assert!(
+        matches!(
+            h.app.session.doc.features.last().unwrap().kind,
+            solidcraft_engine::doc::FeatureKind::Fillet { style: solidcraft_engine::doc::FilletStyle::Constant, .. }
+        ),
+        "Enter must preserve the constant-radius type"
+    );
 }

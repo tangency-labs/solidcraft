@@ -752,3 +752,38 @@ fn selected_components_are_copied_when_create_copy_is_ticked_after_them() {
     let p = crate::dialogs_move::params(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
     assert_eq!(p["occurrences"], json!([[first], [second]]));
 }
+
+#[test]
+fn dialog_tab_preference_restores_floating_move_axis_cycle() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.preferences.dialog_tab_navigation = false;
+    h.app.run("solid.box", json!({"length":20,"width":20,"height":20})).unwrap();
+    h.settle();
+    h.app.run("select.set", json!({"items":[Sel::Body { name:"Body1".into() }]})).unwrap();
+    h.app.start("solid.move");
+    h.frames(3);
+    for (shift, expected) in [
+        (false, "Y"),
+        (false, "Z"),
+        (false, "X Angle"),
+        (false, "Y Angle"),
+        (false, "Z Angle"),
+        (false, "X"),
+        (true, "Z Angle"),
+        (true, "Y Angle"),
+        (true, "X Angle"),
+        (true, "Z"),
+        (true, "Y"),
+        (true, "X"),
+    ] {
+        h.step(&json!({"key":"Tab","shift":shift})).unwrap();
+        h.frames(2);
+        assert_eq!(h.app.dialog.as_mut().and_then(|d| d.primary()).map(|p| p.0), Some(expected));
+        assert_eq!(h.ctx.memory(|m| m.focused()), Some(egui::Id::new("sc_canvas_value")));
+    }
+    h.app.preferences.dialog_tab_navigation = true;
+    h.step(&json!({"key":"Tab"})).unwrap();
+    h.frames(2);
+    let focused = h.ctx.memory(|m| m.focused()).unwrap();
+    assert!(h.app.viewport.dialog_rect.unwrap().contains(h.ctx.read_response(focused).unwrap().rect.center()));
+}

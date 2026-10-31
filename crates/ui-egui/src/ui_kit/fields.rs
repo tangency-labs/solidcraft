@@ -899,18 +899,16 @@ fn paint_dropdown_icon(ui: &Ui, rect: egui::Rect, icon: &str) {
 /// for that option's index, so a choice can be seen before it is picked. Tokens: dropdown tokens,
 /// the tooltip frame.
 pub(crate) fn dropdown_previews(ui: &mut Ui, id: &str, selected: &mut usize, options: &[&str], preview: impl Fn(&mut Ui, usize)) -> Response {
-    let text = options.get(*selected).copied().map(crate::i18n::tr_label).unwrap_or("");
     let row = label(ui).to_string();
-    dropdown_menu(ui, id, text, |ui| {
-        for (index, option) in options.iter().enumerate() {
-            let response = ui.selectable_value(selected, index, crate::i18n::tr_label(option));
-            scenario::publish_target(&format!("dialog:{row}:{option}"), response.rect);
-            Container::tooltip_ui(&response, |ui| {
-                preview(ui, index);
+    indexed_dropdown_with_preview(ui, id, selected, options, |index, response| {
+        Container::tooltip_ui(response, |ui| {
+            preview(ui, index);
+            if let Some(option) = options.get(index) {
                 scenario::publish_rect(&format!("dialog:preview:{row}:{option}"), ui.min_rect());
-            });
-        }
+            }
+        });
     })
+    .0
 }
 
 /// Also reports confirming the already selected choice, so automatic choices become manual.
@@ -919,6 +917,16 @@ pub(crate) fn dropdown_picked(ui: &mut Ui, id: &str, selected: &mut usize, optio
 }
 
 fn indexed_dropdown(ui: &mut Ui, id: &str, selected: &mut usize, options: &[&str]) -> (Response, bool) {
+    indexed_dropdown_with_preview(ui, id, selected, options, |_, _| {})
+}
+
+fn indexed_dropdown_with_preview(
+    ui: &mut Ui,
+    id: &str,
+    selected: &mut usize,
+    options: &[&str],
+    preview: impl Fn(usize, &Response),
+) -> (Response, bool) {
     let owner = ui.make_persistent_id(egui::IdSalt::new(id));
     let cursor_id = owner.with("keyboard_option");
     let open = egui::ComboBox::is_open(ui.ctx(), owner);
@@ -975,6 +983,7 @@ fn indexed_dropdown(ui: &mut Ui, id: &str, selected: &mut usize, options: &[&str
         for (index, option) in options.iter().enumerate() {
             let response = ui.selectable_label(index == cursor, crate::i18n::tr_label(option));
             scenario::publish_target(&format!("dialog:{row}:{option}"), response.rect);
+            preview(index, &response);
             if response.clicked() {
                 *selected = index;
                 picked = true;

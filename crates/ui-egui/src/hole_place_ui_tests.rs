@@ -466,3 +466,31 @@ fn editing_a_hole_replaces_its_face_instead_of_adding_one() {
     assert_eq!(again, hole, "the same feature");
     assert!(position.dist(on_top) < 1e-3, "OK uses the new face: {position:?}");
 }
+
+#[test]
+fn preview_dropdown_hole_type_uses_pending_arrows_space_and_tab_exit() {
+    let mut h = block_as_installed();
+    let features = h.app.session.doc.features.len();
+    h.step(&json!({"start":"solid.hole"})).unwrap();
+    h.frames(3);
+    h.step(&json!({"click":{"handle":"dialog:Hole Type"}})).unwrap();
+    h.step(&json!({"key":"Escape"})).unwrap();
+    h.step(&json!({"key":"Space"})).unwrap();
+    assert!(egui::Popup::is_any_open(&h.ctx));
+    h.step(&json!({"key":"ArrowDown"})).unwrap();
+    assert!(matches!(&h.app.dialog.as_ref().unwrap().kind, Kind::Hole { kind: 0, .. }));
+    h.step(&json!({"key":"Space"})).unwrap();
+    assert!(!egui::Popup::is_any_open(&h.ctx));
+    assert!(matches!(&h.app.dialog.as_ref().unwrap().kind, Kind::Hole { kind: 1, .. }));
+    h.step(&json!({"key":"Space"})).unwrap();
+    h.step(&json!({"key":"ArrowDown"})).unwrap();
+    h.step(&json!({"key":"Tab"})).unwrap();
+    h.frames(2);
+    assert!(!egui::Popup::is_any_open(&h.ctx));
+    assert!(matches!(&h.app.dialog.as_ref().unwrap().kind, Kind::Hole { kind: 1, .. }));
+    let response = h.ctx.read_response(h.ctx.memory(|m| m.focused()).unwrap()).unwrap();
+    assert!(response.rect.contains(handle_at("dialog:Hole Tap Type").unwrap()));
+    h.step(&json!({"key":"Escape"})).unwrap();
+    assert!(h.app.dialog.is_none());
+    assert_eq!(h.app.session.doc.features.len(), features);
+}

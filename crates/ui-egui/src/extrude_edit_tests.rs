@@ -877,7 +877,7 @@ fn checkbox_enter_applies_extrude_without_toggling_reverse() {
         }
         h.step(&json!({"key":"Enter"})).unwrap();
         assert!(h.app.dialog.is_none(), "Enter on a checkbox must apply Extrude");
-        let state = h.app.session.world_state();
+        let state = h.app.session.world_state().unwrap();
         let bounds = state.body("Main").unwrap().mesh().bounds();
         assert!((bounds.min.z - if reversed { -10.0 } else { 0.0 }).abs() < 1e-7);
         assert!((bounds.max.z - if reversed { 0.0 } else { 10.0 }).abs() < 1e-7, "Enter must preserve the checkbox value");

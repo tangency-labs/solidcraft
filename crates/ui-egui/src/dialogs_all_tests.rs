@@ -1780,7 +1780,7 @@ fn dialog_keyboard_body_mirror_and_patterns_traverse_and_apply() {
                 } else {
                     3
                 };
-                let state = h.app.session.world_state();
+                let state = h.app.session.world_state().unwrap();
                 assert_eq!(state.bodies.len(), expected);
                 let volume: f64 = state.bodies.iter().map(|body| solidcraft_engine::doc::kernel::measure(&body.body).unwrap().volume).sum();
                 assert!((volume - 24.0 * expected as f64).abs() < 1e-6, "{command}: copies must preserve seed volume");
@@ -1890,7 +1890,7 @@ fn dialog_keyboard_body_valid_preview_escape_preserves_the_original_model() {
                 assert!(h.app.dialog.is_none(), "{command} {placement:?}: Escape closes the valid dialog");
                 assert_eq!(h.app.session.doc.to_json(), document, "cancel must not commit the preview or edited quantities");
                 assert_eq!(h.app.session.undo.len(), undo, "cancel must not add an undo step");
-                let state = h.app.session.world_state();
+                let state = h.app.session.world_state().unwrap();
                 assert_eq!(state.bodies.len(), 1);
                 assert!((solidcraft_engine::doc::kernel::measure(&state.bodies[0].body).unwrap().volume - 24.0).abs() < 1e-6);
             }
