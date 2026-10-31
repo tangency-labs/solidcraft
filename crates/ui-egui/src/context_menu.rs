@@ -87,6 +87,8 @@ pub enum Target {
     HistoryControls,
     /// The workspace switcher.
     Workspace,
+    /// The view gizmo (axes, cube or a custom body) at the viewport's corner.
+    ViewGizmo,
     /// The Named Views folder, and one view (saved or standard) in it.
     NamedViews,
     NamedView {
@@ -402,6 +404,7 @@ pub fn items(app: &SolveApp, target: &Target) -> Vec<Item> {
         Target::PointCloud { id } => crate::browser::point_cloud_items(app, *id),
         Target::Origin => crate::browser::origin_items(app),
         Target::NamedViews => vec![act("ui.newView", "New Named View", "perspective")],
+        Target::ViewGizmo => crate::view_gizmo::menu_items(app),
         Target::Section => crate::browser::section_items(app),
         Target::Joint { id } => joint_items(app, *id),
         Target::ToolbarCommand { id } => crate::toolbar_custom::command_items(app, id),
@@ -1632,6 +1635,11 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
         "ui.toolbarPin" | "ui.toolbarRemove" | "ui.toolbarReset" | "ui.toolbarCustomize" | "ui.toolbarTab" | "ui.shortcutPin" => {
             crate::toolbar_custom::run(app, &item.id, &p)
         }
+        "ui.navigatorStyle" => {
+            if let Some(style) = p.get("style").and_then(|s| serde_json::from_value(s.clone()).ok()) {
+                crate::view_gizmo::pick_style(app, style);
+            }
+        }
         "ui.navPreset" => {
             // Picked here, a preset sets what Preferences › Navigation sets for it.
             if let Some(preset) = crate::prefs::NAV_PRESETS.iter().find(|preset| p.get("preset").and_then(Value::as_str) == Some(preset.id)) {
@@ -2002,7 +2010,11 @@ fn in_selection(app: &SolveApp, sel: &Sel) -> bool {
 /// Open the viewport menu at a screen position. A right-click on something not selected
 /// selects it first, so the menu is about what is under the cursor; a face or edge already in a
 /// multi-selection keeps the whole selection (#3733), as does one of a selected body (#5849). `held`: the keys held at that click.
+/// On the view gizmo it opens the gizmo's own menu and leaves the selection alone.
 pub fn open(app: &mut SolveApp, at: Pos2, held: crate::tool_modifiers::Held) {
+    if crate::viewport::view_gizmo_at(app, at) {
+        return open_for(app, at, Target::ViewGizmo);
+    }
     app.menu.opened = Some((at, held));
     app.menu.picked = None;
     let before = app.session.selection.clone();

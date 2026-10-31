@@ -306,6 +306,7 @@ pub mod update;
 mod value_step;
 pub(crate) mod view_angles;
 mod view_confirm;
+pub mod view_gizmo;
 pub mod view_pick;
 pub mod viewport;
 mod viewport_details;
@@ -507,6 +508,8 @@ pub struct SolveApp {
     pub cam: Camera,
     /// A view change in progress (axis view, Home, Fit); any mouse navigation cancels it.
     pub cam_anim: Option<CameraAnim>,
+    /// The custom view navigator's body (kept with the preferences).
+    pub view_gizmo: view_gizmo::State,
     /// Seconds since start, as of this frame.
     pub now: f64,
     /// The history marker before Edit Sketch rolled the timeline to the sketch; Finish Sketch
@@ -774,6 +777,7 @@ impl SolveApp {
             shell: Default::default(),
             cam: Camera::default(),
             cam_anim: None,
+            view_gizmo: view_gizmo::State::default(),
             now: 0.0,
             pre_sketch_marker: None,
             pre_sketch_cam: None,
@@ -1020,6 +1024,7 @@ impl SolveApp {
             "agent_cursor": self.ui.agent_cursor,
             "recent_colors": self.ui.recent_colors,
             "preferences": self.preferences,
+            "view_gizmo": self.view_gizmo.stored(),
             "gpu_path_setup_seconds": self.render_workspace.setup_seconds,
         });
         // While the Preferences dialog is open the file holds what Cancel would restore: a change
@@ -1101,6 +1106,7 @@ impl SolveApp {
         if let Some(p) = v.get("settings_profiles") {
             self.settings_profiles.load(p);
         }
+        self.view_gizmo.load(v.get("view_gizmo"));
         if let Some(mut p) = v.get("preferences").filter(|p| p.is_object()).map(prefs::lenient) {
             if !prefs::MSAA.contains(&p.msaa) {
                 p.msaa = prefs::Prefs::default().msaa;
@@ -1386,6 +1392,8 @@ impl SolveApp {
         // Settings profiles live in the app: the engine only checked the parameters.
         let r = match r {
             Ok(v) if id.starts_with("settings.profile.") => settings_profiles::command(self, id, &v),
+            // The view navigator is the app's too.
+            Ok(v) if id == "view.navigator" => view_gizmo::command(self, &v),
             r => r,
         };
         self.finish_command(id, &r);

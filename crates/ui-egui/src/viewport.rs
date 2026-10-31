@@ -37,6 +37,9 @@ mod plane_target_tests;
 #[path = "viewport_refine_wait_tests.rs"]
 mod refine_wait_tests;
 
+#[path = "body_gizmo.rs"]
+mod body_gizmo;
+
 #[path = "navigation_cube.rs"]
 mod navigation_cube;
 
@@ -3080,7 +3083,7 @@ fn section_clip(app: &SolveApp) -> [f32; 4] {
 pub(crate) fn axis_view_size(style: crate::prefs::NavigatorStyle) -> f32 {
     match style {
         crate::prefs::NavigatorStyle::Axes => 116.0,
-        crate::prefs::NavigatorStyle::Cube => navigation_cube::SIZE,
+        crate::prefs::NavigatorStyle::Cube | crate::prefs::NavigatorStyle::Custom => navigation_cube::SIZE,
     }
 }
 // Keep command panels anchored independently of the compact cube's display size.
@@ -6593,9 +6596,11 @@ fn axis_view_orbit(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) -> bool {
         (p.primary_pressed(), p.primary_down(), p.is_decidedly_dragging(), p.press_origin(), p.interact_pos(), i.modifiers.shift)
     });
     if pressed && ui.is_enabled() && ui.rect_contains_pointer(rect) && !pos.is_some_and(|p| crate::shell::covered(app, p)) {
-        app.viewport.axis_drag = origin.filter(|p| match app.preferences.navigator_style {
+        let shown = crate::view_gizmo::shown(app);
+        app.viewport.axis_drag = origin.filter(|p| match shown.style {
             crate::prefs::NavigatorStyle::Axes => axis_rect(app, rect).contains(*p),
-            crate::prefs::NavigatorStyle::Cube => {
+            crate::prefs::NavigatorStyle::Custom if shown.shape.is_some() => body_gizmo::drag_origin(app, rect, *p),
+            crate::prefs::NavigatorStyle::Cube | crate::prefs::NavigatorStyle::Custom => {
                 navigation_cube::drag_origin(&app.cam, axis_center(app, rect), *p, axis_rect(app, rect).width() / navigation_cube::DESIGN_SIZE)
             }
         });
@@ -6617,10 +6622,37 @@ fn axis_view_orbit(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) -> bool {
     true
 }
 
+/// The whole navigator's box takes the right-click for the navigator's menu, before the view
+/// under it would (its controls are drawn over it, and open the same menu themselves).
+fn gizmo_menu(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
+    let outer = axis_rect(app, rect);
+    if !outer.is_positive() || !outer.is_finite() {
+        return;
+    }
+    let response = ui.interact(outer, ui.id().with("view_navigator_menu"), Sense::click());
+    if response.secondary_clicked()
+        && app.dialog.is_none()
+        && let Some(at) = response.interact_pointer_pos()
+    {
+        crate::context_menu::open_for(app, at, crate::context_menu::Target::ViewGizmo);
+    }
+}
+
+/// The view gizmo (whichever type is shown) is under `p`: a right-click there opens its menu.
+pub(crate) fn view_gizmo_at(app: &SolveApp, p: Pos2) -> bool {
+    app.viewport.rect.is_some_and(|rect| {
+        let outer = axis_rect(app, rect);
+        outer.is_positive() && outer.contains(p) && !crate::shell::covered(app, p)
+    })
+}
+
 pub(crate) fn axis_view(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
-    match app.preferences.navigator_style {
+    gizmo_menu(app, ui, rect);
+    let shown = crate::view_gizmo::shown(app);
+    match shown.style {
         crate::prefs::NavigatorStyle::Axes => signed_axis_view(app, ui, rect),
-        crate::prefs::NavigatorStyle::Cube => navigation_cube::show(app, ui, rect),
+        crate::prefs::NavigatorStyle::Custom if shown.shape.is_some() => body_gizmo::show(app, ui, rect, shown),
+        crate::prefs::NavigatorStyle::Cube | crate::prefs::NavigatorStyle::Custom => navigation_cube::show(app, ui, rect),
     }
 }
 

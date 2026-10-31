@@ -173,18 +173,20 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
                 response.on_hover_text(&note)
             });
             ui_kit::row(ui, app.tr_label("View navigator"), |ui| {
-                let mut selected = usize::from(app.preferences.navigator_style == NavigatorStyle::Cube);
+                let mut selected = NavigatorStyle::ALL.iter().position(|s| *s == app.preferences.navigator_style).unwrap_or_default();
                 if ui_kit::segmented(
                     ui,
                     &mut selected,
-                    &[app.tr("prefs.axes"), crate::i18n::tr_label("Cube")],
+                    &[app.tr("prefs.axes"), crate::i18n::tr_label("Cube"), crate::i18n::tr_label("Custom")],
                     ui_kit::Segments { intrinsic: true, ..Default::default() },
                 ) {
-                    app.preferences.navigator_style = if selected == 0 { NavigatorStyle::Axes } else { NavigatorStyle::Cube };
+                    app.preferences.navigator_style = NavigatorStyle::ALL.get(selected).copied().unwrap_or_default();
                 }
                 if let Some(rect) = crate::scenario::rect_of(&format!("dialog:segments:{}", crate::i18n::tr_label("View navigator"))) {
                     crate::scenario::publish_target("prefs:navigator", rect);
-                    for (label, key) in [(app.tr("prefs.axes"), "Signed axes"), (crate::i18n::tr_label("Cube"), "Cube")] {
+                    for (label, key) in
+                        [(app.tr("prefs.axes"), "Signed axes"), (crate::i18n::tr_label("Cube"), "Cube"), (crate::i18n::tr_label("Custom"), "Custom")]
+                    {
                         if let Some(at) = crate::scenario::handle_at(&format!("dialog:{}:{label}", crate::i18n::tr_label("View navigator"))) {
                             crate::scenario::publish_target(
                                 &format!("prefs:navigator:{key}"),

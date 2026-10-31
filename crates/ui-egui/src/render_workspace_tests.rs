@@ -2573,7 +2573,8 @@ fn render_workspace_view_keys_double_middle_click_and_navigators_work() {
         off(&mut h);
         let handle = match style {
             crate::prefs::NavigatorStyle::Axes => "axis_view:home",
-            crate::prefs::NavigatorStyle::Cube => "navigation_cube:control:home",
+            // Custom draws the cube until a body is chosen.
+            crate::prefs::NavigatorStyle::Cube | crate::prefs::NavigatorStyle::Custom => "navigation_cube:control:home",
         };
         h.step(&json!({"click":{"handle":handle}})).unwrap();
         h.settle();

@@ -568,17 +568,33 @@ pub enum NavigatorStyle {
     #[default]
     Axes,
     Cube,
+    /// A body of the user's choice, drawn the cube's size ([`crate::view_gizmo`]); the cube
+    /// until one is chosen.
+    Custom,
 }
 
 impl NavigatorStyle {
-    pub const ALL: [Self; 2] = [Self::Axes, Self::Cube];
+    pub const ALL: [Self; 3] = [Self::Axes, Self::Cube, Self::Custom];
 
     pub fn label(self) -> &'static str {
         match self {
             Self::Axes => "Signed axes",
             Self::Cube => "Cube",
+            Self::Custom => "Custom",
         }
     }
+}
+
+/// How the custom view gizmo colours its body.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum NavigatorTexture {
+    /// The navigation cube's colours. Also what a value this version doesn't know reads as
+    /// (`lenient`).
+    #[default]
+    Themed,
+    /// The body's own appearance, as the viewport shows it.
+    Modeled,
 }
 
 /// How the History at the left lists sketches (Preferences: "Sketches", #6489). The timeline
@@ -977,6 +993,12 @@ preference_settings! {
     right_drag_orbits: bool = true, PAGE_NAVIGATION => check_tr("nav.right_drag_orbits.label");
     /// View orientation widget: original signed axes (default) or compact cube.
     navigator_style: NavigatorStyle = NavigatorStyle::default(), PAGE_NAVIGATION;
+    /// The custom view gizmo's colours: the cube's (themed) or the body's own (modeled).
+    navigator_texture: NavigatorTexture = NavigatorTexture::default(), PAGE_NAVIGATION;
+    /// The custom view gizmo has the cube's orbit and roll arrows around it.
+    navigator_arrows: bool = false, PAGE_NAVIGATION;
+    /// The custom view gizmo has the cube's Home button beside it.
+    navigator_home: bool = false, PAGE_NAVIGATION;
     /// Show the radial ring and enable hold/flick gestures for viewport context menus.
     radial_context_menu: bool = false, PAGE_NAVIGATION => check("Radial context menu");
     /// Work on the model directly in the viewport (pull a face to extrude or cut); off by default.

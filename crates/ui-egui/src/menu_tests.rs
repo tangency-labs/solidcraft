@@ -1493,6 +1493,7 @@ fn every_context_target_has_identified_icon_rows_including_submenus() {
         Target::HistoryControls,
         Target::Workspace,
         Target::NamedViews,
+        Target::ViewGizmo,
         Target::NamedView { name: "Top".into() },
         Target::Canvas { id: 1 },
         Target::Section,
