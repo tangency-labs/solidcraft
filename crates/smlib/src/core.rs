@@ -265,6 +265,7 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.fillet_statuses_pass_on = true;
     f.fillet_corner_per_vertex_fan = true;
     f.fillet_rail_trim_at_near_knot = true;
+    f.offset_splits_corner_vertices = true;
     f
 }
 
@@ -305,8 +306,7 @@ pub(crate) fn fixes() -> UpstreamFixes {
 /// clamping it) and `point_on_start_point_squared_tolerance` (WR-51: `IsPointOnStartPoint` compares
 /// a squared distance with the tolerance).
 ///
-/// The fork has no such code: `offset_splits_corner_vertices` (WR-657: `CloseLoopGaps` splits no
-/// corner and an offset's result is not refused for being open), `defeature_refuses_open_base`
+/// The fork has no such code: `defeature_refuses_open_base`
 /// (WR-656: `DoDefeature` drops `BuildPatches`' outcome) and `ssi_start_loop_trace_budget` (HANG-52:
 /// `DoIntersection`'s start-point loop has no budget). `fillet_refuse_crossing_rails` (WR-460: "not
 /// upstream"; the fork stops such rounds with the overlapping bands' check, SmFilletExecutive.cpp:3654,
@@ -357,7 +357,6 @@ const HELD_BACK: &[&str] = &[
     "circumscribe_axis_map_by_basis",
     "planar_path_profile_in_path_frame",
     "validation_does_not_make_uv_trims",
-    "offset_splits_corner_vertices",
     "iso_curve_uv_line_both_params",
     "extrusion_step_uses_clamped_uv",
     "analytic_corner_failure_is_false",
