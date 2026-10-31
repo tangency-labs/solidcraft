@@ -3288,10 +3288,27 @@ fn apply_traced_with(
             let affected: std::collections::BTreeMap<String, usize> =
                 target_idx.iter().filter_map(|i| state.bodies.get(*i)).map(|b| (b.name.clone(), b.body.lumps().map_or(1, |l| l.len()))).collect();
             let mut remove = Vec::new();
+            // A cut hands a body its tools cannot reach back as it was, but only after a whole
+            // boolean: in a design of many bodies that was most of a hole's time (#10225). Such a
+            // body is left as it is. Its box and the tools' are their meshes' grown past how far
+            // the exact faces can curve out from them (a dome rises above the outline of its
+            // edges), so a tool that touches a body, or only comes near it, still meets it in the
+            // boolean. A body shown in another frame, and a mesh body, are cut as before; an
+            // intersect removes the bodies it misses, and is left as it was.
+            let reach: Option<Vec<Option<solidcraft_geom::Aabb3>>> =
+                (op == Operation::Cut && !tools.iter().any(|t| t.body.is_mesh())).then(|| tools.iter().map(|t| more::body_box(&t.body)).collect());
             for &ti in &target_idx {
                 let Some(mut acc) = state.bodies.get(ti).map(|b| Some(b.traced())) else { continue };
                 // The tools meet the target where it is shown: in its frame (#3383).
                 let into = state.bodies.get(ti).and_then(|b| tool_frame(&b.name));
+                if let (Some(reach), None, Some(mb)) = (&reach, into, state.bodies.get(ti))
+                    && !reach.is_empty()
+                    && !mb.body.is_mesh()
+                    && let Some(target) = more::mesh_box(mb)
+                    && reach.iter().all(|tool| more::boxes_apart(&Some(target), tool))
+                {
+                    continue;
+                }
                 #[cfg(test)]
                 cost_tests::count(|c| c.cut += 1);
                 for t in &tools {

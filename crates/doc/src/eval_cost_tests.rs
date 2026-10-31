@@ -1130,6 +1130,24 @@ fn cutter(base: Vec3, radius: f64, height: f64) -> FeatureKind {
     }
 }
 
+/// A cut leaves the bodies its tool cannot reach as they were, without a boolean on each: in a
+/// design of many bodies those booleans were most of a hole's time (#10225).
+#[test]
+fn a_cut_leaves_bodies_it_cannot_reach_as_they_were() {
+    let mut doc = Document::new("far");
+    block(&mut doc, "Near", Vec3::ZERO, [50.0, 40.0, 30.0]);
+    // 0.5 mm clear of the tool, and far off.
+    block(&mut doc, "Beside", Vec3::new(13.5, 0.0, 0.0), [20.0, 40.0, 30.0]);
+    for i in 0..5 {
+        block(&mut doc, &format!("Far{i}"), Vec3::new(200.0 * (i + 1) as f64, 0.0, 0.0), [50.0, 40.0, 30.0]);
+    }
+    // Near and Beside overlap; the hole goes through Near only, beside Beside.
+    let work = cut_work(&mut doc, cutter(Vec3::new(10.0, 20.0, -5.0), 3.0, 40.0));
+    assert_eq!(work.cut, 1, "only the body the tool reaches goes through the boolean");
+    assert_eq!(work.kept, ["Beside", "Far0", "Far1", "Far2", "Far3", "Far4"]);
+    assert!(volume(&work.model, "Near") < 60_000.0 - 800.0, "and it is cut");
+}
+
 /// A cut still goes through the boolean wherever its tool reaches a body or comes close: on a
 /// face, along a line, a hair beside it, into a dome above its edge circle. (Bodies its tool
 /// cannot reach are left out of it: `a_cut_leaves_bodies_it_cannot_reach_as_they_were`.)

@@ -1556,13 +1556,13 @@ fn sheet_prism_cut(
 
 /// A box around `body`, grown past its mesh's deflection from the exact faces (and a hair
 /// more): bodies whose boxes are apart do not meet. None when it can't be worked out.
-fn body_box(body: &Body) -> Option<Aabb3> {
+pub(super) fn body_box(body: &Body) -> Option<Aabb3> {
     let tol = (body.size() * 1e-3).max(1e-4);
     padded_box(&body.tessellate(tol).ok()?, tol)
 }
 
 /// [`body_box`] of a model body, from the mesh it keeps.
-fn mesh_box(mb: &ModelBody) -> Option<Aabb3> {
+pub(super) fn mesh_box(mb: &ModelBody) -> Option<Aabb3> {
     padded_box(&mb.mesh(), mb.display_tol())
 }
 
@@ -1572,7 +1572,7 @@ fn padded_box(mesh: &solidcraft_geom::Mesh, tol: f64) -> Option<Aabb3> {
 }
 
 /// Whether two boxes are known to be apart (an unknown box is never apart).
-fn boxes_apart(a: &Option<Aabb3>, b: &Option<Aabb3>) -> bool {
+pub(super) fn boxes_apart(a: &Option<Aabb3>, b: &Option<Aabb3>) -> bool {
     let (Some(a), Some(b)) = (a, b) else { return false };
     a.max.x < b.min.x || b.max.x < a.min.x || a.max.y < b.min.y || b.max.y < a.min.y || a.max.z < b.min.z || b.max.z < a.min.z
 }
