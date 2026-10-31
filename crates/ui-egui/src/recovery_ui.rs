@@ -219,13 +219,12 @@ pub fn browser_copies_window(ctx: &egui::Context, language: &str, copies: &[Brow
     let _ = ui_kit::Window::new(egui::Id::new("sc_browser_keep_restore"), "restore", &title).required().show_body(ctx, |ui| {
         ui_kit::text(ui, crate::i18n::tr("recovery.restore_intro"), ui_kit::Text::Report("intro", false));
         for (index, c) in copies.iter().enumerate() {
-            let label = if copies.len() > 1 {
+            if copies.len() > 1 {
                 ui_kit::divider(ui, &format!("entry:{index}"));
-                crate::i18n::format("recovery.restore_row", &[("name", &crate::i18n::tr_name(c.name)), ("when", &c.when)])
-            } else {
-                String::new()
-            };
-            ui_kit::label_actions(ui, &label, |ui| {
+                let row = crate::i18n::format("recovery.restore_row", &[("name", &crate::i18n::tr_name(c.name)), ("when", &c.when)]);
+                ui_kit::text(ui, &row, ui_kit::Text::Report(&format!("row:{index}"), false));
+            }
+            ui.horizontal(|ui| {
                 let mut answers = vec![(CopyAnswer::Restore, crate::i18n::tr("recovery.restore"))];
                 if c.open_saved {
                     answers.push((CopyAnswer::OpenSaved, crate::i18n::tr("recovery.open_saved")));
