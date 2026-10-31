@@ -47,7 +47,7 @@ pub use sketch::dimension_roles;
 pub(crate) use sketch::face::face_pick_form;
 pub use sketch_construction::{ConstructionLine, construction_line_choice, construction_line_mode, construction_line_solutions};
 pub use sketch_import::drawing_import_command;
-pub use sketch_modify::{extend_arc_preview, extend_preview, trim_piece};
+pub use sketch_modify::{TrimHover, extend_arc_preview, extend_end_at, extend_preview, trim_hover, trim_piece};
 pub use view_dxf::sketch::exportable as view_dxf_exportable;
 pub use view_navigation::standard_view;
 mod component_link;

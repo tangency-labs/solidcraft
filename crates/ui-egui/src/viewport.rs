@@ -2697,7 +2697,7 @@ fn pick_hits(app: &SolveApp, proj: &Proj, pos: Pos2, other_sketch_points: bool, 
         // Show Profile off: the sketch being edited offers no profiles.
         let profiles = if ss.sketch.view.hide_profile && s.active_sketch == Some(sid) { &[][..] } else { &ss.profiles[..] };
         for (pi, p) in profiles.iter().enumerate() {
-            if !p.region.contains(lp) {
+            if !p.contains(lp) {
                 continue;
             }
             if all {

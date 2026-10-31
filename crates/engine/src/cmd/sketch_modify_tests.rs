@@ -2752,6 +2752,67 @@ fn trim_piece_is_what_a_trim_there_takes_away() {
     assert!(near(piece[0], [0.0, 0.0]) && near(piece[piece.len() - 1], [8.0, 0.0]), "{piece:?}");
 }
 
+/// The hover keeps one [`super::TrimHover`] per curve while the sketch is unchanged and asks it
+/// for each cursor position: it answers what working the piece out afresh there answers, and the
+/// trim there takes that piece away. Lines, circles and arcs cut by each other and by a spline.
+/// Extend's previews depend on the cursor only through the end it grows
+/// ([`super::extend_end_at`]), which lets the hover keep them while that end stays the nearer.
+#[test]
+fn trim_hover_made_once_and_extend_previews_per_end_answer_as_afresh() {
+    let mut s = new_sketch();
+    for y in [0.0, 6.0, 13.0] {
+        run(&mut s, "sketch.line", json!({"points": [[-20, y], [40, y]], "connect": false}));
+    }
+    for x in [-8.0, 9.0, 27.0] {
+        run(&mut s, "sketch.circle.center", json!({"center": [x, 4], "radius": 5}));
+    }
+    run(&mut s, "sketch.arc.three_point", json!({"start": [-15, -6], "end": [35, -6], "through": [10, 18]}));
+    run(&mut s, "sketch.spline.fit_point", json!({"points": [[-12, -9], [0, 20], [14, -8], [30, 19]]}));
+    run(&mut s, "sketch.line", json!({"points": [[3, 3], [5, 4]], "connect": false}));
+    let sk = sketch(&s);
+    let (mut trimmed, mut extended) = (0, 0);
+    for (ci, c) in sk.curves.iter().enumerate() {
+        let Some(hover) = super::trim_hover(&sk, &c.id) else {
+            assert!(c.kind.is_freeform(), "{}", c.id);
+            continue;
+        };
+        let poly = sk.polyline(ci);
+        for k in 1..12 {
+            let at = poly[(poly.len() - 1) * k / 12] + Vec2::new(0.01, -0.02);
+            let piece = hover.piece(at);
+            assert_eq!(piece, super::trim_piece(&sk, &c.id, at), "{} at {at:?}", c.id);
+            let Some(piece) = piece else { continue };
+            if k % 4 == 1 {
+                let mut after = sk.clone();
+                super::remove_piece(&mut after, ci, at, "sketch.trim").unwrap();
+                let mid = if piece.len() > 2 { piece[piece.len() / 2] } else { (piece[0] + piece[1]) * 0.5 };
+                assert!(!(0..after.curves.len()).filter_map(|i| after.shape(i)).any(|sh| sh.dist(mid) < 1e-6), "{} at {at:?}", c.id);
+                trimmed += 1;
+            }
+        }
+        if !matches!(c.kind, CurveKind::Line { .. } | CurveKind::Arc { .. }) {
+            continue;
+        }
+        let (CurveKind::Line { a, b } | CurveKind::Arc { a, b, .. }) = c.kind else { continue };
+        let (qa, qb) = (sk.point(a).unwrap(), sk.point(b).unwrap());
+        for k in 0..=10 {
+            let at = qa.lerp(qb, f64::from(k) / 10.0) + Vec2::new(0.3, 0.2);
+            let at_b = super::extend_end_at(&sk, ci, at).unwrap();
+            let end = if at_b { qb } else { qa };
+            let preview = |p: Vec2| {
+                if matches!(c.kind, CurveKind::Arc { .. }) {
+                    super::extend_arc_preview(&sk, ci, p)
+                } else {
+                    super::extend_preview(&sk, ci, p).map(|q| vec![q])
+                }
+            };
+            assert_eq!(preview(at), preview(end), "{} at {at:?}", c.id);
+            extended += usize::from(preview(at).is_some());
+        }
+    }
+    assert!(trimmed >= 15 && extended >= 40, "{trimmed} trims, {extended} extensions");
+}
+
 /// An offset's ends follow its source curves, so trimming a piece off it or extending it is
 /// refused (the trim used to report success and leave the curve whole). Trimming away a whole
 /// offset curve still works, and once the association is broken the trim cuts it.
