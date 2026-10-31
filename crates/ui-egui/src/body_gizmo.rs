@@ -1,11 +1,11 @@
-//! The custom view gizmo: the body chosen in [`crate::view_gizmo`] drawn in place of the
-//! navigation cube, made the way the cube is: the same size, each face shaded by how squarely it
-//! meets the eye, the hovered face filled with the cube's hover colour and outlined in the accent.
-//! Its texture is the cube's face and border colours (themed) or the body's own appearance with
-//! the view's edge colour (modeled); the cube's orbit and roll arrows and its Home button go
-//! around it when the `navigator_arrows` and `navigator_home` preferences say so. While the
-//! Custom View Navigator panel is open it shows the panel's choices. A click on a face looks
-//! straight at it; a drag orbits.
+//! The custom view gizmo: the body chosen in [`crate::view_gizmo`] drawn in place of the navigation
+//! cube, made the way the cube is: the same size, each face shaded by how squarely it meets the
+//! eye. Its texture is the cube's face and border colours, the hovered face in the cube's hover
+//! colour and accent (themed), or the body's own appearance with the view's edge colour, the
+//! hovered face in the colours the view selects a face with (modeled); the cube's orbit and roll
+//! arrows and its Home button go around it when the `navigator_arrows` and `navigator_home`
+//! preferences say so. While the Custom View Navigator panel is open it shows the panel's choices.
+//! A click on a face looks straight at it; a drag orbits.
 //!
 //! A concave body cannot be drawn back to front as the cube's six faces are, so the faces go
 //! through a small depth-buffered raster (drawn on the CPU, shown as a texture): hidden faces
@@ -193,6 +193,15 @@ struct Look {
     colours: [Color32; 4],
 }
 
+/// The hovered face's fill and outline: the cube's hover colour and accent (themed), or the
+/// colours the view selects a face of the model with (modeled).
+fn hover_colours(texture: NavigatorTexture, cube: &Tokens, view: &Tokens) -> (Color32, Color32) {
+    match texture {
+        NavigatorTexture::Themed => (cube.cube_hover, cube.accent),
+        NavigatorTexture::Modeled => (view.sel_face, view.sel_edge),
+    }
+}
+
 /// The colour face `face` is painted before shading.
 fn face_colour(shape: &Shape, face: Option<u32>, look: &Look) -> Color32 {
     let [cube_face, hover, body, background] = look.colours;
@@ -328,7 +337,8 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, shown: cra
                 (s.x >= 0.0 && s.y >= 0.0).then(|| cache.raster.at(s.x as usize, s.y as usize)).flatten()
             });
             let face = tri.and_then(|t| mesh.tri_face.get(t).copied());
-            let look = Look { hovered: face, texture, active, colours: [t.cube_face, t.cube_hover, view.body, view.viewport_top] };
+            let (hover_fill, hover_outline) = hover_colours(texture, &t, &view);
+            let look = Look { hovered: face, texture, active, colours: [t.cube_face, hover_fill, view.body, view.viewport_top] };
             if cache.look != Some(look) || cache.texture.is_none() {
                 let img = compose(&cache.raster, &shape, &look);
                 match cache.texture.as_mut() {
@@ -350,7 +360,7 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, shown: cra
                         NavigatorTexture::Modeled if active => view.body_edge,
                         NavigatorTexture::Modeled => view.body_edge.lerp_to_gamma(view.viewport_top, 0.55),
                     };
-                    painter.line_segment([to_screen(*a), to_screen(*b)], Stroke::new(1.0, if lit { t.accent } else { edge }));
+                    painter.line_segment([to_screen(*a), to_screen(*b)], Stroke::new(1.0, if lit { hover_outline } else { edge }));
                 }
             }
             let w = cache.raster.side;
@@ -494,6 +504,14 @@ mod tests {
         let t = Tokens::light();
         let look = |texture| Look { hovered: None, texture, active: true, colours: [t.cube_face, t.cube_hover, t.body, t.viewport_top] };
         assert_ne!(t.body_edge, t.cube_border, "the two textures' edges can be told apart");
+        // A hovered face: the cube's hover colours when themed, the view's selection when modeled.
+        assert_eq!(hover_colours(NavigatorTexture::Themed, &t, &t), (t.cube_hover, t.accent));
+        assert_eq!(hover_colours(NavigatorTexture::Modeled, &t, &t), (t.sel_face, t.sel_edge));
+        // The pixel over the middle of one face seen, hovered.
+        let (face, sample) = face_samples(&r, &shape.mesh)[0];
+        let at = (sample / r.side / SS) * (r.side / SS) + sample % r.side / SS;
+        let hovered = Look { hovered: Some(face), colours: [t.cube_face, t.sel_face, t.body, t.viewport_top], ..look(NavigatorTexture::Modeled) };
+        assert_eq!(compose(&r, &shape, &hovered).pixels[at], t.sel_face, "the hovered face is the view's selection colour, flat");
         let middle = |img: &egui::ColorImage| img.pixels[img.size[1] / 2 * img.size[0] + img.size[0] / 2];
         let red = middle(&compose(&r, &shape, &look(NavigatorTexture::Modeled)));
         assert!(red.r() > red.g() * 3 && red.r() > red.b() * 3, "the body's red: {red:?}");
