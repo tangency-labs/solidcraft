@@ -45,7 +45,9 @@
 
 use crate::curve::curve::p2::FindCurveDistanceExtrema;
 use crate::curve::curve::Curve;
-use crate::error::{ignore_status, ignored, Result, SolidError};
+use crate::error::{
+    ignore_or_pass_on, ignore_status, ignored, ignored_or_pass_on, Result, SolidError,
+};
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::extent1d::Extent1d;
 use crate::geom::global_solver::SolverOperation;
@@ -593,7 +595,8 @@ pub fn calculate_fillet_radius(
 }
 
 /// The radius of [`calculate_fillet_radius`] as its ignoring callers see it: the `0`
-/// it starts with when it fails.
+/// it starts with when it fails (passed on with the opt-in
+/// `Kernel::fixes.query_statuses_pass_on`, WR-663; tangency-labs/smlib 21dcf69).
 fn fillet_radius_or_zero(
     k: &Kernel,
     s: &Surface,
@@ -601,22 +604,22 @@ fn fillet_radius_or_zero(
     param: f64,
     want_circular: bool,
 ) -> Result<f64> {
-    Ok(ignored(calculate_fillet_radius(
-        k,
-        s,
-        rail_dir,
-        param,
-        want_circular,
-        None,
-    ))?
+    Ok(ignored_or_pass_on(
+        calculate_fillet_radius(k, s, rail_dir, param, want_circular, None),
+        k.fixes.query_statuses_pass_on,
+    )?
     .map_or(0.0, |(r, _)| r))
 }
 
 /// The extrema function at `t` with its status ignored: a failed evaluation leaves the
-/// zeros it starts with.
-fn sample(efo: &mut FindCurveDistanceExtrema<'_>, t: f64) -> Result<FunctionValue> {
+/// zeros it starts with (passed on with the opt-in
+/// `Kernel::fixes.query_statuses_pass_on`, WR-663; tangency-labs/smlib 21dcf69).
+fn sample(k: &Kernel, efo: &mut FindCurveDistanceExtrema<'_>, t: f64) -> Result<FunctionValue> {
     let mut v = FunctionValue::default();
-    ignore_status(efo.evaluate(t, &mut v, true))?;
+    ignore_or_pass_on(
+        efo.evaluate(t, &mut v, true),
+        k.fixes.query_statuses_pass_on,
+    )?;
     Ok(v)
 }
 
@@ -657,13 +660,13 @@ pub fn find_fillet_min_max_radii(
     let denom = f64::from(num_steps);
 
     let mut prev_t = domain.min();
-    let mut prev_f = sample(&mut efo, prev_t)?.f;
+    let mut prev_f = sample(k, &mut efo, prev_t)?.f;
 
     for i in 1..=num_steps {
         let frac = f64::from(i) / denom;
         param = domain.evaluate(frac);
 
-        let v = sample(&mut efo, param)?;
+        let v = sample(k, &mut efo, param)?;
         let f = v.f;
         if v.found_answer {
             radii.add_value(fillet_radius_or_zero(k, s, rail_dir, param, true)?);

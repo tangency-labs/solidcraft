@@ -577,18 +577,26 @@ fn assert_test_surface1(k: &Kernel, s: &Surface) -> Result<(bool, f64, f64)> {
 fn assert_test_surface4(k: &Kernel, s: &Surface) -> Result<bool> {
     // Surface continuities across U and V knots (statuses ignored: a failed call
     // leaves the minimum it had reached)
-    let cont = |dir| -> Result<ContinuityType> {
+    // (with the opt-in fix continuities that cannot be computed fail the test, WR-663,
+    // tangency-labs/smlib 21dcf69: `None`)
+    let fails = k.fixes.query_statuses_pass_on;
+    let cont = |dir| -> Result<Option<ContinuityType>> {
         let mut reached = None;
         match s.calculate_continuities_reached(k, dir, &mut reached) {
-            Ok((c, _)) => Ok(c),
+            Ok((c, _)) => Ok(Some(c)),
             Err(e) if e.is_unported() => Err(e),
-            Err(_) => reached.ok_or_else(|| {
+            Err(_) if fails => Ok(None),
+            Err(_) => reached.map(Some).ok_or_else(|| {
                 invalid("continuity output never written (upstream reads it uninitialised)")
             }),
         }
     };
-    let cont_u = cont(SurfParamType::U)?;
-    let cont_v = cont(SurfParamType::V)?;
+    let Some(cont_u) = cont(SurfParamType::U)? else {
+        return Ok(false);
+    };
+    let Some(cont_v) = cont(SurfParamType::V)? else {
+        return Ok(false);
+    };
 
     // Good Surfaces have at least G1 continuity across every knot IsoParam curve
     let g1 = ContinuityType::G1 as i32;
@@ -636,9 +644,13 @@ fn assert_test_surface6(k: &Kernel, s: &Surface) -> Result<bool> {
 
         // Get iso parameter boundaries
         // (a failed CreateIsoBoundaries leaves the curves uninitialised upstream)
+        // (with the opt-in fix boundaries that cannot be built or compared fail the
+        // test, WR-663, tangency-labs/smlib 21dcf69)
+        let fails = k.fixes.query_statuses_pass_on;
         let (crv1, crv2) = match s.create_iso_boundaries(k, dir, a_tol) {
             Ok(Some(c)) => c,
             Err(e) if e.is_unported() => return Err(e),
+            Err(_) if fails => return Ok(false),
             _ => {
                 return Err(invalid(
                     "no iso boundaries (upstream reads uninitialised curves)",
@@ -658,7 +670,7 @@ fn assert_test_surface6(k: &Kernel, s: &Surface) -> Result<bool> {
         );
         let ivl1 = crv1.natural_interval();
         let ivl2 = crv2.natural_interval();
-        let found = crv1.global_coincidence_checker(
+        let found = match crv1.global_coincidence_checker(
             k,
             &ivl1,
             &crv2,
@@ -669,7 +681,11 @@ fn assert_test_surface6(k: &Kernel, s: &Surface) -> Result<bool> {
                 Some(OperandObject::Curve(0, ivl1)),
                 Some(OperandObject::Curve(1, ivl2)),
             ],
-        )?;
+        ) {
+            Ok(f) => f,
+            Err(e) if fails && !e.is_unported() => return Ok(false),
+            Err(e) => return Err(e),
+        };
 
         // Range of Values implies G0 discontinuous non-seam closure of surface
         if found

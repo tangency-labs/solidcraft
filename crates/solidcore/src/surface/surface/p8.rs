@@ -74,7 +74,9 @@ use crate::curve::curve::p5::CurveMemoKey;
 use crate::curve::curve::{Curve, CurveKind};
 use crate::curve::curve_cache::CurveCache;
 use crate::curve::line::Line;
-use crate::error::{ignore_status, ignored, Result, SolidError};
+use crate::error::{
+    ignore_or_pass_on, ignore_status, ignored, ignored_or_pass_on, passed_on, Result, SolidError,
+};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
 use crate::geom::extent3d::Extent3d;
@@ -163,14 +165,16 @@ const NUM_SAMPLES: usize = 6;
 // ---- calls into other units (the only unported one is DropCurve, below) ---------------------
 
 /// `smsurf_CheckShapeMatch(sPVV0, sPVV1, tol, angTolRad, bSuccess)`: `bSuccess`. The
-/// evaluation matrices are modified in place, as upstream's arrays are.
+/// evaluation matrices are modified in place, as upstream's arrays are. `pass_on`: the
+/// opt-in WR-663 fix (its section evaluations pass on their statuses).
 fn check_shape_match(
     pvv0: &mut [[Vec3; 3]; 3],
     pvv1: &mut [[Vec3; 3]; 3],
     tol_3d: f64,
     ang_tol_rad: f64,
+    pass_on: bool,
 ) -> Result<bool> {
-    super::p3::check_shape_match(pvv0, pvv1, tol_3d, ang_tol_rad)
+    super::p3::check_shape_match(pvv0, pvv1, tol_3d, ang_tol_rad, pass_on)
 }
 
 /// `SmSurface::DropPoint(pt, domain, guess, bSuccess, uv, dist, bIsMulti, op)`: success,
@@ -265,19 +269,22 @@ fn surface_drop_curve<O: SolutionObject>(
 // ---- helpers --------------------------------------------------------------------------------
 
 /// `Evaluate(uv, 2, 2, TRUE, TRUE, TRUE (bOnlyUpperHalf), &sPVV[0][0])` whose status upstream ignores: on
-/// failure `out` keeps what it held (upstream's array is left as it was).
+/// failure `out` keeps what it held (upstream's array is left as it was). With the
+/// opt-in `Kernel::fixes.query_statuses_pass_on` the failure is returned (WR-663,
+/// tangency-labs/smlib 21dcf69).
 fn evaluate_3x3_into(
     k: &Kernel,
     surface: &Surface,
     uv: Point2,
     out: &mut [[Vec3; 3]; 3],
 ) -> Result<()> {
+    let pass = k.fixes.query_statuses_pass_on;
     // bOnlyUpperHalf = TRUE: only the entries with i + j <= 2 are written
     let flags = EvaluateFlags {
         only_upper_half: true,
         ..EvaluateFlags::default()
     };
-    let Some(m) = ignored(surface.evaluate(k, uv, 2, 2, flags))? else {
+    let Some(m) = ignored_or_pass_on(surface.evaluate(k, uv, 2, 2, flags), pass)? else {
         return Ok(());
     };
     for (i, row) in out.iter_mut().enumerate() {
@@ -293,9 +300,15 @@ fn evaluate_3x3_into(
     Ok(())
 }
 
-/// `EvaluatePoint(uv, pt)` whose status upstream ignores: `Vec3::UNDEF` on failure.
+/// `EvaluatePoint(uv, pt)` whose status upstream ignores: `Vec3::UNDEF` on failure. With
+/// the opt-in `Kernel::fixes.query_statuses_pass_on` the failure is returned (WR-663,
+/// tangency-labs/smlib 21dcf69).
 fn point_or_undef(k: &Kernel, surface: &Surface, uv: Point2) -> Result<Point3> {
-    Ok(ignored(surface.evaluate_point(k, uv))?.unwrap_or(Vec3::UNDEF))
+    Ok(ignored_or_pass_on(
+        surface.evaluate_point(k, uv),
+        k.fixes.query_statuses_pass_on,
+    )?
+    .unwrap_or(Vec3::UNDEF))
 }
 
 /// The B-spline part of a curve of a kind derived from `SmBSplineCurve`.
@@ -413,7 +426,11 @@ fn boundary_curves<'s>(
 }
 
 fn trim_curves(k: &Kernel, surface: &Surface, domain: &Extent2d) -> Result<Vec<Option<Curve>>> {
-    let t = ignored(surface.create_natural_uv_trim_curves(k, domain, SurfParamType::V, false))?;
+    // (passed on with the opt-in fix, WR-663, tangency-labs/smlib 21dcf69)
+    let t = ignored_or_pass_on(
+        surface.create_natural_uv_trim_curves(k, domain, SurfParamType::V, false),
+        k.fixes.query_statuses_pass_on,
+    )?;
     Ok(t.map(|t| t.curves_3d.into_iter().map(Some).collect())
         .unwrap_or_default())
 }
@@ -567,13 +584,16 @@ impl Surface {
             return Err(SolidError::sm_err(OP_COINC));
         }
 
-        // Check bounding boxes (statuses ignored)
+        // Check bounding boxes (statuses ignored; passed on with the opt-in fix,
+        // WR-663, tangency-labs/smlib 21dcf69)
+        let pass = k.fixes.query_statuses_pass_on;
         let box_of = |s: &Self, d: &Extent2d| -> Result<Extent3d> {
-            Ok(
-                ignored(s.calculate_bounding_box(k, d, [true, false, false], true))?
-                    .and_then(|b| b.normal_box)
-                    .unwrap_or_default(),
-            )
+            Ok(ignored_or_pass_on(
+                s.calculate_bounding_box(k, d, [true, false, false], true),
+                pass,
+            )?
+            .and_then(|b| b.normal_box)
+            .unwrap_or_default())
         };
         let bbox0 = box_of(self, &domain0)?;
         let bbox1 = box_of(other, &domain1)?;
@@ -662,9 +682,14 @@ impl Surface {
                     evaluate_3x3_into(k, other, uv1, &mut pvv1)?;
 
                     // Now check 2nd order terms.
-                    let matched =
-                        ignored(check_shape_match(&mut pvv0, &mut pvv1, tol_3d, ang_tol_rad))?
-                            .unwrap_or(false);
+                    let matched = ignored(check_shape_match(
+                        &mut pvv0,
+                        &mut pvv1,
+                        tol_3d,
+                        ang_tol_rad,
+                        pass,
+                    ))?
+                    .unwrap_or(false);
                     if !matched {
                         continue;
                     }
@@ -713,8 +738,14 @@ impl Surface {
                 // Point coincidence, check normals and curvature.
                 evaluate_3x3_into(k, self, uv0, &mut pvv0)?;
                 evaluate_3x3_into(k, other, uv1, &mut pvv1)?;
-                if ignored(check_shape_match(&mut pvv0, &mut pvv1, tol_3d, ang_tol_rad))?
-                    .unwrap_or(false)
+                if ignored(check_shape_match(
+                    &mut pvv0,
+                    &mut pvv1,
+                    tol_3d,
+                    ang_tol_rad,
+                    pass,
+                ))?
+                .unwrap_or(false)
                 {
                     return Ok(res);
                 }
@@ -743,8 +774,14 @@ impl Surface {
                 // Point coincidence, check normals and curvature.
                 evaluate_3x3_into(k, self, uv0, &mut pvv0)?;
                 evaluate_3x3_into(k, other, uv1, &mut pvv1)?;
-                if ignored(check_shape_match(&mut pvv0, &mut pvv1, tol_3d, ang_tol_rad))?
-                    .unwrap_or(false)
+                if ignored(check_shape_match(
+                    &mut pvv0,
+                    &mut pvv1,
+                    tol_3d,
+                    ang_tol_rad,
+                    pass,
+                ))?
+                .unwrap_or(false)
                 {
                     return Ok(res);
                 }
@@ -769,6 +806,8 @@ impl Surface {
         tol_3d: f64,
         mut res: Coincidence,
     ) -> Result<Coincidence> {
+        // (passed on with the opt-in fix, WR-663, tangency-labs/smlib 21dcf69)
+        let pass = k.fixes.query_statuses_pass_on;
         // First collect the corner points: Eval Surfaces at normalized domain corners
         let mut pts1 = [[Vec3::UNDEF; 2]; 2];
         let mut pts2 = [[Vec3::UNDEF; 2]; 2];
@@ -871,11 +910,13 @@ impl Surface {
         if p1(0, 0).closer_than(tol_3d, p1(1, 0)) {
             // Closed in u (on surf 1).
             let uv1 = domain0.evaluate(0.0, 0.0);
-            let (_, su0, _) = ignored(self.evaluate_1st_derivatives(k, uv1, true, true))?
-                .unwrap_or((Vec3::UNDEF, Vec3::UNDEF, Vec3::UNDEF));
+            let (_, su0, _) =
+                ignored_or_pass_on(self.evaluate_1st_derivatives(k, uv1, true, true), pass)?
+                    .unwrap_or((Vec3::UNDEF, Vec3::UNDEF, Vec3::UNDEF));
             let uv2 = domain1.evaluate(f64::from(idx00 as u8), f64::from(jdx00 as u8));
-            let (_, su1, sv1) = ignored(other.evaluate_1st_derivatives(k, uv2, true, true))?
-                .unwrap_or((Vec3::UNDEF, Vec3::UNDEF, Vec3::UNDEF));
+            let (_, su1, sv1) =
+                ignored_or_pass_on(other.evaluate_1st_derivatives(k, uv2, true, true), pass)?
+                    .unwrap_or((Vec3::UNDEF, Vec3::UNDEF, Vec3::UNDEF));
             let other_dir = if orient == OrientType::Same { su1 } else { sv1 };
             if su0.dot(other_dir) < 0.0 {
                 dir_u = -1.0;
@@ -886,11 +927,13 @@ impl Surface {
         if p1(0, 0).closer_than(tol_3d, p1(0, 1)) {
             // Closed in v (on surf 1).
             let uv1 = domain0.evaluate(0.0, 0.0);
-            let (_, _, sv0) = ignored(self.evaluate_1st_derivatives(k, uv1, true, true))?
-                .unwrap_or((Vec3::UNDEF, Vec3::UNDEF, Vec3::UNDEF));
+            let (_, _, sv0) =
+                ignored_or_pass_on(self.evaluate_1st_derivatives(k, uv1, true, true), pass)?
+                    .unwrap_or((Vec3::UNDEF, Vec3::UNDEF, Vec3::UNDEF));
             let uv2 = domain1.evaluate(f64::from(idx00 as u8), f64::from(jdx00 as u8));
-            let (_, su1, sv1) = ignored(other.evaluate_1st_derivatives(k, uv2, true, true))?
-                .unwrap_or((Vec3::UNDEF, Vec3::UNDEF, Vec3::UNDEF));
+            let (_, su1, sv1) =
+                ignored_or_pass_on(other.evaluate_1st_derivatives(k, uv2, true, true), pass)?
+                    .unwrap_or((Vec3::UNDEF, Vec3::UNDEF, Vec3::UNDEF));
             let other_dir = if orient == OrientType::Same { sv1 } else { su1 };
             if sv0.dot(other_dir) < 0.0 {
                 dir_v = -1.0;
@@ -1049,7 +1092,9 @@ impl Surface {
                 want_higher,
             },
         )?;
-        ignore_status(start_status)?;
+        // (passed on with the opt-in fix, WR-663, tangency-labs/smlib 21dcf69)
+        let pass = k.fixes.query_statuses_pass_on;
+        ignore_or_pass_on(start_status, pass)?;
 
         // Get Sample Values from Face2/Edge2 using edge1 as tangentReference
         def.tangent_reference = Some(curve1);
@@ -1066,21 +1111,24 @@ impl Surface {
                 want_higher,
             },
         )?;
-        ignore_status(end_status)?;
+        ignore_or_pass_on(end_status, pass)?;
 
         // use samples to build cross-section curves that capture the G1/G2/G3 shapes
         // (the status is not checked upstream; the curves built before a failure stay in
         // its array, which the port cannot recover, so a failure leaves it empty)
-        let cross_sections = ignored(def.create_cross_section_curves(&CrossSectionValues {
-            start_pos: &start.positions,
-            start_1st_derivs: &start.first_derivs,
-            start_2nd_derivs: start.second_derivs.as_deref(),
-            start_3rd_derivs: start.third_derivs.as_deref(),
-            end_pos: Some(&end.positions),
-            end_1st_derivs: Some(&end.first_derivs),
-            end_2nd_derivs: end.second_derivs.as_deref(),
-            end_3rd_derivs: end.third_derivs.as_deref(),
-        }))?
+        let cross_sections = ignored_or_pass_on(
+            def.create_cross_section_curves(&CrossSectionValues {
+                start_pos: &start.positions,
+                start_1st_derivs: &start.first_derivs,
+                start_2nd_derivs: start.second_derivs.as_deref(),
+                start_3rd_derivs: start.third_derivs.as_deref(),
+                end_pos: Some(&end.positions),
+                end_1st_derivs: Some(&end.first_derivs),
+                end_2nd_derivs: end.second_derivs.as_deref(),
+                end_3rd_derivs: end.third_derivs.as_deref(),
+            }),
+            pass,
+        )?
         .unwrap_or_default();
 
         // Skin cross sections with blend endCurves as Rail constraints to build the
@@ -1785,8 +1833,10 @@ impl Surface {
                 }
                 sr_eval.set_uv_coords(end.param(1)?, end.param(2)?);
 
-                // When line tangent not perp to surfNormal - can't be coincident
-                ignore_status(sr_eval.eval_normal(k))?;
+                // When line tangent not perp to surfNormal - can't be coincident (the
+                // fork's `SER(SetUV)` passes the evaluation's status on with the opt-in
+                // fix, WR-663, tangency-labs/smlib 21dcf69)
+                ignore_or_pass_on(sr_eval.eval_normal(k), k.fixes.query_statuses_pass_on)?;
                 let normal = sr_eval.values()[2][2];
                 if line_vector.is_perpendicular_to(normal, EFF_ZERO_RAD) {
                     // if SurfaceNormalSection curvature is far from linear - can't be
@@ -1819,7 +1869,10 @@ impl Surface {
             let Ok(mut line) = BSplineCurve::create_line_segment(3, line_start, line_end) else {
                 return Ok(sols);
             };
-            ignore_status(line.edit_parameterization(&line_interval_used))?;
+            ignore_or_pass_on(
+                line.edit_parameterization(&line_interval_used),
+                k.fixes.query_statuses_pass_on,
+            )?;
             let line = Curve::from(line);
 
             // Check Surface/LineSegment Coincidence (its point solve reaches the
@@ -2267,7 +2320,11 @@ impl Surface {
                     &mut sols,
                 )
             };
-            let _ = super::p1::ignore_native_classification(solve)?;
+            // (passed on with the opt-in fix, WR-663, tangency-labs/smlib 21dcf69)
+            let _ = super::p1::ignore_native_classification(passed_on(
+                solve,
+                k.fixes.query_statuses_pass_on,
+            )?)?;
 
             // set output values
             for ii in 0..sols.len() {
@@ -2528,23 +2585,31 @@ impl Surface {
         )?;
 
         // combine duplicate solutions - find coincident regions (the call is not
-        // checked upstream, which returns SM_SUCCESS)
-        ignore_status(super::p10::global_curve_intersect_combine_solutions(
-            k,
-            self,
-            uv_domain,
-            curve,
-            interval,
-            distance_tolerance,
-            &super::p10::CombineContext {
-                curve_tree: Some(curve_tree),
-                surface_cache: Some(surface_cache),
-                curve_handle,
-                surface_handle,
-                edge_tolerance: super::p9::curve_edge_tolerance(curve, curve_handle, face_queries)?,
-            },
-            &mut sols,
-        ))?;
+        // checked upstream, which returns SM_SUCCESS; passed on with the opt-in fix,
+        // WR-663, tangency-labs/smlib 21dcf69)
+        ignore_or_pass_on(
+            super::p10::global_curve_intersect_combine_solutions(
+                k,
+                self,
+                uv_domain,
+                curve,
+                interval,
+                distance_tolerance,
+                &super::p10::CombineContext {
+                    curve_tree: Some(curve_tree),
+                    surface_cache: Some(surface_cache),
+                    curve_handle,
+                    surface_handle,
+                    edge_tolerance: super::p9::curve_edge_tolerance(
+                        curve,
+                        curve_handle,
+                        face_queries,
+                    )?,
+                },
+                &mut sols,
+            ),
+            k.fixes.query_statuses_pass_on,
+        )?;
         Ok(sols)
     }
 }
@@ -2623,9 +2688,13 @@ impl<O: SolutionObject> SpGlobalSolver<'_, '_, O> {
         // Do interval tests and reject if disjoint or adjust if sUVDomain is not
         // completely inside of m_crUVDomain
         if !uv_domain.is_contained_by(&self.uv_domain, EFF_ZERO) {
-            // Need to adjust continuities (the status is ignored)
-            if let Some(d) = ignored(uv_domain.intersect(&self.uv_domain))? {
-                uv_domain = d;
+            // Need to adjust continuities (the status is ignored; with the opt-in fix a
+            // branch outside the domain of interest has no answers, WR-663,
+            // tangency-labs/smlib 21dcf69)
+            match ignored(uv_domain.intersect(&self.uv_domain))? {
+                Some(d) => uv_domain = d,
+                None if k.fixes.query_statuses_pass_on => return Ok(false),
+                None => (),
             }
             // Check for zero in either domain bound
             if are_same(uv_domain.max().x, uv_domain.min().x)
@@ -2774,8 +2843,14 @@ impl Surface {
         let reason = TerminationReason::FoundAnswerConverged;
         let undef3 = (Vec3::UNDEF, Vec3::UNDEF, Vec3::UNDEF);
 
-        let (srf_pt, su, sv) =
-            ignored(self.evaluate_1st_derivatives(k, uv_guess, false, false))?.unwrap_or(undef3);
+        // (the statuses SMLib drops here are passed on with the opt-in fix, WR-663,
+        // tangency-labs/smlib 21dcf69)
+        let pass = k.fixes.query_statuses_pass_on;
+        let (srf_pt, su, sv) = ignored_or_pass_on(
+            self.evaluate_1st_derivatives(k, uv_guess, false, false),
+            pass,
+        )?
+        .unwrap_or(undef3);
         if srf_pt.closer_than(tol, test_pt) {
             return Ok(SingularityInversion {
                 uv: uv_guess,
@@ -2863,8 +2938,11 @@ impl Surface {
 
         // Get a guess param. First re-evaluate at the param that's going in the right
         // direction.
-        let (_, su, sv) =
-            ignored(self.evaluate_1st_derivatives(k, sing_uv, false, false))?.unwrap_or(undef3);
+        let (_, su, sv) = ignored_or_pass_on(
+            self.evaluate_1st_derivatives(k, sing_uv, false, false),
+            pass,
+        )?
+        .unwrap_or(undef3);
         let good_deriv = if sing_dir == SurfParamType::U { sv } else { su };
         let mut guess_t = diff_vec.dot(good_deriv) / good_deriv.dot(good_deriv);
         guess_t = good_domain.clamp_value(guess_t);
@@ -3218,18 +3296,27 @@ pub fn extract_iso_curve(
 
     // Trim ISO curve Trim it to the length of the input UVTrimCurve line (may snap the
     // interval by tol to existing knots).
+    // (with the opt-in fix an iso curve that cannot be trimmed, reversed or
+    // reparameterized is no output curve, WR-663, tangency-labs/smlib 1612a7d)
+    let no_curve = k.fixes.query_statuses_pass_on;
     let mut trim = trim_ivl;
-    ignore_status(iso.trim(k, &mut trim, TrimMode::default()))?;
+    if ignored(iso.trim(k, &mut trim, TrimMode::default()))?.is_none() && no_curve {
+        return Ok(None);
+    }
 
     // when needed - reverse isoParamCurve parameterization to equal input UVTrimcCurve
     // direction
     if reverse {
         let natural = iso.natural_interval();
-        ignore_status(iso.reverse_parameterization(k, &natural))?;
+        if ignored(iso.reverse_parameterization(k, &natural))?.is_none() && no_curve {
+            return Ok(None);
+        }
     }
 
     // Set IsoCurve parameterization to equal input interval
-    ignore_status(iso.edit_parameterization(k, interval))?;
+    if ignored(iso.edit_parameterization(k, interval))?.is_none() && no_curve {
+        return Ok(None);
+    }
     Ok(Some(iso))
 }
 

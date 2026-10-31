@@ -67,7 +67,7 @@ use crate::curve::curve::p3::PointSolveOptions;
 use crate::curve::curve::Curve;
 use crate::curve::iso_curve::IsoCurve;
 use crate::curve::line::Line;
-use crate::error::{ignored, Result, SolidError};
+use crate::error::{ignored, ignored_or_pass_on, passed_on, Result, SolidError};
 use crate::geom::assert_array::ObjectKey;
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::extent1d::{Extent1d, ExtentNd};
@@ -695,19 +695,24 @@ impl Surface {
         cache: Option<&crate::surface::surface_cache::SurfaceCache<O>>,
         context: Option<&mut dyn super::p1::SurfaceSolveContext<O>>,
     ) -> Result<Option<Solution<O>>> {
-        // First try boxing (statuses ignored).
-        let this_box =
-            ignored(self.calculate_bounding_box(k, uv_domain, [true, false, false], true))?
-                .and_then(|b| b.normal_box)
-                .unwrap_or_default();
+        // First try boxing (statuses ignored; passed on with the opt-in fix, WR-663,
+        // tangency-labs/smlib 21dcf69).
+        let pass = k.fixes.query_statuses_pass_on;
+        let this_box = ignored_or_pass_on(
+            self.calculate_bounding_box(k, uv_domain, [true, false, false], true),
+            pass,
+        )?
+        .and_then(|b| b.normal_box)
+        .unwrap_or_default();
         let req = CurveBoxRequest {
             normal: true,
             pseudo: false,
             polar: false,
         };
-        let curv_box = ignored(curve.calculate_bounding_box(k, interval, req, true))?
-            .and_then(|b| b.normal)
-            .unwrap_or_default();
+        let curv_box =
+            ignored_or_pass_on(curve.calculate_bounding_box(k, interval, req, true), pass)?
+                .and_then(|b| b.normal)
+                .unwrap_or_default();
         if this_box.are_disjoint(&curv_box, tol_3d) {
             return Ok(None);
         }
@@ -1075,15 +1080,19 @@ impl Surface {
                 curve_point_ignored(k, curve, t1, prev)?,
             )?;
 
-            // Find the surface point nearest the curve point (status ignored)
-            let (found, solution) = ignored(local_point_solve::<O>(
-                k,
-                self,
-                &reg,
-                SolverOperation::Normalize,
-                slot(&curve_point, tgt)?,
-                Point2::new(t2, t3),
-            ))?
+            // Find the surface point nearest the curve point (status ignored; passed on
+            // with the opt-in fix, WR-663, tangency-labs/smlib 21dcf69)
+            let (found, solution) = ignored_or_pass_on(
+                local_point_solve::<O>(
+                    k,
+                    self,
+                    &reg,
+                    SolverOperation::Normalize,
+                    slot(&curve_point, tgt)?,
+                    Point2::new(t2, t3),
+                ),
+                k.fixes.query_statuses_pass_on,
+            )?
             .unwrap_or_default();
 
             if found {
@@ -1350,7 +1359,7 @@ impl DerivSurfDefinition<'_> {
                         // 2d dir = projection of 3d binormal into surface UV space (status
                         // ignored)
                         let dir = param_direction_ignored(k, surface, surface_uv0, binormal)?;
-                        dir.unitize().unwrap_or(dir)
+                        unitize_2d_ignored(k, dir)?
                     }
                     T::TanToEdges | T::MatchNeighbors => {
                         // dir = linear interp between the start and end angles
@@ -1368,7 +1377,7 @@ impl DerivSurfDefinition<'_> {
                                     SolidError::sm_err(OP_SAMPLE)
                                 }
                             })?;
-                        let uv_binormal = uv_binormal.unitize().unwrap_or(uv_binormal);
+                        let uv_binormal = unitize_2d_ignored(k, uv_binormal)?;
 
                         // linearly interp the dir rotation angle
                         let ang_rad = deg2rad(
@@ -1413,22 +1422,26 @@ impl DerivSurfDefinition<'_> {
 
                         // Project sGap into Surface UV plane (status ignored)
                         let dir = param_direction_ignored(k, surface, surface_uv0, reference_gap)?;
-                        dir.unitize().unwrap_or(dir)
+                        unitize_2d_ignored(k, dir)?
                     }
                     _ => return Err(SolidError::sm_err(OP_SAMPLE)),
                 };
 
                 // Surface directional derivatives up to the num of derivs being stored
-                // (status ignored: the outputs stay zero)
+                // (status ignored: the outputs stay zero; passed on with the opt-in fix,
+                // WR-663, tangency-labs/smlib 21dcf69)
                 let mut tgt_values = [Vec3::new(0.0, 0.0, 0.0); 4];
-                if let Some(d) = ignored(surface.evaluate_directional_derivs(
-                    k,
-                    surface_uv0,
-                    surface_uv1,
-                    num_derivatives,
-                    true,
-                    true,
-                ))? {
+                if let Some(d) = ignored_or_pass_on(
+                    surface.evaluate_directional_derivs(
+                        k,
+                        surface_uv0,
+                        surface_uv1,
+                        num_derivatives,
+                        true,
+                        true,
+                    ),
+                    k.fixes.query_statuses_pass_on,
+                )? {
                     for (dst, src) in tgt_values.iter_mut().zip(d) {
                         *dst = src;
                     }
@@ -1565,11 +1578,20 @@ impl<O: SolutionObject> SsGlobalSolver<'_, '_, O> {
             let uv2a = Point2::new(sol1.start.param(3)?, sol1.start.param(4)?);
             let uv2b = Point2::new(sol2.start.param(3)?, sol2.start.param(4)?);
 
-            // Check positions (statuses ignored).
-            let pt1a = point_ignored(k, surf1, uv1a, Vec3::UNDEF)?;
-            let pt1b = point_ignored(k, surf1, uv1b, Vec3::UNDEF)?;
-            let pt2a = point_ignored(k, surf2, uv2a, Vec3::UNDEF)?;
-            let pt2b = point_ignored(k, surf2, uv2b, Vec3::UNDEF)?;
+            // Check positions (statuses ignored; with the opt-in fix points that cannot be
+            // evaluated are not shown the same, WR-663, tangency-labs/smlib 21dcf69).
+            let undef = (!k.fixes.query_statuses_pass_on).then_some(Vec3::UNDEF);
+            let mut pts = [Vec3::UNDEF; 4];
+            for (slot, (surf, uv)) in
+                pts.iter_mut()
+                    .zip([(surf1, uv1a), (surf1, uv1b), (surf2, uv2a), (surf2, uv2b)])
+            {
+                let Some(p) = ignored(surf.evaluate_point(k, uv))?.or(undef) else {
+                    return Ok((SolutionPairType::DiffParameters, None));
+                };
+                *slot = p;
+            }
+            let [pt1a, pt1b, pt2a, pt2b] = pts;
 
             let tol = self.base.tolerance_3d;
 
@@ -1943,11 +1965,15 @@ fn find_element(values: &[f64], target: f64) -> Option<usize> {
     values.iter().position(|&v| v == target)
 }
 
-/// `pIsoCrv->GetKnots(sIsoKnots)` with its status ignored (no knots on failure).
+/// `pIsoCrv->GetKnots(sIsoKnots)` with its status ignored (no knots on failure); passed
+/// on with the opt-in `Kernel::fixes.query_statuses_pass_on` (WR-663,
+/// tangency-labs/smlib 21dcf69).
 fn iso_knots_of(k: &Kernel, curve: &Curve) -> Result<Vec<f64>> {
-    Ok(ignored(curve.knots(k, None))?
-        .map(|(k, _)| k)
-        .unwrap_or_default())
+    Ok(
+        ignored_or_pass_on(curve.knots(k, None), k.fixes.query_statuses_pass_on)?
+            .map(|(k, _)| k)
+            .unwrap_or_default(),
+    )
 }
 
 /// `aeConts[j]`.
@@ -1987,25 +2013,54 @@ fn set_slot<T>(a: &mut [T; 3], i: usize, v: T) -> Result<()> {
     Ok(())
 }
 
+// The helpers below are the fork's `SER` sites (tangency-labs/smlib 21dcf69): with the
+// opt-in `Kernel::fixes.query_statuses_pass_on` (WR-663) the failure is returned.
+
 /// `EvaluatePoint(uv, pt)` with its status ignored: `prev` on failure.
 fn point_ignored(k: &Kernel, surface: &Surface, uv: Point2, prev: Point3) -> Result<Point3> {
-    Ok(ignored(surface.evaluate_point(k, uv))?.unwrap_or(prev))
+    Ok(ignored_or_pass_on(
+        surface.evaluate_point(k, uv),
+        k.fixes.query_statuses_pass_on,
+    )?
+    .unwrap_or(prev))
 }
 
 /// `crCurve.EvaluatePoint(t, pt)` with its status ignored: `prev` on failure.
 fn curve_point_ignored(k: &Kernel, curve: &Curve, t: f64, prev: Point3) -> Result<Point3> {
-    Ok(ignored(curve.evaluate_point(k, t))?.unwrap_or(prev))
+    Ok(
+        ignored_or_pass_on(curve.evaluate_point(k, t), k.fixes.query_statuses_pass_on)?
+            .unwrap_or(prev),
+    )
 }
 
 /// `EvaluateNormal(uv, FALSE, FALSE, n)` with its status ignored: `prev` on failure.
 fn normal_ignored(k: &Kernel, surface: &Surface, uv: Point2, prev: Vec3) -> Result<Vec3> {
-    Ok(ignored(surface.evaluate_normal(k, uv, Side::Right, Side::Right))?.unwrap_or(prev))
+    Ok(ignored_or_pass_on(
+        surface.evaluate_normal(k, uv, Side::Right, Side::Right),
+        k.fixes.query_statuses_pass_on,
+    )?
+    .unwrap_or(prev))
 }
 
 /// `ComputeParamDirection(uv, vec, dir)` with its status ignored: the cleared output
 /// `(0, 0)` on failure.
 fn param_direction_ignored(k: &Kernel, surface: &Surface, uv: Point2, vec: Vec3) -> Result<Vec2> {
-    Ok(ignored(surface.compute_param_direction(k, uv, vec))?.unwrap_or(Vec2::new(0.0, 0.0)))
+    Ok(ignored_or_pass_on(
+        surface.compute_param_direction(k, uv, vec),
+        k.fixes.query_statuses_pass_on,
+    )?
+    .unwrap_or(Vec2::new(0.0, 0.0)))
+}
+
+/// `Unitize()` of a 2D direction with its status ignored (the vector is left as it was);
+/// passed on with the opt-in fix.
+fn unitize_2d_ignored(k: &Kernel, v: Vec2) -> Result<Vec2> {
+    Ok(
+        match passed_on(v.unitize(), k.fixes.query_statuses_pass_on)? {
+            Ok(u) => u,
+            Err(_) => v,
+        },
+    )
 }
 
 /// `SmIsoCurve(*pSrfEval, dir, value, bFromLeft)` (input clamped) as a curve.

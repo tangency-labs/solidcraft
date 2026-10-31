@@ -7038,7 +7038,15 @@ impl<O: SolutionObject> LsiGlobalSolver<'_, '_, O> {
             Ok(true)
         } else {
             // check lineVector for bounding box intersections
-            let hit = surf_box.intersect_line(point_on_line, self.line_vector)?;
+            // (with the opt-in fix a box that cannot be intersected rules nothing out,
+            // WR-663, tangency-labs/smlib 21dcf69)
+            let hit = match surf_box.intersect_line(point_on_line, self.line_vector) {
+                Ok(h) => h,
+                Err(e) if self.kernel.fixes.query_statuses_pass_on && !e.is_unported() => {
+                    return Ok(true);
+                }
+                Err(e) => return Err(e),
+            };
             Ok(hit.count() > 0)
         }
     }

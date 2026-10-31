@@ -71,7 +71,7 @@ use crate::curve::composite_curve::CompositeCurve;
 use crate::curve::crv_on_surf::{CrvOnSurf, CONTINUITY_ANGLE};
 use crate::curve::curve::p8::CurveIntersectOptions;
 use crate::curve::curve::{Curve, CurveKind};
-use crate::error::{ignored, Result, SolidError};
+use crate::error::{ignored, ignored_or_pass_on, Result, SolidError};
 use crate::geom::extent1d::{Extent1d, ExtentNd};
 use crate::geom::extent2d::Extent2d;
 use crate::geom::extent3d::Extent3d;
@@ -484,8 +484,14 @@ impl Surface {
             n
         };
 
-        // build plane containing answers (SE: Unitize status ignored)
-        plane_norm = plane_norm.unitize_or_z();
+        // build plane containing answers (SE: Unitize status ignored; passed on with the
+        // opt-in fix, WR-663, tangency-labs/smlib 21dcf69)
+        let pass = k.fixes.query_statuses_pass_on;
+        plane_norm = if pass {
+            plane_norm.unitize()?
+        } else {
+            plane_norm.unitize_or_z()
+        };
         let plane_surface = Plane::from_normal(plane_orig, plane_norm);
 
         // instance SmSSPIntersectENFO surf/surf/plane NewtonRaphson Solver
@@ -727,8 +733,12 @@ impl Surface {
                             plane_norm = new_plane_norm;
                         }
                     }
-                    // (SE: Unitize status ignored)
-                    plane_norm = plane_norm.unitize_or_z();
+                    // (SE: Unitize status ignored; passed on with the opt-in fix)
+                    plane_norm = if pass {
+                        plane_norm.unitize()?
+                    } else {
+                        plane_norm.unitize_or_z()
+                    };
                     let plane_d = -p1.dot(plane_norm);
 
                     let ivls2 = intervals(uv_domain, other_uv_domain);
@@ -915,12 +925,15 @@ type LimitedDomain = (Extent2d, [ContinuityType; 2], [ContinuityType; 2]);
 
 /// The patch domain limited to the solve domain with the patch side continuities
 /// (sides on the solve domain's boundary become discontinuous); `None` when the
-/// limited domain has a zero length side (no work).
+/// limited domain has a zero length side (no work), and with `no_work_off_domain` (the
+/// opt-in `Kernel::fixes.query_statuses_pass_on`, WR-663; tangency-labs/smlib 21dcf69)
+/// also when the patch lies outside the solve domain.
 fn limit_domain(
     patch_domain: Extent2d,
     solve_domain: &Extent2d,
     mut u_conts: [ContinuityType; 2],
     mut v_conts: [ContinuityType; 2],
+    no_work_off_domain: bool,
 ) -> Result<Option<LimitedDomain>> {
     let mut domain = patch_domain;
     if solve_domain.min().x >= domain.min().x {
@@ -937,8 +950,10 @@ fn limit_domain(
     }
     if !domain.is_contained_by(solve_domain, EFF_ZERO) {
         // (SE: SmExtent2d::Intersect's status is ignored; a failure leaves the domain)
-        if let Some(d) = ignored(domain.intersect(solve_domain))? {
-            domain = d;
+        match ignored(domain.intersect(solve_domain))? {
+            Some(d) => domain = d,
+            None if no_work_off_domain => return Ok(None),
+            None => (),
         }
         // Check for zero in either domain bound
         if are_same(domain.max().x, domain.min().x) || are_same(domain.max().y, domain.min().y) {
@@ -1029,6 +1044,7 @@ impl<'t, O: SolutionObject + 't> CsGlobalSolver<'t, '_, O> {
             &self.uv_domain,
             patch.u_curve_conts,
             patch.v_curve_conts,
+            k.fixes.query_statuses_pass_on,
         )?
         else {
             return Ok(false);
@@ -1041,8 +1057,15 @@ impl<'t, O: SolutionObject + 't> CsGlobalSolver<'t, '_, O> {
             t_conts[1] = ContinuityType::Discontinuous;
         }
         if !ivl.is_contained_by(&self.interval, EFF_ZERO) {
-            // (SER: checked)
-            ivl = ivl.intersect(&self.interval)?;
+            // (SER: checked; with the opt-in fix a branch outside the interval of
+            // interest has no answers, WR-663, tangency-labs/smlib 21dcf69)
+            ivl = match ivl.intersect(&self.interval) {
+                Ok(i) => i,
+                Err(e) if k.fixes.query_statuses_pass_on && !e.is_unported() => {
+                    return Ok(false);
+                }
+                Err(e) => return Err(e),
+            };
             // Check for zero length intervals
             if are_same(ivl.max(), ivl.min()) {
                 return Ok(false);
@@ -1456,6 +1479,7 @@ impl<'t, O: SolutionObject + 't> SsGlobalSolver<'t, '_, O> {
             &self.uv_domain1,
             patch1.u_curve_conts,
             patch1.v_curve_conts,
+            k.fixes.query_statuses_pass_on,
         )?
         else {
             return Ok(false);
@@ -1465,6 +1489,7 @@ impl<'t, O: SolutionObject + 't> SsGlobalSolver<'t, '_, O> {
             &self.uv_domain2,
             patch2.u_curve_conts,
             patch2.v_curve_conts,
+            k.fixes.query_statuses_pass_on,
         )?
         else {
             return Ok(false);
@@ -1793,8 +1818,12 @@ impl Surface {
                 }
 
                 let crv_t = ivl.mid();
-                // (SE: status ignored)
-                if let Some(p) = ignored(other_crv.evaluate_point(k, crv_t))? {
+                // (SE: status ignored; passed on with the opt-in fix, WR-663,
+                // tangency-labs/smlib 21dcf69)
+                if let Some(p) = ignored_or_pass_on(
+                    other_crv.evaluate_point(k, crv_t),
+                    k.fixes.query_statuses_pass_on,
+                )? {
                     crv_pt = p;
                 }
 
@@ -1824,8 +1853,12 @@ impl Surface {
                         continue;
                     }
 
-                    // may snap sIvl by tol to existing knots (SE: status ignored)
-                    ignored(copy.trim(k, &mut ivl, TrimMode::Notify))?;
+                    // may snap sIvl by tol to existing knots (SE: status ignored; passed
+                    // on with the opt-in fix)
+                    ignored_or_pass_on(
+                        copy.trim(k, &mut ivl, TrimMode::Notify),
+                        k.fixes.query_statuses_pass_on,
+                    )?;
 
                     out.curves_3d.push(copy);
                     out.deviations.push(drop.gap);

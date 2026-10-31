@@ -32,7 +32,7 @@ use crate::curve::crv_on_surf::CrvOnSurf;
 use crate::curve::curve::p3::{local_curve_intersect, PointSolveOptions};
 use crate::curve::curve::{Curve, CurveKind};
 use crate::curve::iso_curve::IsoCurve;
-use crate::error::{ignored, Result, SolidError};
+use crate::error::{ignored, ignored_or_pass_on, Result, SolidError};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
 use crate::geom::geom_utility::p2::ContinuityType;
@@ -197,11 +197,13 @@ fn tessellate(
     angle: f64,
     max_side: f64,
 ) -> Result<Vec<f64>> {
-    Ok(
-        ignored(curve.tessellate_by_bisection(k, interval, chord, angle, max_side))?
-            .map(|t| t.parameters)
-            .unwrap_or_default(),
-    )
+    // (passed on with the opt-in fix, WR-663, tangency-labs/smlib 21dcf69)
+    Ok(ignored_or_pass_on(
+        curve.tessellate_by_bisection(k, interval, chord, angle, max_side),
+        k.fixes.query_statuses_pass_on,
+    )?
+    .map(|t| t.parameters)
+    .unwrap_or_default())
 }
 
 fn check_count(n: usize) -> Result<()> {
@@ -823,8 +825,15 @@ impl<'a, O: SolutionObject + 'a> CsiGlobalSolver<'a, '_, O> {
         if self.uv_domain.max().y <= domain.max().y {
             v_conts[1] = ContinuityType::Discontinuous;
         }
+        // with the opt-in fix a branch outside the domain or interval of interest has no
+        // answers (WR-663, tangency-labs/smlib 21dcf69)
+        let pass = k.fixes.query_statuses_pass_on;
         if !domain.is_contained_by(&self.uv_domain, EFF_ZERO) {
-            domain = domain.intersect(&self.uv_domain)?;
+            domain = match domain.intersect(&self.uv_domain) {
+                Ok(d) => d,
+                Err(e) if pass && !e.is_unported() => return Ok(false),
+                Err(e) => return Err(e),
+            };
             if crate::geom::tol::are_same(domain.max().x, domain.min().x)
                 || crate::geom::tol::are_same(domain.max().y, domain.min().y)
             {
@@ -838,7 +847,11 @@ impl<'a, O: SolutionObject + 'a> CsiGlobalSolver<'a, '_, O> {
             t_conts[1] = ContinuityType::Discontinuous;
         }
         if !interval.is_contained_by(&self.interval, EFF_ZERO) {
-            interval = interval.intersect(&self.interval)?;
+            interval = match interval.intersect(&self.interval) {
+                Ok(i) => i,
+                Err(e) if pass && !e.is_unported() => return Ok(false),
+                Err(e) => return Err(e),
+            };
             if crate::geom::tol::are_same(interval.max(), interval.min()) {
                 return Ok(false);
             }
@@ -856,16 +869,19 @@ impl<'a, O: SolutionObject + 'a> CsiGlobalSolver<'a, '_, O> {
                 .ok_or(SolidError::null_pointer(OP))?
                 .is_closed(k, &natural, 0.0)?
         {
-            let continuity = ignored(crate::curve::curve::p2::evaluate_continuity(
-                k,
-                self.curve.ok_or(SolidError::null_pointer(OP))?,
-                natural.min(),
-                false,
-                self.curve.ok_or(SolidError::null_pointer(OP))?,
-                natural.max(),
-                true,
-                0.5,
-            ))?
+            let continuity = ignored_or_pass_on(
+                crate::curve::curve::p2::evaluate_continuity(
+                    k,
+                    self.curve.ok_or(SolidError::null_pointer(OP))?,
+                    natural.min(),
+                    false,
+                    self.curve.ok_or(SolidError::null_pointer(OP))?,
+                    natural.max(),
+                    true,
+                    0.5,
+                ),
+                pass,
+            )?
             .map_or(ContinuityType::Discontinuous, |c| c.continuity);
             if crate::geom::tol::is_zero(interval.min() - natural.min()) {
                 t_conts[0] = continuity;

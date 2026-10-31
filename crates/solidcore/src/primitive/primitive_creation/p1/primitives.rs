@@ -1005,7 +1005,12 @@ fn cover_face_surface(
     brep.sync_face_surface_tolerance(face)?;
     let r = r?;
     if r.remove_uv_trim_curves_of.is_some() {
-        ignore_status(crate::topology::face::p1::remove_uv_trim_curves(brep, face))?;
+        // (passed on with the opt-in fix: the fork's `SER` in CoverCoincidentSurface,
+        // WR-663, tangency-labs/smlib 21dcf69)
+        ignore_or_pass_on(
+            crate::topology::face::p1::remove_uv_trim_curves(brep, face),
+            k.fixes.query_statuses_pass_on,
+        )?;
     }
     Ok(r.success)
 }

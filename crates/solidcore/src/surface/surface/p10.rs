@@ -55,7 +55,7 @@ use super::p9::implicit_iso;
 use crate::curve::curve::p3::local_curve_intersect;
 use crate::curve::curve::Curve;
 use crate::curve::line::Line;
-use crate::error::{ignored, Result, SolidError};
+use crate::error::{ignored, ignored_or_pass_on, passed_on, Result, SolidError};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
 use crate::geom::extent3d::LineHit as BoxHit;
@@ -274,7 +274,11 @@ fn set_p(end: &mut SolutionEnd, i: usize, v: f64) -> Result<()> {
 
 /// `EvaluatePoint` whose status upstream ignores: `Vec3::UNDEF` on failure.
 fn point_or_undef(k: &Kernel, curve: &Curve, t: f64) -> Result<Point3> {
-    Ok(ignored(curve.evaluate_point(k, t))?.unwrap_or(Vec3::UNDEF))
+    // (passed on with the opt-in fix, WR-663, tangency-labs/smlib 21dcf69)
+    Ok(
+        ignored_or_pass_on(curve.evaluate_point(k, t), k.fixes.query_statuses_pass_on)?
+            .unwrap_or(Vec3::UNDEF),
+    )
 }
 
 /// The count and parameters of an `IntersectLine` whose status upstream ignores (an
@@ -460,10 +464,19 @@ impl<'t, 's, O: SolutionObject + 't> LsiGlobalSolver<'t, 's, O> {
             v_conts[1] = ContinuityType::Discontinuous;
         }
 
+        // with the opt-in fix a branch outside the domain or interval of interest has no
+        // answers and the box intersections pass on their statuses (WR-663,
+        // tangency-labs/smlib 21dcf69)
+        let pass = k.fixes.query_statuses_pass_on;
+
         // when SurfaceLeafDomain is partially intersected by the IntersectionDomain
         if !uv_domain.is_contained_by(&self.uv_domain, EFF_ZERO) {
             // trim leafNode domain down to intersection domain
-            uv_domain = uv_domain.intersect(&self.uv_domain)?;
+            uv_domain = match uv_domain.intersect(&self.uv_domain) {
+                Ok(d) => d,
+                Err(e) if pass && !e.is_unported() => return Ok(false),
+                Err(e) => return Err(e),
+            };
 
             // no work - remaining domain has a zero length dimension
             if are_same(uv_domain.max().x, uv_domain.min().x) {
@@ -481,17 +494,19 @@ impl<'t, 's, O: SolutionObject + 't> LsiGlobalSolver<'t, 's, O> {
         // BBox/line intersect
         let mut bbox = surface_node.bbox;
         bbox.expand_absolute(self.base.tolerance_3d);
-        let Some((bbox_enter, bbox_exit)) =
-            box_hit(&bbox.intersect_line(self.line_point, self.line_vector))
-        else {
+        let Some((bbox_enter, bbox_exit)) = box_hit(&passed_on(
+            bbox.intersect_line(self.line_point, self.line_vector),
+            pass,
+        )?) else {
             // no work - no BBox intersection
             return Ok(false);
         };
 
         // PseudoBox/line intersect
-        let Some((_, pseudo_enter, pseudo_exit)) =
-            pseudo_hit(&pseudo_box.intersect_line(self.line_point, self.line_vector))
-        else {
+        let Some((_, pseudo_enter, pseudo_exit)) = pseudo_hit(&passed_on(
+            pseudo_box.intersect_line(self.line_point, self.line_vector),
+            pass,
+        )?) else {
             // no work - no Pseudo intersection
             return Ok(false);
         };
@@ -510,9 +525,11 @@ impl<'t, 's, O: SolutionObject + 't> LsiGlobalSolver<'t, 's, O> {
 
         // trim sBoundIvl to m_cpLineInterval (the interval of interest)
         if let Some(line_ivl) = &self.line_interval {
-            bound_ivl = bound_ivl
-                .intersect(line_ivl)
-                .unwrap_or_else(|_| Extent1d::new());
+            bound_ivl = match bound_ivl.intersect(line_ivl) {
+                Ok(i) => i,
+                Err(e) if pass && !e.is_unported() => return Ok(false),
+                Err(_) => Extent1d::new(),
+            };
         }
 
         // when firing rays only look at positive line parameters
@@ -530,9 +547,7 @@ impl<'t, 's, O: SolutionObject + 't> LsiGlobalSolver<'t, 's, O> {
 
         // init a line interval - for a ray or for a given line interval
         let ivl = match &self.line_interval {
-            Some(line_ivl) => line_ivl
-                .intersect(&bound_ivl)
-                .unwrap_or_else(|_| Extent1d::new()),
+            Some(line_ivl) => passed_on(line_ivl.intersect(&bound_ivl), pass)?.unwrap_or_default(),
             None => bound_ivl,
         };
 
@@ -970,16 +985,20 @@ fn is_coincident_point<O>(
 ) -> Result<bool> {
     let uv = Point2::new(p(&solution.start, 1)?, p(&solution.start, 2)?);
     let t = p(&solution.start, 0)?;
-    let class = ignored(classify_curve_surface_xsect_point(
-        k,
-        surface,
-        uv_domain,
-        curve,
-        interval,
-        uv,
-        t,
-        edge_tolerance,
-    ))?;
+    // (passed on with the opt-in fix, WR-663, tangency-labs/smlib 21dcf69)
+    let class = ignored_or_pass_on(
+        classify_curve_surface_xsect_point(
+            k,
+            surface,
+            uv_domain,
+            curve,
+            interval,
+            uv,
+            t,
+            edge_tolerance,
+        ),
+        k.fixes.query_statuses_pass_on,
+    )?;
     Ok(class.is_some_and(|c| c.point_type == TsectCurveType::Coincident))
 }
 
@@ -1478,9 +1497,11 @@ pub fn global_curve_intersect_combine_solutions<O: SolutionObject>(
         if !small_interval {
             // (`ClassifyIntersectingRangeSolution` writes only the deviation and the
             // first three parameters of `rCurrSol.m_vStart`)
-            if let Some((degenerate, point)) = ignored(classify_intersecting_range_solution(
-                k, surface, curve, &curr,
-            ))? {
+            // (passed on with the opt-in fix, WR-663, tangency-labs/smlib 21dcf69)
+            if let Some((degenerate, point)) = ignored_or_pass_on(
+                classify_intersecting_range_solution(k, surface, curve, &curr),
+                k.fixes.query_statuses_pass_on,
+            )? {
                 is_degenerate = degenerate;
                 if let Some(pt) = point {
                     curr.start.solution_value = pt.solution_value;

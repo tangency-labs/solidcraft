@@ -66,7 +66,7 @@ use crate::curve::curve::p2::evaluate_geometric as curve_evaluate_geometric;
 use crate::curve::curve::p3::PointSolveOptions;
 use crate::curve::curve::Curve;
 use crate::curve::iso_curve::IsoCurve;
-use crate::error::{ignored, Result, SolidError};
+use crate::error::{ignored, ignored_or_pass_on, passed_on, Result, SolidError};
 use crate::geom::extent1d::{Extent1d, ExtentNd, ExtentPointType};
 use crate::geom::extent2d::Extent2d;
 use crate::geom::geom_utility::p2::ContinuityType;
@@ -349,7 +349,18 @@ impl Surface {
 
             // when the surface has poles
             if sides != SS_NONE {
-                let srf_point = ignored(self.evaluate_point(k, uv))?.unwrap_or(Vec3::UNDEF);
+                // with the opt-in fix a point that cannot be evaluated is not shown at a
+                // pole (WR-663, tangency-labs/smlib 21dcf69)
+                let srf_point = match ignored(self.evaluate_point(k, uv))? {
+                    Some(p) => p,
+                    None if k.fixes.query_statuses_pass_on => {
+                        return Ok(Singularity {
+                            singular: false,
+                            direction,
+                        });
+                    }
+                    None => Vec3::UNDEF,
+                };
                 let pole = |i: usize| -> Result<Point3> {
                     poles.get(i).copied().ok_or(SolidError::invalid_input(
                         OP_SING,
@@ -600,9 +611,11 @@ impl Surface {
         // define the isoParameter Curve as an object
         let iso = iso_curve_of(k, self, param, iso_parameter, true)?;
 
-        // when asked - build OptUVIsoCurve (status ignored)
+        // when asked - build OptUVIsoCurve (status ignored; passed on with the opt-in
+        // fix, WR-663, tangency-labs/smlib 21dcf69)
+        let pass = k.fixes.query_statuses_pass_on;
         let uv_iso_curve = if want_uv_iso_curve {
-            ignored(iso.create_uv_iso_line_with_nurb(k))?
+            ignored_or_pass_on(iso.create_uv_iso_line_with_nurb(k), pass)?
         } else {
             None
         };
@@ -624,7 +637,7 @@ impl Surface {
             let mut uv_domain = self.natural_uv_domain_with_nurb(k)?;
             if let Some(d) = domain {
                 // upstream ignores the status: a disjoint domain leaves Init()
-                uv_domain = uv_domain.intersect(d).unwrap_or_else(|_| Extent2d::new());
+                uv_domain = passed_on(uv_domain.intersect(d), pass)?.unwrap_or_default();
             }
             let ivl = if param == SurfParamType::U {
                 uv_domain.v_interval()
@@ -632,7 +645,7 @@ impl Surface {
                 uv_domain.u_interval()
             };
             if !ivl.is_degenerate(0.0) {
-                crate::error::ignore_status(curve.edit_parameterization(&ivl))?;
+                crate::error::ignore_or_pass_on(curve.edit_parameterization(&ivl), pass)?;
             }
             return Ok(IsoParametricCurve {
                 curve: Curve::from(curve),
@@ -832,13 +845,11 @@ fn finish_ps_solve<O: Copy>(
             is_point_on_normal(k, surface, None, uv, test_point, None, EFF_ZERO * 100.0)?;
         out.found = on_normal.good_point;
 
-        let d = ignored(evaluate_1st_derivatives(
-            k,
-            surface,
-            uv,
-            Side::Right,
-            Side::Right,
-        ))?
+        // (passed on with the opt-in fix, WR-663, tangency-labs/smlib 21dcf69)
+        let d = ignored_or_pass_on(
+            evaluate_1st_derivatives(k, surface, uv, Side::Right, Side::Right),
+            k.fixes.query_statuses_pass_on,
+        )?
         .unwrap_or((Vec3::UNDEF, Vec3::UNDEF, Vec3::UNDEF));
         let (pnt1, du, dv) = d;
         let mut gap = pnt1 - test_point;
@@ -1275,13 +1286,12 @@ impl Surface {
                         // the best matching SurfTangent
                         if on_edge(u_type) || on_edge(v_type) {
                             // evaluate Surf(sThisUV) - eval with NonZero tangents
-                            let (_, du, dv) = ignored(evaluate_1st_derivatives(
-                                k,
-                                self,
-                                this_uv,
-                                Side::Left,
-                                Side::Left,
-                            ))?
+                            // (passed on with the opt-in fix, WR-663,
+                            // tangency-labs/smlib 21dcf69)
+                            let (_, du, dv) = ignored_or_pass_on(
+                                evaluate_1st_derivatives(k, self, this_uv, Side::Left, Side::Left),
+                                k.fixes.query_statuses_pass_on,
+                            )?
                             .unwrap_or((
                                 Vec3::UNDEF,
                                 Vec3::UNDEF,
@@ -1387,32 +1397,40 @@ impl Surface {
         get_surface_cache(kernel, surface2, None::<NoObject>)?;
         get_surface_cache(kernel, surface3, None::<NoObject>)?;
 
-        // nearest point of each surface (statuses ignored)
+        // nearest point of each surface (statuses ignored; passed on with the opt-in fix,
+        // WR-663, tangency-labs/smlib 21dcf69)
+        let pass = k.fixes.query_statuses_pass_on;
         let nearest =
             |s: &Self, domain: &Extent2d, fallback_domain: &Extent2d| -> Result<Option<Point2>> {
-                let mut sols = ignored(s.global_point_solve::<O>(
-                    kernel,
-                    None,
-                    domain,
-                    SolverOperation::Minimize,
-                    xyz_guess1,
-                    new_tol,
-                    None,
-                    SolutionRequested::Single,
-                ))?
+                let mut sols = ignored_or_pass_on(
+                    s.global_point_solve::<O>(
+                        kernel,
+                        None,
+                        domain,
+                        SolverOperation::Minimize,
+                        xyz_guess1,
+                        new_tol,
+                        None,
+                        SolutionRequested::Single,
+                    ),
+                    pass,
+                )?
                 .unwrap_or_default();
                 if sols.is_empty() {
                     if let Some(g2) = opt_xyz_guess2 {
-                        sols = ignored(s.global_point_solve::<O>(
-                            kernel,
-                            None,
-                            fallback_domain,
-                            SolverOperation::Minimize,
-                            g2,
-                            new_tol,
-                            None,
-                            SolutionRequested::Single,
-                        ))?
+                        sols = ignored_or_pass_on(
+                            s.global_point_solve::<O>(
+                                kernel,
+                                None,
+                                fallback_domain,
+                                SolverOperation::Minimize,
+                                g2,
+                                new_tol,
+                                None,
+                                SolutionRequested::Single,
+                            ),
+                            pass,
+                        )?
                         .unwrap_or_default();
                     }
                 }
@@ -1436,9 +1454,12 @@ impl Surface {
         // find surf/surf/surf intersection in this neighborhood (status ignored: a
         // failing solve leaves rbFoundAnswer FALSE and rSolution untouched)
         let mut solution = Solution::new();
-        let Some(Some(sss)) = ignored(self.local_surface_surface_intersect(
-            k, uv_domain1, surface2, uv_domain2, surface3, uv_domain3, uv1, uv2, uv3,
-        ))?
+        let Some(Some(sss)) = ignored_or_pass_on(
+            self.local_surface_surface_intersect(
+                k, uv_domain1, surface2, uv_domain2, surface3, uv_domain3, uv1, uv2, uv3,
+            ),
+            pass,
+        )?
         else {
             return Ok((false, solution));
         };
@@ -2196,23 +2217,20 @@ pub fn filter_solution<O: SolutionObject>(
         if (c0_curve_min && ct(t_conts[0]) >= g1g2) || (c0_curve_max && ct(t_conts[1]) >= g1g2) {
             // get the surface's normal section evaluation (upstream ignores the status;
             // outputs keep their default-constructed values)
-            let (surface_curvature, surface_normal) = ignored(surface_evaluate_normal_section(
-                k,
-                surface,
-                uv,
-                curve_tangent,
-            ))?
+            // (passed on with the opt-in fix, WR-663, tangency-labs/smlib 21dcf69)
+            let pass = k.fixes.query_statuses_pass_on;
+            let (surface_curvature, surface_normal) = ignored_or_pass_on(
+                surface_evaluate_normal_section(k, surface, uv, curve_tangent),
+                pass,
+            )?
             .unwrap_or((0.0, Vec3::UNDEF));
 
             // compute the curve's position, tangent, curvature, and normal values (status
             // ignored: the frame keeps its default-constructed vectors)
-            let frenet = ignored(curve_evaluate_geometric(
-                k,
-                curve,
-                solution.start.param(0)?,
-                2,
-                true,
-            ))?
+            let frenet = ignored_or_pass_on(
+                curve_evaluate_geometric(k, curve, solution.start.param(0)?, 2, true),
+                pass,
+            )?
             .unwrap_or_else(|| vec![Vec3::UNDEF; 3]);
             let curv_vec = frenet.get(2).copied().unwrap_or(Vec3::UNDEF);
 
@@ -2354,9 +2372,19 @@ fn surface_identical_solutions<O: SolutionObject>(
         let uv1 = Point2::new(sol1.start.param(uv_at)?, sol1.start.param(uv_at + 1)?);
         let uv2 = Point2::new(sol2.start.param(uv_at)?, sol2.start.param(uv_at + 1)?);
 
-        // Check positions (statuses ignored).
-        let pt1 = ignored(surf.evaluate_point(k, uv1))?.unwrap_or(Vec3::UNDEF);
-        let pt2 = ignored(surf.evaluate_point(k, uv2))?.unwrap_or(Vec3::UNDEF);
+        // Check positions (statuses ignored; with the opt-in fix points that cannot be
+        // evaluated are not shown the same, WR-663, tangency-labs/smlib 21dcf69).
+        let not_shown = k.fixes.query_statuses_pass_on;
+        let Some(pt1) =
+            ignored(surf.evaluate_point(k, uv1))?.or((!not_shown).then_some(Vec3::UNDEF))
+        else {
+            return Ok((SolutionPairType::DiffParameters, None));
+        };
+        let Some(pt2) =
+            ignored(surf.evaluate_point(k, uv2))?.or((!not_shown).then_some(Vec3::UNDEF))
+        else {
+            return Ok((SolutionPairType::DiffParameters, None));
+        };
 
         let tol = base.tolerance_3d; // untested: see how it works in practice
         if !pt1.closer_than(tol, pt2) {

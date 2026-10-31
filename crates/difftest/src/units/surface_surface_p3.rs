@@ -439,7 +439,13 @@ fn rust_run(k: &Kernel, i: &Inputs) -> Result<Vec<f64>, Fail> {
                 Ok(m) => m,
                 Err(c) => return Ok(vec![c]),
             };
-            match stat(check_shape_match(&mut p0, &mut p1, *tol, *ang))? {
+            match stat(check_shape_match(
+                &mut p0,
+                &mut p1,
+                *tol,
+                *ang,
+                k.fixes.query_statuses_pass_on,
+            ))? {
                 Ok(m) => o.extend([0.0, b(m)]),
                 Err(c) => o.push(c),
             }

@@ -66,7 +66,7 @@
 //!   `across_wrapped_seams` argument of the context variant: `false` keeps the cover
 //!   within one period.
 
-use crate::error::{ignored, Result, SolidError};
+use crate::error::{ignored, ignored_or_pass_on, passed_on, Result, SolidError};
 use crate::geom::assert_array::labels;
 use crate::geom::extent1d::{Extent1d, ExtentNd};
 use crate::geom::extent2d::{Extent2d, SS_NONE, SS_UMAX, SS_UMIN, SS_VMAX, SS_VMIN};
@@ -378,6 +378,7 @@ pub fn check_shape_match(
     pvv1: &mut [[Vec3; 3]; 3],
     this_xsect_tol_3d: f64,
     ang_tol_rad: f64,
+    pass_on: bool,
 ) -> Result<bool> {
     let p00 = pvv0[0][0];
     let p10 = pvv0[1][0];
@@ -408,23 +409,24 @@ pub fn check_shape_match(
     let dir1 = p01;
     let dir2 = p10;
 
-    // upstream ignores the statuses of the section evaluations
+    // upstream ignores the statuses of the section evaluations (`pass_on`: the opt-in
+    // fix passes them on, WR-663, tangency-labs/smlib 21dcf69)
     let mut kappa0 = 0.0;
     let mut kappa1 = 0.0;
-    if let Some(s) = ignored(smsurf_evaluate_normal_section(pvv0, dir1))? {
+    if let Some(s) = ignored_or_pass_on(smsurf_evaluate_normal_section(pvv0, dir1), pass_on)? {
         kappa0 = s.1;
     }
-    if let Some(s) = ignored(smsurf_evaluate_normal_section(pvv1, dir1))? {
+    if let Some(s) = ignored_or_pass_on(smsurf_evaluate_normal_section(pvv1, dir1), pass_on)? {
         kappa1 = s.1;
     }
     if (flip * kappa0 - kappa1).abs() > ang_tol_rad {
         return Ok(false);
     }
 
-    if let Some(s) = ignored(smsurf_evaluate_normal_section(pvv0, dir2))? {
+    if let Some(s) = ignored_or_pass_on(smsurf_evaluate_normal_section(pvv0, dir2), pass_on)? {
         kappa0 = s.1;
     }
-    if let Some(s) = ignored(smsurf_evaluate_normal_section(pvv1, dir2))? {
+    if let Some(s) = ignored_or_pass_on(smsurf_evaluate_normal_section(pvv1, dir2), pass_on)? {
         kappa1 = s.1;
     }
     if (flip * kappa0 - kappa1).abs() > ang_tol_rad {
@@ -642,8 +644,9 @@ impl Surface {
                 };
 
                 // evaluate this surface point - the 1st derivative needing checking is
-                // in p1stDir
-                if let Some(m) = ignored(self.evaluate(
+                // in p1stDir (with the opt-in fix a boundary that cannot be evaluated is
+                // not shown singular, WR-663, tangency-labs/smlib 21dcf69)
+                let evaluated = ignored(self.evaluate(
                     k,
                     uv,
                     1,
@@ -654,7 +657,13 @@ impl Surface {
                         only_upper_half: true,
                         non_zero_tangents: false,
                     },
-                ))? {
+                ))?;
+                if evaluated.is_none() && k.fixes.query_statuses_pass_on {
+                    singular = false;
+                    approx_singular = false;
+                    break;
+                }
+                if let Some(m) = evaluated {
                     for (i, row) in pv.iter_mut().enumerate() {
                         for (j, slot) in row.iter_mut().enumerate() {
                             if let Some(v) = m.get(i).and_then(|r| r.get(j)) {
@@ -781,6 +790,9 @@ impl Surface {
         use crate::nurbs::b_spline_surface::SurfParamType;
 
         let mut tight_box = Extent3d::new();
+        // with the opt-in fix the statuses SMLib drops here are passed on (WR-663,
+        // tangency-labs/smlib 21dcf69)
+        let pass = k.fixes.query_statuses_pass_on;
 
         // Special case for 2x2 B-Spline surfaces (SM_CAST_NONNULL_PTR(SmBSplineSurface)):
         let bspline_based = !matches!(
@@ -803,7 +815,9 @@ impl Surface {
                 (uv_domain.min().x, uv_domain.max().y),
                 (uv_domain.max().x, uv_domain.max().y),
             ] {
-                if let Some(p) = ignored(self.evaluate_point(k, Point2::new(u, v)))? {
+                if let Some(p) =
+                    ignored_or_pass_on(self.evaluate_point(k, Point2::new(u, v)), pass)?
+                {
                     pt = p;
                 }
                 tight_box.add_point(pt);
@@ -820,19 +834,22 @@ impl Surface {
             if idx == 2 {
                 dir_vec = Vec3::new(0.0, 0.0, 1.0); // +/- z
             }
-            for pass in 0..2 {
-                if pass == 1 {
+            for side in 0..2 {
+                if side == 1 {
                     dir_vec = -dir_vec;
                 }
-                let solutions = ignored(super::p4::global_point_solve_starts(
-                    k,
-                    self,
-                    uv_domain,
-                    SolverOperation::Signed3dDirectedMaximize,
-                    dir_vec,
-                    EFF_ZERO_SQRT,
-                    SolutionRequested::All,
-                ))?
+                let solutions = ignored_or_pass_on(
+                    super::p4::global_point_solve_starts(
+                        k,
+                        self,
+                        uv_domain,
+                        SolverOperation::Signed3dDirectedMaximize,
+                        dir_vec,
+                        EFF_ZERO_SQRT,
+                        SolutionRequested::All,
+                    ),
+                    pass,
+                )?
                 .unwrap_or_default();
                 for sol in &solutions {
                     let mut eval = super::p2::SurfaceEval::with_uv(
@@ -841,7 +858,7 @@ impl Surface {
                         sol.parameters.first().copied().unwrap_or(0.0),
                         sol.parameters.get(1).copied().unwrap_or(0.0),
                     );
-                    tight_box.add_point(eval_pos(&mut eval)?);
+                    tight_box.add_point(eval_pos(&mut eval, pass)?);
                 }
             }
         }
@@ -956,6 +973,9 @@ impl Surface {
         mut context: Option<(&mut dyn SurfaceSolveContext<O>, Option<O>)>,
         across_wrapped_seams: bool,
     ) -> Result<CoverCoincident> {
+        // with the opt-in fix the statuses SMLib drops here are passed on (WR-663,
+        // tangency-labs/smlib 21dcf69)
+        let pass = k.fixes.query_statuses_pass_on;
         // init outputs
         let failure = CoverCoincident {
             success: false,
@@ -1009,7 +1029,7 @@ impl Surface {
         // out most, and save lots of drops on corners and edges.  (Picture two fillet
         // surfaces end to end that form a closed loop.)
         let uv_other = other_dom.evaluate(0.5, 0.5);
-        if let Some(p) = ignored(other.evaluate_point(k, uv_other))? {
+        if let Some(p) = ignored_or_pass_on(other.evaluate_point(k, uv_other), pass)? {
             pt = p;
         }
         if ignored(step_inversion_in(
@@ -1030,7 +1050,7 @@ impl Surface {
         for ii in 0..2_usize {
             for jj in 0..2_usize {
                 let uv_other = other_dom.evaluate(ii as f64, jj as f64);
-                if let Some(p) = ignored(other.evaluate_point(k, uv_other))? {
+                if let Some(p) = ignored_or_pass_on(other.evaluate_point(k, uv_other), pass)? {
                     pt = p;
                 }
 
@@ -1071,7 +1091,7 @@ impl Surface {
                 new_domain.add_point(uv_this);
 
                 // Check max distance.
-                if let Some(p) = ignored(self.evaluate_step_point(k, uv_this))? {
+                if let Some(p) = ignored_or_pass_on(self.evaluate_step_point(k, uv_this), pass)? {
                     pt2 = p;
                 }
                 let dist = pt.distance(pt2);
@@ -1092,7 +1112,7 @@ impl Surface {
             let orig_domain = self.step_uv_domain();
             let update_domain = orig_domain.union(&new_domain);
             // (status ignored upstream)
-            ignored(self.adjust_step_uv_domain(k, &update_domain))?;
+            ignored_or_pass_on(self.adjust_step_uv_domain(k, &update_domain), pass)?;
 
             // Have to do this after AdjustSTEPUVDomain call (the caller holding the
             // B-rep runs SmFace::RemoveUVTrimCurves on the owner face):
@@ -1130,7 +1150,7 @@ impl Surface {
                 let dv = kk as f64 / denom;
 
                 let uv_other = other_dom.evaluate(du, dv);
-                if let Some(p) = ignored(other.evaluate_point(k, uv_other))? {
+                if let Some(p) = ignored_or_pass_on(other.evaluate_point(k, uv_other), pass)? {
                     pt = p;
                 }
 
@@ -1163,7 +1183,7 @@ impl Surface {
                 }
 
                 // Check max distance.
-                if let Some(p) = ignored(self.evaluate_step_point(k, uv_this))? {
+                if let Some(p) = ignored_or_pass_on(self.evaluate_step_point(k, uv_this), pass)? {
                     pt2 = p;
                 }
                 let dist = pt.distance(pt2);
@@ -1261,7 +1281,7 @@ impl Surface {
                 };
 
                 // Do the drop.
-                if let Some(p) = ignored(other.evaluate_point(k, uv_other))? {
+                if let Some(p) = ignored_or_pass_on(other.evaluate_point(k, uv_other), pass)? {
                     pt = p;
                 }
 
@@ -1314,7 +1334,7 @@ impl Surface {
                 }
 
                 // Check max distance.
-                if let Some(p) = ignored(self.evaluate_step_point(k, drop_uv))? {
+                if let Some(p) = ignored_or_pass_on(self.evaluate_step_point(k, drop_uv), pass)? {
                     pt2 = p;
                 }
                 let dist = pt.distance(pt2);
@@ -1340,7 +1360,10 @@ impl Surface {
         // But make sure that we didn't expand it to spill outside of sBigDomain.  This
         // would happen if the domain is against the seam of a surface of revolution, for
         // example.
-        new_domain = clip_to_big_domain(&new_domain, &big_domain);
+        new_domain = match passed_on(new_domain.intersect(&big_domain), pass)? {
+            Ok(d) => d,
+            Err(_) => clip_to_big_domain(&new_domain, &big_domain),
+        };
 
         // Now union the projection of Other surface on our domain with our original
         // domain, and update our domain to it.
@@ -1421,7 +1444,7 @@ impl Surface {
         }
 
         // (status ignored upstream)
-        ignored(self.adjust_step_uv_domain(k, &update_domain))?;
+        ignored_or_pass_on(self.adjust_step_uv_domain(k, &update_domain), pass)?;
 
         // Have to do this after AdjustSTEPUVDomain call (the caller holding the B-rep
         // runs SmFace::RemoveUVTrimCurves on the owner face):
@@ -1491,7 +1514,12 @@ impl Surface {
         // In some cases like tracing tangency curves we need to get a normal from
         // outside because of the problems with the surface normals being the same.
         let steepest_descent = false;
-        let plane_norm = plane_normal.unitize_or_z();
+        // (passed on with the opt-in fix, WR-663, tangency-labs/smlib 21dcf69)
+        let plane_norm = if k.fixes.query_statuses_pass_on {
+            plane_normal.unitize()?
+        } else {
+            plane_normal.unitize_or_z()
+        };
 
         let plane_surface = Plane::from_normal(plane_origin, plane_norm);
 
@@ -1954,8 +1982,10 @@ fn clip_to_big_domain(domain: &Extent2d, big_domain: &Extent2d) -> Extent2d {
 
 /// `SmSurfaceEval::Pos()`: the position, also when the evaluation failed (then what
 /// the failed evaluation wrote).
-fn eval_pos(eval: &mut super::p2::SurfaceEval<'_>) -> Result<Point3> {
-    match eval.pos() {
+/// With `pass_on` (the opt-in WR-663 fix) a failed evaluation is returned (`SER` on the
+/// fork's `SetUV`).
+fn eval_pos(eval: &mut super::p2::SurfaceEval<'_>, pass_on: bool) -> Result<Point3> {
+    match passed_on(eval.pos(), pass_on)? {
         Ok(p) => Ok(p),
         Err(e) if e.is_unported() => Err(e),
         Err(_) => Ok(eval
@@ -1970,6 +2000,20 @@ fn eval_pos(eval: &mut super::p2::SurfaceEval<'_>) -> Result<Point3> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn issue_2009_unevaluable_tight_box_corners_are_passed_on() {
+        // tangency-labs/smlib 21dcf69 (CalculateTightBoundingBox: SER on the corner
+        // evaluations of a 2x2 B-spline). Upstream boxes the unset points.
+        let s = Surface::from(crate::nurbs::b_spline_surface::BSplineSurface::default());
+        let dom = Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0);
+        let off = Kernel::default();
+        let mut on = Kernel::default();
+        on.fixes.query_statuses_pass_on = true;
+        assert!(s.calculate_tight_bounding_box(&off, &dom).is_ok());
+        assert!(s.calculate_tight_bounding_box(&on, &dom).is_err());
+    }
+
     use crate::curve::curve::Curve;
     use crate::curve::line::Line;
     use crate::nurbs::b_spline_curve::BSplineCurve as Bsc;
