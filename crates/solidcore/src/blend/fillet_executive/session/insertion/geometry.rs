@@ -1568,4 +1568,54 @@ mod tests {
         .unwrap()
         .unwrap();
     }
+
+    #[test]
+    fn vertex_update_edge_intervals_delegates_to_brep_p1() {
+        let mut k = Kernel::default();
+        let mut target = box_at(&mut k, 0.0);
+        let mut intermediate = box_at(&mut k, 100.0);
+        let mut pseudo = FilletBrep::new();
+        *pseudo.brep_mut() = box_at(&mut k, 200.0);
+        let mut curves = InsertionCurves::default();
+        let mut records = crate::topology::topology::NotifyRecords::new();
+        let mut attributes = AttributeStore::default();
+
+        crate::topology::brep::p3::with_lent_context(&mut k, |k, context| -> Result<()> {
+            let mut view = InsertionGeometry::new(&mut target, &mut pseudo, &mut intermediate)?
+                .with_notifications(
+                    &mut curves,
+                    InsertionNotifications {
+                        records: &mut records,
+                        attributes: &mut attributes,
+                        context,
+                    },
+                )?;
+
+            // 1. Invalid handle returns error (not a vertex)
+            let edge = view.target.edges().ids().next().unwrap();
+            let edge_handle = FilletObject::Topology(FilletBody::Target, EntityRef::Edge(edge));
+            assert!(
+                crate::boolean::topology_intersector::p1::IntersectorBrep::vertex_update_edge_intervals(
+                    &mut view,
+                    k,
+                    edge_handle,
+                )
+                .is_err()
+            );
+
+            // 2. Valid vertex handle updates edge intervals successfully without UNPORTED error
+            let vertex = view.target.vertices().ids().next().unwrap();
+            let vertex_handle = FilletObject::Topology(FilletBody::Target, EntityRef::Vertex(vertex));
+            let res = crate::boolean::topology_intersector::p1::IntersectorBrep::vertex_update_edge_intervals(
+                &mut view,
+                k,
+                vertex_handle,
+            );
+            assert!(res.is_ok(), "vertex_update_edge_intervals must succeed: {:?}", res.err());
+
+            Ok(())
+        })
+        .unwrap()
+        .unwrap();
+    }
 }
