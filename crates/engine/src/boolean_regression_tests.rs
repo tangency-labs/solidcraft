@@ -1492,3 +1492,34 @@ fn join_that_meets_no_body_keeps_the_piece_and_says_so() {
     let combine = s.execute("solid.combine", &json!({"target": "A", "tools": ["B"], "operation": "join"})).unwrap();
     assert!(combine["warning"].is_null(), "{combine}");
 }
+
+/// A spherical cap (a sphere intersected with a box, its base a planar face) joined with its
+/// base flush on a plate's top face. Pushing the coincident faces apart re-swept the sphere's
+/// face as if it stood square to the plane, turning the cap into a disc inside the plate, and
+/// the join silently came out as the plate alone. The cap is joined whole.
+#[test]
+fn a_spherical_cap_flush_on_a_plate_joins_whole() {
+    use std::f64::consts::PI;
+    let top = 1.2;
+    // (plate length, width, cap centre, sphere radius, cap height)
+    for (lx, ly, [cx, cy], r, h) in [(20.0, 20.0, [10.0, 10.0], 2.0, 0.2), (20.0, 20.0, [10.0, 10.0], 5.0, 0.2), (60.0, 40.0, [17.3, 23.9], 5.0, 1.0)]
+    {
+        let mut s = Session::default();
+        s.execute("solid.box", &json!({"length": lx, "width": ly, "height": top, "body_name": "Plate"})).unwrap();
+        s.execute("solid.sphere", &json!({"radius": r, "center": [cx, cy, top + h - r], "operation": "new", "body_name": "Cap"})).unwrap();
+        let w = 2.0 * r + 2.0;
+        s.execute(
+            "solid.box",
+            &json!({"corner": [cx - r - 1.0, cy - r - 1.0, top], "length": w, "width": w, "height": w, "operation": "new", "body_name": "K"}),
+        )
+        .unwrap();
+        s.execute("solid.combine", &json!({"target": "Cap", "tools": ["K"], "operation": "intersect"})).unwrap();
+        s.execute("solid.combine", &json!({"target": "Plate", "tools": ["Cap"], "operation": "join"})).unwrap();
+        let state = s.model.state();
+        let plate = &state.body("Plate").unwrap().body;
+        assert!(plate.validity().is_empty(), "{:?}", plate.validity());
+        let got = plate.tessellate(1e-4).unwrap().measure().volume;
+        let want = lx * ly * top + PI * h * h * (3.0 * r - h) / 3.0;
+        assert!((got - want).abs() < 1e-3, "r {r}, cap {h}: {got} mm³, expected {want}");
+    }
+}
