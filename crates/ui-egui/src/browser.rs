@@ -2180,6 +2180,16 @@ pub fn canvas_items(app: &SolveApp, id: u64) -> Vec<Item> {
 /// Editing a canvas (position, size, angle, opacity, flip) or calibrating it (two points on
 /// the image and their true distance). Live edits of one opening are one undo step.
 #[derive(Clone, Debug)]
+pub(crate) struct CanvasEditDrag {
+    /// 0 move, 1 scale, 2 rotate, 3 opacity.
+    pub(crate) kind: u8,
+    pub(crate) pointer: [f64; 2],
+    pub(crate) center: [f64; 2],
+    pub(crate) width: f64,
+    pub(crate) angle: f64,
+}
+
+#[derive(Clone, Debug)]
 pub struct CanvasPanel {
     pub canvas: u64,
     pub calibrate: bool,
@@ -2190,6 +2200,10 @@ pub struct CanvasPanel {
     pub distance: f64,
     /// Next viewport click sets Point A (`0`) or Point B (`1`) (#9108).
     pub next: u8,
+    /// Calibration marker currently dragged with the primary pointer.
+    pub(crate) dragging: Option<u8>,
+    /// Direct manipulation active while Edit Canvas is open.
+    pub(crate) edit_drag: Option<CanvasEditDrag>,
 }
 
 impl CanvasPanel {
@@ -2203,7 +2217,7 @@ impl CanvasPanel {
             .find(|c| c.id == canvas)
             .map(|c| ([c.center.x - c.width / 2.0, c.center.y], [c.center.x + c.width / 2.0, c.center.y], c.width))
             .unwrap_or(([0.0, 0.0], [100.0, 0.0], 100.0));
-        CanvasPanel { canvas, calibrate, depth: app.session.undo.len(), a, b, distance: d, next: 0 }
+        CanvasPanel { canvas, calibrate, depth: app.session.undo.len(), a, b, distance: d, next: 0, dragging: None, edit_drag: None }
     }
 }
 
