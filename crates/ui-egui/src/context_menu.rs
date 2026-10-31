@@ -533,6 +533,16 @@ pub fn items(app: &SolveApp, target: &Target) -> Vec<Item> {
         v.push(Item::sep());
         v.push(act("ui.groupSelected", "Group Selected", "folder").with(p));
     }
+    // A selected browser body saves or sends the whole selection, as Appearance below acts on it;
+    // a row outside the selection still takes only the body that was right-clicked.
+    if let Target::Body { name } = target {
+        let bodies = sel_solid_bodies(app);
+        if bodies.contains(name) {
+            for item in v.iter_mut().filter(|i| matches!(i.id.as_str(), "ui.saveMesh" | "ui.sendToSlicer")) {
+                item.params = Some(json!({"bodies": bodies}));
+            }
+        }
+    }
     for item in &mut v {
         if item.id != "ui.appearance" {
             continue;

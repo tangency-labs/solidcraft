@@ -1653,6 +1653,23 @@ fn appearance_browser_selection_assigns_and_removes_overrides_together() {
     }
 }
 
+/// Save As Mesh and Send to Slicer on a selected browser row take every selected body; a row
+/// outside the selection takes only itself.
+#[test]
+fn mesh_items_of_a_selected_browser_row_take_the_whole_selection() {
+    for (clicked, expected) in [("One", vec!["One", "Two"]), ("Two", vec!["One", "Two"]), ("Other", vec!["Other"])] {
+        for label in ["Save As Mesh", "Send to Slicer"] {
+            let mut app = appearance_selection_app();
+            app.services.pick_program = Some(Box::new(|| Box::pin(async { None })));
+            let item = find(&context_menu::items(&app, &Target::Body { name: clicked.into() }), label);
+            context_menu::run_item(&mut app, &item, pos2(0.0, 0.0));
+            let inputs = &app.dialog.as_ref().expect("the mesh window opens").inputs;
+            use crate::selection::SelectionExt as _;
+            assert_eq!(crate::selection::items(inputs, 0).body_names(), expected, "{label} on {clicked}");
+        }
+    }
+}
+
 #[test]
 fn appearance_browser_selection_reaches_the_editor_without_other_bodies() {
     for (clicked, expected) in [("Two", vec!["One", "Two"]), ("Other", vec!["Other"])] {
