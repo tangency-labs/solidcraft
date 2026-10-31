@@ -359,6 +359,9 @@ pub struct UiState {
     pub pick_bodies: bool,
     /// A face picks its exact component occurrence in Design and Render.
     pub pick_components: bool,
+    /// The selection shape (#4376): a drag in the view draws a freehand lasso that takes what is
+    /// wholly inside it, instead of the window/crossing rectangle. Off by default.
+    pub lasso_select: bool,
     /// 0: shaded with edges, 1: shaded, 2: wireframe, 3: shaded with hidden edges.
     pub visual_style: u8,
     /// A soft shadow on the ground under the model (seen from above).
@@ -402,6 +405,7 @@ impl Default for UiState {
             pick_off: Vec::new(),
             pick_bodies: false,
             pick_components: false,
+            lasso_select: false,
             visual_style: 0,
             ground_shadow: true,
             up_axis: Default::default(),

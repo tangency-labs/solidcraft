@@ -4852,7 +4852,12 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             && !crate::shell::covered(app, a)
             && !axes.contains(a)
         {
-            app.viewport.boxsel = Some(BoxSel::from_drag(a, b));
+            // The lasso (#4376) follows the pointer from the press; the rectangle spans it.
+            match &mut app.viewport.boxsel {
+                Some(lasso) if app.ui.lasso_select && lasso.is_lasso() => lasso.extend(b),
+                _ if app.ui.lasso_select => app.viewport.boxsel = Some(BoxSel::lasso(&[a, b])),
+                _ => app.viewport.boxsel = Some(BoxSel::from_drag(a, b)),
+            }
         }
         // A shell card disables its underlying widgets. The release still ends a
         // rubber band even when egui no longer sends drag_stopped to the viewport.
@@ -4904,7 +4909,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             Tokens::view().warning,
         );
     }
-    if let Some(bx) = app.viewport.boxsel {
+    if let Some(bx) = &app.viewport.boxsel {
         paint_box_selection(&painter, bx, app.session.active_sketch.is_some());
     }
     if let Some(tl) = app.tool.as_ref() {
@@ -4952,7 +4957,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     crate::tool_cursor::show(app, &painter, badge_at);
 }
 
-fn paint_box_selection(painter: &egui::Painter, bx: BoxSel, sketch: bool) {
+fn paint_box_selection(painter: &egui::Painter, bx: &BoxSel, sketch: bool) {
     let t = Tokens::get();
     let col = if sketch {
         t.sketch_accent
@@ -4961,6 +4966,11 @@ fn paint_box_selection(painter: &egui::Painter, bx: BoxSel, sketch: bool) {
     } else {
         t.box_window
     };
+    // The lasso is drawn as its closed outline: a fill of a concave loop would need tessellating.
+    if bx.is_lasso() {
+        painter.add(Shape::closed_line(bx.lasso.clone(), Stroke::new(1.2, col)));
+        return;
+    }
     painter.rect_filled(bx.rect, 0.0, col.gamma_multiply(0.12));
     if bx.crossing {
         let c = [bx.rect.left_top(), bx.rect.right_top(), bx.rect.right_bottom(), bx.rect.left_bottom()];
@@ -11315,6 +11325,49 @@ mod tests {
         h.step(&json!({"drag": [{"world": [a.x, a.y, a.z]}, {"world": [b.x, b.y, b.z]}]})).unwrap();
         let items = h.app.dialog.as_ref().unwrap().inputs[0].items.clone();
         assert!(!items.iter().any(|s| matches!(s, Sel::Profile { .. })), "a mask that asks for edges takes no region: {items:?}");
+    }
+
+    /// #4376: with the Lasso selection shape, a drag in a sketch draws a freehand loop and takes
+    /// the curves wholly inside it. An L shaped loop leaves out a line in its notch and a line
+    /// that cuts across the notch, which no rectangle could; Shift adds to the selection.
+    #[test]
+    fn a_lasso_in_a_sketch_takes_the_curves_wholly_inside_it() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+        let line = |h: &mut crate::scenario::Harness, a: [f64; 2], b: [f64; 2]| {
+            let made = h.app.run("sketch.line", json!({"points": [a, b]})).unwrap();
+            made["created"]["curves"][0].as_str().unwrap().to_string()
+        };
+        let bottom = line(&mut h, [25.0, 25.0], [75.0, 25.0]);
+        let left = line(&mut h, [25.0, 35.0], [25.0, 75.0]);
+        let notch = line(&mut h, [60.0, 60.0], [75.0, 75.0]);
+        let across = line(&mut h, [30.0, 75.0], [75.0, 30.0]);
+        let far = line(&mut h, [120.0, 25.0], [120.0, 75.0]);
+        h.call("ui.view", json!({"view": "top"}));
+        h.call("ui.view", json!({"view": "fit"}));
+        let r = h.call("ui.set", json!({"lassoSelect": true}));
+        assert_eq!(r["ok"], true, "{r}");
+        let loop_at = |pts: &[[f64; 2]]| pts.iter().map(|p| json!({"world": [p[0], p[1], 0.0]})).collect::<Vec<_>>();
+        let curves = |h: &crate::scenario::Harness| {
+            h.app
+                .session
+                .selection
+                .iter()
+                .filter_map(|s| if let Sel::SketchCurve { id, .. } = s { Some(id.clone()) } else { None })
+                .collect::<Vec<_>>()
+        };
+        let l = [[15.0, 15.0], [85.0, 15.0], [85.0, 45.0], [45.0, 45.0], [45.0, 85.0], [15.0, 85.0], [15.0, 20.0]];
+        h.step(&json!({"drag": loop_at(&l), "steps": 6})).unwrap();
+        assert!(h.app.viewport.boxsel.is_none(), "the release ends the lasso");
+        assert_eq!(curves(&h), vec![bottom.clone(), left.clone()], "not {notch}, {across} or {far}");
+        // Shift adds the far line with a second loop; drawn the other way round, it is the same.
+        let around_far = [[110.0, 15.0], [110.0, 85.0], [130.0, 85.0], [130.0, 15.0], [112.0, 15.0]];
+        h.step(&json!({"drag": loop_at(&around_far), "steps": 6, "shift": true})).unwrap();
+        assert_eq!(curves(&h), vec![bottom, left, far]);
+        // Back to the rectangle: a plain drag is a box again.
+        h.call("ui.set", json!({"lassoSelect": false}));
+        h.step(&json!({"drag": loop_at(&[[15.0, 15.0], [85.0, 85.0]])})).unwrap();
+        assert_eq!(curves(&h).len(), 4, "the window box takes all four lines inside it: {:?}", curves(&h));
     }
 }
 

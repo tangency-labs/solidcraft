@@ -852,8 +852,22 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, method: &str, p: &Value) ->
                 app.synthetic.push(egui::Event::PointerMoved(a));
             }
             let steps = f("steps").unwrap_or(10.0).clamp(1.0, 200.0) as usize;
-            for k in 1..=steps {
-                app.synthetic.push(egui::Event::PointerMoved(a + (z - a) * (k as f32 / steps as f32)));
+            // `via`: [[x, y], ...] the pointer passes through on its way (a lasso's loop, #4376).
+            let via: Vec<egui::Pos2> = p
+                .get("via")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .take(500)
+                .filter_map(|q| Some(egui::pos2(q.get(0)?.as_f64()? as f32, q.get(1)?.as_f64()? as f32)))
+                .filter(|q| q.is_finite())
+                .collect();
+            let mut from = a;
+            for to in via.into_iter().chain([z]) {
+                for k in 1..=steps {
+                    app.synthetic.push(egui::Event::PointerMoved(from + (to - from) * (k as f32 / steps as f32)));
+                }
+                from = to;
             }
             // `hold_end`: frames to keep the button down at the end (to look at a drag's snap).
             for _ in 0..f("hold_end").unwrap_or(0.0).clamp(0.0, 600.0) as usize {

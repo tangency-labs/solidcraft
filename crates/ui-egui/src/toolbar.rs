@@ -2911,6 +2911,9 @@ pub(crate) fn selection_filter(app: &mut SolveApp, ui: &mut egui::Ui) {
             }
         }
     }
+    // The selection shape (#4376): a drag draws a freehand lasso instead of the rectangle.
+    let label = app.tr("ui.lasso_select").to_string();
+    ui_kit::checkbox(ui, &label, &mut app.ui.lasso_select);
 }
 
 /// Two Esc presses within this many seconds finish the open sketch.

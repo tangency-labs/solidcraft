@@ -1,0 +1,10 @@
+{
+  "en": { "ui.lasso_select": "Lasso (drag a freehand loop: takes what is wholly inside)" },
+  "ar": { "ui.lasso_select": "الحبل (اسحب حلقة حرة: يحدّد ما يقع داخلها بالكامل)" },
+  "de": { "ui.lasso_select": "Lasso (freihändig umfahren: wählt, was ganz innen liegt)" },
+  "he": { "ui.lasso_select": "לאסו (גרירת לולאה חופשית: בוחר את מה שנמצא כולו בתוכה)" },
+  "ja": { "ui.lasso_select": "投げ縄（フリーハンドで囲む：完全に内側にあるものを選択）" },
+  "ko": { "ui.lasso_select": "올가미(자유롭게 둘러 그리기: 완전히 안쪽에 있는 것을 선택)" },
+  "vi": { "ui.lasso_select": "Lasso (kéo một vòng tự do: chọn những gì nằm hoàn toàn bên trong)" },
+  "zh": { "ui.lasso_select": "套索（徒手圈选：选择完全在圈内的对象）" }
+}

@@ -869,8 +869,8 @@ fn sketch_previews_selection_band_and_number_focus_follow_sketch_accent() {
             assert!(output.shapes.iter().any(|s| sketch_stroke(&s.shape, t.sketch_accent)));
             for sketch in [false, true] {
                 for crossing in [false, true] {
-                    let bx = BoxSel { rect: Rect::from_min_size(pos2(20.0, 20.0), vec2(100.0, 80.0)), crossing };
-                    let output = draw(&h.ctx, |ui| paint_box_selection(ui.painter(), bx, sketch));
+                    let bx = BoxSel { rect: Rect::from_min_size(pos2(20.0, 20.0), vec2(100.0, 80.0)), crossing, lasso: Vec::new() };
+                    let output = draw(&h.ctx, |ui| paint_box_selection(ui.painter(), &bx, sketch));
                     let color = if sketch {
                         t.sketch_accent
                     } else if crossing {
