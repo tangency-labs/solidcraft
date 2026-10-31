@@ -377,7 +377,8 @@ pub fn run(app: &mut SolveApp, action: &str, p: &Value) {
 
 /// Shortcut keys, S box favourites, toolbar and navigation bar as one file (Keyboard Shortcuts › Export).
 pub fn export(app: &SolveApp) -> Value {
-    json!({ "format": "solidcraft-shortcuts/1", "shortcuts": app.keymap.prefs(), "favourites": app.sbox.pinned, "toolbar": app.toolbar_custom.prefs(), "navigation_bar": app.preferences.navigation_bar })
+    json!({ "format": "solidcraft-shortcuts/1", "shortcuts": app.keymap.prefs(), "favourites": app.sbox.pinned, "toolbar": app.toolbar_custom.prefs(),
+        "navigation_bar": app.preferences.navigation_bar, "preview_reselect_modifier": app.preferences.preview_reselect_modifier })
 }
 
 /// The largest shortcuts file Import… reads (hostile input; an export is a few tens of KiB).
@@ -395,8 +396,16 @@ pub fn import(app: &mut SolveApp, v: &Value) -> Result<(), String> {
             serde_json::from_value::<crate::navigation_bar::NavigationBar>(value.clone()).map_err(|e| e.to_string())
         })
         .transpose()?;
+    let preview_modifier = v
+        .get("preview_reselect_modifier")
+        .map(|value| serde_json::from_value(value.clone()))
+        .transpose()
+        .map_err(|error| format!("preview modifier: {error}"))?;
     if let Some(bar) = navigation_bar {
         app.preferences.navigation_bar = bar;
+    }
+    if let Some(binding) = preview_modifier {
+        app.preferences.preview_reselect_modifier = binding;
     }
     if let Some(s) = v.get("shortcuts") {
         app.keymap.load(s);

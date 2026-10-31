@@ -558,6 +558,19 @@ viewport size. Zoom takes `factor` (0.05..20, below 1 zooms in) and an optional 
 `anchor`. The returned `camera` is applied immediately by the UI, without animation,
 document edits, undo steps or a success-log entry per movement.
 
+### Preview Reselect Modifier
+
+Preferences > Keyboard Shortcuts > Modifier Keys controls **Hide preview for reselect**.
+The default is physical Control on every platform, including macOS, leaving Command-based
+screenshots unchanged. The modifier temporarily hides an active feature preview so obscured
+geometry can be selected; it does not suppress the saved feature. Extra modifiers and active
+manipulator drags prevent this temporary rollback.
+
+`ui.prefs {"preview_reselect_modifier":"control"}` selects the default. Other values are
+`primary` (Command on macOS, Control elsewhere), `alt` (Option on macOS), `shift`, and
+`disabled`. The setting follows Apply/OK/Cancel and Keyboard Shortcuts' Reset All and Restore
+Defaults, and is included in shortcut exports. Older settings without it use Control.
+
 ## MCP
 
 `solidcraft-cli mcp --connect 127.0.0.1:PORT` bridges an MCP client (an AI agent) to this
