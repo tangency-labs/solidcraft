@@ -1492,3 +1492,86 @@ fn join_that_meets_no_body_keeps_the_piece_and_says_so() {
     let combine = s.execute("solid.combine", &json!({"target": "A", "tools": ["B"], "operation": "join"})).unwrap();
     assert!(combine["warning"].is_null(), "{combine}");
 }
+
+/// A 40 mm cube with sealed voids, joined with a box, either way round: the union keeps what of
+/// each void the box does not fill. A void at the centre (a 10 mm cube, a sphere of r 6 or of
+/// r 2) with a 6 × 6 box along +x: in the material beside the void, across the outer face, across
+/// the void and the outer face, inside the void. Then a 14 mm cube over the r 6 sphere (it fills
+/// the void), and two spheres of r 4 with a 4 × 4 box across one of them and the outer face.
+/// On `main` the spherical voids came out filled (r 2) or the join failed (r 6).
+#[test]
+fn join_beside_a_sealed_void_keeps_the_void() {
+    use std::f64::consts::PI;
+    // A sphere of radius `r` at the origin over the square |y|, |z| < `c` (inside its outline):
+    // ∫∫ √(r² − y² − z²), the inner integral over y in closed form, the outer over z by Simpson's
+    // rule. The sphere's part in x > 0 over the square.
+    let cap = |r: f64, c: f64| {
+        let strip = |z: f64| {
+            let a2 = r * r - z * z;
+            c * (a2 - c * c).sqrt() + a2 * (c / a2.sqrt()).asin()
+        };
+        let n = 2000;
+        let h = 2.0 * c / n as f64;
+        let weight = |i: usize| if i == 0 || i == n { 1.0 } else { 2.0 + 2.0 * (i % 2) as f64 };
+        (0..=n).map(|i| weight(i) * strip(-c + i as f64 * h)).sum::<f64>() * h / 3.0
+    };
+    let ball = |r: f64| 4.0 / 3.0 * PI * r * r * r;
+    let sphere = |r: f64, x: f64| ("solid.sphere", json!({"radius": r, "center": [x, 0, 0]}));
+    // (case, voids, tool corner, tool size, expected volume, shells)
+    let mut cases = Vec::new();
+    let central = [
+        ("box", ("solid.box", json!({"length": 10, "width": 10, "height": 10, "center": [0, 0, 0]})), 1000.0, 180.0),
+        ("sphere", sphere(6.0, 0.0), ball(6.0), cap(6.0, 3.0)),
+        // Small enough (0.05 % of the body) that a union filling it passes the volume bounds.
+        ("small sphere", sphere(2.0, 0.0), ball(2.0), ball(2.0) / 2.0),
+    ];
+    for (name, void, volume, filled) in central {
+        let left = 64000.0 - volume;
+        cases.extend([
+            (format!("{name} void, tool beside"), vec![void.clone()], [8.0, -3.0, -3.0], [6.0, 6.0, 6.0], left, 2),
+            (format!("{name} void, tool across the outer face"), vec![void.clone()], [12.0, -3.0, -3.0], [18.0, 6.0, 6.0], left + 360.0, 2),
+            (
+                format!("{name} void, tool across the void and the outer face"),
+                vec![void.clone()],
+                [0.0, -3.0, -3.0],
+                [30.0, 6.0, 6.0],
+                left + 360.0 + filled,
+                2,
+            ),
+            (format!("{name} void, tool inside the void"), vec![void], [-1.0, -1.0, -1.0], [2.0, 2.0, 2.0], left + 8.0, 3),
+        ]);
+    }
+    cases.push(("sphere void, tool filling it".into(), vec![sphere(6.0, 0.0)], [-7.0, -7.0, -7.0], [14.0, 14.0, 14.0], 64000.0, 1));
+    // The box from x = 8 fills the sphere at x = 10 from there on: 2 mm plus its far half.
+    let filled = 2.0 * 16.0 + cap(4.0, 2.0);
+    let two = vec![sphere(4.0, -10.0), sphere(4.0, 10.0)];
+    cases.push(("two sphere voids, tool across one".into(), two, [8.0, -2.0, -2.0], [22.0, 4.0, 4.0], 64000.0 - 2.0 * ball(4.0) + 160.0 + filled, 3));
+    let mut failed = Vec::new();
+    // Each way round: the body with the voids as the target, then as the tool.
+    for ((case, voids, corner, size, want, shells), [target, tool]) in cases.into_iter().flat_map(|c| [(c.clone(), ["B", "K"]), (c, ["K", "B"])]) {
+        let mut s = Session::default();
+        s.execute("solid.box", &json!({"length": 40, "width": 40, "height": 40, "center": [0, 0, 0], "operation": "new", "body_name": "B"})).unwrap();
+        for (command, mut params) in voids {
+            params["operation"] = json!("new");
+            params["body_name"] = json!("V");
+            s.execute(command, &params).unwrap();
+            s.execute("solid.combine", &json!({"target": "B", "tools": ["V"], "operation": "cut"})).unwrap();
+        }
+        let box_ = json!({"length": size[0], "width": size[1], "height": size[2], "corner": corner, "operation": "new", "body_name": "K"});
+        s.execute("solid.box", &box_).unwrap();
+        let joined = s.execute("solid.combine", &json!({"target": target, "tools": [tool], "operation": "join"}));
+        let state = s.model.state();
+        let (mut got, mut count) = (0.0, 0);
+        for b in &state.bodies {
+            assert!(b.body.validity().is_empty(), "{case}: {:?}", b.body.validity());
+            got += b.body.tessellate(1e-5).unwrap().measure().volume;
+            count += b.body.shell_count();
+        }
+        let case = format!("{case}, {tool} joined to {target}");
+        println!("{case}: {got:.6} mm³ in {count} shells, expected {want:.6} in {shells} ({:?})", joined.as_ref().err());
+        if joined.is_err() || count != shells || (got - want).abs() >= 1e-5 * want {
+            failed.push(case);
+        }
+    }
+    assert!(failed.is_empty(), "{failed:?}");
+}

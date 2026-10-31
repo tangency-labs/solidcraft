@@ -74,15 +74,15 @@ fn faces_inward(shell: &MeshedShell) -> Option<bool> {
 }
 
 /// SolidCraft: whether `pt` is inside the closed `shell`, by the faces a ray from it crosses.
-/// For an AND (`and`) each face counts as it is oriented, and a shell facing inward (`inward`,
-/// see [`faces_inward`]) holds what lies outside it: the crossings count 0 there and -1 inside.
-/// An OR keeps truck's count, by the faces' surfaces alone: it folds a solid's voids in as if
-/// they were solids of their own, which is no union with voids whichever way they are counted.
-fn inside_shell(shell: &MeshedShell, pt: Point3, and: bool, inward: bool) -> Option<bool> {
+/// With `oriented` (an AND, and an OR's pass over a void, see [`boolean`]) each face counts as it
+/// is oriented, and a shell facing inward (`inward`, see [`faces_inward`]) holds what lies outside
+/// it: the crossings count 0 there and -1 inside. Otherwise truck's count, by the faces' surfaces
+/// alone, which an OR of two outer shells keeps.
+fn inside_shell(shell: &MeshedShell, pt: Point3, oriented: bool, inward: bool) -> Option<bool> {
     let dir = hash::take_one_unit(pt);
     let mut count = 0;
     for face in shell.face_iter() {
-        let sign = if face.orientation() || !and { 1 } else { -1 };
+        let sign = if face.orientation() || !oriented { 1 } else { -1 };
         count += sign * face.surface()?.signed_crossing_faces(pt, dir);
     }
     Some(if inward { count >= 0 } else { count >= 1 })
@@ -94,7 +94,7 @@ fn process_one_pair_of_shells<C: ShapeOpsCurve<S>, S: ShapeOpsSurface>(
     shell1: &Shell<Point3, C, S>,
     tol: f64,
     lineage: &mut Lineage<C, S>,
-    and: bool,
+    oriented: bool,
 ) -> Option<[Shell<Point3, C, S>; 2]> {
     nonpositive_tolerance!(tol);
     // SolidCraft: robust meshing (boundaries from earlier operations lie on surfaces only
@@ -114,11 +114,11 @@ fn process_one_pair_of_shells<C: ShapeOpsCurve<S>, S: ShapeOpsSurface>(
     let mut cls1 = crate::tr!(divide_face::divide_faces(shell1, &loops_store1, tol, lineage), "divide faces 1");
     cls1.integrate_by_component();
     let [mut and0, mut or0, unknown0] = cls0.and_or_unknown();
-    let inward1 = and && !unknown0.is_empty() && faces_inward(&poly_shell1)?;
+    let inward1 = oriented && !unknown0.is_empty() && faces_inward(&poly_shell1)?;
     unknown0.into_iter().try_for_each(|face| {
         // SolidCraft: no panics (wasm can't catch them).
         let pt = face.boundaries().first()?.vertex_iter().next()?.point();
-        if inside_shell(&poly_shell1, pt, and, inward1)? {
+        if inside_shell(&poly_shell1, pt, oriented, inward1)? {
             and0.push(face);
         } else {
             or0.push(face);
@@ -126,11 +126,11 @@ fn process_one_pair_of_shells<C: ShapeOpsCurve<S>, S: ShapeOpsSurface>(
         Some(())
     })?;
     let [mut and1, mut or1, unknown1] = cls1.and_or_unknown();
-    let inward0 = and && !unknown1.is_empty() && faces_inward(&poly_shell0)?;
+    let inward0 = oriented && !unknown1.is_empty() && faces_inward(&poly_shell0)?;
     unknown1.into_iter().try_for_each(|face| {
         // SolidCraft: no panics (wasm can't catch them).
         let pt = face.boundaries().first()?.vertex_iter().next()?.point();
-        if inside_shell(&poly_shell0, pt, and, inward0)? {
+        if inside_shell(&poly_shell0, pt, oriented, inward0)? {
             and1.push(face);
         } else {
             or1.push(face);
@@ -198,6 +198,12 @@ pub fn or_with_history<C: ShapeOpsCurve<S>, S: ShapeOpsSurface>(
 /// Combines the operands' first shells, then folds in their other shells one at a time
 /// (`and` chooses the AND or the OR shell of each pass). The history is `None` when a face or
 /// edge of the result was not recorded; the result stands without it.
+///
+/// SolidCraft: in an OR with an operand of one shell, a void of the other operand (an inward
+/// shell) is not folded in: folded, it was taken for a solid of its own, and the union filled it
+/// or came out open. What of the void the one shell does not fill (their OR, faces counted as
+/// oriented) is a void of the result. The void lies inside its operand's outer shell, so it
+/// meets nothing of the other passes.
 fn boolean<C: ShapeOpsCurve<S>, S: ShapeOpsSurface>(
     solid0: &Solid<Point3, C, S>,
     meshed0: Option<&[MeshedShell]>,
@@ -213,10 +219,21 @@ fn boolean<C: ShapeOpsCurve<S>, S: ShapeOpsSurface>(
     let shell1 = iter1.next()?;
     let meshed0 = meshed0.filter(|m| m.len() == solid0.boundaries().len()).and_then(|m| m.first());
     let mut shell = pick(crate::tr!(process_one_pair_of_shells(shell0, meshed0, shell1, tol, &mut lineage, and), "first shells"));
-    for other in iter0.chain(iter1) {
-        shell = pick(crate::tr!(process_one_pair_of_shells(&shell, None, other, tol, &mut lineage, and), "another shell"));
+    // Each other shell with the other operand's shell when that is its only one.
+    let single = |solid: &Solid<Point3, C, S>, shell| (!and && solid.boundaries().len() == 1).then_some(shell);
+    let others = iter0.map(|s| (s, single(solid1, shell1))).chain(iter1.map(|s| (s, single(solid0, shell0))));
+    let mut voids = Vec::new();
+    for (other, single) in others {
+        match single.map(|single| (single, other.robust_triangulation(tol))) {
+            Some((single, mesh)) if faces_inward(&mesh) == Some(true) => {
+                voids.push(pick(crate::tr!(process_one_pair_of_shells(other, Some(&mesh), single, tol, &mut lineage, true), "a void")))
+            }
+            _ => shell = pick(crate::tr!(process_one_pair_of_shells(&shell, None, other, tol, &mut lineage, and), "another shell")),
+        }
     }
-    let solid = crate::tr!(Solid::try_new(components_in_order(&shell)).ok(), "result solid");
+    let mut shells = components_in_order(&shell);
+    shells.extend(voids.iter().flat_map(components_in_order));
+    let solid = crate::tr!(Solid::try_new(shells).ok(), "result solid");
     let history = lineage.history(&solid);
     Some((solid, history))
 }
