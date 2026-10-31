@@ -243,14 +243,25 @@ pub(crate) fn note_due(app: &mut SolveApp, ctx: &egui::Context) -> Option<String
     Some(crate::i18n::tr_label(text).to_string())
 }
 
-/// The handles of the note's buttons, in order: the quarter turn, turning the offer off, then the
-/// dismissal. They are published for scripts; `stand_up:stand` and `stand_up:never` are the
-/// dialog's handles too.
-pub const NOTE_HANDLES: [&str; 3] = ["stand_up:stand", "stand_up:never", "stand_up:dismiss"];
+/// The handles of the note's buttons, in order: the quarter turn, then turning the offer off. They
+/// are published for scripts and are the dialog's handles too.
+pub const NOTE_HANDLES: [&str; 2] = ["stand_up:stand", "stand_up:never"];
+
+/// The handles of the note's close (×), which leaves the file as it opened (#7971):
+/// `toast:stand_up:close`, as every toast's, and `stand_up:dismiss`, the handle of the Close
+/// button it replaces, kept for scripts.
+pub const NOTE_CLOSE_HANDLES: [&str; 2] = ["toast:stand_up:close", "stand_up:dismiss"];
 
 /// The note's button labels, in the order of `NOTE_HANDLES`.
-pub(crate) fn note_labels() -> [String; 3] {
-    [crate::i18n::tr_label("Stand it up").to_string(), crate::i18n::tr_label("Don't ask again").to_string(), crate::i18n::tr("ui.close").to_string()]
+pub(crate) fn note_labels() -> [String; 2] {
+    [crate::i18n::tr_label("Stand it up").to_string(), crate::i18n::tr_label("Don't ask again").to_string()]
+}
+
+/// The share of the note's time left now, 1 to 0, for the countdown ring around its close (×).
+/// Pointing at it (`note_keep`) starts its time again, so the ring is full while it is pointed at.
+pub(crate) fn note_left(app: &SolveApp, ctx: &egui::Context) -> f32 {
+    let now = ctx.input(|i| i.time);
+    app.stand_up_note_since.map_or(1.0, |since| crate::viewport::countdown_left(since, now, NOTE_SECONDS))
 }
 
 /// The note was drawn at `rect`: a pointer on it keeps it from going.

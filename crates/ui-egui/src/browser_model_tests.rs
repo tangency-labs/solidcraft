@@ -410,6 +410,35 @@ fn browser_rows_still_fold_or_select_when_move_copy_is_not_open() {
     assert!(h.app.tree.collapsed.contains("c0/bodies"));
 }
 
+#[test]
+fn feature_editor_browser_rows_follow_the_marker_and_return_after_cancel() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.run("sketch.create", json!({"plane":"XY","name":"Base"})).unwrap();
+    h.app.run("sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[10,10]})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    h.app.run("solid.extrude", json!({"sketch":"Base","distance":10,"name":"Depth"})).unwrap();
+    let feature = h.app.session.doc.find_feature("Depth").unwrap().id;
+    h.app.run("sketch.create", json!({"plane":"YZ","name":"Later sketch"})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    h.app.run("construct.plane.offset", json!({"base":"XY","offset":20,"name":"Later plane"})).unwrap();
+    super::prepare_model(&mut h.app);
+    assert_eq!(super::entries(&h.app, 0, "sketches").len(), 2);
+    assert_eq!(super::entries(&h.app, 0, "construction").len(), 1);
+    h.app.edit_feature(feature);
+    // Both the fallback queries and the cached index must follow rollback.
+    assert_eq!(super::entries(&h.app, 0, "sketches").iter().map(|e| e.label.as_str()).collect::<Vec<_>>(), ["Base"]);
+    assert!(super::entries(&h.app, 0, "construction").is_empty());
+    assert!(super::entries(&h.app, 0, "bodies").is_empty());
+    super::prepare_model(&mut h.app);
+    assert_eq!(super::entries(&h.app, 0, "sketches").len(), 1);
+    assert!(super::entries(&h.app, 0, "construction").is_empty());
+    crate::dialogs::cancel(&mut h.app);
+    super::prepare_model(&mut h.app);
+    assert_eq!(super::entries(&h.app, 0, "sketches").len(), 2);
+    assert_eq!(super::entries(&h.app, 0, "construction").len(), 1);
+    assert_eq!(super::entries(&h.app, 0, "bodies").len(), 1);
+}
+
 /// The sketch being edited is marked in the user's language, not with an English "(editing)",
 /// and its default name reads as the browser shows it elsewhere.
 #[test]
@@ -419,4 +448,46 @@ fn the_edited_sketch_is_marked_in_the_users_language() {
     let _japanese = crate::i18n::scope("ja");
     let rows = super::entries(&h.app, 0, "sketches");
     assert_eq!(rows.iter().map(|r| r.label.as_str()).collect::<Vec<_>>(), ["スケッチ1  (編集中)"]);
+}
+
+/// A design saved before groups could nest or be ordered shows the browser it always did: the
+/// groups in creation order, each with its items, above the loose items, which follow the saved
+/// order and leave the ones it does not name to the end. That layout is spelled out here and
+/// compared with the rows drawn now, including a saved order that still names a grouped item.
+#[test]
+fn a_design_saved_before_nested_groups_keeps_its_browser_order() {
+    use super::cache::Row;
+    const BODIES: [&str; 5] = ["Plate", "Washer", "Bolt", "Nut", "Cap"];
+    fn drawn(rows: &[Row]) -> Vec<String> {
+        rows.iter()
+            .map(|r| match r {
+                Row::Item(e) => e.key.clone(),
+                Row::Group(g) => format!("{{{}: {}}}", g.label, drawn(&g.rows).join(",")),
+            })
+            .collect()
+    }
+    let cases: [(&[(&str, &[&str])], &[&str]); 3] = [
+        (&[("Fasteners", &["Bolt", "Nut"])], &[]),
+        (&[("Fasteners", &["Bolt", "Nut"])], &["Washer", "Bolt", "Cap"]),
+        (&[("Zeta", &["Plate"]), ("Alpha", &["Cap", "Washer"])], &["Cap", "Nut"]),
+    ];
+    for (groups, saved) in cases {
+        let mut h = crate::scenario::Harness::new();
+        for (i, name) in BODIES.iter().enumerate() {
+            h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"corner":[i as f64 * 20.0, 0, 0],"body_name":name})).unwrap();
+        }
+        for (name, items) in groups {
+            h.app.run("browser.group", json!({"component":0,"folder":"bodies","name":name,"items":items})).unwrap();
+        }
+        if !saved.is_empty() {
+            h.app.run("browser.order", json!({"folder":"bodies","order":saved})).unwrap();
+        }
+        // The old layout: groups in creation order, then the loose items by their saved place.
+        let mut expected: Vec<String> = groups.iter().map(|(n, items)| format!("{{{n} ({}): {}}}", items.len(), items.join(","))).collect();
+        let mut loose: Vec<&str> = BODIES.into_iter().filter(|b| !groups.iter().any(|(_, items)| items.contains(b))).collect();
+        loose.sort_by_key(|b| saved.iter().position(|s| s == b).unwrap_or(usize::MAX));
+        expected.extend(loose.into_iter().map(String::from));
+        let rows = super::arrange(&h.app.session.doc, 0, "bodies", "c0", super::entries(&h.app, 0, "bodies"));
+        assert_eq!(drawn(&rows), expected, "groups {groups:?}, saved order {saved:?}");
+    }
 }

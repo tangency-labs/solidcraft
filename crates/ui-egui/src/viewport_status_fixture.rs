@@ -6,10 +6,68 @@ use serde_json::{Value, json};
 pub(crate) struct Fixture {
     items: Vec<StatusItem>,
     presentation: StatusPresentation,
+    details_readout: bool,
 }
 
 fn item(id: &str, kind: StatusKind, label: &str, setting: String, has_key: bool) -> StatusItem {
     StatusItem { id: id.into(), kind, name: crate::i18n::tr(label).into(), setting, has_key, editable: false }
+}
+
+fn specimen(id: &str, readout: bool) -> crate::ui_kit::Details {
+    use crate::ui_kit::{DetailFinding, DetailKey, DetailSetting, DetailValue, Details};
+    let t = crate::theme::Tokens::get();
+    let tr = |id| crate::i18n::tr(id).to_owned();
+    let mut description = Details { caption: Some(tr("ui.details_fixture_caption")), ..Default::default() };
+    description.key = t
+        .analysis
+        .draft
+        .into_iter()
+        .zip(["≥ 1.0°", "−1.0° … 1.0°", "≤ −1.0°"])
+        .enumerate()
+        .map(|(index, (colour, label))| DetailKey {
+            numeric: true,
+            pattern_colour: None,
+            colour: crate::theme::srgb(colour),
+            pattern: index == 2,
+            label: label.into(),
+            value: String::new(),
+        })
+        .collect();
+    if id != "details" {
+        return description;
+    }
+    description.settings = vec![
+        DetailSetting {
+            id: "axis".into(),
+            label: tr("ui.details_pull"),
+            value: DetailValue::Axis { value: [0.0, 0.0, 1.0], current: "Z".into() },
+            enabled: true,
+        },
+        DetailSetting { id: "angle".into(), label: tr("ui.details_angle"), value: DetailValue::Angle(1.0), enabled: true },
+        DetailSetting {
+            id: "slider".into(),
+            label: tr("ui.details_stripes"),
+            value: DetailValue::Slider { value: 14.5, min: 1.0, max: 200.0 },
+            enabled: true,
+        },
+        DetailSetting { id: "check".into(), label: tr("ui.details_hatch"), value: DetailValue::Check(true), enabled: true },
+    ];
+    if readout {
+        description.readout = (0..9).map(|index| (tr("ui.details_fixture_readout"), format!("{index}.00 mm"))).collect();
+    } else {
+        description.findings_title = tr("ui.details_fixture");
+        description.findings = (0..9)
+            .map(|index| DetailFinding {
+                id: format!("specimen_{index}"),
+                label: tr("ui.details_fixture_problem"),
+                value: format!("{index}.00 mm"),
+                warning: true,
+                target: true,
+            })
+            .collect();
+    }
+    description.actions.push(("copy".into(), tr("ui.details_copy_list")));
+    description
 }
 
 /// Presets are bounded, named specimens rather than arbitrary user-provided widget state.
@@ -34,15 +92,22 @@ pub(crate) fn control(app: &mut crate::SolveApp, params: &Value) -> Result<Value
         "attention" => vec![attention()],
         "row" => vec![zebra(), section()],
         "kinds" => vec![zebra(), result(), attention()],
+        "many" => vec![zebra(), section(), result(), attention()],
         "key" => vec![item("draft", StatusKind::Mode, "ui.draft", "Z · 1°".into(), true)],
-        _ => return Err("preset must be off, mode, result, attention, row, kinds or key".into()),
+        "details_findings" | "details_readout" => vec![item("details", StatusKind::Result, "ui.details_fixture", String::new(), true)],
+        _ => return Err("unknown viewport status component specimen preset".into()),
     };
-    app.viewport_status_fixture = Fixture { items, presentation: StatusPresentation::default() };
+    app.viewport_status_fixture.items = items;
+    app.viewport_status_fixture.details_readout = preset == "details_readout";
     Ok(json!({"preset": preset, "count": app.viewport_status_fixture.items.len()}))
 }
 
 pub(crate) fn show(app: &mut crate::SolveApp, ctx: &egui::Context, viewport: egui::Rect) {
-    if app.viewport_status_fixture.items.is_empty() {
+    let fixture = &mut app.viewport_status_fixture;
+    let folded = app.preferences.viewport_status_summary && fixture.items.len() >= 3;
+    fixture.presentation.reconcile_summary(ctx, if folded { fixture.items.iter().map(|item| item.id.clone()).collect() } else { Vec::new() });
+    if fixture.items.is_empty() {
+        fixture.presentation.open_key = None;
         return;
     }
     let content = crate::shell::content_rect(app, viewport);
@@ -60,28 +125,24 @@ pub(crate) fn show(app: &mut crate::SolveApp, ctx: &egui::Context, viewport: egu
         return;
     }
     let fixture = &mut app.viewport_status_fixture;
-    let actions = crate::ui_kit::viewport_status_row(ctx, free, &fixture.items, &mut fixture.presentation, |ui, _| {
-        let t = crate::theme::Tokens::get();
-        ui.label(crate::i18n::tr("cmd.inspect_draft"));
-        ui.label(egui::RichText::new(format!("{} (0.00, 0.00, 1.00)", crate::i18n::tr("ui.pull_direction"))).monospace().color(t.text_dim));
-        for (index, (colour, label)) in t.analysis.draft.into_iter().zip(["≥ 1.0°", "−1.0° … 1.0°", "≤ −1.0°"]).enumerate() {
-            ui.horizontal(|ui| {
-                let (rect, _) = ui.allocate_exact_size(egui::vec2(t.space_12, t.space_12), egui::Sense::hover());
-                ui.painter().rect_filled(rect, t.radius_sm, crate::theme::srgb(colour));
-                if index == 2 && t.analysis.hatch {
-                    let painter = ui.painter().with_clip_rect(rect);
-                    for offset in [-t.space_8, -t.space_4, 0.0, t.space_4, t.space_8] {
-                        let from = rect.left_bottom() + egui::vec2(offset, 0.0);
-                        painter.line_segment([from, from + egui::vec2(rect.height(), -rect.height())], ui.visuals().selection.stroke);
-                    }
-                }
-                ui.label(label);
-            });
-        }
-    });
+    let readout = fixture.details_readout;
+    let key_contents = |ui: &mut egui::Ui, id: &str| {
+        let description = specimen(id, readout);
+        crate::ui_kit::details(ui, id, &description, free.height() * 0.6, None);
+    };
+    // Deliberately use the oldest specimen as newest to exercise chronology/slot divergence.
+    // This is explicit specimen metadata, never an engine activation claim.
+    let newest = fixture.items.first().map(|item| item.id.as_str()).unwrap_or_default();
+    let actions = if folded {
+        crate::ui_kit::viewport_status_summary(ctx, free, &fixture.items, newest, &mut fixture.presentation, key_contents)
+    } else {
+        crate::ui_kit::viewport_status_row(ctx, free, &fixture.items, &mut fixture.presentation, key_contents)
+    };
     for action in actions {
-        if let StatusAction::Clear(id) = action {
-            fixture.items.retain(|item| item.id != id);
+        match action {
+            StatusAction::Clear(id) => fixture.items.retain(|item| item.id != id),
+            StatusAction::ClearAll => fixture.items.clear(),
+            StatusAction::Edit(_) => {}
         }
     }
 }

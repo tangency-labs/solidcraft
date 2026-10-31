@@ -6,9 +6,19 @@ use super::hdr;
 use crate::{SolveApp, ui_kit};
 
 pub(super) fn validate_progressive_image(app: &SolveApp) -> Result<(), String> {
-    if app.render_workspace.view.method == super::ImageMethod::CpuRaytrace {
-        let view = &app.render_workspace.view;
-        view.raytrace.budget.validate_image(view.draft.width, view.draft.height, view.raytrace.progressive).map_err(|error| error.to_string())?;
+    let view = &app.render_workspace.view;
+    if view.method == super::ImageMethod::GpuRaytrace {
+        return Ok(());
+    }
+    // A size refusal is shown translated, naming the profile that can render it (#8941). Both CPU
+    // methods stop here, before the English refusals of the render and document crates.
+    let (width, height) = (view.draft.width, view.draft.height);
+    let size = (u64::from(width), u64::from(height));
+    if width > 0 && height > 0 && image_limits(app).fit(size.0, size.1, None) != Some(size) {
+        return Err(super::inspector::size_limit_reason(app, width, height));
+    }
+    if view.method == super::ImageMethod::CpuRaytrace {
+        view.raytrace.budget.validate_image(width, height, view.raytrace.progressive).map_err(|error| error.to_string())?;
     }
     Ok(())
 }
@@ -26,6 +36,22 @@ pub(super) fn image_limits(app: &SolveApp) -> solidcraft_engine::render::RenderL
         limits.max_pixels = limits.max_pixels.min(options.budget.limits().max_camera_samples / u64::from(progressive.samples_per_pixel.max(1)));
     }
     limits
+}
+
+/// For a size a CPU method refuses, the smallest CPU ray tracing profile that can render it, to
+/// name in a hint. `None` for GPU path tracing, for sizes that fit, and past every profile. CPU
+/// raster has no profiles of its own, so its hint also names CPU ray tracing. Neither the method
+/// nor the profile is switched here: they and the resolution change only when chosen.
+pub(super) fn profile_for_size(app: &SolveApp, width: u64, height: u64) -> Option<CpuBudget> {
+    if app.render_workspace.view.method == super::ImageMethod::GpuRaytrace || image_limits(app).fit(width, height, None) == Some((width, height)) {
+        return None;
+    }
+    CpuBudget::smallest_admitting(u32::try_from(width).ok()?, u32::try_from(height).ok()?, app.render_workspace.view.raytrace.progressive)
+}
+
+/// The translated name of a profile, as the profile selector shows it.
+pub(super) fn budget_name(app: &SolveApp, budget: CpuBudget) -> &str {
+    app.tr(budget_key(budget))
 }
 
 fn budget_key(budget: CpuBudget) -> &'static str {

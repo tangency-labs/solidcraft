@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Tangent at a curve point</title>
+  <circle cx="32" cy="34.26" r="17" fill="none" stroke="#6f879c" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M8 17.26L56 17.26" fill="none" stroke="#236ead" stroke-width="4.25" stroke-linejoin="round" stroke-linecap="round"/>
+  <circle cx="32" cy="17.26" r="5.8" fill="#ffffff"/>
+  <circle cx="32" cy="17.26" r="3.4" fill="#236ead"/>
+</svg>

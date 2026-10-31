@@ -42,6 +42,19 @@ pub const MAX_COMPONENT_VARS: usize = 4_000;
 const TOL: f64 = 1e-9;
 /// A solution is accepted when every residual is below this (mm).
 const ACCEPT: f64 = 1e-6;
+/// A solve that only asks whether it succeeds ([`Analysis::StatusOnly`], the held solves of a
+/// drag) gives up on a component once LM has stalled far from a solution: over the last
+/// `STALL_ITERS` iterations the sum of squared residuals fell by at most `STALL_DECREASE` of
+/// itself, and the largest residual is still above `STALL_RESIDUAL` (mm). Such a run sits in a
+/// least-squares valley of constraints that conflict, crawling until `MAX_ITERS`, and a held
+/// solve runs LM up to three times (#6606). Measured on about 62,000 LM runs that succeeded
+/// (the sketch and engine tests and 120 generated sketch scripts with 2,900 drags), the slowest
+/// still fell by 1.4e-3 of itself over any 20 iterations while it was that far off: some cross
+/// a plateau for dozens of iterations and then converge, so the threshold stays a hundred times
+/// below that. Other solves keep iterating: their report names what a failure leaves violated.
+const STALL_ITERS: usize = 20;
+const STALL_DECREASE: f64 = 1e-5;
+const STALL_RESIDUAL: f64 = 1e-4;
 /// How much less it costs a solve to move a point held on a curve than any other point: such a
 /// point is placed relative to the curve, so it follows the curve rather than the curve it.
 const SLIDE_WEIGHT: f64 = 0.01;
@@ -183,7 +196,9 @@ fn layout(sk: &Sketch, hold: &Hold) -> Layout {
         .iter()
         .enumerate()
         .map(|(i, c)| match c.kind {
-            CurveKind::Circle { .. } | CurveKind::Ellipse { .. } if c.link.is_none() && !c.fixed && !hold.radii.contains(&i) => {
+            CurveKind::Circle { .. } | CurveKind::Ellipse { .. }
+                if c.link.is_none() && !c.fixed && !hold.radii.contains(&i) && !sk.offset_circle_follows_source(i) =>
+            {
                 n += 1;
                 Some(n - 1)
             }
@@ -1110,13 +1125,11 @@ fn norm2(v: &[f64]) -> f64 {
 }
 
 /// Levenberg–Marquardt on one component (variables `vars`, blocks `blocks`). Returns the
-/// iterations and the largest residual left.
-fn lm(sk: &Sketch, lay: &Layout, blocks: &[(Block, Vec<usize>)], vars: &[usize], x: &mut Vec<f64>, col: &[usize]) -> (usize, f64) {
-    lm_capped(sk, lay, blocks, vars, x, col, MAX_ITERS)
-}
-
-/// [`lm`], counting its work against a live drag frame's numerical allowance when `budget` has
-/// one ([`Budget::frame`]). The solve itself runs as it would without it.
+/// iterations and the largest residual left. Its work counts against a live drag frame's
+/// numerical allowance when `budget` has one ([`Budget::frame`]); the solve itself runs as it
+/// would without it. `give_up`: stop once
+/// stalled (see [`STALL_ITERS`]); not in a live frame, whose allowance is measured in the work
+/// the full iteration does.
 fn lm_in(
     sk: &Sketch,
     lay: &Layout,
@@ -1125,9 +1138,10 @@ fn lm_in(
     x: &mut Vec<f64>,
     col: &[usize],
     budget: &mut Budget,
+    give_up: bool,
 ) -> (usize, f64) {
     if !budget.counts_numeric() {
-        return lm(sk, lay, blocks, vars, x, col);
+        return lm_run(sk, lay, blocks, vars, x, col, MAX_ITERS, None, give_up).unwrap_or((0, f64::INFINITY));
     }
     let mut meter = Budget::new(usize::MAX);
     let out = lm_capped_with_budget(sk, lay, blocks, vars, x, col, MAX_ITERS, Some(&mut meter)).unwrap_or((0, f64::INFINITY));
@@ -1159,7 +1173,22 @@ fn lm_capped_with_budget(
     x: &mut Vec<f64>,
     col: &[usize],
     max_iters: usize,
+    budget: Option<&mut Budget>,
+) -> Option<(usize, f64)> {
+    lm_run(sk, lay, blocks, vars, x, col, max_iters, budget, false)
+}
+
+/// [`lm_capped_with_budget`], giving up once stalled when `give_up` (see [`STALL_ITERS`]).
+fn lm_run(
+    sk: &Sketch,
+    lay: &Layout,
+    blocks: &[(Block, Vec<usize>)],
+    vars: &[usize],
+    x: &mut Vec<f64>,
+    col: &[usize],
+    max_iters: usize,
     mut budget: Option<&mut Budget>,
+    give_up: bool,
 ) -> Option<(usize, f64)> {
     #[cfg(feature = "solver-profiling")]
     let _timer = profiling::timer(Phase::Lm);
@@ -1175,11 +1204,24 @@ fn lm_capped_with_budget(
     let mut f = norm2(&r);
     #[cfg(feature = "solver-profiling")]
     let run = profiling::start_run(n, r.len(), max_iters, f);
+    // The sum of squares at the start of each iteration, while giving up is allowed.
+    let mut costs = Vec::new();
     for it in 0..max_iters {
         if max_abs(&r) < TOL {
             #[cfg(feature = "solver-profiling")]
             profiling::finish_run(run, StopReason::ResidualTolerance, max_abs(&r));
             return Some((it, max_abs(&r)));
+        }
+        if give_up {
+            if let Some(&earlier) = it.checked_sub(STALL_ITERS).and_then(|k| costs.get(k))
+                && max_abs(&r) > STALL_RESIDUAL
+                && earlier - f <= STALL_DECREASE * earlier
+            {
+                #[cfg(feature = "solver-profiling")]
+                profiling::finish_run(run, StopReason::Stalled, max_abs(&r));
+                return Some((it, max_abs(&r)));
+            }
+            costs.push(f);
         }
         let normal_work =
             n.saturating_mul(n).saturating_mul(r.len()).saturating_add(evaluation_work.saturating_mul(n.saturating_mul(2).saturating_add(1)));
@@ -2726,6 +2768,10 @@ fn solve_inner(
     }
     // Column of each variable in the system being solved or analysed (usize::MAX outside it).
     let mut col = vec![usize::MAX; lay.n];
+    // Only success matters to a status-only solve: a component LM cannot solve is left as soon
+    // as the iteration stalls (see `STALL_ITERS`). It fails either way, and a failed solve
+    // leaves the geometry as it was.
+    let give_up = analysis == Analysis::StatusOnly;
 
     let mut iterations = 0;
     let mut continuations = 0;
@@ -2761,7 +2807,7 @@ fn solve_inner(
                     let rest = unpinned(vars, &pin, None);
                     let rest_blocks = blocks_reading(&sub, &rest);
                     columns(&mut col, &rest, vars);
-                    let (its, r) = if rest.is_empty() { (0, 0.0) } else { lm_in(sk, &lay, &rest_blocks, &rest, &mut x, &col, budget) };
+                    let (its, r) = if rest.is_empty() { (0, 0.0) } else { lm_in(sk, &lay, &rest_blocks, &rest, &mut x, &col, budget, give_up) };
                     iterations += its;
                     residual = r;
                     solved = residual < ACCEPT;
@@ -2785,7 +2831,7 @@ fn solve_inner(
             // the seed did not move it.
             let reseeded = unseeded.as_ref().filter(|plain| vars.iter().any(|v| plain.get(*v).is_some_and(Option::is_some)));
             if !(solved || pinned_failed && reseeded.is_some()) {
-                let (its, r) = lm_in(sk, &lay, &sub, vars, &mut x, &col, budget);
+                let (its, r) = lm_in(sk, &lay, &sub, vars, &mut x, &col, budget, give_up);
                 iterations += its;
                 residual = r;
             }
@@ -2799,7 +2845,7 @@ fn solve_inner(
                         *s = plain.get(v).copied().flatten().unwrap_or(*s0);
                     }
                 }
-                let (its, r) = lm_in(sk, &lay, &sub, vars, &mut x, &col, budget);
+                let (its, r) = lm_in(sk, &lay, &sub, vars, &mut x, &col, budget, give_up);
                 iterations += its;
                 residual = r;
             }
@@ -2830,7 +2876,7 @@ fn solve_inner(
                 iterations += its;
                 if !done {
                     // The last sub-step's solution, solved for the new values in one jump.
-                    let (its, r) = lm_in(sk, &lay, &sub, vars, &mut from, &col, budget);
+                    let (its, r) = lm_in(sk, &lay, &sub, vars, &mut from, &col, budget, false);
                     iterations += its;
                     done = edit.holds(r, &State { sk, lay: &lay, x: &from });
                 }

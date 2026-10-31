@@ -64,6 +64,7 @@ static GERMAN: Catalog = Catalog::new("de", "Deutsch", include_str!(concat!(env!
 /// English in UK spelling: only the messages whose spelling differs; the rest are English's.
 static ENGLISH_UK: Catalog = Catalog::new("en-GB", "English (UK)", include_str!(concat!(env!("OUT_DIR"), "/locales/en-GB.json")));
 static SPANISH: Catalog = Catalog::new("es", "Español (España)", include_str!(concat!(env!("OUT_DIR"), "/locales/es.json")));
+static FINNISH: Catalog = Catalog::new("fi", "Suomi", include_str!(concat!(env!("OUT_DIR"), "/locales/fi.json")));
 static FRENCH: Catalog = Catalog::new("fr", "Français", include_str!(concat!(env!("OUT_DIR"), "/locales/fr.json")));
 static GALICIAN: Catalog = Catalog::new("gl", "Galego", include_str!(concat!(env!("OUT_DIR"), "/locales/gl.json")));
 static HEBREW: Catalog = Catalog::new("he", "עברית", include_str!(concat!(env!("OUT_DIR"), "/locales/he.json")));
@@ -99,6 +100,7 @@ pub const LOCALES: &[&Catalog] = &[
     &GERMAN,
     &ENGLISH_UK,
     &SPANISH,
+    &FINNISH,
     &FRENCH,
     &GALICIAN,
     &HEBREW,
@@ -128,12 +130,50 @@ pub fn is_supported(id: &str) -> bool {
     LOCALES.iter().any(|catalog| catalog.id == id)
 }
 
+/// The `language` preference value that follows the system (#10138). Not a catalog id: it
+/// resolves through [`system_language`] wherever a catalog is needed.
+pub const SYSTEM: &str = "system";
+
+/// Match the system's preferred locale tags against the catalogs: the exact tag first
+/// (`zh-TW`, `pt-BR`, `en-GB`), then the tag's base language (`zh-CN` → `zh`, `de-AT` → `de`),
+/// then English. Tags come in the system's order of preference; the first one that matches wins.
+pub fn match_system_tags(tags: &[String]) -> &'static str {
+    for tag in tags {
+        let tag = tag.replace('_', "-");
+        if let Some(catalog) = LOCALES.iter().find(|catalog| catalog.id.eq_ignore_ascii_case(&tag)) {
+            return catalog.id;
+        }
+        let base = tag.split('-').next().unwrap_or(&tag);
+        if let Some(catalog) = LOCALES.iter().find(|catalog| catalog.id.eq_ignore_ascii_case(base)) {
+            return catalog.id;
+        }
+    }
+    ENGLISH.id
+}
+
+/// The catalog id the system asks for, read once per process: the OS locale on desktop
+/// (Windows, macOS, Linux/BSD) and `navigator.languages` in the browser.
+pub fn system_language() -> &'static str {
+    static CACHED: OnceLock<&'static str> = OnceLock::new();
+    CACHED.get_or_init(|| match_system_tags(&sys_locale::get_locales().collect::<Vec<_>>()))
+}
+
+/// The catalog id a `language` preference resolves to: the saved choice, or the system's for
+/// [`SYSTEM`]. For callers that need the id as text (font fallbacks), not a [`Locale`].
+pub fn effective_language(preference: &str) -> &'static str {
+    Locale::for_language(preference).0.id
+}
+
 /// Immutable locale reference. Catalogs parse once; lookups are logarithmic.
 #[derive(Clone, Copy)]
 pub struct Locale(&'static Catalog);
 
 impl Locale {
     pub fn for_language(id: &str) -> Self {
+        if id == SYSTEM {
+            let system = system_language();
+            return Self(LOCALES.iter().copied().find(|catalog| catalog.id == system).unwrap_or(&ENGLISH));
+        }
         Self(LOCALES.iter().copied().find(|catalog| catalog.id == id).unwrap_or(&ENGLISH))
     }
 
@@ -275,6 +315,26 @@ thread_local! {
     // Helpers without an app reference share a render scope. Nested renders restore
     // their caller's locale; no owned language strings or persistent global setting.
     static CURRENT: Cell<Locale> = const { Cell::new(Locale(&ENGLISH)) };
+    /// Theme-authored language maps are already resolved and are not catalog source labels.
+    static RESOLVED_LABELS: Cell<bool> = const { Cell::new(false) };
+}
+
+#[must_use]
+pub(crate) struct ResolvedLabels {
+    previous: bool,
+    _thread: std::marker::PhantomData<std::rc::Rc<()>>,
+}
+
+/// Shared controls can render supplied translations verbatim while retaining catalog messages.
+pub(crate) fn resolved_labels() -> ResolvedLabels {
+    let previous = RESOLVED_LABELS.with(|labels| labels.replace(true));
+    ResolvedLabels { previous, _thread: std::marker::PhantomData }
+}
+
+impl Drop for ResolvedLabels {
+    fn drop(&mut self) {
+        RESOLVED_LABELS.with(|labels| labels.set(self.previous));
+    }
 }
 
 #[must_use]
@@ -304,7 +364,7 @@ pub fn tr(id: &str) -> &str {
     CURRENT.with(|current| current.get().text(id))
 }
 pub fn tr_label(label: &str) -> &str {
-    CURRENT.with(|current| current.get().label(label))
+    if RESOLVED_LABELS.with(Cell::get) { label } else { CURRENT.with(|current| current.get().label(label)) }
 }
 
 /// Every English catalog entry `(id, text)`, for Preferences search to match a translation
@@ -329,6 +389,59 @@ pub fn tr_diagnostic(text: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    /// The system's locale tags pick a catalog: exact tag, then base language, then English (#10138).
+    #[test]
+    fn system_tags_match_the_catalog_exact_then_base_then_english() {
+        let tags = |list: &[&str]| list.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        assert_eq!(super::match_system_tags(&tags(&["zh-TW"])), "zh-TW", "exact tag");
+        assert_eq!(super::match_system_tags(&tags(&["pt-BR"])), "pt-BR");
+        assert_eq!(super::match_system_tags(&tags(&["en-GB"])), "en-GB");
+        assert_eq!(super::match_system_tags(&tags(&["zh-CN"])), "zh", "base language of zh-CN");
+        assert_eq!(super::match_system_tags(&tags(&["de-AT"])), "de");
+        assert_eq!(super::match_system_tags(&tags(&["zh_CN"])), "zh", "underscores normalize");
+        assert_eq!(super::match_system_tags(&tags(&["FR"])), "fr", "case-insensitive");
+        assert_eq!(super::match_system_tags(&tags(&["nl"])), "nl", "bare base tag");
+        assert_eq!(super::match_system_tags(&tags(&["pt-PT"])), "en", "pt has no catalog: English");
+        assert_eq!(super::match_system_tags(&tags(&["xx-YY"])), "en", "unknown: English");
+        assert_eq!(super::match_system_tags(&tags(&[])), "en", "nothing: English");
+        assert_eq!(super::match_system_tags(&tags(&["xx-YY", "de-DE"])), "de", "the first tag that matches wins");
+    }
+
+    /// A saved language is never overridden: only `system` resolves through the OS (#10138).
+    #[test]
+    fn a_saved_language_choice_is_never_overridden() {
+        assert_eq!(super::Locale::for_language("de").name(), "Deutsch");
+        assert_eq!(super::Locale::for_language("zh-TW").name(), "繁體中文");
+        assert_eq!(super::effective_language("de"), "de");
+        assert_eq!(super::effective_language("ja"), "ja");
+        // A first start has no saved language: the default follows the system.
+        assert_eq!(crate::prefs::Prefs::default().language, super::SYSTEM);
+        // A saved choice in the settings file wins over the default.
+        let saved: crate::prefs::Prefs = serde_json::from_str(r#"{"language":"ja"}"#).unwrap();
+        assert_eq!(saved.language, "ja");
+        // `system` is a preference value, not a catalog: it never enters the language list.
+        assert!(!super::is_supported(super::SYSTEM));
+        assert!(super::is_supported(super::effective_language(super::SYSTEM)), "system resolves to a catalog");
+    }
+
+    #[test]
+    fn theme_options_resolved_labels_are_verbatim_and_restore_catalog_adapters() {
+        let _language = super::scope("de");
+        assert_eq!(super::tr_label("Profile"), "Profil");
+        {
+            let _labels = super::resolved_labels();
+            assert_eq!(super::tr_label("Profile"), "Profile");
+            assert_eq!(super::tr_label("ui.cancel"), "ui.cancel");
+            assert_ne!(super::tr("ui.cancel"), "ui.cancel", "stable catalog messages remain translated");
+            {
+                let _nested = super::resolved_labels();
+                assert_eq!(super::tr_label("Profile"), "Profile");
+            }
+            assert_eq!(super::tr_label("Profile"), "Profile");
+        }
+        assert_eq!(super::tr_label("Profile"), "Profil");
+    }
+
     use super::*;
 
     /// Strings a pull request adds under `assets/locales/pending/` work before they are folded
@@ -344,6 +457,18 @@ mod tests {
                     // pending files hold it in reading order, as the catalogs do (#7527).
                     assert_eq!(Locale::for_language(&locale).text(&id), crate::bidi::visual_template(&text), "{locale}: {id}");
                 }
+            }
+        }
+    }
+
+    #[test]
+    fn construction_operation_names_exist_in_every_supported_catalog() {
+        let family = crate::sketch_families::family("sketch.construction_line").unwrap();
+        for catalog in LOCALES {
+            assert!(catalog.messages().get("ui.construction.ribbon_label").is_some_and(|v| !v.trim().is_empty()), "{}: ribbon label", catalog.id);
+            for id in family.commands {
+                let key = format!("cmd.{id}");
+                assert!(catalog.messages().get(&key).is_some_and(|v| !v.trim().is_empty()), "{}: {key}", catalog.id);
             }
         }
     }
@@ -1140,6 +1265,18 @@ mod tests {
         assert_eq!(gl.format("dialog.selected_count", &[("count", "2")]), "↖ 2 seleccionados");
         assert_eq!(gl.label("Fillet"), "Arredondamento");
         assert_eq!(gl.label("NonExistentKey"), "NonExistentKey");
+    }
+
+    #[test]
+    fn finnish_catalog_is_registered_and_translates_keys() {
+        let fi = Locale::for_language("fi");
+        assert_eq!(fi.name(), "Suomi");
+        assert!(is_supported("fi"));
+        assert_eq!(fi.text("ui.preferences"), "Asetukset");
+        assert_eq!(fi.format("document.save_changes", &[("name", "My {design}")]), "Tallennetaanko muutokset tiedostoon My {design}?");
+        assert_eq!(fi.format("dialog.selected_count", &[("count", "2")]), "↖ 2 valittu");
+        assert_eq!(fi.label("Fillet"), "Pyöristys");
+        assert_eq!(fi.label("NonExistentKey"), "NonExistentKey");
     }
 
     #[test]

@@ -24,9 +24,9 @@ const MAX_BAD_LINES: usize = 8;
 const EVENT_GAP: Duration = Duration::from_millis(100);
 
 static OPEN: AtomicUsize = AtomicUsize::new(0);
-/// The token files this launch wrote (its control port, the agent chat's endpoint), removed
-/// when the app ends.
-static TOKEN_FILES: std::sync::Mutex<Vec<std::path::PathBuf>> = std::sync::Mutex::new(Vec::new());
+/// The token files this launch wrote (its control port, the agent chat's endpoint) and the
+/// token in each, removed when the app ends unless another launch has written the file since.
+static TOKEN_FILES: std::sync::Mutex<Vec<(std::path::PathBuf, String)>> = std::sync::Mutex::new(Vec::new());
 
 /// A new random token: 32 bytes from the operating system, as hex.
 fn new_token() -> Option<String> {
@@ -35,20 +35,21 @@ fn new_token() -> Option<String> {
     Some(bytes.iter().map(|b| format!("{b:02x}")).collect())
 }
 
-/// Remove this launch's token file (at exit).
+/// Remove this launch's token files and discovery file (at exit), leaving any that another
+/// launch has written since (#8794).
 pub fn remove_token_file() {
     if let Ok(files) = TOKEN_FILES.lock() {
-        for p in files.iter() {
-            control_auth::remove_token_file(p);
+        for (path, token) in files.iter() {
+            control_auth::remove_token_file(path, token);
         }
     }
-    if let Some(port) = APP_PORT.lock().ok().and_then(|p| *p) {
-        control_auth::remove_current_port(port);
+    if let Some((port, token)) = APP_PORT.lock().ok().and_then(|p| p.clone()) {
+        control_auth::remove_current_port(port, &token);
     }
 }
 
-/// The port the app's own channel listens on, for removing the discovery file at exit.
-static APP_PORT: std::sync::Mutex<Option<u16>> = std::sync::Mutex::new(None);
+/// The port the app's own channel listens on and its token, for removing the discovery file at exit.
+static APP_PORT: std::sync::Mutex<Option<(u16, String)>> = std::sync::Mutex::new(None);
 
 pub fn start(listen_on: control_auth::Listen, ctx: egui::Context) -> Receiver<ControlRequest> {
     let (tx, rx) = channel::<ControlRequest>();
@@ -61,7 +62,7 @@ pub fn start(listen_on: control_auth::Listen, ctx: egui::Context) -> Receiver<Co
             };
             match listener {
                 Ok(l) => {
-                    if let Some(port) = listen_on_listener(l, token, tx, ctx, false) {
+                    if let Some(port) = listen_on_listener(l, token.clone(), tx, ctx, false) {
                         if matches!(listen_on, control_auth::Listen::Default) {
                             eprintln!("solidcraft: control channel on the default port 127.0.0.1:{port} (Preferences > Assistant turns it off)");
                         }
@@ -69,7 +70,7 @@ pub fn start(listen_on: control_auth::Listen, ctx: egui::Context) -> Receiver<Co
                         match control_auth::write_current_port(port) {
                             Ok(_) => {
                                 if let Ok(mut p) = APP_PORT.lock() {
-                                    *p = Some(port);
+                                    *p = Some((port, token));
                                 }
                             }
                             Err(e) => eprintln!("solidcraft: could not write the control discovery file ({e})"),
@@ -112,7 +113,7 @@ fn listen_on_listener(listener: TcpListener, token: String, tx: Sender<ControlRe
             Ok(()) => {
                 eprintln!("solidcraft: control server listening on 127.0.0.1:{port} (token in {})", path.display());
                 if let Ok(mut files) = TOKEN_FILES.lock() {
-                    files.push(path);
+                    files.push((path, token.clone()));
                 }
             }
             Err(e) => eprintln!(
@@ -412,11 +413,37 @@ impl Lines {
     }
 }
 
+/// A subscribed connection's seat on the watch: it leaves exactly once, whichever thread sees
+/// the connection's end first — the connection's own thread at the end of the stream, or the
+/// events thread at the first write a closed client refuses. The seat used to wait for the
+/// events thread alone, and that thread only leaves its wait when the design moves, so the
+/// count could outlive the connection by a second or more (#8315).
+struct Seat(Mutex<Option<Subscriber>>);
+
+impl Seat {
+    fn new(counted: Subscriber) -> Self {
+        Seat(Mutex::new(Some(counted)))
+    }
+
+    /// Leave the watch now: the seat goes once, whoever gets here first.
+    fn release(&self) {
+        let counted = self.0.lock().unwrap_or_else(PoisonError::into_inner).take();
+        drop(counted);
+    }
+}
+
+impl Drop for Seat {
+    fn drop(&mut self) {
+        self.release();
+    }
+}
+
 /// A connection's `control.subscribe` (#6985): its `design.changed` lines, sent from a thread of
 /// their own until the connection ends.
 struct Subscription {
     lines: Arc<Lines>,
     stop: Arc<AtomicBool>,
+    seat: Arc<Seat>,
 }
 
 impl Subscription {
@@ -432,15 +459,17 @@ impl Subscription {
     ) -> Option<(Self, std::io::Result<()>)> {
         let lines = Arc::new(Lines { socket: out.try_clone().ok()?, turn: Mutex::new(()) });
         let stop = Arc::new(AtomicBool::new(false));
+        let seat = Arc::new(Seat::new(counted));
         let first = lines.turn.lock().unwrap_or_else(PoisonError::into_inner);
-        let (l, s) = (lines.clone(), stop.clone());
+        let (l, s, watch_seat) = (lines.clone(), stop.clone(), Arc::clone(&seat));
         // The connection's seat on the watch rides the events thread: it leaves when the thread
         // does, so the next failed write to a closed client retires it even while the connection's
-        // own thread is slow to see the end of the stream (#7226).
-        std::thread::Builder::new().stack_size(64 * 1024).spawn(move || send_events(design, &l, &s, seen, counted)).ok()?;
+        // own thread is slow to see the end of the stream (#7226). The connection's own thread
+        // leaves it too, so a closed connection stops counting at once (#8315).
+        std::thread::Builder::new().stack_size(64 * 1024).spawn(move || send_events(design, &l, &s, seen, watch_seat)).ok()?;
         let sent = send(&mut &lines.socket, reply);
         drop(first);
-        Some((Subscription { lines, stop }, sent))
+        Some((Subscription { lines, stop, seat }, sent))
     }
 }
 
@@ -453,6 +482,9 @@ fn design_of(reply: &Value) -> Option<(String, u64)> {
 impl Drop for Subscription {
     fn drop(&mut self) {
         self.stop.store(true, Ordering::Relaxed);
+        // The seat on the watch goes now: the connection is over, and nothing counts it any more
+        // (#8315).
+        self.seat.release();
         // The socket closes now, not when the thread next looks; a line blocked on a client that
         // stopped reading ends too.
         let _ = self.lines.socket.shutdown(std::net::Shutdown::Both);
@@ -460,10 +492,10 @@ impl Drop for Subscription {
 }
 
 /// The `design.changed` lines of a subscribed connection, each time the design differs from the
-/// last one it was told of (`seen`), until `stop`. Owns the connection's seat on the watch
-/// (`counted`), so the seat leaves exactly when this thread does: on `stop`, or on the first
-/// write a closed client refuses (#7226).
-fn send_events(design: &DesignWatch, lines: &Lines, stop: &AtomicBool, mut seen: (String, u64), _counted: Subscriber) {
+/// last one it was told of (`seen`), until `stop`. Holds the connection's seat on the watch
+/// (`seat`), which it leaves when the thread ends: on `stop`, or on the first write a closed
+/// client refuses (#7226).
+fn send_events(design: &DesignWatch, lines: &Lines, stop: &AtomicBool, mut seen: (String, u64), seat: Arc<Seat>) {
     while !stop.load(Ordering::Relaxed) {
         let Some(now) = design.wait(&seen, stop, Duration::from_secs(1)).filter(|now| *now != seen) else { continue };
         if lines.send(&json!({"event": "design.changed", "params": {"document_id": now.0, "revision": now.1}})).is_err() {
@@ -472,6 +504,17 @@ fn send_events(design: &DesignWatch, lines: &Lines, stop: &AtomicBool, mut seen:
         seen = now;
         std::thread::sleep(EVENT_GAP);
     }
+    // The client is gone: it is not counted on the watch any more, whatever the connection's own
+    // thread still has to notice (#8315).
+    seat.release();
+}
+
+/// What this app's control channel does beyond the methods every version has, for a client to
+/// find out before it relies on it (an older app answers `control.capabilities` with "unknown
+/// method"). `param_check`: the levels `engine.execute`, `engine.batch` and `engine.script` take
+/// as a request's own parameter check (#9184).
+fn capabilities() -> Value {
+    json!({"param_check": solidcraft_engine::schema::ParamCheck::ALL.map(|l| l.name())})
 }
 
 /// Write `reply` on the connection: through its subscription once it has one.
@@ -534,15 +577,20 @@ fn serve_with(
                 let id = msg.get("id").cloned().unwrap_or(Value::Null);
                 let method = msg.get("method").and_then(Value::as_str).unwrap_or("").to_string();
                 let params = msg.get("params").cloned().unwrap_or(json!({}));
-                // A request that timed out may have finished since (#1618). `control.running` only
-                // looks, so it leaves that reply where it is.
-                let late = pending.as_ref().filter(|_| method != "control.running").and_then(|p| match p.reply.try_recv() {
+                // A request that timed out may have finished since (#1618). `control.running` and
+                // `control.capabilities` only look, so they leave that reply where it is.
+                let late = pending.as_ref().filter(|_| !matches!(method.as_str(), "control.running" | "control.capabilities")).and_then(|p| match p
+                    .reply
+                    .try_recv()
+                {
                     Ok(reply) => Some(reply),
                     Err(TryRecvError::Disconnected) => Some(json!({"ok": false, "error": "the app ended the request without a reply"})),
                     Err(TryRecvError::Empty) => None,
                 });
                 let mut r = if method == "control.running" {
                     json!({"ok": true, "result": running.result(connection)})
+                } else if method == "control.capabilities" {
+                    json!({"ok": true, "result": capabilities()})
                 } else if method == "control.pending" {
                     match (pending.take(), late) {
                         (None, _) => json!({"ok": true, "result": {"pending": null}}),
@@ -749,6 +797,9 @@ mod tests {
         let mut watcher = open();
         let (r, rows) = running(&mut watcher, &|_| true);
         assert!(r["ok"] == true && rows.is_empty(), "idle: {r}");
+        // What the app's control channel does beyond the methods every version has (#9184).
+        let r = watcher(json!({"id": 0, "method": "control.capabilities", "token": token}));
+        assert_eq!((&r["ok"], &r["result"]["param_check"]), (&json!(true), &json!(["off", "warn", "strict"])), "{r}");
 
         let mut export = open();
         let path = "/private/part.step";
@@ -780,6 +831,9 @@ mod tests {
         let own: Vec<&Value> = r["result"]["running"].as_array().unwrap().iter().filter(|row| row["self"] == true).collect();
         assert_eq!(own.len(), 1, "{r}");
         assert_eq!(own[0]["command"], "file.export", "{r}");
+        // So may it ask what the app can do: answered at once, not refused as busy.
+        let r = export(json!({"id": 8, "method": "control.capabilities"}));
+        assert_eq!(r["result"]["param_check"], json!(["off", "warn", "strict"]), "{r}");
 
         gate_tx.send(()).unwrap();
         assert_eq!(queued.join().unwrap()["result"], "engine.batch");
@@ -883,6 +937,58 @@ mod tests {
             std::thread::sleep(Duration::from_millis(20));
         }
         assert!(!WATCH.subscribed());
+    }
+
+    /// #8315: a closed connection leaves the watch at once. The seat of a subscribed connection
+    /// goes when the connection's own thread sees the end of the stream, not only when the
+    /// events thread notices: that thread waits for the design to move, so a connection that
+    /// closed while the design stood still kept the watch counting it for a second or more.
+    #[test]
+    fn a_closed_connection_leaves_the_watch_at_once() {
+        static RUNNING: Running = Running::new();
+        static WATCH: DesignWatch = DesignWatch::new();
+        let token = "0123456789abcdef0123456789abcdef";
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let (tx, rx) = channel::<ControlRequest>();
+        // The window names the design once and then leaves it alone: nothing moves it, so the
+        // events thread has nothing to write and only the end of the connection can retire it.
+        std::thread::spawn(move || {
+            for req in rx {
+                if req.method == "control.subscribe" {
+                    WATCH.publish("d-1", 3);
+                    let _ = req.reply.send(json!({"ok": true, "result": {"document_id": "d-1", "revision": 3}}));
+                } else {
+                    let _ = req.reply.send(json!({"ok": true, "result": req.method}));
+                }
+            }
+        });
+        std::thread::spawn(move || {
+            for stream in listener.incoming().flatten() {
+                let tx = tx.clone();
+                std::thread::spawn(move || serve_with(stream, token, tx, egui::Context::default(), false, WAITS, &RUNNING, &WATCH));
+            }
+        });
+        let s = TcpStream::connect(addr).unwrap();
+        s.set_read_timeout(Some(Duration::from_secs(10))).unwrap();
+        let mut out = s.try_clone().unwrap();
+        let mut lines = BufReader::new(s);
+        writeln!(out, "{}", json!({"id": 1, "method": "control.subscribe", "token": token})).unwrap();
+        let mut l = String::new();
+        lines.read_line(&mut l).unwrap();
+        let reply: Value = serde_json::from_str(&l).unwrap();
+        assert!(reply["ok"] == true, "{reply}");
+        assert!(WATCH.subscribed(), "the connection is subscribed");
+        // Let the events thread settle into its wait: the design stands still, so it has nothing
+        // to write, and only the end of the connection can retire it.
+        std::thread::sleep(Duration::from_millis(200));
+        // The client goes away without asking anything else.
+        drop((out, lines));
+        let deadline = Instant::now() + Duration::from_millis(400);
+        while WATCH.subscribed() && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert!(!WATCH.subscribed(), "a closed connection is not counted on the watch");
     }
 
     /// A timed-out request that only reads is not said to "still apply", nor is one that only

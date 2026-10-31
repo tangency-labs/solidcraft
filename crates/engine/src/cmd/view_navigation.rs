@@ -32,8 +32,17 @@ struct RenderBrowserControls {
 }
 
 const RENDER_SELECT: TypedContract<RenderSelect> = TypedContract::new();
+const STATUS_ITEMS_CONTRACT: TypedContract<crate::schema::view_navigation::StatusItemsParams> = TypedContract::new();
 
 pub static COMMANDS: &[CommandSpec] = &[
+CommandSpec::new("view.status_details", "Viewport Status Details", crate::checked!("view.status_details", status_details))
+    .icon("list").noundo().doc_only()
+    .contract(&STATUS_ITEMS_CONTRACT).output(output_schema_for::<crate::status_details::StatusDetails>)
+    .params("no parameters → current effect settings/detail capabilities and retained per-seam Continuity diagnostics, with current geometry validity; read-only, no evaluation"),
+CommandSpec::new("view.status_items", "Viewport Status Items", crate::checked!("view.status_items", status_items))
+    .icon("list").noundo().doc_only()
+    .contract(&STATUS_ITEMS_CONTRACT).output(output_schema_for::<crate::status_items::StatusItems>)
+    .params("no parameters → {items}; persistent viewport effects, oldest slot first, with structured settings and executable clear requests; read-only, no model evaluation"),
 CommandSpec::new("view.fit", "Fit", fit)
     .icon("fit").key("F6").noundo().doc_only().params("no parameters → frame the active canvas or selection; display only"),
 CommandSpec::new("view.home", "Home view", home)
@@ -97,7 +106,7 @@ CommandSpec::new("view.navigate", "Navigate View", navigate)
     .icon("orbit")
     .noundo()
     .doc_only()
-    .params("camera: Camera; direction?: [x,y,z] in the camera's up-axis frame; or action: left|right|up|down|clockwise|counterclockwise|home|fit, degrees?: 0..180 (how far left|right|up|down turn; default 90); or motion: pan|orbit|zoom, delta?: [dx,dy] (pixels, each ±10000), free_orbit?: bool (orbit through poles, default false), viewport?: [width,height] (1..1000000, required for pan or pivot), pivot?: [x,y,z], factor?: 0.05..20 (required for zoom), anchor?: [x,y,z] → camera, fit, continuous?"),
+    .params("camera: Camera; direction?: [x,y,z] in the camera's up-axis frame; or action: left|right|up|down|clockwise|counterclockwise|home|fit, degrees?: 0..180 (how far left|right|up|down turn; default 90), fit?: bool (frame the whole model from the new direction as well, as home does; default false); or motion: pan|orbit|zoom, delta?: [dx,dy] (pixels, each ±10000), free_orbit?: bool (orbit through poles, default false), viewport?: [width,height] (1..1000000, required for pan or pivot), pivot?: [x,y,z], factor?: 0.05..20 (required for zoom), anchor?: [x,y,z] → camera, fit, continuous?"),
 CommandSpec::new("view.normal_to", "Normal to Selection", normal_to)
         .icon("camera")
         .noundo()
@@ -179,6 +188,23 @@ fn normal_target(s: &Session) -> Option<(solidcraft_geom::Vec3, solidcraft_geom:
         Sel::Plane { name } => solidcraft_geom::Plane::named(name).map(|plane| (plane.origin, plane.normal())),
         _ => None,
     })
+}
+
+fn status_details(s: &mut Session, p: &Value) -> Result<Value> {
+    let p = if p.is_null() { json!({}) } else { p.clone() };
+    if !p.as_object().is_some_and(|object| object.is_empty()) {
+        return Err(bad("view.status_details", "parameters must be an empty object"));
+    }
+    let _: crate::schema::view_navigation::StatusItemsParams = serde_json::from_value(p).map_err(|e| bad("view.status_details", e.to_string()))?;
+    let items =
+        s.status_items().into_iter().map(|source| crate::status_details::StatusDetailItem { has_details: source.has_details(), source }).collect();
+    serde_json::to_value(crate::status_details::StatusDetails {
+        document_id: s.document_id.clone(),
+        items,
+        continuity: s.continuity_details(),
+        param_warnings: Vec::new(),
+    })
+    .map_err(|e| bad("view.status_details", e.to_string()))
 }
 
 fn normal_to(s: &mut Session, p: &Value) -> Result<Value> {
@@ -268,6 +294,15 @@ fn ground_shadow(_s: &mut Session, p: &Value) -> Result<Value> {
 }
 fn navigation_bar(_s: &mut Session, p: &Value) -> Result<Value> {
     view_toggle(p, "view.navigation_bar", "visible")
+}
+
+fn status_items(s: &mut Session, p: &Value) -> Result<Value> {
+    if !p.is_object() {
+        return Err(bad("view.status_items", "parameters must be an empty object"));
+    }
+    let _: crate::schema::view_navigation::StatusItemsParams =
+        serde_json::from_value(p.clone()).map_err(|e| bad("view.status_items", e.to_string()))?;
+    Ok(json!(crate::status_items::StatusItems { items: s.status_items() }))
 }
 
 fn render_focus(_s: &mut Session, p: &Value) -> Result<Value> {
@@ -401,10 +436,19 @@ fn navigate(_s: &mut Session, p: &Value) -> Result<Value> {
     {
         return Err(bad(cmd, "invalid camera"));
     }
+    // A turn may ask the window to frame the whole model from the new direction, as `home` does
+    // (the navigators' Fit preference, #10091).
+    let framed = match p.get("fit") {
+        None => false,
+        Some(value) => value.as_bool().ok_or_else(|| bad(cmd, "fit must be a boolean"))?,
+    };
     if p.get("motion").is_some() {
+        if framed {
+            return Err(bad(cmd, "fit does not apply to a motion"));
+        }
         return continuous(cam, p);
     }
-    let mut fit = false;
+    let mut fit = framed;
     if let Some(value) = p.get("direction") {
         let dir = vec3(value)
             .filter(|v| v.is_finite() && v.len() <= 2.0)
@@ -715,6 +759,34 @@ mod tests {
         for bad in [json!(0), json!(-15), json!(181), json!(f64::NAN.to_string()), json!("15"), json!(null)] {
             assert!(turn("left", Some(bad.clone())).is_err(), "{bad}");
         }
+    }
+
+    /// #10091: a turn asked to frame the model reports `fit`, as home does; a motion can't.
+    #[test]
+    fn a_turn_with_fit_asks_the_window_to_frame_the_model() {
+        let mut s = Session::default();
+        let before = s.doc.to_json();
+        let cam = Camera { distance: 100.0, ..Default::default() };
+        for params in
+            [json!({"camera": cam, "direction": [0, 0, 1]}), json!({"camera": cam, "action": "right"}), json!({"camera": cam, "action": "clockwise"})]
+        {
+            let plain = s.execute("view.navigate", &params).unwrap();
+            assert_eq!(plain["fit"], false, "{params}");
+            let mut framed = params.clone();
+            framed["fit"] = json!(true);
+            let result = s.execute("view.navigate", &framed).unwrap();
+            assert_eq!(result["fit"], true, "{params}");
+            assert_eq!(result["camera"], plain["camera"], "fit asks for the framing, the turn is the same");
+            framed["fit"] = json!(false);
+            assert_eq!(s.execute("view.navigate", &framed).unwrap(), plain);
+        }
+        assert_eq!(s.execute("view.navigate", &json!({"camera": cam, "action": "home", "fit": false})).unwrap()["fit"], true, "home frames anyway");
+        for value in [json!(1), json!("yes"), Value::Null, json!([true])] {
+            assert!(s.execute("view.navigate", &json!({"camera": cam, "action": "right", "fit": value})).is_err(), "{value}");
+        }
+        assert!(s.execute("view.navigate", &json!({"camera": cam, "motion": "zoom", "factor": 2.0, "fit": true})).is_err());
+        assert!(s.execute("view.navigate", &json!({"camera": cam, "motion": "zoom", "factor": 2.0, "fit": false})).is_ok());
+        assert_eq!(s.doc.to_json(), before);
     }
 
     #[test]

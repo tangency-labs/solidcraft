@@ -60,13 +60,14 @@ or **Alt/Option** for 0.1. The mouse wheel over the focused field does the same,
 and the preview follows each step. An expression such as `width / 2` is left as typed.
 
 Expressions are unit-aware: `2 * width + 5 mm`, `angle / 2`, `sqrt(area)`, `1 in + 3 mm`, using
-`+ - * / ^`, parentheses, `sin cos tan asin acos atan atan2 sqrt abs min max floor ceil round mod
-trunc` and unit conversion. A number and the unit after it are one value: `10 mm / 2 mm` is 5
+`+ - * / ^ %`, parentheses, `sin cos tan asin acos atan atan2 sinh cosh tanh asinh acosh atanh sqrt
+abs sign min max floor ceil round trunc mod exp ln log log10 pow hypot` (`log` is base 10) and unit
+conversion. A number and the unit after it are one value: `10 mm / 2 mm` is 5
 and `90 deg / 1 rad` is π/2, and a fraction of numbers before a unit is one value too (`1/2 in`
 is half an inch; after a `/` only written without spaces: `1 in / 1/2 in` is 2, while
-`width / 10 / 2 mm` divides by 10 and then by 2 mm). A decimal comma works too, outside parentheses: `2,5 mm` is
-`2.5 mm` (inside a function's parentheses the comma separates its arguments, so write
-`max(2.5, 3)` there). A mixed number is one value, as imperial sizes are written: `2 1/8"` and
+`width / 10 / 2 mm` divides by 10 and then by 2 mm). A decimal comma works too: `2,5 mm` is
+`2.5 mm`, and `-(width-0,5)/2` is `-(width-0.5)/2` (directly in a function's parentheses the
+comma separates its arguments, so write `max(2.5, 3)` there). A mixed number is one value, as imperial sizes are written: `2 1/8"` and
 `3 7/16 in` are 2.125 in and 3.4375 in (a whole number, a space, then a proper fraction of whole
 numbers). A length where an angle is expected (or the other way round) is an
 error, not a silent conversion. Cycles are reported with their path (`a → b → a`), renaming a
@@ -75,7 +76,9 @@ in use can't be deleted (the error lists its users).
 
 The design's units (Document Settings in the browser: mm, cm, m, in or ft) set how a bare number
 or unitless arithmetic expression typed into a length field is read. In an inch design `0.25`
-and `1 / 4` mean 0.25 in. Operation dialogs start with lengths in the design's units, including
+and `1 / 4` mean 0.25 in. A new user parameter given no unit (`parameters.add` or
+`parameters.import` without `unit`) is a length in the design's units, as the Parameters dialog
+makes it: `40/2` is 20 in. Operation dialogs start with lengths in the design's units, including
 secondary distances, wall thicknesses, gaps, offsets and radii. Canvas handles and live sketch
 values use the same units as the operation. Angles, counts and scale factors keep their own
 units. Preferences selects the default units for new designs; existing designs use their own

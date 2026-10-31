@@ -585,3 +585,25 @@ fn offset_plane_through_a_point_follows_the_point() {
     // A distance and a point at once is refused.
     assert!(s.execute("construct.plane.offset", &json!({"base": "XY", "offset": 5, "through": {"vertex": [0, 0, 0]}})).is_err());
 }
+
+/// Hiding the placement a component is shown at hides its construction geometry too, as it
+/// hides its bodies and sketches.
+#[test]
+fn hiding_an_occurrence_hides_its_construction_geometry() {
+    let mut s = Session::default();
+    run(&mut s, "component.create", json!({"name": "Part"}));
+    run(&mut s, "construct.plane.offset", json!({"base": "XY", "offset": "5 mm", "name": "Shelf"}));
+    run(&mut s, "construct.axis.two_planes", json!({"a": "XZ", "b": "YZ", "name": "Spine"}));
+    run(&mut s, "construct.point.three_planes", json!({"a": "XY", "b": "XZ", "c": "YZ", "name": "Pin"}));
+    let component = s.doc.features.iter().find(|f| f.name == "Shelf").map(|f| f.component).unwrap();
+    assert_ne!(component, 0);
+    let path = s.doc.first_path(component);
+    run(&mut s, "component.activate", json!({"component": 0}));
+    for name in ["Shelf", "Spine", "Pin"] {
+        assert!(s.construction_visible(name), "{name}");
+    }
+    run(&mut s, "browser.visibility", json!({"paths": [path], "visible": false}));
+    for name in ["Shelf", "Spine", "Pin"] {
+        assert!(!s.construction_visible(name), "{name} shows in a hidden placement");
+    }
+}

@@ -206,7 +206,7 @@ fn face_candidates(
 ) -> Vec<Cand> {
     let mut out = Vec::new();
     for (i, b) in st.bodies.iter().enumerate() {
-        if !app.session.body_visible(&b.name) || replaced.contains(&b.name) {
+        if !app.body_visible(&b.name) || replaced.contains(&b.name) {
             continue;
         }
         let ghosted = crate::viewport::body_faded(app, b, active_bodies);
@@ -329,7 +329,7 @@ pub(crate) fn body_cut_at(
 ) -> Option<String> {
     let walk_eps = 1e-6 * (1.0 + crate::viewport::scene_radius(app));
     for (i, b) in st.bodies.iter().enumerate() {
-        if !app.session.body_visible(&b.name) || replaced.contains(&b.name) {
+        if !app.body_visible(&b.name) || replaced.contains(&b.name) {
             continue;
         }
         if !include_ghosted && crate::viewport::body_faded(app, b, active_bodies) {
@@ -390,7 +390,7 @@ fn near_edges(
     let mut best_e: Option<EdgeHit> = None;
     let mut best_v: Option<VertexHit> = None;
     for (i, b) in st.bodies.iter().enumerate() {
-        if !app.session.body_visible(&b.name) || replaced.contains(&b.name) {
+        if !app.body_visible(&b.name) || replaced.contains(&b.name) {
             continue;
         }
         if !include_ghosted && crate::viewport::body_faded(app, b, active_bodies) {

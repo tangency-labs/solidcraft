@@ -117,7 +117,8 @@ The [architecture page](docs/architecture.md) has the layer table. The short ver
    not.) Permissive
    dependencies are fine. Note which one you're adding and why in the PR. THIRD-PARTY-LICENSES.txt
    lists it once the change lands: the Generated files workflow rewrites it on `main`.
-   Nightly/manual CI also scans advisories, bans and sources with cargo-deny; see
+   Nightly/manual CI also scans advisories, bans and sources with cargo-deny, and a PR that
+   changes Cargo.lock or a Cargo.toml checks the advisories; see
    [the local command and coverage limits](docs/book/src/dev/testing.md#dependency-advisories).
 3. **Every asset is original or openly licensed and has a row in
    [ATTRIBUTION.md](ATTRIBUTION.md).** Icons are drawn in code (`crates/ui-egui/src/icons.rs`).

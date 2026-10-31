@@ -172,32 +172,7 @@ impl Document {
         author: u64,
         author_path: &[u64],
     ) -> Result<FaceAnchor> {
-        // A construction certificate that names this face alone, else its exact history name.
-        let certified = body
-            .body
-            .face_plane(index)
-            .ok_or_else(|| DocError::Invalid("this face has no exact planar source; choose a fixed plane instead".into()))
-            .and_then(|source| {
-                let target = self.strong_face_target(body, index, source.origin)?;
-                if target.certificate.is_none() {
-                    return Err(DocError::Invalid("this face has no supported construction certificate; choose a fixed plane instead".into()));
-                }
-                let indices = self.configuration_face_indices(body, &target)?;
-                // A copy a pattern or mirror made on the same body carries its seed's certificate,
-                // which finds the seed's face: the copy is attached by its own history name below.
-                if !indices.contains(&index) {
-                    return Err(DocError::Invalid("this face has no supported construction certificate; choose a fixed plane instead".into()));
-                }
-                self.coplanar_pieces(body, &indices, |_| true)?;
-                Ok(target)
-            });
-        let target = match certified {
-            Ok(target) => target,
-            Err(error) => match body.body.planar_face(index).and_then(|plane| self.lineage_face_target(body, index, plane.origin)) {
-                Some(target) => target,
-                None => return Err(error),
-            },
-        };
+        let target = self.flat_face_target(body, index)?;
         let source = self
             .anchor_face_plane(body, index, target.certificate.as_ref())
             .ok_or_else(|| DocError::Invalid("this face has no exact planar source; choose a fixed plane instead".into()))?;
@@ -218,6 +193,42 @@ impl Document {
         anchor.x_axis = [picked.x.dot(canonical.x), picked.x.dot(canonical.y)];
         anchor.validate()?;
         Ok(anchor)
+    }
+
+    /// A target for flat face `index` of `body` that a rebuild finds again: a construction
+    /// certificate that names this face alone, else its exact history name. What a sketch on a
+    /// face and a print face hold.
+    pub(crate) fn flat_face_target(&self, body: &ModelBody, index: usize) -> Result<ConfigFaceTarget> {
+        let certified = body
+            .body
+            .face_plane(index)
+            .ok_or_else(|| DocError::Invalid("this face has no exact planar source; choose a fixed plane instead".into()))
+            .and_then(|source| {
+                let target = self.strong_face_target(body, index, source.origin)?;
+                if target.certificate.is_none() {
+                    return Err(DocError::Invalid("this face has no supported construction certificate; choose a fixed plane instead".into()));
+                }
+                let indices = self.configuration_face_indices(body, &target)?;
+                // A copy a pattern or mirror made on the same body carries its seed's certificate,
+                // which finds the seed's face: the copy is attached by its own history name below.
+                // A face that is no copy, on the plane of the pieces the certificate finds, is
+                // another piece of that face (a piece a later join left bordering another body,
+                // and named after it): the certificate stands for it too (#9465).
+                if !indices.contains(&index) {
+                    let names = crate::naming::names(body);
+                    let copy = names.faces.get(index).is_none_or(|name| crate::persistent_name::is_copy(name));
+                    let all: Vec<usize> = indices.iter().copied().chain([index]).collect();
+                    if copy || self.coplanar_pieces(body, &all, |_| true).is_err() {
+                        return Err(DocError::Invalid("this face has no supported construction certificate; choose a fixed plane instead".into()));
+                    }
+                }
+                self.coplanar_pieces(body, &indices, |_| true)?;
+                Ok(target)
+            });
+        match certified {
+            Ok(target) => Ok(target),
+            Err(error) => body.body.planar_face(index).and_then(|plane| self.lineage_face_target(body, index, plane.origin)).ok_or(error),
+        }
     }
 
     /// The faces an attachment stands for, and a note when they were found by fallback.

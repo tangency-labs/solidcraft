@@ -285,7 +285,7 @@ fn cancellation_while_encoding_cannot_publish_a_late_frame() {
 }
 
 #[test]
-fn malformed_preparation_fails_the_job_without_stopping_the_host() {
+fn malformed_geometry_is_rejected_without_stopping_the_host() {
     let host = CpuHost::cooperative();
     let scene = ProductScene {
         bounds: Aabb3::EMPTY,
@@ -299,13 +299,9 @@ fn malformed_preparation_fails_the_job_without_stopping_the_host() {
             faces: Vec::new(),
         }],
     };
-    let broken = host.submit(id(1, 1), 1, scene, request()).unwrap();
-    drain(&host);
-    let status = broken.status().unwrap();
-    assert_eq!(status.progress.phase, Phase::Failed);
-    assert_eq!(status.error.unwrap().code, ErrorCode::InvalidScene);
-    assert!(status.frame.is_none(), "a failed preparation path has no cached PNG identity");
-    assert!(broken.frame().unwrap().is_none());
+    let error = host.submit(id(1, 1), 1, scene, request()).err().unwrap();
+    assert_eq!(error.code, ErrorCode::InvalidScene);
+    assert_eq!(host.admitted_bytes(), 0);
     assert!(host.is_available());
     let healthy = host.submit(id(1, 2), 1, empty(), request()).unwrap();
     drain(&host);
@@ -538,6 +534,7 @@ impl ImageExecutor for DropProbe {
         Ok(Admission {
             triangles: 0,
             face_appearances: 0,
+            projected_pixel_tests: None,
             geometry_bytes: 0,
             pixel_scratch_bytes: self.estimated,
             preparation_bytes: 0,
@@ -780,6 +777,7 @@ fn registered_large_pool_is_explicit_finite_and_accounted() {
             Ok(Admission {
                 triangles: 0,
                 face_appearances: 0,
+                projected_pixel_tests: None,
                 geometry_bytes: 0,
                 pixel_scratch_bytes: 0,
                 preparation_bytes: 0,

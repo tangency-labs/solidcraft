@@ -70,6 +70,16 @@ configuration_table	false
 conic	false
 constrainer	false
 construction	false
+construction_line	false
+construction_line_angle	false
+construction_line_bisector	false
+construction_line_horizontal	false
+construction_line_parallel	false
+construction_line_perpendicular	false
+construction_line_tangent_at	false
+construction_line_tangent_external	false
+construction_line_tangent_two	false
+construction_line_vertical	false
 contact_all	false
 contact_new	false
 contact_off	false
@@ -95,6 +105,7 @@ edit	false
 ellipse	false
 emboss	false
 environment_map	false
+equation_curve	false
 error	false
 explode	false
 export	false
@@ -190,6 +201,7 @@ polygon	false
 polygon_circumscribed	false
 polygon_edge	false
 presspull	false
+print_face	false
 project	false
 project_surface	false
 rack_pinion	false
@@ -224,6 +236,7 @@ settings_monitor	false
 settings_mouse	false
 settings_palette	false
 settings_plug	false
+sheet	false
 sheet_rules	false
 shell	false
 shield	false

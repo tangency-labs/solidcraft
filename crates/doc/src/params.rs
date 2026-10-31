@@ -268,7 +268,7 @@ impl Document {
             .filter(|(_, _, k)| *k == Kind::Length)
             .map(|(_, e, _)| {
                 let d = if expr::is_literal(&e) { expr::Defaults::default() } else { expr::Defaults { len: scale, ..expr::Defaults::default() } };
-                expr::eval_with(&e, &look).and_then(|v| v.to_kind_in(Kind::Length, d)).ok()
+                expr::eval_with_defaults(&e, &look, d).and_then(|v| v.to_kind_in(Kind::Length, d)).ok()
             })
             .collect()
     }
@@ -462,7 +462,7 @@ impl Document {
 
     /// User parameters as CSV (`name,unit,expression,value,comment`).
     pub fn params_csv(&self) -> String {
-        let q = |s: &str| if s.contains([',', '"', '\n']) { format!("\"{}\"", s.replace('"', "\"\"")) } else { s.to_string() };
+        let q = |s: &str| if s.contains([',', '"', '\r', '\n']) { format!("\"{}\"", s.replace('"', "\"\"")) } else { s.to_string() };
         let mut out = String::from("name,unit,expression,value,comment,favorite\n");
         for r in self.param_rows().into_iter().filter(|r| r.source == "user") {
             out += &format!(
@@ -497,23 +497,25 @@ impl Document {
                 })
                 .collect::<Result<_>>()?
         } else {
-            let mut lines = text.lines();
-            let header: Vec<String> = parse_csv_line(lines.next().unwrap_or_default()).into_iter().map(|h| h.trim().to_ascii_lowercase()).collect();
-            let col = |n: &str| header.iter().position(|h| h == n);
+            let mut records = split_csv(text.strip_prefix('\u{feff}').unwrap_or(text), '\n');
+            let header = csv_fields(records.next().unwrap_or_default())?;
+            let col = |n: &str| header.iter().position(|h| h.trim().eq_ignore_ascii_case(n));
             let (Some(ni), Some(ei)) = (col("name"), col("expression").or(col("value"))) else {
                 return Err(DocError::Invalid("the CSV needs `name` and `expression` columns".into()));
             };
             let (ui, ci) = (col("unit"), col("comment"));
-            lines
-                .filter(|l| !l.trim().is_empty())
-                .map(|l| {
-                    let c = parse_csv_line(l);
+            records
+                .filter(|record| !record.trim().is_empty())
+                .take(MAX_PARAMS + 1)
+                .map(|record| {
+                    let c = csv_fields(record)?;
                     let get = |i: Option<usize>| i.and_then(|i| c.get(i)).map(|s| s.trim().to_string());
-                    (get(Some(ni)).unwrap_or_default(), get(Some(ei)).unwrap_or_default(), get(ui), get(ci))
+                    let comment = ci.and_then(|i| c.get(i)).cloned();
+                    Ok((get(Some(ni)).unwrap_or_default(), get(Some(ei)).unwrap_or_default(), get(ui), comment))
                 })
-                .collect()
+                .collect::<Result<_>>()?
         };
-        if rows.len() > 10_000 {
+        if rows.len() > MAX_PARAMS {
             return Err(DocError::Invalid("too many parameters".into()));
         }
         // Each row is checked and applied as `change_param` would, but the parameters are
@@ -585,7 +587,7 @@ impl Document {
                 }
                 let unit = match unit {
                     Some(u) => u.trim().to_string(),
-                    None => Self::infer_unit_in(vals, expr_s),
+                    None => Self::infer_unit_in(vals, expr_s, &self.units),
                 };
                 self.params.push(crate::Param {
                     name: name.into(),
@@ -696,18 +698,19 @@ impl Document {
     }
 
     /// The unit for a new parameter with this expression: that of its value; a bare number is
-    /// a length (mm).
+    /// a length in the design's units, as a typed length reads it (#8865).
     pub(crate) fn infer_unit(&self, e: &str) -> String {
-        Self::infer_unit_in(&self.param_values().0, e)
+        Self::infer_unit_in(&self.param_values().0, e, &self.units)
     }
 
-    /// [`Document::infer_unit`] against parameter values already worked out.
-    fn infer_unit_in(vals: &BTreeMap<String, Value>, e: &str) -> String {
+    /// [`Document::infer_unit`] against parameter values already worked out, a length taking
+    /// `units` (the design's, or `mm` where a bare number reads as millimetres).
+    pub(crate) fn infer_unit_in(vals: &BTreeMap<String, Value>, e: &str, units: &str) -> String {
         let v = expr::eval_with(e, &|n| vals.get(n).copied().ok_or_else(|| DocError::Expr(format!("unknown parameter `{n}`"))));
         match v.ok().and_then(|v| v.kind()) {
             Some(Kind::Unitless) if !expr::references(e).is_empty() => String::new(),
             Some(Kind::Angle) => "deg".into(),
-            _ => "mm".into(),
+            _ => expr::length_unit_or_mm(units).to_string(),
         }
     }
 
@@ -896,6 +899,18 @@ impl Document {
                         n += 1;
                     }
                 }
+                // An equation curve's variable hides a parameter of its name: such a parameter is
+                // not what its formulas refer to.
+                for (variable, e) in sketch.equation_exprs_mut() {
+                    if variable == old {
+                        continue;
+                    }
+                    let r = expr::rename_reference(e, old, new);
+                    if r != *e {
+                        *e = r;
+                        n += 1;
+                    }
+                }
                 for e in sketch.text_word_exprs_mut() {
                     let r = crate::text_params::rename_reference(e, old, new);
                     if r != *e {
@@ -1056,25 +1071,32 @@ impl Document {
     }
 }
 
-/// One CSV line with quoted fields.
-fn parse_csv_line(l: &str) -> Vec<String> {
-    let mut out = Vec::new();
-    let mut cur = String::new();
+/// Split records or fields only outside quotes. A doubled quote toggles twice
+/// before the next separator, leaving it inside the same field.
+fn split_csv(text: &str, separator: char) -> impl Iterator<Item = &str> {
     let mut quoted = false;
-    let mut chars = l.chars().peekable();
-    while let Some(c) = chars.next() {
-        match (c, quoted) {
-            ('"', true) if chars.peek() == Some(&'"') => {
-                cur.push('"');
-                chars.next();
-            }
-            ('"', _) => quoted = !quoted,
-            (',', false) => out.push(std::mem::take(&mut cur)),
-            (c, _) => cur.push(c),
+    text.split(move |c| {
+        if c == '"' {
+            quoted = !quoted;
         }
-    }
-    out.push(cur);
-    out
+        c == separator && !quoted
+    })
+}
+
+fn csv_fields(record: &str) -> Result<Vec<String>> {
+    split_csv(record, ',')
+        .map(|raw| {
+            let field = raw.trim();
+            if !field.contains('"') {
+                return Ok(field.to_string());
+            }
+            let inner = field.strip_prefix('"').and_then(|s| s.strip_suffix('"'));
+            match inner {
+                Some(s) if s.split("\"\"").all(|part| !part.contains('"')) => Ok(s.replace("\"\"", "\"")),
+                _ => Err(DocError::Invalid("invalid quoting in parameter CSV".into())),
+            }
+        })
+        .collect()
 }
 
 /// Parameters whose definitions depend on each other in a loop.
@@ -1135,6 +1157,19 @@ mod design_length_tests {
         assert_eq!(written("parsec", 5.0), w("mm", "5 mm"));
         assert_eq!(written("deg", 5.0), w("mm", "5 mm"));
         assert_eq!(written("", 5.0), w("mm", "5 mm"));
+    }
+
+    /// A bare number typed as a formula (`=5`) means the design's units like `5` does.
+    #[test]
+    fn a_formula_that_is_a_bare_number_gets_the_design_unit() {
+        let mut doc = Document::new("Units");
+        doc.units = "in".into();
+        let length = crate::expr::Kind::Length;
+        assert_eq!(doc.with_design_unit("5", length), "5 in");
+        assert_eq!(doc.with_design_unit("=5", length), "=5 in");
+        assert_eq!(doc.with_design_unit("=5 mm", length), "=5 mm");
+        let inches = doc.eval(&doc.with_design_unit("=5", length), length).unwrap();
+        assert!((inches - 127.0).abs() < 1e-9, "{inches}");
     }
 
     #[test]

@@ -65,6 +65,10 @@ struct State {
     /// A heading matched, so the controls under it stay visible until the next heading.
     heading_open: bool,
     hiding: u32,
+    /// Set while a row with no label of its own runs hidden: what its controls say stands in for it.
+    unlabelled: u32,
+    /// Rows drawn this page with no label, so each gets a key of its own.
+    unlabelled_rows: u32,
     key: String,
     hits: u32,
     page_index: usize,
@@ -259,6 +263,7 @@ pub(crate) fn begin_page(ui: &Ui, index: usize, label: &str) {
         state.page_index = index;
         state.page = label.to_string();
         state.page_shown = false;
+        state.unlabelled_rows = 0;
         state.section.clear();
         state.key.clear();
         state.section_matches = false;
@@ -271,6 +276,7 @@ pub(crate) fn begin_section(ui: &Ui, title: &str) {
     let matches = text_hit(ui, title);
     with(ui, |state| {
         state.section = title.to_string();
+        state.unlabelled_rows = 0;
         state.section_matches = matches || state.force > 0;
         state.section_shown.clear();
         // A dropdown with no row of its own must not store its value under the last row's key.
@@ -333,6 +339,53 @@ pub(crate) fn pop_force(ui: &Ui) {
 
 pub(crate) fn set_control(ui: &Ui, label: &str) {
     with(ui, |state| state.key = format!("{}\n{}\n{}", state.page, state.section, label));
+}
+
+/// Key a row that has no label of its own by its place in the section, so two of them do not share
+/// one stored text. Returns the text to match the row on (still empty).
+pub(crate) fn set_unlabelled_control(ui: &Ui) {
+    with(ui, |state| {
+        state.unlabelled_rows += 1;
+        state.key = format!("{}\n{}\n#{}", state.page, state.section, state.unlabelled_rows);
+    });
+}
+
+pub(crate) fn push_unlabelled(ui: &Ui) {
+    with(ui, |state| state.unlabelled = state.unlabelled.saturating_add(1));
+}
+
+pub(crate) fn pop_unlabelled(ui: &Ui) {
+    with(ui, |state| state.unlabelled = state.unlabelled.saturating_sub(1));
+}
+
+/// A control inside a row with no label says what it is. Stored for the row, so the next pass can
+/// match the row on those words and draw it, as it does for a dropdown's current value.
+pub(crate) fn note_unlabelled(ui: &Ui, texts: &[&str]) {
+    if !querying(ui) {
+        return;
+    }
+    with(ui, |state| {
+        if state.hiding == 0 || state.unlabelled == 0 || state.key.is_empty() {
+            return;
+        }
+        let mut stored = state.extras.get(&state.key).cloned().unwrap_or_default();
+        let was = extra_hit_text(state, Some(stored.as_str()));
+        for text in texts.iter().filter(|text| !text.is_empty()) {
+            if !stored.contains(text) {
+                if !stored.is_empty() {
+                    stored.push(' ');
+                }
+                stored.push_str(text);
+            }
+        }
+        let now = extra_hit_text(state, Some(stored.as_str()));
+        let key = state.key.clone();
+        state.extras.insert(key, stored);
+        if was != now {
+            state.child_matched = true;
+            state.dirty = true;
+        }
+    });
 }
 
 /// Draw this control. A miss returns false and draws nothing; the caller still runs the control
@@ -730,6 +783,13 @@ mod tests {
         h.step(&serde_json::json!({"key": "ArrowUp"})).expect("previous match");
         h.frames(1);
         assert_eq!(crate::scenario::handle_at("prefs:search:current"), first, "Up moves back");
+        let (_, _, hits) = nav(&h.ctx);
+        let cursor = hits
+            .iter()
+            .position(|hit| hit.page == crate::prefs::PAGE_NAVIGATION && hit.label == "Reverse zoom direction")
+            .expect("the Navigation setting remains keyboard reachable");
+        set_cursor(&h.ctx, cursor);
+        h.frames(2);
         h.step(&serde_json::json!({"key": "Enter"})).expect("open");
         h.frames(2);
         assert_eq!(h.app.prefs_window.section, crate::prefs::PAGE_NAVIGATION, "Enter opens the match's page");
@@ -846,5 +906,69 @@ mod tests {
         assert!(h.app.prefs_window.filter.is_empty(), "the current tab also clears the search");
         assert!(h.widget("Reverse zoom direction").is_none());
         assert!(h.widget("Units of new designs").is_some());
+    }
+    /// Settings drawn in a row with no label of their own are found by the words they show (#9265).
+    #[test]
+    fn preferences_search_finds_settings_in_rows_without_a_label() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        crate::prefs::open_at(&mut h.app, crate::prefs::PAGE_LAYOUT);
+        h.frames(2);
+        // Drawn, not merely present: a hidden row's controls still exist, far off screen.
+        let drawn = |h: &crate::scenario::Harness, label: &str| {
+            let body = crate::scenario::rect_of("dialog:page_body");
+            h.widget(label).is_some_and(|[x, y]| body.is_none_or(|body| body.contains(egui::pos2(x as f32, y as f32))))
+        };
+        let rows = [
+            ("status bar", "Status bar"),
+            ("sketch tab shown", "Keep the Sketch tab shown"),
+            ("search results", "Show search results in the ribbon"),
+            ("play history", "Play History button in the History controls"),
+            ("view's corner", "OK and Cancel in the view's corner"),
+            ("highlight active", "Highlight active ribbon commands"),
+            ("reveal on hover", "Reveal on hover"),
+        ];
+        for (query, label) in rows {
+            h.app.prefs_window.filter = query.into();
+            h.frames(4);
+            assert!(drawn(&h, label), "searching '{query}' should show '{label}'");
+        }
+        h.app.prefs_window.filter = "status bar".into();
+        h.frames(4);
+        assert!(!drawn(&h, "Keep the Sketch tab shown"), "a row that does not match stays out of the result");
+        // Three unlabelled rows sit under one labelled row: each is found on its own words only.
+        h.app.prefs_window.filter = "sketch tab shown".into();
+        h.frames(4);
+        assert!(drawn(&h, "Keep the Sketch tab shown"));
+        assert!(!drawn(&h, "Highlight active ribbon commands"), "its neighbour is not a match");
+        assert!(!drawn(&h, "Show search results in the ribbon"), "its neighbour is not a match");
+        h.app.prefs_window.filter = "zzzz-no-setting".into();
+        h.frames(4);
+        assert!(!drawn(&h, "Status bar"), "a miss shows nothing");
+    }
+    #[test]
+    fn moved_preferences_search_paths_and_enter_follow_window_groups() {
+        for (query, path, page) in [
+            ("Direct interaction", "Work > Tools", crate::prefs::PAGE_TOOLS),
+            ("Navigate with the 3D mouse", "Input > 3D mouse", crate::prefs::PAGE_MOUSE3D),
+            ("Origin plane names", "Work > Design", crate::prefs::PAGE_DESIGN),
+            ("Status bar", "Look > Layout", crate::prefs::PAGE_LAYOUT),
+        ] {
+            let mut h = crate::scenario::Harness::new();
+            h.app.home.open = false;
+            crate::prefs::open_at(&mut h.app, crate::prefs::PAGE_GENERAL);
+            h.app.prefs_window.filter = query.into();
+            h.frames(4);
+            assert!(h.widget(path).is_some(), "{query} shows {path}");
+            let (_, _, hits) = nav(&h.ctx);
+            let index = hits.iter().position(|hit| hit.page == page && hit.label == query).expect("moved control is keyboard reachable");
+            set_cursor(&h.ctx, index);
+            h.frames(2);
+            h.step(&serde_json::json!({"key":"Enter"})).unwrap();
+            h.frames(2);
+            assert_eq!(h.app.prefs_window.section, page);
+            assert!(h.app.prefs_window.filter.is_empty());
+            assert!(h.widget(query).is_some());
+        }
     }
 }

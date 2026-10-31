@@ -263,3 +263,57 @@ fn one_bit_primary_actions_keep_inverted_labels_and_legacy_fills() {
         }
     }
 }
+
+#[test]
+fn persistent_native_selected_recipe_is_opt_in_and_preserves_small_selected_controls() {
+    fn flatten(shape: &egui::Shape, out: &mut Vec<egui::Shape>) {
+        match shape {
+            egui::Shape::Vec(shapes) => {
+                for s in shapes {
+                    flatten(s, out);
+                }
+            }
+            s => out.push(s.clone()),
+        }
+    }
+    let mut themes: Vec<_> = [false, true]
+        .into_iter()
+        .flat_map(|dark| crate::theme::ColorVision::ALL.into_iter().map(move |vision| crate::theme::Tokens::themed(dark, vision)))
+        .collect();
+    themes.extend(crate::theme_files::builtin().iter().map(crate::theme_files::resolve).filter(|t| t.borders.bevel.is_some()));
+    assert!(themes.iter().any(|t| t.borders.bevel.is_some()), "include a real bevel theme");
+    for t in themes {
+        let _theme = crate::theme::scoped_tokens(t);
+        let ctx = crate::fonts::test_context();
+        let mut selected = egui::Shape::Noop;
+        let mut native = egui::Rect::NOTHING;
+        let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
+            let response = button(ui, "Existing selected", Button::SmallSelected);
+            native = response.rect;
+            selected = persistent_button_shape(ui, &response, response.rect);
+        });
+        output.textures_delta.clear();
+        let mut shapes = Vec::new();
+        flatten(&selected, &mut shapes);
+        assert!(shapes.iter().any(|s| matches!(s, egui::Shape::Rect(r) if r.rect == native && r.fill == t.selected_bg)));
+        assert!(shapes.iter().any(|s| matches!(s, egui::Shape::LineSegment { stroke, .. } if stroke.width == 2.0 && stroke.color == t.accent)));
+        // Existing SmallSelected keeps its old fill (including the bevel policy), regular
+        // label family and no persistent underline. Merely asking for the opt-in shape
+        // cannot alter that widget or its native geometry.
+        let mut old = Vec::new();
+        for shape in output.shapes {
+            flatten(&shape.shape, &mut old);
+        }
+        let fill = if t.borders.bevel.is_some() { t.control_fill } else { t.selected_bg };
+        assert!(old.iter().any(|s| matches!(s, egui::Shape::Rect(r) if r.rect == native && r.fill == fill)));
+        assert!(!old.iter().any(|s| matches!(s, egui::Shape::LineSegment { stroke, .. } if stroke.width == 2.0 && stroke.color == t.accent)));
+        let text = old
+            .iter()
+            .find_map(|s| match s {
+                egui::Shape::Text(s) if s.galley.text() == "Existing selected" => Some(s),
+                _ => None,
+            })
+            .unwrap();
+        assert_eq!(text.galley.job.sections[0].format.font_id.family, egui::FontFamily::Proportional);
+    }
+}

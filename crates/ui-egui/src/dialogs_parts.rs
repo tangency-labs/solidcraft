@@ -1,7 +1,8 @@
 //! Insert Part: the standard parts library (screws, bolts, nuts, washers, set screws, pins,
 //! bearings) by family, size and length, with the size's table values and a picture of the part.
-//! Picking a hole (its wall or rim) seats the part in it with a rigid joint; without one the part
-//! goes at the origin. The live preview shows it placed.
+//! Picking a hole (its wall or rim) seats the part in it with a rigid joint, and picking several
+//! seats the same part in each; without one the part goes at the origin. The live preview shows it
+//! placed.
 
 use crate::ui_kit::{choice_row, text_row};
 use egui::vec2;
@@ -75,10 +76,12 @@ pub struct Pt {
 
 /// The dialog for Insert Part.
 pub fn start(_app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
-    matches!(id, "parts.fastener" | "parts.insert").then(|| {
+    // Standard Parts itself only lists the library: started from the app it opens the dialog
+    // that shows it (#8735), which did nothing before.
+    matches!(id, "parts.fastener" | "parts.insert" | "parts.library").then(|| {
         (
             Kind::Part(Pt { family: 0, size: 0, length: None, name: String::new(), picture: None, lib: None }),
-            vec![SelInput::new("Hole (optional)", FACES | EDGES, false)],
+            vec![SelInput::new("parts.holes", FACES | EDGES, true)],
         )
     })
 }
@@ -87,20 +90,29 @@ fn library(app: &mut SolveApp) -> Vec<Family> {
     app.session.execute("parts.library", &json!({})).map(|v| families(&v)).unwrap_or_default()
 }
 
-/// The insert command's parameters for the picks.
-pub fn insert_params(lib: &[Family], k: &Pt, hole: Option<&Sel>) -> Result<Value, String> {
+/// The insert command's parameters for the hole picks: one part seated in each.
+pub fn insert_params(lib: &[Family], k: &Pt, holes: &[Sel]) -> Result<Value, String> {
     let f = lib.get(k.family).ok_or("the parts library is empty")?;
     let (size, _) = f.sizes.get(k.size).ok_or("pick a size")?;
     let mut p = json!({"family": f.id, "size": size});
     if let Some(l) = k.length.and_then(|i| f.lengths.as_ref().and_then(|ls| ls.get(i))) {
         p["length"] = json!(l);
     }
-    match hole {
-        Some(Sel::Face { point, .. } | Sel::Edge { point, .. }) => p["at"] = json!([point.x, point.y, point.z]),
-        _ => {
+    let at: Vec<Value> = holes
+        .iter()
+        .filter_map(|h| match h {
+            Sel::Face { point, .. } | Sel::Edge { point, .. } => Some(json!([point.x, point.y, point.z])),
+            _ => None,
+        })
+        .collect();
+    match at.len() {
+        0 => {
             p["point"] = json!([0.0, 0.0, 0.0]);
             p["direction"] = json!([0.0, 0.0, 1.0]);
         }
+        // One hole keeps the single pick's form.
+        1 => p["at"] = at.into_iter().next().unwrap_or(Value::Null),
+        _ => p["at"] = Value::Array(at),
     }
     if !k.name.trim().is_empty() {
         p["name"] = json!(k.name.trim());
@@ -181,7 +193,7 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Pt, inputs: &[SelInpu
     let key = (k.family, k.size, k.length);
     let tex_id = egui::Id::new("sc_part_picture");
     if k.picture != Some(key) {
-        let tex = insert_params(&lib, k, None)
+        let tex = insert_params(&lib, k, &[])
             .ok()
             .and_then(|p| picture(&p))
             .map(|img| ui.ctx().load_texture("sc_part_picture", img, egui::TextureOptions::LINEAR));
@@ -218,11 +230,7 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Pt, inputs: &[SelInpu
     }
     if inputs.first().is_some_and(|i| i.items.is_empty()) {
         ui.vertical(|ui| {
-            crate::ui_kit::text(
-                ui,
-                crate::i18n::tr_label("pick a hole to seat it, or OK places it at the origin"),
-                crate::ui_kit::Text::Note("parts_placement"),
-            );
+            crate::ui_kit::text(ui, crate::i18n::tr("parts.placement_hint"), crate::ui_kit::Text::Note("parts_placement"));
         });
     }
     false
@@ -234,7 +242,7 @@ pub fn commands(app: &SolveApp, k: &Pt, inputs: &[SelInput]) -> Result<Vec<(Stri
         Some(l) => l.clone(),
         None => app.session.scratch().execute("parts.library", &json!({})).map(|v| families(&v)).unwrap_or_default(),
     };
-    let p = insert_params(&lib, k, inputs.first().and_then(|i| i.items.first()))?;
+    let p = insert_params(&lib, k, inputs.first().map_or(&[][..], |i| &i.items))?;
     // The toolbar's command when the engine has it (same parameters).
     let id = if solidcraft_engine::find_command("parts.fastener").is_some() { "parts.fastener" } else { "parts.insert" };
     Ok(vec![(id.into(), p)])
@@ -310,20 +318,25 @@ mod tests {
         assert_eq!(default_length(&l[0], 99, &ls), 0, "so does a size that is not there");
     }
 
-    /// A hole pick seats the part (`at`); without one it goes to the origin along Z.
+    /// A hole pick seats the part (`at`), several picks seat it in each hole (#9341); without one
+    /// it goes to the origin along Z.
     #[test]
     fn insert_params_for_picks() {
         let l = lib();
         let k = Pt { family: 0, size: 1, length: Some(2), name: String::new(), picture: None, lib: None };
         let hole = Sel::Face { body: "Body1".into(), index: 3, point: Vec3::new(5.0, 0.0, 10.0) };
-        let p = insert_params(&l, &k, Some(&hole)).unwrap();
+        let p = insert_params(&l, &k, std::slice::from_ref(&hole)).unwrap();
         assert_eq!(p, json!({"family": "socket_head_cap_screw", "size": "M6", "length": 20.0, "at": [5.0, 0.0, 10.0]}));
+        let rim = Sel::Edge { body: "Body1".into(), index: 7, point: Vec3::new(25.0, 0.0, 10.0) };
+        let p = insert_params(&l, &k, &[hole, rim]).unwrap();
+        assert_eq!(p["at"], json!([[5.0, 0.0, 10.0], [25.0, 0.0, 10.0]]));
+        assert!(p.get("point").is_none());
         let k = Pt { family: 1, size: 0, length: None, name: "Front bearing".into(), picture: None, lib: None };
-        let p = insert_params(&l, &k, None).unwrap();
+        let p = insert_params(&l, &k, &[]).unwrap();
         assert_eq!(p["point"], json!([0.0, 0.0, 0.0]));
         assert_eq!(p["name"], "Front bearing");
         assert!(p.get("length").is_none());
-        assert!(insert_params(&[], &k, None).is_err());
+        assert!(insert_params(&[], &k, &[]).is_err());
     }
 
     /// Every dimension the library gives for a size is labelled in words, in each family.

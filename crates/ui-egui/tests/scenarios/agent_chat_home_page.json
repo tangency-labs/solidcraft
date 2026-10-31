@@ -3,7 +3,7 @@
   {"call": "ui.home", "params": {"open": true}},
   {"expect": {"home": true}},
   {"call": "ui.prefs", "params": {"open": "AI"}},
-  {"expect": {"home": true, "prefs": {"dialog": "AI"}}},
+  {"expect": {"home": true, "prefs": {"dialog": "Assistant"}}},
   {"until": {"not_shown": "Looking for agents…"}},
   {"expect": {"shown": "Add agent…"}},
   {"click": {"handle": "prefs:ai_add"}},

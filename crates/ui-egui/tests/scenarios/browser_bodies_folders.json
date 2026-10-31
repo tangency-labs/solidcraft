@@ -1,5 +1,6 @@
 [
   {"note": "Bodies folders (#4217, Preferences › Interface): a nested assembly of plain boxes. Frame:1 holds the body Plate and the placement Pin:1, which holds the body Shaft. The design itself has no bodies, so every Bodies row is a component's."},
+  {"note": "Each row's indent handle is where its depth puts it, so their order shows each row's depth."},
   {"call": "engine.execute", "params": {"command": "component.create", "params": {"name": "Frame"}}},
   {"call": "engine.execute", "params": {"command": "solid.box", "params": {"length": 40, "width": 20, "height": 5, "body_name": "Plate"}}},
   {"call": "engine.execute", "params": {"command": "component.create", "params": {"name": "Pin"}}},
@@ -8,14 +9,14 @@
   {"expect": {"bodies": 2, "errors": 0, "prefs": {"browser_bodies_folders": "several"}}},
 
   {"note": "Several bodies only (the default): each lone body sits straight under its placement, one level in, with no Bodies row."},
-  {"expect": {"browser_has": ["Frame:1", "Plate", "Pin:1", "Shaft"], "browser_lacks": ["Bodies"], "handle_order": ["eye:Frame:1", "eye:Plate"]}},
-  {"expect": {"handle_order": ["eye:Pin:1", "eye:Shaft"]}},
+  {"expect": {"browser_has": ["Frame:1", "Plate", "Pin:1", "Shaft"], "browser_lacks": ["Bodies"], "handle_order": ["indent:Frame:1", "indent:Plate"]}},
+  {"expect": {"handle_order": ["indent:Pin:1", "indent:Shaft"]}},
 
   {"note": "A second body in Frame brings Frame's folder back; Pin's lone body stays folded."},
   {"call": "engine.execute", "params": {"command": "component.activate", "params": {"component": "Frame"}}},
   {"call": "engine.execute", "params": {"command": "solid.box", "params": {"length": 5, "width": 20, "height": 15, "corner": [60, 0, 0], "body_name": "Rib"}}},
   {"call": "engine.execute", "params": {"command": "component.activate", "params": {"component": "root"}}},
-  {"expect": {"bodies": 3, "browser_has": ["Bodies", "Plate", "Rib", "Shaft"], "handle_order": ["eye:Bodies", "eye:Plate"]}},
+  {"expect": {"bodies": 3, "browser_has": ["Bodies", "Plate", "Rib", "Shaft"], "handle_order": ["indent:Bodies", "indent:Plate"]}},
 
   {"note": "Never: every component's bodies sit straight under it, two of them too."},
   {"call": "ui.prefs", "params": {"browser_bodies_folders": "never"}},
@@ -23,7 +24,7 @@
 
   {"note": "Always: every component keeps its folder, Pin's too (the last Bodies row drawn, between Pin:1 and Shaft)."},
   {"call": "ui.prefs", "params": {"browser_bodies_folders": "always"}},
-  {"expect": {"prefs": {"browser_bodies_folders": "always"}, "browser_has": ["Bodies", "Plate", "Rib", "Shaft"], "handle_order": ["eye:Pin:1", "eye:Bodies", "eye:Shaft"]}},
+  {"expect": {"prefs": {"browser_bodies_folders": "always"}, "browser_has": ["Bodies", "Plate", "Rib", "Shaft"], "handle_order": ["indent:Pin:1", "indent:Bodies", "indent:Shaft"]}},
 
   {"note": "A value this version doesn't know is refused and changes nothing."},
   {"call": "ui.prefs", "params": {"browser_bodies_folders": "sometimes"}, "fail": true},

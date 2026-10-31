@@ -829,7 +829,7 @@ mod tests {
                 Some("surface")
             } else if c.panel == "CONSTRAINTS" {
                 Some("constraint")
-            } else if matches!(c.id, "sketch.construction" | "sketch.centerline") {
+            } else if matches!(c.id, "sketch.construction" | "sketch.centerline") || c.id.starts_with("sketch.construction_line") {
                 Some("construction")
             } else if c.id.starts_with("sketch.") && matches!(c.panel, "CREATE" | "MODIFY" | "PATTERN" | "FINISH SKETCH") {
                 Some("sketch")
@@ -942,6 +942,7 @@ mod tests {
     #[test]
     fn sketch_construction_modes_have_distinct_icons() {
         let families: &[&[&str]] = &[
+            crate::sketch_families::family("sketch.construction_line").unwrap().commands,
             &["sketch.polygon.inscribed", "sketch.polygon.circumscribed", "sketch.polygon.edge"],
             &["sketch.slot.center_to_center", "sketch.slot.overall", "sketch.slot.center_point"],
             &["sketch.slot.arc_three_point", "sketch.slot.arc_center"],

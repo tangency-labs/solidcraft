@@ -152,6 +152,39 @@ fn measured_bar_honours_size_position_and_ignores_unknown_slots() {
 }
 
 #[test]
+fn a_bar_on_the_top_edge_sits_under_the_top_and_keeps_the_corner_controls_below_it() {
+    use crate::ui_kit::NAV_BOTTOM;
+    // Older settings have no edge and keep the bar at the bottom; a bad value recovers the same way.
+    let old: NavigationBar = serde_json::from_value(json!({"position": "right"})).unwrap();
+    assert_eq!(old.edge, Edge::Bottom);
+    let bad: NavigationBar = serde_json::from_value(json!({"edge": "sideways"})).unwrap();
+    assert_eq!(bad.edge, Edge::Bottom);
+    assert!(validate(&json!({"edge": "sideways"})).is_err());
+    assert!(validate(&json!({"edge": "top"})).is_ok());
+    let canvas = Rect::from_min_size(pos2(20.0, 30.0), vec2(900.0, 600.0));
+    for position in [Position::Centre, Position::Left, Position::Right] {
+        for edge in [Edge::Bottom, Edge::Top] {
+            let prefs: NavigationBar = serde_json::from_value(json!({"position": position, "edge": edge})).unwrap();
+            assert_eq!(serde_json::to_value(&prefs).unwrap()["edge"], if edge == Edge::Top { "top" } else { "bottom" });
+            let bar = measure(canvas, &prefs, NavCaps::MODEL, |_| 50.0);
+            match edge {
+                Edge::Bottom => assert_eq!(bar.rect.bottom(), canvas.bottom() - NAV_BOTTOM),
+                Edge::Top => assert_eq!(bar.rect.top(), canvas.top() + NAV_BOTTOM),
+            }
+            for corner in [egui::Vec2::ZERO, vec2(120.0, 32.0)] {
+                let layout =
+                    crate::viewport_layout::Layout::with_content(canvas, canvas, &[], 1.0, crate::prefs::NavigatorStyle::Cube, corner, bar.rect);
+                // The axis view keeps its full size: on top, it moves down past the bar instead.
+                assert_eq!(layout.axis_view.width(), crate::viewport::axis_view_size(crate::prefs::NavigatorStyle::Cube));
+                assert!(!layout.axis_view.intersect(bar.rect).is_positive(), "{position:?} {edge:?}");
+                assert!(!layout.confirm.intersect(bar.rect).is_positive(), "{position:?} {edge:?}");
+                assert!(!layout.confirm.intersect(layout.axis_view).is_positive(), "{position:?} {edge:?}");
+            }
+        }
+    }
+}
+
+#[test]
 fn navigation_slot_visuals_never_use_focus_as_a_fill() {
     use crate::ui_kit::{NavigationFill, navigation_visual};
     for kind in [Kind::Action, Kind::Tool, Kind::Toggle, Kind::Menu] {
@@ -438,7 +471,7 @@ fn navigation_context_menus_customise_hide_reset_and_remove() {
         match action {
             "customise" => {
                 assert!(h.app.prefs_window.open);
-                assert_eq!(h.app.prefs_window.section, crate::prefs::PAGE_INTERFACE);
+                assert_eq!(h.app.prefs_window.section, crate::prefs::PAGE_LAYOUT);
                 assert!(crate::scenario::rect_of("prefs:navbar:preview").is_some());
             }
             "hide" => assert!(!h.app.ui.show_navigation_bar),

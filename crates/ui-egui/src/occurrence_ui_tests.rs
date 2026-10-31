@@ -35,6 +35,29 @@ fn fixture() -> (Harness, u64, u64, u64) {
 }
 
 #[test]
+fn folder_visibility_shortcut_targets_only_the_clicked_placement() {
+    let (mut h, component, first, second) = fixture();
+    let group = h.app.run("browser.group", json!({"component":component,"folder":"bodies","items":["Body1"],"name":"Group"})).unwrap()["group"]
+        .as_u64()
+        .unwrap();
+    h.app.preferences.browser_bodies_folders = crate::prefs::BodiesFolders::Always;
+    h.app.tree.collapsed.insert(super::occurrence_key(&[first]));
+    h.settle();
+    let first_body = h.app.session.occurrence_bodies(&[first], false).unwrap()[0].clone();
+    let second_body = h.app.session.occurrence_bodies(&[second], false).unwrap()[0].clone();
+    for (label, key) in [("Bodies", format!("o:{second}/bodies")), ("Group (1)", format!("o:{second}/g{group}"))] {
+        h.step(&json!({"click":{"handle":format!("row:{label}")}})).unwrap();
+        h.step(&json!({"key":"V"})).unwrap();
+        assert_eq!(h.app.session.visibility.hidden_folders, vec![key]);
+        assert!(h.app.session.body_visible(&first_body));
+        assert!(!h.app.session.body_visible(&second_body));
+        h.step(&json!({"key":"V"})).unwrap();
+        assert!(h.app.session.body_visible(&second_body));
+        h.step(&json!({"click":{"handle":format!("row:{label}")}})).unwrap();
+    }
+}
+
+#[test]
 fn browser_reuses_unchanged_rows_and_refreshes_live_state_and_replaced_documents() {
     let (mut h, _, first, second) = fixture();
     let second_body = h.app.session.occurrence_bodies(&[second], false).unwrap().pop().unwrap();
@@ -409,11 +432,10 @@ fn a_folded_body_sits_one_level_under_its_nested_placement() {
     h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"body_name":"Pin"})).unwrap();
     h.app.run("component.activate", json!({"component":0})).unwrap();
     h.app.tree.collapsed.insert(format!("{}/bodies", super::occurrence_key(&[parent, child])));
-    // How many levels the body's row sits under its placement's (each eye sits at the same offset
-    // in its row).
+    // How many levels the body's row sits under its placement's.
     let levels = || -> Option<i32> {
-        let placement = crate::scenario::handle_at(&format!("eye:occurrence:{parent}/{child}"))?;
-        let body = crate::scenario::handle_at("eye:Pin")?;
+        let placement = crate::scenario::handle_at("indent:Child:1")?;
+        let body = crate::scenario::handle_at("indent:Pin")?;
         Some(((body.x - placement.x) / super::INDENT).round() as i32)
     };
     for (mode, want) in [(BodiesFolders::Several, Some(1)), (BodiesFolders::Never, Some(1)), (BodiesFolders::Always, None)] {
@@ -471,7 +493,7 @@ fn a_folded_folders_menu_items_move_to_the_placements_menu() {
     let group = context_menu::items(&h.app, &target).into_iter().find(|i| i.id == "ui.groupSelected").unwrap();
     context_menu::run_item(&mut h.app, &group, egui::Pos2::ZERO);
     let made = h.app.session.doc.browser_groups.iter().find(|g| g.component == component).unwrap();
-    assert_eq!(made.items, ["Body1", "Second"]);
+    assert_eq!(made.item_keys().collect::<Vec<_>>(), ["Body1", "Second"]);
     h.app.preferences.browser_bodies_folders = BodiesFolders::Always;
     assert!(!has(&h, "component.from_bodies"), "Always: on the folder's own menu");
 }
@@ -515,4 +537,27 @@ fn dragging_an_occurrence_row_onto_another_moves_it_into_that_component() {
     h.frames(2);
     let o = h.app.session.doc.occurrences.iter().find(|o| o.id == a_occ).unwrap();
     assert_eq!(o.parent, 0, "A's occurrence moved back out to the design");
+}
+
+/// Dropping a placement row on the top of a sibling's row puts it before that sibling, in the
+/// order saved with the design; the rows follow. (The middle of a row moves it into that
+/// component, as above.)
+#[test]
+fn dragging_an_occurrence_row_onto_the_top_of_a_sibling_reorders_them() {
+    let mut h = Harness::new();
+    let mut placed = Vec::new();
+    for name in ["A", "B", "C"] {
+        placed.push(h.app.run("component.create", json!({"name":name})).unwrap()["occurrence"].as_u64().unwrap());
+        h.app.run("component.activate", json!({"component":0})).unwrap();
+    }
+    let [a, b, c] = [placed[0], placed[1], placed[2]];
+    h.frames(3);
+    let row = |id: u64| crate::scenario::handle_at(&format!("row:occurrence:{id}")).unwrap();
+    let (from, to) = (row(c), row(a));
+    assert_eq!(h.call("ui.drag", json!({"x0":from.x,"y0":from.y,"x1":to.x,"y1":to.y - 10.0,"steps":12}))["ok"], true);
+    h.frames(3);
+    let saved = &h.app.session.doc.browser_order["0/components"];
+    assert_eq!(*saved, [c, a, b].map(|id| solidcraft_engine::doc::BrowserEntry::item(&id.to_string())));
+    assert!(row(c).y < row(a).y && row(a).y < row(b).y, "the rows follow the saved order");
+    assert!(h.app.session.doc.occurrences.iter().all(|o| o.parent == 0), "none moved into another");
 }

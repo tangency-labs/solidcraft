@@ -206,6 +206,20 @@ A dimension can drive the sketch, or be driven by it and only show the value.
 - **Elsewhere:** dimension, dimensional constraint, driving dimension.
 - **For translators:** not a drawing dimension and not a measured value.
 
+### equation curve
+
+A sketch curve whose shape comes from formulas over a range of one variable.
+
+It is a fit point spline through fixed points that the formulas place, and they place them again
+when the design's parameters change. Compare *spline*, whose points are placed by hand.
+
+- **In SolidCraft:** `sketch.equation_curve`, `sketch.equation_curve.edit`; the `equations`
+  design-file key of a sketch; `variable_unit` says whether the variable is a plain number or a
+  length like its range.
+- **Don't use:** formula curve, function curve, parametric curve (for the command).
+- **Elsewhere:** equation-driven curve, curve from equation, function plot.
+- **For translators:** "equation" is a mathematical formula, not a balance or an equality constraint.
+
 ### feature
 
 One step in the timeline that creates or changes geometry, such as an extrude, a fillet or a
@@ -260,6 +274,22 @@ A material sets mass, centre of gravity and strength values. How the body looks 
 - **Elsewhere:** material, physical material.
 - **For translators:** not an appearance.
 
+### moment of inertia
+
+How a body's mass resists turning about an axis: the mass times the square of its distance from
+that axis, summed over the body.
+
+SolidCraft reports the whole inertia tensor about the centre of mass in world axes, with its
+*principal moments* and *principal axes*: the three axes with no products of inertia between
+them. The *first moments* are the mass times the centre of mass.
+
+- **In SolidCraft:** `inertia_g_mm2`, `principal_moments_g_mm2`, `principal_axes`,
+  `first_moment_g_mm` and `about` in `component.properties` and `occurrence.properties`; the
+  Properties window's Moment of inertia section.
+- **Don't use:** rotational inertia, second moment of mass, mass moment.
+- **Elsewhere:** moment of inertia, inertia tensor, mass moment of inertia.
+- **For translators:** not the second moment of area of a cross-section, a different quantity.
+
 ### occurrence
 
 One placed copy of a component inside its parent component.
@@ -295,6 +325,32 @@ The first instance is the original.
 - **Elsewhere:** instance, element, occurrence.
 - **For translators:** not an occurrence of a component.
 
+### personal sheet metal rule
+
+A sheet metal rule kept in the user's preferences instead of a design, ready to add to any design.
+
+Picking one in Sheet Metal Rules fills the rule manager, and its OK copies the rule into the
+design, which then keeps a copy of its own. It is an app setting, not part of a design.
+
+- **In SolidCraft:** Sheet Metal Rules › Personal rules (`sheet.manage_rules`); the
+  `personal_sheet_rules` key of the stored preferences.
+- **Don't use:** preset, template, library rule.
+- **Elsewhere:** rule library, sheet metal style library.
+- **For translators:** "personal" as in the user's own, not private or confidential.
+
+### print face
+
+The flat face of a body that lies on the print bed when the body is sent to a slicer.
+
+A body has one print face at most. The export turns a copy of the body so this face points down
+at Z = 0, with the centre of mass over the origin; the design itself does not move.
+
+- **In SolidCraft:** `body.print_face`; the `print_faces` of a design; the `print_faces` and
+  `warnings` of a `file.send_to_slicer` reply.
+- **Don't use:** bottom face, base face (both say where a face is now, not where it is printed).
+- **Elsewhere:** place on face, lay flat, bed face.
+- **For translators:** the face the part stands on while it prints, not the printer's bed.
+
 ### reference edge
 
 A straight edge of a flat face that a Single hole's centre or a cylinder's base centre keeps a
@@ -323,6 +379,24 @@ are kept, not deleted.
 - **Elsewhere:** rollback bar, rollback marker, end-of-part marker.
 - **For translators:** "history" is the undo history, not the timeline. French had three names
   for this marker while English did.
+
+### settings profile
+
+A named set of input and interface preferences that can be switched, exported and imported as
+one.
+
+A settings profile holds the Interface, Navigation and Sketch preferences, the interface
+language, keyboard shortcuts, the toolbar and the S box favourites. Settings that belong to one
+computer (the 3D mouse, graphics, units) stay out. It is an app setting, not part of a design.
+
+- **In SolidCraft:** `settings.profile.list`, `settings.profile.save`, `settings.profile.apply`,
+  `settings.profile.rename`, `settings.profile.delete`, `settings.profile.export`,
+  `settings.profile.import`; the `settings_profiles` key of the stored preferences; the
+  `solidcraft-profile/1` file format.
+- **Don't use:** preset, configuration, workspace (for the set of settings).
+- **Elsewhere:** settings profile, user profile, preferences set.
+- **For translators:** not a sketch profile and not a frame profile (see *Words with more than
+  one meaning*, "Profile"), and not a design configuration.
 
 ### sketch
 
@@ -407,6 +481,9 @@ share a catalogue entry. Each meaning below gets its own term and, in time, its 
 | Part | a standard part | *standard part* | `parts.*` |
 | | a body, an occurrence or the design | *body*, *occurrence*, *design* | catalogue texts that say "part" |
 | | a design property | *part number* | Design Properties |
+| Profile | a closed region of a sketch that a feature uses | profile | `solid.extrude`, `solid.revolve` |
+| | the cross-section a frame member follows | frame profile | `frame.profile.*` |
+| | a named set of preferences | *settings profile* | `settings.profile.*`, Preferences › General |
 | Gap | the space a hem leaves | hem gap | the Hem dialog's Gap row |
 | | an open end in the sketch continuity legend | open end | the sketch continuity legend |
 | Clearance | the Clearance command | clearance check | `inspect.clearance` |
@@ -447,6 +524,6 @@ reports a different name (`EdgeFlangeFeature`), so a script can't match one agai
 
 ## Open questions for the maintainer
 
-- **British or American spelling** for labels and docs. Today both are in use (colour and color,
-  centre and center, favourite and favorite); ids and keys use American spelling. #2501 proposes
-  an English (UK) language option, so either base spelling can be read in the other.
+- **British or American spelling** in the docs. The labels are settled: `en.json` is American
+  English, and English (UK) (`en-GB.json`, #2501) holds the British spelling. The docs still use
+  both (colour and color, centre and center); ids and keys use American spelling.

@@ -299,6 +299,17 @@ fn groups(t: &Tokens) -> Vec<Group> {
         group("UI text", &[("error", t.error), ("warning", t.warning), ("text", t.text)], &[("panel", t.panel)]),
         // Every axis drawn: origin, view triad, navigation cube, Move gizmo… (one set, #976).
         group("axes", &[("axis_x", t.axis_x), ("axis_y", t.axis_y), ("axis_z", t.axis_z)], &[("viewport_top", t.viewport_top)]),
+        group(
+            "assembly Move",
+            &[("joint_manipulator", t.joint_manipulator), ("joint_axis", t.joint_axis)],
+            &[
+                ("viewport_top", t.viewport_top),
+                ("viewport_bottom", t.viewport_bottom),
+                ("body", t.body),
+                ("sel_face", t.sel_face),
+                ("body_selected", t.body_selected),
+            ],
+        ),
         group("bend lines", &[("bend_up", t.bend_up), ("bend_down", t.bend_down)], &[("viewport_top", t.viewport_top)]),
         group("box select", &[("box_window", t.box_window), ("box_crossing", t.box_crossing)], &[("viewport_top", t.viewport_top)]),
         // Sketch dimensions (#7861): their lines and values, driving and driven, apart from the

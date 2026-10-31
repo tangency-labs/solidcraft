@@ -81,9 +81,26 @@ fn sketch_keys_outside_a_sketch_sketch_on_the_selected_plane_and_start_their_too
         assert!(h.app.session.active_sketch.is_some(), "{key}: no sketch opened");
         assert_eq!(h.app.session.world_state().sketches.len(), 1, "{key}");
         assert!(normal(&h).y.abs() > 0.999, "{key}: not on XZ: {:?}", normal(&h));
-        assert_eq!(tool(&h), Some(cmd), "{key}");
-        assert!(h.app.dialog.is_none(), "{key}: dialog left open");
+        if cmd == "sketch.project" {
+            assert!(h.app.preferences.project_options_dialog, "{key}: options are enabled by default");
+            assert!(matches!(h.app.dialog.as_ref().map(|d| &d.kind), Some(crate::dialogs::Kind::SketchProject { .. })), "{key}");
+            assert!(tool(&h).is_none(), "{key}: Project should open its options dialog");
+        } else {
+            assert_eq!(tool(&h), Some(cmd), "{key}");
+            assert!(h.app.dialog.is_none(), "{key}: dialog left open");
+        }
     }
+}
+
+#[test]
+fn project_can_keep_its_previous_direct_pick_workflow() {
+    let mut h = Harness::new();
+    h.app.preferences.project_options_dialog = false;
+    h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+    h.app.start("sketch.project");
+    h.settle();
+    assert!(h.app.dialog.is_none());
+    assert_eq!(tool(&h), Some("sketch.project"));
 }
 
 #[test]

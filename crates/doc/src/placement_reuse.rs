@@ -31,6 +31,7 @@ impl Model {
             return false;
         }
         self.evaluate(doc);
+        self.mark_fingerprinted(doc);
         if !self.no_cache && self.primed.is_none() && self.placement_local {
             self.placement_inputs = Some(Inputs { document: doc.clone(), state: Arc::downgrade(&self.state()) });
         }
@@ -38,13 +39,16 @@ impl Model {
     }
 
     /// [`Model::refingerprint`] for a shared document: a proof that held for the results before
-    /// is kept for `doc`, since nothing was built differently (pinned body names, say).
-    pub fn refingerprint_shared(&mut self, doc: &Arc<Document>) {
+    /// is kept for `doc`, since nothing was built differently (pinned body names, say). The
+    /// first `keep` results keep their fingerprints: [`Model::pinned_prefix`] of the document
+    /// before the pins, or 0.
+    pub fn refingerprint_shared(&mut self, doc: &Arc<Document>, keep: usize) {
         let proven = !self.no_cache
             && self.primed.is_none()
             && self.placement_inputs.as_ref().is_some_and(|inputs| inputs.state.upgrade().is_some_and(|state| Arc::ptr_eq(&state, &self.state())))
             && !self.is_stale();
-        self.refingerprint(doc);
+        self.refingerprint_from(doc, keep);
+        self.mark_fingerprinted(doc);
         if proven && self.placement_local {
             self.placement_inputs = Some(Inputs { document: doc.clone(), state: Arc::downgrade(&self.state()) });
         }
@@ -127,6 +131,7 @@ fn same_geometry_inputs(a: &Document, b: &Document) -> bool {
         text_params,
         next_component_color_index,
         materials,
+        print_faces,
         user_materials,
         appearances,
         body_components,
@@ -162,6 +167,7 @@ fn same_geometry_inputs(a: &Document, b: &Document) -> bool {
         && *text_params == b.text_params
         && *next_component_color_index == b.next_component_color_index
         && *materials == b.materials
+        && *print_faces == b.print_faces
         && *user_materials == b.user_materials
         && *appearances == b.appearances
         && *body_components == b.body_components

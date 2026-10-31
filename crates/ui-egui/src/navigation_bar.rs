@@ -17,6 +17,14 @@ pub(crate) const SELECTION_MODE_ICONS: &[(&str, &str)] = &[
     ("sketch", "select_sketch"),
 ];
 
+/// The engine's style ids in index order (`ui.visual_style` 0..3), with the English menu label.
+pub(crate) const VISUAL_STYLES: [(&str, &str); 4] = [
+    ("shaded_with_edges", "Shaded with edges"),
+    ("shaded", "Shaded"),
+    ("wireframe", "Wireframe"),
+    ("shaded_with_hidden_edges", "Shaded with hidden edges"),
+];
+
 pub(crate) fn visual_style_icon(style: u8) -> &'static str {
     match style {
         1 => "style_shaded",
@@ -116,6 +124,15 @@ pub enum Position {
     Right,
 }
 
+/// The edge of the 3D view the bar sits on (#8183): the bottom, or the top, under the ribbon.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Edge {
+    #[default]
+    Bottom,
+    Top,
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Size {
@@ -166,6 +183,7 @@ pub struct NavigationBar {
     pub slots: Vec<String>,
     pub slot_options: std::collections::BTreeMap<String, SlotOptions>,
     pub position: Position,
+    pub edge: Edge,
     pub size: Size,
     pub labels: Labels,
     pub idle: Idle,
@@ -180,6 +198,7 @@ impl Default for NavigationBar {
                 .collect(),
             slot_options: Default::default(),
             position: Position::default(),
+            edge: Edge::default(),
             size: Size::default(),
             labels: Labels::default(),
             idle: Idle::default(),
@@ -223,6 +242,9 @@ impl<'de> Deserialize<'de> for NavigationBar {
         if let Some(v) = value.get("position") {
             bar.position = serde_json::from_value(v.clone()).unwrap_or_default();
         }
+        if let Some(v) = value.get("edge") {
+            bar.edge = serde_json::from_value(v.clone()).unwrap_or_default();
+        }
         if let Some(v) = value.get("size") {
             bar.size = serde_json::from_value(v.clone()).unwrap_or_default();
         }
@@ -252,6 +274,7 @@ pub(crate) fn validate(value: &Value) -> Result<(), String> {
                     })
             }),
             "position" => serde_json::from_value::<Position>(value.clone()).is_ok(),
+            "edge" => serde_json::from_value::<Edge>(value.clone()).is_ok(),
             "size" => serde_json::from_value::<Size>(value.clone()).is_ok(),
             "labels" => serde_json::from_value::<Labels>(value.clone()).is_ok(),
             "idle" => serde_json::from_value::<Idle>(value.clone()).is_ok(),

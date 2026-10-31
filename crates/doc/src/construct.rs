@@ -344,9 +344,12 @@ fn model_line(st: &ModelState, g: &GeoRef) -> Result<(Vec3, Vec3)> {
                 _ => Err(bad("the face is not a cylinder, cone or torus")),
             }
         }
-        _ => Err(bad("pick a straight or circular edge, or a cylinder, cone or torus face")),
+        _ => Err(bad(MODEL_AXIS_REFS)),
     }
 }
+
+/// What [`model_axis`] says about a reference that is neither an edge nor a face.
+pub const MODEL_AXIS_REFS: &str = "pick a straight or circular edge, or a cylinder, cone or torus face";
 
 /// The axis a feature turns about when an edge or face of the model is picked for it (a revolve,
 /// a circular pattern, a plane at an angle), as [`model_line`] finds it. The direction is

@@ -34,7 +34,7 @@ pub static COMMANDS: &[CommandSpec] = &[
          revision (moves whenever the design, what is hidden or a component's uncaptured position changes, \
          never on a selection or a view; from one counter for the whole run, so it never repeats). Read-only",
     ),
-    CommandSpec::new("sketch.inspect", "Inspect Sketch", sketch_inspect).icon("inspect").noundo().params("sketch?: id|name (default active)"),
+    CommandSpec::new("sketch.inspect", "Inspect Sketch", sketch_inspect).at("SKETCH", "INSPECT").icon("inspect").noundo().params("sketch?: id|name (default active)"),
     CommandSpec::new("model.edges", "List Edges", model_edges).icon("inspect").noundo().params("body: name"),
     CommandSpec::new("model.faces", "List Faces", model_faces).icon("inspect").noundo().params(
         "body: name → per face: index, name (what face.delete, sheet.convert `face`, solid.shell … take in place of a point), exact, area, centroid (not always on the face), \
@@ -56,20 +56,20 @@ pub static COMMANDS: &[CommandSpec] = &[
         .params("target: appearance.chain target. Copies its resolved look to a transient session clipboard. No document change or dialogs."),
     CommandSpec::new("appearance.paste", "Paste Look", appearance_gestures::paste).icon("paste").key("Ctrl+Alt+V")
         .params("bodies/faces/components: appearance.assign targets. Applies the copied look atomically in one undo step; no dialogs."),
-    CommandSpec::new("appearance.favorite", "Favourite Look", appearance_gestures::favorite).icon("star").noundo().doc_only()
+    CommandSpec::new("appearance.favorite", "Favorite Look", appearance_gestures::favorite).icon("star").noundo().doc_only()
         .params("look: appearance.assign look; favorite: bool → validated look and preference request; UI library preference only, no document change or dialogs."),
     CommandSpec::new("appearance.chain", "Appearance Chain", appearance_chain::chain).icon("inspect").noundo().params(
-        "target: {body: name} | {body: name, face: zero-based model.faces index} | {component: name or id}. Returns steps [{step: face|body|component|material, look: {name,color,opacity,pbr?} or null}] in precedence order and active (step or null). Component material is the common default look of its directly owned bodies, null if mixed/empty. Imported paint is a display fallback outside the four steps. Read-only; no dialogs",
+        "target: {body: name} | {body: name, face: zero-based model.faces index} | {component: name or id}; a placed copy's name (`KB (K:2)`, `K:2`) means the body or component it shows. Returns steps [{step: face|body|component|material, look: {name,color,opacity,pbr?} or null}] in precedence order and active (step or null). Component material is the common default look of its directly owned bodies, null if mixed/empty. Imported paint is a display fallback outside the four steps. Read-only; no dialogs",
     ),
     CommandSpec::new("appearance.replace", "Replace Appearance", appearance_chain::replace).icon("appearance").params(
-        "from: library name | saved look {name,color,opacity,pbr?} (copy appearance.list in_design); to: library name | assignment look {appearance? | color, name?, opacity?, pbr?} (appearance.assign rules; no clear). Matches the full look including name and PBR. scope?: {bodies?: [names], components?: [names or ids]}, at most 10000 targets; body scope includes face overrides, component scope selects only the component override. Omitted scope means all overrides, including hidden/suppressed ones; physical defaults are unchanged. Duplicate targets count once. Returns count of rewritten overrides; zero adds no history. One undo step, atomic; no dialogs. Designs above 100000 overrides refuse",
+        "from: library name | saved look {name,color,opacity,pbr?} (copy appearance.list in_design); to: library name | assignment look {appearance? | color, name?, opacity?, pbr?} (appearance.assign rules; no clear). Matches the full look including name and PBR. scope?: {bodies?: [names], components?: [names or ids]} (a placed copy's name means the body or component it shows), at most 10000 targets; body scope includes face overrides, component scope selects only the component override. Omitted scope means all overrides, including hidden/suppressed ones; physical defaults are unchanged. Duplicate targets count once. Returns count of rewritten overrides; zero adds no history. One undo step, atomic; no dialogs. Designs above 100000 overrides refuse",
     ),
     CommandSpec::new("appearance.library", "Appearance Library", appearance_library).icon("library")
         .noundo()
         .params("→ 20 legacy scalar appearances, six opaque PBR finishes and 40 starter recipes with IDs, categories, provenance, requirements and availability; six starter glass recipes are unavailable"),
     CommandSpec::new("appearance.list", "List Appearances", appearance_list).icon("list")
         .noundo()
-        .params("body?: name → assigned appearances; with body, its resolved look and its faces' (face index, look)"),
+        .params("body?: name (or a placed copy's, `KB (K:2)`: the body it shows) → assigned appearances; with body, its resolved look and its faces' (face index, look)"),
     CommandSpec::new("material.list", "List Materials", material_list).icon("list")
         .noundo()
         .doc_only()
@@ -240,7 +240,12 @@ fn sketch_json(s: &Session, id: u64) -> Option<Value> {
         .profiles
         .iter()
         .enumerate()
-        .map(|(i, p)| json!({"index": i, "area_mm2": p.area, "centroid_sketch": p.centroid, "curves": p.outer_curves, "holes": p.hole_curves}))
+        // A loop records one entry per piece it walks, and a conic or spline is walked as many
+        // short pieces: each loop names a curve once, in loop order.
+        .map(|(i, p)| {
+            let holes: Vec<Vec<String>> = p.hole_curves.iter().map(|h| solidcraft_sketch::distinct_curves(h)).collect();
+            json!({"index": i, "area_mm2": p.area, "centroid_sketch": p.centroid, "curves": solidcraft_sketch::distinct_curves(&p.outer_curves), "holes": holes})
+        })
         .collect();
     Some(json!({
         "id": id,
@@ -514,12 +519,7 @@ pub(super) fn appearance(s: &mut Session, p: &Value) -> Result<Value> {
     }
     let mut comps: Vec<u64> = Vec::new();
     for c in string_list(cmd, p, "components")? {
-        let id = s
-            .doc
-            .find_component(&c)
-            .or_else(|| s.doc.occurrences.iter().find(|o| o.name == c).map(|o| o.component))
-            .filter(|id| *id != 0)
-            .ok_or_else(|| bad(cmd, format!("no component `{c}`")))?;
+        let id = s.component_or_placement(&c).ok_or_else(|| bad(cmd, format!("no component `{c}`")))?;
         comps.push(id);
     }
     if bodies.is_empty() && faces.is_empty() && comps.is_empty() {
@@ -786,9 +786,12 @@ fn appearance_list(s: &mut Session, p: &Value) -> Result<Value> {
     });
     if let Some(name) = str_(p, "body") {
         let st = s.model.state();
-        let b = st.body(name).ok_or_else(|| bad("appearance.list", format!("no body `{name}`")))?;
+        // A placed copy's name (`KB (K:2)`) means the body it shows, as appearance.assign takes
+        // it (#9740): the reply names that body.
+        let own = s.own_body_name(name);
+        let b = own.as_deref().and_then(|n| st.body(n)).ok_or_else(|| bad("appearance.list", format!("no body `{name}`")))?;
         out["body"] = json!({
-            "name": name,
+            "name": b.name,
             "appearance": s.doc.model_body_look(b).map(|l| look_json(&l)),
             "color": s.doc.body_color(b),
             "faces": s.doc.face_colors(b).iter().map(|(i, l)| json!({"face": i, "appearance": look_json(l)})).collect::<Vec<_>>(),

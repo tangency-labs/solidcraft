@@ -21,16 +21,20 @@ fn component(s: &Session, cmd: &str, value: &Value) -> Result<u64> {
         Value::Number(_) => value.as_u64().ok_or_else(|| bad(cmd, "component must be a name or unsigned id"))?.to_string(),
         _ => return Err(bad(cmd, "component must be a name or unsigned id")),
     };
-    s.doc.find_component(&key).filter(|id| *id != 0).ok_or_else(|| bad(cmd, "unknown or root component"))
+    // A placement's name (`K:2`) means its component, as appearance.assign takes it (#9740).
+    s.component_or_placement(&key).ok_or_else(|| bad(cmd, "unknown or root component"))
 }
 
 pub(super) fn chain(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "appearance.chain";
     let target = p.get("target").and_then(Value::as_object).ok_or_else(|| bad(cmd, "give one target object"))?;
-    let target = match (target.get("body"), target.get("face"), target.get("component")) {
-        (Some(body), None, None) if target.len() == 1 => AppearanceTarget::Body(name(cmd, body)?),
+    // A placed copy's name (`KB (K:2)`) means the body it shows, as appearance.assign takes it
+    // (#9740); a name that is neither is left for the chain to refuse.
+    let body = target.get("body").map(|b| name(cmd, b).map(|n| s.own_body_name(n).unwrap_or_else(|| n.to_string()))).transpose()?;
+    let target = match (body.as_deref(), target.get("face"), target.get("component")) {
+        (Some(body), None, None) if target.len() == 1 => AppearanceTarget::Body(body),
         (Some(body), Some(face), None) if target.len() == 2 => AppearanceTarget::Face {
-            body: name(cmd, body)?,
+            body,
             face: face.as_u64().and_then(|f| usize::try_from(f).ok()).ok_or_else(|| bad(cmd, "face must be a zero-based unsigned index"))?,
         },
         (None, None, Some(id)) if target.len() == 1 => AppearanceTarget::Component(component(s, cmd, id)?),
@@ -80,12 +84,18 @@ fn scope(s: &Session, cmd: &str, value: &Value) -> Result<AppearanceScope> {
     if object.contains_key("bodies") {
         let state = s.model.state();
         let bodies: BTreeSet<_> = state.bodies.iter().map(|b| b.name.as_str()).collect();
+        // A placed copy's name means the body it shows (#9740). Built once, and only when a
+        // name is not the model's own.
+        let mut placed: Option<BTreeMap<String, String>> = None;
         for body in list("bodies")? {
             let body = name(cmd, body)?;
-            if !bodies.contains(body) {
-                return Err(bad(cmd, "unknown body in scope"));
-            }
-            scope.bodies.insert(body.into());
+            let own = if bodies.contains(body) {
+                body.to_string()
+            } else {
+                let placed = placed.get_or_insert_with(|| s.body_frames().iter().map(|(world, own, _)| (world.clone(), own.clone())).collect());
+                placed.get(body).cloned().ok_or_else(|| bad(cmd, "unknown body in scope"))?
+            };
+            scope.bodies.insert(own);
         }
     }
     if object.contains_key("components") {
@@ -93,11 +103,13 @@ fn scope(s: &Session, cmd: &str, value: &Value) -> Result<AppearanceScope> {
         // 10000-component design once per target.
         let ids: BTreeSet<_> = s.doc.components.iter().map(|c| c.id).collect();
         let names: BTreeMap<_, _> = s.doc.components.iter().rev().map(|c| (c.name.as_str(), c.id)).collect();
+        // A placement's name (`K:2`) means its component (#9740).
+        let placements: BTreeMap<_, _> = s.doc.occurrences.iter().rev().map(|o| (o.name.as_str(), o.component)).collect();
         for target in list("components")? {
             let id = match target {
                 Value::String(_) => {
                     let key = name(cmd, target)?;
-                    key.parse::<u64>().ok().filter(|id| ids.contains(id)).or_else(|| names.get(key).copied())
+                    key.parse::<u64>().ok().filter(|id| ids.contains(id)).or_else(|| names.get(key).copied()).or_else(|| placements.get(key).copied())
                 }
                 Value::Number(_) => target.as_u64().filter(|id| ids.contains(id)),
                 _ => None,

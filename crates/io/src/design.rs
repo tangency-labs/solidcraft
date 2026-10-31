@@ -1087,12 +1087,12 @@ mod tests {
             .collect();
         let state = json!({
             "bodies": [[0, bodies.len()]], "sketches": [], "body_counter": 7, "sheets": [], "construct": [], "threads": [],
-            "sketch_keys": [], "blend_edges": {}, "fitted": {}, "tapered": {},
+            "sketch_key_set": 0, "blend_edges": {}, "fitted": {}, "tapered": {},
         });
         solidcraft_doc::SavedModel {
             records: json!({
                 "features": [{"id": 1, "fingerprint": "0000000000000000", "ms": 0.0, "skipped": false, "state": 0}],
-                "states": [state], "model_bodies": records, "names": [{"faces": [], "info": []}], "sketches": [], "sheets": [],
+                "states": [state], "model_bodies": records, "names": [{"faces": [], "info": []}], "sketches": [], "sheets": [], "sketch_key_sets": [{"set": [], "drop": []}],
             }),
             bodies,
         }
@@ -1107,6 +1107,38 @@ mod tests {
         assert!(!native_cache::source_trusted("unknown", false));
         assert!(native_cache::source_trusted("unknown", true));
         assert!(native_cache::source_trusted("0123abc", false));
+    }
+
+    /// The model cache is keyed by the source of the crates a model is computed from (#7168):
+    /// each one `doc` is built from must be in it, or an update that changed one would open
+    /// designs with the model the code before it computed.
+    #[test]
+    fn the_cache_key_covers_every_crate_the_model_is_computed_from() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let read = |p: std::path::PathBuf| std::fs::read_to_string(&p).unwrap_or_else(|e| panic!("{}: {e}", p.display()));
+        let workspace = read(root.join("Cargo.toml"));
+        // `solidcraft-geom = { path = "crates/geom" }`: a workspace crate's folder.
+        let folder = |name: &str| {
+            let prefix = format!("{name} = {{ path = \"crates/");
+            workspace.lines().find_map(|l| l.strip_prefix(prefix.as_str())?.split('"').next().map(str::to_string))
+        };
+        let keyed: Vec<&str> = env!("SOLIDCRAFT_EVALUATION_CRATES").split(',').collect();
+        let (mut todo, mut seen) = (vec!["doc".to_string()], BTreeSet::new());
+        while let Some(krate) = todo.pop() {
+            if !seen.insert(krate.clone()) {
+                continue;
+            }
+            assert!(keyed.contains(&krate.as_str()), "crates/{krate} computes models: add it to EVALUATION_CRATES in crates/io/build.rs");
+            let mut built_with = false;
+            for line in read(root.join("crates").join(&krate).join("Cargo.toml")).lines() {
+                if line.starts_with('[') {
+                    built_with = line.ends_with("dependencies]") && !line.contains("dev-dependencies");
+                } else if built_with && let Some(dir) = line.split(" = ").next().filter(|n| n.starts_with("solidcraft-")).and_then(folder) {
+                    todo.push(dir);
+                }
+            }
+        }
+        assert_eq!(seen.len(), keyed.len(), "{seen:?} computed from, {keyed:?} keyed");
     }
 
     #[test]
@@ -1158,6 +1190,63 @@ mod tests {
         }
     }
 
+    /// #9170: a mesh body (an imported STL) is kept in the model cache with the rest of the
+    /// model, as its own triangles, colour and paint. One mesh body left the whole cache out, so
+    /// opening the design evaluated every feature again.
+    #[test]
+    fn model_cache_keeps_mesh_bodies_with_the_rest_of_the_model() {
+        use solidcraft_geom::Vec3;
+        let corners = [Vec3::ZERO, Vec3::new(10., 0., 0.), Vec3::new(0., 10., 0.), Vec3::new(0., 0., 10.)];
+        let tetra = solidcraft_kernel::mesh_body(&corners, &[[0, 2, 1], [0, 1, 3], [0, 3, 2], [1, 2, 3]])
+            .unwrap()
+            .with_color(Some([0.25, 0.5, 0.75]))
+            .with_paint(Some(solidcraft_kernel::Paint { opacity: 0.5, faces: Vec::new() }));
+        let block = solidcraft_kernel::box_solid(Vec3::new(40., 0., 0.), Vec3::new(60., 20., 20.)).unwrap();
+        let model = saved_model(vec![block, tetra.clone()]);
+        let doc = document();
+        let bytes = write_design_container_with_cache(&doc, DesignCompression::Fast, None, Some(&model)).unwrap();
+        let entries = parts(&bytes);
+        let manifest: Value = serde_json::from_slice(&entries["cache/model.json"]).expect("the cache is written");
+        assert_eq!(manifest["slices"].as_array().unwrap().len(), 2);
+        let read = DesignContainerReader::new(Cursor::new(&bytes)).unwrap().geometry().unwrap();
+        assert_eq!(read.records, model.records);
+        assert_eq!(solidcraft_kernel::encode_native_body(&read.bodies[0]).unwrap(), solidcraft_kernel::encode_native_body(&model.bodies[0]).unwrap());
+        let mesh = &read.bodies[1];
+        assert_eq!(mesh.triangle_mesh(), tetra.triangle_mesh());
+        assert_eq!((mesh.color(), mesh.paint()), (tetra.color(), tetra.paint()));
+        // The picture shown while opening draws the mesh body with its own triangles.
+        let preview = read_design_preview(&bytes).unwrap();
+        assert_eq!(preview.meshes.len(), 2);
+        let (positions, triangles) = tetra.triangle_mesh().unwrap();
+        assert_eq!(&*preview.meshes[1].positions, &positions.iter().flat_map(|p| [p.x, p.y, p.z]).collect::<Vec<_>>()[..]);
+        assert_eq!(&*preview.meshes[1].triangles, &triangles.iter().flatten().copied().collect::<Vec<_>>()[..]);
+        assert_eq!(preview.meshes[1].color, tetra.color());
+
+        // A changed or cut-short mesh slice (signed again, so it reaches the slice's reader) is a
+        // cache miss or another mesh, never a crash.
+        let range = |i: usize| manifest["slices"][1][i].as_u64().unwrap() as usize;
+        let (start, length) = (range(0), range(1));
+        let payload = entries["cache/bodies.bin"].clone();
+        assert_eq!(payload.len(), start + length, "the mesh slice is the last");
+        let with = |payload: &[u8], length: usize| {
+            let mut entries = entries.clone();
+            let mut manifest = manifest.clone();
+            manifest["payload"] = json!(digest(payload));
+            manifest["slices"][1][1] = json!(length);
+            entries.insert("cache/model.json".into(), serde_json::to_vec(&manifest).unwrap());
+            entries.insert("cache/bodies.bin".into(), payload.to_vec());
+            package(&entries)
+        };
+        assert!(read_design_geometry(&with(&payload, length)).is_some(), "signed again as it was, it reads");
+        for n in (start..start + length).step_by(5) {
+            let mut changed = payload.clone();
+            changed[n] ^= 0xff;
+            let changed = with(&changed, length);
+            assert!(std::panic::catch_unwind(|| (read_design_geometry(&changed), read_design_preview(&changed))).is_ok(), "byte {n}");
+            assert!(read_design_geometry(&with(&payload[..n], n - start)).is_none(), "cut short at {n}");
+        }
+    }
+
     /// A model cache that does not fit the design file is left out: the save succeeds, and the
     /// design reads back as saved.
     #[test]
@@ -1188,7 +1277,7 @@ mod tests {
                 let bodies = if i == 0 { json!([[0, 16]]) } else { json!([[0, 8], [8 * (i + 1), 8]]) };
                 json!({
                     "bodies": bodies, "sketches": [], "body_counter": 7, "sheets": [], "construct": [], "threads": [],
-                    "sketch_keys": [], "blend_edges": {}, "fitted": {}, "tapered": {},
+                    "sketch_key_set": 0, "blend_edges": {}, "fitted": {}, "tapered": {},
                 })
             })
             .collect();
@@ -1198,7 +1287,7 @@ mod tests {
             .map(|(i, ms)| json!({"id": i + 1, "fingerprint": "0000000000000000", "ms": ms, "skipped": false, "state": i}))
             .collect();
         solidcraft_doc::SavedModel {
-            records: json!({"features": features, "states": states, "model_bodies": records, "names": [{"faces": [], "info": []}], "sketches": [], "sheets": []}),
+            records: json!({"features": features, "states": states, "model_bodies": records, "names": [{"faces": [], "info": []}], "sketches": [], "sheets": [], "sketch_key_sets": [{"set": [], "drop": []}]}),
             bodies,
         }
     }
@@ -1248,7 +1337,7 @@ mod tests {
                 one.records["states"],
                 json!([{
                     "bodies": [[0, 16]], "sketches": [], "body_counter": 7, "sheets": [], "construct": [], "threads": [],
-                    "sketch_keys": [], "blend_edges": {}, "fitted": {}, "tapered": {},
+                    "sketch_key_set": 0, "blend_edges": {}, "fitted": {}, "tapered": {},
                 }])
             );
         }
@@ -1314,7 +1403,7 @@ mod tests {
         let doc = document();
         let bytes = write_design_container_with_cache(&doc, DesignCompression::Fast, None, Some(&native_geometry())).unwrap();
         let original = parts(&bytes);
-        for key in ["format", "producer", "app", "build", "document", "payload"] {
+        for key in ["format", "producer", "evaluation", "document", "payload"] {
             let mut entries = original.clone();
             let mut manifest: Value = serde_json::from_slice(&entries["cache/model.json"]).unwrap();
             manifest[key] = json!("unsupported-or-stale");
@@ -1324,11 +1413,70 @@ mod tests {
             assert!(read_design_preview(&bytes).is_none());
             assert_eq!(crate::read_design(&bytes).unwrap().to_json(), doc.to_json());
         }
+        // A cache of the format before sketch-key sets (/4) is a miss, and so are records of
+        // that shape (each state's keys inline) under the current format: never misread.
+        let manifest: Value = serde_json::from_slice(&original["cache/model.json"]).unwrap();
+        let mut older = manifest.clone();
+        older["format"] = json!("solidcraft-model-cache/4");
+        let mut inline = manifest.clone();
+        let model = inline["model"].as_object_mut().unwrap();
+        model.remove("sketch_key_sets");
+        let state = model["states"][0].as_object_mut().unwrap();
+        state.remove("sketch_key_set");
+        state.insert("sketch_keys".into(), json!([]));
+        for manifest in [older, inline] {
+            let mut entries = original.clone();
+            entries.insert("cache/model.json".into(), serde_json::to_vec(&manifest).unwrap());
+            let bytes = package(&entries);
+            assert!(read_design_geometry(&bytes).is_none(), "{}", manifest["format"]);
+            assert_eq!(crate::read_design(&bytes).unwrap().to_json(), doc.to_json());
+        }
         let mut entries = original;
         entries.get_mut("cache/bodies.bin").unwrap()[0] ^= 1;
         let bytes = package(&entries);
         assert!(read_design_geometry(&bytes).is_none());
         assert_eq!(crate::read_design(&bytes).unwrap().to_json(), doc.to_json());
+    }
+
+    /// #7168: a design saved by another version of SolidCraft (another version number and commit)
+    /// whose model was computed by the same evaluation source opens from its model cache, so an
+    /// update that changed only the interface or the commands does not evaluate every design again.
+    /// One computed by other evaluation source (a kernel or codec change) is evaluated again.
+    #[test]
+    fn a_cache_of_another_version_with_the_same_evaluation_source_is_read() {
+        let doc = document();
+        let geometry = native_geometry();
+        let bytes = write_design_container_with_cache(&doc, DesignCompression::Fast, None, Some(&geometry)).unwrap();
+        let written = |entries: &BTreeMap<String, Vec<u8>>| serde_json::from_slice::<Value>(&entries["cache/model.json"]).unwrap();
+        let original = parts(&bytes);
+        let evaluation = written(&original)["evaluation"].as_str().unwrap().to_string();
+        assert!(evaluation.ends_with(&format!("/{}-{}", std::env::consts::ARCH, std::env::consts::OS)), "{evaluation}");
+        let with = |changes: &[(&str, &str)]| {
+            let mut entries = original.clone();
+            let mut manifest = written(&entries);
+            for (key, value) in changes {
+                manifest[*key] = json!(value);
+            }
+            entries.insert("cache/model.json".into(), serde_json::to_vec(&manifest).unwrap());
+            package(&entries)
+        };
+        let older = with(&[("app", "0.0.1"), ("build", "0123456789abcdef0123456789abcdef01234567/other-platform")]);
+        let state = read_design_geometry(&older).expect("another version's cache of the same evaluation source");
+        assert_eq!(state.bodies[0].body.face_count(), geometry.bodies[0].face_count());
+        assert_eq!(crate::read_design(&older).unwrap().to_json(), doc.to_json());
+        // The same version with other evaluation source, or on another platform, evaluates again.
+        let other_source = format!("{}/{}", "0".repeat(64), evaluation.rsplit('/').next().unwrap());
+        for changed in [other_source.as_str(), &format!("{}/other-platform", evaluation.rsplit_once('/').unwrap().0)] {
+            let bytes = with(&[("evaluation", changed)]);
+            assert!(read_design_geometry(&bytes).is_none(), "{changed}");
+            assert_eq!(crate::read_design(&bytes).unwrap().to_json(), doc.to_json());
+        }
+        // An older build's cache (no evaluation source recorded) is evaluated again.
+        let mut entries = original.clone();
+        let mut manifest = written(&entries);
+        manifest.as_object_mut().unwrap().remove("evaluation");
+        entries.insert("cache/model.json".into(), serde_json::to_vec(&manifest).unwrap());
+        assert!(read_design_geometry(&package(&entries)).is_none());
     }
 
     #[test]

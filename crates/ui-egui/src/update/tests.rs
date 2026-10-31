@@ -359,6 +359,149 @@ fn turning_off_automatic_checks_stops_the_launch_check() {
 }
 
 #[test]
+fn help_menu_checks_with_automatic_checks_off_and_offers_installation() {
+    let dir = scratch();
+    let (feed, version) = next_release_feed(&dir.0);
+    let mut h = crate::scenario::Harness::new();
+    h.app.preferences.check_updates = false;
+    h.app.preferences.update.skipped = format!("v{version}");
+    h.app.preferences.update.remind_after = unix_now() + REMIND_DELAY_S;
+    h.app.updater.feed = Some(feed);
+    h.app.updater.kind = Some(InstallKind::MacApp("/Applications/SolidCraft.app".into()));
+    h.app.updater.managed = Some(None);
+    h.app.services.http_get = Some(Arc::new(|_| panic!("the check must use the test feed")));
+    h.app.services.http_download = Some(Arc::new(|_, _, _| panic!("offering an update must not install it")));
+    h.app.help.menu = true;
+    h.frames(2);
+    let [x, y] = h.widget("Check for updates").expect("the Help menu has an update check");
+    h.call("ui.click", json!({"x": x, "y": y}));
+    wait_for_check(&mut h);
+    h.frames(2);
+    assert!(!h.app.help.menu);
+    assert!(h.app.updater.open);
+    assert!(h.app.preferences.update.skipped.is_empty());
+    assert_eq!(h.app.preferences.update.remind_after, 0.0);
+    assert!(h.widget(&format!("SolidCraft {version} is available")).is_some());
+    assert!(h.widget("Download and open").is_some(), "the macOS installation is offered immediately");
+    assert!(h.app.updater.job.is_none());
+}
+
+/// Hold an automatic check at its result channel so the manual request can join it without
+/// a second HTTP request or a wall-clock race.
+fn pending_check() -> (crate::scenario::Harness, std::sync::mpsc::Sender<Result<Release, FetchError>>) {
+    let mut h = crate::scenario::Harness::new();
+    h.app.preferences.check_updates = false;
+    h.app.updater.kind = Some(InstallKind::WindowsMsi);
+    h.app.services.http_get = Some(Arc::new(|_| panic!("do not start a second check")));
+    let (tx, rx) = std::sync::mpsc::channel();
+    h.app.updater.rx = Some((rx, false));
+    h.app.updater.status = Status::Checking;
+    (h, tx)
+}
+
+#[test]
+fn help_check_shows_progress_and_up_to_date_then_closes() {
+    let (mut h, tx) = pending_check();
+    h.call("ui.help", json!({"item": "updates"}));
+    assert!(h.app.updater.open);
+    assert!(h.app.updater.rx.as_ref().unwrap().1, "the in-flight automatic check becomes manual");
+    assert!(h.widget("Checking…").is_some());
+    let release = Release::parse(
+        json!({"tag_name": format!("v{}", comparable(&parse_version(current_version()).unwrap())), "assets": []}).to_string().as_bytes(),
+    )
+    .unwrap();
+    tx.send(Ok(release)).unwrap();
+    h.frames(2);
+    assert_eq!(h.app.updater.status, Status::UpToDate);
+    assert!(h.widget("SolidCraft is up to date.").is_some());
+    assert!(h.widget("Download").is_none() && h.widget("Update now").is_none());
+    let [x, y] = h.widget("Close").unwrap();
+    h.call("ui.click", json!({"x": x, "y": y}));
+    assert!(!h.app.updater.open);
+    // Reopening during the cooldown still shows the result, without another request.
+    h.app.updater.last_manual = unix_now();
+    h.call("ui.help", json!({"item": "updates"}));
+    assert!(h.widget("SolidCraft is up to date.").is_some());
+    assert!(h.app.updater.rx.is_none());
+}
+
+#[test]
+fn help_check_reports_network_errors_and_rate_limits_in_the_window() {
+    for error in [FetchError::Failed("offline".into()), FetchError::RateLimited { retry_after_s: 3600 }] {
+        let (mut h, tx) = pending_check();
+        h.call("ui.help", json!({"item": "updates"}));
+        tx.send(Err(error.clone())).unwrap();
+        h.frames(2);
+        assert_eq!(h.app.updater.status, Status::Failed(error.to_string()));
+        assert!(h.widget(&format!("Couldn't check: {error}")).is_some());
+        assert!(h.widget("SolidCraft is up to date.").is_none());
+        if matches!(error, FetchError::RateLimited { .. }) {
+            h.call("ui.help", json!({"item": "updates"}));
+            assert!(h.app.updater.rx.is_none(), "the server's rate limit is honoured");
+            assert!(matches!(h.app.updater.status, Status::Failed(_)));
+        }
+    }
+}
+
+#[test]
+fn help_check_result_follows_the_selected_language() {
+    let (mut h, tx) = pending_check();
+    h.call("ui.prefs", json!({"language": "de"}));
+    h.call("ui.help", json!({"item": "updates"}));
+    let release = Release::parse(json!({"tag_name": current_version(), "assets": []}).to_string().as_bytes()).unwrap();
+    tx.send(Ok(release)).unwrap();
+    h.frames(2);
+    assert!(h.widget("SolidCraft ist aktuell.").is_some());
+    for (language, title, message) in [
+        ("fr", "Rechercher des mises à jour", "SolidCraft est à jour."),
+        ("ja", "アップデートを確認", "SolidCraft は最新です。"),
+        ("zh-TW", "檢查更新", "SolidCraft 已是最新版本。"),
+    ] {
+        h.call("ui.prefs", json!({"language": language}));
+        assert!(h.widget(title).is_some(), "the window title follows {language}");
+        assert!(h.widget(message).is_some(), "the result follows {language}");
+        assert!(h.widget("SolidCraft is up to date.").is_none());
+    }
+}
+
+#[test]
+fn help_check_explains_when_checks_are_unavailable() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.updater.off = true;
+    h.call("ui.help", json!({"item": "updates"}));
+    assert!(h.widget("Update checks are not available for this installation.").is_some());
+    assert!(h.widget("SolidCraft is up to date.").is_none());
+    assert!(h.app.updater.rx.is_none());
+}
+
+#[test]
+fn closing_a_manual_check_does_not_reopen_it_when_an_update_arrives() {
+    let (mut h, tx) = pending_check();
+    h.call("ui.help", json!({"item": "updates"}));
+    let [x, y] = h.widget("Close").unwrap();
+    h.call("ui.click", json!({"x": x, "y": y}));
+    assert!(!h.app.updater.open);
+    let release = Release::parse(br#"{"tag_name":"v999.0.0","assets":[]}"#).unwrap();
+    tx.send(Ok(release)).unwrap();
+    h.frames(2);
+    assert!(!h.app.updater.open);
+    assert!(offered(&h.app).is_some(), "the update remains available from the title bar");
+}
+
+#[test]
+fn help_check_keeps_an_active_installation_on_screen() {
+    let (mut h, dir) = open_update_window(None);
+    let (_tx, rx) = std::sync::mpsc::channel();
+    h.app.updater.job = Some((rx, Arc::new(install::Progress::default())));
+    h.app.updater.open = false;
+    h.call("ui.help", json!({"item": "updates"}));
+    assert!(h.app.updater.open && h.app.updater.job.is_some());
+    assert!(h.app.updater.rx.is_none());
+    assert!(h.widget("Cancel").is_some());
+    drop(dir);
+}
+
+#[test]
 fn the_title_bar_offers_the_new_version_and_opens_the_update_window() {
     let dir = scratch();
     let (feed, version) = next_release_feed(&dir.0);
@@ -685,4 +828,113 @@ fn an_unmanaged_install_updates_itself_as_before() {
     assert!(h.widget("Update now").is_some());
     assert!(h.widget("Download").is_some());
     assert!(h.widget("Update available: update SolidCraft in ArtCraft Launcher").is_none());
+}
+
+#[test]
+fn periodic_checks_refresh_the_offered_label() {
+    let dir = scratch();
+    let (feed, first) = next_release_feed(&dir.0);
+    let mut h = crate::scenario::Harness::new();
+    h.app.updater.feed = Some(feed.clone());
+    h.frame();
+    wait_for_check(&mut h);
+    h.frames(2);
+    assert!(h.widget(&format!("Update to {first}")).is_some());
+    h.app.updater.installed = Some(Ok(install::Outcome::Restart(dir.0.join("SolidCraft.AppImage"))));
+    let v = parse_version(&first).unwrap();
+    let next = format!("{}.{}.0", v.major, v.minor + 1);
+    std::fs::write(feed, json!({"tag_name": format!("v{next}")}).to_string()).unwrap();
+    h.app.preferences.update.next_check = 0.0;
+    h.frame();
+    wait_for_check(&mut h);
+    h.frames(2);
+    assert!(h.widget(&format!("Update to {next}")).is_some());
+    assert!(h.widget(&format!("Update to {first}")).is_none());
+}
+
+#[test]
+fn install_selection_refreshes_the_button_and_progress_before_completion() {
+    let dir = scratch();
+    let target = dir.0.join("SolidCraft.AppImage");
+    let name = asset_name(&InstallKind::AppImage(target.clone()), std::env::consts::ARCH, "999.1.0").unwrap();
+    let mut h = crate::scenario::Harness::new();
+    h.app.preferences.check_updates = false;
+    let mut shown = release();
+    shown.tag = "v999.0.0".into();
+    h.app.updater.release = Some(shown);
+    h.app.updater.kind = Some(InstallKind::AppImage(target));
+    h.app.updater.open = true;
+    h.app.services.http_get = Some(Arc::new(move |url| {
+        if url == LATEST_API {
+            return Ok(json!({"tag_name":"v999.1.0", "assets":[
+                {"name": name, "browser_download_url":format!("https://github.com/tangency-labs/solidcraft/releases/download/v999.1.0/{name}")},
+                {"name": install::SUMS, "browser_download_url":"https://github.com/tangency-labs/solidcraft/releases/download/v999.1.0/SHA256SUMS.txt"}
+            ]}).to_string().into_bytes());
+        }
+        Ok(format!("{}  {name}\n", "a".repeat(64)).into_bytes())
+    }));
+    let (tx, rx) = std::sync::mpsc::channel();
+    let rx = std::sync::Mutex::new(rx);
+    h.app.services.http_download = Some(Arc::new(move |_, _, _| {
+        rx.lock().unwrap().recv().unwrap();
+        Err(FetchError::Failed("download stopped".into()))
+    }));
+    start_install(&mut h.app, &egui::Context::default());
+    for _ in 0..500 {
+        poll_install(&mut h.app);
+        if h.app.updater.release.as_ref().unwrap().version() == "999.1.0" {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(2));
+    }
+    h.frames(2);
+    assert!(h.widget("Update to 999.1.0").is_some());
+    assert!(h.widget("Updating to 999.1.0.").is_some());
+    assert!(h.app.updater.installed.is_none());
+    tx.send(()).unwrap();
+}
+
+#[test]
+fn cancel_download_leaves_downloading_immediately() {
+    // Cancel must clear the job from the UI at once so the card leaves "Downloading" without
+    // waiting for a stalled feed or checksum GET (#8908).
+    let dir = scratch();
+    let target = dir.0.join("SolidCraft.AppImage");
+    let name = asset_name(&InstallKind::AppImage(target.clone()), std::env::consts::ARCH, "999.1.0").unwrap();
+    let mut h = crate::scenario::Harness::new();
+    h.app.preferences.check_updates = false;
+    let mut shown = release();
+    shown.tag = "v999.0.0".into();
+    h.app.updater.release = Some(shown);
+    h.app.updater.kind = Some(InstallKind::AppImage(target));
+    h.app.updater.open = true;
+    let (gate_tx, gate_rx) = std::sync::mpsc::channel();
+    let gate_rx = std::sync::Mutex::new(gate_rx);
+    h.app.services.http_get = Some(Arc::new(move |url| {
+        if url == LATEST_API {
+            return Ok(json!({"tag_name":"v999.1.0", "assets":[
+                {"name": name, "browser_download_url":format!("https://github.com/tangency-labs/solidcraft/releases/download/v999.1.0/{name}")},
+                {"name": install::SUMS, "browser_download_url":"https://github.com/tangency-labs/solidcraft/releases/download/v999.1.0/SHA256SUMS.txt"}
+            ]}).to_string().into_bytes());
+        }
+        // Stall checksum GET until the test ends so Cancel has to work before the body download.
+        let _ = gate_rx.lock().unwrap().recv();
+        Ok(format!("{}  {name}\n", "a".repeat(64)).into_bytes())
+    }));
+    h.app.services.http_download = Some(Arc::new(|_, _, _| Err(FetchError::Failed("download must not start".into()))));
+    start_install(&mut h.app, &egui::Context::default());
+    assert!(h.app.updater.job.is_some());
+    h.frames(2);
+    let cancel = h.widget("Cancel").expect("Cancel while Downloading");
+    h.call("ui.click", json!({"x": cancel[0], "y": cancel[1]}));
+    assert!(h.app.updater.job.is_none(), "Cancel clears the job immediately");
+    assert!(h.app.updater.installed.is_none());
+    assert!(h.app.updater.open, "Cancel leaves the Update window open on Offer");
+    h.frames(2);
+    assert!(
+        h.widget("Remind me later").is_some() || h.widget("Skip this version").is_some() || h.widget("Update now").is_some(),
+        "Offer returns after Cancel"
+    );
+    assert!(h.widget("Updating to 999.1.0.").is_none());
+    let _ = gate_tx.send(());
 }

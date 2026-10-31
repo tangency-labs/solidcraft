@@ -36,3 +36,25 @@ fn spline_reverse_reply_matches_its_schema() {
     assert!(conforms(schema, schema, &r), "{r} doesn't match {schema}");
     assert!(r["param_warnings"].as_array().is_some_and(|w| !w.is_empty()), "{r}");
 }
+
+#[test]
+fn construction_line_contracts_and_replies_match() {
+    use super::{ConstructionLineParams, ConstructionLineResult};
+    assert_keys(
+        input_schema_for::<ConstructionLineParams>(),
+        &["alternate", "angle", "at", "curve", "curve2", "mode", "near", "sketch", "solution", "through"],
+    );
+    let schema = output_schema_for::<ConstructionLineResult>();
+    let schema = schema.as_value();
+    let mut s = Session { param_check: ParamCheck::Strict, ..Session::default() };
+    s.execute("sketch.create", &json!({"plane":"XY"})).unwrap();
+    for (id, p) in [
+        ("sketch.construction_line", json!({"at":[0,0],"through":[5,5]})),
+        ("sketch.construction_line.horizontal", json!({"at":[0,10]})),
+        ("sketch.construction_line.angle", json!({"at":[10,10],"angle":30})),
+    ] {
+        let r = s.execute(id, &p).unwrap();
+        assert!(conforms(schema, schema, &r), "{r}");
+    }
+    assert!(s.execute("sketch.construction_line", &json!({"at":[0,0],"mode":"unknown"})).is_err());
+}

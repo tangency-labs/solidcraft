@@ -625,7 +625,7 @@ fn embedded_hdr_capture_rejects_parameters_scope_and_cpu_primaries_without_mutat
         assert_eq!(state, (s.revision, s.undo.len(), s.redo.len()));
     }
     let nonce = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
-    let dir = std::env::temp_dir().join(format!("solidcraft-hdr-scope-{}-{nonce}", std::process::id()));
+    let dir = solidcraft_io::vfs::temp_dir().join(format!("solidcraft-hdr-scope-{}-{nonce}", std::process::id()));
     std::fs::create_dir(&dir).unwrap();
     let allowed = dir.join("allowed");
     std::fs::create_dir(&allowed).unwrap();

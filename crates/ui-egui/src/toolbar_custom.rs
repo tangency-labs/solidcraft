@@ -3,10 +3,11 @@
 //! pins it to the toolbar, removes it, or pins it to the S box's favourites; buttons are dragged
 //! to reorder them within and between panels; a drop-down row dragged onto the toolbar pins it
 //! there, a button dragged off the toolbar (or back into the drop-down) leaves it; the pin icon
-//! on a hovered drop-down row pins or unpins; the toolbar's own menu (right-click its empty
-//! space) has Customize Toolbar… (a window listing every command of the tab with a check box)
-//! and Reset Toolbar; Reset Toolbar restores the tab. Kept with the
-//! preferences and exported or imported with the keyboard shortcuts.
+//! on a hovered drop-down row pins or unpins; the toolbar's own menu (the plus after the tabs,
+//! or right-click its empty space or a tab) shows or hides each tab, and has Customize Toolbar…
+//! (a window listing every command of the tab with a check box) and Reset Toolbar; Reset Toolbar
+//! restores the tab. The buttons are kept with the preferences and exported or imported with the
+//! keyboard shortcuts; hidden tabs are kept in the `hidden_toolbar_tabs` preference.
 
 use std::collections::BTreeMap;
 
@@ -331,12 +332,28 @@ pub fn command_items(app: &SolveApp, id: &str) -> Vec<Item> {
     v
 }
 
-/// The toolbar's own menu (right-click on its empty space).
+/// The toolbar's own menu (right-click on its empty space or a tab): every tab that can be shown
+/// or hidden, ticked when on, then the button customisation of the selected tab.
 pub fn toolbar_items(app: &SolveApp) -> Vec<Item> {
-    vec![
-        Item::action("ui.toolbarCustomize", "Customize Toolbar…", "settings"),
-        Item::action("ui.toolbarReset", "Reset Toolbar", "restore").with(json!({ "tab": app.ui.tab })),
-    ]
+    let mut v = Vec::new();
+    if !crate::render_workspace::active(app) {
+        v.push(Item::heading(app.tr("prefs.toolbar_tabs")));
+        for tab in crate::workspace::choosable_tabs() {
+            let on = crate::workspace::tab_turned_on(app, tab);
+            // The row reads as the tab does, in every language.
+            let item = Item::action("ui.toolbarTab", &crate::toolbar::ribbon_label(app, tab), crate::workspace::tab_icon(tab))
+                .with(json!({ "tab": tab, "shown": !on }));
+            v.push(if on { item.key("current") } else { item });
+        }
+        // With every tab hidden there is no tab to customise.
+        if !crate::workspace::visible_tabs(app).contains(&app.ui.tab.as_str()) {
+            return v;
+        }
+        v.push(Item::sep());
+    }
+    v.push(Item::action("ui.toolbarCustomize", "Customize Toolbar…", "settings"));
+    v.push(Item::action("ui.toolbarReset", "Reset Toolbar", "restore").with(json!({ "tab": app.ui.tab })));
+    v
 }
 
 /// Run a toolbar item from a menu.
@@ -352,6 +369,7 @@ pub fn run(app: &mut SolveApp, action: &str, p: &Value) {
         "ui.toolbarRemove" => remove(app, &tab, id),
         "ui.toolbarReset" => reset(app, &tab),
         "ui.toolbarCustomize" => app.toolbar_custom.customizing = true,
+        "ui.toolbarTab" => crate::workspace::set_tab_shown(app, &tab, p.get("shown").and_then(Value::as_bool).unwrap_or(true)),
         "ui.shortcutPin" => app.sbox.toggle_pin(id),
         _ => {}
     }

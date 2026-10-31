@@ -593,6 +593,74 @@ fn window_pages_have_shared_metrics_callbacks_and_a_pinned_left_footer_action() 
 }
 
 #[test]
+fn page_window_is_as_opaque_as_every_other_window_in_both_themes() {
+    // #9078: the Preferences window let the ribbon's labels show through its title bar and search field.
+    fn window_fill(pages: bool) -> egui::Color32 {
+        let ctx = crate::fonts::test_context();
+        let list = [WindowPage {
+            group: None,
+            icon: "settings",
+            label: "ui.general",
+            handle: "test:page:general",
+            scroll: true,
+            draw: |ui, _: &mut ()| {
+                text(ui, "General", Text::Inline);
+            },
+        }];
+        let mut selected = 0;
+        let mut output = None;
+        for _ in 0..3 {
+            scenario::clear_handles();
+            output = Some(crate::test_support::frame(
+                &ctx,
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(900.0, 800.0))),
+                    focused: true,
+                    ..Default::default()
+                },
+                |ui| {
+                    let window = Window::new(ui.id().with("opaque"), "settings", "Preferences");
+                    if pages {
+                        window.cards(3.0).show_pages(ui.ctx(), &mut selected, &list, &mut (), |_| {});
+                    } else {
+                        window.show(ui.ctx(), true, |ui| {
+                            text(ui, "Body", Text::Inline);
+                        });
+                    }
+                },
+            ));
+        }
+        let window = scenario::rect_of("dialog:window").expect("window rect published");
+        let mut fill = None;
+        for clipped in output.iter().flat_map(|o| &o.shapes) {
+            crate::test_support::each_shape(&clipped.shape, &mut |shape| {
+                if let egui::Shape::Rect(r) = shape
+                    && fill.is_none()
+                    && r.blur_width == 0.0
+                    && (r.rect.min - window.min).abs().max_elem() <= 0.5
+                    && (r.rect.max - window.max).abs().max_elem() <= 0.5
+                {
+                    fill = Some(r.fill);
+                }
+            });
+        }
+        fill.expect("the window frame is painted at the window's rect")
+    }
+    let previous = crate::theme::is_dark();
+    for dark in [false, true] {
+        crate::theme::set_dark(dark);
+        let t = Tokens::get();
+        assert_eq!(t.dialog_body.a(), 255, "{dark}: the window token itself is opaque");
+        let plain = window_fill(false);
+        assert_eq!(plain, t.dialog_body, "{dark}: a plain window is the opaque dialog body");
+        let page = window_fill(true);
+        assert_eq!(page.a(), 255, "{dark}: the Preferences page window lets nothing show through");
+        assert_eq!(page, plain, "{dark}: the page window has the same fill as every other window");
+    }
+    crate::theme::set_dark(previous);
+}
+
+#[test]
 fn confirm_routes_enter_escape_selected_answers_and_blocks_background_clicks() {
     for (key, valid, selected, expected) in [
         (egui::Key::Enter, true, Action::Ok, Action::Ok),
@@ -788,6 +856,19 @@ fn preferences_preserves_every_page_and_footer_in_both_themes() {
             }
             assert!(scenario::rect_of("prefs:page_body").is_some());
             assert!(h.widget(h.app.tr("ui.restore_defaults")).is_some());
+            let footer = scenario::rect_of("dialog:pages_footer").expect("pinned profile footer");
+            assert!(nav.contains_rect(footer));
+            assert!(footer.contains_rect(scenario::rect_of("prefs:profile").expect("real switcher")));
+            let tagged = [
+                crate::prefs::PAGE_GENERAL,
+                crate::prefs::PAGE_APPEARANCE,
+                crate::prefs::PAGE_LAYOUT,
+                crate::prefs::PAGE_SKETCH,
+                crate::prefs::PAGE_NAVIGATION,
+                crate::prefs::PAGE_SHORTCUTS,
+            ]
+            .contains(&index);
+            assert_eq!(scenario::rect_of("prefs:in_profile").is_some(), tagged, "{page}");
         }
     }
     crate::theme::set_dark(previous);
@@ -882,6 +963,58 @@ fn required_platform_window_keeps_recovery_pending_until_an_explicit_choice() {
     assert!(scenario::handle_at("dialog:close").is_none(), "recovery cannot be dismissed through the header");
     assert!(scenario::rect_of("dialog:header").is_some());
     assert!(scenario::rect_of("dialog:footer").is_none());
+}
+
+/// #9472: a card first laid out while the page is still tiny (a browser canvas not sized yet)
+/// grows its body once the page has its size, so the choice stays visible on every page size and
+/// scale. The browser's recovery card and the desktop one (with a footer) share this body.
+#[test]
+fn window_body_buttons_stay_visible_after_the_page_grows_from_nothing() {
+    for desktop in [false, true] {
+        for ppp in [1.0, 1.5, 2.0] {
+            for size in [egui::vec2(2992.0, 1692.0), egui::vec2(1496.0, 846.0), egui::vec2(800.0, 600.0), egui::vec2(320.0, 200.0)] {
+                let ctx = crate::fonts::test_context();
+                let mut buttons = Vec::new();
+                for page in [egui::Vec2::ZERO, egui::vec2(1.0, 1.0), egui::vec2(300.0, 150.0), size, size, size, size] {
+                    let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, page);
+                    let viewport = egui::ViewportInfo { native_pixels_per_point: Some(ppp), ..Default::default() };
+                    let input = egui::RawInput {
+                        screen_rect: Some(screen),
+                        focused: true,
+                        viewports: std::iter::once((egui::ViewportId::ROOT, viewport)).collect(),
+                        ..Default::default()
+                    };
+                    buttons.clear();
+                    crate::test_support::frame(&ctx, input, |ui| {
+                        let window = Window::new(egui::Id::new("sc_browser_recovery"), "restore", "Recover unsaved work?");
+                        let body = |ui: &mut Ui| {
+                            ui.label("“Bracket” had unsaved changes when this page last closed.");
+                            ui.horizontal(|ui| {
+                                for label in ["Recover", "Discard"] {
+                                    let rect = button(ui, label, Button::Normal).rect;
+                                    buttons.push((label, rect, ui.clip_rect()));
+                                }
+                            });
+                        };
+                        if desktop {
+                            window.actions("", "Later", None).show_with_left(ui.ctx(), true, body, |_| {});
+                        } else {
+                            window.required().show_body(ui.ctx(), body);
+                        }
+                    });
+                }
+                let screen = ctx.content_rect();
+                assert_eq!(buttons.len(), 2, "desktop {desktop}, {size:?} at {ppp}");
+                for (label, rect, clip) in &buttons {
+                    assert!(rect.height() > 0.0 && rect.width() > 0.0, "{label}: desktop {desktop}, {size:?} at {ppp}: {rect:?}");
+                    assert!(
+                        clip.contains_rect(*rect) && screen.contains_rect(*rect),
+                        "{label} hidden: desktop {desktop}, {size:?} at {ppp}: {rect:?} clipped to {clip:?} on {screen:?}"
+                    );
+                }
+            }
+        }
+    }
 }
 
 #[test]
@@ -1142,4 +1275,49 @@ fn bevel_lighting_reverses_for_fields_and_pressed_buttons_without_changing_geome
     let tiny = Rect::from_min_size(Pos2::ZERO, egui::vec2(2.0, 2.0));
     let output = crate::test_support::frame(&ctx, egui::RawInput::default(), |ui| bevel.paint(ui.painter(), tiny, 0, false, true));
     assert!(!output.shapes.iter().any(|s| matches!(&s.shape, egui::Shape::LineSegment { .. })));
+}
+
+/// A left-anchored panel in a view that came out inside out keeps an anchor instead of
+/// panicking in `f32::clamp`, as the layout beside it did in #9492.
+#[test]
+fn a_left_panel_in_an_inside_out_view_keeps_an_anchor() {
+    let ctx = crate::fonts::test_context();
+    let inside_out = egui::Rect::from_min_max(egui::pos2(264.1875, 40.0), egui::pos2(159.0, 600.0));
+    let panel = super::Panel::new(
+        "Panel",
+        egui::Id::new("inside_out_panel"),
+        egui::pos2(200.0, 80.0),
+        inside_out,
+        crate::frame::Side::Left,
+        egui::Frame::NONE,
+    );
+    let anchor = panel.bounded_anchor(&ctx);
+    assert!(anchor.x.is_finite() && anchor.y.is_finite(), "{anchor:?}");
+}
+
+#[test]
+fn page_sidebar_footer_stays_visible_when_the_page_list_scrolls() {
+    for theme in ["light", "dark"] {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.preferences.theme = theme.into();
+        h.call("ui.resize", serde_json::json!({"width":1200,"height":620}));
+        crate::prefs::open_at(&mut h.app, crate::prefs::PAGE_GENERAL);
+        h.frames(6);
+        let footer = scenario::rect_of("dialog:pages_footer").unwrap();
+        let nav = scenario::rect_of("dialog:pages").unwrap();
+        h.frame_with(vec![
+            egui::Event::PointerMoved(egui::pos2(nav.center().x, nav.top() + 30.0)),
+            egui::Event::MouseWheel {
+                unit: egui::MouseWheelUnit::Point,
+                delta: egui::vec2(0.0, -1000.0),
+                modifiers: egui::Modifiers::NONE,
+                phase: egui::TouchPhase::Move,
+            },
+        ]);
+        h.frames(60);
+        assert_eq!(scenario::rect_of("dialog:pages_footer"), Some(footer));
+        assert!(footer.contains_rect(scenario::rect_of("prefs:profile").unwrap()));
+        assert!(nav.contains_rect(scenario::rect_of("prefs:page:Plugins").unwrap()), "last page is reachable in {theme}");
+    }
 }

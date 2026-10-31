@@ -3,17 +3,17 @@
 //! that turns the text about its centre (Shift: steps of 15°). Each frame of a drag runs
 //! `sketch.edit_text` live; the whole gesture is one undo step and Esc cancels it (the drag
 //! shares [`crate::viewport::Viewport::text_drag`] with moving a text, so it ends and cancels
-//! the same way).
+//! the same way). A drag from anywhere else inside the frame moves the text ([`grab_inside`]).
 use std::cell::RefCell;
 
 use egui::{Align2, CursorIcon, FontId, Painter, Pos2, Rect, Stroke, StrokeKind, vec2};
 use serde_json::json;
 use solidcraft_engine::geom::Vec2;
-use solidcraft_engine::sketch::{LinkKind, LinkSource};
+use solidcraft_engine::sketch::{CurveKind, LinkKind, LinkSource};
 
 use crate::SolveApp;
 use crate::theme::Tokens;
-use crate::viewport::Proj;
+use crate::viewport::{Hit, Proj};
 
 /// Pixels from a handle's centre that still grab it.
 const GRAB_PX: f32 = 8.0;
@@ -174,6 +174,24 @@ fn hit(app: &SolveApp, proj: &Proj, pos: Pos2) -> Option<(Frame, Grab)> {
 /// Is a handle under the pointer? (A click there does not change the selection.)
 pub(crate) fn over(app: &SolveApp, proj: &Proj, pos: Pos2) -> bool {
     hit(app, proj, pos).is_some()
+}
+
+/// The selected text's curve, as a drag from `pos` grabs it, when `pos` is inside the text's
+/// frame: a drag from anywhere in the frame moves the text, not only one from a letter (#8835).
+pub(crate) fn grab_inside(app: &SolveApp, proj: &Proj, pos: Pos2) -> Option<Hit> {
+    let sketch = app.session.active_sketch?;
+    let f = frame(app, &target(app)?)?;
+    let at = on_plane(app, proj, pos)?;
+    let q = f.to_local(at);
+    if !((f.min.x..=f.max.x).contains(&q.x) && (f.min.y..=f.max.y).contains(&q.y)) {
+        return None;
+    }
+    let id = crate::sketch_text::selected_entity(app)?;
+    let state = app.session.world_state();
+    let ss = state.sketch(sketch)?;
+    let curve = ss.sketch.curves.iter().find(|c| c.id == id)?;
+    let straight = matches!(curve.kind, CurveKind::Line { .. });
+    Some(Hit::SketchCurve { sketch, id, straight, point: ss.plane.to_world(at) })
 }
 
 /// Where the pointer is on the active sketch's plane.

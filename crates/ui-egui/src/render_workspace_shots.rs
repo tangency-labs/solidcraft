@@ -59,9 +59,14 @@ pub(crate) fn contents(app: &mut SolveApp, ui: &mut egui::Ui) {
             start = response.clicked();
             let response = ui_kit::compact_dropdown_menu(ui, "render_shots_size", &size_label, |ui| {
                 for (label, width, height) in SIZE_PRESETS {
-                    if ui_kit::list_picker(ui, label, &format!("{label} · {width} × {height}"), draft.width == width && draft.height == height)
-                        .clicked()
-                    {
+                    let text = format!("{label} · {width} × {height}");
+                    let mark = super::inspector::size_mark(app, &text, Some((u64::from(width), u64::from(height))));
+                    let mut response =
+                        ui_kit::list_picker(ui, label, mark.as_deref().unwrap_or(&text), draft.width == width && draft.height == height);
+                    if mark.is_some() {
+                        response = response.on_hover_text(super::inspector::size_limit_reason(app, width, height));
+                    }
+                    if response.clicked() {
                         size = Some((width, height));
                         ui.close();
                     }

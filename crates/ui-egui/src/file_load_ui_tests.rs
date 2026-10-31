@@ -12,13 +12,15 @@ struct Win {
     ctx: egui::Context,
     app: SolveApp,
     time: f64,
+    /// The window's size in points; a test that changes it moves the viewport's layout.
+    size: egui::Vec2,
 }
 
 impl Win {
     fn new() -> Self {
         let mut app = SolveApp::new(Session::default(), Default::default());
         app.custom_titlebar = true;
-        let mut w = Win { ctx: crate::fonts::test_context(), app, time: 0.0 };
+        let mut w = Win { ctx: crate::fonts::test_context(), app, time: 0.0, size: vec2(1600.0, 1000.0) };
         for _ in 0..3 {
             w.frame(vec![]);
         }
@@ -29,7 +31,7 @@ impl Win {
     fn frame(&mut self, events: Vec<Event>) -> Vec<ViewportCommand> {
         self.time += 1.0 / 60.0;
         let raw = RawInput {
-            screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(1600.0, 1000.0))),
+            screen_rect: Some(Rect::from_min_size(Pos2::ZERO, self.size)),
             time: Some(self.time),
             focused: true,
             events,
@@ -671,5 +673,79 @@ fn cancelling_a_step_open_releases_the_slot_before_the_worker_returns() {
         w.frame(vec![]);
     }
     assert_eq!(fingerprint(&w.app.session), fingerprint(&expected));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// An opened design comes up at the home view, framed on its own model: the angle the design
+/// before it was left at doesn't carry over, and a design opened while the Home screen is over
+/// the viewport is framed when the viewport is drawn, not against the layout of what was there
+/// before (which left the design wherever the camera happened to be).
+#[test]
+fn an_opened_design_comes_up_at_the_home_view() {
+    use solidcraft_engine::render::StandardView;
+    let dir = scratch("home-view");
+    let path = large_design(&dir, 4);
+    let home_angles = {
+        let mut cam = solidcraft_engine::render::Camera::default();
+        cam.set_view(StandardView::Iso);
+        (cam.yaw, cam.pitch, cam.roll)
+    };
+    let mut w = Win::new();
+    // The view the design before it was left at: straight down, zoomed right in.
+    w.app.cam.set_view(StandardView::Top);
+    w.app.cam.distance = 12.0;
+    w.app.cam.target = solidcraft_engine::geom::Vec3::new(50.0, -70.0, 3.0);
+    // Opened from the Home screen, which covers the viewport while the design goes in: the
+    // viewport is not drawn, so the layout a fit would be framed into is the one left over from
+    // what was there before, which cannot frame anything.
+    let revision = w.app.session.revision;
+    w.app.home.show(revision);
+    let stale = Rect::from_min_size(Pos2::ZERO, vec2(24.0, 24.0));
+    w.app.open_path_async(&path);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(120);
+    while w.app.file_load.busy() {
+        w.app.viewport.rect = Some(stale);
+        w.frame(vec![]);
+        assert!(std::time::Instant::now() < deadline, "the open finishes");
+        std::thread::yield_now();
+    }
+    // The design is meshed and framed while the Home screen is still over the viewport, as it is
+    // for a design opened from it: nothing draws the viewport in between, so nothing frames the
+    // design again afterwards.
+    while crate::open_meshing::active(&w.app) {
+        w.app.viewport.rect = Some(stale);
+        w.frame(vec![]);
+        assert!(std::time::Instant::now() < deadline, "the meshing finishes");
+        std::thread::yield_now();
+    }
+    for _ in 0..4 {
+        w.app.viewport.rect = Some(stale);
+        w.frame(vec![]);
+    }
+    // The Home screen closes and the viewport is drawn for the first time since the open.
+    w.app.home.open = false;
+    for _ in 0..4 {
+        w.frame(vec![]);
+    }
+    assert_eq!((w.app.cam.yaw, w.app.cam.pitch, w.app.cam.roll), home_angles, "opened at the home view");
+    // Framed on its model, as a fit asked for now frames it: not left at the default camera.
+    let opened = w.app.cam;
+    w.app.fit_view();
+    let refitted = w.app.cam;
+    assert!((refitted.target - opened.target).len() < 1e-6, "framed on the model: {opened:?} vs {refitted:?}");
+    assert!((refitted.distance - opened.distance).abs() < 1e-6, "framed on the model: {opened:?} vs {refitted:?}");
+    // A synchronous open (the control channel's) into a blank design, which keeps its tab and so
+    // its camera, comes up at the home view too.
+    let other = scratch("home-view-sync");
+    let second = large_design(&other, 2);
+    crate::documents::new_design(&mut w.app);
+    w.frame(vec![]);
+    w.app.cam.set_view(StandardView::Front);
+    w.app.open_path(&second);
+    for _ in 0..4 {
+        w.frame(vec![]);
+    }
+    assert_eq!((w.app.cam.yaw, w.app.cam.pitch, w.app.cam.roll), home_angles, "a synchronous open too");
+    let _ = std::fs::remove_dir_all(&other);
     let _ = std::fs::remove_dir_all(&dir);
 }

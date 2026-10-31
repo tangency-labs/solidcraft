@@ -530,6 +530,99 @@ fn mass_properties_need_consistently_oriented_faces() {
     assert!(m.mass_properties().is_none());
 }
 
+/// `m` with every vertex moved by the linear map `l` (row by row).
+fn mapped(m: &Mesh, l: &inertia::Tensor3) -> Mesh {
+    let apply = |p: Vec3| {
+        let [x, y, z] = l.map(|r| r[0] * p.x + r[1] * p.y + r[2] * p.z);
+        Vec3::new(x, y, z)
+    };
+    Mesh { positions: m.positions.iter().map(|p| apply(*p)).collect(), triangles: m.triangles.clone(), ..Default::default() }
+}
+
+fn tensors_close(a: &inertia::Tensor3, b: &inertia::Tensor3, tol: f64) -> bool {
+    a.iter().flatten().zip(b.iter().flatten()).all(|(x, y)| (x - y).abs() <= tol)
+}
+
+#[test]
+fn gyration_follows_a_rotation_a_scale_and_a_mirror_of_the_body() {
+    let base = offset_box(Vec3::new(5.0, -3.0, 2.0), 20.0, 30.0, 40.0);
+    let props = base.mass_properties().unwrap();
+    let g = props.gyration().unwrap();
+    assert!(tensors_close(&inertia::from_gyration(&g, props.volume), &props.inertia, 1e-6 * props.inertia[0][0]));
+    let (c, s) = (30f64.to_radians().cos(), 30f64.to_radians().sin());
+    let (cx, sx) = (20f64.to_radians().cos(), 20f64.to_radians().sin());
+    let turn_z = [[c, -s, 0.0], [s, c, 0.0], [0.0, 0.0, 1.0]];
+    let turn_x = [[1.0, 0.0, 0.0], [0.0, cx, -sx], [0.0, sx, cx]];
+    let turn = [0, 1, 2].map(|i| [0, 1, 2].map(|j| (0..3).map(|k| turn_z[i][k] * turn_x[k][j]).sum::<f64>()));
+    for l in [turn, [[2.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 0.5]], [[-1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]] {
+        let moved = mapped(&base, &l).mass_properties().expect("a mapped box is still closed");
+        let want = moved.inertia;
+        let got = inertia::from_gyration(&inertia::transformed(&g, &l), moved.volume);
+        assert!(tensors_close(&got, &want, 1e-6 * want[0][0].abs().max(want[2][2].abs())), "{l:?}\n{got:?}\n{want:?}");
+    }
+}
+
+#[test]
+fn principal_axes_of_a_turned_box_are_its_edges() {
+    let (a, b, c) = (20.0, 30.0, 40.0);
+    let v = a * b * c;
+    let (cs, sn) = (30f64.to_radians().cos(), 30f64.to_radians().sin());
+    let turn = [[cs, -sn, 0.0], [sn, cs, 0.0], [0.0, 0.0, 1.0]];
+    let m = mapped(&offset_box(Vec3::ZERO, a, b, c), &turn).mass_properties().unwrap();
+    assert!(m.inertia[0][1].abs() > 1.0, "turned about z, the box has a product of inertia: {:?}", m.inertia);
+    let (moments, axes) = inertia::principal(&m.inertia, 0.0).unwrap();
+    // Smallest about the longest edge (z), largest about the shortest (the turned x).
+    let want = [v * (a * a + b * b) / 12.0, v * (a * a + c * c) / 12.0, v * (b * b + c * c) / 12.0];
+    for (got, want) in moments.iter().zip(want) {
+        assert!(close(*got, want, 1e-9), "{moments:?} {want}");
+    }
+    let edges = [Vec3::Z, Vec3::new(-sn, cs, 0.0), Vec3::new(cs, sn, 0.0)];
+    for (axis, edge) in axes.iter().zip(edges) {
+        assert!((axis.dot(edge).abs() - 1.0).abs() < 1e-9, "{axes:?}");
+    }
+    assert!((axes[0].cross(axes[1]) - axes[2]).len() < 1e-12, "right-handed: {axes:?}");
+    // The first two point along the world axis nearest them: +z, then +y.
+    assert!(axes[0].z > 0.0 && axes[1].y > 0.0, "{axes:?}");
+}
+
+#[test]
+fn shifted_inertia_about_a_box_corner_matches_the_closed_form() {
+    let (a, b, c) = (20.0, 30.0, 40.0);
+    let m = offset_box(Vec3::ZERO, a, b, c).mass_properties().unwrap();
+    let mass = 3.0 * m.volume;
+    let at_centre = m.inertia.map(|r| r.map(|x| 3.0 * x));
+    let corner = inertia::shifted(&at_centre, mass, Vec3::ZERO - m.centroid);
+    let want = [
+        [mass * (b * b + c * c) / 3.0, -mass * a * b / 4.0, -mass * a * c / 4.0],
+        [-mass * a * b / 4.0, mass * (a * a + c * c) / 3.0, -mass * b * c / 4.0],
+        [-mass * a * c / 4.0, -mass * b * c / 4.0, mass * (a * a + b * b) / 3.0],
+    ];
+    assert!(tensors_close(&corner, &want, 1e-9 * want[0][0]), "{corner:?}");
+}
+
+#[test]
+fn principal_axes_of_equal_zero_or_broken_tensors() {
+    let sphere = [[5.0, 0.0, 0.0], [0.0, 5.0, 0.0], [0.0, 0.0, 5.0]];
+    assert_eq!(inertia::principal(&sphere, 0.0), Some(([5.0; 3], [Vec3::X, Vec3::Y, Vec3::Z])));
+    assert_eq!(inertia::principal(&[[0.0; 3]; 3], 0.0), Some(([0.0; 3], [Vec3::X, Vec3::Y, Vec3::Z])));
+    assert!(inertia::principal(&[[f64::NAN, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]], 0.0).is_none());
+    assert!(inertia::principal(&[[f64::INFINITY, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]], 0.0).is_none());
+    // Products of inertia far larger than the moments still settle.
+    let (moments, _) = inertia::principal(&[[1.0, 1e12, 0.0], [1e12, 1.0, 0.0], [0.0, 0.0, 1.0]], 0.0).unwrap();
+    assert!(close(moments[0], -1e12, 1e-9) && close(moments[2], 1e12, 1e-9), "{moments:?}");
+    // A tessellated pin along z: x and y differ in the fifth digit, with a stray product between
+    // them. Exactly, their axes are turned at random; counted as equal, they are X and Y.
+    let pin = [[7.99497, -0.000535, 0.0], [-0.000535, 7.99536, 0.0], [0.0, 0.0, 5.18447]];
+    let (_, exact) = inertia::principal(&pin, 0.0).unwrap();
+    assert!(exact[1].x.abs() < 0.99, "{exact:?}");
+    assert_eq!(inertia::principal(&pin, 1e-3).map(|(_, axes)| axes), Some([Vec3::Z, Vec3::X, Vec3::Y]));
+    // The same with the round pair smallest (a disc), and all three alike (a cube's tessellation).
+    let disc = [[3.00001, 0.0002, 0.0], [0.0002, 3.0, 0.0], [0.0, 0.0, 6.0]];
+    assert_eq!(inertia::principal(&disc, 1e-3).map(|(_, axes)| axes), Some([Vec3::X, Vec3::Y, Vec3::Z]));
+    let cube = [[2.0, 1e-5, 0.0], [1e-5, 2.0001, 0.0], [0.0, 0.0, 1.9999]];
+    assert_eq!(inertia::principal(&cube, 1e-3).map(|(_, axes)| axes), Some([Vec3::X, Vec3::Y, Vec3::Z]));
+}
+
 mod close_pairs {
     use super::*;
 

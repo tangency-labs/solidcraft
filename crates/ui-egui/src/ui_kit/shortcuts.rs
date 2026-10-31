@@ -79,7 +79,7 @@ fn search_with_icon(ui: &mut Ui, id: egui::Id, value: &mut String, hint: &str) -
     let response = ui
         .scope_builder(egui::UiBuilder::new().max_rect(editor), |ui| {
             ui.set_clip_rect(ui.clip_rect().intersect(editor));
-            ui.add_sized(
+            let mut response = ui.add_sized(
                 editor.size(),
                 super::fields::text_input(egui::TextEdit::singleline(value))
                     .id(id)
@@ -89,7 +89,9 @@ fn search_with_icon(ui: &mut Ui, id: egui::Id, value: &mut String, hint: &str) -
                     .margin(vec2(t.space_4, 0.0))
                     .clip_text(true)
                     .frame(egui::Frame::NONE),
-            )
+            );
+            super::text_menu::menu(ui, &mut response, value, super::text_menu::Field::LINE);
+            response
         })
         .inner;
     let mut cleared = false;

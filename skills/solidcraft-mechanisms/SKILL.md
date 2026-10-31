@@ -14,7 +14,7 @@ Written against SolidCraft `main` after 0.11.1, which counts the degrees of free
 1. In SolidCraft's own chat or any MCP client, call `skill_reference {"skill":"solidcraft-mechanisms"}`. Elsewhere, read `reference.md`.
 2. **Open:** if the design is not open yet, run `open {path}`. When the server is bridged to the app and the current design is `dirty`, ask before opening anything.
 3. **Map it:** run `inspect_design {"measure":false,"sketches":false}`, then `execute joint.list`. `joint.list` shows `fixed` (the grounded occurrences, always with the root, 0), `dof` per occurrence, `conflicts`, the joints, links and named origins, at about 0.5 KB per joint. `execute motion.list` lists the motion studies.
-4. **Existing design:** take `edit.checkpoint` in its own call before you move bodies into components. `edit.restore_checkpoint {checkpoint}` goes back exactly.
+4. **Existing design:** take `edit.checkpoint` in its own call before you move bodies into components. `edit.restore_checkpoint {checkpoint}` goes back exactly, once: restoring uses the checkpoint up, so take a new one to go back again.
 5. **Write the plan:**
    - the components, and which one is grounded
    - each joint: type, the two occurrences, its world point and axis, limits
@@ -62,7 +62,7 @@ Written against SolidCraft `main` after 0.11.1, which counts the degrees of free
 - **Sweep until contact:** `joint.sweep {"joint":..., "from":0, "to":120, "occurrences":[...], "against":[...], "report_gaps":true}` answers how far a hinge, door or linkage opens: `stopped_at` (last clear value, bisected to `refine` mm, default 0.01), `stopped_by` `{a, b, at}` (or `"loop"`, `"limit"`), per-sample `min_gap_mm` and the nearest each part came (`min_gap`). It runs on a copy; `"apply":true` leaves the design at the stop. Pairs touching at `from` (`touching_at_start`) stop it only once they pass into each other.
 
 ## Verify
-- **Each joint:** `execute occurrence.properties {"occurrence":"Wing:1"}` (under 1 KB) gives the world bbox and centre of mass of one occurrence. Joining must not move them.
+- **Each joint:** `execute occurrence.properties {"occurrence":"Wing:1"}` (about 2 KB) gives the world bbox, centre of mass and inertia of one occurrence. Joining must not move them.
 - **Each drive:** compute the expected value of every follower, and read it back from `joint.list` (degrees and mm, with `unit`). For an actuator from root R to tip T on a panel hinged at H: `L(θ) = |T(θ) - R|`, where `T(θ)` is T turned by θ about the hinge axis through H, and the stroke is `L(θ) - L(0)`. A closed loop matches to 1e-6 mm.
 - **Each stop:** solve for where the limit is reached, and compare with the value the drive stopped at. Stops are found by bisection, so they land within about 0.01 degrees.
 - **Links:** b must equal r·a + o exactly, unless that is outside b's limits; then b sits at the limit and the mirror stops following.

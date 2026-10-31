@@ -587,9 +587,9 @@ fn folder_and_group_menus_make_rename_and_drop_groups() {
     act(&mut app, &t, "Show/Hide");
     assert!(app.session.visibility.hidden_bodies.is_empty());
     assert!(app.session.folder_hidden(&format!("c0/g{}", g.id)));
-    assert!(g.items.iter().all(|b| !app.session.body_visible(b)));
+    assert!(g.item_keys().all(|b| !app.session.body_visible(b)));
     act(&mut app, &t, "Show/Hide");
-    assert!(g.items.iter().all(|b| app.session.body_visible(b)));
+    assert!(g.item_keys().all(|b| app.session.body_visible(b)));
     act(&mut app, &t, "Ungroup");
     assert!(app.session.doc.browser_groups.is_empty());
     act(&mut app, &folder, "New Group");
@@ -671,6 +671,26 @@ fn delete_key_handles_every_kind_and_asks_about_dependents() {
     crate::delete::delete_selection(&mut app);
     assert!(app.status.as_ref().is_some_and(|s| s.0.contains("Delete Face")), "{:?}", app.status);
     assert_eq!(app.session.doc.features.len(), n);
+}
+
+/// #9079: Modify ▸ Delete with nothing selected says what to pick, not the command's parameter
+/// error, and changes nothing; with something selected it deletes it, as the Delete key does.
+#[test]
+fn modify_delete_with_nothing_selected_asks_for_a_pick() {
+    let mut app = SolveApp::new(Session::default(), Services::default());
+    app.run("solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "Box"})).unwrap();
+    app.run("construct.plane.offset", json!({"base": "XY", "offset": 10})).unwrap();
+    let n = app.session.doc.features.len();
+    app.run("select.clear", json!({})).unwrap();
+    app.start("timeline.delete");
+    let (message, _, error) = app.status.clone().expect("a hint");
+    assert!(!error && message == app.tr("ui.delete_select_first"), "{message:?} error: {error}");
+    assert!(!message.contains('`'), "no parameter names: {message}");
+    assert_eq!(app.session.doc.features.len(), n, "nothing deleted");
+    app.run("select.set", json!({"items": [{"type": "plane", "name": "Plane1"}]})).unwrap();
+    app.start("timeline.delete");
+    assert!(app.session.doc.find_feature("Plane1").is_none(), "the selection goes");
+    assert_eq!(app.session.doc.features.len(), n - 1);
 }
 
 #[test]
@@ -1466,6 +1486,8 @@ fn every_context_target_has_identified_icon_rows_including_submenus() {
         Target::Group { id: group_id, scope: "c0".into() },
         Target::Origin,
         Target::Units,
+        Target::VisualStyle,
+        Target::ViewTool,
         Target::ToolbarCommand { id: "solid.extrude".into() },
         Target::Toolbar,
         Target::HistoryControls,
@@ -1809,4 +1831,85 @@ mod browser_rows {
         h.frames(2);
         assert!(h.app.viewport.context_menu.is_none(), "a click outside the menu closes it");
     }
+}
+
+/// #8570: Insert Design lists the designs open in other tabs. One click inserts a saved one; one
+/// with unsaved changes inserts its saved file and says so; one never saved is greyed out, as there
+/// is no file to link. Browse… opens the file picker. Alone, or with the preference off, the
+/// button goes straight to the picker, as before.
+#[test]
+fn insert_design_offers_the_other_open_designs_then_browse() {
+    let mut h = crate::scenario::Harness::new();
+    let open = |dir: &std::path::Path, file: &str, size: f64| {
+        let path = dir.join(file);
+        let mut s = Session::default();
+        s.execute("solid.box", &json!({"length": size, "width": size, "height": size})).unwrap();
+        s.execute("file.save", &json!({"path": path})).unwrap();
+        let mut opened = Session::default();
+        opened.execute("doc.open", &json!({"path": path})).unwrap();
+        opened
+    };
+    let linked = |app: &SolveApp, file: &str| app.session.doc.links.values().filter(|l| l.path.ends_with(file)).count();
+    let menu_open = |app: &SolveApp| app.viewport.context_menu.is_some() && app.menu.target == Target::InsertDesign;
+
+    // Alone: the picker, as before.
+    h.step(&json!({"choose_file": "none.solidcraft"})).unwrap();
+    h.app.start("component.insert_design");
+    assert!(!menu_open(&h.app));
+    h.frames(3);
+    context_menu::close(&mut h.app);
+
+    let dir = h.dir.clone();
+    crate::documents::open_tab(&mut h.app, open(&dir, "bracket.solidcraft", 10.0)).unwrap();
+    crate::documents::open_tab(&mut h.app, open(&dir, "plate.solidcraft", 20.0)).unwrap();
+    h.app.run("solid.box", json!({"length": 5, "width": 5, "height": 5, "corner": [40, 0, 0]})).unwrap();
+    crate::documents::open_tab(&mut h.app, Session::default()).unwrap();
+    h.app.run("solid.box", json!({"length": 5, "width": 5, "height": 5})).unwrap();
+    crate::documents::open_tab(&mut h.app, Session::default()).unwrap();
+    crate::documents::switch(&mut h.app, 0);
+    h.app.run("solid.box", json!({"length": 1, "width": 1, "height": 1, "body_name": "Base"})).unwrap();
+
+    h.app.start("component.insert_design");
+    assert!(menu_open(&h.app));
+    let items = context_menu::items(&h.app, &Target::InsertDesign);
+    let rows: Vec<(&str, &str, bool)> = items.iter().map(|i| (i.label.as_str(), i.shortcut.as_str(), i.enabled)).collect();
+    let names: Vec<String> = h.app.docs.background().map(|s| s.doc.name.clone()).collect();
+    assert_eq!(
+        rows,
+        [
+            ("Open designs", "", false),
+            (names[0].as_str(), "bracket.solidcraft", true),
+            (names[1].as_str(), "Unsaved changes", true),
+            (names[2].as_str(), "Not saved yet", false),
+            ("", "", false),
+            ("Browse…", "", true),
+        ],
+        "a saved design, one with unsaved changes, one never saved; not the blank new tab"
+    );
+
+    act(&mut h.app, &Target::InsertDesign, &names[0]);
+    assert_eq!(linked(&h.app, "bracket.solidcraft"), 1);
+    assert!(h.app.status.as_ref().is_none_or(|(s, _, _)| !s.contains("unsaved")), "{:?}", h.app.status);
+    act(&mut h.app, &Target::InsertDesign, &names[1]);
+    assert_eq!(linked(&h.app, "plate.solidcraft"), 1);
+    assert!(
+        h.app.status.as_ref().is_some_and(|(s, _, error)| !*error && s.contains("unsaved changes") && s.contains("Update Links")),
+        "{:?}",
+        h.app.status
+    );
+
+    // Browse…: the picker, for any file on disk.
+    h.step(&json!({"choose_file": "bracket.solidcraft"})).unwrap();
+    act(&mut h.app, &Target::InsertDesign, "Browse…");
+    h.frames(3);
+    assert_eq!(linked(&h.app, "bracket.solidcraft"), 2);
+
+    // The preference off: straight to the picker.
+    h.app.preferences.insert_lists_open_designs = false;
+    context_menu::close(&mut h.app);
+    h.step(&json!({"choose_file": "plate.solidcraft"})).unwrap();
+    h.app.start("component.insert_design");
+    assert!(!menu_open(&h.app));
+    h.frames(3);
+    assert_eq!(linked(&h.app, "plate.solidcraft"), 2);
 }

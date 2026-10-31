@@ -331,6 +331,13 @@ Orbit around, zoom to the cursor, the SpaceMouse, the middle double-click, F6 an
 view or navigation cube all work and
 **Fit Product** frames visible product bodies without including sketches or selection.
 
+While Frame shows the picture's frame, **Fit Product** and the fit on entering Render keep
+the product inside that frame rather than the viewport, so a picture taller than wide moves
+the camera back. The fit on entering waits for the saved setup to load, so it frames that
+setup's aspect, not the draft it replaces. `render.camera.fit` takes the picture's `aspect`
+(width over height, 0.000001 to 1000000, default 1) and refuses a fit whose camera would be
+out of range, leaving the current camera as it was.
+
 Preview drafts do not make the document dirty until saved. Unknown backend preferences
 and unsupported modes remain saved intent: the strict resolver reports the unsupported
 viewport request. **Use Integrated Preview** is an explicit draft change, never an
@@ -371,8 +378,16 @@ opaque CPU snapshot path to approximate transparent appearances.
 GPU product batches are separate from Design batches while sharing the installed
 device and pipelines. Model/visibility/appearance changes update the product scene;
 camera movement updates uniforms without rebuilding vertices. Selection and section
-state do not change the product buffers. Vertex uploads are bounded to 128 MiB and
-checked before allocation; malformed/non-finite triangles and invalid opacity fail.
+state do not change the product buffers. On desktop the preview takes up to eight of
+the device's largest buffers of vertex geometry (2 GiB with the usual 256 MiB buffers,
+never more than 2 GiB); uploads are split into buffers within that size. The web keeps
+a 128 MiB budget. The budget is checked before allocation, and a refusal names the
+scene's geometry size, the limit and how to get under it (hide bodies in Design). The
+upload itself runs under its own GPU error scopes: an allocation the device refuses is
+shown in the preview instead of drawing, and nothing else in the app changes how GPU
+errors are handled. Messages sit on a theme panel card so they stay readable on any
+background colour. The separate CPU image job keeps its own memory and work limits.
+Malformed/non-finite triangles and invalid opacity fail.
 Reinstalling the host invalidates product uploads. This is not a general device-loss,
 render-job or cancellation protocol; those ownership mechanisms belong to R4.
 
@@ -535,3 +550,5 @@ existing reasons. Destination selection uses the completed-image export picker.
 Render and Cancel stay in the stage bar. Active jobs also show a single-row progress
 pill with Cancel. The result viewer retains Copy, export, close, Fit/100% and shared
 pan/zoom. R starts the active setup; Escape closes the image without cancelling its job.
+
+Preferences › Graphics offers “Use previous Render preview geometry budget” (`render_previous_geometry_budget`). It restores the fixed limit (512 MiB on 64-bit desktop, 128 MiB elsewhere); by default, desktop previews use the device-based budget. Changes apply to the next preview frame.

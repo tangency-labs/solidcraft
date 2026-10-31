@@ -93,6 +93,8 @@
     "icons.highlight": "#ffffff",
     "icons.marker_halo": "#000000cc",
     "interference": "#ff5555",
+    "joint_axis": "#aaaaaa",
+    "joint_manipulator": "#ffff55",
     "logo": [
       "#ffffff",
       "#55ffff",

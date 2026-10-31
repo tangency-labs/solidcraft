@@ -5,6 +5,10 @@ use egui::{Color32, FontId, Pos2, Rect, Sense, Stroke, pos2, vec2};
 const ROW_H: f32 = super::TREE_ROW_HEIGHT;
 const INDENT: f32 = 14.0;
 const DIM_ICON_OPACITY: f32 = 0.4;
+/// A drag over the eyes scrolls the rows when the pointer is this near their top or bottom edge,
+/// by this many points a frame (#9680).
+const DRAG_EDGE: f32 = 24.0;
+const DRAG_SCROLL: f32 = 6.0;
 
 /// Trailing tree action; disabled actions retain their reason and a scenario rectangle.
 pub(crate) struct TreeAction<'a> {
@@ -24,6 +28,8 @@ pub(crate) struct Row<'a> {
     pub(crate) fold: Option<bool>,
     /// Some(visible) for rows with an eye.
     pub(crate) eye: Option<bool>,
+    /// The eye between the fold arrow and the radio, as before #8718, instead of at the row's end.
+    pub(crate) eye_left: bool,
     pub(crate) icon: &'a str,
     pub(crate) label: &'a str,
     /// The label is a name someone gave (a body, sketch, component, …): it is shown as typed,
@@ -31,6 +37,8 @@ pub(crate) struct Row<'a> {
     pub(crate) name: bool,
     pub(crate) selected: bool,
     pub(crate) dim: bool,
+    /// What Cut has marked, until Paste moves it: the row has a dashed outline.
+    pub(crate) cut: bool,
     pub(crate) color: Option<Color32>,
     /// Draw the icon in this one colour instead of its artwork (a sketch's solve state, #7245).
     pub(crate) icon_ink: Option<Color32>,
@@ -46,6 +54,9 @@ pub(crate) struct Row<'a> {
     pub(crate) kind_tip: Option<&'a str>,
     /// Lit by the selection or the 3D view's pointer: the item's own row, or a row leading to it.
     pub(crate) mark: Mark,
+    /// A feature that failed or built with a warning, or a folded row holding one: its mark at
+    /// the row's end, the message in [`Row::tip`].
+    pub(crate) status: Option<Status>,
     /// Optional document appearance and shared trailing text slots.
     pub(crate) swatch: Option<Color32>,
     pub(crate) secondary: &'a str,
@@ -67,6 +78,23 @@ pub(crate) enum Mark {
     Here,
 }
 
+/// A feature's build state as its row marks it; the worse one sorts last.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) enum Status {
+    Warning,
+    Error,
+}
+
+impl Status {
+    /// The icon and the scenario handle's word.
+    pub(crate) fn icon(self) -> &'static str {
+        match self {
+            Status::Warning => "warning",
+            Status::Error => "error",
+        }
+    }
+}
+
 /// What happened on a row.
 #[derive(Default)]
 pub(crate) struct RowResp {
@@ -75,6 +103,7 @@ pub(crate) struct RowResp {
     pub(crate) double: bool,
     pub(crate) secondary: Option<Pos2>,
     pub(crate) fold: bool,
+    /// The eye was clicked, or a drag over the eyes sets it (#9680, see [`eye_drag_id`]).
     pub(crate) eye: bool,
     pub(crate) eye_rect: Option<Rect>,
     pub(crate) radio: bool,
@@ -85,7 +114,19 @@ pub(crate) struct RowResp {
     pub(crate) resp: Option<egui::Response>,
     /// The press began on the fold arrow, eye or radio (not a drag of the row).
     pub(crate) on_control: bool,
+    /// Centres of the fold arrow, eye and radio, for rows that publish them under other handles.
+    pub(crate) fold_at: Option<Pos2>,
+    pub(crate) eye_at: Option<Pos2>,
+    pub(crate) radio_at: Option<Pos2>,
+    /// Where the label starts.
+    pub(crate) label_left: Option<f32>,
     pub(crate) actions: Vec<egui::Response>,
+}
+
+/// The state a drag over the eyes sets them to: the first eye's new state, while the button is
+/// down (egui temporary data). Absent when no eye drag is under way.
+pub(crate) fn eye_drag_id() -> egui::Id {
+    egui::Id::new("sc_tree_eye_drag")
 }
 
 /// Geometry used by Browser culling and the shared row painter.
@@ -131,6 +172,8 @@ pub(crate) fn tree_row(ui: &mut egui::Ui, id: egui::Id, row: &Row) -> RowResp {
     }
     let mut x = r.left() + if row.compact { t.space_8 + row.depth as f32 * t.space_14 } else { 2.0 + row.depth as f32 * INDENT };
     let cy = r.top() + row_height / 2.0;
+    // Where the row's depth puts it, whatever controls it has.
+    crate::scenario::publish_handle(&format!("indent:{}", row.label), pos2(x, cy));
     let action_width = if row.compact { t.space_16 } else { t.form_close_size };
     let action_left = (r.right() - if row.compact { t.space_8 } else { t.space_4 } - action_width * row.actions.len() as f32).max(r.left());
     for (index, action) in row.actions.iter().enumerate() {
@@ -164,13 +207,26 @@ pub(crate) fn tree_row(ui: &mut egui::Ui, id: egui::Id, row: &Row) -> RowResp {
     // padding, the eye, the radio, or the row itself), so a click on the arrow never also
     // selects the row or starts a drag.
     let fold_r = Rect::from_min_max(pos2(x - 4.0, r.top()), pos2(x + 15.0, r.bottom()));
-    let eye_r = Rect::from_center_size(
-        pos2(if row.compact { action_left - t.space_6 } else { x + 14.0 + 8.0 }, cy),
-        vec2(t.space_16 + t.space_3, r.height()),
-    );
-    let radio_r = Rect::from_center_size(pos2(x + 32.0 + 6.0, cy), vec2(t.space_12 + t.space_3, r.height()));
+    // At the row's end the eyes form one column, clear of a floating scroll bar laid over the rows.
+    let eye_end = !row.compact && !row.eye_left;
+    let scroll = &ui.spacing().scroll;
+    let bar = if scroll.floating { (scroll.bar_width + scroll.bar_outer_margin - scroll.floating_allocated_width).max(0.0) } else { 0.0 };
+    let eye_width = t.space_16 + t.space_3;
+    let eye_x = if row.compact {
+        action_left - t.space_6
+    } else if eye_end {
+        action_left.min(r.right() - bar) - eye_width / 2.0
+    } else {
+        x + 14.0 + 8.0
+    };
+    let eye_r = Rect::from_center_size(pos2(eye_x, cy), vec2(eye_width, r.height()));
+    // After the fold arrow: the eye's slot, or a gap that keeps the arrow and the radio apart.
+    let slot = if eye_end { t.space_10 } else { 18.0 };
+    let radio_x = x + 14.0 + slot + 6.0;
+    let radio_r = Rect::from_center_size(pos2(radio_x, cy), vec2(t.space_12 + t.space_3, r.height()));
     // The button right after the name takes room from the label; it is placed once the label is laid out.
-    let name_action_width = if row.action.is_some() { 22.0 } else { 0.0 };
+    let (name_action_gap, name_action_size) = (t.space_8, t.space_16 + t.space_4);
+    let name_action_width = if row.action.is_some() { name_action_gap + name_action_size } else { 0.0 };
     let at = |p: Pos2| -> u8 {
         if !row.actions.is_empty() && p.x >= action_left {
             4
@@ -191,6 +247,7 @@ pub(crate) fn tree_row(ui: &mut egui::Ui, id: egui::Id, row: &Row) -> RowResp {
     if let Some(open) = row.fold {
         crate::ui_kit::disclosure(ui.painter(), pos2(x + 6.0, cy), open, if hover_on == 1 { t.text } else { t.text_dim });
         out.fold = resp.clicked() && click_on == 1;
+        out.fold_at = Some(fold_r.center());
         crate::scenario::publish_handle(&format!("fold:{}", row.label), fold_r.center());
     }
     x += if row.compact { t.space_16 } else { 14.0 };
@@ -201,11 +258,32 @@ pub(crate) fn tree_row(ui: &mut egui::Ui, id: egui::Id, row: &Row) -> RowResp {
         // Hidden or faded rows keep main's dimming, with the rounded suppression asset.
         icons::paint_icon(ui.painter(), er, if vis { "eye" } else { "suppress" }, if vis && !row.dim { 0.85 } else { DIM_ICON_OPACITY });
         out.eye = resp.clicked() && click_on == 2;
+        // A press on an eye that turns into a drag takes the opposite state, and each eye the
+        // pointer then passes over takes that same state (#9680).
+        if resp.drag_started() && press_on == 2 {
+            ui.data_mut(|d| d.insert_temp(eye_drag_id(), !vis));
+            out.eye = true;
+        } else if let Some(p) = ui.input(|i| i.pointer.primary_down().then(|| i.pointer.hover_pos()).flatten())
+            && at(p) == 2
+            && ui.rect_contains_pointer(eye_r)
+            && let Some(target) = ui.data(|d| d.get_temp::<bool>(eye_drag_id()))
+        {
+            out.eye |= target != vis;
+            // Within a few points of the rows' top or bottom edge, the drag scrolls them.
+            let clip = ui.clip_rect();
+            if p.y < clip.top() + DRAG_EDGE {
+                ui.scroll_to_rect(Rect::from_min_size(pos2(r.left(), clip.top() - DRAG_SCROLL), vec2(1.0, 1.0)), None);
+            } else if p.y > clip.bottom() - DRAG_EDGE {
+                ui.scroll_to_rect(Rect::from_min_size(pos2(r.left(), clip.bottom() + DRAG_SCROLL), vec2(1.0, 1.0)), None);
+            }
+            ui.ctx().request_repaint();
+        }
         out.eye_rect = Some(eye_r.intersect(ui.clip_rect()));
+        out.eye_at = Some(er.center());
         crate::scenario::publish_handle(&format!("eye:{}", row.label), er.center());
     }
     if !row.compact {
-        x += 18.0;
+        x += slot;
     }
     // Activation radio (components).
     if let Some(active) = row.radio {
@@ -215,6 +293,7 @@ pub(crate) fn tree_row(ui: &mut egui::Ui, id: egui::Id, row: &Row) -> RowResp {
             ui.painter().circle_filled(rc, 2.8, t.accent);
         }
         out.radio = resp.clicked() && click_on == 3;
+        out.radio_at = Some(radio_r.center());
         x += 15.0;
     }
     if !row.icon.is_empty() && !(row.compact && row.swatch.is_some()) {
@@ -246,7 +325,15 @@ pub(crate) fn tree_row(ui: &mut egui::Ui, id: egui::Id, row: &Row) -> RowResp {
     // The label stops before the badges and the card's edge; a longer name ends in an ellipsis
     // and its full text is in the tooltip.
     let badges_width = row.badges.len() as f32 * 15.0;
-    let mut right = if row.compact && row.eye.is_some() { eye_r.left() - t.space_4 } else { action_left } - badges_width;
+    let end = if (row.compact || eye_end) && row.eye.is_some() { eye_r.left() - t.space_4 } else { action_left };
+    let mut right = end - badges_width;
+    if let Some(status) = row.status {
+        right -= t.space_16;
+        let sr = Rect::from_center_size(pos2(right + t.space_8, cy), vec2(t.space_14, t.space_14));
+        icons::paint_icon(ui.painter(), sr, status.icon(), 1.0);
+        crate::scenario::publish_handle(&format!("status:{}:{}", status.icon(), row.label), sr.center());
+        right -= t.space_4;
+    }
     for text in [row.count, row.secondary, if row.compact { row.subtitle } else { "" }] {
         if text.is_empty() {
             continue;
@@ -281,14 +368,23 @@ pub(crate) fn tree_row(ui: &mut egui::Ui, id: egui::Id, row: &Row) -> RowResp {
     let elided = galley.elided;
     crate::scenario::publish_rect(&format!("row_label:{}", row.label), Rect::from_min_size(pos2(x, cy - galley.size().y / 2.0), galley.size()));
     ui.painter().with_clip_rect(ui.painter().clip_rect().intersect(r)).galley(pos2(x, cy - galley.size().y / 2.0), galley, col);
-    let mut bx = (x + lw + 6.0 + name_action_width).min(r.right() - 16.0);
+    if row.cut {
+        let inside = r.shrink2(vec2(t.space_2, t.space_2));
+        let corners = [inside.left_top(), inside.right_top(), inside.right_bottom(), inside.left_bottom(), inside.left_top()];
+        ui.painter().add(egui::Shape::dashed_line(&corners, Stroke::new(1.2, t.text_dim), 4.0, 3.0));
+    }
+    out.label_left = Some(x);
+    let mut bx = (x + lw + 6.0 + name_action_width).min(if eye_end && row.eye.is_some() { end } else { r.right() } - 16.0);
     for b in row.badges {
         let br = Rect::from_center_size(pos2(bx + 6.0, cy), vec2(t.space_12, t.space_12));
         badge(ui.painter(), br, b, t.text_dim);
         bx += 15.0;
     }
     // The name's action button sits right after the label; a press on it is not a press on the row.
-    let action_r = Rect::from_min_size(pos2(x + lw + 2.0, r.top()), vec2(t.space_16 + t.space_4, r.height()));
+    // The gap before it belongs to the row: a click that lands just past the end of the name, or
+    // a press on the name that slips a few points before its release, selects the row instead of
+    // opening the feature's sketch (#10079). The gap is wider than egui's click slop (6 points).
+    let action_r = Rect::from_min_size(pos2(x + lw + name_action_gap, r.top()), vec2(name_action_size, r.height()));
     let over_action = |p: Option<Pos2>| row.action.is_some() && p.is_some_and(|p| action_r.contains(p));
     let action_hover = over_action(resp.hover_pos());
     let action_click = over_action(resp.interact_pointer_pos());
@@ -312,6 +408,13 @@ pub(crate) fn tree_row(ui: &mut egui::Ui, id: egui::Id, row: &Row) -> RowResp {
     };
     let state = row.kind_tip.map(crate::i18n::tr).or(row.tip);
     let resp = match (tip, state) {
+        // The eye at the row's end shows its tip there, not under the name.
+        (Some(t), _) if hover_on == 2 && eye_end => {
+            let mut at_eye = resp.clone();
+            (at_eye.rect, at_eye.interact_rect) = (eye_r, eye_r);
+            at_eye.on_hover_text(t);
+            resp
+        }
         (Some(t), _) => resp.on_hover_text(t),
         (None, Some(state)) if elided => resp.on_hover_text(format!("{label_display}\n{state}")),
         (None, Some(state)) => resp.on_hover_text(state),

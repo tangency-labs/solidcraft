@@ -3,7 +3,7 @@
 use std::hash::{Hash, Hasher};
 use std::sync::{Arc, Mutex};
 
-use egui::{Color32, Sense};
+use egui::Sense;
 use serde_json::json;
 use solidcraft_engine::doc::render_settings::RenderSetup;
 #[cfg(test)]
@@ -71,6 +71,46 @@ mod thumbnails;
 #[path = "render_ui/wear.rs"]
 mod wear;
 
+/// The browser's preview budget: WebGPU and WebGL share the tab's memory, so it stays small.
+const WEB_GEOMETRY_BYTES: u64 = 128 * 1024 * 1024;
+/// Desktop: at most this many of the device's largest buffers of geometry...
+const DESKTOP_GEOMETRY_BUFFERS: u64 = 8;
+/// ...and never more than this, whatever the device allows.
+const DESKTOP_GEOMETRY_CEILING: u64 = 2 * 1024 * 1024 * 1024;
+
+/// The product preview's geometry budget for a device whose largest buffer is `max_buffer_size`
+/// bytes (`wgpu::Device::limits`, what the device was created with). Uploads are split into
+/// buffers of at most that size, so the budget bounds memory, not a single buffer: 2 GiB on a
+/// device with the standard 256 MiB buffers. An allocation the device still refuses is caught
+/// by the upload's error scope and reported, not a crash.
+pub(crate) fn geometry_budget(max_buffer_size: u64, web: bool) -> u64 {
+    if web { WEB_GEOMETRY_BYTES } else { max_buffer_size.saturating_mul(DESKTOP_GEOMETRY_BUFFERS).min(DESKTOP_GEOMETRY_CEILING) }
+}
+
+/// Apply the saved compatibility preference to the device-derived budget.
+fn preferred_geometry_budget(device_budget: u64, previous: bool) -> u64 {
+    if previous { MAX_GEOMETRY_BYTES as u64 } else { device_budget }
+}
+
+fn admit_geometry(bytes: u64, budget: u64) -> Result<(), String> {
+    if bytes > budget {
+        return Err(format!(
+            "Render preview needs {:.1} MiB of geometry; the limit is {:.1} MiB. Hide bodies in Design, then return to Render and try again.",
+            bytes as f64 / 1048576.0,
+            budget as f64 / 1048576.0
+        ));
+    }
+    Ok(())
+}
+
+/// The message when the device refused the preview's geometry.
+fn upload_refusal(bytes: u64, error: &str) -> String {
+    format!(
+        "The graphics device could not hold the Render preview's {:.1} MiB of geometry ({error}). Hide bodies in Design, then return to Render and try again.",
+        bytes as f64 / 1048576.0
+    )
+}
+
 #[cfg(test)]
 #[path = "render_workspace_tests.rs"]
 mod tests;
@@ -87,13 +127,16 @@ pub struct State {
     pub setup_seconds: std::collections::BTreeMap<String, f64>,
     /// The viewport adapter the current setup runs on.
     pub setup_key: Option<String>,
+    pub geometry_budget: u64,
+    /// A GPU error the preview's last geometry upload caught.
+    pub upload_error: crate::gpu::UploadError,
     pub image_host: Option<solidcraft_engine::render::job::CpuHost>,
     pub view: ViewState,
     revision: u64,
     design_camera: Option<(Camera, bool)>,
     slot: SceneSlot,
     key: Option<u64>,
-    scene_signature: Option<(u64, usize, u64)>,
+    scene_signature: Option<(u64, usize, u64, u64)>,
     scene: Option<ProductScene>,
     scene_error: Option<String>,
     preview_upload_bytes: Option<usize>,
@@ -414,6 +457,8 @@ impl Default for State {
             pending_setup: None,
             setup_seconds: Default::default(),
             setup_key: None,
+            geometry_budget: WEB_GEOMETRY_BYTES,
+            upload_error: Arc::new(Mutex::new(None)),
             image_host: None,
             view: Default::default(),
             revision: u64::MAX,
@@ -435,8 +480,9 @@ impl Default for State {
 
 impl State {
     /// Retain the selected viewport adapter, but do not open another device or
-    /// compile shaders until Render is used. A later viewport installation (for
-    /// example safe-mode fallback) replaces only a not-yet-started factory.
+    /// compile shaders until the GPU path image method is used in Render
+    /// ([`wants_path_host`]). A later viewport installation (for example safe-mode
+    /// fallback) replaces only a not-yet-started factory.
     #[cfg(not(target_arch = "wasm32"))]
     pub(crate) fn defer_path_host(&mut self, key: String, create: impl FnOnce() -> Result<ImageHost, String> + Send + 'static) {
         if matches!(self.path_host, PathHost::NotStarted) {
@@ -511,9 +557,17 @@ pub fn host_executor(max_dimension: u32, depth: bool, samples: u32) -> Result<Ex
     })
 }
 
+/// Whether the GPU path tracer is wanted now: Render is open with the GPU path image method.
+/// Its setup compiles a large shader that some Vulkan drivers take gigabytes and minutes over,
+/// so Render with the Raster or CPU method never starts it (#9041).
+#[cfg(not(target_arch = "wasm32"))]
+fn wants_path_host(app: &SolveApp) -> bool {
+    active(app) && app.render_workspace.view.method == ImageMethod::GpuRaytrace
+}
+
 pub fn sync_backend(app: &mut SolveApp) {
     #[cfg(not(target_arch = "wasm32"))]
-    if active(app) {
+    if wants_path_host(app) {
         app.render_workspace.start_deferred_path_host();
     }
     if let Some(took) = app.render_workspace.path_host.poll() {
@@ -570,11 +624,12 @@ pub fn reset_document(app: &mut SolveApp) {
     app.ui.ribbon_context = None;
     let host = app.render_workspace.host.clone();
     let image_host = app.render_workspace.image_host.clone();
+    let geometry_budget = app.render_workspace.geometry_budget;
     let path_host = std::mem::take(&mut app.render_workspace.path_host);
     let setup_seconds = std::mem::take(&mut app.render_workspace.setup_seconds);
     let setup_key = app.render_workspace.setup_key.take();
     let pending_setup = app.render_workspace.pending_setup.take();
-    app.render_workspace = State { host, image_host, path_host, setup_seconds, setup_key, pending_setup, ..Default::default() };
+    app.render_workspace = State { host, image_host, path_host, setup_seconds, setup_key, pending_setup, geometry_budget, ..Default::default() };
     if active(app) {
         app.ui.tab = "MODEL".into();
     }
@@ -606,24 +661,30 @@ pub fn enter(app: &mut SolveApp, render: bool) -> Result<(), String> {
             return Err(crate::i18n::tr("render.error_finish_operation").into());
         }
         app.run("render.scene", json!({}))?;
-        if !active(app) {
+        let entering = !active(app);
+        if entering {
             app.render_workspace.design_camera = Some((app.cam, app.ui.perspective));
             app.ui.tab = "RENDER".into();
             select_stage(app, app.render_workspace.view.stage.key());
             if app.render_workspace.view.selection == RenderSelection::Nothing {
                 selection_editor(app, &RenderSelection::Nothing);
             }
-            let scene = solidcraft_engine::product_scene::extract(&app.session).map_err(|e| e.to_string())?;
-            if !scene.bounds.is_empty() {
-                app.fit_bounds(scene.bounds);
-            }
         }
         setups::refresh_dirty(app);
         if app.render_workspace.revision != app.session.revision && !app.render_workspace.view.dirty {
             setups::load(app);
         }
+        // Fit once the setup in effect is known: the fit frames that image's aspect.
+        if entering {
+            let scene = solidcraft_engine::product_scene::extract(&app.session).map_err(|e| e.to_string())?;
+            if !scene.bounds.is_empty() {
+                app.fit_bounds(scene.bounds);
+            }
+        }
         #[cfg(not(target_arch = "wasm32"))]
-        app.render_workspace.start_deferred_path_host();
+        if wants_path_host(app) {
+            app.render_workspace.start_deferred_path_host();
+        }
     } else {
         assign::stop(app);
         if let Some((camera, perspective)) = app.render_workspace.design_camera.take() {
@@ -1599,9 +1660,9 @@ fn show_result(app: &mut SolveApp, ui: &mut egui::Ui) {
 }
 
 impl State {
-    fn prepare_preview(&mut self, signature: (u64, usize, u64), capture: impl FnOnce() -> Result<ProductScene, String>) -> Result<(), String> {
+    fn prepare_preview(&mut self, signature: (u64, usize, u64, u64), capture: impl FnOnce() -> Result<ProductScene, String>) -> Result<(), String> {
         if self.scene_signature != Some(signature) {
-            let prepared = capture().and_then(|scene| gpu_scene(&scene).map(|(key, gpu)| (scene, key, gpu)));
+            let prepared = capture().and_then(|scene| gpu_scene_with_budget(&scene, signature.3).map(|(key, gpu)| (scene, key, gpu)));
             self.scene_signature = Some(signature);
             match prepared {
                 Ok((scene, key, gpu)) => {
@@ -1623,6 +1684,9 @@ impl State {
                             return Err(error);
                         }
                         self.key = Some(key);
+                        if let Ok(mut error) = self.upload_error.lock() {
+                            *error = None;
+                        }
                     }
                     self.scene = Some(scene);
                     self.scene_error = None;
@@ -1725,10 +1789,7 @@ impl PreviewUploadPlan {
             &mut self.tris
         };
         *count = count.checked_add(bytes).ok_or(crate::i18n::tr("render.error_geometry_size"))?;
-        if self.bytes()? > limit {
-            return Err(crate::i18n::format("render.error_vertex_envelope", &[("limit", &(limit / (1024 * 1024)).to_string())]));
-        }
-        Ok(())
+        admit_geometry(self.bytes()? as u64, limit as u64)
     }
 }
 
@@ -1764,18 +1825,25 @@ fn preview_upload_plan(scene: &ProductScene, limit: usize) -> Result<PreviewUplo
                 return Err(crate::i18n::tr("render.error_pbr_opacity").into());
             }
             if opacity > 0.0 {
-                plan.add(pbr, opacity < 0.999, 1, limit)?;
+                plan.add(pbr, opacity < 0.999, 1, usize::MAX)?;
             }
         }
     }
+    admit_geometry(plan.bytes()? as u64, limit as u64)?;
     Ok(plan)
 }
 
 /// Convert all captured surfaces, without decimation. The finite, exact payload
 /// plan is admitted first; each output vector is reserved once rather than grown
 /// once per triangle. Device uploads retain their existing chunked buffer path.
-pub fn gpu_scene(scene: &ProductScene) -> Result<(u64, GpuScene), String> {
-    let plan = preview_upload_plan(scene, MAX_GEOMETRY_BYTES)?;
+#[cfg(test)]
+fn gpu_scene(scene: &ProductScene) -> Result<(u64, GpuScene), String> {
+    gpu_scene_with_budget(scene, MAX_GEOMETRY_BYTES as u64)
+}
+
+fn gpu_scene_with_budget(scene: &ProductScene, budget: u64) -> Result<(u64, GpuScene), String> {
+    let limit = usize::try_from(budget).unwrap_or(usize::MAX);
+    let plan = preview_upload_plan(scene, limit)?;
     let mut hash = std::collections::hash_map::DefaultHasher::new();
     let mut gpu = GpuScene::default();
     for (buffer, bytes) in [(&mut gpu.pbr, plan.pbr), (&mut gpu.tris, plan.tris), (&mut gpu.glass, plan.glass)] {
@@ -1855,11 +1923,46 @@ fn hash_surface(surface: Option<solidcraft_engine::render::surface::OpaqueSurfac
     }
 }
 
+/// The image's width over its height.
+pub fn image_aspect(setup: &RenderSetup) -> f64 {
+    f64::from(setup.width.max(1)) / f64::from(setup.height.max(1))
+}
+
+/// `layout` seen from the picture: while Frame shows the picture's frame the preview projects
+/// into that frame, not the viewport, so a fit that keeps the product inside this layout keeps
+/// it inside the image. Elsewhere the preview fills the viewport and the layout is unchanged.
+pub(crate) fn picture_layout(app: &SolveApp, layout: &crate::viewport_layout::Layout) -> crate::viewport_layout::Layout {
+    let Some(frame) = shot::preview_rect(app, layout.viewport) else { return layout.clone() };
+    // The same 16-point margin the viewport's fit keeps inside its free area.
+    crate::viewport_layout::Layout { viewport: frame, drawable: layout.drawable.intersect(frame.shrink(16.0)), ..layout.clone() }
+}
+
 /// The size the product preview draws at for a viewport of `full` physical pixels: the full
 /// size when the viewport executor admits it, else the largest size at the same aspect it does.
 /// Without an executor the request is left for resolution to report.
 pub fn preview_size(executor: Option<&ExecutorDescriptor>, full: (u64, u64)) -> (u64, u64) {
     executor.and_then(|e| e.fit(full.0, full.1)).unwrap_or(full)
+}
+
+/// Theme only the untouched, unsaved preview. Saved setups have no background provenance,
+/// so even a saved default-colour backplate remains scene-owned. Never alter image requests.
+fn preview_background(app: &SolveApp) -> Tokens {
+    let view = &app.render_workspace.view;
+    let tokens = Tokens::get();
+    if crate::theme::tab_surfaces_enabled()
+        && !app.session.doc.render.setups.contains_key(&view.name)
+        && view.clean_setup.as_ref().is_some_and(|clean| clean.background == view.draft.background)
+        && !view.transparent
+        && !view.studio.backdrop_enabled
+        && view.studio.environment == studio::Environment::None
+        && view.cpu.environment == cpu::Environment::None
+        && view.raytrace.environment.is_none()
+    {
+        // Includes the current fade and explicit viewport palette/flat-colour preferences.
+        tokens
+    } else {
+        tokens.with_background(Some(view.draft.background))
+    }
 }
 
 pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
@@ -1916,8 +2019,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     } else {
         app.viewport.hover = None;
     }
-    let bg = app.render_workspace.view.draft.background;
-    ui.painter().rect_filled(viewport, 0.0, Color32::from_rgb(bg[0], bg[1], bg[2]));
+    crate::gpu::paint_background(ui.painter(), viewport, &preview_background(app));
     let result = (|| -> Result<(), String> {
         if app.viewport.gpu.is_none() {
             return Err(crate::i18n::tr("render.error_gpu_preview").into());
@@ -1951,14 +2053,23 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         let mut visibility = std::collections::hash_map::DefaultHasher::new();
         app.session.visibility.hidden_bodies.hash(&mut visibility);
         app.session.visibility.hidden_occurrences.hash(&mut visibility);
-        let signature = (app.session.revision, Arc::as_ptr(&app.session.world_state()) as usize, visibility.finish() ^ assign::preview_key(app));
+        let budget = preferred_geometry_budget(app.render_workspace.geometry_budget, app.preferences.render_previous_geometry_budget);
+        let signature =
+            (app.session.revision, Arc::as_ptr(&app.session.world_state()) as usize, visibility.finish() ^ assign::preview_key(app), budget);
         let preview = assign::preview(app);
+        let previous_key = app.render_workspace.key;
         app.render_workspace.prepare_preview(signature, || {
             let mut scene = solidcraft_engine::product_scene::extract(&app.session).map_err(|error| error.to_string())?;
             assign::preview_scene(&mut scene, preview.as_ref())?;
             Ok(scene)
         })?;
+        if app.render_workspace.key != previous_key {
+            ui.ctx().request_repaint();
+        }
         let scene = app.render_workspace.scene.as_ref().ok_or(crate::i18n::tr("render.error_no_scene"))?;
+        if let Some(error) = app.render_workspace.upload_error.lock().ok().and_then(|e| e.clone()) {
+            return Err(upload_refusal(app.render_workspace.preview_upload_bytes.unwrap_or(0) as u64, &error));
+        }
         request.features = scene.required_features();
         solidcraft_engine::render::resolve_request(&[app.session.render_backend()], &request).map_err(|e| e.to_string())?;
         let key = app.render_workspace.key.ok_or(crate::i18n::tr("render.error_no_geometry"))?;
@@ -1980,6 +2091,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         let callback = ViewportCallback(Frame {
             product_lights: Some(light::preview(app)?),
             product: true,
+            upload_error: Some(app.render_workspace.upload_error.clone()),
             key,
             slot: slot.clone(),
             sketch_key: 0,
@@ -1995,7 +2107,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             clip: [0.0; 4],
             cap: [0.0; 4],
             images: Vec::new(),
-            points: Vec::new(),
+            clouds: Vec::new(),
             analysis: [0.0; 8],
             analysis_colors: [0.0; 36],
             access: None,
@@ -2003,6 +2115,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             // Product rendering has its own lighting; AO is a Design viewport setting.
             ao_radius: 0.0,
             ao_samples: solidcraft_gpu::view::AO_SAMPLES,
+            sky: [0.0; 4],
             eye: [eye.x as f32, eye.y as f32, eye.z as f32, if camera.fov > 0.0 { 1.0 } else { 0.0 }],
             ssaa: if width < full.0 { width as f32 / full.0 as f32 } else { 1.0 },
             hover_tint: [f32::from(Tokens::get().hover_face_lift) / 255.0; 3],

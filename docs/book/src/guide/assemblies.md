@@ -35,6 +35,27 @@ pending. Scripts and agents do the same with `occurrence.drag {occurrence or pat
 which moves the placement by `point - at` in world coordinates and answers the placements it
 `moved`.
 
+**Move along the joint's free axes.** Select a face or a single assembly part, then choose
+**Assemble → Move**, or right-click the selected face and choose **Move**. Thick straight
+arrows move along the allowed axes; circular arrows turn about them. Grounded parts, rigid
+joints, fixed coordinates and coordinates controlled by parameter expressions have no handle.
+The handles appear only after Move is started and disappear when Measure or another command
+starts. A face selected for measurement does not open Move.
+If the selected part has no free joint value, Move shows a warning instead of handles.
+Check rigid joints, grounding, joint limits and parameter-driven values; OK or Escape
+dismisses the warning without changing those constraints.
+
+While dragging, a readout shows the actual distance or angle from the drag's starting pose,
+including when a joint limit or contact stops the part. Distances use the design's display
+units. Rotation uses 10° steps near the ring; pull the pointer outside the dashed guide to
+use 0.1° steps. Crossing the guide changes precision without jumping to another angle.
+Change both step sizes under **Preferences → Design → Assembly Move**. Each drag is one
+undo step; Escape while dragging restores its starting pose. **Done** (or Escape when idle)
+closes the handles.
+
+To use the previous Move panel, turn off **Use joint motion handles for assembly Move**
+in the same settings section.
+
 Paste New copies nested component definitions, sketches, feature histories and generated
 dimension parameters. Repeated child instances remain shared within the new copy. Materials,
 appearances and wholly internal joints/motion records receive copied references. Design-wide
@@ -238,7 +259,9 @@ it where it is), and it moves.
 `joint.drive` answers the joint's values as `joint.list` gives them, in degrees and millimetres
 with their units and limits, and `moved` says whether any part moved. A joint's origins are mated
 by default: B's z axis is turned against A's, as two faces meet. `flip: true` lines them up
-instead, so two origins given at one point with the same z stay as they are. Without an
+instead, so two origins given at one point with the same z and x stay as they are. A point origin
+without `x` takes its x from z alone, so a part turned about z turns back when it is joined: give
+`x` on both origins, or use `joint.as_built`, to keep it where it is. Without an
 `angle`, a new joint (other than a relation, which starts where its parts are) takes no turn or a half turn about its axis, whichever turns B less: two
 faces that already meet, a plate under a panel, stay as they are instead of B spinning about
 their shared normal. For scripts that drive many steps, `quiet: true` leaves the per-part
@@ -352,20 +375,27 @@ leaves the design as it was unless `apply` is true.
 
 **Insert Design** (`component.insert_design {path, translate?}`, on the **ASSEMBLE** panel and
 in the **File** menu) adds a component linked to another saved design, so each part can live in
-its own document. A STEP or mesh file picked there is inserted as **Insert STEP** or **Insert
+its own document. When other designs are open in tabs, the button first lists them under
+**Open designs**. One click inserts that design; a design not saved yet is greyed out, as it has no
+file to link; one with unsaved changes inserts its saved file, and the status line says so.
+**Browse…** at the end opens the file picker, as the button does when no other design is open.
+Preferences › Design › **Insert Design lists the designs open in other tabs first** turns the list
+off. A STEP or mesh file picked there is inserted as **Insert STEP** or **Insert
 Mesh** would. The part's solid bodies come
 in as they sit in that design, and they are kept in the assembly, so it opens even without the
 part file. The link is stored relative to the assembly's folder once the assembly is saved.
 After the part file changes, **Update Links** (`component.update_links`) reads it again.
-An assembly whose tab comes back to the front does that by itself for the parts whose files
+An assembly that opens, or whose tab comes back to the front, does that by itself for the parts whose files
 changed since it last read them, whether the part was saved in another tab, another window or by
-a checkout. A part that cannot be read is tried again the next time, and holds up no other.
+a checkout. The parts it reads come in as one step, so one **Undo** takes them all back. A part
+that cannot be read keeps its bodies, is tried again the next time, and holds up no other.
 **Update changed linked designs when a tab comes back** (Preferences, Design,
 `update_changed_links`) turns this off.
 To edit the source, right-click a linked component or occurrence in the Browser and choose
 **Open Linked Design**. It opens the part in another tab and reports if its file is missing.
 **Break Link** (`component.break_link`) keeps the bodies and forgets the file, and
-`component.links` lists the links and whether their files are found. A linked component holds
+`component.links` lists the links, whether their files are found, and whether they changed since
+the assembly last read them (`changed`). A linked component holds
 the part's bodies only: its timeline, parameters and sheet-metal data (flat pattern, bend
 table) stay in the part's own design.
 
@@ -400,8 +430,11 @@ joint still describes the intended connection.
 
 STEP export writes the component tree as an assembly.
 
-Right-click a component in the Browser and choose **Properties** to inspect
-material-aware mass, volume, surface area, centre of mass and world bounds. Descendants and
+Right-click a component in the Browser and choose **Properties**, or use **Inspect → Measure →
+Properties** for the selected placement or the active component, to inspect material-aware
+mass, volume, surface area, centre of mass, first moments, moment of inertia and world bounds.
+While the window is open, the view marks the centre of mass with the three principal axes
+standing out of it. Descendants and
 repeated instances contribute to assembly totals; pending moves are included. A component
 uses its first placement; `occurrence.properties` selects a specific instance. Root Properties
 measures the complete assembly. Volumes are summed, including overlapping bodies, rather than
@@ -436,6 +469,8 @@ description; **Change Part Size** renumbers them, keeping a field you changed yo
   under it as `children` (items 1.1, 1.2…, with `each` per bolt and `count` in all) instead of
   rows of their own. Bolts with different contents (one with a nut, one without) are different
   rows. `total_occurrences` counts the children too, so it is the same either way.
+  For an inseparable part, only its purchased descendants become children; a purchased part
+  still has no children listed. Parts without a part number are not grouped this way.
 - `component` lists one subassembly's parts instead of the design's.
 
 A component's **bill of materials type** (`bom_type`, a part property set with

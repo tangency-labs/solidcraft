@@ -267,6 +267,7 @@ pub(crate) fn view_frame(
     crate::gpu::Frame {
         product: false,
         product_lights: None,
+        upload_error: None,
         key: model.0,
         slot: model.1.clone(),
         sketch_key: 0,
@@ -282,7 +283,7 @@ pub(crate) fn view_frame(
         clip: [0.0; 4],
         cap: [0.0; 4],
         images: Vec::new(),
-        points: Vec::new(),
+        clouds: Vec::new(),
         analysis: [0.0; 8],
         analysis_colors: crate::gpu::analysis_colors(&t.analysis),
         access: None,
@@ -290,6 +291,7 @@ pub(crate) fn view_frame(
         eye: [e[0], e[1], e[2], if proj.cam.fov > 0.0 { 1.0 } else { 0.0 }],
         ao_radius: 0.0,
         ao_samples: solidcraft_gpu::view::AO_SAMPLES,
+        sky: [0.0; 4],
         ssaa: 1.0,
         hover_tint: [f32::from(t.hover_face_lift) / 255.0; 3],
         selection_tint: [0.4, 0.6, 0.9],
@@ -404,6 +406,39 @@ fn frame_cost_of_a_design_file() {
     while t.elapsed().as_secs() < std::env::var("SOLIDCRAFT_SCALE_LOOP").ok().and_then(|v| v.parse().ok()).unwrap_or(0) {
         h.frame();
     }
+}
+
+/// A design from a file (`SOLIDCRAFT_SCALE_DESIGN`) open in two tabs, both with an unsaved change
+/// the comparison with the saved design finds only at its end (a favourite, as a changed
+/// appearance is): the time of an idle frame, and of one unsaved-changes check
+/// (`Session::is_dirty`, which the tab strip and the autosave ask every frame).
+#[test]
+#[ignore = "manual measurement on a design file"]
+fn idle_frame_cost_of_two_unsaved_tabs() {
+    let Some(path) = std::env::var_os("SOLIDCRAFT_SCALE_DESIGN") else { return };
+    let path = path.to_string_lossy().to_string();
+    let open = || {
+        let (doc, saved) = solidcraft_engine::io::read_design_file(&path, None::<fn(solidcraft_engine::io::DesignPreview)>).unwrap();
+        let mut s = solidcraft_engine::Session::opened(doc, saved.as_ref());
+        s.doc_mut().favorites.insert("idle-measurement".into());
+        s.revision += 1;
+        s
+    };
+    let mut h = Harness::new();
+    h.app.session = open();
+    crate::documents::open_tab(&mut h.app, open()).unwrap();
+    assert!(h.app.session.is_dirty());
+    h.frames(5);
+    let median = |mut v: Vec<f64>| {
+        v.sort_by(f64::total_cmp);
+        (v[v.len() / 2], v[0], v[v.len() - 1])
+    };
+    let (frame, frame_min, frame_max) = median((0..30).map(|_| ms(|| h.frame())).collect());
+    let (dirty, dirty_min, dirty_max) = median((0..30).map(|_| ms(|| assert!(std::hint::black_box(h.app.session.is_dirty())))).collect());
+    let bodies = h.app.session.model.state().bodies.len();
+    println!(
+        "IDLE2TABS bodies={bodies} idle_frame_ms={frame:.3} ({frame_min:.3}-{frame_max:.3}) is_dirty_ms={dirty:.4} ({dirty_min:.4}-{dirty_max:.4})"
+    );
 }
 
 /// A whole assembly's hover highlight: the model's own triangles (its display plans on the GPU)
@@ -573,4 +608,64 @@ fn zoomed_view_frame_cost() {
     println!(
         "ZOOMED whole_ms={whole:.2} whole_triangles={whole_tris} zoomed_ms={zoomed:.2} zoomed_triangles={zoomed_tris} zoomed_orbit_ms={orbit:.2}"
     );
+}
+
+/// Every body of a design selected (`SOLIDCRAFT_SCALE_DESIGN`, or a generated grid of 1,440
+/// boxes), the pointer moving from face to face: the time of each hover
+/// change's highlight build, headless and as the app builds it on a GPU (bodies drawn from their
+/// plans, and from the model's own blocks). Run with `--ignored --nocapture`.
+#[test]
+#[ignore = "manual highlight measurement"]
+fn many_selected_bodies_hover_cost() {
+    use solidcraft_engine::geom::Vec3;
+    let mut h = match std::env::var_os("SOLIDCRAFT_SCALE_DESIGN") {
+        Some(path) => {
+            let mut h = Harness::new();
+            h.app.run("doc.open", json!({"path": path.to_string_lossy()})).unwrap();
+            h.frames(3);
+            h
+        }
+        None => grid(1440),
+    };
+    let st = h.app.session.world_state();
+    st.warm_meshes(|| true);
+    for b in &st.bodies {
+        let _ = b.display_plan();
+    }
+    let bodies: Vec<(String, usize)> = st.bodies.iter().map(|b| (b.name.clone(), b.body.face_count())).collect();
+    drop(st);
+    let big = (0..bodies.len()).max_by_key(|&i| bodies[i].1).unwrap_or(0);
+    let median = |mut v: Vec<f64>| {
+        v.sort_by(f64::total_cmp);
+        v[v.len() / 2]
+    };
+    let modes: [(&str, Option<bool>); 3] = [("headless", None), ("gpu_plans", Some(true)), ("gpu_blocks", Some(false))];
+    for (mode, tess) in modes {
+        h.app.viewport.gpu =
+            tess.map(|tess| crate::gpu::GpuTarget { format: egui_wgpu::wgpu::TextureFormat::Rgba8Unorm, depth: None, samples: 1, tess, oit: false });
+        drop(crate::viewport::build_scene(&h.app));
+        for (selected, biggest) in [(false, false), (true, false), (false, true), (true, true)] {
+            h.app.session.selection =
+                if selected { bodies.iter().map(|(name, _)| solidcraft_engine::Sel::Body { name: name.clone() }).collect() } else { Vec::new() };
+            let hover = |h: &mut Harness, i: usize| {
+                let (name, faces) = if biggest { &bodies[big] } else { &bodies[(i * 37) % bodies.len()] };
+                h.app.viewport.hover = Some(crate::viewport::Hit::Face { body: name.clone(), index: (i * 7) % (*faces).max(1), point: Vec3::ZERO });
+            };
+            hover(&mut h, 0);
+            drop(crate::viewport::build_highlight(&h.app));
+            let loops = std::env::var("SOLIDCRAFT_SCALE_LOOP").ok().and_then(|v| v.parse().ok()).unwrap_or(31);
+            let changes: Vec<f64> = (1..=loops)
+                .map(|i| {
+                    hover(&mut h, i);
+                    ms(|| drop(crate::viewport::build_highlight(&h.app)))
+                })
+                .collect();
+            println!(
+                "MANYSEL bodies={} mode={mode} all_selected={selected} hovering_biggest_body={biggest} hover_change_median_ms={:.3} hover_change_max_ms={:.3}",
+                bodies.len(),
+                median(changes.clone()),
+                changes.iter().copied().fold(0.0, f64::max)
+            );
+        }
+    }
 }

@@ -6,10 +6,10 @@ fn executor() -> Option<Executor> {
     let (adapter, device, queue) = match open_headless() {
         Ok(device) => device,
         Err(e) => {
-            // The path tracer runs on Vulkan only: where the backends in use leave Vulkan out
-            // (macOS, or `WGPU_BACKEND=dx12`), it is unavailable by design, not missing.
-            let vulkan = crate::select::native_backends().contains(wgpu::Backends::VULKAN);
-            assert!(!vulkan || std::env::var_os("SOLIDCRAFT_REQUIRE_GPU").is_none(), "required GPU unavailable: {e}");
+            // The path tracer runs on Vulkan or Metal only: where the backends in use leave both out
+            // (`WGPU_BACKEND=dx12`), it is unavailable by design, not missing.
+            let available = !crate::select::path_backends().is_empty();
+            assert!(!available || std::env::var_os("SOLIDCRAFT_REQUIRE_GPU").is_none(), "required GPU unavailable: {e}");
             eprintln!("gpu-path device test skipped: {e}");
             return None;
         }
@@ -531,6 +531,48 @@ fn shader_validates_without_a_device() {
     naga::valid::Validator::new(naga::valid::ValidationFlags::all(), naga::valid::Capabilities::empty()).validate(&module).unwrap();
 }
 
+/// #6705: native compilers inline every call. With 33 inlined BVH walks in `main` (three path
+/// samples, a shadow walk per light source family) NVIDIA's Vulkan compiler crashed or ran out
+/// of memory and never built the pipeline. Count the walks `main` inlines, so another call site
+/// is a deliberate choice, checked on such a driver.
+#[test]
+fn main_inlines_few_bvh_walks() {
+    fn callees(block: &naga::Block, out: &mut Vec<naga::Handle<naga::Function>>) {
+        for statement in block.iter() {
+            match statement {
+                naga::Statement::Call { function, .. } => out.push(*function),
+                naga::Statement::Block(inner) => callees(inner, out),
+                naga::Statement::If { accept, reject, .. } => {
+                    callees(accept, out);
+                    callees(reject, out);
+                }
+                naga::Statement::Switch { cases, .. } => cases.iter().for_each(|case| callees(&case.body, out)),
+                naga::Statement::Loop { body, continuing, .. } => {
+                    callees(body, out);
+                    callees(continuing, out);
+                }
+                _ => {}
+            }
+        }
+    }
+    fn walks(module: &naga::Module, function: &naga::Function) -> usize {
+        let mut called = Vec::new();
+        callees(&function.body, &mut called);
+        called
+            .into_iter()
+            .map(|handle| {
+                let callee = &module.functions[handle];
+                let walk = matches!(callee.name.as_deref(), Some("trace_precise_within" | "trace_ordered_within"));
+                usize::from(walk) + walks(module, callee)
+            })
+            .sum()
+    }
+    let module = naga::front::wgsl::parse_str(SHADER).unwrap();
+    let main = module.entry_points.iter().find(|entry| entry.name == "main").unwrap();
+    let inlined = walks(&module, &main.function);
+    assert!(inlined <= 5, "`main` inlines {inlined} BVH walks");
+}
+
 #[test]
 fn render_lights_path_visibility_uniform_keeps_the_shader_contract() {
     shader_validates_without_a_device();
@@ -538,16 +580,14 @@ fn render_lights_path_visibility_uniform_keeps_the_shader_contract() {
     assert!(request.studio_weights.is_none());
 }
 
-/// #3217: the path tracer opens Vulkan adapters only, and none where the platform has no
-/// Vulkan backend (macOS).
+/// #3217: the path tracer opens Vulkan adapters, or Metal on macOS, never D3D12 or GL.
 #[test]
-fn path_devices_are_vulkan_only() {
-    let picked = crate::select::pick_vulkan(crate::select::Policy::Auto, |_| true);
-    if let Some((adapter, report)) = &picked {
-        assert_eq!(adapter.get_info().backend, wgpu::Backend::Vulkan);
-        assert_eq!(report.backend, "Vulkan");
+fn path_devices_are_vulkan_or_metal_only() {
+    let picked = crate::select::pick_path(crate::select::Policy::Auto, |_| true);
+    if let Some((adapter, _)) = &picked {
+        assert!(matches!(adapter.get_info().backend, wgpu::Backend::Vulkan | wgpu::Backend::Metal));
     }
-    if cfg!(target_os = "macos") || !crate::select::native_backends().contains(wgpu::Backends::VULKAN) {
+    if crate::select::path_backends().is_empty() {
         assert!(picked.is_none());
     }
 }
@@ -564,7 +604,7 @@ fn viewport_path_backends_keep_windows_on_its_selected_backend() {
 #[test]
 fn viewport_path_backends_preserve_other_platforms() {
     for backend in [wgpu::Backend::Vulkan, wgpu::Backend::Gl, wgpu::Backend::Metal] {
-        assert_eq!(viewport_path_backends(backend, false), wgpu::Backends::VULKAN);
+        assert_eq!(viewport_path_backends(backend, false), crate::select::path_backends());
     }
 }
 
@@ -591,6 +631,39 @@ fn admission_rejects_hostile_parameters_and_transparency() {
     scene.meshes[0].opacity = 1.0;
     Arc::make_mut(&mut scene.meshes[0].mesh).triangles[0][0] = u32::MAX;
     assert!(scene::flatten(&scene, Vec3::ZERO, &CancelToken::default()).is_err());
+}
+
+#[test]
+fn admission_ignores_the_cpu_raster_projected_pixel_limit() {
+    let mesh = Mesh {
+        positions: vec![Vec3::new(-10.0, -10.0, 0.0), Vec3::new(10.0, -10.0, 0.0), Vec3::new(10.0, 10.0, 0.0)],
+        normals: vec![Vec3::Z; 3],
+        triangles: vec![[0, 1, 2]; 3201],
+        tri_face: vec![0; 3201],
+        ..Default::default()
+    };
+    let scene = ProductScene {
+        bounds: mesh.bounds(),
+        meshes: vec![ProductMesh {
+            name: "overlapping triangles".into(),
+            mesh: Arc::new(mesh),
+            color: [255; 3],
+            opacity: 1.0,
+            surface: Some(white()),
+            transmission: None,
+            faces: Vec::new(),
+        }],
+    };
+    let mut r = request(100);
+    r.camera.distance = 1.0;
+    r.camera.fov = 0.0;
+    let raster_error = solidcraft_render::job::admit(&scene, &r).unwrap_err();
+    assert_eq!(raster_error.code, ErrorCode::LimitExceeded);
+    assert!(raster_error.message.contains("128000000 pixel tests"), "{raster_error:?}");
+    // Exercise the actual GPU admission path without requiring a Vulkan device.
+    let gpu = admission(&scene, &r, JobOptions::default()).unwrap();
+    assert_eq!(gpu.projected_pixel_tests, None);
+    assert!(gpu.estimated_total_bytes > gpu.geometry_bytes);
 }
 
 #[test]
@@ -3255,8 +3328,8 @@ fn display_bloom_slices_refuse_invalid_ranges_without_panicking() {
 fn cancelled_environment_preparation_unwinds_gpu_error_scopes() {
     use solidcraft_render::lighting::environment::EnvironmentSource;
     let Ok((_, device, _queue)) = open_headless() else {
-        let vulkan = crate::select::native_backends().contains(wgpu::Backends::VULKAN);
-        assert!(!vulkan || std::env::var_os("SOLIDCRAFT_REQUIRE_GPU").is_none(), "required Vulkan device unavailable");
+        let available = !crate::select::path_backends().is_empty();
+        assert!(!available || std::env::var_os("SOLIDCRAFT_REQUIRE_GPU").is_none(), "required Vulkan device unavailable");
         return;
     };
     let mut image = request(1);
@@ -3281,8 +3354,8 @@ fn cancelled_environment_preparation_unwinds_gpu_error_scopes() {
 #[test]
 fn failed_resource_creation_unwinds_gpu_error_scopes() {
     let Ok((_, device, _queue)) = open_headless() else {
-        let vulkan = crate::select::native_backends().contains(wgpu::Backends::VULKAN);
-        assert!(!vulkan || std::env::var_os("SOLIDCRAFT_REQUIRE_GPU").is_none(), "required Vulkan device unavailable");
+        let available = !crate::select::path_backends().is_empty();
+        assert!(!available || std::env::var_os("SOLIDCRAFT_REQUIRE_GPU").is_none(), "required Vulkan device unavailable");
         return;
     };
     let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {

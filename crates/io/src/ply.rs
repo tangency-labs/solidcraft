@@ -25,7 +25,7 @@ fn invalid(m: impl std::fmt::Display) -> IoError {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
-enum Scalar {
+pub(crate) enum Scalar {
     I8,
     U8,
     I16,
@@ -50,7 +50,7 @@ impl Scalar {
             _ => return None,
         })
     }
-    fn size(self) -> usize {
+    pub(crate) fn size(self) -> usize {
         match self {
             Scalar::I8 | Scalar::U8 => 1,
             Scalar::I16 | Scalar::U16 => 2,
@@ -79,7 +79,7 @@ impl Scalar {
         })
     }
     /// A colour channel of this type as a byte: integers by their range, floats from 0..1.
-    fn channel(self, v: f64) -> u8 {
+    pub(crate) fn channel(self, v: f64) -> u8 {
         let v = match self {
             Scalar::F32 | Scalar::F64 => v * 255.0,
             Scalar::U16 | Scalar::I16 => v / 257.0,
@@ -91,23 +91,23 @@ impl Scalar {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
-enum Kind {
+pub(crate) enum Kind {
     Scalar(Scalar),
     /// The count's type and the items' type.
     List(Scalar, Scalar),
 }
 
 #[derive(Clone, Debug)]
-struct Property {
-    name: String,
-    kind: Kind,
+pub(crate) struct Property {
+    pub(crate) name: String,
+    pub(crate) kind: Kind,
 }
 
 #[derive(Clone, Debug)]
-struct Element {
-    name: String,
-    count: u64,
-    properties: Vec<Property>,
+pub(crate) struct Element {
+    pub(crate) name: String,
+    pub(crate) count: u64,
+    pub(crate) properties: Vec<Property>,
 }
 
 impl Element {
@@ -124,7 +124,7 @@ impl Element {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
-enum Encoding {
+pub(crate) enum Encoding {
     Ascii,
     Little,
     Big,
@@ -132,10 +132,12 @@ enum Encoding {
 
 /// What the header says, and where the rows start.
 #[derive(Debug)]
-struct Header {
-    encoding: Encoding,
-    elements: Vec<Element>,
-    body: usize,
+pub(crate) struct Header {
+    pub(crate) encoding: Encoding,
+    pub(crate) elements: Vec<Element>,
+    pub(crate) body: usize,
+    /// The text of the `comment` lines.
+    pub(crate) comments: Vec<String>,
 }
 
 /// Does `bytes` start like a PLY file?
@@ -143,7 +145,7 @@ pub fn is_ply(bytes: &[u8]) -> bool {
     bytes.starts_with(b"ply") && bytes.get(3).is_some_and(|b| matches!(b, b'\n' | b'\r'))
 }
 
-fn header(bytes: &[u8]) -> Result<Header> {
+pub(crate) fn header(bytes: &[u8]) -> Result<Header> {
     if !is_ply(bytes) {
         return Err(invalid("not a PLY file (it must start with `ply`)"));
     }
@@ -163,7 +165,12 @@ fn header(bytes: &[u8]) -> Result<Header> {
     let text = String::from_utf8_lossy(head.get(..end).unwrap_or_default());
     let mut encoding = None;
     let mut elements: Vec<Element> = Vec::new();
+    let mut comments = Vec::new();
     for line in text.split(['\n', '\r']).skip(1) {
+        if let Some(c) = line.strip_prefix("comment ") {
+            comments.push(c.trim().to_string());
+            continue;
+        }
         let mut it = line.split_whitespace();
         match it.next() {
             Some("format") => {
@@ -206,11 +213,11 @@ fn header(bytes: &[u8]) -> Result<Header> {
         }
     }
     let encoding = encoding.ok_or_else(|| invalid("no `format` line"))?;
-    Ok(Header { encoding, elements, body })
+    Ok(Header { encoding, elements, body, comments })
 }
 
 /// A row's values, read one after another.
-enum Rows<'a> {
+pub(crate) enum Rows<'a> {
     Binary { b: &'a [u8], pos: usize, big: bool },
     Ascii { tokens: std::slice::Split<'a, u8, fn(&u8) -> bool> },
 }
@@ -220,7 +227,7 @@ fn space(b: &u8) -> bool {
 }
 
 impl<'a> Rows<'a> {
-    fn new(h: &Header, bytes: &'a [u8]) -> Rows<'a> {
+    pub(crate) fn new(h: &Header, bytes: &'a [u8]) -> Rows<'a> {
         let b = bytes.get(h.body..).unwrap_or_default();
         match h.encoding {
             Encoding::Ascii => Rows::Ascii { tokens: b.split(space as fn(&u8) -> bool) },
@@ -228,7 +235,7 @@ impl<'a> Rows<'a> {
             Encoding::Big => Rows::Binary { b, pos: 0, big: true },
         }
     }
-    fn value(&mut self, t: Scalar) -> Result<f64> {
+    pub(crate) fn value(&mut self, t: Scalar) -> Result<f64> {
         match self {
             Rows::Binary { b, pos, big } => {
                 let v = b.get(*pos..).and_then(|r| t.read(r, *big)).ok_or_else(|| invalid("the file ends early"))?;
@@ -265,7 +272,7 @@ impl<'a> Rows<'a> {
             }
         }
     }
-    fn count(&mut self, t: Scalar) -> Result<usize> {
+    pub(crate) fn count(&mut self, t: Scalar) -> Result<usize> {
         let n = self.value(t)?;
         if !(n >= 0.0 && n <= MAX_FACE as f64 && n.fract() == 0.0) {
             return Err(invalid("a list is longer than SolidCraft reads"));
@@ -316,7 +323,6 @@ pub(crate) type Vertex = ([f64; 3], Option<[u8; 3]>);
 /// into `faces` (a fan of triangles per face) when given.
 struct Read {
     vertices: u64,
-    colored: bool,
     bad_faces: usize,
 }
 
@@ -327,7 +333,7 @@ fn walk(bytes: &[u8], keep: &mut dyn FnMut(u64) -> bool, on_vertex: &mut dyn FnM
     if w.xyz.is_none() {
         return Err(invalid("the vertices have no `x`, `y` and `z`"));
     }
-    let mut out = Read { vertices: vertex.count, colored: w.rgb.is_some(), bad_faces: 0 };
+    let mut out = Read { vertices: vertex.count, bad_faces: 0 };
     let body = bytes.len().saturating_sub(h.body) as u64;
     let mut rows = Rows::new(&h, bytes);
     let mut slots = vec![0.0f64; MAX_PROPERTIES];
@@ -447,14 +453,6 @@ fn walk(bytes: &[u8], keep: &mut dyn FnMut(u64) -> bool, on_vertex: &mut dyn FnM
     Ok(out)
 }
 
-/// The vertices of a PLY file, every `stride`th one (`1`: all), and how many the file has.
-/// The colour of each is `Some` when the file has colours.
-pub(crate) fn read_vertices(bytes: &[u8], stride: u64, on_vertex: &mut dyn FnMut(Vertex)) -> Result<(u64, bool)> {
-    let stride = stride.max(1);
-    let r = walk(bytes, &mut |i| i.is_multiple_of(stride), on_vertex, None)?;
-    Ok((r.vertices, r.colored))
-}
-
 /// How many vertices and faces a PLY file says it has (from its header alone).
 pub fn ply_counts(bytes: &[u8]) -> Result<(u64, u64)> {
     let h = header(bytes)?;
@@ -501,10 +499,12 @@ pub fn read_ply_mesh(bytes: &[u8], name: &str) -> Result<(Vec<MeshObject>, Vec<S
 mod tests {
     use super::*;
 
-    fn vertices(bytes: &[u8], stride: u64) -> Result<(Vec<Vertex>, u64, bool)> {
-        let mut out = Vec::new();
-        let (n, c) = read_vertices(bytes, stride, &mut |v| out.push(v))?;
-        Ok((out, n, c))
+    /// The vertices kept from at most `max` of them, how many the file has, and whether it has colours.
+    fn vertices(bytes: &[u8], max: usize) -> Result<(Vec<Vertex>, u64, bool)> {
+        let r = crate::ply_complex::read_ply_cloud(bytes, max)?;
+        let colors = r.colors.as_ref();
+        let out = r.positions.iter().enumerate().map(|(i, p)| (*p, colors.and_then(|c| c.get(i).copied()))).collect();
+        Ok((out, r.vertices, colors.is_some()))
     }
 
     fn binary(big: bool) -> Vec<u8> {
@@ -532,7 +532,7 @@ mod tests {
     #[test]
     fn binary_little_and_big_endian_with_colours_and_other_elements() {
         for big in [false, true] {
-            let (v, n, colored) = vertices(&binary(big), 1).unwrap();
+            let (v, n, colored) = vertices(&binary(big), 3).unwrap();
             assert_eq!((n, colored), (3, true));
             assert_eq!(v[1], ([1.5, 0.0, 0.0], Some([10, 20, 255])));
             assert_eq!(v[2].0, [0.0, 2.5, -3.0]);
@@ -551,7 +551,7 @@ mod tests {
         let src = "ply\nformat ascii 1.0\nelement vertex 4\nproperty double x\nproperty double y\nproperty double z\nproperty float red\nproperty float green\nproperty float blue\n\
                    element face 1\nproperty list uchar uint vertex_index\nend_header\n\
                    0 0 0 1 0 0\n1 0 0 0 1 0\n1 1 0 0 0 1\n0 1 0 0.5 0.5 0.5\n4 0 1 2 3\n";
-        let (v, n, colored) = vertices(src.as_bytes(), 1).unwrap();
+        let (v, n, colored) = vertices(src.as_bytes(), 4).unwrap();
         assert_eq!((n, colored, v.len()), (4, true, 4));
         assert_eq!(v[0].1, Some([255, 0, 0]));
         assert_eq!(v[3], ([0.0, 1.0, 0.0], Some([128, 128, 128])));
@@ -560,7 +560,7 @@ mod tests {
         // Only points (as the glim maps are written): no colours, no faces.
         let points =
             "ply\nformat ascii 1.0\nelement vertex 2\nproperty float32 x\nproperty float32 y\nproperty float32 z\nend_header\n1 2 3\n4 5 6\n";
-        let (v, n, colored) = vertices(points.as_bytes(), 1).unwrap();
+        let (v, n, colored) = vertices(points.as_bytes(), 2).unwrap();
         assert_eq!((v.len(), n, colored), (2, 2, false));
         assert_eq!(v[1], ([4.0, 5.0, 6.0], None));
         assert!(read_ply_mesh(points.as_bytes(), "x").is_err(), "a point cloud is not a mesh");
@@ -589,13 +589,13 @@ mod tests {
         for c in &cases {
             let r = std::panic::catch_unwind(|| {
                 let _ = vertices(c, 1);
-                let _ = vertices(c, 3);
+                let _ = vertices(c, 1000);
                 let _ = read_ply_mesh(c, "x");
                 let _ = ply_counts(c);
             });
             assert!(r.is_ok(), "{:?}", String::from_utf8_lossy(c));
         }
-        assert!(vertices(&good[..good.len() - 30], 1).is_err(), "a cut-off file is refused");
+        assert!(vertices(&good[..good.len() - 30], 1000).is_err(), "a cut-off file is refused");
         // A face naming a vertex that isn't there is left out, with a warning.
         let tri = "ply\nformat ascii 1.0\nelement vertex 3\nproperty float x\nproperty float y\nproperty float z\nelement face 2\nproperty list uchar int vertex_indices\nend_header\n0 0 0 1 0 0 0 1 0\n3 0 1 2\n3 0 1 99\n";
         let (mesh, warnings) = read_ply_mesh(tri.as_bytes(), "x").unwrap();

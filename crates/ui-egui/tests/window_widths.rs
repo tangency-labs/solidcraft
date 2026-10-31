@@ -104,7 +104,10 @@ fn command_dialogs_shrink_to_their_content_within_limits() {
         h.app.dialog = None;
         h.app.params = None;
         h.app.design_properties = None;
+        h.app.sketch_report = None;
         h.app.bom = None;
+        // Properties (Inspect → Measure) opens the Properties card.
+        h.app.menu.props = None;
         if spec.id == "material.properties.validate" {
             h.step(&json!({"click":{"handle":"dialog:close"}})).unwrap();
         }

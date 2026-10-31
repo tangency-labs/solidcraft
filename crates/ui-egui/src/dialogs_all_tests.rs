@@ -398,7 +398,53 @@ form_case!(web, "solid.web", ["Direction", "Thickness", "Depth"]);
 form_case!(emboss, "solid.emboss", ["Depth", "Type"]);
 form_case!(replace_face, "solid.replace_face", []);
 form_case!(boundary_fill, "solid.boundary_fill", ["Cells", "Operation"]);
-form_case!(align, "solid.align", ["From Snap", "To Snap"]);
+form_case!(align, "solid.align", ["Object Type", "From Snap", "To Snap"]);
+
+#[test]
+fn align_components_mode_switches_and_aligns_only_selected_instance() {
+    let mut h = Harness::new();
+    let comp = h.app.run("component.create", json!({"name": "Extrusion"})).unwrap()["component"].as_u64().unwrap();
+    h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 60, "body_name": "Beam"})).unwrap();
+    h.app.run("component.activate", json!({"component": "root"})).unwrap();
+    let second = h.app.run("occurrence.copy", json!({"component": comp, "translate": [40, 0, 0]})).unwrap()["occurrence"].as_u64().unwrap();
+
+    // Preselecting an occurrence opens Align in Components mode and advances to From.
+    let picked = vec![Sel::Occurrence { path: vec![second] }];
+    h.app.session.selection = picked.clone();
+    h.app.start("solid.align");
+    h.frames(4);
+    assert_eq!(h.app.dialog.as_ref().unwrap().inputs[0].label, "Components");
+    assert_eq!(h.app.dialog.as_ref().unwrap().inputs[0].items, picked);
+    assert_eq!(h.app.dialog.as_ref().unwrap().active, 1);
+
+    // Switching Object Type to Bodies and back restores the preselected occurrence.
+    mirror_object_type(&mut h, "Bodies");
+    assert_eq!(h.app.dialog.as_ref().unwrap().inputs[0].label, "Bodies");
+    assert!(h.app.dialog.as_ref().unwrap().inputs[0].items.is_empty());
+    mirror_object_type(&mut h, "Components");
+    assert_eq!(h.app.dialog.as_ref().unwrap().inputs[0].label, "Components");
+    assert_eq!(h.app.dialog.as_ref().unwrap().inputs[0].items, picked);
+
+    let from = face_sel(&h.app.session, Vec3::new(45.0, 5.0, 0.0)).unwrap();
+    let to = face_sel(&h.app.session, Vec3::new(10.0, 5.0, 30.0)).unwrap();
+    {
+        let d = h.app.dialog.as_mut().unwrap();
+        d.inputs[1].items = vec![from];
+        d.inputs[2].items = vec![to];
+    }
+    let commands = apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
+    assert_eq!(commands[0].0, "occurrence.align");
+    assert_eq!(commands[0].1["paths"], json!([[second]]));
+    for (command, params) in commands {
+        h.app.run(&command, params).unwrap();
+    }
+
+    let st = h.app.session.world_state();
+    let b1 = st.body("Beam").unwrap().mesh().bounds();
+    assert!((b1.min.x - 0.0).abs() < 1e-5 && (b1.max.x - 10.0).abs() < 1e-5, "{b1:?}");
+    let b2 = st.body("Beam (Extrusion:2)").unwrap().mesh().bounds();
+    assert!((b2.min.x - 10.0).abs() < 1e-5 && (b2.max.x - 70.0).abs() < 1e-5, "{b2:?}");
+}
 form_case!(remove, "solid.remove", []);
 form_case!(path_pattern, "solid.pattern.path", ["Type", "Object Type", "Quantity", "Spacing"]);
 form_case!(pipe, "solid.pipe", ["Diameter", "Wall", "Operation"]);
@@ -1060,4 +1106,196 @@ fn every_selection_field_label_is_translated() {
         }
     }
     assert!(missing.is_empty(), "selection fields without a message: {missing:#?}");
+}
+
+#[test]
+fn align_components_picks_the_placement_under_the_active_component_and_warns_when_shared() {
+    let mut h = Harness::new();
+    let made = h.app.run("component.create", json!({"name": "Frame", "grounded": false})).unwrap();
+    let (frame, a) = (made["component"].as_u64().unwrap(), made["occurrence"].as_u64().unwrap());
+    let bracket = h.app.run("component.create", json!({"name": "Bracket", "grounded": false})).unwrap()["occurrence"].as_u64().unwrap();
+    h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 4, "body_name": "Plate"})).unwrap();
+    h.app.run("component.activate", json!({"component": "root"})).unwrap();
+    let plate = h.app.session.world_state().bodies.first().map(|b| b.name.clone()).unwrap();
+
+    // With the design active, a click on the part inside Frame picks the Frame placement.
+    assert_eq!(occurrence_path_of_body(&h.app.session, &plate), Some(vec![a]));
+    // With that Frame placement active, the same click picks the part inside it.
+    h.app.run("component.activate", json!({"component": frame, "occurrence": a, "path": [a]})).unwrap();
+    assert_eq!(occurrence_path_of_body(&h.app.session, &plate), Some(vec![a, bracket]));
+    assert!(!align_moves_shared(&h.app.session, &[Sel::Occurrence { path: vec![a, bracket] }]), "Frame is placed once");
+
+    // Once Frame is placed twice, the part's placement inside it is shared: the dialog says so.
+    h.app.run("component.activate", json!({"component": "root"})).unwrap();
+    h.app.run("occurrence.copy", json!({"component": frame, "translate": [0, 50, 0]})).unwrap();
+    assert!(align_moves_shared(&h.app.session, &[Sel::Occurrence { path: vec![a, bracket] }]));
+    assert!(!align_moves_shared(&h.app.session, &[Sel::Occurrence { path: vec![a] }]), "a top-level placement is its own");
+
+    h.app.session.selection = vec![Sel::Occurrence { path: vec![a] }];
+    h.app.start("solid.align");
+    h.frames(4);
+    assert!(h.widget(ALIGN_SHARED_WARNING).is_none(), "no warning for a top-level pick");
+    h.app.dialog.as_mut().unwrap().inputs[0].items = vec![Sel::Occurrence { path: vec![a, bracket] }];
+    h.frames(4);
+    assert!(h.widget(ALIGN_SHARED_WARNING).is_some(), "the shared pick is called out");
+}
+
+/// OK on the editor of a pattern behind the history marker leaves it rolled back, so the view
+/// does not change: the status line says why, where the edit used to look as if it had silently
+/// failed (#8100).
+#[test]
+fn ok_on_a_rolled_back_pattern_editor_says_it_is_not_built() {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    for (id, params) in [
+        ("solid.box", json!({"length":40,"width":30,"height":10,"corner":[0,0,0],"body_name":"Plate"})),
+        ("solid.cylinder", json!({"radius":2,"height":20,"base":[10,15,-5],"operation":"cut","targets":["Plate"],"name":"Cut"})),
+        ("solid.pattern.circular", json!({"features":["Cut"],"axis":{"origin":[20,15,0],"dir":[0,0,1]},"count":2,"name":"Pattern"})),
+        ("timeline.roll_to", json!({"position":2})),
+    ] {
+        h.app.run(id, params).unwrap();
+    }
+    let pattern = h.app.session.doc.features.last().unwrap().id;
+    h.app.edit_feature(pattern);
+    h.settle();
+    assert!(h.app.dialog.is_some(), "the pattern's editor opens");
+    h.step(&json!({"click":{"handle":"dialog:OK"}})).unwrap();
+    for _ in 0..500 {
+        if h.app.dialog.is_none() {
+            break;
+        }
+        h.frames(1);
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    assert!(h.app.dialog.is_none(), "the edit is applied");
+    assert_eq!(h.app.session.doc.marker, Some(2), "the pattern stays behind the marker");
+    let (text, _, error) = h.app.status.clone().unwrap();
+    assert!(!error, "{text}");
+    assert!(text.starts_with("Pattern changed, but it is after the history marker"), "{text}");
+}
+
+/// The Circular Pattern dialog must show only one field active at a time (#10066): the pick
+/// field's accent ring yields while a text field holds the keyboard, and clicking a pick field
+/// takes the keyboard back.
+#[test]
+fn circular_pattern_dialog_shows_one_active_field_at_a_time() {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    h.app.run("solid.box", json!({"length": 20, "width": 20, "height": 10})).unwrap();
+    let mut d = Dialog::for_command(&h.app, "solid.pattern.circular").unwrap();
+    d.inputs[1].items = vec![Sel::Axis { name: "Z".into() }];
+    h.app.dialog = Some(d);
+    h.settle();
+    let active = |label: &str| crate::scenario::count_of(&format!("dialog:selection:{label}:active")) == Some(1.0);
+    let keyboard = |h: &Harness| h.ctx.memory(|m| m.focused()).is_some();
+    let click_field = |h: &mut Harness, rect: &str| {
+        let at = crate::scenario::rect_of(rect).unwrap_or_else(|| panic!("{rect} is not drawn")).center();
+        h.step(&json!({"click": [at.x, at.y]})).unwrap();
+        h.frames(2);
+    };
+    // A fresh dialog: the Objects pick field is the one active field, no text field has the keyboard.
+    assert!(!keyboard(&h), "nothing holds the keyboard when the dialog opens");
+    assert_eq!((active("Objects"), active("Axis")), (true, false), "only Objects looks active");
+    // Clicking Quantity: the text field takes the keyboard and no pick field keeps its ring.
+    h.step(&json!({"click": {"handle": "dialog:Quantity"}})).unwrap();
+    h.frames(2);
+    assert!(keyboard(&h), "Quantity holds the keyboard");
+    assert_eq!((active("Objects"), active("Axis")), (false, false), "only the typed field looks active");
+    // Clicking the Axis pick field: it becomes the one active field and takes the keyboard back.
+    click_field(&mut h, "dialog:field:Axis");
+    assert!(!keyboard(&h), "the pick field takes the keyboard from Quantity");
+    assert_eq!((active("Objects"), active("Axis")), (false, true), "only Axis looks active");
+    assert_eq!(h.app.dialog.as_ref().unwrap().active, 1, "picks still go to Axis");
+}
+
+/// #10057: a sketch clicked for a pattern's objects is not taken in silence. In the view, the
+/// Browser and the History, with either Object Type, the dialog says a sketch is neither a body
+/// nor a feature and what to do instead, as a hint rather than an error; nothing is picked and
+/// the selection stays as it was.
+#[test]
+fn pattern_says_why_a_clicked_sketch_is_not_taken() {
+    for (dock, ty) in [("bottom", "Bodies"), ("left", "Features"), ("under_browser", "Bodies")] {
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        h.app.run("view.history_layout", json!({"dock": dock})).unwrap();
+        h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+        h.app.run("sketch.circle.center", json!({"center": [20, 0], "radius": 5})).unwrap();
+        h.app.run("sketch.finish", json!({})).unwrap();
+        h.app.run("select.clear", json!({})).unwrap();
+        h.app.start("solid.pattern.circular");
+        h.frames(4);
+        mirror_object_type(&mut h, ty);
+        for click in [json!({"browser": "Sketch1"}), json!({"handle": "timeline:Sketch1"}), json!({"world": [25, 0, 0]})] {
+            h.app.dialog.as_mut().unwrap().error = None;
+            // Out of double-click time: a double click opens the sketch to edit.
+            h.frames(30);
+            h.step(&json!({ "click": click })).unwrap();
+            h.frames(2);
+            let d = h.app.dialog.as_ref().expect("the pattern stays open");
+            assert!(matches!(d.kind, Kind::PatternCirc { .. }), "{dock} {ty} {click}");
+            assert_eq!(d.error.as_deref(), Some(crate::dialogs::SKETCH_NOT_OBJECT), "{dock} {ty} {click}");
+            assert!(d.inputs[0].items.is_empty(), "{dock} {ty} {click}: the sketch is not picked");
+            assert!(h.app.session.selection.is_empty(), "{dock} {ty} {click}: the selection stays as it was");
+        }
+    }
+    assert!(crate::dialogs::missing_pick(crate::dialogs::SKETCH_NOT_OBJECT), "shown as what to pick, with no Create Issue");
+    let _japanese = crate::i18n::scope("ja");
+    assert!(!crate::i18n::tr_label(crate::dialogs::SKETCH_NOT_OBJECT).is_ascii(), "the hint reads in the user's language");
+    assert!(!crate::i18n::tr("ui.pattern_object_type_tip").is_ascii(), "so does the Object Type tooltip");
+}
+
+/// Features stored with bare numbers edit with their units written out, as the Plastic ones do
+/// (#1936): Fillet, Chamfer, Shell, Draft, Offset Face, Stock, Offset Plane and Revolve among them.
+/// OK in the editor keeps the feature in place.
+#[test]
+fn stored_bare_numbers_edit_with_their_units() {
+    use serde_json::{Value, json};
+    let profile = [
+        ("sketch.create", json!({"plane": "XZ", "name": "Profile"})),
+        ("sketch.rectangle.two_point", json!({"p0": [50, 0], "p1": [60, 10]})),
+        ("sketch.finish", json!({})),
+    ];
+    let one = |command: &'static str, params: Value| vec![(command, params)];
+    let cases: Vec<(Vec<(&str, Value)>, &[&str])> = vec![
+        (one("solid.fillet", json!({"edges": [[20, 0, 20]], "radius": 2})), &["2 mm"]),
+        (one("solid.chamfer", json!({"edges": [[20, 0, 20]], "distance": 1, "distance2": 1.5})), &["1 mm", "1.5 mm"]),
+        (one("solid.chamfer", json!({"edges": [[20, 0, 20]], "distance": 1, "angle": 30})), &["1 mm", "30 deg"]),
+        (one("solid.shell", json!({"faces": [[20, 15, 20]], "thickness": 2})), &["2 mm"]),
+        (one("solid.draft", json!({"faces": [[0, 15, 10]], "angle": 3, "neutral": "XY"})), &["3 deg"]),
+        (one("solid.offset_face", json!({"faces": [[20, 15, 20]], "distance": 2})), &["2 mm"]),
+        (one("solid.bounding_solid", json!({"margin": 2})), &["2 mm"]),
+        (one("construct.plane.offset", json!({"base": "XY", "offset": 5})), &["5 mm"]),
+        (profile.iter().cloned().chain([("solid.revolve", json!({"sketch": "Profile", "axis": "Z", "angle": 90}))]).collect(), &["90 deg"]),
+    ];
+    for (cmds, expected) in cases {
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        h.app.run("solid.box", json!({"length": 40, "width": 30, "height": 20})).unwrap();
+        let command = cmds.last().map(|(c, _)| *c).unwrap_or_default();
+        for (c, p) in cmds {
+            h.app.run(c, p).unwrap();
+        }
+        h.frames(2);
+        let id = h.app.session.doc.features.last().unwrap().id;
+        let count = h.app.session.doc.features.len();
+        h.app.edit_feature(id);
+        h.frames(4);
+        let shown = match &h.app.dialog.as_ref().unwrap().kind {
+            Kind::Fillet { radius, ctype: 0, .. } => vec![radius.clone()],
+            Kind::Fillet { radius, distance2, ctype: 1, .. } => vec![radius.clone(), distance2.clone()],
+            Kind::Fillet { radius, angle, ctype: 2, .. } => vec![radius.clone(), angle.clone()],
+            Kind::Shell { thickness } => vec![thickness.clone()],
+            Kind::Draft { angle } => vec![angle.clone()],
+            Kind::OffsetFaces { distance } => vec![distance.clone()],
+            Kind::Stock { margin } => vec![margin.clone()],
+            Kind::OffsetPlane { offset } => vec![offset.clone()],
+            Kind::Revolve { angle, .. } => vec![angle.clone()],
+            other => panic!("{command}: {other:?}"),
+        };
+        assert_eq!(shown, expected, "{command}");
+        h.step(&json!({"widget": "OK"})).unwrap();
+        h.frames(4);
+        assert!(h.app.dialog.is_none(), "{command}: OK applies the unchanged editor");
+        assert_eq!(h.app.session.doc.features.len(), count, "{command}: the feature is redefined in place");
+    }
 }

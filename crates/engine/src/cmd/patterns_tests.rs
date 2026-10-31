@@ -1006,6 +1006,22 @@ fn pattern_count_units_explain_how_to_use_a_parameter() -> Result<(), Box<dyn st
     Ok(())
 }
 
+/// #9015: in an inch design, pattern spacing `baseLength - 1` subtracts one inch, not one mm.
+#[test]
+fn pattern_spacing_bare_offsets_follow_design_units() {
+    let mut s = Session::default();
+    run(&mut s, "document.units", json!({"units": "in"}));
+    run(&mut s, "parameters.add", json!({"name": "baseLength", "expression": "4"}));
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "Seed"}));
+    run(&mut s, "solid.pattern.rectangular", json!({"bodies": ["Seed"], "dir1": [1, 0, 0], "count1": 2, "spacing1": "baseLength - 1"}));
+    assert_eq!(s.model.state().bodies.len(), 2);
+    // Spacing is 3 in = 76.2 mm (not 3 mm): the seed is 10 in, so the copy starts at x = 76.2.
+    let m = run(&mut s, "inspect.measure", json!({}));
+    let bodies = m["bodies"].as_array().expect("bodies");
+    let xmin = |b: &Value| b["bbox"]["min"][0].as_f64().unwrap_or(0.0);
+    assert!(bodies.iter().any(|b| (xmin(b) - 76.2).abs() < 1e-6), "expected a copy spaced 3 in apart, got {m}");
+}
+
 #[test]
 fn pattern_count_fractions_are_refused() -> Result<(), Box<dyn std::error::Error>> {
     let mut s = Session::default();
@@ -1048,4 +1064,42 @@ fn pattern_count_integer_parameters_survive_save_and_reject_fractional_edits() -
     let invalid = Session::new(solidcraft_doc::Document::from_json(&saved.to_json())?);
     assert!(invalid.model.results.iter().any(|r| r.error.as_ref().is_some_and(|e| e.contains("a count must be a whole number;"))));
     Ok(())
+}
+
+/// Editing a pattern behind the history marker (double-clicking its greyed-out item and pressing
+/// OK) changes nothing in the model: the reply says so, where the edit used to look as if it had
+/// silently failed, and it still carries what building the copies met (#8100).
+#[test]
+fn editing_a_rolled_back_pattern_says_it_is_not_built() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length":40,"width":30,"height":10,"corner":[0,0,0],"body_name":"Plate"}));
+    run(&mut s, "solid.cylinder", json!({"radius":2,"height":20,"base":[10,15,-5],"operation":"cut","targets":["Plate"],"name":"Cut"}));
+    let pattern = |count: u32, origin: [f64; 3]| json!({"features":["Cut"],"axis":{"origin":origin,"dir":[0,0,1]},"count":count});
+    let redefine = |count, origin| json!({"feature":"Pattern","command":"solid.pattern.circular","params":pattern(count, origin)});
+    let centre = [20.0, 15.0, 0.0];
+    let hole = PI * 4.0 * 10.0;
+    let mut first = pattern(2, centre);
+    first["name"] = json!("Pattern");
+    let id = run(&mut s, "solid.pattern.circular", first)["feature"].as_u64().unwrap();
+    assert!(rel(volume(&mut s), 12000.0 - 2.0 * hole) < 1e-4);
+    // A pattern that is built: the edit is built at once, with nothing to say.
+    let reply = run(&mut s, "timeline.redefine", redefine(3, centre));
+    assert_eq!(reply["rolled_back"], json!(false), "{reply}");
+    assert!(reply.get("note").is_none(), "{reply}");
+    assert!(rel(volume(&mut s), 12000.0 - 3.0 * hole) < 1e-4);
+    // Behind the marker: the edit is kept but not built, and the reply says why nothing changed.
+    run(&mut s, "timeline.roll_to", json!({"position": 2}));
+    let reply = run(&mut s, "timeline.redefine", redefine(4, centre));
+    assert_eq!(reply["rolled_back"], json!(true), "{reply}");
+    assert_eq!(reply["note"], "Pattern is after the history marker, so it is not built: move the marker past it to build it");
+    assert!(reply.get("warning").is_none(), "{reply}");
+    assert!(rel(volume(&mut s), 12000.0 - hole) < 1e-4);
+    assert!(s.model.result(id).is_some_and(|r| r.skipped && r.error.is_none()));
+    run(&mut s, "timeline.roll_to", json!({}));
+    assert!(rel(volume(&mut s), 12000.0 - 4.0 * hole) < 1e-4);
+    // What building the rolled-back copies met still reaches the reply: here a copy that misses.
+    run(&mut s, "timeline.roll_to", json!({"position": 2}));
+    let reply = run(&mut s, "timeline.redefine", redefine(2, [0.0, 0.0, 0.0]));
+    assert_eq!(reply["rolled_back"], json!(true), "{reply}");
+    assert_eq!(reply["warning"], "1 of 1 cut copies remove no material", "{reply}");
 }

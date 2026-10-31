@@ -1,6 +1,6 @@
 //! Measured single-row navigation bar. Commands own all view changes.
 use crate::navigation::NavCaps;
-use crate::navigation_bar::{self, Idle, Kind, Labels, MenuDisplay, NavigationBar, Position, Slot};
+use crate::navigation_bar::{self, Edge, Idle, Kind, Labels, MenuDisplay, NavigationBar, Position, Slot};
 use crate::theme::Tokens;
 use crate::ui_kit::{self, Container, Surface};
 use crate::{SolveApp, viewport::NavMode};
@@ -88,7 +88,12 @@ fn measure_row(content: Rect, prefs: &NavigationBar, caps: NavCaps, label_width:
         Position::Left => content.left() + NAV_EDGE,
         Position::Right => content.right() - NAV_EDGE - row_width,
     };
-    result.rect = Rect::from_min_size(pos2(left, content.bottom() - height - NAV_BOTTOM), vec2(row_width, height));
+    // The same gap from either edge of the view.
+    let top = match prefs.edge {
+        navigation_bar::Edge::Bottom => content.bottom() - height - NAV_BOTTOM,
+        navigation_bar::Edge::Top => content.top() + NAV_BOTTOM,
+    };
+    result.rect = Rect::from_min_size(pos2(left, top), vec2(row_width, height));
     let mut x = left + inset;
     for slot in slots.iter().take(visible) {
         let w = width(slot, result.labels, result.values);
@@ -175,7 +180,7 @@ fn activate(app: &mut SolveApp, slot: &Slot) {
     }
 }
 
-fn tooltip(app: &SolveApp, response: egui::Response, slot: &Slot, hidden: Option<&str>, top: f32) -> egui::Response {
+fn tooltip(app: &SolveApp, response: egui::Response, slot: &Slot, hidden: Option<&str>, along: Rect, edge: Edge) -> egui::Response {
     let label = if let Some(hidden) = hidden {
         app.tr(hidden).to_owned()
     } else if slot.id == "visual_style" {
@@ -186,7 +191,7 @@ fn tooltip(app: &SolveApp, response: egui::Response, slot: &Slot, hidden: Option
         app.tr(slot.label).to_owned()
     };
     let key = slot.command.and_then(|id| crate::keymap::display_for(app, id));
-    ui_kit::navigation_tooltip(&response, top, &label, key.as_deref());
+    ui_kit::navigation_tooltip(&response, along, edge, &label, key.as_deref());
     response
 }
 
@@ -253,7 +258,7 @@ pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
                     menu: false,
                 },
             );
-            ui_kit::navigation_tooltip(&response, bar.rect.top(), app.tr("navbar.more"), None);
+            ui_kit::navigation_tooltip(&response, bar.rect, app.preferences.navigation_bar.edge, app.tr("navbar.more"), None);
             crate::scenario::publish_target("nav:more", response.rect);
             context_menu(app, &response, None);
             if response.clicked() {
@@ -265,12 +270,14 @@ pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
     if !open.is_empty() && anchor.is_positive() {
         let child_popup_open = egui::Popup::is_any_open(ui.ctx());
         let ctx = ui.ctx().clone();
-        let menu = Container::new(&ctx, Surface::Popup)
-            .area(menu_id.with("popup"))
-            .order(egui::Order::Foreground)
-            .pivot(Align2::RIGHT_BOTTOM)
-            .fixed_pos(anchor.right_top() - vec2(0.0, ui_kit::NAV_POPUP_GAP))
-            .show(&ctx, |ui| {
+        // Menus open into the view: up from a bar at the bottom, down from one at the top.
+        let (pivot, at) = match app.preferences.navigation_bar.edge {
+            Edge::Bottom => (Align2::RIGHT_BOTTOM, anchor.right_top() - vec2(0.0, ui_kit::NAV_POPUP_GAP)),
+            Edge::Top => (Align2::RIGHT_TOP, anchor.right_bottom() + vec2(0.0, ui_kit::NAV_POPUP_GAP)),
+        };
+        let menu = Container::new(&ctx, Surface::Popup).area(menu_id.with("popup")).order(egui::Order::Foreground).pivot(pivot).fixed_pos(at).show(
+            &ctx,
+            |ui| {
                 ui_kit::navigation_menu(ui, if open == "more" { ui_kit::NAV_MORE_WIDTH } else { ui_kit::NAV_POPUP_WIDTH }, |ui| {
                     match open.as_str() {
                         "visual_style" => {
@@ -283,7 +290,8 @@ pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
                         _ => open.clear(),
                     }
                 });
-            });
+            },
+        );
         let outside = !child_popup_open
             && ui.input(|i| {
                 i.pointer.any_pressed() && i.pointer.interact_pos().is_some_and(|p| !menu.response.rect.contains(p) && !bar.rect.contains(p))
@@ -383,7 +391,9 @@ pub(crate) fn paint_row(
                 egui::WidgetInfo::selected(egui::WidgetType::Button, ui.is_enabled(), selected(app, slot.id) || open == slot.id, app.tr(slot.label))
             });
         }
-        responses.push((index, *slot, tooltip(app, response, slot, hidden, bar.rect.top())));
+        // The settings' preview keeps its tips above, wherever the bar sits in the view.
+        let edge = if editing.is_some() { Edge::Bottom } else { app.preferences.navigation_bar.edge };
+        responses.push((index, *slot, tooltip(app, response, slot, hidden, bar.rect, edge)));
     }
     responses
 }
@@ -423,7 +433,7 @@ pub(crate) fn context_menu(app: &mut SolveApp, response: &egui::Response, index:
 
 fn style_menu(app: &mut SolveApp, ui: &mut egui::Ui) -> bool {
     let mut chosen = false;
-    for (index, style) in ["shaded_with_edges", "shaded", "wireframe", "shaded_with_hidden_edges"].into_iter().enumerate() {
+    for (index, style) in navigation_bar::VISUAL_STYLES.iter().map(|(style, _)| *style).enumerate() {
         let label = format!("navbar.style.{style}");
         let mut item = ui_kit::NavigationMenuRow::new(style, app.tr(&label), navigation_bar::visual_style_icon(index as u8));
         item.selected = app.ui.visual_style == index as u8;
@@ -462,7 +472,7 @@ fn overflow_menu(app: &mut SolveApp, ui: &mut egui::Ui, slots: &[&Slot], open: &
         if slot.id == "display" {
             crate::scenario::publish_handle("nav:view", response.rect.center());
         }
-        if tooltip(app, response.clone(), slot, None, response.rect.top()).clicked() {
+        if tooltip(app, response.clone(), slot, None, response.rect, Edge::Bottom).clicked() {
             if slot.kind == Kind::Menu {
                 *open = slot.id.to_owned();
             } else {

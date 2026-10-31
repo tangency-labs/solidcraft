@@ -24,6 +24,7 @@ mod bom;
 mod browser;
 pub(crate) mod clearance;
 mod clipboard;
+mod clipboard_foreign;
 mod compare;
 mod component;
 mod component_clone;
@@ -36,12 +37,16 @@ mod face;
 mod features;
 mod features_more;
 mod join_pieces;
+pub(crate) use construct::{GeoForm, GeoFormError, REF as GEO_REF_FORMS, SKETCH_PART, geo_form, is_model_axis};
 pub(crate) use face::{FaceRefForm, face_ref_form};
 pub(crate) use features::profiles as feature_profiles;
-pub(crate) use features::{EdgeRefForm, axis_dir_form, edge_ref_form, sketch_key};
+pub(crate) use features::{EdgeRefForm, PLANE_FORMS, axis_dir_form, axis_line_object, edge_ref_form, explicit_plane, plane_name_problem, sketch_key};
 pub use features::{auto_operation, extrude_reach, shown_scope};
 pub use join_pieces::{Addition, addition};
 pub use sketch::dimension_roles;
+pub(crate) use sketch::face::face_pick_form;
+pub use sketch_construction::{ConstructionLine, construction_line_choice, construction_line_mode, construction_line_solutions};
+pub use sketch_create::tangent_arc_preview;
 pub use sketch_import::drawing_import_command;
 pub use sketch_modify::{extend_arc_preview, extend_preview, trim_piece};
 pub use view_dxf::sketch::exportable as view_dxf_exportable;
@@ -56,6 +61,7 @@ pub(crate) mod inspect;
 mod interference;
 pub(crate) mod joints;
 mod libraries;
+pub mod mass_properties;
 mod material_properties;
 mod materials;
 mod measure_sel;
@@ -67,6 +73,7 @@ mod parts;
 mod point_cloud;
 mod script;
 mod section;
+pub mod settings;
 pub(crate) use measure_sel::{measure_items, shape_of};
 pub(crate) use measure_shape::Shape;
 #[cfg(test)]
@@ -74,6 +81,7 @@ mod kernel_heal_tests;
 mod parameter_sweep;
 mod parameters;
 mod plastic;
+mod print_face;
 mod render;
 mod render_ui;
 #[cfg(test)]
@@ -86,14 +94,17 @@ pub(crate) use sheet::{
 mod silhouette;
 mod sketch;
 pub(crate) use sketch::author_path_for_rebind;
+pub(crate) use sketch::collapse_reason;
 pub(crate) use sketch::created as sketch_created;
 mod canvas_sketch;
 mod sketch_3d;
 mod sketch_canvas;
 pub mod sketch_clipboard;
 mod sketch_constraints;
+mod sketch_construction;
 mod sketch_create;
 mod sketch_ends;
+mod sketch_equation;
 mod sketch_freeform;
 mod sketch_import;
 mod sketch_inspect;
@@ -286,6 +297,8 @@ pub fn command_specs() -> Vec<&'static CommandSpec> {
     let mut v: Vec<&'static CommandSpec> = Vec::new();
     v.extend(sketch::COMMANDS.iter());
     v.extend(sketch_create::COMMANDS.iter());
+    v.extend(sketch_construction::COMMANDS.iter());
+    v.extend(sketch_equation::COMMANDS.iter());
     v.extend(sketch_constraints::COMMANDS.iter());
     v.extend(sketch_import::COMMANDS.iter());
     v.extend(sketch_inspect::COMMANDS.iter());
@@ -315,6 +328,7 @@ pub fn command_specs() -> Vec<&'static CommandSpec> {
     v.extend(config::COMMANDS.iter());
     v.extend(parts::COMMANDS.iter());
     v.extend(bom::COMMANDS.iter());
+    v.extend(mass_properties::COMMANDS.iter());
     v.extend(browser::COMMANDS.iter());
     v.extend(delete::COMMANDS.iter());
     v.extend(edit::COMMANDS.iter());
@@ -324,6 +338,7 @@ pub fn command_specs() -> Vec<&'static CommandSpec> {
     v.extend(parameters::COMMANDS.iter());
     v.extend(parameter_sweep::COMMANDS.iter());
     v.extend(file::COMMANDS.iter());
+    v.extend(print_face::COMMANDS.iter());
     v.extend(metadata::COMMANDS.iter());
     v.extend(inspect::COMMANDS.iter());
     v.extend(compare::COMMANDS.iter());
@@ -334,6 +349,7 @@ pub fn command_specs() -> Vec<&'static CommandSpec> {
     v.extend(section::COMMANDS.iter());
     v.extend(view_navigation::COMMANDS.iter());
     v.extend(view_dxf::COMMANDS.iter());
+    v.extend(settings::COMMANDS.iter());
     v.extend(diagnostics::COMMANDS.iter());
     v.extend(render::COMMANDS.iter());
     v.extend(render_ui::COMMANDS.iter());
@@ -368,6 +384,20 @@ pub(crate) fn did_you_mean(id: &str) -> String {
         [] => String::new(),
         [one] => format!(" (did you mean {one}?)"),
         [rest @ .., end] => format!(" (did you mean {} or {end}?)", rest.join(", ")),
+    }
+}
+
+/// "no body `name`", and the closest of `bodies` when it is near enough to be a typo or another
+/// case of the same name (`b` for `B`): `no body `Bdy`; did you mean `Body`?` (#9740).
+pub(crate) fn no_body<'a>(name: &str, bodies: impl IntoIterator<Item = &'a str>) -> String {
+    let want = name.to_lowercase();
+    let near = (want.chars().count() / 3).max(1);
+    let closest = (want.len() <= 256)
+        .then(|| bodies.into_iter().map(|b| (edit_distance(&want, &b.to_lowercase()), b)).filter(|(d, _)| *d <= near).min_by_key(|(d, _)| *d))
+        .flatten();
+    match closest {
+        Some((_, b)) => format!("no body `{name}`; did you mean `{b}`?"),
+        None => format!("no body `{name}`"),
     }
 }
 

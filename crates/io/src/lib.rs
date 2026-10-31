@@ -28,6 +28,7 @@ mod native_cad;
 pub use native_cad::{NATIVE_CAD_EXTS, is_native_cad_path, native_cad_to_step};
 pub mod paper;
 mod ply;
+mod ply_complex;
 pub use ply::{ply_counts, read_ply_mesh};
 mod point_cloud;
 pub use point_cloud::{CloudFile, DEFAULT_MAX_POINTS, MAX_POINT_CLOUD_BYTES, is_ply_path, is_point_cloud_path, read_point_cloud};
@@ -43,7 +44,7 @@ pub use dxf_out::{DxfEntity, DxfLayer, DxfLinetype, DxfShape, loop_shapes, seg_s
 pub use legacy_dir::{APP_ID, LEGACY_APP_ID, PREVIOUS_APP_IDS, adopt_legacy_dir, legacy_flatpak_paths};
 pub use safe_write::{backup_path, write_atomic};
 pub use sketch2d::{Geom2, MAX_DRAWING_BYTES};
-pub use svg::read_svg;
+pub use svg::{decode_svg, read_svg, svg_nothing_to_import};
 mod gltf_in;
 pub use gltf_in::{GltfImport, Loader, MAX_GLTF_BYTES, MeshPlan, PlanPlace, glb_container, is_gltf_path, read_gltf};
 mod obj;
@@ -54,7 +55,7 @@ pub use threemf::{
 pub use urdf::{UrdfOptions, UrdfPackage, urdf};
 
 use solidcraft_doc::{Document, Metadata, ModelState};
-use solidcraft_geom::{Mesh, Vec3};
+use solidcraft_geom::{MassProperties, Mesh, Vec3};
 
 /// Design file extension: new designs, autosaves and recovery files are written as `.sc`.
 pub const DESIGN_EXT: &str = "sc";
@@ -423,6 +424,14 @@ pub fn export_mesh_at(b: &solidcraft_kernel::Body, quality: MeshQuality) -> Resu
 /// Distance within which an exported mesh's vertices are welded (STL and 3MF alike).
 fn weld_eps(b: &solidcraft_kernel::Body) -> f64 {
     (b.size() * 1e-6).max(1e-7)
+}
+
+/// Unit-density [`MassProperties`] of a body from its welded [`export_mesh`], the mesh URDF links
+/// take their inertia from; `None` when that mesh does not close (an open surface).
+pub fn mass_properties(b: &solidcraft_kernel::Body) -> Result<Option<MassProperties>> {
+    let m = export_mesh(b)?;
+    let (positions, triangles) = weld(&m.positions, &m.triangles, weld_eps(b));
+    Ok(Mesh { positions, triangles, ..Mesh::default() }.mass_properties())
 }
 
 /// Binary STL of several meshes (one solid).
@@ -816,6 +825,12 @@ pub fn read_design(bytes: &[u8]) -> Result<Document> {
     if is_design_container(bytes) {
         return design::read(bytes);
     }
+    // Every DWG starts with its version (`AC1032`), whatever the file is called (#9328).
+    if bytes.starts_with(b"AC1") {
+        return Err(IoError::Invalid(
+            "this is a DWG file, which SolidCraft can't read: export the model as STEP and open that, or the drawing as DXF and use Insert DXF in a sketch".into(),
+        ));
+    }
     let s = std::str::from_utf8(bytes).map_err(|_| IoError::Invalid("design file is not UTF-8 JSON".into()))?;
     // Only a file that isn't a design pays for asking whether it is a drawing.
     Document::from_json(s).map_err(|e| match file_kind(bytes) {
@@ -1101,6 +1116,8 @@ mod tests {
         let back = read_design(&write_design(&doc)).unwrap();
         assert_eq!(back, doc);
         assert!(read_design(b"\xff\xfe").is_err());
+        let dwg = read_design(b"AC1032\0\0\0\0\0\xff\xfe").unwrap_err().to_string();
+        assert!(dwg.contains("this is a DWG file") && dwg.contains("STEP") && dwg.contains("DXF"), "{dwg}");
         assert!(matches!(export(&m.state(), &["nope".into()], Format::Step, "t"), Err(IoError::Empty)));
         assert_eq!(Format::from_name("a.STP").unwrap(), Format::Step);
         assert!(is_step_path("/x/Part.STEP") && is_step_path("a.stp") && !is_step_path("a.step.json") && !is_step_path("step"));

@@ -831,17 +831,19 @@ fn text_beside_other_curves_is_drawn_geometry() {
     }
     assert_areas(&sorted_areas(&find_drawn_profiles(&sk)), vec![13.5557, 600.0]);
     // Projected reference geometry still doesn't count as drawn.
-    let square = |s: f64| {
+    let square = |x: f64, s: f64| {
         vec![
-            LinkGeom::Line(v(100.0, 0.0), v(100.0 + s, 0.0)),
-            LinkGeom::Line(v(100.0 + s, 0.0), v(100.0 + s, s)),
-            LinkGeom::Line(v(100.0 + s, s), v(100.0, s)),
-            LinkGeom::Line(v(100.0, s), v(100.0, 0.0)),
+            LinkGeom::Line(v(x, 0.0), v(x + s, 0.0)),
+            LinkGeom::Line(v(x + s, 0.0), v(x + s, s)),
+            LinkGeom::Line(v(x + s, s), v(x, s)),
+            LinkGeom::Line(v(x, s), v(x, 0.0)),
         ]
     };
-    sk.add_link(LinkKind::Project, LinkSource::Origin, &square(5.0)).unwrap();
+    sk.add_link(LinkKind::Project, LinkSource::Origin, &square(100.0, 5.0)).unwrap();
     assert_eq!(find_profiles(&sk).len(), 3);
     assert_areas(&sorted_areas(&find_drawn_profiles(&sk)), vec![13.5557, 600.0]);
+    sk.add_link(LinkKind::Intersect, LinkSource::Origin, &square(110.0, 7.0)).unwrap();
+    assert_areas(&sorted_areas(&find_drawn_profiles(&sk)), vec![13.5557, 49.0, 600.0]);
 }
 
 #[test]
@@ -1395,4 +1397,77 @@ fn a_fillet_folded_through_flat_is_refused_like_a_fold() {
         assert!(lines_leave_the_arc(&sk, arc, [l1, l2]), "step {step}: sweep {sweep}");
     }
     assert!(refused.is_some_and(|s| (7..=9).contains(&s)), "refused at {refused:?}");
+}
+
+/// #8639: two rounded rectangles drawn as closed control-point splines with the same straight
+/// sides and different corners (as a DXF can carry an outline twice). Where the sides lie on each
+/// other the two curves' sampled pieces end a few millionths apart; every profile must still close
+/// within the 1e-6 a solid needs, or the region around them can't be extruded or shown.
+#[test]
+fn rounded_rectangles_sharing_their_sides_leave_every_profile_closed() {
+    // Control points of a rounded rectangle 17.6 by 17.6, corner `r`, sides split in thirds.
+    fn rounded(sk: &mut Sketch, r: f64) {
+        let (lo, hi) = (0.0, 17.6);
+        let k = r * 0.448;
+        let mut pts = Vec::new();
+        for (cx, cy, dx, dy) in [(hi, hi, 1.0, 1.0), (hi, lo, 1.0, -1.0), (lo, lo, -1.0, -1.0), (lo, hi, -1.0, 1.0)] {
+            // Into the corner along the side, round it, out along the next side (clockwise).
+            let (a, b) = if dx * dy > 0.0 { ((cx - dx * r, cy), (cx, cy - dy * r)) } else { ((cx, cy - dy * r), (cx - dx * r, cy)) };
+            let (ka, kb) = if dx * dy > 0.0 { ((cx - dx * k, cy), (cx, cy - dy * k)) } else { ((cx, cy - dy * k), (cx - dx * k, cy)) };
+            pts.extend([v(a.0, a.1), v(ka.0, ka.1), v(kb.0, kb.1), v(b.0, b.1)]);
+            // Two more points along the next side, so it is straight.
+            let (nx, ny) = if dx * dy > 0.0 { (cx, cy - dy * (hi - r)) } else { (cx - dx * (hi - r), cy) };
+            let t = |f: f64| v(b.0 + (nx - b.0) * f, b.1 + (ny - b.1) * f);
+            pts.extend([t(1.0 / 3.0), t(2.0 / 3.0)]);
+        }
+        let mut ids: Vec<usize> = pts.iter().map(|p| sk.add_point(*p, None).unwrap()).collect();
+        ids.push(ids[0]);
+        sk.add_curve(CurveKind::Spline { pts: ids, control: true, degree: 3, periodic: false }, None).unwrap();
+    }
+    let mut sk = Sketch::new();
+    rounded(&mut sk, 0.55);
+    rounded(&mut sk, 0.8);
+    sk.add_circle(v(8.8, 8.8), 10.0, None, None).unwrap();
+    let ps = find_profiles(&sk);
+    assert!(!ps.is_empty());
+    for p in &ps {
+        for lp in std::iter::once(&p.region.outer).chain(&p.region.holes) {
+            let n = lp.segs.len();
+            let gap = (0..n).map(|i| lp.segs[i].end().dist(lp.segs[(i + 1) % n].start())).fold(0.0, f64::max);
+            assert!(lp.is_closed(1e-6), "a loop of {:?} is open by {gap:.3e}", crate::distinct_curves(&p.outer_curves));
+        }
+    }
+}
+
+/// A drag step that cannot succeed gives up once the iteration has stalled (#6606). Holding
+/// the two right corners of a rectangle further apart than its dimensioned left side leaves the
+/// left corners a least-squares valley (the perpendicular repeats what horizontal and vertical
+/// already say), along which the iteration crawled for its whole allowance.
+#[test]
+fn a_held_solve_that_cannot_succeed_stops_once_it_stalls() {
+    let mut sk = Sketch::new();
+    let [bottom, right, top, left] = rect(&mut sk, [v(-6.0, -20.0), v(23.5, -20.8), v(23.5, 0.0), v(-6.0, 0.0)]);
+    for kind in [
+        ConstraintKind::Horizontal { l: bottom },
+        ConstraintKind::Horizontal { l: top },
+        ConstraintKind::Vertical { l: right },
+        ConstraintKind::Vertical { l: left },
+        ConstraintKind::Length { l: left, value: 20.0 },
+        ConstraintKind::Perpendicular { a: top, b: left },
+    ] {
+        sk.add_constraint(kind, None).unwrap();
+    }
+    let hold = Hold { points: sk.curves[right].kind.point_ids(), radii: vec![] };
+    let reference: Vec<Vec2> = sk.points.iter().map(|p| p.pos).collect();
+    let solve = |analysis| {
+        let mut moved = sk.clone();
+        let rep = solve_with(&mut moved, &hold, Some(&reference), analysis, None);
+        assert!(!rep.ok());
+        assert_eq!(moved.points, sk.points, "a failed solve leaves the geometry as it was");
+        rep.iterations
+    };
+    let stalled = solve(Analysis::StatusOnly);
+    assert!(stalled < 100, "a held solve gives up once stalled: {stalled} iterations");
+    // A solve whose report names the violated constraints still iterates to the end.
+    assert!(solve(Analysis::Full) >= 500);
 }

@@ -1058,6 +1058,34 @@ pub enum Attempt<E> {
     Refused(RetryPlan, E),
 }
 
+/// SolidCraft: the present mode a viewport's surface is configured with. The main window keeps
+/// `configured`. Another window (the agent chat popped out into its own window) is an immediate
+/// viewport: eframe draws and presents it inside the main window's frame, one surface after the
+/// other. With vsync on both, every frame waited for the display twice, and on a compositor that
+/// sends no frame callbacks to a window it isn't showing (Wayland: on another workspace, scrolled
+/// away, covered) the main window stalled behind the other one's present. So another window
+/// presents without waiting where its surface can (Mailbox, which doesn't tear, before
+/// Immediate); the main window's vsync still paces both. A `configured` mode without vsync is
+/// kept everywhere.
+pub fn viewport_present_mode(
+    root: bool,
+    configured: wgpu::PresentMode,
+    supported: &[wgpu::PresentMode],
+) -> wgpu::PresentMode {
+    use wgpu::PresentMode;
+    let waits = matches!(
+        configured,
+        PresentMode::AutoVsync | PresentMode::Fifo | PresentMode::FifoRelaxed
+    );
+    if root || !waits {
+        return configured;
+    }
+    [PresentMode::Mailbox, PresentMode::Immediate]
+        .into_iter()
+        .find(|mode| supported.contains(mode))
+        .unwrap_or(configured)
+}
+
 /// SolidCraft: the surface size for a window of `width` x `height` pixels on a device whose
 /// textures are at most `max_side` on a side, and the scale it is drawn at. A window that fits is
 /// unchanged (scale 1); a larger one shrinks uniformly, keeping its aspect ratio, so the image

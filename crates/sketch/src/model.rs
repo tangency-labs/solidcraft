@@ -730,6 +730,9 @@ pub struct Sketch {
     /// 3D curves (world coordinates) carried by the sketch.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub wires: Vec<crate::wire::Wire>,
+    /// Curves drawn from formulas (#8352): the fit point splines they place, with their formulas.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub equations: Vec<crate::equation::EquationCurve>,
     /// Next number per id prefix (`l` → l1, l2…).
     #[serde(default)]
     counters: std::collections::BTreeMap<String, u64>,
@@ -759,6 +762,7 @@ impl Sketch {
             offsets: Vec::new(),
             freeform_offsets: Vec::new(),
             wires: Vec::new(),
+            equations: Vec::new(),
             counters: Default::default(),
             view: SketchView::default(),
         }
@@ -832,7 +836,7 @@ impl Sketch {
         self.points.get(i).map(|p| p.pos)
     }
 
-    fn check_pos(p: Vec2) -> Result<Vec2> {
+    pub(crate) fn check_pos(p: Vec2) -> Result<Vec2> {
         if in_range(p) { Ok(p) } else { Err(SketchError::Invalid(format!("point {:?}", [p.x, p.y]))) }
     }
 
@@ -963,13 +967,46 @@ impl Sketch {
     }
 
     pub fn add_constraint(&mut self, kind: ConstraintKind, param: Option<String>) -> Result<String> {
+        self.validate(&kind)?;
+        if let Some(same) = self.same_constraint(&kind) {
+            return Ok(same.to_string());
+        }
         if self.constraints.len() >= MAX_CONSTRAINTS {
             return Err(SketchError::TooLarge);
         }
-        self.validate(&kind)?;
         let id = self.fresh("k")?;
         self.constraints.push(Constraint { id: id.clone(), kind, param, driven: false, text: None });
         Ok(id)
+    }
+
+    /// The id of a geometric (not dimensional) constraint that already says what `kind` says: the
+    /// same kind on the same entities, in either order where the order doesn't matter.
+    pub fn same_constraint(&self, kind: &ConstraintKind) -> Option<&str> {
+        use ConstraintKind::*;
+        let pair = |x: usize, y: usize| if x <= y { (x, y) } else { (y, x) };
+        let key = |k: &ConstraintKind| -> Option<(u8, usize, usize, usize)> {
+            Some(match *k {
+                Coincident { p, q } => (0, pair(p, q).0, pair(p, q).1, 0),
+                PointOnCurve { p, c } => (1, p, c, 0),
+                Horizontal { l } => (2, l, 0, 0),
+                Vertical { l } => (3, l, 0, 0),
+                HorizontalPoints { p, q } => (4, pair(p, q).0, pair(p, q).1, 0),
+                VerticalPoints { p, q } => (5, pair(p, q).0, pair(p, q).1, 0),
+                Parallel { a, b } => (6, pair(a, b).0, pair(a, b).1, 0),
+                Perpendicular { a, b } => (7, pair(a, b).0, pair(a, b).1, 0),
+                Collinear { a, b } => (8, pair(a, b).0, pair(a, b).1, 0),
+                Tangent { a, b } => (9, pair(a, b).0, pair(a, b).1, 0),
+                Equal { a, b } => (10, pair(a, b).0, pair(a, b).1, 0),
+                Concentric { a, b } => (11, pair(a, b).0, pair(a, b).1, 0),
+                Midpoint { p, l } => (12, p, l, 0),
+                Symmetric { p, q, l } => (13, pair(p, q).0, pair(p, q).1, l),
+                Fix { p } => (14, p, 0, 0),
+                Smooth { a, b } => (15, pair(a, b).0, pair(a, b).1, 0),
+                _ => return None,
+            })
+        };
+        let want = key(kind)?;
+        self.constraints.iter().find(|c| key(&c.kind) == Some(want)).map(|c| c.id.as_str())
     }
 
     /// Check indices and entity kinds of a constraint.
@@ -1691,6 +1728,8 @@ impl Sketch {
     /// Remove curves only (points stay), remapping constraints.
     fn drop_curves(&mut self, which: &[usize]) {
         self.prune_offsets_for_removed_curves(which);
+        let removed: std::collections::BTreeSet<String> = which.iter().filter_map(|i| self.curves.get(*i).map(|c| c.id.clone())).collect();
+        self.prune_equations(&removed);
         let mut cmap = vec![None; self.curves.len()];
         let mut n = 0;
         for (i, slot) in cmap.iter_mut().enumerate() {

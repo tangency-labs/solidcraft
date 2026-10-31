@@ -175,6 +175,8 @@ impl Tokens {
             body: Color32::from_rgb(176, 186, 198),
             body_edge: Color32::from_rgb(40, 44, 52),
             manipulator: Color32::from_rgb(40, 110, 220),
+            joint_manipulator: Color32::from_rgb(235, 157, 0),
+            joint_axis: Color32::from_rgb(0, 95, 110),
             preview_add: Color32::from_rgb(112, 160, 226),
             preview_new: Color32::from_rgb(240, 225, 105),
             preview_sketch: Color32::from_rgb(32, 190, 96),
@@ -352,6 +354,7 @@ impl Tokens {
         t.hover = Color32::from_rgb(54, 61, 74);
         t.hover_edge_halo = Color32::from_rgb(203, 203, 203);
         t.origin_point = Color32::from_rgb(214, 215, 218);
+        t.joint_axis = Color32::from_rgb(110, 240, 250);
         t.viewport_top = Color32::from_rgb(46, 52, 64);
         t.viewport_bottom = Color32::from_rgb(46, 52, 64);
         t.grid = Color32::from_rgb(59, 65, 76);

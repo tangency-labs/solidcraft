@@ -123,7 +123,7 @@ const ELEMENTS: &[Element] = &[
             });
             navigation_tile(ui, "grid", "Grid", "style", false);
             row(ui, "Position", |ui| {
-                segmented(ui, &mut state.selected, &["Left", "Centre", "Right"], Default::default());
+                segmented(ui, &mut state.selected, &["Left", "Center", "Right"], Default::default());
             });
             checkbox(ui, "Show navigation bar", &mut state.checked);
             button(ui, "Reset to default", Button::Normal);
@@ -271,7 +271,7 @@ const ELEMENTS: &[Element] = &[
         let actions = [
             StageAction { icon: Some("chain"), label: "Appearance Chain", enabled: true, primary: false, reason: None },
             StageAction { icon: Some("reorder"), label: "Replace All", enabled: true, primary: false, reason: None },
-            StageAction { icon: Some("star"), label: "Favourite Look", enabled: true, primary: true, reason: None },
+            StageAction { icon: Some("star"), label: "Favorite Look", enabled: true, primary: true, reason: None },
             StageAction { icon: Some("suppress"), label: "Hide", enabled: true, primary: false, reason: None },
         ];
         selection_actions(ui, "Boss", &actions);
@@ -695,7 +695,7 @@ const ELEMENTS: &[Element] = &[
         });
     }),
     element!("file_action", |ui, _| {
-        FileView::action_tile(ui, "gallery:file:new", ui.available_width(), "new", "New design", "Millimetres · opens in Design", true);
+        FileView::action_tile(ui, "gallery:file:new", ui.available_width(), "new", "New design", "Millimeters · opens in Design", true);
     }),
     element!("file_recovery_banner", |ui, _| {
         FileView::recovery_banner(
@@ -981,6 +981,12 @@ const ELEMENTS: &[Element] = &[
             removable_header(ui, "Width");
         });
     }),
+    element!("sort_header", |ui, _| {
+        ui.allocate_ui(vec2(140.0, row_height()), |ui| {
+            ui.set_min_size(vec2(140.0, row_height()));
+            sort_header(ui, "Name", &mut Sort::Ascending);
+        });
+    }),
     element!("plus_header", |ui, _| {
         ui.allocate_ui(vec2(140.0, row_height()), |ui| {
             ui.set_min_size(vec2(140.0, row_height()));
@@ -1150,6 +1156,9 @@ const ELEMENTS: &[Element] = &[
     element!("text", "dialog:report:gallery", Some("dialog:report:gallery"), |ui, _| {
         text(ui, "Validation report with retained units: 10 mm", Text::Report("gallery", false));
     }),
+    element!("name_cell_with_hint", "dialog:cell:Width", Some("dialog:cell:Width"), |ui, _| {
+        name_cell_with_hint(ui, "Width", false, "Double-click to rename");
+    }),
     element!("search_field", |ui, s| {
         search_field(ui, ui.id().with("search"), &mut s.value, "Search");
     }),
@@ -1176,6 +1185,9 @@ const ELEMENTS: &[Element] = &[
     }),
     element!("scalar_field", |ui, _| {
         scalar_field(ui, &mut 0.5, 0.0..=1.0);
+    }),
+    element!("track_number", |ui, _| {
+        track_number(ui, &mut 1350.0, 0.5, 1);
     }),
     element!("length_field", |ui, _| {
         length_field(ui, &mut 12.7, "in", 2);
@@ -1280,7 +1292,7 @@ const ELEMENTS: &[Element] = &[
     }),
     element!("text_emphasis", "dialog:row:Gallery", Some("dialog:Bold"), |ui, s| {
         row(ui, "Gallery", |ui| {
-            text_emphasis(ui, &mut s.checked, &mut false);
+            text_emphasis(ui, &mut s.checked, &mut false, true);
         });
     }),
     element!("value_pair_named", "dialog:row:Position", Some("dialog:Distance X"), |ui, s| {
@@ -1323,6 +1335,13 @@ const ELEMENTS: &[Element] = &[
     element!("dropdown", "dialog:row:Gallery", Some("dialog:Gallery"), |ui, s| {
         row(ui, "Gallery", |ui| {
             dropdown(ui, "gallery", &mut s.selected, &["One", "Two"]);
+        });
+    }),
+    element!("dropdown_previews", "dialog:row:Gallery", Some("dialog:Gallery"), |ui, s| {
+        row(ui, "Gallery", |ui| {
+            dropdown_previews(ui, "gallery_previews", &mut s.selected, &["One", "Two"], |ui, index| {
+                ui.label(if index == 0 { "One" } else { "Two" });
+            });
         });
     }),
     element!("dropdown_picked", "dialog:row:Gallery", Some("dialog:Gallery"), |ui, s| {
@@ -1414,6 +1433,21 @@ const ELEMENTS: &[Element] = &[
     }),
     element!("wide_primary_button", |ui, _| {
         wide_primary_button(ui, "Finish Sketch");
+    }),
+    element!("persistent_button_shape", "gallery:persistent_button", Some("gallery:persistent_button"), |ui, _| {
+        let t = Tokens::get();
+        let (rect, response) = ui.allocate_exact_size(vec2(t.form_button_height * 3.0, t.form_button_height * 2.0), egui::Sense::click());
+        ui.painter().add(persistent_button_shape(ui, &response, rect));
+        ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, "Selected", crate::fonts::semibold(t.font_label), t.selected_ink);
+        scenario::publish_target("gallery:persistent_button", rect);
+    }),
+    element!("native_button_focus", "gallery:native_button_focus", Some("gallery:native_button_focus"), |ui, _| {
+        let t = Tokens::get();
+        let (rect, response) = ui.allocate_exact_size(vec2(t.form_button_height * 3.0, t.form_button_height), egui::Sense::click());
+        response.request_focus();
+        ui.painter().rect_filled(rect, t.radius_sm, t.control_fill);
+        ui.painter().add(native_button_focus(ui, &response, rect));
+        scenario::publish_target("gallery:native_button_focus", rect);
     }),
     element!("button", "dialog:row:Gallery", Some("dialog:button:Gallery:Add"), |ui, _| {
         row(ui, "Gallery", |ui| {
@@ -1740,7 +1774,7 @@ fn emphasis_and_compact_modes_keep_independent_actions_in_both_themes() {
         let mut italic = false;
         let mut selected = 0;
         let mut draw = |ui: &mut Ui| {
-            row(ui, "Style", |ui| text_emphasis(ui, &mut bold, &mut italic));
+            row(ui, "Style", |ui| text_emphasis(ui, &mut bold, &mut italic, true));
             row(ui, "Alignment", |ui| {
                 segmented(
                     ui,
@@ -1908,8 +1942,8 @@ fn gallery_covers_every_inline_element() {
                 && matches!(&item.vis, syn::Visibility::Restricted(v) if v.path.is_ident("crate"))
             {
                 let name = item.sig.ident.to_string();
-                // The inherited row label is metadata, not a renderable element.
-                if name != "label" {
+                // Inherited labels, state keys and size measurements do not render elements.
+                if !matches!(name.as_str(), "eye_drag_id" | "label" | "placement_field_content_size") {
                     assert!(names.contains(name.as_str()), "{file}: {name} needs a gallery entry");
                 }
             }

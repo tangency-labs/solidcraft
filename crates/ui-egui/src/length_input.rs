@@ -40,25 +40,7 @@ pub(crate) fn expression(doc: &Document, text: &str, kind: Kind) -> String {
     }
     let normalized = doc.with_design_unit(text, kind);
     if kind == Kind::Length && unit(doc) != "mm" && normalized == text && doc.eval(text, Kind::Unitless).is_ok() {
-        // A decimal comma is numeric only outside parentheses. Preserve function-argument
-        // commas while moving the expression inside the unit multiplication's parentheses.
-        let mut depth = 0usize;
-        let grouped: String = text
-            .chars()
-            .map(|c| match c {
-                '(' => {
-                    depth = depth.saturating_add(1);
-                    c
-                }
-                ')' => {
-                    depth = depth.saturating_sub(1);
-                    c
-                }
-                ',' if depth == 0 => '.',
-                _ => c,
-            })
-            .collect();
-        format!("({grouped}) * 1 {}", unit(doc))
+        format!("({text}) * 1 {}", unit(doc))
     } else {
         normalized
     }
@@ -237,6 +219,21 @@ pub(crate) fn extra(extra: &mut serde_json::Map<String, serde_json::Value>, mut 
             {
                 *value = json!(convert(text));
             }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_decimal_comma_survives_the_design_unit() {
+        // The unit wraps the text in parentheses, where a comma stays decimal (#9408).
+        let doc = Document { units: "in".into(), ..Document::default() };
+        for (text, inches) in [("2,5", 2.5), ("(2,5)", 2.5), ("-(10-0,5)/2", -4.75), ("2,5 + max(1,2)", 4.5)] {
+            let mm = eval(&doc, text, Kind::Length).unwrap();
+            assert!((mm - inches * 25.4).abs() < 1e-9, "{text}: {mm}");
         }
     }
 }

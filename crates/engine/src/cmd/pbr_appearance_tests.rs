@@ -945,3 +945,38 @@ fn appearance_gestures_favorite_is_a_validated_transient_request() {
     assert!(Arc::ptr_eq(&before, &s.doc));
     assert_eq!((s.undo.len(), s.redo.len(), s.revision, s.evaluations, s.is_dirty()), state);
 }
+
+/// A placed copy's name (`KB (K:2)`, the name inspect.measure lists) and a placement's (`K:2`)
+/// mean the body and component they show in appearance.chain, appearance.list and
+/// appearance.replace's scope, as appearance.assign already takes them (#9740).
+#[test]
+fn appearance_reads_and_scopes_take_a_placed_copys_name() {
+    let mut s = Session::default();
+    s.execute("component.create", &json!({"name":"K"})).unwrap();
+    s.execute("solid.box", &json!({"body_name":"KB","length":10,"width":10,"height":10})).unwrap();
+    s.execute("occurrence.copy", &json!({"component":"K","translate":[30,0,0]})).unwrap();
+    let world: Vec<String> = s.world_state().bodies.iter().map(|b| b.name.clone()).collect();
+    assert!(world.iter().any(|n| n == "KB (K:2)"), "{world:?}");
+    s.execute("appearance.assign", &json!({"bodies":["KB"],"appearance":"ABS - Red"})).unwrap();
+    s.execute("appearance.assign", &json!({"components":["K"],"appearance":"ABS - Blue"})).unwrap();
+
+    assert_eq!(chain_read(&mut s, json!({"body":"KB (K:2)"})), chain_read(&mut s, json!({"body":"KB"})));
+    assert_eq!(chain_read(&mut s, json!({"body":"KB (K:2)","face":0})), chain_read(&mut s, json!({"body":"KB","face":0})));
+    assert_eq!(chain_read(&mut s, json!({"component":"K:2"})), chain_read(&mut s, json!({"component":"K"})));
+    let listed = |s: &mut Session, body: &str| s.execute("appearance.list", &json!({"body":body})).unwrap()["body"].clone();
+    let placed = listed(&mut s, "KB (K:2)");
+    assert_eq!(placed["name"], "KB", "the reply names the body the copy shows: {placed}");
+    assert_eq!(placed, listed(&mut s, "KB"));
+
+    let scope = json!({"bodies":["KB (K:2)"],"components":["K:2"]});
+    let r = s.execute("appearance.replace", &json!({"from":"ABS - Red","to":"ABS - Blue","scope":scope})).unwrap();
+    assert_eq!(r["count"], 1, "{r}");
+    assert_eq!(s.doc.appearances.bodies["KB"], s.doc.appearances.components[&s.doc.find_component("K").unwrap()]);
+
+    // A name that is neither the model's nor a placed copy's is still refused.
+    assert!(s.execute("appearance.chain", &json!({"target":{"body":"KB (K:9)"}})).is_err());
+    assert!(s.execute("appearance.chain", &json!({"target":{"component":"K:9"}})).is_err());
+    assert!(s.execute("appearance.list", &json!({"body":"KB (K:9)"})).is_err());
+    assert!(s.execute("appearance.replace", &json!({"from":"ABS - Blue","to":"ABS - Red","scope":{"bodies":["KB (K:9)"]}})).is_err());
+    assert!(s.execute("appearance.replace", &json!({"from":"ABS - Blue","to":"ABS - Red","scope":{"components":["K:9"]}})).is_err());
+}

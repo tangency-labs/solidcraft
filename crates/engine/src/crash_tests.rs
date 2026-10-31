@@ -50,6 +50,15 @@ fn child() {
         }
         std::process::abort();
     }
+    // Up and running, then a second window's surface (the agent chat on its own), then dying.
+    if mode == "late_surface" {
+        startup_step("window surface");
+        startup_step("surface configure");
+        phase(RUNNING);
+        startup_step("window surface");
+        startup_step("surface configure");
+        std::process::abort();
+    }
     set_environment("Renderer: test");
     let mut s = Session { crash_journal: true, ..Default::default() };
     s.execute("solid.box", &json!({"length": 10, "width": 20, "height": 30})).unwrap();
@@ -440,6 +449,21 @@ fn a_crash_signal_is_reported_with_its_thread_and_its_walk_up_the_stack() {
     assert_eq!(bt[5], "solidcraft+0x0 frame0");
     assert_eq!(bt.len(), 3 + MAX_FRAMES, "{bt:?}");
     assert!(v.get("minidump_path").is_none(), "{v}");
+    let _ = fs::remove_dir_all(&d);
+}
+
+#[test]
+fn a_window_surface_after_startup_is_not_a_startup_crash() {
+    let d = fresh_dir("late_surface");
+    let (_, ok) = run_child(&d, "late_surface");
+    assert!(!ok, "the child aborted");
+    let (_, ok) = run_child(&d, "none");
+    assert!(ok);
+    let (s, v) = only_report(&d);
+    assert_eq!(s.kind, "unclean_exit");
+    assert!(!s.message.contains("during startup"), "{}", s.message);
+    assert!(s.message.contains("between commands"), "{}", s.message);
+    assert!(v.get("startup_phase").is_none(), "{v}");
     let _ = fs::remove_dir_all(&d);
 }
 

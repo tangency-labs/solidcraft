@@ -222,9 +222,21 @@ pub(crate) fn choice_row(ui: &mut Ui, label: &str, id: &str, selected: &mut usiz
 pub(super) fn sized_row<R>(ui: &mut Ui, text: &str, height: f32, control: impl FnOnce(&mut Ui) -> R) -> R {
     let mut passthrough = false;
     if crate::prefs_search::querying(ui) {
-        crate::prefs_search::set_control(ui, text);
+        // A row with no label has no words to match; its controls supply them (#9265).
+        let unlabelled = text.is_empty();
+        if unlabelled {
+            crate::prefs_search::set_unlabelled_control(ui);
+        } else {
+            crate::prefs_search::set_control(ui, text);
+        }
         if !crate::prefs_search::visible(ui, &[text]) {
+            if unlabelled {
+                crate::prefs_search::push_unlabelled(ui);
+            }
             let result = crate::prefs_search::run_hidden(ui, text, control);
+            if unlabelled {
+                crate::prefs_search::pop_unlabelled(ui);
+            }
             crate::prefs_search::recheck(ui, &[text]);
             return result;
         }
@@ -666,6 +678,15 @@ pub(crate) fn note_height(ui: &Ui, text: &str) -> f32 {
 }
 
 pub(crate) fn text(ui: &mut Ui, text: &str, style: Text<'_>) -> Response {
+    text_impl(ui, text, style, None)
+}
+
+/// One name-cell tooltip: the action hint, with the full name only if the cell clips it.
+pub(crate) fn name_cell_with_hint(ui: &mut Ui, name: &str, strong: bool, hint: &str) -> Response {
+    text_impl(ui, name, Text::NameCell(strong), Some(hint))
+}
+
+fn text_impl(ui: &mut Ui, text: &str, style: Text<'_>, hover_hint: Option<&str>) -> Response {
     if crate::prefs_search::querying(ui) {
         let heading = matches!(style, Text::Heading(_));
         if heading {
@@ -706,9 +727,16 @@ pub(crate) fn text(ui: &mut Ui, text: &str, style: Text<'_>) -> Response {
             vec2(dimension(ui.available_width()), row_height()),
             if matches!(style, Text::Value(_, _)) { egui::Sense::hover() } else { egui::Sense::click() },
         );
+        let tooltip = hover_hint.map(|hint| {
+            if ui.painter().layout_no_wrap(text.to_owned(), font.clone(), ink).size().x > rect.width() {
+                format!("{text}\n{hint}")
+            } else {
+                hint.to_owned()
+            }
+        });
         paint_text(ui, rect, text, font, ink, false);
         response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), text));
-        response.on_hover_text(text)
+        response.on_hover_text(tooltip.as_deref().unwrap_or(text))
     } else if matches!(style, Text::Error(_)) {
         egui::Frame::NONE
             .fill(t.form_error_fill)

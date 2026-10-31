@@ -712,7 +712,8 @@ fn camera_controls(app: &mut SolveApp, ui: &mut egui::Ui) {
     let mut camera = before;
     let mut perspective = camera.fov > 0.0;
     if ui_kit::checkbox(ui, app.tr("render.perspective"), &mut perspective).changed() {
-        camera.fov = if perspective { std::f64::consts::FRAC_PI_4 } else { 0.0 };
+        // On at the Field of view preference's angle (#5364); a saved setup keeps its own.
+        camera.fov = if perspective { crate::prefs::perspective_fov(&app.preferences) } else { 0.0 };
     }
     if perspective {
         let mut fov = camera.fov.to_degrees();
@@ -853,13 +854,23 @@ fn output_controls(app: &mut SolveApp, ui: &mut egui::Ui) {
             ui.horizontal_wrapped(|ui| {
                 for (key, label, size) in choices {
                     let allowed = size.filter(|&(w, h)| cpu::image_limits(app).fit(w, h, None) == Some((w, h)));
+                    let mark = size_mark(app, label, *size);
                     let response = ui
                         .add_enabled_ui(allowed.is_some(), |ui| {
-                            ui_kit::choice_chip(ui, key, label, *size == Some((u64::from(before[0]), u64::from(before[1]))))
+                            ui_kit::choice_chip(
+                                ui,
+                                key,
+                                mark.as_deref().unwrap_or(label),
+                                *size == Some((u64::from(before[0]), u64::from(before[1]))),
+                            )
                         })
                         .inner;
                     crate::scenario::publish_target(&format!("render:size:{key}"), response.rect);
-                    if response.on_disabled_hover_text(app.tr("render.output_over_budget")).clicked()
+                    let reason = match (mark.is_some(), *size) {
+                        (true, Some((w, h))) => size_limit_reason(app, u32::try_from(w).unwrap_or(u32::MAX), u32::try_from(h).unwrap_or(u32::MAX)),
+                        _ => app.tr("render.output_over_budget").to_string(),
+                    };
+                    if response.on_disabled_hover_text(reason).clicked()
                         && let Some((w, h)) = allowed
                         && let (Ok(w), Ok(h)) = (u32::try_from(w), u32::try_from(h))
                         && let Err(error) = apply_size(app, w, h, false)
@@ -1247,10 +1258,10 @@ fn apply_size(app: &mut SolveApp, width: u32, height: u32, custom: bool) -> Resu
     app.render_workspace.view.dirty = true;
     Ok(())
 }
-fn size_limit_reason(app: &SolveApp, width: u32, height: u32) -> String {
+pub(super) fn size_limit_reason(app: &SolveApp, width: u32, height: u32) -> String {
     let limits = cpu::image_limits(app);
     let (w, h) = limits.fit(u64::from(width), u64::from(height), None).unwrap_or((0, 0));
-    crate::i18n::format(
+    let reason = crate::i18n::format(
         "render.output_size_limit",
         &[
             ("method", app.tr(app.render_workspace.view.method.label())),
@@ -1259,7 +1270,24 @@ fn size_limit_reason(app: &SolveApp, width: u32, height: u32) -> String {
             ("width", &w.to_string()),
             ("height", &h.to_string()),
         ],
-    )
+    );
+    let Some(profile) = cpu::profile_for_size(app, u64::from(width), u64::from(height)) else {
+        return reason;
+    };
+    let (profile, method) = (cpu::budget_name(app, profile), app.tr(ImageMethod::CpuRaytrace.label()));
+    let (width, height) = (width.to_string(), height.to_string());
+    let args = [("profile", profile), ("method", method), ("width", width.as_str()), ("height", height.as_str())];
+    // CPU raster has no profile selector: the way out includes changing the method.
+    let key =
+        if app.render_workspace.view.method == ImageMethod::Raster { "render.output_size_method_profile" } else { "render.output_size_profile" };
+    format!("{reason} {}", crate::i18n::format(key, &args))
+}
+/// A preset a CPU method refuses carries the profile that renders it (#8941). Kept short for the
+/// narrow size lists; the reason in its tooltip says what to choose, method included.
+pub(super) fn size_mark(app: &SolveApp, text: &str, size: Option<(u64, u64)>) -> Option<String> {
+    let (width, height) = size?;
+    let profile = cpu::budget_name(app, cpu::profile_for_size(app, width, height)?);
+    Some(crate::i18n::format("render.size_needs_profile", &[("size", text), ("profile", profile)]))
 }
 pub(super) fn size_presets(app: &mut SolveApp, ui: &mut egui::Ui) {
     ui_kit::scope(ui, |ui| {
@@ -1267,6 +1295,7 @@ pub(super) fn size_presets(app: &mut SolveApp, ui: &mut egui::Ui) {
         let custom = app.render_workspace.view.inspector.resolution.custom || !SIZE_PRESETS.iter().any(|(_, _, size)| *size == Some(current));
         for (key, label, size) in SIZE_PRESETS {
             let summary = size.map_or_else(String::new, |(w, h)| format!("{w} × {h}"));
+            let summary = size_mark(app, &summary, size.map(|(w, h)| (u64::from(w), u64::from(h)))).unwrap_or(summary);
             let enabled =
                 size.is_none_or(|(w, h)| cpu::image_limits(app).fit(u64::from(w), u64::from(h), None) == Some((u64::from(w), u64::from(h))));
             let response = ui
@@ -1297,7 +1326,8 @@ pub(super) fn stage_tools(app: &mut SolveApp, ui: &mut egui::Ui) {
         for (key, label, size) in SIZE_PRESETS {
             let enabled =
                 size.is_none_or(|(w, h)| cpu::image_limits(app).fit(u64::from(w), u64::from(h), None) == Some((u64::from(w), u64::from(h))));
-            let response = ui.add_enabled_ui(enabled, |ui| ui_kit::list_picker(ui, key, app.tr(label), false)).inner;
+            let mark = size_mark(app, app.tr(label), size.map(|(w, h)| (u64::from(w), u64::from(h))));
+            let response = ui.add_enabled_ui(enabled, |ui| ui_kit::list_picker(ui, key, mark.as_deref().unwrap_or(app.tr(label)), false)).inner;
             crate::scenario::publish_target(&format!("render:stage:size:{key}"), response.rect);
             let reason = size.map_or_else(String::new, |(w, h)| size_limit_reason(app, w, h));
             if response.on_disabled_hover_text(reason).clicked() {
@@ -1624,9 +1654,10 @@ fn base_appearance(app: &mut SolveApp, ui: &mut egui::Ui) {
 mod tests;
 
 pub(super) fn fit_subject(app: &mut SolveApp) -> Result<(), String> {
-    // Capture the current navigation orientation before the engine's view command.
+    // Capture the current navigation orientation before the engine's view command, which fits
+    // the product to the picture's aspect: what the preview frames and Export PNG writes.
     app.run("render.camera.set", json!({"camera":app.cam}))?;
-    app.run("render.camera.fit", json!({}))?;
+    app.run("render.camera.fit", json!({"aspect":super::image_aspect(&app.render_workspace.view.draft)}))?;
     app.follow_view_request(false);
     app.fit_view();
     Ok(())

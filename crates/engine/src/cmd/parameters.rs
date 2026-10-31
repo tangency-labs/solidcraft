@@ -13,7 +13,7 @@ use crate::{EngineError, Result, Session};
 
 pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("parameters.change", "Change Parameters", change_param).at("SOLID", "MODIFY").icon("params").params(
-        "name, expression (number or text), unit?: mm|cm|m|in|ft|deg|rad|\"\"|text (new parameters default to their value's unit; \
+        "name, expression (number or text), unit?: mm|cm|m|in|ft|deg|rad|\"\"|text (new parameters default to their value's unit, a length the design's units; \
          a text parameter's expression is its text, quotes round it optional: sketch texts' words are built from it), comment?, \
              favorite?: bool, new_name?: rename (references follow; an expression `new = value` renames to `new` and sets value, \
          or sets `new` when the expression is just `new`); or delete: name; or changes: {name: expression, …} (existing \
@@ -35,7 +35,7 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("parameters.delete", "Delete Parameter", delete)
         .icon("delete")
         .params("name (refused while something uses it; the error lists the users)"),
-    CommandSpec::new("parameters.favorite", "Favourite Parameter", favorite).icon("star").params("name, favorite?: bool (default true)"),
+    CommandSpec::new("parameters.favorite", "Favorite Parameter", favorite).icon("star").params("name, favorite?: bool (default true)"),
     CommandSpec::new("parameters.move", "Move Parameter", move_param)
         .icon("reorder")
         .params("name, before | after: another user parameter; the user parameter is listed just before or after it"),
@@ -230,7 +230,18 @@ fn keep_dimension_start(s: &mut Session, name: &str) {
         }
         let reference: Vec<_> = stored.points.iter().map(|p| p.pos).collect();
         let hold = Hold { points: vec![start], radii: Vec::new() };
-        if !solve_with(&mut trial, &hold, Some(&reference), Analysis::StatusOnly, None).keeps_orientation() {
+        let solved = if trial.offsets.is_empty() && trial.freeform_offsets.is_empty() {
+            solve_with(&mut trial, &hold, Some(&reference), Analysis::StatusOnly, None).keeps_orientation()
+        } else {
+            // A solve against stale offset points can stretch an attached cap into a different
+            // tangency branch. Keep the start through the complete solve/refresh sequence.
+            let Some(p) = trial.points.get_mut(start) else { continue };
+            p.fixed = true;
+            s.doc
+                .solve_sketch_with_analysis(&vals, &mut trial, &stored.driving_values(), Some(stored), Analysis::StatusOnly)
+                .is_ok_and(|report| report.keeps_orientation())
+        };
+        if !solved {
             continue;
         }
         if stored.points.len() == trial.points.len() {
@@ -467,7 +478,9 @@ fn evaluate(s: &mut Session, p: &Value) -> Result<Value> {
         (None, None) => None,
     };
     let (vals, _) = s.doc.param_values();
-    let defaults = expr::Defaults::for_unit(unit.unwrap_or(""), 1.0);
+    // Bare numbers follow the asked-for unit when given, else the design's length unit (#9015).
+    let doc_len = expr::unit_info(s.doc.units.trim()).filter(|(k, _)| *k == Kind::Length).map(|(_, s)| s).unwrap_or(1.0);
+    let defaults = expr::Defaults::for_unit(unit.unwrap_or(""), doc_len);
     let refs = expr::references(&e);
     let lookup = |n: &str| vals.get(n).copied().ok_or_else(|| solidcraft_doc::DocError::Expr(format!("unknown parameter `{n}`")));
     let r = expr::eval_with_defaults(&e, &lookup, defaults).and_then(|v| match kind {

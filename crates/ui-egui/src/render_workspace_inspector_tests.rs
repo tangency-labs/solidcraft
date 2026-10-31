@@ -1624,6 +1624,110 @@ fn output_sections_sizes_refuse_hostile_input_and_4k_follows_the_selected_budget
     assert!(h.app.render_workspace.view.job.is_none());
 }
 
+/// #8941: the Shots strip offers 4K UHD whatever the method. Under the default CPU raster, which
+/// has no profiles, the list and the refusal name CPU ray tracing with Studio; neither is selected.
+#[test]
+fn cpu_raster_refusing_a_size_names_the_method_and_profile_that_render_it() {
+    use solidcraft_engine::render::job::CpuBudget;
+    let mut h = fixture();
+    assert_eq!(h.app.render_workspace.view.method, ImageMethod::Raster, "the default method is unchanged");
+    let doc = h.app.session.doc.clone();
+    let undo = h.app.session.undo.len();
+    h.step(&json!({"click":{"handle":"render:shots:size"}})).unwrap();
+    h.step(&json!({"widget":"Full HD · 1920 × 1080"})).unwrap();
+    assert_eq!((h.app.render_workspace.view.draft.width, h.app.render_workspace.view.draft.height), (1920, 1080));
+    assert!(super::super::image_request(&h.app).is_ok());
+    h.step(&json!({"click":{"handle":"render:shots:size"}})).unwrap();
+    h.step(&json!({"widget":"4K UHD · 3840 × 2160 · needs Studio"})).unwrap();
+    assert_eq!((h.app.render_workspace.view.draft.width, h.app.render_workspace.view.draft.height), (3840, 2160));
+    let refusal = super::super::image_request(&h.app).unwrap_err();
+    assert!(refusal.contains("Largest fitting size: 2730 × 1536."), "{refusal}");
+    assert!(refusal.contains("To render 3840 × 2160, choose CPU ray tracing with the Studio CPU resource profile, or a smaller size."), "{refusal}");
+    assert_eq!(refusal, size_limit_reason(&h.app, 3840, 2160));
+    assert_eq!(h.app.render_workspace.view.method, ImageMethod::Raster);
+    assert_eq!(h.app.render_workspace.view.raytrace.budget, CpuBudget::Compact);
+    assert!(Arc::ptr_eq(&doc, &h.app.session.doc));
+    assert_eq!(h.app.session.undo.len(), undo);
+    assert!(!size_limit_reason(&h.app, 16384, 16384).contains("CPU resource profile"), "past Workstation no profile is named");
+    assert_eq!(size_mark(&h.app, "fits", Some((2048, 2048))), None);
+    h.app.preferences.language = "de".into();
+    let _language = crate::i18n::scope("de");
+    assert!(super::super::image_request(&h.app).unwrap_err().contains("CPU-Ressourcenprofil Studio"));
+}
+
+/// #8941: under the default Compact CPU profile 4K UHD is refused with a translated reason that
+/// names Studio, and the size lists mark only the presets the selected profile can't render.
+/// Nothing switches the profile or the size; GPU path tracing shows no CPU profile.
+#[test]
+fn a_size_the_cpu_profile_refuses_names_the_profile_that_renders_it() {
+    use solidcraft_engine::render::job::CpuBudget;
+    let mut h = fixture();
+    super::super::select_image_method(&mut h.app, ImageMethod::CpuRaytrace);
+    h.frames(3);
+    h.step(&json!({"click":{"handle":"render:shots:size"}})).unwrap();
+    h.step(&json!({"widget":"4K UHD · 3840 × 2160 · needs Studio"})).unwrap();
+    assert_eq!(h.app.render_workspace.view.raytrace.budget, CpuBudget::Compact, "the default profile is unchanged");
+    let reason = size_limit_reason(&h.app, 3840, 2160);
+    assert!(reason.contains("Largest fitting size: 2730 × 1536."), "{reason}");
+    assert!(reason.contains("To render 3840 × 2160, choose the Studio CPU resource profile, or a smaller size."), "{reason}");
+    assert_eq!(size_mark(&h.app, "4K UHD", Some((3840, 2160))).as_deref(), Some("4K UHD · needs Studio"));
+    for fits in [(1280, 720), (1920, 1080), (2048, 2048)] {
+        assert_eq!(size_mark(&h.app, "fits", Some(fits)), None, "{fits:?}");
+    }
+    assert_eq!(size_mark(&h.app, "custom", None), None);
+    assert_eq!(size_mark(&h.app, "past every profile", Some((16385, 16385))), None);
+    let reason = size_limit_reason(&h.app, 16384, 16384);
+    assert!(!reason.contains("CPU resource profile"), "past Workstation no profile is named: {reason}");
+
+    // Render and Check are refused with the same translated reason, and nothing is changed.
+    h.app.render_workspace.view.draft.width = 3840;
+    h.app.render_workspace.view.draft.height = 2160;
+    let doc = h.app.session.doc.clone();
+    h.frames(3);
+    assert_eq!(cpu::validate_progressive_image(&h.app).unwrap_err(), size_limit_reason(&h.app, 3840, 2160));
+    assert!(super::super::image_request(&h.app).unwrap_err().contains("choose the Studio CPU resource profile"));
+    assert_eq!(h.app.render_workspace.view.raytrace.budget, CpuBudget::Compact);
+    assert_eq!((h.app.render_workspace.view.draft.width, h.app.render_workspace.view.draft.height), (3840, 2160));
+    assert!(Arc::ptr_eq(&doc, &h.app.session.doc));
+
+    // Studio renders 4K and marks nothing up to it; a 16K-wide image names Workstation.
+    h.app.render_workspace.view.raytrace.budget = CpuBudget::Studio;
+    cpu::validate_progressive_image(&h.app).unwrap();
+    assert_eq!(size_mark(&h.app, "4K UHD", Some((3840, 2160))), None);
+    assert_eq!(size_mark(&h.app, "16K", Some((15360, 4320))).as_deref(), Some("16K · needs Workstation"));
+    assert!(size_limit_reason(&h.app, 15360, 4320).contains("choose the Workstation CPU resource profile"));
+    h.app.render_workspace.view.raytrace.budget = CpuBudget::Workstation;
+    assert_eq!(size_mark(&h.app, "16K", Some((15360, 4320))), None);
+
+    // Progressive sampling's camera-sample budget counts: 4K at 64 spp needs Studio too.
+    h.app.render_workspace.view.raytrace.budget = CpuBudget::Compact;
+    h.app.render_workspace.view.raytrace.progressive = Some(solidcraft_engine::render::job::CpuProgressiveOptions { samples_per_pixel: 64, seed: 0 });
+    assert_eq!(cpu::profile_for_size(&h.app, 3840, 2160), Some(CpuBudget::Studio));
+    h.app.render_workspace.view.raytrace.progressive = None;
+
+    // Translated: the profile is named as the profile selector names it.
+    h.app.preferences.language = "ja".into();
+    {
+        let _language = crate::i18n::scope("ja");
+        let reason = size_limit_reason(&h.app, 3840, 2160);
+        assert!(reason.contains("CPUリソースプロファイル「スタジオ」"), "{reason}");
+        assert_eq!(size_mark(&h.app, "4K UHD", Some((3840, 2160))).as_deref(), Some("4K UHD・「スタジオ」が必要"));
+    }
+    h.app.preferences.language = "en".into();
+    h.frames(3);
+
+    // GPU path tracing renders 4K and never names a CPU profile.
+    super::super::select_image_method(&mut h.app, ImageMethod::GpuRaytrace);
+    h.frames(3);
+    h.step(&json!({"click":{"handle":"render:shots:size"}})).unwrap();
+    h.step(&json!({"widget":"4K UHD · 3840 × 2160"})).unwrap();
+    assert_eq!(size_mark(&h.app, "4K UHD", Some((3840, 2160))), None);
+    // 15360 × 4320 is past the GPU limits, yet Workstation would admit it: still no CPU profile.
+    assert_eq!(size_mark(&h.app, "16K", Some((15360, 4320))), None);
+    assert!(!size_limit_reason(&h.app, 15360, 4320).contains("CPU resource profile"));
+    cpu::validate_progressive_image(&h.app).unwrap();
+}
+
 #[test]
 fn shots_strip_render_submits_the_current_job_request() {
     let mut h = fixture();

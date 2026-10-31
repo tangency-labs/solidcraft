@@ -89,7 +89,7 @@ pub(crate) fn paint_orbit(p: &Painter, rect: Rect, pivot: usize) {
         p.line_segment([centre, c.at(x - 11.0, y + 5.5)], grey);
     }
     if pivot == 1 {
-        // A restrained screen-space crosshair makes "View centre" distinct from origin.
+        // A restrained screen-space crosshair makes "View center" distinct from origin.
         let guide = Stroke::new(c.width(1.0), t.form_dim.gamma_multiply(0.7));
         for (a, b) in [((x - 9.0, y), (x - 5.0, y)), ((x + 5.0, y), (x + 9.0, y)), ((x, y - 9.0), (x, y - 5.0))] {
             p.line_segment([c.at(a.0, a.1), c.at(b.0, b.1)], guide);

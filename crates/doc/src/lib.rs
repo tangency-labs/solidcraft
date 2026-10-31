@@ -10,6 +10,7 @@ pub mod appearance_pack;
 mod assembly;
 mod body_transfer;
 mod body_transfer_sheet;
+mod browser_tree;
 pub mod pbr_appearance;
 pub use body_transfer::{valid_transfer_matrix, validate_body_transfer};
 pub mod canvas;
@@ -53,6 +54,8 @@ pub mod physical_material;
 mod piece_names;
 pub mod pipe_thread_catalog;
 pub mod point_cloud;
+mod point_cloud_complex;
+pub mod point_cloud_distribution;
 mod points;
 mod profile_refs;
 pub mod progress;
@@ -61,6 +64,8 @@ pub use thread_catalog::{TappedThread, TappedThreadFamily, parse_tapped_thread, 
 mod walk;
 pub use profile_refs::{capture_profile_selection, profile_fallback_notes, profile_selection_indices, profile_selection_indices_lenient};
 pub mod plastic;
+mod print_face;
+pub use print_face::PrintFace;
 pub mod project;
 mod project3d;
 pub mod render_aging;
@@ -71,6 +76,7 @@ pub mod render_settings;
 pub mod render_surface;
 pub use project3d::iso_grid;
 pub mod sheet;
+pub mod sketch_equation;
 pub mod text_params;
 
 pub use assembly::{

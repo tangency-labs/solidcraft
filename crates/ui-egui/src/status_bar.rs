@@ -1,8 +1,10 @@
 //! The status bar (Preferences › Interface › Status bar, #7243; off by default): a thin bar
 //! along the window's bottom edge, below the History strip, with what is being edited, the open
 //! sketch's state in that state's colour, and the design's units. A click on the units opens
-//! the Units menu, whose rows run Change Design Units (`document.units`, one undo step). While
-//! the bar is on, the sketch's state is not also painted in the view's top-left corner.
+//! the Units menu, whose rows run Change Design Units (`document.units`, one undo step). Beside
+//! it, the mouse mapping (Preferences › Navigation) opens a menu of the mappings, and picking one
+//! sets what that page sets for it (#7023). While the bar is on, the sketch's state is not also
+//! painted in the view's top-left corner.
 //!
 //! The bar is window chrome like the application bar: full width and flat in either workspace
 //! layout. It is allocated before the viewport, so the view and everything anchored to its
@@ -12,6 +14,7 @@
 use egui::{Color32, FontId, Rect, Sense, pos2, vec2};
 
 use crate::SolveApp;
+use crate::context_menu::Target;
 use crate::theme::Tokens;
 use crate::ui_kit::{Container, Edge, Surface};
 
@@ -83,6 +86,8 @@ pub(crate) struct Contents {
     pub sketch: Option<SketchState>,
     /// The design's units (`mm`, `cm`, `m`, `in`, `ft`).
     pub units: String,
+    /// The mouse mapping's name.
+    pub navigation: String,
 }
 
 pub(crate) fn contents(app: &SolveApp) -> Contents {
@@ -100,6 +105,7 @@ pub(crate) fn contents(app: &SolveApp) -> Contents {
         editing: edited.map(|name| crate::i18n::format("status.editing", &[("name", &crate::i18n::tr_name(&name))])),
         sketch: sketch.map(SketchState::of),
         units: app.session.doc.units.clone(),
+        navigation: crate::prefs::nav_preset(&app.preferences.nav).translated_label().to_string(),
     }
 }
 
@@ -124,9 +130,9 @@ pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     crate::scenario::publish_target("status:bar", response.rect);
 }
 
-/// The items, right-aligned from the window's right edge: units, the sketch's state, what is
-/// being edited. The left end stays free (for next-step hints, #2325). An item that would not
-/// fit is left out, the leftmost first.
+/// The items, right-aligned from the window's right edge: units, the mouse mapping, the sketch's
+/// state, what is being edited. The left end stays free (for next-step hints, #2325). An item
+/// that would not fit is left out, the leftmost first.
 fn paint(app: &mut SolveApp, ui: &mut egui::Ui, contents: &Contents) {
     let t = Tokens::get();
     let r = ui.max_rect();
@@ -136,28 +142,12 @@ fn paint(app: &mut SolveApp, ui: &mut egui::Ui, contents: &Contents) {
     let left = r.left() + t.space_8;
     let mut right = r.right() - t.space_6;
 
-    // The units: a flat button with the kit's dropdown chevron.
-    let units = painter.layout_no_wrap(contents.units.clone(), font.clone(), t.text);
-    let chevron = t.space_10;
-    let width = t.space_6 + units.size().x + t.space_4 + chevron + t.space_6;
-    let button = Rect::from_min_max(pos2(right - width, r.top() + t.space_3), pos2(right, r.bottom() - t.space_3));
-    let response = ui.interact(button, egui::Id::new("sc_status_units"), Sense::click());
-    let open = app.viewport.context_menu.is_some() && app.menu.target == crate::context_menu::Target::Units;
-    if response.hovered() || open {
-        painter.rect_filled(button, t.control_radius, t.hover);
-        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
-    }
-    let units_at = pos2(button.left() + t.space_6, button.center().y - units.size().y / 2.0);
-    painter.galley(units_at, units, t.text);
-    let chevron_rect = Rect::from_center_size(pos2(button.right() - t.space_6 - chevron / 2.0, button.center().y), vec2(chevron, chevron));
-    crate::ui_kit::dropdown_indicator(&painter, chevron_rect, t.text_dim);
-    let label = crate::i18n::format("browser.units", &[("units", &contents.units)]);
-    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &label));
-    crate::scenario::publish_target("status:units", button);
-    if response.on_hover_text(crate::i18n::tr("status.units_tip")).clicked() {
-        // The menu opens above the bar, its right edge on the button's.
-        crate::context_menu::toggle_for(app, button, button.right_top(), crate::context_menu::Target::Units);
-    }
+    // The units, then the mouse mapping: flat buttons that open their menus.
+    let units = crate::i18n::format("browser.units", &[("units", &contents.units)]);
+    let button = menu_button(app, ui, right, Target::Units, &contents.units, &units, crate::i18n::tr("status.units_tip"));
+    let navigation = crate::i18n::format("status.navigation", &[("mapping", &contents.navigation)]);
+    let tip = crate::i18n::tr("status.navigation_tip");
+    let button = menu_button(app, ui, button.left() - t.space_4, Target::Navigation, &contents.navigation, &navigation, tip);
     right = button.left() - t.space_6;
 
     // The sketch's state, after a dot in its colour; then what is being edited.
@@ -188,6 +178,35 @@ fn paint(app: &mut SolveApp, ui: &mut egui::Ui, contents: &Contents) {
         crate::scenario::publish_target(handle, item);
         right = item.left();
     }
+}
+
+/// A flat button with the kit's dropdown chevron, its right edge at `right`; a click opens (or
+/// closes) the `target` menu above the bar, its right edge on the button's.
+fn menu_button(app: &mut SolveApp, ui: &mut egui::Ui, right: f32, target: Target, text: &str, label: &str, tip: &str) -> Rect {
+    let handle = if target == Target::Units { "status:units" } else { "status:navigation" };
+    let t = Tokens::get();
+    let r = ui.max_rect();
+    let painter = ui.painter().clone();
+    let galley = painter.layout_no_wrap(text.to_string(), FontId::proportional(t.font_body), t.text);
+    let chevron = t.space_10;
+    let width = t.space_6 + galley.size().x + t.space_4 + chevron + t.space_6;
+    let button = Rect::from_min_max(pos2(right - width, r.top() + t.space_3), pos2(right, r.bottom() - t.space_3));
+    let response = ui.interact(button, egui::Id::new(("sc_status_menu", handle)), Sense::click());
+    let open = app.viewport.context_menu.is_some() && app.menu.target == target;
+    if response.hovered() || open {
+        painter.rect_filled(button, t.control_radius, t.hover);
+        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+    }
+    let text_at = pos2(button.left() + t.space_6, button.center().y - galley.size().y / 2.0);
+    painter.galley(text_at, galley, t.text);
+    let chevron_rect = Rect::from_center_size(pos2(button.right() - t.space_6 - chevron / 2.0, button.center().y), vec2(chevron, chevron));
+    crate::ui_kit::dropdown_indicator(&painter, chevron_rect, t.text_dim);
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, label));
+    crate::scenario::publish_target(handle, button);
+    if response.on_hover_text(tip).clicked() {
+        crate::context_menu::toggle_for(app, button, button.right_top(), target);
+    }
+    button
 }
 
 #[cfg(test)]
