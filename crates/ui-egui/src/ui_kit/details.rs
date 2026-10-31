@@ -1,4 +1,5 @@
 //! Description-driven details content. No tool, document or command knowledge lives here.
+use crate::ui_kit::BackingTooltipExt as _;
 use crate::{fonts::RichTextExt as _, scenario, theme::Tokens};
 use egui::{RichText, Ui};
 
@@ -213,7 +214,7 @@ fn setting(ui: &mut Ui, field: &DetailSetting, focus: bool) -> Option<DetailEven
     if let DetailValue::Axis { value: vector, current } = &value
         && ![[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]].contains(vector)
     {
-        let response = ui.add(egui::Label::new(RichText::new(current).monospace()).wrap()).on_hover_text(current);
+        let response = ui.add(egui::Label::new(RichText::new(current).monospace()).wrap()).backing_on_hover_text(current);
         scenario::publish_target(&format!("details:current:{}", field.id), response.rect);
     }
     changed.then(|| DetailEvent::Change(field.id.clone(), value))
@@ -281,11 +282,11 @@ pub(crate) fn details(ui: &mut Ui, id: &str, description: &Details, max_height: 
                                             let (rect, _) = ui.allocate_exact_size(egui::vec2(t.space_16, t.space_16), egui::Sense::hover());
                                             crate::icons::paint_icon(ui.painter(), rect, "warning", 1.0);
                                         }
-                                        ui.label(&row.label).on_hover_text(&row.label);
+                                        ui.label(&row.label).backing_on_hover_text(&row.label);
                                     });
                                 });
                                 cells.cell(|ui| {
-                                    ui.label(RichText::new(&row.value).monospace().size(t.font_small)).on_hover_text(&row.value);
+                                    ui.label(RichText::new(&row.value).monospace().size(t.font_small)).backing_on_hover_text(&row.value);
                                 });
                                 cells.cell(|ui| {
                                     if row.target {

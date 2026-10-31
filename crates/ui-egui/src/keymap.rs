@@ -3,6 +3,7 @@
 //! already uses is reported and only taken over on request; keys the app itself handles (Esc, S,
 //! V, Delete, Ctrl+Z…) can't be bound. Changes are kept between runs.
 
+use crate::ui_kit::BackingTooltipExt as _;
 use std::collections::BTreeMap;
 
 use serde_json::{Value, json};
@@ -732,9 +733,9 @@ pub fn page(app: &mut SolveApp, ui: &mut egui::Ui) {
                                 for slot in 0..=keys.len() {
                                     let capture = if capturing && app.keymap.slot == slot {
                                         let text = app.keymap.recorder.preview().unwrap_or_else(|| app.tr_label("press a key…").to_string());
-                                        ui_kit::button(ui, &text, ui_kit::Button::Normal).on_hover_text(tip)
+                                        ui_kit::button(ui, &text, ui_kit::Button::Normal).backing_on_hover_text(tip)
                                     } else if let Some(key) = keys.get(slot) {
-                                        ui_kit::button(ui, display(key), ui_kit::Button::Normal).on_hover_text(tip)
+                                        ui_kit::button(ui, display(key), ui_kit::Button::Normal).backing_on_hover_text(tip)
                                     } else {
                                         let (rect, _) = ui.allocate_exact_size(egui::vec2(t.control_height, t.control_height), egui::Sense::hover());
                                         ui_kit::quiet_icon_button_at(ui, rect, "plus", tip)

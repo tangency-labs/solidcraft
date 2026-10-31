@@ -141,37 +141,38 @@ changes for blur. The egui dependency is the published 0.36.2 crate.
 | View background | `viewport.rs::show` emits an egui gradient mesh before the viewport callback. `render_workspace.rs::show` emits its effective preview background, shared with the blur source. Neither is contained in the GPU renderer's scene texture. |
 | Prepare scene | `gpu.rs::ViewportCallback::prepare` calls `solidcraft_gpu::view::Renderer::prepare`. Native `set_wgpu_split` already draws scene depth/MSAA/OIT offscreen. The UI target has one sample and no depth. The resolved scene is transparent outside geometry. |
 | Acquire/order | `vendor/egui-wgpu/src/winit.rs::Painter::paint_and_update_textures` acquires/probes the drawable before preparing callbacks. `Renderer::update_buffers` uploads meshes, runs all callback `prepare`s, then all `finish_prepare`s. The enabled frame hook supplies actual physical target extent and the effective scale, including surface clamping. |
-| Build source/blur | The enabled `blur_native.rs::Source` replaces the viewport callback. Its `prepare` delegates unchanged to the original callback. Its `finish_prepare` draws the independent background/prepared viewport into S, then the blur chain, all on the same encoder. A cache hit encodes neither source nor blur passes. |
-| UI composition | The native pass owner selects an installed `FrameCompositor` before beginning the UI pass. It renders the unchanged egui primitive stream into C. At semantic markers, `PanelMarker::paint` samples B; ordinary panel fill/content follow in their original order. |
+| Build source | The enabled `blur_native.rs::Source` replaces the viewport callback. Its `prepare` delegates unchanged to the original callback. Its `finish_prepare` retains the independent background/prepared viewport source and availability/cache evidence. A source cache hit avoids rebuilding that source. |
+| UI composition | The native pass owner initializes C from the cached source and segments the original ordered UI stream at semantic backing markers. Before each marker it runs the existing blur pyramid from current C, then the marker samples B. Ordinary fill, border and content follow. The replaced source callback is skipped during composition. |
 | Present/capture | A final triangle presents C into the normal drawable or existing capture texture. Existing screenshot copying, queue guard, texture frees and presentation remain after that. `submitted` commits a pending source key only after queue submission. |
 
 `CallbackTrait::paint` receives an already active pass, not its encoder or target;
 it cannot redirect the UI or start blur passes. Callback command buffers execute
-before the main encoder. Source production and its dependent blur therefore use
-the same encoder and return no additional callback command buffers.
+before the main encoder. The pass owner ends each UI segment before encoding its dependent blur pyramid
+and starts the next segment on the same encoder. No additional callback command
+buffers are returned.
 
-## Independent source and color contract
+## Ordered backdrop and color contract
 
-S, B and C are separate textures with separate jobs:
+S, B and C retain separate resources and jobs. S is the independent cached
+viewport/background source used for initialization, availability and evidence.
+It includes prepared model/sketch/highlight/preview geometry, section caps,
+reference images and point clouds. Source construction uses the actual prepared
+renderer, background colors, placement and inherited clip.
 
-- **S** is full-target, single-sample viewport/background color. Its construction
-  takes the explicit background rectangle/colors, inherited clip and prepared
-  `ViewportCallback::Frame`. The background pipeline has a uniform-only bind
-  group: it cannot sample C or a panel texture. The source viewport paint uses
-  the same prepared renderer, with its actual screen placement/scissor.
-- **B** is the final full-target linear RGBA16F Kawase result, shared by every
-  eligible panel in that native viewport. Intermediate down/up targets are also
-  RGBA16F and are distinct read/write textures on every pass.
-- **C** has the UI target's format and contains the normal sharp viewport plus
-  egui UI/markers. Only the final presentation samples C. C never feeds S or B.
+C is the current ordered UI composition. It starts from the source, then receives
+ordinary egui shapes in their original order. Before each actual translucent
+backing marker, the existing down/up pyramid filters current C into B. The marker
+samples that result before its ordinary surface fill and contents are painted.
+Thus menus, dialogs and nested cards include preceding UI in their backdrop;
+they do not replace underlying panels with the model scene. B is refreshed at
+each boundary rather than shared unchanged by all panels. The final presentation
+samples C. Read and write targets remain separate throughout the pyramid.
 
-No prefix of the UI paint list is blurred. A docked panel or window can precede
-the viewport in that list; this does not affect source construction. Panels,
-menus, HUDs, toasts, dimension editors, cursors and input shields are excluded.
-The source does include model/sketch/highlight/preview geometry, section caps,
-reference images and point clouds drawn by the GPU viewport. A panel outside
-the model rectangle sees the deterministic source background, not invented
-geometry behind a dock. Extending the projection under docks is a separate change.
+This uses the existing effect resources and adds **2 × steps GPU passes per
+actual backing boundary**. Source-cache hits still save source construction;
+they do not eliminate the per-boundary backdrop filtering. No extra resources
+or disabled-path GPU passes are introduced. Outside the model rectangle the
+source remains the deterministic background; geometry is not invented under docks.
 
 Render preview uses its original product `Frame`, lighting, resolution reduction
 and effective preview background, including authored-scene precedence and the
@@ -184,7 +185,7 @@ Source color is opaque viewport/background color. Translucent custom viewport
 or outside backgrounds report unavailable before effect GPU allocation; their
 composition with a transparent native window is not silently approximated.
 For an unorm UI target, the
-first down pass decodes each source texel before bilinear interpolation; for an
+first down pass decodes each composition texel before bilinear interpolation; for an
 sRGB target, texture sampling performs the decode. All subsequent filtering is
 linear. Marker output follows egui's gamma-premultiplied convention: convert B
 to gamma, multiply RGB/alpha by rounded coverage and host opacity, and for an
@@ -196,58 +197,37 @@ sRGB formats. The worker has not yet verified those images on hardware.
 
 ## Semantic hosts, clipping and rounding
 
-Eligible surfaces are `Panel`, `Feature`, `Palette` and `Chrome`, with nonzero,
-translucent outer fill. `Container` owns eligibility; alpha alone does not select
-arbitrary UI. Opaque fills have no marker. Viewport, native application bar,
-Canvas, InputShield, HUDs, Toast, Window and Popup are outside the initial policy.
+Blur eligibility follows actual backing UI surfaces rather than a workspace-surface
+whitelist. Panels, ribbon and application bars, History, system windows, modal
+dialogs and their dimming backdrops, menus/submenus, popovers, canvas editors,
+notifications, file-loading shields, and tooltips use the same marker policy.
+Nested backing cards participate too. Zero-alpha layout frames stay transparent;
+text, strokes, selection/hover tints and model geometry do not create backing markers.
+The effective fill alpha includes inherited painter opacity, so a normally opaque
+surface fading in can participate without treating its text as another surface.
 
-The app uses stock egui 0.36.2 public APIs. In the positive eligible path,
-`Container::show_frame`, `show_edge` and the bounded `FeatureWindow::show`
-reserve an early painter slot before invoking the original host. Once geometry
-is known they populate that slot with a marker; the original shadow, fill,
-stroke and contents remain in their original slots. The zero path reserves
-nothing and calls the existing `Prepared::end`, `Panel::show` or `Window::show`.
-No host becomes transparent, and child `UiStack` frame/background metadata,
-styles, margins, stroke widths, IDs and interactions remain stock.
+The app uses stock egui 0.36.2 public host APIs. `show_frame`, `show_backing`,
+`show_edge`, `show_central` and bounded Window reserve a slot before the original
+frame paints. Native popup and tooltip wrappers keep their placement, hover gates,
+stacking, close behavior and response types. Response tooltip extension methods
+route native enabled/disabled and pointer-anchored variants through the same policy.
+Manual backing surfaces replace their original reserved slot, preserving ordering.
+The off path calls the original hosts without marker slots or effect allocations.
+`show_backing` adds no inset decoration to callers which previously had none.
 
-`show_frame` owns `Frame::begin` and uses the final content rectangle and
-joined-edge corner rounding. `show_edge` captures the panel painter before the
-body can narrow its clip or change opacity, then measures the actual frame
-content (the response may be clamped on overflow). Its marker uses the original
-host clip, including padding/borders and any host clipping. Current adaptive
-edge callers use ordinary `show`; the helper deliberately exposes no animated
-panel entry point.
+Modal rendering first reserves full-screen backdrop blur, then retains native
+input shielding/focus/dismissal and dimming. Its visible dialog frame is painted
+through `show_backing` after dimming, so the dialog samples the actual dimmed UI
+beneath it. The off path remains the original native Modal. Existing host geometry,
+interaction and legacy paint assertions require manager validation after this
+iteration; no automated checks were run by these implementation workers.
 
-Only `Panel::window_placed` creates an adaptive stock Window. Its small
-`FeatureWindow` wrapper keeps the existing builder private and forwards only
-`fixed_size`, `open` and `show`. The open flag is forwarded with a shortened borrow
-lifetime; stock Window owns visibility and close-request handling. These sheets
-explicitly disable native title bars, collapse, resize, scrolling and fades,
-and use an explicit persistent ID and
-Middle layer. The early slot is on that exact layer. The final Area response
-includes the outer margins; subtracting the original total margins reconstructs
-the content rectangle for marker geometry even though stock Window relocates
-`inner_margin` into an internal Frame. The marker inherits the host painter's
-visibility/opacity and Area's viewport clip, rather than Resize's content-only
-clip. System windows (`Surface::Window`) remain outside blur eligibility.
-
-Manual workspace ribbon cards and History retain semantic background painting;
-manual HUD painting remains plain. No private storage access, extra outer
-visual container, duplicate frame or search for matching colors/rectangles is
-used. The tests inject a marker function into these same helpers without a GPU
-to compare stock and decorated output, geometry, IDs and semantic metadata.
-
-A marker precedes the ordinary shadow, fill, border and content on the same
-layer. It retains all four final corner radii and painter
-opacity. At paint it uses the final transformed callback rectangle and actual
-physical scale, matching egui rectangle snapping when enabled. It changes the
-GPU viewport to the full target, retains the renderer's inherited scissor, and
-uses an antialiased rounded distance mask at the original unclipped rectangle.
-Thus clipping an edge does not invent a new rounded corner. UVs come from screen
-position, so a moved panel samples the corresponding source pixels. Distinct
-retained marker uniforms prevent one panel's queue write from changing another's
-draw. Marker count is bounded to 256. Nested/overlapping panels sample the same B,
-never each other's fill or content.
+Markers retain all four final corner radii, host clipping and painter opacity.
+Clipping does not invent rounded corners, and moved surfaces sample corresponding
+screen pixels. The compositor respects ordered preceding UI, so a translucent
+popup above a panel blurs the panel beneath it rather than cutting through to the
+model. No private storage access, global matching-color search or arbitrary
+rectangle heuristic selects backing surfaces.
 
 ## Radius, cache, allocation and recovery
 
@@ -277,8 +257,8 @@ source/background rectangles and clip after the source layer's final global
 transform, background colors, physical target extent,
 effective scale, target encoding and radius. It is per device/host; installation
 on a replacement device retires the old state. A pending key becomes valid only
-after submission. A resting repaint reuses B with zero source/blur passes; normal
-UI composition/presentation still occurs. Panel-only tint/layout changes reuse
+after submission. A resting repaint can reuse the source, while each painted backing boundary
+still filters the current UI composition. Panel-only tint/layout changes reuse
 the full-target source unless they change projection, source placement or extent.
 No repaint timer is added to keep blur alive.
 

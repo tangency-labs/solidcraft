@@ -1,6 +1,7 @@
 //! Structured configuration rule editing and non-mutating row preview.
 use crate::SolveApp;
 use crate::ui_kit;
+use crate::ui_kit::BackingTooltipExt as _;
 use egui::Ui;
 use serde_json::{Value, json};
 use solidcraft_engine::doc::config::{Column, ConfigRule, RuleCondition, RuleEffect, RuleOperator};
@@ -116,13 +117,13 @@ pub(super) fn show(ui: &mut Ui, app: &mut SolveApp, error: &mut Option<String>, 
                 if ui_kit::button(ui, crate::i18n::tr_label("Edit"), ui_kit::Button::Normal).clicked() {
                     editor.rule = rule.clone();
                 }
-                let up = ui_kit::button(ui, "↑", ui_kit::Button::Enabled(index > 0)).on_hover_text(crate::i18n::tr_label("Move earlier"));
+                let up = ui_kit::button(ui, "↑", ui_kit::Button::Enabled(index > 0)).backing_on_hover_text(crate::i18n::tr_label("Move earlier"));
                 crate::scenario::publish_handle(&format!("config:rule:{}:up", rule.id), up.rect.center());
                 if up.clicked() {
                     *error = app.run("config.rule", json!({"id":rule.id,"index":index-1})).err();
                 }
                 if ui_kit::button(ui, "↓", ui_kit::Button::Enabled(index + 1 < rules.len()))
-                    .on_hover_text(crate::i18n::tr_label("Move later"))
+                    .backing_on_hover_text(crate::i18n::tr_label("Move later"))
                     .clicked()
                 {
                     *error = app.run("config.rule", json!({"id":rule.id,"index":index+1})).err();

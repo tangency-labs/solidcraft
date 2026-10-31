@@ -1,6 +1,7 @@
 //! The first local appearance-library consumer, inside the existing Appearance panel.
-#[cfg(not(target_arch = "wasm32"))]
 use crate::dialogs_appearance::selected_params;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::ui_kit::BackingTooltipExt as _;
 use crate::{SolveApp, dialogs_appearance::Ap, selection::SelInput, ui_kit};
 use serde_json::json;
 use solidcraft_engine::io::catalog::Catalog;
@@ -221,7 +222,7 @@ fn import_rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Ap, inputs: &[SelI
                             }
                             let button =
                                 ui_kit::list_picker(ui, &entry.id, entry.definition.name(), k.local.selected.as_deref() == Some(entry.id.as_str()))
-                                    .on_hover_text(format!(
+                                    .backing_on_hover_text(format!(
                                         "{} · {} · {}",
                                         entry.id,
                                         entry.provenance.license,

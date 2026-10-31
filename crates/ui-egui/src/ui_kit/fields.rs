@@ -4,6 +4,7 @@ use super::{
     metrics::*,
     text::paint_text,
 };
+use crate::ui_kit::BackingTooltipExt as _;
 use crate::ui_kit::{Container, Surface};
 use crate::{scenario, theme::Tokens};
 use egui::{Response, RichText, Ui, vec2};
@@ -1558,7 +1559,7 @@ pub(crate) fn placement_field(ui: &mut Ui, id: egui::Id, value: &mut String, hin
     });
     crate::theme::TabAccent::number_focus(ui, &response);
     t.input_bevel(ui, &response);
-    response.on_hover_text(crate::i18n::tr_label(hint))
+    response.backing_on_hover_text(crate::i18n::tr_label(hint))
 }
 
 /// Attached Library dropdown and text editor inside one bordered control.
@@ -1586,7 +1587,7 @@ pub(crate) fn library_cell(ui: &mut Ui, id: egui::Id, value: &mut String, hint: 
     if open {
         ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape));
     }
-    if value.is_empty() { response.on_hover_text(crate::i18n::tr_label(hint)) } else { response }
+    if value.is_empty() { response.backing_on_hover_text(crate::i18n::tr_label(hint)) } else { response }
 }
 
 /// Inline tree-name editor in caller-owned geometry; preserves its native focus and selection ID.

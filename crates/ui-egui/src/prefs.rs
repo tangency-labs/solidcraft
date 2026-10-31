@@ -1,6 +1,7 @@
 //! Grouped preferences composed with the shared UI kit. Changes apply immediately; Cancel
 //! restores the opening snapshot, Apply keeps editing, and Defaults affects the current page.
 
+use crate::ui_kit::BackingTooltipExt as _;
 use std::collections::BTreeMap;
 
 use egui::{Modifiers, Pos2};
@@ -966,7 +967,7 @@ macro_rules! preference_settings {
     (@page $page:expr) => { Some($page) };
     (@control $app:ident, $ui:ident, $field:ident, check($label:literal $(, $help:literal)?)) => {
         ui_kit::checkbox($ui, crate::i18n::tr_label($label), &mut $app.preferences.$field)
-            $(.on_hover_text(crate::i18n::tr_label($help)))?
+            $(.backing_on_hover_text(crate::i18n::tr_label($help)))?
     };
     (@control $app:ident, $ui:ident, $field:ident, check_tr($label:literal)) => {
         ui_kit::checkbox($ui, crate::i18n::tr($label), &mut $app.preferences.$field)
@@ -1960,7 +1961,7 @@ fn theme_row(app: &mut SolveApp, ui: &mut egui::Ui) {
         },
         |ui| {
             let tile = ui_kit::theme_import_tile(ui, app.tr_label("Import…"), app.tr("prefs.theme_file_or_paste"))
-                .on_hover_text(app.tr("prefs.theme_import_hint"));
+                .backing_on_hover_text(app.tr("prefs.theme_import_hint"));
             import_tile = Some(tile.rect);
             if tile.clicked() {
                 action = Some("import");
@@ -2050,7 +2051,7 @@ fn follow_row(app: &mut SolveApp, ui: &mut egui::Ui) {
             stop = stop_button.clicked();
             let name = std::path::Path::new(&path).file_name().map(|n| n.to_string_lossy().to_string());
             let shown = name.unwrap_or_else(|| app.tr("prefs.theme_follow_off").to_string());
-            ui_kit::text(ui, &shown, ui_kit::Text::Inline).on_hover_text(&path);
+            ui_kit::text(ui, &shown, ui_kit::Text::Inline).backing_on_hover_text(&path);
         });
     });
     if !path.is_empty() {
@@ -2602,7 +2603,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         Some((Tokens::get().control_height * 3.0, crate::settings_profiles::sidebar)),
         |ui| {
             if ui_kit::button(ui, crate::i18n::tr("ui.restore_defaults"), ui_kit::Button::Normal)
-                .on_hover_text(crate::i18n::tr("ui.reset_the_settings_on_this_page"))
+                .backing_on_hover_text(crate::i18n::tr("ui.reset_the_settings_on_this_page"))
                 .clicked()
             {
                 button = Some("defaults");
@@ -2767,7 +2768,7 @@ fn nav_bridge(app: &mut SolveApp, ui: &mut egui::Ui) {
         (None, true) => Some((app.tr("ui.nav_bridge_waiting").to_owned(), true)),
     };
     ui.horizontal_wrapped(|ui| {
-        ui_kit::checkbox(ui, &label, &mut app.preferences.nav_bridge_enabled).on_hover_text(&tip);
+        ui_kit::checkbox(ui, &label, &mut app.preferences.nav_bridge_enabled).backing_on_hover_text(&tip);
         if let Some((status, waiting)) = &status {
             ui_kit::settings_badge(ui, status, *waiting);
         }
@@ -2802,9 +2803,9 @@ fn space_mouse_rows(app: &mut SolveApp, ui: &mut egui::Ui) {
             });
         });
         ui.allocate_ui_with_layout(egui::vec2(width, 0.0), egui::Layout::top_down(egui::Align::Min), |ui| {
-            setting::space_mouse_in_view(app, ui).on_hover_text(crate::i18n::tr("ui.3d_mouse_show_in_view_tip"));
+            setting::space_mouse_in_view(app, ui).backing_on_hover_text(crate::i18n::tr("ui.3d_mouse_show_in_view_tip"));
             ui.add_enabled_ui(app.preferences.space_mouse_enabled, |ui| {
-                setting::space_mouse_sketch_orbit(app, ui).on_hover_text(crate::i18n::tr("ui.3d_mouse_sketch_orbit_tip"));
+                setting::space_mouse_sketch_orbit(app, ui).backing_on_hover_text(crate::i18n::tr("ui.3d_mouse_sketch_orbit_tip"));
             });
         });
     });
@@ -2828,7 +2829,7 @@ fn space_mouse_rows(app: &mut SolveApp, ui: &mut egui::Ui) {
             let rect = response.response.rect;
             crate::scenario::publish_handle("prefs:3d_mouse_orbit_traced", egui::pos2(rect.left() + rect.width() * 0.25, rect.center().y));
             crate::scenario::publish_handle("prefs:3d_mouse_orbit_classic", egui::pos2(rect.left() + rect.width() * 0.75, rect.center().y));
-            response.response.on_hover_text(crate::i18n::tr("ui.3d_mouse_orbit_tip"));
+            response.response.backing_on_hover_text(crate::i18n::tr("ui.3d_mouse_orbit_tip"));
         });
         ui_kit::row(ui, crate::i18n::tr("ui.3d_mouse_ghost_position"), |ui| {
             let (in_view, position) = (app.preferences.space_mouse_in_view, &mut app.preferences.space_mouse_ghost_position);
@@ -2860,8 +2861,8 @@ fn space_mouse_rows(app: &mut SolveApp, ui: &mut egui::Ui) {
             let saved = device.as_ref().is_some_and(|device| app.preferences.space_mouse_calibrations.contains_key(device));
             ui.add_enabled_ui(app.preferences.space_mouse_enabled && device.is_some(), |ui| {
                 if ui_kit::button(ui, app.tr("ui.3d_mouse_calibrate"), ui_kit::Button::Normal)
-                    .on_hover_text(app.tr("ui.3d_mouse_calibrate_tip"))
-                    .on_disabled_hover_text(app.tr(if app.space_mouse.device.is_none() {
+                    .backing_on_hover_text(app.tr("ui.3d_mouse_calibrate_tip"))
+                    .backing_on_disabled_hover_text(app.tr(if app.space_mouse.device.is_none() {
                         "ui.3d_mouse_calibrate_wait"
                     } else {
                         "ui.3d_mouse_calibrate_tip"
@@ -2893,7 +2894,7 @@ fn space_mouse_rows(app: &mut SolveApp, ui: &mut egui::Ui) {
             // Nothing confirmed yet (none found, or waiting for the first record): a hint to try, as a
             // tooltip here and, while a reader is waiting for the first record, as a line below.
             if device.is_none() && !not_allowed {
-                status_line.on_hover_text(app.tr("ui.3d_mouse_wiggle"));
+                status_line.backing_on_hover_text(app.tr("ui.3d_mouse_wiggle"));
             }
         });
         if app.space_mouse.device.is_none() {
@@ -2964,7 +2965,7 @@ fn space_mouse_rows(app: &mut SolveApp, ui: &mut egui::Ui) {
                             0.0..=solidcraft_space_mouse::MAX_DEAD_ZONE_SHARE,
                             ui_kit::Slider { step: Some(0.01), format: |v| format!("{:.0} %", v * 100.0), ..Default::default() },
                         )
-                        .on_hover_text(tip);
+                        .backing_on_hover_text(tip);
                     });
                 });
             }
@@ -3035,7 +3036,7 @@ fn space_mouse_rows(app: &mut SolveApp, ui: &mut egui::Ui) {
                                     }
                                 }
                             })
-                            .on_hover_text(if *off { &off_tip } else { &driven_by });
+                            .backing_on_hover_text(if *off { &off_tip } else { &driven_by });
                             if chosen != current {
                                 crate::space_mouse::reassign(source, axis, chosen);
                             }
@@ -9465,7 +9466,8 @@ mod ui_scale_regression_tests {
 /// View ▸ View angles and Preferences ▸ Graphics run the same command (#6032).
 pub(crate) fn view_angles_checkbox(app: &mut SolveApp, ui: &mut egui::Ui) {
     let mut enabled = app.preferences.show_view_angles;
-    let response = ui_kit::checkbox(ui, crate::i18n::tr("ui.view_angles"), &mut enabled).on_hover_text(crate::i18n::tr("ui.view_angles_help"));
+    let response =
+        ui_kit::checkbox(ui, crate::i18n::tr("ui.view_angles"), &mut enabled).backing_on_hover_text(crate::i18n::tr("ui.view_angles_help"));
     crate::scenario::publish_handle("view:view_angles", response.rect.center());
     if response.changed() {
         let _ = app.run("view.angle_readout", json!({"enabled": enabled}));

@@ -7,6 +7,7 @@ use super::agents::{self, AgentConfig, Kind, Mode, Protocol};
 use super::backend::TestError;
 use super::*;
 use crate::ui_kit;
+use crate::ui_kit::BackingTooltipExt as _;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum AddKind {
@@ -405,7 +406,7 @@ fn start_test(app: &SolveApp, e: &agents::Entry, key: Option<String>) -> Test {
 /// An endpoint's request timeout field: seconds, 30 s to an hour.
 fn timeout_field(ui: &mut egui::Ui, secs: &mut u64, handle: &str) -> bool {
     let r = ui_kit::number_field(ui, secs, agents::MIN_REQUEST_TIMEOUT_S..=agents::MAX_REQUEST_TIMEOUT_S, 5.0, " s")
-        .on_hover_text(tr("ui.ai_request_timeout_hint"));
+        .backing_on_hover_text(tr("ui.ai_request_timeout_hint"));
     crate::scenario::publish_target(handle, r.rect);
     r.changed()
 }
@@ -413,7 +414,7 @@ fn timeout_field(ui: &mut egui::Ui, secs: &mut u64, handle: &str) -> bool {
 /// The free-text reasoning effort field with its hover hint; true when the text changed.
 fn effort_field(ui: &mut egui::Ui, effort: &mut String) -> bool {
     ui_kit::cell_editor(ui, ui.id().with("ai_reasoning_effort"), effort, tr("ui.ai_reasoning_effort_field_hint"), false)
-        .on_hover_text(tr("ui.ai_reasoning_effort_hint"))
+        .backing_on_hover_text(tr("ui.ai_reasoning_effort_hint"))
         .changed()
 }
 
@@ -438,28 +439,28 @@ pub fn page(app: &mut SolveApp, ui: &mut egui::Ui) {
     ui_kit::settings_heading(ui, tr("prefs.assistant"), tr("ai.prefs.intro"));
     ui_kit::settings_section(ui, "assistant_availability", tr("ai.prefs.availability"), |ui| {
         let response =
-            ui_kit::checkbox(ui, tr("ui.ai_show_features"), &mut app.preferences.ai_features).on_hover_text(tr("ui.ai_show_features_note"));
+            ui_kit::checkbox(ui, tr("ui.ai_show_features"), &mut app.preferences.ai_features).backing_on_hover_text(tr("ui.ai_show_features_note"));
         crate::scenario::publish_handle("prefs:ai_features", response.rect.center());
         if !cfg!(target_arch = "wasm32") {
             if app.preferences.ai_features {
                 let response = ui_kit::checkbox(ui, tr("ui.ai_toolbar_button"), &mut app.preferences.ai_toolbar_button)
-                    .on_hover_text(tr("ui.ai_toolbar_button_note"));
+                    .backing_on_hover_text(tr("ui.ai_toolbar_button_note"));
                 crate::scenario::publish_handle("prefs:ai_toolbar_button", response.rect.center());
                 let response = ui_kit::checkbox(ui, tr("ai.prefs.connect_at_start"), &mut app.preferences.agent_connect_at_start)
-                    .on_hover_text(tr("ai.prefs.connect_at_start_note"));
+                    .backing_on_hover_text(tr("ai.prefs.connect_at_start_note"));
                 crate::scenario::publish_handle("prefs:agent_connect_at_start", response.rect.center());
                 let response = ui_kit::checkbox(ui, tr("ai.prefs.open_at_start"), &mut app.preferences.agent_chat_open_at_start)
-                    .on_hover_text(tr("ai.prefs.open_at_start_note"));
+                    .backing_on_hover_text(tr("ai.prefs.open_at_start_note"));
                 crate::scenario::publish_handle("prefs:agent_chat_open_at_start", response.rect.center());
             }
             let response = ui_kit::checkbox(ui, tr("ai.prefs.background_commands"), &mut app.preferences.agent_off_thread)
-                .on_hover_text(tr("ui.agent_off_thread_note"));
+                .backing_on_hover_text(tr("ui.agent_off_thread_note"));
             crate::scenario::publish_handle("prefs:agent_off_thread", response.rect.center());
             let response = ui_kit::checkbox(ui, tr("ai.prefs.allow_control"), &mut app.preferences.agent_control)
-                .on_hover_text(tr("ai.prefs.allow_control_note"));
+                .backing_on_hover_text(tr("ai.prefs.allow_control_note"));
             crate::scenario::publish_handle("prefs:agent_control", response.rect.center());
             let response = ui_kit::checkbox(ui, tr("ai.prefs.connect_apps"), &mut app.preferences.connect_ai_apps)
-                .on_hover_text(tr("ai.prefs.connect_apps_note"));
+                .backing_on_hover_text(tr("ai.prefs.connect_apps_note"));
             crate::scenario::publish_handle("prefs:connect_ai_apps", response.rect.center());
         }
         if cfg!(target_arch = "wasm32") {
@@ -512,7 +513,7 @@ fn permissions_section(app: &mut SolveApp, ui: &mut egui::Ui) {
         if app.preferences.ai_permissions == Mode::All {
             ui_kit::text(ui, tr("ui.ai_mode_all_warning"), ui_kit::Text::Report("permissions_warning", true));
         }
-        ui_kit::text(ui, tr("ai.prefs.permission_scope"), ui_kit::Text::Hint("scope")).on_hover_text(tr("ui.ai_modes_scope"));
+        ui_kit::text(ui, tr("ai.prefs.permission_scope"), ui_kit::Text::Hint("scope")).backing_on_hover_text(tr("ui.ai_modes_scope"));
         let remembered: Vec<_> = app
             .preferences
             .agent_always_allow
@@ -522,7 +523,8 @@ fn permissions_section(app: &mut SolveApp, ui: &mut egui::Ui) {
             .collect();
         ui_kit::section_count(ui, "always_allowed", tr("ui.ai_always_allowed"), false, Some(remembered.len()), |ui| {
             if remembered.is_empty() {
-                ui_kit::text(ui, tr("ai.prefs.no_saved_approvals"), ui_kit::Text::Hint("none")).on_hover_text(tr("ui.ai_always_allowed_none"));
+                ui_kit::text(ui, tr("ai.prefs.no_saved_approvals"), ui_kit::Text::Hint("none"))
+                    .backing_on_hover_text(tr("ui.ai_always_allowed_none"));
             }
             let names: std::collections::HashMap<_, _> = agents::entries(app).into_iter().map(|entry| (entry.id, entry.name)).collect();
             for (agent, tools) in remembered {
@@ -562,7 +564,7 @@ fn panel_section(app: &mut SolveApp, ui: &mut egui::Ui) {
                     p.agent_chat_turn_limit = if unlimited { 0 } else { gate::SEEDED_TURN_LIMIT };
                 }
                 if !unlimited {
-                    ui_kit::settings_number(ui, &mut p.agent_chat_turn_limit, 1..=200, 1.0).on_hover_text(tr("ai.prefs.turn_limit_hint"));
+                    ui_kit::settings_number(ui, &mut p.agent_chat_turn_limit, 1..=200, 1.0).backing_on_hover_text(tr("ai.prefs.turn_limit_hint"));
                 }
             });
         });
@@ -576,14 +578,14 @@ fn pointer_section(app: &mut SolveApp, ui: &mut egui::Ui) {
             ui,
             |ui| {
                 ui_kit::checkbox(ui, tr("ai.prefs.show_pointer"), &mut app.ui.agent_cursor.show)
-                    .on_hover_text(crate::i18n::tr_label("Show the pointer an AI agent moves (#35)"));
+                    .backing_on_hover_text(crate::i18n::tr_label("Show the pointer an AI agent moves (#35)"));
                 ui.add_enabled_ui(app.ui.agent_cursor.show, |ui| {
                     let speed_label_width = ui_kit::ContentWidth::label(ui, tr("ai.prefs.pointer_speed")) + crate::theme::Tokens::get().space_4;
                     ui_kit::settings_block(ui, tr("ai.prefs.pointer_speed"), speed_label_width, |ui| {
                         crate::agent_cursor::speed_slider(ui, &mut app.ui.agent_cursor.speed);
                     });
                     ui_kit::checkbox(ui, tr("ai.prefs.follow_camera"), &mut app.ui.agent_cursor.follow_camera)
-                        .on_hover_text(crate::i18n::tr_label("Follow the camera (Look At sketches)"));
+                        .backing_on_hover_text(crate::i18n::tr_label("Follow the camera (Look At sketches)"));
                 });
                 (app.ui.agent_cursor.show, app.ui.agent_cursor.speed.label(), app.ui.agent_cursor.follow_camera)
             },
@@ -639,13 +641,13 @@ fn agents_section(app: &mut SolveApp, ui: &mut egui::Ui) {
                             Kind::Api => "ui.ai_test_api_tip",
                             Kind::Anthropic => "ui.ai_test_anthropic_tip",
                         };
-                        if test_button.on_hover_text(tr(tip)).clicked() {
+                        if test_button.backing_on_hover_text(tr(tip)).clicked() {
                             test = Some(entry.clone());
                         }
                         if !entry.found {
                             let edit_button = ui_kit::button(ui, tr("ui.ai_edit"), ui_kit::Button::Small);
                             crate::scenario::publish_handle(&format!("prefs:ai_edit:{}", entry.id), edit_button.rect.center());
-                            if edit_button.on_hover_text(tr("ui.ai_edit_tip")).clicked() {
+                            if edit_button.backing_on_hover_text(tr("ui.ai_edit_tip")).clicked() {
                                 edit = Some(entry.id.clone());
                             }
                         }
@@ -767,7 +769,7 @@ fn agents_section(app: &mut SolveApp, ui: &mut egui::Ui) {
                     }
                     if app.preferences.agent_permissions.get(&entry.id) == Some(&Mode::All) {
                         ui_kit::text(ui, tr("ai.prefs.override_all_warning"), ui_kit::Text::Report("agent_permissions_warning", true))
-                            .on_hover_text(tr("ui.ai_mode_all_warning"));
+                            .backing_on_hover_text(tr("ui.ai_mode_all_warning"));
                     }
                     test_line(ui, &app.agent_chat.settings.tests.get(&entry.id));
                 });

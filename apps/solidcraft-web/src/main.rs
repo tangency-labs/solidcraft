@@ -162,6 +162,7 @@ mod web {
 
     use solidcraft_engine::Session;
     use solidcraft_engine::io::vfs;
+    use solidcraft_ui_egui::ui_kit::BackingTooltipExt as _;
     use solidcraft_ui_egui::{Services, SolveApp, ui_kit};
     use wasm_bindgen::JsCast as _;
 
@@ -492,7 +493,7 @@ mod web {
                             files::pick_from_disk(&self.files, Intent::Open);
                         }
                         if ui_kit::button(ui, "Insert from computer…", ui_kit::Button::Normal)
-                            .on_hover_text(solidcraft_ui_egui::i18n::tr("web.files.insert_drawings_hint"))
+                            .backing_on_hover_text(solidcraft_ui_egui::i18n::tr("web.files.insert_drawings_hint"))
                             .clicked()
                         {
                             files::pick_from_disk(&self.files, Intent::Insert);
@@ -546,7 +547,7 @@ mod web {
                                         let design = solidcraft_engine::io::is_design_path(&e.name);
                                         if !design
                                             && ui_kit::button(ui, "Insert", ui_kit::Button::Small)
-                                                .on_hover_text(solidcraft_ui_egui::i18n::tr("web.files.insert_stored_drawings_hint"))
+                                                .backing_on_hover_text(solidcraft_ui_egui::i18n::tr("web.files.insert_stored_drawings_hint"))
                                                 .clicked()
                                         {
                                             act = Some(("insert", e.name.clone()));
@@ -556,7 +557,7 @@ mod web {
                                             self.rename_focus = true;
                                         }
                                         if ui_kit::button(ui, "Save to computer…", ui_kit::Button::Small)
-                                            .on_hover_text("A copy in a file you choose; the stored design stays here")
+                                            .backing_on_hover_text("A copy in a file you choose; the stored design stays here")
                                             .clicked()
                                         {
                                             act = Some(("save_copy", e.name.clone()));

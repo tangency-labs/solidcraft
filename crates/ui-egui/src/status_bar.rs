@@ -11,6 +11,7 @@
 //! bottom (History, the navigation bar, toasts) sit above it, and it is one of the shell's
 //! covered rects.
 
+use crate::ui_kit::BackingTooltipExt as _;
 use egui::{Color32, FontId, Rect, Sense, pos2, vec2};
 
 use crate::SolveApp;
@@ -119,13 +120,8 @@ pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     let t = Tokens::get();
     let contents = contents(app);
     let host = Container::new(ui.ctx(), Surface::ApplicationBar);
-    let response = host
-        .edge("sc_status_bar", Edge::Bottom)
-        .exact_size(HEIGHT)
-        .show_separator_line(false)
-        .frame(host.edge_frame(t.toolbar))
-        .show(ui, |ui| paint(app, ui, &contents))
-        .response;
+    let panel = host.edge("sc_status_bar", Edge::Bottom).exact_size(HEIGHT).show_separator_line(false);
+    let response = host.show_edge(ui, panel, host.edge_frame(t.toolbar), |ui| paint(app, ui, &contents)).response;
     app.shell.status_bar = Some(response.rect);
     crate::scenario::publish_target("status:bar", response.rect);
 }
@@ -203,7 +199,7 @@ fn menu_button(app: &mut SolveApp, ui: &mut egui::Ui, right: f32, target: Target
     crate::ui_kit::dropdown_indicator(&painter, chevron_rect, t.text_dim);
     response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, label));
     crate::scenario::publish_target(handle, button);
-    if response.on_hover_text(tip).clicked() {
+    if response.backing_on_hover_text(tip).clicked() {
         crate::context_menu::toggle_for(app, button, button.right_top(), target);
     }
     button

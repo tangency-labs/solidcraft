@@ -1,5 +1,6 @@
 //! The timeline (bottom): features in order, the rollback marker, errors and warnings.
 
+use crate::ui_kit::BackingTooltipExt as _;
 use crate::ui_kit::{Container, Edge, Status, Surface};
 use egui::{Rect, Sense, UiBuilder, pos2, vec2};
 use serde_json::{Value, json};
@@ -805,7 +806,7 @@ fn folder_tile(app: &mut SolveApp, ui: &mut egui::Ui, p: &egui::Painter, x: f32,
             app.tree.collapsed.remove(&key);
         }
     }
-    resp.on_hover_text(format!("{} ({count})", group.name));
+    resp.backing_on_hover_text(format!("{} ({count})", group.name));
     x + 32.0
 }
 
@@ -875,7 +876,7 @@ fn timeline_contents(app: &mut SolveApp, ui: &mut egui::Ui, floating: bool) {
                 } else {
                     "Activate or pick a component in the browser to show only its features"
                 };
-                if resp.on_hover_text(tip).clicked() && (only.is_some() || show_all) {
+                if resp.backing_on_hover_text(tip).clicked() && (only.is_some() || show_all) {
                     ui.data_mut(|d| d.insert_temp(show_all_id, !show_all));
                 }
                 x = br.right() + 8.0;
@@ -1011,7 +1012,7 @@ fn timeline_contents(app: &mut SolveApp, ui: &mut egui::Ui, floating: bool) {
                     drag = Some(Drag::Feature(*id));
                 }
                 // The tip is written only while it shows (as `on_hover_text` would lay it out).
-                let resp = resp.on_hover_ui(|ui| {
+                let resp = resp.backing_on_hover_ui(|ui| {
                     let mut tip = status_text(name, ty, err.as_deref(), warn.as_deref());
                     // Greyed out says only "not shown": say why (#8100).
                     if rolled {
@@ -1106,7 +1107,7 @@ fn timeline_contents(app: &mut SolveApp, ui: &mut egui::Ui, floating: bool) {
                     ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
                 }
                 crate::ui_kit::history_marker(&p, mr, false, accent);
-                resp.on_hover_text(crate::i18n::tr("ui.history_marker_tip"));
+                resp.backing_on_hover_text(crate::i18n::tr("ui.history_marker_tip"));
             }
             let content_end = crate::dialogs_assembly::timeline_joints(app, ui, &p, end + 10.0, r);
             // The scroll range follows the drawn content (the buttons don't take layout space themselves).

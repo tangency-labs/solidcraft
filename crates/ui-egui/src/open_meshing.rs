@@ -171,7 +171,8 @@ pub(crate) fn show(app: &SolveApp, ctx: &egui::Context) {
         .fixed_pos(at)
         .interactable(false)
         .show(ctx, |ui| {
-            Container::popup_frame(ui.style()).fill(t.panel).show(ui, |ui| {
+            let frame = Container::popup_frame(ui.style()).fill(t.panel);
+            Container::show_backing(ui, frame, |ui| {
                 ui.horizontal(|ui| {
                     ui.spinner();
                     ui.label(egui::RichText::new(format!("Loading parts {done}/{total}")).color(t.text));

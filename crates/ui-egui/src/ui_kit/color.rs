@@ -1,6 +1,7 @@
 //! Document RGB and optional separate opacity editing. Interface paint uses tokens; gradients are colour data.
 use super::{layout::label, metrics::dimension};
 use crate::recent_colors::{MAX_RECENT_COLORS, recent_colors, remember_color};
+use crate::ui_kit::BackingTooltipExt as _;
 use crate::ui_kit::{Container, Surface};
 use crate::{i18n, scenario, theme::Tokens};
 use egui::{Color32, Response, Sense, Ui, ecolor::HsvaGamma, pos2, vec2};
@@ -96,7 +97,7 @@ fn color_field_inner(ui: &mut Ui, rgb: &mut [u8; 3], opacity: Option<&mut f64>, 
         response.mark_changed();
     }
     let response = response.on_hover_cursor(egui::CursorIcon::PointingHand);
-    if ui.style().explanation_tooltips { response.on_hover_text(i18n::tr("color.edit")) } else { response }
+    if ui.style().explanation_tooltips { response.backing_on_hover_text(i18n::tr("color.edit")) } else { response }
 }
 
 /// Popover body, also rendered independently by the gallery. Format is global, alpha is opaque.
@@ -139,7 +140,7 @@ fn color_popover_with_opacity(ui: &mut Ui, rgb: &mut [u8; 3], mut opacity: Optio
                 for (index, (key, name)) in [("color.gamma", "U8"), ("color.linear", "F"), ("color.hex_help", "Hex")].iter().enumerate() {
                     let rect =
                         egui::Rect::from_min_size(rect.min + vec2(index as f32 * rect.width() / 3.0, 0.0), vec2(rect.width() / 3.0, rect.height()));
-                    ui.interact(rect, ui.id().with(("format_tip", index)), Sense::hover()).on_hover_text(i18n::tr(key));
+                    ui.interact(rect, ui.id().with(("format_tip", index)), Sense::hover()).backing_on_hover_text(i18n::tr(key));
                     scenario::publish_handle(&format!("color:format:{name}"), rect.center());
                 }
             });
@@ -180,7 +181,7 @@ fn color_popover_with_opacity(ui: &mut Ui, rgb: &mut [u8; 3], mut opacity: Optio
                 ui.spacing_mut().item_spacing.y = t.space_3;
                 ui.add(egui::Label::new(egui::RichText::new(i18n::tr("color.hex")).size(t.font_small).color(t.form_dim)));
                 let response = super::cell_editor(ui, hex_id.with("input"), &mut hex.draft, i18n::tr("color.hex_hint"), false)
-                    .on_hover_text(i18n::tr("color.hex_help"));
+                    .backing_on_hover_text(i18n::tr("color.hex_help"));
                 publish("color:hex", &response);
                 if response.changed()
                     && let Some((value, alpha)) = parse_hex(&hex.draft)
@@ -255,7 +256,7 @@ fn color_popover_with_opacity(ui: &mut Ui, rgb: &mut [u8; 3], mut opacity: Optio
         marker(ui, pos2(square.left() + hsv.s * square.width(), square.bottom() - hsv.v * square.height()), t.space_6);
         response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Other, ui.is_enabled(), i18n::tr("color.saturation_value")));
         publish("color:sv", &response);
-        response.on_hover_text(i18n::tr("color.saturation_value"));
+        response.backing_on_hover_text(i18n::tr("color.saturation_value"));
         let (hue, response) = ui.allocate_exact_size(vec2(width, t.space_14), Sense::click_and_drag());
         if (response.clicked() || response.dragged())
             && let Some(pos) = response.interact_pointer_pos()
@@ -267,7 +268,7 @@ fn color_popover_with_opacity(ui: &mut Ui, rgb: &mut [u8; 3], mut opacity: Optio
         marker(ui, pos2(hue.left() + hsv.h * hue.width(), hue.center().y), t.space_8);
         response.widget_info(|| egui::WidgetInfo::slider(ui.is_enabled(), f64::from(hsv.h), i18n::tr("color.hue")));
         publish("color:hue", &response);
-        response.on_hover_text(i18n::tr("color.hue"));
+        response.backing_on_hover_text(i18n::tr("color.hue"));
         if graphical_edit {
             let c = Color32::from(hsv);
             *rgb = [c.r(), c.g(), c.b()];
@@ -282,7 +283,7 @@ fn color_popover_with_opacity(ui: &mut Ui, rgb: &mut [u8; 3], mut opacity: Optio
             egui::StrokeKind::Inside,
         );
         publish("color:current", &response);
-        response.on_hover_text(i18n::tr("color.selected"));
+        response.backing_on_hover_text(i18n::tr("color.selected"));
         if let Some(picked) = recent_row(ui, width) {
             *rgb = picked;
             picked_recent = true;
@@ -391,7 +392,7 @@ fn spin_channel(ui: &mut Ui, name: &str, tip: Option<&str>, value: &mut f64, spi
         ui.spacing_mut().item_spacing.y = t.space_3;
         let label = ui.add(egui::Label::new(egui::RichText::new(name).size(t.font_small).color(t.form_dim)));
         if let Some(tip) = tip {
-            label.on_hover_text(tip);
+            label.backing_on_hover_text(tip);
         }
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = t.space_2;
@@ -411,7 +412,7 @@ fn spin_channel(ui: &mut Ui, name: &str, tip: Option<&str>, value: &mut f64, spi
             });
             publish(&format!("color:channel:{name}"), &response);
             let response = match tip {
-                Some(tip) => response.on_hover_text(tip),
+                Some(tip) => response.backing_on_hover_text(tip),
                 None => response,
             };
             changed |= response.changed();
@@ -474,7 +475,7 @@ fn spin_buttons(ui: &mut Ui, key: &str, height: f32) -> i32 {
         } else {
             ui.ctx().data_mut(|d| d.remove::<f64>(repeat));
         }
-        response.on_hover_text(i18n::tr(label));
+        response.backing_on_hover_text(i18n::tr(label));
     }
     steps
 }
@@ -505,7 +506,7 @@ fn recent_row(ui: &mut Ui, width: f32) -> Option<[u8; 3]> {
         let (row, response) = ui.allocate_exact_size(vec2(width, side), Sense::hover());
         publish("color:recent", &response);
         if colors.is_empty() {
-            response.on_hover_text(i18n::tr("color.recent_help"));
+            response.backing_on_hover_text(i18n::tr("color.recent_help"));
         }
         for slot in 0..MAX_RECENT_COLORS {
             let rect = egui::Rect::from_min_size(row.min + vec2(slot as f32 * (side + gap), 0.0), vec2(side, side));
@@ -519,7 +520,7 @@ fn recent_row(ui: &mut Ui, width: f32) -> Option<[u8; 3]> {
             let hex = format!("#{r:02x}{g:02x}{b:02x}");
             response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &hex));
             publish(&format!("color:recent:{slot}"), &response);
-            let response = response.on_hover_cursor(egui::CursorIcon::PointingHand).on_hover_text(&hex);
+            let response = response.on_hover_cursor(egui::CursorIcon::PointingHand).backing_on_hover_text(&hex);
             if response.clicked() {
                 picked = Some([r, g, b]);
             }

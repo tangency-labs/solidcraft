@@ -498,7 +498,8 @@ pub fn paint(app: &SolveApp, ctx: &egui::Context) {
             .interactable(false)
             .fade_in(false)
             .show(ctx, |ui| {
-                Container::popup_frame(ui.style()).fill(t.overlay).show(ui, |ui| {
+                let frame = Container::popup_frame(ui.style()).fill(t.overlay);
+                Container::show_backing(ui, frame, |ui| {
                     ui.label(egui::RichText::new(crate::i18n::tr_label(label)).size(t.font_label).color(t.text));
                 });
             });

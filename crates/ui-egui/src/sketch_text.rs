@@ -2,6 +2,7 @@
 //! sketch text's outlines; OK runs `sketch.edit_text`. The canvas follows the fields as they
 //! change (live `sketch.edit_text`); the whole edit is one undo step and Cancel puts the text
 //! back. The Text tool places a text and opens this dialog on it, so a new text is typed here too.
+use crate::ui_kit::BackingTooltipExt as _;
 use std::sync::{Arc, OnceLock};
 
 use serde_json::{Value, json};
@@ -508,7 +509,7 @@ pub(crate) fn rows(ui: &mut egui::Ui, k: &mut Tx, inputs: &mut [SelInput], activ
     if ui.memory(|m| m.has_focus(id)) {
         enter |= ui.input_mut(|i| !i.modifiers.shift && i.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
     }
-    let response = ui_kit::multiline_text_field(ui, "Text", id, &mut k.text).on_hover_text(crate::i18n::tr("sketch_text.formula"));
+    let response = ui_kit::multiline_text_field(ui, "Text", id, &mut k.text).backing_on_hover_text(crate::i18n::tr("sketch_text.formula"));
     crate::scenario::publish_handle("dialog:Text", response.rect.center());
     if k.focus {
         response.request_focus();
@@ -550,7 +551,7 @@ pub(crate) fn rows(ui: &mut egui::Ui, k: &mut Tx, inputs: &mut [SelInput], activ
         let response = ui.add_enabled_ui(!on_path, |ui| ui_kit::value_pair(ui, "Position", [x, y], ["X", "Y"], None));
         enter |= response.inner;
         if on_path {
-            response.response.on_disabled_hover_text(crate::i18n::tr("sketch_text.on_path"));
+            response.response.backing_on_disabled_hover_text(crate::i18n::tr("sketch_text.on_path"));
         }
     }
     for (i, (label, value)) in LABELS.iter().skip(2).zip(rest).enumerate() {
@@ -558,7 +559,7 @@ pub(crate) fn rows(ui: &mut egui::Ui, k: &mut Tx, inputs: &mut [SelInput], activ
         let response = ui.add_enabled_ui(!(on_path && index == ANGLE), |ui| ui_kit::row(ui, label, |ui| ui_kit::field(ui, value)));
         enter |= response.inner;
         if on_path && index == ANGLE {
-            response.response.on_disabled_hover_text(crate::i18n::tr("sketch_text.on_path"));
+            response.response.backing_on_disabled_hover_text(crate::i18n::tr("sketch_text.on_path"));
         }
     }
     path_row(ui, k, inputs, active);
@@ -572,7 +573,7 @@ fn path_row(ui: &mut egui::Ui, k: &mut Tx, inputs: &mut [SelInput], active: &mut
         let on = k.style.path.is_some();
         let text = if on { crate::i18n::format("dialog.selected_count", &[("count", "1")]) } else { crate::i18n::tr("dialog.select").into() };
         let chip = ui_kit::selection_field(ui, &text, ui_kit::Selection { active: k.picking, filled: on })
-            .on_hover_text(crate::i18n::tr("sketch_text.path_hint"));
+            .backing_on_hover_text(crate::i18n::tr("sketch_text.path_hint"));
         let chip_rect = chip.rect;
         crate::scenario::publish_handle("dialog:Path", chip.rect.center());
         if chip.clicked() {

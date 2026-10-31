@@ -1,4 +1,5 @@
 //! Selection-following appearance editor. All mutations use the appearance registry.
+use crate::ui_kit::BackingTooltipExt as _;
 use crate::{SolveApp, dialogs_appearance, ui_kit};
 use serde_json::{Value, json};
 use solidcraft_engine::{
@@ -269,7 +270,7 @@ pub(super) fn footer(app: &mut SolveApp, ui: &mut egui::Ui) {
     ui.horizontal(|ui| {
         let enabled = !app.session.selection.is_empty();
         if ui_kit::icon_label_action(ui, app.tr("render.inspector_save_library"), Some("plus"), enabled, false)
-            .on_hover_text(app.tr_label("Export design library..."))
+            .backing_on_hover_text(app.tr_label("Export design library..."))
             .clicked()
         {
             app.start("library.export");

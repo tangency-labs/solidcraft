@@ -5,6 +5,7 @@
 //! ships with its help: `every_toolbar_command_has_help` fails otherwise.
 
 use crate::i18n;
+use crate::ui_kit::BackingTooltipExt as _;
 
 /// The commands that have help text. Each one needs a `help.<id>` message in the catalogs.
 pub const DOCUMENTED: &[&str] = &[
@@ -315,7 +316,7 @@ pub fn help(command: &str) -> Option<String> {
 /// with the help of `command` below it when there is one.
 pub fn tooltip(response: egui::Response, command: &str, tip: String) -> egui::Response {
     let help = help(command);
-    response.on_hover_ui(move |ui| {
+    response.backing_on_hover_ui(move |ui| {
         ui.set_max_width(300.0);
         ui.label(tip);
         if let Some(help) = help {
