@@ -4852,12 +4852,22 @@ fn hole_tools_and_prisms(
             if !(rc > r && half > 1e-3 && half < std::f64::consts::FRAC_PI_2) {
                 return Err(DocError::Invalid("the countersink must be wider than the hole".into()));
             }
-            // Cone from above the face to just inside the hole radius, then the hole.
-            let r_top = rc + top * half.tan();
+            // One revolved tool: the cone from just above the face to just inside the hole
+            // radius, and above it a cylinder of the countersink's own diameter up to the run-on
+            // height. A cone started at the run-on height is wider than the countersink above
+            // the face and notches a wall or step next to the hole (#5041). The cone is the
+            // profile's first segment, so its face keeps the name `csink:side:0`.
+            let lift = top / 20.0;
+            let r_rim = rc + lift * half.tan();
             let r_end = r * 0.9;
-            let len = (r_top - r_end) / half.tan();
-            let top_plane = plane.offset(top);
-            tools.push((crate::lineage::part_tool(kernel::extrude_tapered(&top_plane, &disc(r_top), len, -1.0, -half)?, "csink"), None));
+            let low = lift - (r_rim - r_end) / half.tan();
+            let up = -dir;
+            let rp = Plane::new(*position, up.any_perp(), up).ok_or_else(|| DocError::Invalid("hole axis".into()))?;
+            let pts = [Vec2::new(r_rim, lift), Vec2::new(r_end, low), Vec2::new(0.0, low), Vec2::new(0.0, top), Vec2::new(r_rim, top)];
+            let region = Region2 { outer: solidcraft_geom::Loop2::polygon(&pts), holes: vec![] };
+            for tool in kernel::revolve(&rp, &[region], Vec2::ZERO, Vec2::Y, std::f64::consts::TAU)? {
+                tools.push((crate::lineage::part_tool(tool, "csink"), None));
+            }
             tools.extend(bore(tip_angle.as_ref())?);
         }
     }
