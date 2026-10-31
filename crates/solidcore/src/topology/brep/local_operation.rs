@@ -152,6 +152,8 @@ pub fn local_operation(
         radius / 2.0,
         tolerance / 2.0,
     );
+    // (the geometry creator's constructor tolerance, half a degree under WR-666's opt-in)
+    executive.use_creator_tangency_tol(k);
     executive.set_local_surfaces(&all_faces, new_list);
     // the shell faces get copied without being offset: none
     executive.set_shell_faces(&[]);

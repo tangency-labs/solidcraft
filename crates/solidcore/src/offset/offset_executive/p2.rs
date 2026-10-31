@@ -252,6 +252,7 @@ pub fn offset_brep(
         && kernel.fixes.offset_splits_corner_vertices
         && brep_is_manifold_solid(original)?;
     let mut executive = configured_executive(original, options);
+    executive.use_creator_tangency_tol(kernel);
     let mut result = collapse_offset_status(executive.do_solid_offset(
         kernel,
         Some(original),
@@ -1793,6 +1794,7 @@ fn run_shell_offset(
     notifications: &mut OffsetNotifications<'_>,
 ) -> Result<Brep> {
     let mut executive = configured_shell_executive(original, options, faces);
+    executive.use_creator_tangency_tol(kernel);
     // Unlike offset_brep, shelling must not collapse ordinary inner statuses.
     executive.do_solid_offset(
         kernel,

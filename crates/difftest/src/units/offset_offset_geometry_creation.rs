@@ -1342,6 +1342,18 @@ impl OffsetBrep<H> for Two {
     fn edge_is_lamina(&self, edge: H) -> solidcore::Result<bool> {
         ed::is_lamina(self.brep_r(edge)?, eid(edge))
     }
+    fn edge_is_closed(&self, edge: H) -> solidcore::Result<bool> {
+        ed::is_closed(self.brep_r(edge)?, eid(edge))
+    }
+    fn vertex_edges(&self, vertex: H) -> solidcore::Result<Vec<H>> {
+        Ok(vx::edges(self.brep_r(vertex)?, vid(vertex), None)?
+            .into_iter()
+            .map(|e| hd(vertex.b, K_EDGE, e.index()))
+            .collect())
+    }
+    fn faceuse_shell(&self, fu: H) -> solidcore::Result<Option<H>> {
+        Ok(eu1::faceuse_shell(self.brep_r(fu)?, fuid(fu))?.map(|s| hd(fu.b, K_SHELL, s.index())))
+    }
     fn edge_is_seam_of_face_surface(
         &mut self,
         k: &Kernel,

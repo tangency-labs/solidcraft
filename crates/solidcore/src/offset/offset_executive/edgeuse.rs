@@ -912,6 +912,25 @@ impl OffsetBrep<Handle> for EdgeBrep<'_> {
             .collect())
     }
 
+    fn edge_is_closed(&self, e: Handle) -> Result<bool> {
+        let (arena, e) = e.edge()?;
+        edge::is_closed(self.brep(arena), e)
+    }
+
+    fn vertex_edges(&self, v: Handle) -> Result<Vec<Handle>> {
+        let (arena, v) = v.vertex()?;
+        Ok(vertex::edges(self.brep(arena), v, None)?
+            .into_iter()
+            .map(|e| Handle::topology(arena, EntityRef::Edge(e)))
+            .collect())
+    }
+
+    fn faceuse_shell(&self, fu: Handle) -> Result<Option<Handle>> {
+        let (arena, fu) = fu.faceuse()?;
+        Ok(eu::faceuse_shell(self.brep(arena), fu)?
+            .map(|s| Handle::topology(arena, EntityRef::Shell(s))))
+    }
+
     fn edge_is_lamina(&self, e: Handle) -> Result<bool> {
         let (arena, e) = e.edge()?;
         edge::is_lamina(self.brep(arena), e)
