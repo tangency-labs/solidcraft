@@ -43,6 +43,12 @@ pub static COMMANDS: &[CommandSpec] = &[
          taken wherever a face name is, and it holds while sizes change and flanges come and go)",
     ),
     CommandSpec::new("model.threads", "List Threads", model_threads).icon("inspect").noundo(),
+    CommandSpec::new("model.health", "Design Health", model_health).icon("inspect").noundo().params(
+        "→ revision (moves with every change to the design or the view), features, \
+         errors: [{feature, name, error}], warnings: [{feature, name, warning}], parameter_errors: {name: why}, \
+         undo: [the last 20 undo steps' labels, oldest first], undo_depth, redo_depth, rolled_back (timeline marker or null), \
+         dirty (changes not saved), path. Cheap: nothing is measured. The MCP server reads it around every tool call",
+    ),
     CommandSpec::new("material.assign", "Physical Material", physical_material)
         .at("SOLID", "MODIFY")
         .icon("material")
@@ -321,6 +327,31 @@ impl Session {
 fn revision(s: &mut Session, _p: &Value) -> Result<Value> {
     let revision = s.design_revision();
     Ok(json!({"document_id": s.document_id, "revision": revision}))
+}
+
+/// How many undo labels `model.health` reports.
+const HEALTH_UNDO: usize = 20;
+
+/// The design's state in brief: what fails or warns, and the history, so that a client can tell what changed between two calls (and who changed it).
+fn model_health(s: &mut Session, _p: &Value) -> Result<Value> {
+    let results = &s.model.results;
+    let errors: Vec<Value> = results.iter().filter_map(|r| r.error.as_ref().map(|e| json!({"feature": r.id, "name": r.name, "error": e}))).collect();
+    let warnings: Vec<Value> =
+        results.iter().filter_map(|r| r.warning.as_ref().map(|w| json!({"feature": r.id, "name": r.name, "warning": w}))).collect();
+    let undo: Vec<&str> = s.undo.iter().rev().take(HEALTH_UNDO).rev().map(|u| u.label.as_str()).collect();
+    Ok(json!({
+        "revision": s.revision,
+        "features": s.doc.features.len(),
+        "errors": errors,
+        "warnings": warnings,
+        "parameter_errors": s.model.param_errors,
+        "undo": undo,
+        "undo_depth": s.undo.len(),
+        "redo_depth": s.redo.len(),
+        "rolled_back": s.doc.marker,
+        "dirty": s.is_dirty(),
+        "path": s.path,
+    }))
 }
 
 fn inspect(s: &mut Session, p: &Value) -> Result<Value> {
@@ -829,3 +860,7 @@ fn colored_components(s: &mut Session, p: &Value) -> Result<Value> {
     }
     Ok(json!({"enabled": enabled}))
 }
+
+#[cfg(test)]
+#[path = "health_tests.rs"]
+mod health_tests;

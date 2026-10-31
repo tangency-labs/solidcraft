@@ -1313,6 +1313,9 @@ preference_settings! {
     agent_chat_window: Option<[f32; 4]> = None, PAGE_AI;
     /// Changes the agent may make for one message; 0 is no limit.
     agent_chat_turn_limit: u32 = crate::agent_chat::gate::DEFAULT_TURN_LIMIT, PAGE_AI;
+    /// Tool results tell the chat's agent what each call did to the design (`--design-feedback`,
+    /// docs/mcp.md). Off by default.
+    agent_design_feedback: bool = false, PAGE_AI;
 
     // ---- Sketch / selection modifier bindings (classic defaults; alternate mapping is opt-in) ----
     /// Modifier that suppresses sketch auto-snap while drawing or dragging a sketch point.

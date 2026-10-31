@@ -22,6 +22,28 @@ use super::process::{AgentProcess, FromAgent, ProcessHandle};
 
 /// Longest tool result handed back to the model.
 const MAX_TOOL_TEXT: usize = 20_000;
+
+/// The first words of the MCP server's design feedback block (crates/mcp/src/feedback.rs), which
+/// ends a tool result: what the call did to the design and what its features report.
+const FEEDBACK_PREFIX: &str = "Design feedback: ";
+
+/// `text` cut to about `max` bytes, keeping a trailing design feedback block whole: it comes last,
+/// and a plain cut would drop the part of the result the agent most needs.
+fn cut_keeping_feedback(text: &str, max: usize) -> String {
+    if text.len() <= max {
+        return text.to_string();
+    }
+    let (body, feedback) = match text.rfind(&format!("\n{FEEDBACK_PREFIX}")) {
+        Some(i) => text.split_at(i),
+        None if text.starts_with(FEEDBACK_PREFIX) => ("", text),
+        None => (text, ""),
+    };
+    let mut cut = max.saturating_sub(feedback.len()).max(max / 4).min(body.len());
+    while !body.is_char_boundary(cut) {
+        cut -= 1;
+    }
+    format!("{}\n…(cut){feedback}", &body[..cut])
+}
 /// Messages kept in the conversation (the system note stays).
 const MAX_HISTORY: usize = 240;
 /// Pictures of the view kept in the conversation. The whole history goes with every request
@@ -669,7 +691,7 @@ impl ApiBackend {
         // The same MCP server an ACP agent would get.
         let mcp = match &ctx.bridge {
             Some(b) => {
-                let argv = vec![b.cli.to_string_lossy().into_owned(), "mcp".into(), "--connect".into(), format!("127.0.0.1:{}", b.port)];
+                let argv: Vec<String> = std::iter::once(b.cli.to_string_lossy().into_owned()).chain(b.args()).collect();
                 Some(AgentProcess::spawn(&argv, &ctx.cwd, &["SOLIDCRAFT_CONTROL_TOKEN"], || {})?)
             }
             None => None,
@@ -945,7 +967,7 @@ impl Worker {
                         Err(e) => (e, true),
                     }
                 };
-                let shown: String = text.chars().take(2000).collect();
+                let shown = cut_keeping_feedback(&text, 2000);
                 self.emit(Event::Tool {
                     id: tool_id,
                     title: None,
@@ -1660,16 +1682,7 @@ fn tool_text(r: &Value) -> (String, bool) {
                 .collect()
         })
         .unwrap_or_default();
-    let mut text = parts.join("\n");
-    if text.len() > MAX_TOOL_TEXT {
-        let mut cut = MAX_TOOL_TEXT;
-        while !text.is_char_boundary(cut) {
-            cut -= 1;
-        }
-        text.truncate(cut);
-        text.push_str("\n…(cut)");
-    }
-    (text, failed)
+    (cut_keeping_feedback(&parts.join("\n"), MAX_TOOL_TEXT), failed)
 }
 
 /// What a tool call card says: the tool and, for `execute` and `batch`, the commands.
@@ -2890,5 +2903,19 @@ mod tests {
         drop(sent);
         assert!(test_anthropic_endpoint(&http, "http://10.0.0.2/anthropic", Some("k"), "m").is_err());
         assert!(test_anthropic_endpoint(&http, "https://api.anthropic.com", None, "").is_err());
+    }
+
+    #[test]
+    fn a_long_tool_result_keeps_its_design_feedback() {
+        let feedback = r#"Design feedback: {"failing":1,"new_errors":[{"feature":2,"name":"Fillet1","error":"the radius is too big"}]}"#;
+        let r = json!({"content": [{"type": "text", "text": "x".repeat(MAX_TOOL_TEXT * 2)}, {"type": "text", "text": feedback}]});
+        let (text, failed) = tool_text(&r);
+        assert!(!failed);
+        assert!(text.ends_with(feedback), "the block survives the cut: …{}", &text[text.len().saturating_sub(120)..]);
+        assert!(text.contains("…(cut)") && text.len() <= MAX_TOOL_TEXT + 20, "{}", text.len());
+        // The card the user sees keeps it too.
+        assert!(cut_keeping_feedback(&text, 2000).ends_with(feedback));
+        // Short results are left alone.
+        assert_eq!(cut_keeping_feedback("ok", 2000), "ok");
     }
 }

@@ -321,6 +321,11 @@ The agent reaches the open design only through SolidCraft's own tools (the
   a single undo step, named after your message. The conversation shows *N changes, one undo
   step* with **Undo these changes** while nothing else has happened since.
 - **Tool cards:** each tool call shows as a card with its state; click it to see what it returned.
+- **Design feedback:** with **Preferences → AI › Tell the agent what each call did to the design**
+  turned on (it is off by default; it takes effect when the agent next connects), a tool result can
+  end with a *Design feedback* block: what the call broke or mended, and changes you made in the
+  window between the agent's calls. The agent is told to act on it, and a long result is shortened
+  before the block, never through it ([MCP](mcp.md#design-feedback)).
 - **Formatted text:** the agent's answers show as Markdown: headings, lists, quotes, code blocks
   (with **Copy**), bold, italic, `code` and links (web links only; each link is a button that opens
   it in your browser). What you type, and the agent's thoughts, stay plain text.

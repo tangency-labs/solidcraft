@@ -370,6 +370,8 @@ fn panel_section(app: &mut SolveApp, ui: &mut egui::Ui) {
                 }
             });
         });
+        // Takes effect when the agent next connects.
+        ui_kit::checkbox(ui, tr("ui.agent_design_feedback"), &mut app.preferences.agent_design_feedback);
         ui_kit::text(ui, tr("ai.prefs.privacy_note"), ui_kit::Text::Hint("privacy"));
     });
 }

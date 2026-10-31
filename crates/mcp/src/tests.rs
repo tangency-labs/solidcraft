@@ -2494,3 +2494,54 @@ fn plain_headless_adds_no_notice() {
     let r = raw_tool(&mut s, "list_commands", json!({}));
     assert_eq!(r["result"]["content"].as_array().unwrap().len(), 1);
 }
+
+/// The `Design feedback:` block of a tool reply, parsed.
+fn feedback(r: &Value) -> Option<Value> {
+    r["result"]["content"]
+        .as_array()?
+        .iter()
+        .filter_map(|c| c["text"].as_str())
+        .find_map(|t| t.strip_prefix(crate::FEEDBACK_PREFIX))
+        .map(|t| serde_json::from_str(t).unwrap())
+}
+
+#[test]
+fn tool_results_tell_the_agent_what_changed_in_the_design() {
+    // Off by default: the replies, and the instructions, are as they always were.
+    let mut plain = server();
+    let init = call(
+        &mut plain,
+        1,
+        "initialize",
+        json!({"protocolVersion": PROTOCOL_VERSION, "capabilities": {}, "clientInfo": {"name": "t", "version": "1"}}),
+    );
+    assert!(!init["result"]["instructions"].as_str().unwrap_or_default().contains("Design feedback"), "{init}");
+    tool(&mut plain, "execute", json!({"command": "parameters.add", "params": {"name": "L", "expression": "20", "unit": "mm"}}));
+    assert_eq!(
+        feedback(&raw_tool(&mut plain, "execute", json!({"command": "solid.box", "params": {"length": "L", "width": 10, "height": 10}}))),
+        None
+    );
+
+    let mut s = server().with_design_feedback(true);
+    let init =
+        call(&mut s, 1, "initialize", json!({"protocolVersion": PROTOCOL_VERSION, "capabilities": {}, "clientInfo": {"name": "t", "version": "1"}}));
+    assert!(init["result"]["instructions"].as_str().unwrap_or_default().contains("Design feedback"), "{init}");
+    assert_eq!(feedback(&raw_tool(&mut s, "inspect_design", json!({"measure": false}))), None, "nothing to tell");
+    tool(&mut s, "execute", json!({"command": "parameters.add", "params": {"name": "L", "expression": "20", "unit": "mm"}}));
+    let r = raw_tool(&mut s, "execute", json!({"command": "solid.box", "params": {"length": "L", "width": 10, "height": 10}}));
+    let f = feedback(&r).unwrap();
+    assert!(f["features"].as_u64().is_some() && f.get("new_errors").is_none(), "{f}");
+    tool(&mut s, "execute", json!({"command": "solid.fillet", "params": {"edges": [[20, 5, 10]], "radius": 3}}));
+    // A parameter that breaks the fillet: the call says so.
+    let f = feedback(&raw_tool(&mut s, "set_parameter", json!({"name": "L", "value": "2"}))).unwrap();
+    assert!(f["new_errors"][0]["name"].as_str().is_some_and(|n| n.starts_with("Fillet")), "{f}");
+    assert_eq!(f["failing"], 1, "{f}");
+    let f = feedback(&raw_tool(&mut s, "set_parameter", json!({"name": "L", "value": "20"}))).unwrap();
+    assert!(f["fixed"][0].as_str().is_some_and(|n| n.starts_with("Fillet")), "{f}");
+    // Someone at the app adds a cylinder between two of the agent's calls.
+    s.backend().call("engine.execute", json!({"command": "solid.cylinder", "params": {"radius": 2, "height": 5, "base": [50, 0, 0]}})).unwrap();
+    let f = feedback(&raw_tool(&mut s, "inspect_design", json!({"measure": false}))).unwrap();
+    assert_eq!(f["changed_since_your_last_call"]["done"], json!(["Cylinder"]), "{f}");
+    assert!(f.get("features").is_none(), "inspecting changed nothing: {f}");
+    assert_eq!(feedback(&raw_tool(&mut s, "inspect_design", json!({"measure": false}))), None, "told once");
+}

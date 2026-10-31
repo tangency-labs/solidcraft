@@ -386,6 +386,28 @@ To look closely at one part of a large model, such as a STEP assembly, work in a
 6. Cut a section with `inspect.section`, e.g. `{"plane": {"origin": [50, 30, 0], "normal": [0, 1, 0]}}` or `{"plane": "XY", "at": 5}`.
 7. Take the picture with `screenshot`: a `camera` whose `target` is the centre of the region and whose eye is on the cut side, `source: "model"`, `grid: false` if the region straddles Z 0 (the ground grid would cut through it), and `path`, `width` and `height` as needed. An orthographic picture is 0.8 × `distance` high, so a `distance` of about 1.5 times the region's size frames it. Look at the image, adjust `yaw`, `pitch` and `distance`, and shoot again. Headless, the picture is always a render of the model; bridged to the app, `source: "model"` asks for that render instead of the app's window.
 
+## Design feedback
+
+Off by default: start the server with `solidcraft-cli mcp --design-feedback` (the in-app agent
+chat passes it when **Preferences → AI** has design feedback turned on), and the server
+instructions then describe the block too. Without it, results and instructions are as before.
+
+The server reads `model.health` (the design's failing features, warnings, parameter errors and
+undo history, in brief) before and after every tool call. When there is something to tell, the
+call's result ends with one more text block, `Design feedback: {…}`:
+
+- `features` and, when any fail, `failing`: after a call that changed the design.
+- `new_errors` (`[{feature, name, error}]`), `fixed` (names), `new_warnings`,
+  `parameter_errors`: what the call broke, mended or raised.
+- `changed_since_your_last_call`: the design changed between the agent's calls, at the app (the
+  person modelling alongside) or by another client: `done` (the new undo steps' labels),
+  `undone`, `redone`, `opened` (another design), and what broke or mended meanwhile. The agent
+  should inspect the design before relying on what it knew.
+- `failing_features`: on the first call, the features already failing.
+
+A call that changes nothing has no block. Bridged to an app that predates `model.health`, results
+come without it. In code, `Server::with_design_feedback(true)` turns it on.
+
 ## Compact replies
 
 `execute` and `batch` default to `verbose: true`, preserving the full command results.

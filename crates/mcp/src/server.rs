@@ -9,6 +9,7 @@ use solidcraft_engine::MAX_LINE;
 use solidcraft_engine::io::vfs::{self, PathScope};
 
 use crate::backend::Backend;
+use crate::feedback::Feedback;
 use crate::tools::{call_tool, check_arguments, tool_definitions};
 
 /// The newest protocol revision we speak; offered when the client asks for one we don't know.
@@ -37,10 +38,16 @@ edge], radius}`, `solid.chamfer`, patterns, mirror, primitives). Use `batch` for
 `body_topology` to find edge points, `set_parameter` to drive the design and `screenshot` to look at it. A call whose error \
 starts `still running:` was not cancelled: don't send it again; `pending` waits for its result.";
 
+/// Added to the instructions when the server sends design feedback.
+const FEEDBACK_INSTRUCTIONS: &str = " A result may end with a \"Design feedback:\" block: \
+features the call broke (new_errors) or mended (fixed), new warnings, and changed_since_your_last_call when the person \
+at the app (or another client) changed the design between your calls; act on it before going on.";
+
 pub struct Server {
     backend: Box<dyn Backend>,
     initialized: bool,
     scope: Option<PathScope>,
+    feedback: Feedback,
 }
 
 /// The design files a call opens or saves (#7181): `open` and `save`, and the commands they run
@@ -75,12 +82,19 @@ fn error(id: Value, code: i64, message: impl Into<String>) -> Value {
 
 impl Server {
     pub fn new(backend: Box<dyn Backend>) -> Self {
-        Self { backend, initialized: false, scope: None }
+        Self { backend, initialized: false, scope: None, feedback: Feedback::default() }
     }
     /// Confine the files tool calls may reach to `scope` (`None`: anywhere). `solidcraft-cli mcp`
     /// always sets one unless started with `--allow-any-path` (docs/mcp.md).
     pub fn with_path_scope(mut self, scope: Option<PathScope>) -> Self {
         self.scope = scope;
+        self
+    }
+    /// End tool results with the design feedback block (see `feedback.rs` and docs/mcp.md). Off by
+    /// default, so agents that don't expect it see the replies they always did;
+    /// `solidcraft-cli mcp --design-feedback` and the agent chat's preference turn it on.
+    pub fn with_design_feedback(mut self, on: bool) -> Self {
+        self.feedback.on = on;
         self
     }
     pub fn backend(&mut self) -> &mut dyn Backend {
@@ -196,7 +210,11 @@ impl Server {
                     "protocolVersion": version,
                     "capabilities": {"tools": {"listChanged": false}, "resources": {"listChanged": false}},
                     "serverInfo": {"name": "solidcraft", "title": "SolidCraft", "version": env!("CARGO_PKG_VERSION")},
-                    "instructions": format!("{INSTRUCTIONS} Backend: {}.", self.backend.describe()),
+                    "instructions": format!(
+                        "{INSTRUCTIONS}{} Backend: {}.",
+                        if self.feedback.on { FEEDBACK_INSTRUCTIONS } else { "" },
+                        self.backend.describe()
+                    ),
                 }))
             }
             "ping" => Ok(json!({})),
@@ -214,7 +232,19 @@ impl Server {
                 self.scope = self.scope.take().map(|s| s.with_design(open.as_deref()));
                 let scope = self.scope.clone();
                 let backend = self.backend.as_mut();
-                let mut result = vfs::scoped(scope, || call_tool(backend, name, &args));
+                let feedback = &mut self.feedback;
+                // The backend's notice comes before the feedback block, which stays last.
+                let result = vfs::scoped(scope, || {
+                    feedback.around(backend, |b| {
+                        let mut result = call_tool(b, name, &args);
+                        if let Some(note) = b.notice()
+                            && let Some(content) = result.get_mut("content").and_then(Value::as_array_mut)
+                        {
+                            content.push(json!({"type": "text", "text": note}));
+                        }
+                        result
+                    })
+                });
                 // So does the folder of each design file the call opened or saved: the call reached
                 // it, so it was one of the agent's folders already. Only paths given in full: a
                 // running app resolves a relative one against its own working folder.
@@ -222,11 +252,6 @@ impl Server {
                     for file in design_files(name, &args).iter().filter(|f| std::path::Path::new(f).is_absolute()) {
                         self.scope = self.scope.take().map(|s| s.with_design_file(file));
                     }
-                }
-                if let Some(note) = backend.notice()
-                    && let Some(content) = result.get_mut("content").and_then(Value::as_array_mut)
-                {
-                    content.push(json!({"type": "text", "text": note}));
                 }
                 Ok(result)
             }
