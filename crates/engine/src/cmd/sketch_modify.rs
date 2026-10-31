@@ -8,7 +8,7 @@ use solidcraft_doc::ProfileSel;
 use solidcraft_geom::Vec2;
 use solidcraft_sketch::{ConstraintKind, Curve, CurveKind, Shape, Sketch, intersections, intersections_within};
 
-use super::sketch::{add_c, edit, ids_of, line_or_axis_ref, solve_current};
+use super::sketch::{add_c, coincident_points, edit, ids_of, line_or_axis_ref, solve_current};
 use super::sketch_store;
 use super::{CommandSpec, in_sketch};
 use crate::params::{bad, bool_, expr, num, req_expr, req_vec2, str_, string_list, vec2, vec2_list};
@@ -1879,7 +1879,13 @@ fn chamfer_dist_angle(s: &mut Session, p: &Value) -> Result<Value> {
 /// Curves of the connected chain through `start` (joined where exactly two curves meet), in
 /// order, with whether each is walked from its stored start (`a`) to its end (`b`).
 fn chain(sk: &Sketch, start: usize, pool: &[usize]) -> (Vec<(usize, bool)>, bool) {
-    let ends = |c: usize| sk.curves.get(c).and_then(|c| c.kind.ends());
+    // Ends joined by a coincident constraint are one joint, as well as a shared point: lines drawn
+    // one by one meet at their own points, held together by constraints, and must chain the same
+    // (else each is offset on its own, to the left of the way it was drawn).
+    let groups = coincident_points(sk);
+    let root = |i: usize| groups.get(i).copied().unwrap_or(i);
+    let endpoints: Vec<_> = sk.curves.iter().map(|c| c.kind.ends().map(|(a, b)| (root(a), root(b)))).collect();
+    let ends = |c: usize| endpoints.get(c).copied().flatten();
     let Some((s0, s1)) = ends(start) else { return (vec![(start, true)], true) };
     let next = |from: usize, at: usize, used: &[usize]| -> Option<usize> {
         let users: Vec<usize> = pool.iter().copied().filter(|c| ends(*c).is_some_and(|(a, b)| a == at || b == at)).collect();
