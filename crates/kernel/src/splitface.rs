@@ -1622,6 +1622,30 @@ mod tests {
     }
 
     #[test]
+    fn replace_a_keyway_floor_onto_the_boss_wall() {
+        // A keyway cut into a boss: replacing its floor with the boss's outer wall fills it
+        // back, the wall's neighbours extending to the cylinder as NX does.
+        let boss = cylinder(Vec3::new(0.0, 0.0, 8.0), Vec3::Z, 12.0, 14.0).unwrap();
+        let cutter = box_solid(Vec3::new(-1.75, -20.0, 12.0), Vec3::new(1.75, -5.0, 22.0)).unwrap();
+        let body = crate::boolean(&boss, &cutter, crate::BoolOp::Cut).unwrap().unwrap();
+        let faces = body.faces(1e-3).unwrap();
+        let floor = faces
+            .iter()
+            .find(|f| f.plane_normal.is_some_and(|n| n.dot(-Vec3::Y) > 0.999) && (f.centroid.y + 5.0).abs() < 1e-6)
+            .expect("keyway floor");
+        let wall = (0..body.face_count())
+            .find(|i| matches!(crate::face_surface(&body, *i), Some(crate::FaceSurface::Cylinder { radius, .. }) if (radius - 12.0).abs() < 1e-6))
+            .expect("boss wall");
+        let result = crate::replace_faces(&body, &[floor.centroid], &SplitTool::Face { body: &body, face: wall }).unwrap();
+        assert_eq!(result.unmeshed_faces(), 0);
+        let volume = result.tessellate(1e-4).unwrap().measure().volume;
+        let want = std::f64::consts::PI * 144.0 * 14.0;
+        assert!((volume - want).abs() < 1.0, "{volume} vs {want}");
+        assert!(result.contains(Vec3::new(0.0, -11.0, 17.0)));
+        assert!(!result.contains(Vec3::new(0.0, -14.0, 17.0)));
+    }
+
+    #[test]
     fn replace_face_with_bspline_target() {
         // A parabolic cylinder z=9+x²/20, represented as a B-spline surface,
         // wider than the source cap so its trim does not supply the new boundary.

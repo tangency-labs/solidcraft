@@ -5,7 +5,7 @@
 
 use std::collections::BTreeSet;
 
-use truck_modeling::{self as mt, builder};
+use truck_modeling::builder;
 
 use crate::history::{Change, EdgeOrigin, EdgeProv, FaceOrigin, FaceProv, History};
 use crate::{Body, BoolOp, KernelError, Result, SplitTool};
@@ -15,16 +15,22 @@ fn fail(s: impl Into<String>) -> KernelError {
     KernelError::Invalid(format!("Replace Face: {}", s.into()))
 }
 
-/// The plane a target names, when it is a plane or a flat face.
-fn target_plane(tool: &SplitTool) -> Option<Plane> {
+/// The surface a target names: a plane, or a cylinder around the face.
+fn target_surface(tool: &SplitTool) -> Option<TargetSurface> {
     match tool {
-        SplitTool::Plane(p) => Some(*p),
-        SplitTool::Face { body, face } => match crate::face_surface(body, *face) {
-            Some(crate::FaceSurface::Plane { normal, point }) => Plane::from_normal(point, normal.vec()),
+        SplitTool::Plane(p) => Some(TargetSurface::Plane(*p)),
+        SplitTool::Face { body, face } => match crate::face_surface(body, *face)? {
+            crate::FaceSurface::Plane { normal, point } => Plane::from_normal(point, normal.vec()).map(TargetSurface::Plane),
+            crate::FaceSurface::Cylinder { origin, axis, radius } => Some(TargetSurface::Cylinder { origin, axis: axis.vec(), radius }),
             _ => None,
         },
         SplitTool::Curves { .. } => None,
     }
+}
+
+enum TargetSurface {
+    Plane(Plane),
+    Cylinder { origin: Vec3, axis: Vec3, radius: f64 },
 }
 
 /// Move one flat face to a parallel plane too far for the offset path (a face beside it would
@@ -49,6 +55,47 @@ fn extend_to_plane(body: &Body, chosen: &BTreeSet<usize>, plane: &Plane) -> Resu
         return Ok(None);
     };
     Ok(Some(keep_body_origins(result, body)))
+}
+
+/// Whether one of the body's own faces lies on this cylinder: a wall beside the face being
+/// replaced, which the splitter cannot cut by (it meets its own surface).
+fn body_lies_on_cylinder(body: &Body, origin: Vec3, axis: Vec3, radius: f64) -> bool {
+    let tol = body.size() * 1e-6 + 1e-9;
+    (0..body.face_count()).any(|i| match crate::face_surface(body, i) {
+        Some(crate::FaceSurface::Cylinder { origin: o, axis: a, radius: r }) => {
+            let w = o - origin;
+            (r - radius).abs() <= tol && a.vec().dot(axis).abs() > 1.0 - 1e-9 && w.dot(axis).abs() <= tol && (w - axis * w.dot(axis)).len() <= tol
+        }
+        _ => false,
+    })
+}
+
+/// A flat face replaced by a cylinder around it (a keyway's floor back onto the boss's outer
+/// wall): sweep the face past the cylinder, keep the part the cylinder bounds, and join it (or
+/// cut it when that part is inside the body). The boolean extends and trims the neighbours as
+/// NX's Replace Face does, without a new surface-intersection routine.
+fn extend_to_cylinder(body: &Body, chosen: &BTreeSet<usize>, origin: Vec3, axis: Vec3, radius: f64) -> Result<Option<Body>> {
+    let only: Vec<usize> = chosen.iter().copied().collect();
+    let [index] = only.as_slice() else { return Ok(None) };
+    let Some(crate::FaceSurface::Plane { normal, .. }) = crate::face_surface(body, *index) else { return Ok(None) };
+    let axis = axis.normalized().ok_or_else(|| fail("the target cylinder has no axis"))?;
+    let size = body.size().max(1.0);
+    let tall = crate::cylinder(origin - axis * (2.0 * size), axis, radius, 4.0 * size)?;
+    let face = body.solid.face_iter().nth(*index).cloned().ok_or_else(|| fail("the selected face is gone"))?;
+    // Toward the wall the face looks at; the other way when that side holds nothing.
+    for sign in [1.0, -1.0] {
+        let prism = crate::guard("replace face sweep", || Body::new(builder::tsweep(&face, crate::body::v3(normal.vec() * (2.0 * size) * sign))))?;
+        let Some(plug) = crate::guard("replace face sweep trim", || crate::boolean(&prism, &tall, BoolOp::Intersect))? else { continue };
+        let Ok(plug_measure) = crate::measure(&plug) else { continue };
+        if plug_measure.volume <= 1e-9 {
+            continue;
+        }
+        // The swept part is material the body lacks (a keyway to fill) or has (a cut).
+        let op = if body.contains(plug_measure.centroid) { BoolOp::Cut } else { BoolOp::Union };
+        let Some(result) = crate::guard("replace face sweep boolean", || crate::boolean(body, &plug, op))? else { continue };
+        return Ok(Some(keep_body_origins(result, body)));
+    }
+    Ok(None)
 }
 
 /// `result`'s history over `[body, tool]` as one over `[body]`: the body's faces keep their
@@ -175,6 +222,24 @@ pub fn replace_faces(body: &Body, at: &[Vec3], tool: &SplitTool) -> Result<Body>
         Ok(None) => {}
         Err(e) => merge_failure = Some(e.to_string()),
     }
+    let sweep = |tool: &SplitTool| -> Result<Option<Body>> {
+        if chosen.len() != 1 {
+            return Ok(None);
+        }
+        match target_surface(tool) {
+            Some(TargetSurface::Plane(plane)) => extend_to_plane(body, &chosen, &plane),
+            Some(TargetSurface::Cylinder { origin, axis, radius }) => extend_to_cylinder(body, &chosen, origin, axis, radius),
+            None => Ok(None),
+        }
+    };
+    // A cylinder the body already sits on (a wall beside the face) cannot be split by: the
+    // splitter meets its own surface. Meet it by sweeping the face onto it instead.
+    if let Some(TargetSurface::Cylinder { origin, axis, radius }) = target_surface(tool)
+        && body_lies_on_cylinder(body, origin, axis, radius)
+        && let Some(result) = sweep(tool)?
+    {
+        return Ok(result);
+    }
     let counts = crate::record::counts(&[body]);
     let attempt = |grown: &Body, compose: bool| -> Result<Option<Body>> {
         let pieces = crate::split_body(grown, tool)?;
@@ -226,14 +291,6 @@ pub fn replace_faces(body: &Body, at: &[Vec3], tool: &SplitTool) -> Result<Body>
     if !reach.is_finite() || reach > 1e6 {
         return Err(fail("target is too far from the source"));
     }
-    // A parallel target too far for the offset path: sweep the face there and let the boolean
-    // trim its neighbours, which is what a large move asks for.
-    let sweep = |tool: &SplitTool| -> Result<Option<Body>> {
-        match target_plane(tool) {
-            Some(plane) if chosen.len() == 1 => extend_to_plane(body, &chosen, &plane),
-            _ => Ok(None),
-        }
-    };
     let growth = reach.max(body.size() * 0.1);
     let grown = match crate::offset_faces(body, at, growth) {
         Ok(grown) => grown,
