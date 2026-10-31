@@ -278,10 +278,10 @@ fn measure(
     let form = match hole {
         HoleKind::Simple => Form::Simple,
         HoleKind::Drilled { tip_angle } => Form::Drilled { tip_angle: angle(tip_angle, "tip angle")? },
-        HoleKind::Counterbore { cb_diameter, cb_depth } => {
+        HoleKind::Counterbore { cb_diameter, cb_depth, tip_angle: _ } => {
             Form::Counterbore { diameter: length(cb_diameter, "counterbore diameter")?, depth: length(cb_depth, "counterbore depth")? }
         }
-        HoleKind::Countersink { cs_diameter, cs_angle } => {
+        HoleKind::Countersink { cs_diameter, cs_angle, tip_angle: _ } => {
             Form::Countersink { diameter: length(cs_diameter, "countersink diameter")?, angle: angle(cs_angle, "countersink angle")? }
         }
     };
