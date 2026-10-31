@@ -1617,8 +1617,17 @@ fn the_first_dimension_scales_shapes_joined_by_a_constraint() {
     run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [20, 10]}));
     run(&mut s, "sketch.rectangle.two_point", json!({"p0": [30, 10], "p1": [45, 20]}));
     run(&mut s, "sketch.constraint.coincident", json!({"a": "l1.start", "b": "l5.start"}));
+    let before = sketch(&s);
+    let f = 40.0 / pt(&s, "l1.end").dist(pt(&s, "l1.start"));
     let out = run(&mut s, "sketch.dimension", json!({"entities": ["l1"], "value": "40 mm", "scale_sketch": true}));
-    assert!(out.get("scaled").is_some(), "{out}");
+    assert!((out["scaled"].as_f64().unwrap() - f).abs() < 1e-6, "{out}");
+    // l1 measures its value, and every point of both rectangles, the joined one too, scaled
+    // about the origin by the same factor: the joined rectangle keeps its shape at its scaled place.
+    assert!((pt(&s, "l1.end").dist(pt(&s, "l1.start")) - 40.0).abs() < 1e-6);
+    let after = sketch(&s);
+    for (p, q) in before.points.iter().zip(&after.points) {
+        assert!(q.pos.dist(p.pos * f) < 1e-6, "{} {:?} -> {:?}", p.id, p.pos, q.pos);
+    }
 }
 
 /// The cursor fallback shares the held solves' frame budget; a scripted drag can finish later.
