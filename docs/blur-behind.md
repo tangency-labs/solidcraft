@@ -261,9 +261,10 @@ semantic fill/frame information and persistent IDs; asymmetric margins, stroke
 width, host clipping, final joined corners and late layer transforms are covered.
 They replace the old test of the vendored Window hook. They are authored only,
 not executed by this worker. Open-flag forwarding also covers initially hidden,
-closed and reopened windows, including stock close-request propagation. The
-existing seven GPU/radius/budget tests and zero marker/tint test remain; the
-broader `blur_` filter selects thirteen tests.
+closed and reopened windows, including stock close-request propagation via
+`ui.close_kind(egui::UiKind::Window)`. Plain `ui.close()` targets Window's nearer
+internal Collapsible, even when native title/collapse controls are disabled.
+The other blur tests remain; the broader `blur_` filter selects fourteen tests.
 
 Cargo.lock was restored as text to the egui 0.36.2 registry source and checksum
 from the matching local crates.io index entry; dependency versions are unchanged.

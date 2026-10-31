@@ -163,7 +163,9 @@ fn blur_stock_window_open_flag_preserves_closed_close_and_reopen_behavior() {
                     called = true;
                     ui.label("Window body");
                     if index == 4 {
-                        ui.close();
+                        // Window contains a closable Collapsible even with title/collapse
+                        // controls disabled. Target the Window, not that nearer ancestor.
+                        ui.close_kind(egui::UiKind::Window);
                     }
                 };
                 let shown = if mode == 0 {
@@ -174,12 +176,15 @@ fn blur_stock_window_open_flag_preserves_closed_close_and_reopen_behavior() {
                     let window = window.open(&mut keep);
                     if mode == 1 { window.show(&ctx, &mut body) } else { window.show_background(&ctx, Some(host_marker), &mut body) }
                 };
-                if index == 0 {
-                    assert!(shown.is_none(), "initially closed windows stay hidden");
+                if index == 0 || index == 7 {
+                    assert!(shown.is_none(), "initially closed and settled closed windows stay hidden");
+                }
+                if index == 4 {
+                    assert!(shown.as_ref().is_some_and(|shown| shown.response.should_close()), "the Window response carries the close request");
                 }
                 observation = format!("{:?}", (keep, shown.map(|shown| (shown.response.id, shown.response.rect, shown.inner))));
             });
-            if index == 0 {
+            if index == 0 || index == 7 {
                 assert!(!called);
             }
             if index == 4 {
