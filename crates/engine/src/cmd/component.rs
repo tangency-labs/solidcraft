@@ -128,7 +128,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .params("sketches: [ids or names], component; the sketches keep their own coordinates (component.move_features keeps them where they are in the world), except that a sketch on an exactly attached face stays where it is on the face"),
     CommandSpec::new(
         "component.move_sketches.to_parts",
-        "Move Sketches to the Part They're On",
+        "Move Sketches to Their Parts",
         crate::checked!("component.move_sketches.to_parts", sketches_to_parts::to_parts),
     )
     .icon("move")

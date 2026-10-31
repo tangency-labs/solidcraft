@@ -7,7 +7,7 @@ component has its own origin, bodies, sketches and timeline entries. The **activ
 faded.
 
 Sketches drawn on a part's face while the design was active belong to the design, so they
-collect in its Sketches folder. **Move Sketches to the Part They're On**
+collect in its Sketches folder. **Move Sketches to Their Parts**
 (`component.move_sketches.to_parts`), on a Sketches folder's menu and on a sketch's menu, moves
 the folder's sketches (or the selected ones) to the part whose face each is drawn on, as dragging
 it onto the part would. Each stays where it is on its face, and the whole move is one undo step.

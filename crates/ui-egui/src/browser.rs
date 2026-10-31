@@ -376,9 +376,9 @@ pub fn group_items(app: &SolveApp, id: u64, scope: &str) -> Vec<Item> {
     v
 }
 
-/// Move Sketches to the Part They're On (`component.move_sketches.to_parts`) for `sketches` (ids).
+/// Move Sketches to Their Parts (`component.move_sketches.to_parts`) for `sketches` (ids).
 pub(crate) fn sketches_to_parts_item(sketches: Vec<String>) -> Item {
-    Item::action("component.move_sketches.to_parts", "Move Sketches to the Part They're On", "move").with(json!({ "sketches": sketches }))
+    Item::action("component.move_sketches.to_parts", "Move Sketches to Their Parts", "move").with(json!({ "sketches": sketches }))
 }
 
 /// The menu of a folder row (Bodies, Sketches, Construction).
