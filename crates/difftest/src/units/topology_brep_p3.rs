@@ -146,10 +146,15 @@ enum OpIn {
     ApiCopyNull,
     /// Every face and edge tagged with its own long attribute (behaviour `behavior`, an
     /// `SmAttributeBehaviorType` value), then `SmApiBrepCopy`; also compares the
-    /// attributes of the copy's and the source's faces and edges (issue #1462).
+    /// attributes of the copy's and the source's faces and edges (issue #1462). With
+    /// `shared_naming` the Rust copy names its source by the copy's own naming
+    /// ([`key_of`], not [`source_key_of`]), the B-rep's own naming a caller reaches for
+    /// (the C++ side has no names).
     AttributedCopy {
         #[serde(default)]
         behavior: u8,
+        #[serde(default)]
+        shared_naming: bool,
     },
 }
 
@@ -225,7 +230,9 @@ fn op_args(op: &OpIn, c: &[usize; 10]) -> Result<Option<(Op, Vec<f64>)>, Harness
         OpIn::TurnNurbsOffset { offset } => (Op::TurnNurbsOffset, vec![*offset]),
         OpIn::Copy { analytics, api } => (Op::Copy, vec![flag(*analytics), flag(*api)]),
         OpIn::Merge { analytics } => (Op::Merge, vec![flag(*analytics)]),
-        OpIn::AttributedCopy { behavior } => (Op::AttributedCopy, vec![f64::from(*behavior)]),
+        OpIn::AttributedCopy { behavior, .. } => {
+            (Op::AttributedCopy, vec![f64::from(*behavior)])
+        }
         OpIn::CopyVertices { vertices } => {
             let mut v = vec![vertices.len() as f64];
             for &s in vertices {
@@ -1428,12 +1435,20 @@ fn run_rust_op_in(
             out.push(flag(c.editing_enabled()));
             put_counts(&mut out, &c)?;
         }
-        OpIn::AttributedCopy { behavior } => {
+        OpIn::AttributedCopy {
+            behavior,
+            shared_naming,
+        } => {
             let behavior = Behavior::from_code(i32::from(*behavior))
                 .map_err(|e| Fail::Harness(harness(format!("behavior: {e}"))))?;
             tag_brep(b, behavior)?;
             let src: &Brep = b;
-            let c = must(bp3::api_brep_copy(k, &mut env, Some(src), &source_key_of))?;
+            let source: &dyn Fn(EntityRef) -> ObjectRef = if *shared_naming {
+                &key_of
+            } else {
+                &source_key_of
+            };
+            let c = must(bp3::api_brep_copy(k, &mut env, Some(src), source))?;
             out.push(0.0);
             out.push(c.tolerance());
             out.push(flag(c.editing_enabled()));

@@ -74,7 +74,7 @@
 //!   `CreateExtendedSurface`, where upstream never returns
 //!   (`plan/upstream-issues.md` HANG-18).
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use crate::curve::curve::p2::is_curve_class;
 use crate::curve::curve::{p8::CurveIntersectOptions, Curve, CurveKind};
@@ -856,13 +856,23 @@ impl ArenaNotifyState {
 /// operation's `store` under that operation's identities `key_of` of the same objects.
 ///
 /// # Errors
-/// [`SolidError::InvalidInput`] for a list whose key names no object; a store that
-/// cannot grow.
+/// [`SolidError::InvalidInput`] for a list whose key names no object, or for two lists
+/// `key_of` gives one key (see [`distinct_listed_keys`]); a store that cannot grow.
 pub(crate) fn seed_brep_attributes(
     store: &mut AttributeStore,
     source: AttributeStore,
     key_of: &dyn Fn(EntityRef) -> ObjectRef,
 ) -> Result<()> {
+    let mut named = BTreeSet::new();
+    for key in source.attributed_objects() {
+        if let Some(e) = crate::topology::loopuse::entity_of_notify_key(key) {
+            if !named.insert(key_of(e).key) {
+                return Err(shared_attribute_key(
+                    "topology::brep::p2::seed_brep_attributes",
+                ));
+            }
+        }
+    }
     store.absorb(source, &|key| {
         crate::topology::loopuse::entity_of_notify_key(key)
             .map(|e| key_of(e).key)
@@ -903,7 +913,8 @@ pub(crate) fn restore_decoded_attributes(
 /// `store` itself is left as it is.
 ///
 /// # Errors
-/// None in practice.
+/// [`SolidError::InvalidInput`] when `key_of` gives two live objects the key of a list
+/// in `store` ([`distinct_listed_keys`]); `b` is then left as it is.
 pub(crate) fn restore_keyed_attributes(
     b: &mut Brep,
     store: &AttributeStore,
@@ -913,15 +924,49 @@ pub(crate) fn restore_keyed_attributes(
         b.set_attributes(AttributeStore::default());
         return Ok(());
     }
-    let names: BTreeMap<ObjectKey, EntityRef> = live_entities(b)
-        .into_iter()
-        .map(|e| (key_of(e).key, e))
-        .collect();
+    let names = distinct_listed_keys(
+        b,
+        key_of,
+        &|key| !store.attributes(key).is_empty(),
+        "topology::brep::p2::restore_keyed_attributes",
+    )?;
     restore_decoded_attributes(b, store.clone(), &|key| names.get(&key).copied())
 }
 
+/// The refusal of a naming that gives two objects one attribute key.
+const fn shared_attribute_key(operation: &'static str) -> SolidError {
+    SolidError::invalid_input(operation, "the naming gives two objects one attribute key")
+}
+
+/// (not upstream: upstream's attributes live on the objects.) `b`'s live objects by
+/// their key under `key_of` (the last one named for a key no list holds), refusing a
+/// naming that gives two of them the key of an attribute list (`listed`): stores key
+/// by [`ObjectKey`] alone, so such a list would silently pass to one of them and the
+/// other would lose its own. Arena identities ([`brep_cache::arena_identity`], and so
+/// [`Brep::owner_identity`] under any scheme but [`crate::topology::NamingScheme::Notify`])
+/// are such a naming: a face, an edge and a vertex of one index share their key;
+/// [`crate::topology::loopuse::notify_ref`] is not.
+///
+/// # Errors
+/// [`SolidError::InvalidInput`] for such a key.
+pub(crate) fn distinct_listed_keys(
+    b: &Brep,
+    key_of: &dyn Fn(EntityRef) -> ObjectRef,
+    listed: &dyn Fn(ObjectKey) -> bool,
+    operation: &'static str,
+) -> Result<BTreeMap<ObjectKey, EntityRef>> {
+    let mut names = BTreeMap::new();
+    for e in live_entities(b) {
+        let key = key_of(e).key;
+        if names.insert(key, e).is_some() && listed(key) {
+            return Err(shared_attribute_key(operation));
+        }
+    }
+    Ok(names)
+}
+
 /// Every live object of `b` that can carry attributes (all but the B-rep itself).
-fn live_entities(b: &Brep) -> Vec<EntityRef> {
+pub(crate) fn live_entities(b: &Brep) -> Vec<EntityRef> {
     let mut all = Vec::new();
     all.extend(b.regions().iter().map(|(x, _)| EntityRef::Region(x)));
     all.extend(b.shells().iter().map(|(x, _)| EntityRef::Shell(x)));

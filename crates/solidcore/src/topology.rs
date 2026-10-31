@@ -1079,6 +1079,12 @@ impl Brep {
     /// geometry by it and [`check_brep`](crate::topology::brep::validation::check_brep)
     /// checks owners against it, so the two always agree (upstream's identity exists
     /// from the moment the entity does).
+    ///
+    /// It is a geometry-owner identity, unique only as a whole
+    /// [`ObjectRef`](crate::geom::object::ObjectRef) (type code and key): outside
+    /// [`NamingScheme::Notify`] a face, an edge and a vertex of one index share their key.
+    /// Never use it as an attribute or notification key (a `key_of` or `source_key`),
+    /// whose stores key by the key alone; use [`loopuse::notify_ref`].
     #[must_use]
     pub fn owner_identity(&self, entity: EntityRef) -> crate::geom::object::ObjectRef {
         owner_identity_of(self.naming, self.geometry_owner_key(entity), entity)
