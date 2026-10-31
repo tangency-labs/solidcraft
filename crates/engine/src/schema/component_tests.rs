@@ -83,3 +83,53 @@ fn replies_match_the_output_schema() {
     assert!(r2.get("param_warnings").is_some(), "{r2}");
     assert!(conforms(schema, schema, &r2), "{r2} doesn't match {schema}");
 }
+
+fn sketch_square(s: &mut Session) {
+    let run = |s: &mut Session, c: &str, p: Value| s.execute(c, &p).unwrap_or_else(|e| panic!("{c}: {e}"));
+    run(s, "sketch.rectangle.two_point", json!({"p0":[1,1],"p1":[3,3]}));
+    run(s, "sketch.finish", json!({}));
+}
+
+/// `component.move_sketches.to_parts` (#10218): sketches drawn on a part's face while the design
+/// was active go to that part and stay where they are on the face; the others stay and say why;
+/// it is one undo step.
+#[test]
+fn sketches_move_to_the_part_whose_face_they_are_on() {
+    let mut s = Session::default();
+    let run = |s: &mut Session, c: &str, p: Value| s.execute(c, &p).unwrap_or_else(|e| panic!("{c}: {e}"));
+    let part = run(&mut s, "component.create", json!({"name":"Part","parent":0,"grounded":false}));
+    let (component, occurrence) = (part["component"].as_u64().unwrap(), part["occurrence"].as_u64().unwrap());
+    run(&mut s, "solid.box", json!({"length":10,"width":10,"height":10,"body_name":"Base"}));
+    run(&mut s, "occurrence.move", json!({"occurrence":occurrence,"translate":[30,0,0]}));
+    run(&mut s, "component.activate", json!({"component":0}));
+    let world = s.world_state();
+    let base = world.body("Base").unwrap();
+    let top = base.body.faces(0.01).unwrap().into_iter().max_by(|a, b| a.centroid.z.total_cmp(&b.centroid.z)).unwrap();
+    let pick = json!({"body": base.name, "index": top.index, "face": [top.centroid.x, top.centroid.y, top.centroid.z], "path": [occurrence]});
+    let on_face = run(&mut s, "sketch.create", json!({"name":"OnFace","plane":pick,"project_edges":false}))["sketch"].as_u64().unwrap();
+    sketch_square(&mut s);
+    let on_xy = run(&mut s, "sketch.create", json!({"name":"OnXY","plane":"XY"}))["sketch"].as_u64().unwrap();
+    sketch_square(&mut s);
+    let world_plane = |s: &Session| s.world_state().sketch(on_face).unwrap().plane;
+    let before = world_plane(&s);
+    assert_eq!(s.doc.feature(on_face).unwrap().component, 0);
+    let doc_before = s.doc.to_json();
+
+    let out = run(&mut s, "component.move_sketches.to_parts", json!({}));
+    assert_eq!((out["moved"].as_u64(), out["stayed"].as_u64()), (Some(1), Some(1)), "{out}");
+    assert_eq!(out["sketches"][0]["part"], "Part");
+    assert_eq!(out["kept"][0]["name"], "OnXY");
+    assert_eq!(out["kept"][0]["reason"], "not on a face");
+    assert_eq!(s.doc.feature(on_face).unwrap().component, component);
+    assert_eq!(s.doc.feature(on_xy).unwrap().component, 0);
+    let solidcraft_doc::FeatureKind::Sketch { plane, .. } = &s.doc.feature(on_face).unwrap().kind else { panic!("not sketch") };
+    assert_eq!(solidcraft_doc::face_anchor::plane_face_anchor(plane).unwrap().author_path, vec![occurrence]);
+    assert!(s.model.result(on_face).unwrap().error.is_none());
+    let after = world_plane(&s);
+    assert!((after.origin - before.origin).len() < 1e-6 && after.normal().dot(before.normal()) > 1. - 1e-9, "{before:?} {after:?}");
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(s.doc.to_json(), doc_before, "one undo step");
+    run(&mut s, "component.move_sketches.to_parts", json!({}));
+    let again = run(&mut s, "component.move_sketches.to_parts", json!({"sketches":["OnFace"]}));
+    assert_eq!((again["moved"].as_u64(), again["kept"][0]["reason"].as_str()), (Some(0), Some("already in its part")));
+}
