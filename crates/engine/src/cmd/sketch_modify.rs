@@ -5,8 +5,8 @@ use std::f64::consts::{FRAC_PI_2, PI, TAU};
 
 use serde_json::{Value, json};
 use solidcraft_doc::ProfileSel;
-use solidcraft_geom::Vec2;
-use solidcraft_sketch::{ConstraintKind, Curve, CurveKind, Shape, Sketch, intersections, intersections_within};
+use solidcraft_geom::{Plane, Vec2};
+use solidcraft_sketch::{ConstraintKind, Curve, CurveKind, Shape, Sketch, Wire, WireSpace, intersections, intersections_within};
 
 use super::sketch::{add_c, edit, ids_of, line_or_axis_ref, solve_current};
 use super::sketch_store;
@@ -92,7 +92,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .at("SKETCH", "MODIFY")
         .icon("sketch_move")
         .enabled(in_sketch)
-        .params(concat!("entities: [ids], translate?: [dx,dy], angle?: deg, center?: [x,y], copy?: bool, rotate_constraints?: bool (default true; false keeps constraints unchanged); a rotation turns the constraints tied to the sketch axes when all their geometry moves (horizontal and vertical relations and dimensions swap at odd quarter turns and stay at half turns, line angles turn with the line) and removes the horizontal and vertical ones that cannot hold at other angles; picking a text outline or linked point transforms its whole text source once, and copies remain editable text", created_doc!())),
+        .params(concat!("entities: [ids], translate?: [dx,dy], angle?: deg, center?: [x,y], copy?: bool, rotate_constraints?: bool (default true; false keeps constraints unchanged); a rotation turns the constraints tied to the sketch axes when all their geometry moves (horizontal and vertical relations and dimensions swap at odd quarter turns and stay at half turns, line angles turn with the line) and removes the horizontal and vertical ones that cannot hold at other angles; picking a text outline or linked point transforms its whole text source once, and copies remain editable text; copy also accepts drawn 3D curves, preserving exact arcs and height above the sketch plane", created_doc!())),
     CommandSpec::new("sketch.mirror", "Mirror", mirror)
         .at("SKETCH", "PATTERN")
         .icon("sketch_mirror")
@@ -2917,20 +2917,52 @@ fn release_origin_holds(sk: &mut Sketch, pts: &[usize]) {
     );
 }
 
+/// Separate drawn wires from planar entities. Their fit points use either the owner's local
+/// frame or the legacy world frame, so each must turn about the sketch plane in that frame.
+fn drawn_copy_selection(s: &Session, p: &Value, ids: Vec<String>) -> Result<(Vec<String>, Vec<(Wire, Plane)>)> {
+    let cmd = "sketch.move";
+    let id = sketch_store::target(s, p, cmd)?;
+    let sk = sketch_store::read(&s.doc, id)?;
+    let mut planar = Vec::new();
+    let mut drawn: Vec<(Wire, Plane)> = Vec::new();
+    for entity in ids {
+        let Some(wire) = sk.wires.iter().find(|w| w.id == entity) else {
+            planar.push(entity);
+            continue;
+        };
+        if wire.link.is_some() || wire.fit.is_empty() {
+            return Err(bad(cmd, "Copy supports drawn 3D curves; reference wires cannot be copied"));
+        }
+        if drawn.iter().any(|(w, _)| w.id == entity) {
+            continue;
+        }
+        let plane = match wire.space {
+            WireSpace::Component => s.model.state().sketch(id).map(|sk| sk.plane),
+            WireSpace::World => s.world_state().sketch(id).map(|sk| sk.plane),
+        }
+        .ok_or_else(|| bad(cmd, "sketch plane is unavailable"))?;
+        drawn.push((wire.clone(), plane));
+    }
+    Ok((planar, drawn))
+}
+
 fn move_copy(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.move";
     let t = if p.get("translate").is_some() { req_vec2(cmd, p, "translate")? } else { Vec2::ZERO };
     let ang = if p.get("angle").is_some() { num(p, "angle").ok_or_else(|| bad(cmd, "`angle` must be finite"))? } else { 0.0 }.to_radians();
     let copy = bool_(p, "copy").unwrap_or(false);
     let rotate_constraints = bool_(p, "rotate_constraints").unwrap_or(true);
+    let selection = string_list(cmd, p, "entities")?;
+    let (planar, drawn) = if copy { drawn_copy_selection(s, p, selection)? } else { (selection, Vec::new()) };
     let (out, info) = edit(s, p, cmd, false, |sk, doc| {
-        let (mut cs, mut ps) = entities(sk, p, cmd)?;
+        let (mut cs, mut ps) =
+            if planar.is_empty() && !drawn.is_empty() { (Vec::new(), Vec::new()) } else { entities(sk, &json!({"entities": planar}), cmd)? };
         let c = if p.get("center").is_some() { point_or_ref(sk, p, "center", cmd)? } else { Vec2::ZERO };
         let rot = rotate(c, ang);
         let f = move |q: Vec2| rot(q) + t;
         let mut links = Vec::new();
-        for entity in string_list(cmd, p, "entities")? {
-            if let Some(link) = super::sketch_create::text_link(sk, &entity)
+        for entity in &planar {
+            if let Some(link) = super::sketch_create::text_link(sk, entity)
                 && !links.iter().any(|old| old == link)
             {
                 links.push(link.to_owned());
@@ -2945,7 +2977,12 @@ fn move_copy(s: &mut Session, p: &Value) -> Result<Value> {
         if copy {
             let (mut m, _) = copy_through(sk, &cs, &ps, &f, false, &|_| false, 1.0)?;
             m.extend(text_curves);
-            return Ok(ids_of(sk, &m));
+            let mut ids = ids_of(sk, &m);
+            for (wire, plane) in &drawn {
+                let fit: Vec<_> = wire.fit.iter().map(|&q| plane.to_world(f(plane.to_local(q))) + plane.normal() * plane.height(q)).collect();
+                ids.push(if wire.arc.is_some() { sk.add_drawn_arc_in(&fit, wire.space)? } else { sk.add_drawn_wire_in(&fit, wire.space)? });
+            }
+            return Ok(ids);
         }
         transform_in_place(sk, &cs, &ps, &f, 1.0, cmd)?;
         if rotate_constraints {

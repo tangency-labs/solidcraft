@@ -3884,3 +3884,115 @@ fn offset_corners_trim_the_overlap_and_extend_the_gap() {
     let (_, _, _, end) = line_ends(&sk, &sk.offsets[0].outputs[0]);
     assert!(end.dist(Vec2::new(23.5, -3.0)) < 1e-4, "coincident corner extended to {end:?}");
 }
+
+#[test]
+fn move_copy_drawn_arc_keeps_exact_geometry_and_original() {
+    use solidcraft_geom::Vec3;
+    let mut s = new_sketch();
+    run(&mut s, "sketch.options", json!({"sketch_3d":true}));
+    let source = ids(&run(&mut s, "sketch.arc3d", json!({"start":[10,0,3],"through":[0,10,3],"end":[-10,0,3]}))["curves"])[0].clone();
+    let id = s.active_sketch.unwrap();
+    let original = s.doc.sketch(id).unwrap().wires[0].clone();
+    let before = s.doc.to_json();
+    let out = run(&mut s, "sketch.move", json!({"entities":[source],"translate":[1.6,0],"copy":true}));
+    let copied = ids(&out["curves"]);
+    assert_eq!(copied.len(), 1);
+    assert_ne!(copied[0], source);
+    let sk = s.doc.sketch(id).unwrap();
+    assert_eq!(sk.wires.len(), 2);
+    assert_eq!(sk.wires[0], original);
+    let wire = &sk.wires[1];
+    assert_eq!(wire.id, copied[0]);
+    assert_eq!(wire.space, original.space);
+    assert_eq!(wire.link, None);
+    let arc = wire.arc.unwrap();
+    assert!(arc.center.dist(Vec3::new(1.6, 0.0, 3.0)) < 1e-9);
+    assert!(close(arc.radius, 10.0));
+    assert!(close(solidcraft_sketch::arc_sweep(&arc), std::f64::consts::PI));
+    for (p, q) in wire.fit.iter().zip(&original.fit) {
+        assert!(p.dist(*q + Vec3::new(1.6, 0.0, 0.0)) < 1e-9);
+    }
+    let after = s.doc.to_json();
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(s.doc.to_json(), before);
+    run(&mut s, "edit.redo", json!({}));
+    assert_eq!(s.doc.to_json(), after);
+    let reopened = solidcraft_doc::format::read(&after).unwrap();
+    assert_eq!(reopened.sketch(id).unwrap().wires, s.doc.sketch(id).unwrap().wires);
+}
+
+#[test]
+fn move_copy_drawn_arc_turns_in_the_sketch_plane_without_flattening() {
+    use solidcraft_geom::Vec3;
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane":"YZ"}));
+    run(&mut s, "sketch.options", json!({"sketch_3d":true}));
+    let source = ids(&run(&mut s, "sketch.arc3d", json!({"start":[5,12,3],"through":[5,2,13],"end":[5,-8,3]}))["curves"])[0].clone();
+    run(&mut s, "sketch.move", json!({"entities":[source],"translate":[4,-1],"angle":90,"center":[2,3],"copy":true}));
+    let sk = s.doc.sketch(s.active_sketch.unwrap()).unwrap();
+    let copy = &sk.wires[1];
+    for (p, expected) in copy.fit.iter().zip([Vec3::new(5.0, 6.0, 12.0), Vec3::new(5.0, -4.0, 2.0), Vec3::new(5.0, 6.0, -8.0)]) {
+        assert!(p.dist(expected) < 1e-9, "{p:?} != {expected:?}");
+    }
+    let arc = copy.arc.unwrap();
+    assert!(arc.center.dist(Vec3::new(5.0, 6.0, 2.0)) < 1e-9);
+    assert!(arc.normal.dist(Vec3::X) < 1e-9);
+    assert!(close(arc.radius, 10.0));
+}
+
+#[test]
+fn move_copy_drawn_wires_mix_with_planar_curves_and_deduplicate() {
+    use solidcraft_geom::Vec3;
+    let mut s = new_sketch();
+    run(&mut s, "sketch.options", json!({"sketch_3d":true}));
+    let curve = ids(&run(&mut s, "sketch.line", json!({"points":[[1,2],[4,2]]}))["curves"])[0].clone();
+    let wire = ids(&run(&mut s, "sketch.spline3d", json!({"points":[[1,2,3],[4,6,8],[10,8,9]]}))["curves"])[0].clone();
+    let point = run(&mut s, "sketch.point3d", json!({"point":[2,3,4]}))["point"].as_str().unwrap().to_owned();
+    let before = sketch(&s);
+    let out = run(&mut s, "sketch.move", json!({"entities":[wire,curve,point,wire],"translate":[3,-2],"copy":true}));
+    assert_eq!(ids(&out["curves"]).len(), 3);
+    let after = sketch(&s);
+    assert_eq!(after.curves.len(), before.curves.len() + 1);
+    assert_eq!(after.wires.len(), before.wires.len() + 2);
+    for (original, copy) in before.wires.iter().zip(after.wires.iter().skip(2)) {
+        assert_eq!(after.wires.iter().find(|w| w.id == original.id).unwrap(), original);
+        assert_eq!(copy.space, original.space);
+        assert_eq!(copy.arc, None);
+        for (p, q) in copy.fit.iter().zip(&original.fit) {
+            assert!(p.dist(*q + Vec3::new(3.0, -2.0, 0.0)) < 1e-9);
+        }
+    }
+    let copied = &after.curves[1];
+    let CurveKind::Line { a, b } = copied.kind else { panic!("expected a copied line") };
+    assert!(after.point(a).unwrap().dist(Vec2::new(4.0, 0.0)) < 1e-9);
+    assert!(after.point(b).unwrap().dist(Vec2::new(7.0, 0.0)) < 1e-9);
+}
+
+#[test]
+fn move_copy_drawn_wire_failures_leave_the_design_and_history_unchanged() {
+    let mut s = new_sketch();
+    run(&mut s, "sketch.options", json!({"sketch_3d":true}));
+    let wire = ids(&run(&mut s, "sketch.arc3d", json!({"start":[10,0,0],"through":[0,10,0],"end":[-10,0,0]}))["curves"])[0].clone();
+    let original = s.doc.to_json();
+    let history = (s.undo.len(), s.redo.len());
+    for params in [
+        json!({"entities":[wire],"copy":true,"translate":[1e9,0]}),
+        json!({"entities":[wire,"missing"],"copy":true,"translate":[1,0]}),
+        json!({"entities":[],"copy":true}),
+    ] {
+        assert!(s.execute("sketch.move", &params).is_err());
+        assert_eq!(s.doc.to_json(), original);
+        assert_eq!((s.undo.len(), s.redo.len()), history);
+    }
+    // An unlinked reference wire has no editable fit points: Copy must not convert its
+    // samples to a fitted spline and silently change the curve's shape.
+    let id = s.active_sketch.unwrap();
+    s.doc_mut().sketch_mut(id).unwrap().wires[0].fit.clear();
+    s.doc_mut().sketch_mut(id).unwrap().wires[0].arc = None;
+    s.refresh();
+    let original = s.doc.to_json();
+    let error = s.execute("sketch.move", &json!({"entities":[wire],"copy":true})).unwrap_err().to_string();
+    assert!(error.contains("drawn 3D"), "{error}");
+    assert_eq!(s.doc.to_json(), original);
+    assert_eq!((s.undo.len(), s.redo.len()), history);
+}
