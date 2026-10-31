@@ -21,7 +21,8 @@ use solidcraft_geom::{Aabb3, Vec3};
 
 use solidcraft_sketch::linalg;
 
-use crate::{DocError, Document, IDENTITY, Mat, ModelState, Result, apply_point, apply_vector, mat_inverse, mat_mul};
+use crate::construct::ConstructGeom;
+use crate::{DocError, Document, IDENTITY, Mat, ModelState, PlaneRef, Result, apply_point, apply_vector, mat_inverse, mat_mul};
 
 #[path = "joints_handles.rs"]
 mod handles;
@@ -29,6 +30,42 @@ pub use handles::{MotionAxis, motion_axes};
 
 /// Joints the solver (and the URDF export) reads at most.
 pub const MAX_JOINTS: usize = 10_000;
+
+/// A reference to an axis for a joint origin (component coordinates): an origin axis (X, Y, Z),
+/// a named construction axis, or an axis from model geometry.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum AxisRef {
+    Target(AxisTarget),
+    /// Name shorthand: "X", "Y", "Z" for origin axes, or a construction axis feature name.
+    Name(String),
+}
+
+/// A structured reference to an axis.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum AxisTarget {
+    /// An origin axis: "X", "Y", or "Z".
+    Origin { axis: String },
+    /// A construction axis feature, by name.
+    Construction { name: String },
+    /// An axis from model or sketch geometry.
+    Geo(crate::construct::GeoRef),
+}
+
+impl AxisRef {
+    pub fn origin(axis: impl Into<String>) -> Self {
+        AxisRef::Target(AxisTarget::Origin { axis: axis.into() })
+    }
+
+    pub fn construction(name: impl Into<String>) -> Self {
+        AxisRef::Target(AxisTarget::Construction { name: name.into() })
+    }
+
+    pub fn geo(geo: crate::construct::GeoRef) -> Self {
+        AxisRef::Target(AxisTarget::Geo(geo))
+    }
+}
 
 /// Where a joint origin sits on a component's geometry (component coordinates).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -93,6 +130,26 @@ pub enum Snap {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         x: Option<Vec3>,
     },
+    /// A plane (origin plane, construction plane, or any plane definition): z along its normal,
+    /// x along the plane's x axis (or `x` if given). Origin at `pick` projected onto the plane,
+    /// or the plane's own origin when `pick` is omitted.
+    Plane {
+        plane: PlaneRef,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pick: Option<Vec3>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        x: Option<XRef>,
+    },
+    /// An axis (origin axis "X"|"Y"|"Z", construction axis, or model edge/axis): z along the
+    /// axis, x square to z (or `x` if given). Origin at `pick` projected onto the axis line,
+    /// or the axis origin when `pick` is None.
+    Axis {
+        axis: AxisRef,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pick: Option<Vec3>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        x: Option<XRef>,
+    },
 }
 
 /// The z of an edge origin that isn't its face's normal (component coordinates); its x follows
@@ -148,6 +205,9 @@ impl Snap {
         if let Snap::Edge { edge, face, corner, .. } = self {
             out.extend(edge.iter().chain(face.iter()).chain(corner.iter()));
         }
+        if let Snap::Plane { x: Some(XRef::Face { face, .. }), .. } | Snap::Axis { x: Some(XRef::Face { face, .. }), .. } = self {
+            out.push(face);
+        }
         out
     }
 
@@ -169,27 +229,35 @@ impl Snap {
                 }
             }
             Snap::Edge { edge, face, corner, .. } => out.extend(edge.iter_mut().chain(face.iter_mut()).chain(corner.iter_mut())),
+            Snap::Plane { x: Some(XRef::Face { face, .. }), .. } | Snap::Axis { x: Some(XRef::Face { face, .. }), .. } => {
+                out.push(face);
+            }
             _ => {}
         }
         out
     }
 
-    /// The direction a face or circle snap keeps as its frame's x (`XRef::Dir`), in the
+    /// The direction a face, circle, plane, or axis snap keeps as its frame's x (`XRef::Dir`), in the
     /// component's coordinates; `None` for a face reference or none.
     pub fn frame_x(&self) -> Option<Vec3> {
         match self {
-            Snap::FaceCenter { x: Some(XRef::Dir(d)), .. } | Snap::CircleCenter { x: Some(XRef::Dir(d)), .. } => Some(*d),
+            Snap::FaceCenter { x: Some(XRef::Dir(d)), .. }
+            | Snap::CircleCenter { x: Some(XRef::Dir(d)), .. }
+            | Snap::Plane { x: Some(XRef::Dir(d)), .. }
+            | Snap::Axis { x: Some(XRef::Dir(d)), .. } => Some(*d),
             _ => None,
         }
     }
 
-    /// A face or circle snap given no x reference keeps `x` (the frame's x as it is now): each
-    /// solve lays it onto the face, or square to the hole's axis, as the geometry is then, so a
-    /// part on a face that tilts keeps its turn about z. Without it (designs made before) x
-    /// follows from z alone, and turns through a right angle where z crosses 0.9 along the
-    /// component's X. A snap with a reference keeps it.
+    /// A face, circle, plane, or axis snap given no x reference keeps `x` (the frame's x as it is now): each
+    /// solve lays it onto the face, or square to the axis, as the geometry is then, so a
+    /// part that tilts keeps its turn about z.
     pub fn with_frame_x(mut self, x: Vec3) -> Snap {
-        if let Snap::FaceCenter { x: slot @ None, .. } | Snap::CircleCenter { x: slot @ None, .. } = &mut self {
+        if let Snap::FaceCenter { x: slot @ None, .. }
+        | Snap::CircleCenter { x: slot @ None, .. }
+        | Snap::Plane { x: slot @ None, .. }
+        | Snap::Axis { x: slot @ None, .. } = &mut self
+        {
             *slot = Some(XRef::Dir(x));
         }
         self
@@ -207,6 +275,8 @@ impl Snap {
             Snap::FaceCenter { pick, x, .. } | Snap::CircleCenter { pick, x, .. } => pick.is_finite() && x_ok(x),
             Snap::Point { point, z, x } => point.is_finite() && z.is_none_or(|z| z.is_finite()) && x.is_none_or(|x| x.is_finite()),
             Snap::Edge { pick, axis, .. } => pick.is_finite() && axis.is_none_or(|a| a.dir().is_finite()),
+            Snap::Plane { pick, x, .. } => pick.is_none_or(|p| p.is_finite()) && x_ok(x),
+            Snap::Axis { pick, x, .. } => pick.is_none_or(|p| p.is_finite()) && x_ok(x),
         }
     }
 }
@@ -571,12 +641,12 @@ fn size_of(doc: &Document, st: &ModelState, s: &Size) -> Result<f64> {
 /// (`MotionLink::lift`; empty for the others), worked out from the geometry and parameters it is
 /// defined by; `None` for a plain link.
 pub fn coupling_values(doc: &Document, st: &ModelState, l: &MotionLink) -> Option<Result<(f64, Vec<f64>)>> {
-    l.coupling.as_ref().map(|c| match c {
-        Coupling::Cam(c) => cam::table(doc, st, l, c).map(|t| (1.0, t)),
-        c => coupled(doc, st, l, c).map(|r| (r, Vec::new())),
-    })
+    match &l.coupling {
+        Some(Coupling::Cam(cam)) => Some(cam::table(doc, st, l, cam).map(|t| (1.0, t))),
+        Some(c) => Some(coupled(doc, st, l, c).map(|r| (r, Vec::new()))),
+        None => None,
+    }
 }
-
 fn coupled(doc: &Document, st: &ModelState, l: &MotionLink, c: &Coupling) -> Result<f64> {
     let angle = |id: u64, i: usize| doc.assembly.joints.iter().find(|j| j.id == id).is_some_and(|j| j.kind.is_angle(i));
     let (turn_a, turn_b) = (angle(l.a, l.ia), angle(l.b, l.ib));
@@ -670,18 +740,21 @@ impl Assembly {
             out.extend(x.values.iter_mut().flatten());
         }
         for l in &mut self.links {
-            for s in l.coupling.as_mut().map(Coupling::sizes_mut).unwrap_or_default() {
-                if let Size::Expr(e) = s {
-                    out.push(e);
+            if let Some(c) = &mut l.coupling {
+                for s in c.sizes_mut() {
+                    if let Size::Expr(ref mut e) = *s {
+                        out.push(e);
+                    }
                 }
             }
         }
         for trace in &mut self.traces {
             if let crate::motion::TraceMotion::Joint { from, to, .. } = &mut trace.motion {
-                for value in [from, to] {
-                    if let serde_json::Value::String(e) = value {
-                        out.push(e);
-                    }
+                if let serde_json::Value::String(ref mut e) = *from {
+                    out.push(e);
+                }
+                if let serde_json::Value::String(ref mut e) = *to {
+                    out.push(e);
                 }
             }
         }
@@ -823,6 +896,56 @@ fn nearest_plane(doc: &Document, st: &ModelState, o: &JointOrigin, pick: Vec3) -
     })
 }
 
+/// Resolve an axis reference to a line (origin, unit direction) in component coordinates.
+pub fn resolve_axis_ref(doc: &Document, st: &ModelState, component: u64, axis: &AxisRef) -> Result<(Vec3, Vec3)> {
+    match axis {
+        AxisRef::Target(AxisTarget::Origin { axis }) => {
+            let d = match axis.to_ascii_uppercase().as_str() {
+                "X" => Vec3::X,
+                "Y" => Vec3::Y,
+                "Z" => Vec3::Z,
+                _ => return Err(DocError::Unknown(format!("axis `{axis}`"))),
+            };
+            Ok((Vec3::ZERO, d))
+        }
+        AxisRef::Name(axis) if matches!(axis.to_ascii_uppercase().as_str(), "X" | "Y" | "Z") => {
+            let d = match axis.to_ascii_uppercase().as_str() {
+                "X" => Vec3::X,
+                "Y" => Vec3::Y,
+                "Z" => Vec3::Z,
+                _ => unreachable!(),
+            };
+            Ok((Vec3::ZERO, d))
+        }
+        AxisRef::Target(AxisTarget::Construction { name }) | AxisRef::Name(name) => {
+            let mut match_comp = None;
+            let mut match_any = None;
+            for c in &st.construct {
+                if c.name == *name {
+                    if let ConstructGeom::Axis { origin, dir } = &c.geom {
+                        let feat_comp = doc.feature(c.feature).map(|f| f.component).unwrap_or(0);
+                        if feat_comp == component {
+                            match_comp = Some((*origin, *dir));
+                            break;
+                        }
+                        if match_any.is_none() {
+                            match_any = Some((*origin, *dir));
+                        }
+                    } else {
+                        return Err(DocError::Invalid(format!("construction `{name}` is not an axis")));
+                    }
+                }
+            }
+            match_comp.or(match_any).ok_or_else(|| DocError::Unknown(format!("construction axis `{name}`")))
+        }
+        AxisRef::Target(AxisTarget::Geo(geo)) => {
+            let (vals, _) = doc.param_values();
+            let ctx = crate::construct::Ctx { doc, vals: &vals, st, depth: 0 };
+            crate::construct::line(&ctx, geo)
+        }
+    }
+}
+
 /// Resolve a joint origin to a frame in its component's coordinates.
 pub fn resolve_origin(doc: &Document, st: &ModelState, o: &JointOrigin) -> Result<Mat> {
     let bad = || DocError::Invalid("joint origin: degenerate frame".into());
@@ -847,6 +970,59 @@ pub fn resolve_origin(doc: &Document, st: &ModelState, o: &JointOrigin) -> Resul
         Snap::CircleCenter { x, .. } => {
             let r = round_of(doc, st, o)?;
             frame(r.centre, r.z, face::x_axis(doc, st, component_of(doc, o.occurrence)?, x.as_ref(), r.centre)?).ok_or_else(bad)
+        }
+        Snap::Plane { plane, pick, x } => {
+            let comp = component_of(doc, o.occurrence)?;
+            let (vals, _) = doc.param_values();
+            let pl = doc
+                .resolve_plane_in(&vals, plane, 0, Some(st))
+                .or_else(|err| {
+                    if let PlaneRef::Origin { name } = plane {
+                        let mut match_comp = None;
+                        let mut match_any = None;
+                        for c in &st.construct {
+                            if c.name == *name {
+                                if let ConstructGeom::Plane(p) = &c.geom {
+                                    let feat_comp = doc.feature(c.feature).map(|f| f.component).unwrap_or(0);
+                                    if feat_comp == comp {
+                                        match_comp = Some(*p);
+                                        break;
+                                    }
+                                    if match_any.is_none() {
+                                        match_any = Some(*p);
+                                    }
+                                } else {
+                                    return Err(DocError::Invalid(format!("construction `{name}` is not a plane")));
+                                }
+                            }
+                        }
+                        match_comp.or(match_any).ok_or(err)
+                    } else {
+                        Err(err)
+                    }
+                })
+                .map_err(|e| DocError::Invalid(e.to_string()))?;
+            let n = pl.normal().normalized().ok_or_else(bad)?;
+            let origin = match pick {
+                Some(p) => *p - n * (*p - pl.origin).dot(n),
+                None => pl.origin,
+            };
+            let x_axis = match x {
+                Some(_) => face::x_axis(doc, st, comp, x.as_ref(), origin)?,
+                None => Some(pl.x),
+            };
+            frame(origin, n, x_axis).ok_or_else(bad)
+        }
+        Snap::Axis { axis, pick, x } => {
+            let comp = component_of(doc, o.occurrence)?;
+            let (line_origin, line_dir) = resolve_axis_ref(doc, st, comp, axis)?;
+            let z = line_dir.normalized().ok_or_else(bad)?;
+            let origin = match pick {
+                Some(p) => line_origin + z * (*p - line_origin).dot(z),
+                None => line_origin,
+            };
+            let x_axis = face::x_axis(doc, st, comp, x.as_ref(), origin)?;
+            frame(origin, z, x_axis).ok_or_else(bad)
         }
     }
 }
@@ -2472,5 +2648,58 @@ mod tests {
         let values: Vec<_> = doc.assembly.joints.iter().map(|j| j.values.clone()).collect();
         assert_eq!(values, vec![vec![0.0], vec![0.75]]);
         assert!(!doc.apply_joint_solution(&Solution { world, ..Solution::default() }), "applied twice, nothing moves");
+    }
+
+    #[test]
+    fn resolve_plane_and_axis_origins() {
+        let doc = Document::default();
+        let mut st = ModelState::default();
+        st.construct.push(crate::construct::Construct {
+            feature: 10,
+            name: "Spine".into(),
+            geom: ConstructGeom::Axis { origin: Vec3::new(10.0, 5.0, 0.0), dir: Vec3::Z },
+        });
+        st.construct.push(crate::construct::Construct {
+            feature: 11,
+            name: "WorkPlane".into(),
+            geom: ConstructGeom::Plane(solidcraft_geom::Plane::new(Vec3::new(0.0, 0.0, 15.0), Vec3::X, Vec3::Y).unwrap()),
+        });
+
+        // 1. Origin plane XY
+        let o_xy = JointOrigin { occurrence: 0, snap: Snap::Plane { plane: PlaneRef::Origin { name: "XY".into() }, pick: None, x: None } };
+        let m = resolve_origin(&doc, &st, &o_xy).unwrap();
+        assert_eq!(apply_point(&m, Vec3::ZERO), Vec3::ZERO);
+        assert_eq!(apply_vector(&m, Vec3::Z), Vec3::Z);
+
+        // 2. Origin plane XY with pick projected
+        let o_xy_pick = JointOrigin {
+            occurrence: 0,
+            snap: Snap::Plane { plane: PlaneRef::Origin { name: "XY".into() }, pick: Some(Vec3::new(12.0, 34.0, 56.0)), x: None },
+        };
+        let m_pick = resolve_origin(&doc, &st, &o_xy_pick).unwrap();
+        assert_eq!(apply_point(&m_pick, Vec3::ZERO), Vec3::new(12.0, 34.0, 0.0));
+
+        // 3. Construction plane by name
+        let o_wp = JointOrigin { occurrence: 0, snap: Snap::Plane { plane: PlaneRef::Origin { name: "WorkPlane".into() }, pick: None, x: None } };
+        let m_wp = resolve_origin(&doc, &st, &o_wp).unwrap();
+        assert_eq!(apply_point(&m_wp, Vec3::ZERO), Vec3::new(0.0, 0.0, 15.0));
+        assert_eq!(apply_vector(&m_wp, Vec3::Z), Vec3::Z);
+
+        // 4. Origin axis Z
+        let o_z = JointOrigin { occurrence: 0, snap: Snap::Axis { axis: AxisRef::origin("Z"), pick: None, x: None } };
+        let m_z = resolve_origin(&doc, &st, &o_z).unwrap();
+        assert_eq!(apply_point(&m_z, Vec3::ZERO), Vec3::ZERO);
+        assert_eq!(apply_vector(&m_z, Vec3::Z), Vec3::Z);
+
+        // 5. Construction axis
+        let o_spine = JointOrigin { occurrence: 0, snap: Snap::Axis { axis: AxisRef::Name("Spine".into()), pick: None, x: None } };
+        let m_spine = resolve_origin(&doc, &st, &o_spine).unwrap();
+        assert_eq!(apply_point(&m_spine, Vec3::ZERO), Vec3::new(10.0, 5.0, 0.0));
+        assert_eq!(apply_vector(&m_spine, Vec3::Z), Vec3::Z);
+
+        // 6. Serde roundtrip
+        let json = serde_json::to_string(&o_xy).unwrap();
+        let decoded: JointOrigin = serde_json::from_str(&json).unwrap();
+        assert_eq!(o_xy, decoded);
     }
 }
