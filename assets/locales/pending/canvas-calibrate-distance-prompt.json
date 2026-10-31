@@ -1,0 +1,8 @@
+{
+  "en": { "browser.calibrate_type_distance": "Type the real distance from Point A to Point B, then press Calibrate." },
+  "ar": { "browser.calibrate_type_distance": "اكتب المسافة الحقيقية من النقطة A إلى النقطة B، ثم اضغط معايرة." },
+  "he": { "browser.calibrate_type_distance": "הקלידו את המרחק האמיתי מנקודה A לנקודה B, ולאחר מכן לחצו על כיול." },
+  "ja": { "browser.calibrate_type_distance": "点Aから点Bまでの実際の距離を入力し、「校正」を押してください。" },
+  "vi": { "browser.calibrate_type_distance": "Nhập khoảng cách thực từ điểm A đến điểm B, rồi nhấn Hiệu chuẩn." },
+  "zh": { "browser.calibrate_type_distance": "输入点 A 到点 B 的实际距离，然后按“校准”。" }
+}
