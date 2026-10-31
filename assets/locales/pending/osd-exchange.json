@@ -1,0 +1,38 @@
+{
+  "en": {
+    "osd.export": "Export OSD…",
+    "osd.export_hint": "Experimental triangle stream; vendor compatibility unverified"
+  },
+  "ja": {
+    "osd.export": "OSD をエクスポート…",
+    "osd.export_hint": "実験的な三角形ストリーム。ベンダーとの互換性は未検証"
+  },
+  "zh": {
+    "osd.export": "导出 OSD…",
+    "osd.export_hint": "实验性三角形流；尚未验证厂商兼容性"
+  },
+  "de": {
+    "osd.export": "OSD exportieren…",
+    "osd.export_hint": "Experimenteller Dreiecksdatenstrom; Herstellerkompatibilität ungeprüft"
+  },
+  "ko": {
+    "osd.export": "OSD 내보내기…",
+    "osd.export_hint": "실험적 삼각형 스트림; 공급업체 호환성 미검증"
+  },
+  "ru": {
+    "osd.export": "Экспорт OSD…",
+    "osd.export_hint": "Экспериментальный формат: совместимость со SprutCAM не проверена"
+  },
+  "ar": {
+    "osd.export": "تصدير OSD…",
+    "osd.export_hint": "تدفق مثلثات تجريبي؛ لم يتم التحقق من التوافق مع برنامج الشركة المصنّعة"
+  },
+  "he": {
+    "osd.export": "ייצוא OSD…",
+    "osd.export_hint": "זרם משולשים ניסיוני; התאימות לתוכנת היצרן לא נבדקה"
+  },
+  "vi": {
+    "osd.export": "Xuất OSD…",
+    "osd.export_hint": "Luồng tam giác thử nghiệm; chưa xác minh khả năng tương thích với phần mềm của nhà cung cấp"
+  }
+}
