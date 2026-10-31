@@ -851,6 +851,22 @@ channel and CLI scripts (`solidcraft-cli run`). A generic entry form built from 
 later work (section 13). Purpose: the smallest end-to-end transaction test and the code sample in
 `docs/plugin-author-guide.md`.
 
+### 8a. Example: tabs and slots for welded parts (`command-plugin`, not a pilot)
+
+Suggested in this PR: cut matching teeth into the edge of a sheet or plate so two parts key into each
+other before welding. It is the same shape as Pilot A, so the interface needs nothing new for it:
+
+- One entry `tabs`, params `{face, count, length, depth, side}`. `face` names the face to cut along (a
+  face name from `model.faces`, or a point on it, as other commands take); `count` 1-200, `length` and
+  `depth` 0.1-1000 mm; `side` is `positive` (teeth stand out) or `negative` (slots cut in). Two parts
+  mesh when one uses `positive` and the other `negative` with the same count, length and depth.
+- It reads the face's outline with `model.faces`, sketches the tooth row on that face, and joins or
+  cuts it with `solid.extrude`, all inside one `plugin.run` transaction, so one Undo removes it.
+- Like the gear, it is reached through `plugin.run` in 0.1. A `toolbar-entry` (9b) needs an entry
+  without parameters, so a button that asks for the face and the numbers waits for the entry form
+  (section 13). Where that button sits is the host's choice (9b): plugin surfaces go on the plugins'
+  panel, not into a core tab such as a weldments tab; #4933 is where that placement is settled.
+
 ## 9. Pilot B: review notes (`panel-plugin`)
 
 `examples/plugins/review-notes/` (same workspace as the gear). Team members open the same design
