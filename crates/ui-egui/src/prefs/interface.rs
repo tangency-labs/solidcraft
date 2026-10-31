@@ -166,6 +166,7 @@ pub(super) fn interface(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
                         }
                     });
                     setting::ribbon_menus_skip_pinned(app, ui);
+                    setting::sketch_chamfer_submenu(app, ui);
                     ui_kit::row(ui, app.tr("prefs.history"), |ui| {
                         let mut selected = if app.preferences.history_in_browser {
                             3
