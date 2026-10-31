@@ -513,6 +513,13 @@ pub struct FilletSolver {
     pub saved_offsets: [f64; 2],
     /// `m_dSurfaceExtensionFactor` (`0.5`).
     pub surface_extension_factor: f64,
+    /// Fork `m_dTraceReach` (WR-609, `fixes.fillet_trace_reaches_rails`): how far (3D)
+    /// the trace's base surface domains reach past their own at least, across the edge
+    /// (`0` = by the extension factor alone; [`FilletSolver::domain_extension`]).
+    pub trace_reach: f64,
+    /// Fork `m_abTraceAcross` (WR-609): `[surface][u, v]`, whether that parameter
+    /// direction runs across the edge (gets [`FilletSolver::trace_reach`]).
+    pub trace_across: [[bool; 2]; 2],
     /// `m_dConversionTol` (`SM_EFF_ZERO / 10`).
     pub conversion_tol: f64,
     /// `m_bReverseTrim`.
@@ -568,6 +575,8 @@ impl FilletSolver {
             lent_rollover: None,
             saved_offsets: [0.0, 0.0],
             surface_extension_factor: 0.5,
+            trace_reach: 0.0,
+            trace_across: [[true, true], [true, true]],
             conversion_tol: EFF_ZERO / 10.0,
             reverse_trim: false,
             extend_before: false,
@@ -1174,12 +1183,9 @@ impl FilletSolver {
         surface: &Surface,
         domain: &mut Extent2d,
     ) -> Result<()> {
-        // get length of extensions
-        let domain_size = domain.size();
-        let mut size = Vec2::new(
-            self.surface_extension_factor * domain_size.x,
-            self.surface_extension_factor * domain_size.y,
-        );
+        // get length of extensions (fork WR-609: and the trace's reach, which stays 0
+        // without `fixes.fillet_trace_reaches_rails`)
+        let mut size = self.domain_extension(k, Some(surface), &*domain)?;
 
         // Extend by a smaller amount if periodic.
         let periodic_extension_factor = 0.2;

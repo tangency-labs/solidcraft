@@ -1388,12 +1388,10 @@ impl ConstantDistanceFs {
             surface2_rail = Some(other_rail);
             let uv2 = self.surface2_guess(k, brep, other_rail, &mut surface1, uv, pnt)?;
 
-            let domain = self
-                .solver
-                .rail(other_rail)?
-                .base_surface()
-                .natural_uv_domain_with_nurb(k)?;
-            let size: Vec2 = self.solver.surface_extension_factor * domain.size();
+            let other_base = self.solver.rail(other_rail)?.base_surface();
+            let domain = other_base.natural_uv_domain_with_nurb(k)?;
+            // fork WR-609: and the trace's reach (0 without `fillet_trace_reaches_rails`)
+            let size: Vec2 = self.solver.domain_extension(k, Some(other_base), &domain)?;
 
             let n = guess_t.len();
             *interval_mut(intervals, n, OP)? =

@@ -104,6 +104,7 @@ mod original_merge;
 mod original_trim;
 mod piecewise;
 mod surface;
+mod trace_reach;
 pub use original_trim::{OriginalSurfaceDeletion, OriginalSurfaceSelection};
 
 const OP: &str = "blend::fillet_executive::session";
@@ -2582,6 +2583,22 @@ impl BrepCreationAccess<FilletObject> for SessionObjects<'_> {
             k,
             self.target,
         )
+    }
+
+    fn creation_extend_trace_to_its_rails(
+        &mut self,
+        k: &mut Kernel,
+        solver: FilletObject,
+    ) -> Result<()> {
+        let FilletObject::Solver(id) = solver else {
+            return Err(invalid("object is not a solver"));
+        };
+        let current = self
+            .solvers
+            .get_mut(id.0 as usize)
+            .and_then(Option::as_mut)
+            .ok_or_else(|| invalid("solver is not live in this session"))?;
+        trace_reach::extend_trace_to_its_rails(k, self.target, current)
     }
 }
 

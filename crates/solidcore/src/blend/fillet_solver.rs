@@ -13,3 +13,4 @@ pub mod p4;
 pub mod p5;
 
 pub mod surfaces;
+pub mod trace_reach;

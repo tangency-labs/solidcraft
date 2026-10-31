@@ -1763,6 +1763,16 @@ pub trait BrepCreationAccess<O: ClassObject + SolutionObject + Ord>:
     /// The judging's own errors; the adapter over [`ExecutiveAccess`] has no solver
     /// geometry to judge.
     fn creation_ball_fits(&mut self, k: &mut Kernel, solver: O) -> Result<bool>;
+
+    /// `sm_ExtendTraceToItsRails` (fork tangency-labs/smlib@a9277fd, WR-609; called
+    /// before the corners since @6e77631, WR-610) on this solver: let its trace reach
+    /// as far as its rails can lie from the filleted edge. Only a live session has
+    /// solvers to extend.
+    ///
+    /// # Errors
+    /// The extension's own errors; the adapter over [`ExecutiveAccess`] has no solver
+    /// geometry to extend.
+    fn creation_extend_trace_to_its_rails(&mut self, k: &mut Kernel, solver: O) -> Result<()>;
 }
 impl<O, A> BrepCreationAccess<O> for A
 where
@@ -1779,6 +1789,10 @@ where
 
     fn creation_ball_fits(&mut self, _k: &mut Kernel, _solver: O) -> Result<bool> {
         Err(invalid("the ball-fit rule needs a live fillet session"))
+    }
+
+    fn creation_extend_trace_to_its_rails(&mut self, _k: &mut Kernel, _solver: O) -> Result<()> {
+        Err(invalid("the trace reach needs a live fillet session"))
     }
 }
 
@@ -2673,6 +2687,19 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
                     self.error.comment = "Fillet Error: a rail turns back on itself: the blend is wider than the face's curve allows (its rolling ball does not fit)".into();
                     return Err(failure());
                 }
+                index += 1;
+            }
+        }
+
+        // Opt-in, not upstream (`fixes.fillet_trace_reaches_rails`, WR-609/WR-610; the
+        // fork's tangency-labs/smlib@a9277fd and @6e77631): each solver's base surfaces
+        // reach as far as its rails can lie from the edge before the corners look for
+        // where the rails meet the side edges, which search those surfaces' extended
+        // domains as the trace does.
+        if k.fixes.fillet_trace_reaches_rails {
+            let mut index = 0;
+            while let Some(solver) = self.solvers.get(index).copied() {
+                access.creation_extend_trace_to_its_rails(k, solver)?;
                 index += 1;
             }
         }

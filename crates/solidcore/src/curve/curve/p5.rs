@@ -329,7 +329,7 @@ pub fn make_curve_cache_with_zone_tol<O: Copy + PartialEq>(
     let cache = build_curve_cache(k, curve, handle, zone_tol_3d)?;
     if let Some(key) = key {
         if let Some(neutral) = cache.retag::<()>(None) {
-            curve.memo().store(key, neutral);
+            curve.memo().store(&key, neutral);
         }
     }
     Ok(cache)
@@ -479,12 +479,12 @@ impl CurveMemo {
             .and_then(|e| e.cache.retag(handle))
     }
 
-    fn store(&self, key: CurveMemoKey, cache: CurveCache<()>) {
+    fn store(&self, key: &CurveMemoKey, cache: CurveCache<()>) {
         let slot = self.0.get_or_init(Arc::default);
         let mut entry = slot
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        *entry = Some(CurveMemoEntry { key, cache });
+        *entry = Some(CurveMemoEntry { key: *key, cache });
     }
 }
 

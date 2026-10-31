@@ -63,6 +63,10 @@
 //!   blend-curve section whose centre line is a point on the arc's axis and revolves the
 //!   blend curve of `CreateSurfaceFromCurves` (shared:
 //!   `BlendCurveCrossSectionFsg::cross_section_through`) at the start point.
+//! - **Side edge run on (WR-610, #960).** With `fixes.fillet_trace_reaches_rails`,
+//!   `RailEdgeuseIntersect` widens a straight side edge's parameter interval on a planar
+//!   base surface past both ends (`run_side_edge_on_along_its_line`, the fork's
+//!   tangency-labs/smlib@6e77631).
 
 use crate::blend::fillet_custom_solver::OffsetSurface;
 use crate::blend::fillet_executive::p3::ErrorInfo;
@@ -508,6 +512,56 @@ fn bspline_part(curve: &Curve) -> Result<&BSplineCurve> {
 
 /// `GetOrCreateUVTrimCurve` hands back an `SmBSplineCurve*`: only the kinds deriving
 /// from it (B-splines, lines, ellipses, hyperbolas, parabolas) can be a UV trim curve.
+/// Fork `RailEdgeuseIntersect` (tangency-labs/smlib@6e77631, WR-610): widens the
+/// side edge use's parameter interval (`intervals[0]`) past both ends when the side
+/// edge is a line, its UV trim curve is linear and the rail's base surface is planar:
+/// by the trace's reach or the extension factor times the edge's length, whichever is
+/// larger, in the UV trim curve's parameters.
+fn run_side_edge_on_along_its_line(
+    k: &Kernel,
+    b: &Brep,
+    side_edge: EdgeId,
+    uv_trim: &Curve,
+    base: &Surface,
+    solver: &FilletSolver,
+    intervals: &mut ExtentNd,
+) -> Result<()> {
+    let Some(side_3d) = edge::curve(b, side_edge)?.cloned() else {
+        return Ok(());
+    };
+    if !(side_3d.is_linear(k, EFF_ZERO, false)?.linear
+        && uv_trim.is_linear(k, EFF_ZERO, false)?.linear
+        && base.is_planar(k, EFF_ZERO)?.is_planar)
+    {
+        return Ok(());
+    }
+    let edge_ivl = intervals
+        .get(0)
+        .ok_or_else(|| invalid("no edge-use parameter interval"))?;
+    let side_ivl = edge::interval(b, side_edge)?;
+    let from = side_3d.evaluate_point(k, side_ivl.min())?;
+    let to = side_3d.evaluate_point(k, side_ivl.max())?;
+    let length = from.distance(to);
+    let reach = {
+        let factor_reach = solver.surface_extension_factor * length;
+        // smos_Max
+        if solver.trace_reach > factor_reach {
+            solver.trace_reach
+        } else {
+            factor_reach
+        }
+    };
+    if length > EFF_ZERO_SQRT {
+        let past = reach * edge_ivl.length() / length;
+        set_interval(
+            intervals,
+            0,
+            Extent1d::from_min_max(edge_ivl.min() - past, edge_ivl.max() + past),
+        );
+    }
+    Ok(())
+}
+
 fn check_uv_bspline_kind(c: &Curve) -> Result<()> {
     use crate::curve::curve::CurveKind;
     match c.kind() {
@@ -1675,6 +1729,27 @@ impl FilletSolver {
         let mut domain = base.natural_uv_domain_with_nurb(k)?;
         // virtual SetupOffsetExtension: dispatched on the solver's kind
         ops.setup_offset_extension(k, &base, &mut domain)?;
+
+        // Opt-in, not upstream (`fixes.fillet_trace_reaches_rails`, WR-610; the fork's
+        // tangency-labs/smlib@6e77631): a straight side edge on a plane continues
+        // exactly along its line, as far as the base surface's domain is extended
+        // across the edge (its extension factor, or the trace's reach). A rail that
+        // leaves its face across a cliff meets the side edge's line past the edge's
+        // end; bounded to the edge's own interval, the solve found that point only
+        // from a first guess already on it.
+        if k.fixes.fillet_trace_reaches_rails {
+            if let Some(side_edge) = side_edge {
+                run_side_edge_on_along_its_line(
+                    k,
+                    b,
+                    side_edge,
+                    &uv_trim,
+                    &base,
+                    ops.solver(),
+                    &mut intervals,
+                )?;
+            }
+        }
         set_interval(
             &mut intervals,
             1,
