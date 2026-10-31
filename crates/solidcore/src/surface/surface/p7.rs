@@ -3249,4 +3249,46 @@ mod tests {
         let v = compute_inward_vector(k, &s, d.min()).unwrap();
         assert!((v.length() - 1.0).abs() < 1e-12);
     }
+
+    /// tangency-labs/solidcore#1852 (WR-56): `sm_GoodDropResult` stores the result
+    /// distance in `dDsqGuess` and the guess distance in `dDsqResult`, so its last
+    /// test rejects a drop that improved on the guess. The opt-in
+    /// `Kernel::fixes.good_drop_result_distances_in_order` compares the actual
+    /// guess and result distances. Every case reaches the final comparison: the
+    /// point lies on the plane, `1/2048` from the result along `S_u`, so `Fu` is
+    /// `1/2048` and `Fv` is zero, past the residual early return and inside the
+    /// interior tolerance.
+    #[test]
+    fn issue_1852_good_drop_compares_the_actual_guess_distance() {
+        let h = 1.0 / 2048.0;
+        let domain = Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0);
+        let s = Surface::from(Plane::from_normal(Point3::ZERO, Vec3::Z));
+        let mut k = Kernel::default();
+        let result_uv = Point2::new(0.5, 0.5);
+        let (result_point, su, _) =
+            evaluate_1st_derivatives(&k, &s, result_uv, Side::Left, Side::Left).unwrap();
+        let pt_to_drop = result_point + h * su;
+        let mut sol = SolutionEnd::new();
+        sol.solution_value = 1.0;
+        *sol.param_mut(0).unwrap() = result_uv.x;
+        *sol.param_mut(1).unwrap() = result_uv.y;
+
+        // The result is closer than the guess: upstream rejects it (its swapped
+        // names make the guess look farther); the fix accepts it.
+        let nearer_guess = result_uv - Point2::new(0.1, 0.0);
+        // The guess is closer than the result: upstream accepts it; the fix
+        // rejects it, as the final test intends.
+        let farther_guess = result_uv + Point2::new(h, 0.0);
+        // Equidistant: both accept.
+        let equal_guess = result_uv + Point2::new(2.0 * h, 0.0);
+
+        assert!(!good_drop_result(&k, &s, &domain, pt_to_drop, nearer_guess, &sol).unwrap());
+        assert!(good_drop_result(&k, &s, &domain, pt_to_drop, farther_guess, &sol).unwrap());
+        assert!(good_drop_result(&k, &s, &domain, pt_to_drop, equal_guess, &sol).unwrap());
+
+        k.fixes.good_drop_result_distances_in_order = true;
+        assert!(good_drop_result(&k, &s, &domain, pt_to_drop, nearer_guess, &sol).unwrap());
+        assert!(!good_drop_result(&k, &s, &domain, pt_to_drop, farther_guess, &sol).unwrap());
+        assert!(good_drop_result(&k, &s, &domain, pt_to_drop, equal_guess, &sol).unwrap());
+    }
 }
