@@ -216,6 +216,10 @@ pub fn init() -> Result<()> {
 pub fn set_dump_dir(dir: Option<&Path>) -> Result<()> {
     let c = dir.map(c_path).transpose()?;
     core::dump::set_dir(dir.map(Path::to_path_buf));
+    // A build or a run on solidcore alone never starts the C++ kernel to tell it.
+    if !route::any_on_cpp() {
+        return Ok(());
+    }
     match init() {
         Ok(()) => check(ffi::set_dump_dir(c.as_deref())),
         Err(Error::NotBuilt) => Ok(()),
@@ -227,6 +231,9 @@ pub fn set_dump_dir(dir: Option<&Path>) -> Result<()> {
 pub fn current_call() -> Option<String> {
     if let Some(call) = core::dump::current() {
         return Some(call);
+    }
+    if !route::any_on_cpp() {
+        return None;
     }
     let mut buf = [0u8; 512];
     let n = ffi::current_call(&mut buf);

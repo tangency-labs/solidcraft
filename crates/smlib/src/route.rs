@@ -212,6 +212,11 @@ pub(crate) fn on_cpp() -> impl Drop {
     Guard
 }
 
+/// Whether any family runs on the C++ kernel now: nothing need start it otherwise.
+pub fn any_on_cpp() -> bool {
+    Op::ALL.into_iter().any(|op| op.backend() == Backend::Smlib)
+}
+
 /// What answers the operations: the routing table, or one kernel for all of them.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum Choice {
