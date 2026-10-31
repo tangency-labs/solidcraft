@@ -80,14 +80,17 @@ const OP: &str = "blend::fillet_executive::api";
 /// `fixes.fillet_refuse_non_manifold_result` (WR-212, not upstream), a refusal of a
 /// result that is not a closed manifold solid puts back the body as it was before the
 /// call (a [`Brep::clone_for_rollback`] taken first) and names no entity, as the
-/// refused result's edge is gone with it. Every other result is `fillet`'s own.
+/// refused result's edge is gone with it. Every other result is `fillet`'s own, and
+/// a result the check keeps is the flag-off result: the copy shares nothing with
+/// `brep`, so `fillet` edits the caller's own objects (curve owners included). The
+/// copy fails only on geometry nested deeper than `MAX_GEOMETRY_NESTING`.
 fn refusing_non_manifold_result(
     k: &mut Kernel,
     brep: &mut Brep,
     fillet: impl FnOnce(&mut Kernel, &mut Brep) -> Result<()>,
 ) -> Result<()> {
     let saved = if k.fixes.fillet_refuse_non_manifold_result {
-        Some(brep.clone_for_rollback())
+        Some(brep.clone_for_rollback()?)
     } else {
         None
     };

@@ -1208,14 +1208,25 @@ impl Brep {
     }
 
     /// A copy of this B-rep to put back with [`Brep::restore_from`] if an operation
-    /// on it is refused (not upstream: an operation's rollback). The edge and edge use
-    /// arenas are shared copy-on-write, so their curves keep their owners, and the face
-    /// surfaces keep theirs; the surfaces start with empty cache slots (a cache the
-    /// operation builds on the edited faces is not one of the copy's), and the copy's
-    /// objects, being copies, carry no notification identities.
-    #[must_use]
-    pub fn clone_for_rollback(&self) -> Self {
-        let mut copy = self.copy(true);
+    /// on it is refused (not upstream: an operation's rollback). Its edge curves and UV
+    /// trim curves are exact copies that keep their owners, and its face surfaces keep
+    /// theirs; the surfaces start with empty cache slots (a cache the operation builds
+    /// on the edited faces is not one of the copy's), and the copy's objects, being
+    /// copies, carry no notification identities.
+    ///
+    /// The copy shares no arena with this B-rep, so the operation that follows edits
+    /// this B-rep's own objects exactly as it would without the copy. (Sharing the edge
+    /// arenas copy-on-write, as [`Brep::clone_sharing_surface_caches`] does, would make
+    /// the operation's first edge edit copy them for this B-rep with the copy
+    /// constructor, which resets every curve's owner: a result the check then fails with
+    /// Test #61, Bad Edge, `ValidateGeometry`.)
+    ///
+    /// # Errors
+    ///
+    /// Those of the geometry copies (a geometry nesting deeper than
+    /// `MAX_GEOMETRY_NESTING`).
+    pub fn clone_for_rollback(&self) -> Result<Self> {
+        let mut copy = self.copy(false);
         for (id, face) in self.faces.iter() {
             if let (Some(original), Ok(face_copy)) = (face.surface.as_ref(), copy.face_mut(id)) {
                 if let Some(surface) = face_copy.surface.as_mut() {
@@ -1223,7 +1234,17 @@ impl Brep {
                 }
             }
         }
-        copy
+        for (id, edge) in self.edges.iter() {
+            if let Some(curve) = edge.curve.as_ref() {
+                copy.edge_mut(id)?.curve = Some(curve.clone_for_evaluation()?);
+            }
+        }
+        for (id, edgeuse) in self.edgeuses.iter() {
+            if let Some(curve) = edgeuse.uv_trim_curve.as_ref() {
+                copy.edgeuse_mut(id)?.uv_trim_curve = Some(curve.clone_for_evaluation()?);
+            }
+        }
+        Ok(copy)
     }
 
     /// Puts back the contents of `saved`, a [`Brep::clone_for_rollback`] of this

@@ -22,6 +22,7 @@ use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
 use solidcore::math::Point3;
 use solidcore::primitive::api_primitives::{create_box, create_cylinder};
 use solidcore::topology::brep::p2::is_manifold_solid;
+use solidcore::topology::brep::validation::{check_brep, CheckLevel};
 use solidcore::topology::{edge, vertex, EdgeId};
 use solidcore::{Brep, Kernel, Result, SolidError};
 
@@ -156,17 +157,34 @@ fn issue_422_round_into_the_hole_is_refused_with_the_fix() {
         "the body differs from before the call"
     );
     assert_eq!(volume(&k, &mut b).to_bits(), before_volume.to_bits());
+    let lines = check_brep(&mut k, &mut b, CheckLevel::Level2)
+        .unwrap()
+        .lines();
+    assert!(lines.is_empty(), "{lines:?}");
     // The restored body still takes a round that fits.
     fillet_edges(&mut k, &mut b, &[top], 2.0, 1, 1, 1.0).unwrap();
     assert!(is_manifold_solid(&b).unwrap());
 }
 
-/// A round clear of the hole (R2, the hole's wall at y = 17.5) still builds a solid.
+/// A round clear of the hole (R2, the hole's wall at y = 17.5) still builds a solid,
+/// and with the fix it is the round without it: the same check report (the refusal's
+/// rollback copy must not leave the kept result's curves without owner, Test #61).
 #[test]
 fn issue_422_round_clear_of_the_hole_is_kept() {
+    let mut reports = Vec::new();
     for fix in [false, true] {
         let (result, solid) = round(fix, 2.0);
         result.unwrap();
         assert!(solid, "fix {fix}");
+        let mut k = Kernel::default();
+        k.fixes.fillet_refuse_non_manifold_result = fix;
+        let (mut b, top) = block(&mut k);
+        fillet_edges(&mut k, &mut b, &[top], 2.0, 1, 1, 1.0).unwrap();
+        reports.push(
+            check_brep(&mut k, &mut b, CheckLevel::Level2)
+                .unwrap()
+                .lines(),
+        );
     }
+    assert_eq!(reports[1], reports[0]);
 }
