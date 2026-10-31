@@ -639,7 +639,7 @@ mod tests {
         s.execute("solid.sphere", &json!({"radius": 10})).unwrap();
         let mesh = s.world_state().bodies[0].mesh();
         let mut big = (*mesh).clone();
-        while big.triangles.len() + mesh.triangles.len() <= MAX_TRIANGLES {
+        while big.triangles.len() < MAX_TRIANGLES {
             let offset = u32::try_from(big.positions.len()).unwrap();
             let shift = Vec3::new(0.0, 0.0, 0.001 * big.triangles.len() as f64);
             big.positions.extend(mesh.positions.iter().map(|p| *p + shift));
@@ -647,7 +647,10 @@ mod tests {
             big.triangles.extend(mesh.triangles.iter().map(|t| t.map(|i| i + offset)));
             big.tri_face.extend(mesh.tri_face.iter().copied());
         }
-        assert!(fits(&big) && big.triangles.len() * 3 > MAX_TRIANGLES * 2, "{} triangles", big.triangles.len());
+        // Exactly at the limit, however finely the sphere is meshed.
+        big.triangles.truncate(MAX_TRIANGLES);
+        big.tri_face.truncate(MAX_TRIANGLES);
+        assert!(fits(&big), "{} triangles", big.triangles.len());
         let shape = Shape::of("Sphere", &big, Some([1, 2, 3]), &BTreeMap::new()).expect("a body under the limit snapshots");
         let bytes = shape.to_json().to_string().len();
         assert!(bytes < 400 * 1024, "{bytes} bytes for {} triangles", big.triangles.len());
@@ -696,12 +699,13 @@ mod tests {
         h.frames(2);
         let body = h.app.session.world_state().bodies[0].name.clone();
         let open = |h: &mut crate::scenario::Harness| {
+            let before = h.app.preferences.navigator_style;
             let c = crate::scenario::rect_of("axis_view:outer").unwrap().center();
             h.call("ui.click", json!({"x": c.x, "y": c.y, "button": "right"}));
             assert_eq!(h.call("ui.menuPick", json!({"item": "Custom"}))["ok"], true);
             h.frames(2);
             assert!(matches!(h.app.dialog.as_ref().map(|d| &d.kind), Some(Kind::ViewNavigator(_))), "the Custom View Navigator panel");
-            assert_eq!(h.app.preferences.navigator_style, NavigatorStyle::Cube, "nothing changes before OK");
+            assert_eq!(h.app.preferences.navigator_style, before, "nothing changes before OK");
         };
         // Pick the body as a click in the view would, and turn Home off (it starts on).
         let fill = |h: &mut crate::scenario::Harness| {
@@ -725,6 +729,7 @@ mod tests {
         assert_eq!(h.app.preferences.navigator_style, NavigatorStyle::Cube, "Cancel keeps the cube");
         assert!(h.app.view_gizmo.shape.is_none() && h.app.preferences.navigator_home, "Cancel keeps Home on");
 
+        let undo = h.app.session.undo.len();
         open(&mut h);
         fill(&mut h);
         h.step(&json!({"click": {"handle": "dialog:ok"}})).unwrap();
@@ -734,7 +739,7 @@ mod tests {
         assert_eq!(h.app.view_gizmo.shape.as_ref().map(|s| s.name.as_str()), Some(body.as_str()));
         assert!(!h.app.preferences.navigator_home && h.app.preferences.navigator_arrows);
         assert_eq!(h.app.preferences.navigator_texture, NavigatorTexture::Modeled);
-        assert!(h.app.session.undo.is_empty(), "the navigator is never part of the design");
+        assert_eq!(h.app.session.undo.len(), undo, "the navigator is never part of the design");
 
         // Opened again, the panel starts from the navigator as it is.
         open(&mut h);
