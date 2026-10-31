@@ -260,6 +260,12 @@ impl TopologyCopy<'_> {
         source: ObjectRef,
         copy: ObjectRef,
     ) -> Result<()> {
+        // Both objects are SmTopology objects upstream, each with the default record its
+        // constructor gives it; a record this crate has not made yet (a source the
+        // caller seeded no record for, or an edge or face the merge just created) is
+        // that default one, as in `p1::merge_vertex` (#1869).
+        self.vertices.records.or_default(source.key);
+        self.vertices.records.or_default(copy.key);
         topo::notify(
             self.vertices.records,
             self.vertices.attributes,

@@ -2099,6 +2099,31 @@ impl UnitDiff for Runner {
                 )?;
             }
         }
+        // #1869: copies through the merge whose new edges and faces get other ids than
+        // their sources (with a fresh records map, their copy notifications need the
+        // default record every upstream SmTopology object has)
+        for (file, n, repeat) in [
+            ("box_with_large_fillet.smb", 1, 1),
+            ("box_with_large_fillet.smb", 3, 1),
+            ("cone.smb", 1, 1),
+            ("Mouse.smb", 2, 1),
+            ("plane_square.smb", 2, 2),
+            ("disk.smb", 2, 3),
+        ] {
+            push(
+                &mut v,
+                format!("copy_merge_n{n}_repeat{repeat}_{file}"),
+                &Inputs::Copy {
+                    brep: BrepIn::File {
+                        file: file.to_string(),
+                        rebuild: false,
+                    },
+                    n,
+                    merge: true,
+                    repeat,
+                },
+            )?;
+        }
         // #1628: copies into a destination that already has faces
         for file in ["plane_square.smb", "disk.smb", "plane_circ.smb"] {
             for repeat in [2, 3] {
