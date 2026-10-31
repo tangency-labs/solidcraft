@@ -446,6 +446,13 @@ fn rust_hcr(k: &mut Kernel, i: &Inputs) -> Result<Result<Hcr, Output>, HarnessEr
     if let Err(e) = fixture::validate_block(&path_of(&i.brep)?, &brep) {
         return Ok(Err(Output::err(format!("rejected: {e}"))));
     }
+    // `ffi::validate_hcr` admits the extra curve through a wire fixture too.
+    if let Some(x) = &i.extra {
+        let wire = brep_block(&BrepIn::Wire { curve: x.curve.clone(), t0: x.t0, t1: x.t1 })?;
+        if let Err(e) = fixture::validate_block("", &wire) {
+            return Ok(Err(Output::err(format!("rejected: {e}"))));
+        }
+    }
     if let Err(m) = check_view(i) {
         return Ok(Err(Output::err(m)));
     }
