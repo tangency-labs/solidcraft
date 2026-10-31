@@ -2335,6 +2335,18 @@ impl SolveApp {
     pub fn open_path_async(&mut self, path: &str) {
         file_load::begin(self, path, false);
     }
+    /// Open `path` as [`Self::open_path_async`] does, for a caller that has more to do once the
+    /// design is in (the web app's design links, #10198): the receiver gets `{"ok": true, ...}`
+    /// when it is, or `{"ok": false, "error"}`; it is dropped unanswered when the load is.
+    pub fn open_path_answered(&mut self, path: &str) -> std::sync::mpsc::Receiver<Value> {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let mut request = file_load::Request::new(path, file_load::Kind::Open);
+        request.reply = Some(tx);
+        if let Err(e) = file_load::begin_request(self, request) {
+            self.set_status(e, true);
+        }
+        rx
+    }
     pub fn insert_path_async(&mut self, path: &str) {
         file_load::begin(self, path, true);
     }
