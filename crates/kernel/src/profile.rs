@@ -194,8 +194,7 @@ mod tests {
         if r.is_ok() {
             // The geometry kernel's calls, on whichever answers, are children of the boolean: their
             // time is not its self time.
-            let calls: std::time::Duration =
-                rep.rows.iter().filter(|r| matches!(r.category, "smlib" | "solidcore")).map(|r| r.total).sum();
+            let calls: std::time::Duration = rep.rows.iter().filter(|r| matches!(r.category, "smlib" | "solidcore")).map(|r| r.total).sum();
             assert!(calls > std::time::Duration::ZERO && k.self_time < k.total, "{rep:?}");
         }
     }
