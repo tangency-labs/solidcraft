@@ -1123,16 +1123,95 @@ mod async_path_host {
     }
 }
 
+/// The GPU product preview and the CPU product image of the current scene, compared pixel by
+/// pixel away from the silhouettes (CPU uses 2x supersampling, the GPU target 1x), for a
+/// linear and an sRGB GPU attachment. Skips (returning false) without a GPU adapter.
 #[cfg(not(target_arch = "wasm32"))]
-#[test]
-fn opaque_pbr_product_gpu_and_cpu_share_color_and_material_semantics() {
+fn gpu_preview_matches_cpu_image(s: &Session, label: &str) -> bool {
     use solidcraft_engine::render::{
         StandardView,
         job::{CancelToken, ImageRequest, ImageTask, TaskPoll},
     };
+    const SIZE: u32 = 256;
+    let scene = solidcraft_engine::product_scene::extract(s).unwrap();
+    let (_, gpu) = gpu_scene(&scene).unwrap();
+    let mut camera = Camera { fov: 0.0, ..Default::default() };
+    camera.set_view(StandardView::Iso);
+    camera.fit(&scene.bounds);
+    let radius = scene.bounds.diagonal().max(10.0) + scene.bounds.center().dist(camera.target);
+    let eye = camera.eye().to_f32();
+    let mut task = ImageTask::new(
+        scene,
+        ImageRequest {
+            studio_weights: None,
+            environment: None,
+            textures: None,
+            camera,
+            width: SIZE,
+            height: SIZE,
+            background: [255; 3],
+            transparent_background: false,
+            integrator: Default::default(),
+            raytrace: None,
+        },
+        CancelToken::default(),
+    )
+    .unwrap();
+    let mut png = None;
+    for _ in 0..100_000 {
+        if let TaskPoll::Complete(bytes) = task.step(4096).unwrap() {
+            png = Some(bytes);
+            break;
+        }
+    }
+    let cpu = image::load_from_memory(&png.expect("bounded original fixture completes")).unwrap().to_rgba8();
+    assert_eq!(cpu.dimensions(), (SIZE, SIZE));
+    let cpu = cpu.into_raw();
+    for srgb in [false, true] {
+        let Some(gpu) = crate::gpu::render_product_offscreen(
+            gpu.clone(),
+            None,
+            camera.view_proj(1.0, radius).to_f32(),
+            camera.back().to_f32(),
+            [eye[0], eye[1], eye[2], 0.0],
+            SIZE,
+            srgb,
+        ) else {
+            eprintln!("skipping: no GPU adapter");
+            return false;
+        };
+        let at = |pixels: &[u8], x: usize, y: usize| {
+            let i = (y * SIZE as usize + x) * 4;
+            [pixels[i], pixels[i + 1], pixels[i + 2]]
+        };
+        let mut core = 0usize;
+        let mut error = 0usize;
+        let mut outliers = 0usize;
+        for y in 2..SIZE as usize - 2 {
+            for x in 2..SIZE as usize - 2 {
+                // Exclude antialiased silhouettes: CPU uses 2x supersampling, GPU uses 1x.
+                if (y - 1..=y + 1).any(|ny| (x - 1..=x + 1).any(|nx| at(&cpu, nx, ny) == [255; 3] || at(&gpu, nx, ny) == [255; 3])) {
+                    continue;
+                }
+                let delta = at(&cpu, x, y).into_iter().zip(at(&gpu, x, y)).map(|(a, b)| usize::from(a.abs_diff(b))).collect::<Vec<_>>();
+                error += delta.iter().sum::<usize>();
+                outliers += usize::from(delta.iter().any(|d| *d > 12));
+                core += 1;
+            }
+        }
+        assert!(core > 1000);
+        let mean = error as f64 / (3 * core) as f64;
+        eprintln!("{label} srgb={srgb}: core={core}, mean={mean}, outliers={outliers}");
+        assert!(mean < 2.0 && outliers * 100 < core * 2, "{label}: CPU/GPU color or material interpretation differs");
+    }
+    true
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn opaque_pbr_product_gpu_and_cpu_share_color_and_material_semantics() {
     let mut s = Session::default();
     s.execute("solid.sphere", &json!({"radius":10,"body_name":"Original sphere"})).unwrap();
-    const SIZE: u32 = 256;
     let mut previous = None;
     for (metallic, roughness) in [(0.0, 0.2), (0.0, 0.65), (1.0, 0.2), (1.0, 0.65)] {
         s.execute(
@@ -1146,74 +1225,32 @@ fn opaque_pbr_product_gpu_and_cpu_share_color_and_material_semantics() {
         assert!(!gpu.pbr.is_empty() && gpu.tris.is_empty());
         assert_ne!(previous, Some(key));
         previous = Some(key);
-        let mut camera = Camera { fov: 0.0, ..Default::default() };
-        camera.set_view(StandardView::Iso);
-        camera.fit(&scene.bounds);
-        let radius = scene.bounds.diagonal().max(10.0) + scene.bounds.center().dist(camera.target);
-        let eye = camera.eye().to_f32();
-        let mut task = ImageTask::new(
-            scene,
-            ImageRequest {
-                studio_weights: None,
-                environment: None,
-                textures: None,
-                camera,
-                width: SIZE,
-                height: SIZE,
-                background: [255; 3],
-                transparent_background: false,
-                integrator: Default::default(),
-                raytrace: None,
-            },
-            CancelToken::default(),
-        )
-        .unwrap();
-        let mut png = None;
-        for _ in 0..100_000 {
-            if let TaskPoll::Complete(bytes) = task.step(4096).unwrap() {
-                png = Some(bytes);
-                break;
-            }
+        if !gpu_preview_matches_cpu_image(&s, &format!("PBR m={metallic} r={roughness}")) {
+            return;
         }
-        let cpu = image::load_from_memory(&png.expect("bounded original fixture completes")).unwrap().to_rgba8();
-        assert_eq!(cpu.dimensions(), (SIZE, SIZE));
-        let cpu = cpu.into_raw();
-        for srgb in [false, true] {
-            let Some(gpu) = crate::gpu::render_product_offscreen(
-                gpu.clone(),
-                None,
-                camera.view_proj(1.0, radius).to_f32(),
-                camera.back().to_f32(),
-                [eye[0], eye[1], eye[2], 0.0],
-                SIZE,
-                srgb,
-            ) else {
-                eprintln!("skipping: no GPU adapter");
-                return;
-            };
-            let at = |pixels: &[u8], x: usize, y: usize| {
-                let i = (y * SIZE as usize + x) * 4;
-                [pixels[i], pixels[i + 1], pixels[i + 2]]
-            };
-            let mut core = 0usize;
-            let mut error = 0usize;
-            let mut outliers = 0usize;
-            for y in 2..SIZE as usize - 2 {
-                for x in 2..SIZE as usize - 2 {
-                    // Exclude antialiased silhouettes: CPU uses 2x supersampling, GPU uses 1x.
-                    if (y - 1..=y + 1).any(|ny| (x - 1..=x + 1).any(|nx| at(&cpu, nx, ny) == [255; 3] || at(&gpu, nx, ny) == [255; 3])) {
-                        continue;
-                    }
-                    let delta = at(&cpu, x, y).into_iter().zip(at(&gpu, x, y)).map(|(a, b)| usize::from(a.abs_diff(b))).collect::<Vec<_>>();
-                    error += delta.iter().sum::<usize>();
-                    outliers += usize::from(delta.iter().any(|d| *d > 12));
-                    core += 1;
-                }
-            }
-            assert!(core > 1000);
-            let mean = error as f64 / (3 * core) as f64;
-            eprintln!("PBR m={metallic} r={roughness} srgb={srgb}: core={core}, mean={mean}, outliers={outliers}");
-            assert!(mean < 2.0 && outliers * 100 < core * 2, "CPU/GPU color or material interpretation differs");
+    }
+}
+
+/// A simple colour (no PBR), the look every body starts with, is shaded alike by the GPU
+/// preview and the CPU image: in linear light, encoded once. The preview used to shade the
+/// sRGB-encoded colour, which left its shadows and mid-tones darker than the exported PNG's
+/// (#5761: a mean of 12.9/255 over this sphere, two thirds of its pixels more than 12/255
+/// apart), so what Render showed was not what Export PNG wrote. The near-black colours sit
+/// on both sides of the sRGB transfer's knee (0.04045: #0a0a0a is below it, #0b0b0b above)
+/// and their lit values fall under the encoder's (0.0031308), so a decoder with a flat dark
+/// branch, or encoding twice on a linear attachment, fails here.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn simple_color_product_gpu_and_cpu_shade_alike() {
+    let mut s = Session::default();
+    s.execute("solid.sphere", &json!({"radius":10,"body_name":"Original sphere"})).unwrap();
+    for color in ["#b47846", "#808080", "#2040c0", "#000000", "#050505", "#0a0a0a", "#0b0b0b"] {
+        s.execute("appearance.assign", &json!({"bodies":["Original sphere"],"color":color})).unwrap();
+        let scene = solidcraft_engine::product_scene::extract(&s).unwrap();
+        let (_, gpu) = gpu_scene(&scene).unwrap();
+        assert!(gpu.pbr.is_empty() && !gpu.tris.is_empty());
+        if !gpu_preview_matches_cpu_image(&s, &format!("simple colour {color}")) {
+            return;
         }
     }
 }

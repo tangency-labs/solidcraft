@@ -391,6 +391,9 @@ Malformed/non-finite triangles and invalid opacity fail.
 Reinstalling the host invalidates product uploads. This is not a general device-loss,
 render-job or cancellation protocol; those ownership mechanisms belong to R4.
 
+Simple colours are shaded by the Design viewport's lights, in linear light and encoded
+once, exactly as the CPU product image shades them, so the preview and the exported PNG
+agree (Design itself shades the encoded colour, as it always has).
 Transparency uses the existing raster far/near alpha-blending approximation, without
 refraction or HDR illumination. Opaque PBR uses a separate surface batch in the
 same installed renderer. R3 itself added no export job; R4a supplies CPU product

@@ -4142,7 +4142,7 @@ fn load_depth<T>(first: bool, clear: T) -> wgpu::LoadOp<T> {
 pub fn uniform_bytes(cb: &Frame, w: f32, h: f32, linear: bool, reversed: bool) -> Vec<u8> {
     let mut v: Vec<f32> = gpu_view_proj(cb.view_proj, reversed).iter().flatten().copied().collect();
     v.extend([cb.back[0], cb.back[1], cb.back[2], if linear { 1.0 } else { 0.0 }]);
-    v.extend([w.max(1.0), h.max(1.0), 0.0, if cb.outline { 1.0 } else { 0.0 }]);
+    v.extend([w.max(1.0), h.max(1.0), if cb.product { 1.0 } else { 0.0 }, if cb.outline { 1.0 } else { 0.0 }]);
     v.extend(cb.clip);
     v.extend(cb.cap);
     v.extend(cb.analysis);
