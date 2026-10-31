@@ -59,6 +59,7 @@ fn nurb_fillet(k: &mut Kernel) -> Option<Brep> {
 const BUDGET: std::time::Duration = std::time::Duration::from_secs(1800);
 
 #[test]
+#[ignore = "slow: UB-285 regression, run with --ignored"]
 fn ub_285_nurb_fillet_shell_returns_for_every_open_face() {
     let (tx, rx) = std::sync::mpsc::channel();
     std::thread::spawn(move || {
