@@ -46,7 +46,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .key("O")
         .enabled(in_sketch)
         .params(concat!(
-            "curves: [ids], distance: number in mm or length expression (creates an editable dimension; positive = left of the chain, or toward `side`), side?: [x,y], chain?: bool (default true: the connected chain); ",
+            "curves: [ids], distance: number in mm or length expression (creates an editable dimension; positive = left of the chain, or toward `side`), side?: [x,y], chain?: bool (default true: the connected chain, including ends that only coincide). A corner is trimmed back to the crossing when the offset runs past it, and extended until the offset curves intersect when the corner falls short; ",
             "direction?: one_side|symmetric (default one_side) or symmetric?: bool (the same distance each way; no `side`, whose job it takes over), ",
             "distance2?: positive length expression (Two Sides: an independent distance the other way, as for `solid.extrude`). Each side is its own offset association, listed in `sides`; flip?: bool reverses the primary side; `param`/`param2` name the driving dimensions",
             created_doc!()
@@ -1876,13 +1876,40 @@ fn chamfer_dist_angle(s: &mut Session, p: &Value) -> Result<Value> {
 // ---------------------------------------------------------------------------------------------
 // Offset
 
+/// Ends this close are one corner. Profile finding joins ends at the same distance, so a loop
+/// the sketch already treats as one profile offsets as one chain.
+const ENDPOINT_JOIN: f64 = 1e-4;
+
 /// Curves of the connected chain through `start` (joined where exactly two curves meet), in
 /// order, with whether each is walked from its stored start (`a`) to its end (`b`).
+///
+/// A corner counts when the curves share the point, when a coincident constraint makes the two
+/// ends one point, or when the ends simply lie on each other. The offset then trims a corner
+/// that runs past the crossing and extends one that stops short, so the new curves intersect.
 fn chain(sk: &Sketch, start: usize, pool: &[usize]) -> (Vec<(usize, bool)>, bool) {
     let ends = |c: usize| sk.curves.get(c).and_then(|c| c.kind.ends());
     let Some((s0, s1)) = ends(start) else { return (vec![(start, true)], true) };
+    let mut parent: Vec<usize> = (0..sk.points.len()).collect();
+    for constraint in &sk.constraints {
+        if let ConstraintKind::Coincident { p, q } = constraint.kind {
+            union_points(&mut parent, p, q);
+        }
+    }
+    let group: Vec<usize> = (0..parent.len()).map(|i| find_point(&mut parent, i)).collect();
+    let same = |a: usize, b: usize| -> bool {
+        if a == b {
+            return true;
+        }
+        if group.get(a).zip(group.get(b)).is_some_and(|(x, y)| x == y) {
+            return true;
+        }
+        match (sk.point(a), sk.point(b)) {
+            (Some(p), Some(q)) if p.is_finite() && q.is_finite() => p.dist(q) <= ENDPOINT_JOIN,
+            _ => false,
+        }
+    };
     let next = |from: usize, at: usize, used: &[usize]| -> Option<usize> {
-        let users: Vec<usize> = pool.iter().copied().filter(|c| ends(*c).is_some_and(|(a, b)| a == at || b == at)).collect();
+        let users: Vec<usize> = pool.iter().copied().filter(|c| ends(*c).is_some_and(|(a, b)| same(a, at) || same(b, at))).collect();
         if users.len() != 2 {
             return None;
         }
@@ -1894,7 +1921,7 @@ fn chain(sk: &Sketch, start: usize, pool: &[usize]) -> (Vec<(usize, bool)>, bool
     let mut closed = false;
     while let Some(n) = next(cur, at, &used) {
         let Some((a, b)) = ends(n) else { break };
-        let forward = a == at;
+        let forward = same(a, at);
         fwd.push((n, forward));
         used.push(n);
         cur = n;
@@ -1903,7 +1930,7 @@ fn chain(sk: &Sketch, start: usize, pool: &[usize]) -> (Vec<(usize, bool)>, bool
             break;
         }
     }
-    if at == s0 && fwd.len() > 1 {
+    if fwd.len() > 1 && same(at, s0) {
         closed = true;
     } else {
         // Walk backwards from the start.
@@ -1911,7 +1938,7 @@ fn chain(sk: &Sketch, start: usize, pool: &[usize]) -> (Vec<(usize, bool)>, bool
         let mut back = Vec::new();
         while let Some(n) = next(cur, at, &used) {
             let Some((a, b)) = ends(n) else { break };
-            let forward = b == at;
+            let forward = same(b, at);
             back.push((n, forward));
             used.push(n);
             cur = n;
@@ -1925,6 +1952,33 @@ fn chain(sk: &Sketch, start: usize, pool: &[usize]) -> (Vec<(usize, bool)>, bool
         fwd = back;
     }
     (fwd, closed)
+}
+
+fn find_point(parent: &mut [usize], mut i: usize) -> usize {
+    let mut top = i;
+    while parent.get(top).copied().unwrap_or(top) != top {
+        top = parent[top];
+    }
+    while i != top {
+        let next = parent.get(i).copied().unwrap_or(top);
+        if let Some(slot) = parent.get_mut(i) {
+            *slot = top;
+        }
+        i = next;
+    }
+    top
+}
+
+fn union_points(parent: &mut [usize], a: usize, b: usize) {
+    if a >= parent.len() || b >= parent.len() {
+        return;
+    }
+    let (a, b) = (find_point(parent, a), find_point(parent, b));
+    if a != b
+        && let Some(slot) = parent.get_mut(b)
+    {
+        *slot = a;
+    }
 }
 
 /// An offset piece: shape walked in chain direction, offset by `d` to the left.
