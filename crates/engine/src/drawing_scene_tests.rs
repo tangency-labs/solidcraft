@@ -96,7 +96,7 @@ fn same_within(a: &Group, b: &Group, tol: f64) -> bool {
     let near = |s: &Seg2, t: &Seg2| s.start().dist(t.start()) <= tol && s.end().dist(t.end()) <= tol;
     a.items.len() == b.items.len()
         && a.items.iter().zip(&b.items).all(|pair| match pair {
-            (Item::Stroke { path: p, closed: c, width_mm: w }, Item::Stroke { path: q, closed: d, width_mm: v }) => {
+            (Item::Stroke { path: p, closed: c, width_mm: w, .. }, Item::Stroke { path: q, closed: d, width_mm: v, .. }) => {
                 c == d && w == v && p.len() == q.len() && p.iter().zip(q).all(|(s, t)| near(s, t))
             }
             _ => false,
@@ -355,7 +355,7 @@ fn a_view_past_the_sheets_records_leaves_out_only_itself() {
     // One stroke of `n` pieces: n + 2 records with its group.
     let lines = |n: usize| {
         let path = (0..n).map(|i| Seg2::Line { a: Vec2::new(i as f64 * 1e-3, 0.0), b: Vec2::new((i + 1) as f64 * 1e-3, 0.0) }).collect();
-        let items = vec![Item::Stroke { path, closed: false, width_mm: 0.5 }];
+        let items = vec![Item::Stroke { path, closed: false, width_mm: 0.5, pattern: None }];
         Drawn { group: Some(Group { object: n as u64, kind: ObjectKind::View, items }), status: Status::Drawn, stats: None }
     };
     let left = MAX_RECORDS - border(&s, sheet).iter().map(Group::records).sum::<usize>();

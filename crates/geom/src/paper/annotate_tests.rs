@@ -20,7 +20,7 @@ fn piece(x0: f64, y0: f64, x1: f64, y1: f64) -> [i64; 4] {
 /// A stroke's pieces, closed or not, and width; a fill's outline with no width.
 fn drawn(item: &Item) -> (Vec<[i64; 4]>, bool, Option<f64>) {
     match item {
-        Item::Stroke { path, closed, width_mm } => (ends(path), *closed, Some(*width_mm)),
+        Item::Stroke { path, closed, width_mm, .. } => (ends(path), *closed, Some(*width_mm)),
         Item::Fill { region } => (ends(&region.outer.segs), true, None),
     }
 }
