@@ -1,0 +1,34 @@
+{
+  "ar": {
+    "nav.creo.help": "السحب بالزر الأوسط يدوّر العرض، وShift مع الزر الأوسط يحرّكه، وCtrl مع السحب العمودي بالزر الأوسط يكبّر أو يصغّر (السحب لأسفل للتكبير)؛ وتدوير عجلة الفأرة يكبّر أو يصغّر",
+    "nav.creo.label": "Creo"
+  },
+  "de": {
+    "nav.creo.help": "Ziehen mit der mittleren Maustaste dreht, Umschalt+Mitte verschiebt, Strg+Mitte zoomt beim vertikalen Ziehen (nach unten zum Vergrößern); das Mausrad zoomt",
+    "nav.creo.label": "Creo"
+  },
+  "en": {
+    "nav.creo.help": "Middle drag orbits, Shift+middle pans, Ctrl+middle drag vertically zooms (down to zoom in); scroll the wheel to zoom",
+    "nav.creo.label": "Creo"
+  },
+  "he": {
+    "nav.creo.help": "גרירה בלחצן האמצעי מסובבת את התצוגה, Shift והלחצן האמצעי מזיזים אותה, Ctrl וגרירה אנכית בלחצן האמצעי משנים את הזום (גרירה מטה להגדלה); גלילת הגלגלת משנה גם היא את הזום",
+    "nav.creo.label": "Creo"
+  },
+  "ja": {
+    "nav.creo.help": "マウスの中ボタンドラッグで回転、Shift+中ボタンで平行移動、Ctrl+中ボタンの上下ドラッグでズーム（下方向で拡大）。ホイールの回転でもズーム",
+    "nav.creo.label": "Creo"
+  },
+  "ko": {
+    "nav.creo.help": "가운데 버튼을 끌면 회전, Shift+가운데 버튼은 이동, Ctrl+가운데 버튼을 위아래로 끌면 확대/축소합니다(아래로 끌면 확대). 휠을 굴려도 확대/축소합니다",
+    "nav.creo.label": "Creo"
+  },
+  "vi": {
+    "nav.creo.help": "Kéo nút giữa để xoay, Shift+nút giữa để di chuyển, Ctrl+kéo nút giữa theo chiều dọc để thu phóng (kéo xuống để phóng to); lăn con lăn để thu phóng",
+    "nav.creo.label": "Creo"
+  },
+  "zh": {
+    "nav.creo.help": "中键拖动旋转，Shift+中键平移，Ctrl+中键上下拖动缩放（向下放大）；滚动滚轮也可缩放",
+    "nav.creo.label": "Creo"
+  }
+}

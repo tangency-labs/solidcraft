@@ -802,7 +802,8 @@ pub(crate) fn handle(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &e
                 Some(NavMode::Zoom) => {
                     let press = ui.input(|i| i.pointer.press_origin());
                     let anchor = model_zoom_anchor(app, rect, press.or(hover), caps.orbit);
-                    app.cam.zoom_at((f64::from(delta.y) * 0.01).exp(), anchor);
+                    let sign = if crate::prefs::nav_preset(&app.preferences.nav).reverse_drag_zoom { -1.0 } else { 1.0 };
+                    app.cam.zoom_at((f64::from(delta.y) * 0.01 * sign).exp(), anchor);
                 }
                 _ => {}
             }

@@ -451,7 +451,7 @@ One setting per line, sorted by name. A change that adds a setting adds its own 
 - `max_step_file_mb` (default 512): the largest STEP or import file opened, in MB, from the default up to 16384 (16 GB) (Preferences › General › Largest file to open, #4086; a `--max-file-size` launch flag overrides both for that run; the web app keeps the defaults and refuses other values; [large files](book/src/guide/files.md#large-files))
 - `middle_double_click` (`home` (default), `fit`, `off`)
 - `msaa`
-- `nav` (`fusion`, `solidworks`, `inventor`, `alias`, `blender`, `tinkercad`, `openscad`, `touchpad`)
+- `nav` (`fusion`, `solidworks`, `creo`, `inventor`, `alias`, `blender`, `tinkercad`, `openscad`, `touchpad`)
 - `nav_bridge_enabled` (default false) and `nav_bridge_port` (default 8765: a device's own app on this computer moves the view, [the navigation bridge](3d-mouse.md#device-apps-the-navigation-bridge))
 - `offer_stand_up`
 - `orbit_around` (`view_centre` (default: what Pan moves and Fit frames), `origin` (the world origin stays still on screen), `cursor` (the model point under the pointer when the drag began); the older `orbit_cursor` boolean still sets `cursor` when true)
