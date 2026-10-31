@@ -157,7 +157,7 @@
    }
   },
   {
-   "name": "l2_thin_face_tests",
+   "name": "l2_thinnest_buildable_face_tests",
    "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
    "inputs": {
     "brep": {
@@ -179,7 +179,7 @@
      "dom": [
       0,
       0,
-      1e-13,
+      1e-12,
       1
      ]
     },
@@ -187,7 +187,7 @@
    }
   },
   {
-   "name": "l2_thin_face2_tests",
+   "name": "l2_thinnest_buildable_face2_tests",
    "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
    "inputs": {
     "brep": {
@@ -209,7 +209,7 @@
      "dom": [
       -1,
       -1,
-      -0.9999999999995,
+      -0.99999999999,
       1
      ]
     },

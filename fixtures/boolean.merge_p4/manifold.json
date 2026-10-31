@@ -7657,14 +7657,14 @@
       }
     },
     {
-      "name": "plane-domain-constructor-rejection",
+      "name": "plane-domain-1e6-largest-buildable",
       "inputs": {
         "primary": [
           3,
           0,
           0,
           0,
-          2000000,
+          1000000,
           1,
           0
         ],
@@ -7678,7 +7678,8 @@
           0
         ],
         "operation": 0
-      }
+      },
+      "note": "The largest plane-face U domain the pinned constructor builds here (1e6; 2e6 is refused, now topology.brep_p8 constructor_refusals.json)."
     }
   ]
 }

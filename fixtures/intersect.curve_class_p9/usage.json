@@ -660,23 +660,25 @@
       }
     },
     {
-      "name": "collapsed_rectangle_setup_rejected",
+      "name": "collapsed_surface_face_topology",
       "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:16225; review #151",
       "inputs": {
         "op": 1,
         "kind": 2,
-        "rectangle": true
-      }
+        "rectangle": false
+      },
+      "note": "The collapsed kind-2 surface built through MakeFaceTopology (rectangle off): the nearest setup the pinned C++ builds (the rectangle form is refused, now topology.brep_p8 constructor_refusals.json)."
     },
     {
-      "name": "tiny_zero_zone_rectangle_setup_rejected",
+      "name": "smallest_buildable_zero_zone_rectangle",
       "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:16225; review #151",
       "inputs": {
         "op": 1,
-        "scale": 1e-06,
+        "scale": 0.0001,
         "zone": 0,
         "rectangle": true
-      }
+      },
+      "note": "The smallest rectangle scale the pinned fixture builds with zone 0 (1e-4; 1e-5 and 1e-6 are refused at every zone, now topology.brep_p8 constructor_refusals.json)."
     },
     {
       "name": "vertex_at_source_start",

@@ -3089,7 +3089,30 @@ mod tests {
                 }
                 compared += 1;
             } else if case.name.ends_with("_selected") {
-                // The tiny box is an empty B-rep: no face 0 to select.
+                // The smallest box the native constructor builds here has a face 0 to
+                // select: compared.
+                let rust = Runner.run_rust(&case).unwrap();
+                for output in [&cpp, &rust] {
+                    assert!(output.rejected.is_none() && output.error.is_none());
+                }
+                let comparison = crate::compare::compare(&cpp, &rust, Runner.abs_floors());
+                assert!(comparison.pass(), "{}: {comparison:?}", case.name);
+                compared += 1;
+                // The tiny box the case held before is an empty B-rep: no face 0 to
+                // select, a native fixture rejection.
+                let mut tiny = case.clone();
+                let side = if case.name.contains("foreign") {
+                    "foreign"
+                } else {
+                    "source"
+                };
+                let size = if case.name.contains("translated") {
+                    1e-3
+                } else {
+                    1e-6
+                };
+                tiny.inputs[side]["size"] = serde_json::json!([size, size, size]);
+                let cpp = Runner.run_cpp(&tiny).unwrap();
                 assert_eq!(
                     cpp.rejected.as_deref(),
                     Some("native fixture constructor status_1001")
@@ -3109,7 +3132,7 @@ mod tests {
                 compared += 1;
             }
         }
-        assert_eq!((rejected, compared), (4, 6));
+        assert_eq!((rejected, compared), (4, 10));
     }
 
     fn assert_native_constructor_control(case: &Case, cpp: &Output, counts: [i64; 5]) {

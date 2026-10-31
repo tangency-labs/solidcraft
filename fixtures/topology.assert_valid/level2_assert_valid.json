@@ -322,7 +322,7 @@
    }
   },
   {
-   "name": "l2_thin_face_level2",
+   "name": "l2_thinnest_buildable_face_level2",
    "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
    "inputs": {
     "brep": {
@@ -344,7 +344,7 @@
      "dom": [
       0,
       0,
-      1e-13,
+      1e-12,
       1
      ]
     },
@@ -352,7 +352,7 @@
    }
   },
   {
-   "name": "l2_thin_face_capi2",
+   "name": "l2_thinnest_buildable_face_capi2",
    "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
    "inputs": {
     "brep": {
@@ -374,7 +374,7 @@
      "dom": [
       0,
       0,
-      1e-13,
+      1e-12,
       1
      ]
     },
@@ -383,7 +383,7 @@
    }
   },
   {
-   "name": "l2_thin_face2_level2",
+   "name": "l2_thinnest_buildable_face2_level2",
    "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
    "inputs": {
     "brep": {
@@ -405,7 +405,7 @@
      "dom": [
       -1,
       -1,
-      -0.9999999999995,
+      -0.99999999999,
       1
      ]
     },
@@ -413,7 +413,7 @@
    }
   },
   {
-   "name": "l2_thin_face2_capi2",
+   "name": "l2_thinnest_buildable_face2_capi2",
    "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
    "inputs": {
     "brep": {
@@ -435,7 +435,7 @@
      "dom": [
       -1,
       -1,
-      -0.9999999999995,
+      -0.99999999999,
       1
      ]
     },
