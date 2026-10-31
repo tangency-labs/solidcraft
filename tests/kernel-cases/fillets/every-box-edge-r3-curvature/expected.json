@@ -2,9 +2,9 @@
  "sources": [],
  "what": "a curvature-continuous (Type: Curvature) round of size 3 on a box's long top edge, between two planar end faces",
  "source": "analytic",
- "method": "box 40x30x20, the top back edge (y=30, z=20, 40 long) filleted type curvature size 3: the section is the quintic Bezier with control points at thirds of the setback s = 3 along each face (as fillets/862), zero curvature where it meets the faces. The area between the corner and that curve (Green on the Bezier, exact: 113/756 s^2) is 1.345238; the end faces x=0 and x=40 are square to the edge: V = 24000 - 40 * 1.345238 = 23946.1905. Faces 7; both seams of the round with the faces G2.",
+ "method": "box 40x30x20, the top back edge (y=30, z=20, 40 long) filleted type curvature size 3: the curvature section: the order-2 section at thumbweight 0 between the contacts set back s along two planes square to each other (cov-fillet-section-curvature-box-edge-r3), S(t) = f(t) (e + (1 - t) (rho1 - e)) + (1 - f(t)) (e + t (rho2 - e)), f = (1-t)^3 / ((1-t)^3 + t^3), e the corner: it cuts A = 0.154192655384275 s^2 off the corner, its first moment about either face M = 0.0291753295725360 s^3 (Green's theorem on S), here s = 3: A = 1.387733898; the end faces x=0 and x=40 are square to the edge: V = 24000 - 40 * 1.387733898 = 23944.4906. Faces 7; both seams of the round with the faces G2 (G3 in fact, cov-fillet-section-curvature-box-edge-r3).",
  "body_count": 1,
- "volume_mm3": 23946.190476190477,
+ "volume_mm3": 23944.49064406166,
  "faces": 7,
  "bbox": {
   "min": [

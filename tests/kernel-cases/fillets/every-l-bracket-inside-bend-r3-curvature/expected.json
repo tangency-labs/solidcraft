@@ -2,9 +2,9 @@
  "sources": [],
  "what": "an L-bracket's inside bend rounded curvature-continuous (Type: Curvature) size 3",
  "source": "analytic",
- "method": "L-bracket: the legs 40x20x5 (x 0..40, z 0..5) and 5x20x40 (x 0..5, z 0..40) joined, 20 deep in y: V0 = 4000 + 4000 - 500 = 7500, 8 faces. The concave edge between two planes square to each other, its ends on the planar faces y = 0 and 20: the section is the quintic Bezier of setback 3 (fillets/862), area 113/756 9 = 1.345238, added along 20: V = 7526.9048. Faces 9; both seams G2.",
+ "method": "L-bracket: the legs 40x20x5 (x 0..40, z 0..5) and 5x20x40 (x 0..5, z 0..40) joined, 20 deep in y: V0 = 4000 + 4000 - 500 = 7500, 8 faces. The concave edge between two planes square to each other, its ends on the planar faces y = 0 and 20: the curvature section: the order-2 section at thumbweight 0 between the contacts set back s along two planes square to each other (cov-fillet-section-curvature-box-edge-r3), S(t) = f(t) (e + (1 - t) (rho1 - e)) + (1 - f(t)) (e + t (rho2 - e)), f = (1-t)^3 / ((1-t)^3 + t^3), e the corner: it cuts A = 0.154192655384275 s^2 off the corner, its first moment about either face M = 0.0291753295725360 s^3 (Green's theorem on S), here s = 3: A = 1.387733898, added along 20: V = 7527.7547. Faces 9; both seams G2.",
  "body_count": 1,
- "volume_mm3": 7526.9047619047615,
+ "volume_mm3": 7527.754677969169,
  "faces": 9,
  "bbox": {
   "min": [

@@ -1,11 +1,11 @@
 {
  "what": "a curvature-continuous fillet (equivalent radius 2) of the three edges at a top corner of a bar whose far end runs tangent into a cylinder: it built with SMLib's own corner patch, tangent to the rounds only (a 35.8 / mm curvature jump), seen as a dome on the corner; the corner must be a G2 patch; reported from the app (2026-10-30, test-peg part)",
  "source": "analytic",
- "method": "a bar 40 x 16 x 10 whose far end is a half disc R8 about (40, 8), a disc R8 about the same centre sketched on its top (the top's outline projected) and extruded 10 up, joined: the bar's sides run tangent into the cylinder, V0 = 6400 + 960 pi; the curvature section of setback 2: the quintic Bezier from (2, 0) on the top to (0, 2) on the side (y from the front face, depth below the top), control points at thirds along each face, area A2 = 0.5978835979 (= 3.73677 * 4 / 25, fillets/2708 at s = 5); the front round removes the section along x up to the wall, the vertical and left rounds A2 along 10 and 16: removed 38.1659846785 if each ran whole to the vertex; the corner patch (set back 1.5 r = 3) lies within the setback cube, so V is graded as V0 - that with 3^3 as its tolerance; every seam of the rounds and the patch G2",
+ "method": "a bar 40 x 16 x 10 whose far end is a half disc R8 about (40, 8), a disc R8 about the same centre sketched on its top (the top's outline projected) and extruded 10 up, joined: the bar's sides run tangent into the cylinder, V0 = 6400 + 960 pi; the curvature section of setback 2: the order-2 section at thumbweight 0 from (2, 0) on the top to (0, 2) on the side (y from the front face, depth below the top), area A2 = 0.616770621537 (cov-fillet-section-curvature-box-edge-r3 at s = 2); the front round removes the section along x up to the wall, x = 40 - sqrt(64 - (8 - y)^2), 23.3237146876 (report-peg-front-curvature-round-r2), the vertical and left rounds A2 along 10 and 16: removed 39.3597508476 if each ran whole to the vertex; the corner patch (set back 1.5 r = 3) lies within the setback cube, so V is graded as V0 - that with 3^3 as its tolerance; every seam of the rounds and the patch G2",
  "body_count": 1,
- "volume_mm3": 9377.76296276769,
+ "volume_mm3": 9376.569196598593,
  "tolerance": {
-  "rel": 0.002879151467913772
+  "rel": 0.0028795180234786103
  },
  "continuity": {
   "order": "g2"

@@ -2,9 +2,9 @@
  "sources": [],
  "what": "the top rim of a hole through a plate rounded curvature-continuous (Type: Curvature) size 1",
  "source": "analytic",
- "method": "plate 40x40x10 with a through hole R5 at (20, 20): V0 = 16000 - 250 pi = 15214.6018. In every meridian plane the top face and the hole's wall are two lines square to each other, so the section is the quintic Bezier of setback 1 (fillets/862): area 113/756 = 0.149471, first moment about the wall 0.028184 (Green on the Bezier), revolved once: 2 pi (5 A + M) = 4.8729. V = 15209.7290. Faces 8; both seams of the round G2.",
+ "method": "plate 40x40x10 with a through hole R5 at (20, 20): V0 = 16000 - 250 pi = 15214.6018. In every meridian plane the top face and the hole's wall are two lines square to each other: the curvature section: the order-2 section at thumbweight 0 between the contacts set back s along two planes square to each other (cov-fillet-section-curvature-box-edge-r3), S(t) = f(t) (e + (1 - t) (rho1 - e)) + (1 - f(t)) (e + t (rho2 - e)), f = (1-t)^3 / ((1-t)^3 + t^3), e the corner: it cuts A = 0.154192655384275 s^2 off the corner, its first moment about either face M = 0.0291753295725360 s^3 (Green's theorem on S), here s = 1: A = 0.154192655, M = 0.029175330 about the wall, revolved once: 2 pi (5 A + M) = 5.0274191. V = 15209.5744. Faces 8; both seams of the round G2.",
  "body_count": 1,
- "volume_mm3": 15209.728986079066,
+ "volume_mm3": 15209.574417466521,
  "faces": 8,
  "bbox": {
   "min": [

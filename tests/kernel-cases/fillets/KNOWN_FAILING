@@ -16,8 +16,6 @@ cov-fillet-g2-corner-beside-a-cylinder not supported yet: the curvature fillet b
 cov-fillet-g2-five-edge-apex-corner refused: the default setback is shorter than where the rounds' contact lines meet (3.5056 mm from the apex); the corner should take a setback that works
 cov-fillet-g2-four-edge-apex-corner refused: the default setback is shorter than where the rounds' contact lines meet (3.9027 mm from the apex); the corner should take a setback that works
 cov-fillet-g2-mixed-corner not supported yet: SMLib sets back a corner only where its edges are all convex or all concave
-cov-fillet-section-curvature-boss-root-r2 the curvature round's section is SMLib's quintic blend curve, not the order-2 section: volume 26042.0901 against 26042.0732 (rel 6.5e-7)
-cov-fillet-section-curvature-pipe-on-plate-r2 the curvature round's section is SMLib's quintic blend curve, not the order-2 section: volume 40255.6308 against 40256.1327 (rel 1.2e-5)
 cov-fillet-variable-box-edge-1-to-5-on-its-cone the variable round's sections are the balls' great circles, not the circles their envelope touches them along: volume 11955.6466 against 11956.2224 (rel 4.8e-5)
 report-drafted-peg-front-and-concave-rounds-together-r2 not supported yet: SMLib refuses the corner where the drafted front top edge runs tangent into the concave arc (on the cone) as of no kind its blend corners take
 report-fillet-concave-arc-and-front-top-edge-together-r5-solver-residues the corner patch where the convex and concave rounds meet stands 0.128 out of the front face (box y min -0.0699 against 0.0579)
